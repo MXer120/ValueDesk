@@ -65,13 +65,24 @@ const MAX_ARRAY = 20;
 const MAX_KEYS = 40;
 const SECRET_KEY = /(private|secret|signature|\bsig\b|mnemonic|seed|passphrase|password|token|api[-_]?key|authorization|cookie)/i;
 /**
- * Whole words that mark a secret inside a key name, however it is cased:
- * `key`, `privKey`, `pk`, `session_jwt`, `bearerToken`, `credentials`. Checked
- * per word so `keyName` is caught but `monkey` or `turnkey` are not.
+ * Whole words in a key name, however it is cased (`privKey`, `session_jwt`,
+ * `bearerToken`), checked per word so `monkey` or `turnkey` never match.
+ * ALWAYS: a jwt / bearer / credential is redacted whatever it holds.
+ * KEY-SHAPED: `key` / `pk` are redacted only when the value looks like key
+ * material (long hex or raw bytes) - a chart series key like
+ * "perps|BTC-USD|1m" stays readable, it is the diagnostic.
  */
-const SECRET_WORDS = new Set(['key', 'pk', 'jwt', 'bearer', 'credential', 'credentials']);
-const isSecretKey = (k: string): boolean =>
-  SECRET_KEY.test(k) || k.split(/[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])/).some((w) => SECRET_WORDS.has(w.toLowerCase()));
+const ALWAYS_SECRET_WORDS = new Set(['jwt', 'bearer', 'credential', 'credentials']);
+const KEY_WORDS = new Set(['key', 'pk']);
+const KEY_MATERIAL = /^(0x)?[0-9a-fA-F]{32,}$/;
+const wordsOf = (k: string): string[] => k.split(/[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])/).map((w) => w.toLowerCase());
+const isSecretKey = (k: string, v: unknown): boolean => {
+  if (SECRET_KEY.test(k)) return true;
+  const words = wordsOf(k);
+  if (words.some((w) => ALWAYS_SECRET_WORDS.has(w))) return true;
+  if (!words.some((w) => KEY_WORDS.has(w))) return false;
+  return (typeof v === 'string' && KEY_MATERIAL.test(v.trim())) || v instanceof ArrayBuffer || ArrayBuffer.isView(v);
+};
 /** A JWT anywhere in a string (header.payload.signature, the header always base64 of `{"`). */
 const JWT_IN_TEXT = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
 const BEARER_IN_TEXT = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
@@ -157,7 +168,7 @@ function sanitize(value: unknown, depth = 0): unknown {
     let n = 0;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (n++ >= MAX_KEYS) { out['…'] = 'more keys omitted'; break; }
-      out[k] = isSecretKey(k) ? '[redacted]' : sanitize(v, depth + 1);
+      out[k] = isSecretKey(k, v) ? '[redacted]' : sanitize(v, depth + 1);
     }
     return out;
   }
