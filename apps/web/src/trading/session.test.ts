@@ -100,6 +100,8 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
   const raw = typeof init?.body === 'string' ? init.body : '';
   const s: Sent = { url, method: init?.method ?? 'GET', headers: (init?.headers ?? {}) as Record<string, string>, body: raw ? JSON.parse(raw) : null, raw };
   if (url.startsWith('/api/md/')) return new Response(JSON.stringify(SYMBOLS), { status: 200 });
+  // Market data is read from the gateway directly now (exchange/sodexMarket.ts).
+  if (/\/api\/v1\/(spot|perps)\/markets\/symbols$/.test(url)) return new Response(JSON.stringify({ code: 0, data: SYMBOLS.symbols }), { status: 200 });
   sent.push(s);
   const custom = reply(s);
   const r: { status?: number; body: unknown } =

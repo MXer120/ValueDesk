@@ -3,6 +3,7 @@
  * coalesces concurrent misses, a polite request limiter, and a shared
  * rate-limit cooldown.
  */
+import { unrefTimer } from '../env.js';
 
 /**
  * TTL cache with in-flight coalescing. Failures are never cached, so a blip is
@@ -68,7 +69,7 @@ export class Limiter {
   private high: Array<() => void> = [];
   private low: Array<() => void> = [];
   private lastStart = 0;
-  private timer: NodeJS.Timeout | undefined;
+  private timer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(private readonly concurrency: number, private readonly gapMs: number) {}
 
@@ -102,7 +103,7 @@ export class Limiter {
             this.timer = undefined;
             this.pump();
           }, wait);
-          this.timer.unref?.();
+          unrefTimer(this.timer);
         }
         return;
       }
@@ -156,8 +157,7 @@ export function isRateLimit(err: unknown): boolean {
 
 export const sleep = (ms: number): Promise<void> =>
   new Promise((r) => {
-    const t = setTimeout(r, ms);
-    t.unref?.();
+    unrefTimer(setTimeout(r, ms));
   });
 
 /** Resolve with `p`, or with `fallback` once `ms` has passed. Never rejects on timeout. */

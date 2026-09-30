@@ -14,15 +14,16 @@
  * Budget: 60 requests / minute per IP unauthenticated (docs). The API thread
  * and the indexer worker each get a share.
  */
+import { envOf } from '../env.js';
 import type { Window } from '../types.js';
 import { Pacer, lowerAddress, num } from './http.js';
 
-export const LIGHTER_API = (process.env.VALUESCAN_LIGHTER_API?.trim() || 'https://mainnet.zklighter.elliot.ai').replace(/\/+$/, '');
+export const LIGHTER_API = (envOf('VALUESCAN_LIGHTER_API')?.trim() || 'https://mainnet.zklighter.elliot.ai').replace(/\/+$/, '');
 /** Public trade stream (verified 2026-09-29): `trade/{market_id}` channels name both sub-accounts. */
-export const LIGHTER_WS = process.env.VALUESCAN_LIGHTER_WS?.trim() || 'wss://mainnet.zklighter.elliot.ai/stream';
+export const LIGHTER_WS = envOf('VALUESCAN_LIGHTER_WS')?.trim() || 'wss://mainnet.zklighter.elliot.ai/stream';
 
 /** This thread's share of Lighter's 60/min (the worker sets its own in the env). */
-export const lighterPacer = new Pacer('Lighter', Number(process.env.VALUESCAN_LIGHTER_PER_MIN) || 20, 8);
+export const lighterPacer = new Pacer('Lighter', Number(envOf('VALUESCAN_LIGHTER_PER_MIN')) || 20, 8, 20_000, 50);
 
 export const LIGHTER_WINDOW: Record<Window, string> = { '1d': '24h', '7d': '7d', '30d': '30d', all: 'all' };
 export const LIGHTER_PAGE = 100;

@@ -15,14 +15,15 @@
  * 429 backoff and in-flight dedup. Nothing starts at import time: the
  * leaderboard downloads on first use, the WS opens on the first whales() call.
  */
-import type { VenueProvider } from '../types.js';
-import { HlInfoClient } from './info.js';
+import { shownLabel } from '../labels.js';
+import type { TraderRow, VenueProvider } from '../types.js';
+import { hlInfo } from './client.js';
 import { HlLeaderboardStore, queryLeaderboard } from './leaderboard.js';
 import { HlPositioning } from './positioning.js';
 import { hlFills, hlTrader } from './trader.js';
 import { HlTradeFeed } from './whales.js';
 
-export const hlInfo = new HlInfoClient();
+export { hlInfo };
 export const hlLeaderboard = new HlLeaderboardStore();
 const feed = new HlTradeFeed(hlInfo);
 const positioning = new HlPositioning(hlInfo, hlLeaderboard);
@@ -43,3 +44,15 @@ export const hyperliquidProvider: VenueProvider = {
 
   positioning: (symbol) => positioning.get(symbol),
 };
+
+/**
+ * One address's row on the Hyperliquid leaderboard, as a profile shows it (rank
+ * by 30-day PnL, rank change against the previous file), or null when it is not
+ * listed. For an index route: the browser reads each user's Hyperliquid account
+ * directly and only needs this row from us (the file behind it is 39 MB).
+ */
+export async function hlLeaderboardRow(address: string): Promise<TraderRow | null> {
+  const snap = hlLeaderboard.peek() ?? (await hlLeaderboard.snapshot().catch(() => null));
+  const row = snap?.rowFor(address.toLowerCase(), 'pnl', '30d', hlLeaderboard.previous()) ?? null;
+  return row ? { ...row, label: shownLabel(row.address, row.label) } : null;
+}

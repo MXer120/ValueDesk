@@ -25,6 +25,10 @@
  * rather than inventing a number.
  */
 
+import { dataGet } from './exchange/sodexData';
+import { gwGet } from './exchange/sodexGateway';
+import { network as appNetwork } from './exchange/hosts';
+
 const DATA_HOST = (net: string) => (net === 'testnet' ? 'https://testnet-data.sodex.dev' : 'https://mainnet-data.sodex.dev');
 const BIZ_HOST = 'https://alpha-biz.sodex.dev';
 
@@ -96,11 +100,12 @@ export async function fetchChart(
   marketType: MarketType,
   network: string,
 ): Promise<{ points: ChartPoint[]; totalPnl: number; roi: number }> {
-  const url =
-    `${DATA_HOST(network)}/api/v1/wallet/portfolio/chart` +
-    `?account_id=${accountId}&window=${window}&market_type=${marketType}`;
-  const body = await getJson<{ code: number; data?: Record<string, unknown> }>(url);
-  const d = (body?.data ?? {}) as Record<string, unknown>;
+  const path = `/api/v1/wallet/portfolio/chart?account_id=${accountId}&window=${window}&market_type=${marketType}`;
+  // The app's own network goes through the shared data-host client (its limiter and
+  // rate-limit cooldown, shared by every tab); another network is read as before.
+  const d = (network === appNetwork()
+    ? await dataGet<Record<string, unknown>>(path)
+    : (await getJson<{ code: number; data?: Record<string, unknown> }>(`${DATA_HOST(network)}${path}`))?.data) ?? {};
   const raw = Array.isArray(d.chart) ? (d.chart as Array<Record<string, unknown>>) : [];
   return {
     points: raw
@@ -290,8 +295,11 @@ export async function fetchAirdropStatus(address: string): Promise<AirdropStatus
 export async function fetchAccountId(address: string, network: string): Promise<number | null> {
   const gw = network === 'testnet' ? 'https://testnet-gw.sodex.dev' : 'https://mainnet-gw.sodex.dev';
   try {
-    const body = await getJson<any>(`${gw}/api/v1/perps/accounts/${address}/state`);
-    const aid = num(body?.data?.aid);
+    // Shared with every other read of this account's state (one request, one budget).
+    const state = network === appNetwork()
+      ? await gwGet<{ aid?: unknown } | null>(`/api/v1/perps/accounts/${address}/state`)
+      : (await getJson<any>(`${gw}/api/v1/perps/accounts/${address}/state`))?.data;
+    const aid = num(state?.aid);
     return aid > 0 ? aid : null;
   } catch {
     return null;

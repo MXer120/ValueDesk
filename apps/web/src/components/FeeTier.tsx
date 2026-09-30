@@ -52,6 +52,7 @@ import {
   type Reconciliation,
   type VenueFeeRate,
 } from '../fees';
+import { api } from '../api';
 import { fmtUsd } from '../format';
 import './FeeTier.css';
 import { Private } from '../privacy';
@@ -112,12 +113,9 @@ function FeeTierInner({
     setVenue(null);
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/acct/${engine}/fee-rate?address=${encodeURIComponent(address)}`)
-      .then(async (res) => {
-        const body = await res.json().catch(() => null);
-        if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
-        return body;
-      })
+    // Straight from the gateway, in this browser: { engine, feeRate }.
+    api
+      .feeRate(engine, address)
       .then((body) => {
         if (cancelled) return;
         // The route wraps the gateway payload as { engine, feeRate }. Tolerate

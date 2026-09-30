@@ -338,6 +338,10 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
   }
   if (url === '/api/deposit/chain') return json({ chainId: 286623, chainIdHex: '0x45f9f', name: 'ValueChain', rpcUrl: 'https://rpc.valuechain.xyz', explorerUrl: null, nativeCurrency: { name: 'SOSO', symbol: 'SOSO', decimals: 18 }, exchange: CLOB_GATEWAY });
   if (url.startsWith('/api/deposit/assets')) return json({ assets: [{ coinId: 0, symbol: 'vUSDC', address: USDC.valuechain.token, decimals: 6, isNative: false, verified: true, walletBalance: String(world.evm) }], registered: true });
+  // ValueChain's explorer (the wallet-balance fallback, read straight from the browser).
+  if (url === `https://main-scan.valuechain.xyz/api/v2/addresses/${OWNER}/token-balances`) {
+    return json([{ value: String(Math.round(world.evm * 1e6)), token: { address_hash: USDC.valuechain.token, symbol: 'vUSDC', decimals: '6' } }]);
+  }
   if (url.startsWith('/api/md/')) return json({ symbols: [] });
   if (url.endsWith(`/user/${OWNER}/subaccounts`)) return json({ code: 0, data: { primaryAccountID: AID } });
   if (url.endsWith(`/spot/accounts/${OWNER}/state`)) return json({ code: 0, data: { aid: AID, B: [{ i: 0, a: 'vUSDC', t: String(world.spot), l: '0' }, { i: 4, a: 'WSOSO', t: String(world.spot), l: '0' }] } });
@@ -755,14 +759,16 @@ test('the gas coin (native SOSO): the wallet keeps 0.001 for fees, never offered
   assert.equal((await balancesOf(OWNER, USDC)).evm, '20', 'a token keeps no reserve');
 });
 
-test('the wallet balance is read straight from ValueChain; the backend answers only when the RPC does not', async () => {
+test('the wallet balance is read straight from ValueChain; the explorer answers only when the RPC does not', async () => {
   world.evm = 12.5;
   assert.equal((await balancesOf(OWNER, USDC)).evm, '12.5');
   assert.equal(rpcReads, 1);
-  assert.equal(sent.filter((x) => x.url.startsWith('/api/deposit/assets')).length, 0, 'no backend read');
+  const explorer = () => sent.filter((x) => x.url.startsWith('https://main-scan.valuechain.xyz/')).length;
+  assert.equal(explorer(), 0, 'no explorer read');
   rpcDown = true;
   assert.equal((await balancesOf(OWNER, USDC)).evm, '12.5');
-  assert.equal(sent.filter((x) => x.url.startsWith('/api/deposit/assets')).length, 1, 'the backend, as the fallback');
+  assert.equal(explorer(), 1, 'the explorer, as the fallback');
+  assert.equal(sent.filter((x) => x.url.startsWith('/api/')).length, 0, 'never the Valuescan server');
 });
 
 test('transfer Perps -> wallet goes through Spot: two key-signed moves, no wallet prompt', async () => {

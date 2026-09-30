@@ -351,9 +351,9 @@ export async function balancesOf(owner: string, coin: CoinConfig): Promise<Balan
 
 /**
  * What the wallet holds of `coin` on ValueChain, in base units: one call
- * straight to ValueChain (about 0.1-0.3 s). The backend's deposit-asset read
- * answers the same from the chain but reads every token (0.6-1.6 s), so it is
- * only the fallback when the RPC does not answer.
+ * straight to ValueChain (about 0.1-0.3 s). ValueChain's explorer answers the
+ * same from its own index, exact to the base unit, so it is the fallback when
+ * the RPC does not answer - both straight from this browser.
  */
 async function walletUnits(owner: string, coin: CoinConfig): Promise<bigint> {
   try {
@@ -361,11 +361,26 @@ async function walletUnits(owner: string, coin: CoinConfig): Promise<bigint> {
     const units = hexUnits((await rpcBatch(VALUECHAIN_RPC, [call])).get(0));
     if (units !== null) return units;
   } catch {
-    /* the backend below */
+    /* the explorer below */
   }
-  const wallet = await api.depositAssets(owner).catch(() => null);
-  const w = wallet?.assets?.find((a) => (a.symbol ?? '').toUpperCase() === coin.valuechain.symbol.toUpperCase() || (a.isNative && coin.valuechain.native));
-  return unitsDown(w?.walletBalance, coin.valuechain.decimals);
+  return explorerUnits(owner, coin).catch(() => 0n);
+}
+
+/** ValueChain's explorer (Blockscout): the wallet's balance of `coin`, exact, in base units. */
+const VALUECHAIN_EXPLORER_API = 'https://main-scan.valuechain.xyz/api/v2';
+async function explorerUnits(owner: string, coin: CoinConfig): Promise<bigint> {
+  const base = `${VALUECHAIN_EXPLORER_API}/addresses/${owner}`;
+  const get = async (url: string): Promise<unknown> => {
+    const r = await fetch(url, { headers: { Accept: 'application/json' }, credentials: 'omit', referrerPolicy: 'no-referrer' });
+    if (!r.ok) throw new Error(`explorer HTTP ${r.status}`);
+    return r.json();
+  };
+  const int = (v: unknown): bigint => (typeof v === 'string' && /^\d+$/.test(v) ? BigInt(v) : 0n);
+  if (coin.valuechain.native) return int(((await get(base)) as { coin_balance?: unknown } | null)?.coin_balance);
+  const j = await get(`${base}/token-balances`);
+  const rows = (Array.isArray(j) ? j : ((j as { items?: unknown[] } | null)?.items ?? [])) as Array<{ value?: unknown; token?: { address?: string; address_hash?: string } }>;
+  const want = coin.valuechain.token.toLowerCase();
+  return int(rows.find((b) => (b.token?.address ?? b.token?.address_hash ?? '').toLowerCase() === want)?.value);
 }
 
 // --- deposit from the connected wallet (ValueChain -> Spot) ---------------------------

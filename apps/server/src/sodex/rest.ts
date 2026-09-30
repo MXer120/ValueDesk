@@ -10,6 +10,22 @@
  */
 import { NET, enginePath, type Engine } from '../config.js';
 import { signExchangeAction, DomainName, type Hex } from '../signing/eip712.js';
+import {
+  COOL_BASE_MS,
+  COOL_MAX_MS,
+  COOL_WAIT_MAX_MS,
+  RETRY_ATTEMPTS,
+  TRANSIENT_ENVELOPE_RE,
+  endpointOf,
+  retryDelayMs,
+  ttlFor,
+  unwrapList,
+  weightFor,
+} from './restCore.js';
+
+// The request POLICY (weights, cache lifetimes, retry and cooldown timings, list
+// unwrapping) is pure and shared with the browser's gateway client: restCore.ts.
+export { endpointOf, unwrapList, weightFor } from './restCore.js';
 
 export interface Envelope<T> {
   code: number;
@@ -69,81 +85,13 @@ export class SodexApiError extends Error {
   }
 }
 
-/**
- * Normalise a list response to a bare array.
- *
- * The gateway is inconsistent: `orders`, `positions` and `balances` come wrapped
- * as `{blockTime, blockHeight, <name>: [...]}`, while `trades` and
- * `orders/history` are bare arrays. Callers that assumed "always an array" got a
- * silent empty list - which for cancel-all meant reporting success while
- * cancelling nothing.
- *
- * The [] fallback is only safe because `SodexClient.send` now refuses to return a
- * body that does not positively assert success. Reached with an error envelope,
- * this function would turn a failed page into an indistinguishable empty one.
- */
-export function unwrapList<T = unknown>(data: unknown, key: string): T[] {
-  if (Array.isArray(data)) return data as T[];
-  if (data && typeof data === 'object') {
-    const inner = (data as Record<string, unknown>)[key];
-    if (Array.isArray(inner)) return inner as T[];
-  }
-  return [];
-}
-
 // --- retry policy ------------------------------------------------------------
-
-/**
- * Total attempts, the first one included, so 4 means at most 3 retries.
- *
- * Sized against the observed failure: roughly 8% of history pages come back HTTP
- * 200 with an error envelope. Untreated that is a ~98% chance of losing at least
- * one page somewhere in a 50-page walk. Four attempts drops the per-page loss
- * rate to ~0.004%, i.e. ~0.2% across the same walk, for a worst case of ~1.75s of
- * added latency - well inside the 30s request timeout.
- */
-const RETRY_ATTEMPTS = 4;
-const RETRY_BASE_MS = 250;
-const RETRY_CAP_MS = 4_000;
 
 /** Weight the gateway bills for a signed write. */
 const SIGNED_WEIGHT = 1;
 
-/**
- * Exponential backoff with equal jitter: half of each window is fixed so a retry
- * is never effectively instantaneous, half is random so several stalled callers
- * do not resynchronise into a thundering herd against an already-sick gateway.
- */
-/** A rate-limit cooldown: 15 s, doubling to 5 min; callers wait at most 8 s for one to end. */
-const COOL_BASE_MS = 15_000;
-const COOL_MAX_MS = 5 * 60_000;
-const COOL_WAIT_MAX_MS = 8_000;
-
-/** `/api/v1/perps/accounts/0xabc…/trades?limit=5` -> `/api/v1/perps/accounts/{a}/trades`. */
-export const endpointOf = (path: string): string =>
-  path.replace(/\?.*$/, '').replace(/0x[0-9a-fA-F]{40}/g, '{a}').replace(/\/\d+(?=\/|$)/g, '/{n}');
-
 export const isRateLimited = (err: unknown): boolean =>
   err instanceof SodexApiError && (err.httpStatus === 429 || err.code === 429);
-
-function retryDelayMs(attempt: number): number {
-  const ceiling = Math.min(RETRY_CAP_MS, RETRY_BASE_MS * 2 ** (attempt - 1));
-  return ceiling / 2 + Math.random() * (ceiling / 2);
-}
-
-/**
- * Envelope text that means "the gateway had a bad minute" rather than "your
- * request was wrong". Only ever matched against an HTTP-200-with-error-envelope
- * body, which is how SoDEX reports the intermittent history failure:
- *
- *   {"code":-1,"error":"internal server error: invalid character 'R'..."}
- *
- * The stray 'R' is an upstream non-JSON error page leaking into a JSON decode -
- * unambiguously an upstream fault and not a property of anything we sent, which
- * is exactly why replaying the identical request usually works.
- */
-const TRANSIENT_ENVELOPE_RE =
-  /internal (server )?error|service unavailable|unavailable|timed? ?out|temporar|try again|too many requests|server busy|unexpected EOF|connection reset/i;
 
 /**
  * Whether a failure is worth replaying.
@@ -176,29 +124,6 @@ export function isTransientFailure(err: unknown): boolean {
 }
 
 // --- weight budget -----------------------------------------------------------
-
-/** Documented endpoint weights (references/market-data.md, account-query.md). */
-export function weightFor(path: string, limit = 0): number {
-  if (/\/markets\/(symbols|tickers|bookTickers|coins|mark-prices)/.test(path)) return 2;
-  if (/\/orderbook/.test(path)) return limit > 100 ? 10 : 5;
-  if (/\/(klines|trades)/.test(path) && !/accounts/.test(path)) return 20;
-  // 20 + limit/20 is measured, not guessed: limit 1 -> 20, 20 -> 21, 100 -> 25,
-  // 200 -> 30, 500 -> 45, 1000 -> 70. It applies to every paged history endpoint,
-  // but the alternation used to name the funding log `funding-history` - the path
-  // the published table documents and which 404s. The live route is `/fundings`
-  // (see routes/account.ts, verified against testnet), so funding pages fell
-  // through to the flat 5 below: a limit=500 funding page was billed 5 instead of
-  // 45, quietly overdrawing the shared 1200/min budget and inviting a 429 that
-  // looks like it came from nowhere. `positions/history` scales identically and
-  // was missing for the same reason. `funding-history` is kept in case the
-  // gateway ever honours the documented spelling.
-  if (/\/(orders\/history|trades|funding-history|fundings|positions\/history)/.test(path)) {
-    return 20 + Math.floor(limit / 20);
-  }
-  if (/\/fee-rate/.test(path)) return 2;
-  if (/\/accounts\//.test(path)) return 5;
-  return 5;
-}
 
 class WeightBudget {
   private used: Array<{ at: number; w: number }> = [];
@@ -267,6 +192,9 @@ class WeightBudget {
  * would otherwise burn the shared weight budget. Also coalesces concurrent
  * identical requests into one upstream call.
  */
+/** Bounded (security audit S-17): /klines paths carry caller-chosen times. */
+const TTL_CACHE_MAX = 2_000;
+
 class TtlCache {
   private entries = new Map<string, { at: number; ttl: number; value: unknown }>();
   private inflight = new Map<string, Promise<unknown>>();
@@ -280,7 +208,9 @@ class TtlCache {
 
     const p = fn()
       .then((value) => {
+        this.entries.delete(key);
         this.entries.set(key, { at: Date.now(), ttl: ttlMs, value });
+        this.prune();
         return value;
       })
       .finally(() => this.inflight.delete(key));
@@ -289,22 +219,21 @@ class TtlCache {
     return p;
   }
 
+  /** Expired entries first, then the oldest, down to TTL_CACHE_MAX. */
+  private prune(): void {
+    if (this.entries.size <= TTL_CACHE_MAX) return;
+    const now = Date.now();
+    for (const [k, v] of this.entries) if (now - v.at >= v.ttl) this.entries.delete(k);
+    for (const k of this.entries.keys()) {
+      if (this.entries.size <= TTL_CACHE_MAX) break;
+      this.entries.delete(k);
+    }
+  }
+
   clear(): void {
     this.entries.clear();
   }
 }
-
-/** Per-path cache TTLs. Anything not listed is uncached. */
-const CACHE_TTL: Array<[RegExp, number]> = [
-  [/\/markets\/symbols/, 60_000],
-  [/\/markets\/coins/, 60_000],
-  [/\/markets\/tickers/, 1_000],
-  [/\/markets\/bookTickers/, 1_000],
-  [/\/markets\/mark-prices/, 1_000],
-  [/\/klines/, 2_000],
-];
-
-const ttlFor = (path: string): number => CACHE_TTL.find(([re]) => re.test(path))?.[1] ?? 0;
 
 // --- signing session ---------------------------------------------------------
 

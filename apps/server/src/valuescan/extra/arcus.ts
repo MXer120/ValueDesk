@@ -15,14 +15,15 @@
  *
  * Budget: 1,500 weight / minute per IP; account 2, the rest 20 (docs).
  */
+import { envOf } from '../env.js';
 import type { EquityPoint, Window } from '../types.js';
 import { HttpError, Pacer, lowerAddress, num } from './http.js';
 
-export const ARCUS_API = (process.env.VALUESCAN_ARCUS_API?.trim() || 'https://api.arcus.xyz').replace(/\/+$/, '');
-export const ARCUS_WS = process.env.VALUESCAN_ARCUS_WS?.trim() || 'wss://api.arcus.xyz/v1/ws';
+export const ARCUS_API = (envOf('VALUESCAN_ARCUS_API')?.trim() || 'https://api.arcus.xyz').replace(/\/+$/, '');
+export const ARCUS_WS = envOf('VALUESCAN_ARCUS_WS')?.trim() || 'wss://api.arcus.xyz/v1/ws';
 
 /** This thread's share of Arcus's 1,500 weight/min. */
-export const arcusPacer = new Pacer('Arcus', Number(process.env.VALUESCAN_ARCUS_WEIGHT) || 300);
+export const arcusPacer = new Pacer('Arcus', Number(envOf('VALUESCAN_ARCUS_WEIGHT')) || 300, undefined, undefined, 50);
 
 const E9 = 1e9;
 

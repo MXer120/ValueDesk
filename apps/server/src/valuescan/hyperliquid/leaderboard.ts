@@ -24,6 +24,7 @@
  * this process (so for up to an hour after a restart), and for addresses that
  * were not on the previous file.
  */
+import { envOf } from '../env.js';
 import { labelMatches } from '../labels.js';
 import type { LeaderboardPage, LeaderboardQuery, LeaderboardSort, TraderRow, Window } from '../types.js';
 import { WINDOWS } from '../types.js';
@@ -31,7 +32,7 @@ import type { HlLeaderboardRaw, HlWindowName } from './raw.js';
 import { normAddress, num, WINDOW_OF } from './mappers.js';
 
 export const HL_LEADERBOARD_URL = (
-  process.env.VALUESCAN_HL_LEADERBOARD_URL?.trim() || 'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard'
+  envOf('VALUESCAN_HL_LEADERBOARD_URL')?.trim() || 'https://stats-data.hyperliquid.xyz/Mainnet/leaderboard'
 ).replace(/\/+$/, '');
 
 export const HL_LEADERBOARD_SOURCE = 'Hyperliquid leaderboard';

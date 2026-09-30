@@ -1,5 +1,6 @@
 /**
- * Reading /api/vs/trader and /api/vs/fills for one address on one venue.
+ * Reading one address's profile and fills on one venue - straight from the
+ * venue, in this browser (vsApi -> exchange/venues.ts).
  *
  * WHY NOT `useAsync`. Its error state is a string, and the multi-venue API has
  * two very different failures behind one HTTP 200: `not_available` (the venue's
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { vsApi, VsError, type TraderProfile, type Venue, type VsFill } from '../../vsApi';
 import { hasActivity } from './hlModel';
 import { logLoadFailure } from '../LoadFailed';
+import { pollEvery, visibleTimeout } from '../../exchange/visibility';
 
 export interface VsRead<T> {
   data: T | null;
@@ -89,8 +91,7 @@ export function useVsRead<T>(
 
   useEffect(() => {
     if (!key || !pollMs) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), pollMs);
-    return () => window.clearInterval(id);
+    return pollEvery(pollMs, () => setTick((t) => t + 1));
   }, [key, pollMs]);
 
   /* An outage is retried on its own, once per RETRY_MS, so a backend restart
@@ -99,8 +100,7 @@ export function useVsRead<T>(
   const failed = !!key && !!state.error && !state.unavailable && !state.loading;
   useEffect(() => {
     if (!failed) return;
-    const id = window.setTimeout(() => setTick((t) => t + 1), RETRY_MS);
-    return () => window.clearTimeout(id);
+    return visibleTimeout(RETRY_MS, () => setTick((t) => t + 1));
     // `state`, not just the message: a retry that fails with the SAME message
     // still has to schedule the next one.
   }, [failed, state]);

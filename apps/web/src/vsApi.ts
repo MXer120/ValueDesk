@@ -1,5 +1,13 @@
 /**
- * Client for /api/vs/*: the multi-venue trader API (see apps/server/src/routes/valuescan.ts).
+ * The multi-venue trader API.
+ *
+ * Two halves. The Valuescan INDEX - leaderboards, cohorts, the screener,
+ * Explore, whales and positioning - is ours and comes from /api/vs/* (see
+ * apps/server/src/routes/valuescan.ts). One TRADER on one venue - profile,
+ * fills, open orders, history, funding, balances - and a coin's price are read
+ * straight from that venue in this browser (exchange/venues.ts), with the
+ * server's own provider code: each user's own IP and budget, and no address
+ * anyone looks at passes through Valuescan.
  *
  * Types come from the server through the `@sign` alias, so both sides share one
  * definition. Every endpoint answers HTTP 200 with {ok:false, code, error} when
@@ -21,6 +29,7 @@ import type {
   WhaleTrade,
   Window,
 } from '@sign/valuescan/types.js';
+import { VenueError, venues } from './exchange/venues';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuescan/cohorts/model.js';
 
 export type {
@@ -76,6 +85,24 @@ async function unwrap<T>(path: string, signal?: AbortSignal): Promise<T> {
   return body as T;
 }
 
+/** A venue read done in this browser, failing the way the route did (VsError with its code). */
+function direct<T>(p: Promise<T>, signal?: AbortSignal): Promise<T> {
+  const mapped = p.catch((e: unknown) => {
+    if (e instanceof VenueError) throw new VsError(e.message, e.code === 'bad_request' ? undefined : e.code);
+    throw new VsError(e instanceof Error ? e.message : String(e), 'upstream');
+  });
+  if (!signal) return mapped;
+  if (signal.aborted) return Promise.reject(new DOMException('aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(new DOMException('aborted', 'AbortError'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    mapped.then(
+      (v) => { signal.removeEventListener('abort', onAbort); resolve(v); },
+      (e) => { signal.removeEventListener('abort', onAbort); reject(e); },
+    );
+  });
+}
+
 export const vsApi = {
   leaderboard: (
     o: { venue?: Venue | 'all'; venues?: string; view?: 'net' | 'single'; window?: BoardWindow; sort?: LeaderboardSort; limit?: number; offset?: number; q?: string; side?: 'top' | 'worst'; curves?: 1; minTrades?: 2 },
@@ -84,19 +111,20 @@ export const vsApi = {
 
   explore: (signal?: AbortSignal) => unwrap<ExploreResponse>('/api/vs/explore', signal),
 
-  trader: (venue: Venue, address: string, signal?: AbortSignal) =>
-    unwrap<{ profile: TraderProfile | null }>(`/api/vs/trader${qs({ venue, address })}`, signal).then((b) => b.profile),
+  // --- one trader on one venue: straight from the venue, in this browser -----
+  trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
+    direct(venues.trader(venue, address), signal),
 
-  fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal) =>
-    unwrap<{ fills: VsFill[] }>(`/api/vs/fills${qs({ venue, address, ...o })}`, signal).then((b) => b.fills),
-  openOrders: (venue: Venue, address: string, signal?: AbortSignal) =>
-    unwrap<{ orders: VsOrder[] }>(`/api/vs/account${qs({ venue, address, kind: 'open' })}`, signal).then((b) => b.orders),
-  orderHistory: (venue: Venue, address: string, signal?: AbortSignal) =>
-    unwrap<{ orders: VsOrder[] }>(`/api/vs/account${qs({ venue, address, kind: 'history' })}`, signal).then((b) => b.orders),
-  funding: (venue: Venue, address: string, signal?: AbortSignal) =>
-    unwrap<{ funding: VsFunding[] }>(`/api/vs/account${qs({ venue, address, kind: 'funding' })}`, signal).then((b) => b.funding),
-  balances: (venue: Venue, address: string, signal?: AbortSignal) =>
-    unwrap<{ balances: VsBalance[] }>(`/api/vs/account${qs({ venue, address, kind: 'balances' })}`, signal).then((b) => b.balances),
+  fills: (venue: Venue, address: string, o: { from?: number; to?: number; limit?: number } = {}, signal?: AbortSignal): Promise<VsFill[]> =>
+    direct(venues.fills(venue, address, o), signal),
+  openOrders: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>
+    direct(venues.openOrders(venue, address), signal),
+  orderHistory: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsOrder[]> =>
+    direct(venues.orderHistory(venue, address), signal),
+  funding: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsFunding[]> =>
+    direct(venues.funding(venue, address), signal),
+  balances: (venue: Venue, address: string, signal?: AbortSignal): Promise<VsBalance[]> =>
+    direct(venues.balances(venue, address), signal),
 
   whales: (o: { venue?: Venue | 'all'; minUsd?: number; limit?: number } = {}, signal?: AbortSignal) =>
     unwrap<{ trades: WhaleTrade[] }>(`/api/vs/whales${qs(o)}`, signal).then((b) => b.trades),
@@ -116,8 +144,8 @@ export const vsApi = {
   cohortFocus: (venues: readonly Venue[], f: CohortFilter, range: CohortRange, signal?: AbortSignal) =>
     unwrap<CohortFocusResponse>(`/api/vs/cohorts/focus${qs({ venues: venues.join(','), sector: f.sector ?? undefined, coin: f.coin ?? undefined, range })}`, signal),
   /** A coin's price over a range (Hyperliquid candles: [t, open, high, low, close], and the closes). */
-  price: (coin: string, range: CohortRange, signal?: AbortSignal) =>
-    unwrap<{ coin: string; market: string; source: string; interval?: string; points: Array<[number, number]>; candles?: Array<[number, number, number, number, number]> }>(`/api/vs/price${qs({ coin, range })}`, signal),
+  price: (coin: string, range: CohortRange, signal?: AbortSignal): Promise<{ coin: string; market: string; source: string; interval?: string; points: Array<[number, number]>; candles?: Array<[number, number, number, number, number]> }> =>
+    direct(venues.price(coin, range), signal),
   cohortWallets: (
     venues: readonly Venue[], cohort: CohortId, f: CohortFilter,
     /** `range`: what `pnlRange` and the win rate cover (the server's default is 30d). */

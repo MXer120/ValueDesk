@@ -37,6 +37,7 @@
  * Everything below `// --- readers` is pure and covered by accountData.test.ts.
  */
 import { tradingConfig } from './trading/config';
+import { account } from './exchange/sodexAccount';
 
 export type HistoryEngine = 'spot' | 'perps';
 
@@ -636,28 +637,23 @@ export async function fetchHistoryPage(
   limit = HISTORY_PAGE,
 ): Promise<HistoryPage<any>> {
   const spec = HISTORY[kind];
-  // Through the backend, never straight to the gateway: the backend shares one
-  // request budget, a few seconds of cache between tabs, and SoDEX's rate-limit
-  // cooldown. Straight from the browser, a busy history page got this IP
-  // rate-limited by SoDEX - and then nothing loaded anywhere.
-  const res = await fetch(BACKEND_HISTORY[kind](engine, address) + historyQuery(limit, endTime).replace('?', '&'), {
-    signal: AbortSignal.timeout(20_000),
-  });
-  const body = (await res.json().catch(() => null)) as Record<string, unknown> | null;
-  if (!res.ok || !body) throw new Error(`history ${kind}: HTTP ${res.status}${body?.error ? ` ${String(body.error)}` : ''}`);
-  const rows = asList(body, BACKEND_KEY[kind]);
-  const staleAt = typeof body.staleAt === 'number' ? body.staleAt : null;
-  return { rows, next: nextCursor(rows, spec.timeOf, limit), staleAt };
+  // Straight from the gateway, in this browser - through the exchange layer,
+  // which keeps what the backend used to: one request budget shared by every
+  // tab of this browser (it is the user's own IP now), a few seconds of
+  // sharing between panels, SoDEX's rate-limit cooldown, the last good copy of
+  // a page when SoDEX refuses, and - the part that matters - the drip that keeps
+  // /trades and /orders/history under Cloudflare's 1015 threshold
+  // (exchange/sodexGateway.ts). A busy history page can no longer get the IP
+  // rate-limited: past four such reads in 30 s the next one waits its turn.
+  const q = { limit, endTime };
+  const r =
+    kind === 'orders' ? await account.orderHistory(engine, address, q).then((x) => ({ rows: x.orders as unknown, staleAt: x.staleAt }))
+    : kind === 'trades' ? await account.trades(engine, address, q).then((x) => ({ rows: x.trades as unknown, staleAt: x.staleAt }))
+    : kind === 'funding' ? await account.fundingHistory(address, q).then((x) => ({ rows: x.funding as unknown, staleAt: x.staleAt }))
+    : await account.positionHistory(address, q).then((x) => ({ rows: x.positions as unknown, staleAt: x.staleAt }));
+  const rows = asList(r.rows, kind);
+  return { rows, next: nextCursor(rows, spec.timeOf, limit), staleAt: r.staleAt };
 }
-
-/** The backend's history routes (apps/server/src/routes/account.ts) and the list each answers. */
-const BACKEND_HISTORY: Record<HistoryKind, (engine: HistoryEngine, address: string) => string> = {
-  orders: (e, a) => `/api/acct/${e}/orders/history?address=${a}`,
-  trades: (e, a) => `/api/acct/${e}/trades?address=${a}`,
-  funding: (_e, a) => `/api/acct/perps/funding-history?address=${a}`,
-  positions: (_e, a) => `/api/acct/perps/positions/history?address=${a}`,
-};
-const BACKEND_KEY: Record<HistoryKind, string> = { orders: 'orders', trades: 'trades', funding: 'funding', positions: 'positions' };
 
 /** sodex.com's history host. Mainnet only - it has no testnet twin. */
 export const BIZ_HISTORY_ORIGIN = 'https://alpha-biz.sodex.dev';

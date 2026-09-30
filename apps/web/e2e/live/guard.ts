@@ -188,6 +188,14 @@ export function classifyRelayerWrite(method: string, path: string, body: any): {
   return { refuse: `call_for_permit ${String(body?.cmdType)} to ${to} is not a command the runner sends` };
 }
 
+/**
+ * sodex.com's deposit-address reads (the app builds deposit options in the
+ * browser now, exchange/deposits.ts): POSTs that only read - except that
+ * create_deposit_addresses makes SoDEX ISSUE a new wallet's addresses, which
+ * --registry-only exists to avoid.
+ */
+const RELAYER_READ_POSTS = new Set(['/biz/mirror/create_deposit_addresses', '/biz/mirror/deposit_address']);
+
 export function installGuard(o: GuardOptions): Guard {
   const original = globalThis.fetch;
   const backend = new URL(o.backend);
@@ -297,6 +305,13 @@ export function installGuard(o: GuardOptions): Guard {
     if (method === 'GET' || method === 'HEAD') {
       if (dest === 'backend' && o.blockDepositIssuing && url.pathname === '/api/mirror/deposit-options') {
         return refused(rec, '--registry-only: not asking the backend (and through it SoDEX) to issue deposit addresses', 'backend');
+      }
+      return send();
+    }
+
+    if (dest === 'relayer' && method === 'POST' && RELAYER_READ_POSTS.has(url.pathname)) {
+      if (o.blockDepositIssuing && url.pathname === '/biz/mirror/create_deposit_addresses') {
+        return refused(rec, '--registry-only: not asking SoDEX to issue deposit addresses', 'gateway');
       }
       return send();
     }

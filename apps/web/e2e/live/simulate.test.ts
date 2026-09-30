@@ -53,6 +53,12 @@ const CHAINS: Record<string, number> = {
   'https://polygon-bor-rpc.publicnode.com': 137,
 };
 const REGISTRY_ABI = parseAbi(['function getDepositWalletList(address account, string coinSymbol) view returns (string[] chains, string[][] wallets)']);
+/** The mirror registry the app reads the CURRENT deposit address from (apps/server/src/sodex/mirrorCore.ts). */
+const MIRROR_REGISTRY = '0xb37295d1ea21e65b76dcb2e85e035ee0dbfc70cb';
+const MIRROR_ABI = parseAbi([
+  'function getDepositWallet(address account, string chain) view returns (string)',
+  'function listRemoteNativeTokens() view returns ((string chain, string coinAddr, string bridgeAddr, bool custodyDisabled, uint256 minDepositAmount, uint256 custodyAmount, uint256 bridgedAmount)[])',
+]);
 const ERC20 = parseAbi(['function approve(address spender, uint256 amount)', 'function transfer(address to, uint256 amount)']);
 const EXCHANGE_ABI = parseAbi(['function depositERC20(address token, uint256 amount)']);
 const PERMIT_CMD = [{ type: 'string' }, { type: 'string' }, { type: 'string' }, { type: 'uint256' }, { type: 'uint8' }, { type: 'string' }, { type: 'bool' }] as const;
@@ -196,6 +202,12 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
       const { to, data } = params[0] as { to: string; data: string };
       const t = to.toLowerCase();
       if (chainId === 286623) {
+        if (t === MIRROR_REGISTRY) {
+          const d = decodeFunctionData({ abi: MIRROR_ABI, data: data as Hex });
+          if (d.functionName === 'listRemoteNativeTokens') return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'listRemoteNativeTokens', result: [] });
+          const mine = String(d.args[0]).toLowerCase() === w.owner && d.args[1] === 'ARBITRUM_ETH';
+          return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'getDepositWallet', result: mine ? DEPOSIT_ADDR : '' });
+        }
         if (t === DEPOSIT_WALLET_REGISTRY.toLowerCase()) {
           const { args } = decodeFunctionData({ abi: REGISTRY_ABI, data: data as Hex });
           const mine = String(args[0]).toLowerCase() === w.owner && args[1] === 'USDC';
@@ -301,6 +313,14 @@ function gateway(url: URL, method: string, body: any): Response {
       return ok(name ? assetConfig.filter((a) => a.assetName === name) : assetConfig);
     }
     if (p === '/api/v1/perps/markets/coins') return ok([]);
+    // Market data: the app reads it from the gateway directly now (exchange/sodexMarket.ts).
+    if (p === '/api/v1/spot/markets/symbols') return ok(spotSymbols);
+    if (p === '/api/v1/perps/markets/symbols') return ok(perpsSymbols);
+    if (p === '/api/v1/spot/markets/tickers') return ok(spotSymbols.map((s) => ({ symbol: s.name, lastPx: ASK[s.id] })));
+    if ((m = /^\/api\/v1\/(spot|perps)\/markets\/([^/]+)\/orderbook$/.exec(p))) {
+      const s = spotSymbols.find((x) => x.name === m![2]);
+      return ok(s ? { bids: [[BID[s.id], '100']], asks: [[ASK[s.id], '100']] } : { bids: [['84071', '1']], asks: [['84072', '1']] });
+    }
     if ((m = /^\/api\/v1\/user\/(0x[0-9a-f]{40})\/subaccounts$/.exec(p))) return w.aid ? ok({ userID: w.aid, primaryAccountID: w.aid, subaccounts: [] }) : json({ code: 1, error: 'user not found' });
     if (/^\/api\/v1\/spot\/accounts\/0x[0-9a-f]{40}\/state$/.test(p)) return ok(spotState());
     if (/^\/api\/v1\/perps\/accounts\/0x[0-9a-f]{40}\/state$/.test(p)) return ok(perpsState());
@@ -438,6 +458,17 @@ function relayer(url: URL, method: string, body: any): Response {
   const w = world;
   const p = url.pathname;
   if (method === 'GET' && p === '/biz/v1/ext-chain/maintenance') return json({ code: 0, data: [] });
+  // Deposit options: the app reads them itself now (exchange/deposits.ts).
+  if (method === 'GET' && p === '/biz/config/symbol') {
+    return json({ code: 0, data: { depositWhiteList: { USDC: { ARBITRUM_ETH: { depositTime: 2 } } }, explorer: { ARBITRUM_ETH: 'https://arbiscan.io/token/' } } });
+  }
+  if (method === 'POST' && p === '/biz/mirror/create_deposit_addresses') {
+    const mine = String(body?.account).toLowerCase() === w.owner;
+    return json({ code: '0', data: { accountAddresses: mine ? [{ chain: 'ARBITRUM_ETH', address: DEPOSIT_ADDR, custodian: 'Cobo', status: 'Enabled' }] : [] } });
+  }
+  if (method === 'POST' && p === '/biz/mirror/deposit_address') {
+    return json({ code: 0, data: { status: 'Enabled', address: String(body?.chain) === 'ARBITRUM_ETH' ? DEPOSIT_ADDR : '' } });
+  }
   if (method === 'POST' && p === '/biz/mirror/analyse_address') {
     w.writes.push(`analyse_address ${body.address}`);
     return json({ code: 0, data: {} });
@@ -589,7 +620,9 @@ test('a whole live run against the fake: every step ok, no guard or wallet refus
 test('live refuses to start - nothing is signed or sent - when the backend and the on-chain registry disagree on the deposit address', async () => {
   const { code, lines } = await run(CONFIG, { setup: (w) => (w.registryAddress = '0x000000000000000000000000000000000000dead') });
   assert.equal(code, 2);
-  assert.ok(lines.some((l) => /disagree/.test(l)), 'says why');
+  // The app cross-checks the address against the registry itself now (exchange/deposits.ts), so it
+  // withholds the address before the runner's own independent comparison even runs.
+  assert.ok(lines.some((l) => /disagree|not this coin's registered address/.test(l)), 'says why');
   assert.deepEqual(world.writes, [], 'no write of any kind reached the fake');
 });
 

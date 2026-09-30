@@ -145,8 +145,11 @@ test('guard, live mode: a relayed DepositERC20WithPermit is decoded (token + amo
   g.expect({ kind: 'kyt-check', label: 'kyt', check: (r) => (r.body?.address === MINE ? null : 'another address') });
   assert.equal((await post(kyt, { address: OWNER })).status, 403, 'for another address');
   assert.equal((await post(kyt, { address: MINE })).status, 200);
-  assert.equal((await post(`${BIZ_ORIGIN}/biz/mirror/create_deposit_addresses`, { account: OWNER })).status, 403, 'relayer writes the runner never makes');
-  assert.equal(hits.length, 2);
+  // The app's own deposit-option read (exchange/deposits.ts - what the backend used to do) passes;
+  // a relayer write the runner never makes does not.
+  assert.equal((await post(`${BIZ_ORIGIN}/biz/mirror/create_deposit_addresses`, { account: OWNER })).status, 200, 'the app reads its deposit options');
+  assert.equal((await post(`${BIZ_ORIGIN}/biz/mirror/replace_deposit_address`, { account: OWNER, chain: 'ETH' })).status, 403, 'relayer writes the runner never makes');
+  assert.equal(hits.length, 3);
 });
 
 test('guard, plan mode: the relayer is read-only too (maintenance reads pass; permits and address checks do not)', async () => {

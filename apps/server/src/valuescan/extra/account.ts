@@ -13,7 +13,7 @@
  * orders and balances; the market list gives it its pair name.
  */
 import type { VsBalance, VsFunding, VsOrder } from '../types.js';
-import { hlInfo } from '../hyperliquid/index.js';
+import { hlInfo } from '../hyperliquid/client.js';
 import { arcusPacer, arcusRead, ARCUS_API } from './arcus.js';
 import { lighterAccounts, lighterPacer, LIGHTER_API } from './lighter.js';
 import { num } from './http.js';

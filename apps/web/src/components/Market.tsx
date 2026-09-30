@@ -24,6 +24,7 @@ import { createPortal, flushSync } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol, type Ticker } from '../api';
 import { useAsync, useChannel, useSharedStored, useStored } from '../hooks';
 import { hub } from '../ws';
+import { pollEvery } from '../exchange/visibility';
 import { DASH, coinLabel, fmt, fmtCountdown, fmtPct, fmtPrice, fmtQty, num, pick, precisionOf, signClass } from '../format';
 import {
   AccountCell,
@@ -355,7 +356,8 @@ const TICKERS_POLL_MS = 30_000;
 interface TickerFeed {
   rows: Ticker[] | null;
   subs: Set<(rows: Ticker[] | null) => void>;
-  timer?: number;
+  /** Stops the (visibility-aware) poll. */
+  timer?: () => void;
 }
 const tickerFeeds = new Map<Engine, TickerFeed>();
 
@@ -391,7 +393,7 @@ function useTickers(engine: Engine): Ticker[] | null {
     // First subscriber owns the timer; the rest ride along.
     if (!feed.timer) {
       pumpTickers(engine);
-      feed.timer = window.setInterval(() => pumpTickers(engine), TICKERS_POLL_MS);
+      feed.timer = pollEvery(TICKERS_POLL_MS, () => pumpTickers(engine));
     }
 
     return () => {
@@ -399,7 +401,7 @@ function useTickers(engine: Engine): Ticker[] | null {
       if (!f) return;
       f.subs.delete(sub);
       if (f.subs.size === 0 && f.timer) {
-        clearInterval(f.timer);
+        f.timer();
         f.timer = undefined;
       }
     };
@@ -1273,7 +1275,8 @@ function mergeBookSide(
 interface BookFeed {
   book: OrderBook | null;
   subs: Set<(book: OrderBook | null) => void>;
-  pollTimer?: number;
+  /** Stops the (visibility-aware) REST poll. */
+  pollTimer?: () => void;
   unsubscribeWs?: () => void;
   // Health, for the log only: when the last l2Book push arrived and its update
   // id, whether the feed is currently flagged stale, and the hub state seen last.
@@ -1345,7 +1348,7 @@ export function useOrderBook(engine: Engine, symbol: string): OrderBook | null {
       const k = key;
       log.info('book feed opened', { engine, symbol });
       pumpBookRest(k, engine, symbol);
-      feed.pollTimer = window.setInterval(() => pumpBookRest(k, engine, symbol), BOOK_POLL_MS);
+      feed.pollTimer = pollEvery(BOOK_POLL_MS, () => pumpBookRest(k, engine, symbol));
       // `level` is omitted from the subscription: it was always ignored by
       // the gateway (verified live), so asking for one was a claim this
       // channel cannot honour. mergeBookSide keeps whatever the last REST
@@ -1399,7 +1402,7 @@ export function useOrderBook(engine: Engine, symbol: string): OrderBook | null {
       if (!f) return;
       f.subs.delete(sub);
       if (f.subs.size === 0) {
-        if (f.pollTimer) clearInterval(f.pollTimer);
+        f.pollTimer?.();
         if (f.staleTimer) clearInterval(f.staleTimer);
         f.unsubscribeWs?.();
         f.unsubscribeState?.();

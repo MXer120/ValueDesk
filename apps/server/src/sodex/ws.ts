@@ -13,119 +13,30 @@
 import WebSocket from 'ws';
 import { EventEmitter } from 'node:events';
 import { NET, wsPath, type Engine } from '../config.js';
+import {
+  ACCOUNT_CHANNELS,
+  ACCOUNT_CONN_CAP,
+  ACCOUNT_IDLE_CLOSE_MS,
+  KEEPALIVE_MS,
+  normaliseSubParams,
+  subKey,
+  routeKeys,
+  type SubParams,
+} from './wsProtocol.js';
 
-export interface SubParams {
-  channel: string;
-  symbol?: string;
-  symbols?: string[];
-  interval?: string;
-  level?: number;
-  user?: string;
-}
-
-/**
- * How each channel wants its symbol(s) expressed.
- *
- * DETERMINED EMPIRICALLY against testnet-gw.sodex.dev, because the published
- * reference (references/websocket.md) is wrong for two channels: it documents
- * `trade` and `markPrice` as taking `symbol`, but the gateway rejects that with
- * "symbols cannot be empty" and requires an array. The confusion is easy to hit
- * because the gateway ECHOES a one-element `symbols:[X]` back as `symbol:"X"`
- * in the subscribe ack, which reads like confirmation of the singular form.
- *
- * Verified matrix (subscribe ack, one channel per connection):
- *   trade        symbol=ERR   symbols=OK    none=ERR
- *   l2Book       symbol=OK    symbols=ERR   none=ERR
- *   candle       symbol=OK    symbols=ERR   none=ERR
- *   ticker       symbol=ERR   symbols=OK    none=ERR
- *   bookTicker   symbol=ERR   symbols=OK    none=ERR
- *   markPrice    symbol=ERR   symbols=OK    none=ERR
- *   allTicker    symbol=OK    symbols=OK    none=OK
- *   allMarkPrice symbol=OK    symbols=OK    none=OK
- */
-export const CHANNEL_PARAM_STYLE: Record<string, 'symbol' | 'symbols' | 'none'> = {
-  trade: 'symbols',
-  l2Book: 'symbol',
-  candle: 'symbol',
-  ticker: 'symbols',
-  bookTicker: 'symbols',
-  markPrice: 'symbols',
-  allTicker: 'none',
-  allMarkPrice: 'none',
-};
-
-/**
- * Rewrite caller-supplied params into the shape the gateway actually accepts,
- * so callers may pass either `symbol` or `symbols` for any channel.
- */
-export function normaliseSubParams(p: SubParams): SubParams {
-  if (ACCOUNT_CHANNELS.has(p.channel)) {
-    return { channel: p.channel, user: p.user };
-  }
-  const style = CHANNEL_PARAM_STYLE[p.channel] ?? 'symbol';
-  const list = [p.symbol, ...(p.symbols ?? [])].filter(Boolean) as string[];
-  const out: SubParams = { channel: p.channel };
-
-  if (style === 'symbols') out.symbols = [...new Set(list)];
-  else if (style === 'symbol' && list[0]) out.symbol = list[0];
-
-  if (p.interval) out.interval = p.interval;
-  if (p.level !== undefined) out.level = p.level;
-  return out;
-}
-
-/**
- * Stable identity for a subscription, so refcounts and re-subscribes line up.
- * Computed on the NORMALISED params, so `{symbol:'X'}` and `{symbols:['X']}`
- * resolve to the same upstream subscription rather than opening two.
- */
-export function subKey(raw: SubParams): string {
-  const p = normaliseSubParams(raw);
-  const parts = [p.channel];
-  if (p.symbol) parts.push(`s=${p.symbol}`);
-  if (p.symbols?.length) parts.push(`ss=${[...p.symbols].sort().join('|')}`);
-  if (p.interval) parts.push(`i=${p.interval}`);
-  if (p.level !== undefined) parts.push(`l=${p.level}`);
-  if (p.user) parts.push(`u=${p.user.toLowerCase()}`);
-  return parts.join(',');
-}
-
-/** Channels whose `data` is an array of per-symbol entries. */
-export const ARRAY_CHANNELS = new Set(['ticker', 'allTicker', 'bookTicker', 'markPrice', 'allMarkPrice']);
-/** Channels scoped to a wallet rather than a symbol. */
-export const ACCOUNT_CHANNELS = new Set([
-  'accountOrderUpdate',
-  'accountTrade',
-  'accountUpdate',
-  'accountState',
-]);
-
-/** Every symbol referenced by a push message. */
-export function symbolsIn(msg: any): string[] {
-  const d = msg?.data;
-  if (Array.isArray(d)) return [...new Set(d.map((e: any) => e?.s).filter(Boolean))] as string[];
-  return d?.s ? [d.s] : [];
-}
-
-/**
- * The subscription keys a push message could satisfy.
- *
- * Note this reconstructs keys from the PAYLOAD, because the gateway does not
- * echo the subscription parameters on pushes.
- */
-export function routeKeys(msg: any): string[] {
-  const channel = msg?.channel;
-  if (!channel) return [];
-  if (ACCOUNT_CHANNELS.has(channel)) {
-    // The gateway's account pushes name no wallet (verified live: a bare array of
-    // fills / order updates, envelope {channel, type} only). `msg.user` is stamped
-    // by the single-wallet connection that received it - see accountUpstream().
-    const user = msg?.user ?? msg?.data?.user;
-    return [subKey({ channel, user: user ?? undefined })];
-  }
-  const interval = Array.isArray(msg.data) ? undefined : msg?.data?.i;
-  return symbolsIn(msg).map((s) => subKey({ channel, symbol: s, interval }));
-}
+// The protocol (subscription shapes, keys, routing) is pure and shared with the
+// browser's own connections: sodex/wsProtocol.ts. Re-exported unchanged.
+export {
+  ACCOUNT_CHANNELS,
+  ACCOUNT_CONN_CAP,
+  ARRAY_CHANNELS,
+  CHANNEL_PARAM_STYLE,
+  normaliseSubParams,
+  routeKeys,
+  subKey,
+  symbolsIn,
+  type SubParams,
+} from './wsProtocol.js';
 
 export type UpstreamStatus = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
@@ -224,7 +135,7 @@ export class Upstream extends EventEmitter {
     this.stopPing();
     this.pingTimer = setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN) this.send({ op: 'ping' });
-    }, 30_000);
+    }, KEEPALIVE_MS);
   }
 
   private stopPing() {
@@ -315,8 +226,7 @@ export const upstreams: Record<Engine, Upstream> = {
  * stream (the pages poll the same data anyway); idle connections close after
  * IDLE_CLOSE_MS so a scan does not hold one for good.
  */
-export const ACCOUNT_CONN_CAP = 6;
-const IDLE_CLOSE_MS = 30_000;
+const IDLE_CLOSE_MS = ACCOUNT_IDLE_CLOSE_MS;
 
 const accountConns = new Map<string, { up: Upstream; idle?: NodeJS.Timeout }>();
 const accountListeners = new Set<(up: Upstream) => void>();

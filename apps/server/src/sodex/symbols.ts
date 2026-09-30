@@ -10,6 +10,11 @@
 import { sodex } from './rest.js';
 import { enginePath, type Engine } from '../config.js';
 import { canonicalDecimal, decimalCompare, roundToStep } from '../decimal.js';
+import { findSymbol, isSymbolId } from './symbolRef.js';
+import { mulDecimal } from './decimalMath.js';
+
+// Exact decimal multiply, pure and shared with the browser's history totals.
+export { mulDecimal };
 
 export interface Symbol {
   id: number;
@@ -69,17 +74,9 @@ export const coins = (): Promise<Coin[]> => sodex.get<Coin[]>(`${enginePath('spo
 /** Resolve by internal name, display name, or numeric id - case-insensitively. */
 export async function resolve(engine: Engine, ref: string | number): Promise<Symbol> {
   const list = await symbols(engine);
-  if (typeof ref === 'number' || /^\d+$/.test(String(ref))) {
-    const id = Number(ref);
-    const hit = list.find((s) => s.id === id);
-    if (hit) return hit;
-    throw new SymbolNotFoundError(`unknown ${engine} symbolID ${id}`);
-  }
-  const want = String(ref).toUpperCase();
-  const hit = list.find(
-    (s) => s.name.toUpperCase() === want || s.displayName.toUpperCase() === want,
-  );
+  const hit = findSymbol(list, ref);
   if (hit) return hit;
+  if (isSymbolId(ref)) throw new SymbolNotFoundError(`unknown ${engine} symbolID ${Number(ref)}`);
   throw new SymbolNotFoundError(`unknown ${engine} symbol ${ref}`);
 }
 
@@ -168,26 +165,6 @@ export function normaliseOrder(
   }
 
   return out;
-}
-
-/**
- * Exact decimal multiply via BigInt - no float rounding.
- * Sign is stripped before the digit shuffling and reapplied at the end, since
- * zero-padding a "-15" string would otherwise produce garbage like "0-15".
- */
-export function mulDecimal(a: string, b: string): string {
-  const [ca, cb] = [canonicalDecimal(a), canonicalDecimal(b)];
-  const negative = ca.startsWith('-') !== cb.startsWith('-');
-  const strip = (s: string) => (s.startsWith('-') ? s.slice(1) : s);
-  const scale = (s: string) => (s.split('.')[1] ?? '').length;
-  const digits = (s: string) => BigInt(strip(s).replace('.', ''));
-
-  const total = scale(ca) + scale(cb);
-  const raw = (digits(ca) * digits(cb)).toString();
-  const sign = negative ? '-' : '';
-  if (total === 0) return canonicalDecimal(sign + raw);
-  const padded = raw.padStart(total + 1, '0');
-  return canonicalDecimal(sign + padded.slice(0, -total) + '.' + padded.slice(-total));
 }
 
 export const clearSymbolCache = (): void => void byEngine.clear();

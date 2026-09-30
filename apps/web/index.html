@@ -29,13 +29,30 @@
               when delivered via <meta> and only logs an error. Anti-framing is
               sent as a real header instead - by vite.config.ts in dev, and by
               whatever serves web/dist in production. See DEPLOYMENT.md.
-        connect-src 'self' + ws  the Vite proxy keeps the API same-origin, and
-                                the WalletConnect relay needs an outbound wss;
-                                plus the public RPCs the address menu reads
-                                wallet balances from (trading/walletBalances.ts:
-                                ValueChain, Arbitrum, Base, Ethereum, BNB Chain,
-                                Polygon) - read-only balance calls, nothing signed
+        connect-src 'self'      the Valuescan index API (same origin; in dev the
+                                Vite proxy, and Vite's own HMR socket)
+                    + exactly the exchanges this browser talks to DIRECTLY,
+                                https and wss: SoDEX (gateway REST + WebSocket,
+                                its data host, sodex.com's biz API), Hyperliquid
+                                /info, Lighter, Arcus - every user's exchange
+                                traffic leaves from their own browser and IP,
+                                never through Valuescan (docs/ARCH-traffic.md);
+                                the WalletConnect relay (wss) and its wallet list
+                                (api.web3modal.org); the ValueChain explorer; the
+                                public RPCs the address menu reads wallet balances
+                                from (trading/walletBalances.ts: ValueChain, Arbitrum,
+                                Base, Ethereum, BNB Chain, Polygon) - read-only
+                                balance calls, nothing signed. No wildcard: a
+                                socket or fetch to any other host is refused.
+                                (The SharedWorker holding the SoDEX sockets gets
+                                its policy from its own response headers - see
+                                docs/ARCH-traffic.md for what a host must send.)
         img-src     + data:     wallet icons arrive as data: URIs over EIP-6963
+        font-src    'self'      fonts are self-hosted; the WalletConnect modal is
+                                themed with ours (walletconnect.ts), so it never
+                                asks fonts.reown.com (checked in the network log)
+        worker-src  'self'      the SharedWorker holding every SoDEX socket, and
+                                the copy simulator's worker - same origin only
         form-action 'none'      nothing in this app posts a form anywhere
         base-uri    'none'      an injected <base> cannot re-point relative URLs
 
@@ -65,22 +82,29 @@
       the content attribute does not merely fail to parse as CSP - a quote inside
       it ends the attribute and breaks the whole document. Comments go here.
     -->
+    <!-- The exchanges this page reads first: connect while the app still loads. -->
+    <link rel="preconnect" href="https://mainnet-gw.sodex.dev" crossorigin />
+    <link rel="preconnect" href="https://mainnet-data.sodex.dev" crossorigin />
     <meta
       http-equiv="Content-Security-Policy"
       content="
         default-src 'self';
         script-src 'self';
         style-src 'self' 'unsafe-inline';
-        img-src 'self' data: blob: https://explorer-api.walletconnect.com https://api.web3modal.org;
+        img-src 'self' data: blob: https://api.web3modal.org;
         frame-src https://verify.walletconnect.org;
-        font-src 'self' https://fonts.reown.com;
-        connect-src 'self' ws: wss:
-          https://mainnet-gw.sodex.dev https://testnet-gw.sodex.dev
+        worker-src 'self';
+        font-src 'self';
+        connect-src 'self'
+          https://mainnet-gw.sodex.dev wss://mainnet-gw.sodex.dev
+          https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
           https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
           https://alpha-biz.sodex.dev
-          https://relay.walletconnect.org https://relay.walletconnect.com
-          https://explorer-api.walletconnect.com https://api.web3modal.org
-          https://fonts.reown.com
+          https://api.hyperliquid.xyz
+          https://mainnet.zklighter.elliot.ai
+          https://api.arcus.xyz
+          wss://relay.walletconnect.org
+          https://api.web3modal.org
           https://main-scan.valuechain.xyz
           https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
           https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org

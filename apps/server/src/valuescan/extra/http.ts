@@ -26,12 +26,19 @@ export class Pacer {
   private tokens: number;
   private refilledAt = Date.now();
   private coolUntil = 0;
+  /** Requests waiting or running on this pacer. */
+  private queued = 0;
 
   constructor(
     readonly name: string,
     private readonly perMin: number,
     private readonly burst = Math.max(1, Math.floor(perMin / 6)),
     private readonly timeoutMs = 20_000,
+    /**
+     * Refuse new requests beyond this many waiting (security audit S-16): a
+     * burst of reads must not build a queue every later caller waits behind.
+     */
+    private readonly maxQueue = Number.POSITIVE_INFINITY,
   ) {
     this.tokens = this.burst;
   }
@@ -54,6 +61,10 @@ export class Pacer {
   }
 
   get<T>(url: string, cost = 1): Promise<T> {
+    if (this.queued >= this.maxQueue) {
+      return Promise.reject(new HttpError(503, `${this.name}: busy (${this.queued} requests queued) - try again shortly`, url));
+    }
+    this.queued++;
     const run = async (): Promise<T> => {
       for (let wait = this.waitFor(cost); wait > 0; wait = this.waitFor(cost)) await sleep(wait);
       this.tokens -= cost;
@@ -73,6 +84,10 @@ export class Pacer {
     };
     const p = this.chain.then(run, run);
     this.chain = p.catch(() => undefined);
+    const done = () => {
+      this.queued--;
+    };
+    p.then(done, done);
     return p;
   }
 }

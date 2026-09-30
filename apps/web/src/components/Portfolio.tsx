@@ -29,7 +29,8 @@
  * payloads feed the whole page, and each was inspected live against the running
  * backend before a single column was written:
  *
- *  1. GET /api/acct/perps/state -> `state`, whose keys are terse:
+ *  1. The perps account state (SoDEX gateway, read from this browser) ->
+ *     `state`, whose keys are terse:
  *       user aid uid av mm mmr am ami amw im cm oim ocm B P O TO S
  *     The gateway documents none of them. Their meaning here is not guessed -
  *     it is pinned by arithmetic identities that this account's own numbers
@@ -57,23 +58,22 @@
  *     only true if `av` is equity and `P[].ur` is unrealised PnL, and it holds
  *     to twelve significant figures across 52 live positions.
  *
- *  2. GET /api/acct/perps/positions -> the verbose position rows. Verified
+ *  2. The perps positions (gateway) -> the verbose position rows. Verified
  *     keys: id symbol marginMode positionSide size initialMargin avgEntryPrice
  *     cumOpenCost cumTradingFee cumClosedSize avgClosePrice maxSize realizedPnL
  *     leverage active isTakenOver takeOverPrice createdAt updatedAt.
  *     There is no mark price, no unrealised PnL and no liquidation price in it.
  *
- *  3. GET /api/md/perps/mark-prices -> { symbol, markPrice, indexPrice, ... }.
+ *  3. The perps mark prices (gateway) -> { symbol, markPrice, indexPrice, ... }.
  *     This is the ONLY source of a mark price on this page. Positions are
  *     valued by joining it in; a position the feed does not carry gets no
  *     notional and no ROE, and the panel says how many were skipped rather than
  *     quietly summing an incomplete book.
  *
- *  4. GET /api/stats/all-time -> the venue's own perps PnL headline (including
- *     a real daily cumulative-PnL series) plus a SERVER-SIDE WALK of this
- *     account's whole fill and funding history. It is expensive - see
- *     `useAllTime` - so it is behind an explicit button and nothing on this page
- *     starts it on load.
+ *  4. api.statsAllTime -> the venue's own perps PnL headline (including a
+ *     real daily cumulative-PnL series) plus a walk, from this browser, of
+ *     this account's whole fill and funding history. It is expensive - see
+ *     `useAllTime`, which paces it and says what it costs.
  *
  * Unrealised PnL is therefore never derived here: it is `P[].ur`, the venue's
  * own per-position figure, joined onto the verbose row by position id. The
@@ -176,6 +176,7 @@ import { useAccountTotals } from './account/useAccountTotals';
 import { Chevron, ConnectedWalletLogo, CopyIcon, SodexMark } from './funds/ui';
 import { marginUsage } from '../accountData';
 import { readGateway } from '../trading/gateway';
+import { walletRank } from '../exchange/sodexData';
 import { logLoadFailure } from './LoadFailed';
 import { Modal } from './Modal';
 import { Collapse } from './motion';
@@ -538,7 +539,7 @@ function deriveChecks(account: AccountSummary | null, rows: PositionRow[]): Chec
  * rows barely move at all. The account WebSocket also pushes a refresh, so the
  * polls are a floor rather than the mechanism.
  *
- * The expensive server-side history walk is NOT here - see `useAllTime`.
+ * The expensive history walk is NOT here - see `useAllTime`.
  */
 function usePortfolioModel(
   address: string | null,
@@ -660,7 +661,7 @@ interface SyncProgress {
   oldest: number | null;
 }
 
-/** The subset of /api/stats/all-time this page reads. The route owns the full shape. */
+/** The subset of api.statsAllTime this page reads (server/src/statsCore.ts owns the full shape). */
 interface AllTimeResponse {
   trades: { spot: WalkTradeStats; perps: WalkTradeStats };
   funding: { count: number; totals: CoinTotal[] };
@@ -687,10 +688,12 @@ interface AllTime {
 /**
  * The account's own history, behind one click.
  *
- * GET /api/stats/all-time kicks a SERVER-SIDE WALK of this account's entire
- * fill and funding history. On an active account that is tens of thousands of
- * rows and several minutes, and - this is the part that matters - it spends the
- * same per-minute upstream rate-limit budget that the live trading views need.
+ * api.statsAllTime walks this account's entire fill and funding history from
+ * this browser (exchange/allTime.ts). On an active account that is tens of
+ * thousands of rows and several minutes, and - this is the part that matters -
+ * it spends the same per-IP upstream budget that the live trading views need.
+ * So the walk is paced as the lowest-priority traffic there is (a page every
+ * few seconds, never while the fill panels need the history drip).
  * This was not theoretical: auto-loading it drove `weightSpent` to 1151/1200 and
  * left the equity and positions panels stuck on "Loading…" while the walk ran.
  *
@@ -699,7 +702,7 @@ interface AllTime {
  * every figure that depends on it renders an em-dash until then.
  *
  * Polling only while a walk is in flight is the same rule: a finished walk is
- * cached on the server and re-polling it would burn budget for no new data.
+ * cached in this browser and re-polling it would burn budget for no new data.
  */
 function useAllTime(address: string | null): AllTime {
   const [started, setStarted] = useState(false);
@@ -727,12 +730,9 @@ function useAllTime(address: string | null): AllTime {
     if (!address) return;
     setLoading(true);
     try {
-      const res = await fetch(`/api/stats/all-time?address=${encodeURIComponent(address)}`);
-      const text = await res.text();
-      const body = text ? JSON.parse(text) : null;
-      if (!res.ok) throw new Error(body?.error ?? body?.message ?? `HTTP ${res.status}`);
+      const body: AllTimeResponse = await api.statsAllTime(address);
       if (alive.current) {
-        setData(body as AllTimeResponse);
+        setData(body);
         setError(null);
       }
     } catch (e) {
@@ -3275,8 +3275,8 @@ function useVolume7d(address: string | null): number | null {
     setV(null);
     if (!address) return;
     let off = false;
-    fetch(`/api/external/leaderboard/rank?wallet_address=${address}&window_type=7D&sort_by=volume`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+    // SoDEX's data host, straight from this browser.
+    walletRank('7D', 'volume', address)
       .then((j: { found?: boolean; item?: { volume_usd?: string } }) => { if (!off) setV(j.found ? num(j.item?.volume_usd) : 0); })
       .catch((e) => logLoadFailure('7-day volume', e));
     return () => { off = true; };

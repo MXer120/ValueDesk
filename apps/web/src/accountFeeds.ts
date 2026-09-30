@@ -27,6 +27,7 @@
  * (positionDirection, the derived-PnL labelling, etc.) is touched by this.
  */
 import { useEffect, useRef, useState } from 'react';
+import { pollEvery } from './exchange/visibility';
 
 interface FeedState<T> {
   data: T | null;
@@ -42,7 +43,8 @@ interface Feed<T> extends FeedState<T> {
    *  into this key and the other book came back as "couldn't load"). */
   fetchers: Set<() => Promise<T>>;
   fetcher: () => Promise<T>;
-  timer?: number;
+  /** Stops the poll (visibility-aware: paused while the tab is hidden). */
+  timer?: () => void;
   inflight?: Promise<void>;
   debounceTimer?: number;
   evictTimer?: number;
@@ -176,7 +178,7 @@ export function useAccountResource<T>(
     // contract to useTickers in Market.tsx.
     if (!feed.timer) {
       pump<T>(key);
-      feed.timer = window.setInterval(() => pump<T>(key), pollMs);
+      feed.timer = pollEvery(pollMs, () => pump<T>(key));
     }
 
     return () => {
@@ -189,7 +191,7 @@ export function useAccountResource<T>(
         // reason to keep spending REST weight on it. Only the CACHE entry
         // itself gets a grace period before it is discarded (below).
         if (f.timer) {
-          clearInterval(f.timer);
+          f.timer();
           f.timer = undefined;
         }
         if (f.debounceTimer) {

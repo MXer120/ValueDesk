@@ -20,15 +20,16 @@
  * known after the response. That extra is charged afterwards (see
  * WeightBudget.charge), so it delays the NEXT requests, not this one.
  */
+import { envOf } from '../env.js';
 
-export const HL_INFO_URL = (process.env.VALUESCAN_HL_INFO_URL?.trim() || 'https://api.hyperliquid.xyz/info').replace(
+export const HL_INFO_URL = (envOf('VALUESCAN_HL_INFO_URL')?.trim() || 'https://api.hyperliquid.xyz/info').replace(
   /\/+$/,
   '',
 );
 
 /** Our share of HL's 1,200 weight/min/IP. Env-overridable, clamped to HL's limit. */
 export const HL_WEIGHT_PER_MIN = (() => {
-  const n = Number.parseInt(process.env.VALUESCAN_HL_WEIGHT_PER_MIN ?? '', 10);
+  const n = Number.parseInt(envOf('VALUESCAN_HL_WEIGHT_PER_MIN') ?? '', 10);
   return Number.isFinite(n) && n > 0 ? Math.min(1200, Math.max(60, n)) : 1000;
 })();
 

@@ -1,0 +1,60 @@
+/**
+ * Market reads by name (sodexMarket.ts withMarket): the read goes out together
+ * with the market list instead of after it - that list only confirms the
+ * market exists - so the book's first paint costs one round trip, not two. An
+ * id or a display name still waits for the list; a name that is not safe in a
+ * URL path never reaches one.
+ */
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+
+const SYMBOLS_DELAY_MS = 150;
+const calls: Array<{ path: string; t: number }> = [];
+let t0 = Date.now();
+
+// The app's gateway client calls the global fetch; answer like SoDEX would.
+globalThis.fetch = (async (input: string | URL) => {
+  const url = new URL(String(input));
+  calls.push({ path: url.pathname + url.search, t: Date.now() - t0 });
+  const ok = (data: unknown) => new Response(JSON.stringify({ code: 0, data }), { status: 200 });
+  if (url.pathname.endsWith('/markets/symbols')) {
+    await new Promise((r) => setTimeout(r, SYMBOLS_DELAY_MS));
+    return ok([{ id: 1, name: 'BTC-USD', displayName: 'BTC/USD', baseCoin: 'BTC', quoteCoin: 'USD' }]);
+  }
+  if (url.pathname.endsWith('/orderbook')) return ok({ s: url.pathname.split('/')[5], b: [['1', '1']], a: [['2', '1']] });
+  if (url.pathname.endsWith('/trades')) return ok([]);
+  return new Response(JSON.stringify({ code: 404, message: 'not found' }), { status: 404 });
+}) as typeof fetch;
+
+const { market, MarketRequestError } = await import('./sodexMarket');
+
+test('market: a book read by name goes out together with the market list, not after it', async () => {
+  calls.length = 0;
+  t0 = Date.now();
+  const r = await market.orderbook('perps', 'BTC-USD', 20);
+  const book = calls.find((c) => c.path.includes('/orderbook'))!;
+  assert.ok(calls.some((c) => c.path.endsWith('/markets/symbols')), 'the list is still read (it confirms the market)');
+  assert.ok(book.t < SYMBOLS_DELAY_MS, `the book did not wait for the list (sent at ${book.t} ms)`);
+  assert.equal(r.symbol, 'BTC-USD');
+  assert.deepEqual(r.book, { s: 'BTC-USD', b: [['1', '1']], a: [['2', '1']] });
+});
+
+test('market: a display name or an id waits for the list and reads by the canonical name', async () => {
+  for (const ref of ['BTC/USD', '1']) {
+    calls.length = 0;
+    const r = await market.orderbook('perps', ref, 20);
+    assert.equal(r.symbol, 'BTC-USD');
+    const books = calls.filter((c) => c.path.includes('/orderbook'));
+    assert.deepEqual(books.map((c) => c.path), ['/api/v1/perps/markets/BTC-USD/orderbook?limit=20'], ref);
+  }
+});
+
+test('market: an unknown market is still refused', async () => {
+  await assert.rejects(market.trades('perps', 'NOPE-USD', 10), (e: unknown) => e instanceof MarketRequestError && e.status === 404);
+});
+
+test('market: a name that is not safe in a URL path never reaches one', async () => {
+  calls.length = 0;
+  await assert.rejects(market.orderbook('perps', '../accounts/0xabc/trades', 20));
+  assert.ok(calls.every((c) => !c.path.includes('accounts')), calls.map((c) => c.path).join(', '));
+});

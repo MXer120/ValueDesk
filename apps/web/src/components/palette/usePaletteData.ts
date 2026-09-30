@@ -16,6 +16,7 @@ import type { ScreenerResponse } from '@sign/valuescan/screener/model.js';
 import { positioningIndex, withPositioning, toSearch, type AssetRow, type ScreenerRow } from './model';
 import { num } from '../../format';
 import { logLoadFailure } from '../LoadFailed';
+import { visibleTimeout } from '../../exchange/visibility';
 
 interface CacheEntry<T> {
   at: number;
@@ -162,8 +163,7 @@ export function useScreener(
   useEffect(() => {
     if (!enabled || loading) return;
     if (!error && scrolledPastFirstPage) return;
-    const t = window.setTimeout(() => setTick((n) => n + 1), error ? retryDelay(failures) : REFRESH_MS);
-    return () => window.clearTimeout(t);
+    return visibleTimeout(error ? retryDelay(failures) : REFRESH_MS, () => setTick((n) => n + 1));
   }, [enabled, loading, error, failures, scrolledPastFirstPage, firstUrl]);
 
   const loadMore = () => {
@@ -280,11 +280,12 @@ function useJson<T>(key: string, load: (signal: AbortSignal) => Promise<T>, enab
     if (!enabled) return;
     let alive = true;
     let ac: AbortController | null = null;
-    let timer: number | undefined;
+    let cancel: (() => void) | undefined;
     let failures = 0;
+    // Paused while the tab is hidden; runs at once when it is shown again.
     const schedule = (ms: number) => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(run, Math.max(0, ms));
+      cancel?.();
+      cancel = visibleTimeout(Math.max(0, ms), run);
     };
     function run() {
       ac?.abort();
@@ -313,7 +314,7 @@ function useJson<T>(key: string, load: (signal: AbortSignal) => Promise<T>, enab
     else schedule(pollMs - (Date.now() - hit.at));
     return () => {
       alive = false;
-      window.clearTimeout(timer);
+      cancel?.();
       ac?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -425,7 +426,7 @@ export function useVenueBoards(venues: readonly Venue[], win: BoardWindow, limit
   useEffect(() => {
     if (!enabled || !venues.length) return;
     const ac = new AbortController();
-    let timer: number | undefined;
+    let cancel: (() => void) | undefined;
     const run = () => {
       for (const v of venues) {
         const k = keyOf(v);
@@ -444,12 +445,12 @@ export function useVenueBoards(venues: readonly Venue[], win: BoardWindow, limit
             setState((s) => ({ ...s, [k]: { rows: s[k]?.rows ?? [], error: e instanceof Error ? e.message : String(e), loading: false } }));
           });
       }
-      timer = window.setTimeout(run, REFRESH_MS);
+      cancel = visibleTimeout(REFRESH_MS, run);
     };
     run();
     return () => {
       ac.abort();
-      window.clearTimeout(timer);
+      cancel?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sig, win, limit, enabled]);

@@ -16,6 +16,7 @@
 import { SodexApiError, parseEnvelope } from '@sodex-core';
 import { tradingConfig } from './config';
 import { logger } from '../log';
+import { gateway as exchangeGateway } from '../exchange/sodexGateway';
 
 const log = logger('trade');
 
@@ -74,6 +75,8 @@ export async function sendSigned<T = unknown>(req: SignedHttpRequest, what: stri
   } finally {
     clearTimeout(timer);
   }
+  // Counted against this browser's per-IP budget (never delayed, never retried).
+  exchangeGateway.chargeWrite(1);
   const text = await res.text().catch(() => '');
   const ms = Math.round(performance.now() - t0);
   // A server error or an unreadable answer is NOT a "no": the engine may have
@@ -105,29 +108,12 @@ export async function sendSigned<T = unknown>(req: SignedHttpRequest, what: stri
   }
 }
 
-/** An unsigned read straight from the gateway (public account/market data). */
+/**
+ * An unsigned read straight from the gateway (public account/market data),
+ * through the browser's exchange layer: the per-IP budget every tab shares,
+ * dedupe of identical concurrent reads, and SoDEX's rate-limit cooldown.
+ * `attempts` covers transient failures; a definite rejection is final.
+ */
 export async function readGateway<T = unknown>(path: string, attempts = 2): Promise<T> {
-  const { gateway } = tradingConfig();
-  let last: unknown;
-  for (let i = 0; i < attempts; i++) {
-    const ctl = new AbortController();
-    const timer = setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
-    try {
-      const res = await fetch(gateway + path, {
-        headers: { Accept: 'application/json' },
-        signal: ctl.signal,
-        mode: 'cors',
-        credentials: 'omit',
-        referrerPolicy: 'no-referrer',
-      });
-      return parseEnvelope<T>(res.status, await res.text(), path);
-    } catch (e) {
-      last = e;
-      // A definite rejection will not change on retry.
-      if (e instanceof SodexApiError && e.httpStatus >= 400 && e.httpStatus < 500 && e.httpStatus !== 429) break;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last));
+  return exchangeGateway.get<T>(path, { attempts });
 }

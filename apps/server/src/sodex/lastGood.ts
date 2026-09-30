@@ -20,6 +20,10 @@ import { deviceKeyPath } from '../deviceKey.js';
 const MAX_AGE_MS = 7 * 86_400_000;
 const MAX_ROWS = 5_000;
 
+/** Sweep old rows and enforce MAX_ROWS every this many writes (was 2% at random). */
+const SWEEP_EVERY = 50;
+let writes = 0;
+
 let db: DatabaseSync | null = null;
 let tried = false;
 
@@ -44,7 +48,7 @@ export function rememberGood(path: string, value: unknown): void {
   try {
     const now = Date.now();
     d.prepare('INSERT OR REPLACE INTO last_good (path, at, body) VALUES (?, ?, ?)').run(path, now, JSON.stringify(value));
-    if (Math.random() < 0.02) {
+    if (++writes % SWEEP_EVERY === 0) {
       d.prepare('DELETE FROM last_good WHERE at < ?').run(now - MAX_AGE_MS);
       d.prepare('DELETE FROM last_good WHERE path NOT IN (SELECT path FROM last_good ORDER BY at DESC LIMIT ?)').run(MAX_ROWS);
     }

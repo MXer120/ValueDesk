@@ -23,9 +23,10 @@
  * - rank / rankChange: position on the leaderboard by 30d PnL, the page's
  *   default ordering.
  */
-import type { TraderProfile, VsFill, VsPosition } from '../types.js';
+import { unrefTimer } from '../env.js';
+import type { LeaderboardSort, TraderProfile, TraderRow, VsFill, VsPosition, Window } from '../types.js';
 import type { InfoLike } from './info.js';
-import type { HlLeaderboardStore, LbSnapshot } from './leaderboard.js';
+import type { LbSnapshot } from './leaderboard.js';
 import {
   fillStats,
   mapFill,
@@ -59,15 +60,29 @@ const MAX_EXTRA_DEXES = 4;
 export const HL_FILLS_PAGE = 2000;
 export const HL_FILLS_REACHABLE = 10_000;
 
+/** Anything that can answer one address's leaderboard row (an LbSnapshot does). */
+export interface LbRowSource {
+  rowFor(address: string, sort: LeaderboardSort, window: Window, prev: LbSnapshot | null): TraderRow | null;
+}
+
 export interface TraderDeps {
   info: InfoLike;
-  leaderboard: Pick<HlLeaderboardStore, 'snapshot' | 'peek' | 'previous'>;
+  /**
+   * The server passes its HlLeaderboardStore. The browser passes a source that
+   * reads just this address's row from the Valuescan index, since the file
+   * behind the store is 39 MB.
+   */
+  leaderboard: {
+    snapshot(): Promise<LbRowSource>;
+    peek(): LbRowSource | null;
+    previous(): LbSnapshot | null;
+  };
 }
 
 const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T | null> =>
-  Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms).unref?.())]);
+  Promise.race([p.catch(() => null), new Promise<null>((r) => unrefTimer(setTimeout(() => r(null), ms)))]);
 
-async function leaderboardSnapshot(deps: TraderDeps): Promise<LbSnapshot | null> {
+async function leaderboardSnapshot(deps: TraderDeps): Promise<LbRowSource | null> {
   return deps.leaderboard.peek() ?? (await withTimeout(deps.leaderboard.snapshot(), LEADERBOARD_WAIT_MS));
 }
 

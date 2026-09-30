@@ -27,41 +27,12 @@ import { NETWORK, type Network } from '../config.js';
 import { keccak256, utf8, bytesToHex, hexToBytes } from '../signing/eip712.js';
 import { canonicalDecimal, decimalCompare } from '../decimal.js';
 import { coins as gatewayCoins, type Coin } from './symbols.js';
+import { CHAINS, type ChainConfig } from './chainParams.js';
+import { fromBaseUnits, toBaseUnits } from './units.js';
 
-export interface ChainConfig {
-  chainId: number;
-  name: string;
-  rpcUrl: string;
-  explorerUrl: string | null;
-  /** Blockscout API root, when one exists for this network. */
-  explorerApi: string | null;
-  nativeCurrency: { name: string; symbol: string; decimals: number };
-  /** The SoDEX exchange contract that custodies deposits. */
-  exchange: string;
-}
-
-export const CHAINS: Record<Network, ChainConfig> = {
-  mainnet: {
-    chainId: 286623,
-    name: 'ValueChain',
-    rpcUrl: process.env.VALUECHAIN_RPC?.trim() || 'https://rpc.valuechain.xyz',
-    explorerUrl: 'https://main-scan.valuechain.xyz',
-    explorerApi: 'https://main-scan.valuechain.xyz/api/v2',
-    nativeCurrency: { name: 'SOSO', symbol: 'SOSO', decimals: 18 },
-    exchange: '0x0101010101010101010101010101010101010101',
-  },
-  testnet: {
-    chainId: 138565,
-    name: 'ValueChain Testnet',
-    rpcUrl: process.env.VALUECHAIN_TESTNET_RPC?.trim() || 'https://testnet-rpc.valuechain.xyz',
-    explorerUrl: null,
-    // No public Blockscout instance responded for testnet; the registry falls
-    // back to on-chain probing there.
-    explorerApi: null,
-    nativeCurrency: { name: 'SOSO', symbol: 'SOSO', decimals: 18 },
-    exchange: '0x0101010101010101010101010101010101010101',
-  },
-};
+// Pure and shared with the browser: the chain table (chainParams.ts) and the
+// exact decimal <-> base-unit conversions (units.ts).
+export { CHAINS, fromBaseUnits, toBaseUnits, type ChainConfig };
 
 export const CHAIN: ChainConfig = CHAINS[NETWORK];
 
@@ -156,27 +127,6 @@ export const encodeApprove = (spender: string, amount: bigint): string =>
 
 export const encodeDeposit = (token: string, amount: bigint): string =>
   encodeCall(SELECTORS.depositERC20, encodeAddress(token), encodeUint(amount));
-
-// --- decimal <-> base units -------------------------------------------------
-
-/** "1.5" @ 6dp -> 1500000n. String-based, so no float ever touches an amount. */
-export function toBaseUnits(amount: string, decimals: number): bigint {
-  const c = canonicalDecimal(amount);
-  if (c.startsWith('-')) throw new Error('amount must be positive');
-  const [int = '0', frac = ''] = c.split('.');
-  if (frac.length > decimals) {
-    throw new Error(`${c} has more than ${decimals} decimal places for this asset`);
-  }
-  return BigInt(int + frac.padEnd(decimals, '0'));
-}
-
-/** 1500000n @ 6dp -> "1.5" */
-export function fromBaseUnits(v: bigint, decimals: number): string {
-  const neg = v < 0n;
-  const s = (neg ? -v : v).toString().padStart(decimals + 1, '0');
-  const out = decimals === 0 ? s : `${s.slice(0, -decimals)}.${s.slice(-decimals)}`;
-  return canonicalDecimal((neg ? '-' : '') + out);
-}
 
 // --- coin registry ----------------------------------------------------------
 
@@ -567,6 +517,17 @@ async function corroborateOwner(accountId: number): Promise<string | null> {
 
 const onchainCache = new Map<number, { at: number; value: OnChainResolution }>();
 const ONCHAIN_TTL = 60 * 60_000;
+/** Bounded (security audit S-06): expired entries go first, then the oldest. */
+const ONCHAIN_MAX = 5_000;
+
+function pruneOnchain(now: number): void {
+  if (onchainCache.size <= ONCHAIN_MAX) return;
+  for (const [k, v] of onchainCache) if (now - v.at >= ONCHAIN_TTL) onchainCache.delete(k);
+  for (const k of onchainCache.keys()) {
+    if (onchainCache.size <= ONCHAIN_MAX) break;
+    onchainCache.delete(k);
+  }
+}
 
 /** Decode a 32-byte word returned as an address, or null if it is the zero word. */
 function decodeAddress(hex: string): string | null {
@@ -581,7 +542,9 @@ export async function resolveAccountOnChain(accountId: number): Promise<OnChainR
   if (cached && Date.now() - cached.at < ONCHAIN_TTL) return cached.value;
 
   const put = (v: OnChainResolution): OnChainResolution => {
+    onchainCache.delete(accountId);
     onchainCache.set(accountId, { at: Date.now(), value: v });
+    pruneOnchain(Date.now());
     return v;
   };
 

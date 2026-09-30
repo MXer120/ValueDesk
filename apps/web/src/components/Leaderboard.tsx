@@ -9,6 +9,7 @@
  */
 import { useState } from 'react';
 import { useAsync, useStored } from '../hooks';
+import { leaderboardPage, walletRank } from '../exchange/sodexData';
 import { fmtDateTime, fmtUsd, shortAddr, signClass } from '../format';
 import './Leaderboard.css';
 import { LoadFailed, couldntLoad, logLoadFailure, useLoadFailedToast } from './LoadFailed';
@@ -129,7 +130,8 @@ export function Leaderboard({
   });
   const { data, error, loading, refresh } = useAsync<Page>(
 
-    () => getJson<Page>(`/api/external/leaderboard?${query}`),
+    // SoDEX's own leaderboard, straight from its data host in this browser.
+    () => leaderboardPage<Page>({ window_type: windowType, sort_by: sortBy, sort_order: sortOrder, page, page_size: pageSize }),
     [windowType, sortBy, sortOrder, pageSize, page],
   );
   useLoadFailedToast(error, 'Leaderboard', refresh);
@@ -138,9 +140,7 @@ export function Leaderboard({
   // is almost never on the page being viewed - there are ~128k ranked accounts.
   const { data: mine, error: mineError } = useAsync<RankLookup>(
     () =>
-      getJson<RankLookup>(
-        `/api/external/leaderboard/rank?window_type=${windowType}&sort_by=${sortBy}&wallet_address=${address}`,
-      ).catch((e: unknown) => {
+      (walletRank(windowType, sortBy, address!) as Promise<unknown> as Promise<RankLookup>).catch((e: unknown) => {
         logLoadFailure(`${subjectLabel} rank`, e);
         throw e;
       }),

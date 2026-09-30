@@ -2,8 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { api, ApiError, type Engine, type Symbol, type SessionInfo } from './api';
 import { hub, type ConnState, type SubParams } from './ws';
 import { getTradingState, sessionInfoOf, subscribeTrading } from './trading/session';
+import { pollEvery } from './exchange/visibility';
 
-/** A promise-backed value with loading/error state and manual refresh. */
+/**
+ * A promise-backed value with loading/error state and manual refresh.
+ * `pollMs` polls only while the tab is visible, and catches up at once when
+ * it is shown again (every poll spends the user's own exchange budget).
+ */
 export function useAsync<T>(
   fn: () => Promise<T>,
   deps: unknown[],
@@ -41,8 +46,7 @@ export function useAsync<T>(
 
   useEffect(() => {
     if (!enabled || !pollMs) return;
-    const id = window.setInterval(() => setTick((t) => t + 1), pollMs);
-    return () => clearInterval(id);
+    return pollEvery(pollMs, () => setTick((t) => t + 1));
   }, [enabled, pollMs]);
 
   return { data, error, loading, refresh: useCallback(() => setTick((t) => t + 1), []) };

@@ -66,6 +66,7 @@ import type { EthersAdapter } from '@reown/appkit-adapter-ethers';
    import statically on first paint. */
 import { PACKAGE_VERSION as APPKIT_VERSION } from '@reown/appkit/constants';
 import { api } from './api';
+import { EVM_CHAINS } from './trading/onboard';
 import {
   discoverWallets,
   getDiscoveredWallets,
@@ -643,7 +644,15 @@ async function createKit(): Promise<AppKit> {
       methods: { eip155: [...WC_METHODS] },
       events: { eip155: [...WC_EVENTS] },
       chains: { eip155: [`eip155:${chain.chainId}`] },
-      rpcMap: { [`eip155:${chain.chainId}`]: chain.rpcUrl },
+      /* Every chain the app asks a wallet to be on gets an RPC the page's CSP
+         allows: ValueChain, and the EVM chains a first deposit comes from
+         (trading/onboard.ts). Without an entry the universal provider falls
+         back to rpc.walletconnect.org, which the CSP blocks - so reading USDC
+         through a phone wallet after switching to Arbitrum failed. */
+      rpcMap: {
+        [`eip155:${chain.chainId}`]: chain.rpcUrl,
+        ...Object.fromEntries(Object.values(EVM_CHAINS).map((c) => [`eip155:${c.chainId}`, c.rpcUrl])),
+      },
     },
   };
   const k = createAppKit(options);
@@ -1736,10 +1745,17 @@ export function closeWalletModal(): void {
 function purgeWalletConnectStorage(): void {
   try {
     for (const k of Object.keys(localStorage)) {
-      if (k.startsWith('wc@2:') || k === 'WALLETCONNECT_DEEPLINK_CHOICE') localStorage.removeItem(k);
+      if (k.startsWith('wc@2:') || k.startsWith('@appkit/') || k === 'WALLETCONNECT_DEEPLINK_CHOICE') localStorage.removeItem(k);
     }
   } catch {
     /* private mode, or storage disabled - nothing to purge */
+  }
+  /* The session keys themselves live in IndexedDB, not localStorage: without
+     this, the next Connect on a shared machine could adopt the old session. */
+  try {
+    indexedDB.deleteDatabase('WALLET_CONNECT_V2_INDEXED_DB');
+  } catch {
+    /* no IndexedDB here - nothing kept there either */
   }
 }
 

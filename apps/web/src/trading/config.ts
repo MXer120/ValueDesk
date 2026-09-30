@@ -11,6 +11,12 @@
  *   VITE_SODEX_GATEWAY          gateway origin override (default: SoDEX's own)
  *   VITE_ALLOW_MAINNET_TRADING  '1' - allow mainnet writes even when the
  *                               backend's own switch is off
+ *
+ * WHAT THE SERVER MAY DECIDE. Its /api/health picks mainnet or testnet, and
+ * may only ever switch trading OFF (`mainnetWritesAllowed: false`). Chain ids,
+ * gateway origins and signing domains are pinned in this bundle (@sodex-core,
+ * sodex/chainParams.ts): an impersonated or compromised API cannot point a
+ * signature or a deposit anywhere else, nor switch mainnet trading on.
  *   VITE_BUILDER_ID             Valuescan's SoDEX builder account id; unset =
  *                               no builder fee is approved or charged
  *   VITE_BUILDER_FEE_PERPS      fee per perps order, tenths of a bp (0..200)
@@ -83,7 +89,8 @@ let current: TradingConfig = {
   network: pinned() ?? 'mainnet',
   chainId: SODEX_CHAIN_ID[pinned() ?? 'mainnet'],
   gateway: (env.VITE_SODEX_GATEWAY?.trim() || GATEWAY_ORIGIN[pinned() ?? 'mainnet']).replace(/\/+$/, ''),
-  writesAllowed: pinned() === 'testnet' || env.VITE_ALLOW_MAINNET_TRADING === '1',
+  // On until the server says otherwise: it may only ever switch trading OFF.
+  writesAllowed: true,
   builder: builderFromEnv(),
   keyTtlMs: (int(env.VITE_TRADING_KEY_TTL_H, 1, 168) ?? 168) * 3_600_000,
   disabled: env.VITE_TRADING_DISABLED === '1',
@@ -111,8 +118,9 @@ export function configureFromHealth(h: { network?: string; restBase?: string; ma
     network,
     chainId: SODEX_CHAIN_ID[network],
     gateway: (env.VITE_SODEX_GATEWAY?.trim() || GATEWAY_ORIGIN[network]).replace(/\/+$/, ''),
+    // The server may only ever switch trading OFF, never on (security audit K-03).
     writesAllowed:
-      !mismatch && (network === 'testnet' || h.mainnetWritesAllowed === true || env.VITE_ALLOW_MAINNET_TRADING === '1'),
+      !mismatch && (network === 'testnet' || h.mainnetWritesAllowed !== false || env.VITE_ALLOW_MAINNET_TRADING === '1'),
   };
   fromBackend = true;
 }

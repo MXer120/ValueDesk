@@ -1,5 +1,20 @@
-/** Typed client for the local backend. */
+/**
+ * The app's data client. Exchange data - markets and accounts - is read
+ * STRAIGHT from SoDEX in this browser (exchange/*); only Valuescan's own
+ * index and status come from the Valuescan server.
+ */
+import { SodexApiError } from '@sodex-core';
+import { CHAINS } from '@sign/sodex/chainParams.js';
 import { logger } from './log';
+import { account } from './exchange/sodexAccount';
+import { market, MarketRequestError } from './exchange/sodexMarket';
+import { BudgetWaitError } from './exchange/ledger';
+import { RateLimitedError, UnreachableError } from './exchange/errors';
+import { network } from './exchange/hosts';
+import { DepositAddressRequestError, deposits } from './exchange/deposits';
+import { rpcCall } from './trading/rpc';
+import { formatUnits } from './trading/onboard';
+import { getTradingState, sessionInfoOf } from './trading/session';
 
 const apiLog = logger('api');
 
@@ -246,7 +261,7 @@ export interface SessionInfo {
   } | null;
 }
 
-// --- all-time stats (mirrors server/src/routes/stats.ts) --------------------
+// --- all-time stats (server/src/statsCore.ts builds this shape) --------------
 
 export interface StatsCoinTotal {
   /** null when the venue did not label which coin the amount is in. */
@@ -473,43 +488,95 @@ export interface PlaceOrderInput {
 
 // --- endpoints ---------------------------------------------------------------
 
+/**
+ * Exchange reads go STRAIGHT from this browser to SoDEX (exchange/*): the
+ * user's own IP and budget, and nothing about their account passes through a
+ * Valuescan server. Errors keep the shape the server used to answer with
+ * (ApiError: message, status, hint, code, source), so every panel's error text
+ * is unchanged.
+ */
+function toApiError(e: unknown): ApiError {
+  if (e instanceof ApiError) return e;
+  if (e instanceof SodexApiError) {
+    return new ApiError(e.message, e.httpStatus >= 400 ? e.httpStatus : 400, e.hint, e.code, 'sodex');
+  }
+  if (e instanceof MarketRequestError) return new ApiError(e.message, e.status, undefined, undefined, 'validation');
+  if (e instanceof DepositAddressRequestError) return new ApiError(e.message, e.statusCode);
+  if (e instanceof RateLimitedError || e instanceof BudgetWaitError) {
+    return new ApiError(e.message, 429, 'Rate limited - backing off.', 429, 'sodex');
+  }
+  if (e instanceof UnreachableError) {
+    apiLog.warn('exchange unreachable', { host: e.host, timedOut: e.timedOut });
+    return new ApiError(e.timedOut ? 'The request timed out.' : 'SoDEX could not be reached.', 0);
+  }
+  return new ApiError((e as Error)?.message ?? String(e), 0);
+}
+
+/**
+ * One exchange read with the deadline every api call had (REQUEST_TIMEOUT_MS):
+ * a read stuck behind a full budget ends as an honest "timed out" instead of a
+ * spinner. History pages may queue longer for their drip slot (sodexGateway.ts).
+ */
+async function direct<T>(what: string, fn: () => Promise<T>, deadlineMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      apiLog.warn('request timed out', { what, timeoutMs: deadlineMs });
+      reject(new ApiError('The request timed out.', 0));
+    }, deadlineMs);
+  });
+  try {
+    return await Promise.race([fn(), late]);
+  } catch (e) {
+    throw toApiError(e);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** History reads can wait for their slot: at most 2 per minute per IP on /trades and /orders/history together. */
+const HISTORY_DEADLINE_MS = 130_000;
+
 /** The browser-trading module, loaded on first use (see placeOrder below). */
 const trading = () => import('./trading/actions');
 
 export const api = {
+  /** The Valuescan server itself: its network and status (not exchange data). */
   health: () => get<any>('/api/health'),
-  onboarding: (address?: string) => get<OnboardingState>(`/api/onboarding${qs({ address })}`),
-  statsAllTime: (address: string, rebuild = false) =>
-    get<StatsResponse>(`/api/stats/all-time${qs({ address, rebuild: rebuild ? 1 : undefined })}`),
+  onboarding: (address?: string) => direct('onboarding', () => onboardingState(address)),
+  /**
+   * All-time statistics, walked and totalled in this browser (exchange/allTime.ts,
+   * loaded on first use): the same answer the server's /api/stats/all-time gave.
+   */
+  statsAllTime: (address: string, rebuild = false): Promise<StatsResponse> =>
+    direct('stats/all-time', async () => (await import('./exchange/allTime')).allTimeStats(address, rebuild)),
 
-  // market data
-  symbols: (e: Engine) => get<{ symbols: Symbol[] }>(`/api/md/${e}/symbols`),
-  tickers: (e: Engine) => get<{ tickers: Ticker[] }>(`/api/md/${e}/tickers`),
-  markPrices: () => get<{ markPrices: any[] }>('/api/md/perps/mark-prices'),
-  orderbook: (e: Engine, symbol: string, limit = 20) =>
-    get<{ book: OrderBook }>(`/api/md/${e}/orderbook${qs({ symbol, limit })}`),
+  // market data - straight from the gateway
+  symbols: (e: Engine) => direct('symbols', () => market.symbols(e)),
+  tickers: (e: Engine) => direct('tickers', () => market.tickers(e)),
+  markPrices: () => direct('mark-prices', () => market.markPrices()),
+  orderbook: (e: Engine, symbol: string, limit = 20) => direct('orderbook', () => market.orderbook(e, symbol, limit)),
   klines: (e: Engine, symbol: string, interval: string, limit = 300) =>
-    get<{ klines: Kline[] }>(`/api/md/${e}/klines${qs({ symbol, interval, limit })}`),
-  publicTrades: (e: Engine, symbol: string, limit = 50) =>
-    get<{ trades: PublicTrade[] }>(`/api/md/${e}/trades${qs({ symbol, limit })}`),
+    direct('klines', () => market.klines(e, symbol, interval, limit)),
+  publicTrades: (e: Engine, symbol: string, limit = 50) => direct('trades', () => market.trades(e, symbol, limit)),
 
-  // account
-  state: (e: Engine, address: string) => get<any>(`/api/acct/${e}/state${qs({ address })}`),
-  balances: (e: Engine, address: string) => get<any>(`/api/acct/${e}/balances${qs({ address })}`),
+  // account - straight from the gateway (public reads: an address, no signature)
+  state: (e: Engine, address: string) => direct('state', () => account.state(e, address)),
+  balances: (e: Engine, address: string) => direct('balances', () => account.balances(e, address)),
   openOrders: (e: Engine, address: string, symbol?: string) =>
-    get<{ orders: any[] }>(`/api/acct/${e}/orders${qs({ address, symbol })}`),
-  positions: (address: string) => get<{ positions: any[] }>(`/api/acct/perps/positions${qs({ address })}`),
+    direct('orders', () => account.openOrders(e, address, symbol)),
+  positions: (address: string) => direct('positions', () => account.positions(address)),
   orderHistory: (e: Engine, address: string, limit = 100) =>
-    get<{ orders: any[] }>(`/api/acct/${e}/orders/history${qs({ address, limit })}`),
+    direct('orders/history', () => account.orderHistory(e, address, { limit }), HISTORY_DEADLINE_MS),
   userTrades: (e: Engine, address: string, limit = 100) =>
-    get<{ trades: any[] }>(`/api/acct/${e}/trades${qs({ address, limit })}`),
+    direct('trades', () => account.trades(e, address, { limit }), HISTORY_DEADLINE_MS),
   fundingHistory: (address: string, limit = 100) =>
-    get<{ funding: any[] }>(`/api/acct/perps/funding-history${qs({ address, limit })}`),
-  feeRate: (e: Engine, address: string) => get<any>(`/api/acct/${e}/fee-rate${qs({ address })}`),
+    direct('fundings', () => account.fundingHistory(address, { limit }), HISTORY_DEADLINE_MS),
+  feeRate: (e: Engine, address: string) => direct('fee-rate', () => account.feeRate(e, address)),
 
   // keys: read-only. Trading keys are created, kept and used in the browser
   // (trading/session.ts) - no Valuescan server holds or sees one.
-  walletAccount: (address: string) => get<WalletAccount>(`/api/wallet/account${qs({ address })}`),
+  walletAccount: (address: string) => direct('wallet account', () => walletAccount(address)),
 
   // trading: signed in this browser and sent straight to SoDEX (trading/actions.ts).
   // Loaded on first use, so the signing code only downloads for people who trade.
@@ -527,8 +594,8 @@ export const api = {
   scheduleCancel: (e: Engine, afterMs?: number) => trading().then((m) => m.scheduleCancel(e, afterMs)),
 
   // money
-  moneyOverview: (address: string) => get<any>(`/api/money/overview${qs({ address })}`),
-  coins: () => get<{ coins: Array<{ id: number; name: string; precision: number }> }>('/api/money/coins'),
+  moneyOverview: (address: string) => direct<any>('money overview', () => moneyOverview(address)),
+  coins: () => direct('coins', () => market.coins()),
   /** Spot <-> perps between your own accounts; signed here with the trading key. */
   transferCross: (direction: string, coinId: number, amount: string) =>
     trading().then((m) => m.transferCross(direction, coinId, amount)),
@@ -543,7 +610,8 @@ export const api = {
       advisory: string;
     }>(`/api/money/resolve-destination${qs({ id: String(id) })}`),
   // deposits (on-chain, via ValueChain)
-  depositChain: () => get<DepositChain>('/api/deposit/chain'),
+  /** ValueChain's parameters for the wallet (static per network; no request). */
+  depositChain: () => direct('deposit chain', async () => depositChainParams()),
   depositAssets: (address: string) =>
     get<{
       assets: DepositAsset[];
@@ -558,14 +626,154 @@ export const api = {
   depositTx: (hash: string) =>
     get<{ hash: string; status: string; explorerUrl: string | null }>(`/api/deposit/tx/${hash}`),
   depositStatus: (address: string) => get<any>(`/api/deposit/status${qs({ address })}`),
+  /**
+   * Cross-chain deposit addresses, cross-checked against ValueChain's registries -
+   * built in this browser (exchange/deposits.ts) with the server's own rules.
+   * SoDEX's issuer may CREATE a new wallet's addresses on this read, as before.
+   */
   depositOptions: (address: string) =>
-    get<{
+    direct('deposit options', () => deposits.options(address) as Promise<{
       address: string;
       assets: MirrorAsset[];
       rejected: Array<{ chain: string; reason: string }>;
       allVerified: boolean;
       registry: { address: string; chainId: number };
-    }>(`/api/mirror/deposit-options${qs({ address })}`),
+    }>, 60_000),
   /** sodex.com's "Confirm & Update Address" - only for an address SoDEX flagged. */
-  replaceDepositAddress: (address: string, chain: string) => post<{ ok: true }>('/api/mirror/replace-deposit-address', { address, chain }),
+  replaceDepositAddress: (address: string, chain: string) =>
+    direct('replace deposit address', async () => {
+      await deposits.replace(address, chain);
+      return { ok: true as const };
+    }, 30_000),
 };
+
+// --- browser-side answers to what used to be server routes ---------------------------------
+
+/** Balances on both engines, side by side (what /api/money/overview answered). */
+async function moneyOverview(address: string) {
+  const [spot, perps, coinList] = await Promise.all([
+    account.balances('spot', address).then((r) => r.balances).catch(() => [] as any[]),
+    account.balances('perps', address).then((r) => r.balances).catch(() => [] as any[]),
+    market.coins().then((r) => r.coins).catch(() => [] as Array<{ id: number; name: string; precision: number }>),
+  ]);
+  return { address, spot, perps, coins: coinList };
+}
+
+/** What /api/wallet/account answered: both engines' state and the registered API keys. */
+async function walletAccount(address: string): Promise<WalletAccount> {
+  const [spot, perps, keys] = await Promise.all([
+    account.state('spot', address).then((r) => r.state).catch(() => null),
+    account.state('perps', address).then((r) => r.state).catch(() => null),
+    account.apiKeys('spot', address).then((r) => (Array.isArray(r.apiKeys) ? r.apiKeys : [])).catch(() => []),
+  ]);
+  const accountId = spot?.aid || perps?.aid || 0;
+  return {
+    address,
+    accountId,
+    exists: accountId !== 0,
+    network: network(),
+    apiKeys: (keys as any[]).map((k) => ({ name: k.name, type: k.type, publicKey: k.publicKey, expiresAt: k.expiresAt, permissions: k.permissions })),
+    spotState: spot,
+    perpsState: perps,
+  };
+}
+
+/** ValueChain for this network, in /api/deposit/chain's shape. */
+function depositChainParams(): DepositChain {
+  const c = CHAINS[network()];
+  return {
+    chainId: c.chainId,
+    chainIdHex: '0x' + c.chainId.toString(16),
+    name: c.name,
+    rpcUrl: c.rpcUrl,
+    explorerUrl: c.explorerUrl,
+    nativeCurrency: c.nativeCurrency,
+    exchange: c.exchange,
+  };
+}
+
+const num = (v: unknown): number => {
+  const n = Number.parseFloat(String(v ?? '0'));
+  return Number.isFinite(n) ? n : 0;
+};
+
+/**
+ * "Where is this user, and what is the next step?" - /api/onboarding, answered
+ * here from the gateway (whose `aid` agrees exactly with the exchange
+ * contract's getUserId) and ValueChain's RPC, with the trading key this
+ * browser holds (trading/session.ts).
+ */
+async function onboardingState(address?: string): Promise<OnboardingState> {
+  const hasWallet = Boolean(address && /^0x[0-9a-fA-F]{40}$/.test(address));
+  const chain = CHAINS[network()];
+  const [spot, perps, gasWei] = hasWallet
+    ? await Promise.all([
+        account.state('spot', address!).then((r) => r.state).catch(() => null),
+        account.state('perps', address!).then((r) => r.state).catch(() => null),
+        rpcCall<string>(chain.rpcUrl, 'eth_getBalance', [address!, 'latest']).then((r) => (r.result ? BigInt(r.result) : 0n)).catch(() => 0n),
+      ])
+    : [null, null, 0n];
+  const accountId = Number(spot?.aid || perps?.aid || 0) || null;
+  const registered = accountId !== null;
+  const funded =
+    (spot?.B ?? []).some((b: any) => num(b?.t ?? b?.total) > 0) ||
+    (perps?.B ?? []).some((b: any) => num(b?.t ?? b?.total) > 0) ||
+    num(perps?.av) > 0;
+  const { session } = sessionInfoOf(getTradingState()) as { session: SessionInfo['session'] };
+  const unlocked = Boolean(session);
+  const perms = session?.permissions ?? 0;
+  const names = unlocked ? (sessionInfoOf(getTradingState()) as SessionInfo).permissionNames : [];
+  const gas = formatUnits(gasWei, chain.nativeCurrency.decimals);
+  const steps: OnboardingStep[] = [
+    {
+      id: 'wallet', title: 'Connect a wallet', done: hasWallet, blocked: false,
+      detail: hasWallet ? `Connected as ${address}` : 'Use a browser extension or pair a phone wallet with WalletConnect.',
+      action: hasWallet ? undefined : 'connect',
+    },
+    {
+      id: 'account', title: 'SoDEX account', done: registered, blocked: false,
+      detail: registered
+        ? `Registered on-chain as account #${accountId}`
+        : hasWallet
+          ? 'This wallet has no SoDEX account yet. Its first deposit of USDC or SOSO creates it (SoDEX keeps 1 USDC / 1 SOSO as a one-time activation fee) - from another network or from ValueChain, right here.'
+          : 'Connect a wallet first.',
+      action: hasWallet && !registered ? 'create-account' : undefined,
+    },
+    {
+      id: 'key', title: 'Enable trading', done: unlocked, blocked: false,
+      detail: unlocked
+        ? `Enabled — you can ${names.join(', ')}`
+        : registered
+          ? 'One click and one wallet signature. The trading key stays in this browser; your wallet key is never read.'
+          : 'Available once the account exists.',
+      action: registered && !unlocked ? 'enable' : undefined,
+    },
+    {
+      id: 'funds', title: 'Fund the account', done: funded, blocked: false,
+      detail: funded
+        ? 'Balance available to trade.'
+        : registered
+          ? `Deposit on ${chain.name}. Your wallet holds ${gas} ${chain.nativeCurrency.symbol} for gas.`
+          : 'Available once the account exists.',
+      action: registered && !funded ? 'deposit' : undefined,
+    },
+  ];
+  const next = steps.find((s) => !s.done);
+  return {
+    network: network(),
+    address: hasWallet ? address! : null,
+    accountId,
+    registered,
+    unlocked,
+    permissions: perms,
+    permissionNames: names,
+    canTrade: unlocked,
+    canTransfer: unlocked,
+    canWithdraw: unlocked,
+    funded,
+    gasBalance: gas,
+    steps,
+    nextStep: next?.id ?? null,
+    ready: steps.every((s) => s.done),
+  };
+}

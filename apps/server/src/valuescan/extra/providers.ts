@@ -18,7 +18,7 @@ import {
   type VsFill,
   type VsPosition,
 } from '../types.js';
-import { hlInfo } from '../hyperliquid/index.js';
+import { hlInfo } from '../hyperliquid/client.js';
 import { mapFill, mapPositions } from '../hyperliquid/mappers.js';
 import type { HlClearinghouseState, HlFillRaw } from '../hyperliquid/raw.js';
 import { ARCUS_LB_WINDOW, arcusAccount, arcusFills, arcusLeaderboard, arcusPortfolio } from './arcus.js';
