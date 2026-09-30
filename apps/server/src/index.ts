@@ -41,6 +41,7 @@ import { CHAIN } from './sodex/chain.js';
 import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQUIRED } from './localToken.js';
 import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
+import { perfPlugin } from './perf.js';
 
 const app = Fastify({
   logger: {
@@ -72,6 +73,10 @@ await app.register(cors, HOSTED
       origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/, ...ALLOWED_ORIGINS],
       methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     });
+
+// Compression, ETag/304 and short caching for the index routes (perf.ts).
+// Before the security-header hook, so its Cache-Control on index routes stands.
+await app.register(perfPlugin);
 
 // Custodial routes answer 410 while server signing is off - the default, and
 // always in hosted mode (hosted.ts: SERVER_SIGNING_PATHS). Matched on the raw
