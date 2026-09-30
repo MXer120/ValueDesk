@@ -27,7 +27,8 @@
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shrinkPng } from './png-shrink.mjs';
+import { recompressPng, shrinkPng } from './png-shrink.mjs';
+import { cleanSvg } from './logo-clean.mjs';
 import { COIN_LOGOS } from '../src/logoManifest.ts';
 import { logoCandidates, resolveKey } from '../src/logoKey.ts';
 
@@ -91,10 +92,21 @@ async function image(url) {
   }
 }
 
+/**
+ * SVGs are sanitised - script, event handlers, foreignObject, external or
+ * javascript: references (security audit W-09) - and minified without
+ * changing a pixel; see logo-clean.mjs. Anything removed is reported.
+ */
+function cleanedSvg(buf, label) {
+  const { svg, removed } = cleanSvg(buf);
+  if (removed.length) console.log(`  sanitised ${label}: removed ${[...new Set(removed)].join(', ')}`);
+  return Buffer.from(svg, 'utf8');
+}
+
 function write(rel, img, label) {
   const file = join(OUT, rel);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, img.ext === '.png' ? shrinkPng(img.buf, label) : img.buf);
+  writeFileSync(file, img.ext === '.png' ? recompressPng(shrinkPng(img.buf, label)) : img.ext === '.svg' ? cleanedSvg(img.buf, label) : img.buf);
 }
 
 /** Every market / coin name the four venues use, with the name Hyperliquid would know it by. */

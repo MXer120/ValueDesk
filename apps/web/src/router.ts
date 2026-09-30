@@ -62,6 +62,18 @@ export const TAB_LABELS: Record<Tab, string> = {
 export const pathForTab = (tab: Tab): string => `/${tab}`;
 
 /**
+ * The page a pathname ends up on once `useRoute` has normalised it: its own
+ * tab, or where a removed page moved to, or the default. App.tsx uses it to
+ * fetch that page's code before the first render.
+ */
+export function landingTab(pathname: string): Tab {
+  const tab = tabForPath(pathname);
+  if (tab) return tab;
+  const seg = pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
+  return MOVED[seg] ?? DEFAULT_TAB;
+}
+
+/**
  * Resolve a pathname to a tab, or null when it is not one of ours.
  *
  * Tolerates a trailing slash and is case-insensitive, because a URL a person

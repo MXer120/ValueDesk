@@ -20,6 +20,7 @@ import type {
 import { sizeCohort, type CohortId, type CohortMarket, type MapSector } from '@sign/valuescan/cohorts/model.js';
 import type { Positioning, TraderRow, Venue, Window } from '../../vsApi';
 import { DASH, MINUS } from '../../format';
+import { formatNumber } from '../../intlCache';
 
 export type { ActiveSpan, HlAsset, PresetId, ScreenerRow, ScreenerSort, Strategy };
 
@@ -77,7 +78,7 @@ export function fmtFracPct(v: number | null | undefined, dp = 2): string {
   if (!isNum(v)) return DASH;
   const p = v * 100;
   const d = Math.abs(p) >= 1000 ? 0 : Math.abs(p) >= 100 ? 1 : dp;
-  const body = Math.abs(p).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const body = formatNumber(Math.abs(p), 'en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
   return `${p > 0 ? '+' : p < 0 ? MINUS : ''}${body}%`;
 }
 
@@ -97,7 +98,7 @@ export function fmtPriceAuto(v: number | null | undefined): string {
   if (!isNum(v)) return DASH;
   const a = Math.abs(v);
   const dp = a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : 7;
-  return v.toLocaleString('en-US', { minimumFractionDigits: a >= 1000 ? 0 : Math.min(dp, 2), maximumFractionDigits: dp });
+  return formatNumber(v, 'en-US', { minimumFractionDigits: a >= 1000 ? 0 : Math.min(dp, 2), maximumFractionDigits: dp });
 }
 
 export const signOf = (v: number | null | undefined): 'pos' | 'neg' | '' =>

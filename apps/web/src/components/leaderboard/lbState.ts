@@ -11,6 +11,7 @@
  * `npx tsx --test` without a DOM.
  */
 import type { BoardWindow, LeaderboardSort, TraderRow, Venue, Window } from '../../vsApi';
+import { formatNumber } from '../../intlCache';
 
 /** Every venue the leaderboard can show, in display order. */
 export const LB_VENUES: readonly Venue[] = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'];
@@ -176,7 +177,7 @@ export function fmtRoi(v: number | null | undefined, dp = 2): string {
   const n = reported(v);
   if (n === null) return DASH;
   const pct = n * 100;
-  const body = Math.abs(pct).toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const body = formatNumber(Math.abs(pct), 'en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
   if (Number(body.replace(/,/g, '')) === 0) return body + '%';
   return `${pct > 0 ? '+' : MINUS}${body}%`;
 }

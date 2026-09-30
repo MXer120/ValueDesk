@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react';
 import type { PanelDefinition, PanelPlacement, BreakpointName } from '../../dashboard/types';
 import { AccountChip, Card } from '../Portfolio';
-import { aliasFor, saveAlias } from '../../dashboard/ScanDashboard';
+import { aliasFor, saveAlias } from '../../dashboard/scanAliases';
 import {
   HlActivityCard, HlCapitalCard, HlChips, HlExposureCard, HlOverviewGroup,
   HlPerformanceCard, HlPnlCard, HlValueCard, HlVolumeGroup, type HlState,

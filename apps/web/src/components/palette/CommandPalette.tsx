@@ -45,7 +45,7 @@ import type { Engine } from '../../api';
 import type { Tab } from '../../router';
 import { VENUE_LABEL, type BoardWindow, type Venue } from '../../vsApi';
 import { usePrivacy } from '../../privacy';
-import { resolveTarget } from '../../dashboard/ScanDashboard';
+import { resolveTarget } from '../../dashboard/scanAliases';
 import { FadeView } from '../motion';
 import { CohortIcon } from '../explore/cohorts/CohortIcon';
 import {

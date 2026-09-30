@@ -53,6 +53,7 @@ import { Section, Seg } from '../accountTables/FilterBar';
 import '../Account.css';
 import '../Leaderboard.css';
 import './LeaderboardPage.css';
+import { formatNumber } from '../../intlCache';
 
 function VenueMark({ venue, size = 16 }: { venue: Venue; size?: number }) {
   return <VenueLogo venue={venue} size={size} />;
@@ -140,7 +141,7 @@ function metric(r: TraderRow, sort: SortKey, window: BoardWindow): number {
 
 function fmtTrades(r: TraderRow): string {
   if (r.trades == null) return '—';
-  const n = r.trades.toLocaleString('en-US');
+  const n = formatNumber(r.trades, 'en-US');
   return r.tradesCapped ? `${n}+` : n;
 }
 

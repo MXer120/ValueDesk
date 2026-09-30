@@ -1,0 +1,236 @@
+/**
+ * Response performance for the JSON API: compression and HTTP caching.
+ *
+ *   import { perfPlugin } from './perf.js';
+ *   await app.register(perfPlugin);
+ *
+ * Register it right after CORS, before the routes. Its hooks apply to every
+ * route (the plugin opts out of encapsulation), and running before index.ts's
+ * security-header hook means the Cache-Control it sets on index routes is the
+ * one that hook then keeps (it only fills in `no-store` when none is set).
+ *
+ * COMPRESSION. Every JSON response of 1 KiB or more is sent brotli- or
+ * gzip-encoded when the client accepts it (the index pages are 10-66 KB of
+ * JSON that compress 3-5x). Compression runs on zlib's thread pool, never on
+ * the event loop, and index responses - identical for every client until the
+ * index moves - are compressed once per content and encoding and served from
+ * a small memory cache. `Vary: Accept-Encoding` keeps shared caches honest.
+ *
+ * CACHING, INDEX ROUTES ONLY. Everything else keeps index.ts's `no-store`:
+ * account data must never land in a disk or shared cache. The index is
+ * different - public, the same for everyone, and rebuilt on a clock:
+ *   - boards, cohorts, the screener and Explore are rebuilt about once a
+ *     minute (docs/INDEXER.md), so a response may be reused for 10 s and
+ *     served stale for 20 s more while it revalidates - never older than one
+ *     rebuild cycle, never a different answer than a fresh read in that window;
+ *   - the price chart is Hyperliquid candles the server itself caches for 60 s;
+ *   - the whale tape and positioning move with the trade streams: they are
+ *     revalidated on every use (`no-cache`), and only ever answered 304 when
+ *     truly unchanged.
+ * Each carries a weak ETag (weak: the same JSON is sent in three encodings), so
+ * a revalidation that finds nothing new costs a 304 and no body.
+ */
+import { createHash } from 'node:crypto';
+import { promisify } from 'node:util';
+import { brotliCompress as brotliCb, constants as Z, gzip as gzipCb } from 'node:zlib';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+
+const brotli = promisify(brotliCb);
+const gzip = promisify(gzipCb);
+
+/** Below this a JSON body is sent as is: framing overhead outweighs the saving. */
+export const COMPRESS_MIN_BYTES = 1024;
+
+export interface CachePolicy {
+  /** The Cache-Control value for a 200. */
+  cacheControl: string;
+}
+
+const BOARD: CachePolicy = { cacheControl: 'public, max-age=10, stale-while-revalidate=20' };
+const PRICE: CachePolicy = { cacheControl: 'public, max-age=30, stale-while-revalidate=30' };
+const LIVE: CachePolicy = { cacheControl: 'public, no-cache' };
+
+/** Route PATTERN (req.routeOptions.url) -> policy. Only GET/HEAD 200s are affected. */
+export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
+  '/api/vs/leaderboard': BOARD,
+  '/api/vs/explore': BOARD,
+  '/api/vs/cohorts': BOARD,
+  '/api/vs/cohorts/detail': BOARD,
+  '/api/vs/cohorts/map': BOARD,
+  '/api/vs/cohorts/focus': BOARD,
+  '/api/vs/cohorts/wallets': BOARD,
+  '/api/vs/screener': BOARD,
+  '/api/vs/price': PRICE,
+  '/api/vs/whales': LIVE,
+  '/api/vs/positioning': LIVE,
+};
+
+export type Encoding = 'br' | 'gzip';
+
+/**
+ * The encoding to answer with, from an Accept-Encoding header: brotli, then
+ * gzip, honouring q-values (`br;q=0` refuses it) and `*`. Null: send identity.
+ */
+export function pickEncoding(header: string | string[] | undefined): Encoding | null {
+  if (!header) return null;
+  const raw = Array.isArray(header) ? header.join(',') : header;
+  const q = new Map<string, number>();
+  for (const part of raw.split(',')) {
+    const [name, ...params] = part.trim().toLowerCase().split(';');
+    if (!name) continue;
+    let weight = 1;
+    for (const p of params) {
+      const m = /^\s*q\s*=\s*([0-9.]+)\s*$/.exec(p);
+      if (m) weight = Number(m[1]);
+    }
+    if (Number.isFinite(weight)) q.set(name, weight);
+  }
+  const accepts = (name: string, alias?: string): boolean => {
+    const own = q.get(name) ?? (alias ? q.get(alias) : undefined);
+    if (own !== undefined) return own > 0;
+    const star = q.get('*');
+    return star !== undefined && star > 0;
+  };
+  if (accepts('br')) return 'br';
+  if (accepts('gzip', 'x-gzip')) return 'gzip';
+  return null;
+}
+
+/** Does an If-None-Match header match this ETag? Weak comparison, lists and `*` understood. */
+export function etagMatches(header: string | string[] | undefined, etag: string): boolean {
+  if (!header) return false;
+  const raw = Array.isArray(header) ? header.join(',') : header;
+  if (raw.trim() === '*') return true;
+  const opaque = (t: string) => t.trim().replace(/^W\//, '');
+  const want = opaque(etag);
+  return raw.split(',').some((t) => opaque(t) === want);
+}
+
+/** A weak ETag over the exact response body. */
+export function weakEtag(body: Buffer): string {
+  return `W/"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"`;
+}
+
+/**
+ * Compressed index bodies, by content hash and encoding. Bounded by count and
+ * bytes; content-addressed, so an entry can never be stale - only evicted.
+ */
+export class CompressedCache {
+  private map = new Map<string, Buffer>();
+  private bytes = 0;
+  constructor(private readonly maxEntries = 128, private readonly maxBytes = 8 * 1024 * 1024) {}
+  get(key: string): Buffer | undefined {
+    const v = this.map.get(key);
+    if (v) {
+      this.map.delete(key);
+      this.map.set(key, v); // most recently used
+    }
+    return v;
+  }
+  set(key: string, value: Buffer): void {
+    if (value.length > this.maxBytes / 4) return;
+    const old = this.map.get(key);
+    if (old) {
+      this.map.delete(key);
+      this.bytes -= old.length;
+    }
+    this.map.set(key, value);
+    this.bytes += value.length;
+    for (const [k, v] of this.map) {
+      if (this.map.size <= this.maxEntries && this.bytes <= this.maxBytes) break;
+      this.map.delete(k);
+      this.bytes -= v.length;
+    }
+  }
+  get size(): number {
+    return this.map.size;
+  }
+}
+
+export async function compress(body: Buffer, enc: Encoding): Promise<Buffer> {
+  return enc === 'br'
+    ? brotli(body, {
+        params: {
+          // Quality 5: most of brotli's gain at a small fraction of 11's cost - these are live responses.
+          [Z.BROTLI_PARAM_QUALITY]: 5,
+          [Z.BROTLI_PARAM_MODE]: Z.BROTLI_MODE_TEXT,
+          [Z.BROTLI_PARAM_SIZE_HINT]: body.length,
+        },
+      })
+    : gzip(body, { level: 6 });
+}
+
+function appendVary(reply: FastifyReply, value: string): void {
+  const cur = reply.getHeader('Vary');
+  const list = (Array.isArray(cur) ? cur.join(',') : cur ? String(cur) : '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (list.includes('*') || list.some((v) => v.toLowerCase() === value.toLowerCase())) return;
+  reply.header('Vary', [...list, value].join(', '));
+}
+
+export interface PerfOptions {
+  /** Override the policy table (tests). */
+  policies?: Readonly<Record<string, CachePolicy>>;
+  /** Override the compression threshold (tests). */
+  minBytes?: number;
+}
+
+async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
+  const policies = opts.policies ?? CACHE_POLICIES;
+  const minBytes = opts.minBytes ?? COMPRESS_MIN_BYTES;
+  const cache = new CompressedCache();
+
+  app.addHook('onSend', async (req: FastifyRequest, reply: FastifyReply, payload: unknown) => {
+    const isGet = req.method === 'GET' || req.method === 'HEAD';
+    const status = reply.statusCode;
+    if (typeof payload !== 'string' && !Buffer.isBuffer(payload)) return payload; // streams, null
+    const type = String(reply.getHeader('Content-Type') ?? '');
+    if (!/\bjson\b/i.test(type)) return payload;
+
+    const policy = isGet && status === 200 ? policies[req.routeOptions.url ?? ''] : undefined;
+    let body = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+    let etag: string | undefined;
+
+    if (policy) {
+      reply.header('Cache-Control', policy.cacheControl);
+      etag = weakEtag(body);
+      reply.header('ETag', etag);
+      appendVary(reply, 'Accept-Encoding');
+      if (etagMatches(req.headers['if-none-match'], etag)) {
+        reply.code(304);
+        reply.removeHeader('Content-Length');
+        reply.removeHeader('Content-Type');
+        return '';
+      }
+    }
+
+    if (req.method === 'HEAD' || status === 204 || status === 304) return payload;
+    if (body.length < minBytes || reply.hasHeader('Content-Encoding')) return payload;
+    if (/\bno-transform\b/i.test(String(reply.getHeader('Cache-Control') ?? ''))) return payload;
+    appendVary(reply, 'Accept-Encoding');
+    const enc = pickEncoding(req.headers['accept-encoding']);
+    if (!enc) return payload;
+
+    const key = etag ? `${enc}:${etag}` : undefined;
+    let out = key ? cache.get(key) : undefined;
+    if (!out) {
+      try {
+        out = await compress(body, enc);
+      } catch (err) {
+        req.log.warn({ err: (err as Error).message }, 'response compression failed; sent uncompressed');
+        return payload;
+      }
+      if (out.length >= body.length) return payload;
+      if (key) cache.set(key, out);
+    }
+    body = out;
+    reply.header('Content-Encoding', enc);
+    reply.removeHeader('Content-Length');
+    return body;
+  });
+}
+
+// Not encapsulated: the hook must see every route, like fastify-plugin would arrange.
+(perf as unknown as Record<symbol, boolean>)[Symbol.for('skip-override')] = true;
+(perf as unknown as Record<symbol, string>)[Symbol.for('fastify.display-name')] = 'valuescan-perf';
+
+export const perfPlugin = perf;

@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import './cssOrder';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
-import { TABS, useRoute, type Tab } from './router';
+import { DEFAULT_TAB, TABS, landingTab, tabForPath, useRoute, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
-import { TickerBar } from './components/Market';
 import { Guarded } from './components/ErrorBoundary';
 import { StatusFooter } from './components/StatusFooter';
-import { CommandPalette, openPalette } from './components/palette/CommandPalette';
-import { PortfolioDashboard, ScanDashboard, TradeDashboard, type TradeContext } from './dashboard';
+import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
+import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -20,20 +20,100 @@ import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
 import { ToastProvider } from './toast';
 import { FillToasts } from './components/FillToasts';
-import { Explore } from './components/explore/Explore';
-import { CopyPage } from './components/copy/CopyPage';
-import { LeaderboardPage } from './components/leaderboard/LeaderboardPage';
+import { lazyPage, type LazyPage } from './lazyPage';
 import type { Venue } from './vsApi';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
+/*
+ * THE PAGES ARE CODE-SPLIT, AND NOTHING ON SCREEN MAY TELL.
+ *
+ * Each page is its own chunk, so the first load only parses the page you
+ * landed on (plus the shell) instead of all six. lazyPage.ts explains why this
+ * is not React.lazy; the rules that keep it invisible live here:
+ *   - the landing page's code - and the Cmd+K palette's, which must answer a
+ *     key pressed the moment the page appears - is requested the moment this
+ *     module runs, in parallel, and <App> renders nothing until both are in:
+ *     the whole app still mounts in ONE commit, in the same order as before
+ *     (App's effects after its children's, e.g. the dash:lock query below
+ *     still finds the Dashboard), with the palette listening from the start;
+ *   - the other pages are fetched right after the first paint (idle time, at
+ *     most a second later), and again on hover/focus of any link to them;
+ *   - `setTab` changes page only once the next page's code is in, so a
+ *     navigation never renders a fallback.
+ * Their CSS is not split at all: see cssOrder.ts.
+ */
+const TradeDashboard = lazyPage('trade', () => import('./dashboard/TradeDashboard').then((m) => m.TradeDashboard));
+const Explore = lazyPage('explore', () => import('./components/explore/Explore').then((m) => m.Explore));
+const CopyPage = lazyPage('copy', () => import('./components/copy/CopyPage').then((m) => m.CopyPage));
+const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
+const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
+const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
+/* The market strip below is shown on no page today, so this never loads. */
+const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PAGES: Record<Tab, LazyPage<any>> = {
+  trade: TradeDashboard,
+  explore: Explore,
+  copy: CopyPage,
+  leaderboard: LeaderboardPage,
+  portfolio: PortfolioDashboard,
+  scan: ScanDashboard,
+};
+
+/** The page the first render shows, and the one an old URL is then moved to (router.ts). */
+const bootTabs = (): Tab[] => {
+  const first = tabForPath(window.location.pathname) ?? DEFAULT_TAB;
+  const settled = landingTab(window.location.pathname);
+  return first === settled ? [first] : [first, settled];
+};
+/* Requested now, in parallel with React starting up. */
+const booting: Promise<unknown> = Promise.all([...bootTabs().map((t) => PAGES[t].preload()), loadPalette()]);
+booting.catch(() => {
+  /* logged in lazyPage; the page itself retries and recovers when it renders */
+});
+
+/** Holds the app back until the landing page's code is in (see above). */
 export function App() {
+  const [ready, setReady] = useState(() => bootTabs().every((t) => PAGES[t].ready) && paletteReady());
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    const done = () => {
+      if (live) setReady(true);
+    };
+    booting.then(done, done);
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+  return ready ? <AppShell /> : null;
+}
+
+function AppShell() {
   const [engine, setEngine] = useStored<Engine>('ot.engine', 'perps');
   const [symbol, setSymbol] = useStored<string>('ot.symbol', DEFAULT_SYMBOL.perps);
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, setTab] = useRoute();
+  const [tab, navigate] = useRoute();
+  /* Change page only once its code is in; the latest request wins. After the
+     idle prefetch every page is in, and this is a plain synchronous navigate. */
+  const navSeq = useRef(0);
+  const setTab = useCallback((next: Tab) => {
+    const seq = ++navSeq.current;
+    const page = PAGES[next];
+    if (page.ready) {
+      navigate(next);
+      return;
+    }
+    const go = () => {
+      if (seq === navSeq.current) navigate(next);
+    };
+    page.preload().then(go, go);
+  }, [navigate]);
+  usePagePrefetch();
   const openScanAddress = useCallback((addr: string, venue?: Venue) => {
     window.location.href = venue
       ? `/scan?address=${encodeURIComponent(addr)}&venue=${venue}`
@@ -260,8 +340,11 @@ export function App() {
     : connState;
 
   return (
-    /* The provider wraps the WHOLE shell, header included: the navbar's address
-       chip reads it, and so does every page below. */
+    /* Only a page chunk that failed to load can suspend in here (lazyPage.ts
+       then retries or reloads); navigation never does - see setTab. */
+    <Suspense fallback={null}>
+    {/* The provider wraps the WHOLE shell, header included: the navbar's address
+       chip reads it, and so does every page below. */}
     <ToastProvider>
     <PrivacyProvider>
     <div className="shell">
@@ -419,7 +502,40 @@ export function App() {
     </div>
     </PrivacyProvider>
     </ToastProvider>
+    </Suspense>
   );
+}
+
+/**
+ * Fetch every other page once the first one has painted - in idle time, at
+ * most 1 s later - and fetch a page early when a link to it is hovered,
+ * focused or touched. Loading a chunk only fetches and evaluates it; nothing
+ * renders until the page is navigated to.
+ */
+function usePagePrefetch(): void {
+  useEffect(() => {
+    const all = () => {
+      for (const t of TABS) PAGES[t].preload().catch(() => {});
+    };
+    const idle = typeof window.requestIdleCallback === 'function';
+    const handle = idle ? window.requestIdleCallback(all, { timeout: 1000 }) : window.setTimeout(all, 300);
+    const onIntent = (e: Event) => {
+      const el = e.target instanceof Element ? e.target.closest('a[href]') : null;
+      if (!(el instanceof HTMLAnchorElement) || el.origin !== window.location.origin) return;
+      const t = tabForPath(el.pathname);
+      if (t && !PAGES[t].ready) PAGES[t].preload().catch(() => {});
+    };
+    document.addEventListener('pointerover', onIntent, { passive: true });
+    document.addEventListener('focusin', onIntent);
+    document.addEventListener('touchstart', onIntent, { passive: true });
+    return () => {
+      if (idle) window.cancelIdleCallback(handle);
+      else window.clearTimeout(handle);
+      document.removeEventListener('pointerover', onIntent);
+      document.removeEventListener('focusin', onIntent);
+      document.removeEventListener('touchstart', onIntent);
+    };
+  }, []);
 }
 
 /**

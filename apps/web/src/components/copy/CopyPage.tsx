@@ -15,7 +15,7 @@
  * Reads `?address=&venue=` on mount (Explore, Leaderboard and Scan link here
  * with them) and keeps the URL in step with the selected trader.
  */
-import { Dashboard } from '../../dashboard';
+import { Dashboard } from '../../dashboard/Dashboard';
 import { COPY_DASHBOARD } from './layout';
 import { COPY_PANELS } from './panels';
 import { useCopyContext, type CopyPageProps } from './useCopy';

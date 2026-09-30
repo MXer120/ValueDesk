@@ -12,6 +12,7 @@ import { CoinIcon } from '../CoinIcon';
 import type { Direction, OrderSource } from './filters';
 import { StatusIcon } from './StatusIcon';
 import { formatPct, orderStatusInfo, statusTitle, type StatusInput } from './orderStatus';
+import { formatNumber } from '../../intlCache';
 
 export type PillTone = 'pos' | 'neg' | 'accent' | 'warn' | 'muted';
 
@@ -171,7 +172,7 @@ export function signedUsd(v: number | null | undefined, plus = true): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
   const a = Math.abs(v);
   const s = v < 0 ? MINUS : v > 0 && plus ? '+' : '';
-  return `${s}$${a.toLocaleString('en-US', { minimumFractionDigits: usdPlaces(a), maximumFractionDigits: usdPlaces(a) })}`;
+  return `${s}$${formatNumber(a, 'en-US', { minimumFractionDigits: usdPlaces(a), maximumFractionDigits: usdPlaces(a) })}`;
 }
 
 /** "+23.75%" / "−23.75%". */

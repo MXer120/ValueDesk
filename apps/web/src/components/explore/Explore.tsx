@@ -17,7 +17,8 @@
  * sections it feeds and nowhere else.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Dashboard, type DashboardConfig, type PanelDefinition, type PanelPlacement } from '../../dashboard';
+import { Dashboard } from '../../dashboard/Dashboard';
+import type { DashboardConfig, PanelDefinition, PanelPlacement } from '../../dashboard/types';
 import { Card, Stat } from '../Portfolio';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import { useAsync, useStored, useSymbols } from '../../hooks';

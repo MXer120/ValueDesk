@@ -11,6 +11,7 @@
  * Pure (no React, no DOM) so it runs under `npx tsx --test`.
  */
 import { WIN_RATE_MIN_CLOSES } from '@sign/valuescan/winRate.js';
+import { formatNumber } from './intlCache';
 
 export interface WinRateFields {
   winRate?: number | null;
@@ -40,7 +41,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const fmtSince = (ms: number): string =>
   new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-const closesWord = (n: number): string => `${n.toLocaleString('en-US')} ${n === 1 ? 'close' : 'closes'}`;
+const closesWord = (n: number): string => `${formatNumber(n, 'en-US')} ${n === 1 ? 'close' : 'closes'}`;
 
 /**
  * `context`:

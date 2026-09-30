@@ -4,6 +4,7 @@
  * its arguments, so the page component only wires data to markup.
  */
 import { DASH, MINUS } from '../../format';
+import { formatNumber, formatTime } from '../../intlCache';
 import type { Positioning, TraderRow, Venue, WhaleTrade } from '../../vsApi';
 
 export type VenueFilter = Venue | 'all';
@@ -27,8 +28,8 @@ export function fmtUsdShort(v: number | null | undefined, signed = false): strin
   const abs = Math.abs(v);
   const sign = v < 0 && abs >= 0.5 ? MINUS : signed && v >= 0.5 ? '+' : '';
   const body = abs < 10_000
-    ? abs.toLocaleString('en-US', { maximumFractionDigits: 0 })
-    : abs.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: abs < 1e6 ? 1 : 2 });
+    ? formatNumber(abs, 'en-US', { maximumFractionDigits: 0 })
+    : formatNumber(abs, 'en-US', { notation: 'compact', maximumFractionDigits: abs < 1e6 ? 1 : 2 });
   return `${sign}$${body}`;
 }
 
@@ -36,7 +37,7 @@ export function fmtUsdShort(v: number | null | undefined, signed = false): strin
 export function fmtUsdExact(v: number | null | undefined): string | undefined {
   if (!finite(v)) return undefined;
   const sign = v < 0 ? MINUS : '';
-  return `${sign}$${Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `${sign}$${formatNumber(Math.abs(v), 'en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** ROI arrives as a fraction (0.12 = +12%). Always signed. */
@@ -46,22 +47,22 @@ export function fmtRoi(v: number | null | undefined): string {
   const abs = Math.abs(pct);
   const sign = pct < 0 && abs >= 0.05 ? MINUS : pct >= 0.05 ? '+' : '';
   const dp = abs >= 100 ? 0 : 1;
-  return `${sign}${abs.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
+  return `${sign}${formatNumber(abs, 'en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}%`;
 }
 
 export function fmtCount(v: number | null | undefined): string {
-  return finite(v) ? v.toLocaleString('en-US', { maximumFractionDigits: 0 }) : DASH;
+  return finite(v) ? formatNumber(v, 'en-US', { maximumFractionDigits: 0 }) : DASH;
 }
 
 /** A trade price with no tick size to hand: six significant figures. */
 export function fmtPx(v: number | null | undefined): string {
-  return finite(v) ? v.toLocaleString('en-US', { maximumSignificantDigits: 6 }) : DASH;
+  return finite(v) ? formatNumber(v, 'en-US', { maximumSignificantDigits: 6 }) : DASH;
 }
 
 /** 24-hour clock, fixed width - a tape column must not change width per row. */
 export function fmtClock(ms: number | null | undefined): string {
   if (!finite(ms) || ms <= 0) return DASH;
-  return new Date(ms).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  return formatTime(ms, 'en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
 /** `pos` / `neg` / '' like signClass() in format.ts, and `muted` for a missing figure. */

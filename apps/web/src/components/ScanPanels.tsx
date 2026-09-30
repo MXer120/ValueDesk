@@ -19,7 +19,8 @@
  */
 import { useEffect, useState } from 'react';
 import { AccountChip, Card, OverviewGroup } from './Portfolio';
-import { aliasFor, saveAlias, type ScanContext } from '../dashboard/ScanDashboard';
+import type { ScanContext } from '../dashboard/ScanDashboard';
+import { aliasFor, saveAlias } from '../dashboard/scanAliases';
 import type { PanelDefinition } from '../dashboard/types';
 export const SCAN_PANELS: Array<PanelDefinition<ScanContext>> = [];
 

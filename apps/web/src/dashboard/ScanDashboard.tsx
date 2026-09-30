@@ -37,6 +37,7 @@ import {
 import { ScanVenueCard } from '../components/scan/ScanVenueCard';
 import { VenueLogo } from '../components/VenueLogo';
 import '../components/scan/scan.css';
+import { resolveTarget } from './scanAliases';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -59,39 +60,10 @@ const scanUrl = (address: string | null, venue: Venue): string => {
   return s ? `/scan?${s}` : '/scan';
 };
 
-/** Aliases are the one thing worth keeping from the old page. */
-const ALIAS_KEY = 'scan-aliases';
-
-export function aliasMap(): Record<string, string> {
-  try {
-    return (JSON.parse(localStorage.getItem(ALIAS_KEY) || '{}') || {}) as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
-
-export function saveAlias(addr: string, name: string): void {
-  const m = aliasMap();
-  const k = addr.toLowerCase();
-  if (name.trim()) m[k] = name.trim();
-  else delete m[k];
-  try {
-    localStorage.setItem(ALIAS_KEY, JSON.stringify(m));
-  } catch {
-    /* storage disabled */
-  }
-}
-
-export const aliasFor = (addr: string): string => aliasMap()[addr.toLowerCase()] ?? '';
-
-/** An alias, or a raw address, resolved to an address. */
-export function resolveTarget(input: string): string | null {
-  const t = input.trim();
-  if (ADDRESS_RE.test(t)) return t;
-  const m = aliasMap();
-  const hit = Object.keys(m).find((a) => m[a]!.toLowerCase() === t.toLowerCase());
-  return hit ?? null;
-}
+/* Aliases live in ./scanAliases so the always-loaded shell (the Cmd+K palette)
+   can resolve one without importing this whole page. Re-exported for the
+   existing importers. */
+export { aliasMap, saveAlias, aliasFor, resolveTarget } from './scanAliases';
 
 export interface ScanContext extends PortfolioContext {
   /** The address being scanned, which is NOT the connected wallet. */

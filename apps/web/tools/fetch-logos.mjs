@@ -28,7 +28,8 @@ import { createHash } from 'node:crypto';
 import { dirname, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // Icons render at 16-64 CSS px; some sources ship 400-1600 px PNGs (sodex.com's sol.png is 400 KB).
-import { shrinkPng } from './png-shrink.mjs';
+import { recompressPng, shrinkPng } from './png-shrink.mjs';
+import { cleanSvg } from './logo-clean.mjs';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(WEB, 'public', 'logos');
@@ -115,6 +116,17 @@ async function get(url, { json = false, attempts = 3 } = {}) {
 }
 
 const EXT = { 'image/png': '.png', 'image/svg+xml': '.svg', 'image/jpeg': '.jpg', 'image/webp': '.webp', 'image/gif': '.gif' };
+
+/**
+ * SVGs are sanitised - script, event handlers, foreignObject, external or
+ * javascript: references (security audit W-09) - and minified without
+ * changing a pixel; see logo-clean.mjs. Anything removed is reported.
+ */
+function cleanedSvg(buf, label) {
+  const { svg, removed } = cleanSvg(buf);
+  if (removed.length) console.log(`  sanitised ${label}: removed ${[...new Set(removed)].join(', ')}`);
+  return Buffer.from(svg, 'utf8');
+}
 const saved = new Map(); // source url -> relative path (one file per source image)
 const byContent = new Map(); // sha1 of the stored bytes -> relative path (identical images stored once)
 const failed = new Map(); // source url -> error, so a dead link is asked once, not once per key
@@ -133,7 +145,7 @@ async function save(url, relNoExt) {
   if (!ext) throw new Error(`${url}: not an image (${type || 'no content-type'})`);
   if (buf.length < 64) throw new Error(`${url}: empty image`);
   if (ext === '.svg' && !/<svg[\s>]/i.test(buf.toString('utf8', 0, 4096))) throw new Error(`${url}: not an SVG`);
-  const bytes = ext === '.png' ? shrinkPng(buf, url) : buf;
+  const bytes = ext === '.png' ? recompressPng(shrinkPng(buf, url)) : ext === '.svg' ? cleanedSvg(buf, url) : buf;
   const hash = createHash('sha1').update(bytes).digest('hex');
   let rel = byContent.get(hash);
   if (!rel) {
@@ -156,7 +168,7 @@ async function saveBundled(src, relNoExt) {
   const buf = m[2] ? Buffer.from(m[3], 'base64') : Buffer.from(decodeURIComponent(m[3]), 'utf8');
   const rel = `${relNoExt}${ext}`;
   mkdirSync(dirname(join(STAGE, rel)), { recursive: true });
-  writeFileSync(join(STAGE, rel), ext === '.png' ? shrinkPng(buf, relNoExt) : buf);
+  writeFileSync(join(STAGE, rel), ext === '.png' ? recompressPng(shrinkPng(buf, relNoExt)) : ext === '.svg' ? cleanedSvg(buf, relNoExt) : buf);
   return rel;
 }
 
@@ -238,7 +250,7 @@ async function unitreeTile() {
   const rel = 'coins/UNITREE.svg';
   const tile = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1D1D1F"/><g fill="#FFFFFF" transform="translate(16 16) scale(.68)">${paths.map((d) => `<path d="${d}"/>`).join('')}</g></svg>\n`;
   mkdirSync(dirname(join(STAGE, rel)), { recursive: true });
-  writeFileSync(join(STAGE, rel), tile);
+  writeFileSync(join(STAGE, rel), cleanedSvg(Buffer.from(tile, 'utf8'), rel));
   return rel;
 }
 

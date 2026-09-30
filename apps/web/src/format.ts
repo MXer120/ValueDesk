@@ -7,6 +7,8 @@
  * here would silently change an order.
  */
 
+import { formatNumber } from './intlCache';
+
 /** Decimal places implied by a tick/step size like "0.0001". */
 export const precisionOf = (step: string | undefined): number =>
   step ? (step.split('.')[1] ?? '').replace(/0+$/, '').length || (step.includes('.') ? 0 : 0) : 2;
@@ -23,7 +25,7 @@ export function fmt(value: string | number | undefined | null, dp?: number): str
   if (value === undefined || value === null || value === '') return DASH;
   const n = typeof value === 'number' ? value : Number.parseFloat(value);
   if (!Number.isFinite(n)) return String(value);
-  return n.toLocaleString('en-US', {
+  return formatNumber(n, 'en-US', {
     minimumFractionDigits: dp ?? 0,
     maximumFractionDigits: dp ?? 8,
   });
@@ -54,7 +56,7 @@ export function fmtUsd(v: string | number | undefined | null, dp?: number): stri
   if (!Number.isFinite(n)) return DASH;
   const digits = usdDigits(n, dp);
   const sign = n < 0 ? MINUS : '';
-  return `${sign}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  return `${sign}$${formatNumber(Math.abs(n), 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 /**
@@ -86,7 +88,7 @@ export function fmtQuote(
   if (!Number.isFinite(n)) return DASH;
   const digits = usdDigits(n, dp);
   const sign = n < 0 ? MINUS : '';
-  const body = Math.abs(n).toLocaleString('en-US', {
+  const body = formatNumber(Math.abs(n), 'en-US', {
     minimumFractionDigits: digits, maximumFractionDigits: digits,
   });
   return isDollarQuote(quoteCoin)

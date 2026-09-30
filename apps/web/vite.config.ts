@@ -1,12 +1,15 @@
-import { createLogger, defineConfig } from 'vite';
+import { createLogger, defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import type { IncomingHttpHeaders } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
+import { fromAppOrigin } from './src/devOrigin';
 
 /**
- * The local API token, injected into every proxied request.
+ * The local API token, injected into proxied requests from the app itself.
  *
  * Deliberately read HERE and not exposed to the app: if this were a `define` or
  * a VITE_ env var it would be in the bundle, and any XSS in our own UI could
@@ -43,6 +46,77 @@ function localToken(): string | null {
 
 const TOKEN_HEADER = 'x-valuetrade-token';
 
+/*
+ * ...and only to the app's own requests (security audit W-04): src/devOrigin.ts
+ * says which. Its origin is this server's REAL port, recorded by the plugin
+ * below, so a dev server that moved to 5181 because 5180 was taken still works.
+ */
+const appPorts = new Set<number>();
+const recordPort = (addr: string | AddressInfo | null | undefined): void => {
+  if (addr && typeof addr === 'object') appPorts.add(addr.port);
+};
+const trackAppOrigin = (): Plugin => ({
+  name: 'valuescan:app-origin',
+  configureServer(server) {
+    appPorts.add(server.config.server.port ?? 5180);
+    server.httpServer?.on('listening', () => recordPort(server.httpServer?.address()));
+  },
+  configurePreviewServer(server) {
+    appPorts.add(server.config.preview.port ?? 4173);
+    server.httpServer.on('listening', () => recordPort(server.httpServer.address()));
+  },
+});
+const mayCarryToken = (headers: IncomingHttpHeaders): boolean => fromAppOrigin(headers, appPorts);
+
+/*
+ * THE PALETTE'S CHUNKS, ANNOUNCED UP FRONT.
+ *
+ * App.tsx holds the first render until the landing page's chunk AND the Cmd+K
+ * palette's are in (a key pressed the moment the page appears must open the
+ * palette as fast as it always did). The palette is needed on every page, so
+ * its chunks are listed in the built index.html as modulepreload links: they
+ * download alongside the entry instead of after it has run, and the wait costs
+ * nothing. Page chunks are not listed - which one is needed depends on the URL.
+ */
+const preloadPalette = (): Plugin => {
+  let base = '/';
+  return {
+    name: 'valuescan:preload-palette',
+    apply: 'build',
+    configResolved(cfg) {
+      base = cfg.base;
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, ctx) {
+        const bundle = ctx.bundle;
+        if (!bundle) return [];
+        const chunks = Object.values(bundle).filter((c) => c.type === 'chunk');
+        const byName = new Map(chunks.map((c) => [c.fileName, c]));
+        const entry = chunks.find((c) => c.isEntry);
+        const palette = chunks.find((c) => c.isDynamicEntry && /[\\/]palette[\\/]CommandPalette\.tsx$/.test(c.facadeModuleId ?? ''));
+        if (!entry || !palette) return [];
+        const closure = (root: string): Set<string> => {
+          const seen = new Set<string>();
+          const stack = [root];
+          while (stack.length) {
+            const f = stack.pop()!;
+            if (seen.has(f)) continue;
+            seen.add(f);
+            const c = byName.get(f);
+            if (c && c.type === 'chunk') stack.push(...c.imports);
+          }
+          return seen;
+        };
+        const already = closure(entry.fileName);
+        return [...closure(palette.fileName)]
+          .filter((f) => !already.has(f))
+          .map((f) => ({ tag: 'link', attrs: { rel: 'modulepreload', crossorigin: true, href: base + f }, injectTo: 'head' as const }));
+      },
+    },
+  };
+};
+
 // `npm run dev` starts the backend and this dev server together, so every
 // startup - and every tsx-watch restart after an edit - opens a window where
 // the backend is briefly gone and the proxy throws ECONNREFUSED/ECONNRESET at
@@ -62,7 +136,7 @@ logger.error = (msg, options) => {
 
 export default defineConfig({
   customLogger: logger,
-  plugins: [react()],
+  plugins: [react(), trackAppOrigin(), preloadPalette()],
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
    *
@@ -140,6 +214,12 @@ export default defineConfig({
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
     },
+    /*
+     * No CORS at all (audit W-04). The app is same-origin with this server and
+     * never needs it; Vite's default would let any other localhost page read
+     * this server's responses.
+     */
+    cors: false,
     // Proxy keeps the browser same-origin, so there is no CORS preflight on the
     // hot path and the WebSocket upgrade works without extra configuration.
     proxy: {
@@ -147,7 +227,8 @@ export default defineConfig({
         target: 'http://127.0.0.1:8797',
         changeOrigin: true,
         configure: (proxy) => {
-          proxy.on('proxyReq', (proxyReq) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            if (!mayCarryToken(req.headers)) return;
             const t = localToken();
             if (t) proxyReq.setHeader(TOKEN_HEADER, t);
           });
@@ -157,7 +238,8 @@ export default defineConfig({
         target: 'ws://127.0.0.1:8797',
         ws: true,
         configure: (proxy) => {
-          proxy.on('proxyReqWs', (proxyReq) => {
+          proxy.on('proxyReqWs', (proxyReq, req) => {
+            if (!mayCarryToken(req.headers)) return;
             const t = localToken();
             if (t) proxyReq.setHeader(TOKEN_HEADER, t);
           });
@@ -168,8 +250,16 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        // Split the charting library so first paint does not wait on it.
-        manualChunks: { charts: ['lightweight-charts'] },
+        /*
+         * React in a chunk of its own. It changes far less often than our code,
+         * so after a deploy returning visitors keep it from their cache and
+         * re-download only the app. The pages themselves are split by App.tsx
+         * (dynamic imports); the chart library already loads on demand.
+         */
+        manualChunks(id) {
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+          return undefined;
+        },
       },
     },
   },
