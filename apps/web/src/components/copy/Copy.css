@@ -1,0 +1,121 @@
+/**
+ * Copy page. The little that the shared vocabulary does not already cover.
+ *
+ * Everything visible on this page is an existing Valuetrade surface: the
+ * portfolio's cards, rows, stat strip and chart (Portfolio.css), the order
+ * ticket's fields, checkbox and read-out (OrderEntry.css), the account band's
+ * tables and tabs (Account.css, dashboard). This file only adapts those to the
+ * places they are used here, and states nothing a token does not supply.
+ * Scoped under `.copy`, which the dashboard root carries next to `.pf`.
+ */
+
+/* --- the ticket inside a card ------------------------------------------------
+   The order ticket's classes live on `.oe`, which also carries their timing
+   variables. Inside a card body the inset is the card's 12px, not the ticket's
+   16px, and the blocks are a step apart like `.oe-body`'s. */
+.copy .copy-ticket.oe { --oe-inset: var(--sp-3); gap: var(--sp-3); }
+.copy .copy-ticket .oe-facts { margin: 0; }
+.copy .copy-ticket .pf-group { gap: var(--sp-2); }
+.copy .copy-ticket .pf-group__head { margin-bottom: 0; }
+.copy .copy-ticket .pf-group + .pf-group { margin-top: 0; }
+.copy .copy-ticket .pf-seg { flex-wrap: wrap; }
+
+/* Six limits in two columns of a 12-column card leave ~170px a box, which the
+   ticket's own gutters (sized for two TP/SL pairs in a wider ticket) overflow:
+   the unit was cut off. The value's right gutter and the unit's left one give
+   back a step between them, so label, figure and unit all stay whole. */
+.copy .copy-ticket .oe-exitgrid .oe-input { min-width: 32px; padding-right: var(--sp-1); }
+.copy .copy-ticket .oe-exitgrid .oe-suffix { padding: 0 var(--sp-2) 0 var(--sp-1); }
+
+/* The two coin lists run as the exit grid's fields do: 36px, 12px type. */
+.copy .copy-coins { display: grid; gap: var(--sp-2); }
+.copy .copy-coins .oe-inputrow { height: 36px; }
+.copy .copy-coins .oe-input { height: 34px; line-height: 34px; font-size: var(--fs-xs); text-align: right; }
+.copy .copy-coins .oe-inlabel { padding-left: var(--sp-2); font-size: var(--fs-xs); line-height: 34px; }
+
+/* A field whose value cannot be used. The border is the signal; the sentence
+   saying why sits under the Start button, where it blocks you. */
+.copy .copy-invalid,
+.copy .copy-invalid:focus-within { border-color: var(--neg); }
+.copy .copy-errors { color: var(--neg); }
+
+.copy .copy-example { margin: 0; }
+.copy .copy-caveat { color: var(--warn); }
+.copy .copy-hint { margin: 0; }
+.copy .copy-opts { padding-left: var(--sp-1); }
+
+/* The read-out is pinned to the ticket's bottom edge on the trade page; here it
+   is one group among others. */
+.copy .copy-fees { margin: 0; }
+
+.copy .copy-notlive { margin: 0; border-left-color: var(--warn); }
+
+/* --- the trader list ------------------------------------------------------ */
+
+/* Addresses are figures: the numeral face, like the portfolio's account chip. */
+.copy .copy-addr { font-family: var(--font-num); }
+
+/* The whole row is the control, so it takes the pointer; the chosen trader is
+   marked the way the leaderboard marks your own row. */
+.copy .copy-pick tbody tr { cursor: pointer; }
+.copy .copy-pick tbody tr.is-on td { background: var(--bg-elevated); }
+.copy .copy-pick tbody tr.is-on td:first-child { box-shadow: inset 2px 0 0 0 var(--accent); }
+.copy .copy-pick tbody tr:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+.copy .copy-tags { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+
+/* --- the backtest --------------------------------------------------------- */
+
+.copy .copy-readout { margin-bottom: var(--sp-2); }
+
+.copy .copy-legend {
+  display: flex; flex-wrap: wrap; gap: var(--sp-4);
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-micro); line-height: var(--lh-micro); letter-spacing: var(--ls-micro);
+  color: var(--muted);
+}
+.copy .copy-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+.copy .copy-swatch { display: inline-block; flex: none; width: 10px; height: 2px; border-radius: 1px; }
+.copy .copy-swatch--you { background: var(--accent); }
+.copy .copy-swatch--leader { background: var(--muted); }
+
+/* Taller than the portfolio's 142px card chart: this one is the panel's subject. */
+.copy .pf-chart.copy-chart { height: 230px; }
+.copy .pf-chart--empty.copy-chart { height: auto; min-height: 230px; }
+.copy .copy-chart__line { fill: none; stroke-width: 1.5; }
+.copy .copy-chart__line--you { stroke: var(--accent); }
+.copy .copy-chart__line--leader { stroke: var(--muted); stroke-width: 1; opacity: 0.8; }
+.copy .copy-chart__dot--you { fill: var(--accent); }
+.copy .copy-chart__dot--leader { fill: var(--muted); }
+.copy .copy-chart__tiprow { display: inline-flex; align-items: center; gap: 6px; }
+
+/* The stat strip sits mid-card here, not at the card's foot, so it bleeds to
+   both edges with a hairline above AND below instead of eating the bottom
+   padding. */
+.copy .pf-statstrip.copy-strip {
+  margin: var(--sp-3) calc(-1 * var(--sp-3)) 0;
+  border-bottom: 1px solid var(--pf-line);
+}
+.copy .pf-duo.copy-duo { gap: var(--sp-4); margin-top: var(--sp-3); align-items: start; }
+.copy .copy-duo .pf-group + .pf-group { margin-top: var(--sp-3); }
+.copy .copy-duo + .pf-note { margin-top: var(--sp-3); }
+
+/* --- the band ------------------------------------------------------------- */
+
+.copy .copy-time { font-family: var(--font-num); white-space: nowrap; }
+.copy .copy-lognote { margin-top: var(--sp-2); }
+
+/* --- how it works ---------------------------------------------------------- */
+
+.copy .copy-how p {
+  margin: 0;
+  font-size: var(--fs-xs); line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.copy .copy-how p.pf-note { margin-top: var(--sp-3); font-size: var(--fs-micro); line-height: 15px; }
+
+@media (max-width: 560px) {
+  .copy .copy-ticket.oe { --oe-inset: var(--sp-2); }
+  .copy .pf-statstrip.copy-strip { margin: var(--sp-2) calc(-1 * var(--sp-2)) 0; }
+}

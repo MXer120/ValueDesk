@@ -1,0 +1,327 @@
+/**
+ * Small-screen and popup behaviour for the dashboard.
+ *
+ * Loaded from layout.ts, which is the file that already owns per-breakpoint
+ * decisions, and which is evaluated after Dashboard.tsx (and therefore after
+ * dashboard.css) in every import path into this directory. Order is not relied
+ * on, though: every override below carries an extra `.dash` so it wins on
+ * specificity regardless of how the bundler ends up sequencing the sheets.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THESE ARE WINDOW media queries and layout.ts's are CONTAINER widths
+ *
+ * The grid picks its breakpoint from the measured width of `.dash-scroll`,
+ * which is the window minus `.app`'s side padding. CSS cannot read that width -
+ * a container query could, but `container-type` implies `contain: layout`,
+ * which makes `.dash` a containing block for `position: fixed`, and the panels
+ * already sit inside a transformed `.react-grid-item` that does the same
+ * thing. Adding a second one to save a fixed 34px conversion is not worth it.
+ *
+ * Measured on the running app, `.app` spends 4px a side above a 760px window
+ * and 8px below it, so container = window - 8 and window - 16 respectively.
+ * (It was 12px a side; the full-bleed change in styles.css took it to 4px, which
+ * moved this boundary from 823 to 807. The 4px matches the panel gutter.)
+ * The two conversions this file needs:
+ *
+ *   max-width: 807px  == container < 800 == breakpoint sm or xs
+ *   max-width: 993px  == window < 994, where styles.css stops pinning the shell
+ *                        to the viewport - the touch tier, not a grid tier
+ *
+ * If you move `BREAKPOINTS.md` in layout.ts, move the 807 with it.
+ * ---------------------------------------------------------------------------
+ */
+
+/* --- sm / xs: no drag, no resize ------------------------------------------ */
+
+/* At sm and xs the arrangement is fixed: book left, ticket right, header above,
+   tables below. There is nothing a drag can achieve except to lose that order,
+   and on touch the drag handle competes with the scroll gesture - a downward
+   swipe that starts on a tab bar would drag the panel instead of scrolling the
+   page. So the handles stop accepting input entirely.
+
+   `pointer-events: none` rather than hiding them, because one of the two drag
+   handles IS the tab bar: it has to stay visible and its tabs have to stay
+   pressable, which is what the second rule restores. Getting that wrong makes
+   every tab on the phone silently dead - and at these two breakpoints the book's
+   tab bar is the ONLY route to the chart, so a dead tab there is a dead panel. */
+@media (max-width: 807px) {
+  .dash .dash-panel__handle {
+    pointer-events: none;
+    cursor: default;
+  }
+  .dash .dash-panel__handle button,
+  .dash .dash-panel__handle input,
+  .dash .dash-panel__handle label,
+  .dash .dash-panel__handle .dash-nodrag {
+    pointer-events: auto;
+  }
+  /* The grab strip is a lie once dragging is off, and it is nothing but an
+     affordance - there is no content under it to keep. */
+  .dash .dash-panel__grip { display: none; }
+
+  /* Same for resizing. react-grid-layout renders its grips as absolutely
+     positioned 20-28px boxes in the panel's corners and edges, sitting on top
+     of whatever content is there - on a phone they are pure interference. */
+  .dash .dash-grid .react-grid-item > .react-resizable-handle { display: none; }
+}
+
+/* --- touch targets -------------------------------------------------------- */
+
+/* styles.css already lifts controls to 34px below 760px. 34px is under every
+   published touch-target minimum (~44px iOS, 48dp Android); this takes the
+   dashboard's own controls to 40px, and does it from 993px down rather than
+   from 760px down so that a tablet gets them too.
+ *
+ * 993 is deliberately NOT the sm boundary above. It is the window width where
+ * styles.css stops pinning the shell to the viewport, which is the best
+ * available proxy for "this is a touch screen" - a 900px window is a tablet
+ * whether the grid put it on md or sm, and a 1100px one is a laptop either way.
+ * Scoped to `.dash` so the navbar and the modals keep their own metrics. */
+@media (max-width: 993px) {
+  .dash button,
+  .dash input,
+  .dash select,
+  .dash textarea {
+    min-height: 40px;
+  }
+  /* Segmented controls and tab bars are laid out as rows of buttons; give them
+     horizontal room to match, so a 40px-tall target is not 18px wide. */
+  .dash .dash-tabs__bar button,
+  .dash .tabbar button,
+  .dash .segmented button,
+  .dash .menu-grid button {
+    padding-left: var(--sp-3);
+    padding-right: var(--sp-3);
+  }
+  /* ...but the bar itself is a fixed 40px strip. `min-height: 40px` on the
+     buttons inside it is exactly the bar's height, so without this the tabs
+     push it open by their own border box and the bar drifts to 42px. */
+  .dash .dash-tabs__bar { height: 44px; }
+  .dash .dash-tabs__bar button { min-height: 0; align-self: stretch; }
+  /* Eight account tabs do not fit a phone. The bar scrolls, and without a
+     fade the last visible label is cut mid-word ("Position His") and looks
+     broken rather than scrollable. The extra padding is inside the scroller,
+     so the final tab can be brought clear of the fade.
+     Three classes: styles.css restates `.dash .dash-tabs__bar` padding and
+     that sheet is injected last, so two classes here would lose the padding. */
+  .dash .dash-tabs > .dash-tabs__bar {
+    padding-right: 28px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  }
+
+  /* Icon-only buttons come out 40px tall and 15-20px wide, which is not a 40px
+     target in the direction that matters for a thumb. These two are named
+     rather than covered by a blanket `.dash button { min-width: 40px }`,
+     because a blanket rule also hits the chart's interval strip - and that
+     toolbar is CLIPPED, not scrolled, below ~340px of panel, so widening it
+     would push the chart's minimum width past what a 375px phone can give it.
+     The chart's own buttons already measure 34-39px wide, near enough.
+     `.tape-id` is deliberately excluded too: those are one badge per printed
+     trade, part of the tape's column alignment rather than a control.
+   *
+   * The `.mkt-` prefix is not decoration: components/Market.tsx renders the
+   * watchlist star and the book's side toggles under those names now, and the
+   * unprefixed `.tickerfav` / `.book-viewtoggle` this rule used to name are
+   * left over in styles.css and match nothing on this page. A touch-target rule
+   * that silently selects nothing is the failure mode you never notice, because
+   * the control is still visible - it is just 15px wide under your thumb. */
+  .dash .mkt-fav {
+    min-width: 40px;
+  }
+
+  /* The book's side toggles want the same 40px target, but they cannot have it
+     as a FLOOR. `.mkt-book-ctl` is a single unwrapped row - swatches left, the
+     "USD | 1" unit control pushed right by `margin-left: auto` - and the book
+     is a half-width column at sm and xs. Measured at 390px: the row is 169px
+     wide and a floor makes its content 215px (3x40 + 2x16 gap + 8 + 55), so the
+     unit control is pushed past the panel's `overflow: hidden` and "USD"
+     renders as "US" with the grouping value gone entirely. That is the same
+     failure the chart's interval strip is excluded for above - a toolbar that
+     is CLIPPED rather than scrolled cannot be widened past its panel.
+
+     So the 40px is a PREFERRED width that yields under pressure instead: the
+     target is a full 40px wherever the row can afford it, and shrinks toward
+     the swatch itself where it cannot. `min-width` is the 12px swatch, not 0,
+     so the mark is never clipped - and at that floor the group measures
+     3x12 + 2x16 = 68px, which is exactly what it measures at lg. The narrow
+     fallback is the desktop rendering, not a degraded one, because the swatch
+     is a fixed 12px block (`.mkt-view-sw`) and the button width around it is
+     invisible - it is hit area, and it spends itself before the label does. */
+  .dash .mkt-views button {
+    width: 40px;
+    min-width: 12px;
+  }
+  /* A flex item will not shrink below its content width without this. */
+  .dash .mkt-views { min-width: 0; }
+  /* ...and the shrink has to land entirely on the swatches. Flexbox otherwise
+     distributes it by basis, which would take ~12px off the unit control too
+     and clip the very label this rule exists to protect. */
+  .dash .mkt-book-ctl .mkt-unit { flex: none; }
+
+  /* Checkboxes and radios do not respond to min-height - they are replaced
+     controls with an intrinsic size. */
+  .dash input[type='checkbox'],
+  .dash input[type='radio'] {
+    min-height: 0;
+    width: 20px;
+    height: 20px;
+  }
+
+  /* The order book's price rows are click-to-fill targets, but they are also
+     the panel's information density - at 40px a phone would show four levels a
+     side. 30px is the compromise: a comfortably tappable row that still shows
+     ~9 levels in the 716px the xs layout gives the book. */
+  .dash .mkt-booktable td { padding-top: 6px; padding-bottom: 6px; }
+}
+
+/* --- xs: the third tab has to be visible ---------------------------------- */
+
+/* At xs the book panel is 185px wide and carries THREE tabs - Order Book,
+   Trades, and the chart, which has no panel of its own at this breakpoint and
+   lives here instead. At the 12px of tab padding the touch query above sets,
+   the first two exactly fill the bar and the third begins past its right edge
+   with nothing visible to suggest it is there. A tab you cannot see is not the
+   "still reachable" that dropping a panel from the layout depends on.
+ *
+ * 8px gets a sliver of the third label on screen, which is the conventional cue
+ * that a strip scrolls, and the tabs stay 44px tall - the dimension a thumb
+ * actually needs. Specificity beats the `.dash .dash-tabs__bar button` rule
+ * above (3 classes to 2 classes + an element) rather than relying on the fact
+ * that this block happens to come later in the file.
+ *
+ * 567px is `xs` as a WINDOW width: BREAKPOINTS.sm is 552 of container and
+ * `.app` spends 8px a side below a 760px window. */
+@media (max-width: 567px) {
+  .dash .dash-tabs__bar .dash-tab {
+    padding-left: var(--sp-2);
+    padding-right: var(--sp-2);
+  }
+}
+
+/* --- popups must not be clipped by their panel ---------------------------- */
+
+/* `.dash-panel` is `overflow: hidden` (it has to be, to clip content to the
+   rounded corner), and `.dash-panel__body--fit` is too. Menus inside a panel
+   are `position: absolute`, so both of those clip them - measured on a 375px
+   window, the chart's indicator popup is 435px tall inside a 332px panel and
+   209px of it, including the whole lower half of the indicator list, was
+   simply unreachable.
+ *
+ * `:has()` lets the panel open up only while a menu is actually mounted, so
+ * the normal corner-clipping is untouched the rest of the time. z-index lifts
+ * it over later grid items, which would otherwise paint on top of the escaped
+ * popup (react-grid-layout gives items no z-index of their own, so DOM order
+ * decides; 6 clears the 3 it puts on a dragging item).
+ *
+ * A browser without `:has()` ignores these rules and gets today's behaviour,
+ * so this cannot regress anything. */
+.dash .dash-panel:has(.menu-popup) {
+  overflow: visible;
+  z-index: 6;
+}
+.dash .dash-panel:has(.menu-popup) .dash-panel__body--fit,
+/* ...and the tab body, which is the OTHER non-scrolling box a menu can be born
+   in: at sm and xs the chart is a tab of the book panel, so its indicator menu
+   opens inside `.dash-tabs__body--fit` rather than `.dash-panel__body--fit`.
+   Exactly the breakpoints where the panel is narrowest and the menu tallest. */
+.dash .dash-panel:has(.menu-popup) .dash-tabs__body--fit {
+  overflow: visible;
+}
+
+/* Escaping the panel is only half of it - a popup taller than the viewport is
+   still unusable. `.kc-scroll` inside the indicator menu already caps its own
+   list at 320px, but the popup around it (header, active-indicator list,
+   groups) adds another ~115px. Cap the whole thing and let it scroll. */
+.dash .dash-panel .menu-popup {
+  max-height: min(70vh, 480px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* --- narrow-panel fallbacks ----------------------------------------------- */
+
+/* `.panel` normally carries `overflow-x: auto`, but dashboard.css strips it so
+   the panel BODY can be the scroll container instead. That works for
+   `scroll: 'auto'` panels and not for `scroll: 'hidden'` ones, where the body
+   is `overflow: hidden` on purpose - so a book narrower than its three columns
+   loses them silently. Give the row block its own horizontal scroller so it
+   degrades to a scrollbar instead. It costs nothing when the book fits: with
+   `auto` there is no scrollbar until there is something to scroll.
+ *
+ * BOTH bodies are named because the book is a TAB of its panel rather than the
+ * panel's whole content, so at sm and xs - where its column is 185px and its
+ * three columns want ~240 - `.dash-tabs__body--fit` is the box that actually
+ * bites. Without it the header row is clipped mid-word by `.mkt-book-rows`'s
+ * own `overflow: hidden` and Size prints into Sum.
+ *
+ * overflow-y MUST stay explicit: a box with `overflow-x: auto` and
+ * `overflow-y: visible` is not representable, and the browser resolves it by
+ * promoting the y axis to `auto` as well. That would put a vertical scrollbar
+ * on the element whose clientHeight the book divides to decide how many levels
+ * fit - it would size itself to a box that then grew, and oscillate. */
+.dash .dash-panel__body--fit .mkt-book-rows,
+.dash .dash-tabs__body--fit .mkt-book-rows {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* --- xs: the book in a 185px column ---------------------------------------- */
+
+/* A SCROLLBAR IS THE FALLBACK, NOT THE ANSWER.
+ *
+ * The rule above keeps the book from clipping its own columns mid-word, but at
+ * xs it was firing on every load: at 390 the book card is 185px, a 16px inset a
+ * side leaves 153px of content, and `table-layout: fixed` splits that into
+ * three 51px columns while "Size (USD)" measures 57 and "Sum (USD)" 60. The
+ * heads are `white-space: nowrap`, so each one printed straight over its
+ * neighbour - "Size (USD)Sum (USD)" - and the whole rows block picked up a 9px
+ * sideways scroll. Reported from the 390 gate.
+ *
+ * Two changes, in the order they matter:
+ *
+ * 1. The card gives back a step of inset, the same trade the order ticket makes
+ *    at this width (see the xs block in OrderEntry.css). 169px of content puts
+ *    the columns at 56px, which is what the data actually needs - a "510.80K"
+ *    sum measures 51px and was sitting on the column edge.
+ * 2. The heads stop being nowrap. Equal thirds cannot fit a 60px head until the
+ *    content column reaches 180px, i.e. an inset of 2px, and a 2px inset is not
+ *    a design. So "Size (USD)" sets as two lines and the header row grows to
+ *    take them. Wrapping a column head costs 16px of book once; unequal fixed
+ *    column widths would have to be guessed against every symbol's price length
+ *    and would clip a real number the first time one ran long.
+ *
+ * The `height` is dropped rather than doubled so the row is exactly its two
+ * lines, and `text-wrap: balance` keeps "Size" / "(USD)" from setting as
+ * "Size (" / "USD)".
+ *
+ * These reach into `.mkt-*` deliberately: the classes belong to
+ * components/Market.css, but this is the dashboard's own narrow-panel
+ * behaviour - the book is only 185px wide because layout.ts puts two panels in
+ * a 390px window - and the block above already owns exactly that boundary. */
+@media (max-width: 567px) {
+  .dash .mkt-book { padding-left: var(--sp-2); padding-right: var(--sp-2); }
+  .dash .mkt-booktable th {
+    white-space: normal;
+    text-wrap: balance;
+    height: auto;
+  }
+
+  /* The mid-price row is the other thing that does not fit: a 20px price, its
+     mark and the funding rate on one 169px line measure 186. Left to itself the
+     funding percentage is simply cut off by the scroller above - a number the
+     user cannot see is worse than a number on a second line. */
+  .dash .mkt-mid-top { flex-wrap: wrap; }
+}
+
+/* --- motion --------------------------------------------------------------- */
+
+/* react-grid-layout transitions `transform, width, height` on every item. At sm
+   and xs that means seven panels visibly slide into place on load, which reads
+   as jank rather than polish, and it is animation the user did not ask for on a
+   screen where nothing can be dragged anyway. styles.css already clamps this
+   under prefers-reduced-motion; this turns it off for everyone below `md`,
+   where it has no job to do. */
+@media (max-width: 807px) {
+  .dash .dash-grid .react-grid-item { transition: none; }
+}

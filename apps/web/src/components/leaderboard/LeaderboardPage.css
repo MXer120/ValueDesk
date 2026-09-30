@@ -1,0 +1,441 @@
+/* Leaderboard page, in the app's own language - the trade / portfolio panels,
+   the wallet menu and the funds sheets:
+     - the bar: segmented controls (the funds sheets' tiles), a search well and
+       the account tables' View pop-up;
+     - the podium: three soft cards (the account card's tiles), the place in a
+       small tinted chip - no metal-plated card;
+     - the tables: a dashboard panel with the account tables' rows (12-13px,
+       numbers in the number font, hairline-free rows, a hover tint).
+   Scoped under .lbp so the Stats leaderboard is untouched. */
+
+.panel.lbp {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 12px 16px 36px;
+  overflow: visible;
+  height: auto;
+  min-height: 0;
+}
+.lbp .lbp-body { overflow: visible; }
+
+/* --- the bar ----------------------------------------------------------------- */
+
+.lbp-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.lbp-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.lbp-seg > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.lbp-seg > button:where(:not(.active)) { background: transparent; }
+.lbp-seg > button:hover { color: var(--text); }
+.lbp-seg > button.is-on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 70%, transparent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.lbp-seg > button img, .lbp-seg > button svg { flex: none; }
+
+/* Venue chips: multi-select. A selected chip takes its venue's own colour
+   (border + a faint tint); an unselected one stays neutral. */
+.lbp-venues { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+button.lbp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+button.lbp-chip:where(:not(.active)) { background: color-mix(in srgb, var(--bg) 55%, transparent); }
+button.lbp-chip:hover { color: var(--text); border-color: var(--line); }
+button.lbp-chip.is-on {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--brand) 75%, transparent);
+  background: color-mix(in srgb, var(--brand) 11%, transparent);
+}
+button.lbp-chip.is-on:hover { border-color: var(--brand); }
+button.lbp-chip img { flex: none; border-radius: 50%; }
+
+.lbp-search {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  width: 240px;
+  height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--dim);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.lbp-search:focus-within { border-color: var(--line); color: var(--muted); }
+.lbp-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  outline: none;
+  box-shadow: none;
+}
+.lbp-bar .acctf-view { height: 32px; border-radius: 8px; }
+
+.lbp-note, .lbp-empty {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+.lbp-empty { padding: 24px 16px; text-align: center; }
+
+/* --- podium ------------------------------------------------------------------ */
+
+.lbp-pod {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* The side cards stand on the same floor; first place rises above them. */
+  align-items: end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+button.lbp-card,
+.lbp-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: 100%;
+  height: auto;
+  min-height: 150px;
+  margin: 0;
+  padding: 14px 16px;
+  text-align: left;
+  color: var(--text);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--text) 5%, var(--bg-panel));
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), transform 200ms var(--ease-spring);
+}
+button.lbp-card:where(:not(.active)) { background: color-mix(in srgb, var(--text) 5%, var(--bg-panel)); }
+button.lbp-card:hover { border-color: var(--line); background: color-mix(in srgb, var(--text) 8%, var(--bg-panel)); color: var(--text); }
+button.lbp-card:active { transform: scale(0.995); }
+
+/*
+ * The podium reads 2 - 1 - 3: first place in the middle. Each of the three
+ * carries the order panel's glare (`.sidetabs button`: --sheen from the top)
+ * over a faint wash of its metal.
+ */
+.lbp-card.is-1 { --metal: #e6c15a; order: 2; }
+.lbp-card.is-2 { --metal: #d5d8de; order: 1; }
+.lbp-card.is-3 { --metal: #c8884a; order: 3; }
+button.lbp-card.is-1, button.lbp-card.is-2, button.lbp-card.is-3,
+.lbp-card.is-1, .lbp-card.is-2, .lbp-card.is-3 {
+  border-color: color-mix(in srgb, var(--metal) 22%, var(--panel-line));
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--metal) 7%, transparent), transparent 85%),
+    color-mix(in srgb, var(--text) 5%, var(--bg-panel));
+}
+button.lbp-card.is-1:hover, button.lbp-card.is-2:hover, button.lbp-card.is-3:hover {
+  border-color: color-mix(in srgb, var(--metal) 40%, var(--panel-line));
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--metal) 11%, transparent), transparent 85%),
+    color-mix(in srgb, var(--text) 8%, var(--bg-panel));
+}
+.lbp-skel .lbp-card.is-1, .lbp-skel .lbp-card.is-2, .lbp-skel .lbp-card.is-3 { border-color: var(--panel-line); }
+
+/* First place, in the middle: taller, a gold edge and a soft gold halo. */
+button.lbp-card.is-1, .lbp-card.is-1 {
+  min-height: 172px;
+  border-color: color-mix(in srgb, var(--metal) 45%, var(--panel-line));
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 55%),
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--metal) 14%, transparent), transparent 70%),
+    color-mix(in srgb, var(--text) 6%, var(--bg-panel));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--metal) 12%, transparent), 0 10px 28px -14px color-mix(in srgb, var(--metal) 45%, transparent);
+}
+button.lbp-card.is-1:hover {
+  border-color: color-mix(in srgb, var(--metal) 65%, var(--panel-line));
+  background:
+    linear-gradient(180deg, var(--sheen), transparent 55%),
+    radial-gradient(120% 90% at 50% 0%, color-mix(in srgb, var(--metal) 19%, transparent), transparent 70%),
+    color-mix(in srgb, var(--text) 8%, var(--bg-panel));
+}
+.lbp-card.is-1 .lbp-card__pnl { font-size: 28px; line-height: 34px; }
+.lbp-card.is-1 .lbp-spark { height: 76px; }
+.lbp-skel .lbp-card.is-1 { box-shadow: none; }
+
+.lbp-card__top { display: flex; align-items: center; gap: 8px; min-width: 0; width: 100%; }
+.lbp-card__id {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-num);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* The place: a small chip, the metal only as its tint. */
+.lbp-place {
+  margin-left: auto;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 1000px;
+  font-family: var(--font-num);
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  color: var(--metal);
+  background: color-mix(in srgb, var(--metal) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--metal) 40%, transparent);
+}
+.lbp-place.is-1 { --metal: #e6c15a; }
+.lbp-place.is-2 { --metal: #d5d8de; }
+.lbp-place.is-3 { --metal: #c8884a; }
+
+.lbp-card__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+  flex: 1;
+  width: 100%;
+}
+.lbp-card__fig { display: block; min-width: 0; }
+.lbp-card__pnl {
+  display: block;
+  font-family: var(--font-num);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  letter-spacing: -0.2px;
+}
+.lbp-card__k { display: block; margin-top: 1px; color: var(--muted); font-size: var(--fs-micro); }
+.lbp-card__av { display: block; margin-top: 10px; font-family: var(--font-num); font-size: 14px; font-weight: 500; }
+.lbp-spark { width: 100%; height: 64px; display: block; }
+.lbp-spark.is-up { color: var(--pos); }
+.lbp-spark.is-down { color: var(--neg); }
+.lbp-spark.is-empty { min-height: 64px; }
+
+.lbp-ava {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+  color: var(--muted);
+}
+.lbp-medal { display: none; }
+.lbp-assets { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.lbp-assets img, .lbp-card__top .lbp-assets img, .lbp-assets .coin-ic { border-radius: 50%; display: block; }
+.lbp-assets .coin-ic + .coin-ic { margin-left: -5px; box-shadow: 0 0 0 1.5px var(--bg-panel); }
+
+/* --- tables: a dashboard panel with the account tables' rows ------------------------- */
+
+.lbp-sheet {
+  margin-top: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.lbp .lb-scroll { overflow: visible; flex: none; }
+.lbp .lb-table.lbp-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: collapse; }
+.lbp .lb-table.lbp-table th:nth-child(1) { width: 5%; }
+.lbp .lb-table.lbp-table th:nth-child(2) { width: 20%; }
+.lbp .lb-table.lbp-table th:nth-child(3) { width: 13%; }
+.lbp .lb-table.lbp-table th:nth-child(4) { width: 15%; }
+.lbp .lb-table.lbp-table th:nth-child(5) { width: 13%; }
+.lbp .lb-table.lbp-table th:nth-child(6) { width: 8%; }
+.lbp .lb-table.lbp-table th:nth-child(7) { width: 8%; }
+.lbp .lb-table.lbp-table th:nth-child(8) { width: 10%; }
+.lbp .lb-table.lbp-table th:nth-child(9) { width: 8%; }
+
+.lbp .lbp-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 -1px 0 var(--panel-line);
+  border: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+  white-space: nowrap;
+}
+.lbp .lbp-table th:first-child, .lbp .lbp-table td:first-child { padding-left: 16px; }
+.lbp .lbp-table th:last-child, .lbp .lbp-table td:last-child { padding-right: 16px; }
+.lbp .lbp-table td {
+  height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  line-height: 18px;
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.lbp .lbp-table td.right { font-family: var(--font-num); font-weight: 500; }
+.lbp .lbp-table tbody tr:hover td { background: var(--tint); }
+.lbp .lbp-table tr.lb-me td { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.lbp .lbp-table td.lbp-rank { color: var(--dim); font-family: var(--font-num); font-weight: 500; }
+/* Rank movement since the index's earlier snapshot: a small signed marker after the rank. */
+.lbp-move { margin-left: 6px; font-family: var(--font-num); font-size: var(--fs-micro); font-weight: 500; white-space: nowrap; }
+.lbp-card__top .lbp-move { margin-left: auto; }
+.lbp-card__top .lbp-move + .lbp-place { margin-left: 6px; }
+
+button.lbp-th {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-height: 0;
+  height: auto;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+button.lbp-th:where(:not(.active)) { background: none; }
+button.lbp-th:hover, button.lbp-th.is-on { color: var(--text); }
+.lbp .lbp-table th.right { text-align: right; }
+.lbp .lbp-table th.right > button.lbp-th { margin-left: auto; }
+.lbp-caret { fill: var(--dim); flex: none; transition: fill var(--dur-fast) var(--ease-out); }
+.lbp-caret.is-on { fill: var(--text); }
+
+.lbp-trader { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lbp .lbp-table .lbp-ava { width: 22px; height: 22px; }
+button.lbp-name {
+  min-height: 0;
+  height: auto;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+button.lbp-name:where(:not(.active)) { background: none; }
+button.lbp-name:hover { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+/* "You": the account tables' tinted pill. */
+.lbp-you {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+/* --- inverse ----------------------------------------------------------------- */
+
+.lbp-inv { margin-top: 28px; }
+.lbp-inv header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.lbp-inv h2 { margin: 0; color: var(--text); font-size: 15px; font-weight: 600; line-height: 20px; }
+.lbp-inv header p { margin: 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+
+/* --- waiting ----------------------------------------------------------------- */
+
+.lbp-skel .lbp-card { cursor: default; }
+.lbp-skel__rows { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; padding: 16px; border: 1px solid var(--panel-line); border-radius: 12px; background: var(--bg-panel); }
+.lbp-bone { display: block; border-radius: 4px; background: color-mix(in srgb, var(--text) 8%, transparent); animation: lbp-shimmer 1.4s ease-in-out infinite; }
+.lbp-bone--id { width: 42%; height: 12px; }
+.lbp-bone--pnl { width: 56%; height: 22px; }
+.lbp-bone--line { width: 28%; height: 10px; }
+.lbp-bone--row { width: 100%; height: 18px; }
+@keyframes lbp-shimmer { 50% { opacity: 0.5; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .lbp-bone { animation: none; }
+}
+
+@media (max-width: 760px) {
+  .panel.lbp { padding: 12px 10px 28px; }
+  .lbp-pod { grid-template-columns: 1fr; }
+  /* One column: first place first again. */
+  .lbp-card.is-1, .lbp-card.is-2, .lbp-card.is-3 { order: 0; }
+  button.lbp-card.is-1, .lbp-card.is-1 { min-height: 150px; }
+  .lbp-search { margin-left: 0; flex: 1 1 200px; min-width: 0; width: auto; }
+  .lbp .lb-scroll, .lbp-sheet { overflow-x: auto; }
+  .lbp .lb-table.lbp-table { min-width: 860px; }
+}
+
+/* Venues: a narrow column of overlapping marks on the right. */
+.lbp .lbp-table th.lbp-th-venues, .lbp .lbp-table td.lbp-td-venues { text-align: right; }
+.lbp-venue-marks { display: inline-flex; align-items: center; flex: none; }
+.lbp-vm { display: inline-flex; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg-panel); }
+.lbp-vm + .lbp-vm { margin-left: -4px; }
+.lbp-vm img, .lbp-vm svg { display: block; border-radius: 50%; }
+.lbp-card__top .lbp-venue-marks { margin-left: 2px; }

@@ -1,0 +1,48 @@
+/* Pre-trade review modal body. Tokens only - no literal colours, so a theme
+   change in styles.css reaches this component for free. */
+
+.review { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* The identity line. Side, market and network are the three facts that make a
+   mis-clicked ticket obvious at a glance, so they are the largest thing in the
+   dialog and sit above the numbers rather than inside the table with them. */
+.review-head { display: flex; align-items: baseline; gap: var(--sp-2); flex-wrap: wrap; }
+/* THE MOST CONSEQUENTIAL STRING IN THE APP, and it was --fs-lg + 700 - a
+   synthetic bold at a size that IS --fs-base, so it read as smeared rather than
+   larger. If it needs to be louder that is a size step or a fill, never a
+   weight the face does not have. */
+.review-side { font-size: var(--fs-base); font-weight: 500; letter-spacing: 0.02em; }
+.review-market { font-size: var(--fs-base); font-weight: 500; }
+.review-sub { margin: 0; }
+
+/* Bigger than the ticket's own .kv: this is the read-it-once surface, and the
+   12px used inside a dense panel is too small for a number you are about to
+   commit money to. Tabular figures so the column of prices aligns digit-wise. */
+.review-kv { width: 100%; }
+.review-kv th,
+.review-kv td { font-size: var(--fs-xs); padding-top: 3px; padding-bottom: 3px; }
+.review-kv td { }
+.review-kv tr + tr th,
+.review-kv tr + tr td { border-top: 1px solid var(--line-soft); }
+
+.review-exits { display: flex; flex-direction: column; gap: var(--sp-1); }
+.review-exits h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: var(--ls-body); }
+.review-exits-table { width: 100%; }
+.review-exits-table td { }
+
+.review-note { margin: 0; }
+
+/* A stop the exchange would reach after liquidation is not a nuance, it is the
+   single most expensive thing this dialog can tell you: the protection the
+   trader believes they have does not exist. It gets a solid left rule and a
+   tinted ground so it cannot be skimmed past on the way to the confirm button.
+   The acknowledgement checkbox in the footer is the other half of that - see
+   `requireAck` in Modal.tsx. */
+.review-hazard {
+  border-left: 3px solid var(--neg);
+  background: var(--ask-bg);
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+
+.review-suppress { margin-top: var(--sp-1); font-size: var(--fs-xs); color: var(--muted); }

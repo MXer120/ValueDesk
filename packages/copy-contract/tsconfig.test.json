@@ -1,0 +1,11 @@
+{
+  // Tests and tools run under Node (node:test, node:fs), so they get Node
+  // typings. src/ is still held to the stricter tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023"],
+    "types": ["node"],
+    "resolveJsonModule": true
+  },
+  "include": ["src", "test", "tools"]
+}

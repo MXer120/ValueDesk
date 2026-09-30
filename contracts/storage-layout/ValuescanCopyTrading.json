@@ -1,0 +1,485 @@
+{
+  "contract": "ValuescanCopyTrading",
+  "namespace": "erc7201:valuescan.storage.CopyTrading",
+  "location": "0xc3b2bc2cf6fc6db46d2b311dd8531e2120cf7207f8eeaaf9015bcf1d32c6bf00",
+  "root": "struct ValuescanCopyTrading.CopyTradingStorage",
+  "arrayElementStructs": [],
+  "structs": {
+    "struct EnumerableSet.Set": {
+      "numberOfBytes": "64",
+      "members": [
+        {
+          "label": "_values",
+          "slot": "0",
+          "offset": 0,
+          "type": "bytes32[]",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "_positions",
+          "slot": "1",
+          "offset": 0,
+          "type": "mapping(bytes32 => uint256)",
+          "numberOfBytes": "32"
+        }
+      ]
+    },
+    "struct EnumerableSet.UintSet": {
+      "numberOfBytes": "64",
+      "members": [
+        {
+          "label": "_inner",
+          "slot": "0",
+          "offset": 0,
+          "type": "struct EnumerableSet.Set",
+          "numberOfBytes": "64"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.BuilderTerms": {
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "label": "builderId",
+          "slot": "0",
+          "offset": 0,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "perpsFee",
+          "slot": "0",
+          "offset": 8,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "spotFee",
+          "slot": "0",
+          "offset": 10,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "updatedAt",
+          "slot": "0",
+          "offset": 12,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.Commitment": {
+      "numberOfBytes": "64",
+      "members": [
+        {
+          "label": "merkleRoot",
+          "slot": "0",
+          "offset": 0,
+          "type": "bytes32",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "count",
+          "slot": "1",
+          "offset": 0,
+          "type": "uint32",
+          "numberOfBytes": "4"
+        },
+        {
+          "label": "committedAt",
+          "slot": "1",
+          "offset": 4,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.Executor": {
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "label": "authorised",
+          "slot": "0",
+          "offset": 0,
+          "type": "bool",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "updatedAt",
+          "slot": "0",
+          "offset": 1,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        },
+        {
+          "label": "lastEpoch",
+          "slot": "0",
+          "offset": 6,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.KillSwitch": {
+      "numberOfBytes": "32",
+      "members": [
+        {
+          "label": "triggeredAt",
+          "slot": "0",
+          "offset": 0,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        },
+        {
+          "label": "closePositions",
+          "slot": "0",
+          "offset": 5,
+          "type": "bool",
+          "numberOfBytes": "1"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.Subscription": {
+      "numberOfBytes": "224",
+      "members": [
+        {
+          "label": "follower",
+          "slot": "0",
+          "offset": 0,
+          "type": "address",
+          "numberOfBytes": "20"
+        },
+        {
+          "label": "status",
+          "slot": "0",
+          "offset": 20,
+          "type": "enum IValuescanCopyTrading.Status",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "venue",
+          "slot": "0",
+          "offset": 21,
+          "type": "uint8",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "marketScope",
+          "slot": "0",
+          "offset": 22,
+          "type": "enum IValuescanCopyTrading.MarketScope",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "sizingMode",
+          "slot": "0",
+          "offset": 23,
+          "type": "enum IValuescanCopyTrading.SizingMode",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "symbolMode",
+          "slot": "0",
+          "offset": 24,
+          "type": "enum IValuescanCopyTrading.SymbolMode",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "copyExisting",
+          "slot": "0",
+          "offset": 25,
+          "type": "bool",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "maxLeverage",
+          "slot": "0",
+          "offset": 26,
+          "type": "uint8",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "closePositions",
+          "slot": "0",
+          "offset": 27,
+          "type": "bool",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "version",
+          "slot": "0",
+          "offset": 28,
+          "type": "uint32",
+          "numberOfBytes": "4"
+        },
+        {
+          "label": "leader",
+          "slot": "1",
+          "offset": 0,
+          "type": "address",
+          "numberOfBytes": "20"
+        },
+        {
+          "label": "createdAt",
+          "slot": "1",
+          "offset": 20,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        },
+        {
+          "label": "updatedAt",
+          "slot": "1",
+          "offset": 25,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        },
+        {
+          "label": "slippageBps",
+          "slot": "1",
+          "offset": 30,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "delegatedKey",
+          "slot": "2",
+          "offset": 0,
+          "type": "address",
+          "numberOfBytes": "20"
+        },
+        {
+          "label": "expiry",
+          "slot": "2",
+          "offset": 20,
+          "type": "uint40",
+          "numberOfBytes": "5"
+        },
+        {
+          "label": "takeProfitBps",
+          "slot": "2",
+          "offset": 25,
+          "type": "uint32",
+          "numberOfBytes": "4"
+        },
+        {
+          "label": "tradeStopLossBps",
+          "slot": "2",
+          "offset": 29,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "sodexAccountId",
+          "slot": "3",
+          "offset": 0,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "stopEpoch",
+          "slot": "3",
+          "offset": 8,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "sizingValue",
+          "slot": "3",
+          "offset": 16,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "maxDrawdownBps",
+          "slot": "3",
+          "offset": 24,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "maxBuilderFeePerps",
+          "slot": "3",
+          "offset": 26,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "maxBuilderFeeSpot",
+          "slot": "3",
+          "offset": 28,
+          "type": "uint16",
+          "numberOfBytes": "2"
+        },
+        {
+          "label": "allocationCap",
+          "slot": "4",
+          "offset": 0,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "maxPositionNotional",
+          "slot": "4",
+          "offset": 8,
+          "type": "uint64",
+          "numberOfBytes": "8"
+        },
+        {
+          "label": "symbolsHash",
+          "slot": "5",
+          "offset": 0,
+          "type": "bytes32",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "keyName",
+          "slot": "6",
+          "offset": 0,
+          "type": "string",
+          "numberOfBytes": "32"
+        }
+      ]
+    },
+    "struct IValuescanCopyTrading.Venue": {
+      "numberOfBytes": "64",
+      "members": [
+        {
+          "label": "enabled",
+          "slot": "0",
+          "offset": 0,
+          "type": "bool",
+          "numberOfBytes": "1"
+        },
+        {
+          "label": "name",
+          "slot": "1",
+          "offset": 0,
+          "type": "string",
+          "numberOfBytes": "32"
+        }
+      ]
+    },
+    "struct ValuescanCopyTrading.CopyTradingStorage": {
+      "numberOfBytes": "416",
+      "members": [
+        {
+          "label": "subscriptionCount",
+          "slot": "0",
+          "offset": 0,
+          "type": "uint256",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "subscriptions",
+          "slot": "1",
+          "offset": 0,
+          "type": "mapping(uint256 => struct IValuescanCopyTrading.Subscription)",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "followerHistory",
+          "slot": "2",
+          "offset": 0,
+          "type": "mapping(address => uint256[])",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "leaderHistory",
+          "slot": "3",
+          "offset": 0,
+          "type": "mapping(uint8 => mapping(address => uint256[]))",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "followerLive",
+          "slot": "4",
+          "offset": 0,
+          "type": "mapping(address => mapping(uint64 => struct EnumerableSet.UintSet))",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "liveByKey",
+          "slot": "5",
+          "offset": 0,
+          "type": "mapping(bytes32 => uint256)",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "stopEpoch",
+          "slot": "6",
+          "offset": 0,
+          "type": "mapping(address => uint64)",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "killSwitches",
+          "slot": "7",
+          "offset": 0,
+          "type": "mapping(address => mapping(uint64 => struct IValuescanCopyTrading.KillSwitch))",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "executors",
+          "slot": "8",
+          "offset": 0,
+          "type": "mapping(address => struct IValuescanCopyTrading.Executor)",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "commitments",
+          "slot": "9",
+          "offset": 0,
+          "type": "mapping(address => mapping(uint64 => struct IValuescanCopyTrading.Commitment))",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "venues",
+          "slot": "10",
+          "offset": 0,
+          "type": "mapping(uint8 => struct IValuescanCopyTrading.Venue)",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "nonceBitmap",
+          "slot": "11",
+          "offset": 0,
+          "type": "mapping(address => mapping(uint256 => uint256))",
+          "numberOfBytes": "32"
+        },
+        {
+          "label": "builderTerms",
+          "slot": "12",
+          "offset": 0,
+          "type": "struct IValuescanCopyTrading.BuilderTerms",
+          "numberOfBytes": "32"
+        }
+      ]
+    }
+  },
+  "enums": {
+    "enum IValuescanCopyTrading.MarketScope": [
+      "NONE",
+      "PERPS",
+      "SPOT",
+      "PERPS_AND_SPOT"
+    ],
+    "enum IValuescanCopyTrading.SizingMode": [
+      "NONE",
+      "PROPORTIONAL",
+      "FIXED_RATIO",
+      "FIXED_NOTIONAL"
+    ],
+    "enum IValuescanCopyTrading.Status": [
+      "NONE",
+      "ACTIVE",
+      "PAUSED",
+      "STOPPED"
+    ],
+    "enum IValuescanCopyTrading.SymbolMode": [
+      "ALL",
+      "ALLOW",
+      "DENY"
+    ]
+  }
+}

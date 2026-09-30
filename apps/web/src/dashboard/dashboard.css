@@ -1,0 +1,887 @@
+/**
+ * Dashboard chrome. Every colour, spacing, size and duration below is a token
+ * from styles.css - nothing is hardcoded, so a theme or density change reaches
+ * the terminal without touching this file.
+ *
+ * Loaded after styles.css (Dashboard.tsx imports it, App imports Dashboard),
+ * which is what lets the panel-neutralising rules below win over `.panel`
+ * without resorting to !important.
+ *
+ * OWNERSHIP. This file is the ONLY place a dashboard panel's chrome is
+ * described. styles.css used to carry a `.dash`-prefixed mirror of the header
+ * height, title type, body padding and toolbar button - two files stating the
+ * same properties with different values, where only load order decided which
+ * one you actually saw. That mirror is gone; what styles.css keeps is the
+ * react-grid-layout overrides, which have to out-specify the LIBRARY's sheet
+ * rather than ours. If you need a panel to look different, this is the file.
+ *
+ * ---------------------------------------------------------------------------
+ * EVERY PANEL IS A FILLED CARD. Read this before deleting a background again.
+ *
+ * This file spent a revision believing the reference's panels were transparent.
+ * That reading came from counting `getComputedStyle().backgroundColor` over all
+ * DOM nodes: the panel CONTAINER carries the fill and everything inside it is
+ * transparent, so counting every element reported "mostly transparent" and the
+ * fills were stripped. Rendered pixels are the ground truth, and sampling them
+ * says the opposite - order book body, order entry body, chart, bottom tab body,
+ * symbol header, market strip and status bar are all #1b1a14, while the gutters
+ * between columns and the page edge are #141310.
+ *
+ * So: `.dash-panel` is a --bg-panel card with a 4px radius on a --bg page,
+ * separated from its neighbours by the 4px grid gutter. There is no exception
+ * and no `chrome` mode - a panel that is neither filled nor bordered reads
+ * washed out, which is the opposite error to the bordered deck we started with.
+ *
+ * What the reference genuinely does NOT have, and what stays deleted:
+ *   - no per-panel title bar and no `⠿` drag-dots glyph
+ *   - NO BORDER of any kind around a card. The tone step separates panels; a
+ *     hairline on top of it is one line doing a job the fill already did.
+ *
+ * Drag and resize still work. Both affordances are hover-revealed rather than
+ * permanent: a 6px strip along the panel's top edge, and react-grid-layout's
+ * own corner grip at opacity 0 until you point at the panel.
+ * ---------------------------------------------------------------------------
+ *
+ * Motion: the react-grid-layout stylesheet animates transform/width/height on
+ * `.react-grid-item`. styles.css re-declares that transition WITHOUT width and
+ * height, because the order book and the trade tape measure their own box -
+ * see the long comment there. The universal prefers-reduced-motion backstop in
+ * styles.css clamps every transition-duration, so those are covered too.
+ */
+
+/* --- shell ---------------------------------------------------------------- */
+
+.dash {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* Containing block for the layout controls, which are lifted out of the flex
+     column on desktop (see .dash-toolbar). No z-index here on purpose: setting
+     one would make .dash a stacking context and trap the escaped menu popups
+     that responsive.css lifts to z-index 6. */
+  position: relative;
+}
+
+/* The old hover-revealed "lock/reset" text strip that used to live here is
+   gone - see the comment in Dashboard.tsx where it was removed. Both actions
+   live in LayoutMenu.tsx now, reachable by right-click or by a settings icon
+   a caller places in its own chrome (see `.mkt-settingsbtn` in Market.css). */
+
+/* --- panel right-click menu (LayoutMenu.tsx) ------------------------------- */
+
+/* `.menu-popup .dash-layoutmenu` is (0,2,0) for the same reason the header
+   stat menu needs two classes in Market.css: `.menu-popup` on its own is
+   (0,1,0) and this sheet is not guaranteed to load after that one wins the
+   tie. `position: fixed` for the same reason too - this is placed from a
+   pointer event in viewport coordinates and portalled to <body>, since the
+   panel it was summoned from clips its own children and the grid item around
+   it carries react-grid-layout's own transform. */
+.menu-popup.dash-layoutmenu {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+/* The one place this menu is not a plain checklist: a section label on the
+   left and the single dashboard-wide lock toggle on the right, sharing a row
+   instead of the lock being a fifteenth list item indistinguishable from a
+   panel. `menu-group-label` is reused as-is (styles.css) rather than
+   restated, so this heading matches every other menu's in the app. */
+.dash-layoutmenu-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+}
+.dash-layoutmenu-head .menu-group-label { margin-bottom: 0; }
+/* Ghost icon button, ink-only - the same ghost-role reasoning `.dash-
+   toolbar__btn` above uses, and the same --warn "this is frozen" colour while
+   locked, so the icon and the text button it duplicates never disagree about
+   what colour "locked" is. */
+.dash-layoutmenu-lock {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  background: none;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--dim);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.dash-layoutmenu-lock:hover { color: var(--text); background: none; border-color: transparent; }
+.dash-layoutmenu-lock[aria-pressed='true'] { color: var(--warn); }
+
+/* Row, mark, label - identical shape to `.mkt-statmenu-item` in Market.css
+   (a fixed mark slot then the label, so labels line up in one column
+   whether their panel is on or off), restated here rather than shared
+   because that file belongs to Market.tsx's own header menu, not to the
+   dashboard shell. */
+.dash-layoutmenu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--ctl-lh);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.dash-layoutmenu-item:hover:not(:disabled) { color: var(--text); background: none; border-color: transparent; }
+.dash-layoutmenu-item.is-on { color: var(--text); }
+.dash-layoutmenu-item:disabled { cursor: default; opacity: 0.5; }
+.dash-layoutmenu-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex: none;
+  color: var(--accent);
+}
+.dash-layoutmenu-foot {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--panel-line);
+}
+
+/* The grid scrolls, the page does not. On desktop styles.css pins .appcontent
+   to the viewport, so this is the only scroller between the navbar and the
+   footer. Below that the app scrolls normally and this simply grows.
+
+   `padding-bottom` is reserved bleed room, not spacing - it CANNOT be
+   `.dash-panel`'s own `overflow-clip-margin` trick here, because this
+   element genuinely scrolls (`overflow-y: auto`) rather than merely clipping
+   at a fixed edge, and `overflow-clip-margin` only ever applies to
+   `overflow: clip`. Without it, the bottom row's own content reached exactly
+   to this element's own bottom edge with nothing left over (measured at
+   several viewport heights: the bottom row consistently overshoots this
+   element's own box by several px before a resize grip's bleed is even
+   considered - `fitRows` dividing the measured height into 90 rows and
+   multiplying each panel's own row-span back out does not round-trip to
+   the exact pixel, so the last row always lands a few px past where the
+   division implies), so a resize grip's few more px of intentional bleed
+   past ITS panel's corner (dashboard.css' `overflow-clip-margin` on
+   `.dash-panel`) had nowhere left to go before hitting THIS element's own
+   scroll clip - which sits, in turn, right above the status bar, so the
+   grip visibly lost to it, reading as a z-index bug when the real cause was
+   never being painted there at all to compete on z-index in the first
+   place. Dashboard.tsx measures this element's `contentRect` (content-box,
+   padding excluded) to size every row, so this padding is invisible to that
+   math: `fitRows` divides a correspondingly smaller number and the grid's
+   own content stops this much short of this element's true bottom edge, on
+   every viewport height.
+
+   8px, matching `.dash-panel`'s own clip margin - NOT the 20px a first pass
+   here used. 20 was chosen to be generous against the rounding overshoot
+   without measuring what that generosity would look like once actually
+   reachable: on the trade page it read as a third, larger margin size next
+   to the 4px inter-panel gutter and the navbar's own inset, not as "no
+   visible gap". 8 still comfortably covers the grip's real bleed (a few px
+   at rest, growing on hover) plus the rounding overshoot, without becoming
+   a visible band of its own. */
+.dash-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 8px;
+}
+
+/* --- panel ---------------------------------------------------------------- */
+
+/* ===========================================================================
+   PANELS ARE QUERY CONTAINERS.
+
+   THE BUG THIS FIXES. Every responsive adaptation in this app was keyed to
+   WINDOW width, but a panel's width is set by the user dragging its edge. Drag
+   the order ticket down to 200px on a 2560px monitor and none of its narrow
+   rules fire, because the window is still 2560. The panel keeps its desktop
+   layout inside a box a third of the size, and overflows.
+
+   WHY THIS IS SAFE HERE, having been rejected for `.dash`. The objection in
+   responsive.css is real: `container-type` implies `contain: layout`, which
+   makes the element a containing block for `position: fixed`. But the panel body
+   already sits inside `.react-grid-item`, which react-grid-layout positions with
+   a `transform` - and a transform ALREADY establishes a containing block for
+   fixed descendants. Nothing changes for anything inside a panel. The objection
+   applies to `.dash` (untransformed) and not to this.
+
+   Components opt in by writing `@container panel (max-width: …)`; nothing is
+   changed for a component that does not.
+   ======================================================================== */
+.dash-panel__body {
+  container-type: inline-size;
+  container-name: panel;
+}
+
+.dash-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  /* THE CARD. Filled, 4px-rounded, and OUTLINED. Every panel, with no exception:
+     the market strip, the symbol header, the chart, the book, the ticket, the
+     bottom band (bar AND table body, one continuous surface) and the account
+     summary.
+     
+     These were borderless to match the reference. The portfolio cards carry a
+     hairline and read better for it - a filled card on a barely-lighter gutter
+     relies on a 4px gap alone to separate two panels, and the edge states it
+     instead. box-sizing is border-box globally, so the 1px costs no layout. */
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  /* Anchor for the hover-revealed drag strip. */
+  position: relative;
+  /* Content is clipped to the card's box, which is also what rounds the corners
+     of whatever is painted inside them - a table one row taller than its panel
+     must not paint over the panel below it, or square off the radius. Note the
+     consequence: a dropdown opened inside a panel is bounded by that panel, and
+     responsive.css lifts the clip while a `.menu-popup` is mounted.
+
+     `clip` + a small `overflow-clip-margin`, not plain `hidden` - the resize
+     grip (styles.css, `.react-resizable-handle`) is a CHILD of this same
+     element, not a sibling that escapes its clip some other way, because
+     react-grid-layout renders it inside the item it resizes. `hidden` clipped
+     it flush to this box, which is exactly the "half on, half off the panel"
+     look the grip is supposed to have made impossible - it could never
+     actually paint the "off" half. The margin only defers clipping by a few
+     px at every edge, so a table row genuinely taller than its panel is still
+     cut, same as before. */
+  overflow: clip;
+  overflow-clip-margin: 8px;
+}
+
+/* THE ENTIRE DRAG AFFORDANCE.
+ *
+ * A 6px strip along the top edge, invisible and pointer-transparent until the
+ * panel is hovered. It replaces a 24px title bar per panel - seven panels, so
+ * ~170px of vertical that the tables now have instead.
+ *
+ * Why the top edge rather than a corner: a corner grip has to land on whatever
+ * control happens to be there, and across these seven panels that is the
+ * leverage button, a tab, and the chart's fullscreen toggle. The top 6px is
+ * padding in every panel we ship, and even while the strip is live it only
+ * shadows the top 6px of a 32-40px control, so nothing becomes unclickable.
+ *
+ * z-index 2 puts it over the panel body but under the escaped menu popups (6). */
+.dash-panel__grip {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  transition: opacity var(--dur-fast) var(--ease-out);
+}
+/* Drawn, not imported: a 34px pill centred on the panel's top edge, so there is
+   no icon asset in the bundle and nothing to theme separately. */
+.dash-panel__grip::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--dim);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.dash-panel:hover > .dash-panel__grip {
+  opacity: 1;
+  pointer-events: auto;
+}
+.dash-panel__grip:hover::after { background: var(--muted); }
+.dash-panel__grip:active { cursor: grabbing; }
+
+/* Resize grips are hover-revealed for the same reason. react-grid-layout draws
+   them as absolutely positioned corner boxes; at rest they were seven small
+   permanent marks on a page that is meant to have none. styles.css themes their
+   arrow and gives them an opacity transition but never sets an opacity, so this
+   is the only declaration and there is no fight over it. */
+.dash .dash-grid .dash-panel > .react-resizable-handle { opacity: 0; }
+.dash .dash-grid .dash-panel:hover > .react-resizable-handle,
+.dash .dash-grid .dash-panel.resizing > .react-resizable-handle { opacity: 1; }
+
+/* Locked already disables dragging and resizing (`dragConfig`/`resizeConfig`
+   in Dashboard.tsx both go `enabled: !locked`) - this is what makes that
+   state visible rather than just felt on the next failed drag. `display:
+   none`, not opacity: an affordance for an action that cannot happen is not
+   "quieter", it is wrong, and opacity would still let it hover-reveal and
+   sit there inert. The mover (`.dash-panel__grip`) is a plain div this app
+   always renders regardless of drag state, so it needs this explicitly; the
+   resize handle react-grid-layout may or may not still mount internally when
+   `isResizable` is false, but hiding it here costs nothing either way. */
+.dash.is-locked .dash-panel__grip,
+.dash.is-locked .react-resizable-handle {
+  display: none;
+}
+
+/* --- panel body ----------------------------------------------------------- */
+
+/* CARD PADDING IS 16px HORIZONTAL, and the vertical is 4px.
+ *
+ * The measured card inset is 16px, and horizontally that is what this sets:
+ * the account summary's first glyph lands 16px inside its card edge, matching
+ * the book and the ticket beside it, whose own components draw the same inset
+ * (they declare `pad: false` and own their insets, because their depth bars and
+ * full-width rules have to bleed past the text column - see `--flush`).
+ *
+ * VERTICALLY 16px is not available and never was. The tightest card on the page
+ * is the symbol header: 51px at 1920x1080 and 41px on a 900px screen, carrying
+ * 35px of content. A 16px vertical inset would want 67px and, because the card
+ * clips, would cut the stats line in half on every screen we ship. 4px is the
+ * largest inset that fits it, and the strip rule below centres the content in
+ * whatever slack the row quantisation leaves.
+ *
+ * That header does not actually take this padding any more - Market.css zeroes
+ * the body's inset for it, because `.mkt-header` paints its own full-bleed card
+ * and owns its own 16px gutter - but it is still the card this number has to
+ * clear, because it is the shortest box a panel body is ever given. */
+.dash-panel__body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-1) var(--sp-4);
+}
+
+/* A STRIP IS CENTRED IN ITS ROW, NOT PINNED TO THE TOP OF IT.
+ *
+ * The market strip and the symbol header are fixed-height content in a box
+ * whose height comes from layout.ts, and the two rarely match to the pixel -
+ * 18px of chips in a 29px band and 35px of header in a 51px one, and more slack
+ * again at the stacked breakpoints, where the row is a fixed 26px and the touch
+ * targets rather than the text set the content height. Left alone
+ * the strip sits hard against the top with all the slack dumped underneath,
+ * which reads as a rendering bug rather than as spare room; on the symbol
+ * header, which is a FILLED surface, the empty band under the price is the
+ * most visible version of that.
+ *
+ * `--strip` is set for panels declared `resize: 'horizontal'`, which is exactly
+ * the set of panels whose height is not the user's to choose - see Dashboard.tsx.
+ *
+ * `safe` matters when the body is also a scroll container: a plain `center` on
+ * an OVERFLOWING column pushes the first line above the scrollport where it can
+ * never be reached. `safe center` degrades to flex-start in that case - and in
+ * a browser that does not know the keyword the whole declaration is dropped,
+ * which lands on the same flex-start. Both failure modes are the old behaviour,
+ * never an unreachable one. */
+.dash-panel--strip .dash-panel__body {
+  display: flex;
+  flex-direction: column;
+  justify-content: safe center;
+}
+
+/* Content that sizes itself to the box (chart canvas, order-book rows). It
+   must never gain a scrollbar: given one it would grow instead of fit, and the
+   "how many rows fit" measurement would read a height that is not the panel's. */
+.dash-panel__body--fit {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Everything list-shaped. This element is the scroll container the trade tape
+   walks up to find when it compensates for prepended rows. */
+.dash-panel__body--scroll { overflow: auto; }
+
+/* Panels whose content brings its own insets (a tab bar, a toolbar). */
+.dash-panel__body--flush { padding: 0; }
+
+/* A SEVERED ROW IS NOT A SCROLL CUE.
+ *
+ * A scrolling body is whatever height the panel's row span works out to, and
+ * the content inside it almost never divides into that exactly - so the last
+ * thing in the box was being cut horizontally through the middle of its glyphs
+ * by the panel's own edge. Measured at 1920 and 1440, the tape's last print
+ * came out as a half-height "80,107 / 0.00280"; at 1440x900 the order ticket's
+ * summary table was severed the same way. Half a digit is not a smaller number,
+ * it is an unreadable one, and on this screen that is the failure that matters.
+ *
+ * A 14px alpha ramp at the bottom edge is the fix, and it is the one that does
+ * not touch geometry: the partial row fades out instead of being guillotined,
+ * which is also the conventional "this continues below" cue.
+ *
+ * Note what it is NOT: it is not a height change, and nothing about it animates.
+ * This element is the box the trade tape measures scrollHeight deltas against
+ * to compensate scrollTop when prints prepend, and the order book next door
+ * divides its own clientHeight by a measured row height. A mask changes neither
+ * - it only changes which pixels of the body's own painting reach the screen.
+ *
+ * Why it is safe on a body that is NOT overflowing: the mask applies to what
+ * THIS element paints, and its background is `none` - the surface behind it
+ * belongs to `.dash-panel`. A panel with slack under its content therefore has
+ * nothing in the ramp to fade, and looks exactly as it did.
+ *
+ * ONE CAUTION for later: a mask clips to its element's box, so a popup that
+ * escapes a scrolling body would be cut by this rather than by the `overflow`
+ * that already cuts it. That costs nothing today - every menu in the app lives
+ * in a `scroll: 'hidden'` panel, which gets `--fit` and not this - but if a
+ * panel with a `.menu-popup` ever becomes `scroll: 'auto'`, the escape rule in
+ * responsive.css will need a `mask-image: none` beside its `overflow: visible`. */
+.dash-panel__body--scroll,
+.dash-tabs__body:not(.dash-tabs__body--fit) {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* --- tabs ----------------------------------------------------------------- */
+
+/* Two panels use these: the book/tape module and the account band.
+ *
+ * The bar draws NO fill of its own any more. It used to, back when the panel
+ * under it was transparent, and that is exactly what made the bottom band read
+ * as a 40px chip floating over bare page with the table below it on the page
+ * colour. The panel is the card; the bar is a region of it, marked off by a
+ * 1px rule at its base and nothing else. */
+.dash-tabs {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-tabs__bar {
+  flex: none;
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-1);
+  /* 41px, NOT 40: the band is 40px and the rule is a 41st row UNDER it.
+     `box-sizing` is border-box app-wide, so a 40px height spends one of those
+     rows on the border and leaves 39px of band - which put every tab label 1px
+     high and the hairline 1px shallow. Measured, the reference's bottom band
+     runs y720-759 with its rule at y760, and its book bar y60-99 with the rule
+     at y100; both are 40 + 1. */
+  height: 41px;
+  /* The FALLBACK inset. styles.css overrides this pair - `gap: 8px` and
+     `padding: 0 16px 0 8px` - from the sheet that is injected last, because the
+     bar's rhythm is one decision that has to hold in both tab bars and it kept
+     drifting when two files stated it. What is left here is a sane default for
+     anything that renders this bar outside `.dash`: 4px plus each tab's own 8px
+     still lands the first label on the 16px card inset. */
+  padding: 0 var(--sp-1);
+  background: none;
+  /* The rule the active-tab stub sits on. One hairline for the whole band, not
+     a border per panel. */
+  border-bottom: 1px solid var(--panel-line);
+  /* Eight tabs plus the market filter fit at 1513px and do not at 660px. A
+     scroller is the graceful end of that; the scrollbar itself is suppressed
+     because a 6px bar inside a 40px strip reads as damage. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  /* The bar doubles as a drag region - it is the one piece of panel chrome
+     that exists permanently, so it may as well be one. Actual controls inside
+     it are excluded by react-grid-layout's `cancel` selector. */
+  cursor: grab;
+  user-select: none;
+}
+/* A control in the band (the account book's menu) has to escape the bar.
+   Tab bars scroll; this one does not. */
+.dash-tabs__bar.has-end { overflow: visible; }
+.dash-tabs__bar::-webkit-scrollbar { display: none; }
+.dash-tabs__bar:active { cursor: grabbing; }
+
+/* 14px/400. Hierarchy between the selected tab and the rest is carried by
+   COLOUR plus a short amber stub, never by weight - the two states are the same
+   size and the same weight, which is what stops a tab bar from flickering as
+   the selection moves.
+ *
+ * PADDING IS 8px, NOT 12. The eight bottom-band labels render at pixel-identical
+ * widths to the reference's (Positions (0) 78px, Balances 57px, Account History
+ * 101px - measured, all eight match), so the bar's rhythm is decided entirely by
+ * this number and the bar's own 8px gap. At 12px the rendered gap between
+ * adjacent labels came out at 35px against the reference's 27px, and the tab row
+ * ran 940px wide against 884px - eight tabs each 8px too wide, accumulating into
+ * a bar that reached 56px further across the panel. At 8px: 8 + 8 + 8 = 24px of
+ * box gap, which renders as the measured 27px once the glyphs' side bearings are
+ * counted, and the first label lands 17px inside the card edge (4px panel to bar,
+ * 8px bar padding, 8px here, ~1px bearing) exactly as the reference does. */
+.dash-tab {
+  position: relative;
+  flex: none;
+  appearance: none;
+  margin: 0;
+  padding: 0 var(--sp-2);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--lh-base);
+  letter-spacing: inherit;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.dash-tab:hover { color: var(--text); background: none; }
+.dash-tab.is-active { color: var(--text); }
+
+/* THE ACTIVE MARKER IS A STUB, NOT A RULE.
+ *
+ * 16px wide and 3px tall, centred under the LABEL - measured. It was a 2px
+ * border-bottom spanning the whole button, which at "Open Orders (0)" is an
+ * 89-96px bar: wide enough to read as a second divider competing with the
+ * hairline it sits on, and wide enough that the marker's length changed with
+ * the tab's word count. A fixed stub is the same mark under every tab.
+ *
+ * Drawn as a pseudo-element rather than a border so its width is independent of
+ * the button box. `bottom: 0` rather than `-1px` because the bar clips on the
+ * y axis (it is an x-scroller), so a stub hanging below the content box would
+ * be cut - at 3px tall it lands on the hairline either way. */
+.dash-tab.is-active::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 3px;
+  background: var(--accent);
+}
+
+/* THE HEADING A SINGLE-VIEW PANEL GETS INSTEAD OF A TAB ROW.
+ *
+ * It sits in `.dash-tabs__bar` - the same band, so it cannot drift out of line
+ * with the tab row beside it - and takes the ACTIVE tab's type exactly: 14px/400
+ * in --text. Not 500, and not --fs-head: measured, the reference's account
+ * heading has the same 10px cap and lands on the same ink rows (735-744) as the
+ * tab labels in the panel to its left, and the whole page tops out at weight
+ * 500 with rank carried by colour.
+ *
+ * The padding is `.dash-tab`'s own, so the heading starts exactly where a first
+ * tab would: 8px here on top of the bar's 8px puts the first glyph 16px inside
+ * the card edge - the measured x1537 against a panel edge of x1521, and the same
+ * 17px the tab row beside it lands on.
+ *
+ * `letter-spacing: inherit` and `margin: 0` undo styles.css's global `h2`,
+ * which is a 20px-line 500-weight tracked heading for document pages and has no
+ * business setting the type of a panel band. */
+.dash-heading {
+  flex: none;
+  display: flex;
+  align-items: center;
+  margin: 0;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--lh-base);
+  letter-spacing: inherit;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Right-hand end of the bar. `cursor: default` because this is not a drag
+   region even though its parent is.
+ *
+ * NO PADDING ON THE RIGHT. The bar's own right inset is 16px and it is set in
+ * styles.css, which is injected last and deliberately owns the bar's rhythm (see
+ * its "DASHBOARD TAB BARS" block). A second inset here stacked on top of it:
+ * 16 + 12 put the "Current market" label 28px inside the card edge against a
+ * 17px inset on the left, so the one bar on the page that should read symmetric
+ * was the one that did not. The reference measures 17px left / 16px right; the
+ * bar alone produces that, and this element adding nothing is what keeps the two
+ * ends answering to one number instead of two. `padding-left` stays: it is a
+ * minimum gap from the last tab, not an edge inset. */
+.dash-tabs__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-left: var(--sp-4);
+  padding-right: 0;
+  cursor: default;
+}
+
+.dash-tabs__body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+/* A tab whose content measures its own box - the order book. Same contract as
+   `.dash-panel__body--fit`. */
+.dash-tabs__body--fit {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- current-market filter ------------------------------------------------ */
+
+.dash-mktfilter {
+  display: inline-flex;
+  /* `label` in styles.css is a COLUMN flexbox - it is the form-field wrapper
+     for the whole app. This is a checkbox beside its words, so the direction
+     has to be stated, not just the display. Without it the box sits above the
+     text and the filter renders two lines tall in a 40px bar. */
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  /* --disabled, not --muted. This is a filter that is OFF by default sitting in
+     a bar full of tab labels; at --muted it was as bright as they are and read
+     as a ninth tab. The reference keeps it well below them. It brightens to
+     --text on hover like everything else, so it is never unreadable - only
+     quiet until you go looking for it. */
+  color: var(--disabled);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.dash-mktfilter:hover { color: var(--text); }
+
+/* A HOLLOW SQUARE, not a filled one.
+ *
+ * The native checkbox paints its unchecked state as a light-grey filled box
+ * with a mid-grey border, which on this palette reads as already ticked - and
+ * `accent-color` only themes the CHECKED fill, so it could not fix that.
+ * `appearance: none` hands us the whole box: the panel shows through a 1px
+ * --line outline when off, and it fills amber with a dark tick when on.
+ *
+ * The tick is a background-image rather than a pseudo-element because
+ * ::before/::after on a replaced element are not reliable across engines even
+ * after `appearance: none`, and a 12x12 inline SVG costs no request. */
+.dash-mktfilter input {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: transparent no-repeat center;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out);
+}
+.dash-mktfilter input:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.2 4.8 8.5 9.5 3.8' fill='none' stroke='%2305222a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+.dash-mktfilter input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* The filter's own wrapper has to be transparent to layout - the tables inside
+   it are the panel's content and were sized against the body, not against an
+   extra box. */
+.dash-filtered { display: contents; }
+/* ...except `display: contents` removes the element from the box tree, so the
+   note below is a sibling of the table rather than a child of a wrapper. That
+   is exactly what is wanted: it reads as a line under the table. */
+.dash-filtered__note {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-2);
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+}
+
+/* --- a view with no source ------------------------------------------------ */
+
+/* DATA HONESTY, rendered. Two of the account tabs have no endpoint behind them
+   on this backend, so they show an em-dash and a sentence about where the real
+   data is - never a zero, never a plausible-looking empty table that implies
+   the account genuinely has no history. */
+.dash-nosource {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  /* NEAR THE TOP, NOT IN THE MIDDLE. The measured empty state sits ~36px under
+     the tab bar's rule, which is a caption on the table that is not there.
+     Centring it in the whole body - which is what `justify-content: center` and
+     `min-height: 100%` used to do here - drops it 130px down a 320px band,
+     where it reads as a lost line rather than as a note about the tab above.
+     Same words, same honesty, placed where the first row would have been. */
+  padding: var(--sp-6) var(--sp-4) var(--sp-4);
+  text-align: center;
+  max-width: 52ch;
+  margin-inline: auto;
+  color: var(--dim);
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+}
+.dash-nosource__mark {
+  color: var(--dim);
+  font-size: var(--fs-xl);
+  font-weight: 400;
+  line-height: var(--lh-xl);
+}
+
+/* --- empty states --------------------------------------------------------- */
+
+/* A disconnected panel is CORRECT - there is no account, so there are no rows,
+   and inventing any would be the worst thing this app could do. What was wrong
+   is where the sentence sat: "Connect a wallet." rendered as one 13px line in
+   the top-left of a 1300x230 panel, leaving ~210px of empty surface below the
+   tab strip. That reads as an unimplemented panel, not as an empty account.
+ *
+ * CENTRED HORIZONTALLY, HIGH VERTICALLY. This block used to centre on both
+ * axes, which put the line 130px down a 320px band - measured against the
+ * reference it sits ~36px under the tab rule, i.e. roughly where the first row
+ * of the table would have been, reading as a caption on the tab above rather
+ * than as a stray line in a void. Same words, no invented data.
+ *
+ * The colour drops to --dim for the same reason: an empty state is the quietest
+ * thing a panel can say, and at --muted it was as loud as a data value.
+ *
+ * `:has(> p:only-child)` is the test for "this panel's entire content is one
+ * short message" - a panel with a table, a warning AND a message keeps its
+ * normal top-aligned flow. A browser without :has() simply gets the old
+ * top-left placement, so this cannot break anything. */
+/* `flex-direction` is stated rather than inherited, and that is not tidiness:
+   the rules further down give a `--fit` panel `flex-direction: column`, which
+   swaps what `justify-content` and `align-items` mean. Left implicit, the pair
+   below reads as "top, centred" in one panel and "centred, left" in the next -
+   which is exactly the bug this block was written to fix, reappearing in half
+   the panels. */
+.dash-panel__body .panel:has(> p:only-child),
+.dash-tabs__body .panel:has(> p:only-child) {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding-top: var(--sp-6);
+  text-align: center;
+}
+/* Margin AND padding, because the components that own these sentences pad them
+   to centre themselves in a standalone page - which inside a panel is a second
+   opinion about placement fighting the one above. The chrome decides where an
+   empty state sits; the component decides what it says. */
+.dash-panel__body .panel:has(> p:only-child) > p,
+.dash-tabs__body .panel:has(> p:only-child) > p {
+  margin: 0;
+  padding: 0;
+  max-width: 34ch;
+  color: var(--dim);
+}
+
+/* The wired-in components are standalone panels in their own right and draw
+   their own box. Inside dashboard chrome that would be a box in a box, so strip
+   it - the same trick .tabbody already uses. `overflow: visible` matters as
+   well as looking right: `.panel { overflow-x: auto }` otherwise makes each of
+   these a scroll container, which would swallow the body's scrolling.
+ *
+ * All three parents are listed because a tabbed panel puts the component one or
+ * two levels further down - `.dash-tabs__body > .panel`, or
+ * `.dash-tabs__body > .dash-filtered > .panel` on a filtered account tab.
+ * `.dash-filtered` is `display: contents`, so it disappears from the BOX tree
+ * and its child inherits the body's flex context - but it is still a real node
+ * in the SELECTOR tree, which is why `>` has to be spelled out for it.
+ *
+ * `.private-scope` (incognito mode) is the SAME case and was the bug this
+ * paragraph failed to prevent: wrapping the account tables in it put a node
+ * between the body and the `.panel`, every `>` here stopped matching, and each
+ * table got its border, radius and padding back - a visible box inside a box on
+ * the positions, orders and account panels. Any future display:contents wrapper
+ * has to be added here too. */
+.dash-panel__body > .panel,
+.dash-panel__body > .private-scope > .panel,
+.dash-tabs__body > .panel,
+.dash-tabs__body > .private-scope > .panel,
+.dash-filtered > .panel,
+.dash-filtered > .private-scope > .panel,
+.private-scope > .panel {
+  border: none;
+  background: none;
+  border-radius: 0;
+  padding: 0;
+  overflow: visible;
+}
+.dash-panel__body--fit > .panel,
+.dash-panel__body--fit > .private-scope > .panel,
+.dash-tabs__body--fit > .panel,
+.dash-tabs__body--fit > .private-scope > .panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dash-panel__body--scroll > .panel,
+.dash-panel__body--scroll > .private-scope > .panel,
+.dash-tabs__body:not(.dash-tabs__body--fit) > .panel,
+.dash-tabs__body:not(.dash-tabs__body--fit) > .private-scope > .panel,
+.dash-tabs__body:not(.dash-tabs__body--fit) > .dash-filtered > .panel,
+.dash-tabs__body:not(.dash-tabs__body--fit) > .dash-filtered > .private-scope > .panel { min-height: 100%; }
+
+/* The chart's holder is a fixed 380px tall on its own; in a panel it fills
+   whatever height the panel has, and klinecharts re-measures from there. */
+.dash-panel__body .chartholder-wrap { flex: 1; min-height: 0; }
+
+/* --- react-grid-layout theming ------------------------------------------- */
+
+/* Mostly NOT here. This file used to re-theme the placeholder, the resize
+   grips, the hover border and the dragging state, and styles.css themed all
+   four again at a higher specificity with different values - a 4px-vs-8px
+   placeholder radius and two different hover border colours, of which you only
+   ever saw one. The library overrides live in styles.css alone, next to the
+   transition rule that has to sit there for correctness reasons. Search
+   `.dash .dash-grid` there. The one exception is the resize grips' opacity
+   above, which styles.css transitions but never sets. */
+
+/* Smooth tab switching (Panel.tsx PanelTabs): the bodies share one grid cell,
+   so the outgoing tab fades out beneath the incoming one; one marker slides. */
+.dash-tabs__stack {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+}
+.dash-tabs__stack > .dash-tabs__body { grid-area: 1 / 1; min-height: 0; }
+.dash-tabs__body.is-leaving {
+  pointer-events: none;
+  animation: mo-tab-out 200ms var(--ease-out) forwards;
+}
+.dash-tabs__stack > .dash-tabs__body.mo-switch { animation: mo-tab-in 220ms var(--ease-out) both; }
+@keyframes mo-tab-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mo-tab-in { from { opacity: 0; } to { opacity: 1; } }
+.dash-tabs__bar.has-ink { position: relative; }
+.dash .dash-tabs__bar.has-ink .dash-tab::after,
+.dash-tabs__bar.has-ink .dash-tab.is-active::after { display: none; }
+.dash-tabs__ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 16px;
+  height: 3px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.dash-tabs__ink.is-ready { transition: transform 280ms var(--ease-spring); }
+@media (prefers-reduced-motion: reduce) {
+  .dash-tabs__body.is-leaving { display: none; }
+  .dash-tabs__stack > .dash-tabs__body.mo-switch { animation: none; }
+  .dash-tabs__ink.is-ready { transition: none; }
+}

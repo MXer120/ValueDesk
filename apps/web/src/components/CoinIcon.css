@@ -1,0 +1,34 @@
+/* Coin / chain icons (CoinIcon.tsx). Size comes inline; call sites add their own layout class. */
+.coin-ic {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  object-fit: cover;
+  vertical-align: middle;
+  user-select: none;
+}
+/* The letter avatar for anything without an icon: ink on the coin's colour disc. */
+.coin-ic--letter {
+  color: var(--bg);
+  font-weight: 700;
+  line-height: 1;
+}
+/* The letter is drawn, not written: a table cell's text must stay the market's
+   name alone - the "Current market" filter (dashboard/Panel.tsx:MarketOnly)
+   matches rows on it. */
+.coin-ic--letter::before { content: attr(data-letter); }
+
+/* Icon + name in a table cell or list row. */
+.coin-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  vertical-align: middle;
+}
+.coin-lbl__t {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

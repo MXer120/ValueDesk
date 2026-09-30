@@ -1,0 +1,3502 @@
+{
+ "platforms": [
+  {
+   "id": "binance",
+   "name": "Binance",
+   "kind": "cex",
+   "aliases": [
+    "binance",
+    "bnc",
+    "bn"
+   ],
+   "domain": "binance.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/52/large/binance.jpg?1706864274",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "binance_us",
+   "name": "Binance US",
+   "kind": "cex",
+   "aliases": [
+    "binance us",
+    "binanceus"
+   ],
+   "domain": "binance.us",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/469/large/Binance.png?1706864454",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coinbase",
+   "name": "Coinbase",
+   "kind": "cex",
+   "aliases": [
+    "coinbase",
+    "cb",
+    "coinbase exchange"
+   ],
+   "domain": "coinbase.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/23/large/Coinbase_Coin_Primary.png?1706864258",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coinbase_advanced",
+   "name": "Coinbase Advanced",
+   "kind": "cex",
+   "aliases": [
+    "coinbase advanced",
+    "coinbase pro"
+   ],
+   "domain": "coinbase.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/23/large/Coinbase_Coin_Primary.png?1706864258",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "kraken",
+   "name": "Kraken",
+   "kind": "cex",
+   "aliases": [
+    "kraken"
+   ],
+   "domain": "kraken.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/29/large/kraken.jpg?1706864265",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "okx",
+   "name": "OKX",
+   "kind": "cex",
+   "aliases": [
+    "okx",
+    "okex"
+   ],
+   "domain": "okx.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/96/large/WeChat_Image_20220117220452.png?1706864283",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bybit",
+   "name": "Bybit",
+   "kind": "cex",
+   "aliases": [
+    "bybit"
+   ],
+   "domain": "bybit.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/698/large/bybit_spot.png?1706864649",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitget",
+   "name": "Bitget",
+   "kind": "cex",
+   "aliases": [
+    "bitget",
+    "bg"
+   ],
+   "domain": "bitget.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/540/large/2023-07-25_21.47.43.jpg?1706864507",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "kucoin",
+   "name": "KuCoin",
+   "kind": "cex",
+   "aliases": [
+    "kucoin",
+    "kc"
+   ],
+   "domain": "kucoin.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/61/large/kucoin.png?1706864282",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "gate",
+   "name": "Gate.io",
+   "kind": "cex",
+   "aliases": [
+    "gate",
+    "gate.io",
+    "gateio"
+   ],
+   "domain": "gate.io",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/60/large/Frame_1.png?1747795534",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "htx",
+   "name": "HTX",
+   "kind": "cex",
+   "aliases": [
+    "htx",
+    "huobi"
+   ],
+   "domain": "htx.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/25/large/htx.png?1721712842",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "mexc",
+   "name": "MEXC",
+   "kind": "cex",
+   "aliases": [
+    "mexc"
+   ],
+   "domain": "mexc.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/409/large/164286be-32a5-4b58-978c-d072eea00eb9.jpeg?1775619316",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "crypto_com",
+   "name": "Crypto.com",
+   "kind": "cex",
+   "aliases": [
+    "crypto.com",
+    "cryptocom",
+    "crypto com exchange"
+   ],
+   "domain": "crypto.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/589/large/h2oMjPp6_400x400.jpg?1706864542",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitfinex",
+   "name": "Bitfinex",
+   "kind": "cex",
+   "aliases": [
+    "bitfinex"
+   ],
+   "domain": "bitfinex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/4/large/BItfinex.png?1706864245",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitstamp",
+   "name": "Bitstamp",
+   "kind": "cex",
+   "aliases": [
+    "bitstamp"
+   ],
+   "domain": "bitstamp.net",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/9/large/bitstamp.jpg?1706864251",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "gemini",
+   "name": "Gemini",
+   "kind": "cex",
+   "aliases": [
+    "gemini"
+   ],
+   "domain": "gemini.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/50/large/gemini.png?1706864273",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "upbit",
+   "name": "Upbit",
+   "kind": "cex",
+   "aliases": [
+    "upbit"
+   ],
+   "domain": "upbit.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/117/large/upbit.png?1706864294",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bithumb",
+   "name": "Bithumb",
+   "kind": "cex",
+   "aliases": [
+    "bithumb"
+   ],
+   "domain": "bithumb.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/6/large/bithumb_BI.png?1706864248",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coinone",
+   "name": "Coinone",
+   "kind": "cex",
+   "aliases": [
+    "coinone"
+   ],
+   "domain": "coinone.co.kr",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/20/large/coinone_circle_500x500.png?1706864256",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "korbit",
+   "name": "Korbit",
+   "kind": "cex",
+   "aliases": [
+    "korbit"
+   ],
+   "domain": "korbit.co.kr",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/28/large/digital-x.png?1790061806",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bingx",
+   "name": "BingX",
+   "kind": "cex",
+   "aliases": [
+    "bingx"
+   ],
+   "domain": "bingx.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/812/large/YtFwQwJr_400x400.jpg?1706864837",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitvavo",
+   "name": "Bitvavo",
+   "kind": "cex",
+   "aliases": [
+    "bitvavo"
+   ],
+   "domain": "bitvavo.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/714/large/bitvavo-mark-square-black.png?1706864670",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitpanda",
+   "name": "Bitpanda",
+   "kind": "cex",
+   "aliases": [
+    "bitpanda"
+   ],
+   "domain": "bitpanda.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/474/large/app-icon_%281%29.png?1740474944",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "lbank",
+   "name": "LBank",
+   "kind": "cex",
+   "aliases": [
+    "lbank"
+   ],
+   "domain": "lbank.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/118/large/LBank_200_200.png?1757347528",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "phemex",
+   "name": "Phemex",
+   "kind": "cex",
+   "aliases": [
+    "phemex"
+   ],
+   "domain": "phemex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/564/large/phemex-exchange-new-logo.png?1763018222",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitmart",
+   "name": "BitMart",
+   "kind": "cex",
+   "aliases": [
+    "bitmart"
+   ],
+   "domain": "bitmart.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/bitmart",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "whitebit",
+   "name": "WhiteBIT",
+   "kind": "cex",
+   "aliases": [
+    "whitebit"
+   ],
+   "domain": "whitebit.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/418/large/800_800.jpg?1706864419",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "deribit",
+   "name": "Deribit",
+   "kind": "cex",
+   "aliases": [
+    "deribit"
+   ],
+   "domain": "deribit.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/deribit",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "bullish",
+   "name": "Bullish",
+   "kind": "cex",
+   "aliases": [
+    "bullish"
+   ],
+   "domain": "bullish.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/905/large/bullish_com.png?1706864904",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "robinhood",
+   "name": "Robinhood",
+   "kind": "cex",
+   "aliases": [
+    "robinhood",
+    "rh"
+   ],
+   "domain": "robinhood.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/robinhood",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "revolut",
+   "name": "Revolut",
+   "kind": "cex",
+   "aliases": [
+    "revolut"
+   ],
+   "domain": "revolut.com",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://revolut.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "etoro",
+   "name": "eToro",
+   "kind": "cex",
+   "aliases": [
+    "etoro"
+   ],
+   "domain": "etoro.com",
+   "logo": {
+    "url": "https://www.etoro.com/favicon.svg",
+    "source": "site",
+    "px": 512
+   }
+  },
+  {
+   "id": "poloniex",
+   "name": "Poloniex",
+   "kind": "cex",
+   "aliases": [
+    "poloniex",
+    "polo"
+   ],
+   "domain": "poloniex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/37/large/poloniex.png?1706864269",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "hitbtc",
+   "name": "HitBTC",
+   "kind": "cex",
+   "aliases": [
+    "hitbtc"
+   ],
+   "domain": "hitbtc.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/24/large/hitbtc.png?1706864259",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitflyer",
+   "name": "bitFlyer",
+   "kind": "cex",
+   "aliases": [
+    "bitflyer"
+   ],
+   "domain": "bitflyer.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/5/large/bitFlyer-logo.png?1706864247",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coincheck",
+   "name": "Coincheck",
+   "kind": "cex",
+   "aliases": [
+    "coincheck"
+   ],
+   "domain": "coincheck.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/18/large/Coincheck.jpg?1706864255",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitbank",
+   "name": "bitbank",
+   "kind": "cex",
+   "aliases": [
+    "bitbank"
+   ],
+   "domain": "bitbank.cc",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/122/large/bitbank.jpg?1706864298",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "indodax",
+   "name": "Indodax",
+   "kind": "cex",
+   "aliases": [
+    "indodax"
+   ],
+   "domain": "indodax.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/3/large/logogram-Indodax-new-_JPG_format.jpg?1706864243",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "tokocrypto",
+   "name": "Tokocrypto",
+   "kind": "cex",
+   "aliases": [
+    "tokocrypto"
+   ],
+   "domain": "tokocrypto.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/501/large/toko.png?1706864476",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "wazirx",
+   "name": "WazirX",
+   "kind": "cex",
+   "aliases": [
+    "wazirx"
+   ],
+   "domain": "wazirx.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/274/large/wazirx.jpg?1706864354",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coindcx",
+   "name": "CoinDCX",
+   "kind": "cex",
+   "aliases": [
+    "coindcx"
+   ],
+   "domain": "coindcx.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/520/large/coindcx.png?1706864493",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "mercado_bitcoin",
+   "name": "Mercado Bitcoin",
+   "kind": "cex",
+   "aliases": [
+    "mercado bitcoin",
+    "mercadobitcoin"
+   ],
+   "domain": "mercadobitcoin.com.br",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/34/large/logo_MB_hexagono.png?1706864267",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitso",
+   "name": "Bitso",
+   "kind": "cex",
+   "aliases": [
+    "bitso"
+   ],
+   "domain": "bitso.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/8/large/Bitso-icon-dark.png?1706864249",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "luno",
+   "name": "Luno",
+   "kind": "cex",
+   "aliases": [
+    "luno"
+   ],
+   "domain": "luno.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/33/large/RGB_LUNO_SYMBOL_NAVY_BLUE_1.png?1706864266",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "valr",
+   "name": "VALR",
+   "kind": "cex",
+   "aliases": [
+    "valr"
+   ],
+   "domain": "valr.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1036/large/VALR.png?1720089142",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "btcturk",
+   "name": "BTCTurk",
+   "kind": "cex",
+   "aliases": [
+    "btcturk"
+   ],
+   "domain": "btcturk.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/223/large/btctrurk_kripto.png?1706864333",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "paribu",
+   "name": "Paribu",
+   "kind": "cex",
+   "aliases": [
+    "paribu"
+   ],
+   "domain": "paribu.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/136/large/paribu-new-logo.png?1763018109",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitopro",
+   "name": "BitoPro",
+   "kind": "cex",
+   "aliases": [
+    "bitopro"
+   ],
+   "domain": "bitopro.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/358/large/bitopro_coingecko_250x250_%281%29.png?1706864386",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "max_exchange",
+   "name": "MAX Exchange",
+   "kind": "cex",
+   "aliases": [
+    "maicoin"
+   ],
+   "domain": "max.maicoin.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://max.maicoin.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "okcoin",
+   "name": "OKCoin",
+   "kind": "cex",
+   "aliases": [
+    "okcoin"
+   ],
+   "domain": "okcoin.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/okcoin",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "bitkub",
+   "name": "Bitkub",
+   "kind": "cex",
+   "aliases": [
+    "bitkub"
+   ],
+   "domain": "bitkub.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/249/large/bitkub.png?1706864345",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coins_ph",
+   "name": "Coins.ph",
+   "kind": "cex",
+   "aliases": [
+    "coins.ph",
+    "coinsph"
+   ],
+   "domain": "coins.ph",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/999/large/coinspro.png?1706864987",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coinw",
+   "name": "CoinW",
+   "kind": "cex",
+   "aliases": [
+    "coinw"
+   ],
+   "domain": "coinw.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1172/large/coinw_new_logo.png?1713879109",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "xt",
+   "name": "XT.com",
+   "kind": "cex",
+   "aliases": [
+    "xt",
+    "xt.com"
+   ],
+   "domain": "xt.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/404/large/xt_logo_%E7%BB%BF.png?1761205934",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "toobit",
+   "name": "Toobit",
+   "kind": "cex",
+   "aliases": [
+    "toobit"
+   ],
+   "domain": "toobit.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1139/large/Toobit_logo400X400.png?1706865157",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "blofin",
+   "name": "BloFin",
+   "kind": "cex",
+   "aliases": [
+    "blofin"
+   ],
+   "domain": "blofin.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1645/large/blofin_logo.jpeg?1718852326",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "weex",
+   "name": "WEEX",
+   "kind": "cex",
+   "aliases": [
+    "weex"
+   ],
+   "domain": "weex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1398/large/weex.png?1730946490",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitunix",
+   "name": "Bitunix",
+   "kind": "cex",
+   "aliases": [
+    "bitunix"
+   ],
+   "domain": "bitunix.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1185/large/APP_icon_1024.png?1706865197",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "pionex",
+   "name": "Pionex",
+   "kind": "cex",
+   "aliases": [
+    "pionex"
+   ],
+   "domain": "pionex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1026/large/pionex.png?1706865056",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "ascendex",
+   "name": "AscendEX",
+   "kind": "cex",
+   "aliases": [
+    "ascendex"
+   ],
+   "domain": "ascendex.com",
+   "logo": null
+  },
+  {
+   "id": "probit",
+   "name": "ProBit",
+   "kind": "cex",
+   "aliases": [
+    "probit"
+   ],
+   "domain": "probit.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://probit.com&size=128",
+    "source": "favicon",
+    "px": 64
+   }
+  },
+  {
+   "id": "hotcoin",
+   "name": "Hotcoin",
+   "kind": "cex",
+   "aliases": [
+    "hotcoin"
+   ],
+   "domain": "hotcoinfin.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1345/large/hotcoin.png?1756783952",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "digifinex",
+   "name": "DigiFinex",
+   "kind": "cex",
+   "aliases": [
+    "digifinex"
+   ],
+   "domain": "digifinex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/225/large/DF_logo.png?1706864334",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitvenus",
+   "name": "BitVenus",
+   "kind": "cex",
+   "aliases": [
+    "bitvenus"
+   ],
+   "domain": "bitvenus.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/bitvenus",
+    "source": "defillama",
+    "px": 200
+   }
+  },
+  {
+   "id": "nexo",
+   "name": "Nexo",
+   "kind": "cex",
+   "aliases": [
+    "nexo"
+   ],
+   "domain": "nexo.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/nexo",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "swissborg",
+   "name": "SwissBorg",
+   "kind": "cex",
+   "aliases": [
+    "swissborg"
+   ],
+   "domain": "swissborg.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/swissborg",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "uphold",
+   "name": "Uphold",
+   "kind": "cex",
+   "aliases": [
+    "uphold"
+   ],
+   "domain": "uphold.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://uphold.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "bitrue",
+   "name": "Bitrue",
+   "kind": "cex",
+   "aliases": [
+    "bitrue"
+   ],
+   "domain": "bitrue.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/254/large/unnamed_%281%29.png?1706864350",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "coinex",
+   "name": "CoinEx",
+   "kind": "cex",
+   "aliases": [
+    "coinex"
+   ],
+   "domain": "coinex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/135/large/coinex.jpg?1706864305",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "backpack_exchange",
+   "name": "Backpack Exchange",
+   "kind": "cex",
+   "aliases": [
+    "backpack exchange"
+   ],
+   "domain": "backpack.exchange",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1387/large/backpack.jpeg?1708663541",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "hashkey",
+   "name": "HashKey Exchange",
+   "kind": "cex",
+   "aliases": [
+    "hashkey"
+   ],
+   "domain": "hashkey.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1206/large/hashkey_2.png?1706869603",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "osl",
+   "name": "OSL",
+   "kind": "cex",
+   "aliases": [
+    "osl"
+   ],
+   "domain": "osl.com",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://osl.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "uniswap",
+   "name": "Uniswap",
+   "kind": "dex",
+   "aliases": [
+    "uniswap",
+    "uni"
+   ],
+   "domain": "uniswap.org",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/uniswap-v3",
+    "source": "defillama",
+    "px": 230
+   }
+  },
+  {
+   "id": "pancakeswap",
+   "name": "PancakeSwap",
+   "kind": "dex",
+   "aliases": [
+    "pancakeswap",
+    "cake"
+   ],
+   "domain": "pancakeswap.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/pancakeswap-amm",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "sushiswap",
+   "name": "SushiSwap",
+   "kind": "dex",
+   "aliases": [
+    "sushiswap",
+    "sushi"
+   ],
+   "domain": "sushi.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/576/large/2048x2048_Logo.png?1706864530",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "curve",
+   "name": "Curve",
+   "kind": "dex",
+   "aliases": [
+    "curve",
+    "curve finance"
+   ],
+   "domain": "curve.fi",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/curve",
+    "source": "defillama",
+    "px": 256
+   }
+  },
+  {
+   "id": "balancer",
+   "name": "Balancer",
+   "kind": "dex",
+   "aliases": [
+    "balancer"
+   ],
+   "domain": "balancer.fi",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/balancer-v2",
+    "source": "defillama",
+    "px": 256
+   }
+  },
+  {
+   "id": "1inch",
+   "name": "1inch",
+   "kind": "dex",
+   "aliases": [
+    "1inch"
+   ],
+   "domain": "1inch.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/1inch-swap",
+    "source": "defillama",
+    "px": 300
+   }
+  },
+  {
+   "id": "matcha",
+   "name": "Matcha (0x)",
+   "kind": "dex",
+   "aliases": [
+    "matcha",
+    "0x",
+    "0x protocol"
+   ],
+   "domain": "matcha.xyz",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/matcha",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "cowswap",
+   "name": "CoW Swap",
+   "kind": "dex",
+   "aliases": [
+    "cowswap",
+    "cow swap",
+    "cow protocol"
+   ],
+   "domain": "swap.cow.fi",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/cowswap",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "paraswap",
+   "name": "Paraswap (Velora)",
+   "kind": "dex",
+   "aliases": [
+    "paraswap",
+    "velora"
+   ],
+   "domain": "paraswap.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/velora",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "jupiter",
+   "name": "Jupiter",
+   "kind": "dex",
+   "aliases": [
+    "jupiter",
+    "jup"
+   ],
+   "domain": "jup.ag",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/jupiter-aggregator",
+    "source": "defillama",
+    "px": 200
+   }
+  },
+  {
+   "id": "raydium",
+   "name": "Raydium",
+   "kind": "dex",
+   "aliases": [
+    "raydium",
+    "ray"
+   ],
+   "domain": "raydium.io",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/649/large/raydium.jpeg?1706864594",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "orca",
+   "name": "Orca",
+   "kind": "dex",
+   "aliases": [
+    "orca"
+   ],
+   "domain": "orca.so",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/691/large/orca.png?1706864640",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "meteora",
+   "name": "Meteora",
+   "kind": "dex",
+   "aliases": [
+    "meteora"
+   ],
+   "domain": "meteora.ag",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1520/large/meteora.jpeg?1710908196",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "hyperliquid",
+   "name": "Hyperliquid",
+   "kind": "dex",
+   "aliases": [
+    "hyperliquid",
+    "hl"
+   ],
+   "domain": "hyperliquid.xyz",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1571/large/PFP.png?1714470912",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "dydx",
+   "name": "dYdX",
+   "kind": "dex",
+   "aliases": [
+    "dydx"
+   ],
+   "domain": "dydx.exchange",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/dydx-v4",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "gmx",
+   "name": "GMX",
+   "kind": "dex",
+   "aliases": [
+    "gmx"
+   ],
+   "domain": "gmx.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/gmx-v2-perps",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "aerodrome",
+   "name": "Aerodrome",
+   "kind": "dex",
+   "aliases": [
+    "aerodrome"
+   ],
+   "domain": "aerodrome.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/aerodrome",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "velodrome",
+   "name": "Velodrome",
+   "kind": "dex",
+   "aliases": [
+    "velodrome"
+   ],
+   "domain": "velodrome.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/velodrome-v2",
+    "source": "defillama",
+    "px": 240
+   }
+  },
+  {
+   "id": "traderjoe",
+   "name": "Trader Joe (LFJ)",
+   "kind": "dex",
+   "aliases": [
+    "trader joe",
+    "traderjoe",
+    "lfj"
+   ],
+   "domain": "lfj.gg",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/trader-joe",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "camelot",
+   "name": "Camelot",
+   "kind": "dex",
+   "aliases": [
+    "camelot"
+   ],
+   "domain": "camelot.exchange",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1007/large/vj5DIMhP_400x400.jpeg?1706864994",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "sodex",
+   "name": "SoDEX",
+   "kind": "dex",
+   "aliases": [
+    "sodex"
+   ],
+   "domain": "sodex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/22217/large/SoDEX-logo.png?1771995806",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "aster",
+   "name": "Aster",
+   "kind": "dex",
+   "aliases": [
+    "aster",
+    "asterdex"
+   ],
+   "domain": "asterdex.com",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/22102/large/_ASTER.png?1758244334",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "lighter",
+   "name": "Lighter",
+   "kind": "dex",
+   "aliases": [
+    "lighter"
+   ],
+   "domain": "lighter.xyz",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://lighter.xyz&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "paradex",
+   "name": "Paradex",
+   "kind": "dex",
+   "aliases": [
+    "paradex"
+   ],
+   "domain": "paradex.trade",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://paradex.trade&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "vertex",
+   "name": "Vertex",
+   "kind": "dex",
+   "aliases": [
+    "vertex",
+    "vertex protocol"
+   ],
+   "domain": "vertexprotocol.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/vertex-perps",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "drift",
+   "name": "Drift",
+   "kind": "dex",
+   "aliases": [
+    "drift",
+    "drift protocol"
+   ],
+   "domain": "drift.trade",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/drift-trade",
+    "source": "defillama",
+    "px": 200
+   }
+  },
+  {
+   "id": "kwenta",
+   "name": "Kwenta",
+   "kind": "dex",
+   "aliases": [
+    "kwenta"
+   ],
+   "domain": "kwenta.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/kwenta",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "synthetix",
+   "name": "Synthetix",
+   "kind": "dex",
+   "aliases": [
+    "synthetix",
+    "snx"
+   ],
+   "domain": "synthetix.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/synthetix-v3",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "apex_protocol",
+   "name": "ApeX Protocol",
+   "kind": "dex",
+   "aliases": [
+    "apex",
+    "apex protocol"
+   ],
+   "domain": "apex.exchange",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/apex-omni",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "edgex",
+   "name": "EdgeX",
+   "kind": "dex",
+   "aliases": [
+    "edgex"
+   ],
+   "domain": "edgex.exchange",
+   "logo": {
+    "url": "https://www.edgex.exchange/logo.svg",
+    "source": "site",
+    "px": 101
+   }
+  },
+  {
+   "id": "orderly",
+   "name": "Orderly Network",
+   "kind": "dex",
+   "aliases": [
+    "orderly",
+    "orderly network"
+   ],
+   "domain": "orderly.network",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/orderly-chain",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "thorchain",
+   "name": "THORChain",
+   "kind": "dex",
+   "aliases": [
+    "thorchain",
+    "thor"
+   ],
+   "domain": "thorchain.org",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/22244/large/THORChain_Exchange.png?1782375505",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "osmosis",
+   "name": "Osmosis",
+   "kind": "dex",
+   "aliases": [
+    "osmosis"
+   ],
+   "domain": "osmosis.zone",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/684/large/osmosis-dex.jpeg?1706864630",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "dodo",
+   "name": "DODO",
+   "kind": "dex",
+   "aliases": [
+    "dodo"
+   ],
+   "domain": "dodoex.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/dodo-amm",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "kyberswap",
+   "name": "KyberSwap",
+   "kind": "dex",
+   "aliases": [
+    "kyberswap",
+    "kyber"
+   ],
+   "domain": "kyberswap.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/kyberswap-classic",
+    "source": "defillama",
+    "px": 256
+   }
+  },
+  {
+   "id": "maverick",
+   "name": "Maverick Protocol",
+   "kind": "dex",
+   "aliases": [
+    "maverick"
+   ],
+   "domain": "mav.xyz",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/maverick-v2",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "ambient",
+   "name": "Ambient",
+   "kind": "dex",
+   "aliases": [
+    "ambient",
+    "ambient finance"
+   ],
+   "domain": "ambient.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/ambient",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "fluid",
+   "name": "Fluid",
+   "kind": "dex",
+   "aliases": [
+    "fluid"
+   ],
+   "domain": "fluid.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/fluid-dex",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "pendle",
+   "name": "Pendle",
+   "kind": "dex",
+   "aliases": [
+    "pendle"
+   ],
+   "domain": "pendle.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/pendle-v2",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "morpho",
+   "name": "Morpho",
+   "kind": "defi",
+   "aliases": [
+    "morpho"
+   ],
+   "domain": "morpho.org",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/morpho-blue",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "aave",
+   "name": "Aave",
+   "kind": "defi",
+   "aliases": [
+    "aave"
+   ],
+   "domain": "aave.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/aave-v3",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "compound",
+   "name": "Compound",
+   "kind": "defi",
+   "aliases": [
+    "compound"
+   ],
+   "domain": "compound.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/compound-v3",
+    "source": "defillama",
+    "px": 256
+   }
+  },
+  {
+   "id": "lido",
+   "name": "Lido",
+   "kind": "defi",
+   "aliases": [
+    "lido"
+   ],
+   "domain": "lido.fi",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/lido",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "eigenlayer",
+   "name": "EigenLayer",
+   "kind": "defi",
+   "aliases": [
+    "eigenlayer"
+   ],
+   "domain": "eigenlayer.xyz",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/eigencloud",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "stargate",
+   "name": "Stargate",
+   "kind": "bridge",
+   "aliases": [
+    "stargate",
+    "stargate finance"
+   ],
+   "domain": "stargate.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/stargate-v2",
+    "source": "defillama",
+    "px": 196
+   }
+  },
+  {
+   "id": "across",
+   "name": "Across",
+   "kind": "bridge",
+   "aliases": [
+    "across",
+    "across protocol"
+   ],
+   "domain": "across.to",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/across",
+    "source": "defillama",
+    "px": 140
+   }
+  },
+  {
+   "id": "relay",
+   "name": "Relay",
+   "kind": "bridge",
+   "aliases": [
+    "relay",
+    "relay.link"
+   ],
+   "domain": "relay.link",
+   "logo": {
+    "url": "https://relay.link/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "mayan",
+   "name": "Mayan",
+   "kind": "bridge",
+   "aliases": [
+    "mayan",
+    "mayan finance"
+   ],
+   "domain": "mayan.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/mayan-bridge",
+    "source": "defillama",
+    "px": 300
+   }
+  },
+  {
+   "id": "debridge",
+   "name": "deBridge",
+   "kind": "bridge",
+   "aliases": [
+    "debridge"
+   ],
+   "domain": "debridge.finance",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/debridge",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "metamask",
+   "name": "MetaMask",
+   "kind": "wallet",
+   "aliases": [
+    "metamask",
+    "mm"
+   ],
+   "domain": "metamask.io",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://metamask.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "rabby",
+   "name": "Rabby",
+   "kind": "wallet",
+   "aliases": [
+    "rabby",
+    "rabby wallet"
+   ],
+   "domain": "rabby.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/rabby-wallet",
+    "source": "defillama",
+    "px": 200
+   }
+  },
+  {
+   "id": "trust_wallet",
+   "name": "Trust Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "trust wallet",
+    "trustwallet"
+   ],
+   "domain": "trustwallet.com",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://trustwallet.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "coinbase_wallet",
+   "name": "Coinbase Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "coinbase wallet",
+    "base app"
+   ],
+   "domain": "wallet.coinbase.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/base-app",
+    "source": "defillama",
+    "px": 250
+   }
+  },
+  {
+   "id": "phantom",
+   "name": "Phantom",
+   "kind": "wallet",
+   "aliases": [
+    "phantom"
+   ],
+   "domain": "phantom.app",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://phantom.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "solflare",
+   "name": "Solflare",
+   "kind": "wallet",
+   "aliases": [
+    "solflare"
+   ],
+   "domain": "solflare.com",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://solflare.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "backpack_wallet",
+   "name": "Backpack",
+   "kind": "wallet",
+   "aliases": [
+    "backpack wallet",
+    "backpack"
+   ],
+   "domain": "backpack.app",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/backpack",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "okx_wallet",
+   "name": "OKX Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "okx wallet"
+   ],
+   "domain": "okx.com",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://okx.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "bitget_wallet",
+   "name": "Bitget Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "bitget wallet",
+    "bitkeep"
+   ],
+   "domain": "web3.bitget.com",
+   "logo": {
+    "url": "https://web3.bitget.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "binance_wallet",
+   "name": "Binance Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "binance wallet",
+    "binance web3 wallet"
+   ],
+   "domain": "binance.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/binance-wallet",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "rainbow",
+   "name": "Rainbow",
+   "kind": "wallet",
+   "aliases": [
+    "rainbow",
+    "rainbow wallet"
+   ],
+   "domain": "rainbow.me",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/rainbow-wallet",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "zerion",
+   "name": "Zerion",
+   "kind": "wallet",
+   "aliases": [
+    "zerion"
+   ],
+   "domain": "zerion.io",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://zerion.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "exodus",
+   "name": "Exodus",
+   "kind": "wallet",
+   "aliases": [
+    "exodus"
+   ],
+   "domain": "exodus.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://exodus.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "atomic_wallet",
+   "name": "Atomic Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "atomic wallet",
+    "atomic"
+   ],
+   "domain": "atomicwallet.io",
+   "logo": {
+    "url": "https://atomicwallet.io/images/logo.ico",
+    "source": "site",
+    "px": 48
+   }
+  },
+  {
+   "id": "keplr",
+   "name": "Keplr",
+   "kind": "wallet",
+   "aliases": [
+    "keplr"
+   ],
+   "domain": "keplr.app",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://keplr.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "leap_wallet",
+   "name": "Leap Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "leap",
+    "leap wallet"
+   ],
+   "domain": "leapwallet.io",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://leapwallet.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "argent",
+   "name": "Argent",
+   "kind": "wallet",
+   "aliases": [
+    "argent"
+   ],
+   "domain": "argent.xyz",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://argent.xyz&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "braavos",
+   "name": "Braavos",
+   "kind": "wallet",
+   "aliases": [
+    "braavos"
+   ],
+   "domain": "braavos.app",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://braavos.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "uniswap_wallet",
+   "name": "Uniswap Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "uniswap wallet"
+   ],
+   "domain": "uniswap.org",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://uniswap.org&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "frame",
+   "name": "Frame",
+   "kind": "wallet",
+   "aliases": [
+    "frame",
+    "frame wallet"
+   ],
+   "domain": "frame.sh",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://frame.sh&size=128",
+    "source": "favicon",
+    "px": 64
+   }
+  },
+  {
+   "id": "taho",
+   "name": "Taho",
+   "kind": "wallet",
+   "aliases": [
+    "taho"
+   ],
+   "domain": "taho.xyz",
+   "logo": {
+    "url": "https://taho.xyz/favicon.svg",
+    "source": "site",
+    "px": 300
+   }
+  },
+  {
+   "id": "enkrypt",
+   "name": "Enkrypt",
+   "kind": "wallet",
+   "aliases": [
+    "enkrypt"
+   ],
+   "domain": "enkrypt.com",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://enkrypt.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "safepal",
+   "name": "SafePal",
+   "kind": "wallet",
+   "aliases": [
+    "safepal"
+   ],
+   "domain": "safepal.com",
+   "logo": {
+    "url": "https://safepal.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 114
+   }
+  },
+  {
+   "id": "tokenpocket",
+   "name": "TokenPocket",
+   "kind": "wallet",
+   "aliases": [
+    "tokenpocket",
+    "tp wallet"
+   ],
+   "domain": "tokenpocket.pro",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/tokenpocket",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "imtoken",
+   "name": "imToken",
+   "kind": "wallet",
+   "aliases": [
+    "imtoken"
+   ],
+   "domain": "token.im",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://token.im&size=128",
+    "source": "favicon",
+    "px": 33
+   }
+  },
+  {
+   "id": "mathwallet",
+   "name": "MathWallet",
+   "kind": "wallet",
+   "aliases": [
+    "mathwallet"
+   ],
+   "domain": "mathwallet.org",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://mathwallet.org&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "coin98",
+   "name": "Coin98",
+   "kind": "wallet",
+   "aliases": [
+    "coin98"
+   ],
+   "domain": "coin98.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/coin98",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "zengo",
+   "name": "Zengo",
+   "kind": "wallet",
+   "aliases": [
+    "zengo"
+   ],
+   "domain": "zengo.com",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://zengo.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "guarda",
+   "name": "Guarda",
+   "kind": "wallet",
+   "aliases": [
+    "guarda",
+    "guarda wallet"
+   ],
+   "domain": "guarda.com",
+   "logo": {
+    "url": "https://guarda.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "edge_wallet",
+   "name": "Edge",
+   "kind": "wallet",
+   "aliases": [
+    "edge wallet",
+    "edge"
+   ],
+   "domain": "edge.app",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://edge.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "bluewallet",
+   "name": "BlueWallet",
+   "kind": "wallet",
+   "aliases": [
+    "blue wallet",
+    "bluewallet"
+   ],
+   "domain": "bluewallet.io",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://bluewallet.io&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "muun",
+   "name": "Muun",
+   "kind": "wallet",
+   "aliases": [
+    "muun",
+    "muun wallet"
+   ],
+   "domain": "muun.com",
+   "logo": {
+    "url": "https://muun.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "sparrow",
+   "name": "Sparrow",
+   "kind": "wallet",
+   "aliases": [
+    "sparrow",
+    "sparrow wallet"
+   ],
+   "domain": "sparrowwallet.com",
+   "logo": {
+    "url": "https://sparrowwallet.com/favicon.ico",
+    "source": "site",
+    "px": 48
+   }
+  },
+  {
+   "id": "electrum",
+   "name": "Electrum",
+   "kind": "wallet",
+   "aliases": [
+    "electrum"
+   ],
+   "domain": "electrum.org",
+   "logo": {
+    "url": "https://electrum.org/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "xverse",
+   "name": "Xverse",
+   "kind": "wallet",
+   "aliases": [
+    "xverse"
+   ],
+   "domain": "xverse.app",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://xverse.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "unisat",
+   "name": "Unisat",
+   "kind": "wallet",
+   "aliases": [
+    "unisat"
+   ],
+   "domain": "unisat.io",
+   "logo": {
+    "url": "https://coin-images.coingecko.com/markets/images/1143/large/unisat.jpeg?1706865160",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "leather",
+   "name": "Leather",
+   "kind": "wallet",
+   "aliases": [
+    "leather",
+    "leather wallet"
+   ],
+   "domain": "leather.io",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://leather.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "tonkeeper",
+   "name": "Tonkeeper",
+   "kind": "wallet",
+   "aliases": [
+    "tonkeeper"
+   ],
+   "domain": "tonkeeper.com",
+   "logo": {
+    "url": "https://keeperwallet.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "mytonwallet",
+   "name": "MyTonWallet",
+   "kind": "wallet",
+   "aliases": [
+    "mytonwallet"
+   ],
+   "domain": "mytonwallet.io",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://mytonwallet.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "tonhub",
+   "name": "Tonhub",
+   "kind": "wallet",
+   "aliases": [
+    "tonhub"
+   ],
+   "domain": "tonhub.com",
+   "logo": {
+    "url": "https://tonhub.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "xaman",
+   "name": "Xaman (XUMM)",
+   "kind": "wallet",
+   "aliases": [
+    "xaman",
+    "xumm"
+   ],
+   "domain": "xaman.app",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://xaman.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "freighter",
+   "name": "Freighter",
+   "kind": "wallet",
+   "aliases": [
+    "freighter"
+   ],
+   "domain": "freighter.app",
+   "logo": {
+    "url": "https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://freighter.app&size=128",
+    "source": "favicon",
+    "px": 64
+   }
+  },
+  {
+   "id": "lobstr",
+   "name": "Lobstr",
+   "kind": "wallet",
+   "aliases": [
+    "lobstr"
+   ],
+   "domain": "lobstr.co",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://lobstr.co&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "suiet",
+   "name": "Suiet",
+   "kind": "wallet",
+   "aliases": [
+    "suiet"
+   ],
+   "domain": "suiet.app",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://suiet.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "slush",
+   "name": "Sui Wallet (Slush)",
+   "kind": "wallet",
+   "aliases": [
+    "sui wallet",
+    "slush"
+   ],
+   "domain": "slush.app",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://slush.app&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "petra",
+   "name": "Petra",
+   "kind": "wallet",
+   "aliases": [
+    "petra",
+    "petra wallet"
+   ],
+   "domain": "petra.app",
+   "logo": {
+    "url": "https://petra.app/favicon.ico",
+    "source": "site",
+    "px": 32
+   }
+  },
+  {
+   "id": "martian",
+   "name": "Martian Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "martian",
+    "martian wallet"
+   ],
+   "domain": "martianwallet.xyz",
+   "logo": null
+  },
+  {
+   "id": "nightly",
+   "name": "Nightly",
+   "kind": "wallet",
+   "aliases": [
+    "nightly",
+    "nightly wallet"
+   ],
+   "domain": "nightly.app",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://nightly.app&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "magic_eden_wallet",
+   "name": "Magic Eden Wallet",
+   "kind": "wallet",
+   "aliases": [
+    "magic eden wallet",
+    "magic eden"
+   ],
+   "domain": "wallet.magiceden.io",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/magic-eden",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "onekey",
+   "name": "OneKey",
+   "kind": "wallet",
+   "aliases": [
+    "onekey"
+   ],
+   "domain": "onekey.so",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://onekey.so&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "ambire",
+   "name": "Ambire",
+   "kind": "wallet",
+   "aliases": [
+    "ambire",
+    "ambire wallet"
+   ],
+   "domain": "ambire.com",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/ambire-wallet",
+    "source": "defillama",
+    "px": 240
+   }
+  },
+  {
+   "id": "safe",
+   "name": "Safe (Gnosis Safe)",
+   "kind": "wallet",
+   "aliases": [
+    "gnosis safe",
+    "safe wallet",
+    "safe{wallet}"
+   ],
+   "domain": "safe.global",
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/protocols/safe",
+    "source": "defillama",
+    "px": 400
+   }
+  },
+  {
+   "id": "ledger",
+   "name": "Ledger",
+   "kind": "wallet",
+   "aliases": [
+    "ledger",
+    "ledger live",
+    "nano"
+   ],
+   "domain": "ledger.com",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://ledger.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "trezor",
+   "name": "Trezor",
+   "kind": "wallet",
+   "aliases": [
+    "trezor"
+   ],
+   "domain": "trezor.io",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://trezor.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "keystone",
+   "name": "Keystone",
+   "kind": "wallet",
+   "aliases": [
+    "keystone"
+   ],
+   "domain": "keyst.one",
+   "logo": {
+    "url": "https://keyst.one/favicon.ico",
+    "source": "site",
+    "px": 100
+   }
+  },
+  {
+   "id": "tangem",
+   "name": "Tangem",
+   "kind": "wallet",
+   "aliases": [
+    "tangem"
+   ],
+   "domain": "tangem.com",
+   "logo": {
+    "url": "https://tangem.com/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  },
+  {
+   "id": "gridplus",
+   "name": "GridPlus",
+   "kind": "wallet",
+   "aliases": [
+    "gridplus"
+   ],
+   "domain": "gridplus.io",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://gridplus.io&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "bitbox",
+   "name": "BitBox",
+   "kind": "wallet",
+   "aliases": [
+    "bitbox"
+   ],
+   "domain": "bitbox.swiss",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://bitbox.swiss&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "ellipal",
+   "name": "Ellipal",
+   "kind": "wallet",
+   "aliases": [
+    "ellipal"
+   ],
+   "domain": "ellipal.com",
+   "logo": {
+    "url": "https://t3.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://ellipal.com&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "coolwallet",
+   "name": "CoolWallet",
+   "kind": "wallet",
+   "aliases": [
+    "coolwallet"
+   ],
+   "domain": "coolwallet.io",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://coolwallet.io&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "dcent",
+   "name": "D'CENT",
+   "kind": "wallet",
+   "aliases": [
+    "dcent",
+    "d'cent"
+   ],
+   "domain": "dcentwallet.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://dcentwallet.com&size=128",
+    "source": "favicon",
+    "px": 128
+   }
+  },
+  {
+   "id": "secux",
+   "name": "SecuX",
+   "kind": "wallet",
+   "aliases": [
+    "secux"
+   ],
+   "domain": "secuxtech.com",
+   "logo": {
+    "url": "https://t1.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://secuxtech.com&size=128",
+    "source": "favicon",
+    "px": 25
+   }
+  },
+  {
+   "id": "arculus",
+   "name": "Arculus",
+   "kind": "wallet",
+   "aliases": [
+    "arculus"
+   ],
+   "domain": "getarculus.com",
+   "logo": {
+    "url": "https://t2.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=http://getarculus.com&size=128",
+    "source": "favicon",
+    "px": 32
+   }
+  },
+  {
+   "id": "ngrave",
+   "name": "NGRAVE",
+   "kind": "wallet",
+   "aliases": [
+    "ngrave"
+   ],
+   "domain": "ngrave.io",
+   "logo": {
+    "url": "https://ngrave.io/apple-touch-icon.png",
+    "source": "site",
+    "px": 180
+   }
+  }
+ ],
+ "chains": [
+  {
+   "id": "valuechain",
+   "name": "ValueChain",
+   "sodexKey": "VALUECHAIN",
+   "aliases": [
+    "valuechain",
+    "value chain"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": null
+  },
+  {
+   "id": "ethereum",
+   "name": "Ethereum",
+   "sodexKey": "ETH",
+   "aliases": [
+    "ethereum",
+    "eth",
+    "erc20",
+    "mainnet"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/279/large/ethereum.png?1696501628",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "arbitrum",
+   "name": "Arbitrum One",
+   "sodexKey": "ARBITRUM_ETH",
+   "aliases": [
+    "arbitrum",
+    "arb",
+    "arbitrum one"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_arbitrum?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "base",
+   "name": "Base",
+   "sodexKey": "BASE_ETH",
+   "aliases": [
+    "base"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_base?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "bsc",
+   "name": "BNB Smart Chain",
+   "sodexKey": "BSC_BNB",
+   "aliases": [
+    "bsc",
+    "bnb chain",
+    "bep20",
+    "binance smart chain",
+    "bnb"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/825/large/bnb-icon2_2x.png?1696501970",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "polygon",
+   "name": "Polygon",
+   "sodexKey": "MATIC",
+   "aliases": [
+    "matic",
+    "polygon",
+    "pol"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/4713/large/polygon.png?1698233745",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "avalanche",
+   "name": "Avalanche C-Chain",
+   "sodexKey": "AVAXC",
+   "aliases": [
+    "avalanche",
+    "avax",
+    "avax c-chain",
+    "c-chain"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/12559/large/Avalanche_Circle_RedWhite_Trans.png?1696512369",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "hyperevm",
+   "name": "HyperEVM",
+   "sodexKey": "HYPEREVM_HYPE",
+   "aliases": [
+    "hyperevm",
+    "hyperliquid evm",
+    "hype"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/50882/large/hyperliquid.jpg?1729431300",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "arc",
+   "name": "Arc",
+   "sodexKey": "ARC",
+   "aliases": [
+    "arc"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_arc?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "robinhood_chain",
+   "name": "Robinhood Chain",
+   "sodexKey": "ROBINHOOD_ETH",
+   "aliases": [
+    "robinhood chain"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_robinhood-chain?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "solana",
+   "name": "Solana",
+   "sodexKey": "SOL",
+   "aliases": [
+    "solana",
+    "sol",
+    "spl"
+   ],
+   "addressKind": "solana",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/4128/large/solana.png?1718769756",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitcoin",
+   "name": "Bitcoin",
+   "sodexKey": "BTC",
+   "aliases": [
+    "bitcoin",
+    "btc"
+   ],
+   "addressKind": "bitcoin",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/1/large/bitcoin.png?1696501400",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "litecoin",
+   "name": "Litecoin",
+   "sodexKey": "LTC",
+   "aliases": [
+    "litecoin",
+    "ltc"
+   ],
+   "addressKind": "litecoin",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/2/large/litecoin.png?1696501400",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "dogecoin",
+   "name": "Dogecoin",
+   "sodexKey": "DOGE",
+   "aliases": [
+    "dogecoin",
+    "doge"
+   ],
+   "addressKind": "dogecoin",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/5/large/dogecoin.png?1696501409",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "cardano",
+   "name": "Cardano",
+   "sodexKey": "ADA",
+   "aliases": [
+    "cardano",
+    "ada"
+   ],
+   "addressKind": "cardano",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/975/large/cardano.png?1696502090",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "sui",
+   "name": "Sui",
+   "sodexKey": "SUI",
+   "aliases": [
+    "sui"
+   ],
+   "addressKind": "sui",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/26375/large/sui-ocean-square.png?1727791290",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "ton",
+   "name": "TON",
+   "sodexKey": "TON",
+   "aliases": [
+    "ton",
+    "the open network"
+   ],
+   "addressKind": "ton",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/17980/large/Gram_Circular_Badge.png?1781524778",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "stellar",
+   "name": "Stellar",
+   "sodexKey": "XLM",
+   "aliases": [
+    "stellar",
+    "xlm"
+   ],
+   "addressKind": "stellar",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/100/large/fmpFRHHQ_400x400.jpg?1735231350",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "xrp",
+   "name": "XRP Ledger",
+   "sodexKey": "XRP",
+   "aliases": [
+    "xrp",
+    "xrp ledger",
+    "ripple"
+   ],
+   "addressKind": "xrp",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/44/large/xrp-symbol-white-128.png?1696501442",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "zcash",
+   "name": "Zcash",
+   "sodexKey": "ZEC",
+   "aliases": [
+    "zcash",
+    "zec"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/486/large/Brandmark-Yellow_%281%29.png?1785810558",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "optimism",
+   "name": "Optimism",
+   "sodexKey": null,
+   "aliases": [
+    "op",
+    "optimism"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_optimism?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "zksync",
+   "name": "zkSync Era",
+   "sodexKey": null,
+   "aliases": [
+    "zksync",
+    "zksync era"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_zksync%20era?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "linea",
+   "name": "Linea",
+   "sodexKey": null,
+   "aliases": [
+    "linea"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_linea?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "scroll",
+   "name": "Scroll",
+   "sodexKey": null,
+   "aliases": [
+    "scroll"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_scroll?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "blast",
+   "name": "Blast",
+   "sodexKey": null,
+   "aliases": [
+    "blast"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_blast?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "mantle",
+   "name": "Mantle",
+   "sodexKey": null,
+   "aliases": [
+    "mantle"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/30980/large/MNT_Token_Logo.png?1765516974",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "sonic",
+   "name": "Sonic",
+   "sodexKey": null,
+   "aliases": [
+    "sonic"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/38108/large/200x200_Sonic_Logo.png?1734679256",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "berachain",
+   "name": "Berachain",
+   "sodexKey": null,
+   "aliases": [
+    "berachain",
+    "bera"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/25235/large/BERA.png?1738822008",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "unichain",
+   "name": "Unichain",
+   "sodexKey": null,
+   "aliases": [
+    "unichain"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_unichain?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "ink",
+   "name": "Ink",
+   "sodexKey": null,
+   "aliases": [
+    "ink"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_ink?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "sei",
+   "name": "Sei",
+   "sodexKey": null,
+   "aliases": [
+    "sei"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/28205/large/Sei_Logo_-_Transparent.png?1696527207",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "gnosis",
+   "name": "Gnosis",
+   "sodexKey": null,
+   "aliases": [
+    "gnosis",
+    "gnosis chain",
+    "xdai"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/11062/large/Identity-Primary-DarkBG.png?1696511004",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "celo",
+   "name": "Celo",
+   "sodexKey": null,
+   "aliases": [
+    "celo"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/11090/large/InjXBNx9_400x400.jpg?1696511031",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "fantom",
+   "name": "Fantom",
+   "sodexKey": null,
+   "aliases": [
+    "fantom",
+    "ftm"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/4001/large/Fantom_round.png?1696504642",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "cronos",
+   "name": "Cronos",
+   "sodexKey": null,
+   "aliases": [
+    "cronos",
+    "cro"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/7310/large/cro_token_logo.png?1696507599",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "moonbeam",
+   "name": "Moonbeam",
+   "sodexKey": null,
+   "aliases": [
+    "moonbeam"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/22459/large/Moonbeam_GLMR_ICON.png?1716647586",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "kava",
+   "name": "Kava",
+   "sodexKey": null,
+   "aliases": [
+    "kava"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/9761/large/kava.png?1696509822",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "tron",
+   "name": "Tron",
+   "sodexKey": null,
+   "aliases": [
+    "tron",
+    "trc20",
+    "trx"
+   ],
+   "addressKind": "tron",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/1094/large/photo_2026-04-13_09-59-16.png?1776048311",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "aptos",
+   "name": "Aptos",
+   "sodexKey": null,
+   "aliases": [
+    "aptos",
+    "apt"
+   ],
+   "addressKind": "sui",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/26455/large/Aptos-Network-Profile-Picture_%281%29.png?1788259511",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "near",
+   "name": "NEAR",
+   "sodexKey": null,
+   "aliases": [
+    "near"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/10365/large/near.jpg?1696510367",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "polkadot",
+   "name": "Polkadot",
+   "sodexKey": null,
+   "aliases": [
+    "polkadot",
+    "dot"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/12171/large/polkadot.jpg?1766533446",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "cosmoshub",
+   "name": "Cosmos Hub",
+   "sodexKey": null,
+   "aliases": [
+    "cosmos",
+    "cosmos hub",
+    "atom"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/1481/large/cosmos_hub.png?1696502525",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "osmosis_chain",
+   "name": "Osmosis",
+   "sodexKey": null,
+   "aliases": [
+    "osmosis chain"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/16724/large/osmo.png?1696516298",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "injective",
+   "name": "Injective",
+   "sodexKey": null,
+   "aliases": [
+    "injective",
+    "inj"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/12882/large/Other_200x200.png?1738782212",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "starknet",
+   "name": "Starknet",
+   "sodexKey": null,
+   "aliases": [
+    "starknet",
+    "strk"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/26433/large/starknet.png?1696525507",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "bitcoincash",
+   "name": "Bitcoin Cash",
+   "sodexKey": null,
+   "aliases": [
+    "bitcoin cash",
+    "bch"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/780/large/bitcoin-cash-circle.png?1696501932",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "hedera",
+   "name": "Hedera",
+   "sodexKey": null,
+   "aliases": [
+    "hedera",
+    "hbar"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/3688/large/hbar.png?1696504364",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "algorand",
+   "name": "Algorand",
+   "sodexKey": null,
+   "aliases": [
+    "algorand",
+    "algo"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/4380/large/download.png?1696504978",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "tezos",
+   "name": "Tezos",
+   "sodexKey": null,
+   "aliases": [
+    "tezos",
+    "xtz"
+   ],
+   "addressKind": "other",
+   "domain": null,
+   "logo": {
+    "url": "https://coin-images.coingecko.com/coins/images/976/large/Tezos-logo.png?1696502091",
+    "source": "coingecko",
+    "px": 250
+   }
+  },
+  {
+   "id": "monad",
+   "name": "Monad",
+   "sodexKey": null,
+   "aliases": [
+    "monad"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_monad?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "abstract",
+   "name": "Abstract",
+   "sodexKey": null,
+   "aliases": [
+    "abstract"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_abstract?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "plasma",
+   "name": "Plasma",
+   "sodexKey": null,
+   "aliases": [
+    "plasma"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_plasma?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  },
+  {
+   "id": "katana",
+   "name": "Katana",
+   "sodexKey": null,
+   "aliases": [
+    "katana"
+   ],
+   "addressKind": "evm",
+   "domain": null,
+   "logo": {
+    "url": "https://icons.llamao.fi/icons/chains/rsz_katana?w=128&h=128",
+    "source": "defillama",
+    "px": 128
+   }
+  }
+ ]
+}

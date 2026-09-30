@@ -1,0 +1,1402 @@
+/* Order ticket chrome.
+ *
+ * SPECIFICITY, BECAUSE LOAD ORDER IS AGAINST US
+ * ---------------------------------------------
+ * main.tsx imports App BEFORE styles.css, so every component-local sheet -
+ * this one included - is evaluated FIRST and styles.css is injected LAST. A tie
+ * on specificity therefore goes to styles.css, not to the file that owns the
+ * component. Everything here consequently wins on specificity or not at all:
+ *   - one class (0,1,0) beats the `button` / `input, select` element resets and
+ *     the zero-specificity `button:where(...)` chrome, so plain `.oe-*` is
+ *     enough for the resting state;
+ *   - anything fighting a styles.css rule that already carries a pseudo-class
+ *     (`input:hover`, `select:hover`, `.panel > h2`) is prefixed with `.oe` or
+ *     `.panel.oe` to buy the extra class it needs.
+ * The panel deliberately does NOT carry the `entry` class any more - see the
+ * header comment in OrderEntry.tsx.
+ *
+ * TYPE
+ * ----
+ * Four sizes (10/12/14/20) and two weights (400, 500) exist in this app; this
+ * panel uses TWO of them - 12px for every label and value, 14px for controls -
+ * and both weights. Nothing here is 600, and nothing is uppercase. The 10px
+ * step is gone: it was carrying only the `est.` qualifier, and a disclosure
+ * that has to be read does not belong at the app's smallest size.
+ * Rank is carried by colour: --muted labels against --text values, at the same
+ * size and the same weight. The 12px/400 label + 12px/500 value pair is most of
+ * the text on this panel, so it is stated once (`.oe-out__k` / `.oe-out__v`)
+ * and reused rather than re-derived per row.
+ *
+ * MOTION
+ * ------
+ * Three timings, stated once. Hover/interaction is one fast step on colour
+ * properties only. Meters (the size slider's fill) animate transform, never
+ * width - a width transition on a meter forces layout every frame and, worse,
+ * makes the bar's geometry a thing that is briefly WRONG. The order-value
+ * read-out gets a deliberately slow colour transition so a value crossing the
+ * minimum notional reads as a flash rather than a strobe.
+ * The global prefers-reduced-motion backstop in styles.css is `!important` and
+ * loads after this file, so it still clamps every duration here.
+ */
+
+/* The measured interaction timing: one 150ms step on colour, on the
+   reference's own curve. Stated here rather than borrowed from --dur-fast /
+   --ease-out so this panel's hover matches the measurement exactly.
+ *
+ * TWO HOSTS, ONE DECLARATION. The leverage popover is portalled to <body>
+ * (see OrderEntry.tsx), so it is not a descendant of `.oe` and inherits
+ * nothing from it. Declared on `.oe` alone, every `var(--oe-hover)` inside
+ * that popover - `.oe-mini`, `.oe-confirm` - would resolve to nothing, the
+ * `transition` shorthands holding them would be dropped as invalid, and the
+ * preset buttons would snap between colours while the identical buttons two
+ * inches away eased. It is the panel's timing wherever the panel's chrome is
+ * rendered, so it is declared on both roots rather than duplicated as a
+ * literal. */
+.oe,
+.oe-pop--float {
+  --oe-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --oe-hover: 0.15s;
+}
+
+.oe {
+  --oe-meter: var(--dur-med);
+  --oe-flash: 500ms;
+  /* The reference's two order buttons sit on a 6px radius. The global scale
+     carries 2 / 4 / 8 and nothing between, so the one step it is missing is
+     named once here instead of appearing as a bare number at the call site. */
+  --oe-radius-action: 6px;
+  /* The card's own inset. Named because three rules need it: the padding
+     itself, and the two elements (tab divider, nothing else) that have to
+     cancel it to bleed to the card edge. */
+  --oe-inset: var(--sp-4);
+  /* WHERE THE SIDE GRADIENT'S DEEP STOP LANDS.
+     Only the first ~58% of the shared buy/sell ramp belongs inside the button.
+     Measured across the reference's button width, the buy face runs
+     #00b281 -> #0b7668 and the sell face #ee4a3c -> #a42d40 - both perfectly
+     linear in sRGB, and both far shallower than --button-buy / --button-sell,
+     which reach their deep stop at the button's MIDPOINT and then keep falling
+     nearly to black. Putting that deep stop at 1/0.58 of the box pushes the
+     token's own end colour just off the right edge, so the semantic tokens stay
+     the single source of the hue and only the measured slope is on screen. */
+  --oe-ramp-end: 172%;
+  /* The dropdown caret: a 1px STROKED chevron, 10px wide, drawn rather than
+     imported so there is no icon asset in the bundle. `currentColor` does not
+     resolve inside a data URI, so the two tones are two variables - --muted at
+     rest, --text on hover - and the hover rules swap the whole image. Stated
+     here once because both the unit selector and the small selects use it. */
+  --oe-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1.25 5 5 9 1.25' fill='none' stroke='%23bcbcbc' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  --oe-caret-on: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1.25 5 5 9 1.25' fill='none' stroke='%23f7f7f7' stroke-width='1' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* THE PANEL IS A FILLED CARD, AND IT DRAWS ITSELF.
+ *
+ * Measured off the reference: every panel is --bg-panel (#1b1a14) on a --bg
+ * (#141310) page, ~4px radius, NO border - the tone step does the separating.
+ * Content is inset 16px horizontally; the first control sits 8px below the
+ * card's top edge, which is why the vertical is 8/16 rather than a flat 16.
+ *
+ * Why this panel rather than the dashboard body: this panel is registered
+ * `pad: false`, so `.dash-panel__body--flush` gives it zero padding by design
+ * and the inset is this file's to state. `.dash-panel__body > .panel` zeroes
+ * padding and background at (0,2,0), which ties with `.panel.oe` and would be
+ * settled by bundle order, so the descendant form is spelled out to win
+ * outright. There is no double-inset risk: the body contributes none. */
+/* Side colour is a fade on `.oe-fx`, under the form. It is already present at
+   the top of the card and thins out downward. A hairline on `::before` tints
+   the top edge with that same colour and fades down the sides. The moving
+   glare is a short streak on `.oe-fx__glare`; its wrapper lets that streak
+   fade out once it travels low, so the lower edge stays the plain panel line. */
+@property --oe-glare {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.panel.oe,
+.dash-panel__body > .panel.oe {
+  --oe-tint: var(--pos);
+  --oe-wash: 10%;
+  --oe-edge: 35%;
+  position: relative;
+  overflow: visible;
+  background: var(--bg-panel);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--sp-2) var(--oe-inset) var(--oe-inset);
+}
+.panel.oe.is-sell,
+.dash-panel__body > .panel.oe.is-sell { --oe-tint: var(--neg); }
+.oe-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--oe-tint) var(--oe-wash), transparent) 0%,
+    color-mix(in srgb, var(--oe-tint) calc(var(--oe-wash) * 0.55), transparent) 14%,
+    color-mix(in srgb, var(--oe-tint) calc(var(--oe-wash) * 0.18), transparent) 46%,
+    transparent 72%
+  );
+}
+/* Resting edge. Slightly the side colour across the top, then gone, so the
+   lower border is the panel hairline outside this layer. */
+.oe-fx::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--oe-tint) 28%, transparent) 0%,
+    color-mix(in srgb, var(--oe-tint) 10%, transparent) 7%,
+    transparent 18%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+}
+/* The fade lives on the wrapper, not on the ring. The ring already spends its
+   mask on cutting the centre out, and a second mask on the same box fights
+   that cut. Full near the top, gone before the form fields. */
+.oe-fx__rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 8%, transparent 26%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 8%, transparent 26%);
+}
+.oe-fx__glare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: conic-gradient(
+    from var(--oe-glare),
+    transparent 0 320deg,
+    color-mix(in srgb, var(--oe-tint) 16%, transparent) 329deg,
+    color-mix(in srgb, var(--oe-tint) 34%, transparent) 338deg,
+    color-mix(in srgb, var(--oe-tint) 16%, transparent) 347deg,
+    transparent 356deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  /* Most of a full turn is hidden below the fade. The slow step is the
+     short arc that is actually on screen; the two later steps skip the
+     rest. Each step is under 180deg so the angle keeps moving forward. */
+  animation: oe-glare 5.4s linear infinite;
+}
+@keyframes oe-glare {
+  0%   { --oe-glare: 325deg; }
+  84%  { --oe-glare: 435deg; }
+  92%  { --oe-glare: 560deg; }
+  100% { --oe-glare: 685deg; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .oe-fx__glare { animation: none; }
+}
+.panel.oe > :not(.oe-fx) { position: relative; z-index: 1; }
+
+/* 14px at weight 400 - state is carried by colour, never by weight, so the
+   title is the same size as a tab label and differs only in its muted tone. */
+.panel.oe > h2 {
+  font-size: var(--fs-base);
+  font-weight: 400;
+  letter-spacing: var(--ls-body);
+  line-height: var(--lh-base);
+  color: var(--muted);
+  margin: 0;
+}
+
+/* The body owns the remaining height so the read-out can sit on the panel's
+   bottom edge (see `.oe-out`) instead of floating under the buttons.
+ *
+ * TWELVE, NOT EIGHT, BETWEEN STACKED BLOCKS.
+ *
+ * Measured at three independent sites, our form ran 3-4px tighter than the
+ * reference every time: the size field's bottom border to the slider rail (11px
+ * there, 8 here), and the last checkbox row to the top of the order buttons
+ * (14px of clear pixels there, 10 here). Those are not three separate gaps to
+ * nudge - they are one value, `.oe-body`'s own, and 8px is `--sp-2` doing the
+ * job of the step above it. A ticket is the densest form in the app, but the
+ * blocks inside it are separate decisions (what price, what size, how much of
+ * the balance, which flags) and the reference gives each of them a step more
+ * air than it gives the label-to-input pairing inside one block, which stays at
+ * `--sp-1`.
+ *
+ * `margin-top` puts the same 12px between the tab rule and the first field
+ * label. It cannot come from `.oe`'s own gap: that gap ALSO sets the distance
+ * from the margin-mode row to the tab strip, which is measured at 8px and
+ * correct - the tab bar sits tight under its buttons and the form sits a step
+ * below the rule. One flex gap cannot be both. */
+.oe-body {
+  display: flex; flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-1);
+  flex: 1; min-height: 0;
+}
+
+/* --- 1. leverage + margin mode --------------------------------------------- */
+
+/* The ROW, not the button, is the IN-FLOW popover's containing block.
+ *
+ * Anchoring a popover to a control that sits two thirds of the way across the
+ * ticket puts half of it outside the panel; anchoring it to the row makes its
+ * width the ticket's width at every panel size, which is the one geometry that
+ * cannot overflow. `.oe-anchor` therefore stays STATIC on purpose - it is a DOM
+ * handle for the outside-press check, not a positioning context.
+ *
+ * That covers the margin popover, which still opens downward. The leverage one
+ * no longer lives in this subtree at all: it is portalled to <body> and placed
+ * in viewport coordinates, so nothing here positions it - see `.oe-pop--float`
+ * below and `useFloatPop` in OrderEntry.tsx. The row keeps its `relative`
+ * either way; it is also the box whose width the floating popover borrows for
+ * its measure. */
+.oe-mode {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  gap: var(--sp-2);
+  min-height: 24px;
+  overflow: visible;
+}
+.oe-anchor { position: static; flex: 1; min-width: 0; }
+
+/* Two equal buttons, 24px - the app's standard control height - on radius 4.
+ *
+ * The fill is a FLAT --bg-control body that darkens left to right, with a 1px
+ * lighter rule on the top and bottom edges. Measured: #675b5d at the left edge
+ * to #4d4446 at the right, rules at ~#726668. It used to run the vertical
+ * --button-border gradient at 32px tall and flush with the card's top edge,
+ * which read as a raised chip rather than as the reference's quiet segment.
+ * The two edge rules are box-shadow rather than a border so they do not eat
+ * into the 24px box.
+ *
+ * The lit stop is 10% of --text, not 6% of pure white: at 6% the left edge came
+ * out #5d5456 against the reference's #675b5d, so the ramp started a step too
+ * dark and the pill read flatter than it should. Tinting with --text rather
+ * than #fff also keeps the highlight on the palette's warm axis.
+ *
+ * The outer shadow is the measured ~5px feather around each pill (#2a2722 at
+ * the edge falling to the panel's own #1b1a14) - the one soft edge in the
+ * panel, and the reason the pills read as raised segments rather than as flat
+ * patches of a lighter grey. */
+.panel.oe .oe-mode__btn {
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-height: 28px;
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background-color: #3a3a3a;
+  background-image: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text) 10%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 12%, transparent) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 var(--line-strong),
+    inset 0 -1px 0 var(--line-strong),
+    0 0 5px color-mix(in srgb, var(--line) 60%, transparent);
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: var(--lh-base);
+  white-space: nowrap;
+  transition: filter var(--oe-hover) var(--oe-ease);
+}
+/* The pills are FILLED surfaces whose label already sits at --text - measured,
+   the reference sets "Cross" and its leverage figure in #fffeef, not in the
+   muted tone the panel's unfilled controls use - so the colour-to-text hover
+   the rest of this file runs has nowhere left to go. Same case as the two order
+   buttons at the bottom of the file, and the same answer: the fill lifts one
+   step, nothing moves and nothing fades. */
+.oe-mode__btn:hover:not(:disabled) { filter: brightness(1.08); }
+/* Open swaps the two edge rules for a full amber ring; the outer feather is
+   carried over rather than dropped, so the pill does not visibly flatten onto
+   the card the moment its popover opens. */
+.oe-mode__btn[aria-expanded='true'] {
+  box-shadow:
+    inset 0 0 0 1px var(--accent),
+    0 0 5px color-mix(in srgb, var(--line) 60%, transparent);
+}
+
+/* Popovers float, so they get the app's float shadow and the same enter-only
+   pop as .menu-popup. Enter only: they unmount on close. */
+.oe-pop {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  /* Glass, matching every other floating surface in the app - see --glass-bg
+     in styles.css. The no-backdrop-filter fallback lives there too, keyed off
+     this same class name, so it does not need repeating here. */
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: var(--shadow-modal);
+  padding: var(--sp-2);
+  display: flex; flex-direction: column; gap: var(--sp-1);
+  animation: oe-pop-in var(--dur-fast) var(--ease-spring);
+  transform-origin: top left;
+}
+@keyframes oe-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* THE LEVERAGE POPOVER, OPENED SIDEWAYS AND OUT OF THE PANEL.
+ *
+ * `position: fixed` with `left`/`top`/`width` written by the component from the
+ * trigger's own rect, because there is nothing in this subtree left to position
+ * against: the node is portalled to <body>. It has to be. Opened downward, this
+ * popover - the tallest in the app, with a slider and seven presets - landed on
+ * the price and size fields, covering the form it exists to configure; opened
+ * to the left it overhangs the order book, which is a surface you read rather
+ * than one you fill in, and the whole execution panel stays usable underneath.
+ * Sideways is only reachable outside the panel, and outside the panel means
+ * outside the flow twice over: this panel's body is `overflow: auto`, so a box
+ * reaching past its edge is clipped rather than drawn, and react-grid-layout
+ * transforms every panel, which makes each one the containing block for its own
+ * fixed descendants. Modal.tsx portals for the second of those reasons already.
+ *
+ * `right: auto` cancels the `right: 0` of the in-flow rule above - `left` and
+ * `right` together would over-constrain the box and silently ignore the width.
+ * The max-height here covers the ONE frame before the component has measured:
+ * from then on it writes an explicit `max-height` for the band it placed the
+ * box in, which is tighter than this in every case and is what lets the sheet
+ * scroll rather than grow across the trigger.
+ *
+ * z-index 50: over every in-panel layer (the highest is 20) and under the modal
+ * scrim at 100, so the review dialog still covers this if both are somehow up.
+ *
+ * The enter animation flips with the placement - a box that arrives from the
+ * right of where it lands reads as having come OUT of its button. Same 4px,
+ * same curve, same duration; only the axis changes. */
+.oe-pop--float {
+  position: fixed;
+  right: auto;
+  bottom: auto;
+  z-index: 50;
+  /* Two declarations, not a mistake: `vh` is the LARGE viewport on a phone, so
+     on its own it would allow a box taller than the visible page. The second
+     line is dropped whole by anything that does not know `dvh`, which is why
+     the first one has to stand behind it. */
+  max-height: calc(100vh - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  transform-origin: top right;
+  animation-name: oe-pop-out-left;
+}
+@keyframes oe-pop-out-left {
+  from { opacity: 0; transform: translateX(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+/* THE PHONE CASE: NEITHER SIDE HAS ROOM, SO IT STOPS SITTING BESIDE THE TRIGGER.
+ *
+ * At 390 the card is 185px wide and the trigger sits in the right-hand column,
+ * with 193px of room on its left and 92 on its right against a 216px minimum
+ * measure. There is no side to flip to. Clamping a left-placed box into the
+ * viewport - which is what used to happen - parked it on the ticket, covering
+ * its own trigger and the Price and Size fields underneath.
+ *
+ * So below that width it becomes a sheet: centred, as wide as the window
+ * allows, hung 4px off the TOP edge of its trigger. Above, because everything
+ * this popover configures is below the leverage row, so the band above the
+ * trigger is the one band guaranteed to hold nothing it must not cover.
+ * `left`, `top`, `width` and `max-height` all still come from the component -
+ * this rule only turns the enter animation to match, since a box that arrives
+ * from the side of a trigger it is no longer beside reads as sliding out of
+ * nowhere. It rises the 4px it is offset by, off the control it belongs to. */
+.oe-pop--sheet {
+  transform-origin: center bottom;
+  animation-name: oe-pop-out-up;
+}
+@keyframes oe-pop-out-up {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+/* The box is focused on open so Tab order follows it out of the panel; it is a
+   container, not a control, so it takes the ring only on real keyboard entry -
+   `:focus-visible`, never bare `:focus`, the same rule as everything else. */
+.oe-pop--float:focus { outline: none; }
+.oe-pop__title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
+  font-size: var(--fs-base); font-weight: 400; line-height: var(--lh-base); color: var(--text);
+  margin-bottom: var(--sp-1);
+}
+.oe-pop__max { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); }
+
+.oe-pop__opt {
+  display: flex; flex-direction: column; gap: 1px; text-align: left; width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: none; color: var(--muted); font-weight: 400;
+  transition:
+    color var(--oe-hover) var(--oe-ease),
+    background-color var(--oe-hover) var(--oe-ease),
+    border-color var(--oe-hover) var(--oe-ease);
+}
+.oe-pop__opt b { font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 500; }
+.oe-pop__opt span { font-size: var(--fs-xs); color: var(--muted); line-height: var(--lh-xs); white-space: normal; }
+/* One of the two places a background hover is still correct: a menu option's
+   whole surface IS the click target, the same case as an order-book row. Every
+   other control in this file hovers on colour alone. */
+.oe-pop__opt:hover { color: var(--text); background: var(--bg-hover); }
+/* Selected is colour + an accent edge, not extra weight. */
+.oe-pop__opt.is-on { border-color: var(--accent); background: var(--bg-hover); }
+
+.oe-pop__row { display: flex; align-items: center; gap: var(--sp-2); }
+.oe-pop__x { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); flex: none; }
+.oe-pop__presets { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.oe-pop__note { margin: 0; font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); }
+
+.oe-mini {
+  height: 24px; padding: 0 var(--sp-2); min-width: 34px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-panel); color: var(--muted);
+  font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: 400;
+  transition:
+    color var(--oe-hover) var(--oe-ease),
+    background-color var(--oe-hover) var(--oe-ease),
+    border-color var(--oe-hover) var(--oe-ease);
+}
+.oe-mini:hover:not(:disabled) { color: var(--text); }
+.oe-mini.is-on { color: var(--text); border-color: var(--accent); }
+
+.oe-confirm {
+  height: 32px; padding: 0 var(--sp-4); margin-top: var(--sp-1);
+  border: none; border-radius: var(--radius-sm);
+  background: var(--accent); color: var(--accent-text);
+  font-size: var(--fs-base); font-weight: 500; line-height: var(--lh-base);
+  transition: background-color var(--oe-hover) var(--oe-ease);
+}
+/* A filled amber button cannot brighten its label to --text (the label is
+   --accent-text, the one colour allowed on amber), so its hover is the token
+   the palette already carries for exactly this. Still one colour step, still
+   no lift and no opacity. */
+.oe-confirm:hover:not(:disabled) { background: var(--accent-hover); }
+
+/* Leverage range: the popover's own slider. Same meter language as the size
+   slider below - a filled track and a plain circular thumb. */
+.oe-lev-range {
+  flex: 1; min-width: 0; height: 24px; padding: 0; margin: 0;
+  background: none; border: none; appearance: none; -webkit-appearance: none;
+}
+.oe-lev-range::-webkit-slider-runnable-track { height: 2px; border-radius: 1px; background: var(--bg-control); }
+.oe-lev-range::-moz-range-track { height: 2px; border-radius: 1px; background: var(--bg-control); }
+.oe-lev-range::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; margin-top: -5px; border-radius: 50%;
+  background: var(--bg-elevated); border: 2px solid var(--accent); cursor: pointer;
+}
+.oe-lev-range::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--bg-elevated); border: 2px solid var(--accent); cursor: pointer;
+}
+.oe-lev-range:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* --- 2. order type tabs ---------------------------------------------------- */
+
+/* Nav role: a 40px bar carrying a hairline, with the active tab's accent stub
+   sitting flush on it. State is colour + that stub; the tab is never boxed,
+   filled or emboldened.
+ *
+ * The hairline BLEEDS to both card edges - measured, it runs the full width of
+ * the card while everything else in the panel stays inside the 16px inset - so
+ * the row cancels the card's padding and puts it back as its own. The first
+ * tab's label therefore lands 16 + 12 = 28px from the card edge, which is the
+ * measured 13px inside the content column. The old `:first-child` zero-padding
+ * exception hung the tab row left of every other control in the panel. */
+/* Three tabs at full padding have a hard ~178px floor and no `flex`, so they
+   cannot shrink - in a narrow panel they used to push out of the box. Allowing
+   the strip itself to scroll keeps every tab reachable at any width. */
+.oe-tabs {
+  overflow-x: auto;
+  scrollbar-width: none;
+  display: flex; gap: 0;
+  margin-inline: calc(var(--oe-inset) * -1);
+  padding-inline: var(--oe-inset);
+  border-bottom: 1px solid var(--line);
+}
+/* NO NEGATIVE MARGIN. The tab used to carry `margin-bottom: -1px`, which pulled
+   `.oe-tabs`' content box from 40px down to 39 and dragged the strip's own
+   border-bottom up INTO the active tab's accent stub - the marker painted over
+   the hairline it is supposed to sit on, and the whole strip came out 1px
+   short. Measured, the reference runs a 40px row of tabs with the 3px stub
+   ending on its last row and the rule a clear pixel below that. Letting the
+   border sit where the box puts it is the entire fix. */
+.oe-tab {
+  position: relative;
+  height: 40px; padding: 0 var(--sp-3);
+  border: none; border-radius: 0; background: none;
+  color: var(--muted); font-size: var(--fs-base); font-weight: 400;
+  line-height: var(--lh-base); white-space: nowrap;
+  transition: color var(--oe-hover) var(--oe-ease);
+}
+/* A SHORT CENTRED STUB, NOT A BAR UNDER THE WHOLE LABEL.
+   16x3px centred on the tab - about a third of the label's width. A rule that
+   spans the label reads as a segmented control; the stub reads as a marker. */
+.oe-tab::after {
+  content: ''; position: absolute; left: 50%; bottom: 0;
+  width: 16px; height: 3px; margin-left: -8px;
+  background: var(--accent); transform: scaleX(0);
+  transition: transform var(--dur-med) var(--ease-spring);
+}
+.oe-tab:hover:not(.is-on) { color: var(--text); }
+.oe-tab.is-on { color: var(--text); }
+.oe-tab.is-on::after { transform: scaleX(1); }
+
+/* --- 3. fields ------------------------------------------------------------- */
+
+.oe-field { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+/* Field captions are 12px/400 muted - the same step as the numbers they label,
+   sentence case, no tracking. Micro-caps were an extra loudness dial on the
+   densest form in the app, and tracked-out capitals are measurably slower to
+   read than the words they replace. */
+.oe-hint { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); }
+.oe-hint--under { margin: 0; }
+.oe-hint--bad { color: var(--neg); }
+.oe-hint b { color: var(--text); font-weight: 500; }
+/* The Available read-out is right-aligned above the size field, where the eye
+   already is when it starts typing a size.
+   The word "Available" is a CAPTION, one step below the figure it introduces,
+   so it sits at --dim: at --muted it measured the same brightness as its own
+   value and the row lost the only hierarchy it has. */
+/* One box holds the input and its unit control, so a field reads as a single
+   object rather than a text box parked next to a dropdown.
+ *
+ * OUTLINED, NOT FILLED. Measured, the reference's field interior is the same
+ * #1b1a14 as the card behind it: the box is defined purely by a uniform 1px
+ * --line stroke on an 8px radius. Ours filled the field and faded the stroke
+ * with --button-border - light at the top, near-nothing at the bottom - which
+ * on a filled card reads as a raised box floating over the panel rather than
+ * an outline drawn on it, and made the frame look uneven top to bottom. */
+.oe-inputrow {
+  display: flex; align-items: stretch; height: 40px;
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+  overflow: hidden;
+  background: none;
+  transition: border-color var(--oe-hover) var(--oe-ease);
+}
+.oe-inputrow:focus-within { border-color: var(--accent); }
+/* The row's accent border IS the focus mark: no second ring on the input inside it. */
+.oe-inputrow .oe-input:focus-visible,
+.oe-inputrow input:focus-visible { outline: none; }
+.oe-inputrow.is-bad,
+.oe-inputrow.is-bad:focus-within { border-color: var(--neg); }
+
+.oe-input {
+  /* `min-width` is a FLOOR, not a preference. This row can carry a label, a MAX
+     chip, a unit and a swap button, which between them had squeezed the input to
+     43px in a 216px panel - narrower than the number it holds, so the placeholder
+     spilled out of its own box. It now shrinks last and never below something a
+     price fits in. `width: 100%` went with it: on a flex item sitting beside
+     fixed-width siblings it fights the flex basis rather than setting it. */
+  flex: 1 1 auto; min-width: 56px;
+  height: 38px; padding: 0 var(--sp-3);
+  border: none; border-radius: 0; background: none; color: var(--text);
+  font: inherit; font-size: var(--fs-base); font-weight: 400; line-height: 38px;
+}
+/* Prices and quantities are right-aligned, the same reason the tables are. */
+.oe-inputrow .oe-input { text-align: right; }
+.oe-input::placeholder { color: var(--dim); }
+
+.oe-suffix {
+  display: flex; align-items: center; padding: 0 var(--sp-3); flex: none;
+  font-size: var(--fs-base); font-weight: 500; color: var(--text); white-space: nowrap;
+}
+
+/* The unit dropdown lives INSIDE the size field's box, so it drops the platform
+   chrome, the border and the surface, and reads as a label with a caret.
+ *
+ * The unit is a VALUE, not a caption: it names what the number beside it counts,
+ * so it carries --text, exactly like the `.oe-suffix` on the price field
+ * directly above it. At --muted the two fields disagreed about what a unit is -
+ * "vUSDC" white on one row, "BTC" grey on the next.
+ *
+ * The caret is a STROKED chevron, not a filled triangle: 8px wide, 1px, parked
+ * 12px in from the field's edge and drawn in the same tone as the unit it
+ * belongs to. A solid ▼ is heavier than anything else on the panel and was
+ * sitting tight against the border.
+ *
+ * `text-align: right` is what closes the gap between the two. A <select> is as
+ * wide as its WIDEST option, so a box sized for "vUSDC" while showing "BTC"
+ * left ~20px of slack between the word and its caret. Right-aligning the value
+ * moves that slack to the side the field is read from and leaves the measured
+ * 6px between unit and chevron, whatever the two coins are called.
+ *
+ * `select:hover` in styles.css carries a pseudo-class and would otherwise put
+ * its own filled triangle back the moment you point at the field, so the image
+ * is restated there too. */
+.oe-unit {
+  flex: none; height: 38px; padding: 0 26px 0 var(--sp-3);
+  border: none; border-radius: 0;
+  background-color: transparent; color: var(--text); text-align: right;
+  font: inherit; font-size: var(--fs-base); font-weight: 500; line-height: 38px;
+  appearance: none; -webkit-appearance: none;
+  background-image: var(--oe-caret-on);
+  background-position: right 12px center;
+  background-size: 8px 5px;
+  background-repeat: no-repeat;
+}
+.oe .oe-unit:hover { background-image: var(--oe-caret-on); }
+.oe-unit:disabled { color: var(--disabled); cursor: not-allowed; }
+
+/* The two inputs that stand alone rather than living inside an `.oe-inputrow`
+   box have to draw their own. Declared AFTER `.oe-input` on purpose: they tie
+   with it on specificity, so source order inside this file is what decides. */
+.oe-input--lev {
+  flex: none; width: 62px; height: 26px; line-height: 24px; text-align: right; padding: 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: none;
+}
+
+.oe-compactrow { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.oe-compact {
+  display: flex; flex-direction: row; align-items: center; gap: var(--sp-1);
+  font-size: var(--fs-xs); font-weight: 400; line-height: var(--lh-xs); color: var(--muted);
+}
+.oe-select {
+  height: 24px; padding: 0 22px 0 var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background-color: transparent; color: var(--muted);
+  font: inherit; font-size: var(--fs-xs); font-weight: 400; line-height: 22px;
+  appearance: none; -webkit-appearance: none;
+  /* Same stroked chevron as the unit selector, one step smaller. */
+  background-image: var(--oe-caret);
+  background-position: right 8px center;
+  background-size: 8px 5px;
+  background-repeat: no-repeat;
+  transition: color var(--oe-hover) var(--oe-ease);
+}
+.oe .oe-select:hover { color: var(--text); background-image: var(--oe-caret-on); }
+
+/* --- 4. percentage slider -------------------------------------------------- */
+
+.oe-slider { display: flex; flex-direction: column; gap: var(--sp-1); }
+/* Inset by half a THUMB *plus* the clearance the reference keeps outside it.
+ *
+ * The rail spans exactly the THUMB CENTRE's travel - that is what makes the
+ * notch grid come out even, see `.oe-slider__input` - so this inset is where
+ * the thumb's outer edge lands, not where the rail starts. At a flat 8px (half
+ * of the 16px thumb) the leftmost thumb sat with its edge ON the content
+ * column, breaking the left alignment line that the Size label, the input box
+ * and every read-out label share. Measured, the reference keeps 2.5px of air
+ * there: its notch centres are 1547.5 / 1632.5 / 1718.5 / 1803.5 / 1888.5 in a
+ * content column running 1537..1899, i.e. a 10.5px inset and an 85.25px step
+ * against our 8px and 86.75px. Half a pixel, five times over, is what makes a
+ * grid look drawn rather than derived. */
+.oe-slider__rail { position: relative; height: 20px; margin: 0 10.5px; }
+/* The visible track and its fill are one 2px rail centred in a 20px hit strip.
+   --line, not --bg-control: they are the same #544a4c today, but this is the
+   panel's divider tone doing divider work, and the reference's track measures
+   at exactly the value of every other hairline on the card. */
+.oe-slider__rail::before {
+  content: ''; position: absolute; left: 0; right: 0; top: 3px; height: 14px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--oe-tint) 28%, transparent) 0 2px, transparent 2px 5px);
+}
+/* clip-path, not scaleX: scaling a repeating bar gradient would squash the
+   segments. The pattern stays put and the filled share grows. */
+.oe-slider__fill {
+  position: absolute; left: 0; right: 0; top: 3px; height: 14px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(90deg, var(--oe-tint) 0 2px, transparent 2px 5px);
+  clip-path: inset(0 calc((1 - var(--oe-p, 0)) * 100%) 0 0);
+  transition: clip-path var(--oe-meter) var(--oe-ease);
+}
+/* 8px hollow rings drawn in the TRACK's own colour - a notch is a mark ON the
+   rail, so it cannot be brighter than the rail it marks; at --dim the dots
+   out-shone the track and inverted that relationship. Still smaller than the
+   16px thumb, and the thumb's centre is an opaque --bg-panel disc, so a notch
+   under the thumb is covered rather than showing through as a doubled circle. */
+.oe-slider__notch {
+  position: absolute; top: 6px; width: 8px; height: 8px; margin-left: -4px;
+  border-radius: 50%; border: 1px solid var(--line); background: var(--bg-panel);
+  pointer-events: none;
+  transition: border-color var(--oe-meter) var(--oe-ease);
+}
+.oe-slider__notch { display: none; }
+.oe-slider__notch.is-past { border-color: var(--oe-tint); }
+/* THE INPUT IS 8px WIDER THAN THE RAIL ON EACH SIDE, AND THAT IS THE WHOLE
+   POINT. A range thumb's centre travels from half a thumb inside the input's
+   left edge to half a thumb inside its right edge. With the input flush to the
+   rail, the thumb at 0% sat 8px right of the 0% notch while every other notch
+   landed true - the first gap on the grid measured 77px against 85px for the
+   other three. Bleeding the input out by exactly half a thumb puts the centre's
+   travel back on the rail's own 0-100%, so the notches and the thumb share one
+   grid and all four gaps are equal. `width: auto` is required: left, right and
+   width together are over-constrained and width would win, silently undoing the
+   right-hand bleed. */
+.oe-slider__input {
+  position: absolute; inset: 0 -8px; width: auto; height: 20px;
+  margin: 0; padding: 0; border: none; border-radius: 0; background: none;
+  appearance: none; -webkit-appearance: none; cursor: pointer;
+}
+.oe-slider__input::-webkit-slider-runnable-track { height: 20px; background: none; }
+.oe-slider__input::-moz-range-track { height: 20px; background: none; }
+/* 16px outer, a 2px ring of full-strength amber, and NO halo. The ring used to
+   be 3px inside a 4px glow, which fattened the thumb's edge and smeared it into
+   the panel; measured, the reference's is a crisp 2px hoop around a 12px hollow
+   centre, and it is the hollow centre - not a glow - that separates it from the
+   notches it slides over. */
+.oe-slider__input::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 10px; height: 18px; margin-top: 1px; border-radius: 6px;
+  background: #fff; border: 0; cursor: pointer;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+.oe-slider__input::-moz-range-thumb {
+  width: 10px; height: 18px; border-radius: 6px;
+  background: #fff; border: 0; cursor: pointer;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+}
+.oe-slider__input:disabled { cursor: not-allowed; }
+/* A DISABLED SLIDER IS STILL A SLIDER - the same argument as the disabled order
+   buttons further down this file, and the same answer.
+ *
+ * This used to wash the whole rail at 45% opacity, which composited the amber
+ * ring down to #82602b, the track to #352f2d and the notches to #46423e: three
+ * separate colours that are not in the palette, on the control the reference
+ * draws at full strength. The state is still carried, and carried in words -
+ * the input keeps its `disabled` attribute, and `.oe-note` directly beneath
+ * says which of the five reasons applies (no wallet, no balance, no leverage,
+ * no price). The fill going --dim is what says the METER has no basis; a
+ * translucent wash only made the control hard to read. */
+.oe-slider.is-off .oe-slider__fill { background: repeating-linear-gradient(90deg, var(--dim) 0 2px, transparent 2px 5px); }
+
+.oe-note { margin: 0; font-size: var(--fs-xs); font-weight: 400; line-height: var(--lh-xs); color: var(--muted); }
+/* --- 5. flags -------------------------------------------------------------- */
+
+/* ONE FLAG PER ROW.
+ *
+ * These used to run as a wrapped toolbar - two checkboxes and a bordered select
+ * on one line - which packed three separate decisions into a strip you have to
+ * read left to right. The reference stacks them, one lone checkbox per row, and
+ * a stacked list is also the only arrangement that does not reflow into a
+ * different shape at every panel width. `.oe-optrow` keeps a flag and the input
+ * it enables on the SAME row; without it the exits block would stack a trigger
+ * price a full row below the box that turns it on. */
+/* The 4px indent is the checkbox column's own, and it is measured: the
+   reference hangs its boxes 4px INSIDE the content edge that every input,
+   button and label in the panel starts from, so a 14px square does not read as
+   sticking out to the left of a 40px field. The right-hand edge of `.oe-optrow`
+   is untouched, so the exit inputs stay flush with the field above them. */
+.oe-opts {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--sp-2);
+  padding-left: var(--sp-1);
+}
+.oe-check {
+  display: flex; flex-direction: row; align-items: center; gap: var(--sp-2);
+  font-size: var(--fs-xs); font-weight: 400; line-height: var(--lh-xs); color: var(--text); cursor: pointer;
+}
+/* A 14px box on a 2px radius, drawn rather than borrowed: `accent-color` alone
+   leaves the UNCHECKED box painted in the platform's grey, which is the one
+   cold value on an otherwise warm panel. */
+.oe-check input {
+  appearance: none; -webkit-appearance: none;
+  width: 14px; height: 14px; min-height: 0; flex: none; margin: 0; padding: 0;
+  border: 1px solid var(--dim); border-radius: var(--radius-xs);
+  background: none; cursor: pointer;
+  transition: background-color var(--oe-hover) var(--oe-ease), border-color var(--oe-hover) var(--oe-ease);
+}
+.oe-check input:hover:not(:disabled) { border-color: var(--muted); }
+.oe-check input:checked {
+  background-color: var(--accent); border-color: var(--accent);
+  /* The tick is the only shape here that cannot be a token; it is stroked in
+     --accent-text (#1b1a14), the one colour allowed on top of amber. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.3 4.8 8.6 9.5 3.6' fill='none' stroke='%2305222a' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-size: 12px 12px; background-position: center; background-repeat: no-repeat;
+}
+.oe-check:has(input:disabled) { color: var(--dim); cursor: not-allowed; }
+.oe-exits { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+/* --- 6. the two irreversible controls -------------------------------------- */
+
+/* The side gradient is the one gradient in the app that carries meaning rather
+   than decoration - which side you are about to take - so it comes straight
+   from the shared --button-buy / --button-sell tokens. Both buttons are the
+   same size and weight: the hue is the only thing that differs, because the hue
+   is the only thing that differs.
+
+   THE INK IS DARK, AND THAT IS NOT A STYLE CHOICE. --text on these gradients
+   measures 2.50 (buy) and 3.43 (sell) - the two worst contrast figures in the
+   app, on its largest and most consequential control. Dark ink on a saturated
+   fill is what `.submit.buy` and `.oe-dir__btn.is-on` already do; this was the
+   one place still painting light-on-light. */
+.oe-side { display: flex; gap: var(--sp-2); }
+.oe-side__btn {
+  flex: 1; height: 40px; padding: 0 var(--sp-4);
+  border: none; border-radius: var(--oe-radius-action);
+  color: var(--bg); font-size: var(--fs-base); font-weight: 600; line-height: var(--lh-base);
+  transition: filter var(--oe-hover) var(--oe-ease);
+}
+/* The ramp is the tokens' own, stopped short - see --oe-ramp-end. Written out
+   here rather than taken from --button-buy / --button-sell because the stop
+   position is the whole correction: those tokens land their deep colour at
+   100% of the box, which on a 177px button is twice the measured fall. */
+.oe-side__btn.is-buy { background: linear-gradient(90deg, var(--pos) 0%, var(--pos-deep) var(--oe-ramp-end)); }
+.oe-side__btn.is-sell { background: linear-gradient(90deg, var(--neg) 0%, var(--neg-deep) var(--oe-ramp-end)); }
+/* The one brightness step left in this panel. These two are FILLED surfaces
+   whose label is already --text, so the colour-to-text hover the rest of the
+   file uses has nowhere to go - and the two irreversible controls are the last
+   place to ship with no pointer feedback at all. Nothing moves and nothing
+   fades; only the fill lifts. */
+.oe-side__btn:hover:not(:disabled) { filter: brightness(1.08); }
+
+/* A DISABLED BUY BUTTON IS STILL A BUY BUTTON.
+ *
+ * This used to be `opacity: 0.4`, which composited the gradient down to
+ * #0c533d / #6b2822 and the label to a mid grey - roughly half the reference's
+ * luminance. Signed out (which is how this panel is most often first seen) both
+ * primary actions read as dead chrome rather than as the thing the panel is
+ * for. The reference is signed out in the same screenshot and keeps them vivid.
+ *
+ * The state is still carried, and carried where it belongs: the button keeps
+ * its `disabled` attribute, so it is unfocusable, unclickable and announced as
+ * disabled, and the guardrail text directly ABOVE it says in words why - no
+ * balance, no size, no unlocked key. A 40% wash says none of that; it only
+ * makes the control hard to read.
+ *
+ * `.oe` is needed on the front: the 40% is `button:disabled` in styles.css at
+ * (0,1,1), which ties with a bare `.oe-side__btn:disabled` and wins on load
+ * order. This is the (0,2,1) that actually turns it off. */
+.oe .oe-side__btn:disabled { opacity: 1; cursor: not-allowed; }
+/* Read-only, the button is the connect / enable action; while that is in
+   flight (a wallet restore, the enable dialog, the signature) it waits rather
+   than refuses. */
+.oe .oe-side__btn.is-wait:disabled { cursor: progress; }
+
+/* --- 7. read-out ----------------------------------------------------------- */
+
+/* Pinned to the bottom of the panel by `margin-top: auto`, with ONE hairline
+   inside the group and none anywhere else: the rows read as a block at a
+   glance, and a rule under each of them would turn a summary into a table you
+   have to parse. */
+.oe-out {
+  margin: auto 0 0;
+  display: flex; flex-direction: column;
+}
+/* CONTENT HEIGHT, NOT --row-h.
+ *
+ * This pinned `height: var(--row-h)` - 20px, the order BOOK's data-row token -
+ * onto a read-out that is not a table. Measured, the reference's five detail
+ * rows sit on an alternating 20/21px pitch, i.e. a fractional 20.5px line box,
+ * and over the block that made ours 2px short of theirs with the last row
+ * drifting a further pixel out of step. 16.5px of line box plus 2px of padding
+ * a side IS 20.5, so the row simply takes the height its own type gives it and
+ * the pitch stops being a number that has to be maintained against the type
+ * scale. A book row and a summary row are different objects; only one of them
+ * needs to divide a panel height evenly. */
+.oe-out__row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3);
+  padding-block: 2px;
+}
+
+/* THE RULE GOES UNDER THE POSITION ROW, NOT OVER IT.
+ *
+ * What you already hold is a different KIND of fact from what this ticket
+ * would cost you, so the hairline separates those two things rather than
+ * separating the whole read-out from the buttons above it. With the rule on
+ * top, the position was just the first of six metrics; with it underneath, the
+ * position is a summary and the five costs below are the estimate.
+ *
+ * The split either side of that rule is measured, and it is NOT symmetric: the
+ * reference sets the hairline 13px under the position row's ink and starts the
+ * first read-out row 20px below it (baseline to baseline). Ours ran 8 above and
+ * 17 below - the same total gap, hung the wrong way round, which read as a rule
+ * belonging to the list underneath rather than closing the row above it.
+ *
+ * At --sp-2 / --sp-1 the rule sat 11px under the position row's ink and the
+ * first detail row started 18px under the rule - crowded on BOTH sides, which
+ * pulled the whole five-row block 4-6px high and left the shortfall as dead
+ * space at the bottom of the panel. The two literals below are what land the
+ * measured 13 / 20; re-verified in the browser after the change, the rendered
+ * pixels are ink-end 585 -> rule 598 (13) -> first detail baseline 618.5 (20.5)
+ * against the reference's 584 -> 597 (13) -> 617 (20).
+ *
+ * They are literals because there is no 9px or 6px step on the spacing scale
+ * and :root is final; rounding them to --sp-3 / --sp-2 overshoots by the same
+ * 2px in the other direction. Note that 9 is not 13 minus a token: the row now
+ * carries 2px of its own top and bottom padding (see `.oe-out__row`) and the
+ * label's line box has ~2px of leading under its descender, so the number here
+ * is the box gap that produces the measured INK gap, not the ink gap itself.
+ *
+ * Attached to the row and not to the container on purpose: spot has no
+ * position row, and on spot there is then correctly no rule at all. */
+.oe-out__k {
+  margin: 0; font-size: var(--fs-xs); font-weight: 400; line-height: var(--lh-xs);
+  color: var(--muted); white-space: nowrap;
+}
+/* THE VALUE IS ONE SIZE STEP ABOVE ITS LABEL. THE LINE BOX IS NOT.
+ *
+ * Both halves of the row were --fs-xs, which flattened the read-out: measured
+ * against the reference, the labels match to the pixel ("Est. slippage" is 70px
+ * wide in both) but its figures stand 10px tall against our 8, one clear step
+ * over its own 9px label caps. Verified in the browser against the loaded
+ * faces: --font-num renders a 9px figure at 12px and a 10px figure at 14px, at
+ * 7.63px of tabular advance against the reference's measured 7.5 - so 14px is
+ * the step, and it lands the WIDTH as well, which 13px type would not have.
+ * (Half the reason the last pass read this as unfixable is that the figures
+ * were still in the text face then, where 12px gives an 8px figure on a 7.3px
+ * advance - too short AND too wide at the same time.)
+ *
+ * --lh-xs, not --lh-base: the line box is what sets the row's 20.5px pitch (see
+ * `.oe-out__row`), and letting it follow the size to 21px would buy the size
+ * step by spending 4px a row - 20px over the block - on a panel where vertical
+ * space decides whether the two order buttons stay above the fold. 14px on a
+ * 16.5px box is tight, not clipped: the face's ink is 10px tall. */
+.oe-out__v {
+  margin: 0; font-size: var(--fs-base); font-weight: 500; line-height: var(--lh-xs);
+  color: var(--text); text-align: right; white-space: nowrap;
+  /* Deliberately slow: an order value crossing the minimum notional should read
+     as a flash, not a strobe. */
+  transition: color var(--oe-flash) var(--oe-ease);
+}
+.oe-out__v.is-dim { color: var(--muted); }
+.oe-out__v .is-pos { color: var(--pos); }
+.oe-out__v .is-neg { color: var(--neg); }
+.oe-out__v.is-neg { color: var(--neg); }
+.oe-slip { display: inline-flex; align-items: center; gap: 4px; }
+.oe-slip .is-warn { color: var(--warn); }
+.oe-out__v.is-pos { color: var(--pos); }
+.oe-out__v--small { font-size: var(--fs-xs); font-weight: 400; }
+.oe-sliplink {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 0; border: none; background: none; color: inherit;
+  font: inherit; cursor: pointer;
+}
+/* Same glass pop as leverage and margin, hung above the row it belongs to.
+   The read-out sits on the panel's bottom edge, so downward would leave the card. */
+.oe-sliprow { position: relative; }
+.oe-pop.oe-slippop {
+  top: auto;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  transform-origin: center bottom;
+  animation-name: oe-pop-out-up;
+  white-space: normal;
+  text-align: left;
+}
+
+.oe-out__sep { color: var(--dim); padding: 0 var(--sp-1); }
+/* "est." is a QUALIFIER INSIDE THE LABEL, not a badge beside it: same size,
+   same line, one step dimmer. It was set 2px smaller, which made a disclosure
+   that has to be read look like a decoration you can skip - and the reference's
+   read-out labels are each a single run of text at one size. The tag stays: it
+   is the only thing on the row that says the number is derived, not quoted. */
+.oe-tag { font-size: inherit; line-height: inherit; color: var(--dim); }
+
+/* --- touch ----------------------------------------------------------------- */
+
+/* styles.css lifts every bare button/input/select to a 34px minimum below
+   760px; these controls carry explicit heights that would out-specify it, so
+   they state their own touch sizes rather than silently opting out. */
+@media (max-width: 760px) {
+  .oe-mode__btn { height: 40px; }
+  .oe-tab { height: 44px; }
+  .oe-select, .oe-mini, .oe-input--exit { height: 34px; line-height: 32px; }
+  .oe-slider__rail, .oe-slider__input { height: 28px; }
+  .oe-slider__rail::before, .oe-slider__fill { top: 7px; }
+  .oe-slider__input::-webkit-slider-runnable-track { height: 28px; }
+  .oe-slider__input::-webkit-slider-thumb { margin-top: 5px; }
+  .oe-check input { width: 18px; height: 18px; }
+}
+
+/* --- xs: the ticket in a 185px column -------------------------------------- */
+
+/* THE PHONE COLUMN, AND WHY THE INSET IS THE FIRST THING TO GO.
+ *
+ * Below 568px of window the measured design is two columns - order book left,
+ * this panel right - and at 390 that makes the card 185px wide. The desktop
+ * chrome does not survive that untouched: a 16px inset a side spends 17% of the
+ * card on air, which left 153px of content for a tab strip that wants 178, a
+ * size field whose unit <select> is as wide as "vUSDC" and a read-out row
+ * carrying "0.0120% maker / 0.0400% taker". Measured in the browser, `.oe-body`
+ * needed 223px in a 153px box: the size placeholder truncated to "min 0.0" -
+ * which reads as a DIFFERENT minimum, not as a clipped one - and both order
+ * buttons wrapped their labels onto two lines.
+ *
+ * Nothing here is hidden and nothing shrinks below the type scale. The panel
+ * gives back the padding it can afford, the two controls that carry fixed
+ * horizontal chrome (the tab strip, the field's own gutters) drop one step to
+ * `--sp-2`, the read-out's long values wrap instead of overflowing, and the
+ * order buttons drop the direction qualifier the reference also drops at this
+ * width. Touch heights from the 760px block above are untouched.
+ *
+ * 567px is `xs` as a WINDOW width: layout.ts puts the breakpoint at 552 of
+ * CONTAINER and `.app` spends 8px a side below a 760px window. It matches the
+ * same conversion in dashboard/responsive.css - move them together. */
+/*
+ * CONTAINER, NOT WINDOW.
+ *
+ * These fire on the ORDER TICKET'S OWN WIDTH now. They were gated on a 567px
+ * window, which meant a ticket dragged to 200px on a wide monitor kept its full
+ * desktop insets and overflowed, while a full-width ticket on a small laptop got
+ * the cramped treatment it did not need. The panel is the thing whose width
+ * matters; see the container note in dashboard.css.
+ *
+ * 380px is the ticket's own measured floor: below it the three type tabs, the
+ * unit selector and the read-out values all stop fitting at full padding.
+ */
+.oe-tabs::-webkit-scrollbar { display: none; }
+
+@container panel (max-width: 380px) {
+  .oe { --oe-inset: var(--sp-2); }
+
+  /* Three tabs at 12px of padding measure 178px against 169 of content. At 8px
+     they measure 154 and the strip stops scrolling sideways. */
+  .oe-tab { padding: 0 var(--sp-2); }
+
+  /* The size field is the tightest box in the panel: an input and a unit
+     selector sized for the longest coin name have to share one 40px row.
+     Reclaiming a step of gutter from each is what keeps `min 0.00001` whole. */
+  .oe-input { padding: 0 var(--sp-2); }
+  .oe-unit { padding: 0 20px 0 var(--sp-2); background-position: right 8px center; }
+
+  /* A LONG VALUE WRAPS; IT DOES NOT GET CUT.
+     "0.0120% maker / 0.0400% taker" is 185px of text and there is no width at
+     which it fits beside its label here. `nowrap` on a value that cannot fit is
+     a value the user cannot read, so the row gives up its fixed height and the
+     value takes two lines. The label stays on one - it is the shorter half and
+     the one the eye scans down. */
+  .oe-out__row { align-items: baseline; }
+  .oe-out__v { white-space: normal; }
+
+  /* The direction switch keeps both halves at every width: "Long"/"Short" and
+     "Buy"/"Sell" are short enough not to need the qualifier the old two-button
+     ending dropped here. */
+  .oe-dir__btn { font-size: var(--fs-xs); }
+}
+
+/* ===========================================================================
+   DIRECTION SWITCH — the first decision on the ticket.
+
+   Two equal halves of one control, not two buttons that happen to sit together:
+   the pair carries a single border and the selected half fills. It replaces the
+   old pair of submit buttons at the bottom, where the direction was the LAST
+   thing chosen and every figure above it described a trade whose side was still
+   unknown.
+   ======================================================================== */
+.oe-dir {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.oe-dir__btn {
+  height: 30px;
+  border: 0;
+  border-radius: calc(var(--radius-md) - 2px);
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--oe-hover) var(--oe-ease), color var(--oe-hover) var(--oe-ease);
+}
+.oe-dir__btn:hover:not(.is-on) { color: var(--text); }
+/* The fill is the side's own colour, so the ticket states its direction in the
+   same green/red the position will be reported in. */
+.oe-dir__btn.is-on.is-buy  { background: var(--pos); color: var(--bg); }
+.oe-dir__btn.is-on.is-sell { background: var(--neg); color: var(--bg); }
+
+/* ---------------------------------------------------------------------------
+   LABELS INSIDE THE FIELD.
+
+   The caption used to sit in a `.oe-field__head` row above each input, which
+   cost 17px per field and put the name further from its own box than from the
+   box above it. Inside, the label is the left half of the control and the value
+   is right-aligned against it - which is also what makes a bare "0" read as an
+   amount rather than as placeholder text.
+   ------------------------------------------------------------------------ */
+.oe-inlabel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 0 0 var(--sp-3);
+  color: var(--muted);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: 38px;
+  white-space: nowrap;
+  /* The label is a click target for its own input, not a drag handle. */
+  cursor: text;
+  user-select: none;
+}
+/* With a label on the left the input no longer needs its own left inset. */
+.oe-inputrow .oe-inlabel + .oe-input { padding-left: var(--sp-2); }
+
+/* ---------------------------------------------------------------------------
+   TAKE PROFIT / STOP LOSS.
+   ------------------------------------------------------------------------ */
+.oe-exits__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 24px;
+}
+
+/* $ / % toggle. Sized to the icons in the reference, and deliberately quiet:
+   it changes how a number is READ, it does not change the order. */
+/* Two rows of two: the trigger price and the money it implies, side by side,
+   because they are one fact seen two ways. */
+.oe-exitgrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+/* These boxes hold a label AND a value in half the panel's width, so they run
+   tighter than the full-width price and size fields above. */
+.oe-exitgrid .oe-inputrow { height: 36px; }
+.oe-exitgrid .oe-input { height: 34px; line-height: 34px; font-size: var(--fs-xs); }
+.oe-exitgrid .oe-inlabel { padding-left: var(--sp-2); font-size: var(--fs-xs); line-height: 34px; }
+.oe-exitgrid .oe-suffix { font-size: var(--fs-xs); }
+
+/* A TIF that cannot be changed is stated, not offered - same row rhythm as the
+   `.oe-compact` select it stands in for, without the caret or the hit target. */
+.oe-compact--fixed { color: var(--muted); }
+.oe-compact--fixed b { color: var(--text); font-weight: 500; }
+
+/* ===========================================================================
+   DIRECTION AS TABS.
+
+   The filled pair read as two submit buttons sitting at the top of the ticket -
+   which is exactly what they used to be at the bottom, and exactly the confusion
+   worth avoiding when the real submit is 300px below. Tabs say "this is a mode
+   you are in", which is what the direction now is.
+   ======================================================================== */
+.oe-dir--tabs {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+}
+.oe-dir--tabs .oe-dir__btn {
+  height: 34px;
+  border-radius: 0;
+  /* The selected tab is marked by a rule on its own bottom edge, drawn OVER the
+     group's hairline rather than beside it, so the two never sit 1px apart. */
+  box-shadow: inset 0 -2px 0 transparent;
+  margin-bottom: -1px;
+}
+.oe-dir--tabs .oe-dir__btn.is-on.is-buy,
+.oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: none; }
+.oe-dir--tabs .oe-dir__btn.is-on.is-buy  { color: var(--pos); box-shadow: inset 0 -2px 0 var(--pos); }
+.oe-dir--tabs .oe-dir__btn.is-on.is-sell { color: var(--neg); box-shadow: inset 0 -2px 0 var(--neg); }
+
+/* ---------------------------------------------------------------------------
+   THE TWO ACCOUNT FACTS, above the fields they constrain.
+   Label left, figure right, on one 20px line - the same rhythm as the read-out
+   at the bottom, because they are the same kind of row.
+   ------------------------------------------------------------------------ */
+.oe-facts { margin: 0 0 var(--sp-2); display: grid; gap: 2px; }
+.oe-facts__row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.oe-facts__row dt { color: var(--muted); font-size: var(--fs-xs); }
+.oe-facts__row dd {
+  margin: 0; color: var(--text); font-size: var(--fs-xs); font-weight: 500;
+}
+.oe-facts__row dd.is-dim { color: var(--dim); }
+.oe-facts__row dd.is-pos { color: var(--pos); }
+.oe-facts__row dd.is-neg { color: var(--neg); }
+
+/* ---------------------------------------------------------------------------
+   IN-FIELD CHIPS AND THE UNIT TOGGLE.
+
+   MID and MAX are actions ON the field they sit in, so they live inside its
+   border rather than as a caption above it. Quiet by default: they are shortcuts,
+   not the primary way to fill either box.
+   ------------------------------------------------------------------------ */
+.oe-chip {
+  flex: none; align-self: center;
+  height: 20px; margin-right: var(--sp-2); padding: 0 6px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: none; color: var(--muted);
+  font-size: var(--fs-micro); font-weight: 500; line-height: 18px;
+  letter-spacing: var(--ls-micro); cursor: pointer;
+}
+.oe-chip:hover:not(:disabled) { color: var(--text); }
+.oe-chip:disabled { color: var(--disabled); cursor: default; }
+/* MAX sits after the label, so it needs the gap on its LEFT instead. */
+.oe-inlabel + .oe-chip { margin-left: var(--sp-2); margin-right: 0; }
+
+.oe-unitlabel {
+  flex: none; padding: 0 0 0 var(--sp-2);
+  color: var(--text); font-size: var(--fs-base); font-weight: 500; line-height: 38px;
+  white-space: nowrap;
+}
+.oe-swap {
+  flex: none; align-self: center;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; margin-right: 6px; padding: 0;
+  border: 0; border-radius: var(--radius-sm);
+  background: none; color: var(--muted); cursor: pointer;
+}
+.oe-swap:hover:not(:disabled) { color: var(--text); }
+.oe-swap:disabled { color: var(--disabled); cursor: default; }
+
+/* ---------------------------------------------------------------------------
+   THE PERCENTAGE, as a field beside the slider.
+   Typing 25 and dragging to 25 are the same act, so they are one control with
+   two grips rather than a slider and a caption that only reports it.
+   ------------------------------------------------------------------------ */
+.oe-slider { display: grid; grid-template-columns: minmax(0, 1fr) 72px; align-items: center; gap: var(--sp-2); }
+.oe-slider > .oe-note { grid-column: 1 / -1; }
+.oe-slider .oe-pctbox {
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, #000 55%, var(--bg));
+  justify-content: center;
+}
+.oe-slider .oe-pctbox .oe-input { height: 28px; min-width: 0; line-height: 28px; padding: 0 2px 0 8px; font-size: var(--fs-xs); }
+.oe-slider .oe-pctbox .oe-suffix { padding: 0 8px 0 0; font-size: var(--fs-xs); color: var(--muted); }
+/* ===========================================================================
+   OPTIONS ROWS — a flag on the left, its control on the right.
+
+   `.oe-opts` was a COLUMN, which put the TIF on its own line between the two
+   checkboxes and made it read as a third flag rather than as a property of the
+   order. Each row now pairs one checkbox with the control that belongs to it.
+   ======================================================================== */
+.oe-opts {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+.oe-opts .oe-switch { width: auto; }
+.oe-switch {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+}
+.oe .oe-switch input {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 36px;
+  height: 20px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2a;
+  cursor: pointer;
+}
+.oe .oe-switch input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  clip-path: none;
+  transform: none;
+  transition: transform 0.16s var(--oe-ease);
+}
+.oe .oe-switch input:checked { background: var(--oe-tint, var(--pos)); }
+.oe .oe-switch input:checked::after { transform: translateX(16px); }
+.oe .oe-switch input:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* The exits header is already a space-between row; this only matches its
+   left inset to the options row above it so the two checkboxes line up. */
+.oe-exits__head { padding-left: var(--sp-1); }
+
+/* ONE unit control: the unit you are in, then the arrow out of it. */
+.oe-unitswap { display: inline-flex; align-items: center; gap: 2px; }
+.oe-unitswap__now {
+  min-width: 12px; text-align: right;
+  color: var(--muted); font-size: var(--fs-xs); font-weight: 500;
+}
+
+/* ---------------------------------------------------------------------------
+   THE UNIT IS NOT THE VALUE.
+
+   `USDC` beside a price and `BTC` beside a size were rendering at --text, the
+   same weight and colour as the number itself, so each field read as two values
+   with a space between them. The unit is a label for the figure beside it and
+   takes the label colour, the same as the in-field name on the left.
+   ------------------------------------------------------------------------ */
+.oe-suffix,
+.oe-unitlabel { color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+   SWAP GLYPH ALIGNMENT.
+
+   `align-self: center` centres the 24px box in a 38px row, but the glyph inside
+   is drawn on a 16 viewBox whose two arrows are not symmetric about its middle -
+   the upper arrow sits one unit above centre - so the ICON read low against the
+   text baseline even though its BOX was centred. The box is nudged up by that
+   one unit rather than the artwork being redrawn, so the same icon stays usable
+   anywhere else it appears.
+   ------------------------------------------------------------------------ */
+.oe-inputrow .oe-swap { position: relative; top: -1px; }
+
+/* ===========================================================================
+   THE FEE ROW.
+
+   Taker / maker with no words: the pair is always in that order and always in
+   that place, so the labels restated a convention the numbers already carry -
+   and they cost the row the width a discount needs.
+   ======================================================================== */
+.oe-feebtn {
+  height: auto; padding: 0;
+  border: 0; background: none; color: inherit; font: inherit;
+  /* A dotted rule rather than a solid underline: this opens a detail, it does
+     not navigate, and a link-looking label promises a page. */
+  border-bottom: 1px dotted var(--dim);
+  border-radius: 0;
+  cursor: pointer;
+}
+.oe-feebtn:hover { color: var(--text); border-bottom-color: var(--muted); }
+
+.oe-fee { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+/* The flame is the only decoration on this panel, and it is doing a job: it
+   marks the row as carrying a discount at a glance, before either number is
+   read. Sized down - an emoji at full text size out-weighs the figures. */
+.oe-fee__flame { font-size: var(--fs-label); line-height: 1; }
+/* The superseded rate is struck AND dimmed. Struck alone still reads as a live
+   value at a glance; dimmed alone does not say it no longer applies. */
+.oe-fee__was { color: var(--dim); text-decoration: line-through; }
+.oe-fee__now { color: var(--pos); }
+
+/* The tier line under the row when it is expanded. */
+.oe-out__row--note { grid-template-columns: 1fr; }
+.oe-out__v--note {
+  color: var(--muted); font-size: var(--fs-micro); font-weight: 400;
+  line-height: 14px; white-space: normal; text-align: left;
+}

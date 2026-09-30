@@ -1,0 +1,275 @@
+/* ===========================================================================
+   ACCOUNT CONTROLS - everything the retired wallet sheet used to hold.
+
+   Connect is our Connect dialog (ConnectDialog.tsx / ConnectDialog.css), which
+   hands off to the AppKit modal (themed from walletconnect.ts) only after a row
+   is pressed. What is left here is small and lives where it is used:
+     - the navbar address menu's wallet + trading block      (.acct-menu__*)
+     - the "Advanced key options" modal                       (.acct-adv)
+
+   The order ticket's read-only state is its own Long/Short button, which reads
+   "Connect wallet" / "Enable trading" (account/useTradeGate.ts).
+
+   Every value is a styles.css token. No new colour, font or radius: this is
+   Valuetrade's vocabulary, only arranged for these places.
+   ======================================================================== */
+
+/* ---------------------------------------------------------------------------
+   THE APPKIT MODAL - one token its theme API does not reach.
+
+   walletconnect.ts sets the accent, font, radius and z-index through AppKit's
+   own `themeVariables`. Setting a font also stops AppKit fetching its KHTeka
+   faces from fonts.reown.com - including KHTekaMono, which its numeric/tag text
+   still names, so that text fell through to the browser's default SERIF. Point
+   the mono token at our numeric face instead. `html:root` (0,1,1) outranks the
+   `:root` block AppKit injects into <head> after this sheet.
+   ------------------------------------------------------------------------ */
+html:root { --apkt-fontFamily-mono: var(--font-num); }
+
+/* AppKit's own overlay - rgba(0,0,0,.5) and an 8px blur, drawn on the
+   <w3m-modal> host - OFF while our Connect dialog's scrim is behind it
+   (walletconnect.ts:shareBackdrop sets the attribute for every view it opens).
+   That scrim stays up for the whole connect session, so the page is tinted and
+   blurred ONCE, by one layer, from the dialog's first frame to its last - never
+   twice, and never not at all. The theme API has no switch for it (the blur is
+   hard-coded), but a page rule on a shadow host outranks the component's own
+   `:host` rules, so nothing has to reach into its shadow root. If a later AppKit
+   moves the overlay off the host, this matches nothing and the two scrims simply
+   stack while AppKit is open: darker, never missing. */
+w3m-modal[data-shared-backdrop] {
+  background-color: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* ---------------------------------------------------------------------------
+   THE ADDRESS MENU's wallet block.
+
+   `.navaddr__menu` / `.navaddr__item` (styles.css) own the surface and the rows;
+   these only add what the sheet used to show: which wallet, which chain, and
+   whether trading is on.
+   ------------------------------------------------------------------------ */
+.acct-menu__wallet {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-1) var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+.acct-menu__icon {
+  width: 16px; height: 16px; flex: none;
+  border-radius: var(--radius-xs);
+  object-fit: contain;
+}
+.acct-menu__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.acct-menu__chain { margin-left: auto; flex: none; color: var(--muted); font-family: var(--font-num); }
+
+.acct-menu__section {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: 1px solid var(--panel-line);
+}
+.acct-menu__label {
+  padding: 2px var(--sp-1) var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 14px;
+}
+
+/* One line of state: a dot and a sentence. The dot is the same 7px status dot
+   the footer uses, so "enabled" means the same green everywhere. */
+.acct-menu__state {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-1) var(--sp-1);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+}
+.acct-menu__state .statusdot { flex: none; }
+.acct-menu__state--warn { color: var(--warn); }
+.acct-menu__detail {
+  padding: 0 var(--sp-1) var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* The row that arms the ticket. Accent text, not a filled button: a menu is a
+   list of rows, and one filled block in it would read as a second surface. */
+.navaddr__item.acct-menu__item--accent { color: var(--accent); }
+.navaddr__item.acct-menu__item--accent:hover { color: var(--accent-hover); }
+.navaddr__item.acct-menu__item--danger { color: var(--muted); }
+.navaddr__item.acct-menu__item--danger:hover { color: var(--neg); }
+.navaddr__item:disabled { opacity: 0.4; cursor: not-allowed; }
+.navaddr__item:disabled:hover { background: none; color: var(--muted); }
+
+/* ---------------------------------------------------------------------------
+   ADVANCED KEY OPTIONS - the small modal behind "Advanced…".
+   ------------------------------------------------------------------------ */
+/* `.stack` already spaces its children; a paragraph's own margins on top of that
+   doubled every gap in this dialog. */
+.acct-adv > p,
+.acct-adv > .stack > p { margin: 0; }
+.acct-adv .row.wrap > label { flex: 1 1 160px; min-width: 0; }
+.acct-adv .row.wrap > label > input,
+.acct-adv .row.wrap > label > select { width: 100%; }
+.acct-adv code { overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------------------
+   THE ADDRESS MENU (NavBar.tsx:AddressMenu), after the owner's reference: a
+   glass card; three account boxes (label over coin icon + value, an action
+   square on the right) with the transfer button riding the Perps/Spot seam;
+   then plain rows, text left and glyph right, Sign out always red.
+   ------------------------------------------------------------------------ */
+.navaddr__menu.acct-menu {
+  min-width: 320px;
+  padding: var(--sp-3);
+  border-radius: 14px;
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  font-size: 14px;
+}
+.acct-menu__funds { display: grid; gap: 8px; margin-bottom: var(--sp-2); }
+.acct-menu__pair { position: relative; display: grid; gap: 8px; }
+.acct-menu__acct {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 12px 12px 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+}
+.acct-menu__acct-main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  text-align: left;
+}
+.acct-menu__acct-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.acct-menu__acct-k {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 16px;
+}
+.acct-menu__chev { transition: transform var(--dur-fast) var(--ease-out); }
+.acct-menu__acct--evm.is-open .acct-menu__chev { transform: rotate(180deg); }
+.acct-menu__acct-v {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 24px;
+  white-space: nowrap;
+}
+.acct-menu__iconbtn,
+.acct-menu__swap {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+  color: var(--text);
+  cursor: pointer;
+}
+.acct-menu__iconbtn { width: 40px; height: 40px; border-radius: 10px; }
+/* On the seam between Perps and Spot, the same rounded square as the actions. */
+.acct-menu__swap {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 34px;
+  border-radius: 10px;
+}
+.acct-menu__iconbtn:hover,
+.acct-menu__swap:not(:disabled):hover { border-color: var(--muted); background: var(--bg-elevated); }
+.acct-menu__swap:disabled { cursor: default; opacity: 0.45; }
+
+.acct-menu__holdings {
+  flex-basis: 100%;
+  display: grid;
+  gap: 8px;
+  max-height: 232px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 10px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--panel-line);
+}
+.acct-menu__holding { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.acct-menu__holding.is-dim { color: var(--muted); }
+.acct-menu__holding-ic { position: relative; display: inline-grid; flex: none; }
+.acct-menu__holding-chain {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  box-shadow: 0 0 0 1.5px var(--bg-elevated);
+}
+.acct-menu__holding-t { min-width: 0; font-family: var(--font-num); }
+.acct-menu__holding-t small { display: block; color: var(--muted); font-family: var(--font-ui, inherit); font-size: 11px; }
+.acct-menu__holding-v { margin-left: auto; color: var(--text); font-family: var(--font-num); white-space: nowrap; }
+
+.navaddr__item.acct-menu__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-2);
+  color: var(--text);
+  font-size: 15px;
+}
+.navaddr__item.acct-menu__row svg { flex: none; color: var(--muted); }
+.navaddr__item.acct-menu__row:hover svg { color: var(--text); }
+.navaddr__item.acct-menu__row--out,
+.navaddr__item.acct-menu__row--out svg,
+.navaddr__item.acct-menu__row--out:hover,
+.navaddr__item.acct-menu__row--out:hover svg { color: var(--neg); }
+.navaddr__item.acct-menu__row--out:hover { background: color-mix(in srgb, var(--neg) 10%, transparent); }
+
+/* The wallet app's icon inside the navbar address button (NavBar.tsx). */
+.navbtn.navaddr__btn { display: inline-flex; align-items: center; gap: 8px; }
+.navaddr__wicon, .wmark { display: block; flex: none; border-radius: 5px; object-fit: contain; }
+.navaddr__wicon { width: 18px; height: 18px; }
+/* The EVM box's holdings open under it, across the full width (motion.tsx Collapse). */
+.acct-menu__acct--evm > .mo-collapse { flex-basis: 100%; }
+.acct-menu__holding--rest { color: var(--muted); padding-left: 2px; }
+.acct-menu__holding--rest .acct-menu__holding-v { color: var(--muted); }
+
+/* The EVM total while chains are still answering: the figures so far, and this. */
+.acct-menu__spin {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 2px;
+  border: 2px solid var(--line);
+  border-top-color: var(--muted);
+  border-radius: 50%;
+  animation: acct-menu-spin 0.9s linear infinite;
+}
+@keyframes acct-menu-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .acct-menu__spin { animation: none; } }

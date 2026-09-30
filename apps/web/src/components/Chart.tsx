@@ -1,0 +1,3037 @@
+/**
+ * Candlestick chart (klinecharts 10 — Apache-2.0, zero runtime deps).
+ *
+ * Replaces lightweight-charts. The reason for the swap is not the candles, it
+ * is the overlay layer: klinecharts ships 27 indicators, ~16 drawing tools, and
+ * — the part that matters most — overlays that emit drag events
+ * (onPressedMoveStart / onPressedMoving / onPressedMoveEnd), which is what
+ * drag-to-modify hangs off.
+ *
+ * ORDER INTERACTION lives half here and half in ../chart/orderOverlays.ts. The
+ * split is deliberate: that file knows how to draw a line and how to snap a
+ * price; this one owns every decision about whether anything is SENT. Three
+ * rules hold that line, and none of them is optional on a screen that signs
+ * real mainnet orders:
+ *
+ *   1. A drag never submits. Releasing the mouse opens a confirm box and
+ *      nothing else; the modify goes out on an explicit click.
+ *   2. What you see is what gets signed. The dragged price is snapped to the
+ *      symbol's tick before it is displayed, and the displayed string is the
+ *      one that goes on the wire.
+ *   3. A line is never optimistic. Between "submitted" and "the venue agrees"
+ *      it is drawn amber and labelled as unsent; on rejection, on the order
+ *      being filled out from under the drag, or on the venue simply not
+ *      confirming, it snaps back to the last price the server stated.
+ *
+ * Right-clicking a line is intercepted for a fourth reason: klinecharts' own
+ * right-click handler DELETES the overlay by default, which on a stop-loss
+ * would erase the line while the order kept resting at the venue.
+ *
+ * The data path is unchanged from the previous implementation: seeded from
+ * REST /api/md/{engine}/klines, then updated live from the `candle` channel via
+ * useChannel. What changed is the seam — v10 has no applyNewData/updateData;
+ * history and live ticks both flow through a single `setDataLoader()` object,
+ * so the REST fetch lives in `getBars` and the WS tick is handed to the
+ * `subscribeBar` callback the library gives us.
+ *
+ * The library is imported dynamically so it lands in its own chunk and never
+ * blocks first paint.
+ */
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useLatched } from './motion';
+import { createPortal } from 'react-dom';
+import type {
+  AxisRange,
+  CandleType,
+  Chart as KChart,
+  DataLoader,
+  DataLoaderGetBarsParams,
+  IndicatorSeries,
+  KLineData,
+  Point,
+} from 'klinecharts';
+import { api, type Engine, type Kline, type Symbol } from '../api';
+import { bumpAccountResource, useAccountResource } from '../accountFeeds';
+import { useAsync, useChannel, useStatus, useStored } from '../hooks';
+import { fmtPct, fmtPrice, fmtQty, fmtQuote, num, precisionOf, signClass } from '../format';
+import {
+  CANDLE_PANE_ID,
+  DEFAULT_BAR_SPACE,
+  DEFAULT_OFFSET_RIGHT,
+  chartStyles,
+  createDenseYTicks,
+  formatBigNumber,
+  registerChartAxes,
+  X_AXIS_NAME,
+} from '../chart/theme';
+import {
+  INTERVAL_GROUPS,
+  PERIOD_BY_INTERVAL,
+  QUICK_INTERVALS,
+  intervalLabel,
+  intervalOf,
+} from '../chart/intervals';
+import {
+  ORDER_LINE_OVERLAY,
+  OrderLineLayer,
+  orderLines,
+  positionLines,
+  registerOrderLineOverlay,
+  snapToTick,
+  type OrderLine,
+  type OrderLineHandlers,
+} from '../chart/orderOverlays';
+import {
+  MEASURE_OVERLAY,
+  finishMeasure,
+  registerMeasureOverlay,
+} from '../chart/measureOverlay';
+import { DrawingRail, overlayLabel } from '../chart/DrawingRail';
+import { DepthView, MarketInfoView } from './MarketPanels';
+import { withTradingView } from '../chart/tv/switch';
+import { fetchKlineRows } from '../chart/klines';
+import {
+  FeedWatchdog,
+  LOAD_TIMEOUT_MS,
+  gapFillLimit,
+  intervalMs,
+  isFatalStatus,
+  loadWithRetry,
+  mergeBars,
+  planMerge,
+  retryDelayMs,
+  type FeedHealth,
+  type RecoverReason,
+  type RecoverResult,
+  type RetryHandle,
+} from '../chart/feedHealth';
+import { FEED_LOADING, FeedBadge, FeedOverlay, type FeedView } from '../chart/FeedOverlay';
+import { CandleMorph, type CandleLayerState } from '../chart/CandleMorph';
+import { ChartBoundary } from '../chart/ChartBoundary';
+import {
+  MORPH_HIDDEN,
+  MORPH_HIDDEN_CANDLES,
+  MORPH_SHOWN,
+  badgeStyles,
+  gridLines,
+  morphable,
+  prefersReducedMotion,
+  type RGBA,
+} from '../chart/morph';
+import { dragAnywhere } from '../chart/dragAnywhere';
+import { holdFrame } from '../chart/switchFrame';
+import { HistoryPager } from '../chart/historyPager';
+import { HistoryReveal } from '../chart/historyReveal';
+import { ViewTween, defaultView } from '../chart/viewTween';
+import {
+  INITIAL_SCALE,
+  PriceFit,
+  holdRange,
+  isAutoFit,
+  resumeAutoFit,
+  kindOf,
+  pannedRange,
+  priceAxis,
+  scaleReducer,
+  templateRange,
+} from '../chart/yScale';
+import { hub } from '../ws';
+import '../chart/chart.css';
+import { useLoadFailedToast } from './LoadFailed';
+import { notify } from '../toast';
+import { logger, recentLogs } from '../log';
+import { plotViolation, readPlot, type Violation } from '../chart/invariant';
+
+/** error = the user sees something broken; warn = degraded or recovering;
+ *  info = lifecycle; debug = high-volume detail (`?debug=chart`). */
+const log = logger('chart');
+
+/** How much history to seed. Matches the previous implementation. */
+const KLINE_LIMIT = 500;
+/** Older bars per request when scrolling back (the backend's maximum) -
+ *  and how many such pages are kept fetched ahead of the user
+ *  (chart/historyPager.ts). */
+const HISTORY_PAGE = 1000;
+const HISTORY_AHEAD = 2;
+
+/* The volume histogram is NO LONGER ON BY DEFAULT.
+ *
+ * It used to be seeded on mount, and it cost more than it looked like it did:
+ * a second pane took ~100px off the candles, brought its own y-axis scale
+ * (0.2000 / 0.1200 / 0.0400) up the right-hand side beside the price scale,
+ * and printed a second legend line — VOL(5,10,20) MA5/MA10/MA20 — with three
+ * moving-average overlays on top. Four numbers competing with the price axis
+ * on a panel whose whole job is the price. The measured reference is candles
+ * only, full height, one scale.
+ *
+ * Nothing was removed: VOL is still in the Indicators menu with the other 26,
+ * and adding it back gets the same pane it always did. The default just no
+ * longer decides for the user. */
+
+const PANE_HEIGHT_DEFAULT = 90;
+const PANE_HEIGHT_MIN = 40;
+const PANE_HEIGHT_MAX = 400;
+const PANE_HEIGHT_STEP = 25;
+
+/* The price scale is the footer's `% A L`, left to right (chart/yScale.ts):
+ *
+ *   %  percentage scale, relative to the leftmost visible bar
+ *   A  autoscale: the axis fits the candles on screen as the view moves. On by
+ *      default; it goes off by itself when the user takes the axis - a drag or
+ *      a scroll on the price axis, or a vertical drag on the plot - and the
+ *      range then holds while the chart pans sideways.
+ *   L  logarithmic scale
+ *
+ * % and L are klinecharts y-axis behaviours selected by the *name* of a
+ * registered axis ('percentage', 'logarithm'; neither = 'normal'), and exclude
+ * each other. */
+
+/** How far a drag on the plot has to go vertically - and more vertically than
+ *  sideways - before it pans the price axis and switches A off. One pixel, per
+ *  the owner: a vertical drag moves the axis from its first pixel. The
+ *  "more vertical than sideways" half of the rule still keeps a horizontal
+ *  pan's wobble from switching A off. */
+const V_PAN_PX = 1;
+
+/**
+ * The toolbar's views. Chart is the klinecharts canvas this file has always
+ * owned; the other two render MarketPanels.tsx components fed by data this
+ * app already fetches for every listed symbol - the deep order book (Depth)
+ * and the symbol's own trading rules (Market info).
+ */
+const VIEWS = [
+  { id: 'chart', label: 'Chart' },
+  { id: 'depth', label: 'Depth' },
+  { id: 'market', label: 'Market info' },
+] as const;
+type ViewId = (typeof VIEWS)[number]['id'];
+
+/** How the price series is drawn. Every one of these is a `CandleType` the
+ *  installed build renders natively — nothing here is a mode we implement
+ *  ourselves, so the menu cannot offer a style the canvas will not paint. */
+const CANDLE_STYLES: { id: CandleType; label: string }[] = [
+  { id: 'candle_solid', label: 'Candles' },
+  { id: 'candle_stroke', label: 'Hollow candles' },
+  { id: 'ohlc', label: 'Bars' },
+  { id: 'area', label: 'Line' },
+];
+
+/* --- toolbar glyphs --------------------------------------------------------
+   Hand-written on the same 24x24 grid the drawing rail uses, drawn with
+   `currentColor` so the whole hover/active model is one CSS `color` property.
+
+   Drawn at 20px, not 16. Measured against the reference, its toolbar icons
+   carry 16-17px of ink; ours carried 12-14 and sat a whole step below the
+   14px text beside them, which is what made the strip read as two rows of
+   different importance rather than one. The grid moved from 16 to 24 with the
+   size bump so the strokes stay ~1.25px instead of thickening to 1.6. */
+const SVG = {
+  viewBox: '0 0 24 24',
+  width: 20,
+  height: 20,
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.5,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+  'aria-hidden': true,
+  focusable: false,
+} as const;
+
+/**
+ * The overflow caret. A STROKED chevron, and a real element rather than the
+ * '⌄' character it replaces: that glyph carries its own font metrics, which
+ * sat its ink 5px below the centreline of the timeframe labels next to it and
+ * gave the toolbar two competing baselines. An SVG box centres like a box.
+ *
+ * IT HAS ITS OWN GRID, and that is the fix rather than a tidy-up. Squeezing the
+ * shared 24-unit viewBox into a 14px box scales the stroke down with it: 1.5
+ * units became 0.875 device px, so the caret could not reach the token colour
+ * however it was aligned — measured, it topped out at #423b3b against the
+ * #544a4c of the '1D' label two pixels to its left, and read as a fainter rank
+ * of control than the thing it belongs to. A 12-unit grid drawn at 12px is 1:1
+ * with the screen, so the stroke below is stated in real device pixels.
+ *
+ * 1.25px, matching the rest of the strip, and NOT the 1px the fullscreen
+ * brackets use. That is not an inconsistency, it is what a diagonal costs: an
+ * axis-aligned 1px stroke can own a whole pixel column, but a sloped one is
+ * spread across the width of its own slope, so a 1px diagonal tops out around
+ * 80% of the token however it is placed. 1.25 on this 4:3 chevron puts just
+ * over two pixels of ink on each scanline, which saturates the middle one —
+ * the same reason the toolbar's other glyphs already reach #544a4c. */
+const chevron = {
+  ...SVG,
+  viewBox: '0 0 12 12',
+  width: 12,
+  height: 12,
+  strokeWidth: 1.25,
+} as const;
+const ChevronIcon = (
+  <svg {...chevron}>
+    <path d="M3 4.5 6 8l3-3.5" />
+  </svg>
+);
+
+/** Series style. THREE FILLED candlesticks with wicks, not two hollow outlines:
+ *  measured, the reference's glyph is three solid bodies across 16px, and the
+ *  outlined pair we drew read as a pair of empty boxes at this size — the one
+ *  icon in the strip whose whole job is to say "candles" did not look like
+ *  candles. Filled, so it carries the same ink weight as its neighbours. */
+const StyleIcon = (
+  <svg {...SVG}>
+    <path d="M4.75 4v16M12 2.5v19M19.25 5.5v13" />
+    <path
+      d="M2.75 8h4v8h-4zM10 6.5h4v11h-4zM17.25 9.5h4v5h-4z"
+      fill="currentColor"
+      stroke="none"
+    />
+  </svg>
+);
+/** Indicators. An `fx` mark, matching the reference — a function applied to the
+ *  series, which is what an indicator is, rather than the generic line-chart
+ *  squiggle that could equally mean "chart". Drawn narrow (10px of ink, the
+ *  measured reference width) so it reads as a typographic mark sitting next to
+ *  the word it labels rather than as a third icon button. */
+const IndicatorIcon = (
+  <svg {...SVG}>
+    <path d="M9 20c0-9.5.3-13.5 2.6-14.5.7-.3 1.4-.2 1.9.2" />
+    <path d="M7 12.5h5" />
+    <path d="M14.5 15 18.5 19.5M18.5 15 14.5 19.5" />
+  </svg>
+);
+/**
+ * Fullscreen. FOUR CORNER BRACKETS ON A 1:1 GRID, and the grid is the point.
+ *
+ * This glyph is nothing but axis-aligned hairlines, which makes it the strictest
+ * test of the toolbar's rendering in the whole strip — and it was failing it.
+ * The shared 24-unit viewBox drawn into a 20px box scales a 1.5-unit stroke to
+ * 1.25 device px and puts every coordinate on a fraction, so each arm spread
+ * across two columns at partial coverage: measured, this one control topped out
+ * at #463e3e while every neighbour (the candle icon, the fit/zoom/goto trio, the
+ * Depth/Margin/Market info tabs) sat at a full #544a4c. One faded button beside
+ * correctly-valued siblings reads as a bug, not as a design.
+ *
+ * So: a 20-unit grid drawn at 20px, a 1px stroke, integer coordinates, and a
+ * viewBox origin of -0.5 so those integers land on pixel CENTRES rather than on
+ * the boundaries between pixels. Geometry follows the measured reference — ink
+ * spans 16x16, arms are 5px, and the clear cross through the middle is 6px.
+ *
+ * The corners are ARCS, not mitres. `strokeLinejoin: round` does nothing at a
+ * 1px stroke — there is no join width to round — so the brackets came out
+ * square against the reference's visibly curved ones, which is the difference
+ * between a crop mark and a viewport. A 2-unit radius is what the reference's
+ * corner profile measures.
+ */
+const fsIcon = {
+  ...SVG,
+  viewBox: '-0.5 -0.5 20 20',
+  width: 20,
+  height: 20,
+  strokeWidth: 1,
+} as const;
+const FullscreenIcon = (
+  <svg {...fsIcon}>
+    <path d="M2 6V4a2 2 0 0 1 2-2h2M13 2h2a2 2 0 0 1 2 2v2M17 13v2a2 2 0 0 1-2 2h-2M6 17H4a2 2 0 0 1-2-2v-2" />
+  </svg>
+);
+const ExitFullscreenIcon = (
+  <svg {...fsIcon}>
+    <path d="M2 6h2a2 2 0 0 0 2-2V2M17 6h-2a2 2 0 0 1-2-2V2M17 13h-2a2 2 0 0 0-2 2v2M2 13h2a2 2 0 0 1 2 2v2" />
+  </svg>
+);
+
+interface ActiveIndicator {
+  id: string;
+  name: string;
+  series: IndicatorSeries;
+  /** 'candle_pane' for price-series overlays, else the pane created for it. */
+  paneId: string;
+  visible: boolean;
+  /** Only meaningful for indicators that own a pane. */
+  height: number;
+}
+
+const toKLineData = (k: Kline): KLineData => ({
+  timestamp: k.t,
+  open: +k.o,
+  high: +k.h,
+  low: +k.l,
+  close: +k.c,
+  volume: +k.v,
+  turnover: +k.q,
+});
+
+/**
+ * Raw gateway rows -> ascending, de-duplicated bars. The gateway answers
+ * newest-first; klinecharts needs ascending time. A row with a non-number in
+ * a price is dropped: one NaN poisons the autoscale for the whole range.
+ */
+function toRows(raw: readonly unknown[]): KLineData[] {
+  const byTime = new Map<number, KLineData>();
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue;
+    const bar = toKLineData(r as Kline);
+    bar.timestamp = Number((r as Kline).t);
+    if (![bar.timestamp, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite) || bar.timestamp <= 0) continue;
+    byTime.set(bar.timestamp, bar);
+  }
+  return [...byTime.values()].sort((a, b) => a.timestamp - b.timestamp);
+}
+
+/** The shape feedHealth's merge reads, carrying the chart's own row along. */
+const asBar = (k: KLineData) => ({
+  time: k.timestamp,
+  open: k.open,
+  high: k.high,
+  low: k.low,
+  close: k.close,
+  ...(Number.isFinite(k.volume) ? { volume: k.volume as number } : {}),
+  row: k,
+});
+
+/** Which series a load or a live candle belongs to. */
+const feedKey = (engine: string, symbol: string, interval: string): string => `${engine}|${symbol}|${interval}`;
+
+/** Which price the candles show. */
+type PriceSource = 'latest' | 'mark' | 'index';
+const SOURCE_LABEL: Record<PriceSource, string> = { latest: 'Latest', mark: 'Mark', index: 'Index' };
+const SOURCE_HINT: Record<PriceSource, string> = {
+  latest: 'Candles of the last traded price on SoDEX',
+  mark: 'Candles of the mark price - what PnL and liquidation are measured against',
+  index: 'Candles of the index price - the weighted average of external spot prices',
+};
+/** SoDEX's price-data series start at 5m, and skip 8h and 3D. */
+const NO_MARK_INDEX = new Set(['1m', '3m', '8h', '3D']);
+
+/** Why Mark / Index cannot be shown on this chart, in one sentence. */
+function markIndexNotice(engine: Engine, interval: string): string {
+  if (engine !== 'perps') return 'Mark and index prices exist for perpetuals only.';
+  if (interval === '1m' || interval === '3m') {
+    return `Mark and index aren't on the ${intervalLabel(interval)} chart. Switch to 5m or higher.`;
+  }
+  return `Mark and index aren't published for ${intervalLabel(interval)}. Switch to 5m or another supported timeframe.`;
+}
+
+/** Hub socket open AND the venue stream behind it for this engine. */
+const streamOpen = (engine: Engine): boolean =>
+  hub.state === 'open' && (hub.upstream[engine] ?? 'open') === 'open';
+
+interface Series {
+  key: string;
+  engine: Engine;
+  symbol: string;
+  interval: string;
+}
+
+/** How long to wait for the venue to report a submitted modify before giving up
+ *  and putting the line back on the last confirmed price. Generous enough for a
+ *  10s poll plus a round trip; short enough that a silently-dropped modify does
+ *  not leave a pending line on screen indefinitely. */
+const SETTLE_TIMEOUT_MS = 15_000;
+
+/** Approximate placement-menu box, used only to decide which way it opens. */
+const MENU_W = 220;
+const MENU_H = 170;
+
+export interface ChartProps {
+  engine: Engine;
+  symbol: string;
+  sym?: Symbol;
+  /**
+   * Optional escape hatch for features that need the live chart instance.
+   * Called with the instance once it exists and with null on teardown.
+   */
+  onChartReady?: (chart: KChart | null) => void;
+
+  // --- order lines ----------------------------------------------------------
+  // All optional: the chart renders candles perfectly well without any of them,
+  // and a caller that passes none simply gets no order layer.
+
+  /** Wallet selected in the UI. Drives the order/position READS the lines come
+   *  from. Without it there is nothing to draw and nothing is fetched. */
+  address?: string | null;
+  /** False = read-only. Lines are still drawn (reading your own resting orders
+   *  is not a write), but nothing can be dragged and the right-click menu does
+   *  not open — a read-only session must not offer actions it cannot take. */
+  unlocked?: boolean;
+  /** Bumped by the app whenever account state changed elsewhere. */
+  refreshToken?: number;
+  /** Tell the app an order moved, so the other panels re-read. */
+  onChanged?: () => void;
+  /** Prefill the shared order-ticket price. Never submits anything. */
+  onPrice?: (p: string) => void;
+  /** Last traded price, for the distance readout while dragging - and the
+   *  feed watchdog's "is the market trading?" signal. */
+  lastPrice?: string;
+  /**
+   * The app's modify-order path, for the TradingView chart's DIY order lines
+   * (chart/tv/, behind VITE_CHART=tradingview). That chart never sends
+   * anything itself: a dragged line becomes a confirm, and only the confirm
+   * calls this. Without it the TradingView lines stay read-only. The
+   * klinecharts chart does not use it.
+   */
+  onModifyOrder?: (body: Record<string, unknown>) => Promise<unknown>;
+}
+
+/** A price the user dragged to and has not sent. Held here, never on the wire. */
+interface PendingMove {
+  line: OrderLine;
+  price: string;
+}
+
+/* VITE_CHART=tradingview swaps in TradingView Advanced Charts when its files are
+   installed in public/charting_library/ (chart/tv/, docs/TRADINGVIEW.md). With
+   the flag unset - the default - withTradingView returns `Chart` itself, so the
+   export below IS this component, unchanged. */
+/** How long a view-control move takes: the tween's own duration, or a
+ *  one-frame cut when the user asked for less motion. */
+const viewMs = (): number | undefined => (prefersReducedMotion() ? 0 : undefined);
+
+const ChartOrTradingView = withTradingView(Chart);
+
+/** The chart behind its own error boundary (chart/ChartBoundary.tsx): a crash
+ *  stays inside the chart card instead of taking its panel with it. */
+function GuardedChart(props: ChartProps) {
+  return (
+    <ChartBoundary>
+      <ChartOrTradingView {...props} />
+    </ChartBoundary>
+  );
+}
+export { GuardedChart as Chart };
+
+function Chart({
+  engine, symbol, sym, onChartReady,
+  address = null, unlocked = false, refreshToken = 0, onChanged, onPrice, lastPrice,
+}: ChartProps) {
+  const root = useRef<HTMLElement>(null);
+  const holder = useRef<HTMLDivElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const chart = useRef<KChart | null>(null);
+  const lib = useRef<typeof import('klinecharts') | null>(null);
+  /** The price axis' createRange wrapper and the y half of a move
+   *  (chart/yScale.ts). */
+  const fit = useRef<PriceFit | null>(null);
+  fit.current ??= new PriceFit();
+  /** A move is running: work the frames can do without (the legend, the
+   *  clock) waits for it to end. */
+  const moving = useRef(false);
+  const afterMove = useRef<Array<() => void>>([]);
+  /** Every programmatic view change - double-click reset, jump to latest, the
+   *  zoom buttons, A switching back on - is one smooth move, x and y together
+   *  (chart/viewTween.ts). */
+  const tween = useRef<ViewTween | null>(null);
+  tween.current ??= new ViewTween(() => chart.current, fit.current, (m) => {
+    moving.current = m;
+    if (m) return;
+    const queued = afterMove.current;
+    afterMove.current = [];
+    for (const run of queued) run();
+  });
+
+  /** Set by the library's `subscribeBar`, cleared by `unsubscribeBar`. Doubles
+   *  as the "history for the CURRENT symbol+period is loaded" flag — see the
+   *  stale-tick guard below. */
+  const pushBar = useRef<((d: KLineData) => void) | null>(null);
+  const lastBar = useRef<KLineData | null>(null);
+  const hovering = useRef(false);
+  /** Monotonic id so a slow history fetch can never overwrite a newer one. */
+  const loadSeq = useRef(0);
+
+  // --- feed failsafes (chart/feedHealth.ts) ----------------------------------
+  /** The initial load in flight, with its retries. A newer load cancels it -
+   *  aborting its request - so a late answer for the market we left can never
+   *  reach the chart. */
+  const loadHandle = useRef<RetryHandle<unknown[]> | null>(null);
+  /** The series `loadHandle` is loading. */
+  const loadingKey = useRef('');
+  /** The series whose bars are on the chart right now; null while loading. */
+  const series = useRef<Series | null>(null);
+  /** Bars for a silent rebuild (gap repair): the next `init` load of this key
+   *  takes them instead of fetching, and without the loading mask. */
+  const primed = useRef<{ key: string; rows: KLineData[] } | null>(null);
+  /** Older bars of the series on the chart, fetched ahead of the user
+   *  (chart/historyPager.ts); replaced with the series. */
+  const pager = useRef<HistoryPager | null>(null);
+  /** Brings up older bars that land where the user is already looking. */
+  const reveal = useRef<HistoryReveal | null>(null);
+  /** The newest request klinecharts made for older bars: an older one still
+   *  waiting was superseded (a reset re-armed the library) and is dropped. */
+  const forwardSeq = useRef(0);
+  const watchdog = useRef<FeedWatchdog | null>(null);
+  const watchdogKey = useRef('');
+  /** A line is being dragged or awaits a confirm: no rebuild may run under it. */
+  const interacting = useRef(false);
+  /** The plot is masked (loading / failed / empty): nothing on it is real. */
+  const maskedRef = useRef(true);
+  const lastPriceRef = useRef(lastPrice);
+  lastPriceRef.current = lastPrice;
+  /** Load state of the series in `feed.key`. The render compares that key with
+   *  the one on screen, so a switch shows the mask on its very first frame. */
+  const [feed, setFeed] = useState<FeedView & { key: string }>({ key: '', ...FEED_LOADING });
+  const [health, setHealth] = useState<{ health: FeedHealth; why: string }>({
+    health: 'live',
+    why: 'Live: candles are streaming from the venue.',
+  });
+  /** Bumped to re-subscribe the candle channel after a stall. */
+  const [resub, setResub] = useState(0);
+  /** A freshly loaded series whose candles are due to take over from the
+   *  loading skeleton (chart/CandleMorph.tsx): 'morph' grows the placeholder
+   *  candles into them, 'fade' crossfades (reduced motion, or a series style
+   *  with no candles to grow into). Set only by a FRESH load - first load, or
+   *  a symbol / interval switch - in the same batch that unmasks the plot. A
+   *  gap repair, a reconnect catch-up and a precision-only reload take the
+   *  other two paths through getBars and never set it. */
+  const [arrival, setArrival] = useState<{ key: string; mode: 'morph' | 'fade' } | null>(null);
+  /** The series whose candles (and grid) klinecharts leaves to the morph
+   *  layer while it draws them instead (morph.ts, MORPH_HIDDEN). */
+  const hiddenCandles = useRef<string | null>(null);
+  /** A switch is holding the chart's frame: indicator and overlay drawings
+   *  are faded out while the grid and axes stay (chart/switchFrame.ts). */
+  const frameHeld = useRef(false);
+  /** The colour the last-price badge was last given while the candle layer
+   *  owns the rule (null: the theme's own colours). */
+  const badgeCss = useRef<string | null>(null);
+  /** The switch's wait is over: indicators and overlays fade back in. */
+  const releaseFrame = useCallback(() => {
+    if (!frameHeld.current) return;
+    frameHeld.current = false;
+    const c = chart.current;
+    if (c) holdFrame(c, false);
+  }, []);
+  /** Give klinecharts its candles, grid and badge colours back: on the
+   *  morph's hand-over frame, or when a morph is cut short. */
+  const showCandles = useCallback(() => {
+    releaseFrame();
+    const tinted = badgeCss.current !== null;
+    badgeCss.current = null;
+    if (hiddenCandles.current === null && !tinted) return;
+    hiddenCandles.current = null;
+    chart.current?.setStyles(MORPH_SHOWN);
+  }, [releaseFrame]);
+  /** The morph out takes klinecharts' candles (and grid) over on a switch:
+   *  the layer draws them from here, in their place. The frame - grid, price
+   *  and time axes - stays on screen; what belongs to the old data or the new
+   *  market's overlays fades. */
+  const hideCandles = useCallback(() => {
+    const c = chart.current;
+    if (!c) return;
+    if (hiddenCandles.current === null) c.setStyles(gridLines(c) ? MORPH_HIDDEN : MORPH_HIDDEN_CANDLES);
+    hiddenCandles.current ??= '(switch)';
+    if (!frameHeld.current) {
+      frameHeld.current = true;
+      holdFrame(c, true);
+    }
+  }, []);
+  /** The badge on the price axis takes the rule's colour, frame by frame,
+   *  while the candle layer draws the rule (grey through a switch, then the
+   *  new price's colour). One restyle per actual change of colour. */
+  const tintBadge = useCallback((color: RGBA) => {
+    const c = chart.current;
+    if (!c) return;
+    const css = `rgb(${Math.round(color[0])}, ${Math.round(color[1])}, ${Math.round(color[2])})`;
+    if (css === badgeCss.current) return;
+    badgeCss.current = css;
+    c.setStyles(badgeStyles(css));
+  }, []);
+  /** The chart library itself failed to start (its chunk did not load). */
+  const [initFailed, setInitFailed] = useState<{ error: string; failures: number; nextRetryAt: number } | null>(null);
+  const [initAttempt, setInitAttempt] = useState(0);
+  const initFailures = useRef(0);
+  /** name -> series, so the probe-create below runs at most once per indicator. */
+  const seriesCache = useRef(new Map<string, IndicatorSeries>());
+  const paneSeq = useRef(0);
+  const drawingId = useRef<string | null>(null);
+  const onReady = useRef(onChartReady);
+  onReady.current = onChartReady;
+
+  const [interval, setIntervalValue] = useState('1m');
+  /*
+   * PRICE SOURCE: Latest (traded - the gateway's candles), Mark, or Index
+   * (sodex.com's stats series; perps only, 5m and up). Carried to the loader
+   * in the chart's ticker (`BTC-USD@mark`, chart/klines.ts).
+   */
+  const [priceSource, setPriceSource] = useStored<PriceSource>('vs.chart.priceSource', 'latest');
+  const sourceOk = engine === 'perps' && !NO_MARK_INDEX.has(interval);
+  const src: PriceSource = priceSource !== 'latest' && sourceOk ? priceSource : 'latest';
+  // A timeframe change that drops Mark/Index (1m, 3m, 8h, 3D) says so. The
+  // first run is the stored choice meeting the default 1m chart — that toast
+  // would fire on every visit, so it waits for a change.
+  const skipSourceNotice = useRef(true);
+  useEffect(() => {
+    if (skipSourceNotice.current) {
+      skipSourceNotice.current = false;
+      return;
+    }
+    if (priceSource !== 'latest' && !sourceOk) notify('info', markIndexNotice(engine, interval));
+  }, [interval, engine, sourceOk, priceSource]);
+  const seriesTicker = src === 'latest' ? symbol : `${symbol}@${src}`;
+  /** Which of the toolbar's views is showing - see VIEWS above. The
+   *  klinecharts canvas stays mounted regardless (see the render below): it
+   *  is parked, still at its real size, while another view is active, never
+   *  torn down and never `display: none`. Disposing it would cost a flicker
+   *  and a fresh history fetch; collapsing it to 0×0 makes klinecharts refit
+   *  the price axis to 0–10. */
+  const [view, setView] = useState<ViewId>('chart');
+  const [ready, setReady] = useState(false);
+  /**
+   * Which klinecharts instance the effects below are wired to: bumped every
+   * time one is created. The instance is created again after a failed start,
+   * and during development on every hot update of this file or of anything it
+   * imports - and `ready` alone does not re-run effects when it is already
+   * true. That was a way to an empty chart with a 0-10 price scale: a fresh
+   * instance nobody had asked for bars, unmasked because the feed state still
+   * described the instance before it.
+   */
+  const [chartGen, setChartGen] = useState(0);
+  /**
+   * THE PLOT INVARIANT (chart/invariant.ts): the key of a series the guard is
+   * holding masked because the plot was about to show nothing true, until a
+   * fresh load of it answers. `reload` re-runs the market effect for it.
+   */
+  const [guard, setGuard] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const guardCount = useRef(0);
+  const guardTimer = useRef<number>();
+  const [error, setError] = useState<string | null>(null);
+  // 'draw' is gone: the drawing tools moved out of the toolbar into the rail
+  // down the left edge of the chart pane (chart/DrawingRail.tsx), which is where
+  // every professional charting terminal puts them and which keeps the armed
+  // tool visible instead of hiding it behind a closed popup.
+  const [openMenu, setOpenMenu] = useState<'timeframe' | 'indicators' | 'style' | null>(null);
+  /** The toolbar menu on screen - kept while it fades out (motion.tsx). */
+  const mm = useLatched(openMenu);
+  const [supported, setSupported] = useState<{ indicators: string[]; overlays: string[] }>({
+    indicators: [],
+    overlays: [],
+  });
+  const [indicators, setIndicators] = useState<ActiveIndicator[]>([]);
+  /** The footer's % A L (chart/yScale.ts). */
+  const [scale, dispatchScale] = useReducer(scaleReducer, INITIAL_SCALE);
+  /** A, for the pointer handlers below, which are bound once. */
+  const autoRef = useRef(scale.auto);
+  autoRef.current = scale.auto;
+  /** With A off, a new series or scale type refits the axis; hold that fit
+   *  once bars are on screen so A stays off (see the pin effect). */
+  const pinAfterLoad = useRef(false);
+  const scaleRef = useRef<HTMLDivElement>(null);
+
+  /*
+   * THE 'L' BUTTON IS BEHIND THE PANEL'S RESIZE GRIP.
+   *
+   * `.kc-scale` reads `% A L` right-aligned in the panel's bottom-right
+   * corner - and react-grid-layout pins its south-east resize handle to
+   * exactly that corner. 'L', being rightmost, sits mostly UNDER it: a real
+   * click there hits the grip (topmost element at that point), which is not
+   * an ancestor of the button, so the click never reaches its onClick. This
+   * is the same class of bug as the symbol header's right-click dead zone
+   * (Market.tsx) and the same fix: move the listener to the window, in the
+   * CAPTURE phase, and decide by GEOMETRY - which button's rect contains the
+   * point - rather than by DOM ancestry, which is the question a native click
+   * dispatch cannot answer here.
+   *
+   * This only intercepts a plain click; it never touches pointerdown, so the
+   * grip keeps every event it needs to actually resize the panel. A click
+   * with no movement was never a resize gesture anyway.
+   */
+  useEffect(() => {
+    const onClick = (e: globalThis.MouseEvent) => {
+      // Real pointer clicks only. `btn.click()` below dispatches its own
+      // synthetic click to reach the button's onClick - without this guard
+      // that synthetic event would re-enter this same capture listener.
+      if (!e.isTrusted) return;
+      const group = scaleRef.current;
+      if (!group) return;
+      const gr = group.getBoundingClientRect();
+      if (e.clientX < gr.left || e.clientX >= gr.right || e.clientY < gr.top || e.clientY >= gr.bottom) return;
+      for (const btn of group.querySelectorAll<HTMLButtonElement>('button')) {
+        if (btn.disabled) continue;
+        const r = btn.getBoundingClientRect();
+        if (e.clientX >= r.left && e.clientX < r.right && e.clientY >= r.top && e.clientY < r.bottom) {
+          e.preventDefault();
+          e.stopPropagation();
+          btn.click();
+          return;
+        }
+      }
+    };
+    window.addEventListener('click', onClick, true);
+    return () => window.removeEventListener('click', onClick, true);
+  }, []);
+  const [candleStyle, setCandleStyle] = useState<CandleType>('candle_solid');
+  /** Read by getBars, which is built once and must not close over state. */
+  const candleStyleRef = useRef(candleStyle);
+  candleStyleRef.current = candleStyle;
+  const [drawing, setDrawing] = useState<string | null>(null);
+  const drawingRef = useRef(drawing);
+  drawingRef.current = drawing;
+  const [legendBar, setLegendBarNow] = useState<KLineData | null>(null);
+  /** The legend follows the crosshair and the live bar - except while a view
+   *  move runs, when it catches up as the move ends: a render of this whole
+   *  component per crosshair event or tick is exactly the work a move's
+   *  frames cannot spare. */
+  const legendWait = useRef<{ bar: KLineData | null } | null>(null);
+  const setLegendBar = useCallback((bar: KLineData | null) => {
+    if (!moving.current) {
+      setLegendBarNow(bar);
+      return;
+    }
+    if (!legendWait.current) {
+      afterMove.current.push(() => {
+        const w = legendWait.current;
+        legendWait.current = null;
+        if (w) setLegendBarNow(w.bar);
+      });
+    }
+    legendWait.current = { bar };
+  }, []);
+  /** Wall clock for the chart's footer strip, in UTC.
+   *
+   *  UTC and not local time, and labelled as such: every timestamp the gateway
+   *  and the venue speak is UTC, so a footer clock in the browser's zone would
+   *  be the one number on the panel that disagrees with the axis above it. */
+  const [utc, setUtc] = useState(() => new Date().toISOString().slice(11, 19));
+  /** Whether THIS panel is the fullscreen element. Read from the document
+   *  rather than tracked optimistically: the user can leave fullscreen with
+   *  Escape, which never goes through our button. */
+  const [isFull, setIsFull] = useState(false);
+  /** Some embedding contexts (an iframe without `allowfullscreen`) refuse the
+   *  request outright. A button that cannot work is not rendered at all. */
+  const [canFullscreen] = useState(
+    () => typeof document !== 'undefined' && document.fullscreenEnabled,
+  );
+
+  // --- order-line interaction state -----------------------------------------
+  const layer = useRef<OrderLineLayer | null>(null);
+  /** Right-click menu: chart-relative pixels, the tick-snapped price there, and
+   *  which way to open so the popup stays inside a small panel. */
+  const [menu, setMenu] = useState<
+    { x: number; y: number; price: string; flipX: boolean; flipY: boolean } | null
+  >(null);
+  /** Live readout while a line is under the cursor. */
+  const [drag, setDrag] = useState<PendingMove | null>(null);
+  /** Dropped, snapped, and awaiting an explicit confirm. Nothing sent yet. */
+  const [pending, setPending] = useState<PendingMove | null>(null);
+  /** Submitted, waiting for the venue to report it back. */
+  const [awaiting, setAwaiting] = useState<PendingMove | null>(null);
+  const [sending, setSending] = useState(false);
+  /** What the last context-menu pick put into the order ticket. */
+  const [ticket, setTicket] = useState<{ kind: 'buy' | 'sell' | 'stop'; price: string } | null>(null);
+  const settleTimer = useRef<number>();
+  const { msg: lineMsg, show: showLine, fromError: lineError, clear: clearLine } = useStatus();
+  /** Measured height of the floating notice stack, so the OHLC legend can move
+   *  out from under it instead of being half-covered by an opaque bar. */
+  const notices = useRef<HTMLDivElement>(null);
+  const [noticeH, setNoticeH] = useState(0);
+
+  // --- order data ------------------------------------------------------------
+  // Read directly rather than through props: the lines have to stay in step with
+  // the venue on their own, including while the Positions/Orders panels are on a
+  // different tab of the dashboard and not mounted at all.
+  //
+  // Shared with Account.tsx (and OrderEntry.tsx for positions) - see
+  // accountFeeds.ts. This used to fetch its OWN symbol-scoped order list
+  // (`api.openOrders(engine, address, symbol)`), a narrower REST call nobody
+  // else made, duplicating work every time the Positions/Open Orders panels
+  // were ALSO mounted. It now reads the same full, unfiltered feed those
+  // panels use; `orderLines()` in chart/orderOverlays.ts already filters to
+  // the current symbol internally (`pick(raw,'symbol','s') !== o.symbol`), so
+  // nothing downstream of this needs to change.
+  const ordersKey = address ? `orders:${engine}:${address}` : null;
+  const orders = useAccountResource(ordersKey, () => api.openOrders(engine, address!), 10_000);
+  const posKey = address && engine === 'perps' ? `pos:${address}` : null;
+  const positions = useAccountResource(posKey, () => api.positions(address!), 10_000);
+
+  /* Failures land in the toast rail, not in a line of red prose that reflows
+     the chart panel every time a poll misses. */
+  useLoadFailedToast(orders.error, 'Open orders', orders.refresh);
+  useLoadFailedToast(positions.error, 'Positions', positions.refresh);
+  const refreshOrders = orders.refresh;
+  const refreshPositions = positions.refresh;
+  useEffect(() => {
+    refreshOrders();
+    refreshPositions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshToken]);
+  const onAccountEvent = useCallback(() => {
+    bumpAccountResource(ordersKey);
+    bumpAccountResource(posKey);
+  }, [ordersKey, posKey]);
+  useChannel(engine, address ? { channel: 'accountOrderUpdate', user: address } : null, onAccountEvent);
+  useChannel(engine, address ? { channel: 'accountTrade', user: address } : null, onAccountEvent);
+
+  /**
+   * Whether a chart drag may modify anything.
+   *
+   * Two independent gates, and the reason for each is stated to the user rather
+   * than left as a dead line that will not move:
+   *   - the gateway exposes /trade/perps/modify and nothing equivalent on spot,
+   *   - a locked signing key cannot sign anything at all.
+   */
+  const modifyBlocked =
+    engine !== 'perps'
+      ? 'Spot orders cannot be modified in place — the gateway only offers modify on perps. Cancel and re-place instead.'
+      : !unlocked
+        ? 'Read-only — enable trading to move orders from the chart.'
+        : null;
+  const canModify = modifyBlocked === null;
+  /** Placing is the same gate minus the perps-only part: the ticket can prefill
+   *  for either engine, but not while the session is read-only. */
+  const canPlace = unlocked;
+
+  // Close an open dropdown on outside click.
+  useEffect(() => {
+    if (!openMenu) return;
+    const onDown = (e: MouseEvent) => {
+      if (!toolbar.current?.contains(e.target as Node)) setOpenMenu(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [openMenu]);
+
+  // --- order-line callbacks --------------------------------------------------
+
+  /**
+   * Put a line back onto the price the server last stated and drop every trace
+   * of the move.
+   *
+   * This is the one function that has to be right. It runs on cancel, on a
+   * rejected modify, on the order vanishing mid-drag, and on the settle timeout
+   * — i.e. on every path where the line is showing a price the venue has not
+   * agreed to. Leaving a line where the user dragged it after any of those would
+   * tell them an order moved when it did not.
+   */
+  const abandon = useCallback((key: string) => {
+    window.clearTimeout(settleTimer.current);
+    layer.current?.release(key);
+    setDrag(null);
+    setPending(null);
+    setAwaiting(null);
+  }, []);
+
+  /**
+   * The overlay layer is built once, inside the create-the-chart effect, so its
+   * callbacks cannot close over props or state — they would be frozen at first
+   * render. They are routed through this ref, which is rewritten every render.
+   */
+  const lineHandlers = useRef<OrderLineHandlers | null>(null);
+  lineHandlers.current = {
+    onDragStart: (line) => {
+      clearLine();
+      setPending(null);
+      setAwaiting(null);
+      setDrag({ line, price: line.price });
+    },
+    onDragMove: (line, price) => {
+      if (price !== null) setDrag({ line, price });
+    },
+    onDrop: (line, price) => {
+      setDrag(null);
+      if (price === null) {
+        // The axis could not name a price for where the line landed. There is
+        // nothing honest to offer, so it goes back where it was.
+        abandon(line.key);
+        showLine('err', 'Could not read a price for that point on the axis — the line was put back.');
+        return;
+      }
+      setPending({ line, price });
+    },
+    onGone: (line) => {
+      abandon(line.key);
+      showLine(
+        'err',
+        `${line.label} is no longer open — it filled or was cancelled while you were moving it. Nothing was sent.`,
+      );
+    },
+    onSettled: (line) => {
+      window.clearTimeout(settleTimer.current);
+      setAwaiting(null);
+      showLine('ok', `Order moved. The venue reports it at ${fmtPrice(line.price, sym?.tickSize)}.`);
+    },
+    onLineClick: (line) => {
+      if (!line.draggable && line.lockedReason) showLine('info', line.lockedReason);
+    },
+  };
+
+  useEffect(() => () => window.clearTimeout(settleTimer.current), []);
+
+  // One tick a second for the footer clock. Cheap, and it only ever rewrites a
+  // 12-character text node - but it re-renders this component, so a tick that
+  // lands during a view move waits for the move to end.
+  useEffect(() => {
+    const tick = () => setUtc(new Date().toISOString().slice(11, 19));
+    const id = window.setInterval(() => {
+      if (moving.current) afterMove.current.push(tick);
+      else tick();
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // The notice stack floats over the canvas, so nothing in the layout knows how
+  // tall it is. Measure it and hand the number to the legend, which would
+  // otherwise sit half-hidden behind an opaque bar. A ResizeObserver rather than
+  // a one-shot read: the bar re-wraps as the panel is resized.
+  useEffect(() => {
+    const el = notices.current;
+    if (!el) {
+      setNoticeH(0);
+      return;
+    }
+    const measure = () => setNoticeH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [drag, pending, awaiting, ticket, lineMsg]);
+
+  // --- create the chart once -------------------------------------------------
+  useEffect(() => {
+    let disposed = false;
+    let ro: ResizeObserver | undefined;
+    let initRetryTimer = 0;
+
+    /**
+     * A page of history is on the chart for `s`: unmask, and (re)arm the
+     * watchdog for that series. A silent rebuild of the SAME series keeps its
+     * watchdog, so the recovery pacing is not reset by the recovery itself.
+     */
+    const applyHistory = (s: Series, rows: KLineData[]) => {
+      series.current = s;
+      lastBar.current = rows[rows.length - 1] ?? null;
+      if (!hovering.current) setLegendBar(lastBar.current);
+      setFeed({ key: s.key, phase: rows.length ? 'ready' : 'empty', failures: 0, nextRetryAt: null, error: null });
+      let w = watchdog.current;
+      if (!w || watchdogKey.current !== s.key) {
+        w?.dispose();
+        w = new FeedWatchdog({
+          intervalMs: intervalMs(s.interval) ?? 60_000,
+          recover,
+          onHealth: (h, why) => {
+            if (h === 'delayed') log.warn('feed delayed', { key: s.key, why });
+            else log.info('feed live again', { key: s.key });
+            setHealth({ health: h, why });
+          },
+        });
+        watchdog.current = w;
+        watchdogKey.current = s.key;
+        w.noteStream(streamOpen(s.engine));
+        w.noteVisible(document.visibilityState === 'visible');
+        // The baseline is THIS market's last close: `lastPrice` may still be
+        // the previous market's for a moment after a switch.
+        w.noteTicker(lastBar.current?.close ?? lastPriceRef.current);
+      }
+      w.noteHistory(lastBar.current?.timestamp ?? null);
+      // Older bars, fetched ahead of the user. The pager goes with the series
+      // and keeps its runway while the chart's oldest bar is the one it handed
+      // over (a silent rebuild hands every bar back, history included).
+      const first = rows[0]?.timestamp;
+      const pg = pager.current;
+      if (first === undefined) {
+        pg?.dispose();
+        pager.current = null;
+      } else if (!pg || pg.key !== s.key || pg.oldest !== first) {
+        pg?.dispose();
+        const next = new HistoryPager({
+          key: s.key,
+          firstTimestamp: first,
+          pageSize: HISTORY_PAGE,
+          ahead: HISTORY_AHEAD,
+          fetchOlder: async (endTime, limit, signal) =>
+            toRows(await fetchKlineRows({ engine: s.engine, symbol: s.symbol, interval: s.interval, limit, endTime }, { signal, timeoutMs: LOAD_TIMEOUT_MS })),
+          onError: (error, failures, retryInMs) =>
+            (failures >= 3 ? log.error : log.warn)('older bars failed to load; retrying', { key: s.key, failures, retryInMs, error }),
+        });
+        pager.current = next;
+        next.prefetch();
+        log.debug('history: fetching older bars ahead', { key: s.key, from: first, pages: HISTORY_AHEAD, pageSize: HISTORY_PAGE });
+      }
+    };
+
+    /**
+     * klinecharts has scrolled to the oldest bar it holds: hand it the next
+     * page of older ones - from the pager's runway at once (the library adds
+     * it before it paints: the user never sees the edge), or, when the user
+     * outran the runway, as soon as it lands, brought up by the reveal.
+     */
+    const loadOlder = async (callback: DataLoaderGetBarsParams['callback']) => {
+      const seq = ++forwardSeq.current;
+      const c = chart.current;
+      const pg = pager.current;
+      const s = series.current;
+      const first = c?.getDataList()[0]?.timestamp;
+      if (!c || !pg || !s || pg.key !== s.key || first === undefined) {
+        callback([], false);
+        return;
+      }
+      let page = pg.take(first);
+      const late = page === null;
+      if (!page) {
+        log.debug('history: the oldest bar came into view before the next page; waiting for it', { key: s.key, first });
+        page = await pg.next(first);
+        // A reset re-armed the library (it asked again) or another series
+        // owns it now: this answer belongs to nobody.
+        if (!page || disposed || seq !== forwardSeq.current || pager.current !== pg || chart.current !== c || c.getDataList()[0]?.timestamp !== first) {
+          log.debug('history: a late page was dropped', { key: pg.key });
+          return;
+        }
+      }
+      callback(page.rows, { forward: page.more, backward: false });
+      if (!page.rows.length) {
+        log.info('history: reached the start of this market\'s history', { key: s.key });
+        return;
+      }
+      log.debug('history: older bars added', { key: s.key, bars: page.rows.length, late, more: page.more, ahead: pg.held });
+      // The user is looking at where they landed: bring them up - unless the
+      // candle layer is drawing the plot, which fades in bars of its own.
+      if (late && hiddenCandles.current === null) reveal.current?.start(first);
+    };
+
+    /**
+     * Put the chart back in step with the venue: re-subscribe the candle
+     * stream when it has gone quiet, refetch the right edge, and merge it in
+     * without duplicating a bar (feedHealth.ts, planMerge).
+     */
+    const recover = async (reason: RecoverReason): Promise<RecoverResult> => {
+      const s = series.current;
+      const c = chart.current;
+      if (disposed || !s || !c || !pushBar.current) return 'failed';
+      log.info('recovering the feed', { key: s.key, reason });
+      if (reason === 'ticker-moving' || reason === 'stale-bars' || reason === 'stream-silent') {
+        log.info('candle stream resubscribed', { key: s.key, reason });
+        setResub((n) => n + 1);
+      }
+      const before = c.getDataList();
+      const last = before[before.length - 1] ?? null;
+      const ivMs = intervalMs(s.interval) ?? 60_000;
+      const limit = gapFillLimit(last?.timestamp ?? null, Date.now(), ivMs, 10, KLINE_LIMIT);
+      let raw: unknown[];
+      const t0 = performance.now();
+      try {
+        raw = await fetchKlineRows(
+          { engine: s.engine, symbol: s.symbol, interval: s.interval, limit },
+          { timeoutMs: LOAD_TIMEOUT_MS },
+        );
+      } catch (error) {
+        log.warn('gap-fill request failed; the watchdog retries', { key: s.key, reason, limit, error });
+        return 'failed';
+      }
+      log.debug('gap-fill response', { key: s.key, limit, bars: raw.length, ms: Math.round(performance.now() - t0) });
+      // The market, the interval or the chart itself moved on meanwhile.
+      if (disposed || series.current !== s || chart.current !== c || !pushBar.current) return 'current';
+
+      const held = c.getDataList().map(asBar);
+      const fetched = toRows(raw).map(asBar);
+      const plan = planMerge(held, fetched);
+      if (plan.kind === 'none') return 'current';
+      if (plan.kind === 'append') {
+        // The chart's realtime path: a bar at its last time replaces it, a
+        // later one is appended - so nothing is ever drawn twice.
+        for (const b of plan.bars) pushBar.current?.(b.row);
+        const newest = plan.bars[plan.bars.length - 1]!.row;
+        if (!lastBar.current || newest.timestamp >= lastBar.current.timestamp) lastBar.current = newest;
+        if (!hovering.current) setLegendBar(lastBar.current);
+        log.info('gap filled at the right edge', { key: s.key, bars: plan.bars.length, newBars: plan.newBars });
+        return plan.newBars > 0 ? 'caught-up' : 'current';
+      }
+      // A hole the realtime path cannot fill. Never under a line the user is
+      // holding or has not confirmed yet; the watchdog comes back later.
+      if (interacting.current) return 'failed';
+      const rows = (plan.reason === 'too-far' ? fetched : mergeBars(held, fetched)).map((b) => b.row);
+      // A rebuild onto nothing would empty a chart that was showing bars.
+      if (!rows.length) {
+        log.warn('gap repair produced no bars; keeping the bars on screen', { key: s.key, reason: plan.reason });
+        return 'failed';
+      }
+      log.info('gap repair: reloading the series from merged bars', { key: s.key, reason: plan.reason, bars: rows.length });
+      // Keep the user where they were if they had scrolled back into history.
+      const range = c.getVisibleRange();
+      const anchor = range.realTo < before.length ? before[Math.max(0, range.realTo - 1)]?.timestamp : undefined;
+      primed.current = { key: s.key, rows };
+      c.resetData();
+      if (anchor !== undefined) c.scrollToTimestamp(anchor, 0);
+      return 'caught-up';
+    };
+
+    /**
+     * v10's single data seam. `getBars` is deliberately a pure function of its
+     * own params (klinecharts hands it the SymbolInfo and Period it is asking
+     * about) rather than of React state, so a fetch can never be answered with
+     * the wrong market's candles.
+     */
+    const loader: DataLoader = {
+      getBars: async (params: DataLoaderGetBarsParams) => {
+        const { type, symbol: info, period, callback } = params;
+        // 'forward' is klinecharts' word for OLDER bars (they go in front of
+        // the list): the pager has them ready (loadOlder). Nothing newer than
+        // the live bar exists - the stream brings it - so 'backward' is empty.
+        if (type === 'forward') {
+          await loadOlder(callback);
+          return;
+        }
+        if (type !== 'init') {
+          callback([], false);
+          return;
+        }
+        const seq = ++loadSeq.current;
+        const eng = info.engine as Engine | undefined;
+        const iv = intervalOf(period);
+        if (!eng || !iv) {
+          // klinecharts has to be answered, and there is nothing honest to
+          // answer with. The plot stays masked: no feed state is ready for it.
+          log.error('bars asked for an unknown engine or interval', { engine: info.engine, ticker: info.ticker, period });
+          callback([], false);
+          return;
+        }
+        const key = feedKey(eng, info.ticker, iv);
+        log.debug('bars requested', { key, generation: seq });
+
+        // A silent rebuild (gap repair, see `recover` below) hands over bars
+        // it already holds: no request, and no loading mask over a chart that
+        // was showing good candles a moment ago.
+        const p = primed.current;
+        if (p && p.key === key) {
+          primed.current = null;
+          log.debug('gap repair: bars handed back', { key, bars: p.rows.length });
+          applyHistory({ key, engine: eng, symbol: info.ticker, interval: iv }, p.rows);
+          callback(p.rows, { forward: pager.current?.more ?? p.rows.length > 0, backward: false });
+          return;
+        }
+        primed.current = null;
+
+        // The SAME series reloaded - klinecharts resets the store when only the
+        // symbol's precision changed (the market's rules arrived after its
+        // candles). The bars on the chart are this series' bars, live-updated:
+        // hand them straight back. No request, no mask.
+        const cur = series.current;
+        const onChart = chart.current?.getDataList() ?? [];
+        if (cur && cur.key === key && onChart.length) {
+          const rows = onChart.slice();
+          log.debug('same series reloaded (precision change): bars handed back', { key, bars: rows.length });
+          applyHistory(cur, rows);
+          callback(rows, { forward: pager.current?.more ?? rows.length > 0, backward: false });
+          return;
+        }
+
+        let handle = loadHandle.current;
+        if (!handle || loadingKey.current !== key) {
+          // A new series. Whatever was loading for the previous one is
+          // cancelled - its request aborted, its retries stopped - and the
+          // mask goes up.
+          log.info('series switch', { from: series.current?.key ?? (loadingKey.current || null), to: key, generation: seq });
+          if (handle) log.debug('stale load cancelled', { key: loadingKey.current });
+          handle?.cancel();
+          series.current = null;
+          pager.current?.dispose();
+          pager.current = null;
+          reveal.current?.stop();
+          watchdog.current?.dispose();
+          watchdog.current = null;
+          watchdogKey.current = '';
+          setError(null);
+          // A morph still running belongs to the market being left. Its
+          // candles stay with the candle layer, which morphs them out into the
+          // placeholders and owes klinecharts its candles back (CandleMorph).
+          setArrival(null);
+          tween.current?.cancel();
+          setFeed({ key, ...FEED_LOADING });
+          lastBar.current = null;
+          if (!hovering.current) setLegendBar(null);
+          handle = null;
+        }
+
+        /*
+         * WHY THE CALLBACK WAITS THROUGH EVERY RETRY. klinecharts sets its
+         * internal `_loading` before calling getBars and clears it only in the
+         * callback. It used to be answered with an empty set on the first
+         * failure, which drew a bare 0-10 price scale with nothing to say why.
+         * Now the load keeps retrying (1s, 2s, 5s, 10s, then every 15s) and
+         * the store keeps waiting; the mask covers the canvas the whole time,
+         * so the previous market's candles that klinecharts still holds are
+         * never visible under the new market's name, and nothing under the
+         * mask can be clicked. A switch to another market cancels this load
+         * and klinecharts' own reset re-arms the store for the new one.
+         */
+        if (!handle) {
+          handle = loadWithRetry({
+            attempt: async (signal) => {
+              const t0 = performance.now();
+              log.debug('klines request', { key, limit: KLINE_LIMIT });
+              const rows = await fetchKlineRows({ engine: eng, symbol: info.ticker, interval: iv, limit: KLINE_LIMIT }, { signal });
+              log.debug('klines response', { key, bars: rows.length, ms: Math.round(performance.now() - t0) });
+              return rows;
+            },
+            isFatal: isFatalStatus,
+            onStatus: (s) => {
+              if (loadingKey.current !== key || disposed) return;
+              if (s.nextRetryAt !== null) {
+                const retry = { key, status: s.status, attempt: s.failures, nextRetryInMs: Math.max(0, s.nextRetryAt - Date.now()), error: s.error };
+                if (s.phase === 'error') log.error('klines keep failing; the chart shows an error and keeps retrying', retry);
+                else log.warn('klines request failed; retrying', retry);
+              }
+              setFeed({ key, phase: s.phase, failures: s.failures, nextRetryAt: s.nextRetryAt, error: s.error });
+            },
+          });
+          loadHandle.current = handle;
+          loadingKey.current = key;
+        }
+        // (Same series asked for twice while loading: the second call shares
+        // the first one's request, and only the newest callback is answered.)
+        let raw: unknown[];
+        try {
+          raw = await handle.promise;
+        } catch {
+          // Cancelled: a newer load owns the callback, and calling this one
+          // would clear the store out from under it.
+          return;
+        }
+        if (seq !== loadSeq.current || disposed) {
+          log.debug('stale bars dropped', { key, generation: seq, latest: loadSeq.current });
+          return;
+        }
+        if (loadHandle.current === handle) {
+          loadHandle.current = null;
+          loadingKey.current = '';
+        }
+        const rows = toRows(raw);
+        if (!rows.length) log.warn('klines response is empty', { key, rows: raw.length });
+        else if (rows.length < raw.length) log.warn('klines response had unusable rows', { key, rows: raw.length, usable: rows.length });
+        // All the bars go in at once - scale, layout and axes are final before
+        // the plot is unmasked - and the candle layer takes them over from the
+        // skeleton. Batched with applyHistory's setFeed, so the commit that
+        // unmasks the plot is the one that starts the morph.
+        const mode = !rows.length
+          ? null
+          : morphable(candleStyleRef.current) && !prefersReducedMotion()
+            ? 'morph'
+            : 'fade';
+        if (mode === 'morph' && chart.current) {
+          // Hidden in the same tick the bars go in, so klinecharts never draws
+          // them before the morph layer does; CandleMorph hands them back.
+          // The grid goes too: the layer draws it UNDER its candles, where the
+          // finished chart has it (morph.ts, MORPH_HIDDEN).
+          chart.current.setStyles(gridLines(chart.current) ? MORPH_HIDDEN : MORPH_HIDDEN_CANDLES);
+          hiddenCandles.current = key;
+        }
+        setArrival(mode ? { key, mode } : null);
+        // A switch held the frame: indicators and overlays come back with the
+        // new bars, over the first part of the morph.
+        releaseFrame();
+        applyHistory({ key, engine: eng, symbol: info.ticker, interval: iv }, rows);
+        if (rows.length) {
+          // A reload the invariant guard asked for has answered.
+          guardCount.current = 0;
+          setGuard((g) => (g === key ? null : g));
+        }
+        callback(rows, { forward: rows.length > 0, backward: false });
+        // klinecharts sizes the price range to the visible bars BEFORE it
+        // re-measures the price axis for the new labels, and a first load
+        // widens that axis (from "10" to "84,000"): fewer bars fit, and the
+        // range can still include some that are gone. The next forced layout
+        // corrects it - which used to be the morph's landing restyle, so every
+        // candle jumped at the hand-over (measured at 390px). resize() asks for
+        // the library's second measuring pass, folded into this same pending
+        // layout, so the range is final before the first frame is drawn.
+        if (rows.length) chart.current?.resize();
+      },
+      // klinecharts calls these around every reload (setSymbol/setPeriod both
+      // reset the store). We do not open a socket here — the app's hub already
+      // owns that — we just park the callback the live tick will be fed into.
+      subscribeBar: ({ callback }) => {
+        pushBar.current = callback;
+      },
+      unsubscribeBar: () => {
+        pushBar.current = null;
+      },
+    };
+
+    /**
+     * Legend source. The action fires with `{ x, y, paneId }` only — the
+     * KLineData on the internal crosshair is NOT passed through — so the bar is
+     * resolved from the x pixel via the public convert API.
+     */
+    const onCrosshair = (data?: unknown) => {
+      const c = chart.current;
+      if (!c) return;
+      const cr = data as { x?: number; paneId?: string } | null | undefined;
+      if (!cr || typeof cr.x !== 'number') {
+        hovering.current = false;
+        setLegendBar(lastBar.current);
+        return;
+      }
+      const points = c.convertFromPixel([{ x: cr.x }], { paneId: cr.paneId ?? CANDLE_PANE_ID }) as Array<
+        Partial<Point>
+      >;
+      const idx = points[0]?.dataIndex;
+      const list = c.getDataList();
+      const bar = typeof idx === 'number' && idx >= 0 && idx < list.length ? list[idx] : undefined;
+      hovering.current = bar !== undefined;
+      setLegendBar(bar ?? lastBar.current);
+    };
+
+    (async () => {
+      const kc = await import('klinecharts');
+      if (disposed || !holder.current) return;
+
+      // Global, name-keyed and idempotent. Must happen before the first order
+      // line is created; it is filtered out of the Draw menu below, because an
+      // order line drawn by hand would look exactly like a real resting order.
+      registerOrderLineOverlay(kc);
+      // The measure tool. Registered into the SAME global overlay registry the
+      // library's own sixteen live in, and deliberately before the rail's tool
+      // list is read below — so it arrives in the rail through
+      // getSupportedOverlays() like every other overlay rather than being
+      // appended by hand, and a build where the registration failed would show
+      // no measure button rather than a button that does nothing.
+      registerMeasureOverlay(kc);
+      // Same shape: registers the x-axis whose tick filter drops a time label
+      // that would be drawn half outside the canvas. Must land before init, so
+      // the name is in the registry by the time the axis is overridden below.
+      registerChartAxes(kc);
+
+      const c = kc.init(holder.current, {
+        styles: chartStyles,
+        // v9's `customApi` is `formatter` in v10.
+        formatter: { formatBigNumber },
+      });
+      if (!c) {
+        setError('klinecharts failed to initialise (empty container)');
+        return;
+      }
+      if (disposed) {
+        kc.dispose(c);
+        return;
+      }
+
+      // klinecharts measures the container inside its constructor and caches
+      // that bounding; every later re-measure of its own is requestAnimationFrame
+      // gated. If the container was not laid out yet at that instant the chart
+      // sizes itself to the stale numbers (observed: a 14px-tall candle pane).
+      // One synchronous resize here re-reads the real box before first paint.
+      c.resize();
+
+      // A pan or an axis drag follows the pointer anywhere until it is
+      // released, not just while it is over the pane it began on.
+      dragAnywhere(c);
+      reveal.current?.dispose();
+      reveal.current = new HistoryReveal(c);
+
+      // Swapping the x-axis rebuilds the axis component from the registry, and
+      // the rebuilt one only carries the flags this call passes — so
+      // `scrollZoomEnabled` has to be restated or drag-to-zoom on the time axis
+      // is silently lost with it.
+      c.overrideXAxis({ name: X_AXIS_NAME, scrollZoomEnabled: true });
+
+      // Candle width. See DEFAULT_BAR_SPACE — the library's own default draws
+      // 7px bodies where the reference draws 5, so the same plot width shows
+      // noticeably less history. Set once; the user's wheel owns it after that.
+      c.setBarSpace(DEFAULT_BAR_SPACE);
+      // Where every load puts the newest bar, and where the double-click reset
+      // lands (chart/viewTween.ts) - stated, not assumed to be the library's.
+      c.setOffsetRightDistance(DEFAULT_OFFSET_RIGHT);
+
+      c.setDataLoader(loader);
+      c.subscribeAction('onCrosshairChange', onCrosshair);
+
+      lib.current = kc;
+      chart.current = c;
+      layer.current = new OrderLineLayer(c, {
+        onDragStart: (l) => lineHandlers.current?.onDragStart(l),
+        onDragMove: (l, p) => lineHandlers.current?.onDragMove(l, p),
+        onDrop: (l, p) => lineHandlers.current?.onDrop(l, p),
+        onGone: (l) => lineHandlers.current?.onGone(l),
+        onSettled: (l) => lineHandlers.current?.onSettled(l),
+        onLineClick: (l) => lineHandlers.current?.onLineClick(l),
+      });
+      // Menus are built from what this build ACTUALLY registers, not a
+      // hardcoded list — a name that is not in here can never be created. Our
+      // own order-line template is registered in the same list and is stripped:
+      // it is not a drawing tool.
+      setSupported({
+        indicators: kc.getSupportedIndicators(),
+        overlays: kc.getSupportedOverlays().filter((n) => n !== ORDER_LINE_OVERLAY),
+      });
+      // A fresh instance holds no bars: the plot stays masked until the load
+      // the effects below start for it has answered.
+      setFeed({ key: '', ...FEED_LOADING });
+      setArrival(null);
+      hiddenCandles.current = null;
+      setChartGen((g) => g + 1);
+      setReady(true);
+      log.info('chart created', { attempt: initAttempt });
+      onReady.current?.(c);
+
+      // The chart sizes itself from the container; this re-measures when the
+      // surrounding flex layout changes (panel resize, viewport breakpoints).
+      ro = new ResizeObserver(() => c.resize());
+      ro.observe(holder.current);
+      initFailures.current = 0;
+      setInitFailed(null);
+    })().catch((e) => {
+      // Typically the klinecharts chunk failing to download (a dev-server
+      // restart, a flaky connection, a deploy that replaced the chunk). The
+      // mask says so, and the chart retries on the load schedule by itself.
+      if (disposed) return;
+      initFailures.current += 1;
+      const delay = retryDelayMs(initFailures.current);
+      log.error('the chart failed to start; retrying', { error: e, failures: initFailures.current, nextRetryInMs: delay });
+      setInitFailed({ error: String(e), failures: initFailures.current, nextRetryAt: Date.now() + delay });
+      initRetryTimer = window.setTimeout(() => setInitAttempt((n) => n + 1), delay);
+    });
+
+    return () => {
+      disposed = true;
+      window.clearTimeout(initRetryTimer);
+      loadHandle.current?.cancel();
+      loadHandle.current = null;
+      loadingKey.current = '';
+      watchdog.current?.dispose();
+      watchdog.current = null;
+      watchdogKey.current = '';
+      series.current = null;
+      primed.current = null;
+      pager.current?.dispose();
+      pager.current = null;
+      reveal.current?.dispose();
+      reveal.current = null;
+      frameHeld.current = false;
+      badgeCss.current = null;
+      ro?.disconnect();
+      const c = chart.current;
+      if (c) {
+        c.unsubscribeAction('onCrosshairChange');
+        layer.current?.removeAll();
+        lib.current?.dispose(c);
+      }
+      layer.current = null;
+      onReady.current?.(null);
+      chart.current = null;
+      lib.current = null;
+      pushBar.current = null;
+      lastBar.current = null;
+      // A new instance starts with nothing applied, whatever this one had,
+      // and nothing on it is ready until it has been told what to load.
+      applied.current = { period: '', symbol: '' };
+      hiddenCandles.current = null;
+      setReady(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initAttempt]);
+
+  // --- market / timeframe ----------------------------------------------------
+  // setPeriod and setSymbol EACH reset the store and trigger a fresh getBars, so
+  // only the one that actually changed is touched — otherwise a single click on
+  // a timeframe button fires two identical history fetches.
+  const applied = useRef({ period: '', symbol: '' });
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c) return;
+    const period = PERIOD_BY_INTERVAL[interval];
+    if (!period) return;
+
+    const pricePrecision = sym ? precisionOf(sym.tickSize) : undefined;
+    const volumePrecision = sym ? precisionOf(sym.stepSize) : undefined;
+    const symbolKey = `${engine}|${seriesTicker}|${pricePrecision}|${volumePrecision}`;
+
+    // Anything the legend was showing belongs to the market we are leaving.
+    if (applied.current.symbol !== symbolKey || applied.current.period !== interval) {
+      lastBar.current = null;
+      hovering.current = false;
+      setLegendBar(null);
+    }
+
+    if (applied.current.period !== interval) {
+      applied.current.period = interval;
+      c.setPeriod(period);
+    }
+    if (applied.current.symbol !== symbolKey) {
+      applied.current.symbol = symbolKey;
+      c.setSymbol({
+        ticker: seriesTicker,
+        // Read back inside getBars — see the note there about not closing over
+        // React state. SymbolInfo carries arbitrary extra keys by design.
+        engine,
+        ...(pricePrecision === undefined ? {} : { pricePrecision }),
+        ...(volumePrecision === undefined ? {} : { volumePrecision }),
+      });
+    }
+    // A new market or interval puts klinecharts' price axis back on auto-fit
+    // (setSymbol resets it, and a range from another series means nothing).
+    // A is the user's alone: with A off, the new series' fit is held once its
+    // bars are on screen (the pin effect below), so A stays off.
+    if (!autoRef.current) pinAfterLoad.current = true;
+  }, [ready, chartGen, reload, engine, symbol, seriesTicker, interval, sym?.tickSize, sym?.stepSize]);
+
+  // --- order lines -----------------------------------------------------------
+  //
+  // Server truth in, drawn lines out. The derivation is a pure function of the
+  // payloads (see chart/orderOverlays.ts), so "what should be on screen" is
+  // answered in one place; OrderLineLayer decides which of those actually need
+  // redrawing, and refuses to touch a line that is mid-drag or under an open
+  // confirm box.
+  useEffect(() => {
+    const l = layer.current;
+    if (!ready || !l) return;
+    l.setSymbol(sym);
+    // useAsync keeps its last payload when it is disabled, so a disconnected
+    // wallet would otherwise keep the previous account's lines on the chart.
+    const rawOrders = address ? (orders.data?.orders ?? []) : [];
+    const rawPositions = address && engine === 'perps' ? (positions.data?.positions ?? []) : [];
+    const opts = {
+      symbol,
+      sym,
+      canModify,
+      ...(modifyBlocked === null ? {} : { cannotModifyReason: modifyBlocked }),
+    };
+    l.sync([...orderLines(rawOrders, opts), ...positionLines(rawPositions, opts)]);
+  }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked]);
+
+  // Switching market invalidates every price on screen, including any the user
+  // was in the middle of dragging. Drop the interaction state rather than let a
+  // confirm box for BTC survive onto an ETH chart.
+  useEffect(() => {
+    window.clearTimeout(settleTimer.current);
+    setMenu(null);
+    setDrag(null);
+    setPending(null);
+    setAwaiting(null);
+    setTicket(null);
+  }, [engine, symbol]);
+
+  // --- live candle -----------------------------------------------------------
+  // Subscribed on the shared hub exactly as `useChannel` would, but by hand, so
+  // the watchdog can force a fresh subscription (`resub`) when the stream has
+  // gone quiet on a market that is still trading. The hub refcounts, so this
+  // never opens a second upstream subscription beside another panel's.
+  const onCandle = useRef<(d: any) => void>(() => undefined);
+  useEffect(() => {
+    if (!ready) return;
+    return hub.subscribe(engine, { channel: 'candle', symbol, interval }, (d) => onCandle.current(d));
+  }, [ready, chartGen, engine, symbol, interval, resub]);
+
+  onCandle.current = (d) => {
+    // The hub's fan-out matches engine, channel and interval but NOT symbol
+    // (ws.ts), so a candle for another market on the same interval would
+    // otherwise be drawn onto this one.
+    if (d?.s && d.s !== symbol) return;
+    if (d?.i && d.i !== interval) return;
+    if (series.current?.key !== feedKey(engine, seriesTicker, interval)) return;
+    // Two independent guards, both load-bearing:
+    //
+    // 1. `pushBar` is null from the moment klinecharts resets the store until
+    //    the new history lands, which is exactly the window in which a tick for
+    //    the symbol/interval we just left can still arrive. Dropping those is
+    //    what kept the old implementation from throwing "Cannot update oldest
+    //    data" when the timeframe changed mid-stream.
+    // 2. Even inside one stream a tick can arrive out of order; a timestamp
+    //    older than the last bar is stale, not an error. (klinecharts silently
+    //    ignores it, but the legend would still regress, and the legend is a
+    //    price a human reads.)
+    if (!d?.t || !pushBar.current) return;
+    const last = lastBar.current;
+    if (last && d.t < last.timestamp) return;
+
+    const bar: KLineData = {
+      timestamp: d.t,
+      open: +d.o,
+      high: +d.h,
+      low: +d.l,
+      close: +d.c,
+      volume: +d.v,
+      turnover: +d.q,
+    };
+    if (![bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)) return;
+    lastBar.current = bar;
+    if (!hovering.current) setLegendBar(bar);
+    pushBar.current(bar);
+    watchdog.current?.noteTick(bar.timestamp);
+    // The first trade on a market that had no candles: there is a chart now.
+    setFeed((f) => (f.phase === 'empty' && f.key === series.current?.key ? { ...f, phase: 'ready' } : f));
+  };
+
+  // --- feed watchdog signals (chart/feedHealth.ts) ---------------------------
+  // The hub's reconnection signal, and the venue-side stream status it relays.
+  useEffect(() => hub.onState(() => watchdog.current?.noteStream(streamOpen(engine))), [engine]);
+  // A tab coming back from the background re-reads the right edge.
+  useEffect(() => {
+    const onVis = () => watchdog.current?.noteVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
+  // The last traded price: the one signal that tells a stalled candle stream
+  // from a quiet market.
+  useEffect(() => {
+    // Only the latest-price series moves with the traded price.
+    if (src === 'latest') watchdog.current?.noteTicker(lastPrice);
+  }, [lastPrice, src]);
+
+  // Mark / index have no candle stream: the right edge is re-read every 10 s
+  // and pushed through the same realtime path a streamed candle takes.
+  useEffect(() => {
+    if (!ready || src === 'latest') return;
+    const key = feedKey(engine, seriesTicker, interval);
+    let off = false;
+    const poll = async () => {
+      try {
+        const rows = toRows(await fetchKlineRows({ engine, symbol: seriesTicker, interval, limit: 2 }, { timeoutMs: LOAD_TIMEOUT_MS }));
+        if (off || series.current?.key !== key || !pushBar.current) return;
+        for (const bar of rows) {
+          const last = lastBar.current;
+          if (last && bar.timestamp < last.timestamp) continue;
+          lastBar.current = bar;
+          pushBar.current(bar);
+          watchdog.current?.noteTick(bar.timestamp);
+        }
+        if (!hovering.current && lastBar.current) setLegendBar(lastBar.current);
+      } catch {
+        /* the next poll tries again; the watchdog repairs gaps */
+      }
+    };
+    const id = window.setInterval(() => void poll(), 10_000);
+    return () => {
+      off = true;
+      window.clearInterval(id);
+    };
+  }, [ready, src, engine, seriesTicker, interval]);
+  useEffect(() => {
+    const id = window.setInterval(() => watchdog.current?.check(), 5_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // --- price scale -----------------------------------------------------------
+  useEffect(() => {
+    const c = chart.current;
+    const f = fit.current;
+    if (!ready || !c || !f) return;
+    // A move in flight belongs to the scale being left.
+    tween.current?.cancel();
+    // v10 picks the y-axis behaviour by the name of a registered axis; passing a
+    // new name rebuilds the axis component for that pane. `createTicks` has to
+    // be restated on every one of those rebuilds — it is a property of the axis
+    // instance, not of the registered template, so a scale change would drop it.
+    c.overrideYAxis({ paneId: CANDLE_PANE_ID, name: scale.mode, createTicks: createDenseYTicks });
+    // So does `createRange`: the rebuilt axis carries its template's own
+    // (plain auto-fit for that scale), and PriceFit wraps it so a view move
+    // can carry the axis along (chart/yScale.ts). Both calls leave the axis
+    // fitting the data, which is what A shows after a scale change.
+    const axis = priceAxis(c);
+    if (axis) {
+      c.overrideYAxis({ paneId: CANDLE_PANE_ID, createRange: f.wrap(templateRange(axis.createRange), kindOf(scale.mode)) });
+    }
+    // The rebuilt axis fits the data; with A off that fit is held once laid
+    // out, so a scale change never switches A on (the pin effect).
+    if (!autoRef.current) pinAfterLoad.current = true;
+  }, [ready, chartGen, scale.mode]);
+
+  /** A follows klinecharts: a drag or a scroll on the price axis, or its own
+   *  double-click on the axis, changes whether the axis fits the data. */
+  const syncAuto = useCallback(() => {
+    const c = chart.current;
+    const axis = c && priceAxis(c);
+    // Not while a move carries the axis, nor while a refit waits to be held
+    // (pinAfterLoad): in both the axis auto-fits on purpose with A off.
+    if (!axis || fit.current?.moving || pinAfterLoad.current) return;
+    const auto = isAutoFit(axis);
+    if (auto === autoRef.current) return;
+    log.debug(auto ? 'autoscale on: klinecharts refitted the price axis' : 'autoscale off: the price axis was dragged or scrolled');
+    dispatchScale({ type: auto ? 'fit' : 'manual' });
+  }, []);
+
+  // --- how the price series is drawn ----------------------------------------
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c) return;
+    c.setStyles({ candle: { type: candleStyle } });
+  }, [ready, chartGen, candleStyle]);
+
+  // --- view controls ---------------------------------------------------------
+  // Every one is ONE smooth move (chart/viewTween.ts): bar space and scroll
+  // interpolated together, painted once per frame in the frame that moved
+  // them - and, with A on, the price axis on the same clock, from the range it
+  // shows to the range the destination fits (chart/yScale.ts), instead of
+  // re-fitting in jumps as highs and lows enter the window. With A off the
+  // axis holds its range, as it does when the user pans.
+  // With reduced motion they are a one-frame cut instead (viewMs).
+
+  /** When the last reset started: one double click reaches resetView twice
+   *  (its release, below, and the `dblclick` fallback on the pane). */
+  const lastReset = useRef(-Infinity);
+  /** Double-click anywhere on the chart resets zoom, pan AND the price axis -
+   *  back to exactly what a fresh chart shows (`DEFAULT_BAR_SPACE`, newest bar
+   *  `DEFAULT_OFFSET_RIGHT` from the axis, the axis fitting the candles),
+   *  in one eased move, whatever was done to the axis - any vertical offset,
+   *  even a pixel. It never changes the modes (owner's rule): A, L and % stay
+   *  as they are. With A off the axis eases onto the same fit and is then
+   *  held there, so A is still off afterwards. */
+  const resetView = useCallback(() => {
+    const now = performance.now();
+    if (now - lastReset.current < 600) return;
+    lastReset.current = now;
+    const keepManual = !autoRef.current;
+    log.debug('view reset (double-click)', { autoscale: autoRef.current });
+    // The y half of the move hands the axis to auto-fit while it runs
+    // (PriceFit.begin); with A off, take it back when the move ends - done or
+    // cut short by the user - so the fitted range stays and A stays off.
+    const holdIfManual = () => {
+      const c = chart.current;
+      const axis = c && priceAxis(c);
+      if (keepManual && axis && !autoRef.current) holdRange(axis);
+    };
+    tween.current?.start(defaultView(), { ms: viewMs(), fitY: true, onEnd: holdIfManual });
+    // Nothing to move at all (already the default view): PriceFit may still
+    // have handed the axis to auto-fit, so hold it right away.
+    if (!tween.current?.running) holdIfManual();
+  }, []);
+
+  /** A. On -> off pins the range on screen; off -> on eases the axis onto the
+   *  fit of what is on screen - the same move, with nothing to scroll. */
+  const toggleAuto = useCallback(() => {
+    const c = chart.current;
+    const axis = c && priceAxis(c);
+    if (!c || !axis) return;
+    if (autoRef.current) {
+      tween.current?.cancel();
+      if (holdRange(axis)) {
+        log.debug('autoscale off (A): the price range is held', { from: axis.getRange().from, to: axis.getRange().to });
+        dispatchScale({ type: 'auto' });
+      } else log.warn('autoscale cannot be switched off: this klinecharts build has no axis setRange');
+      return;
+    }
+    log.debug('autoscale on (A): fitting the price axis');
+    dispatchScale({ type: 'auto' });
+    tween.current?.start((from) => from, { ms: viewMs(), fitY: true });
+  }, []);
+
+  // The user takes the chart back: a wheel, a press, a touch or a key on the
+  // plot stops a running move dead, where its last frame left it.
+  //
+  // And a double click must not ALSO drag. klinecharts starts a scroll on
+  // every press on the plot, so a pixel of travel between the second press and
+  // its release nudged the chart just before the reset took it. Scrolling is
+  // off for exactly that press (the click count says which one it is); the
+  // library has no mouse inertia to suppress, only touch flings, and a touch
+  // double-tap is not a dblclick.
+  //
+  // Such a press (click count 2 or more) is part of a click, not a grab, so it
+  // does not stop the move either: the third press of a quick triple click
+  // used to cancel the reset its double click had just started, leaving the
+  // chart frozen a few frames in.
+  //
+  // Autoscale follows the pointer too. klinecharts itself stops fitting the
+  // axis when it is dragged or scrolled on (A reads that back, syncAuto); a
+  // drag on the plot that goes clearly vertical pans the axis and switches A
+  // off, TradingView's rule - klinecharts only pans an axis that was already
+  // off when the press began, so that first drag is done here.
+  useEffect(() => {
+    const el = holder.current;
+    if (!ready || !el) return;
+    const stop = () => tween.current?.cancel();
+    /** A has to be read back once klinecharts has handled the event. */
+    const syncSoon = () => window.setTimeout(syncAuto, 0);
+    /** The chart whose scrolling is off for a second press, if any. */
+    let held: KChart | null = null;
+    /** A press on the chart is down (so a move anywhere is its drag). */
+    let pressed = false;
+    /** A drag on the plot, A on, that may yet go vertical; `from` once it has. */
+    let pan: { x: number; y: number; height: number; from: { range: AxisRange; dy: number } | null } | null = null;
+    const onDown = (e: MouseEvent) => {
+      const c = chart.current;
+      pressed = e.button === 0;
+      pan = null;
+      if (c && e.button === 0 && e.detail >= 2) {
+        held = c;
+        c.setScrollEnabled(false);
+        return;
+      }
+      stop();
+      // A plain press on the plot itself: not on an order line or a drawing
+      // (klinecharts shows the pointer cursor over those), no tool armed.
+      const main = c?.getDom(CANDLE_PANE_ID, 'main');
+      const axis = c && priceAxis(c);
+      if (!main || !axis || e.button !== 0 || !autoRef.current || drawingRef.current) return;
+      if (main.style.cursor === 'pointer' || !isAutoFit(axis)) return;
+      const r = main.getBoundingClientRect();
+      if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) return;
+      pan = { x: e.clientX, y: e.clientY, height: r.height, from: null };
+    };
+    const onMove = (e: MouseEvent) => {
+      if (!pressed || !(e.buttons & 1)) return;
+      if (!pan) {
+        // A drag on the price axis switches A off as it happens.
+        syncAuto();
+        return;
+      }
+      const c = chart.current;
+      const axis = c && priceAxis(c);
+      if (!axis) return;
+      const dx = e.clientX - pan.x;
+      const dy = e.clientY - pan.y;
+      if (!pan.from) {
+        if (Math.abs(dy) < V_PAN_PX || Math.abs(dy) <= Math.abs(dx) * 0.5) return;
+        // Gone vertical. From here the axis follows the pointer, starting
+        // from the range on screen now (auto-fit may have moved it while the
+        // drag was still sideways) so nothing jumps; klinecharts' own scroll
+        // of this same event lays it out.
+        pan.from = { range: { ...axis.getRange() }, dy };
+        log.debug('autoscale off: a vertical drag pans the price axis');
+        dispatchScale({ type: 'manual' });
+      }
+      holdRange(axis, pannedRange(axis, pan.from.range, dy - pan.from.dy, pan.height));
+    };
+    /** Mouse presses are judged by their click count, in onDown. */
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') stop();
+    };
+    const onUp = (e: MouseEvent) => {
+      held?.setScrollEnabled(true);
+      held = null;
+      pan = null;
+      const wasPressed = pressed;
+      pressed = false;
+      // The second release of a double click on the chart: reset. Here, in
+      // the capture phase, rather than on `dblclick`: klinecharts acts on this
+      // same release (a price axis the user dragged goes back to auto-fit, in
+      // one jump), and starting first means the move eases from the range the
+      // user left - klinecharts then finds the axis fitting already and leaves
+      // it alone.
+      if (wasPressed && e.button === 0 && e.detail === 2 && el.contains(e.target as Node)) resetView();
+      if (wasPressed) syncSoon();
+    };
+    const onWheel = () => {
+      stop();
+      syncSoon();
+    };
+    const passive = { capture: true, passive: true } as const;
+    el.addEventListener('wheel', onWheel, passive);
+    el.addEventListener('touchstart', stop, passive);
+    el.addEventListener('touchend', syncSoon, passive);
+    el.addEventListener('pointerdown', onPointerDown, true);
+    el.addEventListener('keydown', stop, true);
+    el.addEventListener('mousedown', onDown, true);
+    window.addEventListener('mousemove', onMove, true);
+    window.addEventListener('mouseup', onUp, true);
+    return () => {
+      el.removeEventListener('wheel', onWheel, passive);
+      el.removeEventListener('touchstart', stop, passive);
+      el.removeEventListener('touchend', syncSoon, passive);
+      el.removeEventListener('pointerdown', onPointerDown, true);
+      el.removeEventListener('keydown', stop, true);
+      el.removeEventListener('mousedown', onDown, true);
+      window.removeEventListener('mousemove', onMove, true);
+      window.removeEventListener('mouseup', onUp, true);
+      held?.setScrollEnabled(true);
+      held = null;
+      stop();
+    };
+  }, [ready, chartGen, resetView, syncAuto]);
+
+  // Fullscreen is read back from the document rather than assumed: Escape and
+  // the browser's own chrome both leave fullscreen without touching our button,
+  // and an icon stuck in the wrong state is worse than no icon.
+  useEffect(() => {
+    if (!canFullscreen) return;
+    const sync = () => setIsFull(document.fullscreenElement === root.current);
+    document.addEventListener('fullscreenchange', sync);
+    sync();
+    return () => document.removeEventListener('fullscreenchange', sync);
+  }, [canFullscreen]);
+
+  const toggleFullscreen = useCallback(() => {
+    const el = root.current;
+    if (!el) return;
+    if (document.fullscreenElement === el) {
+      void document.exitFullscreen().catch(() => undefined);
+      return;
+    }
+    void el.requestFullscreen().catch(() => undefined);
+  }, []);
+
+  // --- indicators ------------------------------------------------------------
+  /**
+   * Mirror of `indicators` kept in a ref.
+   *
+   * Every mutation below has to happen OUTSIDE a setState updater: React
+   * double-invokes updaters under StrictMode, and `createIndicator` is not a
+   * pure function - running it twice really does build two panes (it did,
+   * before this ref existed). The ref is what lets the handlers read the
+   * current list without a stale closure and still keep the updaters pure.
+   */
+  const indicatorsRef = useRef<ActiveIndicator[]>([]);
+  const commitIndicators = useCallback((next: ActiveIndicator[]) => {
+    indicatorsRef.current = next;
+    setIndicators(next);
+  }, []);
+
+  const addIndicator = useCallback(
+    (name: string) => {
+      const c = chart.current;
+      if (!c) return;
+      const current = indicatorsRef.current;
+      if (current.some((i) => i.name === name)) return;
+
+      // klinecharts does not expose an indicator's `series` without
+      // instantiating it, and the series is what decides where it belongs:
+      // 'price' (MA/EMA/BOLL/SAR/...) overlays the candles, everything else
+      // needs its own pane. So the first time we see a name we create it on the
+      // candle pane, read the series back, and move it if that was the wrong
+      // home. Both steps run in one synchronous block, so the misplaced create
+      // never reaches the screen; the answer is then cached per name.
+      //
+      // isStack MUST be true: with isStack false, addIndicator wipes every
+      // other indicator already on the target pane.
+      let series = seriesCache.current.get(name);
+      let placed: string | null = null;
+      if (series === undefined) {
+        const probeId = c.createIndicator({ name, paneId: CANDLE_PANE_ID }, true);
+        if (!probeId) {
+          setError(`Indicator "${name}" is not available in this build`);
+          return;
+        }
+        series = c.getIndicators({ id: probeId, paneId: CANDLE_PANE_ID })[0]?.series ?? 'normal';
+        seriesCache.current.set(name, series);
+        if (series === 'price') placed = probeId;
+        else c.removeIndicator({ id: probeId, paneId: CANDLE_PANE_ID });
+      }
+
+      if (series === 'price') {
+        const id = placed ?? c.createIndicator({ name, paneId: CANDLE_PANE_ID }, true);
+        if (!id) return;
+        commitIndicators([
+          ...current,
+          { id, name, series, paneId: CANDLE_PANE_ID, visible: true, height: 0 },
+        ]);
+        return;
+      }
+
+      const paneId = `ind_${name}_${++paneSeq.current}`;
+      const id = c.createIndicator({ name, paneId }, true);
+      if (!id) return;
+      c.setPaneOptions({
+        id: paneId,
+        height: PANE_HEIGHT_DEFAULT,
+        minHeight: PANE_HEIGHT_MIN,
+        dragEnabled: true,
+      });
+      commitIndicators([
+        ...current,
+        { id, name, series, paneId, visible: true, height: PANE_HEIGHT_DEFAULT },
+      ]);
+    },
+    [commitIndicators],
+  );
+
+  const removeIndicator = useCallback(
+    (ind: ActiveIndicator) => {
+      chart.current?.removeIndicator({ id: ind.id, paneId: ind.paneId });
+      commitIndicators(indicatorsRef.current.filter((i) => i.id !== ind.id));
+    },
+    [commitIndicators],
+  );
+
+  const toggleIndicator = useCallback(
+    (ind: ActiveIndicator) => {
+      const next = !ind.visible;
+      chart.current?.overrideIndicator({ name: ind.name, id: ind.id, paneId: ind.paneId, visible: next });
+      commitIndicators(
+        indicatorsRef.current.map((i) => (i.id === ind.id ? { ...i, visible: next } : i)),
+      );
+    },
+    [commitIndicators],
+  );
+
+  const resizePane = useCallback(
+    (ind: ActiveIndicator, delta: number) => {
+      const c = chart.current;
+      if (!c || ind.paneId === CANDLE_PANE_ID) return;
+      const height = Math.max(PANE_HEIGHT_MIN, Math.min(PANE_HEIGHT_MAX, ind.height + delta));
+      if (height === ind.height) return;
+      c.setPaneOptions({ id: ind.paneId, height });
+      commitIndicators(indicatorsRef.current.map((i) => (i.id === ind.id ? { ...i, height } : i)));
+    },
+    [commitIndicators],
+  );
+
+  // --- drawing tools ---------------------------------------------------------
+  const startDrawing = useCallback((name: string) => {
+    const c = chart.current;
+    if (!c) return;
+    setOpenMenu(null);
+    setDrawing(name);
+    const id = c.createOverlay({
+      name,
+      // Confirmed present on every overlay in klinecharts 10.0.2:
+      // onPressedMoveStart / onPressedMoving / onPressedMoveEnd, plus
+      // onDrawStart/onDrawing/onDrawEnd/onSelected/onRemoved. The drag trio is
+      // what the stop-loss-modify feature will use to read a line's new price
+      // while the user is still holding it.
+      onDrawEnd: (e) => {
+        drawingId.current = null;
+        setDrawing(null);
+        // The measure tool is drawn by dragging, so a click that never moved
+        // leaves an overlay with one anchor, no span and nothing to report;
+        // and a real drag leaves one anchor per animation frame. Both are the
+        // measure's own business — see finishMeasure — but only this callback
+        // knows the drag is over, because the template's own onDrawEnd is
+        // replaced by the one on this create call.
+        if (name === MEASURE_OVERLAY) finishMeasure(c, e.overlay);
+      },
+      onRemoved: () => {
+        drawingId.current = null;
+        setDrawing(null);
+      },
+    });
+    drawingId.current = typeof id === 'string' ? id : null;
+  }, []);
+
+  /** Auto-fit was on when the rail started moving, so the end can give it back. */
+  const railWasAuto = useRef(false);
+  const onRailMotion = useCallback((phase: 'start' | 'end') => {
+    const c = chart.current;
+    const axis = c && priceAxis(c);
+    if (!c || !axis) return;
+    if (phase === 'end') {
+      if (railWasAuto.current) resumeAutoFit(c, axis);
+      railWasAuto.current = false;
+      return;
+    }
+    railWasAuto.current = isAutoFit(axis);
+    // Reduced motion skips the width transition, so there is no end event to
+    // put auto-fit back. A short timer covers that, and a normal transition
+    // ends first and clears the flag.
+    if (!railWasAuto.current || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    holdRange(axis);
+    window.setTimeout(() => {
+      const live = chart.current;
+      const ax = live && priceAxis(live);
+      if (railWasAuto.current && live && ax) resumeAutoFit(live, ax);
+      railWasAuto.current = false;
+    }, 280);
+  }, []);
+  const cancelDrawing = useCallback(() => {
+    const c = chart.current;
+    if (c && drawingId.current) c.removeOverlay({ id: drawingId.current });
+    drawingId.current = null;
+    setDrawing(null);
+  }, []);
+
+  const clearDrawings = useCallback(() => {
+    const c = chart.current;
+    if (!c) return;
+    // NOT `removeOverlay()` with no filter: that removes EVERY overlay, order
+    // lines included, and a "clear drawings" click that silently wipes your
+    // resting orders off the chart is the kind of thing you only notice after
+    // you have stopped watching a stop-loss.
+    for (const o of c.getOverlays()) {
+      if (o.name !== ORDER_LINE_OVERLAY) c.removeOverlay({ id: o.id });
+    }
+    drawingId.current = null;
+    setDrawing(null);
+    setOpenMenu(null);
+  }, []);
+
+  // Escape disarms. With the tools on a rail rather than behind a dropdown it is
+  // much easier to leave one armed by accident, and an armed overlay silently
+  // eats the next click on the chart — including a click the user meant for an
+  // order line. The keyboard out has to exist, and it has to be the key everyone
+  // already tries.
+  useEffect(() => {
+    if (!drawing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelDrawing();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [drawing, cancelDrawing]);
+
+  // --- right-click to place --------------------------------------------------
+
+  /**
+   * Open the placement menu at the price under the pointer.
+   *
+   * klinecharts already calls preventDefault on the canvas's contextmenu event
+   * but does not stop it propagating, so this DOM handler still sees it — and it
+   * sees it for clicks on an order line too, where the overlay's own
+   * onRightClick has meanwhile stopped the library deleting that line.
+   */
+  const onContextMenu = useCallback(
+    (e: ReactMouseEvent) => {
+      const c = chart.current;
+      const el = holder.current;
+      // A read-only session is offered nothing: every item in this menu is a
+      // step towards signing an order.
+      if (!ready || !c || !el || !canPlace || drawing || maskedRef.current) return;
+
+      const rect = el.getBoundingClientRect();
+      const y = e.clientY - rect.top;
+      // Only the candle pane's own y-axis carries a price. A right-click down in
+      // a volume or MACD pane would convert against THAT pane's scale and name a
+      // number that is not a price at all.
+      const pane = c.getSize(CANDLE_PANE_ID);
+      if (!pane || y < pane.top || y > pane.top + pane.height) return;
+
+      const pt = c.convertFromPixel([{ y }], { paneId: CANDLE_PANE_ID, absolute: true }) as Array<
+        Partial<Point>
+      >;
+      const price = snapToTick(pt[0]?.value ?? Number.NaN, sym?.tickSize);
+      if (price === null) return;
+
+      e.preventDefault();
+      /*
+       * WHERE THE MENU OPENS - viewport coordinates, portalled, so it may hang
+       * outside the chart over other panels. Below the last price it opens
+       * below-right of the pointer, above it above-right: the menu grows away
+       * from the price, never across it. Only when the screen has no room that
+       * way does it flip (left / the other side).
+       */
+      const last = Number(lastBar.current?.close ?? lastPriceRef.current ?? Number.NaN);
+      const abovePrice = Number.isFinite(last) ? Number(price) >= last : false;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let up = abovePrice;
+      if (up && e.clientY - MENU_H < 8) up = false;
+      else if (!up && e.clientY + MENU_H > vh - 8) up = true;
+      setMenu({
+        x: e.clientX,
+        y: e.clientY,
+        price,
+        flipX: e.clientX + MENU_W > vw - 8,
+        flipY: up,
+      });
+    },
+    [ready, canPlace, drawing, sym?.tickSize],
+  );
+
+  // Dismiss the placement menu on any outside click or on Escape.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setMenu(null);
+    };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [menu]);
+
+  /**
+   * Hand a price to the order ticket. This is the whole of what a menu pick
+   * does — the ticket's own Buy/Sell buttons remain the only thing that submits
+   * anything, and the note rendered afterwards says exactly which fields were
+   * and were not filled in.
+   */
+  const prefill = useCallback(
+    (kind: 'buy' | 'sell' | 'stop', price: string) => {
+      onPrice?.(price);
+      setMenu(null);
+      setTicket({ kind, price });
+    },
+    [onPrice],
+  );
+
+  // --- drag to modify --------------------------------------------------------
+
+  const cancelPending = useCallback(() => {
+    if (pending) abandon(pending.line.key);
+    setPending(null);
+  }, [pending, abandon]);
+
+  /** The only path in this file that sends anything. */
+  const confirmPending = useCallback(async () => {
+    const p = pending;
+    const l = layer.current;
+    if (!p || !l || p.line.orderID === undefined) return;
+
+    // Re-check the gate at the moment of sending, not just when the line was
+    // drawn: the session can lock between a drop and a click.
+    if (!canModify) {
+      abandon(p.line.key);
+      showLine('err', modifyBlocked ?? 'Modifying orders is not available here.');
+      return;
+    }
+
+    // Everything NOT being changed is re-sent verbatim from the strings the
+    // gateway gave us — including the OTHER leg of a stop-limit order, so that
+    // moving one price can never be read by the venue as clearing the other.
+    // Only the dragged leg carries a new value, and it is already on the tick
+    // grid, so the number in the confirm box is the number that gets signed.
+    const body: { symbol: string; orderID?: number; quantity?: string; price?: string; stopPrice?: string } = {
+      symbol: p.line.symbol,
+      orderID: p.line.orderID,
+    };
+    if (p.line.quantity) body.quantity = p.line.quantity;
+    if (p.line.kind === 'trigger') {
+      body.stopPrice = p.price;
+      if (p.line.restPrice) body.price = p.line.restPrice;
+    } else {
+      body.price = p.price;
+      if (p.line.stopPrice) body.stopPrice = p.line.stopPrice;
+    }
+
+    setSending(true);
+    setPending(null);
+    setAwaiting(p);
+    // Hold the line at the submitted price, drawn as pending, until the venue
+    // reports it back. `hold` tells the layer what to watch for.
+    l.place(p.line.key, p.price, 'sending');
+    l.hold(p.line.key, p.price);
+    try {
+      await api.modifyOrder(body);
+      showLine('info', `Modify submitted — waiting for the venue to confirm ${fmtPrice(p.price, sym?.tickSize)}.`);
+      onChanged?.();
+      refreshOrders();
+      // A submitted modify that is never reported back is not a success. Give up
+      // after a bounded wait and put the line on the last confirmed price, so
+      // the chart never claims an order is somewhere the venue never said it is.
+      window.clearTimeout(settleTimer.current);
+      settleTimer.current = window.setTimeout(() => {
+        abandon(p.line.key);
+        // 'err', not a softer kind: an unconfirmed modify is an open question
+        // about where a live order is resting, and the user has to go and look.
+        showLine(
+          'err',
+          `The venue has not reported ${p.line.label} at ${fmtPrice(p.price, sym?.tickSize)} yet. The line is back on the last confirmed price — check Open orders before assuming it moved.`,
+        );
+      }, SETTLE_TIMEOUT_MS);
+    } catch (err) {
+      abandon(p.line.key);
+      lineError(err);
+    } finally {
+      setSending(false);
+    }
+  }, [pending, canModify, modifyBlocked, sym?.tickSize, onChanged, refreshOrders, abandon, showLine, lineError]);
+
+  const change = legendBar ? legendBar.close - legendBar.open : 0;
+  /** Direction class for the whole OHLC row — one reading, one colour. */
+  const dir = signClass(change);
+  // Whether the selected interval is one of the buttons in the strip. When it is
+  // not, the overflow chevron is carrying the selection and takes the amber.
+  const quickInterval = QUICK_INTERVALS.includes(interval as (typeof QUICK_INTERVALS)[number]);
+  // Mutually exclusive by construction: a drop clears `drag` and sets `pending`,
+  // a confirm clears `pending` and sets `awaiting`.
+  const active = drag ?? pending ?? awaiting;
+  interacting.current = active !== null;
+
+  // What the plot shows. `feed` describes the series it was last told about;
+  // until that is the series on screen - the very first frame after a click on
+  // a timeframe - the answer is "loading", so a switch masks immediately.
+  const wantKey = feedKey(engine, seriesTicker, interval);
+  const shownFeed: FeedView = initFailed
+    ? { phase: 'error', failures: initFailed.failures, nextRetryAt: initFailed.nextRetryAt, error: initFailed.error }
+    : !ready || feed.key !== wantKey
+      ? FEED_LOADING
+      : feed;
+  const guarded = guard !== null && guard === wantKey;
+  const masked = shownFeed.phase !== 'ready' || guarded;
+  maskedRef.current = masked;
+
+  // A stays off across a new series or scale type (the owner's rule: only the
+  // user switches A). klinecharts refits the rebuilt or reloaded axis; once
+  // real bars are on screen, hold that fit so the axis is manual again.
+  useEffect(() => {
+    if (!pinAfterLoad.current || masked || shownFeed.phase !== 'ready') return;
+    const c = chart.current;
+    if (!c || c.getDataList().length === 0) return;
+    const id = requestAnimationFrame(() => {
+      const axis = priceAxis(c);
+      if (!axis || autoRef.current) {
+        pinAfterLoad.current = false;
+        return;
+      }
+      const r = axis.getRange();
+      // Never hold an empty or invalid range (e.g. klinecharts' 0-10 default).
+      if (![r.from, r.to].every(Number.isFinite) || !(r.to > r.from)) return;
+      pinAfterLoad.current = false;
+      if (isAutoFit(axis) && holdRange(axis)) log.debug('autoscale stays off: holding the fit of the new series or scale', { from: r.from, to: r.to });
+    });
+    return () => cancelAnimationFrame(id);
+  });
+  // The candle layer: the skeleton under every masked state that is waiting
+  // for bars (not 'empty' - there are none coming), then the arrival.
+  const candleLayer: CandleLayerState =
+    arrival !== null && arrival.key === wantKey && !masked
+      ? arrival.mode
+      : masked && shownFeed.phase !== 'empty'
+        ? 'skeleton'
+        : 'off';
+  // A switch keeps the chart's frame - grid, price and time axes - on screen
+  // while the candles wait for the new series in grey (chart/switchFrame.ts):
+  // the plot is not faded out. Only while the new series is on its way, the
+  // old one's bars are still with the library, and the candle layer is the
+  // one restyling them (the same test CandleMorph opens its morph out on).
+  const keepFrame =
+    masked &&
+    !guarded &&
+    (shownFeed.phase === 'loading' || shownFeed.phase === 'retrying') &&
+    candleLayer === 'skeleton' &&
+    morphable(candleStyle) &&
+    !prefersReducedMotion() &&
+    (chart.current?.getDataList().length ?? 0) > 0;
+  const endArrival = () => {
+    showCandles();
+    setArrival((a) => (a?.key === wantKey ? null : a));
+  };
+  // Room for the loading market's price axis, which klinecharts sizes to its
+  // labels - the last price at the symbol's precision, give or take.
+  const priceHint = () => {
+    const price = Number.parseFloat(lastPriceRef.current ?? '');
+    return price > 0 && sym ? { price, precision: precisionOf(sym.tickSize) } : null;
+  };
+  const retryNow = () => {
+    if (initFailed) {
+      setInitAttempt((n) => n + 1);
+      return;
+    }
+    loadHandle.current?.retryNow();
+  };
+
+  /** What the guard's error snapshot reports, as of this render. */
+  const diag = useRef({ engine, symbol, interval, wantKey, feed, health: health.health, scale: scale.mode, layer: candleLayer });
+  diag.current = { engine, symbol, interval, wantKey, feed, health: health.health, scale: scale.mode, layer: candleLayer };
+
+  /*
+   * THE GUARD. Before the first frame that shows the plot, and every half
+   * second while it is shown, the plot must show something true (invariant.ts).
+   * If it does not - whatever the path that got it there - the placeholders
+   * go back up, the console gets an error with everything needed to find the
+   * path, and the series reloads (the load's own backoff applies; repeated
+   * violations back off too).
+   */
+  useLayoutEffect(() => {
+    if (masked || !ready) return;
+    const check = (when: 'unmask' | 'watch') => {
+      const c = chart.current;
+      if (!c) return;
+      const d = diag.current;
+      const plot = readPlot(c, d.layer !== 'off');
+      // A price-axis move in progress may start from a range away from the
+      // bars (a dragged axis easing home): not a fault.
+      if (fit.current?.moving) plot.auto = false;
+      const v: Violation | null = plotViolation(plot);
+      if (!v) return;
+      const key = d.wantKey;
+      guardCount.current += 1;
+      log.error('the plot was about to show nothing true: masked, reloading the series', {
+        violation: v,
+        when,
+        engine: d.engine,
+        symbol: d.symbol,
+        interval: d.interval,
+        key,
+        generation: loadSeq.current,
+        chart: chartGen,
+        bars: plot.bars,
+        visibleRange: c.getVisibleRange(),
+        yRange: plot.range,
+        autoscale: plot.auto,
+        scale: d.scale,
+        barsInView: plot.low === null ? null : { low: plot.low, high: plot.high },
+        candlesHidden: plot.candlesHidden,
+        layer: d.layer,
+        feed: { key: d.feed.key, phase: d.feed.phase, failures: d.feed.failures, error: d.feed.error },
+        health: d.health,
+        series: series.current?.key ?? null,
+        loading: loadingKey.current || null,
+        occurrence: guardCount.current,
+        recent: recentLogs()
+          .filter((e) => e.ns === 'chart')
+          .slice(-15)
+          .map((e) => `${new Date(e.t).toISOString().slice(11, 23)} ${e.level} ${e.msg}`),
+      });
+      setGuard(key);
+      window.clearTimeout(guardTimer.current);
+      guardTimer.current = window.setTimeout(() => {
+        if (diag.current.wantKey !== key) return;
+        // Reload from scratch: a fresh request, the new-series path.
+        series.current = null;
+        primed.current = null;
+        loadHandle.current?.cancel();
+        loadHandle.current = null;
+        loadingKey.current = '';
+        applied.current = { period: '', symbol: '' };
+        setReload((n) => n + 1);
+      }, retryDelayMs(guardCount.current - 1));
+    };
+    check('unmask');
+    const id = window.setInterval(() => check('watch'), 500);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [masked, ready, wantKey, chartGen, candleLayer]);
+  useEffect(() => () => window.clearTimeout(guardTimer.current), []);
+
+  return (
+    <section className="panel chart kc-panel" ref={root}>
+      <div className="kc-toolbar" ref={toolbar}>
+        <div className="kc-tb-group">
+          {/* The selected timeframe is WHITE, not amber — see chart.css. Colour
+              is the entire signal: no box, no fill, no rule under it. */}
+          {QUICK_INTERVALS.map((i) => (
+            <button
+              key={i}
+              className={`kc-tf${i === interval ? ' on' : ''}`}
+              aria-pressed={i === interval}
+              onClick={() => setIntervalValue(i)}
+            >
+              {intervalLabel(i)}
+            </button>
+          ))}
+
+          <div className="menu">
+            <button
+              className={`kc-tf${openMenu === 'timeframe' || !quickInterval ? ' on' : ''}`}
+              title="More timeframes"
+              aria-label="More timeframes"
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'timeframe'}
+              onClick={() => setOpenMenu((m) => (m === 'timeframe' ? null : 'timeframe'))}
+            >
+              {quickInterval ? null : intervalLabel(interval)}
+              {ChevronIcon}
+            </button>
+            {mm.value === 'timeframe' && (
+              <div className={`menu-popup${mm.closing ? ' is-closing' : ''}`} role="menu" onAnimationEnd={mm.onExit}>
+                {INTERVAL_GROUPS.map((g) => (
+                  <div className="kc-section" key={g.label}>
+                    <div className="kc-menu-label">{g.label}</div>
+                    <div className="kc-menu-grid">
+                      {g.items.map((i) => (
+                        <button
+                          key={i}
+                          role="menuitem"
+                          className={i === interval ? 'on' : ''}
+                          onClick={() => {
+                            setIntervalValue(i);
+                            setOpenMenu(null);
+                          }}
+                        >
+                          {intervalLabel(i)}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="menu">
+            <button
+              className={`kc-ico${openMenu === 'style' ? ' on' : ''}`}
+              title="Series style"
+              aria-label="Series style"
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'style'}
+              disabled={!ready}
+              onClick={() => setOpenMenu((m) => (m === 'style' ? null : 'style'))}
+            >
+              {StyleIcon}
+            </button>
+            {mm.value === 'style' && (
+              <div className={`menu-popup${mm.closing ? ' is-closing' : ''}`} role="menu" onAnimationEnd={mm.onExit}>
+                <div className="kc-menu-label">Series style</div>
+                <div className="kc-menu-list">
+                  {CANDLE_STYLES.map((s) => (
+                    <button
+                      key={s.id}
+                      role="menuitem"
+                      className={s.id === candleStyle ? 'on' : ''}
+                      onClick={() => {
+                        setCandleStyle(s.id);
+                        setOpenMenu(null);
+                      }}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="menu">
+            <button
+              className={openMenu === 'indicators' ? 'kc-tf on' : 'kc-tf'}
+              disabled={!ready}
+              aria-haspopup="menu"
+              aria-expanded={openMenu === 'indicators'}
+              onClick={() => setOpenMenu((m) => (m === 'indicators' ? null : 'indicators'))}
+            >
+              {/* No count suffix. It changed the button's width every time an
+                  indicator was added or removed, which re-flowed the whole
+                  strip under the pointer, and the list inside the popup already
+                  says what is on. */}
+              {IndicatorIcon}
+              Indicators
+            </button>
+          {mm.value === 'indicators' && (
+            <div className={`menu-popup kc-menu-wide${mm.closing ? ' is-closing' : ''}`} onAnimationEnd={mm.onExit}>
+              <div className="kc-section">
+                <div className="kc-menu-label">Active</div>
+                <div className="kc-menu-list">
+                  {indicators.length === 0 && <div className="kc-empty">None</div>}
+                  {indicators.map((ind) => (
+                    <div className="kc-row" key={ind.id}>
+                      <span className={`kc-row-name${ind.visible ? '' : ' off'}`} title={ind.name}>
+                        {ind.name}
+                      </span>
+                      <button
+                        className="kc-icon"
+                        title={ind.visible ? 'Hide' : 'Show'}
+                        aria-label={ind.visible ? `Hide ${ind.name}` : `Show ${ind.name}`}
+                        onClick={() => toggleIndicator(ind)}
+                      >
+                        {ind.visible ? '◉' : '○'}
+                      </button>
+                      {ind.paneId === CANDLE_PANE_ID ? (
+                        <span className="kc-pane-h" title="Drawn over the candles — no pane of its own">
+                          –
+                        </span>
+                      ) : (
+                        <>
+                          <button
+                            className="kc-icon"
+                            title="Shorter pane"
+                            aria-label={`Shrink ${ind.name} pane`}
+                            disabled={ind.height <= PANE_HEIGHT_MIN}
+                            onClick={() => resizePane(ind, -PANE_HEIGHT_STEP)}
+                          >
+                            −
+                          </button>
+                          <span className="kc-pane-h">{ind.height}</span>
+                          <button
+                            className="kc-icon"
+                            title="Taller pane"
+                            aria-label={`Grow ${ind.name} pane`}
+                            disabled={ind.height >= PANE_HEIGHT_MAX}
+                            onClick={() => resizePane(ind, PANE_HEIGHT_STEP)}
+                          >
+                            +
+                          </button>
+                        </>
+                      )}
+                      <button
+                        className="kc-icon kc-remove"
+                        title="Remove"
+                        aria-label={`Remove ${ind.name}`}
+                        onClick={() => removeIndicator(ind)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="kc-section">
+                <div className="kc-menu-label">Add ({supported.indicators.length} built in)</div>
+                <div className="kc-menu-grid kc-scroll">
+                  {supported.indicators.map((name) => (
+                    <button
+                      key={name}
+                      disabled={indicators.some((i) => i.name === name)}
+                      onClick={() => addIndicator(name)}
+                    >
+                      {name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          </div>
+
+          {/* Price source.
+           *
+           * The candles are the venue's traded prices — the mark series — and
+           * that is stated rather than left implicit, because on a perps screen
+           * "which price is this?" decides whether a line you draw is where
+           * your liquidation is measured from.
+           *
+           * Oracle is rendered and DISABLED rather than omitted or faked. The
+           * gateway serves one kline series; there is no oracle candle history
+           * to switch to, and a segment that silently redrew the same data
+           * under a different name would be a lie about the source. Shown-and-
+           * explained beats both a dead toggle and a missing half-control. */}
+          <div className="kc-seg" role="group" aria-label="Price source">
+            {(['latest', 'mark', 'index'] as const).map((s) => {
+              const off = s !== 'latest' && !sourceOk;
+              return (
+                <button
+                  key={s}
+                  className={src === s ? 'on' : undefined}
+                  aria-pressed={src === s}
+                  onClick={(e) => {
+                    if (!off) {
+                      setPriceSource(s);
+                      return;
+                    }
+                    // A fast nudge, then the class comes off so the next click
+                    // can play it again. Disabled would swallow the click.
+                    const el = e.currentTarget;
+                    el.classList.remove('is-deny');
+                    void el.offsetWidth;
+                    el.classList.add('is-deny');
+                    notify('info', markIndexNotice(engine, interval));
+                  }}
+                  onAnimationEnd={(e) => e.currentTarget.classList.remove('is-deny')}
+                  title={off ? markIndexNotice(engine, interval) : SOURCE_HINT[s]}
+                >
+                  {SOURCE_LABEL[s]}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Transient strip. It lives in the flexible middle so that a hint
+            appearing can never push the right-hand group onto a second row. */}
+        <div className="kc-tb-mid">
+          {drawing && (
+            <span className="kc-hint warn">
+              Drawing {overlayLabel(drawing)} —{' '}
+              {drawing === MEASURE_OVERLAY ? 'drag across the chart' : 'click on the chart'}
+              <button className="link" onClick={cancelDrawing}>
+                cancel
+              </button>
+            </span>
+          )}
+        </div>
+
+        <div className="kc-tb-group kc-tb-right">
+          {/* The view group. A single tab was worse than four: with nothing
+              beside it there was no active/inactive contrast, so "Chart" read
+              as a label rather than as the selected one of a set. */}
+          {VIEWS.map((v) => (
+            <button
+              key={v.id}
+              className={`kc-view${v.id === view ? ' on' : ''}`}
+              aria-pressed={v.id === view}
+              aria-label={`${v.label} view`}
+              onClick={() => setView(v.id)}
+            >
+              {v.label}
+            </button>
+          ))}
+          {/* `kc-fs` only sets it apart from the view group beside it — see
+              chart.css. It is not a fifth view, so it does not sit on the
+              group's rhythm. */}
+          {canFullscreen && (
+            <button
+              className={`kc-ico kc-fs${isFull ? ' on' : ''}`}
+              title={isFull ? 'Leave fullscreen' : 'Fullscreen'}
+              aria-label={isFull ? 'Leave fullscreen' : 'Fullscreen'}
+              aria-pressed={isFull}
+              onClick={toggleFullscreen}
+            >
+              {isFull ? ExitFullscreenIcon : FullscreenIcon}
+            </button>
+          )}
+        </div>
+      </div>
+
+
+      {/*
+        Stage = rail | pane. The rail is a flex SIBLING of the canvas rather than
+        an overlay floated on top of it, because klinecharts measures its drawable
+        area from the holder's own box and re-measures through a ResizeObserver on
+        that element. An overlay would leave the chart convinced it owns the full
+        width and draw the leftmost candles under the buttons; taking the 52px in
+        the flex row means the holder's box IS the drawable area.
+      */}
+      {/* Kept mounted - see the `view` state comment above for why the
+          klinecharts instance has to survive a toggle away from Chart. Depth
+          and Market info are plain conditional renders: neither owns an
+          imperative library instance, so mounting only while selected is the
+          cheaper default (their data hooks stop when the view is hidden). */}
+      {/* The chart stays laid out while another view is up. `display: none`
+          collapsed the canvas to 0×0, and klinecharts then refit the price
+          axis to its empty default — the 0–10 scale on the way back. Parked,
+          it keeps the body's size, so the range the user left is the range
+          they come back to. */}
+      <div className="kc-body">
+      <div className={`chartholder-wrap kc-stage${view === 'chart' ? '' : ' is-parked'}`}>
+        <DrawingRail
+          tools={supported.overlays}
+          active={drawing}
+          onSelect={startDrawing}
+          onCancel={cancelDrawing}
+          onClear={clearDrawings}
+          disabled={!ready}
+          onMotion={onRailMotion}
+        />
+        {/* Plot column. The footer strip lives in here rather than beside the
+            whole stage so the rail keeps the full height of the card — see
+            .kc-col in rail.css. */}
+        <div className="kc-col">
+        <div
+          className="kc-pane"
+          onContextMenu={onContextMenu}
+          // The chart itself resets on the double click's second release (the
+          // pointer effect above); this covers the rest of the pane.
+          onDoubleClick={resetView}
+          onMouseLeave={() => {
+            // klinecharts only emits onCrosshairChange while the pointer is over a
+            // pane, so "left the chart" has to come from the DOM. Scoped to the
+            // canvas side of the stage, not the whole wrap: moving the pointer
+            // onto the rail really has left the chart.
+            hovering.current = false;
+            setLegendBar(lastBar.current);
+          }}
+        >
+        {/* The candle layer: the text-free skeleton while the series loads,
+            then the morph of it into the loaded candles (chart/CandleMorph.tsx).
+            BEFORE the canvas on purpose: it draws the grid and the candles
+            under the plot, so the library's lines, overlays and crosshair stay
+            over them exactly as they stay over its own. */}
+        <CandleMorph
+          state={candleLayer}
+          chart={chart}
+          priceHint={priceHint}
+          hollow={candleStyle === 'candle_stroke'}
+          morphable={morphable(candleStyle)}
+          onHide={hideCandles}
+          onBadge={tintBadge}
+          onLand={showCandles}
+          onDone={endArrival}
+        />
+        <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}`} />
+        <FeedOverlay
+          bare
+          // While the invariant guard is reloading, the feed can still say
+          // 'ready' - report it as loading so the overlay (and its screen-reader
+          // status) matches the placeholders on screen.
+          view={guarded ? FEED_LOADING : shownFeed}
+          label={`${sym?.displayName ?? symbol} · ${intervalLabel(interval)}`}
+          onRetry={retryNow}
+        />
+        {legendBar && !masked && (
+          <div
+            className="kc-legend"
+            style={noticeH ? { top: `calc(${noticeH}px + var(--sp-2))` } : undefined}
+          >
+            <span className="kc-legend-sym">
+              {sym?.displayName ?? symbol} · {interval}
+            </span>
+            {/* Colour roles, corrected against the reference: the LETTER is
+                chrome and stays --text; the NUMBER carries the bar's direction.
+                They butt together with no space so each pair reads as one
+                token. The change shows the absolute move first and the
+                percentage in parentheses after it — a percentage alone is not
+                actionable on a contract quoted in dollars. */}
+            <span className="kc-legend-ohlc">
+              <span>
+                O<span className={`kc-v ${dir}`}>{fmtPrice(legendBar.open, sym?.tickSize)}</span>
+              </span>
+              <span>
+                H<span className={`kc-v ${dir}`}>{fmtPrice(legendBar.high, sym?.tickSize)}</span>
+              </span>
+              <span>
+                L<span className={`kc-v ${dir}`}>{fmtPrice(legendBar.low, sym?.tickSize)}</span>
+              </span>
+              <span>
+                C<span className={`kc-v ${dir}`}>{fmtPrice(legendBar.close, sym?.tickSize)}</span>
+              </span>
+              <span className={dir}>
+                {change >= 0 ? '+' : ''}
+                {fmtPrice(change, sym?.tickSize)} (
+                {fmtPct((change / (legendBar.open || 1)) * 100)})
+              </span>
+            </span>
+          </div>
+        )}
+
+        {/*
+          Transient notices FLOAT over the chart rather than sitting above it in
+          flow. That is not a styling preference: the chart sizes its canvas from
+          this container and re-measures on every resize, so a bar appearing
+          in-flow shrinks the pane, redraws the price range, and slides the line
+          out from under the cursor at exactly the moment the user is dragging
+          it. Persistent errors stay in flow above — a broken account feed is not
+          transient and should keep its space.
+        */}
+        {(active || ticket || lineMsg) && (
+          <div ref={notices} className="kc-notices">
+            {active && (
+              <div className="kc-movebar">
+                <span className="kc-movebar-title">
+                  {pending ? 'Move this order?' : awaiting ? 'Submitted' : 'Moving'}
+                </span>
+                <MoveReadout line={active.line} to={active.price} sym={sym} lastPrice={lastPrice} />
+                {pending && (
+                  <>
+                    <button className="btn-primary kc-confirm" onClick={() => void confirmPending()} disabled={sending}>
+                      {sending ? 'Sending…' : 'Confirm — send live modify'}
+                    </button>
+                    <button onClick={cancelPending} disabled={sending}>
+                      Cancel
+                    </button>
+                    <span className="muted">Nothing has been sent yet.</span>
+                  </>
+                )}
+                {drag && <span className="muted">Release to review. Nothing is sent while you drag.</span>}
+                {awaiting && (
+                  <span className="muted">
+                    Waiting for the venue. The line stays highlighted until the order is confirmed here.
+                  </span>
+                )}
+              </div>
+            )}
+
+
+            {lineMsg && <p className={`status ${lineMsg.kind} kc-note`}>{lineMsg.text}</p>}
+          </div>
+        )}
+
+        {menu && createPortal(
+          <div
+            className="menu-popup kc-ctxmenu"
+            style={{
+              position: 'fixed',
+              // 'auto' is load-bearing. `.menu-popup` sets `top: calc(100% + 4px)`
+              // and `left: 0`. Leaving either unset lets that rule through, and
+              // on a fixed box `top: 100%` parks the menu below the viewport —
+              // which is why a right-click above the price did nothing.
+              left: menu.flipX ? 'auto' : menu.x + 6,
+              right: menu.flipX ? window.innerWidth - menu.x + 6 : 'auto',
+              top: menu.flipY ? 'auto' : menu.y + 6,
+              bottom: menu.flipY ? window.innerHeight - menu.y + 6 : 'auto',
+              zIndex: 1600,
+              minWidth: `${MENU_W}px`,
+              transformOrigin: `${menu.flipX ? 'right' : 'left'} ${menu.flipY ? 'bottom' : 'top'}`,
+            }}
+            // The dismiss-on-outside-click listener is on document; without this
+            // the menu would close on the way to its own buttons.
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="kc-menu-label">At {fmtPrice(menu.price, sym?.tickSize)}</div>
+            <div className="kc-menu-list">
+              <button onClick={() => prefill('buy', menu.price)}>Limit buy here</button>
+              <button onClick={() => prefill('sell', menu.price)}>Limit sell here</button>
+              <button onClick={() => prefill('stop', menu.price)}>Stop here</button>
+            </div>
+            <p className="muted small" style={{ margin: 'var(--sp-2) 0 0' }}>
+              Prefills the order price only. Nothing is submitted from here.
+            </p>
+          </div>,
+          document.body,
+        )}
+        </div>
+
+        {/* Footer strip, under the time axis.
+         *
+         * The price scale used to be a filled chip up in the toolbar, which put
+         * the one raised control on the page into a strip that otherwise has
+         * none. Down here it is three plain toggles, `% A L`, each in the accent
+         * while it is on — the reference's own arrangement, and it also gives
+         * the panel the ~30px of footer that made our chart card a step shorter
+         * than every other card in the column. The clock earns its place beside
+         * them: it is the only thing on the panel that says which zone the axis
+         * above is drawn in. */}
+        <div className="kc-status">
+          {!masked && <FeedBadge health={health.health} why={health.why} />}
+          <span className="kc-clock">{utc} UTC</span>
+          <div className="kc-scale" role="group" aria-label="Price scale" ref={scaleRef}>
+            <button
+              title="Percentage scale"
+              aria-label="Percentage scale"
+              className={scale.mode === 'percentage' ? 'on' : ''}
+              aria-pressed={scale.mode === 'percentage'}
+              disabled={!ready}
+              onClick={() => {
+                log.debug(scale.mode === 'percentage' ? 'percentage scale off' : 'percentage scale on');
+                dispatchScale({ type: 'percent' });
+              }}
+            >
+              %
+            </button>
+            <button
+              title="Auto (fits data to screen)"
+              aria-label="Auto (fits data to screen)"
+              className={scale.auto ? 'on' : ''}
+              aria-pressed={scale.auto}
+              disabled={!ready}
+              onClick={toggleAuto}
+            >
+              A
+            </button>
+            <button
+              title="Logarithmic scale"
+              aria-label="Logarithmic scale"
+              className={scale.mode === 'logarithm' ? 'on' : ''}
+              aria-pressed={scale.mode === 'logarithm'}
+              disabled={!ready}
+              onClick={() => {
+                log.debug(scale.mode === 'logarithm' ? 'logarithmic scale off' : 'logarithmic scale on');
+                dispatchScale({ type: 'log' });
+              }}
+            >
+              L
+            </button>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      {/* Depth and Market info mount only while selected. The chart above
+          stays mounted and parked so its price range survives the switch. */}
+      {view === 'depth' && <DepthView engine={engine} symbol={symbol} sym={sym} />}
+      {view === 'market' && <MarketInfoView engine={engine} symbol={symbol} sym={sym} />}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * What a dragged price actually costs, in numbers the user can act on.
+ *
+ * Two figures are always honest and always shown: the distance moved, and where
+ * the new price sits relative to the last trade. The third — the cash effect —
+ * is offered ONLY for a limit line, because a limit order fills AT its price and
+ * so the arithmetic is exact. A trigger price is not a fill price: a stop that
+ * executes at market fills wherever the market happens to be when it trips, so
+ * any cash figure attached to moving one would be a confident guess. A guess is
+ * worse than a blank on this screen, so triggers get the blank.
+ */
+function MoveReadout({
+  line, to, sym, lastPrice,
+}: {
+  line: OrderLine;
+  to: string;
+  sym?: Symbol;
+  lastPrice?: string;
+}) {
+  const from = num(line.price);
+  const next = num(to);
+  const diff = next - from;
+  const last = num(lastPrice);
+  const vsLast = last > 0 ? ((next - last) / last) * 100 : null;
+  const qty = num(line.quantity);
+  const cash = line.kind === 'limit' && line.side !== null && qty > 0 ? diff * qty : null;
+
+  return (
+    <span className="kc-readout">
+      <span className="muted">{fmtPrice(line.price, sym?.tickSize)} →</span>
+      <span className="kc-v">{fmtPrice(to, sym?.tickSize)}</span>
+      <span className={signClass(diff)}>
+        {diff >= 0 ? '+' : ''}
+        {fmtPrice(diff, sym?.tickSize)}
+      </span>
+      {vsLast !== null && <span className="muted">{fmtPct(vsLast)} from last</span>}
+      {line.quantity !== null && (
+        <span className="muted">
+          size {fmtQty(line.quantity, sym?.stepSize)}
+        </span>
+      )}
+      {cash !== null && (
+        // Sign convention: a higher price makes a buy cost more and a sell
+        // receive more, so the word is the same for both sides; only whether
+        // that is good or bad flips, which is what the colour says.
+        <span className={signClass(line.side === 'buy' ? -diff : diff)}>
+          {line.side === 'buy' ? 'costs' : 'receives'} {fmtQuote(Math.abs(cash), sym?.quoteCoin)}{' '}
+          {diff >= 0 ? 'more' : 'less'}
+        </span>
+      )}
+    </span>
+  );
+}

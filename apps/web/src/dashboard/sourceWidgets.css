@@ -1,0 +1,29 @@
+.wg { display: flex; flex-direction: column; gap: 8px; min-height: 0; height: 100%; padding: 8px; }
+.wg__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wg__bar strong { font-size: var(--fs-xs); font-weight: 500; color: var(--text); }
+.wg-src { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--panel-line); border-radius: 8px; }
+button.wg-src__btn {
+  flex-direction: row;
+  min-height: 0;
+  padding: 2px 7px;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+button.wg-src__btn.is-on { color: var(--text); background: var(--bg); }
+.wg__stage { flex: 1 1 auto; min-height: 72px; border-radius: 8px; background: var(--bg); }
+.wg__src { margin: 0; color: var(--muted); font-size: var(--fs-micro); }
+.wg-calc { max-width: 280px; }
+.wg-field { gap: 4px; font-size: var(--fs-micro); }
+.wg-field input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+.wg-out { display: flex; justify-content: space-between; margin: 0; color: var(--pos); font-variant-numeric: tabular-nums; }

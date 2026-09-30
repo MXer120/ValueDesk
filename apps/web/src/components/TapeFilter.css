@@ -1,0 +1,286 @@
+/* Counterparty tape: header bar + the account-id column.
+   Tokens only - every colour here comes from :root in styles.css. */
+
+/* The trade tape scrolls inside an ancestor (.tabbody), so the controls stick
+   to the top of that scroller. The suppressed-print counter lives in here and
+   must never scroll out of reach: a muted, very active account can empty the
+   list entirely, and the count is the only explanation the user gets. */
+/* BUDGET. This bar was ~90px of a ~360px panel - a quarter of the tape spent
+   on chrome before the first print. Nothing below removes a control or a
+   disclosure; it is all spacing and one redundant label:
+     4px  of vertical padding instead of 12
+     0px  gap between the two rows instead of 4
+     -18px  by dropping the "No accounts muted" hint (see .tape-hint)
+   which lands the bar at ~46px and gives the tape three more prints in the
+   same panel. Height only - nothing here animates, because Trades compensates
+   its scrollTop against scrollHeight deltas and a bar whose height is
+   mid-transition would yank the tape. */
+.tape-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--line);
+  padding: 2px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.tape-bar-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* The table header is sticky at top:0 by default; push it below this bar so
+   the two do not overlap. --tape-bar-h is measured and set by Trades. */
+.trades .trades-table th {
+  top: var(--tape-bar-h, 0px);
+}
+
+.tape-muteform { flex: none; display: flex; align-items: center; gap: var(--sp-1); }
+
+/* A filter field, not a button. It was rendering at the shared field height on
+   the elevated surface beside a real button, which is why the review read it
+   as "a text input styled like a button": quieter surface, hairline border,
+   and it lifts to the normal field treatment the moment you point at it or
+   focus it. */
+.tape-muteinput {
+  width: 104px;
+  height: 20px;
+  padding: 1px 6px;
+  font-size: var(--fs-micro);
+  line-height: 16px;
+  background: none;
+  border-color: var(--line-soft);
+}
+.tape-muteinput:hover,
+.tape-muteinput:focus {
+  background: var(--bg-elevated);
+  border-color: var(--line-strong);
+}
+
+.tape-mutego {
+  padding: 1px 7px;
+  line-height: 16px;
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.tape-muteinput::placeholder { color: var(--muted); }
+
+/* One line, never wrapping: a wrapping chip list would change the bar's height
+   as accounts are muted, which both shifts the sticky offset and perturbs the
+   scroll compensation in Trades. */
+.tape-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.tape-chips::-webkit-scrollbar { display: none; }
+
+/* "No accounts muted" is a line of text that says the chip list next to it is
+   empty - which the empty chip list already says. It cost a fifth of the bar
+   to restate the absence of state, so it is not drawn. It stays in the DOM as
+   the accessible name for the region: a screen reader reaches the chip list by
+   name and needs to be told it is empty, where a sighted user can see it.
+   `clip` rather than `display: none` is what keeps it in the accessibility
+   tree. */
+.tape-hint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.tape-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px 5px;
+  font-size: var(--fs-micro);
+  border-radius: var(--radius-sm);
+  border-color: var(--warn);
+  color: var(--warn);
+  background: var(--bg-elevated);
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.tape-chip-x { color: var(--muted); }
+
+.tape-clear {
+  flex: none;
+  padding: 1px 6px;
+  font-size: var(--fs-micro);
+  color: var(--muted);
+}
+
+/*
+   Wrap rather than scroll. This row carries the honesty disclosures - how many
+   prints are hidden by a mute, and that REST-seeded rows carry no counterparty
+   id and so cannot be filtered at all. It previously scrolled horizontally with
+   the scrollbar hidden, which meant the longest and most important line was
+   silently cut off at the panel edge with no way to reach it. A disclosure the
+   user cannot finish reading is not a disclosure.
+*/
+/* One status line where the panel is wide enough for one, wrapping to two
+   where it is not - and separated by SPACE rather than by a middot. A middot
+   pseudo-element was tried and rejected: this row wraps at the tape's width,
+   and a leading separator is what you get on the second line, which reads as a
+   bullet list rather than as a continued sentence. 12px of column gap does the
+   same grouping work with nothing to go wrong at a line break. */
+.tape-stats {
+  gap: 0 var(--sp-3);
+  flex-wrap: wrap;
+  min-width: 0;
+  line-height: 14px;
+}
+
+.tape-stat {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  min-width: 0;
+}
+/* Short numeric stats stay on one line; only the long prose note is allowed
+   to break, so the counters never split mid-number. */
+.tape-stat--note { white-space: normal; }
+.tape-stat:not(.tape-stat--note) { white-space: nowrap; }
+/* Amber, not red: prints are hidden by the user's own filter, which is a state
+   worth noticing, not an error. */
+.tape-stat.warnish { color: var(--warn); }
+.tape-stat.dim { opacity: 0.75; }
+.tape-stat-of { opacity: 0.7; }
+
+/* --- account column --- */
+
+.tape-cp {
+  font-size: var(--fs-micro);
+  text-align: right;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.tape-id {
+  font-size: var(--fs-micro);
+}
+
+/* Click to rename - see AccountCell in TapeFilter.tsx. */
+button.tape-id-agg {
+  border: none;
+  background: none;
+  padding: 0 1px;
+  border-radius: var(--radius-sm);
+  font-weight: 500;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+button.tape-id-agg:hover { background: var(--bg-hover); }
+button.tape-id-agg.pos { color: var(--pos); }
+button.tape-id-agg.neg { color: var(--neg); }
+
+/* Unattributed (REST-seeded) prints. Dim, non-interactive, and visibly not an
+   account id - they were not filtered, because they could not be. */
+.tape-cp-none { color: var(--muted); opacity: 0.55; }
+
+/* The rename box replaces the button in place - see the `editing` branch of
+   AccountCell - so it is sized to sit in the same 90px column without
+   reflowing the table when it opens. */
+.tape-acct-input {
+  width: 84px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: var(--fs-micro);
+  background: var(--bg-elevated);
+  border-color: var(--line-strong);
+}
+
+/* Ghost, same size as the search icon everywhere else this small - a
+   placeholder control should not out-weigh the data next to it. */
+.tape-acct-search {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.tape-acct-search:hover { background: none; color: var(--muted); }
+
+/* --- tape settings ------------------------------------------------------- */
+/* `.mkt-tape-head` itself is a Market.css rule (mkt- prefix = a class
+   Market.tsx's own JSX owns) - only the settings trigger and its popup,
+   which TapeFilter.tsx's exports actually render, belong in this file. */
+
+/* `margin-left: auto`, not the parent's `justify-content`, pushes this to the
+   row's end regardless of whether `.mkt-title` (its only possible sibling)
+   is even rendered - see the `showTitle={false}` note on `.mkt-tape-head` in
+   Market.css. */
+.tape-settingswrap { flex: none; margin-left: auto; }
+
+.tape-settingsbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.tape-settingsbtn:hover { background: none; color: var(--text); }
+
+/* TWO CLASSES, same reason `.menu-popup.mkt-statmenu` in Market.css needs
+   them: `.menu-popup` alone is (0,1,0) and (per that same comment) is
+   injected LAST, so a single class here ties on specificity and loses the
+   tie to source order - which left this popup keeping `.menu-popup`'s own
+   `left: 0` and growing off the right edge of a narrow panel instead of
+   right-aligning under the trigger. */
+.menu-popup.tape-settingsmenu { right: 0; left: auto; min-width: 220px; }
+.tape-settings-cols {
+  display: flex;
+  align-items: start;
+  gap: var(--sp-4);
+}
+.tape-settings-cols > .menu-group { flex: 1 1 auto; min-width: 0; }
+.tape-settingsmenu .tape-settings-cols > .menu-group + .menu-group {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.tape-settingsmenu .menu-grid { grid-template-columns: 1fr; gap: 1px; }
+.tape-settingsmenu .menu-grid button { text-align: left; }
+
+.tape-settings-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-ctl);
+  color: var(--muted);
+  cursor: pointer;
+  padding: 3px 6px;
+}
+.tape-settings-check input { accent-color: var(--accent); margin: 0; }
+.tape-settings-check:hover { color: var(--text); }

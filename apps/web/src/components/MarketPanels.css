@@ -1,0 +1,186 @@
+/**
+ * MarketPanels.tsx - Market info, Margin, Depth. Fills the same card the
+ * chart canvas otherwise occupies (see .chartholder-wrap in Chart.tsx,
+ * toggled to display:none rather than unmounted while one of these is
+ * shown), so it inherits that card's padding and fill and only adds its own
+ * internal layout.
+ */
+
+/* `flex: 1; min-height: 0`, not `height: 100%` - this is a flex CHILD of
+   `.panel.kc-panel` (display:flex, flex-direction:column), a sibling of the
+   toolbar and the (hidden, not unmounted) chart stage. A percentage height
+   does not reliably resolve against a flex column's main axis; this is the
+   exact pattern `.chartholder-wrap` itself uses to fill the same slot, in
+   dashboard.css. */
+.mkinfo {
+  padding: var(--sp-4);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.mkinfo-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: var(--fs-base);
+  text-align: center;
+  padding: var(--sp-6);
+}
+
+.mkinfo-head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.mkinfo-pair { display: inline-flex; align-items: center; flex: none; }
+.mkinfo-pair .coin-ic + .coin-ic { margin-left: -10px; box-shadow: 0 0 0 2px var(--bg-panel); }
+.mkinfo-coin {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--bg);
+  flex: none;
+}
+.mkinfo-title { font-size: var(--fs-xl); font-weight: 500; margin: 0; color: var(--text); }
+.mkinfo-badge {
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+.mkinfo-badge.spot { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); }
+
+.mkinfo-h3 { font-size: var(--fs-base); font-weight: 500; color: var(--text); margin: 0 0 var(--sp-3); }
+.mkinfo-h4 {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--muted);
+  margin: 0 0 var(--sp-3);
+  letter-spacing: 0.04em;
+}
+
+.mkinfo-cols { display: flex; gap: var(--sp-6); flex-wrap: wrap; }
+.mkinfo-col { flex: 1 1 240px; min-width: 200px; }
+.mkinfo-col + .mkinfo-col { padding-left: var(--sp-5); border-left: 1px solid var(--line); }
+
+.mkinfo-row { padding: var(--sp-2) 0; }
+.mkinfo-l {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  line-height: var(--lh-xs);
+}
+.mkinfo-v {
+  display: block;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text);
+  line-height: var(--lh-base);
+}
+
+.mkinfo-note { font-size: var(--fs-xs); color: var(--muted); line-height: var(--lh-xs); margin: 0 0 var(--sp-4); max-width: 60ch; }
+
+.mkinfo-table { width: 100%; border-collapse: collapse; }
+.mkinfo-table th {
+  text-align: right;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0 var(--sp-2) var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.mkinfo-table th:first-child { text-align: left; }
+.mkinfo-table td {
+  text-align: right;
+  font-size: var(--fs-base);
+  color: var(--text);
+  padding: var(--sp-2);
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 50%, transparent);
+}
+.mkinfo-table td:first-child { text-align: left; color: var(--muted); }
+.mkinfo-table tr:last-child td { border-bottom: none; }
+
+/* --- depth chart ------------------------------------------------------------ */
+
+/* Same `flex: 1; min-height: 0` reasoning as `.mkinfo` above. */
+.mkdepth { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: var(--sp-4); }
+
+.mkdepth-chart {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  cursor: crosshair;
+}
+.mkdepth-chart > svg { display: block; width: 100%; height: 100%; }
+
+/* Gradient fills, not a flat tint - a solid block of one colour read as ugly
+   and, worse, flattened the shape into a silhouette instead of a filled
+   curve. The actual gradient stops are the two <linearGradient> defs in
+   DepthView (MarketPanels.tsx), since an SVG fill has to reference a def by
+   id rather than take one from CSS. */
+.mkdepth-fill { stroke: none; }
+
+/* The visible outline traces ONLY the step curve (a separate path from the
+   fill - see stepLineD in MarketPanels.tsx), never the vertical segments
+   that close the fill shape down to the baseline or out to the domain edge.
+   Stroking those as one path with the fill drew a solid coloured wall down
+   both sides of the chart, which read as a border around the box rather
+   than part of the data. */
+.mkdepth-line {
+  fill: none;
+  stroke: var(--pos);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.mkdepth-line.ask { stroke: var(--neg); }
+
+.mkdepth-mid { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.mkdepth-guide { stroke: var(--muted); stroke-width: 1; }
+
+/* Real gridlines, not three sparse text labels at the edges - a hairline at
+   every tick, the same weight the panel's own dividers use elsewhere, faint
+   enough to read as structure rather than data. */
+.mkdepth-grid { stroke: var(--line); stroke-width: 1; opacity: 0.35; }
+
+.mkdepth-xlabel,
+.mkdepth-ylabel {
+  position: absolute;
+  font-size: var(--fs-micro);
+  color: var(--dim);
+  pointer-events: none;
+  white-space: nowrap;
+}
+/* Along the bottom, centred on its gridline - `left`/`top` are set inline
+   per tick (see DepthView), computed from the SAME xOf/yOf the chart itself
+   plots with, so a label always sits exactly on the line it names. */
+.mkdepth-xlabel { bottom: 2px; transform: translateX(-50%); }
+.mkdepth-ylabel { left: 2px; transform: translateY(-50%); }
+
+/* Portalled to <body> (see DepthView in MarketPanels.tsx) - fixed
+   coordinates, same reasoning as .mkt-spark-tip in Market.css. */
+.mkdepth-tip {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, calc(-100% - 8px));
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 4px 8px;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+  pointer-events: none;
+  text-align: center;
+}
+.mkdepth-tip.bid { border-color: color-mix(in srgb, var(--pos) 40%, var(--line)); }
+.mkdepth-tip.ask { border-color: color-mix(in srgb, var(--neg) 40%, var(--line)); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mkdepth-tip { background: var(--bg-elevated); }
+}

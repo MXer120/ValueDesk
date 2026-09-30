@@ -1,0 +1,119 @@
+/* Leaderboard panel. Tokens only - no literal colours, so a theme change in
+   styles.css reaches this component for free. */
+
+.leaderboard { display: flex; flex-direction: column; min-height: 0; }
+
+.lb-controls {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+/* `flex: 0 0 auto`, not `0 1 auto`: allowed to shrink, the group squeezed
+   "All time" until it wrapped onto a second line inside its own segment, which
+   made that one button 34px tall against its neighbours' 24px and broke the
+   group's baseline. nowrap + a shared min-width is what makes four segments of
+   different label lengths one control rather than four buttons. */
+.lb-controls .segmented { flex: 0 0 auto; }
+.lb-controls .segmented button { white-space: nowrap; min-width: 56px; }
+.lb-size { flex: none; }
+
+.lb-you-line { margin: 0 0 var(--sp-2); }
+
+/* The table scrolls inside the panel so the controls and the pager stay put
+   while paging - the page itself must not jump. */
+.lb-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+/* CAP THE MEASURE - AT A CREDIBLE ONE.
+ *
+ * The leaderboard carries five columns - rank, wallet, account, volume, PnL -
+ * and on a 1920px monitor `table { width: 100% }` stretched them across 1870px,
+ * leaving two gaps of 700+ empty pixels per row. At that width the eye cannot
+ * carry a row from the wallet on the left to its PnL on the right, which is the
+ * one thing a leaderboard row is for.
+ *
+ * The first attempt at that was `width: auto`, so the columns sized to their
+ * contents. It over-corrected hard: content sizing collapsed the whole table to
+ * ~381px inside an 1870px panel, so 80% of the panel was empty background to
+ * the right of the PnL column and the five headings read as a fragment of a
+ * table rather than as a table.
+ *
+ * `min(100%, 900px)` is the middle: a definite measure that the columns fill,
+ * and one that still shrinks with the panel on a laptop or a tablet. 900px is
+ * what the five columns want when none of them is starved - measured against a
+ * 12-character abbreviated address in the wallet column and 11-digit USD in the
+ * two money columns.
+ *
+ * The percentages are the other half. With a definite width and no per-column
+ * hint, an auto table layout hands all of the slack to the widest TEXT column,
+ * so the wallet column came out ~520px around 90px of address and the row still
+ * had a 400px hole in the middle of it. These are hints, not a fixed layout:
+ * `table-layout` stays `auto`, so a column whose content is wider than its
+ * share still grows rather than clipping a number - which on this screen is the
+ * only failure mode that actually matters.
+ *
+ * What is left over sits as ONE margin to the right of the panel rather than as
+ * two holes inside every row. It stays empty: the leaderboard payload carries
+ * rank, wallet, account, volume and PnL and nothing else, and a
+ * trades/win-rate/ROI column that no API field backs would be a fabricated
+ * number on a screen where those are unacceptable.
+ *
+ * The cap is on the TABLE, not on `.lb-scroll`, so the scroller still spans the
+ * panel and can still scroll the table sideways on a narrow one. */
+.lb-table { width: min(100%, 900px); }
+.lb-table th:nth-child(1) { width: 7%; }   /* # */
+.lb-table th:nth-child(2) { width: 30%; }  /* wallet - the one text column */
+.lb-table th:nth-child(3) { width: 16%; }  /* account */
+.lb-table th:nth-child(4) { width: 23%; }  /* volume */
+.lb-table th:nth-child(5) { width: 24%; }  /* PnL */
+
+.lb-table th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.lb-table th.sortable:hover { color: var(--text); }
+.lb-table code { font-size: var(--fs-xs); word-break: normal; }
+
+/* A plain button wrapping the SAME <code> markup, not a restyled cell - only
+   the hover state changes, so a row with no `onScan` handler (Leaderboard
+   rendered with nothing to send a click to) looks pixel-identical to one
+   that has it. */
+.lb-scanlink { padding: 0; border: none; background: none; color: inherit; cursor: pointer; }
+.lb-scanlink:hover code { color: var(--accent); text-decoration: underline; }
+
+/* The connected wallet's own row. Marked with the accent (the "this is you /
+   this is active" colour) rather than --warn or --pos, because being on the
+   leaderboard is neither a warning nor a profit signal. The left border is
+   drawn with an inset shadow so it does not shift the cell text by a pixel. */
+.lb-table tr.lb-me td {
+  background: var(--bg-elevated);
+  border-bottom-color: var(--line);
+}
+.lb-table tr.lb-me td:first-child { box-shadow: inset 2px 0 0 0 var(--accent); }
+.lb-table tbody tr.lb-me:hover td { background: var(--bg-hover); }
+
+.lb-badge { margin-left: var(--sp-2); color: var(--accent); border-color: var(--accent); }
+
+/* Capped for the same reason the table is. With `space-between` across a
+   1876px panel, Prev and Next ended up at opposite edges of the screen with
+   the page counter marooned between them.
+ *
+ * It takes the TABLE's measure, not its own content's. `max-content` was tried
+ * and it pinned the pager to whatever the three controls happened to need -
+ * which, once the table stopped being content-sized, was a different and
+ * narrower width than the thing it pages through. Same expression as the table
+ * so the two cannot drift: Prev sits under the '#' column and Next under PnL.
+ * `space-between` still applies below the cap, which is what keeps them apart
+ * once the row wraps on a narrow panel. */
+.lb-pager {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+  width: min(100%, 900px);
+}
+
+/* Provenance sits WITH the thing it dates.
+ *
+ * `.panelhead` is `justify-content: space-between`, which is right for a title
+ * plus a control but wrong for a title plus a caption: on a 1920px monitor it
+ * parked "Snapshot 28.8.2026, 00:00:00" at x=1880, a full screen width from the
+ * period selector at x=20 that the snapshot actually qualifies, with nothing
+ * between them. Packed left it reads as what it is - the subtitle of the
+ * heading, sitting directly above the 24H / 7D / 30D / All time control and the
+ * table those two describe. */
+.leaderboard .panelhead { justify-content: flex-start; }

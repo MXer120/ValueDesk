@@ -1,0 +1,398 @@
+/**
+ * Valuetrade local backend.
+ *
+ * Binds to 127.0.0.1 only. It is not hardened for network exposure and is not
+ * meant to be: it holds a signing key, and its whole security model assumes the
+ * only caller is a browser on this machine.
+ */
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import websocket from '@fastify/websocket';
+
+import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS } from './config.js';
+import { sodex, SodexApiError, NotUnlockedError } from './sodex/rest.js';
+import { upstreams } from './sodex/ws.js';
+import { addClient, removeClient, startHub, hubStats } from './hub.js';
+import { marketRoutes } from './routes/market.js';
+import { accountRoutes } from './routes/account.js';
+import { tradeRoutes } from './routes/trade.js';
+import { walletRoutes } from './routes/wallet.js';
+import { moneyRoutes } from './routes/money.js';
+import { depositRoutes } from './routes/deposit.js';
+import { onboardingRoutes } from './routes/onboarding.js';
+import { mirrorRoutes } from './routes/mirror.js';
+import { externalRoutes } from './routes/external.js';
+import { statsRoutes } from './routes/stats.js';
+import { scanRoutes } from './routes/scan.js';
+import { pointsAuthRoutes } from './routes/pointsAuth.js';
+import { valuescanRoutes } from './routes/valuescan.js';
+import { hexToBytes, privateKeyToAddress } from './signing/eip712.js';
+import { canMoveFunds } from './signing/actions.js';
+import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
+import { KeystoreError } from './keystore.js';
+import * as ks from './keystore.js';
+import { isAllowedOrigin } from './origin.js';
+import { CHAIN } from './sodex/chain.js';
+import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQUIRED } from './localToken.js';
+import { ElevationError, revokeAllElevations } from './elevation.js';
+import { classify, take } from './rateLimit.js';
+
+const app = Fastify({
+  logger: { level: process.env.LOG_LEVEL ?? 'info', transport: undefined },
+  bodyLimit: 1_000_000,
+});
+
+await app.register(cors, {
+  // The Vite dev server is a different origin from the API; both are loopback.
+  // A hosted deployment adds its own site(s) with VALUETRADE_ALLOWED_ORIGINS.
+  origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/, ...ALLOWED_ORIGINS],
+  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+});
+
+/**
+ * Custodial routes: this process minting, holding or using a trading key
+ * (config.ts, SERVER_SIGNING). Trading happens in the browser now; with server
+ * signing off - the default - these answer 410 and say where it went, so a
+ * hosted server can never hold a key that trades or moves funds.
+ */
+const SERVER_SIGNING_PATHS: readonly RegExp[] = [
+  /^\/api\/session(\/|$)/,
+  /^\/api\/wallet\/(enable|permissions|apikey)(\/|$)/,
+  /^\/api\/trade\//,
+  /^\/api\/money\/(elevat|transfer\/|withdraw)/,
+];
+const isServerSigningPath = (path: string): boolean => SERVER_SIGNING_PATHS.some((re) => re.test(path));
+if (!SERVER_SIGNING) {
+  app.addHook('onRequest', async (req, reply) => {
+    if (!isServerSigningPath(req.url.split('?')[0] ?? '')) return;
+    return reply.code(410).send({
+      error: 'This server does not hold trading keys. Trading keys are created and used in your browser.',
+      source: 'server',
+      hint: 'Enable trading in the app. VALUETRADE_SERVER_SIGNING=1 turns server-side signing back on for a local, single-user setup only.',
+    });
+  });
+}
+await app.register(websocket);
+
+/** One error shape for the whole API, with an actionable hint where we have one. */
+app.setErrorHandler((err, _req, reply) => {
+  if (err instanceof SodexApiError) {
+    app.log.warn({ code: err.code, path: err.path }, err.message);
+    return reply.code(err.httpStatus >= 400 ? err.httpStatus : 400).send({
+      error: err.message,
+      code: err.code,
+      hint: err.hint,
+      source: 'sodex',
+    });
+  }
+  if (err instanceof NotUnlockedError) {
+    return reply.code(401).send({
+      error: err.message,
+      source: 'session',
+      hint: 'Open the Wallet tab to create a restricted signing key, or unlock an existing one.',
+    });
+  }
+  if (err instanceof SymbolNotFoundError) {
+    return reply.code(404).send({ error: err.message, source: 'validation' });
+  }
+  if (err instanceof OrderValidationError) {
+    return reply.code(400).send({ error: err.message, source: 'validation' });
+  }
+  if (err instanceof KeystoreError) {
+    return reply.code(401).send({ error: err.message, source: 'keystore' });
+  }
+  if (err instanceof ElevationError) {
+    return reply.code(err.statusCode).send({
+      error: err.message,
+      source: 'elevation',
+      hint: 'Money movement needs a fresh wallet signature for that exact operation.',
+    });
+  }
+  const e = err as Error & { statusCode?: number };
+  const status = e.statusCode ?? 500;
+  if (status >= 500) {
+    // The full error goes to the local log, where the operator can see it. The
+    // RESPONSE gets a fixed string: an unhandled 500 carries stack frames, file
+    // paths and occasionally upstream detail, and there is no version of that
+    // which belongs in a browser payload.
+    app.log.error({ err: e }, 'unhandled error');
+    return reply.code(500).send({
+      error: 'internal error - see the backend log for details',
+      source: 'server',
+    });
+  }
+  return reply.code(status).send({ error: e.message, source: 'server' });
+});
+
+app.get('/api/health', async () => ({
+  ok: true,
+  network: NETWORK,
+  chainId: NET.chainId,
+  restBase: NET.restBase,
+  wsBase: NET.wsBase,
+  mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES,
+  chain: { chainId: CHAIN.chainId, name: CHAIN.name, explorerUrl: CHAIN.explorerUrl },
+  serverSigning: SERVER_SIGNING,
+  weightSpent: sodex.weightSpent(),
+  hub: hubStats(),
+  // Machine-local details (file paths, key sessions) exist only in the local,
+  // server-signing setup - never on a hosted server.
+  ...(SERVER_SIGNING
+    ? {
+        envFile: { path: ENV_FILE, loaded: ENV_FILE_LOADED },
+        localToken: { required: TOKEN_REQUIRED, path: localTokenPath() },
+        unlocked: sodex.isUnlocked,
+        unlockedAccounts: sodex.sessionCount,
+        activeAddress: sodex.activeAddress,
+      }
+    : {}),
+}));
+
+await app.register(marketRoutes);
+await app.register(accountRoutes);
+await app.register(tradeRoutes);
+await app.register(walletRoutes);
+await app.register(moneyRoutes);
+await app.register(depositRoutes);
+await app.register(onboardingRoutes);
+await app.register(mirrorRoutes);
+// Read-only: proxies SoDEX's public data/business hosts (leaderboard,
+// maintenance status, announcements) so the browser stays same-origin.
+await app.register(externalRoutes);
+// All-time account aggregates, backed by the paged history walk + SQLite cache.
+await app.register(statsRoutes);
+// Backend for the ported static Scan page (web/public/scan/) - see that
+// file's own header comment for the full /api/scan/* contract this serves.
+await app.register(scanRoutes);
+// SoPoints login, proxied so Privy's origin allowlist does not pin this app to
+// one port in dev and one domain in production - see routes/pointsAuth.ts.
+await app.register(pointsAuthRoutes);
+// Valuescan: multi-venue traders (SoDEX + Hyperliquid) for Explore,
+// Leaderboard, Scan and Copy. Read-only - see routes/valuescan.ts.
+await app.register(valuescanRoutes);
+
+// --- browser websocket -------------------------------------------------------
+
+app.get('/ws', { websocket: true }, (socket, req) => {
+  const origin = req.headers.origin;
+  if (!isAllowedOrigin(origin, ALLOWED_ORIGINS)) {
+    app.log.warn({ origin }, 'rejected cross-origin websocket upgrade');
+    socket.close(1008, 'origin not allowed');
+    return;
+  }
+  // The account channels stream balances, positions, orders and fills. That is
+  // not a mutation, so the hook above does not cover it - but it is exactly the
+  // data a hostile local process would want, and such a process reaches this
+  // socket by simply omitting Origin. Same token, same reasoning.
+  if (TOKEN_REQUIRED && !tokenMatches(req.headers[LOCAL_TOKEN_HEADER] as string | undefined)) {
+    app.log.warn({ origin: origin ?? null }, 'rejected websocket upgrade with no valid local token');
+    socket.close(1008, 'missing or invalid local API token');
+    return;
+  }
+  const client = addClient(socket);
+  socket.on('message', (raw: Buffer) => client.handle(raw.toString()));
+  socket.on('close', () => removeClient(client));
+  socket.on('error', () => removeClient(client));
+});
+
+/**
+ * Headers that apply to every response.
+ *
+ * This process serves JSON to one local page. It should never be framed, never
+ * be sniffed into another content type, never leak a referrer to an upstream,
+ * and - because responses carry balances, positions and order history - never
+ * be written to a disk cache.
+ */
+app.addHook('onSend', async (_req, reply, payload) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('Referrer-Policy', 'no-referrer');
+  reply.header('Cross-Origin-Resource-Policy', 'same-origin');
+  reply.header('Cache-Control', 'no-store');
+  return payload;
+});
+
+/**
+ * Same reasoning for state-changing HTTP requests. @fastify/cors already stops a
+ * browser from READING a cross-origin response, but the request still executes;
+ * for a signed trading action that side effect is the whole problem.
+ *
+ * Two independent gates, because they close different holes:
+ *
+ *  - the Origin check stops a hostile WEB PAGE. Browsers always attach Origin to
+ *    a POST, so this is airtight against that class.
+ *  - the token stops a hostile PROCESS, which simply omits Origin. Previously a
+ *    missing Origin was accepted outright, which meant anything on the machine
+ *    that could open a socket could trade or move funds.
+ *
+ * A request must pass BOTH: a browser request carries a loopback Origin and gets
+ * the token injected by the Vite proxy; a legitimate native client (CLI, tests)
+ * carries the token and no Origin.
+ */
+app.addHook('onRequest', async (req, reply) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+  if (!isAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS)) {
+    return reply.code(403).send({ error: 'origin not allowed', source: 'server' });
+  }
+  if (TOKEN_REQUIRED && !tokenMatches(req.headers[LOCAL_TOKEN_HEADER] as string | undefined)) {
+    app.log.warn(
+      { path: req.url, origin: req.headers.origin ?? null },
+      'rejected a mutating request with no valid local token',
+    );
+    return reply.code(401).send({
+      error: 'missing or invalid local API token',
+      source: 'server',
+      hint: `Native clients must send ${LOCAL_TOKEN_HEADER}: <contents of ${localTokenPath()}>`,
+    });
+  }
+  // Counted only AFTER the auth gates, so rejected traffic cannot exhaust the
+  // budget that legitimate requests depend on.
+  for (const { key, limit } of classify(req.url.split('?')[0] ?? '')) {
+    const retryAfter = take(key, limit);
+    if (retryAfter !== null) {
+      app.log.warn({ path: req.url, key }, 'rate limit hit');
+      reply.header('Retry-After', String(retryAfter));
+      return reply.code(429).send({
+        error: `too many ${key} requests - wait ${retryAfter}s`,
+        source: 'server',
+        hint: 'This cap exists so a runaway loop or a compromised page cannot flood the exchange.',
+      });
+    }
+  }
+});
+
+// Minted before the first request so the dev proxy always has a file to read.
+localToken();
+if (!TOKEN_REQUIRED) {
+  app.log.warn('VALUETRADE_REQUIRE_TOKEN=0 - the local API accepts unauthenticated writes from any process on this machine');
+}
+
+startHub();
+
+// --- no auto-unlock ------------------------------------------------------------
+
+/**
+ * There is deliberately NO unlock at boot.
+ *
+ * The one-click flow now mints a memory-only session key, so in the normal case
+ * there is nothing on disk to unlock at all. What remains is a keystore the user
+ * created explicitly under Advanced - and auto-unlocking that would recreate the
+ * exact property this design removes: a fund-signing key armed in a long-running
+ * process with no human present, reachable by anything that can reach the local
+ * API, for as long as the machine is on.
+ *
+ * An existing keystore is therefore listed but left locked. Unlocking it is one
+ * call to POST /api/session/unlock (no passphrase needed for a device-protected
+ * record), which requires someone to actually be there.
+ */
+if (ks.load(KEYSTORE_PATH)) {
+  app.log.warn(
+    { keystore: KEYSTORE_PATH },
+    'a keystore file from an older version is still on disk. Nothing writes one any more and ' +
+      'nothing reads it to sign. Open the Wallet tab to move that key into memory and delete the ' +
+      'file, or delete it yourself.',
+  );
+}
+
+// --- optional env bootstrap --------------------------------------------------
+
+if (BOOTSTRAP.privateKey && !ALLOW_ENV_KEY) {
+  app.log.warn(
+    { envFile: ENV_FILE },
+    'SODEX_PRIVATE_KEY is set but IGNORED. A raw key in .env is plaintext on disk inside the ' +
+      'cloud-synced project folder. Remove it, or set VALUETRADE_ALLOW_ENV_KEY=1 if this is a ' +
+      'headless setup that genuinely cannot sign in a browser.',
+  );
+} else if (BOOTSTRAP.privateKey && BOOTSTRAP.apiKeyName && BOOTSTRAP.accountId) {
+  try {
+    const pk = BOOTSTRAP.privateKey.startsWith('0x') ? BOOTSTRAP.privateKey : '0x' + BOOTSTRAP.privateKey;
+    const keyAddress = privateKeyToAddress(hexToBytes(pk));
+    const address = BOOTSTRAP.address || keyAddress;
+
+    /*
+     * Ask the EXCHANGE what this key may do, rather than assuming.
+     *
+     * `permissions` on the wire is a mask of DISABLED bits, and an ordinary key
+     * has no such field at all - which means everything is enabled, withdrawal
+     * included. So a missing field is mask 0 (full access), not "no
+     * permissions". The only reason to refuse is that the key is not registered.
+     */
+    let permissions: number | null = null;
+    try {
+      const keys = await sodex.get<any[]>(`${enginePath('spot')}/accounts/${address}/api-keys`);
+      const match = (keys ?? []).find(
+        (k) => String(k.name) === BOOTSTRAP.apiKeyName ||
+          String(k.publicKey).toLowerCase() === keyAddress.toLowerCase(),
+      );
+      if (match) permissions = Number(match.permissions ?? 0);
+    } catch (e) {
+      app.log.warn({ err: (e as Error).message }, 'could not read the env key permissions from the exchange');
+    }
+    if (permissions === null) {
+      app.log.error(
+        { keyAddress },
+        'refusing the env key: the exchange does not list it for this account (wrong name, wrong ' +
+          'account, or it was revoked)',
+      );
+    } else {
+      if (canMoveFunds(permissions)) {
+        app.log.warn(
+          { keyAddress, permissions },
+          'the env key can move funds (withdraw or transfer are enabled on it) - anything that reads .env can drain the account',
+        );
+      }
+      sodex.addSession({
+        privateKey: hexToBytes(pk),
+        apiKeyName: BOOTSTRAP.apiKeyName,
+        accountId: Number(BOOTSTRAP.accountId),
+        address,
+        keyAddress,
+        permissions,
+      });
+      app.log.warn(
+        { keyAddress, apiKey: BOOTSTRAP.apiKeyName, permissions },
+        'session unlocked from environment - a raw key is sitting in .env on disk',
+      );
+    }
+  } catch (e) {
+    app.log.error({ err: e }, 'SODEX_* environment bootstrap failed');
+  }
+}
+
+// --- lifecycle ---------------------------------------------------------------
+
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => {
+    app.log.info('shutting down');
+    upstreams.spot.close();
+    upstreams.perps.close();
+    // Any armed elevation is a live fund-moving key. It expires on its own, but
+    // leaving one valid for up to three minutes after the app is gone is exactly
+    // the window this design exists to remove.
+    void revokeAllElevations()
+      .catch(() => {})
+      .finally(() => app.close().then(() => process.exit(0)));
+  });
+}
+
+await app.listen({ host: HOST, port: PORT });
+
+// The leaderboard indexer (src/indexer): top and worst hundreds by PnL for
+// every window, with every board member's fills. It runs on a worker thread
+// so a board rebuild never holds an API request. Production runs it as its
+// own process (`npm run indexer`) and sets VALUESCAN_INDEXER=0 here.
+if (process.env.VALUESCAN_INDEXER !== '0' && process.env.VALUETRADE_TRADER_INDEX !== '0') {
+  const { startIndexerWorker } = await import('./indexer/host.js');
+  startIndexerWorker();
+}
+
+app.log.info(
+  {
+    network: NETWORK,
+    chainId: NET.chainId,
+    keystore: KEYSTORE_PATH,
+    envFile: ENV_FILE_LOADED ? ENV_FILE : `${ENV_FILE} (not present - using defaults)`,
+    mainnetWrites: NETWORK === 'mainnet' ? (ALLOW_MAINNET_WRITES ? 'ENABLED' : 'blocked') : 'n/a',
+  },
+  `Valuetrade backend on http://${HOST}:${PORT}`,
+);

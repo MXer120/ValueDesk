@@ -1,0 +1,170 @@
+/* ===================================================================
+   Shared app chrome — loaded by EVERY page.
+
+   Context menus, the floating dock, the shortcut overlay and the navbar
+   affordances. Page-specific styling stays in that page's own sheet;
+   anything here must work on all ten.
+   =================================================================== */
+
+/* ── context menu (ctxmenu.js) ──────────────────────────────────── */
+.mcm{position:fixed;z-index:9998;min-width:212px;max-width:340px;padding:5px 0;
+  background:rgba(16,17,19,.98);border:1px solid var(--border2);
+  box-shadow:0 14px 40px rgba(0,0,0,.6);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  animation:mcm-in .1s ease-out;max-height:80vh;overflow-y:auto;overscroll-behavior:contain}
+@keyframes mcm-in{from{opacity:0;transform:translateY(-3px)}to{opacity:1;transform:none}}
+.mcm-item{display:flex;align-items:center;gap:9px;padding:7px 12px 7px 9px;font-size:12px;
+  font-weight:600;color:var(--dim2);cursor:pointer;user-select:none;white-space:nowrap}
+.mcm-item.hot,.mcm-item:hover{background:var(--bg4);color:var(--text)}
+.mcm-item.danger{color:var(--red)}
+.mcm-item.danger.hot,.mcm-item.danger:hover{background:var(--red-bg);color:var(--red)}
+.mcm-item.disabled{opacity:.34;cursor:default}
+.mcm-item.disabled:hover{background:none;color:var(--dim2)}
+.mcm-ic{width:15px;flex-shrink:0;text-align:center;font-size:12px;opacity:.85}
+.mcm-item.checked .mcm-ic{color:var(--green);opacity:1}
+.mcm-lbl{flex:1;overflow:hidden;text-overflow:ellipsis}
+.mcm-hint{font-size:10px;color:var(--dim);letter-spacing:.04em;font-family:'SF Mono','Cascadia Code',monospace;padding-left:14px}
+.mcm-caret{font-size:14px;color:var(--dim);padding-left:10px}
+.mcm-sep{height:1px;background:var(--border);margin:4px 0}
+.mcm-header{padding:7px 12px 4px;font-size:9px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.13em;color:var(--dim)}
+
+/* ── floating dock ──────────────────────────────────────────────── */
+.dock{position:fixed;right:12px;bottom:38px;z-index:55;display:flex;flex-direction:column;gap:6px}
+.dock-btn{position:relative;width:38px;height:38px;display:flex;align-items:center;justify-content:center;
+  background:rgba(16,17,19,.94);border:1px solid var(--border2);color:var(--dim2);cursor:pointer;
+  font-size:15px;font-family:inherit;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  transition:color .12s,border-color .12s,background .12s}
+.dock-btn:hover{color:var(--text);border-color:var(--text);background:var(--bg4)}
+.dock-btn.danger:hover{color:var(--red);border-color:var(--red)}
+.dock-btn .dk-lbl{position:absolute;right:46px;top:50%;transform:translateY(-50%);padding:5px 9px;
+  background:var(--bg4);border:1px solid var(--border2);font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.08em;white-space:nowrap;opacity:0;pointer-events:none;
+  transition:opacity .12s}
+.dock-btn:hover .dk-lbl{opacity:1}
+.dock-toggle{opacity:.4}
+.dock-toggle:hover{opacity:1}
+.dock.folded .dock-btn:not(.dock-toggle){display:none}
+
+/* ── shortcut overlay ───────────────────────────────────────────── */
+.kbd-ov{position:fixed;inset:0;z-index:9997;background:rgba(4,4,5,.72);display:flex;
+  align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}
+.kbd-card{width:min(620px,100%);max-height:82vh;overflow-y:auto;background:var(--bg2);
+  border:1px solid var(--border2);box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.kbd-card .panel-h{position:sticky;top:0;background:var(--bg2);z-index:1}
+.kbd-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;align-items:center;padding:14px}
+.kbd-grid .k{display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap}
+kbd{display:inline-block;padding:3px 7px;background:var(--bg4);border:1px solid var(--border2);
+  font-family:'SF Mono','Cascadia Code',monospace;font-size:10px;color:var(--text);font-weight:600}
+.kbd-grid .d{font-size:12px;color:var(--dim2)}
+.kbd-sec{grid-column:1/-1;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.13em;
+  color:var(--dim);padding-top:10px;border-top:1px solid var(--border);margin-top:4px}
+.kbd-grid .kbd-sec:first-child{border-top:none;margin-top:0;padding-top:0}
+
+/* ── navbar ─────────────────────────────────────────────────────────
+   The header is a wrapping flex row. .topnav was flex:1 1 auto, i.e. its
+   flex-basis was its CONTENT width — and with a tab per active bot plus ten
+   tool pages that is ~1100px. A flex item that wide cannot share a line, so
+   the browser wrapped it instead of shrinking it, and the status group wrapped
+   again after it: a 141px-tall, three-line header on a 1440px desktop.
+
+   Above the mobile breakpoint the header is now a single non-wrapping row and
+   the nav is flex:1 1 0 — zero basis, so it takes the space that is left and
+   scrolls its overflow instead of pushing anything onto another line.
+   Below 760px the existing design (nav drops to its own full-width scrolling
+   strip) is the right answer and is left alone.                              */
+@media (min-width:761px){
+  .app-header{flex-wrap:nowrap}
+  .topnav{flex:1 1 0;min-width:0}
+  .logo,.hgroup,.cmdk-trigger{flex:0 0 auto}
+  /* The header carries a <div class="grow"> spacer at flex:1. Left alone it
+     competes with the nav for the free space and they split it 50/50, so the
+     nav ended up half as wide as it should be. The nav IS the flexible element
+     here — collapse the spacer and give it everything that is left. */
+  .app-header > .grow{flex:0 0 0;min-width:0;width:0}
+}
+.topnav{scrollbar-width:none;position:relative}
+.topnav::-webkit-scrollbar{display:none}
+.nav-tab{position:relative}
+.nav-tab.active::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--text)}
+.nav-tab:focus-visible{outline:2px solid var(--text);outline-offset:-2px}
+
+/* A scrolling strip with hard-cut edges looks like a rendering glitch. Fade the
+   overflowing side(s) so it reads as "there is more here" — the classes are set
+   by shell.js from the actual scroll position. */
+.navwrap{position:relative;flex:1 1 0;min-width:0;display:flex}
+.navwrap::before,.navwrap::after{content:'';position:absolute;top:0;bottom:0;width:26px;
+  pointer-events:none;z-index:2;opacity:0;transition:opacity .15s}
+.navwrap::before{left:0;background:linear-gradient(90deg,var(--bg2),transparent)}
+.navwrap::after{right:0;background:linear-gradient(270deg,var(--bg2),transparent)}
+.navwrap.more-l::before{opacity:1}
+.navwrap.more-r::after{opacity:1}
+@media (max-width:760px){ .navwrap{flex-basis:100%;width:100%;order:3} }
+/* the "g then key" chord indicator */
+.chordhint{position:fixed;left:50%;bottom:52px;transform:translateX(-50%);z-index:9996;
+  padding:7px 13px;background:rgba(16,17,19,.97);border:1px solid var(--border2);
+  font-size:11px;font-weight:700;color:var(--text);letter-spacing:.05em;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);animation:mcm-in .1s ease-out}
+.chordhint span{color:var(--dim);font-weight:600}
+
+/* ── generic toolbar bits reused by pages ───────────────────────── */
+.mini-btn{padding:7px 11px;background:var(--bg3);border:1px solid var(--border);color:var(--dim2);
+  cursor:pointer;font:inherit;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;
+  display:inline-flex;align-items:center;gap:6px}
+.mini-btn:hover{border-color:var(--border2);color:var(--text)}
+.mini-btn.on{background:var(--bg4);color:var(--text);border-color:var(--border2)}
+.mini-btn:disabled{opacity:.35;cursor:not-allowed}
+
+@media (prefers-reduced-motion:reduce){ .mcm,.chordhint{animation:none} }
+@media (max-width:640px){
+  .dock{right:8px;bottom:44px}
+  .dock-btn{width:42px;height:42px}
+  .mcm{min-width:200px}
+  .mcm-item{padding:10px 12px}
+  .kbd-grid{grid-template-columns:1fr;gap:3px 0}
+  .kbd-grid .k{justify-content:flex-start;padding-top:6px}
+}
+
+/* Chart tooltip. Lived in analysis.css, so any other page that used the same
+   #chtip element got an unstyled, position:static div — the tooltip was in the
+   DOM and invisible, which is how the Revenue page shipped with no hover at
+   all. It is a shared component; it lives with the shell. */
+.chtip{position:fixed;z-index:9999;pointer-events:none;padding:6px 10px;
+  background:rgba(16,17,19,.98);border:1px solid var(--border2);font-size:11px;font-weight:600;
+  color:var(--text);white-space:nowrap;box-shadow:0 8px 24px rgba(0,0,0,.5);
+  font-family:'SF Mono','Cascadia Code',monospace}
+
+
+/* ── mobile ───────────────────────────────────────────────────────────
+   Shared rules for every page, keyed on the body class MCShell sets. The
+   dashboard is dense by design; on a phone the job is to stop that density
+   turning into a horizontal scrollbar and 4px type. */
+body.mc-narrow .app-main{padding:10px;gap:10px}
+body.mc-narrow .panel-h{flex-wrap:wrap;gap:6px;padding:9px 11px}
+body.mc-narrow .panel-h h3{font-size:12.5px}
+body.mc-narrow .panel-b{padding:11px}
+/* toolbars: let them wrap rather than clip, and give the controls a real
+   touch target (the 44px guideline; these sit at 34 which is the practical
+   floor for a dense tool) */
+body.mc-narrow .fleet-tools{flex-wrap:wrap;gap:5px;width:100%}
+body.mc-narrow .seg{flex-wrap:wrap}
+body.mc-narrow .seg button,body.mc-narrow .mini-btn{min-height:34px;padding:6px 10px;font-size:11.5px}
+body.mc-narrow .mini-sel{min-height:34px;font-size:11.5px;max-width:100%}
+/* any wide table becomes a scroll region with a pinned first column, so the
+   row label stays visible while the numbers scroll */
+body.mc-narrow .tablewrap,body.mc-narrow .rvwrap,body.mc-narrow .rewrap{-webkit-overflow-scrolling:touch}
+body.mc-narrow table td.l:first-child,body.mc-narrow table th.l:first-child{
+  position:sticky;left:0;background:var(--bg2);z-index:2}
+/* the context menu is a desktop affordance; on a phone it becomes a sheet */
+body.mc-phone .mcm{position:fixed;left:0!important;right:0!important;bottom:0!important;
+  top:auto!important;max-width:none;width:100%;max-height:70vh;overflow:auto;
+  border-radius:10px 10px 0 0;border-bottom:none;padding-bottom:14px}
+body.mc-phone .mcm-item{padding:11px 14px;font-size:13.5px}
+/* Touch has no hover, so the "right-click" hints are noise — but the tooltip
+   itself is the whole point of the chart and must NOT be hidden. It becomes a
+   tap-to-show panel pinned to the bottom, out from under the finger. */
+@media (hover:none){
+  #anScatter::after,#anHist::after,#anHold::after{display:none}
+}
+body.mc-phone .chtip{left:8px!important;right:8px!important;top:auto!important;
+  bottom:calc(8px + env(safe-area-inset-bottom,0px))!important;max-width:none;
+  font-size:12px;padding:10px 12px;border-color:var(--acc,#ffb547)}

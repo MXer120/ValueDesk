@@ -1,0 +1,87 @@
+/* MobileCarousel.tsx - the sm/xs Chart / Book+Trades / Execution swipe. */
+
+/* flex: 1 1 auto + min-height: 0, not height: 100% - this is a flex CHILD of
+   .dash-panel__body--fit (itself flex-column with no explicit height of its
+   own), and a percentage height does not reliably resolve against a flex
+   parent sized that way. Exactly .dash-tabs's own rule in dashboard.css,
+   which is the proven "fill whatever this panel was given" pattern every
+   other panel body already uses - height: 100% let the carousel grow to fit
+   its CONTENT (the dots ended up at y964 on an 844px viewport) instead of
+   being fit INTO its allotted band. */
+.mcarousel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.mcarousel__track {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Mandatory, not proximity: this is navigation between three distinct
+     screens, not a loose scroller that happens to have stopping points - a
+     drag that lets go mid-page should always finish the swipe, never strand
+     the user half on one page and half on the next. */
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.mcarousel__track::-webkit-scrollbar { display: none; }
+
+/* `display: flex; flex-direction: column` is not decoration - every panel
+   body this renders (`.dash-tabs`, `.kc-stage`, the execution ticket) fills
+   its box with `flex: 1 1 auto` / `flex: 1 1 0%`, the same "fill whatever
+   this was given" contract `.mcarousel` itself uses above. That only does
+   anything inside an ACTUAL flex container: a plain `display: block` page
+   (what this was) gives a block-level child no flex formatting context at
+   all, so its `flex: 1 1 auto` was silently inert and the child sized to its
+   own content instead - measured on the Order Book page, 198px of ladder
+   inside a 659px-tall page, the remaining ~460px simply blank. `min-height:
+   0` for the usual flex-child reason: without it a child with real content
+   (the ladder's own rows) can refuse to shrink below its content size and
+   blow out the page instead of scrolling inside it. */
+.mcarousel__page {
+  flex: 0 0 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+  overflow-y: auto;
+}
+/* The peek. Every page except the last is 16px narrower than the carousel,
+   so the next page's left edge sits 16px inside the viewport once this one
+   is snapped to rest - a sliver of "Order Book" visible at the right edge of
+   "Chart" is what tells a first-time user there is somewhere to swipe TO,
+   without them needing to already know the gesture. Left off the LAST page
+   so nothing dangles past it with a strip of blank track. */
+.mcarousel__page--peek { flex-basis: calc(100% - 16px); }
+/* Content that measures its own box (the chart) rather than scrolling - same
+   contract as PanelScroll's 'hidden'. A scrollbar here would let the chart
+   grow instead of fit. */
+.mcarousel__page--fit { overflow: hidden; }
+
+.mcarousel__dots {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+}
+.mcarousel__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: var(--radius-full);
+  background: var(--line);
+  transition: background var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+.mcarousel__dot.is-active {
+  background: var(--accent);
+  transform: scale(1.4);
+}

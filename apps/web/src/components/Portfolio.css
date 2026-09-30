@@ -1,0 +1,1593 @@
+/**
+ * Portfolio page styling.
+ *
+ * Every colour, space, size and radius below is a token from styles.css, so a
+ * palette change reaches this page without anyone editing it.
+ *
+ * THE ONE STRUCTURAL DIFFERENCE FROM THE TRADE PAGE
+ * -------------------------------------------------
+ * The trade page is FLAT: its panels are transparent and borderless and the 4px
+ * gutter does all the separating. The portfolio page is the opposite - it is
+ * built from CARDS, and that is deliberate rather than an inconsistency. The
+ * trade page is one continuous instrument read at a glance while the market
+ * moves; this page is a set of separate answers about one account, each of
+ * which has to be identifiable on its own. A card is:
+ *
+ *     background  --bg-panel
+ *     border      1px solid var(--pf-line)   (--line at 40% - a hairline, not a box)
+ *     radius      --radius-sm (4px)
+ *     head strip  40px, title left, at most one control right
+ *     body        12px padding
+ *
+ * Do not make this page flat, and do not carry these cards onto the trade page.
+ *
+ * FOUR RULES THIS SHEET IS BUILT ON
+ * ---------------------------------
+ *  1. TYPE IS 10 / 12 / 14 / 20 AT WEIGHT 400 OR 500. Nothing is 600 or 700,
+ *     and nothing is uppercased. Hierarchy is carried by COLOUR (--muted ->
+ *     --text) and by size. A UI that bolds its selected tab has spent its
+ *     loudest signal on its least important information, and micro-caps make a
+ *     label louder than the number it names.
+ *  2. METERS ANIMATE BY TRANSFORM. Every bar on this page is a full-width layer
+ *     with `transform: scaleX()` and a 200ms transition. Never width, never
+ *     height: there can be fifty of these on screen while the mark feed ticks
+ *     several times a second, and a width transition relayouts the whole column
+ *     on every frame of every one of them.
+ *  3. CONTROL GEOMETRY IS BY ROLE. Four sizes, each with one job -
+ *       .pf-icon  24px circle, radius 1000px             (copy address)
+ *       .pf-btn   32px, 8px/12px padding, radius 4px     (primary actions)
+ *       .pf-chip  20px, 0/8px padding, radius 4px        (status chips)
+ *       .pf-ctl   24px, 0/8px padding, radius 4px        (period segments)
+ *     Nothing else invents a height.
+ *  4. A METRIC WITH NO SOURCE IS AN EM-DASH, and every one of them is dimmed
+ *     rather than hidden. This rule used to extend to the provenance chips too;
+ *     it no longer does. They are now switched off at the component
+ *     (SHOW_PROVENANCE_TAGS in Portfolio.tsx), NOT hidden from here - a metric
+ *     with no source is still a dimmed em-dash, and no style in this sheet may
+ *     make a disclosure note disappear.
+ *
+ * Loaded by Portfolio.tsx, i.e. BEFORE styles.css (main.tsx imports App first),
+ * so anything here that has to beat a shared rule does it on specificity, never
+ * on source order. That is why the nested-panel resets below carry two classes.
+ */
+
+.pf {
+  /*
+   * The rail width. 320px is measured, not chosen: it is the width at which
+   * "All-time volume" and a 12-character compact money value both fit on one
+   * 20px line with the label left and the number right, which is the property
+   * the whole rail exists to have. Narrower and the longer labels wrap; wider
+   * and the eye has to travel between the two halves.
+   */
+  --pf-rail: 320px;
+  /* Kept as a local alias so the ~40 call sites below do not all have to change;
+     the value itself is shared with the trade panels now. */
+  --pf-line: var(--panel-line);
+  /* Inset blocks: meter tracks, chart wells, the address field. */
+  --pf-inset: rgba(78, 78, 78, 0.2);
+  /* 40 + the 1px rule under it, like `.dash-tabs__bar` on the trade page. */
+  --pf-head-h: 41px;
+  /*
+   * The measured interaction curve. Deliberately NOT --ease-out (0.2,0,0,1):
+   * that one is the app's "arrive and stop" curve for things that appear, and
+   * this is the symmetric ease for state changes on controls and meters. Two
+   * different jobs, two different curves.
+   */
+  --pf-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --pf-dur-hover: 150ms;
+  --pf-dur-meter: 200ms;
+  /* A deliberate flash, not a strobe - see useFlash() in Portfolio.tsx. */
+  --pf-dur-flash: 500ms;
+  /*
+   * THE WELL - the funds sheets' `.fx-box` and the address menu's account boxes.
+   * A recessed block inside a card: a hairline, a 10px radius, and the page
+   * colour let through at 55% - the exact `--fx-well` formula funds.css uses, so
+   * a box here and a box in the Withdraw sheet are the same object. 10px is the
+   * sheets' own box radius (funds.css), stated once here rather than per rule.
+   */
+  --pf-well: color-mix(in srgb, var(--bg) 55%, transparent);
+  --pf-well-r: 10px;
+
+  /*
+   * `.pf` IS NOW A SCOPE, NOT A LAYOUT.
+   *
+   * It used to be the page: a `display: grid` with a 320px rail and a stretched
+   * main column. The page is a dashboard now - every card is a panel the user
+   * places - so the arrangement is in PORTFOLIO_DASHBOARD and this class exists
+   * only to carry the tokens above and to be the ancestor the `.pf .pf-*` rules
+   * below match against. It is set on the dashboard root by PortfolioDashboard.
+   *
+   * Do not give it geometry again. A `display` or a `min-height` here lands on
+   * the dashboard's own scroll container and fights react-grid-layout for the
+   * same box. The old `--pf-rail` token is kept because a panel's default WIDTH
+   * still derives from it in the layout config's comments.
+   */
+  letter-spacing: 0.01em;
+}
+
+/*
+ * A portfolio card inside a dashboard panel: THE PANEL IS THE SURFACE.
+ *
+ * `.pf-card` draws its own fill, hairline and radius, which was right when it
+ * sat on the bare page. Inside a panel that is a second box around the first -
+ * two borders 1px apart. The card keeps its 40px head and every internal rule;
+ * it just stops painting a background. `height: 100%` so the head stays pinned
+ * to the panel's top edge when the panel is dragged taller than its content.
+ */
+.dash-panel .pf-card {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  height: 100%;
+}
+
+/* --- the two columns ------------------------------------------------------- */
+
+.pf-rail,
+.pf-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  min-height: 0;
+}
+
+/*
+ * WHERE THE SLACK GOES.
+ *
+ * Three bands, and only two of them can spend height on anything useful: a
+ * chart turns it into a longer y axis, and the account band turns it into more
+ * visible rows. The pair in the middle is a fixed list of figures and a legend,
+ * so giving it height would give it whitespace - it takes its content height
+ * and no more.
+ *
+ * `flex-shrink: 0` on the two growers rather than a min-height in pixels: the
+ * floor is whatever the card's own content needs, which is a number the cards
+ * already state and this file should not restate. The band is the exception -
+ * with no wallet its content is one sentence, and a 60px-tall table area reads
+ * as a broken panel rather than as an empty account.
+ *
+ * 1 : 2 because the account band is the taller thing by nature. The charts are
+ * a readout, a plot and a three-cell strip - a fixed composition that stops
+ * looking better past about 400px - while the band is a table, and a table is
+ * worth every row it can get.
+ */
+.pf-main > .pf-duo--charts { flex: 1 0 auto; }
+.pf-main > .pf-duo--risk { flex: 0 0 auto; }
+/*
+ * The band's basis is a NUMBER, not `auto`, and that is the whole reason this
+ * declaration is not `flex: 2 0 auto` with a `min-height`.
+ *
+ * With `auto` the band's flex base is whatever the selected tab happens to
+ * contain, so the free space split with the charts changed as you moved along
+ * the tab row: selecting Position History (whose no-source note is taller than
+ * a four-row table) pushed the charts 23px up the page. A tab bar at the bottom
+ * of the page must not move the chart at the top of it. 280px is the floor a
+ * table area needs to read as one; anything taller than the box scrolls inside
+ * the band's own body, which is what that body is already for.
+ */
+.pf-main > .pf-card--band { flex: 2 0 280px; }
+
+/* Sticky only where the app owns the scroll container. Below 1241px the page
+   takes scrolling back, and a sticky rail there would pin a half-height column
+   over the content the reader scrolled to. */
+@media (min-width: 1241px) {
+  .pf-rail {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    /*
+     * `height`, not `max-height`. It was a maximum, which meant the rail ended
+     * wherever its ninth row did and left the bottom of the left column on bare
+     * page colour - 270px of it at 1920x1080, which reads as a rail that failed
+     * to render rather than as one that is finished. As a fixed height it fills
+     * the window, and the LAST card takes the slack (below), so the column ends
+     * on a card edge like every other column in this terminal.
+     *
+     * It is still a maximum in effect: a rail taller than this could not be
+     * sticky, so anything past it scrolls inside the rail exactly as before.
+     */
+    height: calc(100vh - var(--navbar-h) - 48px);
+    overflow-y: auto;
+    /*
+     * NO `scrollbar-gutter: stable` HERE.
+     *
+     * It was here to stop a scrollbar eating the 320px the layout promised, but
+     * it reserves that 10px UNCONDITIONALLY - including in the case this rail is
+     * actually in, where the content fits and nothing ever scrolls. Measured at
+     * 1920x1080: the rail box was 320px with a 310px content box, so the cards
+     * ended at x=314 while the main column started at x=328, and the gutter
+     * between the two columns rendered 14px against the system's 4px. A 4px
+     * grid cannot afford a permanent 10px of nothing inside one of its columns.
+     *
+     * Without it the cards are the full 320px and the columns are 4px apart. On
+     * a window short enough for this rail to actually overflow (below ~880px
+     * tall) a scrollbar appears and takes its own width from the cards - which
+     * is the honest cost of a scrollbar that exists, paid only then.
+     */
+  }
+  /*
+   * WHERE THE RAIL'S SLACK GOES: to every card, equally.
+   *
+   * It used to go entirely to the last one (`:last-child { flex: 1 0 auto }`),
+   * on the reasoning that a column should end on a card edge rather than on
+   * 200px of bare page. Ending on a card edge is still right; putting the whole
+   * surplus in ONE card was not. That card is Performance - seven rows and a
+   * period selector, a fixed composition that cannot grow - so at 1920x1080 it
+   * rendered 239px of content inside a 443px box: a bordered card that is 54%
+   * empty, which reads as a panel that failed to load its own contents.
+   *
+   * Nothing in this rail can spend height the way the main column's chart and
+   * account band can - all three cards are fixed lists of labelled figures. So
+   * there is no card to give it to, and the slack is SHARED: `flex-grow: 1` on
+   * each, which splits it three ways and leaves every card with the same small
+   * amount of breathing room under its last row instead of one obviously blank
+   * box. `flex-shrink: 0` still keeps every card at its content height once the
+   * rail is full, so a short window scrolls rather than squashing rows.
+   */
+  .pf-rail > .pf-card { flex: 1 0 auto; }
+}
+
+/* Two equal cards to a row, 4px apart. */
+.pf-duo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-1);
+  align-items: stretch;
+}
+
+/* --- cards ----------------------------------------------------------------- */
+
+.pf-card {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--radius-sm);
+  min-width: 0;
+}
+
+/* The 40px head strip. One title, at most one control, and a hairline under it
+   that lines up with the card's own border. */
+.pf-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  height: var(--pf-head-h);
+  flex: none;
+  /* 16px: where the chart's and the order book's panel headings start
+     (`.dash-heading` - 8px bar padding + 8px of its own). */
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  border-bottom: 1px solid var(--pf-line);
+}
+
+.pf-card__action { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+
+.pf-card__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+
+/* Card title: 14px/400 in --text. The rank over a 12px/400 --muted label is
+   size and colour; it is never weight. */
+.pf .pf-h {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--lh-base);
+  color: var(--text);
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A group heading inside a card: same 12px as the rows it sits over, separated
+   from them by colour alone. */
+/* The funds sheets' field label (`.fx-lbl`): 12px --muted over the box it names. */
+.pf .pf-h--sub {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+/* --- groups (the rail's stacked lists) ------------------------------------- */
+
+.pf-group { display: flex; flex-direction: column; min-width: 0; }
+.pf-group + .pf-group { margin-top: var(--sp-3); }
+
+.pf-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 20px;
+  margin-bottom: 4px;
+}
+.pf .pf-group__head .pf-unit { font-size: var(--fs-xs); color: var(--dim); }
+
+/* The group's rows sit in a WELL - the Withdraw sheet's Amount box, the address
+   menu's account boxes. */
+.pf-well,
+.pf-group__body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 5px var(--sp-3);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--pf-well-r);
+  background: var(--pf-well);
+}
+.pf-group__body--bare { padding: 0; border: 0; border-radius: 0; background: none; }
+/* Small print and inline buttons at the foot of a well keep to its rhythm. */
+.pf-group__body > .pf-note { margin: 2px 0 4px; }
+.pf-group__body > .pf-btn--ghost { margin: 2px 0 3px; }
+.pf-group__body > .load-failed { padding: 4px 0; }
+
+/* Identity card: the chip, the actions and the note stack with air between. */
+.pf-card--identity .pf-card__body { gap: var(--sp-2); }
+
+/* A card that is nothing but stacked lists has no head strip of its own - each
+   group carries its own heading, so a second title above them would be a title
+   for a title. */
+.pf-card--lists .pf-card__body { padding: var(--sp-3); }
+
+/* Sub-headings inside a table panel (Perps / Spot) get the group's rhythm. */
+.pf .pf-tablewrap .pf-h--sub { margin: var(--sp-3) 0 var(--sp-1); }
+.pf .pf-tablewrap .pf-h--sub:first-child { margin-top: 0; }
+
+/* --- data rows ------------------------------------------------------------- */
+
+/*
+ * The rail's atom. 20px tall, 12px text, label --muted at 400 and value --text
+ * at 500 - the same "rank is colour" rule as the headings, applied to the
+ * label/value relationship. Numbers are right-aligned and tabular so the
+ * decimal points stack down the rail.
+ */
+.pf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: var(--row-h);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+/*
+ * A toggling row is a real <button>, so it arrives carrying a button's UA
+ * styling - a border, a background, a centred 13px system font, and its own
+ * padding. All four have to be unset for it to sit in the rail as one more
+ * line; without that the disclosure row is visibly a control dropped into a
+ * list rather than a line of it.
+ */
+.pf-row--toggle {
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.pf-row--toggle:hover .pf-row__label { color: var(--text); }
+
+/* A right-pointing chevron that turns down when open - the same affordance the
+   collapsible groups elsewhere in the app use. */
+.pf-row__twisty {
+  display: inline-block;
+  width: 8px;
+  color: var(--dim);
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.pf-row__twisty.is-open { transform: rotate(90deg); }
+
+/*
+ * A breakdown line. Indented past the twisty so it reads as belonging to the
+ * row above, and quieter in BOTH columns - a sub-row whose value is the same
+ * --text as its parent competes with the total instead of explaining it.
+ */
+.pf-row--sub { padding-left: 14px; min-height: 18px; }
+.pf-row--sub .pf-row__label { color: var(--dim); }
+.pf-row--sub .pf-row__value { color: var(--muted); font-weight: 400; }
+
+.pf-row__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 400;
+  color: var(--muted);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-row__value {
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* --- provenance tags ------------------------------------------------------- */
+
+/*
+ * Three words, three meanings, and nothing else is allowed in here: `derived`
+ * (computed in Portfolio.tsx from the venue's inputs), `est.` (a risk.ts model
+ * output), `venue` (printed exactly as reported). A row with no source at all
+ * gets an em-dash and NO tag - the absence of a tag next to a dash is itself the
+ * signal that there is nothing behind it.
+ *
+ * Sentence case, 10px/400, hairline box. It used to be tracked-out capitals,
+ * which made a four-letter provenance note louder than the money it qualified.
+ */
+.pf-tag,
+.pf-est {
+  flex: none;
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: var(--lh-micro);
+  letter-spacing: var(--ls-micro);
+  text-transform: none;
+  color: var(--muted);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--radius-xs);
+  padding: 0 3px;
+  cursor: help;
+}
+.pf-est { border: none; padding: 0; cursor: inherit; }
+
+/* --- the three-column stat strip ------------------------------------------- */
+
+/*
+ * Row 1's cards end in a strip of three stats. It is full-bleed to the card's
+ * edges (hence the negative margins that cancel the body padding), divided by
+ * the same hairline as the head strip, and each cell is label above value with
+ * room under it for a meter or one line of small print.
+ */
+.pf-statstrip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: var(--sp-3) calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4));
+  border-top: 1px solid var(--pf-line);
+  margin-top: auto;
+}
+
+/* 84px was sized for a label, a value and two or three lines of disclosure
+   underneath. The disclosures are gone, so that left ~35px of dead space below
+   every cell with the content pinned to the top of it. 64px is the new floor -
+   still a FLOOR, so the one cell that carries a meter grows rather than clips -
+   and the content centres in whatever height the row settles at. Rule 4. */
+.pf-stat {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--sp-2) var(--sp-4);
+}
+
+/* One cell in the strip carries a meter and the others do not. In the flow it
+   adds 6px to that cell's content, so centring pushed its label 4.5px above its
+   two neighbours' and the row of labels visibly stepped. Taking it out of the
+   flow lets all three centre on the same label+value block; it still sits
+   directly under its own value. */
+.pf-statstrip .pf-meter {
+  position: absolute;
+  left: var(--sp-4);
+  right: var(--sp-4);
+  bottom: 8px;
+}
+.pf-stat + .pf-stat { border-left: 1px solid var(--pf-line); }
+
+.pf-stat__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-stat__value {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+/* The value is the whole point of the cell now that the sentence under it is
+   gone, so it steps up from 12px to 14px. Scoped to the strip: .pf-stat__value
+   is also used by the margin-usage rows, which are dense and stay at 12. */
+.pf-statstrip .pf-stat__value { font-size: var(--fs-base); line-height: 20px; }
+
+.pf-stat__value.pos { color: var(--pos); }
+.pf-stat__value.neg { color: var(--neg); }
+/* WARN IS AMBER. These five selectors are all named `warn` and were all painted
+   `var(--accent)`, so a warning rendered identically to an informational accent
+   - the exact collision the accent comment in styles.css warns against. */
+.pf-stat__value.warn { color: var(--warn); }
+.pf-stat__value.pf-dim { color: var(--muted); }
+
+.pf-stat__sub {
+  display: block;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+.pf-unit { font-size: var(--fs-micro); color: var(--muted); }
+.pf-approx { color: var(--muted); }
+
+/* --- account chip ---------------------------------------------------------- */
+
+/* Inside the identity card, so it carries no fill or border of its own - the
+   address itself sits in an inset block, which is the only thing on this page
+   that needs to look like a field. */
+.pf-account { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+
+/* The Deposit sheet's address box (`.fx-addr`): the address in the numeral face
+   in a well, its copy action inside the right edge like the Withdraw sheet's
+   address-book button. The status badges ride between the two. */
+.pf-account__id {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 42px;
+  padding: 0 5px 0 var(--sp-3);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--pf-well-r);
+  background: var(--pf-well);
+}
+
+.pf-account__addr {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: var(--lh-base);
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-account__meta { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-left: auto; min-width: 0; }
+.pf-account__id > .pf-icon { flex: none; }
+
+/* --- controls -------------------------------------------------------------- */
+
+/*
+ * One transition list, shared by every control on the page: colour, background
+ * and border over 150ms on the measured curve. Nothing here transitions
+ * `transform` - controls do not move, only meters do.
+ *
+ * HOVER IS COLOUR, NEVER A FILL. The app-wide rule is that hovering a control
+ * moves its ink to --text and nothing else; the one exception is a table or
+ * order-book ROW, where the surface itself is the click target and so the
+ * surface is what has to light up. Every control below used to paint
+ * `background: var(--pf-inset)` on hover, which made a 24px period segment
+ * announce itself more loudly than a table row does. `background-color` stays in
+ * this transition list because two SELECTED states still carry a fill - the
+ * amber primary button and `.pf-ctl.is-on` - and those must animate too.
+ */
+.pf .pf-btn,
+.pf .pf-icon,
+.pf .pf-ctl,
+.pf .pf-chip {
+  transition:
+    color var(--pf-dur-hover) var(--pf-ease),
+    background-color var(--pf-dur-hover) var(--pf-ease),
+    border-color var(--pf-dur-hover) var(--pf-ease);
+}
+
+/* The funds sheets' ghost action (`.fx-cta--ghost`): a hairline box in the
+   well colour, --text label. 32px here - a card action, not a sheet's CTA - so
+   the radius steps down to 8 with it. */
+.pf .pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--pf-line);
+  background: var(--pf-well);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pf .pf-btn:hover:not(:disabled) { border-color: var(--line); }
+.pf .pf-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* The sheets' primary (`.fx-cta`): solid --text, page-colour label. */
+.pf .pf-btn--primary {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+.pf .pf-btn--primary:hover:not(:disabled) {
+  background: var(--text);
+  border-color: var(--text);
+  filter: brightness(0.92);
+}
+
+.pf .pf-btn--wide { width: 100%; }
+
+/* The one deliberately smaller button: an inline "go and fetch this" under a
+   rail row - the sheets' `.fx-chip` (24px, 6px radius, --muted until hovered). */
+.pf .pf-btn--ghost {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border-radius: 6px;
+  background: transparent;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+  align-self: flex-start;
+  margin-top: var(--sp-1);
+}
+.pf .pf-btn--ghost:hover:not(:disabled) { color: var(--text); }
+
+/* The sheets' icon button (`.fx-iconbtn`): a 32px, 8px-rounded square that is
+   only ink at rest and takes a hairline and the raised fill under the pointer. */
+.pf .pf-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  padding: 0;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+.pf .pf-icon svg { display: block; }
+.pf .pf-icon:hover:not(:disabled) { color: var(--text); border-color: var(--pf-line); background: var(--bg-elevated); }
+.pf .pf-icon:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* THE SWITCH. The Withdraw sheet's Spot / EVM source tiles (`.fx-srct`), at
+   control size: the options sit in one well, --muted until chosen, and the
+   chosen one is --text ink with the tile's own "on" state - a 1px --text ring
+   over a 7% --text fill. The label never changes weight, so the group cannot
+   re-flow under the cursor as you click along it. */
+.pf .pf-ctl {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+  cursor: pointer;
+}
+/* Hover moves the label --muted -> --text. The FILL belongs to `.is-on` alone,
+   which is what keeps "this one is selected" distinguishable from "the pointer
+   happens to be here" - two backgrounds a shade apart said neither clearly. */
+.pf .pf-ctl:hover:not(.is-on) { color: var(--text); }
+/*
+ * A SELECTED PERIOD IS NOT AN ACCENT.
+ *
+ * The accent marks the thing the page is ABOUT - your line on the chart, your
+ * best week, the primary action. A period switch is a lens you are looking
+ * through, not a subject: 30D is not more important than 7D, it is just the one
+ * currently on. Painting it cyan spent the loudest colour on the terminal on a
+ * control that changes nothing about what matters, and put six of them on screen
+ * competing with the data.
+ *
+ * Selection reads as raised-and-brighter instead, which is what "on" means
+ * everywhere else in this app.
+ */
+.pf .pf-ctl.is-on {
+  color: var(--text);
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+.pf-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--pf-line);
+  border-radius: var(--radius-md);
+  background: var(--pf-well);
+}
+
+/* Status chip: the Deposit sheet's "Recommended" badge (`.fx-badge`) - 10px ink on
+   a 16% tint of its own colour, 4px radius, no border. Neutral is --muted on a
+   --text tint. */
+.pf .pf-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  border: 0;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  line-height: 10px;
+  white-space: nowrap;
+}
+.pf .pf-chip--ok { color: var(--pos); background: color-mix(in srgb, var(--pos) 16%, transparent); }
+.pf .pf-chip--warn { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+
+.pf-actions { display: flex; gap: var(--sp-1); }
+.pf-actions .pf-btn { flex: 1; }
+
+/* --- the headline readout -------------------------------------------------- */
+
+.pf-readout { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--sp-3); }
+
+.pf-readout__label {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+/*
+ * 20px/500 - the largest type on the page and the only place it appears.
+ *
+ * The 500ms flash is two-phase and the order is load-bearing. `.pf-flash--*` is
+ * applied with `transition: none`, so the colour lands on the same frame the
+ * number changes - that instant is the flash. React strips the class one beat
+ * later, and THIS rule's 500ms colour transition is what carries it back to
+ * neutral. Written the other way round (hold the colour for 500ms, then drop
+ * it) you get a hard on/off blink at twice the duration, which is a strobe.
+ */
+.pf-readout__value {
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: 26px;
+  letter-spacing: var(--ls-read);
+  color: var(--text);
+  transition: color var(--pf-dur-flash) var(--pf-ease);
+}
+.pf-readout__value.pos { color: var(--pos); }
+.pf-readout__value.neg { color: var(--neg); }
+.pf-readout__value.pf-flash--up { color: var(--pos); transition: none; }
+.pf-readout__value.pf-flash--down { color: var(--neg); transition: none; }
+
+.pf-readout__sub {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+/* --- chart ----------------------------------------------------------------- */
+
+.pf-chart { display: flex; flex-direction: column; gap: var(--sp-1); min-width: 0; }
+
+/* The WRAPPER owns the height now, not the svg.
+   EquityCurve measures this box with a ResizeObserver and draws in real pixels,
+   so the svg's own width/height are set from that measurement rather than from
+   CSS - a CSS height here plus a fixed viewBox is exactly what was squashing the
+   glyphs before. 142px rather than the old 110: the axis labels need a band at
+   the bottom that the plot used to have, plus a margin under them so they do not
+   sit on the stat strip's border. The PLOT keeps its 114px either way - the extra
+   height all goes to the axis band. */
+.pf-chart { height: 142px; }
+.pf-chart__svg { display: block; }
+.pf-chart__zero { stroke: var(--line); stroke-width: 1; stroke-dasharray: 3 3; }
+.pf-chart__line { fill: none; stroke-width: 1.5; }
+.pf-chart__line.pos { stroke: var(--pos); }
+.pf-chart__line.neg { stroke: var(--neg); }
+/* Equity rising is not a profit, so it is not painted like one. */
+.pf-chart__line.neutral { stroke: var(--text); }
+
+/* --- axes, cursor and tooltip on the curve --------------------------------
+   Nothing is stretched any more: the viewBox matches the measured pixel size, so
+   text renders at its stated size and a 1px stroke is one pixel. The tooltip is
+   still HTML rather than <text> because it needs a border and a background,
+   which are easier to get right outside the svg. */
+.pf-chart { position: relative; }
+.pf-chart__grid { stroke: var(--line); stroke-width: 1; opacity: 0.35; }
+.pf-chart__line { stroke-width: 1.5; }
+/* Zero is the period's own starting level, so it is drawn stronger than the
+   other gridlines - it is the line the sign is read against. */
+.pf-chart__zero { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.pf-chart__ylabel,
+.pf-chart__xlabel {
+  fill: var(--muted); font-size: var(--fs-label);}
+.pf-chart__cursor { stroke: var(--muted); stroke-width: 1; opacity: 0.5; }
+.pf-chart__dot.pos { fill: var(--pos); }
+.pf-chart__dot.neg { fill: var(--neg); }
+.pf-chart__dot.neutral { fill: var(--text); }
+
+/* The glass of the sheets' open pickers (`.fx-list`). */
+.pf-chart__tip {
+  position: absolute; top: 4px; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--pf-well-r);
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-pop);
+  pointer-events: none; white-space: nowrap;
+  z-index: 2;
+}
+.pf-chart__tipday { color: var(--muted); font-size: var(--fs-label); }
+.pf-chart__tipval { font-family: var(--font-num); font-size: var(--fs-data); font-weight: 500; }
+
+.pf-chart__axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: var(--lh-micro);
+  letter-spacing: var(--ls-micro);
+  color: var(--muted);
+}
+.pf-chart__range { color: var(--dim); }
+
+/*
+ * The empty chart.
+ *
+ * This is the state most visits see - no wallet connected, or the history walk
+ * not started - so it has to read as a deliberate answer rather than as a panel
+ * that failed to load. It therefore OCCUPIES the chart's height instead of
+ * collapsing, and centres a real sentence in it. The inset fill says "a chart
+ * belongs here" without drawing a fake axis.
+ */
+.pf-chart--empty {
+  min-height: 110px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  text-align: center;
+  padding: var(--sp-3);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--pf-well-r);
+  background: var(--pf-well);
+}
+.pf-chart--empty p {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  max-width: 56ch;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.pf-chart--empty .load-failed { justify-content: center; }
+
+/* --- meters ---------------------------------------------------------------- */
+
+/*
+ * Every bar on this page is the same two elements: a track, and a full-width
+ * layer scaled from the left. `width: 100%` plus `scaleX(fraction)` rather than
+ * `width: fraction%` is the whole point - see rule 2 at the top of this file.
+ */
+.pf-meter {
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--pf-inset);
+  overflow: hidden;
+}
+.pf-meter__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transition: transform var(--pf-dur-meter) var(--pf-ease);
+}
+.pf-meter__fill--pos { background: var(--pos); }
+.pf-meter__fill--warn { background: var(--warn); }
+.pf-meter__fill--neg { background: var(--neg); }
+
+/*
+ * The stacked capital bar.
+ *
+ * Four absolutely-positioned full-width layers, each scaled to its CUMULATIVE
+ * fraction and painted largest-first, so every layer ends exactly where the next
+ * begins. Four flex children would have had to animate width; this way the whole
+ * bar is one composited transform per segment.
+ */
+.pf-stack-bar {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--pf-inset);
+  margin: 6px 0;
+}
+.pf-stack-bar__seg {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transition: transform var(--pf-dur-meter) var(--pf-ease);
+}
+.pf-stack-bar__seg--cross { background: var(--accent); }
+.pf-stack-bar__seg--iso { background: var(--accent-secondary); }
+.pf-stack-bar__seg--orders { background: var(--dim); }
+.pf-stack-bar__seg--free { background: var(--bg-control); }
+
+.pf-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.pf-legend li {
+  display: grid;
+  grid-template-columns: 8px 1fr auto 52px;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--row-h);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.pf-legend b { color: var(--text); font-weight: 500; }
+.pf-legend .pf-dim { text-align: right; }
+/* Figures in the numeral face, as every other value on the page. */
+.pf-legend b,
+.pf-legend .pf-dim,
+.pf-alloc__share { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+/* A headline meter sits between its row and the next with air on both sides. */
+.pf-card__body > .pf-meter { margin: 2px 0 4px; }
+
+.pf-swatch { width: 8px; height: 8px; border-radius: var(--radius-full); display: block; }
+.pf-swatch--cross { background: var(--accent); }
+.pf-swatch--iso { background: var(--accent-secondary); }
+.pf-swatch--orders { background: var(--dim); }
+.pf-swatch--free { background: var(--bg-control); }
+
+/* --- exposure -------------------------------------------------------------- */
+
+/* Net and Gross: the address menu's Perps / Spot boxes, side by side. */
+.pf-exposure__figures {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+.pf-exposure__figures > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--pf-well-r);
+  background: var(--pf-well);
+}
+.pf-exposure__figures .pf-stat__value { font-size: var(--fs-base); line-height: 20px; }
+
+/* Track IS the short side; the fill is the long side scaled over it, so the two
+   colours meet at the skew point with one animated transform instead of two. */
+.pf-split {
+  position: relative;
+  height: 6px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  background: var(--neg);
+}
+.pf-split__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--pos);
+  transform-origin: left center;
+  transition: transform var(--pf-dur-meter) var(--pf-ease);
+}
+.pf-split__labels {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 var(--sp-1);
+  font-family: var(--font-num);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+}
+.pf-split__labels .pos { color: var(--pos); }
+.pf-split__labels .neg { color: var(--neg); }
+.pf-well > .pf-split { margin-top: 6px; }
+
+.pf-alloc { list-style: none; margin: 0; padding: 0; }
+.pf-alloc li {
+  display: grid;
+  grid-template-columns: minmax(64px, 1fr) minmax(60px, 1.4fr) auto 46px;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--row-h);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+}
+.pf-alloc__name {
+  color: var(--text);
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pf-alloc__track { height: 4px; border-radius: var(--radius-full); background: var(--pf-inset); overflow: hidden; }
+.pf-alloc__fill {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transition: transform var(--pf-dur-meter) var(--pf-ease);
+}
+.pf-alloc__fill.pos { background: var(--pos-dim); }
+.pf-alloc__fill.neg { background: var(--neg-dim); }
+.pf-alloc__value { text-align: right; color: var(--text); }
+.pf-alloc__share { text-align: right; }
+
+/* --- tables ---------------------------------------------------------------- */
+
+/* A wide table scrolls inside its own box. The page must never scroll
+   horizontally - that moves the rail off screen, which is the one thing the rail
+   is not allowed to do. */
+.pf-tablewrap { overflow-x: auto; min-width: 0; }
+
+/* Column heads 12px/400 --muted sentence case; rows 20px at 12px/500; numerics
+   right-aligned and tabular; hover a subtle tint; no zebra striping. */
+.pf .datatable { }
+.pf .datatable th {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--th-lh);
+  text-transform: none;
+  color: var(--muted);
+  border-bottom: 1px solid var(--pf-line);
+}
+.pf .datatable td {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--row-lh);
+  color: var(--text);
+  border-bottom: 1px solid var(--pf-line);
+}
+.pf .datatable tbody tr:hover { background: var(--tint); }
+.pf .datatable td.tablenote { font-weight: 400; }
+
+.pf-badge { margin-left: 6px; }
+.pf-mode { margin-left: 6px; font-size: var(--fs-micro); font-weight: 400; }
+
+/* --- the shared account band ----------------------------------------------- */
+
+/*
+ * THE CARD IS A FRAME AND NOTHING ELSE.
+ *
+ * What is inside it is components/AccountTabs.tsx - the same element the trade
+ * page carries along its bottom edge - and it brings its own 41px tab bar, its
+ * own hairline and its own scrolling body. So the card contributes only its
+ * fill, its radius and its clip: no head strip (the tab bar IS the head), and
+ * no body padding (the band's own insets are already the measured 16px, and a
+ * second 12px on top of them would put this page's tab labels 12px further in
+ * than the trade page's).
+ *
+ * This page states NOTHING about how that bar looks. The wrapper carries the
+ * `dash` class, which is the scope styles.css already uses for the tab bar's
+ * rhythm and its amber stub, so both pages read one set of numbers. See the
+ * note in Portfolio.tsx for why that class is a style hook here and not a
+ * dashboard.
+ */
+.pf .pf-card--band { overflow: hidden; }
+.pf .pf-card--band > .pf-card__body { padding: 0; flex: 1; min-height: 0; }
+/* `.dash` already declares the flex column and `height: 100%`; these two make
+   the fill work from the flex side as well, so the band still reaches the
+   card's bottom edge if the percentage cannot resolve. */
+.pf .pf-band { flex: 1 1 auto; min-height: 0; }
+
+/*
+ * THE TAB STRIP IS NOT A DRAG HANDLE HERE.
+ *
+ * `.dash-tabs__bar` declares `cursor: grab` (and `:active -> grabbing`) because
+ * on the TRADE page that bar is the top edge of a react-grid-layout panel and
+ * dragging it really does move the panel. This page mounts the same band inside
+ * a fixed two-column CSS layout - see the header of Portfolio.tsx for why the
+ * portfolio is deliberately not a draggable grid - so there is nothing to drag,
+ * and 1586px of strip was offering a grab hand for an interaction the page
+ * cannot honour. A cursor is a promise.
+ *
+ * The tabs themselves keep their own `cursor: pointer`; this only resets the
+ * strip they sit on. The right home for the grab hand is the dashboard's own
+ * scope in dashboard.css, which is not this file's to edit, so it is scoped OUT
+ * here instead - `.pf .pf-band` is exactly the portfolio's copy of the band.
+ */
+.pf .pf-band .dash-tabs__bar,
+.pf .pf-band .dash-tabs__bar:active { cursor: default; }
+
+/* The chart cards must be the same height side by side, and their stat strips
+   must sit on the same line, so the body stretches and the strip is pushed to
+   the bottom by `margin-top: auto`. */
+.pf-card--chart .pf-card__body { flex: 1; }
+
+/*
+ * THE PLOT TAKES THE CARD'S SLACK, NOT THE GAP ABOVE THE STAT STRIP.
+ *
+ * Once the page fills the window these two cards are taller than their content,
+ * and the strip's `margin-top: auto` would have parked it at the bottom with an
+ * empty band between it and a 110px plot. The plot absorbs that instead: the
+ * SVG is `preserveAspectRatio="none"` with a non-scaling stroke, so it is built
+ * to be stretched, and a taller box is a longer y axis rather than dead space.
+ * The 110px in `.pf-chart__svg` stays as the flex BASIS, which is also the
+ * floor - this only ever adds height.
+ */
+.pf-card--chart .pf-chart { flex: 1 1 auto; }
+.pf-card--chart .pf-chart__svg { flex: 1 1 auto; }
+
+/* --- notes, warnings, empties ---------------------------------------------- */
+
+/*
+ * Small print: 10px/400 --muted. Every disclosure on this page - why a figure
+ * is a floor, why a column is an estimate, why a cell is an em-dash - lands
+ * here, so this rule may get quieter but must never get to `display: none`.
+ */
+/* The sheets' small print (`.fx-note`): 12px --muted. */
+.pf-note {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.pf-note:first-child { margin-top: 0; }
+.pf-note--warn { color: var(--warn); }
+/* A real disclaimer, and only that: the quietest line a card can carry,
+   right-aligned under what it qualifies. */
+.pf-fine {
+  margin: var(--sp-1) 0 0;
+  text-align: right;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-xs);
+  color: var(--disabled);
+  letter-spacing: 0.01em;
+}
+.pf-note strong, .pf-note b { font-weight: 400; color: var(--text); }
+
+.pf-dim { color: var(--muted); }
+.pf-neg-text { color: var(--neg); }
+
+.pf-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+}
+
+/*
+ * The runtime identity report. Loud, and above the numbers, when one of the
+ * three arithmetic identities the field decoding rests on stops holding.
+ * Stays at 12px where the small print is 10px: this one says the labels below
+ * it may be wrong, and it is the last thing that should be hard to read.
+ */
+/* The Deposit sheet's warning box (`.fx-warnbox`), in amber. */
+.pf-warn {
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, var(--pf-well));
+  border-radius: var(--pf-well-r);
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+}
+.pf-warn strong { color: var(--warn); font-weight: 400; display: block; margin-bottom: var(--sp-1); }
+.pf-warn p, .pf-warn ul { margin: var(--sp-1) 0 0; color: var(--muted); }
+.pf-warn ul { padding-left: var(--sp-4); }
+.pf-warn code { font-size: var(--fs-xs); }
+
+.pf-index {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: var(--sp-3) 0;
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.pf-index input { margin-top: 2px; }
+.pf-index small { display: block; margin-top: 2px; color: var(--muted); font-weight: 400; line-height: 1.4; }
+
+/* --- responsive ------------------------------------------------------------ */
+
+/*
+ * The rail is a rail only while there is room for a rail AND a readable main
+ * column beside it. Below that it becomes a full-width band of the same cards
+ * laid out horizontally, which keeps the reading order (identity, then money,
+ * then analysis) without squeezing the chart into a gutter.
+ */
+@media (max-width: 1240px) {
+  .pf { grid-template-columns: minmax(0, 1fr); }
+  /*
+   * THREE COLUMNS, NOT TWO, AND THE REASON IS THE HOLE.
+   *
+   * The rail is three cards. In two columns the third wraps onto a second row,
+   * which leaves a card-sized rectangle of bare page beside the shortest one -
+   * measured at 1200x800, ~600x360 of it, the largest single piece of dead
+   * space anywhere on the page. Three columns puts all three in one row, and
+   * the narrowest that reaches - 295px at the 901px floor of this range - still
+   * fits the longest label ("Open position size") and its value on one line,
+   * which is the property the rail exists to have.
+   *
+   * `align-items: start` stays: these are three lists of different lengths, and
+   * stretching the short one to the tall one's height would trade the hole
+   * between the cards for the same hole inside one.
+   */
+  .pf-rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+}
+
+@media (max-width: 900px) {
+  .pf-rail { grid-template-columns: minmax(0, 1fr); }
+  .pf-duo { grid-template-columns: minmax(0, 1fr); }
+  .pf-statstrip { grid-template-columns: minmax(0, 1fr); }
+  .pf-stat + .pf-stat { border-left: none; border-top: 1px solid var(--pf-line); }
+}
+
+@media (max-width: 560px) {
+  /* The performance card's range buttons were wider than the row, and the
+     title shrank to "Perfor…". The title keeps its width; the controls wrap
+     onto the next line instead of eating it. */
+  .pf-card__head {
+    height: auto;
+    min-height: var(--pf-head-h);
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 6px var(--sp-2) 6px var(--sp-3);
+  }
+  .pf .pf-h { flex: none; overflow: visible; text-overflow: clip; }
+  .pf-card__action { margin-left: auto; max-width: 100%; }
+  .pf-card__body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+  .pf-statstrip { margin: var(--sp-2) calc(-1 * var(--sp-3)) calc(-1 * var(--sp-3)); }
+  .pf-stat { padding: var(--sp-2) var(--sp-3); }
+  .pf-statstrip .pf-meter { left: var(--sp-3); right: var(--sp-3); }
+  /* On a phone the three stats stay one row, as the address menu keeps its
+     boxes side by side: stacked, the strip took 192px of a 384px card and
+     pushed its own chart out of it. A long label wraps instead of clipping. */
+  .pf-statstrip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .pf-stat + .pf-stat { border-top: none; border-left: 1px solid var(--pf-line); }
+  .pf-stat { min-height: 56px; padding: var(--sp-2) 10px; }
+  .pf-statstrip .pf-meter { left: 10px; right: 10px; }
+  .pf-statstrip .pf-stat__label { white-space: normal; overflow: visible; }
+}
+
+/* Respect a stated preference for less motion: the meters and the flash are
+   information, but their MOVEMENT is not - the end state carries all of it. */
+@media (prefers-reduced-motion: reduce) {
+  .pf-meter__fill,
+  .pf-stack-bar__seg,
+  .pf-split__fill,
+  .pf-alloc__fill,
+  .pf-readout__value { transition: none; }
+}
+
+
+/* --- Chart series menu + window segment (Portfolio.tsx) --------------------
+   The trigger follows the trade page's own convention exactly: a gear in the
+   card's action slot, `.menu-popup` for the panel itself. That class is not
+   decorative - it is what keeps the popup unclipped and what stops the page's
+   right-click handlers stealing clicks inside it. */
+.pf-cardactions { display: inline-flex; align-items: center; gap: var(--sp-2); }
+
+
+/* `--bg-raised` is defined NOWHERE in this repo, so this always rendered its
+   fallback #21262d - a cold blue-grey belonging to no palette this app has had.
+   It also duplicated `.pf-ctl.is-on` above. Deleted rather than retokenised. */
+
+.perf-settingswrap { position: relative; flex: none; }
+/* The gear: the sheets' icon button, at the switch's height. */
+.perf-settingsbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 1px solid transparent; border-radius: var(--radius-md);
+  background: none; color: var(--muted); cursor: pointer;
+}
+.perf-settingsbtn:hover { color: var(--text); border-color: var(--pf-line); background: var(--bg-elevated); }
+/* Two classes on purpose: `.menu-popup` alone ties on specificity and the
+   right/left override would never apply. */
+.menu-popup.perf-settingsmenu { right: 0; left: auto; min-width: 210px; }
+
+/* The scan page's one control the design system has no equivalent for: an
+   address field with its buttons. Same 32px control height as `.pf-btn`. */
+
+/* ---------------------------------------------------------------------------
+   SCAN.
+
+   The address input inside the account card, and the idle state of everything
+   that is not it.
+   ------------------------------------------------------------------------ */
+.pf .scan-addr {
+  display: flex;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+/* The Withdraw sheet's address field (`.fx-input`). */
+.pf .scan-addr input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--pf-line);
+  border-radius: var(--radius-md);
+  background: var(--pf-well);
+  font-family: var(--font-num);
+  font-size: var(--fs-xs);
+}
+.pf .scan-addr input:focus,
+.pf .scan-addr input:focus-visible { border-color: var(--muted); outline: none; box-shadow: none; }
+
+/*
+ * IDLE: nothing scanned.
+ *
+ * Every panel except the account card is dimmed and softened - they are all
+ * showing em-dashes, and at full contrast that reads as "this wallet is empty"
+ * rather than "no address yet". The blur is deliberately small: the point is to
+ * push them back, not to hide them, so you can still see what the page will give
+ * you once you type something.
+ *
+ * `:not()` on the account panel rather than a class on the others, so a new
+ * panel is dimmed by default and nobody has to remember to opt it in.
+ */
+.scan--idle .dash-panel:not(:has(.pf-card--identity)) {
+  opacity: 0.38;
+  filter: blur(1.5px) saturate(0.7);
+  pointer-events: none;
+  transition: opacity var(--dur-med) var(--ease-out), filter var(--dur-med) var(--ease-out);
+}
+/*
+ * `:has()` is not universal. Without it the selector above never matches, every
+ * panel stays sharp, and the page is exactly what it was before - degraded, not
+ * broken, which is the right failure for a purely presentational cue.
+ */
+@supports not selector(:has(*)) {
+  .scan--idle .dash-panel { opacity: 1; filter: none; pointer-events: auto; }
+}
+
+
+/* ---------------------------------------------------------------------------
+   THE HEADLINE BOX (OverviewGroup) - the address menu's account box.
+
+   Label over a 20px figure in the numeral face, the whole head a toggle with the
+   menu's chevron (its EVM box), and the breakdown under a hairline as the menu's
+   holdings list: brand / chain icon, name, value right. Its border, fill and
+   12px radius are the menu box's own (account/account.css .acct-menu__acct).
+   ------------------------------------------------------------------------ */
+.pf-hero {
+  display: grid;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2) 14px;
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg) 45%, transparent);
+}
+.pf-hero__main {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pf-hero__main:hover:not(:disabled) { background: none; }
+.pf-hero__k {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+}
+.pf-hero__k .fx-chev { margin-left: 0; transition: transform var(--dur-fast) var(--ease-out); }
+.pf-hero.is-open .pf-hero__k .fx-chev { transform: rotate(180deg); }
+.pf-hero__main:hover .pf-hero__k { color: var(--text); }
+.pf-hero__v {
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: 24px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pf-hero__list {
+  display: grid;
+  margin-top: var(--sp-2);
+  padding-top: 6px;
+  border-top: 1px solid var(--pf-line);
+}
+/* A breakdown line here is a holding, not an indented footnote. */
+.pf-hero .pf-row--sub { padding-left: 0; min-height: var(--row-h); }
+.pf-hero .pf-row--sub .pf-row__label { color: var(--muted); gap: var(--sp-2); }
+.pf-hero .pf-row--sub .pf-row__value { color: var(--text); font-weight: 500; }
+.pf-hero .pf-row--sub .pf-row__value.pf-dim { color: var(--muted); }
+
+/* The rows under the box: the sheets' fee / you-receive lines (`.fx-kv`). */
+.pf-kvlist { display: flex; flex-direction: column; margin-top: var(--sp-2); }
+
+/* Brand and chain marks inside a row label. */
+.pf-row__label .fx-av,
+.pf-row__label .coin-ic { flex: none; }
+
+/* A figure still on its way: the sheets' spinner (funds.css .fx-spin). */
+.pf-spin {
+  display: inline-block;
+  flex: none;
+  vertical-align: -2px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: pf-spin 0.9s linear infinite;
+}
+@keyframes pf-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .pf-spin { animation: none; } }
+
+/* The copy page builds FORMS out of Group (fields, switches, a leader list) and
+   lays them out with its own gaps (copy/Copy.css). A well around a form is a
+   box around boxes, so there the rows' wrapper is not drawn at all and the
+   group is exactly the flat column it was. */
+.pf.copy .pf-group__body { display: contents; }
+
+.pf-well--legend { padding-top: 7px; padding-bottom: 3px; }
+.pf-well--legend > .pf-stack-bar { margin: 0 0 3px; }
+.pf-well--exposure { padding-top: var(--sp-2); }
+.pf-well--exposure > .pf-split { margin-top: 0; }
+
+/* The EVM holdings under Total equity - the wallet menu's holdings list: coin
+   with the chain as a small badge, symbol over chain name, value right. */
+.pf-evm { list-style: none; margin: 2px 0 0; padding: 0 0 0 22px; display: grid; gap: 4px; }
+.pf-evm > li { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--muted); }
+.pf-evm__ic { position: relative; display: inline-flex; flex: none; }
+.pf-evm__chain { position: absolute; right: -3px; bottom: -3px; border-radius: 50%; box-shadow: 0 0 0 1.5px var(--bg-panel); }
+.pf-evm__t { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; color: var(--text); }
+.pf-evm__t > small { color: var(--dim); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-evm__v { font-family: var(--font-num); color: var(--text); }
+
+/* ---------------------------------------------------------------------------
+   THE ACCOUNT CARD (Portfolio.tsx AccountCard) - light, after the owner's
+   reference: address, a large equity figure, where it sits, the money actions
+   (Deposit filled, Withdraw / Transfer outlined) and two soft tiles.
+   ------------------------------------------------------------------------ */
+.pf-card--account2 .pf-card__body { padding: 16px; }
+.pfa { display: flex; flex-direction: column; gap: 12px; }
+.pfa__id { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pfa__addr { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-family: var(--font-num); font-size: 16px; font-weight: 600; color: var(--text); }
+.pfa__copy { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted); cursor: pointer; }
+.pfa__copy:hover { color: var(--text); background: var(--tint); }
+.pfa__state { margin-left: auto; padding: 2px 8px; border-radius: 1000px; background: var(--tint); color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; }
+.pfa__state.is-on { color: var(--pos); background: color-mix(in srgb, var(--pos) 14%, transparent); }
+.pfa__equity {
+  display: flex; align-items: baseline; gap: 6px; width: 100%; height: auto; margin: -2px 0 0; padding: 0;
+  border: 0; background: none; color: var(--text); text-align: left; cursor: pointer;
+}
+.pfa__eqv { font-family: var(--font-num); font-size: 30px; font-weight: 600; line-height: 36px; letter-spacing: -0.3px; }
+.pfa__equ { color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
+.pfa__more { margin-left: auto; display: inline-flex; align-items: center; gap: 2px; color: var(--muted); font-size: var(--fs-xs); }
+.pfa__more svg { transform: rotate(-90deg); }
+.pfa__equity:hover .pfa__more { color: var(--text); }
+.pfa__parts { display: flex; flex-direction: column; gap: 2px; }
+.pfa__part {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 30px; padding: 0 2px;
+  border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-align: left;
+}
+.pfa__part--toggle { cursor: pointer; border-radius: 6px; }
+.pfa__part--toggle:hover { color: var(--text); }
+.pfa__part--toggle svg { transition: transform 200ms var(--ease-out); }
+.pfa__part--toggle.is-open .pfa__part-k svg { transform: rotate(180deg); }
+.pfa__part-ic { display: inline-grid; place-items: center; width: 20px; flex: none; }
+.pfa__part-k { flex: 1; display: inline-flex; align-items: center; gap: 4px; }
+.pfa__part-v { color: var(--text); font-family: var(--font-num); font-weight: 500; }
+.pfa__evm { padding: 2px 2px 6px 32px; }
+.pfa__actions { display: flex; flex-direction: column; gap: 8px; margin-top: 2px; }
+.pfa__actions button {
+  height: 36px; border-radius: 8px; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+  border: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 50%, transparent); color: var(--text);
+  transition: background-color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.pfa__actions button:hover:not(:disabled) { border-color: var(--muted); }
+.pfa__actions button:disabled { color: var(--disabled); cursor: default; }
+.pfa__actions .pfa__deposit {
+  border-color: transparent;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0.30) 0%, rgb(255 255 255 / 0.12) 100%);
+}
+.pfa__actions .pfa__deposit:hover { background: linear-gradient(90deg, rgb(255 255 255 / 0.38) 0%, rgb(255 255 255 / 0.16) 100%); }
+.pfa__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pfa__tile {
+  display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border-radius: 10px; background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.pfa__tile-k { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: var(--fs-xs); }
+.pfa__tile-v { color: var(--text); font-family: var(--font-num); font-size: 20px; font-weight: 600; line-height: 26px; }
+.pfa__info { display: inline-grid; place-items: center; color: var(--dim); cursor: help; }
+.pfa__info:hover { color: var(--muted); }
+
+/* The equity detail sheet. */
+.pfa-modal { max-width: 860px; }
+.pfa-d { display: flex; flex-direction: column; gap: 16px; }
+.pfa-d__head { display: flex; flex-direction: column; gap: 2px; }
+.pfa-d__k { color: var(--muted); font-size: var(--fs-xs); }
+.pfa-d__v { color: var(--text); font-family: var(--font-num); font-size: 30px; font-weight: 600; line-height: 36px; }
+.pfa-d__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.pfa-d__sec { padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, var(--text) 5%, transparent); min-width: 0; }
+.pfa-d__sec h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; }
+.pfa-d__sec h3 b { margin-left: auto; color: var(--text); font-family: var(--font-num); font-weight: 600; }
+.pfa-d__sec > p { margin: 0; font-size: var(--fs-xs); }
+.pfa-d__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.pfa-d__list li { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-xs); color: var(--text); }
+.pfa-d__coin { display: inline-flex; align-items: center; gap: 6px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pfa-d__amt { color: var(--muted); font-family: var(--font-num); white-space: nowrap; }
+.pfa-d__usd { margin-left: auto; min-width: 72px; text-align: right; font-family: var(--font-num); font-weight: 500; }
+.pfa-d__list--kv li > span:first-child { color: var(--muted); }
+.pfa-d__chart { height: 300px; }
+.pfa-d__chart > .pf-card { height: 100%; }
+.pfa-d__coin { flex: 1 1 auto; }
+.pfa-d__amt { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Daily PnL calendar (Portfolio.tsx CrossFadeCal): Monday-first month grid,
+   each day tinted by its share of the month's biggest move. */
+.pf-cal { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 4px 16px 8px; animation: mo-fade-in 220ms var(--ease-out) both; }
+.pf-cal__head { display: flex; align-items: center; gap: 6px; }
+.pf-cal__month { min-width: 128px; text-align: center; color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
+.pf-cal__nav { width: 24px; height: 24px; padding: 0; border: 1px solid var(--panel-line); border-radius: 6px; background: none; color: var(--muted); font-size: 16px; line-height: 20px; cursor: pointer; }
+.pf-cal__nav:hover:not(:disabled) { color: var(--text); border-color: var(--line); }
+.pf-cal__nav:disabled { color: var(--disabled); cursor: default; }
+.pf-cal__total { margin-left: auto; font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 600; }
+.pf-cal__dow, .pf-cal__grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+.pf-cal__dow span { color: var(--dim); font-size: var(--fs-micro); text-align: center; }
+.pf-cal__grid { flex: 1; grid-auto-rows: minmax(26px, 1fr); }
+.pf-cal__cell {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between;
+  padding: 3px 5px; border-radius: 6px; min-width: 0; overflow: hidden;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+}
+.pf-cal__cell.is-empty { background: none; }
+.pf-cal__cell.is-up { background: color-mix(in srgb, var(--pos) calc(var(--s, 0) * 55%), color-mix(in srgb, var(--text) 4%, transparent)); }
+.pf-cal__cell.is-down { background: color-mix(in srgb, var(--neg) calc(var(--s, 0) * 55%), color-mix(in srgb, var(--text) 4%, transparent)); }
+.pf-cal__d { color: var(--dim); font-size: 10px; line-height: 12px; }
+.pf-cal__v { color: var(--text); font-family: var(--font-num); font-size: 11px; font-weight: 600; line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

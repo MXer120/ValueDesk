@@ -1,0 +1,41 @@
+/*
+ * Loaded INSIDE the TradingView iframe, via the widget's `custom_css_url`.
+ *
+ * Plain CSS on purpose: no @import, no url(). It is handed to the library as a
+ * raw asset URL (`?url`), which Vite does not run through its CSS pipeline at
+ * build, so anything that needs resolving would break in production. Colours
+ * are NOT here either - they are set at runtime from styles.css's live tokens
+ * with setCSSCustomProperty (see theme.ts), so there is one source of truth.
+ * The app's @font-face rules are copied into the frame at runtime too
+ * (collectFontFaceCss), which is what makes the family below resolve.
+ */
+html,
+body {
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+/* The Mark / Last header toggles (TvChart.tsx). Same language as the
+   klinecharts toolbar's Mark/Oracle segment: muted text, pressed = the
+   --bg-control fill with white text. */
+.vs-tv-toggle {
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--tv-color-toolbar-button-text);
+  user-select: none;
+}
+.vs-tv-toggle:hover {
+  color: var(--tv-color-toolbar-button-text-hover);
+  background: var(--tv-color-toolbar-button-background-hover);
+}
+.vs-tv-toggle[aria-pressed="true"] {
+  color: var(--tv-color-toolbar-button-text-active);
+  background: var(--tv-color-toolbar-toggle-button-background-active);
+}
+.vs-tv-toggle[aria-disabled="true"] {
+  opacity: 0.4;
+  cursor: default;
+  background: none;
+}

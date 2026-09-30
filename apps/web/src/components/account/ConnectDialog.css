@@ -1,0 +1,337 @@
+/* ===========================================================================
+   THE CONNECT DIALOG - our own sheet in front of AppKit (ConnectDialog.tsx).
+
+   Laid out like the owner's reference (a "Connect" title, a round close button,
+   full-width rows, an "or" rule) and drawn in Valuetrade's vocabulary: the same
+   glass panel, hairline, radius and shadow as `.modal`, the same scrim as
+   `.modal-scrim`, the four radii and the two weights. No new colour, font or
+   radius; every value is a styles.css token.
+
+   It has EXIT animations, unlike the rest of the app's popups, because nothing
+   is unmounted until its animation has run: `data-state="closing"` plays it and
+   ConnectDialog acts on `animationend`. The reduced-motion backstop at the end
+   of styles.css shortens them to 0.01ms, which still fires `animationend`, so a
+   reduced-motion close cannot hang.
+
+   The scrim and the sheet animate SEPARATELY. The scrim is up for the whole
+   session - including all the time AppKit's modal is in front of it, when it is
+   the only backdrop on the page (AppKit's own overlay is switched off, see
+   account.css) - and animates only at the session's two ends. The sheet also
+   steps out of AppKit's way and back, on the same two animations as its close
+   and open, while the scrim underneath does not move.
+   ======================================================================== */
+
+/* --- scrim ----------------------------------------------------------------
+   `.modal-scrim`'s treatment (blur, not darken). z-index 1400: above every
+   popover (1200) so a menu left open cannot sit on top of it, below AppKit's
+   modal (1500) and the toast rail (2000). */
+.cdlg-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(10px) saturate(0.9);
+  backdrop-filter: blur(10px) saturate(0.9);
+  animation: cdlg-fade-in var(--dur-med) var(--ease-out) both;
+}
+.cdlg-scrim[data-state="closing"] {
+  animation: cdlg-fade-out var(--dur-fast) var(--ease-out) both;
+  /* A click during the fade must reach neither the sheet nor the page. */
+  pointer-events: none;
+}
+/* Leaving with AppKit's card rather than ours (a wallet connected while AppKit
+   was in front): on AppKit's clock - its fade is --apkt-durations-lg, 200ms -
+   so the backdrop and the card on it go as one. */
+.cdlg-scrim[data-state="closing"][data-card="away"] { animation-duration: var(--dur-med); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cdlg-scrim { background: var(--scrim-solid); }
+}
+
+/* --- the sheet ------------------------------------------------------------ */
+.cdlg {
+  position: relative;
+  width: 100%;
+  max-width: 520px;
+  max-height: calc(100dvh - 2 * var(--sp-4));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--sp-6);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-modal);
+  color: var(--text);
+  /* Fade plus a subtle scale, in on the app's spring and out on its plain
+     ease-out: arriving may overshoot a hair, leaving should just go. */
+  animation: cdlg-in var(--dur-med) var(--ease-spring) both;
+}
+.cdlg[data-state="closing"] {
+  animation: cdlg-out var(--dur-fast) var(--ease-out) both;
+  /* Leaving - for good, or for AppKit - it takes no more presses. */
+  pointer-events: none;
+}
+.cdlg:focus { outline: none; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .cdlg { background: var(--bg-elevated); }
+}
+
+@keyframes cdlg-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes cdlg-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes cdlg-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cdlg-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(4px) scale(0.97); }
+}
+@keyframes cdlg-sheet-in {
+  from { opacity: 0; transform: translateY(32px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes cdlg-sheet-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(32px); }
+}
+
+/* --- header --------------------------------------------------------------- */
+.cdlg-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-5);
+}
+/* The one 20px line on the sheet. 500, not bold: the app has two weights. */
+.cdlg-title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
+  font-weight: 500;
+  letter-spacing: var(--ls-read);
+  color: var(--text);
+}
+/* Round, filled, 40px - a real touch target. Hover is a colour change only,
+   like every other ghost control here. Pinned to the sheet's corner, 16px in,
+   as in the owner's reference - not centred on the title line 32px in, which
+   also made the header 40px tall and pushed every row down. */
+.cdlg-close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-control) 30%, transparent);
+  color: var(--muted);
+}
+.cdlg-close:hover { color: var(--text); }
+
+/* --- rows ----------------------------------------------------------------- */
+.cdlg-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* A row IS the click target, so it is one of the two places this app lets a
+   surface light up under the pointer (see "HOVER IS A COLOUR CHANGE" in
+   styles.css). The fills are the symbol-search modal's: a tint of
+   --bg-control at real opacity, which reads as "lit" on glass where a flat
+   --bg-elevated would all but vanish into it. */
+.cdlg-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-control) 30%, transparent);
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  font-weight: 500;
+  text-align: left;
+  overflow: hidden;
+}
+.cdlg-row:hover:not([aria-disabled="true"]),
+.cdlg-row[aria-busy="true"] {
+  background: color-mix(in srgb, var(--bg-control) 55%, transparent);
+}
+.cdlg-row__body {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2); /* icon to label, 8px as in the reference */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.cdlg-row__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cdlg-row__aside {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  margin-left: auto;
+}
+
+/* --- icons ---------------------------------------------------------------- */
+.cdlg-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+/* The icon that can never break: the wallet's initial on a control tile. */
+.cdlg-icon--mono {
+  display: inline-grid;
+  place-items: center;
+  background: var(--bg-control);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1;
+}
+.cdlg-icon--glyph { display: block; color: var(--text); }
+
+/* --- email: shown, not offered ---------------------------------------------
+   Not a control yet. It keeps its place in the list, refuses the pointer, and
+   on hover or keyboard focus its contents blur and darken while "Coming soon"
+   fades in over them. `:active` too, because a touch screen has no hover and a
+   tap should still get an answer. */
+.cdlg-row--soon { cursor: not-allowed; }
+.cdlg-row--soon .cdlg-row__body {
+  transition:
+    filter var(--dur-med) var(--ease-out),
+    opacity var(--dur-med) var(--ease-out);
+}
+.cdlg-row--soon:hover .cdlg-row__body,
+.cdlg-row--soon:focus-visible .cdlg-row__body,
+.cdlg-row--soon:active .cdlg-row__body {
+  filter: blur(3px) brightness(0.45);
+}
+.cdlg-soon {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 500;
+  letter-spacing: var(--ls-micro);
+  opacity: 0;
+  transition: opacity var(--dur-med) var(--ease-out);
+  pointer-events: none;
+}
+.cdlg-row--soon:hover .cdlg-soon,
+.cdlg-row--soon:focus-visible .cdlg-soon,
+.cdlg-row--soon:active .cdlg-soon {
+  opacity: 1;
+}
+
+/* --- the "or" rule -------------------------------------------------------- */
+.cdlg-or {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-5) 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.cdlg-or::before,
+.cdlg-or::after {
+  content: "";
+  flex: 1 1 0;
+  height: 1px;
+  background: var(--panel-line);
+}
+
+/* --- tags and waiting ------------------------------------------------------ */
+/* "Installed": the extension announced itself. --pos, because that is what
+   "this is ready" means everywhere else in the app (the footer's status dot). */
+.cdlg-tag {
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--pos) 16%, transparent);
+  color: var(--pos);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  font-weight: 500;
+  letter-spacing: var(--ls-micro);
+}
+.cdlg-wait {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: 400;
+}
+.cdlg-spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid color-mix(in srgb, var(--muted) 35%, transparent);
+  border-top-color: var(--accent);
+  animation: cdlg-spin 0.8s linear infinite;
+}
+@keyframes cdlg-spin { to { transform: rotate(360deg); } }
+
+/* Why the last attempt did not connect. Muted, not red: a refused prompt is
+   the user's decision, not an error. */
+.cdlg-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+/* Empty, it takes no room - but it stays in the tree (not display:none), so a
+   screen reader is already watching the live region when a message lands. */
+.cdlg-note:not(:empty) { margin-top: var(--sp-3); }
+
+/* --- phones: a bottom sheet ------------------------------------------------
+   Anchored to the bottom edge, full width, sliding up rather than scaling.
+   The safe-area insets keep the last row clear of the home indicator and the
+   notch in landscape (index.html sets viewport-fit=cover). */
+@media (max-width: 640px) {
+  .cdlg-scrim {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .cdlg {
+    max-width: none;
+    max-height: calc(100dvh - var(--sp-6) - env(safe-area-inset-top, 0px));
+    padding:
+      var(--sp-5)
+      calc(var(--sp-4) + env(safe-area-inset-right, 0px))
+      calc(var(--sp-4) + env(safe-area-inset-bottom, 0px))
+      calc(var(--sp-4) + env(safe-area-inset-left, 0px));
+    border-width: 1px 0 0;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+    animation-name: cdlg-sheet-in;
+  }
+  .cdlg[data-state="closing"] { animation-name: cdlg-sheet-out; }
+  .cdlg-close { right: calc(var(--sp-4) + env(safe-area-inset-right, 0px)); }
+  .cdlg-head { margin-bottom: var(--sp-4); }
+  .cdlg-or { margin: var(--sp-4) 0; }
+}

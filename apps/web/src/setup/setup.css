@@ -1,0 +1,229 @@
+/* Wider than the default sheet: checklist on the left, a quiet graphic on the right. */
+.modal-stack.modal-lg.vs-setup { max-width: 920px; }
+.vs-setup__foot { display: flex; align-items: center; gap: var(--sp-2); }
+button.vs-setup__skip {
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+}
+.vs-setup .modal-body { padding-top: 0; }
+.vs-setup__split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(180px, 0.85fr);
+  gap: var(--sp-5);
+  align-items: stretch;
+}
+.vs-setup__list {
+  list-style: none;
+  margin: 0 0 var(--sp-4);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.vs-setup__list li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  color: var(--muted);
+  font-size: var(--fs-base);
+}
+.vs-setup__list li small {
+  display: block;
+  margin-top: 2px;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+.vs-setup__list i {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--line);
+  box-sizing: border-box;
+}
+.vs-setup__list li.is-done { color: var(--text); }
+.vs-setup__list li.is-done i {
+  position: relative;
+  border-color: var(--pos);
+  background: var(--pos);
+}
+.vs-setup__list li.is-done i::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 6px;
+  height: 3px;
+  border-left: 1.5px solid var(--bg);
+  border-bottom: 1.5px solid var(--bg);
+  transform: rotate(-45deg);
+}
+.vs-setup__list li.is-now { color: var(--text); }
+.vs-setup__list li.is-now i {
+  border-color: var(--pos);
+  background:
+    radial-gradient(circle at 50% 50%, var(--pos) 0 3px, transparent 4px);
+  animation: vs-setup-pulse 1.6s ease-in-out infinite;
+}
+.vs-setup__list li.is-now span {
+  background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pos) 35%, transparent), transparent);
+  background-size: 40% 2px;
+  background-repeat: no-repeat;
+  background-position: 0 100%;
+  animation: vs-setup-bar 1.8s ease-in-out infinite;
+}
+.vs-setup__art {
+  position: relative;
+  min-height: 280px;
+  border-radius: 16px;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 70% at 80% 0%, color-mix(in srgb, var(--pos) 14%, transparent), transparent 58%),
+    var(--bg);
+  border: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+}
+.vs-setup__glow {
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -20px;
+  bottom: -30px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--pos) 22%, transparent), transparent 68%);
+  animation: vs-setup-drift 9s ease-in-out infinite;
+}
+.vs-setup__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--text) 5%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--text) 5%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(180deg, transparent, #000 18%, #000 78%, transparent);
+  opacity: 0.55;
+}
+.vs-setup__chart { position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 62%; }
+.vs-setup__line {
+  fill: none;
+  stroke: var(--pos);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  animation: vs-setup-draw 2.8s ease-out forwards;
+}
+.vs-setup__fill { fill: color-mix(in srgb, var(--pos) 16%, transparent); opacity: 0; animation: vs-setup-fade 1.2s ease-out 1.2s forwards; }
+.vs-setup__float {
+  position: absolute;
+  left: 16px;
+  top: 18px;
+  display: flex;
+  gap: 8px;
+  animation: vs-setup-drift 7s ease-in-out infinite;
+}
+.vs-setup__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.vs-setup__chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--pos);
+}
+.vs-setup__chip--dim i { background: var(--dim); }
+@keyframes vs-setup-pulse { 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--pos) 25%, transparent); } }
+@keyframes vs-setup-bar { 0% { background-position: -40% 100%; } 100% { background-position: 140% 100%; } }
+@keyframes vs-setup-drift { 50% { transform: translate3d(6%, -4%, 0); } }
+@keyframes vs-setup-draw { to { stroke-dashoffset: 0; } }
+@keyframes vs-setup-fade { to { opacity: 1; } }
+@media (max-width: 720px) {
+  .vs-setup__split { grid-template-columns: 1fr; }
+  .vs-setup__art { min-height: 140px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vs-setup__list li.is-now i,
+  .vs-setup__list li.is-now span,
+  .vs-setup__glow,
+  .vs-setup__float,
+  .vs-setup__line,
+  .vs-setup__fill { animation: none; }
+  .vs-setup__line { stroke-dashoffset: 0; }
+  .vs-setup__fill { opacity: 1; }
+}
+
+/* Wizard bits that the shared modal does not already cover. Tokens only. */
+
+.vs-setup .vs-setup__note {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.vs-setup .vs-setup__progress {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+.vs-setup .vs-setup__kicker {
+  margin: 0 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.vs-setup .vs-setup__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.vs-setup .vs-setup__choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  text-align: left;
+}
+.vs-setup .vs-setup__choice small {
+  color: var(--muted);
+  font-weight: 400;
+}
+.vs-setup .vs-setup__choice.active small { color: var(--text); }
+.vs-setup .vs-setup__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.vs-setup .vs-setup__speed { margin-top: var(--sp-1); }
+.vs-setup .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/*
+ * Potato mode. Near-zero durations, not `animation: none`, so animationend
+ * still fires (the same reason as the prefers-reduced-motion backstop in
+ * styles.css). Scoped to no-preference so that backstop keeps owning users
+ * who already asked for reduced motion — this rule does not compete with it.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  html.is-potato *,
+  html.is-potato *::before,
+  html.is-potato *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

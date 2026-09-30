@@ -1,0 +1,6 @@
+// Type-checks the live E2E runner, which sits outside apps/web's own "include".
+// From apps/web:  npx tsc --noEmit -p e2e/live
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./**/*.ts", "../../src/vite-env.d.ts"]
+}

@@ -1,0 +1,231 @@
+/**
+ * Explore.
+ *
+ * THIS SHEET ADDS NO DESIGN. The pieces are Valuetrade's: the portfolio cards
+ * and stat strip (Portfolio.css, under `.pf`), the account band's table
+ * (Account.css `.acct-table`), the trade tape (Market.css `.mkt-tapetable`),
+ * the exposure bar (`.pf-split`), `.badge` and `.pf-chip`. What is here only
+ * fits them together - column widths, alignment, which body scrolls - and every
+ * value is a token from styles.css. No colour, size, weight or radius is new.
+ *
+ * Every selector is under `.vs-explore`, the class the page hangs on the
+ * dashboard root, so nothing here can reach another page.
+ */
+
+/* --- cards: the head stays, the body scrolls ------------------------------ */
+
+/* The portfolio's panels scroll as a whole, head included. A ranking read down
+   past its tenth row should keep its title and column meaning in view, so here
+   the card body is the scroller and the 40px head stays put. The fade at the
+   bottom edge is the dashboard's own (dashboard.css, "A SEVERED ROW IS NOT A
+   SCROLL CUE"), moved to the element that now scrolls. */
+.vs-explore .vs-card > .pf-card__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* The overview is a head plus a stat strip and nothing else: the strip IS the
+   body, edge to edge, so the body adds no inset and no fade. */
+.vs-explore .vs-card--flush > .pf-card__body {
+  padding: 0;
+  overflow: hidden;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+/* A head carries a title and a caption. The caption gives way first: it
+   truncates (its full text is its title) while the title keeps its width. */
+.vs-explore .vs-card > .pf-card__head > .pf-h { flex: none; }
+.vs-explore .vs-card > .pf-card__head > .pf-card__action { flex: 0 1 auto; min-width: 0; }
+.vs-explore .vs-sub {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A notice replaces a table, so it sits where the first row would. */
+.vs-explore .vs-notice { margin: var(--sp-2) 0 0; }
+.vs-explore .vs-stale { margin-top: var(--sp-2); }
+
+/* --- the KPI strip --------------------------------------------------------- */
+
+/* The portfolio's three-cell strip, at four cells, filling the body. It is not
+   under a chart here, so it drops the negative margins and the top rule that
+   join it to one. Two classes deep so it beats Portfolio.css at every width,
+   including that sheet's own single-column rule below 900px. */
+.vs-explore .pf-statstrip.vs-kpis {
+  flex: 1 1 auto;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border-top: 0;
+}
+.vs-explore .vs-kpis .pf-stat + .pf-stat {
+  border-left: 1px solid var(--pf-line);
+  border-top: 0;
+}
+
+.vs-explore .vs-venues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: 2px;
+}
+
+/* Two by two once the panel is narrower than four readable cells. A container
+   query, not a media query: the panel's width is the user's to drag. */
+@container panel (max-width: 560px) {
+  .vs-explore .pf-statstrip.vs-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vs-explore .vs-kpis .pf-stat:nth-child(3) { border-left: 0; }
+  .vs-explore .vs-kpis .pf-stat:nth-child(n + 3) { border-top: 1px solid var(--pf-line); }
+}
+
+/* --- ranking and positioning tables --------------------------------------- */
+
+/* `.acct-table` measures its outer columns from `--acct-inset`. The card body
+   already insets 12px, the same as the card's title, so the table adds none
+   and its first column lines up under the title. */
+.vs-explore .vs-acct { --acct-inset: 0; }
+
+.vs-explore .vs-trader,
+.vs-explore .vs-mkt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  vertical-align: middle;
+}
+/* A market name gives way before its venue badge does. */
+.vs-explore .vs-mkt__sym {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.vs-explore .vs-trader code {
+  flex: none;
+  font-size: var(--fs-xs);
+  word-break: normal;
+  color: var(--text);
+}
+/* A display name is secondary to the address it belongs to: muted, 400, and cut
+   short rather than allowed to push the figures off the row. */
+.vs-explore .vs-trader__label {
+  min-width: 0;
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+  color: var(--muted);
+}
+.vs-explore .badge { flex: none; }
+/* "you" takes the accent, the colour this app gives "this row is yours" - the
+   same treatment as the leaderboard's own badge. */
+.vs-explore .vs-you { color: var(--accent); border-color: var(--accent); }
+.vs-explore .acct-table tr.vs-me td { background: var(--bg-elevated); }
+
+/* Narrow panel: the display name goes to the address's title, and the third
+   figure drops, so a phone reads trader, ranked figure, context, actions
+   without scrolling sideways. The address and the ranked figure never drop. */
+@container panel (max-width: 440px) {
+  .vs-explore .vs-trader__label { display: none; }
+  .vs-explore .vs-table .vs-col-3 { display: none; }
+  .vs-explore .vs-acct .acct-table th,
+  .vs-explore .vs-acct .acct-table td { padding-left: var(--sp-1); padding-right: var(--sp-1); }
+  .vs-explore .vs-acct .acct-table th:first-child,
+  .vs-explore .vs-acct .acct-table td:first-child { padding-left: 0; }
+  .vs-explore .vs-acct .acct-table th:last-child,
+  .vs-explore .vs-acct .acct-table td:last-child { padding-right: 0; }
+  .vs-explore .vs-acct .acct-table td.acct-actions > * + * { margin-left: var(--sp-2); }
+}
+
+/* The exposure card's long/short bar, inside a 20px row. */
+.vs-explore .vs-pos th.vs-pos__bar,
+.vs-explore .vs-pos td.vs-pos__bar {
+  width: 30%;
+  min-width: 64px;
+  padding-inline: var(--sp-2);
+}
+.vs-explore .vs-pos .pf-split { width: 100%; }
+
+/* Rows that open something. The row is the target, so it keeps the table's
+   hover tint (Account.css) and gains a pointer and a keyboard focus ring. */
+.vs-explore tr.vs-click { cursor: pointer; }
+.vs-explore tr.vs-click:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* --- the large-trade tape --------------------------------------------------- */
+
+/* Market.css declares the tape's local tokens on its `.mkt-tape` wrapper, which
+   this table does not sit in. Same names, same fallbacks, so the rows resolve
+   to the trade tape's own line box and hover timing. */
+.vs-explore .vs-tape {
+  --mkt-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --mkt-hover: 150ms;
+  --mkt-lh-micro: var(--lh-micro, 12px);
+  --mkt-lh-xs: var(--lh-xs, 16.5px);
+}
+
+/* The trade page's tape, with a Market column in front because these prints
+   span markets. Cells carry a 4px gutter here: the trade tape's cells have none
+   because it only ever holds four short figures, and a symbol running straight
+   into a price is one string, not two. */
+.vs-explore .mkt-tapetable.vs-tape th,
+.vs-explore .mkt-tapetable.vs-tape td { padding: 0 var(--sp-1); }
+.vs-explore .mkt-tapetable.vs-tape th:first-child,
+.vs-explore .mkt-tapetable.vs-tape td:first-child { padding-left: 0; }
+.vs-explore .mkt-tapetable.vs-tape th:last-child,
+.vs-explore .mkt-tapetable.vs-tape td:last-child { padding-right: 0; }
+
+/* Widths sized to the longest ordinary content at 12px: a symbol plus its
+   venue badge, a six-figure price, "Size (USD)", a short address in the mono
+   face (the widest cell), and a fixed 8-character clock. */
+.vs-explore .vs-tape__mkt { width: 24%; }
+.vs-explore .vs-tape__px { width: 18%; }
+.vs-explore .vs-tape__sz { width: 17%; }
+.vs-explore .vs-tape__who { width: 26%; }
+.vs-explore .vs-tape__time { width: 15%; }
+@container panel (max-width: 440px) {
+  .vs-explore .vs-tape__mkt { width: 18%; }
+  .vs-explore .vs-tape__px { width: 17%; }
+  .vs-explore .vs-tape__sz { width: 18%; }
+  .vs-explore .vs-tape__who { width: 30%; }
+  .vs-explore .vs-tape__time { width: 17%; }
+  .vs-explore .mkt-tapetable.vs-tape th,
+  .vs-explore .mkt-tapetable.vs-tape td { padding: 0 3px; }
+  .vs-explore .mkt-tapetable.vs-tape th:first-child,
+  .vs-explore .mkt-tapetable.vs-tape td:first-child { padding-left: 0; }
+  .vs-explore .mkt-tapetable.vs-tape th:last-child,
+  .vs-explore .mkt-tapetable.vs-tape td:last-child { padding-right: 0; }
+}
+
+/* Market and price read left as a pair, like the trade tape's price; the
+   figures after them right-align so their digits stack. */
+.vs-explore .mkt-tapetable.vs-tape th:nth-child(-n + 2),
+.vs-explore .mkt-tapetable.vs-tape td:nth-child(-n + 2) { text-align: left; }
+.vs-explore .mkt-tapetable.vs-tape th:nth-child(n + 3),
+.vs-explore .mkt-tapetable.vs-tape td:nth-child(n + 3) { text-align: right; }
+
+/* The symbol is a word: text face, not the numeral face the tape's cells take. */
+.vs-explore .mkt-tapetable.vs-tape tbody td.vs-tape-mkt { font-family: var(--font-text); }
+.vs-explore .vs-tape-mkt { overflow: hidden; }
+.vs-explore .vs-tape-who code { font-size: var(--fs-xs); word-break: normal; color: var(--text); }
+/* The trade tape sets its clock on `.mkt-tape-t`, a span that fades out on hover
+   for its mute control. This tape has no mute control, so the clock is the cell
+   itself and takes the numeral face here instead. */
+.vs-explore .mkt-tapetable.vs-tape td.mkt-tape-time { font-family: var(--font-num); }
+
+/* Overview | Cohorts: the dashboards' own tab strip, above whichever view is on. */
+.vs-explore-page { display: flex; flex-direction: column; gap: 4px; min-height: 100%; }
+.ex-views .dash-tabs__bar { border-radius: var(--radius-md, 8px); }
+.ex-views__tabs { display: flex; align-items: stretch; }
+.ex-cohorts { padding: 0; }

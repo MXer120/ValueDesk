@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Scan · Valuetrade</title>
+  <!--
+    THE SCAN PAGE MOVED INTO THE APP.
+
+    It used to be 4,142 lines of standalone vanilla JS copied from an unrelated
+    dashboard, sharing no code, no tokens and no components with the app - so it
+    rendered the same facts in a different vocabulary and the two drifted apart
+    by construction. It is now the portfolio page pointed at another address.
+
+    This file survives ONLY to forward links anyone already saved, including the
+    `?address=` and `?wallet=` parameters the old page accepted.
+  -->
+  <script>
+    (function () {
+      var q = new URLSearchParams(location.search);
+      var a = q.get('address') || q.get('wallet') || '';
+      location.replace('/scan' + (a ? '?address=' + encodeURIComponent(a) : ''));
+    })();
+  </script>
+  <meta http-equiv="refresh" content="0; url=/scan" />
+</head>
+<body>
+  <p>Moved to <a href="/scan">/scan</a>.</p>
+</body>
+</html>

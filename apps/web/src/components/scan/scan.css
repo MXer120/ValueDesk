@@ -1,0 +1,369 @@
+/**
+ * The Scan header, and nothing else.
+ *
+ * Everything the Hyperliquid cards draw is Portfolio.css and Account.css
+ * unchanged. The one new element on the page is the strip above the grid that
+ * carries the venue switch and the Copy trader button, and it is built from
+ * existing parts: a `.dash-panel` surface (fill, panel hairline, 4px radius)
+ * around a `.dash-tabs__bar` band with `.dash-tab` labels. Only the geometry
+ * that makes those parts sit outside a grid panel is stated here.
+ */
+
+/* The page: the header on top, the dashboard taking the rest. `.dash` declares
+   `height: 100%`, which beside a header would overflow by the header's height,
+   so here it flexes instead. Below 994px the app scrolls and both are auto. */
+.scanv {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.scanv > .dash {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+}
+
+/* A panel's surface: the same fill, hairline and radius as `.dash-panel`, and
+   the grid's own 4px gutter under it. */
+.scan-head {
+  flex: none;
+  margin-bottom: var(--sp-1);
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* The band. 40px inside the 1px frame, so the frame's bottom edge is the rule
+   the accent stub rests on - the bar's own rule would be a second line 1px
+   above it. Not a drag region: there is no panel here to drag. */
+.scan-head .scan-head__bar {
+  height: 40px;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) 0 var(--sp-2);
+  border-bottom: 0;
+  cursor: default;
+  align-items: stretch;
+}
+.scan-head .scan-head__bar:active { cursor: default; }
+
+.scan-head__tabs {
+  display: flex;
+  align-items: stretch;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+/* "Has activity here": a 6px --pos dot after the label. Colour is not the only
+   carrier - the tab's title and the note beside the tabs say it in words. */
+.scan-head__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-left: 6px;
+  border-radius: var(--radius-full);
+  background: var(--pos);
+  vertical-align: 2px;
+}
+
+.scan-head__note {
+  align-self: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+.scan-head .dash-tabs__actions {
+  padding-left: var(--sp-2);
+  align-items: stretch;
+}
+.scan-head .scan-head__copy { align-self: center; }
+
+/* An inactive venue stays clickable. --disabled is the gray; --muted is the
+   word, one step up so the label is still readable on the selected tab. */
+.scan-head .dash-tab.is-inactive:not(.is-active) { color: var(--disabled); }
+.scan-head .dash-tab.is-inactive:not(.is-active):hover { color: var(--muted); }
+.scan-head__idle {
+  margin-left: 6px;
+  color: var(--disabled);
+  font-size: var(--fs-micro);
+}
+.scan-head__tab { display: inline-flex; align-items: center; gap: 6px; }
+.scan-head__tab .scan-head__idle { margin-left: 0; }
+.scan-head__logo { display: inline-flex; flex: none; transition: filter var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out); }
+.scan-head .dash-tab.is-inactive .scan-head__logo { filter: grayscale(1); opacity: 0.55; }
+.scan-head .dash-tab.is-inactive:hover .scan-head__logo { opacity: 0.8; }
+
+.scan-find {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+}
+.scan-find__hero { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.scan-find__hero h1 { margin: 0; font-size: var(--fs-xl); font-weight: 500; letter-spacing: -0.02em; }
+/* Every supported venue, overlapping like a hand of cards. */
+.scan-find__marks { display: flex; align-items: center; justify-content: center; padding: 4px 0; }
+.scan-find__mark {
+  display: inline-flex;
+  border-radius: 50%;
+  box-shadow: 0 0 0 3px var(--bg);
+  background: var(--bg);
+}
+.scan-find__mark + .scan-find__mark { margin-left: -10px; }
+.scan-find__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: min(560px, 100%);
+  padding: 4px 4px 4px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+.scan-find__row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-base);
+}
+.scan-find__row input:focus { outline: none; }
+button.scan-find__go {
+  flex-direction: row;
+  min-height: 0;
+  padding: 8px 16px;
+  background: var(--text);
+  color: var(--bg);
+  border-color: transparent;
+  border-radius: 10px;
+  font-weight: 500;
+}
+button.scan-find__go:disabled { opacity: 0.45; }
+/* "Me": the connected wallet, one quiet click left of Search. */
+button.scan-find__me {
+  flex: none;
+  min-height: 0;
+  padding: 7px 12px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+button.scan-find__me:hover { color: var(--text); border-color: var(--line-strong); }
+/* The venues fold away while the field is empty, and unfold unchanged. */
+.scan-find__fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  width: min(1120px, 100%);
+  opacity: 1;
+  transform: none;
+  transition: grid-template-rows 260ms var(--ease-out), opacity 200ms var(--ease-out), transform 260ms var(--ease-out);
+}
+.scan-find__fold > .scan-find__cards { min-height: 0; overflow: hidden; width: 100%; padding: 2px; }
+.scan-find__fold.is-folded { grid-template-rows: 0fr; opacity: 0; transform: translateY(-6px); pointer-events: none; }
+@media (prefers-reduced-motion: reduce) { .scan-find__fold { transition: none; } }
+/* The overview: every venue as a card in a grid, active first, quiet ones last. */
+.scan-find__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  width: min(1120px, 100%);
+}
+button.scan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 14px 14px 12px;
+  text-align: left;
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 16px;
+  color: var(--text);
+}
+button.scan-card.is-idle {
+  color: var(--disabled);
+  background: color-mix(in srgb, var(--bg) 72%, var(--bg-panel));
+  opacity: 0.62;
+}
+/* Quiet venues: the logo in grayscale, the rest in the gray it already is. */
+button.scan-card.is-idle .scan-card__mark { filter: grayscale(1); opacity: 0.7; }
+button.scan-card.is-idle .scan-card__spark { filter: grayscale(1); opacity: 0.6; }
+button.scan-card.is-none { opacity: 0.5; }
+.scan-card__mark { display: inline-flex; flex: none; }
+.scan-card__ago.is-idle { color: var(--disabled); }
+button.scan-card.is-pending { cursor: progress; }
+button.scan-card.is-pending .scan-card__chart { background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 8%, transparent), transparent); background-size: 200% 100%; animation: scan-wait 1.1s linear infinite; }
+@keyframes scan-wait { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.scan-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.scan-card__name { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.scan-card__name b {
+  position: relative;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.scan-card__glow {
+  position: absolute;
+  inset: -2px 0;
+  filter: blur(10px);
+  opacity: 0.55;
+  z-index: 0;
+  pointer-events: none;
+}
+.scan-card__name b { isolation: isolate; }
+.scan-card__mono {
+  width: 28px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--panel-line);
+  font-size: 12px;
+}
+.scan-card__logo { display: block; border-radius: 50%; object-fit: cover; }
+.scan-card__ago {
+  flex: none;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.scan-card__chart { position: relative; height: 92px; }
+.scan-card__spark { position: absolute; inset: 8px 0 0; width: 100%; height: calc(100% - 8px); }
+.scan-card__empty { position: absolute; inset: 28px 0 8px; border-bottom: 1px solid var(--panel-line); }
+.scan-card__pnl {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+}
+button.scan-card:hover .scan-card__pnl,
+button.scan-card:focus-visible .scan-card__pnl { opacity: 1; }
+.scan-card__eq { display: flex; flex-direction: column; gap: 2px; color: var(--muted); font-size: var(--fs-xs); }
+.scan-card__eq span:last-child { color: var(--text); font-size: var(--fs-xl); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.scan-find__err { margin: 0; color: var(--neg); font-size: var(--fs-xs); }
+.scan-over {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  max-width: 980px;
+}
+button.scan-over__back {
+  align-self: flex-start;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+/* The pre-navigation chooser. Same panel surface as the header. The chart is
+   EquityCurve, just shorter than the card it was drawn for. */
+.scan-choose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+}
+.scan-choose__net {
+  display: grid;
+  grid-template-columns: minmax(108px, 160px) minmax(88px, 140px) minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-2);
+  border: 1px solid color-mix(in srgb, var(--text) 10%, var(--panel-line));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+.scan-choose__netnote {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.scan-choose__lead,
+.scan-choose__status {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.scanv > .scan-choose__status { margin: 0 var(--sp-1) var(--sp-2); }
+.scan-choose__row {
+  display: grid;
+  grid-template-columns: minmax(108px, 160px) minmax(88px, 120px) minmax(140px, 1fr) minmax(96px, 120px);
+  gap: var(--sp-3);
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: var(--sp-2);
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.scan-choose__row.is-inactive { color: var(--disabled); }
+.scan-choose__row.is-inactive:hover { color: var(--muted); }
+.scan-choose__row.is-on { border-color: var(--accent); }
+.scan-choose__name { font-size: var(--fs-base); }
+.scan-choose__tag,
+.scan-choose__meta {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+}
+.scan-choose__eq,
+.scan-choose__when {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.scan-choose__dash { color: var(--muted); }
+.scan-choose__chart .pf-chart { height: 96px; }
+.symbolsearch-table tr.ss-addr--choose { cursor: default; }
+.symbolsearch-table tr.ss-addr--choose td { flex-wrap: wrap; align-items: stretch; }
+.symbolsearch-table tr.ss-addr--choose .scan-choose {
+  flex: 1 1 100%;
+  margin: var(--sp-1) 0 0;
+}
+
+@media (max-width: 720px) {
+  .scan-choose__row,
+  .scan-choose__net { grid-template-columns: 1fr 1fr; }
+  .scan-choose__chart,
+  .scan-choose__netnote { grid-column: 1 / -1; }
+}
+
+/* A phone has room for the two tabs and the button, not for the sentence. The
+   dots still say it, and the tab titles say it in words. */
+@media (max-width: 640px) {
+  .scan-head__note { display: none; }
+}

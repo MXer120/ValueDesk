@@ -1,0 +1,1023 @@
+/* Chart-local styles. Owned by components/Chart.tsx.
+ *
+ * Everything here is namespaced `.kc-` on purpose. The global sheet is injected
+ * LAST (main.tsx imports App before styles.css), so a rule here that ties a
+ * global selector on specificity LOSES. Two consequences run through this file:
+ *
+ *   1. The chart panel no longer borrows `.chart-toolbar`, `.segmented` or
+ *      `.chartlegend`. It owns its chrome outright, which is what lets the
+ *      toolbar be 48px of transparent strip instead of a row of bordered boxes.
+ *   2. Where a global class IS still needed for layout (`.panel` for the
+ *      dashboard's flex sizing, `.chartholder-wrap` for the panel-fill rule in
+ *      dashboard.css) the override carries a second class so it out-specifies
+ *      the global rule rather than racing it.
+ */
+
+/* --- panel ---------------------------------------------------------------- */
+
+/* A FILLED CARD, and this is the correction that matters most in this file.
+ *
+ * An earlier revision made every panel transparent on the theory that the
+ * reference separates panels with gutters alone. Sampling the reference's
+ * rendered pixels says otherwise: every panel body - chart canvas included -
+ * is #1b1a14 (--bg-panel) and only the 4px gutters between them are #141310
+ * (--bg). The tone step IS the separation; a transparent chart on a #141310
+ * page has no separation at all and reads washed out next to the cards around
+ * it. So: filled, 4px radius, and still NO BORDER of any kind - a hairline
+ * around a plot is what makes it read as an embedded widget.
+ *
+ * No `overflow: hidden` here, deliberately. It would clip the toolbar's own
+ * dropdowns back inside the panel, which is the exact bug responsive.css
+ * already works around for `.dash-panel`. The radius has nothing to clip
+ * anyway: the canvas paints the same --bg-panel as the card. */
+/* --kc-ink is the chart's own NEUTRAL grey, and it is scoped to this panel on
+ * purpose: it is the one place in the app whose text is not the warm --muted.
+ * Measured, the reference's legend ink is #dbdbdb — R=G=B, no tint — while the
+ * same reference paints the tab bar and the order-book headers ten pixels away
+ * in the warm #c6b6ba. It drops the tint once you are inside the plot, and this
+ * is the DOM half of that; theme.ts carries the canvas half (T.canvasText /
+ * canvasMuted / canvasDim), sampled from the same screenshot. The two move
+ * together — if one is retuned, retune both. */
+.panel.kc-panel {
+  --kc-ink: #dbdbdb;
+  background: var(--bg-panel);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0;
+}
+
+/* Fullscreen paints its own black backdrop behind the element, so the surface
+   has to be stated here or the chart sits on pure #000. */
+.panel.kc-panel:fullscreen {
+  background: var(--bg-panel);
+  border-radius: 0;
+  padding: var(--sp-1);
+}
+
+/* Chart, depth and market info share this slot. The chart stage parks inside
+   it (see .kc-stage.is-parked) instead of unmounting, so its canvas keeps a
+   real size while another view is on screen. */
+.panel.kc-panel > .kc-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- toolbar -------------------------------------------------------------- */
+
+/* 48px, measured. `min-height` rather than `height` because the strip is inside
+   a resizable dashboard panel: at 1920 it is a single 48px row, and on a narrow
+   panel it wraps to two rather than clipping controls out of reach. No overflow
+   is set - this element contains absolutely-positioned menus, and any overflow
+   value here would clip them. */
+/* THE ROW IS NOT SYMMETRIC, and that is measured rather than an oversight.
+ *
+ * Left is 10px because every control in the strip carries 6px of its own
+ * horizontal padding, so 10 + 6 lands the first GLYPH 16px inside the card edge
+ * — the inset the whole design uses, and the reference's "1m" starts at exactly
+ * that x.
+ *
+ * Right is 16px, which lands the fullscreen icon's INK 22px inside the card,
+ * and 22 is what the reference measures. It is not that the reference is
+ * sloppy: the last thing on the left is a text label whose glyphs run to the
+ * edge of their box, while the last thing on the right is a 20px icon in a 28px
+ * button — 4px of button slack plus ~2px of clear space inside the glyph's own
+ * grid. Padding both sides to the same number puts the ink at 16 on the left
+ * and 10 on the right, which is what ours was doing and why the strip read as
+ * pushed against its right edge. Ink is what the eye measures, so ink is what
+ * is matched: 16 both sides on the left, 22 on the right. */
+.kc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-height: 48px;
+  padding: 0 16px 0 10px;
+  flex: none;
+}
+
+/* Wraps rather than overflows. The chart is a resizable dashboard panel and the
+   panel body clips, so a nowrap row would silently put the last control (the
+   price scale) outside the panel where it cannot be clicked - measured at a
+   1280px window, where the chart column is 535px wide. */
+/* 2px between controls, not 4. Measured off the reference: its timeframe labels
+   sit on a 32-37px pitch, and at 4px ours ran 34-38 — the whole strip was a
+   couple of pixels loose per control, which compounds across thirteen of them
+   into the difference between one row and two on a 1440px screen. */
+.kc-tb-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+/* Absorbs the slack between the two groups and carries the transient hints, so
+   a hint appearing can never push the right-hand group onto a second row. */
+.kc-tb-mid {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.kc-tb-right { margin-left: auto; }
+
+/* One control language for the whole strip: transparent, no border, state
+   carried by COLOUR alone. Nothing here changes weight or size on hover, so
+   the row never reflows under the pointer.
+ *
+ * IDLE IS --disabled (#544a4c), NOT --muted. This is the single largest visual
+ * correction in the strip and it is a measurement, not a taste call: sampled
+ * off the reference, EVERY inactive control in its toolbar - the unselected
+ * timeframes, the overflow chevron, the series-style glyph, the fx mark, the
+ * word Indicators, the three action icons, the inactive view tabs and the
+ * fullscreen icon - paints at #544a4c. Ours painted them at #c6b6ba, roughly
+ * twice the luminance, which made a recessive strip read as a busy one and
+ * left the selected item with nothing to stand out against. The whole point of
+ * the toolbar is that only the ACTIVE items (#fffeef) and an armed tool
+ * (amber) carry any brightness; everything else is a low-contrast affordance
+ * that comes up to --text under the pointer.
+ *
+ * 14px, not 12: measured, the reference's toolbar text renders a 10px ink
+ * height against our 9px at 12px, and its right-hand view tabs and left-hand
+ * timeframes are the same size as each other. One size for the whole strip. */
+.kc-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--disabled);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--lh-base);
+  padding: 4px 6px;
+  /* A label that breaks across two lines inside a 48px strip is what turned
+     "Indicators (1)" into two stacked fragments on a narrow panel. */
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.kc-toolbar button:hover:not(:disabled) { color: var(--text); background: transparent; }
+/* Same colour as an idle control, deliberately: the reference draws its inert
+   Depth / Margin / Market info tabs and its idle timeframes at one and the
+   same #544a4c, and the difference between them is that only the live one
+   answers the pointer. */
+.kc-toolbar button:disabled { color: var(--disabled); cursor: default; opacity: 1; }
+.kc-toolbar button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+
+/* Every rule below carries `.kc-toolbar` so it out-specifies the strip's own
+   `.kc-toolbar button` base above. Without it the base rule's padding and font
+   size win the tie on source order and the icon squares come out oblong. */
+
+/* The active timeframe is WHITE, not amber.
+ *
+ * The previous rule made it amber on the strength of an early reading of the
+ * spec; the reference pixels say otherwise - the selected interval is #fffeef
+ * against #c6b6ba siblings and carries no accent at all. That matters beyond
+ * this one control: amber on this screen means "the thing you are about to
+ * act on" (the armed drawing tool, the active price scale), and spending it
+ * on a passive selection devalues it everywhere else. Colour alone, at the
+ * same 400 weight - the jump from muted to text is what reads as emphasis. */
+.kc-toolbar .kc-tf.on,
+.kc-toolbar .kc-tf.on:hover { color: var(--text); }
+
+/* Icon buttons. Square so the strip keeps its rhythm whatever the glyph.
+   28px box around an 18px glyph: measured, the reference's toolbar icons carry
+   16-17px of ink, and the 16px glyphs this used to draw were a whole step
+   smaller than the text they sit next to. */
+.kc-toolbar .kc-ico {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.kc-toolbar .kc-ico.on,
+.kc-toolbar .kc-ico.on:hover { color: var(--accent); }
+
+/* Fullscreen stands APART from the view tabs beside it, and the gap is the only
+   thing that says so.
+ *
+ * Chart / Depth / Market info are one set — three names, pick one — and
+ * fullscreen is not a fifth view, it is what to do with the panel. Measured, the
+ * reference spends 23px between the last label and this icon against the 12-14px
+ * it holds between the labels themselves; ours used the same 14px everywhere, so
+ * the icon read as a fifth member of the group with a missing label. 9px of
+ * margin on top of the strip's own 14 is that 23.
+ *
+ * It goes on margin-LEFT, inside a group that is right-anchored by
+ * `.kc-tb-right { margin-left: auto }`, so the extra width pushes the labels
+ * left and leaves the icon where the row's right padding put it. */
+.kc-toolbar .kc-fs { margin-left: 9px; }
+
+/* Segmented pair, price source. A RECESSED TRACK: 28px tall, filled with the
+   page base so it sits *into* the panel rather than on it, holding a 24px
+   active chip in --bg-control. Without the track the members do not read as
+   one control - which is what a bare chip with a border was doing before. */
+/* --radius-md (6px) on BOTH the track and the chip, measured, and deliberately
+   not the usual "outer radius minus the inset". The reference's corner-inset
+   profile loses 4-5px of width over its top four rows on the container and the
+   same on the pill; ours lost 1px over 1 row, which is what made a pair of
+   rounded lozenges read as two square boxes. The chip is only inset 2px, so
+   matching its radius to the track rather than dropping it to 4 is what keeps
+   the two curves concentric at this size. */
+.kc-seg {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+/* 12px, one step below the rest of the strip, and 7px of padding rather than 8.
+ *
+ * Measured, the reference's pair is 98px wide for these two labels and ours was
+ * 112 — the same two words in a visibly bigger box. Both halves of that: its
+ * segment labels carry 9px of ink where every other label in its toolbar
+ * carries 10, and its segments hold ~8px of padding where ours held ~10 (6px of
+ * which is the padding below, the rest the button's own). This is the one
+ * control in the strip the reference quiets rather than sizes with its
+ * neighbours, which is right — it names the price SOURCE, a thing you set once,
+ * not a view you switch between. */
+.kc-toolbar .kc-seg button {
+  height: 24px;
+  padding: 0 7px;
+  border-radius: var(--radius-md);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.kc-toolbar .kc-seg button.on,
+.kc-toolbar .kc-seg button.on:hover {
+  background: var(--bg-control);
+  color: var(--text);
+}
+/* A source this timeframe cannot serve stays clickable. The click shakes the
+   button — a fast refusal — and a notification says to move to 5m or higher.
+   Disabled would swallow that click, which is how the refusal used to vanish. */
+@keyframes kc-deny {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-5px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(2px); }
+}
+.kc-toolbar .kc-seg button.is-deny { animation: kc-deny 180ms linear; }
+@media (prefers-reduced-motion: reduce) {
+  .kc-toolbar .kc-seg button.is-deny { animation: none; }
+}
+.kc-toolbar .kc-seg button:disabled { color: var(--disabled); background: transparent; }
+
+/* View tabs, right-hand group: 14px/400, colour is the whole state model. A
+   view we do not offer is --dim and inert rather than hidden, so the set of
+   views stays stable as more of them land - which is also exactly what the
+   reference renders, three dimmed siblings beside one bright tab. */
+.kc-toolbar .kc-view { padding: 2px 4px; }
+.kc-toolbar .kc-view.on,
+.kc-toolbar .kc-view.on:hover { color: var(--text); }
+.kc-toolbar .kc-view:disabled { color: var(--disabled); }
+
+/* Transient strip text: the armed-tool hint and the history spinner. */
+.kc-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kc-hint.warn { color: var(--warn); }
+
+/* The inline "cancel" inside the armed-tool hint. `.link` in the global sheet is
+   a single class, so `.kc-toolbar button` above out-specifies it whatever the
+   load order and would repaint this control at the strip's idle colour — which,
+   now that idle is #544a4c, would make the one control that disarms a live
+   drawing tool the quietest thing in the row. Restated here at a specificity
+   the strip cannot beat. */
+.kc-toolbar .kc-hint .link {
+  color: var(--accent);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+}
+.kc-toolbar .kc-hint .link:hover:not(:disabled) { color: var(--text); }
+
+/* --- menus ---------------------------------------------------------------- */
+
+/* Sentence case, never micro-caps: the global `.menu-group-label` uppercases
+   and tracks out, which is the one type treatment this design does not use. */
+.kc-menu-label {
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  font-weight: 400;
+  color: var(--muted);
+  padding: 0 4px;
+  margin-bottom: var(--sp-1);
+}
+
+/* 27 indicators do not fit in a popup; cap it and scroll. */
+.kc-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.kc-menu-wide { min-width: 300px; }
+
+.kc-menu-list { display: flex; flex-direction: column; gap: 1px; }
+
+/* Popup rows and grids. `.menu-popup` (global) supplies the plate; the items
+   inside it are ours so they keep the 12px/400 type of the rest of the chart. */
+.kc-menu-list > button,
+.kc-menu-grid > button {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.kc-menu-list > button:hover:not(:disabled),
+.kc-menu-grid > button:hover:not(:disabled) { background: var(--bg-elevated); }
+.kc-menu-list > button.on,
+.kc-menu-grid > button.on { color: var(--accent); }
+.kc-menu-list > button:disabled,
+.kc-menu-grid > button:disabled { color: var(--dim); cursor: default; }
+
+.kc-menu-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; }
+.kc-menu-grid > button { text-align: center; }
+
+.kc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 3px 4px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--text);
+}
+.kc-row:hover { background: var(--bg-elevated); }
+.kc-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kc-row-name.off { color: var(--muted); text-decoration: line-through; }
+
+/* Compact square controls: hide/show, pane taller/shorter, remove.
+ *
+ * Selector doubled with `.kc-toolbar` because these live inside the Indicators
+ * popup, which is a descendant of the strip: the single-class form loses to
+ * `.kc-toolbar button` on specificity, and the row of controls would inherit
+ * both the strip's 14px type and its #544a4c idle colour. Idle inside a popup
+ * is --muted — the recessive toolbar treatment is for chrome sitting on the
+ * panel, not for a list the user has deliberately opened. */
+.kc-toolbar .kc-icon {
+  flex: none;
+  width: 22px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+}
+.kc-toolbar .kc-icon:hover:not(:disabled) { color: var(--text); }
+.kc-toolbar .kc-icon:disabled { color: var(--dim); }
+.kc-toolbar .kc-icon.kc-remove:hover:not(:disabled) { color: var(--neg); }
+
+.kc-pane-h {
+  flex: none;
+  width: 30px;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+
+.kc-empty { color: var(--muted); font-size: var(--fs-xs); padding: 3px 4px; }
+
+.kc-section + .kc-section { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--line); }
+
+/* --- surface -------------------------------------------------------------- */
+
+/* klinecharts paints candles onto a transparent <canvas> and never fills the
+   backdrop. The plot sits on the CARD colour (--bg-panel, from .kc-panel) -
+   part of the chart card, not a hole punched through it down to the page
+   (theme.ts's grid colour is tuned against this exact surface; the two move
+   together).
+ *
+ * The holder itself stays TRANSPARENT, and that is load-bearing: the candle
+ * layer (CandleMorph.tsx) is drawn UNDER it, so while the skeleton becomes the
+ * loaded candles, klinecharts' last-price line, indicators and grid - which the
+ * library paints over its candles - are already over the morphing ones, in
+ * the library's own order. A filled holder would hide the layer entirely. No
+ * radius, because a rounded corner on a full-bleed plot clips candles. */
+.chartholder.kc-canvas {
+  background: none;
+  border-radius: 0;
+  overflow: hidden;
+}
+
+/* --- status strip --------------------------------------------------------- */
+
+/* The row under the time axis: a live UTC clock and the price-scale controls,
+   both right-aligned. The scale used to be a filled chip up in the toolbar,
+   which put a raised control in a strip that has none and left the chart's
+   own footer empty. Down here it is three plain words, and the active one is
+   the only amber thing in the panel apart from an armed drawing tool. */
+/* 34px, not 30. Measured against the reference, the band below the plot is ~15px
+   deeper than ours was: 4 of those belong here (its footer text centres 18px off
+   the card floor where ours centred at 14) and the other 11 belong to the time
+   axis inside the canvas, which theme.ts pins with `xAxis.size`. Split that way
+   rather than all in one place because the two gaps are separately visible — the
+   clear space under the time labels and the clear space under the clock. */
+.kc-status {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-4);
+  height: 34px;
+  padding: 0 10px;
+}
+
+/* 14px, and the scale buttons below match it. Sampled off the reference: its
+   footer digits carry 10px of ink and its "%" 14px, both #c6b6ba with the
+   active scale in amber — one size for the whole row. Ours ran the clock at
+   10px and the buttons at 12px, which rendered 7px digits and read as two
+   ranks of text crammed under the axis instead of one quiet strip. */
+.kc-clock {
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  color: var(--muted);
+}
+
+.kc-scale { display: flex; align-items: center; gap: var(--sp-3); }
+
+.kc-scale button {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--lh-base);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.kc-scale button:hover:not(:disabled) { color: var(--text); }
+.kc-scale button.on,
+.kc-scale button.on:hover { color: var(--accent); }
+.kc-scale button:disabled { color: var(--dim); cursor: default; }
+.kc-scale button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* --- legend --------------------------------------------------------------- */
+
+/* One line, 12px/400, sitting directly ON the candles - no plate. Legibility
+   comes from a shadow rather than an opaque strip, because a strip that is
+   wide enough to hold the OHLC row also hides ~30px of the most recent price
+   action behind it, and that is the part of the chart people are watching.
+   `pointer-events: none` keeps the crosshair tracking underneath. */
+/* left is 4px, not 8: the plot column now carries a 4px inset of its own (see
+   .kc-col in rail.css) so the candles start where the reference starts them,
+   and the legend is positioned against the pane rather than the card. Keeping
+   8 here would push the one line of text that sits ON the candles 4px right of
+   the measured position it already held. */
+/* HIERARCHY HERE IS SIZE, NOT COLOUR, and getting that backwards cost the
+ * legend its whole job twice over.
+ *
+ * The reference builds three ranks out of one ink colour and two sizes:
+ *   title  11px of ink, #dbdbdb   — the biggest thing in the legend
+ *   O/H/L/C letters 9px, #dbdbdb  — the SAME colour, one size down
+ *   values          9px, red/green — the only thing carrying a second colour
+ *
+ * Ours had the title dimmer AND the same size as everything else (so it
+ * receded instead of leading), and the O/H/L/C letters at #fffeef — pure white,
+ * the brightest ink on the whole panel, spent on four characters that never
+ * change. The eye landed on the labels and had to hunt for the caption.
+ *
+ * So the row below drops to 12px and the title rises to 14, both on the same
+ * --kc-ink, and only the numbers keep a colour of their own. Nothing here is
+ * bolder than 400: rank is size and position, never weight. */
+.kc-legend {
+  position: absolute;
+  top: var(--sp-2);
+  left: var(--sp-1);
+  z-index: 2;
+  pointer-events: none;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  width: max-content;
+  max-width: calc(100% - var(--sp-4));
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--kc-ink);
+  /* NO text-shadow. This was a halo meant to keep the legend legible over
+     candles, but the legend sits in the panel's top-left gutter where candles
+     do not reach, so it was darkening a flat background for nothing. Measured,
+     it bled ~3px around every glyph and held the OHLC values back from full
+     saturation - our brightest red read #d94437 against the reference's
+     #ef4a3c, which made the whole row look muddy. The reference legend sits
+     crisply on the flat canvas colour with no shadow at all. */
+  /* Mounted when the plot unmasks (Chart.tsx), so it arrives with the chart
+     rather than a beat ahead of it. Opacity only: nothing shifts. */
+  animation: kc-fade-in var(--dur-med) var(--ease-out) both;
+}
+@keyframes kc-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* The caption LEADS on size and shares its colour with the row it heads. 14px
+   against the row's 12 is one step on the terminal's four-size scale, which
+   puts 10px of ink over 8 — the reference's 11 over 9, one pixel down, and the
+   only pair of sizes on the scale that reproduces the step at all. It stays off
+   --text deliberately: a chart title that is the brightest thing on the panel
+   competes with the price action it labels, and --text is reserved for the
+   ACTIVE control in the toolbar. */
+.kc-legend-sym {
+  color: var(--kc-ink);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+}
+
+/* The LETTER is chrome — it says which field you are looking at and never
+   changes — so it sits at the caption's colour and gets no emphasis of its own.
+   The VALUE is the reading, and it is what carries both the brightness and the
+   bar's direction colour, so a glance at the row tells you the candle was red
+   before you have read a single digit. Letter and value butt together with no
+   space, which is what makes "O80,297.84" read as one token rather than two
+   words. */
+.kc-legend-ohlc {
+  display: flex;
+  gap: var(--sp-2);
+  color: var(--kc-ink);
+}
+/* --text rather than inheriting: an unchanged bar returns neither .pos nor .neg
+   from signClass(), and a value that then fell back to the label colour would
+   flatten the one distinction this row exists to make. */
+/* The numeral face belongs on the FIGURES, not on the O/H/L/C letters: Asap is
+   tuned for digits and its letterforms read as a different font beside the rest
+   of the legend. */
+.kc-legend-ohlc > span { font-family: var(--font-text); }
+.kc-legend-ohlc .kc-v { margin-left: 0; color: var(--text); font-family: var(--font-num); }
+/* The direction tint, applied to every value and to the change pair. `.pos` /
+   `.neg` come from signClass() in format.ts, which returns neither for an
+   unchanged bar - so a flat candle simply keeps the inherited --text and no
+   third colour has to be invented for "no direction". */
+.kc-legend-ohlc .pos { color: var(--pos); }
+.kc-legend-ohlc .neg { color: var(--neg); }
+
+/* The one place the bare legend does not survive. klinecharts draws its own
+   high/low price annotations at the extremes of the visible range, and on a
+   phone-width panel those land inside the legend's line box: measured at 375px,
+   "80,428" printed straight through the OHLC row. A text-shadow cannot separate
+   text from text, so below the dashboard's md breakpoint - and only there - the
+   legend takes a plate back. */
+@media (max-width: 993px) {
+  .kc-legend {
+    padding: 2px var(--sp-1);
+    border-radius: var(--radius-sm);
+    /* --bg-elevated, not --bg-panel: the canvas IS --bg-panel now, so a panel
+       coloured plate would be invisible and the two texts would go back to
+       printing through one another. */
+    background: var(--bg-elevated);
+    text-shadow: none;
+  }
+}
+
+/* --- floating notices ----------------------------------------------------- */
+
+/* These FLOAT over the chart rather than sitting above it in flow: the chart
+   sizes its canvas from the container and re-measures on every resize, so a bar
+   appearing in flow shrinks the pane, redraws the price range, and slides the
+   line out from under the cursor at exactly the moment the user is dragging it. */
+.kc-notices {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  /* --bg-elevated for the same reason the mobile legend plate moved off
+     --bg-panel: the canvas underneath is --bg-panel now, and a notice about a
+     live order modify has to be unmistakably a layer over the chart. */
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--line);
+}
+
+/* The move bar. It is the ONLY thing that turns a drag into a request, and it
+   is deliberately a wide bordered strip rather than a tooltip: a modify is a
+   live mainnet action and the button that sends it should not be something the
+   eye can skate past. */
+.kc-movebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.kc-movebar-title { color: var(--accent); font-weight: 500; }
+/* Doubled class again: the global `.btn-primary` still carries a heavier
+   weight, and nothing in this design is heavier than 500 - not even the button
+   that sends a live modify. Rank here comes from the amber fill. */
+.kc-movebar .btn-primary.kc-confirm { font-weight: 500; }
+.kc-readout {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.kc-readout .kc-v { color: var(--text); font-weight: 500; }
+/* Doubled class: `.status` lives in the global sheet, which is injected after
+   this one, so a single-class rule here would tie it and lose. */
+.status.kc-note { margin: 0; }
+.kc-note .kc-v { font-weight: 500; }
+
+/* --- feed failsafes (FeedOverlay.tsx, feedHealth.ts) ------------------------ */
+
+/* The canvas is MASKED, not unmounted, until the first bars of the market and
+   interval on screen have landed: klinecharts keeps the previous market's
+   candles (and, with none, draws a bare 0-10 scale) until its load answers,
+   and neither is something to show under the new market's name. Opacity keeps
+   the canvas laid out, so it measures its real box while hidden.
+ *
+ * Unmasking is the axes arriving: the price and time labels, grid and
+ * last-price line fade in over the first half of the candle morph (morph.ts,
+ * 580ms), and are fully in well before the morph hands the candles back to
+ * the library - so the swap never lands on a half-faded canvas. */
+.chartholder.kc-canvas {
+  /* Its own stacking context. klinecharts gives its widgets z-index 1 and its
+     canvases 2; without this they would stack among the pane's own layers -
+     the legend, the notices - instead of all together beneath them. */
+  isolation: isolate;
+  transition: opacity 320ms var(--ease-out);
+}
+/* A switch fades the old chart out over the skeleton fading in beneath it (a
+   crossfade, not a blink to a bare card). The mask above takes the pointer
+   from its first frame, so nothing under it can be reached meanwhile. First
+   load is unaffected - an element's initial style never transitions, so the
+   canvas starts hidden. */
+.chartholder.kc-canvas.kc-masked {
+  opacity: 0;
+  transition: opacity 180ms var(--ease-out);
+}
+
+/* Covers the plot (not the toolbar, rail or footer) and swallows the pointer,
+   so nothing under it - an order line, the right-click menu - can be reached
+   while it is showing a price scale that belongs to nothing.
+ *
+ * TRANSITIONS, NOT KEYFRAMES, in both directions: a load that answers while
+ * the mask is still fading in reverses the fade from wherever it got to,
+ * instead of jumping to opaque and then fading out. `@starting-style` is the
+ * fade in on mount; a browser without it shows the mask at once. */
+.kc-feed-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
+  opacity: 1;
+  transition: opacity var(--dur-med) var(--ease-out);
+}
+@starting-style {
+  .kc-feed-mask { opacity: 0; }
+}
+/* The bars are in. Whatever the mask shows fades out over the chart fading
+   in, and lets go of the pointer at once so the chart is usable through the
+   fade. 260ms matches EXIT_MS in FeedOverlay.tsx, which unmounts it
+   afterwards. */
+.kc-feed-mask.kc-leaving {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 260ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+/* The klinecharts chart draws its own skeleton, under the plot canvas
+   (CandleMorph.tsx), so its mask is see-through: it only keeps the pointer off
+   the plot and carries the retry pill or the error card. */
+.kc-feed-mask.kc-bare { background: none; }
+
+/* The chart's error boundary (ChartBoundary.tsx): the same error card, in a
+   card of its own when the chart itself crashed. */
+.panel.kc-panel.kc-crashed {
+  position: relative;
+  min-height: 160px;
+}
+
+/* The loading state is said to screen readers only: on screen it is the
+   skeleton and nothing else. */
+.kc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Skeleton candles: a fixed, seeded walk (never random per render, which
+   would read as flicker) in the faintest line colour, with a soft highlight
+   gliding across them.
+ *
+ * THE SHIMMER IS TWO TRANSFORMS, NOT AN ANIMATED MASK. It used to slide a
+ * mask-position across the SVG, which is repainted on the main thread every
+ * frame - and the skeleton is on screen exactly while the main thread is
+ * busiest (a history page parsing, the canvas rebuilding), so it stepped. Now
+ * a window 40% as wide as the skeleton, masked to soft edges, travels across
+ * it (translateX -100% -> 250% of its own width) while a brighter copy of the
+ * same candles inside it travels the other way (+40% -> -100% of ITS width,
+ * which is the skeleton's): the two cancel, so the lit candles stay put under
+ * a moving light. Transform-only, on the compositor, whatever the page does. */
+.kc-skel {
+  position: absolute;
+  inset: 14% 72px 16% var(--sp-2);
+  overflow: hidden;
+  pointer-events: none;
+}
+.kc-skel svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.kc-skel rect { fill: var(--line-soft); }
+.kc-skel line { stroke: var(--line-soft); stroke-width: 1px; }
+.kc-skel-glint {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 40%;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 50%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 50%, transparent);
+  animation: kc-glint 2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+.kc-skel-glint svg,
+.kc-skel-glint canvas {
+  width: 250%;
+  animation: kc-glint-counter 2s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+/* Stacked on the base copy: 20% white over 10% peaks near 28% at the centre
+   of the window and falls off to nothing at its edges - a light passing over
+   the candles, not a second set of them. */
+.kc-skel-glint rect { fill: var(--line-strong); }
+.kc-skel-glint line { stroke: var(--line-strong); }
+/* Both hold for the last fifth: a breath between passes. The two keyframe
+   lists share their stops and their timing function, so they stay locked. */
+@keyframes kc-glint {
+  0% { transform: translateX(-100%); }
+  80%, 100% { transform: translateX(250%); }
+}
+@keyframes kc-glint-counter {
+  0% { transform: translateX(40%); }
+  80%, 100% { transform: translateX(-100%); }
+}
+
+/* --- candle layer (CandleMorph.tsx, morph.ts) ---------------------------------
+
+   The klinecharts chart's skeleton and the morph of it into the loaded
+   candles: a canvas laid exactly over the candle pane's drawing area, and
+   UNDER the plot canvas (it comes first in the pane, and the holder is
+   transparent - see "surface"), so the library's grid and lines draw over it
+   exactly as they draw over its own candles. Never takes the pointer. It
+   fades in with a switch (the old chart fading out above it) and out on the
+   crossfade path (reduced motion; OHLC bars and the line style). */
+.kc-morph {
+  position: absolute;
+  inset: 0 2px 0 0;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 1;
+  transition: opacity 180ms var(--ease-out);
+}
+@starting-style {
+  .kc-morph:not(.kc-morph-cut) { opacity: 0; }
+}
+/* A layer that opens with the morph out replaces klinecharts' own candles in
+   its first frame (CandleMorph.tsx), so it must not fade in: those candles
+   would flash. */
+.kc-morph.kc-morph-out {
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out);
+}
+/* Grid below, candles above it: the finished chart's own order. The grid
+   canvas takes the plot's opacity frame by frame (CandleMorph.tsx), so it
+   arrives with the axes. */
+.kc-morph-grid,
+.kc-morph-candles {
+  position: absolute;
+  display: block;
+}
+/* The shimmer: the same two-transform glint as the SVG skeleton ("the
+   shimmer" above) over a brighter copy of the candles, sized to the plot. It
+   goes as soon as the candles start to move - it lights the placeholder
+   geometry, which is no longer where the candles are. */
+.kc-morph-glint {
+  position: absolute;
+  overflow: hidden;
+  transition: opacity 160ms linear;
+}
+.kc-morph-glint.kc-off { opacity: 0; }
+.kc-morph-glint .kc-skel-glint canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+/* --- a drag beyond the chart (dragAnywhere.ts) ---------------------------------
+
+   A pan or axis drag keeps following the pointer after it leaves the chart.
+   While it does, nothing on the page gets text-selected under the pointer
+   (`user-select: none` on the root: every element left at `auto` inherits it)
+   and the cursor stays the one the drag began with, instead of turning into a
+   text caret over the order book. */
+html.kc-drag {
+  user-select: none;
+  -webkit-user-select: none;
+}
+html.kc-drag,
+html.kc-drag * {
+  cursor: var(--kc-drag-cursor, default) !important;
+}
+
+/* --- older bars arriving late (historyReveal.ts) ---------------------------------
+
+   What the plot showed before they came - background, grid, the last-price
+   rule - laid over each pane's candle canvas, under its overlay canvas (the
+   crosshair, drawings), and faded out: the bars that arrived under it fade in.
+   Only ever up for a moment, and only when the user outran the prefetch. */
+.kc-reveal {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* klinecharts' two canvases are z-index 2; at the same level the DOM order
+     (main, this, overlay) stacks it between them. */
+  z-index: 2;
+  display: block;
+  pointer-events: none;
+}
+
+.kc-feed-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(360px, calc(100% - var(--sp-5)));
+  padding: var(--sp-3) var(--sp-4);
+  text-align: center;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.kc-feed-card.boxed {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-pop);
+}
+.kc-feed-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+}
+.kc-feed-detail {
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  overflow-wrap: anywhere;
+}
+.kc-feed-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2) var(--sp-3);
+}
+.kc-feed-actions .kc-feed-retry { font-weight: 500; }
+
+/* "Reconnecting..." - a small pill at the top of the plot, over the skeleton. */
+.kc-feed-pill {
+  position: absolute;
+  top: var(--sp-2);
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: calc(100% - var(--sp-4));
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  color: var(--warn);
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  white-space: nowrap;
+}
+.kc-feed-pill .muted { color: var(--dim); }
+
+.kc-spinner {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--line);
+  border-top-color: var(--muted);
+  border-radius: 50%;
+  animation: kc-spin 0.9s linear infinite;
+}
+.kc-feed-pill .kc-spinner { width: 9px; height: 9px; border-top-color: var(--warn); }
+@keyframes kc-spin { to { transform: rotate(360deg); } }
+
+/* Live / Delayed, in the footer beside the clock. The WORD is the state and
+   stays --muted; the dot carries it in colour - the status footer's model. */
+.kc-feed {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-right: auto;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  cursor: default;
+}
+.kc-feed-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.kc-feed.live .kc-feed-dot { background: var(--pos); }
+.kc-feed.delayed .kc-feed-dot { background: var(--warn); }
+.kc-feed.delayed { color: var(--warn); }
+
+/* Less motion: no shimmer, no spinner, and no morph (Chart.tsx picks the
+   crossfade). The chart still arrives by a short crossfade - opacity only,
+   nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .kc-skel-glint { display: none; }
+  .kc-spinner { animation: none; }
+  .kc-legend { animation-duration: 120ms; }
+  .chartholder.kc-canvas,
+  .chartholder.kc-canvas.kc-masked,
+  .kc-morph,
+  .kc-morph.kc-morph-out,
+  .kc-feed-mask,
+  .kc-feed-mask.kc-leaving { transition-duration: 120ms; }
+}
+
+/* Glass, like every floating surface (docs/DESIGN.md section 4). */
+.kc-feed-card.boxed {
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .kc-feed-card.boxed { background: var(--bg-elevated); }
+}

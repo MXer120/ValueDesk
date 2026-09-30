@@ -1,0 +1,57 @@
+{
+  "//": "Copy to config.json (keep it out of git) and edit. Every coin amount is a decimal STRING in that coin's units. Keys starting with // are comments. README.md explains every field.",
+
+  "// acknowledgeRealFunds": "live mode refuses to start unless this is true AND --confirm names the wallet address",
+  "acknowledgeRealFunds": false,
+
+  "backend": "http://127.0.0.1:5180",
+
+  "// maxSpendUsd": "the most this wallet may LOSE in the run: fees, gas, activation, trading costs, and anything sent to an address other than the wallet itself. Checked before every step.",
+  "maxSpendUsd": 8,
+
+  "// allowExistingAccount": "a brand-new wallet is the expected start; set true to resume with --only on a wallet the runner already funded",
+  "allowExistingAccount": false,
+
+  "startChain": "ARBITRUM_ETH",
+  "keyTtlHours": 24,
+
+  "// deposit": "USDC sent from this chain to the wallet's own SoDEX deposit address. A new account keeps 1 USDC as its activation fee.",
+  "deposit": { "chain": "ARBITRUM_ETH", "amount": "25" },
+
+  "transfers": { "amount": "2" },
+
+  "orders": {
+    "spotSymbol": "WSOSO_vUSDC",
+    "spotLimitOffsetPct": 50,
+    "sosoBuyQuantity": "auto",
+    "perpsSymbol": "BTC-USD",
+    "perpsLimitOffsetPct": 50,
+    "perpsCollateral": "3"
+  },
+
+  "spotToEvm": { "usdc": "3", "soso": "all" },
+  "evmToSpot": { "usdc": "1" },
+  "withdrawValuechainSelf": { "amount": "1" },
+
+  "// withdrawValuechainOther": "skipped unless receivers.valuechain is set to ANOTHER address you control",
+  "withdrawValuechainOther": { "amount": "1", "receiver": "valuechain" },
+
+  "withdrawExternal": { "coin": "USDC", "chain": "ARBITRUM_ETH", "amount": "5", "receiver": "self" },
+
+  "// extraDeposits": "more USDC deposits from other EVM chains the wallet is funded on, e.g. { \"chain\": \"BASE_ETH\", \"amount\": \"5\" }",
+  "extraDeposits": [],
+
+  "// extraWithdrawals": "per chain: the token AND the native coin where both are offered. buyIfMissing market-buys the missing amount on Spot first (fee + spread; the rest stays in Spot).",
+  "extraWithdrawals": [
+    { "coin": "ETH", "chain": "ARBITRUM_ETH", "amount": "min", "receiver": "self", "buyIfMissing": true }
+  ],
+
+  "// receivers": "the ONLY addresses other than the wallet itself that anything may be sent to. XRP/XLM: { \"address\": \"r...\", \"memo\": \"123\" } or { \"address\": \"r...\", \"noMemo\": true }",
+  "receivers": {
+    "valuechain": ""
+  },
+
+  "cleanup": { "enabled": false, "chain": "ARBITRUM_ETH" },
+
+  "timeouts": { "depositMinutes": 30, "withdrawMinutes": 30, "settleSeconds": 180, "orderSeconds": 60 }
+}

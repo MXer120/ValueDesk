@@ -1,0 +1,1204 @@
+/**
+ * Account surfaces: positions, open orders, balances, history, and the compact
+ * account readout on the right.
+ *
+ * SCOPED ON PURPOSE. These tables used to ride on the global `.datatable`
+ * rules, which carry a bordered, micro-caps header (`text-transform:
+ * uppercase`, 10px) and a hairline under every row. The measured reference
+ * does none of that: a data table there is a 12px/400 sentence-case header, a
+ * 20px row at 12px/500, no rules, no zebra, and a hover tint. Because
+ * styles.css is injected LAST (see its header comment), a rule here cannot win
+ * a specificity tie against `.datatable th` - so these tables carry their own
+ * class instead of fighting one, and this file owns their whole appearance.
+ *
+ * Type here is 12px only, at weights 400 and 500. Rank comes from COLOUR
+ * (--muted label -> --text value -> --pos/--neg sign), never from weight, and
+ * nothing in this file is bold or uppercase.
+ */
+
+/* Root of every account panel. The column layout is what lets the head row,
+   the error line and the table stack and let the table take the slack;
+   `.tabbody > .panel` and the dashboard body both hand this height: 100%. */
+.acct {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+
+  /* OUTER inset: the distance from the card's edge to the first/last column,
+     as opposed to --row-pad-x which is the gutter BETWEEN columns. One knob,
+     because the two are different measurements that happened to share a value.
+
+     The measured reference insets panel content 16px from the card edge, and
+     the tab bar above these tables already lands there (8px on
+     `.dash-tabs__bar` + 8px on each tab). At 6px the first column started
+     10px to the left of the tab label directly above it, which is the kind of
+     misalignment that reads as sloppy before it reads as anything.
+
+     It is a variable rather than a flat 16px because these tables render in
+     containers with different padding contracts: `.dash-tabs__body` is flush
+     (tabbed content brings its own insets) so the table has to supply all 16px
+     itself, while `.dash-panel__body` (16px) and `.tabbody` (8px) already pad
+     and adding a second 16px there would double the inset. Those two keep the
+     old 6px, so nothing outside the dashboard's tab bodies moves. */
+  --acct-inset: var(--row-pad-x);
+  /* The funds sheets' well (`--fx-well` in funds.css): the page colour at 55%.
+     The switch, "Load more" and the row chips below sit on it. */
+  --acct-well: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.dash-tabs__body .acct { --acct-inset: var(--sp-4); }
+
+/* One head row, used only when there is something to put in it. An empty
+   panel renders its message and nothing else - no disabled action bar. */
+.acct-head {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  min-height: var(--head-h);
+  margin-bottom: var(--sp-1);
+  /* Same edge as the columns underneath. Without this the row's right-aligned
+     action ("Cancel all", which is the only thing in it inside the dashboard's
+     flush tab body) sat hard against the card edge while the last column of
+     the table below it stopped 16px short. */
+  padding: 0 var(--acct-inset);
+}
+/* RANK COMES FROM COLOUR, NOT WEIGHT. The reference's section heading reads as
+   the strongest thing in the card, and the temptation is to answer that with
+   font-weight 600 - but the reference tops out at 500 everywhere on the page,
+   and what actually separates its heading from the labels under it is that the
+   heading is full-strength --text while a label is --muted. This was --muted,
+   which put the heading at the same rank as the quietest text below it. */
+.acct-head h2 {
+  margin: 0 auto 0 0;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: var(--lh-base);
+  color: var(--text);
+}
+
+/* EMPTY / NOTICE LINE.
+   One quiet sentence. No card, no icon, no button - the void is the message,
+   and a call-to-action button in it just adds a second thing to read.
+
+   CENTRED HORIZONTALLY, HIGH VERTICALLY. This used to be `margin: auto`, i.e.
+   centred on BOTH axes, which dropped the line ~130px into a 320px band and
+   read as a stray sentence in a void. Measured against the reference the line
+   sits ~36px below the tab rule - roughly where the table's first row would
+   have been - so it reads as a caption on the tab above it. Same words, no
+   invented data. dashboard.css states the same placement for panels whose
+   entire content is one message and wins the tie there; the offset is spelled
+   out here as well so the standalone account page, which that rule does not
+   reach, does not drift away from the dashboard.
+
+   --dim, not --muted: an empty state is the quietest thing a panel can say,
+   and at --muted it was as loud as a data value. Measured reference #7c7068. */
+.acct-empty {
+  margin: var(--sp-6) auto 0;
+  padding: 0 var(--sp-2);
+  max-width: 40ch;
+  text-align: center;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  /* --muted, as the funds sheets' own empty line (`.fx-opt-empty`) and the
+     address menu's labels are: the same sentence reads at the same strength in
+     both places. */
+  color: var(--muted);
+}
+/* "Loading…" with the sheets' spinner (`.fx-spin`) in front of it. */
+.acct-empty.acct-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+}
+.acct-spin {
+  display: inline-block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: acct-spin 0.9s linear infinite;
+}
+@keyframes acct-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .acct-spin { animation: none; } }
+
+/* A FAILED FETCH IS NOT AN EMPTY STATE, so it does not get the empty state's
+   quiet, dimmed, centred treatment: "no positions" and "we could not read your
+   positions" mean opposite things to someone deciding whether they are flat.
+   It sits flush left at the top in --neg, on the same edge as the columns, and
+   above whatever rows the last good response left on screen. */
+.acct-error {
+  margin: 0 0 var(--sp-1);
+  padding: 0 var(--acct-inset);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--neg);
+}
+
+/* --- tables --------------------------------------------------------------- */
+
+.acct-table {
+  width: 100%;
+  border-collapse: collapse;
+  /* On the table, not the numeric cells: one proportional digit anywhere in a
+     column breaks the vertical alignment of the whole column. */
+  font-size: var(--fs-xs);
+}
+
+/* Column heads are labels, so they are the QUIETEST text in the table: same
+   size as the data, one weight lighter, and muted. Sentence case - micro-caps
+   at 10px/600 was two kinds of loud (tracking and weight) applied to the text
+   that matters least. */
+.acct-table th {
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Data rows: 20px, full-strength text, no border, no zebra - the order book's
+   rows. Like the book, the FIGURES carry the weight: every numeric cell is 500
+   in the numeral face (styles.css names `td.num`), while words - type, status,
+   role - sit at 400. The market cell keeps 500: it is the row's name, the way
+   the chosen coin reads in the funds sheets' pickers. */
+.acct-table td {
+  height: var(--row-h);
+  padding: 0 var(--row-pad-x);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--text);
+  white-space: nowrap;
+  border: 0;
+}
+/* A hairline under every data row. Lighter than the header rule so the
+   columns still read as one table, not as boxed cards. */
+.acct-table.acct-t tbody td {
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--text) 8%, transparent);
+}
+.acct-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.acct-table th.num .acct-sort { margin-left: auto; }
+.acct-sort:hover { color: var(--text); }
+.acct-edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  vertical-align: middle;
+  cursor: pointer;
+}
+.acct-edit:hover:not(:disabled) { color: var(--text); }
+.acct-exits { white-space: nowrap; }
+.acct-exit { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
+.acct-exit__k { color: var(--dim); font-size: var(--fs-micro); }
+.acct-exit__v { font-variant-numeric: tabular-nums; }
+.acct-sort__m { font-size: 10px; color: var(--text); }
+.acct-table td.num,
+.acct-table td:first-child { font-weight: 500; }
+
+/* The first and last columns answer to the CARD's edge, not to the gutter
+   between columns - see --acct-inset on `.acct` above. */
+.acct-table th:first-child,
+.acct-table td:first-child { padding-left: var(--acct-inset); }
+.acct-table th:last-child,
+.acct-table td:last-child { padding-right: var(--acct-inset); }
+
+/* Numeric columns right-align so digits stack; that is the entire point of
+   tabular-nums above and it does nothing on ragged columns. */
+.acct-table th.num,
+.acct-table td.num { text-align: right; }
+
+/* ONE OF THE TWO PLACES A BACKGROUND HOVER SURVIVES.
+   The measured reference hovers by brightening TEXT to --text and changes
+   nothing else - no fill, no transform, no opacity - everywhere except where
+   the surface itself is the click target. A table row is exactly that case
+   (the whole row is the affordance, and there is no single word in it to
+   brighten), so it keeps its tint. Every control below hovers on colour. */
+.acct-table tbody tr { transition: background-color var(--dur-fast) var(--ease-out); }
+.acct-table tbody tr:hover { background: var(--tint); }
+
+/* Colour carries meaning in these cells, so it is pinned locally rather than
+   inherited from the global utilities. */
+.acct-table .pos { color: var(--pos); }
+.acct-table .neg { color: var(--neg); }
+.acct-table .muted { color: var(--muted); }
+.acct-table .warn { color: var(--warn); }
+
+/* Qualifier on a column head: "derived", "est.". It states where a number came
+   from, which is the difference between a computed figure and a reported one,
+   so it sits ON the header rather than in a tooltip nobody opens. Smallest
+   step in the scale, dimmest colour - it must never compete with the label. */
+.acct-tag {
+  font-size: var(--fs-micro);
+  font-weight: 400;
+  line-height: var(--lh-micro);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+/* Row actions. A default button is ~24px tall and would set the row height on
+   its own, so in-row actions are text: no fill, no border, no radius. They win
+   over the global `button` chrome on specificity, which is why this selector
+   is two classes deep. */
+.acct-table .acct-act {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  text-decoration: none;
+  /* No horizontal padding, and no radius: with the hover fill gone there is no
+     box to inset the label from or to round, and 4px a side would have pushed
+     the last action's text 20px off the card edge where the column beside it
+     ends at --acct-inset. The gap to the next action comes from the sibling
+     margin below instead, so the right edge stays flush with the numbers. */
+  padding: 0 var(--sp-2);
+  /* The funds sheets' chip (`.fx-chip` - Max, Clear): a hairline, 6px round,
+     --muted ink that comes up to --text. 18px so the 20px row stays 20px. */
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 16px;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+/* Colour only. This used to add a --tint fill, which is the row's language,
+   not a control's - and inside a row that is ALSO tinting on hover it stacked
+   into a second, brighter patch that read as a selected cell. */
+.acct-table .acct-act:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: transparent; }
+/* --disabled is the palette's "idle / unavailable control" step. It was
+   `opacity: .4`, which is a different mechanism for the same idea and lands on
+   a colour that is not in the palette at all. */
+.acct-table .acct-act:disabled { color: var(--disabled); border-color: color-mix(in srgb, var(--panel-line) 60%, transparent); opacity: 1; }
+.acct-table td.acct-actions { text-align: left; }
+.acct-table td.acct-actions > * + * { margin-left: var(--sp-1); }
+
+/* --- account readout (the compact label/value panel) ---------------------- */
+
+/* A list, not a table: label left, value right, 20px per row, no rules. The
+   panel's own --bg-panel fill and 4px radius come from the panel chrome around
+   it, so this draws no box of its own and cannot double it. */
+.acct-kv { display: flex; flex-direction: column; }
+.acct--summary .acct-kv { padding-top: var(--sp-2); }
+/* The row answers to the CARD's edge, exactly as a table row does - same
+   --acct-inset, so a label here and the first column of a table below it land
+   on one line. It used to carry no horizontal padding at all and borrowed the
+   inset from whatever container it happened to sit in, which made it the one
+   thing in this file whose left edge was not its own decision: 16px inside the
+   dashboard's padded panel body, 0 the moment that body went flush for the
+   heading band, and 6px out of step with `.acct-table` on the standalone
+   account page the whole time. */
+/* CONTENT HEIGHT, NOT --row-h - the same correction as `.oe-out__row`, and for
+   the same reason: this is a read-out, not a table. --row-h is the order BOOK's
+   20px data row, chosen because a book has to fit floor(panelHeight / rowHeight)
+   levels; nothing here divides anything. Measured, the reference's label/value
+   rows run a fractional 20.5px pitch (an alternating 20/21px in the pixels),
+   which is exactly 16.5px of line box plus 2px of padding a side, so the row
+   takes the height its own type gives it. The two read-outs sit one above the
+   other in the same column, so they have to agree. */
+.acct-kv-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 2px var(--acct-inset);
+}
+.acct-kv-label {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+/* ONE SIZE STEP ABOVE THE LABEL, on the label's line box.
+   Same measurement as `.oe-out__v` in OrderEntry.css, and the same shape of
+   fix: label and value were both --fs-xs, which is the one pairing in the
+   reference that is NOT the same size - its read-out figures stand a step over
+   their own label caps. In --font-num that step is 12px -> 14px (a 9px figure
+   becomes 10px, which is the reference's), and --lh-xs stays so the 20.5px row
+   pitch above does not move with it.
+   This is the read-out only. `.acct-table td` is a TABLE cell and stays at
+   --fs-xs: a column of figures is read down against its neighbours, not against
+   a label beside it, and 20 rows at 14px is a different panel. */
+.acct-kv-value {
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+.acct-kv-value.pos { color: var(--pos); }
+.acct-kv-value.neg { color: var(--neg); }
+/* Indent the label only. Padding the whole row shoved the figure off the
+   column the other values sit on. */
+.acct-kv-row.is-sub .acct-kv-label { padding-left: 14px; color: var(--dim); }
+.acct-kv-row.is-sub .acct-kv-value { font-size: var(--fs-xs); font-weight: 400; }
+
+/* Perps / Spot / EVM, sitting in the heading band. The chevron is part of
+   the label, immediately to its right. The list is the same glass menu as
+   every other popup — a native select cannot be styled. */
+.acct-book { position: relative; margin-left: auto; align-self: center; flex: none; }
+.acct-book__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 2px 0 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  cursor: pointer;
+}
+.acct-book__btn svg { color: var(--muted); }
+.acct-book__btn:hover,
+.acct-book__btn.is-open,
+.acct-book__btn:hover svg,
+.acct-book__btn.is-open svg { color: var(--text); }
+.menu-popup.acct-book__menu {
+  top: calc(100% + 4px);
+  right: 0;
+  left: auto;
+  z-index: 40;
+  min-width: 148px;
+  padding: 4px;
+}
+.acct-book__menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  line-height: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+.acct-book__menu button:hover { background: var(--bg-elevated); }
+.acct-book__menu button.is-on { color: var(--accent); }
+
+/* Coin rows, the same arrangement as the wallet menu's holdings: icon, the
+   chain as a badge, name over the chain, amount on the right. */
+.acct-hold {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: var(--sp-3) var(--acct-inset) 0;
+}
+.acct-hold li { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.acct-hold__ic { position: relative; display: inline-grid; flex: none; }
+.acct-hold__chain {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+.acct-hold__t { min-width: 0; color: var(--text); font-family: var(--font-num); font-size: var(--fs-xs); }
+.acct-hold__t small { display: block; color: var(--muted); font-family: inherit; font-size: var(--fs-micro); }
+.acct-hold__v { margin-left: auto; color: var(--text); font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; }
+.acct-hold li.is-rest .acct-hold__t { color: var(--muted); font-family: inherit; }
+
+/* The two sections of the balances panel, when both are shown on the standalone
+   account page. The gutter is the separator - there is no rule between them. */
+.acct-split { display: flex; flex-direction: column; gap: var(--sp-3); min-height: 0; }
+
+/* Deposit / Withdraw / Transfer under the account summary. They open the funds
+   sheets (funds/*Modal.tsx), so they are drawn as those sheets' own actions:
+   Deposit the solid `.fx-cta`, the other two `.fx-cta--ghost`. */
+.acct-funds { display: flex; flex-direction: column; gap: 8px; margin-top: var(--sp-4); padding: 0 var(--acct-inset) var(--sp-3); }
+.acct-funds__row { display: flex; gap: 8px; }
+.acct-funds .fx-cta {
+  width: 100%;
+  height: 36px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.acct-funds .fx-cta:hover:not(:disabled) { filter: brightness(0.92); }
+.acct-funds .fx-cta:disabled { opacity: 0.4; cursor: not-allowed; }
+.acct-funds .fx-cta--ghost { background: transparent; color: var(--text); border: 1px solid var(--panel-line); }
+.acct-funds .fx-cta--ghost:hover:not(:disabled) { filter: none; border-color: var(--muted); }
+.acct-funds__row .fx-cta { flex: 1 1 0; width: auto; }
+
+/* "<What> couldn't load." inside an account panel sits on the same edge as the
+   columns, like the rest of the panel's content. The line itself is the shared
+   `.load-failed` (styles.css). */
+.acct .load-failed { padding-left: var(--acct-inset); padding-right: var(--acct-inset); }
+
+/* The segmented Spot / Perps switch (a history's own tab switch still uses it). */
+.acct-head .segmented { flex: 0 0 auto; }
+.acct-head .segmented button { min-width: 52px; }
+
+/* THE SPOT / PERPS SWITCH - the Withdraw sheet's source tiles (`.fx-srct`) at
+   control size, and the portfolio's period switch (Portfolio.css `.pf-seg`):
+   one well, --muted options, the chosen one --text with a 1px --text ring over
+   a 7% --text fill. */
+.acct-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
+  padding: 2px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: var(--acct-well);
+}
+.acct-switch > button {
+  min-width: 52px;
+  height: 22px;
+  padding: 0 var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+}
+.acct-switch > button:hover:not(:disabled):not(.active) { color: var(--text); background: transparent; }
+.acct-switch > button.active {
+  color: var(--text);
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* "Cancel all": the sheets' danger chip (`.fx-chip--danger`). */
+.acct-head > button.danger {
+  height: 26px;
+  padding: 0 var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--neg) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--neg);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+}
+.acct-head > button.danger:hover:not(:disabled) { border-color: var(--neg); background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); }
+.acct-head > button.danger:disabled { opacity: 0.4; }
+
+/* A history's "Load more": the Withdraw sheet's pill button (`.fx-pillbtn`),
+   with the sheets' spinner while the next page is on its way. */
+.acct-more {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-3) var(--acct-inset) var(--sp-4);
+}
+.acct-more > .acct-morebtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-full);
+  background: var(--acct-well);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: var(--lh-xs);
+}
+.acct-more > .acct-morebtn:hover:not(:disabled) { border-color: var(--line); background: var(--acct-well); color: var(--text); }
+.acct-more > .acct-morebtn:disabled { opacity: 1; color: var(--muted); cursor: progress; }
+
+/* A sub-section heading inside one panel (Spot / Perps / EVM wallet balances):
+   the Withdraw / Transfer sheets' account tile - the SoDEX mark on Spot and
+   Perps, the ValueChain mark on the EVM wallet (the address menu's EVM box) -
+   the name, and the section's priced total right in the numeral face. A
+   hairline under it, like the tile's own edge, closes the head off from its
+   rows. */
+.acct-head.acct-sub {
+  justify-content: space-between;
+  min-height: 32px;
+  margin: var(--sp-2) var(--acct-inset) var(--sp-1);
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--panel-line);
+}
+.acct-head.acct-sub:first-child { margin-top: var(--sp-1); }
+.acct-head.acct-sub h2 {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 0;
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+.acct-head.acct-sub .muted,
+.acct-head.acct-sub .acct-sub__total {
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.acct-head.acct-sub + .acct-empty { margin-top: var(--sp-3); margin-bottom: var(--sp-3); }
+.acct-table a { color: inherit; text-decoration: underline; text-decoration-color: var(--line); }
+.acct-table a:hover { text-decoration-color: currentColor; }
+
+/* ===========================================================================
+   THE ACCOUNT BAND'S TABLES (v2) - `.acct-t`, and the cards of Position History.
+
+   The vocabulary is the wallet pop-up's and the funds sheets', not a new one:
+     - a row is the reference's (image 16): 32px, the coin logo, the market in
+       --text 500, a tinted pill for the side - `.fx-badge`: a 16% tint of the
+       colour, 4px radius, no border;
+     - figures right-aligned in the numeral face, units after them in --muted;
+     - row actions are `.fx-chip` (hairline, 6px radius, --muted -> --text);
+     - nothing is boxed. Rows separate by nothing but their rhythm; cards by a
+       hairline. The panel fill shows through everything.
+   Scoped to `.acct-t` so the other pages that borrow `.acct-table` (Explore,
+   Leaderboard, the Hyperliquid scan) keep their dense 20px rows.
+   ======================================================================== */
+.acct-table.acct-t th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 30px;
+  background: var(--bg-panel);
+  box-shadow: inset 0 -1px 0 var(--panel-line);
+  color: var(--muted);
+  font-weight: 400;
+}
+.acct-table.acct-t td {
+  height: 32px;
+  vertical-align: middle;
+}
+.acct-table.acct-t td,
+.acct-table.acct-t td:first-child { font-weight: 400; }
+.acct-table.acct-t td.num { font-weight: 500; }
+.acct-table.acct-t tbody tr:first-child td { padding-top: 2px; }
+.acct-table.acct-t tbody tr:hover { background: var(--tint); }
+.acct-table.acct-t th.acct-actions,
+.acct-table.acct-t td.acct-actions { width: 1%; text-align: left; white-space: nowrap; }
+
+/* The market cell: logo, name, pills. */
+.acct-mkt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  vertical-align: middle;
+}
+.acct-mkt .coin-lbl { gap: 8px; }
+.acct-mkt__n {
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.acct-mkt .acct-pill:first-of-type { margin-left: 2px; }
+
+/* THE PILL - `.fx-badge`. Tinted fill, the colour's own ink, no border. */
+.acct-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-text);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.acct-pill--pos { background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
+.acct-pill--neg { background: color-mix(in srgb, var(--neg) 18%, transparent); color: color-mix(in srgb, var(--neg) 72%, var(--text)); }
+.acct-pill--accent { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.acct-pill--warn { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.acct-pill--muted { background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--muted); }
+td .acct-pill--muted { margin-left: 6px; }
+
+.acct-lev {
+  color: var(--muted);
+  font-family: var(--font-num);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+}
+
+/* Quieter parts of a cell: a unit, a qualifier, a time. */
+.acct-unit { color: var(--muted); font-weight: 400; }
+.acct-sub { color: var(--muted); font-weight: 400; }
+td.pos .acct-sub, td.neg .acct-sub { color: inherit; opacity: 0.8; }
+.acct-dim,
+.acct-table.acct-t td.acct-dim { color: var(--muted); }
+.acct-table.acct-t td.acct-time { color: var(--muted); font-weight: 400; }
+.acct-table.acct-t td.acct-word { font-weight: 400; color: var(--text); }
+.acct-table.acct-t td.acct-word.acct-dim { color: var(--muted); }
+
+/* STATUS - the glyph and its word (accountTables/StatusIcon.tsx). */
+.acct-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  vertical-align: middle;
+  white-space: nowrap;
+  cursor: default;
+}
+.acct-st { flex: none; display: block; }
+.acct-st--pos { color: var(--pos); }
+.acct-st--neg { color: var(--neg); }
+.acct-st--warn { color: var(--warn); }
+.acct-st--accent { color: var(--accent); }
+.acct-st--muted { color: var(--muted); }
+.acct-st--dim { color: var(--dim); }
+.acct-status__l { color: var(--text); }
+.acct-status__l.is-dead { color: var(--muted); }
+
+/* ROW ACTIONS - `.fx-chip` (Max, Clear). 24px in a 32px row. */
+.acct-table.acct-t .acct-act {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 22px;
+}
+.acct-table.acct-t .acct-act:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: transparent; }
+.acct-table.acct-t .acct-act:disabled { color: var(--disabled); border-color: color-mix(in srgb, var(--panel-line) 60%, transparent); opacity: 1; }
+.acct-table.acct-t .acct-act + .acct-act { margin-left: 6px; }
+/* "Cancel all" in the actions column head: `.fx-chip--danger`. */
+.acct-table.acct-t th .acct-act { height: 22px; line-height: 20px; }
+.acct-table.acct-t .acct-act--danger { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 45%, transparent); }
+.acct-table.acct-t .acct-act--danger:hover:not(:disabled) { color: var(--neg); border-color: var(--neg); background: color-mix(in srgb, var(--neg) 10%, transparent); }
+
+/* The in-line link ("Reset view"), `.fx-link`. */
+.acct-link {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+button.acct-link:where(:not(.active)) { background: none; }
+.acct-link:hover { color: var(--text); }
+
+/* FilteredHint: the quietest line in the panel, under the rows. */
+.acct-hint {
+  margin: var(--sp-2) 0 0;
+  text-align: center;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--dim, var(--muted));
+}
+
+.acct-more { gap: var(--sp-3); align-items: center; }
+.acct-more__note { color: var(--muted); font-size: var(--fs-xs); }
+
+/* Account history: direction, network, transaction. */
+.acct-dir {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--muted);
+}
+.acct-dir--in { background: color-mix(in srgb, var(--pos) 14%, transparent); color: var(--pos); }
+.acct-net { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
+.acct-table.acct-t a.acct-tx,
+.acct-tx {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-family: var(--font-num);
+  text-decoration: none;
+}
+.acct-table.acct-t a.acct-tx:hover { color: var(--text); }
+.acct-tx svg { width: 12px; height: 12px; }
+
+/* Modify an order: one line under the table, the sheets' well inputs. */
+.acct-modify {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--acct-inset);
+  border-top: 1px solid var(--panel-line);
+}
+.acct-modify__t { align-self: center; margin-right: var(--sp-2); color: var(--text); font-size: var(--fs-xs); font-weight: 500; }
+.acct-modify label { gap: 4px; font-size: var(--fs-micro); }
+.acct-modify input {
+  width: 128px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: var(--acct-well);
+  font-family: var(--font-num);
+}
+.acct-modify input:focus { border-color: var(--muted); outline: none; }
+.acct-modify .acct-act {
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.acct-modify .acct-act:hover:not(:disabled) { color: var(--text); border-color: var(--line); background: transparent; }
+.acct-modify .acct-act--solid,
+.acct-modify .acct-act--solid:hover:not(:disabled) { border-color: var(--text); background: var(--text); color: var(--bg); }
+.acct-modify .status { flex-basis: 100%; margin: 0; }
+
+/* Balances' section heads on the table's own scale. */
+.acct-head.acct-sub h2 { font-size: var(--fs-xs); font-weight: 500; }
+.acct-head.acct-sub .acct-sub__total { font-size: var(--fs-xs); }
+
+/* ---------------------------------------------------------------------------
+   POSITION HISTORY CARDS (image 15).
+   The market line, a row of big coloured figures, a row of small ones - the
+   wallet pop-up's "label over value" (`.acct-menu__acct-k / -v`) laid on one
+   6-column grid so the two rows share their columns. A hairline between cards;
+   no box, no fill.
+   ------------------------------------------------------------------------ */
+.acct-cards { container-type: inline-size; }
+.acct-card {
+  padding: 14px var(--acct-inset);
+  border-bottom: 1px solid var(--panel-line);
+  transition: background-color var(--dur-fast) var(--ease-out);
+}
+.acct-card:hover { background: var(--tint); }
+.acct-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-bottom: 12px;
+}
+.acct-card__sym {
+  color: var(--text);
+  font-size: calc(var(--fs-base) + 2px);
+  font-weight: 500;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+.acct-card__head .acct-pill { margin-left: 2px; }
+.acct-card__link {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--muted);
+  transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.acct-card__link:hover { color: var(--text); background: color-mix(in srgb, var(--text) 7%, transparent); }
+.acct-card__grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px var(--sp-4);
+}
+.acct-card__grid--big { margin-bottom: 12px; }
+.acct-card__m { display: grid; gap: 2px; min-width: 0; }
+.acct-card__k {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.acct-card__v {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: calc(var(--fs-xs) + 1px);
+  font-weight: 500;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.acct-card__v--big {
+  font-size: var(--fs-xl);
+  line-height: 26px;
+  letter-spacing: 0;
+}
+.acct-card__v.pos { color: var(--pos); }
+.acct-card__v.neg { color: var(--neg); }
+@container (max-width: 820px) {
+  .acct-card__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .acct-card__v--big { font-size: calc(var(--fs-base) + 2px); line-height: 22px; }
+}
+@container (max-width: 420px) {
+  .acct-card__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ===========================================================================
+   THE FILTER BAR - the right end of the tab bar (accountTables/FilterBar.tsx).
+   ======================================================================== */
+/* The bar scrolls sideways when the tabs run out of room (dashboard.css), so
+   the filter end is allowed to shrink first: the stale note gives way to an
+   ellipsis before any control is pushed out of sight. */
+.dash-tabs__actions:has(> .acctf) { flex: 1 1 auto; min-width: 0; justify-content: flex-end; }
+.acctf {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+.acctf > * { flex: none; }
+.acctf > .acctf-stale {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.acctf-stale > svg { flex: none; }
+.acctf-stale > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The market checkbox: the app's hollow square, the market's name beside it. */
+.acctf-mkt {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.acctf-mkt:hover,
+.acctf-mkt:has(input:checked) { color: var(--text); }
+.acctf-mkt span { font-family: var(--font-num); font-weight: 500; }
+
+/* VIEW - a hairline control that opens the panel; the count as a solid dot. */
+.acctf-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1;
+}
+button.acctf-view:where(:not(.active)) { background: transparent; border-color: var(--panel-line); }
+button.acctf-view:hover:not(:disabled),
+button.acctf-view.is-open,
+button.acctf-view.is-active { color: var(--text); border-color: var(--line); }
+.acctf-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--radius-full);
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-num);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+}
+
+/* Card / list - two `.fx-iconbtn`s at 26px. */
+.acctf-vt { display: inline-flex; gap: 2px; }
+.acctf-vt > button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dim);
+}
+.acctf-vt > button:where(:not(.active)) { background: transparent; border-color: transparent; }
+.acctf-vt > button:hover:not(:disabled) { color: var(--text); }
+.acctf-vt > button.is-on { color: var(--text); border-color: var(--line); background: color-mix(in srgb, var(--text) 7%, transparent); }
+
+/* THE PANEL - `.fx-list`'s glass. */
+.acctf-pop {
+  position: fixed;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  animation: pop-in var(--dur-fast) var(--ease-spring);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .acctf-pop { background: var(--bg-elevated); }
+}
+.acctf-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: -2px;
+}
+.acctf-head > span { font-size: var(--fs-base); font-weight: 500; }
+.acctf-pop .acctf-reset {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.acctf-pop .acctf-reset:hover:not(:disabled) { color: var(--text); }
+.acctf-pop .acctf-reset:disabled { color: var(--disabled); text-decoration: none; opacity: 1; cursor: default; }
+.acctf-lbl {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.acctf-lbl__aside { color: var(--dim); font-size: var(--fs-micro); }
+
+/* The Withdraw sheet's source tiles, at control size. */
+.acctf-seg { display: grid; gap: 6px; }
+.acctf-pop .acctf-seg > button {
+  height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  opacity: 0.62;
+  transition: border-color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+.acctf-pop .acctf-seg > button:hover:not(.is-on) { opacity: 0.9; border-color: var(--line); background: transparent; }
+.acctf-pop .acctf-seg > button.is-on {
+  opacity: 1;
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.acctf-pop .acctf-seg > button.acctf-seg--pos.is-on { border-color: var(--pos); background: color-mix(in srgb, var(--pos) 12%, transparent); color: var(--pos); }
+.acctf-pop .acctf-seg > button.acctf-seg--neg.is-on { border-color: var(--neg); background: color-mix(in srgb, var(--neg) 12%, transparent); color: color-mix(in srgb, var(--neg) 72%, var(--text)); }
+.acctf-seg--presets > button { font-family: var(--font-num); }
+
+/* The dual range: one track, the chosen span in --text, two round thumbs. */
+.acctf-range {
+  position: relative;
+  height: 22px;
+  margin: 12px 7px 6px;
+}
+.acctf-range__track {
+  position: absolute;
+  top: 9px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+}
+.acctf-range__track > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--a);
+  right: calc(100% - var(--b));
+  border-radius: 2px;
+  background: var(--text);
+}
+.acctf-pop .acctf-range input[type="range"] {
+  position: absolute;
+  top: 0;
+  left: -7px;
+  width: calc(100% + 14px);
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: none;
+  outline: none;
+}
+.acctf-range input[type="range"]::-webkit-slider-runnable-track { height: 22px; background: none; border: 0; }
+.acctf-range input[type="range"]::-moz-range-track { height: 22px; background: none; border: 0; }
+.acctf-range input[type="range"]::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  border: 2px solid var(--bg-elevated);
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+  appearance: none;
+  -webkit-appearance: none;
+  pointer-events: auto;
+  cursor: grab;
+}
+.acctf-range input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--bg-elevated);
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+  pointer-events: auto;
+  cursor: grab;
+}
+.acctf-range input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px var(--focus); }
+.acctf-range input[type="range"]:active::-webkit-slider-thumb { cursor: grabbing; }
+
+/* Two dates, the sheets' well inputs. */
+.acctf-dates {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: end;
+  gap: var(--sp-2);
+  margin-top: 6px;
+}
+.acctf-dates label { gap: 4px; min-width: 0; color: var(--muted); font-size: var(--fs-micro); line-height: var(--lh-micro); }
+.acctf-pop .acctf-dates input {
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: var(--fs-xs);
+  color-scheme: dark;
+}
+.acctf-pop .acctf-dates input:hover { border-color: var(--line); }
+.acctf-pop .acctf-dates input:focus { border-color: var(--muted); outline: none; }
+.acctf-dates__arrow { padding-bottom: 8px; color: var(--dim); }
+
+/* The status hover card (cells.tsx HoverCard): the wallet pop-up's glass,
+   portalled to the body, fading and settling in. */
+.acct-hc {
+  position: fixed;
+  z-index: 1500;
+  min-width: 210px;
+  max-width: 270px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-pop);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(calc(-100% + 4px));
+  transition: opacity var(--dur-fast) var(--ease-out), transform 180ms var(--ease-spring);
+}
+.acct-hc.is-on { opacity: 1; transform: translateY(-100%); }
+.acct-hc.is-below { transform: translateY(-4px); }
+.acct-hc.is-below.is-on { transform: none; }
+.acct-hc__t { display: flex; align-items: center; gap: 6px; color: var(--text); font-weight: 500; }
+.acct-hc__main { margin-top: 6px; color: var(--text); font-family: var(--font-num); font-size: 13px; font-weight: 500; }
+.acct-hc__at { color: var(--muted); font-weight: 400; }
+.acct-hc__bar { margin-top: 8px; height: 4px; border-radius: 1000px; background: var(--line); overflow: hidden; }
+.acct-hc__bar > span { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.acct-hc__row { display: flex; justify-content: space-between; gap: 12px; margin-top: 6px; font-family: var(--font-num); }
+.acct-hc__row > span:first-child { color: var(--text); }
+.acct-status { outline: none; cursor: default; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .acct-hc { background: var(--bg-elevated); }
+}
+
+.bal-dust {
+  display: inline-flex; flex-direction: row; align-items: center; gap: var(--sp-2);
+  color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs);
+  white-space: nowrap; cursor: pointer;
+}
+.bal-dust:hover,
+.bal-dust:has(input:checked) { color: var(--text); }
+.bal-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 8px; }
+.bal-tag {
+  display: inline-flex; align-items: center;
+  padding: 0 5px; border-radius: 3px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--dim); font-size: 10px; line-height: 16px;
+}
+.bal-more {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; min-height: 0; margin: 0; padding: 0;
+  border: none; background: none; color: var(--muted); cursor: pointer;
+}
+.bal-more svg { transition: transform .15s cubic-bezier(.4, 0, .2, 1); }
+.bal-more.is-open svg { transform: rotate(180deg); }
+.bal-more:hover { color: var(--text); }
+.bal-sub td { padding-top: 2px; padding-bottom: 2px; }

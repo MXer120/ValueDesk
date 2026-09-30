@@ -1,0 +1,195 @@
+/* All-time statistics panel.
+
+   Scoped to .stats-* so it composes with the global .panel / .datatable / .kv
+   rules rather than overriding them. Every colour and every space comes from the
+   tokens in styles.css - nothing here is hardcoded. */
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* --- empty state --- */
+
+/* ONE empty-state treatment, shared with .feetier in FeeTier.css: --fs-sm,
+   muted, no margin of its own.
+ *
+ * These two panels sit directly on top of each other on the Stats page and
+ * were setting the same kind of sentence at two different sizes - "Connect a
+ * wallet." at the inherited 14px and "Connect a wallet to see the fee tier
+ * this account is on." at 12px - so the quieter, longer sentence was the
+ * smaller one. Same job, same size.
+ *
+ * The `:has()` rule is the height half of it: `.stats` carries a 16px flex gap
+ * for the case where it holds sections of real figures, and spending that gap
+ * plus 14px of leading on a single line made a 110px panel out of one
+ * sentence. When the message IS the panel, the gap drops to 8px, which lands a
+ * one-line panel at ~56px. Browsers without :has() keep the old spacing. */
+.stats > p.muted,
+.stats > p.muted.small {
+  margin: 0;
+  font-size: var(--fs-xs);
+}
+.stats:has(> p.muted:last-child) { gap: var(--sp-2); }
+
+/* --- sections --- */
+
+.stats-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.stats-block:first-of-type { border-top: none; padding-top: 0; }
+
+.stats h4 {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-weight: 500;
+  margin: var(--sp-2) 0 var(--sp-1);
+}
+
+/* A caption, not a number: never let it compete with the figures above it. */
+.stats-note {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  line-height: 1.5;
+}
+.stats-note strong { color: var(--text); font-weight: 500; }
+
+.stats-details > summary {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  padding: var(--sp-1) 0;
+}
+.stats-details > summary:hover { color: var(--text); }
+
+/* --- headline --- */
+
+.stats-headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+}
+
+.stats-big { display: flex; flex-direction: column; gap: 2px; }
+.stats-bigvalue {
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  line-height: 1.1;
+}
+
+/* Fixed height, flexible width: the curve is a shape, and it must not push the
+   number it belongs to onto its own line on a narrow panel. */
+.stats-spark {
+  height: 48px;
+  width: 260px;
+  max-width: 100%;
+  flex: 0 1 260px;
+  overflow: visible;
+}
+.stats-spark-zero {
+  stroke: var(--line);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.stats-spark-line {
+  fill: none;
+  stroke-width: 1.5;
+  /* The path is drawn into a non-uniformly scaled viewBox, so without this the
+     stroke would be squashed horizontally along with it. */
+  vector-effect: non-scaling-stroke;
+}
+.stats-spark-line.pos { stroke: var(--pos); }
+.stats-spark-line.neg { stroke: var(--neg); }
+
+/* --- amounts --- */
+
+.stats-amount { white-space: nowrap; }
+.stats-coin { font-size: var(--fs-xs); color: var(--muted); }
+
+.stats .datatable td.right,
+.stats .datatable th.right { }
+
+/* --- per-engine columns --- */
+
+.stats-engines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.stats-engine { min-width: 0; }
+/* No text-transform: capitalize here - it would title-case the whole heading and
+   turn "Spot - 9,130 fills" into "Spot - 9,130 Fills". */
+.stats-engine h3 { color: var(--text); }
+
+/* --- sync progress --- */
+
+.stats-sync {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.stats-sync-track {
+  position: relative;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+
+/* Indeterminate on purpose. The gateway never says how many fills exist, so a
+   percentage would be an invented one; this only claims "still working". */
+.stats-sync-fill {
+  position: absolute;
+  inset-block: 0;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: stats-sync-slide 1.4s var(--ease-out) infinite;
+}
+
+@keyframes stats-sync-slide {
+  0% { left: -35%; }
+  100% { left: 100%; }
+}
+
+.stats-sync-lines { display: flex; flex-direction: column; gap: 2px; }
+.stats-sync-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+}
+
+/* A global backstop already disables animation under prefers-reduced-motion;
+   this makes the bar still READ as active rather than as a stalled sliver. */
+@media (prefers-reduced-motion: reduce) {
+  .stats-sync-fill { left: 0; width: 100%; opacity: 0.5; }
+}
+
+/* --- incompleteness warning --- */
+
+.stats-warn {
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--warn);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  font-size: var(--fs-xs);
+}
+.stats-warn strong { color: var(--warn); }
+.stats-warn ul { margin: var(--sp-1) 0 0; padding-left: var(--sp-4); }
+.stats-warn li { margin-top: 2px; }

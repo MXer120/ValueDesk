@@ -1,0 +1,453 @@
+/**
+ * Edit-mode chrome. The page itself is scaled with a transform on `.app`
+ * (everything under the navbar, footer included) so the grid's measured width
+ * does not change and no breakpoint fires. These windows are portaled to
+ * `document.body` because a transform on `.app` would scale `position: fixed`
+ * descendants and trap them inside the page.
+ */
+
+.shell > .app {
+  transform-origin: center center;
+  transition: transform calc(var(--dur-med) * 2) var(--ease-out);
+}
+/* The big page sits on the left. The doubled right rail stays clear of it,
+   and the bottom holds the layout strip plus the edit menu. */
+.shell.is-dash-edit > .app {
+  transform-origin: left center;
+  transform: translateY(-56px) scale(0.64);
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent);
+}
+.shell.is-dash-edit.is-dash-preview > .app {
+  transform-origin: center center;
+  transform: scale(1);
+  border-radius: 0;
+  overflow: visible;
+  box-shadow: none;
+}
+
+/* The right-click menu is also a body portal. It has to sit above this chrome
+   or a click near the palette opens the menu underneath it. */
+.menu-popup.dash-layoutmenu { z-index: 80; }
+
+/* Widths shared by the three fixed windows. The root itself is only a
+   variable scope: the windows are position:fixed, portaled to the body. */
+.dash-edit-root {
+  --edit-bar-w: 148px;
+  --edit-palette-w: 464px;
+}
+
+.dash-edit-side {
+  position: fixed;
+  z-index: 40;
+  top: calc(var(--navbar-h) + var(--sp-4));
+  bottom: calc(var(--sp-6) + var(--sp-6));
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  transition:
+    opacity calc(var(--dur-med) * 2) var(--ease-out),
+    transform calc(var(--dur-med) * 2) var(--ease-out);
+}
+.dash-edit-side.is-quiet {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+/* The gap under the scaled page. Layout cards sit in the middle of it,
+   and the menu bar floats directly underneath them. */
+.dash-edit-dock {
+  position: fixed;
+  z-index: 45;
+  left: var(--sp-3);
+  right: calc(var(--edit-palette-w) + var(--sp-3) + var(--sp-2));
+  top: calc(var(--navbar-h) + (100vh - var(--navbar-h)) * 0.82 - 48px);
+  bottom: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  pointer-events: none;
+  transition: opacity calc(var(--dur-med) * 2) var(--ease-out);
+}
+/* Preview brings the page back to full size, which covers this dock.
+   The layout cards go away. The menu bar stays painted above the page. */
+.dash-edit-dock.is-quiet { pointer-events: none; z-index: 70; }
+.dash-edit-dock.is-quiet .dash-edit-slots {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.dash-edit-dock .dash-edit-slots,
+.dash-edit-dock .dash-edit-bar { pointer-events: auto; }
+.dash-edit-dock.is-quiet .dash-edit-bar {
+  position: fixed;
+  z-index: 2;
+  left: 50%;
+  right: auto;
+  bottom: calc(var(--sfoot-h, 28px) + var(--sp-3));
+  top: auto;
+  transform: translateX(-50%);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+.dash-edit-slots {
+  position: relative;
+  display: flex;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 100%;
+  height: auto;
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+  gap: var(--sp-2);
+}
+.dash-edit-slots.is-quiet { transform: translateY(12px); }
+.dash-edit-slots .dash-edit-card__title { margin-top: 4px; }
+.dash-edit-slots .dash-edit-card__blurb {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-edit-slots button.dash-edit-card,
+.dash-edit-slots button.dash-edit-plus { padding: 6px; }
+.dash-edit-palette {
+  right: var(--sp-3);
+  width: var(--edit-palette-w);
+  z-index: 45;
+}
+
+.dash-edit-switch {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+button.dash-edit-switch button,
+.dash-edit-switch button {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 6px;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.dash-edit-switch button.is-on { color: var(--text); background: var(--bg-panel); }
+.dash-edit-palette__empty { margin: 0; color: var(--muted); font-size: var(--fs-xs); }
+.dash-edit-palette.is-quiet { transform: translateX(12px); }
+
+.dash-edit-slots__list,
+.dash-edit-palette__list {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+.dash-edit-slots__list {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: safe center;
+  gap: 10px;
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+button.dash-edit-card,
+button.dash-edit-plus {
+  flex: none;
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-panel);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, var(--panel-line));
+  border-radius: 12px;
+  box-shadow: var(--shadow-pop);
+  color: var(--muted);
+  text-align: left;
+}
+button.dash-edit-card:hover,
+button.dash-edit-plus:hover { color: var(--text); }
+button.dash-edit-card.is-active { border-color: var(--accent); color: var(--text); }
+button.dash-edit-card:focus-visible,
+button.dash-edit-plus:focus-visible,
+.dash-edit-bar__btn:focus-visible {
+  outline: 1px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.dash-edit-card__screen {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  background: var(--bg);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 12%, transparent);
+}
+.dash-edit-card__title {
+  display: block;
+  margin-top: 8px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+}
+.dash-edit-card__blurb {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 1.35;
+}
+.dash-edit-slot { position: relative; flex: none; width: 176px; }
+.dash-edit-confirm {
+  position: absolute;
+  z-index: 2;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  padding: 8px;
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+}
+.dash-edit-confirm p { margin: 0 0 8px; color: var(--text); font-size: var(--fs-xs); }
+.dash-edit-confirm div { display: flex; justify-content: flex-end; gap: 6px; }
+.dash-edit-card__block {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 2px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent);
+}
+
+button.dash-edit-plus {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.dash-edit-slots button.dash-edit-plus {
+  width: 132px;
+  align-self: stretch;
+}
+
+.dash-edit-palette {
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  padding: var(--sp-2);
+}
+.dash-edit-palette__label {
+  flex: none;
+  margin: 0 0 var(--sp-2);
+}
+.dash-edit-palette__list { flex: 1 1 auto; }
+.dash-edit-palette__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: start;
+}
+.dash-edit-palette__group p {
+  margin: 10px 2px 6px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.dash-edit-wcard {
+  min-width: 0;
+  padding: 6px;
+  background: var(--bg);
+  border: 1px solid color-mix(in srgb, var(--text) 12%, var(--panel-line));
+  border-radius: 10px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.dash-edit-wcard.is-present { cursor: default; opacity: 0.55; }
+.dash-edit-wcard__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 6px;
+}
+.dash-edit-widget {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: 3px var(--sp-1);
+  border-radius: var(--radius-xs);
+  color: var(--muted);
+  font-size: var(--fs-ctl);
+  line-height: var(--ctl-lh);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+.dash-edit-widget:hover { color: var(--text); }
+.dash-edit-widget.is-present,
+.dash-edit-widget.is-present:hover {
+  color: var(--dim);
+  cursor: default;
+}
+.dash-edit-widget__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dash-edit-widget__mark {
+  flex: none;
+  color: var(--dim);
+  font-size: var(--fs-label);
+  line-height: var(--lh-micro);
+}
+
+.dash-edit-delete {
+  flex: none;
+  margin-top: var(--sp-2);
+  padding: var(--sp-4) var(--sp-2);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  color: var(--dim);
+  font-size: var(--fs-ctl);
+  line-height: var(--ctl-lh);
+  text-align: center;
+}
+.dash-edit-delete.is-over {
+  border-style: solid;
+  border-color: var(--neg);
+  color: var(--neg);
+}
+
+.dash-edit-bar {
+  position: relative;
+  z-index: 1;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  transform: none;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  width: auto;
+  gap: 2px;
+  padding: var(--sp-1);
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-pop);
+}
+button.dash-edit-bar__btn {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: auto;
+  min-height: 0;
+  padding: 6px 8px;
+  background: none;
+  border-color: transparent;
+  color: var(--muted);
+  text-align: left;
+}
+button.dash-edit-bar__btn:hover,
+button.dash-edit-bar__btn[aria-pressed='true'] { color: var(--text); }
+.dash-edit-bar__ico { flex: none; display: block; }
+button.dash-edit-bar__btn kbd {
+  margin-left: 8px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.dash-edit-ghost {
+  position: fixed;
+  z-index: 70;
+  pointer-events: none;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-ctl);
+  line-height: var(--ctl-lh);
+  transform: translate(10px, 12px);
+}
+
+/* Empty canvases still need a box to drop onto. The scrollport has a definite
+   height; the grid does not, once every panel is hidden. */
+.dash.is-arrange .dash-panel { cursor: grab; }
+.dash.is-arrange .dash-panel:active { cursor: grabbing; }
+.dash.is-arrange .dash-grid { min-height: 100%; }
+.dash.is-arrange .dash-panel > .dash-panel__grip {
+  display: block;
+  height: 16px;
+  opacity: 1;
+  pointer-events: auto;
+  touch-action: none;
+}
+.dash.is-arrange .dash-panel > .dash-panel__grip::after {
+  width: 52px;
+  height: 5px;
+  top: 5px;
+}
+.dash.is-arrange .dash-grid .react-resizable-handle {
+  display: block;
+  opacity: 1;
+  width: 28px;
+  height: 28px;
+}
+.dash.is-arrange .dash-grid .react-resizable-handle::after {
+  width: 28px;
+  height: 28px;
+  animation: dash-grip-shake 1.8s ease-in-out infinite;
+}
+@keyframes dash-grip-shake {
+  0%, 100% { transform: translate(50%, 50%) rotate(0deg); }
+  30% { transform: translate(50%, 50%) rotate(-8deg); }
+  70% { transform: translate(50%, 50%) rotate(8deg); }
+}
+.shell.is-dash-preview .dash-panel__grip,
+.shell.is-dash-preview .react-resizable-handle {
+  display: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .dash.is-arrange .dash-grid .react-resizable-handle::after { animation: none; }
+}
+.dash.is-drop .dash-grid { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+/* Glass, like every floating surface (docs/DESIGN.md section 4). */
+.dash-edit-confirm {
+  border-color: var(--line);
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .dash-edit-confirm { background: var(--bg-elevated); }
+}

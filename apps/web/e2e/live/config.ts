@@ -1,0 +1,346 @@
+/**
+ * The runner's config file: shape, defaults, and STRUCTURAL validation.
+ *
+ * Structural means: types, decimal strings, known keys, receiver names that
+ * exist. Whether an amount clears SoDEX's minimum, whether a route is open and
+ * whether an address is valid FOR ITS CHAIN needs live data - that is checked
+ * in the plan (plan.ts), before anything is signed.
+ *
+ * Every coin amount is a decimal STRING ("20", "0.0015") - never a JSON number,
+ * which would already be a float. A handful of amounts also take a word:
+ *   "min"  the route's live withdrawal minimum
+ *   "all"  everything that can move
+ *   "auto" the smallest order the market accepts (plus 20 %)
+ * Keys starting with "//" are comments and ignored.
+ */
+import { readFileSync } from 'node:fs';
+import { isDecimal } from './util';
+
+export interface ReceiverSpec {
+  address: string;
+  /** XRP / Stellar: the numeric memo (destination tag). */
+  memo?: string;
+  /** XRP / Stellar: the address takes no memo (a wallet you control, not an exchange). */
+  noMemo?: boolean;
+}
+
+export interface ExtraWithdrawal {
+  coin: string;
+  chain: string;
+  /** decimal | "min" | "all" */
+  amount: string;
+  /** "self" (this wallet, EVM chains only) or a key of `receivers`. */
+  receiver: string;
+  /** Not enough of the coin in Spot: market-buy what is missing first (costs a fee + spread). */
+  buyIfMissing?: boolean;
+}
+
+export interface RunConfig {
+  /** Must be true for live mode: "I know this moves real funds". */
+  acknowledgeRealFunds: boolean;
+  /** Web + API proxy origin (the Vite dev server). */
+  backend: string;
+  /**
+   * The most this wallet may LOSE in this run, in USD: fees, gas, activation,
+   * trading costs, AND anything sent to an address other than the wallet
+   * itself (receivers). Checked before every step.
+   */
+  maxSpendUsd: number;
+  /** A brand-new wallet is the expected start; true allows one that already has a SoDEX account (e.g. to resume). */
+  allowExistingAccount: boolean;
+  /** The chain the key-backed wallet starts on, like a browser wallet that is on some network (SoDEX chain key or VALUECHAIN). */
+  startChain: string;
+  /** Trading-key lifetime registered on SoDEX, hours (1..168). */
+  keyTtlHours: number;
+  deposit: { chain: string; amount: string };
+  transfers: { amount: string };
+  orders: {
+    spotSymbol: string;
+    /** How far below the best bid the resting spot limit buy sits (capped inside the market's price band). */
+    spotLimitOffsetPct: number;
+    /** SOSO market-buy quantity for ValueChain gas: decimal | "auto". */
+    sosoBuyQuantity: string;
+    perpsSymbol: string;
+    perpsLimitOffsetPct: number;
+    /** USDC moved Spot -> Perps for the perps orders (more if the market needs it), moved back afterwards. */
+    perpsCollateral: string;
+  };
+  spotToEvm: { usdc: string; soso: string };
+  evmToSpot: { usdc: string };
+  withdrawValuechainSelf: { amount: string };
+  withdrawValuechainOther: { amount: string; receiver: string };
+  withdrawExternal: { coin: string; chain: string; amount: string; receiver: string };
+  extraDeposits: Array<{ chain: string; amount: string }>;
+  extraWithdrawals: ExtraWithdrawal[];
+  receivers: Record<string, ReceiverSpec>;
+  cleanup: { enabled: boolean; chain: string };
+  timeouts: { depositMinutes: number; withdrawMinutes: number; settleSeconds: number; orderSeconds: number };
+}
+
+export const DEFAULT_CONFIG: RunConfig = {
+  acknowledgeRealFunds: false,
+  backend: 'http://127.0.0.1:5180',
+  maxSpendUsd: 8,
+  allowExistingAccount: false,
+  startChain: 'ARBITRUM_ETH',
+  keyTtlHours: 24,
+  deposit: { chain: 'ARBITRUM_ETH', amount: '25' },
+  transfers: { amount: '2' },
+  orders: {
+    spotSymbol: 'WSOSO_vUSDC',
+    spotLimitOffsetPct: 50,
+    sosoBuyQuantity: 'auto',
+    perpsSymbol: 'BTC-USD',
+    perpsLimitOffsetPct: 50,
+    perpsCollateral: '3',
+  },
+  spotToEvm: { usdc: '3', soso: 'all' },
+  evmToSpot: { usdc: '1' },
+  withdrawValuechainSelf: { amount: '1' },
+  withdrawValuechainOther: { amount: '1', receiver: 'valuechain' },
+  withdrawExternal: { coin: 'USDC', chain: 'ARBITRUM_ETH', amount: '5', receiver: 'self' },
+  extraDeposits: [],
+  extraWithdrawals: [{ coin: 'ETH', chain: 'ARBITRUM_ETH', amount: 'min', receiver: 'self', buyIfMissing: true }],
+  receivers: {},
+  cleanup: { enabled: false, chain: 'ARBITRUM_ETH' },
+  timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60 },
+};
+
+export interface LoadedConfig {
+  config: RunConfig;
+  /** Where it came from ('defaults' when no file was given). */
+  source: string;
+  errors: string[];
+  warnings: string[];
+}
+
+const CHAIN_RE = /^[A-Z0-9_]{2,32}$/;
+const NAME_RE = /^[A-Za-z0-9_-]{1,40}$/;
+
+/** Read and validate a config file (or the defaults, when `path` is null). */
+export function loadConfig(path: string | null): LoadedConfig {
+  if (!path) return { ...validateConfig({}), source: 'defaults' };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (e) {
+    return { config: structuredClone(DEFAULT_CONFIG), source: path, errors: [`Cannot read ${path}: ${(e as Error).message}`], warnings: [] };
+  }
+  return { ...validateConfig(raw), source: path };
+}
+
+/** Merge `raw` over the defaults and check every field. Pure (tests call it directly). */
+export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    errors.push('The config must be a JSON object.');
+    return { config: cfg, errors, warnings };
+  }
+  const src = stripComments(raw) as Record<string, unknown>;
+
+  const known = new Set(Object.keys(DEFAULT_CONFIG));
+  for (const k of Object.keys(src)) if (!known.has(k)) warnings.push(`Unknown key "${k}" is ignored (a typo?).`);
+
+  const bool = (v: unknown, where: string): boolean | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== 'boolean') errors.push(`${where} must be true or false.`);
+    return typeof v === 'boolean' ? v : undefined;
+  };
+  const numIn = (v: unknown, where: string, lo: number, hi: number): number | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== 'number' || !Number.isFinite(v) || v < lo || v > hi) {
+      errors.push(`${where} must be a number from ${lo} to ${hi}.`);
+      return undefined;
+    }
+    return v;
+  };
+  const amount = (v: unknown, where: string, words: readonly string[] = []): string | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v === 'number') {
+      errors.push(`${where} must be a decimal STRING like "${v}" - a JSON number is already a float.`);
+      return undefined;
+    }
+    if (typeof v !== 'string' || !(isDecimal(v) || words.includes(v))) {
+      errors.push(`${where} must be a decimal string${words.length ? ` or one of ${words.map((w) => `"${w}"`).join(', ')}` : ''}.`);
+      return undefined;
+    }
+    if (isDecimal(v) && Number(v) <= 0) {
+      errors.push(`${where} must be more than 0.`);
+      return undefined;
+    }
+    return v.trim();
+  };
+  const chain = (v: unknown, where: string): string | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== 'string' || !CHAIN_RE.test(v)) {
+      errors.push(`${where} must be a SoDEX chain key like "ARBITRUM_ETH".`);
+      return undefined;
+    }
+    return v;
+  };
+  const text = (v: unknown, where: string, re = /^[A-Za-z0-9_.-]{1,40}$/): string | undefined => {
+    if (v === undefined) return undefined;
+    if (typeof v !== 'string' || !re.test(v)) {
+      errors.push(`${where} is not valid.`);
+      return undefined;
+    }
+    return v;
+  };
+  const obj = (v: unknown, where: string, keys: readonly string[]): Record<string, unknown> | undefined => {
+    if (v === undefined) return undefined;
+    if (!v || typeof v !== 'object' || Array.isArray(v)) {
+      errors.push(`${where} must be an object.`);
+      return undefined;
+    }
+    for (const k of Object.keys(v)) if (!keys.includes(k)) warnings.push(`Unknown key "${where}.${k}" is ignored (a typo?).`);
+    return v as Record<string, unknown>;
+  };
+  const set = <T>(v: T | undefined, apply: (x: T) => void) => {
+    if (v !== undefined) apply(v);
+  };
+
+  set(bool(src.acknowledgeRealFunds, 'acknowledgeRealFunds'), (v) => (cfg.acknowledgeRealFunds = v));
+  if (src.backend !== undefined) {
+    if (typeof src.backend !== 'string' || !/^https?:\/\/[^/\s]+$/.test(src.backend.replace(/\/+$/, ''))) errors.push('backend must be an origin like "http://127.0.0.1:5180".');
+    else cfg.backend = src.backend.replace(/\/+$/, '');
+  }
+  set(numIn(src.maxSpendUsd, 'maxSpendUsd', 0, 1000), (v) => (cfg.maxSpendUsd = v));
+  set(bool(src.allowExistingAccount, 'allowExistingAccount'), (v) => (cfg.allowExistingAccount = v));
+  set(chain(src.startChain, 'startChain'), (v) => (cfg.startChain = v));
+  set(numIn(src.keyTtlHours, 'keyTtlHours', 1, 168), (v) => (cfg.keyTtlHours = v));
+
+  const dep = obj(src.deposit, 'deposit', ['chain', 'amount']);
+  if (dep) {
+    set(chain(dep.chain, 'deposit.chain'), (v) => (cfg.deposit.chain = v));
+    set(amount(dep.amount, 'deposit.amount'), (v) => (cfg.deposit.amount = v));
+  }
+  const tr = obj(src.transfers, 'transfers', ['amount']);
+  if (tr) set(amount(tr.amount, 'transfers.amount'), (v) => (cfg.transfers.amount = v));
+
+  const ord = obj(src.orders, 'orders', ['spotSymbol', 'spotLimitOffsetPct', 'sosoBuyQuantity', 'perpsSymbol', 'perpsLimitOffsetPct', 'perpsCollateral']);
+  if (ord) {
+    set(text(ord.spotSymbol, 'orders.spotSymbol', /^[A-Za-z0-9_./-]{1,40}$/), (v) => (cfg.orders.spotSymbol = v));
+    set(numIn(ord.spotLimitOffsetPct, 'orders.spotLimitOffsetPct', 1, 90), (v) => (cfg.orders.spotLimitOffsetPct = v));
+    set(amount(ord.sosoBuyQuantity, 'orders.sosoBuyQuantity', ['auto']), (v) => (cfg.orders.sosoBuyQuantity = v));
+    set(text(ord.perpsSymbol, 'orders.perpsSymbol', /^[A-Za-z0-9_./-]{1,40}$/), (v) => (cfg.orders.perpsSymbol = v));
+    set(numIn(ord.perpsLimitOffsetPct, 'orders.perpsLimitOffsetPct', 1, 90), (v) => (cfg.orders.perpsLimitOffsetPct = v));
+    set(amount(ord.perpsCollateral, 'orders.perpsCollateral'), (v) => (cfg.orders.perpsCollateral = v));
+  }
+  const s2e = obj(src.spotToEvm, 'spotToEvm', ['usdc', 'soso']);
+  if (s2e) {
+    set(amount(s2e.usdc, 'spotToEvm.usdc'), (v) => (cfg.spotToEvm.usdc = v));
+    set(amount(s2e.soso, 'spotToEvm.soso', ['all']), (v) => (cfg.spotToEvm.soso = v));
+  }
+  const e2s = obj(src.evmToSpot, 'evmToSpot', ['usdc']);
+  if (e2s) set(amount(e2s.usdc, 'evmToSpot.usdc'), (v) => (cfg.evmToSpot.usdc = v));
+  const wvs = obj(src.withdrawValuechainSelf, 'withdrawValuechainSelf', ['amount']);
+  if (wvs) set(amount(wvs.amount, 'withdrawValuechainSelf.amount'), (v) => (cfg.withdrawValuechainSelf.amount = v));
+  const wvo = obj(src.withdrawValuechainOther, 'withdrawValuechainOther', ['amount', 'receiver']);
+  if (wvo) {
+    set(amount(wvo.amount, 'withdrawValuechainOther.amount'), (v) => (cfg.withdrawValuechainOther.amount = v));
+    set(text(wvo.receiver, 'withdrawValuechainOther.receiver', NAME_RE), (v) => (cfg.withdrawValuechainOther.receiver = v));
+  }
+  const wx = obj(src.withdrawExternal, 'withdrawExternal', ['coin', 'chain', 'amount', 'receiver']);
+  if (wx) {
+    set(text(wx.coin, 'withdrawExternal.coin'), (v) => (cfg.withdrawExternal.coin = v));
+    set(chain(wx.chain, 'withdrawExternal.chain'), (v) => (cfg.withdrawExternal.chain = v));
+    set(amount(wx.amount, 'withdrawExternal.amount', ['min']), (v) => (cfg.withdrawExternal.amount = v));
+    set(text(wx.receiver, 'withdrawExternal.receiver', NAME_RE), (v) => (cfg.withdrawExternal.receiver = v));
+  }
+  if (src.extraDeposits !== undefined) {
+    if (!Array.isArray(src.extraDeposits)) errors.push('extraDeposits must be a list.');
+    else {
+      cfg.extraDeposits = [];
+      src.extraDeposits.forEach((d, i) => {
+        const o = obj(d, `extraDeposits[${i}]`, ['chain', 'amount']);
+        const c = chain(o?.chain, `extraDeposits[${i}].chain`);
+        const a = amount(o?.amount, `extraDeposits[${i}].amount`);
+        if (o && (!c || !a)) errors.push(`extraDeposits[${i}] needs "chain" and "amount".`);
+        if (c && a) cfg.extraDeposits.push({ chain: c, amount: a });
+      });
+    }
+  }
+  if (src.extraWithdrawals !== undefined) {
+    if (!Array.isArray(src.extraWithdrawals)) errors.push('extraWithdrawals must be a list.');
+    else {
+      cfg.extraWithdrawals = [];
+      src.extraWithdrawals.forEach((w, i) => {
+        const where = `extraWithdrawals[${i}]`;
+        const o = obj(w, where, ['coin', 'chain', 'amount', 'receiver', 'buyIfMissing']);
+        if (!o) return;
+        const coin = text(o.coin, `${where}.coin`);
+        const c = chain(o.chain, `${where}.chain`);
+        const a = amount(o.amount, `${where}.amount`, ['min', 'all']);
+        const r = text(o.receiver ?? 'self', `${where}.receiver`, NAME_RE);
+        const buy = bool(o.buyIfMissing, `${where}.buyIfMissing`);
+        if (!coin || !c || !a || !r) {
+          errors.push(`${where} needs "coin", "chain", "amount" and "receiver".`);
+          return;
+        }
+        cfg.extraWithdrawals.push({ coin, chain: c, amount: a, receiver: r, buyIfMissing: buy ?? false });
+      });
+    }
+  }
+  const rc = obj(src.receivers, 'receivers', Object.keys((src.receivers as object | undefined) ?? {}));
+  if (rc) {
+    cfg.receivers = {};
+    for (const [name, v] of Object.entries(rc)) {
+      if (!NAME_RE.test(name) || name === 'self') {
+        errors.push(`receivers."${name}": a receiver name is letters, digits, "_" or "-" (and not "self").`);
+        continue;
+      }
+      if (v === '' || v === null) continue; // an unset receiver: the steps that need it are skipped
+      if (typeof v === 'string') {
+        cfg.receivers[name] = { address: v.trim() };
+        continue;
+      }
+      const r = obj(v, `receivers.${name}`, ['address', 'memo', 'noMemo']);
+      if (!r) continue;
+      if (typeof r.address !== 'string' || !r.address.trim()) {
+        errors.push(`receivers.${name}.address must be a string.`);
+        continue;
+      }
+      if (r.memo !== undefined && (typeof r.memo !== 'string' || !/^\d{1,20}$/.test(r.memo))) {
+        errors.push(`receivers.${name}.memo must be a string of digits.`);
+        continue;
+      }
+      const noMemo = bool(r.noMemo, `receivers.${name}.noMemo`);
+      cfg.receivers[name] = { address: r.address.trim(), ...(r.memo !== undefined ? { memo: r.memo as string } : {}), ...(noMemo ? { noMemo } : {}) };
+    }
+  }
+  const cl = obj(src.cleanup, 'cleanup', ['enabled', 'chain']);
+  if (cl) {
+    set(bool(cl.enabled, 'cleanup.enabled'), (v) => (cfg.cleanup.enabled = v));
+    set(chain(cl.chain, 'cleanup.chain'), (v) => (cfg.cleanup.chain = v));
+  }
+  const to = obj(src.timeouts, 'timeouts', ['depositMinutes', 'withdrawMinutes', 'settleSeconds', 'orderSeconds']);
+  if (to) {
+    set(numIn(to.depositMinutes, 'timeouts.depositMinutes', 1, 240), (v) => (cfg.timeouts.depositMinutes = v));
+    set(numIn(to.withdrawMinutes, 'timeouts.withdrawMinutes', 1, 240), (v) => (cfg.timeouts.withdrawMinutes = v));
+    set(numIn(to.settleSeconds, 'timeouts.settleSeconds', 10, 3600), (v) => (cfg.timeouts.settleSeconds = v));
+    set(numIn(to.orderSeconds, 'timeouts.orderSeconds', 5, 600), (v) => (cfg.timeouts.orderSeconds = v));
+  }
+
+  // Receivers named by steps must exist (or be "self").
+  const named: Array<[string, string]> = [
+    ['withdrawExternal.receiver', cfg.withdrawExternal.receiver],
+    ...cfg.extraWithdrawals.map((w, i): [string, string] => [`extraWithdrawals[${i}].receiver`, w.receiver]),
+  ];
+  for (const [where, r] of named) {
+    if (r !== 'self' && !cfg.receivers[r]) errors.push(`${where} is "${r}", but receivers has no "${r}" (set it, or use "self").`);
+  }
+  if (cfg.withdrawValuechainOther.receiver === 'self') errors.push('withdrawValuechainOther.receiver must name a DIFFERENT address in receivers, not "self".');
+  return { config: cfg, errors, warnings };
+}
+
+function stripComments(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stripComments);
+  if (v && typeof v === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) if (!k.startsWith('//')) out[k] = stripComments(x);
+    return out;
+  }
+  return v;
+}

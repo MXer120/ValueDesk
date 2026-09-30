@@ -1,0 +1,30 @@
+{
+  "name": "valuescan",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/server",
+    "apps/web",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,green \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --prefix apps/server run dev",
+    "dev:web": "npm --prefix apps/web run dev",
+    "test": "npm --prefix apps/server test",
+    "typecheck": "npm --prefix apps/server run typecheck && npm --prefix apps/web run typecheck",
+    "build": "npm --prefix apps/web run build",
+    "predev": "node scripts/preflight.mjs",
+    "indexer": "npm --prefix apps/server run indexer"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "overrides": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.20.0"
+    }
+  }
+}

@@ -1,0 +1,1162 @@
+/* ===========================================================================
+   DEPOSIT / WITHDRAW SHEETS (DepositModal.tsx, WithdrawModal.tsx).
+
+   The owner's reference is a "Transfer Crypto" sheet: a dark rounded card, a
+   back arrow, a centred title and a close button; rounded pickers with a coin
+   avatar; a white QR tile; a "you send -> you receive" pill; an address box
+   with the copy action attached underneath; one full-width primary action.
+   Drawn here in this app's own tokens and type - no new colour or face.
+   ======================================================================== */
+
+.modal.fx {
+  --fx-well: color-mix(in srgb, var(--bg) 55%, transparent);
+  max-width: 460px;
+  border-radius: 14px;
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+  border: 1px solid var(--panel-line);
+}
+.fx .modal-head {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: center;
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+  border-bottom: 0;
+}
+.fx .modal-head h2 {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.fx .modal-back,
+.fx .modal-close {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.fx .modal-back { grid-column: 1; }
+.fx .modal-close { grid-column: 3; justify-self: end; }
+.fx .modal-back:hover,
+.fx .modal-close:hover { color: var(--text); background: var(--bg-elevated); }
+.fx .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4) var(--sp-4);
+}
+
+/* --- labels, pickers ---------------------------------------------------------- */
+.fx-lbl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.fx-lbl__aside { color: var(--muted); }
+.fx-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-2); }
+
+.fx-selwrap { position: relative; }
+.fx-sel,
+.fx-row--btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 42px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.fx-sel:hover,
+.fx-row--btn:hover { border-color: var(--line); }
+.fx-sel__v { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.fx-sel__v > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-chev { margin-left: auto; flex: none; color: var(--muted); }
+.fx-row--btn .fx-sel__v { margin-left: auto; }
+.fx-row--btn .fx-chev { margin-left: 0; }
+.fx-row__k { color: var(--muted); font-weight: 500; }
+
+/* The open list is portalled to <body> (ui.tsx:FxSelect) and placed in viewport
+   pixels against its button, so no sheet's scroll box can clip it. Above the
+   sheets (scrim z 100) and the navbar menus (z 1200). */
+.fx-list {
+  position: fixed;
+  z-index: 1300;
+  display: flex;
+  flex-direction: column;
+  min-width: 180px;
+  padding: var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal);
+  font-size: var(--fs-base);
+  animation: pop-in var(--dur-fast) var(--ease-spring);
+}
+.fx-list__ul {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fx-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-1);
+  padding: 0 var(--sp-2);
+  height: 34px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--muted);
+}
+.fx-search:focus-within { border-color: var(--muted); }
+.fx-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  box-shadow: none;
+}
+.fx-search input:focus,
+.fx-search input:focus-visible { outline: none; border: 0; box-shadow: none; }
+.fx-opt-empty { padding: 10px var(--sp-2); color: var(--muted); font-size: var(--fs-xs); }
+.fx-opt-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 8px var(--sp-2);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.fx-opt-row.is-active { background: var(--bg-hover); }
+.fx-opt-row[aria-selected='true'] .fx-opt-row__l { font-weight: 600; }
+.fx-opt-row.is-off { opacity: 0.45; cursor: not-allowed; }
+.fx-opt-row__l { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.fx-opt-row__h { flex: none; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+
+.fx-av {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 50%;
+  color: var(--bg);
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* --- the chooser ------------------------------------------------------------------ */
+.fx-opt {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  padding: var(--sp-3) var(--sp-3);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fx-opt:hover:not(:disabled) { border-color: var(--line); background: var(--fx-well, var(--bg)); }
+.fx-opt:disabled { opacity: 0.5; cursor: not-allowed; }
+.fx-opt__icon { color: var(--muted); display: inline-grid; place-items: center; }
+.fx-opt__t { display: flex; align-items: center; gap: var(--sp-2); font-weight: 600; }
+.fx-opt__d { margin-top: 2px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.35; }
+.fx-opt__r { text-align: right; font-size: var(--fs-xs); color: var(--muted); }
+.fx-opt__r strong { display: block; color: var(--text); font-size: var(--fs-base); font-family: var(--font-num); }
+.fx-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--pos) 16%, transparent);
+  color: var(--pos);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+.fx-coins { display: inline-flex; }
+.fx-coins .fx-av + .fx-av { margin-left: -5px; box-shadow: 0 0 0 2px var(--bg-panel); }
+
+/* --- transfer crypto ------------------------------------------------------------------ */
+.fx-qr {
+  position: relative;
+  align-self: center;
+  padding: 10px;
+  border-radius: 12px;
+  background: #fff;
+  line-height: 0;
+}
+.fx-qr img { width: 156px; height: 156px; }
+.fx-qr .fx-av {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 3px #fff;
+}
+.fx-pill {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+}
+.fx-pill__s { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.fx-pill__s small { display: block; color: var(--muted); font-size: var(--fs-micro); }
+.fx-pill__s b { display: block; font-weight: 600; }
+.fx-pill > svg { color: var(--muted); }
+
+.fx-addr { border: 1px solid var(--panel-line); border-radius: 10px; background: var(--fx-well, var(--bg)); overflow: hidden; }
+.fx-addr code {
+  display: block;
+  padding: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  word-break: break-all;
+}
+.fx-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 38px;
+  border: 0;
+  border-top: 1px solid var(--panel-line);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fx-copy:hover { background: var(--bg-elevated); }
+
+.fx-info { border-radius: 10px; background: var(--fx-well, var(--bg)); font-size: var(--fs-xs); }
+.fx-info > .fx-info__sum {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+  cursor: pointer;
+  color: var(--text);
+}
+.fx-info__sum {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.fx-info__sum .fx-chev { transition: transform var(--dur-med) var(--ease-spring); }
+.fx-info.is-open .fx-info__sum .fx-chev { transform: rotate(180deg); }
+.fx-info__body { padding: 0 var(--sp-3) var(--sp-3); color: var(--muted); line-height: 1.45; }
+
+.fx-i {
+  display: inline-grid;
+  place-items: center;
+  vertical-align: -2px;
+  color: var(--muted);
+  cursor: help;
+}
+.fx-i:hover { color: var(--text); }
+.fx-i svg { display: block; }
+.fx-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.fx-link--warn { color: var(--warn); }
+.fx-link:hover { color: var(--text); }
+
+/* --- amounts, balances, withdraw -------------------------------------------------------- */
+.fx-box { border: 1px solid var(--panel-line); border-radius: 10px; background: var(--fx-well, var(--bg)); }
+.fx-box__head {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.fx-max { color: var(--warn); font-family: var(--font-num); }
+.fx-amount {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+.fx-amount input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: 22px;
+  font-weight: 600;
+  outline: none;
+}
+.fx-amount input::placeholder { color: var(--dim); }
+/* The number sits bare in its box: focus shows on the BOX, not as a ring
+   around the digits. */
+.fx .fx-amount input:focus,
+.fx .fx-amount input:focus-visible { outline: none; border: 0; box-shadow: none; }
+.fx-box:focus-within { border-color: var(--muted); }
+.fx-amount__unit { color: var(--muted); font-weight: 600; }
+.fx-chip {
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.fx-chip:hover { color: var(--text); border-color: var(--line); }
+/* Withdraw: where it is paid from - one of Spot (left) and EVM (right), like the Transfer route's ends; the chosen one in white. */
+.fx-srcs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--panel-line);
+}
+.fx-srct {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  opacity: 0.62;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out), opacity var(--dur-fast) var(--ease-out);
+}
+.fx-srct:not(:disabled):hover { opacity: 0.9; border-color: var(--line); }
+.fx-srct.is-on {
+  opacity: 1;
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.fx-srct__t { flex: 1 1 auto; min-width: 0; }
+.fx-srct__t b { display: block; font-size: var(--fs-base); font-weight: 600; }
+.fx-srct__t small { display: block; overflow: hidden; color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); white-space: nowrap; text-overflow: ellipsis; }
+.fx-srct.is-on .fx-srct__t small { color: var(--text); }
+/* The tick: an empty ring when off, the accent filled with a check when on. */
+.fx-srct__tick {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid var(--line);
+  border-radius: 50%;
+  color: transparent;
+  transition: background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.fx-srct.is-on .fx-srct__tick { border-color: var(--text); background: var(--text); color: var(--bg); }
+@media (max-width: 420px) {
+  .fx-srct { gap: 8px; padding: 8px 10px; }
+}
+
+.fx-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+  color: var(--text);
+  font: inherit;
+}
+.fx .fx-input:focus,
+.fx .fx-input:focus-visible { border-color: var(--muted); outline: none; }
+.fx-input[readonly] { color: var(--muted); }
+
+/* The minimum a chain takes: a warning, not a hint - below it nothing is paid out. */
+.fx-min { color: var(--warn); font-family: var(--font-num); }
+
+/* Destination: the address field with the address book inside its right edge. */
+.fx-dest { position: relative; }
+.fx-dest .fx-input { padding-right: 46px; font-family: var(--font-num); font-size: var(--fs-xs); }
+.fx-dest__book { position: absolute; top: 5px; right: 5px; }
+.fx-iconbtn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fx-iconbtn:hover { color: var(--text); border-color: var(--panel-line); background: var(--bg-elevated); }
+.fx-dest__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin-top: 8px; }
+.fx-dest__actions:empty { display: none; }
+.fx-pillbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: var(--fx-well, var(--bg));
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.fx-pillbtn svg { width: 14px; height: 14px; color: var(--muted); }
+.fx-pillbtn:hover { border-color: var(--line); }
+.fx-contact-tag {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--pos) 16%, transparent);
+  color: var(--pos);
+  font-weight: 600;
+}
+.fx-chip--danger { color: var(--neg); border-color: color-mix(in srgb, var(--neg) 45%, transparent); }
+
+/* --- address book: the drawer out of the Withdraw sheet (AddressBook.tsx) --------- */
+/* As tall as the sheet: head, search and foot stay put, the list scrolls. */
+.fx-book { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); font-size: var(--fs-xs); }
+.fx-book__head { flex: none; display: flex; align-items: center; gap: 6px; }
+.fx-book__head h3 { margin: 0; font-size: var(--fs-base); font-weight: 600; }
+.fx-book__fold { margin-left: -6px; color: var(--muted); }
+.fx-book__fold:hover { color: var(--text); }
+.fx-book__search { flex: none; height: 36px; margin: 0; }
+.fx-book__viewall { flex: none; align-self: flex-start; padding: 0; font-size: var(--fs-xs); }
+.fx-book__scroll { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -4px; padding: 0 4px; }
+.fx-book__view > section + section { margin-top: 2px; }
+.fx-book__foot { flex: none; }
+.fx-book__sec {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--sp-2) 0 4px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fx-book__letter { margin-top: var(--sp-2); color: var(--text); letter-spacing: 0; }
+/* "Clear" appears with the pointer on Recent. */
+.fx-book__clear {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.fx-book__recent:hover .fx-book__clear,
+.fx-book__clear:focus-visible { opacity: 1; }
+.fx-book__clear:hover { color: var(--text); }
+@media (hover: none) { .fx-book__clear { opacity: 1; } }
+.fx-book__list { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.fx-book__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  border-radius: 8px;
+}
+.fx-book__row:hover,
+.fx-book__row:focus-within { background: var(--fx-well, var(--bg)); }
+.fx-book__star {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.fx-book__star:hover { color: var(--text); }
+.fx-book__star.is-on { color: var(--warn); }
+.fx-book__pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fx-book__pick-t { display: grid; min-width: 0; }
+.fx-book__pick b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fx-book__pick small { overflow: hidden; color: var(--muted); font-family: var(--font-num); font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; }
+.fx-book__acts { display: inline-flex; opacity: 0; transition: opacity var(--dur-fast) var(--ease-out); }
+.fx-book__row:hover .fx-book__acts,
+.fx-book__row:focus-within .fx-book__acts { opacity: 1; }
+@media (hover: none) { .fx-book__acts { opacity: 1; } }
+.fx-book__acts .fx-iconbtn { width: 26px; height: 26px; }
+.fx-book__edit { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; padding: 2px; }
+.fx-book__edit .fx-input { height: 32px; }
+.fx-book__confirm { flex: 1 1 auto; display: flex; align-items: center; gap: 6px; padding: 4px 6px; }
+.fx-book__confirm span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fx-book__new { display: grid; gap: var(--sp-2); padding-top: var(--sp-1); }
+.fx-book__new .fx-input { height: 36px; }
+.fx-book__new .fx-book__sec { margin-top: 0; }
+.fx-book__namerow { display: flex; align-items: center; gap: 10px; }
+.fx-book__namerow .fx-input { flex: 1 1 auto; min-width: 0; }
+.fx-book__addr { margin: 0; color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); }
+/* Logo and chain pickers, side by side; the lists open wider than the halves. */
+.fx-book__picks { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.fx-book__picks .fx-sel { height: 36px; padding: 0 8px; font-size: var(--fs-xs); }
+.fx-book__picks .fx-sel__v { min-width: 0; overflow: hidden; }
+.fx-book__picks .fx-sel__v > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* --- a contact's picture: platform / coin logo, the chain as the small badge -------- */
+.ab-av { position: relative; display: inline-block; flex: none; }
+.ab-av__main {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-elevated);
+  /* a hairline, so a dark logo (Ledger's black) still reads as a disc */
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text) 16%, transparent);
+}
+.ab-av__plain { display: grid; place-items: center; color: var(--muted); }
+.ab-av__letter {
+  display: grid;
+  place-items: center;
+  color: #0b0b0b;
+  font-size: 13px;
+  font-weight: 700;
+}
+.ab-av__badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--bg-panel);
+  box-shadow: 0 0 0 2px var(--bg-panel);
+}
+.ab-av__badgeimg { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.ab-av__badgetxt { color: var(--text); font-size: 6px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.ab-optimg { border-radius: 50%; object-fit: cover; }
+.ab-optletter { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--bg-elevated); font-size: 10px; font-weight: 700; }
+
+/* Withdraw: "this address needs no memo" */
+.fx-check { display: flex; flex-direction: row; align-items: center; gap: 8px; margin-top: 8px; color: var(--muted); font-size: var(--fs-xs); cursor: pointer; }
+.fx-check input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); }
+.fx-book__actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+.fx-book .fx-cta { height: 36px; }
+
+.fx-kv { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); }
+.fx-kv > div { display: flex; justify-content: space-between; gap: var(--sp-2); color: var(--muted); }
+.fx-kv b { color: var(--text); font-family: var(--font-num); font-weight: 600; }
+
+.fx-cta {
+  width: 100%;
+  height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fx-cta:hover:not(:disabled) { filter: brightness(0.92); }
+.fx-cta:disabled { opacity: 0.4; cursor: not-allowed; }
+.fx-cta--ghost { background: transparent; color: var(--text); border: 1px solid var(--panel-line); }
+/* The Withdraw sheet's action: says where it goes, a size up. */
+.fx-cta--lg { height: 48px; font-size: calc(var(--fs-base) + 2px); letter-spacing: 0.01em; }
+
+.fx-note { margin: 0; font-size: var(--fs-xs); color: var(--muted); line-height: 1.45; }
+.fx-note--warn { color: var(--warn); }
+.fx-note--ok { color: var(--pos); }
+.fx-note--err { color: var(--neg); }
+.fx-wait { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
+.fx-spin {
+  display: inline-block;
+  flex: none;
+  vertical-align: -2px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--line);
+  border-top-color: var(--text);
+  border-radius: 50%;
+  animation: fx-spin 0.9s linear infinite;
+}
+@keyframes fx-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .fx-spin { animation: none; } }
+
+/* --- transfer: the route IS the From / To picker (TransferModal.tsx) ------------------ */
+.fx-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  background: var(--fx-well, var(--bg));
+}
+.fx-route > .fx-selwrap { display: flex; min-width: 0; }
+/* Each end opens its own list. */
+.fx-route__btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.fx-route__btn:hover,
+.fx-route__btn[aria-expanded='true'] { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.fx-route__btn > .fx-chev { flex: none; color: var(--muted); transition: transform var(--dur-med) var(--ease-spring), color var(--dur-fast) var(--ease-out); }
+.fx-route__btn:hover > .fx-chev { color: var(--text); }
+.fx-route__btn[aria-expanded='true'] > .fx-chev { transform: rotate(180deg); }
+.fx-route__end { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.fx-route__t { min-width: 0; }
+.fx-route__t small { display: block; color: var(--muted); font-size: var(--fs-xs); }
+.fx-route__t b { display: block; overflow: hidden; font-size: var(--fs-base); font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+/* Between the ends: -> at rest; under the pointer it turns into the two
+   arrows, and a press swaps From and To. */
+.fx-route__swap {
+  position: relative;
+  align-self: center;
+  width: 34px;
+  height: 34px;
+  margin: 0 2px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.fx-route__swap > span {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: opacity 160ms var(--ease-out), transform 220ms var(--ease-out);
+}
+.fx-route__swap svg { width: 18px; height: 18px; }
+.fx-route__flip { opacity: 0; transform: rotate(-90deg) scale(0.8); }
+.fx-route__swap:not(:disabled):hover,
+.fx-route__swap:focus-visible {
+  color: var(--text);
+  border-color: var(--line);
+  background: var(--bg-panel);
+}
+.fx-route__swap:not(:disabled):hover .fx-route__arrow,
+.fx-route__swap:focus-visible .fx-route__arrow { opacity: 0; transform: rotate(90deg) scale(0.8); }
+.fx-route__swap:not(:disabled):hover .fx-route__flip,
+.fx-route__swap:focus-visible .fx-route__flip { opacity: 1; transform: none; }
+.fx-route__swap:disabled { cursor: default; }
+/* No hover on touch: the two arrows, so swapping is visible at all. */
+@media (hover: none) {
+  .fx-route__swap:not(:disabled) .fx-route__arrow { opacity: 0; }
+  .fx-route__swap:not(:disabled) .fx-route__flip { opacity: 1; transform: none; }
+}
+@media (max-width: 480px) {
+  .fx-route__btn { padding: 10px; gap: 4px; }
+  .fx-route__end { gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fx-route__swap > span, .fx-route__btn > .fx-chev { transition: none; }
+}
+
+@media (max-width: 480px) {
+  .modal.fx { border-radius: 12px; }
+  .fx .modal-body { padding: var(--sp-2) var(--sp-3) var(--sp-3); }
+}
+
+/* --- the deposit warning (DepositModal.tsx): read before the address shows ---------- */
+.fx-warnbox {
+  display: grid;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--neg) 55%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, color-mix(in srgb, var(--neg) 14%, var(--bg-panel)) 88%, transparent);
+  box-shadow: var(--shadow-modal);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+}
+.fx-warnbox p { margin: 0; }
+.fx-warnbox__t { font-weight: 600; }
+.fx-warnbox ul { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+.fx-warnbox em { font-style: normal; color: var(--neg); font-weight: 600; }
+.fx-warnbox .fx-cta { margin-top: var(--sp-1); }
+
+/* The sheet's content column (inside AutoHeight, which animates its height). */
+.fx-stack { display: flex; flex-direction: column; gap: var(--sp-3); }
+.fx-dest__book.is-on { color: var(--text); border-color: var(--line); background: var(--bg-elevated); }
+
+/* --- the deposit address zone: drawn from the start, blurred until the warning is read --- */
+.fx-addrzone { position: relative; }
+.fx-addrzone__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  filter: blur(11px) saturate(0.7);
+  user-select: none;
+  pointer-events: none;
+  transition: filter 360ms var(--ease-out);
+}
+.fx-addrzone.is-readable .fx-addrzone__content { filter: none; user-select: auto; pointer-events: auto; }
+.fx-addrzone__cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 18px;
+  transition: opacity 260ms var(--ease-out), visibility 0s linear 0s;
+}
+.fx-addrzone.is-readable .fx-addrzone__cover {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 260ms var(--ease-out), visibility 0s linear 260ms;
+}
+.fx-addrzone__wait {
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+}
+.fx-qr__wait { display: grid; place-items: center; width: 156px; height: 156px; }
+
+/* "From Wallet": the wallet app's icon with a small SOSO mark on it (ValueChain only). */
+.fx-wmark { position: relative; display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; }
+.fx-wmark img { width: 100%; height: 100%; border-radius: 6px; object-fit: contain; }
+.fx-wmark svg { width: 90%; height: 90%; color: var(--muted); }
+.fx-wmark__badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  box-shadow: 0 0 0 1.5px var(--bg-panel);
+}
+.fx-brand { border-radius: 50%; object-fit: cover; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-addrzone__content, .fx-addrzone__cover { transition: none; }
+}
+
+/* --- Withdraw: the review before signing (WithdrawModal.tsx WithdrawReview) ---------- */
+.fx-review__t { margin: 0; font-size: var(--fs-base); font-weight: 600; }
+.fx-review {
+  display: grid;
+  gap: 10px;
+  padding: var(--sp-3);
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+  font-size: var(--fs-xs);
+}
+.fx-review > div { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.fx-review span { color: var(--muted); }
+.fx-review span em { font-style: normal; color: var(--text); }
+.fx-review b { font-weight: 600; font-family: var(--font-num); text-align: right; }
+.fx-review__net { display: inline-flex; align-items: center; gap: 6px; font-family: inherit !important; }
+.fx-review__to { flex-direction: column; align-items: stretch !important; gap: 6px !important; }
+.fx-review__to code {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  word-break: break-all;
+}
+.fx-review__recv { padding-top: 8px; border-top: 1px solid var(--panel-line); }
+.fx-review__recv b { font-size: var(--fs-base); }
+.fx-review__actions { display: grid; grid-template-columns: 1fr 2fr; gap: var(--sp-2); }
+
+/* "Please approve on mobile / in browser" on an Enable trading button. */
+.fx-approve { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.fx-approve > svg { flex: none; opacity: 0.85; }
+
+/* A deposit on its way (depositWatch.ts): a glare runs clockwise round the
+   You send -> You receive border, then the border settles green when SoDEX
+   has credited it. The arrow stays put — only the glare moves. */
+@property --fx-glare {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.fx-pill { position: relative; transition: border-color 300ms var(--ease-out); }
+.fx-pill.is-live { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.fx-pill.is-live::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--fx-glare), transparent 0deg, transparent 250deg, rgb(255 255 255 / 0.85) 320deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: fx-glare 2.2s linear infinite;
+  pointer-events: none;
+}
+.fx-pill.is-live > svg { color: var(--text); }
+.fx-pill.is-done { border-color: color-mix(in srgb, var(--pos) 60%, transparent); }
+.fx-pill.is-done > svg { color: var(--pos); }
+.fx-pill.is-failed { border-color: color-mix(in srgb, var(--neg) 60%, transparent); }
+@keyframes fx-glare { to { --fx-glare: 360deg; } }
+
+/* The progress strip hangs off the pill the way the address book hangs off
+   the withdraw sheet: one shared edge, square corners where they meet, the
+   same glass, and it slides open rather than appearing in a gap. */
+.fx-sendrecv {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 420px);
+}
+.fx-sendrecv .fx-pill { align-self: stretch; justify-content: center; }
+.fx-sendrecv.has-strip .fx-pill {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.fx-sendrecv .mo-collapse { width: 100%; }
+
+.fx-dprog {
+  margin: 0;
+  padding: 10px 14px 12px;
+  border: 1px solid var(--panel-line);
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+}
+.fx-dprog__what { color: var(--text); font-family: var(--font-num); font-weight: 600; font-size: var(--fs-xs); }
+.fx-dprog__what small { color: var(--muted); font-family: inherit; font-weight: 400; }
+.fx-dprog__steps { list-style: none; display: flex; justify-content: space-between; gap: 8px; margin: 8px 0 0; padding: 0; }
+.fx-dprog__steps li { display: inline-flex; align-items: center; gap: 6px; color: var(--dim); font-size: var(--fs-micro); transition: color 300ms var(--ease-out); }
+.fx-dprog__steps li.is-past { color: var(--muted); }
+.fx-dprog__steps li.is-now { color: var(--text); font-weight: 500; }
+.fx-dprog__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.5; flex: none; }
+.fx-dprog__steps li.is-past .fx-dprog__dot { background: var(--pos); opacity: 1; }
+.fx-dprog__steps li.is-now .fx-dprog__dot { opacity: 1; animation: fx-pulse 1.2s ease-in-out infinite; }
+.fx-dprog__steps li.is-now:last-child .fx-dprog__dot { background: var(--pos); animation: none; }
+.fx-dprog__fail { margin: 6px 0 0; color: var(--neg); font-size: var(--fs-xs); }
+.fx-dprog__note { margin: 6px 0 0; color: var(--text); font-size: var(--fs-xs); }
+@keyframes fx-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .fx-pill.is-live::before, .fx-dprog__dot { animation: none !important; }
+}
+
+/* The status panel tucks under the sheet. The sheet keeps its own rounded
+   bottom corners and paints above the panel, so the join reads as one piece
+   without squaring the window. `.fx-chev` elsewhere uses margin-left: auto. */
+.fx-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-top: 8px;
+}
+.modal-stack.has-dock .fx-dock { margin-top: -20px; }
+button.fx-dock__up {
+  position: absolute;
+  z-index: 2;
+  left: 50%;
+  bottom: 6px;
+  width: 28px;
+  height: 22px;
+  min-height: 0;
+  margin: 0 0 0 -14px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: var(--glass-sheet-bg);
+  color: var(--pos);
+  cursor: pointer;
+}
+.fx-dock.is-bad button.fx-dock__up { color: var(--neg); }
+button.fx-dock__up .fx-chev {
+  display: block;
+  margin: 0;
+  color: inherit;
+  transform: rotate(180deg);
+}
+.fx-dock__clip {
+  display: grid;
+  grid-template-rows: 0fr;
+  width: 100%;
+  transition: grid-template-rows 280ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.fx-dock.is-open .fx-dock__clip { grid-template-rows: 1fr; }
+.fx-dock__panel {
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+  padding: 16px var(--sp-3) 20px;
+  border: 1px solid var(--panel-line);
+  border-radius: 0 0 14px 14px;
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+  box-shadow: var(--shadow-modal);
+}
+.fx-dock.is-ok .fx-dock__panel {
+  background: color-mix(in srgb, var(--pos) 14%, var(--glass-sheet-bg));
+  border-color: transparent;
+}
+.fx-dock__panel > * { position: relative; z-index: 1; }
+.fx-dock.is-ok .fx-dock__panel::before {
+  content: '';
+  z-index: 0;
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--fx-spin, 0deg), transparent 0 62%, color-mix(in srgb, var(--pos) 75%, white) 78%, transparent 90%);
+  animation: fx-border-spin 8s linear infinite;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+.fx-dock.is-bad .fx-dock__panel {
+  background: color-mix(in srgb, var(--neg) 10%, var(--glass-sheet-bg));
+  border-color: color-mix(in srgb, var(--neg) 45%, var(--panel-line));
+}
+@property --fx-spin { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes fx-border-spin { to { --fx-spin: 360deg; } }
+@keyframes fx-dock-ok {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 50%, transparent); }
+  45% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--pos) 0%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.fx-route.is-glare .fx-route__btn { position: relative; }
+.fx-route.is-glare .fx-route__btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: conic-gradient(from var(--fx-once, 0deg), transparent 0 68%, #fff 84%, transparent 96%);
+  animation: fx-once-spin 0.65s linear 1;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+@property --fx-once { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+@keyframes fx-once-spin { to { --fx-once: 360deg; } }
+.fx-dock--inline .fx-dock__clip,
+.fx-dock--inline .fx-dock__panel { width: 100%; }
+.fx-move {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.fx-move__route {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+}
+.fx-move__end {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-base);
+}
+.fx-move__end img,
+.fx-move__end .fx-wmark { flex: none; }
+.fx-move__route .fx-route__arrow,
+.fx-move__route > svg { flex: none; color: var(--muted); }
+.fx-move__side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex: none;
+}
+.fx-move__side b { font-weight: 500; font-family: var(--font-num); }
+.fx-xnow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.fx-xnow b { font-weight: 500; font-family: var(--font-num); }
+.fx-xnow > span:last-child { flex: 1 0 100%; color: var(--muted); font-size: var(--fs-xs); }
+.fx-xsteps { list-style: none; display: grid; gap: 0; margin: 12px 0 0; padding: 0; }
+.fx-xsteps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  color: var(--dim);
+  font-size: var(--fs-xs);
+}
+.fx-xsteps li.is-past { color: var(--muted); }
+.fx-xsteps li.is-now { color: var(--text); }
+.fx-xsteps li.is-bad { color: var(--neg); }
+.fx-xsteps li.is-done { color: var(--pos); }
+.fx-xsteps__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: 0.45; flex: none; }
+.fx-xsteps li.is-past .fx-xsteps__dot,
+.fx-xsteps li.is-done .fx-xsteps__dot { background: var(--pos); opacity: 1; }
+.fx-xsteps li.is-now .fx-xsteps__dot { opacity: 1; animation: fx-pulse 1.2s ease-in-out infinite; }
+.fx-xsteps li.is-bad .fx-xsteps__dot { background: var(--neg); opacity: 1; }
+.fx-xfers { list-style: none; margin: 0; padding: 0; }
+.fx-xfer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--panel-line);
+}
+.fx-xfer:last-child { border-bottom: 0; }
+.fx-xfer__amt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-num); font-weight: 600; }
+.fx-xfer__route { grid-column: 1; color: var(--muted); font-size: var(--fs-micro); }
+.fx-xfer__st { grid-row: 1 / span 2; align-self: center; font-size: var(--fs-xs); }
+.fx-xfer__st.is-pending { color: var(--text); }
+.fx-xfer__st {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fx-xfer__st.is-success { color: var(--pos); }
+.fx-xfer__st.is-failed { color: var(--neg); }
+.fx-xfer__ic {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  flex: none;
+}
+.fx-xfer__ic.is-pending {
+  color: var(--muted);
+  animation: fx-pulse 1.4s ease-in-out infinite;
+}
+.fx-xfer__ic.is-success {
+  color: var(--pos);
+  background: color-mix(in srgb, var(--pos) 16%, transparent);
+  border-color: transparent;
+}
+.fx-xfer__ic.is-success svg path {
+  stroke-dasharray: 18;
+  stroke-dashoffset: 18;
+  animation: fx-draw 380ms ease-out forwards;
+}
+.fx-xfer__ic.is-failed {
+  color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 14%, transparent);
+  border-color: transparent;
+}
+@keyframes fx-draw { to { stroke-dashoffset: 0; } }
+.fx-dock__err { margin: 8px 0 0; color: var(--neg); font-size: var(--fs-xs); line-height: 1.4; }
+.fx-dock__more {
+  display: inline-block;
+  margin-top: 10px;
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  text-decoration: none;
+}
+.fx-dock.is-ok .fx-dock__more { color: color-mix(in srgb, var(--pos) 42%, var(--dim)); }
+.fx-dock.is-bad .fx-dock__more { color: color-mix(in srgb, var(--neg) 42%, var(--dim)); }
+.fx-dock__more:hover { color: var(--muted); }
+.fx-dock .fx-note { margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  .fx-dock__clip, .fx-xsteps__dot, .fx-xfer__ic, .fx-xfer__ic svg path,
+  .fx-dock.is-ok .fx-dock__panel::before, .fx-route.is-glare .fx-route__btn::after { transition: none; animation: none !important; }
+  .fx-xfer__ic.is-success svg path { stroke-dashoffset: 0; }
+}

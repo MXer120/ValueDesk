@@ -1,0 +1,1789 @@
+/**
+ * Market.tsx's own sheet: market strip, symbol header, order book, trade tape.
+ *
+ * WHY EVERY CLASS IS PREFIXED `mkt-`
+ * styles.css is injected LAST (main.tsx imports App before styles.css, so
+ * component sheets evaluate first). That means a rule there beats a rule here
+ * on a specificity TIE. Reusing `.panel` / `.booktable` / `.datatable` would
+ * hand the generic card treatment the win on every shared property, and the
+ * fight would be invisible until someone read the bundle order. A private
+ * namespace sidesteps the whole problem: nothing in styles.css selects
+ * `mkt-*`, so nothing here can be silently overridden. The `button` element
+ * reset in styles.css is (0,0,1), so a single class here outranks it - but
+ * only for properties this file actually restates, which is why the control
+ * blocks below spell out padding, radius, font-size, background and border.
+ *
+ * TYPE. Four sizes and two weights, everywhere, no exceptions:
+ *   10px/400  lh 12px    stat labels, notes, the quietest text
+ *   12px/400  lh 16.5px  column heads, secondary captions
+ *   12px/500  lh 16.5px  every data value
+ *   14px/400  lh 21px    panel titles
+ *   20px/500             the market name and the two headline prices; the
+ *                        line box is 22-30px depending on what has to sit
+ *                        under it, and it is always a FIXED px value
+ * Nothing is 600, nothing is 700, nothing is uppercased. Rank comes from
+ * COLOUR - --dim, then --muted, then --text - and from size. On a screen made
+ * of numbers, weight is the one lever that makes the numbers themselves harder
+ * to compare against each other, so it is spent only on them.
+ *
+ * SURFACES. Every panel is a FILLED CARD in --bg-panel (#1b1a14) on a --bg
+ * (#141310) page, separated by 4px gutters and rounded 4px, with NO border of
+ * any kind - the tone step does the separating. Measured off the reference's
+ * rendered pixels, which is the only authority here: an earlier revision read
+ * `getComputedStyle().backgroundColor` across every DOM node, saw that panel
+ * CHILDREN are transparent (only the container is filled), concluded "panels
+ * are transparent", and shipped a page of washed-out content sitting on bare
+ * background. So the strip, the header, the book and the tape all paint.
+ *
+ * Content is inset 16px from the card edge - including the depth bars, which
+ * are clipped to exactly the same gutter as the text they sit behind.
+ */
+
+.mkt-strip,
+.mkt-header,
+.mkt-book,
+.mkt-tape {
+  --mkt-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --mkt-hover: 150ms;
+  /* Fallbacks so this sheet renders correctly even if the shared line-height
+     tokens are renamed out from under it. The px values ARE the spec. */
+  --mkt-lh-micro: var(--lh-micro, 12px);
+  --mkt-lh-xs: var(--lh-xs, 16.5px);
+  --mkt-lh-base: var(--lh-base, 21px);
+  --mkt-lh-xl: var(--lh-xl, 30px);
+}
+
+/* Panel titles, on the rare mount that still asks for one. The tabbed panel
+   passes showTitle={false}, so this is the standalone case only. */
+.mkt-title {
+  font-size: var(--fs-base);
+  font-weight: 400;
+  line-height: var(--mkt-lh-base);
+  color: var(--muted);
+  margin: 0 0 var(--sp-1);
+}
+
+/* The title row also carries the settings trigger now - one row, not a
+   second, matching TapeFilter.css's own chrome budget (every row here is
+   height the print list does not get). `.mkt-title`'s own bottom margin is
+   cleared so this flex row's `align-items: center` decides the spacing
+   instead of two competing rules. Renders (and right-aligns the settings
+   button via its own margin, see `.tape-settingswrap` in TapeFilter.css)
+   even when the title itself does not - the tabbed mount passes
+   `showTitle={false}`, and the settings control still has to be reachable
+   there. */
+.mkt-tape-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.mkt-tape-head .mkt-title { margin: 0; }
+
+/* A note that stands in for content: loading, empty, or "everything is
+   filtered". Deliberately quiet - it is not data. */
+.mkt-note {
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--mkt-lh-xs);
+  color: var(--dim);
+  margin: var(--sp-2) 0;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+}
+
+/* ==========================================================================
+   1. MARKET STRIP
+   ==========================================================================
+   One row of chips on its OWN CARD - the strip is a filled --bg-panel surface
+   with 4px gutters above and below it, not a bare band running out of the
+   navbar into the header. A chip is still TEXT: no border, no fill, no
+   capsule. At 24 markets a row of outlined pills is a second navbar competing
+   with the real one, and this row exists to be read PAST on the way to the
+   chart.
+
+   The scrollbar is hidden rather than styled: a 6px track inside a 36px row
+   is a visible horizontal rule under the prices, and a wheel or trackpad
+   flick is the only interaction this row ever gets. */
+
+.mkt-strip {
+  display: flex;
+  align-items: center;
+  /* 24px, not 16px: measured chip-to-chip clearance on the reference is a
+     consistent 25px and ours was 17-18px, which read as a denser, busier row
+     than the one it is copying. */
+  gap: var(--sp-5);
+  /* The card fills the cell the grid gives it - the band height belongs to the
+     layout's row size, not to this rule. A `min-height` above what the content
+     draws would win against a shorter cell and then be CLIPPED by the panel's
+     own `overflow: hidden`, which is a worse failure than a short card: the
+     rounded bottom corners get sliced off.
+     THE FLOOR IS THE CHIP AND NOTHING MORE - 18px, down from 20px, so a tighter
+     row allocation lands as a tighter bar instead of as an overflowing one.
+     There is no vertical padding here and there never was: every pixel between
+     the chips and the card edge is slack the grid row hands down, which is why
+     shrinking this bar is a row-count edit (layout.ts) with this rule staying
+     out of its way. */
+  height: 100%;
+  min-height: 18px;
+  min-width: 0;
+  width: 100%;
+  /* 28px, not the card's usual 16px. Measured, the reference starts its first
+     ticker 28px inside the strip's own edge - the extra 12px is what stops the
+     first symbol reading as a label attached to the panel corner, in the one
+     row on the page that is pure horizontal text with no leading control to
+     hold it off the edge. The trailing side matches so the fade lands
+     symmetrically; `::after` below reaches back over it. */
+  padding: 0 28px;
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  overflow-x: auto;
+  overflow-y: hidden;
+  /* Firefox + the standard property. styles.css sets `* { scrollbar-width:
+     thin }` at zero specificity, so this class wins on its own. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  white-space: nowrap;
+}
+/* Beats the global `::-webkit-scrollbar { height: 6px }` - that rule is (0,0,0). */
+.mkt-strip::-webkit-scrollbar { display: none; height: 0; }
+
+/* THE RIGHT-HAND FADE.
+ *
+ * The strip overflows at every realistic width, and without this the last
+ * visible chip is cut mid-word at full brightness against the panel gutter -
+ * a hard vertical slice through a glyph, which reads as a rendering fault
+ * rather than as "there is more this way".
+ *
+ * `position: sticky` on a flex item inside the scroller pins it to the
+ * scrollport's right edge while the chips scroll underneath; the negative
+ * margin-left takes it back out of the flow so it overlays rather than
+ * occupies. The negative `right` reaches past the strip's own padding - it
+ * tracks that padding, so the fade always covers the full card edge.
+ *
+ * THE STOP IS 60%, not 72%. At 72% the gradient was still ~8% short of opaque
+ * where the last clipped glyph fell, which left a readable orphan fragment
+ * floating past the fade - measured at luminance 32 against a 26 background,
+ * i.e. faint but present, and worse than a clean cut because it reads as dirt
+ * on the panel rather than as "there is more this way". 60% gives 34px of ramp
+ * and 22px of solid, so anything the fade reaches is gone by the time the card
+ * edge arrives while the ramp is still long enough not to read as a hard edge. */
+.mkt-strip::after {
+  content: '';
+  position: sticky;
+  right: -28px;
+  flex: none;
+  align-self: stretch;
+  width: 56px;
+  margin-left: -56px;
+  background: linear-gradient(to right, transparent, var(--bg-panel) 60%);
+  pointer-events: none;
+}
+
+.mkt-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  /* 4px between the ticker and its change, not 6px. Measured on the reference
+     the clear run between the symbol's last glyph and the sign is a consistent
+     4 columns; at 6px each chip came out 4px wide of its reference twin and the
+     symbol and its percentage read as two items rather than one reading. The
+     25px CHIP-to-chip gap above is what separates markets from each other -
+     this gap only has to stop two halves of one label from touching. */
+  gap: var(--sp-1);
+  /* 18px, not 20px, and this is the strip's floor rather than a look: the chip
+     is the tallest thing in the row, so `.mkt-strip`'s min-height cannot go
+     below it. The 16.5px line box already contains the 12px face's descender
+     (IBM Plex Sans at 12px is ~15.6px of ascent+descent), so 18px leaves 0.75px
+     of clearance a side and clips nothing - it just stops the row claiming 2px
+     it never draws in. See `.mkt-strip`. */
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  cursor: pointer;
+  transition: color var(--mkt-hover) var(--mkt-ease);
+}
+
+.mkt-chip:hover { color: var(--text); background: none; }
+
+/* EVERY symbol in the strip is --text, INCLUDING the one currently loaded.
+   The strip used to tint the active market amber; measured, the reference
+   gives it no highlight at all, and it is right to: the market you are on is
+   named at 20px in the header 40px below, so a second marker here only teaches
+   the eye that amber in this row means something it does not mean anywhere
+   else. `aria-selected` still carries the state for assistive tech. */
+.mkt-chip-sym { color: var(--text); }
+
+.mkt-chip-chg { }
+.mkt-chip-chg.pos { color: var(--pos); }
+.mkt-chip-chg.neg { color: var(--neg); }
+/* Flat or unknown: never a green zero. */
+.mkt-chip-chg:not(.pos):not(.neg) { color: var(--dim); }
+
+/* A favourite is marked by a star, not by moving it out of the sort - it is
+   already sorted to the front, so the marker only has to say WHY. */
+.mkt-chip-fav { color: var(--accent); font-size: var(--fs-label); line-height: 1; }
+
+.mkt-strip-empty { color: var(--dim); font-size: var(--fs-data); line-height: var(--mkt-lh-xs); }
+
+/* ==========================================================================
+   2. SYMBOL HEADER
+   ==========================================================================
+   56px, the panel fill, radius 4, content inset 16px from the card edge.
+
+   Reading order left to right: what market, what it costs, what else is true
+   about it. The price block sits second because it is the only thing here
+   that changes twice a second, and a number that moves belongs next to the
+   name it belongs to, not at the end of a row of statistics.
+
+   TWO GUTTERS, and the difference between them is measured off rendered ink,
+   not off the box model: 19px of clearance from the market picker's chevron to
+   the headline price and 25px from the price to the first stat label. The row
+   ran a flat 20px flex gap, which made both seams the same - and they are not
+   the same seam. The ident and the price are one statement ("this market, this
+   price"); the stats are a second one, and the reference spends 6px saying so.
+   The base gap is therefore 18px and `.mkt-stats` adds the 6px back at the one
+   seam that wants it, rather than three gaps being spelled out independently.
+   Neither is a spacing token, and deliberately: these are optical gaps between
+   glyph edges, and the glyphs' own side bearings are already part of the sum. */
+
+.mkt-header {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  /* Same contract as the strip: the card is as tall as the cell, and the band
+     height is the layout's row count to set.
+     THE FLOOR IS 35px, down from 40px, because 35px is what the tallest thing
+     in the bar actually draws: `.mkt-stats` is 1px of padding + a 16.5px label
+     line + a 1px gap + a 16.5px value line, and the ident and price stacks are
+     32px. The old 40px was 5px of floor holding the bar open around nothing,
+     and it would have overflowed - and clipped - the moment the row allocation
+     came down to meet the content. Nothing here is a type change: both lines
+     keep their 12px face and their fixed 16.5px line box. */
+  height: 100%;
+  min-height: 35px;
+  min-width: 0;
+  width: 100%;
+  padding: 0 var(--sp-4);
+  background: var(--bg-panel);
+  border-radius: var(--radius-sm);
+  /* The panel this sits in can be resized horizontally. Below its comfortable
+     width the stats scroll rather than wrap into a second line the 52px box
+     has no room for. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.mkt-header::-webkit-scrollbar { display: none; height: 0; }
+
+/* THE CARD OWNS ITS OWN INSET, so the panel body must not add a second one.
+ *
+ * Every other component that paints its own card is registered `pad: false`
+ * (registry.tsx), which flips the body to `--flush`; the symbol header is the
+ * one that was not, so `.dash-panel__body`'s 16px landed on top of this card's
+ * 16px and the star chip sat 32px inside the panel against the reference's 16px
+ * - and everything downstream of it, coin dot, name, badge, price, shifted with
+ * it. Written here rather than there because it is a fact about THIS component
+ * (it draws a full-bleed fill, a radius and its own gutter), and scoped by
+ * `:has(> .mkt-header)` so it can only ever reach the panel this thing is
+ * mounted in. It is also idempotent: if the registry entry later declares
+ * `pad: false`, `--flush` zeroes the same padding and this rule changes
+ * nothing. A browser without `:has()` drops the rule and lands back on today's
+ * 32px rather than on anything broken.
+ *
+ * THE VERTICAL HALF IS NOW ZEROED TOO, and that is 8px of band height that was
+ * being spent on nothing. `.dash-panel__body`'s 4px inset exists so a card that
+ * does NOT paint its own surface has some air inside the panel; this one paints
+ * a full-bleed fill with its own 16px gutter, so the inset only inset the fill.
+ * Measured, it showed up as the two seams either side of this bar being 8px
+ * (the grid's 4px gutter plus this 4px) where every other seam on the page is
+ * the design's single 4px - the symbol header was the one card on the terminal
+ * floating in its own cell. Zeroing it also makes the row-count reduction in
+ * layout.ts land 1:1: without it a 2-row allocation would leave this card 8px
+ * short of the 35px its two lines need and clip the value line. */
+.dash-panel__body:has(> .mkt-header) {
+  padding: 0;
+}
+
+/* THE IDENT IS NOT CENTRED ON THE BAND, and that is the measured difference.
+   The header centres both of its blocks vertically, which put the star / coin /
+   name / badge / chevron run exactly on the band's centreline - 2px below where
+   the reference draws it. The reference hangs the ident off the headline
+   price's FIRST line rather than off the two-line price block, so the symbol's
+   baseline sits 2px under the price's instead of 4px under it, and the name
+   reads as a label ON the price rather than as a row beneath it.
+   Expressed as a margin PAIR that sums to zero so the outer height, and
+   therefore every other item's centring, is untouched - the same idiom
+   `.mkt-price` uses two blocks down for its own +2px. */
+.mkt-ident {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+  margin-top: -2px;
+  margin-bottom: 2px;
+}
+
+/* Watchlist toggle. It gets a container: a bare outline glyph floating beside a
+   20px market name has no hit target you can find and no edge that says it is
+   pressable. The chip is what makes the star a control; the colour is what
+   makes it a state.
+
+   SQUARE, and the star nearly fills it. An earlier comment here claimed the
+   measured chip was 28x22; re-measured it is 24 wide by 24-25 tall with a 12px
+   star inside, and the squat 28x22 box with a 9px glyph in the middle of it was
+   the visible error - a wide hairline rectangle with a small mark adrift in it.
+   The star is DRAWN rather than typed for the same reason the chevron is: U+2605
+   is not in IBM Plex Sans, so `★` fell through to whatever symbol font the
+   platform resolved and arrived at a size and weight nobody here chose.
+
+   THE GLYPH IS SOLID IN BOTH STATES and the STATE IS THE COLOUR - see the
+   `Star` comment in Market.tsx for the measurement. The earlier note here
+   reasoned that "we do not paint the on-state colour on an off-state control to
+   match a screenshot", which is right, and then drew the wrong conclusion from
+   it: it kept the off state as an OUTLINE, and an outline star at 12px is a
+   shape made entirely of antialiased edges, so it composites to about half its
+   token value and lands at roughly the contrast of the 1px border framing it.
+   Measured against the reference's 13x12 of solid ink, ours read as an empty
+   box with a scratch in it - reported three rounds running. Filling it fixes
+   the legibility without borrowing the on-state's meaning, because the meaning
+   was never in the fill: --muted is "not on your watchlist", --accent is on,
+   and that is the same colour-only distinction every other control here makes.
+
+   RADIUS 6, not --radius-sm. Traced on the top border row, the reference's flat
+   edge does not begin until ~6px inside the left border where ours began ~2px
+   in - the same 6px this file already records for the reference's button radius
+   ("between our --radius-sm (4) and --radius-md (8)"), which was applied to a
+   different control and never reached this one. Not tokenised, for the reason
+   given there: 6px is not one of the design's five radii, it is the one control
+   family that sits between two of them. */
+.mkt-fav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--mkt-hover) var(--mkt-ease);
+}
+.mkt-fav-star { display: block; }
+.mkt-fav:hover { background: none; color: var(--text); }
+.mkt-fav.is-on { color: var(--accent); }
+
+/* The market picker. This IS the page's primary navigation, so it gets the
+   only real hit area in the header. */
+.mkt-symbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+/* Hover brightens, it does not fill. A background swap here was the loudest
+   surviving instance of the old interaction language: the measured reference
+   changes exactly one property on hover, `color`, on every control it has. */
+.mkt-symbtn:hover { background: none; border: none; }
+
+/* THE ROW'S FOUR SEAMS ARE NOT ALL 8px, and the two that are not are measured
+   off rendered ink rather than off the box model. Coin -> name is 9 blank
+   columns in both, so the flex gap is right there and stays. The other two are
+   not: the reference leaves 9 columns between the name's last glyph and the
+   badge's PILL EDGE and 10 between that pill edge and the chevron's first
+   stroke, where a flat 8px gap gave 8 and 8.
+   The asymmetry is real rather than sloppy - a filled pill has no side bearing,
+   so a gap that looks right against a glyph looks tight against a background
+   edge, and it needs the extra pixel on each side to sit level with the seams
+   made of text. The two together are also what lands the headline price on its
+   measured left edge: the ident is the only thing to its left, so 1 + 2 here is
+   3px of the price block's position, and it was 3px light. */
+.mkt-symbtn .mkt-kind { margin-left: 1px; }
+.mkt-symbtn .mkt-chev { margin-left: 2px; transition: color var(--mkt-hover) var(--mkt-ease); }
+.mkt-symbtn:hover .mkt-chev { color: var(--text); }
+
+/* A generic letter dot, not a logo. No brand glyph is shipped or borrowed;
+   the hue is derived from the ticker so it is stable per asset without any
+   asset being copied. */
+.mkt-coin {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  color: var(--bg);
+  flex: none;
+}
+
+/* The market name is the loudest LABEL in the app and it still does not get
+   bold - 20px/500 is the headline step, and it earns the rest of its rank from
+   full --text against everything around it being --muted. It was set at 14px,
+   which measured half the reference's cap height and left the page's subject
+   line quieter than the statistics beside it. */
+.mkt-symname {
+  font-size: var(--fs-read);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xl);
+  letter-spacing: 0;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* Contract-kind badge. Sentence case: micro-caps at 10px cost ~15% more width
+   and buy nothing but noise next to a name that is already legible. The label
+   is --text, not --muted: on an already-raised --bg-control chip, --muted
+   drops the word below the fill it sits on and the badge reads as disabled. */
+.mkt-kind {
+  font-size: var(--fs-label);
+  font-weight: 500;
+  line-height: var(--mkt-lh-micro);
+  /* 4px of side padding, not 5. Measured against the reference the glyph run
+     inside this pill is byte-identical (21px) and the height matches to the
+     pixel, so the pill's 3px of extra width was all padding - and on a 29px
+     chip 3px is a tenth of it, enough that the badge stopped reading as tight
+     to the word it holds. */
+  padding: 2px 4px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-control);
+  color: var(--text);
+  flex: none;
+}
+
+/* A STROKED chevron, not a glyph. `▾` renders as a 4px solid wedge whose size
+   and weight are the font's business rather than ours; a 10px two-stroke V is
+   the measured shape and it scales with the control instead of with the text. */
+.mkt-chev { color: var(--muted); flex: none; display: block; overflow: visible; }
+
+/* --- headline price ------------------------------------------------------ */
+
+/* TWO COLOURS, TWO QUESTIONS. The price carries the direction of the last
+   tick; the change line carries the sign of the 24h move. They are allowed to
+   disagree, and when they do that disagreement is the information - a market
+   up on the day whose last print was a downtick. Painting both from the 24h
+   sign, which is what this used to do, spends a 20px number restating a fact
+   the line underneath it already states in words and a sign.
+   The tick direction is LATCHED in useTickDirection (it holds until a print
+   contradicts it), so this is a state, not a flash: nothing here strobes.
+
+   THE PRICE IS NOT ON THE STAT GRID, and forcing it onto one was an error this
+   block used to commit. Both stacks were pinned to a shared 40px height and
+   bottom-aligned, which made the change line and the stat values share a
+   baseline exactly. Measured, the reference does the opposite: the change
+   baseline sits 3px BELOW the stat-value baseline and the price cap sits 3px
+   below the stat-label cap, so the two-line price block hangs slightly off the
+   label/value grid and reads as its own optically-centred unit rather than as a
+   third statistic that happens to be large. Both stacks now take their natural
+   height and are centred by the header's own `align-items`, which also makes
+   them independent of the row height the layout hands this card; the 2px margin
+   pair below is the whole of the deliberate offset (+2px down, outer height
+   unchanged, so the centring is not disturbed).
+
+   The leading inside the block is 13px baseline-to-baseline - 20px + 12px of
+   line box - against the 16.25px that 22 + 16.5 produced. That is what closes
+   the ink gap between the price and the change from 9px to the measured 5px. */
+
+.mkt-price {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  min-width: 0;
+  margin-top: 2px;
+  margin-bottom: -2px;
+  color: var(--text);
+}
+
+.mkt-price-v {
+  font-size: var(--fs-read);
+  font-weight: 500;
+  /* 20px, not 22 and certainly not 30. See the block comment: the price and the
+     change line are 13px baseline-to-baseline, and this line box plus the
+     change's 12px is exactly that. */
+  line-height: 20px;
+  letter-spacing: 0;
+  white-space: nowrap;
+  color: var(--text);
+}
+.mkt-price-v.up { color: var(--pos); }
+.mkt-price-v.down { color: var(--neg); }
+
+.mkt-price-chg {
+  font-size: var(--fs-data);
+  font-weight: 500;
+  /* The one place in the app that does not take the 16.5px data line. It is the
+     second half of a two-line display block, not a row in a table, and the
+     16.5px box is 4px of it spent holding the change away from the price it
+     belongs to. Still a fixed px value, still 12px/500. */
+  line-height: var(--lh-micro);
+  white-space: nowrap;
+  color: var(--muted);
+}
+.mkt-price-chg.pos { color: var(--pos); }
+.mkt-price-chg.neg { color: var(--neg); }
+
+/* TWO FACTS ON ONE LINE, held apart by 6px rather than by a space.
+   "+266.57" and "+0.33%" are two different statements of the same move - one in
+   the quote currency, one as a proportion - and a literal space at 12px is 3px
+   of advance, which runs them into a single unreadable token. Measured, the
+   reference leaves 8 blank ink columns here and ours left 4. A margin and not a
+   wider character: there is no 6px space codepoint that is also tabular, and a
+   figure space would change width with the font under it. */
+.mkt-price-pct { margin-left: 6px; }
+
+/* --- stat columns -------------------------------------------------------- */
+
+/* The 6px the base header gap gives up so the ident and the price read as one
+   block - see .mkt-header. Only this seam gets it back. */
+.mkt-stats { display: flex; align-items: center; gap: var(--sp-5); min-width: 0; margin-left: 6px; }
+/* Below a wide window the stats do not fit beside the name and the price.
+   The header itself used to scroll, which slid the price off the left edge
+   and cut "Mark" down to "Ma" on the right with no cue that it scrolled.
+   The name and the price stay put; only the stats move, and the fade says so. */
+@media (max-width: 1200px) {
+  .mkt-header { overflow-x: hidden; }
+  .mkt-stats {
+    flex: 1 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-right: 20px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+  .mkt-stats::-webkit-scrollbar { display: none; height: 0; }
+}
+/* A phone has no room for the stats beside the name and the price: measured,
+   they were left a 20px sliver ("Ma"). The xs ticker is 3 rows (layout.ts)
+   so this second line fits. 567px is that breakpoint as a window width. */
+@media (max-width: 567px) {
+  .mkt-header {
+    flex-wrap: wrap;
+    align-content: center;
+    row-gap: 2px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .mkt-stats { flex-basis: 100%; margin-left: 0; }
+}
+
+/* Label ABOVE value, where label-beside-value would force every column to the
+   width of its longest word and turn the header into a table. Both lines are
+   centred as one natural-height block by the header's `align-items: center`;
+   nothing here is pinned to a fixed height, because the price stack next to it
+   deliberately does NOT share this grid (see .mkt-price). */
+/* THE PADDING AND THE GAP ARE ONE EDIT, and they have to stay one.
+   Measured, the reference's label-to-value baseline step is 18px and ours was
+   19px, with the VALUE baseline already correct in both - so the label alone
+   had to come down 1px without the value following it. `gap: 1px` closes the
+   step (the step is the label's 16.5px line box plus the gap); `padding-top:
+   1px` puts back the pixel the gap gave up, so the block is still exactly 35px
+   tall and the header's `align-items: center` places it exactly where it did
+   before. Change one without the other and the whole column moves half a pixel
+   and the value baseline goes with it. */
+.mkt-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-top: 1px;
+  flex: none;
+}
+
+/* 12px, not 10px. This was the single most visible miss in the whole header
+   strip: measured against the reference's identical strings the labels ran a
+   consistent 17-21% short on every one of them - "24h High" 42px against 49,
+   "Open Interest" 64 against 76 - with no tracking difference, i.e. a pure size
+   step. 10px is for small print; a column head naming a live number is not
+   small print, and the reference sets it at the same 12px as the value beneath
+   it, one step down in WEIGHT and COLOUR instead of in size. */
+.mkt-stat-l {
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--mkt-lh-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.mkt-stat-v {
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+/* NO sign colour on a stat value - not even on funding, which is the one that
+   most obviously invites it. Every value in this row is --text; the row's job
+   is to be scanned as a block, and one green cell in it becomes the thing the
+   eye lands on instead of the price 24px to its left. A negative funding rate
+   still says so: it carries a minus sign. */
+/* The funding countdown rides on the funding rate's own line: it is the same
+   fact ("how much, and when"), so splitting it into another column would make
+   the header wider for no extra information. */
+.mkt-stat-sub { color: var(--muted); margin-left: 6px; }
+
+/* ==========================================================================
+   3. ORDER BOOK
+   ==========================================================================
+   ONE CARD. The whole book - controls, headers, rows, mid anchor and footer -
+   is a --bg-panel surface with its content inset 16px, and that inset is what
+   the depth bars are clipped to as well, so bar and text share exactly one
+   gutter on both edges. Running the bars full-bleed to the panel edges while
+   the text sat 6px in was the visible tell: the shading no longer lined up
+   with the numbers it was shading.
+
+   NO `border-top`. The rule under the tab strip is drawn once, by the tab bar
+   itself (`.dashboard` tab bar, dashboard.css) - it is the element that spans
+   the whole band including the tabs the book does not own. This panel used to
+   add its own hairline directly beneath that one, and the two stacked into a
+   2px rule: the only doubled divider in the app, and visibly heavier than every
+   other 1px line on the page. */
+
+.mkt-book {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: 12px var(--sp-4) 10px;
+  background: var(--bg-panel);
+  border: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  overflow: visible;
+  /* DEPTH-BAR RAMPS, measured off the reference's rendered pixels.
+     Each bar is a horizontal gradient inside its own filled region: dark at
+     the inner edge, brightening toward the panel edge, so the bar reads as
+     depth accumulating outward rather than as a flat block of tint. The old
+     0.18-alpha flat fill peaked at #3b1d17 - about a third of the reference's
+     brightest point - which is why our book looked washed out beside it.
+     Tokenised here so the two sides cannot drift apart. BookRow sets the
+     stops; the ramp, the red hatch and the dotted limit slice are painted
+     from these in the row rule below. A <tr> cannot host an absolutely
+     positioned child without leaving the table's sizing algorithm. */
+  --mkt-bid-lo: #153c42;
+  --mkt-bid-hi: #088660;
+  /* #551834, not #631e35. Sampled at the inner edge of the longest bar the two
+     sides had drifted apart: the bid ramp landed on the reference exactly and
+     the ask ramp started ~18% brighter in red, which flattened the ask block
+     and made the two halves of the book read as different depths of shading for
+     the same magnitude. */
+  --mkt-ask-lo: #551834;
+  --mkt-ask-hi: #af3c30;
+}
+
+/* --- controls row -------------------------------------------------------- */
+
+/* THE 1px IS ON THIS ROW ONLY, which is why it is a margin pair and not less
+   card padding. Measured against the reference the book's column heads land on
+   the same row to the pixel (ink 140-148 in both) and so do the first level's
+   baselines - it is only the controls above them that sat 1px low, on BOTH
+   ends of the row independently: the view swatches by 1px and the unit label's
+   baseline by 1px. Taking it out of `.mkt-book`'s 12px top padding would move
+   the heads and every level with them and trade one aligned thing for two
+   misaligned ones. Summing to zero keeps `.mkt-book-rows` exactly where it is,
+   so the row-fitting maths never sees a height change. */
+.mkt-book-ctl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 24px;
+  flex: none;
+  padding: 0;
+  margin-top: -1px;
+  margin-bottom: 1px;
+}
+
+/* 16px between swatches, not 4px. At 4px the three squares read as one
+   tri-colour object rather than as three independent toggles; 16px puts the
+   group on the measured 28px pitch (12px of colour, 16px of air).
+
+   The 2px indent is OPTICAL, not structural. Everything else in this panel -
+   the column heads, every price, the depth bars - starts at the card's 16px
+   inset, but those are all TEXT, and a glyph carries a left side bearing that a
+   flat 12px block does not: aligned to the same box edge the swatches hang 2px
+   proud of the "Price" head directly beneath them. The reference indents by the
+   same 2px, which is what puts the first swatch's colour on the same vertical
+   as the P's stem rather than on the box that contains it. */
+.mkt-views { display: flex; align-items: center; gap: var(--sp-4); margin-left: 2px; }
+
+/* Three swatches. No border, no fill, no box - the swatch IS the label, and a
+   chrome-free 12px square reads as "which sides" faster than three words.
+   Square corners: a radius on a 12px block is 2px of rounding on 12px of
+   colour, which at this size only makes the edge look soft rather than
+   deliberate. */
+.mkt-view {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+  /* 0.5, not 0.4: composited over the panel this lands on exactly the
+     measured #0d674b / #853228 of the reference's idle swatches. */
+  opacity: 0.5;
+  transition: opacity var(--mkt-hover) var(--mkt-ease);
+}
+/* The one place a hover is not a colour change on text, because there is no
+   text: the swatch's colour IS its label, and brightening it to full is the
+   same single-property change every other control here makes. */
+.mkt-view:hover { opacity: 1; background: none; border: none; }
+.mkt-view.is-on { opacity: 1; }
+
+.mkt-view-sw {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 0;
+  overflow: hidden;
+}
+.mkt-view-sw.bids { background: var(--pos); }
+.mkt-view-sw.asks { background: var(--neg); }
+/* Asks on top, bids below - the same vertical order the book itself uses, so
+   the swatch is a miniature of what the button turns on. The 2px transparent
+   band between the halves is what makes it read as TWO sides rather than as a
+   single square that happens to change colour halfway down. */
+.mkt-view-sw.both {
+  background: linear-gradient(
+    to bottom,
+    var(--neg) 0 5px,
+    transparent 5px 7px,
+    var(--pos) 7px 12px
+  );
+}
+
+/* Unit + grouping, pushed to the far right of the row. */
+.mkt-unit { margin-left: auto; position: relative; }
+
+/* Unit and grouping are DATA - which currency the two right-hand columns are
+   counted in, and how coarsely prices are bucketed - so they take the data
+   treatment, 12px/500 in --text. Set at 400/--muted they read as a caption
+   about the book rather than as two settings that change every number in it. */
+/* 3px of air on each side of the separator, not 6px. "USD | 0.1" is ONE
+   compound label - which currency, bucketed how coarsely - and at 6px it broke
+   into three separately-spaced items floating at the end of the control row. */
+/* The 3px trailing margin is the same inset the mid row's spread mark takes,
+   and for the same reason: these two are the only things in the panel whose
+   right edge is a STROKE rather than a glyph, so run to the 16px card inset
+   they sit flush against it while every number above and below them stops a
+   side bearing short. Measured, the reference holds both off the content edge;
+   ours were hard against it. */
+.mkt-unitbtn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  padding: 0;
+  margin-right: 3px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  cursor: pointer;
+  transition: color var(--mkt-hover) var(--mkt-ease);
+}
+.mkt-unitbtn:hover { color: var(--text); background: none; border: none; }
+/* The caret does NOT inherit the control's --text. "USD" and the tick value are
+   both settings that change every number in the panel; the caret only says the
+   pair is pressable, and at full brightness it read as a third bright element in
+   a control that has two. Measured, the reference's never exceeds --muted.
+   The extra 3px on top of the row's own gap is the seam between the compound
+   label and the caret that discloses it: "USD | 1" is one setting spelled in
+   three parts and the caret is not one of them, so it gets the wider gap the
+   reference gives it (6px, against 3px inside the label). */
+.mkt-unitbtn .mkt-chev { color: var(--muted); margin-left: 3px; }
+.mkt-unitsep { width: 1px; height: 11px; background: var(--dim); flex: none; }
+
+/* TWO CLASSES, ON PURPOSE. `.menu-popup` in styles.css sets `left: 0` at
+   (0,1,0) and styles.css is injected LAST, so a lone `.mkt-unitmenu` TIES and
+   loses - which is exactly the trap this file's header warns about, and it had
+   already sprung: `left: auto` never applied, so the popup grew rightward out
+   of the book panel and over the order ticket instead of hanging off the
+   control's right edge. `.menu-popup.mkt-unitmenu` is (0,2,0) and settles it.
+   `min-width` is deliberately NOT restated - the shared 190px plate is wide
+   enough for both columns and the two menus should be the same width. */
+.menu-popup.mkt-unitmenu { right: 0; left: auto; }
+/* Sentence case here too - styles.css uppercases `.menu-group-label`, and a
+   micro-caps heading inside a menu whose own options are sentence case is two
+   type systems inside 168px. (0,2,0) beats it. */
+.mkt-unitmenu .menu-group-label,
+.mkt-statmenu .menu-group-label {
+  text-transform: none;
+  letter-spacing: inherit;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: var(--mkt-lh-micro);
+  color: var(--muted);
+}
+
+/* TWO COLUMNS, NOT TWO STACKED ROWS.
+ *
+ * Display unit and price grouping are INDEPENDENT settings - one names the
+ * currency the Size and Sum columns are counted in, the other how coarsely
+ * prices are bucketed - and stacked they read as a sequence, as though you set
+ * the first and then the second. Side by side under their own headings they
+ * read as two switches, which is what they are, and the 1-2-5 grouping ladder
+ * (six steps now, see GROUP_MULTIPLIERS) has somewhere to go that is not a
+ * three-wide grid of numbers.
+ *
+ * `align-items: start` so the shorter column (two units against six steps) sits
+ * under its own heading rather than stretching to the taller one's height. */
+.mkt-unitmenu-cols {
+  display: flex;
+  align-items: start;
+  gap: var(--sp-4);
+}
+.mkt-unitmenu-cols > .menu-group { flex: 1 1 auto; min-width: 0; }
+/* styles.css draws a hairline and 8px of lead between STACKED `.menu-group`s.
+   Beside each other they are not a stack, and the rule would put a horizontal
+   rule across the top of the second column only. (0,3,0) against its (0,2,0),
+   so this wins on specificity rather than on which sheet is injected last. */
+.mkt-unitmenu-cols > .menu-group + .menu-group {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+/* One item per row. `.menu-grid` is a 3-up grid in styles.css and `.menu-grid
+   button` is what gives these items the app's ghost-button and selected
+   treatment, so the class is KEPT and only its track count is overridden -
+   (0,2,0) beats the (0,1,0) it is overriding. Items are left-aligned: a column
+   of right-aligned figures over a left-aligned heading reads as a table with a
+   missing column. */
+.mkt-unitmenu .menu-grid { grid-template-columns: 1fr; gap: 1px; }
+.mkt-unitmenu .menu-grid button { text-align: left; }
+
+/* --- header stat configuration menu -------------------------------------- */
+
+/* Right-clicking the symbol header opens this at the pointer. It is the same
+ * `.menu-popup` plate as every other menu in the app - same fill, same radius,
+ * same 4px inset, same enter animation - and it differs in exactly two ways.
+ *
+ * `position: fixed`, because it is placed from a POINTER event in viewport
+ * coordinates and it is portalled to <body> (see StatMenu in Market.tsx: the
+ * header clips its own children, and the grid item around it is transformed, so
+ * an in-place popup would be both clipped and mis-anchored). `left` and `top`
+ * arrive inline from the measured placement, so the `auto`s here only exist to
+ * unset `.menu-popup`'s own `top: calc(100% + 4px); left: 0`.
+ *
+ * TWO CLASSES in the selector for the same reason `.menu-popup.mkt-unitmenu`
+ * above needs them: `.menu-popup` is (0,1,0) and lives in the sheet that is
+ * injected last, so a single class here ties and loses - and losing means the
+ * popup silently falls back to `position: absolute`, which is right only on a
+ * page that never scrolls.
+ *
+ * The cap and the scroll are the "fourteen stats on a short window" case: the
+ * list is as long as the feed is rich, and a menu that runs off the bottom of a
+ * 768px screen loses its Reset item. */
+.menu-popup.mkt-statmenu {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: auto;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
+/* A row, not a grid cell: a fixed mark slot then the label, so the labels line
+   up in one column whether their stat is on or off and nothing shifts sideways
+   as you tick through them. Ghost chrome, and hover changes COLOUR only - the
+   one interaction this app has. `button:where(...)` in styles.css is (0,0,1),
+   so a single class here already outranks it. */
+.mkt-statmenu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--mkt-lh-xs);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--mkt-hover) var(--mkt-ease);
+}
+.mkt-statmenu-item:hover { color: var(--text); background: none; border-color: transparent; }
+/* A shown stat is --text and a hidden one is --muted, which is the same
+   colour-carries-rank distinction the watchlist star and every other toggle in
+   this app makes. The tick is the redundant second signal, and `aria-checked`
+   on the button is the one assistive tech reads, so nothing depends on hue. */
+.mkt-statmenu-item.is-on { color: var(--text); }
+/* NO FOCUS RULE HERE ON PURPOSE. styles.css draws one ring for the whole app -
+   `2px solid var(--focus)` on `:focus-visible`, never on bare `:focus` - and
+   these items carry a `tabindex` for the roving cursor, so `[tabindex]:focus-
+   visible` already reaches them at (0,2,0). A local override would have to beat
+   a tie against the sheet that is injected last, and it should not want to: the
+   ring is amber because --focus is amber everywhere, and the menu having its
+   own focus colour is one design language more than the app has. The tick and
+   the ring share a hue but not a shape or a position, and `aria-checked` is
+   what carries "shown" to anything that cannot see either. */
+.mkt-statmenu-item:focus-visible { color: var(--text); }
+
+/* The mark's slot. Always present, only sometimes inked - see the `Tick`
+   comment in Market.tsx for why an appearing-and-disappearing box is the one
+   thing a checkbox list must not do. Amber, because this is the app's single
+   "on" colour and the item's own label is already carrying the --muted/--text
+   step. */
+.mkt-statmenu-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  flex: none;
+  color: var(--accent);
+}
+.mkt-statmenu-tick { display: block; }
+
+/* Reset is not a stat, so it is fenced off by the same hairline styles.css uses
+   between menu groups rather than sitting as a fifteenth checkbox. */
+.mkt-statmenu-foot {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--panel-line);
+}
+
+/* --- the table ----------------------------------------------------------- */
+
+/* CENTRED, NOT FLUSH-TOP. A shallow real book - fewer buckets than rowCap
+   has room for - used to leave every unused row as dead space below the
+   last one, hugging the column heads at the top of a mostly-empty panel.
+   `justify-content: center` on the column axis splits that leftover space
+   above and below the actual ladder instead, so a thin book still reads as
+   "the whole of a small thing" rather than "the top slice of something that
+   failed to fill in". The table itself keeps its intrinsic height - flex's
+   default `align-items: stretch` only reaches the CROSS axis here (width),
+   which is exactly the full-width behaviour it already had. */
+.mkt-book-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.mkt-booktable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Column heads. Sentence case, 12px/400, muted - the same size as the data
+   they head but a step down in weight and colour, which is the entire
+   distinction the eye needs and the only one that does not cost height.
+   A HEAD IS TEXT, so it takes --font-text (IBM Plex) even though every cell
+   under it takes --font-num (Asap). The numeral font is applied by CONTENT TYPE
+   in one block at the end of styles.css, and the only handle it has on a table
+   is the table element itself - `.mkt-booktable`, which every `th` then
+   inherits. "Price" and "Size (USD)" are words, and words set in the numeral
+   face is the same error in the other direction: it is a DIN-alike chosen for
+   its digit advance, and its lowercase is not what the rest of the page's
+   labels are set in. `.mkt-booktable th` is (0,1,1) against that rule's (0,1,0),
+   so it wins on specificity and not on which sheet is injected last. */
+.mkt-booktable th {
+  font-family: var(--font-text);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* 26px of box around a 16.5px line, top-aligned: that is the measured 12px
+     of air between the column heads and the first level. The block above it -
+     12px of card padding, then a 24px control row - puts the swatches 18px
+     below the tab rule, which is the other half of the same measurement. The
+     header block used to occupy 44px where the reference occupies 62px, and
+     the swatches sat almost against the tabs. */
+  height: 26px;
+  vertical-align: top;
+  padding: 0;
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--mkt-lh-xs);
+  color: var(--muted);
+  text-align: right;
+  text-transform: none;
+  letter-spacing: inherit;
+  white-space: nowrap;
+  /* No fill needed: `.mkt-book-rows` is `overflow: hidden` and the book fits
+     itself to the panel, so this header never has a row passing underneath it.
+     `position: sticky` stays as the guard for the one frame between a resize
+     and the row-count recompute. */
+  background: none;
+}
+.mkt-booktable th:first-child { text-align: left; }
+
+/* No cell padding. The 16px inset lives on `.mkt-book`, so the table itself
+   spans exactly the region the depth bars fill and the first and last columns
+   land on the same gutter as everything else in the panel. Padding here would
+   put the text 6px inside a bar that starts at the card edge - which is
+   precisely the misalignment this replaces. */
+.mkt-booktable td {
+  height: 20px;
+  padding: 0;
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  text-align: right;
+  white-space: nowrap;
+  border: none;
+  color: var(--text);
+}
+.mkt-booktable td:first-child { text-align: left; }
+
+/* READING ORDER. A book is read price-first - the price carries its side's
+   colour and the depth shading carries the magnitude - but Size and Sum are
+   still DATA, and data is --text. They were --muted, which measured 187 lumens
+   against the reference's 253 and left two thirds of every row a step quieter
+   than it should be; on top of a depth bar that is now three times brighter,
+   muted numbers would have disappeared into the shading entirely.
+
+   Deliberately NOT transitioned: the gateway replaces the whole book every
+   ~500ms and rows are keyed by their place (rank from the touch), so the levels
+   move THROUGH a row and a background transition would smear one level's depth
+   into the next one's. A depth bar caught mid-interpolation is a wrong number
+   on a trading screen.
+
+   The background hover STAYS. This is one of the two places the spec keeps it:
+   the row surface is itself the click target (click-to-price into the ticket),
+   so the affordance has to be the surface, not the text. */
+/* The depth ramp snaps with the book (rows are keyed by rank, so a transition
+   on --bar-start would smear one level into the next). The take hatch and the
+   dotted limit extension ease, so a size slider moves them instead of stepping.
+   --bar-start eases only on the one limit row, where it is the edge of the
+   added slice. Registered so the gradient stops and the slice box interpolate. */
+@property --take-w {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+@property --solid-end {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 100%;
+}
+@property --rest-w {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --rest-start {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 100%;
+}
+@property --bar-start {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 100%;
+}
+.mkt-bookrow {
+  cursor: pointer;
+  --bar-start: 100%;
+  --solid-end: 100%;
+  --take-w: 0%;
+  --rest-start: 100%;
+  --rest-w: 0%;
+  --mkt-bar-lo: transparent;
+  --mkt-bar-hi: transparent;
+  --mkt-dot: transparent;
+  position: relative;
+  isolation: isolate;
+  /* The live boundary eases with the slider. A level the order has left is
+     .is-quiet and drops --take-w from this list, so the hatch snaps off
+     instead of lingering on that row as the size comes down. */
+  transition:
+    --take-w 140ms linear,
+    --solid-end 140ms linear,
+    --rest-w 140ms linear,
+    --rest-start 140ms linear;
+  background-image:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--neg) 38%, transparent) 0 3px,
+      color-mix(in srgb, var(--neg) 88%, transparent) 3px 4.4px
+    ),
+    linear-gradient(
+      to right,
+      transparent 0 var(--bar-start),
+      var(--mkt-bar-lo) var(--bar-start),
+      var(--mkt-bar-hi) var(--solid-end),
+      transparent var(--solid-end)
+    );
+  background-size: var(--take-w) 100%, 100% 100%;
+  background-position: right center, left center;
+  background-repeat: no-repeat;
+}
+/* The added slice of a limit. A gradient on the row cannot tile dots inside
+   one band, so this box is only that band and the dots tile inside it.
+   z-index -1 keeps it over the row background and under the numbers. */
+.mkt-bookrow__rest {
+  position: absolute;
+  z-index: -1;
+  top: 0;
+  bottom: 0;
+  left: var(--rest-start);
+  width: var(--rest-w);
+  pointer-events: none;
+  background-color: color-mix(in srgb, var(--mkt-bar-hi) 22%, transparent);
+  background-image: radial-gradient(circle, var(--mkt-dot) 1.15px, transparent 1.4px);
+  background-size: 6px 6px;
+  background-repeat: repeat;
+}
+.mkt-bookrow.bid {
+  --mkt-bar-lo: var(--mkt-bid-lo);
+  --mkt-bar-hi: var(--mkt-bid-hi);
+  --mkt-dot: var(--mkt-bid-hi);
+}
+.mkt-bookrow.ask {
+  --mkt-bar-lo: var(--mkt-ask-lo);
+  --mkt-bar-hi: var(--mkt-ask-hi);
+  --mkt-dot: var(--mkt-ask-hi);
+}
+.mkt-bookrow.is-rest {
+  transition:
+    --take-w 140ms linear,
+    --solid-end 140ms linear,
+    --rest-w 140ms linear,
+    --rest-start 140ms linear,
+    --bar-start 140ms linear;
+}
+/* Untouched rows on a side a market order is eating. No take transition:
+   the hatch must not keep painting a level the size has already left.
+   :not(.is-hover) so this still beats .is-lit (same row, later rule) and a
+   stale hover-hold cannot leave the row bright after the size moves on.
+   A row the pointer is actually on stays at full strength. */
+.mkt-bookrow.is-quiet:not(.is-hover) {
+  opacity: 0.32;
+  transition: --rest-w 140ms linear, --rest-start 140ms linear;
+}
+.mkt-bookrow:hover { box-shadow: inset 0 0 0 999px var(--tint, rgba(255, 254, 239, 0.035)); }
+.mkt-bookrow.ask .p { color: var(--neg); }
+.mkt-bookrow.bid .p { color: var(--pos); }
+
+/* --- hover: one level lit, the rest of the book dimmed ---------------------
+   While the pointer is on a level (`.is-hovering`, set by Book() only while
+   its popup is showing), every OTHER level - both sides - and the mid row's
+   readings drop back, and so do their depth bars, which are the rows' own
+   background. The hovered row stays at full strength and takes its side's
+   tint across the whole row, so the eye lands on the one level the popup
+   beside the book is describing.
+
+   ONE FADE, ON THE BOOK - NEVER ON A ROW. The dim is a single registered
+   number, --mkt-dim, on `.mkt-book-rows`: 1 at rest, 0.4 while a level is
+   focused, eased over 80ms both ways. Every row reads its opacity from it and
+   has no transition of its own, so:
+    - the row the pointer REACHES lights and the row it LEAVES dims in the same
+      frame, and exactly one level is ever at full strength (per-row fades left
+      a trail of half-lit rows behind a moving pointer);
+    - the book dims in smoothly when a focus starts and back out when it ends
+      (the pointer coming to rest on the mid row, or leaving the book);
+    - a focus that returns while the book is still fading back out reverses
+      from wherever the fade has got to - a transition on one value does - in
+      place of the snap to 0.4 the old `transition-duration: 0s` under
+      `.is-hovering` made.
+   The focused row's side tint rides the same number (15% of the side colour
+   at full dim, none at rest), and `is-lit` holds the row lit LAST at full
+   strength while the book fades back up to it, so it never dips first. The
+   reduced-motion backstop in styles.css collapses the fade. */
+@property --mkt-dim {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 1;
+}
+.mkt-book-rows {
+  --mkt-dim: 1;
+  transition: --mkt-dim 80ms linear;
+}
+.mkt-book-rows.is-hovering { --mkt-dim: 0.4; }
+.mkt-bookrow,
+.mkt-mid { opacity: var(--mkt-dim); }
+.mkt-bookrow.is-hover,
+.mkt-bookrow.is-lit { opacity: 1; }
+/* The native :hover wash yields to the focus while there is one. The browser
+   moves :hover lazily after rows re-lay under a still pointer, so for a frame
+   or two it can sit on a neighbour of the lit row. */
+.mkt-book-rows.is-hovering .mkt-bookrow:hover:not(.is-hover) {
+  box-shadow: none;
+}
+.mkt-bookrow.ask.is-hover,
+.mkt-bookrow.ask.is-lit {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--neg) calc((1 - var(--mkt-dim)) * 25%), transparent);
+}
+.mkt-bookrow.bid.is-hover,
+.mkt-bookrow.bid.is-lit {
+  box-shadow: inset 0 0 0 999px color-mix(in srgb, var(--pos) calc((1 - var(--mkt-dim)) * 25%), transparent);
+}
+
+/* --- mid-price anchor ---------------------------------------------------- */
+
+/**
+ * TWO classes on one <td>, and an absolutely positioned child. Both are load
+ * bearing, and both are non-obvious:
+ *
+ * 1. `.mkt-booktable td` above is (0,1,1); `.mkt-midrow > td` would score the
+ *    SAME and the later rule would win every shared property by accident.
+ *    `td.mkt-midcell` takes it to (0,2,1) and settles it explicitly.
+ *
+ * 2. The content is taken out of flow. A table cell sizes its column from its
+ *    content's min-content width and every cell here is `white-space: nowrap`,
+ *    so an in-flow anchor holding a 20px price plus two captions demands more
+ *    width than the book has and pushes the Sum column off the right edge. An
+ *    absolutely positioned child contributes NO intrinsic width. The price of
+ *    that is an explicit height, which is fine: the row-fitting code in
+ *    Market.tsx MEASURES whatever this renders, so the two cannot disagree.
+ */
+.mkt-midrow > td.mkt-midcell {
+  position: relative;
+  /* 38px. The two rules that used to box this row top and bottom are gone:
+     whitespace already separates the two sides of a book, and a pair of
+     hairlines across the panel's widest element made the mid price read as a
+     banner cutting the depth in half rather than as the place where the two
+     halves meet. Whitespace only does that job if there is some: at 28px the
+     20px price was pressed against the depth blocks above and below it, and the
+     measured anchor gives itself 38px. Height matters beyond looks - the
+     row-fitting maths reserves this space in ROW units and MEASURES it rather
+     than assuming, so the extra 10px cannot silently clip a level off a side.
+     BOOK_MID_H in Market.tsx is the first-paint guess for the same number. */
+  height: 38px;
+  padding: 0;
+  border: none;
+  text-align: left;
+  background: none;
+}
+
+.mkt-mid {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0;
+  overflow: hidden;
+}
+
+/* CENTRED ON THE PRICE, NOT SAT ON ITS BASELINE.
+   The mark, the funding rate and the spread mark are captions ABOUT a 20px
+   number, not a second line of the same sentence, and the reference treats them
+   that way: measured, its caption ink centres within 1-2px of the price's own
+   ink centre, where baseline alignment drops 12px text 4-5px lower because a
+   20px glyph's baseline is that much further down its box. The visible symptom
+   was a row whose three small readings all hung off the bottom of the big one.
+   The tick arrow keeps its own `align-self: center` - it has no baseline worth
+   aligning to either way. */
+.mkt-mid-top { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; width: 100%; }
+
+.mkt-mid-last {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 3px;
+  font-size: var(--fs-read);
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--text);
+  flex: none;
+}
+/* Unlike the header's headline, this one HOLDS the last tick's direction: it
+   sits between the two sides of the book, where "which side traded last" is
+   exactly the question being asked. */
+.mkt-mid-last.up { color: var(--pos); }
+.mkt-mid-last.down { color: var(--neg); }
+
+/* DRAWN, at 10x12, and hard against the number. It was `↑`/`↓` at 14px, which
+   rendered 7x10 of ink - the codepoints are not in IBM Plex Sans, so the size
+   and weight were whichever fallback font the platform picked, and the mark
+   floated between the two prices belonging to neither. The measured glyph is
+   nearly as tall as the price's cap height and sits 3px off it, so it reads as
+   part of the number it qualifies rather than as a separate symbol.
+   `align-self` overrides the row's baseline alignment: an arrow that spans the
+   whole cap height has no baseline of its own worth aligning to. */
+.mkt-mid-arrow { display: block; align-self: center; }
+
+/* The mark is what your margin is valued at rather than what you trade, so it
+   sits beside the traded price. It is --muted, not --text, and so is the funding
+   rate below: this row has ONE reading - the mid price, at 20px in its side's
+   colour - and two captions qualifying it. Set at --text all three arrived at
+   the same brightness and the row lost its subject. (Measured: the reference
+   renders both of these at #c6b6ba even though its row numerals elsewhere do
+   reach full white, so this is a decision and not an antialiasing artefact.) On
+   a narrow book the mark is still the first thing allowed to go: the number is
+   one panel away in the symbol header, and the mid price is nowhere else. */
+.mkt-mid-mark {
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* THE SPREAD PERCENTAGE. This slot held the FUNDING RATE, which put a number
+   about the next settlement immediately left of the glyph that means "the gap
+   between the two sides" - so the mark labelled the wrong figure, and a
+   negative funding rate printed a minus sign in front of what read as a spread.
+   Funding lives in the symbol header, where it is named and counted down.
+   Present on spot as well as perps: every two-sided book has a spread, where
+   only a perp has funding, which is the other half of why this slot was wrong.
+   --text, the app's white, in EVERY state - idle, hovered, recording - and so
+   are its glyph and its chart's line (the owner's call): the spread is a
+   reading, not a caption, and a control that recoloured itself while
+   recording read as a different figure. */
+.mkt-mid-spread {
+  flex: none;
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  color: var(--text);
+  white-space: nowrap;
+}
+
+/* THE SPREAD, AS A GLYPH.
+ *
+ * The spread used to have a second line of its own here, which made the mid
+ * anchor two rows tall and cost a level of depth on each side to say something
+ * a trader reads off the touch prices six pixels away. It is not deleted - the
+ * exact figure is on this row's tooltip, so the number is still reachable -
+ * but the standing display is a 9x12 measure mark at the panel's right inset,
+ * which is what the row is actually FOR: "this is the gap". */
+.mkt-mid-icon {
+  flex: none;
+  display: block;
+  margin-left: var(--sp-2);
+  /* See `.mkt-unitbtn`: a stroked mark run to the card's 16px inset sits flush
+     against an edge every number in the panel stops short of, so it reads as
+     overhanging the column. 4px is the measured hold-off. */
+  margin-right: var(--sp-1);
+  color: var(--text);
+}
+
+/* Wraps the spread reading and its glyph into one control: it is also the
+   spread-recording toggle now, so `margin-left: auto` moved here from
+   `.mkt-mid-spread` - the whole cluster pushes right as one unit rather than
+   the text alone, with the icon carried along by ordinary flow inside it. A
+   `<button>` needed every one of these reset explicitly; styles.css's own
+   button reset is (0,0,1) and loses ties to bare-element rules, not to a
+   class, so nothing here can be assumed inherited. */
+.mkt-mid-spreadbtn {
+  display: inline-flex;
+  align-items: center;
+  margin-left: auto;
+  flex: none;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  transition: background-color var(--mkt-hover) var(--mkt-ease), box-shadow var(--mkt-hover) var(--mkt-ease);
+}
+/* "This is a control" is said by the SURFACE, as on the B/S row: the figure
+   and its glyph never change colour. The wash reaches 3px past the text by a
+   spread shadow rather than padding, so it moves nothing. */
+.mkt-mid-spreadbtn:hover {
+  background: var(--tint);
+  box-shadow: 0 0 0 3px var(--tint);
+}
+
+/* --- inline recordings ------------------------------------------------------
+   The spread chart and the buy/sell chart share one rendering component
+   (Sparkline in Market.tsx) and one visual language: a thin drawn line on
+   nothing, no axes, sized to whatever slot it is standing in for. */
+
+/* The hoverable wrapper - `.mkt-spark` used to BE the <svg>; it now wraps
+   one, so pointer tracking has a stable box to measure that does not change
+   shape with the polyline inside it. `cursor: crosshair` doubles as the one
+   affordance that says "you can scrub this", which a plain line otherwise
+   gives no hint of. */
+.mkt-spark {
+  display: block;
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-width: 0;
+  cursor: crosshair;
+}
+.mkt-spark > svg { display: block; width: 100%; height: 100%; }
+/* The y-band is ONE transform over points kept in data coordinates (see
+   orderbook/Sparkline.tsx): when the band has to move, the whole line eases
+   to its new scale - the only way a drawn point ever moves vertically. The
+   reduced-motion backstop in styles.css collapses it. */
+.mkt-spark-scale { transition: transform 240ms var(--mkt-ease); }
+.mkt-spark--empty {
+  display: flex;
+  align-items: center;
+  font-size: var(--fs-label);
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Stands in for the last-price/mark cluster it replaces (see Market.tsx),
+   so it takes the same `flex: 1` role they occupied in `.mkt-mid-top`. */
+.mkt-mid-chart { flex: 1; min-width: 0; }
+
+/* PORTALLED to <body> (see Sparkline in Market.tsx), so it is styled here
+   rather than namespaced under `.mkt-book` - by the time it renders it is a
+   sibling of the panel, not a descendant. `position: fixed` because its
+   left/top are already CLIENT coordinates, the same space `position: fixed`
+   measures in; `position: absolute` would need them re-based against
+   whatever ancestor happens to be the nearest positioned one post-portal. */
+.mkt-spark-tip {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, calc(-100% - 6px));
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px 6px;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  line-height: 14px;
+  white-space: nowrap;
+  /* It follows the pointer; it must never be what the pointer is over. */
+  pointer-events: none;
+}
+/* The hovered sample's time: a caption above its value(s). */
+.mkt-spark-tip-t { color: var(--muted); font-weight: 400; }
+/* THE ORDER BOOK'S HOVER POPUP - avg price and running sums through the
+   hovered level. Portalled to <body> like `.mkt-spark-tip` above, and for the
+   same reasons: `position: fixed` in client coordinates, above every panel,
+   never clipped by the dashboard's overflow. Book() sets `transform` directly
+   from the hovered row's rect; `left`/`top` stay 0 so the transform IS the
+   position and moving it never triggers layout.
+
+   ONE ELEMENT, NEVER UNMOUNTED. It fades with `.is-on` and moves with its
+   transform, and between two levels only its numbers change - which is what
+   keeps a fast sweep across the book from flashing it on and off.
+
+   Same glass as the wallet card and the funds dropdowns: translucent,
+   blurred, 10px corners. Labels left in --muted with the coin's logo,
+   figures right in the numeral face, price in its side's colour. */
+.mkt-bookpop {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  min-width: 200px;
+  padding: 10px 12px;
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-modal);
+  opacity: 0;
+  /* Out 120ms, in 60ms: it arrives at once and leaves without a snap. */
+  transition: opacity 120ms linear;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+.mkt-bookpop.is-on {
+  opacity: 1;
+  transition-duration: 60ms;
+}
+.mkt-bookpop-kv {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: var(--sp-5);
+  margin: 0;
+}
+.mkt-bookpop-kv > div { display: contents; }
+.mkt-bookpop-kv dt,
+.mkt-bookpop-kv dd {
+  margin: 0;
+  font-size: var(--fs-data);
+  line-height: 20px;
+  white-space: nowrap;
+}
+.mkt-bookpop-kv dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-text);
+  font-weight: 400;
+  color: var(--muted);
+}
+.mkt-bookpop-kv dd {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  text-align: right;
+  color: var(--text);
+}
+.mkt-bookpop-kv dd.neg { color: var(--neg); }
+.mkt-bookpop-kv dd.pos { color: var(--pos); }
+/* A touch screen has no hover; a popup left behind by a tap would only cover
+   the chart. Book() ignores touch pointers too - this is the backstop. */
+@media (hover: none) {
+  .mkt-bookpop { display: none; }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .mkt-spark-tip, .mkt-bookpop { background: var(--bg-elevated); }
+}
+
+/* --- buy/sell ratio footer ------------------------------------------------ */
+
+/* 12px between each percentage and the bar, not 8px. The bar is the reading and
+   the two figures annotate its ends; at 8px they crowded the caps and the whole
+   footer read as one run-on object. The bar keeps whatever is left, so widening
+   the gutters shortens the track by the 12px the labels gained.
+
+   A <button> now, doubling as the buy/sell recording toggle - every property
+   below `gap` resets what styles.css's button rule and the browser default
+   both bring with the element, the same discipline `.mkt-mid-spreadbtn`
+   above follows. */
+.mkt-ratio {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  width: 100%;
+  /* 20px IN BOTH STATES. It used to grow to 26px while recording, and those
+     6px came out of `.mkt-book-rows`' flex:1 share: opening the chart moved
+     every row, the heads and the mid row up by 3px (and could drop a level of
+     depth), then back down on close. The chart is drawn 20px tall inside this
+     same box instead (see Market.tsx), so opening or closing it moves nothing
+     else in the book. */
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  font: inherit;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+  transition: background-color var(--mkt-hover) var(--mkt-ease);
+}
+/* The affordance for "this row is a control" is the SURFACE, not the letters:
+   B and S are the axis and keep their --muted in every state - idle, hovered,
+   recording. They used to brighten under the pointer and turn --accent while
+   recording, which read as the axis itself changing meaning. */
+.mkt-ratio:hover { background: var(--tint); }
+
+.mkt-ratio-chart { flex: 1; min-width: 0; height: 20px; }
+
+.mkt-ratio-l {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  white-space: nowrap;
+}
+/* Only the NUMBERS take a side colour. Colouring the B and the S too made the
+   whole label green and red, which is three coloured things in a row where the
+   measured design has one: the letters are the axis, the percentages are the
+   reading. */
+.mkt-ratio-k { color: var(--muted); }
+.mkt-ratio-v.bid { color: var(--pos); }
+.mkt-ratio-v.ask { color: var(--neg); }
+
+.mkt-ratio-bar {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  /* Square. A pill cap on a 4px bar rounds away the first and last pixel of
+     each side's share, which on a 49/51 split is the only part of the bar
+     anyone reads precisely. */
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--neg);
+}
+/* Width is animated by TRANSFORM. This bar updates on every book push (~2/s);
+   a width transition relayouts on each one, a scaleX is composited. */
+.mkt-ratio-fill {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  transform-origin: left;
+  background: var(--pos);
+  transition: transform 200ms var(--mkt-ease);
+}
+
+/* ==========================================================================
+   4. TRADE TAPE
+   ==========================================================================
+   The book's other tab, so it takes the book's card: same fill, same 16px
+   inset, and - like the book - it draws NO rule of its own under the tab strip,
+   because the tab bar already draws that hairline for the whole band and two
+   stacked 1px borders make a 2px one. `min-height: 100%` keeps the fill
+   covering the whole tab body on a short tape - without it a five-print tape
+   paints a card the height of five prints and bare page below it.
+
+   `overflow: visible` is load bearing: Trades walks up to the nearest
+   scrollable ancestor to compensate scrollTop when new prints prepend, and it
+   must find the DASHBOARD body rather than a scroll container this component
+   accidentally created. */
+
+.mkt-tape {
+  display: block;
+  min-width: 0;
+  min-height: 100%;
+  padding: 0 var(--sp-4) 10px;
+  background: var(--bg-panel);
+  border: none;
+  overflow: visible;
+}
+
+.mkt-tapetable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* --tape-bar-h is measured and published by TapeControls; it pushes this
+   header below the sticky control bar instead of underneath it. */
+/* Text, not numerals - the same rule and the same reason as `.mkt-booktable th`
+   above: `.mkt-tapetable` carries --font-num for the cells and the heads
+   inherit it, and "Price / Size / Time" are words. */
+.mkt-tapetable th {
+  font-family: var(--font-text);
+  position: sticky;
+  top: var(--tape-bar-h, 0px);
+  z-index: 2;
+  height: 20px;
+  padding: 0;
+  font-size: var(--fs-data);
+  font-weight: 400;
+  line-height: var(--mkt-lh-xs);
+  color: var(--muted);
+  text-transform: none;
+  letter-spacing: inherit;
+  white-space: nowrap;
+  /* The tape DOES scroll (prints outrun the panel), so this one needs a fill
+     or rows pass through the glyphs. It takes the same surface as the control
+     bar directly above it so the pinned region reads as one block. */
+  background: var(--bg-panel);
+  text-align: center;
+}
+.mkt-tapetable th:first-child { text-align: left; }
+.mkt-tapetable th:last-child { text-align: right; }
+
+.mkt-tapetable td {
+  height: 20px;
+  padding: 0;
+  font-size: var(--fs-data);
+  font-weight: 500;
+  line-height: var(--mkt-lh-xs);
+  white-space: nowrap;
+  border: none;
+  text-align: center;
+}
+.mkt-tapetable td.pos { color: var(--pos); text-align: left; }
+.mkt-tapetable td.neg { color: var(--neg); text-align: left; }
+.mkt-tape-size { color: var(--text); }
+
+/* An empty or fully-filtered tape. `.mkt-tapetable td` is (0,1,1) and would
+   otherwise pin this to a 20px nowrap row, which truncates the sentence that
+   explains WHY the tape is empty - the one thing the user needs there. */
+.mkt-tapetable td.mkt-note {
+  height: auto;
+  padding: var(--sp-3) 0;
+  font-weight: 400;
+  text-align: left;
+  white-space: normal;
+  margin: 0;
+}
+
+.mkt-taperow { transition: background-color var(--mkt-hover) var(--mkt-ease); }
+.mkt-taperow:hover { background: var(--tint, rgba(255, 254, 239, 0.035)); }
+
+/* THE TIME CELL DOUBLES AS THE MUTE CONTROL.
+ *
+ * Counterparty attribution is a real capability of this tape and it is kept in
+ * full - but it is not a third number to scan past on every print, and a
+ * permanent "12345 -> 678" column is both the widest thing in the panel and
+ * the least often read. So the account that crossed the spread takes the
+ * timestamp's place on hover, on the rows that carry one. Rows seeded from
+ * REST have no ids and reveal nothing, which is the same fact the note below
+ * states in words - the absence is the disclosure. Both children are in the
+ * same cell and only their opacity changes, so nothing moves and the tape's
+ * scroll-compensation maths never sees a height change. */
+.mkt-tape-time { position: relative; color: var(--muted); text-align: right; }
+.mkt-tape-t { transition: opacity var(--mkt-hover) var(--mkt-ease); }
+.mkt-taperow:hover .mkt-tape-t { opacity: 0; }
+
+.mkt-tape-mute {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: var(--accent);
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: var(--mkt-lh-micro);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--mkt-hover) var(--mkt-ease);
+}
+.mkt-taperow:hover .mkt-tape-mute { opacity: 1; pointer-events: auto; }
+.mkt-tape-mute:hover { background: none; border: none; color: var(--text); }
+
+/* --- the tape control bar ------------------------------------------------- */
+
+/* TapeControls lives in TapeFilter.tsx and keeps every control and counter it
+   had. What changes here is only loudness: the bar was the brightest thing in
+   the panel, above a tape whose whole job is to be scanned. Amber chips and
+   --muted counters became --dim text on a hairline, and the one signal that
+   genuinely needs to be noticed - "your filter is hiding prints right now" -
+   keeps the accent to itself. TapeFilter.css is imported before this file, so
+   a same-specificity rule here already wins; the extra `.mkt-tape` makes that
+   independent of import order. Nothing below changes a height: Trades
+   compensates scrollTop against scrollHeight deltas, and a bar that grew here
+   would yank the tape on the next print. */
+.mkt-tape .tape-bar { border-bottom: 1px solid var(--line-soft, rgba(255, 254, 239, 0.1)); }
+.mkt-tape .tape-stat { font-size: var(--fs-label); font-weight: 400; line-height: var(--mkt-lh-micro); color: var(--dim); }
+.mkt-tape .tape-stat.warnish { color: var(--warn); }
+.mkt-tape .tape-stat-of { opacity: 1; color: var(--dim); }
+.mkt-tape .tape-muteinput,
+.mkt-tape .tape-mutego,
+.mkt-tape .tape-clear { font-size: var(--fs-label); font-weight: 400; }
+.mkt-tape .tape-chip {
+  font-size: var(--fs-label);
+  font-weight: 400;
+  background: none;
+  border: 1px solid var(--line-soft, rgba(255, 254, 239, 0.1));
+  color: var(--muted);
+}
+.mkt-tape .tape-chip-x { color: var(--dim); }
+
+/* The book row is a real control now: reachable by keyboard, so it needs a
+   visible focus ring. Inset because a table row cannot show an outline outside
+   its own box without being clipped by the scroll container. */
+.mkt-bookrow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}

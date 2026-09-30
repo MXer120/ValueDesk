@@ -1,0 +1,600 @@
+/**
+ * Status bar (components/StatusFooter.tsx).
+ *
+ * THE BAR IS A PANEL, NOT A RULED-OFF STRIP.
+ *
+ * Measured off the reference terminal's rendered pixels at 1920x1080:
+ *
+ *   bar band          y1052-1079   28px, background #1b1a14 (--bg-panel)
+ *   gutter above it   y1048-1051    4px, background #141310 (--bg)
+ *   horizontal extent x0-1919      full bleed, edge to edge
+ *   border                          none, anywhere
+ *   separator rules   x71, x1811    1px, #3e3935, spanning the FULL 28px
+ *   connection dot    x16-19        4px, #00b481
+ *   account chip      x84-203       120x20, fill #27241f, radius ~3, and a 1px
+ *                                   edge on the LEFT AND RIGHT ONLY - its top
+ *                                   and bottom rows are chip fill. Its label
+ *                                   is LEFT-ALIGNED in that box: 9px of
+ *                                   leading air against 28px of trailing, and
+ *                                   the trailing region is empty to the pixel
+ *   icon group        x1826-1902    3 glyphs, 14-16px ink, ~31px pitch, the
+ *                                   last of them ending 18px from the window.
+ *                                   Their boxes sit at y1054-1073 - 2px from
+ *                                   the bar's top edge and 6px from its
+ *                                   bottom, i.e. deliberately NOT centred
+ *   type              8px flat cap, baseline y1069 -> 12px
+ *
+ * Two of those are the whole visual story and both were wrong here before:
+ * the bar had NO fill and a 1px top hairline instead, so it read as the ruled
+ * bottom edge of the page rather than as the last panel on it; and its
+ * separators were 10px ticks floating in the middle of the band rather than
+ * rules that divide the bar. The tone step from --bg to --bg-panel is what
+ * separates the bar from the dashboard above it. A hairline does not.
+ *
+ * Colour equivalences worth stating, because they look like arbitrary literals
+ * in the measurement table above and are not:
+ *   #3e3935 == --line-strong  (rgba(198,182,186,.20)) composited on --bg-panel
+ *   #27241f == --line         at 20.5% on --bg-panel. It read "~= --bg-elevated"
+ *                               here for a round and the approximation shipped:
+ *                               --bg-elevated is three levels lighter and no
+ *                               alpha of it reaches this colour. See the note
+ *                               on `.sfoot-chip`.
+ *   #6b1741 ~= --neg-deep     - the reference's chip border in its
+ *                               "not connected" state, which is the state its
+ *                               screenshot happens to be in. Ours renders
+ *                               --neg-deep flat, #6e1742, and the 3-level gap
+ *                               on red is left alone deliberately: it is not a
+ *                               compositing difference (the reference's GREEN
+ *                               channel is --neg-deep's exactly, and any alpha
+ *                               towards the bar would raise it), so closing it
+ *                               would mean a new literal for a delta below the
+ *                               threshold on a 1px stroke.
+ * So every colour below is a token or a stated mix of two; none is a literal.
+ *
+ * GEOMETRY LIVES AT THE END OF THIS FILE, in one block, and nowhere else.
+ * styles.css used to carry a second copy of all five of those properties in a
+ * `@media (min-width: 761px) { .shell .sfoot }` block describing a 24px bar
+ * with 18px controls. Every declaration in it was already being overridden
+ * here, so it changed nothing on screen and only misled whoever read it next;
+ * it is deleted. If a bar height, a control size or the type step needs to
+ * move, it moves in the block at the bottom of this file.
+ */
+
+.sfoot {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  /* 16px inset, both ends. The reference's first ink (the connection dot) is
+     at x16 and its last (the trailing icon glyph) ends at x1902 - which is
+     16px of padding plus the 2px the glyph sits inside its 20px button. */
+  padding: 0 var(--sp-4);
+  background: var(--bg-panel);
+  border: 0;
+  color: var(--muted);
+
+  /* FULL BLEED, by cancelling `.app`'s side padding. That padding is 4px at
+     every width from 761px up and 8px below it, so the desktop value is stated
+     here and the touch query at the end of the file restates the other.
+
+     `calc(50% - 50vw)` above 994px does the same job independently of what
+     `.app` happens to spend: it is exactly the distance from the containing
+     block's centre to the viewport's, so the bar's edges land on x0 / x100vw
+     whatever the padding is. It is fenced at 994px because that is where
+     styles.css locks `.shell` to 100vh and moves scrolling inside
+     `.appcontent`: above it the document cannot scroll, so 100vw IS the client
+     width. Below it the page scrolls normally, a classic scrollbar makes 100vw
+     wider than the client width, and the same calc would push ~15px of
+     horizontal overflow onto every narrow layout - a real bug traded for a
+     cosmetic one. */
+  margin-inline: calc(-1 * var(--sp-1));
+  margin-top: var(--sp-1);
+  /* Cancels `.app`'s bottom padding so the bar sits flush on the window's
+     bottom edge, as the reference's does (its last row is the viewport's last
+     row).
+     THIS NUMBER MUST TRACK `.app`'s padding-bottom EXACTLY. It was -8px
+     against a 4px padding for one round, and the 4px of overshoot did not show
+     up as a bar hanging off the screen - `.shell` is locked to 100vh, so the
+     bar's own box was simply pushed 4px below the fold and its bottom 4px
+     clipped. What that LOOKED like was a 28px bar rendering 24px tall and, far
+     more visibly, the whole panel grid above it running 4px too long: the
+     footer's negative margin is what `.appcontent` gets to keep, so every
+     pixel of overshoot here is a pixel the grid steals from the gutter that is
+     meant to separate it from the bar. Measured, that put our last panel row
+     at y1051 against the reference's y1047 and closed the 4px gutter to zero.
+     `.app` spends var(--sp-1) from 761px up; the touch query restates the 8px
+     it spends below that. */
+  margin-bottom: calc(-1 * var(--sp-1));
+
+  /* A fixed-height strip: anything that would wrap has to shrink or ellipsis
+     instead, otherwise a long chip silently doubles the bar's height and
+     pushes the dashboard's scroll container.
+     `overflow: visible` is deliberate and was a bug once: `hidden` here reads
+     as harmless belt-and-braces against that same wrap, but it also clips the
+     account popup, which by definition hangs ABOVE the bar's own box. The
+     symptom was a menu that opened - correct position, correct size, hit
+     testing landing on the dashboard panel behind it - and painted nothing.
+     Clipping is therefore done per-item (`.sfoot-chipaddr`), where it only
+     ever truncates text. */
+  flex-wrap: nowrap;
+  overflow: visible;
+}
+
+@media (min-width: 994px) {
+  .sfoot { margin-inline: calc(50% - 50vw); }
+}
+
+.sfoot-group {
+  display: flex;
+  align-items: center;
+  /* The groups run the bar's full height even though everything inside them is
+     centred, because the separator rules live INSIDE them: a rule can only
+     stretch to its own flex container, so a group sized to its tallest child
+     (21px) produced a 21px rule in a 28px bar - a taller tick, not the
+     full-height division the reference draws. */
+  align-self: stretch;
+  /* 12px, and it is the ONLY thing that spaces this bar horizontally: the
+     separator rules carry no margin of their own, so cluster-to-rule and
+     rule-to-cluster are the same gap by construction rather than by two
+     numbers that have to be kept equal. Measured 11-12px on both sides of
+     both reference rules. */
+  gap: var(--sp-3);
+  /* min-width:0 is what lets the account chip's ellipsis actually engage - a
+     flex item defaults to min-content width and would refuse to shrink. */
+  min-width: 0;
+}
+.sfoot-right {
+  margin-left: auto;
+  flex: none;
+}
+
+/* --- connection ----------------------------------------------------------- */
+
+.sfoot-conn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+  flex: none;
+}
+/* The WORD is the state - "Live", "Connecting", "Hub ok · sodex closed" - so
+   it does not also need to change colour to say the same thing twice. It stays
+   --muted at every state, which is where the reference has it, and the dot
+   beside it carries the same fact in colour for a glance. The previous rule
+   here brightened the word to --text when everything was FINE, which is the
+   wrong way round: it made the healthy bar the loud one and let a broken
+   connection fade into the chrome.
+
+   Weight 500, and that is measured rather than an emphasis choice: at an
+   identical #c6b6ba the reference's stems in "Online" cover ~1.8px against
+   ~1.1px in ours, which is 500 against 400. 500 is also the ceiling - nothing
+   in this terminal goes above it - so this is the top of the scale, not a step
+   towards bold. It matters most here because 12px chrome is the smallest text
+   on the screen: at 400 the strokes drop below one full pixel and the word
+   greys out into the bar instead of reading as a label. */
+.sfoot-connword { color: var(--muted); font-weight: 500; }
+
+.sfoot-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: none;
+}
+.sfoot-dot.ok { background: var(--pos); }
+.sfoot-dot.warn { background: var(--warn); }
+
+/* A rule, not a glyph: a bullet or a pipe character inherits the text colour
+   and font metrics and ends up as loud as the data either side of it.
+   `align-self: stretch` is what makes it a rule rather than a tick - it spans
+   the bar's full 28px, which is how the reference divides this bar. A centred
+   10px hairline reads as punctuation between two words; a full-height rule
+   reads as a division between two groups, which is what it is. */
+.sfoot-rule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line-strong);
+  flex: none;
+  margin: 0;
+}
+
+/* --- account switcher ----------------------------------------------------- */
+
+.sfoot-acct {
+  position: relative;
+  min-width: 0;
+}
+
+/* A CHIP AT REST, not on hover. This control used to be transparent-bordered
+   and unfilled until the pointer touched it, which left the single most
+   important fact in the bar - which key the next order signs under - looking
+   like a run of loose bold text. It is a control; it looks like one before you
+   go looking for it. 20px tall, filled one step above the bar.
+
+   THE EDGES ARE THE SIDES ONLY. Measured across the reference's chip, the
+   border colour appears in exactly two 1px COLUMNS, at the chip's left and
+   right; its top and bottom rows are chip fill. Ours drew all four sides,
+   which is the difference between a soft filled pill and an outlined button -
+   and in a 28px bar an outlined 20px button reads as the loudest object in the
+   chrome.
+   Kept as a 1px border on all four sides with the block edges painted
+   TRANSPARENT rather than as `border-inline` alone, because the box has to
+   stay 20px: background-clip defaults to border-box, so a transparent edge
+   shows this element's own --bg-elevated fill and renders as the reference's
+   fill row, while dropping the border outright would shorten the chip by 2px
+   and break the line-height arithmetic below. */
+.sfoot-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-inline-color: var(--line);
+  border-radius: var(--radius-sm);
+  /* THE SURFACE IS THE STROKE COLOUR AT LOW STRENGTH, not --bg-elevated.
+     This was --bg-elevated on the strength of the "~=" in the note at the top
+     of this file, and the approximation is where the error was: the reference
+     chip is a flat rgb(39,36,31) against a bar of rgb(27,26,20), and
+     --bg-elevated renders rgb(42,38,32) - three levels lighter on red, two on
+     green. --bg-elevated is NOT wrong as a token: a reviewer cross-checked
+     every other raised surface in the app against the reference and they match
+     exactly, the Cross button and the leverage button included. It is wrong
+     HERE, and the arithmetic says why. No alpha of --bg-elevated over the bar
+     reaches the measured colour (it wants 0.80 on red, 0.83 on green and 0.92
+     on blue - three different numbers, so no single compositing produces it),
+     while --line over the bar wants 0.211 / 0.208 / 0.196 - one number inside
+     half a level on all three channels. 20.5% is that number, and it lands
+     rgb(39,36,31) exactly. It is measured, not tuned by eye.
+     Which makes the chip the one surface in the app whose fill is its own
+     divider colour rather than the shared elevated step - a soft tint of the
+     line that draws it, one notch off the bar, rather than a control lifted
+     off it. */
+  background: color-mix(in srgb, var(--line) 20.5%, var(--bg-panel));
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  /* Colour only. No fill change, no border-width change, no transform - the
+     surface is already there, so brightening the label is the whole hover. */
+  transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.sfoot-chip:hover,
+.sfoot-chip.open { color: var(--text); border-inline-color: var(--line-strong); }
+.sfoot-chip:hover .sfoot-chipstate,
+.sfoot-chip.open .sfoot-chipstate { color: var(--text); }
+.sfoot-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+/* The address is a VALUE, so it takes the value treatment the rest of the app
+   uses: --text at weight 500. Nothing in this bar goes above 500. */
+.sfoot-chipaddr {
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* With no account there is no value to state, only an invitation, so the chip
+   drops to label weight and the border picks up the same deep-red the
+   reference uses for its own disconnected chip. */
+.sfoot-chip.none { border-inline-color: var(--neg-deep); }
+.sfoot-chip.none .sfoot-chipaddr { color: var(--muted); font-weight: 400; }
+.sfoot-chip.none:hover .sfoot-chipaddr { color: var(--text); }
+.sfoot-chipstate {
+  color: var(--muted);
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+/* THE DISCLOSURE SLOT IS ALWAYS THERE; THE CARET IS NOT.
+   The reference's chip is 120px around 81px of label - 9px of air on the left
+   and 28px on the right, and a reviewer confirmed the trailing region is empty
+   to the pixel. That is not asymmetric padding for its own sake, it is a
+   reserved slot: the chip is a disclosure control whose caret only exists when
+   there is something to disclose, and a box that grew and shrank by the width
+   of a caret would move the bar's one identity read every time the account
+   list changed length. Ours was symmetric 8/8 and did exactly that.
+   Rendering the slot unconditionally rather than padding the trailing side by
+   a constant is what keeps the two states the same width: with a caret the
+   glyph fills it, without one it is 9px of chip fill, and either way the box
+   measures the same. 9px + the chip's 6px gap + 8px of padding puts 23px of
+   clear surface after the label against the reference's 28px - the remaining
+   5px is their caret being larger than ours, not a spacing difference. */
+.sfoot-chipslot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 9px;
+}
+/* The caret rotates rather than swapping glyph, so open/closed is one element
+   whose state you can see mid-transition. */
+.sfoot-chip .sfoot-glyph {
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.sfoot-chip.open .sfoot-glyph { transform: rotate(180deg); }
+
+/* The popup opens UPWARD - it hangs off the bottom edge of the window, so
+   `top: 100%` would render it off screen. Its own keyframe for the same
+   reason: the shared `pop-in` translates down from above. */
+.sfoot-pop {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  min-width: 232px;
+  padding: var(--sp-1);
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-modal);
+  animation: sfoot-pop-in var(--dur-fast) var(--ease-spring);
+  transform-origin: bottom left;
+}
+@keyframes sfoot-pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .sfoot-pop { background: var(--bg-elevated); }
+}
+
+/* Sentence case, 10px. It used to be uppercase micro-caps; nothing on the
+   reference is uppercased, and a tracked-out all-caps label is louder than the
+   rows it introduces. */
+.sfoot-poplabel {
+  padding: var(--sp-1) 6px 6px;
+  font-size: var(--fs-label);
+  line-height: var(--lh-micro);
+  color: var(--muted);
+}
+
+/* A data row, sized like every other list in the app (20px content box plus
+   the 2px it needs to clear the selection marker), so the menu reads as part
+   of the terminal rather than as an OS menu dropped on top of it. */
+.sfoot-poprow {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-data);
+  line-height: 22px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) var(--ease-out);
+}
+/* One of the two places a background hover survives. The bar's own controls
+   hover by colour alone, but a menu row IS its surface - the whole 22px strip
+   is the click target, the same as an order-book row - and a target that wide
+   with no surface feedback leaves you guessing which line you are on. */
+.sfoot-poprow:hover:not(:disabled) { background: var(--bg-hover); color: var(--text); }
+.sfoot-poprow:disabled { cursor: progress; }
+/* Selection is colour plus an accent rule - no bold, no tick glyph competing
+   with the status word, which is the same signal `button.active` carries
+   everywhere else in the app. The class is `current` rather than `active`
+   precisely so it does NOT match that global rule: `button.active` puts its
+   accent along the bottom edge, which on a list row reads as an underline. */
+.sfoot-poprow.current {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+/* A pseudo-element, not `box-shadow: inset 2px 0 0`: an inset shadow follows
+   the row's 4px radius, so the marker rendered as a small arc at each corner
+   rather than as a rule. A positioned bar stays straight. */
+.sfoot-poprow.current::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.sfoot-poprow:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.sfoot-popaddr {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Right-aligned like every other trailing value in the app. */
+.sfoot-popstate {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: var(--fs-label);
+  white-space: nowrap;
+}
+.sfoot-poperr {
+  padding: 6px;
+  margin-top: var(--sp-1);
+  border-top: 1px solid var(--line);
+  color: var(--neg);
+  font-size: var(--fs-label);
+  line-height: 1.4;
+}
+
+/* --- icon buttons --------------------------------------------------------- */
+
+/* No box at rest and no box on hover: the reference's trailing icons are bare
+   glyphs that brighten to --text under the pointer, and that is the one hover
+   rule this whole terminal uses. The 20px button is a hit area, not a shape -
+   it exists so the 16px glyph has something to be centred in and so the three
+   of them land on the measured 31px pitch. */
+.sfoot-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.sfoot-icon:hover { color: var(--text); }
+.sfoot-icon:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+/* THE TRAILING ICONS ARE TOP-BIASED, NOT CENTRED, AND THAT IS MEASURED.
+   In an identical 28px bar (y1052-1079 in both) the reference's three glyph
+   inks centre on y1063.5 / 1064.5 / 1064.0 - three different glyphs with three
+   different ink heights (16 / 12 / 15px) agreeing to within a pixel, which is
+   what rules out glyph-shape noise and points at the box. Back-solving from
+   the tallest of them, its 20px button sits at y1054-1073: 2px of air above
+   it and 6px below, where a centred one would take 4px and 4px. Ours centred
+   exactly - box y1056-1075, all three ink centres on 1065.5 - and read 2px low
+   against the chip and the connection word beside it, both of which already
+   match.
+   Written as flex-start plus an explicit 2px rather than as a bottom margin
+   trick on the centred box, because the two are indistinguishable on screen
+   and only one of them says what it means. Scoped to the right-hand group: the
+   left group carries no icons, and the touch bar below re-centres, where the
+   controls are 34px in a 40px bar and 2px of deliberate bias is just an
+   off-centre button. */
+.sfoot-right .sfoot-icon {
+  align-self: flex-start;
+  margin-top: 2px;
+}
+
+/* --- shortcuts dialog ----------------------------------------------------- */
+
+.sfoot-keys {
+  margin: 0;
+  display: grid;
+  /* auto for the key column so the widest chord sets it and every description
+     starts on the same x - a ragged left edge is what made the alert() version
+     unreadable. */
+  grid-template-columns: auto 1fr;
+  gap: 0;
+  font-size: var(--fs-ctl);
+}
+.sfoot-keyrow {
+  display: contents;
+}
+.sfoot-keys dt {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px var(--sp-3) 5px 0;
+  white-space: nowrap;
+}
+.sfoot-keys dd {
+  margin: 0;
+  padding: 5px 0;
+  color: var(--muted);
+  align-self: center;
+}
+.sfoot-keyrow + .sfoot-keyrow dt,
+.sfoot-keyrow + .sfoot-keyrow dd {
+  border-top: 1px solid var(--line-soft);
+}
+.sfoot-keynote {
+  margin: var(--sp-3) 0 0;
+  max-width: 46ch;
+  line-height: 1.5;
+}
+
+/* --- narrow ---------------------------------------------------------------
+   The connection WORD goes at 560px; the dot still carries the state, and it
+   is the same convention the navbar already uses at 900px. Identity and the
+   three actions survive at every width. */
+@media (max-width: 560px) {
+  .sfoot-connword { display: none; }
+}
+
+/* --- geometry --------------------------------------------------------------
+   The bar's box - its height, its type step and the size of its four controls -
+   is set HERE and only here. These rules used to be written `.sfoot.sfoot.sfoot`
+   to out-specify a duplicate block in styles.css that stated all of it at
+   `.shell .sfoot`; that block has been deleted (every one of its declarations
+   was already losing to this one, so it painted nothing and only documented a
+   24px bar we do not render), and with it the reason for the repeated class.
+   Plain single-class rules again. */
+
+.sfoot {
+  /* 28px, measured y1052-1079. The bar has to clear a 20px chip with 4px of air
+     above and below it; 24px does not, which is why the chip and the icons were
+     once held at 18px to fit a bar that was too short for them. */
+  height: 28px;
+  /* 12px/16.5px - the data step, not the body step.
+     This was 14px for a round, justified by a cap-height measured on the round
+     'O' of the reference's "Online". Round glyphs overshoot the cap line by
+     about a pixel at this size, so that reading came back ~9-10px and the
+     correction landed a whole step too big. Measure a FLAT cap instead: the
+     reference's is 8px (its 'N', baseline y1069), ours at 14px was 10px, and
+     12px - our nearest allowed step - renders exactly 8px on the same baseline.
+     What the extra step cost was the bar's job. At 14px this text was the size
+     of the nav links two rows up and larger than every number in the tables
+     below it, so the bar read as body copy crammed into 28px of chrome instead
+     of as chrome. */
+  font-size: var(--fs-data);
+  line-height: var(--lh-xs);
+}
+.sfoot .sfoot-chip {
+  height: 20px;
+  /* 18px == the chip's 20px box less its two 1px borders, so the label's line
+     box exactly fills the content box and the text centres on whole pixels. */
+  line-height: 18px;
+  padding: 0 var(--sp-2);
+}
+.sfoot .sfoot-icon { width: 20px; height: 20px; }
+.sfoot .sfoot-dot { width: 4px; height: 4px; }
+/* `height: auto` is the load-bearing half of the full-height rule: an explicit
+   height defeats `align-self: stretch` silently - the rule would keep rendering
+   as a centred tick with the stretch declaration sitting there looking like it
+   worked. */
+.sfoot .sfoot-rule { height: auto; }
+
+/* Touch. styles.css decides that below 760px every control gets
+   `min-height: 34px`, and min-height beats a smaller `height` outright - it is
+   a different property, so no amount of specificity here would hold a 20px
+   button at 20px. The chip and the icons would therefore render 34px tall
+   inside a 28px bar and spill over its bottom edge.
+   Clamping back to 20px would be overriding a deliberate accessibility
+   decision to keep a cosmetic height, so the bar yields instead: 40px tall
+   with 34px controls, which is the same target size the rest of the app uses
+   on touch. Density is a desktop trade-off. */
+/* Not sticky. The shell is a viewport-height column (styles.css) and this bar
+   is its last flex item, so it stays at the bottom of the screen without
+   painting over the page. `position: sticky; bottom: 0` did that covering:
+   the order ticket's last rows and the chart's time axis sat under the bar. */
+
+@media (max-width: 760px) {
+  /* `.app` grows to 8px of padding here, so both cancellations cost 8px rather
+     than 4. See the margin notes at the top of the file - the bottom one in
+     particular has to track `.app` exactly or the content above the bar runs
+     long by the difference. */
+  .sfoot {
+    height: 40px;
+    padding: 0 var(--sp-2);
+    margin-inline: calc(-1 * var(--sp-2));
+    margin-bottom: calc(-1 * var(--sp-2));
+  }
+  .sfoot .sfoot-chip { height: 34px; line-height: 32px; }
+  .sfoot .sfoot-icon { width: 34px; height: 34px; }
+  /* See the note on the desktop rule: a 2px lift is an optical correction on a
+     20px control in a 28px bar, and nothing at all on a 34px control in a 40px
+     one - there it is just an off-centre button. */
+  .sfoot-right .sfoot-icon { align-self: center; margin-top: 0; }
+}

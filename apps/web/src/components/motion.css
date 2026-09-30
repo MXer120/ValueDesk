@@ -1,0 +1,70 @@
+/* motion.tsx: smooth expand, animated height, fade-in of a new view. */
+
+.mo-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 260ms var(--ease-out), opacity 200ms var(--ease-out);
+}
+.mo-collapse.is-open { grid-template-rows: 1fr; opacity: 1; }
+.mo-collapse__in { min-height: 0; overflow: hidden; }
+
+/* Clip to the box, but let focus rings and shadows at the edge show. */
+.mo-autoh {
+  overflow: hidden;
+  overflow: clip;
+  overflow-clip-margin: 6px;
+  transition: height 260ms var(--ease-out);
+}
+
+.mo-fade { animation: mo-fade-in 240ms var(--ease-out) both; }
+@keyframes mo-fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mo-collapse, .mo-autoh { transition: none; }
+  .mo-fade { animation: none; }
+}
+
+/* Exits (usePresence): every pop-up, menu and sheet leaves the way it came in -
+   a short fade and settle - instead of vanishing. Scoped by class so a pop-up
+   opts in by adding `is-closing` while it is closing. */
+.is-closing:is(.menu-popup, .privacy__menu, .fx-list, .acctf-pop, .navaddr__menu, .dash-menu, .oe-pop, .cp-menu) {
+  animation: mo-pop-out var(--dur-fast) var(--ease-out) forwards;
+  pointer-events: none;
+}
+.modal-scrim.is-closing { animation: mo-scrim-out 180ms var(--ease-out) forwards; pointer-events: none; }
+.modal-scrim.is-closing .modal { animation: mo-modal-out 180ms var(--ease-out) forwards; }
+@keyframes mo-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-4px) scale(0.985); }
+}
+@keyframes mo-scrim-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes mo-modal-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(6px) scale(0.985); }
+}
+/* A switched view (account tabs, Position History cards <-> list) fades in. */
+.mo-switch { animation: mo-fade-in 200ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Exits still play, in 1ms: `animation: none` would never fire animationend,
+     and every usePresence pop-up would then wait out its fallback timer. */
+  .is-closing, .modal-scrim.is-closing .modal { animation-duration: 1ms !important; animation-delay: 0s !important; }
+  .mo-switch { animation: none !important; }
+}
+
+/* CrossFade: both views in one grid cell; the old one fades out on top of the
+   new one fading and settling in. */
+.mo-xfade__stack { display: grid; grid-template-columns: minmax(0, 1fr); }
+.mo-xfade__stack > * { grid-area: 1 / 1; min-width: 0; }
+.mo-xfade__out { pointer-events: none; animation: mo-xf-out 200ms var(--ease-out) forwards; z-index: 1; }
+.mo-xfade__in { animation: mo-xf-in 260ms var(--ease-out) both; }
+@keyframes mo-xf-out { from { opacity: 1; } to { opacity: 0; transform: scale(0.995); } }
+@keyframes mo-xf-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .mo-xfade__out { display: none; }
+  .mo-xfade__in { animation: none; }
+}

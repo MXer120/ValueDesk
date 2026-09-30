@@ -1,0 +1,450 @@
+/* Drawing-tool rail + the stage that holds it beside the chart canvas.
+   Owned by chart/DrawingRail.tsx and components/Chart.tsx. The two layout
+   classes (.kc-stage, .kc-pane) are additive wrappers on the global
+   `.chartholder-wrap` / `.chartholder` shell so dashboard.css keeps sizing the
+   panel body; every override carries a second class so it out-specifies the
+   global rule instead of tying it (styles.css is injected last). */
+
+/* The measured interaction spec calls for 150ms cubic-bezier(0.4, 0, 0.2, 1)
+   on control hover, which is NOT the global --dur-fast/--ease-out pair
+   (140ms / cubic-bezier(0.2, 0, 0, 1)). The difference is small but the spec is
+   a measurement, not a preference, so it is honoured locally and scoped to the
+   rail rather than smuggled into the global tokens. */
+.kc-rail,
+.kc-rail-popup {
+  --rail-dur: 150ms;
+  --rail-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  /* THE STRIP'S GEOMETRY, AND THE ONLY COPY OF IT.
+   *
+   * DrawingRail.tsx has to turn a measured body height into a tool count, which
+   * means it needs these three numbers — and a second copy of them written as
+   * TypeScript constants would go stale the first time a breakpoint changed one
+   * (the touch breakpoint at the foot of this file changes --rail-btn, and a
+   * hardcoded 34 there would have quietly over-filled the strip on a phone).
+   * So they live here, where the buttons themselves read them, and the
+   * component reads them back off the computed style. */
+  --rail-btn: 34px;
+  --rail-gap: 2px;
+  --rail-break: 11px;
+}
+
+/* --- stage ----------------------------------------------------------------- */
+
+/* The rail is a FLEX SIBLING of the canvas, not an absolute overlay. That is
+   deliberate and it is the part most likely to be got wrong: klinecharts sizes
+   its canvas from the container's own box and re-measures through a
+   ResizeObserver on that element. Floating a 40px strip over the canvas would
+   leave the chart believing it owns the full width and quietly draw the leftmost
+   candles underneath the buttons. Taking the width in the flex row instead means
+   the holder's box really is the drawable area, the observer fires once on
+   mount, and the candles start where they appear to start. */
+.chartholder-wrap.kc-stage {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Off the flow, still the size of the view slot. visibility keeps it laid
+   out; display:none would hand klinecharts a 0×0 box and a 0–10 price axis. */
+.chartholder-wrap.kc-stage.is-parked {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  width: auto;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* The plot column: canvas on top, footer strip (clock + price scale) beneath.
+ *
+ * The footer used to be a sibling of the whole stage, which stopped the rail
+ * ~30px above the panel floor and left a dead notch at the bottom of the
+ * strip. The reference runs its rail the FULL height of the card and keeps the
+ * footer inside the plot column, right-aligned under the time axis — so the
+ * last tool sits beside the clock rather than above it, and the strip has no
+ * unexplained gap. Moving the footer in here is what buys the rail that height
+ * back; nothing about the canvas changes, because the pane still takes all the
+ * space the footer does not.
+ *
+ * min-width:0 is load-bearing on both: a flex item defaults to min-width:auto,
+ * which would refuse to shrink below the canvas's intrinsic width and push the
+ * whole panel into horizontal overflow on a narrow dashboard column. */
+/* padding-left is 4px, and it is what sets where the CANDLES start.
+ *
+ * Measured, the reference's plot area begins 60px inside the page edge and ours
+ * began at 56 — the rail is the same width in both, so the difference is a clear
+ * 4px column between the last tool and the first candle that we did not have.
+ * It goes on the column rather than on the rail because the rail's own width is
+ * already pinned by where its GLYPHS have to centre (see .kc-rail below);
+ * widening the rail to 56 would fix the plot and move all nine icons 2px off
+ * the reference's centre line. The legend compensates for the shift so the one
+ * piece of text sitting on the candles keeps its measured position. */
+.kc-col {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding-left: 0;
+}
+
+.kc-pane {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+/* A short fade, not a margin. The candles meet the left edge and dissolve
+   into the card over a few pixels instead of ending on a hard cut. */
+.kc-pane::after {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  background: linear-gradient(90deg, var(--bg-panel) 0%, transparent 100%);
+  pointer-events: none;
+}
+
+/* The canvas fills the pane from the pane's own box rather than from a
+   percentage height. `.chartholder { height: 100% }` in the global sheet
+   resolves against a flex-sized parent, but only once that parent's height is
+   definite; pinning it removes the dependency entirely, and klinecharts then
+   measures exactly the box it is given.
+ *
+ * THE 2px ON THE RIGHT is the price gutter's outer inset, and it is here rather
+ * than on `.kc-col` so it moves the canvas alone and leaves the footer strip
+ * (clock, % / Log / Lin) right-aligned where it already matched. klinecharts
+ * pins the last-price badge to the exact right edge of the canvas with no
+ * padding option of its own, so the only way to inset that badge is to inset
+ * the canvas: measured, the reference's badge stops 4px inside the card and
+ * ours stopped at 2. The tick labels ride the same 2px in, which is why
+ * theme.ts asks for a 7px label margin rather than the 9 the reference measures
+ * — 2 + 7 is the 9, and splitting it this way is what moves both the badge and
+ * the labels onto the reference's columns with one number each. */
+.kc-pane > .chartholder.kc-canvas {
+  position: absolute;
+  inset: 0 2px 0 0;
+  height: auto;
+  width: auto;
+}
+
+/* --- rail ------------------------------------------------------------------ */
+
+/* 52px of the same surface the chart draws on. No fill of its own, no border
+   down its inner edge and no dividers between the tools: the strip is a column
+   of glyphs on the card, and every line drawn around it is one more box on a
+   screen whose whole separation model is the 4px gutter.
+ *
+ * 52 rather than 40 because the measurement that matters is where the GLYPHS
+ * sit, not how wide the strip is. The reference centres them ~30px from the
+ * card's left edge; at 40px wide ours centred at ~24 and hugged the plot, with
+ * a dead gutter to their left. 52px puts the centre line at 26 inside the card
+ * plus the 4px page margin - 30, on the reference's line. */
+/* padding-top is 8, not 4: measured, the reference's first glyph centres 24px
+ * below the top of the plot area and ours centred at 20. 8 + half a 34px button
+ * is 25, which lands it on the reference's line. The bottom keeps 4 — the strip
+ * is bottom-anchored by the collapse handle, not by a symmetric inset. */
+.kc-rail {
+  flex: none;
+  /* Containing block for the overflow flyout — see .kc-rail-popup, which is
+     capped against this box so it can never open off the top of the chart. */
+  position: relative;
+  width: 52px;
+  /* The plot is the flex sibling, so this width is what moves the chart.
+     Same duration the chart's own view moves use, so the first open and
+     every later one are one motion rather than a jump. */
+  /* Short on purpose. A long width change makes klinecharts re-lay the plot
+     on every frame, and that is what read as lag. The price axis is held
+     still for this same interval (Chart.tsx). */
+  transition: width 200ms cubic-bezier(0.2, 0, 0, 1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--rail-gap);
+  padding: var(--sp-2) 0 var(--sp-1);
+  border: 0;
+  background: transparent;
+}
+
+.kc-rail-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--rail-gap);
+  /* Takes whatever height is left after the cursor button and the footer
+     actions, so those stay pinned at the ends of the rail at every panel size. */
+  flex: 1 1 auto;
+  min-height: 0;
+  /* A backstop, not a feature. DrawingRail.tsx measures this box and only puts
+     in what fits, so in steady state there is nothing to scroll; this is here
+     so that a body measured mid-transition — a dashboard cell being dragged,
+     the touch breakpoint changing the button size — can never clip a button
+     outright.
+   *
+   * THE FADE THAT USED TO SIT HERE IS GONE. It was a cut-off cue for a strip
+   * that scrolled, and the tools past the fold now go to the "…" flyout
+   * instead; a permanent gradient over the last button would be telling the
+   * user to scroll for something that is not down there. It was also a flex
+   * child of this box, so it added two pixels to every height this component
+   * now has to predict. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* A visible scrollbar inside a 52px strip would eat a third of the icon
+     width, and there is nothing to scroll in the first place. */
+  scrollbar-width: none;
+}
+.kc-rail-body::-webkit-scrollbar { width: 0; height: 0; }
+
+/* A tool group. Each one is its own column so that the separator above it
+   travels with it: when a tool promotes out of the "…" flyout and lands in a
+   group that was not on screen, the break arrives with it rather than having to
+   be counted in by the parent. The group is flex:none — the body owns the
+   leftover space, not the groups inside it. */
+.kc-rail-group {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--rail-gap);
+}
+
+/* Group break. Same 11px as the footer spacer below and for the same reason:
+   with the flex `gap: 2px` landing on both sides of it, a 34px button, 2, 11, 2
+   and the next button put 49px between their centres against the rail's
+   otherwise uniform 36px pitch — the measured group gap. Space, not a rule:
+   there are no dividers anywhere in this strip. */
+.kc-rail-sep { flex: none; height: var(--rail-break); }
+
+/* Spacer, not a rule. It keeps the footer actions off the tool list without
+   drawing a line between them.
+ *
+ * 11px: the flex `gap: 2px` lands on both sides of it, so a 34px button, 2, 11,
+ * 2 and the next 34px button put 49px between their centres - the measured
+ * group gap, against the rail's otherwise uniform 36px pitch. There is exactly
+ * ONE of these now, below the tools: the reference holds its 36px pitch from
+ * the top of the strip and opens its first gap only once, well down the column,
+ * so a second spacer under the cursor was a grouping signal the reference does
+ * not send. It is also the only grouping signal here, since there are no
+ * dividers. */
+.kc-rail-gap { flex: none; height: var(--rail-break); }
+
+/* 34px square on a 2px gap: a 36px pitch, measured off the reference. State is
+   carried by `color` alone — no plate, no border, no weight change, nothing
+   that reflows the strip while the pointer moves down it. */
+.kc-rail-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--rail-btn);
+  height: var(--rail-btn);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color var(--rail-dur) var(--rail-ease);
+}
+
+.kc-rail-btn:hover:not(:disabled) { color: var(--text); background: transparent; }
+
+.kc-rail-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -1px;
+}
+
+/* Armed. Amber, and only amber.
+ *
+ * box-shadow: none is NOT redundant. The global sheet gives every
+ * `button.active` an `inset 0 -2px 0 var(--accent)` rule along the bottom edge,
+ * which is the right signal on a wide segmented control and reads as a
+ * rendering fault on a 32px icon square — measured on screen, it drew a solid
+ * bar under the glyph. `.kc-rail-btn.active` out-specifies that rule for the
+ * properties it declares but inherits anything it does not, so the shadow and
+ * the fill both have to be cancelled explicitly. */
+.kc-rail-btn.active,
+.kc-rail-btn.active:hover {
+  color: var(--accent);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.kc-rail-btn:disabled {
+  color: var(--dim);
+  opacity: 1;
+  cursor: default;
+}
+
+/* Destructive, so it earns its own hue on hover — but only on hover: a
+   permanently red button in a tool strip reads as an error state. */
+.kc-rail-clear:hover:not(:disabled) { color: var(--neg); }
+
+.kc-rail-empty {
+  color: var(--dim);
+  font-size: var(--fs-micro);
+  line-height: var(--rail-btn);
+}
+
+/* Collapse handle. A 14px-wide tab on the rail's inner edge, sitting just
+   above the clear action, that folds the whole strip down to a stub so the
+   plot can have the width back. It is on the rail rather than in the toolbar
+   because that is where the thing it hides is. */
+.kc-rail-collapse {
+  flex: none;
+  align-self: flex-end;
+  width: 16px;
+  height: 28px;
+  padding: 0;
+  margin-right: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color var(--rail-dur) var(--rail-ease);
+}
+.kc-rail-collapse:hover { color: var(--text); }
+.kc-rail-collapse:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+
+/* Collapsed keeps the handle and gives the rest of the width to the plot.
+   The tools stay mounted so the width transition has something to clip;
+   opacity takes them off before the clip reaches them. */
+.kc-rail.is-collapsed {
+  width: 16px;
+  padding-left: 0;
+  padding-right: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .kc-rail { transition: none; }
+}
+.kc-rail.is-collapsed .kc-rail-collapse { margin-right: 0; }
+.kc-rail.is-collapsed .kc-rail-body,
+.kc-rail.is-collapsed .kc-rail-gap,
+.kc-rail.is-collapsed .kc-rail-more,
+.kc-rail.is-collapsed .kc-rail-clear,
+.kc-rail.is-collapsed > .kc-rail-btn {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* --- overflow popup -------------------------------------------------------- */
+
+/* STATIC on purpose. The flyout is positioned against the RAIL, not against
+   this button, so that its max-height can be expressed as a fraction of the
+   strip; a flyout anchored to the button would need a hardcoded guess at how
+   much room is above it. */
+.kc-rail-more { position: static; flex: none; display: flex; }
+
+/* Opens to the RIGHT, over the canvas: there is nothing to the left of the rail
+   but the panel edge. z-index clears the legend (2) and the notice stack (4). */
+.kc-rail-popup {
+  position: absolute;
+  left: calc(100% + var(--sp-1));
+  bottom: var(--sp-1);
+  z-index: 6;
+  min-width: 200px;
+  /* The whole overflow can be a dozen rows and four headings — around 420px on
+     a short panel, which is more than the chart pane is tall. Capping against
+     the rail's own height rather than at a fixed number means the flyout always
+     opens inside the plot and scrolls for the rest, at every panel size, with
+     no number in this file pretending to know how tall the chart is. */
+  max-height: calc(100% - var(--sp-2));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--sp-1);
+  background: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: var(--shadow-modal);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .kc-rail-popup { background: var(--bg-elevated); }
+}
+
+/* Heading: 12px at weight 400, muted, sentence case. Rank comes from colour and
+   position, never from bolding and never from micro-caps. */
+.kc-rail-popup-head {
+  padding: var(--sp-1) 6px;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+
+/* A heading that follows another group's rows needs air above it; the first one
+   does not, because the popup's own padding already gives it. */
+.kc-rail-popup > div + div > .kc-rail-popup-head { margin-top: var(--sp-1); }
+
+/* An overflow row is the SAME glyph the rail draws, at the same 24px, beside
+   its name. That is the whole point of icons down here: when the panel is
+   dragged taller and a tool promotes into the strip, the user has to recognise
+   the shape that just arrived — a row that showed only a label would teach them
+   nothing about what to look for. */
+.kc-rail-popup button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  line-height: 20px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color var(--rail-dur) var(--rail-ease),
+    background-color var(--rail-dur) var(--rail-ease);
+}
+
+/* The glyph sits one step back from its label so the column of names is what
+   the eye runs down; it comes forward with the row on hover. `color` alone
+   again — the icons are drawn in currentColor. */
+.kc-rail-popup-ico {
+  flex: none;
+  display: flex;
+  color: var(--muted);
+  transition: color var(--rail-dur) var(--rail-ease);
+}
+.kc-rail-popup button:hover { background-color: var(--bg-hover); }
+.kc-rail-popup button:hover .kc-rail-popup-ico { color: var(--text); }
+.kc-rail-popup button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+.kc-rail-popup button.active { color: var(--accent); background-color: transparent; box-shadow: none; }
+.kc-rail-popup button.active .kc-rail-popup-ico { color: var(--accent); }
+
+/* --- narrow panels --------------------------------------------------------- */
+
+/* At and below the dashboard's `md` breakpoint, dashboard/responsive.css raises
+   every control inside `.dash` to `min-height: 40px` as a touch-target policy.
+   min-height clamps height whatever the specificity, and `.dash button` also
+   out-specifies `.kc-rail-btn`, so the rail measured 32 WIDE by 40 TALL here —
+   stretched rectangles, verified in the browser rather than reasoned about.
+   The answer is to follow that policy rather than fight it: 40px square
+   buttons in a 48px rail. It costs the canvas 8px on a phone-width panel,
+   which is the price of a control a thumb can actually hit. */
+@media (max-width: 993px) {
+  .kc-rail { width: 48px; --rail-btn: 40px; }
+  .kc-rail-popup { min-width: 180px; }
+}
+

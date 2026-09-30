@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <!-- IBM Plex Sans is self-hosted via @fontsource, imported in main.tsx.
+         The Google Fonts CDN link that used to sit here was doing three bad
+         things: a render-blocking round trip to a third party on every load,
+         a privacy leak of the user's IP to that third party, and - worst for
+         us - it shipped weights 600 and 700, which the design system does not
+         use and which kept reappearing in the UI because they were available.
+         Self-hosting loads 400 and 500 only, so a stray `font-weight: 700`
+         now visibly falls back instead of silently rendering. -->
+    <!--
+      Content Security Policy.
+
+      This app signs trading actions and displays balances, so the cost of an
+      injected script here is not defacement - it is a hostile order or a leaked
+      account view. The policy is therefore an allow-list of exactly what the app
+      uses and nothing else:
+
+        default-src 'self'      nothing loads from a third party at all
+        script-src  'self'      no inline <script>, no eval, no CDN
+        style-src   + unsafe-inline   React sets element styles inline; the
+                                chart library does too. Scripts are the vector
+                                that matters, and those stay strict.
+        NOTE: frame-ancestors deliberately does NOT appear here. It is ignored
+              when delivered via <meta> and only logs an error. Anti-framing is
+              sent as a real header instead - by vite.config.ts in dev, and by
+              whatever serves web/dist in production. See DEPLOYMENT.md.
+        connect-src 'self' + ws  the Vite proxy keeps the API same-origin, and
+                                the WalletConnect relay needs an outbound wss;
+                                plus the public RPCs the address menu reads
+                                wallet balances from (trading/walletBalances.ts:
+                                ValueChain, Arbitrum, Base, Ethereum, BNB Chain,
+                                Polygon) - read-only balance calls, nothing signed
+        img-src     + data:     wallet icons arrive as data: URIs over EIP-6963
+        form-action 'none'      nothing in this app posts a form anywhere
+        base-uri    'none'      an injected <base> cannot re-point relative URLs
+
+      Wallet extensions inject into the page directly rather than over the
+      network, so they are unaffected by this.
+
+      EXPECTED CONSOLE LINE: pairing by WalletConnect logs one CSP violation for
+      an iframe from verify.walletconnect.org. That is their Verify API, which
+      tells the wallet "this dapp is registered to this domain" so it can show a
+      badge. We block it deliberately: it is a third-party frame, it means
+      nothing for an app served from localhost, and allowing it would widen the
+      policy for cosmetics. Pairing works regardless - the only effect is that
+      the wallet shows the dapp as unverified, which for a self-hosted app is
+      simply true.
+    -->
+    <!--
+      frame-src is WalletConnect's Verify iframe: the anti-phishing check that
+      tells the wallet whether this origin is the one registered to the project
+      id, so the user sees a verdict before approving anything. Blocking it did
+      not make us safer - it turned a real signal into an unverifiable one, plus
+      a console error on every pairing. It is cross-origin and can read nothing
+      of ours. The directive has to be explicit: with no frame-src, framing falls
+      back to default-src 'self', which is what was refusing it.
+
+      NOTE FOR ANY FUTURE EDIT: a CSP policy string has NO comment syntax, and
+      this attribute is delimited by double quotes. A /* */ block placed inside
+      the content attribute does not merely fail to parse as CSP - a quote inside
+      it ends the attribute and breaks the whole document. Comments go here.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: blob: https://explorer-api.walletconnect.com https://api.web3modal.org;
+        frame-src https://verify.walletconnect.org;
+        font-src 'self' https://fonts.reown.com;
+        connect-src 'self' ws: wss:
+          https://mainnet-gw.sodex.dev https://testnet-gw.sodex.dev
+          https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
+          https://alpha-biz.sodex.dev
+          https://relay.walletconnect.org https://relay.walletconnect.com
+          https://explorer-api.walletconnect.com https://api.web3modal.org
+          https://fonts.reown.com
+          https://main-scan.valuechain.xyz
+          https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
+          https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
+          https://polygon-bor-rpc.publicnode.com;
+        form-action 'none';
+        base-uri 'none';
+        object-src 'none';
+      "
+    />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>Valuescan</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

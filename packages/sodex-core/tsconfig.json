@@ -1,0 +1,23 @@
+{
+  // SOURCE ONLY, with NO ambient typings ("types": []) and no DOM lib: anything
+  // under src/ that reaches for Buffer, process, node:*, window or document
+  // fails to compile here. Tests are checked by tsconfig.test.json.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src"]
+}

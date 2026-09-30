@@ -1,0 +1,30 @@
+{
+  "name": "@valuescan/sodex-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-safe SoDEX core: EIP-712 action and API-key signing (byte-identical to the official Go SDK), builder codes, nonce management, request assembly, decimal canonicalisation and REST/WS shapes. Pure TypeScript + @noble; no Node or DOM APIs; never sends anything.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "vectors": "bash tools/genvectors.sh"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.7.0",
+    "@noble/hashes": "^1.6.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "~5.9.3"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ]
+}

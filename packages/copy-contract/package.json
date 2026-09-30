@@ -1,0 +1,37 @@
+{
+  "name": "@valuescan/copy-contract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TypeScript bindings for the ValuescanCopyTrading contract (UUPS proxy) on ValueChain: types, the committed ABI, calldata builders and view decoders, EIP-712 typed data for every ...WithSig action, event decoders and an event-sourced index with the stop-epoch rule, executor gates, execution-commitment Merkle trees, relayer helpers and TimelockController proposals. Pure TypeScript + @noble; no Node or DOM APIs; never sends anything.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./abi.json": "./abi/ValuescanCopyTrading.abi.json",
+    "./timelock-abi.json": "./abi/TimelockController.abi.json"
+  },
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.test.json",
+    "abi": "tsx tools/extract-abi.ts",
+    "abi:check": "tsx tools/extract-abi.ts --check",
+    "vectors": "tsx tools/gen-vectors.ts",
+    "vectors:check": "tsx tools/gen-vectors.ts --check"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.7.0",
+    "@noble/hashes": "^1.6.1"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "~5.9.3",
+    "viem": "^2.56.0"
+  },
+  "files": [
+    "src",
+    "abi",
+    "README.md"
+  ]
+}

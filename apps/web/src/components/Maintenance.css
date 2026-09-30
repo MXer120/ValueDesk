@@ -1,0 +1,85 @@
+/* Status + announcements panel. Tokens only. */
+
+.maintenance { display: flex; flex-direction: column; min-height: 0; }
+
+.mt-status {
+  display: flex; align-items: flex-start; gap: var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: var(--sp-2); background: var(--bg-elevated);
+}
+/* Only a real, reported maintenance state gets the attention colour. An
+   unreachable status service stays neutral on purpose - see the component. */
+.mt-status.down { border-color: var(--warn); }
+.mt-status .statusdot { margin-top: 6px; }
+.mt-status-text { min-width: 0; }
+
+/* Capped with the list below it. A category filter parked at x=1880 while the
+   rows it filters end at x=1130 is a control detached from its object; on the
+   same measure the "All / Updates / Listings / ..." strip sits over the right
+   edge of the list, where it reads as that list's own header. */
+.mt-feedhead {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  flex-wrap: wrap; margin-top: var(--sp-3);
+  max-width: 1100px;
+}
+.mt-feedhead h3 { margin: 0; }
+.mt-labels { flex: 0 1 auto; }
+.mt-labels button { padding: 3px 8px; font-size: var(--fs-xs); }
+
+/* ~90 characters, not the full 1870px panel. At a 1920 window this paragraph
+   was running about 230 characters per line, which is roughly three times the
+   measure a line of prose can be tracked across without losing the return. */
+.mt-note { margin: var(--sp-2) 0; max-width: 90ch; }
+
+/* CAP THE MEASURE, hairlines included. A row's content - timestamp, title,
+   category chip - ends around x=540; on a 1920px monitor the list ran to 1900,
+   so every row was a short run of text followed by 1350px of hairline. The rule
+   is what tells you where the row ends, and a rule that long says the row is
+   1870px wide when it is not.
+ *
+ * The cap is on the LIST, so the borders stop with the content instead of each
+ * `li` needing its own max-width. 1100px is the same measure `.mt-note` above
+ * uses (~90ch), so the panel reads as one column rather than as prose at one
+ * width and a list at another. */
+.mt-list { list-style: none; margin: 0; padding: 0; flex: 1; min-height: 0; overflow: auto; max-width: 1100px; }
+.mt-list > li { border-bottom: 1px solid var(--line-soft); }
+
+/* 3px of vertical padding, not 8px: one line of 13px text in a 38px row is a
+   list that shows half as many announcements as it could, and this list is the
+   one place in the app where "what changed recently" has to be scannable. */
+.mt-row {
+  display: flex; align-items: baseline; gap: var(--sp-2); width: 100%;
+  border: none; background: none; border-radius: 0; text-align: left;
+  padding: 3px var(--sp-1); font: inherit; color: var(--text);
+}
+.mt-row:hover:not(:disabled) { background: var(--bg-hover); border-color: transparent; }
+.mt-when { flex: none; }
+/* `0 1 auto`, not `1`: the title used to be the elastic column, which parked
+   the category chip 1400px away at the panel's right edge with nothing in
+   between - so the chip read as unrelated to the row it labels. Now the title
+   takes only the width it needs, the chip sits immediately after it where a
+   label belongs, and the disclosure arrow is the only thing pinned right. */
+.mt-title { flex: 0 1 auto; min-width: 0; font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-label { flex: none; }
+/* The chip moved in beside the title but the arrow stayed pinned right, which
+   left a 6px glyph sitting 1350px from the row it opens - the eye cannot pair
+   those. `margin-left: auto` is gone: the disclosure follows the chip, so the
+   whole row is one object you can take in at a glance, and the leftover width
+   is margin rather than a gap running through the middle of a control. */
+.mt-chev { flex: none; padding-left: var(--sp-2); }
+
+/* An 'alert'-style article is upstream's own emphasis, not our inference. */
+.mt-list > li.alert .mt-title { color: var(--warn); }
+
+.mt-body { padding: 0 var(--sp-1) var(--sp-3) var(--sp-1); }
+/* pre-wrap keeps the paragraph breaks the backend preserved when it flattened
+   the article, without any markup being involved. */
+.mt-text { white-space: pre-wrap; margin: 0; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .mt-row { flex-wrap: wrap; }
+  /* On its own line the title has the whole row, so it wraps rather than
+     truncating - undoing the desktop ellipsis, which only exists to keep the
+     chip beside the title on one line. */
+  .mt-title { flex: 1 1 100%; white-space: normal; overflow: visible; }
+}

@@ -1,0 +1,54 @@
+/*
+ * Host side of the TradingView chart. The panel reuses the klinecharts
+ * chart's `.panel.kc-panel` surface (chart.css) so the two are the same card;
+ * this only adds the stage, the frame holder and the attribution strip. The
+ * loading / error overlay, the Live / Delayed word and the move-confirm bar
+ * are chart.css's own classes, shared with the klinecharts chart.
+ */
+.panel.kc-panel.tv-panel {
+  overflow: hidden;
+  height: 100%;
+}
+
+/* The stage takes the panel's free height; the library's iframe fills it
+   from an absolutely placed holder, and the overlay and the notices float
+   over the same box. The library manages the holder's children itself, so
+   nothing React renders goes INSIDE the holder. */
+.tv-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+.tv-stage > .tv-holder {
+  position: absolute;
+  inset: 0;
+}
+.tv-holder > iframe {
+  display: block;
+}
+
+/* Attribution strip. The logo inside the chart is the licence's requirement;
+   the text link here says the same in words and must stay visible - it is not
+   decoration to trim for space. */
+.tv-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: 2px var(--sp-2) 4px;
+  font-size: var(--fs-micro);
+  line-height: var(--lh-micro);
+  color: var(--dim);
+}
+.tv-foot a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.tv-foot a:hover {
+  color: var(--text);
+}
+.tv-foot .tv-note {
+  margin-right: auto;
+}

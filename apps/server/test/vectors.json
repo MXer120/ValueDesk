@@ -1,0 +1,439 @@
+{
+  "address": "0x2c7536E3605D9C16a7a3D7b1898e529396a65c23",
+  "bigIntCheck": "138565",
+  "chainID": 138565,
+  "decimals": {
+    "-0": "0",
+    "-0.500": "-0.5",
+    ".5": "0.5",
+    "0": "0",
+    "0.000": "0",
+    "0.0000001": "0.0000001",
+    "0.1": "0.1",
+    "0.406": "0.406",
+    "0.4060": "0.406",
+    "000123.4500": "123.45",
+    "1.": "1",
+    "1000000": "1000000",
+    "12345678901234567890.123": "12345678901234567890.123",
+    "1E+3": "1000",
+    "1e-7": "0.0000001",
+    "3.14159265358979323846": "3.14159265358979323846",
+    "95000": "95000",
+    "95000.00": "95000"
+  },
+  "domainPerps": "0x82cda88572639da241e3558ba107594e177cc9c2191562fa9672efcd45d5fcd0",
+  "domainSpot": "0x46e5cb94aed2e3d92346e976fb03a3391c1dd9228c1bb22069c60e40f35e1411",
+  "domainUniv": "0x88f393c4d0251b22dbcfd44f15e76dd278d6e9c5af181038fa89db2d0188e3c2",
+  "privateKey": "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318",
+  "sigTypeExch": 1,
+  "sigTypeUniv": 2,
+  "vectors": [
+    {
+      "name": "perps_limit_order",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1730000000000,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-limit-1\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"70000.5\",\"quantity\":\"0.01\",\"reduceOnly\":false,\"positionSide\":1}]}}",
+      "payloadHash": "0x08a4baa0179b21ae64e1a5d2db33194c19532e070bf65afe873ada9dbabe67a5",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-limit-1\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"70000.5\",\"quantity\":\"0.01\",\"reduceOnly\":false,\"positionSide\":1}]}",
+      "signature": "0x015b65fb8c6f61c8092cecabc6db04745e6a3aa4fd820bc3e14b69ee3cfb272c44675b4b344516a111d2502659874c4ff30f7a458a249ba65fb9c535c6ae9db66f00",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "opentrade-limit-1",
+            "modifier": 1,
+            "side": 1,
+            "type": 1,
+            "timeInForce": 1,
+            "price": "70000.5",
+            "quantity": "0.01",
+            "reduceOnly": false,
+            "positionSide": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_market_reduce_only",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1730000000001,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-mkt-1\",\"modifier\":1,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.001\",\"reduceOnly\":true,\"positionSide\":1}]}}",
+      "payloadHash": "0x1bb5c5a7c3299fa5ec8b7346bab38c809f9d83c217b7fcad4c165354b9c39d31",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-mkt-1\",\"modifier\":1,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.001\",\"reduceOnly\":true,\"positionSide\":1}]}",
+      "signature": "0x01fbab8b13782df2c805564c6bbb9ccf7d8245110e75c4d5676af7e57ac819aeb94e40009c3c3229a9fa167449b19dec7819eb018d29f0b9c49ae79e02ee191c3900",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "opentrade-mkt-1",
+            "modifier": 1,
+            "side": 2,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.001",
+            "reduceOnly": true,
+            "positionSide": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_stop_loss",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1730000000002,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-sl-1\",\"modifier\":1,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.5\",\"stopPrice\":\"64000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}]}}",
+      "payloadHash": "0x2299be3b728a52f6eb3f1440e47360c072a9c5aed6c20aaf50c8ec65583bfb28",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"opentrade-sl-1\",\"modifier\":1,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.5\",\"stopPrice\":\"64000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}]}",
+      "signature": "0x014674a1a4d6d6d1d6f5eff0ae8e425945b06142862ff19dba2bf476e673f80c851a9fae47dd943f409a5c78241c7d0a948f81f1bc6c634d5a7ee5718217b75cab00",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "opentrade-sl-1",
+            "modifier": 1,
+            "side": 2,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.5",
+            "stopPrice": "64000",
+            "stopType": 1,
+            "triggerType": 2,
+            "reduceOnly": true,
+            "positionSide": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_tiny_price",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1730000000003,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":7,\"orders\":[{\"clOrdID\":\"opentrade-tiny-1\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":4,\"price\":\"0.0000001\",\"quantity\":\"1000000\",\"reduceOnly\":false,\"positionSide\":1}]}}",
+      "payloadHash": "0x87b1243cfd79bee449a1ed70b9503f31f9c1a08f7b9cf8bb92303fdf29fafa46",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":7,\"orders\":[{\"clOrdID\":\"opentrade-tiny-1\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":4,\"price\":\"0.0000001\",\"quantity\":\"1000000\",\"reduceOnly\":false,\"positionSide\":1}]}",
+      "signature": "0x014f17f09d6526f505db945c8446209dcdeebdce5e6c5accda2ecfff5413a586e82a6acd89b36716f8abcbb7d0fb9f97d0968e20350499f45262b9caf1f835949400",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 7,
+        "orders": [
+          {
+            "clOrdID": "opentrade-tiny-1",
+            "modifier": 1,
+            "side": 1,
+            "type": 1,
+            "timeInForce": 4,
+            "price": "0.0000001",
+            "quantity": "1000000",
+            "reduceOnly": false,
+            "positionSide": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_multi_order",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1730000000004,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":2,\"orders\":[{\"clOrdID\":\"ot-a\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"2500.25\",\"quantity\":\"1.5\",\"reduceOnly\":false,\"positionSide\":1},{\"clOrdID\":\"ot-b\",\"modifier\":1,\"side\":2,\"type\":1,\"timeInForce\":4,\"price\":\"2600\",\"quantity\":\"0.75\",\"reduceOnly\":false,\"positionSide\":1}]}}",
+      "payloadHash": "0xb572aa1f9e68bd220d7bbe53d114830b3a7dc1e618768353e4e6bc2e300ee3df",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":2,\"orders\":[{\"clOrdID\":\"ot-a\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"2500.25\",\"quantity\":\"1.5\",\"reduceOnly\":false,\"positionSide\":1},{\"clOrdID\":\"ot-b\",\"modifier\":1,\"side\":2,\"type\":1,\"timeInForce\":4,\"price\":\"2600\",\"quantity\":\"0.75\",\"reduceOnly\":false,\"positionSide\":1}]}",
+      "signature": "0x017212f3b7e7a3a7b4525e720366e68a57fbe212b12a032f63a445084006f0aaee7aef934e31e08853b2e4e77227d93343bd984683ba2decc3ca26506431fd043f00",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 2,
+        "orders": [
+          {
+            "clOrdID": "ot-a",
+            "modifier": 1,
+            "side": 1,
+            "type": 1,
+            "timeInForce": 1,
+            "price": "2500.25",
+            "quantity": "1.5",
+            "reduceOnly": false,
+            "positionSide": 1
+          },
+          {
+            "clOrdID": "ot-b",
+            "modifier": 1,
+            "side": 2,
+            "type": 1,
+            "timeInForce": 4,
+            "price": "2600",
+            "quantity": "0.75",
+            "reduceOnly": false,
+            "positionSide": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_cancel",
+      "engine": "perps",
+      "actionType": "cancelOrder",
+      "nonce": 1730000000005,
+      "payloadJSON": "{\"type\":\"cancelOrder\",\"params\":{\"accountID\":43933,\"cancels\":[{\"symbolID\":1,\"orderID\":987654321},{\"symbolID\":2,\"clOrdID\":\"opentrade-limit-1\"}]}}",
+      "payloadHash": "0xa3ef517b8b7312d8e074ae50d996061713de9ff1db3a9dbdb629ea977f7d0346",
+      "bodyJSON": "{\"accountID\":43933,\"cancels\":[{\"symbolID\":1,\"orderID\":987654321},{\"symbolID\":2,\"clOrdID\":\"opentrade-limit-1\"}]}",
+      "signature": "0x0171fa8947b28997afaa5c92be08b26f2610e8e14aa4098ad9edc45f2e35d126f313f30c5be7ec44cb83e23eef9493b2b803f86ae673f1fcebba817ddd65e566e301",
+      "params": {
+        "accountID": 43933,
+        "cancels": [
+          {
+            "symbolID": 1,
+            "orderID": 987654321
+          },
+          {
+            "symbolID": 2,
+            "clOrdID": "opentrade-limit-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_modify",
+      "engine": "perps",
+      "actionType": "modifyOrder",
+      "nonce": 1730000000006,
+      "payloadJSON": "{\"type\":\"modifyOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orderID\":987654321,\"price\":\"71000\",\"quantity\":\"0.02\"}}",
+      "payloadHash": "0x4d3e9c2097c1cb922a4bb759ce85489a234676d7ba91984e8f4f2b768bc361ab",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orderID\":987654321,\"price\":\"71000\",\"quantity\":\"0.02\"}",
+      "signature": "0x010af98d3dba32af594496c177c2bdbaf20fcc70c44bd2ffdbe1cb008296a1262846268d9b573fe827163065d1f9ce14c6db30ef01b9cdd897d8aaeea458a67ce300",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orderID": 987654321,
+        "price": "71000",
+        "quantity": "0.02"
+      }
+    },
+    {
+      "name": "perps_leverage",
+      "engine": "perps",
+      "actionType": "updateLeverage",
+      "nonce": 1730000000007,
+      "payloadJSON": "{\"type\":\"updateLeverage\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"leverage\":10,\"marginMode\":2}}",
+      "payloadHash": "0x8df964d98d1c3d122b27e76931a65c1939823c17b1b63ea76f46619bf9150e9e",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"leverage\":10,\"marginMode\":2}",
+      "signature": "0x0195e5da98e60fc212f0178fadf9c7ba2e4b1024aba7e8a6e147f664d850c76b32377c3d1c11d9dc7b7100589571e870dbd9dc9217123b645c8146c9b671865d2a00",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "leverage": 10,
+        "marginMode": 2
+      }
+    },
+    {
+      "name": "perps_margin",
+      "engine": "perps",
+      "actionType": "updateMargin",
+      "nonce": 1730000000008,
+      "payloadJSON": "{\"type\":\"updateMargin\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"amount\":\"250.5\"}}",
+      "payloadHash": "0x50c266c9d8a0c465cc6528dfef904d6cabe86d4a6e2f9b97d12f77b5ea5ba6c8",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"amount\":\"250.5\"}",
+      "signature": "0x01f445804a58543b4e58ad41675fef9a4e20446c6a717fa331ccb134aa28109d275841863015786bd0aa1245c8054cf99baa88e1fe4948a4ff61f5a1e0b64345ff00",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "amount": "250.5"
+      }
+    },
+    {
+      "name": "perps_transfer_to_spot",
+      "engine": "perps",
+      "actionType": "transferAsset",
+      "nonce": 1730000000009,
+      "payloadJSON": "{\"type\":\"transferAsset\",\"params\":{\"id\":1,\"fromAccountID\":43933,\"toAccountID\":999,\"coinID\":0,\"amount\":\"100\",\"type\":5}}",
+      "payloadHash": "0x43d6d493bb69e85980b1ff50cf70fb55de525a07917b3d6f58ae3216db00a3ce",
+      "bodyJSON": "{\"id\":1,\"fromAccountID\":43933,\"toAccountID\":999,\"coinID\":0,\"amount\":\"100\",\"type\":5}",
+      "signature": "0x016c10fe29a741b24d08631a3ecaa0605bf5b524d5a285ab8df1dcedb24959b063618dc43e1b8ca3dc14d28fbcf19873d0c3122d9ffad839813a3237830594de6c00",
+      "params": {
+        "id": 1,
+        "fromAccountID": 43933,
+        "toAccountID": 999,
+        "coinID": 0,
+        "amount": "100",
+        "type": 5
+      }
+    },
+    {
+      "name": "perps_schedule_cancel",
+      "engine": "perps",
+      "actionType": "scheduleCancel",
+      "nonce": 1730000000010,
+      "payloadJSON": "{\"type\":\"scheduleCancel\",\"params\":{\"accountID\":43933,\"scheduledTimestamp\":1776000060000}}",
+      "payloadHash": "0x28b9cf52635f2e964a106bdd8a7199961456a1f51745823ae327223c6ceed514",
+      "bodyJSON": "{\"accountID\":43933,\"scheduledTimestamp\":1776000060000}",
+      "signature": "0x01e814b821b8227aadacac6d188fa9183df8a0a2588b5958fbc8a782dc9b07997a6e4817db32e3bc35525722bc78520c94f5d50566e2b9bca363b4809c8e10c41d00",
+      "params": {
+        "accountID": 43933,
+        "scheduledTimestamp": 1776000060000
+      }
+    },
+    {
+      "name": "perps_schedule_cancel_clear",
+      "engine": "perps",
+      "actionType": "scheduleCancel",
+      "nonce": 1730000000011,
+      "payloadJSON": "{\"type\":\"scheduleCancel\",\"params\":{\"accountID\":43933}}",
+      "payloadHash": "0x2ab6984ec724c509cf8496c314797e2390fef7edb2afe909998a4459dea0963e",
+      "bodyJSON": "{\"accountID\":43933}",
+      "signature": "0x0185df76ab9cc1bb24b7826892276e17ff5ae2e944bafa93e182acea662cdd4fe518e79a3b0f1f759f11318be057b6a1564c0e3a4f3b45562d5fdb06a60fd98b3701",
+      "params": {
+        "accountID": 43933
+      }
+    },
+    {
+      "name": "spot_batch_new_order",
+      "engine": "spot",
+      "actionType": "batchNewOrder",
+      "nonce": 1730000000012,
+      "payloadJSON": "{\"type\":\"batchNewOrder\",\"params\":{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"opentrade-spot-1\",\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"95000\",\"quantity\":\"0.406\"}]}}",
+      "payloadHash": "0xa536a885e0702b15ac14db924dd784b24d860c54e1cf7d306dedf2eae0d0a721",
+      "bodyJSON": "{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"opentrade-spot-1\",\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"95000\",\"quantity\":\"0.406\"}]}",
+      "signature": "0x01119d0fe30735d13b3e238f830580e96a90e108137cf513c77873a77893ace6ce20cd676120e0b07ef7c1927615c0376cde994458c564a66e5b8a68792ad11abc01",
+      "params": {
+        "accountID": 43933,
+        "orders": [
+          {
+            "symbolID": 1,
+            "clOrdID": "opentrade-spot-1",
+            "side": 1,
+            "type": 1,
+            "timeInForce": 1,
+            "price": "95000",
+            "quantity": "0.406"
+          }
+        ]
+      }
+    },
+    {
+      "name": "spot_market_by_funds",
+      "engine": "spot",
+      "actionType": "batchNewOrder",
+      "nonce": 1730000000013,
+      "payloadJSON": "{\"type\":\"batchNewOrder\",\"params\":{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"opentrade-spot-funds\",\"side\":1,\"type\":2,\"timeInForce\":3,\"funds\":\"500\"}]}}",
+      "payloadHash": "0x1d985b256aabe9f8e837c1bd687277e042afbed8ee8676632d4fbbf17c161606",
+      "bodyJSON": "{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"opentrade-spot-funds\",\"side\":1,\"type\":2,\"timeInForce\":3,\"funds\":\"500\"}]}",
+      "signature": "0x012f9a3081b2efc653b0a97fdfcb9b1de01f636c9a1b86f38b603ea39cbbaaeac2774b42fb99eb369acae2a9a521c3add909c1700d52b23986a3951dfdb85521d300",
+      "params": {
+        "accountID": 43933,
+        "orders": [
+          {
+            "symbolID": 1,
+            "clOrdID": "opentrade-spot-funds",
+            "side": 1,
+            "type": 2,
+            "timeInForce": 3,
+            "funds": "500"
+          }
+        ]
+      }
+    },
+    {
+      "name": "spot_batch_cancel",
+      "engine": "spot",
+      "actionType": "batchCancelOrder",
+      "nonce": 1730000000014,
+      "payloadJSON": "{\"type\":\"batchCancelOrder\",\"params\":{\"accountID\":43933,\"cancels\":[{\"symbolID\":1,\"clOrdID\":\"ot-cancel-1\",\"orderID\":555},{\"symbolID\":2,\"clOrdID\":\"ot-cancel-2\",\"origClOrdID\":\"opentrade-spot-1\"}]}}",
+      "payloadHash": "0x99e84648c1c553a4c101b877ce1e7da7cba8dd1419815006cb2c57c89963a1ee",
+      "bodyJSON": "{\"accountID\":43933,\"cancels\":[{\"symbolID\":1,\"clOrdID\":\"ot-cancel-1\",\"orderID\":555},{\"symbolID\":2,\"clOrdID\":\"ot-cancel-2\",\"origClOrdID\":\"opentrade-spot-1\"}]}",
+      "signature": "0x01c0a5d3035d8315eeb55717cf51ecc080068cec62b152485d9751b8e443ebaa1a74473bec4f5ca72aa4690e6f971a8b8b9b9630dbaca4339b355c5d375db4215200",
+      "params": {
+        "accountID": 43933,
+        "cancels": [
+          {
+            "symbolID": 1,
+            "clOrdID": "ot-cancel-1",
+            "orderID": 555
+          },
+          {
+            "symbolID": 2,
+            "clOrdID": "ot-cancel-2",
+            "origClOrdID": "opentrade-spot-1"
+          }
+        ]
+      }
+    },
+    {
+      "name": "spot_transfer_to_perps",
+      "engine": "spot",
+      "actionType": "transferAsset",
+      "nonce": 1730000000015,
+      "payloadJSON": "{\"type\":\"transferAsset\",\"params\":{\"id\":2,\"fromAccountID\":43933,\"toAccountID\":999,\"coinID\":0,\"amount\":\"42.75\",\"type\":3}}",
+      "payloadHash": "0xa457cdf4748dbc5c365a37e63d9cce22df21595cec372192672defdd32b95946",
+      "bodyJSON": "{\"id\":2,\"fromAccountID\":43933,\"toAccountID\":999,\"coinID\":0,\"amount\":\"42.75\",\"type\":3}",
+      "signature": "0x011db3c5e4311a627e382361008d9e7ba8ef12d17d1f13a7000555ff9d2875cc9047464f28954964482a36edbcc8a226ca46b9e19a1b9828900bb8d1044e759b2901",
+      "params": {
+        "id": 2,
+        "fromAccountID": 43933,
+        "toAccountID": 999,
+        "coinID": 0,
+        "amount": "42.75",
+        "type": 3
+      }
+    },
+    {
+      "name": "perps_replace",
+      "engine": "perps",
+      "actionType": "replaceOrder",
+      "nonce": 1730000000016,
+      "payloadJSON": "{\"type\":\"replaceOrder\",\"params\":{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"ot-replace-1\",\"origOrderID\":987654321,\"price\":\"69500\"}]}}",
+      "payloadHash": "0xd5c1f3124dfcf2306da7916751634ac34244d41acc227679672c18986d821f27",
+      "bodyJSON": "{\"accountID\":43933,\"orders\":[{\"symbolID\":1,\"clOrdID\":\"ot-replace-1\",\"origOrderID\":987654321,\"price\":\"69500\"}]}",
+      "signature": "0x01b021ecd71a078b8301660760e1fb12afab671e4ca5b8a7033d875d0ea97d2e3e123f4b207795a9eb0617a6e36d02175c474c5f5e55e689448f757af70583ab3000",
+      "params": {
+        "accountID": 43933,
+        "orders": [
+          {
+            "symbolID": 1,
+            "clOrdID": "ot-replace-1",
+            "origOrderID": 987654321,
+            "price": "69500"
+          }
+        ]
+      }
+    },
+    {
+      "name": "perps_revoke_api_key",
+      "engine": "perps",
+      "actionType": "revokeAPIKey",
+      "nonce": 1730000000017,
+      "payloadJSON": "{\"type\":\"revokeAPIKey\",\"params\":{\"accountID\":43933,\"name\":\"opentrade-key\"}}",
+      "payloadHash": "0xef55e9a9fb240884b74bbefbd56ca7f29bf9aaf744d9072bcd086d03eff0d12b",
+      "bodyJSON": "{\"accountID\":43933,\"name\":\"opentrade-key\"}",
+      "signature": "0x014c93870125b55a21b25cabbf94755f843ec33f3d74763d7047303d05de0168493d887aa7daf576f9dc0975350cb3afb28200f01749e0caa6b4eebc1ad29354f101",
+      "params": {
+        "accountID": 43933,
+        "name": "opentrade-key"
+      }
+    },
+    {
+      "name": "user_signed_add_permissioned_api_key",
+      "engine": "universal",
+      "actionType": "addPermissionedAPIKey",
+      "nonce": 1730000000018,
+      "payloadJSON": "{\"accountID\":43933,\"name\":\"opentrade-trading\",\"type\":1,\"publicKey\":\"0x1234567890abcdef1234567890abcdef12345678\",\"expiresAt\":1800000000,\"permissions\":3}",
+      "payloadHash": "0x1722f51e16c53d13806382b82fce59dafea1070adcaddcd25d3fed6d9643f263",
+      "bodyJSON": "{\"accountID\":43933,\"name\":\"opentrade-trading\",\"type\":1,\"publicKey\":\"0x1234567890abcdef1234567890abcdef12345678\",\"expiresAt\":1800000000,\"permissions\":3}",
+      "signature": "0x02de518c048333c329bab83ea6b588bc88b71563c22f13e05ac9e388f3c051c54200ad75c188e07b5f5748e4e6b1d456be1b3e49293dcbf0fd5a1a60297ee29b5800",
+      "params": {
+        "accountID": 43933,
+        "name": "opentrade-trading",
+        "type": 1,
+        "publicKey": "0x1234567890abcdef1234567890abcdef12345678",
+        "expiresAt": 1800000000,
+        "permissions": 3
+      }
+    }
+  ]
+}

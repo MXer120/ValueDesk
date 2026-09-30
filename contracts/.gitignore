@@ -1,0 +1,11 @@
+# Foundry build output
+out/
+cache/
+broadcast/
+# Coverage
+lcov.info
+coverage/
+# Never commit keys or RPC secrets
+.env
+.env.*
+!.env.example
