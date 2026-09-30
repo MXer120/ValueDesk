@@ -30,6 +30,10 @@ import {
   type ReactNode,
 } from 'react';
 import { CoinIcon } from './components/CoinIcon';
+import { logger } from './log';
+
+// Error detail for the console, through the logger's redaction (never raw text).
+const toastLog = logger('toast');
 
 export type Severity = 'error' | 'warn' | 'info' | 'ok';
 
@@ -147,7 +151,7 @@ export function notifyError(source: string, e: unknown, retry?: () => void): str
   const message = shortMessage(source, raw);
   const code = errorCode(source, message);
   // The detail lives in the console, findable by the code the toast shows.
-  console.warn(`[${code}] ${source}: ${raw}`);
+  toastLog.warn(`[${code}] ${source}`, { detail: raw });
   emit({ severity: 'error', message, code, retry });
   return code;
 }

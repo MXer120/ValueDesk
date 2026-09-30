@@ -64,6 +64,17 @@ const MAX_STRING = 500;
 const MAX_ARRAY = 20;
 const MAX_KEYS = 40;
 const SECRET_KEY = /(private|secret|signature|\bsig\b|mnemonic|seed|passphrase|password|token|api[-_]?key|authorization|cookie)/i;
+/**
+ * Whole words that mark a secret inside a key name, however it is cased:
+ * `key`, `privKey`, `pk`, `session_jwt`, `bearerToken`, `credentials`. Checked
+ * per word so `keyName` is caught but `monkey` or `turnkey` are not.
+ */
+const SECRET_WORDS = new Set(['key', 'pk', 'jwt', 'bearer', 'credential', 'credentials']);
+const isSecretKey = (k: string): boolean =>
+  SECRET_KEY.test(k) || k.split(/[^A-Za-z0-9]+|(?<=[a-z0-9])(?=[A-Z])/).some((w) => SECRET_WORDS.has(w.toLowerCase()));
+/** A JWT anywhere in a string (header.payload.signature, the header always base64 of `{"`). */
+const JWT_IN_TEXT = /eyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}/g;
+const BEARER_IN_TEXT = /\b(Bearer)\s+[A-Za-z0-9._~+/=-]{8,}/gi;
 
 const STORAGE_KEY = 'vs.debug';
 const SESSION_KEY = 'vs.debug.session';
@@ -109,18 +120,23 @@ function clip(s: string): string {
   return s.length > MAX_STRING ? `${s.slice(0, MAX_STRING)}… (${s.length} chars)` : s;
 }
 
+/** Tokens never reach the buffer or the console, even inside free text. */
+function scrub(s: string): string {
+  return s.replace(JWT_IN_TEXT, '[jwt]').replace(BEARER_IN_TEXT, '$1 [redacted]');
+}
+
 function sanitize(value: unknown, depth = 0): unknown {
   if (value === null || value === undefined) return value;
   const t = typeof value;
-  if (t === 'string') return clip(value as string);
+  if (t === 'string') return clip(scrub(value as string));
   if (t === 'number' || t === 'boolean') return value;
   if (t === 'bigint') return `${(value as bigint).toString()}n`;
   if (t === 'function' || t === 'symbol') return `[${t}]`;
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: clip(value.message),
-      stack: value.stack ? clip(value.stack.split('\n').slice(0, 8).join('\n')) : undefined,
+      message: clip(scrub(value.message)),
+      stack: value.stack ? clip(scrub(value.stack.split('\n').slice(0, 8).join('\n'))) : undefined,
       ...(value as { status?: unknown }).status !== undefined ? { status: (value as { status?: unknown }).status } : {},
       ...(value as { code?: unknown }).code !== undefined ? { code: (value as { code?: unknown }).code } : {},
     };
@@ -128,6 +144,9 @@ function sanitize(value: unknown, depth = 0): unknown {
   if (typeof Event !== 'undefined' && value instanceof Event) {
     return { event: value.type };
   }
+  // Raw bytes (a key, a signature, a seed) are never copied out, only counted.
+  if (value instanceof ArrayBuffer) return `[bytes:${value.byteLength}]`;
+  if (ArrayBuffer.isView(value)) return `[bytes:${value.byteLength}]`;
   if (depth >= 2) return Array.isArray(value) ? `[array(${value.length})]` : '[object]';
   if (Array.isArray(value)) {
     const head = value.slice(0, MAX_ARRAY).map((v) => sanitize(v, depth + 1));
@@ -138,7 +157,7 @@ function sanitize(value: unknown, depth = 0): unknown {
     let n = 0;
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
       if (n++ >= MAX_KEYS) { out['…'] = 'more keys omitted'; break; }
-      out[k] = SECRET_KEY.test(k) ? '[redacted]' : sanitize(v, depth + 1);
+      out[k] = isSecretKey(k) ? '[redacted]' : sanitize(v, depth + 1);
     }
     return out;
   }
@@ -205,6 +224,9 @@ function emit(level: LogLevel, ns: string, msg: string, data: unknown): void {
     try { sink(entry); } catch { /* a broken sink must never break the app */ }
   }
 }
+
+/** The redaction every entry goes through - exported for tests. */
+export const sanitizeForLog = (value: unknown): unknown => sanitize(value);
 
 /** A namespaced logger. Cheap to create; create one per module. */
 export function logger(ns: string): Logger {
