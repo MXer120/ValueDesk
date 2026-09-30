@@ -54,27 +54,24 @@ export interface HostedRoute {
   cls: RateClass;
   /** Non-empty values of these query parameters move a GET into `upstream` as well. */
   upstreamWhen?: readonly string[];
-  /**
-   * Set while the route is only on the list until docs/ARCH-traffic.md decides
-   * whether the web still needs it from here: why it is kept for now.
-   */
-  provisional?: string;
 }
 
-const PROVISIONAL_DIRECT = 'per-user or per-address venue read; drop once the web reads it browser-direct';
-
 /**
- * Everything a public server answers.
+ * Everything a public server answers - final, per docs/ARCH-traffic.md §5.
  *
- * PROVISIONAL LIST. The index routes (no `provisional`) are what a hosted
- * server exists for. The rest are here because the web app, as of 2026-09-30,
- * still calls them from pages that must work in production; each is to be
- * confirmed or removed against docs/ARCH-traffic.md once that inventory lands.
- * Not listed - so 404 in hosted mode - includes on purpose: /ws (the web goes
- * direct), /api/md/* /api/acct/* /api/scan* /api/stats/* /api/onboarding
- * /api/mirror/* /api/deposit/{assets,prepare,status,tx} (a user's own exchange
- * traffic, moving browser-direct), /api/vs/index/status (diagnostics), and every
- * custodial route (which answers 410 before this list is consulted).
+ * Every user's exchange traffic now leaves from that user's browser, so the
+ * list is the index and a few answers that are about no user at all. Not
+ * listed - so 404 in hosted mode - on purpose:
+ *   - /ws, /api/md/*, /api/acct/*, /api/stats/*, /api/mirror/*, /api/onboarding,
+ *     /api/wallet/*, /api/money/*, /api/deposit/*, /api/scan*: one user's
+ *     exchange traffic, now browser-direct;
+ *   - /api/vs/trader|fills|account|price, /api/external/leaderboard(/rank),
+ *     /api/external/resolve-account: the web reads them itself (ARCH §1.2, §1.4);
+ *   - /api/vs/index/status: diagnostics;
+ *   - /api/points/* (the SoPoints relay: the page is not mounted; if it returns,
+ *     list both routes as { method: 'POST', cls: 'auth' } - the gate then needs
+ *     the exact site Origin and applies the `auth` caps);
+ *   - every custodial route, which answers 410 before this list is consulted.
  */
 export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/health', cls: 'read' },
@@ -87,26 +84,18 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
   { method: 'GET', url: '/api/vs/screener', cls: 'read' },
-  // Provisional - see above.
-  { method: 'GET', url: '/api/vs/whales', cls: 'read', provisional: 'Explore tape, aggregated server-side from venue trade streams' },
-  { method: 'GET', url: '/api/vs/positioning', cls: 'read', provisional: 'Explore positioning, aggregated server-side' },
-  { method: 'GET', url: '/api/vs/price', cls: 'upstream', provisional: 'cohort asset price chart (Hyperliquid candles); could go browser-direct' },
-  { method: 'GET', url: '/api/vs/trader', cls: 'upstream', provisional: PROVISIONAL_DIRECT },
-  { method: 'GET', url: '/api/vs/fills', cls: 'upstream', provisional: PROVISIONAL_DIRECT },
-  { method: 'GET', url: '/api/vs/account', cls: 'upstream', provisional: PROVISIONAL_DIRECT },
-  { method: 'GET', url: '/api/external/maintenance/status', cls: 'read', provisional: 'maintenance banner; alpha-biz answers any origin, so it could go direct' },
-  { method: 'GET', url: '/api/external/announcements', cls: 'read', provisional: 'maintenance page; could go direct' },
-  { method: 'GET', url: '/api/external/announcements/:id', cls: 'upstream', provisional: 'maintenance page; could go direct' },
-  { method: 'GET', url: '/api/external/leaderboard', cls: 'upstream', provisional: 'the SoDEX leaderboard panel' },
-  { method: 'GET', url: '/api/external/leaderboard/rank', cls: 'upstream', provisional: PROVISIONAL_DIRECT },
-  { method: 'GET', url: '/api/external/resolve-account', cls: 'upstream', provisional: 'account id -> wallet, verified on-chain' },
-  { method: 'GET', url: '/api/feed/account', cls: 'upstream', provisional: 'deep links by SoDEX account id' },
-  { method: 'GET', url: '/api/deposit/chain', cls: 'read', provisional: 'static ValueChain parameters; should be pinned in the web instead' },
-  // NOT LISTED: POST /api/points/auth/{nonce,verify}, the SoPoints sign-in
-  // relay. The points page is not mounted (web router.ts: points -> trade), so
-  // hosted mode has no state-changing route at all. If it returns, add both as
-  // { method: 'POST', cls: 'auth' }: the gate then requires the exact site
-  // Origin and applies the per-client and overall `auth` caps.
+  // Aggregated server-side from the venues' trade streams - no one user's traffic.
+  { method: 'GET', url: '/api/vs/whales', cls: 'read' },
+  { method: 'GET', url: '/api/vs/positioning', cls: 'read' },
+  // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
+  // a lookup in the file already in memory, never a per-address upstream call.
+  { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },
+  // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
+  { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
+  // Global, not per-user (until the web reads alpha-biz directly).
+  { method: 'GET', url: '/api/external/maintenance/status', cls: 'read' },
+  { method: 'GET', url: '/api/external/announcements', cls: 'read' },
+  { method: 'GET', url: '/api/external/announcements/:id', cls: 'upstream' },
 ];
 
 // --- configuration ---------------------------------------------------------------

@@ -151,11 +151,38 @@ test('the allow-list names only routes that exist, each once', () => {
   }
 });
 
-test('the allow-list holds no custodial, per-user-proxy, diagnostic or websocket route', () => {
+test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
+  assert.deepEqual(
+    HOSTED_ROUTES.map((r) => `${r.method} ${r.url} ${r.cls}`).sort(),
+    [
+      'GET /api/external/announcements read',
+      'GET /api/external/announcements/:id upstream',
+      'GET /api/external/maintenance/status read',
+      'GET /api/feed/account upstream',
+      'GET /api/health read',
+      'GET /api/vs/cohorts read',
+      'GET /api/vs/cohorts/detail read',
+      'GET /api/vs/cohorts/focus read',
+      'GET /api/vs/cohorts/map read',
+      'GET /api/vs/cohorts/wallets read',
+      'GET /api/vs/explore read',
+      'GET /api/vs/lbrow read',
+      'GET /api/vs/leaderboard read',
+      'GET /api/vs/positioning read',
+      'GET /api/vs/screener read',
+      'GET /api/vs/whales read',
+    ],
+  );
+  // Nothing is left marked provisional: the list is final.
+  for (const r of HOSTED_ROUTES) assert.deepEqual(Object.keys(r).filter((k) => !['method', 'url', 'cls', 'upstreamWhen'].includes(k)), [], r.url);
+});
+
+test('the allow-list holds no custodial, per-user, diagnostic or websocket route', () => {
   const forbidden = [
     /^\/api\/session/, /^\/api\/wallet\//, /^\/api\/trade\//, /^\/api\/money\//,
     /^\/api\/acct\//, /^\/api\/md\//, /^\/api\/scan/, /^\/api\/stats\//, /^\/api\/onboarding/,
-    /^\/api\/mirror\//, /^\/api\/deposit\/(assets|prepare|status|tx)/, /^\/api\/prefs/,
+    /^\/api\/mirror\//, /^\/api\/deposit\//, /^\/api\/prefs/, /^\/api\/points\//,
+    /^\/api\/vs\/(trader|fills|account|price)$/, /^\/api\/external\/leaderboard/, /^\/api\/external\/resolve-account/,
     /^\/api\/vs\/index\/status/, /^\/ws$/,
   ];
   for (const r of HOSTED_ROUTES) {
@@ -168,12 +195,14 @@ test('the allow-list holds no custodial, per-user-proxy, diagnostic or websocket
   assert.equal(hostedRoute('GET', undefined), null);
 });
 
-test('rate classes: search and per-address reads cost more, the sign-in relay is capped overall', () => {
+test('rate classes: search and per-id lookups cost more, an auth route is capped overall', () => {
   const lb = hostedRoute('GET', '/api/vs/leaderboard')!;
   assert.deepEqual(limitsFor(lb, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c']);
   assert.deepEqual(limitsFor(lb, { q: '  ' }, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c']);
   assert.deepEqual(limitsFor(lb, { q: '0xabc' }, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c', 'upstream|c']);
-  assert.deepEqual(limitsFor(hostedRoute('GET', '/api/vs/trader')!, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c', 'upstream|c']);
+  assert.deepEqual(limitsFor(hostedRoute('GET', '/api/feed/account')!, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c', 'upstream|c']);
+  // One leaderboard row is a lookup in memory, whatever the address.
+  assert.deepEqual(limitsFor(hostedRoute('GET', '/api/vs/lbrow')!, { address: '0x' + '1'.repeat(40) }, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c']);
   assert.deepEqual(limitsFor(AUTH_ROUTE, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['auth|c', 'auth|*']);
   assert.equal(hostedRoute('POST', '/api/points/auth/nonce'), null, 'the unused SoPoints relay is not public');
 });
@@ -210,6 +239,10 @@ async function hostedApp(o: { limits?: Partial<HostedLimits>; trustProxy?: Hoste
   // Registered anyway: the LIST decides, not what happens to be registered.
   app.get('/api/acct/:engine/state', async () => ({ leaked: true }));
   app.get('/api/vs/index/status', async () => ({ leaked: true }));
+  // Dropped from the list with the browser-direct move (ARCH-traffic §5); the server still registers them.
+  for (const url of ['/api/vs/trader', '/api/vs/fills', '/api/vs/account', '/api/vs/price', '/api/external/leaderboard', '/api/external/leaderboard/rank', '/api/external/resolve-account', '/api/deposit/chain']) {
+    app.get(url, async () => ({ leaked: true }));
+  }
   app.post('/api/session/import', async () => ({ leaked: true }));
   app.post('/api/trade/:engine/order', async () => ({ leaked: true }));
   app.post('/api/scan/track', async () => ({ leaked: true }));
@@ -224,7 +257,14 @@ test('gate: listed routes answer, everything else is a 404 - including registere
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/leaderboard?window=7d' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'HEAD', url: '/api/vs/cohorts' })).statusCode, 200);
   assert.equal((await app.inject({ method: 'GET', url: '/api/external/announcements/42' })).statusCode, 200);
-  for (const url of ['/api/acct/perps/state?address=0x' + '1'.repeat(40), '/api/vs/index/status', '/nope', '/', '/ws']) {
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/lbrow?venue=hyperliquid&address=0x${'1'.repeat(40)}` })).statusCode, 200);
+  const addr = '0x' + '1'.repeat(40);
+  for (const url of [
+    `/api/acct/perps/state?address=${addr}`, '/api/vs/index/status', '/nope', '/', '/ws',
+    `/api/vs/trader?venue=sodex&address=${addr}`, `/api/vs/fills?venue=sodex&address=${addr}`, `/api/vs/account?venue=sodex&address=${addr}&kind=open`,
+    '/api/vs/price?coin=BTC', '/api/external/leaderboard', `/api/external/leaderboard/rank?wallet_address=${addr}`,
+    '/api/external/resolve-account?id=1', '/api/deposit/chain',
+  ]) {
     const r = await app.inject({ method: 'GET', url });
     assert.equal(r.statusCode, 404, url);
     assert.deepEqual(r.json(), { error: 'not found', source: 'server' }, url);
@@ -313,11 +353,11 @@ test('gate: per-client read limit, with Retry-After; another client is unaffecte
 test('gate: upstream-costly reads have their own, tighter budget', async () => {
   const app = await hostedApp({ limits: { upstream: { max: 2, windowMs: 60_000 } } });
   const get = (url: string) => app.inject({ method: 'GET', url, remoteAddress: '198.51.100.9' });
-  const addr = '0x' + '3'.repeat(40);
-  assert.equal((await get(`/api/vs/trader?venue=sodex&address=${addr}`)).statusCode, 200);
+  assert.equal((await get('/api/feed/account?id=12345')).statusCode, 200);
   assert.equal((await get('/api/vs/leaderboard?q=0xabc')).statusCode, 200, 'a search counts as upstream');
-  assert.equal((await get(`/api/vs/fills?venue=sodex&address=${addr}`)).statusCode, 429);
+  assert.equal((await get('/api/external/announcements/7')).statusCode, 429);
   assert.equal((await get('/api/vs/leaderboard?window=30d')).statusCode, 200, 'plain index reads are not held back');
+  assert.equal((await get(`/api/vs/lbrow?venue=hyperliquid&address=0x${'3'.repeat(40)}`)).statusCode, 200, 'a leaderboard row is a plain index read');
   await app.close();
 });
 

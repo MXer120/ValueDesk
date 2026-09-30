@@ -62,6 +62,22 @@ const envNum = (name: string, dflt: number, min: number, max: number): number =>
   return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(min, n)) : dflt;
 };
 
+/**
+ * SoDEX's history limit, MEASURED 2026-09-30 (docs/ARCH-traffic.md §2):
+ * `/trades` and `/orders/history` - both engines - share ONE Cloudflare
+ * counter of about 4 requests per ~60 s per IP. The fifth gets `error code:
+ * 1015`, and the block holds for as long as requests keep coming - for the
+ * whole IP's history reads. Cloudflare weighs the previous minute into the
+ * current one, so any two adjacent minutes must stay at 4 or fewer: the safe
+ * drip is 2 per 60 s for the PAIR together (3 per minute was seen to trip it).
+ *
+ * The indexer's `/trades` lane can never be configured above this. Anything else
+ * on the same IP that reads either path (the local API's account-history
+ * routes, the all-time history walk) spends the same counter, so run the drip
+ * only where nothing else reads SoDEX history.
+ */
+export const SODEX_HISTORY_PAIR_PER_MIN = 2;
+
 export const INDEXER_ENV = {
   /**
    * HL /info weight per minute for the boards' fill reads. HL allows 1,200 per
@@ -72,8 +88,12 @@ export const INDEXER_ENV = {
   hlWeightPerMin: () => envNum('VALUESCAN_INDEX_HL_WEIGHT', 500, 30, 900),
   /** SoDEX `/positions/history` requests per minute (closed positions). */
   sodexClosesPerMin: () => envNum('VALUESCAN_INDEX_SODEX_CLOSES', 6, 0.2, 30),
-  /** SoDEX `/trades` requests per minute. Cloudflare limits this path per IP (error 1015); keep it a drip. */
-  sodexTradesPerMin: () => envNum('VALUESCAN_INDEX_SODEX_TRADES', 0.05, 0.05, 6),
+  /**
+   * SoDEX `/trades` requests per minute: a drip, never above
+   * SODEX_HISTORY_PAIR_PER_MIN (2 per 60 s - the measured rule above; the cap
+   * used to be 6, three times what trips a 1015).
+   */
+  sodexTradesPerMin: () => envNum('VALUESCAN_INDEX_SODEX_TRADES', 0.05, 0.05, SODEX_HISTORY_PAIR_PER_MIN),
   /**
    * SoDEX `/trades` backfill is OFF unless this is set: Cloudflare answers the
    * path with 1015 (whole IP, trading UI included) even at a drip - verified
@@ -289,6 +309,10 @@ export class Indexer {
     // runs (the trading UI shares the IP) and pause 15 minutes after a 429.
     const sodexGate = () => Math.max(cooldownLeftMs(), sodex.cooldownLeft(), gatewayWeightSpent() > 400 ? 5_000 : 0);
     this.sgw = new Lane({ name: 'sgw', perMin: INDEXER_ENV.sodexClosesPerMin(), gate: sodexGate, rateLimitPauseMs: 15 * 60_000 });
+    // The indexer's only SoDEX `/trades` reader (off unless VALUESCAN_INDEX_SODEX_TRADES
+    // is set). Each task reads ONE page (syncTrades maxPages: 1) and the lane then
+    // rests, so its rate is `perMin`, capped at SODEX_HISTORY_PAIR_PER_MIN: the
+    // measured /trades + /orders/history counter (~4 per 60 s per IP, then 1015).
     this.strades = new Lane({ name: 'strades', perMin: INDEXER_ENV.sodexTradesPerMin(), gate: sodexGate, rateLimitPauseMs: 30 * 60_000 });
     this.sdata = new Lane({ name: 'sdata', perMin: INDEXER_ENV.sodexDataPerMin(), gate: () => cooldownLeftMs() });
     const lighter = this.ext.get('lighter') as LighterVenue;

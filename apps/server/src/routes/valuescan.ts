@@ -14,6 +14,7 @@
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
+ *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
@@ -29,7 +30,8 @@ import {
   type Window,
 } from '../valuescan/types.js';
 import { sodexProvider } from '../valuescan/sodex/index.js';
-import { hlInfo, hyperliquidProvider } from '../valuescan/hyperliquid/index.js';
+import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuescan/hyperliquid/index.js';
+import { hlPriceSeries } from '../valuescan/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuescan/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuescan/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
@@ -247,32 +249,48 @@ export async function valuescanRoutes(app: FastifyInstance) {
   /**
    * A coin's price over `range` (1d / 7d / 30d) for the cohort asset page:
    * Hyperliquid candles (its default dex, then its "k" 1000x unit, then the
-   * trade.xyz dex), closes only. Cached a minute per coin and range.
+   * trade.xyz dex). Cached a minute per coin and range. The series itself is
+   * valuescan/hyperliquid/price.ts, the same code the browser now runs with its
+   * own client; a bad coin name or no history answers not_available.
    */
   app.get('/api/vs/price', async (req, reply) => {
     try {
       const q = req.query as Q;
-      const coin = (q.coin ?? '').trim().toUpperCase();
-      if (!/^[A-Z0-9]{1,20}$/.test(coin)) return fail(reply, new NotAvailable('Name a coin'));
-      const range = q.range === '1d' || q.range === '30d' ? q.range : '7d';
-      const span = { '1d': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 }[range];
-      const interval = { '1d': '15m', '7d': '1h', '30d': '4h' }[range];
-      const end = Date.now();
-      const names = [coin, ...(coin.startsWith('K') && coin.length > 3 ? [`k${coin.slice(1)}`] : []), `xyz:${coin}`];
-      for (const name of names) {
-        const rows = await hlInfo.post<Array<{ t?: number; o?: string; h?: string; l?: string; c?: string }> | null>(
-          { type: 'candleSnapshot', req: { coin: name, interval, startTime: end - span, endTime: end } },
-          { ttlMs: 60_000 },
-        ).catch(() => null);
-        // [t, open, high, low, close]; `points` (t, close) stays for older clients.
-        const candles = (rows ?? []).flatMap((r) => {
-          const o = Number(r.o), h = Number(r.h), l = Number(r.l), c = Number(r.c);
-          return typeof r.t === 'number' && o > 0 && h > 0 && l > 0 && c > 0 ? [[r.t, o, h, l, c] as [number, number, number, number, number]] : [];
-        });
-        const points = candles.map(([t, , , , c]) => [t, c] as [number, number]);
-        if (points.length > 1) return { ok: true, coin, market: name, source: 'Hyperliquid', range, interval, points, candles };
-      }
-      return fail(reply, new NotAvailable(`No price history for ${coin}`));
+      return { ok: true, ...(await hlPriceSeries(hlInfo, q.coin ?? '', q.range)) };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * One address's Hyperliquid leaderboard row from the index: rank by 30-day
+   * PnL, the rank change against the previous file, and HL's own figures - the
+   * one index read a Scan profile needs (its account data the browser reads
+   * from Hyperliquid itself). A lookup in the leaderboard file this process
+   * already holds, never a per-address upstream call.
+   *
+   * `row` is null when the address is not listed (or the file cannot be read).
+   * Only the row's own fields are sent, whatever the store may add later.
+   */
+  app.get('/api/vs/lbrow', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      if (typeof q.venue !== 'string' || q.venue.toLowerCase() !== 'hyperliquid') throw bad('venue must be hyperliquid');
+      const row = await hlLeaderboardRow(addressOf(q));
+      return {
+        ok: true,
+        row: row && {
+          venue: row.venue,
+          address: row.address,
+          label: row.label ?? null,
+          accountValue: row.accountValue,
+          pnl: row.pnl,
+          roi: row.roi,
+          volume: row.volume,
+          rank: row.rank,
+          rankChange: row.rankChange ?? null,
+        },
+      };
     } catch (e) {
       return fail(reply, e);
     }

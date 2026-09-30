@@ -292,15 +292,13 @@ else app.addHook('onRequest', async (req, reply) => {
 
 if (HOSTED) {
   // No local token (there is no Vite proxy to hand it over) and no hub.
-  const provisional = HOSTED_ROUTES.filter((r) => r.provisional).map((r) => `${r.method} ${r.url}`);
   app.log.warn(
     {
       siteOrigins: SITE_ORIGINS,
       trustProxy: HOSTED_CONFIG.trustProxy,
       originSecret: HOSTED_CONFIG.originSecret ? 'set' : 'not set',
       limitsPerMinute: Object.fromEntries(Object.entries(HOSTED_CONFIG.limits).map(([k, l]) => [k, l.max])),
-      routes: HOSTED_ROUTES.length,
-      provisional,
+      routes: HOSTED_ROUTES.map((r) => `${r.method} ${r.url}`),
     },
     'HOSTED MODE: public read-only index API - custodial routes, the hub and the local token are off',
   );

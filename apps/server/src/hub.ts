@@ -16,30 +16,18 @@
  */
 import type { WebSocket } from 'ws';
 import type { Engine } from './config.js';
-import {
-  ACCOUNT_CHANNELS,
-  ARRAY_CHANNELS,
-  accountStats,
-  onAccountUpstream,
-  releaseUpstream,
-  subKey,
-  symbolsIn,
-  upstreamFor,
-  upstreams,
-  type SubParams,
-  type Upstream,
-} from './sodex/ws.js';
+import { accountStats, onAccountUpstream, releaseUpstream, upstreamFor, upstreams, type Upstream } from './sodex/ws.js';
+// The protocol - subscription identity and who receives which push - is the
+// pure core the browser's own socket host runs too, so both route by the same
+// rules (docs/ARCH-traffic.md §3).
+import { pushFor, subKey, wantedSymbols, type SubParams } from './sodex/wsProtocol.js';
 
 /**
  * Whether an account push belongs to a subscription: only when the wallet that
- * received it is exactly the one subscribed. A push that names no wallet goes
- * nowhere - one wallet's fills must never reach another wallet's listeners.
+ * received it is exactly the one subscribed (sodex/wsProtocol.ts). Re-exported
+ * here, where it always lived.
  */
-export function accountPushFor(subUser: string | undefined, msgUser: unknown): boolean {
-  const want = subUser?.trim().toLowerCase();
-  const got = typeof msgUser === 'string' ? msgUser.trim().toLowerCase() : '';
-  return !!want && !!got && want === got;
-}
+export { accountPushFor } from './sodex/wsProtocol.js';
 
 interface ClientSub {
   engine: Engine;
@@ -139,9 +127,7 @@ export class HubClient {
       return this.send({ type: 'error', op: 'subscribe', engine, channel: params.channel, message: 'account stream unavailable' });
     }
     const { key, snapshot } = up.subscribe(params);
-    const wanted = new Set<string>(
-      [params.symbol, ...(params.symbols ?? [])].filter(Boolean) as string[],
-    );
+    const wanted = wantedSymbols(params);
     this.subs.set(localKey, { engine, up, params, key, wanted });
     this.send({ type: 'ack', op: 'subscribe', engine, channel: params.channel, key: localKey });
 
@@ -160,36 +146,18 @@ export class HubClient {
   }
 
   /**
-   * Route one upstream push to this client, narrowed to its subscriptions.
-   *
-   * Array payloads are filtered per-client rather than forwarded whole: a client
-   * watching BTC-USD should not receive (or have to discard) 40 other symbols.
+   * Route one upstream push to this client, narrowed to its subscriptions
+   * (sodex/wsProtocol.ts `pushFor`): an account push only to the wallet that
+   * received it, array payloads filtered to the symbols asked for - a client
+   * watching BTC-USD should not receive (or have to discard) 40 other symbols -
+   * and a candle only for the interval asked for.
    */
   deliver(engine: Engine, msg: any): void {
-    const channel = msg?.channel;
-    if (!channel) return;
-
+    if (!msg?.channel) return;
     for (const sub of this.subs.values()) {
-      if (sub.engine !== engine || sub.params.channel !== channel) continue;
-
-      if (ACCOUNT_CHANNELS.has(channel)) {
-        if (!accountPushFor(sub.params.user, msg?.user ?? msg?.data?.user)) continue;
-        this.push(engine, msg, msg.data, sub.params.user?.toLowerCase());
-        continue;
-      }
-
-      if (Array.isArray(msg.data) && ARRAY_CHANNELS.has(channel)) {
-        const data = sub.wanted.size
-          ? msg.data.filter((e: any) => sub.wanted.has(e?.s))
-          : msg.data;
-        if (data.length) this.push(engine, msg, data);
-        continue;
-      }
-
-      const syms = symbolsIn(msg);
-      if (sub.wanted.size && !syms.some((s) => sub.wanted.has(s))) continue;
-      if (sub.params.interval && msg?.data?.i && msg.data.i !== sub.params.interval) continue;
-      this.push(engine, msg, msg.data);
+      if (sub.engine !== engine) continue;
+      const out = pushFor(sub.params, sub.wanted, msg);
+      if (out) this.push(engine, msg, out.data, out.user);
     }
   }
 

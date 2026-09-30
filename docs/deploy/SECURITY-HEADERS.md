@@ -36,35 +36,34 @@ third-party wallet images and fonts, because those hosts send no CORP header.
 
 ### 1.2 Content-Security-Policy (header form)
 
-This is the `<meta>` policy from `apps/web/index.html` with four changes:
+This is the `<meta>` policy in `apps/web/index.html` (exact hosts, no wildcard; see
+`docs/ARCH-traffic.md` §4), with three additions a `<meta>` tag cannot make or that only
+matter in production:
 
-1. `frame-ancestors 'none'` is added. It only works as a header.
-2. The `ws: wss:` wildcards are replaced by the exact WebSocket origins. The wildcards let any
-   injected script send data to any host. `ws:` also allows plaintext.
-3. The testnet hosts are dropped. A production site is mainnet-only. Keep them only if the
-   production build can switch networks.
-4. `upgrade-insecure-requests` and `worker-src 'self'` are added. The copy simulator runs in a
-   same-origin worker.
+1. `frame-ancestors 'none'`. It only works as a header.
+2. `upgrade-insecure-requests` and `manifest-src 'self'`.
+3. The hosted API's origin, if the API is not served from the site's own origin.
 
 ```
 default-src 'self';
 script-src 'self';
 style-src 'self' 'unsafe-inline';
-img-src 'self' data: blob: https://explorer-api.walletconnect.com https://api.web3modal.org;
-font-src 'self' https://fonts.reown.com;
-frame-src https://verify.walletconnect.org https://verify.walletconnect.com;
+img-src 'self' data: blob: https://api.web3modal.org;
+font-src 'self';
+frame-src https://verify.walletconnect.org;
 worker-src 'self';
 connect-src 'self'
   https://mainnet-gw.sodex.dev wss://mainnet-gw.sodex.dev
-  https://mainnet-data.sodex.dev https://alpha-biz.sodex.dev
-  https://rpc.valuechain.xyz https://main-scan.valuechain.xyz
-  https://arb1.arbitrum.io https://mainnet.base.org https://ethereum-rpc.publicnode.com
-  https://bsc-dataseed.bnbchain.org https://polygon-bor-rpc.publicnode.com
-  https://relay.walletconnect.org wss://relay.walletconnect.org
-  https://relay.walletconnect.com wss://relay.walletconnect.com
-  https://explorer-api.walletconnect.com https://api.web3modal.org https://fonts.reown.com
+  https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
+  https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
+  https://alpha-biz.sodex.dev
   https://api.hyperliquid.xyz https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
-  __API_ORIGIN__ __BROWSER_DIRECT_ORIGINS__;
+  wss://relay.walletconnect.org https://api.web3modal.org
+  https://main-scan.valuechain.xyz
+  https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
+  https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
+  https://polygon-bor-rpc.publicnode.com
+  __API_ORIGIN__;
 form-action 'none';
 base-uri 'none';
 object-src 'none';
@@ -73,41 +72,63 @@ frame-ancestors 'none';
 upgrade-insecure-requests
 ```
 
-Fill in the two placeholders before deploying:
+- **`__API_ORIGIN__`:** the hosted API's origin, e.g. `https://api.valuescan.example`. Omit it
+  if `/api/*` is served from the site's own origin, because `'self'` covers it then.
+- **Keep the header equal to `index.html`.** When that policy changes, change this header in
+  the same deploy. **Never reintroduce a `ws:`/`wss:`/`https:` wildcard.**
+- **Testnet hosts:** a deployment that can only ever run mainnet may drop the testnet ones.
+- **Length:** a header is one line; join the policy with single spaces. CloudFront limits a
+  response headers policy's CSP value to 1783 characters, and this policy is about 900.
 
-- `__API_ORIGIN__`: the hosted API's origin, e.g. `https://api.valuescan.example`. Omit it if
-  CloudFront serves `/api/*` from the site's own origin; `'self'` then covers it.
-- `__BROWSER_DIRECT_ORIGINS__`: any further exchange host in `docs/ARCH-traffic.md`. The three
-  browser-direct REST hosts already known are listed above, from `apps/web/src/exchange/hosts.ts`:
-  Hyperliquid info, Lighter and Arcus. Today's `index.html` does not list them yet.
-  - If one of them is also streamed from, add its exact `wss://` origin. Today the browser's
-    own sockets go only to the SoDEX gateway.
-  - **Do not reintroduce `wss:` as a wildcard.**
+### 1.2.1 The SharedWorker script
 
-**The header policy reaches places the `<meta>` policy cannot.** A worker's policy comes from
-the response that delivered the worker script. The web's SharedWorker, which holds every
-exchange socket, therefore runs with **no** CSP unless this header is sent. The same applies
-to an SVG file opened directly. So send the header on every response of the site, including
-`/assets/*`.
+**A worker does not inherit the page's policy.** Its CSP comes from the HTTP headers of the
+response that delivered its script (`docs/ARCH-traffic.md` §4).
 
-**Parity with dev.** This policy allows exactly what the dev `<meta>` policy allows, plus the
-three exchange hosts. Two differences stay unresolved, and changing them changes behaviour,
-so they are for the owner of `index.html` and `walletconnect.ts`:
+- **Why it matters:** the web's socket host is a module SharedWorker holding every exchange
+  socket (`apps/web/src/exchange/ws/worker.ts`). Without a header on that script response it
+  runs with **no CSP at all**, and the `<meta>` tag cannot reach it.
+- **The build output:** Vite emits the worker as `/assets/worker-<hash>.js`. Confirm the name
+  in the build's `assets/` folder.
 
-- **`https://rpc.walletconnect.org` is used but blocked, in dev and prod alike.**
-  WalletConnect's universal provider falls back to it for any chain without its own RPC
-  entry. The fix is to give every EVM chain an RPC already listed here
-  (`walletconnect.ts`), not to widen the CSP.
-- **`https://verify.walletconnect.org` is allowed as a frame but not as `connect-src`.** Verify
-  also fetches its public key from that host.
+Send one of these two headers:
 
-Some allowed hosts appear unused: `explorer-api.walletconnect.com`, the `https://` relay
-origins and `fonts.reown.com`. Remove them after checking the Network tab with a real
-pairing.
+**A. Recommended: the site policy on every response.** Send the §1.2 header on every response,
+`/assets/*.js` included. A CSP header on an ordinary script response is ignored, so this is
+harmless for the rest, and the worker gets exactly the page's policy:
+`connect-src` lists the SoDEX gateways over `wss`, and `script-src 'self'` covers its own
+module imports.
 
-Headers are one line. Join the policy with single spaces. CloudFront limits a response
-headers policy's CSP value to 1783 characters, and this policy is about 1,100 before the
-placeholders.
+**B. Tightest: a worker-only policy** on the worker script's response, and only there:
+
+```
+Content-Security-Policy: default-src 'none'; script-src 'self'; connect-src 'self' wss://mainnet-gw.sodex.dev wss://testnet-gw.sodex.dev; base-uri 'none'
+```
+
+This policy covers exactly what the socket host does:
+
+- it opens only the two SoDEX gateway origins over `wss`, checked again inside the worker by
+  `exchange/ws/allowed.ts`;
+- it imports only its own modules from `'self'`;
+- it fetches nothing else.
+
+If a build points the app at another gateway (`VITE_SODEX_GATEWAY`), add that gateway's
+`wss://` origin to both policies.
+
+With either option, the worker's own allow-list check stays the first line of defence. The
+header is the second.
+
+- **CloudFront:** add a behaviour for the path pattern `/assets/worker-*.js`, with the same
+  origin and cache policy as `/assets/*`, and a response headers policy identical to the site
+  one (§1.3) except that its `ContentSecurityPolicy` is option B.
+- **Caddy:** see the `@worker` matcher in §1.4.
+
+Check it after a deploy. Both commands must print the policy:
+
+```
+curl -sI https://<site>/assets/worker-<hash>.js | grep -i content-security-policy
+curl -sI https://<site>/ | grep -i content-security-policy
+```
 
 **Image directories.** `/logos/*` and `/addrbook/*` hold third-party SVGs (see the audit,
 W-09). Serve them with a policy under which nothing can run:
@@ -135,9 +156,6 @@ node -e "const h=require('fs').readFileSync('apps/web/public/scan/index.html','u
 
 The file must have LF line endings, which `.gitattributes` enforces. Without the hash, the
 `<meta refresh>` fallback still redirects, but it drops the address.
-
-The rest of `apps/web/public/scan/*.js` is dead code: nothing loads it any more. Delete it
-from the deploy, or from the repo.
 
 ### 1.3 CloudFront
 
@@ -195,13 +213,18 @@ Other behaviours need their own copies of this policy:
 
 - `/scan/*`: attach a second policy that is identical except for the `script-src` hash above.
 - `/logos/*` and `/addrbook/*`: attach a third, with the image-directory CSP from 1.2.
+- `/assets/worker-*.js` (optional, only for option B of 1.2.1): attach a fourth, whose
+  `ContentSecurityPolicy` is the worker-only policy. Otherwise the site policy on `/assets/*`
+  already covers the SharedWorker (option A).
 
 For `/api/*`, attach a policy that only sets HSTS with `Override: false`. The API sends its
 own headers (section 2); do not overwrite them.
 
 ### 1.4 Caddy (site on an instance instead of S3)
 
-Replace `<CSP>` and `<CSP with the /scan hash>` with the one-line policies from 1.2.
+Replace `<CSP>` and `<CSP with the /scan hash>` with the one-line policies from 1.2. The global
+`header` block sends the site policy on every response, `/assets/*.js` included, which covers
+the SharedWorker (1.2.1, option A). The `@worker` lines are option B; drop them to keep A.
 
 ```caddyfile
 valuescan.example {
@@ -225,6 +248,8 @@ valuescan.example {
 	header @scan Content-Security-Policy "<CSP with the /scan hash>"
 	@images path /logos/* /addrbook/*
 	header @images Content-Security-Policy "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox"
+	@worker path /assets/worker-*.js
+	header @worker Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self' wss://mainnet-gw.sodex.dev wss://testnet-gw.sodex.dev; base-uri 'none'"
 
 	@assets path /assets/*
 	header @assets Cache-Control "public, max-age=31536000, immutable"
@@ -257,7 +282,7 @@ valuescan.example {
 | `VALUESCAN_TRUST_PROXY` | unset (the socket address is the client) | Who may set `X-Forwarded-For`. Either a hop count 1–9, or IPs/CIDRs plus `loopback` / `linklocal` / `uniquelocal`. `true` / `*` is refused. See 2.3. |
 | `VALUESCAN_ORIGIN_SECRET` | unset | At least 32 characters. When set, every request except `/api/health` must carry `X-Origin-Verify: <secret>`. Set it as a CloudFront origin custom header, so that nobody can bypass CloudFront and WAF by calling the instance directly. |
 | `VALUESCAN_RATE_READ_PER_MIN` | 600 | Per client: every allowed request. |
-| `VALUESCAN_RATE_UPSTREAM_PER_MIN` | 120 | Per client: reads that can cost upstream calls. These are per-address and per-coin reads (`/api/vs/trader`, `fills`, `account`, `price`, leaderboard search, the `/api/external/*` lookups and `/api/feed/account`). |
+| `VALUESCAN_RATE_UPSTREAM_PER_MIN` | 120 | Per client: reads that can cost upstream calls. These are leaderboard search (`/api/vs/leaderboard?q=`), deep links by account id (`/api/feed/account`) and one announcement (`/api/external/announcements/:id`). |
 | `VALUESCAN_RATE_AUTH_PER_MIN` | 20 | Per client: `auth`-class routes. None is listed today, because the SoPoints sign-in relay is unused and therefore 404. |
 | `VALUESCAN_RATE_AUTH_GLOBAL_PER_MIN` | 300 | All clients together: `auth`-class routes. |
 | `HOST` / `PORT` | `127.0.0.1` / `8787` | Keep `HOST` on loopback behind Caddy. |
@@ -270,9 +295,13 @@ the other variables say:
   plugins are not registered, and custodial paths answer 410.
 - **Hub off:** the WebSocket hub and `/ws` are not registered.
 - **Local token off:** the local token is neither minted nor required.
-- **Route allow-list:** only the list in `hosted.ts` answers; every other route is 404. Today
-  it holds 23 routes, all GET: 9 index routes and 14 marked provisional. The list is
-  **provisional** until `docs/ARCH-traffic.md` is final.
+- **Route allow-list:** only the list in `hosted.ts` answers; every other route is 404. The
+  list is final, per `docs/ARCH-traffic.md` §5: 16 routes, all GET.
+  - **Index routes:** `/api/health`, the leaderboard, explore, the 5 cohort routes, the
+    screener, whales and positioning.
+  - **`/api/vs/lbrow`:** one Hyperliquid leaderboard row for a Scan profile.
+  - **`/api/feed/account`:** deep links by account id.
+  - **Maintenance:** the maintenance status and the announcements.
 - **CORS:** the site origins only. No loopback origins, no `DELETE`.
 - **Minimal `/api/health`:** `{ ok, network, chainId, mainnetWritesAllowed }`.
 - **Request limits:** 16 KiB request bodies, a 30 s request timeout, and a 400 for repeated

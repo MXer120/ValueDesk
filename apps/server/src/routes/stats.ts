@@ -16,12 +16,11 @@
  *    takes. It is returned with that timestamp attached so the panel can say how
  *    old it is instead of implying it is live.
  *
- * There is deliberately NO spot realized-PnL figure. The venue publishes none
- * (`/spot/pnl/overview` 404s), and the only honest alternative is a full
- * FIFO/average-cost reconstruction across several fee and quote denominations.
- * Until that exists, this route returns `spotRealizedPnl: null` with a reason
- * string, and the panel renders the reason. A blank on a trading screen is
- * recoverable; a plausible wrong number is not.
+ * The headline reader and the answer's shape are ../statsCore.ts, the same code
+ * the browser runs for its own walk (docs/ARCH-traffic.md §1.2) - this route
+ * binds them to the server's gateway client and the stats host, and answers
+ * what it always answered. The web no longer calls it, and hosted mode does not
+ * serve it.
  *
  * A walk over a long history takes minutes, so this route never blocks on one: it
  * starts the sync, answers immediately from whatever the cache holds, and reports
@@ -40,6 +39,9 @@ import {
   rowsFor,
   type SyncProgress,
 } from '../history.js';
+import { allTimeStatsBody, headlineReader } from '../statsCore.js';
+
+export type { Headline } from '../statsCore.js';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -104,100 +106,18 @@ async function dataGet<T>(path: string): Promise<T> {
   }
 }
 
-export interface Headline {
-  available: boolean;
-  reason: string | null;
-  accountId: number | null;
-  /** Snapshot timestamp reported by the venue - the basis for the staleness note. */
-  asOf: number | null;
-  cumulativePnl: string | null;
-  unrealizedPnl: string | null;
-  cumulativeQuoteVolume: string | null;
-  /** Absent for accounts the venue has no fills for; rendered only when present. */
-  firstTradeAt: number | null;
-  /** Cumulative (not per-day) perps PnL, one point per UTC day. */
-  curve: Array<{ t: number; pnl: string }>;
-}
-
-const decOrNull = (v: unknown): string | null =>
-  typeof v === 'string' && v !== '' ? v : typeof v === 'number' ? String(v) : null;
-
-const msOrNull = (v: unknown): number | null =>
-  typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
-
 /**
- * Resolve the numeric account id the stats host keys on.
- *
- * `aid === 0` means this wallet has no SoDEX account at all, which is a real
- * answer and not an error - the headline is simply unavailable.
+ * The headline, memoised a minute per wallet (bounded): the underlying figure
+ * only moves once a day, and the panel polls. `accountId` is the perps state's
+ * `aid` - 0 means this wallet has no SoDEX account, a real answer, not an error.
  */
-async function accountId(address: string): Promise<number> {
-  const state = await sodex.get<{ aid?: number }>(`${enginePath('perps')}/accounts/${address}/state`);
-  return Number(state?.aid ?? 0);
-}
-
-const EMPTY_HEADLINE = (reason: string): Headline => ({
-  available: false,
-  reason,
-  accountId: null,
-  asOf: null,
-  cumulativePnl: null,
-  unrealizedPnl: null,
-  cumulativeQuoteVolume: null,
-  firstTradeAt: null,
-  curve: [],
+const headlineFor = headlineReader({
+  accountId: async (address) => {
+    const state = await sodex.get<{ aid?: number }>(`${enginePath('perps')}/accounts/${address}/state`);
+    return Number(state?.aid ?? 0);
+  },
+  dataGet,
 });
-
-/** 60s memo: the underlying figure only moves once a day, and the panel polls. */
-const headlineCache = new Map<string, { at: number; value: Headline }>();
-const HEADLINE_TTL = 60_000;
-
-async function headlineFor(address: string): Promise<Headline> {
-  const key = address.toLowerCase();
-  const hit = headlineCache.get(key);
-  if (hit && Date.now() - hit.at < HEADLINE_TTL) return hit.value;
-
-  let value: Headline;
-  try {
-    const aid = await accountId(address);
-    if (!aid) {
-      value = EMPTY_HEADLINE('this wallet has no SoDEX account yet');
-    } else {
-      const overview = await dataGet<Record<string, unknown>>(
-        `/api/v1/perps/pnl/overview?account_id=${aid}`,
-      );
-      // The equity curve is a nicety. Losing it must not lose the headline.
-      let curve: Array<{ t: number; pnl: string }> = [];
-      try {
-        const daily = await dataGet<{ items?: Array<Record<string, unknown>> }>(
-          `/api/v1/perps/pnl/daily_stats?account_id=${aid}`,
-        );
-        curve = (daily?.items ?? [])
-          .map((i) => ({ t: msOrNull(i.ts_ms) ?? 0, pnl: decOrNull(i.pnl) ?? '' }))
-          .filter((p) => p.t > 0 && p.pnl !== '')
-          .sort((a, b) => a.t - b.t);
-      } catch {
-        curve = [];
-      }
-      value = {
-        available: true,
-        reason: null,
-        accountId: aid,
-        asOf: msOrNull(overview.ts_ms),
-        cumulativePnl: decOrNull(overview.cumulative_pnl),
-        unrealizedPnl: decOrNull(overview.unrealized_pnl),
-        cumulativeQuoteVolume: decOrNull(overview.cumulative_quote_volume),
-        firstTradeAt: msOrNull(overview.first_trade_ts_ms),
-        curve,
-      };
-    }
-  } catch (e) {
-    value = EMPTY_HEADLINE((e as Error).message);
-  }
-
-  headlineCache.set(key, { at: Date.now(), value });
-  return value;
-}
 
 // --- routes ------------------------------------------------------------------
 
@@ -227,50 +147,24 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
 
     for (const kind of SCOPE_KINDS) ensureSync(kind, address, rebuild);
 
-    const sync: Record<string, SyncProgress> = {};
-    for (const kind of SCOPE_KINDS) sync[kind] = progressOf(kind, address);
+    const scopes: Record<string, SyncProgress> = {};
+    for (const kind of SCOPE_KINDS) scopes[kind] = progressOf(kind, address);
 
     const [spot, perps, headline] = await Promise.all([
       aggregateTrades('spot', rowsFor('trades-spot', address)),
       aggregateTrades('perps', rowsFor('trades-perps', address)),
       headlineFor(address),
     ]);
-    const funding = aggregateFunding(rowsFor('funding', address));
-
-    return {
+    // Everything is labelled at the source (statsCore.ts allTimeStatsBody): the
+    // walk and the venue's daily perps snapshot are never merged.
+    return allTimeStatsBody({
       address,
-      /*
-       * Everything below is labelled at the source. The panel must not merge
-       * these: `trades` is our own exhaustive walk, `headline` is the venue's
-       * daily perps snapshot, and the two will not agree - different scopes,
-       * different cut-off times, and the venue's volume is quote-denominated
-       * across perps only.
-       */
-      trades: {
-        spot: { ...spot, provenance: 'walked from this account\'s full spot fill history' },
-        perps: { ...perps, provenance: 'walked from this account\'s full perps fill history' },
-      },
-      funding: {
-        ...funding,
-        provenance:
-          'walked from the perps funding log; totals carry the venue\'s own sign, unmodified',
-      },
-      headline: {
-        ...headline,
-        provenance: 'mainnet-data.sodex.dev perps PnL overview - PERPS ONLY, daily snapshot',
-      },
-      spotRealizedPnl: {
-        value: null,
-        reason:
-          'The venue publishes no spot realized PnL (/spot/pnl/overview returns 404). Deriving one '
-          + 'would need a FIFO/average-cost reconstruction across several fee and quote coins, which '
-          + 'would be our estimate rather than the venue\'s figure - so nothing is shown.',
-      },
-      sync: {
-        running: SCOPE_KINDS.some((k) => sync[k]?.status === 'running'),
-        scopes: sync,
-        cache: cacheStatus(),
-      },
-    };
+      spot,
+      perps,
+      funding: aggregateFunding(rowsFor('funding', address)),
+      headline,
+      scopes,
+      cache: cacheStatus(),
+    });
   });
 }

@@ -106,3 +106,25 @@ test('stats: the side-effecting GET refuses cross-site and same-site browser req
     await app.close();
   }
 });
+
+test('mirror: "Confirm & Update Address" validates through the shared core before any read', async () => {
+  const s = stubFetch();
+  const { mirrorRoutes } = await import('../src/routes/mirror.js');
+  const app = Fastify();
+  await app.register(mirrorRoutes);
+  try {
+    const post = (payload: unknown) => app.inject({ method: 'POST', url: '/api/mirror/replace-deposit-address', payload: payload as object });
+    const noAddress = await post({ chain: 'ETH' });
+    assert.equal(noAddress.statusCode, 400);
+    assert.deepEqual(noAddress.json(), { error: 'a valid 0x wallet address is required' });
+    const badChain = await post({ address: '0x' + '1'.repeat(40), chain: 'eth; drop' });
+    assert.equal(badChain.statusCode, 400);
+    assert.deepEqual(badChain.json(), { error: 'a SoDEX chain key is required' });
+    const badOptions = await app.inject({ method: 'GET', url: '/api/mirror/deposit-options?address=0x123' });
+    assert.equal(badOptions.statusCode, 400);
+    assert.equal(s.calls.length, 0);
+  } finally {
+    s.restore();
+    await app.close();
+  }
+});
