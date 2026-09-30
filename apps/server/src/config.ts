@@ -27,6 +27,7 @@ export const NETWORKS: Record<Network, NetworkConfig> = {
 
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { hostedConfigFromEnv, siteOriginsFrom, type HostedConfig } from './hosted.js';
 
 /**
  * Load the repo-root `.env` before anything reads process.env.
@@ -48,6 +49,16 @@ export const ENV_FILE_LOADED = (() => {
 })();
 
 const env = (k: string, fallback = ''): string => process.env[k]?.trim() || fallback;
+
+/**
+ * HOSTED MODE (VALUESCAN_HOSTED=1): this process as the public, read-only
+ * index API - a route allow-list, no local token, per-client rate limits behind
+ * the configured proxy, CORS for the site origins only, no WebSocket hub, and
+ * nothing custodial whatever else the environment says. See hosted.ts.
+ * Unset (the default), local dev behaves exactly as before.
+ */
+export const HOSTED_CONFIG: HostedConfig = hostedConfigFromEnv(process.env);
+export const HOSTED = HOSTED_CONFIG.enabled;
 
 /**
  * Mainnet is the default. Set SODEX_TESTNET=1 to work against testnet instead.
@@ -83,7 +94,7 @@ export const KEYSTORE_PATH = env(
  * The interactive flow needs none of this: it mints a key in memory from one
  * wallet signature.
  */
-export const ALLOW_ENV_KEY = env('VALUETRADE_ALLOW_ENV_KEY', '0') === '1';
+export const ALLOW_ENV_KEY = !HOSTED && env('VALUETRADE_ALLOW_ENV_KEY', '0') === '1';
 
 export const BOOTSTRAP = {
   privateKey: env('SODEX_PRIVATE_KEY'),
@@ -109,20 +120,30 @@ export const ALLOW_MAINNET_WRITES = env('VALUETRADE_ALLOW_MAINNET', '1') !== '0'
  * setup. Valuescan trades from the browser: the trading key is created, kept
  * and used there (apps/web/src/trading) and orders go straight to SoDEX, so a
  * hosted server holds nothing that can trade or move funds, and sees no order.
- * While this is off, every custodial route answers 410 (index.ts,
+ * While this is off, every custodial route answers 410 (hosted.ts,
  * SERVER_SIGNING_PATHS) and no key session can exist in this process.
+ * Hosted mode forces it off, whatever the variable says.
  */
-export const SERVER_SIGNING = env('VALUETRADE_SERVER_SIGNING', '0') === '1';
+export const SERVER_SIGNING = !HOSTED && env('VALUETRADE_SERVER_SIGNING', '0') === '1';
 
 /**
  * Browser origins, besides loopback, allowed to call the write routes -
  * a hosted deployment's own site, e.g. `https://app.valuescan.example`.
- * Comma-separated, exact origins.
+ * Comma-separated, exact origins. VALUESCAN_ALLOWED_ORIGINS, or the older
+ * VALUETRADE_ALLOWED_ORIGINS.
  */
-export const ALLOWED_ORIGINS: readonly string[] = env('VALUETRADE_ALLOWED_ORIGINS', '')
+export const ALLOWED_ORIGINS: readonly string[] = env('VALUESCAN_ALLOWED_ORIGINS', env('VALUETRADE_ALLOWED_ORIGINS', ''))
   .split(',')
   .map((s) => s.trim().replace(/\/+$/, ''))
   .filter(Boolean);
+
+/**
+ * Hosted mode's site origins, normalised: the ONLY origins its CORS answers
+ * and the only Origin a state-changing request may carry (no loopback there).
+ * A malformed entry stops the process at boot rather than silently opening or
+ * closing the API.
+ */
+export const SITE_ORIGINS: readonly string[] = HOSTED ? siteOriginsFrom(ALLOWED_ORIGINS) : [];
 
 /**
  * Whether the permission-mask semantics have been observed end to end.

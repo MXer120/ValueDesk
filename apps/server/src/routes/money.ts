@@ -111,6 +111,11 @@ export async function moneyRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/money/overview', async (req, reply) => {
     const { address } = req.query as { address?: string };
     if (!address) return reply.code(400).send({ error: 'address is required' });
+    // It is spliced into the gateway path below: anything but an address could
+    // walk that path (`../..`) to another gateway endpoint on this server's budget.
+    if (typeof address !== 'string' || !ADDRESS_RE.test(address)) {
+      return reply.code(400).send({ error: 'a valid 0x wallet address is required' });
+    }
     const [spot, perps, coinList] = await Promise.all([
       sodex.get<any>(`${enginePath('spot')}/accounts/${address}/balances`).catch(() => null),
       sodex.get<any>(`${enginePath('perps')}/accounts/${address}/balances`).catch(() => null),

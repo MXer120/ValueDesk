@@ -34,3 +34,34 @@ export function isAllowedOrigin(origin: string | undefined | null, extra: readon
     }
   });
 }
+
+/**
+ * The serialized origin of `value` (`https://app.example`), or null when it is
+ * not an http(s) origin with nothing after the host. Used to normalise the
+ * configured site origins once, so that matching is exact string equality -
+ * the same comparison @fastify/cors makes against the request's Origin header.
+ */
+export function normaliseOrigin(value: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(value.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  if (u.username || u.password || (u.pathname !== '/' && u.pathname !== '') || u.search || u.hash) return null;
+  return u.origin;
+}
+
+/**
+ * HOSTED MODE's origin rule: the request must name one of the site's own
+ * origins, exactly. Unlike `isAllowedOrigin` there is no loopback allowance and
+ * a missing Origin is refused - on a public server the only legitimate caller
+ * of a state-changing route is the site's own page, and a browser always sends
+ * Origin with a POST.
+ */
+export function isSiteOrigin(origin: string | undefined | null, site: readonly string[]): boolean {
+  if (!origin) return false;
+  const o = normaliseOrigin(origin);
+  return o !== null && site.includes(o);
+}

@@ -4,12 +4,17 @@
  * Binds to 127.0.0.1 only. It is not hardened for network exposure and is not
  * meant to be: it holds a signing key, and its whole security model assumes the
  * only caller is a browser on this machine.
+ *
+ * The one exception is HOSTED MODE (VALUESCAN_HOSTED=1, hosted.ts): the public,
+ * read-only index API - an allow-list of routes, per-client rate limits behind
+ * the configured proxy, CORS for the site only, no hub, nothing custodial.
  */
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 
-import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS } from './config.js';
+import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS, HOSTED, HOSTED_CONFIG, SITE_ORIGINS } from './config.js';
+import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, fastifyTrustProxy, installHostedGate, installServerSigningGate } from './hosted.js';
 import { sodex, SodexApiError, NotUnlockedError } from './sodex/rest.js';
 import { upstreams } from './sodex/ws.js';
 import { addClient, removeClient, startHub, hubStats } from './hub.js';
@@ -38,41 +43,43 @@ import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
 
 const app = Fastify({
-  logger: { level: process.env.LOG_LEVEL ?? 'info', transport: undefined },
-  bodyLimit: 1_000_000,
+  logger: {
+    level: process.env.LOG_LEVEL ?? 'info',
+    transport: undefined,
+    // Hosted: log the path, never the query string - it carries wallet
+    // addresses and search text, which a public server has no reason to keep.
+    ...(HOSTED
+      ? { serializers: { req: (req: { method: string; url: string; ip?: string }) => ({ method: req.method, url: req.url.split('?')[0], remoteAddress: req.ip }) } }
+      : {}),
+  },
+  bodyLimit: HOSTED ? 16_384 : 1_000_000,
+  // Hosted: X-Forwarded-For is believed only from the configured proxy hops;
+  // locally there is no proxy and the socket address is the client.
+  trustProxy: HOSTED ? fastifyTrustProxy(HOSTED_CONFIG.trustProxy) : false,
+  // Hosted: a slow client may not hold a connection open indefinitely.
+  ...(HOSTED ? { requestTimeout: 30_000 } : {}),
 });
 
-await app.register(cors, {
-  // The Vite dev server is a different origin from the API; both are loopback.
-  // A hosted deployment adds its own site(s) with VALUETRADE_ALLOWED_ORIGINS.
-  origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/, ...ALLOWED_ORIGINS],
-  methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-});
-
-/**
- * Custodial routes: this process minting, holding or using a trading key
- * (config.ts, SERVER_SIGNING). Trading happens in the browser now; with server
- * signing off - the default - these answer 410 and say where it went, so a
- * hosted server can never hold a key that trades or moves funds.
- */
-const SERVER_SIGNING_PATHS: readonly RegExp[] = [
-  /^\/api\/session(\/|$)/,
-  /^\/api\/wallet\/(enable|permissions|apikey)(\/|$)/,
-  /^\/api\/trade\//,
-  /^\/api\/money\/(elevat|transfer\/|withdraw)/,
-];
-const isServerSigningPath = (path: string): boolean => SERVER_SIGNING_PATHS.some((re) => re.test(path));
-if (!SERVER_SIGNING) {
-  app.addHook('onRequest', async (req, reply) => {
-    if (!isServerSigningPath(req.url.split('?')[0] ?? '')) return;
-    return reply.code(410).send({
-      error: 'This server does not hold trading keys. Trading keys are created and used in your browser.',
-      source: 'server',
-      hint: 'Enable trading in the app. VALUETRADE_SERVER_SIGNING=1 turns server-side signing back on for a local, single-user setup only.',
+await app.register(cors, HOSTED
+  ? {
+      // The site's own origin(s), exactly - no loopback, no patterns.
+      origin: [...SITE_ORIGINS],
+      methods: ['GET', 'POST', 'OPTIONS'],
+    }
+  : {
+      // The Vite dev server is a different origin from the API; both are loopback.
+      // A hosted deployment adds its own site(s) with VALUETRADE_ALLOWED_ORIGINS.
+      origin: [/^http:\/\/localhost:\d+$/, /^http:\/\/127\.0\.0\.1:\d+$/, ...ALLOWED_ORIGINS],
+      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     });
-  });
-}
-await app.register(websocket);
+
+// Custodial routes answer 410 while server signing is off - the default, and
+// always in hosted mode (hosted.ts: SERVER_SIGNING_PATHS). Matched on the raw
+// path AND the route the router picked, so percent-encoding cannot slip past.
+if (!SERVER_SIGNING) installServerSigningGate(app);
+// The hub is a local-only feature: hosted, the web opens its own streams.
+// Client messages are small subscribe/unsubscribe ops; 64 KiB is far above them.
+if (!HOSTED) await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
 
 /** One error shape for the whole API, with an actionable hint where we have one. */
 app.setErrorHandler((err, _req, reply) => {
@@ -124,7 +131,12 @@ app.setErrorHandler((err, _req, reply) => {
   return reply.code(status).send({ error: e.message, source: 'server' });
 });
 
-app.get('/api/health', async () => ({
+app.get('/api/health', async () => (HOSTED
+  // Hosted: only what the web reads (trading/config.ts configureFromHealth).
+  // No upstream URLs, budgets, hub or stream stats - the latter name every
+  // wallet whose account stream is open.
+  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES }
+  : {
   ok: true,
   network: NETWORK,
   chainId: NET.chainId,
@@ -150,9 +162,12 @@ app.get('/api/health', async () => ({
 
 await app.register(marketRoutes);
 await app.register(accountRoutes);
-await app.register(tradeRoutes);
-await app.register(walletRoutes);
-await app.register(moneyRoutes);
+// Custodial plugins: never even registered on a hosted server.
+if (!HOSTED) {
+  await app.register(tradeRoutes);
+  await app.register(walletRoutes);
+  await app.register(moneyRoutes);
+}
 await app.register(depositRoutes);
 await app.register(onboardingRoutes);
 await app.register(mirrorRoutes);
@@ -173,7 +188,7 @@ await app.register(valuescanRoutes);
 
 // --- browser websocket -------------------------------------------------------
 
-app.get('/ws', { websocket: true }, (socket, req) => {
+if (!HOSTED) app.get('/ws', { websocket: true }, (socket, req) => {
   const origin = req.headers.origin;
   if (!isAllowedOrigin(origin, ALLOWED_ORIGINS)) {
     app.log.warn({ origin }, 'rejected cross-origin websocket upgrade');
@@ -201,14 +216,18 @@ app.get('/ws', { websocket: true }, (socket, req) => {
  * This process serves JSON to one local page. It should never be framed, never
  * be sniffed into another content type, never leak a referrer to an upstream,
  * and - because responses carry balances, positions and order history - never
- * be written to a disk cache.
+ * be written to a disk cache. A route that sets its own Cache-Control (public
+ * index data) keeps it; nothing does today.
+ *
+ * Hosted adds HSTS and a deny-all CSP (hosted.ts HOSTED_RESPONSE_HEADERS).
  */
 app.addHook('onSend', async (_req, reply, payload) => {
   reply.header('X-Content-Type-Options', 'nosniff');
   reply.header('X-Frame-Options', 'DENY');
   reply.header('Referrer-Policy', 'no-referrer');
   reply.header('Cross-Origin-Resource-Policy', 'same-origin');
-  reply.header('Cache-Control', 'no-store');
+  if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
+  if (HOSTED) for (const [k, v] of Object.entries(HOSTED_RESPONSE_HEADERS)) reply.header(k, v);
   return payload;
 });
 
@@ -228,8 +247,12 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * A request must pass BOTH: a browser request carries a loopback Origin and gets
  * the token injected by the Vite proxy; a legitimate native client (CLI, tests)
  * carries the token and no Origin.
+ *
+ * HOSTED MODE replaces all of this with hosted.ts's gate: the route allow-list,
+ * the site Origin for its one state-changing route family, per-client limits.
  */
-app.addHook('onRequest', async (req, reply) => {
+if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS });
+else app.addHook('onRequest', async (req, reply) => {
   if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
   if (!isAllowedOrigin(req.headers.origin, ALLOWED_ORIGINS)) {
     return reply.code(403).send({ error: 'origin not allowed', source: 'server' });
@@ -246,8 +269,9 @@ app.addHook('onRequest', async (req, reply) => {
     });
   }
   // Counted only AFTER the auth gates, so rejected traffic cannot exhaust the
-  // budget that legitimate requests depend on.
-  for (const { key, limit } of classify(req.url.split('?')[0] ?? '')) {
+  // budget that legitimate requests depend on. Classified by the route the
+  // router matched, so a percent-encoded path cannot dodge the money class.
+  for (const { key, limit } of classify(req.routeOptions?.url ?? req.url.split('?')[0] ?? '')) {
     const retryAfter = take(key, limit);
     if (retryAfter !== null) {
       app.log.warn({ path: req.url, key }, 'rate limit hit');
@@ -261,13 +285,36 @@ app.addHook('onRequest', async (req, reply) => {
   }
 });
 
-// Minted before the first request so the dev proxy always has a file to read.
-localToken();
-if (!TOKEN_REQUIRED) {
-  app.log.warn('VALUETRADE_REQUIRE_TOKEN=0 - the local API accepts unauthenticated writes from any process on this machine');
-}
+if (HOSTED) {
+  // No local token (there is no Vite proxy to hand it over) and no hub.
+  const provisional = HOSTED_ROUTES.filter((r) => r.provisional).map((r) => `${r.method} ${r.url}`);
+  app.log.warn(
+    {
+      siteOrigins: SITE_ORIGINS,
+      trustProxy: HOSTED_CONFIG.trustProxy,
+      originSecret: HOSTED_CONFIG.originSecret ? 'set' : 'not set',
+      limitsPerMinute: Object.fromEntries(Object.entries(HOSTED_CONFIG.limits).map(([k, l]) => [k, l.max])),
+      routes: HOSTED_ROUTES.length,
+      provisional,
+    },
+    'HOSTED MODE: public read-only index API - custodial routes, the hub and the local token are off',
+  );
+  if (!SITE_ORIGINS.length) {
+    app.log.warn('hosted mode without VALUESCAN_ALLOWED_ORIGINS: a site on another origin gets no CORS headers (a same-origin site is unaffected)');
+  }
+  for (const o of SITE_ORIGINS) if (!o.startsWith('https://')) app.log.warn({ origin: o }, 'hosted site origin is not https');
+  if (HOSTED_CONFIG.trustProxy === false) {
+    app.log.warn('hosted mode without VALUESCAN_TRUST_PROXY: behind a proxy every client shares the proxy address and its rate limit');
+  }
+} else {
+  // Minted before the first request so the dev proxy always has a file to read.
+  localToken();
+  if (!TOKEN_REQUIRED) {
+    app.log.warn('VALUETRADE_REQUIRE_TOKEN=0 - the local API accepts unauthenticated writes from any process on this machine');
+  }
 
-startHub();
+  startHub();
+}
 
 // --- no auto-unlock ------------------------------------------------------------
 

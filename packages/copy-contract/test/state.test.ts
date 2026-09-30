@@ -157,7 +157,11 @@ test('lifecycle: versions, armedAt, effective fee = min(fee, consent), nonces, e
   assert.deepEqual(idx2.executorInfo(OTHER), { authorised: false, updatedAt: NOW + 70, lastEpoch: 5n }, 'lastEpoch is kept');
   assert.deepEqual(idx2.authorisedExecutors(), []);
   assert.equal(idx2.isDelegatedKey(validTerms().delegatedKey), true);
-  assert.deepEqual(idx2.liveSubscriptionsUsingKey(validTerms().delegatedKey), [id]);
+  const owner = { follower: idx2.getSubscription(id)!.follower, sodexAccountId: idx2.getSubscription(id)!.sodexAccountId };
+  assert.deepEqual(idx2.liveSubscriptionsUsingKey(validTerms().delegatedKey, owner), [id]);
+  // Someone else's subscription naming the same key does not keep it alive for its owner (audit C-2).
+  assert.deepEqual(idx2.liveSubscriptionsUsingKey(validTerms().delegatedKey, { ...owner, sodexAccountId: owner.sodexAccountId + 1n }), []);
+  assert.deepEqual(idx2.liveSubscriptionsUsingKey(validTerms().delegatedKey, { ...owner, follower: OTHER }), []);
 });
 
 test('governance events: pause, venues, ownership, upgrades, domain changes', () => {

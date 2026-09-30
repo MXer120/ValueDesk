@@ -129,12 +129,24 @@ export type SignalDecision =
 /**
  * Gate one leader signal for one subscription (spec §8.3 "per leader event", steps 1-3; sizing and clipping, §4.5,
  * are the executor's own). Record every `go: false` as a SKIP leaf with `skipReason` (merkle.ts).
+ *
+ * CYCLE PROTECTION ASKS THE KEY STORE, NOT THE INDEX. `issuanceOf` is the same lookup `isServiceable` takes. The
+ * contract accepts any `delegatedKey` in anyone's subscription, so "some subscription names this key" is a flag
+ * anyone can plant on any address: one cheap subscription naming a leader's own order signer used to make every
+ * fill of that leader a "copy of a copy" for every follower - closes included, leaving followers in positions the
+ * leader had left (security audit 2026-09-30, C-1). Only a key Valuescan's key service issued signs copy orders.
  */
-export function gateSignal(index: CopyTradingIndex, id: bigint, i: SignalInput): SignalDecision {
+export function gateSignal(
+  index: CopyTradingIndex,
+  id: bigint,
+  i: SignalInput,
+  issuanceOf: (delegatedKey: Address) => KeyIssuance | undefined,
+): SignalDecision {
   const m = copyMode(index, id, Math.floor(i.nowMs / 1000));
   if (m.mode === 'ignore') return { go: false, skipReason: SkipReason.NOT_COPYABLE, detail: 'unknown subscription' };
   if (m.mode === 'wind-down') return { go: false, skipReason: SkipReason.NOT_COPYABLE, detail: 'subscription is STOPPED' };
-  if (i.leaderOrderSigner && index.isDelegatedKey(i.leaderOrderSigner)) {
+  const signerIssuance = i.leaderOrderSigner ? issuanceOf(i.leaderOrderSigner) : undefined;
+  if (i.leaderOrderSigner && signerIssuance && sameAddress(signerIssuance.delegatedKey, i.leaderOrderSigner)) {
     return { go: false, skipReason: SkipReason.COPY_OF_COPY, detail: 'the leader fill came from a Valuescan copy order' };
   }
   if (i.nowMs - i.signalTimeMs > (i.maxAgeMs ?? SIGNAL_STALENESS_MS)) {

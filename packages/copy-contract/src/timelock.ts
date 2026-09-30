@@ -19,7 +19,7 @@
  */
 import { timelockControllerAbi } from './abi.ts';
 import { type Abi, decodeEventLog, decodeFunctionData, encodeAbiParameters, encodeFunctionData, eventTopicOf, getAbiItem } from './abiCodec.ts';
-import { type Address, type Hex, ZERO_BYTES32, bytesToHex, hexToBytes, keccak256, sameAddress, utf8 } from './bytes.ts';
+import { type Address, type Hex, ZERO_BYTES32, bytesToHex, hexToBytes, isAddress, keccak256, sameAddress, utf8 } from './bytes.ts';
 import { calls, decodeCall } from './calldata.ts';
 import { TIMELOCK_MIN_DELAY_SECONDS } from './constants.ts';
 import type { RpcLog } from './events.ts';
@@ -184,9 +184,12 @@ export type ScheduledCallDescription =
  * Explain a CallScheduled (or CallExecuted). Pass the timelock's own address so that calls on the timelock itself are
  * recognised: a monitor MUST watch every CallScheduled on the timelock, not only those that target the proxy, because
  * a timelock self-call can lower the delay first and then upgrade the proxy with no notice (audit SEC-02).
+ * `timelock` is REQUIRED: left out, `updateDelay(0)` used to be described as an unrelated target and announced with
+ * severity 'ignore' - the SEC-02 bypass, silently back (security audit 2026-09-30, C-5).
  */
-export function describeScheduledCall(call: { target: Address; data: Hex }, proxy: Address, timelock?: Address): ScheduledCallDescription {
-  const onTimelock = timelock !== undefined && sameAddress(call.target, timelock);
+export function describeScheduledCall(call: { target: Address; data: Hex }, proxy: Address, timelock: Address): ScheduledCallDescription {
+  if (!isAddress(timelock)) throw new TypeError('describeScheduledCall: pass the timelock address - without it a self-call on the timelock goes unseen (audit SEC-02)');
+  const onTimelock = sameAddress(call.target, timelock);
   if (!onTimelock && !sameAddress(call.target, proxy)) return { kind: 'other-target', target: call.target };
   let d: { functionName: string; args: unknown[] };
   try {

@@ -76,12 +76,12 @@ test('monitoring: CallScheduled is decoded and explained (an upgrade vs an owner
   const ev = decodeTimelockLog(log(up), TIMELOCK);
   assert.ok(ev && ev.eventName === 'CallScheduled');
   assert.equal(ev.args.id, up.id);
-  assert.deepEqual(describeScheduledCall(ev.args, PROXY), { kind: 'upgrade', newImplementation: IMPL, initData: '0x' });
+  assert.deepEqual(describeScheduledCall(ev.args, PROXY, TIMELOCK), { kind: 'upgrade', newImplementation: IMPL, initData: '0x' });
   const ev2 = decodeTimelockLog(log(fee));
   assert.ok(ev2 && ev2.eventName === 'CallScheduled');
-  assert.deepEqual(describeScheduledCall(ev2.args, PROXY), { kind: 'owner-call', functionName: 'setBuilderTerms', args: [231_000n, 60, 100] });
-  assert.deepEqual(describeScheduledCall({ target: LEADER, data: '0x' }, PROXY), { kind: 'other-target', target: LEADER });
-  assert.deepEqual(describeScheduledCall({ target: PROXY, data: '0xdeadbeef' }, PROXY), { kind: 'undecodable', data: '0xdeadbeef' });
+  assert.deepEqual(describeScheduledCall(ev2.args, PROXY, TIMELOCK), { kind: 'owner-call', functionName: 'setBuilderTerms', args: [231_000n, 60, 100] });
+  assert.deepEqual(describeScheduledCall({ target: LEADER, data: '0x' }, PROXY, TIMELOCK), { kind: 'other-target', target: LEADER });
+  assert.deepEqual(describeScheduledCall({ target: PROXY, data: '0xdeadbeef' }, PROXY, TIMELOCK), { kind: 'undecodable', data: '0xdeadbeef' });
   assert.equal(decodeTimelockLog(log(up), LEADER), null, 'another timelock');
   assert.equal(decodeTimelockLog({ address: TIMELOCK, topics: [`0x${'11'.repeat(32)}`], data: '0x' }), null);
   assert.equal(Object.keys(TIMELOCK_EVENT_TOPICS).length, 7);
@@ -93,7 +93,8 @@ test('audit SEC-02: a scheduled call on the timelock itself (updateDelay) is cri
   const d = describeScheduledCall({ target: TIMELOCK, data: lower }, PROXY, TIMELOCK);
   assert.deepEqual(d, { kind: 'timelock-admin', functionName: 'updateDelay', args: [0n] });
   assert.equal(announcementSeverity(d), 'critical');
-  assert.deepEqual(describeScheduledCall({ target: TIMELOCK, data: lower }, PROXY), { kind: 'other-target', target: TIMELOCK }, 'without the timelock address the monitor is blind: pass it');
+  // @ts-expect-error the timelock address is required (audit 2026-09-30, C-5): without it the monitor is blind.
+  assert.throws(() => describeScheduledCall({ target: TIMELOCK, data: lower }, PROXY));
   const grant = encodeFunctionData({ abi: timelockControllerAbi, functionName: 'grantRole', args: [TIMELOCK_ROLES.PROPOSER_ROLE, LEADER] });
   assert.equal(announcementSeverity(describeScheduledCall({ target: TIMELOCK, data: grant }, PROXY, TIMELOCK)), 'critical');
   assert.equal(announcementSeverity(describeScheduledCall({ target: PROXY, data: calls.upgradeToAndCall(IMPL) }, PROXY, TIMELOCK)), 'critical');

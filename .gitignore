@@ -43,6 +43,16 @@ local-api.token
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+# key material in any container format (TLS, deploy keys, exported wallets)
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
 
 # agent staging copies
 .tsc-stage/

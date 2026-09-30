@@ -486,15 +486,27 @@ export class CopyTradingIndex {
     return [...(this.killed.get(`${k(follower)}:${stopEpoch}`) ?? [])];
   }
 
-  /** Whether `key` is (or was) the delegated key of any subscription: fills signed by it are copies (cycle protection). */
+  /**
+   * Whether `key` is (or was) the delegated key of any subscription. NOT a trust signal: the contract takes any key
+   * in anyone's subscription, so this is true for whatever address someone chose to name. Cycle protection asks the
+   * key store instead (executor.ts gateSignal).
+   */
   isDelegatedKey(key: Address): boolean {
     return this.delegatedKeys.has(k(key));
   }
 
-  /** Live subscriptions that use `key` now (destroy the key once this is empty, §8.3). */
-  liveSubscriptionsUsingKey(key: Address): bigint[] {
+  /**
+   * Live subscriptions of `owner` (the follower and SoDEX account the key was issued for) that use `key` now -
+   * destroy the key once this is empty (§8.3). Scoped to the owner because anyone can copy a follower's key out of
+   * a public `Subscribed` event into a subscription of their own, which would otherwise keep a key the follower has
+   * finished with alive, and authorised on their account, forever (security audit 2026-09-30, C-2).
+   */
+  liveSubscriptionsUsingKey(key: Address, owner: { follower: Address; sodexAccountId: bigint }): bigint[] {
     return [...(this.delegatedKeys.get(k(key)) ?? [])]
-      .filter((id) => isLive(this.statusOf(id)) && sameAddress(this.subscriptions.get(id)!.record.delegatedKey, key))
+      .filter((id) => {
+        const r = this.subscriptions.get(id)!.record;
+        return isLive(this.statusOf(id)) && sameAddress(r.delegatedKey, key) && sameAddress(r.follower, owner.follower) && r.sodexAccountId === owner.sodexAccountId;
+      })
       .sort(cmpBig);
   }
 

@@ -73,12 +73,16 @@ test('engineInScope and symbolAllowed', () => {
   assert.equal(symbolAllowed(sub(SymbolMode.DENY, ['BTC-USD']), 'ETH-USD'), true);
 });
 
+/** The key store: KEY is the one key Valuescan issued (for FOLLOWER, account 1). */
+const issued = new Map<string, KeyIssuance>([[KEY.toLowerCase(), { delegatedKey: KEY, follower: FOLLOWER, sodexAccountId: 1n }]]);
+const issuanceOf = (key: Address): KeyIssuance | undefined => issued.get(key.toLowerCase());
+
 test('gateSignal: every skip reason, and reduce-only while paused', () => {
   const idx = indexWith(validTerms({ symbols: ['BTC-USD'] }));
   const base = { sodexSymbol: 'BTC-USD', engine: 'perps' as const, increases: true, signalTimeMs: NOW * 1000, nowMs: NOW * 1000 + 100 };
-  assert.deepEqual(gateSignal(idx, 1n, base).go, true);
+  assert.deepEqual(gateSignal(idx, 1n, base, issuanceOf).go, true);
   const skip = (i: Partial<typeof base> & { leaderOrderSigner?: Address }, id = 1n, index = idx) => {
-    const d = gateSignal(index, id, { ...base, ...i });
+    const d = gateSignal(index, id, { ...base, ...i }, issuanceOf);
     return d.go ? 'go' : d.skipReason;
   };
   assert.equal(skip({}, 9n), SkipReason.NOT_COPYABLE);
@@ -92,6 +96,22 @@ test('gateSignal: every skip reason, and reduce-only while paused', () => {
   assert.equal(skip({ increases: false }, 1n, paused), 'go', 'reductions are mirrored while paused');
   const killed = indexWith(validTerms(), [['KillSwitchTriggered', { follower: FOLLOWER, stopEpoch: 1n, closePositions: false }]]);
   assert.equal(skip({ increases: false }, 1n, killed), SkipReason.NOT_COPYABLE, 'STOPPED: only the wind-down path trades');
+});
+
+test('gateSignal: naming a leader\'s own signer as a delegated key does not silence that leader (audit C-1)', () => {
+  // Mallory records a subscription whose delegatedKey is the LEADER's order signer. The contract accepts it (any key
+  // but zero or the follower), so the index now lists that address as "a delegated key".
+  const idx = indexWith(validTerms({ symbols: ['BTC-USD'], delegatedKey: LEADER }));
+  assert.equal(idx.isDelegatedKey(LEADER), true, 'the planted flag is in the index');
+  const base = { sodexSymbol: 'BTC-USD', engine: 'perps' as const, signalTimeMs: NOW * 1000, nowMs: NOW * 1000 + 100 };
+  // The leader's fills - opens AND closes - are still copied: Valuescan never issued that key.
+  for (const increases of [true, false]) {
+    const d = gateSignal(idx, 1n, { ...base, increases, leaderOrderSigner: LEADER }, issuanceOf);
+    assert.equal(d.go, true, `increases=${increases}`);
+  }
+  // A fill signed by a key Valuescan did issue is still recognised as a copy.
+  const d = gateSignal(idx, 1n, { ...base, increases: true, leaderOrderSigner: KEY }, issuanceOf);
+  assert.equal(d.go ? 'go' : d.skipReason, SkipReason.COPY_OF_COPY);
 });
 
 test('isServiceable: only keys Valuescan issued for exactly this follower and account (spam costs nothing)', () => {

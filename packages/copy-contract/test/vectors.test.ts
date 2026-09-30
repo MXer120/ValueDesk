@@ -284,7 +284,7 @@ test('governance: operation ids (viem), CallScheduled explained as an upgrade, t
       assert.ok(ev, l.eventName);
       const viem = viemDecodeEventLog({ abi: timelockControllerAbi, topics: l.topics, data: l.data });
       assert.deepEqual(norm(ev.args), norm(viem.args));
-      if (ev.eventName === 'CallScheduled') scheduled.push(describeScheduledCall(ev.args, PROXY));
+      if (ev.eventName === 'CallScheduled') scheduled.push(describeScheduledCall(ev.args, PROXY, TIMELOCK));
     }
   }
   assert.deepEqual(scheduled.map((d) => d.kind), ['owner-call', 'upgrade']);

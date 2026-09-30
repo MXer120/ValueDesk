@@ -210,7 +210,17 @@ export async function statsRoutes(app: FastifyInstance): Promise<void> {
    * walks it again from scratch - the escape hatch for a cache written by an
    * older, wronger parse.
    */
-  app.get('/api/stats/all-time', async (req) => {
+  app.get('/api/stats/all-time', async (req, reply) => {
+    // A GET with side effects: it starts history walks for any address, and
+    // `rebuild=1` throws a wallet's cached history away. So a foreign page must
+    // not be able to fire it with an <img> or a no-cors fetch - through the
+    // Vite proxy those even carry the local token. Browsers label them
+    // Sec-Fetch-Site: cross-site / same-site; the app's own reads are
+    // same-origin, and native clients send no such header.
+    const site = req.headers['sec-fetch-site'];
+    if (site === 'cross-site' || site === 'same-site') {
+      return reply.code(403).send({ error: 'cross-site request refused', source: 'server' });
+    }
     const q = req.query as { address?: string; rebuild?: string };
     const address = requireAddress(q);
     const rebuild = q.rebuild === '1';

@@ -36,14 +36,30 @@ function requireAddress(q: Record<string, string | undefined>): string {
 }
 
 // --- tiny per-route cache, same shape as external.ts's own -------------------
+// Keyed by wallet address, so bounded: past CACHE_MAX entries, anything older
+// than the longest TTL here (45 s) goes first, then the oldest.
 const cache = new Map<string, { at: number; value: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
+const CACHE_MAX = 200;
+const CACHE_MAX_AGE_MS = 45_000;
 async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
   const running = inflight.get(key);
   if (running) return running as Promise<T>;
-  const p = fn().then((v) => { cache.set(key, { at: Date.now(), value: v }); return v; }).finally(() => inflight.delete(key));
+  const p = fn().then((v) => {
+    cache.delete(key);
+    cache.set(key, { at: Date.now(), value: v });
+    if (cache.size > CACHE_MAX) {
+      const now = Date.now();
+      for (const [k, e] of cache) if (now - e.at >= CACHE_MAX_AGE_MS) cache.delete(k);
+      for (const k of cache.keys()) {
+        if (cache.size <= CACHE_MAX) break;
+        cache.delete(k);
+      }
+    }
+    return v;
+  }).finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }

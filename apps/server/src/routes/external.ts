@@ -152,9 +152,17 @@ async function getJson<T>(url: string): Promise<T> {
  * separate request to a host we do not own. Concurrent identical requests are
  * coalesced onto one upstream call. Deliberately does NOT cache failures - a
  * transient blip should not be pinned for the whole TTL.
+ *
+ * BOUNDED. Keys are upstream URLs, and those carry caller-chosen page numbers,
+ * ids and wallet addresses - an unbounded map is memory anyone can fill. Past
+ * CACHE_MAX entries, anything older than the longest TTL used here goes first,
+ * then the oldest.
  */
 const cache = new Map<string, { at: number; value: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
+const CACHE_MAX = 500;
+/** The longest TTL any route here passes to `cached`. */
+const CACHE_MAX_AGE_MS = 5 * 60_000;
 
 async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
   const hit = cache.get(key);
@@ -163,13 +171,31 @@ async function cached<T>(key: string, ttlMs: number, fn: () => Promise<T>): Prom
   if (running) return running as Promise<T>;
   const p = fn()
     .then((value) => {
+      cache.delete(key);
       cache.set(key, { at: Date.now(), value });
+      if (cache.size > CACHE_MAX) {
+        const now = Date.now();
+        for (const [k, v] of cache) if (now - v.at >= CACHE_MAX_AGE_MS) cache.delete(k);
+        for (const k of cache.keys()) {
+          if (cache.size <= CACHE_MAX) break;
+          cache.delete(k);
+        }
+      }
       return value;
     })
     .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
 }
+
+/** Test seam: how many upstream answers are held. */
+export const _externalCacheSize = (): number => cache.size;
+
+/** Highest page number any list here is asked for. SoDEX publishes its top 1,000 rows. */
+const MAX_PAGE = 1000;
+/** A language tag as the announcements host takes it: `en`, `zh-CN`, `pt_BR`. */
+const LANG_RE = /^[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{2,8})?$/;
+const MAX_LABEL = 64;
 
 // --- leaderboard shapes ------------------------------------------------------
 
@@ -305,6 +331,7 @@ export async function externalRoutes(app: FastifyInstance): Promise<void> {
       });
     }
     const page = Math.max(1, Number.parseInt(q.page ?? '1', 10) || 1);
+    if (page > MAX_PAGE) return reply.code(400).send({ error: `page must be 1..${MAX_PAGE}` });
 
     const params = new URLSearchParams({
       window_type: windowType,
@@ -460,9 +487,13 @@ export async function externalRoutes(app: FastifyInstance): Promise<void> {
   app.get('/api/external/announcements', async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;
     const page = Math.max(1, Number.parseInt(q.page ?? '1', 10) || 1);
+    if (page > MAX_PAGE) return reply.code(400).send({ error: `page must be 1..${MAX_PAGE}` });
     // Upstream caps size at 100.
     const size = Math.min(100, Math.max(1, Number.parseInt(q.size ?? '20', 10) || 20));
-    const params = new URLSearchParams({ page: String(page), size: String(size), lang: q.lang || 'en' });
+    const lang = q.lang || 'en';
+    if (!LANG_RE.test(lang)) return reply.code(400).send({ error: 'lang must be a language tag such as en' });
+    if (q.label && q.label.length > MAX_LABEL) return reply.code(400).send({ error: `label is longer than ${MAX_LABEL} characters` });
+    const params = new URLSearchParams({ page: String(page), size: String(size), lang });
     if (q.label) params.set('label', q.label);
 
     const url = `${BIZ_API}/biz/announcements?${params}`;
@@ -495,6 +526,7 @@ export async function externalRoutes(app: FastifyInstance): Promise<void> {
       return reply.code(400).send({ error: 'a numeric announcement id is required' });
     }
     const lang = (req.query as { lang?: string }).lang || 'en';
+    if (!LANG_RE.test(lang)) return reply.code(400).send({ error: 'lang must be a language tag such as en' });
     const url = `${BIZ_API}/biz/announcements/detail/${id}?lang=${encodeURIComponent(lang)}`;
     try {
       const data = await cached(url, 5 * 60_000, () =>
