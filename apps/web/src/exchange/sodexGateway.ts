@@ -46,9 +46,17 @@ import { RateLimitedError, UnreachableError, isAbort, isRateLimitError } from '.
 import { RequestGate } from './gate';
 import { gatewayOrigin } from './hosts';
 import { SharedCooldowns, SharedLedger, defaultLedgerDeps, type LedgerDeps } from './ledger';
+import { HistoryQueue, type HistoryPriority } from './historyQueue';
+import { isHidden } from './visibility';
 
 /** At most this many `/trades` and `/orders/history` requests together per window, every tab together. */
 export const HISTORY_DRIP = { max: 2, windowMs: 60_000 } as const;
+/**
+ * The drip's ledger counts a little longer than that window: a slot is taken a
+ * few milliseconds before its request leaves, and that lag varies - so two
+ * requests exactly a window apart in the ledger could be a hair closer on the wire.
+ */
+const DRIP_GUARD_MS = 500;
 
 /**
  * After a refused (or unreadable) history read, no tab sends another for this
@@ -70,8 +78,15 @@ const READ_TIMEOUT_MS = 20_000;
 const QUICK_READ_TIMEOUT_MS = 8_000;
 /** How long a read may wait for the per-IP weight budget (the server's WeightBudget waited 30 s). */
 const BUDGET_WAIT_MS = 30_000;
-/** How long a history read may queue for its drip slot. */
-const DRIP_WAIT_MS = 2 * 60_000;
+/**
+ * How long a history read for something on screen may queue for its drip slot:
+ * two full windows (two reads ahead of it in each) and the polling slack.
+ */
+const DRIP_WAIT_MS = 2 * HISTORY_DRIP.windowMs + 5_000;
+/** ...a page of a view's many (a wallet's fills for the copy simulator): tables go first, so it may wait longer... */
+const BULK_DRIP_WAIT_MS = 5 * 60_000;
+/** ...and a background history read (it waits behind everything on screen). */
+const BACKGROUND_DRIP_WAIT_MS = 15 * 60_000;
 
 const HISTORY_RE = /\/accounts\/[^/]+\/(orders\/history|trades|fundings|funding-history|positions\/history)(\?|$)/;
 const TRADES_RE = /\/accounts\/[^/]+\/trades(\?|$)/;
@@ -85,6 +100,8 @@ export interface GatewayClientOptions {
   origin?: () => string;
   /** The cache's clock (tests). */
   now?: () => number;
+  /** Whether this tab is off screen (history reads from a hidden tab are background). */
+  hidden?: () => boolean;
 }
 
 export interface GwGetOptions {
@@ -92,11 +109,25 @@ export interface GwGetOptions {
   weight?: number;
   /** Cache lifetime; default: the server's table, 5 s for history pages, else concurrent dedupe only. */
   ttlMs?: number;
+  /**
+   * The reader no longer wants the answer. Ends a read that is still waiting
+   * (budget, history slot) at once. A history read already sent completes all
+   * the same: its slot is spent, and the answer is kept for the next reader.
+   */
   signal?: AbortSignal;
   /** Attempts for a transient failure (the server used 4). */
   attempts?: number;
   /** false: do not keep this answer as the path's last good copy (bulk walk pages). */
   keepLastGood?: boolean;
+  /**
+   * For /trades and /orders/history: who this read is for (historyQueue.ts).
+   * Default 'visible' - a table on screen; 'bulk' for a view's many pages (a
+   * wallet's fills); 'background' for anything nobody is looking at; 'walk'
+   * for the all-time walk.
+   */
+  priority?: HistoryPriority;
+  /** Called when the request is sent - after any wait for the budget or a history slot. */
+  onSent?: () => void;
 }
 
 /** A gateway client with its own budget ledgers. The app uses the one below; tests make their own. */
@@ -107,6 +138,8 @@ export class GatewayClient {
   readonly historyDrip: SharedLedger;
   /** The class-wide cooldown after a refused history read. */
   readonly historyCool: SharedCooldowns;
+  /** Who gets the drip's next slot. */
+  readonly historyQueue: HistoryQueue;
   readonly gate: RequestGate;
   private readonly deps: LedgerDeps;
   private readonly fetchImpl: typeof fetch;
@@ -120,14 +153,20 @@ export class GatewayClient {
     // No lock per request: this budget has room to spare (see ledger.ts `atomic`).
     this.budget = new SharedLedger('sodex-gw', GATEWAY_WEIGHT_PER_MIN, GATEWAY_WINDOW_MS, this.deps, false);
     this.cooldowns = new SharedCooldowns('sodex-gw', COOL_BASE_MS, COOL_MAX_MS, this.deps);
-    this.historyDrip = new SharedLedger('sodex-history', HISTORY_DRIP.max, HISTORY_DRIP.windowMs, this.deps);
+    this.historyDrip = new SharedLedger('sodex-history', HISTORY_DRIP.max, HISTORY_DRIP.windowMs + DRIP_GUARD_MS, this.deps);
     this.historyCool = new SharedCooldowns('sodex-history', HISTORY_COOL.baseMs, HISTORY_COOL.maxMs, this.deps);
+    this.historyQueue = new HistoryQueue({
+      drip: this.historyDrip,
+      store: this.deps.store,
+      now: this.deps.now,
+      sleep: this.deps.sleep,
+      hidden: o.hidden ?? isHidden,
+    });
   }
 
   /** The drip a path must pass, or null. */
   dripFor(path: string): SharedLedger | null {
     return TRADES_RE.test(path) || ORDERS_HISTORY_RE.test(path) ? this.historyDrip : null;
-    return null;
   }
 
   /** Default cache lifetime of a path. */
@@ -140,8 +179,11 @@ export class GatewayClient {
   /** One gateway GET (path relative to the gateway origin); resolves with the envelope's `data`. */
   get<T>(path: string, o: GwGetOptions = {}): Promise<T> {
     const ttl = o.ttlMs ?? this.ttlOf(path);
-    const key = `${this.origin()}${path}`;
-    return this.gate.run(key, ttl, () => this.request<T>(path, o), o.keepLastGood ?? true);
+    // A history read waits only on a request of its own priority: a table on
+    // screen never stands in a background read's place in the queue. The answer
+    // and the last good copy are the path's, whoever read it.
+    const lane = this.dripFor(path) ? (o.priority ?? 'visible') : '';
+    return this.gate.run(`${this.origin()}${path}`, ttl, () => this.request<T>(path, o), o.keepLastGood ?? true, lane);
   }
 
   /** The last good answer for a path (history pages fall back to it). */
@@ -172,11 +214,25 @@ export class GatewayClient {
       if (cool > COOL_WAIT_MAX_MS) throw new RateLimitedError(host, cool);
       if (cool > 0) await this.deps.sleep(cool);
       await this.budget.take(weight, BUDGET_WAIT_MS, o.signal);
-      if (drip) await drip.take(1, DRIP_WAIT_MS, o.signal);
+      if (drip) {
+        const priority = o.priority ?? 'visible';
+        const maxWait = priority === 'visible' ? DRIP_WAIT_MS : priority === 'bulk' ? BULK_DRIP_WAIT_MS : BACKGROUND_DRIP_WAIT_MS;
+        await this.historyQueue.take(priority, maxWait, o.signal, () => {
+          // A refusal seen while this read waited for its slot (another read,
+          // another tab) closes history for every read: this one takes no slot
+          // and is not sent into the cooldown.
+          const left = this.cooldownLeft(path);
+          if (left > COOL_WAIT_MAX_MS) throw new RateLimitedError(host, left, 'history reads');
+          return left;
+        });
+      }
+      if (o.signal?.aborted) throw o.signal.reason ?? new DOMException('aborted', 'AbortError');
 
       const ctl = new AbortController();
       const onAbort = () => ctl.abort();
-      o.signal?.addEventListener('abort', onAbort, { once: true });
+      // A history read that was sent is not cancelled by its reader leaving: the
+      // slot is spent, and the answer is kept for whoever reads that page next.
+      if (!drip) o.signal?.addEventListener('abort', onAbort, { once: true });
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
@@ -184,6 +240,7 @@ export class GatewayClient {
       }, drip ? READ_TIMEOUT_MS : QUICK_READ_TIMEOUT_MS);
       let status = 0;
       let text = '';
+      o.onSent?.();
       try {
         const res = await this.fetchImpl(this.origin() + path, {
           headers: { Accept: 'application/json' },

@@ -15,9 +15,14 @@
  *
  * `state` is this tab's link to the host; `upstream[engine]` is the host's
  * market connection for that engine - the same split the server hub reported.
+ *
+ * What the wallets' account channels say also goes to exchange/accountActivity.ts
+ * (since when this page has listened to each without a break, and when it last
+ * heard anything): that is how a kept history table knows it is still current.
  */
 import type { Engine } from './api';
-import type { SubParams } from '@sign/sodex/wsProtocol.js';
+import { ACCOUNT_CHANNELS, type SubParams } from '@sign/sodex/wsProtocol.js';
+import { accountActivity } from './exchange/accountActivity';
 import { gatewayWsOrigin } from './exchange/hosts';
 import { hostLink, type HostLink } from './exchange/ws/link';
 import type { ToTab } from './exchange/ws/messages';
@@ -56,6 +61,8 @@ class HubClient {
   state: ConnState = 'closed';
   /** The host's market connection status per engine (SoDEX-side), as panels read it (UPSTREAM_SHOWN). */
   upstream: Partial<Record<Engine, string>> = { spot: 'open', perps: 'open' };
+  /** Engines whose market connection dropped and is not back yet. */
+  private dropped = new Set<Engine>();
 
   connect(): void {
     if (this.link) return;
@@ -68,6 +75,8 @@ class HubClient {
         // (Re-)arm every live subscription on the host that now answers.
         for (const s2 of this.subs.values()) this.sendSubscribe(s2.engine, s2.params);
       } else {
+        // Nothing is heard while the host is away: what the account streams say is unknown from here.
+        accountActivity.stoppedAll();
         this.setState(s === 'reconnecting' ? 'reconnecting' : 'connecting');
       }
     });
@@ -81,11 +90,32 @@ class HubClient {
 
   private onMessage(m: ToTab): void {
     if (m.type === 'status') {
+      // A market connection that dropped means the network did: the wallets'
+      // connections may have missed pushes too - then, and until it is back.
+      if (m.status === 'reconnecting') {
+        this.dropped.add(m.engine);
+        accountActivity.interrupted(m.engine);
+      } else if (m.status === 'open' && this.dropped.delete(m.engine)) {
+        accountActivity.interrupted(m.engine);
+      }
       this.upstream[m.engine] = UPSTREAM_SHOWN[m.status] ?? m.status;
       this.setState(this.state, `${m.engine}:${m.status}`);
       return;
     }
+    if (m.type === 'gap') {
+      // One wallet's connection dropped, or is back after a drop.
+      accountActivity.interrupted(m.engine, m.user);
+      return;
+    }
+    if (m.type === 'error') {
+      // No stream for this account channel (no room for another wallet's connection): nothing is heard on it.
+      if (m.op === 'subscribe' && m.engine && m.channel && ACCOUNT_CHANNELS.has(m.channel)) {
+        accountActivity.stopped(m.engine, m.user ?? null, m.channel);
+      }
+      return;
+    }
     if (m.type !== 'push') return;
+    if (m.user && ACCOUNT_CHANNELS.has(m.channel)) accountActivity.heard(m.engine, m.user, m.channel);
 
     // Fan out to every handler whose subscription matches this push. One
     // handler throwing (e.g. a chart series rejecting an out-of-order
@@ -118,6 +148,7 @@ class HubClient {
   private sendSubscribe(engine: Engine, params: SubParams): void {
     if (this.link?.state() !== 'open') return; // armed when the link opens
     this.link.post({ op: 'subscribe', engine, params, wsBase: gatewayWsOrigin() });
+    if (params.user && ACCOUNT_CHANNELS.has(params.channel)) accountActivity.listening(engine, params.user, params.channel);
   }
 
   private sendUnsubscribe(engine: Engine, params: SubParams): void {
@@ -150,9 +181,13 @@ class HubClient {
       if (e.handlers.size === 0) {
         this.subs.delete(key);
         this.sendUnsubscribe(engine, params);
+        if (params.user && ACCOUNT_CHANNELS.has(params.channel)) accountActivity.stopped(engine, params.user, params.channel);
       }
     };
   }
 }
 
 export const hub = new HubClient();
+
+// What this page knows of each wallet's account goes to the page that follows a reload.
+if (typeof addEventListener === 'function') addEventListener('pagehide', () => accountActivity.keep());

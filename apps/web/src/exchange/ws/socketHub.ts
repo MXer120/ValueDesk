@@ -74,6 +74,8 @@ export class SocketHub {
   private clients = new Map<string, Client>();
   private market = new Map<string, Pooled>();
   private accounts = new Map<string, Pooled>();
+  /** Wallet connections that dropped and are not back yet. */
+  private readonly dropped = new WeakSet<SodexSocket>();
   private readonly factory?: SocketFactory;
   private readonly host: 'worker' | 'leader' | 'local';
   private readonly now: () => number;
@@ -176,7 +178,7 @@ export class SocketHub {
     if (!sock) {
       // An account channel with no wallet, or no room for another wallet's
       // connection: no live stream, the page's polling covers it.
-      c.port.send({ type: 'error', op: 'subscribe', engine, channel: params.channel, message: 'account stream unavailable' });
+      c.port.send({ type: 'error', op: 'subscribe', engine, channel: params.channel, message: 'account stream unavailable', ...(params.user ? { user: params.user } : {}) });
       return;
     }
     const { key, snapshot } = sock.subscribe(params);
@@ -247,7 +249,9 @@ export class SocketHub {
     }
     const sock = new SodexSocket(base, engine, {
       onPush: (s, msg) => this.onPush(s, msg),
-      // A wallet connection's status is not the engine's (an idle close is not an outage).
+      // A wallet connection's status is not the engine's (an idle close is not an
+      // outage). A drop is told to the tabs listening on it: they may have missed pushes.
+      onStatus: (s, status) => this.onAccountStatus(s, status),
     }, this.factory, user);
     this.accounts.set(k, { sock });
     return sock;
@@ -305,6 +309,20 @@ export class SocketHub {
   private onStatus(sock: SodexSocket, status: SocketStatus): void {
     if (sock.user) return;
     for (const c of this.clients.values()) c.port.send({ type: 'status', engine: sock.engine, status });
+  }
+
+  /** A wallet connection dropped, or is back after a drop: the tabs listening on it may have missed pushes. */
+  private onAccountStatus(sock: SodexSocket, status: SocketStatus): void {
+    if (status === 'reconnecting') this.dropped.add(sock);
+    else if (status !== 'open' || !this.dropped.delete(sock)) return;
+    if (!sock.user) return;
+    for (const c of this.clients.values()) {
+      for (const sub of c.subs.values()) {
+        if (sub.sock !== sock) continue;
+        c.port.send({ type: 'gap', engine: sock.engine, user: sock.user });
+        break;
+      }
+    }
   }
 
   /** Close everything (a host shutting down). */

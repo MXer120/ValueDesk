@@ -7,6 +7,8 @@
  * over /ws, so ws.ts's fan-out is unchanged:
  *   {type:"push",   engine, channel, pushType:"snapshot"|"update", data, user?}
  *   {type:"status", engine, status}
+ *   {type:"gap",    engine, user}     a wallet's connection dropped, or is back after a drop:
+ *                                    pushes may be missing (exchange/accountActivity.ts)
  * Over a BroadcastChannel every tab hears every message, so host messages name
  * the tab(s) they are for in `to`.
  */
@@ -29,8 +31,9 @@ export type ToTab = (
   | { type: 'hello'; v: number; host: 'worker' | 'leader' | 'local' }
   | { type: 'push'; engine: Engine; channel: string; pushType: 'snapshot' | 'update'; data: unknown; user?: string }
   | { type: 'status'; engine: Engine; status: SocketStatus }
+  | { type: 'gap'; engine: Engine; user: string }
   | { type: 'ack'; op: 'subscribe' | 'unsubscribe'; engine: Engine; channel: string }
-  | { type: 'error'; op?: string; engine?: Engine; channel?: string; message: string }
+  | { type: 'error'; op?: string; engine?: Engine; channel?: string; user?: string; message: string }
   | { type: 'pong' }
   | { type: 'leader'; id: string }
 ) & { to?: string[] };

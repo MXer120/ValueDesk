@@ -63,7 +63,9 @@ async function guarded<T>(fn: () => Promise<T>): Promise<T> {
 // --- SoDEX ---------------------------------------------------------------------------------
 
 const sodexIo: SodexTraderIo = {
-  ...gatewayReads((path, weight) => gwGet(path, weight !== undefined ? { weight } : {})),
+  // A wallet's fills are many pages for one view ('bulk'): they take free history
+  // slots, but never while a history table waits (exchange/historyQueue.ts).
+  ...gatewayReads((path, weight) => gwGet(path, { ...(weight !== undefined ? { weight } : {}), priority: 'bulk' })),
   portfolioChart: (accountId, window) => dataReads.portfolioChart(accountId, window),
   lbRank: (window, sortBy, address) => dataReads.lbRank(window, sortBy, address),
   coolingDown,

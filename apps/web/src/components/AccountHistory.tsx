@@ -24,10 +24,14 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExt
 import { api, type Engine, type Symbol as MarketSymbol } from '../api';
 import { bumpAccountResource, useAccountResource } from '../accountFeeds';
 import {
-  HISTORY, countNew, fetchAccountFlows, fetchFundTransfers, fetchHistoryPage, ledgerAvailable, mergeRows,
-  timeline, txUrl, type HistoryKind, type LedgerRow, type TokenBook,
+  HISTORY, HISTORY_PAGE, countNew, fetchAccountFlows, fetchFundTransfers, fetchHistoryPage, ledgerAvailable, mergeRows,
+  timeline, txUrl, type HistoryKind, type HistoryPage, type LedgerRow, type TokenBook,
 } from '../accountData';
 import { DASH, coinLabel, fmt, fmtBalance, fmtDateTime, fmtPrice, fmtQty, fmtUsd, num, pick } from '../format';
+import { LAG_MS, accountActivity } from '../exchange/accountActivity';
+import { isAbort } from '../exchange/errors';
+import { network } from '../exchange/hosts';
+import { holdsAll, newWants, notePush, tableStore, trimForStore, type StreamWants } from '../exchange/historyTables';
 import { CrossFade } from './motion';
 import { useAsync, useChannel, useSharedStored } from '../hooks';
 import { useMask } from '../privacy';
@@ -157,117 +161,374 @@ interface Paged {
   loadingMore: boolean;
   error: unknown;
   moreError: unknown;
-  /** Set while what is on screen is a copy the backend kept because SoDEX refused (ms read). */
+  /**
+   * Set while what is on screen is older than what SoDEX would answer now (ms
+   * read): SoDEX refused, or the copy is still waiting for its turn to be
+   * caught up (SoDEX allows two history reads a minute).
+   */
   staleAt: number | null;
+  /** When SoDEX answered for the newest rows on screen (ms; 0 = never). */
+  fetchedAt: number;
+  /**
+   * When SoDEX was asked for them (ms; 0 = not known). The copy is current
+   * for as long as nothing has happened on the account since.
+   */
+  askedAt: number;
 }
 
-const IDLE: Paged = { key: null, rows: [], next: null, loading: false, loadingMore: false, error: null, moreError: null, staleAt: null };
+const IDLE: Paged = { key: null, rows: [], next: null, loading: false, loadingMore: false, error: null, moreError: null, staleAt: null, fetchedAt: 0, askedAt: 0 };
 
 /**
  * What each history held when its tab was last on screen (rows, the pages
- * already loaded, the cursor). Switching back shows it at once and re-reads
- * only the first page for anything new.
+ * already loaded, the cursor). Switching back shows it at once. Between visits
+ * the same lives in IndexedDB (exchange/historyTables.ts). The PAGED_KEEP most
+ * recently shown tables stay here; an older one opens from IndexedDB.
  */
 const pagedCache = new Map<string, Paged>();
+const PAGED_KEEP = 24;
+
+/**
+ * SoDEX allows two reads a minute of `/trades` and `/orders/history` per IP
+ * (exchange/sodexGateway.ts), so a table spends none it does not need:
+ *  - a copy read less than FRESH_MS ago, with nothing heard on the account's
+ *    stream since it was asked for (exchange/accountActivity.ts), is shown as
+ *    it is - a tab switch or a quick reload with no trading in between;
+ *  - any other copy is shown at once and ONE read catches it up - for fills
+ *    only the ones newer than the newest held (a fill never changes); orders
+ *    do change (one that closes late), so their newest page is read again;
+ *  - a push on the account stream is a reason to read only if the table
+ *    lacks what it reports: a fill it already holds, an order that is still
+ *    open (not in the order history at all) or a final state it already
+ *    shows need none;
+ *  - after the user's own action (the app's refresh) the stream is heard
+ *    first, for half a second: a push the table lacks reads at once, a
+ *    stream that reported nothing it lacks needs no read, a stream that
+ *    says nothing reads as before;
+ *  - a trigger (a fill on the stream, a refresh) that arrives while a read
+ *    still waits for its slot is served by that read; one that arrives after
+ *    it was sent gets one more read after it;
+ *  - the table on screen reads first ('visible'); background readers wait
+ *    behind it (exchange/historyQueue.ts).
+ * The usual stale note says how old the rows are when the catch-up does not
+ * land within STALE_GRACE_MS, or at once when the kept copy is older than
+ * SHOW_AGE_MS.
+ */
+const FRESH_MS = 30_000;
+const STALE_GRACE_MS = 3_000;
+const SHOW_AGE_MS = 5 * 60_000;
+
+/** The account channels whose pushes change each history (funding is paid on a schedule, not pushed). */
+const CHANGED_BY: Record<HistoryKind, readonly string[]> = {
+  trades: ['accountTrade'],
+  orders: ['accountOrderUpdate', 'accountTrade'],
+  positions: ['accountTrade'],
+  funding: [],
+};
+
+function newestTime(rows: any[], timeOf: (r: any) => number): number | undefined {
+  let max = -Infinity;
+  for (const r of rows) {
+    const t = timeOf(r);
+    if (Number.isFinite(t) && t > max) max = t;
+  }
+  return Number.isFinite(max) && max > 0 ? max : undefined;
+}
+
+/** Orders and fills: the two histories SoDEX rate-limits (exchange/sodexGateway.ts HISTORY_DRIP). */
+const DRIPPED: ReadonlySet<HistoryKind> = new Set<HistoryKind>(['trades', 'orders']);
+/** After the user's own action: how long the stream is heard before the table reads anyway. */
+const REFRESH_WAIT_MS = 500;
+/** A push this long before the action's refresh still belongs to it (the stream can be faster than the answer). */
+const REFRESH_HEARD_MS = 2_000;
+/** For this long after an action, a push the table lacks reads at once instead of 5 s later. */
+const REFRESH_URGENT_MS = 5_000;
+
+/**
+ * Keep a table for its next visit: in memory for this session and, once SoDEX
+ * has answered for it, in IndexedDB between visits (`storeKey`).
+ */
+function keepTable(key: string, storeKey: string | null, s: Paged, timeOf: (r: any) => number): void {
+  if (s.rows.length === 0 || s.error) return;
+  pagedCache.delete(key);
+  pagedCache.set(key, { ...s, loading: false, loadingMore: false, moreError: null });
+  for (const oldest of pagedCache.keys()) {
+    if (pagedCache.size <= PAGED_KEEP) break;
+    pagedCache.delete(oldest);
+  }
+  if (storeKey && s.fetchedAt > 0) tableStore.put(storeKey, trimForStore(s, timeOf));
+}
 
 /**
  * One gateway history, newest first, with "load more".
  *
- * A refresh re-reads the FIRST page and merges it in, so older pages already
- * loaded stay put - unless every row on it is new and the page was full, in
+ * A refresh reads the newest rows and merges them in, so older pages already
+ * loaded stay put - unless every row read is new and the page was full, in
  * which case there may be a gap and the list starts over from it.
+ *
+ * A table that leaves the screen (another tab, engine or wallet) gives up its
+ * place in the queue for a history slot - the next slot is for what is shown -
+ * and an answer that arrives after it left is still kept for its next visit.
  */
 function usePagedHistory(kind: HistoryKind, engine: Engine, address: string | null, refreshToken: number) {
   const spec = HISTORY[kind];
   const eng: Engine = spec.perpsOnly ? 'perps' : engine;
   const key = address ? `${kind}:${eng}:${address}` : null;
+  const storeKey = address ? `${network()}:${kind}:${eng}:${address.toLowerCase()}` : null;
   const [s, setS] = useState<Paged>(() => (key && pagedCache.get(key)) || IDLE);
-  useEffect(() => {
-    if (s.key && s.rows.length > 0 && !s.error) pagedCache.set(s.key, { ...s, loading: false, loadingMore: false, moreError: null });
-  }, [s]);
   const cur = useRef(s);
   cur.current = s;
   const keyRef = useRef(key);
   keyRef.current = key;
+  useEffect(() => {
+    if (s.key) keepTable(s.key, s.key === keyRef.current ? storeKey : null, s, spec.timeOf);
+  }, [s]); // eslint-disable-line react-hooks/exhaustive-deps
+  /**
+   * Ends this table's reads that still wait for a history slot when it leaves
+   * the screen. null while no table is mounted here.
+   */
+  const leave = useRef<AbortController | null>(null);
+  /** Nothing can have changed since this copy was asked for: it is shown as it is, without a read. */
+  const current = (p: Paged): boolean =>
+    !!address && p.askedAt > 0 && Date.now() - p.fetchedAt < FRESH_MS && accountActivity.quietSince(eng, address, CHANGED_BY[kind], p.askedAt);
+  const inFlight = useRef<string | null>(null);
+  /** The table that was asked for again while it could not be read (one more read follows), and when. */
+  const again = useRef<string | null>(null);
+  const againAt = useRef(0);
+  /** The table whose kept copy is still being read from IndexedDB: SoDEX is not asked before it is known. */
+  const hydrating = useRef<string | null>(null);
+  /** What the account stream has reported since the table was last checked against it. */
+  const wants = useRef<StreamWants>(newWants());
+  /** The user's own action the table is still hearing the stream about: when, and the wait. */
+  const refreshAt = useRef(0);
+  const refreshTimer = useRef<number | undefined>(undefined);
 
   const first = useCallback((reset: boolean) => {
     if (!key || !address) return;
     const k = key;
+    const sk = storeKey;
+    // One read at a time per table, and none before its kept copy is known;
+    // whatever asks meanwhile gets one more read after that.
+    if (inFlight.current === k || hydrating.current === k) {
+      again.current = k;
+      againAt.current = Date.now();
+      return;
+    }
+    inFlight.current = k;
+    const signal = leave.current?.signal;
+    /** When this read left for SoDEX (0: it has not - still waiting for its slot, or never sent). */
+    let sentAt = 0;
+    /** Still this table, still on screen. */
+    const shown = () => keyRef.current === k && leave.current !== null;
+    const base = cur.current.key === k ? cur.current : null;
+    const since = !reset && kind === 'trades' && base && base.rows.length > 0 ? newestTime(base.rows, spec.timeOf) : undefined;
     setS((p) => (reset || p.key !== k ? { ...IDLE, key: k, loading: true } : { ...p, loading: p.rows.length === 0, error: null }));
-    fetchHistoryPage(kind, eng, address, null).then(
+    // Rows on screen that are not caught up promptly say how old they are.
+    const staleTimer = window.setTimeout(() => {
+      setS((p) => (p.key === k && p.rows.length > 0 && p.staleAt === null && p.fetchedAt > 0 ? { ...p, staleAt: p.fetchedAt } : p));
+    }, STALE_GRACE_MS);
+    /** The table once `page` (its newest rows) is in. */
+    const withPage = (p: Paged, page: HistoryPage<any>): Paged => {
+      const staleAt = page.staleAt ?? null;
+      const fetchedAt = staleAt ?? Date.now();
+      // Asked when this read was sent - unless the page is an older copy
+      // (SoDEX refused), or came from a request that was not this table's.
+      const askedAt = staleAt === null && sentAt > 0 ? sentAt : p.askedAt;
+      const gap = p.rows.length > 0 && page.next !== null && countNew(p.rows, page.rows, spec.idOf) === page.rows.length;
+      if (p.rows.length === 0 || gap) return { ...p, rows: mergeRows([], page.rows, spec.idOf, spec.timeOf), next: page.next, loading: false, error: null, staleAt, fetchedAt, askedAt };
+      return { ...p, rows: mergeRows(p.rows, page.rows, spec.idOf, spec.timeOf), loading: false, error: null, staleAt, fetchedAt: Math.max(p.fetchedAt, fetchedAt), askedAt };
+    };
+    // Dropped before it was sent: this table left the screen, or another reader of the same page did.
+    let dropped = false;
+    // `fresh`: never an answer kept from a moment ago - this read is made because something may have changed.
+    const read = { priority: 'visible' as const, since, signal, fresh: true, onSent: () => { sentAt = Date.now(); } };
+    fetchHistoryPage(kind, eng, address, null, HISTORY_PAGE, read).then(
       (page) => {
-        if (keyRef.current !== k) return;
-        const staleAt = page.staleAt ?? null;
-        setS((p) => {
-          if (p.key !== k) return p;
-          const gap = p.rows.length > 0 && page.next !== null && countNew(p.rows, page.rows, spec.idOf) === page.rows.length;
-          if (p.rows.length === 0 || gap) return { ...p, rows: mergeRows([], page.rows, spec.idOf, spec.timeOf), next: page.next, loading: false, error: null, staleAt };
-          return { ...p, rows: mergeRows(p.rows, page.rows, spec.idOf, spec.timeOf), loading: false, error: null, staleAt };
-        });
+        if (shown()) {
+          setS((p) => (p.key === k ? withPage(p, page) : p));
+          return;
+        }
+        // SoDEX answered after the table left the screen. The read is paid for
+        // (two a minute), so it is kept for the table's next visit.
+        keepTable(k, sk, withPage(pagedCache.get(k) ?? base ?? { ...IDLE, key: k }, page), spec.timeOf);
       },
       (e: unknown) => {
-        if (keyRef.current !== k) return;
+        if (isAbort(e)) {
+          dropped = true;
+          return;
+        }
+        if (!shown()) return;
         // A background re-read that fails under rows already on screen keeps
-        // them and says so only in the console.
+        // them, marked with how old they are, and says why only in the console.
         if (!reset && cur.current.key === k && cur.current.rows.length > 0) {
           logLoadFailure(WHAT[kind], e);
-          setS((p) => (p.key === k ? { ...p, loading: false } : p));
+          setS((p) => (p.key === k ? { ...p, loading: false, staleAt: p.staleAt ?? (p.fetchedAt > 0 ? p.fetchedAt : null) } : p));
           return;
         }
         setS((p) => (p.key === k ? { ...p, loading: false, error: e } : p));
       },
-    );
-  }, [key, address, kind, eng, spec]);
+    ).finally(() => {
+      window.clearTimeout(staleTimer);
+      if (inFlight.current === k) inFlight.current = null;
+      if (!shown()) return;
+      // Asked for again while this read was pending: one more read - unless this
+      // one left for SoDEX after that (it waited for its slot), so it already
+      // holds the answer. Dropped unsent while the table is still shown: again.
+      const more = again.current === k && (sentAt === 0 || againAt.current + LAG_MS >= sentAt);
+      if (again.current === k) again.current = null;
+      if (more || dropped) first(dropped ? reset : false);
+    });
+  }, [key, address, kind, eng, spec, storeKey]);
 
   const more = useCallback(() => {
     const p0 = cur.current;
     if (!key || !address || p0.key !== key || p0.next === null || p0.loadingMore) return;
     const k = key;
+    const sk = storeKey;
     const cursor = p0.next;
+    const shown = () => keyRef.current === k && leave.current !== null;
     setS((p) => ({ ...p, loadingMore: true, moreError: null }));
-    fetchHistoryPage(kind, eng, address, cursor).then(
+    /** The table once the next older `page` is in. */
+    const withOlder = (p: Paged, page: HistoryPage<any>): Paged => {
+      // A page of nothing new means the cursor stopped moving: stop.
+      const added = countNew(p.rows, page.rows, spec.idOf);
+      return {
+        ...p,
+        rows: mergeRows(p.rows, page.rows, spec.idOf, spec.timeOf),
+        next: added === 0 ? null : page.next,
+        loadingMore: false,
+        staleAt: page.staleAt ? Math.min(page.staleAt, p.staleAt ?? Infinity) : p.staleAt,
+      };
+    };
+    fetchHistoryPage(kind, eng, address, cursor, HISTORY_PAGE, { priority: 'visible', signal: leave.current?.signal }).then(
       (page) => {
-        if (keyRef.current !== k) return;
-        setS((p) => {
-          if (p.key !== k) return p;
-          // A page of nothing new means the cursor stopped moving: stop.
-          const added = countNew(p.rows, page.rows, spec.idOf);
-          return {
-            ...p,
-            rows: mergeRows(p.rows, page.rows, spec.idOf, spec.timeOf),
-            next: added === 0 ? null : page.next,
-            loadingMore: false,
-            staleAt: page.staleAt ? Math.min(page.staleAt, p.staleAt ?? Infinity) : p.staleAt,
-          };
-        });
+        if (shown()) {
+          setS((p) => (p.key === k ? withOlder(p, page) : p));
+          return;
+        }
+        // Answered after the table left the screen: kept, if the table still ends where this page starts.
+        const held = pagedCache.get(k);
+        if (held && held.next === cursor) keepTable(k, sk, withOlder(held, page), spec.timeOf);
       },
       (e: unknown) => {
-        if (keyRef.current !== k) return;
-        setS((p) => (p.key === k ? { ...p, loadingMore: false, moreError: e } : p));
+        if (!shown()) return;
+        // Dropped unsent (another reader of the same page left): "load more" is simply there again.
+        setS((p) => (p.key === k ? { ...p, loadingMore: false, moreError: isAbort(e) ? null : e } : p));
       },
     );
-  }, [key, address, kind, eng, spec]);
+  }, [key, address, kind, eng, spec, storeKey]);
 
   useEffect(() => {
-    if (!key) { setS(IDLE); return; }
+    if (!key) {
+      setS(IDLE);
+      return;
+    }
+    const ctl = new AbortController();
+    leave.current = ctl;
+    wants.current = newWants();
+    // An action still being heard is the old table's: this one starts clean.
+    window.clearTimeout(refreshTimer.current);
+    refreshTimer.current = undefined;
+    refreshAt.current = 0;
+    let dead = false;
     const kept = pagedCache.get(key);
     if (kept) {
-      // Shown at once; only the newest page is re-read and merged.
+      // Shown at once; read again unless nothing can have changed since.
       setS(kept);
-      first(false);
-    } else first(true);
+      cur.current = kept;
+      if (!current(kept)) first(false);
+    } else {
+      hydrating.current = key;
+      setS({ ...IDLE, key, loading: true });
+      void (storeKey ? tableStore.get(storeKey) : Promise.resolve(null)).then((stored) => {
+        if (dead || keyRef.current !== key) return;
+        hydrating.current = null;
+        // Asked for meanwhile (a fill on the stream, a refresh): the catch-up below serves it.
+        const wanted = again.current === key;
+        if (wanted) again.current = null;
+        if (!stored || stored.rows.length === 0) {
+          first(true);
+          return;
+        }
+        // What this table showed last time, at once; an old copy says so at once.
+        const age = Date.now() - stored.fetchedAt;
+        const view: Paged = { ...IDLE, key, rows: stored.rows as any[], next: stored.next, fetchedAt: stored.fetchedAt, askedAt: stored.askedAt ?? 0, staleAt: age >= SHOW_AGE_MS ? stored.fetchedAt : null };
+        setS(view);
+        cur.current = view;
+        if (wanted || !current(view)) first(false);
+      });
+    }
+    return () => {
+      dead = true;
+      if (hydrating.current === key) hydrating.current = null;
+      // The table leaves the screen: its reads still waiting for a slot end here.
+      if (leave.current === ctl) leave.current = null;
+      ctl.abort();
+    };
   }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const mounted = useRef(false);
+  /** The table holds everything the stream has reported since it was last checked (and nothing is pending or failed). */
+  const holds = (w: StreamWants): boolean => {
+    const p = cur.current;
+    return !!key && p.key === key && inFlight.current !== key && p.fetchedAt > 0 && p.staleAt === null && !p.error && holdsAll(kind, w, p.rows, spec.idOf);
+  };
+
+  // A refresh is a CHANGED token - not the first run, and not React's dev
+  // re-run of the effect on mount (which would spend a history read each time).
+  // It is the app saying "the account may have changed" after the user's own
+  // action. Orders and fills are rate-limited reads, and the account stream
+  // says exactly what an action changed - often nothing here: an order that was
+  // only placed is in neither history. So the stream is heard first, briefly:
+  // a push the table lacks reads at once; a stream that reported nothing the
+  // table lacks needs no read; a stream that says nothing reads as before.
+  const seenToken = useRef(refreshToken);
+  useEffect(() => () => window.clearTimeout(refreshTimer.current), []);
   useEffect(() => {
-    if (!mounted.current) { mounted.current = true; return; }
-    first(false);
+    if (seenToken.current === refreshToken) return;
+    seenToken.current = refreshToken;
+    if (!address || !DRIPPED.has(kind) || !accountActivity.isListening(eng, address)) {
+      first(false);
+      return;
+    }
+    const at = Date.now();
+    refreshAt.current = at;
+    window.clearTimeout(refreshTimer.current);
+    refreshTimer.current = window.setTimeout(() => {
+      refreshTimer.current = undefined;
+      if (accountActivity.pushedSince(eng, address, at - REFRESH_HEARD_MS) && holds(wants.current)) return;
+      first(false);
+    }, REFRESH_WAIT_MS);
   }, [refreshToken]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fills and order changes arrive on the account stream; history follows them.
-  const onStream = useThrottled(() => first(false), 5000);
-  useChannel(eng, address ? { channel: 'accountTrade', user: address } : null, onStream);
-  useChannel(eng, address && kind === 'orders' ? { channel: 'accountOrderUpdate', user: address } : null, onStream);
+  // Fills and order changes arrive on the account stream; history follows them -
+  // unless the table already holds what was reported (the read made for the
+  // user's own action usually brought it), or the push cannot change this
+  // history (an order that is still open is not in the order history). With
+  // two history reads a minute, a read that would bring nothing is one the next
+  // table has to wait for.
+  const onStream = useThrottled(() => {
+    const w = wants.current;
+    wants.current = newWants();
+    if (holds(w)) {
+      // Nothing to read - and the table is known to be current as of now.
+      if (cur.current.askedAt > 0) setS((q) => (q.key === key ? { ...q, askedAt: Date.now() } : q));
+      return;
+    }
+    first(false);
+  }, 5000);
+  const onPush = (channel: 'accountTrade' | 'accountOrderUpdate') => (data: unknown) => {
+    notePush(wants.current, channel, data);
+    // Right after the user's own action a push is its result: if the table
+    // lacks it, read at once (the look 5 s later sees whether that read brought it).
+    if (Date.now() - refreshAt.current < REFRESH_URGENT_MS && inFlight.current !== key && !holds(wants.current)) {
+      refreshAt.current = 0;
+      window.clearTimeout(refreshTimer.current);
+      refreshTimer.current = undefined;
+      first(false);
+    }
+    onStream();
+  };
+  useChannel(eng, address ? { channel: 'accountTrade', user: address } : null, onPush('accountTrade'));
+  useChannel(eng, address && kind === 'orders' ? { channel: 'accountOrderUpdate', user: address } : null, onPush('accountOrderUpdate'));
 
   const live = s.key === key ? s : { ...IDLE, loading: !!key };
   return { ...live, more, retry: () => first(false) };

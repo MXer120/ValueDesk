@@ -122,11 +122,103 @@ rows for the owner's wallet, nothing before 28 Sep, while the server's old cache
 holds 4,987 rows back to June); so all-time funding totals cover what the venue
 still serves, and the panel's coverage line says from when.
 
+**History reads by priority** (exchange/historyQueue.ts). Two reads a minute is
+enough for what is on screen - one history table at a time - as long as nothing
+else takes the slots first:
+
+- `visible` - a history table on screen, "load more", a read the user asked for:
+  takes any free slot.
+- `bulk` - many pages for one view (the copy simulator's walk through a SoDEX
+  leader's fills): any free slot too, but never while a table waits - so a walk
+  still running after its page was left cannot hold up the table opened next.
+- `background` - the account setup's index walk, anything from a hidden tab: only
+  an idle drip (checked and taken in one step, so never two at once), only after
+  a minute in which no tab wanted a visible read, and not in the first 20 s after
+  a page load. So background use is at most one read a minute, and a visible read
+  always finds a slot.
+- `walk` - the all-time statistics walk: the same conditions, after everything else.
+
+A table that leaves the screen (another tab of the band, another engine or wallet)
+gives up its place: a read of its that still waits for a slot is dropped, so the
+next slot goes to the table that is shown. A read that was already sent is never
+cancelled - its slot is spent - and the answer is kept for the table's next visit.
+A read that waits is not sent into a cooldown that opened meanwhile (it ends as
+rate-limited, like one started then). The drip's ledger counts 60.5 s: a slot is
+taken a few milliseconds before its request leaves, and what is sent must never be
+closer than the window.
+
+**History tables between visits** (exchange/historyTables.ts, accountActivity.ts,
+AccountHistory.tsx usePagedHistory). Orders, fills, funding and closed positions are
+kept in IndexedDB (`vs-account-history`: per network, wallet, engine and kind; the
+newest 500 rows of at most 64 tables), with when SoDEX was asked for them. A table
+opens at once with what it showed last time. Whether that copy needs a read:
+
+- None, when it was read less than 30 s ago AND nothing can have changed since: the
+  page has listened to the wallet's account stream without a break since before the
+  read was sent, and heard nothing (a fill changes trade, order and position
+  history; an order update changes order history). ws.ts keeps that per wallet,
+  engine and channel, from the subscriptions the page holds anyway (fill
+  notifications, the account band's live data). Not listening, a dropped connection
+  (the socket host reports a wallet connection that dropped as `gap`), a host that
+  was away: all count as unknown, and unknown means read. So flipping between tabs,
+  or a quick reload, with no trading in between costs nothing - and after a fill
+  the next look always reads.
+- Otherwise ONE read - for fills only those newer than the newest held
+  (`startTime`), for orders the newest page again (an order can close late) - never
+  answered from the gateway's 5 s cache. A trigger (a refresh after the user's own
+  action, a push on the stream) that arrives while a read still waits for its slot
+  is served by that read; one that arrives after it was sent gets one more read.
+- While a table is on screen, a push on the account stream is a reason to read only
+  if the table lacks what it reports (checked 5 s after the push): a fill it already
+  holds, an order that is still open (SoDEX's order history lists filled, canceled,
+  rejected and expired orders only) or a final state it already shows need none.
+  A push that cannot be read reads, as before.
+- After the user's own action (the app's refresh) the table on screen hears the
+  stream first, for half a second: a push it lacks - a fill, an order that reached
+  a final state - reads at once; a stream that reported nothing it lacks needs no
+  read; a stream that says nothing reads as before. So placing an order costs no
+  history read (it used to cost one at once and one 5 s later - both of the
+  minute's slots, and the fill that followed showed a minute late).
+
+Across a reload, the page that goes away leaves what it knew (localStorage) and the
+next one takes it over if it listens again within 8 s. Those seconds cannot be
+heard: a fill exactly then appears with the next stream event, or the next look
+after 30 s. The usual stale note (clock + age) appears when a catch-up has not
+landed after 3 s, when SoDEX refuses it, or at once for a copy older than 5 minutes.
+
+**What a user can still wait for.** History reads on screen go two at a time, one
+pair a minute: of reads wanted together, the third and fourth wait up to a minute,
+the fifth and sixth up to two (a read waits at most 125 s, then ends as
+rate-limited). A table that was open before on this browser shows its rows
+meanwhile, with the stale note after 3 s; only a table never opened before shows
+"Loading..." that long. Where more than two reads can be wanted within a minute:
+
+- Scan of a SoDEX wallet reads history only through its band - the same tables,
+  one read each (checked in the browser: nothing as the page opens). Only if the
+  profile read fails, the fallback card adds two small `/trades` reads.
+- A wallet that is trading: a fill the table on screen does not hold yet re-reads it
+  (at most every 5 s), so with more than two such fills a minute the table follows
+  at two reads a minute (stale note in between), and another history table opened
+  then waits for a slot.
+- A time filter that needs older rows than are loaded (30D, 90D): up to five more
+  pages by itself, one per slot.
+- The copy simulator on a SoDEX leader: one page per 1000 fills and engine, up to
+  five each - two pages a minute, and a table opened meanwhile goes before the
+  next page.
+- Order History and Trade History of both engines, none opened before: the one shown
+  reads first; all four take two minutes.
+- Portfolio's "14-day volume" button: one read, like a table.
+- After a background read (at most one a minute, never while a table waits): one
+  slot is left for that minute.
+
+The account setup's index walk and the all-time walk do not delay any of these:
+they read only when nothing on screen has wanted history for a minute.
+
 **All-time walk** (exchange/allTime.ts) is the lowest-priority traffic: one page
-per 6 s over every tab and wallet; a `/trades` page only while at most one of the
-nothing else read history in the last minute (the fill and order panels always
-find a slot), so fills walk at about one page a minute; never while the gateway budget
-is more than half spent; after a refused walk page, no tab walks for 30 min. One tab per wallet scope walks (Web Lock `vs-history:<scope>`);
+per 6 s over every tab and wallet; a `/trades` page only when a background history
+read may go (above), so fills walk at about one page a minute; never while the
+gateway budget is more than half spent; after a refused walk page, no tab walks
+for 30 min. One tab per wallet scope walks (Web Lock `vs-history:<scope>`);
 another tab waiting on it shows the walk as running and reads what was stored.
 
 **First paint.** Nothing waits in line before it leaves: the weight budget is kept
@@ -188,6 +280,10 @@ when it is shown.
 - **Status seen by the panels**: a connection being made for the first time or
   closed because nothing needs it reads as "live", as the server's always-up upstream
   did; only a dropped connection that is retrying shows as delayed.
+- **A wallet connection that drops** is not an outage of the engine (nothing is
+  shown), but pushes may be missing: the host tells the tabs listening on it
+  (message type: `gap`) when it drops and when it is back, and a kept history
+  table then counts as not current (section 2, exchange/accountActivity.ts).
 
 ---
 

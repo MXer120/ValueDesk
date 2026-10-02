@@ -121,3 +121,13 @@ test('ledger: a non-atomic budget never waits for the lock, and still counts eve
   assert.equal(a.spent(), 8, 'both tabs are counted');
   assert.equal(await b.tryTake(4), 60_000, 'and the budget still holds');
 });
+
+test('ledger: tryTakeIdle records only on an empty window', async () => {
+  const d = fakeDeps();
+  const l = new SharedLedger('drip', 2, 60_000, d);
+  assert.equal(await l.tryTakeIdle(1), 0);
+  assert.equal(await l.tryTakeIdle(1), 60_000, 'one entry in the window: not idle, although a slot is free');
+  assert.equal(await l.tryTake(1), 0, 'a normal take still gets the free slot');
+  d.clock.t += 60_000;
+  assert.equal(await l.tryTakeIdle(1), 0, 'idle again once the window is clear');
+});

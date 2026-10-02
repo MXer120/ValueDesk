@@ -58,3 +58,28 @@ test('gate: a bulk read can stay out of the last-good copies', async () => {
   assert.equal(await g.run('page', 0, async () => 'rows', false), 'rows');
   assert.equal(g.lastGood('page'), null, 'a history walk page is not kept around');
 });
+
+test('gate: lanes separate only the request in flight - the answer and the last good copy are the key\'s', async () => {
+  let now = 0;
+  const g = new RequestGate(100, () => now);
+  let calls = 0;
+  const release: Array<(v: string) => void> = [];
+  const load = () => {
+    calls++;
+    return new Promise<string>((r) => release.push(r));
+  };
+  const a = g.run('k', 5_000, load, true, 'visible');
+  const a2 = g.run('k', 5_000, load, true, 'visible');
+  const b = g.run('k', 5_000, load, true, 'background');
+  assert.equal(calls, 2, 'the same lane shares the request; another lane does not wait on it');
+  release[0]!('first');
+  assert.deepEqual(await Promise.all([a, a2]), ['first', 'first']);
+  // Whoever read it, the answer is the key's: fresh for every lane, and its last good copy.
+  assert.equal(await g.run('k', 5_000, load, true, 'walk'), 'first');
+  assert.equal(calls, 2);
+  assert.deepEqual(g.lastGood('k'), { at: 0, value: 'first' });
+  now = 1_000;
+  release[1]!('second');
+  assert.equal(await b, 'second');
+  assert.deepEqual(g.lastGood('k'), { at: 1_000, value: 'second' });
+});

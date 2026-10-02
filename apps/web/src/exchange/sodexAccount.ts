@@ -12,8 +12,10 @@
  */
 import { unwrapList } from '@sign/sodex/restCore.js';
 import type { Engine } from '../api';
+import { isAbort } from './errors';
 import { MarketRequestError } from './sodexMarket';
-import { gateway, gwGet } from './sodexGateway';
+import { gateway, gwGet, type GwGetOptions } from './sodexGateway';
+import type { HistoryPriority } from './historyQueue';
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/;
 
@@ -35,6 +37,14 @@ export interface HistoryFilter {
   symbol?: string;
   startTime?: number;
   endTime?: number | null;
+  /** Who the read is for (historyQueue.ts); default 'visible'. */
+  priority?: HistoryPriority;
+  /** Aborts when the reader no longer wants the page: a read still waiting for its slot is dropped. */
+  signal?: AbortSignal;
+  /** Called when the request leaves for SoDEX (after any wait for its slot). */
+  onSent?: () => void;
+  /** true: never an answer kept from a moment ago (a table catching up because something changed). */
+  fresh?: boolean;
 }
 
 /** The documented history filter, and the page size it asks for. */
@@ -49,10 +59,17 @@ export function historyQuery(q: HistoryFilter): { qs: string; limit: number } {
 }
 
 /** A history page, or the last good copy of exactly this page (with when it was read). */
-async function historyPage(path: string): Promise<{ data: unknown; staleAt: number | null }> {
+async function historyPage(path: string, q: Pick<HistoryFilter, 'priority' | 'signal' | 'onSent' | 'fresh'> = {}): Promise<{ data: unknown; staleAt: number | null }> {
   try {
-    return { data: await gwGet<unknown>(path), staleAt: null };
+    const o: GwGetOptions = {};
+    if (q.priority) o.priority = q.priority;
+    if (q.signal) o.signal = q.signal;
+    if (q.onSent) o.onSent = q.onSent;
+    if (q.fresh) o.ttlMs = 0;
+    return { data: await gwGet<unknown>(path, o), staleAt: null };
   } catch (e) {
+    // The reader left before the read was sent: not a failure, and no reason to answer with an old copy.
+    if (isAbort(e)) throw e;
     const kept = gateway.lastGood<unknown>(path);
     if (kept) return { data: kept.value, staleAt: kept.at };
     throw e;
@@ -93,14 +110,14 @@ export const account = {
   async orderHistory(e: Engine, addressIn: string, q: HistoryFilter = {}) {
     const address = requireAddress(addressIn);
     const { qs } = historyQuery(q);
-    const { data, staleAt } = await historyPage(`${ep(e)}/accounts/${address}/orders/history?${qs}`);
+    const { data, staleAt } = await historyPage(`${ep(e)}/accounts/${address}/orders/history?${qs}`, q);
     return { engine: e, orders: unwrapList<any>(data, 'orders'), staleAt };
   },
 
   async trades(e: Engine, addressIn: string, q: HistoryFilter = {}) {
     const address = requireAddress(addressIn);
     const { qs } = historyQuery(q);
-    const { data, staleAt } = await historyPage(`${ep(e)}/accounts/${address}/trades?${qs}`);
+    const { data, staleAt } = await historyPage(`${ep(e)}/accounts/${address}/trades?${qs}`, q);
     return { engine: e, trades: unwrapList<any>(data, 'trades'), staleAt };
   },
 
@@ -108,7 +125,7 @@ export const account = {
   async fundingHistory(addressIn: string, q: HistoryFilter = {}) {
     const address = requireAddress(addressIn);
     const { qs } = historyQuery(q);
-    const { data, staleAt } = await historyPage(`${ep('perps')}/accounts/${address}/fundings?${qs}`);
+    const { data, staleAt } = await historyPage(`${ep('perps')}/accounts/${address}/fundings?${qs}`, q);
     return { funding: unwrapList<any>(data, 'fundings'), staleAt };
   },
 
@@ -116,7 +133,7 @@ export const account = {
   async positionHistory(addressIn: string, q: HistoryFilter = {}) {
     const address = requireAddress(addressIn);
     const { qs } = historyQuery(q);
-    const { data, staleAt } = await historyPage(`${ep('perps')}/accounts/${address}/positions/history?${qs}`);
+    const { data, staleAt } = await historyPage(`${ep('perps')}/accounts/${address}/positions/history?${qs}`, q);
     return { positions: unwrapList<any>(data, 'positions'), staleAt };
   },
 

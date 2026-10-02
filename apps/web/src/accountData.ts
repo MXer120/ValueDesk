@@ -38,6 +38,7 @@
  */
 import { tradingConfig } from './trading/config';
 import { account } from './exchange/sodexAccount';
+import type { HistoryPriority } from './exchange/historyQueue';
 
 export type HistoryEngine = 'spot' | 'perps';
 
@@ -138,7 +139,14 @@ export const HISTORY: Record<HistoryKind, HistorySpec> = {
   },
   trades: {
     path: (e, a) => `/api/v1/${e}/accounts/${a}/trades`,
-    idOf: (r) => String(r?.tradeID ?? `${r?.orderID}:${r?.time}:${r?.quantity}`),
+    // NOT `tradeID` alone: it is unique per market, not per account (measured -
+    // server historyRows.ts found 1000 fills on one page under 989 tradeIDs), so
+    // two fills on two markets can share one, and one of them would vanish from
+    // the table. With the order too: both sides of a trade against oneself are two rows.
+    idOf: (r) =>
+      r?.tradeID !== undefined && r?.tradeID !== null
+        ? `${r?.symbol}:${r.tradeID}:${r?.orderID}`
+        : `${r?.orderID}:${r?.time}:${r?.quantity}`,
     timeOf: (r) => n(r?.time),
     perpsOnly: false,
   },
@@ -635,6 +643,16 @@ export async function fetchHistoryPage(
   address: string,
   endTime: number | null,
   limit = HISTORY_PAGE,
+  /**
+   * `priority`: who the read is for - 'visible' for a table on screen; the
+   * default 'background' waits behind every visible read (exchange/historyQueue.ts).
+   * `since`: only rows at or after this time (a table catching up).
+   * `signal`: aborts when the reader leaves - a read still waiting for its
+   * slot is dropped; one already sent completes.
+   * `onSent`: called when the request leaves for SoDEX. `fresh`: never an
+   * answer kept from a moment ago.
+   */
+  opts: { priority?: HistoryPriority; since?: number; signal?: AbortSignal; onSent?: () => void; fresh?: boolean } = {},
 ): Promise<HistoryPage<any>> {
   const spec = HISTORY[kind];
   // Straight from the gateway, in this browser - through the exchange layer,
@@ -644,8 +662,9 @@ export async function fetchHistoryPage(
   // a page when SoDEX refuses, and - the part that matters - the drip that keeps
   // /trades and /orders/history under Cloudflare's 1015 threshold
   // (exchange/sodexGateway.ts). A busy history page can no longer get the IP
-  // rate-limited: past four such reads in 30 s the next one waits its turn.
-  const q = { limit, endTime };
+  // rate-limited: past two such reads in a minute the next one waits its turn,
+  // the table on screen first (exchange/historyQueue.ts).
+  const q = { limit, endTime, startTime: opts.since, priority: opts.priority ?? 'background', signal: opts.signal, onSent: opts.onSent, fresh: opts.fresh };
   const r =
     kind === 'orders' ? await account.orderHistory(engine, address, q).then((x) => ({ rows: x.orders as unknown, staleAt: x.staleAt }))
     : kind === 'trades' ? await account.trades(engine, address, q).then((x) => ({ rows: x.trades as unknown, staleAt: x.staleAt }))

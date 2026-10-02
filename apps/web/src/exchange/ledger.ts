@@ -159,6 +159,25 @@ export class SharedLedger {
   }
 
   /**
+   * Record `w` units only if NOTHING is in the window - one step, so of several
+   * callers (other tabs included) exactly one gets an idle budget. Returns 0
+   * when recorded, else the ms until the window is clear.
+   */
+  tryTakeIdle(w: number): Promise<number> {
+    return this.locked(() => {
+      const now = this.deps.now();
+      const list = this.read(now);
+      if (list.length === 0) {
+        this.write([[now, w]]);
+        return 0;
+      }
+      let newest = 0;
+      for (const [at] of list) newest = Math.max(newest, at);
+      return Math.max(1, newest + this.windowMs - now);
+    });
+  }
+
+  /**
    * Wait until `w` units fit, then record them. Rejects with BudgetWaitError
    * once more than `maxWaitMs` would pass, or when `signal` aborts.
    */

@@ -9,9 +9,10 @@
  *
  * The walk is the lowest-priority traffic there is, as it was on the server:
  *  - one walk page per WALK_GAP_MS, over every tab and every wallet;
- *  - a `/trades` page only while nothing else has read history in the last
- *    minute, so the fill and order panels always find a slot of the two per
- *    minute (the HARD rule: that endpoint answers a burst with Cloudflare 1015);
+ *  - a `/trades` page only as the lowest-priority history read there is
+ *    (exchange/historyQueue.ts): nothing else read history in the last minute,
+ *    no table asked for any, and the page is past its first seconds - so the
+ *    fill and order panels always find a slot of the two per minute;
  *  - never while the per-IP weight budget is more than half spent;
  *  - after SoDEX rate-limits a walk page, no tab walks for WALK_PAUSE_MS.
  *
@@ -49,8 +50,6 @@ const log = logger('history');
 export const WALK_GAP_MS = 6_000;
 /** After SoDEX rate-limits a walk page, every tab's walks stay off this long. */
 export const WALK_PAUSE_MS = 30 * 60_000;
-/** A walk page for a drip path goes only while at most this many drip slots are taken (of 2 per minute). */
-export const WALK_DRIP_MAX_SPENT = 0;
 /** How long a completed sync counts as fresh (the server's RESYNC_AFTER_MS). */
 const RESYNC_AFTER_MS = 5 * 60_000;
 /** A tab waiting for another tab's walk re-reads what it stored at most this often. */
@@ -136,7 +135,9 @@ export function createAllTime(d: AllTimeDeps): AllTime {
         pauseWalks(Math.min(WALK_PAUSE_MS, cool * 4));
         throw new Error('SoDEX is rate limiting this connection - the walk resumes later.');
       }
-      const busy = gateway.budget.spent() > GATEWAY_WEIGHT_PER_MIN / 2 || (drip !== null && drip.spent() > WALK_DRIP_MAX_SPENT);
+      // A `/trades` page only when a background history read may go (historyQueue.ts):
+      // the walk spends its turn when the page can actually be sent, not before.
+      const busy = gateway.budget.spent() > GATEWAY_WEIGHT_PER_MIN / 2 || (drip !== null && !gateway.historyQueue.backgroundMayGo());
       if (!busy) {
         const wait = await walkGap.tryTake(1);
         if (wait === 0) return;
@@ -154,7 +155,7 @@ export function createAllTime(d: AllTimeDeps): AllTime {
       await walkTurn(path);
       try {
         // Not kept as a last-good copy: a long walk would otherwise hold every page it read.
-        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false });
+        const data = await gateway.get<unknown>(path, { ttlMs: 0, keepLastGood: false, priority: 'walk' });
         return unwrapList<Record<string, unknown>>(data, listKey).map((r) => ({ ...normalise(r), raw: '' }));
       } catch (e) {
         if (e instanceof RateLimitedError || isRateLimitError(e)) pauseWalks(WALK_PAUSE_MS);

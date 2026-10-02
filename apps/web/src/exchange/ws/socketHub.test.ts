@@ -302,3 +302,35 @@ test('the last tab to say bye closes every connection at once; the next tab star
   c.sub({ channel: 'l2Book', symbol: 'BTC-USD' });
   assert.equal(live().length, 1, 'a new tab gets a new connection');
 });
+
+test('a wallet connection that drops tells the tabs listening on it - when it drops, and when it is back', () => {
+  const hub = newHub();
+  const a = tab(hub, 'tab-a');
+  const b = tab(hub, 'tab-b');
+  a.sub({ channel: 'accountTrade', user: OWN });
+  a.sub({ channel: 'accountOrderUpdate', user: OWN });
+  b.sub({ channel: 'accountTrade', user: SCANNED });
+  for (const s of FakeSocket.all) s.open();
+  const gaps = (t: { got: ToTab[] }) => t.got.filter((m) => m.type === 'gap');
+  assert.equal(gaps(a).length + gaps(b).length, 0, 'a first connection is not a gap');
+
+  const before = FakeSocket.all.length;
+  walletSocket(OWN).drop();
+  assert.deepEqual(gaps(a), [{ type: 'gap', engine: 'perps', user: OWN }], 'once per tab, whatever it subscribed to');
+  mock.timers.tick(10_000);
+  const again = FakeSocket.all[before]!;
+  assert.ok(again, 'reconnected');
+  again.open();
+  assert.equal(gaps(a).length, 2, 'back: what was pushed in between is unknown');
+  assert.equal(gaps(b).length, 0, 'the other wallet\'s tab hears nothing of it');
+  assert.equal(a.got.filter((m) => m.type === 'status' && m.status === 'reconnecting').length, 0, 'and it is not an outage of the engine');
+});
+
+test('"account stream unavailable" names the wallet it is for', () => {
+  const hub = newHub();
+  const a = tab(hub, 'a');
+  for (let i = 0; i < ACCOUNT_CONN_CAP; i++) a.sub({ channel: 'accountTrade', user: `0x${String(i + 1).padStart(40, '0')}` });
+  a.sub({ channel: 'accountTrade', user: SCANNED });
+  const refused = a.errors().find((e) => /account stream unavailable/.test(e.message));
+  assert.equal(refused?.user, SCANNED);
+});

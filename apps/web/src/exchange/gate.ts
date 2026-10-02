@@ -29,13 +29,18 @@ export class RequestGate {
    * request for it, else a new `load()` (shared with anyone asking meanwhile).
    * `ttlMs` 0 still dedupes concurrent calls. `keep: false` leaves the answer
    * out of `lastGood` (a bulk read nobody will fall back to, like a history walk page).
+   *
+   * `lane` separates callers that must not wait on each other's request (a
+   * read with another place in a queue): only the request in flight is per
+   * lane. The answer and the last good copy are the key's, whoever read it.
    */
-  run<T>(key: string, ttlMs: number, load: () => Promise<T>, keep = true): Promise<T> {
+  run<T>(key: string, ttlMs: number, load: () => Promise<T>, keep = true, lane = ''): Promise<T> {
     if (ttlMs > 0) {
       const hit = this.fresh.get(key);
       if (hit && this.now() - hit.at < ttlMs) return Promise.resolve(hit.value as T);
     }
-    const running = this.inflight.get(key);
+    const flight = lane ? `${key} #${lane}` : key;
+    const running = this.inflight.get(flight);
     if (running) return running as Promise<T>;
     const p = load()
       .then((value) => {
@@ -44,8 +49,8 @@ export class RequestGate {
         if (keep) this.remember(this.good, key, hit);
         return value;
       })
-      .finally(() => this.inflight.delete(key));
-    this.inflight.set(key, p);
+      .finally(() => this.inflight.delete(flight));
+    this.inflight.set(flight, p);
     return p;
   }
 

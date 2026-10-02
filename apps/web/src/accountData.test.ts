@@ -282,3 +282,21 @@ test('margin usage has no ratio without account value, and can exceed 100%', () 
   assert.equal(marginUsage({ av: 'x' }), null);
   assert.equal(marginUsage({ av: '100', am: '-20', cm: '120' })!.ratio, 1.2);
 });
+
+test('fills: one trade id on two markets is two rows (the id is per market), the inclusive overlap row still one', () => {
+  const spec = HISTORY.trades;
+  // As the gateway answers: QNT and XPL each have a trade 122066.
+  const page = [
+    { symbol: 'QNT-USD', tradeID: 122066, orderID: 26740480687, side: 'SELL', price: '237.69', quantity: '0.17', time: 1790965125744 },
+    { symbol: 'XPL-USD', tradeID: 122066, orderID: 26740466573, side: 'SELL', price: '0.0947', quantity: '11', time: 1790965125814 },
+    // Both sides of a trade against oneself: one trade, two orders.
+    { symbol: 'XPL-USD', tradeID: 122067, orderID: 1, side: 'BUY', price: '0.0947', quantity: '5', time: 1790965125900 },
+    { symbol: 'XPL-USD', tradeID: 122067, orderID: 2, side: 'SELL', price: '0.0947', quantity: '5', time: 1790965125900 },
+  ];
+  assert.equal(mergeRows([], page, spec.idOf, spec.timeOf).length, 4, 'no fill is dropped');
+  // The next page starts with the row at the boundary again: merged away, nothing else.
+  const next = [page[0]!, { symbol: 'QNT-USD', tradeID: 122065, orderID: 26740478488, side: 'SELL', price: '237.72', quantity: '0.09', time: 1790965124889 }];
+  assert.equal(countNew(page, next, spec.idOf), 1);
+  assert.equal(mergeRows(page, next, spec.idOf, spec.timeOf).length, 5);
+  assert.equal(spec.idOf({ orderID: 7, time: 9, quantity: '1' }), '7:9:1', 'without a trade id: order, time and size');
+});
