@@ -20,15 +20,32 @@
  * account data must never land in a disk or shared cache. The index is
  * different - public, the same for everyone, and rebuilt on a clock:
  *   - boards, cohorts, the screener and Explore are rebuilt about once a
- *     minute (docs/INDEXER.md), so a response may be reused for 10 s and
- *     served stale for 20 s more while it revalidates - never older than one
- *     rebuild cycle, never a different answer than a fresh read in that window;
+ *     minute (docs/INDEXER.md), so a response may be reused for 10 s, and
+ *     handed out for 20 s more while the cache fetches the next one
+ *     (`stale-while-revalidate`): a page reopened within that half minute has
+ *     its rows at once instead of waiting for a round trip. What that costs:
+ *     a client that polls INSIDE the window (the leaderboard asks every 15 s)
+ *     is handed the copy its last poll left behind - one poll late for as long
+ *     as it runs. The web's polls therefore revalidate
+ *     (apps/web/src/serverFetch.ts `revalidating`); a CDN in front may still
+ *     answer a lone visitor's poll with a copy up to 30 s old, which is what
+ *     this policy allows;
  *   - the price chart is Hyperliquid candles the server itself caches for 60 s;
  *   - the whale tape and positioning move with the trade streams: they are
  *     revalidated on every use (`no-cache`), and only ever answered 304 when
  *     truly unchanged.
  * Each carries a weak ETag (weak: the same JSON is sent in three encodings), so
  * a revalidation that finds nothing new costs a 304 and no body.
+ * A FAILURE IS NEVER CACHED, whatever its status: the index routes answer a
+ * venue that is down as HTTP 200 {ok:false,...} (routes/valuescan.ts `fail`),
+ * and that answer keeps `no-store` like any other error - or a cache would go
+ * on serving "unavailable" after the venue is back.
+ *
+ * TRIMS, INDEX ROUTES ONLY. No username is shown anywhere (valuescan/labels.ts),
+ * so every trader row leaves its route with `label: null`, and no client reads
+ * it. That member is dropped here, on the way out and before the ETag, rather
+ * than in each of the dozen places a row is built: the routes keep answering
+ * their own shape, and a row that DOES carry a name is sent unchanged.
  */
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -50,7 +67,7 @@ const BOARD: CachePolicy = { cacheControl: 'public, max-age=10, stale-while-reva
 const PRICE: CachePolicy = { cacheControl: 'public, max-age=30, stale-while-revalidate=30' };
 const LIVE: CachePolicy = { cacheControl: 'public, no-cache' };
 
-/** Route PATTERN (req.routeOptions.url) -> policy. Only GET/HEAD 200s are affected. */
+/** Route PATTERN (req.routeOptions.url) -> policy. Only GET/HEAD 200s that are not {ok:false} are affected. */
 export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/leaderboard': BOARD,
   '/api/vs/explore': BOARD,
@@ -60,6 +77,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/cohorts/focus': BOARD,
   '/api/vs/cohorts/wallets': BOARD,
   '/api/vs/screener': BOARD,
+  // One Hyperliquid leaderboard row: it moves when the leaderboard file does.
+  '/api/vs/lbrow': BOARD,
   '/api/vs/price': PRICE,
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
@@ -104,6 +123,25 @@ export function etagMatches(header: string | string[] | undefined, etag: string)
   const opaque = (t: string) => t.trim().replace(/^W\//, '');
   const want = opaque(etag);
   return raw.split(',').some((t) => opaque(t) === want);
+}
+
+/**
+ * Compact JSON (what JSON.stringify writes) without its `"label":null`
+ * members. Exact, not a guess at the grammar: outside a string, the text
+ * `"label":null` can only be an object member named `label` whose value is
+ * null. Inside a string both quotes would be escaped, and a longer key ending
+ * in `\"label` has a backslash before that quote, which the pattern refuses.
+ * The member takes one comma with it: the one before, else the one after.
+ */
+export function omitNullLabels(json: string): string {
+  if (!json.includes('"label":null')) return json;
+  return json.replace(/,"label":null|(?<!\\)"label":null,?/g, '');
+}
+
+/** The routes' own failure answer, sent with status 200: `{"ok":false,...}`. */
+const FAILED = '{"ok":false';
+export function isFailure(payload: string | Buffer): boolean {
+  return typeof payload === 'string' ? payload.startsWith(FAILED) : payload.subarray(0, FAILED.length).toString('latin1') === FAILED;
 }
 
 /** A weak ETag over the exact response body. */
@@ -186,8 +224,10 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
     const type = String(reply.getHeader('Content-Type') ?? '');
     if (!/\bjson\b/i.test(type)) return payload;
 
-    const policy = isGet && status === 200 ? policies[req.routeOptions.url ?? ''] : undefined;
-    let body = typeof payload === 'string' ? Buffer.from(payload, 'utf8') : payload;
+    const policy = isGet && status === 200 && !isFailure(payload) ? policies[req.routeOptions.url ?? ''] : undefined;
+    // What is sent when nothing below replaces it: an index answer, trimmed.
+    const plain: string | Buffer = policy && typeof payload === 'string' ? omitNullLabels(payload) : payload;
+    let body = typeof plain === 'string' ? Buffer.from(plain, 'utf8') : plain;
     let etag: string | undefined;
 
     if (policy) {
@@ -203,12 +243,12 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
       }
     }
 
-    if (req.method === 'HEAD' || status === 204 || status === 304) return payload;
-    if (body.length < minBytes || reply.hasHeader('Content-Encoding')) return payload;
-    if (/\bno-transform\b/i.test(String(reply.getHeader('Cache-Control') ?? ''))) return payload;
+    if (req.method === 'HEAD' || status === 204 || status === 304) return plain;
+    if (body.length < minBytes || reply.hasHeader('Content-Encoding')) return plain;
+    if (/\bno-transform\b/i.test(String(reply.getHeader('Cache-Control') ?? ''))) return plain;
     appendVary(reply, 'Accept-Encoding');
     const enc = pickEncoding(req.headers['accept-encoding']);
-    if (!enc) return payload;
+    if (!enc) return plain;
 
     const key = etag ? `${enc}:${etag}` : undefined;
     let out = key ? cache.get(key) : undefined;
@@ -217,9 +257,9 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
         out = await compress(body, enc);
       } catch (err) {
         req.log.warn({ err: (err as Error).message }, 'response compression failed; sent uncompressed');
-        return payload;
+        return plain;
       }
-      if (out.length >= body.length) return payload;
+      if (out.length >= body.length) return plain;
       if (key) cache.set(key, out);
     }
     body = out;

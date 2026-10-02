@@ -175,6 +175,12 @@ export function assemble(
   return { rows, enrichedCount };
 }
 
+/** A row as it is sent: without `enrichedAt`, which no client reads. */
+export function wireRow(r: ScreenerRow): ScreenerRow {
+  const { enrichedAt: _enrichedAt, ...row } = r;
+  return row;
+}
+
 export async function buildScreener(
   providers: readonly VenueProvider[],
   query: Record<string, string | undefined>,
@@ -223,7 +229,7 @@ export async function buildScreener(
   );
   const page = screen(rows, q, now);
   const body: ScreenerResponse = {
-    rows: page.rows,
+    rows: page.rows.map(wireRow),
     total: page.total,
     poolSize: rows.length,
     dormant: q.dormant ? 0 : rows.filter(isDormant).length,

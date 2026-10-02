@@ -129,8 +129,12 @@ export interface ScreenerRow extends TraderRow {
   activeWithin: ActiveBucket | null;
   /** The same address also appears in this pool on these other venues. */
   alsoOn: Venue[];
-  /** When the background enricher last read this trader, null = not yet. */
-  enrichedAt: number | null;
+  /**
+   * When the background enricher last read this trader, null = not yet. On the
+   * server's own rows only: no client reads it, so it is not sent
+   * (screener.ts `wireRow`).
+   */
+  enrichedAt?: number | null;
 }
 
 /* ---------------------------------------------------------------------------

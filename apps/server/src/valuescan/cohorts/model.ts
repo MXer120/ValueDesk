@@ -303,10 +303,17 @@ export function netWallet(address: string, per: ReadonlyMap<Venue, WalletVenue>,
   return { address, label, venues, pnl, pnlRange: range, equity, covered, weight, holdings: [...by.values()] };
 }
 
-/** Every address in a set of venues, netted. */
-export function scopeWallets(scope: readonly Venue[], per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>, mark: MarkOf): NettedWallet[] {
+/**
+ * scopeWallets in steps: yields after every `every` wallets (and once the
+ * addresses are gathered), so a caller netting a quarter of a million of them
+ * can let other work run in between. The wallets come out in the same order.
+ */
+export function* scopeWalletSteps(
+  scope: readonly Venue[], per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>, mark: MarkOf, every = 1_000,
+): Generator<void, NettedWallet[]> {
   const addresses = new Set<string>();
   for (const v of scope) for (const a of per.get(v)?.keys() ?? []) addresses.add(a);
+  yield;
   const out: NettedWallet[] = [];
   for (const address of addresses) {
     const mine = new Map<Venue, WalletVenue>();
@@ -315,8 +322,18 @@ export function scopeWallets(scope: readonly Venue[], per: ReadonlyMap<Venue, Re
       if (w) mine.set(v, w);
     }
     out.push(netWallet(address, mine, mark));
+    if (out.length % every === 0) yield;
   }
   return out;
+}
+
+/** Every address in a set of venues, netted. */
+export function scopeWallets(scope: readonly Venue[], per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>, mark: MarkOf): NettedWallet[] {
+  const steps = scopeWalletSteps(scope, per, mark);
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
 }
 
 /** 0..1 from an address: a fixed, uniform sample (the same wallets stay in it). */
@@ -590,8 +607,6 @@ export interface VenueCoverage {
   members: number;
   /** Of those, wallets whose positions are known. */
   covered: number;
-  /** Share of small wallets read, when the tail is sampled (1 = all). */
-  tailRate: number;
 }
 
 /** A cohort card: today's figures and its lean over the last days as [t, long share]. */

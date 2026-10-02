@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import Fastify from 'fastify';
 
-import { CompressedCache, etagMatches, perfPlugin, pickEncoding, weakEtag, CACHE_POLICIES } from '../src/perf.js';
+import { CompressedCache, etagMatches, isFailure, omitNullLabels, perfPlugin, pickEncoding, weakEtag, CACHE_POLICIES } from '../src/perf.js';
 
 /** A payload well above the compression threshold, shaped like an index page. */
 const BIG = { ok: true, rows: Array.from({ length: 200 }, (_, i) => ({ rank: i + 1, address: `0x${String(i).padStart(40, '0')}`, pnl: { '30d': i * 1234.5 } })) };
@@ -131,6 +131,104 @@ test('index bodies are compressed once per content and encoding', async () => {
   const b = await app.inject({ method: 'GET', url: '/api/vs/leaderboard', headers: { 'accept-encoding': 'br' } });
   assert.ok(a.rawPayload.equals(b.rawPayload));
   assert.equal(brotliDecompressSync(b.rawPayload).toString('utf8'), JSON.stringify(BIG));
+  await app.close();
+});
+
+test('omitNullLabels: only members named label with the value null, with one comma', () => {
+  const same = (v: unknown) => assert.equal(omitNullLabels(JSON.stringify(v)), JSON.stringify(v));
+  const to = (v: unknown, want: unknown) => {
+    const out = omitNullLabels(JSON.stringify(v));
+    assert.equal(out, JSON.stringify(want));
+    JSON.parse(out);
+  };
+  to({ label: null }, {});
+  to({ label: null, a: 1 }, { a: 1 });
+  to({ a: 1, label: null }, { a: 1 });
+  to({ a: 1, label: null, b: 2 }, { a: 1, b: 2 });
+  to({ rows: [{ address: '0x1', label: null, pnl: {} }, { label: null }, { x: null, label: null }] }, { rows: [{ address: '0x1', pnl: {} }, {}, { x: null }] });
+  to({ row: { venue: 'hyperliquid', address: '0x1', label: null, accountValue: 1 } }, { row: { venue: 'hyperliquid', address: '0x1', accountValue: 1 } });
+  // A name is data: it stays. So do other nulls and other keys.
+  same({ label: 'Majors' });
+  same({ label: 0, xlabel: null, labels: null, Label: null });
+  same({ a: ['label', null], b: 'label' });
+  // The text inside a string, in a value and in a key, is never touched.
+  same({ note: '"label":null', other: ',"label":null,' });
+  same({ 'a"label': null, 'a,"label': null, '\\"label': null });
+  to({ 'a"label': null, label: null }, { 'a"label': null });
+  same({ note: 'ends with a backslash\\', label: 'x' });
+  to({ note: 'ends with a backslash\\', label: null }, { note: 'ends with a backslash\\' });
+  // Not compact JSON: left alone rather than guessed at.
+  assert.equal(omitNullLabels('{ "label": null }'), '{ "label": null }');
+});
+
+test('index answers go out without label: null, hashed and compressed as sent; other routes keep it', async () => {
+  const rows = Array.from({ length: 120 }, (_, i) => ({ venue: 'sodex', address: `0x${String(i).padStart(40, '0')}`, label: null, pnl: { '30d': i } }));
+  const app = Fastify();
+  await app.register(perfPlugin);
+  app.get('/api/vs/leaderboard', async () => ({ ok: true, rows }));
+  app.get('/api/vs/lbrow', async () => ({ ok: true, row: { ...rows[0], rank: 1 } }));
+  app.get('/api/vs/trader', async () => ({ ok: true, rows }));
+  await app.ready();
+
+  const want = JSON.stringify({ ok: true, rows: rows.map(({ label: _label, ...r }) => r) });
+  const plain = await app.inject({ method: 'GET', url: '/api/vs/leaderboard' });
+  assert.equal(plain.body, want);
+  assert.equal(Number(plain.headers['content-length']), Buffer.byteLength(want));
+  assert.equal(plain.headers.etag, weakEtag(Buffer.from(want)), 'the ETag is over what is sent');
+
+  const br = await app.inject({ method: 'GET', url: '/api/vs/leaderboard', headers: { 'accept-encoding': 'br' } });
+  assert.equal(brotliDecompressSync(br.rawPayload).toString('utf8'), want);
+  assert.equal(br.headers.etag, plain.headers.etag);
+  const head = await app.inject({ method: 'HEAD', url: '/api/vs/leaderboard' });
+  assert.equal(head.headers.etag, plain.headers.etag);
+
+  const lbrow = await app.inject({ method: 'GET', url: '/api/vs/lbrow?venue=hyperliquid&address=0x1' });
+  assert.equal('label' in lbrow.json().row, false);
+  assert.equal(lbrow.json().row.rank, 1);
+  assert.equal(lbrow.headers['cache-control'], 'public, max-age=10, stale-while-revalidate=20');
+  assert.ok(lbrow.headers.etag);
+
+  // Not an index route: its answer is its own business.
+  const trader = await app.inject({ method: 'GET', url: '/api/vs/trader' });
+  assert.equal(trader.json().rows[0].label, null);
+  await app.close();
+});
+
+test('boards may be reused for ten seconds, and for twenty more while a cache fetches the next copy', () => {
+  for (const route of ['/api/vs/leaderboard', '/api/vs/explore', '/api/vs/cohorts', '/api/vs/cohorts/detail', '/api/vs/cohorts/map', '/api/vs/cohorts/focus', '/api/vs/cohorts/wallets', '/api/vs/screener', '/api/vs/lbrow']) {
+    assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, max-age=10, stale-while-revalidate=20', route);
+  }
+  for (const route of ['/api/vs/whales', '/api/vs/positioning']) assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, no-cache', route);
+});
+
+test('a failure answered as 200 {ok:false} on an index route is not cacheable and gets no ETag', async () => {
+  const app = Fastify();
+  await app.register(perfPlugin);
+  let down = true;
+  app.get('/api/vs/explore', async (_req, reply) => (down
+    ? reply.code(200).send({ ok: false, code: 'upstream', error: 'explore: sodex leaderboard timed out', label: null, pad: 'x'.repeat(2000) })
+    : { ok: true, segments: [] }));
+  app.addHook('onSend', async (_req, reply, payload) => {
+    if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
+    return payload;
+  });
+  await app.ready();
+
+  const failed = await app.inject({ method: 'GET', url: '/api/vs/explore', headers: { 'accept-encoding': 'br' } });
+  assert.equal(failed.statusCode, 200);
+  assert.equal(failed.headers['cache-control'], 'no-store');
+  assert.equal(failed.headers.etag, undefined);
+  assert.equal(failed.headers['content-encoding'], 'br', 'still compressed');
+  const body = JSON.parse(brotliDecompressSync(failed.rawPayload).toString('utf8'));
+  assert.equal(body.ok, false);
+  assert.equal(body.label, null, 'and sent as the route wrote it');
+
+  down = false;
+  const ok = await app.inject({ method: 'GET', url: '/api/vs/explore' });
+  assert.equal(ok.headers['cache-control'], 'public, max-age=10, stale-while-revalidate=20');
+  assert.ok(ok.headers.etag);
+  assert.equal(isFailure('{"ok":true,"rows":[]}'), false);
+  assert.equal(isFailure(Buffer.from('{"ok":false,"error":"x"}')), true);
   await app.close();
 });
 

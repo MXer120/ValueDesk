@@ -39,6 +39,11 @@
  * merged and sorted by the segment's own score. The page can then filter to one
  * venue and still show a full list, and the top rows of the unfiltered list are
  * exactly the global top (the union of per-venue tops contains it).
+ *
+ * WHAT A ROW CARRIES. The segments are cut from full leaderboard rows, but a
+ * row is SENT as what the page shows of it (`wireRow`): trader, account value,
+ * and the windows of the six tables. Everything else a pool row has - the
+ * sparkline alone was a third of the answer - stays here.
  */
 import {
   NotAvailable,
@@ -298,6 +303,49 @@ export function buildSegments(rows: readonly TraderRow[], perVenue = SEGMENT_ROW
 }
 
 /* ---------------------------------------------------------------------------
+ * What a row carries to the page.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * The windows the Explore tables show (apps/web/src/components/explore/model.ts
+ * SEGMENT_COLUMNS): PnL over 30D, 7D and all time, ROI over 30D, volume over 7D.
+ * A column added there needs its window here.
+ */
+export const WIRE_PNL_WINDOWS: readonly Window[] = ['30d', '7d', 'all'];
+export const WIRE_ROI_WINDOWS: readonly Window[] = ['30d'];
+export const WIRE_VOLUME_WINDOWS: readonly Window[] = ['7d'];
+
+function pickWindows(m: Partial<Record<string, number | null>>, windows: readonly Window[]): Partial<Record<Window, number>> {
+  const out: Partial<Record<Window, number>> = {};
+  for (const w of windows) {
+    const v = val(m[w]);
+    if (v !== null) out[w] = v;
+  }
+  return out;
+}
+
+/**
+ * A segment row as it is sent: the trader, the account value and the figures
+ * of the windows above - what the page reads, and nothing else. Left behind:
+ * every other window, the sparkline, win rate, trades, tags, drawdown, last
+ * activity, the account id and the rank inside the segment (the page shows the
+ * rows in the order they arrive). A figure the venue does not give is left out
+ * rather than sent as null; the page reads both as "no figure".
+ */
+export function wireRow(r: TraderRow): TraderRow {
+  return {
+    venue: r.venue,
+    address: r.address,
+    accountValue: val(r.accountValue),
+    pnl: pickWindows(r.pnl, WIRE_PNL_WINDOWS),
+    roi: pickWindows(r.roi, WIRE_ROI_WINDOWS),
+    volume: pickWindows(r.volume, WIRE_VOLUME_WINDOWS),
+  };
+}
+
+const wireSegment = (s: ExploreSegment): ExploreSegment => ({ ...s, rows: s.rows.map(wireRow) });
+
+/* ---------------------------------------------------------------------------
  * Asking the venues.
  * ------------------------------------------------------------------------ */
 
@@ -391,7 +439,7 @@ export function assemble(harvests: readonly VenueHarvest[], now = Date.now()): E
 
   return {
     kpis: { tracked, volume24h, venues: live.map((h) => h.venue) },
-    segments: SEGMENTS.map((def) => cutSegment(def, pool)),
+    segments: SEGMENTS.map((def) => wireSegment(cutSegment(def, pool))),
     updatedAt,
   };
 }
