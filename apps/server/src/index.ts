@@ -14,7 +14,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 
 import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS, HOSTED, HOSTED_CONFIG, SITE_ORIGINS } from './config.js';
-import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, fastifyTrustProxy, installHostedGate, installServerSigningGate } from './hosted.js';
+import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, ON_INSTANCE_ROUTES, fastifyTrustProxy, installHostedGate, installServerSigningGate } from './hosted.js';
 import { sodex, SodexApiError, NotUnlockedError } from './sodex/rest.js';
 import { upstreams } from './sodex/ws.js';
 import { addClient, removeClient, startHub, hubStats } from './hub.js';
@@ -253,8 +253,9 @@ app.addHook('onSend', async (_req, reply, payload) => {
  * the token injected by the Vite proxy; a legitimate native client (CLI, tests)
  * carries the token and no Origin.
  *
- * HOSTED MODE replaces all of this with hosted.ts's gate: the route allow-list,
- * the site Origin for its one state-changing route family, per-client limits.
+ * HOSTED MODE replaces all of this with hosted.ts's gate: the origin secret,
+ * the route allow-list (plus the health route a caller on the instance may
+ * read), the site Origin for a state-changing route, per-client limits.
  */
 if (HOSTED) installHostedGate(app, { cfg: HOSTED_CONFIG, site: SITE_ORIGINS });
 else app.addHook('onRequest', async (req, reply) => {
@@ -296,12 +297,20 @@ if (HOSTED) {
     {
       siteOrigins: SITE_ORIGINS,
       trustProxy: HOSTED_CONFIG.trustProxy,
-      originSecret: HOSTED_CONFIG.originSecret ? 'set' : 'not set',
+      // How many values are accepted - never a value.
+      originSecret: HOSTED_CONFIG.originSecrets.length ? `set (${HOSTED_CONFIG.originSecrets.length} accepted)` : 'not set',
       limitsPerMinute: Object.fromEntries(Object.entries(HOSTED_CONFIG.limits).map(([k, l]) => [k, l.max])),
       routes: HOSTED_ROUTES.map((r) => `${r.method} ${r.url}`),
+      onInstanceOnly: ON_INSTANCE_ROUTES.map((r) => `${r.method} ${r.url}`),
     },
     'HOSTED MODE: public read-only index API - custodial routes, the hub and the local token are off',
   );
+  if (HOSTED_CONFIG.originSecrets.length > 1) {
+    // Meant for the minutes of a rotation; a forgotten old value stays valid for as long as it is listed.
+    app.log.warn(
+      `${HOSTED_CONFIG.originSecrets.length} origin secrets are accepted (a rotation): remove the old value from VALUESCAN_ORIGIN_SECRET once the edge sends the new one`,
+    );
+  }
   if (!SITE_ORIGINS.length) {
     app.log.warn('hosted mode without VALUESCAN_ALLOWED_ORIGINS: a site on another origin gets no CORS headers (a same-origin site is unaffected)');
   }

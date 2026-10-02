@@ -15,6 +15,8 @@
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
+ *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
+ *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
  */
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
@@ -42,6 +44,7 @@ import { buildExplore } from '../valuescan/explore.js';
 import { buildScreener } from '../valuescan/screener.js';
 import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
+import { indexerHealth } from '../hosted.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -217,8 +220,24 @@ export async function valuescanRoutes(app: FastifyInstance) {
     }
   });
 
-  /** Indexer diagnostics: lanes, streams, last board build. */
+  /**
+   * Indexer diagnostics: lanes, streams, last board build - everything the
+   * indexer publishes, wallet addresses and error text included. Local only: a
+   * hosted server answers 404 to every caller (hosted.ts HOSTED_ROUTES).
+   */
   app.get('/api/vs/index/status', async () => ({ ok: true, status: indexerStatus() }));
+
+  /**
+   * The indexer's health, for monitoring: which streams are up, the loop lag,
+   * each lane's counts, the last build. Numbers and booleans only - the
+   * projection (hosted.ts indexerHealth) picks each field by name, so no wallet
+   * address, error text, path or pid can leave with it. `status` is null while
+   * no status has been published (no index file, or an indexer that never ran).
+   *
+   * A hosted server answers it to a caller on the instance only (hosted.ts
+   * ON_INSTANCE_ROUTES); through the proxy it is a 404.
+   */
+  app.get('/api/vs/index/health', async () => ({ ok: true, status: indexerHealth(indexerStatus()) }));
 
   /** Cohorts for `venues=a,b` (netted over them; all venues when none is named), `sector=` / `coin=` filters. */
   app.get('/api/vs/cohorts', async (req, reply) => {

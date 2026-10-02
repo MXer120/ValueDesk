@@ -4,7 +4,9 @@
  * Covers the route allow-list, the custodial 410 (including the
  * percent-encoding bypass it used to have), CORS and the site-origin rule,
  * per-client rate limits and how the client address is derived behind a proxy,
- * the origin secret, and the configuration parsing that feeds all of it.
+ * the origin secret (one value, or two while it is rotated), the indexer
+ * health a caller on the instance may read (and nobody else), and the
+ * configuration parsing that feeds all of it.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -17,15 +19,24 @@ import cors from '@fastify/cors';
 import {
   DEFAULT_LIMITS,
   HOSTED_ROUTES,
+  MAX_ORIGIN_SECRETS,
+  ON_INSTANCE_ROUTES,
   ORIGIN_SECRET_HEADER,
   clientKey,
   fastifyTrustProxy,
   hostedConfigFromEnv,
   hostedRoute,
+  indexerHealth,
   installHostedGate,
   installServerSigningGate,
+  isLoopbackAddress,
+  isLoopbackHost,
+  isOnInstanceRequest,
   isServerSigningRequest,
   limitsFor,
+  originSecretAccepted,
+  originSecretDigests,
+  parseOriginSecrets,
   parseTrustProxy,
   siteOriginsFrom,
   type HostedConfig,
@@ -47,7 +58,7 @@ test('hosted config: off unless VALUESCAN_HOSTED=1, and then no other variable i
   const off = hostedConfigFromEnv({ VALUESCAN_TRUST_PROXY: 'true', VALUESCAN_ORIGIN_SECRET: 'short', VALUESCAN_RATE_READ_PER_MIN: 'lots' });
   assert.equal(off.enabled, false);
   assert.equal(off.trustProxy, false);
-  assert.equal(off.originSecret, null);
+  assert.deepEqual(off.originSecrets, []);
   assert.deepEqual(off.limits, DEFAULT_LIMITS);
   assert.equal(hostedConfigFromEnv({ VALUESCAN_HOSTED: 'true' }).enabled, false, 'only "1" switches it on');
 });
@@ -56,6 +67,7 @@ test('hosted config: defaults, overrides, and malformed values stop the boot', (
   const on = hostedConfigFromEnv({ VALUESCAN_HOSTED: '1' });
   assert.equal(on.enabled, true);
   assert.equal(on.trustProxy, false);
+  assert.deepEqual(on.originSecrets, [], 'no secret configured: not enforced');
   assert.deepEqual(on.limits, DEFAULT_LIMITS);
 
   const tuned = hostedConfigFromEnv({
@@ -68,7 +80,7 @@ test('hosted config: defaults, overrides, and malformed values stop the boot', (
     VALUESCAN_RATE_AUTH_GLOBAL_PER_MIN: '50',
   });
   assert.deepEqual(tuned.trustProxy, ['loopback', '10.0.0.0/8']);
-  assert.equal(tuned.originSecret, 'x'.repeat(40));
+  assert.deepEqual(tuned.originSecrets, ['x'.repeat(40)]);
   assert.deepEqual(
     Object.fromEntries(Object.entries(tuned.limits).map(([k, l]) => [k, l.max])),
     { read: 900, upstream: 60, auth: 5, authGlobal: 50 },
@@ -83,6 +95,61 @@ test('hosted config: defaults, overrides, and malformed values stop the boot', (
   ]) {
     assert.throws(() => hostedConfigFromEnv({ VALUESCAN_HOSTED: '1', ...bad }), Error, JSON.stringify(bad));
   }
+});
+
+test('origin secret config: one value, or the current and the next while it is rotated', () => {
+  const cur = 'c'.repeat(40);
+  const next = 'n'.repeat(64);
+  assert.deepEqual(parseOriginSecrets(undefined), []);
+  assert.deepEqual(parseOriginSecrets('   '), []);
+  assert.deepEqual(parseOriginSecrets(cur), [cur]);
+  assert.deepEqual(parseOriginSecrets(`${cur},${next}`), [cur, next]);
+  assert.deepEqual(parseOriginSecrets(`  ${cur} , ${next}  `), [cur, next], 'spaces around the comma are not part of a value');
+  assert.deepEqual(parseOriginSecrets(`${cur},${cur}`), [cur], 'the same value twice is one value');
+  assert.deepEqual(hostedConfigFromEnv({ VALUESCAN_HOSTED: '1', VALUESCAN_ORIGIN_SECRET: `${cur},${next}` }).originSecrets, [cur, next]);
+
+  const distinct = (n: number) => Array.from({ length: n }, (_, i) => String(i).repeat(32)).join(',');
+  assert.equal(parseOriginSecrets(distinct(MAX_ORIGIN_SECRETS)).length, MAX_ORIGIN_SECRETS);
+
+  // A typo never weakens the gate: each of these stops the boot instead.
+  for (const bad of [
+    ',', // would otherwise read as "no secret": everything open
+    `${cur},`,
+    `,${cur}`,
+    `${cur},,${next}`,
+    'short',
+    `${cur},short`,
+    `${cur},${'n'.repeat(31)}`,
+    `${'a'.repeat(20)} ${'a'.repeat(20)}`, // a space inside a value
+    `${cur}\t${next}`,
+    'é'.repeat(40), // could not travel in a header
+    distinct(MAX_ORIGIN_SECRETS + 1), // old values are removed, not collected
+  ]) {
+    assert.throws(() => parseOriginSecrets(bad), /VALUESCAN_ORIGIN_SECRET/, JSON.stringify(bad));
+  }
+  // The message reaches the log: it never quotes a value.
+  try {
+    parseOriginSecrets(`${cur},not-long-enough-0123456789`);
+    assert.fail('a short value must be refused');
+  } catch (e) {
+    const msg = (e as Error).message;
+    assert.ok(!msg.includes(cur) && !msg.includes('not-long-enough'), msg);
+  }
+});
+
+test('origin secret compare: every accepted value is checked, and only an exact value passes', () => {
+  const cur = 'c'.repeat(40);
+  const next = 'n'.repeat(64);
+  const both = originSecretDigests([cur, next]);
+  assert.equal(originSecretAccepted(cur, both), true);
+  assert.equal(originSecretAccepted(next, both), true, 'the last entry counts like the first');
+  assert.equal(originSecretAccepted(next, originSecretDigests([next, cur])), true);
+  for (const wrong of [undefined, null, '', 'nope', cur.slice(1), `${cur}x`, cur.toUpperCase(), `${cur},${next}`, `${cur}, ${next}`, [cur], 42]) {
+    assert.equal(originSecretAccepted(wrong, both), false, JSON.stringify(wrong));
+  }
+  // No accepted value: nothing passes (the gate does not ask then; this is the floor).
+  assert.equal(originSecretAccepted(cur, originSecretDigests([])), false);
+  assert.equal(originSecretAccepted('', originSecretDigests([])), false);
 });
 
 test('trust proxy: never "everyone"; a hop count or the proxy addresses', () => {
@@ -143,12 +210,24 @@ function registeredRoutes(): Set<string> {
 test('the allow-list names only routes that exist, each once', () => {
   const registered = registeredRoutes();
   const seen = new Set<string>();
-  for (const r of HOSTED_ROUTES) {
+  for (const r of [...HOSTED_ROUTES, ...ON_INSTANCE_ROUTES]) {
     const k = `${r.method} ${r.url}`;
-    assert.ok(registered.has(k), `${k} is on the hosted list but no route file registers it`);
+    assert.ok(registered.has(k), `${k} is on a hosted list but no route file registers it`);
     assert.ok(!seen.has(k), `${k} is listed twice`);
     seen.add(k);
   }
+});
+
+test('the on-instance list is the indexer health and nothing else, and is not public', () => {
+  assert.deepEqual(ON_INSTANCE_ROUTES.map((r) => `${r.method} ${r.url} ${r.cls}`), ['GET /api/vs/index/health read']);
+  for (const r of ON_INSTANCE_ROUTES) {
+    assert.equal(hostedRoute(r.method, r.url), null, `${r.url} must not be on the public list`);
+    assert.ok(hostedRoute(r.method, r.url, ON_INSTANCE_ROUTES));
+  }
+  // The route hands out the projection, never the indexer's status itself.
+  const src = readFileSync(join(SRC, 'routes', 'valuescan.ts'), 'utf8');
+  const handlers = [...src.matchAll(/app\.get\(\s*'\/api\/vs\/index\/health'\s*,([^\n]*)/g)].map((m) => m[1]!.trim());
+  assert.deepEqual(handlers, ['async () => ({ ok: true, status: indexerHealth(indexerStatus()) }));']);
 });
 
 test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
@@ -183,7 +262,7 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     /^\/api\/acct\//, /^\/api\/md\//, /^\/api\/scan/, /^\/api\/stats\//, /^\/api\/onboarding/,
     /^\/api\/mirror\//, /^\/api\/deposit\//, /^\/api\/prefs/, /^\/api\/points\//,
     /^\/api\/vs\/(trader|fills|account|price)$/, /^\/api\/external\/leaderboard/, /^\/api\/external\/resolve-account/,
-    /^\/api\/vs\/index\/status/, /^\/ws$/,
+    /^\/api\/vs\/index\//, /^\/ws$/,
   ];
   for (const r of HOSTED_ROUTES) {
     for (const re of forbidden) assert.ok(!re.test(r.url), `${r.method} ${r.url} must not be public`);
@@ -222,11 +301,44 @@ test('custodial paths are recognised by raw path and by the route the router mat
 
 // --- the gate, end to end ------------------------------------------------------------------
 
-async function hostedApp(o: { limits?: Partial<HostedLimits>; trustProxy?: HostedConfig['trustProxy']; originSecret?: string; extra?: HostedRoute[] } = {}) {
+/**
+ * What the indexer publishes (indexer/engine.ts status(), plus `at` and `pid`
+ * from its worker), with the kind of content that must never leave a hosted
+ * server: wallet addresses, error text, a path, a pid.
+ */
+const WALLET = '0x' + '1'.repeat(40);
+const INDEXER_STATUS = {
+  streams: { sodex: 1_790_000_000_000, hyperliquid: 1_790_000_000_001, tradexyz: null, lighter: null, arcus: 1_790_000_000_003 },
+  sockets: { sodex: 1_790_000_000_000, hyperliquid: 1_790_000_000_001, tradexyz: 1_790_000_000_002, lighter: null, arcus: 1_790_000_000_003 },
+  gaps: { sodex: [{ from: 1, to: 2, broke: true }] },
+  aggregates: 12,
+  retention: { file: '/var/lib/valuescan/index/valuescan-index.db' },
+  lanes: {
+    hl: {
+      queued: 3, done: 1200, failed: 2, spent: 4400, lastError: `HTTP 429 reading fills of ${WALLET}`,
+      current: { key: `h:perps:${WALLET}`, forMs: 812 }, byKind: { fills: 3 }, visible: { fills: 1 }, backoffMs: 1500.4,
+    },
+    sgw: { queued: 0, done: 10, failed: 0, spent: 20, lastError: null, current: null, byKind: {}, visible: {}, backoffMs: 0 },
+    strades: { queued: 41, done: 7, failed: 1, spent: 8, lastError: 'error code: 1015', current: null, byKind: {}, visible: {}, backoffMs: 30_000 },
+    sdata: { queued: 0, done: 0, failed: 0, spent: 0, lastError: null, current: null, byKind: {}, visible: {}, backoffMs: 0 },
+  },
+  venues: { lighter: { walk: WALLET, lastError: 'socket hang up' } },
+  tracked: { hyperliquid: 5000, sodex: 800 },
+  lastBuildAt: 1_790_000_000_500,
+  lastBuildMs: 431.7,
+  lastError: 'flush: database is locked (/var/lib/valuescan/index/valuescan-index.db)',
+  loopLagMs: { lastMinute: 12.6, sinceStart: 340, spikes: [{ late: 340, at: 1, by: `rebuild after ${WALLET}` }] },
+  hlBudget: 870,
+  cohorts: { lastError: `cohort flush: ${WALLET}` },
+  at: 1_790_000_001_000,
+  pid: 4242,
+};
+
+async function hostedApp(o: { limits?: Partial<HostedLimits>; trustProxy?: HostedConfig['trustProxy']; originSecrets?: string[]; extra?: HostedRoute[] } = {}) {
   const cfg: HostedConfig = {
     enabled: true,
     trustProxy: o.trustProxy ?? false,
-    originSecret: o.originSecret ?? null,
+    originSecrets: o.originSecrets ?? [],
     limits: { ...DEFAULT_LIMITS, ...o.limits },
   };
   const routes = [...HOSTED_ROUTES, ...(o.extra ?? [])];
@@ -236,6 +348,8 @@ async function hostedApp(o: { limits?: Partial<HostedLimits>; trustProxy?: Hoste
   for (const r of routes) {
     app.route({ method: r.method, url: r.url, handler: async (req) => ({ ok: true, route: req.routeOptions.url, ip: req.ip }) });
   }
+  // As routes/valuescan.ts registers it: the projection of the indexer's status.
+  app.get('/api/vs/index/health', async () => ({ ok: true, status: indexerHealth(INDEXER_STATUS) }));
   // Registered anyway: the LIST decides, not what happens to be registered.
   app.get('/api/acct/:engine/state', async () => ({ leaked: true }));
   app.get('/api/vs/index/status', async () => ({ leaked: true }));
@@ -401,10 +515,244 @@ test('proxy: a hop count takes the address the last proxy saw', async () => {
 
 test('origin secret: every route but /api/health needs it', async () => {
   const secret = 's'.repeat(48);
-  const app = await hostedApp({ originSecret: secret });
+  const app = await hostedApp({ originSecrets: [secret] });
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/explore' })).statusCode, 403);
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/explore', headers: { [ORIGIN_SECRET_HEADER]: 'nope' } })).statusCode, 403);
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/explore', headers: { [ORIGIN_SECRET_HEADER]: secret } })).statusCode, 200);
   assert.equal((await app.inject({ method: 'GET', url: '/api/health' })).statusCode, 200);
+  // A path that does not exist says nothing either way without the secret.
+  assert.equal((await app.inject({ method: 'GET', url: '/nope' })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'GET', url: '/nope', headers: { [ORIGIN_SECRET_HEADER]: secret } })).statusCode, 404);
   await app.close();
+});
+
+test('origin secret rotation: the server accepts the current and the next value, so no step answers 403', async () => {
+  const cur = 'c'.repeat(48);
+  const next = 'n'.repeat(64);
+  /** What an edge sending `sent` gets while the server is configured with `accepted`. */
+  const status = async (accepted: string[], sent: string | undefined) => {
+    const app = await hostedApp({ originSecrets: accepted });
+    const r = await app.inject({
+      method: 'GET', url: '/api/vs/explore', remoteAddress: '130.176.1.1',
+      headers: sent === undefined ? {} : { [ORIGIN_SECRET_HEADER]: sent },
+    });
+    await app.close();
+    return r.statusCode;
+  };
+  // Before: one value.
+  assert.equal(await status([cur], cur), 200);
+  assert.equal(await status([cur], next), 403);
+  // 1. The server learns the next value. The edge still sends the current one.
+  assert.equal(await status([cur, next], cur), 200);
+  // 2. The edge switches, location by location: both values arrive for a while.
+  assert.equal(await status([cur, next], next), 200);
+  assert.equal(await status([next, cur], next), 200, 'the order of the list does not matter');
+  // 3. The old value is removed: it is dead from then on.
+  assert.equal(await status([next], next), 200);
+  assert.equal(await status([next], cur), 403);
+  // Throughout: exactly one value, never the list, never nothing.
+  for (const sent of [undefined, '', `${cur},${next}`, `${cur}, ${next}`, cur.slice(1), `${next}x`]) {
+    assert.equal(await status([cur, next], sent), 403, JSON.stringify(sent));
+  }
+});
+
+// --- a caller on this instance -------------------------------------------------------------
+
+test('on-instance: a loopback peer, a loopback Host, and nothing a proxy adds', () => {
+  for (const a of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1', '0:0:0:0:0:0:0:1']) assert.equal(isLoopbackAddress(a), true, a);
+  for (const a of [undefined, '', '10.0.0.1', '203.0.113.7', '128.0.0.1', '1270.0.0.1', '::', '::2', '::ffff:10.0.0.1', 'localhost', '127.0.0.1.evil.example']) {
+    assert.equal(isLoopbackAddress(a), false, String(a));
+  }
+  for (const h of ['127.0.0.1', '127.0.0.1:8797', 'localhost', 'LOCALHOST:8797', '[::1]', '[::1]:8797']) assert.equal(isLoopbackHost(h), true, h);
+  for (const h of [undefined, '', 'origin.valuescan.example', 'origin.valuescan.example:443', '127.0.0.1.evil.example', 'localhost.evil.example', 'localhost.', '10.0.0.5:8797', '[::2]', '127.0.0.1:8797/x', 'a b', ['127.0.0.1']]) {
+    assert.equal(isLoopbackHost(h), false, JSON.stringify(h));
+  }
+
+  const local = { host: '127.0.0.1:8797', accept: 'application/json', 'user-agent': 'curl/8' };
+  assert.equal(isOnInstanceRequest('127.0.0.1', local), true);
+  assert.equal(isOnInstanceRequest('::1', { host: 'localhost:8797' }), true);
+  // Not from this machine.
+  assert.equal(isOnInstanceRequest('203.0.113.7', local), false);
+  assert.equal(isOnInstanceRequest(undefined, local), false);
+  // From the proxy on this machine: every marker counts by itself.
+  for (const marker of [
+    { 'x-forwarded-for': '203.0.113.7' }, { 'x-forwarded-proto': 'https' }, { 'x-forwarded-host': 'x' }, { 'x-forwarded-anything': '1' },
+    { forwarded: 'for=203.0.113.7' }, { via: '2.0 abc.cloudfront.net (CloudFront)' }, { 'x-real-ip': '203.0.113.7' },
+    { 'x-amz-cf-id': 'abc' }, { 'cloudfront-viewer-address': '203.0.113.7:4711' }, { 'true-client-ip': '203.0.113.7' }, { 'cdn-loop': 'x' },
+    { 'X-Forwarded-For': '203.0.113.7' },
+  ]) {
+    assert.equal(isOnInstanceRequest('127.0.0.1', { ...local, ...marker }), false, JSON.stringify(marker));
+  }
+  // An empty marker is still a marker.
+  assert.equal(isOnInstanceRequest('127.0.0.1', { ...local, 'x-forwarded-for': '' }), false);
+  // The public name, or no Host at all.
+  assert.equal(isOnInstanceRequest('127.0.0.1', { host: 'origin.valuescan.example' }), false);
+  assert.equal(isOnInstanceRequest('127.0.0.1', {}), false);
+});
+
+test('index health: answered to a caller on the instance, a 404 for everyone else', async () => {
+  // Production: Caddy on loopback, CloudFront in front of it (VALUESCAN_TRUST_PROXY=2).
+  const app = await hostedApp({ trustProxy: 2 });
+  const get = (o: { remoteAddress?: string; headers?: Record<string, string>; method?: 'GET' | 'HEAD' | 'POST' } = {}) =>
+    app.inject({ method: o.method ?? 'GET', url: '/api/vs/index/health', remoteAddress: o.remoteAddress, headers: o.headers ?? { host: '127.0.0.1:8797' } });
+
+  // The health check, or an operator's curl, on the box.
+  const local = await get();
+  assert.equal(local.statusCode, 200);
+  assert.equal(local.json().ok, true);
+  assert.deepEqual(Object.keys(local.json().status).sort(), ['at', 'errorSinceStart', 'lanes', 'lastBuildAt', 'lastBuildMs', 'loopLagMs', 'streams']);
+  assert.equal((await get({ method: 'HEAD' })).statusCode, 200);
+  assert.equal((await get({ headers: { host: 'localhost:8797' } })).statusCode, 200);
+
+  // What Caddy forwards from CloudFront: the same loopback peer, but marked and under the public name.
+  const proxied: Record<string, string> = {
+    host: 'origin.valuescan.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', 'x-forwarded-proto': 'https',
+    'x-forwarded-host': 'origin.valuescan.example', via: '2.0 abc.cloudfront.net (CloudFront)', 'x-amz-cf-id': 'abc',
+  };
+  const notLocal: Array<Record<string, string>> = [
+    proxied,
+    { host: '127.0.0.1:8797', 'x-forwarded-for': '203.0.113.7' }, // one marker is enough, whatever the Host claims
+    { host: '127.0.0.1:8797', via: '1.1 Caddy' },
+    { host: 'origin.valuescan.example' }, // no marker, but not a loopback name
+  ];
+  for (const headers of notLocal) {
+    const r = await get({ headers });
+    assert.equal(r.statusCode, 404, JSON.stringify(headers));
+    assert.deepEqual(r.json(), { error: 'not found', source: 'server' }, 'the same answer as a path that does not exist');
+  }
+  // Not from this machine - and the forwarded address does not make it so: with two
+  // trusted hops req.ip would be the 127.0.0.1 the caller wrote, the socket is not.
+  assert.equal((await get({ remoteAddress: '203.0.113.7' })).statusCode, 404);
+  assert.equal((await get({ remoteAddress: '203.0.113.7', headers: { host: '127.0.0.1:8797', 'x-forwarded-for': '127.0.0.1' } })).statusCode, 404);
+  // Read-only, like everything else.
+  assert.equal((await get({ method: 'POST' })).statusCode, 404);
+  // The full diagnostics stay a 404 for every caller, on the instance too.
+  const full = await app.inject({ method: 'GET', url: '/api/vs/index/status', headers: { host: '127.0.0.1:8797' } });
+  assert.equal(full.statusCode, 404);
+  assert.ok(!full.body.includes('leaked'));
+  await app.close();
+});
+
+test('index health: needs no origin secret on the instance, and the secret does not open it from outside', async () => {
+  const secret = 's'.repeat(48);
+  const app = await hostedApp({ trustProxy: 2, originSecrets: [secret] });
+  const local = { host: '127.0.0.1:8797' };
+  const proxied = { host: 'origin.valuescan.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', via: '2.0 abc.cloudfront.net (CloudFront)' };
+  const get = (url: string, headers: Record<string, string>) => app.inject({ method: 'GET', url, headers });
+
+  // A monitor on the box is not handed the credential that gets past the edge.
+  assert.equal((await get('/api/vs/index/health', local)).statusCode, 200);
+  assert.equal((await get('/api/vs/index/health', { ...local, [ORIGIN_SECRET_HEADER]: secret })).statusCode, 200);
+  // Through the proxy: refused without the secret, not found with it - what any unknown path gets.
+  assert.equal((await get('/api/vs/index/health', proxied)).statusCode, 403);
+  assert.equal((await get('/api/vs/index/health', { ...proxied, [ORIGIN_SECRET_HEADER]: secret })).statusCode, 404);
+  // Being on the instance opens nothing else: public routes still need the secret there,
+  assert.equal((await get('/api/vs/explore', local)).statusCode, 403);
+  assert.equal((await get('/api/vs/explore', { ...local, [ORIGIN_SECRET_HEADER]: secret })).statusCode, 200);
+  // and the full diagnostics answer what operations' lock-down check expects: 404 with the secret (403 without).
+  assert.equal((await get('/api/vs/index/status', { ...local, [ORIGIN_SECRET_HEADER]: secret })).statusCode, 404);
+  assert.equal((await get('/api/vs/index/status', local)).statusCode, 403);
+  await app.close();
+});
+
+test('index health: counted against the read limit like any request', async () => {
+  const app = await hostedApp({ limits: { read: { max: 2, windowMs: 60_000 } } });
+  const get = () => app.inject({ method: 'GET', url: '/api/vs/index/health', headers: { host: '127.0.0.1:8797' } });
+  assert.equal((await get()).statusCode, 200);
+  assert.equal((await get()).statusCode, 200);
+  const over = await get();
+  assert.equal(over.statusCode, 429);
+  assert.ok(Number(over.headers['retry-after']) >= 1);
+  await app.close();
+});
+
+/** Every key and every leaf of a value, for "nothing but numbers and booleans". */
+function leaves(v: unknown, path = ''): Array<{ path: string; value: unknown }> {
+  if (v !== null && typeof v === 'object') return Object.entries(v).flatMap(([k, x]) => leaves(x, path ? `${path}.${k}` : k));
+  return [{ path, value: v }];
+}
+
+test('index health: numbers and booleans picked by name - no address, error text, path or pid', () => {
+  const h = indexerHealth(INDEXER_STATUS);
+  assert.deepEqual(h, {
+    at: 1_790_000_001_000,
+    streams: { sodex: true, hyperliquid: true, tradexyz: true, lighter: false, arcus: true },
+    loopLagMs: { lastMinute: 13, sinceStart: 340 },
+    lanes: {
+      hl: { queued: 3, done: 1200, failed: 2, backoffMs: 1500 },
+      sgw: { queued: 0, done: 10, failed: 0, backoffMs: 0 },
+      strades: { queued: 41, done: 7, failed: 1, backoffMs: 30_000 },
+      sdata: { queued: 0, done: 0, failed: 0, backoffMs: 0 },
+    },
+    lastBuildAt: 1_790_000_000_500,
+    lastBuildMs: 432,
+    errorSinceStart: true,
+  });
+  const sent = JSON.stringify(h);
+  for (const secret of ['0x', WALLET, '4242', 'pid', 'valuescan-index', '/var/lib', '429', '1015', 'locked', 'hang up', 'rebuild', 'spent', 'hlBudget', '870', 'tracked', '5000']) {
+    assert.ok(!sent.includes(secret), `"${secret}" must not be in the health body`);
+  }
+
+  // An older indexer published `streams` only; no error yet; nothing built yet.
+  const early = indexerHealth({ streams: { sodex: 5, lighter: null }, lanes: {}, lastBuildAt: 0, lastBuildMs: 0, lastError: null, at: 7 });
+  assert.deepEqual(early, {
+    at: 7, streams: { sodex: true, lighter: false }, loopLagMs: { lastMinute: null, sinceStart: null }, lanes: {},
+    lastBuildAt: null, lastBuildMs: 0, errorSinceStart: false,
+  });
+
+  // No status to read.
+  for (const none of [null, undefined, '', 'x', 0, 42, true, [], [INDEXER_STATUS]]) assert.equal(indexerHealth(none), null, JSON.stringify(none));
+});
+
+test('index health: whatever the status holds, only a name, a number or a boolean gets out', () => {
+  const hostile = {
+    at: '2026-10-02T00:00:00Z',
+    pid: 4242,
+    sockets: {
+      sodex: `up since ${WALLET}`, // truthy text: reported as "up", the text is not
+      [WALLET]: 1, // a key that is an address
+      ['a'.repeat(40)]: 1, // 40 hex-looking characters without the 0x
+      '../../etc/passwd': 1,
+      'C:\\Users\\someone': 1,
+      Hyperliquid: 1, // not a name as the indexer writes one
+      __proto__x: 1,
+      lighter: { nested: WALLET },
+      arcus: 0,
+    },
+    lanes: {
+      hl: { queued: WALLET, done: { n: 1 }, failed: [2], backoffMs: Number.NaN, lastError: WALLET, current: { key: WALLET } },
+      sgw: 'not an object',
+      [WALLET]: { queued: 1, done: 1, failed: 1, backoffMs: 1 },
+      strades: { queued: -4, done: 1e12, failed: 2.6, backoffMs: Number.POSITIVE_INFINITY },
+    },
+    loopLagMs: { lastMinute: WALLET, sinceStart: -5, spikes: [{ by: WALLET }] },
+    lastBuildAt: WALLET,
+    lastBuildMs: { ms: 1 },
+    lastError: { message: WALLET },
+  };
+  const h = indexerHealth(hostile)!;
+  assert.deepEqual(h, {
+    at: null,
+    streams: { sodex: true, lighter: true, arcus: false },
+    loopLagMs: { lastMinute: null, sinceStart: 0 },
+    lanes: {
+      hl: { queued: null, done: null, failed: null, backoffMs: null },
+      sgw: { queued: null, done: null, failed: null, backoffMs: null },
+      strades: { queued: 0, done: 1e12, failed: 3, backoffMs: null },
+    },
+    lastBuildAt: null,
+    lastBuildMs: null,
+    errorSinceStart: true,
+  });
+  for (const { path, value } of leaves(h)) {
+    assert.ok(value === null || typeof value === 'number' || typeof value === 'boolean', `${path} is ${typeof value}`);
+    for (const key of path.split('.')) assert.match(key, /^[a-zA-Z][a-zA-Z0-9_]{0,23}$/, path);
+  }
+  assert.ok(!JSON.stringify(h).includes('0x'));
+
+  // A status that grew a thousand "venues" and "lanes" does not grow the answer.
+  const many = Object.fromEntries(Array.from({ length: 1000 }, (_, i) => [`v${i}`, 1]));
+  const capped = indexerHealth({ sockets: many, lanes: Object.fromEntries(Object.keys(many).map((k) => [k, { queued: 1 }])) })!;
+  assert.equal(Object.keys(capped.streams).length, 16);
+  assert.equal(Object.keys(capped.lanes).length, 16);
 });

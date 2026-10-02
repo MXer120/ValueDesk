@@ -23,6 +23,12 @@
  *     proxy hops (VALUESCAN_TRUST_PROXY). IPv6 clients are grouped by /64.
  *   - CORS locked to the site origin(s), no WebSocket hub, a minimal
  *     /api/health and API security headers (index.ts).
+ *   - AN ORIGIN SECRET, when configured: every request but /api/health must
+ *     carry it, so nobody reaches the server around the edge. Two values are
+ *     accepted for the length of a rotation (parseOriginSecrets).
+ *   - DIAGNOSTICS STAY ON THE INSTANCE. The indexer's status is never public;
+ *     a minimal health view of it answers a caller on this instance only
+ *     (ON_INSTANCE_ROUTES, isOnInstanceRequest, indexerHealth).
  *
  * Local dev is untouched while the switch is off: nothing here runs, and
  * hostedConfigFromEnv reads no other variable.
@@ -67,7 +73,10 @@ export interface HostedRoute {
  *     exchange traffic, now browser-direct;
  *   - /api/vs/trader|fills|account|price, /api/external/leaderboard(/rank),
  *     /api/external/resolve-account: the web reads them itself (ARCH §1.2, §1.4);
- *   - /api/vs/index/status: diagnostics;
+ *   - /api/vs/index/status: the indexer's full diagnostics (wallet addresses,
+ *     error text, a pid). A 404 for every caller, on the instance too - which is
+ *     also how operations tell that hosted mode is in effect. Monitoring reads
+ *     /api/vs/index/health instead: ON_INSTANCE_ROUTES below, not this list;
  *   - /api/points/* (the SoPoints relay: the page is not mounted; if it returns,
  *     list both routes as { method: 'POST', cls: 'auth' } - the gate then needs
  *     the exact site Origin and applies the `auth` caps);
@@ -98,6 +107,26 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/external/announcements/:id', cls: 'upstream' },
 ];
 
+/**
+ * Answered ONLY to a caller on this instance (isOnInstanceRequest) - the health
+ * check and an operator's curl - and never part of the public list above:
+ * through the proxy these are a 404 like any unknown path, so the public
+ * surface stays exactly HOSTED_ROUTES.
+ *
+ * Why not public: even a minimal health view tells an attacker, live, how the
+ * indexer is coping with what they send. Why not the index file instead: a
+ * monitor that opens the database needs write access to its directory (a WAL
+ * reader writes the -shm file) and knowledge of the store's schema.
+ *
+ * No origin secret is asked of these: the caller is identified by where it
+ * is, and a monitor should not have to hold the credential that gets past the
+ * edge. The body is numbers and booleans only (indexerHealth), so a proxy that
+ * relays without marking its requests leaks nothing that matters.
+ */
+export const ON_INSTANCE_ROUTES: readonly HostedRoute[] = [
+  { method: 'GET', url: '/api/vs/index/health', cls: 'read' },
+];
+
 // --- configuration ---------------------------------------------------------------
 
 export interface HostedLimits {
@@ -115,12 +144,19 @@ export interface HostedConfig {
   enabled: boolean;
   /** Passed to Fastify's `trustProxy`: false, a hop count, or proxy addresses/CIDRs. */
   trustProxy: false | number | string[];
-  /** When set, every request but /api/health must carry it in ORIGIN_SECRET_HEADER. */
-  originSecret: string | null;
+  /**
+   * The accepted values of ORIGIN_SECRET_HEADER. Empty: not enforced. Otherwise
+   * every request but /api/health must carry ONE of them. One value in normal
+   * operation, two while the secret is rotated (parseOriginSecrets).
+   */
+  originSecrets: readonly string[];
   limits: HostedLimits;
 }
 
 export const ORIGIN_SECRET_HEADER = 'x-origin-verify';
+export const MIN_ORIGIN_SECRET_LENGTH = 32;
+/** The current value and the next one, with room for a rotation that overlaps another. */
+export const MAX_ORIGIN_SECRETS = 4;
 
 const MINUTE = 60_000;
 export const DEFAULT_LIMITS: HostedLimits = {
@@ -130,7 +166,7 @@ export const DEFAULT_LIMITS: HostedLimits = {
   authGlobal: { max: 300, windowMs: MINUTE },
 };
 
-const OFF: HostedConfig = { enabled: false, trustProxy: false, originSecret: null, limits: DEFAULT_LIMITS };
+const OFF: HostedConfig = { enabled: false, trustProxy: false, originSecrets: [], limits: DEFAULT_LIMITS };
 
 /**
  * VALUESCAN_TRUST_PROXY -> Fastify `trustProxy`.
@@ -193,18 +229,50 @@ function perMinute(name: string, raw: string, dflt: Limit): Limit {
 }
 
 /**
+ * VALUESCAN_ORIGIN_SECRET -> the accepted secrets.
+ *
+ *   unset                 not enforced
+ *   <secret>              the normal case
+ *   <current>,<next>      while the secret is rotated: the server accepts both, so
+ *                         it does not matter in which order - or how slowly - the
+ *                         edge switches from one to the other. Remove the old value
+ *                         once the edge sends the new one everywhere.
+ *
+ * Anything else stops the boot rather than weakening the gate: an empty entry
+ * (a stray comma must never read as "no secret"), a value under 32 characters,
+ * one that could not travel in a header (visible ASCII only; a comma separates),
+ * or more than MAX_ORIGIN_SECRETS values (old ones are to be removed, not kept).
+ * No message quotes a value: this text reaches the log.
+ */
+export function parseOriginSecrets(raw: string | undefined): string[] {
+  const v = (raw ?? '').trim();
+  if (!v) return [];
+  const list = v.split(',').map((s) => s.trim());
+  if (list.some((s) => !s)) throw new Error('VALUESCAN_ORIGIN_SECRET has an empty entry - remove the stray comma');
+  if (list.some((s) => s.length < MIN_ORIGIN_SECRET_LENGTH)) {
+    throw new Error(`VALUESCAN_ORIGIN_SECRET must be at least ${MIN_ORIGIN_SECRET_LENGTH} characters (each value, when several are listed)`);
+  }
+  if (list.some((s) => !/^[\x21-\x7e]+$/.test(s))) {
+    throw new Error('VALUESCAN_ORIGIN_SECRET may only hold visible ASCII characters, without spaces (it travels in a header)');
+  }
+  const unique = [...new Set(list)];
+  if (unique.length > MAX_ORIGIN_SECRETS) {
+    throw new Error(`VALUESCAN_ORIGIN_SECRET lists more than ${MAX_ORIGIN_SECRETS} values - remove the ones no longer in use`);
+  }
+  return unique;
+}
+
+/**
  * The hosted configuration. With VALUESCAN_HOSTED unset nothing else is read,
  * so a stray or malformed hosted variable can never change local dev.
  */
 export function hostedConfigFromEnv(env: Readonly<Record<string, string | undefined>>): HostedConfig {
   const get = (k: string): string => env[k]?.trim() ?? '';
   if (get('VALUESCAN_HOSTED') !== '1') return OFF;
-  const secret = get('VALUESCAN_ORIGIN_SECRET');
-  if (secret && secret.length < 32) throw new Error('VALUESCAN_ORIGIN_SECRET must be at least 32 characters');
   return {
     enabled: true,
     trustProxy: parseTrustProxy(get('VALUESCAN_TRUST_PROXY')),
-    originSecret: secret || null,
+    originSecrets: parseOriginSecrets(get('VALUESCAN_ORIGIN_SECRET')),
     limits: {
       read: perMinute('VALUESCAN_RATE_READ_PER_MIN', get('VALUESCAN_RATE_READ_PER_MIN'), DEFAULT_LIMITS.read),
       upstream: perMinute('VALUESCAN_RATE_UPSTREAM_PER_MIN', get('VALUESCAN_RATE_UPSTREAM_PER_MIN'), DEFAULT_LIMITS.upstream),
@@ -257,12 +325,84 @@ function ipv6Prefix64(addr: string): string {
     .join(':');
 }
 
-function secretMatches(got: unknown, want: string): boolean {
+// --- the origin secret -----------------------------------------------------------------
+
+const sha256 = (s: string): Buffer => createHash('sha256').update(s).digest();
+
+/** The accepted secrets as the gate compares them: hashed once, not per request. */
+export const originSecretDigests = (secrets: readonly string[]): Buffer[] => secrets.map(sha256);
+
+/**
+ * Whether the presented header is one of the accepted secrets.
+ *
+ * Constant-time on purpose. Both sides are hashed, so their lengths do not
+ * matter; each comparison is timingSafeEqual; and EVERY accepted value is
+ * compared, match or not - no early exit that would tell a caller which entry
+ * matched, or that the first one did not. The header must be exactly one
+ * value: a client that holds the whole list sends one entry of it.
+ */
+export function originSecretAccepted(got: unknown, digests: readonly Buffer[]): boolean {
   if (typeof got !== 'string' || !got) return false;
-  // Hash both sides so the comparison is constant-time whatever the lengths.
-  const a = createHash('sha256').update(got).digest();
-  const b = createHash('sha256').update(want).digest();
-  return timingSafeEqual(a, b);
+  const presented = sha256(got);
+  let ok = false;
+  for (const d of digests) {
+    const same = timingSafeEqual(presented, d);
+    ok = ok || same;
+  }
+  return ok;
+}
+
+// --- a caller on this instance ---------------------------------------------------------
+
+/** 127.0.0.0/8 or ::1 (an IPv4-mapped IPv6 address counts as its IPv4). */
+export function isLoopbackAddress(addr: string | undefined): boolean {
+  let a = (addr ?? '').trim().toLowerCase();
+  if (a.startsWith('::ffff:') && isIP(a.slice(7)) === 4) a = a.slice(7);
+  if (isIP(a) === 4) return a.startsWith('127.');
+  return a === '::1' || a === '0:0:0:0:0:0:0:1';
+}
+
+/** A Host header that names this server by a loopback name: 127.x.x.x, localhost or [::1], any port. */
+export function isLoopbackHost(host: unknown): boolean {
+  if (typeof host !== 'string') return false;
+  const m = /^(\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::\d{1,5})?$/.exec(host.trim().toLowerCase());
+  if (!m) return false;
+  const name = m[1]!;
+  if (name === 'localhost') return true;
+  return isLoopbackAddress(name.startsWith('[') ? name.slice(1, -1) : name);
+}
+
+/**
+ * Headers a relaying proxy puts on what it forwards. Caddy's reverse_proxy
+ * always sets the three X-Forwarded-* ones; CloudFront adds Via, X-Amz-Cf-Id
+ * and X-Forwarded-For; the rest are other proxies' and CDNs' equivalents.
+ */
+const RELAY_HEADERS: ReadonlySet<string> = new Set([
+  'forwarded', 'via', 'x-real-ip', 'x-client-ip', 'true-client-ip', 'cdn-loop',
+  'x-amz-cf-id', 'x-amzn-trace-id', 'cf-connecting-ip', 'cf-ray', 'fastly-client-ip', 'x-envoy-external-address',
+]);
+const isRelayHeader = (name: string): boolean => name.startsWith('x-forwarded-') || name.startsWith('cloudfront-') || RELAY_HEADERS.has(name);
+
+/**
+ * Whether a request started on this instance: a process here that opened the
+ * socket itself, not something a proxy passed on.
+ *
+ *   - the TCP peer is loopback. The SOCKET's address, never req.ip: that one is
+ *     derived from X-Forwarded-For and is whatever the trusted hops say;
+ *   - it carries no header a relaying proxy adds. In production every request
+ *     from the internet arrives from Caddy on loopback, and Caddy marks each one;
+ *   - it names the server by a loopback name. What Caddy forwards keeps the
+ *     public Host.
+ *
+ * A proxy on the instance that relayed WITHOUT marking its requests would make
+ * the whole internet look local. It would equally hand every client the same
+ * rate-limit key (docs/deploy/SECURITY-HEADERS.md 2.3), and all this unlocks is
+ * ON_INSTANCE_ROUTES, whose bodies are harmless by construction.
+ */
+export function isOnInstanceRequest(peer: string | undefined, headers: Readonly<Record<string, unknown>>): boolean {
+  if (!isLoopbackAddress(peer)) return false;
+  if (!isLoopbackHost(headers.host)) return false;
+  return !Object.keys(headers).some((h) => isRelayHeader(h.toLowerCase()));
 }
 
 // --- the gate ------------------------------------------------------------------------
@@ -305,6 +445,8 @@ export interface GateOptions {
   /** Normalised site origins (siteOriginsFrom). */
   site: readonly string[];
   routes?: readonly HostedRoute[];
+  /** Routes answered to a caller on this instance only (default ON_INSTANCE_ROUTES). */
+  onInstance?: readonly HostedRoute[];
   limiter?: KeyedLimiter;
 }
 
@@ -312,17 +454,24 @@ export interface GateOptions {
  * Install the hosted gate: origin secret, allow-list, input shape, site
  * origin for state-changing routes, then the per-client limits. CORS preflights
  * pass through to @fastify/cors, which answers them for the site origins only.
+ *
+ * A request that started on this instance may also reach ON_INSTANCE_ROUTES,
+ * without the origin secret. For every other caller those are a 403 without
+ * the secret and a 404 with it - exactly what a path that does not exist gets.
  */
 export function installHostedGate(app: FastifyInstance, o: GateOptions): KeyedLimiter {
   const limiter = o.limiter ?? new KeyedLimiter();
   const routes = o.routes ?? HOSTED_ROUTES;
+  const onInstance = o.onInstance ?? ON_INSTANCE_ROUTES;
+  const secrets = originSecretDigests(o.cfg.originSecrets);
   app.addHook('onRequest', async (req, reply) => {
     if (req.method === 'OPTIONS') return;
     const pattern = req.routeOptions?.url;
-    if (o.cfg.originSecret && pattern !== '/api/health' && !secretMatches(req.headers[ORIGIN_SECRET_HEADER], o.cfg.originSecret)) {
+    const local = isOnInstanceRequest(req.raw.socket?.remoteAddress, req.headers) ? hostedRoute(req.method, pattern, onInstance) : null;
+    if (!local && secrets.length && pattern !== '/api/health' && !originSecretAccepted(req.headers[ORIGIN_SECRET_HEADER], secrets)) {
       return reply.code(403).send({ error: 'forbidden', source: 'server' });
     }
-    const route = hostedRoute(req.method, pattern, routes);
+    const route = local ?? hostedRoute(req.method, pattern, routes);
     if (!route) return reply.code(404).send({ error: 'not found', source: 'server' });
     const repeated = repeatedParam(req.query);
     if (repeated) return reply.code(400).send({ error: `query parameter "${repeated}" is repeated`, source: 'validation' });
@@ -378,6 +527,83 @@ export function installServerSigningGate(app: FastifyInstance): void {
       hint: 'Enable trading in the app. VALUETRADE_SERVER_SIGNING=1 turns server-side signing back on for a local, single-user setup only.',
     });
   });
+}
+
+// --- the indexer's health, for monitoring ------------------------------------------------
+
+/** What /api/vs/index/health answers: numbers and booleans, nothing else. */
+export interface IndexerHealth {
+  /** When the indexer last published its status (ms since the epoch); it does so every 30 s. */
+  at: number | null;
+  /** venue -> its trade stream is connected. */
+  streams: Record<string, boolean>;
+  /** The event loop's worst delay: within the last minute, and since the indexer started. */
+  loopLagMs: { lastMinute: number | null; sinceStart: number | null };
+  /** lane -> its counts (a lane is one upstream budget's work queue). */
+  lanes: Record<string, { queued: number | null; done: number | null; failed: number | null; backoffMs: number | null }>;
+  /** When the boards were last built, and how long that took. Null: not yet. */
+  lastBuildAt: number | null;
+  lastBuildMs: number | null;
+  /**
+   * The indexer has recorded an error since it started (it keeps the last one,
+   * so this stays true). The text stays in its own log.
+   */
+  errorSinceStart: boolean;
+}
+
+/** A venue or lane name. Never an address (0x...), a path or anything long. */
+const HEALTH_NAME = /^[a-z][a-z0-9_]{0,23}$/;
+const HEALTH_MAX_NAMES = 16;
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+const amount = (v: unknown): number | null => {
+  const n = finite(v);
+  return n === null ? null : Math.max(0, Math.round(n));
+};
+const stamp = (v: unknown): number | null => {
+  const n = finite(v);
+  return n !== null && n > 0 ? Math.round(n) : null;
+};
+
+function namedEntries(v: unknown): Array<[string, unknown]> {
+  if (!isRecord(v)) return [];
+  return Object.entries(v).filter(([k]) => HEALTH_NAME.test(k)).slice(0, HEALTH_MAX_NAMES);
+}
+
+/**
+ * The indexer's status (the `indexer_status` row its worker publishes) reduced
+ * to what monitoring needs: which streams are up, the loop lag, each lane's
+ * counts, the last build.
+ *
+ * A PROJECTION, not a filter: every field is picked by name and rebuilt as a
+ * number or a boolean, so nothing else can leave with it - not the wallet a
+ * lane is working on, not an error's text (they name addresses and URLs), not
+ * a pid, a path or a budget - whatever the indexer adds to its status later.
+ * Null when there is no status to read.
+ */
+export function indexerHealth(status: unknown): IndexerHealth | null {
+  if (!isRecord(status)) return null;
+  // `sockets` is the live connection; an older indexer only published `streams`.
+  const up = isRecord(status.sockets) ? status.sockets : status.streams;
+  const lag = isRecord(status.loopLagMs) ? status.loopLagMs : {};
+  const streams: IndexerHealth['streams'] = {};
+  // The indexer publishes since-when a stream is up, or null while it is down.
+  for (const [venue, v] of namedEntries(up)) streams[venue] = Boolean(v);
+  const lanes: IndexerHealth['lanes'] = {};
+  for (const [name, v] of namedEntries(status.lanes)) {
+    const l = isRecord(v) ? v : {};
+    lanes[name] = { queued: amount(l.queued), done: amount(l.done), failed: amount(l.failed), backoffMs: amount(l.backoffMs) };
+  }
+  return {
+    at: stamp(status.at),
+    streams,
+    loopLagMs: { lastMinute: amount(lag.lastMinute), sinceStart: amount(lag.sinceStart) },
+    lanes,
+    lastBuildAt: stamp(status.lastBuildAt),
+    lastBuildMs: amount(status.lastBuildMs),
+    errorSinceStart: Boolean(status.lastError),
+  };
 }
 
 // --- response headers --------------------------------------------------------------------
