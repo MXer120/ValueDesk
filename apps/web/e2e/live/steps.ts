@@ -15,6 +15,7 @@
 import { CALL_FOR_PERMIT_CONTRACT, CLOB_GATEWAY, CROSS_ENGINE_ACCOUNT_ID, TransferType, WITHDRAW_TOKEN_TARGET, canonicalDecimal, unwrapList } from '@sodex-core';
 import { decodeFunctionData, parseAbi } from 'viem';
 import { cancelOrder, placeOrder } from '../../src/trading/actions';
+import { activeBuilder, fullyApproved, orderBuilder, ratesOf } from '../../src/trading/builder';
 import { tradingConfig } from '../../src/trading/config';
 import {
   balancesOf,
@@ -32,7 +33,16 @@ import {
 import { CANONICAL_USDC, EVM_CHAINS, erc20TransferData, formatUnits, parseUnits, sendUsdcDeposit, usdcRoutes } from '../../src/trading/onboard';
 import { coinPrices, priceOf } from '../../src/trading/prices';
 import { VALUECHAIN_RPC } from '../../src/trading/rpc';
-import { enableTrading, getTradingState, keyStillRegistered, sodexAccountId, tradingKeyName } from '../../src/trading/session';
+import {
+  enableTrading,
+  getTradingState,
+  keyStillRegistered,
+  readBuilderApproval,
+  refreshBuilderApproval,
+  revokeBuilderApproval,
+  sodexAccountId,
+  tradingKeyName,
+} from '../../src/trading/session';
 import type { StoredKey } from '../../src/trading/vault';
 import { SafetyStop, allowedReceivers, armed, coinNamed, receiverNamed, routeOf, type Ctx, type StepId } from './context';
 import type { Expectation } from './guard';
@@ -130,9 +140,25 @@ function orderExpect(o: OrderSpec): Expectation {
         if ((x.reduceOnly ?? false) !== (o.reduceOnly ?? false)) return `reduceOnly ${x.reduceOnly}, expected ${o.reduceOnly ?? false}`;
         if (x.stopPrice !== undefined) return 'a trigger order was not expected';
       }
-      return null;
+      return builderProblem(o.engine, b);
     },
   };
+}
+
+/**
+ * The builder an order body carries must be exactly what the run's config and
+ * the account's approval entitle the app to attach on that engine: the
+ * configured id and fee, as the LAST field of the batch - or none at all.
+ */
+function builderProblem(engine: 'spot' | 'perps', body: Record<string, unknown>): string | null {
+  const want = orderBuilder(tradingConfig().builder, getTradingState().builder, engine);
+  const got = body.builder as { id?: unknown; fee?: unknown } | undefined;
+  if (!want) return got === undefined ? null : `carries a builder (${JSON.stringify(got)}) although none is configured and approved for ${engine}`;
+  if (got === undefined) return `carries no builder; expected {id: ${want.id}, fee: ${want.fee}} on ${engine}`;
+  if (got.id !== want.id || got.fee !== want.fee) return `builder ${JSON.stringify(got)}, expected {id: ${want.id}, fee: ${want.fee}}`;
+  if (Object.keys(got).join(',') !== 'id,fee') return 'the builder must be {id, fee} in that order';
+  if (Object.keys(body).at(-1) !== 'builder') return 'the builder must be the last field of the batch';
+  return null;
 }
 
 interface Placed {
@@ -180,10 +206,13 @@ async function registerKey(ctx: Ctx): Promise<number> {
   const accountId = await sodexAccountId(ctx.owner);
   if (!accountId) throw new SafetyStop('this wallet has no SoDEX account yet - run deposit-external first');
   const name = tradingKeyName();
+  const fee = activeBuilder(tradingConfig().builder);
   await armed(
     ctx,
     {
       expect: [
+        // Only sent when SoDEX does not already list the approval; an unused expectation is fine.
+        ...(fee ? [builderApprovalExpect(accountId, fee.id, fee.maxFeeRate, `approve builder #${fee.id} up to ${fee.maxFeeRate}`)] : []),
         {
           kind: 'key-registration',
           label: `addAPIKey "${name}" (spot + perps)`,
@@ -202,6 +231,7 @@ async function registerKey(ctx: Ctx): Promise<number> {
       policy: {
         typedData: (td) => {
           const m = td.message;
+          if (fee && td.primaryType === 'ApproveBuilderFeeAction') return builderTypedDataProblem(m, accountId, fee.id, fee.maxFeeRate);
           if (td.primaryType !== 'UserSignedAddAPIKeyAction') return `unexpected typed data ${td.primaryType}`;
           if (String(m.accountID) !== String(accountId)) return `account ${String(m.accountID)}, expected ${accountId}`;
           if (m.name !== name) return `key name ${String(m.name)}, expected ${name}`;
@@ -210,10 +240,28 @@ async function registerKey(ctx: Ctx): Promise<number> {
         },
       },
     },
-    () => enableTrading({ owner: ctx.owner, provider: ctx.provider, remember: true }),
+    () =>
+      enableTrading({
+        owner: ctx.owner,
+        provider: ctx.provider,
+        remember: true,
+        // The run's config IS the consent: what the app's dialog would state is noted, then approved.
+        ...(fee
+          ? {
+              confirmBuilderFee: async (terms) => {
+                ctx.rec.note(
+                  `builder fee disclosure: builder #${terms.builderId}, perps ${terms.perps} / spot ${terms.spot} tenths of a bp per fill, maximum ${terms.maxFeeRate}, ${terms.required ? 'required' : 'optional'}` +
+                    `${terms.alreadyApproved.length ? `, already approved on ${terms.alreadyApproved.join(' + ')}` : ''} - approving (ONE more signature)`,
+                );
+                return 'approve' as const;
+              },
+            }
+          : {}),
+      }),
   );
   const st = getTradingState();
   if (st.status !== 'enabled' || !st.accountId) throw new Error(`trading did not switch on (status ${st.status})`);
+  if (fee) ctx.rec.note(`builder approval SoDEX lists for #${fee.id}: ${st.builder ? JSON.stringify(st.builder.engines) : 'none yet'}`);
   ctx.rec.note(`trading key "${st.keyName}" ${st.keyAddress} on ${(st.engines ?? []).join(' + ')}, account #${st.accountId}, expires ${new Date(st.expiresAt ?? 0).toISOString()}`);
   return st.accountId;
 }
@@ -361,6 +409,79 @@ async function stepEnableTrading(ctx: Ctx): Promise<void> {
     }),
   );
   ctx.rec.amount('trading key', `${st.keyName} ${st.keyAddress}`);
+
+  const fee = activeBuilder(tradingConfig().builder);
+  if (fee) {
+    const listed = await ctx.rec.sub(`verify: SoDEX lists the approval of builder #${fee.id} on every engine it is charged on`, () =>
+      waitFor(ctx, 'the builder approval in GET /user/{wallet}/builders', {
+        timeoutMs: Math.max(settleMs(ctx), 60_000),
+        intervalMs: 5_000,
+        probe: () => readBuilderApproval(ctx.owner),
+        done: (a) => fullyApproved(fee, ratesOf(a)),
+        show: (a) => (a ? `listed ${JSON.stringify(a.engines)}` : 'not listed (indexed reads lag an approval)'),
+      }),
+    );
+    // The app attaches the fee from what its session knows: bring it up to what SoDEX lists.
+    await refreshBuilderApproval();
+    ctx.rec.amount('builder approval', `builder #${fee.id}: ${JSON.stringify(listed?.engines ?? {})} (tenths of a bp)`);
+  }
+}
+
+/** Expect ONE approval write for this account and builder, with exactly this maximum (0 = revoke). */
+function builderApprovalExpect(accountId: number, builderId: number, maxFeeRate: number, label: string): Expectation {
+  return {
+    kind: 'builder-approval',
+    label,
+    check: (r) => {
+      const b = r.body ?? {};
+      if (Object.keys(b).join(',') !== 'accountID,builderID,maxFeeRate') return `body keys ${Object.keys(b).join(',')}, expected accountID,builderID,maxFeeRate`;
+      if (b.accountID !== accountId) return `account ${b.accountID}, expected ${accountId}`;
+      if (b.builderID !== builderId) return `builder ${b.builderID}, expected ${builderId}`;
+      if (b.maxFeeRate !== maxFeeRate) return `maxFeeRate ${b.maxFeeRate}, expected ${maxFeeRate}`;
+      return null;
+    },
+  };
+}
+
+/** The wallet signs an ApproveBuilderFeeAction only for this account, this builder and this maximum. */
+function builderTypedDataProblem(m: Record<string, unknown>, accountId: number, builderId: number, maxFeeRate: number): string | null {
+  if (String(m.accountID) !== String(accountId)) return `account ${String(m.accountID)}, expected ${accountId}`;
+  if (String(m.builderID) !== String(builderId)) return `builder ${String(m.builderID)}, expected ${builderId}`;
+  if (String(m.maxFeeRate) !== String(maxFeeRate)) return `maxFeeRate ${String(m.maxFeeRate)}, expected ${maxFeeRate}`;
+  if (String(m.chainID) !== String(tradingConfig().chainId)) return `SoDEX chain ${String(m.chainID)}`;
+  return null;
+}
+
+/** Clear the builder approval with ONE wallet signature (maxFeeRate 0), through the app's own revokeBuilderApproval. */
+async function stepRevokeBuilder(ctx: Ctx): Promise<void> {
+  const b = ctx.cfg.builder;
+  if (!b) throw new SafetyStop('no builder is configured for this run');
+  const accountId = await sodexAccountId(ctx.owner);
+  if (!accountId) throw new SafetyStop('this wallet has no SoDEX account');
+  const r = await ctx.rec.sub(`revoke the approval of builder #${b.id} (one wallet signature, maxFeeRate 0)`, () =>
+    armed(
+      ctx,
+      {
+        expect: [builderApprovalExpect(accountId, b.id, 0, `revoke builder #${b.id}`)],
+        policy: {
+          typedData: (td) =>
+            td.primaryType === 'ApproveBuilderFeeAction' ? builderTypedDataProblem(td.message, accountId, b.id, 0) : `unexpected typed data ${td.primaryType}`,
+        },
+      },
+      () => revokeBuilderApproval({ owner: ctx.owner, provider: ctx.provider, builderId: b.id }),
+    ),
+  );
+  if (r.nothingToRevoke) ctx.rec.note('SoDEX listed no approval for this builder - nothing was signed');
+  await ctx.rec.sub('verify: the builder is gone from both lists', () =>
+    waitFor(ctx, 'the approval to leave GET /user/{wallet}/builders', {
+      timeoutMs: Math.max(settleMs(ctx), 60_000),
+      intervalMs: 5_000,
+      probe: () => readBuilderApproval(ctx.owner, b.id),
+      done: (a) => a === null,
+      show: (a) => (a ? `still listed ${JSON.stringify(a.engines)}` : 'gone'),
+    }),
+  );
+  ctx.rec.amount('builder approval', `builder #${b.id}: revoked${r.tradingTurnedOff ? ' (trading turned off: this run requires the fee)' : ''}`);
 }
 
 async function stepTransfers(ctx: Ctx): Promise<void> {
@@ -1022,4 +1143,5 @@ export const STEPS: Record<StepId, (ctx: Ctx) => Promise<void>> = {
   'extra-deposits': stepExtraDeposits,
   'extra-withdrawals': stepExtraWithdrawals,
   cleanup: stepCleanup,
+  'revoke-builder': stepRevokeBuilder,
 };

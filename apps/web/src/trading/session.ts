@@ -25,6 +25,22 @@
  * and sent straight to SoDEX (actions.ts). No Valuescan server ever holds a key
  * that can trade, sees an order, or can place one.
  *
+ * THE BUILDER FEE (only when the build configures one - config.ts; otherwise
+ * none of this runs and enabling is exactly the one signature above). Before
+ * the key is registered, the account's approvals are READ from SoDEX:
+ *   - already approved for what the build charges: nothing is asked. The
+ *     approval belongs to the account, so it survives every key rotation;
+ *   - not approved: the UI discloses the fee and asks (`confirmBuilderFee`).
+ *     On yes, the wallet signs ONE more typed-data message
+ *     (ApproveBuilderFeeAction, the maximum only), it is sent from here, and
+ *     both engines are read again - with pauses, since reads lag a write.
+ * The fee is then attached per engine ONLY where SoDEX lists the approval
+ * (actions.ts). Optional builds (the default): declining, or SoDEX refusing,
+ * means trading works without a builder fee, and the reason is logged.
+ * Required builds: without the approval trading stays off, and no key is
+ * registered. Why a separate signature rather than the combined
+ * AddAPIKeyWithBuilder: builderApproval.ts and docs/BUILDER-CODES.md.
+ *
  * WHAT THE KEY CAN DO. SoDEX only lets a restricted key be one that cannot
  * trade, so the trading key is an ORDINARY key: it can trade, cancel, change
  * leverage and margin, and move funds between the owner's own spot account,
@@ -48,15 +64,27 @@ import {
   prepareApiKeyRegistrationExchange,
   prepareApiKeyRevocationExchange,
   signingKeyFrom,
+  type BuilderEngineRates,
   type Engine,
   type Network,
   type NonceManager,
   type SigningKeyRef,
 } from '@sodex-core';
+import {
+  activeBuilder,
+  approvalFromRates,
+  builderTerms,
+  fullyApproved,
+  partlyApproved,
+  sameApproval,
+  type BuilderApproval,
+  type BuilderTerms,
+} from './builder';
+import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from './builderApproval';
 import { tradingConfig } from './config';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
 import { openVault, type KeyVault, type StoredKey } from './vault';
-import { addOrSwitchChain, getChainId, signTypedData, type Eip1193Provider } from '../wallet';
+import { addOrSwitchChain, getChainId, isUserRejection, signTypedData, type Eip1193Provider } from '../wallet';
 import { logger } from '../log';
 
 const log = logger('trade');
@@ -82,8 +110,8 @@ export interface TradingState {
   engines: Engine[] | null;
   /** The key survives a reload on this device. */
   remembered: boolean;
-  /** The builder approval the key carries. */
-  builder: { id: number; maxFeeRate: number } | null;
+  /** The builder-fee approval SoDEX lists for this account, per engine (builder.ts); null = none. */
+  builder: BuilderApproval | null;
   /** Why trading went off, when it went off on its own (expired, revoked). */
   reason: string | null;
 }
@@ -92,7 +120,18 @@ export class TradingError extends Error {
   override name = 'TradingError';
   constructor(
     message: string,
-    readonly kind: 'not-enabled' | 'expired' | 'no-account' | 'disabled' | 'writes-off' | 'wrong-wallet' | 'network',
+    readonly kind:
+      | 'not-enabled'
+      | 'expired'
+      | 'no-account'
+      | 'disabled'
+      | 'writes-off'
+      | 'wrong-wallet'
+      | 'network'
+      /** This build requires the builder-fee approval and it is not there. */
+      | 'builder-required'
+      /** The user closed the builder-fee dialog: nothing was signed, nothing changed. */
+      | 'cancelled',
   ) {
     super(message);
   }
@@ -124,6 +163,9 @@ const OFF = (owner: string | null, reason: string | null = null): TradingState =
 let state: TradingState = OFF(null);
 let signer: { key: SigningKeyRef; meta: StoredKey } | null = null;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+/** An approval SoDEX accepted (or may have) that its reads do not list on every engine yet. */
+let builderPending = false;
+let builderTimers: ReturnType<typeof setTimeout>[] = [];
 const listeners = new Set<() => void>();
 
 let vaultP: Promise<KeyVault> | null = null;
@@ -168,11 +210,18 @@ export function subscribeTrading(fn: () => void): () => void {
   return () => listeners.delete(fn);
 }
 
+function clearBuilderTimers(): void {
+  for (const t of builderTimers) clearTimeout(t);
+  builderTimers = [];
+}
+
 function dropSigner(): void {
   if (signer) (signer.key.privateKey as Uint8Array).fill(0);
   signer = null;
   if (expiryTimer) clearTimeout(expiryTimer);
   expiryTimer = undefined;
+  clearBuilderTimers();
+  builderPending = false;
 }
 
 function adopt(meta: StoredKey, privateKey: Uint8Array, remembered: boolean): void {
@@ -308,6 +357,9 @@ export async function restoreTrading(address: string | null): Promise<TradingSta
     if (hit) {
       adopt(hit.meta, hit.privateKey, v.persistent);
       void confirmKeyStillRegistered(hit.meta);
+      // The approval is the account's, and can change behind this key's back
+      // (approved or revoked on another device): what the key stored is a hint.
+      if (activeBuilder(tradingConfig().builder)) void refreshBuilderApproval();
     } else {
       // Nothing stored: never enabled here, expired, or another tab turned it off.
       const expired = state.status === 'expired';
@@ -398,11 +450,23 @@ export function tradingKeyName(ua: string = typeof navigator !== 'undefined' ? n
   return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) ? 'valuescan-mobile' : 'valuescan-web';
 }
 
+/** What the user answered to the builder-fee disclosure. */
+export type BuilderChoice = 'approve' | 'decline' | 'cancel';
+
 export interface EnableOptions {
   owner: string;
   provider: Eip1193Provider;
   /** Keep the key on this device for its lifetime (default true). */
   remember?: boolean;
+  /**
+   * Show the builder-fee disclosure and return the user's answer. Called only
+   * when a builder is configured AND SoDEX does not list a covering approval.
+   * 'cancel' aborts enabling altogether. Without this callback nothing is ever
+   * approved: no disclosure, no signature.
+   */
+  confirmBuilderFee?: (terms: BuilderTerms) => Promise<BuilderChoice>;
+  /** Which wallet prompt comes next (the UI says where to approve, and what). */
+  onStep?: (step: 'builder-approval' | 'key-registration') => void;
 }
 
 /** The key's lifetime: the configured TTL, kept inside SoDEX-side and sodex-core limits. */
@@ -429,6 +493,10 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
     );
   }
 
+  // The builder fee first (a no-op without a configured builder): in a build
+  // that requires it, a refusal must leave no key behind on SoDEX.
+  const fee = await settleBuilderApproval(o, owner, accountId);
+
   // The domain is whatever chain the wallet is on: nothing to switch.
   const walletChain = await getChainId(o.provider);
   const tk = generateTradingKey();
@@ -453,6 +521,7 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
       walletChain,
       expiresAt,
     });
+    o.onStep?.('key-registration');
     const signature = await signTypedData(o.provider, owner, prepared.typedData);
     // Recovers the signer first: a signature from any other account is refused here.
     const requests = assembleExchangeRequests(prepared, signature, { base: '' });
@@ -503,19 +572,395 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
       keyAddress: tk.address.toLowerCase(),
       expiresAt,
       createdAt: Date.now(),
-      builder: null,
+      builder: fee.approval,
       engines: accepted.length === BOTH.length ? undefined : accepted,
     };
     const v = await vault();
     const remember = o.remember !== false && v.persistent;
     await v.save(meta, tk.privateKey, { persist: remember });
     adopt(meta, tk.privateKey.slice(), remember);
+    if (fee.pending) watchPendingBuilderApproval();
     announce(owner, cfg.network);
-    log.info('trading enabled', { network: cfg.network, accountId, key: name, engines: accepted, remembered: remember });
+    log.info('trading enabled', {
+      network: cfg.network,
+      accountId,
+      key: name,
+      engines: accepted,
+      remembered: remember,
+      ...(activeBuilder(cfg.builder) ? { builderFee: fee.approval?.engines ?? 'none', builderPending: fee.pending } : {}),
+    });
     return state;
   } finally {
     destroyTradingKey(tk);
   }
+}
+
+// --- the builder fee ----------------------------------------------------------------
+
+const BUILDER_REQUIRED_DECLINED =
+  'Trading through Valuescan requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account.';
+
+interface BuilderOutcome {
+  /** What SoDEX lists for the configured builder (per engine), or null. */
+  approval: BuilderApproval | null;
+  /** An approval may exist that the reads do not show on every engine yet. */
+  pending: boolean;
+}
+
+/**
+ * Bring the account's builder approval to what this build charges, or find out
+ * that it will not be. Never signs without the user's yes; never treats an
+ * unanswered write as a no without reading first; every attempt uses a fresh
+ * nonce and starts with a read, so pressing Enable again is a safe retry.
+ */
+async function settleBuilderApproval(o: EnableOptions, owner: string, accountId: number): Promise<BuilderOutcome> {
+  const cfg = tradingConfig();
+  const b = activeBuilder(cfg.builder);
+  if (!b) return { approval: null, pending: false };
+
+  let rates: BuilderEngineRates;
+  try {
+    rates = await readBuilderRates(owner, b.id);
+  } catch (e) {
+    if (b.required) {
+      throw new TradingError('Could not reach SoDEX to check your builder fee approval. Check your connection and enable trading again.', 'network');
+    }
+    log.warn('builder fee: SoDEX could not be asked about the approval; trading is enabled without it for now', { builderId: b.id, error: String(e) });
+    return { approval: null, pending: true };
+  }
+  if (fullyApproved(b, rates)) {
+    log.info('builder fee: already approved on this account - nothing to sign', { builderId: b.id, rates });
+    return { approval: approvalFromRates(b.id, rates), pending: false };
+  }
+
+  const choice: BuilderChoice = o.confirmBuilderFee ? await o.confirmBuilderFee(builderTerms(b, rates)) : 'decline';
+  if (choice !== 'approve') {
+    const how = !o.confirmBuilderFee ? 'no disclosure could be shown' : choice === 'cancel' ? 'the dialog was closed' : 'declined';
+    if (b.required && !partlyApproved(b, rates)) {
+      log.info('builder fee: not approved in a build that requires it - trading stays off', { builderId: b.id, how });
+      throw new TradingError(BUILDER_REQUIRED_DECLINED, 'builder-required');
+    }
+    if (choice === 'cancel') throw new TradingError('Enabling trading was cancelled.', 'cancelled');
+    log.info('builder fee: not approved - orders go out without a builder fee', { builderId: b.id, how, kept: rates });
+    return { approval: approvalFromRates(b.id, rates), pending: false };
+  }
+
+  // The user said yes: ONE wallet signature, for the maximum only.
+  o.onStep?.('builder-approval');
+  let accepted = false;
+  let unanswered = false;
+  let walletSaidNo = false;
+  let reason = '';
+  try {
+    await submitBuilderApproval({
+      owner,
+      provider: o.provider,
+      accountId,
+      builderId: b.id,
+      maxFeeRate: b.maxFeeRate,
+      nonce: () => nonces().next(nonceKey(owner, cfg.chainId)),
+    });
+    accepted = true;
+  } catch (e) {
+    walletSaidNo = isUserRejection(e);
+    unanswered = e instanceof OutcomeUnknownError;
+    reason = walletSaidNo
+      ? 'declined in the wallet'
+      : unanswered
+        ? 'SoDEX did not answer'
+        : e instanceof SodexApiError
+          ? `SoDEX refused it: ${e.message}`
+          : e instanceof Error
+            ? e.message
+            : String(e);
+    log.warn('builder fee: the approval did not go through', {
+      builderId: b.id,
+      maxFeeRate: b.maxFeeRate,
+      reason,
+      ...(e instanceof SodexApiError ? { code: e.code, httpStatus: e.httpStatus, hint: e.hint } : {}),
+    });
+  }
+  if (accepted || unanswered) {
+    // Reads lag the write, and no answer is not a no: read both engines again before judging.
+    const seen = await pollBuilderRates(owner, b.id, (r) => fullyApproved(b, r));
+    if (seen) rates = seen;
+  }
+
+  const approval = approvalFromRates(b.id, rates);
+  const full = fullyApproved(b, rates);
+  if (b.required && !accepted && !partlyApproved(b, rates)) {
+    throw new TradingError(
+      walletSaidNo
+        ? BUILDER_REQUIRED_DECLINED
+        : `The builder fee approval did not go through (${reason}). Trading through Valuescan requires it, so trading stays off. Enable trading again to retry.`,
+      'builder-required',
+    );
+  }
+  if (full) log.info('builder fee: approved', { builderId: b.id, rates });
+  else if (accepted) log.warn('builder fee: SoDEX accepted the approval but does not list it on every engine yet', { builderId: b.id, rates });
+  else log.warn('builder fee: not approved - orders go out without a builder fee where SoDEX lists none', { builderId: b.id, reason, rates });
+  return { approval, pending: !full && (accepted || unanswered) };
+}
+
+/** Store what SoDEX lists with the key (so orders and the UI follow it) and tell listeners. */
+async function setBuilderApproval(next: BuilderApproval | null): Promise<void> {
+  const s = signer;
+  if (!s) return;
+  const meta: StoredKey = { ...s.meta, builder: next };
+  signer = { key: s.key, meta };
+  if (state.status === 'enabled') set({ ...state, builder: next });
+  try {
+    await (await vault()).save(meta, s.key.privateKey, { persist: state.remembered });
+  } catch (e) {
+    log.warn('the builder approval could not be stored with the trading key (it is re-read on the next load)', { error: String(e) });
+  }
+}
+
+/**
+ * Re-read the account's approval for the configured builder and follow it:
+ * attach where SoDEX lists it, stop where it is gone (revoked elsewhere, or
+ * never landed). Unreachable is not "revoked": what was known is kept.
+ */
+export async function refreshBuilderApproval(): Promise<BuilderApproval | null> {
+  const s = signer;
+  const b = activeBuilder(tradingConfig().builder);
+  if (!s || !b) return s?.meta.builder ?? null;
+  let rates: BuilderEngineRates;
+  try {
+    rates = await readBuilderRates(s.meta.owner, b.id);
+  } catch (e) {
+    log.debug('builder approval re-read failed; keeping what was known', { error: String(e) });
+    return s.meta.builder;
+  }
+  // The key may have been dropped or replaced while SoDEX was asked.
+  const cur = signer;
+  if (!cur || cur.meta.keyAddress !== s.meta.keyAddress) return cur?.meta.builder ?? null;
+  const before = cur.meta.builder;
+  const next = approvalFromRates(b.id, rates);
+  if (fullyApproved(b, rates)) {
+    builderPending = false;
+    clearBuilderTimers();
+  }
+  if (!sameApproval(next, before)) {
+    const lost = (['spot', 'perps'] as const).filter((e) => before?.engines?.[e] !== undefined && next?.engines?.[e] === undefined);
+    if (lost.length) log.warn('builder fee: SoDEX no longer lists the approval; the fee is no longer attached there', { builderId: b.id, engines: lost });
+    else log.info('builder fee: approval now listed by SoDEX', { builderId: b.id, rates });
+    await setBuilderApproval(next);
+  }
+  return next;
+}
+
+/** After an approval SoDEX accepted but does not list yet: look again a few times, then on demand. */
+function watchPendingBuilderApproval(delays: readonly number[] = [3_000, 10_000, 30_000, 90_000]): void {
+  clearBuilderTimers();
+  builderPending = true;
+  for (const d of delays) {
+    const t = setTimeout(() => {
+      if (builderPending) void refreshBuilderApproval();
+    }, d);
+    (t as unknown as { unref?: () => void }).unref?.();
+    builderTimers.push(t);
+  }
+}
+
+/** True while an accepted approval is not listed on every engine (actions.ts re-reads before an order then). */
+export const builderApprovalPending = (): boolean => builderPending;
+
+/**
+ * What SoDEX lists for `builderId` (default: the configured builder) on
+ * `owner`'s account - a public read, usable with trading off (the key view).
+ */
+export async function readBuilderApproval(owner: string, builderId?: number): Promise<BuilderApproval | null> {
+  const id = builderId ?? tradingConfig().builder?.id;
+  if (!id) return null;
+  return approvalFromRates(id, await readBuilderRates(owner, id));
+}
+
+export interface ApproveBuilderResult {
+  /**
+   * 'already'   SoDEX listed a covering approval: nothing was signed.
+   * 'approved'  signed, accepted, and listed on every engine that is charged.
+   * 'pending'   accepted (or no answer came back) but not listed on every
+   *             engine yet - it is re-read later, and before the next order.
+   * 'declined'  the disclosure was not accepted: nothing was signed.
+   */
+  status: 'already' | 'approved' | 'pending' | 'declined';
+  /** What SoDEX lists for the configured builder now, per engine; null = nothing. */
+  approval: BuilderApproval | null;
+}
+
+/**
+ * Approve the configured builder's fee on its own: the same disclosure, the
+ * same ONE wallet signature (the maximum only) and the same reading of SoDEX's
+ * list as when enabling trading - for an account that enabled trading without
+ * the fee, approved less than this build charges, or holds a key from before
+ * the build had a builder. Works with trading off too: the approval belongs to
+ * the account, and a key enabled later finds it.
+ *
+ * Nothing is signed without `confirmBuilderFee` answering 'approve', and
+ * nothing is signed blind: when SoDEX cannot be asked what it lists, this
+ * throws. Throws WalletError when the wallet declines, SodexApiError when SoDEX
+ * refuses (its reason is the message).
+ */
+export async function approveBuilderFee(o: {
+  owner: string;
+  provider: Eip1193Provider;
+  confirmBuilderFee?: (terms: BuilderTerms) => Promise<BuilderChoice>;
+  onStep?: (step: 'builder-approval') => void;
+}): Promise<ApproveBuilderResult> {
+  const cfg = tradingConfig();
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  const b = activeBuilder(cfg.builder);
+  if (!b) throw new TradingError('This build of Valuescan charges no builder fee: there is nothing to approve.', 'not-enabled');
+  const owner = o.owner.toLowerCase();
+  const mine = signer && signer.meta.owner === owner ? signer : null;
+
+  /** Bring this wallet's session (if it has one here) up to what SoDEX lists. */
+  const follow = async (rates: BuilderEngineRates, watch: boolean | 'keep'): Promise<BuilderApproval | null> => {
+    const approval = approvalFromRates(b.id, rates);
+    const cur = signer;
+    if (mine && cur && cur.meta.keyAddress === mine.meta.keyAddress) {
+      if (!sameApproval(approval, cur.meta.builder)) await setBuilderApproval(approval);
+      if (watch === true) watchPendingBuilderApproval();
+      else if (watch === false) {
+        builderPending = false;
+        clearBuilderTimers();
+      }
+    }
+    return approval;
+  };
+
+  let rates: BuilderEngineRates;
+  try {
+    rates = await readBuilderRates(owner, b.id);
+  } catch (e) {
+    log.warn('builder fee: SoDEX could not be asked about the approval; nothing was signed', { builderId: b.id, error: String(e) });
+    throw new TradingError('Could not reach SoDEX to check your builder fee approval. Check your connection and try again.', 'network');
+  }
+  if (fullyApproved(b, rates)) {
+    log.info('builder fee: already approved on this account - nothing to sign', { builderId: b.id, rates });
+    return { status: 'already', approval: await follow(rates, false) };
+  }
+  const choice: BuilderChoice = o.confirmBuilderFee ? await o.confirmBuilderFee(builderTerms(b, rates, 'approve')) : 'decline';
+  if (choice !== 'approve') {
+    log.info('builder fee: not approved - nothing was signed', { builderId: b.id, how: o.confirmBuilderFee ? choice : 'no disclosure could be shown' });
+    return { status: 'declined', approval: await follow(rates, 'keep') };
+  }
+  const accountId = mine?.meta.accountId ?? (await sodexAccountId(owner));
+  if (!accountId) throw new TradingError('This wallet has no SoDEX account.', 'no-account');
+
+  o.onStep?.('builder-approval');
+  let unanswered = false;
+  try {
+    await submitBuilderApproval({
+      owner,
+      provider: o.provider,
+      accountId,
+      builderId: b.id,
+      maxFeeRate: b.maxFeeRate,
+      nonce: () => nonces().next(nonceKey(owner, cfg.chainId)),
+    });
+  } catch (e) {
+    // No answer is not a no: read before judging. Anything else is a definite outcome for the caller.
+    if (!(e instanceof OutcomeUnknownError)) {
+      log.warn('builder fee: the approval did not go through', {
+        builderId: b.id,
+        maxFeeRate: b.maxFeeRate,
+        reason: isUserRejection(e) ? 'declined in the wallet' : e instanceof Error ? e.message : String(e),
+        ...(e instanceof SodexApiError ? { code: e.code, httpStatus: e.httpStatus, hint: e.hint } : {}),
+      });
+      throw e;
+    }
+    unanswered = true;
+  }
+  const seen = await pollBuilderRates(owner, b.id, (r) => fullyApproved(b, r));
+  if (seen) rates = seen;
+  const full = fullyApproved(b, rates);
+  if (unanswered && !full && !partlyApproved(b, rates)) {
+    throw new TradingError('SoDEX did not confirm the approval, and does not list it. Check your connection and try again.', 'network');
+  }
+  if (full) log.info('builder fee: approved', { builderId: b.id, rates });
+  else log.warn('builder fee: SoDEX accepted the approval but does not list it on every engine yet', { builderId: b.id, rates });
+  return { status: full ? 'approved' : 'pending', approval: await follow(rates, !full) };
+}
+
+export interface RevokeBuilderResult {
+  /** SoDEX lists the builder on neither engine any more. */
+  cleared: boolean;
+  /** Nothing had to be signed: there was no approval. */
+  nothingToRevoke: boolean;
+  /** This build requires the approval, so trading was turned off on this device. */
+  tradingTurnedOff: boolean;
+}
+
+/**
+ * Revoke the builder approval: ONE wallet signature for `maxFeeRate: 0`, then
+ * both engines are read until the builder is gone from both lists. Orders stop
+ * naming the builder as soon as SoDEX has taken the revocation (an order
+ * naming an unapproved builder is rejected). Works with trading off too.
+ *
+ * Throws WalletError when the wallet declines, SodexApiError when SoDEX
+ * refuses (it checks the BUILDER's balance even for a revocation).
+ */
+export async function revokeBuilderApproval(o: { owner: string; provider: Eip1193Provider; builderId?: number }): Promise<RevokeBuilderResult> {
+  const cfg = tradingConfig();
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  const owner = o.owner.toLowerCase();
+  const mine = signer && signer.meta.owner === owner ? signer : null;
+  const builderId = o.builderId ?? cfg.builder?.id ?? mine?.meta.builder?.id;
+  if (!builderId) throw new TradingError('There is no builder approval to revoke.', 'not-enabled');
+  const required = cfg.builder?.id === builderId && cfg.builder.required && !!activeBuilder(cfg.builder);
+
+  const gone = (r: BuilderEngineRates) => r.spot === null && r.perps === null;
+  const settle = async (cleared: boolean, nothingToRevoke: boolean): Promise<RevokeBuilderResult> => {
+    let tradingTurnedOff = false;
+    const cur = signer;
+    if (mine && cur && cur.meta.keyAddress === mine.meta.keyAddress) {
+      builderPending = false;
+      clearBuilderTimers();
+      if (cur.meta.builder?.id === builderId) await setBuilderApproval(null);
+      if (required && !nothingToRevoke) {
+        // Without the approval this build does not trade: the key is of no use here.
+        await disableTrading();
+        tradingTurnedOff = true;
+      }
+    }
+    return { cleared, nothingToRevoke, tradingTurnedOff };
+  };
+
+  // Read first: a second press after an unanswered revocation must not sign again for nothing.
+  const before = await readBuilderRates(owner, builderId);
+  if (gone(before)) {
+    log.info('builder approval: nothing to revoke', { builderId });
+    return settle(true, true);
+  }
+  const accountId = mine?.meta.accountId ?? (await sodexAccountId(owner));
+  if (!accountId) throw new TradingError('This wallet has no SoDEX account.', 'no-account');
+
+  let unanswered = false;
+  try {
+    await submitBuilderApproval({
+      owner,
+      provider: o.provider,
+      accountId,
+      builderId,
+      maxFeeRate: 0,
+      nonce: () => nonces().next(nonceKey(owner, cfg.chainId)),
+    });
+  } catch (e) {
+    if (!(e instanceof OutcomeUnknownError)) throw e;
+    unanswered = true;
+  }
+  const after = await pollBuilderRates(owner, builderId, gone);
+  const cleared = after !== null && gone(after);
+  if (unanswered && !cleared) {
+    throw new TradingError('SoDEX did not confirm the revocation, and still lists the approval. Check your connection and try again.', 'network');
+  }
+  if (cleared) log.info('builder approval revoked', { builderId });
+  else log.warn('builder approval: SoDEX accepted the revocation but still lists the approval', { builderId, rates: after });
+  return settle(cleared, false);
 }
 
 // --- disable -----------------------------------------------------------------------

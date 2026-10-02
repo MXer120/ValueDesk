@@ -35,6 +35,21 @@ export interface ExtraWithdrawal {
   buyIfMissing?: boolean;
 }
 
+/** The Valuescan builder fee for this run - what VITE_BUILDER_* are for a build (docs/BUILDER-CODES.md). */
+export interface RunBuilder {
+  /** The builder's SoDEX account id. */
+  id: number;
+  /** Fee per perps order / per spot order, tenths of a basis point (perps 0..200, spot 0..2000). */
+  feePerps: number;
+  feeSpot: number;
+  /** The ceiling the wallet approves, tenths of a bp (default: the higher fee). */
+  maxFee: number;
+  /** As VITE_BUILDER_REQUIRED=1: no approval, no trading. */
+  required: boolean;
+  /** Run the last step, revoke-builder (one more signature: maxFeeRate 0). */
+  revokeAtEnd: boolean;
+}
+
 export interface RunConfig {
   /** Must be true for live mode: "I know this moves real funds". */
   acknowledgeRealFunds: boolean;
@@ -74,6 +89,13 @@ export interface RunConfig {
   extraWithdrawals: ExtraWithdrawal[];
   receivers: Record<string, ReceiverSpec>;
   cleanup: { enabled: boolean; chain: string };
+  /**
+   * null (the default): no builder - the run is exactly what it was. Set: the
+   * enable-trading step approves the fee when SoDEX does not list it (ONE more
+   * wallet signature), every order must carry the builder, and revoke-builder
+   * can clear the approval at the end.
+   */
+  builder: RunBuilder | null;
   timeouts: { depositMinutes: number; withdrawMinutes: number; settleSeconds: number; orderSeconds: number };
 }
 
@@ -103,6 +125,7 @@ export const DEFAULT_CONFIG: RunConfig = {
   extraWithdrawals: [{ coin: 'ETH', chain: 'ARBITRUM_ETH', amount: 'min', receiver: 'self', buyIfMissing: true }],
   receivers: {},
   cleanup: { enabled: false, chain: 'ARBITRUM_ETH' },
+  builder: null,
   timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60 },
 };
 
@@ -314,6 +337,30 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
   if (cl) {
     set(bool(cl.enabled, 'cleanup.enabled'), (v) => (cfg.cleanup.enabled = v));
     set(chain(cl.chain, 'cleanup.chain'), (v) => (cfg.cleanup.chain = v));
+  }
+  if (src.builder !== undefined && src.builder !== null) {
+    const b = obj(src.builder, 'builder', ['id', 'feePerps', 'feeSpot', 'maxFee', 'required', 'revokeAtEnd']);
+    if (b) {
+      const whole = (v: unknown, where: string, lo: number, hi: number): number | undefined => {
+        const n = numIn(v, where, lo, hi);
+        if (n !== undefined && !Number.isInteger(n)) {
+          errors.push(`${where} must be a whole number (tenths of a basis point).`);
+          return undefined;
+        }
+        return n;
+      };
+      const before = errors.length;
+      const id = whole(b.id, 'builder.id', 1, Number.MAX_SAFE_INTEGER);
+      const feePerps = whole(b.feePerps ?? 0, 'builder.feePerps', 0, 200) ?? 0;
+      const feeSpot = whole(b.feeSpot ?? 0, 'builder.feeSpot', 0, 2000) ?? 0;
+      const maxFee = whole(b.maxFee ?? Math.max(feePerps, feeSpot), 'builder.maxFee', 0, 2000) ?? 0;
+      const required = bool(b.required, 'builder.required') ?? false;
+      const revokeAtEnd = bool(b.revokeAtEnd, 'builder.revokeAtEnd') ?? false;
+      if (id === undefined) errors.push('builder.id (the builder account id) is required.');
+      if (feePerps === 0 && feeSpot === 0) errors.push('builder needs feePerps or feeSpot above 0 (or set "builder": null).');
+      if (maxFee < Math.max(feePerps, feeSpot)) errors.push('builder.maxFee is below the fee it has to cover.');
+      if (errors.length === before && id !== undefined) cfg.builder = { id, feePerps, feeSpot, maxFee, required, revokeAtEnd };
+    }
   }
   const to = obj(src.timeouts, 'timeouts', ['depositMinutes', 'withdrawMinutes', 'settleSeconds', 'orderSeconds']);
   if (to) {

@@ -126,9 +126,37 @@ Where the money ends (default, no cleanup): ~4 USDC + 0.001 ETH back on Arbitrum
 | `extra-deposits` | as `deposit-external` (USDC only) | per entry | as above | as above |
 | `extra-withdrawals` | as `withdraw-external`; `buyIfMissing` market-buys the missing coin on Spot first | per entry (default: 0.0015 ETH -> Arbitrum, native) | as above | as above |
 | `cleanup` (opt-in) | `transferFunds`, `withdrawFunds` | Perps -> Spot, wallet USDC -> Spot, all Spot USDC -> the wallet on `cleanup.chain` | as above | as above |
+| `revoke-builder` (only with `builder.revokeAtEnd`) | `revokeBuilderApproval` (one `ApproveBuilderFeeAction` signature, `maxFeeRate` 0) | nothing | the builder is gone from both lists of `GET /user/{wallet}/builders` | `settleSeconds` (at least 60 s) |
 
 Every step re-reads live state first (so `--only` can resume), records timings, tx hashes, amounts and
 fees, and is refused before signing if its estimate would break `maxSpendUsd`.
+
+## The builder fee (off by default)
+
+With `"builder": null` (the default) the run is exactly what it was: no builder is approved, read or attached.
+
+Set `builder` to exercise the Valuescan builder fee end to end (`docs/BUILDER-CODES.md`) with the app's own code:
+
+```json
+"builder": { "id": 12345, "feePerps": 50, "feeSpot": 50, "maxFee": 50, "required": false, "revokeAtEnd": true }
+```
+
+- `id` is the builder's SoDEX account id (`node tools/check-builder.mjs <builder wallet>` prints it and checks the
+  100 vUSDC it must hold in Spot and in Perps). Fees are tenths of a basis point: perps 0..200, spot 0..2000.
+- **`enable-trading`** reads `GET /user/{wallet}/builders` first. If SoDEX does not list a covering approval, the
+  wallet signs ONE more typed-data message (`ApproveBuilderFeeAction`, the maximum only) before the key
+  registration; the guard lets exactly that body through (`accountID`, `builderID`, `maxFeeRate`) and the wallet
+  policy signs exactly that message. The step then waits until both engines list the approval.
+- **Every order** of the run must carry `{ "id", "fee" }` as the last field of its batch, with that engine's
+  fee - the guard refuses an order with a different builder, or with none.
+- **`revoke-builder`** (last step, only with `revokeAtEnd`) signs `maxFeeRate: 0` and waits until the builder is
+  gone from both lists.
+- What the runner does NOT check: that SoDEX charged the fee. After the run, read the fills once
+  (`GET /api/v1/perps/accounts/<wallet>/trades?limit=10`): `builderFee` is the builder's part of `fee`. The
+  manual checklist in `docs/BUILDER-CODES.md` has the commands.
+
+The shortest live builder test on an account that already exists and holds a few USDC in Spot:
+`--only enable-trading,orders,revoke-builder` with `"allowExistingAccount": true`.
 
 ## What it costs (default config, as of the plan run)
 
@@ -225,7 +253,9 @@ npx tsc --noEmit -p e2e/live
 `simulate.test.ts` runs a **whole live run** against a stateful fake of the backend, the SoDEX gateway,
 SoDEX's relayer and every chain's RPC - under the real guard, wallet and app code - and checks that no
 write is refused, every verification converges and the money ends where the plan says
-(`VS_SIM_VERBOSE=1` prints the transcript). It cannot prove that SoDEX behaves like the fake.
+(`VS_SIM_VERBOSE=1` prints the transcript). Its fake gateway verifies every signature with viem (the key
+registration and the builder approval recover the wallet, each order recovers the trading key over the bytes of
+its body) and rejects an order naming an unapproved builder. It cannot prove that SoDEX behaves like the fake.
 
 ## Notes
 

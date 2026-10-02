@@ -18,18 +18,47 @@
  *     what sodex.com's web app sends for every user (its bundle, 2026-09-26).
  *     One signature, no network switch. Pinned by Go SDK vectors
  *     (SignAddAPIKeyRequest with a wallet chain) and cross-checked with viem.
+ *     Confirmed against mainnet (read-only, 2026-10-02): of 85 builder-less
+ *     registrations read off SoDEX's CLOB explorer on four accounts, every one
+ *     recovers the account owner under UserSignedAddAPIKeyAction - app keys and
+ *     keys their owners named, wallet chains 1, 8453, 4663, 286623 and even
+ *     31337 - and none under the documented AddAPIKey (test/vectors-live.json).
  *   - 'user' (DOCUMENTED, REJECTED LIVE): POST /api/v1/user/{addr}/api-keys with
  *     AddAPIKey under the universal domain. The engines verify a 0x02
  *     registration as UserSignedAddAPIKeyAction, recover a stranger and answer
  *     "spot: API key error: API key not found" (seen on mainnet 2026-09-26).
  *     Kept for AddAPIKeyWithBuilder / the permissioned action, whose typed data
  *     already carries the message chainID.
+ *     AddAPIKeyWithBuilder's TYPED DATA is verified against mainnet: four
+ *     registrations the engines accepted (SoDEX's CLOB explorer, addAPIKey with
+ *     `builder`, both engines, status ok, four different accounts) recover the
+ *     account owner under `addAPIKeyWithBuilderTypedData` - pinned in
+ *     test/vectors-live.json. All four were signed with 286623 as the DOMAIN
+ *     chain as well (a wallet app on ValueChain); a wallet on another chain is
+ *     not among them. WHICH HTTP route delivered them cannot be read off the
+ *     chain, so this route stays unverified for it and the app does not use the
+ *     combined action.
  *   - 'engine' (OPENTRADE LEGACY): POST /api/v1/{engine}/accounts/api-keys with
  *     UserSignedAddPermissionedAPIKeyAction, as Opentrade's routes/wallet.ts does.
  *     One engine per call; permissioned keys only; Opentrade sends X-API-Chain =
  *     the SoDEX chain id while the domain uses the wallet's chain, which the
  *     current docs say must be equal. The signature layer was accepted on testnet
  *     in Aug 2026 (Opentrade NOTES.md) - that is all that is known.
+ *
+ *   BUILDER FEE APPROVAL
+ *   - 'user' (DOCUMENTED + OFFICIAL SDK): POST /api/v1/user/{addr}/builders, body
+ *     {accountID, builderID, maxFeeRate}, ApproveBuilderFeeAction under the
+ *     universal domain, 0x02. This is what the official Python SDK's
+ *     `client.approve_builder_fee` sends end to end (sodex-python-sdk-public
+ *     @939f2d6, examples/approve_builder_fee.py; it signs with the SoDEX network
+ *     id as BOTH chain ids) and what the Go SDK's SignApproveBuilderFeeRequest
+ *     signs (any domain chain, message chainID = the network id). The bytes are
+ *     pinned by Go vectors for testnet and mainnet, wallet chain and network
+ *     chain, maxFeeRate 0 and 2000. NOT yet observed on a live gateway: no
+ *     standalone approval is visible on the public explorer, and sodex.com's own
+ *     web app never approves a builder (its bundle of 2026-10-02 has no such
+ *     code). The first real approval is the owner's manual test
+ *     (docs/BUILDER-CODES.md).
  *
  *   REVOCATION (three candidates; none exercised by this codebase)
  *   - 'engine-delete' (DOCUMENTED): DELETE /api/v1/{engine}/accounts/api-keys,

@@ -41,6 +41,8 @@ import { READ_METHODS } from './provider';
 export type GuardMode = 'plan' | 'live';
 export type WriteKind =
   | 'key-registration'
+  /** The builder-fee approval (or, with maxFeeRate 0, its revocation): POST /user/{owner}/builders. */
+  | 'builder-approval'
   | 'engine-transfer'
   | 'order'
   | 'cancel'
@@ -169,6 +171,10 @@ export function classifyGatewayWrite(method: string, path: string, owner: string
   if (path === '/api/v1/perps/trade/orders') return method === 'POST' ? { kind: 'order', engine: 'perps' } : method === 'DELETE' ? { kind: 'cancel', engine: 'perps' } : null;
   if (method === 'POST' && (m = /^\/api\/v1\/user\/(0x[0-9a-fA-F]{40})\/evm-withdraw$/.exec(path))) {
     return m[1]!.toLowerCase() === owner.toLowerCase() ? { kind: 'withdraw-permit' } : null;
+  }
+  // A builder approval for any account but this wallet's is not a write the runner makes.
+  if (method === 'POST' && (m = /^\/api\/v1\/user\/(0x[0-9a-fA-F]{40})\/builders$/.exec(path))) {
+    return m[1]!.toLowerCase() === owner.toLowerCase() ? { kind: 'builder-approval' } : null;
   }
   return null;
 }

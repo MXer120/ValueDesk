@@ -12,6 +12,8 @@
  *                                          layout (the Go SDK has no per-order builder)
  *   user_add_api_key, user_add_api_key_with_builder_*, user_approve_builder_fee*
  *                                       -> official SDK Sign* methods + action.Hash
+ *                                          (the *_mainnet_* ones are asserted in
+ *                                          builders.test.ts)
  *   user_revoke_api_key_universal       -> composed from SDK primitives (Python SDK route)
  */
 import { test } from 'node:test';
@@ -320,6 +322,10 @@ test('every SDK vector is covered', () => {
     'user_add_api_key', 'user_add_api_key_with_builder_wallet_chain_1', 'user_add_api_key_with_builder_network_chain',
     'user_signed_add_api_key_wallet_chain_1', 'user_signed_add_api_key_wallet_chain_42161', 'user_signed_add_api_key_wallet_chain_138565',
     'user_approve_builder_fee', 'user_approve_builder_fee_clear', 'user_revoke_api_key_universal',
+    // Mainnet builder vectors: asserted in builders.test.ts.
+    'user_approve_builder_fee_mainnet_wallet_chain_42161', 'user_approve_builder_fee_mainnet_wallet_chain_1_max',
+    'user_approve_builder_fee_mainnet_network_chain', 'user_approve_builder_fee_mainnet_clear_wallet_chain_42161',
+    'user_add_api_key_with_builder_mainnet_wallet_chain_8453',
   ]);
   assert.deepEqual(S.userVectors.map((u) => u.name).filter((n) => !users.has(n)), []);
 });

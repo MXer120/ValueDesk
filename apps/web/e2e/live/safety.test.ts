@@ -110,6 +110,30 @@ test('guard, live mode: a write goes out only when armed, only as often as armed
   assert.equal((await post(`${GW}/api/v1/spot/accounts/api-keys`, {}, 'DELETE')).status, 403);
 });
 
+test('guard: a builder-fee approval goes out only for THIS wallet, only when armed, only with the planned maximum - and never in plan mode', async () => {
+  const g = install('live');
+  const url = `${GW}/api/v1/user/${OWNER}/builders`;
+  const body = { accountID: 7, builderID: 9, maxFeeRate: 50 };
+  assert.equal((await post(url, body)).status, 403, 'nothing armed');
+  g.expect({
+    kind: 'builder-approval',
+    label: 'approve builder #9 up to 50',
+    check: (r) => (r.body.accountID === 7 && r.body.builderID === 9 && r.body.maxFeeRate === 50 ? null : 'not the planned approval'),
+  });
+  assert.equal((await post(url, { ...body, maxFeeRate: 2000 })).status, 403, 'a higher maximum than planned');
+  assert.equal((await post(url, { ...body, builderID: 10 })).status, 403, 'another builder');
+  assert.equal((await post(`${GW}/api/v1/user/0x2222222222222222222222222222222222222222/builders`, body)).status, 403, 'an approval on another account is not a write the runner makes');
+  assert.equal((await post(url, body)).status, 200, 'the planned one');
+  assert.equal((await post(url, body)).status, 403, 'used up');
+  assert.equal(hits.length, 1);
+  g.uninstall();
+  // Reading the approvals is a plain GET (plan mode may do it); the write is refused there.
+  const p = install('plan');
+  assert.equal((await fetch(url)).status, 200);
+  assert.equal((await post(url, body)).status, 403);
+  assert.match(p.refusals[0]?.blocked ?? '', /plan mode is read-only \(builder-approval\)/);
+});
+
 const RELAY = `${BIZ_ORIGIN}/biz/mirror/call_for_permit`;
 const MINE = '0x2222222222222222222222222222222222222222';
 const withdrawCmd = (receiver: string, amount: bigint) => encodeWithdrawTokenCmd({ coinSymbol: 'USDC', chain: 'ARBITRUM_ETH', receiver, amount });
@@ -190,6 +214,34 @@ test('config: the defaults are valid; unknown keys warn; "//" keys are comments'
   assert.ok(w.warnings.some((x) => /acknowledgeRealfunds/.test(x)), 'a typo of acknowledgeRealFunds is flagged');
   assert.ok(w.warnings.some((x) => /deposit\.amout/.test(x)));
   assert.equal(w.config.acknowledgeRealFunds, false, 'the typo does not acknowledge anything');
+});
+
+test('config: the builder is OFF by default; when set it is validated like the build\'s own settings', () => {
+  assert.equal(DEFAULT_CONFIG.builder, null);
+  assert.equal(validateConfig({}).config.builder, null);
+  assert.equal(validateConfig({ builder: null }).config.builder, null);
+  const ok = validateConfig({ builder: { id: 223169, feePerps: 50, feeSpot: 100 } });
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.config.builder, { id: 223169, feePerps: 50, feeSpot: 100, maxFee: 100, required: false, revokeAtEnd: false });
+  assert.deepEqual(validateConfig({ builder: { id: 9, feePerps: 200, maxFee: 2000, required: true, revokeAtEnd: true } }).config.builder, {
+    id: 9, feePerps: 200, feeSpot: 0, maxFee: 2000, required: true, revokeAtEnd: true,
+  });
+  const bad = (b: unknown, why: RegExp) => {
+    const r = validateConfig({ builder: b });
+    assert.ok(r.errors.some((e) => why.test(e)), `${JSON.stringify(b)} -> ${r.errors.join('; ')}`);
+    assert.equal(r.config.builder, null, 'an invalid builder never switches one on');
+  };
+  bad({ feePerps: 50 }, /builder\.id/);
+  bad({ id: 0, feePerps: 50 }, /builder\.id/);
+  bad({ id: 9 }, /feePerps or feeSpot above 0/);
+  bad({ id: 9, feePerps: 201 }, /builder\.feePerps/);
+  bad({ id: 9, feeSpot: 2001 }, /builder\.feeSpot/);
+  bad({ id: 9, feePerps: 5.5 }, /whole number/);
+  bad({ id: 9, feePerps: '50' }, /builder\.feePerps/);
+  bad({ id: 9, feePerps: 50, maxFee: 40 }, /below the fee/);
+  bad({ id: 9, feePerps: 50, required: 'yes' }, /builder\.required/);
+  bad('223169', /builder must be an object/);
+  assert.ok(validateConfig({ builder: { id: 9, feePerps: 50, fee: 1 } }).warnings.some((w) => /builder\.fee/.test(w)), 'a typo is flagged');
 });
 
 test('config: amounts must be decimal STRINGS (a JSON number is already a float), words only where allowed', () => {

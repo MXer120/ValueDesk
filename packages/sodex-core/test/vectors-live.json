@@ -1,0 +1,340 @@
+{
+  "//": [
+    "REAL SoDEX MAINNET registrations the engines ACCEPTED, read from the public CLOB explorer",
+    "(GET https://clobscan-mainnet.sodex.dev/api/v1/{spot|perps}/transaction?tx_hash=...) on 2026-10-02.",
+    "They are public appchain transactions; nothing here was signed or sent by this project.",
+    "Each `signature` is the 66-byte wire signature the wallet produced (0x02 || r || s || v).",
+    "`ownerKeccak` is keccak256 of the account owner's 20 address bytes - the address itself is not stored.",
+    "The explorer reports `publicKey` as base64 of the 20 key-address bytes; it is hex here.",
+    "What they prove: the typed data sodex-core hands to a wallet for these two actions is the typed data",
+    "the mainnet engines verify (the recovered signer is the account owner), including the rule that the",
+    "DOMAIN chainId is the signatureChainID / X-API-Chain value while the MESSAGE chainID is 286623.",
+    "They cover: every registration WITH a builder found on four accounts (all four were signed with",
+    "286623 as the domain chain); two keys with names their owners chose (180-day expiry; one of them",
+    "signed with domain chain 31337, a local development chain id - the engines take whatever chain id",
+    "the request names); and sodex.com app keys signed on Ethereum (1), Base (8453) and ValueChain (286623).",
+    "Of the 89 registrations read on those four accounts (85 without a builder, 4 with one; 88 accepted),",
+    "every signature recovers the owner under one of these two structs and none under the documented",
+    "plain AddAPIKey struct."
+  ],
+  "network": "mainnet",
+  "sodexChainID": 286623,
+  "vectors": [
+    {
+      "name": "add_api_key_with_builder_1061_1787829753729",
+      "primaryType": "AddAPIKeyWithBuilder",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-08-27T11:22:25.292Z",
+          "txHash": "0x1263509d8f401dc1e5ede05b8286da2c0deea76835c21b69c31823a2c58160ed"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-08-27T11:22:25.292Z",
+          "txHash": "0x1263509d8f401dc1e5ede05b8286da2c0deea76835c21b69c31823a2c58160ed"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1787829753729,
+      "params": {
+        "accountID": 1061,
+        "name": "safepal-0fa347278ac6",
+        "type": 1,
+        "publicKey": "0xfa347278ac655283a0b747006c3358307e4c028e",
+        "expiresAt": 4102444800000,
+        "builder": {
+          "id": 223169,
+          "fee": 500
+        }
+      },
+      "signature": "0x0253954657c58262126b8fcab9bf89650f9f91baac64bd2bedc8465eb1f7a7deb9547950e11fedaee6f12a27f25359ac515fe29e7711b095c7e49697f41372a98b00",
+      "digest": "0x5392560b4f2f1606e86713c0a5fd2e7e146adab0c5b761050aba8e4c226c0267",
+      "ownerKeccak": "0x9a66aaef516f3b0f33050e61ff11c113724ac56d58f34c4052a69a63ee36a3a2"
+    },
+    {
+      "name": "add_api_key_with_builder_1395_1787832281247",
+      "primaryType": "AddAPIKeyWithBuilder",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-08-27T12:04:32.617Z",
+          "txHash": "0xb22a090dd584c0189c693a2f6528f1a0439eec2704dc9853d63bb46772bb07e3"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-08-27T12:04:32.617Z",
+          "txHash": "0xb22a090dd584c0189c693a2f6528f1a0439eec2704dc9853d63bb46772bb07e3"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1787832281247,
+      "params": {
+        "accountID": 1395,
+        "name": "safepal-04f24e6baffe",
+        "type": 1,
+        "publicKey": "0x4f24e6baffe1492ca81354c42c84e9028b8ba0b2",
+        "expiresAt": 4102444800000,
+        "builder": {
+          "id": 223169,
+          "fee": 500
+        }
+      },
+      "signature": "0x02ea707bd9077838cff7df35897e6cbc611b182bb94129c35d8f8e0bdcc5df415e0bd77ff7c534e7b090309ee92bf0c45055645cc1120f7f1e767465869b92e54001",
+      "digest": "0x003a20922fe7da0a23c72e9354707dec513ed67adcc80d30103faa0ab8590799",
+      "ownerKeccak": "0x47bc3b56d0933b779440ba8955987a98f5e024f5613bbbdf4b1fac24f94d94b8"
+    },
+    {
+      "name": "add_api_key_with_builder_225091_1788330942980",
+      "primaryType": "AddAPIKeyWithBuilder",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-09-02T06:35:34.461Z",
+          "txHash": "0x166845c2d3b4e787aa1171b92d268c2632d919a1d095a62a924a5473766e23d4"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-09-02T06:35:34.461Z",
+          "txHash": "0x166845c2d3b4e787aa1171b92d268c2632d919a1d095a62a924a5473766e23d4"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1788330942980,
+      "params": {
+        "accountID": 225091,
+        "name": "safepal-036cd89792d4",
+        "type": 1,
+        "publicKey": "0x36cd89792d4ae1539854e8e6f5ac2e0ec508f5ba",
+        "expiresAt": 4102444800000,
+        "builder": {
+          "id": 223169,
+          "fee": 500
+        }
+      },
+      "signature": "0x02654645f8329df594cf723604c2781ffddaafe8cf2d7579843a43e41e7594a55b3b69f9f7ff12a16da90b49db131f0dc5388f653f574564e7b2f51c92e7b3754800",
+      "digest": "0xfacf791e31db62d03803c838a7f3af5a3e56934d29287500fb844fd9b25a6ddd",
+      "ownerKeccak": "0x4dafebb78c67ca301126928cd95a98ceaaf7e695fcb6d8b3dbd89e28b51d700e"
+    },
+    {
+      "name": "add_api_key_with_builder_226415_1788878269217",
+      "primaryType": "AddAPIKeyWithBuilder",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-09-08T14:37:40.915Z",
+          "txHash": "0x2653a3be6839832a4896234edac4a73cfd1e1e362a5113fecd279e3ab817d3d0"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-09-08T14:37:40.915Z",
+          "txHash": "0x2653a3be6839832a4896234edac4a73cfd1e1e362a5113fecd279e3ab817d3d0"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1788878269217,
+      "params": {
+        "accountID": 226415,
+        "name": "safepal-047f6424f23e",
+        "type": 1,
+        "publicKey": "0x47f6424f23e45b53a355a3e2365e31ca8c67a89f",
+        "expiresAt": 4102444800000,
+        "builder": {
+          "id": 223169,
+          "fee": 500
+        }
+      },
+      "signature": "0x0228629448a1efe826b9eaee44c6fbfab0fc42c00de0a30f2ff9958365731e0cf17a4d55a54d5075eb255dda1d0ef3b2ed7e304f323a276fd1e0144880fd6021af00",
+      "digest": "0x89b1fef097e1035606f13f27bafa8d6b3df149f0315b6f4e16cf3ab03061dd48",
+      "ownerKeccak": "0x79e5630f27379e38712853f3db1ac2c8627cd920d23d7890f51824e47f8ba1b1"
+    },
+    {
+      "name": "user_signed_add_api_key_1395_1780095890006",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-05-29T23:04:54.665Z",
+          "txHash": "0x454dc32572481f0a69cd933bc69948eb2a90de135134605e9b8656d938ee80a0"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-05-29T23:04:54.554Z",
+          "txHash": "0x454dc32572481f0a69cd933bc69948eb2a90de135134605e9b8656d938ee80a0"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1780095890006,
+      "params": {
+        "accountID": 1395,
+        "name": "botmain01",
+        "type": 1,
+        "publicKey": "0x64e350a7979379f70ca5c172434c2011e19a9123",
+        "expiresAt": 1795647890006
+      },
+      "signature": "0x022ff81367a302284ebe011acea535526b41daee07392d96b5f32cbfe4a9fb48df4272d4e4119e6673f81dc95fedd71a6582cd2dd44285ce20803a7efab41a7f9800",
+      "digest": "0x368209adf71c0bb3ee0364f1696defdafc97c89c926f41076f04f6ce738efc0b",
+      "ownerKeccak": "0x47bc3b56d0933b779440ba8955987a98f5e024f5613bbbdf4b1fac24f94d94b8"
+    },
+    {
+      "name": "user_signed_add_api_key_1395_1784373996418",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-07-18T11:26:52.179Z",
+          "txHash": "0xd04e386134cb354bce7ad8d8de14617d8446869a14693863b1fa71612838167f"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-07-18T11:26:52.179Z",
+          "txHash": "0xd04e386134cb354bce7ad8d8de14617d8446869a14693863b1fa71612838167f"
+        }
+      },
+      "domainChainID": 8453,
+      "messageChainID": 286623,
+      "nonce": 1784373996418,
+      "params": {
+        "accountID": 1395,
+        "name": "mobilekey",
+        "type": 1,
+        "publicKey": "0x80b30a60215f5e6ca446113b445aed40f629225f",
+        "expiresAt": 1784978796418
+      },
+      "signature": "0x0284444ab6b7eb34d8f74717e9933eba6fccbd6f45bc06e3ae9ca051a8a4bdb7fd79d13df2f7ad031d9682de1a87ed0a922fc014c6bc1ed15a6049f2e0c0fe0ca100",
+      "digest": "0xe455fea3356ed9507e7d526d20747fac24d131fc22268a7bce778dee0f262332",
+      "ownerKeccak": "0x47bc3b56d0933b779440ba8955987a98f5e024f5613bbbdf4b1fac24f94d94b8"
+    },
+    {
+      "name": "user_signed_add_api_key_226415_1788682195391",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-09-06T08:10:08.290Z",
+          "txHash": "0x69ba67793afac1761fe5e2820f85d0e0f94741990df28c39ffe7de69ae3b42d3"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-09-06T08:10:08.290Z",
+          "txHash": "0x69ba67793afac1761fe5e2820f85d0e0f94741990df28c39ffe7de69ae3b42d3"
+        }
+      },
+      "domainChainID": 1,
+      "messageChainID": 286623,
+      "nonce": 1788682195391,
+      "params": {
+        "accountID": 226415,
+        "name": "mobilekey",
+        "type": 1,
+        "publicKey": "0x1ab4b7e8f9c98acaffb03f62c48b7325354b93e4",
+        "expiresAt": 1789286995391
+      },
+      "signature": "0x0262839234d336386dc30f837bfa1ee28d72418c39c7567b578bd8a9bdb6c761c41d2a388956944a4f24c130b0e9339816bda8ce3040a1c0a2749b342c6d3257d400",
+      "digest": "0x5b1f01f9bcc01f53184931dd36b58073533c4e4f39bf8f3ab3f02f0659291e8a",
+      "ownerKeccak": "0x79e5630f27379e38712853f3db1ac2c8627cd920d23d7890f51824e47f8ba1b1"
+    },
+    {
+      "name": "user_signed_add_api_key_1061_1789141114624",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-09-11T15:38:51.709Z",
+          "txHash": "0x618abc4306a12666db533e6ff0bf0b2668662c583a448defd07ec4e0eab39f24"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-09-11T15:38:51.709Z",
+          "txHash": "0x618abc4306a12666db533e6ff0bf0b2668662c583a448defd07ec4e0eab39f24"
+        }
+      },
+      "domainChainID": 31337,
+      "messageChainID": 286623,
+      "nonce": 1789141114624,
+      "params": {
+        "accountID": 1061,
+        "name": "SODEX_API_KEY45",
+        "type": 1,
+        "publicKey": "0x1523ef5c20fff7e8e91b5755713f58a2035bd1c4",
+        "expiresAt": 1804693114623
+      },
+      "signature": "0x02f75ae20817b760f16820d1e78e037ee4268f8024b891c60b3db5583d9c10632054568f1e441e81ad0869e99b40d952bdc6b7f961ad18573b7e6e125ad6b6e9be00",
+      "digest": "0x10f8e02487f1a71fecd4e72eebaef007f2cde692a1edf86f4ea21d4333fc7b11",
+      "ownerKeccak": "0x9a66aaef516f3b0f33050e61ff11c113724ac56d58f34c4052a69a63ee36a3a2"
+    },
+    {
+      "name": "user_signed_add_api_key_225091_1790212629055",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-09-24T01:17:16.535Z",
+          "txHash": "0xb2f0c4c994d8679c2ddadc3f9489257ea66bb183642f88ae6292b542d7fbee86"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-09-24T01:17:16.673Z",
+          "txHash": "0xb2f0c4c994d8679c2ddadc3f9489257ea66bb183642f88ae6292b542d7fbee86"
+        }
+      },
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1790212629055,
+      "params": {
+        "accountID": 225091,
+        "name": "mobilekey",
+        "type": 1,
+        "publicKey": "0x5d0c3243fcd61c1060a5c55d816a0660f260f853",
+        "expiresAt": 1790817429055
+      },
+      "signature": "0x023a1b600d871b0f417c366f977e6621740b8126335b909927f6d84e20c3aa3e2e4be1ccc6f6f305da8119857a36aa536d421ec3dad909b7ae6c54b045ef5d940e00",
+      "digest": "0x4f0263bb02e2cc900f2f2f3d696b3282c79fe3565f58708c3086105d92f78f18",
+      "ownerKeccak": "0x4dafebb78c67ca301126928cd95a98ceaaf7e695fcb6d8b3dbd89e28b51d700e"
+    },
+    {
+      "name": "user_signed_add_api_key_225091_1790830102247",
+      "primaryType": "UserSignedAddAPIKeyAction",
+      "action": "addAPIKey",
+      "accepted": {
+        "spot": {
+          "status": 1,
+          "time": "2026-10-01T04:48:27.354Z",
+          "txHash": "0xfff0f61826c4b2ae31c270e7d6a4a6143a48cffeb99285fbde0febb637971362"
+        },
+        "perps": {
+          "status": 1,
+          "time": "2026-10-01T04:48:27.217Z",
+          "txHash": "0xfff0f61826c4b2ae31c270e7d6a4a6143a48cffeb99285fbde0febb637971362"
+        }
+      },
+      "domainChainID": 1,
+      "messageChainID": 286623,
+      "nonce": 1790830102247,
+      "params": {
+        "accountID": 225091,
+        "name": "mobilekey",
+        "type": 1,
+        "publicKey": "0xa110049d4fe86e87692921ca0d34e92252f8ef3d",
+        "expiresAt": 1791434902247
+      },
+      "signature": "0x021ecdc127b5625e2c0467ed4651f5da2f6d63160a8efd611d252a3fab9b4c811a7af0ed3b28e780a0cf01ace1d05f38ce8c85513e3c19909c9fd0f172a09fc0dc01",
+      "digest": "0xf5463caa9c3b7e78a1dc8bf11f42dafa78ff068ec395115fa22b8292be9dd317",
+      "ownerKeccak": "0x4dafebb78c67ca301126928cd95a98ceaaf7e695fcb6d8b3dbd89e28b51d700e"
+    }
+  ]
+}

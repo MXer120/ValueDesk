@@ -57,6 +57,8 @@ import { fmtUsd } from '../format';
 import './FeeTier.css';
 import { Private } from '../privacy';
 import { LoadFailed, logLoadFailure } from './LoadFailed';
+import { useBuilderFee, type BuilderFeeQuote } from './account/useBuilderFee';
+import { requestAdvanced } from './account/actions';
 
 interface Props {
   address: string | null;
@@ -95,6 +97,13 @@ function FeeTierInner({
   const [loading, setLoading] = useState(false);
   /** Bumped by Retry. */
   const [attempt, setAttempt] = useState(0);
+  /*
+   * Valuescan's builder fee on orders placed here - null unless a builder is
+   * configured and applies on this engine. It is NOT one of the venue's rates:
+   * SoDEX charges it on top of them, so it is shown as its own figure. 'sell',
+   * because spot charges it on sells only and the sentence below says so.
+   */
+  const builderFee = useBuilderFee(engine, 'sell', address);
 
   // Called directly rather than through api.ts: that file belongs to the
   // orchestrator, which will fold this into `api.feeRate` (it already declares
@@ -166,7 +175,7 @@ function FeeTierInner({
 
       {venue && rec && (
         <>
-          <Current venue={venue} rec={rec} engine={engine} volume14d={volume14d ?? null} />
+          <Current venue={venue} rec={rec} engine={engine} volume14d={volume14d ?? null} builderFee={builderFee} />
           <Ladder venueTier={venue.feeTier} engine={engine} volume14d={volume14d ?? null} />
           <Staking
             venue={venue}
@@ -194,11 +203,13 @@ function Current({
   rec,
   engine,
   volume14d,
+  builderFee,
 }: {
   venue: VenueFeeRate;
   rec: Reconciliation;
   engine: FeeEngine;
   volume14d: number | null;
+  builderFee: BuilderFeeQuote | null;
 }) {
   const stake = stakingTierAt(venue.stakingTier);
 
@@ -212,7 +223,20 @@ function Current({
           label="Staking tier"
           value={stake ? `${venue.stakingTier} · ${(stake.discount * 100).toFixed(0)}% off` : `${venue.stakingTier}`}
         />
+        {builderFee && <Stat label="Valuescan fee" value={`+${fmtRate(builderFee.fraction)}`} />}
       </div>
+
+      {builderFee && (
+        <p className="muted small feetier-note">
+          Orders placed on Valuescan also carry its builder fee: {fmtRate(builderFee.fraction)} of each fill
+          {engine === 'perps' ? ', buys and sells' : ' on sells (spot buys are not charged)'}, maker or taker. SoDEX
+          charges it on top of the rates above and pays it to Valuescan (builder account #{builderFee.builderId}).
+          {builderFee.status === 'required' ? ' It applies once you have approved it.' : ''}{' '}
+          <button type="button" className="link" onClick={requestAdvanced}>
+            {builderFee.status === 'required' ? 'Approve it, or see what is approved' : 'See or revoke your approval'}
+          </button>
+        </p>
+      )}
 
       {/* Only worth saying when the discount actually did something. */}
       {rec.computed && rec.computed.discount > 0 && rec.mismatches.length === 0 && (

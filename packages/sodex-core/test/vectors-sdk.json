@@ -38,6 +38,8 @@
   "domainSpot": "0x46e5cb94aed2e3d92346e976fb03a3391c1dd9228c1bb22069c60e40f35e1411",
   "domainSpotMainnet": "0x7f4b08bc6b5452f0df86b3a598318de19ca8de243d51b12d09eec6d8086ec7cf",
   "domainUniv": "0x88f393c4d0251b22dbcfd44f15e76dd278d6e9c5af181038fa89db2d0188e3c2",
+  "domainUnivArbitrum": "0x30e1997bff17af66e68466669243f778149ee84fef3baa60309f7ac2b87f0af1",
+  "domainUnivMainnet": "0x543540db884635dcc8bfe9b610891746fa1b3fd8daa203e6421de3cf264d91cf",
   "domainUnivNet": "0x0cac00d12ff9cdac266496bc8bdeff0fe6fcf56a524d98ef954354527f91fd72",
   "goJSONStrings": {
     "\u003cscript\u003e\u0026amp;": "\"\\u003cscript\\u003e\\u0026amp;\"",
@@ -233,6 +235,100 @@
       "digest": "0xf74c7a8684ffdfe6174c6b50e8348446150aa98de3d8f7f63085ddee3399b526",
       "signature": "0x02932c42e8574ad2e05b8b0012ff661cbf725ce773181201bd6fad8a62a114fa175142a596d51e6bdaed047a8c6a01884046bb013132accc5d83897d76633149ee01",
       "source": "go-sdk primitives (python-sdk route)"
+    },
+    {
+      "name": "user_approve_builder_fee_mainnet_wallet_chain_42161",
+      "primaryType": "ApproveBuilderFeeAction",
+      "domainChainID": 42161,
+      "messageChainID": 286623,
+      "nonce": 1760400000001,
+      "message": {
+        "accountID": 1010,
+        "builderID": 223169,
+        "chainID": 286623,
+        "maxFeeRate": 50,
+        "nonce": 1760400000001
+      },
+      "structHash": "0x340070475ced88387bfef69da3aed2d026cb0395a2078d7630030640dae4fde0",
+      "digest": "0x267cc8a3f50c338fdd1eeeafaeb490db51928b47c8271b88e3ff8edee3ab6e57",
+      "signature": "0x020d84728444e9e2c9fedc49f6b05e3f203771b910db9d60554095ccf90a221c697c2af839f6e9749a1cc8f7a6381b146ac9dde8907f635173b462549fac101dc900",
+      "source": "go-sdk:SignApproveBuilderFeeRequest (mainnet signer)"
+    },
+    {
+      "name": "user_approve_builder_fee_mainnet_wallet_chain_1_max",
+      "primaryType": "ApproveBuilderFeeAction",
+      "domainChainID": 1,
+      "messageChainID": 286623,
+      "nonce": 1760400000002,
+      "message": {
+        "accountID": 1010,
+        "builderID": 223169,
+        "chainID": 286623,
+        "maxFeeRate": 2000,
+        "nonce": 1760400000002
+      },
+      "structHash": "0xea6d1c06e251347466ee1a1a1b8d481157dc50f690aae3c527b51f5bde9267db",
+      "digest": "0x3fd9f1fd36e37866dee487c7cab2ebdd587543bad528a5b3fb1b0c9226e9d642",
+      "signature": "0x029d7f29c213791eb048d5c1e73edf21aee2b4ba1e7c98f84e910971e53b91fc5c3ee0fa5655ca441d1c2a7c7e5a3b899091155fffd841fc38e3ef6bc22705259d00",
+      "source": "go-sdk:SignApproveBuilderFeeRequest (mainnet signer)"
+    },
+    {
+      "name": "user_approve_builder_fee_mainnet_network_chain",
+      "primaryType": "ApproveBuilderFeeAction",
+      "domainChainID": 286623,
+      "messageChainID": 286623,
+      "nonce": 1760400000003,
+      "message": {
+        "accountID": 1010,
+        "builderID": 223169,
+        "chainID": 286623,
+        "maxFeeRate": 20,
+        "nonce": 1760400000003
+      },
+      "structHash": "0x4ed0510b83f9d596cb4fd3cc4d2e0aacc18a412824c5a4d11474e0a3196aa8d5",
+      "digest": "0x7a5310e64502b0e9ea0540add501a3ddbbaa994651ded342812a3fdab59dcaef",
+      "signature": "0x02e27b61f1844e829c90235651c550cd789960417626cffe3d3fb530786702225628090670a460582a60514a0d41976ea37bcd28debd708a25ecafaff35f3bc29700",
+      "source": "go-sdk:SignApproveBuilderFeeRequest (mainnet signer)"
+    },
+    {
+      "name": "user_approve_builder_fee_mainnet_clear_wallet_chain_42161",
+      "primaryType": "ApproveBuilderFeeAction",
+      "domainChainID": 42161,
+      "messageChainID": 286623,
+      "nonce": 1760400000004,
+      "message": {
+        "accountID": 1010,
+        "builderID": 223169,
+        "chainID": 286623,
+        "maxFeeRate": 0,
+        "nonce": 1760400000004
+      },
+      "structHash": "0x2ef280d93274d80166fb51fed9b3b1c4c797f3eb4168e8756d779df4f9ea5247",
+      "digest": "0x853f19b1674c755737098f1702c5a50bad52e108cdabb67a77ca6ef9f39b4bc3",
+      "signature": "0x02688430fe0bdf9413a4f46a4f2101cd8bda742e3172ed9de470537427192c5dd070b68244affee6dd1cd73bd6008d234e750c0318e493de80a45262719d21f6e100",
+      "source": "go-sdk:SignApproveBuilderFeeRequest (mainnet signer)"
+    },
+    {
+      "name": "user_add_api_key_with_builder_mainnet_wallet_chain_8453",
+      "primaryType": "AddAPIKeyWithBuilder",
+      "domainChainID": 8453,
+      "messageChainID": 286623,
+      "nonce": 1760400000005,
+      "message": {
+        "accountID": 1010,
+        "builderID": 223169,
+        "chainID": 286623,
+        "expiresAt": 1761004800000,
+        "keyType": 1,
+        "maxFeeRate": 50,
+        "name": "valuescan-web",
+        "nonce": 1760400000005,
+        "publicKey": "0x3d4595c8742d0a58173a9963c05755b59a8f8256"
+      },
+      "structHash": "0x79c6d5beae5f7ccde4de63007bc1a7fca9730b8505a4b56bed9ed0a98a92c129",
+      "digest": "0x936a81ccc72ec59c4f22c6536889433c2b01e10938ada6edc275f8ae2b63bc70",
+      "signature": "0x020b589ce663fd2f2b35f14b639b6e4338ecb76de43c4c35c42e910fd6b11fe3a72b030420a9e2aae01f7422f79b9eed61dd8126b9eb79f942be2e5a391776180701",
+      "source": "go-sdk:SignAddAPIKeyWithBuilderRequest (mainnet signer)"
     }
   ],
   "vectors": [

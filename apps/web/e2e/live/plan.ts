@@ -386,12 +386,16 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   }
 
   if (has('enable-trading')) {
-    add('enable-trading', {
-      lines: [`one EIP-712 signature (UserSignedAddAPIKeyAction) registers key "valuescan-web" for ${cfg.keyTtlHours} h on spot + perps; verified in SoDEX's key list`],
-      costUsd: 0,
-      sentAwayUsd: 0,
-      problems: [],
-    });
+    const lines = [`one EIP-712 signature (UserSignedAddAPIKeyAction) registers key "valuescan-web" for ${cfg.keyTtlHours} h on spot + perps; verified in SoDEX's key list`];
+    if (cfg.builder) {
+      const b = cfg.builder;
+      lines.push(
+        `builder fee: builder account #${b.id}, perps ${b.feePerps} / spot ${b.feeSpot} tenths of a bp per order (spot: sells only), approved maximum ${b.maxFee}${b.required ? ', REQUIRED' : ', optional'}`,
+        'if SoDEX does not already list that approval: ONE more signature (ApproveBuilderFeeAction) BEFORE the key, sent to POST /user/{wallet}/builders, then verified in GET /user/{wallet}/builders on both engines',
+        'every order of this run must then carry the builder as the last field of its batch - an order naming an unapproved builder is rejected by SoDEX',
+      );
+    }
+    add('enable-trading', { lines, costUsd: 0, sentAwayUsd: 0, problems: [] });
   }
 
   if (has('transfers')) {
@@ -689,6 +693,19 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         costUsd: approx(fee),
         sentAwayUsd: 0,
         problems: pr,
+      });
+    }
+  }
+
+  if (has('revoke-builder')) {
+    if (!cfg.builder) add('revoke-builder', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'no builder is configured for this run' });
+    else if (!cfg.builder.revokeAtEnd) add('revoke-builder', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'builder.revokeAtEnd is false - the approval stays on the account' });
+    else {
+      add('revoke-builder', {
+        lines: [`one signature (ApproveBuilderFeeAction with maxFeeRate 0) clears the approval of builder #${cfg.builder.id}; verified: gone from both lists of GET /user/{wallet}/builders`],
+        costUsd: 0,
+        sentAwayUsd: 0,
+        problems: [],
       });
     }
   }

@@ -54,6 +54,8 @@ import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useTradeGate } from './account/useTradeGate';
+import { useBuilderFee } from './account/useBuilderFee';
+import { requestAdvanced } from './account/actions';
 import { DraftInput, decimalInput, integerInput, tickInput, trimZeros } from './numberInput';
 import { Collapse } from './motion';
 import { couldntLoad } from './LoadFailed';
@@ -948,6 +950,13 @@ export function OrderEntry({
   const pctRate = (v: number) => `${fmt(v * 100, 4)}%`;
   /** Taker first: it is the higher number and the one a market order pays. */
   const feePair = (t: number, m: number) => `${pctRate(t)} / ${pctRate(m)}`;
+  /*
+   * Valuescan's builder fee on THIS order - null unless a builder is configured
+   * and the order will carry it (account/useBuilderFee.ts). SoDEX charges it per
+   * fill on top of the pair above, so it gets its own line and is never folded
+   * into the venue's rates.
+   */
+  const builderFee = useBuilderFee(engine, side, connectedAddress);
 
   const orderQty = num(quantity);
   const bestAsk = num(book?.asks?.[0]?.[0]);
@@ -1168,6 +1177,7 @@ export function OrderEntry({
         tif: effectiveTif,
         network,
         signingAddress,
+        ...(builderFee ? { builderFee } : {}),
       };
 
       // Re-run the stop check for the side actually being placed. The panel's
@@ -2033,6 +2043,24 @@ export function OrderEntry({
               )}
             </dd>
           </div>
+          {builderFee && (
+            <div className="oe-out__row">
+              <dt className="oe-out__k">
+                {/* Like "Fees" above, the label opens its detail: the key options,
+                    where the approval SoDEX lists is shown and can be revoked. */}
+                <button
+                  type="button"
+                  className="oe-feebtn"
+                  onClick={requestAdvanced}
+                  title={`SoDEX charges this on every fill of an order placed here, maker or taker, on top of its own fee, and pays it to Valuescan (builder account #${builderFee.builderId}). Spot buys are not charged. ${builderFee.status === 'required' ? 'It applies once you have approved it: press to approve it, or to see what is approved.' : 'Press to see or revoke your approval.'}`}
+                >
+                  Valuescan fee
+                </button>{' '}
+                <span className="oe-tag">builder</span>
+              </dt>
+              <dd className="oe-out__v">{builderFee.charged ? `+${pctRate(builderFee.fraction)}` : 'none on spot buys'}</dd>
+            </div>
+          )}
           {feesOpen && (
             <div className="oe-out__row oe-out__row--note">
               <dd className="oe-out__v oe-out__v--note">

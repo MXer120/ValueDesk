@@ -23,6 +23,7 @@ import {
   type SignableAction,
 } from '@sodex-core';
 import { api } from '../api';
+import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
 import { tradingConfig } from './config';
 import { readGateway, sendSigned } from './gateway';
 import {
@@ -40,7 +41,15 @@ import {
   type OpenOrderRef,
   type OrderTicket,
 } from './orderParams';
-import { checkKeyAfterRejection, keyRejected, nonces, requireSigner } from './session';
+import {
+  TradingError,
+  builderApprovalPending,
+  checkKeyAfterRejection,
+  keyRejected,
+  nonces,
+  refreshBuilderApproval,
+  requireSigner,
+} from './session';
 import { logger } from '../log';
 
 const log = logger('trade');
@@ -69,12 +78,47 @@ export async function symbolFor(engine: Engine, ref: string): Promise<MarketSymb
 
 // --- signing + sending ---------------------------------------------------------
 
-/** The builder fee to attach on `engine`, if this key approved it. */
-function builderFor(engine: Engine, approved: { id: number; maxFeeRate: number } | null): BuilderParams | undefined {
-  const b = tradingConfig().builder;
-  if (!b || !approved || approved.id !== b.id) return undefined;
-  const fee = b.fee[engine];
-  return fee > 0 && fee <= approved.maxFeeRate ? { id: b.id, fee } : undefined;
+/**
+ * The builder fee to attach on `engine`: only where SoDEX lists an approval of
+ * the configured builder that covers the fee, per engine (builder.ts). An order
+ * naming an unapproved builder is rejected, so "not listed" means "not sent".
+ */
+function builderFor(engine: Engine, approved: BuilderApproval | null): BuilderParams | undefined {
+  return orderBuilder(tradingConfig().builder, approved, engine);
+}
+
+/**
+ * The builder for an order placed NOW. Where the approval is not listed and it
+ * matters - SoDEX accepted one moments ago, or this build requires one - it is
+ * re-read first. A build that requires the fee refuses the order rather than
+ * send it without one.
+ */
+async function builderForOrder(engine: Engine): Promise<BuilderParams | undefined> {
+  const cfg = activeBuilder(tradingConfig().builder);
+  if (!cfg || cfg.fee[engine] <= 0) return undefined;
+  let builder = builderFor(engine, requireSigner(undefined, engine).meta.builder);
+  if (!builder && (cfg.required || builderApprovalPending())) {
+    builder = builderFor(engine, await refreshBuilderApproval());
+  }
+  if (!builder && cfg.required) {
+    throw new TradingError(
+      `SoDEX does not list your approval of the Valuescan builder fee for ${engine} orders, and trading through Valuescan requires it. If you approved it a moment ago, try again shortly; otherwise press "Valuescan fee" in the order ticket and approve it there.`,
+      'builder-required',
+    );
+  }
+  return builder;
+}
+
+/**
+ * SoDEX refused something and names the builder: the approval this browser
+ * remembers may be gone (revoked on another device) or too low. Re-read it, so
+ * the next order goes out the way SoDEX will accept. Nothing is re-sent.
+ */
+function noteBuilderRejection(e: unknown): void {
+  if (!(e instanceof SodexApiError) || !/builder/i.test(e.message)) return;
+  if (!activeBuilder(tradingConfig().builder)) return;
+  log.warn('SoDEX refused an order over its builder fee; re-reading the approval', { code: e.code, message: e.message });
+  void refreshBuilderApproval();
 }
 
 async function signAndSend<T = unknown>(action: SignableAction, what: string): Promise<T> {
@@ -89,6 +133,7 @@ async function signAndSend<T = unknown>(action: SignableAction, what: string): P
       // A signature/auth refusal can mean the key was replaced on another
       // device: ask SoDEX, and drop the key if so (the next click re-enables).
       else if (e.httpStatus === 401 || e.code === 401 || /signature|unauthori[sz]ed|api key/i.test(e.message)) void checkKeyAfterRejection();
+      noteBuilderRejection(e);
     }
     throw e;
   }
@@ -118,11 +163,17 @@ function checkBatch(result: unknown, what: string, labels: readonly string[] = [
 export async function placeOrder(engine: Engine, t: OrderTicket) {
   const s = requireSigner(undefined, engine);
   const sym = await symbolFor(engine, t.symbol);
-  const built = placeOrderAction(engine, t, sym, s.meta.accountId, builderFor(engine, s.meta.builder));
+  const builder = await builderForOrder(engine);
+  const built = placeOrderAction(engine, t, sym, s.meta.accountId, builder);
   const labels = ['the order', ...(t.takeProfit ? ['the take-profit'] : []), ...(t.stopLoss ? ['the stop-loss'] : [])];
   const result = await signAndSend(built.action, 'order');
-  checkBatch(result, 'order', labels);
-  log.info('order placed', { engine, symbol: sym.name, legs: built.orderCount });
+  try {
+    checkBatch(result, 'order', labels);
+  } catch (e) {
+    noteBuilderRejection(e);
+    throw e;
+  }
+  log.info('order placed', { engine, symbol: sym.name, legs: built.orderCount, ...(builder ? { builderFee: builder.fee } : {}) });
   return { engine, symbol: built.symbol, orderCount: built.orderCount, result };
 }
 

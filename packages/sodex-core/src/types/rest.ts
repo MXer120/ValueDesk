@@ -353,8 +353,18 @@ export interface UserTradeRow {
   side: SideStr;
   price: Dec;
   quantity: Dec;
+  /**
+   * EVERYTHING the fill was charged, in `feeCoin` - the venue's commission AND
+   * the builder fee, when there is one. [live 2026-10-02: a spot sell with a
+   * 10 bp builder fee reports 13.5 bp maker / 16.5 bp taker here.]
+   */
   fee?: Dec;
-  /** Present when a builder fee was charged on this fill. */
+  /**
+   * The builder's share of `fee` (already inside it - never add the two).
+   * Present only on fills that were charged one: spot sells and, per the docs,
+   * both sides on perps. Absent on spot buys even when the order named a
+   * builder. [live 2026-10-02] Split a row with `fillFeeParts` (builders.ts).
+   */
   builderFee?: Dec;
   feeCoin?: string;
   isMaker?: boolean;
@@ -536,11 +546,15 @@ export interface AccountApiKeys {
 /** GET /api/v1/{engine}/accounts/{addr}/api-keys -> ApiKeyRow[] (bare array). [live] */
 export type EngineApiKeys = ApiKeyRow[];
 
-/** GET /api/v1/user/{addr}/builders [live] */
+/**
+ * GET /api/v1/user/{addr}/builders [live]. One approval appears once per engine,
+ * and the two rows can differ: an approval of 500 reads spot 500, perps 200 (the
+ * perps cap). Read one builder's rates with `approvedBuilderRates` (builders.ts).
+ */
 export interface BuilderApproval {
   userID: number;
   builderID: number;
-  /** Tenths of a basis point. */
+  /** The approved ceiling on this engine, tenths of a basis point. */
   feeRate: number;
 }
 export interface BuilderApprovals {

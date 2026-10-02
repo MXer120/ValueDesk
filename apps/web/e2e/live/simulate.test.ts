@@ -8,6 +8,12 @@
  * armed (no guard or wallet-policy refusals), every verification converges on
  * the state the write produced, and the run ends where the plan says. What it
  * cannot prove: that SoDEX itself behaves like this fake.
+ *
+ * The fake gateway CHECKS SIGNATURES, with viem - an EIP-712 implementation
+ * that shares no code with sodex-core: a key registration and a builder-fee
+ * approval must recover the wallet, an order must recover the registered
+ * trading key over the exact bytes of its body. Like SoDEX, it rejects an
+ * order naming a builder the account has not approved.
  *   npx tsx --test e2e/live/simulate.test.ts        (from apps/web)
  */
 import { test, afterEach } from 'node:test';
@@ -15,9 +21,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, encodeFunctionResult, keccak256, parseAbi, parseAbiParameters, parseTransaction, recoverTransactionAddress, toFunctionSelector, type Hex } from 'viem';
+import { decodeAbiParameters, decodeFunctionData, encodeAbiParameters, encodeFunctionData, encodeFunctionResult, hashTypedData, keccak256, parseAbi, parseAbiParameters, parseTransaction, recoverAddress, recoverTransactionAddress, recoverTypedDataAddress, stringToHex, toFunctionSelector, zeroAddress, type Hex } from 'viem';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { CALL_FOR_PERMIT_CONTRACT, CLOB_GATEWAY, WITHDRAWAL_CREATED_TOPIC, WITHDRAW_TOKEN_TARGET } from '@sodex-core';
+import { gateway as exchangeGateway } from '../../src/exchange/sodexGateway';
 import { formatUnits, parseUnits } from '../../src/trading/onboard';
 import { unitsDown } from '../../src/trading/funds';
 import { BIZ_ORIGIN, QUERY_CONTRACT } from '../../src/trading/relay';
@@ -134,6 +141,15 @@ class World {
   orders: Order[] = [];
   history: Order[] = [];
   keys: Array<{ name: string; publicKey: string; expiresAt: number }> = [];
+  /** Builder approvals per engine (builder id -> approved rate), as GET /user/{wallet}/builders lists them. */
+  builders = { spot: new Map<number, number>(), perps: new Map<number, number>() };
+  /** Who each signature recovered to (viem): builder approvals, key registrations, orders. */
+  signers = { approvals: [] as string[], registrations: [] as string[], orders: [] as string[] };
+  /** Every builder approval body and every order body, exactly as sent. */
+  approvalBodies: string[] = [];
+  orderBodies: Array<{ engine: 'spot' | 'perps'; raw: string }> = [];
+  /** Builder fees the fake charged on perps fills (USDC base units). */
+  builderIncome = 0n;
   /** Mined transactions (wallet-sent and relayed) and their logs. */
   receipts = new Map<string, Array<{ address: string; topics: string[]; data: string }>>();
   txCount = new Map<number, number>();
@@ -303,7 +319,49 @@ function perpsState() {
   return { aid: world.aid, amw: formatUnits(at, 6), B: world.aid ? [{ i: 0, a: 'vUSDC', wb: formatUnits(world.perps, 6), at: formatUnits(at, 6) }] : [], P: open ? [{ s: 'BTC-USD', sz: world.position, ur: '0' }] : [], O: world.orders.filter((o) => o.engine === 'perps') };
 }
 
-function gateway(url: URL, method: string, body: any): Response {
+const UNIVERSAL = (chainId: number) => ({ name: 'universal', version: '1', chainId, verifyingContract: zeroAddress }) as const;
+/** A SoDEX wire signature (type byte || r || s || v) as the 65 bytes viem recovers from. */
+function rsv(wire: string, type: 1 | 2): Hex {
+  assert.match(wire, /^0x[0-9a-f]{132}$/, 'a 66-byte wire signature');
+  assert.equal(wire.slice(2, 4), `0${type}`, `signature type byte 0x0${type}`);
+  assert.ok(wire.endsWith('00') || wire.endsWith('01'), 'v is normalised to 0/1');
+  return `0x${wire.slice(4)}`;
+}
+
+/** Who signed a key-signed exchange action: ExchangeAction{keccak({type, params: <the body bytes>}), nonce} under the engine's domain. */
+async function actionSigner(engine: 'spot' | 'perps', type: string, raw: string, h: Record<string, string>): Promise<string> {
+  const hash = hashTypedData({
+    domain: { name: engine === 'perps' ? 'futures' : 'spot', version: '1', chainId: 286623, verifyingContract: zeroAddress },
+    types: { ExchangeAction: [{ name: 'payloadHash', type: 'bytes32' }, { name: 'nonce', type: 'uint64' }] },
+    primaryType: 'ExchangeAction',
+    message: { payloadHash: keccak256(stringToHex(`{"type":"${type}","params":${raw}}`)), nonce: BigInt(h['x-api-nonce']!) },
+  });
+  return (await recoverAddress({ hash, signature: rsv(h['x-api-sign']!, 1) })).toLowerCase();
+}
+
+/**
+ * An order: signed by the registered trading key over these exact bytes, and -
+ * when it names a builder - the builder is the LAST field of the batch, `id`
+ * before `fee`, and approved for at least that fee on this engine. Returns the
+ * refusal, or null.
+ */
+async function checkOrder(engine: 'spot' | 'perps', body: any, raw: string, h: Record<string, string>): Promise<Response | null> {
+  const w = world;
+  const key = w.keys.find((k) => k.name === h['x-api-key']);
+  const signer = await actionSigner(engine, engine === 'perps' ? 'newOrder' : 'batchNewOrder', raw, h);
+  if (!key || signer !== key.publicKey.toLowerCase()) return json({ code: 401, error: 'API key error: invalid signature' }, 401);
+  w.signers.orders.push(signer);
+  w.orderBodies.push({ engine, raw });
+  const b = body.builder;
+  if (b === undefined) return null;
+  assert.equal(Object.keys(body).at(-1), 'builder', 'builder is the last field of the batch');
+  assert.deepEqual(Object.keys(b), ['id', 'fee'], 'id before fee');
+  const approved = w.builders[engine].get(b.id);
+  if (approved === undefined || b.fee > approved) return json({ code: 400, error: 'builder fee is not approved' }, 400);
+  return null;
+}
+
+async function gateway(url: URL, method: string, body: any, raw: string, h: Record<string, string>): Promise<Response> {
   const w = world;
   const p = url.pathname;
   let m: RegExpExecArray | null;
@@ -329,12 +387,66 @@ function gateway(url: URL, method: string, body: any): Response {
     if ((m = /^\/api\/v1\/(spot|perps)\/accounts\/0x[0-9a-f]{40}\/orders\/history$/.exec(p))) return ok(w.history.filter((o) => o.engine === m![1]));
     if (/^\/api\/v1\/perps\/accounts\/0x[0-9a-f]{40}\/positions$/.test(p)) return ok({ positions: w.position !== '0' ? [{ symbol: 'BTC-USD', size: w.position, avgEntryPrice: '84072' }] : [] });
     if (p === '/api/v1/user/withdraw/status') return ok({ records: [{ status: 'success' }] });
+    if ((m = /^\/api\/v1\/user\/(0x[0-9a-f]{40})\/builders$/.exec(p))) {
+      const rows = (list: Map<number, number>) => (m![1] === w.owner ? [...list].map(([builderID, feeRate]) => ({ userID: w.aid, builderID, feeRate })) : []);
+      return ok({ spot: rows(w.builders.spot), perps: rows(w.builders.perps) });
+    }
     return json({ code: 404, error: `fake gateway: GET ${p}` }, 404);
   }
   w.writes.push(`${method} ${p}`);
   if ((m = /^\/api\/v1\/(spot|perps)\/exchange$/.exec(p))) {
     assert.equal(body.type, 'addAPIKey');
+    // The registration sodex.com itself sends: UserSignedAddAPIKeyAction, the WALLET's chain as the domain.
+    const signer = (
+      await recoverTypedDataAddress({
+        domain: UNIVERSAL(body.signatureChainID),
+        types: {
+          UserSignedAddAPIKeyAction: [
+            { name: 'chainID', type: 'uint64' }, { name: 'nonce', type: 'uint64' }, { name: 'accountID', type: 'uint64' }, { name: 'name', type: 'string' },
+            { name: 'keyType', type: 'uint8' }, { name: 'publicKey', type: 'bytes' }, { name: 'expiresAt', type: 'uint64' },
+          ],
+        },
+        primaryType: 'UserSignedAddAPIKeyAction',
+        message: {
+          chainID: 286623n, nonce: BigInt(body.nonce), accountID: BigInt(body.params.accountID), name: body.params.name,
+          keyType: body.params.type, publicKey: body.params.publicKey, expiresAt: BigInt(body.params.expiresAt),
+        },
+        signature: rsv(body.signature, 2),
+      })
+    ).toLowerCase();
+    if (signer !== w.owner) return json({ code: 401, error: 'API key error: API key not found' }, 401);
+    w.signers.registrations.push(signer);
     if (!w.keys.some((k) => k.publicKey === body.params.publicKey)) w.keys.push({ name: body.params.name, publicKey: body.params.publicKey, expiresAt: body.params.expiresAt });
+    return ok(null);
+  }
+  if ((m = /^\/api\/v1\/user\/(0x[0-9a-f]{40})\/builders$/.exec(p)) && method === 'POST') {
+    // ApproveBuilderFeeAction: domain chainId = X-API-Chain (the wallet's chain), message chainID = the SoDEX network id.
+    assert.equal(raw, JSON.stringify({ accountID: body.accountID, builderID: body.builderID, maxFeeRate: body.maxFeeRate }), 'body {accountID, builderID, maxFeeRate}');
+    assert.equal(h['x-api-key'], undefined, 'signed by the master wallet: no X-API-Key');
+    const signer = (
+      await recoverTypedDataAddress({
+        domain: UNIVERSAL(Number(h['x-api-chain'])),
+        types: {
+          ApproveBuilderFeeAction: [
+            { name: 'chainID', type: 'uint64' }, { name: 'nonce', type: 'uint64' }, { name: 'accountID', type: 'uint64' },
+            { name: 'builderID', type: 'uint64' }, { name: 'maxFeeRate', type: 'uint64' },
+          ],
+        },
+        primaryType: 'ApproveBuilderFeeAction',
+        message: { chainID: 286623n, nonce: BigInt(h['x-api-nonce']!), accountID: BigInt(body.accountID), builderID: BigInt(body.builderID), maxFeeRate: BigInt(body.maxFeeRate) },
+        signature: rsv(h['x-api-sign']!, 2),
+      })
+    ).toLowerCase();
+    w.signers.approvals.push(signer);
+    w.approvalBodies.push(raw);
+    if (signer !== w.owner || m[1] !== w.owner) return json({ code: 401, error: 'signature does not recover the account owner' }, 401);
+    if (body.accountID !== w.aid) return json({ code: 400, error: 'accountID must be the primary account ID' }, 400);
+    if (!Number.isInteger(body.maxFeeRate) || body.maxFeeRate < 0 || body.maxFeeRate > 2000) return json({ code: 400, error: 'maxFeeRate out of range' }, 400);
+    for (const engine of ['spot', 'perps'] as const) {
+      if (body.maxFeeRate === 0) w.builders[engine].delete(body.builderID);
+      // As on mainnet: an approval above the perps cap (200) is stored as the cap.
+      else w.builders[engine].set(body.builderID, engine === 'perps' ? Math.min(body.maxFeeRate, 200) : body.maxFeeRate);
+    }
     return ok(null);
   }
   if ((m = /^\/api\/v1\/(spot|perps)\/accounts\/transfers$/.exec(p))) {
@@ -355,6 +467,8 @@ function gateway(url: URL, method: string, body: any): Response {
     return ok({ id: body.id });
   }
   if (p === '/api/v1/spot/trade/orders/batch' && method === 'POST') {
+    const no = await checkOrder('spot', body, raw, h);
+    if (no) return no;
     const x = body.orders[0];
     const coin = x.symbolID as number;
     const id = w.nextId++;
@@ -380,6 +494,8 @@ function gateway(url: URL, method: string, body: any): Response {
     return ok([{ code: 0, orderID: c.orderID }]);
   }
   if (p === '/api/v1/perps/trade/orders' && method === 'POST') {
+    const no = await checkOrder('perps', body, raw, h);
+    if (no) return no;
     const x = body.orders[0];
     const id = w.nextId++;
     if (x.type === 1) {
@@ -387,6 +503,12 @@ function gateway(url: URL, method: string, body: any): Response {
     } else {
       const fee = parseUnits(dMul(dMul(x.quantity, '84072'), '0.0004').replace(/(\.\d{6})\d+$/, '$1'), 6);
       w.perps -= fee;
+      // The builder fee: charged on BOTH sides of a perps fill, on top of the venue's own fee.
+      if (body.builder) {
+        const extra = parseUnits(dMul(dMul(x.quantity, '84072'), (body.builder.fee / 100_000).toFixed(5)).replace(/(\.\d{6})\d+$/, '$1'), 6);
+        w.perps -= extra;
+        w.builderIncome += extra;
+      }
       w.position = x.side === 1 ? x.quantity : dSub(w.position, x.quantity) === '0' ? '0' : dSub(w.position, x.quantity);
       if (x.reduceOnly) assert.equal(x.side, 2, 'the close is a sell');
     }
@@ -528,7 +650,10 @@ function installFake() {
       };
       return json(Array.isArray(body) ? await Promise.all(body.map(one)) : await one(body));
     }
-    if (url.origin === GW) return gateway(url, method, body);
+    if (url.origin === GW) {
+      const headers = Object.fromEntries(new Headers(init?.headers ?? (typeof input === 'object' && !(input instanceof URL) ? input.headers : undefined)).entries());
+      return gateway(url, method, body, text ?? '', headers);
+    }
     if (url.origin === BACKEND) return backend(url, method, body);
     if (url.origin === BIZ_ORIGIN) return relayer(url, method, body);
     throw new Error(`the fake has no ${url.origin}`);
@@ -549,7 +674,7 @@ const CONFIG = {
   timeouts: { depositMinutes: 1, withdrawMinutes: 1, settleSeconds: 20, orderSeconds: 20 },
 };
 
-async function run(config: object, o: { confirm?: (address: string) => string; setup?: (w: World) => void } = {}) {
+async function run(config: object, o: { confirm?: (address: string) => string; setup?: (w: World) => void; only?: string[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vs-e2e-sim-'));
   const cfgPath = join(dir, 'config.json');
   writeFileSync(cfgPath, JSON.stringify(config));
@@ -557,6 +682,14 @@ async function run(config: object, o: { confirm?: (address: string) => string; s
   const address = privateKeyToAccount(key).address.toLowerCase();
   world = new World();
   world.owner = address;
+  /* A real run is its own process and takes minutes; these runs share one process and take half a
+     second each, so the app's per-IP budgets (60 s windows: the request weight, and the two history
+     reads a minute) would carry over from one test into the next and make it wait a minute. Each
+     simulated run starts with empty budgets, like a real one. */
+  for (const ledger of [exchangeGateway.budget, exchangeGateway.historyDrip]) {
+    (ledger as unknown as { mem: unknown[] }).mem = [];
+    assert.equal(ledger.spent(), 0, `the ${ledger.name} budget could not be reset for the simulated run`);
+  }
   world.arbUsdc.set(address, 30_000_000n);
   world.arbEth.set(address, 10n ** 16n);
   o.setup?.(world);
@@ -566,7 +699,7 @@ async function run(config: object, o: { confirm?: (address: string) => string; s
     mode: 'live',
     configPath: cfgPath,
     confirm: o.confirm ? o.confirm(address) : address,
-    only: null,
+    only: (o.only as Parameters<typeof runE2E>[0]['only']) ?? null,
     keyHex: key,
     throwaway: false,
     registryOnly: false,
@@ -576,6 +709,7 @@ async function run(config: object, o: { confirm?: (address: string) => string; s
   });
   const file = readdirSync(dir).find((f) => f.endsWith('-live.json'));
   const report = file ? JSON.parse(readFileSync(join(dir, file), 'utf8')) : null;
+  if (process.env.VS_SIM_VERBOSE) console.log(`request budget used by this run: ${exchangeGateway.budget.spent()} of ${exchangeGateway.budget.limit} weight`);
   return { code, lines, report, address, key };
 }
 
@@ -586,7 +720,7 @@ test('a whole live run against the fake: every step ok, no guard or wallet refus
   assert.equal(code, 0, `the run failed:\n${out.split('\n').filter((l) => /FAIL|BLOCKED|REFUSED|refused|Error|error/.test(l)).join('\n')}`);
   assert.deepEqual(
     report.steps.map((s: { id: string; status: string }) => `${s.id}:${s.status}`),
-    ['preflight:ok', 'deposit-external:ok', 'enable-trading:ok', 'transfers:ok', 'orders:ok', 'spot-to-evm:ok', 'evm-to-spot:ok', 'withdraw-valuechain-self:ok', 'withdraw-valuechain-other:ok', 'withdraw-external:ok', 'extra-deposits:skipped', 'extra-withdrawals:ok', 'cleanup:ok'],
+    ['preflight:ok', 'deposit-external:ok', 'enable-trading:ok', 'transfers:ok', 'orders:ok', 'spot-to-evm:ok', 'evm-to-spot:ok', 'withdraw-valuechain-self:ok', 'withdraw-valuechain-other:ok', 'withdraw-external:ok', 'extra-deposits:skipped', 'extra-withdrawals:ok', 'cleanup:ok', 'revoke-builder:skipped'],
   );
   assert.equal(report.network.refused.length, 0, 'the guard refused nothing the app really sent');
   assert.ok(!/the test wallet REFUSED/.test(out), 'the wallet policy refused nothing');
@@ -615,6 +749,77 @@ test('a whole live run against the fake: every step ok, no guard or wallet refus
   assert.ok(report.spend.costUsd > 0 && report.spend.costUsd < CONFIG.maxSpendUsd);
   assert.equal(report.spend.sentAwayUsd, 1);
   assert.ok(world.writes.some((w) => w.startsWith('arbitrum transfer 25000000 -> ' + DEPOSIT_ADDR)), 'the deposit went to the verified address');
+  // Signatures: the fake recovered every one of them with viem.
+  assert.deepEqual([...new Set(world.signers.registrations)], [address], 'the key registration recovers the wallet');
+  assert.ok(world.signers.orders.length >= 5 && world.signers.orders.every((s) => s === world.keys[0]!.publicKey.toLowerCase()), 'every order recovers the trading key');
+  // No builder is configured: nothing about builders is ever sent, and no order names one.
+  assert.deepEqual(world.signers.approvals, []);
+  assert.ok(world.orderBodies.every((o) => !o.raw.includes('builder')), 'no order carries a builder');
+  assert.ok(!report.network.requests.some((r: { url: string }) => r.url.endsWith('/builders')), 'the builders endpoint is never even read');
+});
+
+// --- the builder fee -----------------------------------------------------------------------------
+
+const BUILDER = { id: 223169, feePerps: 50, feeSpot: 100, maxFee: 100, revokeAtEnd: true };
+/** What a builder test is about: an account (the deposit opens it), the key and the approval, orders on both engines, the revocation. */
+const BUILDER_STEPS = ['deposit-external', 'enable-trading', 'orders', 'revoke-builder'];
+
+test('the builder fee in a live run: the approval signature recovers the owner, every order carries the builder LAST, the revocation clears it', async () => {
+  const { code, lines, report, address } = await run({ ...CONFIG, builder: BUILDER }, { only: BUILDER_STEPS });
+  const out = lines.join('\n');
+  if (process.env.VS_SIM_VERBOSE) console.log(`${out}\n--- fake writes ---\n${world.writes.join('\n')}`);
+  assert.equal(code, 0, `the run failed:\n${out.split('\n').filter((l) => /FAIL|BLOCKED|REFUSED|refused|Error|error/.test(l)).join('\n')}`);
+  const status = Object.fromEntries(report.steps.map((s: { id: string; status: string }) => [s.id, s.status]));
+  assert.equal(status['enable-trading'], 'ok');
+  assert.equal(status['orders'], 'ok');
+  assert.equal(status['revoke-builder'], 'ok');
+  assert.equal(report.network.refused.length, 0, 'the guard refused nothing the app really sent');
+  assert.ok(!/the test wallet REFUSED/.test(out), 'the wallet policy refused nothing');
+
+  // 1. The approval: ONE extra typed-data signature, on the chain the wallet is on, BEFORE the key.
+  const signed = lines.filter((l) => /wallet signed /.test(l)).map((l) => l.replace(/^.*wallet signed /, ''));
+  assert.equal(signed[0], 'ApproveBuilderFeeAction (chain 42161)', 'first prompt: the approval, with the wallet\'s own chain as the domain');
+  assert.equal(signed[1], 'UserSignedAddAPIKeyAction (chain 42161)', 'then the key registration');
+  assert.equal(signed.filter((s) => s.startsWith('ApproveBuilderFeeAction')).length, 2, 'the approval and, at the end, the revocation - nothing in between');
+  // 2. viem recovered the wallet from both builder signatures.
+  assert.deepEqual(world.signers.approvals, [address, address], 'the approval signature recovers the owner (and so does the revocation)');
+  assert.deepEqual(world.approvalBodies, [
+    `{"accountID":777,"builderID":${BUILDER.id},"maxFeeRate":100}`,
+    `{"accountID":777,"builderID":${BUILDER.id},"maxFeeRate":0}`,
+  ]);
+  const approvals = report.network.requests.filter((r: { method: string; url: string }) => r.method === 'POST' && r.url.endsWith(`/api/v1/user/${address}/builders`));
+  assert.equal(approvals.length, 2, 'sent straight to the gateway, for this wallet');
+  // 3. Every order of the run names the builder as the LAST field, with that engine's fee - and recovers the trading key.
+  const perps = world.orderBodies.filter((o) => o.engine === 'perps');
+  const spot = world.orderBodies.filter((o) => o.engine === 'spot');
+  assert.ok(perps.length >= 3 && spot.length >= 2, `orders seen: ${perps.length} perps, ${spot.length} spot`);
+  assert.ok(perps.every((o) => o.raw.endsWith(`,"builder":{"id":${BUILDER.id},"fee":50}}`)), 'perps: builder last, fee 50');
+  assert.ok(spot.every((o) => o.raw.endsWith(`,"builder":{"id":${BUILDER.id},"fee":100}}`)), 'spot: builder last, fee 100');
+  assert.ok(world.signers.orders.every((s) => s === world.keys[0]!.publicKey.toLowerCase()), 'signed by the trading key over the bytes that carry the builder');
+  // 4. The fake charged the builder fee on both perps fills (open + reduce-only close), on top of its own fee.
+  assert.ok(world.builderIncome > 0n, 'perps fills paid the builder fee');
+  // 5. The revocation cleared both lists; the money ended where it always does.
+  assert.equal(world.builders.spot.size + world.builders.perps.size, 0, 'both approval lists are clear');
+  assert.equal(report.tradingKey.builder, null, 'the app no longer attaches the builder');
+  assert.equal(world.position, '0');
+  assert.equal(world.orders.length, 0);
+  const enable = report.steps.find((s: { id: string }) => s.id === 'enable-trading');
+  assert.ok(enable.notes.some((n: string) => /builder fee disclosure: builder #223169, perps 50 \/ spot 100 tenths of a bp per fill, maximum 100, optional/.test(n)), 'the disclosure the app would show is on record');
+  assert.match(enable.amounts['builder approval'], /"spot":100,"perps":100/);
+});
+
+test('an account that already approved the builder: no approval signature, orders carry the builder, and the approval is left alone', async () => {
+  const { code, lines, report, address } = await run(
+    { ...CONFIG, builder: { ...BUILDER, revokeAtEnd: false } },
+    { only: BUILDER_STEPS, setup: (w) => { w.builders.spot.set(BUILDER.id, 500); w.builders.perps.set(BUILDER.id, 200); } },
+  );
+  assert.equal(code, 0, lines.filter((l) => /FAIL|BLOCKED|REFUSED|refused|Error/.test(l)).join('\n'));
+  assert.ok(!lines.some((l) => /wallet signed ApproveBuilderFeeAction/.test(l)), 'nothing extra to sign');
+  assert.deepEqual(world.signers.approvals, []);
+  assert.ok(world.orderBodies.length >= 5 && world.orderBodies.every((o) => o.raw.includes(`"builder":{"id":${BUILDER.id},`)));
+  assert.equal(report.steps.find((s: { id: string }) => s.id === 'revoke-builder').status, 'skipped');
+  assert.deepEqual([world.builders.spot.get(BUILDER.id), world.builders.perps.get(BUILDER.id)], [500, 200], 'still approved');
+  assert.deepEqual([...new Set(world.signers.registrations)], [address]);
 });
 
 test('live refuses to start - nothing is signed or sent - when the backend and the on-chain registry disagree on the deposit address', async () => {

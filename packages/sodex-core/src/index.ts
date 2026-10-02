@@ -22,6 +22,7 @@ export * from './userSigned.ts';
 export * from './nonce.ts';
 export * from './request.ts';
 export * from './registration.ts';
+export * from './builders.ts';
 export * from './envelope.ts';
 export * from './permit.ts';
 export * from './callForPermit.ts';

@@ -61,6 +61,8 @@ export interface SdkVectorFile extends VectorFile {
   domainUnivNet: string;
   domainPerpsMainnet: string;
   domainSpotMainnet: string;
+  domainUnivMainnet: string;
+  domainUnivArbitrum: string;
   permissionMasks: Record<string, number>;
 }
 

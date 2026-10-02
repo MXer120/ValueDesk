@@ -635,6 +635,89 @@ func main() {
 		Signature: "0x02" + hex.EncodeToString(uRevRaw), Source: "go-sdk primitives (python-sdk route)",
 	})
 
+	// -----------------------------------------------------------------------
+	// Builder codes on MAINNET (added 2026-10-02 for the builder-fee approval).
+	//
+	// Everything above signs for testnet (message chainID 138565). Production is
+	// mainnet, and a builder action carries TWO chain ids that are easy to swap:
+	//   - the DOMAIN chainId is whatever travels in X-API-Chain: the wallet's
+	//     current chain (a browser wallet refuses typed data for another chain),
+	//     or the SoDEX network id (what the official Python SDK's
+	//     client.approve_builder_fee signs: both values the network id);
+	//   - the MESSAGE chainID is always the SoDEX network id.
+	// These pin each combination with the official signer on a MAINNET Signer,
+	// plus the documented extremes of maxFeeRate (2000 = the ceiling, 0 = clear).
+	// They use their own nonce range, so nothing above changes.
+	// -----------------------------------------------------------------------
+	const mainChainID = uint64(286623)
+	perpsMain := perpssgn.NewSigner(mainChainID, pk)
+	spotMain := spotsgn.NewSigner(mainChainID, pk)
+	arbChain, ethChain, baseChain := uint64(42161), uint64(1), uint64(8453)
+	bn := uint64(1760400000000)
+	for _, c := range []struct {
+		name string
+		fee  uint64
+		wc   *uint64 // nil: the signer's own universal domain (the network id)
+	}{
+		{"user_approve_builder_fee_mainnet_wallet_chain_42161", 50, &arbChain},
+		{"user_approve_builder_fee_mainnet_wallet_chain_1_max", 2000, &ethChain},
+		{"user_approve_builder_fee_mainnet_network_chain", 20, nil},
+		{"user_approve_builder_fee_mainnet_clear_wallet_chain_42161", 0, &arbChain},
+	} {
+		bn++
+		ab := &ctypes.ApproveBuilderFeeRequest{AccountID: 1010, BuilderID: 223169, MaxFeeRate: c.fee}
+		abSig, err := perpsMain.SignApproveBuilderFeeRequest(ab, bn, c.wc)
+		if err != nil {
+			panic(err)
+		}
+		// One signature serves both engines: the universal domain has no engine in it.
+		spotSig, err := spotMain.SignApproveBuilderFeeRequest(ab, bn, c.wc)
+		if err != nil || hex.EncodeToString(spotSig) != hex.EncodeToString(abSig) {
+			panic(fmt.Sprintf("%s: the spot and perps signers disagree on a universal action", c.name))
+		}
+		domChain := mainChainID
+		if c.wc != nil {
+			domChain = *c.wc
+		}
+		abAction := &ctypes.ApproveBuilderFeeAction{ChainID: mainChainID, Nonce: bn, AccountID: ab.AccountID, BuilderID: ab.BuilderID, MaxFeeRate: ab.MaxFeeRate}
+		dom := ctypes.NewEIP712Domain(ctypes.UniversalDomainName, domChain)
+		users = append(users, userVector{
+			Name: c.name, PrimaryType: "ApproveBuilderFeeAction", DomainChainID: domChain, MessageChainID: mainChainID, Nonce: bn,
+			Message: json.RawMessage(mustJSON(map[string]any{
+				"chainID": mainChainID, "nonce": bn, "accountID": ab.AccountID, "builderID": ab.BuilderID, "maxFeeRate": ab.MaxFeeRate,
+			})),
+			StructHash: abAction.StructHash().Hex(), Digest: abAction.Hash(&dom).Hex(),
+			Signature: "0x" + hex.EncodeToString(abSig), Source: "go-sdk:SignApproveBuilderFeeRequest (mainnet signer)",
+		})
+	}
+
+	// AddAPIKeyWithBuilder on mainnet with the wallet on Base: the one-signature
+	// registration + approval (the struct SafePal's accepted mainnet
+	// registrations recover under - see test/vectors-live.json).
+	bn++
+	wbMain := &ctypes.AddAPIKeyWithBuilderRequest{
+		AccountID: 1010, Name: "valuescan-web", Type: enums.APIKeyTypeEVM,
+		PublicKey: strings.ToLower(keyAddr.Hex()), ExpiresAt: 1761004800000,
+		Builder: ctypes.BuilderParams{BuilderID: 223169, FeeRate: 50},
+	}
+	wbMainSig, err := perpsMain.SignAddAPIKeyWithBuilderRequest(wbMain, bn, &baseChain)
+	if err != nil {
+		panic(err)
+	}
+	wbMainAction := &ctypes.AddAPIKeyWithBuilderAction{ChainID: mainChainID, Nonce: bn, AddAPIKeyWithBuilderRequest: *wbMain}
+	wbMainDom := ctypes.NewEIP712Domain(ctypes.UniversalDomainName, baseChain)
+	users = append(users, userVector{
+		Name: "user_add_api_key_with_builder_mainnet_wallet_chain_8453", PrimaryType: "AddAPIKeyWithBuilder",
+		DomainChainID: baseChain, MessageChainID: mainChainID, Nonce: bn,
+		Message: json.RawMessage(mustJSON(map[string]any{
+			"chainID": mainChainID, "nonce": bn, "accountID": wbMain.AccountID, "name": wbMain.Name,
+			"keyType": int(wbMain.Type), "publicKey": wbMain.PublicKey, "expiresAt": wbMain.ExpiresAt,
+			"builderID": wbMain.Builder.BuilderID, "maxFeeRate": wbMain.Builder.FeeRate,
+		})),
+		StructHash: wbMainAction.StructHash().Hex(), Digest: wbMainAction.Hash(&wbMainDom).Hex(),
+		Signature: "0x" + hex.EncodeToString(wbMainSig), Source: "go-sdk:SignAddAPIKeyWithBuilderRequest (mainnet signer)",
+	})
+
 	// --- Go encoding/json string escaping (goJSONStringify parity) ----------
 	escCases := []string{
 		"plain", "<script>&amp;", "quote\"back\\slash", "line\nfeed\rtab\t",
@@ -680,6 +763,8 @@ func main() {
 		"domainUnivNet":      sep(ctypes.UniversalDomainName, testChainID),
 		"domainPerpsMainnet": sep(ctypes.PerpsDomainName, 286623),
 		"domainSpotMainnet":  sep(ctypes.SpotDomainName, 286623),
+		"domainUnivMainnet":  sep(ctypes.UniversalDomainName, 286623),
+		"domainUnivArbitrum": sep(ctypes.UniversalDomainName, 42161),
 		"bigIntCheck":        new(big.Int).SetUint64(testChainID).String(),
 		"sigTypeExch":        int(enums.SignatureTypeEIP712),
 		"sigTypeUniv":        int(enums.SignatureTypeEIP712Universal),

@@ -113,7 +113,8 @@ export async function sendSigned<T = unknown>(req: SignedHttpRequest, what: stri
  * through the browser's exchange layer: the per-IP budget every tab shares,
  * dedupe of identical concurrent reads, and SoDEX's rate-limit cooldown.
  * `attempts` covers transient failures; a definite rejection is final.
+ * `weight` books the path's real cost when it is not the table's default.
  */
-export async function readGateway<T = unknown>(path: string, attempts = 2): Promise<T> {
-  return exchangeGateway.get<T>(path, { attempts });
+export async function readGateway<T = unknown>(path: string, attempts = 2, weight?: number): Promise<T> {
+  return exchangeGateway.get<T>(path, weight === undefined ? { attempts } : { attempts, weight });
 }

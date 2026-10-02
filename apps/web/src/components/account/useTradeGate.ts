@@ -19,6 +19,8 @@ import { useWalletSnapshot } from './useWallet';
 import { requestCreateAccount, requestEnableTrading, useAccountPending, walletRoute } from './actions';
 import { openConnectDialog } from './connect';
 import { getTradingState, subscribeTrading } from '../../trading/session';
+import { activeBuilder } from '../../trading/builder';
+import { tradingConfig } from '../../trading/config';
 
 export interface TradeGate {
   /** The button's words. */
@@ -58,7 +60,10 @@ export function useTradeGate(address: string | null | undefined, unlocked: boole
               act: requestCreateAccount,
             }
           : {
-              why: 'Enable trading to place orders: one wallet signature registers a trading key in this browser.',
+              // A build with a builder fee may ask for one more signature, once (its approval).
+              why: activeBuilder(tradingConfig().builder)
+                ? 'Enable trading to place orders: one wallet signature registers a trading key in this browser. The first time, you are also asked about the Valuescan builder fee.'
+                : 'Enable trading to place orders: one wallet signature registers a trading key in this browser.',
               label: 'Enable trading',
               act: requestEnableTrading,
             };

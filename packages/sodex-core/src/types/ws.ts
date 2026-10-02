@@ -390,7 +390,11 @@ interface WsExecution {
 export type WsSpotOrderUpdate = WsOrder & WsExecution;
 export type WsPerpsOrderUpdate = WsPerpsOrder & WsExecution;
 
-/** `accountTrade` (spot). `bf` = builder fee on this fill. */
+/**
+ * `accountTrade` (spot). `f` = fee, `bf` = builder fee on this fill (documented;
+ * not yet observed on a live push). On REST the builder fee is PART of the fee
+ * [live 2026-10-02]; `fillFeeParts` (builders.ts) reads either shape that way.
+ */
 export interface WsSpotUserTrade {
   E: number;
   T: number;

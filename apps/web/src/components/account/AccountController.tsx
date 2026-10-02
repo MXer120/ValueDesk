@@ -17,12 +17,20 @@
  * expires. The wallet's own private key is never read, and no Valuescan server
  * ever holds a key that can trade. A wallet with no SoDEX account yet gets the
  * Deposit sheet (funds/DepositModal.tsx) instead - its first deposit opens the account.
+ *
+ * WITH A BUILDER FEE CONFIGURED (trading/config.ts; off by default) there is one
+ * dialog in between, and only the first time: when SoDEX does not already list
+ * the account's approval, BuilderConsent.tsx discloses the fee and asks, and a
+ * yes adds ONE wallet signature before the key's. Without a configured builder
+ * none of that code runs and the flow is exactly the one above.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SessionInfo } from '../../api';
 import { useConfirm } from '../Modal';
 import { notify, notifyError } from '../../toast';
 import { WalletError, type Eip1193Provider } from '../../wallet';
+import { activeBuilder } from '../../trading/builder';
+import { tradingConfig } from '../../trading/config';
 import {
   TradingError,
   disableTrading as disableTradingInBrowser,
@@ -31,6 +39,7 @@ import {
 import { WalletConnectError } from '../../walletconnect';
 import { WALLET_EVENTS, getAccountPending, setAccountPending, type TransferPreset } from './actions';
 import { AdvancedKeysModal } from './AdvancedKeys';
+import { useBuilderConsent } from './BuilderConsent';
 import { ConnectDialog } from './ConnectDialog';
 import { DepositModal } from '../funds/DepositModal';
 import { WithdrawModal } from '../funds/WithdrawModal';
@@ -51,6 +60,9 @@ const isRejection = (e: unknown): boolean =>
 
 export function AccountController({ address, provider, session, onSession }: Props) {
   const { confirm, dialog } = useConfirm();
+  /* The builder-fee disclosure (only ever opened by a build that configures a builder). */
+  const builderConsent = useBuilderConsent();
+  const askBuilderFee = builderConsent.ask;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const wallet = useWalletSnapshot();
 
@@ -89,13 +101,45 @@ export function AccountController({ address, provider, session, onSession }: Pro
     }
     setAccountPending('enable');
     try {
-      notify('info', `Approve the signature in ${walletName || 'your wallet'} - it lets this browser trade for you.`);
-      await enableTradingInBrowser({ owner: addr, provider: p, remember: true });
-      notify('ok', 'Trading enabled. You can place and cancel orders.');
+      const where = walletName || 'your wallet';
+      const keyPrompt = `Approve the signature in ${where} - it lets this browser trade for you.`;
+      if (!activeBuilder(tradingConfig().builder)) {
+        notify('info', keyPrompt);
+        await enableTradingInBrowser({ owner: addr, provider: p, remember: true });
+        notify('ok', 'Trading enabled. You can place and cancel orders.');
+      } else {
+        /* A builder fee is configured: the session reads the account's approval
+           first, and each wallet prompt is announced when it is actually due. */
+        const st = await enableTradingInBrowser({
+          owner: addr,
+          provider: p,
+          remember: true,
+          confirmBuilderFee: askBuilderFee,
+          onStep: (step) =>
+            notify(
+              'info',
+              step === 'builder-approval'
+                ? `Approve the builder fee in ${where} - the first of two signatures.`
+                : keyPrompt,
+            ),
+        });
+        notify(
+          'ok',
+          st.builder
+            ? 'Trading enabled. Orders placed here carry the Valuescan builder fee you approved.'
+            : 'Trading enabled, without the Valuescan builder fee.',
+        );
+      }
       latest.current.onSession();
       return true;
     } catch (e) {
       if (isRejection(e)) return false;
+      /* The builder-fee dialog was closed: a decision, not a fault. */
+      if (e instanceof TradingError && e.kind === 'cancelled') return false;
+      if (e instanceof TradingError && e.kind === 'builder-required') {
+        notify('info', e.message);
+        return false;
+      }
       if (e instanceof TradingError && e.kind === 'no-account') {
         setDepositOpen(true);
         return false;
@@ -109,7 +153,7 @@ export function AccountController({ address, provider, session, onSession }: Pro
     } finally {
       setAccountPending(null);
     }
-  }, [connect]);
+  }, [connect, askBuilderFee]);
 
   const disableTrading = useCallback(async () => {
     if (getAccountPending()) return;
@@ -210,6 +254,7 @@ export function AccountController({ address, provider, session, onSession }: Pro
   return (
     <>
       {dialog}
+      {builderConsent.dialog}
       <AdvancedKeysModal
         open={advancedOpen}
         onClose={() => setAdvancedOpen(false)}
@@ -218,6 +263,7 @@ export function AccountController({ address, provider, session, onSession }: Pro
         walletName={wallet.walletName}
         session={session}
         onSession={onSession}
+        confirmBuilderFee={askBuilderFee}
       />
       <ConnectDialog />
       <DepositModal

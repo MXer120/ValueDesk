@@ -53,5 +53,8 @@
 
   "cleanup": { "enabled": false, "chain": "ARBITRUM_ETH" },
 
+  "// builder": "OFF (null) by default. To test the Valuescan builder fee (docs/BUILDER-CODES.md) set e.g. { \"id\": 12345, \"feePerps\": 50, \"feeSpot\": 50, \"maxFee\": 50, \"required\": false, \"revokeAtEnd\": true } - fees in tenths of a basis point (perps 0..200, spot 0..2000). enable-trading then approves the fee when SoDEX does not list it yet (ONE more wallet signature), every order of the run must carry the builder, and revoke-builder clears the approval at the end. Find the id with: node tools/check-builder.mjs <builder wallet>",
+  "builder": null,
+
   "timeouts": { "depositMinutes": 30, "withdrawMinutes": 30, "settleSeconds": 180, "orderSeconds": 60 }
 }

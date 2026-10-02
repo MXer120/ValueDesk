@@ -35,6 +35,7 @@ const STEPS: readonly string[] = [
   'extra-deposits',
   'extra-withdrawals',
   'cleanup',
+  'revoke-builder',
 ];
 
 const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json [options]

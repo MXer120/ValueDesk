@@ -63,11 +63,12 @@ const req = assembleWalletSignedRequest(prepared, sig);  // v 27/28 -> 0/1, pref
 
 | Function | Signs | Route | Confidence |
 |---|---|---|---|
-| `prepareApiKeyRegistration` (no builder, no permissions) | `AddAPIKey` (domain chainId = SoDEX network id) | `POST /api/v1/user/{addr}/api-keys` | documented |
-| `prepareApiKeyRegistration({builder})` | `AddAPIKeyWithBuilder` (domain = wallet chain, message `chainID` = 286623/138565) | same | documented |
+| `prepareApiKeyRegistrationExchange` + `assembleExchangeRequests` | `UserSignedAddAPIKeyAction` (domain = wallet chain, message `chainID` = 286623/138565) | `POST /api/v1/{spot,perps}/exchange`, one signature, both engines | **what the web app uses**; what sodex.com sends; the typed data matches 85 real mainnet registrations (`test/vectors-live.json`) |
+| `prepareApiKeyRegistration` (no builder, no permissions) | `AddAPIKey` (domain chainId = SoDEX network id) | `POST /api/v1/user/{addr}/api-keys` | documented, **rejected live** (2026-09-26): the engines verify `UserSignedAddAPIKeyAction` |
+| `prepareApiKeyRegistration({builder})` | `AddAPIKeyWithBuilder` (domain = wallet chain, message `chainID` = 286623/138565) | same | typed data **proven** on mainnet (4 accepted registrations, all with 286623 as the domain chain); the HTTP route is documented only |
 | `prepareApiKeyRegistration({permissions})` | `UserSignedAddPermissionedAPIKeyAction` | same | documented |
 | `prepareEngineApiKeyRegistration` | `UserSignedAddPermissionedAPIKeyAction` | `POST /api/v1/{engine}/accounts/api-keys` (Opentrade `routes/wallet.ts`) | Opentrade legacy |
-| `prepareBuilderFeeApproval` | `ApproveBuilderFeeAction` (`maxFeeRate` 0 clears) | `POST /api/v1/user/{addr}/builders` | documented |
+| `prepareBuilderFeeApproval` | `ApproveBuilderFeeAction` (`maxFeeRate` 0 clears; domain = wallet chain, message `chainID` = 286623/138565) | `POST /api/v1/user/{addr}/builders` | documented, and what the official Go and Python SDKs sign; **not yet observed on a live gateway** (`docs/BUILDER-CODES.md`) |
 | `prepareApiKeyRevocation({route:'engine-delete'})`, `...BothEngines` | `ExchangeAction` `revokeAPIKey`, engine domain, `0x01`, master wallet | `DELETE /api/v1/{engine}/accounts/api-keys`, once per engine | documented, **route unverified** |
 | `prepareApiKeyRevocation({route:'engine-post-revoke'})` | same | `POST /api/v1/{engine}/accounts/api-keys/revoke` (Opentrade) | **undocumented, unverified** |
 | `prepareApiKeyRevocation({route:'user-delete-universal'})` | `ExchangeAction`, universal domain, `0x02` | `DELETE /api/v1/user/{addr}/api-keys` (Python SDK) | **contradicts the docs, unverified** |
@@ -93,6 +94,23 @@ Each prepared action carries `typedData` (hand it to the wallet), `digest`, `cav
 
 It enforces the documented window `(now − 2 d, now + 1 d)` with a 60 s margin. `createMemoryNonceManager()` is the in-memory fallback for a single tab or process. `withNonce(key, fn)` keeps the lock held while `fn` sends, for callers that need wire order.
 
+### Builder codes (`builders.ts`): the read side and the numbers
+
+Signing is above (`builderFragment` on an order, `prepareBuilderFeeApproval` for the approval). This module reads what SoDEX reports and does the arithmetic. Rates are integers in **tenths of a basis point** (`10` = 1 bp = 0.01 %; `fee = notional * rate / 100 000`).
+
+```ts
+const rates = approvedBuilderRates(data, BUILDER_ACCOUNT_ID);   // data of GET /api/v1/user/{addr}/builders
+// -> { spot: 500, perps: 200 }   null = not approved on that engine
+const fee = attachableBuilderFee('perps', 50, rates.perps);     // 50, or null: do NOT name the builder
+const { total, builder, venue } = fillFeeParts(fill);            // REST row (fee, builderFee) or WS (f, bf)
+```
+
+- **`approvedBuilderRates`** judges an approval **per engine**: one approval of 500 is listed as spot 500 and perps 200 (the perps cap). Anything it cannot read is "not approved", never an approval.
+- **`attachableBuilderFee(engine, orderFee, approved)`** returns the fee an order may carry, or `null` when the builder is not approved there, the fee exceeds the approval, or exceeds the engine cap. An order naming a builder beyond its approval is **rejected** by the engine, so this is a correctness rule.
+- **`builderFeeCharged(engine, side)`**: both sides on perps, sells only on spot.
+- **`fillFeeParts`**: a fill's `fee` is the **total**, the builder's share included; `builderFee` is a part of it and is present only on fills that were charged one. Never add the two.
+- **`builderRateToFraction`, `builderRateDecimal`, `builderRatePercent`, `builderFeeAmount`** convert and compute exactly (decimal strings); **`builderApprovalCount`** counts a user's approvals (limit `MAX_BUILDER_APPROVALS` = 10); `BUILDER_MIN_BALANCE_USDC` = 100 is what a builder must hold in each engine.
+
 ### Other modules
 
 - **`decimal.ts`:** `canonicalDecimal`, `decimalCompare`, `roundToStep` and `numberToPlainString`. It matches shopspring/decimal and never uses exponent notation.
@@ -107,17 +125,27 @@ It enforces the documented window `(now − 2 d, now + 1 d)` with a 60 s margin.
 - Opentrade's **19 original vectors** (`test/vectors.json`, copied verbatim). Today's SDK still reproduces them exactly, and a test asserts that.
 - Perps orders with a **batch-level builder**, including a market IOC order with a price cap at the 200 fee cap, and spot batches with a builder. These use official structs and the official signer.
 - **AddAPIKey** (the ordinary key), **AddAPIKeyWithBuilder** (with the wallet on chain 1 and on the network chain), and **ApproveBuilderFeeAction** (approve and clear). These cover the digests and the `0x02` wire signatures, *and* the typed-data **objects** handed to wallets, which hash to the same digest.
+- The same builder actions for **mainnet** (message `chainID` 286623) with a wallet on another chain in the domain: `ApproveBuilderFeeAction` with the wallet on Arbitrum (42161), on Ethereum at the maximum rate 2000, on the network chain, and clearing with `maxFeeRate` 0; `AddAPIKeyWithBuilder` with the wallet on Base (8453).
 - TWAP new and cancel, and the spot revoke payload.
 - Go `encoding/json` string escaping: HTML characters, `\b`, `\f`, U+2028 and U+2029. Decimal canonicalisation on 27 cases.
+
+**Verified against the official Python SDK** (`sodex-python-sdk-public@939f2d6`, 2026-09-28): a literal port of `client.approve_builder_fee`'s digest (type hash, 32-byte big-endian fields, `0x1901` prefix) gives the digest of `approveBuilderFeeTypedData`, and the SDK's own approval test vector is reproduced (`test/builders.test.ts`).
+
+**Verified against SoDEX mainnet, read-only** (`test/vectors-live.json`; public appchain transactions read from SoDEX's CLOB explorer on 2026-10-02 - nothing was signed or sent):
+
+- Registrations **with a builder** that the engines accepted recover the account owner under `addAPIKeyWithBuilderTypedData` (four accounts; HTTP `builder.fee` is the EIP-712 `maxFeeRate`).
+- Registrations **without** one recover the owner under `userSignedAddAPIKeyTypedData` with the wallet's chain in the domain (Ethereum, Base, ValueChain, and a key signed on chain 31337) and never under the documented `AddAPIKey`. Of 89 registrations read on four accounts, none uses the documented struct.
+- `GET /user/{addr}/builders` and the fee fields of a fill (`fee` includes `builderFee`; spot buys carry none) - the rows in `test/builders.test.ts` are real answers.
 
 **Pinned, but only half-official.**
 
 - The perps **per-order builder override.** The Go SDK has no such field. Its layout (the last key of the order, after `positionSide`) comes from the Python SDK (2026-09-08) and the builder-codes doc. The bytes are Go `encoding/json` plus the official signer over a local struct.
 - The **universal-domain revoke** (the Python SDK route) is composed from SDK primitives.
 
-**Unverified: nothing in this package has been sent to a gateway.**
+**Unverified: the tests of this package send nothing to a gateway.**
 
-- Whether the gateway accepts any of the routes above as assembled. Opentrade's notes record only that the signature layer of the legacy engine route was accepted on testnet in Aug 2026.
+- Whether the gateway accepts the routes above as assembled - except the `/exchange` registration, which is the request sodex.com itself sends. Opentrade's notes record only that the signature layer of the legacy engine route was accepted on testnet in Aug 2026.
+- **The standalone builder approval** (`POST /user/{addr}/builders`): its bytes match both official SDKs, but no such request has been observed on a live gateway - neither from this code nor on the explorer. The first one is the owner's manual test (`docs/BUILDER-CODES.md`, section 9). The same holds for a perps fill with a builder fee and for the WebSocket `bf` field.
 - Which revocation route works. The docs say `DELETE /{engine}/accounts/api-keys`, and both Opentrade's `POST …/revoke` and the Python SDK's universal `DELETE /user/{addr}/api-keys` disagree with them.
 - Permission-mask **enforcement**. For example, whether a mask-14 key really cannot withdraw.
 - The real scope of an ordinary key: "moves funds only between the owner's own engines and EVM wallet". This is documented and inferred, not observed.
@@ -136,14 +164,16 @@ It enforces the documented window `(now − 2 d, now + 1 d)` with a 60 s margin.
 - **The master wallet signs only typed data** (registration, builder approval and revocation). `assembleWalletSignedRequest` recovers the signer and refuses a signature from any address other than the account owner.
 - **Key names are public.** Anyone can list an address's keys, so key names must not contain anything identifying.
 - **Never retry a signed write.** A timeout is not evidence that the engine did not act. `isTransientFailure` is for GETs only.
-- **The builder-fee approval is a ceiling, not a payment.** At most 10 approvals per user, and the builder needs at least 100 vUSDC in *both* engines.
+- **The builder-fee approval is a ceiling, not a payment.** At most 10 approvals per user, and the builder needs at least 100 vUSDC in *both* engines. Name the builder on an order only where `approvedBuilderRates` + `attachableBuilderFee` say so: the approval SoDEX lists, per engine, is the only source of truth, and an order naming an unapproved builder is rejected.
 
 ## Develop
 
 ```bash
-npm test                      # tsx --test test/*.test.ts   (141 tests)
+npm test                      # tsx --test test/*.test.ts   (179 tests)
 npm run typecheck             # src (no Node/DOM typings) + tests (Node typings)
 bash tools/genvectors.sh      # regenerate test/vectors-sdk.json from the official Go SDK (needs Go + network once)
 ```
 
 `tools/.cache/` is git-ignored and holds clones of `sodex-go-sdk-public` (used for the vectors) and `sodex-python-sdk-public` (used as field-order evidence).
+
+`test/vectors-live.json` is not generated by a tool in this repo: it holds public mainnet transactions read once from SoDEX's CLOB explorer (its header says how). The account owners are stored only as `keccak256` of their address.

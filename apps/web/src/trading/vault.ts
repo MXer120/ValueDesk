@@ -22,6 +22,7 @@
  * and says so.
  */
 import { privateKeyToAddress, type Engine, type Network } from '@sodex-core';
+import type { BuilderApproval } from './builder';
 
 export interface StoredKey {
   v: 1;
@@ -36,8 +37,12 @@ export interface StoredKey {
   /** Registration expiry, ms. */
   expiresAt: number;
   createdAt: number;
-  /** The builder approval signed with the key, if any. */
-  builder: { id: number; maxFeeRate: number } | null;
+  /**
+   * The builder-fee approval SoDEX lists for this ACCOUNT, per engine, as last
+   * read (builder.ts). It is not part of the key: it is kept here so orders
+   * know where the fee may be attached, and re-read whenever the key is restored.
+   */
+  builder: BuilderApproval | null;
   /** Engines that accepted the key; absent = both. */
   engines?: Engine[];
 }

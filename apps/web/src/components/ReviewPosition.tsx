@@ -28,6 +28,7 @@ import {
   type Side,
   type StopCheck,
 } from '../risk';
+import type { BuilderFeeQuote } from '../trading/builder';
 import './ReviewPosition.css';
 
 /**
@@ -119,6 +120,12 @@ export interface ReviewOrder {
   network?: string;
   /** Address the backend's unlocked key signs as - the account this actually hits. */
   signingAddress?: string | null;
+  /**
+   * Valuescan's builder fee on this order, when it will carry one (absent
+   * otherwise - and always absent without a configured builder). SoDEX charges
+   * it per fill on top of its own fee, so it is a row of its own.
+   */
+  builderFee?: BuilderFeeQuote;
 }
 
 interface Props {
@@ -148,7 +155,7 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
   const {
     side, engine, symbol, sym, orderType, marketExec, entryPrice, quantity, notional,
     leverage, marginMode, triggerPrice, triggerKind, triggerOn, tpPrice, slPrice,
-    reduceOnly, tif, network, signingAddress,
+    reduceOnly, tif, network, signingAddress, builderFee,
   } = order;
 
   const isPerps = engine === 'perps';
@@ -283,6 +290,23 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
               )}
             </td>
           </tr>
+          {builderFee && (
+            <tr>
+              {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to Valuescan. */}
+              <th>Est. Valuescan fee</th>
+              <td>
+                {!builderFee.charged ? (
+                  <span className="muted">none on spot buys</span>
+                ) : notional > 0 ? (
+                  <>
+                    {fmtUsd(notional * builderFee.fraction)} <span className="muted">builder {pct(builderFee.fraction)}</span>
+                  </>
+                ) : (
+                  <span className="muted">-</span>
+                )}
+              </td>
+            </tr>
+          )}
           {signingAddress && (
             <tr>
               <th>Signs as</th>

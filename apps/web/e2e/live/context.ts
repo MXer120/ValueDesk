@@ -25,6 +25,7 @@ export const STEP_ORDER = [
   'extra-deposits',
   'extra-withdrawals',
   'cleanup',
+  'revoke-builder',
 ] as const;
 export type StepId = (typeof STEP_ORDER)[number];
 
@@ -41,6 +42,7 @@ export const STEP_TITLES: Record<StepId, string> = {
   'extra-deposits': 'extra deposits from other EVM chains',
   'extra-withdrawals': 'extra withdrawals per chain',
   cleanup: 'move everything back to Spot and withdraw to the deposit chain',
+  'revoke-builder': 'revoke the builder-fee approval (one wallet signature)',
 };
 
 export interface TxRecord {

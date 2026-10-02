@@ -134,7 +134,10 @@ export async function runE2E(o: RunOptions): Promise<number> {
     gateway: GATEWAY_ORIGIN.mainnet,
     writesAllowed: o.mode === 'live',
     disabled: o.mode !== 'live',
-    builder: null,
+    // OFF unless the run's config sets one (config.ts `builder`).
+    builder: cfg.builder
+      ? { id: cfg.builder.id, fee: { perps: cfg.builder.feePerps, spot: cfg.builder.feeSpot }, maxFeeRate: cfg.builder.maxFee, required: cfg.builder.required }
+      : null,
     keyTtlMs: cfg.keyTtlHours * 3_600_000,
   });
   _resetTradingForTests(memoryVault());
@@ -207,7 +210,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
       spend: ctx.spend,
       tradingKey: (() => {
         const t = getTradingState();
-        return t.status === 'enabled' ? { name: t.keyName, address: t.keyAddress, expiresAt: t.expiresAt, engines: t.engines } : { status: t.status };
+        return t.status === 'enabled' ? { name: t.keyName, address: t.keyAddress, expiresAt: t.expiresAt, engines: t.engines, builder: t.builder } : { status: t.status };
       })(),
       snapshots: { start: startSnapshot, end },
       inFlight: ctx.inFlight,
