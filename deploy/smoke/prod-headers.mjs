@@ -1,0 +1,109 @@
+// The response headers production sends with the site, per path - the values of
+// deploy/aws/edge.yaml (CloudFront response headers policies), which are
+// docs/deploy/SECURITY-HEADERS.md section 1.
+//
+// The smoke test's static server applies exactly these, so a page that works
+// locally under them works behind CloudFront. deploy/aws/validate_offline.py
+// fails when this file and edge.yaml drift apart.
+//
+//   node deploy/smoke/prod-headers.mjs --json     the table, for the validator
+import { pathToFileURL } from 'node:url';
+
+const CONNECT_SRC = [
+  "'self'",
+  'https://mainnet-gw.sodex.dev', 'wss://mainnet-gw.sodex.dev',
+  'https://testnet-gw.sodex.dev', 'wss://testnet-gw.sodex.dev',
+  'https://mainnet-data.sodex.dev', 'https://testnet-data.sodex.dev',
+  'https://alpha-biz.sodex.dev',
+  'https://api.hyperliquid.xyz', 'https://mainnet.zklighter.elliot.ai', 'https://api.arcus.xyz',
+  'wss://relay.walletconnect.org', 'https://api.web3modal.org',
+  'https://main-scan.valuechain.xyz',
+  'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
+  'https://ethereum-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org',
+  'https://polygon-bor-rpc.publicnode.com',
+];
+
+/** The inline script of apps/web/public/scan/index.html (the redirect for old links). */
+export const SCAN_SCRIPT_HASH = "'sha256-bXJtqdhzu4xrNuZI44nF3t24LtnovVLjGKp0GValFLk='";
+
+const sitePolicy = (scriptSrc) => [
+  "default-src 'self'",
+  `script-src ${scriptSrc}`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://api.web3modal.org",
+  "font-src 'self'",
+  'frame-src https://verify.walletconnect.org',
+  "worker-src 'self'",
+  `connect-src ${CONNECT_SRC.join(' ')}`,
+  "form-action 'none'",
+  "base-uri 'none'",
+  "object-src 'none'",
+  "manifest-src 'self'",
+  "frame-ancestors 'none'",
+  'upgrade-insecure-requests',
+].join('; ');
+
+export const CSP = {
+  /** Every site response, /assets/*.js included (the SharedWorker reads it from its own script). */
+  site: sitePolicy("'self'"),
+  /** /scan/*: the site policy plus the hash of the one inline script. */
+  scan: sitePolicy(`'self' ${SCAN_SCRIPT_HASH}`),
+  /** /logos/* and /addrbook/*: third-party SVGs - nothing may run in one opened directly. */
+  images: "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+};
+
+/** Sent with every site response. */
+export const HEADERS = {
+  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains',
+  'X-Frame-Options': 'DENY',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy':
+    'accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)',
+  'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+  'X-XSS-Protection': '0',
+};
+
+/** Which policy a path gets: the cache behaviours of edge.yaml, in CloudFront's precedence. */
+export function policyFor(pathname) {
+  if (pathname.startsWith('/logos/') || pathname.startsWith('/addrbook/')) return 'images';
+  if (pathname.startsWith('/scan/')) return 'scan';
+  return 'site';
+}
+
+/**
+ * Cache-Control per published file, as deploy/release/publish-web.sh sets it on the
+ * S3 objects (docs/deploy/SECURITY-HEADERS.md 1.1, docs/PERFORMANCE.md "Deployment notes").
+ * `file` is the path of the object that is served, e.g. /index.html for an app route.
+ */
+export function cacheControlFor(file) {
+  if (file.startsWith('/assets/')) return 'public, max-age=31536000, immutable';
+  if (file.endsWith('.html')) return 'no-cache';
+  if (file.startsWith('/logos/') || file.startsWith('/addrbook/')) return 'public, max-age=86400, stale-while-revalidate=604800';
+  return 'public, max-age=3600';
+}
+
+/**
+ * The object a site path is answered with: edge.yaml's CloudFront function.
+ * App routes (last segment without a dot) get the shell; /scan/ is the legacy page.
+ */
+export function rewrite(pathname) {
+  if (pathname === '/scan/') return '/scan/index.html';
+  const name = pathname.slice(pathname.lastIndexOf('/') + 1);
+  return name.includes('.') ? pathname : '/index.html';
+}
+
+/** Every header a site response carries for `pathname` (the request path, before the rewrite). */
+export function headersFor(pathname) {
+  return {
+    ...HEADERS,
+    'Content-Security-Policy': CSP[policyFor(pathname)],
+    'Cache-Control': cacheControlFor(rewrite(pathname)),
+  };
+}
+
+// Run directly: print the table for deploy/aws/validate_offline.py.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href && process.argv.includes('--json')) {
+  process.stdout.write(JSON.stringify({ csp: CSP, headers: HEADERS }));
+}

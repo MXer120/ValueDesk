@@ -1,0 +1,54 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# One consistent copy of the index database to S3 (deploy/server/bin/backup.sh).
+# The copy is taken with VACUUM INTO from a read-only connection, so the indexer
+# keeps writing while it runs. Retention is the bucket's lifecycle rule; this
+# unit cannot delete a backup.
+
+[Unit]
+Description=Valuescan index backup to S3
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/var/lib/valuescan/index/valuescan-index.db
+
+[Service]
+Type=oneshot
+User=valuescan
+Group=valuescan
+EnvironmentFile=/etc/valuescan/ops.env
+EnvironmentFile=-/etc/valuescan/ops.local.env
+Environment=HOME=/var/lib/valuescan/state
+ExecStart=/opt/valuescan/bin/backup.sh
+TimeoutStartSec=2h
+SyslogIdentifier=valuescan-backup
+
+# Stay out of the indexer's way: its event loop stalls when the disk does.
+Nice=10
+CPUWeight=20
+IOWeight=20
+IOReadBandwidthMax=/var/lib/valuescan 40M
+IOWriteBandwidthMax=/var/lib/valuescan 40M
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+# Reads the database (and its -shm, which a WAL reader maps read-write); writes the staging copy.
+ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/backup /var/lib/valuescan/state

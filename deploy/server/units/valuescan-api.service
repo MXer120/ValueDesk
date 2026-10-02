@@ -1,0 +1,69 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The public index API in hosted mode (VALUESCAN_HOSTED=1): 16 GET routes, no
+# custody, no hub, no local token. It listens on loopback only; Caddy terminates
+# TLS in front of it and CloudFront is the only client Caddy accepts.
+#
+# VALUESCAN_INDEXER=0: this process never starts an indexer. It reads the index
+# file the indexer writes. Restarting it is cheap (no exchange stream is lost).
+
+[Unit]
+Description=Valuescan index API (hosted mode, reads the index)
+After=network-online.target valuescan-indexer.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/opt/valuescan/current/apps/server/src/index.ts
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan
+Group=valuescan
+WorkingDirectory=/opt/valuescan/current/apps/server
+EnvironmentFile=/etc/valuescan/api.env
+# Only VALUESCAN_ORIGIN_SECRET, written by bootstrap.sh from SSM Parameter Store.
+EnvironmentFile=/etc/valuescan/api.secret.env
+EnvironmentFile=-/etc/valuescan/api.local.env
+ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx src/index.ts
+Restart=always
+RestartSec=3
+KillSignal=SIGTERM
+TimeoutStopSec=20
+LimitNOFILE=65536
+MemoryHigh=1500M
+MemoryMax=2G
+SyslogIdentifier=valuescan-api
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @pkey
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+# A reader of a WAL database still writes its -shm file, and today the API opens
+# the index read-write (apps/server/src/indexer/read.ts). Nothing else is writable.
+ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state
+# MemoryDenyWriteExecute is deliberately NOT set: V8's JIT needs writable+executable memory.
+
+[Install]
+WantedBy=multi-user.target

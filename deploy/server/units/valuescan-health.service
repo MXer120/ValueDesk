@@ -1,0 +1,48 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# One pass of deploy/server/bin/healthcheck.mjs: /api/health, the hosted
+# lock-down, an index read through the gate, the indexer's own status, disk
+# space, the last backup, the certificate. It logs one line; on a change of
+# state it publishes to the alert topic, if one is set.
+
+[Unit]
+Description=Valuescan health check
+After=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+
+[Service]
+Type=oneshot
+User=valuescan
+Group=valuescan
+EnvironmentFile=/etc/valuescan/ops.env
+EnvironmentFile=-/etc/valuescan/ops.local.env
+# The index read needs the origin secret, like every request but /api/health.
+EnvironmentFile=-/etc/valuescan/api.secret.env
+Environment=HOME=/var/lib/valuescan/state
+ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning /opt/valuescan/bin/healthcheck.mjs
+# A failed check is a result, not a broken unit: the script decides what to alert.
+SuccessExitStatus=1
+TimeoutStartSec=45
+SyslogIdentifier=valuescan-health
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0027
+ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state

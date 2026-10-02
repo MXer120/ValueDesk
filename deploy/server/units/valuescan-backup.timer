@@ -1,0 +1,14 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+
+[Unit]
+Description=Nightly Valuescan index backup
+
+[Timer]
+# 03:17 UTC, give or take ten minutes. A run missed while the instance was
+# stopped is made up after the next start.
+OnCalendar=*-*-* 03:17:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+# Real environment files are copied from the *.example templates next to them and
+# filled in locally. They never enter git - the templates do.
+*.env
+!versions.env
+
+# Local outputs of the smoke test and the release scripts (builds, reports, tarballs).
+.out/

@@ -1,0 +1,253 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Valuescan foundation (deploy once, leave up): VPC, one public subnet, the origin
+  security group and the private ops bucket (release artifacts + index backups).
+  Nothing in this stack bills by the hour. See deploy/aws/README.md.
+
+# Stack 1 of 3. Region: the compute region (REGION in params.env).
+#
+# The split follows the owner's hard rule for AWS test environments: the free
+# network is defined once and stays deployed; only compute.yaml goes up and down.
+# The ops bucket lives here because backups must outlive the instance: you pay
+# only for what is stored in it, and its lifecycle rules expire that.
+
+Parameters:
+  VpcCidr:
+    Type: String
+    Default: 10.42.0.0/24
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(1[6-9]|2[0-6])$'
+    ConstraintDescription: an IPv4 CIDR block between /16 and /26
+    Description: CIDR block of the VPC.
+  PublicSubnetCidr:
+    Type: String
+    Default: 10.42.0.0/26
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/(1[6-9]|2[0-8])$'
+    ConstraintDescription: an IPv4 CIDR block between /16 and /28, inside VpcCidr
+    Description: CIDR block of the one public subnet the instance lives in.
+  AvailabilityZone:
+    Type: String
+    Default: ''
+    Description: >-
+      Availability Zone of the subnet, the instance and its data volume, e.g.
+      eu-central-1a. Empty picks the first zone of the region.
+  CloudFrontOriginPrefixListId:
+    Type: String
+    AllowedPattern: '^pl-[0-9a-f]{8,17}$'
+    ConstraintDescription: a prefix list id (pl-...)
+    Description: >-
+      Id of the AWS-managed prefix list com.amazonaws.global.cloudfront.origin-facing
+      IN THIS REGION. Only CloudFront may reach the origin on 443. Look it up with
+      "aws ec2 describe-managed-prefix-lists" (deploy/aws/README.md).
+  BackupRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 365
+    Description: Days an index backup under backups/ is kept before S3 expires it.
+  ArtifactRetentionDays:
+    Type: Number
+    Default: 180
+    MinValue: 7
+    MaxValue: 3650
+    Description: >-
+      Days a release artifact under releases/ (server tarballs, web builds) is kept.
+      Rollback needs the artifact of the release you roll back to.
+
+Conditions:
+  AutoAvailabilityZone: !Equals [!Ref AvailabilityZone, '']
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Ref PublicSubnetCidr
+      AvailabilityZone: !If
+        - AutoAvailabilityZone
+        - !Select [0, !GetAZs '']
+        - !Ref AvailabilityZone
+      # The instance gets its address from the Elastic IP in compute.yaml.
+      MapPublicIpOnLaunch: false
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public'
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-public'
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # The origin instance's only security group.
+  #
+  #   in   443  CloudFront's origin-facing addresses only (the managed prefix list).
+  #             The list counts as 55 rules of the 60 a group may hold: never add
+  #             a second rule that references it.
+  #   in    80  anyone: Caddy answers the ACME HTTP-01 challenge there and
+  #             redirects everything else to https. The API is never served on 80.
+  #   in    22  nothing. There is no SSH; shell access is SSM Session Manager.
+  #   out  443  the exchanges (https + wss), S3, SSM, ACME, package mirrors.
+  #   out   80  package mirrors and OCSP.
+  OriginSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Valuescan origin - 443 from CloudFront only, 80 for ACME, no SSH
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: HTTPS from the CloudFront origin-facing prefix list
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourcePrefixListId: !Ref CloudFrontOriginPrefixListId
+        - Description: HTTP for the ACME HTTP-01 challenge and the redirect to HTTPS
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - Description: HTTPS and WSS to the exchanges, S3, SSM, ACME and package mirrors
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: HTTP to package mirrors and OCSP responders
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-origin'
+
+  # Private bucket for operations:
+  #   bootstrap/  the instance bootstrap bundle (deploy/server)
+  #   releases/   server tarballs and web builds, one per tag
+  #   seed/       an index snapshot to start a new instance from
+  #   backups/    nightly index backups written by the instance
+  OpsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-index-backups
+            Status: Enabled
+            Prefix: backups/
+            ExpirationInDays: !Ref BackupRetentionDays
+          - Id: expire-release-artifacts
+            Status: Enabled
+            Prefix: releases/
+            ExpirationInDays: !Ref ArtifactRetentionDays
+          - Id: expire-seed-snapshots
+            Status: Enabled
+            Prefix: seed/
+            ExpirationInDays: 14
+          - Id: abort-incomplete-uploads
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-ops'
+
+  OpsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref OpsBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource:
+              - !GetAtt OpsBucket.Arn
+              - !Sub '${OpsBucket.Arn}/*'
+            Condition:
+              Bool:
+                'aws:SecureTransport': 'false'
+
+Outputs:
+  VpcId:
+    Description: The VPC.
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub '${AWS::StackName}-VpcId'
+  PublicSubnetId:
+    Description: The public subnet the instance is launched in.
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetId'
+  AvailabilityZone:
+    Description: Availability Zone of the subnet (the data volume must be in the same one).
+    Value: !GetAtt PublicSubnet.AvailabilityZone
+    Export:
+      Name: !Sub '${AWS::StackName}-AvailabilityZone'
+  OriginSecurityGroupId:
+    Description: Security group of the origin instance.
+    Value: !Ref OriginSecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-OriginSecurityGroupId'
+  OpsBucketName:
+    Description: Private bucket for release artifacts and index backups.
+    Value: !Ref OpsBucket
+    Export:
+      Name: !Sub '${AWS::StackName}-OpsBucketName'
+  OpsBucketArn:
+    Description: ARN of the ops bucket.
+    Value: !GetAtt OpsBucket.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-OpsBucketArn'

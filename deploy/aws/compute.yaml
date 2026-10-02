@@ -1,0 +1,540 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  Valuescan compute (billed by the hour): ONE instance that runs the indexer and
+  the hosted index API, its encrypted data volume, an Elastic IP and the origin
+  DNS record. Stop and start it with the DesiredState parameter; never recreate
+  it per test. See deploy/aws/README.md.
+
+# Stack 2 of 3. Region: the compute region (REGION in params.env), same as network.yaml.
+#
+# RULES THIS TEMPLATE IS BUILT AROUND
+#   - Exactly one instance. It is created once and then only stopped and started
+#     (DesiredState). Deleting the stack is for the day the whole campaign ends.
+#   - No inbound SSH and no key pair. Shell access is SSM Session Manager.
+#   - No UserData: the instance is set up by deploy/server/bootstrap.sh through
+#     SSM Run Command, which is idempotent and can be re-run at any time. A
+#     UserData change would stop and start the instance on every stack update.
+#   - AmiId and RootVolumeSizeGiB are pinned at creation. CHANGING EITHER REPLACES
+#     THE INSTANCE (CloudFormation semantics). Termination protection makes such a
+#     replacement fail instead of happening by accident.
+
+Parameters:
+  NetworkStackName:
+    Type: String
+    Default: valuescan-network
+    Description: Name of the network.yaml stack in this region (its exports are imported).
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: >-
+      Amazon Linux 2023 AMI for the instance architecture (arm64 for t4g/m7g/c7g).
+      Resolve it ONCE and keep the value: a different id replaces the instance.
+  InstanceType:
+    Type: String
+    Default: t4g.large
+    AllowedPattern: '^[a-z][a-z0-9-]*\.[a-z0-9]+$'
+    Description: >-
+      Instance type. Changing it stops and starts the instance (no replacement).
+      t4g.large is burstable (baseline 30 % per vCPU); see the sizing notes in
+      docs/deploy/DEPLOY.md before launch. Non-burstable alternatives of the same
+      architecture: m7g.large, c7g.large (then set CpuCredits to none).
+  CpuCredits:
+    Type: String
+    Default: unlimited
+    AllowedValues: [unlimited, standard, none]
+    Description: >-
+      Burstable (T family) credit mode. unlimited never throttles and bills surplus
+      credits; standard throttles to the baseline when credits run out; none is for
+      instance types that are not burstable.
+  RootVolumeSizeGiB:
+    Type: Number
+    Default: 16
+    MinValue: 8
+    MaxValue: 200
+    Description: Root volume size. SET AT CREATION ONLY - changing it replaces the instance.
+  DataVolumeSizeGiB:
+    Type: Number
+    Default: 40
+    MinValue: 10
+    MaxValue: 1000
+    Description: >-
+      Size of the encrypted gp3 volume mounted at /var/lib/valuescan. It holds the
+      index database, its WAL and the staging copy of the nightly backup: keep it
+      at least three times the database size. It can be grown later without
+      downtime (then grow the filesystem on the instance).
+  DataVolumeIops:
+    Type: Number
+    Default: 3000
+    MinValue: 3000
+    MaxValue: 16000
+    Description: Provisioned IOPS of the data volume (3000 is included in gp3).
+  DataVolumeThroughput:
+    Type: Number
+    Default: 125
+    MinValue: 125
+    MaxValue: 1000
+    Description: Throughput of the data volume in MiB/s (125 is included in gp3).
+  DataVolumeSnapshotId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^snap-[0-9a-f]{8,17}$'
+    Description: >-
+      Optional. Create the data volume from this snapshot (a rebuild after the
+      stack was deleted: the old volume was snapshotted on deletion).
+  DesiredState:
+    Type: String
+    Default: running
+    AllowedValues: [running, stopped]
+    Description: >-
+      running or stopped. Changing it stops or starts the instance WITHOUT deleting
+      anything: the volumes, the Elastic IP and the instance id stay. A stopped
+      instance bills for storage and the Elastic IP only.
+  TerminationProtection:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >-
+      API termination protection. Leave it true; set it false in an update of its
+      own right before you delete this stack.
+  OriginDomainName:
+    Type: String
+    AllowedPattern: '^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
+    ConstraintDescription: a lower-case DNS name such as origin.example.com
+    Description: >-
+      DNS name of the instance, e.g. origin.valuescan.example. CloudFront connects
+      to it over HTTPS and Caddy obtains its certificate for it.
+  HostedZoneId:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^Z[A-Z0-9]{5,31}$'
+    Description: >-
+      Route 53 hosted zone that contains OriginDomainName. Empty: no record is
+      created - point an A record at the OriginIp output yourself.
+  ConfigPrefix:
+    Type: String
+    Default: /valuescan/prod
+    AllowedPattern: '^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$'
+    Description: >-
+      SSM Parameter Store path the instance may read. The origin secret lives at
+      <ConfigPrefix>/origin-secret (a SecureString you create yourself).
+  AlertEmail:
+    Type: String
+    Default: ''
+    AllowedPattern: '^$|^[^@\s]+@[^@\s]+\.[^@\s]+$'
+    Description: >-
+      Optional. An address that receives alarms (status check, CPU credits) and the
+      on-instance health check's alerts. The address must confirm the subscription.
+
+Conditions:
+  Burstable: !Not [!Equals [!Ref CpuCredits, none]]
+  UnlimitedCredits: !Equals [!Ref CpuCredits, unlimited]
+  FromSnapshot: !Not [!Equals [!Ref DataVolumeSnapshotId, '']]
+  HasHostedZone: !Not [!Equals [!Ref HostedZoneId, '']]
+  HasAlertEmail: !Not [!Equals [!Ref AlertEmail, '']]
+  BurstableWithAlerts: !And
+    - !Condition Burstable
+    - !Condition HasAlertEmail
+  UnlimitedWithAlerts: !And
+    - !Condition UnlimitedCredits
+    - !Condition HasAlertEmail
+
+Resources:
+  # --- identity -----------------------------------------------------------------
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        # Session Manager and Run Command. This is the only way onto the box.
+        - !Sub 'arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore'
+      Policies:
+        - PolicyName: valuescan-instance
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ListOpsBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource:
+                  Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+                Condition:
+                  StringLike:
+                    's3:prefix':
+                      - bootstrap/*
+                      - releases/*
+                      - seed/*
+                      - backups/*
+              - Sid: ReadArtifacts
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - Fn::Sub:
+                      - '${OpsBucketArn}/bootstrap/*'
+                      - OpsBucketArn:
+                          Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+                  - Fn::Sub:
+                      - '${OpsBucketArn}/releases/*'
+                      - OpsBucketArn:
+                          Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+                  - Fn::Sub:
+                      - '${OpsBucketArn}/seed/*'
+                      - OpsBucketArn:
+                          Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+                  - Fn::Sub:
+                      - '${OpsBucketArn}/backups/*'
+                      - OpsBucketArn:
+                          Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+              # Backups are written, never deleted, by the instance: retention is the
+              # bucket's lifecycle rule, so a compromised box cannot erase them.
+              - Sid: WriteBackups
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:AbortMultipartUpload
+                Resource:
+                  Fn::Sub:
+                    - '${OpsBucketArn}/backups/*'
+                    - OpsBucketArn:
+                        Fn::ImportValue: !Sub '${NetworkStackName}-OpsBucketArn'
+              - Sid: ReadConfig
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ConfigPrefix}/*'
+              - !If
+                - HasAlertEmail
+                - Sid: PublishAlerts
+                  Effect: Allow
+                  Action: sns:Publish
+                  Resource: !Ref AlertTopic
+                - !Ref 'AWS::NoValue'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref InstanceRole
+
+  # --- the instance ---------------------------------------------------------------
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      SubnetId:
+        Fn::ImportValue: !Sub '${NetworkStackName}-PublicSubnetId'
+      SecurityGroupIds:
+        - Fn::ImportValue: !Sub '${NetworkStackName}-OriginSecurityGroupId'
+      DisableApiTermination: !Ref TerminationProtection
+      InstanceInitiatedShutdownBehavior: stop
+      Monitoring: false
+      CreditSpecification: !If
+        - Burstable
+        - CPUCredits: !Ref CpuCredits
+        - !Ref 'AWS::NoValue'
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref RootVolumeSizeGiB
+            Encrypted: true
+            DeleteOnTermination: true
+      PropagateTagsToVolumeOnCreation: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}'
+
+  # /var/lib/valuescan: the index database, its WAL, backup staging, Caddy's state.
+  # Deleting the stack snapshots this volume instead of losing it.
+  DataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AvailabilityZone:
+        Fn::ImportValue: !Sub '${NetworkStackName}-AvailabilityZone'
+      VolumeType: gp3
+      Size: !Ref DataVolumeSizeGiB
+      Iops: !Ref DataVolumeIops
+      Throughput: !Ref DataVolumeThroughput
+      Encrypted: true
+      SnapshotId: !If [FromSnapshot, !Ref DataVolumeSnapshotId, !Ref 'AWS::NoValue']
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-data'
+
+  DataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      InstanceId: !Ref Instance
+      VolumeId: !Ref DataVolume
+      # Appears as an NVMe device; Amazon Linux keeps a /dev/sdf symlink to it.
+      Device: /dev/sdf
+
+  # A fixed address: the origin DNS name and Caddy's certificate survive stop/start.
+  OriginEip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub '${AWS::StackName}-origin'
+
+  OriginEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt OriginEip.AllocationId
+      InstanceId: !Ref Instance
+
+  OriginDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: HasHostedZone
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref OriginDomainName
+      Type: A
+      TTL: '300'
+      ResourceRecords:
+        - !GetAtt OriginEip.PublicIp
+
+  # --- stop / start without deleting ------------------------------------------------
+  #
+  # CloudFormation has no property for an instance's run state, so a small custom
+  # resource applies DesiredState with StopInstances / StartInstances. It only
+  # ever touches this one instance and never terminates anything.
+
+  PowerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      RetentionInDays: 14
+
+  PowerFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: instance-power
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !GetAtt PowerLogGroup.Arn
+              - Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:StartInstances
+                  - ec2:StopInstances
+                Resource: !Sub 'arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/${Instance}'
+
+  PowerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Applies the DesiredState parameter (running or stopped) to the Valuescan instance.
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      Timeout: 900
+      MemorySize: 128
+      Role: !GetAtt PowerFunctionRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref PowerLogGroup
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+
+          ec2 = boto3.client('ec2')
+          WAIT = {'Delay': 10, 'MaxAttempts': 80}
+
+
+          def state_of(instance_id):
+              found = ec2.describe_instances(InstanceIds=[instance_id])
+              return found['Reservations'][0]['Instances'][0]['State']['Name']
+
+
+          def wait_for(name, instance_id):
+              ec2.get_waiter(name).wait(InstanceIds=[instance_id], WaiterConfig=WAIT)
+
+
+          def apply(instance_id, want):
+              state = state_of(instance_id)
+              if state in ('terminated', 'shutting-down'):
+                  raise RuntimeError('instance ' + instance_id + ' is ' + state)
+              if want == 'stopped':
+                  if state == 'stopped':
+                      return state
+                  if state == 'pending':
+                      wait_for('instance_running', instance_id)
+                  if state != 'stopping':
+                      ec2.stop_instances(InstanceIds=[instance_id])
+                  wait_for('instance_stopped', instance_id)
+                  return 'stopped'
+              if state == 'running':
+                  return state
+              if state == 'stopping':
+                  wait_for('instance_stopped', instance_id)
+              if state != 'pending':
+                  ec2.start_instances(InstanceIds=[instance_id])
+              wait_for('instance_running', instance_id)
+              return 'running'
+
+
+          def handler(event, context):
+              props = event.get('ResourceProperties') or {}
+              instance_id = props.get('InstanceId', '')
+              want = props.get('DesiredState', 'running')
+              physical = event.get('PhysicalResourceId') or ('power-' + instance_id)
+              try:
+                  if event.get('RequestType') == 'Delete':
+                      # Nothing to undo: the instance stays as it is.
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical)
+                      return
+                  if want not in ('running', 'stopped'):
+                      raise ValueError('DesiredState must be running or stopped')
+                  state = apply(instance_id, want)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {'State': state}, physical)
+              except Exception as err:  # always answer, or the stack waits for the timeout
+                  print('failed:', repr(err))
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {}, physical, reason=str(err)[:400])
+
+  InstancePower:
+    Type: Custom::InstancePower
+    # After everything that needs the instance: stopping it mid-attachment would fail the stack.
+    DependsOn:
+      - DataVolumeAttachment
+      - OriginEipAssociation
+    Properties:
+      ServiceToken: !GetAtt PowerFunction.Arn
+      ServiceTimeout: 900
+      InstanceId: !Ref Instance
+      DesiredState: !Ref DesiredState
+      # Not read by the function. A type change restarts the instance, so the
+      # state is applied again whenever the type changes.
+      InstanceType: !Ref InstanceType
+
+  # --- alerts (optional) ----------------------------------------------------------------
+
+  AlertTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlertEmail
+    Properties:
+      DisplayName: Valuescan alerts
+
+  AlertSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlertEmail
+    Properties:
+      TopicArn: !Ref AlertTopic
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  StatusCheckAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: HasAlertEmail
+    Properties:
+      AlarmDescription: The Valuescan instance fails its EC2 status checks.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Instance
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      # A stopped instance reports nothing: that is not an alarm.
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+      OKActions:
+        - !Ref AlertTopic
+
+  CpuCreditBalanceAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: BurstableWithAlerts
+    Properties:
+      AlarmDescription: >-
+        The burstable instance is running out of CPU credits: it works above its
+        baseline. In standard mode it is about to be throttled; in unlimited mode
+        surplus credits are being billed. Consider a non-burstable type.
+      Namespace: AWS/EC2
+      MetricName: CPUCreditBalance
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Instance
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 3
+      Threshold: 50
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+  CpuSurplusChargedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: UnlimitedWithAlerts
+    Properties:
+      AlarmDescription: Surplus CPU credits are being billed (unlimited mode, sustained load above the baseline).
+      Namespace: AWS/EC2
+      MetricName: CPUSurplusCreditsCharged
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Instance
+      Statistic: Maximum
+      Period: 3600
+      EvaluationPeriods: 6
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertTopic
+
+Outputs:
+  InstanceId:
+    Description: The instance (target of SSM Session Manager and Run Command).
+    Value: !Ref Instance
+  InstanceState:
+    Description: The run state the DesiredState parameter last applied.
+    Value: !GetAtt InstancePower.State
+  OriginIp:
+    Description: Elastic IP of the instance. The origin DNS name must resolve to it.
+    Value: !GetAtt OriginEip.PublicIp
+  OriginDomainName:
+    Description: DNS name CloudFront uses as the API origin (pass it to edge.yaml).
+    Value: !Ref OriginDomainName
+  DataVolumeId:
+    Description: The data volume mounted at /var/lib/valuescan.
+    Value: !Ref DataVolume
+  InstanceRoleArn:
+    Description: Role of the instance.
+    Value: !GetAtt InstanceRole.Arn
+  AlertTopicArn:
+    Condition: HasAlertEmail
+    Description: SNS topic for alerts (set ALERT_TOPIC_ARN in /etc/valuescan/ops.env to it).
+    Value: !Ref AlertTopic

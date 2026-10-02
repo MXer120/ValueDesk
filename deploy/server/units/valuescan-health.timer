@@ -1,0 +1,12 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+
+[Unit]
+Description=Valuescan health check, every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=60
+AccuracySec=5
+
+[Install]
+WantedBy=timers.target

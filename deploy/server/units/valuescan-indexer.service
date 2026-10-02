@@ -1,0 +1,72 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The indexer is the ONLY writer of the index database (docs/INDEXER.md: exactly
+# one indexer per database file). It holds the venues' trade streams; every
+# restart costs the Lighter stream 3.5-8 minutes of re-subscribing and leaves a
+# gap the boards have to re-read, so restart it only when its code changed.
+
+[Unit]
+Description=Valuescan indexer (the only writer of the index database)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+# No release installed yet: nothing to run (the first release starts it).
+ConditionPathExists=/opt/valuescan/current/apps/server/src/indexer/main.ts
+# Keep trying: an upstream outage must not leave the indexer down for good.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan
+Group=valuescan
+WorkingDirectory=/opt/valuescan/current/apps/server
+EnvironmentFile=/etc/valuescan/indexer.env
+EnvironmentFile=-/etc/valuescan/indexer.local.env
+# node:sqlite still prints an ExperimentalWarning; "--import tsx" runs the
+# TypeScript sources directly, in this one process (no wrapper to forward signals).
+ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx src/indexer/main.ts
+Restart=always
+# Slow restarts: a crash loop must not hammer the exchanges with reconnects.
+RestartSec=30
+# SIGTERM: the indexer flushes, publishes its status and closes the database.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+LimitNOFILE=65536
+# Measured: about 0.9 GB for indexer and API together. A runaway is stopped
+# before it can take the box (and the SSM agent) down.
+MemoryHigh=3G
+MemoryMax=4G
+SyslogIdentifier=valuescan-indexer
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @pkey
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+# The only writable places: the database (with its -wal and -shm) and the state directory.
+ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state
+# MemoryDenyWriteExecute is deliberately NOT set: V8's JIT needs writable+executable memory.
+
+[Install]
+WantedBy=multi-user.target
