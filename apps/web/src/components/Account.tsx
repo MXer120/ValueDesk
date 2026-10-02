@@ -56,7 +56,7 @@ import {
   type TableFilter,
 } from './accountTables/filters';
 import {
-  FilteredEmpty, MarketCell, Note, Pill, SidePill, SourcePill, StatusCell, Unit, orderTypeText, signedPct, signedUsd, tifText, toneOf,
+  FilteredEmpty, LoadMore, MarketCell, Note, Pill, SidePill, SourcePill, StatusCell, Unit, orderTypeText, signedPct, signedUsd, tifText, toneOf,
 } from './accountTables/cells';
 import type { BandMeta } from './accountTables/FilterBar';
 import { SortTh, sortRows, useTableSort } from './accountTables/sort';
@@ -1080,11 +1080,11 @@ function OpenOrdersInner({
         </table>
         )}
         {shownOrders.length > orderCap && (
-          <div className="acct-more">
-            <button type="button" className="acct-morebtn" onClick={() => setOrderCap((n) => n + ORDER_PAGE)}>
-              {`Show ${Math.min(ORDER_PAGE, shownOrders.length - orderCap)} more · ${(shownOrders.length - orderCap).toLocaleString()} left`}
-            </button>
-          </div>
+          <LoadMore
+            onMore={() => setOrderCap((n) => n + ORDER_PAGE)}
+            loading={false}
+            note={`${(shownOrders.length - orderCap).toLocaleString('en-US')} more below`}
+          />
         )}
         </>
       )}

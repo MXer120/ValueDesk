@@ -735,6 +735,10 @@ button.acct-link:where(:not(.active)) { background: none; }
 }
 
 .acct-more { gap: var(--sp-3); align-items: center; }
+/* The end of a paged table while nothing loads: only the scroll marker (and
+   its note) - the pill appears with the next page on its way (cells.tsx). */
+.acct-more.is-idle { min-height: 1px; padding-top: 0; padding-bottom: 0; }
+.acct-more.is-idle > .acct-more__note { padding: var(--sp-2) 0 var(--sp-3); }
 .acct-more__note { color: var(--muted); font-size: var(--fs-xs); }
 
 /* Account history: direction, network, transaction. */

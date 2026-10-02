@@ -4,7 +4,7 @@
  * tint of the colour, no border), the status cell, and the signed-money
  * formatting the Position History card uses (image 15).
  */
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { Symbol as MarketSymbol } from '../../api';
 import { DASH, MINUS, fmt, marketName, pick } from '../../format';
@@ -13,6 +13,7 @@ import type { Direction, OrderSource } from './filters';
 import { StatusIcon } from './StatusIcon';
 import { formatPct, orderStatusInfo, statusTitle, type StatusInput } from './orderStatus';
 import { formatNumber } from '../../intlCache';
+import { AUTO_LOAD_START, onEndSeen, type AutoLoadState } from './autoLoad';
 
 export type PillTone = 'pos' | 'neg' | 'accent' | 'warn' | 'muted';
 
@@ -225,15 +226,65 @@ export function FilteredHint({ shown, total, onReset }: { shown: number; total: 
   );
 }
 
-/** "Load more", as the Withdraw sheet's pill button - with the spinner while it loads. */
+/** How far before the end of its scroller the next page is asked for. */
+const PRELOAD_PX = 160;
+
+/** The nearest ancestor that scrolls vertically, or null for the page itself. */
+function scrollParent(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if (o === 'auto' || o === 'scroll' || o === 'overlay') return p;
+  }
+  return null;
+}
+
+/**
+ * The end of a paged table. Reaching it loads the next page - there is no
+ * button to press: this marker asks for more as it comes into view (a little
+ * before, inside the table's own scroller), and shows the Withdraw sheet's pill
+ * with the spinner while the page is on its way.
+ *
+ * The button only comes back when the end never left the screen for a few
+ * pages in a row (autoLoad.ts: a filter hiding most rows, a very tall panel),
+ * or in a browser without IntersectionObserver.
+ */
 export function LoadMore({ onMore, loading, note }: { onMore: () => void; loading: boolean; note?: ReactNode }) {
+  const end = useRef<HTMLDivElement>(null);
+  const more = useRef(onMore);
+  more.current = onMore;
+  const auto = useRef<AutoLoadState>(AUTO_LOAD_START);
+  const [manual, setManual] = useState(() => typeof IntersectionObserver === 'undefined');
+
+  useEffect(() => {
+    const el = end.current;
+    if (!el || loading || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((entries) => {
+      const visible = entries[entries.length - 1]?.isIntersecting ?? false;
+      const next = onEndSeen(auto.current, visible);
+      auto.current = next.state;
+      setManual(next.state.stalled);
+      if (next.load) more.current();
+    }, { root: scrollParent(el), rootMargin: `0px 0px ${PRELOAD_PX}px 0px` });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loading]);
+
+  const press = () => {
+    auto.current = AUTO_LOAD_START;
+    setManual(false);
+    onMore();
+  };
+  // Nothing loading and nothing to press: only the marker (and its note) remains.
+  const idle = !loading && !manual;
   return (
-    <div className="acct-more">
+    <div ref={end} className={`acct-more${idle ? ' is-idle' : ''}`}>
       {note && <span className="acct-more__note">{note}</span>}
-      <button type="button" className="acct-morebtn" onClick={onMore} disabled={loading}>
-        {loading && <span className="acct-spin" aria-hidden="true" />}
-        {loading ? 'Loading…' : 'Load more'}
-      </button>
+      {!idle && (
+        <button type="button" className="acct-morebtn" onClick={press} disabled={loading}>
+          {loading && <span className="acct-spin" aria-hidden="true" />}
+          {loading ? 'Loading…' : 'Load more'}
+        </button>
+      )}
     </div>
   );
 }

@@ -650,7 +650,7 @@ export function HistoryTable({
             onMore={h.more}
             loading={h.loadingMore}
             note={auto.short && !h.loadingMore && oldest !== null && auto.from !== null
-              ? `Loaded back to ${dateOnly(oldest)} - load more to reach ${dateOnly(auto.from)}.`
+              ? `Loaded back to ${dateOnly(oldest)}. Scroll down to reach ${dateOnly(auto.from)}.`
               : undefined}
           />
         ) : null
@@ -1326,7 +1326,7 @@ export function AccountLedger({
             onMore={l.more}
             loading={l.loadingMore}
             note={auto.short && !l.loadingMore && oldest !== null && auto.from !== null
-              ? `Loaded back to ${dateOnly(oldest)} - load more to reach ${dateOnly(auto.from)}.`
+              ? `Loaded back to ${dateOnly(oldest)}. Scroll down to reach ${dateOnly(auto.from)}.`
               : undefined}
           />
         ) : null
