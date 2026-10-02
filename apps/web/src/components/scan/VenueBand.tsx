@@ -17,7 +17,7 @@ import { DASH, fmtDateTime, fmtPrice, fmtQty, fmtUsd } from '../../format';
 import { Private, usePrivacy } from '../../privacy';
 import { vsApi, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder, type VsPosition } from '../../vsApi';
 import { LoadFailed } from '../LoadFailed';
-import { Card } from '../Portfolio';
+import { Card } from '../portfolio/parts';
 import { CoinIcon } from '../CoinIcon';
 import { FilteredEmpty, FilteredHint, MarketCell, Note, Pill, SidePill, StatusCell, Unit, signedPct, signedUsd } from '../accountTables/cells';
 import { FilterBar, NO_META, type BandMeta } from '../accountTables/FilterBar';

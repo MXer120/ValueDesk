@@ -5,7 +5,7 @@
  * draws, and last active. An inactive venue (no equity, nothing recent) stays
  * in the list, grayed, and can still be opened.
  */
-import { EquityCurve, fmtDay } from '../Portfolio';
+import { EquityCurve, fmtDay } from '../portfolio/parts';
 import { DASH, fmtUsd } from '../../format';
 import { useMask } from '../../privacy';
 import { VENUE_LABEL, type Venue } from '../../vsApi';

@@ -30,6 +30,7 @@ import type {
   Window,
 } from '@sign/valuescan/types.js';
 import { VenueError, venues } from './exchange/venues';
+import { serverGetJson } from './serverFetch';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuescan/cohorts/model.js';
 
 export type {
@@ -76,9 +77,14 @@ const qs = (o: Record<string, string | number | undefined>): string => {
   return p ? `?${p}` : '';
 };
 
+/**
+ * One index read, through serverFetch.ts: identical reads in flight share one
+ * request, and a poll (a read made inside `revalidating()`) asks the server -
+ * an unchanged answer is a 304 - instead of taking the copy the HTTP cache holds.
+ */
 async function unwrap<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(path, { headers: { Accept: 'application/json' }, signal });
-  const body = await res.json().catch(() => null);
+  const res = await serverGetJson<T & { ok?: boolean; error?: string; code?: string }>(path, signal);
+  const body = res.body;
   if (!res.ok || !body || body.ok === false) {
     throw new VsError(body?.error ?? `HTTP ${res.status} from ${path}`, body?.code);
   }

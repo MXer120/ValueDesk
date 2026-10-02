@@ -19,7 +19,7 @@ import { winRateView } from '../../winRateView';
 import { VENUE_LABEL, type TraderRow, type Venue, type VsPosition, type Window } from '../../vsApi';
 import type { PanelDefinition } from '../../dashboard';
 import { PanelTabs } from '../../dashboard/Panel';
-import { Card, Group, Row, Stat } from '../Portfolio';
+import { Card, Group, Row, Stat } from '../portfolio/parts';
 import { LoadFailed } from '../LoadFailed';
 import { EquityChart } from './EquityChart';
 import { CoinLabel } from '../CoinIcon';

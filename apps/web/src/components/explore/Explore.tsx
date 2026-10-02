@@ -19,7 +19,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { Dashboard } from '../../dashboard/Dashboard';
 import type { DashboardConfig, PanelDefinition, PanelPlacement } from '../../dashboard/types';
-import { Card, Stat } from '../Portfolio';
+import { Card, Stat } from '../portfolio/parts';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import { useAsync, useStored, useSymbols } from '../../hooks';
 import { usePrivacy, maskAddress } from '../../privacy';

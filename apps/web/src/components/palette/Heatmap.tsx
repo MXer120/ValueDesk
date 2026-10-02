@@ -22,6 +22,7 @@ import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import { IconChevronRight, IconMap } from './icons';
 import { flattenMapAssets, mapTotals } from './model';
 import { retryDelay } from './usePaletteData';
+import { visibleTimeout } from '../../exchange/visibility';
 import { EmptyState, Panel, useBoxSize } from './ui';
 
 const POLL_MS = 60_000;
@@ -51,11 +52,12 @@ export function useCohortMap(enabled: boolean): CohortMapState {
     if (!enabled) return;
     let alive = true;
     let ac: AbortController | null = null;
-    let timer: number | undefined;
+    let cancelNext: (() => void) | undefined;
     let failures = 0;
+    // Paused while the tab is hidden; runs at once when it is shown again.
     const schedule = (ms: number) => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(run, Math.max(0, ms));
+      cancelNext?.();
+      cancelNext = visibleTimeout(Math.max(0, ms), run);
     };
     function run() {
       ac?.abort();
@@ -88,7 +90,7 @@ export function useCohortMap(enabled: boolean): CohortMapState {
     else run();
     return () => {
       alive = false;
-      window.clearTimeout(timer);
+      cancelNext?.();
       ac?.abort();
       ac = null;
     };

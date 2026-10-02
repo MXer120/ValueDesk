@@ -21,6 +21,7 @@ import { restoreTrading } from './trading/session';
 import { ToastProvider } from './toast';
 import { FillToasts } from './components/FillToasts';
 import { lazyPage, type LazyPage } from './lazyPage';
+import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
@@ -68,6 +69,10 @@ const bootTabs = (): Tab[] => {
   const settled = landingTab(window.location.pathname);
   return first === settled ? [first] : [first, settled];
 };
+/* The landing page's first index reads leave now, when this browser has started
+   on this URL before: the page asks for them in an effect, after its code has
+   arrived and rendered, and takes the answers that are already there (serverFetch.ts). */
+primeFirstReads(window.location.pathname + window.location.search);
 /* Requested now, in parallel with React starting up. */
 const booting: Promise<unknown> = Promise.all([...bootTabs().map((t) => PAGES[t].preload()), loadPalette()]);
 booting.catch(() => {

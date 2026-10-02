@@ -540,9 +540,16 @@ const HISTORY_DEADLINE_MS = 130_000;
 /** The browser-trading module, loaded on first use (see placeOrder below). */
 const trading = () => import('./trading/actions');
 
+/** The /api/health read in flight, if any (see api.health). */
+let healthRead: Promise<any> | null = null;
+
 export const api = {
-  /** The Valuescan server itself: its network and status (not exchange data). */
-  health: () => get<any>('/api/health'),
+  /**
+   * The Valuescan server itself: its network and status (not exchange data).
+   * One request at a time: callers that overlap - the shell's poll and the
+   * portfolio chart both ask as a page loads - share it.
+   */
+  health: (): Promise<any> => (healthRead ??= get<any>('/api/health').finally(() => { healthRead = null; })),
   onboarding: (address?: string) => direct('onboarding', () => onboardingState(address)),
   /**
    * All-time statistics, walked and totalled in this browser (exchange/allTime.ts,

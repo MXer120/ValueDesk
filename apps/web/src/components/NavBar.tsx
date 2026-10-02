@@ -21,7 +21,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
-import { preloadWalletModal } from '../walletconnect';
+import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
@@ -73,11 +73,13 @@ export function NavBar({
   tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch,
 }: NavBarProps) {
   /*
-   * Start fetching the wallet modal's chunk NOW, not on the click.
+   * Have the wallet modal's chunk in memory BEFORE the click.
    *
    * AppKit is a large chunk, and a modal that appears a second after the press
-   * reads as a button that did not work. By the time anyone reaches for Connect
-   * the code is already in memory and it opens on the next frame.
+   * reads as a button that did not work. It is fetched once the page's own first
+   * data is in (walletconnect.ts preloadWalletModal), and at once when the
+   * pointer or the focus reaches Connect below - so by the time anyone has
+   * chosen a wallet the code is already there.
    */
   useEffect(() => { preloadWalletModal(); }, []);
 
@@ -183,6 +185,8 @@ export function NavBar({
               type="button"
               className="navbtn"
               onClick={() => openConnectDialog()}
+              onPointerEnter={warmWalletModal}
+              onFocus={warmWalletModal}
               disabled={pending === 'connect'}
               aria-busy={pending === 'connect' || undefined}
             >

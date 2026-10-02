@@ -3,11 +3,14 @@ import { api, ApiError, type Engine, type Symbol, type SessionInfo } from './api
 import { hub, type ConnState, type SubParams } from './ws';
 import { getTradingState, sessionInfoOf, subscribeTrading } from './trading/session';
 import { pollEvery } from './exchange/visibility';
+import { revalidating } from './serverFetch';
 
 /**
  * A promise-backed value with loading/error state and manual refresh.
  * `pollMs` polls only while the tab is visible, and catches up at once when
  * it is shown again (every poll spends the user's own exchange budget).
+ * A poll's reads of our own server ask it for its current answer; the first
+ * read may be answered by the browser's HTTP cache (serverFetch.ts).
  */
 export function useAsync<T>(
   fn: () => Promise<T>,
@@ -21,13 +24,16 @@ export function useAsync<T>(
   const [tick, setTick] = useState(0);
   const fnRef = useRef(fn);
   fnRef.current = fn;
+  /** The next run is a poll. */
+  const polled = useRef(false);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     setLoading(true);
-    fnRef
-      .current()
+    const poll = polled.current;
+    polled.current = false;
+    (poll ? revalidating(() => fnRef.current()) : fnRef.current())
       .then((d) => {
         if (!cancelled) {
           setData(d);
@@ -46,7 +52,10 @@ export function useAsync<T>(
 
   useEffect(() => {
     if (!enabled || !pollMs) return;
-    return pollEvery(pollMs, () => setTick((t) => t + 1));
+    return pollEvery(pollMs, () => {
+      polled.current = true;
+      setTick((t) => t + 1);
+    });
   }, [enabled, pollMs]);
 
   return { data, error, loading, refresh: useCallback(() => setTick((t) => t + 1), []) };

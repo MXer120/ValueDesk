@@ -66,6 +66,7 @@ import type { EthersAdapter } from '@reown/appkit-adapter-ethers';
    import statically on first paint. */
 import { PACKAGE_VERSION as APPKIT_VERSION } from '@reown/appkit/constants';
 import { api } from './api';
+import { startLater } from './startLater';
 import { EVM_CHAINS } from './trading/onboard';
 import {
   discoverWallets,
@@ -426,8 +427,8 @@ function defineAdapter(Base: EthersAdapterClass) {
  * The module imports, started EARLY and shared.
  *
  * AppKit is a large chunk, and a modal that appears a second after the click
- * reads as a broken button. `preloadWalletModal()` is called when the header
- * mounts, so by the time anyone presses Connect the code is already in memory.
+ * reads as a broken button. So the code is fetched before anyone presses
+ * Connect - see `preloadWalletModal()` for when.
  * Kept as promises rather than booleans: a click that lands mid-download waits on
  * the same import instead of starting a second one. Nothing here talks to a
  * third party - that starts only when AppKit is created (first Connect click, or
@@ -446,11 +447,37 @@ function loadModules() {
   return Promise.all([appkitModule, adapterModule]);
 }
 
+/**
+ * WHEN the wallet code is fetched. It is 1.8 MB of script (0.55 MB on the wire)
+ * that every visitor gets, wallet or not. Fetched the moment the header
+ * mounted, it arrived and ran - a quarter of a second of main thread on a slow
+ * laptop - exactly while the page was fetching and drawing its first data, and
+ * took the link from that data on a slow connection. So it waits for the page:
+ * two seconds, then the first idle moment (a second more at most).
+ *
+ * Nobody waits longer for it: nobody can open the connect dialog AND choose a
+ * wallet inside those seconds, the pointer or the focus reaching Connect starts
+ * it at once (`warmWalletModal`), opening the dialog does too (initWallet), and
+ * a reload with a connection to restore never went through here.
+ */
+const WALLET_CODE_AFTER_MS = 2_000;
+const WALLET_CODE_IDLE_WITHIN_MS = 1_000;
+const walletCode = startLater(() => {
+  void loadModules().catch(() => {});
+  void loadChain();
+}, WALLET_CODE_AFTER_MS, WALLET_CODE_IDLE_WITHIN_MS);
+
+/** The header mounted: have the wallet modal's code in memory before anyone presses Connect. */
 export function preloadWalletModal(): void {
   discoverWallets();
   if (!hasWalletConnectConfig()) return;
-  void loadModules().catch(() => {});
-  void loadChain();
+  walletCode.arm();
+}
+
+/** The pointer or the focus reached a Connect control: fetch the wallet modal's code now. */
+export function warmWalletModal(): void {
+  if (!hasWalletConnectConfig()) return;
+  walletCode.now();
 }
 
 /** Minimal shape of the UniversalProvider instance we depend on. */

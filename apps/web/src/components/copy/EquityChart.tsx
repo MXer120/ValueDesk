@@ -14,7 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { fmtUsd } from '../../format';
 import type { EquityPoint } from '../../vsApi';
-import { fmtCompactUsd } from '../Portfolio';
+import { fmtCompactUsd } from '../portfolio/parts';
 
 /** Axis money: whole dollars below $10k (the allocation scale), the portfolio's compact form above. */
 const fmtAxis = (v: number, step: number): string =>

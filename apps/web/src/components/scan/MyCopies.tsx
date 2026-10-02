@@ -8,7 +8,7 @@
  * shape of what the card will say, which is more useful than a blank box; the
  * one live thing on it is the way to the Copy page.
  */
-import { Card, Group, Row } from '../Portfolio';
+import { Card, Group, Row } from '../portfolio/parts';
 import { DASH } from '../../format';
 
 const WHY = 'Copy trading launches with the on-chain copy contract. Until it is live, nothing is copied from this wallet.';

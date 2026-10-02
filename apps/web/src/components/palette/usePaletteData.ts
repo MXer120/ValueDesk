@@ -17,6 +17,7 @@ import { positioningIndex, withPositioning, toSearch, type AssetRow, type Screen
 import { num } from '../../format';
 import { logLoadFailure } from '../LoadFailed';
 import { visibleTimeout } from '../../exchange/visibility';
+import { serverGetJson } from '../../serverFetch';
 
 interface CacheEntry<T> {
   at: number;
@@ -51,8 +52,9 @@ async function getJson<T>(url: string, signal?: AbortSignal, timeoutMs = REQUEST
     ac.abort();
   }, timeoutMs);
   try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: ac.signal });
-    const body = await res.json().catch(() => null);
+    // Shared with any identical read in flight (serverFetch.ts).
+    const res = await serverGetJson<T & { ok?: boolean; error?: string }>(url, ac.signal);
+    const body = res.body;
     if (!res.ok || !body || body.ok === false) {
       throw new Error(body?.error ?? `HTTP ${res.status}`);
     }

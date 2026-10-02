@@ -10,6 +10,8 @@ import { VENUE_LABEL, type Venue } from '../../../vsApi';
 import { DASH } from '../../../format';
 import { VenueLogo } from '../../VenueLogo';
 import { fmtUsdShort } from '../model';
+import { pollEvery } from '../../../exchange/visibility';
+import { revalidating } from '../../../serverFetch';
 
 export const POLL_MS = 60_000;
 
@@ -45,8 +47,10 @@ export function usePolled<T>(key: string | null, fetcher: (signal: AbortSignal) 
       );
     };
     run();
-    const t = pollMs > 0 ? window.setInterval(() => { if (document.visibilityState === 'visible') run(); }, pollMs) : 0;
-    return () => { alive = false; ac.abort(); if (t) window.clearInterval(t); };
+    // Paused while the tab is hidden; a tick missed then runs the moment it is shown again.
+    // A poll asks the server; the first read may be answered by the HTTP cache (serverFetch.ts).
+    const stop = pollMs > 0 ? pollEvery(pollMs, () => revalidating(run)) : null;
+    return () => { alive = false; ac.abort(); stop?.(); };
   }, [key, tick, pollMs]);
   const mine = state.key === key;
   return {
