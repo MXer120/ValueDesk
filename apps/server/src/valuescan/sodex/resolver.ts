@@ -17,6 +17,15 @@
  * Account ids and user ids are the same numbers today (no sub-accounts exist;
  * getNextUserId ~= getNextAccountId), which is why the bulk resolver's
  * `userIds` accepts the ids from trade prints.
+ *
+ * WHAT THIS SENDS, WHOEVER ASKS. Ids are collected and sent together, and two
+ * calls to the bulk resolver are at least BULK_MIN_GAP_MS apart: at most 30
+ * calls a minute from one process, each for up to 500 ids, however many
+ * prints, visitors or searches queue ids. After a call that failed the next
+ * one waits BULK_FAIL_GAP_MS: at most 4 a minute while the host is down or
+ * limiting, with at most ONCHAIN_PER_BATCH on-chain lookups each (12 a
+ * minute). An id is asked about once: answers are kept for the life of the
+ * process, "no such id" for 10 minutes, a failure for one.
  */
 import { NETWORK } from '../../config.js';
 import { resolveAccountOnChain } from '../../sodex/chain.js';
@@ -27,6 +36,10 @@ const BULK_URL = `https://sodex.dev/${NETWORK === 'testnet' ? 'testnet' : 'mainn
 const BULK_MAX = 500;
 /** Collect ids this long before sending, so a burst of prints becomes one call. */
 const BATCH_DELAY_MS = 60;
+/** Two calls to the bulk resolver are at least this far apart (30 a minute at most). */
+export const BULK_MIN_GAP_MS = 2_000;
+/** ... and this far after a call that failed (4 a minute at most while it fails). */
+export const BULK_FAIL_GAP_MS = 15_000;
 /** An id the resolvers could not answer is not asked about again for this long. */
 const NEGATIVE_TTL_MS = 10 * 60_000;
 /** After a failed lookup (host down, rate limited) ids are retried sooner. */
@@ -41,6 +54,10 @@ const inFlight = new Set<number>();
 const waiters = new Map<number, Array<() => void>>();
 let timer: NodeJS.Timeout | undefined;
 let flushing = false;
+/** When the last bulk call was sent, and whether it failed. */
+let lastBulkAt = 0;
+let lastBulkFailed = false;
+let bulkCalls = 0;
 
 /** Record an id/address pair seen elsewhere (leaderboard, account state). */
 export function seedAddress(accountId: unknown, address: unknown): void {
@@ -54,7 +71,12 @@ export function seedAddress(accountId: unknown, address: unknown): void {
 
 export const knownAddress = (accountId: number): string | undefined => known.get(accountId);
 
-export const resolverStats = () => ({ known: known.size, queued: queued.size, negative: unknownUntil.size });
+export const resolverStats = () => ({ known: known.size, queued: queued.size, negative: unknownUntil.size, bulkCalls });
+
+/** How long the next bulk call has to wait from `now` (0 = it may go once the batch is collected). */
+export function bulkWaitMs(now: number, lastAt: number, lastFailed: boolean): number {
+  return Math.max(0, lastAt + (lastFailed ? BULK_FAIL_GAP_MS : BULK_MIN_GAP_MS) - now);
+}
 
 /** Parse the bulk resolver's `data`: `[{userId: "52599", address: "0xE290..."}]`. */
 export function parseBulk(data: unknown): Map<number, string> {
@@ -96,7 +118,7 @@ function schedule(): void {
   timer = setTimeout(() => {
     timer = undefined;
     void flush();
-  }, BATCH_DELAY_MS);
+  }, Math.max(BATCH_DELAY_MS, bulkWaitMs(Date.now(), lastBulkAt, lastBulkFailed)));
   timer.unref?.();
 }
 
@@ -112,10 +134,14 @@ async function flush(): Promise<void> {
   try {
     let got = new Map<number, string>();
     let bulkFailed = false;
+    lastBulkAt = Date.now();
+    bulkCalls++;
     try {
       got = await bulkLookup(ids);
+      lastBulkFailed = false;
     } catch (e) {
       bulkFailed = true;
+      lastBulkFailed = true;
       if (isRateLimit(e)) noteRateLimited();
       for (const id of ids.slice(0, ONCHAIN_PER_BATCH)) {
         const r = await resolveAccountOnChain(id).catch(() => null);
@@ -144,11 +170,21 @@ async function flush(): Promise<void> {
       }
     }
     flushing = false;
-    if (queued.size) {
-      await sleep(250); // spread consecutive batches out a little
-      schedule();
-    }
+    // What queued up meanwhile goes in the next call, no sooner than the gap allows.
+    if (queued.size) schedule();
   }
+}
+
+/** Tests: forget everything (answers, queues, the last call). */
+export function resetResolver(): void {
+  if (timer) clearTimeout(timer);
+  timer = undefined;
+  known.clear();
+  unknownUntil.clear();
+  queued.clear();
+  lastBulkAt = 0;
+  lastBulkFailed = false;
+  bulkCalls = 0;
 }
 
 function isNegative(id: number, now: number): boolean {

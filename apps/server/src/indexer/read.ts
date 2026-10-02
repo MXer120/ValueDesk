@@ -1,19 +1,20 @@
 /**
  * What the API reads from the index: finished boards and per-trader stats.
  *
- * Opens the same file the indexer writes (another thread or process) and
- * never writes to it beyond the idempotent schema check. A missing file or
- * a board not built yet reads as `null`, and the route says "indexing".
+ * Reads the same file the indexer writes (another thread or process) through
+ * one READ-ONLY connection (reader.ts): nothing here can write to it or
+ * migrate it. A missing file, one the writer has not migrated yet, or a
+ * board not built yet reads as `null`, and the route says "indexing".
  */
-import { existsSync } from 'node:fs';
 import type { BoardWindow, TraderRow, Venue } from '../valuescan/types.js';
 import { VENUES } from '../valuescan/types.js';
 import { mergeBoards } from './boards.js';
-import type { NetRow } from './store.js';
-import { IndexStore, defaultDbPath, type BoardRow, type HistoryKind } from './store.js';
+import { closeReader, reader } from './reader.js';
+import type { CohortBookRow, CohortMemberRow, NetRow } from './store.js';
+import { IndexStore, type BoardRow, type HistoryKind } from './store.js';
 import { BOARD_SIZE, MIN_TRADES, windowStart, type BoardFilter, type Side } from './windows.js';
 import {
-  COHORT_BY_ID, TAIL_EQUITY, aggregate, cohortsOf, everyWallet, filterKey, longShare, scopeKey, scopeWallets, walletRow,
+  Aggregator, COHORT_BY_ID, TAIL_EQUITY, cohortsOf, everyWallet, filterKey, longShare, scopeKey, scopeWalletSteps, walletRow,
   type CohortStat,
   type CohortFocusResponse, type CohortMapResponse, type MapSector,
   type CohortDetailResponse, type CohortFilter, type CohortId, type CohortPoint, type CohortRange, type CohortWalletRow,
@@ -23,23 +24,6 @@ import { TAIL_RATE } from './cohortTracker.js';
 import { labelMatches, shownLabel } from '../valuescan/labels.js';
 import { winRateOf } from '../valuescan/winRate.js';
 import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuescan/cohorts/model.js';
-
-let store: IndexStore | null = null;
-let triedAt = 0;
-
-function reader(): IndexStore | null {
-  if (store) return store;
-  if (Date.now() - triedAt < 10_000) return null;
-  triedAt = Date.now();
-  const path = defaultDbPath();
-  if (!existsSync(path)) return null;
-  try {
-    store = new IndexStore(path);
-  } catch {
-    store = null;
-  }
-  return store;
-}
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -298,14 +282,36 @@ export function indexPool(venue: Venue): { rows: TraderRow[]; updatedAt: number 
 
 // --- cohorts ---------------------------------------------------------------------
 //
-// Netted and filtered HERE, on request, from what the worker keeps current:
-// members (cohort_member), books moved by the streams (cohort_book) and last
-// prices (cohort_mark). One load per venue is shared by every request for a
-// minute; one netting per set of venues likewise.
+// Netted and filtered HERE, from what the worker keeps current: members
+// (cohort_member), books moved by the streams (cohort_book) and last prices
+// (cohort_mark). One load per venue is shared by every request for a minute;
+// one netting per set of venues and one sum per filter likewise.
+//
+// THE LOAD DOES NOT HOLD A REQUEST WHILE THE PAGES ARE IN USE. Reading some
+// 270k wallets takes this thread 3 s and netting five venues 1.4 s more
+// (measured 2026-10-02). That used to happen inside whichever request found
+// the minute-old load expired, and for those seconds NO route answered - there
+// is one event loop. Now the load in use is replaced from behind: a rebuild
+// starts before it turns a minute old, does the very same work in slices that
+// let requests through in between, nets and sums what the pages asked for
+// lately as well, and is swapped in whole. Only the first read, and one after
+// nobody asked for KEEP_WARM_MS, still build in place - as every expired read
+// did before.
 
 const RANGE_MS: Record<CohortRange, number> = { '1d': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 };
 const SPARK_POINTS = 96;
-const LOAD_TTL_MS = 60_000;
+export const LOAD_TTL_MS = 60_000;
+/** Rows per statement while a load is built. */
+const LOAD_PAGE = 2_000;
+/** A rebuild from behind gives the thread back after this much work. */
+const SLICE_MS = 8;
+/** Rebuilds from behind go on for this long after the last cohort read. */
+export const KEEP_WARM_MS = 5 * 60_000;
+/** A rebuild starts at least this long before the load in use expires (longer once the last one's time is known). */
+const REBUILD_LEAD_MS = 15_000;
+/** Sets of venues, and filters per set, that are rebuilt ahead. */
+const WANT_SCOPES = 12;
+const WANT_FILTERS = 24;
 
 interface CohortLoad {
   at: number;
@@ -314,20 +320,101 @@ interface CohortLoad {
   coverage: Partial<Record<Venue, VenueCoverage>>;
   /** Newest book write (ms). */
   booksAt: number;
+  /** Netted wallets per set of venues: built on first use, or ahead by a rebuild. */
+  scopes: Map<string, NettedWallet[]>;
+  /** Every cohort's figures per set of venues and filter, likewise. */
+  stats: Map<string, CohortStat[]>;
+}
+
+/** What a rebuild nets and sums ahead: the sets and filters asked for lately. */
+interface Want {
+  venues: Venue[];
+  askedAt: number;
+  filters: Map<string, { f: CohortFilter; askedAt: number }>;
 }
 
 let cohortLoad: CohortLoad | null = null;
-const scopeCache = new Map<string, { at: number; wallets: NettedWallet[] }>();
+const wanted = new Map<string, Want>();
+let lastAsked = 0;
+let rebuilding = false;
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+let lastRebuildMs = 0;
+/** When a rebuild from behind last failed: the next one waits, instead of spinning. */
+let rebuildFailedAt = 0;
+/** Counters for tests and diagnostics: loads built inside a read, and from behind. */
+const built = { inPlace: 0, behind: 0 };
 
-function loadCohorts(s: IndexStore): CohortLoad {
-  const now = Date.now();
-  if (cohortLoad && now - cohortLoad.at < LOAD_TTL_MS) return cohortLoad;
+/** Run steps to the end, here and now. */
+function runNow<T>(steps: Generator<void, T>): T {
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** Run steps to the end, giving the thread back whenever SLICE_MS of work is done. */
+async function runBehind<T>(steps: Generator<void, T>): Promise<T> {
+  let since = performance.now();
+  for (;;) {
+    const r = steps.next();
+    if (r.done) return r.value;
+    if (performance.now() - since >= SLICE_MS) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      since = performance.now();
+    }
+  }
+}
+
+/** A venue's rows, a page at a time, yielding between pages. */
+function* paged<V>(read: (after: string, limit: number) => Array<[string, V]>, into: Map<string, V>): Generator<void, void> {
+  for (let after = ''; ;) {
+    const page = read(after, LOAD_PAGE);
+    for (const [address, row] of page) into.set(address, row);
+    yield;
+    if (page.length < LOAD_PAGE) return;
+    after = page[page.length - 1]![0];
+  }
+}
+
+/** The wallets of a set of venues, netted (kept on the load). */
+function* netSteps(load: CohortLoad, venues: readonly Venue[]): Generator<void, NettedWallet[]> {
+  const key = scopeKey(venues);
+  const hit = load.scopes.get(key);
+  if (hit) return hit;
+  const mark = (v: Venue, sym: string) => load.marks.get(`${v}|${sym}`) ?? null;
+  const wallets = yield* scopeWalletSteps(venues, load.per, mark);
+  load.scopes.set(key, wallets);
+  return wallets;
+}
+
+/** Every cohort's figures for a set of venues under a filter (kept on the load). */
+function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): Generator<void, CohortStat[]> {
+  const k = `${scopeKey(venues)}|${filterKey(f)}`;
+  const hit = load.stats.get(k);
+  if (hit) return hit;
+  const wallets = yield* netSteps(load, venues);
+  const sum = new Aggregator(f);
+  let n = 0;
+  for (const w of wallets) {
+    sum.add(w);
+    if (++n % 5_000 === 0) yield;
+  }
+  const stats = sum.result();
+  if (load.stats.size > 200) load.stats.clear();
+  load.stats.set(k, stats);
+  return stats;
+}
+
+/** One load, read and (for `ahead`) netted and summed, in steps. */
+function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: readonly Venue[]; filters: readonly CohortFilter[] }>): Generator<void, CohortLoad> {
   const per = new Map<Venue, Map<string, WalletVenue>>();
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   let booksAt = 0;
   for (const venue of VENUES) {
-    const members = s.cohortMembers(venue);
-    const books = s.cohortBooks(venue);
+    const members = new Map<string, CohortMemberRow>();
+    yield* paged((after, limit) => s.cohortMembersPage(venue, after, limit).map((r): [string, CohortMemberRow] => [r.address, r]), members);
+    const books = new Map<string, CohortBookRow>();
+    yield* paged((after, limit) => s.cohortBooksPage(venue, after, limit), books);
     const m = new Map<string, WalletVenue>();
     let covered = 0;
     for (const address of new Set([...members.keys(), ...books.keys()])) {
@@ -340,40 +427,152 @@ function loadCohorts(s: IndexStore): CohortLoad {
       // Covered = wallets whose positions count (a read tail wallet outside the sample does not).
       if (w.positions) { covered++; booksAt = Math.max(booksAt, b!.at); }
       m.set(address, w);
+      if (m.size % 2_000 === 0) yield;
     }
     per.set(venue, m);
-    coverage[venue] = { members: m.size, covered, tailRate: TAIL_RATE[venue] };
+    coverage[venue] = { members: m.size, covered };
+    yield;
   }
-  cohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt };
-  scopeCache.clear();
+  const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, scopes: new Map(), stats: new Map() };
+  for (const a of ahead) {
+    yield* netSteps(load, a.venues);
+    for (const f of a.filters) yield* sumSteps(load, a.venues, f);
+  }
+  return load;
+}
+
+/** Remember that a set of venues (and a filter) is being looked at. */
+function note(venues: readonly Venue[], f?: CohortFilter): void {
+  const now = Date.now();
+  const key = scopeKey(venues);
+  let w = wanted.get(key);
+  if (!w) {
+    if (wanted.size >= WANT_SCOPES) wanted.delete(oldest(wanted));
+    w = { venues: [...venues], askedAt: now, filters: new Map() };
+    wanted.set(key, w);
+  }
+  w.askedAt = now;
+  if (!f) return;
+  const fk = filterKey(f);
+  const e = w.filters.get(fk);
+  if (e) e.askedAt = now;
+  else {
+    if (w.filters.size >= WANT_FILTERS) w.filters.delete(oldest(w.filters));
+    w.filters.set(fk, { f, askedAt: now });
+  }
+}
+
+function oldest<T extends { askedAt: number }>(m: Map<string, T>): string {
+  let key = '';
+  let at = Infinity;
+  for (const [k, v] of m) if (v.askedAt < at) { at = v.askedAt; key = k; }
+  return key;
+}
+
+/** The sets and filters asked for within KEEP_WARM_MS (older ones are forgotten). */
+function wantedNow(now: number): Array<{ venues: Venue[]; filters: CohortFilter[] }> {
+  const out: Array<{ venues: Venue[]; filters: CohortFilter[] }> = [];
+  for (const [key, w] of wanted) {
+    if (now - w.askedAt > KEEP_WARM_MS) { wanted.delete(key); continue; }
+    const filters: CohortFilter[] = [];
+    for (const [fk, e] of w.filters) {
+      if (now - e.askedAt > KEEP_WARM_MS) w.filters.delete(fk);
+      else filters.push(e.f);
+    }
+    out.push({ venues: w.venues, filters });
+  }
+  return out;
+}
+
+/** Start the next rebuild from behind in time for it to be ready when the load in use expires. */
+function armRebuild(s: IndexStore): void {
+  if (rebuildTimer || rebuilding || !cohortLoad) return;
+  const lead = Math.min(LOAD_TTL_MS / 2, Math.max(REBUILD_LEAD_MS, lastRebuildMs * 1.5 + 2_000));
+  const due = Math.max(cohortLoad.at + LOAD_TTL_MS - lead, rebuildFailedAt + 10_000);
+  rebuildTimer = setTimeout(() => {
+    rebuildTimer = null;
+    void rebuildBehind(s);
+  }, Math.max(0, due - Date.now()));
+  rebuildTimer.unref?.();
+}
+
+async function rebuildBehind(s: IndexStore): Promise<void> {
+  const started = Date.now();
+  // Nobody is looking any more: stop here. The next read builds in place and re-arms.
+  if (rebuilding || started - lastAsked > KEEP_WARM_MS) return;
+  rebuilding = true;
+  try {
+    cohortLoad = await runBehind(loadSteps(s, started, wantedNow(started)));
+    built.behind++;
+    lastRebuildMs = Date.now() - started;
+  } catch {
+    // The load in use stays; once it expires a read builds one in place.
+    rebuildFailedAt = Date.now();
+  } finally {
+    rebuilding = false;
+  }
+  armRebuild(s);
+}
+
+function loadCohorts(s: IndexStore): CohortLoad {
+  const now = Date.now();
+  lastAsked = now;
+  // Nothing to answer from yet, or it expired with no rebuild on its way (nobody
+  // asked for a while): build it here. While a rebuild runs, the load in use
+  // answers for the few seconds that takes.
+  if (!cohortLoad || (now - cohortLoad.at >= LOAD_TTL_MS && !rebuilding)) {
+    cohortLoad = runNow(loadSteps(s, now, []));
+    built.inPlace++;
+  }
+  armRebuild(s);
   return cohortLoad;
 }
 
 function walletsOf(load: CohortLoad, venues: readonly Venue[]): NettedWallet[] {
-  const key = scopeKey(venues);
-  const hit = scopeCache.get(key);
-  if (hit && hit.at === load.at) return hit.wallets;
-  const mark = (v: Venue, sym: string) => load.marks.get(`${v}|${sym}`) ?? null;
-  const wallets = scopeWallets(venues, load.per, mark);
-  scopeCache.set(key, { at: load.at, wallets });
-  return wallets;
+  note(venues);
+  return runNow(netSteps(load, venues));
 }
 
 /**
  * Every cohort's figures for a set of venues under a filter - one aggregation
- * per load (a minute), shared by every request. Summing ~120k wallets takes
- * the API thread a second or two; doing it per request held every route.
+ * per load, shared by every request (and done ahead by the rebuild for what was
+ * asked lately; a set or filter asked for the first time is summed here).
  */
-const statsCache = new Map<string, { at: number; stats: CohortStat[] }>();
 function statsOf(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): CohortStat[] {
-  const k = `${scopeKey(venues)}|${filterKey(f)}`;
-  const hit = statsCache.get(k);
-  if (hit && hit.at === load.at) return hit.stats;
-  const stats = aggregate(walletsOf(load, venues), f);
-  if (statsCache.size > 200) statsCache.clear();
-  statsCache.set(k, { at: load.at, stats });
-  return stats;
+  note(venues, f);
+  return runNow(sumSteps(load, venues, f));
 }
+
+/** Tests: the cohort load's state, a rebuild from behind on demand, and a clean slate. */
+export const _cohortLoad = {
+  built,
+  state: () => ({ at: cohortLoad?.at ?? 0, rebuilding, armed: rebuildTimer !== null, scopes: [...(cohortLoad?.scopes.keys() ?? [])], stats: [...(cohortLoad?.stats.keys() ?? [])] }),
+  /** Run the rebuild the timer would start, now; resolves when it has been swapped in. */
+  rebuild: async (): Promise<void> => {
+    const s = reader();
+    if (!s) return;
+    if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+    await rebuildBehind(s);
+  },
+  /** Make the load in use look `ms` older (and the last read likewise), to reach expiry without waiting. */
+  age: (ms: number): void => {
+    if (cohortLoad) cohortLoad.at -= ms;
+    lastAsked -= ms;
+    for (const w of wanted.values()) { w.askedAt -= ms; for (const e of w.filters.values()) e.askedAt -= ms; }
+  },
+  reset: (): void => {
+    if (rebuildTimer) clearTimeout(rebuildTimer);
+    rebuildTimer = null;
+    cohortLoad = null;
+    wanted.clear();
+    lastAsked = 0;
+    lastRebuildMs = 0;
+    rebuildFailedAt = 0;
+    built.inPlace = 0;
+    built.behind = 0;
+    closeReader();
+  },
+};
 
 function thin<T>(rows: T[], max: number): T[] {
   if (rows.length <= max) return rows;

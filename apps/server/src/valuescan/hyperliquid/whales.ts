@@ -21,6 +21,14 @@
  * Duplicates: the first message per coin after (re)subscribing is a snapshot
  * of about 30 recent prints. It is ingested (it fills the buffer at once) and
  * deduplicated by trade id against what was already seen.
+ *
+ * WHAT THIS COSTS HYPERLIQUID, WHATEVER THE NUMBER OF VISITORS. A request
+ * reads the ring buffer; it never causes a request of its own. One feed serves
+ * everyone: one socket with TRACKED_COINS subscriptions, and the coin ranking -
+ * two metaAndAssetCtxs (20 weight each) when the feed starts and once an hour
+ * while it runs. A feed stops after 30 idle minutes, so that is at most
+ * 40 weight per half hour, of the 200 a minute an API-only process may spend
+ * at all (info.ts) and of HL's 1,200.
  */
 import WebSocket from 'ws';
 import type { WhaleTrade } from '../types.js';

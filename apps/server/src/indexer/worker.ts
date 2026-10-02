@@ -12,6 +12,9 @@
 import type { BoardWindow, Venue } from '../valuescan/types.js';
 import { isMainThread, parentPort } from 'node:worker_threads';
 import { noteRateLimited, cooldownLeftMs } from '../valuescan/sodex/util.js';
+import { envOf } from '../valuescan/env.js';
+import { hlInfo } from '../valuescan/hyperliquid/client.js';
+import { hlWeightPerMin, type HlInfoClient } from '../valuescan/hyperliquid/info.js';
 import { Indexer } from './engine.js';
 import { IndexStore, defaultDbPath } from './store.js';
 
@@ -21,7 +24,19 @@ export interface Running {
   stop(): void;
 }
 
+/**
+ * This thread or process IS the indexer: its lanes limit what it reads from
+ * Hyperliquid. The shared client must not hold them below that - it would,
+ * where one env file gives this process the API's switches (VALUESCAN_INDEXER=0,
+ * VALUESCAN_HOSTED=1) and with them the small share of a process that only
+ * serves the API (hyperliquid/info.ts).
+ */
+export function claimHlShare(client: Pick<HlInfoClient, 'resize'> = hlInfo, get: (name: string) => string | undefined = envOf): void {
+  client.resize(hlWeightPerMin(get, true));
+}
+
 export function runIndexer(path = defaultDbPath()): Running {
+  claimHlShare();
   const store = new IndexStore(path);
   const indexer = new Indexer(store);
   indexer.start();

@@ -28,7 +28,7 @@ import {
   type ArcusLbWindow,
 } from '../../valuescan/extra/arcus.js';
 import { Lane } from '../lanes.js';
-import type { FillRow } from '../store.js';
+import { MIN_ROW_T, type FillRow } from '../store.js';
 import { ArcusStream } from '../streams.js';
 import { dayOf, DAY_MS } from '../windows.js';
 import type { ExtContext, ExtVenue } from './types.js';
@@ -42,6 +42,37 @@ const FILLS_PAGE = 1_000;
 const HISTORY_PAGES = 5;
 
 const WINDOWS_WITH_PNL: readonly BoardWindow[] = ['1d', '7d', '30d', 'all'];
+
+/**
+ * Arcus has answered `createdAt: 0` for fills (seen 2026-10-02: 13 fills of
+ * one burst, trade ids 188803-188820, between two fills 265 ms apart). Such
+ * a fill takes the time of the nearest fill in the page that has one (the
+ * page is in trade order, newest first; the older neighbour wins a tie). A
+ * page with no usable time at all drops them. Left as they came, they sat on
+ * 1 January 1970 - and, worse, a zero as a page's oldest time ended the
+ * paging there with the whole window claimed as read.
+ */
+export function fixFillTimes(list: readonly ArcusFill[], now = Date.now()): ArcusFill[] {
+  const ok = (t: number): boolean => t >= MIN_ROW_T && t <= now + DAY_MS;
+  if (list.every((f) => ok(f.t))) return [...list];
+  const out: ArcusFill[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const f = list[i]!;
+    if (ok(f.t)) {
+      out.push(f);
+      continue;
+    }
+    let t: number | null = null;
+    for (let d = 1; d < list.length && t === null; d++) {
+      const older = list[i + d];
+      const newer = list[i - d];
+      if (older && ok(older.t)) t = older.t;
+      else if (newer && ok(newer.t)) t = newer.t;
+    }
+    if (t !== null) out.push({ ...f, t });
+  }
+  return out;
+}
 
 export class ArcusVenue implements ExtVenue {
   readonly venue = 'arcus' as const;
@@ -156,11 +187,13 @@ export class ArcusVenue implements ExtVenue {
     let oldest = now;
     let spent = 0;
     for (let p = 0; p < maxPages; p++) {
-      const list = await arcusFills(address, { from, to, limit }, this.pacer);
+      const page = await arcusFills(address, { from, to, limit }, this.pacer);
       spent += 20;
+      // Fills with no usable time take their neighbour's before anything is stored or paged on.
+      const list = fixFillTimes(page, now);
       store.putFills(this.rows(address, list));
       for (const f of list) oldest = Math.min(oldest, f.t);
-      if (list.length < limit) {
+      if (page.length < limit) {
         store.addCoverage('arcus', address, 'fills', { fromT: from, toT: now, exhausted: from === 0 }, now);
         return spent;
       }

@@ -106,6 +106,9 @@ test('venue=all merges both hundreds by PnL', () => {
 
 // --- store ----------------------------------------------------------------------------
 
+/** Fixture times start here (a UTC midnight in 2024): the store refuses a fill or close before 2020. */
+const B = 20_000 * DAY_MS;
+
 const fill = (o: Partial<FillRow> & { id: string; t: number }): FillRow => ({
   venue: 'hyperliquid',
   address: '0xa',
@@ -122,9 +125,9 @@ const fill = (o: Partial<FillRow> & { id: string; t: number }): FillRow => ({
 
 test('store: a REST fill replaces the stream row with the same id; a stream row never downgrades it', () => {
   const s = new IndexStore(':memory:');
-  s.putFills([fill({ id: '1', t: 10, src: 0 })]);
-  s.putFills([fill({ id: '1', t: 10, oid: '9', src: 1, closedPnl: 5 })]);
-  s.putFills([fill({ id: '1', t: 10, src: 0 })]);
+  s.putFills([fill({ id: '1', t: B + 10, src: 0 })]);
+  s.putFills([fill({ id: '1', t: B + 10, oid: '9', src: 1, closedPnl: 5 })]);
+  s.putFills([fill({ id: '1', t: B + 10, src: 0 })]);
   built(s);
   const st = s.windowStats('hyperliquid', '0xa', 0);
   assert.equal(st.trades, 1);
@@ -137,16 +140,16 @@ test('store: orders, volume, top assets and HL win rate in a window', () => {
   const s = new IndexStore(':memory:');
   s.putFills([
     // Two fills of one execution (same block, market, side): one trade.
-    fill({ id: '1', t: 100, oid: 'A', symbol: 'ETH', px: 10, sz: 1 }),
-    fill({ id: '2', t: 100, oid: 'A', symbol: 'ETH', px: 10, sz: 1 }),
-    fill({ id: '3', t: 200, oid: 'B', symbol: 'BTC', px: 100, sz: 1, closedPnl: 3 }),
-    fill({ id: '4', t: 300, oid: 'C', symbol: 'SOL', px: 1, sz: 1, closedPnl: -1 }),
-    fill({ id: '5', t: 50, oid: 'Z', symbol: 'DOGE', px: 1, sz: 1 }),
+    fill({ id: '1', t: B + 100, oid: 'A', symbol: 'ETH', px: 10, sz: 1 }),
+    fill({ id: '2', t: B + 100, oid: 'A', symbol: 'ETH', px: 10, sz: 1 }),
+    fill({ id: '3', t: B + 200, oid: 'B', symbol: 'BTC', px: 100, sz: 1, closedPnl: 3 }),
+    fill({ id: '4', t: B + 300, oid: 'C', symbol: 'SOL', px: 1, sz: 1, closedPnl: -1 }),
+    fill({ id: '5', t: B + 50, oid: 'Z', symbol: 'DOGE', px: 1, sz: 1 }),
   ]);
   built(s);
-  assert.equal(s.orderCount('hyperliquid', '0xa', 100), 3);
+  assert.equal(s.orderCount('hyperliquid', '0xa', B + 100), 3);
   built(s);
-  const st = s.windowStats('hyperliquid', '0xa', 100);
+  const st = s.windowStats('hyperliquid', '0xa', B + 100);
   assert.equal(st.trades, 3);
   assert.equal(st.volume, 121);
   assert.deepEqual(st.assets, ['BTC', 'ETH', 'SOL']);
@@ -158,17 +161,17 @@ test('store: orders, volume, top assets and HL win rate in a window', () => {
 test('store: SoDEX win rate comes from closed positions', () => {
   const s = new IndexStore(':memory:');
   s.putCloses([
-    { venue: 'sodex', address: '0xb', id: '1', t: 10, openedT: 1, symbol: 'BTC-USD', pnl: 5 },
-    { venue: 'sodex', address: '0xb', id: '2', t: 20, openedT: 2, symbol: 'BTC-USD', pnl: -1 },
-    { venue: 'sodex', address: '0xb', id: '3', t: 30, openedT: 25, symbol: 'BTC-USD', pnl: 2 },
+    { venue: 'sodex', address: '0xb', id: '1', t: B + 10, openedT: B + 1, symbol: 'BTC-USD', pnl: 5 },
+    { venue: 'sodex', address: '0xb', id: '2', t: B + 20, openedT: B + 2, symbol: 'BTC-USD', pnl: -1 },
+    { venue: 'sodex', address: '0xb', id: '3', t: B + 30, openedT: B + 25, symbol: 'BTC-USD', pnl: 2 },
   ]);
   built(s);
-  const st = s.windowStats('sodex', '0xb', 15);
+  const st = s.windowStats('sodex', '0xb', B + 15);
   assert.equal(st.closes, 2);
   assert.equal(st.wins, 1);
   // Two closes since 15 prove two trades; the position opened at 25 and closed at 30 is a round trip.
-  assert.deepEqual(s.closeEvidence('sodex', '0xb', 15), { closes: 2, roundTrips: 1 });
-  assert.deepEqual(s.closeEvidence('sodex', '0xb', 26), { closes: 1, roundTrips: 0 });
+  assert.deepEqual(s.closeEvidence('sodex', '0xb', B + 15), { closes: 2, roundTrips: 1 });
+  assert.deepEqual(s.closeEvidence('sodex', '0xb', B + 26), { closes: 1, roundTrips: 0 });
   s.close();
 });
 
@@ -189,7 +192,7 @@ test('store: coverage merges touching ranges, keeps the held range for a detache
 test('store: versions move on every write for that trader only', () => {
   const s = new IndexStore(':memory:');
   const v0 = s.version('hyperliquid', '0xa');
-  s.putFills([fill({ id: '1', t: 1 })]);
+  s.putFills([fill({ id: '1', t: B + 1 })]);
   assert.ok(s.version('hyperliquid', '0xa') > v0);
   assert.equal(s.version('hyperliquid', '0xother'), 0);
   s.close();
@@ -284,13 +287,13 @@ test('Arcus prints: side is the taker\'s, timestamps are µs, addresses lower-ca
 test('store: Hyperliquid xyz fills and held ranges are mirrored under tradexyz; realised PnL nets fees', () => {
   const s = new IndexStore(':memory:');
   s.putFills([
-    fill({ id: '1', t: 100, symbol: 'xyz:AAPL', closedPnl: 10, fee: 1 }),
-    fill({ id: '2', t: 200, symbol: 'BTC', closedPnl: 50, fee: 2 }),
-    fill({ id: '3', t: 300, symbol: 'xyz:TSLA', closedPnl: -4, fee: 0.5 }),
+    fill({ id: '1', t: B + 100, symbol: 'xyz:AAPL', closedPnl: 10, fee: 1 }),
+    fill({ id: '2', t: B + 200, symbol: 'BTC', closedPnl: 50, fee: 2 }),
+    fill({ id: '3', t: B + 300, symbol: 'xyz:TSLA', closedPnl: -4, fee: 0.5 }),
   ]);
-  s.addCoverage('hyperliquid', '0xa', 'fills', { fromT: 0, toT: 400, exhausted: true }, 400);
+  s.addCoverage('hyperliquid', '0xa', 'fills', { fromT: 0, toT: B + 400, exhausted: true }, B + 400);
   assert.deepEqual(s.realized('tradexyz', '0xa', 0), { pnl: 4.5, volume: 200, fills: 2 });
-  assert.equal(s.realized('tradexyz', '0xa', 150).fills, 1);
+  assert.equal(s.realized('tradexyz', '0xa', B + 150).fills, 1);
   assert.equal(s.coverage('tradexyz', '0xa', 'fills')?.exhausted, true);
   built(s);
   assert.equal(s.orderCount('hyperliquid', '0xa', 0), 3);
@@ -313,8 +316,8 @@ test('Arcus closedPnl is stored gross: an opening fill is 0, a close adds its fe
 
 test('store: stream rows inside a REST-held range are dropped (HL ids differ between the two)', () => {
   const s = new IndexStore(':memory:');
-  s.putFills([fill({ id: 's1', t: 100, src: 0 }), fill({ id: 's2', t: 300, src: 0 }), fill({ id: 'r1', t: 100, oid: '5', src: 1 })]);
-  s.dropStreamRows('hyperliquid', '0xa', 0, 200);
+  s.putFills([fill({ id: 's1', t: B + 100, src: 0 }), fill({ id: 's2', t: B + 300, src: 0 }), fill({ id: 'r1', t: B + 100, oid: '5', src: 1 })]);
+  s.dropStreamRows('hyperliquid', '0xa', 0, B + 200);
   assert.equal(s.fillExtent('hyperliquid', '0xa').count, 2);
   s.close();
 });

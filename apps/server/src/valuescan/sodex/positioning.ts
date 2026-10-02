@@ -1,11 +1,27 @@
 /**
  * Net perps positioning of SoDEX's top traders, per market.
  *
- * The tracked set is the 30-day PnL leaderboard: the top 100 and the lowest
- * 100. SoDEX only publishes its top 1,000, so the low hundred is the bottom of
- * that published list, not the bottom of every wallet. Each one's perps state
- * is read from the gateway (weight 5, so about 1,000 weight for 200 wallets)
- * and the open positions are summed per symbol.
+ * FIRST: THE INDEX. The tracked set is the index's 30-day boards - the top
+ * 100 and the lowest 100 by PnL, the rows the leaderboard shows - and the
+ * indexer keeps a book for each of those wallets, moved by the wallet's own
+ * prints on the trade stream (indexer/held.ts). Summing them is two board
+ * reads and a key lookup per wallet in a file: no request to SoDEX, for one
+ * visitor or ten thousand. The answer is reused for INDEX_TTL_MS.
+ *
+ * OTHERWISE: A CRAWL, only where the index cannot answer yet (no 30-day
+ * board, or books for fewer than half its wallets) AND this process is the
+ * single-process dev server. A process that only serves the API (env.ts
+ * apiOnly: next to the indexer, or public) never crawls - 1,000 gateway weight
+ * whenever a visitor finds the cache expired would come out of the address
+ * the indexer reads from, and the ceiling below counts only this process's
+ * own requests. There, "the index cannot answer yet" is the answer
+ * (NotAvailable).
+ *
+ * The crawl's tracked set is SoDEX's own 30-day PnL list: the top 100 and
+ * the lowest 100. SoDEX only publishes its top 1,000, so that low hundred is
+ * the bottom of the published list, not the bottom of every wallet. Each
+ * one's perps state is read from the gateway (weight 5, so about 1,000 weight
+ * for 200 wallets) and the open positions are summed per symbol.
  *
  * Politeness, because the running Valuetrade UI shares this IP's 1200/min:
  *  - 3 reads in flight, >=150 ms apart;
@@ -20,7 +36,9 @@
  * "still computing" error (with progress) while the crawl carries on; every
  * request after that is served from the snapshot.
  */
-import type { Positioning, VsPosition } from '../types.js';
+import { boardHoldings, type Holdings } from '../../indexer/held.js';
+import { apiOnly } from '../env.js';
+import { NotAvailable, type Positioning, type VsPosition } from '../types.js';
 import { LB_PAGE_SIZE, lbPage } from './data.js';
 import { gatewayWeightSpent, markPrices, perpsState } from './gateway.js';
 import { aggregatePositioning, lowerAddress, markMap, statePositions, symbolMatches } from './mappers.js';
@@ -38,6 +56,8 @@ const BUDGET_WAIT_MS = 20_000;
 const MIN_COVERAGE = 0.5;
 /** How long the first-ever request waits for the first crawl. */
 const FIRST_WAIT_MS = 15_000;
+/** The index's answer is reused this long (the indexer writes its books every 10 s). */
+export const INDEX_TTL_MS = 15_000;
 
 /** Progress of the crawl in flight, for the "still computing" message. */
 const progress = { tracked: 0, done: 0 };
@@ -117,7 +137,32 @@ async function crawl(): Promise<Snapshot> {
   return { at: Date.now(), tracked: wallets.length, scanned, rows: aggregatePositioning(accounts) };
 }
 
+let fromIndex: { at: number; rows: Positioning[] } | null = null;
+
+/**
+ * The index's books for the 30-day boards' wallets, summed per market: no
+ * request to SoDEX. Null when the index cannot answer yet. `read` and `now`
+ * are for tests.
+ */
+export function indexPositioning(read: () => Holdings | null = () => boardHoldings('sodex'), now = Date.now()): Positioning[] | null {
+  if (fromIndex && now - fromIndex.at < INDEX_TTL_MS && now >= fromIndex.at) return fromIndex.rows;
+  const h = read();
+  if (!h || !h.tracked || h.held < h.tracked * MIN_COVERAGE) return null;
+  fromIndex = { at: now, rows: aggregatePositioning(h.traders.map((positions) => ({ positions }))) };
+  return fromIndex.rows;
+}
+
+/** Tests: forget the index's last answer. */
+export function resetIndexPositioning(): void {
+  fromIndex = null;
+}
+
 export async function positioning(symbol?: string): Promise<Positioning[]> {
+  const held = indexPositioning();
+  if (held) return symbol ? held.filter((r) => symbolMatches(r.symbol, symbol)) : held;
+  if (apiOnly()) {
+    throw new NotAvailable("SoDEX positioning is read from the index, which does not hold the 30-day boards' wallets and their positions yet");
+  }
   const hit = cache.stale<Snapshot>(KEY);
   let snap: Snapshot;
   if (hit) {

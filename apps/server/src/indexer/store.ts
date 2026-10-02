@@ -7,6 +7,12 @@
  * waits on the crawl. Everything the API needs is precomputed into `boards`;
  * a request is one indexed SELECT.
  *
+ * ONLY THE WRITER CHANGES THE FILE. It sets the journal mode, applies the
+ * schema, adds columns and migrates. A reader opens the file read-only
+ * (`{ readOnly: true }`, indexer/reader.ts) and runs nothing that writes; a
+ * file the writer has not brought to its schema yet reads as "no index yet"
+ * (schemaReady).
+ *
  * Tables:
  *   accounts      venue + address, SoDEX account id, label, account value
  *   fills         every indexed fill of every tracked trader (REST or stream)
@@ -25,12 +31,41 @@
  * The path is `VALUESCAN_INDEX_DB`, else next to the device key (outside the
  * synced project tree). Nothing here throws on a read; a missing or corrupt
  * file reads as "not indexed yet".
+ *
+ * RETENTION (2026-10-02). Raw `fills` and `closes` are kept for
+ * `VALUESCAN_INDEX_RETAIN_DAYS` whole UTC days (default 100: the longest
+ * rolling window, 90d, plus a margin). Older history lives only in `fill_day`:
+ * one row per trader and UTC day with everything a window reads. The rule
+ * (pruneStep, a few ms at a time):
+ *   - a day older than the retention whose rows the trader's held range
+ *     (`coverage`) says are COMPLETE is summed from its raw rows one last
+ *     time, its day row is marked `frozen`, and only then its raw rows go, a
+ *     slice at a time. A frozen day is final: nothing sums it again, and a row
+ *     that arrives for it later is a re-read of a row already counted, so it
+ *     is dropped;
+ *   - a day the held range does not vouch for stays raw (a bounded leftover
+ *     per trader: partial reach-back pages), so a later read can still finish it;
+ *   - a wallet with no held range at all (stream prints of a wallet no read
+ *     ever landed for) loses its old days outright, raw rows and day rows,
+ *     and everything once it has been quiet for two weeks.
+ * Windows that start inside the retention read their first, partial day from
+ * the raw rows as before. `ytd` and `all` start on a day boundary, so they are
+ * exact from the day rows alone. A window whose first day is frozen starts at
+ * that day's 00:00 UTC (only possible when the retention is set below a
+ * window's length). Held ranges are not touched, so a trader whose raw rows
+ * were pruned is still "covered" for long windows.
+ *
+ * SPACE. A database created by this code uses `auto_vacuum = INCREMENTAL`:
+ * freed pages go back to the OS in 1 MB slices (reclaimStep), never one
+ * blocking VACUUM. A file created before that (auto_vacuum = 0) reuses its
+ * freed pages - it stops growing but does not shrink - until the offline
+ * `src/indexer/compact.ts` is run once with the indexer stopped.
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { deviceKeyPath } from '../deviceKey.js';
-import type { BoardWindow, Venue } from '../valuescan/types.js';
+import { VENUES, type BoardWindow, type Venue } from '../valuescan/types.js';
 import type { BoardFilter, Side } from './windows.js';
 import { closeRuns, type CloseFill } from '../valuescan/winRate.js';
 
@@ -290,6 +325,12 @@ CREATE INDEX IF NOT EXISTS ext_index_addr ON ext_index (venue, address);
 CREATE TABLE IF NOT EXISTS unranked (
   venue TEXT NOT NULL, win TEXT NOT NULL, address TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (venue, win, address)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS fill_prune (
+  venue TEXT NOT NULL, address TEXT NOT NULL, lo INTEGER NOT NULL, hi INTEGER NOT NULL,
+  PRIMARY KEY (venue, address)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS fill_dirty (
+  venue TEXT NOT NULL, address TEXT NOT NULL, day INTEGER NOT NULL,
+  PRIMARY KEY (venue, address, day)) WITHOUT ROWID;
 `;
 
 /** Columns added after a table first shipped: [table, column, type]. */
@@ -303,17 +344,37 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   ['cohort_member', 'pnl_1d', 'REAL'],
   ['cohort_member', 'pnl_7d', 'REAL'],
   ['cohort_member', 'pnl_30d', 'REAL'],
+  // What a day row must carry once its raw rows are gone (retention): how many
+  // fills it had, their realised PnL net of fees, the first one's time, the
+  // newest position-open among its SoDEX closes - and whether it is final.
+  ['fill_day', 'fills', 'INTEGER'],
+  ['fill_day', 'net', 'REAL'],
+  ['fill_day', 'first_t', 'INTEGER'],
+  ['fill_day', 'open_max', 'INTEGER'],
+  ['fill_day', 'frozen', 'INTEGER'],
+  // 2 = every live day row of the trader carries `fills` and `net` (built by this code).
+  ['fill_agg', 'def', 'INTEGER'],
 ];
+
+/** Every table the schema creates (what a reader checks for: schemaReady). */
+const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]!);
 
 /**
  * The close definition the day aggregates were built with (valuescan/winRate.ts).
  *   1 (none recorded)  one close per order id
  *   2                  runs of reducing fills
  *   3                  as 2, and a REST fill with no realised PnL (Lighter sends
- *                      null, not 0, on an opening fill) ends a run: only Lighter
- *                      is re-summed for it
+ *                      null, not 0, on an opening fill) ends a run
+ *   4                  the same closes. Every trader is re-summed once, because the
+ *                      stored day rows had drifted from their fills: a day's "sum me
+ *                      again" mark lived in memory and died with every restart, and a
+ *                      SoDEX build started at the first fill, not the first close.
+ *                      Measured 2026-10-02: the rows held 1% (Arcus, Lighter) to 5%
+ *                      (Hyperliquid) fewer trades than the fills, 10% fewer
+ *                      Hyperliquid closes and 13% fewer SoDEX closes. Every row now
+ *                      also carries `fills` / `net` (retention)
  */
-export const CLOSES_DEF = '3';
+export const CLOSES_DEF = '4';
 
 const DAY = 86_400_000;
 /** While a trader's aggregates build, trade counts stop here (the boards only test for > 1). */
@@ -324,11 +385,54 @@ const ORDER_KEY = `t || '|' || symbol || '|' || side`;
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
-type DayAgg = { trades: number; volume: number; closes: number; wins: number; syms: Map<string, number> };
+/** A wallet's book as the cohort tables hold it. */
+export interface CohortBookRow {
+  equity: number | null;
+  positions: Array<{ symbol: string; szi: number; entry: number | null }>;
+  at: number;
+}
+
+const memberRow = (r: Record<string, unknown>): CohortMemberRow => ({
+  address: r.address as string,
+  pnl: num(r.pnl), equity: num(r.equity), label: typeof r.label === 'string' ? r.label : null,
+  pnl1d: num(r.pnl_1d), pnl7d: num(r.pnl_7d), pnl30d: num(r.pnl_30d),
+});
+
+function bookRow(r: Record<string, unknown>): CohortBookRow {
+  let positions: CohortBookRow['positions'] = [];
+  try {
+    const x = JSON.parse(String(r.positions ?? '[]'));
+    if (Array.isArray(x)) {
+      positions = x.flatMap((e) => (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number'
+        ? [{ symbol: e[0], szi: e[1], entry: typeof e[2] === 'number' ? e[2] : null }] : []));
+    }
+  } catch { /* none */ }
+  return { equity: num(r.equity), positions, at: Number(r.at) || 0 };
+}
+
+/**
+ * One trader's UTC day. `fills` / `net` (realised PnL minus fees) / `firstT`
+ * stand in for the raw rows once those are pruned; `openMax` is the newest
+ * position-open among the day's SoDEX closes (closeEvidence).
+ */
+type DayAgg = {
+  trades: number; volume: number; closes: number; wins: number; syms: Map<string, number>;
+  fills: number; net: number; firstT: number | null; openMax: number | null;
+};
 /** A day being summed: distinct trades so far (plus the ones at `lastT`), volume, markets, REST fills for closes. */
-type DayAcc = { trades: number; lastT: number; atT: Set<string>; volume: number; syms: Map<string, number>; rest: CloseFill[] };
-/** A resumable scan of one trader's fills over [from, to), `cursor` = where it goes on. */
-type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; days: Map<number, DayAcc> };
+type DayAcc = {
+  trades: number; lastT: number; atT: Set<string>; volume: number; syms: Map<string, number>; rest: CloseFill[];
+  fills: number; pnl: number; fee: number; firstT: number;
+  /** The day's closes, once the scan has passed it (`rest` is emptied then). */
+  runs?: { closes: number; wins: number };
+};
+type ScanRow = { t: number; symbol: string; side: number; v: number; closed_pnl: number | null; fee: number | null; src: number };
+/**
+ * A resumable scan of one trader's fills over [from, to), `cursor` = where it
+ * goes on, `day` = the day it is in. `touched` = days that got rows while a
+ * build was in flight: summed again once it has landed.
+ */
+type ScanJob = { venue: Venue; address: string; from: number; to: number; cursor: number; day: number; days: Map<number, DayAcc>; touched: Set<number> };
 /** Rows per scan step: a few ms of work. */
 const SCAN_CHUNK = 1_000;
 /** A dirty day larger than this is summed in the background instead of at once. */
@@ -336,6 +440,111 @@ const SYNC_DAY_ROWS = 3_000;
 
 /** Hyperliquid's HIP-3 dex "xyz": its fills and held ranges are mirrored under `tradexyz`. */
 const XYZ = 'xyz:';
+
+// --- retention ---------------------------------------------------------------------------------
+
+/**
+ * The earliest time a fill or close may carry: before any venue here existed.
+ * 0, seconds read as milliseconds and the like fall below it (Arcus answered
+ * `createdAt: 0` for 13 fills, 2026-10-02: they sat on 1 January 1970 and made
+ * a trader's history span 20,728 days).
+ */
+export const MIN_ROW_T = Date.UTC(2020, 0, 1);
+/** A row may be this far ahead of this machine's clock (microseconds read as milliseconds are millennia ahead). */
+const MAX_AHEAD_MS = DAY;
+/** `t` exclusive upper bound meaning "no upper bound". */
+const END = Number.MAX_SAFE_INTEGER;
+
+export const RETAIN_DAYS_DEFAULT = 100;
+/** Below this the 7d window would lose raw rows of its first day. */
+export const RETAIN_DAYS_MIN = 8;
+
+/**
+ * Whole UTC days of raw fills and closes kept (`VALUESCAN_INDEX_RETAIN_DAYS`).
+ * 100 keeps every rolling window (the longest is 90d) exact to the
+ * millisecond; `ytd` and `all` are exact at any value. Below 91 the 90d
+ * window - below 31 the 30d one too - starts at 00:00 UTC of its first day.
+ */
+export function retainDays(): number {
+  const n = Math.floor(Number(process.env.VALUESCAN_INDEX_RETAIN_DAYS));
+  return Number.isFinite(n) && n > 0 ? Math.min(36_500, Math.max(RETAIN_DAYS_MIN, n)) : RETAIN_DAYS_DEFAULT;
+}
+
+/**
+ * The days of a trader its held range says are complete, among those before
+ * `keepDay`: [lo, hi), or null. A day is complete when the range starts at or
+ * before its first millisecond (or nothing older exists: `exhausted`) and
+ * ends after its last. `minT` = the trader's oldest raw row.
+ */
+export function settledDays(cov: { fromT: number; toT: number; exhausted: boolean }, minT: number, keepDay: number): { lo: number; hi: number } | null {
+  const minDay = Math.floor(minT / DAY);
+  const lo = cov.exhausted ? minDay : Math.max(minDay, Math.ceil(cov.fromT / DAY));
+  const hi = Math.min(keepDay, Math.floor(cov.toT / DAY));
+  return lo < hi ? { lo, hi } : null;
+}
+
+/** `fill_agg.def`: the trader's live day rows carry `fills` and `net`. */
+const AGG_COLS = 2;
+/** Days frozen per job: bounds what one job keeps in memory and writes in one transaction. */
+const JOB_DAYS = 31;
+/** Raw rows of a forgotten trader deleted at once; the rest go in slices (pruneStep). */
+const FORGET_INLINE_ROWS = 2_000;
+/** Stream rows of a wallet that was never indexed are dropped once its newest is this old. */
+const UNINDEXED_KEEP_MS = 14 * DAY;
+/** The whole table is looked through for old rows this often (and at every UTC day change). */
+const SWEEP_EVERY_MS = 6 * 60 * 60_000;
+/** Free pages kept for the next inserts before any are handed back to the OS (64 MB at 4 KiB). */
+const FREE_RESERVE_PAGES = 16_384;
+/** Pages handed back per reclaim step (1 MB). */
+const RECLAIM_PAGES = 256;
+/** The WAL file is cut back to this after a checkpoint (it had grown to 359 MB and stayed there). */
+const WAL_LIMIT_BYTES = 64 * 1024 * 1024;
+
+/** A settled stretch of one trader's old days: summed, frozen, then deleted. */
+interface FreezeJob {
+  venue: Venue; address: string;
+  /** Days [lo, hi). */
+  lo: number; hi: number;
+  keepDay: number;
+  scan: ScanJob;
+  phase: 'scan' | 'delete';
+  /** A row landed in [lo, hi) while it was being summed: the sum is void. */
+  stale: boolean;
+  tries: number;
+  /** The trader holds settled days past `hi` (a job takes JOB_DAYS at most). */
+  more: boolean;
+}
+/** Raw rows of a trader going without a day row kept: everything (`all`) or the days before `keepDay` (`old`). */
+interface DropJob { venue: Venue; address: string; before: number; days: 'all' | 'old'; keepDay: number }
+/** The walk over every wallet with raw rows. `again` = look at `address` once more, from `floorDay` on. */
+interface Sweep { keepDay: number; vi: number; address: string; again: boolean; floorDay: number; wallets: number; startedAt: number }
+
+/** What the retention has done (totals since the file was created) and where it stands. */
+export interface RetentionStatus {
+  retainDays: number;
+  /** Raw rows of days before this UTC day are pruned once settled. */
+  keepFromDay: number;
+  /** Freed pages go back to the OS (a file created with auto_vacuum = INCREMENTAL); else they are only reused. */
+  autoVacuum: boolean;
+  sweeping: boolean;
+  lastSweepAt: number;
+  lastSweepMs: number;
+  /** Work in flight: the stretch being frozen, wallets being dropped. */
+  pending: { freezing: string | null; dropping: number };
+  totals: {
+    /** Days frozen, and the raw rows deleted behind them. */
+    days: number; fills: number; closes: number;
+    /** Rows dropped with no day row kept (never-indexed wallets, forgotten traders). */
+    dropped: number;
+    /** Rows refused on insert: a time before 2020 or more than a day ahead / a day already frozen. */
+    badTime: number; late: number;
+    /** Stored rows with a broken time: given their neighbour's, or deleted. */
+    repaired: number; unrepairable: number;
+    /** Pages handed back to the OS. */
+    reclaimedPages: number;
+  };
+  lastBad: string | null;
+}
 
 export class IndexStore {
   readonly db: DatabaseSync;
@@ -365,6 +574,34 @@ export class IndexStore {
   private readonly aggRefreshMs: number;
   private refreshedAt = new Map<string, number>();
 
+  // --- retention state (the writer's) ---
+  /** Whole UTC days of raw rows kept. */
+  readonly retainDays: number;
+  /** `venue|address` -> the day after its newest frozen day (0 = none frozen): rows from there on need no lookup. */
+  private frozenTo = new Map<string, number>();
+  /** `venue|address` -> its live day rows carry `fills` / `net`. */
+  private netReady = new Map<string, boolean>();
+  /**
+   * `venue|address` -> days [lo, hi) frozen whose raw rows are still being
+   * deleted (also in `fill_prune`, so a restart finishes them). Readers of raw
+   * rows leave those days out: their day rows already count them.
+   */
+  private pruning = new Map<string, { venue: Venue; address: string; lo: number; hi: number }>();
+  private dropping = new Map<string, DropJob>();
+  private job: FreezeJob | null = null;
+  private sweep: Sweep | null = null;
+  private sweepAt = 0;
+  private sweepMs = 0;
+  private sweepDay = -1;
+  /** Rows per delete slice, tuned to a few ms (it starts small: the first pages are cold). */
+  private slice = 100;
+  /** Rows per background scan step, tuned likewise (step). Starts small: the first pages may be cold. */
+  private chunk = 125;
+  private autoVacuum = 0;
+  private totals: RetentionStatus['totals'] = { days: 0, fills: 0, closes: 0, dropped: 0, badTime: 0, late: 0, repaired: 0, unrepairable: 0, reclaimedPages: 0 };
+  private totalsSaved = '';
+  private lastBad: string | null = null;
+
   version(venue: Venue, address: string): number {
     return this.versions.get(`${venue}|${address}`) ?? 0;
   }
@@ -374,15 +611,29 @@ export class IndexStore {
     this.versions.set(k, (this.versions.get(k) ?? 0) + 1);
   }
 
-  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number } = {}) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
+  /**
+   * `readOnly`: a reader beside the writer - the API thread in dev, the API
+   * process in production (indexer/reader.ts). It TOUCHES NOTHING: the file is
+   * opened with SQLite's read-only flag, and nothing below creates a directory,
+   * sets a journal mode, applies the schema, adds a column or migrates. Only the
+   * writer does those. `busy_timeout` is a setting of this connection, not of
+   * the file. A file the writer has not brought to this code's schema yet is
+   * for the caller to refuse (schemaReady).
+   */
+  constructor(readonly path: string = defaultDbPath(), opts: { readOnly?: boolean; aggRefreshMs?: number; retainDays?: number } = {}) {
+    if (path !== ':memory:' && !opts.readOnly) mkdirSync(dirname(path), { recursive: true });
     this.db = new DatabaseSync(path, opts.readOnly ? { readOnly: true } : {});
     this.readOnly = !!opts.readOnly;
     this.aggRefreshMs = opts.aggRefreshMs ?? 10 * 60_000;
+    this.retainDays = opts.retainDays ?? retainDays();
     this.db.exec('PRAGMA busy_timeout = 5000');
     if (!opts.readOnly) {
+      // Only takes effect on a file with no table yet: pages freed later can then be
+      // handed back in slices (reclaimStep). An older file keeps reusing them instead.
+      this.db.exec('PRAGMA auto_vacuum = INCREMENTAL');
       this.db.exec('PRAGMA journal_mode = WAL');
       this.db.exec('PRAGMA synchronous = NORMAL');
+      this.db.exec(`PRAGMA journal_size_limit = ${WAL_LIMIT_BYTES}`);
       this.db.exec(SCHEMA);
       this.addColumns();
       this.setMeta('schema', String(SCHEMA_VERSION));
@@ -392,13 +643,56 @@ export class IndexStore {
         this.setMeta('arcus_gross_pnl', '1');
       }
     }
+    try {
+      this.autoVacuum = Number((this.db.prepare('PRAGMA auto_vacuum').get() as { auto_vacuum?: number } | undefined)?.auto_vacuum) || 0;
+      // Deletions a stop interrupted: their days are frozen, the rest of their raw rows still has to go.
+      for (const r of this.db.prepare('SELECT venue, address, lo, hi FROM fill_prune').all() as Array<{ venue: Venue; address: string; lo: number; hi: number }>) {
+        this.pruning.set(`${r.venue}|${r.address}`, { venue: r.venue, address: r.address, lo: r.lo, hi: r.hi });
+      }
+      // Days whose row was behind its fills when the last process stopped.
+      if (!this.readOnly) {
+        for (const r of this.db.prepare('SELECT venue, address, day FROM fill_dirty').all() as Array<{ venue: string; address: string; day: number }>) {
+          this.dirtyDays.add(`${r.venue}|${r.address}|${r.day}`);
+        }
+      }
+      const saved = this.getMeta('retention_totals');
+      if (saved) {
+        this.totals = { ...this.totals, ...(JSON.parse(saved) as Partial<RetentionStatus['totals']>) };
+        this.totalsSaved = JSON.stringify(this.totals);
+      }
+    } catch { /* a file from before the retention: nothing in flight */ }
   }
 
   close(): void {
     this.db.close();
   }
 
-  /** Add the columns newer code reads (both threads open the file; either may get there first). */
+  /**
+   * Whether the file holds every table and column this code reads. A reader
+   * never adds them - the writer does, when it starts - so until then a reader
+   * treats the file as "no index yet" instead of failing on a missing column
+   * (or, as it once did, migrating the file itself).
+   */
+  schemaReady(): boolean {
+    try {
+      const have = new Set((this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((r) => r.name));
+      for (const table of SCHEMA_TABLES) if (!have.has(table)) return false;
+      const cols = new Map<string, Set<string>>();
+      for (const [table, column] of ADDED_COLUMNS) {
+        let names = cols.get(table);
+        if (!names) {
+          names = new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+          cols.set(table, names);
+        }
+        if (!names.has(column)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Add the columns newer code reads (the writer only: see the constructor). */
   private addColumns(): void {
     for (const [table, column, type] of ADDED_COLUMNS) {
       const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -424,25 +718,51 @@ export class IndexStore {
     const sinceKey = `closes_def_since:${CLOSES_DEF}`;
     const since = Number(this.getMeta(sinceKey)) || Date.now();
     this.setMeta(sinceKey, String(since));
-    // From 2 only Lighter's sums change (its opening fills carry a null PnL).
-    const venues = was === '2' ? "venue = 'lighter'" : "venue != 'sodex'";
-    const rows = this.q(`SELECT venue, address FROM fill_agg WHERE ${venues} AND built_at < ?`).all(since) as Array<{ venue: Venue; address: string }>;
-    for (const r of rows) this.queueAgg(r.venue, r.address, true);
+    // Every trader (definition 4). Queued a few at a time (feedMigration): each job costs
+    // an index seek or two to set up, and there are tens of thousands of traders.
+    const rows = this.q('SELECT venue, address FROM fill_agg WHERE built_at < ?').all(since) as Array<{ venue: Venue; address: string }>;
+    // Taken from the end: SoDEX, Lighter and Arcus first (their trade ids run in time order, so a
+    // trader's fills are read page after page: minutes for all of them), Hyperliquid and its xyz
+    // mirror last (random ids: every fill is a seek while the file is not in memory - hours).
+    const order: Record<string, number> = { hyperliquid: 0, tradexyz: 1, arcus: 2, lighter: 3, sodex: 4 };
+    rows.sort((a, b) => (order[a.venue] ?? 2) - (order[b.venue] ?? 2));
+    this.migrateList = rows;
+    this.migrateWait = new Set(rows.map((r) => `${r.venue}|${r.address}`));
     this.migrating = true;
     if (!rows.length) this.finishMigration();
     return rows.length;
   }
 
   private migrating = false;
+  /** Traders the migration has still to queue, and those it queued whose re-sum has not landed. */
+  private migrateList: Array<{ venue: Venue; address: string }> = [];
+  private migrateWait = new Set<string>();
+  private migrateFlying = new Set<string>();
 
   private finishMigration(): void {
     this.migrating = false;
     this.setMeta('closes_def', CLOSES_DEF);
   }
 
+  /** Keep a few of the migration's re-sums queued. */
+  private feedMigration(): void {
+    while (this.migrateList.length && this.rebuilding.size < 20) {
+      const r = this.migrateList.pop()!;
+      this.migrateOne(r.venue, r.address);
+    }
+  }
+
+  /** Queue one trader's migration re-sum now, if it is still waiting for it. */
+  private migrateOne(venue: Venue, address: string): void {
+    const k = `${venue}|${address}`;
+    if (!this.migrateWait.delete(k)) return;
+    this.migrateFlying.add(k);
+    this.queueAgg(venue, address, true);
+  }
+
   /** Traders whose aggregates are building (first builds, and re-sums under a new definition). */
   get aggBacklog(): { first: number; rebuild: number; days: number } {
-    return { first: this.building.size, rebuild: this.rebuilding.size, days: this.dayJobs.size };
+    return { first: this.building.size, rebuild: this.rebuilding.size + this.migrateWait.size, days: this.dayJobs.size };
   }
 
   private q(sql: string): StatementSync {
@@ -531,6 +851,12 @@ export class IndexStore {
     return new Map(rows.map((r) => [r.account_id, r.address]));
   }
 
+  /** The wallet behind a venue's numeric account id, when the index has seen the pair (one index seek). */
+  accountAddress(venue: Venue, accountId: number): string | null {
+    const r = this.q('SELECT address FROM accounts INDEXED BY accounts_id WHERE venue = ? AND account_id = ? LIMIT 1').get(venue, accountId) as { address?: string } | undefined;
+    return typeof r?.address === 'string' ? r.address : null;
+  }
+
   // --- fills / closes / coverage ---------------------------------------------
 
   /**
@@ -540,8 +866,24 @@ export class IndexStore {
    */
   putFills(input: readonly FillRow[]): void {
     if (!input.length) return;
-    const rows = [...input];
-    for (const f of input) if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) rows.push({ ...f, venue: 'tradexyz' });
+    const maxT = Date.now() + MAX_AHEAD_MS;
+    const rows: FillRow[] = [];
+    const take = (f: FillRow): void => {
+      // A time no venue can have produced (0, seconds, microseconds): never stored.
+      if (!(f.t >= MIN_ROW_T && f.t <= maxT)) return this.noteBad(f.venue, f.address, f.id, f.t);
+      // The day is frozen: its rows were complete when they were summed, so this is a re-read of one of them.
+      if (this.frozenDay(f.venue, f.address, Math.floor(f.t / DAY))) {
+        this.totals.late++;
+        return;
+      }
+      rows.push(f);
+    };
+    for (const f of input) {
+      take(f);
+      if (f.venue === 'hyperliquid' && f.symbol.startsWith(XYZ)) take({ ...f, venue: 'tradexyz' });
+    }
+    if (!rows.length) return;
+    if (this.dropping.size) for (const f of rows) this.keepWallet(f.venue, f.address, f.t);
     const ins = this.q(
       `INSERT INTO fills (venue, address, id, t, symbol, side, px, sz, fee, closed_pnl, oid, src)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -558,12 +900,27 @@ export class IndexStore {
         const [venue, address] = a.split('|') as [Venue, string];
         this.bump(venue, address);
       }
+      // In the same transaction: a day that is now behind its fills is written down with them.
+      for (const f of rows) this.markDay(f.venue, f.address, f.t);
     });
-    for (const f of rows) this.markDay(f.venue, f.address, f.t);
   }
 
-  putCloses(rows: readonly CloseRow[]): void {
+  putCloses(input: readonly CloseRow[]): void {
+    if (!input.length) return;
+    const maxT = Date.now() + MAX_AHEAD_MS;
+    const rows = input.filter((c) => {
+      if (!(c.t >= MIN_ROW_T && c.t <= maxT)) {
+        this.noteBad(c.venue, c.address, c.id, c.t);
+        return false;
+      }
+      if (this.frozenDay(c.venue, c.address, Math.floor(c.t / DAY))) {
+        this.totals.late++;
+        return false;
+      }
+      return true;
+    });
     if (!rows.length) return;
+    if (this.dropping.size) for (const c of rows) this.keepWallet(c.venue, c.address, c.t);
     const ins = this.q(
       `INSERT INTO closes (venue, address, id, t, opened_t, symbol, pnl) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (venue, address, id) DO UPDATE SET t = excluded.t, opened_t = excluded.opened_t,
@@ -572,8 +929,8 @@ export class IndexStore {
     this.tx(() => {
       for (const c of rows) ins.run(c.venue, c.address, c.id, c.t, c.openedT, c.symbol, c.pnl);
       for (const c of rows) this.bump(c.venue, c.address);
+      for (const c of rows) this.markDay(c.venue, c.address, c.t);
     });
-    for (const c of rows) this.markDay(c.venue, c.address, c.t);
   }
 
   coverage(venue: Venue, address: string, kind: HistoryKind): Coverage | null {
@@ -594,6 +951,8 @@ export class IndexStore {
   addCoverage(venue: Venue, address: string, kind: HistoryKind, span: { fromT: number; toT: number; exhausted?: boolean; capped?: boolean }, now: number): Coverage {
     // A Hyperliquid fill history is also the xyz dex's history over the same span.
     if (venue === 'hyperliquid' && kind === 'fills') this.addCoverage('tradexyz', address, kind, span, now);
+    // A read landed for a wallet whose leftovers were being dropped: what is left stays.
+    if (this.dropping.size) this.keepWallet(venue, address, 0);
     const prev = this.coverage(venue, address, kind);
     let next: Coverage;
     if (prev && span.fromT <= prev.toT && span.toT >= prev.fromT) {
@@ -624,29 +983,113 @@ export class IndexStore {
   orderCount(venue: Venue, address: string, fromT: number, toT = Number.MAX_SAFE_INTEGER): number {
     if (toT === Number.MAX_SAFE_INTEGER) {
       if (this.withAgg(venue, address)) {
-        const d0 = Math.floor(fromT / DAY);
-        const part = this.dayRows(venue, address, fromT, (d0 + 1) * DAY).get(d0)?.trades ?? 0;
-        const rest = this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day > ?')
-          .get(venue, address, d0) as { n: number };
-        return part + rest.n;
+        const { d0, whole } = this.firstDay(venue, address, fromT);
+        const part = whole ? 0 : this.dayRows(venue, address, fromT, (d0 + 1) * DAY).get(d0)?.trades ?? 0;
+        return part + this.tradesAfter(venue, address, whole ? d0 - 1 : d0);
       }
       if (!this.readOnly) return this.cappedTrades(venue, address, fromT, PARTIAL_CAP);
     }
-    const r = this.q(
-      `SELECT COUNT(DISTINCT ${ORDER_KEY}) AS n FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t <= ?`,
-    ).get(venue, address, fromT, toT) as { n?: number } | undefined;
-    return r?.n ?? 0;
+    // The raw rows in range, plus the frozen days that lie wholly inside it.
+    let n = 0;
+    const count = this.q(`SELECT COUNT(DISTINCT ${ORDER_KEY}) AS n FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t < ?`);
+    for (const [a, b] of this.rawSpans(venue, address, fromT, toT === END ? END : toT + 1)) {
+      n += (count.get(venue, address, a, b) as { n: number }).n;
+    }
+    const lastDay = toT === END ? END : Math.floor((toT + 1) / DAY) - 1;
+    const frz = this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND day <= ? AND frozen = 1')
+      .get(venue, address, Math.floor(fromT / DAY), lastDay) as { n: number };
+    return n + frz.n;
   }
 
   /**
    * What closed positions prove about trades since `fromT`: each close is a
    * trade, and a position opened AND closed in the window is at least two.
+   * Closes of frozen days count from their day rows (`roundTrips` then counts
+   * days with one, which is all the caller asks: more than none).
    */
   closeEvidence(venue: Venue, address: string, fromT: number): { closes: number; roundTrips: number } {
-    const r = this.q(
-      `SELECT COUNT(*) AS n, SUM(CASE WHEN opened_t >= ? THEN 1 ELSE 0 END) AS rt FROM closes WHERE venue = ? AND address = ? AND t >= ?`,
-    ).get(fromT, venue, address, fromT) as { n: number; rt: number | null };
-    return { closes: r.n, roundTrips: r.rt ?? 0 };
+    let closes = 0;
+    let roundTrips = 0;
+    const raw = this.q(
+      `SELECT COUNT(*) AS n, SUM(CASE WHEN opened_t >= ? THEN 1 ELSE 0 END) AS rt FROM closes WHERE venue = ? AND address = ? AND t >= ? AND t < ?`,
+    );
+    for (const [a, b] of this.rawSpans(venue, address, fromT, END)) {
+      const r = raw.get(fromT, venue, address, a, b) as { n: number; rt: number | null };
+      closes += r.n;
+      roundTrips += r.rt ?? 0;
+    }
+    // Only SoDEX keeps closed positions; elsewhere a day row's `closes` are runs of fills.
+    if (venue === 'sodex' && this.frozenUpTo(venue, address) > Math.floor(fromT / DAY)) {
+      const f = this.q(
+        `SELECT COALESCE(SUM(closes), 0) AS n, COALESCE(SUM(CASE WHEN open_max >= ? THEN 1 ELSE 0 END), 0) AS rt
+         FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND frozen = 1`,
+      ).get(fromT, venue, address, Math.floor(fromT / DAY)) as { n: number; rt: number };
+      closes += f.n;
+      roundTrips += f.rt;
+    }
+    return { closes, roundTrips };
+  }
+
+  // --- retention: what readers need to know -----------------------------------------------------
+
+  /** The day after the trader's newest frozen day (0 = none): a row or a window start from there on is never in a frozen day. */
+  private frozenUpTo(venue: Venue, address: string): number {
+    const k = `${venue}|${address}`;
+    let d = this.frozenTo.get(k);
+    if (d === undefined) {
+      const r = this.q('SELECT MAX(day) AS d FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1').get(venue, address) as { d: number | null } | undefined;
+      d = r?.d == null ? 0 : r.d + 1;
+      if (this.frozenTo.size > 50_000) this.frozenTo.clear();
+      this.frozenTo.set(k, d);
+    }
+    return d;
+  }
+
+  /** The day's raw rows are pruned: its day row is final. */
+  private frozenDay(venue: Venue, address: string, day: number): boolean {
+    if (day >= this.frozenUpTo(venue, address)) return false;
+    const r = this.q('SELECT frozen FROM fill_day WHERE venue = ? AND address = ? AND day = ?').get(venue, address, day) as { frozen: number | null } | undefined;
+    return r?.frozen === 1;
+  }
+
+  /** Whether a day's raw rows have been pruned (its figures come from its day row). */
+  dayFrozen(venue: Venue, address: string, day: number): boolean {
+    return this.frozenDay(venue, address, day);
+  }
+
+  /**
+   * A window's first day and how it is read: its raw rows from `fromT` on, or -
+   * once they are pruned - its whole day row (the window then starts at that
+   * day's 00:00 UTC; exact for `ytd` and `all`, which start there anyway).
+   */
+  private firstDay(venue: Venue, address: string, fromT: number): { d0: number; whole: boolean } {
+    const d0 = Math.floor(fromT / DAY);
+    return { d0, whole: this.frozenDay(venue, address, d0) };
+  }
+
+  private tradesAfter(venue: Venue, address: string, day: number): number {
+    return (this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day > ?').get(venue, address, day) as { n: number }).n;
+  }
+
+  /**
+   * The stretches of [fromT, toT) whose raw rows count on their own: all of
+   * it, minus days that are frozen while their raw rows are still being
+   * deleted (those rows are already in their day rows).
+   */
+  private rawSpans(venue: Venue, address: string, fromT: number, toT: number): Array<[number, number]> {
+    const p = this.pruning.size ? this.pruning.get(`${venue}|${address}`) : undefined;
+    if (!p) return fromT < toT ? [[fromT, toT]] : [];
+    const a = p.lo * DAY;
+    const b = p.hi * DAY;
+    const out: Array<[number, number]> = [];
+    if (fromT < a) out.push([fromT, Math.min(a, toT)]);
+    if (toT > b) out.push([Math.max(fromT, b), toT]);
+    return out.filter(([x, y]) => x < y);
+  }
+
+  private noteBad(venue: Venue, address: string, id: string, t: number): void {
+    this.totals.badTime++;
+    this.lastBad = `${venue} ${address} ${id} t=${t}`;
   }
 
   /** Trades, volume, most-traded symbols and closes in [fromT, now]. */
@@ -671,14 +1114,36 @@ export class IndexStore {
 
   private markDay(venue: Venue, address: string, t: number): void {
     if (this.readOnly) return;
+    const d = Math.floor(t / DAY);
+    // A row changed in a stretch being summed for freezing: that sum is void.
+    const j = this.job;
+    if (j && j.phase === 'scan' && d >= j.lo && d < j.hi && j.venue === venue && j.address === address) j.stale = true;
+    // A frozen day is final: never summed again.
+    if (this.frozenDay(venue, address, d)) return;
+    // A build in flight sums this day from what it reads; whatever it had read by now, the
+    // day is summed again once the build has landed (buildAggregates).
     const b = this.building.get(`${venue}|${address}`) ?? this.rebuilding.get(`${venue}|${address}`);
-    // Inside a build: a day it has already passed is summed again when it is done.
-    if (b) {
-      if (t < b.cursor) this.dirtyDays.add(`${venue}|${address}|${Math.floor(t / DAY)}`);
-      return;
-    }
-    if (!this.aggIsReady(venue, address)) return;
-    this.dirtyDays.add(`${venue}|${address}|${Math.floor(t / DAY)}`);
+    if (b) b.touched.add(d);
+    // Day rows exist: this one is behind its fills from now on.
+    if (this.aggIsReady(venue, address)) this.dirty(venue, address, d);
+  }
+
+  /**
+   * The day's row is behind its fills. Kept on disk too (`fill_dirty`), so a
+   * restart does not forget it: the mark used to live in memory only, and
+   * every restart left the rows of the last minutes' days short for good.
+   */
+  private dirty(venue: Venue, address: string, day: number): void {
+    const k = `${venue}|${address}|${day}`;
+    if (this.dirtyDays.has(k)) return;
+    this.dirtyDays.add(k);
+    this.q('INSERT OR IGNORE INTO fill_dirty (venue, address, day) VALUES (?, ?, ?)').run(venue, address, day);
+  }
+
+  /** The day's row is level with its fills again (unless a row arrived since it was summed). */
+  private clean(venue: Venue, address: string, day: number): void {
+    if (this.dirtyDays.has(`${venue}|${address}|${day}`)) return;
+    this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ? AND day = ?').run(venue, address, day);
   }
 
   // --- the resumable day scan --------------------------------------------------------
@@ -691,18 +1156,39 @@ export class IndexStore {
   // aggregates held it 2.6-7.4 s at a time (profiled 2026-09-29).
 
   private newJob(venue: Venue, address: string, from: number, to: number): ScanJob {
-    return { venue, address, from, to, cursor: from, days: new Map() };
+    return { venue, address, from, to, cursor: from, day: Number.NaN, days: new Map(), touched: new Set() };
   }
 
   private accOf(job: ScanJob, d: number): DayAcc {
     let a = job.days.get(d);
-    if (!a) job.days.set(d, (a = { trades: 0, lastT: Number.NaN, atT: new Set(), volume: 0, syms: new Map(), rest: [] }));
+    if (!a) {
+      job.days.set(d, (a = { trades: 0, lastT: Number.NaN, atT: new Set(), volume: 0, syms: new Map(), rest: [], fills: 0, pnl: 0, fee: 0, firstT: Number.NaN }));
+    }
     return a;
   }
 
-  private eat(job: ScanJob, rows: ReadonlyArray<{ t: number; symbol: string; side: number; v: number; closed_pnl: number | null; src: number }>): void {
+  /**
+   * The scan has passed a day: its closes are counted and its fills let go.
+   * (Held to the end of the job, a market maker's quarter of REST fills was
+   * hundreds of MB.)
+   */
+  private seal(job: ScanJob): void {
+    const a = job.days.get(job.day);
+    if (!a || a.runs || job.venue === 'sodex') return;
+    const c = closeRuns(a.rest);
+    a.runs = { closes: c.closes, wins: c.wins };
+    a.rest = [];
+  }
+
+  private eat(job: ScanJob, rows: ReadonlyArray<ScanRow>): void {
     for (const r of rows) {
-      const a = this.accOf(job, Math.floor(r.t / DAY));
+      const day = Math.floor(r.t / DAY);
+      // Rows come in time order: a new day means the one before is complete.
+      if (day !== job.day) {
+        this.seal(job);
+        job.day = day;
+      }
+      const a = this.accOf(job, day);
       if (r.t !== a.lastT) {
         a.trades += a.atT.size;
         a.atT.clear();
@@ -711,6 +1197,11 @@ export class IndexStore {
       a.atT.add(`${r.symbol}|${r.side}`);
       a.volume += r.v;
       a.syms.set(r.symbol, (a.syms.get(r.symbol) ?? 0) + r.v);
+      // What stands in for the raw rows once they are pruned (realized, fillExtent).
+      a.fills++;
+      if (r.closed_pnl !== null) a.pnl += r.closed_pnl;
+      if (r.fee !== null) a.fee += r.fee;
+      if (!(a.firstT <= r.t)) a.firstT = r.t;
       // A REST fill with no realised PnL is an opening fill (0); a stream print's is unknown (skipped).
       if (r.closed_pnl !== null || r.src === 1) a.rest.push({ symbol: r.symbol, t: r.t, side: r.side, closedPnl: r.closed_pnl ?? 0 });
     }
@@ -723,9 +1214,9 @@ export class IndexStore {
   private scanStep(job: ScanJob, maxRows: number): boolean {
     if (job.cursor >= job.to) return true;
     const rows = this.q(
-      `SELECT t, symbol, side, px * sz AS v, closed_pnl, src FROM fills
+      `SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills
        WHERE venue = ? AND address = ? AND t >= ? AND t < ? ORDER BY t LIMIT ?`,
-    ).all(job.venue, job.address, job.cursor, job.to, maxRows + 1) as Array<{ t: number; symbol: string; side: number; v: number; closed_pnl: number | null; src: number }>;
+    ).all(job.venue, job.address, job.cursor, job.to, maxRows + 1) as ScanRow[];
     if (rows.length <= maxRows) {
       this.eat(job, rows);
       job.cursor = job.to;
@@ -735,8 +1226,8 @@ export class IndexStore {
     if (rows[0]!.t === cut) {
       // One timestamp with more rows than a chunk: take all of it at once.
       this.eat(job, this.q(
-        'SELECT t, symbol, side, px * sz AS v, closed_pnl, src FROM fills WHERE venue = ? AND address = ? AND t = ?',
-      ).all(job.venue, job.address, cut) as Array<{ t: number; symbol: string; side: number; v: number; closed_pnl: number | null; src: number }>);
+        'SELECT t, symbol, side, px * sz AS v, closed_pnl, fee, src FROM fills WHERE venue = ? AND address = ? AND t = ?',
+      ).all(job.venue, job.address, cut) as ScanRow[]);
       job.cursor = cut + 1;
     } else {
       this.eat(job, rows.filter((r) => r.t < cut));
@@ -745,21 +1236,43 @@ export class IndexStore {
     return job.cursor >= job.to;
   }
 
+  /**
+   * One scan step of background work (builds, re-sums, the retention), sized
+   * to stay at a few ms whatever the disk does: a fill is found through the
+   * time index and then fetched by its key, so on pages that are not in
+   * memory every row is a seek: 1,000 Hyperliquid fills took 130-390 ms on
+   * the live file (its trade ids are random, so a trader's fills of one day
+   * are spread over all of its pages), 12 ms for Lighter's, whose ids run in
+   * time order (measured 2026-10-02). Rows of one timestamp are never split.
+   */
+  private step(job: ScanJob): boolean {
+    const t0 = Date.now();
+    const done = this.scanStep(job, this.chunk);
+    const ms = Date.now() - t0;
+    if (ms > 20) this.chunk = Math.max(25, this.chunk >> 1);
+    else if (ms < 5) this.chunk = Math.min(SCAN_CHUNK, this.chunk << 1);
+    return done;
+  }
+
   /** A finished job's day rows (SoDEX closes from the closes table, everyone else's by the close definition). */
   private finish(job: ScanJob): Map<number, DayAgg> {
     const out = new Map<number, DayAgg>();
     for (const [d, a] of job.days) {
-      const c = job.venue === 'sodex' ? { closes: 0, wins: 0 } : closeRuns(a.rest);
-      out.set(d, { trades: a.trades + a.atT.size, volume: a.volume, closes: c.closes, wins: c.wins, syms: a.syms });
+      const c = job.venue === 'sodex' ? { closes: 0, wins: 0 } : a.runs ?? closeRuns(a.rest);
+      out.set(d, {
+        trades: a.trades + a.atT.size, volume: a.volume, closes: c.closes, wins: c.wins, syms: a.syms,
+        fills: a.fills, net: a.pnl - a.fee, firstT: Number.isFinite(a.firstT) ? a.firstT : null, openMax: null,
+      });
     }
     if (job.venue === 'sodex') {
       for (const r of this.q(
-        `SELECT t / ${DAY} AS d, COUNT(*) AS n, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS w FROM closes
+        `SELECT t / ${DAY} AS d, COUNT(*) AS n, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS w, MAX(opened_t) AS om FROM closes
          WHERE venue = ? AND address = ? AND t >= ? AND t < ? GROUP BY d`,
-      ).all(job.venue, job.address, job.from, job.to) as Array<{ d: number; n: number; w: number | null }>) {
-        const x = out.get(r.d) ?? { trades: 0, volume: 0, closes: 0, wins: 0, syms: new Map<string, number>() };
+      ).all(job.venue, job.address, job.from, job.to) as Array<{ d: number; n: number; w: number | null; om: number | null }>) {
+        const x = out.get(r.d) ?? { trades: 0, volume: 0, closes: 0, wins: 0, syms: new Map<string, number>(), fills: 0, net: 0, firstT: null, openMax: null };
         x.closes = r.n;
         x.wins = r.w ?? 0;
+        x.openMax = r.om;
         out.set(r.d, x);
       }
     }
@@ -800,11 +1313,19 @@ export class IndexStore {
     return out;
   }
 
-  private writeDays(venue: Venue, address: string, days: Map<number, DayAgg>): void {
-    const ins = this.q('INSERT OR REPLACE INTO fill_day (venue, address, day, trades, volume, closes, wins, syms) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  /** Write day rows. A frozen row is never replaced; `frozen` writes the rows as final. */
+  private writeDays(venue: Venue, address: string, days: Map<number, DayAgg>, frozen = false): void {
+    const ins = this.q(
+      `INSERT INTO fill_day (venue, address, day, trades, volume, closes, wins, syms, fills, net, first_t, open_max, frozen)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (venue, address, day) DO UPDATE SET trades = excluded.trades, volume = excluded.volume,
+         closes = excluded.closes, wins = excluded.wins, syms = excluded.syms, fills = excluded.fills, net = excluded.net,
+         first_t = excluded.first_t, open_max = excluded.open_max, frozen = excluded.frozen
+       WHERE COALESCE(fill_day.frozen, 0) = 0`,
+    );
     for (const [d, x] of days) {
       const top = [...x.syms].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([s, v]) => [s, Math.round(v)]);
-      ins.run(venue, address, d, x.trades, x.volume, x.closes, x.wins, JSON.stringify(top));
+      ins.run(venue, address, d, x.trades, x.volume, x.closes, x.wins, JSON.stringify(top), x.fills, x.net, x.firstT, x.openMax, frozen ? 1 : 0);
     }
   }
 
@@ -814,8 +1335,13 @@ export class IndexStore {
     if (this.building.has(k) || (rebuild && this.rebuilding.has(k))) return;
     // A first build supersedes a queued re-sum.
     if (!rebuild) this.rebuilding.delete(k);
-    const r = this.q('SELECT MIN(t) AS t FROM fills WHERE venue = ? AND address = ?').get(venue, address) as { t: number | null } | undefined;
-    const first = r?.t ?? null;
+    let first = this.oldestRaw(venue, address);
+    if (venue === 'sodex') {
+      // SoDEX closes reach back before the first stream fill: the day rows start with the first of either.
+      // (Starting at the first fill, a re-sum dropped every close before it.)
+      const c = num((this.q('SELECT MIN(t) AS t FROM closes WHERE venue = ? AND address = ?').get(venue, address) as { t: number | null } | undefined)?.t);
+      if (c !== null && (first === null || c < first)) first = c;
+    }
     const now = Date.now();
     const start = first === null ? now : Math.floor(first / DAY) * DAY;
     (rebuild ? this.rebuilding : this.building).set(k, this.newJob(venue, address, start, (Math.floor(now / DAY) + 1) * DAY));
@@ -826,41 +1352,55 @@ export class IndexStore {
    * first builds (a board is waiting), then dirty days too large to sum at
    * once, then re-sums under a newer close definition. Returns how many
    * traders are still building.
+   *
+   * `resumMs`: the share of that time re-sums may take. They are housekeeping
+   * and read every fill a trader has - on pages that are not in memory, one
+   * seek per row - so the caller keeps it small while its loop is behind.
    */
-  buildAggregates(budgetMs = 40): number {
+  buildAggregates(budgetMs = 40, resumMs = budgetMs): number {
     if (this.readOnly) return 0;
     const t0 = Date.now();
-    const left = () => this.building.size + this.rebuilding.size;
+    const left = () => this.building.size + this.rebuilding.size + this.migrateWait.size;
     const over = () => Date.now() - t0 >= budgetMs;
+    this.feedMigration();
     for (const map of [this.building, this.dayJobs, this.rebuilding]) {
+      const until = map === this.rebuilding ? Math.min(t0 + budgetMs, Date.now() + resumMs) : t0 + budgetMs;
+      const spent = (): boolean => Date.now() >= until;
       for (const [k, job] of map) {
         let done = false;
-        while (!over() && !(done = this.scanStep(job, SCAN_CHUNK))) { /* next chunk */ }
+        while (!spent() && !(done = this.step(job))) { /* next chunk */ }
         if (!done) return left();
         const days = this.finish(job);
         if (map === this.dayJobs) {
           // One day of a heavy trader, summed in the background.
           this.tx(() => {
-            this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day = ?').run(job.venue, job.address, Math.floor(job.from / DAY));
+            this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day = ? AND COALESCE(frozen, 0) = 0').run(job.venue, job.address, Math.floor(job.from / DAY));
             this.writeDays(job.venue, job.address, days);
+            this.clean(job.venue, job.address, Math.floor(job.from / DAY));
           });
           map.delete(k);
           this.bump(job.venue, job.address);
           continue;
         }
         this.tx(() => {
-          this.q('DELETE FROM fill_day WHERE venue = ? AND address = ?').run(job.venue, job.address);
+          // Frozen days stay: their raw rows are gone, so they cannot be summed again.
+          this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND COALESCE(frozen, 0) = 0').run(job.venue, job.address);
           this.writeDays(job.venue, job.address, days);
-          this.q('INSERT OR REPLACE INTO fill_agg (venue, address, built_at) VALUES (?, ?, ?)').run(job.venue, job.address, Date.now());
+          this.q('INSERT OR REPLACE INTO fill_agg (venue, address, built_at, def) VALUES (?, ?, ?, ?)').run(job.venue, job.address, Date.now(), AGG_COLS);
         });
         map.delete(k);
         this.aggReady.set(k, true);
+        this.netReady.set(k, true);
+        this.migrateFlying.delete(k);
+        // Days that got rows while the build ran: what it wrote for them may predate those rows.
+        for (const d of job.touched) this.dirty(job.venue, job.address, d);
         this.bump(job.venue, job.address);
-        if (over()) break;
+        this.feedMigration();
+        if (spent()) break;
       }
       if (over()) break;
     }
-    if (this.migrating && !this.rebuilding.size) this.finishMigration();
+    if (this.migrating && !this.migrateList.length && !this.migrateWait.size && !this.migrateFlying.size) this.finishMigration();
     return left();
   }
 
@@ -881,18 +1421,21 @@ export class IndexStore {
     if (this.dayJobs.has(k)) return;
     const [venue, address, day] = k.split('|') as [Venue, string, string];
     const d = Number(day);
+    if (this.frozenDay(venue, address, d)) return this.clean(venue, address, d);
     const job = this.newJob(venue, address, d * DAY, (d + 1) * DAY);
-    let rows = 0;
-    while (!this.scanStep(job, SCAN_CHUNK)) {
-      rows += SCAN_CHUNK;
-      if (rows >= SYNC_DAY_ROWS) {
+    const t0 = Date.now();
+    while (!this.step(job)) {
+      // Too many rows - or too slow a disk - to sum at once: it goes on in the background.
+      // Its mark stays on disk until that sum has landed.
+      if ((job.days.get(d)?.fills ?? 0) >= SYNC_DAY_ROWS || Date.now() - t0 > 30) {
         this.dayJobs.set(k, job);
         return;
       }
     }
     this.tx(() => {
-      this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day = ?').run(venue, address, d);
+      this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day = ? AND COALESCE(frozen, 0) = 0').run(venue, address, d);
       this.writeDays(venue, address, this.finish(job));
+      this.clean(venue, address, d);
     });
   }
 
@@ -920,8 +1463,11 @@ export class IndexStore {
       return false;
     }
     // Someone reads this trader now (a board, the stats sweep): its re-sum goes first.
+    // Not the one-time re-sum of every trader, though: a board pass reads thousands of them,
+    // and with all of those in the first-builds queue nothing else was summed (2026-10-02).
+    // That one goes venue by venue in its own time (migrateCloses).
     const k = `${venue}|${address}`;
-    const job = this.rebuilding.get(k);
+    const job = this.migrateFlying.has(k) ? undefined : this.rebuilding.get(k);
     if (job) {
       this.rebuilding.delete(k);
       this.building.set(k, job);
@@ -939,7 +1485,7 @@ export class IndexStore {
   private async partialDayAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<DayAgg | undefined> {
     const d0 = Math.floor(fromT / DAY);
     const job = this.newJob(venue, address, fromT, (d0 + 1) * DAY);
-    while (!this.scanStep(job, SCAN_CHUNK)) await pause();
+    while (!this.step(job)) await pause();
     return this.finish(job).get(d0);
   }
 
@@ -947,7 +1493,8 @@ export class IndexStore {
   async windowStatsAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<WindowStats> {
     // Dirty days are left to flushAggregates (a few minutes behind at most); summing them here stalled the build.
     if (!this.withAgg(venue, address, false)) return this.windowStats(venue, address, fromT);
-    const d0 = Math.floor(fromT / DAY);
+    const { d0, whole } = this.firstDay(venue, address, fromT);
+    if (whole) return this.sumWindow(venue, address, d0 - 1, undefined);
     const part = await this.partialDayAsync(venue, address, fromT, pause);
     return this.sumWindow(venue, address, d0, part);
   }
@@ -955,10 +1502,10 @@ export class IndexStore {
   /** orderCount since `fromT` without long stalls. Same figure. */
   async orderCountAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<number> {
     if (!this.withAgg(venue, address, false)) return this.orderCount(venue, address, fromT);
-    const d0 = Math.floor(fromT / DAY);
+    const { d0, whole } = this.firstDay(venue, address, fromT);
+    if (whole) return this.tradesAfter(venue, address, d0 - 1);
     const part = (await this.partialDayAsync(venue, address, fromT, pause))?.trades ?? 0;
-    const rest = this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day > ?').get(venue, address, d0) as { n: number };
-    return part + rest.n;
+    return part + this.tradesAfter(venue, address, d0);
   }
 
   /** At least `n` distinct trades since `fromT`? Stops reading at `n` (the boards' trade test). */
@@ -969,17 +1516,29 @@ export class IndexStore {
   /**
    * Distinct trades since `fromT`, counted to at most `cap`: cheap on any
    * history (it stops reading at the cap), and enough for "more than one trade".
+   * Pruned days count from their day rows.
    */
   private cappedTrades(venue: Venue, address: string, fromT: number, cap: number): number {
-    const r = this.q(
-      `SELECT COUNT(*) AS n FROM (SELECT DISTINCT t, symbol, side FROM fills WHERE venue = ? AND address = ? AND t >= ? LIMIT ?)`,
-    ).get(venue, address, fromT, cap) as { n: number };
-    return r.n;
+    let n = 0;
+    const count = this.q(
+      `SELECT COUNT(*) AS n FROM (SELECT DISTINCT t, symbol, side FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t < ? LIMIT ?)`,
+    );
+    for (const [a, b] of this.rawSpans(venue, address, fromT, END)) {
+      n += (count.get(venue, address, a, b, cap - n) as { n: number }).n;
+      if (n >= cap) return cap;
+    }
+    const d0 = Math.floor(fromT / DAY);
+    if (this.frozenUpTo(venue, address) > d0) {
+      n += (this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND frozen = 1')
+        .get(venue, address, d0) as { n: number }).n;
+    }
+    return Math.min(n, cap);
   }
 
   windowStats(venue: Venue, address: string, fromT: number): WindowStats {
     if (this.withAgg(venue, address)) {
-      const d0 = Math.floor(fromT / DAY);
+      const { d0, whole } = this.firstDay(venue, address, fromT);
+      if (whole) return this.sumWindow(venue, address, d0 - 1, undefined);
       return this.sumWindow(venue, address, d0, this.dayRows(venue, address, fromT, (d0 + 1) * DAY).get(d0));
     }
     // The writer is building this trader's aggregates in the background: a capped
@@ -1016,8 +1575,12 @@ export class IndexStore {
     return this.aggIsReady(venue, address);
   }
 
-  /** The same figures from the fills themselves (a reader with no aggregates yet). */
+  /**
+   * The same figures from the fills themselves (a reader with no aggregates
+   * yet). Days whose raw rows are pruned come from their day rows.
+   */
   private windowStatsScan(venue: Venue, address: string, fromT: number): WindowStats {
+    if (this.frozenUpTo(venue, address) > Math.floor(fromT / DAY)) return this.windowStatsMixed(venue, address, fromT);
     const base = this.q(
       `SELECT COUNT(DISTINCT ${ORDER_KEY}) AS n, COALESCE(SUM(px * sz), 0) AS vol FROM fills WHERE venue = ? AND address = ? AND t >= ?`,
     ).get(venue, address, fromT) as { n: number; vol: number };
@@ -1035,9 +1598,42 @@ export class IndexStore {
     return { trades: base.n, volume: base.vol, assets, wins: closes.w ?? 0, closes: closes.n };
   }
 
+  /** windowStatsScan for a trader with frozen days in the window: raw rows where they exist, day rows where they do not. */
+  private windowStatsMixed(venue: Venue, address: string, fromT: number): WindowStats {
+    let trades = 0;
+    let volume = 0;
+    let closes = 0;
+    let wins = 0;
+    const syms = new Map<string, number>();
+    for (const r of this.q('SELECT trades, volume, closes, wins, syms FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND frozen = 1')
+      .all(venue, address, Math.floor(fromT / DAY)) as Array<{ trades: number; volume: number; closes: number; wins: number; syms: string }>) {
+      trades += r.trades;
+      volume += r.volume;
+      closes += r.closes;
+      wins += r.wins;
+      try {
+        for (const [s, v] of JSON.parse(r.syms) as Array<[string, number]>) syms.set(s, (syms.get(s) ?? 0) + v);
+      } catch { /* skip */ }
+    }
+    for (const [a, b] of this.rawSpans(venue, address, fromT, END)) {
+      for (const [d, x] of this.dayRows(venue, address, a, b)) {
+        // A frozen day's figures are its day row, whatever raw row is left of it.
+        if (this.frozenDay(venue, address, d)) continue;
+        trades += x.trades;
+        volume += x.volume;
+        closes += x.closes;
+        wins += x.wins;
+        for (const [s, v] of x.syms) syms.set(s, (syms.get(s) ?? 0) + v);
+      }
+    }
+    const assets = [...syms].sort((x, y) => y[1] - x[1]).slice(0, 3).map(([s]) => s);
+    return { trades, volume, assets, wins, closes };
+  }
+
   /** Replace a coverage row as given (used when a venue cap moves the start forward). */
   setCoverage(venue: Venue, address: string, kind: HistoryKind, c: Coverage): void {
     if (venue === 'hyperliquid' && kind === 'fills') this.setCoverage('tradexyz', address, kind, c);
+    if (this.dropping.size) this.keepWallet(venue, address, 0);
     this.q(
       `INSERT INTO coverage (venue, address, kind, from_t, to_t, exhausted, capped, rest_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (venue, address, kind) DO UPDATE SET from_t = excluded.from_t, to_t = excluded.to_t,
@@ -1046,10 +1642,36 @@ export class IndexStore {
     this.bump(venue, address);
   }
 
-  /** Fill rows held for an address, and the oldest one's time. */
-  fillExtent(venue: Venue, address: string): { count: number; minT: number | null } {
-    const r = this.q('SELECT COUNT(*) AS n, MIN(t) AS m FROM fills WHERE venue = ? AND address = ?').get(venue, address) as { n: number; m: number | null };
-    return { count: r.n, minT: num(r.m) };
+  private oldestRaw(venue: Venue, address: string): number | null {
+    return num((this.q('SELECT MIN(t) AS t FROM fills WHERE venue = ? AND address = ?').get(venue, address) as { t: number | null } | undefined)?.t);
+  }
+
+  /**
+   * Fill rows held for an address - its raw rows plus those pruned behind
+   * frozen days - and the oldest one's time. Raw rows are counted up to `cap`
+   * (the callers compare with 9,900 and 40,000; counting every row of a
+   * market maker took seconds).
+   */
+  fillExtent(venue: Venue, address: string, cap = 50_000): { count: number; minT: number | null } {
+    let count = 0;
+    const some = this.q('SELECT COUNT(*) AS n FROM (SELECT 1 FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t < ? LIMIT ?)');
+    for (const [a, b] of this.rawSpans(venue, address, 0, END)) {
+      if (count >= cap) break;
+      count += (some.get(venue, address, a, b, cap - count) as { n: number }).n;
+    }
+    const first = this.oldestRaw(venue, address);
+    if (this.frozenUpTo(venue, address) === 0) return { count, minT: first };
+    const f = this.q('SELECT COALESCE(SUM(fills), 0) AS n, MIN(first_t) AS m FROM fill_day WHERE venue = ? AND address = ? AND frozen = 1')
+      .get(venue, address) as { n: number; m: number | null };
+    const m = num(f.m);
+    return { count: Math.min(cap, count + f.n), minT: first === null ? m : m === null ? first : Math.min(first, m) };
+  }
+
+  /** The days in [fromT, toT] that can hold rows (from the trader's oldest raw row on) are summed again. */
+  private markRange(venue: Venue, address: string, fromT: number, toT: number, first: number | null): void {
+    if (first === null) return;
+    const hi = Math.floor(Math.min(toT, Date.now()) / DAY);
+    for (let d = Math.floor(Math.max(fromT, first) / DAY); d <= hi; d++) this.markDay(venue, address, d * DAY);
   }
 
   /**
@@ -1058,13 +1680,13 @@ export class IndexStore {
    * differ from the stream's per-print ids: both copies would count.
    */
   dropStreamRows(venue: Venue, address: string, fromT: number, toT: number): void {
-    this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ?').run(venue, address, fromT, toT);
-    if (venue === 'hyperliquid') this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ?').run('tradexyz', address, fromT, toT);
-    this.bump(venue, address);
-    for (let d = Math.floor(fromT / DAY); d <= Math.floor(Math.min(toT, Date.now()) / DAY); d++) {
-      this.markDay(venue, address, d * DAY);
-      if (venue === 'hyperliquid') this.markDay('tradexyz', address, d * DAY);
+    for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
+      // Days before the trader's oldest row hold nothing to sum again (a range from 0 used to mark 20,000 of them).
+      const first = this.oldestRaw(v, address);
+      this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ?').run(v, address, fromT, toT);
+      this.markRange(v, address, fromT, toT, first);
     }
+    this.bump(venue, address);
   }
 
   /**
@@ -1077,22 +1699,78 @@ export class IndexStore {
          SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND src = 0 AND t >= ? AND t <= ? LIMIT 2000)`,
     );
     for (const v of venue === 'hyperliquid' ? [venue, 'tradexyz' as Venue] : [venue]) {
+      const first = this.oldestRaw(v, address);
       while (Number(slice.run(v, address, fromT, toT).changes) >= 2000) await pause();
+      this.markRange(v, address, fromT, toT, first);
     }
     this.bump(venue, address);
-    for (let d = Math.floor(fromT / DAY); d <= Math.floor(Math.min(toT, Date.now()) / DAY); d++) {
-      this.markDay(venue, address, d * DAY);
-      if (venue === 'hyperliquid') this.markDay('tradexyz', address, d * DAY);
-    }
   }
 
-  /** Realised PnL net of fees, and traded volume, since `fromT`. */
+  /**
+   * Realised PnL net of fees, traded volume and fill count since `fromT`: the
+   * raw rows, plus the day rows of the days whose raw rows are pruned.
+   */
   realized(venue: Venue, address: string, fromT: number): { pnl: number; volume: number; fills: number } {
-    const r = this.q(
+    let pnl = 0;
+    let volume = 0;
+    let fills = 0;
+    const raw = this.q(
       `SELECT COALESCE(SUM(closed_pnl), 0) - COALESCE(SUM(fee), 0) AS pnl, COALESCE(SUM(px * sz), 0) AS vol, COUNT(*) AS n
-       FROM fills WHERE venue = ? AND address = ? AND t >= ?`,
-    ).get(venue, address, fromT) as { pnl: number; vol: number; n: number };
-    return { pnl: r.pnl, volume: r.vol, fills: r.n };
+       FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t < ?`,
+    );
+    for (const [a, b] of this.rawSpans(venue, address, fromT, END)) {
+      const r = raw.get(venue, address, a, b) as { pnl: number; vol: number; n: number };
+      pnl += r.pnl;
+      volume += r.vol;
+      fills += r.n;
+    }
+    const d0 = Math.floor(fromT / DAY);
+    if (this.frozenUpTo(venue, address) > d0) {
+      const f = this.q(
+        `SELECT COALESCE(SUM(net), 0) AS pnl, COALESCE(SUM(volume), 0) AS vol, COALESCE(SUM(fills), 0) AS n
+         FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND frozen = 1`,
+      ).get(venue, address, d0) as { pnl: number; vol: number; n: number };
+      pnl += f.pnl;
+      volume += f.vol;
+      fills += f.n;
+    }
+    return { pnl, volume, fills };
+  }
+
+  /** The trader's live day rows carry `fills` and `net` (they were built by this code). */
+  private hasNet(venue: Venue, address: string): boolean {
+    const k = `${venue}|${address}`;
+    let v = this.netReady.get(k);
+    if (v === undefined) {
+      const r = this.q('SELECT def FROM fill_agg WHERE venue = ? AND address = ?').get(venue, address) as { def: number | null } | undefined;
+      v = (r?.def ?? 0) >= AGG_COLS;
+      if (this.netReady.size > 50_000) this.netReady.clear();
+      this.netReady.set(k, v);
+    }
+    return v;
+  }
+
+  /**
+   * realized() without a long stall: whole days from the day rows and one
+   * chunked scan of the window's first day. (The raw sum reads every fill
+   * since `fromT`: seconds for a market maker's quarter, in one go.) Day rows
+   * are a few minutes behind the newest fills, as for windowStatsAsync.
+   */
+  async realizedAsync(venue: Venue, address: string, fromT: number, pause: () => Promise<void>): Promise<{ pnl: number; volume: number; fills: number }> {
+    if (!this.withAgg(venue, address, false)) return this.realized(venue, address, fromT);
+    if (!this.hasNet(venue, address)) {
+      // Day rows from before they carried `net`: summed again in the background (unless the
+      // one-time re-sum will get to this trader anyway); the raw rows answer meanwhile.
+      const k = `${venue}|${address}`;
+      if (!this.readOnly && !this.migrateWait.has(k) && !this.migrateFlying.has(k)) this.queueAgg(venue, address, true);
+      return this.realized(venue, address, fromT);
+    }
+    const { d0, whole } = this.firstDay(venue, address, fromT);
+    const part = whole ? undefined : await this.partialDayAsync(venue, address, fromT, pause);
+    const r = this.q(
+      'SELECT COALESCE(SUM(net), 0) AS pnl, COALESCE(SUM(volume), 0) AS vol, COALESCE(SUM(fills), 0) AS n FROM fill_day WHERE venue = ? AND address = ? AND day > ?',
+    ).get(venue, address, whole ? d0 - 1 : d0) as { pnl: number; vol: number; n: number };
+    return { pnl: (part?.net ?? 0) + r.pnl, volume: (part?.volume ?? 0) + r.vol, fills: (part?.fills ?? 0) + r.n };
   }
 
   /** Newest REST fill time (the incremental cursor). */
@@ -1101,19 +1779,448 @@ export class IndexStore {
     return num(r?.t);
   }
 
-  /** Drop the fills, closes and coverage of traders no longer tracked. */
+  /**
+   * Drop the fills, closes and coverage of a trader no longer tracked. What
+   * marks it as indexed goes at once; its raw rows go a slice at a time
+   * (pruneStep) - a market maker's are millions, and one DELETE held the loop
+   * for as long as it took.
+   */
   forget(venue: Venue, address: string): void {
     this.tx(() => {
-      this.q('DELETE FROM fills WHERE venue = ? AND address = ?').run(venue, address);
-      this.q('DELETE FROM closes WHERE venue = ? AND address = ?').run(venue, address);
       this.q('DELETE FROM coverage WHERE venue = ? AND address = ?').run(venue, address);
       this.q('DELETE FROM fill_day WHERE venue = ? AND address = ?').run(venue, address);
       this.q('DELETE FROM fill_agg WHERE venue = ? AND address = ?').run(venue, address);
+      this.q('DELETE FROM fill_prune WHERE venue = ? AND address = ?').run(venue, address);
+      this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ?').run(venue, address);
     });
-    this.aggReady.set(`${venue}|${address}`, false);
-    this.building.delete(`${venue}|${address}`);
-    this.rebuilding.delete(`${venue}|${address}`);
+    this.resetWallet(venue, address);
+    const job: DropJob = { venue, address, before: END, days: 'all', keepDay: 0 };
+    if (!this.dropSlice(job, FORGET_INLINE_ROWS)) this.dropping.set(`${venue}|${address}`, job);
     this.bump(venue, address);
+  }
+
+  /** Forget what is cached or queued for a trader (its day rows are gone). */
+  private resetWallet(venue: Venue, address: string): void {
+    const k = `${venue}|${address}`;
+    this.aggReady.set(k, false);
+    this.netReady.delete(k);
+    this.frozenTo.delete(k);
+    this.pruning.delete(k);
+    this.building.delete(k);
+    this.rebuilding.delete(k);
+    this.migrateWait.delete(k);
+    this.migrateFlying.delete(k);
+    const prefix = `${k}|`;
+    for (const d of this.dayJobs.keys()) if (d.startsWith(prefix)) this.dayJobs.delete(d);
+    for (const d of this.dirtyDays) if (d.startsWith(prefix)) this.dirtyDays.delete(d);
+    if (this.job && this.job.venue === venue && this.job.address === address) this.job = null;
+  }
+
+  // --- retention: pruning ---------------------------------------------------------------------------
+
+  /**
+   * Run retention work for up to `budgetMs`, then return: finish deletions a
+   * stop interrupted, drop what forget() queued, go on with the stretch being
+   * frozen, and - once per UTC day and every few hours - walk every wallet
+   * that holds raw rows, looking for days older than the retention. `now`
+   * decides what is old. Each unit is a few ms (a scan chunk, a delete
+   * slice), so the caller's loop is never held. `maxUnits` stops after that
+   * many units whatever the time (tests step through a prune with it).
+   */
+  pruneStep(budgetMs: number, now: number = Date.now(), maxUnits = Number.POSITIVE_INFINITY): RetentionStatus {
+    if (this.readOnly) return this.retention(now);
+    const t0 = Date.now();
+    let units = 0;
+    const over = (): boolean => Date.now() - t0 >= budgetMs || units >= maxUnits;
+    while (!over()) {
+      units++;
+      // One delete slice a step, however much time is left: a deleted fill dirties a page of its
+      // own (Hyperliquid's ids are random), and a burst of them is a burst of disk writes.
+      // 1. Days already frozen whose raw rows are not all gone (a stop came in between).
+      const left = this.leftover();
+      if (left) {
+        this.deleteFrozen(left);
+        break;
+      }
+      // 2. Wallets being dropped.
+      const drop = this.dropping.values().next().value;
+      if (drop) {
+        const s0 = Date.now();
+        const done = this.dropSlice(drop, this.slice);
+        this.tune(Date.now() - s0, !done);
+        if (done) this.dropDone(drop);
+        break;
+      }
+      // 3. The stretch being frozen.
+      if (this.job) {
+        const deleting = this.job.phase === 'delete';
+        this.stepJob(this.job, over);
+        if (deleting) break;
+        continue;
+      }
+      // 4. The sweep.
+      if (!this.sweep) {
+        if (Math.floor(now / DAY) === this.sweepDay && now - this.sweepAt < SWEEP_EVERY_MS) break;
+        this.sweep = { keepDay: Math.floor(now / DAY) - this.retainDays, vi: 0, address: '', again: false, floorDay: 0, wallets: 0, startedAt: Date.now() };
+      }
+      if (!this.sweepNext(now)) {
+        this.sweepMs = Date.now() - this.sweep.startedAt;
+        this.sweep = null;
+        this.sweepAt = now;
+        this.sweepDay = Math.floor(now / DAY);
+        this.saveTotals();
+      }
+    }
+    if (!this.job && !this.dropping.size && !this.pruning.size && !over()) this.reclaimStep();
+    return this.retention(now);
+  }
+
+  /**
+   * A whole sweep at once, start to finish. BLOCKING: for tools and tests,
+   * never for the running indexer (it calls pruneStep on a timer).
+   */
+  pruneNow(now: number = Date.now()): RetentionStatus {
+    // From the first wallet, whatever a sweep in progress had reached.
+    this.sweep = null;
+    this.sweepDay = -1;
+    do this.pruneStep(1_000, now);
+    while (this.sweep || this.job || this.dropping.size || this.pruning.size);
+    this.saveTotals();
+    return this.retention(now);
+  }
+
+  /** Where the retention stands. */
+  retention(now: number = Date.now()): RetentionStatus {
+    const j = this.job;
+    return {
+      retainDays: this.retainDays,
+      keepFromDay: Math.floor(now / DAY) - this.retainDays,
+      autoVacuum: this.autoVacuum === 2,
+      sweeping: this.sweep !== null,
+      lastSweepAt: this.sweepAt,
+      lastSweepMs: this.sweepMs,
+      pending: { freezing: j ? `${j.venue} ${j.address} days ${j.lo}-${j.hi} ${j.phase}` : null, dropping: this.dropping.size },
+      totals: { ...this.totals },
+      lastBad: this.lastBad,
+    };
+  }
+
+  private saveTotals(): void {
+    const s = JSON.stringify(this.totals);
+    if (s === this.totalsSaved) return;
+    this.totalsSaved = s;
+    this.setMeta('retention_totals', s);
+  }
+
+  /** Keep a delete slice at a few ms: halve it after a slow one, grow it back after a quick one. */
+  private tune(ms: number, full: boolean): void {
+    if (!full) return;
+    if (ms > 24) this.slice = Math.max(100, Math.floor(this.slice / 2));
+    else if (ms < 6) this.slice = Math.min(500, this.slice * 2);
+  }
+
+  /** A frozen stretch whose raw rows are still there and that no job is deleting. */
+  private leftover(): { venue: Venue; address: string; lo: number; hi: number } | null {
+    if (!this.pruning.size) return null;
+    const j = this.job;
+    for (const p of this.pruning.values()) {
+      if (j && j.phase === 'delete' && j.venue === p.venue && j.address === p.address) continue;
+      return p;
+    }
+    return null;
+  }
+
+  /**
+   * Delete one slice of the raw rows behind the frozen days in [lo, hi). True
+   * when none is left (the marker goes then). Only rows of days that ARE
+   * frozen go: a row that arrived since for a day of the stretch that had
+   * none stays, and the next sweep freezes its day like any other.
+   */
+  private deleteFrozen(p: { venue: Venue; address: string; lo: number; hi: number }): boolean {
+    const a = p.lo * DAY;
+    const b = p.hi * DAY;
+    const limit = this.slice;
+    const t0 = Date.now();
+    const frozen = `EXISTS (SELECT 1 FROM fill_day d WHERE d.venue = r.venue AND d.address = r.address AND d.day = CAST(r.t / ${DAY} AS INTEGER) AND d.frozen = 1)`;
+    const n = Number(this.q(
+      `DELETE FROM fills WHERE (venue, address, id) IN (
+         SELECT r.venue, r.address, r.id FROM fills r WHERE r.venue = ? AND r.address = ? AND r.t >= ? AND r.t < ? AND ${frozen} LIMIT ?)`,
+    ).run(p.venue, p.address, a, b, limit).changes);
+    this.totals.fills += n;
+    let c = 0;
+    if (n < limit) {
+      c = Number(this.q(
+        `DELETE FROM closes WHERE (venue, address, id) IN (
+           SELECT r.venue, r.address, r.id FROM closes r WHERE r.venue = ? AND r.address = ? AND r.t >= ? AND r.t < ? AND ${frozen} LIMIT ?)`,
+      ).run(p.venue, p.address, a, b, limit).changes);
+      this.totals.closes += c;
+    }
+    const more = n >= limit || c >= limit;
+    this.tune(Date.now() - t0, more);
+    if (more) return false;
+    this.q('DELETE FROM fill_prune WHERE venue = ? AND address = ?').run(p.venue, p.address);
+    this.pruning.delete(`${p.venue}|${p.address}`);
+    this.bump(p.venue, p.address);
+    return true;
+  }
+
+  /** Delete up to `limit` of a drop job's raw rows. True when none is left. */
+  private dropSlice(j: DropJob, limit: number): boolean {
+    const n = Number(this.q(
+      `DELETE FROM fills WHERE (venue, address, id) IN (SELECT venue, address, id FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
+    ).run(j.venue, j.address, j.before, limit).changes);
+    this.totals.dropped += n;
+    if (n >= limit) return false;
+    const c = Number(this.q(
+      `DELETE FROM closes WHERE (venue, address, id) IN (SELECT venue, address, id FROM closes WHERE venue = ? AND address = ? AND t < ? LIMIT ?)`,
+    ).run(j.venue, j.address, j.before, limit).changes);
+    this.totals.dropped += c;
+    return c < limit;
+  }
+
+  /** A drop job has no raw row left: the day rows of what it dropped go too. */
+  private dropDone(j: DropJob): void {
+    const k = `${j.venue}|${j.address}`;
+    this.dropping.delete(k);
+    if (j.days === 'all') {
+      this.tx(() => {
+        this.q('DELETE FROM fill_day WHERE venue = ? AND address = ?').run(j.venue, j.address);
+        this.q('DELETE FROM fill_agg WHERE venue = ? AND address = ?').run(j.venue, j.address);
+        this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ?').run(j.venue, j.address);
+      });
+      this.resetWallet(j.venue, j.address);
+    } else {
+      this.tx(() => {
+        this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day < ? AND COALESCE(frozen, 0) = 0').run(j.venue, j.address, j.keepDay);
+        this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ? AND day < ?').run(j.venue, j.address, j.keepDay);
+      });
+      // A build in flight summed those days from rows that are gone now: it starts again.
+      for (const [map, rebuild] of [[this.building, false], [this.rebuilding, true]] as const) {
+        if (!map.has(k)) continue;
+        map.delete(k);
+        this.queueAgg(j.venue, j.address, rebuild);
+      }
+      const prefix = `${k}|`;
+      const old = (d: string): boolean => d.startsWith(prefix) && Number(d.slice(prefix.length)) < j.keepDay;
+      for (const d of this.dayJobs.keys()) if (old(d)) this.dayJobs.delete(d);
+      for (const d of this.dirtyDays) if (old(d)) this.dirtyDays.delete(d);
+    }
+    this.bump(j.venue, j.address);
+  }
+
+  /**
+   * New data for a wallet whose leftovers are being dropped (it is wanted
+   * again): what is left stays. `t` = the time of the row that arrived (0 = a
+   * held range was written).
+   */
+  private keepWallet(venue: Venue, address: string, t: number): void {
+    const k = `${venue}|${address}`;
+    const j = this.dropping.get(k);
+    if (!j || t >= j.before) return;
+    this.dropping.delete(k);
+    // Old days that lost some of their rows are summed again from what is left.
+    if (j.days === 'old' && this.aggIsReady(venue, address)) this.queueAgg(venue, address, true);
+  }
+
+  private stepJob(j: FreezeJob, over: () => boolean): void {
+    if (j.phase === 'delete') {
+      if (!this.deleteFrozen(j)) return;
+      this.job = null;
+      // The wallet holds more settled days than one job takes: the sweep looks at it again, past these.
+      if (this.sweep && j.more) {
+        this.sweep.again = true;
+        this.sweep.floorDay = j.hi;
+      }
+      return;
+    }
+    let done = false;
+    while (!(done = this.step(j.scan)) && !over()) { /* next chunk */ }
+    if (!done) return;
+    if (j.stale) {
+      // Rows changed under the sum (a read in progress): sum again, a few times at most, else the next sweep.
+      if (++j.tries > 3) {
+        this.job = null;
+        return;
+      }
+      j.stale = false;
+      j.scan = this.newJob(j.venue, j.address, j.lo * DAY, j.hi * DAY);
+      return;
+    }
+    if (this.freeze(j)) j.phase = 'delete';
+    else this.job = null;
+  }
+
+  /**
+   * Write a summed stretch as final day rows and mark its raw rows for
+   * deletion, in one transaction: from here on its days are read from their
+   * day rows, whatever is left of the raw ones. False = the held range no
+   * longer vouches for the stretch.
+   */
+  private freeze(j: FreezeJob): boolean {
+    const cov = this.coverage(j.venue, j.address, j.venue === 'sodex' ? 'closes' : 'fills');
+    const r = cov ? settledDays(cov, j.lo * DAY, j.keepDay) : null;
+    if (!r || r.lo > j.lo || r.hi < j.hi) return false;
+    const days = this.finish(j.scan);
+    this.tx(() => {
+      // Live day rows of the stretch are replaced by what its raw rows say now; a row frozen earlier stays.
+      this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day >= ? AND day < ? AND COALESCE(frozen, 0) = 0').run(j.venue, j.address, j.lo, j.hi);
+      this.writeDays(j.venue, j.address, days, true);
+      this.q('INSERT OR REPLACE INTO fill_prune (venue, address, lo, hi) VALUES (?, ?, ?, ?)').run(j.venue, j.address, j.lo, j.hi);
+      this.q('DELETE FROM fill_dirty WHERE venue = ? AND address = ? AND day >= ? AND day < ?').run(j.venue, j.address, j.lo, j.hi);
+    });
+    const k = `${j.venue}|${j.address}`;
+    this.pruning.set(k, { venue: j.venue, address: j.address, lo: j.lo, hi: j.hi });
+    this.frozenTo.delete(k);
+    this.frozenTo.set(k, Math.max(this.frozenUpTo(j.venue, j.address), j.hi));
+    const prefix = `${k}|`;
+    for (let d = j.lo; d < j.hi; d++) {
+      this.dirtyDays.delete(prefix + d);
+      this.dayJobs.delete(prefix + d);
+      this.refreshedAt.delete(prefix + d);
+    }
+    this.totals.days += days.size;
+    this.bump(j.venue, j.address);
+    return true;
+  }
+
+  /** Look at the sweep's next wallet. False when every venue is done. */
+  private sweepNext(now: number): boolean {
+    const s = this.sweep!;
+    while (s.vi < VENUES.length) {
+      const venue = VENUES[s.vi]!;
+      if (!s.again) {
+        const a = this.nextWallet(venue, s.address);
+        if (a === null) {
+          s.vi++;
+          s.address = '';
+          continue;
+        }
+        s.address = a;
+        s.floorDay = 0;
+        s.wallets++;
+      }
+      s.again = false;
+      this.classify(venue, s.address, s.keepDay, now, s.floorDay);
+      return true;
+    }
+    return false;
+  }
+
+  /** The next wallet after `after` that holds raw rows (fills, or SoDEX closes). Two index seeks. */
+  private nextWallet(venue: Venue, after: string): string | null {
+    const f = (this.q('SELECT address FROM fills WHERE venue = ? AND address > ? ORDER BY address LIMIT 1').get(venue, after) as { address: string } | undefined)?.address ?? null;
+    const c = (this.q('SELECT address FROM closes WHERE venue = ? AND address > ? ORDER BY address LIMIT 1').get(venue, after) as { address: string } | undefined)?.address ?? null;
+    return f === null ? c : c === null ? f : f < c ? f : c;
+  }
+
+  /**
+   * One wallet's raw rows: fix broken times, then freeze the old days its
+   * held range says are complete (a job), drop what nothing claims, or leave
+   * it as it is.
+   */
+  private classify(venue: Venue, address: string, keepDay: number, now: number, floorDay = 0): void {
+    const k = `${venue}|${address}`;
+    if (this.dropping.has(k) || this.pruning.has(k)) return;
+    const cut = keepDay * DAY;
+    const one = (sql: string, ...p: Array<string | number>): number | null => num((this.q(sql).get(...p) as { t: number | null } | undefined)?.t);
+    let minF = this.oldestRaw(venue, address);
+    if (minF !== null && minF < MIN_ROW_T) {
+      this.repairTimes(venue, address);
+      minF = this.oldestRaw(venue, address);
+    }
+    const minC = one('SELECT MIN(t) AS t FROM closes WHERE venue = ? AND address = ?', venue, address);
+    const minT = minF === null ? minC : minC === null ? minF : Math.min(minF, minC);
+    if (minT === null) return;
+    if (!this.q('SELECT 1 AS x FROM coverage WHERE venue = ? AND address = ? LIMIT 1').get(venue, address)) {
+      // Never indexed: stream prints of a wallet no read landed for. Nothing vouches for
+      // these rows, so none is frozen. All go once the wallet has been quiet for two weeks
+      // (nothing tracks it any more), else the days older than the retention.
+      const newest = Math.max(
+        one('SELECT MAX(t) AS t FROM fills WHERE venue = ? AND address = ?', venue, address) ?? 0,
+        one('SELECT MAX(t) AS t FROM closes WHERE venue = ? AND address = ?', venue, address) ?? 0,
+      );
+      if (newest < now - UNINDEXED_KEEP_MS) this.dropping.set(k, { venue, address, before: END, days: 'all', keepDay: 0 });
+      else if (minT < cut) this.dropping.set(k, { venue, address, before: cut, days: 'old', keepDay });
+      // No old raw row: no old day row either (a stop between the last slice and their removal leaves some).
+      else this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day < ? AND COALESCE(frozen, 0) = 0').run(venue, address, keepDay);
+      return;
+    }
+    if (minT >= cut) return;
+    const cov = this.coverage(venue, address, venue === 'sodex' ? 'closes' : 'fills');
+    const r = cov ? settledDays(cov, minT, keepDay) : null;
+    if (!r) return;
+    // The first raw row inside the settled stretch (days before it are frozen already, or empty).
+    const from = Math.max(r.lo, floorDay) * DAY;
+    const to = r.hi * DAY;
+    if (from >= to) return;
+    const f = one('SELECT MIN(t) AS t FROM fills WHERE venue = ? AND address = ? AND t >= ? AND t < ?', venue, address, from, to);
+    const c = one('SELECT MIN(t) AS t FROM closes WHERE venue = ? AND address = ? AND t >= ? AND t < ?', venue, address, from, to);
+    const first = f === null ? c : c === null ? f : Math.min(f, c);
+    if (first === null) return;
+    const lo = Math.floor(first / DAY);
+    const hi = Math.min(r.hi, lo + JOB_DAYS);
+    this.job = { venue, address, lo, hi, keepDay, scan: this.newJob(venue, address, lo * DAY, hi * DAY), phase: 'scan', stale: false, tries: 0, more: hi < r.hi };
+  }
+
+  /**
+   * Stored fills with a time no venue can have produced (the insert guard
+   * keeps new ones out). An Arcus fill takes the time of the nearest fill by
+   * trade id in the same market: Arcus numbers trades in order, and answered
+   * `createdAt: 0` for 13 fills of one burst whose neighbours are 265 ms
+   * apart. Anything else cannot be placed and goes.
+   */
+  private repairTimes(venue: Venue, address: string): void {
+    const bad = this.q('SELECT id, symbol FROM fills WHERE venue = ? AND address = ? AND t < ? LIMIT 2000').all(venue, address, MIN_ROW_T) as Array<{ id: string; symbol: string }>;
+    if (!bad.length) return;
+    const at = this.q('SELECT t, symbol FROM fills WHERE venue = ? AND address = ? AND id = ?');
+    const moved: number[] = [];
+    this.tx(() => {
+      for (const b of bad) {
+        let t: number | null = null;
+        const n = Number(b.id);
+        if (venue === 'arcus' && Number.isSafeInteger(n)) {
+          for (let d = 1; d <= 100 && t === null; d++) {
+            for (const id of [n - d, n + d]) {
+              const r = at.get(venue, address, String(id)) as { t: number; symbol: string } | undefined;
+              if (r && r.symbol === b.symbol && r.t >= MIN_ROW_T) {
+                t = r.t;
+                break;
+              }
+            }
+          }
+        }
+        // A frozen day cannot take another row.
+        if (t !== null && this.frozenDay(venue, address, Math.floor(t / DAY))) t = null;
+        if (t === null) {
+          this.q('DELETE FROM fills WHERE venue = ? AND address = ? AND id = ?').run(venue, address, b.id);
+          this.totals.unrepairable++;
+        } else {
+          this.q('UPDATE fills SET t = ? WHERE venue = ? AND address = ? AND id = ?').run(t, venue, address, b.id);
+          this.totals.repaired++;
+          moved.push(t);
+        }
+      }
+      // The day rows those times made (1 January 1970 and the like).
+      this.q('DELETE FROM fill_day WHERE venue = ? AND address = ? AND day < ? AND COALESCE(frozen, 0) = 0').run(venue, address, Math.floor(MIN_ROW_T / DAY));
+    });
+    for (const t of moved) this.markDay(venue, address, t);
+    this.bump(venue, address);
+  }
+
+  /**
+   * Hand free pages back to the OS, 1 MB at a time, keeping a reserve for the
+   * next inserts. Only a file created with auto_vacuum = INCREMENTAL can; any
+   * other reuses its free pages and keeps its size (see compact.ts). Returns
+   * the pages handed back.
+   */
+  reclaimStep(reservePages = FREE_RESERVE_PAGES, maxPages = RECLAIM_PAGES): number {
+    if (this.readOnly || this.autoVacuum !== 2) return 0;
+    const free = Number((this.q('PRAGMA freelist_count').get() as { freelist_count?: number } | undefined)?.freelist_count) || 0;
+    const n = Math.min(maxPages, free - reservePages);
+    if (n <= 0) return 0;
+    this.db.exec(`PRAGMA incremental_vacuum(${n})`);
+    this.totals.reclaimedPages += n;
+    return n;
   }
 
   /** Addresses that have any coverage row (i.e. were indexed at some point). */
@@ -1145,11 +2252,21 @@ export class IndexStore {
     });
   }
 
-  /** Stream trades of one account since `fromHour` (hour rows) or `fromDay` (day rows). */
+  /**
+   * Stream trades of one account since `fromHour` (hour rows) or `fromDay` (day rows).
+   *
+   * Through the per-account index, by name. Left to itself SQLite reads the
+   * primary key instead (venue, hour >= ?) and tests every row of EVERY
+   * account in the window for the one asked about: 766k rows per call on
+   * Hyperliquid, ~1 s each with the file out of memory against 3 ms this way
+   * (measured 2026-10-02) - and a board walk asks for a candidate at a time,
+   * without yielding. That was the multi-second stall in every Hyperliquid
+   * board, and it grew with the table.
+   */
   activityTrades(venue: Venue, acct: string, from: { hour: number } | { day: number }): number {
     const r = ('hour' in from
-      ? this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_hour WHERE venue = ? AND acct = ? AND hour >= ?').get(venue, acct, from.hour)
-      : this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_day WHERE venue = ? AND acct = ? AND day >= ?').get(venue, acct, from.day)) as { n: number };
+      ? this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_hour INDEXED BY activity_hour_acct WHERE venue = ? AND acct = ? AND hour >= ?').get(venue, acct, from.hour)
+      : this.q('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_day INDEXED BY activity_day_acct WHERE venue = ? AND acct = ? AND day >= ?').get(venue, acct, from.day)) as { n: number };
     return r.n;
   }
 
@@ -1178,12 +2295,29 @@ export class IndexStore {
    * rows and all-time snapshots before `beforeDay`). Returns how many went: the
    * caller repeats while it is not 0, a few ms at a time.
    */
-  pruneActivityChunk(beforeHour: number, beforeDay: number, limit = 5_000): number {
+  pruneActivityChunk(beforeHour: number, beforeDay: number, limit = 5_000, cum?: { beforeDay: number; yearStartDay: number }): number {
     if (this.readOnly) return 0;
     let n = 0;
-    n += Number(this.q('DELETE FROM activity_hour WHERE (venue, hour, acct) IN (SELECT venue, hour, acct FROM activity_hour WHERE hour < ? LIMIT ?)').run(beforeHour, limit).changes);
-    n += Number(this.q('DELETE FROM activity_day WHERE (venue, day, acct) IN (SELECT venue, day, acct FROM activity_day WHERE day < ? LIMIT ?)').run(beforeDay, limit).changes);
-    n += Number(this.q('DELETE FROM cum_pnl_day WHERE (venue, day, address) IN (SELECT venue, day, address FROM cum_pnl_day WHERE day < ? LIMIT ?)').run(beforeDay, limit).changes);
+    // Per venue: each table's key starts with it, so "older than" is a range of the key.
+    // (Without it every call read the whole table to find nothing: seconds once they are large.)
+    const hour = this.q('DELETE FROM activity_hour WHERE (venue, hour, acct) IN (SELECT venue, hour, acct FROM activity_hour WHERE venue = ? AND hour < ? LIMIT ?)');
+    const day = this.q('DELETE FROM activity_day WHERE (venue, day, acct) IN (SELECT venue, day, acct FROM activity_day WHERE venue = ? AND day < ? LIMIT ?)');
+    const snap = this.q('DELETE FROM cum_pnl_day WHERE (venue, day, address) IN (SELECT venue, day, address FROM cum_pnl_day WHERE venue = ? AND day > ? AND day < ? LIMIT ?)');
+    for (const venue of VENUES) {
+      n += Number(hour.run(venue, beforeHour, limit).changes);
+      n += Number(day.run(venue, beforeDay, limit).changes);
+      const before = cum?.beforeDay ?? beforeDay;
+      // All-time snapshots are read at two points only: the 90d window's start, and the
+      // newest one at or before 1 January (ytd). That one outlives the rest.
+      const anchor = cum
+        ? num((this.q('SELECT MAX(day) AS d FROM cum_pnl_day WHERE venue = ? AND day <= ?').get(venue, cum.yearStartDay) as { d: number | null } | undefined)?.d)
+        : null;
+      if (anchor === null || anchor >= before) n += Number(snap.run(venue, -1, before, limit).changes);
+      else {
+        n += Number(snap.run(venue, -1, anchor, limit).changes);
+        n += Number(snap.run(venue, anchor, before, limit).changes);
+      }
+    }
     return n;
   }
 
@@ -1328,13 +2462,20 @@ export class IndexStore {
   cohortMembers(venue: Venue): Map<string, CohortMemberRow> {
     const out = new Map<string, CohortMemberRow>();
     for (const r of this.q('SELECT address, pnl, equity, label, pnl_1d, pnl_7d, pnl_30d FROM cohort_member WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
-      out.set(r.address as string, {
-        address: r.address as string,
-        pnl: num(r.pnl), equity: num(r.equity), label: typeof r.label === 'string' ? r.label : null,
-        pnl1d: num(r.pnl_1d), pnl7d: num(r.pnl_7d), pnl30d: num(r.pnl_30d),
-      });
+      out.set(r.address as string, memberRow(r));
     }
     return out;
+  }
+
+  /**
+   * cohortMembers a page at a time, in the same (address) order: `limit` rows
+   * after `after` ('' starts). For a reader that lets other work run between
+   * pages (indexer/read.ts): one statement over a venue's 170k members holds
+   * the thread for a second.
+   */
+  cohortMembersPage(venue: Venue, after: string, limit: number): CohortMemberRow[] {
+    return (this.q('SELECT address, pnl, equity, label, pnl_1d, pnl_7d, pnl_30d FROM cohort_member WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
+      .all(venue, after, limit) as Array<Record<string, unknown>>).map(memberRow);
   }
 
   /** Every PnL a venue's window list gave the index (address -> PnL). */
@@ -1366,20 +2507,24 @@ export class IndexStore {
   }
 
   /** Every wallet's book on a venue: positions as the stream keeps them. */
-  cohortBooks(venue: Venue): Map<string, { equity: number | null; positions: Array<{ symbol: string; szi: number; entry: number | null }>; at: number }> {
-    const out = new Map<string, { equity: number | null; positions: Array<{ symbol: string; szi: number; entry: number | null }>; at: number }>();
+  cohortBooks(venue: Venue): Map<string, CohortBookRow> {
+    const out = new Map<string, CohortBookRow>();
     for (const r of this.q('SELECT address, equity, positions, at FROM cohort_book WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
-      let positions: Array<{ symbol: string; szi: number; entry: number | null }> = [];
-      try {
-        const x = JSON.parse(String(r.positions ?? '[]'));
-        if (Array.isArray(x)) {
-          positions = x.flatMap((e) => (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number'
-            ? [{ symbol: e[0], szi: e[1], entry: typeof e[2] === 'number' ? e[2] : null }] : []));
-        }
-      } catch { /* none */ }
-      out.set(r.address as string, { equity: num(r.equity), positions, at: Number(r.at) || 0 });
+      out.set(r.address as string, bookRow(r));
     }
     return out;
+  }
+
+  /** One wallet's book on a venue (null if it was never read). */
+  cohortBook(venue: Venue, address: string): CohortBookRow | null {
+    const r = this.q('SELECT equity, positions, at FROM cohort_book WHERE venue = ? AND address = ?').get(venue, address) as Record<string, unknown> | undefined;
+    return r ? bookRow(r) : null;
+  }
+
+  /** cohortBooks a page at a time, in the same (address) order (see cohortMembersPage). */
+  cohortBooksPage(venue: Venue, after: string, limit: number): Array<[string, CohortBookRow]> {
+    return (this.q('SELECT address, equity, positions, at FROM cohort_book WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
+      .all(venue, after, limit) as Array<Record<string, unknown>>).map((r) => [r.address as string, bookRow(r)]);
   }
 
   putCohortMarks(rows: ReadonlyArray<[string, number]>, at: number): void {

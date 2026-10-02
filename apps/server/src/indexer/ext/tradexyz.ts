@@ -80,12 +80,19 @@ export class TradexyzVenue implements ExtVenue {
     });
   }
 
-  refresh(now: number): void {
+  async refresh(now: number): Promise<void> {
     const store = this.ctx.store;
-    const since = this.ctx.streamSince('tradexyz');
     const known = new Set(store.indexedAddresses('tradexyz'));
     const books = store.topCohortBooks('tradexyz', TOP_BOOKS);
     void spanCovers;
+    // Hand the loop back every 40 ms: a trader's sum is a scan of its window's first day,
+    // and summing every trader for every window in one go held the loop for seconds.
+    let last = Date.now();
+    const pause = async (): Promise<void> => {
+      if (Date.now() - last < 40) return;
+      await new Promise<void>((r) => setImmediate(r));
+      last = Date.now();
+    };
     for (const window of INDEX_WINDOWS) {
       if (now - (this.computedAt[window] ?? 0) < EVERY_MS) continue;
       const from = windowStart(window, now);
@@ -96,24 +103,27 @@ export class TradexyzVenue implements ExtVenue {
       const rows: Array<{ address: string; pnl: number; volume: number | null }> = [];
       const order = [...new Set([...active, ...books, ...known])];
       const wanted = new Set([...active, ...books]);
-      order.forEach((address, i) => {
+      for (let i = 0; i < order.length; i++) {
+        const address = order[i]!;
         const cov = store.coverage('tradexyz', address, 'fills');
         // Realised PnL needs REST fills (stream prints carry no closedPnl or fee), so
         // the stream does not stand in here; a history cut by HL's 10k cap does not either.
-        if (cov?.capped && cov.fromT > from) return;
+        if (cov?.capped && cov.fromT > from) continue;
         const back = !!cov && (cov.fromT <= from || cov.exhausted);
         if (!back || now - cov!.restAt > fresh) {
           // Read back to the start of all time once: one pass then serves every window.
           // Above the HL "any"-board histories, below the HL trade checks.
           if (wanted.has(address)) this.queueRead(address, 0, 5_900 - Math.min(400, i), 6);
-          return;
+          continue;
         }
-        const r = store.realized('tradexyz', address, from);
+        // Whole days from the day rows (they outlive the raw fills), the window's first day from its fills.
+        const r = await store.realizedAsync('tradexyz', address, from, pause);
         if (r.fills > 0) {
           rows.push({ address, pnl: r.pnl, volume: r.volume });
           this.queueAccountValue(address, 5_800);
         }
-      });
+        await pause();
+      }
       store.putPnl('tradexyz', window, rows, now, now);
       this.computedAt[window] = now;
     }

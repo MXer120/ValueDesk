@@ -18,12 +18,27 @@
  * The venue's own market makers and system accounts are left out: they are
  * ~90 % of all activity (research 01 §3) and a hedge by the house market maker
  * is not a trader anyone can copy. The ids are the ones research 01 names.
+ *
+ * WHAT THIS COSTS SODEX, WHATEVER THE NUMBER OF VISITORS. A request reads the
+ * ring buffer; it never causes a request of its own. One feed serves everyone:
+ *   - one socket, one `trade` subscription per perps symbol (98 of the 1,000
+ *     an IP may hold; the indexer's own stream is a second socket);
+ *   - the symbol list: one gateway read when the feed starts and one per
+ *     30 minutes while it runs. A start that fails is not tried again for
+ *     START_RETRY_MS, so an outage costs at most two attempts a minute (each
+ *     the gateway client's usual 4 tries), not one per visitor;
+ *   - taker addresses: from the index first (its SoDEX lists pair ids with
+ *     wallets - a key lookup in a file), and only for ids it does not know
+ *     from the bulk resolver, which sends at most one call per 2 s for up to
+ *     500 ids: 30 a minute at the very most, and 4 a minute while that host
+ *     fails (resolver.ts).
  */
+import { reader } from '../../indexer/reader.js';
 import { Upstream } from '../../sodex/ws.js';
 import { symbols } from '../../sodex/symbols.js';
 import type { WhaleTrade } from '../types.js';
 import { WhaleAggregator, takerOf, type WhaleAgg, type WsPrint } from './mappers.js';
-import { prefetchIds, resolveIds } from './resolver.js';
+import { knownAddress, prefetchIds, resolveIds, seedAddress } from './resolver.js';
 
 /** Smallest trade kept. Requests with a lower `minUsd` still only see trades from here up. */
 export const WHALE_FLOOR_USD = 10_000;
@@ -31,6 +46,8 @@ const RING_MAX = 2_000;
 const IDLE_STOP_MS = 30 * 60_000;
 const SYMBOL_REFRESH_MS = 30 * 60_000;
 const RESOLVE_WAIT_MS = 2_500;
+/** A start that failed is not tried again for this long, whoever asks meanwhile. */
+export const START_RETRY_MS = 30_000;
 
 /**
  * 998 mirror/bridge withdrawal account, 999 cross-engine id, 1001 / 1002 / 23342
@@ -50,6 +67,35 @@ const subscribed = new Set<string>();
 let printsSeen = 0;
 let startedAt = 0;
 let lastError: string | null = null;
+let startFailedAt = 0;
+let startError: unknown = null;
+/** Ids the index did not know, and when it was asked: not looked up again on every request. */
+const notInIndex = new Map<number, number>();
+const INDEX_MISS_MS = 60_000;
+
+/**
+ * Pair these account ids with the wallets the index already knows them by
+ * (its SoDEX lists): a key lookup in a file, no request to SoDEX. What is
+ * left goes to the bulk resolver.
+ */
+export function seedFromIndex(ids: Iterable<number>): void {
+  let s: ReturnType<typeof reader> = null;
+  const now = Date.now();
+  try {
+    for (const id of ids) {
+      if (!Number.isInteger(id) || id <= 0 || knownAddress(id)) continue;
+      if (now - (notInIndex.get(id) ?? 0) < INDEX_MISS_MS) continue;
+      s ??= reader();
+      if (!s) return;
+      const a = s.accountAddress('sodex', id);
+      if (a) seedAddress(id, a);
+      else {
+        if (notInIndex.size > 10_000) notInIndex.clear();
+        notInIndex.set(id, now);
+      }
+    }
+  } catch { /* the index only saves requests here: the resolver still answers */ }
+}
 
 function onPush(msg: { channel?: string; data?: unknown }): void {
   if (msg?.channel !== 'trade' || !Array.isArray(msg.data)) return;
@@ -67,7 +113,9 @@ function drain(now = Date.now(), force = false): void {
   if (!done.length) return;
   ring.push(...done);
   if (ring.length > RING_MAX) ring.splice(0, ring.length - RING_MAX);
-  prefetchIds(done.map((a) => a.accountId));
+  const ids = done.map((a) => a.accountId);
+  seedFromIndex(ids);
+  prefetchIds(ids);
 }
 
 function stop(): void {
@@ -100,6 +148,8 @@ async function ensureFeed(): Promise<void> {
     return;
   }
   if (starting) return starting;
+  // A start that just failed is not repeated for every request that follows it.
+  if (startError && Date.now() - startFailedAt < START_RETRY_MS) throw startError;
   starting = (async () => {
     const list = await perpsSymbols();
     if (!list.length) throw new Error('SoDEX returned no perps symbols to subscribe to');
@@ -118,10 +168,27 @@ async function ensureFeed(): Promise<void> {
       if (Date.now() - lastUsed > IDLE_STOP_MS) stop();
     }, 1_000);
     ticker.unref?.();
-  })().finally(() => {
+    startError = null;
+  })().catch((e: unknown) => {
+    startFailedAt = Date.now();
+    startError = e ?? new Error('SoDEX whale feed failed to start');
+    lastError = e instanceof Error ? e.message : String(e);
+    throw e;
+  }).finally(() => {
     starting = null;
   });
   return starting;
+}
+
+/** Tests: the feed as it is before its first use (closes the socket if one is open). */
+export function resetWhaleFeed(): void {
+  stop();
+  ring.length = 0;
+  notInIndex.clear();
+  startFailedAt = 0;
+  startError = null;
+  lastError = null;
+  symbolsCheckedAt = 0;
 }
 
 export const whaleFeedStats = () => ({
@@ -144,10 +211,9 @@ export async function whales(minUsd: number, limit: number): Promise<WhaleTrade[
   for (let i = ring.length - 1; i >= 0 && picked.length < limit; i--) {
     if (ring[i]!.notional >= floor) picked.push(ring[i]!);
   }
-  const addresses = await resolveIds(
-    picked.map((a) => a.accountId),
-    RESOLVE_WAIT_MS,
-  );
+  const ids = picked.map((a) => a.accountId);
+  seedFromIndex(ids);
+  const addresses = await resolveIds(ids, RESOLVE_WAIT_MS);
   return picked.map((a) => ({
     venue: 'sodex',
     time: a.time,

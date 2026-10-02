@@ -53,6 +53,7 @@ import {
   INDEX_WINDOWS,
   SIDES,
   windowStart,
+  yearStartUtc,
   type BoardFilter,
   type Side,
 } from './windows.js';
@@ -161,6 +162,20 @@ const STREAM_KINDS: Record<Venue, HistoryKind[]> = { hyperliquid: ['fills'], tra
 /** Hour buckets serve windows up to this long; longer ones use day buckets. */
 const HOUR_WINDOWS: ReadonlySet<BoardWindow> = new Set(['1d', '7d', '30d']);
 const HOUR_RETAIN = 36 * 24;
+/**
+ * Daily all-time PnL snapshots kept: the 90d window reads the one 90 days
+ * back (ten days of slack for days the indexer was down), ytd the one at 1
+ * January, which is kept apart. They were kept 400 days: ~150k rows a day.
+ */
+const CUM_KEEP_DAYS = 100;
+/**
+ * Retention (store.pruneStep): raw fills and closes older than the kept days
+ * are frozen into their day rows and deleted, this many ms of work a second.
+ * Not in the first minute after a start.
+ */
+const PRUNE_EVERY_MS = 1_000;
+const PRUNE_BUDGET_MS = 20;
+const PRUNE_START_MS = 60_000;
 
 /** Each venue's netting pool: this many from each end of its PnL ranking. */
 const POOL_EACH = 300;
@@ -376,7 +391,31 @@ export class Indexer {
     };
     every(FLUSH_MS, () => this.flush(), 'flush');
     // Traders' day aggregates build in the background, ~40 ms at a time.
-    every(250, () => { this.store.buildAggregates(40); }, 'aggregates');
+    // (Both are synchronous: an error is noted, never thrown out of the timer - that would end the worker.)
+    let aggTick = Date.now();
+    every(250, () => {
+      // Re-sums (housekeeping) run only in steps that start on time: a late step means the loop is busy.
+      const late = Date.now() - aggTick - 250;
+      aggTick = Date.now();
+      try {
+        this.store.buildAggregates(40, late > 150 ? 0 : 25);
+      } catch (e) {
+        this.lastError = `aggregates: ${String(e)}`;
+      }
+    }, 'aggregates');
+    // Retention: a slice of pruning a second, once the start has settled.
+    const prune = setTimeout(() => {
+      if (this.stopped) return;
+      every(PRUNE_EVERY_MS, () => {
+        try {
+          this.store.pruneStep(PRUNE_BUDGET_MS, this.now());
+        } catch (e) {
+          this.lastError = `retention: ${String(e)}`;
+        }
+      }, 'prune');
+    }, PRUNE_START_MS);
+    prune.unref?.();
+    this.timers.push(prune);
     every(REBUILD_MS, () => this.rebuild(), 'rebuild');
     let tick = Date.now();
     every(500, () => {
@@ -494,6 +533,7 @@ export class Indexer {
       sockets: Object.fromEntries(VENUES.map((v) => [v, this.socketOf(v)])),
       gaps: this.gaps,
       aggregates: this.store.aggBacklog,
+      retention: this.store.retention(this.now()),
       lanes: { hl: lane(this.hl), sgw: lane(this.sgw), strades: lane(this.strades), sdata: lane(this.sdata) },
       venues: Object.fromEntries([...this.ext].map(([v, x]) => [v, x.status()])),
       tracked: {
@@ -1007,8 +1047,9 @@ export class Indexer {
   private pruneDue = true;
   private async pruneSome(now: number): Promise<void> {
     if (!this.pruneDue) return;
+    const cum = { beforeDay: dayOf(now) - CUM_KEEP_DAYS, yearStartDay: dayOf(yearStartUtc(now)) };
     for (let k = 0; k < 20; k++) {
-      if (!this.store.pruneActivityChunk(hourOf(now) - HOUR_RETAIN, dayOf(now) - 400, 5_000)) {
+      if (!this.store.pruneActivityChunk(hourOf(now) - HOUR_RETAIN, dayOf(now) - 400, 5_000, cum)) {
         this.pruneDue = false;
         return;
       }

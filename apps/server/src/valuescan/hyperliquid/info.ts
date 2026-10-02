@@ -11,7 +11,8 @@
  * and the whale feed's coin ranking all spend the same budget, and so does any
  * browser tab on this machine that queries HL directly. One process-wide bucket
  * is the only place that budget can be enforced. We default to 1,000/min so
- * there is headroom for those other callers.
+ * there is headroom for those other callers - and to 200/min in a process that
+ * only serves the API beside the indexer (hlWeightPerMin below).
  *
  * Weights (documented): clearinghouseState, spotClearinghouseState, l2Book,
  * allMids, orderStatus, exchangeStatus = 2; userRole = 60; every other info
@@ -20,18 +21,50 @@
  * known after the response. That extra is charged afterwards (see
  * WeightBudget.charge), so it delays the NEXT requests, not this one.
  */
-import { envOf } from '../env.js';
+import { apiOnly, envOf } from '../env.js';
 
 export const HL_INFO_URL = (envOf('VALUESCAN_HL_INFO_URL')?.trim() || 'https://api.hyperliquid.xyz/info').replace(
   /\/+$/,
   '',
 );
 
-/** Our share of HL's 1,200 weight/min/IP. Env-overridable, clamped to HL's limit. */
-export const HL_WEIGHT_PER_MIN = (() => {
-  const n = Number.parseInt(envOf('VALUESCAN_HL_WEIGHT_PER_MIN') ?? '', 10);
-  return Number.isFinite(n) && n > 0 ? Math.min(1200, Math.max(60, n)) : 1000;
-})();
+/** HL's own limit: REST weight per minute per IP. */
+export const HL_LIMIT_PER_MIN = 1200;
+/** The share of a client that is its address's main Hyperliquid reader. */
+export const HL_WEIGHT_DEFAULT = 1000;
+/** The share of a process that only serves the API (env.ts apiOnly). */
+export const HL_WEIGHT_API_ONLY = 200;
+
+/**
+ * This client's share of HL's 1,200 weight/min/IP.
+ *
+ *   VALUESCAN_HL_WEIGHT_PER_MIN set   that, clamped to 60..1,200 - for every role.
+ *   a browser, the dev server         1,000: the address's main reader (the dev
+ *                                     server's indexer thread has lanes of its own).
+ *   a process that only serves the    200. The indexer reads Hyperliquid from the
+ *   API (VALUESCAN_INDEXER=0 or       same address under its own lanes - 500 for the
+ *   VALUESCAN_HOSTED=1)               boards (VALUESCAN_INDEX_HL_WEIGHT, at most 900)
+ *                                     and 200 for the cohort books
+ *                                     (VALUESCAN_INDEX_HL_COHORT) - and those plus
+ *                                     this must fit 1,200: 900 by default. It used
+ *                                     to be 1,000 here too, which with the indexer's
+ *                                     700 is 1,700 from one address. Such a process
+ *                                     needs next to nothing: positioning is answered
+ *                                     from the index, and the whale feed's coin
+ *                                     ranking is 40 weight an hour.
+ *   the indexer itself (`indexer`)    1,000, whatever the two switches say (one env
+ *                                     file often serves both processes): there the
+ *                                     lanes are the limit, and this client must not
+ *                                     hold them below it (indexer/worker.ts).
+ */
+export function hlWeightPerMin(get: (name: string) => string | undefined = envOf, indexer = false): number {
+  const n = Number.parseInt(get('VALUESCAN_HL_WEIGHT_PER_MIN') ?? '', 10);
+  if (Number.isFinite(n) && n > 0) return Math.min(HL_LIMIT_PER_MIN, Math.max(60, n));
+  return !indexer && apiOnly(get) ? HL_WEIGHT_API_ONLY : HL_WEIGHT_DEFAULT;
+}
+
+/** What this process's shared client starts with (client.ts). */
+export const HL_WEIGHT_PER_MIN = hlWeightPerMin();
 
 const WEIGHT_2 = new Set(['clearinghouseState', 'spotClearinghouseState', 'l2Book', 'allMids', 'orderStatus', 'exchangeStatus']);
 
@@ -209,7 +242,7 @@ const CACHE_MAX = 2000;
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 export class HlInfoClient implements InfoLike {
-  readonly budget: WeightBudget;
+  budget: WeightBudget;
   private cache = new Map<string, { at: number; ttl: number; value: unknown }>();
   private inflight = new Map<string, Promise<unknown>>();
 
@@ -222,6 +255,15 @@ export class HlInfoClient implements InfoLike {
     // Half a minute of burst: enough for a profile (about 150 weight) plus a
     // few clearinghouse reads, far from HL's full 1,200.
     this.budget = new WeightBudget(perMin, Math.round(perMin / 2));
+  }
+
+  /**
+   * Give this client another share of HL's limit, with a fresh bucket. For the
+   * indexer process at its start (indexer/worker.ts), before it has sent anything.
+   */
+  resize(perMin: number): void {
+    const n = Math.min(HL_LIMIT_PER_MIN, Math.max(60, Math.round(perMin)));
+    if (n !== this.budget.perMin) this.budget = new WeightBudget(n, Math.round(n / 2));
   }
 
   async post<T>(body: InfoBody, o: InfoOpts = {}): Promise<T> {
@@ -264,7 +306,12 @@ export class HlInfoClient implements InfoLike {
     const w = baseWeight(body.type);
     for (let attempt = 1; ; attempt++) {
       if (o.background) {
-        for (let wait = this.budget.msUntil(w + BACKGROUND_HEADROOM); wait > 0; wait = this.budget.msUntil(w + BACKGROUND_HEADROOM)) {
+        // Never more than the bucket can hold: with a small share (an API-only
+        // process: 100 of burst) "the request plus 150 of headroom" is a level
+        // the bucket never reaches, and this wait would never end. There a
+        // background request waits for a full bucket instead.
+        const need = Math.min(w + BACKGROUND_HEADROOM, this.budget.capacity);
+        for (let wait = this.budget.msUntil(need); wait > 0; wait = this.budget.msUntil(need)) {
           await this.sleepImpl(Math.min(wait, 2000));
         }
       }

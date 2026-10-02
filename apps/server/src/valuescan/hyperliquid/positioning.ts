@@ -3,18 +3,32 @@
  *
  * WHO. The top 100 and the lowest 100 by 30-day PnL. About 200 accounts.
  *
- * HOW. clearinghouseState (weight 2) for each of them on the default dex and
- * on the HIP-3 dex "xyz", so 200 traders cost 800 weight per sweep. Requests
- * run a few at a time with background priority (info.ts), so a sweep only
- * spends weight the interactive pages are not using. The result is cached for
- * CACHE_MS; after that, callers get the cached rows at once and a new sweep
- * starts behind them (stale-while-revalidate). Only the very first call waits.
+ * HOW, FIRST: THE INDEX. The indexer keeps a book for each of those wallets,
+ * moved by the wallet's own prints on the trade stream (indexer/held.ts), on
+ * the default dex and on the HIP-3 dex "xyz". Summing them is a few hundred
+ * key lookups in a file and no request to Hyperliquid, so it costs the same
+ * for one visitor as for ten thousand. The answer is reused for INDEX_TTL_MS.
+ *
+ * HOW, OTHERWISE: A SWEEP. Only where the index cannot answer yet (no 30-day
+ * board, or books for fewer than half its wallets) AND this process is the
+ * single-process dev server: clearinghouseState (weight 2) for each wallet on
+ * both dexes, so 200 traders cost 800 weight per sweep. Requests run a few at
+ * a time with background priority (info.ts), so a sweep only spends weight the
+ * interactive pages are not using. The result is cached for CACHE_MS; after
+ * that, callers get the cached rows at once and a new sweep starts behind them
+ * (stale-while-revalidate). Only the very first call waits.
+ *
+ * A process that only serves the API (env.ts apiOnly: next to the indexer, or
+ * public) never sweeps: 800 weight whenever a visitor finds the cache expired
+ * would come out of the address the indexer reads from. There, "the index
+ * cannot answer yet" is the answer (NotAvailable).
  *
  * LIMITS. clearinghouseState is per account, while leaderboard rows aggregate
  * sub-accounts, so a master that trades only through sub-accounts shows no
  * positions here. Covering those would need `subAccounts` (weight 20 each).
+ * The index's books have the same reach (they start from the same read).
  */
-import type { Positioning, VsPosition } from '../types.js';
+import { NotAvailable, type Positioning, type VsPosition } from '../types.js';
 import { mapLimit, type InfoLike } from './info.js';
 import type { HlLeaderboardStore } from './leaderboard.js';
 import { aggregatePositioning, mapPositions, symbolMatches } from './mappers.js';
@@ -25,23 +39,57 @@ export const TRACKED_WORST = 100;
 const DEXES = ['', 'xyz'];
 const CACHE_MS = 3 * 60_000;
 const CONCURRENCY = 6;
+/** The index's answer is reused this long (the indexer writes its books every 10 s). */
+export const INDEX_TTL_MS = 15_000;
+/** Books for a smaller share of the boards' wallets than this are not published. */
+const MIN_COVERAGE = 0.5;
+
+/** Where the positions come from when the index holds them (indexer/held.ts). */
+export interface IndexSource {
+  /** Positions per board wallet the index has a book for; null = no index, or no 30-day board yet. */
+  holdings(): { traders: VsPosition[][]; tracked: number; held: number } | null;
+  /** This process must not sweep the venue itself (env.ts apiOnly). */
+  only(): boolean;
+}
 
 export class HlPositioning {
   private rows: Positioning[] | null = null;
   private at = 0;
   private running: Promise<Positioning[]> | null = null;
+  private fromIndex: { at: number; rows: Positioning[] } | null = null;
 
   constructor(
     private readonly info: InfoLike,
     private readonly leaderboard: Pick<HlLeaderboardStore, 'snapshot'>,
     private readonly now: () => number = Date.now,
+    private readonly index?: IndexSource,
   ) {}
 
   async get(symbol?: string): Promise<Positioning[]> {
-    let rows = this.rows;
-    if (!rows) rows = await this.sweep();
-    else if (this.now() - this.at >= CACHE_MS) void this.sweep().catch(() => {});
+    const rows = this.indexRows() ?? (await this.swept());
     return symbol ? rows.filter((r) => symbolMatches(r.symbol, symbol)) : rows;
+  }
+
+  /** The index's books for the boards' wallets, summed: no request to Hyperliquid. */
+  private indexRows(): Positioning[] | null {
+    if (!this.index) return null;
+    const now = this.now();
+    if (this.fromIndex && now - this.fromIndex.at < INDEX_TTL_MS) return this.fromIndex.rows;
+    const h = this.index.holdings();
+    if (!h || !h.tracked || h.held < h.tracked * MIN_COVERAGE) return null;
+    this.fromIndex = { at: now, rows: aggregatePositioning(h.traders) };
+    return this.fromIndex.rows;
+  }
+
+  /** The sweep's rows (see the header): never in a process that only serves the API. */
+  private async swept(): Promise<Positioning[]> {
+    if (this.index?.only()) {
+      throw new NotAvailable("Hyperliquid positioning is read from the index, which does not hold the 30-day boards' wallets and their positions yet");
+    }
+    const rows = this.rows;
+    if (!rows) return this.sweep();
+    if (this.now() - this.at >= CACHE_MS) void this.sweep().catch(() => {});
+    return rows;
   }
 
   private sweep(): Promise<Positioning[]> {
