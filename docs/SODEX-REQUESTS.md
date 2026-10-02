@@ -6,8 +6,9 @@ Things only SoDEX can change. Each is written so it can be sent as it stands.
 
 **Why we ask.** A builder fee is set per order by whoever builds the order. A frontend can make sure its own
 code always attaches it, but a user who edits that code, or signs with the same key from their own script,
-can leave the builder out and SoDEX accepts the order. Nothing in the order record says which key or
-application sent it, so the builder cannot even tell afterwards. See [BUILDER-TIERS.md](BUILDER-TIERS.md) §1.
+can leave the builder out and SoDEX accepts the order. The builder can find out afterwards - the public
+explorer returns each order's signed action, so the signing key can be recovered - but it cannot prevent it.
+See [BUILDER-TIERS.md](BUILDER-TIERS.md) §1.
 
 **What we ask for.** An optional binding at key registration:
 
@@ -25,8 +26,9 @@ What ends is using a builder's application - its key, its interface - without pa
 ## 2. Name the signing key on order records
 
 `GET /accounts/{address}/orders/history` (and the order update stream) could carry the name of the API key
-that signed the order. A builder could then see, from SoDEX's own records, which orders its application
-placed, and reconcile them against the orders that named it.
+that signed the order. A builder could then see, from one read, which orders its application placed, and
+reconcile them against the orders that named it. Today that takes one explorer request per order
+(`clobscan .../transaction?account_id=&order_id=`) and recovering the signer from the signature.
 
 ## 3. A builder's own fills
 
