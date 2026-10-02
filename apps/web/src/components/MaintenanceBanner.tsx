@@ -14,6 +14,7 @@
  */
 import { useAsync } from '../hooks';
 import type { MaintenanceStatus } from './Maintenance';
+import { bannerMessage } from './maintenanceVerdict';
 
 async function getStatus(): Promise<MaintenanceStatus> {
   const res = await fetch('/api/external/maintenance/status');
@@ -31,18 +32,11 @@ export function MaintenanceBanner({ onOpenStatus }: { onOpenStatus?: () => void 
   // claiming "operating normally" on no evidence would be worse than silence.
   if (!data) return null;
 
-  // Compare against NORMAL rather than for a specific outage value: the enum is
-  // NORMAL | ALL_MAINTENANCE | CHAIN_MAINTENANCE, and matching on the negative
-  // means a value we have never seen is still treated as "not healthy".
-  const degraded = data.status !== 'NORMAL';
-  const via503 = Boolean((data as { via503?: boolean }).via503);
-  if (!degraded && !via503) return null;
-
-  const message = degraded
-    ? data.status === 'CHAIN_MAINTENANCE'
-      ? 'SoDEX reports chain maintenance. Deposits and withdrawals may be unavailable.'
-      : 'SoDEX reports maintenance. Trading may be unavailable.'
-    : 'A SoDEX service is returning HTTP 503, which usually means maintenance.';
+  // The server's verdict, as given (maintenanceVerdict.ts): a status it could
+  // not read is not an outage. A value we have never seen is still covered -
+  // the server marks any status other than NORMAL as maintenance.
+  const message = bannerMessage(data);
+  if (!message) return null;
 
   return (
     <div className="banner warn" role="status">

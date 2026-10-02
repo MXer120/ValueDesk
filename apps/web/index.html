@@ -28,7 +28,7 @@
         NOTE: frame-ancestors deliberately does NOT appear here. It is ignored
               when delivered via <meta> and only logs an error. Anti-framing is
               sent as a real header instead - by vite.config.ts in dev, and by
-              whatever serves web/dist in production. See DEPLOYMENT.md.
+              whatever serves web/dist in production. See docs/deploy/SECURITY-HEADERS.md.
         connect-src 'self'      the Valuescan index API (same origin; in dev the
                                 Vite proxy, and Vite's own HMR socket)
                     + exactly the exchanges this browser talks to DIRECTLY,
@@ -115,6 +115,7 @@
       "
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="description" content="Valuescan: trader analytics across SoDEX, Hyperliquid, trade.xyz, Lighter and Arcus - leaderboards, wallet cohorts and wallet scans - with non-custodial trading on SoDEX." />
     <title>Valuescan</title>
   </head>
   <body>
