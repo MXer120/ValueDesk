@@ -1617,9 +1617,8 @@ export function OrderEntry({
               <label className="oe-compact">
                 <span>Trigger on</span>
                 <select className="oe-select" value={trigger} onChange={(e) => setTrigger(e.target.value as any)}>
+                  {/* SoDEX accepts the mark price only in order placement (last / index: "not supported yet"). */}
                   <option value="mark">Mark</option>
-                  <option value="last">Last</option>
-                  <option value="index">Index</option>
                 </select>
               </label>
             </div>

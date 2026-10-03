@@ -9,6 +9,19 @@
  * cannot carry, perps take-profit / stop-loss exits as reduce-only legs of the
  * same signed request.
  *
+ * EVERY PERPS ORDER SAYS WHAT IT IS (`modifier`, SoDEX "Place multiple orders"):
+ *   NORMAL         a plain order;
+ *   BRACKET        an entry that carries its own take-profit / stop-loss - the
+ *                  first order of a batch of 2 or 3, never reduce-only;
+ *   ATTACHED_STOP  each of those exits - reduce-only, with its trigger;
+ *   STOP           a trigger order on its own: reduce-only on a position (a
+ *                  position take-profit / stop-loss), not reduce-only when it
+ *                  is a stand-alone trigger order.
+ * Left out, sodex-core would send NORMAL for all of them - and what SoDEX does
+ * with a NORMAL market order that carries a trigger is not documented.
+ * Triggers fire on the MARK price: SoDEX does not accept last or index price in
+ * order placement yet, so those are refused here, before anything is signed.
+ *
  * The builder fee rides at batch level - the placement the official Go SDK
  * carries - and only when the key's own registration approved it: an order
  * naming a builder its account never approved is rejected by the engine.
@@ -17,6 +30,7 @@ import {
   CROSS_ENGINE_ACCOUNT_ID,
   MAX_ORDERS_PER_BATCH,
   MarginMode,
+  OrderModifier,
   OrderSide,
   OrderType,
   OrderValidationError,
@@ -64,7 +78,18 @@ export function genClOrdID(prefix = 'vs', now = Date.now()): string {
 
 const SIDE = { buy: OrderSide.BUY, sell: OrderSide.SELL } as const;
 const TIF = { gtc: TimeInForce.GTC, fok: TimeInForce.FOK, ioc: TimeInForce.IOC, gtx: TimeInForce.GTX } as const;
-const TRIGGER = { last: TriggerType.LAST_PRICE, mark: TriggerType.MARK_PRICE, index: TriggerType.INDEX_PRICE } as const;
+
+/**
+ * The trigger price kind, as SoDEX accepts it in order placement: the mark
+ * price only (LAST_PRICE and INDEX_PRICE are "not supported in order placement
+ * yet"). Anything else is refused before signing.
+ */
+export function triggerTypeFor(t: string | undefined, what = 'the trigger'): number {
+  if (t === undefined || t === 'mark') return TriggerType.MARK_PRICE;
+  throw new OrderValidationError(
+    `SoDEX fires ${what} on the mark price only - ${t === 'last' ? 'the last' : t === 'index' ? 'the index' : `"${t}"`} price is not accepted for orders yet. Choose Mark.`,
+  );
+}
 
 /** A tick-snapped price, or a validation error naming the field. */
 function snapPrice(sym: MarketSymbol, price: string, field: string): string {
@@ -125,21 +150,35 @@ export function placeOrderAction(
   }
 
   const stopPrice = t.stopPrice ? snapPrice(sym, t.stopPrice, 'trigger price') : undefined;
+  const exits = !!(t.takeProfit || t.stopLoss);
+  if (exits && stopPrice) {
+    throw new OrderValidationError(
+      'A trigger order cannot carry its own take-profit or stop-loss here. Place it without them, and add them to the position once it has filled.',
+    );
+  }
+  if (exits && t.reduceOnly) {
+    throw new OrderValidationError(
+      'An order with an attached take-profit or stop-loss opens or adds to a position, so it cannot be reduce-only. Untick reduce-only, or place the order without the exits.',
+    );
+  }
   const orders: RawOrderInput[] = [
     {
       clOrdID: t.clOrdID ?? id(),
+      // An entry with exits is a BRACKET; a trigger order on its own is a STOP; anything else NORMAL.
+      modifier: exits ? OrderModifier.BRACKET : stopPrice ? OrderModifier.STOP : OrderModifier.NORMAL,
       side,
       type,
       timeInForce,
       price: norm.price,
       quantity: norm.quantity,
       funds: norm.funds,
-      reduceOnly: t.reduceOnly ?? false,
+      // A STOP that is reduce-only is a position take-profit / stop-loss; one that is not is a stand-alone trigger order.
+      reduceOnly: exits ? false : (t.reduceOnly ?? false),
       ...(stopPrice
         ? {
             stopPrice,
             stopType: t.stopType === 'tp' ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
-            triggerType: TRIGGER[t.triggerType ?? 'mark'],
+            triggerType: triggerTypeFor(t.triggerType),
           }
         : {}),
     },
@@ -160,13 +199,14 @@ export function placeOrderAction(
     if (!leg) continue;
     orders.push({
       clOrdID: id(stopType === StopType.TAKE_PROFIT ? 'tp' : 'sl'),
+      modifier: OrderModifier.ATTACHED_STOP,
       side: exitSide,
       type: OrderType.MARKET,
       timeInForce: TimeInForce.IOC,
       quantity: norm.quantity,
       stopPrice: snapPrice(sym, leg.price, `${label} price`),
       stopType,
-      triggerType: TRIGGER[leg.triggerType ?? 'mark'],
+      triggerType: triggerTypeFor(leg.triggerType, `the ${label}`),
       // Exits only ever close; they never flip the position.
       reduceOnly: true,
     });

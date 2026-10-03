@@ -478,6 +478,62 @@ func main() {
 	sig, err = perps.SignCancelTwapOrderRequest(twapCancel, n)
 	add("perps_cancel_twap_order", "perps", ctypes.CancelTwapOrderRequestTypeName, n, twapCancel, sig, err)
 
+	// --- perps: the three take-profit / stop-loss shapes SoDEX documents ----
+	// ("Place multiple orders"): an entry with attached exits (BRACKET first,
+	// ATTACHED_STOP exits, reduce-only), a position TP/SL (STOP, reduce-only) and
+	// a stand-alone trigger order (STOP, not reduce-only). Official Go structs.
+	// A nonce series of their own, so the vectors after these keep their bytes.
+	tn := uint64(1770000000000)
+	tpT, slT := enums.StopTypeTakeProfit, enums.StopTypeStopLoss
+	markT := enums.TriggerTypeMarkPrice
+	bracketReq := &ptypes.NewOrderRequest{
+		AccountID: 43933, SymbolID: 1,
+		Orders: []*ptypes.RawOrder{
+			{ClOrdID: "vs-entry-1", Modifier: enums.OrderModifierBracket, Side: enums.OrderSideBuy,
+				Type: enums.OrderTypeLimit, TimeInForce: enums.TimeInForceGTC,
+				Price: d("70000.5"), Quantity: d("0.01"), ReduceOnly: false, PositionSide: enums.PositionSideBoth},
+			{ClOrdID: "tp-entry-1", Modifier: enums.OrderModifierAttachedStop, Side: enums.OrderSideSell,
+				Type: enums.OrderTypeMarket, TimeInForce: enums.TimeInForceIOC,
+				Quantity: d("0.01"), StopPrice: d("75000"), StopType: &tpT, TriggerType: &markT,
+				ReduceOnly: true, PositionSide: enums.PositionSideBoth},
+			{ClOrdID: "sl-entry-1", Modifier: enums.OrderModifierAttachedStop, Side: enums.OrderSideSell,
+				Type: enums.OrderTypeMarket, TimeInForce: enums.TimeInForceIOC,
+				Quantity: d("0.01"), StopPrice: d("68000"), StopType: &slT, TriggerType: &markT,
+				ReduceOnly: true, PositionSide: enums.PositionSideBoth},
+		},
+		Builder: &ctypes.BuilderParams{BuilderID: 456, FeeRate: 20},
+	}
+	sig, err = perps.SignNewOrderRequest(bracketReq, tn)
+	add("perps_bracket_tp_sl", "perps", ptypes.NewOrderRequestTypeName, tn, bracketReq, sig, err)
+
+	tn++
+	posTpReq := &ptypes.NewOrderRequest{
+		AccountID: 43933, SymbolID: 1,
+		Orders: []*ptypes.RawOrder{{
+			ClOrdID: "vs-pos-tp-1", Modifier: enums.OrderModifierStop, Side: enums.OrderSideSell,
+			Type: enums.OrderTypeMarket, TimeInForce: enums.TimeInForceIOC,
+			Quantity: d("0.01"), StopPrice: d("75000"), StopType: &tpT, TriggerType: &markT,
+			ReduceOnly: true, PositionSide: enums.PositionSideBoth,
+		}},
+		Builder: &ctypes.BuilderParams{BuilderID: 456, FeeRate: 20},
+	}
+	sig, err = perps.SignNewOrderRequest(posTpReq, tn)
+	add("perps_position_tp", "perps", ptypes.NewOrderRequestTypeName, tn, posTpReq, sig, err)
+
+	tn++
+	standaloneReq := &ptypes.NewOrderRequest{
+		AccountID: 43933, SymbolID: 1,
+		Orders: []*ptypes.RawOrder{{
+			ClOrdID: "vs-stop-1", Modifier: enums.OrderModifierStop, Side: enums.OrderSideBuy,
+			Type: enums.OrderTypeMarket, TimeInForce: enums.TimeInForceIOC,
+			Quantity: d("0.01"), StopPrice: d("72000"), StopType: &slT, TriggerType: &markT,
+			ReduceOnly: false, PositionSide: enums.PositionSideBoth,
+		}},
+		Builder: &ctypes.BuilderParams{BuilderID: 456, FeeRate: 20},
+	}
+	sig, err = perps.SignNewOrderRequest(standaloneReq, tn)
+	add("perps_standalone_stop", "perps", ptypes.NewOrderRequestTypeName, tn, standaloneReq, sig, err)
+
 	// --- spot revoke (engine-domain, documented DELETE route) ---------------
 	n++
 	spotRev := &ctypes.RevokeAPIKeyRequest{AccountID: 43933, Name: "vs-key-1"}

@@ -909,6 +909,129 @@
       }
     },
     {
+      "name": "perps_bracket_tp_sl",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1770000000000,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-entry-1\",\"modifier\":3,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"70000.5\",\"quantity\":\"0.01\",\"reduceOnly\":false,\"positionSide\":1},{\"clOrdID\":\"tp-entry-1\",\"modifier\":4,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"75000\",\"stopType\":2,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1},{\"clOrdID\":\"sl-entry-1\",\"modifier\":4,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"68000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}}",
+      "payloadHash": "0x68581babcd27fb850c7068e8eb79453c07cbf5a4e306545f3f1062d275e8f83a",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-entry-1\",\"modifier\":3,\"side\":1,\"type\":1,\"timeInForce\":1,\"price\":\"70000.5\",\"quantity\":\"0.01\",\"reduceOnly\":false,\"positionSide\":1},{\"clOrdID\":\"tp-entry-1\",\"modifier\":4,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"75000\",\"stopType\":2,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1},{\"clOrdID\":\"sl-entry-1\",\"modifier\":4,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"68000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}",
+      "signature": "0x01e4e59c8b1aeb37c50c2984c881f7016cf88ad37a219f06aaaf99a4a26d923c49181c3dc51c33b7772c38be8611e2051da8e71f9c988633624b9f7a0b6c8d51a700",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "vs-entry-1",
+            "modifier": 3,
+            "side": 1,
+            "type": 1,
+            "timeInForce": 1,
+            "price": "70000.5",
+            "quantity": "0.01",
+            "reduceOnly": false,
+            "positionSide": 1
+          },
+          {
+            "clOrdID": "tp-entry-1",
+            "modifier": 4,
+            "side": 2,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.01",
+            "stopPrice": "75000",
+            "stopType": 2,
+            "triggerType": 2,
+            "reduceOnly": true,
+            "positionSide": 1
+          },
+          {
+            "clOrdID": "sl-entry-1",
+            "modifier": 4,
+            "side": 2,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.01",
+            "stopPrice": "68000",
+            "stopType": 1,
+            "triggerType": 2,
+            "reduceOnly": true,
+            "positionSide": 1
+          }
+        ],
+        "builder": {
+          "id": 456,
+          "fee": 20
+        }
+      }
+    },
+    {
+      "name": "perps_position_tp",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1770000000001,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-pos-tp-1\",\"modifier\":2,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"75000\",\"stopType\":2,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}}",
+      "payloadHash": "0xcaec44c163af46107513e7ec745180c3c6ef08931e6b2899e35d7d87d1b44332",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-pos-tp-1\",\"modifier\":2,\"side\":2,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"75000\",\"stopType\":2,\"triggerType\":2,\"reduceOnly\":true,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}",
+      "signature": "0x012f1eb1fb189900c63fbb31b8f99841119774e13543de00eac774bf10c6c7e9a06cf4542d2289b38a22ebfa382585f5460488a476062dd16b11f2025bfe76617700",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "vs-pos-tp-1",
+            "modifier": 2,
+            "side": 2,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.01",
+            "stopPrice": "75000",
+            "stopType": 2,
+            "triggerType": 2,
+            "reduceOnly": true,
+            "positionSide": 1
+          }
+        ],
+        "builder": {
+          "id": 456,
+          "fee": 20
+        }
+      }
+    },
+    {
+      "name": "perps_standalone_stop",
+      "engine": "perps",
+      "actionType": "newOrder",
+      "nonce": 1770000000002,
+      "payloadJSON": "{\"type\":\"newOrder\",\"params\":{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-stop-1\",\"modifier\":2,\"side\":1,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"72000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":false,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}}",
+      "payloadHash": "0xcd1199db8dff56916a23d46836819adfb755be02b9be4494c7002206a698682a",
+      "bodyJSON": "{\"accountID\":43933,\"symbolID\":1,\"orders\":[{\"clOrdID\":\"vs-stop-1\",\"modifier\":2,\"side\":1,\"type\":2,\"timeInForce\":3,\"quantity\":\"0.01\",\"stopPrice\":\"72000\",\"stopType\":1,\"triggerType\":2,\"reduceOnly\":false,\"positionSide\":1}],\"builder\":{\"id\":456,\"fee\":20}}",
+      "signature": "0x01a5850fc409668662d504df25951107426ede30c95b3bcb798ea2eb7657a4d5804afd1da5249ebe869f78dc9eb21ad03a89f59d3a65d9b3d2db1817f41091e59100",
+      "params": {
+        "accountID": 43933,
+        "symbolID": 1,
+        "orders": [
+          {
+            "clOrdID": "vs-stop-1",
+            "modifier": 2,
+            "side": 1,
+            "type": 2,
+            "timeInForce": 3,
+            "quantity": "0.01",
+            "stopPrice": "72000",
+            "stopType": 1,
+            "triggerType": 2,
+            "reduceOnly": false,
+            "positionSide": 1
+          }
+        ],
+        "builder": {
+          "id": 456,
+          "fee": 20
+        }
+      }
+    },
+    {
       "name": "spot_revoke_api_key",
       "engine": "spot",
       "actionType": "revokeAPIKey",

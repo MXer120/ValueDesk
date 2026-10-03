@@ -2277,7 +2277,17 @@ function Chart({
     l.place(p.line.key, p.price, 'sending');
     l.hold(p.line.key, p.price);
     try {
-      await api.modifyOrder(body);
+      // The one way the app changes an order (trading/actions.ts changeOrder): modify for a take-profit /
+      // stop-loss, replace for a plain limit order - or cancel + new where that could drop the builder fee.
+      const r = await api.changeOrder(engine, { symbol: body.symbol, orderID: body.orderID }, { price: body.price, quantity: body.quantity, stopPrice: body.stopPrice });
+      if (r.route === 'recreate') {
+        // A NEW order (new id) replaced this one: there is no line to wait for - the new one is drawn on the next read.
+        abandon(p.line.key);
+        showLine('ok', `Order moved: it was cancelled and placed again at ${fmtPrice(p.price, sym?.tickSize)}.`);
+        onChanged?.();
+        refreshOrders();
+        return;
+      }
       showLine('info', `Modify submitted — waiting for the venue to confirm ${fmtPrice(p.price, sym?.tickSize)}.`);
       onChanged?.();
       refreshOrders();
@@ -2300,7 +2310,7 @@ function Chart({
     } finally {
       setSending(false);
     }
-  }, [pending, canModify, modifyBlocked, sym?.tickSize, onChanged, refreshOrders, abandon, showLine, lineError]);
+  }, [pending, canModify, modifyBlocked, engine, sym?.tickSize, onChanged, refreshOrders, abandon, showLine, lineError]);
 
   const change = legendBar ? legendBar.close - legendBar.open : 0;
   /** Direction class for the whole OHLC row — one reading, one colour. */

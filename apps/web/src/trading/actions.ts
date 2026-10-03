@@ -21,6 +21,7 @@
 import {
   OrderValidationError,
   SodexApiError,
+  decimalCompare,
   failedOrders,
   signAndBuildWithNonceManager,
   unwrapList,
@@ -274,33 +275,72 @@ function decimalLeft(a: string, b: string): string {
 const TIFS = ['gtc', 'ioc', 'gtx', 'fok'] as const;
 const TRIGGERS: Record<string, 'mark' | 'last' | 'index'> = { MARK_PRICE: 'mark', LAST_PRICE: 'last', INDEX_PRICE: 'index' };
 
+/** What a change to a resting order may set. A blank field is not a change. */
+export interface OrderChange {
+  price?: string;
+  quantity?: string;
+  stopPrice?: string;
+}
+
+const given = (v: string | undefined): v is string => typeof v === 'string' && v.trim() !== '';
+const changeOf = (c: OrderChange): OrderChange => ({
+  ...(given(c.price) ? { price: c.price.trim() } : {}),
+  ...(given(c.quantity) ? { quantity: c.quantity.trim() } : {}),
+  ...(given(c.stopPrice) ? { stopPrice: c.stopPrice.trim() } : {}),
+});
+
+/** An enum field as SoDEX's REST lists it (a name), or as its stream sends it (the number). */
+const named = (v: unknown, names: Record<number, string>): string =>
+  typeof v === 'number' ? (names[v] ?? String(v)) : String(v ?? '').trim().toUpperCase();
+
+/** The fields of an open order a change depends on, normalised. */
+function rowFacts(o: OrderRow) {
+  const stop = o.stopPrice !== undefined && PLAIN_DECIMAL.test(String(o.stopPrice)) && Number(o.stopPrice) > 0 ? String(o.stopPrice) : undefined;
+  const stopType = named(o.stopType, { 1: 'STOP_LOSS', 2: 'TAKE_PROFIT' });
+  return {
+    side: named(o.side, { 1: 'BUY', 2: 'SELL' }),
+    type: named(o.type, { 1: 'LIMIT', 2: 'MARKET' }),
+    tif: named(o.timeInForce, { 1: 'GTC', 2: 'FOK', 3: 'IOC', 4: 'GTX' }),
+    status: named(o.status, { 1: 'NEW', 2: 'PARTIALLY_FILLED' }),
+    stopPrice: stop,
+    stopType: stopType === 'TAKE_PROFIT' || stopType === 'STOP_LOSS' ? stopType : '',
+    triggerType: named(o.triggerType, { 1: 'LAST_PRICE', 2: 'MARK_PRICE', 3: 'INDEX_PRICE' }),
+    /** A take-profit / stop-loss (position, stand-alone or attached): what SoDEX's modify request is for. */
+    tpsl: stop !== undefined || stopType === 'TAKE_PROFIT' || stopType === 'STOP_LOSS',
+  };
+}
+
 /**
  * The ticket that places `o` again with `change` applied. Throws when the open
  * order cannot be rebuilt exactly from what SoDEX lists - BEFORE anything is
  * cancelled, so a refusal leaves the order as it was.
+ *
+ * The size is a TOTAL, as on the order: the new order is for that total minus
+ * what has already filled. Unchanged, that is what is left to fill; changed on
+ * a partly filled order, the position ends up with the new total, never more.
  */
-export function ticketFromOpenOrder(symbol: string, o: OrderRow, change: { price?: string; quantity?: string; stopPrice?: string }): OrderTicket {
+export function ticketFromOpenOrder(symbol: string, o: OrderRow, changeIn: OrderChange): OrderTicket {
+  const change = changeOf(changeIn);
   const cannot = (why: string) => new OrderValidationError(`This order cannot be changed in place here (${why}). Cancel it and place a new one.`);
-  const side = String(o.side ?? '').toUpperCase();
-  const type = String(o.type ?? '').toUpperCase();
+  const r = rowFacts(o);
+  const side = r.side;
+  const type = r.type;
   if (side !== 'BUY' && side !== 'SELL') throw cannot('SoDEX does not list its side');
   if (type !== 'LIMIT' && type !== 'MARKET') throw cannot(`its type is ${type || 'not listed'}`);
   if ((o.attachedOrderIDs?.length ?? 0) > 0) throw cannot('it has a take-profit or stop-loss attached');
   if (o.primaryOrderID) throw cannot('it is attached to another order');
-  const tif = String(o.timeInForce ?? '').toLowerCase() as (typeof TIFS)[number] | '';
+  const tif = r.tif.toLowerCase() as (typeof TIFS)[number] | '';
   if (tif && !TIFS.includes(tif)) throw cannot(`its time in force is ${tif}`);
-  let quantity = change.quantity;
-  if (quantity === undefined) {
-    // What is left to fill.
-    if (!o.origQty || !PLAIN_DECIMAL.test(o.origQty) || !PLAIN_DECIMAL.test(o.executedQty ?? '0')) throw cannot('its size is not listed as a quantity');
-    quantity = decimalLeft(o.origQty, o.executedQty ?? '0');
-    if (quantity === '0') throw cannot('nothing of it is left to fill');
-  }
-  const listedStop = o.stopPrice && PLAIN_DECIMAL.test(o.stopPrice) && Number(o.stopPrice) > 0 ? o.stopPrice : undefined;
+  const executed = o.executedQty === undefined || o.executedQty === null ? '0' : String(o.executedQty);
+  const total = change.quantity ?? (o.origQty === undefined || o.origQty === null ? undefined : String(o.origQty));
+  if (!total || !PLAIN_DECIMAL.test(total) || !PLAIN_DECIMAL.test(executed)) throw cannot('its size is not listed as a quantity');
+  const quantity = decimalLeft(total, executed);
+  if (quantity === '0') throw cannot(change.quantity === undefined ? 'nothing of it is left to fill' : 'the new size is not above what has already filled');
+  const listedStop = r.stopPrice;
   if (change.stopPrice !== undefined && !listedStop) throw cannot('it has no trigger price to change');
   const stopPrice = change.stopPrice ?? listedStop;
-  const stopType = o.stopType === 'TAKE_PROFIT' ? 'tp' : o.stopType === 'STOP_LOSS' ? 'sl' : undefined;
-  const triggerType = TRIGGERS[String(o.triggerType ?? '')];
+  const stopType = r.stopType === 'TAKE_PROFIT' ? 'tp' : r.stopType === 'STOP_LOSS' ? 'sl' : undefined;
+  const triggerType = TRIGGERS[r.triggerType];
   if (stopPrice && (!stopType || !triggerType)) throw cannot('SoDEX does not list what its trigger is');
   const price = type === 'LIMIT' ? (change.price ?? o.price) : undefined;
   if (type === 'LIMIT' && !price) throw cannot('SoDEX does not list its price');
@@ -332,14 +372,25 @@ export function ticketFromOpenOrder(symbol: string, o: OrderRow, change: { price
 export async function recreateOrder(
   engine: Engine,
   ref: { symbol: string; orderID?: number; clOrdID?: string },
-  change: { price?: string; quantity?: string; stopPrice?: string },
+  change: OrderChange,
 ) {
+  const sym = await symbolFor(engine, ref.symbol);
+  const row = await openOrderRow(engine, sym, ref);
+  return recreateFrom(engine, sym, row, change);
+}
+
+/** The open order `ref` names, as SoDEX lists it now - or a refusal: there is nothing to change. */
+async function openOrderRow(engine: Engine, sym: MarketSymbol, ref: { orderID?: number; clOrdID?: string }): Promise<OrderRow> {
   const s = requireSigner(undefined, engine);
   if (ref.orderID === undefined && !ref.clOrdID) throw new OrderValidationError('orderID or clOrdID is required');
-  const sym = await symbolFor(engine, ref.symbol);
   const open = unwrapList<OrderRow>(await readGateway(`/api/v1/${engine}/accounts/${s.meta.owner}/orders?symbol=${encodeURIComponent(sym.name)}`), 'orders');
   const row = open.find((o) => (ref.orderID !== undefined && Number(o.orderID) === ref.orderID) || (!!ref.clOrdID && o.clOrdID === ref.clOrdID));
   if (!row || !Number.isSafeInteger(Number(row.orderID))) throw new OrderValidationError('That order is no longer open on SoDEX, so there is nothing to change.');
+  return row;
+}
+
+async function recreateFrom(engine: Engine, sym: MarketSymbol, row: OrderRow, change: OrderChange) {
+  const s = requireSigner(undefined, engine);
   const ticket = ticketFromOpenOrder(sym.name, row, change);
   const builder = await builderForOrder(engine);
   const built = placeOrderAction(engine, ticket, sym, s.meta.accountId, builder);
@@ -361,6 +412,78 @@ export async function recreateOrder(
   }
   log.info('order changed as cancel + new order', { engine, symbol: sym.name, was: row.orderID, ...(builder ? { builderFee: builder.fee } : {}) });
   return { result, recreated: true as const };
+}
+
+/** How `changeOrder` changes an open order. */
+export type ChangeRoute = 'modify' | 'replace' | 'recreate';
+
+/**
+ * Which of SoDEX's requests changes this open order - or why none does. Pure.
+ *
+ * SoDEX has two (perps "Modify TP/SL order" and "Replace multiple orders"):
+ *   modify   is for take-profit / stop-loss orders only ("the order must be a
+ *            TP/SL order"), and changes the order in place;
+ *   replace  is for plain limit orders only - GTC or post-only (GTX), status
+ *            NEW or PARTIALLY_FILLED, not a TP/SL - on spot and perps.
+ * Neither request has a builder field. Where it is not known to keep the
+ * order's builder (feeGuard.ts MODIFY_KEEPS_BUILDER / REPLACE_KEEPS_BUILDER)
+ * and the build requires the builder, the change is made as cancel + new
+ * order with the builder instead ('recreate', G6).
+ */
+export function changeRoute(engine: Engine, o: OrderRow, changeIn: OrderChange): ChangeRoute {
+  const change = changeOf(changeIn);
+  if (!change.price && !change.quantity && !change.stopPrice) throw new OrderValidationError('Nothing to change: enter a new price, size or trigger price.');
+  const cannot = (why: string) => new OrderValidationError(`This order cannot be changed here: ${why}. Cancel it and place a new one.`);
+  const r = rowFacts(o);
+  if (r.tpsl) {
+    if (engine !== 'perps') throw cannot('spot has no take-profit or stop-loss orders');
+    return mustRecreate('modifyOrder', engine) ? 'recreate' : 'modify';
+  }
+  if (change.stopPrice) throw cannot('it has no trigger price');
+  if (r.type !== 'LIMIT') throw cannot(`only resting limit orders and take-profit / stop-loss orders can be changed, and this is a ${r.type ? r.type.toLowerCase() : 'not listed'} order`);
+  if (r.tif !== 'GTC' && r.tif !== 'GTX') throw cannot(`SoDEX changes only good-till-cancelled and post-only limit orders, and this one is ${r.tif || 'not listed'}`);
+  if (r.status && r.status !== 'NEW' && r.status !== 'PARTIALLY_FILLED') throw cannot(`its status is ${r.status.toLowerCase().replace(/_/g, ' ')}`);
+  return mustRecreate('replaceOrder', engine) ? 'recreate' : 'replace';
+}
+
+/**
+ * CHANGE A RESTING ORDER - the one function the app calls for it (the open
+ * orders' Modify, the positions table's take-profit / stop-loss edit, the
+ * chart drag). The order is read from SoDEX first and the request chosen by
+ * what it is (`changeRoute`):
+ *   a take-profit / stop-loss (perps)  -> SoDEX's modify request (POST /trade/orders/modify);
+ *   a plain limit GTC / GTX order      -> SoDEX's replace request (POST /trade/orders/replace)
+ *                                         when REPLACE_KEEPS_BUILDER is true or no builder is
+ *                                         required; otherwise cancel + new order with the builder;
+ *   anything else                      -> refused before anything is signed.
+ * Every request still passes the fee guard. Returns which way it went:
+ * after 'recreate' the order has a NEW order id.
+ */
+export async function changeOrder(
+  engine: Engine,
+  ref: { symbol: string; orderID?: number; clOrdID?: string },
+  changeIn: OrderChange,
+): Promise<{ route: ChangeRoute; result: unknown }> {
+  const s = requireSigner(undefined, engine);
+  const sym = await symbolFor(engine, ref.symbol);
+  const row = await openOrderRow(engine, sym, ref);
+  const change = changeOf(changeIn);
+  const route = changeRoute(engine, row, change);
+  const orderID = Number(row.orderID);
+  log.info('order change', { engine, symbol: sym.name, orderID, route, fields: Object.keys(change) });
+  if (route === 'recreate') return { route, result: (await recreateFrom(engine, sym, row, change)).result };
+  if (route === 'modify') {
+    // One id, never both (SoDEX: "either orderID or clOrdID").
+    return { route, result: await signAndSend(modifyOrderAction(sym, s.meta.accountId, { orderID, ...change }), 'order change') };
+  }
+  // Replace: only what changes is sent - a field left out keeps the order's own (SoDEX).
+  const same = (a: string | undefined, b: unknown) => a !== undefined && b !== undefined && b !== null && PLAIN_DECIMAL.test(a) && PLAIN_DECIMAL.test(String(b)) && decimalCompare(a, String(b)) === 0;
+  const price = same(change.price, row.price) ? undefined : change.price;
+  const quantity = same(change.quantity, row.origQty) ? undefined : change.quantity;
+  if (price === undefined && quantity === undefined) throw new OrderValidationError('Nothing to change: the price and size are what the order already has.');
+  const result = await signAndSend(replaceOrderAction(engine, sym, s.meta.accountId, { origOrderID: orderID, price, quantity }), 'order replace');
+  checkBatch(result, 'order replace');
+  return { route, result };
 }
 
 export async function setLeverage(symbol: string, leverage: number, marginMode: 'isolated' | 'cross') {

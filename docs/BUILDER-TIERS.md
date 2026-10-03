@@ -96,6 +96,12 @@ G6. **Changing an order.** SoDEX's modify and replace requests have no builder f
     rebuilt, validated against the market's rules and its builder decided; an order that cannot be rebuilt
     exactly (attached exits, sized in funds, side or type not listed) is refused and left as it is. If
     SoDEX refuses the new order after the cancel, the user is told in plain words that the original is gone.
+    The app changes an order in ONE place, `changeOrder(engine, ref, change)` in `trading/actions.ts`
+    (the open orders' Modify, the positions table's TP/SL edit and the chart drag call it). It reads the
+    order and picks SoDEX's request for it: a take-profit / stop-loss -> modify (SoDEX's modify is for
+    TP/SL orders only); a plain limit GTC / GTX order, NEW or PARTIALLY_FILLED -> replace (spot and
+    perps) - or cancel + new with the builder where the constant above says so; anything else -> refused
+    before signing. It returns `{ route: 'modify' | 'replace' | 'recreate', result }`.
 
 G7. **Spot buys** carry the builder like any order; SoDEX charges nothing on that side, and they never count
     as volume (§5).
@@ -367,6 +373,9 @@ Three lanes, each with a budget of its own, each asleep while it has nothing to 
 - Module `apps/web/src/trading/feeGuard.ts`: `guardAction(action, owner)` (the gate),
   `builderNow(engine)` - **the builder an order placed now must carry** (`{ id, fee }`, or undefined when it
   carries none) - `classifyAction(type)`, `mustRecreate(type, engine)`, and the two G6 constants.
+- Module `apps/web/src/trading/actions.ts`: `changeOrder(engine, { symbol, orderID? | clOrdID? },
+  { price?, quantity?, stopPrice? })` - **change a resting order** (G6); `changeRoute(engine, openOrderRow,
+  change)` - which request that would be, pure.
 
 ## 8. Tests
 

@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { OrderSide, OrderType, OrderValidationError, StopType, TimeInForce, TransferType, TriggerType } from '@sodex-core';
+import { OrderModifier, OrderSide, OrderType, OrderValidationError, StopType, TimeInForce, TransferType, TriggerType } from '@sodex-core';
 import {
   cancelManyActions,
   cancelOrderAction,
@@ -16,6 +16,7 @@ import {
   signedMarginAmount,
   modifyOrderAction,
   placeOrderAction,
+  triggerTypeFor,
   withdrawAction,
   type MarketSymbol,
 } from './orderParams';
@@ -69,9 +70,14 @@ test('take-profit and stop-loss ride along as reduce-only market exits on the ot
     undefined,
     id,
   );
-  const [, tp, sl] = params(b.action).orders;
+  const [entry, tp, sl] = params(b.action).orders;
   assert.equal(b.orderCount, 3);
+  // SoDEX: orders[0].modifier = BRACKET and not reduce-only; each exit ATTACHED_STOP and reduce-only.
+  assert.equal(entry.modifier, OrderModifier.BRACKET);
+  assert.equal(entry.reduceOnly, false);
+  assert.equal(entry.stopPrice, undefined);
   for (const leg of [tp, sl]) {
+    assert.equal(leg.modifier, OrderModifier.ATTACHED_STOP);
     assert.equal(leg.side, OrderSide.SELL);
     assert.equal(leg.type, OrderType.MARKET);
     assert.equal(leg.timeInForce, TimeInForce.IOC);
@@ -82,6 +88,75 @@ test('take-profit and stop-loss ride along as reduce-only market exits on the ot
   assert.equal(tp.stopType, StopType.TAKE_PROFIT);
   assert.equal(tp.stopPrice, '90000.5', 'the trigger is snapped too');
   assert.equal(sl.stopType, StopType.STOP_LOSS);
+});
+
+test('every perps order says what it is: NORMAL, BRACKET + ATTACHED_STOP, or STOP (position or stand-alone)', () => {
+  const one = (t: Partial<Parameters<typeof placeOrderAction>[1]>) =>
+    params(placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', quantity: '0.01', ...t } as Parameters<typeof placeOrderAction>[1], BTC, 1, undefined, id).action).orders;
+  // A plain order, and a plain reduce-only close.
+  assert.equal(one({ price: '84000' })[0].modifier, OrderModifier.NORMAL);
+  assert.deepEqual(one({ type: 'market', side: 'sell', reduceOnly: true }).map((o: any) => [o.modifier, o.reduceOnly]), [[OrderModifier.NORMAL, true]]);
+  // A take-profit / stop-loss on a position: STOP, reduce-only, with its trigger (the positions table's TP/SL).
+  const pos = one({ type: 'market', side: 'sell', reduceOnly: true, stopPrice: '90000', stopType: 'tp', triggerType: 'mark' });
+  assert.equal(pos.length, 1);
+  assert.deepEqual([pos[0].modifier, pos[0].reduceOnly, pos[0].stopPrice, pos[0].stopType, pos[0].triggerType], [OrderModifier.STOP, true, '90000', StopType.TAKE_PROFIT, TriggerType.MARK_PRICE]);
+  // A stand-alone trigger order (the ticket's stop order, not reduce-only): STOP, not reduce-only.
+  const st = one({ type: 'market', stopPrice: '86000', stopType: 'sl' });
+  assert.deepEqual([st[0].modifier, st[0].reduceOnly, st[0].stopType, st[0].triggerType], [OrderModifier.STOP, false, StopType.STOP_LOSS, TriggerType.MARK_PRICE]);
+  // A stop-limit is a STOP too.
+  assert.equal(one({ price: '86500', stopPrice: '86000', stopType: 'sl' })[0].modifier, OrderModifier.STOP);
+  // One exit only: a batch of 2, still BRACKET + ATTACHED_STOP.
+  const half = one({ price: '84000', stopLoss: { price: '80000' } });
+  assert.deepEqual(half.map((o: any) => [o.modifier, o.reduceOnly]), [[OrderModifier.BRACKET, false], [OrderModifier.ATTACHED_STOP, true]]);
+  // Spot has no modifier field at all.
+  const spot = params(placeOrderAction('spot', { symbol: 'BTC-USD', side: 'buy', price: '84000', quantity: '0.01' }, BTC, 1, undefined, id).action).orders[0];
+  assert.equal('modifier' in spot, false);
+});
+
+test('only the MARK price triggers orders: last and index are refused before signing, with a plain message', () => {
+  assert.equal(triggerTypeFor(undefined), TriggerType.MARK_PRICE);
+  assert.equal(triggerTypeFor('mark'), TriggerType.MARK_PRICE);
+  for (const t of ['last', 'index'] as const) {
+    assert.throws(() => triggerTypeFor(t), (e: unknown) => e instanceof OrderValidationError && /mark price only/.test(e.message) && /Choose Mark/.test(e.message));
+    assert.throws(() => placeOrderAction('perps', { symbol: 'BTC-USD', side: 'sell', type: 'market', quantity: '0.01', reduceOnly: true, stopPrice: '80000', stopType: 'sl', triggerType: t }, BTC, 1, undefined, id), OrderValidationError);
+    assert.throws(() => placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', price: '84000', quantity: '0.01', takeProfit: { price: '90000', triggerType: t } }, BTC, 1, undefined, id), (e: unknown) => e instanceof OrderValidationError && /take-profit/.test(e.message));
+  }
+});
+
+test('an entry with exits is never a trigger order and never reduce-only (SoDEX: orders[0].reduceOnly = false)', () => {
+  assert.throws(
+    () => placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', type: 'market', quantity: '0.01', stopPrice: '86000', stopType: 'sl', takeProfit: { price: '90000' } }, BTC, 1, undefined, id),
+    (e: unknown) => e instanceof OrderValidationError && /trigger order cannot carry its own take-profit or stop-loss/.test(e.message),
+  );
+  assert.throws(
+    () => placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', price: '84000', quantity: '0.01', reduceOnly: true, stopLoss: { price: '80000' } }, BTC, 1, undefined, id),
+    (e: unknown) => e instanceof OrderValidationError && /cannot be reduce-only/.test(e.message),
+  );
+});
+
+test('the three TP/SL shapes are byte-identical to the official Go SDK\'s, builder included', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const core = await import('@sodex-core');
+  const V = JSON.parse(readFileSync(fileURLToPath(new URL('../../../../packages/sodex-core/test/vectors-sdk.json', import.meta.url)), 'utf8'));
+  const pk = core.hexToBytes(V.privateKey);
+  const sym = { id: 1, name: 'BTC-USD', displayName: 'BTC-USD', tickSize: '0.5', stepSize: '0.001', minQuantity: '0.001', minNotional: '5', maxLeverage: 50 };
+  const builder = { id: 456, fee: 20 };
+  const ids = (...list: string[]) => {
+    const q = [...list];
+    return () => q.shift()!;
+  };
+  const cases = [
+    ['perps_bracket_tp_sl', placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', price: '70000.5', quantity: '0.01', tif: 'gtc', takeProfit: { price: '75000' }, stopLoss: { price: '68000' } }, sym, 43933, builder, ids('vs-entry-1', 'tp-entry-1', 'sl-entry-1'))],
+    ['perps_position_tp', placeOrderAction('perps', { symbol: 'BTC-USD', side: 'sell', type: 'market', quantity: '0.01', reduceOnly: true, stopPrice: '75000', stopType: 'tp', triggerType: 'mark' }, sym, 43933, builder, ids('vs-pos-tp-1'))],
+    ['perps_standalone_stop', placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', type: 'market', quantity: '0.01', stopPrice: '72000', stopType: 'sl' }, sym, 43933, builder, ids('vs-stop-1'))],
+  ] as const;
+  for (const [name, built] of cases) {
+    const v = V.vectors.find((x: { name: string }) => x.name === name);
+    assert.ok(v, `${name} is in vectors-sdk.json`);
+    assert.equal(core.goJSONStringify(built.action.params), v.bodyJSON, `${name}: body bytes`);
+    assert.equal(core.signExchangeAction(core.engineDomainName('perps'), V.chainID, 'newOrder', built.action.params, BigInt(v.nonce), pk), v.signature, `${name}: signature`);
+  }
 });
 
 test('refusals happen before signing, with the backend\'s messages', () => {

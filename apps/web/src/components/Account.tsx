@@ -615,7 +615,8 @@ function PositionsInner({
     setBusy(true);
     try {
       if (posEdit.orderID) {
-        await api.modifyOrder({ symbol: posEdit.symbol, orderID: posEdit.orderID, stopPrice: draft });
+        // A take-profit / stop-loss: changed with SoDEX's modify request (trading/actions.ts changeOrder).
+        await api.changeOrder('perps', { symbol: posEdit.symbol, orderID: posEdit.orderID }, { stopPrice: draft });
       } else {
         await api.placeOrder('perps', {
           symbol: posEdit.symbol,
@@ -1090,6 +1091,7 @@ function OpenOrdersInner({
       )}
       {editing && (
         <ModifyOrder
+          engine={engine}
           order={editing}
           byName={byName}
           onClose={() => setEditing(null)}
@@ -1103,8 +1105,8 @@ function OpenOrdersInner({
 }
 
 function ModifyOrder({
-  order, byName, onClose, onDone,
-}: { order: any; byName: Map<string, Symbol>; onClose: () => void; onDone: () => void }) {
+  engine, order, byName, onClose, onDone,
+}: { engine: Engine; order: any; byName: Map<string, Symbol>; onClose: () => void; onDone: () => void }) {
   const symbol = symbolOf(order);
   const sym = byName.get(symbol);
   const [priceInput, setPriceInput] = useState(String(pick(order, 'price', 'p') ?? ''));
@@ -1115,13 +1117,14 @@ function ModifyOrder({
   async function submit() {
     setBusy(true);
     try {
-      await api.modifyOrder({
-        symbol,
-        orderID: num(pick(order, 'orderID', 'i', 'orderId')) || undefined,
-        price: priceInput,
-        quantity,
-      });
-      show('ok', 'Modified.');
+      // Modify for a take-profit / stop-loss, replace for a plain limit order - or, where that could
+      // drop the builder fee, cancel + new order (trading/actions.ts changeOrder).
+      const r = await api.changeOrder(
+        engine,
+        { symbol, orderID: num(pick(order, 'orderID', 'i', 'orderId')) || undefined, clOrdID: pick(order, 'clOrdID', 'c') || undefined },
+        { price: priceInput, quantity },
+      );
+      show('ok', r.route === 'recreate' ? 'Changed: the order was cancelled and placed again with the new values.' : 'Modified.');
       onDone();
     } catch (e) {
       fromError(e);

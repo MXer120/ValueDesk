@@ -137,7 +137,21 @@ in full: BUILDER-TIERS.md section 2.
 - Spot **buys** carry the builder too (the field is per batch, not per side) and are charged nothing -
   the same as every other builder on SoDEX (section 6).
 - Cancels, leverage, margin, transfers and withdrawals have no builder field and are unchanged.
-- **Editing** a resting order: SoDEX's modify and replace requests have no builder field, and
+- **Take-profit and stop-loss orders** say what they are (`modifier`, SoDEX "Place multiple orders"):
+  an entry with its own exits is `BRACKET` (never reduce-only) and each exit `ATTACHED_STOP`
+  (reduce-only) - one batch, one builder; a take-profit / stop-loss on a position is `STOP` and
+  reduce-only; a stand-alone trigger order is `STOP` and not reduce-only; everything else `NORMAL`.
+  Triggers fire on the mark price: SoDEX does not accept last or index price in order placement
+  yet, so the ticket offers Mark only and the app refuses the others before signing. All three
+  shapes are byte-identical to the official Go SDK's (vectors `perps_bracket_tp_sl`,
+  `perps_position_tp`, `perps_standalone_stop`).
+- **Editing** a resting order goes through one function, `changeOrder(engine, ref, change)` in
+  `trading/actions.ts` - the open orders' Modify, the positions table's take-profit / stop-loss
+  edit and the chart drag all call it. It reads the order from SoDEX and picks the request SoDEX
+  has for it: a take-profit / stop-loss -> SoDEX's **modify** request (SoDEX: "the order must be a
+  TP/SL order"); a plain limit order, good-till-cancelled or post-only, new or partly filled ->
+  SoDEX's **replace** request (spot and perps), sending only the fields that change; anything else
+  is refused before signing. SoDEX's modify and replace requests have no builder field, and
   whether the changed order keeps the original's builder is not documented. Two constants in
   `trading/feeGuard.ts` say what is assumed until the live test has looked (section 9, step 9):
   `MODIFY_KEEPS_BUILDER = true` (the order is changed in place, same id - the request is used) and
@@ -146,7 +160,9 @@ in full: BUILDER-TIERS.md section 2.
   `trading/actions.ts`). That is two requests and not atomic, so everything that can be known
   beforehand is settled before the cancel (the order is read from SoDEX and rebuilt, validated, its
   builder decided); an order that cannot be rebuilt exactly is refused and left as it is. If SoDEX
-  still refuses the new order, the error says in plain words that the original is gone.
+  still refuses the new order, the error says in plain words that the original is gone. A size
+  given for the change is the order's new TOTAL: the new order is for that total minus what has
+  already filled.
 - **TWAP** orders are not offered and are refused by the gate in a build that requires the builder.
 
 ### 2.3 What the user sees
@@ -569,7 +585,8 @@ Not verifiable without a real wallet (the live test settles 1 to 6):
 | Decisions (what to attach, what to quote, what to tell the user) - pure | `apps/web/src/trading/builder.ts` |
 | The approval on the wire (read, sign, send, poll) | `apps/web/src/trading/builderApproval.ts` |
 | The flow (enable, restore, refresh, approve later, revoke) | `apps/web/src/trading/session.ts` (`enableTrading`, `refreshBuilderApproval`, `approveBuilderFee`, `readBuilderApproval`, `revokeBuilderApproval`) |
-| Attaching to orders, signing (the gate stands here), changing an order as cancel + new | `apps/web/src/trading/actions.ts` (`placeOrder`, `signAndSend`, `recreateOrder`) |
+| Attaching to orders, signing (the gate stands here), changing an order | `apps/web/src/trading/actions.ts` (`placeOrder`, `signAndSend`, `changeOrder`, `changeRoute`, `recreateOrder`) |
+| Order shapes (modifier, trigger type, exits) | `apps/web/src/trading/orderParams.ts` (`placeOrderAction`, `triggerTypeFor`) |
 | Disclosure dialog | `apps/web/src/components/account/BuilderConsent.tsx` |
 | Fee lines | `apps/web/src/components/account/useBuilderFee.ts`, `OrderEntry.tsx`, `ReviewPosition.tsx`, `FeeTier.tsx` |
 | Telling the terms about a fill | `apps/web/src/components/account/BuilderTermsFollower.tsx` |

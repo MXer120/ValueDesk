@@ -595,6 +595,9 @@ export const api = {
     trading().then((m) => m.modifyOrder(b)),
   replaceOrder: (e: Engine, b: { symbol: string; origOrderID?: number; origClOrdID?: string; price?: string; quantity?: string }) =>
     trading().then((m) => m.replaceOrder(e, b)),
+  /** Change a resting order: modify (TP/SL), replace (plain limit), or cancel + new with the builder - trading/actions.ts changeOrder. */
+  changeOrder: (e: Engine, ref: { symbol: string; orderID?: number; clOrdID?: string }, change: { price?: string; quantity?: string; stopPrice?: string }) =>
+    trading().then((m) => m.changeOrder(e, ref, change)),
   setLeverage: (symbol: string, leverage: number, marginMode: 'isolated' | 'cross') =>
     trading().then((m) => m.setLeverage(symbol, leverage, marginMode)),
   adjustMargin: (symbol: string, amount: string) => trading().then((m) => m.adjustMargin(symbol, amount)),

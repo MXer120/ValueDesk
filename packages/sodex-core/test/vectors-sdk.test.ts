@@ -315,6 +315,9 @@ test('every SDK vector is covered', () => {
     ...V.vectors.map((v) => v.name),
     'perps_new_order_builder_batch', 'perps_market_ioc_builder_cap', 'perps_new_order_builder_per_order',
     'spot_batch_new_order_builder', 'perps_new_twap_order', 'perps_cancel_twap_order', 'spot_revoke_api_key', 'spot_evm_withdraw',
+    // The three take-profit / stop-loss shapes: asserted against the app's own order builder in
+    // apps/web/src/trading/orderParams.test.ts.
+    'perps_bracket_tp_sl', 'perps_position_tp', 'perps_standalone_stop',
   ]);
   const missing = S.vectors.map((v) => v.name).filter((n) => !covered.has(n));
   assert.deepEqual(missing, []);
