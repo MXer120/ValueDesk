@@ -32,10 +32,10 @@ import { balancesOf, chainLabel, unitsDown, withdrawQuote, type ChainRoute, type
 import { formatUnits } from '../../src/trading/onboard';
 import { coinPrices, priceOf } from '../../src/trading/prices';
 import { chainWithdrawals, type ChainWithdrawal } from './chainRoutes';
-import { CheckFailure, armed, type Ctx } from './context';
+import { CheckFailure, armed, endsTheRun, tripFailed, type Ctx } from './context';
 import { nativeChainFor, nativeCoinFor, nativeCoinOf } from './native';
 import { ACCOUNT_MINIMUM, NATIVE_DECIMALS, NATIVE_SYMBOL, type NativeChain, type NativeCoin, type PreparedSend, type SendCosts } from './native/types';
-import { waitMaybe } from './orders';
+import { WaitTimeout, waitMaybe } from './orders';
 import { sellBack } from './evmTour';
 import { handInstructions, handKey, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { ownerWord } from './ownerInput';
@@ -73,17 +73,45 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     return markets.get(c.coin)!;
   };
   const list = nativeFirst(chainWithdrawals(ctx.pre.coins, cfg));
+  // Withdrawals that had not arrived when their wait ended: sent back at the end of the step, once they are there.
+  const late: LateTrip[] = [];
   for (const w of list) {
     const id = routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}`);
+    const depId = w.roundTrip ? routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`) : null;
     if (w.skip) {
       ctx.checks.skip(id, w.skip);
-      if (w.roundTrip) ctx.checks.skip(routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`), w.skip);
+      if (depId) ctx.checks.skip(depId, w.skip);
       continue;
     }
-    if (w.roundTrip) {
-      await roundTripLeg(ctx, w, id, list, hasMarket);
-      continue;
+    // Each trip on its own: what goes wrong in one is reported there, and the next goes on (the spend cap still ends the run).
+    try {
+      if (w.roundTrip) {
+        const l = await roundTripLeg(ctx, w, id, list, hasMarket);
+        if (l) late.push(l);
+        continue;
+      }
+      await ownerTrip(ctx, w, id, plans, hasMarket);
+    } catch (e) {
+      if (endsTheRun(e)) throw e;
+      tripFailed(ctx, `${w.coin.coin} -> ${w.route.label}`, e, depId ? [id, depId] : [id]);
     }
+  }
+  for (const l of late) {
+    try {
+      await lateTrip(ctx, l);
+    } catch (e) {
+      if (endsTheRun(e)) throw e;
+      tripFailed(ctx, `${l.coinCfg.coin} back from ${l.route.label}`, e, [l.dId]);
+    }
+  }
+  // Without the hand-sent deposits in this run, what the buys left over is sold back now.
+  if (!ctx.selected.has('manual-deposits')) await sellBackOther(ctx);
+}
+
+/** A withdrawal to the OWNER's address on a chain the runner does not sign on (the deposit back, if any, is theirs). */
+async function ownerTrip(ctx: Ctx, w: ChainWithdrawal, id: string, plans: Map<string, HandPlan>, hasMarket: (c: CoinConfig) => Promise<boolean>): Promise<void> {
+  const { owner, cfg, rec } = ctx;
+  {
     const key = handKey(w.coin.coin, w.route.key);
     const hand = handActive(ctx, w.coin.coin, w.route.key);
     const hp = plans.get(key) ?? null;
@@ -98,7 +126,7 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
       if (!market && hand) {
         ctx.deferredWithdrawals.add(key);
         rec.note(`${w.coin.coin} -> ${w.route.label}: runs after your hand-sent ${w.coin.coin} deposit (manual-deposits) - SoDEX has no ${w.coin.coin}/USDC spot market, so it cannot be bought with USDC`);
-        continue;
+        return;
       }
       if (!market || !cfg.chainWithdrawals.buyIfMissing) {
         ctx.checks.skip(
@@ -107,7 +135,7 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
             ? `not testable from USDC alone: Spot holds ${held} ${w.coin.coin}, and SoDEX has no ${w.coin.coin}/USDC spot market to buy ${amount} on - send ${w.coin.coin} by hand first (manualDeposits; the full test offers it), the run then withdraws it back`
             : `Spot holds ${held} ${w.coin.coin}, less than the ${amount} needed, and chainWithdrawals.buyIfMissing is off`,
         );
-        continue;
+        return;
       }
       const b0 = unitsDown(held, dp);
       await buyOnSpot(ctx, w.coin, amount, id);
@@ -123,8 +151,6 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     addOther(ctx, w.coin.coin, -unitsDown(amount, dp));
     ctx.handArrived.set(key, arrived);
   }
-  // Without the hand-sent deposits in this run, what the buys left over is sold back now.
-  if (!ctx.selected.has('manual-deposits')) await sellBackOther(ctx);
 }
 
 // --- round trips on the chains the runner signs on (native/*.ts) ------------------------------------------------
@@ -146,7 +172,21 @@ function nativeFirst(list: ChainWithdrawal[]): ChainWithdrawal[] {
  * address in a transfer the runner signs (DIRECT), until Spot is credited. The way back is checked BEFORE anything
  * leaves; without one only the withdrawal runs. Nothing goes to anyone else.
  */
-async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: readonly ChainWithdrawal[], hasMarket: (c: CoinConfig) => Promise<boolean>): Promise<void> {
+/** A round trip whose withdrawal had not arrived when its wait ended: what the deposit back needs, for the end of the step. */
+interface LateTrip {
+  chain: NativeChain;
+  coinCfg: CoinConfig;
+  route: ChainRoute;
+  ncoin: NativeCoin;
+  here: string;
+  to: string;
+  wId: string;
+  dId: string;
+  reserve: bigint;
+  floor: string;
+}
+
+async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: readonly ChainWithdrawal[], hasMarket: (c: CoinConfig) => Promise<boolean>): Promise<LateTrip | null> {
   const { owner, cfg, rec } = ctx;
   const chain = nativeChainFor(ctx.native, w.route.key);
   const dId = routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`);
@@ -155,7 +195,7 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
     const why = !chain ? `the runner does not sign on ${w.route.label}` : `the runner does not know ${w.coin.coin}'s decimals on ${w.route.label}`;
     ctx.checks.skip(wId, why);
     ctx.checks.skip(dId, why);
-    return;
+    return null;
   }
   const keys = ctx.native.keys;
   const here = chain.address(keys);
@@ -205,7 +245,7 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
       const why = !(await hasMarket(w.coin)) ? `Spot holds ${held} ${w.coin.coin} and SoDEX has no ${w.coin.coin}/USDC market that is TRADING to buy ${amount} on` : `Spot holds ${held} ${w.coin.coin}, less than ${amount}, and chainWithdrawals.buyIfMissing is off`;
       ctx.checks.skip(wId, why);
       ctx.checks.skip(dId, why);
-      return;
+      return null;
     }
     const b0 = unitsDown(held, sodexDp);
     await buyOnSpot(ctx, w.coin, amount, wId);
@@ -226,7 +266,13 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
     // other chains go on (a payout to a brand-new account a chain refuses, e.g. Stellar without createAccount).
     if (/ended as "/.test(errText(e))) {
       ctx.checks.skip(dId, `nothing to send back: the withdrawal failed (${errText(e)})`);
-      return;
+      return null;
+    }
+    // Sent, but not seen arriving in time: in flight. Its deposit back is tried at the end of the step, once it is there.
+    if (e instanceof WaitTimeout && to) {
+      ctx.checks.finding(wId, `sent, but it had not arrived at ${here} when the wait ended (${errText(e)}) - IN FLIGHT; its deposit back is tried at the end of the step`);
+      addOther(ctx, w.coin.coin, -unitsDown(amount, sodexDp));
+      return { chain, coinCfg: w.coin, route: w.route, ncoin, here, to, wId, dId, reserve, floor };
     }
     throw e;
   }
@@ -234,11 +280,25 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
   if (!to) {
     ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(arrived, 8)} ${w.coin.coin} that arrived stays at the test wallet's ${w.route.label} address ${here}.`, { chain: w.route.key, address: here, leftOnChain: arrived });
     rec.note(`${w.route.label}: the ${w.coin.coin} deposit back is not run (${noBack}); ${cut(arrived, 8)} stays at ${here}`);
-    return;
+    return null;
   }
 
   // 5. Back to SoDEX, signed by the runner (DIRECT): exactly the bytes armed, once.
   await depositBack(ctx, { chain, coinCfg: w.coin, route: w.route, ncoin, here, to, dId, reserve, floor });
+  return null;
+}
+
+/** A withdrawal that arrived late: if it is there now, the deposit back runs (the deposit is still tested). */
+async function lateTrip(ctx: Ctx, l: LateTrip): Promise<void> {
+  const label = `${l.coinCfg.coin} on ${l.route.label}`;
+  const have = await ctx.rec.read(`did the late ${label} withdrawal arrive at ${l.here}?`, () => l.chain.balance(l.here, l.ncoin), (b) => `${formatUnits(b, l.ncoin.decimals)} ${l.coinCfg.coin}`);
+  if (have < unitsDown(l.floor, l.ncoin.decimals)) {
+    ctx.checks.set(l.dId, 'not-run', `not run: the ${label} withdrawal had not arrived by the end of the step (${l.here} holds ${formatUnits(have, l.ncoin.decimals)}) - it is IN FLIGHT`);
+    return;
+  }
+  ctx.checks.finding(l.wId, `arrived at ${l.here} after its wait ended (${formatUnits(have, l.ncoin.decimals)} ${l.coinCfg.coin} there now): slower than the run expected, but there`);
+  ctx.rec.note(`${label}: the withdrawal arrived late - sending it back now`);
+  await depositBack(ctx, { chain: l.chain, coinCfg: l.coinCfg, route: l.route, ncoin: l.ncoin, here: l.here, to: l.to, dId: l.dId, reserve: l.reserve, floor: l.floor });
 }
 
 async function depositBack(

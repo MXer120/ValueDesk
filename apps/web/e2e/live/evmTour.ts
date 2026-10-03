@@ -23,7 +23,7 @@
 import { balancesOf, unitsDown, withdrawQuote } from '../../src/trading/funds';
 import { formatUnits, parseUnits } from '../../src/trading/onboard';
 import { addOrSwitchChain, sendTransaction } from '../../src/wallet';
-import { SafetyStop, armed, type Ctx } from './context';
+import { SafetyStop, armed, endsTheRun, tripFailed, type Ctx } from './context';
 import { marketQty, checkDepositAddress, depositAddressProblem, ownerGasNeed, spotMarketFor } from './plan';
 import { nativeBalance, receipt, registryDepositAddresses } from './reads';
 import { buyOnSpot, creditWaitMs, depositOne, moved, routeCheck, withdrawTo } from './steps';
@@ -128,93 +128,99 @@ export async function stepEvmTour(ctx: Ctx): Promise<void> {
         ctx.checks.skip(dId, leg.skip);
         continue;
       }
-      const quote = await rec.read(`SoDEX's on-chain fee for ${leg.coin.coin} -> ${leg.label}`, () => withdrawQuote(leg.coin, leg.route, owner), (q) => `${formatUnits(q.fee, leg.coin.valuechain.decimals)} ${leg.coin.coin}`);
-      const fee = formatUnits(quote.fee, leg.coin.valuechain.decimals);
-      // The way back must exist BEFORE anything leaves (Arc: SoDEX issues no USDC deposit address there). Without
-      // one, the withdrawal alone is tested - with the least SoDEX pays out - and what arrives is reported, never a stop.
-      const listed = await registryDepositAddresses(owner, leg.coin.coin).catch(() => null);
-      const noBack = depositBackProblem(leg, listed);
-      if (noBack) {
-        const one = oneWayAmount(leg.route, leg.coin, fee);
-        const held = (await balancesOf(owner, leg.coin)).spot;
-        if (dCmp(held, one) < 0) {
-          ctx.checks.skip(wId, `${noBack}, and Spot holds ${held} ${leg.coin.coin} - less than the ${one} a one-way withdrawal needs`);
-          ctx.checks.skip(dId, noBack);
-          continue;
-        }
-        let arrived = dSub(one, fee);
-        await moved(ctx, wId, async () => {
-          const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
-          if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
-          return r;
-        });
-        ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(arrived, 6)} ${leg.coin.coin} that arrived stays in the test wallet on ${leg.label}.`, { chain: leg.chain, leftOnChain: arrived, reason: noBack });
-        rec.note(`${leg.label}: ${noBack} - the withdrawal alone was tested; ${cut(arrived, 6)} ${leg.coin.coin} stays in the test wallet there`);
-        continue;
-      }
-      if (leg.kind === 'native') {
-        const reserve = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
-        const amt = nativeLegAmounts(leg.route, leg.coin, fee, reserve);
-        const isUsdc = leg.coin.coin.toUpperCase() === 'USDC';
-        if (!isUsdc) {
+      // Each leg on its own: what goes wrong in one is reported there, and the next goes on (the spend cap still ends the run).
+      try {
+        const quote = await rec.read(`SoDEX's on-chain fee for ${leg.coin.coin} -> ${leg.label}`, () => withdrawQuote(leg.coin, leg.route, owner), (q) => `${formatUnits(q.fee, leg.coin.valuechain.decimals)} ${leg.coin.coin}`);
+        const fee = formatUnits(quote.fee, leg.coin.valuechain.decimals);
+        // The way back must exist BEFORE anything leaves (Arc: SoDEX issues no USDC deposit address there). Without
+        // one, the withdrawal alone is tested - with the least SoDEX pays out - and what arrives is reported, never a stop.
+        const listed = await registryDepositAddresses(owner, leg.coin.coin).catch(() => null);
+        const noBack = depositBackProblem(leg, listed);
+        if (noBack) {
+          const one = oneWayAmount(leg.route, leg.coin, fee);
           const held = (await balancesOf(owner, leg.coin)).spot;
-          if (dCmp(held, amt.withdraw) < 0) {
-            const m = await spotMarketFor(leg.coin).catch(() => null);
-            if (!m) {
-              const why = `Spot holds ${held} ${leg.coin.coin} and SoDEX has no ${leg.coin.coin}/USDC spot market to buy ${amt.withdraw} on`;
-              ctx.checks.skip(wId, why);
-              ctx.checks.skip(dId, why);
-              if (usdcRuns) rec.warn('gas', `${tc.label}: no ${leg.coin.coin} comes back for gas - the USDC deposit back needs ${tc.spec.native.symbol} already in the wallet there`);
-              continue;
-            }
-            const dp = leg.coin.valuechain.decimals;
-            const b0 = unitsDown(held, dp);
-            await buyOnSpot(ctx, leg.coin, amt.withdraw, wId);
-            const b1 = unitsDown((await balancesOf(owner, leg.coin)).spot, dp);
-            bought.set(leg.coin.coin, (bought.get(leg.coin.coin) ?? 0n) + (b1 > b0 ? b1 - b0 : 0n));
-          }
-        }
-        let received = '0';
-        await moved(ctx, wId, async () => {
-          const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: amt.withdraw });
-          received = typeof r.evidence.received === 'string' ? r.evidence.received : dSub(amt.withdraw, fee);
-          return r;
-        });
-        // What arrived, less what stays for gas - never below SoDEX's deposit minimum.
-        const reserveNow = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
-        const dp = Math.min(leg.coin.valuechain.decimals, tc.spec.native.decimals, 8);
-        const back = dMax(depositFloor(leg.route, dp), toStep(dSub(received, reserveNow), dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`, 'floor'));
-        if (dCmp(back, '0') <= 0) throw new SafetyStop(`${received} ${leg.coin.coin} arrived on ${tc.label}: nothing left to send back after ${reserveNow} for gas`);
-        await moved(ctx, dId, () => depositNative(ctx, leg, back));
-      } else {
-        if (tc.ownerGas) {
-          // SoDEX lists no route for this chain's gas coin (Polygon: POL), so the run cannot get any. The deposit back
-          // runs only if the wallet already holds enough; otherwise the withdrawal alone is tested.
-          const sym = tc.spec.native.symbol;
-          const need = await ownerGasNeed(tc.chain);
-          const have = await nativeBalance(tc.spec.rpcUrl, owner).catch(() => 0n);
-          const held = formatUnits(have, tc.spec.native.decimals);
-          if (approx(held) + 1e-12 < need) {
-            const one = oneWayUsdcAmount(leg.route, fee);
-            let arrived = dSub(one, fee);
-            await moved(ctx, wId, async () => {
-              const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
-              if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
-              return r;
-            });
-            ctx.checks.set(
-              dId,
-              'not-run',
-              `not run: no ${sym} for gas on ${tc.label} - SoDEX lists no ${sym} route, so the run cannot get any, and the wallet holds ${cut(held, 6)} ${sym} (the USDC deposit back needs ~${need} ${sym}). The ${cut(arrived, 6)} USDC that arrived stays in the test wallet on ${tc.label}; send ~${need} ${sym} there to move it.`,
-              { chain: tc.chain, gasHeld: held, gasNeeded: String(need), leftOnChain: arrived },
-            );
-            rec.note(`${tc.label}: the USDC deposit back is not run - no ${sym} for gas (the wallet holds ${cut(held, 6)}, it needs ~${need}); ${cut(arrived, 6)} USDC stays in the test wallet there`);
+          if (dCmp(held, one) < 0) {
+            ctx.checks.skip(wId, `${noBack}, and Spot holds ${held} ${leg.coin.coin} - less than the ${one} a one-way withdrawal needs`);
+            ctx.checks.skip(dId, noBack);
             continue;
           }
+          let arrived = dSub(one, fee);
+          await moved(ctx, wId, async () => {
+            const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
+            if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
+            return r;
+          });
+          ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(arrived, 6)} ${leg.coin.coin} that arrived stays in the test wallet on ${leg.label}.`, { chain: leg.chain, leftOnChain: arrived, reason: noBack });
+          rec.note(`${leg.label}: ${noBack} - the withdrawal alone was tested; ${cut(arrived, 6)} ${leg.coin.coin} stays in the test wallet there`);
+          continue;
         }
-        const amt = usdcLegAmounts(leg.route, fee);
-        await moved(ctx, wId, () => withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: amt.withdraw }));
-        await moved(ctx, dId, () => depositOne(ctx, leg.chain, amt.back));
+        if (leg.kind === 'native') {
+          const reserve = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
+          const amt = nativeLegAmounts(leg.route, leg.coin, fee, reserve);
+          const isUsdc = leg.coin.coin.toUpperCase() === 'USDC';
+          if (!isUsdc) {
+            const held = (await balancesOf(owner, leg.coin)).spot;
+            if (dCmp(held, amt.withdraw) < 0) {
+              const m = await spotMarketFor(leg.coin).catch(() => null);
+              if (!m) {
+                const why = `Spot holds ${held} ${leg.coin.coin} and SoDEX has no ${leg.coin.coin}/USDC spot market to buy ${amt.withdraw} on`;
+                ctx.checks.skip(wId, why);
+                ctx.checks.skip(dId, why);
+                if (usdcRuns) rec.warn('gas', `${tc.label}: no ${leg.coin.coin} comes back for gas - the USDC deposit back needs ${tc.spec.native.symbol} already in the wallet there`);
+                continue;
+              }
+              const dp = leg.coin.valuechain.decimals;
+              const b0 = unitsDown(held, dp);
+              await buyOnSpot(ctx, leg.coin, amt.withdraw, wId);
+              const b1 = unitsDown((await balancesOf(owner, leg.coin)).spot, dp);
+              bought.set(leg.coin.coin, (bought.get(leg.coin.coin) ?? 0n) + (b1 > b0 ? b1 - b0 : 0n));
+            }
+          }
+          let received = '0';
+          await moved(ctx, wId, async () => {
+            const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: amt.withdraw });
+            received = typeof r.evidence.received === 'string' ? r.evidence.received : dSub(amt.withdraw, fee);
+            return r;
+          });
+          // What arrived, less what stays for gas - never below SoDEX's deposit minimum.
+          const reserveNow = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
+          const dp = Math.min(leg.coin.valuechain.decimals, tc.spec.native.decimals, 8);
+          const back = dMax(depositFloor(leg.route, dp), toStep(dSub(received, reserveNow), dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`, 'floor'));
+          if (dCmp(back, '0') <= 0) throw new SafetyStop(`${received} ${leg.coin.coin} arrived on ${tc.label}: nothing left to send back after ${reserveNow} for gas`);
+          await moved(ctx, dId, () => depositNative(ctx, leg, back));
+        } else {
+          if (tc.ownerGas) {
+            // SoDEX lists no route for this chain's gas coin (Polygon: POL), so the run cannot get any. The deposit back
+            // runs only if the wallet already holds enough; otherwise the withdrawal alone is tested.
+            const sym = tc.spec.native.symbol;
+            const need = await ownerGasNeed(tc.chain);
+            const have = await nativeBalance(tc.spec.rpcUrl, owner).catch(() => 0n);
+            const held = formatUnits(have, tc.spec.native.decimals);
+            if (approx(held) + 1e-12 < need) {
+              const one = oneWayUsdcAmount(leg.route, fee);
+              let arrived = dSub(one, fee);
+              await moved(ctx, wId, async () => {
+                const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
+                if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
+                return r;
+              });
+              ctx.checks.set(
+                dId,
+                'not-run',
+                `not run: no ${sym} for gas on ${tc.label} - SoDEX lists no ${sym} route, so the run cannot get any, and the wallet holds ${cut(held, 6)} ${sym} (the USDC deposit back needs ~${need} ${sym}). The ${cut(arrived, 6)} USDC that arrived stays in the test wallet on ${tc.label}; send ~${need} ${sym} there to move it.`,
+                { chain: tc.chain, gasHeld: held, gasNeeded: String(need), leftOnChain: arrived },
+              );
+              rec.note(`${tc.label}: the USDC deposit back is not run - no ${sym} for gas (the wallet holds ${cut(held, 6)}, it needs ~${need}); ${cut(arrived, 6)} USDC stays in the test wallet there`);
+              continue;
+            }
+          }
+          const amt = usdcLegAmounts(leg.route, fee);
+          await moved(ctx, wId, () => withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: amt.withdraw }));
+          await moved(ctx, dId, () => depositOne(ctx, leg.chain, amt.back));
+        }
+      } catch (e) {
+        if (endsTheRun(e)) throw e;
+        tripFailed(ctx, `${leg.coin.coin} on ${leg.label}`, e, [wId, dId]);
       }
     }
     if (cfg.evmTour.sellBack) {

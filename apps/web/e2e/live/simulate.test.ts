@@ -25,6 +25,7 @@ import { runE2E } from './runner';
 import { scriptedOwnerInput, type OwnerInput } from './ownerInput';
 import { SAMPLE_ADDRESS } from './receivers';
 import { FAKE_NATIVE_ADDRESS, fakeNativeChains } from './sim/nativeFakes';
+import type { NativeChain } from './native/types';
 import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, OWNER_ADDRESS, TERMS_PUBLIC_KEY, VC_USDC, depositAddressOf, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
 
 let restore: (() => void) | null = null;
@@ -63,6 +64,8 @@ async function run(
     mode?: 'plan' | 'live';
     onManualDeposit?: (w: World, d: { coin: string; chain: string; address: string; amount: string }) => void;
     ownerInput?: OwnerInput;
+    /** The simulated non-EVM chains (default: sim/nativeFakes.ts as they are). */
+    native?: NativeChain[];
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'vs-e2e-sim-'));
@@ -97,7 +100,7 @@ async function run(
     backendOverride: BACKEND,
     log: (l) => lines.push(l),
     ...(o.ownerInput ? { ownerInput: o.ownerInput } : {}),
-    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, native: fakeNativeChains(), ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
+    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, native: o.native ?? fakeNativeChains(), ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
   });
   const file = readdirSync(dir).find((f) => f.endsWith(`-${mode}.json`));
   const report = file ? JSON.parse(readFileSync(join(dir, file), 'utf8')) : null;
@@ -463,6 +466,38 @@ test('all-chains: a round trip on every chain the runner signs on - out to the t
   assert.deepEqual(manual, { coin: 'SOL', chain: 'SOL', address: depositAddressOf('SOL'), amount: '0.03' });
   // Nothing was sent to your other addresses: the round trips come back.
   assert.equal(report.spend.sentAwayUsd, 0);
+});
+
+test('one trip that breaks never stops the run: XRP\'s node refuses the transfer back, Bitcoin\'s API refuses a read - Solana still goes out and comes back', async () => {
+  const native = fakeNativeChains();
+  const xrp = native.find((c) => c.kind === 'xrp')!;
+  xrp.broadcast = async () => {
+    throw new Error('the node refused it: tefPAST_SEQ');
+  };
+  const btc = native.find((c) => c.kind === 'bitcoin')!;
+  btc.costs = async () => {
+    throw new Error('mempool.space refused the request (HTTP 400)');
+  };
+  const r = await run(
+    { ...CONFIG, maxSpendUsd: 200, receivers: { valuechain: FRIEND } },
+    { profile: 'all-chains', only: ['deposit-external', 'enable-trading', 'chain-withdrawals'], setup: (w) => w.arbUsdc.set(w.owner, 200_000_000n), native },
+  );
+  const { report, byId, w } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  // The step finished: every trip was tried.
+  assert.equal(report.steps.find((x: { id: string }) => x.id === 'chain-withdrawals')?.status, 'ok', show(r));
+  // XRP: out and arrived; the transfer back was refused - that deposit fails, said why.
+  assert.equal(byId.get('withdraw-xrp-xrp')?.status, 'pass', byId.get('withdraw-xrp-xrp')?.detail);
+  assert.equal(byId.get('deposit-xrp-xrp')?.status, 'fail');
+  assert.match(byId.get('deposit-xrp-xrp')!.detail, /tefPAST_SEQ/);
+  // Bitcoin: it broke before anything left - the withdrawal fails, its deposit is "not run" because of it.
+  assert.equal(byId.get('withdraw-btc-btc')?.status, 'fail');
+  assert.match(byId.get('withdraw-btc-btc')!.detail, /refused the request/);
+  assert.equal(byId.get('deposit-btc-btc')?.status, 'not-run');
+  assert.ok(!w.offchain.some((x) => x.coin === 'BTC'), 'nothing was withdrawn to Bitcoin');
+  // The others went on: Solana out and back, SOL and USDC.
+  for (const id of ['withdraw-sol-sol', 'deposit-sol-sol', 'withdraw-usdc-sol', 'deposit-usdc-sol']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  assert.ok(r.lines.some((l) => /one trip failed - the run goes on/.test(l)));
 });
 
 test('the full test: round trips to your own wallet - a deposit you skip, one you leave out, one sent first where SoDEX has no market - and everything sold back', async () => {

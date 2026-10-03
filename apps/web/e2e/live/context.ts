@@ -326,6 +326,26 @@ export class SafetyStop extends Error {
   override name = 'SafetyStop';
 }
 
+/** The spend cap ends the run (checkBudget, withdrawTo); anything else that goes wrong in ONE trip is that trip's. */
+export const endsTheRun = (e: unknown): boolean => e instanceof SafetyStop && /^budget:/.test(e.message);
+
+/**
+ * One trip (a chain's withdrawal and its deposit back, a tour leg) went wrong: the first of its checks without a
+ * verdict fails with what happened, the others are "not run" because of it - and the run goes on with the next
+ * trip. Where its coins are stays known: a transfer under way is in the in-flight list, everything else is in
+ * the balances the run reads at the end.
+ */
+export function tripFailed(ctx: Ctx, what: string, e: unknown, ids: readonly string[]): void {
+  let first = true;
+  for (const id of ids) {
+    if (ctx.checks.get(id)) continue;
+    if (first) ctx.checks.fail(id, errText(e));
+    else ctx.checks.set(id, 'not-run', `not run: ${what} failed before it (${errText(e)})`);
+    first = false;
+  }
+  ctx.rec.warn('one trip failed - the run goes on', `${what}: ${errText(e)}`);
+}
+
 /**
  * The app tried to send or sign something the running step had not armed, and
  * the runner's guard or wallet said no. NOTHING left the process - so inside a
