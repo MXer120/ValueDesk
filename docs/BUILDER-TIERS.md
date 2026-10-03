@@ -134,7 +134,7 @@ A request can do two things only: ask, and leave a hint. Asking writes nothing o
   "sig": "<base64url Ed25519 signature>",
 
   "default": { "perps": 20, "spot": 20 },
-  "volume": { "perpsUsd": 12.4, "spotUsd": 0, "totalUsd": 12.4, "verifiedAt": 1790000000000, "pending": false },
+  "volume": { "perpsUsd": 12.4, "spotUsd": 0, "totalUsd": 12.4, "days": 14, "verifiedAt": 1790000000000, "pending": false },
   "tier": { "index": 1, "next": null },
   "flags": []
 }
@@ -218,12 +218,18 @@ is the kill switch.
   "overrides": {
     "0x0000000000000000000000000000000000000001": { "perps": 10, "spot": 10, "note": "partner" }
   },
-  "underpaid": { "policy": "default-fee", "days": 30 }
+  "underpaid": { "policy": "default-fee", "days": 30 },
+  "volumeDays": 14
 }
 ```
 
 - `tiers` are sorted by `minVolumeUsd` (strictly rising), the first starts at 0. A wallet's tier follows its
-  **total counted volume** (perps + spot), lifetime: the last tier whose `minVolumeUsd` it has reached.
+  **total counted volume** (perps + spot): the last tier whose `minVolumeUsd` it has reached.
+- `volumeDays` (1 to 90): the volume of the last that many UTC calendar days, today included - the ledger
+  counts volume per wallet, engine and day (table `days`, kept 120 days). A wallet that stops trading drops
+  back tier by tier as its days leave the window; nothing has to be read for that, the next signed terms say
+  it. A new wallet is read back as far as the window reaches (at least `..._LOOKBACK_DAYS`). Left out:
+  lifetime volume.
 - Every fee is a whole number. A fee may never exceed the first tier's fee for that engine, `maxFeeRate`, or
   SoDEX's caps (perps 200, spot 2000). The first tier must equal the default fee of the web build (the app
   clamps to its own default anyway).
@@ -244,10 +250,11 @@ is the kill switch.
 Tool (run in `apps/server`; prints one JSON object; never prints the private key; exit code 0 done,
 1 refused, 2 not understood):
 
-- `npx tsx tools/builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--force]`
+- `npx tsx tools/builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--max-fee <n>] [--volume-days <n>] [--force]`
   writes the config and the key where they do not exist, and prints
-  `{ configPath, keyPath, publicKey, keyId, builderId, tiers, configWritten, keyWritten }`. `--test-tiers`
-  writes exactly the example above without `overrides`; `--fee-*` writes one tier, the default fee.
+  `{ configPath, keyPath, publicKey, keyId, builderId, maxFeeRate, tiers, volumeDays, configWritten, keyWritten }`.
+  `--test-tiers` writes the example above without `overrides` and `volumeDays`; `--fee-*` writes one tier, the
+  default fee; `--max-fee` the file's ceiling (default: the default fee); `--volume-days` the window.
   `--force` replaces the configuration; **the key is never replaced** (builds pin it). A configuration that
   exists and names another builder is refused without `--force`.
 - `npx tsx tools/builderTiers.ts status [--address 0x...]` prints `{ configPath, valid, problems, builderId,
@@ -272,12 +279,41 @@ within 5 s; an app takes the new fee with its next signed terms - at the latest 
   it too (`VITE_BUILDER_FEE_*`) and the app never charges more than its build, so raising it needs a new web
   build - and above `VITE_BUILDER_MAX_FEE`, every user approves again.
 - `remove-tier --from-usd <volume>` removes a milestone (never the default).
+- `set-window --days <1..90 | lifetime>`: the volume window (`volumeDays`).
 - `set-fee --address 0x... --perps <n> --spot <n> [--note <text>]` / `clear-fee --address 0x...`: one
   wallet's own fee (an override); `status --address` shows it as `handSetFee`.
 
 A wallet reaching a milestone needs none of this: every verification of its volume (queued after its
 orders; the server runs `VALUESCAN_BUILDER_VERIFY_PER_MIN` of them a minute, default 1) puts it on the
 tier it has reached, as often as that happens, and its next signed terms carry the lower fee.
+
+### The live schedule (owner, 2026-10-04)
+
+Tenths of a basis point; volume = counted perps + spot of the last 14 days (`volumeDays: 14`).
+
+| 14-day volume | perps | spot |
+|---|---|---|
+| under $1M (default) | 15 (1.5 bp) | 15 |
+| $1M | 12 | 12 |
+| $5M | 10 | 10 |
+| $25M | 8 | 8 |
+| $100M | 5 | 5 |
+
+`maxFeeRate` 25 and `VITE_BUILDER_MAX_FEE=25`: users approve up to 2.5 bp once, so copy trades (below) can be
+charged without anyone approving again.
+
+**Copy trades (decided, not built).** Their own, steeper ladder - lower thresholds, ending at 1 bp:
+
+| 14-day volume | copy fee |
+|---|---|
+| under $100k (default) | 25 (2.5 bp) |
+| $100k | 20 |
+| $500k | 15 |
+| $2M | 12 |
+| $10M | 10 (1 bp) |
+
+Nothing charges it yet: there is no copy executor. It needs a second ladder in this file and in the signed
+terms (the ceiling rule above - no fee above the default - holds for the app's own orders only).
 
 ## 5. What counts as volume
 

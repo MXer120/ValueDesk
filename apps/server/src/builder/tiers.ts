@@ -5,7 +5,8 @@
  *   1. a fee set by hand for the wallet (`overrides`) - it wins over everything;
  *   2. the default fee while the wallet is under the underpaid policy: an
  *      underpaid or tampered order in the last `days` days;
- *   3. the tier of the wallet's counted volume (perps + spot, lifetime).
+ *   3. the tier of the wallet's counted volume (perps + spot) - of the last `volumeDays` days when the
+ *      file sets them, else lifetime. The caller passes that volume in `WalletFacts`.
  * Whatever the outcome, no fee is ever above the default fee of the first tier.
  *
  * Volume is held in MICRO-USD (whole millionths of a dollar), so adding up
@@ -21,6 +22,7 @@ export const FLAGS: readonly Flag[] = ['underpaid', 'tampered', 'override', 'no-
 
 /** What the server knows about a wallet. All zero for a wallet it has never verified. */
 export interface WalletFacts {
+  /** Counted volume in the configuration's window (or lifetime). */
   perpsMicro: number;
   spotMicro: number;
   /** When the wallet's last underpaid / tampered / builder-less order was created (ms, 0 = never). */

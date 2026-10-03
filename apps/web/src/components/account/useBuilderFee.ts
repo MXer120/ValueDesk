@@ -41,6 +41,6 @@ export function useBuilderFee(
     engine,
     side,
     fee: feeNow(engine, wallet),
-    next: view?.next ? { atUsd: view.next.atUsd, rate: view.next.fee[engine], volumeUsd: view.volumeUsd } : null,
+    next: view?.next ? { atUsd: view.next.atUsd, rate: view.next.fee[engine], volumeUsd: view.volumeUsd, days: view.volumeDays } : null,
   });
 }

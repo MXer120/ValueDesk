@@ -333,3 +333,12 @@ test('file: an invalid file with nothing valid before it leaves the feature off;
   assert.equal(src.status().exists, false);
   assert.ok(log.lines.some((l) => l.level === 'warn' && /is gone/.test(l.msg)));
 });
+
+test('config: volumeDays - the tiers go by the last 1 to 90 days, or (left out) by lifetime volume', () => {
+  assert.equal(valid(EXAMPLE).volumeDays, null, 'left out: lifetime');
+  assert.equal(valid({ ...structuredClone(EXAMPLE), volumeDays: 14 }).volumeDays, 14);
+  assert.equal(valid({ ...structuredClone(EXAMPLE), volumeDays: 90 }).volumeDays, 90);
+  for (const bad of [0, 91, 14.5, '14', -1, null]) {
+    assert.ok(problemsOf({ volumeDays: bad }).some((p) => /volumeDays/.test(p)), String(bad));
+  }
+});

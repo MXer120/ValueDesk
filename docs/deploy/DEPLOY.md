@@ -737,7 +737,9 @@ deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u v
 - `builder-tiers.json` - the tiers. `--test-tiers` writes 2 bp on both engines and 1.5 bp on perps from
   10 USD of counted volume; for production write the default fee with `--fee-perps <n> --fee-spot <n>`
   and edit the file (it is re-read within seconds, no restart; an invalid file is ignored and logged).
-  The first tier must equal the build's `VITE_BUILDER_FEE_PERPS` / `VITE_BUILDER_FEE_SPOT`.
+  The first tier must equal the build's `VITE_BUILDER_FEE_PERPS` / `VITE_BUILDER_FEE_SPOT`. The live
+  schedule (BUILDER-TIERS.md section 4): `init --builder-id 221909 --fee-perps 15 --fee-spot 15 --max-fee 25
+  --volume-days 14`, then `fees.sh set-tier` for $1M / $5M / $25M / $100M (12, 10, 8, 5).
 - `builder-terms.key` - the Ed25519 signing key, created once, readable by `valuescan` only. Never copy
   it off the instance; it is in no release (the release refuses `*.key`) and no backup (the backup takes
   the index only). Losing it means a new key and a new web build.

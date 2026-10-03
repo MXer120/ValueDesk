@@ -68,6 +68,8 @@ export interface TermsFee {
 export interface TermsDisplay {
   /** Volume the server has counted for this wallet, USD. */
   volumeUsd: number | null;
+  /** The window that volume covers, in days (null: lifetime). */
+  volumeDays: number | null;
   /** A verification is queued or running: the fee may change shortly. */
   pending: boolean;
   tierIndex: number | null;
@@ -306,6 +308,7 @@ function displayOf(o: Record<string, unknown>, fee: TermsFee): TermsDisplay {
       : null;
   return {
     volumeUsd: amount(volume?.totalUsd),
+    volumeDays: whole(volume?.days, 1, 365) ? (volume!.days as number) : null,
     pending: volume?.pending === true,
     tierIndex: whole(index, 0, 1_000) ? index : null,
     next: lower && atUsd !== null ? { atUsd, fee: lower } : null,
@@ -625,6 +628,8 @@ export interface TermsView {
   next: { atUsd: number; fee: TermsFee } | null;
   /** Volume counted so far, USD (display only), or null. */
   volumeUsd: number | null;
+  /** The window that volume covers, in days (display only); null: lifetime. */
+  volumeDays: number | null;
 }
 
 /** What the fee lines show for `address` - null when no verified terms hold (the default fee applies). */
@@ -637,6 +642,7 @@ export function termsView(address: string | null | undefined): TermsView | null 
     default: { perps: b.fee.perps, spot: b.fee.spot },
     next: t.display.next,
     volumeUsd: t.display.volumeUsd,
+    volumeDays: t.display.volumeDays,
   };
 }
 

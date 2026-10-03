@@ -57,12 +57,12 @@ test('init --test-tiers: writes the test configuration and a key, and prints the
   const p = place();
   const r = tool(p, ['init', '--builder-id', '424242', '--test-tiers']);
   assert.equal(r.code, 0);
-  assert.deepEqual(Object.keys(r.out), ['configPath', 'keyPath', 'publicKey', 'keyId', 'builderId', 'tiers', 'configWritten', 'keyWritten']);
+  assert.deepEqual(Object.keys(r.out), ['configPath', 'keyPath', 'publicKey', 'keyId', 'builderId', 'maxFeeRate', 'tiers', 'volumeDays', 'configWritten', 'keyWritten']);
   assert.deepEqual(
     { ...r.out, publicKey: '', keyId: '' },
     {
-      configPath: p.config, keyPath: p.key, publicKey: '', keyId: '', builderId: 424242,
-      tiers: [{ minVolumeUsd: 0, perps: 20, spot: 20 }, { minVolumeUsd: 10, perps: 15, spot: 20 }],
+      configPath: p.config, keyPath: p.key, publicKey: '', keyId: '', builderId: 424242, maxFeeRate: 20,
+      tiers: [{ minVolumeUsd: 0, perps: 20, spot: 20 }, { minVolumeUsd: 10, perps: 15, spot: 20 }], volumeDays: null,
       configWritten: true, keyWritten: true,
     },
   );
@@ -186,13 +186,13 @@ function ledger(p: Place, wallet: string, other: string): void {
     store.recordKeys(a, [{ name: 'valuescan-web', key: addr(0xdead + id) }], 5_000);
     store.recordFee(11, a, { at: 6_000, perps: 15, spot: 20 });
     store.commitFills({
-      builder: 11, address: a, gen: w.createdAt, engine: 'perps', addMicro: 0, queued: 1, noBuilder: { n: 0, at: 0 }, found: true,
+      builder: 11, address: a, gen: w.createdAt, engine: 'perps', addMicro: 0, byDay: new Map(), queued: 1, noBuilder: { n: 0, at: 0 }, found: true,
       rows: [{ key: 'BTC-USD:1', orderId: '1', symbol: 'BTC-USD', clOrdID: 'vs-1', t: 5_500, lastT: 5_500, state: OrderState.pending, paidMicro: 12_400_000, rate: 20, countedMicro: 0, tries: 0, nextAt: 0 }],
       fills: [{ key: 'BTC-USD:9:1', t: 5_500 }],
       state: { hi: 5_500, swFrom: 0, swEnd: 0, swTop: 0, swPages: 0, sweptAt: 5_600 }, pruneFillsBefore: 0,
     });
     store.commitLookup({
-      builder: 11, address: a, gen: w.createdAt, engine: 'perps', closed: true, addMicro: 12_400_000, now: 5_700, misses: 0,
+      builder: 11, address: a, gen: w.createdAt, engine: 'perps', closed: true, addMicro: 12_400_000, byDay: new Map([[0, 12_400_000]]), now: 5_700, misses: 0,
       row: { key: 'BTC-USD:1', orderId: '1', symbol: 'BTC-USD', clOrdID: 'vs-1', t: 5_500, lastT: 5_500, state: OrderState.counted, paidMicro: 12_400_000, rate: 20, countedMicro: 12_400_000, tries: 1, nextAt: 0 },
       underpaid: { n: 1, at: 5_600 }, tampered: { n: 0, at: 0 },
       evidence: [{ kind: 'underpaid', engine: 'perps', orderId: '2', txHash: '0x' + 'ab'.repeat(32), at: 5_600, signer: addr(0xbad), keyName: null, fee: 5, owed: 20 }],
@@ -211,7 +211,7 @@ test('forget: one wallet, everything about it, in one go - and it stays known as
   const seen = tool(p, ['status', '--address', wallet]);
   assert.equal(seen.code, 0);
   const report = seen.out.wallet as Record<string, unknown>;
-  assert.deepEqual(report.rows, { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1 });
+  assert.deepEqual(report.rows, { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1, days: 1 });
   assert.deepEqual(report.volume, { perpsUsd: 12.4, spotUsd: 0 });
   assert.equal((report.evidence as unknown[]).length, 1, 'the operator sees which order raised a flag');
 
@@ -221,30 +221,30 @@ test('forget: one wallet, everything about it, in one go - and it stays known as
   assert.equal(r.code, 0);
   assert.deepEqual(r.out, {
     address: wallet.toLowerCase(), dbPath: p.db, dbExists: true,
-    removed: { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1 }, total: 7, countsFrom: 9_000,
+    removed: { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1, days: 1 }, total: 8, countsFrom: 9_000,
   });
   // The server sees it gone with its next read ...
   assert.equal(server.wallet(11, wallet.toLowerCase()), null);
-  assert.deepEqual(server.rowsOf(wallet.toLowerCase()), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(server.rowsOf(wallet.toLowerCase()), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   assert.equal(server.lastFee(11, wallet.toLowerCase()), null);
   assert.equal(server.keysOf(wallet.toLowerCase()).size, 0);
   // ... a write it still had in mind for that wallet does not go through ...
   assert.equal(server.commitFills({
-    builder: 11, address: wallet.toLowerCase(), gen: 5_000, engine: 'perps', addMicro: 1, queued: 0, noBuilder: { n: 0, at: 0 }, found: false, rows: [], fills: [],
+    builder: 11, address: wallet.toLowerCase(), gen: 5_000, engine: 'perps', addMicro: 1, byDay: new Map([[0, 1]]), queued: 0, noBuilder: { n: 0, at: 0 }, found: false, rows: [], fills: [],
     state: { hi: 1, swFrom: 0, swEnd: 0, swTop: 0, swPages: 0, sweptAt: 1 }, pruneFillsBefore: null,
   }), false);
-  assert.deepEqual(server.rowsOf(wallet.toLowerCase()), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(server.rowsOf(wallet.toLowerCase()), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   // ... and when the wallet comes back, nothing from before the command is read again.
   assert.equal(server.floorOf(wallet.toLowerCase()), 9_000);
   assert.equal(server.createWallet(11, wallet.toLowerCase(), 1, 20_000, 20_000 - 7 * 86_400_000).floor, 9_000);
   // The other wallet, and the default fee on record, are untouched.
-  assert.deepEqual(server.rowsOf(other), { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1 });
+  assert.deepEqual(server.rowsOf(other), { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1, days: 1 });
   assert.equal(server.wallet(11, other)!.perpsMicro, 12_400_000);
   server.close();
 
   // Forgetting it again removes the row the wallet got meanwhile and moves the mark.
   const twice = tool(p, ['forget', '--address', wallet.toLowerCase()], 30_000);
-  assert.deepEqual(twice.out.removed, { wallets: 1, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(twice.out.removed, { wallets: 1, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   assert.equal(twice.out.countsFrom, 30_000);
   const after = tool(p, ['status', '--address', wallet]);
   assert.deepEqual({ known: (after.out.wallet as Record<string, unknown>).known, forgottenAt: (after.out.wallet as Record<string, unknown>).forgottenAt }, { known: false, forgottenAt: 30_000 });
@@ -266,7 +266,7 @@ test('forget: anything that is not exactly one well-formed address is refused, a
     assert.match(String(r.out.error), /forget: --address must be exactly one wallet address/);
   }
   const store = new BuilderStore(p.db, { readOnly: true });
-  for (const a of [wallet, addr(0x56)]) assert.deepEqual(store.rowsOf(a), { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1 }, a);
+  for (const a of [wallet, addr(0x56)]) assert.deepEqual(store.rowsOf(a), { wallets: 1, engines: 1, orders: 1, fills: 1, fees: 1, keys: 1, evidence: 1, days: 1 }, a);
   assert.equal(store.floorOf(wallet), 0);
   store.close();
 });
@@ -275,7 +275,7 @@ test('forget: with no ledger there is nothing to forget, and none is created', (
   const p = place();
   const r = tool(p, ['forget', '--address', addr(1)], 9_000);
   assert.equal(r.code, 0);
-  assert.deepEqual(r.out, { address: addr(1), dbPath: p.db, dbExists: false, removed: { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 }, total: 0, countsFrom: null });
+  assert.deepEqual(r.out, { address: addr(1), dbPath: p.db, dbExists: false, removed: { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 }, total: 0, countsFrom: null });
   assert.equal(existsSync(p.db), false);
 });
 

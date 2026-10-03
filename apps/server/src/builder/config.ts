@@ -12,6 +12,9 @@
  *     tier is the DEFAULT fee: what a wallet nothing is known about pays, and
  *     what the web build must be built with;
  *   - tiers start at volume 0 and rise strictly;
+ *   - `volumeDays`, when set, is a whole number of days from 1 to 90: the tiers then go by the volume of
+ *     the last that many days (UTC calendar days, today included) - a wallet whose trading stops drops
+ *     back tier by tier. Absent: lifetime volume;
  *   - a name this code does not know is a mistake, not something to skip: a
  *     misspelt "overides" would otherwise switch a partner's fee off in silence.
  *     (Names starting with "_" are free for notes.)
@@ -34,7 +37,7 @@ export interface Fee {
 }
 
 export interface Tier extends Fee {
-  /** Counted volume (perps + spot, lifetime) from which this tier applies, in USD. */
+  /** Counted volume (perps + spot; of the last `volumeDays` days, else lifetime) from which this tier applies, in USD. */
   minVolumeUsd: number;
 }
 
@@ -56,7 +59,12 @@ export interface TiersConfig {
   /** Keyed by lower-case wallet address. */
   overrides: Readonly<Record<string, Override>>;
   underpaid: UnderpaidPolicy;
+  /** The tiers go by the volume of the last this many days (UTC days, today included). Null: lifetime volume. */
+  volumeDays: number | null;
 }
+
+/** The longest volume window a file may set (the ledger keeps its day counts a little longer). */
+export const MAX_VOLUME_DAYS = 90;
 
 /** The highest fee an order may carry (SoDEX: perps 0.2 %, spot 2 %). */
 export const FEE_CAP: Readonly<Record<Engine, number>> = { perps: 200, spot: 2000 };
@@ -86,7 +94,7 @@ export function validateTiers(raw: unknown): { config: TiersConfig | null; probl
   const problems: string[] = [];
   if (!isObject(raw)) return { config: null, problems: ['the file must hold one JSON object'] };
 
-  const known = new Set(['builderId', 'maxFeeRate', 'tiers', 'overrides', 'underpaid']);
+  const known = new Set(['builderId', 'maxFeeRate', 'tiers', 'overrides', 'underpaid', 'volumeDays']);
   for (const k of Object.keys(raw)) {
     if (!known.has(k) && !k.startsWith('_')) problems.push(`unknown setting "${k}"`);
   }
@@ -217,6 +225,13 @@ export function validateTiers(raw: unknown): { config: TiersConfig | null; probl
     }
   }
 
+  let volumeDays: number | null = null;
+  if (raw.volumeDays !== undefined) {
+    if (!isWhole(raw.volumeDays) || raw.volumeDays < 1 || raw.volumeDays > MAX_VOLUME_DAYS) {
+      problems.push(`volumeDays must be a whole number of days from 1 to ${MAX_VOLUME_DAYS} (leave it out for lifetime volume)`);
+    } else volumeDays = raw.volumeDays;
+  }
+
   if (problems.length) return { config: null, problems };
   return {
     config: Object.freeze({
@@ -225,6 +240,7 @@ export function validateTiers(raw: unknown): { config: TiersConfig | null; probl
       tiers: Object.freeze(tiers.map((t) => Object.freeze(t))),
       overrides: Object.freeze(overrides),
       underpaid: Object.freeze(underpaid),
+      volumeDays,
     }),
     problems: [],
   };

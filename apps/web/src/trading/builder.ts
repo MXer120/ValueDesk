@@ -200,7 +200,7 @@ export interface BuilderFeeQuote {
    * traded here the fee is `rate`. For the screen only - it is not signed and
    * decides nothing.
    */
-  next?: { atUsd: number; rate: number; volumeUsd: number | null };
+  next?: { atUsd: number; rate: number; volumeUsd: number | null; days?: number | null };
 }
 
 /**
@@ -217,7 +217,7 @@ export function quoteBuilderFee(i: {
   /** The fee the wallet owes now on this engine (terms.ts `feeNow`); the build's default when omitted. */
   fee?: number;
   /** The next tier, as the terms name it (display only). */
-  next?: { atUsd: number; rate: number; volumeUsd: number | null } | null;
+  next?: { atUsd: number; rate: number; volumeUsd: number | null; days?: number | null } | null;
 }): BuilderFeeQuote | null {
   const cfg = activeBuilder(i.builder);
   if (!cfg) return null;

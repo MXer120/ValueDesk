@@ -199,7 +199,7 @@ test('verified terms lower the fee: feeNow is the signed fee, per engine, for th
   assert.equal(feeNow('perps', WALLET_2), 20, 'another wallet pays the default');
   assert.equal(feeNow('perps', null), 20);
   assert.ok(seen.length >= 1, 'listeners are told the fee may have changed');
-  assert.deepEqual(termsView(WALLET), { fee: { perps: 15, spot: 20 }, default: { perps: 20, spot: 20 }, next: null, volumeUsd: 12.4 });
+  assert.deepEqual(termsView(WALLET), { fee: { perps: 15, spot: 20 }, default: { perps: 20, spot: 20 }, next: null, volumeUsd: 12.4, volumeDays: null });
   assert.equal(termsView(WALLET_2), null);
 });
 
@@ -343,7 +343,7 @@ test('readTermsAnswer names what is wrong, and accepts exactly what the app is a
   if (r.ok) {
     assert.deepEqual(r.fee, { perps: 15, spot: 20 });
     assert.equal(r.sig.length, 64);
-    assert.deepEqual(r.display, { volumeUsd: null, pending: false, tierIndex: null, next: null, flags: [] });
+    assert.deepEqual(r.display, { volumeUsd: null, volumeDays: null, pending: false, tierIndex: null, next: null, flags: [] });
   }
   const why = (patch: Record<string, unknown>) => {
     const got = readTermsAnswer({ ...good, ...patch }, x);
@@ -502,7 +502,20 @@ test('the next tier, when the terms name one', async () => {
   server.volume = { perpsUsd: 4.2, spotUsd: 0, totalUsd: 4.2, verifiedAt: 1, pending: false };
   server.tier = { index: 0, next: { atUsd: 10, fee: { perps: 15, spot: 20 } } };
   await refreshTerms(WALLET);
-  assert.deepEqual(termsView(WALLET), { fee: { perps: 20, spot: 20 }, default: { perps: 20, spot: 20 }, next: { atUsd: 10, fee: { perps: 15, spot: 20 } }, volumeUsd: 4.2 });
+  assert.deepEqual(termsView(WALLET), { fee: { perps: 20, spot: 20 }, default: { perps: 20, spot: 20 }, next: { atUsd: 10, fee: { perps: 15, spot: 20 } }, volumeUsd: 4.2, volumeDays: null });
+});
+
+test('the window the volume covers (volumeDays on the server), when the answer names one - shown, never deciding', async () => {
+  server.fee = { perps: 15, spot: 15 };
+  server.volume = { perpsUsd: 400_000, spotUsd: 0, totalUsd: 400_000, days: 14, verifiedAt: 1, pending: false };
+  server.tier = { index: 0, next: { atUsd: 1_000_000, fee: { perps: 12, spot: 12 } } };
+  await refreshTerms(WALLET);
+  assert.equal(termsView(WALLET)!.volumeDays, 14);
+  assert.equal(termsView(WALLET)!.volumeUsd, 400_000);
+  // Anything but a whole number of days is not shown.
+  server.volume = { ...(server.volume as object), days: 'fourteen' };
+  await refreshTerms(WALLET);
+  assert.equal(termsView(WALLET)!.volumeDays, null);
 });
 
 // --- what needs no terms at all ----------------------------------------------------------------------

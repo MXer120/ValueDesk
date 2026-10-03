@@ -24,6 +24,7 @@ import { TiersSource, defaultFee, type Fee, type LogLike, type TiersConfig } fro
 import { EXPLORER_BASE } from './explorer.js';
 import { builderDbPath, termsKeyPath, tiersPath } from './paths.js';
 import { BuilderStore, type WalletRow } from './store.js';
+import { dayOf } from './counting.js';
 import { KeySource, TERMS_TTL_MS, termsMessage } from './terms.js';
 import { MICRO, NO_FACTS, decide, type Decision, type Flag, type NextTier, type WalletFacts } from './tiers.js';
 import {
@@ -47,7 +48,8 @@ export type TermsBody =
       sig: string | null;
       // For display. Not signed; decides nothing.
       default: Fee;
-      volume: { perpsUsd: number; spotUsd: number; totalUsd: number; verifiedAt: number | null; pending: boolean };
+      /** `days`: the window the volume covers (the file's volumeDays), null for lifetime. */
+      volume: { perpsUsd: number; spotUsd: number; totalUsd: number; days: number | null; verifiedAt: number | null; pending: boolean };
       tier: { index: number; next: NextTier | null };
       flags: Flag[];
     };
@@ -81,8 +83,23 @@ export interface BuilderServiceOptions {
 /** After the ledger could not be opened it is tried again this much later. */
 const REOPEN_MS = 30_000;
 
-const factsOf = (w: WalletRow | null): WalletFacts =>
-  w ? { perpsMicro: w.perpsMicro, spotMicro: w.spotMicro, underpaidAt: w.underpaidAt, tamperedAt: w.tamperedAt, noBuilderAt: w.noBuilderAt } : NO_FACTS;
+const factsOf = (w: WalletRow | null, counted: { perps: number; spot: number }): WalletFacts =>
+  w ? { perpsMicro: counted.perps, spotMicro: counted.spot, underpaidAt: w.underpaidAt, tamperedAt: w.tamperedAt, noBuilderAt: w.noBuilderAt } : NO_FACTS;
+
+/**
+ * The volume the tiers go by: the last `volumeDays` UTC days (today included) when the file sets them,
+ * else lifetime. A ledger that cannot be read counts nothing - the default fee, never a lower one.
+ */
+function countedOf(cfg: TiersConfig, store: BuilderStore | null, w: WalletRow | null, now: number): { perps: number; spot: number } {
+  if (!w) return { perps: 0, spot: 0 };
+  if (cfg.volumeDays === null) return { perps: w.perpsMicro, spot: w.spotMicro };
+  if (!store) return { perps: 0, spot: 0 };
+  try {
+    return store.windowMicro(cfg.builderId, w.address, dayOf(now) - (cfg.volumeDays - 1));
+  } catch {
+    return { perps: 0, spot: 0 };
+  }
+}
 
 export class BuilderService {
   readonly tiers: TiersSource;
@@ -199,8 +216,8 @@ export class BuilderService {
    * differs from the last one on record. A wallet at the default fee with no
    * history gets no row: owing the default is what having no row means.
    */
-  private settle(cfg: TiersConfig, store: BuilderStore | null, address: string, w: WalletRow | null, now: number): Decision {
-    const d = decide(cfg, address, factsOf(w), now);
+  private settle(cfg: TiersConfig, store: BuilderStore | null, address: string, w: WalletRow | null, now: number, counted = countedOf(cfg, store, w, now)): Decision {
+    const d = decide(cfg, address, factsOf(w, counted), now);
     if (store) {
       try {
         this.noteDefault(cfg, store, now);
@@ -237,7 +254,8 @@ export class BuilderService {
     } catch (e) {
       this.o.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'builder tiers: the ledger could not be read');
     }
-    const d = this.settle(cfg, rt?.store ?? null, req.address, w, now);
+    const counted = countedOf(cfg, rt?.store ?? null, w, now);
+    const d = this.settle(cfg, rt?.store ?? null, req.address, w, now, counted);
     if (req.hint && rt) {
       try {
         rt.verifier.hint(req.address, req.client);
@@ -247,8 +265,8 @@ export class BuilderService {
     }
     const signer = this.keys.current();
     const fields = { chain: this.o.chainId, builderId: cfg.builderId, address: req.address, perps: d.fee.perps, spot: d.fee.spot, nonce: req.nonce, issued: now, ttl: TERMS_TTL_MS };
-    const perps = w?.perpsMicro ?? 0;
-    const spot = w?.spotMicro ?? 0;
+    const perps = counted.perps;
+    const spot = counted.spot;
     return {
       ok: true,
       chain: fields.chain,
@@ -265,6 +283,7 @@ export class BuilderService {
         perpsUsd: perps / MICRO,
         spotUsd: spot / MICRO,
         totalUsd: (perps + spot) / MICRO,
+        days: cfg.volumeDays,
         verifiedAt: w && w.verifiedAt > 0 ? w.verifiedAt : null,
         // A verification is queued or running, or orders wait for the explorer.
         pending: (rt?.verifier.pending(req.address) ?? false) || (w?.openN ?? 0) > 0,

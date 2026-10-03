@@ -29,6 +29,7 @@
  *   keys      the API keys our app registered for a wallet, as SoDEX listed them.
  *   evidence  for the operator: the order and the transaction behind a flag.
  *   floors    wallets that were forgotten: nothing before that moment counts again.
+ *   days      counted volume per wallet, engine and UTC day - what a volume window (`volumeDays`) adds up.
  */
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
@@ -137,13 +138,24 @@ CREATE TABLE IF NOT EXISTS evidence (
 );
 CREATE INDEX IF NOT EXISTS evidence_wallet ON evidence (builder, address, id);
 CREATE TABLE IF NOT EXISTS floors (address TEXT PRIMARY KEY, at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS days (
+  builder INTEGER NOT NULL,
+  address TEXT NOT NULL,
+  engine TEXT NOT NULL,
+  day INTEGER NOT NULL,
+  micro INTEGER NOT NULL,
+  PRIMARY KEY (builder, address, engine, day)
+) WITHOUT ROWID;
 `;
 
+/** Day counts are kept this long: longer than any volume window a file may set (config MAX_VOLUME_DAYS). */
+export const KEEP_DAYS = 120;
+
 /** Tables holding rows of one wallet, for `forget` and the operator's report. */
-const WALLET_TABLES = ['wallets', 'engines', 'orders', 'fills', 'fees', 'keys', 'evidence'] as const;
+const WALLET_TABLES = ['wallets', 'engines', 'orders', 'fills', 'fees', 'keys', 'evidence', 'days'] as const;
 export type WalletTable = (typeof WALLET_TABLES)[number];
 /** Those of them keyed by builder id, then address. `keys` is keyed by address alone. */
-const BUILDER_TABLES = ['wallets', 'engines', 'orders', 'fills', 'fees', 'evidence'] as const;
+const BUILDER_TABLES = ['wallets', 'engines', 'orders', 'fills', 'fees', 'evidence', 'days'] as const;
 
 /** Fee rows kept per wallet, the newest. */
 export const MAX_FEE_ROWS = 64;
@@ -223,6 +235,8 @@ export interface FillsCommit {
   gen: number;
   engine: Engine;
   addMicro: number;
+  /** `addMicro` by UTC day (counting.ts dayOf). */
+  byDay: ReadonlyMap<number, number>;
   rows: readonly OrderRow[];
   /** New rows among `rows` the explorer has to look at. */
   queued: number;
@@ -245,6 +259,8 @@ export interface LookupCommit {
   /** The row left the explorer's list (it is decided, or given up). */
   closed: boolean;
   addMicro: number;
+  /** `addMicro` by UTC day (counting.ts dayOf). */
+  byDay: ReadonlyMap<number, number>;
   underpaid: FlagDelta;
   tampered: FlagDelta;
   /** Another builder's order: one more in a row. A counted order: back to zero. Null: unchanged. */
@@ -371,6 +387,34 @@ export class BuilderStore {
     return r ? walletOf(r) : null;
   }
 
+  /** Counted volume of one wallet from UTC day `fromDay` on (counting.ts dayOf), per engine. */
+  windowMicro(builder: number, address: string, fromDay: number): { perps: number; spot: number } {
+    const rows = this.q('SELECT engine, sum(micro) AS m FROM days WHERE builder = ? AND address = ? AND day >= ? GROUP BY engine').all(builder, address, fromDay) as Row[];
+    const out = { perps: 0, spot: 0 };
+    for (const r of rows) {
+      const m = Math.min(Number.MAX_SAFE_INTEGER, num(r.m));
+      if (str(r.engine) === 'spot') out.spot = m;
+      else out.perps = m;
+    }
+    return out;
+  }
+
+  /** Add one step's volume to its days, and let go of days no window reaches any more. Inside a transaction. */
+  private addDays(builder: number, address: string, engine: Engine, byDay: ReadonlyMap<number, number>): void {
+    if (!byDay.size) return;
+    const add = this.q(
+      `INSERT INTO days (builder, address, engine, day, micro) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (builder, address, engine, day) DO UPDATE SET micro = min(micro + excluded.micro, ${Number.MAX_SAFE_INTEGER})`,
+    );
+    let newest = 0;
+    for (const [day, micro] of byDay) {
+      if (!(micro > 0)) continue;
+      add.run(builder, address, engine, day, micro);
+      newest = Math.max(newest, day);
+    }
+    if (newest) this.q('DELETE FROM days WHERE builder = ? AND address = ? AND engine = ? AND day < ?').run(builder, address, engine, newest - KEEP_DAYS);
+  }
+
   /** How many wallets the ledger holds (one count at open; kept current by the caller). */
   walletCount(): number {
     return num((this.q('SELECT count(*) AS n FROM wallets').get() as Row).n);
@@ -489,6 +533,7 @@ export class BuilderStore {
          WHERE builder = ? AND address = ?`,
       ).run(perps, spot, c.queued, c.noBuilder.n, c.noBuilder.at, c.found ? 1 : 0, c.builder, c.address);
       for (const o of c.rows) this.putOrder(c.builder, c.address, c.engine, o);
+      this.addDays(c.builder, c.address, c.engine, c.byDay);
       const put = this.q('INSERT OR IGNORE INTO fills (builder, address, engine, fill_key, t) VALUES (?, ?, ?, ?, ?)');
       for (const f of c.fills) put.run(c.builder, c.address, c.engine, f.key, f.t);
       this.q(
@@ -545,6 +590,7 @@ export class BuilderStore {
         c.underpaid.n, c.underpaid.at, c.tampered.n, c.tampered.at, c.builder, c.address,
       );
       this.putOrder(c.builder, c.address, c.engine, c.row);
+      this.addDays(c.builder, c.address, c.engine, c.byDay);
       for (const e of c.evidence) {
         this.q('INSERT INTO evidence (builder, address, kind, engine, order_id, tx_hash, at, signer, key_name, fee, owed) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(
           c.builder, c.address, e.kind, e.engine, e.orderId, e.txHash, e.at, e.signer, e.keyName, e.fee, e.owed,

@@ -39,7 +39,7 @@
 import { weightFor, unwrapList } from '../sodex/restCore.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { ENGINES, defaultFee, type Engine, type LogLike, type TiersConfig } from './config.js';
-import { OrderState, applyFills, defaultsOf, feeOwedAt, judgeOrder, readFill, type FeeRow, type Fill, type OrderRow } from './counting.js';
+import { OrderState, applyFills, dayOf, defaultsOf, feeOwedAt, judgeOrder, readFill, type FeeRow, type Fill, type OrderRow } from './counting.js';
 import { explorerPath, orderFacts, readExplorerTx } from './explorer.js';
 import type { BuilderStore, Evidence, WalletRow } from './store.js';
 
@@ -496,7 +496,9 @@ export class Verifier {
       this.log.error({ wallets: this.wallets }, 'builder verifier: the ledger is full - no new wallet is taken on');
       return;
     }
-    const w = this.guard(() => this.store.createWallet(cfg.builderId, address, accountId, now, now - this.lookbackMs));
+    // A new wallet is read back as far as the volume window reaches (a 14-day window: 14 days), at least the lookback.
+    const back = Math.max(this.lookbackMs, (cfg.volumeDays ?? 0) * 86_400_000);
+    const w = this.guard(() => this.store.createWallet(cfg.builderId, address, accountId, now, now - back));
     if (!w) return;
     if (w.createdAt === now) this.wallets += 1;
     this.enqueue(w, now);
@@ -593,6 +595,7 @@ export class Verifier {
       const ok = this.store.commitFills({
         builder, address, gen: job.gen, engine,
         addMicro: result.addMicro,
+        byDay: result.byDay,
         rows: result.rows,
         queued: result.queued,
         noBuilder: result.noBuilder,
@@ -698,7 +701,7 @@ export class Verifier {
         this.store.commitLookup({
           builder, address: w.address, gen: w.createdAt, engine,
           row: { ...row, tries, nextAt: this.explorerPause, state: gaveUp ? (row.state === OrderState.check ? OrderState.checked : OrderState.unknown) : row.state },
-          closed: gaveUp, addMicro: 0, underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: w.misses + 1, now: at, evidence: [],
+          closed: gaveUp, addMicro: 0, byDay: new Map(), underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: w.misses + 1, now: at, evidence: [],
         });
       });
       this.log.warn(
@@ -726,7 +729,7 @@ export class Verifier {
       this.guard(() => this.store.commitLookup({
         builder, address: w.address, gen: w.createdAt, engine,
         row: { ...row, tries, nextAt: gaveUp ? 0 : at + wait, state: gaveUp ? (row.state === OrderState.check ? OrderState.checked : OrderState.unknown) : row.state },
-        closed: gaveUp, addMicro: 0, underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: null, now: at, evidence: [],
+        closed: gaveUp, addMicro: 0, byDay: new Map(), underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: null, now: at, evidence: [],
       }));
       return;
     }
@@ -737,7 +740,7 @@ export class Verifier {
       this.guard(() => this.store.commitLookup({
         builder, address: w.address, gen: w.createdAt, engine,
         row: { ...row, tries: row.tries + 1, nextAt: 0, state: row.state === OrderState.check ? OrderState.checked : OrderState.unknown },
-        closed: true, addMicro: 0, underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: null, now: at, evidence: [],
+        closed: true, addMicro: 0, byDay: new Map(), underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, misses: null, now: at, evidence: [],
       }));
       return;
     }
@@ -756,6 +759,8 @@ export class Verifier {
     const ok = this.guard(() => this.store.commitLookup({
       builder, address: w.address, gen: w.createdAt, engine, row: next2, closed: true,
       addMicro: verdict.addMicro,
+      // The order's paid fills, on the day it first filled (the explorer confirmed it long after, maybe).
+      byDay: verdict.addMicro > 0 ? new Map([[dayOf(row.t), verdict.addMicro]]) : new Map(),
       underpaid: verdict.underpaid ? { n: 1, at: facts.createdAt } : { n: 0, at: 0 },
       tampered: verdict.tampered ? { n: 1, at: facts.createdAt } : { n: 0, at: 0 },
       misses: verdict.state === OrderState.counted ? 0 : verdict.state === OrderState.other ? w.misses + 1 : null,

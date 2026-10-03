@@ -122,6 +122,17 @@ const toSafe = (n: bigint): number => Number(n > MAX_SAFE ? MAX_SAFE : n);
 /** Sums of micro-USD never leave the range a number holds exactly. */
 export const addMicro = (a: number, b: number): number => Math.min(Number.MAX_SAFE_INTEGER, a + b);
 
+const DAY = 86_400_000;
+/** The UTC day a moment falls on (days since 1970-01-01): the ledger counts volume per day. */
+export const dayOf = (t: number): number => Math.floor(t / DAY);
+
+/** Add `micro` to the count of `t`'s day. */
+export function addToDay(byDay: Map<number, number>, t: number, micro: number): void {
+  if (!(micro > 0)) return;
+  const d = dayOf(t);
+  byDay.set(d, addMicro(byDay.get(d) ?? 0, micro));
+}
+
 // --- fills ----------------------------------------------------------------------------
 
 /** Coins a notional in which is a dollar amount. */
@@ -278,6 +289,8 @@ export interface FillsInput {
 export interface FillsResult {
   /** Micro-USD to add to the wallet's counted volume now. */
   addMicro: number;
+  /** The same, by the UTC day of each fill (for the volume window). */
+  byDay: Map<number, number>;
   /** Rows to store: new ones and changed ones. */
   rows: OrderRow[];
   /** New rows the explorer has to look at. */
@@ -304,7 +317,7 @@ export function applyFills(input: FillsInput): FillsResult {
     else groups.set(f.orderKey, [f]);
   }
 
-  const out: FillsResult = { addMicro: 0, rows: [], queued: 0, noBuilder: { n: 0, at: 0 } };
+  const out: FillsResult = { addMicro: 0, byDay: new Map(), rows: [], queued: 0, noBuilder: { n: 0, at: 0 } };
   const unpaid: Array<{ first: Fill; last: number; app: boolean }> = [];
 
   for (const [orderKey, fills] of groups) {
@@ -336,7 +349,11 @@ export function applyFills(input: FillsInput): FillsResult {
       if (row.state === OrderState.counted) {
         // A known order of ours filling further. The fee is the order's, so its fills pay it; one that paid less is left out.
         let add = 0;
-        for (const f of fills) if (f.paid && f.rate >= row.rate) add = addMicro(add, f.notionalMicro);
+        for (const f of fills) {
+          if (!(f.paid && f.rate >= row.rate)) continue;
+          add = addMicro(add, f.notionalMicro);
+          addToDay(out.byDay, f.time, f.notionalMicro);
+        }
         row.countedMicro = addMicro(row.countedMicro, add);
         out.addMicro = addMicro(out.addMicro, add);
       } else if (row.state === OrderState.pending) row.rate = Math.min(row.rate, rate);

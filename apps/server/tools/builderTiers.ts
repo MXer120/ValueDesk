@@ -1,8 +1,10 @@
 /**
  * Builder fee tiers: the operator's tool (docs/BUILDER-TIERS.md §4). Run in apps/server.
  *
- *   npx tsx tools/builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--force]
- *       Writes the configuration and the signing key where they do not exist yet.
+ *   npx tsx tools/builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--max-fee <n>] [--volume-days <n>] [--force]
+ *       Writes the configuration and the signing key where they do not exist yet. --max-fee: the highest
+ *       fee the file may ever name (default: the default fee); --volume-days: the tiers go by the volume
+ *       of the last that many days (default: lifetime).
  *       --force replaces the CONFIGURATION. The key is never replaced: builds pin it.
  *   npx tsx tools/builderTiers.ts status [--address 0x...]
  *       What is on disk and whether it is valid; with an address, what the ledger holds for that wallet.
@@ -19,6 +21,8 @@
  *   npx tsx tools/builderTiers.ts set-fee --address 0x... --perps <n> --spot <n> [--note <text>]
  *       A hand-set fee for ONE wallet (a partner, a deal); it wins over the tiers.
  *   npx tsx tools/builderTiers.ts clear-fee --address 0x...
+ *   npx tsx tools/builderTiers.ts set-window --days <1..90 | lifetime>
+ *       The volume the tiers go by: the last that many days (UTC days, today included), or lifetime.
  * Fees are tenths of a basis point (20 = 2 bp = 0.02 %). Every change is checked as a whole
  * file (no fee above the default, milestones rising, ...) and written in one step; a change
  * that would make the file invalid is refused and nothing is written.
@@ -46,8 +50,9 @@ export interface ToolResult {
 }
 
 const USAGE =
-  'usage: builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--force] | status [--address 0x...] | forget --address 0x...' +
-  ' | set-tier --from-usd <volume> --perps <n> --spot <n> | remove-tier --from-usd <volume> | set-fee --address 0x... --perps <n> --spot <n> [--note <text>] | clear-fee --address 0x...';
+  'usage: builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--max-fee <n>] [--volume-days <n>] [--force] | status [--address 0x...] | forget --address 0x...' +
+  ' | set-tier --from-usd <volume> --perps <n> --spot <n> | remove-tier --from-usd <volume> | set-fee --address 0x... --perps <n> --spot <n> [--note <text>] | clear-fee --address 0x...' +
+  ' | set-window --days <1..90 | lifetime>';
 
 const usage = (error: string): ToolResult => ({ code: 2, out: { error, usage: USAGE } });
 
@@ -70,7 +75,7 @@ function parseArgs(args: string[], values: readonly string[], flags: readonly st
 const wholeOf = (v: string | true | undefined): number | null => (typeof v === 'string' && /^\d{1,15}$/.test(v) ? Number(v) : null);
 
 function init(args: string[]): ToolResult {
-  const a = parseArgs(args, ['--builder-id', '--fee-perps', '--fee-spot'], ['--test-tiers', '--force']);
+  const a = parseArgs(args, ['--builder-id', '--fee-perps', '--fee-spot', '--max-fee', '--volume-days'], ['--test-tiers', '--force']);
   if (!a) return usage('init: an argument was not understood');
   const builderId = wholeOf(a.get('--builder-id'));
   if (builderId === null || builderId <= 0) return usage('init: --builder-id <the builder account id> is required');
@@ -78,13 +83,19 @@ function init(args: string[]): ToolResult {
   const perps = wholeOf(a.get('--fee-perps'));
   const spot = wholeOf(a.get('--fee-spot'));
   if (test && (a.has('--fee-perps') || a.has('--fee-spot'))) return usage('init: --test-tiers and --fee-perps / --fee-spot exclude each other');
+  const maxFee = a.has('--max-fee') ? wholeOf(a.get('--max-fee')) : null;
+  if (a.has('--max-fee') && maxFee === null) return usage('init: --max-fee <n> is a whole number of tenths of a basis point');
+  const volumeDays = a.has('--volume-days') ? wholeOf(a.get('--volume-days')) : null;
+  if (a.has('--volume-days') && volumeDays === null) return usage('init: --volume-days <n> is a whole number of days');
 
   const configPath = tiersPath();
   const keyPath = termsKeyPath();
   let configWritten = false;
   if (!existsSync(configPath) || a.has('--force')) {
     if (!test && (perps === null || spot === null)) return usage('init: say --test-tiers, or the default fee with --fee-perps <n> --fee-spot <n> (tenths of a basis point)');
-    const raw = test ? testTiers(builderId) : { builderId, maxFeeRate: Math.max(perps!, spot!), tiers: [{ minVolumeUsd: 0, perps, spot }], underpaid: { policy: 'default-fee', days: 30 } };
+    const raw: Record<string, unknown> = test ? testTiers(builderId) : { builderId, maxFeeRate: Math.max(perps!, spot!), tiers: [{ minVolumeUsd: 0, perps, spot }], underpaid: { policy: 'default-fee', days: 30 } };
+    if (maxFee !== null) raw.maxFeeRate = maxFee;
+    if (volumeDays !== null) raw.volumeDays = volumeDays;
     const text = JSON.stringify(raw, null, 2) + '\n';
     const checked = parseTiers(text);
     if (!checked.config) return { code: 1, out: { error: 'these settings are not a valid configuration', problems: checked.problems, configPath } };
@@ -118,7 +129,7 @@ function init(args: string[]): ToolResult {
   }
   return {
     code: 0,
-    out: { configPath, keyPath, publicKey: signer.publicKey, keyId: signer.keyId, builderId: onDisk.config.builderId, tiers: onDisk.config.tiers, configWritten, keyWritten },
+    out: { configPath, keyPath, publicKey: signer.publicKey, keyId: signer.keyId, builderId: onDisk.config.builderId, maxFeeRate: onDisk.config.maxFeeRate, tiers: onDisk.config.tiers, volumeDays: onDisk.config.volumeDays, configWritten, keyWritten },
   };
 }
 
@@ -142,7 +153,9 @@ function status(args: string[]): ToolResult {
     valid: st.valid,
     problems: st.exists ? st.problems : ['the file does not exist: the feature is off'],
     builderId: cfg?.builderId ?? null,
+    maxFeeRate: cfg?.maxFeeRate ?? null,
     tiers: cfg?.tiers ?? null,
+    volumeDays: cfg ? cfg.volumeDays ?? 'lifetime' : null,
     overrides: cfg ? Object.keys(cfg.overrides).length : null,
     underpaid: cfg?.underpaid ?? null,
     keyPath: ks.path,
@@ -200,7 +213,7 @@ function forget(args: string[], now: number): ToolResult {
   }
   const wallet = address.toLowerCase();
   const dbPath = builderDbPath();
-  const none = { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 };
+  const none = { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 };
   if (!existsSync(dbPath)) return { code: 0, out: { address: wallet, dbPath, dbExists: false, removed: none, total: 0, countsFrom: null } };
   const store = new BuilderStore(dbPath);
   try {
@@ -251,6 +264,7 @@ function editConfig(what: string, change: (raw: Record<string, unknown>) => stri
 const summary = (c: TiersConfig): Record<string, unknown> => ({
   defaultFee: { perps: c.tiers[0]!.perps, spot: c.tiers[0]!.spot },
   tiers: c.tiers,
+  volumeDays: c.volumeDays ?? 'lifetime',
   handSetFees: Object.keys(c.overrides).length,
 });
 
@@ -275,6 +289,18 @@ function setTier(args: string[]): ToolResult {
     r.out.note = 'the web build pins the default fee too (VITE_BUILDER_FEE_PERPS / VITE_BUILDER_FEE_SPOT): the app never charges more than its build - a higher default needs a new web build, and above VITE_BUILDER_MAX_FEE every user approves again';
   }
   return r;
+}
+
+function setWindow(args: string[]): ToolResult {
+  const a = parseArgs(args, ['--days'], []);
+  const v = a?.get('--days');
+  const days = v === 'lifetime' ? null : wholeOf(v);
+  if (!a || a.size !== 1 || (v !== 'lifetime' && days === null)) return usage('set-window: --days <1..90> (the volume of the last that many days), or --days lifetime');
+  return editConfig(days === null ? 'tiers go by lifetime volume' : `tiers go by the volume of the last ${days} days`, (raw) => {
+    if (days === null) delete raw.volumeDays;
+    else raw.volumeDays = days;
+    return null;
+  });
 }
 
 function removeTier(args: string[]): ToolResult {
@@ -342,6 +368,7 @@ export function runTool(argv: string[], now: number = Date.now()): ToolResult {
     if (command === 'remove-tier') return removeTier(args);
     if (command === 'set-fee') return setFee(args);
     if (command === 'clear-fee') return clearFee(args);
+    if (command === 'set-window') return setWindow(args);
     return usage(command ? `unknown command "${command}"` : 'a command is required');
   } catch (e) {
     return { code: 1, out: { error: e instanceof Error ? e.message : String(e) } };

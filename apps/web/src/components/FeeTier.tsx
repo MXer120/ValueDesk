@@ -233,12 +233,12 @@ function Current({
           {engine === 'perps' ? ', buys and sells' : ' on sells (spot buys are not charged)'}, maker or taker. SoDEX
           charges it on top of the rates above and pays it to ValueDesk (builder account #{builderFee.builderId}).
           {builderFee.fullRate !== undefined
-            ? ` The volume you traded through ValueDesk has lowered it from ${fmtRate(builderRateToFraction(builderFee.fullRate))}.`
+            ? ` The volume you traded through ValueDesk${builderFee.next?.days ? ` in the last ${builderFee.next.days} days` : ''} has lowered it from ${fmtRate(builderRateToFraction(builderFee.fullRate))}.`
             : ''}
           {builderFee.next
             ? ` Next: ${fmtRate(builderRateToFraction(builderFee.next.rate))} once ${fmtUsd(builderFee.next.atUsd)} is traded through ValueDesk${
-                builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} so far)` : ''
-              }.`
+                builderFee.next.days ? ` within ${builderFee.next.days} days` : ''
+              }${builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} ${builderFee.next.days ? `in the last ${builderFee.next.days} days` : 'so far'})` : ''}.`
             : ''}
           {builderFee.status === 'required' ? ' It applies once you have approved it.' : ''}{' '}
           <button type="button" className="link" onClick={requestAdvanced}>

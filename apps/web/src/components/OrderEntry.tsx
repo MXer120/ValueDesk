@@ -2268,7 +2268,8 @@ export function OrderEntry({
             <div className="oe-out__row oe-out__row--note">
               <dd className="oe-out__v oe-out__v--note">
                 ValueDesk fee {pctRate(builderRateToFraction(builderFee.next.rate))} once {fmtUsd(builderFee.next.atUsd)} is traded through ValueDesk
-                {builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} so far)` : ''}.
+                {builderFee.next.days ? ` within ${builderFee.next.days} days` : ''}
+                {builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} ${builderFee.next.days ? `in the last ${builderFee.next.days} days` : 'so far'})` : ''}.
               </dd>
             </div>
           )}

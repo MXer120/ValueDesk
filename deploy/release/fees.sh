@@ -13,6 +13,7 @@
 #   deploy/release/fees.sh set-fee --address 0x... --perps 5 --spot 10 [--note partner_x]
 #                                                                      one wallet's own fee; it wins over the tiers
 #   deploy/release/fees.sh clear-fee --address 0x...
+#   deploy/release/fees.sh set-window --days 14          # tiers by the volume of the last 14 days (or: lifetime)
 #   ... --print                                                        show the command, run none
 #
 # Milestones need nothing from you: each verification of a wallet's volume puts it on the
@@ -40,7 +41,7 @@ for arg in "$@"; do
   esac
 done
 case "${args[0]:-}" in
-  status|set-tier|remove-tier|set-fee|clear-fee) ;;
+  status|set-tier|remove-tier|set-fee|clear-fee|set-window) ;;
   *) usage; die "unknown command: ${args[0]:-<none>}" ;;
 esac
 export PRINT_ONLY

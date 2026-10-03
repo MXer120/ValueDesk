@@ -130,7 +130,7 @@ test('the mechanism: 2 bp by default, 1.5 bp on perps once more than 10 USD of v
   assert.deepEqual(first.fee, { perps: 20, spot: 20 });
   assert.deepEqual(first.default, { perps: 20, spot: 20 });
   assert.deepEqual(first.tier, { index: 0, next: { atUsd: 10, fee: { perps: 15, spot: 20 } } });
-  assert.deepEqual(first.volume, { perpsUsd: 0, spotUsd: 0, totalUsd: 0, verifiedAt: null, pending: false });
+  assert.deepEqual(first.volume, { perpsUsd: 0, spotUsd: 0, totalUsd: 0, days: null, verifiedAt: null, pending: false });
   assert.deepEqual(first.flags, []);
   assert.equal(w.sodex.calls.length, 0, 'asking costs SoDEX nothing');
 
@@ -149,7 +149,7 @@ test('the mechanism: 2 bp by default, 1.5 bp on perps once more than 10 USD of v
   const started = w.clock.now();
   await drive(w.svc.verifier!, w.clock, HOUR);
   const after = w.ask(wallet);
-  assert.deepEqual(after.volume, { perpsUsd: 12.4, spotUsd: 0, totalUsd: 12.4, verifiedAt: after.volume.verifiedAt, pending: false });
+  assert.deepEqual(after.volume, { perpsUsd: 12.4, spotUsd: 0, totalUsd: 12.4, days: null, verifiedAt: after.volume.verifiedAt, pending: false });
   assert.deepEqual(after.fee, { perps: 15, spot: 20 }, 'the milestone is reached: perps 1.5 bp, spot unchanged');
   assert.deepEqual(after.tier, { index: 1, next: null });
   assert.deepEqual(after.flags, []);
@@ -298,7 +298,7 @@ test('counting: other builders, spot buys, other quote coins and both engines', 
   w.clock.advance(SEC);
 
   const t = await w.verify(wallet);
-  assert.deepEqual(t.volume, { perpsUsd: 5, spotUsd: 3, totalUsd: 8, verifiedAt: t.volume.verifiedAt, pending: false });
+  assert.deepEqual(t.volume, { perpsUsd: 5, spotUsd: 3, totalUsd: 8, days: null, verifiedAt: t.volume.verifiedAt, pending: false });
   assert.deepEqual(t.fee, { perps: 20, spot: 20 }, '8 USD: below the milestone');
   assert.deepEqual(t.flags, [], 'nothing here is held against the wallet');
   assert.equal(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${other}`)!.state, OrderState.other);
@@ -521,7 +521,7 @@ test('tampered: a wallet with no key of our app on record is not looked up at al
   const t = await w.verify(wallet);
   assert.equal(w.sodex.count('explorer'), 0);
   assert.deepEqual(t.flags, []);
-  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 1, engines: 2, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 1, engines: 2, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
 });
 
 // --- hints: limits and back-off ----------------------------------------------------------------------
@@ -879,19 +879,19 @@ test('forget: a wallet removed while the server runs stays removed - nothing in 
   const removed = tool.forget(wallet, forgotAt);
   tool.close();
   // (One fill: the first order's is no longer needed for telling repeats and was dropped.)
-  assert.deepEqual(removed, { wallets: 1, engines: 2, orders: 2, fills: 1, fees: 2, keys: 1, evidence: 1 });
+  assert.deepEqual(removed, { wallets: 1, engines: 2, orders: 2, fills: 1, fees: 2, keys: 1, evidence: 1, days: 1 });
 
   // The very next request starts from nothing.
   const clean = w.ask(wallet);
   assert.deepEqual(clean.fee, { perps: 20, spot: 20 });
   assert.deepEqual(clean.flags, []);
-  assert.deepEqual({ ...clean.volume, pending: false }, { perpsUsd: 0, spotUsd: 0, totalUsd: 0, verifiedAt: null, pending: false });
+  assert.deepEqual({ ...clean.volume, pending: false }, { perpsUsd: 0, spotUsd: 0, totalUsd: 0, days: null, verifiedAt: null, pending: false });
 
   // The queued verification finds its wallet gone and writes nothing.
   const sent = w.sodex.calls.length;
   await drive(w.svc.verifier!, w.clock, HOUR);
   assert.equal(w.sodex.calls.length, sent, 'not even a request');
-  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   assert.equal(w.svc.verifier!.pending(wallet), false);
 
   // A new run with the same wallet: what it did before is not counted again, what it does now is.
@@ -923,7 +923,7 @@ test('forget: a lookup in flight for a forgotten wallet is not written either', 
   tool.forget(wallet, w.clock.now());
   tool.close();
   await drive(w.svc.verifier!, w.clock, HOUR);
-  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+  assert.deepEqual(w.svc.store!.rowsOf(wallet), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   assert.equal(w.ask(wallet).volume.totalUsd, 0);
 });
 
@@ -972,4 +972,24 @@ test('ledger: order rows are kept while an order may still fill, then dropped; a
   const lookups = w.sodex.count('explorer');
   assert.equal((await w.verify(wallet)).volume.perpsUsd, 3);
   assert.equal(w.sodex.count('explorer'), lookups + 1);
+});
+
+test('counting: with volumeDays 14 a new wallet is read back 14 days, and its volume of those days sets the tier', async () => {
+  const w = world({ tiers: { builderId: BUILDER, maxFeeRate: 25, volumeDays: 14, tiers: [{ minVolumeUsd: 0, perps: 20, spot: 20 }, { minVolumeUsd: 10, perps: 15, spot: 20 }] } });
+  const { wallet, app } = trader(w, 31);
+  // A fill ten days before the wallet is taken on: past the 7-day lookback, inside the 14-day window.
+  const t1 = w.clock.now() - 10 * DAY;
+  w.sodex.order(wallet, { engine: 'perps', orderId: nextId(), at: t1, builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '1000', quantity: '0.012' }] });
+  w.clock.advance(SEC);
+  const created = w.clock.now();
+  const t = await w.verify(wallet);
+  const starts = w.sodex.calls.filter((c) => c.kind === 'trades' && c.path.includes('/perps/')).map((c) => Number(new URLSearchParams(c.path.split('?')[1]).get('startTime')));
+  assert.equal(starts[0], created - 14 * DAY, 'read back as far as the window reaches');
+  assert.equal(t.volume.perpsUsd, 12);
+  assert.deepEqual(t.fee, { perps: 15, spot: 20 }, '$12 in the last 14 days: the $10 tier');
+  // Five days later that fill is 15 days old: out of the window, back on the default fee - with no new read at all.
+  w.clock.advance(5 * DAY);
+  const later = w.ask(wallet);
+  assert.equal(later.volume.perpsUsd, 0);
+  assert.deepEqual(later.fee, { perps: 20, spot: 20 });
 });

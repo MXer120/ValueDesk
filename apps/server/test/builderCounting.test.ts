@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
-  APP_ORDER_ID, CLOCK_SLACK_MS, MAX_NOTED, OrderState, addMicro, applyFills, awaitsExplorer, defaultsOf, dollarQuoted, feeOwedAt, graceMs, judgeOrder, readFill,
+  APP_ORDER_ID, CLOCK_SLACK_MS, MAX_NOTED, OrderState, addMicro, applyFills, dayOf, awaitsExplorer, defaultsOf, dollarQuoted, feeOwedAt, graceMs, judgeOrder, readFill,
   type FeeRow, type Fill, type OrderFacts, type OrderRow,
 } from '../src/builder/counting.js';
 import { TERMS_TTL_MS } from '../src/builder/terms.js';
@@ -205,6 +205,8 @@ test('fills: an order known to be ours that fills further adds its new fills at 
     row: (k) => rows.get(k) ?? null, owedAt: owes20, checks: 0,
   });
   assert.equal(r.addMicro, 150_000_000, 'the counted order\'s two new fills');
+  // By the UTC day of each fill, for a volume window: here both on the day of T.
+  assert.deepEqual([...r.byDay], [[dayOf(T + 5), 150_000_000]]);
   assert.equal(r.queued, 0, 'nothing new for the explorer');
   const c = r.rows.find((x) => x.key === 'BTC-USD:1')!;
   assert.deepEqual({ counted: c.countedMicro, paid: c.paidMicro, lastT: c.lastT, t: c.t }, { counted: 200_000_000, paid: 200_000_000, lastT: T + 9, t: T });
@@ -228,7 +230,7 @@ test('fills: orders decided as another builder\'s, underpaid or unknown never co
 test('fills: spot buys never count and are never held against the wallet', () => {
   const buy = (id: number) => mk(id, { symbol: 'vETH_vUSDC', side: 'BUY', builderFee: undefined, feeCoin: 'vETH' }, 'spot');
   const r = applyFills({ fills: [buy(1), buy(2)], row: noRow, owedAt: owes20, checks: 5 });
-  assert.deepEqual(r, { addMicro: 0, rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
+  assert.deepEqual(r, { addMicro: 0, byDay: new Map(), rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
 });
 
 test('fills: builder-less orders where a fee was owed - the app\'s own client order ids first, a bounded number, each once', () => {
@@ -253,10 +255,10 @@ test('fills: builder-less orders where a fee was owed - the app\'s own client or
   assert.equal(none.queued, 0);
   const held = new Map(none.rows.map((r) => [r.key, r]));
   const again = applyFills({ fills, row: (k) => held.get(k) ?? null, owedAt: owes20, checks: 0 });
-  assert.deepEqual(again, { addMicro: 0, rows: [], queued: 0, noBuilder: { n: 0, at: 0 } }, 'the same fills again raise nothing');
+  assert.deepEqual(again, { addMicro: 0, byDay: new Map(), rows: [], queued: 0, noBuilder: { n: 0, at: 0 } }, 'the same fills again raise nothing');
 
   // Where no fee is owed (a fee of 0 attaches no builder) there is nothing to miss.
-  assert.deepEqual(applyFills({ fills, row: noRow, owedAt: () => 0, checks: 5 }), { addMicro: 0, rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
+  assert.deepEqual(applyFills({ fills, row: noRow, owedAt: () => 0, checks: 5 }), { addMicro: 0, byDay: new Map(), rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
   // A flood of them is noted up to a bound.
   const many = Array.from({ length: 60 }, (_, i) => bare(1000 + i, `vs-${i}`, T + i));
   assert.equal(applyFills({ fills: many, row: noRow, owedAt: owes20, checks: 0 }).rows.length, MAX_NOTED);
@@ -329,6 +331,14 @@ test('the pure rules run twice change nothing: a decided order adds nothing agai
   const counted: OrderRow = { ...row, state: verdict.state, rate: verdict.rate, countedMicro: verdict.addMicro };
   assert.equal(verdict.addMicro, 100_000_000);
   // The same fills are not handed in again (the ledger knows them); an empty batch is a no-op.
-  assert.deepEqual(applyFills({ fills: [], row: () => counted, owedAt: owes20, checks: 0 }), { addMicro: 0, rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
+  assert.deepEqual(applyFills({ fills: [], row: () => counted, owedAt: owes20, checks: 0 }), { addMicro: 0, byDay: new Map(), rows: [], queued: 0, noBuilder: { n: 0, at: 0 } });
   assert.equal(addMicro(Number.MAX_SAFE_INTEGER, 5), Number.MAX_SAFE_INTEGER, 'sums never leave the exact range');
+});
+
+test('fills: a counted order filling over midnight adds each fill to its own UTC day', () => {
+  const midnight = Math.ceil(T / 86_400_000) * 86_400_000;
+  const held: OrderRow = { key: 'BTC-USD:1', orderId: '1', symbol: 'BTC-USD', clOrdID: 'vs-abc', t: midnight - 1000, lastT: midnight - 1000, state: OrderState.counted, paidMicro: 50_000_000, rate: 20, countedMicro: 50_000_000, tries: 1, nextAt: 0 };
+  const r = applyFills({ fills: [mk(1, { time: midnight - 10 }), mk(1, { time: midnight + 10 })], row: () => held, owedAt: owes20, checks: 0 });
+  assert.equal(r.addMicro, 100_000_000);
+  assert.deepEqual([...r.byDay].sort((a, b) => a[0] - b[0]), [[dayOf(midnight - 10), 50_000_000], [dayOf(midnight + 10), 50_000_000]]);
 });

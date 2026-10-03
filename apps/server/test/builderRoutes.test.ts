@@ -12,7 +12,8 @@ import Fastify from 'fastify';
 import { testTiers } from '../src/builder/config.js';
 import { BuilderService } from '../src/builder/service.js';
 import { termsMessage, writeNewKeyFile } from '../src/builder/terms.js';
-import { FLAGS } from '../src/builder/tiers.js';
+import { FLAGS, MICRO } from '../src/builder/tiers.js';
+import { OrderState, dayOf } from '../src/builder/counting.js';
 import { DEFAULT_LIMITS, HOSTED_ROUTES, hostedRoute, installHostedGate, limitsFor, type HostedConfig } from '../src/hosted.js';
 import { CACHE_POLICIES, perfPlugin } from '../src/perf.js';
 import { builderRoutes } from '../src/routes/builder.js';
@@ -77,7 +78,7 @@ test('route: the answer of the contract - every field, signed, for the lower-cas
       {
         ok: true, chain: 286623, builderId: BUILDER, address: wallet.toLowerCase(), fee: { perps: 20, spot: 20 }, nonce: NONCE, issued: s.clock.now(), ttl: 600_000,
         keyId: 'x', sig: 'x', default: { perps: 20, spot: 20 },
-        volume: { perpsUsd: 0, spotUsd: 0, totalUsd: 0, verifiedAt: null, pending: false },
+        volume: { perpsUsd: 0, spotUsd: 0, totalUsd: 0, days: null, verifiedAt: null, pending: false },
         tier: { index: 0, next: { atUsd: 10, fee: { perps: 15, spot: 20 } } },
         flags: [],
       },
@@ -199,7 +200,7 @@ test('route: asking writes nothing - builder.db cannot grow from requests for wa
     // The same wallet asked a thousand times is still no row.
     for (let i = 0; i < 50; i++) await get(app, `address=${addr(0x7000)}&nonce=${NONCE}`);
     assert.equal(changes(), c0);
-    assert.deepEqual(s.svc.store!.rowsOf(addr(0x7000)), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0 });
+    assert.deepEqual(s.svc.store!.rowsOf(addr(0x7000)), { wallets: 0, engines: 0, orders: 0, fills: 0, fees: 0, keys: 0, evidence: 0, days: 0 });
   } finally {
     await app.close();
   }
@@ -299,6 +300,55 @@ test('hosted: the route is public as a read; a hint also counts as a request tha
     // The gate refuses a repeated parameter before the route sees it.
     assert.equal((await app.inject({ method: 'GET', url: `${URL_PATH}?address=${addr(1)}&address=${addr(2)}&nonce=${NONCE}` })).statusCode, 400);
     assert.equal(s.svc.verifier!.queues.approvals, 3);
+  } finally {
+    await app.close();
+  }
+});
+
+test('route: with volumeDays the tiers go by the last 14 days - older volume no longer lowers the fee, and the answer shows the window', async () => {
+  const W = addr(0xfeed);
+  const DAY = 86_400_000;
+  const s = setup({
+    tiers: { builderId: BUILDER, maxFeeRate: 25, volumeDays: 14, tiers: [{ minVolumeUsd: 0, perps: 15, spot: 15 }, { minVolumeUsd: 1_000_000, perps: 12, spot: 12 }] },
+  });
+  const app = await appFor(s.svc);
+  try {
+    await get(app, `address=${W}&nonce=${NONCE}`); // opens the ledger; asking writes nothing
+    const store = s.svc.store!;
+    const now = s.clock.now();
+    const w = store.createWallet(BUILDER, W, 77, now, 0);
+    const counted = (t: number, usd: number, key: string) =>
+      store.commitLookup({
+        builder: BUILDER, address: W, gen: w.createdAt, engine: 'perps', closed: true, addMicro: usd * MICRO, byDay: new Map([[dayOf(t), usd * MICRO]]), now, misses: 0,
+        row: { key, orderId: key, symbol: 'BTC-USD', clOrdID: 'vs-1', t, lastT: t, state: OrderState.counted, paidMicro: usd * MICRO, rate: 15, countedMicro: usd * MICRO, tries: 1, nextAt: 0 },
+        underpaid: { n: 0, at: 0 }, tampered: { n: 0, at: 0 }, evidence: [],
+      });
+    const ask = async () => (await get(app, `address=${W}&nonce=${NONCE}`)).json();
+
+    counted(now - 20 * DAY, 2_000_000, 'old');
+    let body = await ask();
+    assert.deepEqual(body.fee, { perps: 15, spot: 15 }, '$2M three weeks ago: outside the 14 days - the default fee');
+    assert.equal(body.volume.totalUsd, 0);
+
+    counted(now - 2 * DAY, 1_500_000, 'recent');
+    body = await ask();
+    assert.deepEqual(body.fee, { perps: 12, spot: 12 }, '$1.5M two days ago: the $1M tier');
+    assert.equal(body.volume.totalUsd, 1_500_000);
+    assert.equal(body.tier.index, 1);
+
+    // Eleven days on, the $1.5M is 13 days old: still inside the 14 days (today included). A day later it is out.
+    s.clock.advance(11 * DAY);
+    assert.deepEqual((await ask()).fee, { perps: 12, spot: 12 });
+    s.clock.advance(1 * DAY);
+    body = await ask();
+    assert.deepEqual(body.fee, { perps: 15, spot: 15 }, 'the volume left the window: back on the default fee');
+    assert.equal(body.volume.totalUsd, 0);
+    // Lifetime (no volumeDays): everything ever counted.
+    writeFileSync(s.tiersPath, JSON.stringify({ builderId: BUILDER, maxFeeRate: 25, tiers: [{ minVolumeUsd: 0, perps: 15, spot: 15 }, { minVolumeUsd: 1_000_000, perps: 12, spot: 12 }] }));
+    s.svc.load();
+    body = await ask();
+    assert.deepEqual(body.fee, { perps: 12, spot: 12 });
+    assert.equal(body.volume.totalUsd, 3_500_000);
   } finally {
     await app.close();
   }
