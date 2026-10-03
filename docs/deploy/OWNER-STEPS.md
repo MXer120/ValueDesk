@@ -32,7 +32,7 @@ warn or refuse until the site's address is on that project's list:
 
 1. Sign in at **https://dashboard.reown.com** and open that project.
 2. In its **Domain / Allowlist** settings add exactly `https://valuedeskapp.vercel.app`
-   (and `https://valuedeskapp.vercel.app` while the old address is in use; later also your own domain). Do not add preview addresses: only this address
+   (and `https://valuexplorer.vercel.app` while the old address is in use; later also your own domain). Do not add preview addresses: only this address
    talks to the index.
 3. For the public launch you may want a separate project for production; give Claude
    its Project ID then (it is not a secret).
