@@ -157,8 +157,11 @@ test('a whole live run against the fake: every step runs, every check passes (or
     assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
   }
   assert.equal(byId.get('perps-market-by-funds')?.status, 'skipped');
-  // FOK: the fake answers as SoDEX documents it ("not supported") - recorded as a finding, never a failure.
-  for (const id of ['spot-fok-not-fillable', 'spot-fok-fillable', 'perps-fok-not-fillable', 'perps-fok-fillable']) assert.equal(byId.get(id)?.status, 'finding', `${id}: ${byId.get(id)?.detail}`);
+  // FOK: SoDEX rejects it (live 2026-10-03) - the app refuses it before signing, nothing is sent.
+  for (const id of ['spot-fok-not-fillable', 'spot-fok-fillable', 'perps-fok-not-fillable', 'perps-fok-fillable']) {
+    assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+    assert.match(byId.get(id)!.detail, /refused it before signing/);
+  }
   // Refusals: nothing moved.
   for (const id of ['refuse-perps-limit-below-min-notional', 'refuse-spot-limit-below-min-notional', 'refuse-perps-market-below-min-notional', 'refuse-spot-market-below-min-notional', 'refuse-quantity-rounds-to-zero', 'refuse-off-tick-price', 'refuse-off-step-quantity', 'refuse-reduce-only-without-position', 'refuse-spot-trigger', 'refuse-transfer-over-balance', 'refuse-withdraw-over-balance', 'refuse-withdraw-below-minimum', 'refuse-malformed-receiver']) {
     assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);

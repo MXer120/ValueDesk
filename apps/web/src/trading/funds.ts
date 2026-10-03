@@ -58,6 +58,7 @@ import {
   type Engine,
 } from '@sodex-core';
 import { api, type DepositChain } from '../api';
+import { CHAIN_ADDRESS } from './chainAddress';
 import { addOrSwitchChain, getChainId, sendTransaction, signTypedData, WalletError, type Eip1193Provider } from '../wallet';
 import { ADDRESS_KIND_LABEL, addressProblem, toChecksumAddress, type AddressKind } from './addresses';
 import { OutcomeUnknownError, readGateway } from './gateway';
@@ -144,15 +145,8 @@ const CHAIN_LABELS: Record<string, string> = {
   XRP: 'XRP Ledger',
   ZEC: 'Zcash',
 };
-/**
- * The address each SoDEX chain pays out to (trading/addresses.ts). A chain not listed is not offered.
- * TON is not: SoDEX lists TON deposits and withdrawals, but its only TON market (vTON_vUSDC) is halted -
- * a deposit could not be traded (owner's decision, 2026-10-03: "if sodex doesnt support ton we shouldnt either").
- */
-export const CHAIN_ADDRESS: Record<string, AddressKind> = {
-  ETH: 'evm', BASE_ETH: 'evm', ARBITRUM_ETH: 'evm', MATIC: 'evm', BSC_BNB: 'evm', AVAXC: 'evm', HYPEREVM_HYPE: 'evm', ARC: 'evm', ROBINHOOD_ETH: 'evm',
-  SOL: 'solana', BTC: 'bitcoin', LTC: 'litecoin', DOGE: 'dogecoin', ADA: 'cardano', SUI: 'sui', XLM: 'stellar', XRP: 'xrp',
-};
+/** The address each SoDEX chain pays out to - a chain not listed (TON) is not offered (trading/chainAddress.ts). */
+export { CHAIN_ADDRESS };
 /** Chains whose withdrawals take a numeric memo (sodex.com: "Memo", digits only). */
 const MEMO_CHAINS = new Set(['XRP', 'XLM']);
 /**
@@ -939,7 +933,7 @@ export async function withdrawFunds(o: {
   }
   if (sent.receipt?.status === 'reverted') throw new WalletError(`SoDEX's transaction ${sent.txHash} reverted - nothing left your wallet.${parked}`);
   const w = sent.receipt ? withdrawalFromReceipt(sent.receipt) : null;
-  if (w && (w.account.toLowerCase() !== owner || w.chain !== r.key || w.coinSymbol !== coin.coin || w.amount > units)) {
+  if (w && (w.account.toLowerCase() !== owner || w.chain !== r.key || w.coinSymbol !== coin.coin || !recordAmountIs(w.amount, units))) {
     log.error('withdrawal record does not match the request', { expected: { owner, chain: r.key, coin: coin.coin, units: units.toString() }, got: { ...w, withdrawId: w.withdrawId.toString(), amount: w.amount.toString() } });
   }
   log.info('withdrawal to another chain created', { coin: coin.coin, chain: r.key, amount: o.amount, txHash: sent.txHash, withdrawId: w?.withdrawId.toString() });
@@ -955,8 +949,26 @@ export interface WithdrawalProgress {
   withdrawId: string | null;
   /** The payout transaction on the destination chain, once SoDEX has sent it. */
   destinationTx: string | null;
-  /** What SoDEX took as its fee, in the coin's decimals. */
+  /** What SoDEX took as its fee - in the DESTINATION token's decimals, as `amount` (recordUnits converts). */
   fee: bigint | null;
+  /** The amount the record names, in the destination token's decimals. */
+  amount: bigint | null;
+}
+
+/**
+ * The Withdrawer record states amounts in the DESTINATION token's decimals, not the coin's ValueChain ones:
+ * USDC is 6.1 = 6100000 on Arbitrum but 6100000000000000000 on BNB Chain and Arc (live run, 2026-10-03).
+ * Does the record's `recordAmount` name exactly `units` (ValueChain decimals) in some number of decimals?
+ */
+export function recordAmountIs(recordAmount: bigint, units: bigint): boolean {
+  if (recordAmount === units) return true;
+  for (let p = 10n; p <= 10n ** 18n; p *= 10n) if (recordAmount === units * p || recordAmount * p === units) return true;
+  return false;
+}
+
+/** A figure of the record (its fee) in the coin's ValueChain units, scaled by the record's amount against the request's `units`. */
+export function recordUnits(v: bigint, recordAmount: bigint, units: bigint): bigint {
+  return recordAmount > 0n ? (v * units) / recordAmount : v;
 }
 
 /**
@@ -968,7 +980,7 @@ export async function withdrawalProgress(ref: { withdrawId?: string | null; txHa
   let id = ref.withdrawId ? BigInt(ref.withdrawId) : null;
   if (id === null && ref.txHash) {
     const receipt = await waitForReceipt(ref.txHash, 0);
-    if (receipt?.status === 'reverted') return { status: 'Reverted - nothing left your wallet', done: true, ok: false, withdrawId: null, destinationTx: null, fee: null };
+    if (receipt?.status === 'reverted') return { status: 'Reverted - nothing left your wallet', done: true, ok: false, withdrawId: null, destinationTx: null, fee: null, amount: null };
     id = receipt ? withdrawalFromReceipt(receipt)?.withdrawId ?? null : null;
   }
   if (id === null) return null;
@@ -981,6 +993,7 @@ export async function withdrawalProgress(ref: { withdrawId?: string | null; txHa
     withdrawId: w.withdrawId.toString(),
     destinationTx: w.txHash || null,
     fee: w.withdrawFee,
+    amount: w.amount,
   };
 }
 

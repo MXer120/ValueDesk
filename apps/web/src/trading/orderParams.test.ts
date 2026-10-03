@@ -18,8 +18,7 @@ import {
   placeOrderAction,
   triggerTypeFor,
   withdrawAction,
-  type MarketSymbol,
-} from './orderParams';
+  type MarketSymbol, FOK_REFUSED } from './orderParams';
 
 const BTC: MarketSymbol = {
   id: 7,
@@ -294,4 +293,15 @@ test("an order from the ticket is byte-identical to the official Go SDK's (perps
   const spot = placeOrderAction('spot', { symbol: 'BTC_USDC', side: 'buy', price: '95000', quantity: '0.406', tif: 'gtc' }, { ...sym(1, 'BTC_USDC'), tickSize: '1' }, 43933, undefined, () => 'opentrade-spot-1');
   assert.equal(core.goJSONStringify(spot.action.params), sv.bodyJSON, 'spot body bytes');
   assert.equal(core.signExchangeAction(core.engineDomainName('spot'), V.chainID, sv.actionType, spot.action.params, BigInt(sv.nonce), pk), sv.signature, 'spot signature');
+});
+
+test('fill-or-kill is refused before signing - SoDEX answers it with "timeInForce is invalid" on spot and perps', () => {
+  for (const engine of ['perps', 'spot'] as const) {
+    assert.throws(
+      () => placeOrderAction(engine, { symbol: 'BTC-USD', side: 'buy', type: 'limit', price: '84000', quantity: '0.01', tif: 'fok' }, BTC, 1, undefined, id),
+      (e: unknown) => e instanceof OrderValidationError && e.message === FOK_REFUSED && /IOC/.test(e.message),
+    );
+  }
+  // IOC, GTC and post-only still go out.
+  for (const tif of ['ioc', 'gtc', 'gtx'] as const) assert.doesNotThrow(() => placeOrderAction('perps', { symbol: 'BTC-USD', side: 'buy', type: 'limit', price: '84000', quantity: '0.01', tif }, BTC, 1, undefined, id));
 });

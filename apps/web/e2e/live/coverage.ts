@@ -51,6 +51,8 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     sendOnValueChain: c(['withdraw-valuechain-other'], 'withdrawFunds to another ValueChain address'),
     withdrawQuote: c(['withdraw-*', 'route-*']),
     withdrawalProgress: c(['withdraw-*']),
+    recordAmountIs: c(['withdraw-*']),
+    recordUnits: c(['withdraw-*']),
     // Called after each withdrawal / gasless deposit the run followed to its end (the next permit is not stopped by it).
     forgetSettledPermit: c(['withdraw-*', 'transfer-evm-to-spot']),
     permitExecuted: c(['withdraw-*']),

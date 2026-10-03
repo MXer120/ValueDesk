@@ -120,3 +120,23 @@ test('issuing an address: create_deposit_address once per wallet and chain every
     Date.now = realNow;
   }
 });
+
+test('deposit options: a chain the caller does not offer (TON) is neither asked for nor shown; a failed chain read is not "no address"', async () => {
+  const asked: string[] = [];
+  const r = await buildDepositOptions(io({ current: { ARBITRUM_ETH: ARB }, requestDepositAddress: async (_a, c) => void asked.push(c), offersChain: (c) => c !== 'ETH' }), ME);
+  assert.deepEqual(r.issuing, ['BASE_ETH'], 'Ethereum (not offered here) is not asked for');
+  assert.deepEqual(asked, ['BASE_ETH']);
+  // The custody read fails for Base: nothing is asked for - it may well have an address already.
+  const asked2: string[] = [];
+  const r2 = await buildDepositOptions(
+    io({
+      currentDepositWallet: async (_a, chain) => {
+        if (chain === 'BASE_ETH') throw new Error('timeout');
+        return chain === 'ARBITRUM_ETH' ? ARB : null;
+      },
+      requestDepositAddress: async (_a, c) => void asked2.push(c),
+    }),
+    ME,
+  );
+  assert.ok(!asked2.includes('BASE_ETH') && !r2.issuing.includes('BASE_ETH'), `asked: ${asked2.join(', ')}`);
+});

@@ -77,7 +77,9 @@ export function genClOrdID(prefix = 'vs', now = Date.now()): string {
 }
 
 const SIDE = { buy: OrderSide.BUY, sell: OrderSide.SELL } as const;
-const TIF = { gtc: TimeInForce.GTC, fok: TimeInForce.FOK, ioc: TimeInForce.IOC, gtx: TimeInForce.GTX } as const;
+const TIF = { gtc: TimeInForce.GTC, ioc: TimeInForce.IOC, gtx: TimeInForce.GTX } as const;
+/** Why a fill-or-kill order is refused (SoDEX rejects the time in force on both engines). */
+export const FOK_REFUSED = 'SoDEX does not accept fill-or-kill (FOK) orders - use IOC (immediate-or-cancel): it fills what it can at once and cancels the rest';
 
 /**
  * The trigger price kind, as SoDEX accepts it in order placement: the mark
@@ -126,6 +128,8 @@ export function placeOrderAction(
   const type = t.type === 'market' ? OrderType.MARKET : OrderType.LIMIT;
   // A market order must not rest on the book: IOC unless told otherwise.
   const tifKey = t.postOnly ? 'gtx' : (String(t.tif ?? (type === OrderType.MARKET ? 'ioc' : 'gtc')).toLowerCase() as 'gtc');
+  // SoDEX answers FOK with "timeInForce is invalid" on spot and perps (live run, 2026-10-03): refused before signing.
+  if (tifKey === ('fok' as string)) throw new OrderValidationError(FOK_REFUSED);
   const timeInForce = TIF[tifKey];
   if (!timeInForce) throw new OrderValidationError(`unknown time in force ${tifKey}`);
   if (type === OrderType.LIMIT && !t.price) throw new OrderValidationError('limit orders require a price');

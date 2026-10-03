@@ -31,9 +31,9 @@ const genClOrdID = (prefix = 'ot'): string =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
 const SIDE: Record<string, number> = { buy: A.OrderSide.BUY, sell: A.OrderSide.SELL };
+// No FOK: SoDEX answers it with "timeInForce is invalid" on spot and perps (live run, 2026-10-03).
 const TIF: Record<string, number> = {
-  gtc: A.TimeInForce.GTC, fok: A.TimeInForce.FOK,
-  ioc: A.TimeInForce.IOC, gtx: A.TimeInForce.GTX,
+  gtc: A.TimeInForce.GTC, ioc: A.TimeInForce.IOC, gtx: A.TimeInForce.GTX,
 };
 const TRIGGER: Record<string, number> = {
   last: A.TriggerType.LAST_PRICE, mark: A.TriggerType.MARK_PRICE, index: A.TriggerType.INDEX_PRICE,
@@ -81,6 +81,7 @@ export async function tradeRoutes(app: FastifyInstance): Promise<void> {
     const type = b.type === 'market' ? A.OrderType.MARKET : A.OrderType.LIMIT;
     // A market order must not rest on the book; default it to IOC.
     const tifKey = b.postOnly ? 'gtx' : (b.tif ?? (type === A.OrderType.MARKET ? 'ioc' : 'gtc'));
+    if (tifKey === 'fok') return reply.code(400).send({ error: 'SoDEX does not accept fill-or-kill (FOK) orders - use IOC (immediate-or-cancel): it fills what it can at once and cancels the rest' });
     const timeInForce = TIF[tifKey];
     if (!timeInForce) return reply.code(400).send({ error: `unknown tif ${tifKey}` });
     if (type === A.OrderType.LIMIT && !b.price) {

@@ -37,6 +37,7 @@ import {
   place,
   positionOf,
   putInOrder,
+  refusedLocally,
   releasePerpsCollateral,
   rememberMarket,
   restsAfter,
@@ -59,6 +60,20 @@ import { builderRef, type BuilderRef } from './ledger';
 import { marketQty, readMarket, restingBuy, type Market } from './plan';
 import { engineState, type OpenOrder } from './reads';
 import { ensureTrading } from './trading';
+import { FOK_REFUSED } from '../../src/trading/orderParams';
+
+/**
+ * A fill-or-kill order: SoDEX answers it with "timeInForce is invalid" on both engines (live, 2026-10-03), so the
+ * app refuses it before anything is signed - and says to use IOC. Nothing is sent.
+ */
+async function fokRefused(ctx: Ctx, id: string, what: string, fn: () => Promise<unknown>): Promise<void> {
+  await scenario(ctx, id, async () => {
+    const r = await refusedLocally(ctx, fn);
+    if (!r.refused) throw new CheckFailure(`${what}: ${r.why}`);
+    if (!r.reason.includes(FOK_REFUSED)) throw new CheckFailure(`${what}: refused, but for another reason: "${r.reason}"`);
+    ctx.checks.pass(id, `${what}: the app refused it before signing ("${r.reason}") - SoDEX rejects FOK ("timeInForce is invalid"); nothing was sent`, { refusal: r.reason });
+  });
+}
 import { approx, cut, dAdd, dCmp, dMul, dSub, dur, paced, sleep, toStep } from './util';
 
 const canon = (v: string | number | undefined | null): string => {
@@ -546,12 +561,8 @@ export async function stepOrdersSpot(ctx: Ctx): Promise<void> {
     await mustNotFill(ctx, m, 'spot-gtx-cross', { market: m, side: 'buy', type: 'limit', tif: 'gtx', price: px, quantity: q }, `spot post-only buy ${q} @ ${px} (above the ask ${m.ask})`, { rests: 'finding', rejection: 'pass' });
     await mustNotFill(ctx, m, 'spot-ioc-no-cross', { market: m, side: 'buy', type: 'limit', tif: 'ioc', price: rb.price, quantity: rb.qty }, `spot IOC buy ${rb.qty} @ ${rb.price} (far below the market)`, { rests: 'fail', rejection: 'pass' });
     await mustFill(ctx, m, 'spot-ioc-cross', { market: m, side: 'buy', type: 'limit', tif: 'ioc', price: px, quantity: q }, `spot IOC buy ${q} @ ${px} (crosses the ask ${m.ask})`, { rejection: 'fail' });
-    await mustNotFill(ctx, m, 'spot-fok-not-fillable', { market: m, side: 'buy', type: 'limit', tif: 'fok', price: rb.price, quantity: rb.qty }, `spot FOK buy ${rb.qty} @ ${rb.price} (far below the market)`, { rests: 'fail', rejection: 'finding' });
-    const m2 = await readMarket('spot', ref);
-    rememberMarket(m2);
-    const px2 = crossingBuyPrice(m2);
-    const q2 = minQtyAt(m2, px2, 5);
-    await mustFill(ctx, m2, 'spot-fok-fillable', { market: m2, side: 'buy', type: 'limit', tif: 'fok', price: px2, quantity: q2 }, `spot FOK buy ${q2} @ ${px2} (crosses the ask ${m2.ask})`, { rejection: 'finding' });
+    await fokRefused(ctx, 'spot-fok-not-fillable', `spot FOK buy ${rb.qty} @ ${rb.price} (far below the market)`, () => app.placeOrder('spot', { symbol: m.sym.name, side: 'buy', type: 'limit', tif: 'fok', price: rb.price, quantity: rb.qty }));
+    await fokRefused(ctx, 'spot-fok-fillable', `spot FOK buy ${q} @ ${px} (crosses the ask ${m.ask})`, () => app.placeOrder('spot', { symbol: m.sym.name, side: 'buy', type: 'limit', tif: 'fok', price: px, quantity: q }));
   }
 
   // 6. The dead-man switch on spot: scheduled a minute out, cleared at once (the perps step lets one fire).
@@ -889,14 +900,13 @@ export async function stepOrdersPerps(ctx: Ctx): Promise<void> {
     );
   }
 
-  // --- 6. FOK (SoDEX documents it as not supported: whatever it does is recorded) ------------------------------------
+  // --- 6. FOK: SoDEX rejects it ("timeInForce is invalid", live 2026-10-03) - the app refuses it before signing -------
   m = await fresh();
   rb = restingBuy(m, cfg.orders.perpsLimitOffsetPct);
-  await mustNotFill(ctx, m, 'perps-fok-not-fillable', { market: m, side: 'buy', type: 'limit', tif: 'fok', price: rb.price, quantity: rb.qty }, `${name} FOK buy ${rb.qty} @ ${rb.price} (far below the market)`, { rests: 'fail', rejection: 'finding' });
-  m = await fresh();
+  await fokRefused(ctx, 'perps-fok-not-fillable', `${name} FOK buy ${rb.qty} @ ${rb.price} (far below the market)`, () => app.placeOrder('perps', { symbol: m.sym.name, side: 'buy', type: 'limit', tif: 'fok', price: rb.price, quantity: rb.qty }));
   px = crossingBuyPrice(m);
   q = minQtyAt(m, px, 5);
-  await mustFill(ctx, m, 'perps-fok-fillable', { market: m, side: 'buy', type: 'limit', tif: 'fok', price: px, quantity: q }, `${name} FOK buy ${q} @ ${px} (crosses the ask ${m.ask})`, { rejection: 'finding' });
+  await fokRefused(ctx, 'perps-fok-fillable', `${name} FOK buy ${q} @ ${px} (crosses the ask ${m.ask})`, () => app.placeOrder('perps', { symbol: m.sym.name, side: 'buy', type: 'limit', tif: 'fok', price: px, quantity: q }));
 
   // Flat again before the entry with exits.
   await rec.sub(`${name}: close whatever is open`, async () => {

@@ -217,6 +217,8 @@ export interface DepositOptionsIo {
   registryInfo(): { address: string; chainId: number };
   /** Ask SoDEX to issue an address on a chain where this wallet has none (absent: the options only read). */
   requestDepositAddress?(account: string, chain: string): Promise<void>;
+  /** The chains the caller offers at all (absent: every whitelisted chain). Others are never asked for, nor shown. */
+  offersChain?(chain: string): boolean;
 }
 
 /**
@@ -238,7 +240,8 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
   const registry = await io.remoteNativeTokens().catch(() => [] as RemoteNativeToken[]);
   const disabledOnChain = (chain: string): boolean =>
     registry.find((r) => r.chain.toUpperCase() === chain.toUpperCase())?.custodyDisabled ?? false;
-  const chains = [...new Set(Object.values(config.whitelist).flatMap((c) => Object.keys(c).map((k) => k.toUpperCase())))].filter((c) => !disabledOnChain(c));
+  const offered = (chain: string): boolean => io.offersChain?.(chain) ?? true;
+  const chains = [...new Set(Object.values(config.whitelist).flatMap((c) => Object.keys(c).map((k) => k.toUpperCase())))].filter((c) => !disabledOnChain(c) && offered(c));
 
   // Per chain: the current address on-chain, and the issuer's word on it (its
   // REST row, else sodex.com's per-chain status read - only where there is an
@@ -248,12 +251,17 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
   const issuing: string[] = [];
   await Promise.all(
     chains.map(async (chain) => {
-      const now = await io.currentDepositWallet(address, chain).catch(() => null);
+      let answered = true;
+      const now = await io.currentDepositWallet(address, chain).catch(() => {
+        answered = false;
+        return null;
+      });
       current.set(chain, now);
       const row = restByChain.get(chain);
       if (row) issuer.set(chain, { status: issuerStatus(row.status), address: row.address });
       else if (now) issuer.set(chain, await io.issuerDepositStatus(address, chain));
-      else if (io.requestDepositAddress) {
+      // Only where the chain's custody ANSWERED "no address" - a failed read is not an empty chain.
+      else if (answered && io.requestDepositAddress) {
         // No address on this chain at all (SoDEX's bulk issue covers the EVM chains only): ask for one, as
         // sodex.com's Deposit sheet does. Nothing is shown until SoDEX has issued it and the chain lists it.
         issuing.push(chain);
@@ -304,7 +312,7 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
   const assets = Object.entries(config.whitelist)
     .map(([symbol, chainRules]) => {
       const routes = Object.entries(chainRules)
-        .filter(([chain]) => !disabledOnChain(chain))
+        .filter(([chain]) => !disabledOnChain(chain) && offered(chain.toUpperCase()))
         .flatMap(([chain, rules]): MirrorRoute[] => {
           const row = addressFor(symbol, chain);
           if (!row) return [];

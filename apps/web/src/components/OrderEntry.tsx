@@ -52,6 +52,7 @@ import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, fmtUsd, num, pic
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
+import { couldntLoad } from './LoadFailed';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useTradeGate } from './account/useTradeGate';
 import { useBuilderFee } from './account/useBuilderFee';
@@ -643,6 +644,8 @@ export function OrderEntry({
   const [pctDraft, setPctDraft] = useState(0);
   const pctDraftRef = useRef(0);
   const pctArmed = useRef(false);
+  /** The size on the ticket was written by the slider (not typed): it follows the limit price while that is typed. */
+  const sizeBySlider = useRef(false);
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>('base');
   const [stopPrice, setStopPrice] = useState('');
   const [stopKind, setStopKind] = useState<'sl' | 'tp'>('sl');
@@ -1159,9 +1162,11 @@ export function OrderEntry({
     if (!sliderReady) return;
     // 0% is no order: an empty field, not "0.00000" sitting in the size box.
     if (!(pct > 0)) {
+      sizeBySlider.current = false;
       setSizeInput('');
       return;
     }
+    sizeBySlider.current = true;
     const target = (sliderBasis! * pct) / 100;
     setSizeInput(
       sizeUnit === 'quote'
@@ -1191,12 +1196,52 @@ export function OrderEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sliderReady]);
 
+  // A size the slider wrote follows the limit price while it is typed: the first digit of "84000" makes the
+  // slider usable, and without this the percent would stay applied at a price of 8 - a size 10,000 times too
+  // large. Re-applied on every price (and balance) change until the size is typed by hand. A market ticket's
+  // price is the live one: its size is never rewritten under the cursor.
   useEffect(() => {
-    if (!sliderReady) return;
+    if (marketExec || !sliderReady || !sizeBySlider.current || !(pctDraftRef.current > 0)) return;
+    setPct(pctDraftRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [price, sliderBasis, marketExec]);
+
+  // The thumb follows a size typed by hand; a size the slider wrote keeps the percent that was chosen.
+  useEffect(() => {
+    if (!sliderReady || sizeBySlider.current) return;
     const next = Math.max(0, Math.min(100, Math.round(thumbPct)));
     pctDraftRef.current = next;
     setPctDraft(next);
   }, [sliderReady, thumbPct]);
+
+  // A percent chosen for one market is not carried to the next one while no size is on the ticket.
+  useEffect(() => {
+    if (sizeInput.trim()) return;
+    sizeBySlider.current = false;
+    pctArmed.current = false;
+    pctDraftRef.current = 0;
+    setPctDraft(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, engine]);
+
+  /**
+   * Why the slider cannot write a size for a CONNECTED wallet (before a wallet is connected the thumb moves
+   * on its own - the percent is applied once a balance exists). Reading the balance says nothing yet.
+   */
+  const sliderNote =
+    !connectedAddress || sliderReady || (acct.loading && !acct.data)
+      ? null
+      : acct.error && !acct.data
+        ? couldntLoad(`Available ${engine === 'perps' ? 'margin' : 'balance'}`)
+        : available === null
+          ? `Available ${engine === 'perps' ? 'margin' : 'balance'} unavailable — size manually.`
+          : available <= 0
+            ? 'No free balance to size against.'
+            : engine === 'perps' && !(lev > 0)
+              ? 'Set a leverage to size by percentage.'
+              : marketExec
+                ? 'No price to size against yet.'
+                : 'Enter a price to size by percentage.';
 
   /**
    * Switch units WITHOUT changing the order.
@@ -1575,6 +1620,7 @@ export function OrderEntry({
                   {maxLev === null && (
                     <p className="oe-pop__note">This symbol publishes no maximum leverage, so nothing here is clamped.</p>
                   )}
+                  {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
                   <button type="button" className="oe-confirm" onClick={commitLeverage} disabled={busy}>
                     Confirm {clampLev(levDraft)}x
                   </button>
@@ -1616,6 +1662,7 @@ export function OrderEntry({
                     </span>
                   </button>
                 ))}
+                {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
               </div>
             )}
           </div>
@@ -1765,7 +1812,10 @@ export function OrderEntry({
               autoComplete="off"
               className="oe-input"
               value={sizeInput}
-              onChange={(e) => setSizeInput(decimalInput(e.target.value))}
+              onChange={(e) => {
+                sizeBySlider.current = false;
+                setSizeInput(decimalInput(e.target.value));
+              }}
               inputMode="decimal"
               placeholder="0.00" 
             />
@@ -1831,6 +1881,7 @@ export function OrderEntry({
             <span className="oe-suffix">%</span>
           </div>
         </div>
+        {sliderNote && <p className="oe-note">{sliderNote}</p>}
 
         {/* 5. Flags, TIF and the attached exits.
             Two rows, each a checkbox on the left and its own control on the
@@ -1854,9 +1905,10 @@ export function OrderEntry({
                 type="button"
                 ref={tifBtnRef}
                 className="oe-select"
+                id={`${uid}-tifv`}
                 aria-haspopup="listbox"
                 aria-expanded={pop === 'tif'}
-                aria-labelledby={`${uid}-tif`}
+                aria-labelledby={`${uid}-tif ${uid}-tifv`}
                 onClick={() => setPop((p) => (p === 'tif' ? null : 'tif'))}
               >
                 {tif.toUpperCase()}
@@ -1868,6 +1920,20 @@ export function OrderEntry({
                   role="listbox"
                   aria-label="Time in force"
                   tabIndex={-1}
+                  onKeyDown={(e) => {
+                    const opts = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+                    if (!opts.length) return;
+                    const at = opts.indexOf(document.activeElement as HTMLButtonElement);
+                    const from = at >= 0 ? at : Math.max(0, TIF_OPTIONS.findIndex((o) => o.id === tif));
+                    const go = (i: number) => {
+                      e.preventDefault();
+                      opts[(i + opts.length) % opts.length]!.focus();
+                    };
+                    if (e.key === 'ArrowDown') go(at >= 0 ? from + 1 : from);
+                    else if (e.key === 'ArrowUp') go(at >= 0 ? from - 1 : from);
+                    else if (e.key === 'Home') go(0);
+                    else if (e.key === 'End') go(opts.length - 1);
+                  }}
                   data-side={tifPos?.side ?? 'down'}
                   style={{
                     left: tifPos?.left ?? 0,
@@ -1882,6 +1948,7 @@ export function OrderEntry({
                       type="button"
                       role="option"
                       aria-selected={tif === o.id}
+                      tabIndex={tif === o.id ? 0 : -1}
                       className={`oe-pop__opt${tif === o.id ? ' is-on' : ''}`}
                       onClick={() => {
                         setTif(o.id);

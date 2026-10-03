@@ -30,6 +30,7 @@ import {
   withdrawFunds,
   withdrawQuote,
   withdrawalProgress,
+  recordUnits,
   forgetSettledPermit,
   permitExecuted,
   type ChainRoute,
@@ -812,19 +813,13 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
     }
     seen = w.value!;
   }
-  const p = seen.p;
+  let p = seen.p;
   if (p?.done && !p.ok) {
     flight.what += ` - SoDEX's record says "${p.status}" (a failed withdrawal paid from Spot is credited back to Spot)`;
     throw new Error(`the withdrawal to ${route.label} ended as "${p.status}"`);
   }
-  let recordNote = `SoDEX's record: "${p?.status ?? 'none read'}"`;
-  if (!p?.done) {
-    recordNote = followedByNonce
-      ? 'SoDEX gave no transaction to follow: the permit\'s nonce shows it executed (no record could be read)'
-      : `the funds arrived, but withdrawalProgress() does not report the withdrawal final (${p ? `"${p.status}"` : 'no record read'}) - the Withdraw sheet would not show "Completed"`;
-    rec.warn('withdrawal record', recordNote);
-  }
-  if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(evmChain(route.key) ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
+  // The record's fee, in the coin's decimals (the record uses the destination token's).
+  const recordFee = (): string | null => (p?.fee !== null && p?.fee !== undefined ? formatUnits(p.amount ? recordUnits(p.fee, p.amount, unitsDown(amount, dp)) : p.fee, dp) : null);
   let received: string | null = null;
   // The chain's nodes gave no answer for the whole wait, while SoDEX's record says it was paid.
   let unanswered = false;
@@ -846,7 +841,7 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
       );
       received = formatUnits(after - before, dest.decimals);
       rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} sent, ${received} received`);
-      rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${cut(dSub(amount, received), 12)} ${coin.coin} (on-chain fee ${fee}${p?.fee !== null && p?.fee !== undefined ? `, record says ${formatUnits(p.fee, dp)}` : ''})`);
+      rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${cut(dSub(amount, received), 12)} ${coin.coin} (on-chain fee ${fee}${recordFee() !== null ? `, record says ${recordFee()}` : ''})`);
     } catch (e) {
       // Not one read answered (Polygon, 2026-10-03: every node call aborted for 15 min), and SoDEX's record says
       // the payout is done: the record is the evidence - reported as a finding, not an open transfer.
@@ -858,8 +853,29 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   } else {
     rec.note(`arrival on ${route.label} cannot be read from here - SoDEX's record "${p?.status ?? '?'}" is the evidence`);
     rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} (fee ${fee}, net ${net})`);
-    rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${p?.fee !== null && p?.fee !== undefined ? formatUnits(p.fee, dp) : fee} ${coin.coin}`);
+    rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${recordFee() ?? fee} ${coin.coin}`);
   }
+  // The funds arrive before SoDEX writes the record's final status (60-130 s later on every chain, live 2026-10-03):
+  // followed there, as the Withdraw sheet keeps polling it - "Completed" is seen, not assumed.
+  if (!p?.done && (txHash || withdrawId)) {
+    const fin = await rec.sub(
+      "verify: SoDEX's record turns final (the Withdraw sheet keeps polling it until then)",
+      () => waitMaybe({ timeoutMs: 10 * 60_000, intervalMs: 10_000, probe: () => withdrawalProgress({ withdrawId, txHash }).catch(() => null), done: (v) => !!v?.done }),
+      (x) => (x.ok ? x.value?.status ?? '?' : 'not final after 10 more minutes'),
+    );
+    if (fin.value) p = fin.value;
+  }
+  let recordNote = `SoDEX's record: "${p?.status ?? 'none read'}"`;
+  if (!p?.done) {
+    recordNote = followedByNonce
+      ? 'SoDEX gave no transaction to follow: the permit\'s nonce shows it executed (no record could be read)'
+      : `the funds arrived, but SoDEX's record is not final 10 minutes later (${p ? `"${p.status}"` : 'no record read'}) - the Withdraw sheet would not show "Completed"`;
+    rec.warn('withdrawal record', recordNote);
+  } else if (!p.ok) {
+    recordNote = `the funds arrived, but SoDEX's record ended as "${p.status}"`;
+    rec.warn('withdrawal record', recordNote);
+  }
+  if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(evmChain(route.key) ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
   ctx.inFlight.splice(ctx.inFlight.indexOf(flight), 1);
   // Followed to its end: the app need not stop the next permit to say this one went through.
   await forgetSettledPermit('withdraw', owner).catch(() => false);

@@ -64,8 +64,7 @@ import {
   permitExecuted,
   withdrawalProgress,
   type ChainRoute,
-  type CoinConfig,
-} from './funds';
+  type CoinConfig, recordAmountIs, recordUnits } from './funds';
 import { receiverAccount, type ReceiverAccount } from '../components/funds/depositGuard';
 
 const master = generateTradingKey();
@@ -915,4 +914,15 @@ test("withdrawFunds leaves an unknown address below the minimum to the sheet's c
   world.registryDown = true;
   const r2 = await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: THEIRS, amount: '5', sources: evmOnly });
   assert.ok('withdrawId' in r2, 'the sheet asked for the tick; nothing here blocks it');
+});
+
+test('withdrawal records: amounts in the destination token\'s decimals (USDC 18 on BNB Chain and Arc) match the request; the fee converts back', () => {
+  // Live 2026-10-03: 6.1 USDC requested (6 decimals on ValueChain).
+  assert.equal(recordAmountIs(6_100_000n, 6_100_000n), true, 'Arbitrum: 6 decimals');
+  assert.equal(recordAmountIs(6_100_000_000_000_000_000n, 6_100_000n), true, 'BNB Chain: 18 decimals');
+  assert.equal(recordAmountIs(610_000n, 6_100_000n), true, 'fewer decimals than ValueChain');
+  assert.equal(recordAmountIs(6_200_000_000_000_000_000n, 6_100_000n), false, 'another amount');
+  assert.equal(recordAmountIs(61_000_001n, 6_100_000n), false, 'not a power of ten');
+  assert.equal(recordUnits(1_000_000_000_000_000_000n, 6_100_000_000_000_000_000n, 6_100_000n), 1_000_000n, 'a 1 USDC fee on BNB Chain is 1 USDC');
+  assert.equal(recordUnits(1_000_000n, 6_100_000n, 6_100_000n), 1_000_000n);
 });

@@ -27,6 +27,7 @@ import { depositWalletReads } from '@sign/sodex/depositWalletsCore.js';
 import { issuerReads } from '@sign/sodex/depositAddressCore.js';
 import { CHAINS } from '@sign/sodex/chainParams.js';
 import { rpcBatch } from '../trading/rpc';
+import { offersChain } from '../trading/chainAddress';
 import { BIZ_ORIGIN, network } from './hosts';
 
 export { DepositAddressRequestError, type DepositOptions };
@@ -123,6 +124,8 @@ export const deposits = {
         depositWalletLists: (a, coin) => lists.depositWalletLists(a, coin),
         registryInfo: () => ({ address: MIRROR_REGISTRY, chainId: CHAINS[network()].chainId }),
         requestDepositAddress: (a, c) => issuer.requestDepositAddress(a, c),
+        // TON and any chain the app does not pay out to: never asked for, never shown.
+        offersChain,
       },
       address,
     );

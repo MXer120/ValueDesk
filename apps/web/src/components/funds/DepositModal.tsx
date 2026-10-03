@@ -252,9 +252,12 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
   // PEPE-only address has no on-chain record to verify it against.
   const tokens = useMemo(() => {
     if (!configs) return [];
-    const open = (symbol: string, chain: string) =>
-      symbol.toUpperCase() !== 'PEPE' &&
-      configs.find((c) => c.coin.toUpperCase() === symbol.toUpperCase())?.chains.find((c) => c.key === chain)?.deposit.allowed === true;
+    // A chain the app does not pay out to (TON) is not offered for deposits either: coins sent there could
+    // not be traded or withdrawn here.
+    const open = (symbol: string, chain: string) => {
+      const route = configs.find((c) => c.coin.toUpperCase() === symbol.toUpperCase())?.chains.find((c) => c.key === chain);
+      return symbol.toUpperCase() !== 'PEPE' && route?.deposit.allowed === true && route.addressKind !== 'other';
+    };
     return (mirror ?? [])
       .map((a) => ({ ...a, routes: a.routes.filter((r) => open(a.symbol, r.chain)) }))
       .filter((a) => a.routes.length && (!firstDeposit || a.symbol.toUpperCase() === 'USDC'));
