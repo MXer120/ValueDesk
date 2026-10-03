@@ -14,6 +14,12 @@
  * unapproved builder is rejected, and a fee nobody approved must never be asked
  * for - so the approval SoDEX lists, per engine, is the only source of truth,
  * and the cost the UI shows is derived from the same decision the order uses.
+ *
+ * WHICH FEE. The build's fee per engine is the DEFAULT and the highest. A
+ * wallet may owe less (a volume tier, docs/BUILDER-TIERS.md): the callers pass
+ * the fee owed now (terms.ts `feeNow`), and nothing here ever goes above the
+ * default. Whether an order may leave WITHOUT the builder is not decided here
+ * but at the gate every signed action passes (feeGuard.ts).
  */
 import {
   attachableBuilderFee,
@@ -94,11 +100,34 @@ export const sameApproval = (a: BuilderApproval | null | undefined, b: BuilderAp
  * only within the engine's own cap. A stored approval for another builder id
  * (the build changed its builder) attaches nothing.
  */
-export function orderBuilder(b: BuilderConfig | null | undefined, approval: BuilderApproval | null | undefined, engine: Engine): BuilderParams | undefined {
+export function orderBuilder(
+  b: BuilderConfig | null | undefined,
+  approval: BuilderApproval | null | undefined,
+  engine: Engine,
+  /** The fee the wallet owes now on `engine` (terms.ts `feeNow`). Default, and upper limit: the build's fee. */
+  fee?: number,
+): BuilderParams | undefined {
   const cfg = activeBuilder(b);
   if (!cfg || !approval || approval.id !== cfg.id) return undefined;
-  const fee = attachableBuilderFee(engine, cfg.fee[engine], approval.engines?.[engine]);
-  return fee === null ? undefined : { id: cfg.id, fee };
+  const owed = owedFee(cfg, engine, fee);
+  if (owed === null) return undefined;
+  const approved = approval.engines?.[engine];
+  // A wallet whose terms say 0 still names the builder, where SoDEX lists it at all (its orders stay ours).
+  if (owed === 0) return typeof approved === 'number' && Number.isInteger(approved) && approved > 0 ? { id: cfg.id, fee: 0 } : undefined;
+  const attach = attachableBuilderFee(engine, owed, approved);
+  return attach === null ? undefined : { id: cfg.id, fee: attach };
+}
+
+/**
+ * The fee an order on `engine` is to carry: `fee` when it is a whole number
+ * from 0 to the build's default, the default otherwise - anything unusable
+ * falls to the HIGHEST fee, never to a lower one. null: the build does not
+ * charge on this engine at all.
+ */
+export function owedFee(cfg: BuilderConfig, engine: Engine, fee?: number): number | null {
+  const dflt = cfg.fee[engine];
+  if (!(dflt > 0)) return null;
+  return typeof fee === 'number' && Number.isInteger(fee) && fee >= 0 && fee <= dflt ? fee : dflt;
 }
 
 // --- what the user is told ------------------------------------------------------
@@ -164,6 +193,14 @@ export interface BuilderFeeQuote {
    *             it - every order that goes out from here will carry it.
    */
   status: 'attached' | 'required';
+  /** The build's default fee - present only when `rate` is below it (a volume tier applies to this wallet). */
+  fullRate?: number;
+  /**
+   * The next tier the server names, when it is lower: from `atUsd` of volume
+   * traded here the fee is `rate`. For the screen only - it is not signed and
+   * decides nothing.
+   */
+  next?: { atUsd: number; rate: number; volumeUsd: number | null };
 }
 
 /**
@@ -177,18 +214,26 @@ export function quoteBuilderFee(i: {
   approval: BuilderApproval | null | undefined;
   engine: Engine;
   side: 'buy' | 'sell';
+  /** The fee the wallet owes now on this engine (terms.ts `feeNow`); the build's default when omitted. */
+  fee?: number;
+  /** The next tier, as the terms name it (display only). */
+  next?: { atUsd: number; rate: number; volumeUsd: number | null } | null;
 }): BuilderFeeQuote | null {
   const cfg = activeBuilder(i.builder);
-  if (!cfg || cfg.fee[i.engine] <= 0) return null;
-  const attached = orderBuilder(cfg, i.approval, i.engine);
+  if (!cfg) return null;
+  const owed = owedFee(cfg, i.engine, i.fee);
+  if (owed === null) return null;
+  const attached = orderBuilder(cfg, i.approval, i.engine, owed);
   if (!attached && !cfg.required) return null;
-  const rate = attached?.fee ?? cfg.fee[i.engine];
+  const rate = attached?.fee ?? owed;
   return {
     builderId: cfg.id,
     rate,
     fraction: builderRateToFraction(rate),
     charged: builderFeeCharged(i.engine, i.side),
     status: attached ? 'attached' : 'required',
+    ...(rate < cfg.fee[i.engine] ? { fullRate: cfg.fee[i.engine] } : {}),
+    ...(i.next && Number.isInteger(i.next.rate) && i.next.rate >= 0 && i.next.rate < rate ? { next: i.next } : {}),
   };
 }
 

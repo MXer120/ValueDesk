@@ -35,11 +35,18 @@
  *     (ApproveBuilderFeeAction, the maximum only), it is sent from here, and
  *     both engines are read again - with pauses, since reads lag a write.
  * The fee is then attached per engine ONLY where SoDEX lists the approval
- * (actions.ts). Optional builds (the default): declining, or SoDEX refusing,
- * means trading works without a builder fee, and the reason is logged.
- * Required builds: without the approval trading stays off, and no key is
- * registered. Why a separate signature rather than the combined
+ * (actions.ts). Required builds (the default for a build that names a
+ * builder): without the approval trading stays off and no key is registered,
+ * and every order goes out with the builder or not at all (feeGuard.ts).
+ * Optional builds (VITE_BUILDER_REQUIRED=0, test builds): declining, or SoDEX
+ * refusing, means trading works without a builder fee, and the reason is
+ * logged. Why a separate signature rather than the combined
  * AddAPIKeyWithBuilder: builderApproval.ts and docs/BUILDER-CODES.md.
+ *
+ * HOW MUCH. The fee an order carries is the build's default unless the server
+ * has signed a lower one for this wallet (terms.ts). The terms follow the
+ * key: asked for when trading is enabled or restored, kept current while it
+ * is on. What this browser stores about fees or approvals decides nothing.
  *
  * WHAT THE KEY CAN DO. SoDEX only lets a restricted key be one that cannot
  * trade, so the trading key is an ORDINARY key: it can trade, cancel, change
@@ -82,6 +89,7 @@ import {
 } from './builder';
 import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from './builderApproval';
 import { tradingConfig } from './config';
+import { followTerms } from './terms';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
 import { openVault, type KeyVault, type StoredKey } from './vault';
 import { addOrSwitchChain, getChainId, isUserRejection, signTypedData, type Eip1193Provider } from '../wallet';
@@ -130,6 +138,10 @@ export class TradingError extends Error {
       | 'network'
       /** This build requires the builder-fee approval and it is not there. */
       | 'builder-required'
+      /** The fee guard refused to sign an action (feeGuard.ts): nothing was sent. */
+      | 'fee-guard'
+      /** An order was changed as cancel + new order, and the new order was not accepted. */
+      | 'recreate-failed'
       /** The user closed the builder-fee dialog: nothing was signed, nothing changed. */
       | 'cancelled',
   ) {
@@ -222,6 +234,8 @@ function dropSigner(): void {
   expiryTimer = undefined;
   clearBuilderTimers();
   builderPending = false;
+  // No key, nobody to keep fee terms current for (what is held simply runs out).
+  followTerms(null);
 }
 
 function adopt(meta: StoredKey, privateKey: Uint8Array, remembered: boolean): void {
@@ -243,6 +257,8 @@ function adopt(meta: StoredKey, privateKey: Uint8Array, remembered: boolean): vo
     builder: meta.builder,
     reason: null,
   });
+  // The fee this wallet owes: asked for now (enabled or restored), then kept current (terms.ts).
+  followTerms(meta.owner);
   // Browsers clamp long timers; re-arm in at most a day.
   const arm = () => {
     const left = meta.expiresAt - Date.now();

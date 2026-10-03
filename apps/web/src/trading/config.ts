@@ -18,20 +18,34 @@
  * sodex/chainParams.ts): an impersonated or compromised API cannot point a
  * signature or a deposit anywhere else, nor switch mainnet trading on.
  *
- * THE BUILDER FEE (docs/BUILDER-CODES.md). OFF unless VITE_BUILDER_ID is set:
- * without it nothing is approved, attached or shown, and the app behaves
- * exactly as it does with no builder at all. The server has no say in any of
- * this - who is paid, and how much, is fixed in the bundle the user loads.
+ * THE BUILDER FEE (docs/BUILDER-CODES.md, docs/BUILDER-TIERS.md). OFF unless
+ * VITE_BUILDER_ID is set: without it nothing is approved, attached or shown,
+ * and the app behaves exactly as it does with no builder at all. Who is paid,
+ * the highest fee and the approval ceiling are fixed in the bundle the user
+ * loads. The server can do one thing only: LOWER a wallet's fee below the two
+ * fees here, with a statement signed by a key pinned here (trading/terms.ts).
  *   VITE_BUILDER_ID             Valuescan's SoDEX builder account id; unset =
  *                               no builder fee is approved or charged
- *   VITE_BUILDER_FEE_PERPS      fee per perps order, tenths of a bp (0..200)
- *   VITE_BUILDER_FEE_SPOT       fee per spot order, tenths of a bp (0..2000;
- *                               SoDEX charges it on sells only)
+ *   VITE_BUILDER_FEE_PERPS      the DEFAULT (highest) fee per perps order,
+ *                               tenths of a bp (0..200)
+ *   VITE_BUILDER_FEE_SPOT       the DEFAULT (highest) fee per spot order,
+ *                               tenths of a bp (0..2000; SoDEX charges it on
+ *                               sells only)
  *   VITE_BUILDER_MAX_FEE        the ceiling the user approves, tenths of a bp
  *                               (0..2000); default: the higher of the two fees
- *   VITE_BUILDER_REQUIRED       '1' - trading through Valuescan requires the
- *                               approval; unset - the fee is optional, and a
- *                               user who declines trades without it
+ *   VITE_BUILDER_REQUIRED       unset or '1' - trading through Valuescan
+ *                               REQUIRES the approval: an order goes out with
+ *                               the builder or not at all. '0' - the fee is
+ *                               optional and a user who declines trades without
+ *                               it (for a test build; never a public one)
+ *   VITE_BUILDER_TERMS_KEYS     Ed25519 public keys of the server that may
+ *                               lower a wallet's fee: base64url of the raw 32
+ *                               bytes, comma separated. Unset - every wallet
+ *                               pays the two fees above
+ * A build that names a builder but whose fee settings cannot be read (a typo,
+ * both fees 0) does NOT fall back to trading without a fee: trading is off in
+ * that build until the settings are fixed. Only VITE_BUILDER_REQUIRED=0 keeps
+ * the old behaviour (the builder is simply off).
  *   VITE_TRADING_KEY_TTL_H      trading key lifetime in hours (1..168; 168 =
  *                               7 days, what sodex.com gives its web key)
  *   VITE_TRADING_DISABLED       '1' - an emergency build with trading off
@@ -53,9 +67,10 @@ export interface BuilderConfig {
   /** The approval ceiling the user signs, tenths of a basis point. */
   maxFeeRate: number;
   /**
-   * true: trading through Valuescan requires the approval - declining leaves
-   * trading off. false: optional - a user who declines (or whose approval SoDEX
-   * refuses) trades without a builder fee.
+   * true (the default for a build that names a builder): trading through
+   * Valuescan requires the approval - an order goes out with the builder or
+   * not at all. false (VITE_BUILDER_REQUIRED=0, test builds): optional - a
+   * user who declines trades without a builder fee.
    */
   required: boolean;
 }
@@ -69,6 +84,11 @@ export interface TradingConfig {
   /** Mainnet writes are allowed (always true on testnet). */
   writesAllowed: boolean;
   builder: BuilderConfig | null;
+  /**
+   * Public keys (Ed25519, base64url of the raw 32 bytes) whose signature may
+   * lower a wallet's builder fee (trading/terms.ts). Empty: nobody can.
+   */
+  termsKeys: readonly string[];
   /** Trading key lifetime, milliseconds. */
   keyTtlMs: number;
   /** An emergency build: every write is refused. */
@@ -86,10 +106,14 @@ const int = (v: string | undefined, lo: number, hi: number): number | null => {
   return Number.isInteger(n) && n >= lo && n <= hi ? n : null;
 };
 
+/** `VITE_BUILDER_REQUIRED=0`: the one setting that makes a builder optional. */
+const optionalBuild = (e: Record<string, string | undefined>): boolean => e.VITE_BUILDER_REQUIRED?.trim() === '0';
+
 /**
  * Why a build that SETS a builder does not get one - empty when the settings
  * are valid (or no builder is configured at all). A value that is present but
  * unusable is never read as 0: a typo must not quietly become "no fee on perps".
+ * See `builderBroken` for what such a build does instead.
  */
 export function builderEnvProblems(e: Record<string, string | undefined> = env): string[] {
   if (blank(e.VITE_BUILDER_ID)) return [];
@@ -109,15 +133,29 @@ export function builderEnvProblems(e: Record<string, string | undefined> = env):
     else if (max < Math.max(perps, spot)) out.push('VITE_BUILDER_MAX_FEE is below the fee it has to cover');
   }
   if (!blank(e.VITE_BUILDER_REQUIRED) && e.VITE_BUILDER_REQUIRED!.trim() !== '1' && e.VITE_BUILDER_REQUIRED!.trim() !== '0') {
-    out.push("VITE_BUILDER_REQUIRED must be '1' (required) or unset (optional)");
+    out.push("VITE_BUILDER_REQUIRED must be '0' (optional, test builds only), or '1' / unset (required)");
+  }
+  // A builder that charges nothing is no builder. Naming one and charging nothing is
+  // a forgotten fee, not a decision - unless the build says the fee is optional.
+  if (!out.length && perps === 0 && spot === 0 && !optionalBuild(e)) {
+    out.push('VITE_BUILDER_ID is set but both VITE_BUILDER_FEE_PERPS and VITE_BUILDER_FEE_SPOT are 0: set a fee, or remove VITE_BUILDER_ID');
   }
   return out;
 }
 
 /**
+ * A build that names a builder and cannot charge it must not trade for free:
+ * its trading is OFF (docs/BUILDER-TIERS.md G1). Not so when the build says
+ * the fee is optional - there, as before, the builder is simply off.
+ */
+export function builderBroken(e: Record<string, string | undefined> = env): boolean {
+  return builderEnvProblems(e).length > 0 && !optionalBuild(e);
+}
+
+/**
  * The builder as the build configured it, or null (no fee). Invalid values
- * turn the builder off rather than signing something unintended; a builder
- * whose fees are both 0 charges nothing and is the same as none.
+ * never become a different fee: they give no builder here, and `builderBroken`
+ * then switches the build's trading off. REQUIRED unless the build says '0'.
  */
 export function builderFromEnv(e: Record<string, string | undefined> = env): BuilderConfig | null {
   const id = int(e.VITE_BUILDER_ID, 1, Number.MAX_SAFE_INTEGER);
@@ -126,7 +164,38 @@ export function builderFromEnv(e: Record<string, string | undefined> = env): Bui
   const spot = int(e.VITE_BUILDER_FEE_SPOT, 0, BUILDER_FEE_CAP.spot) ?? 0;
   if (perps === 0 && spot === 0) return null;
   const max = int(e.VITE_BUILDER_MAX_FEE, 0, MAX_BUILDER_APPROVAL_RATE) ?? Math.max(perps, spot);
-  return { id, fee: { perps, spot }, maxFeeRate: max, required: e.VITE_BUILDER_REQUIRED?.trim() === '1' };
+  return { id, fee: { perps, spot }, maxFeeRate: max, required: !optionalBuild(e) };
+}
+
+const B64URL = /^[A-Za-z0-9_-]+$/;
+
+/** The raw bytes of a base64url string, or null when it is not one. */
+export function base64UrlBytes(s: string): Uint8Array | null {
+  const t = s.trim();
+  if (!t || !B64URL.test(t) || t.length % 4 === 1) return null;
+  try {
+    const bin = atob(t.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (t.length % 4)) % 4));
+    return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The pinned terms keys of the build: every entry that is a 32-byte Ed25519
+ * public key. An unusable entry is dropped and named - it can only ever cost a
+ * discount (no usable key: every wallet pays the default fee), never the fee.
+ */
+export function termsKeysFromEnv(e: Record<string, string | undefined> = env): { keys: string[]; problems: string[] } {
+  const keys: string[] = [];
+  const problems: string[] = [];
+  for (const part of (e.VITE_BUILDER_TERMS_KEYS ?? '').split(',')) {
+    const k = part.trim();
+    if (!k) continue;
+    if (base64UrlBytes(k)?.length !== 32) problems.push(`VITE_BUILDER_TERMS_KEYS: "${k.slice(0, 12)}${k.length > 12 ? '...' : ''}" is not base64url of 32 bytes`);
+    else if (!keys.includes(k)) keys.push(k);
+  }
+  return { keys, problems };
 }
 
 const pinned = (): Network | null => {
@@ -141,16 +210,22 @@ let current: TradingConfig = {
   // On until the server says otherwise: it may only ever switch trading OFF.
   writesAllowed: true,
   builder: builderFromEnv(),
+  termsKeys: termsKeysFromEnv().keys,
   keyTtlMs: (int(env.VITE_TRADING_KEY_TTL_H, 1, 168) ?? 168) * 3_600_000,
-  disabled: env.VITE_TRADING_DISABLED === '1',
+  // An emergency build - or one that names a builder it cannot charge (G1).
+  disabled: env.VITE_TRADING_DISABLED === '1' || builderBroken(),
 };
 
 // A builder that was meant to be on and is not must be visible to whoever runs the build.
 {
   const problems = builderEnvProblems();
   const log = logger('trade');
-  if (problems.length) log.error('the builder fee is OFF: its settings are invalid', { problems });
-  else if (!blank(env.VITE_BUILDER_ID) && !current.builder) log.warn('the builder fee is OFF: both VITE_BUILDER_FEE_PERPS and VITE_BUILDER_FEE_SPOT are 0');
+  if (problems.length && builderBroken()) log.error('TRADING IS OFF in this build: it names a builder but its fee settings are invalid', { problems });
+  else if (problems.length) log.error('the builder fee is OFF: its settings are invalid', { problems });
+  else if (!blank(env.VITE_BUILDER_ID) && !current.builder) log.warn('the builder fee is OFF: both VITE_BUILDER_FEE_PERPS and VITE_BUILDER_FEE_SPOT are 0 (an optional build)');
+  const terms = termsKeysFromEnv();
+  if (terms.problems.length) log.error('builder fee tiers: a pinned terms key is unusable and was dropped', { problems: terms.problems, usable: terms.keys.length });
+  if (current.builder && !current.builder.required) log.warn('this build makes the builder fee OPTIONAL (VITE_BUILDER_REQUIRED=0): a user who declines trades without it');
 }
 
 /** Whether the backend has told us which network it reads. */

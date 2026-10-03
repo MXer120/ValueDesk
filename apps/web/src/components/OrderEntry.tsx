@@ -48,7 +48,7 @@ import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus } from '../hooks';
-import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
+import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, fmtUsd, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
@@ -61,7 +61,7 @@ import { Collapse } from './motion';
 import { couldntLoad } from './LoadFailed';
 import { notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
-import { mulDecimal, roundToStep } from '@sodex-core';
+import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
 import { notify } from '../toast';
 import { publishOrderImpact, type RawTake } from '../orderImpact';
 
@@ -2058,7 +2058,24 @@ export function OrderEntry({
                 </button>{' '}
                 <span className="oe-tag">builder</span>
               </dt>
-              <dd className="oe-out__v">{builderFee.charged ? `+${pctRate(builderFee.fraction)}` : 'none on spot buys'}</dd>
+              <dd className="oe-out__v">
+                {!builderFee.charged ? 'none on spot buys' : builderFee.fullRate !== undefined ? (
+                  /* A volume tier applies to this wallet: the default struck through, like a discounted venue rate above. */
+                  <span className="oe-fee">
+                    <s className="oe-fee__was">+{pctRate(builderRateToFraction(builderFee.fullRate))}</s>
+                    <span className="oe-fee__now">+{pctRate(builderFee.fraction)}</span>
+                  </span>
+                ) : `+${pctRate(builderFee.fraction)}`}
+              </dd>
+            </div>
+          )}
+          {builderFee?.next && (
+            /* The next volume tier, as the server names it (shown only; the fee above is what the order carries). */
+            <div className="oe-out__row oe-out__row--note">
+              <dd className="oe-out__v oe-out__v--note">
+                Valuescan fee {pctRate(builderRateToFraction(builderFee.next.rate))} once {fmtUsd(builderFee.next.atUsd)} is traded through Valuescan
+                {builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} so far)` : ''}.
+              </dd>
             </div>
           )}
           {feesOpen && (

@@ -146,6 +146,17 @@ test('hints: a missing key is named as such, not as a signing bug', () => {
   assert.match(new SodexApiError(-1, 'nonce is invalid', 400, '/x').hint!, /Nonce/);
 });
 
+test('hints: an order rejected over its builder says so - not "trailing zeros or the tick grid"', () => {
+  for (const msg of ['builder fee is not approved', 'spot: builder 223169 not approved', 'Builder fee rate exceeds the approved max fee rate']) {
+    const hint = new SodexApiError(400, msg, 400, '/api/v1/perps/trade/orders').hint!;
+    assert.match(hint, /does not list an approval of this builder fee/, msg);
+    assert.doesNotMatch(hint, /trailing zeros/, msg);
+  }
+  // Any other 400 keeps the generic hint; a missing key and a bad nonce keep theirs.
+  assert.match(new SodexApiError(400, 'invalid price', 400, '/x').hint!, /Rejected payload/);
+  assert.match(new SodexApiError(-1, 'api key not found', 401, '/x').hint!, /no longer registered/);
+});
+
 test('unwrapList handles wrapped and bare lists; failedOrders finds per-order rejects', () => {
   assert.deepEqual(unwrapList({ blockTime: 1, blockHeight: 2, orders: [1, 2] }, 'orders'), [1, 2]);
   assert.deepEqual(unwrapList([3], 'orders'), [3]);

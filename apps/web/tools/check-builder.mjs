@@ -4,7 +4,7 @@
  * the VITE_BUILDER_* lines for it?
  *
  *   node apps/web/tools/check-builder.mjs <walletAddress> [--testnet]
- *        [--fee-perps <n>] [--fee-spot <n>] [--max <n>] [--required] [--json]
+ *        [--fee-perps <n>] [--fee-spot <n>] [--max <n>] [--terms-key <key>]... [--optional] [--json]
  *
  * READ-ONLY. It sends three GET requests to SoDEX's public gateway and nothing
  * else: no wallet, no key, no signature, no POST. (The only request helper in
@@ -22,6 +22,13 @@
  * 0..200, spot 0..2000 (charged on sells only), the approved maximum 0..2000.
  * Without --fee-* it prints 50 (5 bp) as a PLACEHOLDER: choose your own.
  *
+ * A build that names a builder REQUIRES the approval (docs/BUILDER-TIERS.md):
+ * nothing has to be added for that. --optional prints VITE_BUILDER_REQUIRED=0,
+ * for a test build in which a user may decline and trade without the fee.
+ * --terms-key (repeatable) adds the server's Ed25519 public key(s), base64url
+ * of the raw 32 bytes, as VITE_BUILDER_TERMS_KEYS: the keys that may LOWER a
+ * wallet's fee below the two fees. Without one every wallet pays those fees.
+ *
  * Exit code: 0 eligible, 1 not eligible (or no such account), 2 usage / network.
  */
 
@@ -30,12 +37,13 @@ const MIN_USDC = 100;
 const CAP = { perps: 200, spot: 2000, max: 2000 };
 
 const USAGE = `usage: node apps/web/tools/check-builder.mjs <walletAddress> [--testnet]
-         [--fee-perps <0..200>] [--fee-spot <0..2000>] [--max <0..2000>] [--required] [--json]
+         [--fee-perps <0..200>] [--fee-spot <0..2000>] [--max <0..2000>]
+         [--terms-key <base64url public key>]... [--optional] [--json]
 
 Read-only: three GET requests to SoDEX's public gateway. Fees are tenths of a basis point (10 = 1 bp).`;
 
 function parseArgs(argv) {
-  const out = { address: null, network: 'mainnet', feePerps: null, feeSpot: null, max: null, required: false, json: false };
+  const out = { address: null, network: 'mainnet', feePerps: null, feeSpot: null, max: null, optional: false, termsKeys: [], json: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const num = (name, cap) => {
@@ -46,7 +54,16 @@ function parseArgs(argv) {
     };
     if (a === '--testnet') out.network = 'testnet';
     else if (a === '--mainnet') out.network = 'mainnet';
-    else if (a === '--required') out.required = true;
+    else if (a === '--required') out.optional = false; // the default; accepted so older command lines keep working
+    else if (a === '--optional') out.optional = true;
+    else if (a === '--terms-key') {
+      const k = argv[++i];
+      // base64url of exactly 32 bytes: 43 characters, no padding.
+      if (k === undefined || !/^[A-Za-z0-9_-]{43}$/.test(k) || Buffer.from(k, 'base64url').length !== 32) {
+        throw new Error('--terms-key must be an Ed25519 public key: base64url of the raw 32 bytes (43 characters)');
+      }
+      if (!out.termsKeys.includes(k)) out.termsKeys.push(k);
+    }
     else if (a === '--json') out.json = true;
     else if (a === '--fee-perps') out.feePerps = num('--fee-perps', CAP.perps);
     else if (a === '--fee-spot') out.feeSpot = num('--fee-spot', CAP.spot);
@@ -164,7 +181,8 @@ async function main() {
     `VITE_BUILDER_FEE_PERPS=${feePerps}`,
     `VITE_BUILDER_FEE_SPOT=${feeSpot}`,
     `VITE_BUILDER_MAX_FEE=${max}`,
-    ...(args.required ? ['VITE_BUILDER_REQUIRED=1'] : []),
+    ...(args.termsKeys.length ? [`VITE_BUILDER_TERMS_KEYS=${args.termsKeys.join(',')}`] : []),
+    ...(args.optional ? ['VITE_BUILDER_REQUIRED=0'] : []),
   ];
 
   if (args.json) {
@@ -191,7 +209,9 @@ async function main() {
     say('  The fee values above are PLACEHOLDERS (5 bp). Set your own with --fee-perps / --fee-spot / --max');
     say('  (tenths of a basis point: 10 = 1 bp = 0.01 %; perps at most 200, spot at most 2000).');
   }
-  if (!args.required) say('  Add VITE_BUILDER_REQUIRED=1 (or pass --required) to make the approval a condition of trading here.');
+  if (args.optional) say('  VITE_BUILDER_REQUIRED=0: a user who declines trades WITHOUT the fee. For a test build only - never a public one.');
+  else say('  The approval is a condition of trading here (the default): every order goes out with the builder or not at all.');
+  if (!args.termsKeys.length) say('  No VITE_BUILDER_TERMS_KEYS: every wallet pays the two fees above. For volume tiers pass --terms-key <public key>.');
   say('  Keep the balances above the minimum: if the builder falls below it, new approvals AND revocations fail.');
   return eligible ? 0 : 1;
 }

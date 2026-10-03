@@ -52,6 +52,7 @@ import {
   type Reconciliation,
   type VenueFeeRate,
 } from '../fees';
+import { builderRateToFraction } from '@sodex-core';
 import { api } from '../api';
 import { fmtUsd } from '../format';
 import './FeeTier.css';
@@ -231,6 +232,14 @@ function Current({
           Orders placed on Valuescan also carry its builder fee: {fmtRate(builderFee.fraction)} of each fill
           {engine === 'perps' ? ', buys and sells' : ' on sells (spot buys are not charged)'}, maker or taker. SoDEX
           charges it on top of the rates above and pays it to Valuescan (builder account #{builderFee.builderId}).
+          {builderFee.fullRate !== undefined
+            ? ` The volume you traded through Valuescan has lowered it from ${fmtRate(builderRateToFraction(builderFee.fullRate))}.`
+            : ''}
+          {builderFee.next
+            ? ` Next: ${fmtRate(builderRateToFraction(builderFee.next.rate))} once ${fmtUsd(builderFee.next.atUsd)} is traded through Valuescan${
+                builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} so far)` : ''
+              }.`
+            : ''}
           {builderFee.status === 'required' ? ' It applies once you have approved it.' : ''}{' '}
           <button type="button" className="link" onClick={requestAdvanced}>
             {builderFee.status === 'required' ? 'Approve it, or see what is approved' : 'See or revoke your approval'}

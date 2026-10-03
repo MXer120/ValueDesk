@@ -40,6 +40,7 @@ import { WalletConnectError } from '../../walletconnect';
 import { WALLET_EVENTS, getAccountPending, setAccountPending, type TransferPreset } from './actions';
 import { AdvancedKeysModal } from './AdvancedKeys';
 import { useBuilderConsent } from './BuilderConsent';
+import { BuilderTermsFollower } from './BuilderTermsFollower';
 import { ConnectDialog } from './ConnectDialog';
 import { DepositModal } from '../funds/DepositModal';
 import { WithdrawModal } from '../funds/WithdrawModal';
@@ -255,6 +256,8 @@ export function AccountController({ address, provider, session, onSession }: Pro
     <>
       {dialog}
       {builderConsent.dialog}
+      {/* Renders nothing: after a fill it has the fee terms re-checked (only in a build whose fee has volume tiers). */}
+      <BuilderTermsFollower address={address} />
       <AdvancedKeysModal
         open={advancedOpen}
         onClose={() => setAdvancedOpen(false)}

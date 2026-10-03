@@ -42,6 +42,16 @@ export class SodexApiError extends Error {
     if (/nonce/i.test(this.message)) {
       return 'Nonce must be a millisecond timestamp inside (now-2d, now+1d), unique, and above the lowest of the last 100 used.';
     }
+    /*
+     * An order naming a builder the account has not approved for that fee is
+     * rejected with a 400 like any malformed payload - and the generic hint
+     * below (trailing zeros, tick grid) then points away from the one thing
+     * that is wrong: the approval was never given, was revoked, or is lower
+     * than the fee on the order.
+     */
+    if (/builder/i.test(this.message)) {
+      return 'SoDEX does not list an approval of this builder fee for the account (never approved, revoked, or approved for less). Approve the builder fee again, then place the order again.';
+    }
     if (this.httpStatus === 400 || this.code === 400) {
       return 'Rejected payload. Common causes: trailing zeros in price/quantity, duplicate clOrdID, or a value outside the symbol tick/step grid.';
     }

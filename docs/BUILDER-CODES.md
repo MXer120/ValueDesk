@@ -1,9 +1,13 @@
 # Builder codes: the Valuescan fee on SoDEX orders
 
-Status: 2026-10-02. **Off by default.** Implemented and tested against a fake gateway that verifies
-every signature; **not yet exercised against SoDEX with a real wallet** - no agent may sign or send a
-write. Section 9 is the test the owner runs before switching it on; section 10 lists what that test
-settles.
+Status: 2026-10-02. **Off until a builder is named** (`VITE_BUILDER_ID`); **once one is named, the
+approval is required**: an order placed here goes out with the builder at the fee the wallet owes,
+or not at all. Implemented and tested against a fake gateway that verifies every signature; **not
+yet exercised against SoDEX with a real wallet** - no agent may sign or send a write. Section 9 is the
+test the owner runs before switching it on; section 10 lists what that test settles.
+
+How the fee is enforced, and how a wallet's fee follows the volume it traded here:
+[BUILDER-TIERS.md](BUILDER-TIERS.md). This page is about builder codes themselves.
 
 SoDEX's own description (the spec this follows):
 <https://sodex.com/documentation/for-developers/developers/trading/builder-codes-in-trading>.
@@ -54,8 +58,10 @@ section 6).
 
 Valuescan is non-custodial: orders are signed in the browser by a trading key and sent straight to
 SoDEX. The builder fee adds nothing to that picture - no server sees an order, an approval or a fee.
-Who is paid and how much is fixed in the bundle the user loads (build-time settings, section 3); the
-Valuescan API has no say in it.
+Who is paid, the highest fee and the approval ceiling are fixed in the bundle the user loads
+(build-time settings, section 3). The Valuescan API can do exactly one thing: **lower** one wallet's
+fee below the bundle's, with a statement signed by a key the bundle pins (section 2.7). It cannot
+raise a fee, name another builder, or switch the fee off.
 
 ### 2.1 Enabling trading
 
@@ -88,16 +94,19 @@ Rules the flow keeps, each of them covered by a test:
   restored (page load) and whenever SoDEX rejects an order with a message naming the builder. An
   approval revoked on another device stops being attached; one that appears starts being attached.
 
-The two modes differ only in what a missing approval means:
+**A build that names a builder requires the approval.** That is the default and what every build
+users see must be. `VITE_BUILDER_REQUIRED=0` makes the fee optional - a user who declines trades
+without it - and exists for test builds only. The two differ in what a missing approval means:
 
-| | `VITE_BUILDER_REQUIRED` unset (optional, the default) | `VITE_BUILDER_REQUIRED=1` (required) |
+| | Required (the default: `VITE_BUILDER_REQUIRED` unset or `1`) | Optional (`VITE_BUILDER_REQUIRED=0`, test builds) |
 |---|---|---|
-| User declines in the dialog | Trading is enabled **without** the fee | Trading stays off: "Trading through Valuescan requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account." No key is registered |
-| User closes the dialog (Cancel, Escape) | Nothing happens; trading stays as it was | The same message as declining |
-| Wallet rejects the approval signature | Trading is enabled without the fee; the reason is logged | Trading stays off, same message |
-| SoDEX refuses the approval | Trading is enabled without the fee; SoDEX's reason is logged | Trading stays off; the message carries SoDEX's reason |
-| Approved on one engine only | The fee is attached on that engine, not on the other | Trading is enabled; orders on the engine without the approval are refused with an explanation |
-| An order when the approval is not listed | Sent without a builder | Refused before signing (after one re-read), with where to approve it (section 2.5) |
+| User declines in the dialog | Trading stays off: "Trading through Valuescan requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account." No key is registered | Trading is enabled **without** the fee |
+| User closes the dialog (Cancel, Escape) | The same message as declining | Nothing happens; trading stays as it was |
+| Wallet rejects the approval signature | Trading stays off, same message | Trading is enabled without the fee; the reason is logged |
+| SoDEX refuses the approval | Trading stays off; the message carries SoDEX's reason | Trading is enabled without the fee; SoDEX's reason is logged |
+| Approved on one engine only | Trading is enabled; orders on the engine without the approval are refused with an explanation | The fee is attached on that engine, not on the other |
+| An order when the approval is not listed | Refused before signing (after one re-read), with where to approve it (section 2.5). **No order leaves without the builder** | Sent without a builder |
+| The approval is revoked or lowered on SoDEX later | SoDEX rejects the next order (it names a builder that is no longer approved); the app re-reads and sends nothing more until it is approved again | The next order is rejected once, then orders go out without the builder |
 
 "Logged" means the app's logger, namespace `trade` (`apps/web/src/log.ts`): `log.warn('builder fee: the
 approval did not go through', { builderId, maxFeeRate, reason, code, httpStatus })`. Open the page with
@@ -106,9 +115,19 @@ approval did not go through', { builderId, maxFeeRate, reason, code, httpStatus 
 ### 2.2 Orders
 
 `placeOrder` (`trading/actions.ts`) is the only place an order is created. It attaches
-`{id, fee: VITE_BUILDER_FEE_PERPS | VITE_BUILDER_FEE_SPOT}` as the **last field of the batch**, `id`
-before `fee` (the byte order SoDEX verifies), when and only when the engine's listed approval covers
-that fee. A fee of 0 on an engine attaches nothing there.
+`{id, fee}` as the **last field of the batch**, `id` before `fee` (the byte order SoDEX verifies),
+when and only when the engine's listed approval covers that fee. `fee` is **the fee the wallet owes
+now** (`feeNow` in `trading/terms.ts`): the build's `VITE_BUILDER_FEE_PERPS` / `_SPOT`, lowered only
+by terms the server signed for that wallet (section 2.7). A build fee of 0 on an engine attaches
+nothing there.
+
+**The gate.** Every action the trading key signs passes one check first (`guardAction` in
+`trading/feeGuard.ts`, called by `signAndSend`, the only place the app signs an exchange action).
+It does not build anything: it looks at the finished action and refuses what must not leave - an
+order without the builder in a build that requires it, a fee below the fee owed or above the
+default, another builder, a leg with a builder of its own, a TWAP order (SoDEX's TWAP request cannot
+carry a builder), an action type it does not know. Refused means not signed and not sent. The rules
+in full: BUILDER-TIERS.md section 2.
 
 - **Every order the user places carries it**: the order ticket, the take-profit and stop-loss legs
   placed with an order (same batch, same builder), and the orders the positions table places - "Close
@@ -118,9 +137,17 @@ that fee. A fee of 0 on an engine attaches nothing there.
 - Spot **buys** carry the builder too (the field is per batch, not per side) and are charged nothing -
   the same as every other builder on SoDEX (section 6).
 - Cancels, leverage, margin, transfers and withdrawals have no builder field and are unchanged.
-- **Editing** a resting order (dragging it on the chart, changing a trigger price) sends SoDEX's modify
-  request, which has no builder field. Whether SoDEX keeps the order's builder through an edit is not
-  documented; the live test looks at it (section 9, step 9).
+- **Editing** a resting order: SoDEX's modify and replace requests have no builder field, and
+  whether the changed order keeps the original's builder is not documented. Two constants in
+  `trading/feeGuard.ts` say what is assumed until the live test has looked (section 9, step 9):
+  `MODIFY_KEEPS_BUILDER = true` (the order is changed in place, same id - the request is used) and
+  `REPLACE_KEEPS_BUILDER = false` (a new order is created - in a build that requires the builder the
+  change is made as **cancel + new order with the builder** instead, `recreateOrder` in
+  `trading/actions.ts`). That is two requests and not atomic, so everything that can be known
+  beforehand is settled before the cancel (the order is read from SoDEX and rebuilt, validated, its
+  builder decided); an order that cannot be rebuilt exactly is refused and left as it is. If SoDEX
+  still refuses the new order, the error says in plain words that the original is gone.
+- **TWAP** orders are not offered and are refused by the gate in a build that requires the builder.
 
 ### 2.3 What the user sees
 
@@ -153,10 +180,15 @@ shows the row *Builder fee approved: none*, as it did.
   `+0.0500%` (or "none on spot buys"), with a tooltip saying who is paid. The order review adds **Est.
   Valuescan fee** with the amount for this order. Both exist only while the order will really carry
   the fee (or, in a required build, always - every order that leaves will carry it). Like the Fees
-  label above it, the label is pressable: it opens the key options.
+  label above it, the label is pressable: it opens the key options. The rate shown is the fee the
+  order will carry. When the wallet is on a lower volume tier the default is shown struck through
+  beside it (`+0.0200%` ~~struck~~ `+0.0150%`, the ticket's own look for a discounted venue rate), and
+  when the terms name a next tier one small line under it says so: "Valuescan fee 0.0150% once
+  $10.00 is traded through Valuescan ($4.20 so far)."
 - *Fee tier panel*: a **Valuescan fee** figure next to the venue's taker and maker rates, one sentence
   explaining it, and a "See or revoke your approval" link to the key options ("Approve it, or see what
   is approved" while a required build's fee is not approved yet). Never mixed into the venue's rates.
+  A lower tier and the next tier are said in the same sentence.
 - *Key options* ("Advanced key options"): **Builder fee approved** shows what SoDEX lists per engine
   ("perps up to 0.05%, spot up to 0.05% of a fill, builder account 12345"), with **Revoke builder
   approval** while there is one, and **Approve builder fee** while SoDEX lists no approval that
@@ -199,6 +231,8 @@ The dialog used to be reached from the address menu ("Advanced…") and the Mone
 in today's interface, so in a build without a builder nothing opens it. With a builder, the two fee
 lines above do. Two consequences worth knowing:
 
+- In a build as it ships (required) the ticket's fee line is always there, so the key options are
+  always one press away.
 - In an optional build the ticket's fee line exists only while the fee is attached, i.e. with trading
   on and the approval listed. A user who approved, then turned trading off, enables trading again
   first (one signature, no dialog - the approval is there) and finds the line back. A user who
@@ -207,6 +241,26 @@ lines above do. Two consequences worth knowing:
 - A permanent entry - a "Key options" row in the address menu - would be better, and is one line
   (`requestAdvanced` from `components/account/actions.ts`). The address menu follows the owner's
   reference design and belongs to another change, so it was not added here.
+
+### 2.7 The fee a wallet owes, and the signed terms
+
+The fee an order carries is the build's default unless Valuescan's server has **signed** a lower one
+for that wallet (`trading/terms.ts`; the contract is BUILDER-TIERS.md section 3):
+
+- The app asks its own API (`GET /api/vs/builder/terms?address=...&nonce=...`, never SoDEX) when
+  trading is enabled or restored, every four minutes while it is on, and a few seconds after a fill
+  (`hint=1`, at most once a minute), so a new tier arrives without a reload.
+- It rebuilds the signed message from the values it is about to use - the chain it trades on, the
+  pinned builder, the connected wallet, the nonce it just sent, the two fees - and verifies the
+  Ed25519 signature with WebCrypto under a key pinned in the bundle (`VITE_BUILDER_TERMS_KEYS`).
+- Verified terms hold for their `ttl`, at most 15 minutes, counted on the monotonic clock, and live in
+  memory only. Then, or after a reload, the fee is the default until new terms verify.
+- **Whatever goes wrong ends in the default (highest) fee**: the request blocked, the answer
+  rewritten or replayed, signed by another key, for another wallet, builder or chain, expired, a
+  browser without Ed25519, a build without pinned keys. Nothing in storage, the address bar or the
+  console feeds the fee.
+- Without `VITE_BUILDER_TERMS_KEYS` no terms are ever asked for: every wallet pays the build's fees,
+  exactly as before the tiers existed.
 
 ---
 
@@ -218,34 +272,37 @@ Build-time variables of the web app (`apps/web/.env.local`, documented in
 
 | Variable | Meaning | Values |
 |---|---|---|
-| `VITE_BUILDER_ID` | The builder account id. **Unset = no builder: nothing is approved, attached or shown** | positive integer |
-| `VITE_BUILDER_FEE_PERPS` | Fee on every perps fill of an order placed here | 0..200, default 0 |
-| `VITE_BUILDER_FEE_SPOT` | Fee on every spot **sell** fill of an order placed here | 0..2000, default 0 |
+| `VITE_BUILDER_ID` | The builder account id. **Unset = no builder: nothing is approved, attached or shown. Set = the approval is required** | positive integer |
+| `VITE_BUILDER_FEE_PERPS` | The default (highest) fee on every perps fill of an order placed here | 0..200, default 0 |
+| `VITE_BUILDER_FEE_SPOT` | The default (highest) fee on every spot **sell** fill of an order placed here | 0..2000, default 0 |
 | `VITE_BUILDER_MAX_FEE` | The ceiling the wallet approves | 0..2000, default: the higher of the two fees |
-| `VITE_BUILDER_REQUIRED` | `1` = trading here requires the approval; unset = optional | `1` or unset |
+| `VITE_BUILDER_TERMS_KEYS` | Public keys of the server that may lower a wallet's fee (section 2.7). Unset = every wallet pays the two fees above | Ed25519, base64url of the raw 32 bytes, comma separated |
+| `VITE_BUILDER_REQUIRED` | Leave unset. `0` = the fee is optional (a user who declines trades without it) - test builds only | unset / `1` (required), or `0` |
 
-Example - 5 bp on perps, 5 bp on spot sells, optional:
+Example - 2 bp on perps and on spot sells, with volume tiers:
 
 ```
 VITE_BUILDER_ID=12345
-VITE_BUILDER_FEE_PERPS=50
-VITE_BUILDER_FEE_SPOT=50
-VITE_BUILDER_MAX_FEE=50
+VITE_BUILDER_FEE_PERPS=20
+VITE_BUILDER_FEE_SPOT=20
+VITE_BUILDER_MAX_FEE=20
+VITE_BUILDER_TERMS_KEYS=<the public key `npx tsx tools/builderTiers.ts init` printed in apps/server>
 ```
 
 How the values are treated (`apps/web/src/trading/config.ts`):
 
-- A value that is present but unusable (not a whole number, out of range, a maximum below a fee) turns
-  the builder **off** and logs `the builder fee is OFF: its settings are invalid` with the list of
-  problems. A typo never becomes "0" silently and never signs something unintended.
-- Both fees 0 is the same as no builder.
-- The fee is not configurable at run time and not by the server: `/api/health` can switch trading off,
-  it cannot name a builder or a rate.
-- Planned, and not part of this change: per-wallet fee tiers ([BUILDER-TIERS.md](BUILDER-TIERS.md)).
-  There the server may choose a wallet's fee **between 0 and the maximum pinned here**; the builder id
-  and the maximum stay build-time settings. The place to apply such a fee is `orderBuilder` /
-  `quoteBuilderFee` in `trading/builder.ts` - the one decision the signed order and every fee line
-  share. Until that lands, the statement above holds as written.
+- **A build that names a builder and cannot charge it does not trade for free.** A value that is
+  present but unusable (not a whole number, out of range, a maximum below a fee, a
+  `VITE_BUILDER_REQUIRED` that is neither `0` nor `1`), or a builder id with both fees 0, switches
+  **trading off in that build** and logs `TRADING IS OFF in this build: it names a builder but its fee
+  settings are invalid` with the list of problems. A typo never becomes "0", never signs something
+  unintended, and never drops the fee silently. (Only with `VITE_BUILDER_REQUIRED=0` does such a
+  build behave as before: the builder is simply off.)
+- An unusable entry in `VITE_BUILDER_TERMS_KEYS` is dropped and named in the log. It can only cost a
+  discount - with no usable key every wallet pays the default - never the fee.
+- The builder id, the default fees and the ceiling are not configurable at run time and not by the
+  server: `/api/health` can switch trading off, it cannot name a builder or a rate. The one thing the
+  server can do is sign a **lower** fee for a wallet (section 2.7), between 0 and the default here.
 
 Things to know before changing them later:
 
@@ -257,8 +314,10 @@ Things to know before changing them later:
 - **Lowering a fee** needs nothing: existing approvals cover it.
 - **Changing `VITE_BUILDER_ID`** leaves the old approvals on users' accounts (harmless, but each uses
   one of their 10 slots) and the app then only offers to revoke the new builder. Avoid it.
-- **Kill switch:** remove `VITE_BUILDER_ID` and rebuild. No order names the builder any more; approvals
-  stay on the accounts and cost nothing.
+- **Kill switch:** remove `VITE_BUILDER_ID` (and the other `VITE_BUILDER_*` lines) and rebuild. No
+  order names the builder any more; approvals stay on the accounts and cost nothing.
+- **Tiers off, fee on:** remove `VITE_BUILDER_TERMS_KEYS` (or the server's tiers file). Every wallet
+  pays the default fee; nothing else changes.
 
 The same settings for the live end-to-end runner are the `builder` block of
 `apps/web/e2e/live/config.json` (see `apps/web/e2e/live/README.md`).
@@ -408,7 +467,10 @@ what is missing is a proven request to carry it.
 
 Agents never do this: it needs a real wallet and sends real writes. Budget: the 200 vUSDC parked in the
 builder account (not spent), plus two minimum-size orders on a small test account - a few cents of
-fees. Use **optional mode and a low fee** for the test.
+fees. Use a low fee for the test. Steps 1 to 15 run in a test build with the fee **optional**
+(`VITE_BUILDER_REQUIRED=0`), so that declining can be looked at too; steps 16 and 17 in the build as it
+ships. (The run that checks the fee guard and the volume tiers against SoDEX is the live runner's -
+BUILDER-TIERS.md section 8.)
 
 Have ready: the builder wallet (section 4), and a **different** wallet as the test user with about
 25 USDC on SoDEX. Do not use the builder's own account as the test user. Wait about ten seconds between
@@ -417,7 +479,7 @@ the `trades` reads - SoDEX rate-limits its history routes.
 | # | Do | Expect |
 |---|---|---|
 | 0 | `node apps/web/tools/check-builder.mjs <builder wallet>` | `ELIGIBLE`; note the builder id and both balances |
-| 1 | In `apps/web/.env.local`: `VITE_BUILDER_ID=<id>`, `VITE_BUILDER_FEE_PERPS=10`, `VITE_BUILDER_FEE_SPOT=10`, `VITE_BUILDER_MAX_FEE=10`. Restart the dev server. Open the app with `?debug=trade` | No `the builder fee is OFF` error in the console |
+| 1 | In `apps/web/.env.local`: `VITE_BUILDER_ID=<id>`, `VITE_BUILDER_FEE_PERPS=10`, `VITE_BUILDER_FEE_SPOT=10`, `VITE_BUILDER_MAX_FEE=10`, `VITE_BUILDER_REQUIRED=0`. Restart the dev server. Open the app with `?debug=trade` | No `TRADING IS OFF` / `the builder fee is OFF` error in the console (the warning that this build makes the fee optional is expected) |
 | 2 | `curl -s https://mainnet-gw.sodex.dev/api/v1/user/<test wallet>/builders` | `"data":{"spot":[],"perps":[]}` (or lists without your builder) |
 | 3 | Connect the test wallet, press **Enable trading** | The "Valuescan builder fee" dialog with 0.01 % perps, 0.01 % spot sells, maximum 0.01 %, your builder id |
 | 4 | Press **Approve and enable trading** | Wallet prompt 1 is typed data `ApproveBuilderFeeAction`: `chainID` 286623, `accountID` = the test account, `builderID` = yours, `maxFeeRate` 10; domain `universal`. Then wallet prompt 2: the key registration. Toast: "Trading enabled. Orders placed here carry the Valuescan builder fee you approved." |
@@ -432,8 +494,8 @@ the `trades` reads - SoDEX rate-limits its history routes.
 | 13 | Order ticket: press **Valuescan fee** -> **Revoke builder approval** | One wallet prompt: the same message with `maxFeeRate` 0. "Builder approval revoked. Orders placed here no longer carry the Valuescan fee." |
 | 14 | The `curl` of step 2 again; then place one more small order and read its fill | Both lists without your builder; the fill has no `builderFee`, the ticket no Valuescan line |
 | 15 | Address menu -> **Sign out**, connect again, press **Enable trading**: first answer **Cancel**, then press it again and answer **Enable without the fee** | Cancel: nothing changes, no wallet prompt. Then: trading on without the fee, one wallet prompt, no Valuescan line in the ticket |
-| 16 | Required mode and approving later: set `VITE_BUILDER_REQUIRED=1`, restart, reload (the key of step 15 is still in the browser). Try a small order. Then press **Valuescan fee** in the ticket -> **Approve builder fee** -> **Approve the fee** | The ticket shows the Valuescan line; the order is refused with "... press "Valuescan fee" in the order ticket and approve it there". The dialog has two buttons (Cancel, Approve the fee) and does not mention enabling. After the one signature (`ApproveBuilderFeeAction`, no key registration) the same order goes out and its fill has `builderFee` |
-| 17 | Still required mode: **Sign out**, connect again, **Enable trading**, press **Cancel** in the dialog | Trading stays off with the "requires approving its builder fee" message; no wallet prompt at all. Revoke again (step 13) when you are done |
+| 16 | The build as it ships, and approving later: remove `VITE_BUILDER_REQUIRED=0`, restart, reload (the key of step 15 is still in the browser). Try a small order. Then press **Valuescan fee** in the ticket -> **Approve builder fee** -> **Approve the fee** | The ticket shows the Valuescan line; the order is refused with "... press "Valuescan fee" in the order ticket and approve it there". The dialog has two buttons (Cancel, Approve the fee) and does not mention enabling. After the one signature (`ApproveBuilderFeeAction`, no key registration) the same order goes out and its fill has `builderFee` |
+| 17 | Same build: **Sign out**, connect again, **Enable trading**, press **Cancel** in the dialog | The dialog has no "Enable without the fee". Trading stays off with the "requires approving its builder fee" message; no wallet prompt at all. Revoke again (step 13) when you are done: in this build revoking also turns trading off |
 
 Afterwards `__vs.dump()` in the console gives the whole log for the record.
 
@@ -471,7 +533,14 @@ Verified without a wallet (tests, section 11, and read-only mainnet data):
 - that `fee` includes `builderFee`, that spot buys are not charged and makers are;
 - the whole flow against a fake gateway that verifies each signature and rejects an order naming an
   unapproved builder: already approved, approve, decline, wallet rejection, gateway rejection, one
-  engine only, lagging and lost answers, restore, revoke - in both modes.
+  engine only, lagging and lost answers, restore, revoke - in both modes;
+- the fee guard: every action type classified, and each local manipulation - the stored approval
+  deleted, edited or forged, the approval revoked or lowered on SoDEX, the terms request blocked, the
+  terms answer rewritten or replayed, terms that ran out, planted storage keys and URL parameters -
+  ending in the builder at the fee owed, or in no order (unit tests, and in a real browser against the
+  fakes);
+- the signed terms: the message byte for byte, real Ed25519 signatures through WebCrypto, every
+  rejection of BUILDER-TIERS.md section 3.
 
 Not verifiable without a real wallet (the live test settles 1 to 6):
 
@@ -495,12 +564,15 @@ Not verifiable without a real wallet (the live test settles 1 to 6):
 | Typed data, request assembly, signature checks | `packages/sodex-core/src/userSigned.ts`, `registration.ts` (`prepareBuilderFeeApproval`), `actions.ts` (`builderFragment`) |
 | Reading approvals, fee arithmetic, splitting a fill's fee | `packages/sodex-core/src/builders.ts` |
 | Settings | `apps/web/src/trading/config.ts` |
+| The fee a wallet owes now; asking for, verifying and holding the signed terms | `apps/web/src/trading/terms.ts` (`feeNow`, `refreshTerms`, `configureTerms`) |
+| The gate every signed action passes; what an order placed now carries | `apps/web/src/trading/feeGuard.ts` (`guardAction`, `builderNow`, `MODIFY_KEEPS_BUILDER`, `REPLACE_KEEPS_BUILDER`) |
 | Decisions (what to attach, what to quote, what to tell the user) - pure | `apps/web/src/trading/builder.ts` |
 | The approval on the wire (read, sign, send, poll) | `apps/web/src/trading/builderApproval.ts` |
 | The flow (enable, restore, refresh, approve later, revoke) | `apps/web/src/trading/session.ts` (`enableTrading`, `refreshBuilderApproval`, `approveBuilderFee`, `readBuilderApproval`, `revokeBuilderApproval`) |
-| Attaching to orders | `apps/web/src/trading/actions.ts` |
+| Attaching to orders, signing (the gate stands here), changing an order as cancel + new | `apps/web/src/trading/actions.ts` (`placeOrder`, `signAndSend`, `recreateOrder`) |
 | Disclosure dialog | `apps/web/src/components/account/BuilderConsent.tsx` |
 | Fee lines | `apps/web/src/components/account/useBuilderFee.ts`, `OrderEntry.tsx`, `ReviewPosition.tsx`, `FeeTier.tsx` |
+| Telling the terms about a fill | `apps/web/src/components/account/BuilderTermsFollower.tsx` |
 | Revoke | `apps/web/src/components/account/AdvancedKeys.tsx` |
 | Builder check | `apps/web/tools/check-builder.mjs` |
 | Live runner support | `apps/web/e2e/live/` (`config.ts`, `guard.ts`, `steps.ts`, `plan.ts`) |
@@ -512,7 +584,14 @@ Tests (`npx tsx --test`, node:test):
   2000), the Python SDK's digest and its own test vector, the live registrations, approvals, units,
   fills. Vectors: `test/vectors-sdk.json` (Go SDK, `tools/genvectors`), `test/vectors-live.json`
   (mainnet, read from the explorer).
-- `apps/web/src/trading/builder.test.ts` - the decisions and the fee quote.
+- `apps/web/src/trading/builder.test.ts` - the settings (required by default, a broken build has
+  trading off, the pinned keys), the decisions and the fee quote.
+- `apps/web/src/trading/terms.test.ts` - the signed terms, against a server that signs with a real
+  Ed25519 key: the message, every rejection, how long they hold, what they are asked for and when.
+- `apps/web/src/trading/feeGuard.test.ts` - the gate for every action type, and that the app signs in
+  one place only, behind the gate.
+- `apps/web/src/trading/feeGuardFlow.test.ts` - the session with the gate and the terms: what an
+  order carries, every local manipulation, the milestone, changing an order as cancel + new.
 - `apps/web/src/trading/builderFlow.test.ts` - the session flow against a fake wallet and a fake
   gateway that verifies the approval and order signatures.
 - `apps/web/e2e/live/simulate.test.ts`, `safety.test.ts` - a whole run with a builder: the approval
