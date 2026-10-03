@@ -51,6 +51,7 @@ import {
   type OrderSpec,
   type Placed,
   type PreparedOrder,
+  WaitTimeout,
 } from './orders';
 import { readMarket, restingBuy, type Market } from './plan';
 import { apiKeys, type ApiKeyRow } from './reads';
@@ -129,6 +130,19 @@ export async function stepKeyLifecycle(ctx: Ctx): Promise<void> {
     for (const o of open) await cancel(ctx, m, { orderID: o.orderID ?? null, clOrdID: o.clOrdID ?? null }, `cancel what ${tag} left`, tag);
   };
 
+  /**
+   * A wait on SoDEX's key LIST is an observation: the account's state is known (the app's own calls
+   * answered), so a list that lags past the time-out is a failed check - never a stop of the whole run.
+   */
+  const observed = async <T,>(what: string, wait: () => Promise<T>): Promise<T> => {
+    try {
+      return await wait();
+    } catch (e) {
+      if (e instanceof WaitTimeout) throw new CheckFailure(`${what}: SoDEX's key list did not show it in time (${errText(e)})`);
+      throw e;
+    }
+  };
+
   // --- 1. restore -----------------------------------------------------------------------------------------------
   await scenario(
     ctx,
@@ -199,13 +213,17 @@ export async function stepKeyLifecycle(ctx: Ctx): Promise<void> {
       if (st.status === 'enabled') throw new CheckFailure('trading is still enabled in the app after disableTrading()');
       const again = await restoreTrading(owner);
       if (again.status === 'enabled') throw new CheckFailure('the key is still in the vault: restoreTrading() switched trading on again after disableTrading()');
-      const rows = await waitFor(ctx, `"${name}" to leave both engines' key lists`, {
-        timeoutMs: Math.max(settleMs(ctx), 180_000),
-        intervalMs: 10_000,
-        probe: () => listed(owner, name),
-        done: (r) => !sameKey(r.spot, curKey) && !sameKey(r.perps, curKey),
-        show: (r) => (r ? `spot: ${sameKey(r.spot, curKey) ? 'still listed' : 'gone'}, perps: ${sameKey(r.perps, curKey) ? 'still listed' : 'gone'} (indexed reads lag a revocation)` : 'no answer'),
-      });
+      // A revoked key may stay in the list with an expiry in the past: that is gone too.
+      const live = (row: Parameters<typeof sameKey>[0]): boolean => sameKey(row, curKey) && !(typeof row?.expiresAt === 'number' && row.expiresAt <= Date.now());
+      const rows = await observed(`the revoked key ${curKey}`, () =>
+        waitFor(ctx, `"${name}" to leave both engines' key lists`, {
+          timeoutMs: Math.max(settleMs(ctx), 180_000),
+          intervalMs: 10_000,
+          probe: () => listed(owner, name),
+          done: (r) => !live(r.spot) && !live(r.perps),
+          show: (r) => (r ? `spot: ${live(r.spot) ? 'still listed' : 'gone'}, perps: ${live(r.perps) ? 'still listed' : 'gone'} (indexed reads lag a revocation)` : 'no answer'),
+        }),
+      );
       revoked = true;
       const appSays = meta ? await keyStillRegistered(meta) : null;
       if (appSays === true) throw new CheckFailure('both engines no longer list the key, but the app\'s keyStillRegistered() still says yes', { rows });
@@ -258,13 +276,15 @@ export async function stepKeyLifecycle(ctx: Ctx): Promise<void> {
       const now = st.keyAddress ?? '';
       if (st.status !== 'enabled' || !now) throw new CheckFailure(`trading did not switch on again (status ${st.status})`);
       if (now === curKey) throw new CheckFailure('enabling again registered the SAME key address - a revoked key was put back');
-      await waitFor(ctx, 'the new key in both engines\' key lists', {
-        timeoutMs: Math.max(settleMs(ctx), 180_000),
-        intervalMs: 10_000,
-        probe: () => listed(owner, name),
-        done: (r) => sameKey(r.spot, now) && sameKey(r.perps, now),
-        show: (r) => (r ? `spot: ${r.spot?.publicKey ?? 'none'}, perps: ${r.perps?.publicKey ?? 'none'} (indexed reads lag a fresh key)` : 'no answer'),
-      });
+      await observed(`the new key ${now}`, () =>
+        waitFor(ctx, 'the new key in both engines\' key lists', {
+          timeoutMs: Math.max(settleMs(ctx), 180_000),
+          intervalMs: 10_000,
+          probe: () => listed(owner, name),
+          done: (r) => sameKey(r.spot, now) && sameKey(r.perps, now),
+          show: (r) => (r ? `spot: ${r.spot?.publicKey ?? 'none'}, perps: ${r.perps?.publicKey ?? 'none'} (indexed reads lag a fresh key)` : 'no answer'),
+        }),
+      );
       if (leftover) {
         const still = (await openOn(ctx, m)).find((o) => isOurs(o, leftover!));
         if (still) {

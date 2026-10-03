@@ -77,7 +77,7 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     const key = handKey(w.coin.coin, w.route.key);
     const hand = handActive(ctx, w.coin.coin, w.route.key);
     const hp = plans.get(key) ?? null;
-    const quote = await rec.sub(`SoDEX's on-chain fee for ${w.coin.coin} -> ${w.route.label}`, () => withdrawQuote(w.coin, w.route, owner), (q) => `${formatUnits(q.fee, w.coin.valuechain.decimals)} ${w.coin.coin}`);
+    const quote = await rec.read(`SoDEX's on-chain fee for ${w.coin.coin} -> ${w.route.label}`, () => withdrawQuote(w.coin, w.route, owner), (q) => `${formatUnits(q.fee, w.coin.valuechain.decimals)} ${w.coin.coin}`);
     const fee = formatUnits(quote.fee, w.coin.valuechain.decimals);
     // With a hand-sent deposit back: enough that what arrives covers it, the wallet's fee and what stays (handBack.ts).
     const amount = hand && hp && hp.order === 'withdraw-first' ? hp.withdraw : roundTripAmount(w.route, w.coin, fee);

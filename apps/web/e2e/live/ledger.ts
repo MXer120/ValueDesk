@@ -327,11 +327,12 @@ export class Ledger {
     if (z !== null) o.executedQty = z;
     const v = str(row.executedValue ?? row.v);
     if (v !== null) o.executedValue = v;
-    // The record's builder: present -> named; an open-order row or a stream update WITHOUT the field names none.
-    // A FINISHED order in SoDEX's order history carries no builder field at all (read live, 2026-10-02):
-    // there its absence says nothing, and what was seen before is kept.
+    // The record's builder: present -> named; an OPEN-ORDER row without the field names none (read live: open
+    // rows carry `builder` when the order has one). A FINISHED order in SoDEX's order history carries no builder
+    // field at all (read live, 2026-10-02), and a stream update's `b` has never been seen live - there, as in the
+    // history, an absent field says nothing and what was seen before is kept (no false "names no builder").
     const rb = row.builder ?? row.b;
-    if (source !== 'history' || (rb !== undefined && rb !== null)) {
+    if (source === 'open-orders' || (rb !== undefined && rb !== null)) {
       o.recordBuilder = rb === undefined || rb === null ? null : builderOf(rb);
       o.recordSource = source;
     }

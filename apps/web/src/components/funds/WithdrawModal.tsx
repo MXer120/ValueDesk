@@ -37,6 +37,7 @@ import {
   withdrawFunds,
   withdrawQuote,
   withdrawalProgress,
+  forgetSettledPermit,
   type Balances,
   type ChainRoute,
   type CoinConfig,
@@ -197,6 +198,8 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       const s = await withdrawalProgress(track).catch(() => null);
       if (stop) return;
       if (s) setStatus(s.ok && s.destinationTx ? `${s.status} · ${short(s.destinationTx)}` : s.status);
+      // Final: nothing about it is unclear any more - the next withdrawal need not stop to say it went through.
+      if (s?.done && owner) void forgetSettledPermit('withdraw', owner).catch(() => false);
       if (!s?.done) timer = window.setTimeout(tick, 5000);
     };
     void tick();

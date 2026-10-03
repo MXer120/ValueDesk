@@ -28,6 +28,7 @@ import { CheckFailure, SafetyStop, scenario, type Ctx } from './context';
 import {
   awaitFills,
   cancel,
+  ensurePerpsCollateral,
   expectGone,
   expectOpen,
   idText,
@@ -38,6 +39,7 @@ import {
   positionOf,
   putInOrder,
   refusedLocally,
+  releasePerpsCollateral,
   rememberMarket,
   restsAfter,
   sendDirect,
@@ -68,6 +70,9 @@ export async function stepRefusals(ctx: Ctx): Promise<void> {
   const spot = await readMarket('spot', cfg.orders.spotSymbol);
   rememberMarket(perps);
   rememberMarket(spot);
+  // The perps cases rest orders far below the market: they need margin in Perps, and orders-perps took its
+  // collateral back to Spot. Without it SoDEX refuses them for "margin" - not for the rule each case is about.
+  await ensurePerpsCollateral(ctx, String(Math.max(approx(cfg.orders.perpsCollateral), 5)));
 
   /** A local refusal: the app must refuse by itself; the detail is its own words. */
   const local = async (id: string, what: string, fn: () => Promise<unknown>, expectMessage?: RegExp): Promise<void> => {
@@ -272,6 +277,7 @@ export async function stepRefusals(ctx: Ctx): Promise<void> {
 
   // --- SoDEX must refuse: a builder the wallet never approved, and a fee above the approval ------------------------------------------
   await builderRefusals(ctx, perps);
+  await releasePerpsCollateral(ctx);
   rec.note('refusals done: nothing was moved');
 }
 
@@ -322,7 +328,9 @@ async function builderRefusals(ctx: Ctx, market: Market): Promise<void> {
         const action = perpsActions.newOrder(accountId, m.sym.id, [{ clOrdID: genClOrdID('vs'), side: OrderSide.BUY, type: OrderType.LIMIT, timeInForce: TimeInForce.GTC, price: rb.price, quantity: rb.qty, reduceOnly: false }], builder);
         const r = await sendDirect(ctx, 'perps', action, { tag: id, label: `resting buy ${rb.qty} @ ${rb.price} naming ${what}`, purpose: 'a client naming a builder the wallet has not approved for that fee' });
         if (!r.accepted) {
-          ctx.checks.pass(id, `an order naming ${what} was rejected by SoDEX ("${r.rejection}")`, { rejection: r.rejection, builder });
+          // Only a refusal FOR the builder shows the rule; any other reason (margin, price band) proves nothing about it.
+          if (/builder|approv/i.test(r.rejection ?? '')) ctx.checks.pass(id, `an order naming ${what} was rejected by SoDEX ("${r.rejection}")`, { rejection: r.rejection, builder });
+          else ctx.checks.finding(id, `an order naming ${what} was rejected by SoDEX, but not for the builder ("${r.rejection}") - the builder rule was not shown`, { rejection: r.rejection, builder });
           return;
         }
         // It was accepted: take it off the book again, then fail.

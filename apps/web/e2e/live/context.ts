@@ -31,11 +31,13 @@ export function transientWait(e: unknown, base: number | undefined): number | nu
   const x = e as { name?: string; retryInMs?: number; httpStatus?: number; status?: number; message?: string; cause?: { code?: string } } | null;
   if (x?.name === 'RateLimitedError') return Math.max(base, (x.retryInMs ?? 0) + 2_000);
   if (x?.name === 'UnreachableError') return base;
+  // A read the app gave up on (its own timeout aborted it): a slow node or gateway, worth one more try.
+  if (x?.name === 'AbortError' || x?.name === 'TimeoutError') return base;
   const status = x?.httpStatus ?? x?.status ?? 0;
   if (status === 429) return Math.max(base, 60_000);
   if (status >= 500 && status <= 599) return base;
   const text = `${x?.message ?? ''} ${x?.cause?.code ?? ''}`;
-  if (/fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timed? ?out|did not answer/i.test(text)) return base;
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timed? ?out|did not answer|operation was aborted|not a batch answer/i.test(text)) return base;
   return null;
 }
 

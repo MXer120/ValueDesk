@@ -31,12 +31,12 @@ import { REPLACE_KEEPS_BUILDER } from '../../src/trading/feeGuard';
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { chainWithdrawals } from './chainRoutes';
 import { checkRoutes, notTestable, sameDepositAddress } from './routes';
-import { gasReserve, nativeLegAmounts, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { depositBackProblem, gasReserve, nativeLegAmounts, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
 import { handKey, handLine, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { VALUECHAIN_CHAIN_ID } from './provider';
 import { engineState, gasPrice, nativeBalance, registryDepositAddresses, tokenBalance } from './reads';
 import { requestTerms, type TermsVerdict, type TermsWatch } from './terms';
-import { approx, cut, dCmp, dDiv, dMax, dMul, errText, isDecimal, lessPct, morePct, shortAddr, sleep, toStep, usd } from './util';
+import { approx, cut, dCmp, dDiv, dMax, dMul, dSub, errText, isDecimal, lessPct, morePct, shortAddr, sleep, toStep, usd } from './util';
 
 /** The SoDEX exchange contract on ValueChain (backend /api/deposit/chain; memory: sodex-browser-trading-protocol). */
 export const PINNED_EXCHANGE = '0x0101010101010101010101010101010101010101';
@@ -959,6 +959,12 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     let cost = 0;
     const capital = new Map<string, number>();
     let usdcCapital = 0;
+    // The wallet's deposit addresses per coin (the on-chain registry): a leg with no way back runs one-way.
+    const listedOf = new Map<string, Promise<Map<string, string> | null>>();
+    const listed = (c: string): Promise<Map<string, string> | null> => {
+      if (!listedOf.has(c)) listedOf.set(c, registryDepositAddresses(owner, c).catch(() => null));
+      return listedOf.get(c)!;
+    };
     for (const tc of tp.chains) {
       const usdcRuns = tc.legs.some((l) => l.kind === 'usdc' && !l.skip);
       for (const leg of tc.legs) {
@@ -968,6 +974,17 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         }
         const fee = await feeOf(leg.coin, leg.route);
         const p = px(leg.coin.coin) ?? 0;
+        const noBack = depositBackProblem(leg, await listed(leg.coin.coin));
+        if (noBack) {
+          const one = oneWayAmount(leg.route, leg.coin, fee);
+          const arrives = cut(dSub(one, fee), 6);
+          cost += approx(fee) * p;
+          if (leg.coin.coin.toUpperCase() === 'USDC') usdcCapital = Math.max(usdcCapital, approx(one));
+          else capital.set(leg.coin.coin, Math.max(capital.get(leg.coin.coin) ?? 0, approx(one) * p * 1.05));
+          leftOnChains.push(`${tc.label}: ~${arrives} ${leg.coin.coin} stays in the test wallet there - ${noBack}, so it cannot be deposited back`);
+          lines.push(`${tc.label}: ${one} ${leg.coin.coin} out to this wallet (fee ${fee}); the deposit back is NOT RUN: ${noBack}. The ~${arrives} ${leg.coin.coin} that arrives stays in the test wallet there.`);
+          continue;
+        }
         if (leg.kind === 'native') {
           const reserve = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
           const a = nativeLegAmounts(leg.route, leg.coin, fee, reserve);

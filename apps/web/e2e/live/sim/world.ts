@@ -1047,6 +1047,15 @@ async function placeBatch(engine: Engine, body: any, raw: string, h: Record<stri
       reject(`order notional ${notional} below the minimum ${sym.minNotional}`);
       continue;
     }
+    // As on mainnet: a perps order that opens exposure needs margin in Perps (notional / leverage) - the
+    // simulation used to accept one with an empty Perps balance, which hid a step that forgot its collateral.
+    if (engine === 'perps' && !o.reduceOnly && !o.stopPrice) {
+      const need = dDiv(notional, String(w.symbolCfg.get(sym.name)?.l ?? 20));
+      if (dCmp(perpsAvailable(), need) < 0) {
+        reject(`insufficient margin: ${need} needed, ${perpsAvailable()} available`);
+        continue;
+      }
+    }
     w.orders.push(o);
     answers.push({ code: 0, clOrdID: o.clOrdID, orderID: o.orderID });
     if (i === 0) entry = o;

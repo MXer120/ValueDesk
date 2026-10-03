@@ -25,10 +25,10 @@ import { formatUnits, parseUnits } from '../../src/trading/onboard';
 import { addOrSwitchChain, sendTransaction } from '../../src/wallet';
 import { SafetyStop, armed, type Ctx } from './context';
 import { marketQty, checkDepositAddress, depositAddressProblem, ownerGasNeed, spotMarketFor } from './plan';
-import { nativeBalance, receipt } from './reads';
+import { nativeBalance, receipt, registryDepositAddresses } from './reads';
 import { buyOnSpot, depositOne, moved, routeCheck, withdrawTo } from './steps';
 import { mustPlace, orderMs, settleFills, waitFor } from './orders';
-import { gasReserve, nativeLegAmounts, nativeTransferExpect, nativeTransferPolicy, oneWayUsdcAmount, reserveGasUnits, tourPlan, usdcLegAmounts, type TourLeg } from './tour';
+import { depositBackProblem, depositFloor, gasReserve, nativeLegAmounts, nativeTransferExpect, nativeTransferPolicy, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, tourPlan, usdcLegAmounts, type TourLeg } from './tour';
 import { ensureTrading } from './trading';
 import { approx, cut, dCmp, dMax, dSub, toStep, usd } from './util';
 
@@ -128,8 +128,30 @@ export async function stepEvmTour(ctx: Ctx): Promise<void> {
         ctx.checks.skip(dId, leg.skip);
         continue;
       }
-      const quote = await rec.sub(`SoDEX's on-chain fee for ${leg.coin.coin} -> ${leg.label}`, () => withdrawQuote(leg.coin, leg.route, owner), (q) => `${formatUnits(q.fee, leg.coin.valuechain.decimals)} ${leg.coin.coin}`);
+      const quote = await rec.read(`SoDEX's on-chain fee for ${leg.coin.coin} -> ${leg.label}`, () => withdrawQuote(leg.coin, leg.route, owner), (q) => `${formatUnits(q.fee, leg.coin.valuechain.decimals)} ${leg.coin.coin}`);
       const fee = formatUnits(quote.fee, leg.coin.valuechain.decimals);
+      // The way back must exist BEFORE anything leaves (Arc: SoDEX issues no USDC deposit address there). Without
+      // one, the withdrawal alone is tested - with the least SoDEX pays out - and what arrives is reported, never a stop.
+      const listed = await registryDepositAddresses(owner, leg.coin.coin).catch(() => null);
+      const noBack = depositBackProblem(leg, listed);
+      if (noBack) {
+        const one = oneWayAmount(leg.route, leg.coin, fee);
+        const held = (await balancesOf(owner, leg.coin)).spot;
+        if (dCmp(held, one) < 0) {
+          ctx.checks.skip(wId, `${noBack}, and Spot holds ${held} ${leg.coin.coin} - less than the ${one} a one-way withdrawal needs`);
+          ctx.checks.skip(dId, noBack);
+          continue;
+        }
+        let arrived = dSub(one, fee);
+        await moved(ctx, wId, async () => {
+          const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
+          if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
+          return r;
+        });
+        ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(arrived, 6)} ${leg.coin.coin} that arrived stays in the test wallet on ${leg.label}.`, { chain: leg.chain, leftOnChain: arrived, reason: noBack });
+        rec.note(`${leg.label}: ${noBack} - the withdrawal alone was tested; ${cut(arrived, 6)} ${leg.coin.coin} stays in the test wallet there`);
+        continue;
+      }
       if (leg.kind === 'native') {
         const reserve = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
         const amt = nativeLegAmounts(leg.route, leg.coin, fee, reserve);
@@ -161,7 +183,7 @@ export async function stepEvmTour(ctx: Ctx): Promise<void> {
         // What arrived, less what stays for gas - never below SoDEX's deposit minimum.
         const reserveNow = await gasReserve(tc.spec, reserveGasUnits(usdcRuns));
         const dp = Math.min(leg.coin.valuechain.decimals, tc.spec.native.decimals, 8);
-        const back = dMax(leg.route.deposit.min ?? '0', toStep(dSub(received, reserveNow), dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`, 'floor'));
+        const back = dMax(depositFloor(leg.route, dp), toStep(dSub(received, reserveNow), dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`, 'floor'));
         if (dCmp(back, '0') <= 0) throw new SafetyStop(`${received} ${leg.coin.coin} arrived on ${tc.label}: nothing left to send back after ${reserveNow} for gas`);
         await moved(ctx, dId, () => depositNative(ctx, leg, back));
       } else {

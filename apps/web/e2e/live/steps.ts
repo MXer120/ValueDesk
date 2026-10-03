@@ -30,6 +30,8 @@ import {
   withdrawFunds,
   withdrawQuote,
   withdrawalProgress,
+  forgetSettledPermit,
+  permitExecuted,
   type ChainRoute,
   type CoinConfig,
 } from '../../src/trading/funds';
@@ -46,7 +48,7 @@ import { stepEvmTour } from './evmTour';
 import { stepChainWithdrawals, stepManualDeposits } from './otherChains';
 import { declareTourChecks } from './tour';
 import { stepKeyLifecycle } from './keySteps';
-import { engineTransfer, mustPlace, orderMs, settleFills, settleMs, waitFor } from './orders';
+import { WaitTimeout, engineTransfer, mustPlace, orderMs, settleFills, settleMs, waitFor, waitMaybe } from './orders';
 import { stepOrdersPerps, stepOrdersSpot } from './orderSteps';
 import { ACTIVATION_FEE_USDC, checkDepositAddress, depositAddressProblem, marketQty, spotMarketFor } from './plan';
 import { VALUECHAIN_CHAIN_ID } from './provider';
@@ -81,11 +83,12 @@ async function usdPrice(coin: string): Promise<number> {
  * detail; a failure is recorded AND thrown - the run stops, because what follows
  * depends on where the money is.
  */
-export async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: string; evidence?: Record<string, unknown>; costUsd?: number }>): Promise<void> {
+export async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: string; evidence?: Record<string, unknown>; costUsd?: number; finding?: boolean }>): Promise<void> {
   ctx.rec.line(`* ${id}`, 3);
   try {
     const r = await fn();
-    ctx.checks.pass(id, r.detail, r.evidence ?? {}, r.costUsd ?? null);
+    if (r.finding) ctx.checks.finding(id, r.detail, r.evidence ?? {});
+    else ctx.checks.pass(id, r.detail, r.evidence ?? {}, r.costUsd ?? null);
   } catch (e) {
     ctx.checks.fail(id, errText(e));
     throw e;
@@ -133,7 +136,7 @@ export async function depositOne(ctx: Ctx, chainKey: string, amountIn: string): 
   const { rec, owner } = ctx;
   const usdc = ctx.pre.usdc;
   const dp = usdc.valuechain.decimals;
-  const route = (await usdcRoutes()).find((r) => r.chain.key === chainKey);
+  const route = (await rec.read("SoDEX's USDC deposit routes", () => usdcRoutes(), (l) => `${l.length} open`)).find((r) => r.chain.key === chainKey);
   if (!route) throw new SafetyStop(`SoDEX has no OPEN canonical USDC deposit route on ${chainKey} right now`);
   const amount = canonicalDecimal(amountIn);
   const units = parseUnits(amount, route.decimals);
@@ -540,6 +543,7 @@ async function walletToSpot(ctx: Ctx, amountIn: string, title: string): Promise<
     waitFor(ctx, 'the deposit in Spot', { timeoutMs: settleMs(ctx), probe: async () => unitsOf((await balancesOf(owner, usdc)).spot, dp), done: (s) => s >= spot0 + units, show: (s) => `Spot USDC ${s === undefined ? '?' : formatUnits(s, dp)} (want >= ${formatUnits(spot0 + units, dp)})` }),
   );
   rec.amount('wallet -> Spot USDC', amount);
+  await forgetSettledPermit('deposit', owner).catch(() => false);
   const signed = ctx.walletSigned.slice(signedFrom);
   const txs = (ctx.rec.current?.txs.length ?? 0) - txsFrom;
   return {
@@ -648,7 +652,7 @@ const toUnitsCut = (v: string, dp: number): bigint => unitsDown(v, dp);
  * withdrawalProgress (the on-chain Withdrawer record) AND the receiver's
  * balance on the destination chain where it can be read.
  */
-export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRoute; receiverName: string; amount: string }): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number }> {
+export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRoute; receiverName: string; amount: string }): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number; finding?: boolean }> {
   const { owner, rec } = ctx;
   const { coin, route } = o;
   const dp = coin.valuechain.decimals;
@@ -668,7 +672,7 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   await ensureTrading(ctx);
 
   // The fee and liquidity SoDEX's registry states on-chain - what the Withdraw sheet shows and passes back.
-  const quote = await rec.sub(
+  const quote = await rec.read(
     `SoDEX's on-chain fee and liquidity for ${coin.coin} -> ${route.label} (withdrawQuote)`,
     () => withdrawQuote(coin, route, owner),
     (q) => `fee ${formatUnits(q.fee, dp)} ${coin.coin}, available ${formatUnits(q.available, dp)}`,
@@ -696,7 +700,8 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   if (unitsOf(b0.spot, dp) < units) throw new SafetyStop(`Spot holds ${b0.spot} ${coin.coin}, less than ${amount}`);
 
   const dest = await destinationReader(route, address).catch(() => null);
-  const before = dest ? await dest.read() : null;
+  const before = dest ? await dest.read().catch(() => null) : null;
+  if (dest && before === null) rec.warn('balance', `${route.label} could not be read before the withdrawal - SoDEX's record is the evidence`);
   const memo = route.memo === 'numeric' && !r.noMemo ? r.memo ?? '' : '';
   // As the app builds it: an EVM receiver checksummed; a memo rides in "address:memo" AND the memo field.
   const permitReceiver = route.addressKind === 'evm' ? toChecksumAddress(address) : memo ? `${address}:${memo}` : address;
@@ -744,8 +749,14 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   );
   const txHash = 'txHash' in res && res.txHash ? res.txHash : '';
   const withdrawId = 'withdrawId' in res ? res.withdrawId : null;
-  if (!txHash && !withdrawId && !dest) {
-    throw new Error(`SoDEX accepted the withdrawal without a transaction to follow, and ${route.label} cannot be read from here - check the Withdraw sheet before retrying (the app refuses to send a second permit while this one may still run)`);
+  let followedByNonce = false;
+  if (!txHash && !withdrawId && (!dest || before === null)) {
+    // SoDEX accepted it without a transaction (sodex.com calls that pending) and the destination cannot be read:
+    // the permit's nonce on ValueChain says whether it executed.
+    const ran = await rec.sub('SoDEX accepted the permit without a transaction: wait until its nonce is used on ValueChain', () =>
+      waitFor(ctx, 'the permit to execute', { timeoutMs: ctx.cfg.timeouts.withdrawMinutes * 60_000, intervalMs: 10_000, probe: () => permitExecuted('withdraw', owner), done: (v) => v === true, show: (v) => (v === null ? 'no permit remembered' : v ? 'executed' : 'not executed yet') }),
+    );
+    followedByNonce = ran === true;
   }
   if (txHash) rec.tx({ chain: 'VALUECHAIN', hash: txHash, what: `SoDEX relayed permit: ${amount} ${coin.coin} -> ${route.label}`, explorer: explorer(ctx, 'VALUECHAIN', txHash) });
   if (withdrawId) rec.note(`SoDEX withdrawal id ${withdrawId}`);
@@ -756,21 +767,40 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   const arrived = (bal: bigint | null) => !!dest && before !== null && bal !== null && bal >= before + want;
   // withdrawalProgress is polled as the Withdraw sheet polls it; the destination balance is read alongside,
   // so a record the app cannot read (or a status it never calls final) cannot hang the run.
-  const seen = await rec.sub(
-    'verify: SoDEX\'s withdrawal record is final (withdrawalProgress, as the Withdraw sheet polls it)',
-    () =>
-      waitFor(ctx, `the withdrawal to ${route.label}`, {
-        timeoutMs: ctx.cfg.timeouts.withdrawMinutes * 60_000,
-        intervalMs: 10_000,
-        probe: async () => ({
-          p: txHash || withdrawId ? await withdrawalProgress({ withdrawId, txHash }).catch(() => null) : null,
-          bal: dest ? await dest.read().catch(() => null) : null,
-        }),
-        done: (v) => !!v.p?.done || arrived(v.bal),
-        show: (v) => `${v?.p ? v.p.status : 'no record yet'}${dest && v?.bal !== undefined && v.bal !== null ? `, ${route.label} balance ${formatUnits(v.bal, dest.decimals)}` : ''}`,
-      }),
-    (v) => v.p?.status ?? 'no record',
-  );
+  const readable = !!dest && before !== null;
+  const recordMinutes = readable ? ctx.cfg.timeouts.withdrawMinutes : Math.max(ctx.cfg.timeouts.withdrawMinutes, 60);
+  type Seen = { p: Awaited<ReturnType<typeof withdrawalProgress>>; bal: bigint | null };
+  const probe = async (): Promise<Seen> => ({
+    p: txHash || withdrawId ? await withdrawalProgress({ withdrawId, txHash }).catch(() => null) : null,
+    bal: dest ? await dest.read().catch(() => null) : null,
+  });
+  const showSeen = (v: Seen | undefined): string => `${v?.p ? v.p.status : 'no record yet'}${dest && v?.bal !== undefined && v.bal !== null ? `, ${route.label} balance ${formatUnits(v.bal, dest.decimals)}` : ''}`;
+  let seen: Seen;
+  if (followedByNonce) seen = { p: null, bal: null };
+  else {
+    const w = await rec.sub(
+      'verify: SoDEX\'s withdrawal record is final (withdrawalProgress, as the Withdraw sheet polls it)',
+      () => waitMaybe({ timeoutMs: recordMinutes * 60_000, intervalMs: 10_000, probe, done: (v) => !!v.p?.done || arrived(v.bal) }),
+      (x) => (x.ok ? x.value?.p?.status ?? 'arrived' : `not final after ${recordMinutes} min`),
+    );
+    if (!w.ok) {
+      const last = w.value;
+      // The coins left Spot and SoDEX's record shows the payout under way, on a chain this computer cannot read:
+      // that is known state - reported (in flight), never a reason to stop the run.
+      if (!readable && last?.p && !last.p.done) {
+        flight.what += ` - still "${last.p.status}" after ${recordMinutes} min`;
+        if (!r.self) ctx.stepSentAwayUsd += approx(net) * px;
+        return {
+          detail: `${amount} ${coin.coin} -> ${route.label}: the permit executed and SoDEX's record is "${last.p.status}" after ${recordMinutes} min - not final yet (IN FLIGHT: SoDEX pays out on its own; a failed payout returns to Spot)`,
+          evidence: { coin: coin.coin, chain: route.key, receiver: permitReceiver, amount, fee, relayTx: txHash || null, withdrawId, recordStatus: last.p.status, final: false },
+          costUsd: feeUsd,
+          finding: true,
+        };
+      }
+      throw new WaitTimeout(`timed out after ${recordMinutes} min waiting for the withdrawal to ${route.label} - last seen: ${showSeen(last)}`);
+    }
+    seen = w.value!;
+  }
   const p = seen.p;
   if (p?.done && !p.ok) {
     flight.what += ` - SoDEX's record says "${p.status}" (a failed withdrawal paid from Spot is credited back to Spot)`;
@@ -778,7 +808,9 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   }
   let recordNote = `SoDEX's record: "${p?.status ?? 'none read'}"`;
   if (!p?.done) {
-    recordNote = `the funds arrived, but withdrawalProgress() does not report the withdrawal final (${p ? `"${p.status}"` : 'no record read'}) - the Withdraw sheet would not show "Completed"`;
+    recordNote = followedByNonce
+      ? 'SoDEX gave no transaction to follow: the permit\'s nonce shows it executed (no record could be read)'
+      : `the funds arrived, but withdrawalProgress() does not report the withdrawal final (${p ? `"${p.status}"` : 'no record read'}) - the Withdraw sheet would not show "Completed"`;
     rec.warn('withdrawal record', recordNote);
   }
   if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(evmChain(route.key) ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
@@ -802,6 +834,8 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
     rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${p?.fee !== null && p?.fee !== undefined ? formatUnits(p.fee, dp) : fee} ${coin.coin}`);
   }
   ctx.inFlight.splice(ctx.inFlight.indexOf(flight), 1);
+  // Followed to its end: the app need not stop the next permit to say this one went through.
+  await forgetSettledPermit('withdraw', owner).catch(() => false);
   if (!r.self) ctx.stepSentAwayUsd += approx(net) * px;
   return {
     detail: `${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : `(${o.receiverName})`}: ONE permit signature, relayed by SoDEX; ${received !== null ? `${received} arrived on ${route.label} (fee ${fee} ${coin.coin})` : `arrival cannot be read on ${route.label} from this computer`}; ${recordNote}; ${Math.round((Date.now() - t0) / 1000)} s`,

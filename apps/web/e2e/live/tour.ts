@@ -14,7 +14,7 @@ import type { Ctx, StepId } from './context';
 import type { Expectation } from './guard';
 import type { ProviderPolicy } from './provider';
 import { gasPrice } from './reads';
-import { dAdd, dMax, dSub, toStep } from './util';
+import { dAdd, dCmp, dMax, dMul, dSub, toStep } from './util';
 
 // --- which chains, which legs ---------------------------------------------------------------------
 
@@ -102,6 +102,21 @@ function legSkip(coin: CoinConfig, route: ChainRoute): string | null {
   return null;
 }
 
+/** Routes SoDEX issues no deposit address on at all (sodex.com shows none): USDC on Arc (verified 2026-09-26, again 2026-10-03). */
+export const NO_DEPOSIT_ADDRESS: ReadonlySet<string> = new Set(['USDC|ARC']);
+
+/**
+ * Why a leg's deposit BACK cannot run - decided before anything is withdrawn, so the coins never leave for a
+ * chain they cannot come back from: a route SoDEX issues no address on, or a chain missing from the wallet's
+ * deposit addresses for that coin while SoDEX has issued it others (`listed`: the on-chain registry's
+ * chain -> address for the leg's coin; null when it could not be read). null: it can run.
+ */
+export function depositBackProblem(leg: Pick<TourLeg, 'chain' | 'label' | 'coin'>, listed: ReadonlyMap<string, string> | null): string | null {
+  if (NO_DEPOSIT_ADDRESS.has(`${leg.coin.coin.toUpperCase()}|${leg.chain}`)) return `SoDEX issues no ${leg.coin.coin} deposit address on ${leg.label}`;
+  if (listed && listed.size > 0 && !listed.has(leg.chain)) return `SoDEX has issued this wallet ${leg.coin.coin} deposit addresses on other chains, but none on ${leg.label}`;
+  return null;
+}
+
 /** The checks of the tour, one per leg and direction (declared with the other funds checks). */
 export function declareTourChecks(ctx: Ctx, add: (key: string, area: 'deposits' | 'withdrawals', direction: 'deposit' | 'withdraw', coin: string, chain: string, title: string, id: string) => void): void {
   for (const tc of tourPlan(ctx.pre.coins, ctx.cfg, ctx.selected).chains) {
@@ -127,6 +142,18 @@ export function declareTourChecks(ctx: Ctx, add: (key: string, area: 'deposits' 
 
 const step = (dp: number): string => (dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`);
 
+/** What a deposit back must at least be: SoDEX's deposit minimum + 2 % (a minimum read hours earlier, or applied as "more than", still credits it). */
+export function depositFloor(route: ChainRoute, dp: number): string {
+  const min = route.deposit.min ?? '0';
+  return dCmp(min, '0') > 0 ? toStep(dMul(min, '1.02'), step(Math.min(dp, 8)), 'ceil') : '0';
+}
+
+/** A coin out only (its way back cannot run): the withdrawal minimum, and more than the fee. */
+export function oneWayAmount(route: ChainRoute, coin: CoinConfig, fee: string): string {
+  const dp = Math.min(coin.valuechain.decimals, 6);
+  return toStep(dMax(route.withdraw.min ?? '0', dAdd(fee, step(dp))), step(dp), 'ceil');
+}
+
 /**
  * A withdrawal the owner could send straight back: at least SoDEX's withdrawal
  * minimum, and enough that what arrives (less the fee) clears the deposit
@@ -139,7 +166,7 @@ export function roundTripAmount(route: ChainRoute, coin: CoinConfig, fee: string
 
 /** USDC out and back: at least the withdrawal minimum, and enough that what arrives clears the deposit minimum. */
 export function usdcLegAmounts(route: ChainRoute, fee: string): { withdraw: string; back: string } {
-  const need = dMax(route.withdraw.min ?? '0', dAdd(route.deposit.min ?? '0', fee));
+  const need = dMax(route.withdraw.min ?? '0', dAdd(depositFloor(route, 6), fee));
   const withdraw = toStep(need, '0.01', 'ceil');
   return { withdraw, back: dSub(withdraw, fee) };
 }
@@ -155,9 +182,10 @@ export function oneWayUsdcAmount(route: ChainRoute, fee: string): string {
  */
 export function nativeLegAmounts(route: ChainRoute, coin: CoinConfig, fee: string, reserve: string): { withdraw: string; back: string } {
   const dp = Math.min(coin.valuechain.decimals, 6);
-  const need = dMax(route.withdraw.min ?? '0', dAdd(dAdd(route.deposit.min ?? '0', fee), reserve));
+  const floor = depositFloor(route, dp);
+  const need = dMax(route.withdraw.min ?? '0', dAdd(dAdd(floor, fee), reserve));
   const withdraw = toStep(need, step(dp), 'ceil');
-  return { withdraw, back: dMax(route.deposit.min ?? '0', toStep(dSub(dSub(withdraw, fee), reserve), step(dp), 'floor')) };
+  return { withdraw, back: dMax(floor, toStep(dSub(dSub(withdraw, fee), reserve), step(dp), 'floor')) };
 }
 
 /** Gas units the native coin must cover on a chain: the transfer back, plus the USDC deposit when that leg runs and no other gas is there. */

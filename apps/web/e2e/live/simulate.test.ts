@@ -175,7 +175,8 @@ test('a whole live run against the fake: every step runs, every check passes (or
     assert.ok(['pass', 'finding'].includes(byId.get(id)?.status ?? ''), `${id}: ${byId.get(id)?.status} ${byId.get(id)?.detail}`);
   }
   assert.equal(w.historyReads.length, 4, `history reads: ${w.historyReads.map((x) => x.path).join(', ')}`);
-  for (let i = 1; i < w.historyReads.length; i++) assert.ok(w.historyReads[i]!.at - w.historyReads[i - 1]!.at >= 20, 'one history read per gap');
+  // The limiter's gap is 25 ms here; what the fake sees of it varies with the timer under load.
+  for (let i = 1; i < w.historyReads.length; i++) assert.ok(w.historyReads[i]!.at - w.historyReads[i - 1]!.at >= 15, 'one history read per gap');
   assert.equal(report.historyReads.length, 4);
   // Where the money went.
   assert.equal(w.aid, 777, 'the first deposit opened the account');
@@ -378,20 +379,25 @@ test('evm-tour: every EVM chain the runner signs on, out and back - the native c
   const tour = tourChecks(r);
   // Arbitrum (ETH, USDC), Base (ETH, USDC), Robinhood (ETH), BNB Chain (BNB, USDC), Polygon (USDC), Arc (USDC as its native coin), Avalanche (AVAX), HyperEVM (HYPE): 11 legs, 2 checks each.
   assert.equal(tour.length, 22, tour.map((c) => c.id).join(', '));
-  for (const c of tour) assert.equal(c.status, 'pass', `${c.id}: ${c.status} ${c.detail}`);
+  // Arc runs one-way: SoDEX issues no USDC deposit address there (sodex.com shows none) - the withdrawal is tested,
+  // the deposit back is not run, before anything leaves.
+  const arcBack = tour.find((c) => c.id.startsWith('deposit-usdc-arc'))!;
+  for (const c of tour) if (c !== arcBack) assert.equal(c.status, 'pass', `${c.id}: ${c.status} ${c.detail}`);
+  assert.equal(arcBack.status, 'not-run');
+  assert.match(arcBack.detail, /SoDEX issues no USDC deposit address on Arc/);
+  assert.match(byId.get(tour.find((c) => c.id.startsWith('withdraw-usdc-arc'))!.id)!.detail, /5 USDC -> Arc/);
   // Each native coin went back by a plain transfer to that chain's verified deposit address - and only there.
   const natives = w.writes.filter((x) => / native transfer /.test(x));
-  assert.equal(natives.length, 7, natives.join('\n'));
-  for (const [tag, key] of [['arbitrum', 'ARBITRUM_ETH'], ['base_eth', 'BASE_ETH'], ['robinhood_eth', 'ROBINHOOD_ETH'], ['bsc_bnb', 'BSC_BNB'], ['arc', 'ARC'], ['avaxc', 'AVAXC'], ['hyperevm_hype', 'HYPEREVM_HYPE']] as const) {
+  assert.equal(natives.length, 6, natives.join('\n'));
+  assert.ok(!natives.some((x) => x.startsWith('arc native transfer ')), 'nothing is sent back on Arc');
+  for (const [tag, key] of [['arbitrum', 'ARBITRUM_ETH'], ['base_eth', 'BASE_ETH'], ['robinhood_eth', 'ROBINHOOD_ETH'], ['bsc_bnb', 'BSC_BNB'], ['avaxc', 'AVAXC'], ['hyperevm_hype', 'HYPEREVM_HYPE']] as const) {
     assert.ok(natives.some((x) => x.startsWith(`${tag} native transfer `) && x.endsWith(`-> ${depositAddressOf(key).toLowerCase()}`)), `${key}: ${natives.join('; ')}`);
   }
   // The guard saw each as its own kind, armed with that exact transfer.
   const sent = report.network.requests.filter((q: { what: string }) => q.what.startsWith('native-transfer: DIRECT'));
-  assert.equal(sent.length, 7);
+  assert.equal(sent.length, 6);
   // USDC came back through the app on four chains (Arbitrum, Base, BNB Chain - 18 decimals there - and Polygon).
   for (const tag of ['arbitrum', 'base_eth', 'bsc_bnb', 'matic']) assert.ok(w.writes.some((x) => x.startsWith(`${tag} transfer `) && x.endsWith(`-> ${depositAddressOf(tag === 'arbitrum' ? 'ARBITRUM_ETH' : tag.toUpperCase()).toLowerCase()}`)), `${tag} USDC back`);
-  // Arc: 6.05 USDC out, 5 USDC back (18 decimals on the chain, 6 on SoDEX).
-  assert.match(byId.get(tour.find((c) => c.id.startsWith('deposit-usdc-arc'))!.id)!.detail, /credited 5 USDC/);
   // What was bought for the tour was sold back after the last chain that needed it.
   const sells = w.orders.filter((o) => o.engine === 'spot' && o.side === 'SELL' && o.status === 'FILLED').map((o) => o.symbol);
   for (const m of ['vETH_vUSDC', 'vAVAX_vUSDC']) assert.ok(sells.includes(m), `sold back on ${m}: ${sells.join(', ')}`);

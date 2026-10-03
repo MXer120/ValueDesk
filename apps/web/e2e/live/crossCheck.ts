@@ -33,7 +33,8 @@ import { judgeFeeScenario } from './tierSteps';
 import { approx, cut, dAdd, dCmp, dSub, dur, errText, pollUntil } from './util';
 
 const ENGINES: readonly Engine[] = ['perps', 'spot'];
-const FINAL = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED', 'REPLACED']);
+/** SoDEX's final order states (types/rest.ts) - TRIGGERED: a take-profit / stop-loss that fired and handed over to its child order. */
+const FINAL = new Set(['FILLED', 'CANCELED', 'CANCELLED', 'REJECTED', 'EXPIRED', 'REPLACED', 'TRIGGERED']);
 /** What the stream's report of a fill and the history's row of it must agree on. */
 const FILL_FIELDS = ['side', 'price', 'quantity', 'fee', 'builderFee'] as const;
 const canon = (v: unknown): string => {

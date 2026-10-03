@@ -451,6 +451,31 @@ async function settleUnclear(kind: PermitKind, owner: string): Promise<bigint> {
 }
 
 /**
+ * Whether the permit of this kind the app still remembers (an answer without a
+ * transaction, or a receipt it did not see in time) has executed on-chain: its
+ * nonce is used. null: none is remembered.
+ */
+export async function permitExecuted(kind: PermitKind, owner: string): Promise<boolean | null> {
+  const pending = loadPending(kind, owner.toLowerCase());
+  if (!pending) return null;
+  const lane = kind === 'deposit' ? DEPOSIT_NONCE_KEY : WITHDRAW_NONCE_KEY;
+  return (await relayNonce(owner.toLowerCase(), lane)) > BigInt(pending.nonce);
+}
+
+/**
+ * The caller has followed a remembered permit to its end (its withdrawal record
+ * is final, the coins arrived, Spot was credited): forget it, so the next permit
+ * is not stopped to say "your previous one went through". Only once the chain
+ * shows its nonce used - an unexecuted permit stays guarded. Returns whether it
+ * was forgotten.
+ */
+export async function forgetSettledPermit(kind: PermitKind, owner: string): Promise<boolean> {
+  if ((await permitExecuted(kind, owner)) !== true) return false;
+  clearPending(kind, owner.toLowerCase());
+  return true;
+}
+
+/**
  * Send a signed call-for-permit request the way sodex.com does, safer: run it
  * on-chain first (a request the contract refuses is never sent), remember it
  * before it leaves, relay it, and wait for its transaction. Returns the
@@ -641,7 +666,7 @@ export function planWithdraw(
 
 // --- a permit whose answer was unclear ------------------------------------------------------
 
-type PermitKind = 'withdraw' | 'deposit';
+export type PermitKind = 'withdraw' | 'deposit';
 
 interface PendingPermit {
   owner: string;

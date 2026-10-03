@@ -60,6 +60,8 @@ import {
   transferFunds,
   unitsDown,
   withdrawFunds,
+  forgetSettledPermit,
+  permitExecuted,
   withdrawalProgress,
   type ChainRoute,
   type CoinConfig,
@@ -736,6 +738,30 @@ test('accepted without a transaction hash (sodex.com treats it as pending): repo
   assert.deepEqual(r, { route: 'BASE_ETH', txHash: '', withdrawId: null });
   relayReply = 'ok';
   await assert.rejects(withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly }), /previous withdrawal of 5 USDC to Base went through/);
+});
+
+test('a permit followed to its end (the record final, the coins arrived) is forgotten: the next withdrawal goes out without the warning', async () => {
+  world.evm = 20;
+  relayReply = 'nohash';
+  await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly });
+  assert.equal(await permitExecuted('withdraw', OWNER), true, 'its nonce is used');
+  assert.equal(await forgetSettledPermit('withdraw', OWNER), true);
+  assert.equal(await permitExecuted('withdraw', OWNER), null, 'nothing remembered any more');
+  relayReply = 'ok';
+  const r = await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly });
+  assert.ok('withdrawId' in r);
+  assert.equal(world.evm, 10);
+});
+
+test('a permit that has NOT executed is never forgotten: the next one still takes its nonce', async () => {
+  world.evm = 20;
+  relayReply = '504-noexec';
+  await assert.rejects(withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly }), /may still go through/);
+  assert.equal(await permitExecuted('withdraw', OWNER), false);
+  assert.equal(await forgetSettledPermit('withdraw', OWNER), false, 'still guarded');
+  relayReply = 'ok';
+  await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly });
+  assert.deepEqual(relayed().map((p) => p.body.nonce), ['7', '7'], 'the same nonce: at most one of the two can run');
 });
 
 // --- balances and transfers ----------------------------------------------------------------------

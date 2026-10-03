@@ -34,7 +34,7 @@ import { chainWithdrawals } from './chainRoutes';
 import { DEFAULT_CONFIG, validateConfig, type RunConfig } from './config';
 import { applyProfile, profileSteps } from './profiles';
 import { memoRuleProblems, notTestable } from './routes';
-import { nativeLegAmounts, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { nativeLegAmounts, roundTripAmount, tourPlan, usdcLegAmounts, depositBackProblem, oneWayAmount } from './tour';
 import { buildSummary, minimumsBelowFee, type SummaryInput } from './summary';
 import { handInstructions, handPlan, handRoutes, isHandActive } from './handBack';
 import { ownerWord } from './ownerInput';
@@ -273,15 +273,25 @@ const route = (key: string, o: Partial<ChainRoute> = {}): ChainRoute => ({
 const coinOf = (name: string, dp: number, chains: ChainRoute[], assetId = 1): CoinConfig => ({ coin: name, asset: `v${name}`, assetId, valuechain: { token: '0x00000000000000000000000000000000000000c0', symbol: `v${name}`, decimals: dp, native: false }, chains });
 const native = (key: string, dep: string, wd: string, fee: string) => route(key, { isNativeToken: true, deposit: { allowed: true, min: dep, etaSeconds: null }, withdraw: { allowed: true, min: wd, fee } });
 
-test('tour amounts: what goes out clears the deposit minimum when it comes back, with the gas kept back; a round trip never withdraws a minimum the fee eats', () => {
-  assert.deepEqual(usdcLegAmounts(route('ARBITRUM_ETH'), '1'), { withdraw: '6', back: '5' });
-  assert.deepEqual(usdcLegAmounts(route('MATIC', { withdraw: { allowed: true, min: '2', fee: '1' } }), '1'), { withdraw: '6', back: '5' });
+test('tour amounts: what goes out clears the deposit minimum (+2 %) when it comes back, with the gas kept back; a round trip never withdraws a minimum the fee eats', () => {
+  // Every deposit back is SoDEX's deposit minimum + 2 %: a minimum read hours earlier, or applied as "more than", still credits it.
+  assert.deepEqual(usdcLegAmounts(route('ARBITRUM_ETH'), '1'), { withdraw: '6.1', back: '5.1' });
+  assert.deepEqual(usdcLegAmounts(route('MATIC', { withdraw: { allowed: true, min: '2', fee: '1' } }), '1'), { withdraw: '6.1', back: '5.1' });
   const eth = coinOf('ETH', 18, []);
-  assert.deepEqual(nativeLegAmounts(native('ARBITRUM_ETH', '0.0015', '0.0015', '0.0005'), eth, '0.0005', '0.0002'), { withdraw: '0.0022', back: '0.0015' });
+  assert.deepEqual(nativeLegAmounts(native('ARBITRUM_ETH', '0.0015', '0.0015', '0.0005'), eth, '0.0005', '0.0002'), { withdraw: '0.00223', back: '0.00153' });
   // BNB: SoDEX's withdrawal minimum (0.0005) is below its fee (0.002) - the leg withdraws enough to come back.
-  assert.deepEqual(nativeLegAmounts(native('BSC_BNB', '0.005', '0.0005', '0.002'), coinOf('BNB', 18, []), '0.002', '0.0005'), { withdraw: '0.0075', back: '0.005' });
-  // Arc: USDC is the native coin, 6 decimals on SoDEX.
-  assert.deepEqual(nativeLegAmounts(native('ARC', '5', '5', '1'), coinOf('USDC', 6, []), '1', '0.05'), { withdraw: '6.05', back: '5' });
+  assert.deepEqual(nativeLegAmounts(native('BSC_BNB', '0.005', '0.0005', '0.002'), coinOf('BNB', 18, []), '0.002', '0.0005'), { withdraw: '0.0076', back: '0.0051' });
+  // Arc: USDC is the native coin, 6 decimals on SoDEX (the tour runs it one-way: SoDEX issues no USDC deposit address there).
+  assert.deepEqual(nativeLegAmounts(native('ARC', '5', '5', '1'), coinOf('USDC', 6, []), '1', '0.05'), { withdraw: '6.15', back: '5.1' });
+  assert.equal(oneWayAmount(native('ARC', '5', '5', '1'), coinOf('USDC', 6, []), '1'), '5');
+  // The way back: none on a route SoDEX issues no address on, none on a chain missing while the coin has addresses elsewhere.
+  const arcLeg = { chain: 'ARC', label: 'Arc', coin: coinOf('USDC', 6, []) };
+  assert.match(depositBackProblem(arcLeg, null) ?? '', /issues no USDC deposit address on Arc/);
+  const ethLeg = (chain: string) => ({ chain, label: chain, coin: eth });
+  assert.equal(depositBackProblem(ethLeg('BASE_ETH'), new Map([['BASE_ETH', '0xff']])), null);
+  assert.equal(depositBackProblem(ethLeg('BASE_ETH'), new Map()), null, 'nothing issued yet (a new wallet): the deposit step asks for it');
+  assert.equal(depositBackProblem(ethLeg('BASE_ETH'), null), null, 'unread: the deposit step checks again');
+  assert.match(depositBackProblem(ethLeg('ROBINHOOD_ETH'), new Map([['BASE_ETH', '0xff']])) ?? '', /none on ROBINHOOD_ETH/);
   assert.equal(roundTripAmount(native('SOL', '0.03', '0.01', '0.012'), coinOf('SOL', 9, []), '0.012'), '0.042');
   assert.equal(roundTripAmount(native('BTC', '0.00005', '0.0005', '0.00006'), coinOf('BTC', 8, []), '0.00006'), '0.0005');
 });
