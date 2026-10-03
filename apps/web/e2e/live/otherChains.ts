@@ -27,19 +27,23 @@
  *                      At the end, everything these two steps left in Spot is sold
  *                      back to USDC where a market takes it.
  */
-import { balancesOf, chainLabel, unitsDown, withdrawQuote, type CoinConfig } from '../../src/trading/funds';
+import type { AddressKind } from '../../src/trading/addresses';
+import { balancesOf, chainLabel, unitsDown, withdrawQuote, type ChainRoute, type CoinConfig } from '../../src/trading/funds';
 import { formatUnits } from '../../src/trading/onboard';
 import { coinPrices, priceOf } from '../../src/trading/prices';
-import { chainWithdrawals } from './chainRoutes';
-import type { Ctx } from './context';
+import { chainWithdrawals, type ChainWithdrawal } from './chainRoutes';
+import { CheckFailure, armed, type Ctx } from './context';
+import { nativeChainFor, nativeCoinFor, nativeCoinOf } from './native';
+import { ACCOUNT_MINIMUM, NATIVE_DECIMALS, NATIVE_SYMBOL, type NativeChain, type NativeCoin, type PreparedSend, type SendCosts } from './native/types';
+import { waitMaybe } from './orders';
 import { sellBack } from './evmTour';
 import { handInstructions, handKey, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { ownerWord } from './ownerInput';
 import { checkDepositAddress, depositAddressProblem, spotMarketFor } from './plan';
-import { buyOnSpot, moved, routeCheck, withdrawTo } from './steps';
-import { roundTripAmount } from './tour';
+import { buyOnSpot, creditWaitMs, moved, routeCheck, withdrawTo } from './steps';
+import { depositFloor, roundTripAmount } from './tour';
 import { ensureTrading } from './trading';
-import { approx, cut, dCmp, dSub, dur, paced, sleep, toStep } from './util';
+import { approx, cut, dAdd, dCmp, dMax, dSub, dur, errText, paced, sleep, toStep } from './util';
 
 /** The hand-sent deposits planned with live reads (which coins have a market, each route's on-chain fee). */
 async function planHands(ctx: Ctx): Promise<Map<string, HandPlan>> {
@@ -68,10 +72,16 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     if (!markets.has(c.coin)) markets.set(c.coin, !!(await spotMarketFor(c).catch(() => null)));
     return markets.get(c.coin)!;
   };
-  for (const w of chainWithdrawals(ctx.pre.coins, cfg)) {
+  const list = nativeFirst(chainWithdrawals(ctx.pre.coins, cfg));
+  for (const w of list) {
     const id = routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}`);
     if (w.skip) {
       ctx.checks.skip(id, w.skip);
+      if (w.roundTrip) ctx.checks.skip(routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`), w.skip);
+      continue;
+    }
+    if (w.roundTrip) {
+      await roundTripLeg(ctx, w, id, list, hasMarket);
       continue;
     }
     const key = handKey(w.coin.coin, w.route.key);
@@ -115,6 +125,200 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
   }
   // Without the hand-sent deposits in this run, what the buys left over is sold back now.
   if (!ctx.selected.has('manual-deposits')) await sellBackOther(ctx);
+}
+
+// --- round trips on the chains the runner signs on (native/*.ts) ------------------------------------------------
+
+const unitStep = (dp: number): string => (dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`);
+
+/** The native coin of a chain first (a token's transfer back needs it for its fee), the routes' own order otherwise. */
+function nativeFirst(list: ChainWithdrawal[]): ChainWithdrawal[] {
+  const keys = [...new Set(list.map((w) => w.route.key))];
+  return keys.flatMap((k) => {
+    const on = list.filter((w) => w.route.key === k);
+    return [...on.filter((w) => w.route.isNativeToken), ...on.filter((w) => !w.route.isNativeToken)];
+  });
+}
+
+/**
+ * One round trip on a chain the runner signs on itself (the test key - native/*.ts): the coin out to the test
+ * wallet's OWN address there (its arrival read on the chain), then back to the wallet's verified SoDEX deposit
+ * address in a transfer the runner signs (DIRECT), until Spot is credited. The way back is checked BEFORE anything
+ * leaves; without one only the withdrawal runs. Nothing goes to anyone else.
+ */
+async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: readonly ChainWithdrawal[], hasMarket: (c: CoinConfig) => Promise<boolean>): Promise<void> {
+  const { owner, cfg, rec } = ctx;
+  const chain = nativeChainFor(ctx.native, w.route.key);
+  const dId = routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`);
+  const ncoin = chain ? nativeCoinOf(chain, w.route, w.coin.coin) : null;
+  if (!chain || !ctx.native || !ncoin) {
+    const why = !chain ? `the runner does not sign on ${w.route.label}` : `the runner does not know ${w.coin.coin}'s decimals on ${w.route.label}`;
+    ctx.checks.skip(wId, why);
+    ctx.checks.skip(dId, why);
+    return;
+  }
+  const keys = ctx.native.keys;
+  const here = chain.address(keys);
+  const sodexDp = w.coin.valuechain.decimals;
+  const dp = Math.min(ncoin.decimals, sodexDp, 8);
+  const kind = w.route.addressKind as AddressKind;
+
+  // 1. The way back: the wallet's deposit address there, the app's and the on-chain registry's - before anything leaves.
+  const d = await rec.read(
+    `the ${w.coin.coin} deposit address on ${w.route.label}: the app's Deposit sheet vs the on-chain registry`,
+    () => checkDepositAddress(owner, w.route.key, { registryOnly: false, waitMs: cfg.timeouts.addressIssueSeconds * 1000, coin: w.coin.coin, kind, say: (s) => rec.line(s, 7) }),
+    (x) => `${x.backend ?? '-'} vs ${x.registry ?? '-'}`,
+  );
+  const noBack = depositAddressProblem(owner, w.route.key, d, { coin: w.coin.coin, kind });
+  const to = noBack ? null : d.backend!;
+
+  // 2. How much: what arrives must cover the deposit back (SoDEX's minimum + 2 %), the chain's fee, what must stay at
+  //    the address - and, for a chain's native coin, the fees its tokens' transfers back will need.
+  const quote = await rec.read(`SoDEX's on-chain fee for ${w.coin.coin} -> ${w.route.label}`, () => withdrawQuote(w.coin, w.route, owner), (q) => `${formatUnits(q.fee, sodexDp)} ${w.coin.coin}`);
+  const fee = formatUnits(quote.fee, sodexDp);
+  let costs: SendCosts = { fee: 0n, keep: 0n, nativeNeeded: 0n };
+  let reserve = 0n;
+  if (to) {
+    costs = await rec.read(`what a ${w.coin.coin} transfer on ${w.route.label} costs from ${here}`, () => chain.costs(here, ncoin, to), (c) => `fee ${c.fee}, keep ${c.keep}, native needed ${c.nativeNeeded} (base units)`);
+    if (ncoin.native) {
+      for (const t of list) {
+        if (t.route.key !== w.route.key || t.route.isNativeToken || t.skip || !t.roundTrip) continue;
+        const tc = nativeCoinOf(chain, t.route, t.coin.coin);
+        if (!tc) continue;
+        const c = await chain.costs(here, tc, to).catch(() => null);
+        if (c) reserve += (c.nativeNeeded * 12n) / 10n;
+      }
+      // Solana: the paying account must stay rent-exempt (~650,240 lamports) after each token send - or be empty.
+      if (reserve > 0n) reserve += ACCOUNT_MINIMUM[chain.kind] ?? 0n;
+    }
+  }
+  const floor = depositFloor(w.route, dp);
+  const extra = ncoin.native ? formatUnits(costs.fee + costs.keep + reserve, ncoin.decimals) : '0';
+  const amount = to
+    ? toStep(dMax(w.route.withdraw.min ?? '0', dAdd(dAdd(dAdd(floor, extra), fee), unitStep(dp))), unitStep(dp), 'ceil')
+    : roundTripAmount(w.route, w.coin, fee);
+
+  // 3. The coin in Spot (bought with USDC where Spot holds less).
+  const held = (await balancesOf(owner, w.coin)).spot;
+  if (dCmp(held, amount) < 0) {
+    if (!(await hasMarket(w.coin)) || !cfg.chainWithdrawals.buyIfMissing) {
+      const why = !(await hasMarket(w.coin)) ? `Spot holds ${held} ${w.coin.coin} and SoDEX has no ${w.coin.coin}/USDC market that is TRADING to buy ${amount} on` : `Spot holds ${held} ${w.coin.coin}, less than ${amount}, and chainWithdrawals.buyIfMissing is off`;
+      ctx.checks.skip(wId, why);
+      ctx.checks.skip(dId, why);
+      return;
+    }
+    const b0 = unitsDown(held, sodexDp);
+    await buyOnSpot(ctx, w.coin, amount, wId);
+    const b1 = unitsDown((await balancesOf(owner, w.coin)).spot, sodexDp);
+    if (b1 > b0) addOther(ctx, w.coin.coin, b1 - b0);
+  }
+
+  // 4. Out, to the test wallet's own address there - its arrival read on the chain.
+  let arrived = dSub(amount, fee);
+  try {
+    await moved(ctx, wId, async () => {
+      const r = await withdrawTo(ctx, { coin: w.coin, route: w.route, receiverName: w.receiverName, amount });
+      if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
+      return r;
+    });
+  } catch (e) {
+    // SoDEX's record says the payout FAILED: a withdrawal paid from Spot is credited back there - known state, the
+    // other chains go on (a payout to a brand-new account a chain refuses, e.g. Stellar without createAccount).
+    if (/ended as "/.test(errText(e))) {
+      ctx.checks.skip(dId, `nothing to send back: the withdrawal failed (${errText(e)})`);
+      return;
+    }
+    throw e;
+  }
+  addOther(ctx, w.coin.coin, -unitsDown(amount, sodexDp));
+  if (!to) {
+    ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(arrived, 8)} ${w.coin.coin} that arrived stays at the test wallet's ${w.route.label} address ${here}.`, { chain: w.route.key, address: here, leftOnChain: arrived });
+    rec.note(`${w.route.label}: the ${w.coin.coin} deposit back is not run (${noBack}); ${cut(arrived, 8)} stays at ${here}`);
+    return;
+  }
+
+  // 5. Back to SoDEX, signed by the runner (DIRECT): exactly the bytes armed, once.
+  await depositBack(ctx, { chain, coinCfg: w.coin, route: w.route, ncoin, here, to, dId, reserve, floor });
+}
+
+async function depositBack(
+  ctx: Ctx,
+  o: { chain: NativeChain; coinCfg: CoinConfig; route: ChainRoute; ncoin: NativeCoin; here: string; to: string; dId: string; reserve: bigint; floor: string },
+): Promise<void> {
+  const { owner, rec } = ctx;
+  const { chain, ncoin, route, here, to, dId } = o;
+  const coin = o.coinCfg.coin;
+  const sodexDp = o.coinCfg.valuechain.decimals;
+  const natSym = NATIVE_SYMBOL[chain.kind];
+  const natDp = NATIVE_DECIMALS[chain.kind];
+  let flight: { what: string; since: number; ref?: string } | null = null;
+  try {
+    let amount: bigint | 'max' = 'max';
+    if (ncoin.native && o.reserve > 0n) {
+      // What the chain's tokens still need for their fees stays here.
+      const bal = await chain.balance(here, ncoin);
+      const c = await chain.costs(here, ncoin, to);
+      amount = bal - c.fee - c.keep - o.reserve;
+      if (amount <= 0n) throw new CheckFailure(`only ${formatUnits(bal, ncoin.decimals)} ${coin} at ${here}: nothing left to send back after the fee and ${formatUnits(o.reserve, natDp)} ${natSym} kept for the tokens' transfers`);
+    }
+    if (!ncoin.native) {
+      const nat = await chain.balance(here, nativeCoinFor(chain, natSym));
+      const c = await chain.costs(here, ncoin, to);
+      if (nat < c.nativeNeeded) throw new CheckFailure(`not sent: ${here} holds ${formatUnits(nat, natDp)} ${natSym}, the ${coin} transfer needs ${formatUnits(c.nativeNeeded, natDp)} ${natSym} for its fee - the ${coin} stays there`);
+    }
+    const p: PreparedSend = await rec.sub(
+      `build and sign the ${coin} transfer back on ${route.label} (nothing is sent yet)`,
+      () => chain.prepare(ctx.native!.keys, ncoin, to, amount),
+      (x) => `${formatUnits(x.amount, ncoin.decimals)} ${coin}, network fee ${formatUnits(x.fee, natDp)} ${natSym}, tx ${x.txid}`,
+    );
+    const sent = formatUnits(p.amount, ncoin.decimals);
+    if (p.amount < unitsDown(o.floor, ncoin.decimals)) throw new CheckFailure(`not sent: ${sent} ${coin} is below SoDEX's deposit minimum ${route.deposit.min} (+2 %) on ${route.label} - a deposit below it is not credited`);
+    const spot0 = unitsDown((await balancesOf(owner, o.coinCfg)).spot, sodexDp);
+    const label = `DIRECT ${route.label} transfer: ${sent} ${coin} from the test wallet's own address ${here} to the verified deposit address ${to}`;
+    await rec.sub(`send it (the runner signs it - DIRECT): ${sent} ${coin} on ${route.label} to ${to}`, () =>
+      armed(ctx, { expect: [{ kind: 'chain-broadcast', label, exact: p.request.body, tag: dId }] }, () => chain.broadcast(p)),
+    );
+    rec.tx({ chain: route.key, hash: p.txid, what: `DIRECT ${coin} transfer back to SoDEX`, explorer: p.explorer });
+    flight = { what: `${sent} ${coin} sent on ${route.label} to the wallet's SoDEX deposit address ${to} - not credited yet`, since: Date.now(), ref: p.explorer };
+    ctx.inFlight.push(flight);
+    const want = unitsDown(sent, sodexDp);
+    const eta = route.deposit.etaSeconds ? `SoDEX estimate ~${Math.max(1, Math.round(route.deposit.etaSeconds / 60))} min` : 'no SoDEX estimate';
+    const waitMs = Math.max(creditWaitMs(ctx, route.deposit.etaSeconds), 60 * 60_000);
+    const t0 = Date.now();
+    const r = await rec.sub(`wait for SoDEX to credit Spot +${sent} ${coin} (${eta})`, () =>
+      waitMaybe({
+        timeoutMs: waitMs,
+        intervalMs: 20_000,
+        probe: async () => ({ spot: unitsDown((await balancesOf(owner, o.coinCfg)).spot, sodexDp), ok: await chain.confirmed(p.txid).catch(() => null) }),
+        done: (v) => v.spot >= spot0 + want || v.ok === false,
+      }),
+    );
+    const last = r.value;
+    if (last?.ok === false) {
+      ctx.inFlight.splice(ctx.inFlight.indexOf(flight), 1);
+      ctx.checks.fail(dId, `the transfer FAILED on ${route.label} (${p.explorer}) - the ${coin} did not leave ${here}, but its fee did`, { tx: p.txid });
+      return;
+    }
+    if (!r.ok || !last) {
+      ctx.checks.finding(dId, `sent on ${route.label} (DIRECT, ${p.explorer}), but Spot was not credited +${sent} ${coin} within ${dur(waitMs)} (${last?.ok ? 'final on the chain' : 'not yet final on the chain'}) - IN FLIGHT: SoDEX credits it once its custody sees it`, { tx: p.txid, sent });
+      return;
+    }
+    ctx.inFlight.splice(ctx.inFlight.indexOf(flight), 1);
+    const credited = formatUnits(last.spot - spot0, sodexDp);
+    addOther(ctx, coin, last.spot - spot0);
+    rec.amount(`deposit back ${coin} from ${route.label}`, `sent ${sent}, credited ${credited}`);
+    ctx.checks.pass(
+      dId,
+      `${sent} ${coin} sent on ${route.label} (DIRECT, ${p.txid}) from the test wallet's own address to the deposit address the app's Deposit sheet and the on-chain registry both name; Spot was credited ${credited} ${coin} after ${dur(Date.now() - t0)}; network fee ${formatUnits(p.fee, natDp)} ${natSym}`,
+      { tx: p.txid, from: here, depositAddress: to, sent, credited, direct: true },
+    );
+  } catch (e) {
+    if (flight) {
+      ctx.checks.finding(dId, `${errText(e)} - after the transfer was sent (${flight.ref ?? ''}): IN FLIGHT`);
+      return;
+    }
+    ctx.checks.fail(dId, errText(e));
+  }
 }
 
 /** Sell back to USDC what chain-withdrawals and manual-deposits left in Spot (where a market takes it). */

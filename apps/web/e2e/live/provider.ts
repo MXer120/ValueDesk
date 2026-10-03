@@ -36,6 +36,8 @@ import { createPublicClient, createWalletClient, defineChain, http, type Chain, 
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { VALUECHAIN_RPC } from '../../src/trading/rpc';
 import { ALL_EVM } from './chains';
+import { nativeKeysFromHex } from './native/keys';
+import type { NativeKeys } from './native/types';
 import type { Eip1193Provider } from '../../src/wallet';
 
 export const VALUECHAIN_CHAIN_ID = 286623;
@@ -130,6 +132,8 @@ export interface KeyProvider extends Eip1193Provider {
   knownChains(): readonly ChainSpec[];
   /** `text` with the private key (hex, any case, with or without 0x) replaced by [redacted] - for reports and logs. */
   redact(text: string): string;
+  /** The same key for the non-EVM chains (native/keys.ts): secp256k1 as it is, an ed25519 seed derived per chain. */
+  nativeKeys(): NativeKeys;
 }
 
 const KEY_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -360,6 +364,7 @@ export function createKeyProvider(o: KeyProviderOptions): KeyProvider {
     },
     knownChains: () => chains,
     redact: (text: string) => scrub(text),
+    nativeKeys: () => nativeKeysFromHex(secret),
     on(event, handler) {
       let set = listeners.get(event);
       if (!set) listeners.set(event, (set = new Set()));

@@ -24,6 +24,7 @@ import { _setBuilderPollDelaysForTests } from '../../src/trading/builderApproval
 import { runE2E } from './runner';
 import { scriptedOwnerInput, type OwnerInput } from './ownerInput';
 import { SAMPLE_ADDRESS } from './receivers';
+import { FAKE_NATIVE_ADDRESS, fakeNativeChains } from './sim/nativeFakes';
 import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, OWNER_ADDRESS, TERMS_PUBLIC_KEY, VC_USDC, depositAddressOf, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
 
 let restore: (() => void) | null = null;
@@ -96,7 +97,7 @@ async function run(
     backendOverride: BACKEND,
     log: (l) => lines.push(l),
     ...(o.ownerInput ? { ownerInput: o.ownerInput } : {}),
-    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
+    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, native: fakeNativeChains(), ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
   });
   const file = readdirSync(dir).find((f) => f.endsWith(`-${mode}.json`));
   const report = file ? JSON.parse(readFileSync(join(dir, file), 'utf8')) : null;
@@ -407,13 +408,13 @@ test('evm-tour: every EVM chain the runner signs on, out and back - the native c
   assert.ok(report.chains.some((c: { chain: string; coin: string; deposit: { status: string } }) => c.chain === 'AVAXC' && c.coin === 'AVAX' && c.deposit.status === 'pass'));
 });
 
-test('all-chains: withdrawals to your own addresses on the chains the runner cannot sign on, and a deposit you send by hand', async () => {
+test('all-chains: a round trip on every chain the runner signs on - out to the test wallet\'s own address, back to SoDEX signed by the runner - and a deposit you send by hand', async () => {
   let manual: { coin: string; chain: string; address: string; amount: string } | null = null;
   const r = await run(
     {
       ...CONFIG,
       maxSpendUsd: 200,
-      receivers: { valuechain: FRIEND, sol: OWNER_ADDRESS.solana, btc: OWNER_ADDRESS.bitcoin, doge: OWNER_ADDRESS.dogecoin, xrp: { address: OWNER_ADDRESS.xrp, noMemo: true } },
+      receivers: { valuechain: FRIEND },
       manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: '0.03' }],
     },
     {
@@ -431,24 +432,37 @@ test('all-chains: withdrawals to your own addresses on the chains the runner can
   noFailures(r.checks);
   noRefusals(report);
   assert.equal(r.code, 0, show(r));
-  for (const id of ['withdraw-sol-sol', 'withdraw-usdc-sol', 'withdraw-xrp-xrp', 'withdraw-btc-btc', 'manual-deposit-sol-sol']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
-  assert.match(byId.get('withdraw-doge-doge')!.detail, /not testable from USDC alone: .*no DOGE\/USDC spot market/);
-  assert.equal(byId.get('withdraw-doge-doge')!.status, 'skipped');
+  for (const id of ['withdraw-sol-sol', 'deposit-sol-sol', 'withdraw-usdc-sol', 'deposit-usdc-sol', 'withdraw-xrp-xrp', 'deposit-xrp-xrp', 'withdraw-btc-btc', 'deposit-btc-btc', 'manual-deposit-sol-sol']) {
+    assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.status} ${byId.get(id)?.detail}`);
+  }
+  // DOGE: the simulation has no DOGE market to buy it on - both directions say so; ZEC is closed.
+  assert.equal(byId.get('withdraw-doge-doge')?.status, 'skipped');
+  assert.match(byId.get('withdraw-doge-doge')!.detail, /no DOGE\/USDC market that is TRADING/);
   assert.equal(byId.get('withdraw-zec-zec')?.status, 'skipped');
-  // Paid out to the owner's own addresses: never less than what could be sent straight back.
+  // Out: to the test wallet's OWN address on each chain (the same key) - never to anyone else.
   const paid = (coin: string) => w.offchain.find((x) => x.coin === coin);
-  assert.equal(paid('SOL')?.receiver, OWNER_ADDRESS.solana);
-  // SOL is sent back by hand: what arrives covers the 0.03 deposit, the wallet's fee (0.00001) and Solana's rent (0.00089088).
-  assert.equal(paid('SOL')?.amount, 30_901_000n, '0.042901 SOL withdrawn, 0.030901 paid out');
-  assert.equal(paid('XRP')?.receiver, OWNER_ADDRESS.xrp, 'no memo: the address alone');
-  assert.equal(paid('XRP')?.memo, '');
-  assert.equal(paid('BTC')?.amount, 50_000n - 6_000n, 'BTC: its 0.0005 minimum, less the fee');
-  // The manual deposit: shown only once the app's Deposit sheet and the registry agreed on it.
+  assert.equal(paid('SOL')?.receiver, FAKE_NATIVE_ADDRESS.solana);
+  assert.equal(paid('USDC')?.receiver, FAKE_NATIVE_ADDRESS.solana);
+  assert.equal(paid('XRP')?.receiver, FAKE_NATIVE_ADDRESS.xrp);
+  assert.equal(paid('XRP')?.memo, '', 'no memo: its own address');
+  assert.equal(paid('BTC')?.receiver, FAKE_NATIVE_ADDRESS.bitcoin);
+  // Back: from there to the wallet's own SoDEX deposit address on that chain, exactly once each, the native coin first.
+  const back = w.nativeSent.map((x) => `${x.chain} ${x.coin} -> ${x.to === depositAddressOf(x.chain) ? 'deposit address' : x.to}`);
+  assert.deepEqual(back.filter((x) => x.startsWith('SOL ')), ['SOL SOL -> deposit address', 'SOL USDC -> deposit address']);
+  assert.ok(back.includes('XRP XRP -> deposit address') && back.includes('BTC BTC -> deposit address'), back.join('; '));
+  // Every deposit back clears SoDEX's minimum + 2 % (SOL 0.03, USDC 5, XRP 4, BTC 0.00005).
+  const sentOf = (chain: string, coin: string) => w.nativeSent.find((x) => x.chain === chain && x.coin === coin)!.amount;
+  assert.ok(sentOf('SOL', 'SOL') >= 30_600_000n && sentOf('SOL', 'USDC') >= 5_100_000n && sentOf('XRP', 'XRP') >= 4_080_000n && sentOf('BTC', 'BTC') >= 5_100n);
+  // XRP keeps its 1 XRP reserve at the address; Solana keeps what the USDC transfer needed for its fee.
+  const left = async (kind: 'xrp' | 'solana', coin: string) => BigInt(((await (await fetch(`https://${kind}.chain.test/balance?address=${FAKE_NATIVE_ADDRESS[kind]}&coin=${coin}`)).json()) as { balance: string }).balance);
+  void left;
+  // Each broadcast left only as the exact bytes the step armed (the guard's own kind).
+  const casts = report.network.requests.filter((q: { what: string }) => q.what.startsWith('chain-broadcast'));
+  assert.equal(casts.length, w.nativeSent.length);
+  // The hand-sent deposit: shown only once the app's Deposit sheet and the registry agreed on it.
   assert.deepEqual(manual, { coin: 'SOL', chain: 'SOL', address: depositAddressOf('SOL'), amount: '0.03' });
-  const text = r.lines.join('\n');
-  assert.match(text, /SEND BY HAND \(optional\) - 1 of 1: SOL on Solana/);
-  assert.match(text, /amount \.+ 0\.03 SOL {3}\(SoDEX credits nothing below its deposit minimum of 0\.03 SOL/);
-  assert.match(text, /network fee \. your wallet adds it ON TOP/);
+  // Nothing was sent to your other addresses: the round trips come back.
+  assert.equal(report.spend.sentAwayUsd, 0);
 });
 
 test('the full test: round trips to your own wallet - a deposit you skip, one you leave out, one sent first where SoDEX has no market - and everything sold back', async () => {
@@ -486,24 +500,23 @@ test('the full test: round trips to your own wallet - a deposit you skip, one yo
   noRefusals(report);
   assert.equal(r.code, 0, show(r));
   // Asked for, each at least SoDEX's deposit minimum - the wallet's fee on top.
-  assert.deepEqual(sent, ['BTC 0.00041', 'DOGE 42', 'SOL 0.03', 'XRP 4']);
-  for (const id of ['withdraw-btc-btc', 'withdraw-sol-sol', 'withdraw-xrp-xrp', 'withdraw-usdc-sol', 'manual-deposit-btc-btc', 'manual-deposit-sol-sol', 'manual-deposit-doge-doge']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  assert.deepEqual(sent.map((x) => x.split(' ')[0]), ['BTC', 'DOGE', 'SOL', 'XRP']);
+  for (const id of ['withdraw-btc-btc', 'deposit-btc-btc', 'withdraw-sol-sol', 'deposit-sol-sol', 'withdraw-xrp-xrp', 'deposit-xrp-xrp', 'withdraw-usdc-sol', 'deposit-usdc-sol', 'manual-deposit-btc-btc', 'manual-deposit-sol-sol', 'manual-deposit-doge-doge']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
   assert.equal(byId.get('manual-deposit-usdc-sol')?.status, 'skipped');
   assert.match(byId.get('manual-deposit-usdc-sol')!.detail, /^skipped \(owner\): you left this hand-sent deposit out/);
   assert.equal(byId.get('manual-deposit-xrp-xrp')?.status, 'skipped');
   assert.match(byId.get('manual-deposit-xrp-xrp')!.detail, /^skipped \(owner\): you typed "s"/);
   assert.deepEqual(owner.given, ['XRP|XRP: s']);
-  // DOGE has no spot market: deposit first, then the run withdrew it back to your address.
-  assert.equal(byId.get('withdraw-doge-doge')?.status, 'pass', byId.get('withdraw-doge-doge')?.detail);
+  // DOGE: the simulation has no DOGE market, so there is nothing to buy it with when the round trips run (before
+  // your hand-sent DOGE arrives) - said so. (On SoDEX every coin the app offers has a market; TON, without one, is not offered.)
+  assert.equal(byId.get('withdraw-doge-doge')?.status, 'skipped');
+  // XRP: what arrived covers the deposit back (4 + 2 %), the fee and the 1 XRP reserve that stays at the address.
   const paid = (coin: string) => w.offchain.find((x) => x.coin === coin);
-  assert.equal(paid('DOGE')?.receiver, OWNER_ADDRESS.dogecoin);
-  assert.equal(paid('DOGE')?.amount, 3_000_000_000n, '42 DOGE back, 30 arrive after the 12 DOGE fee');
-  // XRP: sized so that the 4 XRP deposit back, the wallet's fee and the 1 XRP reserve all come out of what arrived.
-  assert.equal(paid('XRP')?.amount, 5_000_020n);
-  // What came back was sold back to USDC (BTC is worth enough; the SOL left over is below the market's minimum).
+  const xrpBack = w.nativeSent.find((x) => x.coin === 'XRP')!;
+  assert.equal(paid('XRP')!.amount - xrpBack.amount - xrpBack.nativeFee, 1_000_000n, 'the 1 XRP reserve stays');
+  // What came back - the round trips and your hand-sent deposits - was sold back to USDC.
   const sells = w.orders.filter((o) => o.engine === 'spot' && o.side === 'SELL' && o.status === 'FILLED').map((o) => o.symbol);
-  assert.ok(sells.includes('vBTC_vUSDC'), `sold back: ${sells.join(', ')}`);
-  assert.ok(r.lines.some((l) => /SOL: [0-9.]+ left in Spot/.test(l)), 'what is below the minimum stays, and the run says so');
+  for (const m of ['vBTC_vUSDC', 'vSOL_vUSDC', 'vXRP_vUSDC']) assert.ok(sells.includes(m), `sold back on ${m}: ${sells.join(', ')}`);
   // The summary and the report say "skipped (owner)".
   assert.match(r.summary!, /skipped \(owner\)/);
   const hand = report.plan.handDeposits as Array<{ coin: string; state: string; sendBack: string; depositMin: string }>;
@@ -562,14 +575,16 @@ test('plan --profile all-chains: every route checked read-only, what cannot be t
   assert.equal(byId.get('route-xrp-xrp')?.status, 'pass', byId.get('route-xrp-xrp')?.detail);
   assert.ok(report.plan.routeChecks.length >= 15);
   const nt = report.plan.notTestable as Array<{ what: string; why: string }>;
-  assert.ok(nt.some((n) => n.what === 'BTC on Bitcoin' && /manualDeposits/.test(n.why) && /receivers\.btc/.test(n.why)), JSON.stringify(nt));
+  // Bitcoin, Solana, XRP: the runner signs there itself - both directions are tested, nothing to ask for.
+  assert.ok(!nt.some((n) => n.what === 'BTC on Bitcoin' || n.what === 'SOL on Solana' || n.what === 'XRP on XRP Ledger'), JSON.stringify(nt));
   const rx = report.plan.receiversNeeded as Array<{ name: string; memo: boolean; set: boolean }>;
-  for (const n of ['sol', 'btc', 'xrp', 'doge']) assert.ok(rx.some((x) => x.name === n && !x.set), `receivers.${n} asked for`);
-  assert.equal(rx.find((x) => x.name === 'xrp')?.memo, true);
+  for (const n of ['sol', 'btc', 'xrp', 'doge']) assert.ok(!rx.some((x) => x.name === n), `receivers.${n} is not asked for`);
   assert.ok(report.plan.suggestedMaxSpendUsd > 8);
   assert.ok(report.plan.problems.some((p: string) => /above maxSpendUsd/.test(p)));
   assert.ok(report.plan.profileNotes.every((n: string) => /deposit\.amount/.test(n)));
-  assert.equal(report.plan.steps.find((s: { id: string }) => s.id === 'chain-withdrawals')?.skip, 'no route can run - set your own addresses in receivers (receivers.sol, receivers.btc, ...)');
+  const cw = report.plan.steps.find((s: { id: string }) => s.id === 'chain-withdrawals');
+  assert.ok(!cw?.skip, `chain-withdrawals runs without any receiver: ${cw?.skip}`);
+  assert.ok((cw?.lines as string[]).some((l) => /then back to SoDEX from the test wallet's own address/.test(l)), (cw?.lines as string[]).join('\n'));
   // The summary says what the BNB and Base ETH minimums mean for a user, at the top of the findings.
   assert.match(r.summary!, /### Withdrawal minimums that do not cover the fee[\s\S]*\*\*BNB to BNB Smart Chain\*\*: minimum 0\.0005 BNB, fee 0\.002 BNB/);
   assert.match(r.summary!, /\*\*ETH to Base\*\*: minimum 0\.0005 ETH, fee 0\.0005 ETH\. A user who withdraws exactly the minimum would receive nothing/);

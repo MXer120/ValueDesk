@@ -317,7 +317,7 @@ test('tour plan: which chains, which legs, and why the others are left out', () 
   assert.deepEqual(only.chains[0]!.legs.map((l) => l.skip), [null, null]);
 });
 
-test('chain withdrawals and what cannot be tested: every route on a chain the runner cannot sign on, each with its reason', () => {
+test('chain withdrawals and what cannot be tested: a round trip where the runner signs on the chain itself, every other route with its reason', () => {
   const coins = [
     coinOf('USDC', 6, [route('SOL')], 0),
     coinOf('SOL', 9, [native('SOL', '0.03', '0.01', '0.012')], 8),
@@ -330,14 +330,16 @@ test('chain withdrawals and what cannot be tested: every route on a chain the ru
   assert.deepEqual(w, {
     'USDC@SOL': 'runs',
     'SOL@SOL': 'runs',
-    'XRP@XRP': 'receivers.xrp is not set (your own XRP Ledger address)',
+    'XRP@XRP': 'runs',
     'ZEC@ZEC': 'the app does not offer Zcash',
     'BTC@BTC': 'BTC withdrawals to Bitcoin are closed on SoDEX right now',
   });
+  // The runner signs on Solana, XRP and Bitcoin itself (the same key): out to the test wallet's own address and back - no receiver asked for.
+  const ws = chainWithdrawals(coins, cfg);
+  assert.ok(ws.filter((x) => x.route.key !== 'ZEC').every((x) => x.roundTrip && x.receiverName === `native:${x.route.key}`));
   const nt = Object.fromEntries(notTestable(coins, cfg).map((n) => [n.what, n.why]));
-  assert.match(nt['SOL on Solana']!, /deposit: the runner cannot sign on Solana - opt in with manualDeposits/);
-  assert.match(nt['SOL on Solana']!, /withdrawal: the arrival cannot be read/);
-  assert.ok(!/manualDeposits/.test(nt['XRP on XRP Ledger'] ?? ''), 'XRP is opted into a manual deposit');
+  assert.equal(nt['SOL on Solana'], undefined, 'SOL on Solana: both directions are tested');
+  assert.equal(nt['XRP on XRP Ledger'], undefined);
   assert.match(nt['BTC on Bitcoin']!, /withdrawal: closed/);
   assert.equal(nt['ZEC on Zcash'], 'the app does not offer this chain at all');
   assert.deepEqual(memoRuleProblems(native('XRP', '4', '2', '0.8')), [], 'the app\'s memo rules for XRP hold');

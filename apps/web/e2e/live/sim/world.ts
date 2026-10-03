@@ -354,6 +354,8 @@ export class World {
   evmUsdc = new Map<number, Map<string, bigint>>();
   /** Withdrawals to chains the fake has no node for: what SoDEX paid out, to whom. */
   offchain: Array<{ coin: string; chain: string; receiver: string; memo: string; amount: bigint }> = [];
+  /** Transfers the runner signed on the simulated non-EVM chains (sim/nativeFakes.ts): back to SoDEX. */
+  nativeSent: Array<{ chain: string; coin: string; native: string; from: string; to: string; amount: bigint; nativeFee: bigint; txid: string }> = [];
   nativeOf(chainId: number): Map<string, bigint> {
     let m = this.evmNative.get(chainId);
     if (!m) this.evmNative.set(chainId, (m = new Map()));
@@ -1468,11 +1470,45 @@ export function installFake(): () => void {
     }
     if (url.origin === BACKEND) return backend(url, method, body);
     if (url.origin === BIZ_ORIGIN) return relayer(url, method, body);
+    if (url.hostname.endsWith('.chain.test')) return nativeChainApi(url, method, body);
     throw new Error(`the fake has no ${url.origin}`);
   }) as typeof fetch;
   return () => {
     globalThis.fetch = realFetch;
   };
+}
+
+/**
+ * The simulated non-EVM chains (sim/nativeFakes.ts): an address's balance is what SoDEX paid out to it less what it
+ * sent (and its fees); a transfer to the wallet's SoDEX deposit address there is credited to Spot.
+ */
+function nativeChainApi(url: URL, method: string, body: any): Response {
+  const w = world;
+  if (method === 'GET' && url.pathname === '/balance') {
+    const address = url.searchParams.get('address') ?? '';
+    const coin = url.searchParams.get('coin') ?? '';
+    const paid = w.offchain.filter((x) => x.receiver === address && x.coin === coin).reduce((s, x) => s + x.amount, 0n);
+    const sent = w.nativeSent.filter((x) => x.from === address && x.coin === coin).reduce((s, x) => s + x.amount, 0n);
+    const fees = w.nativeSent.filter((x) => x.from === address && x.native === coin).reduce((s, x) => s + x.nativeFee, 0n);
+    return json({ balance: String(paid - sent - fees) });
+  }
+  if (method === 'GET' && url.pathname.startsWith('/tx/')) {
+    const txid = decodeURIComponent(url.pathname.slice(4));
+    return w.nativeSent.some((x) => x.txid === txid) ? json({ confirmed: true }) : json({ error: 'not found' }, 404);
+  }
+  if (method === 'POST' && url.pathname === '/broadcast') {
+    const t = { chain: String(body.chain), coin: String(body.coin), native: String(body.native), from: String(body.from), to: String(body.to), amount: BigInt(body.amount), nativeFee: BigInt(body.nativeFee), txid: String(body.txid) };
+    w.writes.push(`${t.chain.toLowerCase()} transfer ${t.amount} ${t.coin} ${t.from} -> ${t.to}`);
+    w.nativeSent.push(t);
+    // Only the wallet's own deposit address there is credited (to Spot, in the coin's SoDEX units - the same here).
+    if (t.to === depositAddressOf(t.chain)) {
+      const id = COIN_ID[t.coin];
+      assert.ok(id !== undefined, `the simulation has no coin ${t.coin}`);
+      setTimeout(() => w.addSpot(id, t.amount), 20);
+    }
+    return json({ txid: t.txid });
+  }
+  return json({ error: `the simulated chain has no ${method} ${url.pathname}` }, 404);
 }
 
 /** The account stream's sockets, for the runner's test hook. */

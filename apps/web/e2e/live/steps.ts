@@ -44,6 +44,7 @@ import { depositCheckId, withdrawCheckId, type CheckArea } from './checks';
 import { SafetyStop, allowedReceivers, armed, coinNamed, receiverNamed, routeOf, type Ctx, type StepId } from './context';
 import { stepCrossCheck } from './crossCheck';
 import { declareChainWithdrawalChecks, declareManualDepositChecks } from './chainRoutes';
+import { nativeChainFor, nativeCoinOf } from './native';
 import { stepEvmTour } from './evmTour';
 import { stepChainWithdrawals, stepManualDeposits } from './otherChains';
 import { declareTourChecks } from './tour';
@@ -627,7 +628,13 @@ async function stepWithdrawValuechainOther(ctx: Ctx): Promise<void> {
 }
 
 /** How to read the receiver's balance on the destination chain (every EVM chain the runner reads, chains.ts), or null. */
-export async function destinationReader(route: ChainRoute, holder: string): Promise<{ read: () => Promise<bigint>; decimals: number; symbol: string } | null> {
+export async function destinationReader(route: ChainRoute, holder: string, ctx?: Ctx, coinName?: string): Promise<{ read: () => Promise<bigint>; decimals: number; symbol: string } | null> {
+  // A chain the runner signs on (native/*.ts): its module reads the test wallet's balance there.
+  const nat = ctx ? nativeChainFor(ctx.native, route.key) : null;
+  if (nat && ctx?.native && coinName && nat.address(ctx.native.keys).toLowerCase() === holder.toLowerCase()) {
+    const c = nativeCoinOf(nat, route, coinName);
+    return c ? { read: () => nat.balance(nat.address(ctx.native!.keys), c), decimals: c.decimals, symbol: c.symbol } : null;
+  }
   const chain = evmChain(route.key);
   if (!chain || route.addressKind !== 'evm') return null;
   if (route.isNativeToken) return { read: () => nativeBalance(chain.rpcUrl, holder), decimals: chain.native.decimals, symbol: chain.native.symbol };
@@ -665,7 +672,7 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   if (!allowedReceivers(ctx).has(address.toLowerCase())) throw new SafetyStop(`${address} is neither this wallet nor in the config's receivers`);
   if (!route.withdraw.allowed) throw new SafetyStop(`${coin.coin} withdrawals to ${route.label} are closed right now`);
   if (route.addressKind === 'other') throw new SafetyStop(`the app does not offer ${route.label}`);
-  if (r.self && route.addressKind !== 'evm') throw new SafetyStop(`"self" is an EVM address; ${route.label} needs a receiver from the config`);
+  if (o.receiverName === 'self' && route.addressKind !== 'evm') throw new SafetyStop(`"self" is an EVM address; ${route.label} needs a receiver from the config`);
   if (route.memo === 'numeric' && !r.memo && !r.noMemo) throw new SafetyStop(`${route.label} takes a memo: set "memo" or "noMemo": true on receivers.${o.receiverName}`);
   const bad = receiverProblem(route, address) ?? memoProblem(route, r.memo ?? '', r.noMemo === true);
   if (bad) throw new SafetyStop(`receiver ${address}: ${bad}`);
@@ -702,7 +709,7 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   const b0 = await balancesOf(owner, coin);
   if (unitsOf(b0.spot, dp) < units) throw new SafetyStop(`Spot holds ${b0.spot} ${coin.coin}, less than ${amount}`);
 
-  const dest = await destinationReader(route, address).catch(() => null);
+  const dest = await destinationReader(route, address, ctx, coin.coin).catch(() => null);
   const before = dest ? await dest.read().catch(() => null) : null;
   if (dest && before === null) rec.warn('balance', `${route.label} could not be read before the withdrawal - SoDEX's record is the evidence`);
   const memo = route.memo === 'numeric' && !r.noMemo ? r.memo ?? '' : '';
@@ -718,7 +725,8 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
     return null;
   };
   const t0 = Date.now();
-  const res = await rec.sub(`withdrawFunds: ${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : `(${o.receiverName} ${address})`}, fee ${fee}`, () =>
+  const whose = o.receiverName === 'self' ? '(this wallet)' : o.receiverName.startsWith('native:') ? `(the test wallet's own address ${address})` : `(${o.receiverName} ${address})`;
+  const res = await rec.sub(`withdrawFunds: ${amount} ${coin.coin} -> ${route.label} ${whose}, fee ${fee}`, () =>
     armed(
       ctx,
       {
@@ -841,7 +849,7 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   await forgetSettledPermit('withdraw', owner).catch(() => false);
   if (!r.self) ctx.stepSentAwayUsd += approx(net) * px;
   return {
-    detail: `${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : `(${o.receiverName})`}: ONE permit signature, relayed by SoDEX; ${received !== null ? `${received} arrived on ${route.label} (fee ${fee} ${coin.coin})` : `arrival cannot be read on ${route.label} from this computer`}; ${recordNote}; ${Math.round((Date.now() - t0) / 1000)} s`,
+    detail: `${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : o.receiverName.startsWith('native:') ? "(the test wallet's own address)" : `(${o.receiverName})`}: ONE permit signature, relayed by SoDEX; ${received !== null ? `${received} arrived on ${route.label} (fee ${fee} ${coin.coin})` : `arrival cannot be read on ${route.label} from this computer`}; ${recordNote}; ${Math.round((Date.now() - t0) / 1000)} s`,
     evidence: { coin: coin.coin, chain: route.key, receiver: permitReceiver, amount, fee, received, relayTx: txHash || null, withdrawId, payoutTx: p?.destinationTx ?? null, recordStatus: p?.status ?? null, arrivalVerified: received !== null },
     costUsd: feeUsd,
   };

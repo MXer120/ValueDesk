@@ -28,15 +28,17 @@ import { ALL_EVM, GAS_FLOOR, appSendsUsdc, chainRank, evmChain } from './chains'
 import { Checks } from './checks';
 import type { RunConfig } from './config';
 import { REPLACE_KEEPS_BUILDER } from '../../src/trading/feeGuard';
+import { nativeChainFor, nativeCoinOf, type NativeRegistry } from './native';
+import { ACCOUNT_MINIMUM, NATIVE_DECIMALS, NATIVE_SYMBOL } from './native/types';
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { chainWithdrawals } from './chainRoutes';
 import { checkRoutes, notTestable, sameDepositAddress } from './routes';
-import { depositBackProblem, gasReserve, nativeLegAmounts, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { depositBackProblem, depositFloor, gasReserve, nativeLegAmounts, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
 import { handKey, handLine, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { VALUECHAIN_CHAIN_ID } from './provider';
 import { engineState, gasPrice, nativeBalance, registryDepositAddresses, tokenBalance } from './reads';
 import { requestTerms, type TermsVerdict, type TermsWatch } from './terms';
-import { approx, cut, dCmp, dDiv, dMax, dMul, dSub, errText, isDecimal, lessPct, morePct, shortAddr, sleep, toStep, usd } from './util';
+import { approx, cut, dAdd, dCmp, dDiv, dMax, dMul, dSub, errText, isDecimal, lessPct, morePct, shortAddr, sleep, toStep, usd } from './util';
 
 /** The SoDEX exchange contract on ValueChain (backend /api/deposit/chain; memory: sodex-browser-trading-protocol). */
 export const PINNED_EXCHANGE = '0x0101010101010101010101010101010101010101';
@@ -270,6 +272,8 @@ interface PreflightInput {
   profileNotes?: string[];
   /** Where the route checks are recorded (null: not recorded). */
   checks?: Checks | null;
+  /** The non-EVM chains the runner signs on itself (native/index.ts) and the test key's view for them. */
+  native?: NativeRegistry | null;
 }
 
 /** What one perps market order costs, roughly: the taker fee, the builder fee at the default, half the spread. */
@@ -824,7 +828,9 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
           pr.push(`${label}: ${errText(e)}`);
         }
       }
-      const rcv: { address: string; memo?: string; noMemo?: boolean } | undefined = spec.receiver === 'self' ? { address: owner } : cfg.receivers[spec.receiver];
+      const nat = spec.receiver.startsWith('native:') ? nativeChainFor(o.native ?? null, spec.receiver.slice('native:'.length)) : null;
+      const rcv: { address: string; memo?: string; noMemo?: boolean } | undefined =
+        spec.receiver === 'self' ? { address: owner } : nat && o.native ? { address: nat.address(o.native.keys), noMemo: true } : cfg.receivers[spec.receiver];
       if (!rcv) pr.push(`${label}: receivers.${spec.receiver} is not set`);
       else {
         if (spec.receiver === 'self' && r.addressKind !== 'evm') pr.push(`${label}: "self" is an EVM address - ${r.label} needs a receiver in receivers`);
@@ -850,7 +856,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
       const coinPx = px(c.coin) ?? 0;
       const amt = amount === null ? 0 : approx(amount);
       cost += approx(fee) * coinPx;
-      const self = !!rcv && rcv.address.toLowerCase() === owner;
+      const self = !!rcv && (rcv.address.toLowerCase() === owner || !!nat);
       if (!self) away += Math.max(0, amt - approx(fee)) * coinPx;
       const verifiable = r.addressKind === 'evm' && !!evmChain(r.key);
       lines.push(
@@ -1051,6 +1057,65 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         lines.push(`${w.coin.coin} -> ${w.route.label}: skipped - ${w.skip}`);
         continue;
       }
+      if (w.roundTrip) {
+        const label = `chain-withdrawals ${w.coin.coin} -> ${w.route.label}`;
+        const chain = nativeChainFor(o.native ?? null, w.route.key);
+        const ncoin = chain ? nativeCoinOf(chain, w.route, w.coin.coin) : null;
+        if (!chain || !o.native || !ncoin) {
+          lines.push(`${w.coin.coin} -> ${w.route.label}: skipped - the runner cannot sign ${w.coin.coin} on ${w.route.label}`);
+          continue;
+        }
+        const market = w.coin.coin.toUpperCase() === 'USDC' || !!(await spotMarketFor(w.coin).catch(() => null));
+        if (!market) {
+          lines.push(`${w.coin.coin} -> ${w.route.label}: skipped - SoDEX has no ${w.coin.coin}/USDC market that is TRADING to buy it on`);
+          continue;
+        }
+        const here = chain.address(o.native.keys);
+        const sodexFee = await feeOf(w.coin, w.route);
+        const dp = Math.min(ncoin.decimals, w.coin.valuechain.decimals, 8);
+        const listedTo = await registryDepositAddresses(owner, w.coin.coin).then((m) => m.get(w.route.key) ?? null).catch(() => null);
+        const c = await chain.costs(here, ncoin, listedTo ?? here).catch(() => null);
+        let reserve = 0n;
+        if (ncoin.native && c) {
+          for (const t of list) {
+            if (t.route.key !== w.route.key || t.route.isNativeToken || t.skip || !t.roundTrip) continue;
+            const tc = nativeCoinOf(chain, t.route, t.coin.coin);
+            const tcost = tc ? await chain.costs(here, tc, listedTo ?? here).catch(() => null) : null;
+            if (tcost) reserve += (tcost.nativeNeeded * 12n) / 10n;
+          }
+          if (reserve > 0n) reserve += ACCOUNT_MINIMUM[chain.kind] ?? 0n;
+        }
+        const step = dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`;
+        const floor = depositFloor(w.route, dp);
+        const extra = ncoin.native && c ? formatUnits(c.fee + c.keep + reserve, ncoin.decimals) : '0';
+        const amount = toStep(dMax(w.route.withdraw.min ?? '0', dAdd(dAdd(dAdd(floor, extra), sodexFee), step)), step, 'ceil');
+        const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount, receiver: w.receiverName, buyIfMissing: cfg.chainWithdrawals.buyIfMissing }, label);
+        lines.push(...r.lines);
+        pr.push(...r.pr);
+        cost += r.cost;
+        const natSym = NATIVE_SYMBOL[chain.kind];
+        const natDp = NATIVE_DECIMALS[chain.kind];
+        const natPx = px(natSym) ?? 0;
+        const coinPx = px(w.coin.coin) ?? 0;
+        const netFee = c ? approx(formatUnits(c.fee, natDp)) : 0;
+        const keep = c && ncoin.native ? approx(formatUnits(c.keep, ncoin.decimals)) : 0;
+        const kept = ncoin.native ? approx(formatUnits(reserve, natDp)) : 0;
+        cost += netFee * natPx + keep * coinPx;
+        if (keep > 0) leftOnChains.push(`${w.route.label}: ${cut(String(keep), 8)} ${w.coin.coin} stays at the test wallet's own address ${here} - the chain's reserve for an account`);
+        if (kept > 0) leftOnChains.push(`${w.route.label}: up to ~${cut(String(kept), 8)} ${natSym} stays at ${here} - kept for the fees of the ${w.route.label} token transfers back`);
+        lines.push(
+          `  then back to SoDEX from the test wallet's own address ${here}: everything that can leave${keep > 0 ? ` (${cut(String(keep), 8)} ${w.coin.coin} stays: the chain's reserve)` : ''}${kept > 0 ? ` less ~${cut(String(kept), 8)} ${natSym} for the token transfers` : ''}, in a transfer the runner signs (DIRECT) to the wallet's own ${w.coin.coin} deposit address ${listedTo ?? '(issued when the step runs)'}; network fee ~${c ? formatUnits(c.fee, natDp) : '?'} ${natSym}; at least SoDEX's deposit minimum ${w.route.deposit.min ?? '-'} + 2 %`,
+        );
+        if (w.coin.coin.toUpperCase() !== 'USDC') {
+          try {
+            const m = await spotMarketFor(w.coin);
+            cost += marketCost(m, dMax(marketQty(m, 10), toStep(amount, rule(m.sym.stepSize), 'ceil'))) * 2; // bought, and sold back after
+          } catch {
+            /* said above */
+          }
+        }
+        continue;
+      }
       const hp = hand?.plans.get(handKey(w.coin.coin, w.route.key)) ?? null;
       const active = handActiveFor(w.coin.coin, w.route.key);
       const market = w.coin.coin.toUpperCase() === 'USDC' || (hand?.market.get(w.coin.coin) ?? !!(await spotMarketFor(w.coin).catch(() => null)));
@@ -1237,7 +1302,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   if (has('chain-withdrawals')) {
     for (const w of chainWithdrawals(coins, cfg)) {
       // Routes that cannot run anyway (closed, not offered) ask for nothing; an unset receiver is what the owner can supply.
-      if (w.skip && !/^receivers\./.test(w.skip)) continue;
+      if (w.roundTrip || (w.skip && !/^receivers\./.test(w.skip))) continue;
       const onChain = chainWithdrawals(coins, cfg).filter((x) => x.route.key === w.route.key && (!x.skip || /^receivers\./.test(x.skip))).map((x) => x.coin.coin);
       needReceiver(w.receiverName, w.route.key, w.coin.coin, `your own ${w.route.label} address (e.g. in SafePal) - the run withdraws ${[...new Set(onChain)].join(', ')} there; optional, those withdrawals are skipped without it`);
     }

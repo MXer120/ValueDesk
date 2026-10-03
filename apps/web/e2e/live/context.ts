@@ -15,6 +15,7 @@ import type { FeeRates, FillCheck } from './fees';
 import type { Expectation, Guard } from './guard';
 import type { HistoryLimiter } from './history';
 import type { Ledger } from './ledger';
+import type { NativeRegistry } from './native';
 import type { OwnerInput } from './ownerInput';
 import type { KeyProvider, ProviderPolicy } from './provider';
 import type { InFlight, Snapshot } from './reads';
@@ -316,6 +317,8 @@ export interface Ctx {
   handArrived: Map<string, string>;
   /** Routes whose withdrawal waits for the owner's hand-sent deposit (no spot market to buy the coin on). */
   deferredWithdrawals: Set<string>;
+  /** The non-EVM chains the runner signs on itself (native/index.ts; the simulation's fakes in tests). null: none. */
+  native: NativeRegistry | null;
 }
 
 /** A refusal from the runner's own safety rules - nothing was signed or sent. */
@@ -425,6 +428,12 @@ export function routeOf(coin: CoinConfig, chain: string): ChainRoute {
 /** The receiver a step names: the wallet itself, or an entry of `receivers` (the ONLY other destinations allowed). */
 export function receiverNamed(ctx: Ctx, name: string): ReceiverSpec & { self: boolean } {
   if (name === 'self') return { address: ctx.owner, self: true };
+  if (name.startsWith('native:')) {
+    // The test wallet's own address on a chain the runner signs on (the same key): its own - nothing leaves the owner.
+    const chain = ctx.native?.chains.find((c) => c.chainKey === name.slice('native:'.length));
+    if (!chain || !ctx.native) throw new SafetyStop(`the runner does not sign on ${name.slice('native:'.length)}`);
+    return { address: chain.address(ctx.native.keys), noMemo: true, self: true };
+  }
   const r = ctx.cfg.receivers[name];
   if (!r) throw new SafetyStop(`No receiver "${name}" in the config.`);
   return { ...r, self: r.address.toLowerCase() === ctx.owner };
@@ -432,7 +441,8 @@ export function receiverNamed(ctx: Ctx, name: string): ReceiverSpec & { self: bo
 
 /** Every address money may be sent to in this run: the wallet itself and the configured receivers. */
 export function allowedReceivers(ctx: Ctx): Set<string> {
-  return new Set([ctx.owner, ...Object.values(ctx.cfg.receivers).map((r) => r.address.toLowerCase())]);
+  const native = ctx.native ? ctx.native.chains.map((c) => c.address(ctx.native!.keys).toLowerCase()) : [];
+  return new Set([ctx.owner, ...Object.values(ctx.cfg.receivers).map((r) => r.address.toLowerCase()), ...native]);
 }
 
 /** Refuse a step whose estimate would take the run past maxSpendUsd. */

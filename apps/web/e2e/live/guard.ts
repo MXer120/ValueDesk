@@ -90,7 +90,9 @@ export type WriteKind =
   /** The backend building deposit calldata (the older wallet -> Spot path). */
   | 'deposit-prepare'
   /** A signed raw transaction moving a chain's native coin with no calldata (evm-tour: the deposit back of a native coin). */
-  | 'native-transfer';
+  | 'native-transfer'
+  /** A transaction the runner built and signed on a non-EVM chain (native/*.ts), broadcast to that chain's API - exactly the armed bytes. */
+  | 'chain-broadcast';
 
 /** A decoded raw transaction (kind 'native-transfer'). */
 export interface RawTx {
@@ -150,7 +152,7 @@ export interface NetRecord {
   t: number;
   ms?: number;
   method: string;
-  dest: 'backend' | 'gateway' | 'relayer' | 'rpc' | 'explorer' | 'other';
+  dest: 'backend' | 'gateway' | 'relayer' | 'rpc' | 'explorer' | 'chain' | 'other';
   url: string;
   status?: number;
   what: string;
@@ -189,6 +191,11 @@ export interface GuardOptions {
   rpcUrls: readonly string[];
   /** Origins that may be READ (GET) and nothing else - ValueChain's explorer API. */
   readOnlyOrigins?: readonly string[];
+  /**
+   * The non-EVM chains' public APIs (native/*.ts): reads pass; a write (`isWrite` - a broadcast) leaves only
+   * as a 'chain-broadcast' the running step armed with its exact body.
+   */
+  chainApis?: ReadonlyArray<{ label: string; origins: readonly string[]; isWrite(url: URL, method: string, body: string | null): boolean }>;
   /** The wallet (lower-case): an evm-withdraw for anyone else is refused. */
   owner: string;
   /** Plan mode: do not even let the backend ask SoDEX to issue deposit addresses. */
@@ -338,6 +345,7 @@ export function installGuard(o: GuardOptions): Guard {
   const relayer = new URL(o.relayer);
   const rpcs = new Set(o.rpcUrls.map(norm));
   const readOnly = new Set((o.readOnlyOrigins ?? []).map((u) => new URL(u).origin));
+  const chainApiOf = (origin: string) => (o.chainApis ?? []).find((a) => a.origins.some((x) => new URL(x).origin === origin)) ?? null;
   const armed: Array<Expectation & { left: number }> = [];
   /** Native transfers that went out (their raw signed bytes): the same bytes again are a rebroadcast, never a second payment. */
   const sentRawTx = new Set<string>();
@@ -397,7 +405,9 @@ export function installGuard(o: GuardOptions): Guard {
               ? 'rpc'
               : readOnly.has(url.origin)
                 ? 'explorer'
-                : 'other';
+                : chainApiOf(url.origin)
+                  ? 'chain'
+                  : 'other';
     const rec: NetRecord = { t: Date.now(), method, dest, url: `${url.origin}${url.pathname}${url.search}`, what: 'read' };
     /**
      * A read sent again after a network failure (READ_RETRY_MS). `rpcRequest`: the parsed JSON-RPC body,
@@ -453,6 +463,17 @@ export function installGuard(o: GuardOptions): Guard {
     };
 
     if (dest === 'other') return refused(rec, `host ${url.host} is not one the runner talks to`, 'backend');
+
+    if (dest === 'chain') {
+      const api = chainApiOf(url.origin)!;
+      if (!api.isWrite(url, method, bodyText)) {
+        rec.what = `${api.label} read`;
+        return send(undefined, {});
+      }
+      rec.what = `${api.label} broadcast`;
+      if (o.mode === 'plan') return refused(rec, `plan mode is read-only (${api.label} broadcast)`, 'backend');
+      return dispatch({ kind: 'chain-broadcast', method, url, body: null, raw: bodyText }, rec, 'backend');
+    }
 
     if (dest === 'explorer') {
       if (method === 'GET' || method === 'HEAD') return send(undefined, {});

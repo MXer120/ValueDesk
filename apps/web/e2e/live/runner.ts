@@ -25,6 +25,8 @@ import { Recorder, STEP_ORDER, STEP_TITLES, SafetyStop, checkBudget, type Ctx, t
 import { fillRow } from './fees';
 import { installGuard } from './guard';
 import { HistoryLimiter } from './history';
+import { NATIVE_CHAINS } from './native';
+import type { NativeChain } from './native/types';
 import { Ledger } from './ledger';
 import { preflight, printPlan, routeRows, type PlanResult } from './plan';
 import { applyProfile, profileSteps, type Profile } from './profiles';
@@ -68,6 +70,8 @@ export interface RunOptions {
     socketFactory?: SocketFactory;
     historyGapMs?: number;
     pace?: number;
+    /** Fakes of the non-EVM chains (native/types.ts) instead of the real ones. */
+    native?: readonly NativeChain[];
     /** Called when the run waits for a deposit the owner sends by hand (the fake "sends" it). */
     onManualDeposit?: (d: { coin: string; chain: string; address: string; amount: string }) => void;
   };
@@ -220,6 +224,8 @@ export async function runE2E(o: RunOptions): Promise<number> {
   const termsKeys = b?.termsKeys ?? [];
   const terms = b && termsKeys.length ? new TermsWatch({ owner, builderId: b.id, chainId: SODEX_CHAIN_ID.mainnet, keys: termsKeys, defaults: { perps: b.feePerps, spot: b.feeSpot } }) : null;
 
+  // The non-EVM chains the runner signs on itself (the simulation brings its own fakes).
+  const nativeChains = o.test?.native ?? NATIVE_CHAINS;
   const guard = installGuard({
     mode: o.mode,
     backend: cfg.backend,
@@ -227,6 +233,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
     relayer: BIZ_ORIGIN,
     rpcUrls: KNOWN_CHAINS.map((c) => c.rpcUrl),
     readOnlyOrigins: [EXPLORER_ORIGIN],
+    chainApis: nativeChains.map((c) => ({ label: c.label, origins: c.origins, isWrite: (u: URL, m: string, b: string | null) => c.isWrite(u, m, b) })),
     owner,
     blockDepositIssuing: o.registryOnly,
     history,
@@ -288,6 +295,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
     otherCoins: new Map(),
     handArrived: new Map(),
     deferredWithdrawals: new Set(),
+    native: { chains: nativeChains, keys: provider.nativeKeys() },
   };
 
   // The app's terms module asks through the guard; the runner can hand it a TAMPERED copy of a real answer (tierSteps.ts).
@@ -466,7 +474,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
     // Preflight = the whole of plan mode.
     rec.begin('preflight', 'read-only checks: backend, routes, balances, account, deposit addresses, markets, receivers, fee terms');
     try {
-      plan = await preflight({ mode: o.mode, cfg, owner, selected, registryOnly: o.registryOnly, rec, terms, profile, profileNotes, checks });
+      plan = await preflight({ mode: o.mode, cfg, owner, selected, registryOnly: o.registryOnly, rec, terms, profile, profileNotes, checks, native: ctx.native });
       ctx.pre = plan.pre;
       declareFundsChecks(ctx);
       rec.end('ok');

@@ -16,6 +16,7 @@
  * Nothing here signs or sends; the checks are recorded in plan mode too.
  * And the list of what no run can test automatically, with why.
  */
+import { NATIVE_CHAIN_KEYS } from './native/types';
 import { api } from '../../src/api';
 import { addressProblem, type AddressKind } from '../../src/trading/addresses';
 import { memoProblem, withdrawQuote, type ChainRoute, type CoinConfig } from '../../src/trading/funds';
@@ -204,6 +205,14 @@ export function notTestable(coins: readonly CoinConfig[], cfg: RunConfig): Array
     const evm = route.addressKind === 'evm';
     const spec = evmChain(route.key);
     const why: string[] = [];
+    // The chains the runner signs on itself (native/*.ts): out to the test wallet's own address and back - both tested.
+    const ownChain = !evm && NATIVE_CHAIN_KEYS.has(route.key);
+    if (ownChain && (coin.coin.toUpperCase() === 'USDC' || coin.coin.toUpperCase() === 'USDT' || route.isNativeToken)) {
+      if (!route.deposit.allowed) why.push('deposit: closed on SoDEX right now');
+      if (!route.withdraw.allowed) why.push('withdrawal: closed on SoDEX right now');
+      if (why.length) out.push({ what, why: why.join('; ') });
+      continue;
+    }
     if (route.deposit.allowed) {
       if (!evm && !manual.has(`${coin.coin.toUpperCase()}|${route.key}`)) why.push(`deposit: the runner cannot sign on ${route.label} - opt in with manualDeposits { "coin": "${coin.coin}", "chain": "${route.key}", "amount": "${route.deposit.min ?? '...'}" } and send it by hand (the run waits for it and verifies it)`);
       if (evm && !spec) why.push('deposit: the runner has no chain id and public RPC for this chain (chains.ts)');
