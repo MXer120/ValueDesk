@@ -209,6 +209,13 @@ function toNetwork(c: WalletChain) {
  * @reown/appkit-common). The `--w3m-*` spellings are still read as a fallback
  * (appkit-ui ThemeHelperUtil), but only as that.
  *
+ * - qr: `--apkt-qr-color` (and the legacy `--w3m-qr-color`, which the QR view
+ *   reads as a fallback). The matrix defaults to `var(--apkt-colors-black)`,
+ *   and that variable is never defined anywhere in AppKit, so the dots paint
+ *   transparent on the white tile — a blank square that looks like a QR that
+ *   never arrived. A concrete #202020 (AppKit's own black) is passed through
+ *   as the element's `color` attribute instead.
+ *
  * NOT SET, ON PURPOSE:
  * - `--apkt-color-mix` / `-strength`. AppKit mixes that colour into EVERY
  *   colour token, text and icons included, so pulling the sheet towards our
@@ -231,6 +238,8 @@ function themeVariables() {
     ),
     '--apkt-border-radius-master': '4px',
     '--apkt-z-index': MODAL_Z_INDEX,
+    '--apkt-qr-color': '#202020',
+    '--w3m-qr-color': '#202020',
   };
 }
 

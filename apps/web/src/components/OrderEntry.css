@@ -433,6 +433,18 @@
    container, not a control, so it takes the ring only on real keyboard entry -
    `:focus-visible`, never bare `:focus`, the same rule as everything else. */
 .oe-pop--float:focus { outline: none; }
+
+/* TIF menu. Same glass options as the margin chooser, portalled because the
+   ticket body scrolls and the grid transforms the panel — an in-flow menu at
+   the bottom of the form would be clipped. */
+.oe-pop--menu {
+  transform-origin: top right;
+  animation-name: oe-pop-in;
+}
+.oe-pop--menu[data-side='up'] {
+  transform-origin: bottom right;
+  animation-name: oe-pop-out-up;
+}
 .oe-pop__title {
   display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2);
   font-size: var(--fs-base); font-weight: 400; line-height: var(--lh-base); color: var(--text);
@@ -684,6 +696,19 @@
   transition: color var(--oe-hover) var(--oe-ease);
 }
 .oe .oe-select:hover { color: var(--text); background-image: var(--oe-caret-on); }
+button.oe-select {
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+  /* The shared button reset's padding and the phone min-height would otherwise
+     win on the properties this class does not restate. Height stays the select's. */
+  min-height: 0;
+}
+button.oe-select[aria-expanded='true'] {
+  color: var(--text);
+  border-color: var(--accent);
+  background-image: var(--oe-caret-on);
+}
 
 /* --- 4. percentage slider -------------------------------------------------- */
 
@@ -766,18 +791,6 @@
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
 }
 .oe-slider__input:disabled { cursor: not-allowed; }
-/* A DISABLED SLIDER IS STILL A SLIDER - the same argument as the disabled order
-   buttons further down this file, and the same answer.
- *
- * This used to wash the whole rail at 45% opacity, which composited the amber
- * ring down to #82602b, the track to #352f2d and the notches to #46423e: three
- * separate colours that are not in the palette, on the control the reference
- * draws at full strength. The state is still carried, and carried in words -
- * the input keeps its `disabled` attribute, and `.oe-note` directly beneath
- * says which of the five reasons applies (no wallet, no balance, no leverage,
- * no price). The fill going --dim is what says the METER has no basis; a
- * translucent wash only made the control hard to read. */
-.oe-slider.is-off .oe-slider__fill { background: repeating-linear-gradient(90deg, var(--dim) 0 2px, transparent 2px 5px); }
 
 .oe-note { margin: 0; font-size: var(--fs-xs); font-weight: 400; line-height: var(--lh-xs); color: var(--muted); }
 /* --- 5. flags -------------------------------------------------------------- */
@@ -1264,7 +1277,6 @@
    two grips rather than a slider and a caption that only reports it.
    ------------------------------------------------------------------------ */
 .oe-slider { display: grid; grid-template-columns: minmax(0, 1fr) 72px; align-items: center; gap: var(--sp-2); }
-.oe-slider > .oe-note { grid-column: 1 / -1; }
 .oe-slider .oe-pctbox {
   height: 28px;
   border: 0;
@@ -1332,9 +1344,10 @@
 .oe .oe-switch input:checked::after { transform: translateX(16px); }
 .oe .oe-switch input:disabled { cursor: not-allowed; opacity: 0.45; }
 
-/* The exits header is already a space-between row; this only matches its
-   left inset to the options row above it so the two checkboxes line up. */
-.oe-exits__head { padding-left: var(--sp-1); }
+/* The exits header is already a space-between row. The switch stays shrink-
+   wrapped so the pill sits next to the label and the $ / % swap stays on the right. */
+.oe-exits__head { padding-left: var(--sp-1); flex-wrap: wrap; }
+.oe-exits__head .oe-switch { width: auto; flex: none; }
 
 /* ONE unit control: the unit you are in, then the arrow out of it. */
 .oe-unitswap { display: inline-flex; align-items: center; gap: 2px; }

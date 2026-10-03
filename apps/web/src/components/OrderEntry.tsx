@@ -58,7 +58,6 @@ import { useBuilderFee } from './account/useBuilderFee';
 import { requestAdvanced } from './account/actions';
 import { DraftInput, decimalInput, integerInput, tickInput, trimZeros } from './numberInput';
 import { Collapse } from './motion';
-import { couldntLoad } from './LoadFailed';
 import { notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
@@ -94,10 +93,22 @@ interface Props {
 
 type OrdType = 'market' | 'limit' | 'stop';
 type SizeUnit = 'base' | 'quote';
-type Pop = null | 'margin' | 'leverage';
+type Pop = null | 'margin' | 'leverage' | 'tif';
+type Tif = 'gtc' | 'ioc' | 'gtx';
 
 /** Notch positions on the size slider, in percent. */
 const NOTCHES = [0, 25, 50, 75, 100];
+
+/** Time in force, as a menu rather than a native select — the OS menu cannot
+ *  take the ticket's type. GTX's partial-fill caveat lives on its option. */
+const TIF_OPTIONS: ReadonlyArray<{ id: Tif; code: string; name: string; detail: string }> = [
+  { id: 'gtc', code: 'GTC', name: 'Good till canceled', detail: 'Rests on the book until it fills or you cancel it.' },
+  { id: 'ioc', code: 'IOC', name: 'Immediate or cancel', detail: 'Fills what it can right now and cancels the rest.' },
+  { id: 'gtx', code: 'GTX', name: 'Post only', detail: 'Rests as a maker order and is rejected if it would take. A partial fill can still happen before the rest is rejected.' },
+];
+
+/** Width of the portalled TIF menu. Right-aligned to its trigger. */
+const TIF_MENU_W = 280;
 /**
  * Free buying power, read from the venue's own account state - never inferred.
  *
@@ -545,6 +556,81 @@ function useFloatPop(
   return pos;
 }
 
+interface MenuPos {
+  left: number;
+  top: number;
+  width: number;
+  side: 'up' | 'down';
+}
+
+/**
+ * Place a short menu on its trigger, portalled to `document.body`.
+ *
+ * The ticket lives in a scrolling panel, and react-grid-layout transforms
+ * every panel, so an in-flow menu at the bottom of the form is clipped and a
+ * `position: fixed` descendant would be positioned against the panel rather
+ * than the viewport. Same answer as the leverage popover, with a simpler
+ * placement: under the trigger when the window has room, otherwise above it,
+ * right-aligned so it grows back over the ticket.
+ */
+function useMenuAnchor(
+  open: boolean,
+  btnRef: React.RefObject<HTMLElement>,
+  popRef: React.RefObject<HTMLElement>,
+): MenuPos | null {
+  const [pos, setPos] = useState<MenuPos | null>(null);
+
+  const place = useCallback(() => {
+    const btn = btnRef.current;
+    const pop = popRef.current;
+    if (!btn || !pop) return;
+    const b = btn.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const width = Math.min(TIF_MENU_W, vw - POP_EDGE * 2);
+    pop.style.maxHeight = 'none';
+    pop.style.width = `${Math.round(width)}px`;
+    const h = pop.offsetHeight;
+    const spaceBelow = vh - POP_EDGE - (b.bottom + POP_GAP);
+    const spaceAbove = b.top - POP_GAP - POP_EDGE;
+    const side: MenuPos['side'] = spaceBelow >= h || spaceBelow >= spaceAbove ? 'down' : 'up';
+    const top = side === 'down'
+      ? Math.min(b.bottom + POP_GAP, Math.max(POP_EDGE, vh - POP_EDGE - h))
+      : Math.max(POP_EDGE, b.top - POP_GAP - h);
+    const left = Math.max(POP_EDGE, Math.min(b.right - width, vw - POP_EDGE - width));
+    pop.style.maxHeight = `${Math.max(0, side === 'down' ? spaceBelow : spaceAbove)}px`;
+    const next: MenuPos = { left: Math.round(left), top: Math.round(top), width: Math.round(width), side };
+    setPos((prev) =>
+      prev && prev.left === next.left && prev.top === next.top && prev.width === next.width && prev.side === next.side
+        ? prev
+        : next,
+    );
+  }, [btnRef, popRef]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    place();
+    let raf = 0;
+    let last = '';
+    const watch = () => {
+      raf = requestAnimationFrame(watch);
+      const b = btnRef.current?.getBoundingClientRect();
+      if (!b) return;
+      const now = `${b.left} ${b.top} ${b.width} ${b.height} ${document.documentElement.clientWidth} ${document.documentElement.clientHeight}`;
+      if (now === last) return;
+      last = now;
+      place();
+    };
+    watch();
+    return () => cancelAnimationFrame(raf);
+  }, [open, place, btnRef]);
+
+  return pos;
+}
+
 export function OrderEntry({
   engine, symbol, sym, network, unlocked, showTitle = true,
   connectedAddress, signingAddress, price, onPrice, lastPrice, onPlaced,
@@ -553,6 +639,10 @@ export function OrderEntry({
   /** While the ticket cannot trade, the order button connects or enables instead. */
   const gate = useTradeGate(connectedAddress, unlocked);
   const [sizeInput, setSizeInput] = useState('');
+  /** Percent shown before a balance exists. Applied once that basis appears and the size field is still empty. */
+  const [pctDraft, setPctDraft] = useState(0);
+  const pctDraftRef = useRef(0);
+  const pctArmed = useRef(false);
   const [sizeUnit, setSizeUnit] = useState<SizeUnit>('base');
   const [stopPrice, setStopPrice] = useState('');
   const [stopKind, setStopKind] = useState<'sl' | 'tp'>('sl');
@@ -572,12 +662,12 @@ export function OrderEntry({
    *
    * NOT ALL-OR-NOTHING: a SoDEX GTX order can partially fill and then have the
    * remainder rejected, so it is not a guarantee of a maker fee on the whole
-   * size. The row says so when it is selected.
+   * size. The GTX option in the menu says so.
    *
    * A market order can never rest on the book, so it is IOC and the control is
    * not offered. `effectiveTif` is what actually gets sent.
    */
-  const [tif, setTif] = useState<'gtc' | 'ioc' | 'gtx'>('gtc');
+  const [tif, setTif] = useState<Tif>('gtc');
   const [reduceOnly, setReduceOnly] = useState(false);
   /**
    * WHICH WAY THE TRADE GOES, chosen at the top of the ticket rather than by
@@ -605,7 +695,7 @@ export function OrderEntry({
   const [leverage, setLeverage] = useState('');
   const [marginMode, setMarginMode] = useState<'cross' | 'isolated'>('cross');
   const [busy, setBusy] = useState(false);
-  /** Which of the two header popovers is open; at most one, ever. */
+  /** Which popover is open; at most one, ever. */
   const [pop, setPop] = useState<Pop>(null);
   /** Leverage being edited in the popover, committed only on Confirm. */
   const [levDraft, setLevDraft] = useState(1);
@@ -624,6 +714,9 @@ export function OrderEntry({
   const modeRowRef = useRef<HTMLDivElement>(null);
   const levBtnRef = useRef<HTMLButtonElement>(null);
   const levPopRef = useRef<HTMLDivElement>(null);
+  const tifRef = useRef<HTMLDivElement>(null);
+  const tifBtnRef = useRef<HTMLButtonElement>(null);
+  const tifPopRef = useRef<HTMLDivElement>(null);
   /**
    * The review's "don't show again" tick, held until the order is actually
    * confirmed. Persisting it on change instead would mean opening the review,
@@ -635,7 +728,9 @@ export function OrderEntry({
   const closePop = useCallback(() => setPop(null), []);
   useDismiss(pop === 'margin', [marginRef], closePop);
   useDismiss(pop === 'leverage', [levRef, levPopRef], closePop);
+  useDismiss(pop === 'tif', [tifRef, tifPopRef], closePop);
   const levPos = useFloatPop(pop === 'leverage', levBtnRef, levPopRef, modeRowRef);
+  const tifPos = useMenuAnchor(pop === 'tif', tifBtnRef, tifPopRef);
 
   /**
    * Keyboard focus follows the leverage popover out of the panel.
@@ -671,6 +766,17 @@ export function OrderEntry({
       if (!active || active === document.body) btn?.focus({ preventScroll: true });
     };
   }, [levPlaced]);
+
+  const tifPlaced = pop === 'tif' && tifPos !== null;
+  useEffect(() => {
+    if (!tifPlaced) return;
+    const btn = tifBtnRef.current;
+    tifPopRef.current?.focus({ preventScroll: true });
+    return () => {
+      const active = document.activeElement;
+      if (!active || active === document.body) btn?.focus({ preventScroll: true });
+    };
+  }, [tifPlaced]);
 
   /** The symbol's published cap, or null when it publishes none. */
   const maxLev =
@@ -758,6 +864,9 @@ export function OrderEntry({
   }, [price, sym?.tickSize, onPrice]);
 
   const marketExec = type === 'market' || (type === 'stop' && stopExec === 'market');
+  useEffect(() => {
+    if (marketExec) setPop((p) => (p === 'tif' ? null : p));
+  }, [marketExec]);
   /**
    * The price the order will actually carry. The field itself refuses an
    * off-tick keystroke, and the signing path snaps again (sodex-core
@@ -1039,22 +1148,11 @@ export function OrderEntry({
   // The thumb is clamped at 100; the printed figure is not. Over-committing is
   // a thing you should be able to SEE, not a number that silently saturates.
   const thumbPct = Math.max(0, Math.min(100, Math.round(usedPct)));
-
-  const sliderBlocked = !connectedAddress
-    ? 'Connect a wallet to size by percentage.'
-    : acct.loading && !acct.data
-      ? 'Reading available balance…'
-      : acct.error && !acct.data
-        ? couldntLoad(`Available ${engine === 'perps' ? 'margin' : 'balance'}`)
-      : available === null
-        ? `Available ${engine === 'perps' ? 'margin' : 'balance'} unavailable — size manually.`
-        : available <= 0
-          ? 'No free balance to size against.'
-          : engine === 'perps' && !(lev > 0)
-            ? 'Set a leverage to size by percentage.'
-            : !(effectivePrice > 0) || !sym
-              ? 'No price to size against yet.'
-              : null;
+  /* While a basis exists and a size is already on the ticket, the thumb follows
+     that size. Before the drafted percent has been applied (or with no basis
+     at all) it follows the draft, so connecting a wallet does not flash the
+     thumb back to zero for a frame. */
+  const shownPct = sliderReady && (notional > 0 || pctArmed.current) ? thumbPct : pctDraft;
 
   /** Write a percentage of the slider basis into whichever unit is selected. */
   function setPct(pct: number) {
@@ -1071,6 +1169,34 @@ export function OrderEntry({
         : trimZeros((target / effectivePrice).toFixed(precisionOf(sym?.stepSize))),
     );
   }
+
+  /** Move the thumb always. Size is written only once a basis exists. */
+  function setSizePct(pct: number) {
+    const next = Math.max(0, Math.min(100, Math.round(Number.isFinite(pct) ? pct : 0)));
+    pctDraftRef.current = next;
+    setPctDraft(next);
+    setPct(next);
+  }
+
+  // A percent chosen before the balance (or the price) exists is applied once,
+  // and only if the size field is still empty — a number already typed wins.
+  useEffect(() => {
+    if (!sliderReady) {
+      pctArmed.current = false;
+      return;
+    }
+    if (pctArmed.current) return;
+    pctArmed.current = true;
+    if (!sizeInput.trim() && pctDraftRef.current > 0) setPct(pctDraftRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sliderReady]);
+
+  useEffect(() => {
+    if (!sliderReady) return;
+    const next = Math.max(0, Math.min(100, Math.round(thumbPct)));
+    pctDraftRef.current = next;
+    setPctDraft(next);
+  }, [sliderReady, thumbPct]);
 
   /**
    * Switch units WITHOUT changing the order.
@@ -1449,7 +1575,6 @@ export function OrderEntry({
                   {maxLev === null && (
                     <p className="oe-pop__note">This symbol publishes no maximum leverage, so nothing here is clamped.</p>
                   )}
-                  {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
                   <button type="button" className="oe-confirm" onClick={commitLeverage} disabled={busy}>
                     Confirm {clampLev(levDraft)}x
                   </button>
@@ -1491,7 +1616,6 @@ export function OrderEntry({
                     </span>
                   </button>
                 ))}
-                {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
               </div>
             )}
           </div>
@@ -1631,9 +1755,8 @@ export function OrderEntry({
             <button
               type="button"
               className="oe-chip"
-              disabled={Boolean(sliderBlocked)}
               title="Size to the whole available balance"
-              onClick={() => setPct(100)}
+              onClick={() => setSizePct(100)}
             >
               MAX
             </button>
@@ -1671,15 +1794,15 @@ export function OrderEntry({
           )}
         </div>
 
-        {/* 4. Percentage of buying power. Disabled, never zero-based, when the
-            basis is not a real number. */}
-        <div className={`oe-slider${sliderBlocked ? ' is-off' : ''}`}>
-          <div className="oe-slider__rail" style={{ ['--oe-p' as any]: sliderReady ? thumbPct / 100 : 0 }}>
+        {/* 4. Percentage of buying power. The thumb moves with or without a
+            balance; the size field is filled only once a basis exists. */}
+        <div className="oe-slider">
+          <div className="oe-slider__rail" style={{ ['--oe-p' as any]: shownPct / 100 }}>
             <div className="oe-slider__fill" />
             {NOTCHES.map((n) => (
               <i
                 key={n}
-                className={`oe-slider__notch${sliderReady && thumbPct >= n ? ' is-past' : ''}`}
+                className={`oe-slider__notch${shownPct >= n ? ' is-past' : ''}`}
                 style={{ left: `${n}%` }}
                 aria-hidden="true"
               />
@@ -1690,28 +1813,23 @@ export function OrderEntry({
               min={0}
               max={100}
               step={1}
-              value={sliderReady ? thumbPct : 0}
-              disabled={Boolean(sliderBlocked)}
+              value={shownPct}
               aria-label="Size as a percentage of available balance"
-              onChange={(e) => setPct(Number(e.target.value))}
+              onChange={(e) => setSizePct(Number(e.target.value))}
             />
           </div>
           <div className="oe-inputrow oe-pctbox">
             <DraftInput
               className="oe-input"
-              value={sliderReady && notional > 0 ? String(Math.min(100, Math.round(usedPct))) : ''}
-              onDraft={(t) => setPct(t === '' ? 0 : Math.min(100, Number(t)))}
+              value={shownPct > 0 ? String(shownPct) : ''}
+              onDraft={(t) => setSizePct(t === '' ? 0 : Math.min(100, Number(t)))}
               sanitize={(raw) => integerInput(raw)}
               inputMode="numeric"
-              disabled={Boolean(sliderBlocked)}
               aria-label="Size as a percentage of available balance"
               placeholder="0"
             />
             <span className="oe-suffix">%</span>
           </div>
-          {sliderBlocked ? (
-            <p className="oe-note">{sliderBlocked}</p>
-          ) : null}
         </div>
 
         {/* 5. Flags, TIF and the attached exits.
@@ -1730,38 +1848,68 @@ export function OrderEntry({
               <b>IOC</b>
             </span>
           ) : (
-            <label className="oe-compact">
-              <span>TIF</span>
-              <select
+            <div className="oe-compact" ref={tifRef}>
+              <span id={`${uid}-tif`}>TIF</span>
+              <button
+                type="button"
+                ref={tifBtnRef}
                 className="oe-select"
-                value={tif}
-                onChange={(e) => setTif(e.target.value as 'gtc' | 'ioc' | 'gtx')}
+                aria-haspopup="listbox"
+                aria-expanded={pop === 'tif'}
+                aria-labelledby={`${uid}-tif`}
+                onClick={() => setPop((p) => (p === 'tif' ? null : 'tif'))}
               >
-                <option value="gtc">GTC</option>
-                <option value="ioc">IOC</option>
-                <option value="gtx">GTX</option>
-              </select>
-            </label>
+                {tif.toUpperCase()}
+              </button>
+              {pop === 'tif' && createPortal(
+                <div
+                  ref={tifPopRef}
+                  className="oe-pop oe-pop--float oe-pop--menu"
+                  role="listbox"
+                  aria-label="Time in force"
+                  tabIndex={-1}
+                  data-side={tifPos?.side ?? 'down'}
+                  style={{
+                    left: tifPos?.left ?? 0,
+                    top: tifPos?.top ?? 0,
+                    width: tifPos?.width,
+                    visibility: tifPos ? undefined : 'hidden',
+                  }}
+                >
+                  {TIF_OPTIONS.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      role="option"
+                      aria-selected={tif === o.id}
+                      className={`oe-pop__opt${tif === o.id ? ' is-on' : ''}`}
+                      onClick={() => {
+                        setTif(o.id);
+                        setPop(null);
+                      }}
+                    >
+                      <b>{o.code} · {o.name}</b>
+                      <span>{o.detail}</span>
+                    </button>
+                  ))}
+                </div>,
+                document.body,
+              )}
+            </div>
           )}
         </div>
-
-        {effectiveTif === 'gtx' && (
-          <p className="oe-note">
-            GTX rests as a maker order and is rejected if it would take. SoDEX does not treat it as
-            all-or-nothing: part of the order can fill before the remainder is rejected.
-          </p>
-        )}
 
         {engine === 'perps' && (
           <div className="oe-exits">
             <div className="oe-exits__head">
-              <label className="oe-check">
+              <label className="oe-switch">
+                <span>Take Profit / Stop Loss</span>
                 <input
                   type="checkbox"
+                  role="switch"
                   checked={useExits}
                   onChange={(e) => setUseExits(e.target.checked)}
                 />
-                Take Profit / Stop Loss
               </label>
               {useExits && (
                 <div className="oe-unitswap">
