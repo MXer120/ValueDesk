@@ -71,8 +71,15 @@ export interface RunBuilder {
 export interface ManualDeposit {
   coin: string;
   chain: string;
-  /** At least this much must arrive in Spot (a decimal string, in the coin). */
+  /**
+   * At least this much must arrive in Spot (a decimal string, in the coin), or
+   * "auto": the round trip the runner plans (handBack.ts) - what the chain
+   * withdrawal sent you, less your wallet's fee and what stays at your address,
+   * never below SoDEX's deposit minimum.
+   */
   amount: string;
+  /** You chose not to send this one: reported "skipped (owner)", nothing is waited for. */
+  skip?: boolean;
 }
 
 export interface RunConfig {
@@ -433,11 +440,12 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
       cfg.manualDeposits = [];
       src.manualDeposits.forEach((d, i) => {
         const where = `manualDeposits[${i}]`;
-        const o = obj(d, where, ['coin', 'chain', 'amount']);
+        const o = obj(d, where, ['coin', 'chain', 'amount', 'skip']);
         if (!o) return;
         const coin = text(o.coin, `${where}.coin`);
         const c = chain(o.chain, `${where}.chain`);
-        const a = amount(o.amount, `${where}.amount`);
+        const a = amount(o.amount ?? 'auto', `${where}.amount`, ['auto']);
+        const skip = bool(o.skip, `${where}.skip`);
         if (!coin || !c || !a) {
           errors.push(`${where} needs "coin", "chain" and "amount".`);
           return;
@@ -446,7 +454,7 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
           errors.push(`${where}: ${coin} on ${c} is listed twice.`);
           return;
         }
-        cfg.manualDeposits.push({ coin, chain: c, amount: a });
+        cfg.manualDeposits.push({ coin, chain: c, amount: a, ...(skip ? { skip: true } : {}) });
       });
     }
   }

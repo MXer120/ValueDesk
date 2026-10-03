@@ -125,6 +125,8 @@ export interface RunnerCall {
   /** Whether a key was handed to the child, and which. */
   key: string | null;
   protect: boolean;
+  /** Lines typed during the call are forwarded to the runner (the live run). */
+  input: boolean;
   /** The config file's content at the moment of the call. */
   config: Json | null;
 }
@@ -160,7 +162,7 @@ export class FakeRunner implements DDeps {
   async runner(inv: RunnerInvocation, call: RunnerCallOptions): Promise<RunnerRun> {
     // The same guard the real path has: an invocation the runner would refuse cannot even be built.
     const argv = runnerArgs(inv);
-    this.calls.push({ inv, argv, key: call.key, protect: call.protect === true, config: inv.config ? structuredClone(this.files.get(inv.config) ?? null) : null });
+    this.calls.push({ inv, argv, key: call.key, protect: call.protect === true, input: call.input === true, config: inv.config ? structuredClone(this.files.get(inv.config) ?? null) : null });
     const done = (code: number, lines: string[], report: unknown): RunnerRun => {
       const path = `mem://report-${this.calls.length}.json`;
       if (report !== null && report !== undefined) this.reports.set(path, report);

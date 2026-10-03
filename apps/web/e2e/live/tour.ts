@@ -144,6 +144,11 @@ export function usdcLegAmounts(route: ChainRoute, fee: string): { withdraw: stri
   return { withdraw, back: dSub(withdraw, fee) };
 }
 
+/** USDC out only (no way back - e.g. no gas for the deposit back): the withdrawal minimum, and more than the fee. */
+export function oneWayUsdcAmount(route: ChainRoute, fee: string): string {
+  return toStep(dMax(route.withdraw.min ?? '0', dAdd(fee, '0.01')), '0.01', 'ceil');
+}
+
 /**
  * A native coin out and back: what arrives must clear the deposit minimum AND
  * leave `reserve` for gas (the transfer back, and the USDC deposit after it).

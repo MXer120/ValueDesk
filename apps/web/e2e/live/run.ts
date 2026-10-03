@@ -185,7 +185,10 @@ async function main(): Promise<number> {
   }
 
   const { runE2E } = await import('./runner');
+  const { stdinOwnerInput } = await import('./ownerInput');
   return runE2E({
+    // Live: the owner may skip a hand-sent deposit by typing "s" (read only while such a wait runs).
+    ownerInput: args.mode === 'live' ? stdinOwnerInput() : null,
     mode: args.mode,
     configPath: args.config,
     confirm: args.confirm,

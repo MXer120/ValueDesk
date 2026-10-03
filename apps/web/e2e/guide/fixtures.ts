@@ -63,7 +63,7 @@ export const PLAN_CONSOLE: readonly string[] = `20:23:01  Valuescan live E2E run
 const planStep = (id: string, lines: string[], costUsd: number, skip?: string): Record<string, unknown> => ({ id, title: `title of ${id}`, lines, costUsd, sentAwayUsd: 0, problems: [], ...(skip ? { skip } : {}) });
 
 /** The plan part of the report the runner writes for the console above. */
-export function planReport(o: { funded?: boolean; problems?: string[]; receiversNeeded?: unknown; suggestedMaxSpendUsd?: number } = {}): Record<string, unknown> {
+export function planReport(o: { funded?: boolean; problems?: string[]; receiversNeeded?: unknown; suggestedMaxSpendUsd?: number; handDeposits?: unknown; budget?: unknown } = {}): Record<string, unknown> {
   const mark = o.funded ? 'x' : ' ';
   const holdsUsdc = o.funded ? '25.00' : '0.00';
   const holdsEth = o.funded ? '0.000300' : '0.00';
@@ -97,6 +97,8 @@ export function planReport(o: { funded?: boolean; problems?: string[]; receivers
       ],
       ...(o.receiversNeeded !== undefined ? { receiversNeeded: o.receiversNeeded } : {}),
       ...(o.suggestedMaxSpendUsd !== undefined ? { suggestedMaxSpendUsd: o.suggestedMaxSpendUsd } : {}),
+      ...(o.handDeposits !== undefined ? { handDeposits: o.handDeposits } : {}),
+      ...(o.budget !== undefined ? { budget: o.budget } : {}),
       steps: [
         planStep('deposit-external', ["send 25 USDC on Arbitrum One (0xaf88d065e77c8cc2239327c5edb3a432268e5831) to the wallet's own SoDEX deposit address (not issued yet)", 'wait for the receipt, then until SoDEX shows the account and Spot USDC +24'], 1.01),
         planStep('enable-trading', ['one EIP-712 signature registers key "valuescan-web"'], 0),
@@ -191,3 +193,23 @@ usage: npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json [option
   --report-dir <dir>      where the JSON report goes (default e2e/live/reports)
 
 The key comes only from the environment: VS_E2E_KEY=0x<64 hex>.`;
+
+/** The hand-sent deposits of an all-chains plan (as plan.ts writes them), trimmed. */
+export function handDeposits(state: { sol?: string; xrp?: string } = {}): Array<Record<string, unknown>> {
+  return [
+    { coin: 'SOL', chain: 'SOL', label: 'Solana', state: state.sol ?? 'offered', order: 'withdraw-first', withdraw: '0.047001', arrives: '0.035001', sendBack: '0.03', amount: '0.03', depositMin: '0.03', sodexFee: '0.012', walletFee: '0.00001', feeCoin: 'SOL', keep: '0.00089088', needFirst: '0', needFirstFeeCoin: '0', withdrawalRuns: true, line: 'SOL on Solana [x]: the run withdraws 0.047001 SOL to you, 0.035001 arrives; you send back 0.03 SOL (deposit minimum 0.03)' },
+    { coin: 'XRP', chain: 'XRP', label: 'XRP Ledger', state: state.xrp ?? 'offered', order: 'withdraw-first', withdraw: '5.80002', arrives: '5.00002', sendBack: '4', amount: '4', depositMin: '4', sodexFee: '0.8', walletFee: '0.00002', feeCoin: 'XRP', keep: '1', needFirst: '0', needFirstFeeCoin: '0', withdrawalRuns: true, line: 'XRP on XRP Ledger [x]: the run withdraws 5.80002 XRP to you, 5.00002 arrives; you send back 4 XRP (deposit minimum 4); 1 XRP stays at your address' },
+  ];
+}
+
+/** The budget block of a plan (plan.ts `budget`). */
+export const BUDGET = {
+  fund: ['[ ] Arbitrum One     25.00 USDC  (deposit) - wallet holds 0.00'],
+  costUsd: 41.5,
+  sentAwayUsd: 80.2,
+  returnsUsd: 50.1,
+  leftOnChains: ['Polygon: ~1.00 USDC stays in the test wallet there - no POL for gas to send it back'],
+  ownerWallet: ['XRP on XRP Ledger: nothing of your own - the run sends 5.00002 XRP, you send back 4'],
+  minutes: { expected: 210, worst: 900 },
+  suggestedMaxSpendUsd: 160,
+};

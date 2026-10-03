@@ -190,7 +190,7 @@ async function judgeRoute(o: { owner: string; checks: Checks }, ref: RouteRef, r
 /** What no run can test automatically, per route (one line each) and overall, with why (the plan prints it; the report carries it). */
 export function notTestable(coins: readonly CoinConfig[], cfg: RunConfig): Array<{ what: string; why: string }> {
   const out: Array<{ what: string; why: string }> = [];
-  const manual = new Set(cfg.manualDeposits.map((d) => `${d.coin.toUpperCase()}|${d.chain}`));
+  const manual = new Set(cfg.manualDeposits.filter((d) => !d.skip).map((d) => `${d.coin.toUpperCase()}|${d.chain}`));
   for (const { coin, route } of routesToCheck(coins, cfg)) {
     const what = `${coin.coin} on ${route.label}`;
     if (route.addressKind === 'other') {
@@ -219,7 +219,7 @@ export function notTestable(coins: readonly CoinConfig[], cfg: RunConfig): Array
   for (const key of evmKeys) {
     const native = coins.some((c) => c.chains.some((r) => r.key === key && r.isNativeToken));
     const spec = evmChain(key);
-    if (!native && spec) out.push({ what: `gas on ${spec.name}`, why: `SoDEX lists no ${spec.native.symbol} route there: the gas for sending USDC back must come from you (the plan's funding checklist says how much)` });
+    if (!native && spec) out.push({ what: `the USDC deposit back from ${spec.name}`, why: `SoDEX lists no ${spec.native.symbol} route, so the run cannot get gas there: the deposit back runs only when the test wallet already holds ${spec.native.symbol} on ${spec.name} (else "not run: no ${spec.native.symbol} for gas"; the withdrawal there is still tested)` });
   }
   out.push({ what: "the builder account's own withdrawal of its fee income", why: 'it is the builder wallet\'s business, not the test wallet\'s - the run reads the income from public balances only' });
   out.push({ what: 'a deposit address SoDEX flags ("Suspicious") and replaces', why: 'cannot be provoked from outside; the app withholds a flagged address, and the plan says so when it sees one' });

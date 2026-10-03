@@ -55,6 +55,8 @@ export interface ConfigChoices {
   cleanupEnabled?: boolean;
   /** The spend cap - set only on the owner's explicit yes, to the runner's own suggestion (stageD.ts offerSpendCap). */
   maxSpendUsd?: number;
+  /** The deposits the owner sends back by hand (replaces the list): "auto" amounts are the runner's; `skip` = left out by the owner. */
+  manualDeposits?: Array<{ coin: string; chain: string; amount: string; skip?: boolean }>;
 }
 
 const isObj = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -111,6 +113,7 @@ export function applyChoices(base: Json, c: ConfigChoices, names: BuilderKeyName
   if (c.receivers !== undefined) out.receivers = { ...(isObj(out.receivers) ? out.receivers : {}), ...c.receivers };
   if (c.cleanupEnabled !== undefined) out.cleanup = { ...(isObj(out.cleanup) ? out.cleanup : {}), enabled: c.cleanupEnabled };
   if (c.maxSpendUsd !== undefined) out.maxSpendUsd = c.maxSpendUsd;
+  if (c.manualDeposits !== undefined) out.manualDeposits = c.manualDeposits.map((d) => ({ coin: d.coin, chain: d.chain, amount: d.amount, ...(d.skip ? { skip: true } : {}) }));
   return out;
 }
 
@@ -153,11 +156,14 @@ export function describeConfig(cfg: Json): string[] {
   const cl = isObj(cfg.cleanup) ? cfg.cleanup : {};
   const b = isObj(cfg.builder) ? cfg.builder : null;
   const set = receiversSet(cfg);
+  const hand = Array.isArray(cfg.manualDeposits) ? cfg.manualDeposits.filter(isObj) : [];
+  const sends = hand.filter((d) => d.skip !== true).map((d) => `${str(d.coin)} on ${str(d.chain)}`);
   return [
     `spend cap ............ $${str(cfg.maxSpendUsd)} (the most the wallet may lose: fees, gas, activation, trading costs, anything sent elsewhere)`,
     `deposit .............. ${str(dep.amount)} USDC from ${str(dep.chain)}`,
     `withdrawal ........... ${str(wx.amount)} ${str(wx.coin)} to ${str(wx.chain)} (receiver: ${str(wx.receiver)})`,
     `other receivers ...... ${set.length ? set.map((r) => `${r.name} = ${r.address}`).join(', ') : 'none - steps that send to another address are skipped'}`,
+    ...(hand.length ? [`sent back by you .... ${sends.length ? sends.join(', ') : 'none'}${hand.length > sends.length ? ` (${hand.length - sends.length} left out)` : ''} - each optional, s + Enter skips one during the run`] : []),
     `cleanup at the end ... ${cl.enabled === true ? `yes - all USDC back to ${str(cl.chain)} (one more withdrawal fee)` : 'no - what is left stays on SoDEX and in the wallet'}`,
     `builder fee .......... ${
       b

@@ -74,7 +74,7 @@ Options
   --throwaway-key        with --plan-only: ask for no key; the runner plans with a random
                          in-memory key and reads deposit addresses from the chain only
   --only a,b             stage D: run only these runner steps (to resume a stopped run)
-  --profile <name>       stage D: the runner profile to run (core, evm-tour, all-chains)
+  --profile <name>       stage D: the runner profile to run (core, evm-tour, all-chains), or "full" (the full test)
                          instead of choosing it in the guide
   --suites a,b           stage A: only the suites whose id contains one of these words
   --no-smoke | --smoke   stage B: never run / run without asking the production smoke test

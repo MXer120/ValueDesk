@@ -30,7 +30,8 @@ import type { RunConfig } from './config';
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { chainWithdrawals } from './chainRoutes';
 import { checkRoutes, notTestable, sameDepositAddress } from './routes';
-import { gasReserve, nativeLegAmounts, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { gasReserve, nativeLegAmounts, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { handKey, handLine, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { VALUECHAIN_CHAIN_ID } from './provider';
 import { engineState, gasPrice, nativeBalance, registryDepositAddresses, tokenBalance } from './reads';
 import { requestTerms, type TermsVerdict, type TermsWatch } from './terms';
@@ -87,6 +88,43 @@ export interface PlanResult {
   /** What the plan changed in the config for this profile (printed). */
   profileNotes: string[];
   /** A maxSpendUsd that covers this plan's estimate with room to spare. */
+  suggestedMaxSpendUsd: number;
+  /**
+   * The deposits the owner can send back by hand (profile all-chains): every
+   * route on a chain the runner cannot sign on, what the run sends there first,
+   * what to send back, what the owner's wallet needs. The guided launcher offers them.
+   */
+  handDeposits: HandRow[];
+  /** The run's money and time in one place (printed as "Budget"). */
+  budget: Budget;
+}
+
+/** One hand-sent deposit as the plan offers it. */
+export interface HandRow extends HandPlan {
+  /** 'send': configured, the owner sends it; 'skipped': configured and left out; 'offered': not configured. */
+  state: 'send' | 'skipped' | 'offered';
+  /** The chain withdrawal to the owner's address runs first (a receiver is set, the route is open). */
+  withdrawalRuns: boolean;
+  /** The amount the run asks for (sendBack, or the configured amount). */
+  amount: string;
+  line: string;
+  sendBackUsd: number;
+}
+
+export interface Budget {
+  /** What to send to the test wallet before the run (the funding checklist). */
+  fund: string[];
+  costUsd: number;
+  /** Sent to your own other addresses (withdrawals to your wallet on other chains). */
+  sentAwayUsd: number;
+  /** Of that, what comes back to the test wallet when you send every hand-sent deposit. */
+  returnsUsd: number;
+  /** What the run leaves on a chain it cannot bring it back from (Polygon USDC without POL ...). */
+  leftOnChains: string[];
+  /** Per hand-sent deposit: what YOUR wallet needs first (optional - only for the ones you send). */
+  ownerWallet: string[];
+  /** A rough duration: expected (SoDEX's estimates) and the worst case before a time-out stops it. */
+  minutes: { expected: number; worst: number };
   suggestedMaxSpendUsd: number;
 }
 
@@ -446,6 +484,18 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     }
   };
   const needs: Array<{ chain: string; coin: string; amount: number; have: number | null; why: string }> = [];
+  /** What the run leaves on a chain it cannot bring back from (budget). */
+  const leftOnChains: string[] = [];
+  /** The hand-sent deposits, planned with live reads (all-chains). */
+  const hand = has('chain-withdrawals') || has('manual-deposits')
+    ? await resolveHandPlans(coins, cfg, {
+        market: async (c) => !!(await spotMarketFor(c).catch(() => null)),
+        fee: async (c, r) => formatUnits((await withdrawQuote(c, r, owner)).fee, c.valuechain.decimals),
+      })
+    : null;
+  const handRows: HandRow[] = [];
+  let returnsUsd = 0;
+  const handActiveFor = (coinName: string, chain: string): boolean => has('manual-deposits') && isHandActive(cfg.manualDeposits.find((d) => d.coin.toUpperCase() === coinName.toUpperCase() && d.chain === chain) ?? null);
 
   // Cash flow through the run (estimates, to catch a run that cannot finish before it starts).
   const sim = { spotUsdc: approx(spotUsdc), perpsUsdc: approx(perpsUsdc), walletUsdc: approx(wallet.VALUECHAIN?.usdc ?? '0'), walletSoso: approx(wallet.VALUECHAIN?.native ?? '0'), spotSoso: approx(spotSoso) };
@@ -721,7 +771,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
    * liquidity (withdrawQuote), its maintenance switch (maintenanceFor) and the
    * receiver blacklist (receiverBlacklisted). All reads; nothing is sent.
    */
-  const withdrawal = async (id: StepId, spec: { coin: string; chain: string; amount: string; receiver: string; buyIfMissing?: boolean }, label: string) => {
+  const withdrawal = async (id: StepId, spec: { coin: string; chain: string; amount: string; receiver: string; buyIfMissing?: boolean; fromHand?: boolean }, label: string) => {
     const pr: string[] = [];
     const lines: string[] = [];
     const c = coin(spec.coin);
@@ -781,6 +831,13 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
           const listed = await receiverBlacklisted(r.key, permitReceiver).catch(() => null);
           if (listed) pr.push(`${label}: SoDEX does not pay out to ${rcv.address} on ${r.label} (on-chain blacklist)`);
           if (listed === null) warnings.push(`${label}: could not read SoDEX's receiver blacklist for ${r.label}`);
+          // Never toward this wallet's own SoDEX deposit address with less than the deposit minimum arriving (not credited).
+          const own = await registryDepositAddresses(owner, c.coin)
+            .then((m) => m.get(r.key) ?? null)
+            .catch(() => null);
+          if (own && amount !== null && sameDepositAddress(own, rcv.address, r.addressKind) && r.deposit.min && approx(amount) - approx(fee) < approx(r.deposit.min)) {
+            pr.push(`${label}: ${rcv.address} is this wallet's own SoDEX deposit address on ${r.label}, and ${cut(String(approx(amount) - approx(fee)), 8)} ${spec.coin} would arrive - below SoDEX's deposit minimum ${r.deposit.min}, which it does not credit`);
+          }
         }
       }
       const coinPx = px(c.coin) ?? 0;
@@ -800,10 +857,20 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         // The simulation does not track other coins in Spot: assume the whole amount is bought
         // (at least the market's minimum order, ~6 USDC). The exact buy is priced separately.
         lines.push(`  if Spot holds less than that: buy the missing ${spec.coin} on its USDC spot market first`);
-        const spend = Math.max(amt * coinPx * 1.1, 6);
+        // What the buy costs at the market's ask (as buyOnSpot sizes it: at least the market's minimum order).
+        let spend = Math.max(amt * coinPx * 1.1, 6);
+        try {
+          const m = await spotMarketFor(c);
+          const q = dMax(marketQty(m, 10), toStep(dDiv(amount ?? '0', String(1 - approx(m.sym.takerFee) - 0.0005), 'ceil'), rule(m.sym.stepSize), 'ceil'));
+          spend = Math.max(spend, approx(q) * approx(m.ask) * 1.06);
+        } catch {
+          /* no market: the step says so */
+        }
         const p = short(id, sim.spotUsdc, spend, 'Spot USDC (to buy it)');
         if (p) pr.push(p);
         sim.spotUsdc -= spend;
+      } else if (spec.fromHand) {
+        lines.push(`  ${amt || 'what arrived'} ${spec.coin} comes from your hand-sent deposit first (SoDEX has no ${spec.coin}/USDC spot market)`);
       } else {
         lines.push(`  needs ${amt || 'some'} ${spec.coin} in Spot already (buyIfMissing is off)`);
       }
@@ -914,13 +981,27 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
           lines.push(`${tc.label}: ${a.withdraw} ${leg.coin.coin} out to this wallet (fee ${fee}), ${a.back} back to the verified deposit address by a plain transfer the runner signs (DIRECT; ~${reserve} ${tc.spec.native.symbol} stays for gas)${buy}`);
         } else {
           const a = usdcLegAmounts(leg.route, fee);
+          if (tc.ownerGas) {
+            // SoDEX lists no route for this chain's gas coin (Polygon: POL): the run cannot get any. The deposit back
+            // runs only when the wallet already holds enough - it is never part of the funding.
+            const w = wallet[tc.chain];
+            const need = await gasNeed(tc.chain);
+            const held = w ? approx(w.native) : 0;
+            const sym = tc.spec.native.symbol;
+            if (held + 1e-12 < need) {
+              const one = oneWayUsdcAmount(leg.route, fee);
+              cost += approx(fee);
+              usdcCapital = Math.max(usdcCapital, approx(one));
+              const left = approx(one) - approx(fee);
+              leftOnChains.push(`${tc.label}: ~${left.toFixed(2)} USDC stays in the test wallet there - no ${sym} for gas to send it back (SoDEX lists no ${sym} route); send ~${fmtAmt(need)} ${sym} there before the run to include the deposit back`);
+              lines.push(`${tc.label}: ${one} USDC out to this wallet (fee ${fee}); the deposit back is NOT RUN: no ${sym} for gas on ${tc.label} (SoDEX lists no ${sym} route, the wallet holds ${fmtAmt(held)} ${sym}; it would need ~${fmtAmt(need)}). The ~${left.toFixed(2)} USDC that arrives stays in the test wallet there.`);
+              continue;
+            }
+            needs.push({ chain: tc.chain, coin: sym, amount: need, have: held, why: `gas for sending USDC back (SoDEX lists no ${sym} route to bring it from Spot; the wallet already holds it)` });
+          }
           cost += approx(fee) + (await gasUsd(tc.chain, ethGasUnits.erc20));
           usdcCapital = Math.max(usdcCapital, approx(a.withdraw));
           lines.push(`${tc.label}: ${a.withdraw} USDC out to this wallet (fee ${fee}), ${a.back} back with the app's sendUsdcDeposit`);
-          if (tc.ownerGas) {
-            const w = wallet[tc.chain];
-            needs.push({ chain: tc.chain, coin: tc.spec.native.symbol, amount: await gasNeed(tc.chain), have: w ? approx(w.native) : null, why: `gas for sending USDC back (SoDEX lists no ${tc.spec.native.symbol} route to bring it from Spot)` });
-          }
         }
       }
     }
@@ -946,12 +1027,31 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         lines.push(`${w.coin.coin} -> ${w.route.label}: skipped - ${w.skip}`);
         continue;
       }
-      const amount = roundTripAmount(w.route, w.coin, await feeOf(w.coin, w.route));
-      const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount, receiver: w.receiverName, buyIfMissing: cfg.chainWithdrawals.buyIfMissing }, `chain-withdrawals ${w.coin.coin} -> ${w.route.label}`);
+      const hp = hand?.plans.get(handKey(w.coin.coin, w.route.key)) ?? null;
+      const active = handActiveFor(w.coin.coin, w.route.key);
+      const market = w.coin.coin.toUpperCase() === 'USDC' || (hand?.market.get(w.coin.coin) ?? !!(await spotMarketFor(w.coin).catch(() => null)));
+      // With the owner's hand-sent deposit back: enough that what arrives covers it, their wallet's fee and what stays.
+      const amount = active && hp && hp.order === 'withdraw-first' ? hp.withdraw : roundTripAmount(w.route, w.coin, await feeOf(w.coin, w.route));
+      const label = `chain-withdrawals ${w.coin.coin} -> ${w.route.label}`;
+      if (!market) {
+        if (!active || !hp) {
+          lines.push(`${w.coin.coin} -> ${w.route.label}: not testable from USDC alone - SoDEX has no ${w.coin.coin}/USDC spot market to buy it on; send ${w.coin.coin} by hand first (manualDeposits), the run then withdraws it back`);
+          continue;
+        }
+        lines.push(`${w.coin.coin} -> ${w.route.label}: DEPOSIT FIRST - SoDEX has no ${w.coin.coin}/USDC spot market, so after your hand-sent ${hp.sendBack} ${w.coin.coin} (manual-deposits) the run withdraws it back to receivers.${w.receiverName}`);
+        const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount: hp.withdraw, receiver: w.receiverName, buyIfMissing: false, fromHand: true }, label);
+        lines.push(...r.lines.map((l) => `  ${l}`));
+        pr.push(...r.pr);
+        cost += r.cost;
+        away += r.away;
+        continue;
+      }
+      const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount, receiver: w.receiverName, buyIfMissing: cfg.chainWithdrawals.buyIfMissing }, label);
       lines.push(...r.lines);
       pr.push(...r.pr);
       cost += r.cost;
       away += r.away;
+      if (active && hp) lines.push(`  sized for your hand-sent deposit back: ${hp.arrives} ${w.coin.coin} arrives, you send back ${hp.sendBack} (deposit minimum ${hp.depositMin}), your wallet's fee ~${hp.walletFee} ${hp.feeCoin}${approx(hp.keep) > 0 ? `, ${hp.keep} ${w.coin.coin} stays at your address` : ''}`);
       if (w.coin.coin.toUpperCase() !== 'USDC' && cfg.chainWithdrawals.buyIfMissing) {
         try {
           const m = await spotMarketFor(w.coin);
@@ -965,12 +1065,26 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     else add('chain-withdrawals', { lines, costUsd: cost, sentAwayUsd: away, problems: pr });
   }
 
+  // Every route the owner could send a deposit from by hand, with what it takes (the guided launcher offers these).
+  if (hand) {
+    for (const h of hand.routes) {
+      if (h.why) continue;
+      const hp = hand.plans.get(handKey(h.coin.coin, h.route.key));
+      if (!hp) continue;
+      const d = h.deposit;
+      const amount = d && d.amount !== 'auto' ? d.amount : hp.sendBack;
+      const withdrawalRuns = !!h.withdrawal && !h.withdrawal.skip && has('chain-withdrawals');
+      handRows.push({ ...hp, state: !d ? 'offered' : d.skip ? 'skipped' : 'send', withdrawalRuns, amount, line: handLine(hp, d, withdrawalRuns), sendBackUsd: approx(amount) * (px(h.coin.coin) ?? 0) });
+    }
+  }
+
   if (has('manual-deposits')) {
     if (!cfg.manualDeposits.length) {
-      add('manual-deposits', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'manualDeposits is empty - opt in per route ({ "coin", "chain", "amount" }) to have the run wait for a deposit you send by hand' });
+      add('manual-deposits', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'manualDeposits is empty - opt in per route ({ "coin", "chain", "amount": "auto" }, or choose the full test in the guided launcher) to have the run wait for a deposit you send by hand' });
     } else {
       const lines: string[] = [];
       const pr: string[] = [];
+      let cost = 0;
       for (const d of cfg.manualDeposits) {
         const c = coin(d.coin);
         const r = route(c, d.chain);
@@ -978,16 +1092,35 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
           pr.push(`manualDeposits ${d.coin} on ${d.chain}: SoDEX lists no such route`);
           continue;
         }
+        if (d.skip) {
+          lines.push(`${c.coin} on ${r.label}: left out by you - reported "skipped (owner)"`);
+          continue;
+        }
         if (!r.deposit.allowed) pr.push(`manualDeposits ${d.coin} on ${r.label}: deposits are CLOSED right now`);
         if (r.addressKind === 'other') pr.push(`manualDeposits ${d.coin} on ${r.label}: the app does not offer this chain`);
-        if (r.deposit.min && approx(d.amount) < approx(r.deposit.min)) pr.push(`manualDeposits ${d.coin} on ${r.label}: ${d.amount} is below SoDEX's minimum ${r.deposit.min}`);
+        const row = handRows.find((x) => x.coin === c.coin && x.chain === r.key);
+        const amount = d.amount === 'auto' ? row?.sendBack ?? r.deposit.min ?? null : d.amount;
+        if (!amount) {
+          pr.push(`manualDeposits ${d.coin} on ${r.label}: SoDEX lists no deposit minimum - give an amount`);
+          continue;
+        }
+        // Never a hand-sent deposit SoDEX would not credit (the owner's network fee comes on top of it).
+        if (r.deposit.min && approx(amount) < approx(r.deposit.min)) pr.push(`manualDeposits ${d.coin} on ${r.label}: ${amount} is below SoDEX's deposit minimum ${r.deposit.min} - a deposit below it is not credited`);
         const known = await registryDepositAddresses(owner, c.coin)
           .then((m) => m.get(r.key) ?? null)
           .catch(() => null);
-        lines.push(`you send at least ${d.amount} ${c.coin} on ${r.label} BY HAND to the wallet's deposit address there (${known ? `the registry lists ${known}` : 'not issued yet'}; shown again, verified, when the step runs); the run waits up to ${cfg.timeouts.depositMinutes} min for Spot to rise by it`);
-        if (c.coin.toUpperCase() === 'USDC') sim.spotUsdc += approx(d.amount);
+        const waitMin = Math.max(cfg.timeouts.depositMinutes, Math.ceil(((r.deposit.etaSeconds ?? 0) * 2) / 60));
+        lines.push(row ? row.line : `you send ${amount} ${c.coin} on ${r.label} by hand (at least SoDEX's deposit minimum ${r.deposit.min ?? '-'}; your wallet's network fee on top)`);
+        lines.push(`  to the wallet's ${r.label} deposit address (${known ? `the registry lists ${known}` : 'not issued yet'}; shown again, verified, when the step runs); the run waits up to ${waitMin} min for Spot to rise by ${amount} - optional: type s + Enter to skip it`);
+        const coinPx = px(c.coin) ?? 0;
+        if (row) cost += approx(row.walletFee) * (px(row.feeCoin) ?? 0);
+        // What comes back is sold back to USDC at the end (a taker fee and half the spread, roughly).
+        if (c.coin.toUpperCase() !== 'USDC') cost += approx(amount) * coinPx * 0.002;
+        returnsUsd += approx(amount) * coinPx;
+        if (c.coin.toUpperCase() === 'USDC') sim.spotUsdc += approx(amount);
       }
-      add('manual-deposits', { lines, costUsd: 0, sentAwayUsd: 0, problems: pr });
+      if (cfg.manualDeposits.some((d) => !d.skip)) lines.push("at the end, every coin chain-withdrawals and these deposits left in Spot is sold back to USDC (what is below a market's minimum order stays in Spot)");
+      add('manual-deposits', { lines, costUsd: cost, sentAwayUsd: 0, problems: pr });
     }
   }
 
@@ -1074,14 +1207,15 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     const memo = !!r && r.memo === 'numeric' && !rcv?.memo && !rcv?.noMemo;
     receiversNeeded.push({ name, chain, why, memo, set: !!rcv, problem });
   };
-  if (has('withdraw-valuechain-other')) needReceiver(cfg.withdrawValuechainOther.receiver, 'VALUECHAIN', null, 'withdraw-valuechain-other: a ValueChain address you control, not this wallet');
+  if (has('withdraw-valuechain-other')) needReceiver(cfg.withdrawValuechainOther.receiver, 'VALUECHAIN', null, 'another EVM address of yours (e.g. your SafePal EVM address - the same on every EVM chain), not this test wallet: withdraw-valuechain-other sends it 1 USDC on ValueChain');
   if (has('withdraw-external')) needReceiver(cfg.withdrawExternal.receiver, cfg.withdrawExternal.chain, cfg.withdrawExternal.coin, `withdraw-external: ${cfg.withdrawExternal.coin} to ${chainLabel(cfg.withdrawExternal.chain)}`);
   if (has('extra-withdrawals')) for (const x of cfg.extraWithdrawals) needReceiver(x.receiver, x.chain, x.coin, `extra-withdrawals: ${x.coin} to ${chainLabel(x.chain)}`);
   if (has('chain-withdrawals')) {
     for (const w of chainWithdrawals(coins, cfg)) {
       // Routes that cannot run anyway (closed, not offered) ask for nothing; an unset receiver is what the owner can supply.
       if (w.skip && !/^receivers\./.test(w.skip)) continue;
-      needReceiver(w.receiverName, w.route.key, w.coin.coin, `chain-withdrawals: ${w.coin.coin} (and the chain's other routes) to your own ${w.route.label} address - optional, the route is skipped without it`);
+      const onChain = chainWithdrawals(coins, cfg).filter((x) => x.route.key === w.route.key && (!x.skip || /^receivers\./.test(x.skip))).map((x) => x.coin.coin);
+      needReceiver(w.receiverName, w.route.key, w.coin.coin, `your own ${w.route.label} address (e.g. in SafePal) - the run withdraws ${[...new Set(onChain)].join(', ')} there; optional, those withdrawals are skipped without it`);
     }
   }
 
@@ -1128,6 +1262,25 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
 
   const estimates = new Map<StepId, { costUsd: number; sentAwayUsd: number }>(plans.map((p) => [p.id, { costUsd: p.costUsd, sentAwayUsd: p.sentAwayUsd }]));
   const suggestedMaxSpendUsd = Math.max(5, Math.ceil((totalCostUsd + totalSentAwayUsd) * 1.3 + 2));
+  // What YOUR wallet needs first, per hand-sent deposit you send (optional: only for those).
+  const ownerWallet = handRows
+    .filter((h) => h.state === 'send')
+    .map((h) =>
+      approx(h.needFirst) > 0 || approx(h.needFirstFeeCoin) > 0
+        ? `${h.coin} on ${h.label}: ${approx(h.needFirst) > 0 ? `${h.needFirst} ${h.coin}` : ''}${approx(h.needFirst) > 0 && approx(h.needFirstFeeCoin) > 0 ? ' + ' : ''}${approx(h.needFirstFeeCoin) > 0 ? `${h.needFirstFeeCoin} ${h.feeCoin}` : ''} of your own (${h.order === 'deposit-first' ? `you send ${h.sendBack} first + ~${h.walletFee} ${h.feeCoin} network fee; ${h.arrives} comes back` : `~${h.walletFee} ${h.feeCoin} network fee`})`
+        : `${h.coin} on ${h.label}: nothing of your own - the run sends ${h.arrives} ${h.coin}, you send back ${h.sendBack} (the minimum SoDEX credits is ${h.depositMin}), ~${h.walletFee} ${h.feeCoin} network fee on top${approx(h.keep) > 0 ? `, ${h.keep} ${h.coin} stays at your address (${h.keepWhy})` : ''}`,
+    );
+  const budget: Budget = {
+    fund: checklist,
+    costUsd: totalCostUsd,
+    sentAwayUsd: totalSentAwayUsd,
+    // What comes back can never be more than what went out (a deposit sent first is your own coin coming in).
+    returnsUsd: Math.min(returnsUsd, totalSentAwayUsd),
+    leftOnChains,
+    ownerWallet,
+    minutes: durationMinutes(plans, cfg, coins, o.selected, handRows),
+    suggestedMaxSpendUsd,
+  };
   return {
     pre: { health, vc, coins, usdc, soso, accountId, newAccount, depositAddresses, estimates },
     plans,
@@ -1145,7 +1298,69 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     notTestable: notTestable(coins, cfg),
     profileNotes,
     suggestedMaxSpendUsd,
+    handDeposits: handRows,
+    budget,
   };
+}
+
+/**
+ * A rough duration: per deposit SoDEX's own estimate (5 min where it gives none),
+ * per withdrawal 5 min, per hand-sent deposit 5 min (you send it) plus the chain's
+ * confirms it), the trading steps 25 min, the builder's verifier and the
+ * cross-check their own waits. Worst case: every wait to its time-out.
+ */
+function durationMinutes(plans: readonly StepPlan[], cfg: RunConfig, coins: readonly CoinConfig[], selected: ReadonlySet<StepId>, hand: readonly HandRow[]): { expected: number; worst: number } {
+  const on = (id: StepId) => selected.has(id) && plans.some((p) => p.id === id && !p.skip);
+  const eta = (coin: string, chain: string): number => {
+    const r = coins.find((c) => c.coin.toUpperCase() === coin.toUpperCase())?.chains.find((x) => x.key === chain);
+    return r?.deposit.etaSeconds ? r.deposit.etaSeconds / 60 : 5;
+  };
+  let expected = 0;
+  let worst = 0;
+  const deposit = (coin: string, chain: string) => {
+    expected += eta(coin, chain);
+    worst += cfg.timeouts.depositMinutes;
+  };
+  const withdraw = () => {
+    expected += 5;
+    worst += cfg.timeouts.withdrawMinutes;
+  };
+  if (on('deposit-external')) deposit('USDC', cfg.deposit.chain);
+  if (on('builder-tiers')) {
+    expected += 8;
+    worst += 10 + cfg.timeouts.verifierMinutes;
+  }
+  for (const id of ['orders-spot', 'orders-perps', 'refusals', 'key-lifecycle', 'transfers', 'spot-to-evm', 'evm-to-spot', 'withdraw-valuechain-self', 'withdraw-valuechain-other'] as const) {
+    if (on(id)) {
+      expected += id.startsWith('orders') ? 8 : 2;
+      worst += id.startsWith('orders') ? 15 : 5;
+    }
+  }
+  if (on('withdraw-external')) withdraw();
+  if (on('extra-withdrawals')) for (let i = 0; i < cfg.extraWithdrawals.length; i++) withdraw();
+  const tour = plans.find((p) => p.id === 'evm-tour' && !p.skip);
+  if (tour && selected.has('evm-tour')) {
+    for (const l of tour.lines) {
+      if (/ out to this wallet/.test(l)) withdraw();
+      if (/ back (to the verified deposit address|with the app's sendUsdcDeposit)/.test(l)) {
+        expected += 5;
+        worst += cfg.timeouts.depositMinutes;
+      }
+    }
+  }
+  const cw = plans.find((p) => p.id === 'chain-withdrawals' && !p.skip);
+  if (cw && selected.has('chain-withdrawals')) for (const l of cw.lines) if (/^\S+ \S+ -> .*: min /.test(l)) withdraw();
+  for (const h of hand) {
+    if (h.state !== 'send' || !on('manual-deposits')) continue;
+    expected += 5 + eta(h.coin, h.chain);
+    worst += Math.max(cfg.timeouts.depositMinutes, Math.ceil((eta(h.coin, h.chain) * 2)));
+  }
+  if (on('cleanup')) withdraw();
+  if (on('cross-check')) {
+    expected += 3;
+    worst += 5;
+  }
+  return { expected: Math.ceil(expected), worst: Math.ceil(Math.max(worst, expected)) };
 }
 
 const fmtAmt = (n: number): string => (n >= 1 ? n.toFixed(2) : n.toPrecision(3));
@@ -1155,6 +1370,8 @@ const fmtAmt = (n: number): string => (n >= 1 ? n.toFixed(2) : n.toPrecision(3))
  * x 65k gas, but at least a comfortable floor per chain - gas prices move, and
  * what is not spent stays in the wallet.
  */
+export const ownerGasNeed = (chainKey: string): Promise<number> => gasNeed(chainKey);
+
 async function gasNeed(chainKey: string): Promise<number> {
   const url = evmChain(chainKey)?.rpcUrl;
   const floor = GAS_FLOOR[chainKey] ?? 0.001;
@@ -1280,10 +1497,26 @@ export function printPlan(rec: Recorder, p: PlanResult, cfg: RunConfig, o: { mod
     for (const l of s.lines) L(`      ${l}`);
     for (const pr of s.problems) L(`      PROBLEM: ${pr}`);
   }
+  if (p.handDeposits.length) {
+    L('Hand-sent deposits (optional - from your own wallet, e.g. SafePal; the run shows each one and waits for it, s + Enter skips it)');
+    for (const h of p.handDeposits) L(`  ${h.line}`);
+  }
   L(`Estimated total   costs ${usd(p.totalCostUsd)} + sent to your other addresses ${usd(p.totalSentAwayUsd)} = ${usd(p.totalCostUsd + p.totalSentAwayUsd)} (maxSpendUsd ${usd(cfg.maxSpendUsd)})`);
   L(`Suggested maxSpendUsd for this run: ${p.suggestedMaxSpendUsd}${cfg.maxSpendUsd < p.suggestedMaxSpendUsd ? ` (the config says ${cfg.maxSpendUsd})` : ''}`);
   L(`Funding checklist (send to ${shortAddr(o.owner)} before a live run)`);
   for (const c of p.checklist) L(`  ${c}`);
+  const b = p.budget;
+  L('Budget');
+  L(`  fund the test wallet .... ${b.fund.length ? b.fund.map((f) => f.replace(/^\[[ x]\]\s+/, '').replace(/\s+\(.*$/, '').replace(/\s+/g, ' ')).join(' + ') : 'nothing'}`);
+  L(`  costs (fees, gas, spreads, activation) ~${usd(b.costUsd)}`);
+  L(`  sent to your own addresses ~${usd(b.sentAwayUsd)}${b.returnsUsd ? `, of which ~${usd(b.returnsUsd)} comes back if you send every hand-sent deposit` : ''}`);
+  for (const l of b.leftOnChains) L(`  left on a chain .......... ${l}`);
+  if (b.ownerWallet.length) {
+    L('  your own wallet (optional, only for the hand-sent deposits you send):');
+    for (const l of b.ownerWallet) L(`    - ${l}`);
+  }
+  L(`  maxSpendUsd .............. ${b.suggestedMaxSpendUsd} suggested (costs + sent to your addresses, +30 %)`);
+  L(`  time ..................... ~${Math.round(b.minutes.expected)} min expected; at most ~${Math.round(b.minutes.worst)} min before a time-out would stop it`);
   if (p.notTestable.length) {
     L('Not testable automatically');
     for (const n of p.notTestable) L(`  - ${n.what}: ${n.why}`);

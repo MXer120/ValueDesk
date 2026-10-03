@@ -40,6 +40,11 @@ export interface RunOptions {
   timeoutMs?: number;
   /** Called with the child once it has started (so Ctrl+C handling knows about it). */
   onStart?: (child: ChildProcess) => void;
+  /**
+   * Lines typed while the child runs are handed to its stdin (the live run reads "s" to skip a
+   * deposit the owner sends by hand). Without it the child's stdin is closed.
+   */
+  input?: { next: (ms: number) => Promise<string | null> };
 }
 
 export interface RunResult {
@@ -75,7 +80,7 @@ export function runProcess(program: string, args: readonly string[], o: RunOptio
     const t0 = Date.now();
     let child: ChildProcess;
     try {
-      child = spawn(program, [...args], { cwd: o.cwd, env: o.env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
+      child = spawn(program, [...args], { cwd: o.cwd, env: o.env, stdio: [o.input ? 'pipe' : 'ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
     } catch (e) {
       done({ code: null, signal: null, ms: 0, timedOut: false, startError: (e as Error).message });
       return;
@@ -116,6 +121,16 @@ export function runProcess(program: string, args: readonly string[], o: RunOptio
     child.once('error', (e) => finish({ code: null, signal: null, startError: e.message }));
     child.once('close', (code, signal) => finish({ code, signal, startError: null }));
     o.onStart?.(child);
+    if (o.input && child.stdin) {
+      const stdin = child.stdin;
+      stdin.on('error', () => undefined);
+      void (async () => {
+        while (!settled) {
+          const line = await o.input!.next(1000).catch(() => null);
+          if (line !== null && !settled && stdin.writable) stdin.write(`${line}\n`);
+        }
+      })();
+    }
   });
 }
 

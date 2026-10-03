@@ -24,11 +24,11 @@ import { balancesOf, unitsDown, withdrawQuote } from '../../src/trading/funds';
 import { formatUnits, parseUnits } from '../../src/trading/onboard';
 import { addOrSwitchChain, sendTransaction } from '../../src/wallet';
 import { SafetyStop, armed, type Ctx } from './context';
-import { marketQty, checkDepositAddress, depositAddressProblem, spotMarketFor } from './plan';
+import { marketQty, checkDepositAddress, depositAddressProblem, ownerGasNeed, spotMarketFor } from './plan';
 import { nativeBalance, receipt } from './reads';
 import { buyOnSpot, depositOne, moved, routeCheck, withdrawTo } from './steps';
 import { mustPlace, orderMs, settleFills, waitFor } from './orders';
-import { gasReserve, nativeLegAmounts, nativeTransferExpect, nativeTransferPolicy, reserveGasUnits, tourPlan, usdcLegAmounts, type TourLeg } from './tour';
+import { gasReserve, nativeLegAmounts, nativeTransferExpect, nativeTransferPolicy, oneWayUsdcAmount, reserveGasUnits, tourPlan, usdcLegAmounts, type TourLeg } from './tour';
 import { ensureTrading } from './trading';
 import { approx, cut, dCmp, dMax, dSub, toStep, usd } from './util';
 
@@ -50,6 +50,8 @@ async function depositNative(ctx: Ctx, leg: TourLeg, amount: string): Promise<{ 
   const bad = depositAddressProblem(owner, leg.chain, d, { coin: coin.coin });
   if (bad) throw new SafetyStop(`deposit address: ${bad}`);
   const to = d.backend!.toLowerCase();
+  // Never a deposit SoDEX would not credit: below its minimum it is lost, not refunded.
+  if (leg.route.deposit.min && dCmp(amount, leg.route.deposit.min) < 0) throw new SafetyStop(`${amount} ${coin.coin} is below SoDEX's deposit minimum ${leg.route.deposit.min} on ${leg.label} - nothing was sent`);
   const value = parseUnits(amount, spec.native.decimals);
   const have = await nativeBalance(spec.rpcUrl, owner);
   if (have <= value) throw new SafetyStop(`the wallet holds ${formatUnits(have, spec.native.decimals)} ${spec.native.symbol} on ${spec.name} - not ${amount} plus gas`);
@@ -163,6 +165,31 @@ export async function stepEvmTour(ctx: Ctx): Promise<void> {
         if (dCmp(back, '0') <= 0) throw new SafetyStop(`${received} ${leg.coin.coin} arrived on ${tc.label}: nothing left to send back after ${reserveNow} for gas`);
         await moved(ctx, dId, () => depositNative(ctx, leg, back));
       } else {
+        if (tc.ownerGas) {
+          // SoDEX lists no route for this chain's gas coin (Polygon: POL), so the run cannot get any. The deposit back
+          // runs only if the wallet already holds enough; otherwise the withdrawal alone is tested.
+          const sym = tc.spec.native.symbol;
+          const need = await ownerGasNeed(tc.chain);
+          const have = await nativeBalance(tc.spec.rpcUrl, owner).catch(() => 0n);
+          const held = formatUnits(have, tc.spec.native.decimals);
+          if (approx(held) + 1e-12 < need) {
+            const one = oneWayUsdcAmount(leg.route, fee);
+            let arrived = dSub(one, fee);
+            await moved(ctx, wId, async () => {
+              const r = await withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: one });
+              if (typeof r.evidence.received === 'string') arrived = r.evidence.received;
+              return r;
+            });
+            ctx.checks.set(
+              dId,
+              'not-run',
+              `not run: no ${sym} for gas on ${tc.label} - SoDEX lists no ${sym} route, so the run cannot get any, and the wallet holds ${cut(held, 6)} ${sym} (the USDC deposit back needs ~${need} ${sym}). The ${cut(arrived, 6)} USDC that arrived stays in the test wallet on ${tc.label}; send ~${need} ${sym} there to move it.`,
+              { chain: tc.chain, gasHeld: held, gasNeeded: String(need), leftOnChain: arrived },
+            );
+            rec.note(`${tc.label}: the USDC deposit back is not run - no ${sym} for gas (the wallet holds ${cut(held, 6)}, it needs ~${need}); ${cut(arrived, 6)} USDC stays in the test wallet there`);
+            continue;
+          }
+        }
         const amt = usdcLegAmounts(leg.route, fee);
         await moved(ctx, wId, () => withdrawTo(ctx, { coin: leg.coin, route: leg.route, receiverName: 'self', amount: amt.withdraw }));
         await moved(ctx, dId, () => depositOne(ctx, leg.chain, amt.back));
@@ -171,14 +198,14 @@ export async function stepEvmTour(ctx: Ctx): Promise<void> {
     if (cfg.evmTour.sellBack) {
       for (const [coinName, last] of lastUse) {
         if (last !== i) continue;
-        await sellBack(ctx, coinName, bought.get(coinName) ?? 0n);
+        await sellBack(ctx, coinName, bought.get(coinName) ?? 0n, 'evm-tour', 'what the tour bought');
       }
     }
   }
 }
 
-/** Sell what the tour bought of `coinName` back to USDC (at most what it bought, at least the market's minimum). */
-async function sellBack(ctx: Ctx, coinName: string, boughtUnits: bigint): Promise<void> {
+/** Sell what a step bought of `coinName` back to USDC (at most `boughtUnits`, at least the market's minimum). */
+export async function sellBack(ctx: Ctx, coinName: string, boughtUnits: bigint, tag: string, what: string): Promise<void> {
   const { owner, rec } = ctx;
   const coin = ctx.pre.coins.find((c) => c.coin === coinName);
   if (!coin || boughtUnits <= 0n) return;
@@ -193,8 +220,8 @@ async function sellBack(ctx: Ctx, coinName: string, boughtUnits: bigint): Promis
     rec.note(`${coin.coin}: ${cut(formatUnits(held, dp), 8)} left in Spot (~${usd(notional)}, below what ${m.sym.name} sells)`);
     return;
   }
-  const placed = await rec.sub(`sell back ${qty} ${coin.coin} on ${m.sym.name} (what the tour bought)`, () =>
-    mustPlace(ctx, { market: m, side: 'sell', type: 'market', quantity: qty, tag: 'evm-tour', label: `sell back ${qty} ${coin.coin}` }),
+  const placed = await rec.sub(`sell back ${qty} ${coin.coin} on ${m.sym.name} (${what})`, () =>
+    mustPlace(ctx, { market: m, side: 'sell', type: 'market', quantity: qty, tag, label: `sell back ${qty} ${coin.coin}` }),
   );
   await rec.sub(`verify: Spot ${coin.coin} went down by ${qty}`, () =>
     waitFor(ctx, `${coin.coin} sold`, { timeoutMs: orderMs(ctx), intervalMs: 2000, probe: async () => unitsDown((await balancesOf(owner, coin)).spot, dp), done: (v) => v + unitsDown(qty, dp) <= held, show: (v) => `Spot ${coin.coin} ${v === undefined ? '?' : formatUnits(v, dp)}` }),

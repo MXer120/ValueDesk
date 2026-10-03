@@ -15,6 +15,7 @@ import type { FeeRates, FillCheck } from './fees';
 import type { Expectation, Guard } from './guard';
 import type { HistoryLimiter } from './history';
 import type { Ledger } from './ledger';
+import type { OwnerInput } from './ownerInput';
 import type { KeyProvider, ProviderPolicy } from './provider';
 import type { InFlight, Snapshot } from './reads';
 import type { AccountStream } from './stream';
@@ -264,6 +265,18 @@ export interface Ctx {
   tamperTerms: ((body: Record<string, unknown>) => Record<string, unknown>) | null;
   /** For the offline simulation only: called when the run waits for a deposit the OWNER sends by hand. A real run never sets it. */
   onManualDeposit: ((d: { coin: string; chain: string; address: string; amount: string }) => void) | null;
+  /** What the owner types while the run waits for a hand-sent deposit (`s` skips it). null: no keyboard - the wait runs to its time-out. */
+  ownerInput: OwnerInput | null;
+  /**
+   * The chains the runner cannot sign on (chain-withdrawals, manual-deposits): per coin, the units
+   * these steps added to Spot (bought, credited by a hand-sent deposit) less what they withdrew -
+   * what is sold back to USDC at the end.
+   */
+  otherCoins: Map<string, bigint>;
+  /** Per route (`COIN|CHAIN`): the chain withdrawal to the owner ran, and what arrived there. */
+  handArrived: Map<string, string>;
+  /** Routes whose withdrawal waits for the owner's hand-sent deposit (no spot market to buy the coin on). */
+  deferredWithdrawals: Set<string>;
 }
 
 /** A refusal from the runner's own safety rules - nothing was signed or sent. */

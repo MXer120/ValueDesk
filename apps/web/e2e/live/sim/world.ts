@@ -79,6 +79,17 @@ const CHAINS: Record<string, number> = {
 };
 const keyOfChain = (chainId: number): string | undefined => Object.values(ALL_EVM).find((c) => c.chainId === chainId)?.key;
 
+/**
+ * The OWNER's own addresses on the chains the runner cannot sign on (the receivers of a full test: one
+ * wallet holds them all) - valid for their format and NOT the wallet's SoDEX deposit addresses there.
+ */
+export const OWNER_ADDRESS = {
+  solana: 'US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx',
+  bitcoin: 'bc1qzyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3h8ffkz',
+  dogecoin: 'D6hLULEGDRbk86j58t5iWmeinqM6acA16V',
+  xrp: 'rpZNAnHcvr6TbaY7QJa9yrVfu6coDz9pPH',
+} as const;
+
 /** The wallet's deposit address per chain (one per chain, every coin shares it): Arbitrum's is DEPOSIT_ADDR, the others made up, valid for their format. */
 export function depositAddressOf(chain: string): string {
   if (chain === 'ARBITRUM_ETH') return DEPOSIT_ADDR;

@@ -81,8 +81,10 @@ test('profiles: the menu offers what the runner has, in the owner\'s order, and 
   assert.deepEqual(none.available, []);
   assert.deepEqual(none.missing.map((p) => p.name), ['core', 'evm-tour', 'all-chains', 'builder-rerun']);
   const some = profileMenu({ steps: [], profiles: ['all-chains', 'core', 'builder-rerun', 'nightly'], flags: [], source: 'capabilities' });
-  assert.deepEqual(some.available.map((p) => p.name), ['core', 'all-chains', 'builder-rerun', 'nightly']);
-  assert.match(some.available[2]!.covers.join(' '), /forget --address/);
+  // The full test comes first whenever the runner has all-chains: it is that profile with everything switched on.
+  assert.deepEqual(some.available.map((p) => p.name), ['full', 'core', 'all-chains', 'builder-rerun', 'nightly']);
+  assert.match(some.available[0]!.title, /^Full test \(everything\)/);
+  assert.match(some.available[3]!.covers.join(' '), /forget --address/);
   assert.deepEqual(some.missing.map((p) => p.name), ['evm-tour']);
   assert.match(some.available.at(-1)!.covers[0]!, /no description/);
 });

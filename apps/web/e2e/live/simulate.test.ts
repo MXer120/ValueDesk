@@ -22,8 +22,9 @@ import { gateway as exchangeGateway } from '../../src/exchange/sodexGateway';
 import { formatUnits } from '../../src/trading/onboard';
 import { _setBuilderPollDelaysForTests } from '../../src/trading/builderApproval';
 import { runE2E } from './runner';
+import { scriptedOwnerInput, type OwnerInput } from './ownerInput';
 import { SAMPLE_ADDRESS } from './receivers';
-import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, TERMS_PUBLIC_KEY, VC_USDC, depositAddressOf, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
+import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, OWNER_ADDRESS, TERMS_PUBLIC_KEY, VC_USDC, depositAddressOf, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
 
 let restore: (() => void) | null = null;
 afterEach(() => {
@@ -60,6 +61,7 @@ async function run(
     profile?: Parameters<typeof runE2E>[0]['profile'];
     mode?: 'plan' | 'live';
     onManualDeposit?: (w: World, d: { coin: string; chain: string; address: string; amount: string }) => void;
+    ownerInput?: OwnerInput;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'vs-e2e-sim-'));
@@ -93,6 +95,7 @@ async function run(
     reportDir: dir,
     backendOverride: BACKEND,
     log: (l) => lines.push(l),
+    ...(o.ownerInput ? { ownerInput: o.ownerInput } : {}),
     test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
   });
   const file = readdirSync(dir).find((f) => f.endsWith(`-${mode}.json`));
@@ -338,7 +341,7 @@ test('all-chains: withdrawals to your own addresses on the chains the runner can
     {
       ...CONFIG,
       maxSpendUsd: 200,
-      receivers: { valuechain: FRIEND, sol: SAMPLE_ADDRESS.solana, btc: SAMPLE_ADDRESS.bitcoin, doge: SAMPLE_ADDRESS.dogecoin, xrp: { address: SAMPLE_ADDRESS.xrp, noMemo: true } },
+      receivers: { valuechain: FRIEND, sol: OWNER_ADDRESS.solana, btc: OWNER_ADDRESS.bitcoin, doge: OWNER_ADDRESS.dogecoin, xrp: { address: OWNER_ADDRESS.xrp, noMemo: true } },
       manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: '0.03' }],
     },
     {
@@ -357,19 +360,99 @@ test('all-chains: withdrawals to your own addresses on the chains the runner can
   noRefusals(report);
   assert.equal(r.code, 0, show(r));
   for (const id of ['withdraw-sol-sol', 'withdraw-usdc-sol', 'withdraw-xrp-xrp', 'withdraw-btc-btc', 'manual-deposit-sol-sol']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
-  assert.match(byId.get('withdraw-doge-doge')!.detail, /no DOGE\/USDC spot market/);
+  assert.match(byId.get('withdraw-doge-doge')!.detail, /not testable from USDC alone: .*no DOGE\/USDC spot market/);
   assert.equal(byId.get('withdraw-doge-doge')!.status, 'skipped');
   assert.equal(byId.get('withdraw-zec-zec')?.status, 'skipped');
   // Paid out to the owner's own addresses: never less than what could be sent straight back.
   const paid = (coin: string) => w.offchain.find((x) => x.coin === coin);
-  assert.equal(paid('SOL')?.receiver, SAMPLE_ADDRESS.solana);
-  assert.equal(paid('SOL')?.amount, 30_000_000n, '0.042 SOL withdrawn (deposit minimum 0.03 + fee 0.012), 0.03 paid out');
-  assert.equal(paid('XRP')?.receiver, SAMPLE_ADDRESS.xrp, 'no memo: the address alone');
+  assert.equal(paid('SOL')?.receiver, OWNER_ADDRESS.solana);
+  // SOL is sent back by hand: what arrives covers the 0.03 deposit, the wallet's fee (0.00001) and Solana's rent (0.00089088).
+  assert.equal(paid('SOL')?.amount, 30_901_000n, '0.042901 SOL withdrawn, 0.030901 paid out');
+  assert.equal(paid('XRP')?.receiver, OWNER_ADDRESS.xrp, 'no memo: the address alone');
   assert.equal(paid('XRP')?.memo, '');
   assert.equal(paid('BTC')?.amount, 50_000n - 6_000n, 'BTC: its 0.0005 minimum, less the fee');
   // The manual deposit: shown only once the app's Deposit sheet and the registry agreed on it.
   assert.deepEqual(manual, { coin: 'SOL', chain: 'SOL', address: depositAddressOf('SOL'), amount: '0.03' });
-  assert.ok(r.lines.some((l) => /SEND BY HAND: at least 0\.03 SOL on Solana/.test(l)));
+  const text = r.lines.join('\n');
+  assert.match(text, /SEND BY HAND \(optional\) - 1 of 1: SOL on Solana/);
+  assert.match(text, /amount \.+ 0\.03 SOL {3}\(SoDEX credits nothing below its deposit minimum of 0\.03 SOL/);
+  assert.match(text, /network fee \. your wallet adds it ON TOP/);
+});
+
+test('the full test: round trips to your own wallet - a deposit you skip, one you leave out, one sent first where SoDEX has no market - and everything sold back', async () => {
+  const sent: string[] = [];
+  const owner = scriptedOwnerInput({ 'XRP|XRP': 's' });
+  const r = await run(
+    {
+      ...CONFIG,
+      maxSpendUsd: 250,
+      receivers: { valuechain: FRIEND, sol: OWNER_ADDRESS.solana, btc: OWNER_ADDRESS.bitcoin, doge: OWNER_ADDRESS.dogecoin, xrp: { address: OWNER_ADDRESS.xrp, noMemo: true } },
+      manualDeposits: [
+        { coin: 'BTC', chain: 'BTC', amount: 'auto' },
+        { coin: 'DOGE', chain: 'DOGE', amount: 'auto' },
+        { coin: 'USDC', chain: 'SOL', amount: 'auto', skip: true },
+        { coin: 'SOL', chain: 'SOL', amount: 'auto' },
+        { coin: 'XRP', chain: 'XRP', amount: 'auto' },
+      ],
+    },
+    {
+      profile: 'all-chains',
+      only: ['deposit-external', 'enable-trading', 'chain-withdrawals', 'manual-deposits'],
+      setup: (w) => w.arbUsdc.set(w.owner, 250_000_000n),
+      ownerInput: owner,
+      onManualDeposit: (w, d) => {
+        sent.push(`${d.coin} ${d.amount}`);
+        const units: Record<string, [number, bigint]> = { BTC: [10, 41_000n], DOGE: [11, 4_200_000_000n], SOL: [8, 30_000_000n] };
+        const u = units[d.coin];
+        if (u) setTimeout(() => w.addSpot(u[0], u[1]), 20); // the owner sends it; XRP they skip
+      },
+    },
+  );
+  const { report, w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  noFailures(r.checks);
+  noRefusals(report);
+  assert.equal(r.code, 0, show(r));
+  // Asked for, each at least SoDEX's deposit minimum - the wallet's fee on top.
+  assert.deepEqual(sent, ['BTC 0.00041', 'DOGE 42', 'SOL 0.03', 'XRP 4']);
+  for (const id of ['withdraw-btc-btc', 'withdraw-sol-sol', 'withdraw-xrp-xrp', 'withdraw-usdc-sol', 'manual-deposit-btc-btc', 'manual-deposit-sol-sol', 'manual-deposit-doge-doge']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  assert.equal(byId.get('manual-deposit-usdc-sol')?.status, 'skipped');
+  assert.match(byId.get('manual-deposit-usdc-sol')!.detail, /^skipped \(owner\): you left this hand-sent deposit out/);
+  assert.equal(byId.get('manual-deposit-xrp-xrp')?.status, 'skipped');
+  assert.match(byId.get('manual-deposit-xrp-xrp')!.detail, /^skipped \(owner\): you typed "s"/);
+  assert.deepEqual(owner.given, ['XRP|XRP: s']);
+  // DOGE has no spot market: deposit first, then the run withdrew it back to your address.
+  assert.equal(byId.get('withdraw-doge-doge')?.status, 'pass', byId.get('withdraw-doge-doge')?.detail);
+  const paid = (coin: string) => w.offchain.find((x) => x.coin === coin);
+  assert.equal(paid('DOGE')?.receiver, OWNER_ADDRESS.dogecoin);
+  assert.equal(paid('DOGE')?.amount, 3_000_000_000n, '42 DOGE back, 30 arrive after the 12 DOGE fee');
+  // XRP: sized so that the 4 XRP deposit back, the wallet's fee and the 1 XRP reserve all come out of what arrived.
+  assert.equal(paid('XRP')?.amount, 5_000_020n);
+  // What came back was sold back to USDC (BTC is worth enough; the SOL left over is below the market's minimum).
+  const sells = w.orders.filter((o) => o.engine === 'spot' && o.side === 'SELL' && o.status === 'FILLED').map((o) => o.symbol);
+  assert.ok(sells.includes('vBTC_vUSDC'), `sold back: ${sells.join(', ')}`);
+  assert.ok(r.lines.some((l) => /SOL: [0-9.]+ left in Spot/.test(l)), 'what is below the minimum stays, and the run says so');
+  // The summary and the report say "skipped (owner)".
+  assert.match(r.summary!, /skipped \(owner\)/);
+  const hand = report.plan.handDeposits as Array<{ coin: string; state: string; sendBack: string; depositMin: string }>;
+  for (const h of hand) assert.ok(Number(h.sendBack) >= Number(h.depositMin), `${h.coin}: ${h.sendBack} >= ${h.depositMin}`);
+  assert.equal(hand.find((h) => h.coin === 'USDC')?.state, 'skipped');
+});
+
+test('evm-tour without POL on Polygon: the Polygon withdrawal is tested, the deposit back is "not run: no POL for gas" - and nothing asks for POL', async () => {
+  const p = await run({ ...CONFIG, maxSpendUsd: 60 }, { profile: 'evm-tour', mode: 'plan', setup: (w) => w.arbUsdc.set(w.owner, 0n) });
+  assert.ok(!p.report.plan.checklist.some((l: string) => /POL/.test(l)), p.report.plan.checklist.join('\n'));
+  assert.ok(p.report.plan.budget.leftOnChains.some((l: string) => /Polygon: ~1\.00 USDC stays in the test wallet/.test(l)), JSON.stringify(p.report.plan.budget));
+  const r = await run({ ...CONFIG, maxSpendUsd: 60 }, { profile: 'evm-tour', only: ['deposit-external', 'enable-trading', 'evm-tour'], setup: (w) => w.arbUsdc.set(w.owner, 100_000_000n) });
+  noFailures(r.checks);
+  noRefusals(r.report);
+  assert.equal(r.code, 0, show(r));
+  const wd = r.checks.find((c) => c.id.startsWith('withdraw-usdc-matic'))!;
+  const dp = r.checks.find((c) => c.id.startsWith('deposit-usdc-matic'))!;
+  assert.equal(wd.status, 'pass', wd.detail);
+  assert.equal(dp.status, 'not-run');
+  assert.match(dp.detail, /^not run: no POL for gas on Polygon/);
+  assert.ok(!r.w.writes.some((x) => x.startsWith('matic transfer ')), 'nothing was sent from Polygon');
 });
 
 test('builder-rerun: refused on a wallet with no account; on the funded test wallet it runs the fee test again', async () => {
@@ -418,4 +501,17 @@ test('plan --profile all-chains: every route checked read-only, what cannot be t
   // The summary says what the BNB and Base ETH minimums mean for a user, at the top of the findings.
   assert.match(r.summary!, /### Withdrawal minimums that do not cover the fee[\s\S]*\*\*BNB to BNB Smart Chain\*\*: minimum 0\.0005 BNB, fee 0\.002 BNB/);
   assert.match(r.summary!, /\*\*ETH to Base\*\*: minimum 0\.0005 ETH, fee 0\.0005 ETH\. A user who withdraws exactly the minimum would receive nothing/);
+});
+
+test('never toward a SoDEX deposit address below its deposit minimum: a withdrawal to the wallet\'s own deposit address that would arrive below it - live refuses to start, nothing is signed or sent', async () => {
+  const r = await run({
+    ...CONFIG,
+    maxSpendUsd: 60,
+    // A receiver mistyped as the wallet's OWN Solana deposit address, and 0.02 SOL: 0.008 would arrive, SoDEX credits nothing below 0.03.
+    receivers: { valuechain: FRIEND, sol: depositAddressOf('SOL') },
+    extraWithdrawals: [{ coin: 'SOL', chain: 'SOL', amount: '0.02', receiver: 'sol', buyIfMissing: true }],
+  });
+  assert.equal(r.code, 2);
+  assert.ok(r.report.plan.problems.some((p: string) => /own SoDEX deposit address on Solana, and 0\.008 SOL would arrive - below SoDEX's deposit minimum 0\.03/.test(p)), r.report.plan.problems.join('\n'));
+  assert.deepEqual(r.w.writes, [], 'no write of any kind reached the fake');
 });

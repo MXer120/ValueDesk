@@ -138,8 +138,27 @@ export const RUN_PROFILES: readonly ProfileInfo[] = [
   },
 ];
 
+/**
+ * The full test: not a profile of the runner but a choice of the guide - the
+ * all-chains profile with everything switched on: every receiver asked for, every
+ * hand-sent deposit offered, the builder fee and its tiers when stage C set the
+ * builder up, and the cleanup back to Arbitrum.
+ */
+export const FULL_TEST: ProfileInfo = {
+  name: 'full',
+  title: 'Full test (everything) - one run for every chain, fund only Arbitrum One',
+  covers: [
+    'everything in "All chains": every order type, every way out, every EVM chain out and back, the builder fee and its tiers (when stage C set up the builder)',
+    'withdrawals to YOUR addresses on every other chain (one wallet, e.g. SafePal, holds them all) - you enter each address',
+    'the deposits back from those addresses, sent by you during the run - each one optional',
+    'at the end everything bought is sold back to USDC and the USDC is withdrawn back to Arbitrum One',
+  ],
+};
+/** The runner profile the full test runs. */
+export const FULL_TEST_PROFILE = 'all-chains';
+
 export interface ProfileMenu {
-  /** Offered, in order: the known ones first, then any other profile the runner has. */
+  /** Offered, in order: the full test (when the runner has all-chains), the known ones, then any other profile the runner has. */
   available: ProfileInfo[];
   /** Asked for by the owner, but not in this runner version. */
   missing: ProfileInfo[];
@@ -150,6 +169,7 @@ export function profileMenu(c: Capabilities): ProfileMenu {
   const known = new Set(RUN_PROFILES.map((p) => p.name));
   return {
     available: [
+      ...(has.has(FULL_TEST_PROFILE) ? [FULL_TEST] : []),
       ...RUN_PROFILES.filter((p) => has.has(p.name)),
       ...[...has].filter((p) => !known.has(p)).map((name) => ({ name, title: name, covers: ['(a profile of this runner version the guide has no description for)'] })),
     ],
@@ -267,6 +287,80 @@ export interface PlanView {
   selectedSteps: string[];
   /** Receiver addresses this plan wants and does not have (or has and rejects). */
   receivers: ReceiverNeed[];
+  /** The deposits the owner can send back by hand (profile all-chains). */
+  handDeposits: HandDeposit[];
+  /** The runner's budget block (null: this runner version has none). */
+  budget: BudgetView | null;
+}
+
+/** One deposit the owner can send by hand from their own wallet, as the runner plans it. */
+export interface HandDeposit {
+  coin: string;
+  chain: string;
+  label: string;
+  /** 'send' | 'skipped' | 'offered' (not configured yet). */
+  state: string;
+  /** What the owner sends (never below SoDEX's deposit minimum). */
+  amount: string;
+  depositMin: string;
+  walletFee: string;
+  feeCoin: string;
+  /** What the owner must already hold (0: the run's withdrawal covers it). */
+  needFirst: string;
+  order: string;
+  /** The runner's own sentence about it. */
+  line: string;
+}
+
+export interface BudgetView {
+  fund: string[];
+  costUsd: number | null;
+  sentAwayUsd: number | null;
+  returnsUsd: number | null;
+  leftOnChains: string[];
+  ownerWallet: string[];
+  minutes: { expected: number | null; worst: number | null };
+  suggestedMaxSpendUsd: number | null;
+}
+
+/** The hand-sent deposits of a plan report (tolerant: anything missing is left out). */
+export function handDepositsOf(v: unknown): HandDeposit[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((x): HandDeposit[] => {
+    const o = obj(x);
+    const coin = text(o?.coin);
+    const chain = text(o?.chain);
+    if (!o || !coin || !chain || !/^[A-Za-z0-9_.-]{1,40}$/.test(coin) || !/^[A-Z0-9_]{2,32}$/.test(chain)) return [];
+    return [{
+      coin,
+      chain,
+      label: text(o.label) ?? chain,
+      state: text(o.state) ?? 'offered',
+      amount: text(o.amount) ?? text(o.sendBack) ?? '?',
+      depositMin: text(o.depositMin) ?? '?',
+      walletFee: text(o.walletFee) ?? '?',
+      feeCoin: text(o.feeCoin) ?? coin,
+      needFirst: text(o.needFirst) ?? '0',
+      order: text(o.order) ?? 'withdraw-first',
+      line: text(o.line) ?? `${coin} on ${text(o.label) ?? chain}`,
+    }];
+  });
+}
+
+export function budgetOf(v: unknown): BudgetView | null {
+  const o = obj(v);
+  if (!o) return null;
+  const m = obj(o.minutes);
+  return {
+    fund: lines(o.fund),
+    costUsd: num(o.costUsd),
+    sentAwayUsd: num(o.sentAwayUsd),
+    returnsUsd: num(o.returnsUsd),
+    leftOnChains: lines(o.leftOnChains),
+    ownerWallet: lines(o.ownerWallet),
+    minutes: { expected: num(m?.expected), worst: num(m?.worst) },
+    suggestedMaxSpendUsd: num(o.suggestedMaxSpendUsd),
+  };
 }
 
 /** A receiver address the selected steps need. */
@@ -322,6 +416,8 @@ export function readPlanReport(json: unknown): PlanView | null {
     routes: lines(p?.routes),
     selectedSteps: lines(r.selectedSteps),
     receivers: receiversNeeded(p?.receiversNeeded, { problems, warnings, steps }),
+    handDeposits: handDepositsOf(p?.handDeposits),
+    budget: budgetOf(p?.budget),
   };
 }
 
@@ -419,6 +515,8 @@ export function planFromConsole(raw: readonly string[], exitCode: number | null)
     routes: section(/^Routes per chain/),
     selectedSteps: (ls.find((l) => /^steps\s{2,}/.test(l)) ?? '').replace(/^steps\s+/, '').split(',').map((s) => s.trim()).filter(Boolean),
     receivers: receiversNeeded(undefined, { problems, warnings, steps }),
+    handDeposits: [],
+    budget: null,
   };
 }
 

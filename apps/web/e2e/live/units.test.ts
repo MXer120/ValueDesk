@@ -31,11 +31,13 @@ import { capabilities, parseArgs } from './run';
 import { TermsWatch, judgeTerms, termsKeyId, termsMessage, verifyTermsSignature } from './terms';
 import { CHAIN_ADDRESS, chainLabel, type ChainRoute, type CoinConfig } from '../../src/trading/funds';
 import { chainWithdrawals } from './chainRoutes';
-import { DEFAULT_CONFIG, type RunConfig } from './config';
+import { DEFAULT_CONFIG, validateConfig, type RunConfig } from './config';
 import { applyProfile, profileSteps } from './profiles';
 import { memoRuleProblems, notTestable } from './routes';
 import { nativeLegAmounts, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
 import { buildSummary, minimumsBelowFee, type SummaryInput } from './summary';
+import { handInstructions, handPlan, handRoutes, isHandActive } from './handBack';
+import { ownerWord } from './ownerInput';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 const GW = 'https://gw.test';
@@ -433,4 +435,55 @@ test('capabilities: the route kinds and the chains the runner signs on', () => {
   assert.deepEqual(c.routeKinds.map((k) => k.id), ['route-<coin>-<chain>', 'deposit-<coin>-<chain>', 'withdraw-<coin>-<chain>', 'manual-deposit-<coin>-<chain>']);
   assert.ok(c.routeKinds.every((k) => k.steps.length > 0));
   assert.deepEqual(c.chains.filter((x) => x.source === 'runner').map((x) => `${x.key}:${x.chainId}`), ['ARC:5042', 'AVAXC:43114', 'HYPEREVM_HYPE:999', 'ROBINHOOD_ETH:4663']);
+});
+
+// --- the full test: deposits the owner sends back by hand -----------------------------------------------
+
+test('hand-sent deposits: what arrives covers the deposit back, the wallet fee and what the chain keeps - never below the deposit minimum', () => {
+  const sol = coinOf('SOL', 9, [native('SOL', '0.03', '0.01', '0.012')]);
+  const xrp = coinOf('XRP', 6, [native('XRP', '4', '2', '0.8')]);
+  const btc = coinOf('BTC', 8, [native('BTC', '0.00005', '0.0005', '0.00006')]);
+  const ton = coinOf('TON', 9, [native('TON', '3', '3', '0.8')]);
+  const usdcSol = coinOf('USDC', 6, [route('SOL', { tokenAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v' })], 0);
+  const plain = { market: true, nativeCoin: 'X', nativeCarriesFees: false, tokenSends: 0 };
+  // XRP: 4 back + 0.00002 fee + the 1 XRP reserve arrive; the reserve stays with the owner.
+  const x = handPlan(xrp.chains[0]!, xrp, '0.8', { ...plain, nativeCoin: 'XRP' });
+  assert.deepEqual([x.withdraw, x.arrives, x.sendBack, x.keep, x.needFirst], ['5.80002', '5.00002', '4', '1', '0']);
+  // SOL carrying the fees of two token sends (USDC, USDT on Solana).
+  const s = handPlan(sol.chains[0]!, sol, '0.012', { ...plain, nativeCoin: 'SOL', nativeCarriesFees: true, tokenSends: 2 });
+  assert.deepEqual([s.withdraw, s.sendBack], ['0.047001', '0.03']);
+  // BTC: the withdrawal minimum dominates - the owner sends back what arrived less the fee.
+  const b = handPlan(btc.chains[0]!, btc, '0.00006', { ...plain, nativeCoin: 'BTC' });
+  assert.deepEqual([b.withdraw, b.arrives, b.sendBack], ['0.0005', '0.00044', '0.00041']);
+  // A token send pays its fee in the chain's coin; without a SOL withdrawal the owner brings it.
+  const u = handPlan(usdcSol.chains[0]!, usdcSol, '1', { ...plain, nativeCoin: 'SOL' });
+  assert.deepEqual([u.withdraw, u.sendBack, u.feeCoin, u.walletFee, u.needFirstFeeCoin], ['6', '5', 'SOL', '0.00205', '0.00205']);
+  // TON: no spot market - the owner sends first, enough for the withdrawal back to clear SoDEX's minimum and fee.
+  const t = handPlan(ton.chains[0]!, ton, '0.8', { ...plain, market: false, nativeCoin: 'TON' });
+  assert.deepEqual([t.order, t.sendBack, t.withdraw, t.arrives, t.needFirst], ['deposit-first', '3.8', '3.8', '3', '3.85']);
+  for (const p of [x, s, b, u, t]) assert.ok(Number(p.sendBack) >= Number(p.depositMin), `${p.coin}: ${p.sendBack} >= ${p.depositMin}`);
+  // The instructions say it: the minimum, the fee ON TOP, the address.
+  const text = handInstructions(x, { address: 'rDeposit', memo: true, index: 1, of: 3, waitMin: 30, arrivedFromRun: true, skipHint: true }).join('\n');
+  assert.match(text, /amount \.+ 4 XRP {3}\(SoDEX credits nothing below its deposit minimum of 4 XRP/);
+  assert.match(text, /ON TOP/);
+  assert.match(text, /memo \/ tag \.\. none/);
+  assert.match(text, /1 XRP stays at your address/);
+  assert.match(text, /type s and Enter/);
+});
+
+test('hand-sent deposits: the routes offered, the config ("auto", "skip"), and what a typed line means', () => {
+  const sol = coinOf('SOL', 9, [native('SOL', '0.03', '0.01', '0.012')], 8);
+  const zec = coinOf('ZEC', 8, [{ ...native('ZEC', '0.01', '0.01', '0.001'), addressKind: 'other' as const }], 12);
+  const closed = coinOf('DOGE', 8, [{ ...native('DOGE', '30', '30', '12'), deposit: { allowed: false, min: '30', etaSeconds: null } }], 11);
+  const cfg = validateConfig({ receivers: { sol: SAMPLE_ADDRESS.solana }, manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: 'auto' }, { coin: 'DOGE', chain: 'DOGE', skip: true }] });
+  assert.deepEqual(cfg.errors, []);
+  assert.deepEqual(cfg.config.manualDeposits, [{ coin: 'SOL', chain: 'SOL', amount: 'auto' }, { coin: 'DOGE', chain: 'DOGE', amount: 'auto', skip: true }]);
+  assert.match(validateConfig({ manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: 'some' }] }).errors.join(), /"auto"/);
+  const hr = handRoutes([sol, zec, closed], cfg.config);
+  assert.deepEqual(hr.map((h) => [h.coin.coin, h.why === null, isHandActive(h.deposit)]), [['DOGE', false, false], ['SOL', true, true], ['ZEC', false, false]]);
+  assert.equal(ownerWord('s'), 'skip');
+  assert.equal(ownerWord(' Skip '), 'skip');
+  assert.equal(ownerWord('skip all'), 'skip-all');
+  assert.equal(ownerWord('yes'), null);
+  assert.equal(ownerWord(null), null);
 });

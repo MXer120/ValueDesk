@@ -22,9 +22,11 @@ import { checkStop, heading, logWriter, type Ctx } from './context';
 import { applyChoices, configProblems, describeConfig, loadExample, loadExisting, readBuilderKeyNames, receiversSet, saveConfig, type BuilderKeyNames, type ConfigChoices, type Json, type ReceiverValue } from './config';
 import { addressOfKey, normaliseKey, sameAddress } from './key';
 import { childEnv } from './proc';
-import { choose, confirm, pressEnter, typeExactly } from './prompt';
+import { askValue, choose, confirm, pressEnter, typeExactly } from './prompt';
 import {
   DEFAULT_CAPABILITIES,
+  FULL_TEST,
+  FULL_TEST_PROFILE,
   capabilitiesFromUsage,
   configWarnings,
   extractFeeTable,
@@ -74,6 +76,8 @@ export interface RunnerCallOptions {
   /** A live run: Ctrl+C must reach the runner, which then reports where the funds are; the guide never kills it. */
   protect?: boolean;
   timeoutMs?: number;
+  /** Lines the owner types while it runs go to the runner (the live run: "s" skips a hand-sent deposit). */
+  input?: boolean;
 }
 
 /** Everything stage D does to the outside world, so a test can stand in for all of it. */
@@ -139,6 +143,7 @@ export function realDDeps(ctx: Ctx): DDeps {
         // The ONE place a key leaves this process: the environment of this one child.
         env: childEnv(ctx.env, o.key),
         timeoutMs: o.timeoutMs,
+        ...(o.input ? { input: { next: (ms: number) => ctx.ask.prompter.waitLine(ms) } } : {}),
         onStart: (c) => {
           const set = o.protect ? ctx.liveRuns : ctx.children;
           set.add(c);
@@ -223,6 +228,26 @@ function showPlan(ctx: Ctx, p: Planned, o: { steps: boolean }): void {
     out.line(`   Spend cap ........... ${fmtUsd(v.maxSpendUsd)} (the run stops before it would lose more than this)`);
   }
   for (const w of [...configWarnings(p.run.lines), ...v.warnings]) out.say(`note: ${w}`, '   ');
+}
+
+/** The runner's budget for this plan, in the owner's words: what to fund, what it costs, what goes to your addresses and comes back, how long. */
+function showBudget(ctx: Ctx, v: PlanView, title: string): void {
+  const b = v.budget;
+  if (!b) return;
+  const { out } = ctx;
+  const needs = fundingStatus(v).needs;
+  out.line();
+  out.line(`   ${title}`);
+  out.line(`      fund the test wallet .... ${needs.length ? needs.map((n) => `${n.amount} ${n.coin} on ${n.chain}`).join(' + ') : 'nothing'} - nothing else, on no other chain`);
+  out.line(`      costs ................... ~${fmtUsd(b.costUsd)} (fees, gas, spreads, the activation fee)`);
+  out.line(`      sent to your addresses .. ~${fmtUsd(b.sentAwayUsd)}${b.returnsUsd ? ` - of it ~${fmtUsd(b.returnsUsd)} comes back if you send every hand-sent deposit` : ''}`);
+  for (const l of b.leftOnChains) out.say(`left on a chain: ${l}`, '      ');
+  if (b.ownerWallet.length) {
+    out.line('      in your own wallet (OPTIONAL - only for the hand-sent deposits you send):');
+    for (const l of b.ownerWallet) out.say(`- ${l}`, '        ');
+  }
+  if (b.suggestedMaxSpendUsd !== null) out.line(`      spend cap suggested ..... ${fmtUsd(b.suggestedMaxSpendUsd)} (costs + what goes to your addresses, with room)`);
+  if (b.minutes.expected !== null) out.line(`      time .................... ~${Math.round(b.minutes.expected)} min expected${b.minutes.worst !== null ? `, at most ~${Math.round(b.minutes.worst)} min before a time-out stops it` : ''}`);
 }
 
 // --- the config -------------------------------------------------------------------------------
@@ -476,8 +501,11 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   if (o.headings) heading(ctx, throwaway ? 'D-plan' : 'D-profile');
   const menu = profileMenu(caps);
   let profile: string | null = o.profile ?? null;
+  /** The full test: all-chains with every receiver, every hand-sent deposit offered, the cleanup on. */
+  let full = false;
   if (o.profile === undefined) {
-    const wanted = args.profile;
+    const wanted = args.profile === FULL_TEST.name && caps.profiles.includes(FULL_TEST_PROFILE) ? FULL_TEST_PROFILE : args.profile;
+    full = args.profile === FULL_TEST.name && wanted === FULL_TEST_PROFILE;
     if (wanted) {
       if (!caps.profiles.includes(wanted)) {
         say(`The profile "${wanted}" is not available in this runner version${caps.profiles.length ? ` (it has: ${caps.profiles.join(', ')})` : ' (it has no profiles yet)'}.`);
@@ -523,6 +551,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   };
 
   let previewPlan: Planned | null = null;
+  const runnerProfileOf = (name: string): string => (name === FULL_TEST.name ? FULL_TEST_PROFILE : name);
   if (o.profile === undefined && !args.profile && menu.available.length) {
     say('Choose what the live run tests. For each choice the guide first asks the runner what it needs (a read-only plan with a throwaway key).');
     const previews = new Map<string, Planned>();
@@ -531,23 +560,33 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
       out.line();
       out.line(`   ${p.title}`);
       for (const c of p.covers) out.line(`      - ${c}`);
-      const pv = await preview(p.name, `D-preview-${p.name}.log`);
-      previews.set(p.name, pv);
-      out.say(needsLine(pv), '      ');
+      const rp = runnerProfileOf(p.name);
+      const pv = previews.get(rp) ?? (await preview(rp, `D-preview-${rp}.log`));
+      previews.set(rp, pv);
+      out.say(p.name === FULL_TEST.name ? `${needsLine(pv)} - before your addresses: each address you enter adds its withdrawal; the exact budget follows once they are in` : needsLine(pv), '      ');
     }
     for (const m of menu.missing) out.line(`   ${m.title}: not available in this runner version`);
     out.line();
-    const usable = menu.available.filter((p) => !previews.get(p.name)!.refused.length);
+    const usable = menu.available.filter((p) => !previews.get(runnerProfileOf(p.name))!.refused.length);
     if (!usable.length) return end('FAIL', 'the runner could not plan any profile');
-    profile = await choose(
+    const picked = await choose(
       ctx.ask,
       'Which one?',
-      menu.available.map((p) => ({ key: p.name, label: p.title, ...(previews.get(p.name)!.refused.length ? { disabled: 'the runner could not plan it' } : {}) })),
+      menu.available.map((p) => ({ key: p.name, label: p.title, ...(previews.get(runnerProfileOf(p.name))!.refused.length ? { disabled: 'the runner could not plan it' } : {}) })),
       usable[0]!.name,
     );
+    full = picked === FULL_TEST.name;
+    profile = runnerProfileOf(picked);
     previewPlan = previews.get(profile) ?? null;
   }
   ctx.shared.profile = profile;
+  if (full) {
+    // Everything back where it came from at the end: Spot USDC withdrawn to Arbitrum One (one more withdrawal fee).
+    updateConfig(deps, cfg, { cleanupEnabled: true });
+    notes.push('Full test: the cleanup at the end was switched on (all USDC back to Arbitrum One).');
+    say(`The full test: the runner profile "${FULL_TEST_PROFILE}" with every address of yours, every deposit you can send back by hand, ${ctx.shared.builder ? 'the builder fee and its tiers (set up in stage C), ' : ''}and the cleanup at the end (everything sold back to USDC, the USDC withdrawn back to Arbitrum One).`);
+    previewPlan = await preview(profile, 'D-preview-full.log');
+  }
 
   // ------------------------------------------------------------------ plan only, throwaway key
   if (throwaway) {
@@ -569,7 +608,11 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   }
   showPlan(ctx, previewPlan, { steps: true });
   out.line(`   A brand-new wallet needs: ${fundingStatus(previewPlan.view).needs.map((n) => `${n.amount} ${n.coin} on ${n.chain}`).join(' + ') || 'nothing from other chains'}`);
-  previewPlan = await collectReceivers(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-receivers.log'));
+  previewPlan = await collectReceivers(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-receivers.log'), full);
+  if (previewPlan.view.handDeposits.length && !previewPlan.refused.length) {
+    previewPlan = await collectHandDeposits(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-hand.log'), full);
+  }
+  if (previewPlan.view.budget) showBudget(ctx, previewPlan.view, 'THE BUDGET (the runner\'s read-only plan for a brand-new wallet, with your addresses)');
 
   // ------------------------------------------------------------------ the key
   if (o.headings) heading(ctx, 'D-key');
@@ -693,6 +736,13 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   if (profile) out.line(`   profile ............. ${profile}`);
   showPlan(ctx, finalPlan, { steps: true });
   for (const l of describeConfig(cfg.config)) out.line(`   ${l}`);
+  if (finalPlan.view.budget) showBudget(ctx, finalPlan.view, 'THE BUDGET');
+  const handSends = finalPlan.view.handDeposits.filter((h) => h.state === 'send');
+  if (handSends.length) {
+    out.line();
+    out.line(`   DEPOSITS YOU SEND BY HAND (${handSends.length}, each optional)`);
+    say('Near the end the run shows them one at a time: exactly which coin, on which network, how much (never below SoDEX\'s deposit minimum - your wallet\'s network fee comes on top) and to which address (the one the app and SoDEX\'s on-chain registry both name). Send it from your wallet and the run goes on by itself once SoDEX credits it. To skip one: type s and Enter while it waits ("skip all" skips the rest) - it is then reported as skipped (owner). Skipping never stops the run.');
+  }
   out.line();
   out.line('   BEFORE YOU START: close every other Valuescan tab and every sodex.com tab.');
   say('SoDEX allows about four history reads a minute per internet address. The run and the server\'s fee check need them; another open tab can use them up, SoDEX then blocks this address for a minute, and the run fails.');
@@ -726,7 +776,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   try {
     live = await deps.runner(
       { mode: 'live', config: cfg.path, confirm: held.address, only, reportDir: ctx.paths.reportDir, profile },
-      { key: held.key, logName: 'D-live.log', protect: true, onLine: (l) => out.line(`   ${l}`) },
+      { key: held.key, logName: 'D-live.log', protect: true, input: true, onLine: (l) => out.line(`   ${l}`) },
     );
   } finally {
     // The acknowledgement was for this run only.
@@ -855,7 +905,7 @@ function latestStoppedRun(deps: DDeps, address: string, caps: Capabilities): { p
  * written to the private config, and then VALIDATED BY THE RUNNER: its plan is
  * run again and whatever it says about the address is shown.
  */
-async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Planned, replan: () => Promise<Planned>): Promise<Planned> {
+async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Planned, replan: () => Promise<Planned>, full = false): Promise<Planned> {
   const { out } = ctx;
   let plan = first;
   for (let round = 0; round < 3; round++) {
@@ -863,7 +913,12 @@ async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Pla
     if (!ask.length) return plan;
     const set: Record<string, ReceiverValue> = {};
     out.line();
-    if (round === 0) out.say('The run can also send to addresses of yours. Each is optional: press Enter to leave one out, and the steps that need it are skipped.', '   ');
+    if (round === 0) {
+      if (full) {
+        out.line('   YOUR ADDRESSES (one wallet of yours - e.g. SafePal - holds them all)');
+        out.say('The run withdraws to your own address on each chain below; everything lands in your wallet. Copy each address from your wallet\'s "Receive" screen for exactly that coin and network. Each is optional: press Enter to leave one out, and the withdrawals there are skipped.', '   ');
+      } else out.say('The run can also send to addresses of yours. Each is optional: press Enter to leave one out, and the steps that need it are skipped.', '   ');
+    }
     for (const n of ask) {
       checkStop(ctx);
       const current = receiversSet(cfg.config).find((r) => r.name === n.name)?.address;
@@ -892,12 +947,13 @@ async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Pla
         continue;
       }
       if (n.memo) {
-        out.prompt('      Memo / destination tag (digits), or "none" if this address takes no memo: ');
+        out.say('A memo (destination tag) is only for an account at an exchange. Your own wallet (SafePal and the like) needs none.', '      ');
+        out.prompt('      Memo - press Enter for none (your own wallet), or type the digits an exchange gave you: ');
         const memo = ((await ctx.ask.prompter.ask('')) ?? '').trim();
-        if (/^\d{1,20}$/.test(memo)) set[n.name] = { address, memo };
-        else if (/^none$/i.test(memo)) set[n.name] = { address, noMemo: true };
+        if (!memo || /^(none|no|-)$/i.test(memo)) set[n.name] = { address, noMemo: true };
+        else if (/^\d{1,20}$/.test(memo)) set[n.name] = { address, memo };
         else {
-          out.line('      Neither digits nor "none". Left out.');
+          out.line('      Neither digits nor empty. Left out.');
           set[n.name] = '';
         }
       } else set[n.name] = address;
@@ -928,6 +984,44 @@ async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Pla
     return replan();
   }
   return plan;
+}
+
+/**
+ * The deposits the owner can send back by hand (profile all-chains): listed with
+ * what each takes, offered as a whole, single ones can be left out. Written as
+ * "auto" amounts - the runner computes them (never below SoDEX's deposit minimum)
+ * - with `skip` for the ones left out (reported "skipped (owner)"). Then the plan
+ * is read again.
+ */
+async function collectHandDeposits(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Planned, replan: () => Promise<Planned>, full: boolean): Promise<Planned> {
+  const { out } = ctx;
+  const offers = first.view.handDeposits;
+  if (!offers.length) return first;
+  out.line();
+  out.line('   DEPOSITS YOU SEND BACK BY HAND (optional)');
+  out.say('The run withdraws to your addresses above. It can also test the way IN from those chains: during the run it shows, one at a time, exactly what to send from your wallet - coin, network, amount (at least SoDEX\'s deposit minimum; your wallet\'s network fee comes on top) and the verified SoDEX address - and waits until SoDEX credits it. Each one is optional: leave it out here, or type s and Enter while the run waits for it.', '   ');
+  offers.forEach((h, i) => out.say(`${i + 1}. ${h.line}`, '      '));
+  const want = await confirm(ctx.ask, 'Include these deposits you send by hand in the run?', full);
+  let drop = new Set<number>();
+  if (want) {
+    drop = await askValue(
+      ctx.ask,
+      'Leave any out? Type their numbers (e.g. 2,5), or press Enter to keep them all:',
+      (raw) => {
+        const t = raw.trim();
+        if (!t) return { ok: true, value: new Set<number>() };
+        const nums = t.split(/[\s,]+/).filter(Boolean).map(Number);
+        if (nums.some((x) => !Number.isInteger(x) || x < 1 || x > offers.length)) return { ok: false, problem: `Numbers from 1 to ${offers.length}, separated by commas - or just Enter.` };
+        return { ok: true, value: new Set(nums) };
+      },
+      { auto: '' },
+    );
+  }
+  const list = offers.map((h, i) => ({ coin: h.coin, chain: h.chain, amount: 'auto', ...(!want || drop.has(i + 1) ? { skip: true } : {}) }));
+  updateConfig(deps, cfg, { manualDeposits: list });
+  const sends = list.filter((d) => !d.skip).length;
+  out.line(`   Written: ${sends} deposit(s) you send by hand${list.length - sends ? `, ${list.length - sends} left out (reported "skipped (owner)")` : ''}. Asking the runner for the exact amounts (read-only)...`);
+  return replan();
 }
 
 /** The runner's own fee table for the summary, if it provides one. */

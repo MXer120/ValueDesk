@@ -29,6 +29,7 @@ import { Ledger } from './ledger';
 import { preflight, printPlan, routeRows, type PlanResult } from './plan';
 import { applyProfile, profileSteps, type Profile } from './profiles';
 import { buildSummary, type SummaryInput } from './summary';
+import type { OwnerInput } from './ownerInput';
 import { KNOWN_CHAINS, createKeyProvider, type KeyProvider } from './provider';
 import { snapshot, whereFundsLines, type Snapshot } from './reads';
 import { STEPS, declareFundsChecks } from './steps';
@@ -68,6 +69,8 @@ export interface RunOptions {
     /** Called when the run waits for a deposit the owner sends by hand (the fake "sends" it). */
     onManualDeposit?: (d: { coin: string; chain: string; address: string; amount: string }) => void;
   };
+  /** What the owner types while the run waits for a hand-sent deposit (run.ts: stdin, live mode). */
+  ownerInput?: OwnerInput | null;
 }
 
 const RECOVERY = [
@@ -275,6 +278,10 @@ export async function runE2E(o: RunOptions): Promise<number> {
     tamperTerms: null,
     routeChecks: new Map(),
     onManualDeposit: o.test?.onManualDeposit ?? null,
+    ownerInput: o.ownerInput ?? null,
+    otherCoins: new Map(),
+    handArrived: new Map(),
+    deferredWithdrawals: new Set(),
   };
 
   // The app's terms module asks through the guard; the runner can hand it a TAMPERED copy of a real answer (tierSteps.ts).
@@ -319,6 +326,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
       L(`Spend: costs ${usd(ctx.spend.costUsd)} + sent to other addresses ${usd(ctx.spend.sentAwayUsd)} (maxSpendUsd ${usd(cfg.maxSpendUsd)})`);
     }
     ctx.stream?.close();
+    ctx.ownerInput?.stop();
     followTerms(null);
     // Every declared check, with why the ones that did not run did not.
     const skips = new Map((plan?.plans ?? []).filter((p) => p.skip).map((p) => [p.id, p.skip!]));
@@ -372,6 +380,8 @@ export async function runE2E(o: RunOptions): Promise<number> {
         notTestable: plan.notTestable,
         profileNotes: plan.profileNotes,
         suggestedMaxSpendUsd: plan.suggestedMaxSpendUsd,
+        handDeposits: plan.handDeposits,
+        budget: plan.budget,
         terms: plan.terms ? { verified: plan.terms.verdict.verified, off: plan.terms.verdict.off, problems: plan.terms.verdict.problems, keyId: plan.terms.verdict.keyId, fee: plan.terms.verdict.answer.fee, volume: plan.terms.verdict.answer.volume, tier: plan.terms.verdict.answer.tier, flags: plan.terms.verdict.answer.flags, cacheControl: plan.terms.cacheControl } : null,
         steps: plan.plans,
       },

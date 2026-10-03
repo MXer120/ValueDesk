@@ -59,7 +59,7 @@
   "// chainWithdrawals": "profile all-chains: per route on a chain the runner cannot sign on, the smallest amount you could send straight back, to receivers.<chain>; buyIfMissing market-buys the coin on Spot first",
   "chainWithdrawals": { "skip": [], "buyIfMissing": true },
 
-  "// manualDeposits": "profile all-chains, opt-in per route: deposits YOU send by hand, e.g. { \"coin\": \"SOL\", \"chain\": \"SOL\", \"amount\": \"0.03\" }. The run shows the verified address and waits up to timeouts.depositMinutes for Spot to rise by the amount.",
+  "// manualDeposits": "profile all-chains, opt-in per route: deposits YOU send by hand, e.g. { \"coin\": \"SOL\", \"chain\": \"SOL\", \"amount\": \"auto\" } (auto: the round trip the runner plans - never below SoDEX's deposit minimum, your wallet's fee on top), \"skip\": true = left out (reported skipped (owner)). The run shows the verified address and waits for Spot to rise by the amount; typing s + Enter skips one. The guided full test writes these for you.",
   "manualDeposits": [],
 
   "cleanup": { "enabled": false, "chain": "ARBITRUM_ETH" },

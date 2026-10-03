@@ -50,7 +50,8 @@ import { engineTransfer, mustPlace, orderMs, settleFills, settleMs, waitFor } fr
 import { stepOrdersPerps, stepOrdersSpot } from './orderSteps';
 import { ACTIVATION_FEE_USDC, checkDepositAddress, depositAddressProblem, marketQty, spotMarketFor } from './plan';
 import { VALUECHAIN_CHAIN_ID } from './provider';
-import { apiKeys, nativeBalance, receipt, rpcRead, tokenBalance } from './reads';
+import { apiKeys, nativeBalance, receipt, registryDepositAddresses, rpcRead, tokenBalance } from './reads';
+import { sameDepositAddress } from './routes';
 import { stepRefusals } from './refusalSteps';
 import { stepBuilderTiers } from './tierSteps';
 import { builderApprovalExpect, builderTypedDataProblem, ensureTrading, registerKey } from './trading';
@@ -677,6 +678,14 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
     rec.warn('fee', `SoDEX's asset config says ${route.withdraw.fee} ${coin.coin}, the chain says ${fee} - the chain's fee applies`);
   }
   if (units <= quote.fee) throw new SafetyStop(`${amount} ${coin.coin} does not cover the ${fee} fee`);
+  // Never toward one of this wallet's own SoDEX deposit addresses with less than SoDEX's deposit minimum arriving there:
+  // such a deposit is not credited.
+  const ownDeposit = await registryDepositAddresses(owner, coin.coin)
+    .then((m) => m.get(route.key) ?? null)
+    .catch(() => null);
+  if (ownDeposit && sameDepositAddress(ownDeposit, address, route.addressKind) && route.deposit.min && dCmp(dSub(amount, fee), route.deposit.min) < 0) {
+    throw new SafetyStop(`${address} is this wallet's own SoDEX deposit address on ${route.label}, and ${dSub(amount, fee)} ${coin.coin} would arrive - below SoDEX's deposit minimum ${route.deposit.min}, which it does not credit`);
+  }
   if (units > quote.available) throw new SafetyStop(`SoDEX can pay out only ${formatUnits(quote.available, dp)} ${coin.coin} on ${route.label} right now`);
   const px = await usdPrice(coin.coin);
   const feeUsd = approx(fee) * px;

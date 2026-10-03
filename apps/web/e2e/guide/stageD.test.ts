@@ -12,7 +12,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
-import { TX_DEPOSIT, WALLET, liveReport, planReport } from './fixtures';
+import { BUDGET, TX_DEPOSIT, WALLET, handDeposits, liveReport, planReport } from './fixtures';
 import { askKey, detectCapabilities, moneyRun, planOnce, runStageD, waitForFunding } from './stageD';
 import { EXAMPLE_CONFIG, FakeRunner, NAMES_TIERS, kit, type FakeRunnerOptions } from './testkit';
 
@@ -323,6 +323,43 @@ test('profiles: each one is previewed (what it needs) before the owner chooses; 
     assert.match(k.screen(), /All chains[^\n]*: not available in this runner version/);
     assert.match(k.screen(), /Builder fee again[^\n]*: not available in this runner version/);
     assert.equal(k.ctx.shared.profile, 'evm-tour');
+  } finally {
+    k.cleanup();
+  }
+});
+
+test('the full test: one choice - all-chains, your SafePal addresses (no memo on Enter), the hand-sent deposits offered (one left out), the budget, cleanup on, typed lines reach the run', async () => {
+  const sol = 'US517G5965aydkZ46HS38QLi7UQiSojurfbQfKCELFx';
+  const xrp = 'rpZNAnHcvr6TbaY7QJa9yrVfu6coDz9pPH';
+  const asks = [{ name: 'sol', chain: 'SOL', why: 'your own Solana address (e.g. in SafePal)', memo: false, set: false }, { name: 'xrp', chain: 'XRP', why: 'your own XRP Ledger address', memo: true, set: false }];
+  const preview = { report: planReport({ receiversNeeded: asks, handDeposits: handDeposits(), budget: BUDGET }), code: 2 };
+  const withAddresses = { report: planReport({ receiversNeeded: [], handDeposits: handDeposits(), budget: BUDGET }), code: 2 };
+  const withHand = { report: planReport({ receiversNeeded: [], handDeposits: handDeposits({ sol: 'send', xrp: 'skipped' }), budget: BUDGET }), code: 2 };
+  const funded = plan({ funded: true, receiversNeeded: [], handDeposits: handDeposits({ sol: 'send', xrp: 'skipped' }), budget: BUDGET });
+  // 1 = the full test; the two addresses; Enter = no memo; Enter = include the hand-sent deposits; leave out no. 2; the wallet; tabs closed; YES; the address
+  const k = kit({ argv: ['--stages', 'D'], lines: ['1', sol, xrp, '', '', '2', 'y', '', 'YES', ADDRESS], hidden: [KEY] });
+  const fake = new FakeRunner({ capabilities: CAPS(['core', 'all-chains']), plans: [preview, preview, preview, withAddresses, withHand, funded], live: live() });
+  try {
+    const r = await runStageD(k.ctx, fake);
+    assert.equal(r.status, 'PASS', r.reason);
+    assert.deepEqual(k.prompter.unused, []);
+    // The menu previews all-chains once (for the full test and for itself) and core; then the full test is planned again with the cleanup on.
+    assert.deepEqual(fake.plans.slice(0, 3).map((p) => [p.inv.profile, p.inv.throwaway === true]), [['all-chains', true], ['core', true], ['all-chains', true]]);
+    assert.equal(k.ctx.shared.profile, 'all-chains');
+    const cfg = fake.lives[0]!.config!;
+    assert.equal((cfg.cleanup as { enabled: boolean }).enabled, true, 'the cleanup is on');
+    assert.deepEqual((cfg.receivers as Record<string, unknown>).sol, sol);
+    assert.deepEqual((cfg.receivers as Record<string, unknown>).xrp, { address: xrp, noMemo: true }, 'Enter at the memo: your own wallet needs none');
+    assert.deepEqual(cfg.manualDeposits, [{ coin: 'SOL', chain: 'SOL', amount: 'auto' }, { coin: 'XRP', chain: 'XRP', amount: 'auto', skip: true }]);
+    // The live run gets what the owner types (s skips a hand-sent deposit), and the all-chains profile.
+    assert.equal(fake.lives[0]!.input, true);
+    assert.equal(fake.lives[0]!.inv.profile, 'all-chains');
+    assert.ok(fake.plans.every((p) => !p.input), 'a plan never reads the keyboard');
+    const screen = k.flat();
+    for (const want of ['Full test (everything)', 'YOUR ADDRESSES (one wallet of yours - e.g. SafePal - holds them all)', 'Your own wallet (SafePal and the like) needs none', 'DEPOSITS YOU SEND BACK BY HAND (optional)', "at least SoDEX's deposit minimum", 'Written: 1 deposit(s) you send by hand, 1 left out', 'THE BUDGET', 'fund the test wallet .... 25.00 USDC on Arbitrum One + 0.000200 ETH on Arbitrum One - nothing else, on no other chain', 'comes back if you send every hand-sent deposit', 'left on a chain: Polygon', 'spend cap suggested ..... $160.00', 'DEPOSITS YOU SEND BY HAND (1, each optional)', 'type s and Enter']) {
+      assert.ok(screen.includes(want), want);
+    }
+    assert.match(screen, /sent back by you \.+ SOL on SOL \(1 left out\)/);
   } finally {
     k.cleanup();
   }
