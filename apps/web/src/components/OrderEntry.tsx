@@ -52,7 +52,6 @@ import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, fmtUsd, num, pic
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
-import { couldntLoad } from './LoadFailed';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useTradeGate } from './account/useTradeGate';
 import { useBuilderFee } from './account/useBuilderFee';
@@ -1224,24 +1223,6 @@ export function OrderEntry({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, engine]);
 
-  /**
-   * Why the slider cannot write a size for a CONNECTED wallet (before a wallet is connected the thumb moves
-   * on its own - the percent is applied once a balance exists). Reading the balance says nothing yet.
-   */
-  const sliderNote =
-    !connectedAddress || sliderReady || (acct.loading && !acct.data)
-      ? null
-      : acct.error && !acct.data
-        ? couldntLoad(`Available ${engine === 'perps' ? 'margin' : 'balance'}`)
-        : available === null
-          ? `Available ${engine === 'perps' ? 'margin' : 'balance'} unavailable — size manually.`
-          : available <= 0
-            ? 'No free balance to size against.'
-            : engine === 'perps' && !(lev > 0)
-              ? 'Set a leverage to size by percentage.'
-              : marketExec
-                ? 'No price to size against yet.'
-                : 'Enter a price to size by percentage.';
 
   /**
    * Switch units WITHOUT changing the order.
@@ -1881,7 +1862,6 @@ export function OrderEntry({
             <span className="oe-suffix">%</span>
           </div>
         </div>
-        {sliderNote && <p className="oe-note">{sliderNote}</p>}
 
         {/* 5. Flags, TIF and the attached exits.
             Two rows, each a checkbox on the left and its own control on the
