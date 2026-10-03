@@ -6,17 +6,34 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmt, fmtUsd } from '../format';
 import { Modal } from '../components/Modal';
+import { AutoHeight, FadeView } from '../components/motion';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { loadDashboard, saveDashboard } from '../dashboard/storage';
 import { probeDevice, suggestPotato, type DeviceProbe } from './device';
 import { IDLE_PROGRESS, indexEnabled, setIndexEnabled, startIndexer, stopIndexer, subscribeIndex, type IndexProgress } from './indexer';
 import { indexKey, parseIndex, profileBlurb, recommendProfile, type ProfileId } from './stats';
+import '../components/funds/funds.css';
 import './setup.css';
 
 /** Opt-in trade panels (registry defaultHidden). Hidden for a beginner who has never saved a layout. */
 const BEGINNER_HIDDEN = ['leaderboard', 'feetier', 'venue'];
 
 type Step = 0 | 1 | 2 | 3;
+
+/** The four sheets, in order. History runs underneath the later ones. */
+const STEP_LABELS = ['History', 'Layout', 'Device', 'Ready'] as const;
+
+const PROFILE_LABEL: Record<ProfileId, string> = {
+  beginner: 'Beginner',
+  default: 'Default',
+  advanced: 'Advanced',
+};
+
+const Tick = () => (
+  <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+    <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 function readDone(): boolean {
   try { return localStorage.getItem('vs.setup.done') != null; }
@@ -172,7 +189,8 @@ export function AccountSetup({ address }: { address: string | null }) {
       progress.cursorMs ? `${progress.done ? 'through' : 'back to'} ${when(progress.cursorMs)}` : '',
     ].filter(Boolean).join(' · ');
 
-  const indexState = progress.done && !progress.running ? 'done' : progress.running || step === 0 ? 'now' : 'wait';
+  const indexing = !(progress.done && !progress.running);
+  const hasStats = !!snap && (snap.t.fil > 0 || snap.t.ord > 0 || snap.t.vol > 0);
 
   return (
     <Modal
@@ -180,135 +198,137 @@ export function AccountSetup({ address }: { address: string | null }) {
       title="Setting up your account"
       onClose={finish}
       onBack={step > 0 ? () => setStep((s) => (s - 1) as Step) : undefined}
-      size="lg"
-      className="vs-setup"
-      footer={(
-        <div className="vs-setup__foot">
-          {step < 3 && <button type="button" className="vs-setup__skip" onClick={finish}>Explore while we set up</button>}
-          <button type="button" className="btn-primary vs-setup__go" onClick={next}>{step >= 3 ? 'Explore while we set up' : 'Continue'}</button>
-        </div>
-      )}
+      size="md"
+      className="fx vs-setup"
     >
-      <div className="vs-setup__split">
-        <div className="vs-setup__main">
-      <p className="vs-setup__kicker">{step >= 3 ? 'Ready when you are.' : 'This may take a moment.'}</p>
-      <ol className="vs-setup__list">
-        <li className={step > 0 ? 'is-done' : 'is-now'}>
-          <i aria-hidden="true" />
-          <span>Enabling this browser</span>
-        </li>
-        <li className={indexState === 'done' ? 'is-done' : indexState === 'now' ? 'is-now' : ''}>
-          <i aria-hidden="true" />
-          <span>Indexing history <small>{progressText}</small></span>
-        </li>
-        <li className={step > 1 ? 'is-done' : step === 1 ? 'is-now' : ''}>
-          <i aria-hidden="true" />
-          <span>Layout · {profile}</span>
-        </li>
-        <li className={step > 2 ? 'is-done' : step === 2 ? 'is-now' : ''}>
-          <i aria-hidden="true" />
-          <span>This device{potatoOn ? ' · potato mode' : ''}</span>
-        </li>
+      <ol className="vs-steps" aria-label="Setup progress">
+        {STEP_LABELS.map((label, i) => (
+          <li key={label} className={i < step ? 'is-done' : i === step ? 'is-now' : undefined}>{label}</li>
+        ))}
       </ol>
 
-      {step === 0 && (
-        <>
-          <p className="vs-setup__note">
-            History is rolled into statistics on this browser: fees, funding, volume, deposits,
-            withdrawals, orders, and fills. Individual trades are not stored.
-          </p>
-          <p className="vs-setup__progress">{progressText}</p>
-          {progress.notice && <p className="vs-setup__note">{progress.notice}</p>}
-          <p className="vs-setup__note">
-            {progress.done && !progress.running
-              ? 'Caught up. New activity is picked up from here.'
-              : 'You can keep browsing. Indexing stays at a steady pace so trading is not rate limited.'}
-          </p>
-        </>
+      {progress.notice && <p className="fx-note fx-note--warn">{progress.notice}</p>}
+      {step > 0 && indexing && (
+        <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />{progressText}</p>
       )}
 
-      {step === 1 && (
-        <>
-          <p className="vs-setup__note">
-            From what SoDEX already shows — open positions, volume, or nothing yet — this account looks {suggested}. {profileBlurb(suggested)}
-          </p>
-          <div className="vs-setup__choices" role="group" aria-label="Layout profile">
-            {([
-              ['beginner', 'Beginner', 'Less on screen. The denser optional panels stay off.'],
-              ['default', 'Default', 'The usual layout.'],
-              ['advanced', 'Advanced', 'For several markets or a lot of volume.'],
-            ] as const).map(([id, title, detail]) => (
-              <button
-                key={id}
-                type="button"
-                className={`vs-setup__choice${profile === id ? ' active' : ''}`}
-                aria-pressed={profile === id}
-                onClick={() => setPicked(id)}
-              >
-                <span>{title}</span>
-                <small>{id === suggested ? `Recommended. ${detail}` : detail}</small>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-
-      {step === 2 && (
-        <>
-          <p className="vs-setup__note">
-            A short check: core count, memory if the browser reports it, and a few frames.
-            A device’s age can’t be known from here.
-          </p>
-          <p className="vs-setup__progress">{probe ? deviceLine(probe) : 'Checking…'}</p>
-          <p className="vs-setup__note">
-            {probe && suggestPotato(probe)
-              ? 'This device looks tight, so potato mode starts on. You can turn it off.'
-              : 'This device looks fine. Potato mode stays off unless you turn it on.'}
-          </p>
-          <label className="vs-setup__row">
-            <span>Potato mode</span>
-            <input
-              type="checkbox"
-              checked={potatoOn}
-              onChange={(e) => {
-                potatoTouched.current = true;
-                setPotatoOn(e.target.checked);
-                persistPotato(e.target.checked);
-              }}
-            />
-          </label>
-        </>
-      )}
-
-      {step === 3 && (
-        <>
-          <p className="vs-setup__note">
-            Layout {profile}. Potato mode {potatoOn ? 'on' : 'off'}.
-            {progress.done ? ' History is caught up.' : ' Indexing continues in the background.'}
-          </p>
-          {snap && (snap.t.fil > 0 || snap.t.ord > 0 || snap.t.vol > 0) && (
-            <p className="vs-setup__progress">
-              {fmt(snap.t.fil, 0)} fills · {fmt(snap.t.ord, 0)} orders · {fmtUsd(snap.t.vol)} volume
-              {snap.t.fee ? ` · ${fmtUsd(snap.t.fee)} fees` : ''}
-              {snap.t.f ? ` · ${fmtUsd(snap.t.f)} funding` : ''}
-            </p>
+      <AutoHeight>
+        <FadeView viewKey={String(step)} className="fx-stack">
+          {step === 0 && (
+            <>
+              <p className="fx-note">
+                History is rolled into statistics on this browser: fees, funding, volume, deposits,
+                withdrawals, orders, and fills. Individual trades are not stored.
+              </p>
+              <p className="vs-setup__fig">{progressText}</p>
+              <p className="fx-note">
+                {progress.done && !progress.running
+                  ? 'Caught up. New activity is picked up from here.'
+                  : 'You can keep browsing. Indexing stays at a steady pace so trading is not rate limited.'}
+              </p>
+            </>
           )}
-        </>
-      )}
-        </div>
-        <aside className="vs-setup__art" aria-hidden="true">
-          <div className="vs-setup__glow" />
-          <div className="vs-setup__grid" />
-          <svg className="vs-setup__chart" viewBox="0 0 280 200" preserveAspectRatio="none">
-            <path className="vs-setup__fill" d="M8 156 C 36 154, 52 118, 78 112 S 120 64, 156 72 210 36 272 28 V 188 H 8 Z" />
-            <path className="vs-setup__line" d="M8 156 C 36 154, 52 118, 78 112 S 120 64, 156 72 210 36 272 28" />
-          </svg>
-          <div className="vs-setup__float">
-            <span className="vs-setup__chip"><i /> Equity</span>
-            <span className="vs-setup__chip vs-setup__chip--dim"><i /> 30d</span>
+
+          {step === 1 && (
+            <>
+              <p className="fx-note">
+                From what SoDEX already shows — open positions, volume, or nothing yet — this account looks {suggested}. {profileBlurb(suggested)}
+              </p>
+              <div className="vs-setup__choices" role="group" aria-label="Layout profile">
+                {([
+                  ['beginner', 'Beginner', 'Less on screen. The denser optional panels stay off.'],
+                  ['default', 'Default', 'The usual layout.'],
+                  ['advanced', 'Advanced', 'For several markets or a lot of volume.'],
+                ] as const).map(([id, title, detail]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`fx-opt${profile === id ? ' is-on' : ''}`}
+                    aria-pressed={profile === id}
+                    onClick={() => setPicked(id)}
+                  >
+                    <span className="fx-opt__icon"><span className="fx-srct__tick"><Tick /></span></span>
+                    <span>
+                      <span className="fx-opt__t">
+                        {title}
+                        {id === suggested && <span className="fx-badge">Recommended</span>}
+                      </span>
+                      <span className="fx-opt__d">{detail}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {step === 2 && (
+            <>
+              <p className="fx-note">
+                A short check: core count, memory if the browser reports it, and a few frames.
+                A device’s age can’t be known from here.
+              </p>
+              <p className="vs-setup__fig">{probe ? deviceLine(probe) : 'Checking…'}</p>
+              <p className="fx-note">
+                {probe && suggestPotato(probe)
+                  ? 'This device looks tight, so potato mode starts on. You can turn it off.'
+                  : 'This device looks fine. Potato mode stays off unless you turn it on.'}
+              </p>
+              <button
+                type="button"
+                className={`fx-opt${potatoOn ? ' is-on' : ''}`}
+                aria-pressed={potatoOn}
+                onClick={() => {
+                  potatoTouched.current = true;
+                  const nextOn = !potatoOn;
+                  setPotatoOn(nextOn);
+                  persistPotato(nextOn);
+                }}
+              >
+                <span className="fx-opt__icon"><span className="fx-srct__tick"><Tick /></span></span>
+                <span>
+                  <span className="fx-opt__t">Potato mode</span>
+                  <span className="fx-opt__d">Less motion, for a device that is working hard.</span>
+                </span>
+              </button>
+            </>
+          )}
+
+          {step === 3 && (
+            <>
+              <p className="fx-note">
+                {progress.done
+                  ? 'History is caught up. New activity is picked up from here.'
+                  : 'Indexing continues in the background.'}
+              </p>
+              <div className="fx-box vs-setup__box">
+                <div className="fx-kv">
+                  <div><span>Layout</span><b>{PROFILE_LABEL[profile]}</b></div>
+                  <div><span>Potato mode</span><b>{potatoOn ? 'On' : 'Off'}</b></div>
+                  <div><span>History</span><b>{progress.done ? 'Caught up' : 'Indexing'}</b></div>
+                  {hasStats && snap && (
+                    <>
+                      <div><span>Fills</span><b>{fmt(snap.t.fil, 0)}</b></div>
+                      <div><span>Orders</span><b>{fmt(snap.t.ord, 0)}</b></div>
+                      <div><span>Volume</span><b>{fmtUsd(snap.t.vol)}</b></div>
+                      {snap.t.fee ? <div><span>Fees</span><b>{fmtUsd(snap.t.fee)}</b></div> : null}
+                      {snap.t.f ? <div><span>Funding</span><b>{fmtUsd(snap.t.f)}</b></div> : null}
+                    </>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="vs-setup__actions">
+            <button type="button" className="fx-cta" onClick={next}>
+              {step >= 3 ? 'Explore while we set up' : 'Continue'}
+            </button>
+            {step < 3 && (
+              <button type="button" className="fx-link" onClick={finish}>Explore while we set up</button>
+            )}
           </div>
-        </aside>
-      </div>
+        </FadeView>
+      </AutoHeight>
     </Modal>
   );
 }
