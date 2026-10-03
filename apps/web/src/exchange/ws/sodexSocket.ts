@@ -53,6 +53,9 @@ export class SodexSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private attempt = 0;
   private closed = false;
+  /** A wallet with no SoDEX account yet: its account subscriptions are sent again later. */
+  private noAccountTimer: ReturnType<typeof setTimeout> | undefined;
+  private noAccountTries = 0;
   status: SocketStatus = 'closed';
   lastMessageAt = 0;
 
@@ -105,7 +108,15 @@ export class SodexSocket {
       if (msg?.op === 'pong') return;
       if (msg?.op) {
         // Subscribe/unsubscribe acknowledgement: {op, success, result|error, connID}
-        if (msg.success === false) this.events.onAckError?.(this, String(msg.error ?? 'subscription refused'));
+        if (msg.success === false) {
+          const error = String(msg.error ?? 'subscription refused');
+          this.events.onAckError?.(this, error);
+          // "user not found": the wallet has no SoDEX account YET - a brand-new user before
+          // the first deposit is credited. Ask again, slower each time (20 s up to 2 min),
+          // so the account's orders and fills start to arrive once the account exists.
+          // Without this they never did until the page was reloaded (found by the live run).
+          if (this.user && /user not found/i.test(error)) this.retryForAccount();
+        } else if (msg.success === true && msg.op === 'subscribe') this.noAccountTries = 0;
         return;
       }
       if (!msg?.channel) return;
@@ -127,6 +138,15 @@ export class SodexSocket {
     ws.onerror = () => {
       /* onclose follows and handles the retry */
     };
+  }
+
+  private retryForAccount(): void {
+    if (this.noAccountTimer !== undefined || this.closed) return;
+    const delay = Math.min(120_000, 20_000 * 2 ** Math.min(this.noAccountTries++, 3));
+    this.noAccountTimer = setTimeout(() => {
+      this.noAccountTimer = undefined;
+      for (const sub of this.subs.values()) this.send({ op: 'subscribe', params: sub.params });
+    }, delay);
   }
 
   private setStatus(s: SocketStatus): void {
@@ -200,6 +220,8 @@ export class SodexSocket {
     this.closed = true;
     this.stopPing();
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    if (this.noAccountTimer !== undefined) clearTimeout(this.noAccountTimer);
+    this.noAccountTimer = undefined;
     const ws = this.ws;
     this.ws = null;
     if (ws) {

@@ -33,6 +33,7 @@ import { CheckFailure, SafetyStop, armed, scenario, type Ctx } from './context';
 import { fillKey, fillOk, rateBp, type FillCheck } from './fees';
 import type { LedgerOrder } from './ledger';
 import {
+  clearLeftovers,
   cancel,
   ensurePerpsCollateral,
   expectGone,
@@ -42,7 +43,6 @@ import {
   idText,
   judgeFills,
   mustPlace,
-  openOn,
   positionOf,
   putInOrder,
   refusedLocally,
@@ -132,15 +132,25 @@ export function judgeFeeScenario(ctx: Ctx, id: 'builder-fee-default' | 'builder-
   );
 }
 
-/** Poll the terms (with a hint) until `done`; the order history stays untouched meanwhile - the server's verifier needs that budget. */
+/**
+ * Poll the terms until `done`; the order history stays untouched meanwhile - the server's
+ * verifier needs that budget. Only the FIRST read carries a hint: a hint on every poll
+ * queued a new verification each time, so "pending" never cleared and the wait ran into
+ * its time-out although the server had long verified (seen in the live run of 2026-10-03).
+ */
 async function waitTerms(ctx: Ctx, what: string, done: (v: TermsVerdict) => boolean): Promise<{ ok: boolean; last: TermsVerdict | undefined; ms: number }> {
   const watch = ctx.terms!;
+  let hinted = false;
   ctx.history?.block('the server\'s fee verifier is reading this wallet\'s order history on SoDEX (it needs the same four-a-minute budget)');
   try {
     const r = await pollUntil({
       timeoutMs: ctx.cfg.timeouts.verifierMinutes * 60_000,
       intervalMs: 10_000,
-      probe: async () => (await requestTerms(watch, ctx.owner, { hint: true })).verdict,
+      probe: async () => {
+        const hint = !hinted;
+        hinted = true;
+        return (await requestTerms(watch, ctx.owner, { hint })).verdict;
+      },
       done,
       progressEveryMs: 30_000,
       progress: (v, ms) =>
@@ -168,9 +178,7 @@ export async function stepBuilderTiers(ctx: Ctx): Promise<void> {
     return x;
   };
   let m = await fresh();
-  if ((await openOn(ctx, m)).length || (await positionOf(ctx, m.sym.name))) {
-    throw new SafetyStop(`the account already has open orders or a position on ${m.sym.name} - this step needs that market to itself`);
-  }
+  await clearLeftovers(ctx, m, 'builder-tiers');
   const unit = marketQty(m, 10);
   const unitUsd = approx(unit) * approx(m.ask);
   await ensurePerpsCollateral(ctx, String(Math.max(approx(cfg.orders.perpsCollateral), Math.ceil(unitUsd * 0.6 + 3))));
@@ -495,7 +503,8 @@ async function cheats(ctx: Ctx, x: CheatInput): Promise<void> {
   // One verification for everything since the baseline.
   const ref = (await requestTerms(ctx.terms!, owner, { hint: true })).verdict.answer.issued ?? Date.now();
   rec.line(`hinting, then waiting up to ${dur(ctx.cfg.timeouts.verifierMinutes * 60_000)} for the server to verify everything since it had $${before} of perps volume`, 5);
-  const w = await waitTerms(ctx, 'the server to verify the cheating orders', (v) => v.verified && !!v.answer.volume && !v.answer.volume.pending && (v.answer.volume.verifiedAt ?? 0) > ref);
+  // Verified after the hint is enough: a verification that is queued again does not hide one that finished.
+  const w = await waitTerms(ctx, 'the server to verify the cheating orders', (v) => v.verified && !!v.answer.volume && (v.answer.volume.verifiedAt ?? 0) > ref);
   const v = w.last;
   if (!w.ok || !v || !v.answer.volume) {
     const why = `the server did not finish a verification within ${dur(w.ms)} (last: verified at ${v?.answer.volume?.verifiedAt ?? '?'}, pending ${String(v?.answer.volume?.pending ?? '?')})`;

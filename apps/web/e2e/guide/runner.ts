@@ -621,6 +621,8 @@ export interface LiveView {
   startedAt: string | null;
   finishedAt: string | null;
   steps: LiveStep[];
+  /** Every check of the run with the step it belongs to (only what `retestSteps` needs). */
+  checks: Array<{ id: string; step: string | null; status: string }>;
   selectedSteps: string[];
   spend: { costUsd: number; sentAwayUsd: number } | null;
   maxSpendUsd: number | null;
@@ -671,6 +673,11 @@ export function readLiveReport(json: unknown): LiveView | null {
     startedAt: text(r.startedAt),
     finishedAt: text(r.finishedAt),
     steps,
+    checks: (Array.isArray(r.checks) ? r.checks : []).flatMap((c) => {
+      const o = obj(c);
+      const id = text(o?.id);
+      return o && id ? [{ id, step: text(o.step), status: text(o.status) ?? 'unknown' }] : [];
+    }),
     selectedSteps: lines(r.selectedSteps),
     spend: spend && num(spend.costUsd) !== null && num(spend.sentAwayUsd) !== null ? { costUsd: num(spend.costUsd)!, sentAwayUsd: num(spend.sentAwayUsd)! } : null,
     maxSpendUsd: num(cfg?.maxSpendUsd),
@@ -717,6 +724,21 @@ export function resumeSteps(view: Pick<LiveView, 'steps' | 'selectedSteps'>, ord
   const first = inOrder.findIndex((s) => !done.has(s));
   if (first < 0) return { stoppedAt: null, remaining: [] };
   return { stoppedAt: inOrder[first]!, remaining: inOrder.slice(first).filter((s) => !done.has(s)) };
+}
+
+/**
+ * What the next run of this wallet has to do: every step that did not end "ok", and every step
+ * with a check that failed or was not run (a step can end "ok" with its fee checks unjudged) -
+ * in the runner's order, without the steps the run's own plan skipped. A step that passed whole
+ * is not repeated: its money moved already.
+ */
+export function retestSteps(view: Pick<LiveView, 'steps' | 'selectedSteps' | 'checks'>, order: readonly string[], plannedSkips: ReadonlySet<string> = new Set()): string[] {
+  const ok = new Set(view.steps.filter((s) => s.status === 'ok' || s.status === 'skipped').map((s) => s.id));
+  const open = new Set(view.checks.filter((c) => c.step && (c.status === 'fail' || c.status === 'not-run')).map((c) => c.step!));
+  const selected = view.selectedSteps.length ? view.selectedSteps : [...order];
+  return [...order.filter((s) => selected.includes(s)), ...selected.filter((s) => !order.includes(s))]
+    .filter((s) => !plannedSkips.has(s) || view.steps.some((x) => x.id === s && x.status !== 'skipped'))
+    .filter((s) => !ok.has(s) || open.has(s));
 }
 
 /** The steps a run's own plan said it would skip (from the `plan` inside its report). */

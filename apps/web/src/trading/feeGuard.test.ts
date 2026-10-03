@@ -217,16 +217,16 @@ test('TWAP cannot carry a builder: refused in a build that requires it, on perps
   stops(EVERY.newTwapOrder, /TWAP orders are not available here/);
 });
 
-test('G6: a change request is sent only where it is known to keep the builder - modify yes, replace not yet', () => {
-  // The two constants, as they stand until the live run says otherwise.
+test('G6: a change request is sent where it is known to keep the builder - modify and replace (both proven live)', () => {
+  // The live run of 2026-10-03 showed both keep the builder at the fee the order carried.
   assert.equal(MODIFY_KEEPS_BUILDER, true, 'modify changes the order in place (same order id)');
-  assert.equal(REPLACE_KEEPS_BUILDER, false, 'replace creates a new order from a body with no builder field');
+  assert.equal(REPLACE_KEEPS_BUILDER, true, 'the replaced order still names the builder (live run, spot and perps)');
   passes(EVERY.modifyOrder);
-  stops(EVERY.replaceOrder, /may not carry the Valuescan builder fee/);
-  stops(spotActions.replaceOrder(AID, [{ symbolID: 7, clOrdID: 'rp-2', origOrderID: 1, price: '84001' }]), /may not carry the Valuescan builder fee/);
+  passes(EVERY.replaceOrder);
+  passes(spotActions.replaceOrder(AID, [{ symbolID: 7, clOrdID: 'rp-2', origOrderID: 1, price: '84001' }]));
   assert.equal(mustRecreate('modifyOrder', 'perps'), false);
-  assert.equal(mustRecreate('replaceOrder', 'perps'), true);
-  assert.equal(mustRecreate('replaceOrder', 'spot'), true);
+  assert.equal(mustRecreate('replaceOrder', 'perps'), false);
+  assert.equal(mustRecreate('replaceOrder', 'spot'), false);
   // Not required, not charged, or no builder: SoDEX's own request is used as it always was.
   configure(OPTIONAL);
   passes(EVERY.replaceOrder);
@@ -234,7 +234,7 @@ test('G6: a change request is sent only where it is known to keep the builder - 
   configure(PERPS_ONLY);
   passes(spotActions.replaceOrder(AID, [{ symbolID: 7, clOrdID: 'rp-3', origOrderID: 1, price: '84001' }]));
   assert.equal(mustRecreate('replaceOrder', 'spot'), false);
-  assert.equal(mustRecreate('replaceOrder', 'perps'), true);
+  assert.equal(mustRecreate('replaceOrder', 'perps'), false);
   configure(null);
   passes(EVERY.replaceOrder);
   assert.equal(mustRecreate('replaceOrder', 'perps'), false);

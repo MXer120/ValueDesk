@@ -536,14 +536,22 @@ test('declining the approval: a required build does not enable trading at all; o
 
 // --- G6: changing an order ------------------------------------------------------------------------------
 
-test('G6, required build: a REPLACE is made as cancel + new order with the builder - SoDEX\'s replace request is not sent', async () => {
+test('G6, required build: a REPLACE is SoDEX\'s replace request (proven live to keep the builder)', async () => {
+  await enable();
+  await termsSettled();
+  await perps('84000');
+  world.sent = [];
+  await replaceOrder('perps', { symbol: 'BTC-USD', origOrderID: world.open.perps[0]!.orderID, price: '83000.5' });
+  assert.deepEqual(writes().map((s) => `${s.method} ${s.path}`), ['POST /api/v1/perps/trade/orders/replace']);
+});
+
+test('G6, cancel + new order (for a change request not known to keep the builder): the new order carries the builder', async () => {
   await enable();
   await termsSettled();
   await perps('84000');
   const original = world.open.perps[0]!;
   world.sent = [];
-  const r = await replaceOrder('perps', { symbol: 'BTC-USD', origOrderID: original.orderID, price: '83000.5' });
-  assert.equal((r as { recreated?: boolean }).recreated, true);
+  await recreateOrder('perps', { symbol: 'BTC-USD', orderID: original.orderID }, { price: '83000.5' });
   const w = writes();
   assert.deepEqual(w.map((s) => `${s.method} ${s.path}`), ['DELETE /api/v1/perps/trade/orders', 'POST /api/v1/perps/trade/orders'], 'cancel, then a new order');
   assert.equal(w.some((s) => /\/replace$/.test(s.path)), false);
@@ -568,7 +576,7 @@ test('G6, required build, spot: the same - and a partly filled order is recreate
   original.executedQty = '0.004';
   original.status = 'PARTIALLY_FILLED';
   world.sent = [];
-  await replaceOrder('spot', { symbol: 'BTC-USD', origClOrdID: original.clOrdID, price: '85000' });
+  await recreateOrder('spot', { symbol: 'BTC-USD', clOrdID: original.clOrdID }, { price: '85000' });
   const w = writes();
   assert.deepEqual(w.map((s) => `${s.method} ${s.path}`), ['DELETE /api/v1/spot/trade/orders/batch', 'POST /api/v1/spot/trade/orders/batch']);
   assert.equal(w[1]!.body.orders[0].quantity, '0.006', '0.01 - 0.004');
@@ -684,16 +692,16 @@ const limitRow = (extra: Partial<OrderRow> = {}): OrderRow => ({
 });
 const writeLines = () => writes().map((s) => `${s.method} ${s.path}`);
 
-test('changeRoute: a TP/SL is modified; a plain limit GTC/GTX is replaced - or cancel + new where the builder is required; anything else is refused', () => {
+test('changeRoute: a TP/SL is modified; a plain limit GTC/GTX is replaced (the builder survives a replace, proven live); anything else is refused', () => {
   // The required build of beforeEach.
   assert.equal(changeRoute('perps', tpslRow(), { stopPrice: '91000' }), 'modify', 'a position take-profit');
   assert.equal(changeRoute('perps', tpslRow({ stopType: 'STOP_LOSS', stopPrice: '80000', positionID: undefined, reduceOnly: false }), { stopPrice: '79000' }), 'modify', 'a stand-alone stop');
   assert.equal(changeRoute('perps', tpslRow({ primaryOrderID: 12 }), { stopPrice: '91000' }), 'modify', 'an exit attached to an entry');
-  assert.equal(changeRoute('perps', limitRow(), { price: '83000' }), 'recreate');
-  assert.equal(changeRoute('perps', limitRow({ timeInForce: 'GTX', status: 'PARTIALLY_FILLED' }), { quantity: '0.02' }), 'recreate');
-  assert.equal(changeRoute('spot', limitRow(), { price: '83000' }), 'recreate');
+  assert.equal(changeRoute('perps', limitRow(), { price: '83000' }), 'replace');
+  assert.equal(changeRoute('perps', limitRow({ timeInForce: 'GTX', status: 'PARTIALLY_FILLED' }), { quantity: '0.02' }), 'replace');
+  assert.equal(changeRoute('spot', limitRow(), { price: '83000' }), 'replace');
   // The stream's numeric enums read like REST's names.
-  assert.equal(changeRoute('perps', limitRow({ type: 1 as never, timeInForce: 4 as never, status: 1 as never }), { price: '83000' }), 'recreate');
+  assert.equal(changeRoute('perps', limitRow({ type: 1 as never, timeInForce: 4 as never, status: 1 as never }), { price: '83000' }), 'replace');
   assert.equal(changeRoute('perps', tpslRow({ stopType: 2 as never }), { stopPrice: '91000' }), 'modify');
   // Where no builder is required, SoDEX's own replace request is used.
   configure(OPTIONAL);
@@ -703,7 +711,7 @@ test('changeRoute: a TP/SL is modified; a plain limit GTC/GTX is replaced - or c
   assert.equal(changeRoute('perps', tpslRow(), { stopPrice: '91000' }), 'modify');
   configure({ ...REQUIRED, fee: { perps: 20, spot: 0 } });
   assert.equal(changeRoute('spot', limitRow(), { price: '83000' }), 'replace', 'an engine the build does not charge on');
-  assert.equal(changeRoute('perps', limitRow(), { price: '83000' }), 'recreate');
+  assert.equal(changeRoute('perps', limitRow(), { price: '83000' }), 'replace');
   configure(REQUIRED);
   const refused = (engine: Engine, row: OrderRow, change: Parameters<typeof changeRoute>[2], why: RegExp) =>
     assert.throws(() => changeRoute(engine, row, change), (e: unknown) => e instanceof OrderValidationError && why.test(e.message), String(why));
@@ -717,7 +725,7 @@ test('changeRoute: a TP/SL is modified; a plain limit GTC/GTX is replaced - or c
   refused('spot', tpslRow(), { stopPrice: '91000' }, /spot has no take-profit or stop-loss orders/);
 });
 
-test('changeOrder, required build: a plain limit order is changed as cancel + new order WITH the builder - SoDEX\'s replace request is never sent', async () => {
+test('changeOrder, required build: a plain limit order is changed with SoDEX\'s replace request (the builder survives it, proven live)', async () => {
   await enable();
   await termsSettled();
   await perps('84000');
@@ -725,14 +733,10 @@ test('changeOrder, required build: a plain limit order is changed as cancel + ne
   world.sent = [];
   // What the chart sends: the dragged price, and the size verbatim.
   const r = await changeOrder('perps', { symbol: 'BTC-USD', orderID: o.orderID }, { price: '83000.5', quantity: '0.01' });
-  assert.equal(r.route, 'recreate');
-  assert.deepEqual(writeLines(), ['DELETE /api/v1/perps/trade/orders', 'POST /api/v1/perps/trade/orders']);
+  assert.equal(r.route, 'replace');
+  assert.deepEqual(writeLines(), ['POST /api/v1/perps/trade/orders/replace']);
   const read = world.sent.findIndex((s) => s.method === 'GET' && /\/orders\?symbol=/.test(s.path));
   assert.ok(read >= 0 && read < world.sent.indexOf(writes()[0]!), 'the order is read from SoDEX before anything is written');
-  const placed = writes()[1]!.body;
-  assert.deepEqual(placed.builder, ours(20));
-  assert.deepEqual([placed.orders[0].price, placed.orders[0].quantity, placed.orders[0].side, placed.orders[0].modifier, placed.orders[0].reduceOnly], ['83000.5', '0.01', 1, 1, false]);
-  assert.deepEqual(world.open.perps.map((x) => [x.price, x.builder]), [['83000.5', { builderID: BID, feeRate: 20 }]]);
 });
 
 test('changeOrder: a take-profit / stop-loss is changed with SoDEX\'s modify request - one request, by order id only, no cancel', async () => {

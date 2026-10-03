@@ -241,10 +241,10 @@ test('the builder fee and its tiers, end to end: default fee, verified volume, t
   ]) {
     assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.status} - ${byId.get(id)?.detail}\n${show(r)}`);
   }
-  // G6 against a fake that drops the builder on a replace: the app's constant (false) is right - a pass.
+  // G6 against a fake that keeps the builder on a replace (as SoDEX does, proven live): the app's constant (true) is right - a pass.
   assert.equal(byId.get('builder-replace-keeps-builder')?.status, 'pass', byId.get('builder-replace-keeps-builder')?.detail);
-  // The app changes a resting limit order as cancel + new order (REPLACE_KEEPS_BUILDER is false); the new order carries the builder.
-  assert.match(byId.get('spot-limit-change-price')!.detail, /cancel \+ new order/);
+  // The app changes a resting limit order with SoDEX's replace (REPLACE_KEEPS_BUILDER is true); the replacement keeps the builder.
+  assert.match(byId.get('spot-limit-change-price')!.detail, /with SoDEX's replace request/);
   // The fee went 20 -> 15 -> 20, and the orders followed it.
   const perps = w.orderBodies.filter((o) => o.engine === 'perps').map((o) => /"builder":\{"id":\d+,"fee":(\d+)\}/.exec(o.raw)?.[1] ?? 'none');
   assert.ok(perps.includes('20') && perps.includes('15'), `perps order fees: ${perps.join(',')}`);
@@ -260,15 +260,45 @@ test('the builder fee and its tiers, end to end: default fee, verified volume, t
   assert.ok(w.approvalBodies.some((b) => /"maxFeeRate":0}$/.test(b)), 'the revocation was signed');
 });
 
-test('a fake whose replace KEEPS the builder: the run reports the finding and the constant to flip', async () => {
+test('a fake whose replace DROPS the builder: the run reports the finding and the constant to flip', async () => {
   const r = await run({ ...CONFIG, builder: BUILDER }, { only: ['deposit-external', 'enable-trading', 'orders-spot'], setup: (w) => {
     w.tiers = TIERS;
     w.builderId = BUILDER_ID;
-    w.replaceKeepsBuilder = true;
+    w.replaceKeepsBuilder = false;
   } });
   const c = r.byId.get('builder-replace-keeps-builder');
   assert.equal(c?.status, 'finding', c?.detail);
-  assert.match(c!.detail, /set REPLACE_KEEPS_BUILDER = true/);
+  assert.match(c!.detail, /DROPPED/);
+  assert.match(c!.detail, /set REPLACE_KEEPS_BUILDER = false/);
+});
+
+/** A resting perps BTC-USD buy far below the market, as a stopped earlier run leaves one. */
+function leftover(w: World, clOrdID: string): void {
+  const now = Date.now();
+  w.orders.push({
+    engine: 'perps', orderID: w.nextId++, clOrdID, symbolID: 1, symbol: 'BTC-USD', side: 'BUY', type: 'LIMIT', timeInForce: 'GTC',
+    price: '50000', origQty: '0.0002', funds: null, executedQty: '0', executedValue: '0', status: 'NEW', builder: null, reduceOnly: false,
+    stopPrice: null, stopType: null, triggerType: null, modifier: 1, primaryOrderID: null, createdAt: now, updatedAt: now, locked: 0n,
+    signer: '0x00000000000000000000000000000000000000aa', keyName: 'an earlier run',
+  });
+}
+
+test('a resumed run: the orders a stopped run left on the market (placed by the app) are cancelled first, and the step runs', async () => {
+  const r = await run(CONFIG, { only: ['deposit-external', 'enable-trading', 'orders-perps'], setup: (w) => ['vs-old-1', 'vs-old-2', 'rp-old-3'].forEach((id) => leftover(w, id)) });
+  const step = r.report.steps.find((s: { id: string }) => s.id === 'orders-perps');
+  assert.equal(step?.status, 'ok', show(r));
+  assert.ok(r.lines.some((l) => /an earlier run left 3 open order\(s\) on perps BTC-USD - cleared through the app/.test(l)), show(r));
+  const old = r.w.orders.filter((o) => /-old-/.test(o.clOrdID));
+  assert.equal(old.length, 3);
+  assert.ok(old.every((o) => o.status !== 'NEW' && o.status !== 'PARTIALLY_FILLED'), old.map((o) => `${o.clOrdID} ${o.status}`).join(', '));
+});
+
+test('an open order the app did not place stops the step - it is the owner\'s, nothing of it is cancelled', async () => {
+  const r = await run(CONFIG, { only: ['deposit-external', 'enable-trading', 'orders-perps'], setup: (w) => leftover(w, 'web-123') });
+  const step = r.report.steps.find((s: { id: string }) => s.id === 'orders-perps');
+  assert.notEqual(step?.status, 'ok');
+  assert.ok(r.lines.some((l) => /that Valuescan did not place \(web-123\)/.test(l)), r.lines.slice(-30).join('\n'));
+  assert.equal(r.w.orders.find((o) => o.clOrdID === 'web-123')!.status, 'NEW');
 });
 
 test('live refuses to start - nothing is signed or sent - when the backend and the on-chain registry disagree on the deposit address', async () => {

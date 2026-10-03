@@ -88,10 +88,11 @@ G5. **No terms, no discount.** Terms missing, unverifiable, signed by a key that
 G6. **Changing an order.** SoDEX's modify and replace requests have no builder field. Whether the changed
     order keeps the builder of the original is checked by the live run (§8). `REPLACE_KEEPS_BUILDER` and
     `MODIFY_KEEPS_BUILDER` are constants in one place: `true` (proven) uses the request; `false` or unknown
-    does the change as cancel + new order with the builder. Until the live run has proven them: modify (same
-    order id) is assumed to keep it, replace is not. The constants are in `trading/feeGuard.ts`
-    (`MODIFY_KEEPS_BUILDER = true`, `REPLACE_KEEPS_BUILDER = false`); the gate refuses the request itself
-    where the constant is false, so no path can send it by mistake.
+    does the change as cancel + new order with the builder. The live run of 2026-10-03 proved both: a
+    modified and a replaced order keep the builder of the original, on spot and perps. The constants are in
+    `trading/feeGuard.ts` (`MODIFY_KEEPS_BUILDER = true`, `REPLACE_KEEPS_BUILDER = true`); should SoDEX
+    change that, the run reports it and flipping the constant to false makes the gate refuse the request
+    itself, so no path can send it by mistake.
     Cancel + new order is two requests and not atomic. Before the cancel the order is read from SoDEX,
     rebuilt, validated against the market's rules and its builder decided; an order that cannot be rebuilt
     exactly (attached exits, sized in funds, side or type not listed) is refused and left as it is. If

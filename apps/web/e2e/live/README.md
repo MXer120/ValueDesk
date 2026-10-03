@@ -227,10 +227,11 @@ is `skipped`. To test the Valuescan builder fee (docs/BUILDER-CODES.md, docs/BUI
   and a wallet flagged `underpaid` stays on the default fee. To run the tier test again with the same
   wallet, reset it on the server first: `npx tsx tools/builderTiers.ts forget --address <wallet>` (in
   `apps/server`). The plan warns when a wallet is already below the default or flagged.
-- **G6** (does a changed order keep its builder?): the app changes a resting limit order as cancel + new
-  order while `REPLACE_KEEPS_BUILDER` is false. To observe SoDEX's own replace, ONE replace per engine is
-  made by the app with its builder set to OPTIONAL for exactly that call (said so in the console); the
-  verdict names the constant to flip. The same for modify.
+- **G6** (does a changed order keep its builder?): the app changes a resting limit order with SoDEX's
+  replace (`REPLACE_KEEPS_BUILDER` is true - proven live on 2026-10-03) and the run checks that the
+  replacement's record still names the builder. Were the constant false, the app would change the order as
+  cancel + new order, and ONE replace per engine would be made with the builder OPTIONAL for exactly that
+  call to observe SoDEX's own replace. Either way the verdict names the constant to flip. The same for modify.
 
 ## What it costs (default config, as of the plan run)
 

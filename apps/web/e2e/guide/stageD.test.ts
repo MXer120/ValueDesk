@@ -261,7 +261,8 @@ test('the run stops in the middle: where the funds are, what is left, how to res
     assert.equal(fake.ackHistory.at(-1), false);
     const screen = k.flat();
     for (const want of ['THE RUN STOPPED at the step "withdraw-external"', 'Where the funds are now:', 'SoDEX Spot', 'IN FLIGHT: withdrawal of 5 USDC', 'TO RESUME', 'choose "Resume the earlier run"', `--confirm ${ADDRESS} --only withdraw-external,extra-withdrawals`]) assert.ok(screen.includes(want), want);
-    assert.match(k.ctx.shared.next.join('\n'), /stopped at "withdraw-external"[\s\S]*steps left: withdraw-external, extra-withdrawals/);
+    assert.ok(screen.includes('RUN-LIVE-TESTS.cmd --go again'), 'the --go way to resume');
+    assert.match(k.ctx.shared.next.join('\n'), /stopped at "withdraw-external"[\s\S]*--go[\s\S]*steps to run again: withdraw-external, extra-withdrawals/);
     assert.equal(r.items.find((i) => i.title === 'withdraw-external')!.status, 'FAIL');
   } finally {
     k.cleanup();
@@ -287,6 +288,44 @@ test('a wallet that already has a SoDEX account: resuming the earlier run passes
     assert.deepEqual(run.inv.only, ['withdraw-external', 'extra-withdrawals']);
     assert.equal(run.config!.allowExistingAccount, true);
     assert.deepEqual(run.argv.slice(run.argv.indexOf('--only'), run.argv.indexOf('--only') + 2), ['--only', 'withdraw-external,extra-withdrawals']);
+  } finally {
+    k.cleanup();
+  }
+});
+
+test('--go on a wallet with an earlier stopped run: no menu - only what did not pass or was not run, and the fee test starts on a reset wallet', async () => {
+  const known = { lines: ['20:00:00  SoDEX account     #4711'] };
+  const earlier = liveReport({
+    stoppedAt: 'withdraw-external',
+    checks: [
+      { id: 'deposit-usdc', step: 'deposit-external', status: 'pass' },
+      // The fee test ended "ok" but a check in it failed: it runs again.
+      { id: 'builder-underpaid-not-counted', step: 'builder-tiers', status: 'fail' },
+      { id: 'orders-limit', step: 'orders', status: 'pass' },
+    ],
+  });
+  earlier.wallet = ADDRESS.toLowerCase();
+  const steps = earlier.steps as Array<Record<string, unknown>>;
+  steps.splice(steps.findIndex((s) => s.id === 'orders'), 0, { id: 'builder-tiers', title: 'builder-tiers', status: 'ok' });
+  earlier.selectedSteps = ['deposit-external', 'enable-trading', 'builder-tiers', 'orders', 'withdraw-external', 'extra-withdrawals', 'cleanup'];
+  const k = kit({ argv: ['--stages', 'D'], lines: ['', 'y', '', 'YES', ADDRESS], hidden: [KEY] });
+  (k.ctx.args as { go: boolean }).go = true;
+  const fake = new FakeRunner({
+    capabilities: { text: JSON.stringify({ steps: ['deposit-external', 'enable-trading', 'builder-tiers', 'orders', 'withdraw-external', 'extra-withdrawals', 'cleanup'], profiles: [], flags: [] }), code: 0 },
+    plans: [{ report: planReport(), code: 2 }, { ...plan({ funded: true }), ...known }],
+    live: live(),
+    earlier: [['mem://earlier-live.json', earlier]],
+  });
+  try {
+    const r = await runStageD(k.ctx, fake);
+    assert.equal(r.status, 'PASS', r.reason);
+    const screen = k.flat();
+    assert.ok(!screen.includes('What now?'), 'no menu under --go');
+    assert.match(screen, /Running again ONLY what did not pass or was not run: builder-tiers, withdraw-external, extra-withdrawals/);
+    assert.deepEqual(fake.lives[0]!.inv.only, ['builder-tiers', 'withdraw-external', 'extra-withdrawals']);
+    assert.equal(fake.lives[0]!.config!.allowExistingAccount, true);
+    assert.deepEqual(fake.forgets.map((a) => a.toLowerCase()), [ADDRESS.toLowerCase()], 'the local server forgets the TEST wallet before the fee test');
+    assert.match(screen, /fee record of this test wallet was reset \(7 record\(s\) removed\)/);
   } finally {
     k.cleanup();
   }

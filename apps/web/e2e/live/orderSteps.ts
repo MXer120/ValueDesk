@@ -15,6 +15,7 @@ import { CheckFailure, SafetyStop, armed, isDefiniteRefusal, scenario, type Ctx 
 import type { Engine } from './fees';
 import type { Expectation } from './guard';
 import {
+  clearLeftovers,
   cancel,
   cancelExpect,
   crossingBuyPrice,
@@ -476,8 +477,7 @@ export async function stepOrdersSpot(ctx: Ctx): Promise<void> {
 
   const first = await readMarket('spot', ref);
   rememberMarket(first);
-  const stale = await openOn(ctx, first);
-  if (stale.length) throw new SafetyStop(`the account already has ${stale.length} open order(s) on ${first.sym.name} - this step needs that market to itself (cancel them in the app first)`);
+  await clearLeftovers(ctx, first, 'orders-spot');
   const base = baseCoinOf(ctx, first);
   const bdp = base.valuechain.decimals;
 
@@ -703,9 +703,7 @@ export async function stepOrdersPerps(ctx: Ctx): Promise<void> {
   };
   let m = await fresh();
   const name = `perps ${m.sym.name}`;
-  if ((await openOn(ctx, m)).length || (await positionOf(ctx, m.sym.name))) {
-    throw new SafetyStop(`the account already has open orders or a position on ${m.sym.name} - this step needs that market to itself (close them in the app first)`);
-  }
+  await clearLeftovers(ctx, m, 'orders-perps');
   const start = await symbolConfig(ctx, m);
   const L0 = start.leverage;
   const maxLev = m.sym.maxLeverage ?? L0;

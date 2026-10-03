@@ -16,10 +16,11 @@
  *     funds it is run with --registry-only, so nothing is asked of SoDEX but
  *     reads.
  */
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { checkStop, heading, logWriter, type Ctx } from './context';
 import { applyChoices, configProblems, describeConfig, loadExample, loadExisting, readBuilderKeyNames, receiversSet, saveConfig, type BuilderKeyNames, type ConfigChoices, type Json, type ReceiverValue } from './config';
+import { lastJsonLine } from './builder';
 import { addressOfKey, normaliseKey, sameAddress } from './key';
 import { childEnv } from './proc';
 import { askValue, choose, confirm, pressEnter, typeExactly } from './prompt';
@@ -45,6 +46,7 @@ import {
   refusalLines,
   resumeCommand,
   resumeSteps,
+  retestSteps,
   runnerArgs,
   stepItemStatus,
   stripClock,
@@ -89,6 +91,12 @@ export interface DDeps {
   liveReports(): string[];
   loadConfig(): { existing: Json | null; example: Json | null; problem: string | null; names: BuilderKeyNames };
   saveConfig(path: string, cfg: Json): void;
+  /**
+   * apps/server/tools/builderTiers.ts `forget --address` for the TEST wallet: the local server's
+   * record of it (counted volume, flags) is removed, so the fee test can show the default fee again.
+   * Absent: not available here.
+   */
+  forgetTierWallet?(address: string): Promise<{ ok: boolean; detail: string }>;
 }
 
 const PLAN_TIMEOUT_MS = 6 * 60_000;
@@ -132,6 +140,17 @@ export function realDDeps(ctx: Ctx): DDeps {
       };
     },
     saveConfig,
+    forgetTierWallet: async (address) => {
+      const server = join(ctx.paths.repo, 'apps', 'server');
+      if (!existsSync(join(server, 'tools', 'builderTiers.ts'))) return { ok: false, detail: 'apps/server/tools/builderTiers.ts is not in this checkout' };
+      if (!ctx.tools.tsxCli) return { ok: false, detail: 'tsx is not installed (run "npm install" in the repository)' };
+      const outLines: string[] = [];
+      const errLines: string[] = [];
+      const r = await ctx.run(ctx.tools.node, [ctx.tools.tsxCli, 'tools/builderTiers.ts', 'forget', '--address', address], { cwd: server, env: childEnv(ctx.env), timeoutMs: 120_000, onLine: (l, from) => (from === 'out' ? outLines : errLines).push(l) });
+      const j = lastJsonLine(outLines.join('\n'));
+      if (r.code !== 0 || !j) return { ok: false, detail: r.startError ?? (typeof j?.error === 'string' ? j.error : errLines.filter((l) => l.trim()).slice(-2).join(' ').slice(0, 300) || `the tool exited with code ${r.code}`) };
+      return { ok: true, detail: j.dbExists === false ? 'the server had no record of it' : `${typeof j.total === 'number' ? j.total : '?'} record(s) removed` };
+    },
     runner: async (inv, o) => {
       const lines: string[] = [];
       const log = logWriter(ctx, o.logName);
@@ -688,14 +707,20 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
     say(`This wallet already has a SoDEX account (#${plan.accountId}). The test expects a brand-new wallet.`);
     if (only) {
       say(`You started the guide with --only ${only.join(',')}: those steps are run with this account. Each of them moves its configured amount again.`);
+    } else if (args.go && earlier) {
+      // --go: the owner asked for no questions. What passed whole is not repeated; the rest runs again.
+      only = earlier.retest;
+      say(`--go: the earlier run of this wallet did not pass everything. Running again ONLY what did not pass or was not run: ${only.join(', ')}.`);
+      say('Steps that passed whole (their money moved already) are left out. The earlier report:');
+      out.line(`      ${earlier.path}`);
     } else {
-      if (earlier) say(`An earlier live run with this wallet stopped at the step "${earlier.resume.stoppedAt}". It can be resumed from there (${earlier.resume.remaining.join(', ')}).`);
+      if (earlier) say(`An earlier live run with this wallet stopped at the step "${earlier.resume.stoppedAt}". What did not pass or was not run can be run again (${earlier.retest.join(', ')}).`);
       // The default is to stop, so `--yes` (which only ever takes defaults) never goes on with a used wallet.
       const pick = await choose(
         ctx.ask,
         'What now?',
         [
-          ...(earlier ? [{ key: 'resume' as const, label: `Resume the earlier run: ${earlier.resume.remaining.join(', ')}` }] : []),
+          ...(earlier ? [{ key: 'resume' as const, label: `Resume the earlier run: ${earlier.retest.join(', ')}` }] : []),
           { key: 'continue' as const, label: 'Run the whole test with this wallet anyway (the first deposit pays no activation fee)' },
           { key: 'stop' as const, label: 'Stop - I will use a brand-new wallet' },
         ],
@@ -703,12 +728,13 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
       );
       if (pick === 'stop') return end('SKIPPED', 'the wallet already has a SoDEX account - use a brand-new wallet');
       if (pick === 'resume' && earlier) {
-        only = earlier.resume.remaining;
+        only = earlier.retest;
         say('Each resumed step moves its configured amount again. Look at the earlier report if you are not sure what already happened:');
         out.line(`      ${earlier.path}`);
       }
     }
     updateConfig(deps, cfg, { allowExistingAccount: true });
+    if (only?.includes('builder-tiers')) await resetTierWallet(ctx, deps, cfg.config, held.address);
     plan = await planOnce(ctx, deps, { config: cfg.path, key: held.key, throwaway: false, registryOnly: true, profile, only, logName: 'D-plan.log' });
   }
   showPlan(ctx, plan, { steps: false });
@@ -857,6 +883,8 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   }
   // It stopped. Where the funds are is in the runner's output above and in the summary; say how to go on.
   const resume = view ? resumeSteps(view, caps.steps, plannedSkips(raw)) : { stoppedAt: null, remaining: [] as string[] };
+  // What a resume runs: every step that did not pass whole (a step can end "ok" with checks unjudged).
+  const again = view ? retestSteps(view, caps.steps, plannedSkips(raw)) : [];
   out.line();
   out.line(`   THE RUN STOPPED${resume.stoppedAt ? ` at the step "${resume.stoppedAt}"` : ''} (exit code ${live.code}${live.code === 130 ? ': interrupted' : live.code === 2 ? ': refused before anything was signed' : ''}).`);
   if (view?.whereFunds.length) {
@@ -866,15 +894,16 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   } else {
     say('Where the funds are: see the runner\'s output above ("Where the funds are now"). If it could not read the balances, connect the wallet in the app and look there.');
   }
-  if (resume.remaining.length) {
+  if (again.length) {
     out.line();
     out.line('   TO RESUME, after fixing the cause:');
+    out.line('     - start RUN-LIVE-TESTS.cmd --go again and enter the same key: it runs only what did not pass or was not run; or');
     out.line('     - start RUN-LIVE-TESTS.cmd again, enter the same key, and choose "Resume the earlier run"; or');
     out.line('     - by hand (the guide switches the real-funds acknowledgement off after every run, so set');
     out.line('       "acknowledgeRealFunds": true and "allowExistingAccount": true in the config first):');
-    for (const l of resumeCommand(held.address, resume.remaining)) out.line(`         ${l}`);
+    for (const l of resumeCommand(held.address, again)) out.line(`         ${l}`);
     say('Each resumed step moves its configured amount again - check the report before repeating a step that had already sent something.');
-    ctx.shared.next.push(`The live run stopped at "${resume.stoppedAt}". Fix the cause, then start RUN-LIVE-TESTS.cmd again with the same wallet and choose "Resume the earlier run" (steps left: ${resume.remaining.join(', ')}).`);
+    ctx.shared.next.push(`The live run stopped at "${resume.stoppedAt}". Fix the cause, then start RUN-LIVE-TESTS.cmd --go again with the same wallet (steps to run again: ${again.join(', ')}).`);
   } else {
     ctx.shared.next.push('The live run did not finish. Read the runner\'s output in the log folder, fix the cause and start the guide again.');
   }
@@ -916,17 +945,52 @@ function finishPlanOnly(ctx: Ctx, p: Planned, items: Item[], notes: string[], en
   return end('PASS');
 }
 
-/** The newest earlier live run of this wallet that did not finish, and what is left of it. */
-function latestStoppedRun(deps: DDeps, address: string, caps: Capabilities): { path: string; resume: ReturnType<typeof resumeSteps> } | null {
+/**
+ * The newest earlier live run of this wallet that did not finish: where it stopped, and what has
+ * to run again (`retest`: every step that did not pass whole - runner.ts retestSteps).
+ */
+function latestStoppedRun(deps: DDeps, address: string, caps: Capabilities): { path: string; resume: ReturnType<typeof resumeSteps>; retest: string[] } | null {
   for (const path of deps.liveReports().slice(0, 20)) {
     const raw = deps.readJson(path);
     const v = readLiveReport(raw);
     if (!v || v.mode !== 'live' || !v.wallet || !sameAddress(v.wallet, address)) continue;
     if (v.exitCode === 0) return null; // the newest run of this wallet finished
     const resume = resumeSteps(v, caps.steps, plannedSkips(raw));
-    return resume.remaining.length ? { path, resume } : null;
+    const retest = retestSteps(v, caps.steps, plannedSkips(raw));
+    return retest.length ? { path, resume, retest } : null;
   }
   return null;
+}
+
+const isLocalOrigin = (origin: string): boolean => {
+  try {
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(origin).hostname);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The fee test runs again on a wallet the server already knows (its volume counted, flagged by the
+ * cheating orders): it could not show the default fee. The record of the TEST wallet is removed
+ * from the LOCAL server's ledger first (builderTiers.ts forget - the server reads the ledger on
+ * every request, no restart). Another backend's ledger is not on this computer: its command is shown.
+ */
+async function resetTierWallet(ctx: Ctx, deps: DDeps, config: Json, address: string): Promise<void> {
+  const backend = typeof config.backend === 'string' && config.backend ? config.backend : ctx.args.backend;
+  const cmd = `npx tsx tools/builderTiers.ts forget --address ${address}   (in apps/server, on the server's computer)`;
+  if (!isLocalOrigin(backend) || !deps.forgetTierWallet) {
+    ctx.out.say(`The fee test runs again: the server at ${backend} must forget this test wallet first, or the fee checks are skipped: ${cmd}`, '   ');
+    ctx.shared.next.push(`Before the next fee test with ${address}: ${cmd}`);
+    return;
+  }
+  const r = await deps.forgetTierWallet(address);
+  ctx.out.say(
+    r.ok
+      ? `The fee test runs again: the local server's fee record of this test wallet was reset (${r.detail}), so it starts on the default fee.`
+      : `The fee test runs again, but the local server's fee record of this test wallet could not be reset (${r.detail}) - the fee checks that need a fresh wallet are skipped. By hand: ${cmd}`,
+    '   ',
+  );
 }
 
 /**

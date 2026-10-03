@@ -216,10 +216,25 @@ export async function cancelOrder(engine: Engine, b: { symbol: string; orderID?:
 export async function cancelAll(engine: Engine, symbol?: string) {
   const s = requireSigner();
   const qs = symbol ? `?symbol=${encodeURIComponent((await symbolFor(engine, symbol)).name)}` : '';
-  const open = unwrapList<OpenOrderRef>(await readGateway(`/api/v1/${engine}/accounts/${s.meta.owner}/orders${qs}`), 'orders');
-  if (!open.length) return { cancelled: 0, result: null };
+  const listed = unwrapList<OpenOrderRef & { symbol?: string }>(await readGateway(`/api/v1/${engine}/accounts/${s.meta.owner}/orders${qs}`), 'orders');
+  if (!listed.length) return { cancelled: 0, result: null };
+  // The REST list names each order's market (`symbol: "BTC-USD"`) but not its numeric
+  // id, which the cancel request needs - without this nothing was cancelled at all
+  // (found by the live run: three resting orders stayed on the book).
+  const ids = new Map<string, number>();
+  const open: OpenOrderRef[] = [];
+  for (const o of listed) {
+    let symbolID = o.symbolID ?? o.si;
+    if (typeof symbolID !== 'number' && typeof o.symbol === 'string') {
+      if (!ids.has(o.symbol)) ids.set(o.symbol, (await symbolFor(engine, o.symbol)).id);
+      symbolID = ids.get(o.symbol);
+    }
+    open.push({ ...o, symbolID });
+  }
+  const actions = cancelManyActions(engine, s.meta.accountId, open);
+  if (!actions.length) throw new OrderValidationError('SoDEX listed open orders, but none could be matched to a market - nothing was cancelled. Reload and try again.');
   const results: unknown[] = [];
-  for (const action of cancelManyActions(engine, s.meta.accountId, open)) {
+  for (const action of actions) {
     const r = await signAndSend(action, 'cancel-all');
     checkBatch(r, 'cancel-all');
     results.push(r);

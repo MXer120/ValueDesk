@@ -60,12 +60,12 @@ const log = logger('trade');
  */
 export const MODIFY_KEEPS_BUILDER: boolean = true;
 /**
- * SoDEX's replace request cancels an order and creates a NEW one (new order
- * id) from a body with no builder field: not assumed to keep the builder. Set
- * to true when the live run has shown the replaced order still names it - the
- * request is then used as it is.
+ * SoDEX's replace request has no builder field. PROVEN by the live run of
+ * 2026-10-03 (check builder-replace-keeps-builder): on spot and perps the
+ * replaced order still names the builder at the fee it carried, so the request
+ * is used as it is.
  */
-export const REPLACE_KEEPS_BUILDER: boolean = false;
+export const REPLACE_KEEPS_BUILDER: boolean = true;
 
 const KEEPS_BUILDER: Readonly<Record<'modifyOrder' | 'replaceOrder', boolean>> = {
   modifyOrder: MODIFY_KEEPS_BUILDER,

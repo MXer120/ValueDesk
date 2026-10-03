@@ -33,6 +33,7 @@ import {
   refusalLines,
   resumeCommand,
   resumeSteps,
+  retestSteps,
   runnerArgs,
   stepItemStatus,
   stripClock,
@@ -291,4 +292,33 @@ test('the runner\'s fee table: a section of its summary, else its JSON rows, els
   assert.equal(extractFeeTable('# Run\n\nnothing about that\n', null), null);
   assert.equal(extractFeeTable(null, null), null);
   assert.deepEqual(summaryPathsFor('C:\\r\\2026-live.json'), ['C:\\r\\2026-live.summary.md', 'C:\\r\\2026-live.json.summary.md']);
+});
+
+test('retest: every step that did not pass whole - a step that ended "ok" with a failed or unjudged check runs again; plan skips never', () => {
+  const order = ['deposit-external', 'enable-trading', 'builder-tiers', 'orders-spot', 'orders-perps', 'withdraw-valuechain-other', 'cleanup'];
+  const view = {
+    selectedSteps: order,
+    steps: [
+      { id: 'deposit-external', status: 'ok' },
+      { id: 'enable-trading', status: 'ok' },
+      { id: 'builder-tiers', status: 'ok' },
+      { id: 'orders-spot', status: 'ok' },
+      { id: 'orders-perps', status: 'failed' },
+    ] as never,
+    checks: [
+      { id: 'deposit-usdc', step: 'deposit-external', status: 'pass' },
+      { id: 'builder-underpaid-not-counted', step: 'builder-tiers', status: 'fail' },
+      { id: 'spot-fees-builder', step: 'orders-spot', status: 'not-run' },
+      { id: 'spot-fok-fillable', step: 'orders-spot', status: 'finding' },
+      { id: 'withdraw-valuechain-other', step: 'withdraw-valuechain-other', status: 'skipped' },
+    ],
+  };
+  assert.deepEqual(retestSteps(view, order, new Set(['withdraw-valuechain-other'])), ['builder-tiers', 'orders-spot', 'orders-perps', 'cleanup']);
+  // A finding or a skip is an answer, not something to run again.
+  assert.deepEqual(retestSteps({ ...view, checks: view.checks.filter((c) => c.status !== 'fail' && c.status !== 'not-run') }, order, new Set(['withdraw-valuechain-other'])), ['orders-perps', 'cleanup']);
+});
+
+test('the live report: its checks are read with their steps', () => {
+  const v = readLiveReport(liveReport({ stoppedAt: 'withdraw-external', checks: [{ id: 'a', step: 'orders', status: 'not-run', detail: 'x' }, { status: 'pass' }] }))!;
+  assert.deepEqual(v.checks, [{ id: 'a', step: 'orders', status: 'not-run' }]);
 });

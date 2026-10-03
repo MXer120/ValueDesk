@@ -405,7 +405,8 @@ export class World {
   // --- switches a test sets -------------------------------------------------------------------
   registryAddress = DEPOSIT_ADDR;
   /** Does a replaced / modified order keep the original's builder? */
-  replaceKeepsBuilder = false;
+  /** SoDEX keeps the builder on a replace - proven live on 2026-10-03 (check builder-replace-keeps-builder). */
+  replaceKeepsBuilder = true;
   modifyKeepsBuilder = true;
   /** The builder-terms route: null = the feature is off (`builderId: null`). */
   tiers: { builderId: number; tiers: Array<{ minVolumeUsd: number; perps: number; spot: number }>; policy: 'default-fee' | 'ignore'; ttl: number } | null = null;
@@ -620,7 +621,8 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
 const orderRow = (o: FOrder, withBuilder: boolean): Record<string, unknown> => ({
   orderID: o.orderID,
   clOrdID: o.clOrdID,
-  symbolID: o.symbolID,
+  // As on mainnet: the REST row names the market (`symbol`), not its numeric id - the app's cancel-all
+  // once relied on an id and cancelled nothing (live run of 2026-10-03).
   symbol: o.symbol,
   side: o.side,
   type: o.type,

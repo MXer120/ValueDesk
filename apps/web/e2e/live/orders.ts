@@ -662,6 +662,29 @@ export async function putInOrder(ctx: Ctx, m: Market, tag: string): Promise<void
   if (m.engine === 'perps') await flatten(ctx, m, tag, `close what ${tag} left`);
 }
 
+/** The order ids the app gives (trading/orderParams.ts genClOrdID): "vs-" for a new order, "rp-" for a replacement. */
+export const APP_ORDER_ID = /^(vs|rp)-/;
+
+/**
+ * Before a step that needs a market to itself: what an earlier run of this
+ * wallet left there - orders the app placed, and a position - is cleared
+ * through the app first and said so (a stopped run left three resting orders
+ * on 2026-10-03, and the resumed run must not stop on them). An order the app
+ * did not place (sodex.com, another tool) still stops the step: it is the
+ * owner's, not the run's.
+ */
+export async function clearLeftovers(ctx: Ctx, m: Market, step: string): Promise<void> {
+  const open = await openOn(ctx, m);
+  const pos = m.engine === 'perps' ? await positionOf(ctx, m.sym.name) : null;
+  if (!open.length && !pos) return;
+  const foreign = open.filter((o) => !APP_ORDER_ID.test(o.clOrdID ?? ''));
+  if (foreign.length) {
+    throw new SafetyStop(`the account has ${foreign.length} open order(s) on ${m.engine} ${m.sym.name} that Valuescan did not place (${foreign.map((o) => o.clOrdID ?? `#${o.orderID}`).join(', ')}) - this step needs that market to itself (cancel them first)`);
+  }
+  ctx.rec.note(`${step}: an earlier run left ${open.length} open order(s)${pos ? ` and a position of ${pos.size}` : ''} on ${m.engine} ${m.sym.name} - cleared through the app before the step starts`);
+  await putInOrder(ctx, m, `${step} (what an earlier run left)`);
+}
+
 // --- orders the runner builds itself ------------------------------------------------------------------------
 
 export interface DirectResult {

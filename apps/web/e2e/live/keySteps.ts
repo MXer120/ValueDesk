@@ -33,6 +33,7 @@ import type { StoredKey } from '../../src/trading/vault';
 import { appOrderBuilder } from './app';
 import { CheckFailure, SafetyStop, armed, scenario, type Ctx } from './context';
 import {
+  clearLeftovers,
   cancel,
   engineTransfer,
   expectGone,
@@ -95,8 +96,7 @@ export async function stepKeyLifecycle(ctx: Ctx): Promise<void> {
     return m;
   };
   let m = await fresh();
-  const stale = await openOn(ctx, m);
-  if (stale.length) throw new SafetyStop(`the account has ${stale.length} open order(s) on ${m.sym.name} - this step needs that market to itself`);
+  await clearLeftovers(ctx, m, 'key-lifecycle');
   const rb0 = restingBuy(m, cfg.orders.spotLimitOffsetPct);
   const need = dMul(rb0.lock, '1.05');
   const b0 = await balancesOf(owner, usdc);

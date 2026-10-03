@@ -151,6 +151,8 @@ export interface FakeRunnerOptions {
 export class FakeRunner implements DDeps {
   readonly calls: RunnerCall[] = [];
   readonly saved: Array<{ path: string; cfg: Json }> = [];
+  /** Wallets the guide asked the local server to forget (builderTiers.ts forget). */
+  readonly forgets: string[] = [];
   private readonly reports = new Map<string, unknown>();
   private readonly files = new Map<string, Json>();
   private planIndex = 0;
@@ -199,6 +201,10 @@ export class FakeRunner implements DDeps {
   saveConfig(path: string, cfg: Json): void {
     this.saved.push({ path, cfg: structuredClone(cfg) });
     this.files.set(path, structuredClone(cfg));
+  }
+  async forgetTierWallet(address: string): Promise<{ ok: boolean; detail: string }> {
+    this.forgets.push(address);
+    return { ok: true, detail: '7 record(s) removed' };
   }
 
   get plans(): RunnerCall[] {
