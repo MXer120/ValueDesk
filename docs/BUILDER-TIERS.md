@@ -261,6 +261,24 @@ Tool (run in `apps/server`; prints one JSON object; never prints the private key
   from nothing (the server keeps nothing about a wallet in memory that could write the old rows back), and
   its orders from before the command are never read again: it can run the fee-change test once more.
 
+**Changing the fees while the server runs.** Each of these edits the file in one step, checks the whole
+result as the server will (a fee above the default, milestones out of order, an unknown wallet spelling ...
+are refused and nothing is written) and keeps everything else in it, notes included. The server reads it
+within 5 s; an app takes the new fee with its next signed terms - at the latest when its terms expire
+(10 min). On the instance, `deploy/release/fees.sh <command>` runs the same command there.
+
+- `set-tier --from-usd <volume> --perps <n> --spot <n>` adds the milestone at that counted volume, or new
+  fees for one that exists. `--from-usd 0` is the default fee: lowering it works at once; the web build pins
+  it too (`VITE_BUILDER_FEE_*`) and the app never charges more than its build, so raising it needs a new web
+  build - and above `VITE_BUILDER_MAX_FEE`, every user approves again.
+- `remove-tier --from-usd <volume>` removes a milestone (never the default).
+- `set-fee --address 0x... --perps <n> --spot <n> [--note <text>]` / `clear-fee --address 0x...`: one
+  wallet's own fee (an override); `status --address` shows it as `handSetFee`.
+
+A wallet reaching a milestone needs none of this: every verification of its volume (queued after its
+orders; the server runs `VALUESCAN_BUILDER_VERIFY_PER_MIN` of them a minute, default 1) puts it on the
+tier it has reached, as often as that happens, and its next signed terms carry the lower fee.
+
 ## 5. What counts as volume
 
 Source - all public reads by the server, never anything the app sends:

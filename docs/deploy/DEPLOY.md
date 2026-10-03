@@ -760,5 +760,19 @@ deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u v
 shows whether the file is valid and which key is in force; `status --address 0x...` shows what is
 counted for one wallet and which orders raised a flag; `forget --address 0x...` removes one wallet from
 the ledger (the live test's wallet between two runs). Settings: `api.env.example`, "builder fee tiers".
+
+Changing the fees on the go (no restart, no release; read again within 5 s, in every app within 10 min):
+
+```
+deploy/release/fees.sh status
+deploy/release/fees.sh set-tier --from-usd 100000 --perps 15 --spot 18     # a milestone, or new fees for one
+deploy/release/fees.sh remove-tier --from-usd 100000
+deploy/release/fees.sh set-fee --address 0x... --perps 5 --spot 10 --note partner_x
+deploy/release/fees.sh clear-fee --address 0x...
+```
+
+A change that would make the file invalid is refused and nothing is written. Milestones apply by
+themselves: each verification puts a wallet on the tier its counted volume has reached. The default fee
+(`--from-usd 0`) is also pinned in the web build: raising it needs a new web build.
 The verifier reads SoDEX's history from the instance's address at 1 request a minute, so keep the
 indexer's `/trades` drip off (`VALUESCAN_INDEX_SODEX_TRADES` unset in `indexer.env`).

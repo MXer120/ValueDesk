@@ -279,6 +279,60 @@ test('forget: with no ledger there is nothing to forget, and none is created', (
   assert.equal(existsSync(p.db), false);
 });
 
+test('fees on the go: milestones and hand-set fees are changed in the file the server reads, each change checked as a whole', () => {
+  const p = place();
+  assert.equal(tool(p, ['set-tier', '--from-usd', '10', '--perps', '15', '--spot', '20']).code, 1, 'no configuration yet: refused');
+  tool(p, ['init', '--builder-id', '7', '--test-tiers']);
+  const file = (): Record<string, any> => JSON.parse(readFileSync(p.config, 'utf8'));
+  // A note the owner wrote by hand survives every change.
+  writeFileSync(p.config, JSON.stringify({ ...file(), _note: 'mine' }));
+
+  // A new milestone, in order; the same volume again changes its fees.
+  const add = tool(p, ['set-tier', '--from-usd', '1000000', '--perps', '10', '--spot', '15']);
+  assert.equal(add.code, 0, JSON.stringify(add.out));
+  assert.deepEqual(file().tiers, [{ minVolumeUsd: 0, perps: 20, spot: 20 }, { minVolumeUsd: 10, perps: 15, spot: 20 }, { minVolumeUsd: 1000000, perps: 10, spot: 15 }]);
+  assert.match(String(add.out.appliesWithin), /5 s/);
+  tool(p, ['set-tier', '--from-usd', '10', '--perps', '12', '--spot', '18']);
+  assert.deepEqual(file().tiers[1], { minVolumeUsd: 10, perps: 12, spot: 18 });
+  assert.equal(file()._note, 'mine');
+
+  // The default fee can be lowered; the answer says the web build pins it too.
+  const def = tool(p, ['set-tier', '--from-usd', '0', '--perps', '18', '--spot', '20']);
+  assert.equal(def.code, 0);
+  assert.match(String(def.out.note), /VITE_BUILDER_FEE_PERPS/);
+
+  // What would make the file invalid is refused and nothing is written.
+  const before = readFileSync(p.config, 'utf8');
+  for (const bad of [
+    ['set-tier', '--from-usd', '50', '--perps', '19', '--spot', '20'], // above the default 18
+    ['set-tier', '--from-usd', '0', '--perps', '30', '--spot', '20'], // above maxFeeRate 20
+    ['set-tier', '--from-usd', '-1', '--perps', '5', '--spot', '5'],
+    ['set-tier', '--from-usd', '10', '--perps', '1.5', '--spot', '5'],
+    ['remove-tier', '--from-usd', '0'],
+    ['remove-tier', '--from-usd', '77'],
+    ['set-fee', '--address', '0x1234', '--perps', '5', '--spot', '5'],
+    ['set-fee', '--address', addr(1), '--perps', '25', '--spot', '5'],
+    ['clear-fee', '--address', addr(2)],
+  ]) {
+    const r = tool(p, bad);
+    assert.ok(r.code === 1 || r.code === 2, `${bad.join(' ')} -> ${r.code}`);
+    assert.equal(readFileSync(p.config, 'utf8'), before, `${bad.join(' ')} wrote nothing`);
+  }
+
+  assert.equal(tool(p, ['remove-tier', '--from-usd', '1000000']).code, 0);
+  assert.deepEqual(file().tiers.map((t: { minVolumeUsd: number }) => t.minVolumeUsd), [0, 10]);
+
+  // One wallet's own fee: set, changed (any spelling of the address), shown by status, cleared.
+  const w = addr(3);
+  assert.equal(tool(p, ['set-fee', '--address', w.toUpperCase().replace('0X', '0x'), '--perps', '5', '--spot', '10', '--note', 'partner deal']).code, 0);
+  assert.equal(tool(p, ['set-fee', '--address', w, '--perps', '4', '--spot', '10']).code, 0);
+  assert.deepEqual(file().overrides, { [w.toLowerCase()]: { perps: 4, spot: 10 } });
+  assert.deepEqual(tool(p, ['status', '--address', w]).out.handSetFee, { perps: 4, spot: 10 });
+  assert.equal(tool(p, ['clear-fee', '--address', w]).code, 0);
+  assert.deepEqual(file().overrides, {});
+  assert.equal(tool(p, ['status', '--address', w]).out.handSetFee, null);
+});
+
 test('as a command: one JSON object on stdout, the exit code says whether it worked', () => {
   const p = place();
   const script = fileURLToPath(new URL('../tools/builderTiers.ts', import.meta.url));

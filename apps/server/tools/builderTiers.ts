@@ -9,6 +9,20 @@
  *   npx tsx tools/builderTiers.ts forget --address 0x...
  *       Removes everything the ledger holds about ONE wallet, while the server runs.
  *
+ * Changing the fees while the server runs (the server reads the file again within 5 s; an app
+ * takes the new fee with its next signed terms, at the latest when its terms expire - 10 min):
+ *   npx tsx tools/builderTiers.ts set-tier --from-usd <volume> --perps <n> --spot <n>
+ *       Adds the milestone at that counted volume, or changes its fees. --from-usd 0 is the
+ *       DEFAULT fee; the web build pins it too (VITE_BUILDER_FEE_*), and the app never charges
+ *       more than its build's default.
+ *   npx tsx tools/builderTiers.ts remove-tier --from-usd <volume>
+ *   npx tsx tools/builderTiers.ts set-fee --address 0x... --perps <n> --spot <n> [--note <text>]
+ *       A hand-set fee for ONE wallet (a partner, a deal); it wins over the tiers.
+ *   npx tsx tools/builderTiers.ts clear-fee --address 0x...
+ * Fees are tenths of a basis point (20 = 2 bp = 0.02 %). Every change is checked as a whole
+ * file (no fee above the default, milestones rising, ...) and written in one step; a change
+ * that would make the file invalid is refused and nothing is written.
+ *
  * Each prints one JSON object and nothing else. None prints the private key:
  * this file never holds its text (src/builder/terms.ts writes and reads it).
  *
@@ -20,7 +34,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { TiersSource, parseTiers, testTiers } from '../src/builder/config.js';
+import { TiersSource, parseTiers, testTiers, validateTiers, type TiersConfig } from '../src/builder/config.js';
 import { builderDbPath, termsKeyPath, tiersPath } from '../src/builder/paths.js';
 import { BuilderStore } from '../src/builder/store.js';
 import { ADDRESS_RE, KeySource, signerFromPem, writeNewKeyFile } from '../src/builder/terms.js';
@@ -32,7 +46,8 @@ export interface ToolResult {
 }
 
 const USAGE =
-  'usage: builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--force] | status [--address 0x...] | forget --address 0x...';
+  'usage: builderTiers.ts init --builder-id <n> (--test-tiers | --fee-perps <n> --fee-spot <n>) [--force] | status [--address 0x...] | forget --address 0x...' +
+  ' | set-tier --from-usd <volume> --perps <n> --spot <n> | remove-tier --from-usd <volume> | set-fee --address 0x... --perps <n> --spot <n> [--note <text>] | clear-fee --address 0x...';
 
 const usage = (error: string): ToolResult => ({ code: 2, out: { error, usage: USAGE } });
 
@@ -138,7 +153,10 @@ function status(args: string[]): ToolResult {
     dbPath,
     dbExists: existsSync(dbPath),
   };
-  if (typeof address === 'string') out.wallet = walletReport(dbPath, address.toLowerCase(), cfg?.builderId ?? null);
+  if (typeof address === 'string') {
+    out.wallet = walletReport(dbPath, address.toLowerCase(), cfg?.builderId ?? null);
+    out.handSetFee = cfg?.overrides[address.toLowerCase()] ?? null;
+  }
   return { code: 0, out };
 }
 
@@ -196,6 +214,123 @@ function forget(args: string[], now: number): ToolResult {
   }
 }
 
+// --- changing the fees while the server runs ------------------------------------------------
+
+/** A volume in USD as typed: 0 or more, up to two decimals. */
+const usdOf = (v: string | true | undefined): number | null => (typeof v === 'string' && /^\d{1,13}(\.\d{1,2})?$/.test(v) ? Number(v) : null);
+
+/**
+ * Read the file as it is (notes and all), let `change` edit it, check the WHOLE result as the
+ * server will, and write it in one step. Nothing is written when the file is missing or invalid,
+ * or when the change would make it invalid.
+ */
+function editConfig(what: string, change: (raw: Record<string, unknown>) => string | null): ToolResult {
+  const configPath = tiersPath();
+  if (!existsSync(configPath)) return { code: 1, out: { error: `${what}: there is no configuration yet (init writes one)`, configPath } };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(readFileSync(configPath, 'utf8'));
+  } catch (e) {
+    return { code: 1, out: { error: `${what}: the configuration file is not valid JSON - fix it first`, problem: e instanceof Error ? e.message : String(e), configPath } };
+  }
+  const before = validateTiers(raw);
+  if (!before.config || !raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { code: 1, out: { error: `${what}: the configuration file is not valid - fix it first`, problems: before.problems, configPath } };
+  }
+  const next = structuredClone(raw) as Record<string, unknown>;
+  const refused = change(next);
+  if (refused) return { code: 1, out: { error: `${what}: ${refused}`, configPath } };
+  const after = validateTiers(next);
+  if (!after.config) return { code: 1, out: { error: `${what}: refused - the file would not be valid, nothing was written`, problems: after.problems, configPath } };
+  const tmp = `${configPath}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n');
+  renameSync(tmp, configPath);
+  return { code: 0, out: { done: what, configPath, ...summary(after.config), appliesWithin: 'the server reads it within 5 s; an app takes it with its next signed terms (10 min at the latest)' } };
+}
+
+const summary = (c: TiersConfig): Record<string, unknown> => ({
+  defaultFee: { perps: c.tiers[0]!.perps, spot: c.tiers[0]!.spot },
+  tiers: c.tiers,
+  handSetFees: Object.keys(c.overrides).length,
+});
+
+const tiersOf = (raw: Record<string, unknown>): Array<Record<string, unknown>> => (Array.isArray(raw.tiers) ? (raw.tiers as Array<Record<string, unknown>>) : []);
+
+function setTier(args: string[]): ToolResult {
+  const a = parseArgs(args, ['--from-usd', '--perps', '--spot'], []);
+  const from = usdOf(a?.get('--from-usd'));
+  const perps = wholeOf(a?.get('--perps'));
+  const spot = wholeOf(a?.get('--spot'));
+  if (!a || a.size !== 3 || from === null || perps === null || spot === null) {
+    return usage('set-tier: --from-usd <counted volume in USD> --perps <n> --spot <n> (fees in tenths of a basis point)');
+  }
+  const r = editConfig(from === 0 ? 'set the default fee' : `set the milestone at $${from}`, (raw) => {
+    const list = tiersOf(raw).filter((t) => t.minVolumeUsd !== from);
+    list.push({ minVolumeUsd: from, perps, spot });
+    list.sort((x, y) => Number(x.minVolumeUsd) - Number(y.minVolumeUsd));
+    raw.tiers = list;
+    return null;
+  });
+  if (r.code === 0 && from === 0) {
+    r.out.note = 'the web build pins the default fee too (VITE_BUILDER_FEE_PERPS / VITE_BUILDER_FEE_SPOT): the app never charges more than its build - a higher default needs a new web build, and above VITE_BUILDER_MAX_FEE every user approves again';
+  }
+  return r;
+}
+
+function removeTier(args: string[]): ToolResult {
+  const a = parseArgs(args, ['--from-usd'], []);
+  const from = usdOf(a?.get('--from-usd'));
+  if (!a || a.size !== 1 || from === null) return usage('remove-tier: --from-usd <the milestone volume in USD>');
+  if (from === 0) return { code: 1, out: { error: 'remove-tier: the tier at $0 is the default fee and cannot be removed (set-tier --from-usd 0 changes it)' } };
+  return editConfig(`remove the milestone at $${from}`, (raw) => {
+    const list = tiersOf(raw);
+    const kept = list.filter((t) => t.minVolumeUsd !== from);
+    if (kept.length === list.length) return `there is no milestone at $${from} (they are at ${list.map((t) => `$${t.minVolumeUsd}`).join(', ')})`;
+    raw.tiers = kept;
+    return null;
+  });
+}
+
+/** The key the file already uses for this wallet (any spelling), else the lower-case address. */
+const overrideKey = (raw: Record<string, unknown>, address: string): string => {
+  const o = raw.overrides && typeof raw.overrides === 'object' ? (raw.overrides as Record<string, unknown>) : {};
+  return Object.keys(o).find((k) => k.toLowerCase() === address) ?? address;
+};
+
+function setFee(args: string[]): ToolResult {
+  const a = parseArgs(args, ['--address', '--perps', '--spot', '--note'], []);
+  const address = a?.get('--address');
+  const perps = wholeOf(a?.get('--perps'));
+  const spot = wholeOf(a?.get('--spot'));
+  const note = a?.get('--note');
+  if (!a || typeof address !== 'string' || !ADDRESS_RE.test(address) || perps === null || spot === null || note === true) {
+    return usage('set-fee: --address 0x... --perps <n> --spot <n> [--note <text>] (fees in tenths of a basis point)');
+  }
+  const wallet = address.toLowerCase();
+  return editConfig(`set the fee of ${wallet}`, (raw) => {
+    const o = raw.overrides && typeof raw.overrides === 'object' && !Array.isArray(raw.overrides) ? { ...(raw.overrides as Record<string, unknown>) } : {};
+    delete o[overrideKey(raw, wallet)];
+    o[wallet] = typeof note === 'string' ? { perps, spot, note } : { perps, spot };
+    raw.overrides = o;
+    return null;
+  });
+}
+
+function clearFee(args: string[]): ToolResult {
+  const a = parseArgs(args, ['--address'], []);
+  const address = a?.get('--address');
+  if (!a || a.size !== 1 || typeof address !== 'string' || !ADDRESS_RE.test(address)) return usage('clear-fee: --address 0x... (one wallet)');
+  const wallet = address.toLowerCase();
+  return editConfig(`clear the hand-set fee of ${wallet}`, (raw) => {
+    const o = raw.overrides && typeof raw.overrides === 'object' && !Array.isArray(raw.overrides) ? { ...(raw.overrides as Record<string, unknown>) } : {};
+    const key = overrideKey(raw, wallet);
+    if (!(key in o)) return 'this wallet has no hand-set fee';
+    delete o[key];
+    raw.overrides = o;
+    return null;
+  });
+}
+
 /** Run one command. `argv` is what follows the script name. */
 export function runTool(argv: string[], now: number = Date.now()): ToolResult {
   const [command, ...args] = argv;
@@ -203,6 +338,10 @@ export function runTool(argv: string[], now: number = Date.now()): ToolResult {
     if (command === 'init') return init(args);
     if (command === 'status') return status(args);
     if (command === 'forget') return forget(args, now);
+    if (command === 'set-tier') return setTier(args);
+    if (command === 'remove-tier') return removeTier(args);
+    if (command === 'set-fee') return setFee(args);
+    if (command === 'clear-fee') return clearFee(args);
     return usage(command ? `unknown command "${command}"` : 'a command is required');
   } catch (e) {
     return { code: 1, out: { error: e instanceof Error ? e.message : String(e) } };
