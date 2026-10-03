@@ -33,7 +33,7 @@ import { ACCOUNT_MINIMUM, NATIVE_DECIMALS, NATIVE_SYMBOL } from './native/types'
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { chainWithdrawals } from './chainRoutes';
 import { checkRoutes, notTestable, sameDepositAddress } from './routes';
-import { depositBackProblem, depositFloor, gasReserve, nativeLegAmounts, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { depositBackProblem, depositFloor, gasReserve, nativeLegAmounts, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, roundTripAmount, roundTripWithdrawal, tourPlan, usdcLegAmounts } from './tour';
 import { handKey, handLine, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { VALUECHAIN_CHAIN_ID } from './provider';
 import { engineState, gasPrice, nativeBalance, registryDepositAddresses, tokenBalance } from './reads';
@@ -1085,10 +1085,13 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
           }
           if (reserve > 0n) reserve += ACCOUNT_MINIMUM[chain.kind] ?? 0n;
         }
-        const step = dp <= 0 ? '1' : `0.${'0'.repeat(dp - 1)}1`;
         const floor = depositFloor(w.route, dp);
         const extra = ncoin.native && c ? formatUnits(c.fee + c.keep + reserve, ncoin.decimals) : '0';
-        const amount = toStep(dMax(w.route.withdraw.min ?? '0', dAdd(dAdd(dAdd(floor, extra), sodexFee), step)), step, 'ceil');
+        // What an earlier run left at the test wallet's address goes back too: only what is missing is withdrawn.
+        const held = await chain.balance(here, ncoin).catch(() => null);
+        const have = held === null ? '0' : formatUnits(held, ncoin.decimals);
+        const amount = roundTripWithdrawal({ need: dAdd(floor, extra), have, min: w.route.withdraw.min ?? null, fee: sodexFee, dp });
+        if (dCmp(have, '0') > 0) lines.push(`${w.coin.coin} -> ${w.route.label}: ${cut(have, 8)} ${w.coin.coin} from an earlier run is already at the test wallet's own address ${here} - it goes back to SoDEX in this run's transfer, so only ${amount} is withdrawn`);
         const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount, receiver: w.receiverName, buyIfMissing: cfg.chainWithdrawals.buyIfMissing }, label);
         lines.push(...r.lines);
         pr.push(...r.pr);

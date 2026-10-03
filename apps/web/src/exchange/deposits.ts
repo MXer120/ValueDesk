@@ -122,6 +122,7 @@ export const deposits = {
         issuerDepositStatus: (a, c) => issuer.issuerDepositStatus(a, c),
         depositWalletLists: (a, coin) => lists.depositWalletLists(a, coin),
         registryInfo: () => ({ address: MIRROR_REGISTRY, chainId: CHAINS[network()].chainId }),
+        requestDepositAddress: (a, c) => issuer.requestDepositAddress(a, c),
       },
       address,
     );

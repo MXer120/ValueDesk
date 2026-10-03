@@ -55,6 +55,8 @@ type View = 'choose' | 'wallet' | 'transfer';
 const WALLET_PRESET = { from: 'evm', to: 'spot' } as const;
 const ACCOUNT_POLL_MS = 5000;
 const ADDRESS_POLL_MS = 8000;
+/** How many more reads while SoDEX issues a new chain's address (sodex.com: every 5 s, about 30 times). */
+const ISSUING_MAX_POLLS = 30;
 
 const minutes = (s: number | null | undefined): string => (s ? `~${Math.max(1, Math.round(s / 60))} min` : '');
 /** A balance for display: at most `dp` decimals, CUT (a rounded-up balance would promise more than is there). */
@@ -126,11 +128,14 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
     if (!open || !owner || view !== 'transfer') return;
     let stop = false;
     let timer: number | undefined;
+    // While SoDEX issues an address on a chain the wallet had none on, keep reading (as sodex.com does), a while.
+    let issuingPolls = 0;
     const load = async () => {
       try {
         const r = await api.depositOptions(owner);
         if (!stop) setMirror(r.assets);
-        if (!stop && r.assets.some((a) => a.routes.length)) return;
+        const issuing = r.issuing ?? [];
+        if (!stop && r.assets.some((a) => a.routes.length) && (issuing.length === 0 || ++issuingPolls > ISSUING_MAX_POLLS)) return;
       } catch {
         /* not ready yet */
       }

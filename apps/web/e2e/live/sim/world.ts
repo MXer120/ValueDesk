@@ -406,6 +406,26 @@ export class World {
 
   // --- switches a test sets -------------------------------------------------------------------
   registryAddress = DEPOSIT_ADDR;
+  /**
+   * Chains SoDEX has issued NO deposit address on for the wallet (live, 2026-10-03: Bitcoin, XRP, Stellar, ... -
+   * the bulk issue covers the EVM chains only): none listed anywhere until `create_deposit_address` names the
+   * chain, then issued `issueDelayMs` later. Empty: every chain has its address (the default).
+   */
+  unissued = new Set<string>();
+  issueDelayMs = 30;
+  private issueAt = new Map<string, number>();
+  /** SoDEX was asked to issue the wallet's address on `chain`. */
+  askIssue(chain: string): void {
+    if (this.unissued.has(chain) && !this.issueAt.has(chain)) this.issueAt.set(chain, Date.now() + this.issueDelayMs);
+  }
+  /** Has SoDEX issued the wallet's address on `chain` (by now)? */
+  issued(chain: string): boolean {
+    if (!this.unissued.has(chain)) return true;
+    const at = this.issueAt.get(chain);
+    if (at === undefined || Date.now() < at) return false;
+    this.unissued.delete(chain);
+    return true;
+  }
   /** Does a replaced / modified order keep the original's builder? */
   /** SoDEX keeps the builder on a replace - proven live on 2026-10-03 (check builder-replace-keeps-builder). */
   replaceKeepsBuilder = true;
@@ -508,13 +528,13 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
         if (t === MIRROR_REGISTRY) {
           const d = decodeFunctionData({ abi: MIRROR_ABI, data: data as Hex });
           if (d.functionName === 'listRemoteNativeTokens') return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'listRemoteNativeTokens', result: [] });
-          const mine = String(d.args[0]).toLowerCase() === w.owner;
+          const mine = String(d.args[0]).toLowerCase() === w.owner && w.issued(String(d.args[1]));
           return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'getDepositWallet', result: mine ? depositAddressOf(String(d.args[1])) : '' });
         }
         if (t === DEPOSIT_WALLET_REGISTRY.toLowerCase()) {
           const { args } = decodeFunctionData({ abi: REGISTRY_ABI, data: data as Hex });
           const mine = String(args[0]).toLowerCase() === w.owner;
-          const chains = mine ? (assetConfig.find((a) => a.assetName === args[1])?.chains ?? []).filter((c) => (c.custody as { allowDeposit?: boolean }).allowDeposit).map((c) => c.chainName) : [];
+          const chains = mine ? (assetConfig.find((a) => a.assetName === args[1])?.chains ?? []).filter((c) => (c.custody as { allowDeposit?: boolean }).allowDeposit).map((c) => c.chainName).filter((c) => w.issued(c)) : [];
           return encodeFunctionResult({ abi: REGISTRY_ABI, functionName: 'getDepositWalletList', result: [chains, chains.map((c) => [c === 'ARBITRUM_ETH' ? w.registryAddress : depositAddressOf(c)])] });
         }
         if (t === CALL_FOR_PERMIT_CONTRACT.toLowerCase()) {
@@ -1392,11 +1412,18 @@ function relayer(url: URL, method: string, body: any): Response {
   }
   if (method === 'POST' && p === '/biz/mirror/create_deposit_addresses') {
     const mine = String(body?.account).toLowerCase() === w.owner;
-    const chains = [...new Set(assetConfig.flatMap((a) => a.chains.map((c) => c.chainName)))];
+    const chains = [...new Set(assetConfig.flatMap((a) => a.chains.map((c) => c.chainName)))].filter((c) => w.issued(c));
     return json({ code: '0', data: { accountAddresses: mine ? chains.map((chain) => ({ chain, address: depositAddressOf(chain), custodian: 'Cobo', status: 'Enabled' })) : [] } });
   }
+  if (method === 'POST' && p === '/biz/mirror/create_deposit_address') {
+    const chain = String(body?.chain);
+    w.writes.push(`create_deposit_address ${chain}`);
+    if (String(body?.account).toLowerCase() === w.owner) w.askIssue(chain);
+    return json({ code: 0, data: null });
+  }
   if (method === 'POST' && p === '/biz/mirror/deposit_address') {
-    return json({ code: 0, data: { status: 'Enabled', address: depositAddressOf(String(body?.chain)) } });
+    const chain = String(body?.chain);
+    return json({ code: 0, data: w.issued(chain) ? { status: 'Enabled', address: depositAddressOf(chain) } : { status: '', address: '' } });
   }
   if (method === 'POST' && p === '/biz/mirror/analyse_address') {
     w.writes.push(`analyse_address ${body.address}`);

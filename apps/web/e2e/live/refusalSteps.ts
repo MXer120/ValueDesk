@@ -333,13 +333,19 @@ async function builderRefusals(ctx: Ctx, market: Market): Promise<void> {
           else ctx.checks.finding(id, `an order naming ${what} was rejected by SoDEX, but not for the builder ("${r.rejection}") - the builder rule was not shown`, { rejection: r.rejection, builder });
           return;
         }
-        // It was accepted: take it off the book again, then fail.
+        // It was accepted: take it off the book again. SoDEX does not check the approval when it TAKES an order
+        // (seen live 2026-10-03, both cases) - a fact about SoDEX, not about the app, which never sends such an
+        // order. Whether SoDEX would CHARGE that fee on a fill is not tested: the order only rested.
         const open = (await openOn(ctx, m)).find((o) => isOurs(o, r.id));
         if (open) {
-          await cancel(ctx, m, r.id, 'cancel the order SoDEX should have refused', id);
+          await cancel(ctx, m, r.id, 'cancel the order (it was only there to see whether SoDEX refuses it)', id);
           await expectGone(ctx, m, r.id, 'the order');
         }
-        throw new CheckFailure(`SoDEX ACCEPTED an order naming ${what} (${idText(r.id)})${open ? '; it rested and was cancelled' : ''}`, { orderID: r.id.orderID, builder });
+        ctx.checks.finding(
+          id,
+          `SoDEX ACCEPTED an order naming ${what} (${idText(r.id)})${open ? '; it rested and was cancelled' : ''}: SoDEX does not check the builder approval when it takes an order. The app never sends one (it names only the build's builder, within the approval SoDEX lists); whether SoDEX would charge that fee on a fill is not tested`,
+          { orderID: r.id.orderID, builder, accepted: true },
+        );
       },
       () => putInOrder(ctx, market, id),
     );

@@ -203,6 +203,8 @@ export interface DepositOptions {
   registry: { address: string; chainId: number };
   /** True only if every whitelisted route had a confirmed address. */
   allVerified: boolean;
+  /** Chains SoDEX had no address on for this wallet and was just asked to issue one (requestDepositAddress): it shows once issued. */
+  issuing: string[];
 }
 
 export interface DepositOptionsIo {
@@ -213,6 +215,8 @@ export interface DepositOptionsIo {
   issuerDepositStatus(account: string, chain: string): Promise<{ status: IssuerStatus; address: string | null } | null>;
   depositWalletLists(account: string, coinSymbol: string): Promise<Map<string, string[]>>;
   registryInfo(): { address: string; chainId: number };
+  /** Ask SoDEX to issue an address on a chain where this wallet has none (absent: the options only read). */
+  requestDepositAddress?(account: string, chain: string): Promise<void>;
 }
 
 /**
@@ -241,6 +245,7 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
   // address to check).
   const current = new Map<string, string | null>();
   const issuer = new Map<string, { status: IssuerStatus; address: string | null } | null>();
+  const issuing: string[] = [];
   await Promise.all(
     chains.map(async (chain) => {
       const now = await io.currentDepositWallet(address, chain).catch(() => null);
@@ -248,6 +253,12 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
       const row = restByChain.get(chain);
       if (row) issuer.set(chain, { status: issuerStatus(row.status), address: row.address });
       else if (now) issuer.set(chain, await io.issuerDepositStatus(address, chain));
+      else if (io.requestDepositAddress) {
+        // No address on this chain at all (SoDEX's bulk issue covers the EVM chains only): ask for one, as
+        // sodex.com's Deposit sheet does. Nothing is shown until SoDEX has issued it and the chain lists it.
+        issuing.push(chain);
+        void io.requestDepositAddress(address, chain).catch(() => undefined);
+      }
     }),
   );
 
@@ -323,6 +334,7 @@ export async function buildDepositOptions(io: DepositOptionsIo, address: string)
     rejected,
     registry: io.registryInfo(),
     allVerified: rejected.length === 0,
+    issuing: issuing.sort(),
   };
 }
 

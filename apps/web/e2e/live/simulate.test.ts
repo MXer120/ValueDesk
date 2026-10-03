@@ -500,6 +500,35 @@ test('one trip that breaks never stops the run: XRP\'s node refuses the transfer
   assert.ok(r.lines.some((l) => /one trip failed - the run goes on/.test(l)));
 });
 
+test('a chain SoDEX has issued no address on yet: the run asks for one, as sodex.com does - and coins an earlier run left there go back with the new ones', async () => {
+  const r = await run(
+    { ...CONFIG, maxSpendUsd: 200, receivers: { valuechain: FRIEND } },
+    {
+      profile: 'all-chains',
+      only: ['deposit-external', 'enable-trading', 'chain-withdrawals'],
+      setup: (w) => {
+        w.arbUsdc.set(w.owner, 200_000_000n);
+        w.unissued = new Set(['XRP', 'BTC']);
+        // 4 XRP an earlier run withdrew and could not send back (no address then).
+        w.offchain.push({ coin: 'XRP', chain: 'XRP', receiver: FAKE_NATIVE_ADDRESS.xrp, memo: '', amount: 4_000_000n });
+      },
+    },
+  );
+  const { w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  noFailures(r.checks);
+  // Asked for at the start of the step, once per chain.
+  for (const c of ['XRP', 'BTC']) assert.equal(w.writes.filter((x) => x === `create_deposit_address ${c}`).length, 1, w.writes.join('\n'));
+  assert.ok(!w.writes.some((x) => x === 'create_deposit_address SOL'), 'a chain with an address is not asked for one');
+  for (const id of ['withdraw-xrp-xrp', 'deposit-xrp-xrp', 'withdraw-btc-btc', 'deposit-btc-btc']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  // XRP: the 4 XRP already there counted - withdrawn only what was missing; everything went back but the 1 XRP reserve.
+  assert.ok(r.lines.some((l) => /4 XRP from an earlier run is already at/.test(l)), r.lines.join('\n'));
+  const paid = w.offchain.filter((x) => x.coin === 'XRP').reduce((s, x) => s + x.amount, 0n);
+  const back = w.nativeSent.find((x) => x.coin === 'XRP')!;
+  assert.equal(paid - back.amount - back.nativeFee, 1_000_000n, 'the 1 XRP reserve stays');
+  assert.ok(back.amount > 4_000_000n, 'the leftover went back with the new coins');
+});
+
 test('the full test: round trips to your own wallet - a deposit you skip, one you leave out, one sent first where SoDEX has no market - and everything sold back', async () => {
   const sent: string[] = [];
   const owner = scriptedOwnerInput({ 'XRP|XRP': 's' });

@@ -87,11 +87,22 @@ export interface IssuerReads {
    * called when the user asks for it. Clears this account's cached reads.
    */
   replaceDepositAddress(account: string, chain: string): Promise<void>;
+  /**
+   * Ask SoDEX to ISSUE a deposit address on `chain` where it has none yet - what sodex.com's Deposit sheet does
+   * when a chain's status is empty: POST `create_deposit_address {account, chain}`. Without it a wallet never
+   * gets an address on Bitcoin, XRP, Stellar ... (the bulk `create_deposit_addresses` issues the EVM chains
+   * only - seen 2026-10-03). At most once per wallet and chain every 10 minutes (a minute after a refused
+   * request); never throws.
+   */
+  requestDepositAddress(account: string, chain: string): Promise<void>;
   forgetDepositReads(account: string): void;
 }
 
 const TTL = 60_000;
 const MAX_CACHED = 1_000;
+/** How often the same wallet and chain may ask SoDEX to issue an address - and again after a refused request. */
+const REQUEST_EVERY_MS = 10 * 60_000;
+const RETRY_REFUSED_MS = 60_000;
 
 function bounded<V>(m: Map<string, V>): void {
   while (m.size > MAX_CACHED) {
@@ -104,6 +115,8 @@ function bounded<V>(m: Map<string, V>): void {
 export function issuerReads(getDepositWallet: (account: string, chain: string) => Promise<string | null>, post: BizPost): IssuerReads {
   const currentCache = new Map<string, { at: number; value: Promise<string | null> }>();
   const statusCache = new Map<string, { at: number; value: Promise<{ status: IssuerStatus; address: string | null } | null> }>();
+  /** When each wallet and chain last asked SoDEX to issue an address. */
+  const requested = new Map<string, number>();
 
   const reads: IssuerReads = {
     currentDepositWallet(account, chain) {
@@ -145,6 +158,26 @@ export function issuerReads(getDepositWallet: (account: string, chain: string) =
       if (!r.ok || (code !== undefined && code !== 0 && code !== '0' && code !== 200)) {
         throw new Error(body?.msg || body?.message || `SoDEX refused (HTTP ${r.status})`);
       }
+      reads.forgetDepositReads(account);
+    },
+
+    async requestDepositAddress(account, chain) {
+      const key = `${account.toLowerCase()}:${chain.toUpperCase()}`;
+      const at = requested.get(key);
+      if (at !== undefined && Date.now() - at < REQUEST_EVERY_MS) return;
+      requested.delete(key);
+      requested.set(key, Date.now());
+      bounded(requested);
+      let taken = false;
+      try {
+        const r = await post('/biz/mirror/create_deposit_address', { account, chain }, 15_000);
+        const code = (r.body as { code?: unknown } | null)?.code;
+        taken = r.ok && (code === undefined || String(code) === '0');
+      } catch {
+        /* no answer: below */
+      }
+      // Refused or unanswered: the next read may ask again a minute from now (the deposit sheet keeps polling).
+      if (!taken) requested.set(key, Date.now() - REQUEST_EVERY_MS + RETRY_REFUSED_MS);
       reads.forgetDepositReads(account);
     },
 

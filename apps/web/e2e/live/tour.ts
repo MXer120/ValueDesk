@@ -148,6 +148,18 @@ export function depositFloor(route: ChainRoute, dp: number): string {
   return dCmp(min, '0') > 0 ? toStep(dMul(min, '1.02'), step(Math.min(dp, 8)), 'ceil') : '0';
 }
 
+/**
+ * How much a round trip to the test wallet's own address withdraws: what the transfer back needs there (`need`:
+ * SoDEX's deposit minimum + 2 %, and for a chain's native coin its fees and what must stay), less what an earlier
+ * run already left there (`have` - a deposit back that could not run), plus SoDEX's fee. Never below SoDEX's
+ * withdrawal minimum, and never nothing: the withdrawal is tested in every run, the coins already there go back with it.
+ */
+export function roundTripWithdrawal(o: { need: string; have: string; min: string | null; fee: string; dp: number }): string {
+  const s = step(o.dp);
+  const missing = dCmp(o.have, o.need) >= 0 ? '0' : dSub(o.need, o.have);
+  return toStep(dMax(o.min ?? '0', dAdd(dAdd(missing, o.fee), s)), s, 'ceil');
+}
+
 /** A coin out only (its way back cannot run): the withdrawal minimum, and more than the fee. */
 export function oneWayAmount(route: ChainRoute, coin: CoinConfig, fee: string): string {
   const dp = Math.min(coin.valuechain.decimals, 6);

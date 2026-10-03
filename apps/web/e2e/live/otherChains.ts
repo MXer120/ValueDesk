@@ -40,8 +40,9 @@ import { sellBack } from './evmTour';
 import { handInstructions, handKey, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { ownerWord } from './ownerInput';
 import { checkDepositAddress, depositAddressProblem, spotMarketFor } from './plan';
+import { api } from '../../src/api';
 import { buyOnSpot, creditWaitMs, moved, routeCheck, withdrawTo } from './steps';
-import { depositFloor, roundTripAmount } from './tour';
+import { depositFloor, roundTripAmount, roundTripWithdrawal } from './tour';
 import { ensureTrading } from './trading';
 import { approx, cut, dAdd, dCmp, dMax, dSub, dur, errText, paced, sleep, toStep } from './util';
 
@@ -73,6 +74,21 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     return markets.get(c.coin)!;
   };
   const list = nativeFirst(chainWithdrawals(ctx.pre.coins, cfg));
+  // SoDEX issues a wallet's address on Bitcoin, XRP, Stellar, ... only when asked (its bulk issue covers the EVM
+  // chains - in the live run of 2026-10-03 seven chains had none). Reading the Deposit sheet's options asks for every
+  // chain without one, as sodex.com's sheet does - now, so each is issued by the time its trip needs it.
+  const issueBy = Date.now() + ISSUE_WAIT_MS;
+  if (list.some((w) => w.roundTrip && !w.skip)) {
+    try {
+      await rec.read(
+        "the Deposit sheet's addresses (SoDEX is asked to issue those it has not issued yet)",
+        () => api.depositOptions(owner),
+        (r) => (r.issuing.length ? `asked SoDEX to issue: ${r.issuing.join(', ')}` : 'every chain has its address'),
+      );
+    } catch {
+      /* each trip reads them again, and waits */
+    }
+  }
   // Withdrawals that had not arrived when their wait ended: sent back at the end of the step, once they are there.
   const late: LateTrip[] = [];
   for (const w of list) {
@@ -86,7 +102,7 @@ export async function stepChainWithdrawals(ctx: Ctx): Promise<void> {
     // Each trip on its own: what goes wrong in one is reported there, and the next goes on (the spend cap still ends the run).
     try {
       if (w.roundTrip) {
-        const l = await roundTripLeg(ctx, w, id, list, hasMarket);
+        const l = await roundTripLeg(ctx, w, id, list, hasMarket, issueBy);
         if (l) late.push(l);
         continue;
       }
@@ -186,7 +202,10 @@ interface LateTrip {
   floor: string;
 }
 
-async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: readonly ChainWithdrawal[], hasMarket: (c: CoinConfig) => Promise<boolean>): Promise<LateTrip | null> {
+/** How long after the step began a chain's newly issued deposit address is waited for (sodex.com asks every 5 s for ~2.5 min). */
+const ISSUE_WAIT_MS = 10 * 60_000;
+
+async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: readonly ChainWithdrawal[], hasMarket: (c: CoinConfig) => Promise<boolean>, issueBy: number): Promise<LateTrip | null> {
   const { owner, cfg, rec } = ctx;
   const chain = nativeChainFor(ctx.native, w.route.key);
   const dId = routeCheck(ctx, 'chain-withdrawals', `${w.route.key}#${w.coin.coin}#deposit`);
@@ -204,20 +223,24 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
   const kind = w.route.addressKind as AddressKind;
 
   // 1. The way back: the wallet's deposit address there, the app's and the on-chain registry's - before anything leaves.
+  //    A chain SoDEX was asked to issue an address on at the start of the step gets until then + ISSUE_WAIT_MS.
+  const addressWaitMs = Math.max(cfg.timeouts.addressIssueSeconds * 1000, issueBy - Date.now());
   const d = await rec.read(
     `the ${w.coin.coin} deposit address on ${w.route.label}: the app's Deposit sheet vs the on-chain registry`,
-    () => checkDepositAddress(owner, w.route.key, { registryOnly: false, waitMs: cfg.timeouts.addressIssueSeconds * 1000, coin: w.coin.coin, kind, say: (s) => rec.line(s, 7) }),
+    () => checkDepositAddress(owner, w.route.key, { registryOnly: false, waitMs: addressWaitMs, coin: w.coin.coin, kind, say: (s) => rec.line(s, 7) }),
     (x) => `${x.backend ?? '-'} vs ${x.registry ?? '-'}`,
   );
   const noBack = depositAddressProblem(owner, w.route.key, d, { coin: w.coin.coin, kind });
   const to = noBack ? null : d.backend!;
 
-  // 2. How much: what arrives must cover the deposit back (SoDEX's minimum + 2 %), the chain's fee, what must stay at
-  //    the address - and, for a chain's native coin, the fees its tokens' transfers back will need.
+  // 2. How much: what must be at the address for the deposit back (SoDEX's minimum + 2 %), the chain's fee, what must
+  //    stay there - and, for a chain's native coin, the fees its tokens' transfers back will need. What an earlier run
+  //    left there (a deposit back that could not run) counts: only what is missing is withdrawn, at least the minimum.
   const quote = await rec.read(`SoDEX's on-chain fee for ${w.coin.coin} -> ${w.route.label}`, () => withdrawQuote(w.coin, w.route, owner), (q) => `${formatUnits(q.fee, sodexDp)} ${w.coin.coin}`);
   const fee = formatUnits(quote.fee, sodexDp);
   let costs: SendCosts = { fee: 0n, keep: 0n, nativeNeeded: 0n };
   let reserve = 0n;
+  let have = '0';
   if (to) {
     costs = await rec.read(`what a ${w.coin.coin} transfer on ${w.route.label} costs from ${here}`, () => chain.costs(here, ncoin, to), (c) => `fee ${c.fee}, keep ${c.keep}, native needed ${c.nativeNeeded} (base units)`);
     if (ncoin.native) {
@@ -231,12 +254,16 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
       // Solana: the paying account must stay rent-exempt (~650,240 lamports) after each token send - or be empty.
       if (reserve > 0n) reserve += ACCOUNT_MINIMUM[chain.kind] ?? 0n;
     }
+    try {
+      have = formatUnits(await rec.read(`what the test wallet already holds at ${here}`, () => chain.balance(here, ncoin), (b) => `${formatUnits(b, ncoin.decimals)} ${w.coin.coin}`), ncoin.decimals);
+    } catch {
+      /* unreadable: withdrawn as if nothing were there */
+    }
   }
   const floor = depositFloor(w.route, dp);
   const extra = ncoin.native ? formatUnits(costs.fee + costs.keep + reserve, ncoin.decimals) : '0';
-  const amount = to
-    ? toStep(dMax(w.route.withdraw.min ?? '0', dAdd(dAdd(dAdd(floor, extra), fee), unitStep(dp))), unitStep(dp), 'ceil')
-    : roundTripAmount(w.route, w.coin, fee);
+  const amount = to ? roundTripWithdrawal({ need: dAdd(floor, extra), have, min: w.route.withdraw.min ?? null, fee, dp }) : roundTripAmount(w.route, w.coin, fee);
+  if (dCmp(have, '0') > 0) rec.note(`${w.route.label}: ${cut(have, 8)} ${w.coin.coin} from an earlier run is already at ${here} - it goes back to SoDEX with this run's ${amount}`);
 
   // 3. The coin in Spot (bought with USDC where Spot holds less).
   const held = (await balancesOf(owner, w.coin)).spot;

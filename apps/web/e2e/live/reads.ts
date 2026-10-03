@@ -33,37 +33,51 @@ export const CHAIN_READ_RETRY_MS = [2_000, 5_000];
  * nonsense once must not stop a step that only wanted a balance (the network guard retries
  * network failures inside one try; this covers the app's own read timeout).
  */
-async function chainRead<T>(read: () => Promise<T>): Promise<T> {
+async function chainRead<T>(url: string, read: (url: string) => Promise<T>): Promise<T> {
+  const urls = [url, ...(RPC_FALLBACKS[url] ?? [])];
   for (let i = 0; ; i++) {
-    try {
-      return await read();
-    } catch (e) {
-      if (i >= CHAIN_READ_RETRY_MS.length) throw e;
-      await new Promise((r) => setTimeout(r, CHAIN_READ_RETRY_MS[i]));
+    let last: unknown;
+    for (const u of urls) {
+      try {
+        return await read(u);
+      } catch (e) {
+        last = e;
+      }
     }
+    if (i >= CHAIN_READ_RETRY_MS.length) throw last;
+    await new Promise((r) => setTimeout(r, CHAIN_READ_RETRY_MS[i]));
   }
 }
 
+/**
+ * Other public nodes of the same chain, asked when its usual node gives no answer: READS only (balances,
+ * receipts) - nothing is ever sent through them. Polygon's node timed out for a whole withdrawal in the live
+ * run of 2026-10-03, so its arrival could not be read although SoDEX had paid it.
+ */
+export const RPC_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  'https://polygon-bor-rpc.publicnode.com': ['https://polygon.drpc.org', 'https://1rpc.io/matic'],
+};
+
 export async function rpcRead(url: string, method: string, params: unknown[]): Promise<unknown> {
-  return chainRead(async () => {
-    const answers = await rpcBatch(url, [{ method, params }]);
-    if (!answers.has(0)) throw new Error(`${method}: no answer from ${new URL(url).host}`);
+  return chainRead(url, async (u) => {
+    const answers = await rpcBatch(u, [{ method, params }]);
+    if (!answers.has(0)) throw new Error(`${method}: no answer from ${new URL(u).host}`);
     return answers.get(0) ?? null;
   });
 }
 
 export async function nativeBalance(url: string, holder: string): Promise<bigint> {
-  return chainRead(async () => {
-    const v = hexUnits((await rpcBatch(url, [nativeBalanceCall(holder)])).get(0));
-    if (v === null) throw new Error(`eth_getBalance: unreadable answer from ${new URL(url).host}`);
+  return chainRead(url, async (u) => {
+    const v = hexUnits((await rpcBatch(u, [nativeBalanceCall(holder)])).get(0));
+    if (v === null) throw new Error(`eth_getBalance: unreadable answer from ${new URL(u).host}`);
     return v;
   });
 }
 
 export async function tokenBalance(url: string, token: string, holder: string): Promise<bigint> {
-  return chainRead(async () => {
-    const v = hexUnits((await rpcBatch(url, [balanceOfCall(token, holder)])).get(0));
-    if (v === null) throw new Error(`balanceOf: unreadable answer from ${new URL(url).host}`);
+  return chainRead(url, async (u) => {
+    const v = hexUnits((await rpcBatch(u, [balanceOfCall(token, holder)])).get(0));
+    if (v === null) throw new Error(`balanceOf: unreadable answer from ${new URL(u).host}`);
     return v;
   });
 }

@@ -336,7 +336,7 @@ export function classifyRelayerWrite(method: string, path: string, body: any): {
  * create_deposit_addresses makes SoDEX ISSUE a new wallet's addresses, which
  * --registry-only exists to avoid.
  */
-const RELAYER_READ_POSTS = new Set(['/biz/mirror/create_deposit_addresses', '/biz/mirror/deposit_address']);
+const RELAYER_READ_POSTS = new Set(['/biz/mirror/create_deposit_addresses', '/biz/mirror/create_deposit_address', '/biz/mirror/deposit_address']);
 
 export function installGuard(o: GuardOptions): Guard {
   const original = globalThis.fetch;
@@ -540,7 +540,7 @@ export function installGuard(o: GuardOptions): Guard {
     }
 
     if (dest === 'relayer' && method === 'POST' && RELAYER_READ_POSTS.has(url.pathname)) {
-      if (o.blockDepositIssuing && url.pathname === '/biz/mirror/create_deposit_addresses') {
+      if (o.blockDepositIssuing && (url.pathname === '/biz/mirror/create_deposit_addresses' || url.pathname === '/biz/mirror/create_deposit_address')) {
         return refused(rec, '--registry-only: not asking SoDEX to issue deposit addresses', 'gateway');
       }
       return send();

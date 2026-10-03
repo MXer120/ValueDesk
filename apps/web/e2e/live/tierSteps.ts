@@ -134,22 +134,30 @@ export function judgeFeeScenario(ctx: Ctx, id: 'builder-fee-default' | 'builder-
 
 /**
  * Poll the terms until `done`; the order history stays untouched meanwhile - the server's
- * verifier needs that budget. Only the FIRST read carries a hint: a hint on every poll
- * queued a new verification each time, so "pending" never cleared and the wait ran into
- * its time-out although the server had long verified (seen in the live run of 2026-10-03).
+ * verifier needs that budget. The first read carries a hint; another one only once the
+ * server has FINISHED a pass that does not show it yet, and at most every minute. A hint
+ * on every poll queued a new verification each time, so "pending" never cleared; a single
+ * hint left a pass that ran before SoDEX listed the fills ($0 verified, 2026-10-03 17:39)
+ * as the last word for the whole wait.
  */
+const REHINT_MS = 60_000;
+
 async function waitTerms(ctx: Ctx, what: string, done: (v: TermsVerdict) => boolean): Promise<{ ok: boolean; last: TermsVerdict | undefined; ms: number }> {
   const watch = ctx.terms!;
-  let hinted = false;
+  let hintAt = 0;
+  let idle = false;
   ctx.history?.block('the server\'s fee verifier is reading this wallet\'s order history on SoDEX (it needs the same four-a-minute budget)');
   try {
     const r = await pollUntil({
       timeoutMs: ctx.cfg.timeouts.verifierMinutes * 60_000,
       intervalMs: 10_000,
       probe: async () => {
-        const hint = !hinted;
-        hinted = true;
-        return (await requestTerms(watch, ctx.owner, { hint })).verdict;
+        const hint = hintAt === 0 || (idle && Date.now() - hintAt >= REHINT_MS);
+        if (hint) hintAt = Date.now();
+        const v = (await requestTerms(watch, ctx.owner, { hint })).verdict;
+        // Nothing pending: the pass the hint asked for has finished, without what we wait for - the next poll may ask again.
+        idle = !v.answer.volume?.pending;
+        return v;
       },
       done,
       progressEveryMs: 30_000,

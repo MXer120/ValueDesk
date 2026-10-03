@@ -639,7 +639,8 @@ export const api = {
   /**
    * Cross-chain deposit addresses, cross-checked against ValueChain's registries -
    * built in this browser (exchange/deposits.ts) with the server's own rules.
-   * SoDEX's issuer may CREATE a new wallet's addresses on this read, as before.
+   * SoDEX's issuer may CREATE a new wallet's addresses on this read, as before; a chain with
+   * none at all is asked for one (`issuing`), as sodex.com's Deposit sheet does.
    */
   depositOptions: (address: string) =>
     direct('deposit options', () => deposits.options(address) as Promise<{
@@ -648,6 +649,8 @@ export const api = {
       rejected: Array<{ chain: string; reason: string }>;
       allVerified: boolean;
       registry: { address: string; chainId: number };
+      /** Chains the wallet had no address on: SoDEX was just asked to issue one (shown once issued). */
+      issuing: string[];
     }>, 60_000),
   /** sodex.com's "Confirm & Update Address" - only for an address SoDEX flagged. */
   replaceDepositAddress: (address: string, chain: string) =>

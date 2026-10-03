@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDepositOptions, newDepositAddressRequester, type DepositOptionsIo } from '../src/sodex/depositOptions.js';
-import type { IssuerStatus } from '../src/sodex/depositAddressCore.js';
+import { issuerReads, type IssuerStatus } from '../src/sodex/depositAddressCore.js';
 
 const ME = '0x48d98beb9dfce0a24f284e7653f05609b058ad96';
 const ARB = '0x4577c24e9e7a53aa775589c7d9fa7ae4bbc426cb';
@@ -77,4 +77,46 @@ test('new deposit address: only for a flagged address, at most once per 30 s', a
   await assert.rejects(request(ME, 'ARBITRUM_ETH'), (e: { statusCode?: number }) => e.statusCode === 429);
   await assert.rejects(request('nope', 'ARBITRUM_ETH'), (e: { statusCode?: number }) => e.statusCode === 400);
   assert.deepEqual(calls, ['ARBITRUM_ETH']);
+});
+
+test('deposit options: a chain with no address at all is asked for one (as sodex.com does), and shown only once issued', async () => {
+  const asked: string[] = [];
+  const r = await buildDepositOptions(io({ current: { ARBITRUM_ETH: ARB }, requestDepositAddress: async (_a, c) => void asked.push(c) }), ME);
+  // Every whitelisted chain without an address (Base for USDC, Ethereum for PEPE); Arbitrum has its own.
+  assert.deepEqual(r.issuing, ['BASE_ETH', 'ETH']);
+  assert.deepEqual(asked.sort(), ['BASE_ETH', 'ETH']);
+  assert.ok(!r.assets.some((a) => a.routes.some((x) => x.chain === 'BASE_ETH')), 'nothing shown before it is issued');
+  // Without the request (a read-only caller): nothing is asked for.
+  assert.deepEqual((await buildDepositOptions(io({ current: { ARBITRUM_ETH: ARB } }), ME)).issuing, []);
+});
+
+test('issuing an address: create_deposit_address once per wallet and chain every 10 minutes (a minute after a refusal), a failure never thrown', async () => {
+  const posts: string[] = [];
+  let fail = true;
+  const reads = issuerReads(async () => null, async (path, body) => {
+    posts.push(`${path} ${(body as { chain: string }).chain}`);
+    if (fail) throw new Error('timeout');
+    return { ok: true, status: 200, body: { code: 0 } };
+  });
+  await reads.requestDepositAddress(ME, 'BTC');
+  fail = false;
+  await reads.requestDepositAddress(ME, 'btc');
+  await reads.requestDepositAddress(ME, 'XRP');
+  assert.deepEqual(posts, ['/biz/mirror/create_deposit_address BTC', '/biz/mirror/create_deposit_address XRP']);
+  // A refusal in the answer (SoDEX's code), not a thrown error: asked again after a minute, not ten.
+  const t0 = Date.now();
+  const realNow = Date.now;
+  try {
+    let n = 0;
+    const counting = issuerReads(async () => null, async () => (n++, { ok: true, status: 200, body: { code: 1001 } }));
+    await counting.requestDepositAddress(ME, 'XLM');
+    Date.now = () => t0 + 30_000;
+    await counting.requestDepositAddress(ME, 'XLM');
+    assert.equal(n, 1, 'not within the minute');
+    Date.now = () => t0 + 61_000;
+    await counting.requestDepositAddress(ME, 'XLM');
+    assert.equal(n, 2, 'again after a minute');
+  } finally {
+    Date.now = realNow;
+  }
 });

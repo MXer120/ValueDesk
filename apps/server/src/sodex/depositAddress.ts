@@ -30,3 +30,6 @@ export const issuerDepositStatus = reads.issuerDepositStatus;
 export const replaceDepositAddress = reads.replaceDepositAddress;
 
 export const forgetDepositReads = reads.forgetDepositReads;
+
+/** Ask SoDEX to issue an address on a chain where the wallet has none (sodex.com's Deposit sheet does the same). */
+export const requestDepositAddress = reads.requestDepositAddress;

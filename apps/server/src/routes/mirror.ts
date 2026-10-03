@@ -23,7 +23,7 @@
 import type { FastifyInstance } from 'fastify';
 import { remoteNativeTokens, registryInfo } from '../sodex/mirrorRegistry.js';
 import { _forgetDepositWalletLists, depositWalletLists } from '../sodex/depositWallets.js';
-import { currentDepositWallet, forgetDepositReads, issuerDepositStatus, replaceDepositAddress } from '../sodex/depositAddress.js';
+import { currentDepositWallet, forgetDepositReads, issuerDepositStatus, replaceDepositAddress, requestDepositAddress } from '../sodex/depositAddress.js';
 import {
   DepositAddressRequestError,
   buildDepositOptions,
@@ -62,6 +62,7 @@ const io: DepositOptionsIo = {
   issuerDepositStatus,
   depositWalletLists,
   registryInfo,
+  requestDepositAddress,
 };
 
 /** Forget every cached read for a wallet: issuer rows, chain reads, registry lists. */

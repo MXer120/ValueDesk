@@ -33,7 +33,7 @@ import { applyProfile, profileSteps, type Profile } from './profiles';
 import { buildSummary, type SummaryInput } from './summary';
 import type { OwnerInput } from './ownerInput';
 import { KNOWN_CHAINS, createKeyProvider, type KeyProvider } from './provider';
-import { snapshot, whereFundsLines, type Snapshot } from './reads';
+import { RPC_FALLBACKS, snapshot, whereFundsLines, type Snapshot } from './reads';
 import { STEPS, declareFundsChecks } from './steps';
 import { AccountStream } from './stream';
 import { TermsWatch } from './terms';
@@ -231,7 +231,8 @@ export async function runE2E(o: RunOptions): Promise<number> {
     backend: cfg.backend,
     gateway: GATEWAY_ORIGIN.mainnet,
     relayer: BIZ_ORIGIN,
-    rpcUrls: KNOWN_CHAINS.map((c) => c.rpcUrl),
+    // The chains' usual nodes, and the read-only fallbacks for a node that gives no answer (reads.ts).
+    rpcUrls: [...KNOWN_CHAINS.map((c) => c.rpcUrl), ...Object.values(RPC_FALLBACKS).flat()],
     readOnlyOrigins: [EXPLORER_ORIGIN],
     chainApis: nativeChains.map((c) => ({ label: c.label, origins: c.origins, isWrite: (u: URL, m: string, b: string | null) => c.isWrite(u, m, b) })),
     owner,
