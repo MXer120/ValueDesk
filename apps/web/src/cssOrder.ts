@@ -56,6 +56,9 @@ import './components/explore/cohorts/Cohorts.css';
 import './components/copy/Copy.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
-   the four @fontsource sheets (main.tsx, first), and chart/tv/*.css, which
-   belong to the optional TradingView chart and were already loaded on demand. */
+   the four @fontsource sheets (main.tsx, first), chart/tv/*.css, which
+   belong to the optional TradingView chart and were already loaded on demand,
+   and legal/legal.css: it arrives with the legal pages' chunk, and every rule
+   in it is scoped to `.legal*` classes no other page has, so where it lands in
+   the cascade cannot change anything else - and the first load stays as it was. */
 export {};

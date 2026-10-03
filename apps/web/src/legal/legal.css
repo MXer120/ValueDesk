@@ -1,0 +1,99 @@
+/* The legal pages (legal/LegalView.tsx). Tokens only: one panel card with the
+   panel header strip, prose at the base step, the page switch is the
+   leaderboard's `.lbp-seg`. */
+
+.legal {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-3) var(--sp-3) var(--sp-6);
+}
+.legal-card {
+  width: 100%;
+  max-width: 760px;
+  min-width: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+}
+.legal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  min-height: 42px;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--panel-line);
+}
+.legal-title {
+  margin: 0;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  font-weight: 500;
+  color: var(--text);
+}
+
+.legal-body {
+  padding: var(--sp-4) var(--sp-4) var(--sp-5);
+  color: var(--muted);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  overflow-wrap: anywhere;
+}
+.legal-body p,
+.legal-body ul { margin: 0 0 var(--sp-3); }
+.legal-body ul { padding-left: var(--sp-5); }
+.legal-body li + li { margin-top: var(--sp-1); }
+.legal-body h2 { margin: var(--sp-5) 0 var(--sp-2); }
+.legal-body > .legal-section:first-child h2,
+.legal-draft + .legal-section h2 { margin-top: 0; }
+.legal-lines > span { display: block; }
+.legal-body strong { color: var(--text); font-weight: 500; }
+
+.legal-body a {
+  color: var(--text);
+  text-decoration: underline;
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+  transition: text-decoration-color var(--dur-fast) var(--ease-out);
+}
+.legal-body a:hover { text-decoration-color: currentColor; }
+.legal-body a:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+  border-radius: var(--radius-xs);
+}
+
+/* "Needs attention" - the one use of --warn: the page is a draft, and here is
+   what is still missing. */
+.legal-draft {
+  display: inline-block;
+  margin: 0 0 var(--sp-4);
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  line-height: 20px;
+}
+.legal-owner {
+  padding: 0 2px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+}
+
+.legal-updated {
+  margin: var(--sp-5) 0 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+
+@media (max-width: 760px) {
+  .legal { padding: var(--sp-2) 0 var(--sp-5); }
+  .legal-body { padding: var(--sp-3) var(--sp-3) var(--sp-4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .legal-body a { transition: none; }
+}

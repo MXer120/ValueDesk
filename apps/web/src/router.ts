@@ -62,6 +62,27 @@ export const TAB_LABELS: Record<Tab, string> = {
 export const pathForTab = (tab: Tab): string => `/${tab}`;
 
 /**
+ * The legal texts (src/legal): pages of their own, but NOT tabs. They are not
+ * in the nav, have no number-key shortcut and no dashboard; the status bar at
+ * the bottom of every page links them. Kept out of TABS so the nav, the
+ * shortcuts and the per-tab layout code never see them.
+ */
+export const LEGAL_PAGES = ['impressum', 'privacy', 'terms'] as const;
+export type LegalPage = (typeof LEGAL_PAGES)[number];
+export const LEGAL_LABELS: Record<LegalPage, string> = {
+  impressum: 'Impressum',
+  privacy: 'Privacy',
+  terms: 'Terms',
+};
+export const pathForLegal = (page: LegalPage): string => `/${page}`;
+
+/** The legal page a pathname names, or null. Tolerant like `tabForPath`. */
+export function legalForPath(pathname: string): LegalPage | null {
+  const seg = pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase();
+  return (LEGAL_PAGES as readonly string[]).includes(seg ?? '') ? (seg as LegalPage) : null;
+}
+
+/**
  * The page a pathname ends up on once `useRoute` has normalised it: its own
  * tab, or where a removed page moved to, or the default. App.tsx uses it to
  * fetch that page's code before the first render.
@@ -94,8 +115,11 @@ export function tabForPath(pathname: string): Tab | null {
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(): [Tab, (tab: Tab) => void] {
+export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
+  /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
+     there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
+  const [legal, setLegal] = useState<LegalPage | null>(() => legalForPath(window.location.pathname));
 
   useEffect(() => {
     /*
@@ -107,11 +131,13 @@ export function useRoute(): [Tab, (tab: Tab) => void] {
      * to a page that no longer exists.
      */
     const normalise = () => {
-      if (tabForPath(window.location.pathname) === null) {
-        const seg = window.location.pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
+      const path = window.location.pathname;
+      if (tabForPath(path) === null && legalForPath(path) === null) {
+        const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
         window.history.replaceState(null, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
       setTab(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
+      setLegal(legalForPath(window.location.pathname));
     };
     normalise();
     window.addEventListener('popstate', normalise);
@@ -125,7 +151,15 @@ export function useRoute(): [Tab, (tab: Tab) => void] {
       window.history.pushState(null, '', pathForTab(next));
     }
     setTab(next);
+    setLegal(null);
   }, []);
 
-  return [tab, navigate];
+  const openLegal = useCallback((page: LegalPage) => {
+    if (legalForPath(window.location.pathname) !== page) {
+      window.history.pushState(null, '', pathForLegal(page));
+    }
+    setLegal(page);
+  }, []);
+
+  return [tab, navigate, legal, openLegal];
 }

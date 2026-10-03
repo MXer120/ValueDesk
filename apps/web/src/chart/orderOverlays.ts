@@ -193,8 +193,8 @@ export interface DeriveOptions {
   symbol: string;
   sym?: MarketSymbol;
   /**
-   * Whether a drag may modify anything at all. False on spot (the gateway only
-   * exposes /trade/perps/modify) and false while the signing key is locked.
+   * Whether a drag may modify anything at all: false while the signing key is
+   * locked. Spot and perps alike (changeOrder in trading/actions.ts).
    */
   canModify: boolean;
   /** Why not, when canModify is false. Surfaced verbatim on the line. */

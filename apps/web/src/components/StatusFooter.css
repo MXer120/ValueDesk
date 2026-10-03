@@ -477,6 +477,31 @@
   margin-top: 2px;
 }
 
+/* --- legal links -----------------------------------------------------------
+   Impressum, privacy policy, terms. Words, not a glyph - a "§" icon is not
+   something anyone reads as "Impressum". The bar's own 12px in --muted,
+   brightening to --text like every control here; the page on screen stays
+   --text. No box and no underline: chrome, not content. */
+.sfoot-legal {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  white-space: nowrap;
+}
+.sfoot-link {
+  color: var(--muted);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.sfoot-link:hover,
+.sfoot-link[aria-current='page'] { color: var(--text); }
+.sfoot-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
 /* --- shortcuts dialog ----------------------------------------------------- */
 
 .sfoot-keys {
@@ -521,6 +546,12 @@
    three actions survive at every width. */
 @media (max-width: 560px) {
   .sfoot-connword { display: none; }
+  /* A phone keeps the Impressum link only - the three words together would
+     squeeze the account chip to an ellipsis at 375px. Privacy and Terms are
+     one tap further, in the legal pages' own switch. (Two classes: the touch
+     block at the end of this file gives `.sfoot-link` a display of its own.) */
+  .sfoot-legal .sfoot-link--privacy,
+  .sfoot-legal .sfoot-link--terms { display: none; }
 }
 
 /* --- geometry --------------------------------------------------------------
@@ -593,6 +624,8 @@
   }
   .sfoot .sfoot-chip { height: 34px; line-height: 32px; }
   .sfoot .sfoot-icon { width: 34px; height: 34px; }
+  /* The same 34px touch target as the controls beside them. */
+  .sfoot-link { display: inline-flex; align-items: center; min-height: 34px; }
   /* See the note on the desktop rule: a 2px lift is an optical correction on a
      20px control in a 28px bar, and nothing at all on a 34px control in a 40px
      one - there it is just an off-centre button. */

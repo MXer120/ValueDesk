@@ -17,7 +17,23 @@ const EXEMPT = new Set([
   'styles.css', // main.tsx imports it last, after App
   'chart/tv/tv.css', // the optional TradingView chart loads its own sheets on demand
   'chart/tv/tv-theme.css',
+  'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
 ]);
+
+test('legal.css only styles the legal pages, so it may load with them', () => {
+  const css = readFileSync(join(SRC, 'legal', 'legal.css'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/@[^{]+\{/g, ''); // at-rule preludes (@media ...): their rules are checked like any other
+  const selectors = [...css.matchAll(/([^{}@]+)\{/g)]
+    .map((m) => m[1]!.trim())
+    .filter((s) => s && !/^(?:from|to|\d+%)$/.test(s));
+  assert.ok(selectors.length > 5, 'the selectors were read');
+  for (const group of selectors) {
+    for (const sel of group.split(',')) {
+      assert.match(sel.trim(), /^\.legal[\w-]*\b/, `"${sel.trim()}" must start at a .legal* class`);
+    }
+  }
+});
 
 /* Value imports only: `import type` / `export type` are erased and load nothing. */
 const SPEC_RE = /(?:^\s*(?:import|export)\s+(?!type\s)(?:[^'";]*?\s+from\s+)?|import\(\s*)['"](\.[^'"]+)['"]/gm;

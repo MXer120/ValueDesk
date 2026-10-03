@@ -1065,11 +1065,10 @@ function OpenOrdersInner({
                   <td className="num">{value === null ? EM : fmtUsd(value)}</td>
                   <td className="num acct-time">{when(pick(o, 'createdAt', 'T', 'time'))}</td>
                   {!readOnly && <td className="acct-actions">
-                    {engine === 'perps' && (
-                      <button type="button" className="acct-act" onClick={() => setEditing(o)} disabled={busy || !unlocked}>
-                        Modify
-                      </button>
-                    )}
+                    {/* Spot and perps alike: changeOrder picks SoDEX's request for the order (trading/actions.ts). */}
+                    <button type="button" className="acct-act" onClick={() => setEditing(o)} disabled={busy || !unlocked}>
+                      Modify
+                    </button>
                     <button type="button" className="acct-act" onClick={() => cancel(o)} disabled={busy || !unlocked}>
                       Cancel
                     </button>

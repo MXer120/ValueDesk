@@ -2,7 +2,7 @@ import './cssOrder';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
-import { DEFAULT_TAB, TABS, landingTab, tabForPath, useRoute, type Tab } from './router';
+import { DEFAULT_TAB, TABS, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -52,6 +52,10 @@ const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/Portf
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
+/* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded
+   only when a legal link is hovered, focused or followed - or when the app
+   starts on a legal URL. Never part of the idle prefetch below. */
+const LegalDoc = lazyPage('legal', () => import('./legal/LegalView').then((m) => m.LegalView));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<Tab, LazyPage<any>> = {
@@ -69,19 +73,23 @@ const bootTabs = (): Tab[] => {
   const settled = landingTab(window.location.pathname);
   return first === settled ? [first] : [first, settled];
 };
+/** The code the first render needs: a legal page's, or the landing tab's (above). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const bootPages = (): LazyPage<any>[] =>
+  legalForPath(window.location.pathname) ? [LegalDoc] : bootTabs().map((t) => PAGES[t]);
 /* The landing page's first index reads leave now, when this browser has started
    on this URL before: the page asks for them in an effect, after its code has
    arrived and rendered, and takes the answers that are already there (serverFetch.ts). */
 primeFirstReads(window.location.pathname + window.location.search);
 /* Requested now, in parallel with React starting up. */
-const booting: Promise<unknown> = Promise.all([...bootTabs().map((t) => PAGES[t].preload()), loadPalette()]);
+const booting: Promise<unknown> = Promise.all([...bootPages().map((p) => p.preload()), loadPalette()]);
 booting.catch(() => {
   /* logged in lazyPage; the page itself retries and recovers when it renders */
 });
 
 /** Holds the app back until the landing page's code is in (see above). */
 export function App() {
-  const [ready, setReady] = useState(() => bootTabs().every((t) => PAGES[t].ready) && paletteReady());
+  const [ready, setReady] = useState(() => bootPages().every((p) => p.ready) && paletteReady());
   useEffect(() => {
     if (ready) return;
     let live = true;
@@ -102,7 +110,7 @@ function AppShell() {
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, navigate] = useRoute();
+  const [tab, navigate, legal, navigateLegal] = useRoute();
   /* Change page only once its code is in; the latest request wins. After the
      idle prefetch every page is in, and this is a plain synchronous navigate. */
   const navSeq = useRef(0);
@@ -118,6 +126,20 @@ function AppShell() {
     };
     page.preload().then(go, go);
   }, [navigate]);
+  /* The legal pages the same way: their chunk first, then the page. */
+  const openLegal = useCallback((next: LegalPage) => {
+    const seq = ++navSeq.current;
+    if (LegalDoc.ready) {
+      navigateLegal(next);
+      return;
+    }
+    const go = () => {
+      if (seq === navSeq.current) navigateLegal(next);
+    };
+    LegalDoc.preload().then(go, go);
+  }, [navigateLegal]);
+  /* The tab whose page is on screen - none while a legal page is. */
+  const shown: Tab | null = legal ? null : tab;
   usePagePrefetch();
   const openScanAddress = useCallback((addr: string, venue?: Venue) => {
     window.location.href = venue
@@ -212,7 +234,7 @@ function AppShell() {
     window.dispatchEvent(new CustomEvent('dash:lock:query'));
     setHasLayout(answered);
     return () => window.removeEventListener('dash:lock', onLock);
-  }, [tab]);
+  }, [shown]);
   // Lifted so the ticker bar's star and the search modal's watchlist never go
   // stale against each other - both are mounted continuously, and useStored
   // is a plain useState under the hood with no cross-instance sync.
@@ -366,7 +388,7 @@ function AppShell() {
        * than the live price and the two order buttons, for a fact that does not
        * change between sessions. The network is now a quiet outlined pill. */}
       <NavBar
-        tab={tab}
+        tab={shown}
         onNavigate={setTab}
         address={address}
         hasLayout={hasLayout}
@@ -422,33 +444,37 @@ function AppShell() {
         {/* The trade page IS the dashboard. Layout is data: see
             src/dashboard/layout.ts for the grid and registry.tsx for the
             panels. Nothing about arrangement lives in this file. */}
-        {tab === 'trade' && <TradeDashboard context={tradeCtx} />}
+        {shown === 'trade' && <TradeDashboard context={tradeCtx} />}
 
         {/* The portfolio page is its own dashboard: layout is data, in
             components/Portfolio.tsx. It takes exactly the `ctx` bag the account
             panels already use, so this page adds no state to App.tsx. */}
-        {tab === 'portfolio' && (
+        {shown === 'portfolio' && (
           <Guarded name="Portfolio"><PortfolioDashboard {...ctx} /></Guarded>
         )}
 
-        {tab === 'scan' && (
+        {shown === 'scan' && (
           <Guarded name="Scan"><ScanDashboard {...ctx} /></Guarded>
         )}
 
-        {tab === 'explore' && (
+        {shown === 'explore' && (
           <Guarded name="Explore">
             <Explore address={address} onScan={openScanAddress} onOpenCopy={openCopy} onOpenSymbol={openSymbol} />
           </Guarded>
         )}
 
-        {tab === 'copy' && (
+        {shown === 'copy' && (
           <Guarded name="Copy"><CopyPage address={address} provider={provider} onScan={openScanAddress} /></Guarded>
         )}
 
-        {tab === 'leaderboard' && (
+        {shown === 'leaderboard' && (
           <Guarded name="Leaderboard">
             <LeaderboardPage address={address} onScan={openScanOverview} onOpenCopy={openCopy} />
           </Guarded>
+        )}
+
+        {legal && (
+          <Guarded name="Legal"><LegalDoc page={legal} onOpen={openLegal} /></Guarded>
         )}
 
         </div>
@@ -488,6 +514,8 @@ function AppShell() {
             onSessionChanged={refreshSession}
             helpOpen={helpOpen}
             onHelpOpen={setHelpOpen}
+            legal={legal}
+            onOpenLegal={openLegal}
           />
         </Guarded>
       </div>
@@ -529,6 +557,7 @@ function usePagePrefetch(): void {
       if (!(el instanceof HTMLAnchorElement) || el.origin !== window.location.origin) return;
       const t = tabForPath(el.pathname);
       if (t && !PAGES[t].ready) PAGES[t].preload().catch(() => {});
+      if (!t && legalForPath(el.pathname) && !LegalDoc.ready) LegalDoc.preload().catch(() => {});
     };
     document.addEventListener('pointerover', onIntent, { passive: true });
     document.addEventListener('focusin', onIntent);

@@ -863,17 +863,12 @@ function Chart({
   /**
    * Whether a chart drag may modify anything.
    *
-   * Two independent gates, and the reason for each is stated to the user rather
-   * than left as a dead line that will not move:
-   *   - the gateway exposes /trade/perps/modify and nothing equivalent on spot,
-   *   - a locked signing key cannot sign anything at all.
+   * One gate, and its reason is stated to the user rather than left as a dead
+   * line that will not move: a locked signing key cannot sign anything at all.
+   * Spot and perps alike - the move goes through changeOrder, which picks
+   * SoDEX's request for the order (or refuses it, before signing, with a reason).
    */
-  const modifyBlocked =
-    engine !== 'perps'
-      ? 'Spot orders cannot be modified in place — the gateway only offers modify on perps. Cancel and re-place instead.'
-      : !unlocked
-        ? 'Read-only — enable trading to move orders from the chart.'
-        : null;
+  const modifyBlocked = !unlocked ? 'Read-only — enable trading to move orders from the chart.' : null;
   const canModify = modifyBlocked === null;
   /** Placing is the same gate minus the perps-only part: the ticket can prefill
    *  for either engine, but not while the session is read-only. */
@@ -2280,10 +2275,14 @@ function Chart({
       // The one way the app changes an order (trading/actions.ts changeOrder): modify for a take-profit /
       // stop-loss, replace for a plain limit order - or cancel + new where that could drop the builder fee.
       const r = await api.changeOrder(engine, { symbol: body.symbol, orderID: body.orderID }, { price: body.price, quantity: body.quantity, stopPrice: body.stopPrice });
-      if (r.route === 'recreate') {
-        // A NEW order (new id) replaced this one: there is no line to wait for - the new one is drawn on the next read.
+      if (r.route === 'recreate' || r.route === 'replace') {
+        // A NEW order (new id) replaced this one - SoDEX's replace request creates one too
+        // (trading/feeGuard.ts): there is no line to wait for, the new one is drawn on the
+        // next read. Waiting would end in "no longer open" for an order that moved.
         abandon(p.line.key);
-        showLine('ok', `Order moved: it was cancelled and placed again at ${fmtPrice(p.price, sym?.tickSize)}.`);
+        showLine('ok', r.route === 'recreate'
+          ? `Order moved: it was cancelled and placed again at ${fmtPrice(p.price, sym?.tickSize)}.`
+          : `Order moved: SoDEX replaced it with a new order at ${fmtPrice(p.price, sym?.tickSize)}.`);
         onChanged?.();
         refreshOrders();
         return;

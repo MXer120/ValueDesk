@@ -54,8 +54,8 @@ export const scanHref = (address?: string): string =>
   address ? `/scan/index.html?address=${encodeURIComponent(address)}` : '/scan/index.html';
 
 export interface NavBarProps {
-  /** The page currently rendered, for the active-link state. */
-  tab: Tab;
+  /** The page currently rendered, for the active-link state; null on a page outside the nav (the legal pages). */
+  tab: Tab | null;
   /** Push a new page. The bar renders real hrefs, so this only handles the click. */
   onNavigate: (tab: Tab) => void;
   address: string | null;

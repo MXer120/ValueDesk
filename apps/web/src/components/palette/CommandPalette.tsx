@@ -33,6 +33,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -158,6 +159,7 @@ import {
 import { useLeaderboardSearch, useMarkets, useNow, useScreener, useVenueBoards, type BoardState, type ScreenerState } from './usePaletteData';
 import { MarketHeatmap } from './Heatmap';
 import { PaletteBoundary } from './PaletteBoundary';
+import { TypeAhead, applyTyped } from './typeAhead';
 import { LoadFailed } from '../LoadFailed';
 import {
   overviewCards, overviewLead, useAddressVenues, VENUE_CHECK,
@@ -342,6 +344,13 @@ export function openPalette(seed = ''): void {
   requestOpen?.(seed);
 }
 
+/* Keys typed after an open was asked for and before the search box has the
+   focus (typeAhead.ts): taken here, handed to the box when it gets the focus. */
+const typeAhead = new TypeAhead();
+/** The mounted dialog's search box, and how it takes what was typed ahead. */
+let searchBox: HTMLInputElement | null = null;
+let flushTyped: (() => void) | null = null;
+
 export function CommandPalette(p: CommandPaletteProps) {
   const [state, setState] = useState<Persisted>(initial);
   const patch = useCallback((u: Partial<Persisted>) => setState((s) => ({ ...s, ...u })), []);
@@ -352,7 +361,11 @@ export function CommandPalette(p: CommandPaletteProps) {
   const [selfOpen, setSelfOpen] = useState(false);
   const [seed, setSeed] = useState<string | undefined>(undefined);
   useEffect(() => {
-    requestOpen = (s) => { setSeed(s || undefined); setSelfOpen(true); };
+    requestOpen = (s) => {
+      if (!openRef.current) typeAhead.begin();
+      setSeed(s || undefined);
+      setSelfOpen(true);
+    };
     return () => { requestOpen = null; };
   }, []);
   const open = !!p.open || selfOpen;
@@ -363,8 +376,22 @@ export function CommandPalette(p: CommandPaletteProps) {
       if (openRef.current || e.repeat || !(e.metaKey || e.ctrlKey) || e.altKey || e.key.toLowerCase() !== 'k') return;
       e.preventDefault();
       e.stopImmediatePropagation();
+      typeAhead.begin();
       setSeed(undefined);
       setSelfOpen(true);
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
+  /* Until the search box has the focus, what is typed is the search: taken
+     before anything behind the palette sees it (capture phase, first). */
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (!typeAhead.active || !typeAhead.key(e)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      // A click put the focus in the box before its own focus step ran: hand over now.
+      if (searchBox && document.activeElement === searchBox) flushTyped?.();
     };
     document.addEventListener('keydown', onKey, true);
     return () => document.removeEventListener('keydown', onKey, true);
@@ -375,6 +402,7 @@ export function CommandPalette(p: CommandPaletteProps) {
      alone measured ~30 ms before the sheet began to leave. */
   const shellRef = useRef<HTMLDivElement | null>(null);
   const onClose = useCallback(() => {
+    typeAhead.cancel();
     const layer = shellRef.current;
     layer?.classList.add('is-closing');
     layer?.querySelector(':scope > .cp')?.classList.add('is-closing');
@@ -502,10 +530,13 @@ function PaletteDialog(
     const focusInput = () => {
       const el = inputRef.current;
       const cur = document.activeElement;
-      if (!el || cur === el || (cur && cur !== document.body && layerRef.current?.contains(cur))) return;
-      el.focus({ preventScroll: true });
-      const n = el.value.length;
-      el.setSelectionRange(n, n);
+      if (el && cur !== el && !(cur && cur !== document.body && layerRef.current?.contains(cur))) {
+        el.focus({ preventScroll: true });
+        const n = el.value.length;
+        el.setSelectionRange(n, n);
+      }
+      // What was typed before the box had the focus goes in now, after the seed.
+      flushTyped?.();
     };
     const raf = requestAnimationFrame(focusInput);
     const t = window.setTimeout(focusInput, 100);
@@ -517,6 +548,22 @@ function PaletteDialog(
   useEffect(() => () => {
     const prev = prevFocus.current;
     if (prev && document.contains(prev)) prev.focus({ preventScroll: true });
+  }, []);
+  /* Where the keys typed ahead (typeAhead.ts) go: this dialog's box. Layout
+     effect, so it is in place before the focus step above can run. */
+  useLayoutEffect(() => {
+    const box = inputRef.current;
+    searchBox = box;
+    flushTyped = () => {
+      if (!typeAhead.active) return;
+      const t = typeAhead.take();
+      if (t.back || t.text) setQuery((q) => applyTyped(q, t));
+    };
+    return () => {
+      if (searchBox === box) searchBox = null;
+      flushTyped = null;
+      typeAhead.cancel();
+    };
   }, []);
 
   /* --- Cmd/Ctrl+K closes (App's own handler only opens) ---------------- */

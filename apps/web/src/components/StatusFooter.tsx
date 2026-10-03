@@ -42,6 +42,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionInfo } from '../api';
 import { Modal } from './Modal';
 import { useAddressMask } from '../privacy';
+import { LEGAL_LABELS, LEGAL_PAGES, pathForLegal, type LegalPage } from '../router';
 import './StatusFooter.css';
 
 /**
@@ -94,11 +95,15 @@ export interface StatusFooterProps {
   /** Lifted so the `?` keyboard shortcut can open the same dialog. */
   helpOpen: boolean;
   onHelpOpen: (open: boolean) => void;
+  /** The legal page on screen, if one is (its link reads as current). */
+  legal?: LegalPage | null;
+  /** Show a legal page in place. Without it the links load the page like any link. */
+  onOpenLegal?: (page: LegalPage) => void;
 }
 
 export function StatusFooter({
   connLabel, connOk, session, address, health,
-  onGoToWallet, onGoToStats, onSessionChanged, helpOpen, onHelpOpen,
+  onGoToWallet, onGoToStats, onSessionChanged, helpOpen, onHelpOpen, legal = null, onOpenLegal,
 }: StatusFooterProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -276,6 +281,30 @@ export function StatusFooter({
           only, and the destination was the wallet page in both cases, so this
           is one button fewer for the same reach. */}
       <div className="sfoot-group sfoot-right">
+        {/* The Impressum, privacy policy and terms: required to be reachable
+            from every page, and this bar is the one strip every page has.
+            Words in the bar's own muted type, left of the rule that opens the
+            icon cluster - present, never louder than the icons. Real links
+            (middle-click, copy link); a plain click changes page in place. */}
+        <nav className="sfoot-legal" aria-label="Legal">
+          {LEGAL_PAGES.map((p) => (
+            <a
+              key={p}
+              href={pathForLegal(p)}
+              lang={p === 'impressum' ? 'de' : undefined}
+              className={`sfoot-link sfoot-link--${p}`}
+              aria-current={legal === p ? 'page' : undefined}
+              onClick={(e) => {
+                if (!onOpenLegal || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                setMenuOpen(false);
+                onOpenLegal(p);
+              }}
+            >
+              {LEGAL_LABELS[p]}
+            </a>
+          ))}
+        </nav>
         <span className="sfoot-rule" aria-hidden="true" />
         <button
           type="button"

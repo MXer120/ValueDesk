@@ -544,13 +544,11 @@ export function TvChart({
   /** The same two gates the klinecharts chart applies, plus the one only this
    *  chart has: a host that handed over its modify path. */
   const modifyBlocked =
-    engine !== 'perps'
-      ? 'Spot orders cannot be modified in place - the gateway only offers modify on perps.'
-      : !unlocked
-        ? 'Read-only - unlock a signing key to move orders from the chart.'
-        : !onModifyOrder
-          ? 'Moving orders from the TradingView chart is not wired up here - move them from Open orders.'
-          : null;
+    !unlocked
+      ? 'Read-only - unlock a signing key to move orders from the chart.'
+      : !onModifyOrder
+        ? 'Moving orders from the TradingView chart is not wired up here - move them from Open orders.'
+        : null;
   const canModify = modifyBlocked === null;
 
   const wanted = useMemo(() => {

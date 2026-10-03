@@ -17,6 +17,7 @@
  * requires.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { onFontsSettled } from '../fontsSettled';
 import type { PanelScroll } from './types';
 
 export interface PanelChromeProps {
@@ -126,7 +127,14 @@ export function PanelTabs({
     place();
     const ro = new ResizeObserver(place);
     if (bar.current) ro.observe(bar.current);
-    return () => ro.disconnect();
+    /* The tabs' widths change when the web font swaps in, and the bar's own
+       box does not - so the observer above never hears of it and the marker
+       stayed where the fallback font put it (about half a pixel off). */
+    const offFonts = onFontsSettled(place);
+    return () => {
+      ro.disconnect();
+      offFonts();
+    };
   }, [current?.key, tabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [leaving, setLeaving] = useState<{ key: string; content: ReactNode; fit: boolean } | null>(null);
