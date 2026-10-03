@@ -22,6 +22,23 @@ import type { AccountStream } from './stream';
 import type { TermsWatch } from './terms';
 import { dur, errText, hhmmss } from './util';
 
+/**
+ * How long to wait before reading again after `e`, or null when `e` is an answer
+ * (a refusal, a validation error) that reading again would only repeat.
+ */
+export function transientWait(e: unknown, base: number | undefined): number | null {
+  if (base === undefined) return null;
+  const x = e as { name?: string; retryInMs?: number; httpStatus?: number; status?: number; message?: string; cause?: { code?: string } } | null;
+  if (x?.name === 'RateLimitedError') return Math.max(base, (x.retryInMs ?? 0) + 2_000);
+  if (x?.name === 'UnreachableError') return base;
+  const status = x?.httpStatus ?? x?.status ?? 0;
+  if (status === 429) return Math.max(base, 60_000);
+  if (status >= 500 && status <= 599) return base;
+  const text = `${x?.message ?? ''} ${x?.cause?.code ?? ''}`;
+  if (/fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|network|timed? ?out|did not answer/i.test(text)) return base;
+  return null;
+}
+
 export type Mode = 'plan' | 'live';
 
 export const STEP_ORDER = [
@@ -148,6 +165,26 @@ export class Recorder {
   tx(t: TxRecord): void {
     this.current?.txs.push(t);
     this.line(`tx ${t.what}: ${t.hash} on ${t.chain}${t.explorer ? ` (${t.explorer})` : ''}`, 5);
+  }
+  /**
+   * A timed READ-ONLY sub-step that is tried again when the failure is the network's,
+   * not an answer: a timeout, a dropped connection, a 5xx, a rate limit. One slow
+   * answer of a public endpoint must not end a run before it started (seen live: the
+   * asset config timed out once and the whole plan failed). Never use it for anything
+   * that writes - a write that may have landed is not repeated.
+   */
+  async read<T>(title: string, fn: () => Promise<T>, detail?: (v: T) => string | undefined): Promise<T> {
+    const waits = [5_000, 15_000, 45_000];
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.sub(attempt ? `${title} (again, ${attempt + 1} of ${waits.length + 1})` : title, fn, detail);
+      } catch (e) {
+        const wait = transientWait(e, waits[attempt]);
+        if (wait === null || attempt >= waits.length) throw e;
+        this.line(`the network failed, not SoDEX's answer (${errText(e)}) - trying again in ${Math.round(wait / 1000)} s`, 5);
+        await new Promise((r) => setTimeout(r, wait));
+      }
+    }
   }
   /** A timed sub-step; its failure fails the step. */
   async sub<T>(title: string, fn: () => Promise<T>, detail?: (v: T) => string | undefined): Promise<T> {

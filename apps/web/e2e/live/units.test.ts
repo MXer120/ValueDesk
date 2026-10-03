@@ -487,3 +487,14 @@ test('hand-sent deposits: the routes offered, the config ("auto", "skip"), and w
   assert.equal(ownerWord('yes'), null);
   assert.equal(ownerWord(null), null);
 });
+
+test('transientWait: reads again after the network failed, never after an answer', async () => {
+  const { transientWait } = await import('./context');
+  const { UnreachableError, RateLimitedError } = await import('../../src/exchange/errors');
+  assert.equal(transientWait(new UnreachableError('mainnet-gw.sodex.dev', true), 5_000), 5_000);
+  assert.equal(transientWait(new RateLimitedError('mainnet-gw.sodex.dev', 30_000), 5_000), 32_000);
+  assert.equal(transientWait(Object.assign(new Error('Bad Gateway'), { httpStatus: 502 }), 5_000), 5_000);
+  assert.equal(transientWait(new TypeError('fetch failed'), 5_000), 5_000);
+  assert.equal(transientWait(new Error('order below the minimum notional'), 5_000), null);
+  assert.equal(transientWait(new UnreachableError('x', true), undefined), null, 'no more attempts left');
+});

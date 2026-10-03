@@ -133,3 +133,12 @@ test('which runs need the dev server, and which could move funds', () => {
   assert.equal(mayMoveFunds(ok(['--plan-only'])), false);
   assert.equal(mayMoveFunds(ok(['--stages', 'A,B,C'])), false);
 });
+
+test('--go: the full test straight away - stage D only, the full profile, no menus', () => {
+  const r = parseArgs(['--go']);
+  assert.ok(r.ok);
+  if (!r.ok) return;
+  assert.equal(r.args.go, true);
+  assert.deepEqual(r.args.stages, ['D']);
+  assert.equal(r.args.profile, 'full');
+});

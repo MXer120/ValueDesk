@@ -313,6 +313,14 @@ export async function offerSpendCap(ctx: Ctx, deps: DDeps, cfg: Prepared, plan: 
     '   ',
   );
   out.say(`The runner suggests a cap of ${fmtUsd(s)}: its estimate with about 30 % room. The cap is a limit, not a price - the run stops before it would lose more, and what it does not spend stays in the wallet.`, '   ');
+  // --go: the owner asked for no questions but the key and the start - the cap is set to the
+  // suggestion here and shown again right before the YES that starts the run.
+  if (ctx.args.go) {
+    updateConfig(deps, cfg, { maxSpendUsd: s });
+    notes.push(`--go: the spend cap ("maxSpendUsd") in ${cfg.path} was set to ${s} - the runner's suggestion for this plan - and confirmed with the YES that started the run.`);
+    out.line(`   Set: "maxSpendUsd": ${s} (you confirm it with YES before anything moves). Reading the plan again...`);
+    return replan();
+  }
   if (!(await confirm(ctx.ask, `Set the spend cap ("maxSpendUsd") in the run config to ${fmtUsd(s)}?`, false, { money: true }))) {
     ctx.shared.next.push(`The plan's estimate is above the spend cap: set "maxSpendUsd" in ${cfg.path} to at least ${s} (the runner's suggestion), or choose a smaller profile.`);
     return plan;
@@ -608,9 +616,23 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   }
   showPlan(ctx, previewPlan, { steps: true });
   out.line(`   A brand-new wallet needs: ${fundingStatus(previewPlan.view).needs.map((n) => `${n.amount} ${n.coin} on ${n.chain}`).join(' + ') || 'nothing from other chains'}`);
-  previewPlan = await collectReceivers(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-receivers.log'), full);
+  const savedReceivers = receiversSet(cfg.config).filter((r) => r.address);
+  if (args.go && savedReceivers.length) {
+    // --go: the addresses entered in an earlier session, as they are in the run config.
+    say(`Your addresses from the run config (${savedReceivers.length}): ${savedReceivers.map((r) => r.name).join(', ')}.`);
+  } else {
+    previewPlan = await collectReceivers(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-receivers.log'), full);
+  }
   if (previewPlan.view.handDeposits.length && !previewPlan.refused.length) {
-    previewPlan = await collectHandDeposits(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-hand.log'), full);
+    if (args.go) {
+      // --go: nothing that waits for a person during the run. The deposits back by hand are left out
+      // (reported "skipped (owner)"); the withdrawals to your addresses still run.
+      updateConfig(deps, cfg, { manualDeposits: previewPlan.view.handDeposits.map((h) => ({ coin: h.coin, chain: h.chain, amount: 'auto', skip: true })) });
+      say('The deposits you would send back by hand are left out (--go runs without waiting for you); the withdrawals to your addresses run.');
+      previewPlan = await preview(profile, 'D-preview-hand.log');
+    } else {
+      previewPlan = await collectHandDeposits(ctx, deps, cfg, previewPlan, preview.bind(null, profile, 'D-preview-hand.log'), full);
+    }
   }
   if (previewPlan.view.budget) showBudget(ctx, previewPlan.view, 'THE BUDGET (the runner\'s read-only plan for a brand-new wallet, with your addresses)');
 
@@ -634,6 +656,14 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   if (!held) return end('SKIPPED', 'no usable key was entered');
   ctx.shared.wallet = held.address;
   out.say('Tip: if you pasted the key, it is still in your clipboard. Copy something else when you are done here.', '   ');
+  // An address of yours that IS the test wallet (one SafePal wallet for everything): sending to it
+  // is sending to itself - that step is left out instead of failing the run.
+  for (const r of receiversSet(cfg.config)) {
+    if (r.address && sameAddress(r.address, held.address)) {
+      updateConfig(deps, cfg, { receivers: { [r.name]: '' } });
+      say(`Your "${r.name}" address is this test wallet itself, so the step that sends to "another address of yours" is left out.`);
+    }
+  }
   const builderAddress = ctx.shared.builderAddress;
   if (o.profile === undefined && builderAddress && sameAddress(builderAddress, held.address)) {
     say('That is the BUILDER wallet. The test wallet must be a different one: it is the user who pays the fee. Start again with another wallet.');
@@ -746,7 +776,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   out.line();
   out.line('   BEFORE YOU START: close every other Valuescan tab and every sodex.com tab.');
   say('SoDEX allows about four history reads a minute per internet address. The run and the server\'s fee check need them; another open tab can use them up, SoDEX then blocks this address for a minute, and the run fails.');
-  await pressEnter(ctx.ask, 'Press Enter when the other tabs are closed.');
+  if (!args.go) await pressEnter(ctx.ask, 'Press Enter when the other tabs are closed.');
   const tiersOn = hasTermsKeys(cfg.config);
   if (tiersOn) {
     out.line();
@@ -754,7 +784,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
     say(`The run places two "cheating" orders on purpose (one with a lower fee, one without the builder) to prove they are not credited. After that the server keeps this wallet on the default fee for 30 days. For a second run use a brand-new wallet - or make the server forget this one first, in the folder apps/server:  npx tsx tools/builderTiers.ts forget --address ${held.address}`);
   }
   out.line();
-  say('This moves REAL money: the run deposits, trades and withdraws with the wallet above, up to the spend cap.');
+  say(`This moves REAL money: the run deposits, trades and withdraws with the wallet above, up to the spend cap of ${fmtUsd(finalPlan.view.maxSpendUsd)} (costs + what goes to your own addresses).`);
   if (!(await typeExactly(ctx.ask, 'Type YES (in capitals) to allow it, or q to stop:', 'YES', { exactCase: true }))) {
     items.push(...planItems(finalPlan.view));
     ctx.shared.next.push(`Stage D stopped before the live run: you did not confirm. The funds are still in the test wallet ${held.address}.`);
@@ -934,7 +964,8 @@ async function collectReceivers(ctx: Ctx, deps: DDeps, cfg: Prepared, first: Pla
         const typed = await ctx.ask.prompter.ask('');
         if (typed === null) throw new Stopped('the input ended');
         address = typed.trim();
-        if (looksLikeKey(address)) {
+        // A Sui address IS 0x + 64 hex characters - the size of a key - so it is not refused there.
+        if (looksLikeKey(address) && !(n.name === 'sui' && /^0x[0-9a-fA-F]{64}$/.test(address))) {
           out.line('      That is the size of a PRIVATE KEY. Never enter a key here - this wants an ADDRESS. Left out.');
           address = '';
         } else if (address && (/\s/.test(address) || address.length > 130)) {

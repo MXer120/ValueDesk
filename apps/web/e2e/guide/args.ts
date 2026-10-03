@@ -44,6 +44,12 @@ export interface GuideArgs {
   revoke: boolean | null;
   /** Stage C: leave the server's fee-tier config alone (no `builderTiers.ts init`). */
   noTiers: boolean;
+  /**
+   * --go: the full test straight away, with what the run config already holds (the
+   * addresses and the builder entered in an earlier session): stage D only, no choices.
+   * It asks for the key and the two real-funds confirmations - nothing else.
+   */
+  go: boolean;
 }
 
 export const ALL_STAGES: readonly StageId[] = ['A', 'B', 'C', 'D'];
@@ -59,6 +65,8 @@ export const USAGE = `Valuescan guided test run
 
   RUN-LIVE-TESTS.cmd                 the full guided run: stages A, B, C, D and the summary
   RUN-LIVE-TESTS.cmd --stages A,B    only these stages
+  RUN-LIVE-TESTS.cmd --go            the full test straight away with the addresses and the builder
+                                     already in the run config: asks only for the key, YES and the address
 
 Stages
   A  offline test suites       typechecks and every unit / offline e2e test (no network, no key)
@@ -68,6 +76,9 @@ Stages
 
 Options
   --stages A,B           run only these stages (letters, comma separated; "all" = A,B,C,D)
+  --go                   the full test (stage D only) with the run config as it is: no menus, the
+                         spend cap set to the plan's suggestion (shown before you confirm), the
+                         deposits you would send back by hand left out
   --yes                  answer the non-money questions with their default. The key is never
                          answered for you, and neither is a real-funds confirmation
   --plan-only            stage D stops after the read-only plan: nothing is signed or sent
@@ -127,6 +138,7 @@ export function defaultArgs(): GuideArgs {
     feeSpot: null,
     revoke: null,
     noTiers: false,
+    go: false,
   };
 }
 
@@ -193,6 +205,11 @@ export function parseArgs(argv: readonly string[]): ParseResult {
         break;
       case '--plan-only':
         a.planOnly = true;
+        break;
+      case '--go':
+        a.go = true;
+        a.stages = ['D'];
+        a.profile = 'full';
         break;
       case '--throwaway-key':
         a.throwawayKey = true;

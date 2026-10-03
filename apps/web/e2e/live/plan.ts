@@ -286,7 +286,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   const has = (id: StepId) => o.selected.has(id);
 
   // 1. The backend.
-  const health = await rec.sub('backend health', async () => {
+  const health = await rec.read('backend health', async () => {
     const h = await api.health();
     return { network: String(h?.network ?? ''), chainId: Number(h?.chainId), mainnetWritesAllowed: h?.mainnetWritesAllowed === true };
   }, (h) => `network ${h.network}, chain ${h.chainId}, app mainnet writes ${h.mainnetWritesAllowed ? 'allowed' : 'OFF'}`);
@@ -294,20 +294,20 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   if (health.chainId !== VALUECHAIN_CHAIN_ID) problems.push(`the backend's chain id is ${health.chainId}, not ${VALUECHAIN_CHAIN_ID}`);
   if (o.mode === 'live' && !health.mainnetWritesAllowed) problems.push('the backend reports mainnet writes switched off - the app itself would refuse to trade');
 
-  const vc = await rec.sub('ValueChain parameters (backend /api/deposit/chain)', () => api.depositChain(), (c) => `exchange ${c.exchange}`);
+  const vc = await rec.read('ValueChain parameters (backend /api/deposit/chain)', () => api.depositChain(), (c) => `exchange ${c.exchange}`);
   if (vc.chainId !== VALUECHAIN_CHAIN_ID) problems.push(`the backend's ValueChain id is ${vc.chainId}`);
   if (vc.exchange.toLowerCase() !== PINNED_EXCHANGE) problems.push(`the backend names ${vc.exchange} as the SoDEX exchange contract; the runner only deposits to ${PINNED_EXCHANGE}`);
   if (vc.rpcUrl.replace(/\/+$/, '') !== VALUECHAIN_RPC) warnings.push(`the backend's ValueChain RPC is ${vc.rpcUrl}; the test wallet uses ${VALUECHAIN_RPC}`);
 
   // 2. SoDEX's live asset config.
-  const coins = await rec.sub('SoDEX asset config', () => assetConfigs(), (c) => `${c.length} coins`);
+  const coins = await rec.read('SoDEX asset config', () => assetConfigs(), (c) => `${c.length} coins`);
   const usdc = coins.find((c) => c.coin.toUpperCase() === 'USDC');
   const soso = coins.find((c) => c.valuechain.native);
   if (!usdc || usdc.assetId === null) throw new Error('SoDEX\'s asset config has no tradable USDC');
   if (!soso || soso.assetId === null) throw new Error('SoDEX\'s asset config has no tradable SOSO');
 
   // 3. The account.
-  const accountId = await rec.sub('SoDEX account', () => sodexAccountId(owner), (id) => (id ? `account #${id}` : 'none yet (a brand-new wallet)'));
+  const accountId = await rec.read('SoDEX account', () => sodexAccountId(owner), (id) => (id ? `account #${id}` : 'none yet (a brand-new wallet)'));
   const newAccount = accountId === 0;
   if (!newAccount && o.mode === 'live' && !cfg.allowExistingAccount) {
     problems.push(`this wallet already has SoDEX account #${accountId}; a brand-new wallet is the expected start (set allowExistingAccount: true to use it anyway, e.g. to resume with --only)`);
@@ -326,7 +326,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   // 4. Balances.
   const prices = await coinPrices().catch(() => new Map<string, number>());
   const px = (coin: string): number | null => (/^v?USDC$/i.test(coin) ? 1 : priceOf(prices, coin) ?? null);
-  const wallet = await rec.sub('wallet balances (ValueChain + every EVM chain the runner signs on)', async () => {
+  const wallet = await rec.read('wallet balances (ValueChain + every EVM chain the runner signs on)', async () => {
     const out: Record<string, { native: string; usdc: string | null; err?: string }> = {};
     const reads: Array<Promise<void>> = [];
     reads.push(
@@ -390,7 +390,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   const depositChains = [...(has('deposit-external') ? [cfg.deposit.chain] : []), ...(has('extra-deposits') ? cfg.extraDeposits.map((d) => d.chain) : [])];
   const depositAddresses = new Map<string, DepositAddressCheck>();
   for (const chainKey of [...new Set(depositChains)]) {
-    const d = await rec.sub(
+    const d = await rec.read(
       `USDC deposit address on ${chainKey}: backend vs on-chain registry`,
       () => checkDepositAddress(owner, chainKey, { registryOnly: o.registryOnly, waitMs: o.mode === 'live' ? cfg.timeouts.addressIssueSeconds * 1000 : 0, say }),
       (d) => `backend ${d.backend ?? '-'}${d.backend ? (d.backendVerified ? ' (verified)' : ' (NOT verified)') : ''} | registry ${d.registry ?? '-'} -> ${d.match ? 'MATCH' : 'no match'}${d.note ? ` [${d.note}]` : ''}`,
@@ -430,7 +430,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   // 7a. Every route, read-only (recorded as route-<coin>-<chain> checks).
   let routeLines: string[] = [];
   try {
-    const rc = await rec.sub('every route: open/closed, minimum, fee, maintenance, deposit address, the app\'s receiver check', () =>
+    const rc = await rec.read('every route: open/closed, minimum, fee, maintenance, deposit address, the app\'s receiver check', () =>
       checkRoutes({ owner, coins, cfg, registryOnly: o.registryOnly, checks: o.checks ?? new Checks() }),
       (r) => `${r.lines.length} routes, ${r.warnings.length} with a problem`,
     );
@@ -446,7 +446,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   if (b && b.termsKeys.length && o.terms) {
     const watch = o.terms;
     try {
-      const t = await rec.sub('the server\'s fee terms for this wallet (GET /api/vs/builder/terms)', () => requestTerms(watch, owner), (x) =>
+      const t = await rec.read('the server\'s fee terms for this wallet (GET /api/vs/builder/terms)', () => requestTerms(watch, owner), (x) =>
         x.verdict.off ? 'fee tiers are OFF on the backend' : x.verdict.verified ? `verified (key ${x.verdict.keyId}): perps ${x.verdict.answer.fee?.perps} / spot ${x.verdict.answer.fee?.spot}` : `NOT verified: ${x.verdict.problems.join('; ')}`,
       );
       terms = { verdict: t.verdict, cacheControl: t.cacheControl };
