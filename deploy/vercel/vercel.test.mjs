@@ -35,6 +35,9 @@ function route(path, staticFiles) {
         if (dest) break;
         if (staticFiles.has(path)) return { headers, matchedHeaderRoutes, served: path };
         if (path.endsWith('/') && staticFiles.has(`${path}index.html`)) return { headers, matchedHeaderRoutes, served: `${path}index.html` };
+        // Seen live (2026-10-03): Vercel also serves a directory's index.html for the
+        // path WITHOUT the slash (/scan -> scan/index.html), with no redirect.
+        if (!path.endsWith('/') && staticFiles.has(`${path}/index.html`)) return { headers, matchedHeaderRoutes, served: `${path}/index.html` };
         phase = 'miss';
       }
       continue;

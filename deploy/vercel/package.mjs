@@ -73,6 +73,10 @@ export function routes() {
     ...HEADER_CLASSES.map(([src, sample]) => ({ src, headers: headersFor(sample), continue: true, caseSensitive: true })),
     // public/scan/index.html forwards links saved from the old Scan page.
     { src: '^/scan/$', dest: '/scan/index.html', caseSensitive: true },
+    // /scan without the slash is the app's route. Vercel's filesystem step would serve
+    // the directory's index.html for it - the old redirect page, under the site policy
+    // that blocks its script, whose meta refresh to /scan then reloads it forever.
+    { src: '^/scan$', dest: '/index.html', caseSensitive: true },
     { handle: 'filesystem' },
     // An app route: the shell. A missing file with an extension stays a 404.
     { src: `^/${NO_DOT_LAST}`, dest: '/index.html', caseSensitive: true },
