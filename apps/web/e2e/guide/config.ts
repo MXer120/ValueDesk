@@ -132,7 +132,14 @@ export function parseConfigText(text: string, where: string): ParsedConfig {
 
 /** Why this config may not be used at all. (Amounts, routes and receivers are checked by the runner's plan.) */
 export function configProblems(cfg: Json): string[] {
-  const paths = findKeyLike(cfg);
+  // A Sui address is 0x + 64 hex characters - the size of a key - and belongs in receivers.sui.
+  const suiAddress = (p: string): boolean => {
+    if (p !== 'receivers.sui' && p !== 'receivers.sui.address') return false;
+    const r = isObj(cfg.receivers) ? cfg.receivers.sui : undefined;
+    const v = isObj(r) ? r.address : r;
+    return typeof v === 'string' && /^0x[0-9a-fA-F]{64}$/.test(v);
+  };
+  const paths = findKeyLike(cfg).filter((p) => !suiAddress(p));
   return paths.length
     ? [`The config holds something the size of a private key at: ${paths.join(', ')}. A key must never be in a file - remove it. The guide asks for the key itself, with a hidden prompt.`]
     : [];
