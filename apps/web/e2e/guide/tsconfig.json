@@ -1,0 +1,6 @@
+// Type-checks the guided test run (RUN-LIVE-TESTS.cmd), which sits outside apps/web's own "include".
+// From apps/web:  npx tsc --noEmit -p e2e/guide
+{
+  "extends": "../../tsconfig.json",
+  "include": ["./**/*.ts"]
+}
