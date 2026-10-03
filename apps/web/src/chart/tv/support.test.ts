@@ -52,12 +52,12 @@ test('the probe treats the SPA fallback page as "not installed"', () => {
 test('charts save, list, load, overwrite by id and remove', async () => {
   let t = 1_700_000_000_000;
   const a = createSaveLoadAdapter(memoryStorage(), { now: () => t, newId: () => 'id1' });
-  const id = await a.saveChart({ name: 'Valuescan', symbol: 'perps:BTC-USD', resolution: '1', content: '{"a":1}' });
+  const id = await a.saveChart({ name: 'ValueDesk', symbol: 'perps:BTC-USD', resolution: '1', content: '{"a":1}' });
   assert.equal(id, 'id1');
   t += 5_000;
-  await a.saveChart({ id, name: 'Valuescan', symbol: 'perps:ETH-USD', resolution: '5', content: '{"a":2}' });
+  await a.saveChart({ id, name: 'ValueDesk', symbol: 'perps:ETH-USD', resolution: '5', content: '{"a":2}' });
   const all = await a.getAllCharts();
-  assert.deepEqual(all, [{ id: 'id1', name: 'Valuescan', symbol: 'perps:ETH-USD', resolution: '5', timestamp: 1_700_000_005 }]);
+  assert.deepEqual(all, [{ id: 'id1', name: 'ValueDesk', symbol: 'perps:ETH-USD', resolution: '5', timestamp: 1_700_000_005 }]);
   assert.equal(await a.getChartContent('id1'), '{"a":2}');
   await a.removeChart('id1');
   assert.deepEqual(await a.getAllCharts(), []);

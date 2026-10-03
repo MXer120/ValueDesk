@@ -496,7 +496,7 @@ const keyLifetime = (): number => Math.min(tradingConfig().keyTtlMs, MAX_TRADING
 export async function enableTrading(o: EnableOptions): Promise<TradingState> {
   const cfg = tradingConfig();
   const owner = o.owner.toLowerCase();
-  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) {
     throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
   }
@@ -614,7 +614,7 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
 // --- the builder fee ----------------------------------------------------------------
 
 const BUILDER_REQUIRED_DECLINED =
-  'Trading through Valuescan requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account.';
+  'Trading through ValueDesk requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account.';
 
 interface BuilderOutcome {
   /** What SoDEX lists for the configured builder (per engine), or null. */
@@ -708,7 +708,7 @@ async function settleBuilderApproval(o: EnableOptions, owner: string, accountId:
     throw new TradingError(
       walletSaidNo
         ? BUILDER_REQUIRED_DECLINED
-        : `The builder fee approval did not go through (${reason}). Trading through Valuescan requires it, so trading stays off. Enable trading again to retry.`,
+        : `The builder fee approval did not go through (${reason}). Trading through ValueDesk requires it, so trading stays off. Enable trading again to retry.`,
       'builder-required',
     );
   }
@@ -825,10 +825,10 @@ export async function approveBuilderFee(o: {
   onStep?: (step: 'builder-approval') => void;
 }): Promise<ApproveBuilderResult> {
   const cfg = tradingConfig();
-  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
   const b = activeBuilder(cfg.builder);
-  if (!b) throw new TradingError('This build of Valuescan charges no builder fee: there is nothing to approve.', 'not-enabled');
+  if (!b) throw new TradingError('This build of ValueDesk charges no builder fee: there is nothing to approve.', 'not-enabled');
   const owner = o.owner.toLowerCase();
   const mine = signer && signer.meta.owner === owner ? signer : null;
 
@@ -921,7 +921,7 @@ export interface RevokeBuilderResult {
  */
 export async function revokeBuilderApproval(o: { owner: string; provider: Eip1193Provider; builderId?: number }): Promise<RevokeBuilderResult> {
   const cfg = tradingConfig();
-  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
   const owner = o.owner.toLowerCase();
   const mine = signer && signer.meta.owner === owner ? signer : null;
@@ -1046,7 +1046,7 @@ export async function checkKeyAfterRejection(): Promise<void> {
 /** What signs the next action: throws when trading is not enabled for `owner` (on `engine`). */
 export function requireSigner(owner?: string | null, engine?: Engine): { key: SigningKeyRef; meta: StoredKey } {
   const cfg = tradingConfig();
-  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of Valuescan.', 'disabled');
+  if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
   if (!signer || state.status !== 'enabled') {
     throw new TradingError(

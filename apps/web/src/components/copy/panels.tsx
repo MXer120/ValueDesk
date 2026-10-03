@@ -681,7 +681,7 @@ function HowPanel() {
     <Card title="How it works (planned)" action={<span className="pf-chip pf-chip--warn">Not deployed</span>}>
       <div className="copy-how">
         <Group title="Your funds stay yours">
-          <p>Copies trade in your own SoDEX or Hyperliquid account. Valuescan never holds a deposit.</p>
+          <p>Copies trade in your own SoDEX or Hyperliquid account. ValueDesk never holds a deposit.</p>
         </Group>
         <Group title="A key that can only trade">
           <p>

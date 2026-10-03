@@ -359,9 +359,12 @@ h3 { font-size: var(--fs-xs); line-height: 18px; margin: 0 0 var(--sp-1); font-w
    twice. It sits at the same size as the nav links beside it and is
    distinguished from them by weight alone. */
 .brand {
+  display: inline-flex; align-items: center; gap: 8px;
   font-size: var(--fs-base); font-weight: 500; line-height: var(--lh-base);
   color: var(--text); white-space: nowrap;
 }
+/* The mark (components/BrandMark.tsx): the tab icon's drawing, beside the wordmark. */
+.brand-mark { flex: none; display: block; border-radius: 5px; }
 
 /* Network pill. A TINTED CHIP, not a bare ring.
  *

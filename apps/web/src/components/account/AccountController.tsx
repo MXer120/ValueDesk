@@ -127,8 +127,8 @@ export function AccountController({ address, provider, session, onSession }: Pro
         notify(
           'ok',
           st.builder
-            ? 'Trading enabled. Orders placed here carry the Valuescan builder fee you approved.'
-            : 'Trading enabled, without the Valuescan builder fee.',
+            ? 'Trading enabled. Orders placed here carry the ValueDesk builder fee you approved.'
+            : 'Trading enabled, without the ValueDesk builder fee.',
         );
       }
       latest.current.onSession();

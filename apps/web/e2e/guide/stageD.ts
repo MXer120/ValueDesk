@@ -807,7 +807,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   if (tiersOn) {
     out.line();
     out.line('   ABOUT THE FEE-CHANGE TEST: it works ONCE per wallet.');
-    say(`The run places two "cheating" orders on purpose (one with a lower fee, one without the builder) to prove they are not credited. After that the server keeps this wallet on the default fee for 30 days. For a second run use a brand-new wallet - or make the server forget this one first, in the folder apps/server:  npx tsx tools/builderTiers.ts forget --address ${held.address}`);
+    say(`The run places two "cheating" orders on purpose (one with a lower fee, one without the builder) to prove they are not credited. After that the server keeps this wallet on the default fee for 30 days. A resumed run (--go, or "Resume the earlier run") makes the LOCAL server forget this test wallet before the fee test runs again; for another backend: in the folder apps/server on its computer,  npx tsx tools/builderTiers.ts forget --address ${held.address}`);
   }
   out.line();
   say(`This moves REAL money: the run deposits, trades and withdraws with the wallet above, up to the spend cap of ${fmtUsd(finalPlan.view.maxSpendUsd)} (costs + what goes to your own addresses).`);

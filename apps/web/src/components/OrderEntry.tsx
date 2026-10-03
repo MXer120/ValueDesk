@@ -2051,9 +2051,9 @@ export function OrderEntry({
                   type="button"
                   className="oe-feebtn"
                   onClick={requestAdvanced}
-                  title={`SoDEX charges this on every fill of an order placed here, maker or taker, on top of its own fee, and pays it to Valuescan (builder account #${builderFee.builderId}). Spot buys are not charged. ${builderFee.status === 'required' ? 'It applies once you have approved it: press to approve it, or to see what is approved.' : 'Press to see or revoke your approval.'}`}
+                  title={`SoDEX charges this on every fill of an order placed here, maker or taker, on top of its own fee, and pays it to ValueDesk (builder account #${builderFee.builderId}). Spot buys are not charged. ${builderFee.status === 'required' ? 'It applies once you have approved it: press to approve it, or to see what is approved.' : 'Press to see or revoke your approval.'}`}
                 >
-                  Valuescan fee
+                  ValueDesk fee
                 </button>{' '}
                 <span className="oe-tag">builder</span>
               </dt>
@@ -2072,7 +2072,7 @@ export function OrderEntry({
             /* The next volume tier, as the server names it (shown only; the fee above is what the order carries). */
             <div className="oe-out__row oe-out__row--note">
               <dd className="oe-out__v oe-out__v--note">
-                Valuescan fee {pctRate(builderRateToFraction(builderFee.next.rate))} once {fmtUsd(builderFee.next.atUsd)} is traded through Valuescan
+                ValueDesk fee {pctRate(builderRateToFraction(builderFee.next.rate))} once {fmtUsd(builderFee.next.atUsd)} is traded through ValueDesk
                 {builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} so far)` : ''}.
               </dd>
             </div>

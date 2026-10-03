@@ -130,8 +130,8 @@ test('required build: an order goes out with the pinned builder at the fee owed 
   passes(perpsOrder(ours(20)));
   passes(spotOrder(ours(20)));
   // No builder.
-  stops(perpsOrder(undefined), /does not carry the Valuescan builder fee/);
-  stops(spotOrder(undefined), /does not carry the Valuescan builder fee/);
+  stops(perpsOrder(undefined), /does not carry the ValueDesk builder fee/);
+  stops(spotOrder(undefined), /does not carry the ValueDesk builder fee/);
   // A lower fee than is owed, down to none.
   for (const fee of [19, 15, 1, 0]) stops(perpsOrder(ours(fee)), /not the fee this wallet owes/, `fee ${fee}`);
   stops(spotOrder(ours(19)), /not the fee this wallet owes/);
@@ -139,15 +139,15 @@ test('required build: an order goes out with the pinned builder at the fee owed 
   stops(perpsOrder(ours(21)), /not the fee this wallet owes/);
   stops(spotOrder(ours(2000)), /not the fee this wallet owes/);
   // Another builder, at any fee.
-  stops(perpsOrder({ id: BID + 1, fee: 20 }), /another builder than Valuescan/);
-  stops(spotOrder({ id: 1, fee: 20 }), /another builder than Valuescan/);
+  stops(perpsOrder({ id: BID + 1, fee: 20 }), /another builder than ValueDesk/);
+  stops(spotOrder({ id: 1, fee: 20 }), /another builder than ValueDesk/);
 });
 
 test('required build: a batch with several legs is one order - the builder is the batch\'s, and no leg may name its own', () => {
   const entry = leg({ clOrdID: 'vs-e' });
   const tp = leg({ clOrdID: 'tp-e', side: OrderSide.SELL, type: OrderType.MARKET, timeInForce: TimeInForce.IOC, price: undefined, stopPrice: '90000', stopType: 2, triggerType: 2, reduceOnly: true });
   passes(perpsOrder(ours(20), [entry, tp]));
-  stops(perpsOrder(undefined, [entry, tp]), /does not carry the Valuescan builder fee/);
+  stops(perpsOrder(undefined, [entry, tp]), /does not carry the ValueDesk builder fee/);
   // A per-order builder (perps allows one) could undercut the batch's: refused whatever it says.
   stops(perpsOrder(ours(20), [entry, { ...tp, builder: { id: BID, fee: 1 } }]), /a builder of its own/);
   stops(perpsOrder(ours(20), [{ ...entry, builder: { id: 999, fee: 20 } }]), /a builder of its own/);
@@ -162,7 +162,7 @@ test('the fee owed follows verified terms: a lower tier is the new floor, the de
   passes(perpsOrder(ours(17)));
   stops(perpsOrder(ours(14)), /not the fee this wallet owes/);
   stops(perpsOrder(ours(21)), /not the fee this wallet owes/);
-  stops(perpsOrder(undefined), /does not carry the Valuescan builder fee/);
+  stops(perpsOrder(undefined), /does not carry the ValueDesk builder fee/);
   // Spot has no lower tier: 20 or nothing.
   passes(spotOrder(ours(20)));
   stops(spotOrder(ours(15)), /not the fee this wallet owes/);
@@ -180,7 +180,7 @@ test('a wallet whose terms say 0 still names the builder: {id, fee: 0} passes, n
   passes(perpsOrder(ours(0)));
   passes(spotOrder(ours(0)));
   passes(perpsOrder(ours(20)));
-  stops(perpsOrder(undefined), /does not carry the Valuescan builder fee/);
+  stops(perpsOrder(undefined), /does not carry the ValueDesk builder fee/);
 });
 
 test('optional build (VITE_BUILDER_REQUIRED=0): an order may go without the builder - but never with another one or a lower fee', async () => {
@@ -189,17 +189,17 @@ test('optional build (VITE_BUILDER_REQUIRED=0): an order may go without the buil
   passes(spotOrder(undefined));
   passes(perpsOrder(ours(20)));
   stops(perpsOrder(ours(19)), /not the fee this wallet owes/);
-  stops(perpsOrder({ id: 999, fee: 20 }), /another builder than Valuescan/);
+  stops(perpsOrder({ id: 999, fee: 20 }), /another builder than ValueDesk/);
   stops(perpsOrder(ours(20), [leg({ builder: { id: BID, fee: 1 } })]), /a builder of its own/);
 });
 
 test('an engine the build does not charge on carries no builder: none is required there, and none is let through', () => {
   configure(PERPS_ONLY);
   passes(spotOrder(undefined));
-  stops(spotOrder(ours(20)), /names a builder on spot, where Valuescan charges none/);
+  stops(spotOrder(ours(20)), /names a builder on spot, where ValueDesk charges none/);
   stops(spotOrder(ours(0)), /names a builder on spot/);
   // Perps is still guarded.
-  stops(perpsOrder(undefined), /does not carry the Valuescan builder fee/);
+  stops(perpsOrder(undefined), /does not carry the ValueDesk builder fee/);
   passes(perpsOrder(ours(20)));
 });
 

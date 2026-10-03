@@ -129,13 +129,13 @@ function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): vo
   const dflt = b.fee[engine];
   if (!(dflt > 0)) {
     // An engine this build does not charge on: no builder belongs there.
-    if (got !== undefined && got !== null) throw refuse(`This order was not sent: it names a builder on ${engine}, where Valuescan charges none.`, { ...base, why: 'builder on an engine that is not charged', got });
+    if (got !== undefined && got !== null) throw refuse(`This order was not sent: it names a builder on ${engine}, where ValueDesk charges none.`, { ...base, why: 'builder on an engine that is not charged', got });
     return;
   }
   if (got === undefined || got === null) {
     if (b.required) {
       throw refuse(
-        `This ${engine} order was not sent: it does not carry the Valuescan builder fee, and trading through Valuescan requires it. Reload the page; if it happens again, enable trading again.`,
+        `This ${engine} order was not sent: it does not carry the ValueDesk builder fee, and trading through ValueDesk requires it. Reload the page; if it happens again, enable trading again.`,
         { ...base, why: 'no builder in a build that requires it' },
       );
     }
@@ -145,7 +145,7 @@ function guardOrder(action: SignableAction, b: BuilderConfig, owner: string): vo
   const owed = feeNow(engine, owner);
   const top = Math.min(dflt, BUILDER_FEE_CAP[engine]);
   if (String(got.id) !== String(b.id)) {
-    throw refuse('This order was not sent: it names another builder than Valuescan.', { ...base, why: 'not the pinned builder', got, pinned: b.id });
+    throw refuse('This order was not sent: it names another builder than ValueDesk.', { ...base, why: 'not the pinned builder', got, pinned: b.id });
   }
   if (typeof got.fee !== 'number' || !Number.isInteger(got.fee) || got.fee < owed || got.fee > top) {
     throw refuse(
@@ -174,14 +174,14 @@ export function guardAction(action: SignableAction, owner: string): void {
   // From here: actions that create or change orders and have no builder field of their own.
   if (!b.required || !(b.fee[engine] > 0)) return;
   if (kind === 'order-without-builder') {
-    throw refuse('TWAP orders are not available here: SoDEX cannot attach the Valuescan builder fee to them, and trading through Valuescan requires it.', {
+    throw refuse('TWAP orders are not available here: SoDEX cannot attach the ValueDesk builder fee to them, and trading through ValueDesk requires it.', {
       type: action.type,
       engine,
       why: 'an order type that cannot carry a builder',
     });
   }
   if (!KEEPS_BUILDER[action.type as 'modifyOrder' | 'replaceOrder']) {
-    throw refuse('This change was not sent: it would replace your order with one that may not carry the Valuescan builder fee. Cancel the order and place a new one.', {
+    throw refuse('This change was not sent: it would replace your order with one that may not carry the ValueDesk builder fee. Cancel the order and place a new one.', {
       type: action.type,
       engine,
       why: 'a change request that is not known to keep the builder',

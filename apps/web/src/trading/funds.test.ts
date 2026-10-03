@@ -793,7 +793,7 @@ test('the wallet balance is read straight from ValueChain; the explorer answers 
   rpcDown = true;
   assert.equal((await balancesOf(OWNER, USDC)).evm, '12.5');
   assert.equal(explorer(), 1, 'the explorer, as the fallback');
-  assert.equal(sent.filter((x) => x.url.startsWith('/api/')).length, 0, 'never the Valuescan server');
+  assert.equal(sent.filter((x) => x.url.startsWith('/api/')).length, 0, 'never the ValueDesk server');
 });
 
 test('transfer Perps -> wallet goes through Spot: two key-signed moves, no wallet prompt', async () => {

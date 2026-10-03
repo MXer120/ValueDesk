@@ -84,7 +84,7 @@ export const IMPRESSUM: LegalDoc = {
     {
       title: 'Hinweis',
       blocks: [
-        { p: 'Valuescan ist ein Analysewerkzeug für öffentliche Handelsdaten und eine Oberfläche, über die Nutzer selbst und in eigenem Namen auf SoDEX handeln. Valuescan verwahrt keine Kundengelder und keine privaten Schlüssel und erbringt keine Anlageberatung. Einzelheiten: [Nutzungsbedingungen](/terms) und [Datenschutzerklärung](/privacy).' },
+        { p: 'ValueDesk ist ein Analysewerkzeug für öffentliche Handelsdaten und eine Oberfläche, über die Nutzer selbst und in eigenem Namen auf SoDEX handeln. ValueDesk verwahrt keine Kundengelder und keine privaten Schlüssel und erbringt keine Anlageberatung. Einzelheiten: [Nutzungsbedingungen](/terms) und [Datenschutzerklärung](/privacy).' },
       ],
     },
   ],

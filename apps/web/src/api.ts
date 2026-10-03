@@ -71,7 +71,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
       throw new ApiError('The request timed out.', 0);
     }
     apiLog.warn('backend unreachable', { path, error: (e as Error).message });
-    throw new ApiError('The Valuescan server could not be reached.', 0);
+    throw new ApiError('The ValueDesk server could not be reached.', 0);
   } finally {
     clearTimeout(timer);
     init?.signal?.removeEventListener('abort', onCallerAbort);

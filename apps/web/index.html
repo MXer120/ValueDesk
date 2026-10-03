@@ -29,14 +29,14 @@
               when delivered via <meta> and only logs an error. Anti-framing is
               sent as a real header instead - by vite.config.ts in dev, and by
               whatever serves web/dist in production. See docs/deploy/SECURITY-HEADERS.md.
-        connect-src 'self'      the Valuescan index API (same origin; in dev the
+        connect-src 'self'      the ValueDesk index API (same origin; in dev the
                                 Vite proxy, and Vite's own HMR socket)
                     + exactly the exchanges this browser talks to DIRECTLY,
                                 https and wss: SoDEX (gateway REST + WebSocket,
                                 its data host, sodex.com's biz API), Hyperliquid
                                 /info, Lighter, Arcus - every user's exchange
                                 traffic leaves from their own browser and IP,
-                                never through Valuescan (docs/ARCH-traffic.md);
+                                never through ValueDesk (docs/ARCH-traffic.md);
                                 the WalletConnect relay (wss) and its wallet list
                                 (api.web3modal.org); the ValueChain explorer; the
                                 public RPCs the address menu reads wallet balances
@@ -115,8 +115,8 @@
       "
     />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <meta name="description" content="Valuescan: trader analytics across SoDEX, Hyperliquid, trade.xyz, Lighter and Arcus - leaderboards, wallet cohorts and wallet scans - with non-custodial trading on SoDEX." />
-    <title>Valuescan</title>
+    <meta name="description" content="ValueDesk: trader analytics across SoDEX, Hyperliquid, trade.xyz, Lighter and Arcus - leaderboards, wallet cohorts and wallet scans - with non-custodial trading on SoDEX." />
+    <title>ValueDesk</title>
   </head>
   <body>
     <div id="root"></div>

@@ -17,11 +17,14 @@ import '@fontsource/asap/400.css';
 import '@fontsource/asap/500.css';
 import { App } from './App';
 import { installGlobalLogging } from './log';
+import { installChunkErrorReload } from './lazyPage';
 import './styles.css';
 
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.
 installGlobalLogging();
+// A release replaced the file names while this tab was open: load the current build once (lazyPage.ts).
+installChunkErrorReload();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

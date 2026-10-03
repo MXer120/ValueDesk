@@ -120,7 +120,7 @@ async function builderForOrder(engine: Engine): Promise<BuilderParams | undefine
   }
   if (!builder && cfg.required) {
     throw new TradingError(
-      `SoDEX does not list your approval of the Valuescan builder fee for ${engine} orders, and trading through Valuescan requires it. If you approved it a moment ago, try again shortly; otherwise press "Valuescan fee" in the order ticket and approve it there.`,
+      `SoDEX does not list your approval of the ValueDesk builder fee for ${engine} orders, and trading through ValueDesk requires it. If you approved it a moment ago, try again shortly; otherwise press "ValueDesk fee" in the order ticket and approve it there.`,
       'builder-required',
     );
   }

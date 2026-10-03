@@ -20,25 +20,25 @@ export const TERMS: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'These terms apply to your use of Valuescan at [[OWNER: the site\'s domain]], provided by the operator named in the [Impressum](/impressum) ("we"). By using Valuescan you accept them. Please read the risk notice in section 6 before you trade.' },
+    { p: 'These terms apply to your use of ValueDesk at [[OWNER: the site\'s domain]], provided by the operator named in the [Impressum](/impressum) ("we"). By using ValueDesk you accept them. Please read the risk notice in section 6 before you trade.' },
   ],
   sections: [
     {
-      title: '1. What Valuescan is',
+      title: '1. What ValueDesk is',
       blocks: [
-        { p: 'Valuescan is a free analytics site for public trading data from SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus - leaderboards, cohorts of traders, wallet scans - and an interface through which you can trade on the SoDEX exchange yourself.' },
-        { p: 'Valuescan is not an exchange, a broker, an investment firm or a custodian. It is not a party to your trades, does not act on your behalf and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with the trading key your wallet authorised.' },
+        { p: 'ValueDesk is a free analytics site for public trading data from SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus - leaderboards, cohorts of traders, wallet scans - and an interface through which you can trade on the SoDEX exchange yourself.' },
+        { p: 'ValueDesk is not an exchange, a broker, an investment firm or a custodian. It is not a party to your trades, does not act on your behalf and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with the trading key your wallet authorised.' },
       ],
     },
     {
-      title: '2. Valuescan never holds your funds or your keys',
+      title: '2. ValueDesk never holds your funds or your keys',
       blocks: [
         {
           ul: [
-            'Your funds stay in your wallet and in your own account on SoDEX. Valuescan cannot move, freeze, recover or return them.',
-            'Your wallet\'s private keys and recovery phrase never reach Valuescan. Never enter them anywhere on this site - we will never ask for them.',
+            'Your funds stay in your wallet and in your own account on SoDEX. ValueDesk cannot move, freeze, recover or return them.',
+            'Your wallet\'s private keys and recovery phrase never reach ValueDesk. Never enter them anywhere on this site - we will never ask for them.',
             'To trade without a wallet prompt for every order, you can enable trading: your browser creates a trading key and your wallet registers it with SoDEX. The key is kept only in your browser, encrypted; it can place and cancel orders but, according to SoDEX, cannot send funds to anyone but you; it expires after at most seven days, and you can turn it off or sign out at any time. Anyone who controls your device while the key is valid can trade with it - protect your device.',
-            'Orders, transfers and withdrawals go from your browser directly to SoDEX. Valuescan\'s servers never receive, sign or forward them, and cannot cancel or reverse a transaction once it has been sent.',
+            'Orders, transfers and withdrawals go from your browser directly to SoDEX. ValueDesk\'s servers never receive, sign or forward them, and cannot cancel or reverse a transaction once it has been sent.',
           ],
         },
       ],
@@ -47,30 +47,30 @@ export const TERMS: LegalDoc = {
       title: '3. The exchange and other services',
       blocks: [
         { p: 'Your account, your orders and their execution, margin, liquidations, funding, fees, deposits and withdrawals are governed by the terms of SoDEX, which you accept with SoDEX, not with us. Moving funds can also involve the ValueChain network and other blockchains. Market and trader data comes from the venues named in section 1. We do not control these services, their availability, their prices or the correctness of what they publish, and we are not responsible for them.' },
-        { p: 'Valuescan shows SoDEX\'s answers as it receives them. An order is only placed, changed or cancelled once SoDEX has accepted it. Changing a resting order can be carried out as a cancellation followed by a new order (so that the new order carries the builder fee, section 4); the app says so when it happens, and the new order can fill at a different time or not at all.' },
+        { p: 'ValueDesk shows SoDEX\'s answers as it receives them. An order is only placed, changed or cancelled once SoDEX has accepted it. Changing a resting order can be carried out as a cancellation followed by a new order (so that the new order carries the builder fee, section 4); the app says so when it happens, and the new order can fill at a different time or not at all.' },
       ],
     },
     {
-      title: '4. Valuescan builder fee',
+      title: '4. ValueDesk builder fee',
       blocks: [
-        { p: 'Valuescan may charge a fee on orders placed through it, as a SoDEX "builder fee". Where it does:' },
+        { p: 'ValueDesk may charge a fee on orders placed through it, as a SoDEX "builder fee". Where it does:' },
         {
           ul: [
-            'before you trade, the app shows the rates and the maximum you are asked to approve, and your wallet signs that approval for Valuescan\'s SoDEX builder account. Without the approval you cannot trade through Valuescan; you can always trade on SoDEX directly;',
-            'SoDEX charges the fee on each fill of an order placed through Valuescan, on top of SoDEX\'s own trading fee, for makers and takers alike: on perpetuals on buys and sells, on spot on sells only - spot buys carry no builder fee;',
+            'before you trade, the app shows the rates and the maximum you are asked to approve, and your wallet signs that approval for ValueDesk\'s SoDEX builder account. Without the approval you cannot trade through ValueDesk; you can always trade on SoDEX directly;',
+            'SoDEX charges the fee on each fill of an order placed through ValueDesk, on top of SoDEX\'s own trading fee, for makers and takers alike: on perpetuals on buys and sells, on spot on sells only - spot buys carry no builder fee;',
             'the rate that applies to an order is shown in the order ticket before you place it. It can never exceed the maximum you approved without a new signature from your wallet;',
-            'a lower rate may apply once your wallet has traded a certain volume through Valuescan. The tiers are shown in the app and may change for future orders; a lower rate applies only once our server has confirmed it for your wallet;',
-            'you can revoke the approval at any time in the app: press "Valuescan fee" in the order ticket, then "Revoke builder approval". Trading through Valuescan then stops until you approve again;',
+            'a lower rate may apply once your wallet has traded a certain volume through ValueDesk. The tiers are shown in the app and may change for future orders; a lower rate applies only once our server has confirmed it for your wallet;',
+            'you can revoke the approval at any time in the app: press "ValueDesk fee" in the order ticket, then "Revoke builder approval". Trading through ValueDesk then stops until you approve again;',
             'the fee is charged by SoDEX and paid to us by SoDEX. Fees already charged on fills are not refunded.',
           ],
         },
-        { p: 'Valuescan charges nothing else. The Copy pages place no trades: what they show about following a trader is a simulation, and no fee is charged there.' },
+        { p: 'ValueDesk charges nothing else. The Copy pages place no trades: what they show about following a trader is a simulation, and no fee is charged there.' },
       ],
     },
     {
       title: '5. No advice',
       blocks: [
-        { p: 'Nothing on Valuescan is investment, financial, legal or tax advice, or a recommendation to buy, sell or hold anything or to follow any trader. Leaderboards, rankings, cohorts, statistics and simulations describe what happened in public data; they do not say what will happen. Decide for yourself, and get independent advice where you need it.' },
+        { p: 'Nothing on ValueDesk is investment, financial, legal or tax advice, or a recommendation to buy, sell or hold anything or to follow any trader. Leaderboards, rankings, cohorts, statistics and simulations describe what happened in public data; they do not say what will happen. Decide for yourself, and get independent advice where you need it.' },
       ],
     },
     {
@@ -92,9 +92,9 @@ export const TERMS: LegalDoc = {
       ],
     },
     {
-      title: '7. Who may use Valuescan',
+      title: '7. Who may use ValueDesk',
       blocks: [
-        { p: 'You must be at least 18 years old and able to enter into binding contracts. You may not use Valuescan to trade if the law where you live or are located forbids it, if you are subject to sanctions, or from [[OWNER: the excluded countries, matching GEO_RESTRICTION_COUNTRIES and SoDEX\'s own restricted jurisdictions]]. You may not hide your location to get around such a restriction.' },
+        { p: 'You must be at least 18 years old and able to enter into binding contracts. You may not use ValueDesk to trade if the law where you live or are located forbids it, if you are subject to sanctions, or from [[OWNER: the excluded countries, matching GEO_RESTRICTION_COUNTRIES and SoDEX\'s own restricted jurisdictions]]. You may not hide your location to get around such a restriction.' },
       ],
     },
     {
@@ -104,8 +104,8 @@ export const TERMS: LegalDoc = {
           ul: [
             'do not attack, overload or probe the site or its servers, and do not get around its rate limits or firewall;',
             'do not read the site\'s data automatically on a scale beyond normal personal use without our written consent;',
-            'do not modify the app to get around the builder fee while presenting your orders as placed through Valuescan;',
-            'do not use Valuescan for anything unlawful, including market manipulation.',
+            'do not modify the app to get around the builder fee while presenting your orders as placed through ValueDesk;',
+            'do not use ValueDesk for anything unlawful, including market manipulation.',
           ],
         },
         { p: 'We may block access that breaks these rules.' },
@@ -114,7 +114,7 @@ export const TERMS: LegalDoc = {
     {
       title: '9. Availability and changes',
       blocks: [
-        { p: 'Valuescan is provided as it is, free of charge apart from the builder fee in section 4. We aim to keep it available but do not promise that it is always available, complete or free of errors. We may change, pause or end features - including turning trading through Valuescan off - at any time. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
+        { p: 'ValueDesk is provided as it is, free of charge apart from the builder fee in section 4. We aim to keep it available but do not promise that it is always available, complete or free of errors. We may change, pause or end features - including turning trading through ValueDesk off - at any time. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
       ],
     },
     {
@@ -126,7 +126,7 @@ export const TERMS: LegalDoc = {
     {
       title: '11. Changes to these terms',
       blocks: [
-        { p: 'We may change these terms for the future, for example when features or the law change. The version on this page at the time you use Valuescan applies; we point out significant changes in the app.' },
+        { p: 'We may change these terms for the future, for example when features or the law change. The version on this page at the time you use ValueDesk applies; we point out significant changes in the app.' },
       ],
     },
     {

@@ -80,6 +80,20 @@ export function reloadForChunkError(): boolean {
   return true;
 }
 
+/**
+ * Every OTHER lazily loaded module (the trading actions behind Cancel all, the
+ * wallet modal, the chart library, ...): Vite reports a failed dynamic import
+ * as `vite:preloadError`. When a deploy replaced the hashed file names while
+ * this tab was open, the old name answers 404 - reload once to the current
+ * build (same loop guard as the pages) instead of a "Failed to fetch
+ * dynamically imported module" error. Seen live on 2026-10-03 after a release.
+ */
+export function installChunkErrorReload(target: Pick<Window, 'addEventListener'> = window): void {
+  target.addEventListener('vite:preloadError', (e: Event) => {
+    if (reloadForChunkError()) e.preventDefault();
+  });
+}
+
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Thrown while a reload is under way: keeps the tree suspended, no error UI. */
 const NEVER = new Promise<never>(() => {});

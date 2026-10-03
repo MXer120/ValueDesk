@@ -29,7 +29,7 @@ export function SidePill({ dir, spot = false, prefix }: { dir: Direction | null;
 }
 
 export function SourcePill({ source }: { source: OrderSource | null | undefined }) {
-  if (source === 'copy') return <Pill tone="accent" title="Placed by Valuescan copy trading">Copy</Pill>;
+  if (source === 'copy') return <Pill tone="accent" title="Placed by ValueDesk copy trading">Copy</Pill>;
   if (source === 'liquidation') return <Pill tone="warn" title="SoDEX took this position over (liquidation)">Liquidation</Pill>;
   return null;
 }

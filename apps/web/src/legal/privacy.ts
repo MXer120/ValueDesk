@@ -29,7 +29,7 @@ export const PRIVACY: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'This policy explains which personal data Valuescan processes, why, and what your rights are. In short: Valuescan has no user accounts, sets no cookies and uses no analytics or advertising. It never holds your funds or your keys. Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through Valuescan.' },
+    { p: 'This policy explains which personal data ValueDesk processes, why, and what your rights are. In short: ValueDesk has no user accounts, sets no cookies and uses no analytics or advertising. It never holds your funds or your keys. Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through ValueDesk.' },
   ],
   sections: [
     {
@@ -42,30 +42,30 @@ export const PRIVACY: LegalDoc = {
     {
       title: '2. Visiting the website',
       blocks: [
-        { p: 'Valuescan is delivered by Amazon Web Services (AWS): the Amazon CloudFront content delivery network with the AWS WAF firewall in front of it, and one server for Valuescan\'s own data service in the AWS region [[OWNER: AWS region of the server, e.g. eu-central-1 (Frankfurt)]]. AWS processes this data on our behalf under its data processing addendum (Art. 28 GDPR). [[OWNER: confirm the AWS contracting entity of the account and that the AWS Data Processing Addendum applies to it. If the site is served through another edge instead of CloudFront (for example Vercel), this section has to name that provider, where it processes data and what it logs]]' },
+        { p: 'ValueDesk is delivered by Amazon Web Services (AWS): the Amazon CloudFront content delivery network with the AWS WAF firewall in front of it, and one server for ValueDesk\'s own data service in the AWS region [[OWNER: AWS region of the server, e.g. eu-central-1 (Frankfurt)]]. AWS processes this data on our behalf under its data processing addendum (Art. 28 GDPR). [[OWNER: confirm the AWS contracting entity of the account and that the AWS Data Processing Addendum applies to it. If the site is served through another edge instead of CloudFront (for example Vercel), this section has to name that provider, where it processes data and what it logs]]' },
         { p: 'When you open the site, your browser sends your IP address, the address of the page or file requested, and the usual technical information of an HTTP request (for example the browser type and language). This is processed:' },
         {
           ul: [
             'by CloudFront, to deliver the site. CloudFront keeps no access log in this setup;',
             'by the WAF, to block attacks and excessive requests. It limits the number of requests one IP address may make, and shows a sample of recent requests (IP address, country, path and headers) to the operator for up to three hours;',
-            'by Valuescan\'s server, for requests to its data service. Its log records the IP address and the path requested, without the query string, and is deleted automatically after 14 days.',
+            'by ValueDesk\'s server, for requests to its data service. Its log records the IP address and the path requested, without the query string, and is deleted automatically after 14 days.',
           ],
         },
         { p: 'Legal basis: Art. 6(1)(f) GDPR - our legitimate interest in delivering the site and keeping it secure and available. CloudFront serves the site from locations close to you, which can be outside the EU; AWS participates in the EU-U.S. Data Privacy Framework, and its data processing addendum includes the EU Standard Contractual Clauses.' },
       ],
     },
     {
-      title: '3. Valuescan\'s data service',
+      title: '3. ValueDesk\'s data service',
       blocks: [
-        { p: 'Leaderboards, cohorts, the screener, Explore and parts of the search come from Valuescan\'s own index. Some of these requests carry what you entered or opened: a wallet address or search text you typed into the search, the address whose rank Scan shows on Hyperliquid, or a SoDEX account number from a link. They are used only to answer the request; the query part is not written to the server log (section 2).' },
+        { p: 'Leaderboards, cohorts, the screener, Explore and parts of the search come from ValueDesk\'s own index. Some of these requests carry what you entered or opened: a wallet address or search text you typed into the search, the address whose rank Scan shows on Hyperliquid, or a SoDEX account number from a link. They are used only to answer the request; the query part is not written to the server log (section 2).' },
         { p: 'Legal basis: Art. 6(1)(f) GDPR - answering the request you made.' },
       ],
     },
     {
       title: '4. Builder fee and volume tiers',
       blocks: [
-        { p: 'This section applies while Valuescan charges a builder fee with volume tiers (see the [Terms](/terms)).' },
-        { p: 'When you enable trading, and from then on every few minutes while it is enabled and shortly after your orders fill, the app sends the address of your connected wallet to Valuescan\'s data service to learn which fee applies to you. Valuescan\'s server then reads that wallet\'s trades from SoDEX and the signed requests of the orders behind them from SoDEX\'s public explorer - data that is public on SoDEX - and keeps, for that wallet:' },
+        { p: 'This section applies while ValueDesk charges a builder fee with volume tiers (see the [Terms](/terms)).' },
+        { p: 'When you enable trading, and from then on every few minutes while it is enabled and shortly after your orders fill, the app sends the address of your connected wallet to ValueDesk\'s data service to learn which fee applies to you. ValueDesk\'s server then reads that wallet\'s trades from SoDEX and the signed requests of the orders behind them from SoDEX\'s public explorer - data that is public on SoDEX - and keeps, for that wallet:' },
         {
           ul: [
             'the trading volume counted towards the fee tiers, and the orders counted;',
@@ -80,7 +80,7 @@ export const PRIVACY: LegalDoc = {
     {
       title: '5. Direct connections from your browser',
       blocks: [
-        { p: 'Valuescan runs in your browser, and your browser connects to the following services directly - Valuescan does not see this traffic. Each service receives your IP address and the technical information of the request, and whatever the request is about: market data, the wallet addresses you connect or look at, and - when you trade - the orders and transfers you sign. They are operated by third parties under their own terms and privacy policies.' },
+        { p: 'ValueDesk runs in your browser, and your browser connects to the following services directly - ValueDesk does not see this traffic. Each service receives your IP address and the technical information of the request, and whatever the request is about: market data, the wallet addresses you connect or look at, and - when you trade - the orders and transfers you sign. They are operated by third parties under their own terms and privacy policies.' },
         {
           ul: [
             '**SoDEX** (mainnet-gw.sodex.dev, mainnet-data.sodex.dev, alpha-biz.sodex.dev, and the testnet hosts testnet-gw.sodex.dev and testnet-data.sodex.dev): market data, your account, orders, deposits, transfers and withdrawals.',
@@ -95,7 +95,7 @@ export const PRIVACY: LegalDoc = {
     {
       title: '6. Storage in your browser',
       blocks: [
-        { p: 'Valuescan uses no cookies. It keeps the following in your browser\'s own storage (local storage, session storage and IndexedDB) so that the functions you use keep working between visits. It stays on your device and is never sent to Valuescan:' },
+        { p: 'ValueDesk uses no cookies. It keeps the following in your browser\'s own storage (local storage, session storage and IndexedDB) so that the functions you use keep working between visits. It stays on your device and is never sent to ValueDesk:' },
         {
           ul: [
             'settings and layouts: the selected market, dashboards, chart layouts and drawings, filters, the privacy mode and notices you have seen;',
@@ -112,19 +112,19 @@ export const PRIVACY: LegalDoc = {
     {
       title: '7. Public trading data of wallets',
       blocks: [
-        { p: 'Valuescan\'s index is built from what SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus publish about trading on them: wallet addresses with their positions, trades, volumes and profit and loss, and statistics we derive from that (rankings, win rates, cohorts). A wallet address can relate to a person. Where a venue publishes a display name for a wallet, Valuescan does not show it or make it searchable.' },
+        { p: 'ValueDesk\'s index is built from what SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus publish about trading on them: wallet addresses with their positions, trades, volumes and profit and loss, and statistics we derive from that (rankings, win rates, cohorts). A wallet address can relate to a person. Where a venue publishes a display name for a wallet, ValueDesk does not show it or make it searchable.' },
         { p: 'Purpose: market analysis - showing how traders and groups of traders behave. Legal basis: Art. 6(1)(f) GDPR. The data comes from the venues\' public interfaces and is kept [[OWNER: retention period for the index]]; backups are deleted after 14 days. If you object to the processing of a wallet that belongs to you (section 9), [[OWNER: what happens, e.g. the wallet is removed from the index and not added again]].' },
       ],
     },
     {
-      title: '8. What Valuescan does not do',
+      title: '8. What ValueDesk does not do',
       blocks: [
         {
           ul: [
             'no cookies, no analytics, no advertising, no tracking pixels, no social media plugins;',
-            'no fonts or images from third parties - both are served by Valuescan itself;',
+            'no fonts or images from third parties - both are served by ValueDesk itself;',
             'no user accounts, no names, no e-mail addresses collected in the app;',
-            'no access to your funds or your wallet\'s keys, and no orders through Valuescan\'s servers;',
+            'no access to your funds or your wallet\'s keys, and no orders through ValueDesk\'s servers;',
             'no sale of personal data.',
           ],
         },
@@ -133,7 +133,7 @@ export const PRIVACY: LegalDoc = {
     {
       title: '9. Your rights',
       blocks: [
-        { p: 'You have the right to access your data (Art. 15 GDPR), to rectification (Art. 16), to erasure (Art. 17), to restriction of processing (Art. 18), to data portability (Art. 20) and to object to processing based on our legitimate interests (Art. 21). Write to the address in section 1. Because Valuescan knows wallets only by their address, we may ask you to show that a wallet is yours - for example by signing a short message with it - before we act on a request about it. Data that exists only in your browser (section 6) is in your hands alone.' },
+        { p: 'You have the right to access your data (Art. 15 GDPR), to rectification (Art. 16), to erasure (Art. 17), to restriction of processing (Art. 18), to data portability (Art. 20) and to object to processing based on our legitimate interests (Art. 21). Write to the address in section 1. Because ValueDesk knows wallets only by their address, we may ask you to show that a wallet is yours - for example by signing a short message with it - before we act on a request about it. Data that exists only in your browser (section 6) is in your hands alone.' },
         { p: 'You may also lodge a complaint with a data protection supervisory authority, in particular in the member state where you live or where the alleged infringement took place. The authority responsible for us is [[OWNER: the competent supervisory authority, e.g. the data protection authority of your federal state, with address]].' },
       ],
     },
@@ -147,7 +147,7 @@ export const PRIVACY: LegalDoc = {
       title: 'Kurzfassung auf Deutsch',
       lang: 'de',
       blocks: [
-        { p: 'Verantwortlich ist der im [Impressum](/impressum) genannte Anbieter. Valuescan setzt keine Cookies, nutzt keine Analyse- oder Werbedienste und verwahrt weder Guthaben noch Schlüssel. Beim Aufruf verarbeiten Amazon Web Services (CloudFront, WAF, ein Server) Ihre IP-Adresse und die angefragte Adresse; das Protokoll des Servers enthält IP-Adresse und Pfad ohne Suchparameter und wird nach 14 Tagen gelöscht. Ihr Browser verbindet sich für Markt- und Kontodaten und für den Handel direkt mit SoDEX, Hyperliquid, Lighter, Arcus, ValueChain, öffentlichen Blockchain-Knoten und - nach dem Verbinden einer Wallet - mit Reown/WalletConnect. Einstellungen, Listen und der verschlüsselte Handelsschlüssel liegen nur in Ihrem Browser. Bei aktivem Builder-Fee speichert der Server zu Ihrer Wallet-Adresse das gezählte Handelsvolumen und die Gebührenhistorie. Öffentliche Handelsdaten von Wallets werden für Marktanalysen ausgewertet. Sie haben die Rechte aus Art. 15 bis 21 DSGVO und ein Beschwerderecht bei einer Aufsichtsbehörde. Maßgeblich ist die englische Fassung oben.' },
+        { p: 'Verantwortlich ist der im [Impressum](/impressum) genannte Anbieter. ValueDesk setzt keine Cookies, nutzt keine Analyse- oder Werbedienste und verwahrt weder Guthaben noch Schlüssel. Beim Aufruf verarbeiten Amazon Web Services (CloudFront, WAF, ein Server) Ihre IP-Adresse und die angefragte Adresse; das Protokoll des Servers enthält IP-Adresse und Pfad ohne Suchparameter und wird nach 14 Tagen gelöscht. Ihr Browser verbindet sich für Markt- und Kontodaten und für den Handel direkt mit SoDEX, Hyperliquid, Lighter, Arcus, ValueChain, öffentlichen Blockchain-Knoten und - nach dem Verbinden einer Wallet - mit Reown/WalletConnect. Einstellungen, Listen und der verschlüsselte Handelsschlüssel liegen nur in Ihrem Browser. Bei aktivem Builder-Fee speichert der Server zu Ihrer Wallet-Adresse das gezählte Handelsvolumen und die Gebührenhistorie. Öffentliche Handelsdaten von Wallets werden für Marktanalysen ausgewertet. Sie haben die Rechte aus Art. 15 bis 21 DSGVO und ein Beschwerderecht bei einer Aufsichtsbehörde. Maßgeblich ist die englische Fassung oben.' },
       ],
     },
   ],

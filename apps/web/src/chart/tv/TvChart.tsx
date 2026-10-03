@@ -63,7 +63,7 @@ const MARK_THROTTLE_MS = 500;
 const PNL_THROTTLE_MS = 500;
 /** How long a submitted modify may go unconfirmed before the line goes back. */
 const SETTLE_TIMEOUT_MS = 15_000;
-const LAYOUT_NAME = 'Valuescan';
+const LAYOUT_NAME = 'ValueDesk';
 const INTERVAL_KEY = `${STORAGE_PREFIX}interval`;
 const TOGGLES_KEY = `${STORAGE_PREFIX}toggles`;
 const FRAME_BLOCKED =

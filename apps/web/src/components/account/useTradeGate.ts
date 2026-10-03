@@ -62,7 +62,7 @@ export function useTradeGate(address: string | null | undefined, unlocked: boole
           : {
               // A build with a builder fee may ask for one more signature, once (its approval).
               why: activeBuilder(tradingConfig().builder)
-                ? 'Enable trading to place orders: one wallet signature registers a trading key in this browser. The first time, you are also asked about the Valuescan builder fee.'
+                ? 'Enable trading to place orders: one wallet signature registers a trading key in this browser. The first time, you are also asked about the ValueDesk builder fee.'
                 : 'Enable trading to place orders: one wallet signature registers a trading key in this browser.',
               label: 'Enable trading',
               act: requestEnableTrading,

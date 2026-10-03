@@ -1527,7 +1527,7 @@ function PaletteDialog(
                   ))}
                 </span>
               )}
-              {tab === 'assets' && <span className="cp-nav__note">Markets on SoDEX, where Valuescan trades</span>}
+              {tab === 'assets' && <span className="cp-nav__note">Markets on SoDEX, where ValueDesk trades</span>}
             </div>
 
             {tab === 'screener' && (

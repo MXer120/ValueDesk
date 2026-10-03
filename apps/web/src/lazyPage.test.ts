@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { lazyPage, lazyPageEnv, reloadForChunkError } from './lazyPage';
+import { installChunkErrorReload, lazyPage, lazyPageEnv, reloadForChunkError } from './lazyPage';
 
 /** An in-memory sessionStorage for the reload guard. */
 function memoryStorage(): Storage {
@@ -122,4 +122,22 @@ test('the reload guard: once per minute, and best-effort without storage', () =>
   assert.equal(reloads, 2);
   lazyPageEnv.storage = () => null;
   assert.equal(reloadForChunkError(), true, 'no storage: still reloads');
+});
+
+test('any lazily loaded module that fails (vite:preloadError, a release replaced the file names): one reload to the current build, never a loop', () => {
+  const target = new EventTarget();
+  installChunkErrorReload(target as unknown as Window);
+  const fire = (): boolean => {
+    const e = new Event('vite:preloadError', { cancelable: true });
+    target.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  assert.equal(fire(), true, 'handled: the import does not throw at the caller while the page reloads');
+  assert.equal(reloads, 1);
+  clock += 10_000;
+  assert.equal(fire(), false, 'within a minute of the last reload: the error goes to the caller');
+  assert.equal(reloads, 1);
+  clock += 60_000;
+  assert.equal(fire(), true);
+  assert.equal(reloads, 2);
 });

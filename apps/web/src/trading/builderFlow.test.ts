@@ -885,7 +885,7 @@ test('a REQUIRED build with a key from before it had a builder: orders are refus
   configure(null);
   await enable();
   configure(REQUIRED);
-  await assert.rejects(perpsOrder(), (e: unknown) => e instanceof TradingError && e.kind === 'builder-required' && /press "Valuescan fee"/.test(e.message));
+  await assert.rejects(perpsOrder(), (e: unknown) => e instanceof TradingError && e.kind === 'builder-required' && /press "ValueDesk fee"/.test(e.message));
   assert.equal(orders('perps').length, 0, 'never sent without the fee');
   const r = await approve1();
   assert.equal(r.status, 'approved');

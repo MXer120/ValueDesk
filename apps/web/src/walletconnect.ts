@@ -596,7 +596,7 @@ async function createKit(): Promise<AppKit> {
     networks: [network],
     defaultNetwork: network,
     metadata: {
-      name: 'Valuescan',
+      name: 'ValueDesk',
       description: 'Copy trading on SoDEX',
       url: window.location.origin,
       // A real icon so the wallet's approval prompt can show WHICH dapp is

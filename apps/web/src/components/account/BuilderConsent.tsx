@@ -38,8 +38,8 @@ export function BuilderTermsView({ terms }: { terms: BuilderTerms }) {
   return (
     <div className="stack acct-fee">
       <p>
-        Orders you place here go to SoDEX with Valuescan named as their builder. SoDEX then charges a builder fee on
-        each fill, on top of its own trading fee, and pays it to Valuescan.
+        Orders you place here go to SoDEX with ValueDesk named as their builder. SoDEX then charges a builder fee on
+        each fill, on top of its own trading fee, and pays it to ValueDesk.
       </p>
       <table className="kv acct-fee__terms">
         <tbody>
@@ -61,12 +61,12 @@ export function BuilderTermsView({ terms }: { terms: BuilderTerms }) {
           </tr>
           <tr>
             <th>Paid to</th>
-            <td>Valuescan, SoDEX builder account #{terms.builderId}</td>
+            <td>ValueDesk, SoDEX builder account #{terms.builderId}</td>
           </tr>
         </tbody>
       </table>
       <p>
-        Your wallet signs one message approving that maximum for that builder account. Valuescan cannot charge more
+        Your wallet signs one message approving that maximum for that builder account. ValueDesk cannot charge more
         than the maximum; raising it would need a new signature from you. The fee applies to maker and taker fills
         alike.
         {terms.maxFeeRate > PERPS_CAP ? ` SoDEX limits builder fees on perps to ${fmtBuilderRate(PERPS_CAP)} whatever is approved.` : ''}
@@ -78,13 +78,13 @@ export function BuilderTermsView({ terms }: { terms: BuilderTerms }) {
         </p>
       )}
       <p className="muted">
-        You can revoke the approval at any time: press "Valuescan fee" in the order ticket.{' '}
+        You can revoke the approval at any time: press "ValueDesk fee" in the order ticket.{' '}
         {terms.purpose === 'approve'
           ? terms.required
-            ? 'Trading through Valuescan requires it: until it is approved, orders placed here are not sent. Your SoDEX account and funds are not affected.'
+            ? 'Trading through ValueDesk requires it: until it is approved, orders placed here are not sent. Your SoDEX account and funds are not affected.'
             : 'The fee is optional: where it is not approved, orders placed here carry no builder fee.'
           : terms.required
-            ? 'Trading through Valuescan requires it: if you decline, trading stays off here. Your SoDEX account and funds are not affected.'
+            ? 'Trading through ValueDesk requires it: if you decline, trading stays off here. Your SoDEX account and funds are not affected.'
             : 'The fee is optional: you can enable trading without it.'}
       </p>
     </div>
@@ -125,7 +125,7 @@ export function useBuilderConsent(): { ask: (terms: BuilderTerms) => Promise<Bui
     <Modal
       open
       size="sm"
-      title="Valuescan builder fee"
+      title="ValueDesk builder fee"
       onClose={() => settle('cancel')}
       // A fee is agreed to on purpose: a stray click on the backdrop is not an answer.
       dismissOnBackdrop={false}

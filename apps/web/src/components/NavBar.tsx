@@ -19,6 +19,7 @@
  * --text, every other link is --muted, and the active item gets no pill, no box
  * and no underline.
  */
+import { BrandMark } from './BrandMark';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
@@ -115,7 +116,10 @@ export function NavBar({
   return (
     <header className="navbar">
       <div className="navbar-inner">
-        <span className="brand">Valuescan</span>
+        <span className="brand">
+          <BrandMark />
+          ValueDesk
+        </span>
         <nav className="navlinks">
           {TABS.map((t) => (
             /*

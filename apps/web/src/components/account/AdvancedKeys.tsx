@@ -196,7 +196,7 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
       if (r.status === 'declined') show('info', 'Nothing was approved.');
       else if (r.status === 'already') show('info', 'SoDEX already lists your approval.');
       else if (r.status === 'pending') show('info', 'SoDEX accepted the approval but does not list it on every engine yet. It is followed up automatically; look again in a moment.');
-      else show('ok', 'Builder fee approved. Orders placed here carry the Valuescan fee.');
+      else show('ok', 'Builder fee approved. Orders placed here carry the ValueDesk fee.');
     } catch (e) {
       if (isRejection(e)) show('info', 'Nothing was approved: the signature was declined.');
       else fromError(e);
@@ -220,8 +220,8 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
       onSession();
       if (r.nothingToRevoke) show('info', 'SoDEX lists no builder approval for this account.');
       else if (!r.cleared) show('info', 'SoDEX accepted the revocation but still lists the approval. Orders placed here no longer carry the fee; look again in a moment.');
-      else if (r.tradingTurnedOff) show('ok', 'Builder approval revoked. Trading through Valuescan requires it, so trading is now off on this device.');
-      else show('ok', 'Builder approval revoked. Orders placed here no longer carry the Valuescan fee.');
+      else if (r.tradingTurnedOff) show('ok', 'Builder approval revoked. Trading through ValueDesk requires it, so trading is now off on this device.');
+      else show('ok', 'Builder approval revoked. Orders placed here no longer carry the ValueDesk fee.');
     } catch (e) {
       if (isRejection(e)) show('info', 'Nothing was revoked: the signature was declined.');
       else fromError(e);
@@ -267,7 +267,7 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
               <button
                 disabled={busy}
                 onClick={() => void approveBuilder()}
-                title="Shows what the fee is, then asks your wallet for one signature that sets your maximum builder fee for the Valuescan builder account."
+                title="Shows what the fee is, then asks your wallet for one signature that sets your maximum builder fee for the ValueDesk builder account."
               >
                 Approve builder fee
               </button>
@@ -292,10 +292,10 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
         {canApprove && (
           <p className="muted small">
             {approved
-              ? 'SoDEX does not list an approval that covers the Valuescan builder fee on every market.'
-              : 'SoDEX lists no approval of the Valuescan builder fee for this account.'}{' '}
+              ? 'SoDEX does not list an approval that covers the ValueDesk builder fee on every market.'
+              : 'SoDEX lists no approval of the ValueDesk builder fee for this account.'}{' '}
             {builder!.required
-              ? 'Trading through Valuescan requires it: orders placed here are refused until it is approved.'
+              ? 'Trading through ValueDesk requires it: orders placed here are refused until it is approved.'
               : 'Orders placed here carry no builder fee where it is not approved.'}
           </p>
         )}

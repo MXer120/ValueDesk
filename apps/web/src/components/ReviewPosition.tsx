@@ -293,7 +293,7 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
           {builderFee && (
             <tr>
               {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to Valuescan. */}
-              <th>Est. Valuescan fee</th>
+              <th>Est. ValueDesk fee</th>
               <td>
                 {!builderFee.charged ? (
                   <span className="muted">none on spot buys</span>
