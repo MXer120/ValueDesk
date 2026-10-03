@@ -119,6 +119,8 @@ async function judgeRoute(o: { owner: string; checks: Checks }, ref: RouteRef, r
   const facts: string[] = [];
   const problems: string[] = [];
   const findings: string[] = [];
+  /** SoDEX's withdrawal minimum does not cover the fee: what a user who enters the minimum runs into. */
+  let minBelowFee: { coin: string; chain: string; label: string; min: string; fee: string } | null = null;
   facts.push(route.deposit.allowed ? `deposits open (min ${route.deposit.min ?? '-'})` : 'deposits CLOSED');
   facts.push(route.withdraw.allowed ? `withdrawals open (min ${route.withdraw.min ?? '-'}, fee ${route.withdraw.fee ?? '-'})` : 'withdrawals CLOSED');
   if (!route.deposit.allowed && !route.withdraw.allowed) {
@@ -132,6 +134,7 @@ async function judgeRoute(o: { owner: string; checks: Checks }, ref: RouteRef, r
       const onChain = formatUnits(q.fee, coin.valuechain.decimals);
       facts.push(`on-chain fee ${onChain}`);
       if (route.withdraw.fee !== null && approx(onChain) !== approx(route.withdraw.fee)) findings.push(`SoDEX's asset config says fee ${route.withdraw.fee}, the chain charges ${onChain} (the app shows and pays the chain's)`);
+      if (route.withdraw.min !== null && approx(route.withdraw.min) <= approx(onChain)) minBelowFee = { coin: coin.coin, chain: route.key, label: route.label, min: route.withdraw.min, fee: onChain };
       if (route.withdraw.min !== null && approx(route.withdraw.min) <= approx(onChain)) findings.push(`the withdrawal minimum ${route.withdraw.min} does not cover the ${onChain} fee - a withdrawal of the minimum would leave nothing (the app refuses it; the smallest real one is above the fee)`);
     } catch (e) {
       facts.push(`on-chain fee unreadable (${errText(e)})`);
@@ -171,7 +174,7 @@ async function judgeRoute(o: { owner: string; checks: Checks }, ref: RouteRef, r
   problems.push(...rx);
   if (!rx.length) facts.push(`receiver check ok${route.memo ? ' (memo rules too)' : ''}`);
   const detail = `${facts.join('; ')}${findings.length ? ` - ${findings.join('; ')}` : ''}${problems.length ? ` - ${problems.join('; ')}` : ''}`;
-  const evidence = { deposit: route.deposit, withdraw: route.withdraw, addressKind: route.addressKind };
+  const evidence = { deposit: route.deposit, withdraw: route.withdraw, addressKind: route.addressKind, ...(minBelowFee ? { minBelowFee } : {}) };
   if (problems.length) {
     o.checks.fail(id, detail, evidence);
     return { status: 'fail', line: `${head}: FAIL - ${detail}`, problems };

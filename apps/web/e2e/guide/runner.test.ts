@@ -135,6 +135,8 @@ test('the plan from the runner\'s report', () => {
   assert.equal(v.steps.length, 8);
   assert.equal(v.steps.find((s) => s.id === 'cleanup')!.skip, 'cleanup.enabled is false');
   assert.equal(v.routes.length, 7);
+  assert.equal(v.suggestedMaxSpendUsd, null, 'an older runner suggests no cap');
+  assert.equal(readPlanReport(planReport({ suggestedMaxSpendUsd: 32 }))!.suggestedMaxSpendUsd, 32);
   assert.equal(readPlanReport({ tool: 'something else' }), null);
   assert.equal(readPlanReport(null), null);
 });
@@ -157,6 +159,8 @@ test('the same plan from the console alone (a runner that wrote no readable repo
   assert.equal(v.warnings.length, 1);
   assert.equal(v.estimatedCostUsd, 3.36);
   assert.equal(v.maxSpendUsd, 8);
+  assert.equal(v.suggestedMaxSpendUsd, null);
+  assert.equal(planFromConsole([...PLAN_CONSOLE.slice(0, -1), '20:23:15  Suggested maxSpendUsd for this run: 32 (the config says 8)', PLAN_CONSOLE.at(-1)!], 2).suggestedMaxSpendUsd, 32);
   assert.deepEqual(v.steps.map((s) => s.id), ['deposit-external', 'enable-trading', 'orders', 'withdraw-valuechain-other', 'withdraw-external', 'extra-withdrawals', 'cleanup', 'revoke-builder']);
   assert.equal(v.steps[0]!.costUsd, 1.01);
   assert.equal(v.steps[0]!.lines.length, 2);

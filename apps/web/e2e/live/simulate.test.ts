@@ -97,10 +97,12 @@ async function run(
   });
   const file = readdirSync(dir).find((f) => f.endsWith(`-${mode}.json`));
   const report = file ? JSON.parse(readFileSync(join(dir, file), 'utf8')) : null;
+  const summaryFile = file ? file.replace(/\.json$/, '.summary.md') : null;
+  const summary = summaryFile && readdirSync(dir).includes(summaryFile) ? readFileSync(join(dir, summaryFile), 'utf8') : null;
   const checks: Check[] = report?.checks ?? [];
   const byId = new Map(checks.map((c) => [c.id, c]));
   if (process.env.VS_SIM_DUMP) writeFileSync(process.env.VS_SIM_DUMP, [...lines, '', ...checks.map((c) => `${c.status.padEnd(8)} ${c.id}: ${c.detail}`)].join('\n'));
-  return { code, lines, report, address, key, w, checks, byId };
+  return { code, lines, report, summary, address, key, w, checks, byId };
 }
 
 const show = (r: { lines: string[]; checks: Check[] }): string =>
@@ -192,6 +194,15 @@ test('a whole live run against the fake: every step runs, every check passes (or
   assert.ok(report.orderTypes.length >= 40 && report.orderTypes.every((o: { engine: string }) => o.engine === 'spot' || o.engine === 'perps'));
   assert.ok(report.feeTable.length >= 8, 'every fill is in the fee table');
   assert.ok(report.spend.costUsd > 0 && report.spend.costUsd < CONFIG.maxSpendUsd);
+  // The run in words, next to the report: the builder fee first, the coins last; no key in it either.
+  assert.ok(r.summary, 'a summary.md next to the report');
+  assert.match(r.summary!, /^# Live E2E run - LIVE - profile core/);
+  assert.ok(r.summary!.indexOf('## Builder fee and the fee of every fill') < r.summary!.indexOf('## Chains'));
+  assert.match(r.summary!, /### Fee of every fill\n\n\| order \| market \|/);
+  assert.match(r.summary!, /## Where every coin is\n\n```/);
+  assert.ok(!r.summary!.toLowerCase().includes(key.slice(2).toLowerCase()));
+  assert.ok(r.lines.at(-1)!.includes('report'), 'the last line is still the report');
+  assert.ok(r.lines.some((l) => /summary {11}.*\.summary\.md$/.test(l)));
   // No builder is configured: no order names one, and the builders endpoint is never written to.
   assert.deepEqual(w.signers.approvals, []);
   assert.ok(w.orderBodies.filter((o) => !o.raw.includes('"builder":{"id":777')).every((o) => !o.raw.includes('builder')), 'no order of the app carries a builder');
@@ -404,4 +415,7 @@ test('plan --profile all-chains: every route checked read-only, what cannot be t
   assert.ok(report.plan.problems.some((p: string) => /above maxSpendUsd/.test(p)));
   assert.ok(report.plan.profileNotes.every((n: string) => /deposit\.amount/.test(n)));
   assert.equal(report.plan.steps.find((s: { id: string }) => s.id === 'chain-withdrawals')?.skip, 'no route can run - set your own addresses in receivers (receivers.sol, receivers.btc, ...)');
+  // The summary says what the BNB and Base ETH minimums mean for a user, at the top of the findings.
+  assert.match(r.summary!, /### Withdrawal minimums that do not cover the fee[\s\S]*\*\*BNB to BNB Smart Chain\*\*: minimum 0\.0005 BNB, fee 0\.002 BNB/);
+  assert.match(r.summary!, /\*\*ETH to Base\*\*: minimum 0\.0005 ETH, fee 0\.0005 ETH\. A user who withdraws exactly the minimum would receive nothing/);
 });

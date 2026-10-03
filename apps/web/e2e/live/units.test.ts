@@ -3,8 +3,8 @@
  * fee arithmetic of a fill, the history limiter, the independent terms
  * verifier (against the shared Ed25519 vector), the ledger, the receivers the
  * refusals use, the coverage table, the profiles, the tour's legs and amounts,
- * the chain withdrawals and what cannot be tested. (The guard's write kinds and
- * the wallet policies are in safety.test.ts.)
+ * the chain withdrawals and what cannot be tested, and the summary. (The
+ * guard's write kinds and the wallet policies are in safety.test.ts.)
  *   npx tsx --test e2e/live/units.test.ts        (from apps/web)
  */
 import { test, afterEach } from 'node:test';
@@ -35,6 +35,7 @@ import { DEFAULT_CONFIG, type RunConfig } from './config';
 import { applyProfile, profileSteps } from './profiles';
 import { memoRuleProblems, notTestable } from './routes';
 import { nativeLegAmounts, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
+import { buildSummary, minimumsBelowFee, type SummaryInput } from './summary';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 const GW = 'https://gw.test';
@@ -329,4 +330,107 @@ test('chain withdrawals and what cannot be tested: every route on a chain the ru
   assert.equal(nt['ZEC on Zcash'], 'the app does not offer this chain at all');
   assert.deepEqual(memoRuleProblems(native('XRP', '4', '2', '0.8')), [], 'the app\'s memo rules for XRP hold');
   assert.deepEqual(memoRuleProblems(native('XLM', '26', '25', '7')), []);
+});
+
+// --- the summary ------------------------------------------------------------------------------------------------
+
+const rec = (id: string, area: string, step: string, status: CheckRecordLike['status'], detail: string, evidence: Record<string, unknown> = {}): CheckRecordLike => ({ id, area: area as CheckRecordLike['area'], step: step as CheckRecordLike['step'], title: `title of ${id}`, status, detail, evidence, costUsd: null, at: null });
+type CheckRecordLike = SummaryInput['checks'][number];
+
+function summaryInput(o: Partial<SummaryInput> = {}): SummaryInput {
+  return {
+    mode: 'live',
+    profile: 'core',
+    wallet: OWNER,
+    exitCode: 0,
+    startedAt: '2026-10-03T10:00:00.000Z',
+    finishedAt: '2026-10-03T10:30:00.000Z',
+    checks: [
+      rec('builder-fee-lowered', 'builder', 'builder-tiers', 'pass', 'the next order carried 15'),
+      rec('builder-fee-default', 'builder', 'builder-tiers', 'pass', 'the first orders carried 20'),
+      rec('builder-replace-keeps-builder', 'builder', 'orders-spot', 'finding', 'SoDEX keeps the builder on a replace - set REPLACE_KEEPS_BUILDER = true'),
+      rec('perps-limit-rest', 'orders-perps', 'orders-perps', 'pass', 'rests'),
+      rec('spot-fok-fillable', 'orders-spot', 'orders-spot', 'finding', 'FOK is not supported'),
+      rec('key-enable', 'keys', 'enable-trading', 'pass', 'one signature'),
+      rec('refuse-quantity-rounds-to-zero', 'refusals', 'refusals', 'pass', 'refused before signing'),
+      rec('transfer-spot-to-perps', 'transfers', 'transfers', 'fail', 'Perps did not rise'),
+      rec('withdraw-eth-base_eth', 'withdrawals', 'evm-tour', 'pass', 'arrived on Base'),
+      rec('route-bnb-bsc_bnb', 'routes', 'preflight', 'finding', 'min below fee', { minBelowFee: { coin: 'BNB', chain: 'BSC_BNB', label: 'BNB Smart Chain', min: '0.0005', fee: '0.002' } }),
+      rec('route-eth-base_eth', 'routes', 'preflight', 'finding', 'min equals fee', { minBelowFee: { coin: 'ETH', chain: 'BASE_ETH', label: 'Base', min: '0.0005', fee: '0.0005' } }),
+      rec('cross-end-state', 'cross-checks', 'cross-check', 'pass', 'nothing open'),
+    ],
+    chains: [{ chain: 'BSC_BNB', label: 'BNB Smart Chain', coin: 'BNB', native: true, deposit: { status: 'pass', detail: '' }, withdraw: { status: 'not-run', detail: 'not part of this run' }, route: { status: 'finding', detail: 'min below fee' } }],
+    feeTable: [{ order: 'perps market buy', symbol: 'BTC-USD', side: 'BUY', liquidity: 'taker', quantity: '0.00014', price: '84072', notional: '11.77', commission: '0.0047 vUSDC', commissionRate: '4 bp', builderFee: '0.0023', builderFeeRate: '2 bp', orderBuilderFee: '2 bp', verdict: 'ok' }],
+    termsSeen: [
+      { at: 1, verified: true, fee: { perps: 20, spot: 20 }, flags: [] },
+      { at: 2, verified: true, fee: { perps: 20, spot: 20 }, flags: [] },
+      { at: 3, verified: true, fee: { perps: 15, spot: 20 }, flags: [] },
+      { at: 4, verified: true, fee: { perps: 20, spot: 20 }, flags: ['underpaid'] },
+    ],
+    spend: { costUsd: 3.2, sentAwayUsd: 1 },
+    maxSpendUsd: 8,
+    builder: { id: 223169, feePerps: 20, feeSpot: 20 },
+    steps: [],
+    whereFunds: ['  SoDEX Spot               vUSDC 12.5', '  Open orders              none'],
+    inFlight: [],
+    plan: { problems: [], notTestable: [{ what: 'BTC on Bitcoin', why: 'deposit: the runner cannot sign on Bitcoin' }] },
+    ...o,
+  };
+}
+
+test('summary: the builder fee comes first, under a heading that names fees - with the fee of every fill under it; then failures, findings, chains, orders, the key, refusals, funds, cost, the coins', () => {
+  const md = buildSummary(summaryInput());
+  const heads = md.split('\n').filter((l) => /^##\s/.test(l));
+  assert.deepEqual(heads, [
+    '## Builder fee and the fee of every fill',
+    '## Failed checks',
+    '## Findings (how SoDEX or the app behaved - for you to decide on, not failures)',
+    '## Chains',
+    '## Order types',
+    '## The trading key',
+    '## Refusals (nothing here may move anything)',
+    '## Transfers, deposits and withdrawals',
+    '## Cross-check',
+    '## Cost',
+    '## Where every coin is',
+  ]);
+  // What the guided launcher takes as the runner's fee table: the first section whose heading names fees.
+  const lines = md.split('\n');
+  const first = lines.findIndex((l) => /^#{1,6}\s.*\bfees?\b/i.test(l));
+  assert.equal(lines[first], '## Builder fee and the fee of every fill');
+  const section = lines.slice(first + 1, lines.findIndex((l, i) => i > first && /^##\s/.test(l))).join('\n');
+  assert.ok(section.indexOf('builder-fee-default') < section.indexOf('builder-fee-lowered'), 'in the contract\'s order, not the record\'s');
+  assert.match(section, /perps 20 \/ spot 20 -> perps 15 \/ spot 20 -> perps 20 \/ spot 20/);
+  assert.match(section, /Flags the server set on this wallet: underpaid/);
+  assert.match(section, /### Fee of every fill[\s\S]*\| perps market buy \| BTC-USD \| BUY \| taker/);
+  assert.match(md, /## Failed checks\n\n\| check \| what was seen \|\n\|---\|---\|\n\| transfer-spot-to-perps \| Perps did not rise \|/);
+  assert.match(md, /Spent \$3\.20 in costs .* \+ \$1\.00 sent to your other addresses = \$4\.20 \(maxSpendUsd \$8\.00\)/);
+  assert.match(md, /```\nSoDEX Spot +vUSDC 12\.5/);
+  assert.match(md, /- \*\*BTC on Bitcoin\*\*: deposit: the runner cannot sign on Bitcoin/);
+  assert.match(md, /\| withdraw-eth-base_eth \| PASS \| arrived on Base \|/, 'the tour legs have their own table');
+});
+
+test('summary: a withdrawal minimum that does not cover the fee is said in the owner\'s words, at the top of the findings', () => {
+  const md = buildSummary(summaryInput());
+  const f = md.slice(md.indexOf('## Findings'));
+  assert.ok(f.indexOf('### Withdrawal minimums that do not cover the fee') < f.indexOf('| check |'), 'before the findings table');
+  const lines = minimumsBelowFee(summaryInput().checks);
+  assert.equal(lines.length, 2);
+  assert.match(lines[0]!, /\*\*BNB to BNB Smart Chain\*\*: minimum 0\.0005 BNB, fee 0\.002 BNB\. A user who withdraws the minimum - or anything up to 0\.002 BNB - would receive nothing/);
+  assert.match(lines[0]!, /The app's Withdraw sheet stops it before anything is signed \("The amount must be more than the 0\.002 BNB fee"\)/);
+  assert.match(lines[1]!, /\*\*ETH to Base\*\*: minimum 0\.0005 ETH, fee 0\.0005 ETH\. A user who withdraws exactly the minimum would receive nothing/);
+  // A plan, no builder, nothing found: plain words, no empty tables pretending otherwise.
+  const plan = buildSummary(summaryInput({ mode: 'plan', builder: null, checks: [], feeTable: [], termsSeen: [], whereFunds: null }));
+  assert.match(plan, /PLAN \(nothing was signed or sent\)/);
+  assert.match(plan, /No builder was configured for this run/);
+  assert.match(plan, /No fills were recorded\./);
+  assert.match(plan, /Plan mode: nothing moved\./);
+  assert.ok(!/### Withdrawal minimums/.test(plan));
+});
+
+test('capabilities: the route kinds and the chains the runner signs on', () => {
+  const c = capabilities() as { routeKinds: Array<{ id: string; steps: readonly string[] }>; chains: Array<{ key: string; chainId: number; source: string }> };
+  assert.deepEqual(c.routeKinds.map((k) => k.id), ['route-<coin>-<chain>', 'deposit-<coin>-<chain>', 'withdraw-<coin>-<chain>', 'manual-deposit-<coin>-<chain>']);
+  assert.ok(c.routeKinds.every((k) => k.steps.length > 0));
+  assert.deepEqual(c.chains.filter((x) => x.source === 'runner').map((x) => `${x.key}:${x.chainId}`), ['ARC:5042', 'AVAXC:43114', 'HYPEREVM_HYPE:999', 'ROBINHOOD_ETH:4663']);
 });

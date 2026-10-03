@@ -214,6 +214,43 @@ test('a plan problem that funding does not fix fails the stage at once - no wait
   }
 });
 
+const OVER_CAP = 'estimated spend $22.59 (costs $22.59 + sent to other addresses $0.00) is above maxSpendUsd $8.00';
+
+test('the spend cap: the runner\'s suggestion is shown with what it covers, written only on a typed yes, then the plan is read again', async () => {
+  // no receiver; the wallet; y = raise the cap; tabs closed; YES; the address
+  const k = kit({ argv: ['--stages', 'D'], lines: ['', 'y', 'y', '', 'YES', ADDRESS], hidden: [KEY] });
+  const fake = new FakeRunner({ plans: [{ report: planReport(), code: 2 }, plan({ funded: true, problems: [OVER_CAP], suggestedMaxSpendUsd: 32 }), plan({ funded: true }), plan({ funded: true })], live: live() });
+  try {
+    const r = await runStageD(k.ctx, fake);
+    assert.equal(r.status, 'PASS', r.reason);
+    assert.deepEqual(k.prompter.unused, []);
+    const caps = fake.saved.map((x) => x.cfg.maxSpendUsd);
+    assert.equal(caps.at(-1), 32, 'written: exactly the suggestion');
+    assert.ok(caps.every((c) => c === undefined || c === 8 || c === 32), `never anything else: ${caps.join(',')}`);
+    assert.equal(fake.plans[2]!.config!.maxSpendUsd, 32, 'the plan was read again with the new cap');
+    const screen = k.flat();
+    assert.match(screen, /caps what this run may lose at \$8\.00\. The plan estimates \$3\.36 in costs/);
+    assert.match(screen, /The runner suggests a cap of \$32\.00/);
+    assert.match(r.notes.join(' '), /spend cap \("maxSpendUsd"\) .* was set to 32/);
+  } finally {
+    k.cleanup();
+  }
+});
+
+test('the spend cap: Enter (or --yes) leaves it alone - the plan stays blocked and the summary says what to set', async () => {
+  const k = kit({ argv: ['--stages', 'D'], lines: ['', 'y', ''], hidden: [KEY] });
+  const fake = new FakeRunner({ plans: [{ report: planReport(), code: 2 }, plan({ funded: true, problems: [OVER_CAP], suggestedMaxSpendUsd: 32 })], live: live() });
+  try {
+    const r = await runStageD(k.ctx, fake);
+    assert.equal(r.status, 'FAIL');
+    assert.equal(fake.lives.length, 0);
+    assert.ok(fake.saved.every((x) => x.cfg.maxSpendUsd !== 32), 'not written');
+    assert.match(k.ctx.shared.next.join(' '), /set "maxSpendUsd" in .* to at least 32/);
+  } finally {
+    k.cleanup();
+  }
+});
+
 test('the run stops in the middle: where the funds are, what is left, how to resume - and the switch is off again', async () => {
   const k = kit({ argv: ['--stages', 'D'], lines: HAPPY, hidden: [KEY] });
   const fake = new FakeRunner({ plans: [{ report: planReport(), code: 2 }, plan({ funded: true })], live: live({ stoppedAt: 'withdraw-external' }) });

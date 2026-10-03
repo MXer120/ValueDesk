@@ -63,7 +63,7 @@ export const PLAN_CONSOLE: readonly string[] = `20:23:01  Valuescan live E2E run
 const planStep = (id: string, lines: string[], costUsd: number, skip?: string): Record<string, unknown> => ({ id, title: `title of ${id}`, lines, costUsd, sentAwayUsd: 0, problems: [], ...(skip ? { skip } : {}) });
 
 /** The plan part of the report the runner writes for the console above. */
-export function planReport(o: { funded?: boolean; problems?: string[]; receiversNeeded?: unknown } = {}): Record<string, unknown> {
+export function planReport(o: { funded?: boolean; problems?: string[]; receiversNeeded?: unknown; suggestedMaxSpendUsd?: number } = {}): Record<string, unknown> {
   const mark = o.funded ? 'x' : ' ';
   const holdsUsdc = o.funded ? '25.00' : '0.00';
   const holdsEth = o.funded ? '0.000300' : '0.00';
@@ -96,6 +96,7 @@ export function planReport(o: { funded?: boolean; problems?: string[]; receivers
         "(* = the chain's native coin)",
       ],
       ...(o.receiversNeeded !== undefined ? { receiversNeeded: o.receiversNeeded } : {}),
+      ...(o.suggestedMaxSpendUsd !== undefined ? { suggestedMaxSpendUsd: o.suggestedMaxSpendUsd } : {}),
       steps: [
         planStep('deposit-external', ["send 25 USDC on Arbitrum One (0xaf88d065e77c8cc2239327c5edb3a432268e5831) to the wallet's own SoDEX deposit address (not issued yet)", 'wait for the receipt, then until SoDEX shows the account and Spot USDC +24'], 1.01),
         planStep('enable-trading', ['one EIP-712 signature registers key "valuescan-web"'], 0),

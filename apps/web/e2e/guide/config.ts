@@ -53,6 +53,8 @@ export interface ConfigChoices {
   /** Receivers to set, by name. '' clears one (the steps that need it are then skipped). */
   receivers?: Record<string, ReceiverValue>;
   cleanupEnabled?: boolean;
+  /** The spend cap - set only on the owner's explicit yes, to the runner's own suggestion (stageD.ts offerSpendCap). */
+  maxSpendUsd?: number;
 }
 
 const isObj = (v: unknown): v is Json => !!v && typeof v === 'object' && !Array.isArray(v);
@@ -108,6 +110,7 @@ export function applyChoices(base: Json, c: ConfigChoices, names: BuilderKeyName
   if (c.builder !== undefined) out.builder = c.builder === null ? null : builderSection(c.builder, names);
   if (c.receivers !== undefined) out.receivers = { ...(isObj(out.receivers) ? out.receivers : {}), ...c.receivers };
   if (c.cleanupEnabled !== undefined) out.cleanup = { ...(isObj(out.cleanup) ? out.cleanup : {}), enabled: c.cleanupEnabled };
+  if (c.maxSpendUsd !== undefined) out.maxSpendUsd = c.maxSpendUsd;
   return out;
 }
 

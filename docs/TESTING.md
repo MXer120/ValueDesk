@@ -173,9 +173,12 @@ real wallet on SoDEX mainnet. Its safety model is unchanged; the guide adds your
    chain the runner cannot sign on). Each is optional. They are written to the private run config and checked
    by the runner's next plan.
 3. **The test wallet's key**, into a hidden prompt (section 4). Only the address is shown.
-4. **Funding.** The plan says how much of what, on which chain, to which address. The guide re-runs the
+4. **The spend cap.** When the plan's estimate is above `maxSpendUsd` (the wider profiles cost more than the
+   example's $8), the guide shows the estimate and the runner's suggested cap (the estimate with about 30 %
+   room) and writes exactly that into the run config - only on your typed yes; Enter and `--yes` leave it.
+5. **Funding.** The plan says how much of what, on which chain, to which address. The guide re-runs the
    read-only plan every 20 seconds and goes on by itself when the funds are there (type `q` to stop waiting).
-5. **The run.** One complete plan, the steps with their estimated cost and the spend cap, a reminder to close
+6. **The run.** One complete plan, the steps with their estimated cost and the spend cap, a reminder to close
    every other Valuescan and sodex.com tab (the run and the server's fee check need SoDEX's history reads;
    another tab can use them up and get this address blocked for a minute), then two confirmations: the word
    YES, and the wallet address typed out. Only then is `acknowledgeRealFunds` written into the config - for
@@ -265,7 +268,7 @@ part optional (a missing one degrades to "not available" or "not run", never to 
 |---|---|
 | `run.ts capabilities` printing `{ steps, profiles, flags }`, exit 0 (else the usage text is read) | the step order for resuming, the profile menu |
 | `plan` / `live` with `--config`, `--confirm`, `--only`, `--profile`, `--throwaway-key`, `--registry-only`, `--report-dir`; the key in `VS_E2E_KEY`; exit codes 0 / 1 / 2 / 130; a last line `report   <file>` | everything in stage D |
-| report: `wallet`, `exitCode`, `selectedSteps`, `config.maxSpendUsd`, `plan.{problems, warnings, checklist, steps[], routes[], estimatedCostUsd, estimatedSentAwayUsd}`; funding problems start with `fund the wallet:` | the plan, the funding wait |
+| report: `wallet`, `exitCode`, `selectedSteps`, `config.maxSpendUsd`, `plan.{problems, warnings, checklist, steps[], routes[], estimatedCostUsd, estimatedSentAwayUsd, suggestedMaxSpendUsd}`; funding problems start with `fund the wallet:`, a cap problem names `above maxSpendUsd` | the plan, the spend cap offer, the funding wait |
 | report: `plan.receiversNeeded[] { name, chain?, why?, memo?, set?, problem? }` (else its messages naming `receivers.<name>`) | the receiver questions |
 | report: `steps[] { id, title, status, ms, measured.costUsd, estimateUsd, txs[], subSteps[], error, reason }`, `spend`, `whereFunds[]`, `inFlight[]` | the step table, cost, where the funds are |
 | report: `checks[] { id, title?, status, detail?, value? }` with status `pass / fail / finding / warn / skipped / not-run` and the ids in `apps/web/e2e/guide/report.ts` (`BUILDER_CHECKS`) | the builder-fee section and the findings |

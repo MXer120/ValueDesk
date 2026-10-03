@@ -24,7 +24,16 @@ import { generatePrivateKey } from 'viem/accounts';
 import { CHECKS } from './checks';
 import { coverageList } from './coverage';
 import { STEP_ALIASES, STEP_ORDER, STEP_TITLES, type StepId } from './context';
+import { ALL_EVM } from './chains';
 import { PROFILES, PROFILE_TITLES, profileSteps } from './profiles';
+
+/** The checks declared per coin and chain at run time, by kind (their ids are patterns). */
+export const ROUTE_KINDS = [
+  { id: 'route-<coin>-<chain>', direction: null, steps: ['preflight'], what: "read-only, every plan: open/closed, minimum, fee (config and chain), maintenance, the deposit address, the app's receiver check" },
+  { id: 'deposit-<coin>-<chain>', direction: 'deposit', steps: ['deposit-external', 'extra-deposits', 'evm-tour'], what: "a deposit the runner sends (USDC through the app's sendUsdcDeposit; a native coin by a DIRECT transfer) is credited to Spot" },
+  { id: 'withdraw-<coin>-<chain>', direction: 'withdraw', steps: ['withdraw-external', 'extra-withdrawals', 'evm-tour', 'chain-withdrawals'], what: "a withdrawal through the app's withdrawFunds is final in SoDEX's record, and (EVM) arrived on the chain" },
+  { id: 'manual-deposit-<coin>-<chain>', direction: 'deposit', steps: ['manual-deposits'], what: 'a deposit the owner sends by hand to the verified address is credited to Spot' },
+] as const;
 const FLAGS = ['--config', '--profile', '--confirm', '--only', '--throwaway-key', '--registry-only', '--backend', '--report-dir'] as const;
 
 const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live|capabilities] --config e2e/live/config.json [options]
@@ -128,6 +137,9 @@ export function capabilities(): Record<string, unknown> {
     aliases: STEP_ALIASES,
     profiles: [...PROFILES],
     profileInfo: PROFILES.map((p) => ({ name: p, title: PROFILE_TITLES[p], steps: profileSteps(p) })),
+    routeKinds: ROUTE_KINDS,
+    // The EVM chains the runner reads and signs on; every other chain SoDEX lists: withdrawals to your own address (record only) and manual deposits.
+    chains: Object.values(ALL_EVM).map((c) => ({ key: c.key, chainId: c.chainId, name: c.name, source: c.source })),
     flags: [...FLAGS],
     checks: CHECKS.map((c) => ({ id: c.id, area: c.area, title: c.title, step: c.step })),
     // Every function of the app's trading and funds layer, and the checks that exercise it (coverage.ts).

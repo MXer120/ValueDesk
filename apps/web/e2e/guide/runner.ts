@@ -259,6 +259,8 @@ export interface PlanView {
   estimatedCostUsd: number | null;
   estimatedSentAwayUsd: number | null;
   maxSpendUsd: number | null;
+  /** The cap the runner suggests for this plan (its estimate with room), or null when it names none. */
+  suggestedMaxSpendUsd: number | null;
   balances: string[];
   /** The per-chain route table the runner prints (text rows; the first is the header). */
   routes: string[];
@@ -315,6 +317,7 @@ export function readPlanReport(json: unknown): PlanView | null {
     estimatedCostUsd: num(p?.estimatedCostUsd),
     estimatedSentAwayUsd: num(p?.estimatedSentAwayUsd),
     maxSpendUsd: num(cfg?.maxSpendUsd),
+    suggestedMaxSpendUsd: num(p?.suggestedMaxSpendUsd),
     balances: lines(p?.balances),
     routes: lines(p?.routes),
     selectedSteps: lines(r.selectedSteps),
@@ -408,6 +411,10 @@ export function planFromConsole(raw: readonly string[], exitCode: number | null)
     estimatedCostUsd: total ? Number(total[1]) : null,
     estimatedSentAwayUsd: total ? Number(total[2]) : null,
     maxSpendUsd: total ? Number(total[3]) : null,
+    suggestedMaxSpendUsd: (() => {
+      const m = ls.map((l) => /^Suggested maxSpendUsd for this run: ([\d.]+)/.exec(l)).find(Boolean);
+      return m ? Number(m[1]) : null;
+    })(),
     balances: section(/^Balances$/),
     routes: section(/^Routes per chain/),
     selectedSteps: (ls.find((l) => /^steps\s{2,}/.test(l)) ?? '').replace(/^steps\s+/, '').split(',').map((s) => s.trim()).filter(Boolean),

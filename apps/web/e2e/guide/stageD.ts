@@ -269,6 +269,35 @@ function updateConfig(deps: DDeps, cfg: Prepared, c: ConfigChoices): void {
   deps.saveConfig(cfg.path, cfg.config);
 }
 
+/**
+ * The spend cap is the owner's. When the plan's estimate is above it, the guide
+ * shows the runner's suggestion and what it covers, and writes it into the run
+ * config only on a typed yes - the default is no, so `--yes` never raises it -
+ * and never more than the suggestion. Then the plan is read again.
+ */
+export async function offerSpendCap(ctx: Ctx, deps: DDeps, cfg: Prepared, plan: Planned, notes: string[], replan: () => Promise<Planned>): Promise<Planned> {
+  const v = plan.view;
+  const s = v.suggestedMaxSpendUsd;
+  const over = v.problems.some((p) => /\babove maxSpendUsd\b/.test(p));
+  if (!over || s === null || !(s > 0) || (v.maxSpendUsd !== null && s <= v.maxSpendUsd)) return plan;
+  const { out } = ctx;
+  out.line();
+  out.line('   THE SPEND CAP');
+  out.say(
+    `The run config caps what this run may lose at ${fmtUsd(v.maxSpendUsd)}. The plan estimates ${fmtUsd(v.estimatedCostUsd)} in costs (fees, gas, the activation fee, trading)${v.estimatedSentAwayUsd ? ` + ${fmtUsd(v.estimatedSentAwayUsd)} sent to your other addresses` : ''} - so a live run would not start.`,
+    '   ',
+  );
+  out.say(`The runner suggests a cap of ${fmtUsd(s)}: its estimate with about 30 % room. The cap is a limit, not a price - the run stops before it would lose more, and what it does not spend stays in the wallet.`, '   ');
+  if (!(await confirm(ctx.ask, `Set the spend cap ("maxSpendUsd") in the run config to ${fmtUsd(s)}?`, false, { money: true }))) {
+    ctx.shared.next.push(`The plan's estimate is above the spend cap: set "maxSpendUsd" in ${cfg.path} to at least ${s} (the runner's suggestion), or choose a smaller profile.`);
+    return plan;
+  }
+  updateConfig(deps, cfg, { maxSpendUsd: s });
+  notes.push(`On your yes, the spend cap ("maxSpendUsd") in ${cfg.path} was set to ${s} - the runner's suggestion for this plan.`);
+  out.line(`   Written: "maxSpendUsd": ${s}. Reading the plan again...`);
+  return replan();
+}
+
 // --- the key ----------------------------------------------------------------------------------
 
 export interface HeldKey {
@@ -613,6 +642,9 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
   ctx.shared.planReport = plan.raw;
 
   if (args.planOnly) return finishPlanOnly(ctx, plan, items, notes, end);
+
+  // ------------------------------------------------------------------ the spend cap (the owner's)
+  plan = await offerSpendCap(ctx, deps, cfg, plan, notes, () => planOnce(ctx, deps, { config: cfg.path, key: held.key, throwaway: false, registryOnly: true, profile, only, logName: 'D-plan.log' }));
 
   // ------------------------------------------------------------------ funding
   const maxWaitMs = args.waitMinutes !== null ? args.waitMinutes * 60_000 : ctx.ask.prompter.interactive ? null : 0;

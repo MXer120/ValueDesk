@@ -39,7 +39,7 @@ Without a funded wallet you can still see a plan: `npx tsx e2e/live/run.ts plan 
 | Flag | Meaning |
 |---|---|
 | `plan` / `live` | `plan` (default) is read-only; `live` moves funds |
-| `capabilities` | prints, as ONE JSON line, the steps, profiles, flags, every check and the coverage table (`coverage.ts`); no key, no network |
+| `capabilities` | prints, as ONE JSON line: `steps`, `stepTitles`, `aliases`, `profiles` and `profileInfo` (each profile's title and steps), `routeKinds` (the per-route check ids and the steps that declare them), `chains` (the EVM chains the runner signs on), `flags`, every check, and the coverage table (`coverage.ts`); no key, no network |
 | `--config <file>` | the run's config (`config.example.json` documents every field). Required for `live` |
 | `--profile <name>` | what the run covers: `core` (default), `evm-tour`, `all-chains`, `builder-rerun` - see [Profiles](#profiles) |
 | `--confirm <address>` | `live`: must equal the address `VS_E2E_KEY` controls |
@@ -50,8 +50,8 @@ Without a funded wallet you can still see a plan: `npx tsx e2e/live/run.ts plan 
 | `--report-dir <dir>` | where the JSON report goes (default `e2e/live/reports/`) |
 
 Exit codes: `0` done and no check failed (plan: a live run would start), `1` a step stopped the run or a
-check failed, `2` refused to start (config, key, gates, or plan problems - nothing was signed or sent),
-`130` interrupted. The last console line is `report   <file>`.
+check failed (live), `2` refused to start (config, key, gates, or plan problems - nothing was signed or
+sent), `130` interrupted. The last console lines are `summary  <file>.summary.md` and `report   <file>`.
 
 Add to `.gitignore` (not done by the runner):
 
@@ -244,6 +244,16 @@ is `skipped`. To test the Valuescan builder fee (docs/BUILDER-CODES.md, docs/BUI
 | Optional cleanup withdrawal | +1 USDC |
 | **Total** | **~$3.5** (+$1 with cleanup) + anything sent to your other address |
 
+Per profile (read-only plans of 2026-10-03 with a fresh wallet; `plan --profile <name>` prints the exact
+figures and a suggested `maxSpendUsd`):
+
+| Profile | Fund | Estimated cost | Suggested `maxSpendUsd` |
+|---|---|---|---|
+| `core` | 25 USDC + ~0.0002 ETH on Arbitrum One | ~$3.5 | 8 |
+| `evm-tour` | ~83 USDC + ~0.0002 ETH on Arbitrum One (the deposit is raised to the tour's working capital, which comes back), ~0.2 POL on Polygon | ~$23: a withdrawal fee per leg (ETH 0.0005 x4, BNB 0.002, AVAX 0.12, HYPE 0.03, USDC 1 x5), gas, spreads | ~32 |
+| `all-chains` | as `evm-tour`, plus what the chain withdrawals send to YOUR addresses (each the smallest you could send back: e.g. 0.042 SOL, 4.8 XRP, 0.0005 BTC) - the plan raises the deposit by it | + their fees | from the plan |
+| `builder-rerun` | nothing: the funded test wallet of an earlier run (~10 USDC in Spot or Perps) | ~$1-2 | 8 |
+
 ## Coverage per chain
 
 The deposit/withdraw mechanism is **per chain**: all coins on one chain share the wallet's deposit
@@ -273,6 +283,16 @@ app (connect the same wallet):
 - A withdrawal in flight: its SoDEX record decides; a failed one paid from Spot returns to Spot.
 
 ## Reading the report
+
+`e2e/live/reports/<ISO time>-<mode>.summary.md` is the run in words, built from the report alone. The
+builder fee comes first - every builder check in the order of `docs/BUILDER-TIERS.md` section 8, the fee
+the server signed as it changed, the flags it set, and under it the fee of every fill (the section's
+heading names fees, so the guided launcher shows it as the runner's fee table). Then the failed checks,
+the findings (a withdrawal minimum that does not cover the fee is spelled out: what a user who tries it
+runs into), the chains (deposit, withdrawal and route check per coin and chain, every chain leg, what
+cannot be tested and why), the order types, the trading key, the refusals, transfers and withdrawals,
+the cross-check, the cost per step against `maxSpendUsd`, and where every coin is. Plan mode writes one
+too (every check that needs a live run reads "not run").
 
 `e2e/live/reports/<ISO time>-<mode>.json`:
 
@@ -304,6 +324,7 @@ app (connect the same wallet):
 | `tour.ts`, `evmTour.ts` | the evm-tour: its legs, amounts and the native transfer's guard check and wallet policy; the step |
 | `chainRoutes.ts`, `otherChains.ts` | the routes on chains the runner cannot sign on; chain-withdrawals and manual-deposits |
 | `routes.ts`, `receivers.ts` | the read-only check of every route and what cannot be tested; the receiver samples |
+| `summary.ts` | `<report>.summary.md`: the builder fee first, then failures, findings, chains, orders, the key, refusals, funds, cost, the coins |
 | `orders.ts`, `orderSteps.ts` | placing and judging orders; the spot and perps order steps |
 | `tierSteps.ts`, `terms.ts` | the builder fee and its tiers; the runner's own terms verifier |
 | `refusalSteps.ts`, `keySteps.ts`, `crossCheck.ts` | refusals, the key's life, the final reconciliation |
@@ -333,7 +354,7 @@ key, FOK, a market order below the minimum notional, reduce-only with no positio
 that SoDEX behaves like the fake. `safety.test.ts` has a refusal test for every guard kind and wallet
 policy (the native transfer's included); `units.test.ts` covers checks, fees, the history limiter, the
 terms verifier, the ledger, the receivers, the coverage table, the profiles, the tour's legs and amounts,
-the chain withdrawals and what cannot be tested.
+the chain withdrawals and what cannot be tested, the summary and `capabilities`.
 
 ## Notes
 

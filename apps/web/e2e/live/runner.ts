@@ -28,6 +28,7 @@ import { HistoryLimiter } from './history';
 import { Ledger } from './ledger';
 import { preflight, printPlan, routeRows, type PlanResult } from './plan';
 import { applyProfile, profileSteps, type Profile } from './profiles';
+import { buildSummary, type SummaryInput } from './summary';
 import { KNOWN_CHAINS, createKeyProvider, type KeyProvider } from './provider';
 import { snapshot, whereFundsLines, type Snapshot } from './reads';
 import { STEPS, declareFundsChecks } from './steps';
@@ -402,6 +403,33 @@ export async function runE2E(o: RunOptions): Promise<number> {
       const file = join(o.reportDir, `${startedAt.replace(/[:.]/g, '-')}-${o.mode}.json`);
       const text = provider.redact(JSON.stringify(report, (_k, v) => (typeof v === 'bigint' ? v.toString() : v instanceof Map ? Object.fromEntries(v) : v), 2));
       writeFileSync(file, text, 'utf8');
+      // The run in words, next to it (the guided launcher reads `<report>.summary.md`).
+      const summaryFile = file.replace(/\.json$/, '.summary.md');
+      try {
+        const md = buildSummary({
+          mode: o.mode,
+          profile,
+          wallet: owner,
+          exitCode,
+          startedAt,
+          finishedAt: report.finishedAt,
+          checks: all,
+          chains: report.chains as unknown as SummaryInput['chains'],
+          feeTable: report.feeTable,
+          termsSeen: terms ? terms.seen.map((v) => ({ at: v.receivedAt, verified: v.verified, fee: v.answer.fee ?? null, flags: v.answer.flags ?? [] })) : [],
+          spend: ctx.spend,
+          maxSpendUsd: cfg.maxSpendUsd,
+          builder: cfg.builder ? { id: cfg.builder.id, feePerps: cfg.builder.feePerps, feeSpot: cfg.builder.feeSpot } : null,
+          steps: rec.steps,
+          whereFunds: report.whereFunds,
+          inFlight: ctx.inFlight,
+          plan: plan ? { problems: [...new Set(plan.problems)], notTestable: plan.notTestable } : null,
+        });
+        writeFileSync(summaryFile, provider.redact(md), 'utf8');
+        L(`summary           ${summaryFile}`);
+      } catch (e) {
+        L(`could not write the summary: ${errText(e)}`);
+      }
       L(`report            ${file}`);
     } catch (e) {
       L(`could not write the report: ${errText(e)}`);
