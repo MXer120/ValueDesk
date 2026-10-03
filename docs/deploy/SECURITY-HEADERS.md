@@ -76,7 +76,7 @@ connect-src 'self'
   https://main-scan.valuechain.xyz
   https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
   https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-  https://polygon-bor-rpc.publicnode.com
+  https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
   __API_ORIGIN__;
 form-action 'none';
 base-uri 'none';

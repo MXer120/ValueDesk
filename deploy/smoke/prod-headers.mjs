@@ -20,7 +20,7 @@ const CONNECT_SRC = [
   'https://main-scan.valuechain.xyz',
   'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
   'https://ethereum-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org',
-  'https://polygon-bor-rpc.publicnode.com',
+  'https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org', 'https://1rpc.io',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */

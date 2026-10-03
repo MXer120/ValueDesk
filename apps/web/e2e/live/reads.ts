@@ -12,7 +12,7 @@ import { unwrapList } from '@sodex-core';
 import { account } from '../../src/exchange/sodexAccount';
 import { readGateway } from '../../src/trading/gateway';
 import { CANONICAL_USDC, formatUnits } from '../../src/trading/onboard';
-import { VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } from '../../src/trading/rpc';
+import { RPC_FALLBACKS, VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } from '../../src/trading/rpc';
 import { unitsDown, type CoinConfig } from '../../src/trading/funds';
 import { coinPrices, priceOf } from '../../src/trading/prices';
 import { ALL_EVM } from './chains';
@@ -34,29 +34,22 @@ export const CHAIN_READ_RETRY_MS = [2_000, 5_000];
  * network failures inside one try; this covers the app's own read timeout).
  */
 async function chainRead<T>(url: string, read: (url: string) => Promise<T>): Promise<T> {
-  const urls = [url, ...(RPC_FALLBACKS[url] ?? [])];
   for (let i = 0; ; i++) {
-    let last: unknown;
-    for (const u of urls) {
-      try {
-        return await read(u);
-      } catch (e) {
-        last = e;
-      }
+    try {
+      return await read(url);
+    } catch (e) {
+      if (i >= CHAIN_READ_RETRY_MS.length) throw e;
+      await new Promise((r) => setTimeout(r, CHAIN_READ_RETRY_MS[i]));
     }
-    if (i >= CHAIN_READ_RETRY_MS.length) throw last;
-    await new Promise((r) => setTimeout(r, CHAIN_READ_RETRY_MS[i]));
   }
 }
 
 /**
- * Other public nodes of the same chain, asked when its usual node gives no answer: READS only (balances,
- * receipts) - nothing is ever sent through them. Polygon's node timed out for a whole withdrawal in the live
- * run of 2026-10-03, so its arrival could not be read although SoDEX had paid it.
+ * Other public nodes of the same chain, asked when its usual node gives no answer: READS only - the app's own
+ * list (trading/rpc.ts rpcBatch follows it). Polygon's node timed out for a whole withdrawal in the live run of
+ * 2026-10-03, so its arrival could not be read although SoDEX had paid it.
  */
-export const RPC_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
-  'https://polygon-bor-rpc.publicnode.com': ['https://polygon.drpc.org', 'https://1rpc.io/matic'],
-};
+export { RPC_FALLBACKS };
 
 export async function rpcRead(url: string, method: string, params: unknown[]): Promise<unknown> {
   return chainRead(url, async (u) => {

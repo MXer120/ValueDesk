@@ -14,8 +14,29 @@ export interface RpcCall {
   params: unknown[];
 }
 
-/** Answers by position in `calls`; a call the node refused reads undefined. */
+/**
+ * Other public nodes of the same chain, asked when its usual node does not answer (no reply in time, an error
+ * status, or not a batch answer) - READS only, like everything in this file. Polygon's node answered 529 to the
+ * site's smoke test and gave no answer for 15 minutes in a live run (2026-10-03). Each host is in connect-src.
+ */
+export const RPC_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
+  'https://polygon-bor-rpc.publicnode.com': ['https://polygon.drpc.org', 'https://1rpc.io/matic'],
+};
+
+/** Answers by position in `calls`; a call the node refused reads undefined. Another node of the chain if one does not answer. */
 export async function rpcBatch(url: string, calls: RpcCall[]): Promise<Map<number, string | undefined>> {
+  let last: unknown;
+  for (const u of [url, ...(RPC_FALLBACKS[url] ?? [])]) {
+    try {
+      return await rpcBatchFrom(u, calls);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+async function rpcBatchFrom(url: string, calls: RpcCall[]): Promise<Map<number, string | undefined>> {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), READ_TIMEOUT_MS);
   try {
@@ -27,6 +48,7 @@ export async function rpcBatch(url: string, calls: RpcCall[]): Promise<Map<numbe
       credentials: 'omit',
       referrerPolicy: 'no-referrer',
     });
+    if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
     const answers = (await res.json()) as Array<{ id: number; result?: string }>;
     if (!Array.isArray(answers)) throw new Error(`${url}: not a batch answer`);
     return new Map(answers.map((a) => [a.id, a.result]));
