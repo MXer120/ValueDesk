@@ -265,6 +265,21 @@ test('the builder fee and its tiers, end to end: default fee, verified volume, t
   assert.ok(w.approvalBodies.some((b) => /"maxFeeRate":0}$/.test(b)), 'the revocation was signed');
 });
 
+test('SoDEX lists the fills late: the first verification counts $0, the run hints again once that pass is done - the tier is still verified, and the cheating orders still caught', async () => {
+  const r = await run({ ...CONFIG, builder: BUILDER }, { only: TIER_STEPS, setup: (w) => {
+    w.tiers = TIERS;
+    w.builderId = BUILDER_ID;
+    w.fillsListedAfterMs = 1_200;
+  } });
+  const { w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  for (const id of ['builder-volume-verified', 'builder-fee-lowered', 'builder-underpaid-not-counted', 'builder-no-builder-not-counted']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  // A pass with $0 came first; more than one hint was needed - and never one per poll.
+  assert.ok(w.termsAnswers.some((a) => !a.pending && a.fee?.perps === 20), 'a finished pass without the volume');
+  const hints = w.termsAnswers.filter((a) => a.hint).length;
+  assert.ok(hints >= 2 && hints < w.termsAnswers.length / 2, `hints ${hints} of ${w.termsAnswers.length} reads`);
+});
+
 test('a fake whose replace DROPS the builder: the run reports the finding and the constant to flip', async () => {
   const r = await run({ ...CONFIG, builder: BUILDER }, { only: ['deposit-external', 'enable-trading', 'orders-spot'], setup: (w) => {
     w.tiers = TIERS;

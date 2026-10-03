@@ -826,19 +826,35 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   }
   if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(evmChain(route.key) ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
   let received: string | null = null;
+  // The chain's nodes gave no answer for the whole wait, while SoDEX's record says it was paid.
+  let unanswered = false;
   if (dest && before !== null) {
-    const after = await rec.sub(`verify: ${cut(net, 8)} arrived on ${route.label}`, () =>
-      waitFor(ctx, `the funds on ${route.label}`, {
-        timeoutMs: 15 * 60_000,
-        intervalMs: 10_000,
-        probe: dest.read,
-        done: (v) => v >= before + want,
-        show: (v) => `balance ${v === undefined ? '?' : formatUnits(v, dest.decimals)} (want >= ${formatUnits(before + want, dest.decimals)})`,
-      }),
-    );
-    received = formatUnits(after - before, dest.decimals);
-    rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} sent, ${received} received`);
-    rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${cut(dSub(amount, received), 12)} ${coin.coin} (on-chain fee ${fee}${p?.fee !== null && p?.fee !== undefined ? `, record says ${formatUnits(p.fee, dp)}` : ''})`);
+    let answered = false;
+    try {
+      const after = await rec.sub(`verify: ${cut(net, 8)} arrived on ${route.label}`, () =>
+        waitFor(ctx, `the funds on ${route.label}`, {
+          timeoutMs: 15 * 60_000,
+          intervalMs: 10_000,
+          probe: async () => {
+            const v = await dest.read();
+            answered = true;
+            return v;
+          },
+          done: (v) => v >= before + want,
+          show: (v) => `balance ${v === undefined ? '?' : formatUnits(v, dest.decimals)} (want >= ${formatUnits(before + want, dest.decimals)})`,
+        }),
+      );
+      received = formatUnits(after - before, dest.decimals);
+      rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} sent, ${received} received`);
+      rec.fee(`withdrawal ${coin.coin} -> ${route.label}`, `${cut(dSub(amount, received), 12)} ${coin.coin} (on-chain fee ${fee}${p?.fee !== null && p?.fee !== undefined ? `, record says ${formatUnits(p.fee, dp)}` : ''})`);
+    } catch (e) {
+      // Not one read answered (Polygon, 2026-10-03: every node call aborted for 15 min), and SoDEX's record says
+      // the payout is done: the record is the evidence - reported as a finding, not an open transfer.
+      if (answered || !(e instanceof WaitTimeout) || !p?.done || !p.ok) throw e;
+      unanswered = true;
+      rec.warn('balance', `${route.label} gave no answer for 15 min - SoDEX's record "${p.status}" is the evidence that it was paid`);
+      rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} (fee ${fee}, net ${net}; arrival not read)`);
+    }
   } else {
     rec.note(`arrival on ${route.label} cannot be read from here - SoDEX's record "${p?.status ?? '?'}" is the evidence`);
     rec.amount(`withdrawn to ${route.label}`, `${amount} ${coin.coin} (fee ${fee}, net ${net})`);
@@ -849,9 +865,10 @@ export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRo
   await forgetSettledPermit('withdraw', owner).catch(() => false);
   if (!r.self) ctx.stepSentAwayUsd += approx(net) * px;
   return {
-    detail: `${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : o.receiverName.startsWith('native:') ? "(the test wallet's own address)" : `(${o.receiverName})`}: ONE permit signature, relayed by SoDEX; ${received !== null ? `${received} arrived on ${route.label} (fee ${fee} ${coin.coin})` : `arrival cannot be read on ${route.label} from this computer`}; ${recordNote}; ${Math.round((Date.now() - t0) / 1000)} s`,
+    detail: `${amount} ${coin.coin} -> ${route.label} ${o.receiverName === 'self' ? '(this wallet)' : o.receiverName.startsWith('native:') ? "(the test wallet's own address)" : `(${o.receiverName})`}: ONE permit signature, relayed by SoDEX; ${received !== null ? `${received} arrived on ${route.label} (fee ${fee} ${coin.coin})` : unanswered ? `${route.label}'s nodes gave no answer for 15 min, so the arrival was NOT read` : `arrival cannot be read on ${route.label} from this computer`}; ${recordNote}; ${Math.round((Date.now() - t0) / 1000)} s`,
     evidence: { coin: coin.coin, chain: route.key, receiver: permitReceiver, amount, fee, received, relayTx: txHash || null, withdrawId, payoutTx: p?.destinationTx ?? null, recordStatus: p?.status ?? null, arrivalVerified: received !== null },
     costUsd: feeUsd,
+    ...(unanswered ? { finding: true } : {}),
   };
 }
 

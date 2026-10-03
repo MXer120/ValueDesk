@@ -510,3 +510,26 @@ test('transientWait: reads again after the network failed, never after an answer
   assert.equal(transientWait(new Error('order below the minimum notional'), 5_000), null);
   assert.equal(transientWait(new UnreachableError('x', true), undefined), null, 'no more attempts left');
 });
+
+test('chain reads: a node that gives no answer is followed by another node of the same chain (reads only), the rest stay on their own node', async () => {
+  const { RPC_FALLBACKS, nativeBalance, tokenBalance } = await import('./reads');
+  const POLYGON = 'https://polygon-bor-rpc.publicnode.com';
+  assert.deepEqual(RPC_FALLBACKS[POLYGON], ['https://polygon.drpc.org', 'https://1rpc.io/matic']);
+  const asked: string[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    asked.push(url);
+    if (url === POLYGON) throw new DOMException('This operation was aborted', 'AbortError');
+    return new Response(JSON.stringify([{ jsonrpc: '2.0', id: 0, result: '0xf4240' }]), { headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  try {
+    assert.equal(await tokenBalance(POLYGON, '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', '0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d'), 1_000_000n);
+    assert.deepEqual(asked, [POLYGON, 'https://polygon.drpc.org']);
+    asked.length = 0;
+    assert.equal(await nativeBalance('https://mainnet.base.org', '0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d'), 1_000_000n);
+    assert.deepEqual(asked, ['https://mainnet.base.org'], 'a chain without fallbacks asks its own node only');
+  } finally {
+    globalThis.fetch = real;
+  }
+});

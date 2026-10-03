@@ -434,6 +434,8 @@ export class World {
   tiers: { builderId: number; tiers: Array<{ minVolumeUsd: number; perps: number; spot: number }>; policy: 'default-fee' | 'ignore'; ttl: number } | null = null;
   /** How long after a hint the verification takes (ms). */
   verifyDelayMs = 30;
+  /** SoDEX lists a fill this long after it happened: a verification before then does not see it (live: ~a minute). */
+  fillsListedAfterMs = 0;
 
   // --- the terms stand-in's books ------------------------------------------------------------------
   termsKey = createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), Buffer.from(TERMS_SEED_HEX, 'hex')]), format: 'der', type: 'pkcs8' });
@@ -911,7 +913,7 @@ function verify(): void {
   const byOrder = new Map(w.orders.map((o) => [`${o.engine}:${o.orderID}`, o]));
   for (const t of w.trades) {
     const o = byOrder.get(`${t.engine}:${t.orderID}`);
-    if (!o) continue;
+    if (!o || Date.now() - t.time < w.fillsListedAfterMs) continue;
     const owed = owedAt(o.engine, o.createdAt);
     const ours = !!o.builder && o.builder.builderID === id;
     const appKey = /^valuescan-/.test(o.keyName);

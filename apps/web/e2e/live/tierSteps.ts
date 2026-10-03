@@ -59,7 +59,7 @@ import {
 import { marketQty, readMarket, restingBuy, type Market } from './plan';
 import { requestTerms, type FeePair, type TermsVerdict } from './terms';
 import { builderApprovalExpect, builderApprovalPolicy, ensureTrading, registerKey } from './trading';
-import { approx, cut, dAdd, dMul, dur, errText, pollUntil } from './util';
+import { approx, cut, dAdd, dMul, dur, errText, paced, pollUntil } from './util';
 
 const TIER_IDS = [
   'builder-terms-signed',
@@ -152,7 +152,7 @@ async function waitTerms(ctx: Ctx, what: string, done: (v: TermsVerdict) => bool
       timeoutMs: ctx.cfg.timeouts.verifierMinutes * 60_000,
       intervalMs: 10_000,
       probe: async () => {
-        const hint = hintAt === 0 || (idle && Date.now() - hintAt >= REHINT_MS);
+        const hint = hintAt === 0 || (idle && Date.now() - hintAt >= paced(REHINT_MS));
         if (hint) hintAt = Date.now();
         const v = (await requestTerms(watch, ctx.owner, { hint })).verdict;
         // Nothing pending: the pass the hint asked for has finished, without what we wait for - the next poll may ask again.
@@ -406,7 +406,11 @@ export async function stepBuilderTiers(ctx: Ctx): Promise<void> {
   );
 
   // --- 6. the two cheating orders ---------------------------------------------------------------------------------------
-  await cheats(ctx, { m: await fresh(), D, low, first, restingProbe, sumCounted, appFee });
+  // The tier the run's own volume has passed, verified or not: the server may count it any moment, so a fee at
+  // or above it is NOT under-paying (2026-10-03: the milestone was not verified yet, the run under-paid 15 against
+  // a 20 it thought owed - and the server, having counted the volume by then, rightly took 15 as paid).
+  const reached = next && (first?.answer.volume?.totalUsd ?? 0) + approx(sumCounted().usd) > next.atUsd ? { perps: next.perps, spot: next.spot } : null;
+  await cheats(ctx, { m: await fresh(), D, low, reached, first, restingProbe, sumCounted, appFee });
 
   // --- 7. the approval, lowered and revoked ------------------------------------------------------------------------------
   await approvalEnforcement(ctx, { D, fresh, restingProbe });
@@ -435,6 +439,8 @@ interface CheatInput {
   m: Market;
   D: FeePair;
   low: FeePair | null;
+  /** The tier the run's own volume passed (verified or not). */
+  reached: FeePair | null;
   /** The terms the step started with: what the server had verified BEFORE any order of this step. */
   first: TermsVerdict;
   restingProbe: (tag: string, fee: number, what: string) => Promise<void>;
@@ -454,7 +460,7 @@ async function cheats(ctx: Ctx, x: CheatInput): Promise<void> {
   const b = ctx.cfg.builder!;
   const ids = ['builder-underpaid-not-counted', 'builder-no-builder-not-counted', 'builder-no-builder-flagged', 'builder-terms-back-to-default'] as const;
   // The lowest fee the server has signed for this wallet that is still in force: nothing below it is ever owed.
-  const owed = Math.min(x.low?.perps ?? x.D.perps, ...(ctx.terms ? ctx.terms.allowedFees('perps') : [x.D.perps]));
+  const owed = Math.min(x.low?.perps ?? x.D.perps, x.reached?.perps ?? x.D.perps, ...(ctx.terms ? ctx.terms.allowedFees('perps') : [x.D.perps]));
   const under = owed - 5 >= 1 ? owed - 5 : owed > 1 ? 1 : 0;
   if (under <= 0 || under >= owed) return notRun(ctx, ids, `the fee owed on perps is ${owed}: there is no lower fee above 0 to under-pay with`);
   const accountId = getTradingState().accountId;
@@ -511,10 +517,15 @@ async function cheats(ctx: Ctx, x: CheatInput): Promise<void> {
   // One verification for everything since the baseline.
   const ref = (await requestTerms(ctx.terms!, owner, { hint: true })).verdict.answer.issued ?? Date.now();
   rec.line(`hinting, then waiting up to ${dur(ctx.cfg.timeouts.verifierMinutes * 60_000)} for the server to verify everything since it had $${before} of perps volume`, 5);
-  // Verified after the hint is enough: a verification that is queued again does not hide one that finished.
-  const w = await waitTerms(ctx, 'the server to verify the cheating orders', (v) => v.verified && !!v.answer.volume && (v.answer.volume.verifiedAt ?? 0) > ref);
+  // A pass after the hint that has seen the run's last honest order (the close, placed after both cheating orders):
+  // SoDEX lists fills late, so a pass right after the hint may not have them yet - it is hinted again (waitTerms).
+  const honestNow = approx(x.sumCounted().usd);
+  const seenAll = (v: TermsVerdict): boolean => (v.answer.volume?.perpsUsd ?? 0) - before >= honestNow * 0.98 - 0.05;
+  const after = (v: TermsVerdict | undefined): boolean => !!v?.verified && !!v.answer.volume && (v.answer.volume.verifiedAt ?? 0) > ref;
+  const w = await waitTerms(ctx, 'the server to verify the cheating orders', (v) => after(v) && seenAll(v));
+  // Not all of it seen in time: judged on the last pass after the hint - what it shows is the finding.
   const v = w.last;
-  if (!w.ok || !v || !v.answer.volume) {
+  if (!v || !v.answer.volume || !after(v)) {
     const why = `the server did not finish a verification within ${dur(w.ms)} (last: verified at ${v?.answer.volume?.verifiedAt ?? '?'}, pending ${String(v?.answer.volume?.pending ?? '?')})`;
     for (const id of ['builder-underpaid-not-counted', 'builder-no-builder-not-counted'] as const) ctx.checks.fail(id, why, { last: v?.answer ?? null });
     return notRun(ctx, ['builder-no-builder-flagged', 'builder-terms-back-to-default'], why);
