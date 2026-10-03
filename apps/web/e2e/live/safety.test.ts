@@ -18,7 +18,7 @@ import { api } from '../../src/api';
 import { ACTION, CLOB_GATEWAY, SodexApiError, WITHDRAW_TOKEN_TARGET, actionPayloadHash, bytesToHex, encodeDepositCmd, encodeWithdrawTokenCmd, engineDomainName, exchangeActionTypedData, perpsActions, revokeAPIKey } from '@sodex-core';
 import { placeOrderAction, type MarketSymbol, type OrderTicket } from '../../src/trading/orderParams';
 import { validateConfig, DEFAULT_CONFIG } from './config';
-import { installGuard, type Guard, type SentWrite } from './guard';
+import { READ_RETRY_MS, installGuard, isRpcAnswer, type Guard, type SentWrite } from './guard';
 import { HistoryLimiter } from './history';
 import { orderExpect, type OrderSpec } from './orders';
 import type { TypedDataSeen } from './provider';
@@ -92,6 +92,92 @@ test('guard, plan mode: EVERY write is refused before it leaves - SoDEX, backend
   assert.ok(Array.isArray(batch) && batch.every((x: { error?: unknown }) => x.error));
   assert.deepEqual(hits.map((h) => h.method), ['POST'], 'only the eth_call reached the network');
   assert.equal(g.refusals.length, 7);
+});
+
+test('guard: a READ is sent again after a network failure or a gateway error; a write, a rate limit and a refusal never', async () => {
+  const saved = [...READ_RETRY_MS];
+  READ_RETRY_MS.splice(0, READ_RETRY_MS.length, 1, 1, 1);
+  try {
+    const g = install('live');
+    const ok = globalThis.fetch;
+    const inner = (guard as unknown as { uninstall(): void }) && null;
+    void inner;
+    // Swap the "network" under the guard: a scripted list of what each request meets.
+    let script: Array<'drop' | number | 'html' | 'bare'> = [];
+    const seen: string[] = [];
+    g.uninstall();
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      seen.push(`${(init?.method ?? 'GET').toUpperCase()} ${url}`);
+      const next = script.shift() ?? 200;
+      if (next === 'drop') throw new TypeError('fetch failed');
+      if (next === 'html') return new Response('<html>bad gateway</html>', { status: 200 });
+      if (next === 'bare') return new Response(JSON.stringify({ error: 'rate limited' }), { status: 200 });
+      if (url.startsWith(RPC)) {
+        const body = JSON.parse(String(init?.body));
+        const one = (c: { id: number }) => ({ jsonrpc: '2.0', id: c.id, result: '0x1' });
+        return new Response(JSON.stringify(Array.isArray(body) ? body.map(one) : one(body)), { status: next });
+      }
+      return new Response(JSON.stringify({ code: 0, data: { ok: true } }), { status: next });
+    }) as typeof fetch;
+    void ok;
+    guard = installGuard({ mode: 'live', backend: BACKEND, gateway: GW, relayer: BIZ_ORIGIN, rpcUrls: [RPC], owner: OWNER });
+
+    // A gateway read: dropped twice, then answered.
+    script = ['drop', 503];
+    seen.length = 0;
+    assert.equal((await fetch(`${GW}/api/v1/spot/accounts/${OWNER}/state`)).status, 200);
+    assert.equal(seen.length, 3);
+    // A node that answers a batch with a bare error object, then HTML: read again until it is JSON-RPC.
+    script = ['bare', 'html'];
+    seen.length = 0;
+    const batch = await (await post(RPC, [{ jsonrpc: '2.0', id: 1, method: 'eth_getBalance', params: [] }, { jsonrpc: '2.0', id: 2, method: 'eth_call', params: [] }])).json();
+    assert.ok(Array.isArray(batch) && batch.length === 2);
+    assert.equal(seen.length, 3);
+    // SoDEX's rate limit (429) is never retried: its budget is not ours to spend twice.
+    script = [429];
+    seen.length = 0;
+    assert.equal((await fetch(`${GW}/api/v1/spot/markets/tickers`)).status, 429);
+    assert.equal(seen.length, 1);
+    // Down for good: three more tries, then the failure reaches the caller.
+    script = ['drop', 'drop', 'drop', 'drop'];
+    seen.length = 0;
+    await assert.rejects(fetch(`${GW}/api/v1/spot/markets/tickers`), /fetch failed/);
+    assert.equal(seen.length, 4);
+    // A caller that gave up (its own timeout) is not kept waiting.
+    script = ['drop'];
+    seen.length = 0;
+    const ctl = new AbortController();
+    ctl.abort();
+    await assert.rejects(fetch(`${GW}/api/v1/spot/markets/tickers`, { signal: ctl.signal }));
+    assert.equal(seen.length, 1);
+    // A write is sent once, whatever happens to it.
+    guard.expect({ kind: 'engine-transfer', label: 'x', times: 2 });
+    script = ['drop'];
+    seen.length = 0;
+    await assert.rejects(post(`${GW}/api/v1/spot/accounts/transfers`, { id: 1, fromAccountID: 7, toAccountID: 999, coinID: 0, amount: '2', type: 3 }));
+    assert.equal(seen.length, 1);
+    script = [503];
+    seen.length = 0;
+    assert.equal((await post(`${GW}/api/v1/spot/accounts/transfers`, { id: 1, fromAccountID: 7, toAccountID: 999, coinID: 0, amount: '2', type: 3 })).status, 503);
+    assert.equal(seen.length, 1);
+    // A raw transaction is never sent twice by the guard.
+    script = ['drop'];
+    seen.length = 0;
+    const raw = await post(RPC, { jsonrpc: '2.0', id: 3, method: 'eth_sendRawTransaction', params: ['0x00'] });
+    assert.ok(raw.status === 403 || raw.status === 200);
+    assert.ok(seen.length <= 1);
+  } finally {
+    READ_RETRY_MS.splice(0, READ_RETRY_MS.length, ...saved);
+  }
+});
+
+test('guard: what counts as a JSON-RPC answer (a node error with an id is one; a bare error object is not)', () => {
+  assert.equal(isRpcAnswer({ id: 1 }, '{"jsonrpc":"2.0","id":1,"result":"0x0"}'), true);
+  assert.equal(isRpcAnswer({ id: 1 }, '{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted"}}'), true);
+  assert.equal(isRpcAnswer([{ id: 1 }], '{"jsonrpc":"2.0","id":1,"result":"0x0"}'), false, 'a batch needs a list');
+  assert.equal(isRpcAnswer({ id: 1 }, '{"error":"tenant disabled"}'), false);
+  assert.equal(isRpcAnswer({ id: 1 }, '<html>'), false);
 });
 
 test('guard: hosts the runner does not know are refused in both modes', async () => {

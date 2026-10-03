@@ -159,6 +159,8 @@ export interface NetRecord {
   /** Short response for writes (order ids, transfer ids, tx hashes) - no secrets travel in responses. */
   response?: string;
   error?: string;
+  /** A read sent again this many times after a network failure (READ_RETRY_MS). */
+  retries?: number;
 }
 
 /** A write that left: what the ledger is built from. */
@@ -216,6 +218,31 @@ const norm = (u: string): string => u.replace(/\/+$/, '');
 
 /** Methods a JSON-RPC body may carry in plan mode (and in live mode without a raw tx). */
 const RPC_READS = new Set([...READ_METHODS, 'eth_chainId', 'net_version', 'eth_fillTransaction']);
+
+/**
+ * A READ that failed for a reason of the network is sent again - a public node or SoDEX
+ * dropping one request must not stop a run of hours (live run of 2026-10-03: Polygon's
+ * node "not a batch answer", a SoDEX timeout). Only reads, which change nothing:
+ * never a write, never a rate-limited history read, never the fee terms (a hint),
+ * never once the caller gave up (its own timeout aborted the request).
+ */
+export const READ_RETRY_MS = [1_000, 3_000, 8_000];
+const RETRY_STATUS = new Set([502, 503, 504]);
+const transientError = (e: unknown): boolean => {
+  const m = `${e instanceof Error ? `${e.name} ${e.message} ${String((e as { cause?: unknown }).cause ?? '')}` : String(e)}`;
+  return /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|other side closed|UND_ERR|network|terminated/i.test(m);
+};
+/** A JSON-RPC node's answer to `request` (one call or a batch): anything else - HTML, a bare error object - is not one. */
+export function isRpcAnswer(request: unknown, text: string): boolean {
+  let a: unknown;
+  try {
+    a = JSON.parse(text);
+  } catch {
+    return false;
+  }
+  const one = (x: unknown): boolean => !!x && typeof x === 'object' && ('result' in x || ('error' in x && 'id' in x));
+  return Array.isArray(request) ? Array.isArray(a) && a.length > 0 && a.every(one) : one(a);
+}
 
 const PERMIT_CMD = [
   { type: 'string' },
@@ -370,12 +397,38 @@ export function installGuard(o: GuardOptions): Guard {
                 ? 'explorer'
                 : 'other';
     const rec: NetRecord = { t: Date.now(), method, dest, url: `${url.origin}${url.pathname}${url.search}`, what: 'read' };
-    /** Send it. `after` sees the answer's text first (terms answers, writes). */
-    const send = async (after?: (status: number, text: string) => void): Promise<Response> => {
+    /**
+     * A read sent again after a network failure (READ_RETRY_MS). `rpcRequest`: the parsed JSON-RPC body,
+     * so a node's answer that is not JSON-RPC (or 429) is retried too. A Request object is sent once (its
+     * body cannot be read twice).
+     */
+    const retrying = async (rpcRequest: unknown | undefined): Promise<Response> => {
+      const once = () => original(typeof input === 'string' ? target : input, init);
+      if (!(typeof input === 'string' || input instanceof URL)) return once();
+      for (let i = 0; ; i++) {
+        const last = i >= READ_RETRY_MS.length;
+        let res: Response;
+        try {
+          res = await once();
+        } catch (e) {
+          if (last || init?.signal?.aborted || !transientError(e)) throw e;
+          rec.retries = (rec.retries ?? 0) + 1;
+          await new Promise((r) => setTimeout(r, READ_RETRY_MS[i]));
+          continue;
+        }
+        let again = RETRY_STATUS.has(res.status);
+        if (!again && rpcRequest !== undefined) again = res.status === 429 || !isRpcAnswer(rpcRequest, await res.clone().text().catch(() => ''));
+        if (!again || last || init?.signal?.aborted) return res;
+        rec.retries = (rec.retries ?? 0) + 1;
+        await new Promise((r) => setTimeout(r, READ_RETRY_MS[i]));
+      }
+    };
+    /** Send it. `after` sees the answer's text first (terms answers, writes). `retry`: a read, sent again after a network failure. */
+    const send = async (after?: (status: number, text: string) => void, retry?: { rpc?: unknown }): Promise<Response> => {
       const t0 = Date.now();
       try {
         // A relative string goes to the backend; a URL or Request object goes on exactly as given.
-        const res = await original(typeof input === 'string' ? target : input, init);
+        const res = retry ? await retrying(retry.rpc) : await original(typeof input === 'string' ? target : input, init);
         rec.status = res.status;
         rec.ms = Date.now() - t0;
         if (after || (rec.what !== 'read' && rec.what !== 'rpc-read')) {
@@ -400,7 +453,7 @@ export function installGuard(o: GuardOptions): Guard {
     if (dest === 'other') return refused(rec, `host ${url.host} is not one the runner talks to`, 'backend');
 
     if (dest === 'explorer') {
-      if (method === 'GET' || method === 'HEAD') return send();
+      if (method === 'GET' || method === 'HEAD') return send(undefined, {});
       return refused(rec, `${url.host} is read-only for the runner (${method})`, 'backend');
     }
 
@@ -417,7 +470,7 @@ export function installGuard(o: GuardOptions): Guard {
       const methods = calls.map((c) => String(c?.method ?? ''));
       const ids = Array.isArray(parsed) ? calls.map((c) => c?.id ?? null) : (calls[0]?.id ?? null);
       rec.what = methods.every((m) => RPC_READS.has(m)) ? 'rpc-read' : `rpc ${methods.join(',')}`;
-      if (methods.every((m) => RPC_READS.has(m))) return send();
+      if (methods.every((m) => RPC_READS.has(m))) return send(undefined, { rpc: parsed });
       const writes = methods.filter((m) => !RPC_READS.has(m));
       if (o.mode === 'plan') return refused(rec, `plan mode is read-only (${writes.join(', ')})`, 'rpc', ids);
       if (!writes.every((m) => m === 'eth_sendRawTransaction')) return refused(rec, `JSON-RPC method not allowed: ${writes.join(', ')}`, 'rpc', ids);
@@ -451,7 +504,7 @@ export function installGuard(o: GuardOptions): Guard {
         return send();
       }
       if (dest === 'backend' && url.pathname === TERMS_PATH && o.onTerms) return send((status, text) => o.onTerms!(url, status, text));
-      return send();
+      return send(undefined, {});
     }
 
     if (dest === 'relayer' && method === 'POST' && RELAYER_READ_POSTS.has(url.pathname)) {

@@ -52,6 +52,8 @@ export interface RunOptions {
   /** Read once to create the wallet, then dropped. */
   keyHex: string;
   throwaway: boolean;
+  /** plan only: plan for this address; the key's wallet only stands in (a plan signs nothing). */
+  watch?: string;
   registryOnly: boolean;
   reportDir: string;
   backendOverride: string | null;
@@ -185,8 +187,12 @@ export async function runE2E(o: RunOptions): Promise<number> {
   } finally {
     o.keyHex = '';
   }
-  const owner = provider.address;
-  L(`wallet            ${owner}${o.throwaway ? ' (a throwaway key generated for this plan)' : ''}`);
+  if (o.watch && o.mode !== 'plan') {
+    L('--address is for plan mode only (a live run needs the key)');
+    return 2;
+  }
+  const owner = o.watch ? o.watch.toLowerCase() : provider.address;
+  L(`wallet            ${owner}${o.watch ? ' (by address: a read-only plan, no key)' : o.throwaway ? ' (a throwaway key generated for this plan)' : ''}`);
   L(`backend           ${cfg.backend}`);
   L(`SoDEX gateway     ${GATEWAY_ORIGIN.mainnet} (relayer ${BIZ_ORIGIN})`);
   L(`steps             ${[...selected].join(', ')}`);

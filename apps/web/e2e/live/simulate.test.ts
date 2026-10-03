@@ -301,6 +301,42 @@ test('an open order the app did not place stops the step - it is the owner\'s, n
   assert.equal(r.w.orders.find((o) => o.clOrdID === 'web-123')!.status, 'NEW');
 });
 
+test('a resumed run whose steps need more in Spot than the account holds: the run tops Spot up from the wallet first, then runs', async () => {
+  const r = await run({ ...CONFIG, maxSpendUsd: 60, allowExistingAccount: true }, {
+    profile: 'evm-tour',
+    only: ['enable-trading', 'evm-tour'],
+    setup: (w) => {
+      // An account an earlier run opened, with 4 USDC left in Spot - far below the tour's working capital.
+      w.aid = 777;
+      w.addSpot(0, 4_000_000n);
+      w.arbUsdc.set(w.owner, 100_000_000n);
+    },
+  });
+  const steps = r.report.steps.map((s: { id: string; status: string }) => `${s.id} ${s.status}`);
+  assert.ok(r.report.selectedSteps.includes('deposit-external'), `selected: ${r.report.selectedSteps}`);
+  assert.equal(r.report.steps.find((s: { id: string }) => s.id === 'deposit-external')?.status, 'ok', `${steps.join(', ')}\n${show(r)}`);
+  assert.equal(r.report.steps.find((s: { id: string }) => s.id === 'evm-tour')?.status, 'ok', `${steps.join(', ')}\n${show(r)}`);
+  const note = r.lines.find((l) => /deposit-external added as a top-up of (\d+) USDC/.test(l));
+  assert.ok(note, 'the top-up is said, with its amount');
+  const amount = Number(/top-up of (\d+) USDC/.exec(note!)![1]);
+  assert.ok(amount >= 5 && amount <= 100, `top-up ${amount}`);
+});
+
+test('a resumed run short in Spot with too little USDC in the wallet for the top-up: refused before anything moves, saying what to send', async () => {
+  const r = await run({ ...CONFIG, maxSpendUsd: 60, allowExistingAccount: true }, {
+    profile: 'evm-tour',
+    only: ['enable-trading', 'evm-tour'],
+    setup: (w) => {
+      w.aid = 777;
+      w.addSpot(0, 4_000_000n);
+      w.arbUsdc.set(w.owner, 1_000_000n);
+    },
+  });
+  assert.equal(r.code, 2);
+  assert.ok(r.lines.some((l) => /fund the wallet: \d+(\.\d+)? USDC on Arbitrum One/.test(l)), r.lines.slice(-25).join('\n'));
+  assert.equal(r.w.writes.length, 0, 'nothing was sent');
+});
+
 test('live refuses to start - nothing is signed or sent - when the backend and the on-chain registry disagree on the deposit address', async () => {
   const { code, lines, w } = await run(CONFIG, { setup: (x) => (x.registryAddress = '0x000000000000000000000000000000000000dead') });
   assert.equal(code, 2);

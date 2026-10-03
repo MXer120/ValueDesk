@@ -27,6 +27,7 @@ import { sodexAccountId } from '../../src/trading/session';
 import { ALL_EVM, GAS_FLOOR, appSendsUsdc, chainRank, evmChain } from './chains';
 import { Checks } from './checks';
 import type { RunConfig } from './config';
+import { REPLACE_KEEPS_BUILDER } from '../../src/trading/feeGuard';
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { chainWithdrawals } from './chainRoutes';
 import { checkRoutes, notTestable, sameDepositAddress } from './routes';
@@ -278,6 +279,11 @@ function perpsFillCost(m: Market, qty: string, builderFee: number): number {
 
 const ethGasUnits = { erc20: 65_000, approve: 55_000, deposit: 160_000 };
 
+/** How the app changes a resting limit order, and what the run checks about its builder (G6). */
+const changeNote = REPLACE_KEEPS_BUILDER
+  ? " (the app uses SoDEX's replace - proven to keep the builder; the run checks the replacement's record still names it)"
+  : " (the app changes it as cancel + new order; one replace sent by the runner shows whether SoDEX keeps the builder)";
+
 export async function preflight(o: PreflightInput): Promise<PlanResult> {
   const { cfg, owner, rec } = o;
   const problems: string[] = [];
@@ -389,7 +395,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   // 6. Deposit addresses (USDC, each chain a deposit comes from).
   const depositChains = [...(has('deposit-external') ? [cfg.deposit.chain] : []), ...(has('extra-deposits') ? cfg.extraDeposits.map((d) => d.chain) : [])];
   const depositAddresses = new Map<string, DepositAddressCheck>();
-  for (const chainKey of [...new Set(depositChains)]) {
+  const checkDepositChain = async (chainKey: string): Promise<void> => {
     const d = await rec.read(
       `USDC deposit address on ${chainKey}: backend vs on-chain registry`,
       () => checkDepositAddress(owner, chainKey, { registryOnly: o.registryOnly, waitMs: o.mode === 'live' ? cfg.timeouts.addressIssueSeconds * 1000 : 0, say }),
@@ -402,7 +408,8 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     const disagree = !!d.backend && !!d.registry && !d.match;
     if (p && (disagree || o.mode === 'live')) problems.push(`deposit ${chainKey}: ${p}`);
     else if (p) warnings.push(`deposit ${chainKey}: ${p} - a live run waits up to ${Math.round(cfg.timeouts.addressIssueSeconds / 60)} min for the addresses to be issued, then requires the backend and the registry to agree`);
-  }
+  };
+  for (const chainKey of [...new Set(depositChains)]) await checkDepositChain(chainKey);
 
   // 7. Markets.
   const markets: string[] = [];
@@ -637,7 +644,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
       const buyUsd = approx(q) * approx(spotM.ask);
       const ioc = approx(rb.lock) * 1.05;
       lines.push(
-        `spot ${spotM.sym.name}: limit BUY ${rb.qty} @ ${rb.price} (${rb.offsetPct} % below the bid, locks ~${cut(rb.lock, 4)} USDC) rests; price changed, size changed${dfltSpot ? ' (the app changes it as cancel + new order; one replace sent by the runner shows whether SoDEX keeps the builder)' : ''}; cancelled`,
+        `spot ${spotM.sym.name}: limit BUY ${rb.qty} @ ${rb.price} (${rb.offsetPct} % below the bid, locks ~${cut(rb.lock, 4)} USDC) rests; price changed, size changed${dfltSpot ? changeNote : ''}; cancelled`,
         `market BUY for ${funds.toFixed(2)} USDC (by funds), market BUY ${q} (by quantity), market SELL of the smallest size`,
         'post-only (GTX) resting and crossing, IOC not crossing and crossing, FOK not fillable and fillable (SoDEX documents FOK as not supported: whatever it does is recorded)',
         'dead-man switch: scheduled a minute out, cleared',
@@ -669,7 +676,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
       lines.push(
         `perps ${perpsM.sym.name}: move ~${collateral} USDC Spot -> Perps (leverage ${lev}x); one order is ${q} (~${notional.toFixed(2)} USD)`,
         'leverage changed in cross, the market switched to isolated; market buy by quantity; isolated margin +1 / -0.5 USDC; reduce-only close; back to cross',
-        `limit BUY rests; price changed, size changed${dfltPerps ? ' (the app changes it as cancel + new order; one replace sent by the runner shows whether SoDEX keeps the builder)' : ''}; cancelled`,
+        `limit BUY rests; price changed, size changed${dfltPerps ? changeNote : ''}; cancelled`,
         'post-only resting and crossing; IOC not crossing and crossing; stop-loss and take-profit on the position (listed, trigger changed, cancelled); a take-profit just above the market, waited for (not firing is reported, not failed)',
         'FOK not fillable and fillable (recorded whatever SoDEX does); entry with attached take-profit and stop-loss; cancel-all of three resting orders; dead-man switch cleared, then let fire',
         `every fill: commission at the account's own rate${dfltPerps ? `, builder fee ${dfltPerps / 10} bp of the notional` : ''}; ends flat, no open orders, at the leverage it started with; collateral back to Spot`,
@@ -1232,6 +1239,26 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     for (let k = needs.length - 1; k >= 0; k--) if (needs[k]!.chain === cfg.deposit.chain && (needs[k]!.why === 'deposit' || needs[k]!.why.startsWith('gas for the USDC transfer'))) needs.splice(k, 1);
     needs.unshift(...dp.needs);
     profileNotes.push(`deposit.amount: ${cfg.deposit.amount} USDC instead of ${before} - the ${o.profile} profile's steps need ~${usd(deficit)} more in Spot at their busiest (working capital: it comes back, or leaves to your own addresses)`);
+  } else if (raises && deficit > 0 && !newAccount && !has('deposit-external')) {
+    // A resumed run (--only without deposit-external) whose steps need more in Spot than the account holds:
+    // the run tops Spot up itself, from the wallet's USDC on the deposit chain, BEFORE its first step - instead
+    // of refusing. With a cushion (an estimate is an estimate); the cleanup brings what is left back.
+    const before = cfg.deposit.amount;
+    const r = depositRoutes.find((x) => x.chain.key === cfg.deposit.chain);
+    const held = wallet[cfg.deposit.chain]?.usdc;
+    const least = Math.ceil(deficit + 2);
+    const cushion = Math.ceil(deficit + Math.max(10, (plans.reduce((t, pl) => t + (pl.skip ? 0 : pl.costUsd + pl.sentAwayUsd), 0)) * 0.1));
+    // As much of the cushion as the wallet holds there; never less than the shortfall (then the wallet must be funded).
+    const fromWallet = held === null || held === undefined ? cushion : Math.min(cushion, Math.floor(approx(held)));
+    const topUp = Math.max(least, fromWallet, r ? Math.ceil(approx(r.minDeposit)) : 0);
+    cfg.deposit.amount = String(topUp);
+    o.selected.add('deposit-external');
+    if (!depositAddresses.has(cfg.deposit.chain)) await checkDepositChain(cfg.deposit.chain);
+    for (const pl of plans) pl.problems = pl.problems.filter((x) => !shortfalls.has(x));
+    const dp = await planDeposit();
+    plans.unshift({ id: 'deposit-external', title: STEP_TITLES['deposit-external'], ...dp.plan, lines: [`TOP-UP for this resumed run: the selected steps need ~${usd(deficit)} more in Spot at their busiest than the account holds`, ...dp.plan.lines] });
+    needs.unshift(...dp.needs);
+    profileNotes.push(`deposit-external added as a top-up of ${topUp} USDC from ${chainLabel(cfg.deposit.chain)} (deposit.amount was ${before}): the resumed steps need ~${usd(deficit)} more in Spot than the account holds (working capital: the cleanup withdraws what is left back to ${chainLabel(cfg.cleanup.chain)})`);
   }
   for (const p of plans) if (!p.skip) problems.push(...p.problems);
   const totalCostUsd = plans.reduce((s, p) => s + (p.skip ? 0 : p.costUsd), 0);

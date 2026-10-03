@@ -49,6 +49,8 @@ const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live|capabilities] --config 
   --backend <origin>      override config.backend (default http://127.0.0.1:5180)
   --report-dir <dir>      where the JSON report goes (default e2e/live/reports)
   --profile <name>        what the run covers: ${PROFILES.join(', ')}
+  --address 0x...         plan mode only: plan for this wallet address WITHOUT its key (read-only; a throwaway
+                          key stands in for signing, which a plan never does)
   --only a,b              run only these steps (preflight always runs; "orders" = orders-spot,orders-perps): ${STEP_ORDER.join(', ')}
 
 The key comes only from the environment: VS_E2E_KEY=0x<64 hex>.`;
@@ -63,10 +65,12 @@ interface Args {
   registryOnly: boolean;
   backend: string | null;
   reportDir: string | null;
+  /** plan only: the wallet to plan for, by address (no key). */
+  address: string | null;
 }
 
 export function parseArgs(argv: string[]): Args | string {
-  const a: Args = { mode: 'plan', config: null, confirm: null, only: null, profile: null, throwaway: false, registryOnly: false, backend: null, reportDir: null };
+  const a: Args = { mode: 'plan', config: null, confirm: null, only: null, profile: null, throwaway: false, registryOnly: false, backend: null, reportDir: null, address: null };
   const rest = [...argv];
   if (rest[0] === 'plan' || rest[0] === 'live' || rest[0] === 'capabilities') a.mode = rest.shift() as Args['mode'];
   while (rest.length) {
@@ -109,6 +113,12 @@ export function parseArgs(argv: string[]): Args | string {
         case '--registry-only':
           a.registryOnly = true;
           break;
+        case '--address': {
+          const v = val();
+          if (!/^0x[0-9a-fA-F]{40}$/.test(v)) return `--address must be a wallet address (0x and 40 hex characters), not ${v.slice(0, 12)}...`;
+          a.address = v;
+          break;
+        }
         case '--backend':
           a.backend = val();
           break;
@@ -168,7 +178,14 @@ async function main(): Promise<number> {
   }
 
   let keyHex: string;
-  if (args.throwaway) {
+  if (args.address) {
+    // A plan for an address: read-only by construction - nothing in plan mode signs, and live refuses it.
+    if (args.mode !== 'plan') {
+      process.stderr.write('--address is for plan mode only (a live run needs the key)\n');
+      return 2;
+    }
+    keyHex = generatePrivateKey();
+  } else if (args.throwaway) {
     if (args.mode !== 'plan') {
       process.stderr.write('--throwaway-key is for plan mode only\n');
       return 2;
@@ -196,6 +213,7 @@ async function main(): Promise<number> {
     ...(args.profile ? { profile: args.profile } : {}),
     keyHex,
     throwaway: args.throwaway,
+    ...(args.address ? { watch: args.address } : {}),
     registryOnly: args.registryOnly,
     reportDir: args.reportDir ?? fileURLToPath(new URL('./reports/', import.meta.url)),
     backendOverride: args.backend,

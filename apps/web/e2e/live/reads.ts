@@ -25,22 +25,47 @@ export const DEPOSIT_WALLET_REGISTRY = '0x07E28Aa1BB34A625c94870476b24213AB4d2E7
 const REGISTRY_ABI = parseAbi(['function getDepositWalletList(address account, string coinSymbol) view returns (string[] chains, string[][] wallets)']);
 
 /** One JSON-RPC read, through the app's batch reader. Throws when the node gives no answer. */
+/** Delays before a chain read is tried again: each try has the app's own timeout, the last error is the one thrown. */
+export const CHAIN_READ_RETRY_MS = [2_000, 5_000];
+
+/**
+ * A read of a chain, tried again when it fails: a public node that times out or answers
+ * nonsense once must not stop a step that only wanted a balance (the network guard retries
+ * network failures inside one try; this covers the app's own read timeout).
+ */
+async function chainRead<T>(read: () => Promise<T>): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await read();
+    } catch (e) {
+      if (i >= CHAIN_READ_RETRY_MS.length) throw e;
+      await new Promise((r) => setTimeout(r, CHAIN_READ_RETRY_MS[i]));
+    }
+  }
+}
+
 export async function rpcRead(url: string, method: string, params: unknown[]): Promise<unknown> {
-  const answers = await rpcBatch(url, [{ method, params }]);
-  if (!answers.has(0)) throw new Error(`${method}: no answer from ${new URL(url).host}`);
-  return answers.get(0) ?? null;
+  return chainRead(async () => {
+    const answers = await rpcBatch(url, [{ method, params }]);
+    if (!answers.has(0)) throw new Error(`${method}: no answer from ${new URL(url).host}`);
+    return answers.get(0) ?? null;
+  });
 }
 
 export async function nativeBalance(url: string, holder: string): Promise<bigint> {
-  const v = hexUnits((await rpcBatch(url, [nativeBalanceCall(holder)])).get(0));
-  if (v === null) throw new Error(`eth_getBalance: unreadable answer from ${new URL(url).host}`);
-  return v;
+  return chainRead(async () => {
+    const v = hexUnits((await rpcBatch(url, [nativeBalanceCall(holder)])).get(0));
+    if (v === null) throw new Error(`eth_getBalance: unreadable answer from ${new URL(url).host}`);
+    return v;
+  });
 }
 
 export async function tokenBalance(url: string, token: string, holder: string): Promise<bigint> {
-  const v = hexUnits((await rpcBatch(url, [balanceOfCall(token, holder)])).get(0));
-  if (v === null) throw new Error(`balanceOf: unreadable answer from ${new URL(url).host}`);
-  return v;
+  return chainRead(async () => {
+    const v = hexUnits((await rpcBatch(url, [balanceOfCall(token, holder)])).get(0));
+    if (v === null) throw new Error(`balanceOf: unreadable answer from ${new URL(url).host}`);
+    return v;
+  });
 }
 
 /** The wallet's deposit address per chain for `coinSymbol`, read straight from the on-chain registry (wallets[i][0], as sodex.com uses it). */
