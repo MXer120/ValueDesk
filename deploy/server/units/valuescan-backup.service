@@ -1,12 +1,13 @@
 # Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
 #
-# One consistent copy of the index database to S3 (deploy/server/bin/backup.sh).
+# One consistent copy of the index database to S3, or to the data volume on an
+# instance without an ops bucket (deploy/server/bin/backup.sh).
 # The copy is taken with VACUUM INTO from a read-only connection, so the indexer
-# keeps writing while it runs. Retention is the bucket's lifecycle rule; this
-# unit cannot delete a backup.
+# keeps writing while it runs. Retention in S3 is the bucket's lifecycle rule (this
+# unit cannot delete a backup there); on the data volume backup.sh keeps BACKUP_KEEP.
 
 [Unit]
-Description=Valuescan index backup to S3
+Description=Valuescan index backup (to S3, or to the data volume)
 After=network-online.target
 Wants=network-online.target
 RequiresMountsFor=/var/lib/valuescan

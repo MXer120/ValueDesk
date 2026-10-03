@@ -30,8 +30,13 @@ RestartSec=3
 KillSignal=SIGTERM
 TimeoutStopSec=20
 LimitNOFILE=65536
-MemoryHigh=1500M
-MemoryMax=2G
+# Sized for a 4 GiB instance (t4g.medium). API and indexer were measured together at
+# about 0.9 GB (no split was measured). The two caps (0.9 + 1.8 GB) leave over 1 GB for the
+# system, Caddy, the health check, the nightly backup and npm during a release, so
+# a runaway is stopped inside its own unit (and restarted) before it can take the
+# box down. On 8 GiB (t4g.large) 1500M / 2G is right: a drop-in, `systemctl edit`.
+MemoryHigh=640M
+MemoryMax=900M
 SyslogIdentifier=valuescan-api
 
 # --- hardening ---
@@ -60,8 +65,8 @@ SystemCallFilter=@system-service @pkey
 SystemCallFilter=~@privileged
 SystemCallErrorNumber=EPERM
 UMask=0027
-# A reader of a WAL database still writes its -shm file, and today the API opens
-# the index read-write (apps/server/src/indexer/read.ts). Nothing else is writable.
+# The API opens the index read-only (apps/server/src/indexer/reader.ts), but a
+# reader of a WAL database still maps its -shm file read-write. Nothing else is writable.
 ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state
 # MemoryDenyWriteExecute is deliberately NOT set: V8's JIT needs writable+executable memory.
 

@@ -20,7 +20,18 @@ deploy/server/
 ```
 
 Target: Amazon Linux 2023, arm64 (x86_64 works too). Run it with
-`deploy/release/bootstrap-instance.sh` from your workstation.
+`deploy/release/bootstrap-instance.sh` from your workstation - through SSM on the
+CloudFormation instance, over SSH on the EC2 test instance, which has no instance
+role (`docs/deploy/EC2-VERCEL.md`). On that instance:
+
+- SSH stays on (`KEEP_SSHD=1`, remembered in `/etc/valuescan/bootstrap.env`); keys
+  only, port 22 from the deploying machine's address only;
+- the origin secret comes from a root-only file the workstation wrote through SSH's
+  stdin (`ORIGIN_SECRET_FILE`, `/root/.valuescan/origin-secret`), not from SSM;
+- there is no ops bucket (`OPS_BUCKET` empty): a release arrives over SSH
+  (`release.sh <tag> --from=<file>`), backups stay on the data volume, and EBS
+  snapshots of that volume carry them off the box;
+- the health check alerts nobody (no SNS without a role): it logs.
 
 ## What ends up where
 
@@ -32,13 +43,14 @@ Target: Amazon Linux 2023, arm64 (x86_64 works too). Run it with
 | `/opt/valuescan/current` | link to the active release | |
 | `/opt/valuescan/bin/` | the operations scripts | root |
 | `/etc/valuescan/api.env`, `indexer.env`, `ops.env` | rendered from `env/*.example` on every bootstrap | root:valuescan 0640 |
-| `/etc/valuescan/api.secret.env` | `VALUESCAN_ORIGIN_SECRET`, from SSM Parameter Store | root:valuescan 0640 |
+| `/etc/valuescan/api.secret.env` | `VALUESCAN_ORIGIN_SECRET` (`current`, or `current,next` while it is rotated), from SSM Parameter Store or `ORIGIN_SECRET_FILE` | root:valuescan 0640 |
+| `/etc/valuescan/caddy.secret.env` | the same one or two values for Caddy's gate (`VALUESCAN_ORIGIN_SECRET_1`, `_2`) | root 0600 |
 | `/etc/valuescan/*.local.env` | your own overrides; never touched | you create them |
 | `/etc/caddy/Caddyfile` | rendered from the template | root 0644 |
 | `/var/lib/valuescan/` | the data volume (xfs, encrypted EBS) | |
 | `/var/lib/valuescan/index/valuescan-index.db` (+ `-wal`, `-shm`) | the index | valuescan 0640 |
 | `/var/lib/valuescan/state/` | small state: health state, last backup marker | valuescan |
-| `/var/lib/valuescan/backup/` | staging for the nightly copy | valuescan |
+| `/var/lib/valuescan/backup/` | staging for the nightly copy; `archive/` holds the backups when there is no ops bucket; `seed/` a seed copied over SSH | valuescan (seed: root) |
 | `/var/lib/caddy/` | certificates and the ACME account | caddy |
 
 ## The units
@@ -47,7 +59,7 @@ Target: Amazon Linux 2023, arm64 (x86_64 works too). Run it with
 |---|---|---|---|
 | `valuescan-indexer.service` | `node --import tsx src/indexer/main.ts` as `valuescan` | always, after 30 s | the ONE writer of the index; holds the trade streams |
 | `valuescan-api.service` | `node --import tsx src/index.ts` as `valuescan`, hosted mode, `VALUESCAN_INDEXER=0`, `127.0.0.1:8797` | always, after 3 s | restarting it is cheap |
-| `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name |
+| `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name; passes on only requests that carry the origin secret |
 | `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled | - | catches up after a stop |
 | `valuescan-health.timer` -> `.service` | `healthcheck.mjs`, every minute | - | alerts on a change of state |
 
@@ -59,20 +71,30 @@ Hardening, the same on both Valuescan services: `NoNewPrivileges`,
 `ProtectSystem=strict` with `ReadWritePaths` limited to the index and state
 directories, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, the `Protect*` kernel
 switches, `RestrictAddressFamilies`, `RestrictNamespaces`, an empty capability set,
-`SystemCallFilter=@system-service` without `@privileged`, `MemoryMax`. Not set, on
-purpose: `MemoryDenyWriteExecute` (V8's JIT needs it off).
+`SystemCallFilter=@system-service` without `@privileged`, `MemoryHigh`/`MemoryMax`
+(sized for a 4 GiB instance: API 640M/900M, indexer 1400M/1800M; on 8 GiB use a
+drop-in with 1500M/2G and 3G/4G). Not set, on purpose: `MemoryDenyWriteExecute`
+(V8's JIT needs it off).
 `systemd-analyze security valuescan-api` rates both at about 1.4 ("OK").
 
 If a unit fails after a systemd or kernel update with a `SIGSYS` or an odd `EPERM`,
 the system call filter is the first suspect: override it with a drop-in
 (`systemctl edit valuescan-api`, `SystemCallFilter=` empty) and report it.
 
-**The API is not a pure reader.** `apps/server/src/indexer/read.ts` opens the index
-read-write (a schema check and one `meta` write on open), and a WAL reader maps the
-`-shm` file read-write in any case: that is why the API unit may write to the index
-directory. It also reads the venues itself for Explore, the whale tape, positioning,
-the screener and podium curves, from the same address as the indexer: `env/api.env`
-caps its Hyperliquid share for that reason.
+**The API reads the index read-only** (`apps/server/src/indexer/reader.ts`,
+`{ readOnly: true }`: no schema, no migration). Its unit may still write to the index
+directory because a WAL reader maps the `-shm` file read-write. The API also reads
+the venues itself for Explore, the whale tape, the screener and podium curves, from
+the same address as the indexer - bounded, never per visitor
+(`apps/server/test/publicBudgets.test.ts`); an API-only process's Hyperliquid share
+defaults to 200 weight a minute.
+
+**Caddy's gate.** Caddy passes a request to the API only when it carries
+`X-Origin-Verify` with the current (or, during a rotation, the next) origin secret;
+anything else gets a 403 from Caddy (`caddy/Caddyfile.template`, `@edge`). Behind
+CloudFront the security group already admits nobody else; behind the Vercel function
+port 443 is open to everyone, and the gate is what keeps the API - and the
+`X-Forwarded-For` it keys its limits on - reachable only through the edge.
 
 ## Environment
 
@@ -86,7 +108,7 @@ variable with what it does. The hosted-mode ones in short:
 | `HOST` / `PORT` | `127.0.0.1` / `8797` | loopback; Caddy is in front |
 | `VALUESCAN_ALLOWED_ORIGINS` | `https://<site>` | CORS; unused while site and API share an origin |
 | `VALUESCAN_TRUST_PROXY` | `2` | Caddy, then CloudFront; the next address is the viewer |
-| `VALUESCAN_ORIGIN_SECRET` | from SSM | required on every request but `/api/health` |
+| `VALUESCAN_ORIGIN_SECRET` | from SSM, or the root-only file (EC2) | required on every request but `/api/health`; `current,next` while it is rotated |
 | `VALUESCAN_RATE_READ_PER_MIN` | 600 | per client |
 | `VALUESCAN_RATE_UPSTREAM_PER_MIN` | 120 | per client, routes that can cost upstream calls |
 | `VALUESCAN_RATE_AUTH_PER_MIN` / `_GLOBAL_PER_MIN` | 20 / 300 | no such route is listed today |
@@ -94,9 +116,12 @@ variable with what it does. The hosted-mode ones in short:
 | `VALUETRADE_ALLOW_MAINNET` | `1` | `0` + restart = trading off for every visitor (emergency brake) |
 
 No secret is in a template, in this repository or in a release. The origin secret
-is created once in SSM Parameter Store (`deploy/aws/deploy.sh secret --execute`);
-the bootstrap copies it into `/etc/valuescan/api.secret.env`, CloudFormation hands
-the same value to CloudFront.
+is created once in SSM Parameter Store (`deploy/aws/deploy.sh secret --execute`) -
+or, for the EC2 test instance, on the workstation by the first
+`bootstrap-instance.sh` - and the bootstrap copies it into
+`/etc/valuescan/api.secret.env` and `caddy.secret.env`; the edge gets the same value
+(CloudFormation hands it to CloudFront; the Vercel function has it as a production
+environment variable).
 
 ## Logs
 
@@ -135,6 +160,11 @@ From the workstation, without a shell on the instance:
   of the uncompressed file next to it. (`sqlite3 .backup` is not used: the backup
   API restarts whenever another connection writes, and the indexer writes every
   few seconds.)
+- **Without an ops bucket** (the EC2 test instance): the compressed copy and its
+  `.sha256` go to `BACKUP_DIR` (`/var/lib/valuescan/backup/archive`), the newest
+  `BACKUP_KEEP` (1) are kept. Off the box they go as EBS snapshots of the data volume
+  (`deploy/aws/ec2/provision.sh snapshot`), which hold the live index as well
+  (crash-consistent: SQLite in WAL mode recovers from that like from a power cut).
 - **When:** nightly at 03:17 UTC plus up to ten minutes (`valuescan-backup.timer`;
   a run missed while the instance was stopped is caught up); by hand with
   `sudo systemctl start valuescan-backup.service`, or `deploy/release/remote.sh backup`
@@ -186,14 +216,17 @@ journalctl -t valuescan-health -n 1 --no-pager -o cat      # one JSON line: ok, 
 | `api` | `/api/health` does not answer `{ok:true}` |
 | `lockdown` | a route that only a local server answers is served: hosted mode is not in effect |
 | `index` | a board read through the gate fails, or the board is older than 15 minutes |
-| `indexer` | the status the indexer writes into the index every 30 s is older than 3 minutes, or no board was built for 15 minutes (a stream that is down is a warning) |
+| `indexer` | `/api/vs/index/health` (the indexer's own status, published every 30 s) is older than 3 minutes, or no board was built for 15 minutes (a stream that is down is a warning; the API not answering makes this a warning too - `api` fails then) |
 | `disk` | the data or root volume is over 80 %, or there is no room for the next backup copy |
 | `backup` | the last successful backup is older than 36 hours |
 | `tls` | Caddy's certificate expires in under 14 days, or it serves its internal one |
 | `units` | a service is not active |
 
-`/api/vs/index/status` is not served in hosted mode (diagnostics are not public), so
-the indexer's status is read straight from the index file, read-only.
+`/api/vs/index/status` is not served in hosted mode (diagnostics are not public). The
+check asks `/api/vs/index/health`, which the API answers only to a caller on the
+instance itself (numbers and booleans, no secret needed); it never opens the index
+file, so its unit has no write access to the index directory. During a rotation it
+sends the first value of `VALUESCAN_ORIGIN_SECRET`.
 
 With `ALERT_TOPIC_ARN` set it publishes to the SNS topic after two failing passes in
 a row, on recovery, and every six hours while it stays unhealthy.

@@ -4,14 +4,28 @@
 # touches what differs.
 #
 # It is run as root on the instance, from the bootstrap bundle (this directory),
-# normally by deploy/release/bootstrap-instance.sh through SSM Run Command:
+# normally by deploy/release/bootstrap-instance.sh - through SSM Run Command on the
+# CloudFormation instance, over SSH on the EC2 test instance:
 #
 #   SITE_DOMAIN=valuescan.example ORIGIN_DOMAIN=origin.valuescan.example \
 #   OPS_BUCKET=<ops bucket> CONFIG_PREFIX=/valuescan/prod \
 #   [ALERT_TOPIC_ARN=arn:...] [ACME_EMAIL=you@example.com] \
 #     bash /opt/valuescan/bootstrap/bootstrap.sh
 #
-# Target: Amazon Linux 2023 (arm64 or x86_64). No inbound SSH is needed or left on.
+#   # an instance WITHOUT an instance role (no SSM, no S3): the EC2 test environment
+#   SITE_DOMAIN=... ORIGIN_DOMAIN=... OPS_BUCKET= KEEP_SSHD=1 \
+#   ORIGIN_SECRET_FILE=<root-only-file> \
+#     bash /opt/valuescan/bootstrap/bootstrap.sh
+#
+# Target: Amazon Linux 2023 (arm64 or x86_64). On the CloudFormation instance no
+# inbound SSH is needed or left on; on the EC2 test instance SSH is the way in
+# (KEEP_SSHD=1, remembered for every later run).
+#
+# THE ORIGIN SECRET comes from SSM Parameter Store (<CONFIG_PREFIX>/origin-secret,
+# and <CONFIG_PREFIX>/origin-secret-next while it is rotated), or from a root-only
+# file the workstation wrote over SSH (ORIGIN_SECRET_FILE, and <that file>.next).
+# When there are two, both are accepted: VALUESCAN_ORIGIN_SECRET=current,next
+# (docs/deploy/DEPLOY.md, "Rotating the origin secret").
 #
 # WHAT IT DOES
 #   1. packages (tar, xz, zstd, xfsprogs), no SSH daemon
@@ -63,7 +77,7 @@ install_if_changed() {
 # A previous run's answers are the defaults, so a re-run needs no arguments.
 if [ -f "$ETC/bootstrap.env" ]; then
   while IFS='=' read -r k v; do
-    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE)
+    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE|KEEP_SSHD|ORIGIN_SECRET_FILE)
       [ -n "${!k:-}" ] || printf -v "$k" '%s' "$v" ;;
     esac
   done < "$ETC/bootstrap.env"
@@ -71,18 +85,24 @@ fi
 
 : "${SITE_DOMAIN:?SITE_DOMAIN is required (the site, e.g. valuescan.example)}"
 : "${ORIGIN_DOMAIN:?ORIGIN_DOMAIN is required (this instance, e.g. origin.valuescan.example)}"
-: "${OPS_BUCKET:?OPS_BUCKET is required (network.yaml output OpsBucketName)}"
+# Empty on an instance without an instance role: releases arrive over SSH and
+# backups stay on the data volume (env/ops.env.example).
+OPS_BUCKET="${OPS_BUCKET:-}"
 CONFIG_PREFIX="${CONFIG_PREFIX:-/valuescan/prod}"
 ALERT_TOPIC_ARN="${ALERT_TOPIC_ARN:-}"
 ACME_EMAIL="${ACME_EMAIL:-}"
 DATA_DEVICE="${DATA_DEVICE:-/dev/sdf}"
+KEEP_SSHD="${KEEP_SSHD:-0}"
+ORIGIN_SECRET_FILE="${ORIGIN_SECRET_FILE:-}"
 
 # Everything below ends up in files and sed expressions: accept plain values only.
 domain_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
 [[ "$SITE_DOMAIN" =~ $domain_re ]] || die "SITE_DOMAIN is not a DNS name: $SITE_DOMAIN"
 [[ "$ORIGIN_DOMAIN" =~ $domain_re ]] || die "ORIGIN_DOMAIN is not a DNS name: $ORIGIN_DOMAIN"
 [ "$SITE_DOMAIN" != "$ORIGIN_DOMAIN" ] || die "the origin needs a name of its own, not the site's"
-[[ "$OPS_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "OPS_BUCKET is not a bucket name: $OPS_BUCKET"
+[ -z "$OPS_BUCKET" ] || [[ "$OPS_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "OPS_BUCKET is not a bucket name: $OPS_BUCKET"
+[[ "$KEEP_SSHD" =~ ^[01]$ ]] || die "KEEP_SSHD is 0 or 1"
+[ -z "$ORIGIN_SECRET_FILE" ] || [[ "$ORIGIN_SECRET_FILE" =~ ^/[A-Za-z0-9_./-]+$ ]] || die "ORIGIN_SECRET_FILE is not an absolute path"
 [[ "$CONFIG_PREFIX" =~ ^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$ ]] || die "CONFIG_PREFIX is not a parameter path: $CONFIG_PREFIX"
 [ -z "$ALERT_TOPIC_ARN" ] || [[ "$ALERT_TOPIC_ARN" =~ ^arn:[a-z-]+:sns:[a-z0-9-]+:[0-9]+:[A-Za-z0-9_-]+$ ]] || die "ALERT_TOPIC_ARN is not an SNS topic ARN"
 [ -z "$ACME_EMAIL" ] || [[ "$ACME_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "ACME_EMAIL is not an address"
@@ -112,11 +132,18 @@ done
 if [ "${#missing[@]}" -gt 0 ]; then
   dnf install -y -q "${missing[@]}"
 fi
-command -v aws >/dev/null 2>&1 || die "the AWS CLI is missing (it is part of the standard Amazon Linux 2023 image)"
+# The AWS CLI reads the secret from SSM and, with an ops bucket, moves releases and
+# backups. An instance without a role uses none of that.
+if [ -z "$ORIGIN_SECRET_FILE" ] || [ -n "$OPS_BUCKET" ]; then
+  command -v aws >/dev/null 2>&1 || die "the AWS CLI is missing (it is part of the standard Amazon Linux 2023 image)"
+fi
 
-# No SSH: the security group has no port 22 and there is no key pair; do not leave
-# a daemon listening for the day somebody opens the port. Access is SSM Session Manager.
-if [ "${KEEP_SSHD:-0}" != 1 ] && systemctl list-unit-files sshd.service >/dev/null 2>&1; then
+# No SSH on the CloudFormation instance: the security group has no port 22 and there
+# is no key pair; do not leave a daemon listening for the day somebody opens the
+# port. Access is SSM Session Manager. On an instance without a role SSH IS the way
+# in (KEEP_SSHD=1, remembered in bootstrap.env): it stays, keys only (Amazon Linux
+# 2023's default).
+if [ "$KEEP_SSHD" != 1 ] && systemctl list-unit-files sshd.service >/dev/null 2>&1; then
   systemctl disable --now sshd.service sshd.socket >/dev/null 2>&1 || true
 fi
 
@@ -245,27 +272,81 @@ install_if_changed "$work/ops.env" "$ETC/ops.env" 0640 root:valuescan || true
 {
   printf 'SITE_DOMAIN=%s\nORIGIN_DOMAIN=%s\nOPS_BUCKET=%s\nCONFIG_PREFIX=%s\n' "$SITE_DOMAIN" "$ORIGIN_DOMAIN" "$OPS_BUCKET" "$CONFIG_PREFIX"
   printf 'ALERT_TOPIC_ARN=%s\nACME_EMAIL=%s\nDATA_DEVICE=%s\n' "$ALERT_TOPIC_ARN" "$ACME_EMAIL" "$DATA_DEVICE"
+  printf 'KEEP_SSHD=%s\nORIGIN_SECRET_FILE=%s\n' "$KEEP_SSHD" "$ORIGIN_SECRET_FILE"
 } > "$work/bootstrap.env"
 install_if_changed "$work/bootstrap.env" "$ETC/bootstrap.env" 0640 root:root || true
 
-# The origin secret: SSM Parameter Store -> a root-owned file only the service group reads.
-log "origin secret from SSM ($CONFIG_PREFIX/origin-secret)"
+# The origin secret -> two root-owned files: api.secret.env (the API's group reads
+# it) and caddy.secret.env (only root - systemd hands it to Caddy). Never printed,
+# never on a command line.
+#   current   SSM <CONFIG_PREFIX>/origin-secret, or ORIGIN_SECRET_FILE
+#   next      SSM <CONFIG_PREFIX>/origin-secret-next, or <ORIGIN_SECRET_FILE>.next -
+#             there only while the secret is rotated; then both are accepted.
+check_secret() {   # value, which
+  [ "${#1}" -ge 32 ] || die "the $2 origin secret must be at least 32 characters"
+  [[ "$1" =~ ^[A-Za-z0-9._~-]+$ ]] || die "the $2 origin secret may only contain A-Z a-z 0-9 . _ ~ -"
+}
+secret_file_ok() {   # a file only root can read
+  [ "$(stat -c '%u %a' "$1")" = "0 600" ] || die "$1 must belong to root with mode 600"
+}
 ( umask 077
-  secret="$(aws ssm get-parameter --region "$AWS_REGION" --name "$CONFIG_PREFIX/origin-secret" --with-decryption --query 'Parameter.Value' --output text)" \
-    || die "could not read $CONFIG_PREFIX/origin-secret - create it first (deploy/aws/README.md) and check the instance role"
-  [ "${#secret}" -ge 32 ] || die "the origin secret must be at least 32 characters"
-  [[ "$secret" =~ ^[A-Za-z0-9._~-]+$ ]] || die "the origin secret may only contain A-Z a-z 0-9 . _ ~ -"
-  printf 'VALUESCAN_ORIGIN_SECRET=%s\n' "$secret" > "$work/api.secret.env"
+  current=""
+  next=""
+  if [ -n "$ORIGIN_SECRET_FILE" ]; then
+    log "origin secret from $ORIGIN_SECRET_FILE"
+    [ -f "$ORIGIN_SECRET_FILE" ] || die "$ORIGIN_SECRET_FILE does not exist - deploy/release/bootstrap-instance.sh writes it"
+    secret_file_ok "$ORIGIN_SECRET_FILE"
+    current="$(tr -d '\r\n' < "$ORIGIN_SECRET_FILE")"
+    if [ -f "$ORIGIN_SECRET_FILE.next" ]; then
+      secret_file_ok "$ORIGIN_SECRET_FILE.next"
+      next="$(tr -d '\r\n' < "$ORIGIN_SECRET_FILE.next")"
+    fi
+  else
+    log "origin secret from SSM ($CONFIG_PREFIX/origin-secret, and -next while it is rotated)"
+    # get-parameters (plural) lists a missing name under InvalidParameters instead of
+    # failing, so "no -next" is not an error; no answer at all is.
+    pairs="$(aws ssm get-parameters --region "$AWS_REGION" --with-decryption \
+      --names "$CONFIG_PREFIX/origin-secret" "$CONFIG_PREFIX/origin-secret-next" \
+      --query 'Parameters[].[Name,Value]' --output text)" \
+      || die "could not read $CONFIG_PREFIX/origin-secret - create it first (deploy/aws/README.md) and check the instance role"
+    while IFS=$'\t' read -r name value; do
+      case "$name" in
+        "$CONFIG_PREFIX/origin-secret") current="$value" ;;
+        "$CONFIG_PREFIX/origin-secret-next") next="$value" ;;
+      esac
+    done <<< "$pairs"
+    [ -n "$current" ] || die "$CONFIG_PREFIX/origin-secret does not exist - create it first (deploy/aws/deploy.sh secret --execute)"
+  fi
+  check_secret "$current" current
+  list="$current"
+  second="$current"
+  if [ -n "$next" ] && [ "$next" != "$current" ]; then
+    check_secret "$next" next
+    list="$current,$next"
+    second="$next"
+    log "a rotation is under way: the current and the next origin secret are both accepted"
+  fi
+  printf 'VALUESCAN_ORIGIN_SECRET=%s\n' "$list" > "$work/api.secret.env"
+  # Caddy refuses, before the API, a request that carries neither value
+  # (caddy/Caddyfile.template). Both names are always set - to the same value when
+  # nothing is being rotated - so the matcher never has an empty value.
+  printf 'VALUESCAN_ORIGIN_SECRET_1=%s\nVALUESCAN_ORIGIN_SECRET_2=%s\n' "$current" "$second" > "$work/caddy.secret.env"
 )
 install_if_changed "$work/api.secret.env" "$ETC/api.secret.env" 0640 root:valuescan && NEEDS_RESTART+=(valuescan-api)
-rm -f "$work/api.secret.env"
+install_if_changed "$work/caddy.secret.env" "$ETC/caddy.secret.env" 0600 root:root && NEEDS_RESTART+=(caddy)
+rm -f "$work/api.secret.env" "$work/caddy.secret.env"
 
 log "Caddyfile for $ORIGIN_DOMAIN"
 email_line="# (no ACME contact address was given)"
 [ -z "$ACME_EMAIL" ] || email_line="email $ACME_EMAIL"
 sed -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" -e "s|__ACME_EMAIL_LINE__|$email_line|" "$HERE/caddy/Caddyfile.template" > "$work/Caddyfile"
-XDG_DATA_HOME="$work/caddy-data" XDG_CONFIG_HOME="$work/caddy-config" /usr/local/bin/caddy validate --config "$work/Caddyfile" >/dev/null 2>&1 \
-  || { /usr/local/bin/caddy validate --config "$work/Caddyfile" || true; die "the generated Caddyfile is not valid"; }
+# Validated with stand-in secrets: the real ones reach Caddy only through systemd.
+stand_in="$(printf 'v%.0s' {1..40})"
+caddy_check() {
+  VALUESCAN_ORIGIN_SECRET_1="${stand_in}1" VALUESCAN_ORIGIN_SECRET_2="${stand_in}2" \
+    XDG_DATA_HOME="$work/caddy-data" XDG_CONFIG_HOME="$work/caddy-config" /usr/local/bin/caddy validate --config "$work/Caddyfile" "$@"
+}
+caddy_check >/dev/null 2>&1 || { caddy_check || true; die "the generated Caddyfile is not valid"; }
 install_if_changed "$work/Caddyfile" /etc/caddy/Caddyfile 0644 && NEEDS_RESTART+=(caddy)
 
 # --- 6. systemd -------------------------------------------------------------------------------------------

@@ -1,7 +1,9 @@
 # Shared by the scripts in deploy/release. Sourced, not run.
 #
-# Loads deploy/aws/params.env, resolves what the stacks output (read-only AWS
-# calls) and prints every AWS command before it runs.
+# Loads the environment's values - deploy/aws/params.env (the CloudFormation
+# stacks) or deploy/aws/ec2/ec2.env (the EC2 test instance, reached over SSH) -,
+# resolves what the stacks output (read-only AWS calls) and prints every AWS or
+# SSH command before it runs.
 
 # Git Bash rewrites arguments that start with "/" into Windows paths; S3 keys,
 # SSM names and CloudFront paths start with "/". Off for everything below - which
@@ -42,7 +44,13 @@ load_env_file() {
   set +a
 }
 
+# The environment's values: params.env (cfn) or ec2.env and provision.sh's state (ec2).
 load_params() {
+  select_target
+  if [ "$VS_TARGET" = ec2 ]; then load_ec2; else load_cfn; fi
+}
+
+load_cfn() {
   local file="${PARAMS_FILE:-deploy/aws/params.env}"
   [ -f "$file" ] || die "missing $file - copy deploy/aws/params.env.example and fill it in"
   load_env_file "$file"
@@ -114,4 +122,85 @@ ssm_run() {   # instance id, comment, command
   aws ssm get-command-invocation --region "$REGION" --command-id "$id" --instance-id "$instance" --query 'StandardOutputContent' --output text
   aws ssm get-command-invocation --region "$REGION" --command-id "$id" --instance-id "$instance" --query 'StandardErrorContent' --output text >&2
   [ "$status" = Success ] || die "the command ended with status $status (full output: aws ssm get-command-invocation --command-id $id --instance-id $instance)"
+}
+
+# --- which environment: the CloudFormation stacks (SSM + S3) or the EC2 test instance (SSH) ---
+#
+#   cfn  deploy/aws/params.env      the stacks of deploy/aws/*.yaml; commands through SSM Run
+#                                   Command, artifacts through the ops bucket
+#   ec2  deploy/aws/ec2/ec2.env     the instance of deploy/aws/ec2/provision.sh; no instance
+#                                   role, so commands and files go over SSH
+#
+# Chosen by the file that exists; VS_TARGET=cfn|ec2 when both do.
+EC2_DIR="deploy/aws/ec2"
+select_target() {
+  [ -z "${VS_TARGET:-}" ] || { case "$VS_TARGET" in cfn|ec2) return 0 ;; *) die "VS_TARGET is cfn or ec2" ;; esac; }
+  local cfn=0 ec2=0
+  [ -f "${PARAMS_FILE:-deploy/aws/params.env}" ] && cfn=1
+  [ -f "${EC2_ENV_FILE:-$EC2_DIR/ec2.env}" ] && ec2=1
+  if [ "$cfn" = 1 ] && [ "$ec2" = 1 ]; then die "both deploy/aws/params.env and $EC2_DIR/ec2.env exist: set VS_TARGET=cfn or VS_TARGET=ec2"; fi
+  if [ "$ec2" = 1 ]; then VS_TARGET=ec2; else VS_TARGET=cfn; fi
+}
+
+# The EC2 test instance: ec2.env, then what provision.sh found (its state file).
+load_ec2() {
+  local file="${EC2_ENV_FILE:-$EC2_DIR/ec2.env}" state="$EC2_DIR/.out/state.env"
+  [ -f "$file" ] || die "missing $file - copy $EC2_DIR/ec2.env.example and fill it in"
+  load_env_file "$file"
+  [ -n "${REGION:-}" ] || die "REGION is empty in $file"
+  : "${NAME:=valuescan-test}"
+  : "${SSH_USER:=ec2-user}"
+  : "${SSH_KEY_FILE:=$HOME/.ssh/$NAME.pem}"
+  : "${SSH_KNOWN_HOSTS:=$HOME/.ssh/$NAME.known_hosts}"
+  : "${ORIGIN_SECRET_DIR:=$HOME/.valuescan/$NAME}"
+  if [ -f "$state" ]; then load_env_file "$state"; fi
+  if [ "$PRINT_ONLY" != 1 ]; then
+    [ -n "${PUBLIC_IP:-}" ] || die "no instance address in $state - run deploy/aws/ec2/provision.sh up (or status)"
+    [ -f "$SSH_KEY_FILE" ] || die "the SSH key $SSH_KEY_FILE is not on this machine"
+  fi
+  : "${PUBLIC_IP:=<elastic-ip>}"
+  # The origin's name: ec2.env, else the Elastic IP under sslip.io (docs/deploy/EC2-VERCEL.md).
+  [ -n "${ORIGIN_DOMAIN_NAME:-}" ] || ORIGIN_DOMAIN_NAME="${PUBLIC_IP//./-}.sslip.io"
+  DOMAIN_NAME="${SITE_DOMAIN:-}"
+  SSH_OPTS=(-i "$SSH_KEY_FILE" -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=30
+    -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS" -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR)
+  SSH_HOST="$SSH_USER@$PUBLIC_IP"
+}
+
+# Run a shell script on the instance as root, over SSH. The script travels on
+# stdin (no quoting through two shells); its output comes back as it runs.
+# Never put a secret into it: secrets go with ssh_put_secret.
+ssh_run() {   # comment, command
+  local comment="$1" command="$2"
+  note "[$comment] on $SSH_HOST"
+  { printf '+ ssh %s %q <<<' "$SSH_HOST" 'sudo bash -s'; printf ' %q\n' "$command"; } >&2
+  [ "$PRINT_ONLY" = 1 ] && return 0
+  # As SSM's AWS-RunShellScript runs it: a plain script; its exit status is its last command's.
+  printf '%s\n' "$command" | ssh "${SSH_OPTS[@]}" "$SSH_HOST" 'sudo bash -s'
+}
+
+# Copy a file to the instance (root-owned, mode 0640, directory created).
+ssh_put() {   # local file, remote path
+  local src="$1" dst="$2"
+  case "$dst" in /*) ;; *) die "ssh_put: $dst is not an absolute path" ;; esac
+  case "$dst" in *[!A-Za-z0-9._/-]*) die "ssh_put: unusual characters in $dst" ;; esac
+  printf '+ ssh %s %q < %q\n' "$SSH_HOST" "sudo install -D -m 0640 /dev/stdin $dst" "$src" >&2
+  [ "$PRINT_ONLY" = 1 ] && return 0
+  ssh "${SSH_OPTS[@]}" "$SSH_HOST" "sudo install -D -m 0640 /dev/stdin '$dst'" < "$src"
+}
+
+# A secret to a root-only file on the instance (directory 0700, file 0600), through
+# stdin: never on a command line, never printed.
+ssh_put_secret() {   # local file, remote path
+  local src="$1" dst="$2"
+  case "$dst" in /*) ;; *) die "ssh_put_secret: $dst is not an absolute path" ;; esac
+  case "$dst" in *[!A-Za-z0-9._/-]*) die "ssh_put_secret: unusual characters in $dst" ;; esac
+  printf '+ ssh %s %q < %q   (the content is not shown)\n' "$SSH_HOST" "sudo install -d -m 0700 ${dst%/*} && sudo install -m 0600 /dev/stdin $dst" "$src" >&2
+  [ "$PRINT_ONLY" = 1 ] && return 0
+  ssh "${SSH_OPTS[@]}" "$SSH_HOST" "sudo install -d -m 0700 -o root -g root '${dst%/*}' && sudo install -m 0600 -o root -g root /dev/stdin '$dst'" < "$src"
+}
+
+# One command on the instance, whichever way the environment is reached.
+remote_run() {   # comment, command
+  if [ "$VS_TARGET" = ec2 ]; then ssh_run "$1" "$2"; else ssm_run "$(instance_id)" "$1" "$2"; fi
 }

@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
-# Run one operations command on the instance, through SSM Run Command: no SSH, no
-# Session Manager plugin, nothing to install. The output comes back when it ends.
+# Run one operations command on the instance: through SSM Run Command on the
+# CloudFormation instance (no SSH, nothing to install; the output comes back when it
+# ends), over SSH on the EC2 test instance (deploy/release/lib.sh, "which environment").
 #
 #   deploy/release/remote.sh health                   one health pass, now (the JSON line of healthcheck.mjs)
 #   deploy/release/remote.sh status                   installed releases and what each unit runs
 #   deploy/release/remote.sh logs <unit> [lines]      the journal of indexer | api | caddy | health | backup (default 60)
 #   deploy/release/remote.sh restart api|indexer|caddy
-#   deploy/release/remote.sh backup                   one index backup to S3, now
-#   deploy/release/remote.sh restore <source>         DRY RUN: download, verify, print the plan
-#   deploy/release/remote.sh restore <source> --yes   do it (latest | backups/<file>.db.zst | seed/<file>.db.zst)
+#   deploy/release/remote.sh backup                   one index backup now (to S3, or to the data volume)
+#   deploy/release/remote.sh restore <source>         DRY RUN: fetch, verify, print the plan
+#   deploy/release/remote.sh restore <source> --yes   do it (latest | backups/<file>.db.zst | seed/<file>.db.zst
+#                                                     | /var/lib/valuescan/backup/<...>.db.zst on the instance)
 #   deploy/release/remote.sh disk                     volumes, the index and its WAL
 #   deploy/release/remote.sh run '<command>'          anything else, as root
-#   ... --print                                       show the AWS commands, run none
+#   deploy/release/remote.sh shell                    an interactive shell (EC2 test instance: SSH)
+#   ... --print                                       show the AWS / SSH commands, run none
 #
-# The command line is recorded in SSM's command history and in CloudTrail: never
-# put a secret into `run`. SSM returns the first 24,000 characters of the output,
-# so long logs are cut to their newest part here.
+# Never put a secret into `run`: SSM records the command line (and CloudTrail);
+# over SSH it is not recorded, but it may reach the shell's history on the box.
+# SSM returns the first 24,000 characters of the output, so long logs are cut to
+# their newest part here.
 #
-# For an interactive shell use Session Manager (needs its plugin for the AWS CLI):
-#   aws ssm start-session --region <REGION> --target <instance id>
+# An interactive shell on the CloudFormation instance is Session Manager (needs its
+# plugin for the AWS CLI):  aws ssm start-session --region <REGION> --target <instance id>
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-usage() { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
 
 WHAT=""
 A1=""
@@ -84,9 +88,9 @@ case "$WHAT" in
   restore)
     case "$A1" in
       latest) ;;
-      backups/*.db.zst|seed/*.db.zst)
-        case "$A1" in *[!A-Za-z0-9._/-]*|*..*) die "not a usable key: $A1" ;; esac ;;
-      *) die "restore <latest | backups/<file>.db.zst | seed/<file>.db.zst> [--yes]" ;;
+      backups/*.db.zst|seed/*.db.zst|/var/lib/valuescan/backup/*.db.zst|/var/lib/valuescan/backup/*.db)
+        case "$A1" in *[!A-Za-z0-9._/-]*|*..*) die "not a usable key or path: $A1" ;; esac ;;
+      *) die "restore <latest | backups/<file>.db.zst | seed/<file>.db.zst | /var/lib/valuescan/backup/<file>.db.zst> [--yes]" ;;
     esac
     [ -z "$A2" ] || die "restore takes one source"
     if [ "$YES" = 1 ]; then
@@ -97,7 +101,15 @@ case "$WHAT" in
     fi
     ;;
   disk)
-    command="df -h / /var/lib/valuescan; echo; ls -l --block-size=M /var/lib/valuescan/index /var/lib/valuescan/backup 2>&1 | $CUT"
+    command="df -h / /var/lib/valuescan; echo; ls -lR --block-size=M /var/lib/valuescan/index /var/lib/valuescan/backup 2>&1 | $CUT"
+    ;;
+  shell)
+    load_params
+    [ "$VS_TARGET" = ec2 ] || die "an interactive shell on the CloudFormation instance is Session Manager: aws ssm start-session --region $REGION --target $(instance_id)"
+    printf '+ ssh -t %s
+' "$SSH_HOST" >&2
+    [ "$PRINT_ONLY" = 1 ] || exec ssh -t "${SSH_OPTS[@]}" "$SSH_HOST"
+    exit 0
     ;;
   run)
     [ -n "$A1" ] && [ -z "$A2" ] || die "usage: remote.sh run '<command>' (one quoted argument)"
@@ -108,4 +120,4 @@ esac
 [ "$WHAT" = restore ] || [ "$YES" = 0 ] || die "--yes belongs to restore"
 
 load_params
-ssm_run "$(instance_id)" "valuescan $WHAT" "$command"
+remote_run "valuescan $WHAT" "$command"

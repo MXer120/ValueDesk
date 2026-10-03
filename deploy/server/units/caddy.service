@@ -1,8 +1,9 @@
 # Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
 #
-# Caddy terminates TLS for the origin name: CloudFront -> Caddy (443) -> the API
-# on 127.0.0.1:8797. It obtains and renews its own certificate (Let's Encrypt,
-# HTTP-01 on port 80). Config: /etc/caddy/Caddyfile.
+# Caddy terminates TLS for the origin name: the edge (CloudFront, or the Vercel
+# function) -> Caddy (443) -> the API on 127.0.0.1:8797, and passes on only what
+# carries the origin secret. It obtains and renews its own certificate (Let's
+# Encrypt, HTTP-01 on port 80). Config: /etc/caddy/Caddyfile.
 
 [Unit]
 Description=Caddy (TLS for the Valuescan origin)
@@ -17,6 +18,9 @@ User=caddy
 Group=caddy
 Environment=XDG_DATA_HOME=/var/lib/caddy/data
 Environment=XDG_CONFIG_HOME=/var/lib/caddy/config
+# VALUESCAN_ORIGIN_SECRET_1 and _2 for the Caddyfile's gate. Root-only (0600):
+# systemd reads it before it drops to the caddy user; bootstrap.sh writes it.
+EnvironmentFile=/etc/valuescan/caddy.secret.env
 ExecStartPre=/usr/local/bin/caddy validate --config /etc/caddy/Caddyfile
 ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile
 # The admin endpoint is off (Caddyfile): a config change is a restart.

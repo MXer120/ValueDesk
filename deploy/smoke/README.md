@@ -28,8 +28,9 @@ node deploy/smoke/smoke.mjs --help
 ## What is checked
 
 Per page - Trade, Explore (overview, cohorts, market map, an asset page),
-Leaderboard, Copy, Portfolio, Scan for one wallet on each of the five venues, the
-Cmd/Ctrl+K palette, and the legacy `/scan/` redirect:
+Leaderboard, Copy, Portfolio, the legal pages (`/impressum`, `/privacy`, `/terms`),
+Scan for one wallet on each of the five venues, the Cmd/Ctrl+K palette, and the
+legacy `/scan/` redirect:
 
 - the app renders and ends on the expected route;
 - **no CSP violation**: the page's own `securitypolicyviolation` events, the
@@ -75,26 +76,27 @@ cannot be seen offline is anything the app only asks for after an answer arrived
 
 ## Two things to know before running it next to a live Valuescan
 
-**1. The API's reader opens the index read-write.**
-`apps/server/src/indexer/read.ts` calls `new IndexStore(path)` without
-`{ readOnly: true }`. On open that applies the schema, adds missing columns, writes
-`meta.schema` and can run a one-off data migration
-(`apps/server/src/indexer/store.ts`, the constructor). A hosted API with
-`VALUESCAN_INDEXER=0` is therefore **not** read-only on the file. `smoke.mjs` never
-starts a server on the live index while that is so: it reads a snapshot
-(`--snapshot`: `VACUUM INTO` from a read-only connection - it reads the whole file
-once, a few minutes of disk on a multi-gigabyte index), a copy you name
-(`--index-db`), or nothing (`--no-index`).
+**1. The API's reader is read-only (since 2026-10-02).**
+`apps/server/src/indexer/reader.ts` opens the index with `{ readOnly: true }` and
+runs no statement that can change it - no journal mode, no schema, no migration
+(before, it opened the file read-write and ran the writer's constructor).
+`smoke.mjs` checks that in the source on every run (`readerIsReadOnly`): if an open
+without `readOnly: true` ever comes back, it again refuses to start a server on the
+live index. `--snapshot` (`VACUUM INTO` from a read-only connection - it reads the
+whole file once, a few minutes of disk on a multi-gigabyte index) stays the gentle
+choice next to a running indexer: a reader still maps the `-shm` file, and its long
+reads hold the WAL from being checkpointed.
 
-**2. The API spends exchange budgets.** Explore, the whale tape, positioning, the
-screener and podium curves read the venues from the API process. A second server
-on a machine that already runs one doubles that from the same address - SoDEX's
-positioning crawl alone is about 1,000 of the address's 1,200 weight a minute, and
-a 429 pauses the other server's SoDEX lanes for 15-30 minutes. `--server-egress=deny`
+**2. The API's own exchange reads are bounded, but they are real.** Positioning is
+answered from the index, the whale feeds from one buffer every client shares, and
+the Hyperliquid client of an API-only process defaults to 200 weight a minute
+(`apps/server/test/publicBudgets.test.ts`). Explore, the screener and the podium
+curves still read the venues from the API process, and a second server on a machine
+that already runs one spends that from the same address. `--server-egress=deny`
 (the default) refuses every outbound connection of the spawned server; it then
 answers what the index file holds and reports the rest as unavailable. Use
-`--server-egress=allow` only where no other Valuescan server shares the address:
-with the local dev server stopped, or on a staging instance.
+`--server-egress=allow` where no other Valuescan server shares the address: with the
+local dev server stopped, or on a staging instance.
 
 The browser's own traffic is modest - each page is opened once - but it is real,
 and it comes from the same address: the Scan pages read account data on every
@@ -130,13 +132,15 @@ directory and a random origin secret; nothing under `%LOCALAPPDATA%\Valuescan` (
 
 ```
 node deploy/smoke/smoke.mjs --site=https://valuescan.example --origin=origin.valuescan.example
+# the EC2 + Vercel test environment (docs/deploy/EC2-VERCEL.md):
+node deploy/smoke/smoke.mjs --site=https://valuexplorer.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
 ```
 
 Nothing is built or started but the browser. On top of the page walk above:
 
-- **the headers the edge really sends**, for the shell, an app route, `/scan/`,
-  `robots.txt`, the favicon, a script, a stylesheet, the SharedWorker's script and
-  a logo - each against `prod-headers.mjs`, which is what `edge.yaml` and the
+- **the headers the edge really sends**, for the shell, an app route, `/impressum`,
+  `/scan/`, `robots.txt`, both favicons, a script, a stylesheet, the SharedWorker's
+  script and a logo - each against `prod-headers.mjs`, which is what `edge.yaml` and the
   publish script were written from: the security headers, the CSP of that path
   class, `Cache-Control`, and that scripts and stylesheets have a type a browser
   accepts under `nosniff`;
@@ -148,7 +152,14 @@ Nothing is built or started but the browser. On top of the page walk above:
 - **`--origin`: the instance is closed to you.** From a machine that is not
   CloudFront, its port 443 and the API's port must not accept a connection, and
   port 80 must never serve the API. A name that does not resolve is an error, not
-  a pass.
+  a pass. With `--edge=vercel` port 443 is open on purpose (the Vercel function
+  has no fixed addresses): then `/api/health` and an index route asked there
+  without the origin secret must be refused - Caddy's gate - and the API's port
+  must still be closed.
+- On Vercel the headers come from `deploy/vercel/package.mjs`, which writes the
+  same `prod-headers.mjs` table into the deployment's routes
+  (`deploy/vercel/vercel.test.mjs` checks they agree path by path). Vercel adds
+  its own (`server`, `x-vercel-*`, `age`); those are not judged.
 
 The console is judged in this mode. A page fails on any error line that is not on
 the harmless list - including a third party answering badly (a public RPC
@@ -178,7 +189,9 @@ On the development machine (Chrome 154, Node 24), next to its running indexer:
 | The same server; browser **online**; Trade, Explore, Cohorts, Market map, asset, Leaderboard, Copy, Portfolio, palette, Scan of the SoDEX market maker | pass, 10 of 10: live chart, order book and account data; the worker's socket to `wss://mainnet-gw.sodex.dev/ws/perps` open; no console error on any page but, on Scan, the two harmless ones and one HTTP 529 from Polygon's public RPC |
 | `--site` against a local stand-in, and against a server without the headers | pass / fails as it should (every missing header named) |
 
-**Not run:** index data through the hosted server, the server's own exchange
+**Not run then:** index data through the hosted server, the server's own exchange
 reads, and Scan on Hyperliquid, trade.xyz, Lighter and Arcus with the browser
-online - each for one of the two reasons above. `docs/deploy/DEPLOY.md` section 13
-has the details, section 14 the findings.
+online - at the time the reader still opened the index read-write and the API's
+exchange reads were not bounded. Both are fixed (above); the run that covers them
+is `--snapshot --server-egress=allow` on a machine without another Valuescan
+server. `docs/deploy/DEPLOY.md` section 13 has the details, section 14 the findings.

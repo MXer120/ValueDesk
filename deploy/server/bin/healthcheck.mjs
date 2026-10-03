@@ -13,8 +13,13 @@
 //              server answers (/api/vs/index/status) must be 404
 //   index      one board read through the hosted gate (needs the origin secret):
 //              200, ok, and rebuilt recently
-//   indexer    the status the indexer writes into the index file every 30 s is
-//              fresh, its last build is recent, its streams are up
+//   indexer    /api/vs/index/health - the indexer's own status, which it
+//              publishes every 30 s - is fresh, its last build is recent, its
+//              streams are up. That route answers a caller on this instance only
+//              and needs no secret (apps/server/src/hosted.ts ON_INSTANCE_ROUTES).
+//              While the API does not answer it cannot be judged: a warning, the
+//              `api` check already fails the pass and `units` says whether the
+//              indexer runs.
 //   disk       the data volume has room (the nightly backup needs the size of
 //              the database free)
 //   backup     the last successful backup is not older than 36 hours
@@ -25,8 +30,12 @@
 // changes (after two failing passes in a row, and again on recovery), and every
 // six hours while it stays unhealthy. Nothing secret is ever in a message.
 //
-// It never writes to the index: the file is opened read-only.
-import { DatabaseSync } from 'node:sqlite';
+// It never opens the index: the file is only stat()ed for its size. So the unit
+// needs no write access to the index directory (a WAL reader would: its -shm).
+//
+// THE SECRET. VALUESCAN_ORIGIN_SECRET may list two values while the secret is
+// rotated ("current,next" - api.secret.env). The API accepts each of them; this
+// check sends the FIRST, never the whole list (a header holds one value).
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
@@ -42,7 +51,8 @@ const num = (k, d) => {
 
 const API_URL = env('API_URL', 'http://127.0.0.1:8797').replace(/\/+$/, '');
 const INDEX_DB = env('VALUESCAN_INDEX_DB', '/var/lib/valuescan/index/valuescan-index.db');
-const SECRET = env('VALUESCAN_ORIGIN_SECRET');
+// The first entry of a rotation list ("current,next"): one value per header.
+const SECRET = env('VALUESCAN_ORIGIN_SECRET').split(',')[0].trim();
 const STATE_DIR = env('HEALTH_STATE_DIR', '/var/lib/valuescan/state');
 const TOPIC = env('ALERT_TOPIC_ARN');
 const ORIGIN_DOMAIN = env('ORIGIN_DOMAIN');
@@ -114,23 +124,23 @@ await check('index', async () => {
 
 await check('indexer', async () => {
   if (!existsSync(INDEX_DB)) return { ok: false, note: `${INDEX_DB} does not exist` };
-  const db = new DatabaseSync(INDEX_DB, { readOnly: true });
-  let raw;
+  // On-instance route: no origin secret (a monitor must not need the edge's credential).
+  let r;
   try {
-    db.exec('PRAGMA busy_timeout = 3000');
-    raw = db.prepare("SELECT value FROM meta WHERE key = 'indexer_status'").get()?.value;
-  } finally {
-    db.close();
+    r = await getJson('/api/vs/index/health');
+  } catch (e) {
+    return { ok: true, warn: true, note: `not judged: /api/vs/index/health did not answer (${String(e?.message ?? e).slice(0, 60)})` };
   }
-  if (!raw) return { ok: false, note: 'the indexer has not published a status yet' };
-  const s = JSON.parse(raw);
-  if (age(s.at ?? 0) > INDEXER_STALE_S) return { ok: false, note: `the indexer's status is ${age(s.at ?? 0)} s old (pid ${s.pid})` };
-  const down = Object.entries(s.sockets ?? s.streams ?? {}).filter(([, v]) => !v).map(([k]) => k);
+  if (r.status !== 200 || r.body?.ok !== true) return { ok: true, warn: true, note: `not judged: /api/vs/index/health answered ${r.status}` };
+  const s = r.body.status;
+  if (!s || !s.at) return { ok: false, note: 'the indexer has not published a status yet' };
+  if (age(s.at) > INDEXER_STALE_S) return { ok: false, note: `the indexer's status is ${age(s.at)} s old` };
+  const down = Object.entries(s.streams ?? {}).filter(([, v]) => !v).map(([k]) => k);
   const lag = s.loopLagMs?.lastMinute ?? null;
   const build = s.lastBuildAt ? age(s.lastBuildAt) : null;
   const note = `status ${age(s.at)} s old, last build ${build ?? '?'} s ago in ${s.lastBuildMs ?? '?'} ms, loop lag ${lag ?? '?'} ms`
     + (down.length ? `, streams down: ${down.join(',')}` : '')
-    + (s.lastError ? `, last error: ${String(s.lastError).slice(0, 80)}` : '');
+    + (s.errorSinceStart ? ', an error was logged since it started (journalctl -u valuescan-indexer)' : '');
   if (build !== null && build > BOARD_STALE_S) return { ok: false, note };
   // A stream that is down right after a restart is normal (Lighter needs minutes): a warning.
   return { ok: true, warn: down.length > 0, note };

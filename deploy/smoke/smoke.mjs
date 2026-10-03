@@ -19,7 +19,7 @@
 //               mock             a stand-in that only tests this harness - never a product result
 //               http://host:port an already running hosted server; secret in SMOKE_ORIGIN_SECRET
 // --index-db=   the index file the spawned server reads. REFUSED when it is the live
-//               index and the server would open it read-write (see "the reader" below).
+//               index and the server's reader is not read-only (see "the reader" below).
 // --snapshot    first take a read-only snapshot of the live index (VACUUM INTO) and read that
 // --no-index    spawn the server with no index file at all (every index route says "not available")
 // --server-egress=deny|allow   deny (default): the spawned server cannot reach any
@@ -30,6 +30,9 @@
 //               exchanges, as a visitor's does; --api, --dist and the index options do not apply.
 // --origin=HOST with --site: the instance's own DNS name. Checked to be CLOSED from this
 //               machine (443 and the API port), and never to serve the API on port 80.
+// --edge=cloudfront|vercel   with --origin: the edge in front of it (default cloudfront).
+//               vercel: 443 answers (the function has no fixed addresses), but nothing
+//               may be served there without the origin secret (the Caddy gate).
 // --pages=RE    only the page ids matching this regular expression
 // --wallets=venue=0x..,venue=0x..   the Scan wallet per venue (default: the SoDEX market maker for all)
 // --settle=MS   how long each page is watched after it loaded (default 7000)
@@ -37,12 +40,14 @@
 // --out=DIR     reports, screenshots, the build (default deploy/.out/smoke)
 // --keep        do not stop anything at the end (to look around by hand)
 //
-// THE READER. apps/server/src/indexer/read.ts opens the index with
-// `new IndexStore(path)`: read-WRITE. On open it applies the schema, adds missing
-// columns, writes meta.schema and can run a one-off data migration. So a hosted
-// API with VALUESCAN_INDEXER=0 is not read-only on the file. This script therefore
-// never points a spawned server at the live index unless that open is read-only;
-// it reads a snapshot (--snapshot), a copy you name (--index-db) or nothing (--no-index).
+// THE READER. Since 2026-10-02 the API opens the index READ-ONLY
+// (apps/server/src/indexer/reader.ts: `new IndexStore(path, { readOnly: true })`; before,
+// it opened it read-write and could apply the schema and migrate). The check is made
+// from the source on every run (readerIsReadOnly): should an open without
+// `readOnly: true` come back, a spawned server is never pointed at the live index -
+// it reads a snapshot (--snapshot), a copy you name (--index-db) or nothing
+// (--no-index). Even read-only, --snapshot stays the gentle choice next to a running
+// indexer: a reader still maps the -shm file, and its long reads hold the WAL back.
 //
 // Exit code: 0 when every assessed check passed, 1 when one failed, 2 when the run
 // was refused or could not start. The summary says how much of production the run covered.
@@ -95,6 +100,8 @@ if (REMOTE) {
 if (flags.origin !== undefined && (!REMOTE || flags.origin === true || !/^[A-Za-z0-9.-]+$/.test(String(flags.origin)))) {
   refuse('--origin=<host name of the instance> goes with --site (a name or an address, no scheme, no port)');
 }
+const EDGE = String(flags.edge ?? 'cloudfront');
+if (!['cloudfront', 'vercel'].includes(EDGE)) refuse('--edge is cloudfront or vercel');
 const API_MODE = REMOTE ? 'deployed' : flags.api === undefined || flags.api === true ? 'spawn' : String(flags.api);
 const EGRESS = String(flags['server-egress'] ?? 'deny');
 const SITE = REMOTE ? String(flags.site).replace(/\/+$/, '') : `http://127.0.0.1:${PORT}`;
@@ -211,10 +218,18 @@ const sameFile = (a, b) => {
   }
 };
 
-/** Does the API's reader open the index read-only? Read from the source, not assumed. */
+/**
+ * Does the API open the index read-only? Read from the source, not assumed: every
+ * `new IndexStore(...)` on the API's read path (reader.ts holds the connection,
+ * read.ts uses it) must pass `readOnly: true`, and there must be at least one.
+ */
 function readerIsReadOnly() {
-  const src = readFileSync(join(REPO, 'apps', 'server', 'src', 'indexer', 'read.ts'), 'utf8');
-  const opens = [...src.matchAll(/new IndexStore\(([^)]*)\)/g)].map((m) => m[1]);
+  const opens = [];
+  for (const f of ['reader.ts', 'read.ts']) {
+    const path = join(REPO, 'apps', 'server', 'src', 'indexer', f);
+    if (!existsSync(path)) continue;
+    opens.push(...[...readFileSync(path, 'utf8').matchAll(/new IndexStore\(([^)]*)\)/g)].map((m) => m[1]));
+  }
   return opens.length > 0 && opens.every((a) => /readOnly:\s*true/.test(a));
 }
 
@@ -263,9 +278,10 @@ async function startApi(report) {
   if (!flags['no-index'] && sameFile(indexDb, live) && !readOnly) {
     refuse(
       `refusing to start a server on the live index ${live}:\n` +
-      '  apps/server/src/indexer/read.ts opens it with `new IndexStore(path)` - read-write. On open that\n' +
-      '  applies the schema, adds columns, writes meta.schema and may run a data migration\n' +
-      '  (apps/server/src/indexer/store.ts, the constructor). Use --snapshot or a copy.',
+      '  apps/server/src/indexer/reader.ts (or read.ts) opens it with `new IndexStore(...)` WITHOUT\n' +
+      '  `readOnly: true` - read-write. On open that applies the schema, adds columns, writes\n' +
+      '  meta.schema and may run a data migration (apps/server/src/indexer/store.ts, the\n' +
+      '  constructor). Use --snapshot or a copy.',
     );
   }
 
@@ -388,6 +404,10 @@ function pages(wallets) {
     { id: 'leaderboard', path: '/leaderboard', expectPath: '/leaderboard' },
     { id: 'copy', path: '/copy', expectPath: '/copy' },
     { id: 'portfolio', path: '/portfolio', expectPath: '/portfolio' },
+    // The legal pages (apps/web/src/legal): reachable from every page, so they must render under the production policy too.
+    { id: 'impressum', path: '/impressum', expectPath: '/impressum' },
+    { id: 'privacy', path: '/privacy', expectPath: '/privacy' },
+    { id: 'terms', path: '/terms', expectPath: '/terms' },
     ...scan,
     { id: 'palette', path: '/trade', expectPath: '/trade', palette: true },
     { id: 'legacy-scan', path: `/scan/?address=${wallets.sodex}`, expectPath: '/scan' },
@@ -682,7 +702,7 @@ async function walk(dist, api, report) {
   // The worker's own script is fetched outside the page: take it from the worker target.
   const workerScript = worker.url ? new URL(worker.url).pathname : first(/^\/assets\/worker-[\w-]+\.js$/);
   return {
-    samples: ['/', '/trade', '/scan/', '/robots.txt', '/favicon.svg', first(/^\/assets\/(?!worker-)[^/]+\.js$/), first(/^\/assets\/[^/]+\.css$/),
+    samples: ['/', '/trade', '/impressum', '/scan/', '/robots.txt', '/favicon.svg', '/favicon.ico', first(/^\/assets\/(?!worker-)[^/]+\.js$/), first(/^\/assets\/[^/]+\.css$/),
       workerScript, first(/^\/logos\//), first(/^\/addrbook\//)].filter(Boolean),
   };
 }
@@ -723,7 +743,7 @@ try {
     report.headers = { rows, redirect };
     headersOk = rows.every((r) => r.problems.length === 0) && redirect.ok;
     if (typeof flags.origin === 'string') {
-      report.origin = await probeOrigin(flags.origin);
+      report.origin = await probeOrigin(flags.origin, { edge: EDGE });
       originOk = report.origin.problems.length === 0;
     }
   }

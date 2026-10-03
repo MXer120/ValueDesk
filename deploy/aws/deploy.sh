@@ -4,7 +4,9 @@
 #
 #   deploy/aws/deploy.sh validate              validate-template for all three (read-only)
 #   deploy/aws/deploy.sh secret    --execute   create the origin secret in SSM, once     (REGION)
-#   deploy/aws/deploy.sh secret --rotate --execute   replace it (then: edge, bootstrap - see DEPLOY.md)
+#   deploy/aws/deploy.sh secret --rotate --execute   a NEXT value beside it (a gapless rotation, DEPLOY.md 15)
+#   deploy/aws/deploy.sh edge   --rotate --execute   CloudFront sends the next value
+#   deploy/aws/deploy.sh secret --finish --execute   the next value becomes the only one
 #   deploy/aws/deploy.sh network  [--execute]  VPC, subnet, security group, ops bucket   (REGION)
 #   deploy/aws/deploy.sh compute  [--execute]  the instance, its volume, EIP, DNS        (REGION)
 #   deploy/aws/deploy.sh edge     [--execute]  site bucket, CloudFront, cert, WAF, DNS   (us-east-1)
@@ -30,7 +32,7 @@ export MSYS2_ARG_CONV_EXCL='*'
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 ACTION="${1:-}"
 [ -n "$ACTION" ] || usage 2
@@ -38,11 +40,13 @@ shift || true
 EXECUTE=0
 PRINT_ONLY=0
 ROTATE=0
+FINISH=0
 for arg in "$@"; do
   case "$arg" in
     --execute) EXECUTE=1 ;;
     --print) PRINT_ONLY=1 ;;
     --rotate) ROTATE=1 ;;
+    --finish) FINISH=1 ;;
     -h|--help) usage 0 ;;
     *) echo "unknown option: $arg" >&2; usage 2 ;;
   esac
@@ -194,9 +198,14 @@ case "$ACTION" in
   edge)
     require REGION DOMAIN_NAME ORIGIN_DOMAIN_NAME
     command -v node >/dev/null 2>&1 || die "node is needed to write the parameter file"
-    secret="$(lookup '<origin-secret>' aws ssm get-parameter --region "$REGION" --name "$CONFIG_PREFIX/origin-secret" \
-      --with-decryption --query 'Parameter.Value' --output text)"
-    [ "${#secret}" -ge 32 ] || [ "$PRINT_ONLY" = 1 ] || die "$CONFIG_PREFIX/origin-secret must be at least 32 characters"
+    # CloudFront sends the current value - or, with --rotate, the next one, which the
+    # instance accepts once bootstrap-instance.sh has run after `secret --rotate`.
+    secret_name="$CONFIG_PREFIX/origin-secret"
+    [ "$ROTATE" = 1 ] && secret_name="$CONFIG_PREFIX/origin-secret-next"
+    secret="$(lookup '<origin-secret>' aws ssm get-parameter --region "$REGION" --name "$secret_name" \
+      --with-decryption --query 'Parameter.Value' --output text)" \
+      || die "could not read $secret_name$([ "$ROTATE" = 1 ] && echo ' - start the rotation with: deploy.sh secret --rotate --execute')"
+    [ "${#secret}" -ge 32 ] || [ "$PRINT_ONLY" = 1 ] || die "$secret_name must be at least 32 characters"
     # The secret goes through a 0600 file, not through the command line.
     mkdir -p .out
     params_json=".out/edge-params.$$.json"
@@ -219,22 +228,67 @@ case "$ACTION" in
     ;;
 
   secret)
-    # Creates <CONFIG_PREFIX>/origin-secret (64 random hex characters). The value is
-    # generated here, goes to SSM through a 0600 file and is never printed. Without
-    # --rotate an existing value is never overwritten (the call fails instead).
+    # The origin secret lives in SSM Parameter Store: <CONFIG_PREFIX>/origin-secret, and
+    # <CONFIG_PREFIX>/origin-secret-next while it is rotated. Values are generated here
+    # (64 random hex characters), go to SSM through a 0600 file and are never printed.
+    #
+    #   secret --execute            create origin-secret; fails if it exists
+    #   secret --rotate --execute   create origin-secret-next; fails if a rotation is under way.
+    #                               The instance accepts both after bootstrap-instance.sh.
+    #   secret --finish --execute   origin-secret := origin-secret-next, then -next is deleted.
+    #                               Refused unless CloudFront already sends the next value.
+    #
+    # The whole rotation, without a moment where the edge and the instance disagree
+    # (docs/deploy/DEPLOY.md, "Rotating the origin secret"):
+    #   secret --rotate --execute; bootstrap-instance.sh; edge --rotate --execute;
+    #   secret --finish --execute; bootstrap-instance.sh
     require REGION
     command -v node >/dev/null 2>&1 || die "node is needed to generate the secret"
     if [ "$EXECUTE" != 1 ] && [ "$PRINT_ONLY" != 1 ]; then
       die "this writes to SSM Parameter Store: add --execute"
     fi
+    [ "$ROTATE" = 1 ] && [ "$FINISH" = 1 ] && die "--rotate or --finish, not both"
     mkdir -p .out
     secret_json=".out/origin-secret.$$.json"
     trap 'rm -f "$HERE/$secret_json"' EXIT
+    current="$CONFIG_PREFIX/origin-secret"
+    next="$CONFIG_PREFIX/origin-secret-next"
+
+    if [ "$FINISH" = 1 ]; then
+      value="$(lookup '<next-value>' aws ssm get-parameter --region "$REGION" --name "$next" --with-decryption \
+        --query 'Parameter.Value' --output text)" || die "there is no rotation under way ($next does not exist)"
+      # CloudFront must already send the next value, or the instance - once it accepts
+      # only that value - would refuse the edge. Compared here, never printed.
+      dist="$(lookup '<distribution-id>' aws cloudformation describe-stacks --region "$EDGE_REGION" --stack-name "$EDGE_STACK" \
+        --query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue | [0]" --output text)"
+      sent="$(lookup '<sent-value>' aws cloudfront get-distribution-config --id "$dist" \
+        --query "DistributionConfig.Origins.Items[?Id=='api'].CustomHeaders.Items[?HeaderName=='X-Origin-Verify'].HeaderValue | [0] | [0]" --output text)"
+      if [ "$PRINT_ONLY" != 1 ] && [ "$sent" != "$value" ]; then
+        die "CloudFront does not send the next value yet: deploy/aws/deploy.sh edge --rotate --execute first (and let it finish)"
+      fi
+      ( umask 077
+        NAME="$current" VALUE="$value" node -e '
+          process.stdout.write(JSON.stringify({
+            Name: process.env.NAME, Type: "SecureString", Value: process.env.VALUE, Overwrite: true,
+            Description: "Valuescan: X-Origin-Verify shared by CloudFront and the origin",
+          }));
+        ' > "$secret_json"
+      )
+      run aws ssm put-parameter --region "$REGION" --cli-input-json "file://$secret_json" --query 'Version' --output text
+      run aws ssm delete-parameter --region "$REGION" --name "$next"
+      echo
+      echo "origin-secret now holds the new value; the next one is gone. Last step:"
+      echo "  deploy/release/bootstrap-instance.sh       # the instance accepts only the new value"
+      exit 0
+    fi
+
+    name="$current"
+    [ "$ROTATE" = 1 ] && name="$next"
     ( umask 077
-      NAME="$CONFIG_PREFIX/origin-secret" OVERWRITE="$ROTATE" node -e '
+      NAME="$name" node -e '
         const value = require("node:crypto").randomBytes(32).toString("hex");
         process.stdout.write(JSON.stringify({
-          Name: process.env.NAME, Type: "SecureString", Value: value, Overwrite: process.env.OVERWRITE === "1",
+          Name: process.env.NAME, Type: "SecureString", Value: value, Overwrite: false,
           Description: "Valuescan: X-Origin-Verify shared by CloudFront and the origin",
         }));
       ' > "$secret_json"
@@ -242,10 +296,12 @@ case "$ACTION" in
     run aws ssm put-parameter --region "$REGION" --cli-input-json "file://$secret_json" --query 'Version' --output text
     if [ "$ROTATE" = 1 ]; then
       echo
-      echo "The new value is in SSM only. Until both sides have it, index requests answer 403."
-      echo "Now, in this order (docs/deploy/DEPLOY.md, \"Rotating the origin secret\"):"
-      echo "  deploy/aws/deploy.sh edge --execute        # CloudFront sends the new value (several minutes)"
-      echo "  deploy/release/bootstrap-instance.sh       # the instance reads it and restarts the API (seconds)"
+      echo "The next value is in SSM beside the current one; nothing uses it yet. Now, in this order"
+      echo "(docs/deploy/DEPLOY.md, \"Rotating the origin secret\"):"
+      echo "  deploy/release/bootstrap-instance.sh             # the instance accepts both values (the API restarts, seconds)"
+      echo "  deploy/aws/deploy.sh edge --rotate --execute     # CloudFront sends the next value (several minutes)"
+      echo "  deploy/aws/deploy.sh secret --finish --execute   # the next value becomes the only one in SSM"
+      echo "  deploy/release/bootstrap-instance.sh             # the instance accepts only the new value"
     fi
     ;;
 

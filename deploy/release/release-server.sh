@@ -8,9 +8,11 @@
 #   1. `git archive` of the TAG (never the working tree): the lockfile, the server
 #      workspace, the other workspaces' package.json files (the lockfile names
 #      them) and deploy/server;
-#   2. the tarball and its .sha256 go to s3://<ops bucket>/releases/server/;
-#   3. /opt/valuescan/bin/release.sh <tag> runs on the instance through SSM Run
-#      Command: verify, unpack, `npm ci` for the server workspace, switch the
+#   2. the tarball and its .sha256 go to s3://<ops bucket>/releases/server/ - or,
+#      on the EC2 test instance (no instance role), over SSH to
+#      /var/cache/valuescan/inbox/;
+#   3. /opt/valuescan/bin/release.sh <tag> runs on the instance (SSM Run Command, or
+#      SSH): verify, unpack, `npm ci` for the server workspace, switch the
 #      `current` link, restart in order, check /api/health.
 #
 # --api-only: when the release changes nothing the indexer runs. Restarting the
@@ -48,10 +50,16 @@ fi
 printf '%s  %s\n' "$(sha256_of "$tarball")" "$(basename "$tarball")" > "$tarball.sha256"
 note "built $tarball ($(du -h "$tarball" | awk '{print $1}'))"
 
-OPS="$(ops_bucket)"
-INSTANCE="$(instance_id)"
-run aws s3 cp "$tarball" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz" --only-show-errors
-run aws s3 cp "$tarball.sha256" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz.sha256" --only-show-errors
-
-ssm_run "$INSTANCE" "valuescan release $TAG" "/opt/valuescan/bin/release.sh $TAG$API_ONLY"
+if [ "$VS_TARGET" = ec2 ]; then
+  inbox="/var/cache/valuescan/inbox/valuescan-server-$TAG.tar.gz"
+  ssh_put "$tarball" "$inbox"
+  ssh_put "$tarball.sha256" "$inbox.sha256"
+  ssh_run "valuescan release $TAG" "/opt/valuescan/bin/release.sh $TAG$API_ONLY --from=$inbox && rm -f $inbox $inbox.sha256"
+else
+  OPS="$(ops_bucket)"
+  INSTANCE="$(instance_id)"
+  run aws s3 cp "$tarball" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz" --only-show-errors
+  run aws s3 cp "$tarball.sha256" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz.sha256" --only-show-errors
+  ssm_run "$INSTANCE" "valuescan release $TAG" "/opt/valuescan/bin/release.sh $TAG$API_ONLY"
+fi
 note "released $TAG"

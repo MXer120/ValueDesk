@@ -7,6 +7,11 @@
 #   sudo /opt/valuescan/bin/restore.sh seed/valuescan-index-seed.db.zst --yes    # first start of a new instance
 #   sudo /opt/valuescan/bin/restore.sh /var/lib/valuescan/backup/valuescan-index-....db --yes   # a staged copy
 #
+# WITHOUT AN OPS BUCKET (OPS_BUCKET empty, the EC2 test environment) `latest` is the
+# newest backup in BACKUP_DIR on the data volume, and a seed is a local file the
+# workstation copied over SSH (deploy/release/seed-index.sh). A local .zst is checked
+# against the .sha256 next to it when there is one.
+#
 # WITHOUT --yes nothing is changed: the backup is downloaded, verified, and the
 # plan is printed.
 #
@@ -26,8 +31,9 @@ ETC="${VS_ETC:-/etc/valuescan}"
 for f in "$ETC/ops.env" "$ETC/ops.local.env"; do
   if [ -f "$f" ]; then set -a; . "$f"; set +a; fi
 done
-: "${OPS_BUCKET:?OPS_BUCKET is not set (see $ETC/ops.env)}"
+OPS_BUCKET="${OPS_BUCKET:-}"
 : "${VALUESCAN_INDEX_DB:?VALUESCAN_INDEX_DB is not set (see $ETC/ops.env)}"
+BACKUP_DIR="${BACKUP_DIR:-/var/lib/valuescan/backup/archive}"
 STAGING="${BACKUP_STAGING_DIR:-/var/lib/valuescan/backup}"
 NODE="${NODE_BIN_DIR:-/opt/node/current/bin}/node"
 SYSTEMCTL="${SYSTEMCTL:-systemctl}"
@@ -49,13 +55,28 @@ candidate="$STAGING/restore-$stamp.db"
 cleanup() { rm -f "$candidate" "$candidate.zst"; }
 trap cleanup EXIT
 
+# No ops bucket: "latest" is the newest backup on the data volume.
+if [ "$SOURCE" = latest ] && [ -z "$OPS_BUCKET" ]; then
+  newest="$(ls -1 "$BACKUP_DIR" 2>/dev/null | grep -E '^valuescan-index-[0-9TZ]+\.db\.zst$' | sort | tail -n 1 || true)"
+  [ -n "$newest" ] || die "no backup in $BACKUP_DIR (and no ops bucket to look in)"
+  SOURCE="$BACKUP_DIR/$newest"
+fi
+
 if [ -f "$SOURCE" ]; then
   log "source: local file $SOURCE"
   case "$SOURCE" in
     *.zst) zstd -d -q -c "$SOURCE" > "$candidate" ;;
     *) cp --reflink=auto "$SOURCE" "$candidate" ;;
   esac
+  # The checksum is of the uncompressed database (backup.sh, seed-index.sh).
+  if [ -f "$SOURCE.sha256" ]; then
+    want="$(awk '{print $1; exit}' "$SOURCE.sha256")"
+    got="$(sha256sum "$candidate" | awk '{print $1}')"
+    [ "$want" = "$got" ] || die "checksum mismatch: $SOURCE is not the file that was backed up"
+    log "checksum matches"
+  fi
 else
+  [ -n "$OPS_BUCKET" ] || die "$SOURCE is not a file here, and there is no ops bucket to fetch it from (backups: ls $BACKUP_DIR)"
   key="$SOURCE"
   if [ "$key" = latest ]; then
     key="$(aws s3api list-objects-v2 --bucket "$OPS_BUCKET" --prefix backups/ \

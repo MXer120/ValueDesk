@@ -475,6 +475,27 @@ Check it from outside after a deploy: `node deploy/smoke/smoke.mjs --site=<url>
 --origin=<origin host>`. It expects 443 and the API port closed to you, and port 80 to
 answer nothing but a redirect to HTTPS.
 
+**B'. A Vercel function, then Caddy (HTTPS), then the app.** The EC2 + Vercel test
+environment (`docs/deploy/EC2-VERCEL.md`, `deploy/vercel/api-proxy.cjs`). As B, with
+these differences:
+
+1. **443 is open to everyone**: Vercel's functions have no published address range, so no
+   security group can admit "Vercel only". In its place, **Caddy refuses every request that
+   does not carry `X-Origin-Verify` with the current (or, during a rotation, the next)
+   secret** - before the API, `/api/health` included (`@edge` in the Caddyfile template; the
+   values reach Caddy from a root-only environment file, never through the Caddyfile). That
+   is also what makes point 3 safe again: only the function can set the
+   `X-Forwarded-For` Caddy keeps.
+2. **The function sets `X-Forwarded-For` to one address: the viewer's, as Vercel reports
+   it** (`x-real-ip`; Vercel overwrites these headers, a client cannot set them). Caddy
+   appends the function's own address, so the hops are the same as in B and
+   `VALUESCAN_TRUST_PROXY=2` stays: hop 0 Caddy, hop 1 the function, hop 2 the viewer.
+3. 22 is open to the deploying machine's address (no instance role, so no Systems
+   Manager); points 4 to 6 are unchanged.
+
+Check it: `node deploy/smoke/smoke.mjs --site=<url> --origin=<origin host> --edge=vercel`
+expects 443 to answer, but nothing to be served there without the secret.
+
 **C. CloudFront straight to the app over HTTP.** Not recommended: the origin secret and all
 traffic cross the internet in clear text. If you use it anyway:
 
@@ -530,6 +551,12 @@ value the server refuses. The order:
    several minutes. Both values arrive during that time, and both are accepted.
 4. **Instance:** `VALUESCAN_ORIGIN_SECRET=<next>`, then restart the API. The old value is
    refused from this moment.
+
+The scripts do exactly this: `deploy/aws/deploy.sh secret --rotate`, `bootstrap-instance.sh`,
+`deploy.sh edge --rotate`, `deploy.sh secret --finish`, `bootstrap-instance.sh`
+(DEPLOY.md section 15); in the EC2 + Vercel environment
+`deploy/release/rotate-origin-secret.sh begin`, the Vercel variable and a deploy, then
+`... finish`. The bootstrap writes both values to Caddy's gate as well.
 
 What the server guarantees, and what it asks:
 

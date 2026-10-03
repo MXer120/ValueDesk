@@ -3,6 +3,11 @@
 Three stacks, defined once. The runbook that puts them in context is
 `docs/deploy/DEPLOY.md`; this file is the reference for the stacks themselves.
 
+> The environment being set up now is NOT these stacks: the deploying AWS user may
+> not use CloudFormation, so the test environment is one instance made by
+> `deploy/aws/ec2/provision.sh`, with the site on Vercel (`docs/deploy/EC2-VERCEL.md`).
+> The stacks stay the design for an account that allows them.
+
 | Stack | Template | Region | What it holds | Bills |
 |---|---|---|---|---|
 | `valuescan-network` | `network.yaml` | REGION | VPC, one public subnet, the origin security group, the private ops bucket (release artifacts, index backups) | only what is stored in the bucket |
@@ -123,9 +128,11 @@ It compares the headers CloudFront sends with these templates, asks the gate
 through the edge, walks every page and checks that the instance is closed to
 everyone but CloudFront (`deploy/smoke/README.md`).
 
-The origin secret is replaced with `deploy.sh secret --rotate --execute`, followed
-by `deploy.sh edge --execute` and `deploy/release/bootstrap-instance.sh`
-(`docs/deploy/DEPLOY.md`, "Rotating the origin secret").
+The origin secret is replaced without a gap: `deploy.sh secret --rotate --execute`,
+`deploy/release/bootstrap-instance.sh` (the instance accepts both values),
+`deploy.sh edge --rotate --execute`, `deploy.sh secret --finish --execute`,
+`deploy/release/bootstrap-instance.sh` (`docs/deploy/DEPLOY.md`, "Rotating the origin
+secret").
 
 ### What the commands run
 
@@ -226,7 +233,8 @@ Resolve it with AWS Support, then run the command once more.
 ## Files
 
 - `network.yaml`, `compute.yaml`, `edge.yaml` - the templates.
-- `deploy.sh` - the wrapper (`validate`, `secret [--rotate]`, `network`, `compute`, `edge`, `stop`, `start`, `status`).
+- `deploy.sh` - the wrapper (`validate`, `secret [--rotate | --finish]`, `network`, `compute`, `edge [--rotate]`, `stop`, `start`, `status`).
+- `ec2/` - the EC2 test environment without CloudFormation (`ec2/README.md`).
 - `params.env.example` - the values to fill in.
 - `validate_offline.py` - offline validation: YAML and intrinsic functions, every
   property against the resource specification, no account ids or secrets under

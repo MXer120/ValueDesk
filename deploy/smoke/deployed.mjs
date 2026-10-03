@@ -1,6 +1,7 @@
 // Checks that only make sense against a DEPLOYED site (smoke.mjs --site=https://...):
-// what the real edge sends, and that the origin behind it is closed to everyone
-// but the edge. No browser; plain requests from this machine.
+// what the real edge sends (CloudFront, or Vercel - deploy/vercel serves the same
+// header table), and that the origin behind it serves nobody but the edge. No
+// browser; plain requests from this machine.
 import { lookup } from 'node:dns/promises';
 import http from 'node:http';
 import https from 'node:https';
@@ -94,18 +95,27 @@ const connects = (host, port, timeoutMs) => new Promise((done) => {
 });
 
 /**
- * The origin (the instance) as seen from a machine that is NOT CloudFront:
+ * The origin (the instance) as seen from a machine that is NOT the edge.
+ *
+ * edge 'cloudfront' (deploy/aws/edge.yaml):
  *   - its TLS port must not accept a connection (the security group admits
  *     CloudFront's addresses only);
+ * edge 'vercel' (deploy/vercel: the /api function has no fixed addresses, so the
+ * security group opens 443 to everyone):
+ *   - the TLS port answers, but Caddy must refuse every request that does not carry
+ *     the origin secret (deploy/server/caddy/Caddyfile.template): /api/health and an
+ *     index route asked without it must not be served;
+ * both:
  *   - the API's own port must not be reachable at all;
  *   - port 80 may answer (Caddy's ACME challenge and its redirect) but must
  *     never serve the API.
  *
  * @param {string} host
- * @param {{ tlsPort?: number, httpPort?: number, apiPort?: number, timeoutMs?: number }} [o] the ports are options for tests only
+ * @param {{ edge?: 'cloudfront' | 'vercel', tlsPort?: number, httpPort?: number, apiPort?: number, timeoutMs?: number, tlsScheme?: 'https' | 'http' }} [o]
+ *   the ports and tlsScheme are options for tests only
  * @returns {Promise<{ host: string, checks: Record<string, string>, problems: string[] }>}
  */
-export async function probeOrigin(host, { tlsPort = 443, httpPort = 80, apiPort = 8797, timeoutMs = 6000 } = {}) {
+export async function probeOrigin(host, { edge = 'cloudfront', tlsPort = 443, httpPort = 80, apiPort = 8797, timeoutMs = 6000, tlsScheme = 'https' } = {}) {
   const checks = {};
   const problems = [];
   // A name that does not resolve would read as "closed" on every port: a typo must not pass.
@@ -116,7 +126,22 @@ export async function probeOrigin(host, { tlsPort = 443, httpPort = 80, apiPort 
     return { host, checks: { ...checks, tls: 'not asked', api: 'not asked', http: 'not asked' }, problems: [`${host} does not resolve: is --origin the instance's name (ORIGIN_DOMAIN_NAME)?`] };
   }
   checks.tls = await connects(host, tlsPort, timeoutMs);
-  if (checks.tls === 'open') problems.push(`${host}:${tlsPort} accepts a connection from this machine: the security group is not limited to CloudFront's prefix list`);
+  if (edge === 'vercel') {
+    // Open on purpose; what matters is that nothing passes without the secret.
+    for (const [key, path] of [['gateHealth', '/api/health'], ['gateIndex', '/api/vs/leaderboard?venue=hyperliquid&window=1d&limit=1']]) {
+      try {
+        const r = await get(`${tlsScheme}://${host}:${tlsPort}${path}`, timeoutMs + 4000);
+        checks[key] = `answers ${r.status} without the secret`;
+        if (r.status >= 200 && r.status < 300) {
+          problems.push(`${tlsScheme}://${host}:${tlsPort}${path.split('?')[0]} answers ${r.status} without the origin secret: the Caddy gate (X-Origin-Verify) is not in effect`);
+        }
+      } catch (e) {
+        checks[key] = `refused (${reason(e)})`;
+      }
+    }
+  } else if (checks.tls === 'open') {
+    problems.push(`${host}:${tlsPort} accepts a connection from this machine: the security group is not limited to CloudFront's prefix list`);
+  }
   checks.api = await connects(host, apiPort, timeoutMs);
   if (checks.api === 'open') problems.push(`${host}:${apiPort} is reachable: the API must listen on loopback only and its port must not be in the security group`);
   try {

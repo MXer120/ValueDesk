@@ -2,10 +2,12 @@
 # (__ORIGIN_DOMAIN__ and the email line are filled in). Topology B of
 # docs/deploy/SECURITY-HEADERS.md section 2.3:
 #
-#   viewer -> CloudFront -> Caddy :443 (this file) -> 127.0.0.1:8797 (valuescan-api)
+#   viewer -> the edge -> Caddy :443 (this file) -> 127.0.0.1:8797 (valuescan-api)
 #
-# Caddy is here for one job: TLS between CloudFront and the origin, with a
-# certificate it obtains and renews by itself.
+# The edge is CloudFront (deploy/aws/edge.yaml) or the Vercel function that proxies
+# /api/* (deploy/vercel). Caddy is here for TLS between the edge and the origin,
+# with a certificate it obtains and renews by itself - and for one gate in front of
+# the API: only a request that carries the origin secret is passed on.
 
 {
 	__ACME_EMAIL_LINE__
@@ -16,16 +18,19 @@
 	admin off
 
 	servers {
-		# Keep CloudFront's X-Forwarded-For instead of replacing it with the edge's
-		# address: the API rate-limits by viewer (VALUESCAN_TRUST_PROXY=2).
-		# Trusting every peer is right ONLY because the security group lets nobody
-		# but CloudFront reach port 443.
+		# Keep the edge's X-Forwarded-For instead of replacing it with the edge's
+		# own address: the API rate-limits by viewer (VALUESCAN_TRUST_PROXY=2).
+		# Trusting every peer is safe ONLY because nothing reaches the API through
+		# here without the origin secret (the @edge matcher below): a client that
+		# connects directly cannot choose its own rate-limit key. (Behind CloudFront
+		# the security group also admits CloudFront's addresses only; the Vercel
+		# functions have no published address range, so there port 443 is open.)
 		trusted_proxies static 0.0.0.0/0 ::/0
 	}
 }
 
 __ORIGIN_DOMAIN__ {
-	# Port 443 is closed to everyone but CloudFront, so Let's Encrypt cannot
+	# Port 443 may be closed to everyone but the edge, so Let's Encrypt cannot
 	# validate over TLS-ALPN. It validates over HTTP-01 on port 80, which the
 	# security group opens for exactly that (and for the redirect to https).
 	tls {
@@ -34,7 +39,25 @@ __ORIGIN_DOMAIN__ {
 		}
 	}
 
-	reverse_proxy 127.0.0.1:8797
+	# THE GATE. The edge sends X-Origin-Verify on every request. Its value is one of
+	# two (the current secret and, while it is rotated, the next one - the same
+	# value twice otherwise). systemd hands them over from /etc/valuescan/caddy.secret.env
+	# (root only); they are never written into this file. A request without it is
+	# refused here, before the API: so the API's own check (it requires the secret
+	# on every route but /api/health) is never the only one, and nobody but the edge
+	# can set the X-Forwarded-For the API keys its limits on. Multiple values of one
+	# header matcher are OR-ed.
+	@edge header X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_1} {$VALUESCAN_ORIGIN_SECRET_2}
+
+	handle @edge {
+		reverse_proxy 127.0.0.1:8797
+	}
+
+	handle {
+		respond 403 {
+			close
+		}
+	}
 
 	header -Server
 

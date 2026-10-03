@@ -40,6 +40,7 @@ done
 [ -n "$TAG" ] || die "usage: deploy/release/publish-web.sh [--rollback] <tag> [--print]"
 valid_tag "$TAG" || die "not a usable tag name: $TAG"
 load_params
+[ "$VS_TARGET" != ec2 ] || die "the EC2 test environment serves the web from Vercel: deploy/release/publish-vercel.sh $TAG"
 
 OPS="$(ops_bucket)"
 SITE="$(site_bucket)"

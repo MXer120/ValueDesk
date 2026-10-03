@@ -43,6 +43,7 @@ import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQ
 import { ElevationError, revokeAllElevations } from './elevation.js';
 import { classify, take } from './rateLimit.js';
 import { perfPlugin } from './perf.js';
+import { installLocalHostGate } from './localHost.js';
 
 const app = Fastify({
   logger: {
@@ -61,6 +62,10 @@ const app = Fastify({
   // Hosted: a slow client may not hold a connection open indefinitely.
   ...(HOSTED ? { requestTimeout: 30_000 } : {}),
 });
+
+// Local mode answers only to a loopback Host (DNS rebinding, audit S-12). First, so that
+// nothing - not even a CORS preflight - answers to a Host that is not ours. Hosted: no-op.
+installLocalHostGate(app, HOSTED);
 
 await app.register(cors, HOSTED
   ? {

@@ -1,0 +1,49 @@
+# The Vercel edge
+
+The site and `/api/*` of the EC2 + Vercel test environment
+(`docs/deploy/EC2-VERCEL.md`): what CloudFront is in `deploy/aws/edge.yaml`, as a
+prebuilt Vercel deployment (Build Output API v3). Nothing here is built by Vercel;
+the web is built by `deploy/release/build-web.sh`.
+
+| File | |
+|---|---|
+| `package.mjs` | writes `<dir>/.vercel/output` from a build: `static/`, `config.json` (the routes), the function |
+| `api-proxy.cjs` | the function behind `/api/*` (Node.js, `fra1`): to `https://<origin>` with the origin secret and the viewer's address |
+| `vercel.test.mjs` | `node --test deploy/vercel/vercel.test.mjs` |
+
+```
+deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuexplorer-deploy            # prepare
+deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuexplorer-deploy --deploy   # ... and deploy to production
+```
+
+**The routes** (`config.json`, in order): `/api/*` to the function and nothing
+else; the headers of every other path from `deploy/smoke/prod-headers.mjs` - the
+table `edge.yaml` is validated against - one route per path class, so a header is
+never set twice; `/scan/` to the legacy redirect page; the files; any path whose
+last segment has no dot to `/index.html`. All case-sensitive, like CloudFront's
+path patterns. The test walks 35 paths through a model of Vercel's routing and
+compares each with `headersFor()` and `rewrite()`.
+
+**The function** forwards GET, HEAD and OPTIONS (405 otherwise), the path and query
+unchanged, and only `Accept`, `Accept-Encoding`, `If-None-Match`,
+`If-Modified-Since`, `Origin` (and a preflight's two headers). It adds
+`X-Origin-Verify` and `X-Forwarded-For: <viewer>` - the address Vercel puts in
+`x-real-ip`, never the client's own header. The answer is streamed back as is
+(compressed bytes included), without hop-by-hop headers, `Set-Cookie` or `Server`.
+A `200` with `public, max-age=N` also gets `Vercel-CDN-Cache-Control:
+max-age=min(N,60)` (and the API's `stale-while-revalidate`, at most 60): Vercel's
+CDN does not cache a function's answer on `max-age` alone, and this is what
+CloudFront's API cache policy does with the same header. No origin answer in two
+5-second connection attempts: 502; none in 30 s: 504.
+
+**Settings.** `VALUESCAN_ORIGIN_URL` is written into the function's `.vc-config.json`
+by `package.mjs` (not secret). `VALUESCAN_ORIGIN_SECRET` is a Vercel environment
+variable, **production only**, marked sensitive:
+
+```
+npx vercel@latest env add VALUESCAN_ORIGIN_SECRET production --sensitive < ~/.valuescan/valuescan-test/origin-secret
+```
+
+A preview deployment therefore has no secret and its `/api` answers 503: only the
+production address reaches the index. An environment variable reaches only
+deployments made after it changed - deploy again after setting it.

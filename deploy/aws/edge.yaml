@@ -226,10 +226,13 @@ Resources:
           QueryStringsConfig:
             QueryStringBehavior: none
 
-  # The API decides what may be cached (apps/server/src/perf.ts): the index routes
-  # send "public, max-age=10, stale-while-revalidate=20", the live ones "public,
-  # no-cache", everything else "no-store". CloudFront honours that, never beyond a
-  # minute. The key holds the query string and Origin (docs/deploy/SECURITY-HEADERS.md 2.2).
+  # The API decides what may be cached (apps/server/src/perf.ts CACHE_POLICIES): the
+  # boards, cohorts, screener, Explore and lbrow send "public, max-age=10,
+  # stale-while-revalidate=20", the whale tape and positioning "public, no-cache",
+  # every other answer and every failure "no-store" (/api/vs/price's 30 s policy is
+  # not reachable: the route is not served in hosted mode). CloudFront honours that,
+  # never beyond a minute. The key holds the query string and Origin
+  # (docs/deploy/SECURITY-HEADERS.md 2.2).
   ApiCachePolicy:
     Type: AWS::CloudFront::CachePolicy
     Properties:

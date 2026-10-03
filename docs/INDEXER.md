@@ -225,3 +225,31 @@ The database grows as follows:
 - **Daily all-time PnL:** about 47k Hyperliquid rows per day.
 
 Histories of traders no board has wanted for 14 days are dropped.
+
+**Retention of raw fills and closes** (`apps/server/src/indexer/store.ts`, "RETENTION"):
+`VALUESCAN_INDEX_RETAIN_DAYS` whole UTC days are kept raw (default 100: the longest
+rolling window, 90d, plus a margin; at least 8). An older day of a trader whose held
+range vouches for it is summed into one `fill_day` row, marked frozen, and its raw rows
+go, a slice at a time while the indexer runs. Every window still reads: below 91 days
+the 90d window starts at 00:00 UTC of its first day, below 31 the 30d one too; `ytd`
+and `all` are exact at any value. The deployed test instance runs with 31
+(`deploy/server/env/indexer.env.example`): an estimated 33-44 GB for about 3,300
+wallets at about 4.5 million fills a day.
+
+**Space.** A database created by the current code uses `auto_vacuum = INCREMENTAL`:
+freed pages go back to the file system in 1 MB slices while the indexer runs. A file
+created before 2026-10-02 (`auto_vacuum = 0`) reuses the pages retention frees - it
+stops growing, but does not shrink - until it is compacted once, OFFLINE, with the
+indexer and the API stopped:
+
+```
+cd apps/server
+npx tsx --disable-warning=ExperimentalWarning src/indexer/compact.ts [path] [--prune] [--force]
+```
+
+`--prune` first runs one whole retention sweep, so the rewrite does not copy rows that
+are about to go. The rewrite (`VACUUM`) holds the file for about a minute per 1-2 GB and
+needs free disk of about the file's size. On a deployed instance stop both services
+first (`deploy/release/remote.sh run 'systemctl stop valuescan-api valuescan-indexer'`),
+run it as the `valuescan` user from `/opt/valuescan/current/apps/server`, then start the
+indexer, then the API.

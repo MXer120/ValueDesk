@@ -1,6 +1,7 @@
 // node --disable-warning=ExperimentalWarning --test deploy/server/bin/healthcheck.test.mjs
 //
-// The health check against a stand-in API on loopback and a toy index file.
+// The health check against a stand-in API on loopback and a stand-in index file
+// (only its size is read).
 // No alert topic is ever set here, so nothing is published anywhere.
 //
 // The stand-in's port is assigned by the operating system; TEST_PORT_RANGE=8891-8899
@@ -9,7 +10,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { DatabaseSync } from 'node:sqlite';
 import http from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -24,13 +24,19 @@ const OTHER_SECRET = randomBytes(24).toString('hex');
 const RANGE = /^(\d+)-(\d+)$/.exec(process.env.TEST_PORT_RANGE ?? '');
 const PORTS = RANGE ? Array.from({ length: Number(RANGE[2]) - Number(RANGE[1]) + 1 }, (_, i) => Number(RANGE[1]) + i) : [0];
 
-/** A stand-in for the hosted API. `o` bends it out of shape. */
+/**
+ * A stand-in for the hosted API. `o` bends it out of shape; `o.health` is what
+ * /api/vs/index/health reports (null: the indexer has not published a status).
+ * Like the real gate, that on-instance route needs no origin secret; every other
+ * route but /api/health does, and exactly one value of it.
+ */
 async function api(o = {}) {
   const handler = (req, res) => {
     const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const path = req.url.split('?')[0];
     if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true });
-    if (req.headers['x-origin-verify'] !== (o.secret ?? SECRET)) return send(403, { error: 'forbidden' });
+    if (path === '/api/vs/index/health') return send(200, { ok: true, status: o.health === undefined ? indexerHealth() : o.health });
+    if (!(o.secrets ?? [SECRET]).includes(req.headers['x-origin-verify'])) return send(403, { error: 'forbidden' });
     if (path === '/api/vs/index/status') return o.notHosted ? send(200, { ok: true, status: {} }) : send(404, { error: 'not found' });
     if (path === '/api/vs/leaderboard') return send(200, { ok: true, total: 100, rows: [{}], index: { complete: true, pending: 0, updatedAt: Date.now() - (o.boardAgeMs ?? 20_000) } });
     return send(404, { error: 'not found' });
@@ -46,21 +52,28 @@ async function api(o = {}) {
   throw new Error(`no free port in TEST_PORT_RANGE=${process.env.TEST_PORT_RANGE}`);
 }
 
+/** What /api/vs/index/health answers (apps/server/src/hosted.ts indexerHealth): numbers and booleans. */
+function indexerHealth(o = {}) {
+  const now = Date.now();
+  return {
+    at: now - (o.statusAgeMs ?? 5_000),
+    streams: { sodex: true, hyperliquid: true, tradexyz: true, lighter: !o.lighterDown, arcus: true },
+    loopLagMs: { lastMinute: 12, sinceStart: 80 },
+    lanes: {},
+    lastBuildAt: now - (o.buildAgeMs ?? 30_000),
+    lastBuildMs: 900,
+    errorSinceStart: false,
+  };
+}
+
+/** A data directory: an index file (only its size is read) and the state directory. */
 function fixture(o = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vs-health-'));
   mkdirSync(join(dir, 'index'));
   mkdirSync(join(dir, 'state'));
   const db = join(dir, 'index', 'valuescan-index.db');
-  const d = new DatabaseSync(db);
-  d.exec('CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT) WITHOUT ROWID');
+  writeFileSync(db, 'not a database: the health check must never open it');
   const now = Date.now();
-  const status = {
-    at: now - (o.statusAgeMs ?? 5_000), pid: 4242, lastBuildAt: now - (o.buildAgeMs ?? 30_000), lastBuildMs: 900, lastError: null,
-    sockets: { sodex: now - 60_000, hyperliquid: now - 60_000, tradexyz: now - 60_000, lighter: o.lighterDown ? null : now - 60_000, arcus: now - 60_000 },
-    loopLagMs: { lastMinute: 12, sinceStart: 80, spikes: [] },
-  };
-  if (!o.noStatus) d.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('indexer_status', JSON.stringify(status));
-  d.close();
   if (!o.noBackup) {
     const marker = join(dir, 'state', 'last-backup.json');
     writeFileSync(marker, '{}');
@@ -101,8 +114,8 @@ test('a healthy instance passes every check', async () => {
     assert.match(r.report.checks.index.note, /board \d+ s old/);
     assert.match(r.report.checks.indexer.note, /loop lag 12 ms/);
     const after = statSync(f.db);
-    assert.equal(after.size, before.size, 'the index is opened read-only');
-    assert.equal(after.mtimeMs, before.mtimeMs, 'the index is opened read-only');
+    assert.equal(after.size, before.size, 'the index file is never written');
+    assert.equal(after.mtimeMs, before.mtimeMs, 'the index file is never written');
   } finally {
     await a.close();
     rmSync(f.dir, { recursive: true, force: true });
@@ -125,11 +138,11 @@ test('a server that is not in hosted mode is an alarm', async () => {
 
 test('an indexer that stopped publishing, a stale board, an old backup and a wrong secret are each found', async () => {
   const cases = [
-    [{ statusAgeMs: 10 * 60_000 }, {}, 'indexer', /status is \d+ s old/],
-    [{ noStatus: true }, {}, 'indexer', /has not published a status/],
-    [{ buildAgeMs: 30 * 60_000 }, {}, 'indexer', /last build \d+ s ago/],
+    [{}, { health: indexerHealth({ statusAgeMs: 10 * 60_000 }) }, 'indexer', /status is \d+ s old/],
+    [{}, { health: null }, 'indexer', /has not published a status/],
+    [{}, { health: indexerHealth({ buildAgeMs: 30 * 60_000 }) }, 'indexer', /last build \d+ s ago/],
     [{}, { boardAgeMs: 30 * 60_000 }, 'index', /the board is \d+ s old/],
-    [{}, { secret: OTHER_SECRET }, 'index', /refused the origin secret/],
+    [{}, { secrets: [OTHER_SECRET] }, 'index', /refused the origin secret/],
     [{ backupAgeH: 50 }, {}, 'backup', /the last backup is 50 h old/],
   ];
   for (const [fx, ax, name, note] of cases) {
@@ -147,9 +160,24 @@ test('an indexer that stopped publishing, a stale board, an old backup and a wro
   }
 });
 
+test('during a rotation the check sends the FIRST value of the secret list, never the list', async () => {
+  const f = fixture();
+  // The API accepts only the first value here: a check that sent "a,b" or the second would fail.
+  const a = await api({ secrets: [SECRET] });
+  try {
+    const r = await run(env(f, a, { VALUESCAN_ORIGIN_SECRET: `${SECRET},${OTHER_SECRET}` }));
+    assert.equal(r.status, 0, JSON.stringify(r.report));
+    assert.match(r.report.checks.index.note, /board \d+ s old/);
+    assert.match(r.report.checks.lockdown.note, /hosted mode/);
+  } finally {
+    await a.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
 test('a stream that is down and a backup that has not run yet are warnings, not failures', async () => {
-  const f = fixture({ lighterDown: true, noBackup: true });
-  const a = await api();
+  const f = fixture({ noBackup: true });
+  const a = await api({ health: indexerHealth({ lighterDown: true }) });
   try {
     const r = await run(env(f, a));
     assert.equal(r.status, 0, JSON.stringify(r.report));
@@ -171,7 +199,9 @@ test('a full disk and an API that is down fail the pass', async () => {
     const down = await run(env(f, a));
     assert.equal(down.status, 1);
     for (const c of ['api', 'lockdown', 'index']) assert.ok(down.report.failed.includes(c), `${c}: ${JSON.stringify(down.report.failed)}`);
-    assert.ok(!down.report.failed.includes('indexer'), 'the indexer is judged from the index file, not through the API');
+    assert.ok(!down.report.failed.includes('indexer'), 'an API that is down does not also fail the indexer');
+    assert.ok(down.report.warned.includes('indexer'), 'the indexer cannot be judged without the API: a warning');
+    assert.match(down.report.checks.indexer.note, /not judged/);
   } finally {
     await a.close().catch(() => {});
     rmSync(f.dir, { recursive: true, force: true });

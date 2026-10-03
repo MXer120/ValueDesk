@@ -14,9 +14,13 @@
 #
 #   1. a consistent snapshot of the database (deploy/server/bin/backup-index.mjs:
 #      read-only, VACUUM INTO - the local indexer may keep running);
-#   2. compressed with zstd and uploaded to s3://<ops bucket>/seed/;
+#   2. compressed with zstd and uploaded to s3://<ops bucket>/seed/ - or, on the
+#      EC2 test instance (no instance role), copied over SSH to
+#      /var/lib/valuescan/backup/seed/ (after bootstrap-instance.sh: the data
+#      volume must be mounted);
 #   3. on the instance, BEFORE the first release:
 #        deploy/release/remote.sh restore seed/<name>.db.zst --yes
+#        deploy/release/remote.sh restore /var/lib/valuescan/backup/seed/<name>.db.zst --yes   (EC2)
 #
 # COST ON THE MACHINE IT READS FROM: the whole database is read once and a copy of
 # the same size is written to the work directory (then its compressed form, about
@@ -107,10 +111,18 @@ note "seed: $copy.zst ($(du -h "$copy.zst" | awk '{print $1}'))"
 
 if [ "$UPLOAD" = 1 ]; then
   load_params
-  OPS="$(ops_bucket)"
-  run aws s3 cp "$copy.zst" "s3://$OPS/seed/$name.zst" --only-show-errors
-  run aws s3 cp "$copy.zst.sha256" "s3://$OPS/seed/$name.zst.sha256" --only-show-errors
-  note "uploaded. On the instance, before the first release:"
-  note "  deploy/release/remote.sh restore seed/$name.zst --yes"
+  if [ "$VS_TARGET" = ec2 ]; then
+    remote="/var/lib/valuescan/backup/seed/$name.zst"
+    ssh_put "$copy.zst" "$remote"
+    ssh_put "$copy.zst.sha256" "$remote.sha256"
+    note "copied. On the instance, before the first release:"
+    note "  deploy/release/remote.sh restore $remote --yes"
+  else
+    OPS="$(ops_bucket)"
+    run aws s3 cp "$copy.zst" "s3://$OPS/seed/$name.zst" --only-show-errors
+    run aws s3 cp "$copy.zst.sha256" "s3://$OPS/seed/$name.zst.sha256" --only-show-errors
+    note "uploaded. On the instance, before the first release:"
+    note "  deploy/release/remote.sh restore seed/$name.zst --yes"
+  fi
   note "Then delete the local seed: $copy.zst"
 fi

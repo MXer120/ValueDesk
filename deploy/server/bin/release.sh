@@ -5,12 +5,15 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh --rollback [--api-only]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
+#   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
 #
 # Normally started from your workstation by deploy/release/release-server.sh
-# (through SSM Run Command); it can be run by hand in a Session Manager shell.
+# (through SSM Run Command, or over SSH on an instance without a role); it can be
+# run by hand in a shell on the instance.
 #
 # WHAT A RELEASE IS. The tarball of one git tag, uploaded to
-# s3://<ops bucket>/releases/server/valuescan-server-<tag>.tar.gz with its .sha256.
+# s3://<ops bucket>/releases/server/valuescan-server-<tag>.tar.gz with its .sha256 -
+# or copied onto the instance over SSH and named with --from (its .sha256 next to it).
 # It is unpacked into /opt/valuescan/releases/<tag>, dependencies are installed
 # from the committed lockfile (npm ci, the server workspace only, no install
 # scripts), and /opt/valuescan/current is switched to it atomically. Running
@@ -65,13 +68,21 @@ install_release() {
     log "$tag is already installed"
     return 0
   fi
-  : "${OPS_BUCKET:?OPS_BUCKET is not set (see $ETC/ops.env)}"
   rm -rf "$inc"
   mkdir -p "$inc/tree"
   local key="releases/server/valuescan-server-$tag.tar.gz"
-  log "downloading s3://$OPS_BUCKET/$key"
-  aws s3 cp "s3://$OPS_BUCKET/$key" "$inc/release.tar.gz" --only-show-errors
-  aws s3 cp "s3://$OPS_BUCKET/$key.sha256" "$inc/release.sha256" --only-show-errors
+  if [ -n "$FROM" ]; then
+    key="$FROM"
+    [ -f "$FROM" ] && [ -f "$FROM.sha256" ] || die "--from: $FROM and $FROM.sha256 must both exist"
+    log "taking $FROM"
+    cp "$FROM" "$inc/release.tar.gz"
+    cp "$FROM.sha256" "$inc/release.sha256"
+  else
+    : "${OPS_BUCKET:?OPS_BUCKET is not set (see $ETC/ops.env) - without an ops bucket name the tarball with --from}"
+    log "downloading s3://$OPS_BUCKET/$key"
+    aws s3 cp "s3://$OPS_BUCKET/$key" "$inc/release.tar.gz" --only-show-errors
+    aws s3 cp "s3://$OPS_BUCKET/$key.sha256" "$inc/release.sha256" --only-show-errors
+  fi
   local want got
   want="$(awk '{print $1; exit}' "$inc/release.sha256")"
   got="$(sha256sum "$inc/release.tar.gz" | awk '{print $1}')"
@@ -188,9 +199,11 @@ status() {
 TAG=""
 API_ONLY=0
 ROLLBACK=0
+FROM=""
 for arg in "$@"; do
   case "$arg" in
     --api-only) API_ONLY=1 ;;
+    --from=*) FROM="${arg#--from=}" ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;
     -h|--help) usage 0 ;;
@@ -204,6 +217,7 @@ mkdir -p "$RELEASES"
 
 if [ "$ROLLBACK" = 1 ]; then
   [ -z "$TAG" ] || die "--rollback takes no tag: it goes back to the release before the current one"
+  [ -z "$FROM" ] || die "--rollback takes no --from"
   TAG="$(previous_tag)"
   [ -n "$TAG" ] || die "there is no previous release to roll back to"
   [ -d "$RELEASES/$TAG" ] || die "the previous release $TAG is no longer installed - release it again by tag"

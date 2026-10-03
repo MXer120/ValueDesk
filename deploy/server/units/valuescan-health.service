@@ -1,9 +1,9 @@
 # Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
 #
 # One pass of deploy/server/bin/healthcheck.mjs: /api/health, the hosted
-# lock-down, an index read through the gate, the indexer's own status, disk
-# space, the last backup, the certificate. It logs one line; on a change of
-# state it publishes to the alert topic, if one is set.
+# lock-down, an index read through the gate, the indexer's own status
+# (/api/vs/index/health), disk space, the last backup, the certificate. It logs
+# one line; on a change of state it publishes to the alert topic, if one is set.
 
 [Unit]
 Description=Valuescan health check
@@ -16,7 +16,8 @@ User=valuescan
 Group=valuescan
 EnvironmentFile=/etc/valuescan/ops.env
 EnvironmentFile=-/etc/valuescan/ops.local.env
-# The index read needs the origin secret, like every request but /api/health.
+# The board read needs the origin secret, like every request but /api/health and
+# the on-instance health route (the check sends the first value of the list).
 EnvironmentFile=-/etc/valuescan/api.secret.env
 Environment=HOME=/var/lib/valuescan/state
 ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning /opt/valuescan/bin/healthcheck.mjs
@@ -45,4 +46,6 @@ LockPersonality=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
 UMask=0027
-ReadWritePaths=/var/lib/valuescan/index /var/lib/valuescan/state
+# Only its own state (health-state.json). The index is never opened: the indexer's
+# status comes from /api/vs/index/health, an on-instance route of the API.
+ReadWritePaths=/var/lib/valuescan/state

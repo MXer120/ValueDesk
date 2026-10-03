@@ -10,6 +10,8 @@
 # WEB. Every published build is kept in the ops bucket (releases/web/). A rollback
 # uploads that build's HTML and files again and invalidates CloudFront; the hashed
 # assets of every release are still in the site bucket, so it takes a minute.
+# On the EC2 test environment the web is on Vercel, where every deployment is kept:
+# `npx vercel@latest rollback` (or publish-vercel.sh <older tag> --deploy).
 #
 # SERVER. The instance keeps the last few releases installed. A rollback switches
 # the `current` link back and restarts in order (indexer, then API). To go back
@@ -39,6 +41,8 @@ done
 case "$WHAT" in
   web)
     [ -n "$TAG" ] || die "usage: deploy/release/rollback.sh web <tag>"
+    select_target
+    [ "$VS_TARGET" != ec2 ] || die "the web of the EC2 test environment is on Vercel: npx vercel@latest rollback (the previous production deployment), or deploy/release/publish-vercel.sh $TAG --deploy"
     args=(--rollback "$TAG")
     [ "$PRINT_ONLY" = 1 ] && args+=(--print)
     exec "$RELEASE_DIR/publish-web.sh" "${args[@]}"
@@ -46,11 +50,11 @@ case "$WHAT" in
   server)
     [ -z "$TAG" ] || die "a server rollback takes no tag (it goes back one release); to install a specific tag: release-server.sh $TAG"
     load_params
-    ssm_run "$(instance_id)" "valuescan rollback" "/opt/valuescan/bin/release.sh --rollback$API_ONLY"
+    remote_run "valuescan rollback" "/opt/valuescan/bin/release.sh --rollback$API_ONLY"
     ;;
   status)
     load_params
-    ssm_run "$(instance_id)" "valuescan status" "/opt/valuescan/bin/release.sh --status"
+    remote_run "valuescan status" "/opt/valuescan/bin/release.sh --status"
     ;;
   *) die "unknown target $WHAT (web | server | status)" ;;
 esac

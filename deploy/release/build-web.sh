@@ -3,6 +3,7 @@
 #
 #   deploy/release/build-web.sh <tag>
 #   deploy/release/build-web.sh <tag> --allow-dirty      build what is checked out now (smoke tests)
+#   deploy/release/build-web.sh <tag> --public           a build for the public: the legal pages must be complete
 #
 # Output: deploy/.out/valuescan-web-<tag>.tar.gz (+ .sha256) - what
 # publish-web.sh publishes and what a rollback re-publishes.
@@ -14,16 +15,19 @@
 #
 # Steps: typecheck + vite build (npm --prefix apps/web run build), the static
 # audit of the result against the production CSP (deploy/smoke/audit-dist.mjs),
-# then the tarball.
+# the legal pages (apps/web/tools/check-legal.ts: no [[OWNER: ...]] placeholder may
+# be left - a WARNING for a test deployment, an ERROR with --public), then the tarball.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TAG=""
 ALLOW_DIRTY=0
+PUBLIC=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
-    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --public) PUBLIC=1 ;;
+    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $arg" ;;
     *) [ -z "$TAG" ] || die "one tag at a time"; TAG="$arg" ;;
   esac
@@ -41,6 +45,7 @@ fi
 VITE_VARS=(
   VITE_WALLETCONNECT_PROJECT_ID
   VITE_BUILDER_ID VITE_BUILDER_FEE_PERPS VITE_BUILDER_FEE_SPOT VITE_BUILDER_MAX_FEE
+  VITE_BUILDER_REQUIRED VITE_BUILDER_TERMS_KEYS
   VITE_SODEX_NETWORK VITE_SODEX_GATEWAY
   VITE_ALLOW_MAINNET_TRADING VITE_TRADING_DISABLED VITE_TRADING_KEY_TTL_H
   VITE_CHART
@@ -62,6 +67,10 @@ for v in "${VITE_VARS[@]}"; do
   esac
   export "$v=$value"
 done
+# A public build never makes the builder fee optional (apps/web/src/trading/config.ts).
+if [ "$PUBLIC" = 1 ] && [ "$VITE_BUILDER_REQUIRED" = 0 ]; then
+  die "VITE_BUILDER_REQUIRED=0 (the fee optional) is for test builds only - not with --public"
+fi
 if [ -z "$VITE_WALLETCONNECT_PROJECT_ID" ]; then
   [ "$ALLOW_DIRTY" = 1 ] || die "VITE_WALLETCONNECT_PROJECT_ID is empty: wallets could not connect by WalletConnect in this build"
   note "VITE_WALLETCONNECT_PROJECT_ID is empty: this build cannot connect wallets by WalletConnect"
@@ -87,6 +96,19 @@ run npm --prefix apps/web run build
 DIST=apps/web/dist
 [ -f "$DIST/index.html" ] || die "the build produced no $DIST/index.html"
 run node deploy/smoke/audit-dist.mjs "$DIST"
+
+# The legal pages: their drafts carry [[OWNER: ...]] placeholders until the owner
+# fills them in. A test deployment may go out with them (a warning); a public one
+# may not (--public: an error).
+note "checking the legal pages for placeholders"
+if (cd apps/web && npx --no-install tsx tools/check-legal.ts --dist dist); then
+  :
+else
+  code=$?
+  [ "$code" = 1 ] || die "the legal-page check could not run (exit $code): cd apps/web && npx tsx tools/check-legal.ts --dist dist"
+  [ "$PUBLIC" != 1 ] || die "the legal pages still hold placeholders (listed above) - a public build cannot ship them (apps/web/src/legal)"
+  note "WARNING: the legal pages still hold placeholders (listed above). Fine for a test deployment; build with --public before a launch."
+fi
 
 mkdir -p "$OUT_DIR"
 tarball="$OUT_DIR/valuescan-web-$TAG.tar.gz"

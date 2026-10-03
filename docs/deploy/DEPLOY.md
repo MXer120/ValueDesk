@@ -11,12 +11,18 @@ afterwards. The reference for each part sits next to its code:
 | `deploy/smoke/README.md` | the smoke test, locally and against the deployed site |
 | `docs/deploy/SECURITY-HEADERS.md` | why the headers, the CSP and the hosted-mode settings are what they are |
 
-> **State on 2026-10-02.** Nothing is deployed, and no AWS call was made while
-> this was prepared (the machine has no AWS credentials). The templates passed the
-> offline validation only; AWS's own `validate-template` is step 2 below. The
-> production build passed the local smoke test as far as it could be run next to a
-> live development indexer - section 13 says exactly what was and was not proven,
-> and section 14 lists what is still open in the code.
+> **The deployment being set up now is not this one.** Since 2026-10-03 the test
+> environment is one EC2 instance made by a script plus Vercel for the site and
+> `/api` - the deploying AWS user may not use CloudFormation, IAM or SSM, and the
+> owner chose Vercel: **`docs/deploy/EC2-VERCEL.md`** (and, for the owner,
+> `docs/deploy/OWNER-STEPS.md`). Everything about the instance itself - units,
+> environment, backups, health, releases, the switches - is this file and applies
+> there too; section 3 of EC2-VERCEL.md lists each difference.
+>
+> **State of this design on 2026-10-03.** Nothing is deployed with it. The templates
+> passed the offline validation only; AWS's own `validate-template` is step 2 below.
+> Section 13 says what the local smoke test proved, section 14 what was found while
+> preparing this and where each item stands.
 
 ## 1. What gets deployed
 
@@ -47,7 +53,7 @@ visitor ──HTTPS──> CloudFront ──┬── site bucket (S3, private) 
 | Domain and its Route 53 zone | `DOMAIN_NAME`, `HOSTED_ZONE_ID`, `ORIGIN_DOMAIN_NAME` | With the zone id the certificate and all records are automatic. With DNS elsewhere leave it empty and create three records by hand (section 15). |
 | WalletConnect / Reown project id | `VITE_WALLETCONNECT_PROJECT_ID` in `deploy/release/web.env` | Create the project at dashboard.reown.com and put the production domain on its allowed list. Without it wallets connect only as browser extensions. |
 | Builder account id and fee | `VITE_BUILDER_ID`, `VITE_BUILDER_FEE_PERPS`, `VITE_BUILDER_FEE_SPOT`, `VITE_BUILDER_MAX_FEE` in `web.env` | Fees are in tenths of a basis point. All empty = no fee is approved or charged. Whether and what to charge is a business and a legal decision. Per-wallet tiers: section 16. |
-| Legal pages: Impressum, privacy policy, terms and risk notice | the app has **no place for them today** - no route, no footer link (section 14) | The texts are the owner's and need legal review. The privacy policy has to name what this setup does: section 12. |
+| Legal pages: Impressum, privacy policy, terms and risk notice | `/impressum`, `/privacy`, `/terms` (`apps/web/src/legal/`), linked from every page | Drafts with `[[OWNER: ...]]` placeholders. The texts are the owner's and need legal review; `build-web.sh --public` refuses a build while a placeholder is left. The privacy policy has to name what this setup does: section 12. |
 | Contact address | the legal pages | |
 | Alert address | `ALERT_EMAIL` in `params.env` | Receives the alarms and the health alerts; the address must confirm one mail from AWS. |
 | ACME contact | `ACME_EMAIL` in `params.env` | Optional. Let's Encrypt warns it about a certificate problem at the origin. |
@@ -311,8 +317,10 @@ bootstrap, `restore latest --yes`.
 
 **The indexer's status endpoint is not public.** `/api/vs/index/status` answers
 404 in hosted mode, from loopback too - diagnostics are not on the allow-list. The
-indexer writes the same status into the index every 30 seconds, and the health
-check reads it from there, read-only. `remote.sh health` is that check, on demand.
+health check asks `/api/vs/index/health` instead: a reduced view (numbers and
+booleans only) that the API answers to a caller on the instance itself and to
+nobody through the proxy (`apps/server/src/hosted.ts`, `ON_INSTANCE_ROUTES`). It
+never opens the index file. `remote.sh health` is that check, on demand.
 
 **What alerts by itself** (to `ALERT_EMAIL`, through SNS):
 
@@ -360,8 +368,10 @@ Sizing:
   `CPU_CREDITS=none` in `params.env`, then `deploy/aws/deploy.sh compute --execute`.
   That is a stop and a start - nothing is replaced. A one-year commitment takes
   roughly a third off the instance; decide that after the type has settled.
-- **Memory:** 8 GiB is ample. The units cap the API at 2 GB and the indexer at
-  4 GB; the rest is page cache for the index.
+- **Memory:** 8 GiB is ample. The units are capped for the 4 GiB test instance
+  (API 640M high / 900M max, indexer 1400M / 1800M); on 8 GiB put the larger caps
+  back with a drop-in (API 1500M / 2G, indexer 3G / 4G - the units name them); the
+  rest is page cache for the index.
 - **Disk:** the index is 3.3 GB on the development machine today. The data volume
   needs about three times the index (the index, the nightly staging copy, a
   replaced copy during a restore): 40 GiB lasts to about 12 GB. Growth is bounded
@@ -373,9 +383,9 @@ Sizing:
   API's load is per distinct request, not per visitor; everything per-user goes
   from the browser to the exchanges.
 - **One address for everything on the instance.** The exchanges limit per
-  address, and the API process reads them too (section 14, item 2). The shares
-  are set in `deploy/server/env/api.env.example` and `indexer.env.example`; change
-  them together.
+  address. The API process's own reads are bounded and do not grow with visitors
+  (section 14, item 2); the shares are in `deploy/server/env/api.env.example` and
+  `indexer.env.example` - change them together.
 - **No latency tests are needed for any of this.** Should one ever be wanted:
   measure from this running instance, never with throwaway instances.
 
@@ -395,12 +405,14 @@ Decisions and texts (the owner):
 
 Code (section 14):
 
-- [ ] The API opens the index read-only (item 1), or the release order
-      "indexer first" is accepted as the rule that covers it.
-- [ ] The maintenance banner no longer claims maintenance when the status service
-      is merely unreachable (item 3).
-- [ ] `apps/web/index.html` has a description; the open items of
-      `docs/security/AUDIT-2026-09-30.md` §9 are closed or accepted.
+- [x] The API opens the index read-only (item 1, closed).
+- [x] The maintenance banner uses the server's verdict (item 3, closed).
+- [x] `apps/web/index.html` has a description; legal pages and `/favicon.ico` exist
+      (items 4 and 5, closed).
+- [ ] The open items of `docs/security/AUDIT-2026-09-30.md` §9 are closed or
+      accepted (S-12 is fixed in code; K-02 and D-02 remain there).
+- [ ] The legal pages are filled in: `deploy/release/build-web.sh <tag> --public`
+      passes its legal check.
 - [ ] The full local smoke test has passed once
       (`deploy/smoke/README.md`, "Run it").
 
@@ -487,110 +499,134 @@ The switches:
       Portfolio and Scan work, the index pages say unavailable. Started again:
       they come back by themselves.
 
-What a visitor's browser sends, and to whom - the privacy policy has to say it:
+What a visitor's browser sends, what the server keeps, and to whom - the privacy
+policy (`/privacy`, `apps/web/src/legal/`) has to say it:
 
-- to Valuescan (CloudFront and its firewall, then the instance): the address of
-  the connection and the pages' index requests. The API's log keeps the address
-  and the path, without the query, for 14 days. CloudFront keeps no access log in
-  this setup; its firewall shows a sample of recent requests, addresses included,
-  for a few hours. There is no analytics and no cookie;
-- directly to SoDEX, Hyperliquid, Lighter and Arcus: the visitor's address of
-  connection, and every wallet address looked at;
-- to WalletConnect / Reown when pairing, and to the public RPC endpoints of
-  ValueChain, Arbitrum, Base, Ethereum, BNB Chain and Polygon for balances;
-- in the browser's own storage, never sent to Valuescan: settings, saved
-  address names, the WalletConnect session and the trading key
-  (`apps/web/src/trading/vault.ts`).
+- **To Valuescan's edge, then the instance.** In this design: CloudFront and its
+  firewall. In the test environment (`EC2-VERCEL.md`): **Vercel** - its CDN, in
+  whichever of its regions is nearest the visitor, and the `/api` function in its
+  Frankfurt region (fra1) - in place of CloudFront; the privacy policy's list of
+  processors has to name Vercel (and AWS, eu-central-1, for the instance) instead.
+  What arrives: the address of the connection and the pages' index requests.
+  **Index requests can carry wallet addresses or search text**
+  (`/api/vs/leaderboard?q=`, `/api/vs/lbrow?address=`, `/api/feed/account?id=`);
+  the hosted API's log strips the query and keeps the client address and the path
+  for 14 days. CloudFront keeps no access log in this setup; its firewall shows a
+  sample of recent requests, addresses included, for a few hours. On Vercel, the
+  function logs nothing but an error line (path and reason); Vercel keeps its own
+  request and runtime logs as its plan says (runtime logs: 1 hour on Hobby, 1 day
+  on Pro). There is no analytics and no cookie.
+- **Builder fee tiers** (section 16). When trading is enabled or restored, every 4
+  minutes while it stays on, and after fills, the browser sends the wallet address
+  to `/api/vs/builder/terms`. The server then reads that wallet's fills from SoDEX
+  and its orders from SoDEX's explorer, and keeps a record per wallet in
+  `builder.db`: counted volume, orders, fee history, flags with their evidence, and
+  the app's key addresses. **Nothing expires by itself** - only
+  `builderTiers.ts forget --address 0x...` removes a wallet. The retention period is
+  the owner's to set (a placeholder in `/privacy`).
+- **The index holds other people's public trading activity**: wallet addresses,
+  fills, positions, PnL, and the venues' display names (stored, never shown). The
+  privacy policy needs a section on it, and an objection needs a way to act on it:
+  **none exists in the indexer today** (section 14, item 10).
+- Directly to SoDEX, Hyperliquid, Lighter and Arcus: the visitor's address of
+  connection, and every wallet address looked at; to the ValueChain explorer
+  (`main-scan.valuechain.xyz`) likewise.
+- To WalletConnect / Reown: it starts on any wallet connection - browser
+  extensions included - and when a session is restored: `relay.walletconnect.org`,
+  `api.web3modal.org`, `verify.walletconnect.org` (Reown's telemetry is blocked in
+  the code). To the public RPC endpoints of ValueChain, Arbitrum, Base, Ethereum,
+  BNB Chain and Polygon for balances.
+- In the browser's own storage, never sent to Valuescan: settings, saved address
+  names, the WalletConnect session, the trading key
+  (`apps/web/src/trading/vault.ts`), the trading history of up to six wallets
+  looked at (IndexedDB), per-address statistics, the watchlist, recent searches,
+  recently viewed traders, the log of the visitor's own transfers, chart and
+  dashboard layouts; a deposit or withdrawal in progress in session storage.
 
-## 13. What was proven locally (2026-10-02)
+## 13. What was proven locally
 
 The smoke test (`deploy/smoke/smoke.mjs`) serves the production build with the
 production headers and puts the real server in hosted mode behind `/api`, the way
-CloudFront does.
+the edge does.
+
+**The run of 2026-10-02:**
 
 | Check | Result |
 |---|---|
-| Production build, static audit against the production CSP | pass (about 1,000 files, 16 to 17 MB; one warning: no meta description) |
+| Production build, static audit against the production CSP | pass (about 1,000 files, 16 to 17 MB; one warning, since fixed: no meta description) |
 | Hosted gate of the real server (`VALUESCAN_HOSTED=1`, `VALUESCAN_INDEXER=0`): health open, index routes only with the secret, per-user routes 404, custodial routes 410, writes refused, repeated parameters refused | pass, 10 of 10 |
-| All 15 pages, browser offline: renders, no CSP violation, only allow-listed API routes, none refused, sockets to the exchanges only | pass, 15 of 15 (last run on the tree of 22:08) |
-| Browser online against the live exchanges: Trade, Explore, Cohorts, Market map, an asset, Leaderboard, Copy, Portfolio, the palette, Scan of a SoDEX market maker | pass, 10 of 10 (the tree of 21:10); live chart, book and account data rendered |
+| All 15 pages, browser offline: renders, no CSP violation, only allow-listed API routes, none refused, sockets to the exchanges only | pass, 15 of 15 |
+| Browser online against the live exchanges: Trade, Explore, Cohorts, Market map, an asset, Leaderboard, Copy, Portfolio, the palette, Scan of a SoDEX market maker | pass, 10 of 10; live chart, book and account data rendered |
 | SharedWorker under the production CSP: starts, served with the policy, opens the SoDEX socket itself | pass |
 | The spawned server wrote nothing and reached nothing | confirmed: empty state directory, every outbound connection refused |
 
-**Not run, on purpose:**
-
-- **Index data through the hosted server.** The API opens the index read-write
-  (section 14, item 1), so a second server was never started on the live index of
-  the development machine, and no multi-gigabyte snapshot was taken next to its
-  running indexer. The index pages were therefore exercised with "index not
-  available" answers from the real server, and with stand-in data.
-- **The server's own exchange reads** (Explore, whales, positioning, screener):
-  the spawned server ran with every outbound connection refused, because it would
-  spend the budgets of the address the development indexer uses (item 2).
-- **Scan on Hyperliquid, trade.xyz, Lighter and Arcus with the browser online**,
-  for the same reason: their account reads count against the same address. They
-  passed offline.
-
-The run that closes all three, on a machine that runs no other Valuescan server
-(or after the development server is stopped), is one command:
+Not run then, because the API still opened the index read-write and its own
+exchange reads were not bounded (both fixed since: section 14, items 1 and 2):
+index data through the hosted server, the server's own exchange reads, and Scan on
+Hyperliquid, trade.xyz, Lighter and Arcus with the browser online. The page list
+has grown since by the three legal pages (18 pages; `/favicon.ico` is among the
+header samples). The run that covers all of it, on a machine that runs no other
+Valuescan server (or with the development server stopped):
 
 ```
 node deploy/smoke/smoke.mjs --snapshot --server-egress=allow
 ```
 
-## 14. Open items found while preparing this
+**Offline, 2026-10-03** (for the EC2 + Vercel environment, `EC2-VERCEL.md`):
 
-None of these is in `deploy/`; each is reported to the owner of the file.
+| Check | Result |
+|---|---|
+| `python deploy/aws/validate_offline.py` | 21 checks, 0 errors |
+| `node --test` deploy/smoke, deploy/server/bin (health check, backup copy), deploy/vercel | 32 of 32 |
+| The Vercel routes give every sampled path (35, odd cases included) exactly the headers of `prod-headers.mjs`, from one route each; `/api/*` only the function | pass |
+| The `/api` function against a stand-in origin: path, query and secret forwarded, the viewer's address from Vercel's header only, no cookie / authorization / user agent, the compressed body byte for byte, the edge cache rule, 405 for writes, 503 without the secret, 502 for a stopped instance, no secret or query in its log | pass |
+| `provision.sh up --print` and `status` against the real account (read-only): the plan of 10 writes | as expected; nothing exists yet |
+| `backup.sh` and `restore.sh latest` without an ops bucket, on a small index (Git Bash, a stand-in zstd) | pass: copy, checksum, keep 1, restore dry run |
+| A deployment directory from the 2026-10-02 build (`publish-vercel.sh ... --origin=... --out=...`, no deploy) | 1,012 files, 16.4 MB, 14 routes |
+| The server suite (S-12 included) | 623 of 623 |
 
-1. **The API is not a read-only reader of the index.**
-   `apps/server/src/indexer/read.ts:37` opens it with `new IndexStore(path)`. On
-   open, `apps/server/src/indexer/store.ts` (the constructor) sets the journal
-   mode, applies the schema, adds missing columns, writes `meta.schema` and can
-   run a one-off data migration. With `VALUESCAN_INDEXER=0` the API therefore
-   still writes on start, and an API released before its indexer would migrate
-   the file. The store already has `{ readOnly: true }`; passing it in `read.ts`
-   closes this. Until then the release order (indexer, then API) covers it, and
-   the API unit keeps write access to the index directory.
-2. **The API process spends exchange budgets itself** - Explore, the whale tape
-   (one SoDEX and one Hyperliquid socket), positioning (about 1,000 SoDEX gateway
-   weight per crawl), the screener, podium curves. It shares the instance's one
-   address with the indexer. `api.env` caps its Hyperliquid share at 450 for that
-   reason; SoDEX's positioning crawl has no such setting.
-3. **The maintenance banner claims maintenance when the status service is merely
-   unreachable.** `apps/web/src/components/MaintenanceBanner.tsx:37` treats any
-   status other than `NORMAL` as degraded, and the server answers `status: null`
-   when it cannot reach SoDEX's status service
-   (`apps/server/src/routes/external.ts`, the catch branch - deliberately "not
-   maintenance"). Every page then shows "SoDEX reports maintenance. Trading may be
-   unavailable." Line 38 reads a `via503` field the server never sends (it sends
-   `reason: 'http-503'`), so the 503 wording can never appear.
-4. **The app has no legal pages and no place for them** - no route, no footer.
-   Static files under `apps/web/public/legal/` would be served as they are
-   (`/legal/impressum.html`; CloudFront rewrites only paths without a file
-   extension), and the app needs a link to them.
-5. **`apps/web/index.html`:** no `<meta name="description">`; its comment points
-   at a `DEPLOYMENT.md` that does not exist (this file is `docs/deploy/DEPLOY.md`).
-   There is no `/favicon.ico` (browsers that ignore the SVG icon get a 403).
-6. **Diagnostics in hosted mode.** `/api/vs/index/status` is 404 even on
-   loopback, so operations read the indexer's status from the index file. A
-   loopback-only diagnostics route would be simpler to operate.
-7. **The origin secret cannot be rotated without a gap:** the server accepts one
-   value. Accepting two for the length of a rotation would close it (section 15).
-8. **`docs/deploy/SECURITY-HEADERS.md`**, three points this deployment does
-   differently, for its owner to fold in:
-   - §1.3 maps S3's 403/404 to `/index.html` with custom error responses "only on
-     the site behaviour" - custom error responses are distribution-wide and would
-     rewrite the API's 403 and 404 too. `edge.yaml` uses a CloudFront Function on
-     the site behaviours instead.
-   - §2.3 B: with port 443 limited to CloudFront, Caddy can only obtain its
-     certificate over port 80 (HTTP-01), which therefore has to be open; the
-     TLS-ALPN challenge is switched off so that Caddy does not try 443 first.
-   - Caddy must not write an access log (every request carries the secret in a
-     header) and its admin endpoint should be off.
-9. **A public RPC answered an error during the run:**
-   `https://polygon-bor-rpc.publicnode.com` (set in
-   `apps/web/src/trading/onboard.ts:46`) returned HTTP 529 once on the Scan page.
-   The page rendered; a full smoke run counts it as a console error.
+## 14. Items found while preparing this, and where they stand
+
+1. **Closed - the API reads the index read-only.** `apps/server/src/indexer/reader.ts`
+   opens it with `{ readOnly: true }` and runs no statement that changes it (no
+   schema, no migration). The release order (indexer, then API) stays the rule; the
+   API unit still has write access to the index directory, because a WAL reader
+   maps the `-shm` file read-write.
+2. **Closed - the API's exchange reads are bounded.** Positioning is answered from
+   the index, the whale feeds from one shared buffer bounded by the clock, and an
+   API-only process's Hyperliquid client defaults to 200 weight a minute
+   (`apps/server/test/publicBudgets.test.ts`). `api.env.example` no longer overrides
+   that (it set 450).
+3. **Closed - the maintenance banner shows the server's verdict**
+   (`apps/web/src/components/maintenanceVerdict.ts`), not "maintenance" whenever the
+   status service is unreachable.
+4. **Closed - legal pages:** `/impressum`, `/privacy`, `/terms`
+   (`apps/web/src/legal/`, linked from every page). They are drafts with
+   `[[OWNER: ...]]` placeholders: `build-web.sh` warns about them, `build-web.sh
+   --public` refuses the build.
+5. **Closed - `apps/web/index.html`** has a description, its comment no longer
+   points at a missing file, and `/favicon.ico` exists.
+6. **Closed - diagnostics on the instance:** `/api/vs/index/health`, answered only
+   to a caller on the instance (`hosted.ts` `ON_INSTANCE_ROUTES`). The health check
+   reads it; its unit no longer has write access to the index directory.
+7. **Closed - the origin secret rotates without a gap.** The API accepts
+   `VALUESCAN_ORIGIN_SECRET=current,next` (`hosted.ts`); Caddy accepts both in the
+   EC2 + Vercel environment; the health check sends the first; the scripts carry a
+   rotation through (section 15).
+8. **Closed - `docs/deploy/SECURITY-HEADERS.md`** has the SPA fallback as a
+   CloudFront Function, HTTP-01 only for Caddy, no access log and no admin endpoint.
+9. **Observation - a public RPC answered an error once:**
+   `https://polygon-bor-rpc.publicnode.com` (`apps/web/src/trading/onboard.ts`)
+   returned HTTP 529 once on the Scan page. The page rendered; a full smoke run
+   counts such a line as a console error.
+10. **Open - objections to the index.** The index holds other people's public
+    trading activity (section 12). The privacy policy needs a section on it and
+    there has to be a way to act on an objection (remove a wallet and keep it out);
+    the indexer has none today. For the owner and the indexer's maintainer.
+11. **Open - `docs/security/AUDIT-2026-09-30.md`** still lists S-12 as open. It is
+    fixed in `apps/server/src/localHost.ts` (local mode answers only to `127.0.0.1`,
+    `localhost` and `[::1]`, any port - the Vite `/ws` proxy keeps the browser's
+    Host - with a 421 otherwise); the audit's owner should mark it.
 
 ## 15. Operations
 
@@ -614,17 +650,25 @@ deploy/release/build-web.sh <tag> && deploy/release/publish-web.sh <tag>
 Neither touches anyone's funds or positions: users hold their own keys and can
 always use SoDEX directly.
 
-**Rotating the origin secret.** In this order, at a quiet moment:
+**Rotating the origin secret - without a gap.** The instance can accept two values
+at once (`VALUESCAN_ORIGIN_SECRET=current,next`, `apps/server/src/hosted.ts`; Caddy's
+gate likewise in the EC2 + Vercel environment), so the edge can switch whenever it
+is ready and no request is refused meanwhile:
 
 ```
-deploy/aws/deploy.sh secret --rotate --execute   # a new value in SSM; nothing uses it yet
-deploy/aws/deploy.sh edge --execute              # CloudFront starts sending it (several minutes)
-deploy/release/bootstrap-instance.sh             # the instance reads it and restarts the API (seconds)
+deploy/aws/deploy.sh secret --rotate --execute   # 1. <prefix>/origin-secret-next in SSM, beside the current value
+deploy/release/bootstrap-instance.sh             # 2. the instance accepts both (the API restarts: seconds)
+deploy/aws/deploy.sh edge --rotate --execute     # 3. CloudFront sends the next value (several minutes)
+deploy/aws/deploy.sh secret --finish --execute   # 4. origin-secret := the next value, -next deleted
+                                                 #    (refused unless CloudFront already sends it)
+deploy/release/bootstrap-instance.sh             # 5. the instance accepts only the new value
 ```
 
-Between the second and the third command the index routes answer 403 where
-CloudFront already sends the new value. The site, trading and Scan are not
-affected; CloudFront keeps serving what it has cached.
+Out of order is safe as long as step 2 comes before step 3: a plain `deploy.sh edge`
+in between sends the current value (accepted), and `bootstrap-instance.sh` keeps
+accepting both while `-next` exists. The health check sends the first value of the
+list. In the EC2 + Vercel environment the same is `deploy/release/rotate-origin-secret.sh
+begin`, the new value into Vercel and a deploy, then `... finish` (`EC2-VERCEL.md`).
 
 **Changing a setting on the instance.** Put it into
 `/etc/valuescan/api.local.env` or `indexer.local.env` (the bootstrap rewrites the
@@ -640,7 +684,8 @@ their checksums in `deploy/server/versions.env`: change both, run
 
 **A shell on the instance.** There is no SSH. `deploy/release/remote.sh run '<command>'`
 for one command (its text is recorded by AWS: no secrets in it), or Session
-Manager: `aws ssm start-session --region <REGION> --target <instance id>`.
+Manager: `aws ssm start-session --region <REGION> --target <instance id>`. (The EC2
+test instance has SSH instead: `deploy/release/remote.sh shell`.)
 
 **DNS elsewhere than Route 53.** Leave `HOSTED_ZONE_ID` empty and create by hand:
 an `A` record for `ORIGIN_DOMAIN_NAME` to the stack output `OriginIp` (after step
@@ -665,7 +710,7 @@ then run the command once more.
 | Symptom | Look at |
 |---|---|
 | Index pages say unavailable, the rest works | `remote.sh health`; `remote.sh logs api`; is the instance running (`deploy.sh status`)? |
-| Every `/api` route but health answers 403 | the secret differs between CloudFront and the instance: `deploy.sh edge --execute`, then `bootstrap-instance.sh` |
+| Every `/api` route but health answers 403 | the secret differs between the edge and the instance: `deploy.sh edge --execute`, then `bootstrap-instance.sh` (EC2 + Vercel: every route, health included, answers 403 at Caddy - compare the Vercel variable with `~/.valuescan/valuescan-test/origin-secret`, redeploy) |
 | CloudFront answers 502 or 504 for `/api` | Caddy has no certificate yet or is down: `remote.sh logs caddy`. It needs `ORIGIN_DOMAIN_NAME` to resolve to the instance and port 80 reachable; a CAA record that excludes `letsencrypt.org` stops it. |
 | A page is blank after a release | a file of the build is missing or has the wrong type: `node deploy/smoke/smoke.mjs --site=https://<DOMAIN>`. A missing file answers 403, not 404 (the bucket is private). Roll the web back. |
 | The console shows a CSP violation | the page asks for a host the policy does not list: section 5, "A release that changes the CSP" |
@@ -698,6 +743,11 @@ deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u v
   the index only). Losing it means a new key and a new web build.
 - `builder.db` - created by the API on first use: the counted volume. Not backed up; lost, every wallet
   starts again from the default fee (never from a lower one).
+- On the EC2 test instance the same commands work (`remote.sh run` goes over SSH there), and the files
+  live in the same place - `/var/lib/valuescan/state` on the data volume. So **the EBS snapshots of that
+  volume (`provision.sh snapshot`) contain `builder-terms.key` and `builder.db`**: encrypted, private to
+  the account, but copies of the key all the same. Delete snapshots that are no longer needed, and treat
+  a snapshot shared outside the account as a leaked key (a new key and a new web build).
 
 The command prints `publicKey` and `keyId` - never the private key. Put the public key into
 `deploy/release/web.env` as `VITE_BUILDER_TERMS_KEYS=<publicKey>` (comma separated while a key is

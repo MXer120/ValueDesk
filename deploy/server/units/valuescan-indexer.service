@@ -32,10 +32,13 @@ RestartSec=30
 KillSignal=SIGTERM
 TimeoutStopSec=45
 LimitNOFILE=65536
-# Measured: about 0.9 GB for indexer and API together. A runaway is stopped
-# before it can take the box (and the SSM agent) down.
-MemoryHigh=3G
-MemoryMax=4G
+# Measured: about 0.9 GB for indexer and API together. Sized for a 4 GiB instance
+# (t4g.medium, valuescan-api.service explains the split): a runaway is stopped
+# inside this unit before it can take the box (and sshd / the SSM agent) down.
+# Above MemoryHigh the kernel reclaims this unit's page cache first. On 8 GiB
+# (t4g.large) 3G / 4G is right: a drop-in, `systemctl edit valuescan-indexer`.
+MemoryHigh=1400M
+MemoryMax=1800M
 SyslogIdentifier=valuescan-indexer
 
 # --- hardening ---

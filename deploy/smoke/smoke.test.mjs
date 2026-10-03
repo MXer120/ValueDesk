@@ -371,6 +371,27 @@ test('a deployed site: the origin must be closed to everyone but the edge', asyn
     assert.match(open.problems[1], /must listen on loopback only/);
     assert.match(open.problems[2], /served in clear text/);
 
+    // Behind Vercel 443 is open on purpose: the gate is what is judged.
+    const edgeValue = 'e'.repeat(40);
+    const gated = await listen((req, res) => {
+      const ok = req.headers['x-origin-verify'] === edgeValue;
+      res.writeHead(ok ? 200 : 403, { 'content-type': 'application/json' });
+      res.end(ok ? '{"ok":true}' : '{"error":"forbidden"}');
+    });
+    try {
+      const v = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: gated.port, apiPort: closed, httpPort: caddy80.port, timeoutMs: 1500, tlsScheme: 'http' });
+      assert.deepEqual(v.problems, []);
+      assert.equal(v.checks.tls, 'open');
+      assert.equal(v.checks.gateHealth, 'answers 403 without the secret');
+      assert.equal(v.checks.gateIndex, 'answers 403 without the secret');
+      // ... and an origin that serves without the secret is named, twice.
+      const ungated = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: apiLike.port, apiPort: closed, httpPort: closed, timeoutMs: 1500, tlsScheme: 'http' });
+      assert.equal(ungated.problems.length, 2, ungated.problems.join(' | '));
+      assert.match(ungated.problems[0], /Caddy gate \(X-Origin-Verify\) is not in effect/);
+    } finally {
+      await gated.close();
+    }
+
     // A name that does not resolve is a mistake in the command, never a pass.
     const typo = await probeOrigin('origin.invalid', { timeoutMs: 1500 });
     assert.equal(typo.problems.length, 1);
