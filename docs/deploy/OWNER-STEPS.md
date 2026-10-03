@@ -1,6 +1,6 @@
-# Putting Valuescan online: what you do
+# Putting ValueDesk online: what you do
 
-The test site is live since 2026-10-03 at **https://valuexplorer.vercel.app** - the
+The test site is live since 2026-10-03 at **https://valuedeskapp.vercel.app** - the
 web app on Vercel, the index on one small AWS server in Frankfurt (v0.1.1, started
 from a copy of the development index). Claude runs the AWS and Vercel commands (the
 list is `docs/deploy/EC2-VERCEL.md`, section 6). This page is only what needs
@@ -11,9 +11,8 @@ it is needed.
 
 ### 1. Nothing to buy for now
 
-There is no domain yet, on purpose: the site runs at `valuexplorer.vercel.app`. If
-Vercel gives the project a slightly different address (when the name is taken),
-use that one wherever this page says `valuexplorer.vercel.app`.
+There is no domain yet, on purpose: the site runs at `valuedeskapp.vercel.app`
+(`valuedesk.vercel.app` belongs to someone else; the old `valuexplorer.vercel.app` still works).
 
 Later, for your own name: buy it in Vercel (Domains -> Buy) and tell Claude - the
 switch is described in EC2-VERCEL.md, section 8. Nothing on AWS has to be rebuilt.
@@ -32,8 +31,8 @@ development (from `apps/web/.env.local`). Phone wallets connecting by QR code wi
 warn or refuse until the site's address is on that project's list:
 
 1. Sign in at **https://dashboard.reown.com** and open that project.
-2. In its **Domain / Allowlist** settings add exactly `https://valuexplorer.vercel.app`
-   (later also your own domain). Do not add preview addresses: only this address
+2. In its **Domain / Allowlist** settings add exactly `https://valuedeskapp.vercel.app`
+   (and `https://valuedeskapp.vercel.app` while the old address is in use; later also your own domain). Do not add preview addresses: only this address
    talks to the index.
 3. For the public launch you may want a separate project for production; give Claude
    its Project ID then (it is not a secret).
@@ -85,7 +84,7 @@ jurisdiction, the date.
 ### 6. Watch the site from outside (5 minutes, free)
 
 AWS sends no alerts in this setup. Create a free uptime monitor (for example
-UptimeRobot or Better Stack) for **https://valuexplorer.vercel.app/api/health**,
+UptimeRobot or Better Stack) for **https://valuedeskapp.vercel.app/api/health**,
 checking every 5 minutes, alerting your e-mail. It should answer `"ok":true`.
 
 ### 7. The live test run - once the site is up

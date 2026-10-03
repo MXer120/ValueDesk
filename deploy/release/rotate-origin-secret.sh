@@ -61,7 +61,7 @@ if [ "$STEP" = begin ]; then
 else
   [ -f "$next" ] || die "there is no rotation under way ($next does not exist)"
   note "make sure the Vercel production deployment that is LIVE was made after the new value was set:"
-  note "  npx vercel@latest ls valuexplorer --prod     (its age), and the index pages load"
+  note "  npx vercel@latest ls valuedesk --prod     (its age), and the index pages load"
   if [ "$PRINT_ONLY" != 1 ]; then
     mv -f "$next" "$current"
   fi

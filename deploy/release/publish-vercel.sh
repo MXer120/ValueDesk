@@ -50,7 +50,7 @@ done
 [ -n "$TAG" ] || die "usage: deploy/release/publish-vercel.sh <tag> --out=<dir> [--deploy] [--origin=<host>]"
 valid_tag "$TAG" || die "not a usable tag name: $TAG"
 [ -n "$OUT" ] || OUT="${VERCEL_DEPLOY_DIR:-}"
-[ -n "$OUT" ] || die "name the deployment directory: --out=<dir> (outside the synced folder, e.g. --out=/c/Temp/valuexplorer-deploy)"
+[ -n "$OUT" ] || die "name the deployment directory: --out=<dir> (outside the synced folder, e.g. --out=/c/Temp/valuedesk-deploy)"
 command -v cygpath >/dev/null 2>&1 && OUT="$(cygpath -u "$OUT")"
 # node and npx are native programs on Windows and Git Bash's path conversion is off
 # (lib.sh): hand them C:/... instead of /c/...
@@ -69,7 +69,7 @@ if [ -z "$ORIGIN" ]; then
   ORIGIN="$ORIGIN_DOMAIN_NAME"
 fi
 [[ "$ORIGIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] || die "the origin must be a DNS name, no scheme: $ORIGIN"
-: "${VERCEL_PROJECT:=valuexplorer}"
+: "${VERCEL_PROJECT:=valuedesk}"
 : "${VERCEL_SCOPE:=}"
 
 tarball="$OUT_DIR/valuescan-web-$TAG.tar.gz"

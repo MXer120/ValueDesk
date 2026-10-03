@@ -12,8 +12,8 @@ the web is built by `deploy/release/build-web.sh`.
 | `vercel.test.mjs` | `node --test deploy/vercel/vercel.test.mjs` |
 
 ```
-deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuexplorer-deploy            # prepare
-deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuexplorer-deploy --deploy   # ... and deploy to production
+deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuedesk-deploy            # prepare
+deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuedesk-deploy --deploy   # ... and deploy to production
 ```
 
 **The routes** (`config.json`, in order): `/api/*` to the function and nothing

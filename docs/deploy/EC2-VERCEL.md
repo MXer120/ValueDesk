@@ -1,7 +1,7 @@
 # The test environment: one EC2 instance + Vercel
 
 The deployment that is actually being set up (decided 2026-10-03): the site and
-`/api/*` on **Vercel** (`https://valuexplorer.vercel.app`, no own domain yet), the
+`/api/*` on **Vercel** (`https://valuedeskapp.vercel.app`, no own domain yet), the
 index on **one EC2 instance** in eu-central-1. `docs/deploy/DEPLOY.md` stays the
 reference for everything on the instance and for the CloudFormation design this
 replaces for now; this file says what is different and how to run it.
@@ -14,7 +14,7 @@ The owner's short version is `docs/deploy/OWNER-STEPS.md`.
 ## 1. What runs where
 
 ```
-visitor ──HTTPS──> Vercel  valuexplorer.vercel.app
+visitor ──HTTPS──> Vercel  valuedeskapp.vercel.app
                      ├── the built site (static files, the production headers and CSP of edge.yaml)
                      └── /api/* ──> function api/__vs_proxy (Node.js, fra1)
                                       ──HTTPS + X-Origin-Verify + the viewer's address──>
@@ -67,7 +67,7 @@ health check, the release order, the consistent backup copy.
 | Releases are copied over SSH and installed with `release.sh <tag> --from=<file>` | no S3 | `release-server.sh`, `release.sh` |
 | Nightly backups go to `/var/lib/valuescan/backup/archive` (newest 1 kept); `provision.sh snapshot` takes them, and the live index, off the box. A snapshot holds the whole data volume - `/var/lib/valuescan/state` too, so the builder-terms signing key and `builder.db` (DEPLOY.md section 16) are in every snapshot: encrypted and private to the account, but never share one | no S3 | `backup.sh`, `restore.sh` (`latest` = newest local) |
 | A seed is copied over SSH into `/var/lib/valuescan/backup/seed/` | no S3 | `seed-index.sh` |
-| No SNS alerts, no CloudWatch alarms: the health check logs only | no IAM / CloudFormation | watch `https://valuexplorer.vercel.app/api/health` from outside (section 7) |
+| No SNS alerts, no CloudWatch alarms: the health check logs only | no IAM / CloudFormation | watch `https://valuedeskapp.vercel.app/api/health` from outside (section 7) |
 | **Port 443 is open to everyone**, and **Caddy refuses every request without the origin secret** before the API sees it. Without that gate a client could connect directly and set its own `X-Forwarded-For`, which the API keys its limits on. | Vercel functions have no published address range, so no security group can admit "Vercel only" | `Caddyfile.template` (`@edge`), `caddy.service` (`caddy.secret.env`), `deploy/smoke/deployed.mjs` (`--edge=vercel`) |
 | The edge is a Vercel function, not CloudFront: same methods (GET, HEAD, OPTIONS), same forwarded headers, same 60 s ceiling on caching, the viewer's address in `X-Forwarded-For` | the owner's choice | `deploy/vercel/api-proxy.cjs` |
 | No WAF and no country restriction at the edge. Left: Vercel's own DDoS mitigation, the API's per-client limits, Caddy's gate. Vercel's firewall can add custom rules (3 on Hobby) if needed. | no CloudFront | - |
@@ -163,7 +163,7 @@ command before it runs it; `--print` runs none.
 **0. Settings** (both files are ignored by git; neither holds a secret).
 
 ```
-cp deploy/aws/ec2/ec2.env.example deploy/aws/ec2/ec2.env       # preset: eu-central-1a, t4g.medium, 150 GiB, valuexplorer.vercel.app
+cp deploy/aws/ec2/ec2.env.example deploy/aws/ec2/ec2.env       # preset: eu-central-1a, t4g.medium, 150 GiB, valuedeskapp.vercel.app
 cp deploy/release/web.env.example deploy/release/web.env       # the WalletConnect id and the builder values, when the owner has them
 ```
 
@@ -232,33 +232,35 @@ deploy/release/remote.sh health               # "ok":true; `backup` warns until 
 The directory must be outside the OneDrive folder.
 
 ```
-npx vercel@latest link --yes --project valuexplorer --scope mxer120s-projects --cwd C:/Temp/valuexplorer-deploy
-npx vercel@latest env add VALUESCAN_ORIGIN_SECRET production --sensitive --scope mxer120s-projects --cwd C:/Temp/valuexplorer-deploy < ~/.valuescan/valuescan-test/origin-secret
+npx vercel@latest link --yes --project valuedesk --scope mxer120s-projects --cwd C:/Temp/valuedesk-deploy
+npx vercel@latest env add VALUESCAN_ORIGIN_SECRET production --sensitive --scope mxer120s-projects --cwd C:/Temp/valuedesk-deploy < ~/.valuescan/valuescan-test/origin-secret
 ```
 
 Production only, on purpose: preview deployments (other host names) get no secret,
-and their `/api` answers 503. Only `valuexplorer.vercel.app` reaches the index.
+and their `/api` answers 503. Only `valuedeskapp.vercel.app` reaches the index.
 
 **7. The site.**
 
 ```
 git checkout v0.1.0
 deploy/release/build-web.sh v0.1.0                       # needs VITE_WALLETCONNECT_PROJECT_ID; a first test without it: --allow-dirty
-deploy/release/publish-vercel.sh v0.1.0 --out=/c/Temp/valuexplorer-deploy --deploy
+deploy/release/publish-vercel.sh v0.1.0 --out=/c/Temp/valuedesk-deploy --deploy
 ```
 
 `publish-vercel.sh` checks and audits the build, writes
-`/c/Temp/valuexplorer-deploy/.vercel/output` (the static site, `config.json` with the
+`/c/Temp/valuedesk-deploy/.vercel/output` (the static site, `config.json` with the
 routes and headers, the function with `VALUESCAN_ORIGIN_URL=https://<origin name>`),
 then runs `npx vercel@latest deploy --prebuilt --prod --cwd ...`. Without `--deploy`
-it prints that command. If the project's production URL is not
-`valuexplorer.vercel.app` (the name taken elsewhere), use the one Vercel shows, and
-set it as `SITE_DOMAIN` in `ec2.env`, then `bootstrap-instance.sh` again.
+it prints that command. The project is `valuedesk` (renamed from `valuexplorer` on 2026-10-03; `valuedesk.vercel.app`
+is someone else's, so the site's address is `valuedeskapp.vercel.app`, and the old
+`valuexplorer.vercel.app` still serves it). A new address goes into `SITE_DOMAIN` in `ec2.env`
+(then `bootstrap-instance.sh` again) - or, without a re-bootstrap, into
+`VALUESCAN_ALLOWED_ORIGINS` in `/etc/valuescan/api.env` (comma separated) and `remote.sh restart api`.
 
 **8. Check what is out there.**
 
 ```
-node deploy/smoke/smoke.mjs --site=https://valuexplorer.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
+node deploy/smoke/smoke.mjs --site=https://valuedeskapp.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
 ```
 
 Every page in headless Chrome; the headers against `prod-headers.mjs`; the hosted
@@ -283,7 +285,7 @@ none), then `deploy/aws/ec2/provision.sh snapshot`.
 | More disk | raise `DATA_VOLUME_GIB` in `ec2.env`, `provision.sh grow`, then `remote.sh run 'xfs_growfs /var/lib/valuescan'` |
 | Trading off for every visitor | DEPLOY.md section 15 (`VALUETRADE_ALLOW_MAINNET=0`), unchanged |
 | A new origin secret | `deploy/release/rotate-origin-secret.sh begin`, then the Vercel variable and a deploy, then `... finish` (the script's `--help`) |
-| Alerts | none from AWS (no SNS without a role). Put a free uptime monitor on `https://valuexplorer.vercel.app/api/health`; `remote.sh health` on demand |
+| Alerts | none from AWS (no SNS without a role). Put a free uptime monitor on `https://valuedeskapp.vercel.app/api/health`; `remote.sh health` on demand |
 | OS updates | monthly: `remote.sh run 'dnf upgrade --releasever=latest -y'`, then `provision.sh stop` and `start` |
 
 Snapshots are never deleted by the scripts; remove old ones in the EC2 console
@@ -291,8 +293,8 @@ Snapshots are never deleted by the scripts; remove old ones in the EC2 console
 
 ## 8. Moving to a domain of its own later
 
-1. Buy or add the domain in Vercel (Domains), add it to the project `valuexplorer`;
-   Vercel issues the site's certificate. Keep `valuexplorer.vercel.app` working
+1. Buy or add the domain in Vercel (Domains), add it to the project `valuedesk`;
+   Vercel issues the site's certificate. Keep `valuedeskapp.vercel.app` working
    meanwhile.
 2. DNS for the origin: an `A` record `api.<domain>` -> the Elastic IP (Vercel DNS:
    `npx vercel@latest dns add <domain> api A <elastic ip>`). Wait until it resolves.

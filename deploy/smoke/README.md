@@ -133,7 +133,7 @@ directory and a random origin secret; nothing under `%LOCALAPPDATA%\Valuescan` (
 ```
 node deploy/smoke/smoke.mjs --site=https://valuescan.example --origin=origin.valuescan.example
 # the EC2 + Vercel test environment (docs/deploy/EC2-VERCEL.md):
-node deploy/smoke/smoke.mjs --site=https://valuexplorer.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
+node deploy/smoke/smoke.mjs --site=https://valuedeskapp.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
 ```
 
 Nothing is built or started but the browser. On top of the page walk above:

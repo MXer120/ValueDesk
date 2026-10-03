@@ -227,7 +227,7 @@ test('the function forwards path, query and the secret, the viewer address, and 
       const r = await request(port, '/api/vs/leaderboard?venue=hyperliquid&window=1d&q=0xabc', {
         headers: {
           'accept-encoding': 'gzip', 'x-real-ip': '203.0.113.7', 'x-forwarded-for': '198.51.100.1, 10.0.0.1',
-          cookie: 'session=1', authorization: 'Bearer x', 'user-agent': 'Browser/1', 'if-none-match': 'W/"old"', origin: 'https://valuexplorer.vercel.app',
+          cookie: 'session=1', authorization: 'Bearer x', 'user-agent': 'Browser/1', 'if-none-match': 'W/"old"', origin: 'https://valuedeskapp.vercel.app',
         },
       });
       assert.equal(r.status, 200);
@@ -242,7 +242,7 @@ test('the function forwards path, query and the secret, the viewer address, and 
       assert.equal(h['x-origin-verify'], SECRET);
       assert.equal(h['x-forwarded-for'], '203.0.113.7', 'the address Vercel reports, never the client\'s own X-Forwarded-For');
       assert.equal(h['if-none-match'], 'W/"old"');
-      assert.equal(h.origin, 'https://valuexplorer.vercel.app');
+      assert.equal(h.origin, 'https://valuedeskapp.vercel.app');
       for (const name of ['cookie', 'authorization', 'user-agent', 'x-real-ip']) assert.equal(h[name], undefined, `${name} must not reach the origin`);
     });
   } finally {
