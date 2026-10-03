@@ -448,17 +448,13 @@ function loadModules() {
 }
 
 /**
- * WHEN the wallet code is fetched. It is 1.8 MB of script (0.55 MB on the wire)
- * that every visitor gets, wallet or not. Fetched the moment the header
- * mounted, it arrived and ran - a quarter of a second of main thread on a slow
- * laptop - exactly while the page was fetching and drawing its first data, and
- * took the link from that data on a slow connection. So it waits for the page:
- * two seconds, then the first idle moment (a second more at most).
- *
- * Nobody waits longer for it: nobody can open the connect dialog AND choose a
- * wallet inside those seconds, the pointer or the focus reaching Connect starts
- * it at once (`warmWalletModal`), opening the dialog does too (initWallet), and
- * a reload with a connection to restore never went through here.
+ * WHEN the wallet code is fetched: the moment the header mounts. It is 1.8 MB
+ * of script (0.55 MB on the wire), and starting it later (after the page's
+ * first data) was measured: the data appeared up to a second sooner on a slow
+ * connection, but the page became idle 0.6-2 s later, so a click in that window
+ * waited. The owner's rule is that nothing gets worse for anyone, slow machines
+ * and slow connections included - so it starts at once, as it always did.
+ * `startLater` stays as the one place that would change if that is revisited.
  */
 const WALLET_CODE_AFTER_MS = 2_000;
 const WALLET_CODE_IDLE_WITHIN_MS = 1_000;
@@ -471,7 +467,7 @@ const walletCode = startLater(() => {
 export function preloadWalletModal(): void {
   discoverWallets();
   if (!hasWalletConnectConfig()) return;
-  walletCode.arm();
+  walletCode.now();
 }
 
 /** The pointer or the focus reached a Connect control: fetch the wallet modal's code now. */
