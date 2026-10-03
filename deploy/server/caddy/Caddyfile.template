@@ -45,9 +45,14 @@ __ORIGIN_DOMAIN__ {
 	# (root only); they are never written into this file. A request without it is
 	# refused here, before the API: so the API's own check (it requires the secret
 	# on every route but /api/health) is never the only one, and nobody but the edge
-	# can set the X-Forwarded-For the API keys its limits on. Multiple values of one
-	# header matcher are OR-ed.
-	@edge header X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_1} {$VALUESCAN_ORIGIN_SECRET_2}
+	# can set the X-Forwarded-For the API keys its limits on. Two lines for one
+	# field are OR-ed. (One line with two values is not valid Caddyfile: "malformed
+	# header matcher". Checked on the instance with Caddy 2.11.6: either value
+	# passes; a wrong value, none, or both joined by a comma get the 403.)
+	@edge {
+		header X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_1}
+		header X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_2}
+	}
 
 	handle @edge {
 		reverse_proxy 127.0.0.1:8797
