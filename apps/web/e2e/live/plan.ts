@@ -28,12 +28,27 @@ import type { RunConfig } from './config';
 import { STEP_ORDER, STEP_TITLES, type DepositAddressCheck, type Mode, type Pre, type Recorder, type StepId } from './context';
 import { VALUECHAIN_CHAIN_ID } from './provider';
 import { engineState, gasPrice, nativeBalance, registryDepositAddresses, tokenBalance } from './reads';
+import { requestTerms, type TermsVerdict, type TermsWatch } from './terms';
 import { approx, cut, dCmp, dDiv, dMax, dMul, errText, isDecimal, lessPct, morePct, shortAddr, sleep, toStep, usd } from './util';
 
 /** The SoDEX exchange contract on ValueChain (backend /api/deposit/chain; memory: sodex-browser-trading-protocol). */
 export const PINNED_EXCHANGE = '0x0101010101010101010101010101010101010101';
 /** The activation fee SoDEX keeps from a wallet's first deposit (USDC). */
 export const ACTIVATION_FEE_USDC = '1';
+
+/** A receiver address a selected step needs (`receivers.<name>` in the config). */
+export interface ReceiverNeed {
+  name: string;
+  /** The chain key it is for (VALUECHAIN, SOL, XRP ...). */
+  chain: string;
+  /** What it is needed for. */
+  why: string;
+  /** The chain takes a memo (destination tag) and none - nor "noMemo" - is set. */
+  memo: boolean;
+  set: boolean;
+  /** Set, and refused: why. null: fine (or not set). */
+  problem: string | null;
+}
 
 export interface StepPlan {
   id: StepId;
@@ -56,6 +71,10 @@ export interface PlanResult {
   routeTable: string[];
   balances: string[];
   markets: string[];
+  /** Every receiver address the selected steps name: set or not, and what is wrong with it (the guided launcher asks for these). */
+  receiversNeeded: ReceiverNeed[];
+  /** The server's fee terms for this wallet, as the runner judged them (null: no builder / no terms keys). */
+  terms: { verdict: TermsVerdict; cacheControl: string | null } | null;
 }
 
 // --- markets: the smallest orders SoDEX accepts ----------------------------------------------
@@ -160,8 +179,9 @@ export async function checkDepositAddress(
     if (backend && registry && !match) notes.push('MISMATCH between the backend and the on-chain registry');
     const res: DepositAddressCheck = { backend, backendVerified, registry, match, ...(notes.length ? { note: notes.join('; ') } : {}) };
     if (match || (backend && registry) || Date.now() - t0 >= o.waitMs) return res;
-    o.say?.(`deposit address on ${chainKey} not settled yet (${notes.join('; ')}) - asking again in 8 s`);
-    await sleep(8000);
+    const left = o.waitMs - (Date.now() - t0);
+    o.say?.(`deposit address on ${chainKey} not settled yet (${notes.join('; ')}) - asking again in ${Math.ceil(Math.min(8000, left) / 1000)} s`);
+    await sleep(Math.max(0, Math.min(8000, left)));
   }
 }
 
@@ -187,6 +207,13 @@ interface PreflightInput {
   selected: Set<StepId>;
   registryOnly: boolean;
   rec: Recorder;
+  /** The runner's own judge of the server's fee terms (null: no builder with terms keys). */
+  terms?: TermsWatch | null;
+}
+
+/** What one perps market order costs, roughly: the taker fee, the builder fee at the default, half the spread. */
+function perpsFillCost(m: Market, qty: string, builderFee: number): number {
+  return marketCost(m, qty) + approx(qty) * approx(m.ask) * (builderFee / 100_000);
 }
 
 const ethGasUnits = { erc20: 65_000, approve: 55_000, deposit: 160_000 };
@@ -299,7 +326,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
   for (const chainKey of [...new Set(depositChains)]) {
     const d = await rec.sub(
       `USDC deposit address on ${chainKey}: backend vs on-chain registry`,
-      () => checkDepositAddress(owner, chainKey, { registryOnly: o.registryOnly, waitMs: o.mode === 'live' ? 180_000 : 0, say }),
+      () => checkDepositAddress(owner, chainKey, { registryOnly: o.registryOnly, waitMs: o.mode === 'live' ? cfg.timeouts.addressIssueSeconds * 1000 : 0, say }),
       (d) => `backend ${d.backend ?? '-'}${d.backend ? (d.backendVerified ? ' (verified)' : ' (NOT verified)') : ''} | registry ${d.registry ?? '-'} -> ${d.match ? 'MATCH' : 'no match'}${d.note ? ` [${d.note}]` : ''}`,
     );
     depositAddresses.set(chainKey, d);
@@ -308,7 +335,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     // for it (up to 3 min, like the Deposit sheet) and then still requires both sources to agree.
     const disagree = !!d.backend && !!d.registry && !d.match;
     if (p && (disagree || o.mode === 'live')) problems.push(`deposit ${chainKey}: ${p}`);
-    else if (p) warnings.push(`deposit ${chainKey}: ${p} - a live run waits up to 3 min for the addresses to be issued, then requires the backend and the registry to agree`);
+    else if (p) warnings.push(`deposit ${chainKey}: ${p} - a live run waits up to ${Math.round(cfg.timeouts.addressIssueSeconds / 60)} min for the addresses to be issued, then requires the backend and the registry to agree`);
   }
 
   // 7. Markets.
@@ -326,10 +353,41 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
       return null;
     }
   };
-  const spotM = has('orders') ? await mk('spot', cfg.orders.spotSymbol) : null;
-  const perpsM = has('orders') ? await mk('perps', cfg.orders.perpsSymbol) : null;
-  if (spotM && spotM.sym.baseCoinID !== soso.assetId && has('spot-to-evm')) {
+  const needSpot = (['orders-spot', 'refusals', 'key-lifecycle'] as const).some(has);
+  const needPerps = (['builder-tiers', 'orders-perps', 'refusals'] as const).some(has);
+  const spotM = needSpot ? await mk('spot', cfg.orders.spotSymbol) : null;
+  const perpsM = needPerps ? await mk('perps', cfg.orders.perpsSymbol) : null;
+  if (spotM && spotM.sym.baseCoinID !== soso.assetId && has('spot-to-evm') && has('orders-spot')) {
     warnings.push(`orders.spotSymbol ${spotM.sym.name} does not buy SOSO: the ValueChain wallet will have no gas unless it already holds SOSO`);
+  }
+
+  // 7b. The server's fee terms for this wallet (a read: no hint, nothing is verified by asking).
+  let terms: PlanResult['terms'] = null;
+  const b = cfg.builder;
+  if (b && b.termsKeys.length && o.terms) {
+    const watch = o.terms;
+    try {
+      const t = await rec.sub('the server\'s fee terms for this wallet (GET /api/vs/builder/terms)', () => requestTerms(watch, owner), (x) =>
+        x.verdict.off ? 'fee tiers are OFF on the backend' : x.verdict.verified ? `verified (key ${x.verdict.keyId}): perps ${x.verdict.answer.fee?.perps} / spot ${x.verdict.answer.fee?.spot}` : `NOT verified: ${x.verdict.problems.join('; ')}`,
+      );
+      terms = { verdict: t.verdict, cacheControl: t.cacheControl };
+      const v = t.verdict;
+      const tiersWanted = has('builder-tiers');
+      const add = (msg: string): void => {
+        (tiersWanted ? problems : warnings).push(msg);
+      };
+      if (v.off) add('builder-tiers: the backend answers `builderId: null` - it has no builder-tiers.json, so no fee tier can be tested (apps/server: npx tsx tools/builderTiers.ts init --builder-id <id> --test-tiers)');
+      else if (!v.verified) add(`builder-tiers: the server's terms do not verify under builder.termsKeys: ${v.problems.join('; ')}`);
+      else {
+        const f = v.answer.fee!;
+        if (f.perps < b.feePerps || f.spot < b.feeSpot) warnings.push(`this wallet's terms are already below the default (perps ${f.perps} / spot ${f.spot}): builder-fee-default cannot be shown on its first orders - use a new wallet, or clear it (apps/server: npx tsx tools/builderTiers.ts forget --address ${owner})`);
+        if (v.answer.flags.includes('underpaid')) warnings.push(`the server has this wallet flagged "underpaid" (an earlier cheating test): it stays on the default fee and no tier can be reached - clear it first (apps/server: npx tsx tools/builderTiers.ts forget --address ${owner})`);
+        if (!v.answer.tier?.next && !b.expectTier) warnings.push('the server announces no further fee tier for this wallet and the config names none: builder-volume-verified cannot run');
+        if (!/\bno-store\b/i.test(t.cacheControl ?? '')) warnings.push(`the terms answer is sent with Cache-Control "${t.cacheControl ?? ''}", not no-store`);
+      }
+    } catch (e) {
+      (has('builder-tiers') ? problems : warnings).push(`the server's fee terms could not be read: ${errText(e)}`);
+    }
   }
 
   // 8. Step plans.
@@ -404,44 +462,126 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     add('transfers', { lines: [`Spot -> Perps ${a} USDC, then Perps -> Spot ${a} USDC; each verified in the balances`], costUsd: 0, sentAwayUsd: 0, problems: p ? [p] : [] });
   }
 
-  if (has('orders')) {
+  // The perps steps borrow collateral from Spot and give it back; what they spend is fees.
+  const perpsLev = async (m: Market): Promise<number> => {
+    let lev = approx(String(m.sym.initLeverage ?? 20)) || 20;
+    if (!newAccount) {
+      const st = await engineState('perps', owner).catch(() => null);
+      const s = st?.S?.find((x) => x.s === m.sym.name);
+      if (s?.l) lev = s.l;
+    }
+    return lev;
+  };
+  const dfltPerps = cfg.builder?.feePerps ?? 0;
+  const dfltSpot = cfg.builder?.feeSpot ?? 0;
+
+  if (has('builder-tiers')) {
+    const bt = cfg.builder;
+    if (!bt) add('builder-tiers', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'no builder is configured for this run' });
+    else if (!bt.termsKeys.length) add('builder-tiers', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'builder.termsKeys is empty: the server\'s fee terms cannot be verified, so the tiers cannot be tested (every order carries the default fee; the order steps check that)' });
+    else if (!perpsM) add('builder-tiers', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [`perps market ${cfg.orders.perpsSymbol} could not be read`] });
+    else {
+      const q = marketQty(perpsM, 10);
+      const unit = approx(q) * approx(perpsM.ask);
+      const next = terms?.verdict.answer.tier?.next ?? null;
+      const target = bt.expectTier ?? (next ? { atUsd: next.atUsd, perps: next.fee.perps, spot: next.fee.spot } : null);
+      // First round trip, more round trips until past the milestone, one at the lower fee, the two cheating orders (1 + 2 units) and their close (3).
+      const trips = target ? Math.max(1, Math.ceil((target.atUsd * 1.05) / (2 * unit))) : 1;
+      const fills = 2 * trips + 2 + 1 + 2 + 1;
+      const units = 2 * trips + 2 + 3 + 3;
+      const cost = perpsFillCost(perpsM, q, dfltPerps) * units;
+      const collateral = Math.max(approx(cfg.orders.perpsCollateral), Math.ceil(unit * 0.6 + 3));
+      const pr: string[] = [];
+      const p = short('builder-tiers', sim.spotUsdc, collateral, 'Spot USDC (perps collateral)');
+      if (p) pr.push(p);
+      sim.spotUsdc -= cost;
+      add('builder-tiers', {
+        lines: [
+          `perps ${perpsM.sym.name}: move ~${collateral} USDC Spot -> Perps; one order is ${q} (~${unit.toFixed(2)} USD)`,
+          `the server's terms for this wallet verify under builder.termsKeys and name the default fee (perps ${bt.feePerps} / spot ${bt.feeSpot})${terms ? `; now: ${terms.verdict.verified ? `perps ${terms.verdict.answer.fee?.perps} / spot ${terms.verdict.answer.fee?.spot}, verified volume $${terms.verdict.answer.volume?.totalUsd ?? '?'}` : 'NOT verified'}` : ''}`,
+          'a copy of a real terms answer with its fee lowered is refused by the app (the default stays)',
+          `${trips} round trip(s) (market buy + reduce-only close) at the default fee; each fill's builderFee is ${bt.feePerps / 10} bp of its notional`,
+          target ? `past $${target.atUsd} of volume: hint, then wait up to ${cfg.timeouts.verifierMinutes} min for the server to sign perps ${target.perps} / spot ${target.spot} (no order history is read meanwhile)` : 'the server names no further tier: the lower-fee checks will not run',
+          'one round trip at the lower fee; its fills pay the lower share',
+          `two CHEATING orders the runner signs itself (around the app's gate, labelled DIRECT): ${q} with a fee below the one owed, ${dMul(q, '2')} with no builder; closed through the app; neither may be credited, the first must be flagged "underpaid"`,
+          'the approval lowered below the fee owed, then revoked (two wallet signatures): the app must send nothing; then approved again (one more signature)',
+          `about ${fills} fills, ~${units} units of ${unit.toFixed(2)} USD`,
+        ],
+        costUsd: cost * 1.5,
+        sentAwayUsd: 0,
+        problems: pr,
+      });
+    }
+  }
+
+  if (has('orders-spot')) {
     const pr: string[] = [];
     const lines: string[] = [];
     let cost = 0;
-    if (spotM) {
+    if (!spotM) pr.push(`spot market ${cfg.orders.spotSymbol} could not be read`);
+    else {
       const rb = restingBuy(spotM, cfg.orders.spotLimitOffsetPct);
-      lines.push(`spot ${spotM.sym.name}: limit BUY ${rb.qty} @ ${rb.price} (${rb.offsetPct} % below the bid, locks ~${cut(rb.lock, 4)} USDC) -> verify open -> cancel -> verify gone`);
       const q = cfg.orders.sosoBuyQuantity === 'auto' ? marketQty(spotM, 20) : cfg.orders.sosoBuyQuantity;
-      const qc = marketCost(spotM, q);
-      lines.push(`spot ${spotM.sym.name}: market BUY ${q} (~${(approx(q) * approx(spotM.ask)).toFixed(2)} USDC, cost ~${usd(qc)}) - SOSO for ValueChain gas`);
-      cost += qc;
-      const p1 = short('orders', sim.spotUsdc, Math.max(approx(rb.lock), approx(q) * approx(spotM.ask) * 1.05), 'Spot USDC');
+      const funds = approx(spotM.sym.minNotional) * 1.2 || 1.2;
+      const buyUsd = approx(q) * approx(spotM.ask);
+      const ioc = approx(rb.lock) * 1.05;
+      lines.push(
+        `spot ${spotM.sym.name}: limit BUY ${rb.qty} @ ${rb.price} (${rb.offsetPct} % below the bid, locks ~${cut(rb.lock, 4)} USDC) rests; price changed, size changed${dfltSpot ? ' (the app changes it as cancel + new order; one replace sent by the runner shows whether SoDEX keeps the builder)' : ''}; cancelled`,
+        `market BUY for ${funds.toFixed(2)} USDC (by funds), market BUY ${q} (by quantity), market SELL of the smallest size`,
+        'post-only (GTX) resting and crossing, IOC not crossing and crossing, FOK not fillable and fillable (SoDEX documents FOK as not supported: whatever it does is recorded)',
+        'dead-man switch: scheduled a minute out, cleared',
+        `every fill: commission at the account's own rate${dfltSpot ? `, builder fee ${dfltSpot / 10} bp on sells and none on buys` : ''}`,
+      );
+      cost = (marketCost(spotM, q) * 4 + buyUsd * (dfltSpot / 100_000)) * 1.5;
+      const p1 = short('orders-spot', sim.spotUsdc, Math.max(approx(rb.lock), funds + buyUsd * 2 + ioc * 2) * 1.05, 'Spot USDC');
       if (p1) pr.push(p1);
-      sim.spotUsdc -= approx(q) * approx(spotM.ask) + qc;
-      if (spotM.sym.baseCoinID === soso.assetId) sim.spotSoso += approx(q) * (1 - approx(spotM.sym.takerFee));
+      // About four buys and one sell of the smallest size: the rest stays in the base coin.
+      const kept = funds + buyUsd * 3 - buyUsd * 0.95;
+      sim.spotUsdc -= kept + cost;
+      if (spotM.sym.baseCoinID === soso.assetId) sim.spotSoso += kept / Math.max(approx(spotM.ask), 1e-12);
     }
-    if (perpsM) {
-      const rb = restingBuy(perpsM, cfg.orders.perpsLimitOffsetPct);
+    add('orders-spot', { lines, costUsd: cost, sentAwayUsd: 0, problems: pr });
+  }
+
+  if (has('orders-perps')) {
+    const pr: string[] = [];
+    const lines: string[] = [];
+    let cost = 0;
+    if (!perpsM) pr.push(`perps market ${cfg.orders.perpsSymbol} could not be read`);
+    else {
       const q = marketQty(perpsM, 10);
       const notional = approx(q) * approx(perpsM.ask);
-      let lev = approx(String(perpsM.sym.initLeverage ?? 20)) || 20;
-      if (!newAccount) {
-        const st = await engineState('perps', owner).catch(() => null);
-        const s = st?.S?.find((x) => x.s === perpsM.sym.name);
-        if (s?.l) lev = s.l;
-      }
-      const collateral = Math.max(approx(cfg.orders.perpsCollateral), Math.ceil((notional / lev) * 1.5 + notional * approx(perpsM.sym.takerFee) * 2 + 0.5));
-      const pc = marketCost(perpsM, q) * 2;
-      cost += pc;
-      lines.push(`perps ${perpsM.sym.name}: move ~${collateral} USDC Spot -> Perps (leverage ${lev}x)`);
-      lines.push(`perps ${perpsM.sym.name}: limit BUY ${rb.qty} @ ${rb.price} (${rb.offsetPct} % below the bid) -> verify open -> cancel -> verify gone`);
-      lines.push(`perps ${perpsM.sym.name}: market BUY ${q} (~${notional.toFixed(2)} USD) -> verify position -> reduce-only market SELL -> verify flat (cost ~${usd(pc)})`);
-      lines.push('perps: move what Perps holds back to Spot');
-      const p2 = short('orders', sim.spotUsdc, collateral, 'Spot USDC');
+      const lev = await perpsLev(perpsM);
+      const collateral = Math.max(approx(cfg.orders.perpsCollateral), Math.ceil((6 * notional) / Math.max(1, lev - 1) + 3));
+      const fills = 10;
+      cost = perpsFillCost(perpsM, q, dfltPerps) * fills * 1.5;
+      lines.push(
+        `perps ${perpsM.sym.name}: move ~${collateral} USDC Spot -> Perps (leverage ${lev}x); one order is ${q} (~${notional.toFixed(2)} USD)`,
+        'leverage changed in cross, the market switched to isolated; market buy by quantity; isolated margin +1 / -0.5 USDC; reduce-only close; back to cross',
+        `limit BUY rests; price changed, size changed${dfltPerps ? ' (the app changes it as cancel + new order; one replace sent by the runner shows whether SoDEX keeps the builder)' : ''}; cancelled`,
+        'post-only resting and crossing; IOC not crossing and crossing; stop-loss and take-profit on the position (listed, trigger changed, cancelled); a take-profit just above the market, waited for (not firing is reported, not failed)',
+        'FOK not fillable and fillable (recorded whatever SoDEX does); entry with attached take-profit and stop-loss; cancel-all of three resting orders; dead-man switch cleared, then let fire',
+        `every fill: commission at the account's own rate${dfltPerps ? `, builder fee ${dfltPerps / 10} bp of the notional` : ''}; ends flat, no open orders, at the leverage it started with; collateral back to Spot`,
+        `about ${fills} fills of ~${notional.toFixed(2)} USD`,
+      );
+      const p2 = short('orders-perps', sim.spotUsdc, collateral, 'Spot USDC (perps collateral)');
       if (p2) pr.push(p2);
-      sim.spotUsdc -= pc;
+      sim.spotUsdc -= cost;
     }
-    add('orders', { lines, costUsd: cost * 1.5, sentAwayUsd: 0, problems: pr });
+    add('orders-perps', { lines, costUsd: cost, sentAwayUsd: 0, problems: pr });
+  }
+
+  if (has('refusals')) {
+    const pr: string[] = [];
+    const lines = [
+      'refused by the app before signing: limit orders below the minimum notional (spot, perps), a quantity below one step, triggers on the last / index price, a spot trigger, transfers and withdrawals of more than the balance, a withdrawal below the minimum, malformed receivers for every address format',
+      'off-grid price and size: the order leaves (and rests) at the snapped values',
+      'refused by SoDEX (sent, must move nothing): market orders below the minimum notional, reduce-only with no position, an order naming a builder the wallet never approved, one with a fee above the approval (both signed by the runner itself, labelled DIRECT)',
+    ];
+    let cost = 0;
+    if (perpsM) cost += perpsFillCost(perpsM, marketQty(perpsM, 10), dfltPerps) * 0.2; // only if SoDEX executes what it should refuse
+    if (!perpsM || !spotM) pr.push('refusals need both markets');
+    add('refusals', { lines, costUsd: cost, sentAwayUsd: 0, problems: pr });
   }
 
   if (has('spot-to-evm')) {
@@ -671,6 +811,23 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     }
   }
 
+  if (has('key-lifecycle')) {
+    const pr: string[] = [];
+    const lines = [
+      'the session is dropped and restoreTrading() brings the key back from the vault; an order signed with it rests and is cancelled',
+      'keyStillRegistered() says yes; both engines list the key',
+      'disableTrading({ revoke: true }): the wallet signs one revocation per engine, on ValueChain (it switches there); both engines drop the key',
+      'an order signed with the revoked key (prepared before the revocation, sent by the runner) must be rejected',
+      'trading is enabled again (one more signature): a new key under the same name; an order signed with it rests and is cancelled',
+    ];
+    if (spotM) {
+      const rb = restingBuy(spotM, cfg.orders.spotLimitOffsetPct);
+      const p = short('key-lifecycle', sim.spotUsdc + sim.perpsUsdc, approx(rb.lock) * 1.05, 'Spot USDC (the resting orders lock it)');
+      if (p) pr.push(p);
+    } else pr.push(`spot market ${cfg.orders.spotSymbol} could not be read`);
+    add('key-lifecycle', { lines, costUsd: 0, sentAwayUsd: 0, problems: pr });
+  }
+
   if (has('cleanup')) {
     if (!cfg.cleanup.enabled) add('cleanup', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'cleanup.enabled is false' });
     else {
@@ -697,6 +854,20 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     }
   }
 
+  if (has('cross-check')) {
+    add('cross-check', {
+      lines: [
+        `read SoDEX's order history and fills of both engines ONCE: four requests, ${Math.round(35)} s apart (the two routes take about four a minute per IP), only while the server's fee verifier is idle`,
+        'every order of the run is in the history as it was sent; every fill belongs to an order of the run and matches the stream; every fee is judged again; every order record names the builder the order carried',
+        cfg.builder?.address ? `the builder account #${cfg.builder.id}'s balances rose by the builder fees the run's fills paid` : 'the builder account\'s income is not checked (builder.address is not set)',
+        'nothing is left open; this step signs and sends nothing',
+      ],
+      costUsd: 0,
+      sentAwayUsd: 0,
+      problems: [],
+    });
+  }
+
   if (has('revoke-builder')) {
     if (!cfg.builder) add('revoke-builder', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'no builder is configured for this run' });
     else if (!cfg.builder.revokeAtEnd) add('revoke-builder', { lines: [], costUsd: 0, sentAwayUsd: 0, problems: [], skip: 'builder.revokeAtEnd is false - the approval stays on the account' });
@@ -709,6 +880,23 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
       });
     }
   }
+
+  // The receivers the selected steps name, for whoever fills them in (the guided launcher reads this list).
+  const receiversNeeded: ReceiverNeed[] = [];
+  const needReceiver = (name: string, chain: string, coinName: string | null, why: string): void => {
+    if (name === 'self' || receiversNeeded.some((n) => n.name === name)) return;
+    const rcv = cfg.receivers[name];
+    const r = coinName ? route(coin(coinName), chain) : undefined;
+    const target: ChainRoute | 'VALUECHAIN' | undefined = chain === 'VALUECHAIN' ? 'VALUECHAIN' : r;
+    let problem: string | null = null;
+    if (rcv && target) problem = receiverProblem(target, rcv.address) ?? memoProblem(target, rcv.memo ?? '', rcv.noMemo === true);
+    if (rcv && !problem && chain === 'VALUECHAIN' && rcv.address.toLowerCase() === owner) problem = 'it is this wallet itself - it must be a different address you control';
+    const memo = !!r && r.memo === 'numeric' && !rcv?.memo && !rcv?.noMemo;
+    receiversNeeded.push({ name, chain, why, memo, set: !!rcv, problem });
+  };
+  if (has('withdraw-valuechain-other')) needReceiver(cfg.withdrawValuechainOther.receiver, 'VALUECHAIN', null, 'withdraw-valuechain-other: a ValueChain address you control, not this wallet');
+  if (has('withdraw-external')) needReceiver(cfg.withdrawExternal.receiver, cfg.withdrawExternal.chain, cfg.withdrawExternal.coin, `withdraw-external: ${cfg.withdrawExternal.coin} to ${chainLabel(cfg.withdrawExternal.chain)}`);
+  if (has('extra-withdrawals')) for (const x of cfg.extraWithdrawals) needReceiver(x.receiver, x.chain, x.coin, `extra-withdrawals: ${x.coin} to ${chainLabel(x.chain)}`);
 
   for (const p of plans) if (!p.skip) problems.push(...p.problems);
   const totalCostUsd = plans.reduce((s, p) => s + (p.skip ? 0 : p.costUsd), 0);
@@ -749,6 +937,8 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     routeTable,
     balances,
     markets,
+    receiversNeeded,
+    terms,
   };
 }
 
@@ -777,13 +967,33 @@ async function gasNeed(chainKey: string): Promise<number> {
  * SoDEX lists them), with deposit minimum and withdrawal minimum + fee from the
  * live asset config. One run per CHAIN covers that chain's custody path.
  */
-function coverageTable(coins: CoinConfig[]): string[] {
+/** One coin on one chain, as SoDEX lists it now, and what the runner can do there. */
+export interface RouteRow {
+  chain: string;
+  label: string;
+  coin: string;
+  native: boolean;
+  depositOpen: boolean;
+  withdrawOpen: boolean;
+  depositMin: string | null;
+  withdrawMin: string | null;
+  withdrawFee: string | null;
+  /** The runner can send a deposit of it (USDC on an EVM chain the app sends from). */
+  canDeposit: boolean;
+  /** The app offers a withdrawal there. */
+  canWithdraw: boolean;
+  /** The arrival can be read on that chain from this computer. */
+  canVerify: boolean;
+}
+
+/** Per chain: USDC and the chain's native coin (where SoDEX lists them). */
+export function routeRows(coins: CoinConfig[]): RouteRow[] {
   const usdc = coins.find((c) => c.coin.toUpperCase() === 'USDC');
   const chains = new Set<string>();
   for (const c of coins) for (const r of c.chains) chains.add(r.key);
   const order = ['ARBITRUM_ETH', 'BASE_ETH', 'ETH', 'BSC_BNB', 'MATIC'];
   const sorted = [...chains].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99) || a.localeCompare(b));
-  const out: string[] = [`${'chain'.padEnd(18)} ${'coin'.padEnd(10)} ${'deposit'.padEnd(18)} ${'withdraw'.padEnd(18)} ${'fee'.padEnd(10)} runner`];
+  const out: RouteRow[] = [];
   for (const key of sorted) {
     const rows: Array<[CoinConfig, ChainRoute]> = [];
     const u = usdc?.chains.find((r) => r.key === key);
@@ -793,13 +1003,37 @@ function coverageTable(coins: CoinConfig[]): string[] {
       if (r && c !== usdc) rows.push([c, r]);
     }
     for (const [c, r] of rows) {
-      const dep = r.deposit.allowed ? `open, min ${r.deposit.min ?? '-'}` : 'CLOSED';
-      const wd = r.withdraw.allowed ? `open, min ${r.withdraw.min ?? '-'}` : 'CLOSED';
-      const canDeposit = c === usdc && !!EVM_CHAINS[key] && !!CANONICAL_USDC[key];
-      const canVerify = !!EVM_CHAINS[key];
-      const runner = [canDeposit ? 'deposit' : null, r.addressKind !== 'other' ? `withdraw${canVerify ? '+verify' : ' (status only)'}` : null].filter(Boolean).join(', ');
-      out.push(`${chainLabel(key).padEnd(18)} ${`${c.coin}${r.isNativeToken ? '*' : ''}`.padEnd(10)} ${dep.padEnd(18)} ${wd.padEnd(18)} ${(r.withdraw.fee ?? '-').padEnd(10)} ${runner || '-'}`);
+      out.push({
+        chain: key,
+        label: chainLabel(key),
+        coin: c.coin,
+        native: r.isNativeToken,
+        depositOpen: r.deposit.allowed,
+        withdrawOpen: r.withdraw.allowed,
+        depositMin: r.deposit.min,
+        withdrawMin: r.withdraw.min,
+        withdrawFee: r.withdraw.fee,
+        canDeposit: c === usdc && !!EVM_CHAINS[key] && !!CANONICAL_USDC[key],
+        canWithdraw: r.addressKind !== 'other',
+        canVerify: !!EVM_CHAINS[key] && r.addressKind === 'evm',
+      });
     }
+  }
+  return out;
+}
+
+/**
+ * The coverage table: per chain, USDC and the chain's native coin (where
+ * SoDEX lists them), with deposit minimum and withdrawal minimum + fee from the
+ * live asset config. One run per CHAIN covers that chain's custody path.
+ */
+function coverageTable(coins: CoinConfig[]): string[] {
+  const out: string[] = [`${'chain'.padEnd(18)} ${'coin'.padEnd(10)} ${'deposit'.padEnd(18)} ${'withdraw'.padEnd(18)} ${'fee'.padEnd(10)} runner`];
+  for (const r of routeRows(coins)) {
+    const dep = r.depositOpen ? `open, min ${r.depositMin ?? '-'}` : 'CLOSED';
+    const wd = r.withdrawOpen ? `open, min ${r.withdrawMin ?? '-'}` : 'CLOSED';
+    const runner = [r.canDeposit ? 'deposit' : null, r.canWithdraw ? `withdraw${r.canVerify ? '+verify' : ' (status only)'}` : null].filter(Boolean).join(', ');
+    out.push(`${r.label.padEnd(18)} ${`${r.coin}${r.native ? '*' : ''}`.padEnd(10)} ${dep.padEnd(18)} ${wd.padEnd(18)} ${(r.withdrawFee ?? '-').padEnd(10)} ${runner || '-'}`);
   }
   out.push('(* = the chain\'s native coin)');
   return out;

@@ -2,9 +2,10 @@
  * Valuescan LIVE end-to-end runner for the app's money flows on SoDEX mainnet.
  *
  *   npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json
- *                           [--confirm <walletAddress>] [--only step1,step2]
- *                           [--throwaway-key] [--registry-only]
+ *                           [--profile core] [--confirm <walletAddress>]
+ *                           [--only step1,step2] [--throwaway-key] [--registry-only]
  *                           [--backend http://127.0.0.1:5180] [--report-dir <dir>]
+ *   npx tsx e2e/live/run.ts capabilities      (what this runner can do, as JSON; no key, no network)
  *
  * Run it from apps/web (its tsconfig maps '@sodex-core').
  *
@@ -20,54 +21,47 @@
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { generatePrivateKey } from 'viem/accounts';
-import type { StepId } from './context';
+import { CHECKS } from './checks';
+import { coverageList } from './coverage';
+import { STEP_ALIASES, STEP_ORDER, STEP_TITLES, type StepId } from './context';
 
-const STEPS: readonly string[] = [
-  'deposit-external',
-  'enable-trading',
-  'transfers',
-  'orders',
-  'spot-to-evm',
-  'evm-to-spot',
-  'withdraw-valuechain-self',
-  'withdraw-valuechain-other',
-  'withdraw-external',
-  'extra-deposits',
-  'extra-withdrawals',
-  'cleanup',
-  'revoke-builder',
-];
+/** The runner's profiles (runner.ts PROFILES - kept here too, so `capabilities` loads nothing of the app). */
+const PROFILES = ['core'] as const;
+const FLAGS = ['--config', '--profile', '--confirm', '--only', '--throwaway-key', '--registry-only', '--backend', '--report-dir'] as const;
 
-const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json [options]
+const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live|capabilities] --config e2e/live/config.json [options]
 
   plan                    read-only (default): checks, routes, estimates, funding checklist
   live                    moves real funds (needs --confirm and acknowledgeRealFunds)
+  capabilities            print what this runner can do (steps, profiles, flags, checks) as JSON
   --config <file>         the run's config (see config.example.json); plan falls back to the defaults
   --confirm <address>     live: the wallet address VS_E2E_KEY controls
-  --only a,b              run only these steps (preflight always runs): ${STEPS.join(', ')}
   --throwaway-key         plan only: use a random in-memory key instead of VS_E2E_KEY
   --registry-only         plan only: read deposit addresses from the on-chain registry alone
                           (does not ask the backend, which asks SoDEX to issue addresses)
   --backend <origin>      override config.backend (default http://127.0.0.1:5180)
   --report-dir <dir>      where the JSON report goes (default e2e/live/reports)
+  --profile <name>        what the run covers: ${PROFILES.join(', ')}
+  --only a,b              run only these steps (preflight always runs; "orders" = orders-spot,orders-perps): ${STEP_ORDER.join(', ')}
 
 The key comes only from the environment: VS_E2E_KEY=0x<64 hex>.`;
 
 interface Args {
-  mode: 'plan' | 'live';
+  mode: 'plan' | 'live' | 'capabilities';
   config: string | null;
   confirm: string | null;
   only: StepId[] | null;
+  profile: (typeof PROFILES)[number] | null;
   throwaway: boolean;
   registryOnly: boolean;
   backend: string | null;
   reportDir: string | null;
 }
 
-function parseArgs(argv: string[]): Args | string {
-  const a: Args = { mode: 'plan', config: null, confirm: null, only: null, throwaway: false, registryOnly: false, backend: null, reportDir: null };
+export function parseArgs(argv: string[]): Args | string {
+  const a: Args = { mode: 'plan', config: null, confirm: null, only: null, profile: null, throwaway: false, registryOnly: false, backend: null, reportDir: null };
   const rest = [...argv];
-  if (rest[0] === 'plan' || rest[0] === 'live') a.mode = rest.shift() as 'plan' | 'live';
+  if (rest[0] === 'plan' || rest[0] === 'live' || rest[0] === 'capabilities') a.mode = rest.shift() as Args['mode'];
   while (rest.length) {
     const k = rest.shift()!;
     const val = (): string => {
@@ -83,11 +77,23 @@ function parseArgs(argv: string[]): Args | string {
         case '--confirm':
           a.confirm = val();
           break;
+        case '--profile': {
+          const p = val();
+          if (!(PROFILES as readonly string[]).includes(p)) return `unknown profile ${p} (this runner has: ${PROFILES.join(', ')})`;
+          a.profile = p as Args['profile'];
+          break;
+        }
         case '--only': {
           const list = val().split(',').map((s) => s.trim()).filter(Boolean);
-          const bad = list.filter((s) => !STEPS.includes(s));
+          const out: StepId[] = [];
+          const bad: string[] = [];
+          for (const s of list) {
+            if ((STEP_ORDER as readonly string[]).includes(s)) out.push(s as StepId);
+            else if (STEP_ALIASES[s]) out.push(...STEP_ALIASES[s]!);
+            else bad.push(s);
+          }
           if (bad.length) return `unknown step(s): ${bad.join(', ')}`;
-          a.only = list as StepId[];
+          a.only = [...new Set(out)];
           break;
         }
         case '--throwaway-key':
@@ -115,11 +121,31 @@ function parseArgs(argv: string[]): Args | string {
   return a;
 }
 
+/** What `capabilities` prints: read by the guided launcher (apps/web/e2e/guide). */
+export function capabilities(): Record<string, unknown> {
+  return {
+    tool: 'valuescan-live-e2e',
+    steps: [...STEP_ORDER],
+    stepTitles: STEP_TITLES,
+    aliases: STEP_ALIASES,
+    profiles: [...PROFILES],
+    flags: [...FLAGS],
+    checks: CHECKS.map((c) => ({ id: c.id, area: c.area, title: c.title, step: c.step })),
+    // Every function of the app's trading and funds layer, and the checks that exercise it (coverage.ts).
+    coverage: coverageList(),
+  };
+}
+
 async function main(): Promise<number> {
   const args = parseArgs(process.argv.slice(2));
   if (typeof args === 'string') {
     process.stderr.write(`${args}\n\n${USAGE}\n`);
     return 2;
+  }
+  if (args.mode === 'capabilities') {
+    // One line: a launcher reads the last line of the output.
+    process.stdout.write(`${JSON.stringify(capabilities())}\n`);
+    return 0;
   }
   if (!existsSync('tsconfig.json') || !existsSync('src/trading/funds.ts')) {
     process.stderr.write('Run this from apps/web (its tsconfig maps @sodex-core):  cd apps/web && npx tsx e2e/live/run.ts plan ...\n');
@@ -153,6 +179,7 @@ async function main(): Promise<number> {
     configPath: args.config,
     confirm: args.confirm,
     only: args.only,
+    ...(args.profile ? { profile: args.profile } : {}),
     keyHex,
     throwaway: args.throwaway,
     registryOnly: args.registryOnly,
@@ -161,12 +188,15 @@ async function main(): Promise<number> {
   });
 }
 
-main().then(
-  (code) => process.exit(code),
-  (e) => {
-    // Never print a raw error object here: it could only ever carry what the runner
-    // already scrubbed, but a stack of our own code is all that is useful anyway.
-    process.stderr.write(`fatal: ${e instanceof Error ? e.message : String(e)}\n`);
-    process.exit(1);
-  },
-);
+// Run only as the entry point (tests import parseArgs / capabilities).
+if (process.argv[1] && /run\.ts$/.test(process.argv[1].replace(/\\/g, '/'))) {
+  main().then(
+    (code) => process.exit(code),
+    (e) => {
+      // Never print a raw error object here: it could only ever carry what the runner
+      // already scrubbed, but a stack of our own code is all that is useful anyway.
+      process.stderr.write(`fatal: ${e instanceof Error ? e.message : String(e)}\n`);
+      process.exit(1);
+    },
+  );
+}

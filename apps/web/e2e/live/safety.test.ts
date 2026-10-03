@@ -1,6 +1,9 @@
 /**
  * The runner's safety rails, offline: the network guard (plan = read-only,
- * live = only expected writes), config validation, exact decimal sizing, the
+ * live = only expected writes - every write kind, each refused when it is not
+ * exactly what the step armed; the history routes only through the limiter),
+ * the wallet policies of every signature the runner allows, the exact order
+ * shapes (modifier per case), config validation, exact decimal sizing, the
  * budget check, and the independent registry decoder.
  *   npx tsx --test e2e/live/safety.test.ts        (from apps/web)
  */
@@ -11,9 +14,14 @@ import { OutcomeUnknownError, sendSigned } from '../../src/trading/gateway';
 import { setTradingConfig } from '../../src/trading/config';
 import { BIZ_ORIGIN, RelayRefused, analyseAddress, submitCallForPermit } from '../../src/trading/relay';
 import { api } from '../../src/api';
-import { CLOB_GATEWAY, SodexApiError, WITHDRAW_TOKEN_TARGET, encodeDepositCmd, encodeWithdrawTokenCmd } from '@sodex-core';
+import { ACTION, CLOB_GATEWAY, SodexApiError, WITHDRAW_TOKEN_TARGET, actionPayloadHash, bytesToHex, encodeDepositCmd, encodeWithdrawTokenCmd, engineDomainName, exchangeActionTypedData, perpsActions, revokeAPIKey } from '@sodex-core';
+import { placeOrderAction, type MarketSymbol, type OrderTicket } from '../../src/trading/orderParams';
 import { validateConfig, DEFAULT_CONFIG } from './config';
-import { installGuard, type Guard } from './guard';
+import { installGuard, type Guard, type SentWrite } from './guard';
+import { HistoryLimiter } from './history';
+import { orderExpect, type OrderSpec } from './orders';
+import type { TypedDataSeen } from './provider';
+import { builderApprovalPolicy, keyRevocationExpect, keyRevocationPolicy } from './trading';
 import { checkBudget, SafetyStop, type Ctx } from './context';
 import { marketQty, restingBuy, type Market } from './plan';
 import { decodeDepositWalletList } from './reads';
@@ -222,9 +230,19 @@ test('config: the builder is OFF by default; when set it is validated like the b
   assert.equal(validateConfig({ builder: null }).config.builder, null);
   const ok = validateConfig({ builder: { id: 223169, feePerps: 50, feeSpot: 100 } });
   assert.deepEqual(ok.errors, []);
-  assert.deepEqual(ok.config.builder, { id: 223169, feePerps: 50, feeSpot: 100, maxFee: 100, required: false, revokeAtEnd: false });
-  assert.deepEqual(validateConfig({ builder: { id: 9, feePerps: 200, maxFee: 2000, required: true, revokeAtEnd: true } }).config.builder, {
-    id: 9, feePerps: 200, feeSpot: 0, maxFee: 2000, required: true, revokeAtEnd: true,
+  // A builder is REQUIRED unless the config says otherwise (docs/BUILDER-TIERS.md G1).
+  assert.deepEqual(ok.config.builder, { id: 223169, address: null, feePerps: 50, feeSpot: 100, maxFee: 100, required: true, revokeAtEnd: false, termsKeys: [], expectTier: null });
+  assert.deepEqual(validateConfig({ builder: { id: 9, feePerps: 200, maxFee: 2000, required: false, revokeAtEnd: true } }).config.builder, {
+    id: 9, address: null, feePerps: 200, feeSpot: 0, maxFee: 2000, required: false, revokeAtEnd: true, termsKeys: [], expectTier: null,
+  });
+  // SoDEX's (and the app's) name for the ceiling is accepted too; the builder's address is an address, never a key.
+  const full = validateConfig({
+    builder: { id: 9, address: '0x00000000000000000000000000000000000B1D00', feePerps: 20, feeSpot: 20, maxFeeRate: 20, termsKeys: ['A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg'], expectTier: { atUsd: 10, perps: 15, spot: 20 } },
+  });
+  assert.deepEqual(full.errors, []);
+  assert.deepEqual(full.config.builder, {
+    id: 9, address: '0x00000000000000000000000000000000000b1d00', feePerps: 20, feeSpot: 20, maxFee: 20, required: true, revokeAtEnd: false,
+    termsKeys: ['A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg'], expectTier: { atUsd: 10, perps: 15, spot: 20 },
   });
   const bad = (b: unknown, why: RegExp) => {
     const r = validateConfig({ builder: b });
@@ -241,6 +259,11 @@ test('config: the builder is OFF by default; when set it is validated like the b
   bad({ id: 9, feePerps: 50, maxFee: 40 }, /below the fee/);
   bad({ id: 9, feePerps: 50, required: 'yes' }, /builder\.required/);
   bad('223169', /builder must be an object/);
+  bad({ id: 9, feePerps: 20, termsKeys: ['not-a-key'] }, /termsKeys\[0\]/);
+  bad({ id: 9, feePerps: 20, termsKeys: 'A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg' }, /termsKeys must be a list/);
+  bad({ id: 9, feePerps: 20, address: `0x${'ab'.repeat(32)}` }, /builder\.address must be the builder account's wallet ADDRESS/);
+  bad({ id: 9, feePerps: 20, expectTier: { atUsd: 10, perps: 30, spot: 0 } }, /above the default/);
+  bad({ id: 9, feePerps: 20, maxFee: 20, maxFeeRate: 30 }, /same setting/);
   assert.ok(validateConfig({ builder: { id: 9, feePerps: 50, fee: 1 } }).warnings.some((w) => /builder\.fee/.test(w)), 'a typo is flagged');
 });
 
@@ -339,4 +362,131 @@ test('registry: viem\'s decoder reads the live answer the backend\'s own decoder
     assert.deepEqual([...got.entries()], [...want.entries()], coin);
   }
   assert.throws(() => decodeDepositWalletList(`0x${'ff'.repeat(64)}`));
+});
+
+// --- every write kind and wallet policy of the runner ---------------------------------------------------
+
+test('guard: the two history routes are refused unless the read comes through the limiter - and always in plan mode', async () => {
+  let hits = 0;
+  globalThis.fetch = (async () => {
+    hits += 1;
+    return new Response(JSON.stringify({ code: 0, data: [] }), { status: 200 });
+  }) as typeof fetch;
+  const limiter = new HistoryLimiter({ minGapMs: 1 });
+  guard = installGuard({ mode: 'live', backend: 'http://127.0.0.1:5180', gateway: GW, relayer: 'https://biz.test', rpcUrls: [], owner: OWNER, history: limiter });
+  const url = `${GW}/api/v1/perps/accounts/${OWNER}/trades?limit=10`;
+  assert.equal((await fetch(url)).status, 403, 'a read that did not come through the limiter');
+  assert.equal(await limiter.run('fills', async () => (await fetch(url)).status), 200);
+  assert.equal(hits, 1);
+  guard.uninstall();
+  guard = installGuard({ mode: 'plan', backend: 'http://127.0.0.1:5180', gateway: GW, relayer: 'https://biz.test', rpcUrls: [], owner: OWNER, history: limiter });
+  assert.equal(await limiter.run('fills', async () => (await fetch(url)).status), 403, 'plan mode reads no history at all');
+  assert.equal(hits, 1);
+});
+
+// --- the guard's new write kinds -----------------------------------------------------------------------
+
+test('guard: every write kind of the runner leaves only when armed and only with the expected body; a direct order only with its exact bytes', async () => {
+  const sent: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push(`${(init?.method ?? 'GET').toUpperCase()} ${new URL(String(input)).pathname}`);
+    return new Response(JSON.stringify({ code: 0, data: [{ code: 0, orderID: 1 }] }), { status: 200 });
+  }) as typeof fetch;
+  const writes: SentWrite[] = [];
+  guard = installGuard({ mode: 'live', backend: 'http://127.0.0.1:5180', gateway: GW, relayer: 'https://biz.test', rpcUrls: [], owner: OWNER, onWrite: (w) => writes.push(w) });
+  const post = (path: string, body: unknown, method = 'POST') => fetch(`${GW}${path}`, { method, body: typeof body === 'string' ? body : JSON.stringify(body) });
+  // Key revocation: told apart from a registration by the body's type.
+  const revoke = { type: 'revokeAPIKey', params: { accountID: 7, name: 'valuescan-web' }, nonce: 1, signature: '0x' };
+  assert.equal((await post('/api/v1/spot/exchange', revoke)).status, 403, 'not armed');
+  const disarm = guard.expect(keyRevocationExpect(7, 'valuescan-web'));
+  assert.equal((await post('/api/v1/spot/exchange', { ...revoke, params: { accountID: 7, name: 'other' } })).status, 403, 'another key');
+  assert.equal((await post('/api/v1/spot/exchange', { ...revoke, params: { accountID: 8, name: 'valuescan-web' } })).status, 403, 'another account');
+  assert.equal((await post('/api/v1/spot/exchange', { type: 'addAPIKey', params: {} })).status, 403, 'a registration is not a revocation');
+  assert.equal((await post('/api/v1/spot/exchange', revoke)).status, 200);
+  assert.equal((await post('/api/v1/perps/exchange', revoke)).status, 200);
+  assert.equal((await post('/api/v1/perps/exchange', revoke)).status, 403, 'two, one per engine - no more');
+  disarm();
+  // A direct order: exact bytes, or nothing.
+  assert.throws(() => guard!.expect({ kind: 'direct-order', label: 'no bytes' }), /exact body/);
+  const bytes = JSON.stringify({ accountID: 7, symbolID: 1, orders: [{ clOrdID: 'vs-1' }] });
+  guard.expect({ kind: 'direct-order', label: 'DIRECT test', exact: bytes, tag: 't' });
+  assert.equal((await post('/api/v1/perps/trade/orders', bytes.replace('vs-1', 'vs-2'))).status, 403, 'one byte off');
+  assert.equal((await post('/api/v1/perps/trade/orders', bytes)).status, 200);
+  assert.equal((await post('/api/v1/perps/trade/orders', bytes)).status, 403, 'once');
+  assert.equal(writes.at(-1)?.kind, 'direct-order');
+  assert.equal(writes.at(-1)?.direct, true);
+  // Replace, modify, leverage, margin, schedule-cancel: each its own kind, refused unless armed.
+  for (const [path, kind] of [
+    ['/api/v1/spot/trade/orders/replace', 'order-replace'],
+    ['/api/v1/perps/trade/orders/modify', 'order-modify'],
+    ['/api/v1/perps/trade/leverage', 'leverage'],
+    ['/api/v1/perps/trade/margin', 'margin'],
+    ['/api/v1/perps/trade/orders/schedule-cancel', 'schedule-cancel'],
+  ] as const) {
+    assert.equal((await post(path, { accountID: 7 })).status, 403, `${kind}: not armed`);
+    const off = guard.expect({ kind, label: kind, check: (r) => (r.body?.accountID === 7 ? null : 'another account') });
+    assert.equal((await post(path, { accountID: 8 })).status, 403, `${kind}: another account`);
+    assert.equal((await post(path, { accountID: 7 })).status, 200, `${kind}: the expected one`);
+    off();
+  }
+  assert.ok(!sent.some((s) => /accountID/.test(s)));
+});
+
+// --- wallet policies ----------------------------------------------------------------------------------
+
+const exchangeTd = (engine: 'spot' | 'perps', type: string, params: object): TypedDataSeen => {
+  const td = exchangeActionTypedData(engineDomainName(engine), 286623, actionPayloadHash(type, params), 1n);
+  return { domain: td.domain as Record<string, unknown>, types: td.types as never, primaryType: td.primaryType, message: td.message as Record<string, unknown> };
+};
+
+test('wallet policy: the key revocation signs exactly the revocation of this key, once per engine - never any other engine action', () => {
+  setTradingConfig({ chainId: 286623 });
+  const p = keyRevocationPolicy(7, 'valuescan-web');
+  const ok = exchangeTd('spot', ACTION.revokeAPIKey, revokeAPIKey(7, 'valuescan-web'));
+  assert.match(p.typedData!(exchangeTd('spot', ACTION.revokeAPIKey, revokeAPIKey(7, 'other')), 286623) ?? '', /not the revocation/);
+  const order = perpsActions.newOrder(7, 1, [{ clOrdID: 'x', side: 1, type: 2, timeInForce: 3, quantity: '1' }]);
+  assert.match(p.typedData!(exchangeTd('perps', order.type, order.params), 286623) ?? '', /not the revocation/, 'an order under the same struct is refused');
+  assert.match(p.typedData!(ok, 42161) ?? '', /ValueChain/);
+  assert.equal(p.typedData!(ok, 286623), null);
+  assert.match(p.typedData!(ok, 286623) ?? '', /second/);
+  assert.equal(p.typedData!(exchangeTd('perps', ACTION.revokeAPIKey, revokeAPIKey(7, 'valuescan-web')), 286623), null);
+  assert.equal(bytesToHex(actionPayloadHash(ACTION.revokeAPIKey, revokeAPIKey(7, 'valuescan-web'))).toLowerCase(), String(ok.message.payloadHash).toLowerCase());
+});
+
+test('wallet policy: a builder approval signs exactly one ApproveBuilderFeeAction with the planned maximum', () => {
+  setTradingConfig({ chainId: 286623 });
+  const p = builderApprovalPolicy(7, 9, 20);
+  const td = (max: number): TypedDataSeen => ({ domain: {}, types: {}, primaryType: 'ApproveBuilderFeeAction', message: { chainID: 286623, accountID: 7, builderID: 9, maxFeeRate: max } });
+  assert.match(p.typedData!(td(2000), 42161) ?? '', /maxFeeRate/);
+  assert.equal(p.typedData!(td(20), 42161), null);
+  assert.match(p.typedData!(td(20), 42161) ?? '', /second/);
+});
+
+// --- the exact order shapes --------------------------------------------------------------------------------
+
+const BTC = { id: 1, name: 'BTC-USD', displayName: 'BTC-USD', tickSize: '1', stepSize: '0.00001', minQuantity: '0.00001', marketMinQuantity: '0.00001', minNotional: '10', minPrice: '1', maxPrice: '0', status: 'TRADING' } as unknown as MarketSymbol;
+const perpsMarket = { engine: 'perps', sym: BTC, bid: '84071', ask: '84072' } as unknown as Market;
+const ctxStub = { cfg: { builder: null }, terms: null, appTerms: null, owner: OWNER } as unknown as Ctx;
+
+function check(spec: Omit<OrderSpec, 'tag' | 'label' | 'market'>, ticket: OrderTicket, tamper?: (b: any) => void): string | null {
+  const built = placeOrderAction('perps', ticket, BTC, 7, undefined);
+  const body = JSON.parse(JSON.stringify(built.action.params));
+  tamper?.(body);
+  return orderExpect(ctxStub, { ...spec, market: perpsMarket, tag: 't', label: 'l' }).check!({ kind: 'order', method: 'POST', url: new URL(`${GW}/x`), body, raw: null, engine: 'perps' });
+}
+
+test('order shapes: the guard demands the modifier SoDEX documents for each case, and the mark-price trigger', () => {
+  setTradingConfig({ builder: null });
+  assert.equal(check({ side: 'buy', type: 'limit', price: '80000', quantity: '0.00014' }, { symbol: 'BTC-USD', side: 'buy', type: 'limit', price: '80000', quantity: '0.00014', tif: 'gtc' }), null, 'a plain order: NORMAL');
+  const stop = { side: 'sell' as const, type: 'market' as const, quantity: '0.00014', reduceOnly: true, stop: { price: '80000', kind: 'sl' as const } };
+  const stopTicket: OrderTicket = { symbol: 'BTC-USD', side: 'sell', type: 'market', quantity: '0.00014', reduceOnly: true, stopPrice: '80000', stopType: 'sl', triggerType: 'mark', tif: 'ioc' };
+  assert.equal(check(stop, stopTicket), null, 'a stop-loss: STOP');
+  assert.match(check(stop, stopTicket, (b) => (b.orders[0].modifier = 1)) ?? '', /modifier 1, expected 2/);
+  assert.match(check(stop, stopTicket, (b) => (b.orders[0].triggerType = 1)) ?? '', /triggerType/);
+  const entry = { side: 'buy' as const, type: 'market' as const, quantity: '0.00014', takeProfit: '87000', stopLoss: '80000' };
+  const entryTicket: OrderTicket = { symbol: 'BTC-USD', side: 'buy', type: 'market', quantity: '0.00014', tif: 'ioc', takeProfit: { price: '87000' }, stopLoss: { price: '80000' } };
+  assert.equal(check(entry, entryTicket), null, 'an entry with exits: BRACKET + ATTACHED_STOP');
+  assert.match(check(entry, entryTicket, (b) => (b.orders[1].modifier = 2)) ?? '', /exit leg 1: modifier 2, expected 4/);
+  assert.match(check(entry, entryTicket, (b) => (b.orders[1].reduceOnly = false)) ?? '', /reduceOnly/);
+  assert.match(check(entry, entryTicket, (b) => (b.builder = { id: 1, fee: 1 })) ?? '', /builder/, 'no builder in this run: an order naming one is refused');
 });

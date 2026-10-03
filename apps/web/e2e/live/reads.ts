@@ -9,11 +9,14 @@
  */
 import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import { unwrapList } from '@sodex-core';
+import { account } from '../../src/exchange/sodexAccount';
 import { readGateway } from '../../src/trading/gateway';
 import { CANONICAL_USDC, EVM_CHAINS, formatUnits } from '../../src/trading/onboard';
 import { VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } from '../../src/trading/rpc';
 import { unitsDown, type CoinConfig } from '../../src/trading/funds';
 import { coinPrices, priceOf } from '../../src/trading/prices';
+import { feeRatesFrom, type FeeRates } from './fees';
+import type { HistoryLimiter } from './history';
 import { approx, cut, usd } from './util';
 
 /** sodex.com's deposit-wallet registry on ValueChain (see apps/server/src/sodex/depositWallets.ts). */
@@ -96,8 +99,9 @@ export interface StateRow {
 export interface EngineState {
   aid?: number;
   B?: StateRow[];
-  P?: Array<{ s?: string; sz?: string; ur?: string; ep?: string }>;
+  P?: Array<{ s?: string; sz?: string; ur?: string; ep?: string; m?: string; iw?: string | null; l?: number }>;
   O?: Array<{ s?: string; i?: number; c?: string }>;
+  /** The markets whose leverage / margin mode the account has touched. */
   S?: Array<{ s?: string; l?: number; m?: string }>;
   am?: string;
   av?: string;
@@ -106,31 +110,109 @@ export interface EngineState {
 export const engineState = (engine: 'spot' | 'perps', owner: string): Promise<EngineState | null> =>
   readGateway<EngineState | null>(`/api/v1/${engine}/accounts/${owner}/state`);
 
+/** A row of the open-orders list (and, with the executed figures, of the order history). */
 export interface OpenOrder {
   orderID?: number;
   clOrdID?: string;
   symbol?: string;
   side?: string;
+  type?: string;
+  timeInForce?: string;
   price?: string;
   origQty?: string;
+  executedQty?: string;
+  executedValue?: string;
   status?: string;
+  /** The builder attached to the order: absent = none. */
+  builder?: { builderID?: number; feeRate?: number } | null;
+  reduceOnly?: boolean;
+  stopPrice?: string;
+  stopType?: string;
+  triggerType?: string;
+  /** For an attached stop: the entry order it belongs to. */
+  primaryOrderID?: number;
+  positionID?: number;
+  createdAt?: number;
+  updatedAt?: number;
 }
 export const openOrders = async (engine: 'spot' | 'perps', owner: string, symbol?: string): Promise<OpenOrder[]> =>
   unwrapList<OpenOrder>(await readGateway(`/api/v1/${engine}/accounts/${owner}/orders${symbol ? `?symbol=${encodeURIComponent(symbol)}` : ''}`), 'orders');
 
-export interface HistoryOrder extends OpenOrder {
-  executedQty?: string;
-  executedValue?: string;
+export type HistoryOrder = OpenOrder;
+
+/**
+ * SoDEX's order history since `startTime` - one of the two rate-limited routes,
+ * so it goes through the runner's limiter (history.ts) and through the app's own
+ * reader. An older copy the app's reader would fall back to is refused: the
+ * cross-check needs what SoDEX says NOW.
+ */
+export function historyOrders(limiter: HistoryLimiter, engine: 'spot' | 'perps', owner: string, o: { startTime?: number; limit?: number } = {}): Promise<HistoryOrder[]> {
+  return limiter.run(`${engine} order history`, async () => {
+    const r = await account.orderHistory(engine, owner, { limit: o.limit ?? 500, ...(o.startTime ? { startTime: o.startTime } : {}), fresh: true, priority: 'visible' });
+    if (r.staleAt !== null) throw new Error(`SoDEX did not answer the ${engine} order history (only an older copy was on hand)`);
+    return r.orders as HistoryOrder[];
+  });
 }
-export const orderHistory = async (engine: 'spot' | 'perps', owner: string, symbol: string, limit = 20): Promise<HistoryOrder[]> =>
-  unwrapList<HistoryOrder>(await readGateway(`/api/v1/${engine}/accounts/${owner}/orders/history?symbol=${encodeURIComponent(symbol)}&limit=${limit}`), 'orders');
+
+/** SoDEX's fills since `startTime` - the other rate-limited route, same rules. */
+export function historyFills(limiter: HistoryLimiter, engine: 'spot' | 'perps', owner: string, o: { startTime?: number; limit?: number } = {}): Promise<Array<Record<string, unknown>>> {
+  return limiter.run(`${engine} fills`, async () => {
+    const r = await account.trades(engine, owner, { limit: o.limit ?? 1000, ...(o.startTime ? { startTime: o.startTime } : {}), fresh: true, priority: 'visible' });
+    if (r.staleAt !== null) throw new Error(`SoDEX did not answer the ${engine} fills (only an older copy was on hand)`);
+    return r.trades as Array<Record<string, unknown>>;
+  });
+}
+
+/** The account's own maker / taker rates on one engine (for one market when `symbol` is given); null when SoDEX reports none. */
+export async function feeRates(engine: 'spot' | 'perps', owner: string, symbol?: string): Promise<FeeRates | null> {
+  const r = symbol
+    ? await readGateway<unknown>(`/api/v1/${engine}/accounts/${owner}/fee-rate?symbol=${encodeURIComponent(symbol)}`, 2, 2)
+    : (await account.feeRate(engine, owner)).feeRate;
+  return feeRatesFrom(r);
+}
+
+/**
+ * vUSDC an account holds in one engine (its total, as SoDEX lists it) - a public
+ * read by address and account id, used for the BUILDER account's income. null
+ * when the engine does not know the account.
+ */
+export async function accountUsdc(engine: 'spot' | 'perps', address: string, accountId: number): Promise<string | null> {
+  let data: unknown;
+  try {
+    data = await readGateway(`/api/v1/${engine}/accounts/${address.toLowerCase()}/balances?accountID=${accountId}`);
+  } catch (e) {
+    if (/not found/i.test(e instanceof Error ? e.message : String(e))) return null;
+    throw e;
+  }
+  const rows = unwrapList<{ coin?: unknown; a?: unknown; total?: unknown; t?: unknown; wb?: unknown }>(data, 'balances');
+  const row = rows.find((b) => /^v?USDC$/i.test(String(b.coin ?? b.a ?? '')));
+  const v = row?.total ?? row?.t ?? row?.wb;
+  // No vUSDC row is "holds none", not "unknown": the engine answered for this account.
+  return typeof v === 'string' && /^\d+(\.\d+)?$/.test(v) ? v : typeof v === 'number' && Number.isFinite(v) && v >= 0 ? String(v) : '0';
+}
+
+export interface ApiKeyRow {
+  name: string;
+  publicKey: string;
+  expiresAt?: number;
+}
+
+/** The trading keys one engine lists for the account (a public read). */
+export async function apiKeys(engine: 'spot' | 'perps', owner: string): Promise<ApiKeyRow[]> {
+  const rows = await readGateway<ApiKeyRow[] | { apiKeys?: ApiKeyRow[] } | null>(`/api/v1/${engine}/accounts/${owner}/api-keys`);
+  const list = Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
+  return list.filter((r): r is ApiKeyRow => !!r && typeof r.name === 'string' && typeof r.publicKey === 'string');
+}
 
 export interface Position {
+  id?: number;
   symbol?: string;
   size?: string;
   avgEntryPrice?: string;
   leverage?: number;
   marginMode?: string;
+  /** For an isolated position: its isolated margin. */
+  initialMargin?: string;
   realizedPnL?: string;
 }
 export const positions = async (owner: string): Promise<Position[]> =>

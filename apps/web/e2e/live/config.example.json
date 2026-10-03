@@ -20,13 +20,15 @@
 
   "transfers": { "amount": "2" },
 
+  "// orders": "the markets the order steps trade on, at their smallest sizes. perpsCollateral: USDC moved Spot -> Perps for the perps steps (more if the market needs it), moved back after. triggerWaitSeconds: how long to wait for a take-profit placed at the market to fire (0 = do not try; not firing is reported, never a failure).",
   "orders": {
     "spotSymbol": "WSOSO_vUSDC",
     "spotLimitOffsetPct": 50,
     "sosoBuyQuantity": "auto",
     "perpsSymbol": "BTC-USD",
     "perpsLimitOffsetPct": 50,
-    "perpsCollateral": "3"
+    "perpsCollateral": "8",
+    "triggerWaitSeconds": 45
   },
 
   "spotToEvm": { "usdc": "3", "soso": "all" },
@@ -53,8 +55,9 @@
 
   "cleanup": { "enabled": false, "chain": "ARBITRUM_ETH" },
 
-  "// builder": "OFF (null) by default. To test the Valuescan builder fee (docs/BUILDER-CODES.md) set e.g. { \"id\": 12345, \"feePerps\": 50, \"feeSpot\": 50, \"maxFee\": 50, \"required\": false, \"revokeAtEnd\": true } - fees in tenths of a basis point (perps 0..200, spot 0..2000). enable-trading then approves the fee when SoDEX does not list it yet (ONE more wallet signature), every order of the run must carry the builder, and revoke-builder clears the approval at the end. Find the id with: node tools/check-builder.mjs <builder wallet>",
+  "// builder": "OFF (null) by default. To test the Valuescan builder fee and its tiers (docs/BUILDER-TIERS.md section 8) set e.g. { \"id\": 12345, \"address\": \"0x<builder account's WALLET ADDRESS - never a key>\", \"feePerps\": 20, \"feeSpot\": 20, \"maxFee\": 20, \"required\": true, \"revokeAtEnd\": true, \"termsKeys\": [\"<the server's terms PUBLIC key, base64url of 32 bytes>\"] }. Fees in tenths of a basis point (perps 0..200, spot 0..2000). required: a build with a builder requires the approval (G1) - false only to test an optional build. address: lets the cross-check reconcile the builder account's income. termsKeys: with them builder-tiers runs (default fee, verified volume, the lower fee, two cheating orders, the approval enforced); the SAME wallet can show the default fee only once - reset it with `npx tsx tools/builderTiers.ts forget --address <wallet>` in apps/server. expectTier (optional): { \"atUsd\": 10, \"perps\": 15, \"spot\": 20 } - else the tier the server announces is asserted. Find the id with: node tools/check-builder.mjs <builder wallet>",
   "builder": null,
 
-  "timeouts": { "depositMinutes": 30, "withdrawMinutes": 30, "settleSeconds": 180, "orderSeconds": 60 }
+  "// timeouts": "verifierMinutes: how long to wait for the server to verify the volume after a hint. addressIssueSeconds: how long a live run waits for a new wallet's deposit addresses. streamSeconds: how long to wait for the account stream to report a fill before leaving it to the final cross-check.",
+  "timeouts": { "depositMinutes": 30, "withdrawMinutes": 30, "settleSeconds": 180, "orderSeconds": 60, "verifierMinutes": 10, "addressIssueSeconds": 180, "streamSeconds": 10 }
 }

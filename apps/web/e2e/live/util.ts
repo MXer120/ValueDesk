@@ -106,6 +106,18 @@ export const hhmmss = (t = Date.now()): string => new Date(t).toISOString().slic
 
 export const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * The pace of the runner's own waits (poll intervals, "look again after the
+ * scheduled time"). 1 in every real run. The offline simulation, whose fake
+ * exchange answers at once, sets a small fraction so a whole run takes seconds.
+ * It never shortens a TIMEOUT - only how long the runner sits between two looks.
+ */
+let pace = 1;
+export function setPace(factor: number): void {
+  pace = Number.isFinite(factor) && factor > 0 ? factor : 1;
+}
+export const paced = (ms: number): number => (pace === 1 ? ms : Math.max(5, Math.round(ms * pace)));
+
 // --- polling -----------------------------------------------------------------------------------
 
 export type PollResult<T> = { ok: true; value: T; ms: number } | { ok: false; last: T | undefined; ms: number; lastError: string | null };
@@ -146,7 +158,7 @@ export async function pollUntil<T>(o: {
     // Quick at first (most credits land in seconds), then no faster than every few seconds.
     const base = o.intervalMs ?? 4000;
     const wait = attempt < 3 ? Math.min(base, 1500 + attempt * 1000) : base;
-    await sleep(Math.min(wait, Math.max(250, o.timeoutMs - elapsed)));
+    await sleep(paced(Math.min(wait, Math.max(250, o.timeoutMs - elapsed))));
   }
 }
 

@@ -1,13 +1,24 @@
 /**
  * What every step shares: the run's context, the step recorder (console lines
- * + the JSON report), and `armed()` - the one way a step lets money move.
+ * + the JSON report), `armed()` - the one way a step lets a write leave - and
+ * `scenario()` - the one way a step records an assertion.
  */
+import { OrderValidationError, SodexApiError } from '@sodex-core';
 import type { DepositChain } from '../../src/api';
 import type { ChainRoute, CoinConfig } from '../../src/trading/funds';
+import { OutcomeUnknownError } from '../../src/trading/gateway';
+import { TradingError } from '../../src/trading/session';
+import type { AppTerms } from './app';
+import type { Checks } from './checks';
 import type { RunConfig, ReceiverSpec } from './config';
+import type { FeeRates, FillCheck } from './fees';
 import type { Expectation, Guard } from './guard';
+import type { HistoryLimiter } from './history';
+import type { Ledger } from './ledger';
 import type { KeyProvider, ProviderPolicy } from './provider';
 import type { InFlight, Snapshot } from './reads';
+import type { AccountStream } from './stream';
+import type { TermsWatch } from './terms';
 import { dur, errText, hhmmss } from './util';
 
 export type Mode = 'plan' | 'live';
@@ -16,7 +27,10 @@ export const STEP_ORDER = [
   'deposit-external',
   'enable-trading',
   'transfers',
-  'orders',
+  'builder-tiers',
+  'orders-spot',
+  'orders-perps',
+  'refusals',
   'spot-to-evm',
   'evm-to-spot',
   'withdraw-valuechain-self',
@@ -24,16 +38,26 @@ export const STEP_ORDER = [
   'withdraw-external',
   'extra-deposits',
   'extra-withdrawals',
+  'key-lifecycle',
   'cleanup',
+  'cross-check',
   'revoke-builder',
 ] as const;
 export type StepId = (typeof STEP_ORDER)[number];
 
+/** Names `--only` also takes, for what they were called before. */
+export const STEP_ALIASES: Readonly<Record<string, readonly StepId[]>> = {
+  orders: ['orders-spot', 'orders-perps'],
+};
+
 export const STEP_TITLES: Record<StepId, string> = {
   'deposit-external': 'deposit USDC from an EVM chain to the wallet\'s own SoDEX deposit address',
-  'enable-trading': 'register a trading key (one wallet signature)',
+  'enable-trading': 'approve the builder fee (if one is set) and register a trading key',
   transfers: 'Spot -> Perps -> Spot',
-  orders: 'spot + perps orders (rest/cancel, market buy, open/close)',
+  'builder-tiers': 'the builder fee: default fee, verified volume, lower fee, cheating attempts, approval enforcement',
+  'orders-spot': 'spot orders: limit rest / change / cancel, market buy by funds and by quantity, market sell, IOC, FOK, post-only',
+  'orders-perps': 'perps orders: leverage and margin modes, every order type, exits, cancel-all, dead-man switch',
+  refusals: 'what must be refused: nothing here may move anything',
   'spot-to-evm': 'Spot -> ValueChain wallet (USDC and SOSO)',
   'evm-to-spot': 'ValueChain wallet -> Spot (USDC)',
   'withdraw-valuechain-self': 'withdraw to the own ValueChain wallet',
@@ -41,7 +65,9 @@ export const STEP_TITLES: Record<StepId, string> = {
   'withdraw-external': 'withdraw to another chain (SoDEX permit)',
   'extra-deposits': 'extra deposits from other EVM chains',
   'extra-withdrawals': 'extra withdrawals per chain',
+  'key-lifecycle': 'the trading key: restore, still registered, revoke, an order with the old key is rejected',
   cleanup: 'move everything back to Spot and withdraw to the deposit chain',
+  'cross-check': 'reconcile SoDEX\'s order history and fills with what the run recorded',
   'revoke-builder': 'revoke the builder-fee approval (one wallet signature)',
 };
 
@@ -80,6 +106,8 @@ export interface StepRecord {
   txs: TxRecord[];
   subSteps: SubRecord[];
   notes: string[];
+  /** The assertions this step recorded, by verdict (the full list is the report's `checks`). */
+  checks?: { pass: number; fail: number; finding: number; skipped: number; failed: string[] };
   error?: string;
   reason?: string;
 }
@@ -173,6 +201,13 @@ export interface Pre {
   estimates: Map<StepId, { costUsd: number; sentAwayUsd: number }>;
 }
 
+/** The builder account's vUSDC, read before the run's first order (public reads). */
+export interface BuilderBalances {
+  at: number;
+  spot: string | null;
+  perps: string | null;
+}
+
 export interface Ctx {
   mode: Mode;
   cfg: RunConfig;
@@ -189,11 +224,62 @@ export interface Ctx {
   /** What the running step sent to addresses other than the wallet (USD) - not a cost, but it leaves this wallet. */
   stepSentAwayUsd: number;
   lastSnapshot: Snapshot | null;
+  /** Every assertion of the run. */
+  checks: Checks;
+  /** Every order that left, SoDEX's answers, and every fill. */
+  ledger: Ledger;
+  /** The wallet's account stream (null: not opened - plan mode, or it could not be). */
+  stream: AccountStream | null;
+  /** The one door to the rate-limited history routes (null in plan mode: they are never read). */
+  history: HistoryLimiter | null;
+  /** The signed fee terms the runner itself has seen verify (null: no terms keys in the config). */
+  terms: TermsWatch | null;
+  /** The app's terms module (null: this checkout has none, or no terms keys are configured). */
+  appTerms: AppTerms | null;
+  /** The account's own fee rates per engine, read once (null: SoDEX reported none). */
+  feeRates: { spot?: FeeRates | null; perps?: FeeRates | null };
+  /** The fee check of every fill judged so far, by fill key (the report's fee table). */
+  fillChecks: Map<string, FillCheck>;
+  /** The builder account's balances before the run's first order. */
+  builderBaseline: BuilderBalances | null;
+  /** When the run started (ms): history is read from here on. */
+  startedAtMs: number;
+  /** Every signature / transaction the test wallet refused (its policy did not allow it), in order. */
+  walletRefusals: string[];
+  /** Every typed-data signature the test wallet GAVE, by primary type, in order ("ONE signature" is counted from this). */
+  walletSigned: string[];
+  /** The check of each configured deposit / withdrawal, by `<step>#<index>` (declared once the routes are known). */
+  routeChecks: Map<string, string>;
+  /** What the builder-tiers step learned and the final cross-check judges fills against. */
+  tiers: { defaultFee?: number; loweredFee?: number; cheats: Array<{ kind: 'underpaid' | 'no-builder'; orderID: number | null; clOrdID: string | null; notional: string }> };
+  /** Set by a step to make the app's NEXT terms answer a tampered copy of the real one (runner.ts wires it into the app's terms module). */
+  tamperTerms: ((body: Record<string, unknown>) => Record<string, unknown>) | null;
 }
 
 /** A refusal from the runner's own safety rules - nothing was signed or sent. */
 export class SafetyStop extends Error {
   override name = 'SafetyStop';
+}
+
+/**
+ * The app tried to send or sign something the running step had not armed, and
+ * the runner's guard or wallet said no. NOTHING left the process - so inside a
+ * scenario this fails that scenario and the step goes on; in a funds step (a
+ * chain of moves) it stops the run like any SafetyStop.
+ */
+export class Refused extends SafetyStop {
+  override name = 'Refused';
+}
+
+/** An assertion of a scenario did not hold. The account is in a state the scenario's recovery can clear. */
+export class CheckFailure extends Error {
+  override name = 'CheckFailure';
+  constructor(
+    message: string,
+    readonly evidence: Record<string, unknown> = {},
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -203,6 +289,7 @@ export class SafetyStop extends Error {
  */
 export async function armed<T>(ctx: Ctx, a: { expect?: Expectation[]; policy?: ProviderPolicy }, fn: () => Promise<T>): Promise<T> {
   const before = ctx.guard.refusals.length;
+  const signedBefore = ctx.walletRefusals.length;
   const disarm = a.expect?.length ? ctx.guard.expect(a.expect) : () => undefined;
   ctx.provider.setPolicy(a.policy ?? null);
   try {
@@ -210,12 +297,54 @@ export async function armed<T>(ctx: Ctx, a: { expect?: Expectation[]; policy?: P
   } catch (e) {
     const blocked = ctx.guard.refusals.slice(before);
     if (blocked.length) {
-      throw new SafetyStop(`${errText(e)} [the E2E guard refused ${blocked.map((b) => `${b.what} (${b.blocked})`).join('; ')} - that request was NOT sent]`);
+      throw new Refused(`${errText(e)} [the E2E guard refused ${blocked.map((b) => `${b.what} (${b.blocked})`).join('; ')} - that request was NOT sent]`);
     }
+    const unsigned = ctx.walletRefusals.slice(signedBefore);
+    if (unsigned.length) throw new Refused(`${errText(e)} [the test wallet refused ${unsigned.join('; ')} - nothing was signed]`);
     throw e;
   } finally {
     disarm();
     ctx.provider.setPolicy(null);
+  }
+}
+
+/**
+ * A definite "no" that moved nothing: the app refused before signing
+ * (validation, the trading gate), or SoDEX answered with a rejection. NOT an
+ * unanswered write (that may have executed) and not a refusal by the runner's
+ * own guard or wallet (that means the app tried something the step did not expect).
+ */
+export function isDefiniteRefusal(e: unknown): boolean {
+  if (e instanceof SafetyStop || e instanceof OutcomeUnknownError) return false;
+  return e instanceof SodexApiError || e instanceof TradingError || e instanceof OrderValidationError || e instanceof RangeError;
+}
+
+/**
+ * One assertion of a step. `fn` records its own verdict (ctx.checks.pass /
+ * finding / skip) and may throw:
+ *   CheckFailure, or a definite refusal  -> recorded as FAIL, `recover` puts the
+ *                                           account back in order, the step goes on;
+ *   anything else (a timeout, an unanswered write, a refusal by the guard)
+ *                                        -> recorded as FAIL and thrown: the run stops,
+ *                                           because the account's state is not known.
+ * A scenario that returns without recording anything is a bug in the runner and fails.
+ */
+export async function scenario(ctx: Ctx, id: string, fn: () => Promise<void>, recover?: () => Promise<void>): Promise<void> {
+  ctx.rec.line(`* ${id}`, 3);
+  try {
+    await fn();
+    if (!ctx.checks.get(id)) ctx.checks.fail(id, 'the scenario ended without a verdict (a bug in the runner)');
+  } catch (e) {
+    const soft = e instanceof CheckFailure || e instanceof Refused || isDefiniteRefusal(e);
+    ctx.checks.fail(id, errText(e), e instanceof CheckFailure ? e.evidence : {});
+    if (!soft) throw e;
+    if (recover) {
+      try {
+        await recover();
+      } catch (r) {
+        throw new SafetyStop(`${id} failed (${errText(e)}) and the account could not be put back in order: ${errText(r)}`);
+      }
+    }
   }
 }
 

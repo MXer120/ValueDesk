@@ -35,19 +35,36 @@ export interface ExtraWithdrawal {
   buyIfMissing?: boolean;
 }
 
-/** The Valuescan builder fee for this run - what VITE_BUILDER_* are for a build (docs/BUILDER-CODES.md). */
+/**
+ * The Valuescan builder fee for this run - what VITE_BUILDER_* are for a build
+ * (docs/BUILDER-CODES.md, docs/BUILDER-TIERS.md).
+ */
 export interface RunBuilder {
   /** The builder's SoDEX account id. */
   id: number;
-  /** Fee per perps order / per spot order, tenths of a basis point (perps 0..200, spot 0..2000). */
+  /** The builder account's wallet address (public, lower-case): its balances are read to check the income. null: not checked. */
+  address: string | null;
+  /** DEFAULT fee per perps order / per spot order, tenths of a basis point (perps 0..200, spot 0..2000). */
   feePerps: number;
   feeSpot: number;
   /** The ceiling the wallet approves, tenths of a bp (default: the higher fee). */
   maxFee: number;
-  /** As VITE_BUILDER_REQUIRED=1: no approval, no trading. */
+  /** No approval, no trading - what a build with a builder is (contract G1). false only to test an optional build. */
   required: boolean;
   /** Run the last step, revoke-builder (one more signature: maxFeeRate 0). */
   revokeAtEnd: boolean;
+  /**
+   * The server's terms-signing PUBLIC keys (base64url of the raw 32 bytes,
+   * contract section 3). With them the run tests the fee tiers: the default
+   * fee, the verified volume, the lower fee, the cheating attempts. Empty: the
+   * fee is the default throughout and the tier checks are skipped.
+   */
+  termsKeys: string[];
+  /**
+   * What the tier test must see once the volume passes `atUsd`. null: what the
+   * server itself announces as the wallet's next tier.
+   */
+  expectTier: { atUsd: number; perps: number; spot: number } | null;
 }
 
 export interface RunConfig {
@@ -79,6 +96,11 @@ export interface RunConfig {
     perpsLimitOffsetPct: number;
     /** USDC moved Spot -> Perps for the perps orders (more if the market needs it), moved back afterwards. */
     perpsCollateral: string;
+    /**
+     * How long to wait for a take-profit placed at the market to trigger, seconds
+     * (0 = do not try). Not triggering in that time is reported, never a failure.
+     */
+    triggerWaitSeconds: number;
   };
   spotToEvm: { usdc: string; soso: string };
   evmToSpot: { usdc: string };
@@ -90,13 +112,26 @@ export interface RunConfig {
   receivers: Record<string, ReceiverSpec>;
   cleanup: { enabled: boolean; chain: string };
   /**
-   * null (the default): no builder - the run is exactly what it was. Set: the
-   * enable-trading step approves the fee when SoDEX does not list it (ONE more
-   * wallet signature), every order must carry the builder, and revoke-builder
-   * can clear the approval at the end.
+   * null (the default): no builder - nothing is approved, read or attached, and
+   * the builder checks report "skipped". Set: the enable-trading step approves
+   * the fee when SoDEX does not list it (ONE more wallet signature), every order
+   * must carry the builder at the fee owed, every fill's builderFee is checked,
+   * and revoke-builder can clear the approval at the end. With `termsKeys` the
+   * builder-tiers step runs the whole of docs/BUILDER-TIERS.md section 8.
    */
   builder: RunBuilder | null;
-  timeouts: { depositMinutes: number; withdrawMinutes: number; settleSeconds: number; orderSeconds: number };
+  timeouts: {
+    depositMinutes: number;
+    withdrawMinutes: number;
+    settleSeconds: number;
+    orderSeconds: number;
+    /** How long to wait for the server's fee verifier after a hint (contract section 6: "a minute or two"). */
+    verifierMinutes: number;
+    /** How long a live run waits for a new wallet's deposit addresses to be issued. */
+    addressIssueSeconds: number;
+    /** How long to wait for the account stream to report a fill before leaving it to the final cross-check. */
+    streamSeconds: number;
+  };
 }
 
 export const DEFAULT_CONFIG: RunConfig = {
@@ -114,7 +149,8 @@ export const DEFAULT_CONFIG: RunConfig = {
     sosoBuyQuantity: 'auto',
     perpsSymbol: 'BTC-USD',
     perpsLimitOffsetPct: 50,
-    perpsCollateral: '3',
+    perpsCollateral: '8',
+    triggerWaitSeconds: 45,
   },
   spotToEvm: { usdc: '3', soso: 'all' },
   evmToSpot: { usdc: '1' },
@@ -126,7 +162,7 @@ export const DEFAULT_CONFIG: RunConfig = {
   receivers: {},
   cleanup: { enabled: false, chain: 'ARBITRUM_ETH' },
   builder: null,
-  timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60 },
+  timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60, verifierMinutes: 10, addressIssueSeconds: 180, streamSeconds: 10 },
 };
 
 export interface LoadedConfig {
@@ -242,7 +278,7 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
   const tr = obj(src.transfers, 'transfers', ['amount']);
   if (tr) set(amount(tr.amount, 'transfers.amount'), (v) => (cfg.transfers.amount = v));
 
-  const ord = obj(src.orders, 'orders', ['spotSymbol', 'spotLimitOffsetPct', 'sosoBuyQuantity', 'perpsSymbol', 'perpsLimitOffsetPct', 'perpsCollateral']);
+  const ord = obj(src.orders, 'orders', ['spotSymbol', 'spotLimitOffsetPct', 'sosoBuyQuantity', 'perpsSymbol', 'perpsLimitOffsetPct', 'perpsCollateral', 'triggerWaitSeconds']);
   if (ord) {
     set(text(ord.spotSymbol, 'orders.spotSymbol', /^[A-Za-z0-9_./-]{1,40}$/), (v) => (cfg.orders.spotSymbol = v));
     set(numIn(ord.spotLimitOffsetPct, 'orders.spotLimitOffsetPct', 1, 90), (v) => (cfg.orders.spotLimitOffsetPct = v));
@@ -250,6 +286,7 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
     set(text(ord.perpsSymbol, 'orders.perpsSymbol', /^[A-Za-z0-9_./-]{1,40}$/), (v) => (cfg.orders.perpsSymbol = v));
     set(numIn(ord.perpsLimitOffsetPct, 'orders.perpsLimitOffsetPct', 1, 90), (v) => (cfg.orders.perpsLimitOffsetPct = v));
     set(amount(ord.perpsCollateral, 'orders.perpsCollateral'), (v) => (cfg.orders.perpsCollateral = v));
+    set(numIn(ord.triggerWaitSeconds, 'orders.triggerWaitSeconds', 0, 600), (v) => (cfg.orders.triggerWaitSeconds = v));
   }
   const s2e = obj(src.spotToEvm, 'spotToEvm', ['usdc', 'soso']);
   if (s2e) {
@@ -339,7 +376,7 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
     set(chain(cl.chain, 'cleanup.chain'), (v) => (cfg.cleanup.chain = v));
   }
   if (src.builder !== undefined && src.builder !== null) {
-    const b = obj(src.builder, 'builder', ['id', 'feePerps', 'feeSpot', 'maxFee', 'required', 'revokeAtEnd']);
+    const b = obj(src.builder, 'builder', ['id', 'address', 'feePerps', 'feeSpot', 'maxFee', 'maxFeeRate', 'required', 'revokeAtEnd', 'termsKeys', 'expectTier']);
     if (b) {
       const whole = (v: unknown, where: string, lo: number, hi: number): number | undefined => {
         const n = numIn(v, where, lo, hi);
@@ -351,23 +388,57 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
       };
       const before = errors.length;
       const id = whole(b.id, 'builder.id', 1, Number.MAX_SAFE_INTEGER);
+      let address: string | null = null;
+      if (b.address !== undefined && b.address !== null && b.address !== '') {
+        if (typeof b.address !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(b.address.trim())) errors.push("builder.address must be the builder account's wallet ADDRESS (0x + 40 hex) - never a key.");
+        else address = b.address.trim().toLowerCase();
+      }
       const feePerps = whole(b.feePerps ?? 0, 'builder.feePerps', 0, 200) ?? 0;
       const feeSpot = whole(b.feeSpot ?? 0, 'builder.feeSpot', 0, 2000) ?? 0;
-      const maxFee = whole(b.maxFee ?? Math.max(feePerps, feeSpot), 'builder.maxFee', 0, 2000) ?? 0;
-      const required = bool(b.required, 'builder.required') ?? false;
+      // `maxFeeRate` is SoDEX's own name for it (and the app's); either spelling, not two different values.
+      if (b.maxFee !== undefined && b.maxFeeRate !== undefined && b.maxFee !== b.maxFeeRate) errors.push('builder.maxFee and builder.maxFeeRate are the same setting - give one.');
+      const maxFee = whole(b.maxFee ?? b.maxFeeRate ?? Math.max(feePerps, feeSpot), b.maxFee !== undefined ? 'builder.maxFee' : 'builder.maxFeeRate', 0, 2000) ?? 0;
+      // A build with a builder requires the approval (docs/BUILDER-TIERS.md G1); `false` tests an optional build.
+      const required = bool(b.required, 'builder.required') ?? true;
       const revokeAtEnd = bool(b.revokeAtEnd, 'builder.revokeAtEnd') ?? false;
+      const termsKeys: string[] = [];
+      if (b.termsKeys !== undefined && b.termsKeys !== null) {
+        if (!Array.isArray(b.termsKeys)) errors.push('builder.termsKeys must be a list of public keys (base64url of the raw 32 bytes).');
+        else {
+          b.termsKeys.forEach((k, i) => {
+            const ok = typeof k === 'string' && /^[A-Za-z0-9_-]{43}$/.test(k.trim()) && Buffer.from(k.trim(), 'base64url').length === 32;
+            if (!ok) errors.push(`builder.termsKeys[${i}] is not an Ed25519 PUBLIC key (43 characters of base64url = 32 bytes).`);
+            else termsKeys.push((k as string).trim());
+          });
+        }
+      }
+      let expectTier: RunBuilder['expectTier'] = null;
+      if (b.expectTier !== undefined && b.expectTier !== null) {
+        const t = obj(b.expectTier, 'builder.expectTier', ['atUsd', 'perps', 'spot']);
+        const atUsd = numIn(t?.atUsd, 'builder.expectTier.atUsd', 0, 1_000_000);
+        const perps = whole(t?.perps, 'builder.expectTier.perps', 0, 200);
+        const spot = whole(t?.spot, 'builder.expectTier.spot', 0, 2000);
+        if (t && (atUsd === undefined || perps === undefined || spot === undefined)) errors.push('builder.expectTier needs "atUsd", "perps" and "spot".');
+        else if (t) {
+          if (perps! > feePerps || spot! > feeSpot) errors.push('builder.expectTier names a fee above the default - a tier can only lower the fee.');
+          else expectTier = { atUsd: atUsd!, perps: perps!, spot: spot! };
+        }
+      }
       if (id === undefined) errors.push('builder.id (the builder account id) is required.');
       if (feePerps === 0 && feeSpot === 0) errors.push('builder needs feePerps or feeSpot above 0 (or set "builder": null).');
       if (maxFee < Math.max(feePerps, feeSpot)) errors.push('builder.maxFee is below the fee it has to cover.');
-      if (errors.length === before && id !== undefined) cfg.builder = { id, feePerps, feeSpot, maxFee, required, revokeAtEnd };
+      if (errors.length === before && id !== undefined) cfg.builder = { id, address, feePerps, feeSpot, maxFee, required, revokeAtEnd, termsKeys, expectTier };
     }
   }
-  const to = obj(src.timeouts, 'timeouts', ['depositMinutes', 'withdrawMinutes', 'settleSeconds', 'orderSeconds']);
+  const to = obj(src.timeouts, 'timeouts', ['depositMinutes', 'withdrawMinutes', 'settleSeconds', 'orderSeconds', 'verifierMinutes', 'addressIssueSeconds', 'streamSeconds']);
   if (to) {
     set(numIn(to.depositMinutes, 'timeouts.depositMinutes', 1, 240), (v) => (cfg.timeouts.depositMinutes = v));
     set(numIn(to.withdrawMinutes, 'timeouts.withdrawMinutes', 1, 240), (v) => (cfg.timeouts.withdrawMinutes = v));
     set(numIn(to.settleSeconds, 'timeouts.settleSeconds', 10, 3600), (v) => (cfg.timeouts.settleSeconds = v));
     set(numIn(to.orderSeconds, 'timeouts.orderSeconds', 5, 600), (v) => (cfg.timeouts.orderSeconds = v));
+    set(numIn(to.verifierMinutes, 'timeouts.verifierMinutes', 0.01, 60), (v) => (cfg.timeouts.verifierMinutes = v));
+    set(numIn(to.addressIssueSeconds, 'timeouts.addressIssueSeconds', 0, 3600), (v) => (cfg.timeouts.addressIssueSeconds = v));
+    set(numIn(to.streamSeconds, 'timeouts.streamSeconds', 0.05, 120), (v) => (cfg.timeouts.streamSeconds = v));
   }
 
   // Receivers named by steps must exist (or be "self").

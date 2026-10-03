@@ -6,8 +6,10 @@
  *   1. RELATIVE URLS. The app calls its backend as '/api/...'. In Node there is
  *      no page origin, so they are sent to the configured backend origin.
  *
- *   2. ONLY KNOWN HOSTS. The backend, the SoDEX gateway and the public RPCs of
- *      the chains the app knows. Anything else is refused.
+ *   2. ONLY KNOWN HOSTS. The backend, the SoDEX gateway and relayer, the public
+ *      RPCs of the chains the runner signs on, and (GET only) ValueChain's
+ *      explorer, which the app falls back to for a balance. Anything else is
+ *      refused.
  *
  *   3. PLAN MODE IS READ-ONLY, ENFORCED HERE. GETs, and JSON-RPC calls made of
  *      read methods only. Every other request - any SoDEX write, the backend's
@@ -15,10 +17,18 @@
  *      synthetic refusal and never leaves the process.
  *
  *   4. LIVE MODE WRITES MUST BE EXPECTED. A SoDEX write or a backend POST goes
- *      out only if the running step armed a matching Expectation (its kind, how
- *      many, and a check of the parsed body: account, coin, amount, receiver,
- *      symbol, quantity...). An evm-withdraw permit is DECODED here and its
- *      receiver/amount checked again, independently of the wallet's policy.
+ *      out only if the running step armed a matching Expectation: its kind, how
+ *      many, and a check of the parsed body (account, coin, amount, receiver,
+ *      symbol, side, quantity, price, flags, builder ...). Every kind of write
+ *      the runner can make has its own kind here. A withdraw permit is DECODED
+ *      and its receiver/amount checked again, independently of the wallet's
+ *      policy. An order the runner builds itself (it stands in for a modified
+ *      client) is its own kind, `direct-order`, and leaves only when its BYTES
+ *      are exactly the ones that were armed.
+ *
+ *   5. THE TWO RATE-LIMITED HISTORY ROUTES (`/accounts/{a}/orders/history`,
+ *      `/accounts/{a}/trades`) are refused unless the read comes through the
+ *      runner's one limiter (history.ts) - and always in plan mode.
  *
  * A refused request gets a definite "no" (HTTP 403 with an error envelope, or a
  * JSON-RPC error) - never a network error - so the app does not report "it may
@@ -33,19 +43,36 @@
  *
  * Every request is recorded (method, host, path, status, timing) for the
  * report. Request bodies are NOT recorded: signed writes carry signatures.
+ * (The account stream is a WebSocket and does not pass here: stream.ts opens it
+ * only against SoDEX's own gateway and only ever subscribes.)
  */
 import { decodeAbiParameters } from 'viem';
 import { CLOB_GATEWAY, WITHDRAW_TOKEN_TARGET } from '@sodex-core';
+import { isLimitedHistoryPath } from './history';
 import { READ_METHODS } from './provider';
 
 export type GuardMode = 'plan' | 'live';
 export type WriteKind =
   | 'key-registration'
+  /** The master wallet revoking a trading key: POST /{engine}/exchange, type revokeAPIKey. */
+  | 'key-revocation'
   /** The builder-fee approval (or, with maxFeeRate 0, its revocation): POST /user/{owner}/builders. */
   | 'builder-approval'
   | 'engine-transfer'
   | 'order'
+  /** An order the RUNNER built and signed (not the app): leaves only with exactly the armed bytes. */
+  | 'direct-order'
   | 'cancel'
+  /** POST /{engine}/trade/orders/replace - price / size of a resting limit order. */
+  | 'order-replace'
+  /** POST /perps/trade/orders/modify - a TP/SL order's trigger, price or size. */
+  | 'order-modify'
+  /** POST /perps/trade/leverage - leverage and margin mode of one market. */
+  | 'leverage'
+  /** POST /perps/trade/margin - add / remove isolated margin. */
+  | 'margin'
+  /** POST /{engine}/trade/orders/schedule-cancel - the dead-man switch. */
+  | 'schedule-cancel'
   /** A WithdrawToken permit, relayed (alpha-biz call_for_permit) or via the gateway's evm-withdraw. */
   | 'withdraw-permit'
   /** A DepositERC20WithPermit call-for-permit (the gasless wallet -> Spot deposit). */
@@ -72,11 +99,13 @@ export interface WriteRequest {
   url: URL;
   /** Parsed JSON body (null when there is none or it is not JSON). */
   body: any;
+  /** The body exactly as it would be sent. */
+  raw: string | null;
   /** For 'withdraw-permit': the decoded WithdrawToken command. */
   permit?: PermitCmd;
   /** For 'deposit-permit': the decoded DepositERC20WithPermit command. */
   deposit?: { token: string; amount: bigint };
-  /** For 'engine-transfer' / 'order' / 'cancel' / 'key-registration': which engine's path. */
+  /** Which engine's path (transfers, orders, cancels, key writes ...). */
   engine?: 'spot' | 'perps';
 }
 
@@ -88,13 +117,17 @@ export interface Expectation {
   times?: number;
   /** null = this request is the expected one. */
   check?: (r: WriteRequest) => string | null;
+  /** The body, byte for byte. Required for 'direct-order'; allowed with any kind. */
+  exact?: string;
+  /** The check (scenario) this write belongs to - handed to `onWrite`. */
+  tag?: string;
 }
 
 export interface NetRecord {
   t: number;
   ms?: number;
   method: string;
-  dest: 'backend' | 'gateway' | 'relayer' | 'rpc' | 'other';
+  dest: 'backend' | 'gateway' | 'relayer' | 'rpc' | 'explorer' | 'other';
   url: string;
   status?: number;
   what: string;
@@ -103,6 +136,20 @@ export interface NetRecord {
   /** Short response for writes (order ids, transfer ids, tx hashes) - no secrets travel in responses. */
   response?: string;
   error?: string;
+}
+
+/** A write that left: what the ledger is built from. */
+export interface SentWrite {
+  kind: WriteKind;
+  engine?: 'spot' | 'perps';
+  tag: string | null;
+  label: string;
+  body: any;
+  status: number | null;
+  responseText: string | null;
+  at: number;
+  /** Armed with its exact bytes: a request the RUNNER built (labelled DIRECT), not the app. */
+  direct: boolean;
 }
 
 export interface GuardOptions {
@@ -115,10 +162,18 @@ export interface GuardOptions {
   relayer: string;
   /** Public JSON-RPC URLs (ValueChain + EVM chains). */
   rpcUrls: readonly string[];
+  /** Origins that may be READ (GET) and nothing else - ValueChain's explorer API. */
+  readOnlyOrigins?: readonly string[];
   /** The wallet (lower-case): an evm-withdraw for anyone else is refused. */
   owner: string;
   /** Plan mode: do not even let the backend ask SoDEX to issue deposit addresses. */
   blockDepositIssuing?: boolean;
+  /** The door to the rate-limited history routes (history.ts). Without it they are refused. */
+  history?: { admit(): string | null } | null;
+  /** Every answer of the backend's builder-terms route, before the caller sees it (terms.ts). */
+  onTerms?: (url: URL, status: number, bodyText: string) => void;
+  /** Every write that left, with its answer (ledger.ts). */
+  onWrite?: (w: SentWrite) => void;
   onRecord?: (r: NetRecord) => void;
 }
 
@@ -162,13 +217,28 @@ export function decodeDepositCmd(cmdData: string): { token: string; amount: bigi
   return { token: token.toLowerCase(), amount };
 }
 
+/** The backend's builder-terms route (docs/BUILDER-TIERS.md section 3): a read. */
+const TERMS_PATH = '/api/vs/builder/terms';
+
 /** What kind of write a gateway request is, or null when it is not one the runner ever makes. */
-export function classifyGatewayWrite(method: string, path: string, owner: string): { kind: WriteKind; engine?: 'spot' | 'perps' } | null {
+export function classifyGatewayWrite(method: string, path: string, owner: string, body: unknown = null): { kind: WriteKind; engine?: 'spot' | 'perps' } | null {
   let m: RegExpExecArray | null;
-  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/exchange$/.exec(path))) return { kind: 'key-registration', engine: m[1] as 'spot' | 'perps' };
-  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/accounts\/transfers$/.exec(path))) return { kind: 'engine-transfer', engine: m[1] as 'spot' | 'perps' };
+  const eng = (s: string | undefined): 'spot' | 'perps' => (s === 'spot' ? 'spot' : 'perps');
+  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/exchange$/.exec(path))) {
+    // One route, two master-wallet actions: told apart by the body's own `type`.
+    const type = (body as { type?: unknown } | null)?.type;
+    if (type === 'addAPIKey') return { kind: 'key-registration', engine: eng(m[1]) };
+    if (type === 'revokeAPIKey') return { kind: 'key-revocation', engine: eng(m[1]) };
+    return null;
+  }
+  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/accounts\/transfers$/.exec(path))) return { kind: 'engine-transfer', engine: eng(m[1]) };
   if (path === '/api/v1/spot/trade/orders/batch') return method === 'POST' ? { kind: 'order', engine: 'spot' } : method === 'DELETE' ? { kind: 'cancel', engine: 'spot' } : null;
   if (path === '/api/v1/perps/trade/orders') return method === 'POST' ? { kind: 'order', engine: 'perps' } : method === 'DELETE' ? { kind: 'cancel', engine: 'perps' } : null;
+  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/trade\/orders\/replace$/.exec(path))) return { kind: 'order-replace', engine: eng(m[1]) };
+  if (method === 'POST' && path === '/api/v1/perps/trade/orders/modify') return { kind: 'order-modify', engine: 'perps' };
+  if (method === 'POST' && path === '/api/v1/perps/trade/leverage') return { kind: 'leverage', engine: 'perps' };
+  if (method === 'POST' && path === '/api/v1/perps/trade/margin') return { kind: 'margin', engine: 'perps' };
+  if (method === 'POST' && (m = /^\/api\/v1\/(spot|perps)\/trade\/orders\/schedule-cancel$/.exec(path))) return { kind: 'schedule-cancel', engine: eng(m[1]) };
   if (method === 'POST' && (m = /^\/api\/v1\/user\/(0x[0-9a-fA-F]{40})\/evm-withdraw$/.exec(path))) {
     return m[1]!.toLowerCase() === owner.toLowerCase() ? { kind: 'withdraw-permit' } : null;
   }
@@ -208,6 +278,7 @@ export function installGuard(o: GuardOptions): Guard {
   const gateway = new URL(o.gateway);
   const relayer = new URL(o.relayer);
   const rpcs = new Set(o.rpcUrls.map(norm));
+  const readOnly = new Set((o.readOnlyOrigins ?? []).map((u) => new URL(u).origin));
   const armed: Array<Expectation & { left: number }> = [];
   const records: NetRecord[] = [];
   const refusals: NetRecord[] = [];
@@ -263,17 +334,26 @@ export function installGuard(o: GuardOptions): Guard {
             ? 'relayer'
             : rpcs.has(norm(`${url.origin}${url.pathname}`))
               ? 'rpc'
-              : 'other';
+              : readOnly.has(url.origin)
+                ? 'explorer'
+                : 'other';
     const rec: NetRecord = { t: Date.now(), method, dest, url: `${url.origin}${url.pathname}${url.search}`, what: 'read' };
-    const send = async (): Promise<Response> => {
+    /** Send it. `after` sees the answer's text first (terms answers, writes). */
+    const send = async (after?: (status: number, text: string) => void): Promise<Response> => {
       const t0 = Date.now();
       try {
         // A relative string goes to the backend; a URL or Request object goes on exactly as given.
         const res = await original(typeof input === 'string' ? target : input, init);
         rec.status = res.status;
         rec.ms = Date.now() - t0;
-        if (rec.what !== 'read' && rec.what !== 'rpc-read') {
-          rec.response = (await res.clone().text().catch(() => '')).slice(0, 600);
+        if (after || (rec.what !== 'read' && rec.what !== 'rpc-read')) {
+          const text = await res.clone().text().catch(() => '');
+          if (rec.what !== 'read' && rec.what !== 'rpc-read') rec.response = text.slice(0, 600);
+          try {
+            after?.(res.status, text);
+          } catch {
+            /* a listener must not change what the caller gets */
+          }
         }
         push(rec);
         return res;
@@ -286,6 +366,11 @@ export function installGuard(o: GuardOptions): Guard {
     };
 
     if (dest === 'other') return refused(rec, `host ${url.host} is not one the runner talks to`, 'backend');
+
+    if (dest === 'explorer') {
+      if (method === 'GET' || method === 'HEAD') return send();
+      return refused(rec, `${url.host} is read-only for the runner (${method})`, 'backend');
+    }
 
     if (dest === 'rpc') {
       if (method !== 'POST') return send();
@@ -312,6 +397,14 @@ export function installGuard(o: GuardOptions): Guard {
       if (dest === 'backend' && o.blockDepositIssuing && url.pathname === '/api/mirror/deposit-options') {
         return refused(rec, '--registry-only: not asking the backend (and through it SoDEX) to issue deposit addresses', 'backend');
       }
+      if (dest === 'gateway' && isLimitedHistoryPath(url.pathname)) {
+        rec.what = 'history-read';
+        if (o.mode === 'plan') return refused(rec, 'plan mode makes no history reads (orders/history and trades are limited to about 4 a minute per IP)', 'gateway');
+        const why = o.history ? o.history.admit() : 'history reads (orders/history, trades) go through the runner\'s limiter, and none is set up';
+        if (why) return refused(rec, why, 'gateway');
+        return send();
+      }
+      if (dest === 'backend' && url.pathname === TERMS_PATH && o.onTerms) return send((status, text) => o.onTerms!(url, status, text));
       return send();
     }
 
@@ -332,15 +425,15 @@ export function installGuard(o: GuardOptions): Guard {
     let req: WriteRequest | null = null;
     let notOurs: string | null = null;
     if (dest === 'backend') {
-      if (method === 'POST' && url.pathname === '/api/deposit/prepare') req = { kind: 'deposit-prepare', method, url, body };
+      if (method === 'POST' && url.pathname === '/api/deposit/prepare') req = { kind: 'deposit-prepare', method, url, body, raw: bodyText };
     } else if (dest === 'relayer') {
       const c = classifyRelayerWrite(method, url.pathname, body);
-      if ('req' in c) req = { ...c.req, method, url, body };
+      if ('req' in c) req = { ...c.req, method, url, body, raw: bodyText };
       else notOurs = c.refuse;
     } else {
-      const k = classifyGatewayWrite(method, url.pathname, o.owner);
+      const k = classifyGatewayWrite(method, url.pathname, o.owner, body);
       if (k) {
-        req = { kind: k.kind, engine: k.engine, method, url, body };
+        req = { kind: k.kind, engine: k.engine, method, url, body, raw: bodyText };
         if (k.kind === 'withdraw-permit') {
           try {
             req.permit = decodePermitCmd(String(body?.cmdData ?? ''));
@@ -355,15 +448,33 @@ export function installGuard(o: GuardOptions): Guard {
     if (o.mode === 'plan') return refused(rec, `plan mode is read-only (${rec.what})`, shape);
     if (!req) return refused(rec, notOurs ?? `not a write the runner ever makes (${method} ${url.pathname})`, shape);
     const reasons: string[] = [];
-    for (const e of armed) {
-      if (e.kind !== req.kind || e.left <= 0) continue;
-      const why = e.check ? e.check(req) : null;
-      if (why === null) {
-        e.left -= 1;
-        rec.what = `${req.kind}: ${e.label}`;
-        return send();
+    // An order whose exact bytes were armed as the runner's own is a `direct-order`; anything else on that route is the app's.
+    const kinds: WriteKind[] = req.kind === 'order' ? ['direct-order', 'order'] : [req.kind];
+    for (const kind of kinds) {
+      for (const e of armed) {
+        if (e.kind !== kind || e.left <= 0) continue;
+        let why: string | null = null;
+        if (e.exact !== undefined && req.raw !== e.exact) why = 'the body is not, byte for byte, the one that was armed';
+        if (why === null && e.check) why = e.check({ ...req, kind });
+        if (why === null) {
+          e.left -= 1;
+          rec.what = `${kind}: ${e.label}`;
+          const sent: SentWrite = { kind, engine: req.engine, tag: e.tag ?? null, label: e.label, body, status: null, responseText: null, at: Date.now(), direct: e.exact !== undefined };
+          try {
+            return await send((status, text) => {
+              sent.status = status;
+              sent.responseText = text;
+            });
+          } finally {
+            try {
+              o.onWrite?.(sent);
+            } catch {
+              /* the ledger must not change what the caller gets */
+            }
+          }
+        }
+        reasons.push(`${e.label}: ${why}`);
       }
-      reasons.push(`${e.label}: ${why}`);
     }
     return refused(rec, reasons.length ? `does not match what this step expects - ${reasons.join('; ')}` : `no ${req.kind} is expected right now`, shape);
   };
@@ -373,6 +484,9 @@ export function installGuard(o: GuardOptions): Guard {
     mode: o.mode,
     expect(e) {
       const list = (Array.isArray(e) ? e : [e]).map((x) => ({ ...x, left: x.times ?? 1 }));
+      for (const x of list) {
+        if (x.kind === 'direct-order' && (typeof x.exact !== 'string' || x.exact === '')) throw new Error(`guard: a direct-order expectation needs its exact body ("${x.label}")`);
+      }
       armed.push(...list);
       return () => {
         for (const x of list) {
