@@ -26,7 +26,9 @@ EnvironmentFile=/etc/valuescan/api.secret.env
 EnvironmentFile=-/etc/valuescan/api.local.env
 # The heap is set, not derived: inside MemoryMax=900M Node chose 368 MB on its own, and the API died
 # of it five times on 2026-10-03 (heap out of memory, then a 5-minute core dump with the API down).
-ExecStart=/opt/node/current/bin/node --max-old-space-size=512 --disable-warning=ExperimentalWarning --import tsx src/index.ts
+# Measured (local index, 2026-10-04): the cohort load keeps ~270 MB and peaks ~440 MB while it is
+# built, and it is rebuilt every minute behind the one in use - two at once. 1 GB holds that.
+ExecStart=/opt/node/current/bin/node --max-old-space-size=1024 --disable-warning=ExperimentalWarning --import tsx src/index.ts
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
@@ -37,9 +39,10 @@ LimitNOFILE=65536
 # system, Caddy, the health check, the nightly backup and npm during a release, so
 # a runaway is stopped inside its own unit (and restarted) before it can take the
 # box down. On 8 GiB (t4g.large) 1500M / 2G is right: a drop-in, `systemctl edit`.
-# 512 MB of heap plus Node's own memory fit under MemoryHigh.
-MemoryHigh=800M
-MemoryMax=1000M
+# 1 GB of heap plus Node's own memory fit under MemoryHigh. With the indexer (~0.8 GB in use, capped
+# at 1.8 GB) that leaves the 4 GiB box room for the system; a t4g.large would be comfortable.
+MemoryHigh=1300M
+MemoryMax=1500M
 # No core dump: writing one took 5 minutes, all of them without an API. A crash restarts in 3 s.
 LimitCORE=0
 SyslogIdentifier=valuescan-api
