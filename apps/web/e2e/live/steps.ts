@@ -95,6 +95,9 @@ export async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: st
   }
 }
 
+/** How long a deposit may take to be credited: the configured minutes, or twice SoDEX's own estimate and 5 more, whichever is longer. */
+export const creditWaitMs = (ctx: Ctx, etaSeconds: number | null | undefined): number => Math.max(ctx.cfg.timeouts.depositMinutes * 60_000, ((etaSeconds ?? 0) * 2 + 300) * 1000);
+
 /** The check a configured deposit / withdrawal reports under (`key`: its index in the config, or the step's own key). */
 export function routeCheck(ctx: Ctx, step: StepId, key: number | string): string {
   const id = ctx.routeChecks.get(`${step}#${key}`);
@@ -218,7 +221,7 @@ export async function depositOne(ctx: Ctx, chainKey: string, amountIn: string): 
   const t0 = Date.now();
   const credited = await rec.sub(`wait for SoDEX to ${acct0 ? 'credit' : 'open the account and credit'} Spot +${expected} USDC (${eta})`, () =>
     waitFor(ctx, `SoDEX to credit the deposit (${eta})`, {
-      timeoutMs: ctx.cfg.timeouts.depositMinutes * 60_000,
+      timeoutMs: creditWaitMs(ctx, route.etaSeconds),
       intervalMs: 15_000,
       probe: async () => {
         const id = await sodexAccountId(owner);

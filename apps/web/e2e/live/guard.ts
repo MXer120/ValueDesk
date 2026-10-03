@@ -339,6 +339,8 @@ export function installGuard(o: GuardOptions): Guard {
   const rpcs = new Set(o.rpcUrls.map(norm));
   const readOnly = new Set((o.readOnlyOrigins ?? []).map((u) => new URL(u).origin));
   const armed: Array<Expectation & { left: number }> = [];
+  /** Native transfers that went out (their raw signed bytes): the same bytes again are a rebroadcast, never a second payment. */
+  const sentRawTx = new Set<string>();
   const records: NetRecord[] = [];
   const refusals: NetRecord[] = [];
   /** Long waits poll for up to half an hour: keep the report bounded (writes and refusals are always kept). */
@@ -488,8 +490,17 @@ export function installGuard(o: GuardOptions): Guard {
       const plain = txs.filter((t) => t.value > 0n);
       if (!plain.length) return send();
       if (txs.length > 1) return refused(rec, 'a native-coin transfer goes out alone, never in a batch', 'rpc', ids);
+      const rawKey = String(raws[0] ?? '').toLowerCase();
+      if (sentRawTx.has(rawKey)) {
+        // The wallet's RPC client sends once more after a time-out or a 5xx: the SAME signed transaction (one nonce,
+        // one hash) cannot pay twice - refusing it would only hide whether the first copy arrived.
+        rec.what = 'native-transfer: the same signed transaction again (a rebroadcast)';
+        return send();
+      }
       rec.what = 'native-transfer';
-      return dispatch({ kind: 'native-transfer', method, url, body: parsed, raw: bodyText, tx: plain[0]! }, rec, 'rpc', ids);
+      const res = await dispatch({ kind: 'native-transfer', method, url, body: parsed, raw: bodyText, tx: plain[0]! }, rec, 'rpc', ids);
+      if (!rec.blocked) sentRawTx.add(rawKey);
+      return res;
     }
 
     if (method === 'GET' || method === 'HEAD') {

@@ -183,8 +183,8 @@ export function marketCost(m: Market, qty: string): number {
 /** The spot market that buys `coin` with USDC (e.g. vETH_vUSDC), from the backend's symbol list. */
 export async function spotMarketFor(coin: CoinConfig): Promise<Market> {
   const list = (await api.symbols('spot')).symbols;
-  const s = list.find((x) => x.baseCoin?.toUpperCase() === coin.asset.toUpperCase() && x.quoteCoin?.toUpperCase() === 'VUSDC');
-  if (!s) throw new Error(`no ${coin.asset}/USDC spot market to buy ${coin.coin} on`);
+  const s = list.find((x) => x.baseCoin?.toUpperCase() === coin.asset.toUpperCase() && x.quoteCoin?.toUpperCase() === 'VUSDC' && (!x.status || x.status === 'TRADING'));
+  if (!s) throw new Error(`no ${coin.asset}/USDC spot market that is TRADING to buy ${coin.coin} on`);
   return readMarket('spot', s.name);
 }
 

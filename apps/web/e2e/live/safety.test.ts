@@ -584,8 +584,8 @@ test('order shapes: the guard demands the modifier SoDEX documents for each case
 
 const DEP = '0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed';
 const FRIEND_ADDR = '0x4b363bfcd961eca3aa723151a7ccdab76b869bfd';
-const rawTx = (pk: `0x${string}`, o: { chainId: number; to: string; value: bigint; data?: `0x${string}` }) =>
-  privateKeyToAccount(pk).signTransaction({ type: 'eip1559', chainId: o.chainId, to: o.to as `0x${string}`, value: o.value, data: o.data ?? '0x', nonce: 0, gas: 21_000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n });
+const rawTx = (pk: `0x${string}`, o: { chainId: number; to: string; value: bigint; data?: `0x${string}`; nonce?: number }) =>
+  privateKeyToAccount(pk).signTransaction({ type: 'eip1559', chainId: o.chainId, to: o.to as `0x${string}`, value: o.value, data: o.data ?? '0x', nonce: o.nonce ?? 0, gas: 21_000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n });
 const sendRaw = async (raw: string | string[]) => {
   const list = Array.isArray(raw) ? raw : [raw];
   const body = list.map((r, i) => ({ jsonrpc: '2.0', id: i + 1, method: 'eth_sendRawTransaction', params: [r] }));
@@ -609,9 +609,12 @@ test('guard, live mode: a native-coin transfer leaves only when armed - exactly 
   assert.match((await sendRaw([good, good]))[0].error.message, /alone/, 'two in one batch');
   assert.equal(hits.length, 0, 'none of those reached the node');
   assert.equal((await sendRaw(good))[0].result, '0x1', 'the armed one');
-  assert.match((await sendRaw(good))[0].error.message, /no native-transfer is expected|does not match/, 'used up');
+  // The SAME signed bytes again (the wallet's RPC client retries after a time-out): a rebroadcast - one nonce, one
+  // hash, it cannot pay twice - goes out; any OTHER transfer finds the expectation used up.
+  assert.equal((await sendRaw(good))[0].result, '0x1', 'the identical transaction again');
+  assert.match((await sendRaw(await rawTx(pk, { chainId: 42161, to: DEP, value, nonce: 1 })))[0].error.message, /no native-transfer is expected|does not match/, 'used up');
   disarm();
-  assert.equal(hits.length, 1);
+  assert.equal(hits.length, 2);
   // A zero-value contract call (an ERC-20 transfer) is gated by the wallet's policy, as before; an undecodable one is refused.
   assert.equal((await sendRaw(await rawTx(pk, { chainId: 42161, to: DEP, value: 0n, data: '0xa9059cbb' })))[0].result, '0x1');
   assert.match((await sendRaw('0x00'))[0].error.message, /undecodable/);

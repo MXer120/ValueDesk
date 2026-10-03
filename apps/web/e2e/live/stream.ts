@@ -79,6 +79,12 @@ export class AccountStream {
   readonly wants: Record<Engine, StreamWants> = { spot: newWants(), perps: newWants() };
   /** Reconnects after a drop: pushes may be missing since. */
   readonly gaps: Record<Engine, number> = { spot: 0, perps: 0 };
+  /**
+   * When each engine's subscriptions were first all accepted (null: never). A brand-new wallet's account
+   * does not exist when the run starts: SoDEX refuses the subscription ("user not found") until it does,
+   * and nothing before this moment was pushed.
+   */
+  readonly readySince: Record<Engine, number | null> = { spot: null, perps: null };
   /** Refused subscriptions and other things the gateway said. */
   readonly errors: string[] = [];
   private readonly socks = new Map<Engine, SodexSocket>();
@@ -144,6 +150,7 @@ export class AccountStream {
     }
     if (msg?.op === 'subscribe' && msg.success === true) {
       this.acks[engine] += 1;
+      if (this.readySince[engine] === null && this.acks[engine] >= CHANNELS.length) this.readySince[engine] = Date.now();
       this.notify();
     }
   }

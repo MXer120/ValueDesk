@@ -26,7 +26,7 @@ import { addOrSwitchChain, sendTransaction } from '../../src/wallet';
 import { SafetyStop, armed, type Ctx } from './context';
 import { marketQty, checkDepositAddress, depositAddressProblem, ownerGasNeed, spotMarketFor } from './plan';
 import { nativeBalance, receipt, registryDepositAddresses } from './reads';
-import { buyOnSpot, depositOne, moved, routeCheck, withdrawTo } from './steps';
+import { buyOnSpot, creditWaitMs, depositOne, moved, routeCheck, withdrawTo } from './steps';
 import { mustPlace, orderMs, settleFills, waitFor } from './orders';
 import { depositBackProblem, depositFloor, gasReserve, nativeLegAmounts, nativeTransferExpect, nativeTransferPolicy, oneWayAmount, oneWayUsdcAmount, reserveGasUnits, tourPlan, usdcLegAmounts, type TourLeg } from './tour';
 import { ensureTrading } from './trading';
@@ -91,7 +91,7 @@ async function depositNative(ctx: Ctx, leg: TourLeg, amount: string): Promise<{ 
   const t0 = Date.now();
   const s1 = await rec.sub(`wait for SoDEX to credit Spot +${amount} ${coin.coin} (${eta})`, () =>
     waitFor(ctx, `SoDEX to credit the ${coin.coin} deposit (${eta})`, {
-      timeoutMs: ctx.cfg.timeouts.depositMinutes * 60_000,
+      timeoutMs: creditWaitMs(ctx, leg.route.deposit.etaSeconds),
       intervalMs: 15_000,
       probe: async () => unitsDown((await balancesOf(owner, coin)).spot, coinDp),
       done: (s) => s >= spot0 + want,

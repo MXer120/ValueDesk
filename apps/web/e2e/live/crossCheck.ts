@@ -156,8 +156,10 @@ export async function stepCrossCheck(ctx: Ctx): Promise<void> {
   // --- 2. not while the server's verifier reads the same routes ---------------------------------------------------------
   if (ctx.terms) {
     const watch = ctx.terms;
+    // At most two minutes: "pending" also covers orders waiting for explorer lookups (which use no history budget),
+    // and the run's reads, 35 s apart, plus the verifier's one a minute stay under SoDEX's four a minute anyway.
     const r = await pollUntil({
-      timeoutMs: ctx.cfg.timeouts.verifierMinutes * 60_000,
+      timeoutMs: Math.min(ctx.cfg.timeouts.verifierMinutes, 2) * 60_000,
       intervalMs: 10_000,
       probe: async () => (await requestTerms(watch, owner)).verdict,
       done: (v) => v.off || !v.answer.volume || !v.answer.volume.pending,
@@ -227,6 +229,10 @@ export async function stepCrossCheck(ctx: Ctx): Promise<void> {
       ctx.checks.skip('cross-stream-vs-rest', 'the account stream was not connected in this run: order states and fills came from polling and from this history read');
       return;
     }
+    if (ENGINES.every((e) => stream.readySince[e] === null)) {
+      ctx.checks.skip('cross-stream-vs-rest', `the account stream never had its subscriptions accepted in this run (${JSON.stringify(stream.describe())}): there is nothing to compare`);
+      return;
+    }
     const lines: string[] = [];
     const wrong: string[] = [];
     const news: string[] = [];
@@ -243,8 +249,12 @@ export async function stepCrossCheck(ctx: Ctx): Promise<void> {
         const off = [...w.orders].filter(([id, status]) => byId.get(id) !== status).map(([id, status]) => `#${id}: the stream said ${status}, the history ${byId.has(id) ? `says ${byId.get(id)}` : 'does not list it'}`);
         news.push(`${engine}: ${off.length} order(s) the stream reported final are not in the order history in that state (${some(off, 3).join('; ')}) - the app's order-history table would read again after each of them`);
       }
-      // And the other way round: every fill of the history was pushed.
-      const unseen = fills[engine].filter((f) => !ctx.ledger.streamFills.has(fillKey(f)));
+      // And the other way round: every fill of the history was pushed - from the moment SoDEX accepted the
+      // subscription (a brand-new wallet's account did not exist before its first deposit: nothing earlier was pushed).
+      const since = stream.readySince[engine];
+      const before = fills[engine].filter((f) => !ctx.ledger.streamFills.has(fillKey(f)) && (since === null || (f.time !== null && f.time < since)));
+      if (before.length) news.push(`${engine}: ${before.length} fill(s) happened before the stream's subscription was accepted${since ? ` (${new Date(since).toISOString()})` : ' (it never was)'} - not pushed, as expected`);
+      const unseen = fills[engine].filter((f) => !ctx.ledger.streamFills.has(fillKey(f)) && !before.includes(f));
       if (unseen.length) {
         const text = `${engine}: ${unseen.length} fill(s) of the history were never pushed on the stream (${some(unseen, 2).map((f) => `trade ${f.tradeID}`).join(', ')})`;
         if (stream.gaps[engine] > 0) news.push(`${text} - the stream reconnected ${stream.gaps[engine]} time(s), pushes in between are lost`);
