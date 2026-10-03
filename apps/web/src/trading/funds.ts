@@ -20,7 +20,10 @@
  *
  * STRICTER THAN SODEX.COM, NEVER LAXER. Before anything moves: SoDEX's
  * maintenance switch, its address risk check, the on-chain fee (must be the one
- * shown), custody liquidity and the receiver blacklist. Before anything is sent:
+ * shown), custody liquidity and the receiver blacklist - and never to the
+ * owner's own SoDEX deposit address, nor to any SoDEX deposit address that would
+ * receive less than SoDEX's deposit minimum (components/funds/depositGuard.ts:
+ * it would never be credited). Before anything is sent:
  * the signed request is run on-chain as SoDEX's relayer will run it (eth_call) -
  * a request the contract would refuse is never sent. After: the receipt, and
  * for a withdrawal the Withdrawer's own record of it.
@@ -77,6 +80,7 @@ import {
 } from './relay';
 import { VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } from './rpc';
 import { openingWalletStep } from '../components/funds/openingStep';
+import { _clearReceiverCache, arrivalCheck, receiverAccount } from '../components/funds/depositGuard';
 import { logger } from '../log';
 
 const log = logger('trade');
@@ -781,6 +785,12 @@ export async function withdrawFunds(o: {
     if (bad) throw new RangeError(bad);
     if (!o.provider) throw new WalletError('Reconnect your wallet: a withdrawal to another chain needs one signature.');
   }
+  if (toOther) {
+    // Never to the owner's own SoDEX deposit address (the registry says so; an unanswered read leaves it to the sheet).
+    const reg = await receiverAccount(owner, coin, 'VALUECHAIN', address).catch(() => null);
+    const arrival = arrivalCheck({ owner, coin, route: 'VALUECHAIN', receiver: address, amount: units, fee: 0n, registry: reg });
+    if (arrival.verdict === 'refuse') throw new RangeError(arrival.text);
+  }
 
   const bal = await balancesOf(owner, coin);
   const b = { spot: unitsDown(bal.spot, dp), perps: unitsDown(bal.perps, dp), evm: unitsDown(bal.evm, dp) };
@@ -800,8 +810,14 @@ export async function withdrawFunds(o: {
     // the address risk check sodex.com runs for every custody withdrawal,
     if (route.withdrawType === 0) await analyseAddress(address);
     // and the chain's own rules: the fee must be the one shown, the amount above
-    // it, SoDEX's reserve on that chain able to pay, the receiver not blacklisted.
-    const [quote, blacklisted] = await Promise.all([withdrawRequirements(coin.coin, route.key, owner, route.withdrawType), receiverBlacklisted(route.key, receiver)]);
+    // it, SoDEX's reserve on that chain able to pay, the receiver not blacklisted;
+    // and what arrives creditable when the receiver is a SoDEX deposit address
+    // (an unanswered registry read leaves that to the sheet's confirmation).
+    const [quote, blacklisted, reg] = await Promise.all([
+      withdrawRequirements(coin.coin, route.key, owner, route.withdrawType),
+      receiverBlacklisted(route.key, receiver),
+      receiverAccount(owner, coin, route, address).catch(() => null),
+    ]);
     if (o.expectedFee !== undefined && quote.fee !== o.expectedFee) {
       throw new RangeError(`SoDEX's ${route.label} fee is now ${fmt(quote.fee)} ${coin.coin} - check the amount you receive and try again.`);
     }
@@ -810,6 +826,8 @@ export async function withdrawFunds(o: {
       throw new RangeError(`SoDEX can pay out ${fmt(quote.available)} ${coin.coin} on ${route.label} right now - withdraw less, or try again later.`);
     }
     if (blacklisted) throw new RangeError(`SoDEX does not pay out to this address on ${route.label}.`);
+    const arrival = arrivalCheck({ owner, coin, route, receiver: address, amount: units, fee: quote.fee, registry: reg });
+    if (arrival.verdict === 'refuse') throw new RangeError(arrival.text);
     chain = await valueChain();
     ask = promptCounter(o.onStep, (await needsSwitch(o.provider, chain)) ? 2 : 1);
   }
@@ -1038,6 +1056,7 @@ export const _clearPendingWithdrawals = (): void => {
     clearPending(kind, k.slice(PENDING_KEY[kind].length));
   }
   quoteCache.clear();
+  _clearReceiverCache();
 };
 
 export type { Engine };

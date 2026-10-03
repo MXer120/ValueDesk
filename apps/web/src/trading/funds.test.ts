@@ -11,7 +11,10 @@
  *   - to another chain: every SoDEX refusal (maintenance, risk check, fee, reserve,
  *     blacklist) comes before anything moves; then Spot -> wallet, WAIT, ONE
  *     permit signature, simulated, relayed, tracked by the Withdrawer's record;
- *   - an unclear answer is never sent twice.
+ *   - an unclear answer is never sent twice;
+ *   - what ARRIVES against SoDEX's deposit minimum: refused for the own deposit
+ *     address and for a SoDEX deposit address it would not credit (the custody
+ *     contract's reverse map), a confirmation for any other address below it.
  *   npx tsx --test src/trading/funds.test.ts
  */
 import { test, beforeEach } from 'node:test';
@@ -39,6 +42,8 @@ import {
   tokenNoncesCallData,
   withdrawRequirementsCallData,
 } from '@sodex-core';
+import { MIRROR_REGISTRY } from '@sign/sodex/mirrorCore.js';
+import { DEPOSIT_WALLET_REGISTRY } from '@sign/sodex/depositWalletsCore.js';
 import { setTradingConfig } from './config';
 import { erc20TransferData } from './onboard';
 import { memoryVault } from './vault';
@@ -59,6 +64,7 @@ import {
   type ChainRoute,
   type CoinConfig,
 } from './funds';
+import { receiverAccount, type ReceiverAccount } from '../components/funds/depositGuard';
 
 const master = generateTradingKey();
 const OWNER = master.address.toLowerCase();
@@ -104,6 +110,12 @@ let world = {
   execRevert: null as string | null,
   maintenance: [] as unknown[],
   withdrawals: [] as FakeWithdrawal[],
+  /** SoDexTokenCustody's reverse map: `${chain}|${exact stored string}` -> account. */
+  depositAccounts: {} as Record<string, string>,
+  /** The owner's own deposit addresses for USDC (registry getDepositWalletList), chain -> list. */
+  ownDeposits: {} as Record<string, string[]>,
+  /** The two registries do not answer. */
+  registryDown: false,
 };
 /** What the next call_for_permit answers: normal; a 504 after it executed; a 504 without; a definite 400; accepted without a hash. */
 let relayReply: 'ok' | '504' | '504-noexec' | '400' | 'nohash' = 'ok';
@@ -210,6 +222,8 @@ const S = {
   blacklist: isBlacklistedCallData('BASE_ETH', OWNER).slice(0, 10),
   getWithdrawal: getWithdrawalCallData(1n).slice(0, 10),
   execute: sel('execute(address,string,bytes,uint256,uint256,bytes)'),
+  depositAccounts: sel('depositAccounts(string,string)'),
+  depositWalletList: sel('getDepositWalletList(address,string)'),
 };
 
 /** One JSON-RPC call to the fake ValueChain. */
@@ -237,6 +251,17 @@ function chain(method: string, params: any[]): { result?: unknown; error?: { cod
     if (t === WITHDRAW_TOKEN_TARGET.toLowerCase() && s === S.getWithdrawal) {
       const w = world.withdrawals.find((x) => x.id === BigInt('0x' + data.slice(10)));
       return w ? { result: encodeWithdrawal(w) } : { error: { code: 3, message: 'execution reverted' } };
+    }
+    if ((t === MIRROR_REGISTRY.toLowerCase() && s === S.depositAccounts) || (t === DEPOSIT_WALLET_REGISTRY.toLowerCase() && s === S.depositWalletList)) {
+      if (world.registryDown) return { error: { code: -32000, message: 'header not found' } };
+      if (s === S.depositAccounts) {
+        // An exact string key, as the contract's mapping(string => mapping(string => address)).
+        const [c, w] = decodeAbiParameters([{ type: 'string' }, { type: 'string' }], `0x${data.slice(10)}`);
+        return { result: '0x' + word(BigInt(world.depositAccounts[`${c}|${w}`] ?? 0)) };
+      }
+      const [account, coin] = decodeAbiParameters([{ type: 'address' }, { type: 'string' }], `0x${data.slice(10)}`);
+      const lists = account.toLowerCase() === OWNER && coin === 'USDC' ? Object.entries(world.ownDeposits) : [];
+      return { result: encodeAbiParameters([{ type: 'string[]' }, { type: 'string[][]' }], [lists.map(([c]) => c), lists.map(([, l]) => l)]) };
     }
     throw new Error(`unexpected eth_call ${to} ${s}`);
   }
@@ -359,7 +384,7 @@ globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
 }) as typeof fetch;
 
 beforeEach(async () => {
-  world = { spot: 0, perps: 0, evm: 0, nonce: 7n, depNonce: 0n, tokenNonce: 3n, fee: 1_000_000n, available: 10n ** 12n, blacklisted: false, minWithdraw: 5_000_000n, execRevert: null, maintenance: [], withdrawals: [] };
+  world = { spot: 0, perps: 0, evm: 0, nonce: 7n, depNonce: 0n, tokenNonce: 3n, fee: 1_000_000n, available: 10n ** 12n, blacklisted: false, minWithdraw: 5_000_000n, execRevert: null, maintenance: [], withdrawals: [], depositAccounts: {}, ownDeposits: {}, registryDown: false };
   relayReply = 'ok';
   analyseStatus = 200;
   perpsState = null;
@@ -814,4 +839,54 @@ test('to the own ValueChain wallet EVM Funding cannot pay (it is already there);
   await assert.rejects(withdrawFunds({ owner: OWNER, provider: null, coin: USDC, route: 'VALUECHAIN', receiver: FRIEND, amount: '5', sources: evmOnly }), /Reconnect your wallet/);
   assert.equal(sent.filter((x) => x.method === 'POST').length, 0);
   assert.equal(wallet.txs.length, 0);
+});
+
+// --- the receiving end: a deposit address, and SoDEX's deposit minimum ------------------------------
+// The owner's case (2026-10): 5 USDC withdrawn to Base met the 5 USDC withdrawal
+// minimum, but to ANOTHER SoDEX account's deposit address 4 arrived after the
+// 1 USDC fee - below the 5 USDC deposit minimum, so it was never credited.
+// The sheet's verdicts themselves: components/funds/depositGuard.test.ts.
+
+/** Another SoDEX account, its Base deposit address (stored EIP-55, as SoDEX stores them), and the owner's own. */
+const OTHER = '0x2222222222222222222222222222222222222222';
+const THEIRS = toChecksumAddress('0x4577c24e9e7a53aa775589c7d9fa7ae4bbc426cb');
+const MINE = toChecksumAddress('0x5cc60db393c3d48b8128bc82183da57fd9fc7b01');
+const UNKNOWN: ReceiverAccount = { depositOf: null, own: false };
+
+test("the registry: the custody contract's reverse map, asked in the EIP-55 form SoDEX stores; the owner's own list; no answer is not a no", async () => {
+  world.depositAccounts = { [`BASE_ETH|${THEIRS}`]: OTHER, [`BASE_ETH|${MINE}`]: OWNER };
+  world.ownDeposits = { BASE_ETH: [MINE], ETH: [MINE], SOL: ['F7xtoepF6EpvHBvEuP2Aj8Jmf6Fqw4vjTqgT6ok1hDBj'] };
+  assert.deepEqual(await receiverAccount(OWNER, USDC, BASE, THEIRS.toLowerCase()), { depositOf: OTHER, own: false }, 'typed in lower case: still found');
+  assert.deepEqual(await receiverAccount(OWNER, USDC, BASE, MINE), { depositOf: OWNER, own: true });
+  assert.deepEqual(await receiverAccount(OWNER, USDC, BASE, DEST), UNKNOWN);
+  assert.deepEqual(await receiverAccount(OWNER, USDC, 'VALUECHAIN', MINE.toLowerCase()), { depositOf: null, own: true }, 'ValueChain: from the own list');
+  world.registryDown = true;
+  _clearPendingWithdrawals();
+  await assert.rejects(receiverAccount(OWNER, USDC, BASE, THEIRS));
+});
+
+test('withdrawFunds refuses before anything moves: a SoDEX deposit address that would get less than the minimum, the own deposit address', async () => {
+  world.spot = 30;
+  world.depositAccounts = { [`BASE_ETH|${THEIRS}`]: OTHER, [`BASE_ETH|${MINE}`]: OWNER };
+  world.ownDeposits = { BASE_ETH: [MINE] };
+  const go = (receiver: string, amount: string, route: ChainRoute | 'VALUECHAIN' = BASE) =>
+    withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route, receiver, amount, sources: spotOnly, expectedFee: route === 'VALUECHAIN' ? undefined : 1_000_000n });
+  await assert.rejects(go(THEIRS, '5'), /That is a SoDEX deposit address\. Only 4 USDC arrives .* never be credited/);
+  await assert.rejects(go(MINE, '20'), /your own SoDEX deposit address/);
+  await assert.rejects(go(MINE, '5', 'VALUECHAIN'), /your own SoDEX deposit address/);
+  assert.equal(moved().length, 0, 'no transfer, no permit');
+  assert.equal(wallet.prompts, 0);
+  assert.equal(world.spot, 30);
+  const r = await go(THEIRS, '6');
+  assert.ok('withdrawId' in r && r.withdrawId, 'enough to be credited: it goes');
+});
+
+test("withdrawFunds leaves an unknown address below the minimum to the sheet's confirmation, and an unanswered registry too", async () => {
+  world.evm = 20;
+  const r = await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: DEST, amount: '5', sources: evmOnly });
+  assert.ok('withdrawId' in r);
+  world.depositAccounts = { [`BASE_ETH|${THEIRS}`]: OTHER };
+  world.registryDown = true;
+  const r2 = await withdrawFunds({ owner: OWNER, provider: wallet, coin: USDC, route: BASE, receiver: THEIRS, amount: '5', sources: evmOnly });
+  assert.ok('withdrawId' in r2, 'the sheet asked for the tick; nothing here blocks it');
 });

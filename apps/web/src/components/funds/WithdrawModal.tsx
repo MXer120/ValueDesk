@@ -16,6 +16,13 @@
  * transfer; any other chain goes through SoDEX's permit - one wallet signature
  * (trading/funds.ts). Perps is not a source: SoDEX has no route from Perps to a
  * wallet, so money there moves to Spot first (the Transfer sheet).
+ *
+ * What ARRIVES is checked against SoDEX's deposit minimum on that chain
+ * (depositGuard.ts; withdrawFunds re-checks it): the owner's own SoDEX deposit address is refused; a
+ * SoDEX deposit address (the registry knows them) that would get less than the
+ * minimum is refused - it would never be credited; any other address below it
+ * shows the warning under the amount and needs one tick ("It is a wallet, not
+ * a deposit address") before the button lights.
  */
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
@@ -36,6 +43,7 @@ import {
   type FundsStep,
   type WithdrawQuote,
 } from '../../trading/funds';
+import { arrivalCheck, receiverAccount, type ArrivalCheck, type ReceiverAccount } from './depositGuard';
 import { maintenanceFor, maintenanceNote, type Maintenance } from '../../trading/relay';
 import { formatUnits, parseUnits } from '../../trading/onboard';
 import { WalletError, isUserRejection, type Eip1193Provider } from '../../wallet';
@@ -100,6 +108,10 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
   const [error, setError] = useState<string | null>(null);
   /** Bumped after every attempt, so the balances are re-read whatever happened. */
   const [reads, setReads] = useState(0);
+  /** SoDEX's registry on the destination, for `key` (owner|coin|chain|address); `value` null: still read, or it could not be. */
+  const [registry, setRegistry] = useState<{ key: string; value: ReceiverAccount | null; done: boolean } | null>(null);
+  /** The user said less than SoDEX's deposit minimum may arrive: the destination is a wallet, not a deposit address. */
+  const [belowMinOk, setBelowMinOk] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -107,6 +119,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
     setResult(null);
     setStatus(null);
     setReview(false);
+    setBelowMinOk(false);
     setBookOpen(false);
     setBookDraft(undefined);
     setSource('spot');
@@ -233,6 +246,40 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
   }
   const destProblem = dest ? receiverProblem(route, dest) : null;
   const memoError = memoRoute && dest && !destProblem ? memoProblem(route, memo, noMemo) : null;
+  /**
+   * Is the destination a SoDEX deposit address - the owner's own, or any
+   * account's on this chain? Asked of SoDEX's registry on ValueChain once it is
+   * a valid address other than the connected wallet (depositGuard.ts).
+   */
+  const regKey = owner && coin && dest && !destProblem && !toSelf ? `${owner}|${coin.coin}|${routeKey ?? VALUECHAIN}|${dest}` : null;
+  useEffect(() => {
+    if (!open || !regKey || !owner || !coin) return;
+    let stop = false;
+    setRegistry({ key: regKey, value: null, done: false });
+    receiverAccount(owner, coin, route, dest)
+      .then((value) => !stop && setRegistry({ key: regKey, value, done: true }))
+      .catch(() => !stop && setRegistry({ key: regKey, value: null, done: true }));
+    return () => {
+      stop = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, regKey]);
+  const reg = registry?.key === regKey ? registry : null;
+  /** The registry has not answered yet: the button waits (a fraction of a second). */
+  const regPending = !!regKey && !reg?.done;
+  /**
+   * What arrives, against SoDEX's deposit minimum on that chain: refused for
+   * the owner's own deposit address and for a SoDEX deposit address it would
+   * not credit; any other address below the minimum needs one tick first.
+   */
+  const arrival: ArrivalCheck =
+    owner && coin && regKey
+      ? arrivalCheck({ owner, coin, route, receiver: dest, amount: problem || !feeKnown ? 0n : amtUnits, fee: feeUnits, registry: reg?.value ?? null })
+      : { verdict: 'ok' };
+  const arrivalRefused = arrival.verdict === 'refuse' ? arrival : null;
+  const needsAck = arrival.verdict === 'confirm';
+  // A tick covers the amount and address it was given for.
+  useEffect(() => setBelowMinOk(false), [amount, dest, chainKey, coinName]);
   const receiveUnits = amtUnits > feeUnits ? amtUnits - feeUnits : 0n;
   const plan = amtUnits > 0n ? planWithdraw(amtUnits, external || !toSelf ? 'EXTERNAL' : 'VALUECHAIN', useSrc, b) : null;
   const needsKey = !!plan && ('problem' in plan || plan.fromSpot > 0n);
@@ -351,6 +398,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
               memo={memoRoute ? (noMemo ? '' : memo.trim()) : null}
               fee={show(feeUnits)}
               receive={show(receiveUnits)}
+              arrivalNote={arrival.verdict === 'confirm' ? arrival.brief : null}
               busy={busy}
               busyText={busyLabel(step)}
               error={error}
@@ -433,6 +481,16 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
             </div>
           </div>
 
+          {arrivalRefused && arrivalRefused.reason !== 'own' && <p className="fx-note fx-note--err">{arrivalRefused.text}</p>}
+          {arrival.verdict === 'confirm' && (
+            <div>
+              <p className="fx-note fx-note--warn">{arrival.text}</p>
+              <label className="fx-check">
+                <input type="checkbox" checked={belowMinOk} onChange={(e) => setBelowMinOk(e.target.checked)} />
+                It is a wallet, not a deposit address - withdraw anyway
+              </label>
+            </div>
+          )}
           {sourceProblem && <p className="fx-note fx-note--err">{sourceProblem}</p>}
 
           <div>
@@ -463,11 +521,12 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
                   <WalletIcon /> Use connected wallet {short(owner)}
                 </button>
               )}
-              {dest && !saved && !destProblem && addressKinds(dest).includes(destKind) && !toSelf && (
+              {dest && !saved && !destProblem && addressKinds(dest).includes(destKind) && !toSelf && arrivalRefused?.reason !== 'own' && (
                 <button type="button" className="fx-link" onClick={() => openBook(dest)}>Save as contact</button>
               )}
             </div>
             {destProblem && <p className="fx-note fx-note--err" style={{ marginTop: 6 }}>{destProblem}</p>}
+            {arrivalRefused?.reason === 'own' && <p className="fx-note fx-note--err" style={{ marginTop: 6 }}>{arrivalRefused.text}</p>}
           </div>
 
           {memoRoute && (
@@ -505,7 +564,8 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
               enabling ||
               !coin ||
               (cta === 'Withdraw' &&
-                (!amount || !!problem || sourceEmpty || !!sourceProblem || !dest || !!destProblem || !!memoError || (needsWallet && !provider) || !feeKnown || down?.severity === 'unavailable'))
+                (!amount || !!problem || sourceEmpty || !!sourceProblem || !dest || !!destProblem || !!memoError || (needsWallet && !provider) || !feeKnown || down?.severity === 'unavailable' ||
+                  regPending || !!arrivalRefused || (needsAck && !belowMinOk)))
             }
           >
             {busy ? busyLabel(step) : enabling ? <ApproveLabel /> : ctaText}
@@ -544,6 +604,8 @@ function WithdrawReview(p: {
   memo: string | null;
   fee: string;
   receive: string;
+  /** Less than SoDEX's deposit minimum arrives, and the user ticked that the address is a wallet. */
+  arrivalNote?: string | null;
   busy: boolean;
   busyText: string;
   error: string | null;
@@ -565,6 +627,7 @@ function WithdrawReview(p: {
         <div><span>Fee</span><b>{p.fee} {p.unit}</b></div>
         <div className="fx-review__recv"><span>You receive</span><b>{p.receive} {p.unit}</b></div>
       </div>
+      {p.arrivalNote && <p className="fx-note fx-note--warn">{p.arrivalNote}</p>}
       <p className="fx-note fx-note--warn">
         A withdrawal cannot be reversed. Check the network and every character of the address{p.memo !== null ? ' and the memo' : ''} - funds sent to a wrong one are lost.
       </p>
