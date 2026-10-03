@@ -23,7 +23,7 @@ afterwards. The reference for each part sits next to its code:
 ```
 visitor ──HTTPS──> CloudFront ──┬── site bucket (S3, private)          the built web: /, /assets/*, /logos/*, ...
    │                (+ WAF)     └── /api/* ──HTTPS + secret──> Caddy :443 ──> 127.0.0.1:8797
-   │                                                           on ONE instance:  valuescan-api      (hosted mode, 16 GET routes)
+   │                                                           on ONE instance:  valuescan-api      (hosted mode, 17 GET routes)
    │                                                                             valuescan-indexer  (the one writer of the index)
    └──────────── directly from the browser ──> SoDEX, Hyperliquid, Lighter, Arcus, WalletConnect, public RPCs
 ```
@@ -46,7 +46,7 @@ visitor ──HTTPS──> CloudFront ──┬── site bucket (S3, private) 
 | AWS account and region | `REGION` in `deploy/aws/params.env`; credentials in the AWS CLI | The account must be allowed to launch an instance - see "If the instance cannot be launched" in section 15. The region is a price and data-protection choice: the index only reads the exchanges, latency does not matter to it. |
 | Domain and its Route 53 zone | `DOMAIN_NAME`, `HOSTED_ZONE_ID`, `ORIGIN_DOMAIN_NAME` | With the zone id the certificate and all records are automatic. With DNS elsewhere leave it empty and create three records by hand (section 15). |
 | WalletConnect / Reown project id | `VITE_WALLETCONNECT_PROJECT_ID` in `deploy/release/web.env` | Create the project at dashboard.reown.com and put the production domain on its allowed list. Without it wallets connect only as browser extensions. |
-| Builder account id and fee | `VITE_BUILDER_ID`, `VITE_BUILDER_FEE_PERPS`, `VITE_BUILDER_FEE_SPOT`, `VITE_BUILDER_MAX_FEE` in `web.env` | Fees are in tenths of a basis point. All empty = no fee is approved or charged. Whether and what to charge is a business and a legal decision. |
+| Builder account id and fee | `VITE_BUILDER_ID`, `VITE_BUILDER_FEE_PERPS`, `VITE_BUILDER_FEE_SPOT`, `VITE_BUILDER_MAX_FEE` in `web.env` | Fees are in tenths of a basis point. All empty = no fee is approved or charged. Whether and what to charge is a business and a legal decision. Per-wallet tiers: section 16. |
 | Legal pages: Impressum, privacy policy, terms and risk notice | the app has **no place for them today** - no route, no footer link (section 14) | The texts are the owner's and need legal review. The privacy policy has to name what this setup does: section 12. |
 | Contact address | the legal pages | |
 | Alert address | `ALERT_EMAIL` in `params.env` | Receives the alarms and the health alerts; the address must confirm one mail from AWS. |
@@ -674,3 +674,41 @@ then run the command once more.
 | Git Bash turns `/valuescan/prod/...` into `C:/Program Files/Git/...` | the scripts switch that conversion off; in your own commands set `MSYS_NO_PATHCONV=1` |
 
 **Taking it down** at the end: `deploy/aws/README.md`, "Taking it down".
+
+## 16. Builder fee tiers
+
+Per-wallet builder fees (`docs/BUILDER-TIERS.md`): the API signs the fee each wallet owes and lowers it
+as the wallet's verified volume passes the tiers. Off until its configuration exists; the web build then
+charges its own `VITE_BUILDER_FEE_*` to everyone. Nothing here is needed for a deployment without a
+builder.
+
+**On the instance**, as the service user, in the release that runs (the files go into
+`/var/lib/valuescan/state`, next to `device.key`):
+
+```
+deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u valuescan env VALUETRADE_DEVICE_KEY=/var/lib/valuescan/state/device.key /opt/node/current/bin/node --import tsx tools/builderTiers.ts init --builder-id <id> --test-tiers"
+```
+
+- `builder-tiers.json` - the tiers. `--test-tiers` writes 2 bp on both engines and 1.5 bp on perps from
+  10 USD of counted volume; for production write the default fee with `--fee-perps <n> --fee-spot <n>`
+  and edit the file (it is re-read within seconds, no restart; an invalid file is ignored and logged).
+  The first tier must equal the build's `VITE_BUILDER_FEE_PERPS` / `VITE_BUILDER_FEE_SPOT`.
+- `builder-terms.key` - the Ed25519 signing key, created once, readable by `valuescan` only. Never copy
+  it off the instance; it is in no release (the release refuses `*.key`) and no backup (the backup takes
+  the index only). Losing it means a new key and a new web build.
+- `builder.db` - created by the API on first use: the counted volume. Not backed up; lost, every wallet
+  starts again from the default fee (never from a lower one).
+
+The command prints `publicKey` and `keyId` - never the private key. Put the public key into
+`deploy/release/web.env` as `VITE_BUILDER_TERMS_KEYS=<publicKey>` (comma separated while a key is
+replaced), next to the builder values, and build and publish the web. Then:
+
+```
+deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u valuescan env VALUETRADE_DEVICE_KEY=/var/lib/valuescan/state/device.key /opt/node/current/bin/node --import tsx tools/builderTiers.ts status"
+```
+
+shows whether the file is valid and which key is in force; `status --address 0x...` shows what is
+counted for one wallet and which orders raised a flag; `forget --address 0x...` removes one wallet from
+the ledger (the live test's wallet between two runs). Settings: `api.env.example`, "builder fee tiers".
+The verifier reads SoDEX's history from the instance's address at 1 request a minute, so keep the
+indexer's `/trades` drip off (`VALUESCAN_INDEX_SODEX_TRADES` unset in `indexer.env`).

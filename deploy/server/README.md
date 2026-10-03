@@ -81,7 +81,7 @@ variable with what it does. The hosted-mode ones in short:
 
 | Variable | Production value | |
 |---|---|---|
-| `VALUESCAN_HOSTED` | `1` | the public read-only API: 16 GET routes, the rest 404 |
+| `VALUESCAN_HOSTED` | `1` | the public read-only API: 17 GET routes, the rest 404 |
 | `VALUESCAN_INDEXER` | `0` | this process never starts an indexer |
 | `HOST` / `PORT` | `127.0.0.1` / `8797` | loopback; Caddy is in front |
 | `VALUESCAN_ALLOWED_ORIGINS` | `https://<site>` | CORS; unused while site and API share an origin |

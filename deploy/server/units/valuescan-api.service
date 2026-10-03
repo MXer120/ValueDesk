@@ -1,6 +1,6 @@
 # Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
 #
-# The public index API in hosted mode (VALUESCAN_HOSTED=1): 16 GET routes, no
+# The public index API in hosted mode (VALUESCAN_HOSTED=1): 17 GET routes, no
 # custody, no hub, no local token. It listens on loopback only; Caddy terminates
 # TLS in front of it and CloudFront is the only client Caddy accepts.
 #

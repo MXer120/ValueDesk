@@ -1,0 +1,50 @@
+{
+  "_": "Fixed vectors for the signed builder terms (docs/BUILDER-TIERS.md section 3). The seed is a TEST key (bytes 00..1f) - never use it for anything real. Ed25519 signatures are deterministic, so both sides must reproduce `sig` byte for byte from `message`.",
+  "seedHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "publicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+  "keyId": "56475aa7",
+  "vectors": [
+    {
+      "fields": {
+        "chain": 286623,
+        "builderId": 123456,
+        "address": "0xabababababababababababababababababababab",
+        "perps": 15,
+        "spot": 20,
+        "nonce": "AAAAAAAAAAAAAAAAAAAAAA",
+        "issued": 1790000000000,
+        "ttl": 600000
+      },
+      "message": "valuescan-builder-terms/1\nchain:286623\nbuilder:123456\naddress:0xabababababababababababababababababababab\nperps:15\nspot:20\nnonce:AAAAAAAAAAAAAAAAAAAAAA\nissued:1790000000000\nttl:600000",
+      "sig": "jGEDlHgiyK5gGlaulDSDIgY-yC3vRb-ZnG7YdQzqUpoq9vF4pTlFnJU7RtNTqh0MXeB8jDge9HZsZF21PWR_Cw"
+    },
+    {
+      "fields": {
+        "chain": 138565,
+        "builderId": 1,
+        "address": "0x0000000000000000000000000000000000000001",
+        "perps": 0,
+        "spot": 0,
+        "nonce": "a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-",
+        "issued": 1,
+        "ttl": 900000
+      },
+      "message": "valuescan-builder-terms/1\nchain:138565\nbuilder:1\naddress:0x0000000000000000000000000000000000000001\nperps:0\nspot:0\nnonce:a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-a_b-\nissued:1\nttl:900000",
+      "sig": "2x6uYCfO96dOdHYaU52ng1OvYiT7pMeIVIhGT8imxibdaHxc3YFPF4EOi31wASRxFrfiPTPKEsp1Pq0FamTfCA"
+    },
+    {
+      "fields": {
+        "chain": 286623,
+        "builderId": 9007199254740991,
+        "address": "0xffffffffffffffffffffffffffffffffffffffff",
+        "perps": 200,
+        "spot": 2000,
+        "nonce": "0123456789abcdef",
+        "issued": 1790975564294,
+        "ttl": 600000
+      },
+      "message": "valuescan-builder-terms/1\nchain:286623\nbuilder:9007199254740991\naddress:0xffffffffffffffffffffffffffffffffffffffff\nperps:200\nspot:2000\nnonce:0123456789abcdef\nissued:1790975564294\nttl:600000",
+      "sig": "J8TFCHXUdF3mLrPuIk7gly3kmzmj3ZW30pPDaoamp-qMki2MJXmigEHsG8J_y7PXTvKFI93DwvQYIZT_bUz7DQ"
+    }
+  ]
+}

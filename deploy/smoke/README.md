@@ -34,7 +34,7 @@ Cmd/Ctrl+K palette, and the legacy `/scan/` redirect:
 - the app renders and ends on the expected route;
 - **no CSP violation**: the page's own `securitypolicyviolation` events, the
   SharedWorker's, DevTools' CSP issues and requests blocked by the policy;
-- **our API**: every `/api` request is one of the 16 routes hosted mode serves
+- **our API**: every `/api` request is one of the 17 routes hosted mode serves
   (read from `apps/server/src/hosted.ts`), and none is answered 403 or 404;
 - **WebSockets go to the exchanges, never to us**, and only to origins in
   `connect-src`;

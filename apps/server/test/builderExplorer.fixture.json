@@ -1,0 +1,383 @@
+{
+ "_": "Answers of SoDEX's public explorer and gateway, read on mainnet 2026-10-02 (public data, unchanged). They pin what the verifier relies on: a finished order's history row has no `builder`, an open order has one, a fill carries `builderFee`, and the explorer returns the signed request the builder and the signing key are read from.",
+ "chainId": 286623,
+ "orders": [
+  {
+   "what": "spot order naming builder 223169 at 10 bp, by order id (the explorer sorts the keys)",
+   "engine": "spot",
+   "orderId": "6541447279",
+   "body": {
+    "code": 0,
+    "message": "",
+    "data": {
+     "tx_hash": "0xc785ea4cb2a6b16d5e93a4e2e223f55248078feccffd76d8eb16be88ef6ae730",
+     "snapshot_id": 236990202,
+     "ts_ms": 1790137398511,
+     "seq": 2,
+     "account_id": 226415,
+     "cl_ord_ids": [
+      "s1003"
+     ],
+     "order_ids": [
+      6541447279
+     ],
+     "action": "batchNewOrder",
+     "status": 1,
+     "msg": "",
+     "tx_json": "{\"nonce\":1790137398206,\"payload\":{\"accountID\":226415,\"builder\":{\"fee\":100,\"id\":223169},\"orders\":[{\"clOrdID\":\"s1003\",\"price\":\"2780.4\",\"quantity\":\"5\",\"side\":2,\"symbolID\":2,\"timeInForce\":1,\"type\":1}]},\"signature\":\"0x017f030e06d83fba4995c32fe366828d66bdbb680f4f985297d99c60c2d0e2f25a5a4f9547aaccf3c37fb0f3280efad8d52daf779ed2de53ad3d2c5cc6f0cbd86001\",\"type\":\"batchNewOrder\"}"
+    }
+   },
+   "signer": "0x47f6424f23e45b53a355a3e2365e31ca8c67a89f",
+   "keyName": "safepal-047f6424f23e",
+   "builder": {
+    "id": "223169",
+    "fee": 100
+   },
+   "createdAt": 1790137398511
+  },
+  {
+   "what": "spot order naming builder 223169 at 10 bp, by order id",
+   "engine": "spot",
+   "orderId": "6896407749",
+   "body": {
+    "code": 0,
+    "message": "",
+    "data": {
+     "tx_hash": "0x89a7f5931adf3bef8ab6b09d8a154d267d3b5a2e47e7c14394c8dff8f7c2bc18",
+     "snapshot_id": 247148032,
+     "ts_ms": 1790915302756,
+     "seq": 8,
+     "account_id": 226415,
+     "cl_ord_ids": [
+      "s1129"
+     ],
+     "order_ids": [
+      6896407749
+     ],
+     "action": "batchNewOrder",
+     "status": 1,
+     "msg": "",
+     "tx_json": "{\"nonce\":1790915302423,\"payload\":{\"accountID\":226415,\"builder\":{\"fee\":100,\"id\":223169},\"orders\":[{\"clOrdID\":\"s1129\",\"price\":\"123\",\"quantity\":\"14.08\",\"side\":2,\"symbolID\":7,\"timeInForce\":1,\"type\":1}]},\"signature\":\"0x01a58f0953308bb7c273789be9c46718df8571052d3aa80b12f1604d9a6a4e644e61d868bcc9d7cdb47526e34faf681f15dee4adf8ce38576077f3759175f4253301\",\"type\":\"batchNewOrder\"}"
+    }
+   },
+   "signer": "0x47f6424f23e45b53a355a3e2365e31ca8c67a89f",
+   "keyName": "safepal-047f6424f23e",
+   "builder": {
+    "id": "223169",
+    "fee": 100
+   },
+   "createdAt": 1790915302756
+  },
+  {
+   "what": "perps order without a builder, by order id (keys sorted)",
+   "engine": "perps",
+   "orderId": "26767050140",
+   "body": {
+    "code": 0,
+    "message": "",
+    "data": {
+     "tx_hash": "0x7fe594f937186879059178b61322fc43bc30dcdc19aac76015f06c258b45d4e6",
+     "snapshot_id": 247937234,
+     "ts_ms": 1790976666770,
+     "seq": 4,
+     "account_id": 1061,
+     "cl_ord_ids": [
+      "bmurh9k5h1674"
+     ],
+     "order_ids": [
+      26767050140
+     ],
+     "action": "newOrder",
+     "status": 1,
+     "msg": "",
+     "tx_json": "{\"nonce\":1790976666424,\"payload\":{\"accountID\":1061,\"orders\":[{\"clOrdID\":\"bmurh9k5h1674\",\"modifier\":1,\"positionSide\":1,\"price\":\"225.62\",\"quantity\":\"0.18\",\"reduceOnly\":false,\"side\":1,\"timeInForce\":4,\"type\":1}],\"symbolID\":99},\"signature\":\"0x011b12b990825a0d3858da43f8e7e884185d0647d4aa924f3dbd1faf4acd9bc4f378f9f8555bafd2101432fb9c396da756fb254ca0f6104a7f2202bd3cfef0e86d00\",\"type\":\"newOrder\"}"
+    }
+   },
+   "signer": "0x1523ef5c20fff7e8e91b5755713f58a2035bd1c4",
+   "keyName": "SODEX_API_KEY45",
+   "builder": null,
+   "createdAt": 1790976666770
+  },
+  {
+   "what": "the same perps order by transaction hash (keys in the order they were signed, no action field)",
+   "engine": "perps",
+   "orderId": "26767050140",
+   "body": {
+    "code": 0,
+    "message": "",
+    "data": {
+     "tx_hash": "0x7fe594f937186879059178b61322fc43bc30dcdc19aac76015f06c258b45d4e6",
+     "snapshot_id": 247937234,
+     "ts_ms": 1790976666770,
+     "seq": 4,
+     "account_id": 1061,
+     "cl_ord_ids": [
+      "bmurh9k5h1674"
+     ],
+     "order_ids": [
+      26767050140
+     ],
+     "status": 1,
+     "msg": "",
+     "tx_json": "{\"type\":\"newOrder\",\"payload\":{\"accountID\":1061,\"symbolID\":99,\"orders\":[{\"clOrdID\":\"bmurh9k5h1674\",\"modifier\":1,\"side\":1,\"type\":1,\"timeInForce\":4,\"price\":\"225.62\",\"quantity\":\"0.18\",\"reduceOnly\":false,\"positionSide\":1}]},\"nonce\":1790976666424,\"signature\":\"0x011b12b990825a0d3858da43f8e7e884185d0647d4aa924f3dbd1faf4acd9bc4f378f9f8555bafd2101432fb9c396da756fb254ca0f6104a7f2202bd3cfef0e86d00\"}"
+    }
+   },
+   "signer": "0x1523ef5c20fff7e8e91b5755713f58a2035bd1c4",
+   "keyName": "SODEX_API_KEY45",
+   "builder": null,
+   "createdAt": 1790976666770
+  }
+ ],
+ "apiKeys": {
+  "spot226415": [
+   {
+    "name": "default",
+    "type": "EVM",
+    "publicKey": "0x073e284e100824623355f01773e61b5a66455885",
+    "expiresAt": 0
+   },
+   {
+    "name": "mobilekey",
+    "type": "EVM",
+    "publicKey": "0x1ab4b7e8f9c98acaffb03f62c48b7325354b93e4",
+    "expiresAt": 1789286995391
+   },
+   {
+    "name": "safepal-047f6424f23e",
+    "type": "EVM",
+    "publicKey": "0x47f6424f23e45b53a355a3e2365e31ca8c67a89f",
+    "expiresAt": 4102444800000
+   }
+  ],
+  "perps1061": [
+   {
+    "name": "mobilekey",
+    "type": "EVM",
+    "publicKey": "0xeb64a8111c5e61cf5d97d37adcacd59d45c7fba2",
+    "expiresAt": 1791536889857
+   },
+   {
+    "name": "qrkey",
+    "type": "EVM",
+    "publicKey": "0x4893ed2f72f78660507ec6b74d235384cf9a26a6",
+    "expiresAt": 1789906844659
+   },
+   {
+    "name": "safepal-0fa347278ac6",
+    "type": "EVM",
+    "publicKey": "0xfa347278ac655283a0b747006c3358307e4c028e",
+    "expiresAt": 4102444800000
+   },
+   {
+    "name": "webkey",
+    "type": "EVM",
+    "publicKey": "0x0567c26a50a6358e8abbd210c5a4ee3024507812",
+    "expiresAt": 1791168679800
+   },
+   {
+    "name": "appkey",
+    "type": "EVM",
+    "publicKey": "0x3ea55455c4c85b99d37aeda86d2432dbada46a7f",
+    "expiresAt": 1793526025055
+   },
+   {
+    "name": "SODEX_API_KEY3",
+    "type": "EVM",
+    "publicKey": "0x7e11ff1b97ff92351a36f2c7c81fd4279f517781",
+    "expiresAt": 1799219295387
+   },
+   {
+    "name": "SODEX_API_KEY45",
+    "type": "EVM",
+    "publicKey": "0x1523ef5c20fff7e8e91b5755713f58a2035bd1c4",
+    "expiresAt": 1804693114623
+   },
+   {
+    "name": "default",
+    "type": "EVM",
+    "publicKey": "0x0879a87d6d1ea21c902946f2daf80a7fad77bc84",
+    "expiresAt": 0
+   }
+  ]
+ },
+ "builders226415": {
+  "spot": [
+   {
+    "userID": 226415,
+    "builderID": 223169,
+    "feeRate": 500
+   }
+  ],
+  "perps": [
+   {
+    "userID": 226415,
+    "builderID": 223169,
+    "feeRate": 200
+   }
+  ]
+ },
+ "historyRow": {
+  "symbol": "vSOL_vUSDC",
+  "orderID": 6896407749,
+  "clOrdID": "s1129",
+  "side": "SELL",
+  "type": "LIMIT",
+  "timeInForce": "GTC",
+  "price": "123",
+  "origQty": "14.08",
+  "status": "FILLED",
+  "executedQty": "14.08",
+  "executedValue": "1731.84",
+  "marginFrozen": "0",
+  "createdAt": 1790915302756,
+  "updatedAt": 1790916543793
+ },
+ "openOrder": {
+  "symbol": "vSOL_vUSDC",
+  "orderID": 6897566470,
+  "clOrdID": "s1131",
+  "side": "SELL",
+  "type": "LIMIT",
+  "timeInForce": "GTC",
+  "price": "130",
+  "origQty": "14.08",
+  "status": "NEW",
+  "executedQty": "0",
+  "executedValue": "0",
+  "marginFrozen": "14.08",
+  "builder": {
+   "builderID": 223169,
+   "feeRate": 100
+  },
+  "createdAt": 1790918186571,
+  "updatedAt": 1790918186571
+ },
+ "fills": [
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512431,
+   "orderID": 6896407749,
+   "clOrdID": "s1129",
+   "side": "SELL",
+   "price": "123",
+   "quantity": "0.025",
+   "fee": "0.00415125",
+   "builderFee": "0.003075",
+   "feeCoin": "vUSDC",
+   "time": 1790916543793,
+   "isMaker": true
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512430,
+   "orderID": 6896407749,
+   "clOrdID": "s1129",
+   "side": "SELL",
+   "price": "123",
+   "quantity": "7.338",
+   "fee": "1.2184749",
+   "builderFee": "0.902574",
+   "feeCoin": "vUSDC",
+   "time": 1790916543793,
+   "isMaker": true
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512429,
+   "orderID": 6896407749,
+   "clOrdID": "s1129",
+   "side": "SELL",
+   "price": "123",
+   "quantity": "6.717",
+   "fee": "1.11535785",
+   "builderFee": "0.826191",
+   "feeCoin": "vUSDC",
+   "time": 1790916543793,
+   "isMaker": true
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512358,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.64",
+   "quantity": "4.355",
+   "fee": "0.87407463",
+   "builderFee": "0.5297422",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512357,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.65",
+   "quantity": "7.402",
+   "fee": "1.485747945",
+   "builderFee": "0.9004533",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512356,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.66",
+   "quantity": "10.31",
+   "fee": "2.06961909",
+   "builderFee": "1.2543146",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512355,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.67",
+   "quantity": "10.315",
+   "fee": "2.0707929825",
+   "builderFee": "1.25502605",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512354,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.68",
+   "quantity": "7.942",
+   "fee": "1.594531224",
+   "builderFee": "0.96638256",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  },
+  {
+   "symbol": "vSOL_vUSDC",
+   "tradeID": 1512353,
+   "orderID": 6896181415,
+   "clOrdID": "s1122",
+   "side": "SELL",
+   "price": "121.69",
+   "quantity": "9.676",
+   "fee": "1.942829526",
+   "builderFee": "1.17747244",
+   "feeCoin": "vUSDC",
+   "time": 1790914868860,
+   "isMaker": false
+  }
+ ]
+}

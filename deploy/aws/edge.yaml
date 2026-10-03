@@ -579,7 +579,7 @@ Resources:
             - EventType: viewer-request
               FunctionARN: !GetAtt SpaRewriteFunction.FunctionMetadata.FunctionARN
         CacheBehaviors:
-          # The index API: 16 GET routes in hosted mode. No POST reaches the origin.
+          # The index API: 17 GET routes in hosted mode. No POST reaches the origin.
           - PathPattern: /api/*
             TargetOriginId: api
             ViewerProtocolPolicy: https-only

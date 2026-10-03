@@ -356,11 +356,13 @@ the other variables say:
 - **Hub off:** the WebSocket hub and `/ws` are not registered.
 - **Local token off:** the local token is neither minted nor required.
 - **Route allow-list:** only the list in `hosted.ts` answers; every other route is 404. The
-  list is final, per `docs/ARCH-traffic.md` §5: 16 routes, all GET.
+  list is final, per `docs/ARCH-traffic.md` §5: 17 routes, all GET.
   - **Index routes:** `/api/health`, the leaderboard, explore, the 5 cohort routes, the
     screener, whales and positioning.
   - **`/api/vs/lbrow`:** one Hyperliquid leaderboard row for a Scan profile.
   - **`/api/feed/account`:** deep links by account id.
+  - **`/api/vs/builder/terms`:** the builder fee a wallet owes, signed (`docs/BUILDER-TIERS.md` §3).
+    Class `read`; a request with `hint=1` counts as `upstream` too.
   - **Maintenance:** the maintenance status and the announcements.
 - **Diagnostics stay on the instance:** `/api/vs/index/status` (the indexer's full status,
   with wallet addresses and error text) is 404 for every caller. `/api/vs/index/health`, a

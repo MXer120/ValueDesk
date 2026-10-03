@@ -60,6 +60,9 @@ function answer(pattern, url) {
       };
     case '/api/vs/lbrow':
       return { ok: true, row: null };
+    // A server without builder-tiers.json: the feature is off, the app charges its build's fee.
+    case '/api/vs/builder/terms':
+      return { ok: true, builderId: null };
     default:
       return { ok: false, code: 'not_available', error: 'The index is not running yet' };
   }

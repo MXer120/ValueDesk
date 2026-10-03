@@ -179,7 +179,7 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 16, 'docs/ARCH-traffic.md section 5: 16 routes');
+  assert.equal(routes.length, 17, 'docs/ARCH-traffic.md section 5: 17 routes');
   assert.ok(routes.every((r) => r.method === 'GET' && r.url.startsWith('/api/')));
   assert.ok(matchRoute(routes, 'GET', '/api/vs/leaderboard'));
   assert.ok(matchRoute(routes, 'HEAD', '/api/health'));

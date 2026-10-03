@@ -69,6 +69,7 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 | Whales tape, positioning | `/api/vs/whales`, `/api/vs/positioning` | (b) | aggregated server-side from venue trade streams; not one user's traffic |
 | Deep link by SoDEX account id (App.tsx) | `/api/feed/account` | (b) | resolved from the index's leaderboard map, on-chain only as a fallback |
 | Server status and network | `/api/health` | (c) | about Valuescan itself |
+| Builder fee terms | `/api/vs/builder/terms` | (c) | the fee a wallet owes must be signed by a key the browser cannot hold (docs/BUILDER-TIERS.md) |
 | Maintenance banner and page | `/api/external/maintenance/status`, `/api/external/announcements(/:id)` | (c) | global, not per-user. alpha-biz answers any origin, so this can go direct later; kept to keep the change focused |
 | SoPoints sign-in | `/api/points/auth/*` | (c) | sodex.com's points API allows only its own origin (CORS), so a browser cannot call it; the page is not mounted (router: points -> trade) |
 | Account switcher of the LOCAL server-signing mode | `/api/session/*` | (c) | custodial local mode only; off in hosted mode |
@@ -319,6 +320,11 @@ Against this inventory, HOSTED_ROUTES should be:
   `valuescan/hyperliquid/index.ts` `hlLeaderboardRow(address)` - the only index read
   the Scan profile needs. Until it exists the web falls back to
   `/api/vs/leaderboard?q=` and leaves the rank out.
+- **Add**: `GET /api/vs/builder/terms?address=&nonce=[&hint=1]` (cls `read`,
+  `upstreamWhen: hint`): the builder fee a wallet owes, signed by this server
+  (`docs/BUILDER-TIERS.md` §3). The one per-wallet route: it names the wallet the
+  app trades with, and a hint makes the server read that wallet's fills from SoDEX
+  itself, from its own address, on a budget of its own (§6 there).
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,
   `/api/vs/fills`, `/api/vs/account`, `/api/external/leaderboard`,
   `/api/external/leaderboard/rank`, `/api/external/resolve-account`,

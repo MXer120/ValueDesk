@@ -239,6 +239,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/external/maintenance/status read',
       'GET /api/feed/account upstream',
       'GET /api/health read',
+      'GET /api/vs/builder/terms read',
       'GET /api/vs/cohorts read',
       'GET /api/vs/cohorts/detail read',
       'GET /api/vs/cohorts/focus read',
