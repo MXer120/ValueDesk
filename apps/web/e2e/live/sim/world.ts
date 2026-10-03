@@ -18,7 +18,12 @@
  *                     builder-terms route, signed with the TEST key of the
  *                     shared vector (seed 00..1f), its volume counted from this
  *                     fake's own fills the way docs/BUILDER-TIERS.md section 5 says.
- *   the relayer, every chain's JSON-RPC node.
+ *   the relayer, every chain's JSON-RPC node: ValueChain and every EVM chain
+ *                     the runner signs on (chains.ts), each with native and USDC
+ *                     balances; a USDC transfer or a plain native transfer to the
+ *                     wallet's deposit address there is credited to Spot, a
+ *                     withdrawal to an EVM chain arrives there, one to another
+ *                     chain is recorded (`offchain`).
  *
  * Strict where SoDEX is: every key-signed action must recover the trading key
  * registered on THAT engine under the name it sends (a revoked key cannot sign
@@ -34,7 +39,11 @@ import { gateway as exchangeGateway } from '../../../src/exchange/sodexGateway';
 import type { SocketLike } from '../../../src/exchange/ws/sodexSocket';
 import { formatUnits, parseUnits } from '../../../src/trading/onboard';
 import { BIZ_ORIGIN, QUERY_CONTRACT } from '../../../src/trading/relay';
+import { ALL_EVM } from '../chains';
 import { DEPOSIT_WALLET_REGISTRY } from '../reads';
+import { SAMPLE_ADDRESS } from '../receivers';
+import { CANONICAL_USDC } from '../../../src/trading/onboard';
+import { CHAIN_ADDRESS } from '../../../src/trading/funds';
 import { termsMessage } from '../terms';
 import { cut, dAdd, dCmp, dDiv, dMul, dSub, toStep } from '../util';
 
@@ -55,21 +64,28 @@ const WITHDRAWER_ABI = parseAbi(['function isBlacklistedWallet(string chain, str
 const WITHDRAWAL_TUPLE = parseAbiParameters(
   '(uint256 withdrawId, string chain, string coinAddr, address account, string receiver, uint256 amount, uint256 withdrawFee, string bridgeAddr, uint256 createdTimestamp, uint256 settledTimestamp, string txHash, uint8 status, string memo, bool failedBackToClob, uint256 updatedTimestamp, string coinSymbol)',
 );
-const FEES: Record<string, bigint> = { USDC: 1_000_000n, ETH: 500_000_000_000_000n };
+/** SoDEX's on-chain withdrawal fee per coin, in the coin's ValueChain units. */
+const FEES: Record<string, bigint> = { USDC: 1_000_000n, ETH: 500_000_000_000_000n, BNB: 2_000_000_000_000_000n, AVAX: 120_000_000_000_000_000n, HYPE: 30_000_000_000_000_000n, SOL: 12_000_000n, XRP: 800_000n, BTC: 6_000n, DOGE: 1_200_000_000n };
 export const VC_USDC = '0xcb7f80dff2727c791fa491722c428e6657f7e2c6';
 const VC_ETH = '0xd76544025769c13496bf4a6c2b4e67ead3f857d8';
 export const USDC_ARB = '0xaf88d065e77c8cc2239327c5edb3a432268e5831';
 const EXCHANGE = '0x0101010101010101010101010101010101010101';
 export const DEPOSIT_ADDR = '0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed';
 export const FRIEND = '0x4b363bfcd961eca3aa723151a7ccdab76b869bfd';
+/** Every node the fake answers for: ValueChain and every EVM chain the runner signs on. */
 const CHAINS: Record<string, number> = {
   'https://rpc.valuechain.xyz': 286623,
-  'https://arb1.arbitrum.io/rpc': 42161,
-  'https://mainnet.base.org': 8453,
-  'https://ethereum-rpc.publicnode.com': 1,
-  'https://bsc-dataseed.bnbchain.org': 56,
-  'https://polygon-bor-rpc.publicnode.com': 137,
+  ...Object.fromEntries(Object.values(ALL_EVM).map((c) => [c.rpcUrl.replace(/\/+$/, ''), c.chainId])),
 };
+const keyOfChain = (chainId: number): string | undefined => Object.values(ALL_EVM).find((c) => c.chainId === chainId)?.key;
+
+/** The wallet's deposit address per chain (one per chain, every coin shares it): Arbitrum's is DEPOSIT_ADDR, the others made up, valid for their format. */
+export function depositAddressOf(chain: string): string {
+  if (chain === 'ARBITRUM_ETH') return DEPOSIT_ADDR;
+  const kind = CHAIN_ADDRESS[chain];
+  if (kind && kind !== 'evm') return SAMPLE_ADDRESS[kind];
+  return `0x${keccak256(stringToHex(`deposit:${chain}`)).slice(26)}`;
+}
 const REGISTRY_ABI = parseAbi(['function getDepositWalletList(address account, string coinSymbol) view returns (string[] chains, string[][] wallets)']);
 /** The mirror registry the app reads the CURRENT deposit address from (apps/server/src/sodex/mirrorCore.ts). */
 const MIRROR_REGISTRY = '0xb37295d1ea21e65b76dcb2e85e035ee0dbfc70cb';
@@ -86,13 +102,36 @@ export const COINS: Record<number, { asset: string; dp: number; token: string | 
   0: { asset: 'vUSDC', dp: 6, token: VC_USDC },
   2: { asset: 'vETH', dp: 18, token: VC_ETH },
   4: { asset: 'WSOSO', dp: 18, token: null },
+  5: { asset: 'vBNB', dp: 18, token: '0x00000000000000000000000000000000000b0005' },
+  6: { asset: 'vAVAX', dp: 18, token: '0x00000000000000000000000000000000000b0006' },
+  7: { asset: 'vHYPE', dp: 18, token: '0x00000000000000000000000000000000000b0007' },
+  8: { asset: 'vSOL', dp: 9, token: '0x00000000000000000000000000000000000b0008' },
+  9: { asset: 'vXRP', dp: 6, token: '0x00000000000000000000000000000000000b0009' },
+  10: { asset: 'vBTC', dp: 8, token: '0x00000000000000000000000000000000000b000a' },
+  11: { asset: 'vDOGE', dp: 8, token: '0x00000000000000000000000000000000000b000b' },
+  12: { asset: 'vZEC', dp: 8, token: '0x00000000000000000000000000000000000b000c' },
 };
-const assetConfig = [
+/** SoDEX's external coin name -> engine coin id. */
+const COIN_ID: Record<string, number> = { USDC: 0, ETH: 2, SOSO: 4, BNB: 5, AVAX: 6, HYPE: 7, SOL: 8, XRP: 9, BTC: 10, DOGE: 11, ZEC: 12 };
+interface FakeAsset {
+  assetName: string;
+  valueChainMetadata: { tokenSymbol: string; tokenDecimals: number; evmAddress?: string; isNativeToken: boolean };
+  sodexMetadata: { id: number; name: string; marginRatio: string; tokenPrice: string };
+  chains: Array<{ chainName: string; isNativeToken: boolean; tokenAddress?: string; custody: Record<string, unknown> }>;
+}
+const assetConfig: FakeAsset[] = [
   {
     assetName: 'USDC',
     valueChainMetadata: { tokenSymbol: 'vUSDC', tokenDecimals: 6, evmAddress: '0xcb7F80Dff2727c791fA491722c428e6657f7e2c6', isNativeToken: false },
     sodexMetadata: { id: 0, name: 'vUSDC', marginRatio: '1', tokenPrice: '1' },
-    chains: [{ chainName: 'ARBITRUM_ETH', isNativeToken: false, tokenAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true, estimatedDepositSeconds: 120 } }],
+    chains: [
+      { chainName: 'ARBITRUM_ETH', isNativeToken: false, tokenAddress: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831', custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true, estimatedDepositSeconds: 120 } },
+      { chainName: 'BASE_ETH', isNativeToken: false, tokenAddress: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'BSC_BNB', isNativeToken: false, tokenAddress: '0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d', custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'MATIC', isNativeToken: false, tokenAddress: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359', custody: { minDepositAmount: '5', minWithdrawAmount: '2', withdrawFee: '1', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'ARC', isNativeToken: true, custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'SOL', isNativeToken: false, tokenAddress: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', custody: { minDepositAmount: '5', minWithdrawAmount: '5', withdrawFee: '1', allowDeposit: true, allowWithdraw: true } },
+    ],
   },
   {
     assetName: 'SOSO',
@@ -104,17 +143,85 @@ const assetConfig = [
     assetName: 'ETH',
     valueChainMetadata: { tokenSymbol: 'vETH', tokenDecimals: 18, evmAddress: '0xD76544025769c13496Bf4a6c2b4E67eAD3F857D8', isNativeToken: false },
     sodexMetadata: { id: 2, name: 'vETH', marginRatio: '0.9', tokenPrice: '2690' },
-    chains: [{ chainName: 'ARBITRUM_ETH', isNativeToken: true, custody: { minDepositAmount: '0.0015', minWithdrawAmount: '0.0015', withdrawFee: '0.0005', allowDeposit: true, allowWithdraw: true } }],
+    chains: [
+      { chainName: 'ARBITRUM_ETH', isNativeToken: true, custody: { minDepositAmount: '0.0015', minWithdrawAmount: '0.0015', withdrawFee: '0.0005', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'BASE_ETH', isNativeToken: true, custody: { minDepositAmount: '0.002', minWithdrawAmount: '0.0005', withdrawFee: '0.0005', allowDeposit: true, allowWithdraw: true } },
+      { chainName: 'ROBINHOOD_ETH', isNativeToken: true, custody: { minDepositAmount: '0.002', minWithdrawAmount: '0.002', withdrawFee: '0.0005', allowDeposit: true, allowWithdraw: true } },
+    ],
   },
+  ...(
+    [
+      ['BNB', 5, 18, [{ chainName: 'BSC_BNB', isNativeToken: true, custody: { minDepositAmount: '0.005', minWithdrawAmount: '0.0005', withdrawFee: '0.002', allowDeposit: true, allowWithdraw: true } }]],
+      ['AVAX', 6, 18, [{ chainName: 'AVAXC', isNativeToken: true, custody: { minDepositAmount: '0.35', minWithdrawAmount: '0.35', withdrawFee: '0.12', allowDeposit: true, allowWithdraw: true } }]],
+      ['HYPE', 7, 18, [{ chainName: 'HYPEREVM_HYPE', isNativeToken: true, custody: { minDepositAmount: '0.1', minWithdrawAmount: '0.1', withdrawFee: '0.03', allowDeposit: true, allowWithdraw: true } }]],
+      ['SOL', 8, 9, [{ chainName: 'SOL', isNativeToken: true, custody: { minDepositAmount: '0.03', minWithdrawAmount: '0.01', withdrawFee: '0.012', allowDeposit: true, allowWithdraw: true } }]],
+      ['XRP', 9, 6, [{ chainName: 'XRP', isNativeToken: true, custody: { minDepositAmount: '4', minWithdrawAmount: '2', withdrawFee: '0.8', allowDeposit: true, allowWithdraw: true } }]],
+      ['BTC', 10, 8, [{ chainName: 'BTC', isNativeToken: true, custody: { minDepositAmount: '0.00005', minWithdrawAmount: '0.0005', withdrawFee: '0.00006', allowDeposit: true, allowWithdraw: true } }]],
+      ['DOGE', 11, 8, [{ chainName: 'DOGE', isNativeToken: true, custody: { minDepositAmount: '30', minWithdrawAmount: '30', withdrawFee: '12', allowDeposit: true, allowWithdraw: true } }]],
+      ['ZEC', 12, 8, [{ chainName: 'ZEC', isNativeToken: true, custody: { minDepositAmount: '0.01', minWithdrawAmount: '0.01', withdrawFee: '0.001', allowDeposit: false, allowWithdraw: false } }]],
+    ] as const
+  ).map(([name, id, dp, chains]) => ({
+    assetName: name,
+    valueChainMetadata: { tokenSymbol: COINS[id]!.asset, tokenDecimals: dp, evmAddress: COINS[id]!.token!, isNativeToken: false },
+    sodexMetadata: { id, name: COINS[id]!.asset, marginRatio: '0', tokenPrice: '1' },
+    chains: chains as unknown as FakeAsset['chains'],
+  })),
 ];
+/** The coin's route on a chain, as the asset config lists it. */
+const routeIn = (coin: string, chain: string) => assetConfig.find((a) => a.assetName === coin)?.chains.find((c) => c.chainName === chain);
+/** The coin whose NATIVE route is on this chain (what a plain transfer there deposits). */
+const nativeCoinOn = (chain: string): string | undefined => assetConfig.find((a) => a.chains.some((c) => c.chainName === chain && c.isNativeToken))?.assetName;
 export const spotSymbols = [
   { id: 4, name: 'WSOSO_vUSDC', displayName: 'SOSO/USDC', baseCoin: 'WSOSO', baseCoinID: 4, quoteCoin: 'vUSDC', quoteCoinID: 0, pricePrecision: 4, tickSize: '0.0001', quantityPrecision: 2, stepSize: '0.01', minQuantity: '0.01', marketMinQuantity: '0.01', minNotional: '1', maxNotional: '0', minPrice: '0.0001', maxPrice: '0', makerFee: '0.00035', takerFee: '0.00065', status: 'TRADING', sellLimitDownRatio: '0.5', buyLimitUpRatio: '1' },
   { id: 2, name: 'vETH_vUSDC', displayName: 'ETH/USDC', baseCoin: 'vETH', baseCoinID: 2, quoteCoin: 'vUSDC', quoteCoinID: 0, pricePrecision: 1, tickSize: '0.1', quantityPrecision: 4, stepSize: '0.0001', minQuantity: '0.0001', marketMinQuantity: '0.0001', minNotional: '5', maxNotional: '0', minPrice: '0.1', maxPrice: '0', makerFee: '0.00035', takerFee: '0.00065', status: 'TRADING', sellLimitDownRatio: '0.5', buyLimitUpRatio: '1' },
+  ...(
+    [
+      [5, 'vBNB', 'BNB', '0.001', '0.1'],
+      [6, 'vAVAX', 'AVAX', '0.01', '0.01'],
+      [7, 'vHYPE', 'HYPE', '0.001', '0.001'],
+      [8, 'vSOL', 'SOL', '0.001', '0.01'],
+      [9, 'vXRP', 'XRP', '0.1', '0.0001'],
+      [10, 'vBTC', 'BTC', '0.00001', '1'],
+    ] as const
+  ).map(([id, base, name, step, tick]) => ({
+    id,
+    name: `${base}_vUSDC`,
+    displayName: `${name}/USDC`,
+    baseCoin: base,
+    baseCoinID: id,
+    quoteCoin: 'vUSDC',
+    quoteCoinID: 0,
+    pricePrecision: 4,
+    tickSize: tick,
+    quantityPrecision: 5,
+    stepSize: step,
+    minQuantity: step,
+    marketMinQuantity: step,
+    minNotional: '5',
+    maxNotional: '0',
+    minPrice: tick,
+    maxPrice: '0',
+    makerFee: '0.00035',
+    takerFee: '0.00065',
+    status: 'TRADING',
+    sellLimitDownRatio: '0.5',
+    buyLimitUpRatio: '1',
+  })),
 ];
 export const perpsSymbols = [
   { id: 1, name: 'BTC-USD', displayName: 'BTC-USD', baseCoin: 'BTC', quoteCoin: 'vUSDC', quoteCoinID: 0, pricePrecision: 0, tickSize: '1', quantityPrecision: 5, stepSize: '0.00001', minQuantity: '0.00001', marketMinQuantity: '0.00001', minNotional: '10', maxNotional: '4000000', minPrice: '1', maxPrice: '0', makerFee: '0.00012', takerFee: '0.0004', status: 'TRADING', sellLimitDownRatio: '0.05', buyLimitUpRatio: '0.05', initLeverage: 20, maxLeverage: 40 },
 ];
-const BOOK: Record<string, { bid: string; ask: string }> = { WSOSO_vUSDC: { bid: '0.2996', ask: '0.3' }, vETH_vUSDC: { bid: '2689', ask: '2690' }, 'BTC-USD': { bid: '84071', ask: '84072' } };
+const BOOK: Record<string, { bid: string; ask: string }> = {
+  WSOSO_vUSDC: { bid: '0.2996', ask: '0.3' },
+  vETH_vUSDC: { bid: '2689', ask: '2690' },
+  vBNB_vUSDC: { bid: '599.9', ask: '600' },
+  vAVAX_vUSDC: { bid: '24.99', ask: '25' },
+  vHYPE_vUSDC: { bid: '44.999', ask: '45' },
+  vSOL_vUSDC: { bid: '149.99', ask: '150' },
+  vXRP_vUSDC: { bid: '2.4999', ask: '2.5' },
+  vBTC_vUSDC: { bid: '84070', ask: '84071' },
+  'BTC-USD': { bid: '84071', ask: '84072' },
+};
 const RATES = { spot: { maker: '0.00035', taker: '0.00065' }, perps: { maker: '0.00012', taker: '0.0004' } } as const;
 
 type Engine = 'spot' | 'perps';
@@ -231,8 +338,27 @@ export class World {
   symbolCfg = new Map<string, { l: number; m: 'CROSS' | 'ISOLATED' }>();
   vcNative = 0n;
   vcTok = new Map<string, Map<string, bigint>>();
-  arbUsdc = new Map<string, bigint>();
-  arbEth = new Map<string, bigint>();
+  /** Per EVM chain id: native coin and canonical USDC per holder (base units of that chain). */
+  evmNative = new Map<number, Map<string, bigint>>();
+  evmUsdc = new Map<number, Map<string, bigint>>();
+  /** Withdrawals to chains the fake has no node for: what SoDEX paid out, to whom. */
+  offchain: Array<{ coin: string; chain: string; receiver: string; memo: string; amount: bigint }> = [];
+  nativeOf(chainId: number): Map<string, bigint> {
+    let m = this.evmNative.get(chainId);
+    if (!m) this.evmNative.set(chainId, (m = new Map()));
+    return m;
+  }
+  usdcOf(chainId: number): Map<string, bigint> {
+    let m = this.evmUsdc.get(chainId);
+    if (!m) this.evmUsdc.set(chainId, (m = new Map()));
+    return m;
+  }
+  get arbUsdc(): Map<string, bigint> {
+    return this.usdcOf(42161);
+  }
+  get arbEth(): Map<string, bigint> {
+    return this.nativeOf(42161);
+  }
   /** CallForPermit nonce lanes: 0 withdrawals, 2 deposits (the contract answers lane 2 key-packed). */
   permitNonce = 5n;
   depositNonce = 0n;
@@ -355,8 +481,7 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
     case 'eth_getBalance': {
       const who = String(params[0]).toLowerCase();
       if (chainId === 286623) return word(who === w.owner ? w.vcNative : 0n);
-      if (chainId === 42161) return word(w.arbEth.get(who) ?? 0n);
-      return '0x0';
+      return word(w.nativeOf(chainId).get(who) ?? 0n);
     }
     case 'eth_getTransactionReceipt': {
       const logs = w.receipts.get(String(params[0]));
@@ -369,13 +494,14 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
         if (t === MIRROR_REGISTRY) {
           const d = decodeFunctionData({ abi: MIRROR_ABI, data: data as Hex });
           if (d.functionName === 'listRemoteNativeTokens') return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'listRemoteNativeTokens', result: [] });
-          const mine = String(d.args[0]).toLowerCase() === w.owner && d.args[1] === 'ARBITRUM_ETH';
-          return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'getDepositWallet', result: mine ? DEPOSIT_ADDR : '' });
+          const mine = String(d.args[0]).toLowerCase() === w.owner;
+          return encodeFunctionResult({ abi: MIRROR_ABI, functionName: 'getDepositWallet', result: mine ? depositAddressOf(String(d.args[1])) : '' });
         }
         if (t === DEPOSIT_WALLET_REGISTRY.toLowerCase()) {
           const { args } = decodeFunctionData({ abi: REGISTRY_ABI, data: data as Hex });
-          const mine = String(args[0]).toLowerCase() === w.owner && args[1] === 'USDC';
-          return encodeFunctionResult({ abi: REGISTRY_ABI, functionName: 'getDepositWalletList', result: mine ? [['ARBITRUM_ETH'], [[w.registryAddress]]] : [[], []] });
+          const mine = String(args[0]).toLowerCase() === w.owner;
+          const chains = mine ? (assetConfig.find((a) => a.assetName === args[1])?.chains ?? []).filter((c) => (c.custody as { allowDeposit?: boolean }).allowDeposit).map((c) => c.chainName) : [];
+          return encodeFunctionResult({ abi: REGISTRY_ABI, functionName: 'getDepositWalletList', result: [chains, chains.map((c) => [c === 'ARBITRUM_ETH' ? w.registryAddress : depositAddressOf(c)])] });
         }
         if (t === CALL_FOR_PERMIT_CONTRACT.toLowerCase()) {
           const d = decodeFunctionData({ abi: PERMIT_ABI, data: data as Hex });
@@ -402,10 +528,11 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
         if (data.startsWith(toFunctionSelector('nonces(address)'))) return word(w.tokenNonce);
         return '0x';
       }
-      if (chainId === 42161 && t === USDC_ARB) {
+      const canon = CANONICAL_USDC[keyOfChain(chainId) ?? ''];
+      if (canon && t === canon.address) {
         if (data === '0x95d89b41') return encodeAbiParameters([{ type: 'string' }], ['USDC']);
-        if (data === '0x313ce567') return word(6n);
-        if (data.startsWith('0x70a08231')) return word(w.arbUsdc.get(`0x${data.slice(-40)}`) ?? 0n);
+        if (data === '0x313ce567') return word(BigInt(canon.decimals));
+        if (data.startsWith('0x70a08231')) return word(w.usdcOf(chainId).get(`0x${data.slice(-40)}`) ?? 0n);
       }
       if (data.startsWith('0x70a08231')) return word(0n);
       return '0x';
@@ -419,18 +546,38 @@ async function rpc(chainId: number, method: string, params: any[]): Promise<unkn
       w.txCount.set(chainId, (w.txCount.get(chainId) ?? 0) + 1);
       const to = String(tx.to).toLowerCase();
       const data = (tx.data ?? '0x') as Hex;
-      if (chainId === 42161) {
-        assert.equal(to, USDC_ARB);
-        const d = decodeFunctionData({ abi: ERC20, data });
-        assert.equal(d.functionName, 'transfer');
-        const [dest, amt] = d.args as readonly [string, bigint];
-        w.add(w.arbUsdc, from, -amt);
-        w.writes.push(`arbitrum transfer ${amt} -> ${dest.toLowerCase()}`);
-        if (dest.toLowerCase() === DEPOSIT_ADDR) {
-          const first = w.aid === 0;
-          if (first) w.aid = 777;
-          w.addSpot(0, amt - (first ? 1_000_000n : 0n));
-        } else w.add(w.arbUsdc, dest, amt);
+      const key = keyOfChain(chainId);
+      if (key) {
+        const canon = CANONICAL_USDC[key];
+        const value = tx.value ?? 0n;
+        const tag = chainId === 42161 ? 'arbitrum' : key.toLowerCase();
+        if (data === '0x' && value > 0n) {
+          // A plain transfer of the chain's native coin: to the wallet's deposit address it is a deposit of that coin.
+          w.add(w.nativeOf(chainId), from, -value);
+          w.writes.push(`${tag} native transfer ${value} -> ${to}`);
+          const coin = nativeCoinOn(key);
+          if (to === depositAddressOf(key).toLowerCase() && coin) {
+            const id = COIN_ID[coin]!;
+            const dp = COINS[id]!.dp;
+            const units = value / 10n ** BigInt(18 - dp);
+            assert.ok(w.aid > 0, 'a native deposit to an account that exists');
+            w.addSpot(id, units);
+          } else w.add(w.nativeOf(chainId), to, value);
+        } else {
+          assert.ok(canon && to === canon.address, `unexpected tx on ${key} to ${to}`);
+          assert.equal(value, 0n, 'an ERC-20 call carries no value');
+          const d = decodeFunctionData({ abi: ERC20, data });
+          assert.equal(d.functionName, 'transfer');
+          const [dest, amt] = d.args as readonly [string, bigint];
+          w.add(w.usdcOf(chainId), from, -amt);
+          w.writes.push(`${tag} transfer ${amt} -> ${dest.toLowerCase()}`);
+          if (dest.toLowerCase() === depositAddressOf(key).toLowerCase()) {
+            const first = w.aid === 0;
+            if (first) w.aid = 777;
+            const units = amt / 10n ** BigInt(canon!.decimals - 6);
+            w.addSpot(0, units - (first ? 1_000_000n : 0n));
+          } else w.add(w.usdcOf(chainId), dest, amt);
+        }
       } else if (chainId === 286623) {
         if (to === VC_USDC) {
           const d = decodeFunctionData({ abi: ERC20, data });
@@ -1210,14 +1357,22 @@ function relayer(url: URL, method: string, body: any): Response {
   const p = url.pathname;
   if (method === 'GET' && p === '/biz/v1/ext-chain/maintenance') return json({ code: 0, data: [] });
   if (method === 'GET' && p === '/biz/config/symbol') {
-    return json({ code: 0, data: { depositWhiteList: { USDC: { ARBITRUM_ETH: { depositTime: 2 } } }, explorer: { ARBITRUM_ETH: 'https://arbiscan.io/token/' } } });
+    const white: Record<string, Record<string, { depositTime: number; memoWarning?: boolean }>> = {};
+    for (const a of assetConfig) {
+      for (const c of a.chains) {
+        if (!(c.custody as { allowDeposit?: boolean }).allowDeposit) continue;
+        (white[a.assetName] ??= {})[c.chainName] = { depositTime: 2, ...(c.chainName === 'XRP' || c.chainName === 'XLM' ? { memoWarning: true } : {}) };
+      }
+    }
+    return json({ code: 0, data: { depositWhiteList: white, explorer: { ARBITRUM_ETH: 'https://arbiscan.io/token/' } } });
   }
   if (method === 'POST' && p === '/biz/mirror/create_deposit_addresses') {
     const mine = String(body?.account).toLowerCase() === w.owner;
-    return json({ code: '0', data: { accountAddresses: mine ? [{ chain: 'ARBITRUM_ETH', address: DEPOSIT_ADDR, custodian: 'Cobo', status: 'Enabled' }] : [] } });
+    const chains = [...new Set(assetConfig.flatMap((a) => a.chains.map((c) => c.chainName)))];
+    return json({ code: '0', data: { accountAddresses: mine ? chains.map((chain) => ({ chain, address: depositAddressOf(chain), custodian: 'Cobo', status: 'Enabled' })) : [] } });
   }
   if (method === 'POST' && p === '/biz/mirror/deposit_address') {
-    return json({ code: 0, data: { status: 'Enabled', address: String(body?.chain) === 'ARBITRUM_ETH' ? DEPOSIT_ADDR : '' } });
+    return json({ code: 0, data: { status: 'Enabled', address: depositAddressOf(String(body?.chain)) } });
   }
   if (method === 'POST' && p === '/biz/mirror/analyse_address') {
     w.writes.push(`analyse_address ${body.address}`);
@@ -1232,12 +1387,17 @@ function relayer(url: URL, method: string, body: any): Response {
       assert.equal(BigInt(body.nonce), w.permitNonce, 'the withdraw lane nonce');
       w.permitNonce += 1n;
       const [coinSymbol, chain, receiver, amount, , memo, failedBackToClob] = decodeAbiParameters(PERMIT_CMD, body.cmdData);
-      assert.equal(chain, 'ARBITRUM_ETH');
       const fee = FEES[coinSymbol]!;
-      const token = coinSymbol === 'USDC' ? VC_USDC : VC_ETH;
+      const coinId = COIN_ID[coinSymbol]!;
+      const token = COINS[coinId]!.token!;
+      const dp = COINS[coinId]!.dp;
+      assert.ok(routeIn(coinSymbol, chain), `${coinSymbol} has a route on ${chain}`);
       w.addTok(token, w.owner, -amount);
-      if (coinSymbol === 'USDC') w.add(w.arbUsdc, receiver, amount - fee);
-      else w.add(w.arbEth, receiver, amount - fee);
+      const spec = ALL_EVM[chain];
+      const net = amount - fee;
+      if (spec && routeIn(coinSymbol, chain)!.isNativeToken) w.add(w.nativeOf(spec.chainId), receiver, net * 10n ** BigInt(18 - dp));
+      else if (spec) w.add(w.usdcOf(spec.chainId), receiver, net * 10n ** BigInt((CANONICAL_USDC[chain]?.decimals ?? 6) - dp));
+      else w.offchain.push({ coin: coinSymbol, chain, receiver, memo, amount: net });
       const id = BigInt(w.nextId++);
       const rec = encodeAbiParameters(WITHDRAWAL_TUPLE, [
         { withdrawId: id, chain, coinAddr: token, account: w.owner as Hex, receiver, amount, withdrawFee: fee, bridgeAddr: '', createdTimestamp: 1n, settledTimestamp: 2n, txHash: `0x${'de'.repeat(32)}`, status: 1, memo, failedBackToClob, updatedTimestamp: 2n, coinSymbol },

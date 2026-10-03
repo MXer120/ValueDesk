@@ -2,7 +2,7 @@
  * Valuescan LIVE end-to-end runner for the app's money flows on SoDEX mainnet.
  *
  *   npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json
- *                           [--profile core] [--confirm <walletAddress>]
+ *                           [--profile core|evm-tour|all-chains|builder-rerun] [--confirm <walletAddress>]
  *                           [--only step1,step2] [--throwaway-key] [--registry-only]
  *                           [--backend http://127.0.0.1:5180] [--report-dir <dir>]
  *   npx tsx e2e/live/run.ts capabilities      (what this runner can do, as JSON; no key, no network)
@@ -24,9 +24,7 @@ import { generatePrivateKey } from 'viem/accounts';
 import { CHECKS } from './checks';
 import { coverageList } from './coverage';
 import { STEP_ALIASES, STEP_ORDER, STEP_TITLES, type StepId } from './context';
-
-/** The runner's profiles (runner.ts PROFILES - kept here too, so `capabilities` loads nothing of the app). */
-const PROFILES = ['core'] as const;
+import { PROFILES, PROFILE_TITLES, profileSteps } from './profiles';
 const FLAGS = ['--config', '--profile', '--confirm', '--only', '--throwaway-key', '--registry-only', '--backend', '--report-dir'] as const;
 
 const USAGE = `usage: npx tsx e2e/live/run.ts [plan|live|capabilities] --config e2e/live/config.json [options]
@@ -129,6 +127,7 @@ export function capabilities(): Record<string, unknown> {
     stepTitles: STEP_TITLES,
     aliases: STEP_ALIASES,
     profiles: [...PROFILES],
+    profileInfo: PROFILES.map((p) => ({ name: p, title: PROFILE_TITLES[p], steps: profileSteps(p) })),
     flags: [...FLAGS],
     checks: CHECKS.map((c) => ({ id: c.id, area: c.area, title: c.title, step: c.step })),
     // Every function of the app's trading and funds layer, and the checks that exercise it (coverage.ts).

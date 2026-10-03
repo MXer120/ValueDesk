@@ -11,10 +11,11 @@ import { decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem';
 import { unwrapList } from '@sodex-core';
 import { account } from '../../src/exchange/sodexAccount';
 import { readGateway } from '../../src/trading/gateway';
-import { CANONICAL_USDC, EVM_CHAINS, formatUnits } from '../../src/trading/onboard';
+import { CANONICAL_USDC, formatUnits } from '../../src/trading/onboard';
 import { VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } from '../../src/trading/rpc';
 import { unitsDown, type CoinConfig } from '../../src/trading/funds';
 import { coinPrices, priceOf } from '../../src/trading/prices';
+import { ALL_EVM } from './chains';
 import { feeRatesFrom, type FeeRates } from './fees';
 import type { HistoryLimiter } from './history';
 import { approx, cut, usd } from './util';
@@ -238,7 +239,7 @@ export interface Snapshot {
   positions: string[];
 }
 
-/** Read everything the wallet holds: SoDEX Spot and Perps, its ValueChain wallet, and every EVM chain the app knows. */
+/** Read everything the wallet holds: SoDEX Spot and Perps, its ValueChain wallet, and every EVM chain the runner signs on (chains.ts). */
 export async function snapshot(owner: string, coins: CoinConfig[]): Promise<Snapshot> {
   const unreadable: string[] = [];
   const holdings: Holding[] = [];
@@ -293,7 +294,7 @@ export async function snapshot(owner: string, coins: CoinConfig[]): Promise<Snap
     unreadable.push('ValueChain wallet');
   }
   await Promise.all(
-    Object.values(EVM_CHAINS).map(async (c) => {
+    Object.values(ALL_EVM).map(async (c) => {
       const usdc = CANONICAL_USDC[c.key];
       try {
         const a = await rpcBatch(c.rpcUrl, [nativeBalanceCall(owner), ...(usdc ? [balanceOfCall(usdc.address, owner)] : [])]);

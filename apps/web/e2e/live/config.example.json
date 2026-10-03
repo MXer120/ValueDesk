@@ -48,10 +48,19 @@
     { "coin": "ETH", "chain": "ARBITRUM_ETH", "amount": "min", "receiver": "self", "buyIfMissing": true }
   ],
 
-  "// receivers": "the ONLY addresses other than the wallet itself that anything may be sent to. XRP/XLM: { \"address\": \"r...\", \"memo\": \"123\" } or { \"address\": \"r...\", \"noMemo\": true }",
+  "// receivers": "the ONLY addresses other than the wallet itself that anything may be sent to. XRP/XLM: { \"address\": \"r...\", \"memo\": \"123\" } or { \"address\": \"r...\", \"noMemo\": true }. Profile all-chains: your OWN address per chain the runner cannot sign on, named by the chain key in lower case (sol, btc, ltc, doge, ada, sui, ton, xlm, xrp) - a route without one is skipped.",
   "receivers": {
     "valuechain": ""
   },
+
+  "// evmTour": "profiles evm-tour and all-chains: \"chains\": \"all\" or a list of chain keys; \"skip\": chain keys to leave out (e.g. \"ETH\" for mainnet gas); sellBack: sell what the tour bought back to USDC after the last chain that needs it",
+  "evmTour": { "chains": "all", "skip": [], "sellBack": true },
+
+  "// chainWithdrawals": "profile all-chains: per route on a chain the runner cannot sign on, the smallest amount you could send straight back, to receivers.<chain>; buyIfMissing market-buys the coin on Spot first",
+  "chainWithdrawals": { "skip": [], "buyIfMissing": true },
+
+  "// manualDeposits": "profile all-chains, opt-in per route: deposits YOU send by hand, e.g. { \"coin\": \"SOL\", \"chain\": \"SOL\", \"amount\": \"0.03\" }. The run shows the verified address and waits up to timeouts.depositMinutes for Spot to rise by the amount.",
+  "manualDeposits": [],
 
   "cleanup": { "enabled": false, "chain": "ARBITRUM_ETH" },
 

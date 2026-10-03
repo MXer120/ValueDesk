@@ -71,7 +71,7 @@ function fakeC(o: { checks?: Array<BuilderCheck | null>; tiers?: Partial<Record<
 const PRESENT = (info: TiersInfo): TiersCall => ({ present: true, info, leaked: false, error: null });
 
 test('skip: the builder tests are off, nothing is checked or written', async () => {
-  const k = kit({ argv: ['--stages', 'C'], lines: ['3'] });
+  const k = kit({ argv: ['--stages', 'C'], lines: ['2'] });
   const f = fakeC();
   try {
     const r = await runStageC(k.ctx, f.deps);
@@ -81,6 +81,8 @@ test('skip: the builder tests are off, nothing is checked or written', async () 
     assert.deepEqual(f.d.saved, []);
     assert.match(k.screen(), /A BUILDER ACCOUNT is the SoDEX account that receives the Valuescan fee/);
     assert.match(k.screen(), /PARKED, not spent/);
+    assert.match(k.screen(), /Nothing here creates, funds or moves money on a builder account/);
+    assert.ok(!/Create one/.test(k.screen()), 'no way to create a builder account is offered');
   } finally {
     k.cleanup();
   }
@@ -226,16 +228,23 @@ test('--no-tiers and "no": the tool is not run', async () => {
   }
 });
 
-test('not eligible: exactly what is missing; "check again" re-reads; then it goes on', async () => {
-  const k = kit({ argv: ['--stages', 'C', '--no-tiers'], lines: ['1', BUILDER, '1', '', '', '', ''] }); // have one; address; check again; fees x2; revoke; append
+test('not eligible: exactly what is missing and what to move - then the stage stops; nothing is moved, nothing else is asked', async () => {
+  const k = kit({ argv: ['--stages', 'C', '--no-tiers'], lines: ['1', BUILDER] }); // have one; address
   const f = fakeC({ checks: [LOW, ELIGIBLE] });
   try {
     const r = await runStageC(k.ctx, f.deps);
-    assert.equal(r.status, 'PASS', r.reason);
-    assert.deepEqual(f.checked, [BUILDER, BUILDER]);
+    assert.equal(r.status, 'FAIL');
+    assert.deepEqual(k.prompter.unused, []);
+    assert.deepEqual(f.checked, [BUILDER], 'checked once; not re-read, not offered to fix');
     const screen = k.flat();
     assert.match(screen, /NOT ELIGIBLE YET: - Perps holds 40 vUSDC - it needs 100: short by 60 vUSDC\./);
-    assert.match(screen, /Transfer between "SoDEX Spot" and "SoDEX Futures"/);
+    assert.match(screen, /1\. Deposit 29\.5 USDC \(or more\) to the builder account/);
+    assert.match(screen, /2\. Then Transfer 60 vUSDC from "SoDEX Spot" to "SoDEX Futures" \(Perps\)/);
+    assert.match(screen, /The guide does not move anything on a builder account/);
+    assert.match(k.ctx.shared.next.join(' '), /not eligible yet: Deposit 29\.5 USDC/);
+    assert.equal(k.ctx.shared.builder, undefined);
+    assert.deepEqual(f.d.saved, []);
+    assert.equal(f.d.lives.length, 0);
   } finally {
     k.cleanup();
   }
@@ -318,22 +327,6 @@ test('.env.local: --yes never writes it - the default is no, and the file is not
     assert.deepEqual(f.env.writes, []);
     assert.match(k.screen(), /Add the missing lines to \.env\.local now\? \[y\/N\] no {3}\(--yes: the default\)/);
     assert.deepEqual(k.prompter.asked, []);
-  } finally {
-    k.cleanup();
-  }
-});
-
-test('create one now, with a runner that has no builder-setup profile: the steps in the app\'s own screens, then the check', async () => {
-  const k = kit({ argv: ['--stages', 'C', '--no-tiers'], lines: ['2', '', BUILDER, '', '', '', ''] }); // create; Enter when done; address; fees x2; revoke; append
-  const f = fakeC();
-  try {
-    const r = await runStageC(k.ctx, f.deps);
-    assert.equal(r.status, 'PASS', r.reason);
-    const screen = k.flat();
-    assert.match(screen, /cannot set a builder account up by itself yet \(it has no "builder-setup" profile\)/);
-    for (const want of ['Press "Connect wallet"', 'deposit 205 USDC', 'press "Enable trading"', 'from "SoDEX Spot" to "SoDEX Futures" (that is Perps), 102 USDC']) assert.ok(screen.includes(want), want);
-    assert.equal(f.d.lives.length, 0);
-    assert.deepEqual(f.checked, [BUILDER]);
   } finally {
     k.cleanup();
   }

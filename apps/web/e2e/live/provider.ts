@@ -34,8 +34,8 @@
  */
 import { createPublicClient, createWalletClient, defineChain, http, type Chain, type Transport } from 'viem';
 import { privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
-import { EVM_CHAINS } from '../../src/trading/onboard';
 import { VALUECHAIN_RPC } from '../../src/trading/rpc';
+import { ALL_EVM } from './chains';
 import type { Eip1193Provider } from '../../src/wallet';
 
 export const VALUECHAIN_CHAIN_ID = 286623;
@@ -57,10 +57,14 @@ export const VALUECHAIN: ChainSpec = {
   native: { name: 'SOSO', symbol: 'SOSO', decimals: 18 },
 };
 
-/** ValueChain plus every EVM chain the app itself sends from (trading/onboard.ts EVM_CHAINS). */
+/**
+ * ValueChain plus every EVM chain the runner signs on: the ones the app itself
+ * sends from (trading/onboard.ts EVM_CHAINS) and the payout-only chains the
+ * runner carries its own id and RPC for (chains.ts RUNNER_CHAINS).
+ */
 export const KNOWN_CHAINS: readonly ChainSpec[] = [
   VALUECHAIN,
-  ...Object.values(EVM_CHAINS).map((c) => ({ key: c.key, id: c.chainId, name: c.name, rpcUrl: c.rpcUrl, native: c.native })),
+  ...Object.values(ALL_EVM).map((c) => ({ key: c.key, id: c.chainId, name: c.name, rpcUrl: c.rpcUrl, native: c.native })),
 ];
 
 /** An EIP-1193 error: `code` 4001/4100/4200/4902/-32602/-32000, like a browser wallet's. */

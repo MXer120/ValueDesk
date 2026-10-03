@@ -41,7 +41,7 @@ Without a funded wallet you can still see a plan: `npx tsx e2e/live/run.ts plan 
 | `plan` / `live` | `plan` (default) is read-only; `live` moves funds |
 | `capabilities` | prints, as ONE JSON line, the steps, profiles, flags, every check and the coverage table (`coverage.ts`); no key, no network |
 | `--config <file>` | the run's config (`config.example.json` documents every field). Required for `live` |
-| `--profile <name>` | what the run covers: `core` (today: the config's steps, every order type, the builder fee and its tiers, the key's life, the refusals, the cross-check) |
+| `--profile <name>` | what the run covers: `core` (default), `evm-tour`, `all-chains`, `builder-rerun` - see [Profiles](#profiles) |
 | `--confirm <address>` | `live`: must equal the address `VS_E2E_KEY` controls |
 | `--only a,b` | run only these steps (preflight always runs); `orders` = `orders-spot,orders-perps` |
 | `--throwaway-key` | `plan` only: a random in-memory key instead of `VS_E2E_KEY` |
@@ -59,6 +59,34 @@ Add to `.gitignore` (not done by the runner):
 apps/web/e2e/live/reports/
 apps/web/e2e/live/config.json
 ```
+
+## Profiles
+
+| Profile | Steps | What it adds |
+|---|---|---|
+| `core` (default) | every step but the three below | one chain (the deposit chain): deposit, transfers, every order type, every way out, the key's life, the refusals, the builder fee and its tiers, the cross-check |
+| `evm-tour` | core + `evm-tour` | every EVM chain the runner signs on, out and back: the chain's native coin (withdrawn to this wallet, then sent back to the verified deposit address by a plain transfer the runner signs - DIRECT), then USDC (withdrawn, sent back with the app's `sendUsdcDeposit`) |
+| `all-chains` | evm-tour + `chain-withdrawals`, `manual-deposits` | per route on a chain the runner cannot sign on (Solana, Bitcoin, XRP ...): a withdrawal to YOUR address there (`receivers.<chain key in lower case>`; skipped without it), and the deposits you opt into sending by hand (`manualDeposits`) - the run shows the verified address and waits for the credit |
+| `builder-rerun` | `enable-trading`, `builder-tiers`, `cross-check`, `revoke-builder` | the builder fee test alone, again, on the funded test wallet of an earlier run (it sets `allowExistingAccount`); first `npx tsx tools/builderTiers.ts forget --address <wallet>` in `apps/server` |
+
+`--only` still decides alone: with it, exactly the steps it names run. A profile's changes to the config
+are printed (`profile ...:` lines, and `plan.profileNotes`): `evm-tour` / `all-chains` raise
+`deposit.amount` by what their steps need in Spot at their busiest (working capital - it comes back, or
+leaves to your own addresses). No profile creates or funds a builder account: that is the owner's own,
+existing account, which the runner only reads (by `builder.address` and `builder.id`).
+
+**Every plan, every profile** checks every route read-only (`route-<coin>-<chain>`, recorded in plan mode
+too): open or closed, minimum and fee as configured and as the chain charges it (a difference, or a
+minimum that does not cover the fee, is a finding), SoDEX's maintenance switch, the wallet's deposit
+address there (well-formed for its format; the app's Deposit sheet and the registry agree), and the app's
+own receiver check for that chain (a well-formed address accepted, every malformed one refused; XRP /
+Stellar memo rules). It prints a suggested `maxSpendUsd` and the list of what **no run can test
+automatically**, with why (`plan.notTestable`).
+
+The EVM chains the app does not send from (Arc 5042, Avalanche C-Chain 43114, HyperEVM 999, Robinhood
+Chain 4663) get their chain id and public RPC from `chains.ts` (each from the chain's own documentation):
+the runner reads a withdrawal's arrival there and sends the native-coin deposit back. Polygon has no
+native route on SoDEX: the plan asks you for a little POL for the USDC transfer back.
 
 ## Safety model
 
@@ -80,19 +108,27 @@ apps/web/e2e/live/config.json
   cancels (exactly these orders), replace and modify (exactly this order, exactly this change), leverage
   and margin mode, isolated margin, the dead-man switch (its time), transfers, the key registration and
   revocation, the builder approval (its exact maximum), withdrawal permits (**decoded**: coin, chain,
-  receiver, amount, memo), deposit permits. Anything else gets a definite refusal (HTTP 403 / JSON-RPC
-  error - never "maybe sent"). Unknown hosts are refused; ValueChain's explorer is read-only.
+  receiver, amount, memo), deposit permits, and the evm-tour's native-coin transfer (`native-transfer`:
+  the raw transaction is **decoded** and its signer recovered - exactly this chain, signer, deposit
+  address and value, no calldata, once; native value into a contract is never sent, nor a transfer in a
+  batch). Anything else gets a definite refusal (HTTP 403 / JSON-RPC error - never "maybe sent"). Unknown
+  hosts are refused; ValueChain's explorer is read-only.
 - **The wallet signs only what the step expects** (`provider.ts` policy): the exact USDC transfer to the
   verified deposit address, the key registration for this account, the builder approval with exactly
   this maximum (one), the key **revocation** - an `ExchangeAction` whose payload hash is exactly the
   revocation of this key, one per engine (a master-wallet `ExchangeAction` could carry any engine
   action, so the hash is the whole check) - the token permit + deposit command for this token and amount,
-  the withdrawal permit for this coin/chain/receiver/amount. With no policy it refuses every signature.
+  the withdrawal permit for this coin/chain/receiver/amount, the ONE plain native-coin transfer of this
+  value to the verified deposit address on this chain. With no policy it refuses every signature.
 - **Orders the runner signs itself** - the two cheating orders of the builder-tiers step, the orders
   naming a builder the wallet never approved (refusals) and the order signed with a revoked key
   (key-lifecycle) - stand in for a modified client. They are built with `@sodex-core` and the trading
   key, labelled `DIRECT` in the console and the report, and leave as the guard kind `direct-order`:
   exactly their bytes, once.
+- **The native-coin deposit back** (evm-tour) is the other thing the runner sends itself, because the app
+  has no function for it (its Deposit sheet only shows the address): labelled `DIRECT`, only to the
+  address the app's Deposit sheet offers AND the per-coin registry lists, through the app's own
+  `addOrSwitchChain` / `sendTransaction`.
 - **History reads**: SoDEX allows `/accounts/{a}/orders/history` and `/accounts/{a}/trades` together
   about four requests a minute per IP; the fifth blocks the IP (the owner's browser too) for a minute or
   more. Every read of them goes through ONE limiter (`history.ts`): one per 35 s over both routes and
@@ -103,10 +139,11 @@ apps/web/e2e/live/config.json
 - **Receivers**: only the wallet itself (`"self"`, EVM chains) or an entry of `receivers`. Every
   receiver is validated with the app's `receiverProblem` / `memoProblem` for its chain, checked against
   SoDEX's on-chain blacklist, before anything is signed.
-- **The deposit address** is the backend's verified answer AND an independent `eth_call` of
-  `getDepositWalletList(account, "USDC")` on the ValueChain registry `0x07E28Aa1BB34A625c94870476b24213AB4d2E7C8`
-  (`wallets[i][0]`), decoded with viem. If they disagree, live refuses to start - and the address is
-  re-checked right before the USDC is sent.
+- **The deposit address** is the app's verified answer (its Deposit sheet's `depositOptions`) AND an
+  independent `eth_call` of `getDepositWalletList(account, coin)` on the ValueChain registry
+  `0x07E28Aa1BB34A625c94870476b24213AB4d2E7C8` (`wallets[i][0]`), decoded with viem - for USDC and for every
+  coin the run deposits or asks you to deposit. If they disagree, nothing is sent (live refuses to start for
+  the USDC deposit) - and the address is re-checked right before anything is sent.
 - **Budget**: `maxSpendUsd` caps what the wallet may **lose** - fees, gas, activation, trading costs
   AND value sent to addresses other than the wallet itself. Checked before every step (plan estimate +
   what the run already spent) and again against the on-chain withdrawal fee. Actual spend is measured
@@ -135,7 +172,7 @@ prints the exact checklist with live gas prices and what the wallet already hold
 
 | Step | App code it runs | Checks |
 |---|---|---|
-| `preflight` (always) | `api.health`, `assetConfigs`, `usdcRoutes`, `sodexAccountId`, `balancesOf`, deposit options, `symbolFor`, `withdrawQuote`, `maintenanceFor`, `receiverBlacklisted`, the server's fee terms | - |
+| `preflight` (always) | `api.health`, `assetConfigs`, `usdcRoutes`, `sodexAccountId`, `balancesOf`, deposit options, `symbolFor`, `withdrawQuote`, `maintenanceFor`, `receiverBlacklisted`, `receiverProblem`, `memoProblem`, the server's fee terms | `route-<coin>-<chain>` for every route |
 | `deposit-external` | `sendUsdcDeposit` (ONE ERC-20 transfer to the verified deposit address) | `deposit-usdc-<chain>` |
 | `enable-trading` | `enableTrading` (ONE `UserSignedAddAPIKeyAction`; with a builder not yet approved, ONE `ApproveBuilderFeeAction` before it) | `key-enable`, `builder-approval` |
 | `transfers` | `transferFunds` Spot->Perps, Perps->Spot | `transfer-spot-to-perps`, `transfer-perps-to-spot` |
@@ -149,6 +186,9 @@ prints the exact checklist with live gas prices and what the wallet already hold
 | `withdraw-valuechain-other` | `withdrawFunds` route `VALUECHAIN`, receiver = `receivers.valuechain` (skipped if unset) | `withdraw-valuechain-other` |
 | `withdraw-external` | `withdrawQuote`, `withdrawFunds` with `expectedFee`, `withdrawalProgress` | `withdraw-<coin>-<chain>` |
 | `extra-deposits` / `extra-withdrawals` | as above, per entry (`buyIfMissing` market-buys the coin first) | `deposit-*`, `withdraw-*` |
+| `evm-tour` (evm-tour, all-chains) | per EVM chain: `placeOrder` (buys the native coin if Spot holds too little), `withdrawFunds` to this wallet, a DIRECT native transfer back (`addOrSwitchChain`, `sendTransaction`); then `withdrawFunds` + `sendUsdcDeposit` for USDC; sells what it bought back | `withdraw-<coin>-<chain>`, `deposit-<coin>-<chain>` per leg |
+| `chain-withdrawals` (all-chains) | `withdrawQuote`, `placeOrder` (buys the coin), `withdrawFunds` to `receivers.<chain>` - the smallest amount you could send straight back | `withdraw-<coin>-<chain>` |
+| `manual-deposits` (all-chains, opt-in) | the app's deposit options vs the registry; then it waits for Spot | `manual-deposit-<coin>-<chain>` |
 | `key-lifecycle` | `restoreTrading`, `keyStillRegistered`, `disableTrading({ revoke: true })`, `enableTrading` | `key-restore`, `key-still-registered`, `key-disable-revoke`, `key-old-key-rejected`, `key-reenable` |
 | `cleanup` (opt-in) | `transferFunds`, `withdrawFunds` | `cleanup-sweep` |
 | `cross-check` | reads only: order history and fills (four requests), the builder account's balances | `cross-orders-*`, `cross-fills-*`, `cross-stream-vs-rest`, `cross-end-state`, `builder-order-records`, `builder-income-matches` |
@@ -204,14 +244,14 @@ is `skipped`. To test the Valuescan builder fee (docs/BUILDER-CODES.md, docs/BUI
 | Optional cleanup withdrawal | +1 USDC |
 | **Total** | **~$3.5** (+$1 with cleanup) + anything sent to your other address |
 
-## Coverage policy - one run per chain
+## Coverage per chain
 
 The deposit/withdraw mechanism is **per chain**: all coins on one chain share the wallet's deposit
-address and SoDEX's custody path there. One run per chain you care about (Arbitrum is the default); for
-another EVM chain change `deposit.chain`, `withdrawExternal.chain` and the `extraWithdrawals` entry.
-`plan` prints the live **per-chain table** (USDC and the native coin per chain: deposit minimum,
-withdrawal minimum and fee, what the runner can do there); the report's `chains` has the same rows with
-what this run did on each.
+address and SoDEX's custody path there. `core` covers the deposit chain (Arbitrum by default), `evm-tour`
+every EVM chain the runner signs on, `all-chains` also the others as far as they can be reached from
+here. `plan` prints the live **per-chain table** (USDC and the native coin per chain: deposit minimum,
+withdrawal minimum and fee, what the runner can do there) and the route checks; the report's `chains` has
+the same rows with what this run did on each.
 
 ## Resuming
 
@@ -238,11 +278,12 @@ app (connect the same wallet):
 
 - `checks[]` - every check: `id`, `area`, `title`, `step`, `status`, `detail`, `evidence`, `costUsd`;
   `checkCounts` - how many of each.
-- `chains[]` - per coin and chain SoDEX lists: `deposit` and `withdraw` `{ status, detail }`
-  (`not-testable` with the reason where the runner cannot act).
+- `profile`; `chains[]` - per coin and chain SoDEX lists: `deposit`, `withdraw` and `route` (its
+  read-only route check) `{ status, detail }` (`not-testable` with the reason where the runner cannot act).
 - `orderTypes[]` - the order checks with their engine. `feeTable[]` - one row per fill.
-- `plan` - problems/warnings, funding checklist, per-chain route table, markets, deposit-address check,
-  `receiversNeeded`, the server's fee terms as judged, per-step plan lines and estimates.
+- `plan` - problems/warnings, funding checklist, per-chain route table, `routeChecks`, `notTestable`,
+  `profileNotes`, `suggestedMaxSpendUsd`, markets, deposit-address check, `receiversNeeded`, the server's
+  fee terms as judged, per-step plan lines and estimates.
 - `steps[]` - per step: `status`, timings, `subSteps[]`, `txs[]`, `amounts`, `fees`, `measured`, the
   counts of its checks.
 - `orders[]` / `fills[]` - the run's book: every order that left (with what SoDEX answered and what its
@@ -258,6 +299,11 @@ app (connect the same wallet):
 | `runner.ts` | configures the app's trading layer for Node, guard, wallet, stream, preflight, steps, report |
 | `checks.ts` | every check: id, area, title, step; the run's verdicts |
 | `steps.ts` | the funds steps and the table of all steps |
+| `profiles.ts` | the profiles: their steps and what they change in the config |
+| `chains.ts` | every EVM chain the runner reads and signs on (the app's, plus Arc, Avalanche, HyperEVM, Robinhood) |
+| `tour.ts`, `evmTour.ts` | the evm-tour: its legs, amounts and the native transfer's guard check and wallet policy; the step |
+| `chainRoutes.ts`, `otherChains.ts` | the routes on chains the runner cannot sign on; chain-withdrawals and manual-deposits |
+| `routes.ts`, `receivers.ts` | the read-only check of every route and what cannot be tested; the receiver samples |
 | `orders.ts`, `orderSteps.ts` | placing and judging orders; the spot and perps order steps |
 | `tierSteps.ts`, `terms.ts` | the builder fee and its tiers; the runner's own terms verifier |
 | `refusalSteps.ts`, `keySteps.ts`, `crossCheck.ts` | refusals, the key's life, the final reconciliation |
@@ -278,12 +324,16 @@ npx tsc --noEmit -p e2e/live
 `simulate.test.ts` runs **whole live runs** against `sim/world.ts` - under the real guard, wallet and app
 code: every step and check of the default config, the builder fee and its tiers end to end (the terms
 route signs with the shared test key, its volume counted from the fake's own fills), a fake whose
-replace keeps the builder (the run reports the constant to flip), and the start-up refusals. The fake
+replace keeps the builder (the run reports the constant to flip), the start-up refusals, the evm-tour
+over nine EVM chains (native coins sent back by the runner, USDC with the app; 18-decimal USDC on BNB
+Chain and Arc), all-chains (withdrawals to Solana, XRP without memo, Bitcoin; a manual deposit),
+builder-rerun, and a read-only all-chains plan. The fake
 verifies every signature with viem and rejects what SoDEX rejects (an unapproved builder, a revoked
 key, FOK, a market order below the minimum notional, reduce-only with no position). It cannot prove
 that SoDEX behaves like the fake. `safety.test.ts` has a refusal test for every guard kind and wallet
-policy; `units.test.ts` covers checks, fees, the history limiter, the terms verifier, the ledger, the
-receivers and the coverage table.
+policy (the native transfer's included); `units.test.ts` covers checks, fees, the history limiter, the
+terms verifier, the ledger, the receivers, the coverage table, the profiles, the tour's legs and amounts,
+the chain withdrawals and what cannot be tested.
 
 ## Notes
 

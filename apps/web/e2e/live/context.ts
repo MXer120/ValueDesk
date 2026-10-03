@@ -38,6 +38,9 @@ export const STEP_ORDER = [
   'withdraw-external',
   'extra-deposits',
   'extra-withdrawals',
+  'evm-tour',
+  'chain-withdrawals',
+  'manual-deposits',
   'key-lifecycle',
   'cleanup',
   'cross-check',
@@ -65,6 +68,9 @@ export const STEP_TITLES: Record<StepId, string> = {
   'withdraw-external': 'withdraw to another chain (SoDEX permit)',
   'extra-deposits': 'extra deposits from other EVM chains',
   'extra-withdrawals': 'extra withdrawals per chain',
+  'evm-tour': 'every EVM chain the runner signs on, out and back: the native coin (withdrawn, sent back to the deposit address), then USDC',
+  'chain-withdrawals': 'per route on a chain the runner cannot sign on: a withdrawal to your own address there',
+  'manual-deposits': 'the deposits you send by hand from other chains: the run shows the verified address and waits for the credit',
   'key-lifecycle': 'the trading key: restore, still registered, revoke, an order with the old key is rejected',
   cleanup: 'move everything back to Spot and withdraw to the deposit chain',
   'cross-check': 'reconcile SoDEX\'s order history and fills with what the run recorded',
@@ -210,6 +216,8 @@ export interface BuilderBalances {
 
 export interface Ctx {
   mode: Mode;
+  /** The run profile (profiles.ts). */
+  profile: string;
   cfg: RunConfig;
   owner: string;
   provider: KeyProvider;
@@ -254,6 +262,8 @@ export interface Ctx {
   tiers: { defaultFee?: number; loweredFee?: number; cheats: Array<{ kind: 'underpaid' | 'no-builder'; orderID: number | null; clOrdID: string | null; notional: string }> };
   /** Set by a step to make the app's NEXT terms answer a tampered copy of the real one (runner.ts wires it into the app's terms module). */
   tamperTerms: ((body: Record<string, unknown>) => Record<string, unknown>) | null;
+  /** For the offline simulation only: called when the run waits for a deposit the OWNER sends by hand. A real run never sets it. */
+  onManualDeposit: ((d: { coin: string; chain: string; address: string; amount: string }) => void) | null;
 }
 
 /** A refusal from the runner's own safety rules - nothing was signed or sent. */

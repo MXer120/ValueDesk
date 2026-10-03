@@ -19,8 +19,9 @@ summary on the screen and in two files.
 - For the live money run (stage D): a **brand-new wallet** and about 25 USDC plus a little ETH for gas on
   Arbitrum One. Never use a wallet that holds other funds. The guide shows the exact amounts before it asks
   for anything.
-- For the builder tests (stage C): the builder account, or a second fresh wallet and about 205 USDC to make
-  one (that money is parked in the builder account, not spent).
+- For the builder tests (stage C): your builder account - an activated SoDEX account with at least 100 vUSDC
+  in Spot and 100 vUSDC in Perps. The guide only reads it (its wallet address or account ID is all it asks
+  for); it never creates or funds one.
 
 ## 2. Starting it
 
@@ -111,16 +112,16 @@ subscribing after a restart); it does not fail the stage.
 
 A builder account is the SoDEX account that receives the Valuescan fee: any activated account that holds at
 least 100 vUSDC in Spot **and** 100 vUSDC in Perps. The money is parked, not spent. Its account ID is the
-builder ID. Three choices:
+builder ID. It is **your own, existing account**: the guide and the live run only read it - nothing here
+creates, funds or moves money on a builder account. Two choices:
 
-1. *I already have one*: type its wallet address or account ID. It is checked read-only
-   (`apps/web/tools/check-builder.mjs`: three public reads). The guide prints the ID and both balances; if it
-   is not eligible it says exactly what is missing and checks again when you ask.
-2. *Create one now with a second fresh wallet*: when the live runner has the `builder-setup` profile it does
-   it (a money run of its own, with that wallet's key, the same confirmations as stage D). Otherwise the guide
-   prints the steps in the app's own screens - connect, deposit 205 USDC from Arbitrum, enable trading,
-   transfer 102 USDC from "SoDEX Spot" to "SoDEX Futures" - and then checks the account.
-3. *Skip the builder tests.*
+1. *Test the builder fee with my builder account*: type its wallet address or account ID (an ID is looked
+   up through our own API). It is checked read-only (`apps/web/tools/check-builder.mjs`: three public reads).
+   The guide prints the ID and both balances. If it is not eligible it says exactly what is missing and
+   exactly what to move - a transfer between "SoDEX Spot" and "SoDEX Futures" where one side can spare it, a
+   deposit only for what neither can - and **stops**; do it in the app with the builder wallet, then run
+   `RUN-LIVE-TESTS.cmd --stages C` again.
+2. *Skip the builder tests.*
 
 Then, unless `--no-tiers`:
 
@@ -164,8 +165,10 @@ real wallet on SoDEX mainnet. Its safety model is unchanged; the guide adds your
 1. **Choose what the run tests.** When the runner has profiles, each is shown with what it needs - found by a
    read-only plan with a throwaway key - before you choose: `core` (one chain, every order type, the builder
    fee and its change), `evm-tour` (every EVM chain, out and back), `all-chains` (also chains this computer
-   cannot sign on: withdrawals to addresses you supply, deposits you send by hand). A profile the runner does
-   not have is listed as "not available in this runner version".
+   cannot sign on: withdrawals to addresses you supply, deposits you send by hand), `builder-rerun` (the
+   builder fee test alone, again, on the funded test wallet of an earlier run - after
+   `npx tsx tools/builderTiers.ts forget --address <wallet>` in `apps/server`). A profile the runner does not
+   have is listed as "not available in this runner version".
 2. **Receiver addresses**, if the run can use any (another address of yours on ValueChain, a wallet on a
    chain the runner cannot sign on). Each is optional. They are written to the private run config and checked
    by the runner's next plan.
@@ -180,7 +183,8 @@ real wallet on SoDEX mainnet. Its safety model is unchanged; the guide adds your
 
 With fee tiers on, the fee-change test works **once per wallet**: the run places two "cheating" orders on
 purpose, and afterwards the server keeps that wallet on the default fee for 30 days. For another run use a
-new wallet, or `npx tsx tools/builderTiers.ts forget --address <wallet>` in `apps/server`.
+new wallet, or `npx tsx tools/builderTiers.ts forget --address <wallet>` in `apps/server` and the
+`builder-rerun` profile.
 
 **If the run stops**, the guide prints where every coin is (as the runner read it), what is in flight, and
 how to go on: start `RUN-LIVE-TESTS.cmd` again, enter the same key, and choose *Resume the earlier run* - or
@@ -239,7 +243,7 @@ what was asked for:
 | What a real wallet (MetaMask, a phone over WalletConnect) shows and asks | the runner signs with a key-backed wallet; a wallet's own screens cannot be driven from here | the manual list in `docs/BUILDER-CODES.md` section 9: connect, enable trading, read the approval message |
 | How the app looks: the fee dialog, the order ticket's fee line, toasts, charts | stage B's smoke test checks that every page renders and what it talks to - not what a person sees | look at the pages after stage D with the settings the summary prints |
 | Deposits from chains this computer cannot sign on (Solana, Bitcoin, XRP, ...) | there is no key for those chains here | the `all-chains` profile tells you what to send by hand and then waits for and verifies it |
-| Making the builder account, while the runner has no `builder-setup` profile | it needs a second wallet's key and a deposit | the steps stage C prints |
+| Making or funding the builder account | it is your own account; nothing here moves money on it | stage C reads it and says exactly what to move when it is short |
 | SoDEX's history rate limit (about 4 a minute) and the block that follows | provoking it blocks this address - trading included - for a minute or more | nothing: the guide and the app stay below it by design |
 | Behaviour over time: a trading key expiring after its lifetime, the 30 days after an underpaid order | waiting is not a test | covered by unit tests with a fake clock |
 | SoDEX maintenance, a closed route, an exchange being down | cannot be switched on from here | stage B reports the state it finds (a WARN, or "not testable" in the chain table) |
@@ -259,7 +263,7 @@ part optional (a missing one degrades to "not available" or "not run", never to 
 
 | From the runner | Used for |
 |---|---|
-| `run.ts capabilities` printing `{ steps, profiles, flags }`, exit 0 (else the usage text is read) | the step order for resuming, the profile menu, `builder-setup` |
+| `run.ts capabilities` printing `{ steps, profiles, flags }`, exit 0 (else the usage text is read) | the step order for resuming, the profile menu |
 | `plan` / `live` with `--config`, `--confirm`, `--only`, `--profile`, `--throwaway-key`, `--registry-only`, `--report-dir`; the key in `VS_E2E_KEY`; exit codes 0 / 1 / 2 / 130; a last line `report   <file>` | everything in stage D |
 | report: `wallet`, `exitCode`, `selectedSteps`, `config.maxSpendUsd`, `plan.{problems, warnings, checklist, steps[], routes[], estimatedCostUsd, estimatedSentAwayUsd}`; funding problems start with `fund the wallet:` | the plan, the funding wait |
 | report: `plan.receiversNeeded[] { name, chain?, why?, memo?, set?, problem? }` (else its messages naming `receivers.<name>`) | the receiver questions |

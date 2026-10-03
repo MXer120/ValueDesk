@@ -1047,5 +1047,3 @@ async function cancelAllQuietly(ctx: Ctx, m: Market): Promise<number> {
 }
 const putInOrderKeepingPosition = cancelAllQuietly;
 
-void settleMs;
-void streamMs;

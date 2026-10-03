@@ -67,6 +67,14 @@ export interface RunBuilder {
   expectTier: { atUsd: number; perps: number; spot: number } | null;
 }
 
+/** One deposit the OWNER sends by hand (a chain the runner cannot sign on); the run waits for it and verifies it. */
+export interface ManualDeposit {
+  coin: string;
+  chain: string;
+  /** At least this much must arrive in Spot (a decimal string, in the coin). */
+  amount: string;
+}
+
 export interface RunConfig {
   /** Must be true for live mode: "I know this moves real funds". */
   acknowledgeRealFunds: boolean;
@@ -111,6 +119,23 @@ export interface RunConfig {
   extraWithdrawals: ExtraWithdrawal[];
   receivers: Record<string, ReceiverSpec>;
   cleanup: { enabled: boolean; chain: string };
+  /**
+   * The evm-tour step (profiles evm-tour and all-chains): per EVM chain the
+   * runner signs on, the chain's native coin and USDC out to this wallet and
+   * back. `chains`: "all", or the chain keys to tour; `skip`: chain keys to
+   * leave out. `sellBack`: sell the native coins bought for the tour back to
+   * USDC once the last chain that needs them is done.
+   */
+  evmTour: { chains: 'all' | string[]; skip: string[]; sellBack: boolean };
+  /**
+   * The chain-withdrawals step (profile all-chains): per route on a chain the
+   * runner cannot sign on, a withdrawal of the route's minimum to the owner's
+   * own address there - `receivers.<chain key in lower case>` (receivers.sol,
+   * receivers.btc, receivers.xrp ...). A route without that receiver is skipped.
+   */
+  chainWithdrawals: { skip: string[]; buyIfMissing: boolean };
+  /** The manual-deposits step (profile all-chains): deposits the owner sends by hand, opted into per route. */
+  manualDeposits: ManualDeposit[];
   /**
    * null (the default): no builder - nothing is approved, read or attached, and
    * the builder checks report "skipped". Set: the enable-trading step approves
@@ -161,6 +186,9 @@ export const DEFAULT_CONFIG: RunConfig = {
   extraWithdrawals: [{ coin: 'ETH', chain: 'ARBITRUM_ETH', amount: 'min', receiver: 'self', buyIfMissing: true }],
   receivers: {},
   cleanup: { enabled: false, chain: 'ARBITRUM_ETH' },
+  evmTour: { chains: 'all', skip: [], sellBack: true },
+  chainWithdrawals: { skip: [], buyIfMissing: true },
+  manualDeposits: [],
   builder: null,
   timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60, verifierMinutes: 10, addressIssueSeconds: 180, streamSeconds: 10 },
 };
@@ -374,6 +402,53 @@ export function validateConfig(raw: unknown): Omit<LoadedConfig, 'source'> {
   if (cl) {
     set(bool(cl.enabled, 'cleanup.enabled'), (v) => (cfg.cleanup.enabled = v));
     set(chain(cl.chain, 'cleanup.chain'), (v) => (cfg.cleanup.chain = v));
+  }
+  const tour = obj(src.evmTour, 'evmTour', ['chains', 'skip', 'sellBack']);
+  if (tour) {
+    if (tour.chains !== undefined) {
+      if (tour.chains === 'all') cfg.evmTour.chains = 'all';
+      else if (!Array.isArray(tour.chains)) errors.push('evmTour.chains must be "all" or a list of chain keys.');
+      else {
+        const list = tour.chains.map((c, i) => chain(c, `evmTour.chains[${i}]`)).filter((c): c is string => !!c);
+        if (list.length === tour.chains.length) cfg.evmTour.chains = list;
+      }
+    }
+    if (tour.skip !== undefined) {
+      if (!Array.isArray(tour.skip)) errors.push('evmTour.skip must be a list of chain keys.');
+      else cfg.evmTour.skip = tour.skip.map((c, i) => chain(c, `evmTour.skip[${i}]`)).filter((c): c is string => !!c);
+    }
+    set(bool(tour.sellBack, 'evmTour.sellBack'), (v) => (cfg.evmTour.sellBack = v));
+  }
+  const cw = obj(src.chainWithdrawals, 'chainWithdrawals', ['skip', 'buyIfMissing']);
+  if (cw) {
+    if (cw.skip !== undefined) {
+      if (!Array.isArray(cw.skip)) errors.push('chainWithdrawals.skip must be a list of chain keys.');
+      else cfg.chainWithdrawals.skip = cw.skip.map((c, i) => chain(c, `chainWithdrawals.skip[${i}]`)).filter((c): c is string => !!c);
+    }
+    set(bool(cw.buyIfMissing, 'chainWithdrawals.buyIfMissing'), (v) => (cfg.chainWithdrawals.buyIfMissing = v));
+  }
+  if (src.manualDeposits !== undefined) {
+    if (!Array.isArray(src.manualDeposits)) errors.push('manualDeposits must be a list.');
+    else {
+      cfg.manualDeposits = [];
+      src.manualDeposits.forEach((d, i) => {
+        const where = `manualDeposits[${i}]`;
+        const o = obj(d, where, ['coin', 'chain', 'amount']);
+        if (!o) return;
+        const coin = text(o.coin, `${where}.coin`);
+        const c = chain(o.chain, `${where}.chain`);
+        const a = amount(o.amount, `${where}.amount`);
+        if (!coin || !c || !a) {
+          errors.push(`${where} needs "coin", "chain" and "amount".`);
+          return;
+        }
+        if (cfg.manualDeposits.some((x) => x.coin.toUpperCase() === coin.toUpperCase() && x.chain === c)) {
+          errors.push(`${where}: ${coin} on ${c} is listed twice.`);
+          return;
+        }
+        cfg.manualDeposits.push({ coin, chain: c, amount: a });
+      });
+    }
   }
   if (src.builder !== undefined && src.builder !== null) {
     const b = obj(src.builder, 'builder', ['id', 'address', 'feePerps', 'feeSpot', 'maxFee', 'maxFeeRate', 'required', 'revokeAtEnd', 'termsKeys', 'expectTier']);

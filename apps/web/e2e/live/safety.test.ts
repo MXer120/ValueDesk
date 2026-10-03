@@ -3,8 +3,9 @@
  * live = only expected writes - every write kind, each refused when it is not
  * exactly what the step armed; the history routes only through the limiter),
  * the wallet policies of every signature the runner allows, the exact order
- * shapes (modifier per case), config validation, exact decimal sizing, the
- * budget check, and the independent registry decoder.
+ * shapes (modifier per case), the native-coin transfer the evm-tour sends
+ * itself (its own guard kind and wallet policy), config validation, exact
+ * decimal sizing, the budget check, and the independent registry decoder.
  *   npx tsx --test e2e/live/safety.test.ts        (from apps/web)
  */
 import { test, afterEach } from 'node:test';
@@ -26,6 +27,8 @@ import { checkBudget, SafetyStop, type Ctx } from './context';
 import { marketQty, restingBuy, type Market } from './plan';
 import { decodeDepositWalletList } from './reads';
 import { dCmp, dDiv, dMul, lessPct, morePct, toStep, fx, unfx } from './util';
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
+import { nativeTransferExpect, nativeTransferPolicy } from './tour';
 
 const BACKEND = 'http://127.0.0.1:5180';
 const GW = 'https://gw.test';
@@ -489,4 +492,53 @@ test('order shapes: the guard demands the modifier SoDEX documents for each case
   assert.match(check(entry, entryTicket, (b) => (b.orders[1].modifier = 2)) ?? '', /exit leg 1: modifier 2, expected 4/);
   assert.match(check(entry, entryTicket, (b) => (b.orders[1].reduceOnly = false)) ?? '', /reduceOnly/);
   assert.match(check(entry, entryTicket, (b) => (b.builder = { id: 1, fee: 1 })) ?? '', /builder/, 'no builder in this run: an order naming one is refused');
+});
+
+// --- the native-coin transfer (evm-tour, DIRECT): its own guard kind, its own wallet policy -----------------
+
+const DEP = '0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed';
+const FRIEND_ADDR = '0x4b363bfcd961eca3aa723151a7ccdab76b869bfd';
+const rawTx = (pk: `0x${string}`, o: { chainId: number; to: string; value: bigint; data?: `0x${string}` }) =>
+  privateKeyToAccount(pk).signTransaction({ type: 'eip1559', chainId: o.chainId, to: o.to as `0x${string}`, value: o.value, data: o.data ?? '0x', nonce: 0, gas: 21_000n, maxFeePerGas: 1n, maxPriorityFeePerGas: 1n });
+const sendRaw = async (raw: string | string[]) => {
+  const list = Array.isArray(raw) ? raw : [raw];
+  const body = list.map((r, i) => ({ jsonrpc: '2.0', id: i + 1, method: 'eth_sendRawTransaction', params: [r] }));
+  const res = await (await post(RPC, Array.isArray(raw) ? body : body[0])).json();
+  return Array.isArray(res) ? res : [res];
+};
+
+test('guard, live mode: a native-coin transfer leaves only when armed - exactly this chain, signer, receiver and value; never into a contract, never in a batch', async () => {
+  const g = install('live');
+  const pk = generatePrivateKey();
+  const from = privateKeyToAccount(pk).address.toLowerCase();
+  const value = 10n ** 15n;
+  const good = await rawTx(pk, { chainId: 42161, to: DEP, value });
+  assert.match((await sendRaw(good))[0].error.message, /no native-transfer is expected/, 'nothing armed');
+  const disarm = g.expect(nativeTransferExpect({ chainId: 42161, from, to: DEP, value, label: 'DIRECT native transfer: test' }));
+  assert.match((await sendRaw(await rawTx(pk, { chainId: 42161, to: DEP, value: value + 1n })))[0].error.message, /value/, 'another value');
+  assert.match((await sendRaw(await rawTx(pk, { chainId: 42161, to: FRIEND_ADDR, value })))[0].error.message, /not|expected the verified deposit address/, 'another receiver');
+  assert.match((await sendRaw(await rawTx(pk, { chainId: 8453, to: DEP, value })))[0].error.message, /chain 8453/, 'another chain');
+  assert.match((await sendRaw(await rawTx(generatePrivateKey(), { chainId: 42161, to: DEP, value })))[0].error.message, /signed by/, 'another signer');
+  assert.match((await sendRaw(await rawTx(pk, { chainId: 42161, to: DEP, value, data: '0xa9059cbb' })))[0].error.message, /INTO a contract/, 'value with calldata');
+  assert.match((await sendRaw([good, good]))[0].error.message, /alone/, 'two in one batch');
+  assert.equal(hits.length, 0, 'none of those reached the node');
+  assert.equal((await sendRaw(good))[0].result, '0x1', 'the armed one');
+  assert.match((await sendRaw(good))[0].error.message, /no native-transfer is expected|does not match/, 'used up');
+  disarm();
+  assert.equal(hits.length, 1);
+  // A zero-value contract call (an ERC-20 transfer) is gated by the wallet's policy, as before; an undecodable one is refused.
+  assert.equal((await sendRaw(await rawTx(pk, { chainId: 42161, to: DEP, value: 0n, data: '0xa9059cbb' })))[0].result, '0x1');
+  assert.match((await sendRaw('0x00'))[0].error.message, /undecodable/);
+});
+
+test('wallet policy: the native-coin transfer signs exactly one plain transfer of this value to this address on this chain', () => {
+  const p = nativeTransferPolicy({ chainId: 42161, to: DEP, value: 10n ** 15n });
+  const tx = { chainId: 42161, chainKey: 'ARBITRUM_ETH', from: OWNER, to: DEP, data: '0x', value: 10n ** 15n };
+  assert.match(p.tx!({ ...tx, chainId: 8453 }) ?? '', /chain 8453/);
+  assert.match(p.tx!({ ...tx, to: FRIEND_ADDR }) ?? '', /not the verified deposit address/);
+  assert.match(p.tx!({ ...tx, value: 1n }) ?? '', /value 1/);
+  assert.match(p.tx!({ ...tx, data: '0xa9059cbb' }) ?? '', /calldata/);
+  assert.equal(p.tx!(tx), null, 'the one transfer');
+  assert.match(p.tx!(tx) ?? '', /second transfer/);
+  assert.equal(p.typedData, undefined, 'it signs no typed data');
 });

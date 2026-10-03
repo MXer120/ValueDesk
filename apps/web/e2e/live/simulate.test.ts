@@ -22,7 +22,8 @@ import { gateway as exchangeGateway } from '../../src/exchange/sodexGateway';
 import { formatUnits } from '../../src/trading/onboard';
 import { _setBuilderPollDelaysForTests } from '../../src/trading/builderApproval';
 import { runE2E } from './runner';
-import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, TERMS_PUBLIC_KEY, VC_USDC, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
+import { SAMPLE_ADDRESS } from './receivers';
+import { BACKEND, BUILDER_ADDRESS, DEPOSIT_ADDR, FRIEND, TERMS_PUBLIC_KEY, VC_USDC, depositAddressOf, fakeSocketFactory, installFake, newWorld, termsPublicKey, type World } from './sim/world';
 
 let restore: (() => void) | null = null;
 afterEach(() => {
@@ -50,7 +51,17 @@ interface Check {
   evidence: Record<string, unknown>;
 }
 
-async function run(config: object, o: { confirm?: (address: string) => string; setup?: (w: World) => void; only?: string[] } = {}) {
+async function run(
+  config: object,
+  o: {
+    confirm?: (address: string) => string;
+    setup?: (w: World) => void;
+    only?: string[];
+    profile?: Parameters<typeof runE2E>[0]['profile'];
+    mode?: 'plan' | 'live';
+    onManualDeposit?: (w: World, d: { coin: string; chain: string; address: string; amount: string }) => void;
+  } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), 'vs-e2e-sim-'));
   const cfgPath = join(dir, 'config.json');
   writeFileSync(cfgPath, JSON.stringify(config));
@@ -69,20 +80,22 @@ async function run(config: object, o: { confirm?: (address: string) => string; s
   o.setup?.(w);
   restore = installFake();
   const lines: string[] = [];
+  const mode = o.mode ?? 'live';
   const code = await runE2E({
-    mode: 'live',
+    mode,
     configPath: cfgPath,
-    confirm: o.confirm ? o.confirm(address) : address,
+    confirm: mode === 'plan' ? null : o.confirm ? o.confirm(address) : address,
     only: (o.only as Parameters<typeof runE2E>[0]['only']) ?? null,
+    ...(o.profile ? { profile: o.profile } : {}),
     keyHex: key,
     throwaway: false,
     registryOnly: false,
     reportDir: dir,
     backendOverride: BACKEND,
     log: (l) => lines.push(l),
-    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01 },
+    test: { socketFactory: fakeSocketFactory, historyGapMs: 25, pace: 0.01, ...(o.onManualDeposit ? { onManualDeposit: (d) => o.onManualDeposit!(w, d) } : {}) },
   });
-  const file = readdirSync(dir).find((f) => f.endsWith('-live.json'));
+  const file = readdirSync(dir).find((f) => f.endsWith(`-${mode}.json`));
   const report = file ? JSON.parse(readFileSync(join(dir, file), 'utf8')) : null;
   const checks: Check[] = report?.checks ?? [];
   const byId = new Map(checks.map((c) => [c.id, c]));
@@ -262,4 +275,133 @@ test('live refuses without --confirm equal to the wallet address, or without ack
   assert.equal(noAck.code, 2);
   assert.ok(noAck.lines.some((l) => /acknowledgeRealFunds/.test(l)));
   assert.deepEqual(noAck.w.writes, []);
+});
+
+// --- the wider profiles -------------------------------------------------------------------------------------
+
+const tourChecks = (r: { checks: Check[] }) => r.checks.filter((c) => c.step === 'evm-tour');
+
+test('evm-tour: every EVM chain the runner signs on, out and back - the native coin by a DIRECT transfer to the verified address, USDC through the app', async () => {
+  const r = await run({ ...CONFIG, maxSpendUsd: 60 }, {
+    profile: 'evm-tour',
+    only: ['deposit-external', 'enable-trading', 'evm-tour'],
+    setup: (w) => {
+      w.arbUsdc.set(w.owner, 100_000_000n);
+      w.nativeOf(137).set(w.owner, 10n ** 18n); // POL for the USDC deposit back on Polygon (SoDEX lists no POL route)
+    },
+  });
+  const { report, w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  noFailures(r.checks);
+  noRefusals(report);
+  assert.equal(r.code, 0, show(r));
+  const tour = tourChecks(r);
+  // Arbitrum (ETH, USDC), Base (ETH, USDC), Robinhood (ETH), BNB Chain (BNB, USDC), Polygon (USDC), Arc (USDC as its native coin), Avalanche (AVAX), HyperEVM (HYPE): 11 legs, 2 checks each.
+  assert.equal(tour.length, 22, tour.map((c) => c.id).join(', '));
+  for (const c of tour) assert.equal(c.status, 'pass', `${c.id}: ${c.status} ${c.detail}`);
+  // Each native coin went back by a plain transfer to that chain's verified deposit address - and only there.
+  const natives = w.writes.filter((x) => / native transfer /.test(x));
+  assert.equal(natives.length, 7, natives.join('\n'));
+  for (const [tag, key] of [['arbitrum', 'ARBITRUM_ETH'], ['base_eth', 'BASE_ETH'], ['robinhood_eth', 'ROBINHOOD_ETH'], ['bsc_bnb', 'BSC_BNB'], ['arc', 'ARC'], ['avaxc', 'AVAXC'], ['hyperevm_hype', 'HYPEREVM_HYPE']] as const) {
+    assert.ok(natives.some((x) => x.startsWith(`${tag} native transfer `) && x.endsWith(`-> ${depositAddressOf(key).toLowerCase()}`)), `${key}: ${natives.join('; ')}`);
+  }
+  // The guard saw each as its own kind, armed with that exact transfer.
+  const sent = report.network.requests.filter((q: { what: string }) => q.what.startsWith('native-transfer: DIRECT'));
+  assert.equal(sent.length, 7);
+  // USDC came back through the app on four chains (Arbitrum, Base, BNB Chain - 18 decimals there - and Polygon).
+  for (const tag of ['arbitrum', 'base_eth', 'bsc_bnb', 'matic']) assert.ok(w.writes.some((x) => x.startsWith(`${tag} transfer `) && x.endsWith(`-> ${depositAddressOf(tag === 'arbitrum' ? 'ARBITRUM_ETH' : tag.toUpperCase()).toLowerCase()}`)), `${tag} USDC back`);
+  // Arc: 6.05 USDC out, 5 USDC back (18 decimals on the chain, 6 on SoDEX).
+  assert.match(byId.get(tour.find((c) => c.id.startsWith('deposit-usdc-arc'))!.id)!.detail, /credited 5 USDC/);
+  // What was bought for the tour was sold back after the last chain that needed it.
+  const sells = w.orders.filter((o) => o.engine === 'spot' && o.side === 'SELL' && o.status === 'FILLED').map((o) => o.symbol);
+  for (const m of ['vETH_vUSDC', 'vAVAX_vUSDC']) assert.ok(sells.includes(m), `sold back on ${m}: ${sells.join(', ')}`);
+  // What is below the market's minimum stays in Spot, and the run says so.
+  for (const c of ['BNB', 'HYPE']) assert.ok(r.lines.some((l) => new RegExp(`${c}: [0-9.]+ left in Spot`).test(l)), `${c} left in Spot`);
+  assert.equal(report.profile, 'evm-tour');
+  assert.ok(report.chains.some((c: { chain: string; coin: string; deposit: { status: string } }) => c.chain === 'AVAXC' && c.coin === 'AVAX' && c.deposit.status === 'pass'));
+});
+
+test('all-chains: withdrawals to your own addresses on the chains the runner cannot sign on, and a deposit you send by hand', async () => {
+  let manual: { coin: string; chain: string; address: string; amount: string } | null = null;
+  const r = await run(
+    {
+      ...CONFIG,
+      maxSpendUsd: 200,
+      receivers: { valuechain: FRIEND, sol: SAMPLE_ADDRESS.solana, btc: SAMPLE_ADDRESS.bitcoin, doge: SAMPLE_ADDRESS.dogecoin, xrp: { address: SAMPLE_ADDRESS.xrp, noMemo: true } },
+      manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: '0.03' }],
+    },
+    {
+      profile: 'all-chains',
+      only: ['deposit-external', 'enable-trading', 'chain-withdrawals', 'manual-deposits'],
+      setup: (w) => w.arbUsdc.set(w.owner, 200_000_000n),
+      onManualDeposit: (w, d) => {
+        manual = d;
+        setTimeout(() => w.addSpot(8, 30_000_000n), 20); // the owner's 0.03 SOL arrives
+      },
+    },
+  );
+  const { report, w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  noFailures(r.checks);
+  noRefusals(report);
+  assert.equal(r.code, 0, show(r));
+  for (const id of ['withdraw-sol-sol', 'withdraw-usdc-sol', 'withdraw-xrp-xrp', 'withdraw-btc-btc', 'manual-deposit-sol-sol']) assert.equal(byId.get(id)?.status, 'pass', `${id}: ${byId.get(id)?.detail}`);
+  assert.match(byId.get('withdraw-doge-doge')!.detail, /no DOGE\/USDC spot market/);
+  assert.equal(byId.get('withdraw-doge-doge')!.status, 'skipped');
+  assert.equal(byId.get('withdraw-zec-zec')?.status, 'skipped');
+  // Paid out to the owner's own addresses: never less than what could be sent straight back.
+  const paid = (coin: string) => w.offchain.find((x) => x.coin === coin);
+  assert.equal(paid('SOL')?.receiver, SAMPLE_ADDRESS.solana);
+  assert.equal(paid('SOL')?.amount, 30_000_000n, '0.042 SOL withdrawn (deposit minimum 0.03 + fee 0.012), 0.03 paid out');
+  assert.equal(paid('XRP')?.receiver, SAMPLE_ADDRESS.xrp, 'no memo: the address alone');
+  assert.equal(paid('XRP')?.memo, '');
+  assert.equal(paid('BTC')?.amount, 50_000n - 6_000n, 'BTC: its 0.0005 minimum, less the fee');
+  // The manual deposit: shown only once the app's Deposit sheet and the registry agreed on it.
+  assert.deepEqual(manual, { coin: 'SOL', chain: 'SOL', address: depositAddressOf('SOL'), amount: '0.03' });
+  assert.ok(r.lines.some((l) => /SEND BY HAND: at least 0\.03 SOL on Solana/.test(l)));
+});
+
+test('builder-rerun: refused on a wallet with no account; on the funded test wallet it runs the fee test again', async () => {
+  const fresh = await run({ ...CONFIG, builder: BUILDER }, { profile: 'builder-rerun' });
+  assert.equal(fresh.code, 2);
+  assert.ok(fresh.lines.some((l) => /builder-rerun runs on the funded test wallet/.test(l)), fresh.lines.filter((l) => /PROBLEM|- /.test(l)).join('\n'));
+  assert.deepEqual(fresh.w.writes, []);
+  const r = await run({ ...CONFIG, builder: BUILDER }, {
+    profile: 'builder-rerun',
+    setup: (w) => {
+      w.aid = 777;
+      w.spot.set(0, 40_000_000n);
+      w.tiers = TIERS;
+      w.builderId = BUILDER_ID;
+    },
+  });
+  noFailures(r.checks);
+  noRefusals(r.report);
+  assert.equal(r.code, 0, show(r));
+  assert.deepEqual(r.report.selectedSteps, ['enable-trading', 'builder-tiers', 'cross-check', 'revoke-builder']);
+  for (const id of ['builder-approval', 'builder-fee-default', 'builder-volume-verified', 'builder-fee-lowered', 'builder-underpaid-not-counted', 'builder-terms-back-to-default', 'builder-approval-enforced', 'builder-revoke']) {
+    assert.equal(r.byId.get(id)?.status, 'pass', `${id}: ${r.byId.get(id)?.detail}`);
+  }
+});
+
+test('plan --profile all-chains: every route checked read-only, what cannot be tested listed with why, the receivers asked for, the working capital funded - nothing written', async () => {
+  const r = await run({ ...CONFIG, maxSpendUsd: 8 }, { profile: 'all-chains', mode: 'plan' });
+  const { report, w, byId } = r;
+  assert.equal(report.mode, 'plan');
+  assert.deepEqual(w.writes, [], 'plan mode wrote nothing');
+  assert.equal(byId.get('route-usdc-arbitrum_eth')?.status, 'pass', byId.get('route-usdc-arbitrum_eth')?.detail);
+  assert.match(byId.get('route-usdc-arbitrum_eth')!.detail, new RegExp(`deposit address ${DEPOSIT_ADDR.slice(0, 8)}`));
+  assert.equal(byId.get('route-zec-zec')?.status, 'skipped');
+  assert.equal(byId.get('route-bnb-bsc_bnb')?.status, 'finding', 'BNB: the withdrawal minimum does not cover the fee');
+  assert.equal(byId.get('route-xrp-xrp')?.status, 'pass', byId.get('route-xrp-xrp')?.detail);
+  assert.ok(report.plan.routeChecks.length >= 15);
+  const nt = report.plan.notTestable as Array<{ what: string; why: string }>;
+  assert.ok(nt.some((n) => n.what === 'BTC on Bitcoin' && /manualDeposits/.test(n.why) && /receivers\.btc/.test(n.why)), JSON.stringify(nt));
+  const rx = report.plan.receiversNeeded as Array<{ name: string; memo: boolean; set: boolean }>;
+  for (const n of ['sol', 'btc', 'xrp', 'doge']) assert.ok(rx.some((x) => x.name === n && !x.set), `receivers.${n} asked for`);
+  assert.equal(rx.find((x) => x.name === 'xrp')?.memo, true);
+  assert.ok(report.plan.suggestedMaxSpendUsd > 8);
+  assert.ok(report.plan.problems.some((p: string) => /above maxSpendUsd/.test(p)));
+  assert.ok(report.plan.profileNotes.every((n: string) => /deposit\.amount/.test(n)));
+  assert.equal(report.plan.steps.find((s: { id: string }) => s.id === 'chain-withdrawals')?.skip, 'no route can run - set your own addresses in receivers (receivers.sol, receivers.btc, ...)');
 });

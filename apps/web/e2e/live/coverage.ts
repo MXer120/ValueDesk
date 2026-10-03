@@ -2,11 +2,12 @@
  * What of the app's trading and funds layer a live run exercises: every
  * exported function of those modules, mapped to the checks that exercise it -
  * or marked as not exercised, with why. `run.ts capabilities` prints it, and
- * coverage.test.ts fails when the app exports a function this table does not
+ * units.test.ts fails when the app exports a function this table does not
  * name (so a new action cannot go untested unnoticed).
  *
  * Check ids ending in `*` stand for the per-route checks declared at run time
- * (`deposit-<coin>-<chain>`, `withdraw-<coin>-<chain>`).
+ * (`deposit-<coin>-<chain>`, `withdraw-<coin>-<chain>`, `manual-deposit-<coin>-<chain>`)
+ * and the read-only `route-<coin>-<chain>` every plan records for every route.
  */
 
 export interface Covered {
@@ -48,13 +49,13 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     withdrawFunds: c(['withdraw-valuechain-self', 'withdraw-valuechain-other', 'withdraw-*', 'refuse-withdraw-over-balance', 'refuse-withdraw-below-minimum', 'refuse-malformed-receiver']),
     depositFromWallet: c(['transfer-evm-to-spot', 'cleanup-sweep'], 'transferFunds (wallet -> Spot)'),
     sendOnValueChain: c(['withdraw-valuechain-other'], 'withdrawFunds to another ValueChain address'),
-    withdrawQuote: c(['withdraw-*']),
+    withdrawQuote: c(['withdraw-*', 'route-*']),
     withdrawalProgress: c(['withdraw-*']),
-    balancesOf: c(['transfer-spot-to-perps', 'refuse-transfer-over-balance']),
-    assetConfigs: c(['deposit-*', 'withdraw-*'], 'preflight'),
+    balancesOf: c(['transfer-spot-to-perps', 'refuse-transfer-over-balance', 'manual-deposit-*']),
+    assetConfigs: c(['deposit-*', 'withdraw-*', 'route-*'], 'preflight'),
     cachedAssetConfigs: c(['deposit-*'], 'the app\'s sheets; the runner reads assetConfigs'),
-    receiverProblem: c(['refuse-malformed-receiver']),
-    memoProblem: c(['withdraw-*'], 'every withdrawal\'s receiver check'),
+    receiverProblem: c(['refuse-malformed-receiver', 'route-*']),
+    memoProblem: c(['withdraw-*', 'route-*'], 'every withdrawal\'s receiver check; the memo rules of XRP and Stellar in the route checks'),
     planWithdraw: PURE(['refuse-withdraw-over-balance'], 'source planning of withdrawFunds'),
     transferProblem: PURE(['transfer-spot-to-perps'], 'check of transferFunds'),
     transferNeedsKey: PURE(['transfer-spot-to-perps'], 'rule'),
@@ -123,9 +124,9 @@ export const APP_COVERAGE: Readonly<Record<string, Readonly<Record<string, Cover
     classifyAction: PURE(['builder-approval-enforced'], 'gate classification'),
   },
   onboard: {
-    sendUsdcDeposit: c(['deposit-*']),
+    sendUsdcDeposit: c(['deposit-*'], 'deposit-external, extra-deposits and the USDC legs of the evm-tour'),
     usdcRoutes: c(['deposit-*']),
-    readToken: no('the Deposit sheet\'s token check before a deposit: the runner reads balances itself'),
+    readToken: c(['deposit-*'], "inside sendUsdcDeposit: the token's symbol, decimals and balance are read before every USDC deposit"),
     erc20TransferData: PURE(['deposit-*'], 'calldata'),
     parseUnits: PURE(['deposit-*'], 'decimal helper'),
     formatUnits: PURE(['deposit-*'], 'decimal helper'),

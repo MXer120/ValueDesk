@@ -120,7 +120,8 @@ test('chain switching: known chains switch (and emit chainChanged); the app\'s a
   assert.deepEqual(seen, ['0xa4b1', '0x45f9f', '0x2105']);
   assert.deepEqual(events.filter((e) => e.type === 'switch').map((e) => (e as { to: number }).to), [ARBITRUM, VALUECHAIN_CHAIN_ID, 8453]);
   // Every EVM chain the app sends from, plus ValueChain, is known.
-  assert.deepEqual(KNOWN_CHAINS.map((c) => c.id).sort((a, b) => a - b), [1, 56, 137, 8453, 42161, VALUECHAIN_CHAIN_ID].sort((a, b) => a - b));
+  // The app's chains, plus the payout-only chains the runner carries its own RPC for (chains.ts): Robinhood, HyperEVM, Arc, Avalanche.
+  assert.deepEqual(KNOWN_CHAINS.map((c) => c.id).sort((a, b) => a - b), [1, 56, 137, 999, 4663, 5042, 8453, 42161, 43114, VALUECHAIN_CHAIN_ID].sort((a, b) => a - b));
 });
 
 test('unknown chains are refused (4902), for switch AND add; the app sees a WalletError and the wallet stays put', async () => {

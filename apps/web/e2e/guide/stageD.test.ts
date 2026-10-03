@@ -274,7 +274,7 @@ const CAPS = (profiles: string[]): FakeRunnerOptions['capabilities'] => ({ text:
 
 test('profiles: each one is previewed (what it needs) before the owner chooses; the choice goes to every later call', async () => {
   const k = kit({ argv: ['--stages', 'D'], lines: ['2', '', 'y', '', 'YES', ADDRESS], hidden: [KEY] });
-  const fake = new FakeRunner({ capabilities: CAPS(['core', 'evm-tour', 'builder-setup']), plans: [{ report: planReport(), code: 2 }, { report: planReport(), code: 2 }, plan({ funded: true })], live: live() });
+  const fake = new FakeRunner({ capabilities: CAPS(['core', 'evm-tour']), plans: [{ report: planReport(), code: 2 }, { report: planReport(), code: 2 }, plan({ funded: true })], live: live() });
   try {
     const r = await runStageD(k.ctx, fake);
     assert.equal(r.status, 'PASS', r.reason);
@@ -284,7 +284,7 @@ test('profiles: each one is previewed (what it needs) before the owner chooses; 
     const screen = k.flat();
     assert.match(screen, /Core - one chain, everything.*needs 25\.00 USDC on Arbitrum One \+ 0\.000200 ETH on Arbitrum One; estimated cost \$3\.36/);
     assert.match(k.screen(), /All chains[^\n]*: not available in this runner version/);
-    assert.ok(!screen.includes('builder-setup'), 'a setup profile is not offered as the test run');
+    assert.match(k.screen(), /Builder fee again[^\n]*: not available in this runner version/);
     assert.equal(k.ctx.shared.profile, 'evm-tour');
   } finally {
     k.cleanup();
@@ -315,7 +315,7 @@ test('a runner without profiles (2026-10-02): one run, and the wished-for profil
     // The one run IS the core content: "core" is not listed as missing.
     assert.ok(!/Not available in this runner version[^:]*:\s+- Core/.test(k.flat()));
     assert.ok(fake.plans.every((p) => !p.argv.includes('--profile')));
-    assert.match(r.notes.join(' '), /no profiles\): evm-tour, all-chains\./);
+    assert.match(r.notes.join(' '), /no profiles\): evm-tour, all-chains, builder-rerun\./);
   } finally {
     k.cleanup();
   }
@@ -513,13 +513,13 @@ test('waiting for funds without a console: one look, no loop', async () => {
   }
 });
 
-test('moneyRun for a forced profile the runner does not have (stage C\'s builder setup): reported, nothing asked', async () => {
+test('moneyRun for a forced profile the runner does not have: reported, nothing asked', async () => {
   const k = kit({ lines: [], hidden: [KEY] });
   const fake = new FakeRunner({ plans: [{ report: planReport(), code: 2 }] });
   try {
-    const r = await moneyRun(k.ctx, fake, { what: 'the builder wallet', profile: 'builder-setup', headings: false });
+    const r = await moneyRun(k.ctx, fake, { what: 'the test wallet', profile: 'nightly', headings: false });
     assert.equal(r.status, 'SKIPPED');
-    assert.match(r.reason!, /builder-setup/);
+    assert.match(r.reason!, /nightly/);
     assert.equal(k.prompter.hiddenAsked, 0);
   } finally {
     k.cleanup();

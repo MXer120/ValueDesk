@@ -15,11 +15,11 @@ import { setTradingConfig } from '../../src/trading/config';
 import { _resetTradingForTests, getTradingState } from '../../src/trading/session';
 import { followTerms } from '../../src/trading/terms';
 import { memoryVault } from '../../src/trading/vault';
-import { EVM_CHAINS } from '../../src/trading/onboard';
 import { BIZ_ORIGIN } from '../../src/trading/relay';
 import type { SocketFactory } from '../../src/exchange/ws/sodexSocket';
 import { appTermsModule } from './app';
-import { Checks, STATUS_WORD, countChecks, type CheckDef, type CheckRecord } from './checks';
+import { evmChain } from './chains';
+import { Checks, STATUS_WORD, countChecks, routeCheckId, type CheckDef, type CheckRecord } from './checks';
 import { loadConfig } from './config';
 import { Recorder, STEP_ORDER, STEP_TITLES, SafetyStop, checkBudget, type Ctx, type Pre, type StepId } from './context';
 import { fillRow } from './fees';
@@ -27,6 +27,7 @@ import { installGuard } from './guard';
 import { HistoryLimiter } from './history';
 import { Ledger } from './ledger';
 import { preflight, printPlan, routeRows, type PlanResult } from './plan';
+import { applyProfile, profileSteps, type Profile } from './profiles';
 import { KNOWN_CHAINS, createKeyProvider, type KeyProvider } from './provider';
 import { snapshot, whereFundsLines, type Snapshot } from './reads';
 import { STEPS, declareFundsChecks } from './steps';
@@ -34,9 +35,7 @@ import { AccountStream } from './stream';
 import { TermsWatch } from './terms';
 import { dur, errText, setPace, usd } from './util';
 
-/** The run profiles. Phase 1 has the one: today's config plus every order, builder, key and refusal check. */
-export const PROFILES = ['core'] as const;
-export type Profile = (typeof PROFILES)[number];
+export { PROFILES, type Profile } from './profiles';
 
 /** ValueChain's explorer API: the app reads a balance from it when the RPC does not answer (funds.ts). Reads only. */
 const EXPLORER_ORIGIN = 'https://main-scan.valuechain.xyz';
@@ -61,7 +60,13 @@ export interface RunOptions {
    * between history reads (its fake has no rate limit), and a fast pace for
    * the runner's own waits. A real run never sets these.
    */
-  test?: { socketFactory?: SocketFactory; historyGapMs?: number; pace?: number };
+  test?: {
+    socketFactory?: SocketFactory;
+    historyGapMs?: number;
+    pace?: number;
+    /** Called when the run waits for a deposit the owner sends by hand (the fake "sends" it). */
+    onManualDeposit?: (d: { coin: string; chain: string; address: string; amount: string }) => void;
+  };
 }
 
 const RECOVERY = [
@@ -74,11 +79,11 @@ const RECOVERY = [
   '  - A withdrawal IN FLIGHT ....... the Withdraw sheet / SoDEX history shows its status; a failed one paid from Spot returns to Spot',
 ];
 
-/** The report's per-chain table: every route SoDEX lists, with what this run did there. */
-function chainTable(ctx: Ctx, defs: CheckDef[]): Array<Record<string, unknown>> {
+/** The report's per-chain table: every route SoDEX lists, with what this run did there (`records`: every check, as the report lists them). */
+function chainTable(ctx: Ctx, defs: CheckDef[], records: readonly CheckRecord[]): Array<Record<string, unknown>> {
   if (!ctx.pre) return [];
   const byRoute = new Map<string, { deposit?: CheckRecord; withdraw?: CheckRecord }>();
-  const all = new Map(ctx.checks.all(() => ({ status: 'not-run', detail: '' })).map((r) => [r.id, r]));
+  const all = new Map(records.map((r) => [r.id, r]));
   for (const d of defs) {
     if (!d.route) continue;
     const k = `${d.route.coin.toUpperCase()}|${d.route.chain}`;
@@ -94,16 +99,19 @@ function chainTable(ctx: Ctx, defs: CheckDef[]): Array<Record<string, unknown>> 
     if (!can) return { status: 'not-testable', detail: cannot };
     return { status: 'not-run', detail: 'not part of this run' };
   };
+  const evm = (chain: string) => ctx.pre.coins.some((c) => c.chains.some((x) => x.key === chain && x.addressKind === 'evm'));
   return routeRows(ctx.pre.coins).map((r) => {
     const hit = byRoute.get(`${r.coin.toUpperCase()}|${r.chain}`) ?? {};
     byRoute.delete(`${r.coin.toUpperCase()}|${r.chain}`);
+    const rc = all.get(routeCheckId(r.coin, r.chain));
     return {
       chain: r.chain,
       label: r.label,
       coin: r.coin,
       native: r.native,
-      deposit: cell(hit.deposit, r.depositOpen, r.canDeposit, r.native ? 'the runner sends USDC deposits only (a chain\'s coins share one deposit address)' : 'the runner cannot sign on this chain', 'deposits are closed on SoDEX right now'),
+      deposit: cell(hit.deposit, r.depositOpen, r.canDeposit, evm(r.chain) ? 'the runner has no chain id / RPC for this chain, or the app sends no deposit of this coin' : 'the runner cannot sign on this chain - opt in to a manual deposit (manualDeposits) and send it by hand', 'deposits are closed on SoDEX right now'),
       withdraw: cell(hit.withdraw, r.withdrawOpen, r.canWithdraw, 'the app does not offer this route', 'withdrawals are closed on SoDEX right now'),
+      route: rc ? { status: rc.status, detail: rc.detail } : { status: 'not-run', detail: 'not checked' },
     };
   });
 }
@@ -127,8 +135,16 @@ export async function runE2E(o: RunOptions): Promise<number> {
     for (const e of loaded.errors) L(`  CONFIG ERROR: ${e}`);
     return 2;
   }
+  // What the profile changes in the config, said out loud; --only, when given, decides alone which steps run.
+  const profileNotes = applyProfile(cfg, profile);
+  for (const n of profileNotes) L(`  profile ${profile}: ${n}`);
   const only = o.only ? new Set(o.only) : null;
-  const selected = new Set<StepId>(STEP_ORDER.filter((s) => !only || only.has(s)));
+  const inProfile = new Set(profileSteps(profile));
+  const selected = new Set<StepId>(STEP_ORDER.filter((s) => (only ? only.has(s) : inProfile.has(s))));
+  if (only) {
+    const extra = [...only].filter((s) => !inProfile.has(s));
+    if (extra.length) L(`  --only also runs ${extra.join(', ')}, which the ${profile} profile does not include`);
+  }
 
   const start = KNOWN_CHAINS.find((c) => c.key === cfg.startChain);
   if (!start) {
@@ -146,7 +162,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
       startChainId: start.id,
       onEvent: (e) => {
         if (e.type === 'tx-sent') {
-          const ex = e.chainKey === 'VALUECHAIN' ? null : EVM_CHAINS[e.chainKey]?.explorer;
+          const ex = e.chainKey === 'VALUECHAIN' ? null : evmChain(e.chainKey)?.explorer;
           rec.tx({ chain: e.chainKey, hash: e.hash, what: `wallet tx to ${e.to} (${e.selector}${e.value !== '0' ? `, value ${e.value} wei` : ''})`, ...(ex ? { explorer: `${ex}/tx/${e.hash}` } : {}) });
         } else if (e.type === 'refused') {
           walletRefusals.push(`${e.method}: ${e.reason}`);
@@ -229,6 +245,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
 
   const ctx: Ctx = {
     mode: o.mode,
+    profile,
     cfg,
     owner,
     provider,
@@ -256,6 +273,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
     tiers: { cheats: [] },
     tamperTerms: null,
     routeChecks: new Map(),
+    onManualDeposit: o.test?.onManualDeposit ?? null,
   };
 
   // The app's terms module asks through the guard; the runner can hand it a TAMPERED copy of a real answer (tierSteps.ts).
@@ -319,7 +337,8 @@ export async function runE2E(o: RunOptions): Promise<number> {
       for (const r of all.filter((x) => x.status === 'fail')) L(`  FAIL     ${r.id}: ${r.detail}`);
       for (const r of all.filter((x) => x.status === 'finding')) L(`  FINDING  ${r.id}: ${r.detail}`);
     }
-    exitCode = code === 0 && counts.fail > 0 ? 1 : code;
+    // A failed check fails a LIVE run; a plan's route-check failures are warnings (it signs nothing).
+    exitCode = o.mode === 'live' && code === 0 && counts.fail > 0 ? 1 : code;
     const report = {
       tool: 'valuescan-live-e2e',
       version: 2,
@@ -348,12 +367,16 @@ export async function runE2E(o: RunOptions): Promise<number> {
         markets: plan.markets,
         depositAddresses: Object.fromEntries(plan.pre.depositAddresses),
         receiversNeeded: plan.receiversNeeded,
+        routeChecks: plan.routeChecks,
+        notTestable: plan.notTestable,
+        profileNotes: plan.profileNotes,
+        suggestedMaxSpendUsd: plan.suggestedMaxSpendUsd,
         terms: plan.terms ? { verified: plan.terms.verdict.verified, off: plan.terms.verdict.off, problems: plan.terms.verdict.problems, keyId: plan.terms.verdict.keyId, fee: plan.terms.verdict.answer.fee, volume: plan.terms.verdict.answer.volume, tier: plan.terms.verdict.answer.tier, flags: plan.terms.verdict.answer.flags, cacheControl: plan.terms.cacheControl } : null,
         steps: plan.plans,
       },
       checks: all,
       checkCounts: counts,
-      chains: chainTable(ctx, defs),
+      chains: chainTable(ctx, defs, all),
       orderTypes: all.filter((c) => c.area === 'orders-perps' || c.area === 'orders-spot').map((c) => ({ id: c.id, title: c.title, engine: c.area === 'orders-perps' ? 'perps' : 'spot', status: c.status, detail: c.detail })),
       feeTable: [...ctx.fillChecks.values()].map(fillRow),
       steps: rec.steps,
@@ -399,7 +422,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
     // Preflight = the whole of plan mode.
     rec.begin('preflight', 'read-only checks: backend, routes, balances, account, deposit addresses, markets, receivers, fee terms');
     try {
-      plan = await preflight({ mode: o.mode, cfg, owner, selected, registryOnly: o.registryOnly, rec, terms });
+      plan = await preflight({ mode: o.mode, cfg, owner, selected, registryOnly: o.registryOnly, rec, terms, profile, profileNotes, checks });
       ctx.pre = plan.pre;
       declareFundsChecks(ctx);
       rec.end('ok');

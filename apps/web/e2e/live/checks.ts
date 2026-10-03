@@ -20,7 +20,7 @@
 import type { StepId } from './context';
 
 export type CheckStatus = 'pass' | 'fail' | 'finding' | 'skipped' | 'not-run';
-export type CheckArea = 'orders-perps' | 'orders-spot' | 'builder' | 'keys' | 'transfers' | 'deposits' | 'withdrawals' | 'refusals' | 'cross-checks';
+export type CheckArea = 'orders-perps' | 'orders-spot' | 'builder' | 'keys' | 'transfers' | 'deposits' | 'withdrawals' | 'refusals' | 'cross-checks' | 'routes';
 
 /** For a check about one coin on one chain: which, and in which direction (the report's per-chain table is built from these). */
 export interface CheckRoute {

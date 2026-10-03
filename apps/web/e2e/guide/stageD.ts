@@ -405,7 +405,7 @@ function hasTermsKeys(cfg: Json): boolean {
 export interface MoneyRunOptions {
   /** Which wallet this is, in the owner's words ("the test wallet"). */
   what: string;
-  /** A profile forced by the caller (stage C's builder setup); undefined: the owner chooses. */
+  /** A profile forced by the caller; undefined: the owner chooses. */
   profile?: string | null;
   /** Step headings are printed (stage D); stage C's nested run prints its own. */
   headings: boolean;

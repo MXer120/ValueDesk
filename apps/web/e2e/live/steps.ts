@@ -33,13 +33,18 @@ import {
   type ChainRoute,
   type CoinConfig,
 } from '../../src/trading/funds';
-import { CANONICAL_USDC, EVM_CHAINS, erc20TransferData, formatUnits, parseUnits, sendUsdcDeposit, usdcRoutes } from '../../src/trading/onboard';
+import { CANONICAL_USDC, erc20TransferData, formatUnits, parseUnits, sendUsdcDeposit, usdcRoutes } from '../../src/trading/onboard';
 import { coinPrices, priceOf } from '../../src/trading/prices';
 import { VALUECHAIN_RPC } from '../../src/trading/rpc';
 import { getTradingState, keyStillRegistered, readBuilderApproval, refreshBuilderApproval, requireSigner, revokeBuilderApproval, sodexAccountId } from '../../src/trading/session';
+import { evmChain } from './chains';
 import { depositCheckId, withdrawCheckId, type CheckArea } from './checks';
 import { SafetyStop, allowedReceivers, armed, coinNamed, receiverNamed, routeOf, type Ctx, type StepId } from './context';
 import { stepCrossCheck } from './crossCheck';
+import { declareChainWithdrawalChecks, declareManualDepositChecks } from './chainRoutes';
+import { stepEvmTour } from './evmTour';
+import { stepChainWithdrawals, stepManualDeposits } from './otherChains';
+import { declareTourChecks } from './tour';
 import { stepKeyLifecycle } from './keySteps';
 import { engineTransfer, mustPlace, orderMs, settleFills, settleMs, waitFor } from './orders';
 import { stepOrdersPerps, stepOrdersSpot } from './orderSteps';
@@ -61,7 +66,7 @@ const unitsOf = (v: string, dp: number): bigint => unitsDown(v, dp);
 /** Explorer link for a tx on a chain key. */
 function explorer(ctx: Ctx, chainKey: string, hash: string): string | undefined {
   if (chainKey === 'VALUECHAIN') return ctx.pre.vc.explorerUrl ? `${ctx.pre.vc.explorerUrl.replace(/\/+$/, '')}/tx/${hash}` : undefined;
-  const c = EVM_CHAINS[chainKey];
+  const c = evmChain(chainKey);
   return c ? `${c.explorer}/tx/${hash}` : undefined;
 }
 
@@ -75,7 +80,7 @@ async function usdPrice(coin: string): Promise<number> {
  * detail; a failure is recorded AND thrown - the run stops, because what follows
  * depends on where the money is.
  */
-async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: string; evidence?: Record<string, unknown>; costUsd?: number }>): Promise<void> {
+export async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: string; evidence?: Record<string, unknown>; costUsd?: number }>): Promise<void> {
   ctx.rec.line(`* ${id}`, 3);
   try {
     const r = await fn();
@@ -86,12 +91,12 @@ async function moved(ctx: Ctx, id: string, fn: () => Promise<{ detail: string; e
   }
 }
 
-/** The check a configured deposit / withdrawal reports under. */
-const routeCheck = (ctx: Ctx, step: StepId, index: number): string => {
-  const id = ctx.routeChecks.get(`${step}#${index}`);
-  if (!id) throw new Error(`no check was declared for ${step}#${index} (steps.ts declareFundsChecks)`);
+/** The check a configured deposit / withdrawal reports under (`key`: its index in the config, or the step's own key). */
+export function routeCheck(ctx: Ctx, step: StepId, key: number | string): string {
+  const id = ctx.routeChecks.get(`${step}#${key}`);
+  if (!id) throw new Error(`no check was declared for ${step}#${key} (steps.ts declareFundsChecks)`);
   return id;
-};
+}
 
 /**
  * One check per deposit and per withdrawal the config asks for - declared when
@@ -100,22 +105,30 @@ const routeCheck = (ctx: Ctx, step: StepId, index: number): string => {
  */
 export function declareFundsChecks(ctx: Ctx): void {
   const { cfg } = ctx;
-  const add = (step: StepId, index: number, area: CheckArea, direction: 'deposit' | 'withdraw', coin: string, chain: string, what: string): void => {
-    const base = direction === 'deposit' ? depositCheckId(coin, chain) : withdrawCheckId(coin, chain);
-    const label = chainLabel(chain);
-    const id = ctx.checks.declareUnique({ id: base, area, step, title: what, route: { coin, chain, label, direction } });
+  const add = (step: StepId, index: number | string, area: CheckArea, direction: 'deposit' | 'withdraw', coin: string, chain: string, what: string, base?: string): void => {
+    const id = ctx.checks.declareUnique({
+      id: base ?? (direction === 'deposit' ? depositCheckId(coin, chain) : withdrawCheckId(coin, chain)),
+      area,
+      step,
+      title: what,
+      route: { coin, chain, label: chainLabel(chain), direction },
+    });
     ctx.routeChecks.set(`${step}#${index}`, id);
   };
   add('deposit-external', 0, 'deposits', 'deposit', 'USDC', cfg.deposit.chain, `Deposit of USDC from ${chainLabel(cfg.deposit.chain)} is credited to Spot (a new wallet: less the activation fee)`);
   cfg.extraDeposits.forEach((d, i) => add('extra-deposits', i, 'deposits', 'deposit', 'USDC', d.chain, `Deposit of USDC from ${chainLabel(d.chain)} is credited to Spot`));
   const w = cfg.withdrawExternal;
-  add('withdraw-external', 0, 'withdrawals', 'withdraw', w.coin, w.chain, `Withdrawal of ${w.coin} to ${chainLabel(w.chain)} arrives (SoDEX's record is final${EVM_CHAINS[w.chain] ? ', the balance on that chain rose' : ''})`);
-  cfg.extraWithdrawals.forEach((x, i) => add('extra-withdrawals', i, 'withdrawals', 'withdraw', x.coin, x.chain, `Withdrawal of ${x.coin} to ${chainLabel(x.chain)} arrives (SoDEX's record is final${EVM_CHAINS[x.chain] ? ', the balance on that chain rose' : ''})`));
+  add('withdraw-external', 0, 'withdrawals', 'withdraw', w.coin, w.chain, `Withdrawal of ${w.coin} to ${chainLabel(w.chain)} arrives (SoDEX's record is final${evmChain(w.chain) ? ', the balance on that chain rose' : ''})`);
+  cfg.extraWithdrawals.forEach((x, i) => add('extra-withdrawals', i, 'withdrawals', 'withdraw', x.coin, x.chain, `Withdrawal of ${x.coin} to ${chainLabel(x.chain)} arrives (SoDEX's record is final${evmChain(x.chain) ? ', the balance on that chain rose' : ''})`));
+  // The wider profiles' checks: declared when their step is part of the run.
+  if (ctx.selected.has('evm-tour')) declareTourChecks(ctx, (key, area, direction, coin, chain, title, id) => add('evm-tour', key, area, direction, coin, chain, title, id));
+  if (ctx.selected.has('chain-withdrawals')) declareChainWithdrawalChecks(ctx.pre.coins, cfg, (key, area, direction, coin, chain, title, id) => add('chain-withdrawals', key, area, direction, coin, chain, title, id));
+  if (ctx.selected.has('manual-deposits')) declareManualDepositChecks(cfg, (key, area, direction, coin, chain, title, id) => add('manual-deposits', key, area, direction, coin, chain, title, id));
 }
 
 // --- deposit from an EVM chain --------------------------------------------------------------------
 
-async function depositOne(ctx: Ctx, chainKey: string, amountIn: string): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number }> {
+export async function depositOne(ctx: Ctx, chainKey: string, amountIn: string): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number }> {
   const { rec, owner } = ctx;
   const usdc = ctx.pre.usdc;
   const dp = usdc.valuechain.decimals;
@@ -605,9 +618,9 @@ async function stepWithdrawValuechainOther(ctx: Ctx): Promise<void> {
   });
 }
 
-/** How to read the receiver's balance on the destination chain (EVM chains the app knows), or null. */
-async function destinationReader(route: ChainRoute, holder: string): Promise<{ read: () => Promise<bigint>; decimals: number; symbol: string } | null> {
-  const chain = EVM_CHAINS[route.key];
+/** How to read the receiver's balance on the destination chain (every EVM chain the runner reads, chains.ts), or null. */
+export async function destinationReader(route: ChainRoute, holder: string): Promise<{ read: () => Promise<bigint>; decimals: number; symbol: string } | null> {
+  const chain = evmChain(route.key);
   if (!chain || route.addressKind !== 'evm') return null;
   if (route.isNativeToken) return { read: () => nativeBalance(chain.rpcUrl, holder), decimals: chain.native.decimals, symbol: chain.native.symbol };
   const token = route.tokenAddress?.toLowerCase();
@@ -634,7 +647,7 @@ const toUnitsCut = (v: string, dp: number): bigint => unitsDown(v, dp);
  * withdrawalProgress (the on-chain Withdrawer record) AND the receiver's
  * balance on the destination chain where it can be read.
  */
-async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRoute; receiverName: string; amount: string }): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number }> {
+export async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRoute; receiverName: string; amount: string }): Promise<{ detail: string; evidence: Record<string, unknown>; costUsd: number }> {
   const { owner, rec } = ctx;
   const { coin, route } = o;
   const dp = coin.valuechain.decimals;
@@ -759,7 +772,7 @@ async function withdrawTo(ctx: Ctx, o: { coin: CoinConfig; route: ChainRoute; re
     recordNote = `the funds arrived, but withdrawalProgress() does not report the withdrawal final (${p ? `"${p.status}"` : 'no record read'}) - the Withdraw sheet would not show "Completed"`;
     rec.warn('withdrawal record', recordNote);
   }
-  if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(EVM_CHAINS[route.key] ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
+  if (p?.destinationTx) rec.tx({ chain: route.key, hash: p.destinationTx, what: `SoDEX payout on ${route.label}`, ...(evmChain(route.key) ? { explorer: explorer(ctx, route.key, p.destinationTx) } : {}) });
   let received: string | null = null;
   if (dest && before !== null) {
     const after = await rec.sub(`verify: ${cut(net, 8)} arrived on ${route.label}`, () =>
@@ -813,7 +826,7 @@ async function stepExtraDeposits(ctx: Ctx): Promise<void> {
 }
 
 /** Market-buy what is missing of `coin` so Spot holds `amount` (costs a taker fee + spread). Through the app's placeOrder. */
-async function buyOnSpot(ctx: Ctx, coin: CoinConfig, amount: string, tag: string): Promise<void> {
+export async function buyOnSpot(ctx: Ctx, coin: CoinConfig, amount: string, tag: string): Promise<void> {
   const { owner, rec } = ctx;
   const dp = coin.valuechain.decimals;
   const b0 = await balancesOf(owner, coin);
@@ -902,6 +915,9 @@ export const STEPS: Record<StepId, (ctx: Ctx) => Promise<void>> = {
   'withdraw-external': stepWithdrawExternal,
   'extra-deposits': stepExtraDeposits,
   'extra-withdrawals': stepExtraWithdrawals,
+  'evm-tour': stepEvmTour,
+  'chain-withdrawals': stepChainWithdrawals,
+  'manual-deposits': stepManualDeposits,
   'key-lifecycle': stepKeyLifecycle,
   cleanup: stepCleanup,
   'cross-check': stepCrossCheck,

@@ -2,8 +2,9 @@
  * The runner's own parts, offline and one at a time: the check registry, the
  * fee arithmetic of a fill, the history limiter, the independent terms
  * verifier (against the shared Ed25519 vector), the ledger, the receivers the
- * refusals use, and the coverage table. (The guard's write kinds and the wallet
- * policies are in safety.test.ts.)
+ * refusals use, the coverage table, the profiles, the tour's legs and amounts,
+ * the chain withdrawals and what cannot be tested. (The guard's write kinds and
+ * the wallet policies are in safety.test.ts.)
  *   npx tsx --test e2e/live/units.test.ts        (from apps/web)
  */
 import { test, afterEach } from 'node:test';
@@ -28,6 +29,12 @@ import { Ledger } from './ledger';
 import { NO_CHECKSUM, SAMPLE_ADDRESS, malformedReceivers } from './refusalSteps';
 import { capabilities, parseArgs } from './run';
 import { TermsWatch, judgeTerms, termsKeyId, termsMessage, verifyTermsSignature } from './terms';
+import { CHAIN_ADDRESS, chainLabel, type ChainRoute, type CoinConfig } from '../../src/trading/funds';
+import { chainWithdrawals } from './chainRoutes';
+import { DEFAULT_CONFIG, type RunConfig } from './config';
+import { applyProfile, profileSteps } from './profiles';
+import { memoRuleProblems, notTestable } from './routes';
+import { nativeLegAmounts, roundTripAmount, tourPlan, usdcLegAmounts } from './tour';
 
 const OWNER = '0x1111111111111111111111111111111111111111';
 const GW = 'https://gw.test';
@@ -216,4 +223,110 @@ test('config.example.json is a valid config with no unknown keys, and its builde
   assert.deepEqual([...r.errors, ...r.warnings], []);
   const b = validateConfig({ ...raw, builder: { id: 12345, address: '0x00000000000000000000000000000000000b1d00', feePerps: 20, feeSpot: 20, maxFee: 20, required: true, revokeAtEnd: true, termsKeys: ['A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg'] } });
   assert.deepEqual([...b.errors, ...b.warnings], []);
+});
+
+// --- profiles, the tour, the other chains ----------------------------------------------------------------------
+
+test('profiles: core leaves the wider steps out, evm-tour adds the tour, all-chains adds the other chains, builder-rerun is the fee test alone', () => {
+  const core = profileSteps('core');
+  for (const s of ['evm-tour', 'chain-withdrawals', 'manual-deposits']) assert.ok(!core.includes(s as never), s);
+  assert.deepEqual(profileSteps('evm-tour').filter((s) => !core.includes(s)), ['evm-tour']);
+  assert.deepEqual(profileSteps('all-chains').filter((s) => !core.includes(s)), ['evm-tour', 'chain-withdrawals', 'manual-deposits']);
+  assert.deepEqual(profileSteps('builder-rerun'), ['enable-trading', 'builder-tiers', 'cross-check', 'revoke-builder']);
+  const cfg = structuredClone(DEFAULT_CONFIG);
+  assert.deepEqual(applyProfile(cfg, 'core'), []);
+  assert.equal(applyProfile(cfg, 'builder-rerun').length, 1);
+  assert.equal(cfg.allowExistingAccount, true, 'builder-rerun runs on the existing test account');
+  const c = capabilities() as { profiles: string[]; profileInfo: Array<{ name: string; steps: string[] }> };
+  assert.deepEqual(c.profiles, ['core', 'evm-tour', 'all-chains', 'builder-rerun'], 'no profile creates a builder account');
+  assert.ok(c.profileInfo.every((p) => p.steps.length > 0));
+  assert.ok(typeof parseArgs(['plan', '--profile', 'all-chains']) !== 'string');
+  assert.match(String(parseArgs(['plan', '--profile', 'builder-setup'])), /unknown profile/);
+});
+
+test('config: the wider profiles\' sections are validated', async () => {
+  const { validateConfig } = await import('./config');
+  const ok = validateConfig({ evmTour: { chains: ['BASE_ETH'], skip: ['ETH'], sellBack: false }, chainWithdrawals: { skip: ['BTC'], buyIfMissing: false }, manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: '0.03' }] });
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.config.evmTour, { chains: ['BASE_ETH'], skip: ['ETH'], sellBack: false });
+  assert.match(validateConfig({ evmTour: { chains: 'some' } }).errors.join(), /evmTour\.chains/);
+  assert.match(validateConfig({ manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: 0.03 }] }).errors.join(), /decimal STRING/);
+  assert.match(validateConfig({ manualDeposits: [{ coin: 'SOL', chain: 'SOL', amount: '1' }, { coin: 'sol', chain: 'SOL', amount: '2' }] }).errors.join(), /twice/);
+  assert.match(validateConfig({ chainWithdrawals: { skip: ['bad key'] } }).errors.join(), /chain key/);
+});
+
+const route = (key: string, o: Partial<ChainRoute> = {}): ChainRoute => ({
+  key,
+  label: chainLabel(key),
+  addressKind: CHAIN_ADDRESS[key] ?? 'other',
+  memo: key === 'XRP' || key === 'XLM' ? 'numeric' : null,
+  withdrawType: 0,
+  tokenAddress: null,
+  isNativeToken: false,
+  deposit: { allowed: true, min: '5', etaSeconds: null },
+  withdraw: { allowed: true, min: '5', fee: '1' },
+  ...o,
+});
+const coinOf = (name: string, dp: number, chains: ChainRoute[], assetId = 1): CoinConfig => ({ coin: name, asset: `v${name}`, assetId, valuechain: { token: '0x00000000000000000000000000000000000000c0', symbol: `v${name}`, decimals: dp, native: false }, chains });
+const native = (key: string, dep: string, wd: string, fee: string) => route(key, { isNativeToken: true, deposit: { allowed: true, min: dep, etaSeconds: null }, withdraw: { allowed: true, min: wd, fee } });
+
+test('tour amounts: what goes out clears the deposit minimum when it comes back, with the gas kept back; a round trip never withdraws a minimum the fee eats', () => {
+  assert.deepEqual(usdcLegAmounts(route('ARBITRUM_ETH'), '1'), { withdraw: '6', back: '5' });
+  assert.deepEqual(usdcLegAmounts(route('MATIC', { withdraw: { allowed: true, min: '2', fee: '1' } }), '1'), { withdraw: '6', back: '5' });
+  const eth = coinOf('ETH', 18, []);
+  assert.deepEqual(nativeLegAmounts(native('ARBITRUM_ETH', '0.0015', '0.0015', '0.0005'), eth, '0.0005', '0.0002'), { withdraw: '0.0022', back: '0.0015' });
+  // BNB: SoDEX's withdrawal minimum (0.0005) is below its fee (0.002) - the leg withdraws enough to come back.
+  assert.deepEqual(nativeLegAmounts(native('BSC_BNB', '0.005', '0.0005', '0.002'), coinOf('BNB', 18, []), '0.002', '0.0005'), { withdraw: '0.0075', back: '0.005' });
+  // Arc: USDC is the native coin, 6 decimals on SoDEX.
+  assert.deepEqual(nativeLegAmounts(native('ARC', '5', '5', '1'), coinOf('USDC', 6, []), '1', '0.05'), { withdraw: '6.05', back: '5' });
+  assert.equal(roundTripAmount(native('SOL', '0.03', '0.01', '0.012'), coinOf('SOL', 9, []), '0.012'), '0.042');
+  assert.equal(roundTripAmount(native('BTC', '0.00005', '0.0005', '0.00006'), coinOf('BTC', 8, []), '0.00006'), '0.0005');
+});
+
+test('tour plan: which chains, which legs, and why the others are left out', () => {
+  const usdc = coinOf('USDC', 6, [route('ARBITRUM_ETH', { tokenAddress: '0xaf88d065e77c8cc2239327c5edb3a432268e5831' }), route('MATIC', { tokenAddress: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359' }), route('BASE_ETH', { tokenAddress: '0x0000000000000000000000000000000000000bad' }), native('ARC', '5', '5', '1'), route('SOL')], 0);
+  const coins = [usdc, coinOf('ETH', 18, [native('ARBITRUM_ETH', '0.0015', '0.0015', '0.0005'), native('ROBINHOOD_ETH', '0.002', '0.002', '0.0005'), native('BASE_ETH', '0.002', '0.0005', '0.0005')], 2), coinOf('AVAX', 18, [{ ...native('AVAXC', '0.35', '0.35', '0.12'), withdraw: { allowed: false, min: '0.35', fee: '0.12' } }], 6)];
+  const cfg: RunConfig = { ...structuredClone(DEFAULT_CONFIG), evmTour: { chains: 'all', skip: ['ROBINHOOD_ETH'], sellBack: true } };
+  const all = new Set(profileSteps('evm-tour'));
+  const t = tourPlan(coins, cfg, all);
+  const legs = Object.fromEntries(t.chains.map((c) => [c.chain, c.legs.map((l) => `${l.kind}:${l.skip ? 'skip' : 'run'}`)]));
+  assert.deepEqual(legs.ARBITRUM_ETH, ['native:run', 'usdc:skip'], 'USDC on the deposit chain is covered by deposit-external + withdraw-external');
+  assert.match(t.chains.find((c) => c.chain === 'ARBITRUM_ETH')!.legs[1]!.skip!, /covered in this run/);
+  assert.deepEqual(legs.MATIC, ['usdc:run']);
+  assert.ok(t.chains.find((c) => c.chain === 'MATIC')!.ownerGas, 'Polygon: no native route - the owner funds the gas');
+  assert.match(t.chains.find((c) => c.chain === 'BASE_ETH')!.legs.find((l) => l.kind === 'usdc')!.skip!, /non-canonical|not the canonical/);
+  assert.deepEqual(legs.ARC, ['native:run'], 'Arc: USDC is the native coin');
+  assert.match(t.chains.find((c) => c.chain === 'AVAXC')!.legs[0]!.skip!, /withdrawals .* closed/);
+  assert.deepEqual(t.left.map((l) => `${l.chain}: ${l.why}`), ['ROBINHOOD_ETH: in evmTour.skip']);
+  // Only the chains named; and without withdraw-external the deposit chain's USDC leg runs too.
+  const only = tourPlan(coins, { ...cfg, evmTour: { chains: ['ARBITRUM_ETH'], skip: [], sellBack: true } }, new Set(['evm-tour']));
+  assert.deepEqual(only.chains.map((c) => c.chain), ['ARBITRUM_ETH']);
+  assert.deepEqual(only.chains[0]!.legs.map((l) => l.skip), [null, null]);
+});
+
+test('chain withdrawals and what cannot be tested: every route on a chain the runner cannot sign on, each with its reason', () => {
+  const coins = [
+    coinOf('USDC', 6, [route('SOL')], 0),
+    coinOf('SOL', 9, [native('SOL', '0.03', '0.01', '0.012')], 8),
+    coinOf('XRP', 6, [native('XRP', '4', '2', '0.8')], 9),
+    coinOf('ZEC', 8, [{ ...native('ZEC', '1', '1', '0.1'), deposit: { allowed: false, min: '1', etaSeconds: null }, withdraw: { allowed: false, min: '1', fee: '0.1' } }], 12),
+    coinOf('BTC', 8, [{ ...native('BTC', '0.00005', '0.0005', '0.00006'), withdraw: { allowed: false, min: '0.0005', fee: '0.00006' } }], 10),
+  ];
+  const cfg: RunConfig = { ...structuredClone(DEFAULT_CONFIG), receivers: { sol: { address: SAMPLE_ADDRESS.solana } }, manualDeposits: [{ coin: 'XRP', chain: 'XRP', amount: '4' }] };
+  const w = Object.fromEntries(chainWithdrawals(coins, cfg).map((x) => [`${x.coin.coin}@${x.route.key}`, x.skip ?? 'runs']));
+  assert.deepEqual(w, {
+    'USDC@SOL': 'runs',
+    'SOL@SOL': 'runs',
+    'XRP@XRP': 'receivers.xrp is not set (your own XRP Ledger address)',
+    'ZEC@ZEC': 'the app does not offer Zcash',
+    'BTC@BTC': 'BTC withdrawals to Bitcoin are closed on SoDEX right now',
+  });
+  const nt = Object.fromEntries(notTestable(coins, cfg).map((n) => [n.what, n.why]));
+  assert.match(nt['SOL on Solana']!, /deposit: the runner cannot sign on Solana - opt in with manualDeposits/);
+  assert.match(nt['SOL on Solana']!, /withdrawal: the arrival cannot be read/);
+  assert.ok(!/manualDeposits/.test(nt['XRP on XRP Ledger'] ?? ''), 'XRP is opted into a manual deposit');
+  assert.match(nt['BTC on Bitcoin']!, /withdrawal: closed/);
+  assert.equal(nt['ZEC on Zcash'], 'the app does not offer this chain at all');
+  assert.deepEqual(memoRuleProblems(native('XRP', '4', '2', '0.8')), [], 'the app\'s memo rules for XRP hold');
+  assert.deepEqual(memoRuleProblems(native('XLM', '26', '25', '7')), []);
 });

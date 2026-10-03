@@ -128,10 +128,15 @@ export const RUN_PROFILES: readonly ProfileInfo[] = [
       'plus deposits you send by hand from those chains, which the run waits for and verifies',
     ],
   },
+  {
+    name: 'builder-rerun',
+    title: 'Builder fee again - on the test wallet of an earlier run',
+    covers: [
+      'the builder fee test alone: the approval, 2 bp on the first orders, 1.5 bp after 10 USDC of verified volume, the cheating attempts, the approval enforced, the cross-check',
+      'on the funded test wallet of an earlier run - after the server forgot it (apps/server: npx tsx tools/builderTiers.ts forget --address <wallet>)',
+    ],
+  },
 ];
-
-/** Profiles that prepare something (stage C) instead of testing: never offered as the live run. */
-export const SETUP_PROFILES: ReadonlySet<string> = new Set(['builder-setup']);
 
 export interface ProfileMenu {
   /** Offered, in order: the known ones first, then any other profile the runner has. */
@@ -141,7 +146,7 @@ export interface ProfileMenu {
 }
 
 export function profileMenu(c: Capabilities): ProfileMenu {
-  const has = new Set(c.profiles.filter((p) => !SETUP_PROFILES.has(p)));
+  const has = new Set(c.profiles);
   const known = new Set(RUN_PROFILES.map((p) => p.name));
   return {
     available: [

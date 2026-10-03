@@ -41,12 +41,20 @@
  * The older gateway route for permits (`/user/{owner}/evm-withdraw`) is decoded
  * the same way, so either channel meets the same check.
  *
+ * A RAW TRANSACTION (live mode) is decoded too. One that carries native value
+ * with no calldata - a plain coin transfer, which only the evm-tour's deposit
+ * back of a chain's native coin makes - is its own kind, `native-transfer`, and
+ * leaves only when armed: chain, sender, receiver and value exactly as expected.
+ * Native value INTO a contract is never a transaction the runner makes. Every
+ * other raw transaction (an ERC-20 call with no value) is gated by the
+ * key-backed wallet's policy, which already checked its decoded calldata.
+ *
  * Every request is recorded (method, host, path, status, timing) for the
  * report. Request bodies are NOT recorded: signed writes carry signatures.
  * (The account stream is a WebSocket and does not pass here: stream.ts opens it
  * only against SoDEX's own gateway and only ever subscribes.)
  */
-import { decodeAbiParameters } from 'viem';
+import { decodeAbiParameters, parseTransaction, recoverTransactionAddress } from 'viem';
 import { CLOB_GATEWAY, WITHDRAW_TOKEN_TARGET } from '@sodex-core';
 import { isLimitedHistoryPath } from './history';
 import { READ_METHODS } from './provider';
@@ -80,7 +88,20 @@ export type WriteKind =
   /** SoDEX's address risk check before a custody withdrawal (alpha-biz analyse_address). */
   | 'kyt-check'
   /** The backend building deposit calldata (the older wallet -> Spot path). */
-  | 'deposit-prepare';
+  | 'deposit-prepare'
+  /** A signed raw transaction moving a chain's native coin with no calldata (evm-tour: the deposit back of a native coin). */
+  | 'native-transfer';
+
+/** A decoded raw transaction (kind 'native-transfer'). */
+export interface RawTx {
+  chainId: number | null;
+  /** lower-case; null for a contract creation */
+  to: string | null;
+  /** The signer, recovered from the signature (lower-case). */
+  from: string;
+  value: bigint;
+  data: string;
+}
 
 /** The decoded WithdrawToken command of an evm-withdraw permit. */
 export interface PermitCmd {
@@ -105,6 +126,8 @@ export interface WriteRequest {
   permit?: PermitCmd;
   /** For 'deposit-permit': the decoded DepositERC20WithPermit command. */
   deposit?: { token: string; amount: bigint };
+  /** For 'native-transfer': the decoded, signer-recovered transaction. */
+  tx?: RawTx;
   /** Which engine's path (transfers, orders, cancels, key writes ...). */
   engine?: 'spot' | 'perps';
 }
@@ -215,6 +238,15 @@ const DEPOSIT_CMD = [{ type: 'address' }, { type: 'uint256' }, { type: 'uint256'
 export function decodeDepositCmd(cmdData: string): { token: string; amount: bigint } {
   const [token, amount] = decodeAbiParameters(DEPOSIT_CMD, cmdData as `0x${string}`);
   return { token: token.toLowerCase(), amount };
+}
+
+/** Decode a signed raw transaction and recover its signer (throws when it is not one). */
+export async function decodeRawTx(raw: string): Promise<RawTx> {
+  if (typeof raw !== 'string' || !/^0x[0-9a-fA-F]+$/.test(raw)) throw new Error('not a hex transaction');
+  const tx = parseTransaction(raw as `0x${string}`);
+  const from = (await recoverTransactionAddress({ serializedTransaction: raw as never })).toLowerCase();
+  const data = String((tx as { data?: string }).data ?? '0x').toLowerCase();
+  return { chainId: typeof tx.chainId === 'number' ? tx.chainId : null, to: tx.to ? tx.to.toLowerCase() : null, from, value: tx.value ?? 0n, data: data === '' ? '0x' : data };
 }
 
 /** The backend's builder-terms route (docs/BUILDER-TIERS.md section 3): a read. */
@@ -388,9 +420,23 @@ export function installGuard(o: GuardOptions): Guard {
       if (methods.every((m) => RPC_READS.has(m))) return send();
       const writes = methods.filter((m) => !RPC_READS.has(m));
       if (o.mode === 'plan') return refused(rec, `plan mode is read-only (${writes.join(', ')})`, 'rpc', ids);
-      // Live: only raw transactions, which the key-backed wallet signed under its policy.
-      if (writes.every((m) => m === 'eth_sendRawTransaction')) return send();
-      return refused(rec, `JSON-RPC method not allowed: ${writes.join(', ')}`, 'rpc', ids);
+      if (!writes.every((m) => m === 'eth_sendRawTransaction')) return refused(rec, `JSON-RPC method not allowed: ${writes.join(', ')}`, 'rpc', ids);
+      // Live: raw transactions only, which the key-backed wallet signed under its policy - decoded here once more.
+      const raws = calls.filter((c) => String(c?.method) === 'eth_sendRawTransaction').map((c) => (c as { params?: unknown[] }).params?.[0]);
+      const txs: RawTx[] = [];
+      for (const raw of raws) {
+        try {
+          txs.push(await decodeRawTx(String(raw)));
+        } catch (e) {
+          return refused(rec, `an undecodable raw transaction (${e instanceof Error ? (e.message.split('\n')[0] ?? '') : String(e)})`, 'rpc', ids);
+        }
+      }
+      if (txs.some((t) => t.value > 0n && t.data !== '0x')) return refused(rec, 'native value sent INTO a contract is not a transaction the runner makes', 'rpc', ids);
+      const plain = txs.filter((t) => t.value > 0n);
+      if (!plain.length) return send();
+      if (txs.length > 1) return refused(rec, 'a native-coin transfer goes out alone, never in a batch', 'rpc', ids);
+      rec.what = 'native-transfer';
+      return dispatch({ kind: 'native-transfer', method, url, body: parsed, raw: bodyText, tx: plain[0]! }, rec, 'rpc', ids);
     }
 
     if (method === 'GET' || method === 'HEAD') {
@@ -447,36 +493,41 @@ export function installGuard(o: GuardOptions): Guard {
     rec.what = req ? req.kind : `${method} ${url.pathname}`;
     if (o.mode === 'plan') return refused(rec, `plan mode is read-only (${rec.what})`, shape);
     if (!req) return refused(rec, notOurs ?? `not a write the runner ever makes (${method} ${url.pathname})`, shape);
-    const reasons: string[] = [];
-    // An order whose exact bytes were armed as the runner's own is a `direct-order`; anything else on that route is the app's.
-    const kinds: WriteKind[] = req.kind === 'order' ? ['direct-order', 'order'] : [req.kind];
-    for (const kind of kinds) {
-      for (const e of armed) {
-        if (e.kind !== kind || e.left <= 0) continue;
-        let why: string | null = null;
-        if (e.exact !== undefined && req.raw !== e.exact) why = 'the body is not, byte for byte, the one that was armed';
-        if (why === null && e.check) why = e.check({ ...req, kind });
-        if (why === null) {
-          e.left -= 1;
-          rec.what = `${kind}: ${e.label}`;
-          const sent: SentWrite = { kind, engine: req.engine, tag: e.tag ?? null, label: e.label, body, status: null, responseText: null, at: Date.now(), direct: e.exact !== undefined };
-          try {
-            return await send((status, text) => {
-              sent.status = status;
-              sent.responseText = text;
-            });
-          } finally {
+    return dispatch(req, rec, shape);
+
+    /** Send a write only if an armed expectation takes it; otherwise refuse it, saying why. */
+    async function dispatch(req: WriteRequest, rec: NetRecord, shape: 'gateway' | 'backend' | 'rpc', rpcIds: unknown = null): Promise<Response> {
+      const reasons: string[] = [];
+      // An order whose exact bytes were armed as the runner's own is a `direct-order`; anything else on that route is the app's.
+      const kinds: WriteKind[] = req.kind === 'order' ? ['direct-order', 'order'] : [req.kind];
+      for (const kind of kinds) {
+        for (const e of armed) {
+          if (e.kind !== kind || e.left <= 0) continue;
+          let why: string | null = null;
+          if (e.exact !== undefined && req.raw !== e.exact) why = 'the body is not, byte for byte, the one that was armed';
+          if (why === null && e.check) why = e.check({ ...req, kind });
+          if (why === null) {
+            e.left -= 1;
+            rec.what = `${kind}: ${e.label}`;
+            const sent: SentWrite = { kind, engine: req.engine, tag: e.tag ?? null, label: e.label, body: req.body, status: null, responseText: null, at: Date.now(), direct: e.exact !== undefined };
             try {
-              o.onWrite?.(sent);
-            } catch {
-              /* the ledger must not change what the caller gets */
+              return await send((status, text) => {
+                sent.status = status;
+                sent.responseText = text;
+              });
+            } finally {
+              try {
+                o.onWrite?.(sent);
+              } catch {
+                /* the ledger must not change what the caller gets */
+              }
             }
           }
+          reasons.push(`${e.label}: ${why}`);
         }
-        reasons.push(`${e.label}: ${why}`);
       }
+      return refused(rec, reasons.length ? `does not match what this step expects - ${reasons.join('; ')}` : `no ${req.kind} is expected right now`, shape, rpcIds);
     }
-    return refused(rec, reasons.length ? `does not match what this step expects - ${reasons.join('; ')}` : `no ${req.kind} is expected right now`, shape);
   };
 
   globalThis.fetch = wrapped as typeof fetch;

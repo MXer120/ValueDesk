@@ -16,7 +16,6 @@ import {
   judgeBuilder,
   lastJsonLine,
   makeBuilderChoice,
-  manualBuilderSteps,
   parseEnv,
   parseFee,
   planEnvAppend,
@@ -24,6 +23,7 @@ import {
   readTiersJson,
   tierLines,
   tiersProblems,
+  whatToMove,
 } from './builder';
 import { TERMS_CHAIN, isTermsNonce, judgeTerms, keyIdOf, rawPublicKey, termsMessage, verifyTermsSignature } from './terms';
 
@@ -168,9 +168,16 @@ test('appending to .env.local: only what is missing; an existing line is NEVER c
   assert.match(appendEnvText('', planEnvAppend('', ['A=1']), 'x'), /^\n# Builder fee test settings.*\nA=1\n$/);
 });
 
-test('the manual setup steps name the app\'s own buttons and the two amounts', () => {
-  const text = manualBuilderSteps('http://127.0.0.1:5180').join('\n');
-  for (const want of ['http://127.0.0.1:5180', '"Connect wallet"', '"Deposit"', 'deposit 205 USDC', '"Enable trading"', '"Transfer"', '"SoDEX Spot"', '"SoDEX Futures"', '102 USDC', '204 USDC arrive']) assert.ok(text.includes(want), want);
+test('what to move: a transfer where one side can spare it, a deposit only for what neither can - exact amounts', () => {
+  const at = (spot: number | null, perps: number | null, id: number | null = 7) => whatToMove(judgeBuilder({ address: ADDR, builderId: id, spot, perps }));
+  assert.deepEqual(at(130, 102), [], 'eligible: nothing');
+  assert.deepEqual(at(230.5, 40), ['Transfer 60 vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).']);
+  assert.deepEqual(at(80, 150), ['Transfer 20 vUSDC from "SoDEX Futures" (Perps) to "SoDEX Spot".']);
+  assert.deepEqual(at(130.5, 40), ['Deposit 29.5 USDC (or more) to the builder account - it lands in "SoDEX Spot".', 'Then Transfer 60 vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).']);
+  assert.deepEqual(at(50, 110), ['Deposit 40 USDC (or more) to the builder account - it lands in "SoDEX Spot".', 'Transfer 10 vUSDC from "SoDEX Futures" (Perps) to "SoDEX Spot".']);
+  assert.deepEqual(at(10, 20), ['Deposit 170 USDC (or more) to the builder account - it lands in "SoDEX Spot".', 'Then Transfer 80 vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).']);
+  assert.match(at(null, null, null)[0]!, /Deposit at least 201 USDC/);
+  assert.match(at(null, 120)[0]!, /could not be read/);
 });
 
 // --- signed terms (docs/BUILDER-TIERS.md section 3) -----------------------------------------------

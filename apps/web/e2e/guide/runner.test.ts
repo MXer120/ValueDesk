@@ -42,9 +42,9 @@ import {
 // --- capabilities -----------------------------------------------------------------------------
 
 test('capabilities: the runner\'s own JSON answer, even with a banner around it', () => {
-  const c = parseCapabilities('some banner\n{ "steps": ["a","b"], "profiles": ["core","all-chains","builder-setup"], "flags": ["--profile"] }\n', 0);
-  assert.deepEqual(c, { steps: ['a', 'b'], profiles: ['core', 'all-chains', 'builder-setup'], flags: ['--profile'], source: 'capabilities' });
-  assert.equal(hasProfile(c!, 'builder-setup'), true);
+  const c = parseCapabilities('some banner\n{ "steps": ["a","b"], "profiles": ["core","all-chains","builder-rerun"], "flags": ["--profile"] }\n', 0);
+  assert.deepEqual(c, { steps: ['a', 'b'], profiles: ['core', 'all-chains', 'builder-rerun'], flags: ['--profile'], source: 'capabilities' });
+  assert.equal(hasProfile(c!, 'builder-rerun'), true);
 });
 
 test('capabilities: not that answer = null (never a crash)', () => {
@@ -79,9 +79,10 @@ test('capabilities: the real runner\'s usage text is understood (if the runner i
 test('profiles: the menu offers what the runner has, in the owner\'s order, and names what is missing', () => {
   const none = profileMenu(DEFAULT_CAPABILITIES);
   assert.deepEqual(none.available, []);
-  assert.deepEqual(none.missing.map((p) => p.name), ['core', 'evm-tour', 'all-chains']);
-  const some = profileMenu({ steps: [], profiles: ['all-chains', 'core', 'builder-setup', 'nightly'], flags: [], source: 'capabilities' });
-  assert.deepEqual(some.available.map((p) => p.name), ['core', 'all-chains', 'nightly']); // builder-setup is a setup, not a test run
+  assert.deepEqual(none.missing.map((p) => p.name), ['core', 'evm-tour', 'all-chains', 'builder-rerun']);
+  const some = profileMenu({ steps: [], profiles: ['all-chains', 'core', 'builder-rerun', 'nightly'], flags: [], source: 'capabilities' });
+  assert.deepEqual(some.available.map((p) => p.name), ['core', 'all-chains', 'builder-rerun', 'nightly']);
+  assert.match(some.available[2]!.covers.join(' '), /forget --address/);
   assert.deepEqual(some.missing.map((p) => p.name), ['evm-tour']);
   assert.match(some.available.at(-1)!.covers[0]!, /no description/);
 });

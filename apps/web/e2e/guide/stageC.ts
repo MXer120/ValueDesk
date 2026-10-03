@@ -9,9 +9,10 @@
  *     never sees the private key);
  *   - appending the VITE_BUILDER_* lines to apps/web/.env.local - offered, never
  *     done by `--yes`, never overwriting a line that is already there.
- * Creating a builder account with a second wallet is a money run of its own
- * (stage D's machinery with the runner's `builder-setup` profile), or - while
- * the runner has no such profile - precise steps in the app's own screens.
+ * The builder account is the owner's own, existing account: the guide reads it
+ * (its id and its Spot and Perps balances) and nothing more. When it does not
+ * hold enough, the guide says exactly what to move - and stops; it never
+ * creates, funds or moves anything on a builder account.
  */
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -30,23 +31,22 @@ import {
   judgeBuilder,
   lastJsonLine,
   makeBuilderChoice,
-  manualBuilderSteps,
   parseFee,
   planEnvAppend,
   readCheckBuilderJson,
   readTiersJson,
   tierLines,
   tiersProblems,
+  whatToMove,
   type BuilderCheck,
   type TiersInfo,
 } from './builder';
 import { applyChoices, configProblems, type BuilderChoice } from './config';
 import { checkStop, logWriter, type Ctx } from './context';
 import { childEnv } from './proc';
-import { askValue, choose, confirm, pressEnter } from './prompt';
+import { askValue, choose, confirm } from './prompt';
 import { SODEX_GATEWAY, readOnlyProblem } from './readonly';
-import { hasProfile } from './runner';
-import { detectCapabilities, moneyRun, realDDeps, type DDeps } from './stageD';
+import { realDDeps, type DDeps } from './stageD';
 import { TERMS_PATH, judgeTerms } from './terms';
 import { STAGE_TITLES, Stopped, stageStatus, type Item, type StageResult } from './types';
 
@@ -198,8 +198,7 @@ export async function runStageC(ctx: Ctx, deps: CDeps = realCDeps(ctx)): Promise
       ctx.ask,
       'Which describes you?',
       [
-        { key: 'have', label: 'I already have a builder account' },
-        { key: 'create', label: 'Create one now with a second, fresh wallet (about 205 USDC, parked)' },
+        { key: 'have', label: 'Test the builder fee with my builder account' },
         { key: 'skip', label: 'Skip the builder tests' },
       ],
       'skip',
@@ -208,12 +207,6 @@ export async function runStageC(ctx: Ctx, deps: CDeps = realCDeps(ctx)): Promise
       ctx.shared.builder = null;
       say('Skipped. The live run then tests everything else; the builder-fee checks will read "not run".');
       return done('you chose to skip the builder tests', 'SKIPPED');
-    }
-    if (pick === 'create') {
-      const created = await createBuilder(ctx, deps, items, notes);
-      if (created.next === 'stop') return done('the builder account was not set up');
-      // After a setup run the builder's wallet is known: check that one.
-      input = created.address;
     }
   }
 
@@ -261,19 +254,17 @@ export async function runStageC(ctx: Ctx, deps: CDeps = realCDeps(ctx)): Promise
     }
     for (const n of check.notes) say(`Note: ${n}`);
     if (check.eligible) break;
+    // Not enough on it: say exactly what to move, and stop. The guide never moves money on a builder account.
     out.line('   NOT ELIGIBLE YET:');
     for (const m of check.missing) out.say(`- ${m}`, '      ');
-    say('Top it up in the app: Deposit, then Transfer between "SoDEX Spot" and "SoDEX Futures" (Perps).');
-    if (ctx.ask.auto || args.noWait) return fail(items, done, 'builder account eligible', check.missing.join(' '));
-    const again = await choose(ctx.ask, 'What now?', [{ key: 'again', label: 'Check again (after topping it up)' }, { key: 'other', label: 'Check another wallet or account ID' }, { key: 'skip', label: 'Skip the builder tests' }], 'again');
-    if (again === 'skip') {
-      ctx.shared.builder = null;
-      items.push({ id: 'builder-eligible', title: 'builder account eligible', status: 'FAIL', detail: check.missing.join(' ') });
-      return done('the builder account is not eligible');
-    }
-    if (again === 'other') input = null;
-    if (round > 50) return fail(items, done, 'builder account eligible', check.missing.join(' '));
+    const moves = whatToMove(check);
+    out.line('   To make it eligible, with the BUILDER wallet in the app:');
+    moves.forEach((m, i) => out.say(`${i + 1}. ${m}`, '      '));
+    say('Then run stage C again (RUN-LIVE-TESTS.cmd --stages C). The guide does not move anything on a builder account.');
+    ctx.shared.next.push(`The builder account ${address} is not eligible yet: ${moves.join(' ')} Then run stage C again (RUN-LIVE-TESTS.cmd --stages C).`);
+    return fail(items, done, 'builder account eligible', `${check.missing.join(' ')} To do: ${moves.join(' ')}`);
   }
+  if (!check) return fail(items, done, 'builder account eligible', 'not checked');
   const builderId = check.builderId!;
   const address = check.address!;
   ctx.shared.builderAddress = address;
@@ -445,38 +436,4 @@ async function setupTiers(ctx: Ctx, deps: CDeps, builderId: number, address: str
   out.result(verdict.status, 'the running server signs the fee terms', verdict.detail);
   if (verdict.status === 'FAIL') ctx.shared.next.push('The running backend does not serve signed fee terms that verify (stage C). Until it does, every order carries the default fee and the fee-change test cannot pass.');
   return merged;
-}
-
-/** Choice 2: a builder account with a second, fresh wallet. `address`: the wallet a setup run used. */
-async function createBuilder(ctx: Ctx, deps: CDeps, items: Item[], notes: string[]): Promise<{ next: 'check' | 'stop'; address: string | null }> {
-  const { out } = ctx;
-  const say = (t: string): void => out.say(t, '   ');
-  const caps = await detectCapabilities(ctx, deps.d);
-  if (hasProfile(caps, 'builder-setup')) {
-    say('The live runner can set the builder account up: with the key of a SECOND fresh wallet it deposits, enables trading, moves 102 USDC to Perps and checks the result. It needs about 205 USDC and a little ETH for gas on Arbitrum One in that wallet. The money is parked in the builder account, not spent (the activation fee of 1 USDC and the gas are).');
-    if (!ctx.ask.prompter.interactive) {
-      say('That is a live money run, which only a person at a console can start. Here are the steps to do it by hand instead.');
-    } else if (await confirm(ctx.ask, 'Set it up with the runner now?', true, { money: true })) {
-      // The setup run is a run of its own: what it leaves behind must not be taken for the test wallet's run.
-      const keep = { ...ctx.shared };
-      const r = await moneyRun(ctx, deps.d, { what: 'the BUILDER wallet (the second, fresh wallet)', profile: 'builder-setup', headings: false });
-      const wallet = ctx.shared.wallet;
-      Object.assign(ctx.shared, { wallet: keep.wallet, profile: keep.profile, planReport: keep.planReport, liveReport: keep.liveReport, liveReportPath: keep.liveReportPath, runnerSummaryMd: keep.runnerSummaryMd, runnerSummaryPath: keep.runnerSummaryPath, partial: keep.partial });
-      items.push(...r.items.map((x) => ({ ...x, id: `setup-${x.id}`, group: 'builder setup run' })));
-      notes.push(...r.notes);
-      if (!r.completed) {
-        say(`The builder setup did not finish${r.reason ? `: ${r.reason}` : ''}.`);
-        if (!(await confirm(ctx.ask, 'Check a builder account anyway (for example after finishing it by hand)?', true))) return { next: 'stop', address: null };
-      }
-      return { next: 'check', address: wallet };
-    }
-  } else {
-    say('This version of the live runner cannot set a builder account up by itself yet (it has no "builder-setup" profile). Do it by hand in the app - it takes a few minutes:');
-  }
-  out.line();
-  out.lines(manualBuilderSteps(ctx.args.backend), '      ');
-  out.line();
-  if (ctx.ask.auto) return { next: 'stop', address: null };
-  await pressEnter(ctx.ask, 'Press Enter when that is done (or to check how far it is).');
-  return { next: 'check', address: null };
 }

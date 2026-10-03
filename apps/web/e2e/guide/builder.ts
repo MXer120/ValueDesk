@@ -13,8 +13,6 @@ export const BUILDER_MIN_USDC = 100;
 export const FEE_CAPS = { perps: 200, spot: 2000, max: 2000 } as const;
 /** The fees asked for when no fee tiers are set up (with tiers, the first tier is the fee). */
 export const FEE_DEFAULTS = { perps: 50, spot: 100 } as const;
-/** What the manual setup deposits and moves: 1 USDC is the activation fee, 2 + 2 is the margin above the minimum. */
-export const SETUP = { depositUsdc: 205, toPerpsUsdc: 102 } as const;
 
 export const BUILDER_EXPLANATION: readonly string[] = [
   'A BUILDER ACCOUNT is the SoDEX account that receives the Valuescan fee.',
@@ -26,6 +24,8 @@ export const BUILDER_EXPLANATION: readonly string[] = [
   '  - Its numeric account ID is the "builder ID" the app is configured with.',
   '  - It must be a DIFFERENT wallet from the test wallet: the test wallet is the user',
   '    who approves and pays the fee, the builder account is who receives it.',
+  '  - It is YOUR account: the guide and the live run only read it (its id and two',
+  '    balances). Nothing here creates, funds or moves money on a builder account.',
 ];
 
 /** 50 -> "0.05 %", 20 -> "0.02 %", 15 -> "0.015 %". */
@@ -290,18 +290,27 @@ export function appendEnvText(existingText: string, plan: EnvAppendPlan, stamp: 
   return `${base}\n# Builder fee test settings - added by RUN-LIVE-TESTS on ${stamp} (docs/BUILDER-TIERS.md)\n${plan.append.join('\n')}\n`;
 }
 
-/** Setting a builder account up by hand, with the app's own screens. */
-export function manualBuilderSteps(backend: string): string[] {
-  return [
-    `1. Open ${backend} in the browser that holds the BUILDER wallet`,
-    '   (a second, fresh wallet - not the test wallet).',
-    '2. Press "Connect wallet" and connect that wallet.',
-    `3. Press "Deposit". Choose USDC on Arbitrum One and deposit ${SETUP.depositUsdc} USDC.`,
-    `   The wallet needs ${SETUP.depositUsdc} USDC and a little ETH for gas on Arbitrum One.`,
-    `   SoDEX keeps 1 USDC of a first deposit as the activation fee: ${SETUP.depositUsdc - 1} USDC arrive in Spot.`,
-    '4. When the deposit has arrived (a few minutes), press "Enable trading" and sign once.',
-    `5. Press "Transfer": from "SoDEX Spot" to "SoDEX Futures" (that is Perps), ${SETUP.toPerpsUsdc} USDC.`,
-    `   Now Spot holds ${SETUP.depositUsdc - 1 - SETUP.toPerpsUsdc} USDC and Perps holds ${SETUP.toPerpsUsdc} USDC: ${BUILDER_MIN_USDC} each is the minimum, the rest is margin.`,
-    '6. Come back to this window. The guide then checks the account (read-only).',
-  ];
+/**
+ * What the owner has to move (in the app, with the builder wallet) so the
+ * account holds 100 vUSDC in Spot AND in Perps - exact amounts, the cheapest
+ * way: a transfer between the two where one has enough to spare, a deposit only
+ * for what neither can spare. The guide never moves it itself.
+ */
+export function whatToMove(c: BuilderCheck): string[] {
+  if (c.eligible) return [];
+  const min = BUILDER_MIN_USDC;
+  if (!c.builderId) return [`Deposit at least ${min * 2 + 1} USDC to this wallet's SoDEX account (the first deposit opens it; SoDEX keeps 1 USDC of it), then Transfer ${min} vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).`];
+  if (c.spot === null || c.perps === null) return ['A balance could not be read: check again later - nothing needs moving yet.'];
+  const spotShort = Math.max(0, min - c.spot);
+  const perpsShort = Math.max(0, min - c.perps);
+  const spotSpare = Math.max(0, c.spot - min);
+  const perpsSpare = Math.max(0, c.perps - min);
+  if (perpsShort > 0 && spotShort === 0 && spotSpare >= perpsShort) return [`Transfer ${round(perpsShort)} vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).`];
+  if (spotShort > 0 && perpsShort === 0 && perpsSpare >= spotShort) return [`Transfer ${round(spotShort)} vUSDC from "SoDEX Futures" (Perps) to "SoDEX Spot".`];
+  // Not enough in the two together: deposit what is missing (it lands in Spot), then move it where it is short.
+  const deposit = round(spotShort + perpsShort - spotSpare - perpsSpare);
+  const out = [`Deposit ${deposit} USDC (or more) to the builder account - it lands in "SoDEX Spot".`];
+  if (spotShort > 0 && perpsSpare > 0) out.push(`Transfer ${round(perpsSpare)} vUSDC from "SoDEX Futures" (Perps) to "SoDEX Spot".`);
+  if (perpsShort > 0) out.push(`Then Transfer ${round(perpsShort)} vUSDC from "SoDEX Spot" to "SoDEX Futures" (Perps).`);
+  return out;
 }
