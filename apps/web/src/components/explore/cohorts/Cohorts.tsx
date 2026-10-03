@@ -1,12 +1,13 @@
 /**
- * Explore > Cohorts: every wallet a venue ranks, grouped by all-time PnL and
- * by account size, with what each group holds long and short right now and
- * how that lean has moved.
+ * Explore > Cohorts: the wallets holding positions on a venue, grouped by
+ * all-time PnL and by perp equity, with what each group holds long and short
+ * right now and how that lean has moved. As Hyperdash counts a cohort: a
+ * wallet with no open position is in no count, figure or list.
  *
  * One venue shows that venue; several are NETTED - a wallet on more than one
- * of them is one wallet, its PnL and equity summed into one cohort and its
- * positions added up (apps/server/src/valuescan/cohorts/model.ts). A sector or
- * an asset narrows every figure on the page to the positions in it.
+ * of them is one wallet, its PnL and perp equity summed into one cohort and
+ * its positions added up (apps/server/src/valuescan/cohorts/model.ts). A
+ * sector or an asset narrows every figure on the page to the positions in it.
  *
  * BUILT FROM THE PAGES AROUND IT. The bar, segments and brand chips are the
  * leaderboard's (`.lbp-bar`, `.lbp-seg`, `.lbp-chip`), the tables the account
@@ -45,6 +46,8 @@ const RANGES: Array<{ id: CohortRange; label: string }> = [
   { id: '1d', label: '24H' }, { id: '7d', label: '7D' }, { id: '30d', label: '30D' },
 ];
 const RANGE_WORD: Record<CohortRange, string> = { '1d': '24H', '7d': '7D', '30d': '30D' };
+const WALLETS_TITLE = 'Wallets in this cohort holding an open position. A wallet with none is not counted. Where a venue reads a sample of its small accounts, an estimate.';
+const EQUITY_TITLE = 'Perp equity: what the perps account is worth (a Hyperliquid unified account: its USDC collateral). Size cohorts are by it.';
 const SECTOR_LABEL = Object.fromEntries(SECTORS.map((s) => [s.id, s.label])) as Record<Sector, string>;
 
 /* --- URL: ?view=cohorts&cohort=whale&range=7d&sector=memes&coin=BTC --------------------- */
@@ -149,9 +152,8 @@ function Card({ def, card, empty, onOpen }: { def: CohortDef; card: CohortCard |
       <span className="coh-card__mid">
         <span className="coh-card__meta">
           <BiasPill long={long} short={short} />
-          <span className="coh-card__wallets" title={card ? `Positions known for ${fmtCount(card.covered)} of ${fmtCount(card.wallets)}` : undefined}>
-            {card ? `${fmtCount(card.wallets)} wallets` : DASH}
-            {card && card.holding > 0 && <span className="coh-card__holding"> · {fmtCount(card.holding)} in positions</span>}
+          <span className="coh-card__wallets" title={card ? WALLETS_TITLE : undefined}>
+            {card ? `${fmtCount(card.wallets)} wallets with positions` : DASH}
           </span>
         </span>
         <LeanChart points={card?.spark ?? []} height={52} className="coh-card__spark" />
@@ -262,14 +264,14 @@ function WalletsTable({ venues, id, filter, range, onScan }: { venues: readonly 
           <thead>
             <tr>
               <th>Address</th>
-              <SortTh k="equity" label="Equity" sort={sort} dir={dir} onSort={onSort} />
+              <SortTh k="equity" label="Equity" title={EQUITY_TITLE} sort={sort} dir={dir} onSort={onSort} />
               <SortTh k="value" label="Position value" sort={sort} dir={dir} onSort={onSort} />
               <SortTh k="leverage" label="Leverage" sort={sort} dir={dir} onSort={onSort} />
               <SortTh k="upnl" label="Sum uPnL" sort={sort} dir={dir} onSort={onSort} />
               <SortTh
                 k="pnl"
                 label={`PnL ${RANGE_WORD[range]}`}
-                title="PnL over the selected range. Cohort membership is by all-time PnL (and equity for size cohorts)."
+                title="PnL over the selected range. Cohort membership is by all-time PnL (and perp equity for size cohorts)."
                 sort={sort}
                 dir={dir}
                 onSort={onSort}
@@ -403,7 +405,7 @@ function Detail({
         <span key={`i-${id}`} className="coh-card__icon mo-fade"><CohortIcon id={id} size={20} /></span>
         <div key={`t-${id}`} className="coh-d__title mo-fade"><h2>{def.name}</h2><span>{def.range}</span></div>
         {st && <BiasPill long={st.long} short={st.short} />}
-        {st && <span className="coh-d__count">{fmtCount(st.wallets)} wallets · {fmtCount(st.holding)} in positions</span>}
+        {st && <span className="coh-d__count" title={WALLETS_TITLE}>{fmtCount(st.wallets)} wallets with positions</span>}
       </div>
 
       {r.error && !r.data ? <LoadFailed what="Cohort" onRetry={r.retry} /> : (
@@ -470,9 +472,6 @@ function Detail({
                 : <MarketsTable markets={st?.markets ?? []} onPick={setCoin} />}
             </CrossFade>
           </section>}
-          {st && st.covered < st.wallets && (
-            <p className="coh-fine">Positions known for {fmtCount(st.covered)} of {fmtCount(st.wallets)} wallets so far · largest accounts first</p>
-          )}
         </>
       )}
     </div>
@@ -596,7 +595,7 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
             );
           })}
         </div>
-        {venues.length > 1 && <span className="coh-net" title="A wallet on several of these venues counts once: PnL, equity and positions summed">Netted</span>}
+        {venues.length > 1 && <span className="coh-net" title="A wallet on several of these venues counts once: PnL, perp equity and positions summed">Netted</span>}
         {section === 'cohorts' && <div className="coh-filters">
           <Picker label="Sector" value={filter.sector ? SECTOR_LABEL[filter.sector] : null} onClear={() => setFilter({})}>
             {(close) => (

@@ -15,21 +15,21 @@ test('venueList: one, two, several', () => {
 });
 
 test('PnL cohorts: made / lost, the range without signs or unit', () => {
-  assert.equal(emptyCohortText(COHORT_BY_ID['extremely-profitable'], ['SoDEX']), 'No SoDEX wallet has made $1M+ all-time');
-  assert.equal(emptyCohortText(COHORT_BY_ID['very-profitable'], ['SoDEX', 'Arcus']), 'No SoDEX or Arcus wallet has made $100K to $1M all-time');
-  assert.equal(emptyCohortText(COHORT_BY_ID.rekt, ['Arcus']), 'No Arcus wallet has lost $1M+ all-time');
-  assert.equal(emptyCohortText(COHORT_BY_ID['very-unprofitable'], ['SoDEX']), 'No SoDEX wallet has lost $100K to $1M all-time');
+  assert.equal(emptyCohortText(COHORT_BY_ID['extremely-profitable'], ['SoDEX']), 'No SoDEX wallet that made $1M+ all-time holds a position');
+  assert.equal(emptyCohortText(COHORT_BY_ID['very-profitable'], ['SoDEX', 'Arcus']), 'No SoDEX or Arcus wallet that made $100K to $1M all-time holds a position');
+  assert.equal(emptyCohortText(COHORT_BY_ID.rekt, ['Arcus']), 'No Arcus wallet that lost $1M+ all-time holds a position');
+  assert.equal(emptyCohortText(COHORT_BY_ID['very-unprofitable'], ['SoDEX']), 'No SoDEX wallet that lost $100K to $1M all-time holds a position');
 });
 
-test('size cohorts: holds', () => {
-  assert.equal(emptyCohortText(COHORT_BY_ID.apex, ['SoDEX']), 'No SoDEX wallet holds $5M+');
-  assert.equal(emptyCohortText(COHORT_BY_ID.whale, ['SoDEX']), 'No SoDEX wallet holds $1M – $5M');
+test('size cohorts: perp equity, holds a position', () => {
+  assert.equal(emptyCohortText(COHORT_BY_ID.apex, ['SoDEX']), 'No SoDEX wallet with $5M+ perp equity holds a position');
+  assert.equal(emptyCohortText(COHORT_BY_ID.whale, ['SoDEX']), 'No SoDEX wallet with $1M – $5M perp equity holds a position');
 });
 
 test('page line: names the empty cohorts, null when none', () => {
   assert.equal(emptyCohortsLine([]), null);
   assert.equal(
     emptyCohortsLine([COHORT_BY_ID['extremely-profitable'], COHORT_BY_ID.rekt]),
-    'The chosen venues have no wallet in: Extremely Profitable, Rekt.',
+    'On the chosen venues no wallet holds a position in: Extremely Profitable, Rekt.',
   );
 });

@@ -4,10 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  aggregate, biasOf, coinOf, leanOf, longShare, netWallet, pnlCohort, scopeKey, sectorOf, sizeCohort, walletRow,
+  aggregate, biasOf, coinOf, holdsPosition, leanOf, longShare, netWallet, perpEquity, pnlCohort, sampledVenue, scopeKey, sectorOf, sizeCohort,
+  sumCohorts, walletRow,
   type Position, type WalletVenue,
 } from '../src/valuescan/cohorts/model.js';
-import { allScopes, applyFill, pollTtl, reconcileTtl, type Book } from '../src/indexer/cohortTracker.js';
+import { allScopes, applyFill, needsSpot, pollTtl, reconcileTtl, staleEquity, type Book } from '../src/indexer/cohortTracker.js';
+import { spotCollateral } from '../src/indexer/cohortSource.js';
 import { Lane } from '../src/indexer/lanes.js';
 import type { Venue } from '../src/valuescan/types.js';
 
@@ -90,10 +92,9 @@ test('aggregate: coverage, profit / loss, markets, filters and sampled weights',
   const b = netWallet('0x2', new Map([['hyperliquid', w({ pnl: 1_500_000, equity: 50_000 })]]), mark);
   const c = netWallet('0x3', new Map([['lighter', w({ pnl: 1_200_000, equity: 5_000, weight: 10, positions: [pos('BTC', -1, 110)] })]]), mark);
   const ep = aggregate([a, b, c]).find((s) => s.id === 'extremely-profitable')!;
-  assert.equal(ep.wallets, 3);
-  // The sampled wallet stands for ten, but a cohort never reports more covered wallets than it has
-  // (the nine it stands for are counted in `wallets` only when they are members here too).
-  assert.equal(ep.covered, 3, 'capped at the exact wallet count');
+  // 0x2 holds nothing: not part of the cohort. The sampled wallet stands for ten, but a cohort
+  // never reports more wallets than it has (the nine count only when they are in it too).
+  assert.equal(ep.wallets, 3, '1 + 10 holding, capped at the 3 wallets the cohort has');
   assert.equal(ep.long, 300);
   assert.equal(ep.short, 100 + 1000, 'amounts keep the sample weight');
   assert.equal(ep.inProfit, 3);
@@ -103,10 +104,76 @@ test('aggregate: coverage, profit / loss, markets, filters and sampled weights',
   const onlyEth = aggregate([a, b, c], { coin: 'ETH' }).find((s) => s.id === 'extremely-profitable')!;
   assert.equal(onlyEth.long, 0);
   assert.equal(onlyEth.short, 100);
-  assert.equal(onlyEth.holding, 1);
+  assert.equal(onlyEth.wallets, 1, 'only the wallet holding ETH');
   assert.equal(onlyEth.inLoss, 1, 'on ETH alone wallet 1 is down');
   const majors = aggregate([a], { sector: 'majors' }).find((s) => s.id === 'apex')!;
   assert.equal(majors.long + majors.short, 400);
+});
+
+test('a cohort is its wallets holding positions, as Hyperdash counts it; the total holds every one', () => {
+  const held = (id: string, o: Partial<WalletVenue>) => netWallet(id, new Map([['hyperliquid', w({ positions: [pos('BTC', 1, 100)], ...o })]]), mark);
+  const flat = netWallet('0xf', new Map([['hyperliquid', w({ pnl: 5e6, equity: 9e6, positions: [] })]]), mark);
+  const unread = netWallet('0xu', new Map([['hyperliquid', w({ pnl: 5e6, equity: 9e6 })]]), mark);
+  // Positions, but no perp equity known yet (read empty, funded since): no size cohort, still in the total.
+  const unsized = held('0xn', { pnl: 2e6, equity: 0 });
+  const apex = held('0xa', { pnl: 2e6, equity: 6e6 });
+  const s = sumCohorts([flat, unread, unsized, apex]);
+  const by = (id: string) => s.cohorts.find((c) => c.id === id)!;
+  assert.equal(by('apex').wallets, 1, 'the flat and the unread $9M wallets are not in it');
+  assert.equal(by('extremely-profitable').wallets, 2);
+  assert.equal(by('small').wallets, 0);
+  assert.equal(s.all.wallets, 2);
+  assert.equal(s.all.long, 200, 'the market map keeps the unsized wallet');
+  assert.equal(walletRow(flat, {}).value, 0);
+  assert.ok(holdsPosition(apex, {}) && !holdsPosition(flat, {}) && !holdsPosition(unread, {}));
+  assert.equal(holdsPosition(apex, { coin: 'ETH' }), false, 'under a filter: a position it keeps');
+});
+
+test('perp equity per venue: unified collateral once, dexes summed, the others their own', () => {
+  const hl = { equity: 159e6, collateral: null };
+  const xyz = { equity: 9.7e6 };
+  assert.equal(perpEquity('hyperliquid', hl, xyz), 168.7e6, 'standard: main dex + xyz dex');
+  assert.equal(perpEquity('tradexyz', xyz, hl), 9.7e6, 'trade.xyz alone: its own margin book');
+  const unified = { equity: 3e6, collateral: 20.1e6 };
+  assert.equal(perpEquity('hyperliquid', unified, xyz), 20.1e6, 'unified: the collateral, which the dexes share');
+  assert.equal(perpEquity('tradexyz', xyz, unified), 20.1e6);
+  assert.equal(perpEquity('hyperliquid', undefined, xyz), 9.7e6, 'no main-dex read yet: the xyz book');
+  assert.equal(perpEquity('hyperliquid', undefined, undefined), null);
+  assert.equal(perpEquity('lighter', { equity: 50_000 }), 50_000);
+  // Netted with both chosen, trade.xyz's figure is inside Hyperliquid's: not added again.
+  const n = netWallet('0xu', new Map<Venue, WalletVenue>([
+    ['hyperliquid', w({ equity: perpEquity('hyperliquid', unified, xyz), positions: [pos('BTC', 1, 100)] })],
+    ['tradexyz', w({ equity: perpEquity('tradexyz', xyz, unified), positions: [pos('xyz:TSLA', 1, 5)] })],
+  ]), mark);
+  assert.equal(n.equity, 20.1e6);
+  // The sampling stratum stays the member's equity; the wallet carries its perp equity.
+  const sv = sampledVenue(1, '0xu', { pnl: 1, equity: 250e6, label: null }, { equity: 3e6, positions: [], at: 1 }, 20.1e6);
+  assert.equal(sv.equity, 20.1e6);
+});
+
+test('the spot state: unified collateral in stablecoins; a standard account has none', () => {
+  assert.equal(spotCollateral({ balances: [{ coin: 'USDC', token: 0, total: '65407.1' }] }), null, 'standard: spot is spot');
+  assert.equal(spotCollateral({
+    balances: [
+      { coin: 'USDC', token: 0, total: '191147342.25' }, { coin: 'HYPE', token: 150, total: '529458' },
+      { coin: 'USDT0', token: 268, total: '8' }, { coin: 'USDH', token: 360, total: '0.01' },
+    ],
+    tokenToAvailableAfterMaintenance: [[0, '162591964.9'], [268, '8'], [360, '0.01']],
+  }), 191147342.25 + 8 + 0.01);
+  assert.equal(needsSpot(252.9e6, 159e6, 17), true, 'the leaderboard sees far more than the perps value');
+  assert.equal(needsSpot(1_050_000, 1_000_000, 3), false, 'within 10%');
+  assert.equal(needsSpot(5e6, 0, 0), false, 'no positions: nothing to size');
+  assert.equal(needsSpot(null, 0, 3), false, 'off the leaderboard');
+});
+
+test('a book read empty or small, holding more since, is read again - not in a loop', () => {
+  const now = 10 * 3_600_000;
+  assert.equal(staleEquity({ equity: 0, at: now - 40 * 60_000 }, 377_104, now), true, 'read empty, funded and opened since');
+  assert.equal(staleEquity({ equity: 0, at: now - 10 * 60_000 }, 377_104, now), false, 'just read: wait');
+  assert.equal(staleEquity({ equity: 2_272, at: now - 7 * 3_600_000 }, 1_752_586, now), true, '771x');
+  assert.equal(staleEquity({ equity: 2_272, at: now - 3_600_000 }, 1_752_586, now), false, 'within 6 h of its read');
+  assert.equal(staleEquity({ equity: 75_000, at: 0 }, 377_104, now), false, '5x is a book');
+  assert.equal(staleEquity({ equity: 3e6, collateral: 20e6, at: 0 }, 41.9e6, now), false, 'unified: against its collateral');
 });
 
 test('scopes and read ages', () => {

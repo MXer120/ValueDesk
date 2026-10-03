@@ -179,7 +179,7 @@ export function FocusPage({
           <span>{focus.coin ? `${SECTOR_LABEL[sector!]} · every cohort` : 'Sector · every cohort'}</span>
         </div>
         {t && <BiasPill long={t.long} short={t.short} />}
-        {t && <span className="coh-d__count">{fmtCount(t.holding)} wallets holding</span>}
+        {t && <span className="coh-d__count">{fmtCount(t.wallets)} wallets holding</span>}
       </div>
 
       {r.error && !d ? <LoadFailed what={name} onRetry={r.retry} /> : (
@@ -279,7 +279,7 @@ export function FocusPage({
                             {COHORT_BY_ID[c.id].name}
                           </span>
                         </td>
-                        <td className="num">{past ? <span className="coh-dim" title="Known for now only">{DASH}</span> : fmtCount(c.holding)}</td>
+                        <td className="num">{past ? <span className="coh-dim" title="Known for now only">{DASH}</span> : fmtCount(c.wallets)}</td>
                         <td className="num pos">{fmtUsdShort(long)}</td>
                         <td className="num neg">{fmtUsdShort(short)}</td>
                         <td className={`num ${net !== null && net > 0 ? 'pos' : net !== null && net < 0 ? 'neg' : ''}`}>{fmtUsdShort(net, true)}</td>

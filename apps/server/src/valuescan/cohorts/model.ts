@@ -1,21 +1,27 @@
 /**
- * Cohorts: every wallet a venue ranks, grouped by all-time PnL and by account
- * size, with what each group holds long and short right now.
+ * Cohorts: the wallets holding positions on a venue, grouped by all-time PnL
+ * and by perp equity, with what each group holds long and short right now.
  *
  * PURE AND ISOMORPHIC. The indexer and the API aggregate with it and the web
  * app labels with it (through the `@sign` alias), so a threshold, a sector or
  * a bias word has one definition. No I/O here.
  *
+ * AS HYPERDASH COUNTS (compared 2026-10-03). A cohort is the wallets in it that
+ * hold an open position: a wallet with none is not part of any figure, count
+ * or list. Size cohorts weigh PERP EQUITY - what the wallet's perps account is
+ * worth (perpEquity), not its spot tokens or staked HYPE. PnL cohorts stay
+ * all-time PnL.
+ *
  * NETTING. A wallet on several of the chosen venues is ONE wallet: its PnL and
- * equity are summed across them and it lands in one cohort, and its positions
- * on each are added up per coin. Hyperliquid's own PnL and account value
- * already hold its xyz dex (trade.xyz), so with both chosen the trade.xyz
- * figures are not added again - its POSITIONS are (a separate margin book).
+ * perp equity are summed across them and it lands in one cohort, and its
+ * positions on each are added up per coin. Hyperliquid's own PnL and its perp
+ * equity already hold its xyz dex (trade.xyz), so with both chosen the
+ * trade.xyz figures are not added again - its POSITIONS are.
  *
  * SAMPLED TAIL. Where one read per small account is too expensive (Lighter's
  * ~100k accounts), wallets under TAIL_EQUITY are read on a fixed random sample
- * and each sampled one stands for 1 / rate wallets (`weight`). Wallet counts
- * stay exact - they come from the venue's own lists.
+ * and each sampled one stands for 1 / rate wallets (`weight`). A cohort's
+ * wallet count is then an estimate, never above the wallets it really has.
  */
 import type { Venue } from '../types.js';
 
@@ -66,7 +72,7 @@ export function pnlCohort(pnl: number): CohortId {
   return 'rekt';
 }
 
-/** Account equity -> cohort; null for an empty account (it holds nothing to weigh). */
+/** Perp equity -> cohort; null for an empty account (it holds nothing to weigh). */
 export function sizeCohort(equity: number): CohortId | null {
   if (!(equity > 0)) return null;
   if (equity >= 5_000_000) return 'apex';
@@ -220,6 +226,7 @@ export interface WalletVenue {
   pnl: number | null;
   /** PnL over each page range, when the venue's lists (or the index) have it. Never all-time under a range. */
   pnlRange?: Partial<Record<CohortRange, number | null>>;
+  /** Perp equity (perpEquity) as the last read found it; null until read. Size cohort membership. */
   equity: number | null;
   label: string | null;
   /** Open positions; null until they were read. */
@@ -232,6 +239,49 @@ export interface WalletVenue {
 
 /** A price for a venue's symbol right now. */
 export type MarkOf = (venue: Venue, symbol: string) => number | null;
+
+/** What a cohort read found for a wallet's margin on one venue (cohort_book). */
+export interface BookMargin {
+  /** The venue's perps account value at the read; on Hyperliquid and trade.xyz that dex's own margin book. */
+  equity: number | null;
+  /**
+   * Hyperliquid only: a unified or portfolio-margin account runs every perp dex
+   * on its spot stablecoins, so its perps are worth those (each dex's account
+   * value is only the margin in use there). Null for a standard account, or
+   * when the read did not look (cohortSource.hlCollateral).
+   */
+  collateral?: number | null;
+}
+
+/** The venue whose margin a Hyperliquid account shares: its xyz dex, and back. */
+export const MARGIN_SIBLING: Partial<Record<Venue, Venue>> = { hyperliquid: 'tradexyz', tradexyz: 'hyperliquid' };
+
+/**
+ * A wallet's PERP EQUITY on a venue - what the size cohorts weigh, as Hyperdash
+ * does (its "perp equity": verified 2026-10-03 against its wallet pages).
+ *
+ *   Hyperliquid  a unified / portfolio-margin account: its stablecoin collateral
+ *                (one pool for every dex); otherwise the main dex's account value
+ *                plus the xyz dex's (separate margin books). `sibling` = the xyz book.
+ *   trade.xyz    the shared collateral when the Hyperliquid book has it, else the
+ *                xyz dex's own account value. `sibling` = the Hyperliquid book.
+ *   SoDEX        the perps account's value (`av`; spot is a separate account).
+ *   Lighter      `total_asset_value` summed over sub-accounts (collateral + uPnL;
+ *                spot and pool shares are not in it).
+ *   Arcus        the account's `equity` (perps only).
+ *
+ * Null when no read has valued it.
+ */
+export function perpEquity(venue: Venue, own: BookMargin | undefined, sibling?: BookMargin): number | null {
+  if (venue !== 'hyperliquid' && venue !== 'tradexyz') return own?.equity ?? null;
+  const hl = venue === 'hyperliquid' ? own : sibling;
+  const xyz = venue === 'hyperliquid' ? sibling : own;
+  if (typeof hl?.collateral === 'number') return hl.collateral;
+  if (venue === 'tradexyz') return xyz?.equity ?? null;
+  const main = hl?.equity ?? null;
+  const dex = xyz?.equity ?? null;
+  return main === null && dex === null ? null : (main ?? 0) + (dex ?? 0);
+}
 
 export interface Holding {
   coin: string;
@@ -250,6 +300,7 @@ export interface NettedWallet {
   pnl: number | null;
   /** PnL per range over the venues; null for a range any of them does not know. */
   pnlRange: Partial<Record<CohortRange, number | null>>;
+  /** Perp equity over the venues (perpEquity). */
   equity: number | null;
   /** Its positions were read on at least one of the venues. */
   covered: boolean;
@@ -359,17 +410,22 @@ export function sampleRule(rate: number, address: string, equity: number | null)
   return sampleHash(address) < rate ? { counts: true, weight: 1 / rate } : { counts: false, weight: 1 };
 }
 
-/** The positions a wallet contributes under the sampling rule (null = not covered). */
+/**
+ * The positions a wallet contributes under the sampling rule (null = not
+ * covered). The stratum is the member's equity, as the indexer planned its
+ * reads by; the equity it carries is `perp` (perpEquity), the book's own by
+ * default.
+ */
 export function sampledVenue(
   rate: number, address: string,
   m: { pnl: number | null; equity: number | null; label: string | null; pnlRange?: Partial<Record<CohortRange, number | null>> } | undefined,
   book: { equity: number | null; positions: readonly Position[]; at: number } | undefined,
+  perp: number | null = book?.equity ?? null,
 ): WalletVenue {
-  const eq = m?.equity ?? book?.equity ?? null;
-  const rule = sampleRule(rate, address, eq);
+  const rule = sampleRule(rate, address, m?.equity ?? book?.equity ?? null);
   const read = book && rule.counts;
   return {
-    pnl: m?.pnl ?? null, pnlRange: m?.pnlRange, equity: eq, label: m?.label ?? null,
+    pnl: m?.pnl ?? null, pnlRange: m?.pnlRange, equity: perp, label: m?.label ?? null,
     positions: read ? book.positions : null, at: read ? book.at : 0, weight: rule.weight,
   };
 }
@@ -415,6 +471,9 @@ export function walletFigures(w: NettedWallet, f: CohortFilter): WalletFigures {
   return { long, short, upnl, holding };
 }
 
+/** The wallet holds a position the filter keeps: it is part of a cohort's view (counts, figures, lists). */
+export const holdsPosition = (w: NettedWallet, f: CohortFilter): boolean => w.covered && walletFigures(w, f).holding;
+
 // --- cohort figures ----------------------------------------------------------------------------
 
 export interface CohortMarket {
@@ -427,18 +486,29 @@ export interface CohortMarket {
   holders: number;
 }
 
+/** Every wallet holding a position the filter keeps, cohort or not (the market map, an asset page). */
+export interface CohortTotal {
+  /** Wallets holding a position the filter keeps (a sampled wallet for the ones it stands for). */
+  wallets: number;
+  long: number;
+  short: number;
+  upnl: number;
+  upnlProfit: number;
+  upnlLoss: number;
+  inProfit: number;
+  inLoss: number;
+  /** Every coin held, largest gross exposure first. */
+  markets: CohortMarket[];
+}
+
 export interface CohortStat {
   id: CohortId;
-  /** Wallets in the cohort (exact, from the venues' lists). */
-  wallets: number;
   /**
-   * Wallets whose positions are known: every wallet read above the sampled
-   * tail, plus the sampled tail wallets read, each counted for the ones it
-   * stands for - an estimate there, so capped at `wallets`.
+   * Wallets in the cohort holding a position the filter keeps - the cohort, as
+   * Hyperdash counts it. A sampled tail wallet counts for the ones it stands
+   * for: an estimate there, never above the wallets the cohort really has.
    */
-  covered: number;
-  /** Of those, wallets holding a position the filter keeps. */
-  holding: number;
+  wallets: number;
   long: number;
   short: number;
   upnl: number;
@@ -451,77 +521,105 @@ export interface CohortStat {
   markets: CohortMarket[];
 }
 
-const emptyStat = (id: CohortId): CohortStat => ({
-  id, wallets: 0, covered: 0, holding: 0, long: 0, short: 0, upnl: 0, upnlProfit: 0, upnlLoss: 0, inProfit: 0, inLoss: 0, markets: [],
+/** One group's running sums: `members` (every wallet in it, held or not) only caps the sampled estimate. */
+interface Acc {
+  t: Omit<CohortTotal, 'markets'>;
+  members: number;
+  markets: Map<string, CohortMarket>;
+}
+
+const emptyAcc = (): Acc => ({
+  t: { wallets: 0, long: 0, short: 0, upnl: 0, upnlProfit: 0, upnlLoss: 0, inProfit: 0, inLoss: 0 },
+  members: 0,
+  markets: new Map(),
 });
+
+/** A wallet that holds a position the filter keeps, into one group. */
+function addHeld(a: Acc, w: NettedWallet, f: CohortFilter): void {
+  // Counts by the wallet's weight, amounts by each holding's own (a sampled venue's).
+  const k = w.weight;
+  const s = a.t;
+  s.wallets += k;
+  let upnl = 0;
+  for (const h of w.holdings) {
+    if (!matchesFilter(h, f) || !h.notional) continue;
+    const n = h.notional * h.weight;
+    if (n > 0) s.long += n;
+    else s.short -= n;
+    upnl += h.upnl * h.weight;
+    const cur = a.markets.get(h.coin) ?? { coin: h.coin, sector: h.sector, long: 0, short: 0, upnl: 0, holders: 0 };
+    if (n > 0) cur.long += n;
+    else cur.short -= n;
+    cur.upnl += h.upnl * h.weight;
+    cur.holders += h.weight;
+    a.markets.set(h.coin, cur);
+  }
+  s.upnl += upnl;
+  if (upnl > 0) { s.inProfit += k; s.upnlProfit += upnl; }
+  else if (upnl < 0) { s.inLoss += k; s.upnlLoss += upnl; }
+}
+
+function totalOf(a: Acc): CohortTotal {
+  const s = { ...a.t, markets: [] as CohortMarket[] };
+  // A sampled stratum is an estimate: in a small cohort it can overshoot the
+  // wallets the cohort has. Never report more than that.
+  s.wallets = Math.min(a.members, Math.round(s.wallets));
+  s.inProfit = Math.min(s.wallets, Math.round(s.inProfit));
+  s.inLoss = Math.min(s.wallets - s.inProfit, Math.round(s.inLoss));
+  s.markets = [...a.markets.values()]
+    .map((x) => ({ ...x, holders: Math.round(x.holders) }))
+    .sort((a, b) => b.long + b.short - (a.long + a.short));
+  return s;
+}
 
 /**
  * Every cohort's figures, one wallet at a time - so a caller with a hundred
- * thousand wallets can pause between batches (the indexer does).
+ * thousand wallets can pause between batches (the indexer does). Only wallets
+ * holding a position the filter keeps add to any figure; `total()` sums every
+ * such wallet, in a cohort or not.
  */
 export class Aggregator {
-  private acc = new Map<CohortId, CohortStat>(COHORTS.map((c) => [c.id, emptyStat(c.id)]));
-  private markets = new Map<CohortId, Map<string, CohortMarket>>(COHORTS.map((c) => [c.id, new Map()]));
+  private acc = new Map<CohortId, Acc>(COHORTS.map((c) => [c.id, emptyAcc()]));
+  private all = emptyAcc();
 
   constructor(private readonly f: CohortFilter = {}) {}
 
   add(w: NettedWallet): void {
-    const f = this.f;
-    const ids = cohortsOf(w);
-    if (!ids.length) return;
-    const fig = w.covered ? walletFigures(w, f) : null;
-    for (const id of ids) {
-      const s = this.acc.get(id)!;
-      s.wallets++;
-      if (!fig) continue;
-      // Counts by the wallet's weight, amounts by each holding's own (a sampled venue's).
-      const k = w.weight;
-      s.covered += k;
-      if (!fig.holding) continue;
-      s.holding += k;
-      let upnl = 0;
-      const m = this.markets.get(id)!;
-      for (const h of w.holdings) {
-        if (!matchesFilter(h, f) || !h.notional) continue;
-        const n = h.notional * h.weight;
-        if (n > 0) s.long += n;
-        else s.short -= n;
-        upnl += h.upnl * h.weight;
-        const cur = m.get(h.coin) ?? { coin: h.coin, sector: h.sector, long: 0, short: 0, upnl: 0, holders: 0 };
-        if (n > 0) cur.long += n;
-        else cur.short -= n;
-        cur.upnl += h.upnl * h.weight;
-        cur.holders += h.weight;
-        m.set(h.coin, cur);
-      }
-      s.upnl += upnl;
-      if (upnl > 0) { s.inProfit += k; s.upnlProfit += upnl; }
-      else if (upnl < 0) { s.inLoss += k; s.upnlLoss += upnl; }
+    const held = holdsPosition(w, this.f);
+    this.all.members++;
+    if (held) addHeld(this.all, w, this.f);
+    for (const id of cohortsOf(w)) {
+      const a = this.acc.get(id)!;
+      a.members++;
+      if (held) addHeld(a, w, this.f);
     }
   }
 
   result(): CohortStat[] {
-    return COHORTS.map((c) => {
-      const s = { ...this.acc.get(c.id)! };
-      // A sampled stratum is an estimate: in a small cohort it can overshoot the
-      // exact wallet count. Never report more covered than there are wallets.
-      s.covered = Math.min(s.wallets, Math.round(s.covered));
-      s.holding = Math.min(s.covered, Math.round(s.holding));
-      s.inProfit = Math.min(s.holding, Math.round(s.inProfit));
-      s.inLoss = Math.min(s.holding - s.inProfit, Math.round(s.inLoss));
-      s.markets = [...this.markets.get(c.id)!.values()]
-        .map((x) => ({ ...x, holders: Math.round(x.holders) }))
-        .sort((a, b) => b.long + b.short - (a.long + a.short));
-      return s;
-    });
+    return COHORTS.map((c) => ({ id: c.id, ...totalOf(this.acc.get(c.id)!) }));
+  }
+
+  /** Every wallet holding a position the filter keeps, whatever its cohorts. */
+  total(): CohortTotal {
+    return totalOf(this.all);
   }
 }
 
 /** Every cohort's figures over a set of netted wallets, under a filter. */
 export function aggregate(wallets: Iterable<NettedWallet>, f: CohortFilter = {}): CohortStat[] {
+  return sumCohorts(wallets, f).cohorts;
+}
+
+export interface CohortSums {
+  cohorts: CohortStat[];
+  all: CohortTotal;
+}
+
+/** Every cohort's figures and the total over every wallet holding a position, under a filter. */
+export function sumCohorts(wallets: Iterable<NettedWallet>, f: CohortFilter = {}): CohortSums {
   const a = new Aggregator(f);
   for (const w of wallets) a.add(w);
-  return a.result();
+  return { cohorts: a.result(), all: a.total() };
 }
 
 /** Per-sector totals of a cohort's markets. */
@@ -546,6 +644,7 @@ export interface CohortWalletRow {
   address: string;
   label: string | null;
   venues: Venue[];
+  /** Perp equity (perpEquity): what the size cohort is based on. */
   equity: number | null;
   /** All-time PnL: what the PnL cohort (membership) is based on. */
   pnl: number | null;
@@ -653,26 +752,6 @@ export interface CohortWalletsResponse {
 
 // --- the market map and an asset / sector page ---------------------------------------------
 
-/**
- * Every wallet once: the size cohorts partition the wallets that hold equity,
- * so their markets summed are the whole population's.
- */
-export function everyWallet(stats: readonly CohortStat[]): CohortMarket[] {
-  const by = new Map<string, CohortMarket>();
-  for (const st of stats) {
-    if (COHORT_BY_ID[st.id].kind !== 'size') continue;
-    for (const m of st.markets) {
-      const cur = by.get(m.coin) ?? { coin: m.coin, sector: m.sector, long: 0, short: 0, upnl: 0, holders: 0 };
-      cur.long += m.long;
-      cur.short += m.short;
-      cur.upnl += m.upnl;
-      cur.holders += m.holders;
-      by.set(m.coin, cur);
-    }
-  }
-  return [...by.values()].sort((a, b) => b.long + b.short - (a.long + a.short));
-}
-
 export interface MapSector {
   sector: Sector;
   long: number;
@@ -690,11 +769,10 @@ export interface CohortMapResponse {
   coverage: Partial<Record<Venue, VenueCoverage>>;
 }
 
-/** One cohort on the page's asset or sector. */
+/** One cohort on the page's asset or sector (`wallets`: holding a position in it). */
 export interface FocusCohort {
   id: CohortId;
   wallets: number;
-  holding: number;
   long: number;
   short: number;
   upnl: number;
@@ -707,8 +785,8 @@ export interface CohortFocusResponse {
   filter: CohortFilter;
   at: number;
   range: CohortRange;
-  /** Every wallet together. */
-  total: { long: number; short: number; upnl: number; holding: number; inProfit: number; inLoss: number };
+  /** Every wallet holding a position in it, cohort or not. */
+  total: { long: number; short: number; upnl: number; wallets: number; inProfit: number; inLoss: number };
   cohorts: FocusCohort[];
   /** Each cohort's [t, long, short] over the range (hourly). */
   series: Partial<Record<CohortId, CohortPoint[]>>;

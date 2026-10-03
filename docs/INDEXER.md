@@ -104,7 +104,12 @@ current. Code: `apps/server/src/indexer/`.
 
 ## Cohorts
 
-- **Membership** stays all-time: PnL cohorts by all-time PnL, size cohorts by current equity.
+- **A cohort is its wallets holding an open position**, as Hyperdash counts it (2026-10-03): a wallet with none is in no count, figure, market list or wallet list. The market map and an asset page total every wallet holding a position, in a cohort or not.
+- **Membership** stays all-time for PnL cohorts. Size cohorts are by **perp equity** (`model.ts perpEquity`), not the whole account:
+  - Hyperliquid: the main dex's account value plus the xyz dex's; a unified or portfolio-margin account (its spot state lists collateral tokens) by its stablecoin collateral, which every dex shares. The spot state is read (weight 2) only when a read finds positions and the leaderboard's account value is well above the perps value (`needsSpot`); stored as `cohort_book.collateral` / `spot_at`.
+  - trade.xyz: its own margin book, or the shared collateral. Netted with Hyperliquid it is not added again.
+  - SoDEX: the perps account's `av`. Lighter: `total_asset_value` over sub-accounts. Arcus: the account's `equity`.
+  - A book whose read equity cannot carry what it holds now (0 after 30 min, above 60x after 6 h) is read again (`staleEquity`).
 - **The wallet table's PnL column** is for the page's range (`range=1d|7d|30d`), from the venues' window lists:
   - Hyperliquid: every member.
   - SoDEX and Lighter: only the listed and looked-up wallets.
@@ -113,7 +118,7 @@ current. Code: `apps/server/src/indexer/`.
 - **Sampled tail** (Lighter, rate 10%): stratified by current equity.
   - Wallets below $10K count only when they are in the fixed sample (`sampleHash < rate`); each stands for 10.
   - A tail wallet outside the sample contributes no positions, even if it was read while it was large.
-  - A cohort's `covered` is capped at its exact `wallets`.
+  - A cohort's `wallets` (a sampled wallet counting for ten) is capped at the wallets the cohort really has.
 - **Lighter books** follow the Lighter stream once the wallet's sub-account indices are known. A wallet's first read learns them.
 
 ## Loop health

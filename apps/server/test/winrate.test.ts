@@ -230,7 +230,7 @@ test('engine: a board row shows an exact win rate once the window is held, an es
 
 // --- cohorts: the sampled tail --------------------------------------------------------------------
 
-test('sampling: a tail wallet counts only in the sample; covered never exceeds wallets', () => {
+test('sampling: a tail wallet counts only in the sample; a cohort never counts more wallets than it has', () => {
   const rate = 0.1;
   // Find tail addresses in and out of the sample.
   const inS: string[] = [];
@@ -251,12 +251,11 @@ test('sampling: a tail wallet counts only in the sample; covered never exceeds w
   const mark = () => 100;
   const wallets = [inS[0]!, ...outS.slice(0, 29)].map((a) => netWallet(a, new Map([['lighter', sampledVenue(rate, a, { pnl: 2e6, equity: 500, label: null }, book) as WalletVenue]]), mark));
   const ep = aggregate(wallets).find((c) => c.id === 'extremely-profitable')!;
-  assert.equal(ep.wallets, 30);
-  assert.equal(ep.covered, 10, 'the one sampled wallet stands for ten; the other 29 do not count again');
-  assert.ok(ep.covered <= ep.wallets);
-  // A small cohort where the sample overshoots: capped.
+  assert.equal(ep.wallets, 10, 'the one sampled wallet stands for ten; the other 29 do not count again');
+  assert.equal(ep.long, 1_000, 'its position too');
+  // A small cohort where the sample overshoots: capped at the wallets it has.
   const tiny = aggregate([wallets[0]!]).find((c) => c.id === 'extremely-profitable')!;
-  assert.deepEqual([tiny.wallets, tiny.covered], [1, 1]);
+  assert.equal(tiny.wallets, 1);
 });
 
 // --- SoDEX analytics that cannot be used ------------------------------------------------------------

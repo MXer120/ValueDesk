@@ -14,8 +14,8 @@ import type { CohortBookRow, CohortMemberRow, NetRow } from './store.js';
 import { IndexStore, type BoardRow, type HistoryKind } from './store.js';
 import { BOARD_SIZE, MIN_TRADES, windowStart, type BoardFilter, type Side } from './windows.js';
 import {
-  Aggregator, COHORT_BY_ID, TAIL_EQUITY, cohortsOf, everyWallet, filterKey, longShare, scopeKey, scopeWalletSteps, walletRow,
-  type CohortStat,
+  Aggregator, MARGIN_SIBLING, cohortsOf, filterKey, holdsPosition, longShare, perpEquity, scopeKey, scopeWalletSteps, walletRow,
+  type CohortSums,
   type CohortFocusResponse, type CohortMapResponse, type MapSector,
   type CohortDetailResponse, type CohortFilter, type CohortId, type CohortPoint, type CohortRange, type CohortWalletRow,
   type CohortWalletsResponse, type CohortsResponse, type NettedWallet, type Sector, type VenueCoverage, type WalletSort, type WalletVenue,
@@ -322,8 +322,8 @@ interface CohortLoad {
   booksAt: number;
   /** Netted wallets per set of venues: built on first use, or ahead by a rebuild. */
   scopes: Map<string, NettedWallet[]>;
-  /** Every cohort's figures per set of venues and filter, likewise. */
-  stats: Map<string, CohortStat[]>;
+  /** Every cohort's figures (and every holding wallet's) per set of venues and filter, likewise. */
+  stats: Map<string, CohortSums>;
 }
 
 /** What a rebuild nets and sums ahead: the sets and filters asked for lately. */
@@ -388,7 +388,7 @@ function* netSteps(load: CohortLoad, venues: readonly Venue[]): Generator<void, 
 }
 
 /** Every cohort's figures for a set of venues under a filter (kept on the load). */
-function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): Generator<void, CohortStat[]> {
+function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): Generator<void, CohortSums> {
   const k = `${scopeKey(venues)}|${filterKey(f)}`;
   const hit = load.stats.get(k);
   if (hit) return hit;
@@ -399,7 +399,7 @@ function* sumSteps(load: CohortLoad, venues: readonly Venue[], f: CohortFilter):
     sum.add(w);
     if (++n % 5_000 === 0) yield;
   }
-  const stats = sum.result();
+  const stats: CohortSums = { cohorts: sum.result(), all: sum.total() };
   if (load.stats.size > 200) load.stats.clear();
   load.stats.set(k, stats);
   return stats;
@@ -410,11 +410,13 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
   const per = new Map<Venue, Map<string, WalletVenue>>();
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
   let booksAt = 0;
-  for (const venue of VENUES) {
-    const members = new Map<string, CohortMemberRow>();
-    yield* paged((after, limit) => s.cohortMembersPage(venue, after, limit).map((r): [string, CohortMemberRow] => [r.address, r]), members);
-    const books = new Map<string, CohortBookRow>();
-    yield* paged((after, limit) => s.cohortBooksPage(venue, after, limit), books);
+  // A venue's rows, kept until it is built; Hyperliquid and trade.xyz wait for
+  // each other (their perp equity reads both books: model.ts perpEquity).
+  const raw = new Map<Venue, { members: Map<string, CohortMemberRow>; books: Map<string, CohortBookRow> }>();
+  const build = function* (venue: Venue): Generator<void, void> {
+    const { members, books } = raw.get(venue)!;
+    const sib = MARGIN_SIBLING[venue];
+    const sibBooks = sib ? raw.get(sib)?.books : undefined;
     const m = new Map<string, WalletVenue>();
     let covered = 0;
     for (const address of new Set([...members.keys(), ...books.keys()])) {
@@ -423,7 +425,7 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
       const w = sampledVenue(TAIL_RATE[venue], address, mem && {
         pnl: mem.pnl, equity: mem.equity, label: mem.label,
         pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
-      }, b);
+      }, b, perpEquity(venue, b, sibBooks?.get(address)));
       // Covered = wallets whose positions count (a read tail wallet outside the sample does not).
       if (w.positions) { covered++; booksAt = Math.max(booksAt, b!.at); }
       m.set(address, w);
@@ -432,6 +434,21 @@ function* loadSteps(s: IndexStore, now: number, ahead: ReadonlyArray<{ venues: r
     per.set(venue, m);
     coverage[venue] = { members: m.size, covered };
     yield;
+  };
+  for (const venue of VENUES) {
+    const members = new Map<string, CohortMemberRow>();
+    yield* paged((after, limit) => s.cohortMembersPage(venue, after, limit).map((r): [string, CohortMemberRow] => [r.address, r]), members);
+    const books = new Map<string, CohortBookRow>();
+    yield* paged((after, limit) => s.cohortBooksPage(venue, after, limit), books);
+    raw.set(venue, { members, books });
+    const sib = MARGIN_SIBLING[venue];
+    if (sib && !raw.has(sib)) continue;
+    yield* build(venue);
+    if (sib) {
+      yield* build(sib);
+      raw.delete(sib);
+    }
+    raw.delete(venue);
   }
   const load: CohortLoad = { at: now, per, marks: s.cohortMarks(), coverage, booksAt, scopes: new Map(), stats: new Map() };
   for (const a of ahead) {
@@ -538,7 +555,7 @@ function walletsOf(load: CohortLoad, venues: readonly Venue[]): NettedWallet[] {
  * per load, shared by every request (and done ahead by the rebuild for what was
  * asked lately; a set or filter asked for the first time is summed here).
  */
-function statsOf(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): CohortStat[] {
+function statsOf(load: CohortLoad, venues: readonly Venue[], f: CohortFilter): CohortSums {
   note(venues, f);
   return runNow(sumSteps(load, venues, f));
 }
@@ -608,26 +625,18 @@ export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsR
   const s = reader();
   if (!s) return null;
   const load = loadCohorts(s);
-  const wallets = walletsOf(load, venues);
-  const stats = statsOf(load, venues, f);
+  const stats = statsOf(load, venues, f).cohorts;
   const series = history(s, scopeKey(venues), Date.now() - RANGE_MS['7d'], f);
   // The asset picker: every coin held in this scope, unfiltered.
-  const all = f.coin || f.sector ? statsOf(load, venues, {}) : stats;
-  const coins = new Map<string, { coin: string; sector: Sector; gross: number }>();
-  for (const st of all) {
-    if (COHORT_BY_ID[st.id].kind !== 'size') continue; // each wallet is in one size cohort: no double count
-    for (const m of st.markets) {
-      const cur = coins.get(m.coin) ?? { coin: m.coin, sector: m.sector, gross: 0 };
-      cur.gross += m.long + m.short;
-      coins.set(m.coin, cur);
-    }
-  }
+  const coins = statsOf(load, venues, {}).all.markets
+    .map((m) => ({ coin: m.coin, sector: m.sector, gross: m.long + m.short }))
+    .sort((a, b) => b.gross - a.gross);
   return {
     venues: [...venues],
     filter: f,
     at: load.booksAt,
     coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
-    coins: [...coins.values()].sort((a, b) => b.gross - a.gross),
+    coins,
     cohorts: stats.map(({ markets: _m, ...rest }) => ({
       ...rest,
       spark: thin((series.get(rest.id) ?? []).flatMap((p) => {
@@ -642,7 +651,7 @@ export function cohortDetail(venues: readonly Venue[], cohort: CohortId, range: 
   const s = reader();
   if (!s) return null;
   const load = loadCohorts(s);
-  const stat = statsOf(load, venues, f).find((x) => x.id === cohort)!;
+  const stat = statsOf(load, venues, f).cohorts.find((x) => x.id === cohort)!;
   const series = history(s, scopeKey(venues), Date.now() - RANGE_MS[range], f, cohort).get(cohort) ?? [];
   return {
     venues: [...venues], filter: f, at: load.booksAt, range, cohort: stat,
@@ -692,8 +701,8 @@ export function cohortMap(venues: readonly Venue[], cohort: CohortId | null): Co
   const s = reader();
   if (!s) return null;
   const load = loadCohorts(s);
-  const stats = statsOf(load, venues, {});
-  const markets = cohort ? stats.find((x) => x.id === cohort)!.markets : everyWallet(stats);
+  const sums = statsOf(load, venues, {});
+  const markets = cohort ? sums.cohorts.find((x) => x.id === cohort)!.markets : sums.all.markets;
   const by = new Map<Sector, MapSector>();
   for (const m of markets) {
     if (!(m.long + m.short > 0)) continue;
@@ -718,18 +727,8 @@ export function cohortFocus(venues: readonly Venue[], f: CohortFilter, range: Co
   const s = reader();
   if (!s) return null;
   const load = loadCohorts(s);
-  const wallets = walletsOf(load, venues);
-  const stats = statsOf(load, venues, f);
-  const total = { long: 0, short: 0, upnl: 0, holding: 0, inProfit: 0, inLoss: 0 };
-  for (const st of stats) {
-    if (COHORT_BY_ID[st.id].kind !== 'size') continue;
-    total.long += st.long;
-    total.short += st.short;
-    total.upnl += st.upnl;
-    total.holding += st.holding;
-    total.inProfit += st.inProfit;
-    total.inLoss += st.inLoss;
-  }
+  const { cohorts: stats, all } = statsOf(load, venues, f);
+  const total = { long: all.long, short: all.short, upnl: all.upnl, wallets: all.wallets, inProfit: all.inProfit, inLoss: all.inLoss };
   const hist = history(s, scopeKey(venues), Date.now() - RANGE_MS[range], f);
   return {
     venues: [...venues],
@@ -738,15 +737,15 @@ export function cohortFocus(venues: readonly Venue[], f: CohortFilter, range: Co
     range,
     total,
     cohorts: stats.map((st) => ({
-      id: st.id, wallets: st.wallets, holding: st.holding, long: st.long, short: st.short, upnl: st.upnl, inProfit: st.inProfit, inLoss: st.inLoss,
+      id: st.id, wallets: st.wallets, long: st.long, short: st.short, upnl: st.upnl, inProfit: st.inProfit, inLoss: st.inLoss,
     })),
     series: Object.fromEntries([...hist].map(([c, pts]) => [c, thin(pts, 400)])),
-    assets: f.sector && !f.coin ? everyWallet(stats) : [],
+    assets: f.sector && !f.coin ? all.markets : [],
     coverage: Object.fromEntries(venues.map((v) => [v, load.coverage[v]])),
   };
 }
 
-/** A cohort's wallets, sorted and paged; under a filter, only wallets holding what it keeps. */
+/** A cohort's wallets holding a position (under a filter, one it keeps), sorted and paged. */
 export function cohortWallets(
   venues: readonly Venue[], cohort: CohortId, f: CohortFilter,
   o: { sort: WalletSort; dir: 'asc' | 'desc'; offset: number; limit: number; range?: CohortRange },
@@ -755,12 +754,10 @@ export function cohortWallets(
   if (!s) return null;
   const load = loadCohorts(s);
   const range: CohortRange = o.range && COHORT_RANGES.includes(o.range) ? o.range : '30d';
-  const filtered = !!(f.coin || f.sector);
   const rows: CohortWalletRow[] = [];
   for (const w of walletsOf(load, venues)) {
-    if (!cohortsOf(w).includes(cohort)) continue;
+    if (!cohortsOf(w).includes(cohort) || !holdsPosition(w, f)) continue;
     const r = walletRow(w, f, range);
-    if (filtered && !(r.value && r.value > 0)) continue;
     r.label = shownLabel(r.address, r.label);
     rows.push(r);
   }

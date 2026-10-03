@@ -16,7 +16,7 @@ import { IndexStore } from '../src/indexer/store.js';
 import { TAIL_RATE } from '../src/indexer/cohortTracker.js';
 import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead } from '../src/indexer/read.js';
 import {
-  aggregate, cohortsOf, everyWallet, sampledVenue, scopeKey, scopeWallets, walletRow,
+  MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
 } from '../src/valuescan/cohorts/model.js';
 import { VENUES, type Venue } from '../src/valuescan/types.js';
@@ -58,10 +58,22 @@ function seed(w: IndexStore, venue: Venue, n: number, seedNo: number, at: number
         const symbol = COINS[Math.floor(r() * COINS.length)]!;
         return { symbol, szi: Math.round((r() - 0.4) * 1000) / 10, entry: r() < 0.9 ? MARK[symbol]! * (0.8 + r() * 0.4) : null };
       });
-      books.push({ venue, address, equity, positions, at: at - Math.floor(r() * 100_000) });
+      // Every seventh Hyperliquid book a unified account: its perp equity is its collateral.
+      const unified = venue === 'hyperliquid' && i % 7 === 0;
+      books.push({ venue, address, equity, positions, at: at - Math.floor(r() * 100_000), collateral: unified ? (equity ?? 0) * 3 + 50_000 : null, spotAt: unified ? at : null });
     }
   }
   w.putCohortMembers(venue, members, at);
+  w.putCohortBooks(books);
+}
+
+/** trade.xyz books on Hyperliquid's addresses (the same accounts' xyz dex). */
+function seedXyz(w: IndexStore, n: number, at: number): void {
+  const r = rng(11);
+  const books = [];
+  for (let i = 1; i < n; i += 2) {
+    books.push({ venue: 'tradexyz' as Venue, address: addr('hyperliquid', i), equity: Math.round(r() * 3_000_000), positions: [{ symbol: 'xyz:TSLA', szi: Math.round(r() * 1000), entry: 240 }], at: at - 5 });
+  }
   w.putCohortBooks(books);
 }
 
@@ -73,6 +85,8 @@ function oracle(s: IndexStore) {
   for (const venue of VENUES) {
     const members = s.cohortMembers(venue);
     const books = s.cohortBooks(venue);
+    const sib = MARGIN_SIBLING[venue];
+    const sibBooks = sib ? s.cohortBooks(sib) : undefined;
     const m = new Map<string, WalletVenue>();
     let covered = 0;
     for (const address of new Set([...members.keys(), ...books.keys()])) {
@@ -81,7 +95,7 @@ function oracle(s: IndexStore) {
       const w = sampledVenue(TAIL_RATE[venue], address, mem && {
         pnl: mem.pnl, equity: mem.equity, label: mem.label,
         pnlRange: { '1d': mem.pnl1d ?? null, '7d': mem.pnl7d ?? null, '30d': mem.pnl30d ?? null },
-      }, b);
+      }, b, perpEquity(venue, b, sibBooks?.get(address)));
       if (w.positions) { covered++; booksAt = Math.max(booksAt, b!.at); }
       m.set(address, w);
     }
@@ -101,10 +115,12 @@ const writer = new IndexStore(DB);
 seed(writer, 'sodex', 900, 1, T0);
 seed(writer, 'hyperliquid', 5_300, 2, T0);
 seed(writer, 'lighter', 4_100, 3, T0);
+seedXyz(writer, 1_200, T0);
 writer.putCohortMarks(VENUES.flatMap((v) => COINS.map((c): [string, number] => [`${v}|${c}`, MARK[c]!])), T0);
 
 const ALL: Venue[] = [...VENUES];
 const TWO: Venue[] = ['sodex', 'hyperliquid'];
+const HL_XYZ: Venue[] = ['hyperliquid', 'tradexyz'];
 const NONE: CohortFilter = {};
 const ETH: CohortFilter = { coin: 'ETH' };
 
@@ -135,10 +151,11 @@ test('the paged readers give the same rows, in the same order, as the whole-tabl
 test('every cohort answer equals netting and summing the tables in one go', () => {
   _cohortLoad.reset();
   const want = oracle(writer);
-  for (const venues of [ALL, TWO, ['lighter'] as Venue[]]) {
+  for (const venues of [ALL, TWO, HL_XYZ, ['tradexyz'] as Venue[], ['lighter'] as Venue[]]) {
     const wallets = want.wallets(venues);
     for (const f of [NONE, ETH, { sector: 'majors' } as CohortFilter]) {
-      const stats = aggregate(wallets, f);
+      const sums = sumCohorts(wallets, f);
+      const stats = sums.cohorts;
       const list = cohortsRead(venues, f)!;
       assert.deepEqual(list.cohorts.map(({ spark: _spark, ...c }) => c), stats.map(({ markets: _markets, ...c }) => c), `${scopeKey(venues)} cohorts`);
       assert.equal(list.at, want.booksAt);
@@ -147,19 +164,35 @@ test('every cohort answer equals netting and summing the tables in one go', () =
       assert.deepEqual(detail.cohort, stats.find((x) => x.id === 'apex'));
       const focus = cohortFocus(venues, f, '7d')!;
       assert.deepEqual(focus.cohorts.map((c) => [c.id, c.wallets, c.long, c.short, c.upnl]), stats.map((c) => [c.id, c.wallets, c.long, c.short, c.upnl]));
+      assert.deepEqual(focus.total, { long: sums.all.long, short: sums.all.short, upnl: sums.all.upnl, wallets: sums.all.wallets, inProfit: sums.all.inProfit, inLoss: sums.all.inLoss });
+      // Every count is of wallets holding a position the filter keeps.
+      for (const c of stats) {
+        const holders = wallets.filter((w) => cohortsOf(w).includes(c.id) && holdsPosition(w, f) && w.weight === 1).length;
+        assert.ok(c.wallets >= holders, `${c.id}: ${c.wallets} >= ${holders}`);
+      }
     }
-    const all = aggregate(wallets, NONE);
+    const all = sumCohorts(wallets, NONE).all;
     const bySector = new Map<string, unknown[]>();
-    for (const m of everyWallet(all)) {
+    for (const m of all.markets) {
       if (m.long + m.short > 0) bySector.set(m.sector, [...(bySector.get(m.sector) ?? []), m]);
     }
     assert.deepEqual(Object.fromEntries(cohortMap(venues, null)!.sectors.map((x) => [x.sector, x.assets])), Object.fromEntries(bySector), `${scopeKey(venues)} map`);
-    const rows = cohortWallets(venues, 'whale', NONE, { sort: 'equity', dir: 'desc', offset: 0, limit: 25 })!;
-    const expect = wallets.filter((w) => cohortsOf(w).includes('whale')).map((w) => ({ ...walletRow(w, NONE, '30d'), label: null }))
-      .sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0));
-    assert.equal(rows.total, expect.length);
-    assert.deepEqual(rows.rows.map((r) => [r.address, r.equity, r.value, r.pnlRange]), expect.slice(0, 25).map((r) => [r.address, r.equity, r.value, r.pnlRange]));
+    assert.deepEqual(cohortsRead(venues, ETH)!.coins.map((c) => c.coin), all.markets.map((m) => m.coin), 'the asset picker: every coin, unfiltered');
+    for (const id of ['whale', 'small', 'rekt'] as const) {
+      const rows = cohortWallets(venues, id, NONE, { sort: 'equity', dir: 'desc', offset: 0, limit: 25 })!;
+      const expect = wallets.filter((w) => cohortsOf(w).includes(id) && holdsPosition(w, NONE)).map((w) => ({ ...walletRow(w, NONE, '30d'), label: null }))
+        .sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0));
+      assert.equal(rows.total, expect.length, `${scopeKey(venues)} ${id}: only wallets holding a position`);
+      assert.ok(rows.rows.every((r) => r.value !== null && r.lean !== null));
+      assert.deepEqual(rows.rows.map((r) => [r.address, r.equity, r.value, r.pnlRange]), expect.slice(0, 25).map((r) => [r.address, r.equity, r.value, r.pnlRange]));
+    }
   }
+  // A unified Hyperliquid account is sized by its collateral; a standard one by its dexes summed.
+  const hl = want.wallets(HL_XYZ);
+  const u = hl.find((w) => w.address === addr('hyperliquid', 7))!;
+  assert.equal(u.equity, (writer.cohortBook('hyperliquid', u.address)!.equity ?? 0) * 3 + 50_000);
+  const std = hl.find((w) => w.address === addr('hyperliquid', 1))!;
+  assert.equal(std.equity, (writer.cohortBook('hyperliquid', std.address)!.equity ?? 0) + writer.cohortBook('tradexyz', std.address)!.equity!);
   assert.equal(_cohortLoad.built.inPlace, 1, 'one load served all of it');
 });
 

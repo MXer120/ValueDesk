@@ -21,6 +21,15 @@
  * sample of its ~100k accounts is read at all (each standing for ten; see
  * model.ts sampleRule).
  *
+ * PERP EQUITY (model.ts perpEquity) sizes the cohorts, so two more reads:
+ *   - a book whose read equity cannot carry what it now holds (read while the
+ *     wallet was empty or small, funded and opened since) is read again:
+ *     after 30 min at an equity of 0, after 6 h above 60x leverage;
+ *   - a Hyperliquid read that finds positions while the leaderboard puts the
+ *     account well above its perps value also reads the spot state (weight
+ *     2): a unified account keeps its perps collateral there. Books read
+ *     before this existed are read again once, largest first (needsSpot).
+ *
  * MEMBERS. Every wallet the index can value: Hyperliquid's leaderboard file
  * (equity + all-time PnL), SoDEX's and Lighter's lists, Arcus portfolios,
  * trade.xyz traders the stream saw, and any wallet a read has valued.
@@ -32,7 +41,7 @@ import { VENUES, type Venue } from '../valuescan/types.js';
 import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
 import type { Pacer } from '../valuescan/extra/http.js';
 import {
-  Aggregator, TAIL_EQUITY, netWallet, sampleRule, sampledVenue, scopeKey, sectorTotals,
+  Aggregator, MARGIN_SIBLING, TAIL_EQUITY, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
   type CohortRange, type Position, type WalletVenue,
 } from '../valuescan/cohorts/model.js';
 import { Lane } from './lanes.js';
@@ -85,6 +94,36 @@ export function reconcileTtl(equity: number): number {
   return 7 * DAY_MS;
 }
 
+/** No venue here lends more than 50x: a book above this against its read equity was read before it was funded. */
+export const MAX_LEVERAGE = 60;
+const STALE_EMPTY_MS = 30 * 60_000;
+const STALE_LEVERAGE_MS = 6 * 60 * 60_000;
+
+/**
+ * A book whose read equity cannot carry the positions it holds now: the read
+ * found the wallet empty or small, and prints opened positions since (a
+ * deposit moves no print). Waits a while after a read, so a book that really
+ * is that thin is not read in a loop.
+ */
+export function staleEquity(book: Pick<Book, 'equity' | 'collateral' | 'at'>, notional: number, now: number): boolean {
+  if (!(notional > 0)) return false;
+  const eq = book.collateral ?? book.equity ?? 0;
+  const age = now - book.at;
+  if (!(eq > 0)) return age >= (book.collateral == null ? STALE_EMPTY_MS : STALE_LEVERAGE_MS);
+  return notional > MAX_LEVERAGE * eq && age >= STALE_LEVERAGE_MS;
+}
+
+/**
+ * A Hyperliquid read with positions also reads the spot state when the
+ * leaderboard's account value (perps + spot + staked) is well above the perps
+ * account value: the gap may be a unified account's collateral. Off the
+ * leaderboard the two are the same figure, and nothing is read.
+ */
+export function needsSpot(total: number | null | undefined, perpsValue: number | null, positions: number): boolean {
+  if (!positions || total == null || !(total > 0)) return false;
+  return total - Math.max(0, perpsValue ?? 0) > Math.max(1_000, 0.1 * total);
+}
+
 /** A book no stream moves: re-read after this long. */
 export function pollTtl(equity: number): number {
   if (equity >= 5_000_000) return 30 * 60_000;
@@ -102,10 +141,15 @@ export function allScopes(venues: readonly Venue[] = VENUES): Venue[][] {
 }
 
 export interface Book {
+  /** The read's perps account value (that dex's own on Hyperliquid / trade.xyz). */
   equity: number | null;
   pos: Map<string, { szi: number; entry: number | null }>;
   /** When the snapshot was read. */
   at: number;
+  /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
+  collateral?: number | null;
+  /** Hyperliquid: when the read looked at the spot state. */
+  spotAt?: number | null;
 }
 
 /**
@@ -195,7 +239,10 @@ export class CohortTracker {
     for (const v of VENUES) {
       const m = new Map<string, Book>();
       for (const [a, b] of s.cohortBooks(v)) {
-        m.set(a, { equity: b.equity, at: b.at, pos: new Map(b.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])) });
+        m.set(a, {
+          equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt,
+          pos: new Map(b.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
+        });
       }
       this.books.set(v, m);
       // Whatever traded while the indexer was down is unknown: large books are re-read.
@@ -356,9 +403,10 @@ export class CohortTracker {
     return this.hlc;
   }
 
-  private readOne(venue: Venue, address: string): Promise<PositionRead> {
+  /** `total`: the member's account value (Hyperliquid: the leaderboard's), for needsSpot. */
+  private readOne(venue: Venue, address: string, total: number | null): Promise<PositionRead> {
     switch (venue) {
-      case 'hyperliquid': return hlPositions(address);
+      case 'hyperliquid': return hlPositions(address, undefined, (r) => needsSpot(total, r.equity, r.positions.length));
       case 'tradexyz': return hlPositions(address, 'xyz');
       case 'sodex': return sodexPositions(address);
       case 'lighter': return lighterPositions(address, this.d.lighter.pacer);
@@ -405,6 +453,12 @@ export class CohortTracker {
       const gap = this.gapAt.get(venue) ?? 0;
       const floor = this.gapFloor.get(venue) ?? 100_000;
       const due: Array<[string, number]> = [];
+      const totals = new Map<string, number | null>();
+      const notional = (book: Book): number => {
+        let v = 0;
+        for (const [symbol, p] of book.pos) v += Math.abs(p.szi) * (this.marks.get(`${venue}|${symbol}`) ?? p.entry ?? 0);
+        return v;
+      };
       const consider = (address: string, m: Member | undefined) => {
         const eq = m?.equity ?? (venue === 'tradexyz' ? hlMembers.get(address)?.equity ?? 0 : 0);
         const book = books.get(address);
@@ -412,15 +466,22 @@ export class CohortTracker {
         const size = Math.round(Math.log10(Math.max(1, eq)) * 100);
         // A tail wallet outside the sample is never read, traded or not (it would count twice).
         if (!sampleRule(TAIL_RATE[venue], address, eq).counts) return;
+        const push = (prio: number) => {
+          due.push([address, prio]);
+          if (venue === 'hyperliquid') totals.set(address, m?.equity ?? null);
+        };
         if (!book) {
-          due.push([address, 1_000 + size + (traded ? 300 : 0)]);
+          push(1_000 + size + (traded ? 300 : 0));
           return;
         }
         const age = now - book.at;
         // Lighter prints name sub-accounts: a book follows them only once its indices are known.
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
-        if (follows && eq >= floor && book.at < gap) due.push([address, 900 + size]);
-        else if (age >= (follows ? reconcileTtl(eq) : pollTtl(eq))) due.push([address, 400 + size]);
+        if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
+        else if (follows && eq >= floor && book.at < gap) push(900 + size);
+        // Read before the spot state was looked at, and the leaderboard says it may matter.
+        else if (venue === 'hyperliquid' && book.spotAt == null && needsSpot(m?.equity, book.equity, book.pos.size)) push(900 + size);
+        else if (age >= (follows ? reconcileTtl(eq) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
       for (const [address, m] of members) {
@@ -442,17 +503,20 @@ export class CohortTracker {
           key: `coh:${venue}:${address}`,
           prio,
           run: async () => {
-            const r = await this.readOne(venue, address);
+            const r = await this.readOne(venue, address, totals.get(address) ?? null);
             if (venue === 'lighter' && r.indices?.length) this.d.lighter.learn?.(address, r.indices);
             const at = this.d.now();
-            books.set(address, { equity: r.equity, at, pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])) });
+            books.set(address, {
+              equity: r.equity, at, collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
+              pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
+            });
             this.dirtyBooks.add(`${venue}|${address}`);
             this.wanted.delete(`${venue}|${address}`);
             for (const [sym, px] of r.marks) {
               const mk = `${venue}|${sym}`;
               if (!this.marks.has(mk)) { this.marks.set(mk, px); this.dirtyMarks.add(mk); }
             }
-            return READ_COST[venue];
+            return READ_COST[venue] + (r.extraCost ?? 0);
           },
         });
       }
@@ -463,14 +527,17 @@ export class CohortTracker {
     const s = this.d.store;
     try {
       if (this.dirtyBooks.size) {
-        const rows: Array<{ venue: Venue; address: string; equity: number | null; positions: Position[]; at: number }> = [];
+        const rows: Array<{ venue: Venue; address: string; equity: number | null; positions: Position[]; at: number; collateral: number | null; spotAt: number | null }> = [];
         for (const k of this.dirtyBooks) {
           const i = k.indexOf('|');
           const venue = k.slice(0, i) as Venue;
           const address = k.slice(i + 1);
           const b = this.books.get(venue)?.get(address);
           if (!b) continue;
-          rows.push({ venue, address, equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) });
+          rows.push({
+            venue, address, equity: b.equity, at: b.at, collateral: b.collateral ?? null, spotAt: b.spotAt ?? null,
+            positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })),
+          });
         }
         this.dirtyBooks.clear();
         s.putCohortBooks(rows);
@@ -495,12 +562,15 @@ export class CohortTracker {
     for (const venue of VENUES) {
       const m = new Map<string, WalletVenue>();
       const books = this.books.get(venue)!;
+      const sib = MARGIN_SIBLING[venue];
+      const sibBooks = sib ? this.books.get(sib) : undefined;
       const members = this.members.get(venue) ?? new Map<string, Member>();
       const addresses = new Set([...members.keys(), ...books.keys()]);
       for (const address of addresses) {
         const b = books.get(address);
         m.set(address, sampledVenue(TAIL_RATE[venue], address, members.get(address),
-          b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined));
+          b ? { equity: b.equity, at: b.at, positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })) } : undefined,
+          perpEquity(venue, b, sibBooks?.get(address))));
         if (Date.now() - t0 > SLICE_MS) {
           await new Promise<void>((r) => setImmediate(r));
           mark('coh:record');

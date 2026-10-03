@@ -344,6 +344,10 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   ['cohort_member', 'pnl_1d', 'REAL'],
   ['cohort_member', 'pnl_7d', 'REAL'],
   ['cohort_member', 'pnl_30d', 'REAL'],
+  // Hyperliquid perp equity of a unified / portfolio-margin account (its spot
+  // stablecoins), and when a read last looked at the spot state (cohortSource.ts).
+  ['cohort_book', 'collateral', 'REAL'],
+  ['cohort_book', 'spot_at', 'INTEGER'],
   // What a day row must carry once its raw rows are gone (retention): how many
   // fills it had, their realised PnL net of fees, the first one's time, the
   // newest position-open among its SoDEX closes - and whether it is final.
@@ -387,9 +391,14 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 
 /** A wallet's book as the cohort tables hold it. */
 export interface CohortBookRow {
+  /** The read's perps account value (on Hyperliquid / trade.xyz: that dex's own margin book). */
   equity: number | null;
   positions: Array<{ symbol: string; szi: number; entry: number | null }>;
   at: number;
+  /** Hyperliquid: a unified / portfolio-margin account's stablecoin collateral (model.ts perpEquity); null = standard, or not looked at. */
+  collateral: number | null;
+  /** Hyperliquid: when the read looked at the spot state (null = it did not). */
+  spotAt: number | null;
 }
 
 const memberRow = (r: Record<string, unknown>): CohortMemberRow => ({
@@ -407,7 +416,7 @@ function bookRow(r: Record<string, unknown>): CohortBookRow {
         ? [{ symbol: e[0], szi: e[1], entry: typeof e[2] === 'number' ? e[2] : null }] : []));
     }
   } catch { /* none */ }
-  return { equity: num(r.equity), positions, at: Number(r.at) || 0 };
+  return { equity: num(r.equity), positions, at: Number(r.at) || 0, collateral: num(r.collateral), spotAt: num(r.spot_at) };
 }
 
 /**
@@ -2499,17 +2508,22 @@ export class IndexStore {
     return num(r?.equity);
   }
 
-  putCohortBooks(rows: ReadonlyArray<{ venue: Venue; address: string; equity: number | null; positions: ReadonlyArray<{ symbol: string; szi: number; entry: number | null }>; at: number }>): void {
+  putCohortBooks(rows: ReadonlyArray<{
+    venue: Venue; address: string; equity: number | null; positions: ReadonlyArray<{ symbol: string; szi: number; entry: number | null }>; at: number;
+    collateral?: number | null; spotAt?: number | null;
+  }>): void {
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at) VALUES (?, ?, ?, ?, ?)');
-      for (const r of rows) ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map((p) => [p.symbol, p.szi, p.entry])), r.at);
+      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const r of rows) {
+        ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map((p) => [p.symbol, p.szi, p.entry])), r.at, r.collateral ?? null, r.spotAt ?? null);
+      }
     });
   }
 
   /** Every wallet's book on a venue: positions as the stream keeps them. */
   cohortBooks(venue: Venue): Map<string, CohortBookRow> {
     const out = new Map<string, CohortBookRow>();
-    for (const r of this.q('SELECT address, equity, positions, at FROM cohort_book WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
+    for (const r of this.q('SELECT address, equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
       out.set(r.address as string, bookRow(r));
     }
     return out;
@@ -2517,13 +2531,13 @@ export class IndexStore {
 
   /** One wallet's book on a venue (null if it was never read). */
   cohortBook(venue: Venue, address: string): CohortBookRow | null {
-    const r = this.q('SELECT equity, positions, at FROM cohort_book WHERE venue = ? AND address = ?').get(venue, address) as Record<string, unknown> | undefined;
+    const r = this.q('SELECT equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ? AND address = ?').get(venue, address) as Record<string, unknown> | undefined;
     return r ? bookRow(r) : null;
   }
 
   /** cohortBooks a page at a time, in the same (address) order (see cohortMembersPage). */
   cohortBooksPage(venue: Venue, after: string, limit: number): Array<[string, CohortBookRow]> {
-    return (this.q('SELECT address, equity, positions, at FROM cohort_book WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
+    return (this.q('SELECT address, equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
       .all(venue, after, limit) as Array<Record<string, unknown>>).map((r) => [r.address as string, bookRow(r)]);
   }
 

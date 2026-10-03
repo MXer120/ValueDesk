@@ -6,6 +6,7 @@
  * public answer for "what does this wallet hold right now":
  *
  *   hyperliquid  POST /info clearinghouseState            weight 2
+ *                (+ spotClearinghouseState, weight 2, when asked: hlCollateral)
  *   tradexyz     POST /info clearinghouseState dex "xyz"  weight 2 (its own margin book)
  *   sodex        GET perps /accounts/{address}/state      weight 5 (one request)
  *   lighter      GET /api/v1/account?by=l1_address        1 request, every sub-account with positions
@@ -27,18 +28,53 @@ import { num, type Pacer } from '../valuescan/extra/http.js';
 import type { Position } from '../valuescan/cohorts/model.js';
 
 export interface PositionRead {
+  /** The perps account value (model.ts perpEquity says per venue what it is). */
   equity: number | null;
   positions: Position[];
   /** Prices seen in the read (symbol -> mark), to value positions before the stream prints them. */
   marks: Array<[string, number]>;
   /** Lighter: every sub-account index of the wallet (the stream names parties by index). */
   indices?: number[];
+  /** Hyperliquid, when the spot state was read: a unified / portfolio-margin account's collateral, null for a standard one. */
+  collateral?: number | null;
+  /** Hyperliquid: when the spot state was read (absent = it was not). */
+  spotAt?: number;
+  /** What the read spent beyond READ_COST (the spot state). */
+  extraCost?: number;
 }
 
 const EMPTY: PositionRead = { equity: null, positions: [], marks: [] };
 
-/** Hyperliquid's default dex, or a HIP-3 dex (`xyz` = trade.xyz). */
-export async function hlPositions(address: string, dex?: string): Promise<PositionRead> {
+interface HlSpotState {
+  balances?: Array<{ coin?: string; token?: number; total?: string }>;
+  /** Present only on a unified or portfolio-margin account: the tokens its perps run on. */
+  tokenToAvailableAfterMaintenance?: Array<[number, string]>;
+}
+
+/** Stablecoins counted at $1 as perps collateral. */
+const STABLE_COLLATERAL = /^(USDC|USDT0?|USDE|USDH|USDG)$/i;
+
+/**
+ * A unified / portfolio-margin account's perp equity from its spot state: the
+ * stablecoins it lists as collateral (verified 2026-10-03: Hyperdash's "perps"
+ * for 0x7737...bf66 is its $20.1M USDC while each dex's account value only
+ * holds the margin in use there; for a standard account Hyperdash's figure is
+ * the dexes' account values summed). Null for a standard account - its spot
+ * is spot, not perps. Collateral that is not a stablecoin is not counted.
+ */
+export function spotCollateral(st: HlSpotState | null | undefined): number | null {
+  const pool = st?.tokenToAvailableAfterMaintenance;
+  if (!Array.isArray(pool)) return null;
+  const tokens = new Set(pool.map((e) => Number(e?.[0])));
+  let sum = 0;
+  for (const b of st?.balances ?? []) {
+    if (tokens.has(Number(b.token)) && STABLE_COLLATERAL.test(String(b.coin ?? ''))) sum += num(b.total) ?? 0;
+  }
+  return sum;
+}
+
+/** Hyperliquid's default dex, or a HIP-3 dex (`xyz` = trade.xyz); `spot` decides whether the default dex's read also reads the spot state. */
+export async function hlPositions(address: string, dex?: string, spot?: (r: PositionRead) => boolean): Promise<PositionRead> {
   const st = await hlInfo.post<HlClearinghouseState | null>(
     dex ? { type: 'clearinghouseState', user: address, dex } : { type: 'clearinghouseState', user: address },
     // Not `background`: that waits for spare room in the shared bucket, which the
@@ -56,7 +92,14 @@ export async function hlPositions(address: string, dex?: string): Promise<Positi
     const value = Math.abs(num(p.positionValue) ?? 0);
     if (value > 0) marks.push([p.coin, value / Math.abs(szi)]);
   }
-  return { equity: num(st.marginSummary?.accountValue), positions, marks };
+  const out: PositionRead = { equity: num(st.marginSummary?.accountValue), positions, marks };
+  if (!dex && spot?.(out)) {
+    const sp = await hlInfo.post<HlSpotState | null>({ type: 'spotClearinghouseState', user: address }, { ttlMs: 0 });
+    out.collateral = spotCollateral(sp);
+    out.spotAt = Date.now();
+    out.extraCost = 2;
+  }
+  return out;
 }
 
 export async function sodexPositions(address: string): Promise<PositionRead> {
