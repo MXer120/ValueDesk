@@ -24,7 +24,9 @@ EnvironmentFile=/etc/valuescan/api.env
 # Only VALUESCAN_ORIGIN_SECRET, written by bootstrap.sh from SSM Parameter Store.
 EnvironmentFile=/etc/valuescan/api.secret.env
 EnvironmentFile=-/etc/valuescan/api.local.env
-ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx src/index.ts
+# The heap is set, not derived: inside MemoryMax=900M Node chose 368 MB on its own, and the API died
+# of it five times on 2026-10-03 (heap out of memory, then a 5-minute core dump with the API down).
+ExecStart=/opt/node/current/bin/node --max-old-space-size=512 --disable-warning=ExperimentalWarning --import tsx src/index.ts
 Restart=always
 RestartSec=3
 KillSignal=SIGTERM
@@ -35,8 +37,11 @@ LimitNOFILE=65536
 # system, Caddy, the health check, the nightly backup and npm during a release, so
 # a runaway is stopped inside its own unit (and restarted) before it can take the
 # box down. On 8 GiB (t4g.large) 1500M / 2G is right: a drop-in, `systemctl edit`.
-MemoryHigh=640M
-MemoryMax=900M
+# 512 MB of heap plus Node's own memory fit under MemoryHigh.
+MemoryHigh=800M
+MemoryMax=1000M
+# No core dump: writing one took 5 minutes, all of them without an API. A crash restarts in 3 s.
+LimitCORE=0
 SyslogIdentifier=valuescan-api
 
 # --- hardening ---

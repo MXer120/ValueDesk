@@ -27,6 +27,7 @@ import {
   ROI_MIN_ACCOUNT_USD,
   matchesQuery,
   parseLeaderboard,
+  parseLeaderboardStream,
   queryLeaderboard,
 } from '../src/valuescan/hyperliquid/leaderboard.js';
 import {
@@ -816,4 +817,43 @@ test('mapLimit: bounded concurrency, results in input order, failures isolated',
   });
   assert.equal(peak, 2);
   assert.deepEqual(out.map((r) => (r.status === 'fulfilled' ? r.value : 'x')), [10, 20, 'x', 40, 50]);
+});
+
+/** A body that arrives in pieces of `size` bytes, like a slow download. */
+function streamOf(text: string, size: number): ReadableStream<Uint8Array> {
+  const bytes = new TextEncoder().encode(text);
+  let at = 0;
+  return new ReadableStream({
+    pull(c) {
+      if (at >= bytes.length) return c.close();
+      c.enqueue(bytes.slice(at, at + size));
+      at += size;
+    },
+  });
+}
+
+test('parseLeaderboardStream: row by row, whatever the chunk size, the same columns as parsing the whole file', async () => {
+  // A label holding quotes, braces, brackets and a non-ASCII character split across chunks must not confuse the scan.
+  const raw: HlLeaderboardRaw = { leaderboardRows: [...LB.leaderboardRows, { ...LB.leaderboardRows[1]!, ethAddress: '0x' + 'ab'.repeat(20), displayName: 'a "}{[]\\" € trader' }] };
+  const whole = parseLeaderboard(raw);
+  for (const text of [JSON.stringify(raw), JSON.stringify(raw, null, 2)]) {
+    for (const size of [1, 3, 7, 64, 1 << 16]) {
+      const streamed = await parseLeaderboardStream(streamOf(text, size));
+      assert.deepEqual(streamed, whole, `chunks of ${size}`);
+    }
+  }
+  assert.equal(whole.labels.at(-1), 'a "}{[]\\" € trader');
+});
+
+test('parseLeaderboardStream: a download cut short is an error, never a shorter leaderboard', async () => {
+  const text = JSON.stringify(LB, null, 2);
+  await assert.rejects(parseLeaderboardStream(streamOf(text.slice(0, Math.floor(text.length * 0.6)), 50)), /ended early/);
+  await assert.rejects(parseLeaderboardStream(null), /no body/);
+});
+
+test('parseLeaderboardStream: 50,000 rows in 64 KB pieces - only the row being read is held as text', async () => {
+  const rows = Array.from({ length: 50_000 }, (_, i) => ({ ...LB.leaderboardRows[0]!, ethAddress: '0x' + i.toString(16).padStart(40, '0') }));
+  const p = await parseLeaderboardStream(streamOf(JSON.stringify({ leaderboardRows: rows }, null, 2), 1 << 16));
+  assert.equal(p.addresses.length, 50_000);
+  assert.equal(p.accountValue.length, 50_000);
 });

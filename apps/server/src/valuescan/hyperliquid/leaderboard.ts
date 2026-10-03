@@ -13,7 +13,11 @@
  * (stale-while-revalidate); only the very first call waits for the download.
  * Concurrent callers share one in-flight download.
  *
- * MEMORY. The raw JSON is parsed once and dropped. What stays is columnar:
+ * MEMORY. The download is read as a stream and parsed ROW BY ROW (parseLeaderboardStream): the
+ * 39 MB text and its 47k-object tree never exist at once. Parsed whole, the file needed more than the
+ * 368 MB heap the API gets inside its unit's MemoryMax, and the process died on it (live, 2026-10-03:
+ * five out-of-memory crashes, each the first Explore/Cohorts load after a restart or a new file).
+ * What stays is columnar:
  * one address array plus 13 Float64Arrays (account value plus pnl, roi and
  * volume for 4 windows), about 5 MB per snapshot. Sort orders and rank arrays
  * are computed lazily per (sort, window) and cached on the snapshot.
@@ -28,7 +32,7 @@ import { envOf } from '../env.js';
 import { labelMatches } from '../labels.js';
 import type { LeaderboardPage, LeaderboardQuery, LeaderboardSort, TraderRow, Window } from '../types.js';
 import { WINDOWS } from '../types.js';
-import type { HlLeaderboardRaw, HlWindowName } from './raw.js';
+import type { HlLeaderboardRaw, HlLeaderboardRowRaw, HlWindowName } from './raw.js';
 import { normAddress, num, WINDOW_OF } from './mappers.js';
 
 export const HL_LEADERBOARD_URL = (
@@ -68,39 +72,108 @@ export interface ParsedLeaderboard {
 const nanOr = (v: unknown): number => num(v) ?? Number.NaN;
 const nullIfNaN = (v: number | undefined): number | null => (v === undefined || Number.isNaN(v) ? null : v);
 
-/** Raw file to columns. Rows without a valid address are dropped; duplicates keep the first. */
-export function parseLeaderboard(raw: HlLeaderboardRaw): ParsedLeaderboard {
-  const rows = Array.isArray(raw?.leaderboardRows) ? raw.leaderboardRows : [];
-  const addresses: string[] = [];
-  const labels: Array<string | null> = [];
-  const av: number[] = [];
-  const cols = {} as Record<ColKey, number[]>;
-  for (const m of METRICS) for (const w of WINDOWS) cols[`${m}:${w}`] = [];
-  const seen = new Set<string>();
+/** Rows to columns, one row at a time. Rows without a valid address are dropped; duplicates keep the first. */
+class LeaderboardBuilder {
+  private readonly addresses: string[] = [];
+  private readonly labels: Array<string | null> = [];
+  private readonly av: number[] = [];
+  private readonly cols = {} as Record<ColKey, number[]>;
+  private readonly seen = new Set<string>();
 
-  for (const r of rows) {
+  constructor() {
+    for (const m of METRICS) for (const w of WINDOWS) this.cols[`${m}:${w}`] = [];
+  }
+
+  add(r: HlLeaderboardRowRaw | null | undefined): void {
     const address = normAddress(r?.ethAddress);
-    if (!address || seen.has(address)) continue;
-    seen.add(address);
-    addresses.push(address);
+    if (!r || !address || this.seen.has(address)) return;
+    this.seen.add(address);
+    this.addresses.push(address);
     const label = typeof r.displayName === 'string' && r.displayName.trim() ? r.displayName.trim() : null;
-    labels.push(label);
-    av.push(nanOr(r.accountValue));
+    this.labels.push(label);
+    this.av.push(nanOr(r.accountValue));
     const perf = new Map<string, { pnl: string; roi: string; vlm: string }>();
     for (const wp of Array.isArray(r.windowPerformances) ? r.windowPerformances : []) {
       if (Array.isArray(wp) && typeof wp[0] === 'string' && wp[1]) perf.set(wp[0], wp[1]);
     }
     for (const [hl, w] of Object.entries(WINDOW_OF) as Array<[HlWindowName, Window]>) {
       const p = perf.get(hl);
-      cols[`pnl:${w}`].push(nanOr(p?.pnl));
-      cols[`roi:${w}`].push(nanOr(p?.roi));
-      cols[`volume:${w}`].push(nanOr(p?.vlm));
+      this.cols[`pnl:${w}`].push(nanOr(p?.pnl));
+      this.cols[`roi:${w}`].push(nanOr(p?.roi));
+      this.cols[`volume:${w}`].push(nanOr(p?.vlm));
     }
   }
 
-  const typed = {} as Record<ColKey, Float64Array>;
-  for (const k of Object.keys(cols) as ColKey[]) typed[k] = Float64Array.from(cols[k]);
-  return { addresses, labels, accountValue: Float64Array.from(av), cols: typed };
+  finish(): ParsedLeaderboard {
+    const typed = {} as Record<ColKey, Float64Array>;
+    for (const k of Object.keys(this.cols) as ColKey[]) typed[k] = Float64Array.from(this.cols[k]);
+    return { addresses: this.addresses, labels: this.labels, accountValue: Float64Array.from(this.av), cols: typed };
+  }
+}
+
+/** Raw file to columns. Rows without a valid address are dropped; duplicates keep the first. */
+export function parseLeaderboard(raw: HlLeaderboardRaw): ParsedLeaderboard {
+  const b = new LeaderboardBuilder();
+  for (const r of Array.isArray(raw?.leaderboardRows) ? raw.leaderboardRows : []) b.add(r);
+  return b.finish();
+}
+
+/**
+ * The file as it arrives, to columns - without ever holding it whole. The text is scanned once for the
+ * objects directly inside the array under the root object (`{"leaderboardRows":[ {row}, {row}, ... ]}`);
+ * each row is parsed on its own and handed to the builder, then dropped. Only the row being read is
+ * kept as text. A file that ends early (a cut download) is an error, never a short leaderboard.
+ */
+export async function parseLeaderboardStream(body: ReadableStream<Uint8Array> | null): Promise<ParsedLeaderboard> {
+  if (!body) throw new Error('leaderboard: the answer has no body');
+  const b = new LeaderboardBuilder();
+  const decoder = new TextDecoder();
+  const reader = body.getReader();
+  // The containers we are inside ('{' or '['), whether we are in a string, and the text of the row being read.
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  let carry = '';
+  let rowStart = -1;
+  let rows = 0;
+  const scan = (text: string): void => {
+    const s = carry + text;
+    for (let i = carry.length; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === 92 /* \\ */) escaped = true;
+        else if (c === 34 /* " */) inString = false;
+        continue;
+      }
+      if (c === 34) inString = true;
+      else if (c === 123 /* { */ || c === 91 /* [ */) {
+        // A row: an object opened directly inside the array that sits inside the root object.
+        if (c === 123 && stack.length === 2 && stack[0] === '{' && stack[1] === '[') rowStart = i;
+        stack.push(c === 123 ? '{' : '[');
+      } else if (c === 125 /* } */ || c === 93 /* ] */) {
+        if (!stack.length) throw new Error('leaderboard: the file is not valid JSON (unbalanced)');
+        stack.pop();
+        if (c === 125 && stack.length === 2 && rowStart >= 0) {
+          b.add(JSON.parse(s.slice(rowStart, i + 1)) as HlLeaderboardRowRaw);
+          rows += 1;
+          rowStart = -1;
+        }
+      }
+    }
+    if (rowStart >= 0) {
+      carry = s.slice(rowStart);
+      rowStart = 0;
+    } else carry = '';
+  };
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    scan(decoder.decode(value, { stream: true }));
+  }
+  scan(decoder.decode());
+  if (stack.length || inString) throw new Error(`leaderboard: the file ended early (after ${rows} rows)`);
+  return b.finish();
 }
 
 const orderKey = (sort: LeaderboardSort, window: Window): string => (sort === 'accountValue' ? 'accountValue' : `${sort}:${window}`);
@@ -357,7 +430,7 @@ export class HlLeaderboardStore {
       return;
     }
 
-    const parsed = parseLeaderboard((await res.json()) as HlLeaderboardRaw);
+    const parsed = await parseLeaderboardStream(res.body);
     if (!parsed.addresses.length) throw new Error('leaderboard file had no rows');
     const next = new LbSnapshot(parsed, lastModified, etag, this.now());
     if (this.cur) this.prev = this.cur;
