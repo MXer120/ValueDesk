@@ -1,10 +1,11 @@
 # Putting Valuescan online: what you do
 
-The test site will be **https://valuexplorer.vercel.app** - the web app on Vercel, the
-index on one small AWS server in Frankfurt. Claude prepares and runs the AWS and
-Vercel commands (the list is `docs/deploy/EC2-VERCEL.md`, section 6). This page is
-only what needs **you**: accounts, decisions, texts, and the checks at the end. Each
-step says when it is needed.
+The test site is live since 2026-10-03 at **https://valuexplorer.vercel.app** - the
+web app on Vercel, the index on one small AWS server in Frankfurt (v0.1.1, started
+from a copy of the development index). Claude runs the AWS and Vercel commands (the
+list is `docs/deploy/EC2-VERCEL.md`, section 6). This page is only what needs
+**you**: accounts, decisions, texts, and the checks at the end. Each step says when
+it is needed.
 
 ---
 
@@ -24,16 +25,18 @@ people is fine on it. A launch that **charges a builder fee is commercial and ne
 Vercel Pro** (20 USD a month per developer seat): vercel.com -> your team ->
 Settings -> Billing -> Upgrade.
 
-### 3. WalletConnect (so phone wallets can connect)
+### 3. WalletConnect (so phone wallets can connect) - do this now
 
-Needed before testers connect wallets by QR code (browser extensions work without it).
+The test build uses the WalletConnect / Reown project id you already use for local
+development (from `apps/web/.env.local`). Phone wallets connecting by QR code will
+warn or refuse until the site's address is on that project's list:
 
-1. Sign in at **https://dashboard.reown.com** and create a project (type "AppKit"/web).
-2. Copy its **Project ID** and give it to Claude (it is not a secret; it goes into
-   `deploy/release/web.env` as `VITE_WALLETCONNECT_PROJECT_ID`).
-3. In the project's **Domain / Allowlist** settings add exactly
-   `https://valuexplorer.vercel.app` (later also your own domain). Do not add
-   preview addresses: only this address talks to the index.
+1. Sign in at **https://dashboard.reown.com** and open that project.
+2. In its **Domain / Allowlist** settings add exactly `https://valuexplorer.vercel.app`
+   (later also your own domain). Do not add preview addresses: only this address
+   talks to the index.
+3. For the public launch you may want a separate project for production; give Claude
+   its Project ID then (it is not a secret).
 
 ### 4. The builder account (only if a builder fee is to be charged)
 
@@ -103,8 +106,8 @@ Before you show the site to anyone, run the guided test on your PC:
 
 | | What it means | Cost per month (eu-central-1) |
 |---|---|---|
-| **Running** | the server is on; everything works | about 47.50 USD + CPU above its baseline (estimated 6 to 18) + snapshots (estimated 3 to 10) |
-| **Stopped** | the server is off; nothing is deleted. The site still loads; trading, Portfolio and Scan still work (they talk to the exchanges directly); the leaderboard, Explore and Copy pages say the index is unavailable | about 19.50 USD (the disks and the fixed address) + snapshots |
+| **Running** | the server is on; everything works | about 41 USD (t4g.medium 28.03, disks 16 + 80 GiB 9.14, fixed address 3.65) + CPU above its baseline (estimated 6 to 18) + snapshots (estimated 3 to 10) |
+| **Stopped** | the server is off; nothing is deleted. The site still loads; trading, Portfolio and Scan still work (they talk to the exchanges directly); the leaderboard, Explore and Copy pages say the index is unavailable | about 13 USD (the disks and the fixed address) + snapshots |
 | Vercel | Hobby free (non-commercial), Pro 20 USD | |
 
 Ask Claude to **stop** (`deploy/aws/ec2/provision.sh stop`) or **start**
