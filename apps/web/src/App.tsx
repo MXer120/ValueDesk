@@ -14,6 +14,7 @@ import { MaintenanceBanner } from './components/MaintenanceBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
 import { AccountSetup } from './setup/AccountSetup';
+import { IndexPrompt } from './components/IndexPrompt';
 import { DevPanel } from './components/dev/DevPanel';
 import { goToWallet } from './components/account/actions';
 import { useWalletBridge } from './components/account/useWallet';
@@ -499,6 +500,9 @@ function AppShell() {
         </Guarded>
         <Guarded name="Dev panel">
           <DevPanel address={address} engine={engine} />
+        </Guarded>
+        <Guarded name="Indexing">
+          <IndexPrompt address={address} />
         </Guarded>
 
         {/* The workspace bar: connection + which account we are signing as on

@@ -2718,6 +2718,16 @@ input[inputmode="decimal"], input[inputmode="numeric"],
   width: min(360px, calc(100vw - var(--sp-4)));
   pointer-events: none;
 }
+/* The indexing card portals into the pin. contents makes that card a row of
+   this stack, and an empty pin takes no gap. The live region is its own
+   column so a progress update is not announced with every other toast. */
+#vs-toast-pin { display: contents; }
+.toasts__live {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.toasts__live:empty { display: none; }
 
 /* The address menu opens in this corner (NavBar.tsx): the stack steps left of
    it while it is open, or hides where there is no room beside it. */

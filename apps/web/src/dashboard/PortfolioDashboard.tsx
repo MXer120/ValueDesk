@@ -31,7 +31,6 @@ import {
   type PortfolioContext,
   type PortfolioProps,
 } from '../components/Portfolio';
-import { IndexPrompt } from '../components/IndexPrompt';
 import { MyCopiesCard } from '../components/scan/MyCopies';
 
 const PANELS: Array<PanelDefinition<PortfolioContext>> = [
@@ -51,15 +50,12 @@ const PANELS: Array<PanelDefinition<PortfolioContext>> = [
 export function PortfolioDashboard(props: PortfolioProps) {
   const context = usePortfolioContext(props);
   return (
-    <>
-      <Dashboard
-        config={PORTFOLIO_DASHBOARD}
-        panels={PANELS}
-        context={context}
-        /* The CSS scope every `.pf .pf-*` rule matches against - see Portfolio.css. */
-        className="pf"
-      />
-      <IndexPrompt address={props.address} />
-    </>
+    <Dashboard
+      config={PORTFOLIO_DASHBOARD}
+      panels={PANELS}
+      context={context}
+      /* The CSS scope every `.pf .pf-*` rule matches against - see Portfolio.css. */
+      className="pf"
+    />
   );
 }

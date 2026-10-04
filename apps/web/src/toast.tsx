@@ -256,10 +256,17 @@ export function useErrorToast(error: unknown, source: string, retry?: () => void
  * ------------------------------------------------------------------------ */
 
 function ToastRail({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: number) => void }) {
-  if (!toasts.length) return null;
+  /* The pin stays mounted so the indexing card can sit in this stack even
+     when no other toast is up. `display: contents` keeps an empty pin from
+     opening a gap above the first toast. */
   return (
-    <div className="toasts" aria-live="polite">
-      {toasts.map((t) => <ToastCard key={t.id} t={t} onDismiss={onDismiss} />)}
+    <div className="toasts">
+      <div id="vs-toast-pin" />
+      {toasts.length > 0 && (
+        <div className="toasts__live" aria-live="polite">
+          {toasts.map((t) => <ToastCard key={t.id} t={t} onDismiss={onDismiss} />)}
+        </div>
+      )}
     </div>
   );
 }
