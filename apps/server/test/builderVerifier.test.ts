@@ -833,7 +833,7 @@ test('explorer: an order it does not know is asked for again a few times, then g
   w.sodex.txs.clear();
   w.clock.advance(SEC);
   const t = await w.verify(wallet);
-  assert.equal(w.sodex.count('explorer'), 4, 'at once, after 30 s, after 2 min, after 10 min');
+  assert.equal(w.sodex.count('explorer'), 8, 'at once, then after 30 s, 1, 1.5, 2, 3, 5 and 10 min');
   assert.equal(t.volume.perpsUsd, 0);
   assert.equal(t.volume.pending, false);
   assert.equal(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`)!.state, OrderState.unknown);

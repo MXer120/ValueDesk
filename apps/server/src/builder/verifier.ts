@@ -93,8 +93,12 @@ const MAX_STEP_FAILURES = 3;
 /** After a failed explorer request: this long, doubling, at most the second. */
 const EXPLORER_PAUSE_MS = 10 * 60_000;
 const EXPLORER_PAUSE_MAX_MS = 6 * 60 * 60_000;
-/** An order the explorer does not know (yet) is asked for again after these waits, then given up. */
-const NOT_FOUND_RETRY_MS = [30_000, 120_000, 600_000];
+/**
+ * An order the explorer does not know (yet) is asked for again after these waits, then given up. The explorer
+ * lists a new order a few minutes late: dense at first, so a fee tier follows within minutes (live 2026-10-04:
+ * listed between 2.5 and 10 minutes, the next look came at 10 - six seconds after the live run stopped waiting).
+ */
+const NOT_FOUND_RETRY_MS = [30_000, 60_000, 90_000, 120_000, 180_000, 300_000, 600_000];
 /** Rows wait for a retry and nothing else is due: look again after this. */
 const EXPLORER_POLL_MS = 30_000;
 

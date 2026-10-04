@@ -389,7 +389,7 @@ Three lanes, each with a budget of its own, each asleep while it has nothing to 
   stays off). A sweep stops after 20 pages; the wallets in the queue take turns, productive ones first.
 - **Explorer.** One order's request per step, at most `VALUESCAN_BUILDER_EXPLORER_PER_MIN` (default 3, at
   most 6). The explorer publishes no limits: any answer that is not a 200 stops the lane for 10 minutes,
-  doubling to 6 hours. An order it does not know is asked for again after 30 s, 2 and 10 minutes, then left
+  doubling to 6 hours. An order it does not know is asked for again after 30 s, 1, 1.5, 2, 3, 5 and 10 minutes, then left
   uncounted. Builder-less orders are looked up only for wallets that have a key of our app on record, two
   per page of fills at most, the app's client order ids first.
 - A wallet is verified at most once a minute, and twice as long after each pass that found nothing new (up to

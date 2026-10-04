@@ -36,6 +36,7 @@ import { CheckFailure, armed, endsTheRun, tripFailed, type Ctx } from './context
 import { nativeChainFor, nativeCoinFor, nativeCoinOf } from './native';
 import { ACCOUNT_MINIMUM, NATIVE_DECIMALS, NATIVE_SYMBOL, type NativeChain, type NativeCoin, type PreparedSend, type SendCosts } from './native/types';
 import { WaitTimeout, waitMaybe } from './orders';
+import type { InFlight } from './reads';
 import { sellBack } from './evmTour';
 import { handInstructions, handKey, isHandActive, resolveHandPlans, type HandPlan } from './handBack';
 import { ownerWord } from './ownerInput';
@@ -379,7 +380,7 @@ async function depositBack(
   const sodexDp = o.coinCfg.valuechain.decimals;
   const natSym = NATIVE_SYMBOL[chain.kind];
   const natDp = NATIVE_DECIMALS[chain.kind];
-  let flight: { what: string; since: number; ref?: string } | null = null;
+  let flight: InFlight | null = null;
   try {
     let amount: bigint | 'max' = 'max';
     if (ncoin.native && o.reserve > 0n) {
@@ -429,6 +430,9 @@ async function depositBack(
     }
     if (!r.ok || !last) {
       ctx.checks.finding(dId, `sent on ${route.label} (DIRECT, ${p.explorer}), but Spot was not credited +${sent} ${coin} within ${dur(waitMs)} (${last?.ok ? 'final on the chain' : 'not yet final on the chain'}) - IN FLIGHT: SoDEX credits it once its custody sees it`, { tx: p.txid, sent });
+      // Final on its chain: the coins are SoDEX's to credit (2026-10-04: a first deposit to a new XRP / Stellar
+      // address was credited well after an hour). The end-of-run check reports it as a finding, not an open transfer.
+      if (last?.ok) flight.depositFinal = true;
       return;
     }
     ctx.inFlight.splice(ctx.inFlight.indexOf(flight), 1);

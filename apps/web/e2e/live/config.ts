@@ -197,7 +197,7 @@ export const DEFAULT_CONFIG: RunConfig = {
   chainWithdrawals: { skip: [], buyIfMissing: true },
   manualDeposits: [],
   builder: null,
-  timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60, verifierMinutes: 10, addressIssueSeconds: 180, streamSeconds: 10 },
+  timeouts: { depositMinutes: 30, withdrawMinutes: 30, settleSeconds: 180, orderSeconds: 60, verifierMinutes: 15, addressIssueSeconds: 180, streamSeconds: 10 },
 };
 
 export interface LoadedConfig {

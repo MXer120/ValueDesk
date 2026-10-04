@@ -356,6 +356,8 @@ export interface InFlight {
   since: number;
   /** Where to look it up (explorer / SoDEX tx). */
   ref?: string;
+  /** A deposit that is final on its chain and waits only for SoDEX's credit (SoDEX's side, reported as a finding). */
+  depositFinal?: boolean;
 }
 
 /** "Where your funds are now" - printed at every stop, so nothing has to be guessed. */

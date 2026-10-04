@@ -141,8 +141,15 @@ export async function stepCrossCheck(ctx: Ctx): Promise<void> {
     if (so.length) wrong.push(`${so.length} spot order(s) open (${some(so, 3).map((o) => `${o.symbol} #${o.orderID}`).join(', ')})`);
     if (po.length) wrong.push(`${po.length} perps order(s) open (${some(po, 3).map((o) => `${o.symbol} #${o.orderID}`).join(', ')})`);
     if (open.length) wrong.push(`position(s) open: ${open.map((p) => `${p.symbol} ${p.size}`).join(', ')}`);
-    if (ctx.inFlight.length) wrong.push(`${ctx.inFlight.length} transfer(s) in flight: ${ctx.inFlight.map((f) => f.what).join('; ')}`);
+    // A deposit final on its chain only waits for SoDEX's credit: SoDEX's side, said as a finding (its own check says the same).
+    const waiting = ctx.inFlight.filter((f) => f.depositFinal);
+    const flying = ctx.inFlight.filter((f) => !f.depositFinal);
+    if (flying.length) wrong.push(`${flying.length} transfer(s) in flight: ${flying.map((f) => f.what).join('; ')}`);
     if (wrong.length) throw new CheckFailure(`${wrong.join('; ')} - close them in the app (Orders / Positions tabs)`, { spotOrders: some(so), perpsOrders: some(po), positions: open });
+    if (waiting.length) {
+      ctx.checks.finding('cross-end-state', `no open order, no position; ${waiting.length} deposit(s) final on their chains that SoDEX had not credited yet: ${waiting.map((f) => f.what).join('; ')}`, { waiting: waiting.map((f) => f.what) });
+      return;
+    }
     ctx.checks.pass('cross-end-state', 'no open order on either engine, no position, nothing in flight', {});
   });
 
