@@ -789,6 +789,8 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     const r = route(c, spec.chain);
     let cost = 0;
     let away = 0;
+    /** USD of Spot USDC this withdrawal takes (the amount, or the buy of the coin). */
+    let spent = 0;
     if (!c || c.assetId === null) pr.push(`${label}: SoDEX has no tradable coin "${spec.coin}"`);
     else if (!r) pr.push(`${label}: ${spec.coin} has no route on ${spec.chain}`);
     else {
@@ -866,6 +868,7 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         const p = short(id, sim.spotUsdc, amt, 'Spot USDC');
         if (p) pr.push(p);
         sim.spotUsdc -= amt;
+        spent = amt;
       } else if (spec.buyIfMissing) {
         // The simulation does not track other coins in Spot: assume the whole amount is bought
         // (at least the market's minimum order, ~6 USDC). The exact buy is priced separately.
@@ -882,13 +885,14 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         const p = short(id, sim.spotUsdc, spend, 'Spot USDC (to buy it)');
         if (p) pr.push(p);
         sim.spotUsdc -= spend;
+        spent = spend;
       } else if (spec.fromHand) {
         lines.push(`  ${amt || 'what arrived'} ${spec.coin} comes from your hand-sent deposit first (SoDEX has no ${spec.coin}/USDC spot market)`);
       } else {
         lines.push(`  needs ${amt || 'some'} ${spec.coin} in Spot already (buyIfMissing is off)`);
       }
     }
-    return { lines, cost, away, pr };
+    return { lines, cost, away, pr, spent };
   };
 
   if (has('withdraw-external')) {
@@ -965,6 +969,12 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     let cost = 0;
     const capital = new Map<string, number>();
     let usdcCapital = 0;
+    // What Spot already holds of a tour coin (an earlier run's leftovers) is not bought again: USD per coin.
+    const heldOf = new Map<string, Promise<number>>();
+    const heldUsd = (c: CoinConfig): Promise<number> => {
+      if (!heldOf.has(c.coin)) heldOf.set(c.coin, balancesOf(owner, c).then((b) => approx(b.spot) * (px(c.coin) ?? 0)).catch(() => 0));
+      return heldOf.get(c.coin)!;
+    };
     // The wallet's deposit addresses per coin (the on-chain registry): a leg with no way back runs one-way.
     const listedOf = new Map<string, Promise<Map<string, string> | null>>();
     const listed = (c: string): Promise<Map<string, string> | null> => {
@@ -1039,7 +1049,12 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
     if (cfg.evmTour.sellBack) lines.push('each coin bought for the tour is sold back to USDC after the last chain that needs it (what is below the market minimum stays in Spot)');
     // Conservative: every coin bought may sit in Spot until the end (below a market's minimum it is not sold back),
     // and every fee and spread is paid along the way - so the tour needs all of it at once, plus the largest USDC leg.
-    const need = [...capital.values()].reduce((a, b) => a + b, 0) + usdcCapital + cost * 1.2 + 1;
+    let coinCapital = 0;
+    for (const [name, usdNeed] of capital) {
+      const c = coins.find((x) => x.coin === name);
+      coinCapital += Math.max(0, usdNeed - (c ? await heldUsd(c) : 0));
+    }
+    const need = coinCapital + usdcCapital + cost * 1.2 + 1;
     const p = short('evm-tour', sim.spotUsdc, need, "Spot USDC (the tour's working capital: it comes back)");
     if (p) pr.push(p);
     sim.spotUsdc -= cost;
@@ -1090,16 +1105,27 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         // What an earlier run left at the test wallet's address goes back too: only what is missing is withdrawn.
         const held = await chain.balance(here, ncoin).catch(() => null);
         const have = held === null ? '0' : formatUnits(held, ncoin.decimals);
-        const amount = roundTripWithdrawal({ need: dAdd(floor, extra), have, min: w.route.withdraw.min ?? null, fee: sodexFee, dp });
+        const need = dAdd(floor, extra);
+        const natSym = NATIVE_SYMBOL[chain.kind];
+        const natDp = NATIVE_DECIMALS[chain.kind];
+        const natPx = px(natSym) ?? 0;
+        const coinPx = px(w.coin.coin) ?? 0;
+        // What an earlier run's withdrawal left there pays for the transfer back: it goes back, nothing is withdrawn
+        // again (the next run, with nothing left there, withdraws again) - and no USDC is needed for it.
+        if (dCmp(have, '0') > 0 && dCmp(have, need) >= 0) {
+          const netFee0 = c ? approx(formatUnits(c.fee, natDp)) : 0;
+          cost += netFee0 * natPx;
+          lines.push(
+            `${w.coin.coin} -> ${w.route.label}: NO new withdrawal - ${cut(have, 8)} ${w.coin.coin} from an earlier run's withdrawal is already at the test wallet's own address ${here} (the transfer back needs ${cut(need, 8)}); it goes back to SoDEX in a transfer the runner signs (DIRECT) to the wallet's own deposit address ${listedTo ?? '(issued when the step runs)'}; network fee ~${c ? formatUnits(c.fee, natDp) : '?'} ${natSym}`,
+          );
+          continue;
+        }
+        const amount = roundTripWithdrawal({ need, have, min: w.route.withdraw.min ?? null, fee: sodexFee, dp });
         if (dCmp(have, '0') > 0) lines.push(`${w.coin.coin} -> ${w.route.label}: ${cut(have, 8)} ${w.coin.coin} from an earlier run is already at the test wallet's own address ${here} - it goes back to SoDEX in this run's transfer, so only ${amount} is withdrawn`);
         const r = await withdrawal('chain-withdrawals', { coin: w.coin.coin, chain: w.route.key, amount, receiver: w.receiverName, buyIfMissing: cfg.chainWithdrawals.buyIfMissing }, label);
         lines.push(...r.lines);
         pr.push(...r.pr);
         cost += r.cost;
-        const natSym = NATIVE_SYMBOL[chain.kind];
-        const natDp = NATIVE_DECIMALS[chain.kind];
-        const natPx = px(natSym) ?? 0;
-        const coinPx = px(w.coin.coin) ?? 0;
         const netFee = c ? approx(formatUnits(c.fee, natDp)) : 0;
         const keep = c && ncoin.native ? approx(formatUnits(c.keep, ncoin.decimals)) : 0;
         const kept = ncoin.native ? approx(formatUnits(reserve, natDp)) : 0;
@@ -1109,14 +1135,19 @@ export async function preflight(o: PreflightInput): Promise<PlanResult> {
         lines.push(
           `  then back to SoDEX from the test wallet's own address ${here}: everything that can leave${keep > 0 ? ` (${cut(String(keep), 8)} ${w.coin.coin} stays: the chain's reserve)` : ''}${kept > 0 ? ` less ~${cut(String(kept), 8)} ${natSym} for the token transfers` : ''}, in a transfer the runner signs (DIRECT) to the wallet's own ${w.coin.coin} deposit address ${listedTo ?? '(issued when the step runs)'}; network fee ~${c ? formatUnits(c.fee, natDp) : '?'} ${natSym}; at least SoDEX's deposit minimum ${w.route.deposit.min ?? '-'} + 2 %`,
         );
+        let spread = 0;
         if (w.coin.coin.toUpperCase() !== 'USDC') {
           try {
             const m = await spotMarketFor(w.coin);
-            cost += marketCost(m, dMax(marketQty(m, 10), toStep(amount, rule(m.sym.stepSize), 'ceil'))) * 2; // bought, and sold back after
+            spread = marketCost(m, dMax(marketQty(m, 10), toStep(amount, rule(m.sym.stepSize), 'ceil'))) * 2; // bought, and sold back after
+            cost += spread;
           } catch {
             /* said above */
           }
         }
+        // The coin comes back and is sold right after its trip (otherChains.ts sellBackNow): the USDC is there for
+        // the next trip, less what the trip cost. So the step needs its largest trip at once, not their sum.
+        sim.spotUsdc += Math.max(0, r.spent - r.cost - netFee * natPx - keep * coinPx - kept * natPx - spread);
         continue;
       }
       const hp = hand?.plans.get(handKey(w.coin.coin, w.route.key)) ?? null;

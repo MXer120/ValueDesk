@@ -547,6 +547,37 @@ test('a chain SoDEX has issued no address on yet: the run asks for one, as sodex
   assert.ok(back.amount > 4_000_000n, 'the leftover went back with the new coins');
 });
 
+test('coins an earlier withdrawal left there cover the deposit back: no new withdrawal, nothing bought for them; every other coin is sold right after its own trip', async () => {
+  const r = await run(
+    { ...CONFIG, maxSpendUsd: 200, receivers: { valuechain: FRIEND } },
+    {
+      profile: 'all-chains',
+      only: ['deposit-external', 'enable-trading', 'chain-withdrawals'],
+      setup: (w) => {
+        w.arbUsdc.set(w.owner, 200_000_000n);
+        // 20 XRP an earlier run withdrew and could not send back: more than the transfer back needs.
+        w.offchain.push({ coin: 'XRP', chain: 'XRP', receiver: FAKE_NATIVE_ADDRESS.xrp, memo: '', amount: 20_000_000n });
+      },
+    },
+  );
+  const { w, byId } = r;
+  if (process.env.VS_SIM_VERBOSE) console.log(r.lines.join('\n'));
+  noFailures(r.checks);
+  assert.equal(byId.get('withdraw-xrp-xrp')?.status, 'skipped');
+  assert.match(byId.get('withdraw-xrp-xrp')!.detail, /not withdrawn again: 20 XRP from an earlier run/);
+  assert.equal(byId.get('deposit-xrp-xrp')?.status, 'pass', byId.get('deposit-xrp-xrp')?.detail);
+  assert.ok(!w.offchain.some((x) => x.coin === 'XRP' && x.amount !== 20_000_000n), 'no XRP withdrawn');
+  assert.ok(!w.orders.some((o) => o.symbol === 'vXRP_vUSDC' && o.side === 'BUY'), 'no XRP bought');
+  // 19 XRP back (the 1 XRP reserve stays), less the network fee.
+  const back = w.nativeSent.find((x) => x.coin === 'XRP')!;
+  assert.equal(back.amount + back.nativeFee, 19_000_000n);
+  // BTC is bought, goes out and back, and is sold BEFORE the next trip's coin is bought.
+  const spot = w.orders.filter((o) => o.engine === 'spot').map((o) => `${o.side} ${o.symbol}`);
+  const btcSold = spot.indexOf('SELL vBTC_vUSDC');
+  const solBought = spot.indexOf('BUY vSOL_vUSDC');
+  assert.ok(btcSold >= 0 && solBought >= 0 && btcSold < solBought, spot.join(', '));
+});
+
 test('the full test: round trips to your own wallet - a deposit you skip, one you leave out, one sent first where SoDEX has no market - and everything sold back', async () => {
   const sent: string[] = [];
   const owner = scriptedOwnerInput({ 'XRP|XRP': 's' });

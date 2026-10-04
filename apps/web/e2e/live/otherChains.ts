@@ -241,14 +241,16 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
   let costs: SendCosts = { fee: 0n, keep: 0n, nativeNeeded: 0n };
   let reserve = 0n;
   let have = '0';
-  if (to) {
-    costs = await rec.read(`what a ${w.coin.coin} transfer on ${w.route.label} costs from ${here}`, () => chain.costs(here, ncoin, to), (c) => `fee ${c.fee}, keep ${c.keep}, native needed ${c.nativeNeeded} (base units)`);
+  // Without the deposit address (not issued yet) the costs are those of a transfer to the wallet's own address there.
+  const dest = to ?? here;
+  {
+    costs = await rec.read(`what a ${w.coin.coin} transfer on ${w.route.label} costs from ${here}`, () => chain.costs(here, ncoin, dest), (c) => `fee ${c.fee}, keep ${c.keep}, native needed ${c.nativeNeeded} (base units)`);
     if (ncoin.native) {
       for (const t of list) {
         if (t.route.key !== w.route.key || t.route.isNativeToken || t.skip || !t.roundTrip) continue;
         const tc = nativeCoinOf(chain, t.route, t.coin.coin);
         if (!tc) continue;
-        const c = await chain.costs(here, tc, to).catch(() => null);
+        const c = await chain.costs(here, tc, dest).catch(() => null);
         if (c) reserve += (c.nativeNeeded * 12n) / 10n;
       }
       // Solana: the paying account must stay rent-exempt (~650,240 lamports) after each token send - or be empty.
@@ -262,7 +264,22 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
   }
   const floor = depositFloor(w.route, dp);
   const extra = ncoin.native ? formatUnits(costs.fee + costs.keep + reserve, ncoin.decimals) : '0';
-  const amount = to ? roundTripWithdrawal({ need: dAdd(floor, extra), have, min: w.route.withdraw.min ?? null, fee, dp }) : roundTripAmount(w.route, w.coin, fee);
+  const need = dAdd(floor, extra);
+  // What an earlier run's withdrawal left there already pays for the transfer back: it goes back, and nothing is
+  // withdrawn again - that withdrawal was the test of it, and the next run (nothing left there) withdraws again.
+  // So a run on the coins it already has needs no USDC for them.
+  if (dCmp(have, '0') > 0 && dCmp(have, need) >= 0) {
+    ctx.checks.skip(wId, `not withdrawn again: ${cut(have, 8)} ${w.coin.coin} from an earlier run's withdrawal is already at the test wallet's own address ${here} - this run sends it back (the deposit is what is tested here); the next run, with nothing left there, withdraws again`);
+    if (!to) {
+      // No address to send it to yet: it stays there, and nothing more is withdrawn on top of it.
+      ctx.checks.set(dId, 'not-run', `not run: ${noBack}. The ${cut(have, 8)} ${w.coin.coin} from an earlier run stays at the test wallet's ${w.route.label} address ${here}.`, { chain: w.route.key, address: here, leftOnChain: have });
+      return null;
+    }
+    rec.note(`${w.route.label}: ${cut(have, 8)} ${w.coin.coin} from an earlier run is already at ${here} - sending it back, no new withdrawal`);
+    await depositBack(ctx, { chain, coinCfg: w.coin, route: w.route, ncoin, here, to, dId, reserve, floor });
+    return null;
+  }
+  const amount = to ? roundTripWithdrawal({ need, have, min: w.route.withdraw.min ?? null, fee, dp }) : roundTripAmount(w.route, w.coin, fee);
   if (dCmp(have, '0') > 0) rec.note(`${w.route.label}: ${cut(have, 8)} ${w.coin.coin} from an earlier run is already at ${here} - it goes back to SoDEX with this run's ${amount}`);
 
   // 3. The coin in Spot (bought with USDC where Spot holds less).
@@ -312,7 +329,31 @@ async function roundTripLeg(ctx: Ctx, w: ChainWithdrawal, wId: string, list: rea
 
   // 5. Back to SoDEX, signed by the runner (DIRECT): exactly the bytes armed, once.
   await depositBack(ctx, { chain, coinCfg: w.coin, route: w.route, ncoin, here, to, dId, reserve, floor });
+  // 6. The coin is sold back now, not at the end of the step: the next trip buys its own coin with this USDC, so
+  //    the step needs the largest single trip in Spot, not all of them at once.
+  await sellBackNow(ctx, w, list);
   return null;
+}
+
+/** Sell what this step bought of `w`'s coin back to USDC, unless a later trip of the step needs the same coin. */
+async function sellBackNow(ctx: Ctx, w: ChainWithdrawal, list: readonly ChainWithdrawal[]): Promise<void> {
+  const coin = w.coin.coin;
+  if (coin.toUpperCase() === 'USDC') return;
+  if (list.slice(list.indexOf(w) + 1).some((t) => !t.skip && t.coin.coin === coin)) return;
+  const units = ctx.otherCoins.get(coin) ?? 0n;
+  if (units <= 0n) return;
+  try {
+    const dp = w.coin.valuechain.decimals;
+    const before = unitsDown((await balancesOf(ctx.owner, w.coin)).spot, dp);
+    await sellBack(ctx, coin, units, 'other-chains', `the ${coin} the round trip bought - sold back before the next trip`);
+    // What is below the market's minimum order stays, and is still the step's: sold at its end with what joins it.
+    const after = unitsDown((await balancesOf(ctx.owner, w.coin)).spot, dp);
+    const sold = before > after ? before - after : 0n;
+    ctx.otherCoins.set(coin, units > sold ? units - sold : 0n);
+  } catch (e) {
+    // Left for the sale at the end of the step.
+    ctx.rec.warn('sell back', `${coin} after its round trip: ${errText(e)} - tried again at the end of the step`);
+  }
 }
 
 /** A withdrawal that arrived late: if it is there now, the deposit back runs (the deposit is still tested). */
