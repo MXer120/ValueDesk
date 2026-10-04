@@ -186,11 +186,11 @@
 /* Widths sized to the longest ordinary content at 12px: a symbol plus its
    venue badge, a six-figure price, "Size (USD)", a short address in the mono
    face (the widest cell), and a fixed 8-character clock. */
-.vs-explore .vs-tape__mkt { width: 24%; }
-.vs-explore .vs-tape__px { width: 18%; }
-.vs-explore .vs-tape__sz { width: 17%; }
-.vs-explore .vs-tape__who { width: 26%; }
-.vs-explore .vs-tape__time { width: 15%; }
+.vs-explore .vs-tape__mkt { width: 32%; }
+.vs-explore .vs-tape__px { width: 16%; }
+.vs-explore .vs-tape__sz { width: 16%; }
+.vs-explore .vs-tape__who { width: 22%; }
+.vs-explore .vs-tape__time { width: 14%; }
 @container panel (max-width: 440px) {
   .vs-explore .vs-tape__mkt { width: 18%; }
   .vs-explore .vs-tape__px { width: 17%; }
@@ -227,7 +227,7 @@
 .ex-views__tabs { display: flex; align-items: stretch; }
 .ex-cohorts { padding: 0; }
 
-/* One ranking, then the tape and positioning beside it. */
+/* The market map, then each venue's book, then the tape and the rankings. */
 .ex-board {
   display: flex;
   flex-direction: column;
@@ -243,9 +243,65 @@
 }
 .vs-explore .cp-seg { max-width: 100%; }
 .vs-explore .cp-seg > button:hover:not(:disabled) { color: var(--text); background: transparent; }
-.ex-grid {
+.vs-explore .ex-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.vs-explore .ex-headacts {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.vs-explore .vs-mark { display: inline-flex; flex: none; }
+
+/* The landing map. Tiles are the cohort map's own; this only gives them a box. */
+.vs-explore .ex-map {
+  position: relative;
+  height: 400px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+}
+.vs-explore .ex-map button.coh-tree__tile { min-height: 0; }
+.vs-explore .ex-map .coh-tree__name { font-weight: 500; }
+.vs-explore .ex-map__state {
+  position: absolute;
+  inset: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.8fr);
+  place-items: center;
+  margin: 0;
+  padding: var(--sp-3);
+}
+.vs-explore .pf-statstrip.ex-stats {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: var(--sp-3);
+}
+.vs-explore .ex-stats .pf-stat + .pf-stat {
+  border-top: 0;
+  border-left: 1px solid var(--pf-line);
+}
+
+/* One column per venue, divided by the card's own hairline. */
+.vs-explore .ex-books {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+.vs-explore .ex-book + .ex-book {
+  border-left: 1px solid var(--pf-line);
+  padding-left: var(--sp-4);
+}
+.vs-explore .ex-book__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 var(--sp-2);
+}
+.vs-explore .ex-book__head .pf-h { margin: 0; }
+
+.ex-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
   gap: var(--sp-2);
   align-items: start;
 }
@@ -256,5 +312,18 @@
   min-width: 0;
 }
 @media (max-width: 960px) {
-  .ex-grid { grid-template-columns: minmax(0, 1fr); }
+  .ex-lower { grid-template-columns: minmax(0, 1fr); }
+  .vs-explore .ex-books { grid-template-columns: minmax(0, 1fr); }
+  .vs-explore .ex-book + .ex-book {
+    border-left: 0;
+    padding-left: 0;
+    border-top: 1px solid var(--pf-line);
+    padding-top: var(--sp-3);
+  }
+}
+@media (max-width: 720px) {
+  .vs-explore .ex-map { height: 260px; }
+  .vs-explore .pf-statstrip.ex-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .vs-explore .ex-stats .pf-stat:nth-child(3) { border-left: 0; }
+  .vs-explore .ex-stats .pf-stat:nth-child(n + 3) { border-top: 1px solid var(--pf-line); }
 }

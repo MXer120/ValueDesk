@@ -56,11 +56,20 @@
   .mo-switch { animation: none !important; }
 }
 
-/* CrossFade: both views in one grid cell; the old one fades out on top of the
-   new one fading and settling in. */
-.mo-xfade__stack { display: grid; grid-template-columns: minmax(0, 1fr); }
+/* CrossFade: the incoming view is in flow, so AutoHeight measures it on this
+   frame and the height ease runs with the fade. The leaving view is taken out
+   of flow and fades on top; while it shared the grid cell the box stayed at
+   the taller of the two until the leave finished, and the ease started late. */
+.mo-xfade__stack { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); }
 .mo-xfade__stack > * { grid-area: 1 / 1; min-width: 0; }
-.mo-xfade__out { pointer-events: none; animation: mo-xf-out 200ms var(--ease-out) forwards; z-index: 1; }
+.mo-xfade__out {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  animation: mo-xf-out 200ms var(--ease-out) forwards;
+  z-index: 1;
+}
 .mo-xfade__in { animation: mo-xf-in 260ms var(--ease-out) both; }
 @keyframes mo-xf-out { from { opacity: 1; } to { opacity: 0; transform: scale(0.995); } }
 @keyframes mo-xf-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

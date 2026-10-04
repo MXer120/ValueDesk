@@ -108,8 +108,8 @@ export function useLatched<T>(value: T | null | undefined | false, ms = EXIT_MS)
 
 /**
  * Cross-fade between two views of the same place (Position History cards <->
- * list): the old view stays for a moment, fading out in the same grid cell
- * while the new one fades and settles in, and the box eases its height.
+ * list, the fee sheet's two engines): the new view sets the height at once,
+ * the old one fades out on top of it, and the box eases to the new height.
  */
 export function CrossFade({ viewKey, children, className = '' }: { viewKey: string; children: ReactNode; className?: string }) {
   const [leaving, setLeaving] = useState<{ key: string; node: ReactNode } | null>(null);
