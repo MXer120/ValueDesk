@@ -250,7 +250,7 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
               Potato mode
               <span className="devp__meta">{potato ? 'On' : 'Off'}</span>
             </button>
-            <button type="button" className="devp__btn" onClick={forget}>Forget setup</button>
+            <button type="button" className="devp__btn" title="Clears the finished flag and shows account setup again. The wallet, trading key, and trade index stay." onClick={forget}>Forget setup</button>
             <div className="devp__row">
               <button type="button" className="devp__mini" onClick={() => notify('ok', 'Saved.')}>Ok</button>
               <button type="button" className="devp__mini" onClick={() => notify('info', 'Heads up.')}>Info</button>

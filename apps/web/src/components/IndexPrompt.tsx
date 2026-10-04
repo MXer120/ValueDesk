@@ -40,8 +40,9 @@ function when(ms: number): string {
 }
 
 /**
- * Mean of every stream. A stream that has not started is 0. One stream that
- * has already walked back must not make the whole job look finished.
+ * Mean of every stream. A stream that has not started is 0. One that is still
+ * paging stops short of 1: the first deposit is not the end of trade history,
+ * so a cursor past that date must not read as finished.
  */
 function coverage(address: string, earliest: number): number | null {
   let idx;
@@ -58,7 +59,7 @@ function coverage(address: string, earliest: number): number | null {
     if (typeof c.b !== 'number' || c.b <= 0) continue;
     started += 1;
     const walked = Math.max(0, Date.now() - c.b);
-    sum += Math.max(0, Math.min(1, walked / span));
+    sum += Math.max(0, Math.min(0.99, walked / span));
   }
   if (!started) return null;
   return (sum / cursors.length) * 100;
@@ -108,7 +109,10 @@ export function IndexPrompt({ address }: { address: string | null }) {
   useEffect(() => {
     if (!engaged || !address || earliest === null) { setPct(null); return; }
     if (progress.done) { setPct(100); return; }
-    setPct(coverage(address, earliest));
+    const raw = coverage(address, earliest);
+    // 100 is only the caught-up flag. Rounding a 99.6 mean used to say 100%
+    // while a stream was still paging.
+    setPct(raw === null ? null : Math.min(99, raw));
   }, [engaged, address, earliest, progress.pages, progress.done, progress.cursorMs]);
 
   if (!open || !address || !slot) return null;
@@ -148,7 +152,7 @@ export function IndexPrompt({ address }: { address: string | null }) {
         </div>
         {engaged ? (
           <span className="ix-note__pct">
-            {pct === null ? '…' : `${Math.round(pct)}%`}
+            {pct === null ? '…' : `${progress.done ? 100 : Math.min(99, Math.floor(pct))}%`}
           </span>
         ) : (
           <>

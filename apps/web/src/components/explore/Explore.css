@@ -12,21 +12,18 @@
  * dashboard root, so nothing here can reach another page.
  */
 
-/* --- cards: the head stays, the body scrolls ------------------------------ */
+/* --- cards: the page scrolls, the card does not clip its last row ---------- */
 
-/* The portfolio's panels scroll as a whole, head included. A ranking read down
-   past its tenth row should keep its title and column meaning in view, so here
-   the card body is the scroller and the 40px head stays put. The fade at the
-   bottom edge is the dashboard's own (dashboard.css, "A SEVERED ROW IS NOT A
-   SCROLL CUE"), moved to the element that now scrolls. */
+.vs-explore .pf-card {
+  height: auto;
+  container-type: inline-size;
+  container-name: panel;
+}
 .vs-explore .vs-card > .pf-card__body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 14px), transparent 100%);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
+  flex: none;
+  overflow: visible;
+  -webkit-mask-image: none;
+  mask-image: none;
 }
 
 /* The overview is a head plus a stat strip and nothing else: the strip IS the
@@ -224,8 +221,40 @@
    itself and takes the numeral face here instead. */
 .vs-explore .mkt-tapetable.vs-tape td.mkt-tape-time { font-family: var(--font-num); }
 
-/* Overview | Cohorts: the dashboards' own tab strip, above whichever view is on. */
-.vs-explore-page { display: flex; flex-direction: column; gap: 4px; min-height: 100%; }
+/* Traders | Cohorts: the dashboards' own tab strip, above whichever view is on. */
+.vs-explore-page { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 100%; min-width: 0; }
 .ex-views .dash-tabs__bar { border-radius: var(--radius-md, 8px); }
 .ex-views__tabs { display: flex; align-items: stretch; }
 .ex-cohorts { padding: 0; }
+
+/* One ranking, then the tape and positioning beside it. */
+.ex-board {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ex-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.vs-explore .cp-seg { max-width: 100%; }
+.vs-explore .cp-seg > button:hover:not(:disabled) { color: var(--text); background: transparent; }
+.ex-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.8fr);
+  gap: var(--sp-2);
+  align-items: start;
+}
+.ex-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+@media (max-width: 960px) {
+  .ex-grid { grid-template-columns: minmax(0, 1fr); }
+}

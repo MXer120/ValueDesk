@@ -2,50 +2,10 @@
    centred title, hairline rows and full-width action. This file only adds
    what that sheet does not already have. */
 
-/* Four labels, one hairline each. Done and current are the text colour;
-   the rest stay dim. The bar eases when the step changes; the sheet's
-   cross-fade handles the body. */
-.vs-steps {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.vs-steps li {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  color: var(--dim);
-  font-size: var(--fs-micro);
-  font-weight: 500;
-  line-height: 1.2;
-  transition: color 220ms var(--ease-out);
-}
-.vs-steps li::before {
-  content: '';
-  height: 2px;
-  border-radius: 1px;
-  background: var(--line);
-  transition: background 220ms var(--ease-out);
-}
-.vs-steps li.is-done,
-.vs-steps li.is-now { color: var(--text); }
-.vs-steps li.is-done::before,
-.vs-steps li.is-now::before { background: var(--text); }
-.vs-steps button {
-  min-height: 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-.vs-steps button:hover { color: var(--text); }
+/* The command palette's sliding ink, full width of the sheet. */
+.vs-setup .cp-seg { width: 100%; }
+.vs-setup .cp-seg > button { flex: 1; justify-content: center; min-height: 0; }
+.vs-setup .cp-seg > button:hover:not(:disabled) { color: var(--text); background: transparent; }
 
 .vs-setup__index {
   display: flex;
@@ -54,8 +14,6 @@
   gap: var(--sp-2);
 }
 .vs-setup__index .fx-link { min-height: 0; }
-.vs-setup__index .segmented { width: 100%; }
-.vs-setup__index .segmented button { min-height: 0; }
 
 .vs-setup__fig {
   margin: 0;

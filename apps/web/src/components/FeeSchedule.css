@@ -70,10 +70,22 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  display: flex;
   width: 100%;
+  padding: 2px 0;
   background: var(--glass-sheet-bg);
 }
+/* The command palette's sliding ink, stretched to the sheet. */
+.fee-sched .cp-seg { width: 100%; }
+.fee-sched .cp-seg > button { flex: 1; justify-content: center; }
+.fee-sched .cp-seg > button:hover:not(:disabled) { color: var(--text); background: transparent; }
 
+.fee-sched__tables {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
 .fee-sched__block {
   display: flex;
   flex-direction: column;

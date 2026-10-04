@@ -47,6 +47,11 @@ const GW: Record<GwStream, { kind: HistoryKind; engine: HistoryEngine; label: st
 };
 
 const STREAMS = Object.keys(GW) as GwStream[];
+
+/** Every gateway stream and the ledger have walked back to their start. */
+function caughtUp(index: StoredIndex): boolean {
+  return STREAMS.every((s) => index.c[GW[s].field].x) && index.c.l.x;
+}
 const STABLE = /^(v)?(usdc|usdt|dai|usd)$/i;
 /** alpha-biz is a different host. 5 matches the gateway's flat account-read weight. */
 const LEDGER_WEIGHT = 5;
@@ -253,7 +258,9 @@ async function main(address: string, signal: AbortSignal): Promise<void> {
   };
 
   const note = (stream: string, cursorMs: number | null, notice: string | null) => {
-    publish({ running: true, pages: state.pages, stream, cursorMs, done: false, notice });
+    // A caught-up index still checks for newer rows. That check is not a new
+    // walk, so the toast stays finished instead of reopening at 100%.
+    publish({ running: true, pages: state.pages, stream, cursorMs, done: caughtUp(state.index), notice });
   };
 
   const drainGateway = async (stream: GwStream): Promise<void> => {
@@ -396,11 +403,11 @@ async function main(address: string, signal: AbortSignal): Promise<void> {
     else if (state.index.c.l.h === 0) await walk('older', 0);
   };
 
-  publish({ running: true, pages: 0, stream: '', cursorMs: null, done: false, notice: null });
+  publish({ running: true, pages: 0, stream: '', cursorMs: null, done: caughtUp(state.index), notice: null });
   while (!signal.aborted) {
     await Promise.all([...STREAMS.map((s) => drainGateway(s)), drainFlows()]);
     if (signal.aborted) break;
-    const caught = STREAMS.every((s) => state.index.c[GW[s].field].x) && state.index.c.l.x;
+    const caught = caughtUp(state.index);
     let cursorMs: number | null = null;
     for (const s of STREAMS) {
       const c = state.index.c[GW[s].field];
@@ -409,6 +416,8 @@ async function main(address: string, signal: AbortSignal): Promise<void> {
     }
     publish({ running: false, done: caught, pages: state.pages, cursorMs, notice: null });
     await sleep(caught ? 60_000 : 5_000, signal);
-    if (!signal.aborted) publish({ running: true, done: false });
+    // Only an unfinished walk looks busy again. A caught index keeps `done`
+    // through the quiet minute and the next newer-row check.
+    if (!signal.aborted && !caught) publish({ running: true, done: false });
   }
 }

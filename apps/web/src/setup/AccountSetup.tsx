@@ -7,6 +7,7 @@ import { api } from '../api';
 import { fmt, fmtUsd } from '../format';
 import { Modal } from '../components/Modal';
 import { CrossFade } from '../components/motion';
+import { Seg } from '../components/palette/ui';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { loadDashboard, saveDashboard } from '../dashboard/storage';
 import { potatoChosenByUser, probeDevice, readPotatoOn, suggestPotato, writePotato, type DeviceProbe } from './device';
@@ -230,13 +231,12 @@ export function AccountSetup({ address }: { address: string | null }) {
       size="md"
       className="fx vs-setup"
     >
-      <ol className="vs-steps" aria-label="Setup progress">
-        {STEP_LABELS.map((label, i) => (
-          <li key={label} className={i < step ? 'is-done' : i === step ? 'is-now' : undefined}>
-            <button type="button" onClick={() => go(i as Step)} aria-current={i === step ? 'step' : undefined}>{label}</button>
-          </li>
-        ))}
-      </ol>
+      <Seg
+        label="Setup progress"
+        value={String(step) as '0' | '1' | '2' | '3'}
+        onChange={(id) => go(Number(id) as Step)}
+        options={STEP_LABELS.map((label, i) => ({ id: String(i) as '0' | '1' | '2' | '3', label }))}
+      />
 
       {progress.notice && <p className="fx-note fx-note--warn">{progress.notice}</p>}
 
@@ -244,10 +244,9 @@ export function AccountSetup({ address }: { address: string | null }) {
         <div className="fx-stack">
           {step === 0 && (
             <>
-              <p className="fx-note">History is counted on this browser. Trades stay on SoDEX.</p>
               <div className="fx-box vs-setup__box">
                 <div className="fx-kv">
-                  <div><span>Status</span><b>{!indexOn ? 'Paused' : progress.done && !progress.running ? 'Caught up' : 'Indexing'}</b></div>
+                  <div><span>Status</span><b>{!indexOn ? 'Paused' : progress.done ? 'Caught up' : 'Indexing'}</b></div>
                   <div><span>Progress</span><b>{progressText}</b></div>
                 </div>
               </div>
@@ -263,19 +262,12 @@ export function AccountSetup({ address }: { address: string | null }) {
                 >
                   {indexOn ? 'Pause' : 'Resume'}
                 </button>
-                <div className="segmented" role="group" aria-label="Index speed">
-                  {SPEED_ORDER.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      className={speed === id ? 'active' : ''}
-                      aria-pressed={speed === id}
-                      onClick={() => { setIndexSpeed(id); setSpeed(id); }}
-                    >
-                      {id === 'giga' ? 'Giga' : SPEEDS[id].label}
-                    </button>
-                  ))}
-                </div>
+                <Seg
+                  label="Index speed"
+                  value={speed}
+                  onChange={(id) => { setIndexSpeed(id); setSpeed(id); }}
+                  options={SPEED_ORDER.map((id) => ({ id, label: id === 'giga' ? 'Giga' : SPEEDS[id].label }))}
+                />
                 <button
                   type="button"
                   className="fx-link"
@@ -289,7 +281,6 @@ export function AccountSetup({ address }: { address: string | null }) {
 
           {step === 1 && (
             <>
-              <p className="fx-note">Recommended: {PROFILE_LABEL[suggested]}.</p>
               <div className="vs-setup__choices" role="group" aria-label="Layout profile">
                 {([
                   ['beginner', 'Beginner', 'Less on screen. The denser optional panels stay off.'],
@@ -320,11 +311,6 @@ export function AccountSetup({ address }: { address: string | null }) {
           {step === 2 && (
             <>
               <p className="vs-setup__fig">{probe ? deviceLine(probe) : 'Checking…'}</p>
-              <p className="fx-note">
-                {probe && suggestPotato(probe)
-                  ? 'Four cores or fewer, and 4 GB or less, so potato mode starts on.'
-                  : 'Potato mode stays off unless you turn it on.'}
-              </p>
               <button
                 type="button"
                 className={`fx-opt${potatoOn ? ' is-on' : ''}`}
@@ -347,11 +333,6 @@ export function AccountSetup({ address }: { address: string | null }) {
 
           {step === 3 && (
             <>
-              <p className="fx-note">
-                {progress.done
-                  ? 'History is caught up. New activity is picked up from here.'
-                  : 'Indexing continues in the background.'}
-              </p>
               <div className="fx-box vs-setup__box">
                 <div className="fx-kv">
                   <div><span>Layout</span><b>{PROFILE_LABEL[profile]}</b></div>
@@ -375,7 +356,7 @@ export function AccountSetup({ address }: { address: string | null }) {
 
       <div className="vs-setup__actions">
         <button type="button" className="fx-cta" onClick={next}>
-          {step >= 3 ? 'Explore while we set up' : 'Continue'}
+          {step >= 3 ? 'Done' : 'Continue'}
         </button>
         {step < 3 && (
           <button type="button" className="fx-link" onClick={finish}>Explore while we set up</button>

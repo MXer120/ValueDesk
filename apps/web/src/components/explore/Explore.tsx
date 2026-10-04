@@ -1,26 +1,15 @@
 /**
- * Explore: discover traders across venues.
+ * Explore: one ranking, the large-trade tape, and where top traders are positioned.
  *
- * BUILT FROM VALUETRADE'S OWN PIECES, NOT A NEW LOOK. The page is a dashboard -
- * the same react-grid-layout machinery, 4px gutters and card panels as
- * /portfolio and /points - and every panel is the portfolio design system's
- * `Card` / `Stat` (components/Portfolio.tsx), scoped under `.pf` the way those
- * two pages scope it. Tables are the account band's `.acct-table` (20px rows,
- * sentence-case heads, hover tint, text actions), the large-trade tape is the
- * trade page's `.mkt-tapetable`, the long/short bar is the exposure card's
- * `.pf-split`, and the venue and size selectors are `.pf-seg` segments.
- * Explore.css only fits those together; it introduces no colour, size or radius.
- *
- * EVERY SECTION FAILS ON ITS OWN. Rankings, the tape and positioning are three
- * requests; each renders its own loading / not-available / error / empty state,
- * so a venue whose backend is not built yet reads as "not available yet" in the
- * sections it feeds and nowhere else.
+ * The same pieces as the rest of the app: portfolio cards, the account table,
+ * the trade tape, the exposure bar, and the command palette's sliding segment.
+ * Rankings, the tape and positioning each fail on their own.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { Dashboard } from '../../dashboard/Dashboard';
-import type { DashboardConfig, PanelDefinition, PanelPlacement } from '../../dashboard/types';
-import { Card, Stat } from '../portfolio/parts';
+import { Card } from '../portfolio/parts';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
+import { CrossFade } from '../motion';
+import { Seg } from '../palette/ui';
 import { useAsync, useStored, useSymbols } from '../../hooks';
 import { usePrivacy, maskAddress } from '../../privacy';
 import { DASH, marketName, shortAddr } from '../../format';
@@ -30,7 +19,7 @@ import {
 } from '../../vsApi';
 import {
   SEGMENT_COLUMNS, SEGMENT_FALLBACK, SEGMENT_IDS, VENUE_SHORT, WHALE_MIN_OPTIONS,
-  fmtCell, fmtClock, fmtCount, fmtPx, fmtUsdExact, fmtUsdShort, longShare, marketKey,
+  fmtCell, fmtClock, fmtPx, fmtUsdExact, fmtUsdShort, longShare, marketKey,
   rollUpPositioning, rowsFor, tradeKeys,
   type SegmentId, type VenueFilter,
 } from './model';
@@ -149,49 +138,41 @@ const TAPE_POLL_MS = 5_000;
 const POSITIONING_POLL_MS = 30_000;
 /** The server rebuilds rankings at most once a minute. */
 const EXPLORE_POLL_MS = 60_000;
-const SEGMENT_ROWS = 10;
+const SEGMENT_ROWS = 15;
 const TAPE_ROWS = 40;
+const TAPE_SHOWN = 12;
+const POSITION_ROWS = 8;
+
+const RANK_LABEL: Record<SegmentId, string> = {
+  'top-pnl': 'PnL',
+  'top-roi': 'ROI',
+  consistent: 'Consistent',
+  whales: 'Whales',
+  rising: 'Rising',
+  'most-active': 'Active',
+};
 
 /* ===========================================================================
  *  SMALL PIECES
  * ======================================================================== */
 
-/**
- * A segmented control on the design system's classes - the same local helper
- * Points.tsx keeps, because `PeriodSeg` is welded to the period union.
- */
-function Seg<T extends string | number>({ value, options, onChange, label }: {
-  value: T;
-  options: ReadonlyArray<{ v: T; label: string; hint?: string }>;
-  onChange: (v: T) => void;
-  label: string;
-}) {
-  return (
-    <div className="pf-seg" role="tablist" aria-label={label}>
-      {options.map((o) => (
-        <button
-          key={String(o.v)}
-          type="button"
-          role="tab"
-          aria-selected={o.v === value}
-          title={o.hint}
-          className={`pf-ctl ${o.v === value ? 'is-on' : ''}`}
-          onClick={() => onChange(o.v)}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 const VENUE_OPTIONS = VENUE_FILTERS.map((v) => ({
-  v,
-  label: v === 'all' ? 'All' : VENUE_LABEL[v],
-  hint: v === 'all' ? 'Every venue' : `${VENUE_LABEL[v]} only`,
+  id: v,
+  label: v === 'all' ? 'All' : VENUE_SHORT[v],
+  title: v === 'all' ? 'Every venue' : VENUE_LABEL[v],
 }));
 
-const MIN_OPTIONS = WHALE_MIN_OPTIONS.map((o) => ({ v: o.v, label: o.label, hint: `Trades of ${o.label} or more` }));
+const RANK_OPTIONS = SEGMENT_IDS.map((id) => ({
+  id,
+  label: RANK_LABEL[id],
+  title: SEGMENT_FALLBACK[id].subtitle,
+}));
+
+const MIN_OPTIONS = WHALE_MIN_OPTIONS.map((o) => ({
+  id: String(o.v),
+  label: o.label,
+  title: `Trades of ${o.label} or more`,
+}));
 
 function VenueBadge({ venue }: { venue: Venue }) {
   return <span className="badge vs-venue" title={VENUE_LABEL[venue]}>{VENUE_SHORT[venue]}</span>;
@@ -241,69 +222,6 @@ function StaleNote({ s }: { s: Section<unknown> }) {
 /* ===========================================================================
  *  PANELS
  * ======================================================================== */
-
-function OverviewPanel({ c }: { c: ExploreContext }) {
-  const ex = c.explore;
-  const k = ex.data?.kpis ?? null;
-  const live = new Set(k?.venues ?? []);
-
-  return (
-    <Card
-      title="Explore"
-      className="vs-card vs-card--flush"
-      action={<Seg value={c.venue} options={VENUE_OPTIONS} onChange={c.setVenue} label="Venue" />}
-    >
-      <div className="pf-statstrip vs-kpis">
-        <Stat
-          label="Traders tracked"
-          value={k ? fmtCount(k.tracked) : DASH}
-          cls={k ? undefined : 'pf-dim'}
-          hint="Every account the live venues rank, summed across venues. The venue filter does not change it."
-        />
-        <Stat
-          label="24h volume, top traders"
-          value={fmtUsdShort(k?.volume24h)}
-          cls={k?.volume24h != null ? undefined : 'pf-dim'}
-          hint={
-            k?.volume24h != null
-              ? `${fmtUsdExact(k.volume24h)} - summed over the top traders Explore holds, not the venues' total.`
-              : 'No venue reports a 24h volume for its top traders yet.'
-          }
-        />
-        <div className="pf-stat" title="Which venues answered the last ranking request.">
-          <span className="pf-stat__label">Venues</span>
-          <span className="vs-venues">
-            {VS_VENUES.map((v) => {
-              const state = !ex.data && ex.loading ? 'pending' : live.has(v) ? 'live' : 'down';
-              return (
-                <span
-                  key={v}
-                  className={`pf-chip ${state === 'live' ? 'pf-chip--ok' : state === 'down' ? 'pf-chip--warn' : ''}`}
-                >
-                  {VENUE_LABEL[v]}
-                  {state === 'live' ? ' live' : state === 'down' ? ' unavailable' : ''}
-                </span>
-              );
-            })}
-          </span>
-        </div>
-        <Stat
-          label="Snapshot"
-          value={ex.data ? fmtClock(ex.data.updatedAt) : DASH}
-          cls={ex.data ? undefined : 'pf-dim'}
-          hint="Time of the oldest leaderboard snapshot on this page. Rankings refresh every minute."
-        >
-          {/* Said once, here, for all six rankings - they share this one request. */}
-          {ex.stale ? (
-            <span className="pf-stat__sub pf-note--warn">
-              Last refresh failed; showing the previous rankings.
-            </span>
-          ) : null}
-        </Stat>
-      </div>
-    </Card>
-  );
-}
 
 function TraderCell({ r, me }: { r: TraderRow; me: boolean }) {
   const hidden = usePrivacy().isHidden('address') && me;
@@ -385,19 +303,18 @@ function SegmentPanel({ c, id }: { c: ExploreContext; id: SegmentId }) {
   }
 
   return (
-    <Card
-      title={meta.title}
-      className="vs-card"
-      action={<span className="pf-unit vs-sub" title={meta.subtitle}>{meta.subtitle}</span>}
-    >
-      {body}
+    <Card title={meta.title} className="vs-card">
+      <CrossFade viewKey={`${id}|${c.venue}`}>
+        {body}
+      </CrossFade>
+      <StaleNote s={ex} />
     </Card>
   );
 }
 
 function TapePanel({ c }: { c: ExploreContext }) {
   const s = c.whales;
-  const trades = (s.data ?? []).slice(0, TAPE_ROWS);
+  const trades = (s.data ?? []).slice(0, TAPE_SHOWN);
   const keys = tradeKeys(trades);
   const state = sectionState(s, 'large trades', c.venue);
 
@@ -405,7 +322,15 @@ function TapePanel({ c }: { c: ExploreContext }) {
     <Card
       title="Large trades"
       className="vs-card"
-      action={<Seg value={c.minUsd} options={MIN_OPTIONS} onChange={c.setMinUsd} label="Minimum trade size" />}
+      action={(
+        <Seg
+          size="sm"
+          label="Minimum trade size"
+          value={String(c.minUsd)}
+          onChange={(id) => c.setMinUsd(Number(id))}
+          options={MIN_OPTIONS}
+        />
+      )}
     >
       {state ?? (trades.length === 0 ? (
         <Notice>No {venueWord(c.venue)}trade of {fmtUsdShort(c.minUsd)} or more yet.</Notice>
@@ -472,14 +397,13 @@ function TapePanel({ c }: { c: ExploreContext }) {
 
 function PositioningPanel({ c }: { c: ExploreContext }) {
   const s = c.positioning;
-  const rows = useMemo(() => rollUpPositioning(s.data ?? [], 20), [s.data]);
+  const rows = useMemo(() => rollUpPositioning(s.data ?? [], POSITION_ROWS), [s.data]);
   const state = sectionState(s, 'top-trader positioning', c.venue);
 
   return (
     <Card
-      title="Top-trader positioning"
+      title="Positioning"
       className="vs-card"
-      action={<span className="pf-unit vs-sub" title="Open positions of the tracked top traders, by market">By market</span>}
     >
       {state ?? (rows.length === 0 ? (
         <Notice>No {venueWord(c.venue)}top trader holds an open position yet.</Notice>
@@ -544,122 +468,12 @@ function PositioningPanel({ c }: { c: ExploreContext }) {
 }
 
 /* ===========================================================================
- *  REGISTRY AND LAYOUT
- *
- *  Same shape and units as the portfolio dashboard in dashboard/layout.ts: 48
- *  columns, a fixed 26px row (the page scrolls, so it cannot derive its row
- *  from its own height), 4px gutters.
- * ======================================================================== */
-
-const segPanel = (id: SegmentId): PanelDefinition<ExploreContext> => ({
-  id: `seg-${id}`,
-  title: SEGMENT_FALLBACK[id].title,
-  pad: false,
-  scroll: 'hidden',
-  minW: 10,
-  minH: 6,
-  render: (c) => <SegmentPanel c={c} id={id} />,
-});
-
-const EXPLORE_PANELS: PanelDefinition<ExploreContext>[] = [
-  {
-    id: 'overview',
-    title: 'Explore overview',
-    pad: false,
-    scroll: 'hidden',
-    minW: 12,
-    minH: 4,
-    render: (c) => <OverviewPanel c={c} />,
-  },
-  ...SEGMENT_IDS.map(segPanel),
-  {
-    id: 'tape',
-    title: 'Large trades',
-    pad: false,
-    scroll: 'hidden',
-    minW: 10,
-    minH: 6,
-    render: (c) => <TapePanel c={c} />,
-  },
-  {
-    id: 'positioning',
-    title: 'Top-trader positioning',
-    pad: false,
-    scroll: 'hidden',
-    minW: 10,
-    minH: 6,
-    render: (c) => <PositioningPanel c={c} />,
-  },
-];
-
-/** Two ranking columns and a live rail on the right, the trade page's arrangement. */
-const EX_LG: PanelPlacement[] = [
-  { i: 'overview',         x: 0,  y: 0,  w: 48, h: 4 },
-  { i: 'seg-top-pnl',      x: 0,  y: 4,  w: 17, h: 11 },
-  { i: 'seg-top-roi',      x: 17, y: 4,  w: 17, h: 11 },
-  { i: 'seg-consistent',   x: 0,  y: 15, w: 17, h: 11 },
-  { i: 'seg-whales',       x: 17, y: 15, w: 17, h: 11 },
-  { i: 'seg-rising',       x: 0,  y: 26, w: 17, h: 11 },
-  { i: 'seg-most-active',  x: 17, y: 26, w: 17, h: 11 },
-  { i: 'tape',             x: 34, y: 4,  w: 14, h: 18 },
-  { i: 'positioning',      x: 34, y: 22, w: 14, h: 15 },
-];
-
-/** Two columns; the live pair sits under the first rankings row. */
-const EX_MD: PanelPlacement[] = [
-  { i: 'overview',         x: 0,  y: 0,  w: 48, h: 4 },
-  { i: 'seg-top-pnl',      x: 0,  y: 4,  w: 24, h: 11 },
-  { i: 'seg-top-roi',      x: 24, y: 4,  w: 24, h: 11 },
-  { i: 'tape',             x: 0,  y: 15, w: 24, h: 17 },
-  { i: 'positioning',      x: 24, y: 15, w: 24, h: 17 },
-  { i: 'seg-consistent',   x: 0,  y: 32, w: 24, h: 11 },
-  { i: 'seg-whales',       x: 24, y: 32, w: 24, h: 11 },
-  { i: 'seg-rising',       x: 0,  y: 43, w: 24, h: 11 },
-  { i: 'seg-most-active',  x: 24, y: 43, w: 24, h: 11 },
-];
-
-/**
- * One column, in reading order.
- *
- * Taller ranking panels than on a desktop, and not by choice: below a 993px
- * window responsive.css gives every button in the dashboard a 40px touch
- * target, which makes a row carrying Scan / Copy 40px tall. Ten of them plus the
- * head is 17 rows; at 11 a phone would scroll inside a panel inside the page.
- */
-const column = (overviewH: number): PanelPlacement[] => {
-  const order: Array<[string, number]> = [
-    ['overview', overviewH],
-    ['seg-top-pnl', 17],
-    ['tape', 15],
-    ['seg-top-roi', 17],
-    ['seg-consistent', 17],
-    ['seg-whales', 17],
-    ['seg-rising', 17],
-    ['seg-most-active', 17],
-    ['positioning', 17],
-  ];
-  let y = 0;
-  return order.map(([i, h]) => {
-    const p = { i, x: 0, y, w: 48, h };
-    y += h;
-    return p;
-  });
-};
-
-const ROW = { cols: 48, rowHeight: 26, margin: [4, 4] as [number, number], containerPadding: [0, 0] as [number, number] };
-
-const EXPLORE_DASHBOARD: DashboardConfig = {
-  id: 'explore',
-  version: 1,
-  breakpoints: { lg: 1200, md: 800, sm: 552, xs: 0 },
-  grid: { lg: ROW, md: ROW, sm: ROW, xs: ROW },
-  // xs: the four KPIs go two by two (see Explore.css), which needs two more rows.
-  layouts: { lg: EX_LG, md: EX_MD, sm: column(4), xs: column(6) },
-};
-
-/* ===========================================================================
  *  THE PAGE
  * ======================================================================== */
+
+function isSegment(v: string): v is SegmentId {
+  return (SEGMENT_IDS as readonly string[]).includes(v);
+}
 
 export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExploreProps) {
   const pageVisible = usePageVisible();
@@ -680,6 +494,8 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
 
   const [storedVenue, setVenue] = useStored<VenueFilter>('vs.explore.venue', 'all');
   const venue: VenueFilter = VENUE_FILTERS.includes(storedVenue) ? storedVenue : 'all';
+  const [storedSeg, setSegment] = useStored<string>('vs.explore.segment', 'top-pnl');
+  const segment: SegmentId = isSegment(storedSeg) ? storedSeg : 'top-pnl';
   const [storedMin, setMinUsd] = useStored<number>('vs.explore.minUsd', DEFAULT_MIN_USD);
   const minUsd = WHALE_MIN_OPTIONS.some((o) => o.v === storedMin) ? storedMin : DEFAULT_MIN_USD;
 
@@ -713,7 +529,7 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
           <div className="ex-views__tabs" role="tablist" aria-label="Explore">
             {(['overview', 'cohorts'] as ExploreView[]).map((v) => (
               <button key={v} type="button" role="tab" aria-selected={view === v} className={`dash-tab${view === v ? ' is-active' : ''}`} onClick={() => setView(v)}>
-                {v === 'overview' ? 'Overview' : 'Cohorts'}
+                {v === 'overview' ? 'Traders' : 'Cohorts'}
               </button>
             ))}
           </div>
@@ -725,14 +541,19 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
           <Cohorts onScan={(a) => { window.location.href = `/scan?find=${encodeURIComponent(a)}`; }} />
         </div>
       ) : (
-        <Dashboard
-          config={EXPLORE_DASHBOARD}
-          panels={EXPLORE_PANELS}
-          context={context}
-          /* `pf` is the scope the portfolio design system's rules match against -
-             the same reason PointsDashboard passes it. */
-          className="pf vs-explore"
-        />
+        <div className="pf vs-explore ex-board">
+          <div className="ex-bar">
+            <Seg label="Ranking" value={segment} onChange={setSegment} options={RANK_OPTIONS} />
+            <Seg label="Venue" value={venue} onChange={setVenue} options={VENUE_OPTIONS} />
+          </div>
+          <div className="ex-grid">
+            <SegmentPanel c={context} id={segment} />
+            <div className="ex-side">
+              <TapePanel c={context} />
+              <PositioningPanel c={context} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
