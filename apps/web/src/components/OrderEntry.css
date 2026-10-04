@@ -1382,9 +1382,8 @@ button.oe-select[aria-expanded='true'] {
 /* ===========================================================================
    THE FEE ROW.
 
-   Taker / maker with no words: the pair is always in that order and always in
-   that place, so the labels restated a convention the numbers already carry -
-   and they cost the row the width a discount needs.
+   One pair, taker then maker, with the ValueDesk fee included. The words live
+   on the button title; the click opens the fee schedule.
    ======================================================================== */
 .oe-feebtn {
   height: auto; padding: 0;

@@ -400,3 +400,117 @@ export function fmtThreshold(usd: number): string {
 /** SOSO amounts, which span 30 to 1,500,000 and read better grouped. */
 export const fmtSoso = (n: number): string =>
   Number.isFinite(n) ? n.toLocaleString('en-US') : '-';
+
+/** Venue rate plus the ValueDesk builder fraction. Both are fractions of notional. */
+export function withBuilder(venueRate: number, builderFraction: number): number {
+  const add = Number.isFinite(builderFraction) ? builderFraction : 0;
+  return venueRate + add;
+}
+
+/**
+ * One engine's `/fee-rate`, with tier fields that were absent left absent.
+ *
+ * A missing `makerRebateTier` is not tier 0. Tier 0 is a real report (no rebate,
+ * base volume tier, no stake). Coercing a hole to 0 would mark the wrong row.
+ */
+export interface VenueFeeRead {
+  taker: number;
+  maker: number;
+  feeTier: number | null;
+  stakingTier: number | null;
+  makerRebateTier: number | null;
+}
+
+function wholeTier(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) && v >= 0 ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v.trim());
+    return Number.isInteger(n) && n >= 0 ? n : null;
+  }
+  return null;
+}
+
+function finiteRate(v: unknown): number | null {
+  const n = typeof v === 'number'
+    ? v
+    : typeof v === 'string' && v.trim() !== ''
+      ? Number(v.trim())
+      : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Accept the gateway body (`{ engine, feeRate }`), an already-unwrapped rate,
+ * or anything else (null). Rates are required. Tier indices are not.
+ */
+export function readVenueFee(body: unknown): VenueFeeRead | null {
+  if (!body || typeof body !== 'object') return null;
+  let node = body as Record<string, unknown>;
+  const inner = node.feeRate;
+  if (inner && typeof inner === 'object') node = inner as Record<string, unknown>;
+  const taker = finiteRate(node.takerFeeRate);
+  const maker = finiteRate(node.makerFeeRate);
+  if (taker === null || maker === null) return null;
+  return {
+    taker,
+    maker,
+    feeTier: wholeTier(node.feeTier),
+    stakingTier: wholeTier(node.stakingTier),
+    makerRebateTier: wholeTier(node.makerRebateTier),
+  };
+}
+
+export interface TierMark {
+  /** Row to mark when the engines agree, or only one of them reported a row. */
+  highlight: number | null;
+  /** Both engines reported a tier and the two indices differ. Mark no row. */
+  split: boolean;
+}
+
+/**
+ * Staking row for the account, from the two engines' own indices.
+ *
+ * SoDEX's trade ticket takes Math.max of the two. That hides a disagreement.
+ * Here a shared index is the row, a single report is the row, and two different
+ * reports mark nothing — the screen names both numbers instead.
+ */
+export function stakingMark(spot: number | null, perps: number | null): TierMark {
+  const reported = (n: number | null): number | null =>
+    n !== null && Number.isInteger(n) && n >= 0 ? n : null;
+  const a = reported(spot);
+  const b = reported(perps);
+  if (a !== null && b !== null && a !== b) return { highlight: null, split: true };
+  const tier = a ?? b;
+  if (tier === null || tier > STAKING_TIERS.length - 1) return { highlight: null, split: false };
+  return { highlight: tier, split: false };
+}
+
+export interface LadderRows {
+  /** Entry engine's row, when that index is in the table. */
+  highlight: number | null;
+  /** The other engine's row, when it is in the table and is a different row. */
+  also: number | null;
+}
+
+function rowIn(n: number | null, min: number, max: number): number | null {
+  return n !== null && Number.isInteger(n) && n >= min && n <= max ? n : null;
+}
+
+/** Volume-tier rows. Tier 0 is a real row. An index past the table is not. */
+export function feeTierRows(entry: number | null, other: number | null): LadderRows {
+  const last = FEE_TIERS.length - 1;
+  const e = rowIn(entry, 0, last);
+  const o = rowIn(other, 0, last);
+  return { highlight: e, also: o !== null && o !== e ? o : null };
+}
+
+/**
+ * Maker-rebate rows. Tier 0 means the venue reported "no rebate", which is not
+ * a row of the rebate table. Tiers 1–3 are the rows.
+ */
+export function rebateRows(entry: number | null, other: number | null): LadderRows {
+  const last = MAKER_REBATE_TIERS.length;
+  const e = rowIn(entry, 1, last);
+  const o = rowIn(other, 1, last);
+  return { highlight: e, also: o !== null && o !== e ? o : null };
+}

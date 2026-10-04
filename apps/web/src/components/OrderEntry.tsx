@@ -48,14 +48,16 @@ import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus } from '../hooks';
-import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, fmtUsd, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
+import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useTradeGate } from './account/useTradeGate';
 import { useBuilderFee } from './account/useBuilderFee';
-import { requestAdvanced } from './account/actions';
+import { FeeSchedule } from './FeeSchedule';
+import { useVenueFees } from './useVenueFees';
+import { fmtRate, withBuilder } from '../fees';
 import { DraftInput, decimalInput, integerInput, tickInput, trimZeros } from './numberInput';
 import { Collapse } from './motion';
 import { notifyTrade } from '../toast';
@@ -681,12 +683,12 @@ export function OrderEntry({
    * submit button reads back the choice.
    */
   const [side, setSide] = useState<'buy' | 'sell'>('buy');
-  /** Whether the fee row is expanded to show which tier produced it. */
   /* The two account facts at the top of the ticket are the balance and the
      position - both named incognito categories, and both on screen whenever
      the trade page is. */
   const maskFunds = useMask('funds');
   const maskPositions = useMask('positions');
+  /** The fee schedule, opened from the fee row. */
   const [feesOpen, setFeesOpen] = useState(false);
   /** One switch for both exits, per the ticket's own layout. */
   const [useExits, setUseExits] = useState(false);
@@ -1026,48 +1028,34 @@ export function OrderEntry({
   });
 
   /*
-   * TWO fee schedules, and the difference between them is the whole point.
-   *
-   * `sym.makerFee` / `sym.takerFee` is the market's PUBLISHED default. The
-   * account's own rate comes from the venue's fee-rate endpoint and is what will
-   * actually be charged - lower when volume or staking has earned a tier. Showing
-   * only the symbol default told a discounted account the wrong number; showing
-   * only the account rate hid the discount it had earned.
+   * The pair on the fee row is what this order pays. Taker, then maker: the
+   * venue's rate for this account, plus the ValueDesk builder fee on this side.
+   * Spot buys name the builder and SoDEX charges nothing for it, so that addend
+   * is zero there. The symbol's published rate is struck through when the
+   * account pays less. Both engines' tiers live in the schedule the row opens.
    */
-  const feeRes2 = useAsync(
-    () => api.feeRate(engine, connectedAddress!),
-    [engine, connectedAddress],
-    { enabled: !!connectedAddress },
-  );
-  const acctFee = (() => {
-    const r = (feeRes2.data?.feeRate ?? feeRes2.data) as
-      | { takerFeeRate?: string; makerFeeRate?: string; feeTier?: number; stakingTier?: number }
-      | undefined;
-    return r && r.takerFeeRate !== undefined && r.makerFeeRate !== undefined ? r : null;
-  })();
-
+  const venueFees = useVenueFees(connectedAddress ?? null);
+  const acctFee = engine === 'spot' ? venueFees.spot : venueFees.perps;
   const defTaker = sym ? num(sym.takerFee) : null;
   const defMaker = sym ? num(sym.makerFee) : null;
-  const ownTaker = acctFee ? num(acctFee.takerFeeRate) : null;
-  const ownMaker = acctFee ? num(acctFee.makerFeeRate) : null;
-  /* A discount only counts if it is actually cheaper - an account on the base
-     tier reports the same numbers, and striking those through would invent a
-     saving that is not there. A hair of tolerance because these are decimal
-     strings from two different endpoints. */
-  const discounted =
-    ownTaker !== null && ownMaker !== null && defTaker !== null && defMaker !== null
-    && (ownTaker < defTaker - 1e-9 || ownMaker < defMaker - 1e-9);
-
-  const pctRate = (v: number) => `${fmt(v * 100, 4)}%`;
-  /** Taker first: it is the higher number and the one a market order pays. */
-  const feePair = (t: number, m: number) => `${pctRate(t)} / ${pctRate(m)}`;
-  /*
-   * Valuescan's builder fee on THIS order - null unless a builder is configured
-   * and the order will carry it (account/useBuilderFee.ts). SoDEX charges it per
-   * fill on top of the pair above, so it gets its own line and is never folded
-   * into the venue's rates.
-   */
+  const ownTaker = acctFee ? acctFee.taker : null;
+  const ownMaker = acctFee ? acctFee.maker : null;
   const builderFee = useBuilderFee(engine, side, connectedAddress);
+  const bNow = builderFee?.charged ? builderFee.fraction : 0;
+  const bFull = builderFee?.charged ? builderRateToFraction(builderFee.fullRate ?? builderFee.rate) : 0;
+  const showTaker = ownTaker ?? defTaker;
+  const showMaker = ownMaker ?? defMaker;
+  const pairNow = showTaker !== null && showMaker !== null
+    ? `${fmtRate(withBuilder(showTaker, bNow))} / ${fmtRate(withBuilder(showMaker, bNow))}`
+    : null;
+  const pairWas = defTaker !== null && defMaker !== null
+    ? `${fmtRate(withBuilder(defTaker, bFull))} / ${fmtRate(withBuilder(defMaker, bFull))}`
+    : null;
+  /* A discount only counts when the combined rate is actually cheaper. Striking
+     an unchanged pair would invent a saving. */
+  const cheaper = showTaker !== null && showMaker !== null && defTaker !== null && defMaker !== null
+    && (withBuilder(showTaker, bNow) < withBuilder(defTaker, bFull) - 1e-9
+      || withBuilder(showMaker, bNow) < withBuilder(defMaker, bFull) - 1e-9);
 
   const orderQty = num(quantity);
   const bestAsk = num(book?.asks?.[0]?.[0]);
@@ -2211,85 +2199,38 @@ export function OrderEntry({
               <button
                 type="button"
                 className="oe-feebtn"
+                aria-haspopup="dialog"
                 aria-expanded={feesOpen}
-                onClick={() => setFeesOpen((v) => !v)}
-                title={feesOpen ? 'Hide fee tier' : 'Show which tier this rate comes from'}
+                onClick={() => setFeesOpen(true)}
+                title="Taker, then maker, with the ValueDesk fee included. Opens the fee schedule."
               >
                 Fees
               </button>
-              {/*
-                WHICH NUMBER IS WHICH. The value renders as `0.0450% / 0.0180%`
-                and nothing on screen said the first was taker - not the label,
-                not a title, not the expanded note. Order-as-convention is only
-                disclosure if the convention is stated.
-              */}
-              <span className="oe-tag">taker / maker</span>
             </dt>
             <dd className="oe-out__v">
-              {!sym ? DASH : discounted ? (
+              {!pairNow ? DASH : cheaper && pairWas ? (
                 <span className="oe-fee">
                   <span className="oe-fee__flame" aria-hidden="true">🔥</span>
-                  <s className="oe-fee__was">{feePair(defTaker!, defMaker!)}</s>
-                  <span className="oe-fee__now">{feePair(ownTaker!, ownMaker!)}</span>
+                  <s className="oe-fee__was">{pairWas}</s>
+                  <span className="oe-fee__now">{pairNow}</span>
                 </span>
               ) : (
-                feePair(ownTaker ?? defTaker!, ownMaker ?? defMaker!)
+                pairNow
               )}
             </dd>
           </div>
-          {builderFee && (
-            <div className="oe-out__row">
-              <dt className="oe-out__k">
-                {/* Like "Fees" above, the label opens its detail: the key options,
-                    where the approval SoDEX lists is shown and can be revoked. */}
-                <button
-                  type="button"
-                  className="oe-feebtn"
-                  onClick={requestAdvanced}
-                  title={`SoDEX charges this on every fill of an order placed here, maker or taker, on top of its own fee, and pays it to ValueDesk (builder account #${builderFee.builderId}). Spot buys are not charged. ${builderFee.status === 'required' ? 'It applies once you have approved it: press to approve it, or to see what is approved.' : 'Press to see or revoke your approval.'}`}
-                >
-                  ValueDesk fee
-                </button>{' '}
-                <span className="oe-tag">builder</span>
-              </dt>
-              <dd className="oe-out__v">
-                {!builderFee.charged ? 'none on spot buys' : builderFee.fullRate !== undefined ? (
-                  /* A volume tier applies to this wallet: the default struck through, like a discounted venue rate above. */
-                  <span className="oe-fee">
-                    <s className="oe-fee__was">+{pctRate(builderRateToFraction(builderFee.fullRate))}</s>
-                    <span className="oe-fee__now">+{pctRate(builderFee.fraction)}</span>
-                  </span>
-                ) : `+${pctRate(builderFee.fraction)}`}
-              </dd>
-            </div>
-          )}
-          {builderFee?.next && (
-            /* The next volume tier, as the server names it (shown only; the fee above is what the order carries). */
-            <div className="oe-out__row oe-out__row--note">
-              <dd className="oe-out__v oe-out__v--note">
-                ValueDesk fee {pctRate(builderRateToFraction(builderFee.next.rate))} once {fmtUsd(builderFee.next.atUsd)} is traded through ValueDesk
-                {builderFee.next.days ? ` within ${builderFee.next.days} days` : ''}
-                {builderFee.next.volumeUsd !== null ? ` (${fmtUsd(builderFee.next.volumeUsd)} ${builderFee.next.days ? `in the last ${builderFee.next.days} days` : 'so far'})` : ''}.
-              </dd>
-            </div>
-          )}
-          {feesOpen && (
-            <div className="oe-out__row oe-out__row--note">
-              <dd className="oe-out__v oe-out__v--note">
-                {acctFee
-                  ? <>Fee tier {acctFee.feeTier ?? 0} · staking tier {acctFee.stakingTier ?? 0}
-                      {discounted ? ' — better than this market\u2019s published rate.' : ' — this market\u2019s published rate.'}</>
-                  : connectedAddress
-                    ? 'The venue has not reported a rate for this account; the market default is shown.'
-                    : 'Connect a wallet to see the rate this account actually pays.'}
-              </dd>
-            </div>
-          )}
         </dl>
       </div>
 
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}
       {dialog}
+      <FeeSchedule
+        open={feesOpen}
+        onClose={() => setFeesOpen(false)}
+        engine={engine}
+        address={connectedAddress ?? null}
+        rates={venueFees}
+      />
     </section>
   );
 }

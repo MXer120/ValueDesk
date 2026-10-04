@@ -114,6 +114,20 @@ export function AccountSetup({ address }: { address: string | null }) {
     return () => window.removeEventListener('vs-index', onToggle);
   }, [address, open]);
 
+  // The dev panel reopens the wizard after it has already been finished.
+  useEffect(() => {
+    const onOpen = () => {
+      if (!connected) return;
+      setStep(0);
+      setPicked(null);
+      const stored = readPotato();
+      if (stored !== null) setPotatoOn(stored);
+      setOpen(true);
+    };
+    window.addEventListener('vs-dev-setup', onOpen);
+    return () => window.removeEventListener('vs-dev-setup', onOpen);
+  }, [connected]);
+
   useEffect(() => {
     if (connected && !readDone()) setOpen(true);
   }, [connected]);

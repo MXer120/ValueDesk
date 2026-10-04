@@ -1,0 +1,85 @@
+/* Floating test dock. Above the status bar (its popup is z 20), under modals (z 100). */
+
+.devp {
+  position: fixed;
+  z-index: 40;
+  left: 12px;
+  bottom: 52px;
+  width: min(280px, calc(100vw - 24px));
+}
+.devp.is-shut { width: auto; }
+
+.devp__sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--panel-line);
+  border-radius: 14px;
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+  box-shadow: var(--shadow-modal);
+}
+.devp__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 8px 6px;
+}
+.devp__title {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.devp__hint {
+  margin-left: auto;
+  color: var(--dim);
+  font-size: var(--fs-micro);
+}
+.devp__hide {
+  min-height: 0;
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.devp__hide:hover { color: var(--text); background: none; }
+
+.devp__btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+  line-height: 1.3;
+  text-align: left;
+  cursor: pointer;
+}
+.devp__btn:hover { background: var(--bg-hover); }
+.devp__meta { color: var(--muted); font-size: var(--fs-xs); }
+
+.devp__chip {
+  min-height: 0;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 999px;
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.devp__chip:hover { color: var(--text); }

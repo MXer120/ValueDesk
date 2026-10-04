@@ -1,0 +1,135 @@
+/* Fee schedule sheet. Imported after funds.css so the width beats .modal.fx. */
+
+.modal.fx.fee-sched {
+  max-width: 680px;
+  max-height: min(90vh, 860px);
+}
+.fee-sched .modal-body {
+  flex: 1;
+  min-height: 0;
+  max-height: 72vh;
+}
+
+.fee-sched__card {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--panel-line);
+  overflow: hidden;
+}
+.fee-sched__col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: var(--sp-3);
+  background: var(--fx-well, var(--bg));
+}
+.fee-sched__k {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.01em;
+}
+.fee-sched__badge {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+}
+.fee-sched__pair {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-xl);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+.fee-sched__was {
+  color: var(--dim);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+  text-decoration: line-through;
+}
+.fee-sched__sub,
+.fee-sched__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  line-height: 1.45;
+}
+.fee-sched__switch { width: 100%; }
+
+.fee-sched__block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.fee-sched__block h3 {
+  margin: 0;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+.fee-sched__scroll {
+  overflow-x: auto;
+  min-width: 0;
+}
+.fee-sched__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.fee-sched__table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  padding: 0 var(--sp-3) var(--sp-1) 0;
+  border-bottom: 1px solid var(--line);
+}
+.fee-sched__table td {
+  padding: var(--sp-1) var(--sp-3) var(--sp-1) 0;
+  border-bottom: 1px solid var(--line-soft);
+}
+.fee-sched__table th:last-child,
+.fee-sched__table td:last-child { padding-right: 0; }
+.fee-sched__table th.num,
+.fee-sched__table td.num { text-align: right; }
+.fee-sched__table th.grp { text-align: center; }
+.fee-sched__table th[rowspan] { vertical-align: bottom; }
+.fee-sched__table tr.is-you > td {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.fee-sched__you,
+.fee-sched__also {
+  margin-left: 6px;
+  font-size: var(--fs-micro);
+  font-weight: 500;
+}
+.fee-sched__also { color: var(--muted); font-weight: 400; }
+
+.fee-sched__more {
+  align-self: flex-start;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.fee-sched__more:hover { color: var(--text); }
+
+@media (max-width: 560px) {
+  .fee-sched__card { grid-template-columns: 1fr; }
+}
