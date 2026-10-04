@@ -120,8 +120,8 @@ export function AccountController({ address, provider, session, onSession }: Pro
             notify(
               'info',
               step === 'builder-approval'
-                ? `Approve the builder fee in ${where} - the first of two signatures.`
-                : keyPrompt,
+                ? `Approve the builder fee in ${where}.`
+                : `Approve in ${where} so this browser can place orders.`,
             ),
         });
         notify(

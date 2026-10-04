@@ -121,17 +121,17 @@ w3m-modal[data-shared-backdrop] {
 .acct-adv code { overflow-wrap: anywhere; }
 
 /* ---------------------------------------------------------------------------
-   THE BUILDER-FEE DISCLOSURE (BuilderConsent.tsx) - the app's Modal and its
-   key/value table (`.kv`, styles.css); only the row rhythm is set here, the
-   same hairline-separated rows as the order review.
+   THE BUILDER-FEE SHEET (BuilderConsent.tsx). The transfer glass (funds.css);
+   this is only the inset of the readout and the action stack.
    ------------------------------------------------------------------------ */
-.acct-fee > p { margin: 0; line-height: var(--lh-xs); }
-.acct-fee__terms { width: 100%; border-collapse: collapse; }
-.acct-fee__terms th,
-.acct-fee__terms td { font-size: var(--fs-xs); padding-top: 3px; padding-bottom: 3px; white-space: normal; }
-.acct-fee__terms td { color: var(--text); }
-.acct-fee__terms tr + tr th,
-.acct-fee__terms tr + tr td { border-top: 1px solid var(--line-soft); }
+.vs-fee__box { padding: var(--sp-3); }
+.vs-fee__actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.vs-fee__actions .fx-link { min-height: 0; }
 
 /* ---------------------------------------------------------------------------
    THE ADDRESS MENU (NavBar.tsx:AddressMenu), after the owner's reference: a
