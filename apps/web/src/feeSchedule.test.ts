@@ -5,9 +5,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { builderTierIndex } from './builderSchedule';
+import { builderTierIndex, builderVolumeLabel, copyVolumeLabel } from './builderSchedule';
 import {
   feeTierRows,
+  feeVolumeLabel,
   fmtRate,
   readVenueFee,
   rebateRows,
@@ -81,6 +82,18 @@ test('fee tier 0 is a real row, and a missing tier is not tier 0', () => {
   assert.deepEqual(feeTierRows(null, 0), { highlight: null, also: 0 });
   assert.deepEqual(feeTierRows(1, 4), { highlight: 1, also: 4 });
   assert.deepEqual(feeTierRows(9, 2), { highlight: null, also: 2 });
+});
+
+test('volume bands print full dollars, and the boundary stays with the lower tier', () => {
+  assert.equal(feeVolumeLabel(0), '≤ $5,000,000');
+  assert.equal(feeVolumeLabel(1), '> $5,000,000');
+  assert.equal(feeVolumeLabel(6), '> $7,000,000,000');
+  assert.equal(builderVolumeLabel(0), '< $1,000,000');
+  assert.equal(builderVolumeLabel(1), '≥ $1,000,000');
+  assert.equal(builderVolumeLabel(4), '≥ $100,000,000');
+  assert.equal(copyVolumeLabel(0), '< $100,000');
+  assert.equal(copyVolumeLabel(1), '≥ $100,000');
+  assert.equal(copyVolumeLabel(4), '≥ $10,000,000');
 });
 
 test('maker rebate tier 0 is not a row', () => {

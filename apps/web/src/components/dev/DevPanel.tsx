@@ -6,11 +6,48 @@
  * dev the shortcut only folds the sheet — the dock is back on the next load.
  */
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Engine } from '../../api';
 import { openConnectDialog } from '../account/connect';
 import { openPalette } from '../palette/lazyPalette';
 import { FeeSchedule } from '../FeeSchedule';
 import './DevPanel.css';
+
+/**
+ * Ctrl+Shift+D is also Chrome's "bookmark all tabs". A bubble listener that
+ * skips focused inputs never cancels that, so the shortcut does nothing on the
+ * live site while the order ticket has a field focused. Capture on document,
+ * installed as the module loads, runs first and cancels the browser action.
+ * Keyup covers a keydown the browser swallowed.
+ */
+function installDevChord(): void {
+  if (typeof document === 'undefined') return;
+  const w = window as Window & { __vsDevChord?: boolean };
+  if (w.__vsDevChord) return;
+  w.__vsDevChord = true;
+  let down = false;
+  const chord = (e: KeyboardEvent): boolean =>
+    !e.altKey && !e.metaKey && e.ctrlKey && e.shiftKey
+    && (e.code === 'KeyD' || e.key === 'd' || e.key === 'D');
+  const onKey = (e: KeyboardEvent) => {
+    if (e.type === 'keydown') {
+      if (e.repeat || !chord(e)) return;
+      down = true;
+      e.preventDefault();
+      e.stopPropagation();
+      window.dispatchEvent(new Event('vs-dev-toggle'));
+      return;
+    }
+    if (!chord(e)) return;
+    if (down) { down = false; return; }
+    e.preventDefault();
+    e.stopPropagation();
+    window.dispatchEvent(new Event('vs-dev-toggle'));
+  };
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('keyup', onKey, true);
+}
+installDevChord();
 
 function storedPotato(): boolean {
   try { return localStorage.getItem('vs.potato') === 'true'; }
@@ -49,11 +86,7 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
   const [potato, setPotato] = useState(storedPotato);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.code !== 'KeyD' || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
-      e.preventDefault();
+    const onToggle = () => {
       if (import.meta.env.DEV) {
         setAllowed(true);
         setOpen((v) => !v);
@@ -66,8 +99,8 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
         return next;
       });
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('vs-dev-toggle', onToggle);
+    return () => window.removeEventListener('vs-dev-toggle', onToggle);
   }, []);
 
   const hide = () => {
@@ -101,38 +134,40 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
     setPotato(next);
   };
 
+  const dock = allowed ? (
+    <aside className={open ? 'devp' : 'devp is-shut'} aria-label="Developer">
+      {open ? (
+        <div className="devp__sheet">
+          <div className="devp__head">
+            <span className="devp__title">Dev</span>
+            <span className="devp__hint">Ctrl+Shift+D</span>
+            <button type="button" className="devp__hide" onClick={hide}>Hide</button>
+          </div>
+          <button type="button" className="devp__btn" onClick={openSetup}>Account setup</button>
+          <button type="button" className="devp__btn" onClick={() => openConnectDialog()}>Connect</button>
+          <button type="button" className="devp__btn" onClick={() => openPalette()}>Search</button>
+          <button type="button" className="devp__btn" onClick={() => setSched(true)}>Fee schedule</button>
+          <button type="button" className="devp__btn" onClick={togglePotato}>
+            Potato mode
+            <span className="devp__meta">{potato ? 'On' : 'Off'}</span>
+          </button>
+          <button type="button" className="devp__btn" onClick={forget}>Forget setup</button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="devp__chip"
+          onClick={() => { setPotato(storedPotato()); setOpen(true); }}
+        >
+          Dev
+        </button>
+      )}
+    </aside>
+  ) : null;
+
   return (
     <>
-      {allowed && (
-        <aside className={open ? 'devp' : 'devp is-shut'} aria-label="Developer">
-          {open ? (
-            <div className="devp__sheet">
-              <div className="devp__head">
-                <span className="devp__title">Dev</span>
-                <span className="devp__hint">Ctrl+Shift+D</span>
-                <button type="button" className="devp__hide" onClick={hide}>Hide</button>
-              </div>
-              <button type="button" className="devp__btn" onClick={openSetup}>Account setup</button>
-              <button type="button" className="devp__btn" onClick={() => openConnectDialog()}>Connect</button>
-              <button type="button" className="devp__btn" onClick={() => openPalette()}>Search</button>
-              <button type="button" className="devp__btn" onClick={() => setSched(true)}>Fee schedule</button>
-              <button type="button" className="devp__btn" onClick={togglePotato}>
-                Potato mode
-                <span className="devp__meta">{potato ? 'On' : 'Off'}</span>
-              </button>
-              <button type="button" className="devp__btn" onClick={forget}>Forget setup</button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="devp__chip"
-              onClick={() => { setPotato(storedPotato()); setOpen(true); }}
-            >
-              Dev
-            </button>
-          )}
-        </aside>
-      )}
+      {dock && createPortal(dock, document.body)}
       <FeeSchedule open={sched} onClose={() => setSched(false)} engine={engine} address={address} />
     </>
   );

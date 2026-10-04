@@ -1028,34 +1028,26 @@ export function OrderEntry({
   });
 
   /*
-   * The pair on the fee row is what this order pays. Taker, then maker: the
-   * venue's rate for this account, plus the ValueDesk builder fee on this side.
-   * Spot buys name the builder and SoDEX charges nothing for it, so that addend
-   * is zero there. The symbol's published rate is struck through when the
-   * account pays less. Both engines' tiers live in the schedule the row opens.
+   * One figure: what this order pays. A post-only order rests, so it is the
+   * maker rate; anything that can take liquidity is the taker rate. The
+   * ValueDesk fee is included. Spot buys name the builder and SoDEX charges
+   * nothing for it, so that addend is zero there. The symbol's published rate
+   * is struck through when the account pays less.
    */
   const venueFees = useVenueFees(connectedAddress ?? null);
   const acctFee = engine === 'spot' ? venueFees.spot : venueFees.perps;
-  const defTaker = sym ? num(sym.takerFee) : null;
-  const defMaker = sym ? num(sym.makerFee) : null;
-  const ownTaker = acctFee ? acctFee.taker : null;
-  const ownMaker = acctFee ? acctFee.maker : null;
+  const makerOnly = !marketExec && effectiveTif === 'gtx';
+  const defRate = sym ? num(makerOnly ? sym.makerFee : sym.takerFee) : null;
+  const ownRate = acctFee ? (makerOnly ? acctFee.maker : acctFee.taker) : null;
   const builderFee = useBuilderFee(engine, side, connectedAddress);
   const bNow = builderFee?.charged ? builderFee.fraction : 0;
   const bFull = builderFee?.charged ? builderRateToFraction(builderFee.fullRate ?? builderFee.rate) : 0;
-  const showTaker = ownTaker ?? defTaker;
-  const showMaker = ownMaker ?? defMaker;
-  const pairNow = showTaker !== null && showMaker !== null
-    ? `${fmtRate(withBuilder(showTaker, bNow))} / ${fmtRate(withBuilder(showMaker, bNow))}`
-    : null;
-  const pairWas = defTaker !== null && defMaker !== null
-    ? `${fmtRate(withBuilder(defTaker, bFull))} / ${fmtRate(withBuilder(defMaker, bFull))}`
-    : null;
-  /* A discount only counts when the combined rate is actually cheaper. Striking
-     an unchanged pair would invent a saving. */
-  const cheaper = showTaker !== null && showMaker !== null && defTaker !== null && defMaker !== null
-    && (withBuilder(showTaker, bNow) < withBuilder(defTaker, bFull) - 1e-9
-      || withBuilder(showMaker, bNow) < withBuilder(defMaker, bFull) - 1e-9);
+  const showRate = ownRate ?? defRate;
+  const feeNow = showRate !== null ? withBuilder(showRate, bNow) : null;
+  const feeWas = defRate !== null ? withBuilder(defRate, bFull) : null;
+  const feeLabel = feeNow !== null ? fmtRate(feeNow) : null;
+  const feeWasLabel = feeWas !== null ? fmtRate(feeWas) : null;
+  const cheaper = feeNow !== null && feeWas !== null && feeNow < feeWas - 1e-9;
 
   const orderQty = num(quantity);
   const bestAsk = num(book?.asks?.[0]?.[0]);
@@ -2202,20 +2194,20 @@ export function OrderEntry({
                 aria-haspopup="dialog"
                 aria-expanded={feesOpen}
                 onClick={() => setFeesOpen(true)}
-                title="Taker, then maker, with the ValueDesk fee included. Opens the fee schedule."
+                title="Fee schedule"
               >
                 Fees
               </button>
             </dt>
             <dd className="oe-out__v">
-              {!pairNow ? DASH : cheaper && pairWas ? (
+              {!feeLabel ? DASH : cheaper && feeWasLabel ? (
                 <span className="oe-fee">
                   <span className="oe-fee__flame" aria-hidden="true">🔥</span>
-                  <s className="oe-fee__was">{pairWas}</s>
-                  <span className="oe-fee__now">{pairNow}</span>
+                  <s className="oe-fee__was">{feeWasLabel}</s>
+                  <span className="oe-fee__now">{feeLabel}</span>
                 </span>
               ) : (
-                pairNow
+                feeLabel
               )}
             </dd>
           </div>

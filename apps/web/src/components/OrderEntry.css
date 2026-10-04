@@ -1382,8 +1382,8 @@ button.oe-select[aria-expanded='true'] {
 /* ===========================================================================
    THE FEE ROW.
 
-   One pair, taker then maker, with the ValueDesk fee included. The words live
-   on the button title; the click opens the fee schedule.
+   One combined rate, with the ValueDesk fee included. The click opens the
+   fee schedule.
    ======================================================================== */
 .oe-feebtn {
   height: auto; padding: 0;

@@ -397,6 +397,22 @@ export function fmtThreshold(usd: number): string {
   return `$${usd.toLocaleString('en-US')}`;
 }
 
+const usdComma = (n: number): string => `$${Math.round(n).toLocaleString('en-US')}`;
+
+/**
+ * Volume band as the venue ticket prints it, full dollars.
+ * The boundary belongs to the lower tier: tier 0 is "≤ $5,000,000".
+ */
+export function feeVolumeLabel(index: number): string {
+  const row = FEE_TIERS[index];
+  if (!row) return '-';
+  if (index === 0) {
+    const next = FEE_TIERS[1];
+    return next ? `≤ ${usdComma(next.minVolume)}` : usdComma(row.minVolume);
+  }
+  return `> ${usdComma(row.minVolume)}`;
+}
+
 /** SOSO amounts, which span 30 to 1,500,000 and read better grouped. */
 export const fmtSoso = (n: number): string =>
   Number.isFinite(n) ? n.toLocaleString('en-US') : '-';

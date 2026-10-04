@@ -9,9 +9,10 @@
  * The fee on an order is whatever `feeNow` signed, which can differ from this
  * table when the build default and the live file disagree. `builderTierIndex`
  * marks a row only when that signed fee is the row's rate.
+ *
+ * COPY_LADDER is the copy-trading schedule from the same doc. Nothing charges
+ * it: there is no copy executor, and it stays a displayed table.
  */
-import { fmtThreshold } from './fees';
-
 export interface BuilderTier {
   minVolumeUsd: number;
   perps: number;
@@ -26,13 +27,39 @@ export const BUILDER_LADDER: readonly BuilderTier[] = [
   { minVolumeUsd: 100_000_000, perps: 5, spot: 5 },
 ];
 
+export interface CopyTier {
+  minVolumeUsd: number;
+  /** Tenths of a basis point. 25 = 2.5 bp = 0.025%. */
+  fee: number;
+}
+
+/** Copy-trading ladder. Decided, not charged. */
+export const COPY_LADDER: readonly CopyTier[] = [
+  { minVolumeUsd: 0, fee: 25 },
+  { minVolumeUsd: 100_000, fee: 20 },
+  { minVolumeUsd: 500_000, fee: 15 },
+  { minVolumeUsd: 2_000_000, fee: 12 },
+  { minVolumeUsd: 10_000_000, fee: 10 },
+];
+
+const usdComma = (n: number): string => `$${Math.round(n).toLocaleString('en-US')}`;
+
 /** Band label. The first row is everything under the next milestone. */
 export function builderVolumeLabel(index: number): string {
   const row = BUILDER_LADDER[index];
   if (!row) return '-';
   const next = BUILDER_LADDER[index + 1];
-  if (index === 0 && next) return `< ${fmtThreshold(next.minVolumeUsd)}`;
-  return `≥ ${fmtThreshold(row.minVolumeUsd)}`;
+  if (index === 0 && next) return `< ${usdComma(next.minVolumeUsd)}`;
+  return `≥ ${usdComma(row.minVolumeUsd)}`;
+}
+
+/** Same boundary rule as the futures ladder: the milestone belongs to the higher row. */
+export function copyVolumeLabel(index: number): string {
+  const row = COPY_LADDER[index];
+  if (!row) return '-';
+  const next = COPY_LADDER[index + 1];
+  if (index === 0 && next) return `< ${usdComma(next.minVolumeUsd)}`;
+  return `≥ ${usdComma(row.minVolumeUsd)}`;
 }
 
 /**
