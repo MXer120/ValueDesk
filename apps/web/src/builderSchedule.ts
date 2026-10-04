@@ -53,6 +53,20 @@ export function builderVolumeLabel(index: number): string {
   return `≥ ${usdComma(row.minVolumeUsd)}`;
 }
 
+/**
+ * Which row a volume sits on. The milestone belongs to this row (`>=` min).
+ * `mins` are the rows' inclusive lower bounds, in order.
+ */
+export function ladderIndex(volumeUsd: number, mins: readonly number[]): number {
+  let idx = 0;
+  if (!Number.isFinite(volumeUsd)) return 0;
+  for (let i = 0; i < mins.length; i++) {
+    const min = mins[i];
+    if (min !== undefined && volumeUsd >= min) idx = i;
+  }
+  return idx;
+}
+
 /** Same boundary rule as the futures ladder: the milestone belongs to the higher row. */
 export function copyVolumeLabel(index: number): string {
   const row = COPY_LADDER[index];

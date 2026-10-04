@@ -2,12 +2,22 @@
 
 .modal.fx.fee-sched {
   max-width: 760px;
-  max-height: min(92vh, 920px);
+  max-height: none;
+  overflow: visible;
+  /* The scrim is a flex row. Shrink would squash this sheet to the window
+     and put the scrollbar back on the body. It stays full height; the scrim
+     scrolls only when that is taller than the window. */
+  flex-shrink: 0;
+}
+.modal-scrim:has(.fee-sched) {
+  overflow: auto;
+  align-items: safe center;
+  overscroll-behavior: contain;
 }
 .fee-sched .modal-body {
-  flex: 1;
-  min-height: 0;
-  max-height: 78vh;
+  flex: none;
+  overflow: visible;
+  max-height: none;
 }
 
 /* The transfer sheet centres its title. This one is a wide table, so the
@@ -56,7 +66,13 @@
   letter-spacing: -0.02em;
   line-height: var(--lh-xl);
 }
-.fee-sched__switch { width: 100%; }
+.fee-sched__switch {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  width: 100%;
+  background: var(--glass-sheet-bg);
+}
 
 .fee-sched__block {
   display: flex;

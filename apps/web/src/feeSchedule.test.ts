@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { builderTierIndex, builderVolumeLabel, copyVolumeLabel } from './builderSchedule';
+import { builderTierIndex, builderVolumeLabel, copyVolumeLabel, ladderIndex } from './builderSchedule';
 import {
   feeTierRows,
   feeVolumeLabel,
@@ -60,6 +60,18 @@ test('the builder row is the signed fee, not a reported index that disagrees', (
   assert.equal(builderTierIndex(15, 'perps', 0), 0);
   assert.equal(builderTierIndex(12, 'spot', null), 1);
   assert.equal(builderTierIndex(20, 'spot', 0), null);
+});
+
+test('a volume milestone belongs to the higher builder row', () => {
+  const futures = [0, 1_000_000, 5_000_000, 25_000_000, 100_000_000];
+  assert.equal(ladderIndex(0, futures), 0);
+  assert.equal(ladderIndex(999_999, futures), 0);
+  assert.equal(ladderIndex(1_000_000, futures), 1);
+  assert.equal(ladderIndex(100_000_000, futures), 4);
+  const copy = [0, 100_000, 500_000, 2_000_000, 10_000_000];
+  assert.equal(ladderIndex(99_999, copy), 0);
+  assert.equal(ladderIndex(100_000, copy), 1);
+  assert.equal(ladderIndex(Number.NaN, copy), 0);
 });
 
 test('the builder fraction is added to the venue rate', () => {

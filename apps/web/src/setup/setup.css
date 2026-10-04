@@ -3,7 +3,8 @@
    what that sheet does not already have. */
 
 /* Four labels, one hairline each. Done and current are the text colour;
-   the rest stay dim. No motion — the sheet's own open animation is enough. */
+   the rest stay dim. The bar eases when the step changes; the sheet's
+   cross-fade handles the body. */
 .vs-steps {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -21,17 +22,40 @@
   font-size: var(--fs-micro);
   font-weight: 500;
   line-height: 1.2;
+  transition: color 220ms var(--ease-out);
 }
 .vs-steps li::before {
   content: '';
   height: 2px;
   border-radius: 1px;
   background: var(--line);
+  transition: background 220ms var(--ease-out);
 }
 .vs-steps li.is-done,
 .vs-steps li.is-now { color: var(--text); }
 .vs-steps li.is-done::before,
 .vs-steps li.is-now::before { background: var(--text); }
+.vs-steps button {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vs-steps button:hover { color: var(--text); }
+
+.vs-setup__index {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.vs-setup__index .fx-link { min-height: 0; }
+.vs-setup__index .segmented { width: 100%; }
+.vs-setup__index .segmented button { min-height: 0; }
 
 .vs-setup__fig {
   margin: 0;

@@ -91,6 +91,19 @@ export function startIndexer(address: string): void {
 export function stopIndexer(): void {
   run?.abort.abort();
   run = null;
+  if (progress.running) publish({ running: false });
+}
+
+/** Drop this browser's aggregate and walk again from the start. */
+export function resetIndex(address: string): void {
+  const addr = address.trim();
+  if (!addr) return;
+  const resume = indexEnabled() || run?.address.toLowerCase() === addr.toLowerCase();
+  stopIndexer();
+  try { saveIndex(localStorage, emptyIndex(addr)); }
+  catch { /* private mode: the walk still restarts from an empty memory copy */ }
+  publish({ running: false, pages: 0, stream: '', cursorMs: null, done: false, notice: null });
+  if (resume) startIndexer(addr);
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

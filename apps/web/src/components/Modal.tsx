@@ -76,7 +76,17 @@ export function Modal({
 
   useEffect(() => {
     if (!open) return;
-    restoreTo.current = document.activeElement as HTMLElement | null;
+    const prev = document.activeElement as HTMLElement | null;
+    restoreTo.current = prev;
+    // The dev dock stays the focused surface when it opened this sheet, so the
+    // next control in the dock can be used without clicking back into it.
+    if (prev?.closest('.devp')) {
+      return () => {
+        const now = document.activeElement as HTMLElement | null;
+        if (now?.closest('.devp')) return;
+        restoreTo.current?.focus?.();
+      };
+    }
 
     const node = dialogRef.current;
     // Prefer the first real control; fall back to the dialog itself so focus
@@ -84,7 +94,11 @@ export function Modal({
     const first = node?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? node)?.focus();
 
-    return () => restoreTo.current?.focus?.();
+    return () => {
+      const now = document.activeElement as HTMLElement | null;
+      if (now?.closest('.devp')) return;
+      restoreTo.current?.focus?.();
+    };
   }, [open]);
 
   useEffect(() => {
@@ -99,9 +113,15 @@ export function Modal({
 
       const node = rowRef.current ?? stackRef.current ?? dialogRef.current;
       if (!node) return;
+      // The dev dock stays in the tab cycle while a sheet is open, so it can
+      // be used without closing the thing it opened.
+      const dock = document.querySelector<HTMLElement>('.devp');
       // `inert` is how a closed drawer (and the address-book aside) leaves the
       // tab cycle. offsetParent alone still sees controls inside a 0-height clip.
-      const items = [...node.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null && !el.closest('[inert]'));
+      const items = [
+        ...node.querySelectorAll<HTMLElement>(FOCUSABLE),
+        ...(dock ? dock.querySelectorAll<HTMLElement>(FOCUSABLE) : []),
+      ].filter((el) => el.offsetParent !== null && !el.closest('[inert]'));
       if (items.length === 0) return;
       const first = items[0]!;
       const last = items[items.length - 1]!;

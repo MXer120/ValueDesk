@@ -1386,7 +1386,7 @@ button.oe-select[aria-expanded='true'] {
    fee schedule.
    ======================================================================== */
 .oe-feebtn {
-  height: auto; padding: 0;
+  height: auto; min-height: 0; padding: 0;
   border: 0; background: none; color: inherit; font: inherit;
   /* A dotted rule rather than a solid underline: this opens a detail, it does
      not navigate, and a link-looking label promises a page. */

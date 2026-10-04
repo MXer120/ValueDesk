@@ -1,14 +1,15 @@
 /**
  * Fee schedule, opened from the order ticket and the dev panel.
  *
- * The sheet follows the venue trade-ticket layout: an effective taker/maker
- * pair for both engines, then the three published tables. The pair is the
- * rate `/fee-rate` reported. "You're here" is that report's tier index, on
- * all three tables, per engine, without collapsing a disagreement. The
- * ValueDesk switch replaces the tables with the futures & spot ladder and
- * the copy-trading ladder. The header stays the venue pair.
+ * The pair at the top is the venue rate plus the ValueDesk fee on that
+ * engine. "You're here" on the SoDEX tables is the tier index `/fee-rate`
+ * reported for that engine — fee tier, staking tier, maker-rebate tier —
+ * kept apart when the two engines disagree. The ValueDesk tab is the
+ * futures & spot ladder and the copy-trading ladder. The futures row is the
+ * terms' tier index; the copy row is that same counted volume on the copy
+ * ladder, which no order is charged yet.
  */
-import { useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { builderRateToFraction } from '@sodex-core';
 import {
   BUILDER_LADDER,
@@ -16,6 +17,7 @@ import {
   builderTierIndex,
   builderVolumeLabel,
   copyVolumeLabel,
+  ladderIndex,
 } from '../builderSchedule';
 import {
   FEE_DOC_URL,
@@ -31,11 +33,12 @@ import {
   makerRebateAt,
   rebateRows,
   stakingMark,
+  withBuilder,
   type FeeEngine,
   type VenueFeeRead,
 } from '../fees';
 import { fmtUsd } from '../format';
-import { currentTerms, feeNow, termsView } from '../trading/terms';
+import { currentTerms, ensureTerms, feeNow, subscribeTerms, termsRevision } from '../trading/terms';
 import { Modal } from './Modal';
 import { useVenueFees, type VenueFees } from './useVenueFees';
 import './funds/funds.css';
@@ -73,12 +76,22 @@ interface Props {
   address: string | null;
   /** When the ticket already loaded both engines, skip a second fetch. */
   rates?: VenueFees;
+  /** Which tables to show when the sheet opens. */
+  table?: 'sodex' | 'valuedesk';
 }
 
-export function FeeSchedule({ open, onClose, engine, address, rates }: Props) {
+export function FeeSchedule({ open, onClose, engine, address, rates, table = 'sodex' }: Props) {
   const fetched = useVenueFees(address, open && rates === undefined);
   const live = rates ?? fetched;
-  const [which, setWhich] = useState<'sodex' | 'valuedesk'>('sodex');
+  const [which, setWhich] = useState<'sodex' | 'valuedesk'>(table);
+  useSyncExternalStore(subscribeTerms, termsRevision, termsRevision);
+  useEffect(() => {
+    if (open) setWhich(table);
+  }, [open, table]);
+  useEffect(() => {
+    if (!open || !address) return;
+    void ensureTerms(address);
+  }, [open, address]);
   const connected = !!address;
   const other: FeeEngine = engine === 'spot' ? 'perps' : 'spot';
   const entry = connected ? live[engine] : null;
@@ -114,6 +127,8 @@ export function FeeSchedule({ open, onClose, engine, address, rates }: Props) {
     outside('maker rebate tier', read.makerRebateTier, MAKER_REBATE_TIERS.length);
   }
 
+  const builderOn = (['perps', 'spot'] as const).some((e) => feeNow(e, connected ? address : null) > 0);
+
   return (
     <Modal open={open} onClose={onClose} title="Fee Schedule" size="md" className="fx fee-sched">
       <div className="fee-sched__card">
@@ -126,9 +141,13 @@ export function FeeSchedule({ open, onClose, engine, address, rates }: Props) {
             loading={connected && live.loading}
             failed={connected && (e === 'perps' ? !!live.perpsError : !!live.spotError)}
             entry={e === engine}
+            address={address}
           />
         ))}
       </div>
+      {builderOn && (
+        <p className="fee-sched__note">Includes the ValueDesk fee. Spot buys pay the venue fee only.</p>
+      )}
 
       <div className="segmented fee-sched__switch" role="group" aria-label="Fee tables">
         <button type="button" className={which === 'sodex' ? 'active' : ''} aria-pressed={which === 'sodex'} onClick={() => setWhich('sodex')}>
@@ -138,6 +157,10 @@ export function FeeSchedule({ open, onClose, engine, address, rates }: Props) {
           ValueDesk
         </button>
       </div>
+
+      {which === 'sodex' && connected && !live.loading && (
+        <p className="fee-sched__note">{placeLine('Perps', live.perps, !!live.perpsError)} {placeLine('Spot', live.spot, !!live.spotError)}</p>
+      )}
 
       {which === 'valuedesk' ? (
         <ValueDesk address={address} />
@@ -164,6 +187,19 @@ function Here() {
   return <span className="fee-sched__pill">You're here</span>;
 }
 
+/** The three indices `/fee-rate` actually returned. A missing index is named, never filled in as 0. */
+function placeLine(label: string, read: VenueFeeRead | null, failed: boolean): string {
+  if (!read) return failed ? `${label}: the fee-rate request failed.` : `${label}: SoDEX returned no rate.`;
+  const fee = read.feeTier === null ? 'fee tier not reported' : `fee tier ${read.feeTier}`;
+  const stake = read.stakingTier === null ? 'staking not reported' : `staking ${read.stakingTier}`;
+  const rebate = read.makerRebateTier === null
+    ? 'rebate not reported'
+    : read.makerRebateTier === 0
+      ? 'no rebate'
+      : `rebate tier ${read.makerRebateTier}`;
+  return `${label}: ${fee}, ${stake}, ${rebate}.`;
+}
+
 function EngineHead({
   engine,
   read,
@@ -171,6 +207,7 @@ function EngineHead({
   loading,
   failed,
   entry,
+  address,
 }: {
   engine: FeeEngine;
   read: VenueFeeRead | null;
@@ -178,11 +215,13 @@ function EngineHead({
   loading: boolean;
   failed: boolean;
   entry: boolean;
+  address: string | null;
 }) {
   const base = effectiveFees(0, 0, engine);
   const waiting = connected && loading && !read;
   const taker = read?.taker ?? (!connected ? base?.taker ?? null : null);
   const maker = read?.maker ?? (!connected ? base?.maker ?? null : null);
+  const add = builderRateToFraction(feeNow(engine, connected ? address : null));
   const ready = taker !== null && maker !== null;
   return (
     <div className="fee-sched__col">
@@ -191,7 +230,7 @@ function EngineHead({
         <span className={entry ? 'fee-sched__eng is-on' : 'fee-sched__eng'}>{badge(engine)}</span>
       </div>
       <div className="fee-sched__pair">
-        {waiting ? '…' : ready ? `${fmtHead(taker)} / ${fmtHead(maker)}` : '—'}
+        {waiting ? '…' : ready ? `${fmtHead(withBuilder(taker, add))} / ${fmtHead(withBuilder(maker, add))}` : '—'}
       </div>
       {!waiting && !ready && (
         <p className="fee-sched__note">
@@ -320,31 +359,25 @@ function Sodex({
 }
 
 function ValueDesk({ address }: { address: string | null }) {
-  const reported = address ? currentTerms(address)?.display.tierIndex ?? null : null;
+  const held = address ? currentTerms(address) : null;
+  const reported = held?.display.tierIndex ?? null;
+  const volume = held?.display.volumeUsd ?? null;
   const perpsFee = feeNow('perps', address);
   const spotFee = feeNow('spot', address);
-  const perpsIdx = address ? builderTierIndex(perpsFee, 'perps', reported) : null;
-  const spotIdx = address ? builderTierIndex(spotFee, 'spot', reported) : null;
-  const view = address ? termsView(address) : null;
-  const off: string[] = [];
-  if (address && perpsIdx === null && perpsFee > 0) off.push(`perps ${fmtRate(builderRateToFraction(perpsFee))}`);
-  if (address && spotIdx === null && spotFee > 0) off.push(`spot ${fmtRate(builderRateToFraction(spotFee))}`);
-
-  const mark = (i: number): 'both' | 'perps' | 'spot' | null => {
-    const p = perpsIdx === i;
-    const s = spotIdx === i;
-    if (p && s) return 'both';
-    if (p) return 'perps';
-    if (s) return 'spot';
-    return null;
-  };
+  const inRange = reported !== null && reported >= 0 && reported < BUILDER_LADDER.length;
+  const fromVolume = volume !== null ? ladderIndex(volume, BUILDER_LADDER.map((row) => row.minVolumeUsd)) : null;
+  const row = inRange ? reported : fromVolume !== null ? fromVolume : address ? builderTierIndex(perpsFee, 'perps', null) : null;
+  const placedBy = inRange ? 'terms' : fromVolume !== null ? 'volume' : row !== null ? 'fee' : 'none';
+  const copyRow = volume !== null ? ladderIndex(volume, COPY_LADDER.map((r) => r.minVolumeUsd)) : null;
+  const perpsOff = row !== null && BUILDER_LADDER[row]?.perps !== perpsFee && perpsFee > 0;
+  const spotOff = row !== null && BUILDER_LADDER[row]?.spot !== spotFee && spotFee > 0;
 
   return (
     <>
       <section className="fee-sched__block">
         <h3>Futures &amp; spot</h3>
         <p className="fee-sched__lead">
-          SoDEX charges this on top of its own fee, on perps and on spot sells.
+          Charged on perps and on spot sells.
           {' '}{address ? 'On orders now' : 'Default on orders'}: perps {fmtRate(builderRateToFraction(perpsFee))}, spot {fmtRate(builderRateToFraction(spotFee))}.
         </p>
         <div className="fee-sched__frame">
@@ -358,35 +391,42 @@ function ValueDesk({ address }: { address: string | null }) {
               </tr>
             </thead>
             <tbody>
-              {BUILDER_LADDER.map((row, i) => {
-                const who = mark(i);
-                return (
-                  <tr key={row.minVolumeUsd} className={who === 'both' ? 'is-you' : undefined}>
-                    <td>
-                      {i}
-                      {who === 'both' && <Here />}
-                      {who && who !== 'both' && <span className="fee-sched__also">{badge(who)}</span>}
-                    </td>
-                    <td>{builderVolumeLabel(i)}</td>
-                    <td className="num">{fmtRate(builderRateToFraction(row.perps))}</td>
-                    <td className="num">{fmtRate(builderRateToFraction(row.spot))}</td>
-                  </tr>
-                );
-              })}
+              {BUILDER_LADDER.map((tier, i) => (
+                <tr key={tier.minVolumeUsd} className={row === i ? 'is-you' : undefined}>
+                  <td>
+                    {i}
+                    {row === i && <Here />}
+                  </td>
+                  <td>{builderVolumeLabel(i)}</td>
+                  <td className="num">{fmtRate(builderRateToFraction(tier.perps))}</td>
+                  <td className="num">{fmtRate(builderRateToFraction(tier.spot))}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-        {off.length > 0 && (
+        {address && inRange && fromVolume !== null && fromVolume !== reported && (
           <p className="fee-sched__note">
-            Orders carry {off.join(' and ')}. The table has no row at that rate.
+            Terms place this account on tier {reported}. Counted volume on this published table is tier {fromVolume}.
           </p>
         )}
-        {view && view.volumeUsd !== null && (
+        {address && placedBy === 'fee' && (
+          <p className="fee-sched__note">The volume tier was not returned. The marked row is the fee on orders now.</p>
+        )}
+        {address && placedBy === 'none' && (
+          <p className="fee-sched__note">The volume tier was not returned, and the fee on orders is not a row of this table.</p>
+        )}
+        {(perpsOff || spotOff) && row !== null && (
           <p className="fee-sched__note">
-            Counted volume {fmtUsd(view.volumeUsd, 0)}
-            {view.volumeDays ? ` over the last ${view.volumeDays} days` : ''}.
-            {view.next
-              ? ` Next rate from $${Math.round(view.next.atUsd).toLocaleString('en-US')}: perps ${fmtRate(builderRateToFraction(view.next.fee.perps))}, spot ${fmtRate(builderRateToFraction(view.next.fee.spot))}.`
+            Tier {row} is where this account sits. Orders now carry perps {fmtRate(builderRateToFraction(perpsFee))} and spot {fmtRate(builderRateToFraction(spotFee))}.
+          </p>
+        )}
+        {volume !== null && (
+          <p className="fee-sched__note">
+            Counted volume {fmtUsd(volume, 0)}
+            {held?.display.volumeDays ? ` over the last ${held.display.volumeDays} days` : ''}.
+            {held?.display.next
+              ? ` Next rate from $${Math.round(held.display.next.atUsd).toLocaleString('en-US')}: perps ${fmtRate(builderRateToFraction(held.display.next.fee.perps))}, spot ${fmtRate(builderRateToFraction(held.display.next.fee.spot))}.`
               : ''}
           </p>
         )}
@@ -405,11 +445,14 @@ function ValueDesk({ address }: { address: string | null }) {
               </tr>
             </thead>
             <tbody>
-              {COPY_LADDER.map((row, i) => (
-                <tr key={row.minVolumeUsd}>
-                  <td>{i}</td>
+              {COPY_LADDER.map((tier, i) => (
+                <tr key={tier.minVolumeUsd} className={copyRow === i ? 'is-you' : undefined}>
+                  <td>
+                    {i}
+                    {copyRow === i && <span className="fee-sched__pill">This volume</span>}
+                  </td>
                   <td>{copyVolumeLabel(i)}</td>
-                  <td className="num">{fmtRate(builderRateToFraction(row.fee))}</td>
+                  <td className="num">{fmtRate(builderRateToFraction(tier.fee))}</td>
                 </tr>
               ))}
             </tbody>

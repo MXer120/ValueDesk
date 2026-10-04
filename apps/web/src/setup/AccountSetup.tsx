@@ -6,12 +6,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmt, fmtUsd } from '../format';
 import { Modal } from '../components/Modal';
-import { AutoHeight, FadeView } from '../components/motion';
+import { CrossFade } from '../components/motion';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { loadDashboard, saveDashboard } from '../dashboard/storage';
-import { probeDevice, suggestPotato, type DeviceProbe } from './device';
-import { IDLE_PROGRESS, indexEnabled, setIndexEnabled, startIndexer, stopIndexer, subscribeIndex, type IndexProgress } from './indexer';
-import { indexKey, parseIndex, profileBlurb, recommendProfile, type ProfileId } from './stats';
+import { potatoChosenByUser, probeDevice, readPotatoOn, suggestPotato, writePotato, type DeviceProbe } from './device';
+import { IDLE_PROGRESS, indexEnabled, resetIndex, setIndexEnabled, setIndexSpeed, startIndexer, stopIndexer, subscribeIndex, type IndexProgress } from './indexer';
+import { SPEED_ORDER, SPEEDS, indexKey, parseIndex, readSpeed, recommendProfile, type ProfileId, type SpeedId } from './stats';
 import '../components/funds/funds.css';
 import './setup.css';
 
@@ -40,20 +40,6 @@ function readDone(): boolean {
   catch { return true; }
 }
 
-function readPotato(): boolean | null {
-  try {
-    const v = localStorage.getItem('vs.potato');
-    if (v === 'true') return true;
-    if (v === 'false') return false;
-    return null;
-  } catch { return false; }
-}
-
-function persistPotato(on: boolean): void {
-  try { localStorage.setItem('vs.potato', on ? 'true' : 'false'); }
-  catch { /* private mode */ }
-}
-
 function applyProfile(profile: ProfileId): void {
   try { localStorage.setItem('vs.setup.profile', profile); }
   catch { /* private mode */ }
@@ -74,8 +60,13 @@ function when(ms: number): string {
 
 function deviceLine(p: DeviceProbe): string {
   const mem = p.memoryGb === null ? 'memory not reported' : `${p.memoryGb} GB`;
-  const fps = p.fps === null ? 'frames not measured' : `${Math.round(p.fps)} fps`;
-  return `${p.cores} cores · ${mem} · ${fps}`;
+  return `${p.cores} cores · ${mem}`;
+}
+
+/** The user turned indexing off. A missing key is the first run, which still starts. */
+function indexPaused(): boolean {
+  try { return localStorage.getItem('vs.setup.indexOn') === '0'; }
+  catch { return false; }
 }
 
 export function AccountSetup({ address }: { address: string | null }) {
@@ -83,7 +74,12 @@ export function AccountSetup({ address }: { address: string | null }) {
   const [open, setOpen] = useState(() => connected && !readDone());
   const [step, setStep] = useState<Step>(0);
   const [progress, setProgress] = useState<IndexProgress>(IDLE_PROGRESS);
-  const [potatoOn, setPotatoOn] = useState(() => readPotato() === true);
+  const [potatoOn, setPotatoOn] = useState(() => (potatoChosenByUser() ? readPotatoOn() : false));
+  const [speed, setSpeed] = useState<SpeedId>(() => {
+    try { return readSpeed((k) => localStorage.getItem(k)); }
+    catch { return 'default'; }
+  });
+  const [indexOn, setIndexOn] = useState(() => indexEnabled());
   const [probe, setProbe] = useState<DeviceProbe | null>(null);
   const [pos, setPos] = useState({ n: 0, markets: 0 });
   const [picked, setPicked] = useState<ProfileId | null>(null);
@@ -94,34 +90,40 @@ export function AccountSetup({ address }: { address: string | null }) {
   }, [potatoOn]);
 
   useEffect(() => {
-    if (!connected || !address || (!open && !indexEnabled())) {
+    if (!connected || !address) {
       stopIndexer();
       return;
     }
-    startIndexer(address);
-    return subscribeIndex(setProgress);
+    const unsub = subscribeIndex(setProgress);
+    // Pause stays paused while this sheet is open. A missing flag still
+    // starts, so the first run shows progress before the flag is written.
+    if (indexEnabled() || (open && !indexPaused())) startIndexer(address);
+    else stopIndexer();
+    return unsub;
   }, [connected, address, open]);
 
   useEffect(() => {
     const onToggle = () => {
+      setIndexOn(indexEnabled());
       if (!address || !indexEnabled()) {
-        if (!open) stopIndexer();
+        stopIndexer();
         return;
       }
       startIndexer(address);
     };
     window.addEventListener('vs-index', onToggle);
     return () => window.removeEventListener('vs-index', onToggle);
-  }, [address, open]);
+  }, [address]);
 
   // The dev panel reopens the wizard after it has already been finished.
   useEffect(() => {
-    const onOpen = () => {
+    const onOpen = (e: Event) => {
       if (!connected) return;
-      setStep(0);
+      const raw = (e as CustomEvent<{ step?: number }>).detail?.step;
+      const nextStep: Step = raw === 1 || raw === 2 || raw === 3 ? raw : 0;
+      setStep(nextStep);
       setPicked(null);
-      const stored = readPotato();
-      if (stored !== null) setPotatoOn(stored);
+      if (potatoChosenByUser()) setPotatoOn(readPotatoOn());
       setOpen(true);
     };
     window.addEventListener('vs-dev-setup', onOpen);
@@ -133,15 +135,17 @@ export function AccountSetup({ address }: { address: string | null }) {
   }, [connected]);
 
   useEffect(() => {
-    if (open && address) setIndexEnabled(true, address);
+    if (!open || !address || indexPaused()) return;
+    setIndexEnabled(true, address);
   }, [open, address]);
 
+  // Probe on load, not only while the sheet is open, so a stored "on" from
+  // the old frame-rate check is cleared on a machine that is not small.
   useEffect(() => {
-    if (!open) return;
     let dead = false;
     probeDevice().then((p) => { if (!dead) setProbe(p); });
     return () => { dead = true; };
-  }, [open]);
+  }, []);
 
   useEffect(() => {
     if (!open || !address) return;
@@ -158,18 +162,20 @@ export function AccountSetup({ address }: { address: string | null }) {
     return () => { dead = true; };
   }, [open, address]);
 
-  // Offer the suggestion once the device step is up. A stored choice wins.
+  // A hand-set choice wins. Otherwise the probe decides, and a stored "on"
+  // from an older frame-rate check does not.
   useEffect(() => {
-    if (step < 2 || !probe || potatoTouched.current) return;
-    if (readPotato() !== null) return;
-    setPotatoOn(suggestPotato(probe));
-  }, [step, probe]);
+    if (!probe || potatoTouched.current || potatoChosenByUser()) return;
+    const on = suggestPotato(probe);
+    setPotatoOn(on);
+    writePotato(on, false);
+  }, [probe]);
 
   const snap = useMemo(() => {
     if (!address) return null;
     try { return parseIndex(localStorage.getItem(indexKey(address)), address); }
     catch { return null; }
-  }, [address, progress.pages]);
+  }, [address, progress.pages, progress.done, progress.notice, progress.cursorMs]);
 
   const suggested = recommendProfile({
     openPositions: pos.n,
@@ -182,16 +188,26 @@ export function AccountSetup({ address }: { address: string | null }) {
 
   const finish = () => {
     if (step >= 1) applyProfile(profile);
-    if (step >= 2 || potatoTouched.current) persistPotato(potatoOn);
+    if (step >= 2 || potatoTouched.current) writePotato(potatoOn, potatoTouched.current);
     try { localStorage.setItem('vs.setup.done', '1'); }
     catch { /* still close — the dialog must not trap them */ }
     setOpen(false);
   };
 
+  const leave = () => {
+    if (step === 1) applyProfile(profile);
+    if (step === 2) writePotato(potatoOn, potatoTouched.current);
+  };
+
+  const go = (to: Step) => {
+    if (to === step) return;
+    leave();
+    setStep(to);
+  };
+
   const next = () => {
     if (step >= 3) { finish(); return; }
-    if (step === 1) applyProfile(profile);
-    if (step === 2) persistPotato(potatoOn);
+    leave();
     setStep((s) => (s + 1) as Step);
   };
 
@@ -203,7 +219,6 @@ export function AccountSetup({ address }: { address: string | null }) {
       progress.cursorMs ? `${progress.done ? 'through' : 'back to'} ${when(progress.cursorMs)}` : '',
     ].filter(Boolean).join(' · ');
 
-  const indexing = !(progress.done && !progress.running);
   const hasStats = !!snap && (snap.t.fil > 0 || snap.t.ord > 0 || snap.t.vol > 0);
 
   return (
@@ -211,43 +226,70 @@ export function AccountSetup({ address }: { address: string | null }) {
       open={open && connected}
       title="Setting up your account"
       onClose={finish}
-      onBack={step > 0 ? () => setStep((s) => (s - 1) as Step) : undefined}
+      onBack={step > 0 ? () => go((step - 1) as Step) : undefined}
       size="md"
       className="fx vs-setup"
     >
       <ol className="vs-steps" aria-label="Setup progress">
         {STEP_LABELS.map((label, i) => (
-          <li key={label} className={i < step ? 'is-done' : i === step ? 'is-now' : undefined}>{label}</li>
+          <li key={label} className={i < step ? 'is-done' : i === step ? 'is-now' : undefined}>
+            <button type="button" onClick={() => go(i as Step)} aria-current={i === step ? 'step' : undefined}>{label}</button>
+          </li>
         ))}
       </ol>
 
       {progress.notice && <p className="fx-note fx-note--warn">{progress.notice}</p>}
-      {step > 0 && indexing && (
-        <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />{progressText}</p>
-      )}
 
-      <AutoHeight>
-        <FadeView viewKey={String(step)} className="fx-stack">
+      <CrossFade viewKey={String(step)}>
+        <div className="fx-stack">
           {step === 0 && (
             <>
-              <p className="fx-note">
-                History is rolled into statistics on this browser: fees, funding, volume, deposits,
-                withdrawals, orders, and fills. Individual trades are not stored.
-              </p>
-              <p className="vs-setup__fig">{progressText}</p>
-              <p className="fx-note">
-                {progress.done && !progress.running
-                  ? 'Caught up. New activity is picked up from here.'
-                  : 'You can keep browsing. Indexing stays at a steady pace so trading is not rate limited.'}
-              </p>
+              <p className="fx-note">History is counted on this browser. Trades stay on SoDEX.</p>
+              <div className="fx-box vs-setup__box">
+                <div className="fx-kv">
+                  <div><span>Status</span><b>{!indexOn ? 'Paused' : progress.done && !progress.running ? 'Caught up' : 'Indexing'}</b></div>
+                  <div><span>Progress</span><b>{progressText}</b></div>
+                </div>
+              </div>
+              <div className="vs-setup__index">
+                <button
+                  type="button"
+                  className="fx-cta fx-cta--ghost"
+                  onClick={() => {
+                    if (!address) return;
+                    setIndexEnabled(!indexOn, address);
+                    setIndexOn(!indexOn);
+                  }}
+                >
+                  {indexOn ? 'Pause' : 'Resume'}
+                </button>
+                <div className="segmented" role="group" aria-label="Index speed">
+                  {SPEED_ORDER.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      className={speed === id ? 'active' : ''}
+                      aria-pressed={speed === id}
+                      onClick={() => { setIndexSpeed(id); setSpeed(id); }}
+                    >
+                      {id === 'giga' ? 'Giga' : SPEEDS[id].label}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  className="fx-link"
+                  onClick={() => { if (address) resetIndex(address); }}
+                >
+                  Clear index
+                </button>
+              </div>
             </>
           )}
 
           {step === 1 && (
             <>
-              <p className="fx-note">
-                From what SoDEX already shows — open positions, volume, or nothing yet — this account looks {suggested}. {profileBlurb(suggested)}
-              </p>
+              <p className="fx-note">Recommended: {PROFILE_LABEL[suggested]}.</p>
               <div className="vs-setup__choices" role="group" aria-label="Layout profile">
                 {([
                   ['beginner', 'Beginner', 'Less on screen. The denser optional panels stay off.'],
@@ -277,15 +319,11 @@ export function AccountSetup({ address }: { address: string | null }) {
 
           {step === 2 && (
             <>
-              <p className="fx-note">
-                A short check: core count, memory if the browser reports it, and a few frames.
-                A device’s age can’t be known from here.
-              </p>
               <p className="vs-setup__fig">{probe ? deviceLine(probe) : 'Checking…'}</p>
               <p className="fx-note">
                 {probe && suggestPotato(probe)
-                  ? 'This device looks tight, so potato mode starts on. You can turn it off.'
-                  : 'This device looks fine. Potato mode stays off unless you turn it on.'}
+                  ? 'Four cores or fewer, and 4 GB or less, so potato mode starts on.'
+                  : 'Potato mode stays off unless you turn it on.'}
               </p>
               <button
                 type="button"
@@ -295,7 +333,7 @@ export function AccountSetup({ address }: { address: string | null }) {
                   potatoTouched.current = true;
                   const nextOn = !potatoOn;
                   setPotatoOn(nextOn);
-                  persistPotato(nextOn);
+                  writePotato(nextOn, true);
                 }}
               >
                 <span className="fx-opt__icon"><span className="fx-srct__tick"><Tick /></span></span>
@@ -318,7 +356,7 @@ export function AccountSetup({ address }: { address: string | null }) {
                 <div className="fx-kv">
                   <div><span>Layout</span><b>{PROFILE_LABEL[profile]}</b></div>
                   <div><span>Potato mode</span><b>{potatoOn ? 'On' : 'Off'}</b></div>
-                  <div><span>History</span><b>{progress.done ? 'Caught up' : 'Indexing'}</b></div>
+                  <div><span>History</span><b>{!indexOn ? 'Paused' : progress.done ? 'Caught up' : 'Indexing'}</b></div>
                   {hasStats && snap && (
                     <>
                       <div><span>Fills</span><b>{fmt(snap.t.fil, 0)}</b></div>
@@ -332,17 +370,17 @@ export function AccountSetup({ address }: { address: string | null }) {
               </div>
             </>
           )}
+        </div>
+      </CrossFade>
 
-          <div className="vs-setup__actions">
-            <button type="button" className="fx-cta" onClick={next}>
-              {step >= 3 ? 'Explore while we set up' : 'Continue'}
-            </button>
-            {step < 3 && (
-              <button type="button" className="fx-link" onClick={finish}>Explore while we set up</button>
-            )}
-          </div>
-        </FadeView>
-      </AutoHeight>
+      <div className="vs-setup__actions">
+        <button type="button" className="fx-cta" onClick={next}>
+          {step >= 3 ? 'Explore while we set up' : 'Continue'}
+        </button>
+        {step < 3 && (
+          <button type="button" className="fx-link" onClick={finish}>Explore while we set up</button>
+        )}
+      </div>
     </Modal>
   );
 }

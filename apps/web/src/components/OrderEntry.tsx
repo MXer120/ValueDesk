@@ -2200,15 +2200,24 @@ export function OrderEntry({
               </button>
             </dt>
             <dd className="oe-out__v">
-              {!feeLabel ? DASH : cheaper && feeWasLabel ? (
-                <span className="oe-fee">
-                  <span className="oe-fee__flame" aria-hidden="true">🔥</span>
-                  <s className="oe-fee__was">{feeWasLabel}</s>
-                  <span className="oe-fee__now">{feeLabel}</span>
-                </span>
-              ) : (
-                feeLabel
-              )}
+              <button
+                type="button"
+                className="oe-feebtn"
+                aria-haspopup="dialog"
+                aria-expanded={feesOpen}
+                onClick={() => setFeesOpen(true)}
+                title="Fee schedule"
+              >
+                {!feeLabel ? DASH : cheaper && feeWasLabel ? (
+                  <span className="oe-fee">
+                    <span className="oe-fee__flame" aria-hidden="true">🔥</span>
+                    <s className="oe-fee__was">{feeWasLabel}</s>
+                    <span className="oe-fee__now">{feeLabel}</span>
+                  </span>
+                ) : (
+                  feeLabel
+                )}
+              </button>
             </dd>
           </div>
         </dl>
