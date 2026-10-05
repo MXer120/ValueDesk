@@ -119,6 +119,10 @@ export const vsApi = {
 
   explore: (signal?: AbortSignal) => unwrap<ExploreResponse>('/api/vs/explore', signal),
 
+  /** Hyperliquid markets (default dex and xyz), including the hourly funding rate. */
+  assets: (signal?: AbortSignal) =>
+    unwrap<{ assets?: unknown }>('/api/vs/screener?view=assets', signal),
+
   // --- one trader on one venue: straight from the venue, in this browser -----
   trader: (venue: Venue, address: string, signal?: AbortSignal): Promise<TraderProfile | null> =>
     direct(venues.trader(venue, address), signal),

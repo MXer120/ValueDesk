@@ -614,17 +614,36 @@
 }
 /* Open positions carry a logo, a leverage chip and a margin-mode chip.
    Taller than the 32px history rows, at the page's body size. */
-.acct-table.acct-t.acct-pos th { height: 46px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos td { height: 56px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos th { height: 40px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos td { height: 48px; font-size: var(--fs-base); }
 .acct-table.acct-t.acct-pos .acct-mkt__n { font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-act { height: 32px; line-height: 30px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-edit { width: 26px; height: 26px; }
+.acct-table.acct-t.acct-pos .acct-act { height: 28px; line-height: 26px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-edit { width: 22px; height: 22px; }
+.acct-table.acct-t.acct-pos td.acct-actions { text-align: right; }
+.acct-table.acct-t.acct-pos .acct-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--neg) 16%, transparent);
+  color: var(--neg);
+  cursor: pointer;
+}
+.acct-table.acct-t.acct-pos .acct-x:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--neg) 28%, transparent);
+}
+.acct-table.acct-t.acct-pos .acct-x:disabled { opacity: 0.4; cursor: default; }
 .acct-table.acct-t.acct-pos .acct-levbox,
 .acct-table.acct-t.acct-pos .acct-mode {
   display: inline-flex;
   align-items: center;
-  height: 26px;
-  padding: 0 8px;
+  height: 22px;
+  padding: 0 7px;
   border-radius: 6px;
   font-size: var(--fs-base);
   font-weight: 500;

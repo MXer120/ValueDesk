@@ -38,7 +38,7 @@ import { requestDeposit, requestTransfer, requestWithdraw, requestWithdrawFrom }
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Engine, type Symbol } from '../api';
 import { bumpAccountResource, useAccountResource } from '../accountFeeds';
-import { collateralSplit, crossAccountLeverage, crossMarginRatio, fetchHistoryPage } from '../accountData';
+import { collateralSplit, crossAccountLeverage, crossMarginRatio } from '../accountData';
 import { useAccountTotals } from './account/useAccountTotals';
 import { PanelHeading } from '../dashboard/Panel';
 import { useAsync, useChannel, useStatus } from '../hooks';
@@ -494,6 +494,12 @@ const PencilIcon = () => (
   </svg>
 );
 
+const CloseX = () => (
+  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
+    <path d="M2.4 2.4 9.6 9.6M9.6 2.4 2.4 9.6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+  </svg>
+);
+
 function PositionsInner({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged, symbolFilter, filter = DEFAULT_FILTER, onResetView,
   showTitle = true, onCount,
@@ -520,25 +526,6 @@ function PositionsInner({
   const markOf = useMarkPrices(open.map(symbolOf));
   const ordersKey = address && engine === 'perps' ? `orders:perps:${address}` : null;
   const ordersFeed = useAccountResource(ordersKey, () => api.openOrders('perps', address!), 10_000);
-  const funding = useAsync(
-    async () => {
-      const sums = new Map<string, number>();
-      let end: number | null = null;
-      for (let i = 0; i < 6; i++) {
-        const page = await fetchHistoryPage('funding', 'perps', address!, end, 100);
-        for (const f of page.rows) {
-          const id = String(pick(f, 'positionID') ?? '');
-          if (!id) continue;
-          sums.set(id, (sums.get(id) ?? 0) + num(pick(f, 'fundingFee')));
-        }
-        if (page.next == null) break;
-        end = page.next;
-      }
-      return sums;
-    },
-    [address],
-    { enabled: !!address && engine === 'perps' },
-  );
   const { sort, toggle } = useTableSort();
   const [posEdit, setPosEdit] = useState<PosEdit | null>(null);
 
@@ -717,15 +704,8 @@ function PositionsInner({
     }
     if (key === 'upnl') return upnl;
     if (key === 'margin') return im > 0 ? im : null;
-    if (key === 'fees') return -num(pick(p, 'cumTradingFee'));
-    if (key === 'realised') { const v = pick(p, 'realizedPnL'); return v === undefined ? null : num(v); }
-    if (key === 'funding') return funding.data?.get(String(pick(p, 'id'))) ?? null;
     return null;
   });
-
-  // A takeover column only when some position has one: otherwise it is a
-  // column of em-dashes on every account that was never liquidated.
-  const anyTakeover = positions.some((p) => pick<boolean>(p, 'isTakenOver') || num(pick(p, 'takeOverPrice')) > 0);
 
   return (
     <section className="panel acct">
@@ -745,14 +725,10 @@ function PositionsInner({
               <SortTh k="entry" label="Entry" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="mark" label="Mark" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="liq" label={<>Liq. <span className="acct-tag">est.</span></>} numeric sort={sort} onSort={toggle} className="num" title="Estimated from entry, size and leverage against the venue's published margin tiers. It ignores collateral held elsewhere in the account, which can only move real liquidation further away." />
-              <SortTh k="upnl" label="Unreal. PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
+              <SortTh k="upnl" label="PnL" numeric sort={sort} onSort={toggle} className="num" title="Derived here: (mark − entry) × size, signed by direction; the % is against the position's margin. The venue does not publish an unrealised PnL for a position." />
               <SortTh k="margin" label="Margin" numeric sort={sort} onSort={toggle} className="num" />
-              <SortTh k="funding" label="Funding" numeric sort={sort} onSort={toggle} className="num" title="Settled funding on this position. Positive is received, negative is paid." />
-              <SortTh k="fees" label="Fees" numeric sort={sort} onSort={toggle} className="num" />
-              <SortTh k="realised" label="Realised" numeric sort={sort} onSort={toggle} className="num" />
               <th>TP/SL</th>
-              {anyTakeover && <th className="num" title="takeOverPrice as reported. Not a liquidation price.">Takeover</th>}
-              {!readOnly && <th className="acct-actions" aria-label="Row actions" />}
+              {!readOnly && <th className="acct-actions" aria-label="Close" />}
             </tr>
           </thead>
           <tbody>
@@ -767,9 +743,6 @@ function PositionsInner({
               const margin = marginOf(pick(p, 'marginMode'));
               const lev = num(pick(p, 'leverage'));
               const im = num(pick(p, 'initialMargin'));
-              // Capital L in `realizedPnL` - the gateway's spelling.
-              const rpnl = pick(p, 'realizedPnL');
-              const takeover = pick(p, 'takeOverPrice');
               const unit = coinLabel(sym?.baseCoin) || undefined;
 
               const upnl =
@@ -779,7 +752,6 @@ function PositionsInner({
               const roe = upnl !== null && im > 0 ? upnl / im : null;
 
               const exits = exitsFor(openOrders, symbol, pick(p, 'id'));
-              const fund = funding.data?.get(String(pick(p, 'id') ?? ''));
               const liq =
                 dir && entry > 0 && size > 0
                   ? estimateLiquidationPrice({
@@ -794,7 +766,7 @@ function PositionsInner({
               return (
                 <tr key={String(pick(p, 'id') ?? i)}>
                   <td>
-                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={26}>
+                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={22}>
                       {lev > 0 && (
                         <span
                           className={`acct-levbox${dir ? ` acct-levbox--${dir}` : ''}`}
@@ -828,12 +800,6 @@ function PositionsInner({
                       </button>
                     )}
                   </td>
-                  <td className={`num ${fund === undefined ? '' : toneOf(fund)}`}>
-                    {fund === undefined ? EM : signedUsd(fund)}
-                  </td>
-                  <td className="num">{signedUsd(-num(pick(p, 'cumTradingFee')), false)}</td>
-                  <td className={`num ${toneOf(num(rpnl))}`}>{rpnl === undefined ? EM : signedUsd(num(rpnl))}</td>
-                  {/* A position that was not taken over reports takeOverPrice 0 - not a price. */}
                   <td className="acct-exits">
                     <span className="acct-tpsl">
                       <span>{exits.tp ? price(pick(exits.tp, 'stopPrice'), sym?.tickSize) : EM}</span>
@@ -867,20 +833,16 @@ function PositionsInner({
                       </button>
                     )}
                   </td>
-                  {anyTakeover && (
-                    <td className={`num ${pick<boolean>(p, 'isTakenOver') ? 'warn' : ''}`}>
-                      {num(takeover) ? fmtPrice(takeover, sym?.tickSize) : EM}
-                    </td>
-                  )}
                   {!readOnly && <td className="acct-actions">
                     <button
                       type="button"
-                      className="acct-act"
+                      className="acct-x"
                       onClick={() => close(p)}
                       disabled={busy || !unlocked || !dir}
+                      aria-label={dir ? `Close ${symbol} at market` : `Cannot close ${symbol}`}
                       title={dir ? 'Close at market (reduce-only)' : 'Direction unknown - close manually from the order ticket.'}
                     >
-                      Close
+                      <CloseX />
                     </button>
                   </td>}
                 </tr>
