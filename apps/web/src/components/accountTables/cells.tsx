@@ -44,7 +44,7 @@ export function shortName(symbol: string, sym: MarketSymbol | undefined, engine:
 }
 
 export function MarketCell({
-  symbol, sym, engine, children, full = false,
+  symbol, sym, engine, children, full = false, icon = 18,
 }: {
   symbol: string;
   sym: MarketSymbol | undefined;
@@ -53,11 +53,13 @@ export function MarketCell({
   children?: ReactNode;
   /** Show the full display name (BTC-USD) rather than the short one (BTC). */
   full?: boolean;
+  /** Coin logo, in px. Positions use a larger one. */
+  icon?: number;
 }) {
   const name = full ? sym?.displayName ?? marketName(symbol) : shortName(symbol, sym, engine);
   return (
     <span className="acct-mkt" title={sym?.displayName ?? symbol}>
-      <CoinIcon coin={sym?.baseCoin ?? symbol} size={18} />
+      <CoinIcon coin={sym?.baseCoin ?? symbol} size={icon} />
       <span className="acct-mkt__n">{name || DASH}</span>
       {children}
     </span>

@@ -273,6 +273,31 @@ test('PriceFit: from a dragged range to the destination fit, eased, no jump eith
   }
 });
 
+test('PriceFit: a primed span is where a series switch glides from', () => {
+  const { c, axis, view, layout } = fakeChart(series(300));
+  const fit = new PriceFit();
+  c.overrideYAxis({ createRange: fit.wrap(templateRange(axis.createRange), 'linear') });
+  // The new series is already on the axis, fitting itself. The switch remembers
+  // the span the previous timeframe was showing.
+  const fitted = layout();
+  const old: Span = { from: 20, to: 40 };
+  fit.prime(old);
+  // The view tween cancels whatever was running before it begins. That cancel
+  // must not forget the span the switch captured.
+  fit.end();
+  assert.equal(fit.begin(c, { ...view }, 600), true);
+  const start = layout();
+  const shown = addGap(old, gapRates(undefined, 400), 'linear');
+  assert.ok(close(start.from, shown.from) && close(start.to, shown.to), 'the first frame is the previous scale');
+  assert.ok(Math.abs(start.from - fitted.from) > 1, 'it did not start on the new fit');
+  fit.step(c, 1, { ...view }, 600);
+  const end = layout();
+  assert.ok(close(end.from, fitted.from) && close(end.to, fitted.to), 'it lands on the new series fit');
+  // A bad prime is ignored, and a prime is used once.
+  fit.prime({ from: 5, to: 5 });
+  assert.equal(fit.begin(c, { ...view }, 600), false);
+});
+
 test('PriceFit: nothing to move when already fitting there; end() hands back mid-move', () => {
   const { c, axis, view, layout } = fakeChart(series(300));
   const fit = new PriceFit();

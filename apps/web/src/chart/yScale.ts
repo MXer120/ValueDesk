@@ -25,7 +25,10 @@
  * between the span the axis showed when the move started - automatic or one
  * the user dragged - and the span the DESTINATION view fits. The last frame
  * of the move is the pass-through, which is that same destination fit, so
- * handing back to auto-fit is not a step.
+ * handing back to auto-fit is not a step. A timeframe or market switch primes
+ * the span the axis was showing before the bars were replaced (`prime`), and
+ * the next move glides from that span instead of from the new series' fit,
+ * which is already on the axis by the time the move can start.
  *
  * klinecharts' internals it leans on, all present in 10.0.2 and each guarded:
  * the axis' `_autoCalcTickFlag` (get/setAutoCalcTickFlag: true = auto-fit,
@@ -300,13 +303,25 @@ function spanDiffPx(a: Span, b: Span, height: number, kind: ScaleKind): number {
  */
 export class PriceFit implements YMotion {
   private move: { from: Span; to: Span; e: number } | null = null;
+  private primed: Span | null = null;
   private kind: ScaleKind = 'linear';
+
+  /**
+   * Glide from this span on the next `begin`, once. The axis may already be
+   * fitting the new series by then (a timeframe switch replaces the bars
+   * before the move can start); this is the span it showed before that.
+   * An unusable span clears a prime that has not been consumed yet.
+   */
+  prime(span: Span): void {
+    this.primed = [span.from, span.to].every(Number.isFinite) && span.to > span.from ? span : null;
+  }
 
   /** Wrap the axis template's own createRange (klinecharts' plain auto-fit
    *  for that scale). */
   wrap(base: AxisCreateRangeCallback, kind: ScaleKind): AxisCreateRangeCallback {
     this.kind = kind;
     this.move = null;
+    this.primed = null;
     const wrapped: AxisCreateRangeCallback = (params) => {
       const m = this.move;
       if (!m) return base(params);
@@ -331,6 +346,8 @@ export class PriceFit implements YMotion {
 
   begin(c: KChart, dest: View, width: number): boolean {
     this.move = null;
+    const primed = this.primed;
+    this.primed = null;
     const axis = priceAxis(c);
     if (!axis) return false;
     const height = paneHeight(c);
@@ -341,7 +358,7 @@ export class PriceFit implements YMotion {
       return false;
     }
     const r = axis.getRange();
-    const from = stripGap({ from: r.from, to: r.to }, gapRates(axis.gap, height), this.kind);
+    const from = primed ?? stripGap({ from: r.from, to: r.to }, gapRates(axis.gap, height), this.kind);
     if (![from.from, from.to].every(Number.isFinite) || !(from.to > from.from)) {
       if (!auto) resumeAutoFit(c, axis);
       return false;
@@ -372,6 +389,8 @@ export class PriceFit implements YMotion {
 
   end(): void {
     this.move = null;
+    // A prime belongs to the next begin. ViewTween.start cancels the move
+    // already in flight before that begin, and this is where the cancel lands.
   }
 }
 

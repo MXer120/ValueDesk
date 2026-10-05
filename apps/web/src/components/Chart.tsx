@@ -114,15 +114,17 @@ import {
   MORPH_SHOWN,
   badgeStyles,
   gridLines,
+  MORPH_MS,
   morphable,
   prefersReducedMotion,
   type RGBA,
 } from '../chart/morph';
 import { dragAnywhere } from '../chart/dragAnywhere';
 import { holdFrame } from '../chart/switchFrame';
+import { captureAxis, type AxisHold } from '../chart/axisHandoff';
 import { HistoryPager } from '../chart/historyPager';
 import { HistoryReveal } from '../chart/historyReveal';
-import { ViewTween, defaultView } from '../chart/viewTween';
+import { ViewTween, defaultView, readView } from '../chart/viewTween';
 import {
   INITIAL_SCALE,
   PriceFit,
@@ -714,6 +716,15 @@ function Chart({
   /** With A off, a new series or scale type refits the axis; hold that fit
    *  once bars are on screen so A stays off (see the pin effect). */
   const pinAfterLoad = useRef(false);
+  /** The scale kind, for a switch that eases the price axis (axisHandoff.ts). */
+  const scaleKind = useRef(kindOf(scale.mode));
+  scaleKind.current = kindOf(scale.mode);
+  /** Labels and span from the series being left. A newer switch bumps the generation. */
+  const handoff = useRef<AxisHold | null>(null);
+  const handoffGen = useRef(0);
+  /** Which generation already started its glide, so a later reload does not start it again. */
+  const handoffUsed = useRef(0);
+  const motionOk = () => !prefersReducedMotion() && !document.documentElement.classList.contains('is-potato');
   const scaleRef = useRef<HTMLDivElement>(null);
 
   /*
@@ -1327,6 +1338,63 @@ function Chart({
         // the library's second measuring pass, folded into this same pending
         // layout, so the range is final before the first frame is drawn.
         if (rows.length) chart.current?.resize();
+        // A timeframe or market switch kept the old axis labels up. Ease the
+        // price scale from the span they showed, and crossfade the time labels.
+        // Precision reloads and gap repair return above, so they never start this.
+        const pending = handoff.current;
+        const gen = handoffGen.current;
+        if (pending && handoffUsed.current !== gen && rows.length) {
+          handoffUsed.current = gen;
+          const startGlide = () => {
+            if (handoff.current !== pending || handoffGen.current !== gen) return;
+            const c2 = chart.current;
+            const tw = tween.current;
+            const fitY = fit.current;
+            if (!c2 || !tw || !fitY) {
+              pending.clear();
+              if (handoff.current === pending) handoff.current = null;
+              return;
+            }
+            const settle = () => {
+              if (gen !== handoffGen.current) return;
+              if (!autoRef.current) {
+                const axis = priceAxis(c2);
+                if (axis) holdRange(axis);
+              }
+              pinAfterLoad.current = false;
+            };
+            fitY.prime(pending.span);
+            tw.start(readView(c2), {
+              ms: MORPH_MS,
+              fitY: true,
+              onEnd: (completed) => {
+                if (gen !== handoffGen.current) return;
+                if (!completed) pending.clear();
+                settle();
+                if (handoff.current === pending) handoff.current = null;
+              },
+            });
+            const reveal = () => {
+              if (handoffGen.current !== gen || handoff.current !== pending) return;
+              pending.releasePrice();
+              pending.fadeTime(MORPH_MS);
+            };
+            if (tw.running) requestAnimationFrame(reveal);
+            else {
+              // Already on the new fit, or the move could not start. onEnd is
+              // not called then. Drop a prime begin() never saw.
+              fitY.prime({ from: Number.NaN, to: Number.NaN });
+              reveal();
+              settle();
+              if (handoff.current === pending) handoff.current = null;
+            }
+          };
+          queueMicrotask(() => requestAnimationFrame(startGlide));
+        } else if (pending && handoffUsed.current !== gen) {
+          handoffUsed.current = gen;
+          pending.clear();
+          if (handoff.current === pending) handoff.current = null;
+        }
       },
       // klinecharts calls these around every reload (setSymbol/setPeriod both
       // reset the store). We do not open a socket here — the app's hub already
@@ -1534,6 +1602,25 @@ function Chart({
       setLegendBar(null);
     }
 
+    // Precision arriving later changes symbolKey without changing the market.
+    // That reload hands the same bars back and must not glide the axis.
+    const marketId = `${engine}|${seriesTicker}`;
+    const prevKey = applied.current.symbol;
+    const pipe = prevKey.indexOf('|');
+    const pipe2 = pipe < 0 ? -1 : prevKey.indexOf('|', pipe + 1);
+    const prevMarket = pipe2 < 0 ? '' : prevKey.slice(0, pipe2);
+    const switching =
+      (applied.current.period !== '' && applied.current.period !== interval) ||
+      (prevMarket !== '' && prevMarket !== marketId);
+    // The new bars are not here yet. Keep the axes that are on screen and
+    // ease the price scale across once they land (chart/axisHandoff.ts).
+    if (switching && c.getDataList().length > 0 && motionOk()) {
+      handoff.current?.clear();
+      handoffGen.current += 1;
+      const shot = captureAxis(c, scaleKind.current);
+      handoff.current = shot;
+      tween.current?.cancel();
+    }
     if (applied.current.period !== interval) {
       applied.current.period = interval;
       c.setPeriod(period);
@@ -1548,6 +1635,18 @@ function Chart({
         ...(pricePrecision === undefined ? {} : { pricePrecision }),
         ...(volumePrecision === undefined ? {} : { volumePrecision }),
       });
+    }
+    // setPeriod rebuilds the axis DOM in a microtask. Paint the saved labels
+    // onto whatever widgets are there now, and once more after that rebuild.
+    const shot = handoff.current;
+    if (shot && switching) {
+      const gen = handoffGen.current;
+      const stick = () => {
+        if (handoff.current === shot && handoffGen.current === gen) shot.stick(c);
+      };
+      stick();
+      queueMicrotask(stick);
+      requestAnimationFrame(stick);
     }
     // A new market or interval puts klinecharts' price axis back on auto-fit
     // (setSymbol resets it, and a range from another series means nothing).
@@ -2343,6 +2442,9 @@ function Chart({
     const c = chart.current;
     if (!c || c.getDataList().length === 0) return;
     const id = requestAnimationFrame(() => {
+      // A glide is carrying the axis onto the new fit. Holding now would
+      // freeze it; the glide pins the landed range when A is off.
+      if (fit.current?.moving) return;
       const axis = priceAxis(c);
       if (!axis || autoRef.current) {
         pinAfterLoad.current = false;

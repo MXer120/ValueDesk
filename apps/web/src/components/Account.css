@@ -221,9 +221,13 @@
 }
 .acct-edit:hover:not(:disabled) { color: var(--text); }
 .acct-exits { white-space: nowrap; }
-.acct-exit { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
-.acct-exit__k { color: var(--dim); font-size: var(--fs-micro); }
-.acct-exit__v { font-variant-numeric: tabular-nums; }
+.acct-tpsl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.acct-tpsl__s { color: var(--dim); font-weight: 400; }
 .acct-sort__m { font-size: 10px; color: var(--text); }
 .acct-table td.num,
 .acct-table td:first-child { font-weight: 500; }
@@ -608,6 +612,15 @@
   height: 32px;
   vertical-align: middle;
 }
+/* Open positions carry a logo, a side pill and a TP/SL pair. A step up from
+   the 32px history rows, at the page's body size. */
+.acct-table.acct-t.acct-pos th { height: 40px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos td { height: 44px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-mkt__n,
+.acct-table.acct-t.acct-pos .acct-lev { font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-pill { height: 22px; }
+.acct-table.acct-t.acct-pos .acct-act { height: 30px; line-height: 28px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-edit { width: 24px; height: 24px; }
 .acct-table.acct-t td,
 .acct-table.acct-t td:first-child { font-weight: 400; }
 .acct-table.acct-t td.num { font-weight: 500; }

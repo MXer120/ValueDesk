@@ -672,6 +672,132 @@
 .fx.vs-confirm .fx-check { align-items: flex-start; margin-top: 0; }
 .fx.vs-confirm .fx-check input { margin-top: 2px; }
 .modal-scrim:has(.vs-confirm) { overflow: auto; align-items: safe center; }
+
+/* Take profit and stop loss, one sheet (TpSlSheet.tsx). The reference puts the
+   coin with the title on the left and the two triggers side by side. */
+.fx.vs-tpsl { max-width: 480px; }
+.fx.vs-tpsl .modal-head { grid-template-columns: minmax(0, 1fr) 32px; }
+.fx.vs-tpsl .modal-head h2 { grid-column: 1; justify-self: start; text-align: left; }
+.fx.vs-tpsl .modal-close { grid-column: 2; }
+.vs-tpsl__name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+.fx.vs-tpsl .modal-body { gap: 0; }
+.fx.vs-tpsl .modal-foot {
+  display: block;
+  padding: 0 var(--sp-4) var(--sp-4);
+  border-top: 0;
+  background: transparent;
+}
+.vs-tpsl__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+}
+.vs-tpsl__stat {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 4px 0;
+  font-size: var(--fs-base);
+}
+.vs-tpsl__stat span { color: var(--muted); font-weight: 400; }
+.vs-tpsl__stat b { font-family: var(--font-num); font-weight: 500; color: var(--text); }
+.vs-tpsl__stat b.pos { color: var(--pos); }
+.vs-tpsl__stat b.neg { color: var(--neg); }
+.vs-tpsl__leg { margin-top: var(--sp-3); }
+.vs-tpsl__leg h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  color: var(--text);
+}
+.vs-tpsl__pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.vs-tpsl__field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+  background: var(--fx-well, var(--bg));
+}
+.vs-tpsl__field > span { flex: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
+.vs-tpsl__val {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  margin-left: auto;
+}
+.vs-tpsl__usd { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-base); font-weight: 400; }
+.fx.vs-tpsl .vs-tpsl__field input {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 4.5ch;
+  max-width: 100%;
+  height: 28px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-family: var(--font-num);
+  font-size: var(--fs-base);
+  font-weight: 500;
+  text-align: right;
+  field-sizing: content;
+}
+.fx.vs-tpsl .vs-tpsl__field input::placeholder { color: var(--muted); font-weight: 400; }
+.fx.vs-tpsl .vs-tpsl__field input:hover,
+.fx.vs-tpsl .vs-tpsl__field input:focus,
+.fx.vs-tpsl .vs-tpsl__field input:focus-visible { border: 0; outline: none; background: transparent; }
+.vs-tpsl__unit { flex: none; color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 400; }
+.fx.vs-tpsl button.vs-tpsl__swap,
+.fx.vs-tpsl button.vs-tpsl__info {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fx.vs-tpsl button.vs-tpsl__swap:hover:not(:disabled),
+.fx.vs-tpsl button.vs-tpsl__info:hover { color: var(--text); background: transparent; }
+.vs-tpsl__leg .fx-note { margin-top: 6px; }
+.vs-tpsl__opts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--panel-line);
+}
+.vs-tpsl__opt { display: flex; align-items: center; gap: 4px; }
+.vs-tpsl__opt .fx-check { margin-top: 0; color: var(--text); font-size: var(--fs-base); font-weight: 400; }
+.vs-tpsl__opts .fx-note { margin: 0; }
+.modal-scrim:has(.vs-tpsl) { overflow: auto; align-items: safe center; }
 /* The Withdraw sheet's action: says where it goes, a size up. */
 .fx-cta--lg { height: 48px; font-size: calc(var(--fs-base) + 2px); letter-spacing: 0.01em; }
 

@@ -48,6 +48,8 @@ import { Private } from '../privacy';
 import { estimateLiquidationPrice } from '../risk';
 import { signedMarginAmount } from '../trading/orderParams';
 import { useConfirm } from './Modal';
+import { TpSlSheet, type TpSlConfirm } from './TpSlSheet';
+import { planExit, type ExitExisting } from './tpsl';
 import './Account.css';
 import { CoinIcon, CoinLabel } from './CoinIcon';
 import { HistoryTable, ReadFailed } from './AccountHistory';
@@ -432,14 +434,20 @@ function useMarkPrices(symbols: string[]): (symbol: string) => number | null {
 
 const MARGIN_WORD = { cross: 'Cross', isolated: 'Isolated' } as const;
 
-type PosEdit = {
-  symbol: string;
-  kind: 'margin' | 'tp' | 'sl';
-  orderID?: number;
-  draft: string;
-  dir: 'long' | 'short';
-  qty: string;
-};
+type PosEdit =
+  | { kind: 'margin'; symbol: string; draft: string; dir: 'long' | 'short'; qty: string }
+  | {
+      kind: 'tpsl';
+      symbol: string;
+      dir: 'long' | 'short';
+      coin: string;
+      fullQty: string;
+      entry: number;
+      mark: number | null;
+      tick?: string;
+      tp?: ExitExisting;
+      sl?: ExitExisting;
+    };
 
 function stopKind(o: any): 'tp' | 'sl' | null {
   const s = String(pick(o, 'stopType', 'st') ?? '').toUpperCase();
@@ -466,33 +474,25 @@ const orderIdOf = (o: any): number | undefined => {
   const id = num(pick(o, 'orderID', 'i', 'orderId'));
   return id > 0 ? id : undefined;
 };
-const stopText = (o: any): string => {
-  const px = pick(o, 'stopPrice');
-  return px == null || num(px) <= 0 ? '' : String(px);
-};
+function exitSnap(o: any): ExitExisting | undefined {
+  if (!o) return undefined;
+  const px = num(pick(o, 'stopPrice'));
+  if (!(px > 0)) return undefined;
+  const q = pick(o, 'origQty', 'quantity', 'q');
+  const t = String(pick(o, 'type', 'o') ?? '').toUpperCase();
+  return {
+    orderID: orderIdOf(o),
+    price: String(pick(o, 'stopPrice')),
+    quantity: q == null || num(q) <= 0 ? '' : String(q),
+    limit: t === 'LIMIT' || t === '1',
+  };
+}
 
 const PencilIcon = () => (
   <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" focusable="false">
     <path d="M7.1 1.7 10.3 4.9 4.1 11.1H.9V7.9Z" fill="none" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round" />
   </svg>
 );
-
-function ExitBit({
-  label, order, tick, disabled, onEdit, readOnly = false,
-}: { label: string; order?: any; tick?: string; disabled: boolean; onEdit: () => void; readOnly?: boolean }) {
-  const px = order ? num(pick(order, 'stopPrice')) : 0;
-  return (
-    <span className="acct-exit">
-      <span className="acct-exit__k">{label}</span>
-      <span className="acct-exit__v">{px > 0 ? price(px, tick) : EM}</span>
-      {!readOnly && (
-        <button type="button" className="acct-edit" aria-label={`Edit ${label}`} disabled={disabled} onClick={onEdit}>
-          <PencilIcon />
-        </button>
-      )}
-    </span>
-  );
-}
 
 function PositionsInner({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged, symbolFilter, filter = DEFAULT_FILTER, onResetView,
@@ -594,42 +594,56 @@ function PositionsInner({
     }
   }
 
-  async function saveEdit() {
-    if (!posEdit) return;
-    const draft = posEdit.draft.trim();
-    if (!draft || !(num(draft) > 0)) return show('err', 'Enter an amount.');
-    if (posEdit.kind === 'margin') return;
-    const label = posEdit.kind === 'tp' ? 'take profit' : 'stop loss';
-    const ok = await confirm({
-      title: `Update ${label}`,
-      confirmLabel: 'Update',
-      cancelLabel: 'Back',
-      body: (
-        <p>
-          {posEdit.orderID ? 'Change' : 'Place'} the reduce-only {label} on <strong>{posEdit.symbol}</strong> so it
-          triggers at <strong>{draft}</strong>. SoDEX fires these from the mark price.
-        </p>
-      ),
-    });
-    if (!ok) return;
+  async function saveExits(req: TpSlConfirm) {
+    if (!posEdit || posEdit.kind !== 'tpsl') return;
+    const edit = posEdit;
     setBusy(true);
     try {
-      if (posEdit.orderID) {
-        // A take-profit / stop-loss: changed with SoDEX's modify request (trading/actions.ts changeOrder).
-        await api.changeOrder('perps', { symbol: posEdit.symbol, orderID: posEdit.orderID }, { stopPrice: draft });
-      } else {
-        await api.placeOrder('perps', {
-          symbol: posEdit.symbol,
-          side: posEdit.dir === 'long' ? 'sell' : 'buy',
-          type: 'market',
-          quantity: posEdit.qty,
+      for (const [kind, draft, existing] of [
+        ['tp', req.tp, edit.tp],
+        ['sl', req.sl, edit.sl],
+      ] as const) {
+        const plan = planExit(existing, draft);
+        if (plan.action === 'keep') continue;
+        const place = (order: { price: string; quantity: string; limit: boolean }) => api.placeOrder('perps', {
+          symbol: edit.symbol,
+          side: edit.dir === 'long' ? 'sell' : 'buy',
+          type: order.limit ? 'limit' : 'market',
+          ...(order.limit ? { price: order.price, tif: 'gtc' as const } : {}),
+          quantity: order.quantity,
           reduceOnly: true,
-          stopPrice: draft,
-          stopType: posEdit.kind,
+          stopPrice: order.price,
+          stopType: kind,
           triggerType: 'mark',
         });
+        if (plan.action === 'cancel') {
+          if (!existing?.orderID) throw new Error('That exit has no order id, so it cannot be cancelled from here.');
+          await api.cancelOrder('perps', { symbol: edit.symbol, orderID: existing.orderID });
+          continue;
+        }
+        if (plan.action === 'modify') {
+          if (!existing?.orderID) throw new Error('That exit has no order id, so it cannot be changed from here.');
+          await api.changeOrder('perps', { symbol: edit.symbol, orderID: existing.orderID }, {
+            ...(plan.price ? { stopPrice: plan.price } : {}),
+            ...(plan.quantity ? { quantity: plan.quantity } : {}),
+            ...(plan.limitPrice ? { price: plan.limitPrice } : {}),
+          });
+          continue;
+        }
+        if (plan.action === 'replace') {
+          if (!existing?.orderID) throw new Error('That exit has no order id, so it cannot be changed from here.');
+          await api.cancelOrder('perps', { symbol: edit.symbol, orderID: existing.orderID });
+          try {
+            await place(plan);
+          } catch (e) {
+            const why = e instanceof Error ? e.message : String(e);
+            throw new Error(`The previous exit was cancelled, and the new one was not accepted (${why}). Place it again.`);
+          }
+          continue;
+        }
+        await place(plan);
       }
-      show('ok', `${label[0]!.toUpperCase()}${label.slice(1)} updated.`);
+      show('ok', 'TP/SL updated.');
       setPosEdit(null);
       onChanged();
       refresh();
@@ -722,7 +736,7 @@ function PositionsInner({
         {positions.length === 0 ? (!error && (open.length > 0
           ? <FilteredEmpty onReset={onResetView} />
           : <Note>{loading ? 'Loading…' : 'No open positions.'}</Note>)) : (
-        <table className="acct-table acct-t">
+        <table className="acct-table acct-t acct-pos">
           <thead>
             <tr>
               <SortTh k="market" label="Market" sort={sort} onSort={toggle} />
@@ -736,7 +750,7 @@ function PositionsInner({
               <SortTh k="funding" label="Funding" numeric sort={sort} onSort={toggle} className="num" title="Settled funding on this position. Positive is received, negative is paid." />
               <SortTh k="fees" label="Fees" numeric sort={sort} onSort={toggle} className="num" />
               <SortTh k="realised" label="Realised" numeric sort={sort} onSort={toggle} className="num" />
-              <th>TP / SL</th>
+              <th>TP/SL</th>
               {anyTakeover && <th className="num" title="takeOverPrice as reported. Not a liquidation price.">Takeover</th>}
               {!readOnly && <th className="acct-actions" aria-label="Row actions" />}
             </tr>
@@ -780,7 +794,7 @@ function PositionsInner({
               return (
                 <tr key={String(pick(p, 'id') ?? i)}>
                   <td>
-                    <MarketCell symbol={symbol} sym={sym} engine="perps">
+                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={24}>
                       <SidePill dir={dir} prefix={margin ? MARGIN_WORD[margin] : undefined} />
                       {lev > 0 && <span className="acct-lev">{lev}x</span>}
                     </MarketCell>
@@ -814,22 +828,37 @@ function PositionsInner({
                   <td className={`num ${toneOf(num(rpnl))}`}>{rpnl === undefined ? EM : signedUsd(num(rpnl))}</td>
                   {/* A position that was not taken over reports takeOverPrice 0 - not a price. */}
                   <td className="acct-exits">
-                    <ExitBit
-                      label="TP"
-                      readOnly={readOnly}
-                      order={exits.tp}
-                      tick={sym?.tickSize}
-                      disabled={busy || !unlocked || !dir}
-                      onEdit={() => dir && setPosEdit({ symbol, kind: 'tp', orderID: orderIdOf(exits.tp), draft: stopText(exits.tp), dir, qty: String(size) })}
-                    />
-                    <ExitBit
-                      label="SL"
-                      readOnly={readOnly}
-                      order={exits.sl}
-                      tick={sym?.tickSize}
-                      disabled={busy || !unlocked || !dir}
-                      onEdit={() => dir && setPosEdit({ symbol, kind: 'sl', orderID: orderIdOf(exits.sl), draft: stopText(exits.sl), dir, qty: String(size) })}
-                    />
+                    <span className="acct-tpsl">
+                      <span>{exits.tp ? price(pick(exits.tp, 'stopPrice'), sym?.tickSize) : EM}</span>
+                      <span className="acct-tpsl__s">/</span>
+                      <span>{exits.sl ? price(pick(exits.sl, 'stopPrice'), sym?.tickSize) : EM}</span>
+                    </span>
+                    {!readOnly && (
+                      <button
+                        type="button"
+                        className="acct-edit"
+                        aria-label={`Edit TP/SL on ${symbol}`}
+                        disabled={busy || !unlocked || !dir}
+                        onClick={() => {
+                          if (!dir) return;
+                          const raw = String(pick(p, 'size', 'positionAmt', 'pa', 'q') ?? '');
+                          setPosEdit({
+                            kind: 'tpsl',
+                            symbol,
+                            dir,
+                            coin: coinLabel(sym?.baseCoin) || sym?.baseCoin || '',
+                            fullQty: raw.startsWith('-') ? raw.slice(1) : raw,
+                            entry,
+                            mark,
+                            tick: sym?.tickSize,
+                            tp: exitSnap(exits.tp),
+                            sl: exitSnap(exits.sl),
+                          });
+                        }}
+                      >
+                        <PencilIcon />
+                      </button>
+                    )}
                   </td>
                   {anyTakeover && (
                     <td className={`num ${pick<boolean>(p, 'isTakenOver') ? 'warn' : ''}`}>
@@ -855,13 +884,11 @@ function PositionsInner({
         )}
         </>
       )}
-      {posEdit && (
+      {posEdit?.kind === 'margin' && (
         <div className="acct-modify">
-          <span className="acct-modify__t">
-            {posEdit.kind === 'margin' ? `Isolated margin · ${posEdit.symbol}` : `${posEdit.kind === 'tp' ? 'Take profit' : 'Stop loss'} · ${posEdit.symbol}`}
-          </span>
+          <span className="acct-modify__t">Isolated margin · {posEdit.symbol}</span>
           <label>
-            <span>{posEdit.kind === 'margin' ? 'Amount' : 'Trigger'}</span>
+            <span>Amount</span>
             <input
               value={posEdit.draft}
               onChange={(e) => setPosEdit({ ...posEdit, draft: e.target.value })}
@@ -869,16 +896,27 @@ function PositionsInner({
               autoFocus
             />
           </label>
-          {posEdit.kind === 'margin' ? (
-            <>
-              <button type="button" className="acct-act acct-act--solid" onClick={() => saveMargin(true)} disabled={busy}>Add</button>
-              <button type="button" className="acct-act" onClick={() => saveMargin(false)} disabled={busy}>Remove</button>
-            </>
-          ) : (
-            <button type="button" className="acct-act acct-act--solid" onClick={saveEdit} disabled={busy}>Save</button>
-          )}
+          <button type="button" className="acct-act acct-act--solid" onClick={() => saveMargin(true)} disabled={busy}>Add</button>
+          <button type="button" className="acct-act" onClick={() => saveMargin(false)} disabled={busy}>Remove</button>
           <button type="button" className="acct-act" onClick={() => setPosEdit(null)} disabled={busy}>Cancel</button>
         </div>
+      )}
+      {posEdit?.kind === 'tpsl' && (
+        <TpSlSheet
+          key={`${posEdit.symbol}:${posEdit.fullQty}`}
+          symbol={posEdit.symbol}
+          coin={posEdit.coin}
+          side={posEdit.dir}
+          entry={posEdit.entry}
+          mark={posEdit.mark}
+          fullQty={posEdit.fullQty}
+          tick={posEdit.tick}
+          tp={posEdit.tp}
+          sl={posEdit.sl}
+          busy={busy}
+          onClose={() => { if (!busy) setPosEdit(null); }}
+          onConfirm={(req) => void saveExits(req)}
+        />
       )}
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}
       {dialog}
