@@ -736,13 +736,14 @@ button.oe-select[aria-expanded='true'] {
   background: repeating-linear-gradient(90deg, color-mix(in srgb, var(--oe-tint) 28%, transparent) 0 2px, transparent 2px 5px);
 }
 /* clip-path, not scaleX: scaling a repeating bar gradient would squash the
-   segments. The pattern stays put and the filled share grows. */
+   segments. The pattern stays put and the filled share grows. No transition:
+   the thumb is the native range thumb and it moves on the pointer, so an
+   eased clip leaves the fill behind it. */
 .oe-slider__fill {
   position: absolute; left: 0; right: 0; top: 3px; height: 14px;
   border-radius: 3px;
   background: repeating-linear-gradient(90deg, var(--oe-tint) 0 2px, transparent 2px 5px);
   clip-path: inset(0 calc((1 - var(--oe-p, 0)) * 100%) 0 0);
-  transition: clip-path var(--oe-meter) var(--oe-ease);
 }
 /* 8px hollow rings drawn in the TRACK's own colour - a notch is a mark ON the
    rail, so it cannot be brighter than the rail it marks; at --dim the dots

@@ -101,6 +101,22 @@ type Tif = 'gtc' | 'ioc' | 'gtx';
 /** Notch positions on the size slider, in percent. */
 const NOTCHES = [0, 25, 50, 75, 100];
 
+/**
+ * The striped fill is a clip of the rail. The white thumb is the native range
+ * thumb, so it moves before this panel re-renders. Paint the clip here, in the
+ * input event, or the fill trails the grabber for the whole render.
+ */
+function paintSliderFill(el: HTMLInputElement): void {
+  const rail = el.parentElement;
+  if (!rail) return;
+  const min = Number(el.min);
+  const max = Number(el.max);
+  const span = max - min;
+  const v = Number(el.value);
+  const p = span > 0 && Number.isFinite(v) ? Math.min(1, Math.max(0, (v - min) / span)) : 0;
+  rail.style.setProperty('--oe-p', String(p));
+}
+
 /** Time in force, as a menu rather than a native select — the OS menu cannot
  *  take the ticket's type. GTX's partial-fill caveat lives on its option. */
 const TIF_OPTIONS: ReadonlyArray<{ id: Tif; code: string; name: string; detail: string }> = [
@@ -1130,11 +1146,12 @@ export function OrderEntry({
   // The thumb is clamped at 100; the printed figure is not. Over-committing is
   // a thing you should be able to SEE, not a number that silently saturates.
   const thumbPct = Math.max(0, Math.min(100, Math.round(usedPct)));
-  /* While a basis exists and a size is already on the ticket, the thumb follows
-     that size. Before the drafted percent has been applied (or with no basis
-     at all) it follows the draft, so connecting a wallet does not flash the
-     thumb back to zero for a frame. */
-  const shownPct = sliderReady && (notional > 0 || pctArmed.current) ? thumbPct : pctDraft;
+  /* A size typed by hand moves the thumb to match it. A size the slider wrote
+     keeps the percent that was dragged: deriving the thumb from the rounded
+     size puts it a step behind the grabber, and the fill follows that number.
+     Before a basis exists, the draft is the only position there is. */
+  const shownPct =
+    sliderReady && !sizeBySlider.current && (notional > 0 || pctArmed.current) ? thumbPct : pctDraft;
 
   /** Write a percentage of the slider basis into whichever unit is selected. */
   function setPct(pct: number) {
@@ -1826,7 +1843,10 @@ export function OrderEntry({
               step={1}
               value={shownPct}
               aria-label="Size as a percentage of available balance"
-              onChange={(e) => setSizePct(Number(e.target.value))}
+              onChange={(e) => {
+                paintSliderFill(e.currentTarget);
+                setSizePct(Number(e.currentTarget.value));
+              }}
             />
           </div>
           <div className="oe-inputrow oe-pctbox">
@@ -2153,6 +2173,7 @@ export function OrderEntry({
                       value={Math.min(slipCap, Math.max(0, num(slipDraft)))}
                       aria-label="Maximum slippage percent"
                       onChange={(e) => {
+                        paintSliderFill(e.currentTarget);
                         const s = Math.min(slipCap, Math.max(0, Number(e.target.value))).toFixed(2);
                         setSlipDraft(s);
                         setMaxSlip(s);
