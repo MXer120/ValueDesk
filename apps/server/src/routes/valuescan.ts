@@ -13,6 +13,7 @@
  *   GET /api/vs/fills?venue&address&from&to&limit
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
+ *   GET /api/vs/news?limit     (SoSoValue; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
@@ -45,6 +46,7 @@ import { buildScreener } from '../valuescan/screener.js';
 import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
+import { latestNews, newsKey } from '../valuescan/sosovalue/news.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -215,6 +217,22 @@ export async function valuescanRoutes(app: FastifyInstance) {
       };
       const failed = pages.flatMap((p, i) => (p.status === 'rejected' ? [CORE_VENUES[i]] : []));
       return { ok: true, ...body, partial: failed.length ? failed : undefined };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * SoSoValue news for Explore. The key stays on this process. Without it the
+   * section is told the feed is not available, rather than shown made-up rows.
+   */
+  app.get('/api/vs/news', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const limit = intOf(q.limit, 8, 1, 12);
+      if (!newsKey()) throw new NotAvailable('SoSoValue news is not configured');
+      const items = await latestNews(limit);
+      return { ok: true, items, source: 'SoSoValue' };
     } catch (e) {
       return fail(reply, e);
     }

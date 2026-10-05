@@ -640,6 +640,38 @@
 .fx-cta:hover:not(:disabled) { filter: brightness(0.92); }
 .fx-cta:disabled { opacity: 0.4; cursor: not-allowed; }
 .fx-cta--ghost { background: transparent; color: var(--text); border: 1px solid var(--panel-line); }
+/* Destructive confirms keep the sheet's full-width button. The fill is the
+   danger role (styles.css .btn-danger); the shape is the sheet's. */
+.fx-cta--danger { background: var(--neg); color: var(--bg); font-weight: 500; }
+.fx-cta--danger:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* Order review, cancel-all, close, and the other useConfirm sheets. */
+.fx.vs-confirm .modal-body { padding-bottom: var(--sp-2); }
+.fx.vs-confirm .modal-body > p,
+.fx.vs-confirm .modal-body .stack > p { margin: 0; line-height: 1.45; }
+.fx.vs-confirm .modal-body .stack { display: flex; flex-direction: column; gap: var(--sp-3); }
+.fx.vs-confirm .modal-body label.row { display: flex; align-items: flex-start; gap: 8px; }
+.fx.vs-confirm .kv { width: 100%; border-collapse: collapse; }
+.fx.vs-confirm .kv th,
+.fx.vs-confirm .kv td {
+  padding: 7px 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--fs-xs);
+  line-height: 1.35;
+}
+.fx.vs-confirm .kv tr + tr th,
+.fx.vs-confirm .kv tr + tr td { border-top: 1px solid var(--panel-line); }
+.fx.vs-confirm .modal-foot {
+  display: block;
+  padding: 0 var(--sp-4) var(--sp-4);
+  border-top: 0;
+  background: transparent;
+}
+.fx.vs-confirm .vs-confirm__foot { display: flex; flex-direction: column; gap: var(--sp-3); }
+.fx.vs-confirm .fx-check { align-items: flex-start; margin-top: 0; }
+.fx.vs-confirm .fx-check input { margin-top: 2px; }
+.modal-scrim:has(.vs-confirm) { overflow: auto; align-items: safe center; }
 /* The Withdraw sheet's action: says where it goes, a size up. */
 .fx-cta--lg { height: 48px; font-size: calc(var(--fs-base) + 2px); letter-spacing: 0.01em; }
 

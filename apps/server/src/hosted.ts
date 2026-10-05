@@ -96,6 +96,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
   { method: 'GET', url: '/api/vs/positioning', cls: 'read' },
+  // SoSoValue news. The process caches the page (valuescan/sosovalue/news.ts);
+  // without SOSOVALUE_API_KEY the route answers not_available.
+  { method: 'GET', url: '/api/vs/news', cls: 'read' },
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },

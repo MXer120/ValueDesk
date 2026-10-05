@@ -279,30 +279,33 @@ export function useConfirm(): { confirm: ConfirmFn; dialog: ReactNode } {
   const dialog = req ? (
     <Modal
       open
+      className="fx vs-confirm"
       size={req.size ?? 'sm'}
       title={req.title}
       onClose={() => settle(false)}
       dismissOnBackdrop={!req.danger}
       footer={
-        <>
+        <div className="vs-confirm__foot">
           {req.requireAck && (
-            // `margin-right: auto` inline rather than a class: `.modal-foot` is
-            // right-aligned and this is the only element that ever needs to sit
-            // opposite the buttons. No colour is hardcoded here.
-            <label className="inline small" style={{ marginRight: 'auto', textAlign: 'left' }}>
+            <label className="fx-check">
               <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-              {req.requireAck}
+              <span>{req.requireAck}</span>
             </label>
           )}
-          <button onClick={() => settle(false)}>{req.cancelLabel ?? 'Cancel'}</button>
-          <button
-            className={req.danger ? 'btn-danger' : 'btn-primary'}
-            disabled={Boolean(req.requireAck) && !ack}
-            onClick={() => settle(true)}
-          >
-            {req.confirmLabel ?? 'Confirm'}
-          </button>
-        </>
+          <div className="fx-review__actions">
+            <button type="button" className="fx-cta fx-cta--ghost" onClick={() => settle(false)}>
+              {req.cancelLabel ?? 'Cancel'}
+            </button>
+            <button
+              type="button"
+              className={req.danger ? 'fx-cta fx-cta--danger' : 'fx-cta'}
+              disabled={Boolean(req.requireAck) && !ack}
+              onClick={() => settle(true)}
+            >
+              {req.confirmLabel ?? 'Confirm'}
+            </button>
+          </div>
+        </div>
       }
     >
       {req.body}

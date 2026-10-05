@@ -82,6 +82,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/price': PRICE,
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
+  // The process already holds the page for five minutes. The edge may keep a minute of it.
+  '/api/vs/news': { cacheControl: 'public, max-age=60, stale-while-revalidate=60' },
 };
 
 export type Encoding = 'br' | 'gzip';

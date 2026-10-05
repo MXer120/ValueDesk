@@ -20,7 +20,7 @@ visitor ──HTTPS──> Vercel  valuedeskapp.vercel.app
                                       ──HTTPS + X-Origin-Verify + the viewer's address──>
                                     Caddy :443 on the instance (<elastic-ip-with-dashes>.sslip.io)
                                       refuses anything without the secret, then ──> 127.0.0.1:8797
-                                    valuescan-api (hosted mode, 17 GET routes) + valuescan-indexer
+                                    valuescan-api (hosted mode, 18 GET routes) + valuescan-indexer
 browser ──directly──> SoDEX, Hyperliquid, Lighter, Arcus, WalletConnect, public RPCs (as before)
 ```
 

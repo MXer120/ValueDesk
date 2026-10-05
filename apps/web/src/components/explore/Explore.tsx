@@ -14,7 +14,7 @@ import { CoinIcon } from '../CoinIcon';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import { CrossFade } from '../motion';
 import { useCohortMap } from '../palette/Heatmap';
-import { flattenMapAssets, mapTotals, cohortAssetPath, MARKET_MAP_PATH } from '../palette/model';
+import { flattenMapAssets, mapTotals, cohortAssetPath, MARKET_MAP_PATH, fmtAgo } from '../palette/model';
 import { Seg, useBoxSize } from '../palette/ui';
 import { VenueLogo } from '../VenueLogo';
 import { useAsync, useStored, useSymbols } from '../../hooks';
@@ -22,14 +22,14 @@ import { usePrivacy, maskAddress } from '../../privacy';
 import { DASH, fmtPct, marketName, num, shortAddr, signClass } from '../../format';
 import {
   vsApi, VsError, SCAN_VENUES, VENUE_LABEL, VS_VENUES,
-  type ExploreResponse, type Positioning, type TraderRow, type Venue, type WhaleTrade,
+  type ExploreResponse, type NewsItem, type Positioning, type TraderRow, type Venue, type WhaleTrade,
 } from '../../vsApi';
 import { MarketTile, squarify, tone } from './cohorts/Treemap';
 import { VenueMarks } from './cohorts/parts';
 import {
   SEGMENT_COLUMNS, SEGMENT_FALLBACK, SEGMENT_IDS, VENUE_SHORT, WHALE_MIN_OPTIONS,
-  fmtCell, fmtClock, fmtCount, fmtPx, fmtUsdExact, fmtUsdShort, longShare, marketKey,
-  rollUpPositioning, rowsFor, tradeKeys,
+  fmtCell, fmtClock, fmtCount, fmtPx, fmtRoi, fmtUsdExact, fmtUsdShort, longShare, marketKey,
+  rollUpPositioning, rowsFor, toneOf, tradeKeys,
   type MarketPositioning, type SegmentId, type VenueFilter,
 } from './model';
 import '../Account.css';
@@ -157,6 +157,11 @@ const POSITION_ROWS = 6;
 /** Largest books on the landing map. The full map is one click away. */
 const HEAT_TOP = 36;
 const SECONDS_PER_YEAR = 365 * 24 * 3600;
+/** Names on the today tape. The board's first page. */
+const TICKER_LIMIT = 20;
+/** SoSoValue's page is cached for five minutes on the server. */
+const NEWS_POLL_MS = 5 * 60_000;
+const NEWS_ROWS = 8;
 
 const RANK_LABEL: Record<SegmentId, string> = {
   'top-pnl': 'PnL',
@@ -701,6 +706,129 @@ function MarketPanel({
 }
 
 /* ===========================================================================
+ *  TODAY'S TRADERS, AND THE NEWS
+ * ======================================================================== */
+
+/** Scroll the tape only when motion is wanted. Potato mode and reduced motion get a still row. */
+function useMarquee(): boolean {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const sync = () => setOn(!mq.matches && !document.documentElement.classList.contains('is-potato'));
+    sync();
+    mq.addEventListener('change', sync);
+    const obs = new MutationObserver(sync);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => {
+      mq.removeEventListener('change', sync);
+      obs.disconnect();
+    };
+  }, []);
+  return on;
+}
+
+function TickerChip({ r, rank, me, onScan, quiet }: { r: TraderRow; rank: number; me: boolean; onScan: ExploreProps['onScan']; quiet?: boolean }) {
+  const hidden = usePrivacy().isHidden('address') && me;
+  const name = hidden ? maskAddress(r.address, true) : (r.label?.trim() || shortAddr(r.address));
+  const pnl = r.pnl['1d'];
+  return (
+    <button
+      type="button"
+      className="ex-tick"
+      tabIndex={quiet ? -1 : undefined}
+      title={hidden ? undefined : `${r.address} · today ${fmtUsdExact(pnl) ?? DASH} · ${fmtRoi(r.roi['1d'])}`}
+      onClick={() => onScan(r.address, r.venue)}
+    >
+      <span className="ex-tick__rank">{rank}</span>
+      <VenueLogo venue={r.venue} size={14} />
+      <code>{name}</code>
+      <span className={toneOf(pnl)}>{fmtUsdShort(pnl, true)}</span>
+    </button>
+  );
+}
+
+function TradersTicker({ enabled, me, onScan }: { enabled: boolean; me: string | null; onScan: ExploreProps['onScan'] }) {
+  const board = useSection(
+    'Top traders',
+    '1d',
+    () => vsApi.leaderboard({ venue: 'all', window: '1d', sort: 'pnl', side: 'top', limit: TICKER_LIMIT }),
+    { pollMs: EXPLORE_POLL_MS, enabled },
+  );
+  const marquee = useMarquee();
+  const rows = board.data?.rows ?? [];
+  const run = marquee && rows.length > 1;
+  const mine = me?.toLowerCase() ?? null;
+  const chips = (copy: boolean) => rows.map((r, i) => (
+    <TickerChip key={`${copy ? 'b' : 'a'}-${r.venue}-${r.address}`} r={r} rank={r.rank ?? i + 1} me={mine === r.address.toLowerCase()} onScan={onScan} quiet={copy} />
+  ));
+  let body: ReactNode;
+  if (rows.length === 0) {
+    body = sectionState(board, 'top traders', 'all') ?? <Notice>No ranked traders for today yet.</Notice>;
+  } else {
+    body = (
+      <div className={`ex-ticker__view${run ? ' is-run' : ' is-still'}`}>
+        <div className="ex-ticker__track">
+          <div className="ex-ticker__set">{chips(false)}</div>
+          {run && <div className="ex-ticker__set" aria-hidden="true">{chips(true)}</div>}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <section className="ex-ticker" aria-label="Top traders today">
+      <span className="ex-ticker__label">Today</span>
+      {body}
+      {rows.length > 0 && <StaleNote s={board} />}
+    </section>
+  );
+}
+
+function NewsPanel({ enabled }: { enabled: boolean }) {
+  const news = useSection(
+    'News',
+    'news',
+    () => vsApi.news(NEWS_ROWS),
+    { pollMs: NEWS_POLL_MS, enabled },
+  );
+  const items = news.data?.items ?? [];
+  const now = Date.now();
+  // A 404 is the same fact as an unconfigured key: this API has not started serving the feed.
+  const unavailable = news.error?.code === 'not_available' || (!news.data && !!news.error && /HTTP 404/.test(news.error.message));
+  const state = unavailable ? <Notice>News is not available yet.</Notice> : sectionState(news, 'news', 'all');
+  return (
+    <Card title="News" className="vs-card" action={<span className="vs-sub" title="SoSoValue">SoSoValue</span>}>
+      {state ?? (items.length === 0 ? (
+        <Notice>No stories on the feed right now.</Notice>
+      ) : (
+        <div className="ex-news">
+          {items.map((item) => <NewsRow key={item.id} item={item} now={now} />)}
+        </div>
+      ))}
+      <StaleNote s={news} />
+    </Card>
+  );
+}
+
+function NewsRow({ item, now }: { item: NewsItem; now: number }) {
+  return (
+    <a className="ex-news__row" href={item.href} target="_blank" rel="noopener noreferrer">
+      <span className="ex-news__when">{item.time > 0 ? fmtAgo(item.time, now) : DASH}</span>
+      <span className="ex-news__body">
+        <span className="ex-news__title">{item.title}</span>
+        {(item.author || item.symbols.length > 0) && (
+          <span className="ex-news__meta">
+            {item.author && <span>{item.author}</span>}
+            {item.symbols.map((s) => (
+              <span key={s} className="ex-news__coin"><CoinIcon coin={s} size={14} />{s}</span>
+            ))}
+          </span>
+        )}
+      </span>
+    </a>
+  );
+}
+
+/* ===========================================================================
  *  THE PAGE
  * ======================================================================== */
 
@@ -788,6 +916,7 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
         </div>
       ) : (
         <div className="pf vs-explore ex-board">
+          <TradersTicker enabled={visible} me={address} onScan={onScan} />
           <MarketPanel enabled={visible} explore={explore} onAsset={openAsset} onOpenMap={openMap} />
           <PositioningPanel c={context} />
           <div className="ex-bar">
@@ -803,6 +932,7 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
               )}
             </div>
           </div>
+          <NewsPanel enabled={visible} />
         </div>
       )}
     </div>

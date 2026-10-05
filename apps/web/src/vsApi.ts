@@ -19,6 +19,7 @@ import type {
   ExploreResponse,
   LeaderboardResponse,
   LeaderboardSort,
+  NewsItem,
   Positioning,
   TraderProfile,
   Venue,
@@ -43,6 +44,7 @@ export type {
   ExploreSegment,
   LeaderboardResponse,
   LeaderboardSort,
+  NewsItem,
   Positioning,
   TraderProfile,
   TraderRow,
@@ -137,6 +139,10 @@ export const vsApi = {
 
   positioning: (o: { venue?: Venue | 'all'; symbol?: string } = {}, signal?: AbortSignal) =>
     unwrap<{ rows: Positioning[] }>(`/api/vs/positioning${qs(o)}`, signal).then((b) => b.rows),
+
+  /** SoSoValue news, already reduced by the server. The key never reaches this browser. */
+  news: (limit = 8, signal?: AbortSignal) =>
+    unwrap<{ items: NewsItem[]; source: string }>(`/api/vs/news${qs({ limit })}`, signal),
 
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>

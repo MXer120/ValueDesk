@@ -311,7 +311,8 @@ the header is site-wide). The worker's own allow-list check stays the first line
 
 Against this inventory, HOSTED_ROUTES should be:
 
-- **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`
+- **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`,
+  `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`)
   (index, drop their `provisional`); `/api/feed/account`;
   `/api/external/maintenance/status`, `/api/external/announcements(/:id)` (until
   they go direct).

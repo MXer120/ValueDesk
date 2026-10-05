@@ -117,6 +117,18 @@ export interface LeaderboardResponse extends LeaderboardPage {
   sort: LeaderboardSort;
 }
 
+/** One SoSoValue story, already reduced to what Explore renders. No HTML. */
+export interface NewsItem {
+  id: string;
+  title: string;
+  href: string;
+  /** Publish time, milliseconds. 0 when the feed omitted it. */
+  time: number;
+  author: string | null;
+  /** Matched coin symbols, at most three. */
+  symbols: string[];
+}
+
 export interface VsPosition {
   symbol: string;
   side: 'long' | 'short';

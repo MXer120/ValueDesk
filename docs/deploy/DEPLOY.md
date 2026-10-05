@@ -29,7 +29,7 @@ afterwards. The reference for each part sits next to its code:
 ```
 visitor ──HTTPS──> CloudFront ──┬── site bucket (S3, private)          the built web: /, /assets/*, /logos/*, ...
    │                (+ WAF)     └── /api/* ──HTTPS + secret──> Caddy :443 ──> 127.0.0.1:8797
-   │                                                           on ONE instance:  valuescan-api      (hosted mode, 17 GET routes)
+   │                                                           on ONE instance:  valuescan-api      (hosted mode, 18 GET routes)
    │                                                                             valuescan-indexer  (the one writer of the index)
    └──────────── directly from the browser ──> SoDEX, Hyperliquid, Lighter, Arcus, WalletConnect, public RPCs
 ```

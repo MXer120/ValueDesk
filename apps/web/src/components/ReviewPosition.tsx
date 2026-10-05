@@ -229,92 +229,86 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
         {isPerps && opensExposure ? ` · ${marginMode} ${lev > 0 ? `${fmt(lev, 0)}x` : ''}` : ''}
       </p>
 
-      <table className="kv review-kv">
-        <tbody>
-          <tr>
-            <th>Size</th>
-            <td>{quantity > 0 ? `${fmt(quantity, sym ? precisionOf(sym.stepSize) : undefined)} ${sym?.baseCoin ?? ''}` : '-'}</td>
-          </tr>
-          <tr>
-            <th>{marketExec ? 'Entry (last price)' : 'Entry (limit)'}</th>
-            <td>{priceKnown ? fmtPrice(entryPrice, tick) : '-'}</td>
-          </tr>
-          {triggerPrice !== undefined && triggerPrice > 0 && (
-            <tr>
-              <th>Trigger ({triggerKind === 'tp' ? 'take profit' : 'stop loss'}{triggerOn ? `, on ${triggerOn}` : ''})</th>
-              <td>{fmtPrice(triggerPrice, tick)}</td>
-            </tr>
+      <div className="fx-review">
+        <div>
+          <span>Size</span>
+          <b className={quantity > 0 ? undefined : 'muted'}>
+            {quantity > 0 ? `${fmt(quantity, sym ? precisionOf(sym.stepSize) : undefined)} ${sym?.baseCoin ?? ''}` : '-'}
+          </b>
+        </div>
+        <div>
+          <span>{marketExec ? 'Entry (last price)' : 'Entry (limit)'}</span>
+          <b className={priceKnown ? undefined : 'muted'}>{priceKnown ? fmtPrice(entryPrice, tick) : '-'}</b>
+        </div>
+        {triggerPrice !== undefined && triggerPrice > 0 && (
+          <div>
+            <span>Trigger ({triggerKind === 'tp' ? 'take profit' : 'stop loss'}{triggerOn ? `, on ${triggerOn}` : ''})</span>
+            <b>{fmtPrice(triggerPrice, tick)}</b>
+          </div>
+        )}
+        <div>
+          <span>Order value</span>
+          <b className={notional > 0 ? undefined : 'muted'}>{notional > 0 ? fmtUsd(notional) : '-'}</b>
+        </div>
+        {opensExposure && (
+          <div>
+            <span>Margin required</span>
+            <b className={margin !== null ? undefined : 'muted'}>{margin !== null ? fmtUsd(margin) : '-'}</b>
+          </div>
+        )}
+        {opensExposure && (
+          <div>
+            {/* "est." is not decoration. The exchange liquidates against the
+                whole account - other positions, funding, its own mark price -
+                which a client cannot reproduce. See risk.ts. */}
+            <span>Est. liquidation</span>
+            {liq?.price ? (
+              <b>
+                {fmtPrice(liq.price, tick)}
+                <span className="muted"> ({fmt((liq.distancePct ?? 0) * 100, 2)}% away)</span>
+              </b>
+            ) : (
+              <b className="muted">-</b>
+            )}
+          </div>
+        )}
+        <div>
+          <span>Est. entry fee</span>
+          {!feeKnown ? (
+            <b className="muted">-</b>
+          ) : marketExec ? (
+            <b>
+              {fmtUsd(notional * takerFee)} <span className="muted">taker {pct(takerFee)}</span>
+            </b>
+          ) : (
+            <b>
+              {fmtUsd(notional * makerFee)}–{fmtUsd(notional * takerFee)}{' '}
+              <span className="muted">maker {pct(makerFee)} / taker {pct(takerFee)}</span>
+            </b>
           )}
-          <tr>
-            <th>Order value</th>
-            <td>{notional > 0 ? fmtUsd(notional) : '-'}</td>
-          </tr>
-          {opensExposure && (
-            <tr>
-              <th>Margin required</th>
-              <td>{margin !== null ? fmtUsd(margin) : '-'}</td>
-            </tr>
-          )}
-          {opensExposure && (
-            <tr>
-              {/* "est." is not decoration. The exchange liquidates against the
-                  whole account - other positions, funding, its own mark price -
-                  which a client cannot reproduce. See risk.ts. */}
-              <th>Est. liquidation</th>
-              <td>
-                {liq?.price ? (
-                  <>
-                    {fmtPrice(liq.price, tick)}
-                    <span className="muted"> ({fmt((liq.distancePct ?? 0) * 100, 2)}% away)</span>
-                  </>
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </td>
-            </tr>
-          )}
-          <tr>
-            <th>Est. entry fee</th>
-            <td>
-              {!feeKnown ? (
-                <span className="muted">-</span>
-              ) : marketExec ? (
-                <>
-                  {fmtUsd(notional * takerFee)} <span className="muted">taker {pct(takerFee)}</span>
-                </>
-              ) : (
-                <>
-                  {fmtUsd(notional * makerFee)}–{fmtUsd(notional * takerFee)}{' '}
-                  <span className="muted">maker {pct(makerFee)} / taker {pct(takerFee)}</span>
-                </>
-              )}
-            </td>
-          </tr>
-          {builderFee && (
-            <tr>
-              {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to Valuescan. */}
-              <th>Est. ValueDesk fee</th>
-              <td>
-                {!builderFee.charged ? (
-                  <span className="muted">none on spot buys</span>
-                ) : notional > 0 ? (
-                  <>
-                    {fmtUsd(notional * builderFee.fraction)} <span className="muted">builder {pct(builderFee.fraction)}</span>
-                  </>
-                ) : (
-                  <span className="muted">-</span>
-                )}
-              </td>
-            </tr>
-          )}
-          {signingAddress && (
-            <tr>
-              <th>Signs as</th>
-              <td><code>{shortAddr(signingAddress)}</code></td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+        </div>
+        {builderFee && (
+          <div>
+            {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to Valuescan. */}
+            <span>Est. ValueDesk fee</span>
+            {!builderFee.charged ? (
+              <b className="muted">none on spot buys</b>
+            ) : notional > 0 ? (
+              <b>
+                {fmtUsd(notional * builderFee.fraction)} <span className="muted">builder {pct(builderFee.fraction)}</span>
+              </b>
+            ) : (
+              <b className="muted">-</b>
+            )}
+          </div>
+        )}
+        {signingAddress && (
+          <div>
+            <span>Signs as</span>
+            <b><code>{shortAddr(signingAddress)}</code></b>
+          </div>
+        )}
+      </div>
 
       {opensExposure && !liq?.price && (
         <p className="muted small review-note">
@@ -330,33 +324,34 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
       {(tpPrice > 0 || slPrice > 0) && (
         <div className="review-exits">
           <h3>Exits</h3>
-          <table className="datatable review-exits-table">
-            <thead>
-              <tr><th>Leg</th><th>Level</th><th>Distance</th><th>PnL if hit</th></tr>
-            </thead>
-            <tbody>
-              {tpPrice > 0 && (
-                <tr>
-                  <td>Take profit</td>
-                  <td>{fmtPrice(tpPrice, tick)}</td>
-                  <td><Distance from={entryPrice} to={tpPrice} sym={sym} /></td>
-                  <td className={tpPnl === null ? 'muted' : signClass(tpPnl)}>
+          <div className="fx-review">
+            {tpPrice > 0 && (
+              <div>
+                <span>Take profit</span>
+                <b>
+                  {fmtPrice(tpPrice, tick)}
+                  <span className="muted"> · <Distance from={entryPrice} to={tpPrice} sym={sym} /></span>
+                  {' '}
+                  <span className={tpPnl === null ? 'muted' : signClass(tpPnl)}>
                     {tpPnl === null ? '-' : fmtUsd(tpPnl)}
-                  </td>
-                </tr>
-              )}
-              {slPrice > 0 && (
-                <tr>
-                  <td>Stop loss</td>
-                  <td>{fmtPrice(slPrice, tick)}</td>
-                  <td><Distance from={entryPrice} to={slPrice} sym={sym} /></td>
-                  <td className={slPnl === null ? 'muted' : signClass(slPnl)}>
+                  </span>
+                </b>
+              </div>
+            )}
+            {slPrice > 0 && (
+              <div>
+                <span>Stop loss</span>
+                <b>
+                  {fmtPrice(slPrice, tick)}
+                  <span className="muted"> · <Distance from={entryPrice} to={slPrice} sym={sym} /></span>
+                  {' '}
+                  <span className={slPnl === null ? 'muted' : signClass(slPnl)}>
                     {slPnl === null ? '-' : fmtUsd(slPnl)}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  </span>
+                </b>
+              </div>
+            )}
+          </div>
           <p className="muted small review-note">
             PnL is price movement only — entry and exit fees, funding and slippage are not included.
             {!priceKnown && ' No entry price is known yet, so no PnL can be computed.'}
@@ -388,7 +383,7 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
         </p>
       )}
 
-      <label className="inline review-suppress">
+      <label className="fx-check review-suppress">
         <input type="checkbox" checked={suppress} onChange={(e) => toggle(e.target.checked)} />
         Don&apos;t show this review again
       </label>

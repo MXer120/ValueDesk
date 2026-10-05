@@ -28,6 +28,7 @@ export const FALLBACK_ROUTES: readonly RouteDef[] = [
   '/api/vs/screener',
   '/api/vs/whales',
   '/api/vs/positioning',
+  '/api/vs/news',
   '/api/vs/lbrow',
   '/api/feed/account',
   '/api/external/maintenance/status',
@@ -174,6 +175,21 @@ function probesOf(url: string): Probe[] | null {
       return [{ id: 'whales', title: '/api/vs/whales', path: () => '/api/vs/whales?venue=all&limit=5', judge: list('trades', 'whale trades', 'WARN', 'the route answers, the tape is empty: normal in a quiet minute or shortly after the server started; look again later') }];
     case '/api/vs/positioning':
       return [{ id: 'positioning', title: '/api/vs/positioning', path: () => '/api/vs/positioning?venue=all', judge: list('rows', 'markets'), retryIfNotReady: true }];
+    case '/api/vs/news':
+      // Stories when SOSOVALUE_API_KEY is set. Without it the route says so, which is the configured answer.
+      return [{
+        id: 'news',
+        title: '/api/vs/news',
+        path: () => '/api/vs/news?limit=5',
+        judge: (status, body) => {
+          const bad = failure(status, body);
+          if (bad && obj(body)?.code === 'not_available') return { status: 'WARN', detail: 'SoSoValue news is not configured (SOSOVALUE_API_KEY)' };
+          if (bad) return { status: 'FAIL', detail: bad };
+          const items = arr(obj(body)?.items);
+          if (!items) return { status: 'FAIL', detail: 'the answer has no "items" list' };
+          return items.length ? { status: 'PASS', detail: `${items.length} stories` } : { status: 'WARN', detail: '0 stories' };
+        },
+      }];
     case '/api/vs/lbrow':
       return [{
         id: 'lbrow',

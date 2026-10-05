@@ -15,21 +15,11 @@
 .review-market { font-size: var(--fs-base); font-weight: 500; }
 .review-sub { margin: 0; }
 
-/* Bigger than the ticket's own .kv: this is the read-it-once surface, and the
-   12px used inside a dense panel is too small for a number you are about to
-   commit money to. Tabular figures so the column of prices aligns digit-wise. */
-.review-kv { width: 100%; }
-.review-kv th,
-.review-kv td { font-size: var(--fs-xs); padding-top: 3px; padding-bottom: 3px; }
-.review-kv td { }
-.review-kv tr + tr th,
-.review-kv tr + tr td { border-top: 1px solid var(--line-soft); }
-
+/* The numbers sit in the transfer sheet's review rows (funds.css .fx-review).
+   A missing figure stays muted; the sheet's `b` would otherwise paint it as a value. */
+.review .fx-review b.muted { color: var(--muted); font-weight: 400; }
 .review-exits { display: flex; flex-direction: column; gap: var(--sp-1); }
-.review-exits h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: var(--ls-body); }
-.review-exits-table { width: 100%; }
-.review-exits-table td { }
-
+.review-exits h3 { margin: var(--sp-1) 0 0; font-size: var(--fs-xs); color: var(--muted); font-weight: 500; letter-spacing: var(--ls-body); }
 .review-note { margin: 0; }
 
 /* A stop the exchange would reach after liquidation is not a nuance, it is the
