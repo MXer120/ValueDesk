@@ -46,7 +46,7 @@ import { checkStop, logWriter, type Ctx } from './context';
 import { childEnv } from './proc';
 import { askValue, choose, confirm } from './prompt';
 import { SODEX_GATEWAY, readOnlyProblem } from './readonly';
-import { realDDeps, type DDeps } from './stageD';
+import { LIVE_VOLUME_DAYS, realDDeps, type DDeps } from './stageD';
 import { TERMS_PATH, judgeTerms } from './terms';
 import { STAGE_TITLES, Stopped, stageStatus, type Item, type StageResult } from './types';
 
@@ -392,6 +392,11 @@ async function setupTiers(ctx: Ctx, deps: CDeps, builderId: number, address: str
     say(`The tier tool did not answer as expected: ${init.error}`);
     items.push({ id: 'tiers', title: 'fee tiers set up', status: 'FAIL', detail: `builderTiers.ts init: ${init.error}` });
     return null;
+  }
+  // As on the live site: the tiers go by the volume of the last LIVE_VOLUME_DAYS days, not lifetime.
+  if (deps.d.setTierWindow) {
+    const w = await deps.d.setTierWindow(LIVE_VOLUME_DAYS);
+    if (!w.ok) say(`The volume window could not be set (${w.detail}): the local tiers go by lifetime volume. By hand, in apps\\server:  npx tsx tools/builderTiers.ts set-window --days ${LIVE_VOLUME_DAYS}`);
   }
   // `init` leaves existing files alone, so `status` is what says what is in force.
   const st = await deps.tiers('status');

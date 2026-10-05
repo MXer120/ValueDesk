@@ -97,7 +97,17 @@ export interface DDeps {
    * Absent: not available here.
    */
   forgetTierWallet?(address: string): Promise<{ ok: boolean; detail: string }>;
+  /**
+   * apps/server/tools/builderTiers.ts `set-window --days <n>` on the LOCAL server: its tiers go by the volume
+   * of the last n days, as on the live site. Run from here because this process is outside the Claude app,
+   * whose own tools cannot write the server's data directory (Windows redirects them to a private copy).
+   * Absent: not available here.
+   */
+  setTierWindow?(days: number): Promise<{ ok: boolean; detail: string }>;
 }
+
+/** The volume window of the live site's fee tiers (its builder-tiers.json, docs/BUILDER-TIERS.md section 4). */
+export const LIVE_VOLUME_DAYS = 14;
 
 const PLAN_TIMEOUT_MS = 6 * 60_000;
 const POLL_MS = 20_000;
@@ -140,6 +150,17 @@ export function realDDeps(ctx: Ctx): DDeps {
       };
     },
     saveConfig,
+    setTierWindow: async (days) => {
+      const server = join(ctx.paths.repo, 'apps', 'server');
+      if (!existsSync(join(server, 'tools', 'builderTiers.ts'))) return { ok: false, detail: 'apps/server/tools/builderTiers.ts is not in this checkout' };
+      if (!ctx.tools.tsxCli) return { ok: false, detail: 'tsx is not installed (run "npm install" in the repository)' };
+      const outLines: string[] = [];
+      const errLines: string[] = [];
+      const r = await ctx.run(ctx.tools.node, [ctx.tools.tsxCli, 'tools/builderTiers.ts', 'set-window', '--days', String(days)], { cwd: server, env: childEnv(ctx.env), timeoutMs: 120_000, onLine: (l, from) => (from === 'out' ? outLines : errLines).push(l) });
+      const j = lastJsonLine(outLines.join('\n'));
+      if (r.code !== 0 || !j) return { ok: false, detail: r.startError ?? (typeof j?.error === 'string' ? j.error : errLines.filter((l) => l.trim()).slice(-2).join(' ').slice(0, 300) || `the tool exited with code ${r.code}`) };
+      return { ok: true, detail: `tiers by the volume of the last ${String(j.volumeDays ?? days)} days` };
+    },
     forgetTierWallet: async (address) => {
       const server = join(ctx.paths.repo, 'apps', 'server');
       if (!existsSync(join(server, 'tools', 'builderTiers.ts'))) return { ok: false, detail: 'apps/server/tools/builderTiers.ts is not in this checkout' };
@@ -983,6 +1004,16 @@ async function resetTierWallet(ctx: Ctx, deps: DDeps, config: Json, address: str
     ctx.out.say(`The fee test runs again: the server at ${backend} must forget this test wallet first, or the fee checks are skipped: ${cmd}`, '   ');
     ctx.shared.next.push(`Before the next fee test with ${address}: ${cmd}`);
     return;
+  }
+  // The local server counts volume as the live site does: by the last LIVE_VOLUME_DAYS days (not lifetime).
+  if (deps.setTierWindow) {
+    const w = await deps.setTierWindow(LIVE_VOLUME_DAYS);
+    ctx.out.say(
+      w.ok
+        ? `The local server's fee tiers go by the volume of the last ${LIVE_VOLUME_DAYS} days, as on the live site (${w.detail}).`
+        : `The local server's volume window could not be set (${w.detail}) - its tiers may go by lifetime volume. By hand: npx tsx tools/builderTiers.ts set-window --days ${LIVE_VOLUME_DAYS}   (in apps/server)`,
+      '   ',
+    );
   }
   const r = await deps.forgetTierWallet(address);
   ctx.out.say(
