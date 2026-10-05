@@ -555,9 +555,14 @@ export function TvChart({
     const rawOrders = address ? (orders.data?.orders ?? []) : [];
     const rawPositions = address && engine === 'perps' ? (positions.data?.positions ?? []) : [];
     const opts = { symbol, sym, canModify, ...(modifyBlocked === null ? {} : { cannotModifyReason: modifyBlocked }) };
-    return lineShapes([...orderLines(rawOrders, opts), ...positionLines(rawPositions, opts)], paletteRef.current);
+    return lineShapes(
+      [...orderLines(rawOrders, opts), ...positionLines(rawPositions, opts)],
+      paletteRef.current,
+      lastPrice,
+    );
     // `ready` re-derives once the palette has been read from the live tokens.
-  }, [ready, address, engine, symbol, sym, orders.data, positions.data, canModify, modifyBlocked]);
+    // `lastPrice` recolours the position line when it crosses the entry.
+  }, [ready, address, engine, symbol, sym, orders.data, positions.data, canModify, modifyBlocked, lastPrice]);
 
   useEffect(() => {
     if (onSymbol) lines.sync(wanted);

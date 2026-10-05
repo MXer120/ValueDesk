@@ -325,21 +325,57 @@ interface LineVisual {
  * the values are allowed to appear as literals, and they appear there, once.
  *
  * Green/red mean SIDE on an order line, exactly as they do everywhere else in
- * the terminal. The position entry is deliberately NOT green or red: its
- * direction is stated in words on the badge, and borrowing the side colours for
- * it would make an entry line read as a resting order.
+ * the terminal. The position entry does not borrow that: a long painted green
+ * would read as another resting buy. Its direction is the word on the badge
+ * (LONG / SHORT). The line itself answers the other question — is that entry
+ * ahead — so it is green in profit, red in loss, and plain when the result
+ * cannot be read. Compared with the last traded price, which is the price the
+ * candles are showing against the line.
  *
  * Amber is the terminal's one attention colour and it is spent here on the
  * single state that needs it: a price the user has moved and the venue has not
- * agreed to. That is why the position entry is plain --text rather than amber -
- * two amber lines on one chart and neither of them means anything.
+ * agreed to.
  */
-function colorOf(line: OrderLine, state: LineState): string {
+function colorOf(line: OrderLine, state: LineState, last: number | null): string {
   if (state !== 'live') return T.accent; // an unsent price is a pending state, not a side
-  if (line.kind === 'position') return T.text;
+  if (line.kind === 'position') return positionInk(line, last);
   if (line.side === 'buy') return T.pos;
   if (line.side === 'sell') return T.neg;
   return T.muted; // side unknown - say nothing with colour either
+}
+
+/** +1 long, -1 short, from the direction positionLines() puts first in the label. */
+function positionSign(line: Pick<OrderLine, 'kind' | 'label'>): 1 | -1 | null {
+  if (line.kind !== 'position') return null;
+  const lead = line.label.trim().split(/\s+/)[0]?.toUpperCase();
+  return lead === 'LONG' ? 1 : lead === 'SHORT' ? -1 : null;
+}
+
+/**
+ * Unrealised PnL of a position line at `last`, in quote units. Null when the
+ * direction, size or price cannot be read. An order line has none.
+ */
+export function unrealisedPnl(
+  line: Pick<OrderLine, 'kind' | 'label' | 'price' | 'quantity'>,
+  last: string | number | null | undefined,
+): number | null {
+  const dir = positionSign(line);
+  const entry = Number(line.price);
+  const qty = Number(line.quantity);
+  const px = typeof last === 'number' ? last : Number(last);
+  if (dir === null || !(entry > 0) || !(qty > 0) || !(px > 0)) return null;
+  return (px - entry) * qty * dir;
+}
+
+/** Profit green, loss red, and the plain text colour when it is flat or unknown. */
+export function positionInk(
+  line: Pick<OrderLine, 'kind' | 'label' | 'price' | 'quantity'>,
+  last: string | number | null | undefined,
+  ink: { pos: string; neg: string; text: string } = T,
+): string {
+  const pnl = unrealisedPnl(line, last);
+  if (pnl === null || pnl === 0) return ink.text;
+  return pnl > 0 ? ink.pos : ink.neg;
 }
 
 function visualOf(
@@ -347,6 +383,7 @@ function visualOf(
   state: LineState,
   price: string,
   sym?: MarketSymbol,
+  last: number | null = null,
 ): LineVisual {
   const priceText = fmtPrice(price, sym?.tickSize);
   const suffix =
@@ -361,7 +398,7 @@ function visualOf(
   return {
     text,
     axisText: priceText,
-    color: colorOf(line, state),
+    color: colorOf(line, state, last),
     // Dashed = "not a resting limit price": a trigger that has not fired, an
     // entry that is not an order, or a price still being moved.
     dashed: state !== 'live' || line.kind !== 'limit',
@@ -506,6 +543,10 @@ export class OrderLineLayer {
   private expecting: { key: string; price: string } | null = null;
   private tick: string | undefined;
   private sym: MarketSymbol | undefined;
+  /** Last traded price, so a position line can be recoloured without a redraw. */
+  private mark: number | null = null;
+  /** Colour last painted on a position line. Same colour skips the override. */
+  private tone = new Map<string, string>();
 
   constructor(
     private readonly chart: KChart,
@@ -515,6 +556,28 @@ export class OrderLineLayer {
   setSymbol(sym: MarketSymbol | undefined): void {
     this.sym = sym;
     this.tick = sym?.tickSize;
+  }
+
+  /**
+   * The price the candles are printing. A position line is green while that
+   * price is on the profitable side of the entry, red on the other, and stays
+   * as it was when the price has not crossed. Orders are not touched.
+   */
+  notePrice(px: number | null): void {
+    const next = px !== null && px > 0 ? px : null;
+    this.mark = next;
+    for (const [key, line] of this.lines) {
+      if (line.kind !== 'position' || this.held === key) continue;
+      const id = this.ids.get(key);
+      if (!id) continue;
+      const color = positionInk(line, next);
+      if (this.tone.get(key) === color) continue;
+      this.tone.set(key, color);
+      this.chart.overrideOverlay({
+        id,
+        extendData: visualOf(line, 'live', line.price, this.sym, next),
+      });
+    }
   }
 
   /** Server truth in, drawn state out. */
@@ -600,10 +663,11 @@ export class OrderLineLayer {
     this.chart.overrideOverlay({
       id,
       points: [{ value }],
-      extendData: visualOf(line, 'live', line.price, this.sym),
+      extendData: visualOf(line, 'live', line.price, this.sym, this.mark),
       lock: !line.draggable,
     });
     this.sigs.set(key, signature(line));
+    this.tone.set(key, positionInk(line, this.mark));
   }
 
   /** Our overlays only. Used by "clear all drawings", which must not take the
@@ -620,13 +684,15 @@ export class OrderLineLayer {
     // A line we cannot price is not drawn at all. There is no safe placeholder
     // position for "an order exists somewhere".
     if (!Number.isFinite(value)) return;
+    const visual = visualOf(line, 'live', line.price, this.sym, this.mark);
+    if (line.kind === 'position') this.tone.set(line.key, visual.color);
     const id = this.chart.createOverlay({
       name: ORDER_LINE_OVERLAY,
       paneId: CANDLE_PANE_ID,
       zLevel: Z_LEVEL,
       lock: !line.draggable,
       points: [{ value }],
-      extendData: visualOf(line, 'live', line.price, this.sym),
+      extendData: visual,
 
       // Without this the library deletes the overlay on right-click. See the
       // file header - on a stop-loss that is a one-click lie.
@@ -666,6 +732,7 @@ export class OrderLineLayer {
     if (id) this.chart.removeOverlay({ id });
     this.ids.delete(key);
     this.sigs.delete(key);
+    this.tone.delete(key);
   }
 
   /** The dragged price, straight off the overlay the library just mutated. */

@@ -1677,6 +1677,8 @@ function Chart({
       ...(modifyBlocked === null ? {} : { cannotModifyReason: modifyBlocked }),
     };
     l.sync([...orderLines(rawOrders, opts), ...positionLines(rawPositions, opts)]);
+    const px = Number(lastBar.current?.close ?? lastPriceRef.current ?? Number.NaN);
+    l.notePrice(Number.isFinite(px) ? px : null);
   }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked]);
 
   // Switching market invalidates every price on screen, including any the user
@@ -1736,6 +1738,7 @@ function Chart({
     if (![bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)) return;
     lastBar.current = bar;
     if (!hovering.current) setLegendBar(bar);
+    layer.current?.notePrice(bar.close);
     pushBar.current(bar);
     watchdog.current?.noteTick(bar.timestamp);
     // The first trade on a market that had no candles: there is a chart now.
@@ -1756,6 +1759,11 @@ function Chart({
   useEffect(() => {
     // Only the latest-price series moves with the traded price.
     if (src === 'latest') watchdog.current?.noteTicker(lastPrice);
+    // Before the first candle, the ticker is the only price the entry can be
+    // compared with. Once candles exist, they own that comparison.
+    if (lastBar.current) return;
+    const px = Number(lastPrice ?? Number.NaN);
+    layer.current?.notePrice(Number.isFinite(px) ? px : null);
   }, [lastPrice, src]);
 
   // Mark / index have no candle stream: the right edge is re-read every 10 s
@@ -1773,6 +1781,7 @@ function Chart({
           if (last && bar.timestamp < last.timestamp) continue;
           lastBar.current = bar;
           pushBar.current(bar);
+          layer.current?.notePrice(bar.close);
           watchdog.current?.noteTick(bar.timestamp);
         }
         if (!hovering.current && lastBar.current) setLegendBar(lastBar.current);

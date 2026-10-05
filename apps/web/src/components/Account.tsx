@@ -794,9 +794,16 @@ function PositionsInner({
               return (
                 <tr key={String(pick(p, 'id') ?? i)}>
                   <td>
-                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={24}>
-                      <SidePill dir={dir} prefix={margin ? MARGIN_WORD[margin] : undefined} />
-                      {lev > 0 && <span className="acct-lev">{lev}x</span>}
+                    <MarketCell symbol={symbol} sym={sym} engine="perps" icon={26}>
+                      {lev > 0 && (
+                        <span
+                          className={`acct-levbox${dir ? ` acct-levbox--${dir}` : ''}`}
+                          title={dir === 'long' ? 'Long' : dir === 'short' ? 'Short' : undefined}
+                        >
+                          {lev}x
+                        </span>
+                      )}
+                      {margin && <span className="acct-mode">{MARGIN_WORD[margin]}</span>}
                     </MarketCell>
                   </td>
                   <td className="num"><Unit value={qty(size, sym?.stepSize)} unit={unit} /></td>

@@ -16,10 +16,10 @@
  * The derivation of WHICH lines exist is chart/orderOverlays.ts's
  * (orderLines / positionLines), shared with the klinecharts chart, so both
  * charts agree on what is resting where. Colours follow that file's rule:
- * green/red = side, the position entry in plain --text, never a side colour.
+ * green/red = side on an order, and profit/loss on the position entry.
  */
 import { fmtQuote } from '../../format';
-import { snapToTick, type OrderLine } from '../orderOverlays';
+import { positionInk, snapToTick, unrealisedPnl, type OrderLine } from '../orderOverlays';
 import type { CreateMultipointShapeOptions, ShapePoint } from './types';
 
 export interface LineShape {
@@ -43,13 +43,17 @@ export interface LineColors {
   muted: string;
 }
 
-export function lineShapes(lines: readonly OrderLine[], c: LineColors): LineShape[] {
+export function lineShapes(
+  lines: readonly OrderLine[],
+  c: LineColors,
+  last?: string | number | null,
+): LineShape[] {
   const out: LineShape[] = [];
   for (const l of lines) {
     const price = Number(l.price);
     if (!Number.isFinite(price) || price <= 0) continue;
     const color =
-      l.kind === 'position' ? c.text : l.side === 'buy' ? c.pos : l.side === 'sell' ? c.neg : c.muted;
+      l.kind === 'position' ? positionInk(l, last, c) : l.side === 'buy' ? c.pos : l.side === 'sell' ? c.neg : c.muted;
     // Dashed = not a resting limit price (a trigger, or the entry), exactly
     // as orderOverlays draws it.
     out.push({
@@ -125,12 +129,7 @@ export function positionDirection(l: OrderLine): 1 | -1 | null {
 /** Unrealised PnL of the position at `last`, in quote units; null when it
  *  cannot be computed honestly (no direction, no size, no price). */
 export function positionPnl(l: OrderLine, last: string | number | null | undefined): number | null {
-  const dir = positionDirection(l);
-  const entry = Number(l.price);
-  const qty = Number(l.quantity);
-  const px = typeof last === 'number' ? last : Number(last);
-  if (dir === null || !(entry > 0) || !(qty > 0) || !(px > 0)) return null;
-  return (px - entry) * qty * dir;
+  return unrealisedPnl(l, last);
 }
 
 /** The text a shape should show right now: its label, plus the live PnL for

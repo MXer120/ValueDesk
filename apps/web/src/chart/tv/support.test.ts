@@ -221,21 +221,39 @@ const line = (over: Partial<OrderLine>): OrderLine => ({
 });
 const colors = { pos: 'G', neg: 'R', text: 'W', muted: 'M' };
 
-test('order lines take side colours; the position entry does not', () => {
+test('order lines take side colours; a position line follows profit', () => {
   const shapes = lineShapes(
     [
       line({}),
       line({ key: 'o2', side: 'sell', kind: 'trigger' }),
-      line({ key: 'p', kind: 'position', side: null }),
+      line({ key: 'p', kind: 'position', side: null, label: 'LONG 1 @ 100', price: '100', quantity: '1' }),
       line({ key: 'bad', price: 'x' }),
     ],
     colors,
+    '110',
   );
   assert.deepEqual(shapes.map((s) => [s.key, s.color, s.dashed]), [
     ['o1', 'G', false],
     ['o2', 'R', true],
-    ['p', 'W', true],
+    ['p', 'G', true],
   ]);
+  const losing = lineShapes(
+    [line({ key: 'p', kind: 'position', side: null, label: 'LONG 1 @ 100', price: '100', quantity: '1' })],
+    colors,
+    '90',
+  );
+  assert.equal(losing[0]?.color, 'R');
+  const shortWin = lineShapes(
+    [line({ key: 's', kind: 'position', side: null, label: 'SHORT 1 @ 100', price: '100', quantity: '1' })],
+    colors,
+    '90',
+  );
+  assert.equal(shortWin[0]?.color, 'G');
+  const unknown = lineShapes(
+    [line({ key: 'p', kind: 'position', side: null, label: 'LONG 1 @ 100', price: '100', quantity: '1' })],
+    colors,
+  );
+  assert.equal(unknown[0]?.color, 'W', 'no last price: the line stays plain');
 });
 
 test('shapes are locked, unselectable and never saved into a layout', () => {

@@ -612,15 +612,42 @@
   height: 32px;
   vertical-align: middle;
 }
-/* Open positions carry a logo, a side pill and a TP/SL pair. A step up from
-   the 32px history rows, at the page's body size. */
-.acct-table.acct-t.acct-pos th { height: 40px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos td { height: 44px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-mkt__n,
-.acct-table.acct-t.acct-pos .acct-lev { font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-pill { height: 22px; }
-.acct-table.acct-t.acct-pos .acct-act { height: 30px; line-height: 28px; font-size: var(--fs-base); }
-.acct-table.acct-t.acct-pos .acct-edit { width: 24px; height: 24px; }
+/* Open positions carry a logo, a leverage chip and a margin-mode chip.
+   Taller than the 32px history rows, at the page's body size. */
+.acct-table.acct-t.acct-pos th { height: 46px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos td { height: 56px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-mkt__n { font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-act { height: 32px; line-height: 30px; font-size: var(--fs-base); }
+.acct-table.acct-t.acct-pos .acct-edit { width: 26px; height: 26px; }
+.acct-table.acct-t.acct-pos .acct-levbox,
+.acct-table.acct-t.acct-pos .acct-mode {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+.acct-table.acct-t.acct-pos .acct-levbox {
+  font-family: var(--font-num);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
+}
+.acct-table.acct-t.acct-pos .acct-levbox--long {
+  background: color-mix(in srgb, var(--pos) 16%, transparent);
+  color: var(--pos);
+}
+.acct-table.acct-t.acct-pos .acct-levbox--short {
+  background: color-mix(in srgb, var(--neg) 18%, transparent);
+  color: color-mix(in srgb, var(--neg) 72%, var(--text));
+}
+.acct-table.acct-t.acct-pos .acct-mode {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--muted);
+}
 .acct-table.acct-t td,
 .acct-table.acct-t td:first-child { font-weight: 400; }
 .acct-table.acct-t td.num { font-weight: 500; }
