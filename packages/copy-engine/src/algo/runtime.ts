@@ -69,6 +69,8 @@ import {
 export const ALGO_TICK_MS = 500;
 const FLUSH_MS = 2_000;
 const MARKETS_REFRESH_MS = 10 * 60_000;
+/** On stop, how long a step that is placing or cancelling an order is waited for. */
+const STOP_DRAIN_MS = 8_000;
 /** An IOC with no final update after this is looked up on SoDEX. */
 const STALE_IOC_MS = 8_000;
 /** A request with no answer after this is `unknown`. */
@@ -232,6 +234,10 @@ export class AlgoRuntime {
     this.running = false;
     for (const t of this.timers) timers.cancel(t);
     this.timers = [];
+    // A step may be placing or cancelling an order right now: let it finish and
+    // record what it did, so the next start resumes from the truth (bounded: the
+    // service manager stops waiting after 20 s).
+    for (let i = 0; this.busy.size && i < STOP_DRAIN_MS / 25; i++) await new Promise((r) => timers.after(25, () => r(undefined)));
     this.market.stop();
     await this.flush();
   }

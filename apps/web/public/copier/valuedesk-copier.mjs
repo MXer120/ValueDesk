@@ -11370,6 +11370,7 @@ var KeyAlgoSink = class {
 var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
+var STOP_DRAIN_MS = 8e3;
 var STALE_IOC_MS = 8e3;
 var SENDING_MAX_MS = 2e4;
 var HISTORY_EVERY_MS = 2e4;
@@ -11457,6 +11458,7 @@ var AlgoRuntime = class {
     this.running = false;
     for (const t of this.timers) timers.cancel(t);
     this.timers = [];
+    for (let i = 0; this.busy.size && i < STOP_DRAIN_MS / 25; i++) await new Promise((r) => timers.after(25, () => r(void 0)));
     this.market.stop();
     await this.flush();
   }

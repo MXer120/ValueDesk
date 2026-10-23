@@ -317,7 +317,7 @@ none), then `deploy/aws/ec2/provision.sh snapshot`.
 | Health, logs, a restart, a shell | `deploy/release/remote.sh health` / `logs api 100` / `restart api` / `shell` |
 | The copy executor | `remote.sh logs executor 100` / `restart executor`; a release of it alone: `release-server.sh <tag> --executor-only` (section 13) |
 | The Tokyo environment during the move | the same commands with `VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env` in front (section 12) |
-| A server release / rollback | `deploy/release/release-server.sh <tag> [--api-only]` / `deploy/release/rollback.sh server` |
+| A server release / rollback | `deploy/release/release-server.sh <tag> [--all|--api-only]` (by default only the units whose code changed restart) / `deploy/release/rollback.sh server` |
 | A web release / rollback | `build-web.sh <tag>` + `publish-vercel.sh <tag> --out=... --deploy` / `npx vercel@latest rollback` |
 | A backup now; a snapshot | `deploy/release/remote.sh backup` (the index, then the executor's database); `deploy/aws/ec2/provision.sh snapshot` (weekly, and before a risky release) |
 | Restore | `deploy/release/remote.sh restore latest` (dry run), then `--yes`; older: a snapshot -> a new volume, by hand |
@@ -646,7 +646,7 @@ follower registered. The same program a follower can run on their own machine
 | The edge | `/api/copy/*` only: POST (64 KB), `Content-Type`, `Authorization`, `X-Viewer-Country` from Vercel's `x-vercel-ip-country`, never cached (`deploy/vercel/api-proxy.cjs`) |
 | Settings | `/etc/valuescan/executor.env` (from `deploy/server/env/executor.env.example`; `executor.local.env` for your own), `/etc/valuescan/executor.secret.env` (root only: the origin secret(s)) |
 | Data | `/var/lib/valuescan/executor` (0700): `executor.db` (+ `-wal`, `-shm`), `kek`, `session.key` |
-| Release | in the same tarball as the server; `release-server.sh` restarts it after the API; alone: `--executor-only` |
+| Release | in the same tarball as the server; `release-server.sh` restarts it after the API only when its code (`apps/executor`, `packages/copy-engine`, `packages/sodex-core`, dependencies) changed; alone: `--executor-only` |
 | Health | `healthcheck.mjs` check `executor` (`/api/copy/v1/health`), and the unit in `units`. Its nightly backup is not in the health check (the marker is in its own 0700 directory): `remote.sh logs executor-backup` |
 | Logs | `remote.sh logs executor 100` (request lines only at `LOG_LEVEL=debug`) |
 

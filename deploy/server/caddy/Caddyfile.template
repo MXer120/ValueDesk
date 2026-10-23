@@ -66,12 +66,23 @@ __ORIGIN_DOMAIN__ {
 		# /api/copy/v1/. Caddy's path matcher ignores case; the edge forwards paths
 		# exactly, and the executor answers 404 for a path it does not know.
 		handle /api/copy/* {
-			reverse_proxy 127.0.0.1:8799
+			reverse_proxy 127.0.0.1:8799 {
+				# A restart (a release that changes the executor) leaves nothing listening
+				# for a few seconds: a request that cannot connect is held and tried again
+				# instead of answered 502. Only a failed connect is retried - a request the
+				# executor received is never sent twice.
+				lb_try_duration 20s
+				lb_try_interval 250ms
+			}
 		}
 
 		# Everything else: the index API.
 		handle {
-			reverse_proxy 127.0.0.1:8797
+			reverse_proxy 127.0.0.1:8797 {
+				# Likewise while the API restarts (a few seconds).
+				lb_try_duration 15s
+				lb_try_interval 250ms
+			}
 		}
 	}
 

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # /opt/valuescan/bin/release.sh - install a server release and switch to it.
 #
-#   sudo /opt/valuescan/bin/release.sh <tag>              install <tag>, restart indexer, API, executor
+#   sudo /opt/valuescan/bin/release.sh <tag>              install <tag>, restart what runs changed code
+#   sudo /opt/valuescan/bin/release.sh <tag> --all        install <tag>, restart indexer, API, executor
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
-#   sudo /opt/valuescan/bin/release.sh --rollback [--api-only|--executor-only]   back to the release before
+#   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
 #   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
 #
@@ -30,6 +31,16 @@
 # back in seconds, its feeds reconnect, and the next read of each leader's and
 # follower's positions settles a change it missed meanwhile. A release without
 # apps/executor leaves a running executor alone.
+#
+# ONLY WHAT CHANGED (the default). A unit is restarted only when the code it runs
+# differs from the new release's: the indexer and the API when apps/server or the
+# installed dependencies differ, the copy executor when apps/executor,
+# packages/copy-engine, packages/sodex-core or the dependencies differ (tests are
+# not compared). So a release of web or API changes never stops a running copy
+# or algo, and one that only touches the executor keeps the indexer's streams.
+# A unit that is not running is started. --all restarts all three regardless.
+# The comparison is of the two release directories on this disk (diff), so it
+# needs no git and holds for a rollback too.
 #
 # THE COST OF RESTARTING THE INDEXER: its trade streams reconnect. Hyperliquid
 # and SoDEX are back in seconds; Lighter needs 3.5-8 minutes to re-subscribe its
@@ -174,6 +185,34 @@ wait_ok() {   # url, tries: until it answers {"ok":true...}
 }
 wait_health() { wait_ok "$API_URL/api/health" "${1:-60}"; }
 
+# What each unit's code is made of, relative to a release. node_modules/.package-lock.json
+# is npm's record of what it installed: it differs exactly when the installed
+# dependencies do (a web-only dependency in the lockfile does not change it).
+SERVER_CODE=(apps/server)
+EXECUTOR_CODE=(apps/executor packages/copy-engine packages/sodex-core)
+SHARED_CODE=(node_modules/.package-lock.json)
+
+# True when every path is the same under release dirs <a> and <b> (absent in both
+# counts as the same). Dependencies and tests are not compared.
+same_tree() {
+  local a="$1" b="$2" p; shift 2
+  for p in "$@"; do
+    if [ ! -e "$a/$p" ] && [ ! -e "$b/$p" ]; then continue; fi
+    [ -e "$a/$p" ] && [ -e "$b/$p" ] || return 1
+    diff -rq --no-dereference -x node_modules -x test -x '*.test.ts' -x '*.test.mjs' "$a/$p" "$b/$p" >/dev/null 2>&1 || return 1
+  done
+}
+
+# True when <unit> must be restarted to run `current`: it is not running, its
+# release is gone, or its code differs from current's in the given paths.
+needs_restart() {
+  local unit="$1" from; shift
+  from="$(unit_release "$unit")"
+  [ -n "$from" ] && [ -d "$RELEASES/$from" ] || return 0
+  [ "$RELEASES/$from" -ef "$CURRENT" ] && return 1
+  ! same_tree "$RELEASES/$from" "$CURRENT" "$@" "${SHARED_CODE[@]}"
+}
+
 restart_indexer_and_api() {
   local api_only="$1"
   if [ "$api_only" != 1 ]; then
@@ -210,8 +249,28 @@ restart_executor() {
   log "the executor answers /api/copy/v1/health"
 }
 
-restart_units() {   # all | api | executor
+restart_units() {   # auto | all | api | executor
   case "$1" in
+    auto)
+      local idx=0 api=0 exe=0
+      if needs_restart valuescan-indexer.service "${SERVER_CODE[@]}"; then idx=1; fi
+      if needs_restart valuescan-api.service "${SERVER_CODE[@]}"; then api=1; fi
+      if [ -e "$CURRENT/apps/executor/src/main.ts" ] && needs_restart valuescan-executor.service "${EXECUTOR_CODE[@]}"; then exe=1; fi
+      if [ "$idx" = 1 ]; then
+        restart_indexer_and_api 0
+      elif [ "$api" = 1 ]; then
+        restart_indexer_and_api 1
+      else
+        log "the indexer (release $(indexer_release)) and the API (release $(release_of valuescan-api.service)) already run this server code: not restarted"
+      fi
+      if [ "$exe" = 1 ]; then
+        restart_executor
+      elif [ -e "$CURRENT/apps/executor/src/main.ts" ]; then
+        log "the copy executor (release $(release_of valuescan-executor.service)) already runs this code: not restarted, copies and algos carry on"
+      else
+        restart_executor
+      fi
+      ;;
     all) restart_indexer_and_api 0; restart_executor ;;
     api)
       restart_indexer_and_api 1
@@ -266,13 +325,14 @@ status() {
 }
 
 TAG=""
-MODE=all
+MODE=auto
 ROLLBACK=0
 FROM=""
 for arg in "$@"; do
   case "$arg" in
-    --api-only) [ "$MODE" = all ] || die "--api-only and --executor-only exclude each other"; MODE=api ;;
-    --executor-only) [ "$MODE" = all ] || die "--api-only and --executor-only exclude each other"; MODE=executor ;;
+    --all) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=all ;;
+    --api-only) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=api ;;
+    --executor-only) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=executor ;;
     --from=*) FROM="${arg#--from=}" ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;

@@ -12,7 +12,7 @@ deploy/server/
   caddy/Caddyfile.template TLS in front of the API and the copy executor (/api/copy/*)
   journald/valuescan.conf  log retention
   bin/                     installed to /opt/valuescan/bin
-    release.sh             install a release, switch to it, restart in order, roll back
+    release.sh             install a release, switch to it, restart what changed in order, roll back
     backup.sh              one index backup to S3 or the data volume (run nightly by a timer);
                            --executor: the copy executor's database
     backup-index.mjs       the consistent copy itself (VACUUM INTO, read-only)

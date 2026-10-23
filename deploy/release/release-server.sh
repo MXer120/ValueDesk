@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Release the server (indexer + API + copy executor) of one git tag to the instance.
 #
-#   deploy/release/release-server.sh <tag>                   restart the indexer, the API, the executor
+#   deploy/release/release-server.sh <tag>                   restart what runs changed code (below)
+#   deploy/release/release-server.sh <tag> --all             restart the indexer, the API, the executor
 #   deploy/release/release-server.sh <tag> --api-only        restart the API only
 #   deploy/release/release-server.sh <tag> --executor-only   restart the copy executor only
 #   ... --print                                               show the AWS commands, run none
@@ -17,8 +18,12 @@
 #      /var/cache/valuescan/inbox/;
 #   3. /opt/valuescan/bin/release.sh <tag> runs on the instance (SSM Run Command, or
 #      SSH): verify, unpack, `npm ci` for the server workspace, switch the
-#      `current` link, restart in order (indexer, API, executor), check
-#      /api/health and /api/copy/v1/health.
+#      `current` link, restart in order (indexer, API, executor) the units whose
+#      code differs from what they run now, check /api/health and /api/copy/v1/health.
+#
+# By default a unit whose code the tag does not change keeps running: a release
+# that does not touch apps/executor, packages/copy-engine, packages/sodex-core or
+# the installed dependencies never stops a live copy or algo.
 #
 # --api-only: when the release changes nothing the indexer runs. Restarting the
 # indexer costs its Lighter stream 3.5-8 minutes; restarting the API costs seconds.
@@ -32,14 +37,14 @@ TAG=""
 API_ONLY=""
 for arg in "$@"; do
   case "$arg" in
-    --api-only|--executor-only) [ -z "$API_ONLY" ] || die "--api-only and --executor-only exclude each other"; API_ONLY=" $arg" ;;
+    --all|--api-only|--executor-only) [ -z "$API_ONLY" ] || die "--all, --api-only and --executor-only exclude each other"; API_ONLY=" $arg" ;;
     --print) PRINT_ONLY=1 ;;
     -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $arg" ;;
     *) [ -z "$TAG" ] || die "one tag at a time"; TAG="$arg" ;;
   esac
 done
-[ -n "$TAG" ] || die "usage: deploy/release/release-server.sh <tag> [--api-only|--executor-only] [--print]"
+[ -n "$TAG" ] || die "usage: deploy/release/release-server.sh <tag> [--all|--api-only|--executor-only] [--print]"
 require_tag "$TAG"
 load_params
 

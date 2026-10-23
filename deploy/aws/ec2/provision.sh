@@ -12,6 +12,7 @@
 #   deploy/aws/ec2/provision.sh grow           raise the data volume to DATA_VOLUME_GIB, online
 #   deploy/aws/ec2/provision.sh executor-ip    a second private IP with an Elastic IP of its own, for the
 #                                              copy executor (EXECUTOR_LOCAL_ADDRESS)
+#   deploy/aws/ec2/provision.sh alarms         a CloudWatch alarm that reboots the instance when its OS hangs
 #   deploy/aws/ec2/provision.sh check          can this profile do what `up` needs? (dry runs, read-only)
 #
 # Every command prints each AWS call before it makes it. Values: deploy/aws/ec2/ec2.env
@@ -62,7 +63,7 @@ export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,57p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 ACTION="${1:-}"
 [ -n "$ACTION" ] || usage 2
@@ -583,6 +584,22 @@ cmd_grow() {
   log "  deploy/release/remote.sh run 'xfs_growfs /var/lib/valuescan'"
 }
 
+# --- alarms: reboot a hung OS ----------------------------------------------------------------
+
+# A failed SYSTEM status check (the host under the instance) is EC2's to fix: simplified
+# automatic recovery is on by default for this instance type (MaintenanceOptions
+# AutoRecovery=default). A failed INSTANCE status check - the OS hung, ran out of
+# memory, panicked - is not: this alarm reboots the instance after 3 failed minutes,
+# and the services start again by themselves (enabled systemd units). put-metric-alarm
+# replaces an alarm of the same name, so running this again changes nothing else.
+cmd_alarms() {
+  local inst
+  inst="$(find_instance)"
+  [ -n "$inst" ] || die "there is no instance tagged env=$NAME"
+  write "${AWS[@]}" cloudwatch put-metric-alarm --alarm-name "$NAME-reboot-on-hang"     --alarm-description "valuescan $NAME: the instance status check failed for 3 minutes - reboot (deploy/aws/ec2/provision.sh alarms)"     --namespace AWS/EC2 --metric-name StatusCheckFailed_Instance --dimensions "Name=InstanceId,Value=$inst"     --statistic Maximum --period 60 --evaluation-periods 3 --datapoints-to-alarm 3 --threshold 1     --comparison-operator GreaterThanOrEqualToThreshold --treat-missing-data notBreaching     --alarm-actions "arn:aws:automate:$REGION:ec2:reboot"
+  log "a hung OS (instance status check failed 3 minutes) reboots $inst; a failed host is EC2's automatic recovery"
+}
+
 # --- check: what may this profile do? ----------------------------------------------------------
 
 cmd_check() {
@@ -699,5 +716,6 @@ case "$ACTION" in
   grow) cmd_grow ;;
   check) cmd_check ;;
   executor-ip) cmd_executor_ip ;;
+  alarms) cmd_alarms ;;
   *) usage 2 ;;
 esac

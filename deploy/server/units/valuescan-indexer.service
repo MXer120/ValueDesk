@@ -24,7 +24,10 @@ EnvironmentFile=/etc/valuescan/indexer.env
 EnvironmentFile=-/etc/valuescan/indexer.local.env
 # node:sqlite still prints an ExperimentalWarning; "--import tsx" runs the
 # TypeScript sources directly, in this one process (no wrapper to forward signals).
-ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx src/indexer/main.ts
+# The heap is set, not left to Node: it derives one from MemoryMax, and at the
+# old 1800M that was ~690 MB - the indexer outgrew it and crashed every 16-26
+# minutes, before most board builds could finish (Tokyo, 2026-10-23).
+ExecStart=/opt/node/current/bin/node --max-old-space-size=1536 --disable-warning=ExperimentalWarning --import tsx src/indexer/main.ts
 Restart=always
 # Slow restarts: a crash loop must not hammer the exchanges with reconnects.
 RestartSec=30
@@ -32,13 +35,21 @@ RestartSec=30
 KillSignal=SIGTERM
 TimeoutStopSec=45
 LimitNOFILE=65536
-# Measured: about 0.9 GB for indexer and API together. Sized for a 4 GiB instance
-# (t4g.medium, valuescan-api.service explains the split): a runaway is stopped
-# inside this unit before it can take the box (and sshd / the SSM agent) down.
-# Above MemoryHigh the kernel reclaims this unit's page cache first. On 8 GiB
-# (t4g.large) 3G / 4G is right: a drop-in, `systemctl edit valuescan-indexer`.
-MemoryHigh=1400M
-MemoryMax=1800M
+# No core file: writing one of a 1.5 GB heap held the restart back 5 minutes,
+# and systemd-coredump discarded it as too large anyway.
+LimitCORE=0
+# Sized for a 4 GiB instance (t4g.medium): a runaway is stopped inside this unit
+# before it can take the box (and sshd / the SSM agent) down.
+# THE PAGE CACHE COUNTS HERE: the database pages this unit reads are charged to
+# it, and above MemoryHigh the kernel reclaims them first. The indexer's own
+# memory is ~0.7 GB; the rest of MemoryHigh is how much of the database stays
+# cached. At 1400M that was ~0.7 GB of a 19 GB file, and a board build took
+# 11-25 minutes waiting on the disk (Tokyo, 2026-10-23). The API (~0.1 GB) and
+# the executor (~0.06 GB) leave this much room. On 8 GiB (t4g.large) 6G / 6.5G:
+# a drop-in, `systemctl edit valuescan-indexer`. A running unit takes new limits
+# without a restart: systemctl set-property --runtime valuescan-indexer.service ...
+MemoryHigh=2600M
+MemoryMax=3000M
 SyslogIdentifier=valuescan-indexer
 
 # --- hardening ---

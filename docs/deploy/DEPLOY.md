@@ -211,7 +211,8 @@ A release is a git tag. The web and the server are released separately.
 git tag v0.1.1 && git push origin v0.1.1
 
 # server
-deploy/release/release-server.sh v0.1.1               # restarts the indexer, then the API
+deploy/release/release-server.sh v0.1.1               # restarts what runs changed code (below)
+deploy/release/release-server.sh v0.1.1 --all         # restarts the indexer, the API, the executor
 deploy/release/release-server.sh v0.1.1 --api-only    # restarts the API only
 
 # web
@@ -220,10 +221,19 @@ deploy/release/build-web.sh v0.1.1
 deploy/release/publish-web.sh v0.1.1
 ```
 
-- **Order on the instance: the indexer first, then the API.** The indexer is the
-  writer and applies schema changes as it opens the index. Zero downtime is not a
-  goal: the API is back in seconds, and CloudFront serves the index from its short
-  cache meanwhile.
+- **Only what changed is restarted.** On the instance, `release.sh` compares the
+  new release with the one each unit runs (diff of the two directories, tests not
+  counted): the indexer and the API restart when `apps/server` or the installed
+  dependencies differ; the copy executor when `apps/executor`,
+  `packages/copy-engine`, `packages/sodex-core` or the dependencies differ. A
+  release of web or API changes never stops a live copy or algo.
+  `deploy/server/bin/release.test.mjs` covers the decision.
+- **Order on the instance: the indexer first, then the API, then the executor.**
+  The indexer is the writer and applies schema changes as it opens the index.
+  While the API or the executor restarts (seconds), Caddy holds a request that
+  cannot connect and tries again for up to 15 s (20 s for the executor) instead of
+  answering 502; only a failed connect is retried, so nothing is sent twice. The
+  executor, stopping, finishes the order steps it is in the middle of first.
 - **Every indexer restart costs its Lighter stream 3.5 to 8 minutes** (about 220
   markets are re-subscribed one by one), and that gap has to be re-read for the
   traders on the boards. Hyperliquid and SoDEX are back in seconds. So a release

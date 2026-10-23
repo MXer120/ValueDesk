@@ -117,6 +117,15 @@ export const INDEXER_ENV = {
 const REBUILD_MS = 60_000;
 /** Per-trader answers are reused this long unless the trader's data changed. */
 const CACHE_MS = 5 * 60_000;
+/**
+ * An answer for a trader with no new data since is reused across one whole
+ * build (1.5x the last one), up to this long. A build on a cold disk outlasts
+ * CACHE_MS, and without this every build recomputed every trader from the
+ * disk, which kept the next build just as slow (Tokyo, 2026-10-23: 11-25 min).
+ */
+const MAX_REUSE_MS = 30 * 60_000;
+/** Above this many cached answers, the ones too old to be reused are dropped. */
+const CACHE_MAX = 50_000;
 /** Stream-discovered SoDEX wallets are re-queued for lookups this often per window. */
 const LOOKUP_SCAN_MS = 10 * 60_000;
 const FLUSH_MS = 5_000;
@@ -296,6 +305,8 @@ export class Indexer {
   private stopped = false;
   lastBuildMs = 0;
   lastBuildAt = 0;
+  /** venue -> how long its boards took in the last build (ms). */
+  lastBuildVenueMs: Partial<Record<Venue, number>> = {};
   lastError: string | null = null;
   /** Cohorts: members, their positions, and the figures per set of venues. */
   readonly cohorts: CohortTracker;
@@ -543,6 +554,7 @@ export class Indexer {
       },
       lastBuildAt: this.lastBuildAt,
       lastBuildMs: this.lastBuildMs,
+      lastBuildVenueMs: this.lastBuildVenueMs,
       lastError: this.lastError,
       loopLagMs: { lastMinute: this.lag.window, sinceStart: this.lag.max, spikes: this.spikes },
       hlBudget: Math.round(hlInfo.budget.available()),
@@ -652,6 +664,18 @@ export class Indexer {
     return { exact: back && !cut, from: back && !cut ? null : Math.max(from, cov.fromT) };
   }
 
+  /** How long an answer for a trader whose data has not changed is reused: one build, within bounds. */
+  private reuseMs(): number {
+    return Math.min(MAX_REUSE_MS, Math.max(CACHE_MS, Math.round(this.lastBuildMs * 1.5)));
+  }
+
+  /** Fresh enough, or the trader's data is unchanged since and it is not older than one build. */
+  private reusable(hit: { ver: number; at: number }, ver: number, now: number, sticky: boolean): boolean {
+    const age = now - hit.at;
+    if (age < CACHE_MS && (sticky || hit.ver === ver)) return true;
+    return hit.ver === ver && age < this.reuseMs();
+  }
+
   /** Reuse a per-trader answer until the trader's data changes or it is CACHE_MS old. */
   /**
    * `sticky`: reuse for CACHE_MS even when the trader has new fills since (the
@@ -661,7 +685,7 @@ export class Indexer {
   private cached<T>(key: string, venue: Venue, address: string, now: number, fn: () => T, sticky = false): T {
     const ver = this.store.version(venue, address);
     const hit = this.cache.get(key);
-    if (hit && (sticky || hit.ver === ver) && now - hit.at < CACHE_MS) return hit.value as T;
+    if (hit && this.reusable(hit, ver, now, sticky)) return hit.value as T;
     const value = fn();
     this.cache.set(key, { ver, at: now, value });
     return value;
@@ -721,7 +745,7 @@ export class Indexer {
   private async tradeStateAsync(venue: Venue, address: string, window: BoardWindow, from: number, now: number): Promise<{ n: number | null; exact: boolean }> {
     const key = `t|${venue}|${address}|${window}`;
     const hit = this.cache.get(key);
-    if (hit && now - hit.at < CACHE_MS) return hit.value as { n: number | null; exact: boolean };
+    if (hit && this.reusable(hit, this.store.version(venue, address), now, true)) return hit.value as { n: number | null; exact: boolean };
     const held = await this.store.orderCountAsync(venue, address, from, () => this.breathe());
     const value = this.tradeFrom(venue, address, window, from, now, held);
     this.cache.set(key, { ver: this.store.version(venue, address), at: now, value });
@@ -732,7 +756,7 @@ export class Indexer {
   private async pickStatsAsync(venue: Venue, address: string, window: BoardWindow, from: number, now: number): Promise<PickStats> {
     const key = `s|${venue}|${address}|${window}`;
     const hit = this.cache.get(key);
-    if (hit && now - hit.at < CACHE_MS) return hit.value as PickStats;
+    if (hit && this.reusable(hit, this.store.version(venue, address), now, true)) return hit.value as PickStats;
     const stats = await this.store.windowStatsAsync(venue, address, from, () => this.breathe());
     const wc = this.winCoverage(venue, address, from);
     const value: PickStats = {
@@ -1186,7 +1210,9 @@ export class Indexer {
       const want = new Map<Venue, Set<string>>(VENUES.map((v) => [v, new Set<string>()]));
       for (const a of this.watchedHl) want.get('hyperliquid')!.add(a);
       const built = new Map<string, BoardRow>();
+      const venueMs: Partial<Record<Venue, number>> = {};
       for (const venue of VENUES) {
+        const v0 = Date.now();
         for (const window of INDEX_WINDOWS) {
           for (const side of SIDES) {
             for (const filter of FILTERS) {
@@ -1196,7 +1222,9 @@ export class Indexer {
             }
           }
         }
+        venueMs[venue] = Date.now() - v0;
       }
+      this.lastBuildVenueMs = venueMs;
       for (const window of INDEX_WINDOWS) {
         const pending = await this.writePools(window, snap, now, built);
         for (const [venue, list] of pending) for (const a of list) want.get(venue)!.add(a);
@@ -1533,7 +1561,12 @@ export class Indexer {
     const tracked = new Map<number, string>();
     for (const [id, a] of ids) if (sodex.has(a)) tracked.set(id, a);
     this.trackedSodex = tracked;
-    if (this.cache.size > 50_000) this.cache.clear();
+    if (this.cache.size > CACHE_MAX) {
+      // Keep what the next build can still reuse; drop the rest (all of it, if that is not enough).
+      const cut = now - this.reuseMs();
+      for (const [k, v] of this.cache) if (v.at < cut) this.cache.delete(k);
+      if (this.cache.size > CACHE_MAX * 2) this.cache.clear();
+    }
     // Drop queued work nobody wants any more.
     const keep = (k: string) => {
       const a = k.split(':').pop()!;

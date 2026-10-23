@@ -677,3 +677,24 @@ test('smallest and largest slice: due quantity waits for the smallest; no child 
   await step(r, b.id);
   assert.equal(r.sink.all.at(-1)!.quantity, '0.0015');
 });
+
+test('stopping waits for a step that is placing an order, and records what it sent before the runner goes', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'chase', quantity: '0.002' });
+  // SoDEX takes its time to answer the order.
+  let answer!: () => void;
+  const slow = new Promise<void>((res) => { answer = res; });
+  const place = r.sink.place.bind(r.sink);
+  r.sink.place = async (...args) => { await slow; return place(...args); };
+  r.rt.tick(clock);
+  await new Promise((res) => setImmediate(res));
+  let stopped = false;
+  const stopping = r.rt.stop().then(() => { stopped = true; });
+  await new Promise((res) => setTimeout(res, 80));
+  assert.equal(stopped, false, 'stop waits while the order is on its way');
+  answer();
+  await stopping;
+  assert.equal(r.sink.all.length, 1);
+  const saved = (await r.store.algos()).find((x) => x.id === a.id)!;
+  assert.equal(saved.children.length, 1, 'the order that went out is in the books');
+});
