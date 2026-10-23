@@ -27,48 +27,42 @@
 .lf__vid { position: absolute; overflow: hidden; background: #000; }
 .lf__frame--yt { bottom: auto; }
 .lf__shield { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
-/* The widget's cover over a blurred picture: a play button when paused, a spinner
-   while YouTube's own play / pause shows in the middle after a start. Its disc is
-   solid and larger than YouTube's button, so nothing of that shows through. It
-   fades in and out (is-on). */
-.lf__cover {
+/* The widget's centre play / pause, on the spot where YouTube draws its own pause
+   sign after a start; larger than that sign and nearly opaque, so the sign under it
+   never shows. It comes and goes with the other controls (is-awake, is-settling)
+   and stays while paused. */
+.lf__mid {
   position: absolute;
-  inset: 0;
+  left: 50%;
+  top: 50%;
   z-index: 2;
   display: grid;
   place-items: center;
-  margin: 0;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
   padding: 0;
-  border: 0;
-  background: rgba(0, 0, 0, 0.5);
-  -webkit-backdrop-filter: blur(18px) saturate(0.8);
-  backdrop-filter: blur(18px) saturate(0.8);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(14, 14, 16, 0.78);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
   color: #fff;
   cursor: pointer;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 240ms ease-out;
+  transition: opacity 180ms, transform 140ms, border-color 140ms;
 }
-.lf__cover.is-on { opacity: 1; pointer-events: auto; }
-.lf__big {
-  display: grid;
-  place-items: center;
-  width: 72px;
-  height: 72px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 50%;
-  background: #141416;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-  transition: transform 140ms, border-color 140ms;
-}
-.lf:fullscreen .lf__big { width: 104px; height: 104px; }
-.lf__big svg { width: 26px; height: 26px; margin-left: 3px; }
-.lf__cover:hover .lf__big { transform: scale(1.05); border-color: rgba(255, 255, 255, 0.3); }
-.lf__cover:focus-visible { outline: none; }
-.lf__cover:focus-visible .lf__big { box-shadow: 0 0 0 2px var(--text); }
+.lf.is-awake .lf__mid,
+.lf.is-settling .lf__mid,
+.lf.is-paused .lf__mid { opacity: 1; pointer-events: auto; }
+.lf__mid:hover { transform: scale(1.05); border-color: rgba(255, 255, 255, 0.28); }
+.lf__mid svg { width: 24px; height: 24px; }
+.lf:fullscreen .lf__mid { width: 84px; height: 84px; margin: -42px 0 0 -42px; }
+.lf:fullscreen .lf__mid svg { width: 32px; height: 32px; }
 .lf__spin {
-  width: 24px;
-  height: 24px;
+  width: 22px;
+  height: 22px;
   border: 2px solid rgba(255, 255, 255, 0.2);
   border-top-color: #fff;
   border-radius: 50%;
@@ -90,9 +84,11 @@
   transition: opacity 180ms, transform 180ms;
   pointer-events: none;
 }
-/* Shown while the pointer moves or rests on them, while the keyboard is in them (not
-   after a click: a clicked button keeps focus), or with nothing to play. */
+/* Shown while the pointer moves or rests on them, for a few seconds after playback
+   starts (with the centre button), while the keyboard is in them (not after a click:
+   a clicked button keeps focus), or with nothing to play. */
 .lf.is-awake .lf__bar,
+.lf.is-settling .lf__bar,
 .lf__bar:has(:focus-visible),
 .lf__bar:has([aria-expanded="true"]),
 .lf.is-empty .lf__bar,

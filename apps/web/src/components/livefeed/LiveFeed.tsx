@@ -13,14 +13,13 @@
  * A YouTube stream shows none of YouTube's own overlays. A transparent layer
  * keeps its hover controls away; the player is made taller than its picture and
  * clipped to it, so its title bar, logo and "More videos" land outside the clip
- * (ytPlayer.ts playerBand). YouTube also shows a play / pause button in the
- * middle for a few seconds each time playback starts - on load and on resume,
- * whatever its controls setting - so the widget's own cover stays over the
- * picture from the load until that has passed, and a channel's live stream is
- * never stopped and started again: pausing it holds it, running on silently
- * under the cover, and play lifts the cover - at once, and live. A pasted video
- * pauses for real. The widget drives the player through its commands and reads
- * back what it does (ytPlayer.ts), so play / pause shows the real state; the
+ * (ytPlayer.ts playerBand). YouTube also draws a small pause sign in the middle
+ * for a few seconds each time playback starts - on load and on resume, whatever
+ * its controls setting (paused, it draws nothing). The widget has its own centre
+ * play / pause on that spot, shown with the other controls, and after a start
+ * the controls stay up as long as YouTube's sign would, so it never shows. The
+ * widget drives the player through its commands and reads back what it does
+ * (ytPlayer.ts), so play / pause shows the real state and really pauses; the
  * sound follows the viewer's choice; captions are unloaded each time it starts
  * playing (YouTube turns them on for a muted video). Twitch, Kick and Vimeo keep
  * their own controls. It starts muted (a browser only autoplays a muted video;
@@ -45,9 +44,9 @@ const IDLE_MS = 2200;
 const CLICK_MS = 220;
 /** A player that has not started this long after it answered is held up (autoplay refused): the widget offers play. */
 const STALL_MS = 3500;
-/** How long YouTube's own play / pause shows in the middle after playback starts: the cover stays this long. */
+/** How long YouTube's own pause sign shows in the middle after playback starts: the widget's controls stay this long. */
 const SETTLE_MS = 4500;
-/** A frame that never reports (its messages blocked) is uncovered after this long. */
+/** A frame that never reports (its messages blocked) lets its controls hide after this long. */
 const LOAD_MS = 10_000;
 
 function useBoxSize<T extends HTMLElement>() {
@@ -126,7 +125,7 @@ function useYouTube(frame: RefObject<HTMLIFrameElement | null>, src: string | nu
 }
 
 /**
- * Whether YouTube's own play / pause has left the middle of the picture: false
+ * Whether YouTube's own pause sign has left the middle of the picture: false
  * from a frame's load until SETTLE_MS after its player starts playing, and again
  * after each later start (a resume) - a rebuffer inside a run is no start. A frame
  * that never reports is taken as settled after LOAD_MS.
@@ -171,8 +170,6 @@ export function LiveFeed({ instance }: {
   const choice = readChoice(stored);
   // The sound the viewer chose (a stream starts without it); the player follows it.
   const [sound, setSound] = useState(false);
-  // A channel's live stream paused: it runs on, silent, under the widget's cover.
-  const [held, setHeld] = useState(false);
   const [draft, setDraft] = useState(choice && 'custom' in choice ? choice.custom : '');
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -205,13 +202,9 @@ export function LiveFeed({ instance }: {
   const video = fitVideo(pic?.w ?? size.w, pic?.h ?? size.h);
   const band = playerBand(video.h);
 
-  // A channel's stream is live: pausing holds it instead of stopping the player (which
-  // would bring YouTube's own button back when it starts again).
-  const holdable = channel !== null;
   // What the player does, once it has said so; until then it is taken to autoplay.
-  const running = player.state === null || player.state === YT.playing || player.state === YT.buffering;
+  const playing = player.state === null || player.state === YT.playing || player.state === YT.buffering;
   const stopped = player.ready && (player.state === YT.paused || player.state === YT.ended);
-  const playing = running && !held;
   const [stalled, setStalled] = useState(false);
   const notStarted = player.state === null || player.state === YT.unstarted || player.state === YT.cued;
   useEffect(() => {
@@ -220,30 +213,28 @@ export function LiveFeed({ instance }: {
     const t = window.setTimeout(() => setStalled(true), STALL_MS);
     return () => window.clearTimeout(t);
   }, [yt, player.ready, notStarted]);
+  /* After each start YouTube shows a pause sign in the middle for a few seconds. The
+     widget's own centre button sits over it, and while it does the controls stay up
+     with it (is-settling), so the two never part. Paused, the centre button stays. */
   const settled = useSettled(yt ? src : null, player.state, player.ready);
-  // The cover: a play button when paused, held or held up; a spinner while YouTube's own button shows.
-  const cover = !yt ? null : held || stopped || stalled ? 'paused' : !settled ? 'starting' : null;
-  const lastCover = useRef<'paused' | 'starting'>('starting');
-  if (cover) lastCover.current = cover;
+  const settling = yt && !settled;
+  const paused = yt && (stopped || stalled);
+  const loading = yt && !paused && player.state !== YT.playing;
 
   useEffect(() => {
     const on = () => setFull(document.fullscreenElement === box.current);
     document.addEventListener('fullscreenchange', on);
     return () => document.removeEventListener('fullscreenchange', on);
   }, [box]);
-  // A new stream starts muted and playing.
+  // A new stream starts muted.
   const streamKey = stream ? JSON.stringify(stream) : '';
-  useEffect(() => {
-    setSound(false);
-    setHeld(false);
-  }, [streamKey]);
+  useEffect(() => setSound(false), [streamKey]);
 
-  // The player's sound follows the viewer's choice; a held stream stays silent under its cover.
+  // The player's sound follows the viewer's choice.
   const { send } = player;
-  const silent = !sound || held;
   useEffect(() => {
-    if (yt && player.ready) send(ytCommand(silent ? 'mute' : 'unMute'));
-  }, [yt, player.ready, silent, send]);
+    if (yt && player.ready) send(ytCommand(sound ? 'unMute' : 'mute'));
+  }, [yt, player.ready, sound, send]);
 
   // Captions off each time it starts playing: YouTube turns them on for a muted video,
   // and again when it resumes.
@@ -274,22 +265,13 @@ export function LiveFeed({ instance }: {
     wake();
   };
 
-  const command = (next: boolean) => {
+  // Pause stops the player, play starts it again.
+  const togglePlay = () => {
+    if (!yt) return;
+    const next = !playing;
     player.assume({ state: next ? YT.playing : YT.paused });
     setStalled(false);
     send(ytCommand(next ? 'playVideo' : 'pauseVideo'));
-  };
-  // Pause: a live channel is held, a pasted video stops. Play: the cover lifts, and the
-  // player is started only if it is not already running.
-  const togglePlay = () => {
-    if (!yt) return;
-    if (playing) {
-      if (holdable) setHeld(true);
-      else command(false);
-      return;
-    }
-    setHeld(false);
-    if (!running || stopped || stalled) command(true);
   };
   const toggleMute = () => setSound((s) => !s);
   const toggleFull = () => {
@@ -394,7 +376,7 @@ export function LiveFeed({ instance }: {
   return (
     <div
       ref={box}
-      className={`lf${src ? '' : ' is-empty'}${editing ? ' is-editing' : ''}${docked ? ' is-docked' : ''}${awake ? ' is-awake' : ''}`}
+      className={`lf${src ? '' : ' is-empty'}${editing ? ' is-editing' : ''}${docked ? ' is-docked' : ''}${awake ? ' is-awake' : ''}${settling ? ' is-settling' : ''}${paused ? ' is-paused' : ''}`}
       onPointerMove={wake}
       onPointerEnter={wake}
       onPointerLeave={() => { holding.current = false; setAwake(false); }}
@@ -407,17 +389,10 @@ export function LiveFeed({ instance }: {
               {iframe('lf__frame lf__frame--yt', { top: -band, height: video.h + 2 * band })}
               {/* YouTube under a layer: its own hover controls never show; the widget's do. */}
               <div className="lf__shield" onClick={onPicClick} onDoubleClick={onPicDouble} aria-hidden="true" />
-              {/* Always there, so it fades out rather than vanishing; its last face stays while it fades. */}
-              <button
-                type="button"
-                className={`lf__cover${cover ? ' is-on' : ''}`}
-                onClick={cover === 'paused' ? togglePlay : onPicClick}
-                onDoubleClick={onPicDouble}
-                aria-label={lastCover.current === 'paused' ? 'Play' : 'Starting the stream'}
-                aria-hidden={!cover}
-                tabIndex={cover ? 0 : -1}
-              >
-                <span className="lf__big">{lastCover.current === 'paused' ? <IconPlay /> : <span className="lf__spin" aria-hidden="true" />}</span>
+              {/* The centre play / pause, over the spot where YouTube draws its own. The bar's
+                  button does the same for the keyboard, so this one takes no focus. */}
+              <button type="button" className="lf__mid" onClick={togglePlay} tabIndex={-1} aria-hidden="true">
+                {loading ? <span className="lf__spin" /> : playing ? <IconPause /> : <IconPlay />}
               </button>
             </div>
           ) : (
