@@ -169,7 +169,7 @@ export function Spark({ values, className, loading }: { values: number[] | null;
 export function ScoreMeter({ s }: { s: CopyScore }) {
   const lit = Math.round(s.score / 10);
   return (
-    <span className={`cpy-score cpy-score--${scoreBand(s.score)}`} title={explainScore(s)}>
+    <span className={`cpy-score cpy-score--${s.kind} cpy-score--${scoreBand(s.score)}`} title={explainScore(s)}>
       <span className="cpy-score__n"><b>{s.score}</b>/100</span>
       <span className="cpy-score__bars" aria-hidden="true">
         {Array.from({ length: 10 }, (_, i) => <i key={i} className={i < lit ? 'is-on' : undefined} />)}
@@ -211,13 +211,15 @@ export interface TraderCardProps {
   window: BoardWindow;
   /** The big figure: the window's PnL in dollars, or its return in percent. */
   unit: 'usd' | 'pct';
+  /** 'copy': a trader to copy, glowing green. 'counter': one to trade against, glowing red (the order ticket's two sides). */
+  kind?: 'copy' | 'counter';
   onOpen: (row: TraderRow) => void;
   onCopy: (row: TraderRow) => void;
   /** Already copying this trader: the button says so. */
   copying?: boolean;
 }
 
-export function TraderCard({ row, score, window: w, unit, onOpen, onCopy, copying }: TraderCardProps) {
+export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen, onCopy, copying }: TraderCardProps) {
   const { ref, peek, loading } = useTraderPeek(row, w);
   const pnl = row.pnl[w] ?? null;
   const big = unit === 'usd' ? fmtSignedUsd(pnl, 0) : fmtSignedPct(score.roi, 1);
@@ -227,12 +229,16 @@ export function TraderCard({ row, score, window: w, unit, onOpen, onCopy, copyin
   return (
     <article
       ref={ref}
-      className="cpy-card"
+      className={`cpy-card cpy-card--${kind} cpy-card--${scoreBand(score.score)}`}
       tabIndex={0}
       onClick={() => onOpen(row)}
       onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(row); }}
       aria-label={`Trader ${shortAddr(row.address)} on ${VENUE_LABEL[row.venue]}`}
     >
+      {/* The order ticket's side glow (OrderEntry.css .oe-fx): a wash, a rim and a slow glare, rising from the score. */}
+      <span className="cpy-glow" aria-hidden="true">
+        <span className="cpy-glow__rim"><span className="cpy-glow__glare" /></span>
+      </span>
       <header className="cpy-card__head">
         <Avatar address={row.address} />
         <div className="cpy-card__id">
@@ -257,10 +263,10 @@ export function TraderCard({ row, score, window: w, unit, onOpen, onCopy, copyin
         <Spark values={peek?.spark ?? null} loading={loading} className="cpy-card__spark" />
       </div>
 
-      <footer className={`cpy-card__foot cpy-card__foot--${scoreBand(score.score)}`}>
+      <footer className="cpy-card__foot">
         <ScoreMeter s={score} />
-        <button type="button" className={`cpy-copybtn${copying ? ' is-copying' : ''}`} onClick={copy}>
-          {copying ? 'Copying' : 'Copy'}
+        <button type="button" className={`cpy-copybtn cpy-copybtn--${kind}${copying ? ' is-copying' : ''}`} onClick={copy}>
+          {copying ? 'Copying' : kind === 'copy' ? 'Copy' : 'Counter'}
         </button>
       </footer>
     </article>

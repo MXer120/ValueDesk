@@ -3,8 +3,9 @@
  *
  * A hero with the three highest-scoring traders, then the grid of both copy
  * venues' top hundred - categories, filters, a sort, $ or %, cards or a list.
- * A card opens the trader; its Copy button opens the copy setup over the grid
- * (CopyModal). The figures are the public boards' (/api/vs/leaderboard); the
+ * The Counter-trade tab is the boards' WORST hundred, ranked by the counter
+ * score, its cards glowing red. A card opens the trader; its Copy (or Counter)
+ * button opens the copy setup over the grid (CopyModal) in that direction. The figures are the public boards' (/api/vs/leaderboard); the
  * curve on a card is read from the venue in this browser when it scrolls into
  * view (TraderCard.tsx).
  */
@@ -16,11 +17,11 @@ import { VENUE_BRAND } from '../venueBrand';
 import { VENUE_LABEL, vsApi, type BoardWindow, type TraderRow, type Venue } from '../../vsApi';
 import {
   CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
-  filtersActive, scoreRows, shapeGrid, type Category, type Filters, type Scored, type SortKey,
+  filtersActive, kindOf, normaliseFilters, scoreRows, shapeGrid, type Category, type Filters, type Scored, type SortKey,
 } from './gridModel';
 import { Avatar, CoinRow, ScoreMeter, Spark, TraderCard, WINDOW_SHORT, useTraderPeek } from './TraderCard';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
-import { LOSING_CAP } from './copyScore';
+import { COPY_COST_BPS, WRONG_SIDE_CAP, type ScoreKind } from './copyScore';
 
 interface GridPrefs {
   category: Category;
@@ -38,7 +39,8 @@ const keyOf = (r: Pick<TraderRow, 'venue' | 'address'>) => `${r.venue}:${r.addre
 
 export interface DiscoverProps {
   onOpen: (row: TraderRow) => void;
-  onCopy: (row: TraderRow) => void;
+  /** Open the copy setup for this trader, copying or countering. */
+  onCopy: (row: TraderRow, direction: 'copy' | 'counter') => void;
   /** venue:address of every trader this wallet is copying now. */
   copying: ReadonlySet<string>;
   /** A pasted address: open that trader. */
@@ -47,7 +49,9 @@ export interface DiscoverProps {
 
 export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) {
   const [stored, setStored] = useStored<GridPrefs>('vs.copy.grid', DEFAULT_PREFS);
-  const prefs: GridPrefs = { ...DEFAULT_PREFS, ...stored, filters: { ...NO_FILTERS, ...(stored?.filters ?? {}) } };
+  const prefs: GridPrefs = { ...DEFAULT_PREFS, ...stored, filters: normaliseFilters(stored?.filters) };
+  if (!CATEGORIES.some((c) => c.id === prefs.category)) prefs.category = 'top';
+  const kind: ScoreKind = kindOf(prefs.category);
   const patch = (p: Partial<GridPrefs>) => setStored({ ...prefs, ...p });
   const [q, setQ] = useState('');
   const [shown, setShown] = useState(PAGE);
@@ -60,16 +64,26 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
     { pollMs: 60_000 },
   );
   useLoadFailedToast(boards.error, 'Top traders', boards.refresh);
+  // The Counter-trade tab: each venue's worst hundred, read only once the tab is open.
+  const worst = useAsync(
+    () => Promise.all(COPY_VENUES.map((venue) =>
+      vsApi.leaderboard({ venue, window: w, sort: 'pnl', limit: 100, side: 'worst' }).then((b) => b.rows, () => [] as TraderRow[]))),
+    [w],
+    { pollMs: 60_000, enabled: kind === 'counter' },
+  );
+  useLoadFailedToast(worst.error, 'Counter-trade candidates', worst.refresh);
 
-  const scored = useMemo(() => scoreRows((boards.data ?? []).flat(), w), [boards.data, w]);
+  const scored = useMemo(() => scoreRows((boards.data ?? []).flat(), w, 'copy'), [boards.data, w]);
+  const scoredCounter = useMemo(() => scoreRows((worst.data ?? []).flat(), w, 'counter'), [worst.data, w]);
   const pasted = isAddress(q) ? q.trim().toLowerCase() : null;
   const grid = useMemo(
-    () => shapeGrid(scored, { category: prefs.category, filters: prefs.filters, sort: prefs.sort, window: w, q: pasted ? '' : q }),
-    [scored, prefs.category, prefs.filters, prefs.sort, w, q, pasted],
+    () => shapeGrid(kind === 'counter' ? scoredCounter : scored, { category: prefs.category, filters: prefs.filters, sort: prefs.sort, window: w, q: pasted ? '' : q }),
+    [kind, scored, scoredCounter, prefs.category, prefs.filters, prefs.sort, w, q, pasted],
   );
   const podium = useMemo(() => shapeGrid(scored, { category: 'top', filters: NO_FILTERS, sort: 'score', window: w }).slice(0, 3), [scored, w]);
   const nFilters = filtersActive(prefs.filters);
-  const loading = boards.loading && !boards.data;
+  const source = kind === 'counter' ? worst : boards;
+  const loading = source.loading && !source.data;
 
   return (
     <div className="cpy-discover">
@@ -97,7 +111,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
             <button
               key={c.id}
               type="button"
-              className={`cpy-cat${prefs.category === c.id ? ' is-on' : ''}`}
+              className={`cpy-cat${c.id === 'counter' ? ' cpy-cat--counter' : ''}${prefs.category === c.id ? ' is-on' : ''}`}
               aria-pressed={prefs.category === c.id}
               onClick={() => { patch({ category: c.id }); setShown(PAGE); }}
             >
@@ -109,7 +123,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
           <label className="cpy-select" title="Sort">
             <span className="cpy-select__k" aria-hidden="true">⇅</span>
             <select value={prefs.sort} onChange={(e) => patch({ sort: e.target.value as SortKey })} aria-label="Sort traders">
-              {SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              {SORTS[kind].map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
             </select>
           </label>
           <Toggle
@@ -154,18 +168,18 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         />
         <Pick
           label="PnL"
-          value={prefs.filters.profitableOnly ? 1 : 0}
-          options={[{ v: 0, label: 'Any' }, { v: 1, label: 'Profitable only' }]}
-          onChange={(v) => patch({ filters: { ...prefs.filters, profitableOnly: v === 1 } })}
+          value={prefs.filters.sideOnly ? 1 : 0}
+          options={[{ v: 0, label: 'Any' }, { v: 1, label: kind === 'copy' ? 'Profitable only' : 'Losing only' }]}
+          onChange={(v) => patch({ filters: { ...prefs.filters, sideOnly: v === 1 } })}
         />
         <Pick
           label="Win rate"
-          value={prefs.filters.minWinRate}
-          options={WIN_RATE_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${Math.round(v * 100)}%` }))}
-          onChange={(v) => patch({ filters: { ...prefs.filters, minWinRate: v } })}
+          value={WIN_RATE_STEPS[kind].includes(prefs.filters.winRate) ? prefs.filters.winRate : 0}
+          options={WIN_RATE_STEPS[kind].map((v) => ({ v, label: v === 0 ? 'Any' : `${kind === 'copy' ? '≥' : '≤'} ${Math.round(v * 100)}%` }))}
+          onChange={(v) => patch({ filters: { ...prefs.filters, winRate: v } })}
         />
         <Pick
-          label="Copy score"
+          label={kind === 'copy' ? 'Copy score' : 'Counter score'}
           value={prefs.filters.minScore}
           options={SCORE_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${v}` }))}
           onChange={(v) => patch({ filters: { ...prefs.filters, minScore: v } })}
@@ -176,8 +190,16 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         <span className="cpy-count">{loading ? 'Loading traders…' : `${grid.length} trader${grid.length === 1 ? '' : 's'}`}</span>
       </div>
 
-      {boards.error && !boards.data ? (
-        <div className="cpy-empty"><LoadFailed what="Top traders" onRetry={boards.refresh} /></div>
+      {kind === 'counter' && (
+        <p className="cpy-counter-note">
+          Counter-trading takes the other side of every trade: these are the boards' biggest losers, ranked by how well
+          trading against them would have worked - their loss beyond ~{COPY_COST_BPS} bps of costs per traded dollar, a win rate
+          that is surely low, and the size and record to keep trading. A losing streak can end at any time.
+        </p>
+      )}
+
+      {source.error && !source.data ? (
+        <div className="cpy-empty"><LoadFailed what={kind === 'counter' ? 'Counter-trade candidates' : 'Top traders'} onRetry={source.refresh} /></div>
       ) : loading ? (
         <div className="cpy-grid" aria-busy="true">
           {Array.from({ length: 8 }, (_, i) => <div key={i} className="cpy-card cpy-card--ghost" />)}
@@ -196,14 +218,15 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
               score={s.score}
               window={w}
               unit={prefs.unit}
+              kind={kind}
               onOpen={onOpen}
-              onCopy={onCopy}
+              onCopy={(r) => onCopy(r, kind)}
               copying={copying.has(keyOf(s.row))}
             />
           ))}
         </div>
       ) : (
-        <TraderList rows={grid.slice(0, shown)} w={w} onOpen={onOpen} onCopy={onCopy} copying={copying} />
+        <TraderList rows={grid.slice(0, shown)} w={w} kind={kind} onOpen={onOpen} onCopy={(r) => onCopy(r, kind)} copying={copying} />
       )}
 
       {grid.length > shown && (
@@ -278,9 +301,10 @@ function MiniCard({ s, w, i, onOpen }: { s: Scored; w: BoardWindow; i: number; o
   );
 }
 
-function TraderList({ rows, w, onOpen, onCopy, copying }: {
+function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
   rows: Scored[];
   w: BoardWindow;
+  kind: ScoreKind;
   onOpen: (r: TraderRow) => void;
   onCopy: (r: TraderRow) => void;
   copying: ReadonlySet<string>;
@@ -291,7 +315,7 @@ function TraderList({ rows, w, onOpen, onCopy, copying }: {
         <thead>
           <tr>
             <th>Trader</th>
-            <th>Copy score</th>
+            <th>{kind === 'copy' ? 'Copy score' : 'Counter score'}</th>
             <th className="num">PnL {WINDOW_SHORT[w]}</th>
             <th className="num">Return</th>
             <th className="num">Equity</th>
@@ -319,8 +343,8 @@ function TraderList({ rows, w, onOpen, onCopy, copying }: {
                 <td className="num">{row.winRate == null ? DASH : `${Math.round(row.winRate * 100)}%`}</td>
                 <td><CoinRow assets={row.assets} /></td>
                 <td className="num">
-                  <button type="button" className={`cpy-copybtn${copying.has(keyOf(row)) ? ' is-copying' : ''}`} onClick={(e) => { e.stopPropagation(); onCopy(row); }}>
-                    {copying.has(keyOf(row)) ? 'Copying' : 'Copy'}
+                  <button type="button" className={`cpy-copybtn cpy-copybtn--${kind}${copying.has(keyOf(row)) ? ' is-copying' : ''}`} onClick={(e) => { e.stopPropagation(); onCopy(row); }}>
+                    {copying.has(keyOf(row)) ? 'Copying' : kind === 'copy' ? 'Copy' : 'Counter'}
                   </button>
                 </td>
               </tr>
@@ -334,7 +358,7 @@ function TraderList({ rows, w, onOpen, onCopy, copying }: {
 
 function HowItWorks() {
   const steps = [
-    ['Pick a trader', 'Sorted by a copy score from public figures: profit, return, win rate, account size and track record.'],
+    ['Pick a trader', `Sorted by a copy score from public figures: return, edge per traded dollar beyond ~${COPY_COST_BPS} bps of copy costs, profit, a win rate that holds up, account size and track record. Or trade against the worst, in the Counter-trade tab.`],
     ['Set your rules', 'Size, leverage cap, position cap, slippage, stop loss and drawdown stop. A replay of their last 30 days shows what those rules would have done.'],
     ['Choose where it runs', 'In this browser, on the ValueDesk executor in Tokyo around the clock, or on a copier you host yourself.'],
     ['Copy, pause, stop', 'Copies trade in your own SoDEX account. Pause or stop any copy, stop them all at once, or revoke the copy key on SoDEX.'],
@@ -351,8 +375,8 @@ function HowItWorks() {
         ))}
       </ol>
       <p className="cpy-how__note">
-        The copy score is a summary of public figures, the same formula for everyone (a trader with a loss scores at most {LOSING_CAP}); it is
-        not a recommendation. Past results do not predict future ones. Copy fee up to 0.025% per copied order, on top of SoDEX's fees.
+        The copy and counter scores summarise public figures, the same formula for everyone, ranked against the traders on the board (a
+        trader on the wrong side of the window scores at most {WRONG_SIDE_CAP}); they are not a recommendation. Past results do not predict future ones. Copy fee up to 0.025% per copied order, on top of SoDEX's fees.
         Not available in the US or sanctioned countries; in the EU and EEA copies are limited to 2x leverage.{' '}
         <a className="fx-link" href="/copy-terms">Copy terms and risks</a>.
       </p>

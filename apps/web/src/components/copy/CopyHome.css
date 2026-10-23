@@ -12,7 +12,6 @@
 .cpy {
   --cpy-card: color-mix(in srgb, var(--bg-panel) 92%, transparent);
   --cpy-line: var(--panel-line);
-  --cpy-pos-band: color-mix(in srgb, var(--pos) 13%, var(--bg-panel));
   max-width: 1720px;
   margin: 0 auto;
   padding: var(--sp-3) var(--sp-4) var(--sp-6);
@@ -205,8 +204,7 @@
 .cpy-card__lbl { color: var(--muted); font-size: var(--fs-micro); margin-bottom: var(--sp-2); }
 .cpy-card__eq { font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; }
 .cpy-card__spark { height: 72px; }
-.cpy-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 10px var(--sp-3); border-top: 1px solid var(--cpy-line); background: var(--tint); }
-.cpy-card__foot--high { background: var(--cpy-pos-band); border-top-color: color-mix(in srgb, var(--pos) 25%, transparent); }
+.cpy-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 10px var(--sp-3); border-top: 1px solid color-mix(in srgb, var(--cpy-tint) 18%, var(--cpy-line)); }
 
 .cpy-spark { display: block; width: 100%; overflow: visible; }
 .cpy-spark--empty { border-bottom: 1px dashed var(--line-soft); }
@@ -429,3 +427,127 @@
 .cpy-dir__opt--copy.is-on { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent); }
 .cpy-dir__opt--counter.is-on { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 45%, transparent); }
 .cpy-dir__note { margin: 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--neg) 8%, transparent); color: var(--text); font-size: var(--fs-xs); line-height: 1.45; }
+
+/* --- the order ticket's side glow on the cards ------------------------------
+   OrderEntry.css .oe-fx: a wash of the side colour, a 1px rim that fades out,
+   and a slow glare running along it. Here it rises from the bottom, where the
+   score and the button are, in the card's side colour: green to copy, red to
+   counter-trade. Its strength follows the score: full from 70, half from 45,
+   none below. */
+@property --cpy-glare {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.cpy-card { --cpy-tint: var(--pos); --cpy-wash: 11%; position: relative; isolation: isolate; }
+.cpy-card--counter { --cpy-tint: var(--neg); }
+.cpy-card--mid { --cpy-wash: 6%; }
+.cpy-card > :not(.cpy-glow) { position: relative; z-index: 1; }
+.cpy-glow {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--cpy-tint) var(--cpy-wash), transparent) 0%,
+    color-mix(in srgb, var(--cpy-tint) calc(var(--cpy-wash) * 0.55), transparent) 16%,
+    color-mix(in srgb, var(--cpy-tint) calc(var(--cpy-wash) * 0.18), transparent) 44%,
+    transparent 70%
+  );
+}
+.cpy-glow::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--cpy-tint) 30%, transparent) 0%,
+    color-mix(in srgb, var(--cpy-tint) 10%, transparent) 9%,
+    transparent 22%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.cpy-glow__rim {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  -webkit-mask-image: linear-gradient(to top, #000 0%, #000 10%, transparent 34%);
+  mask-image: linear-gradient(to top, #000 0%, #000 10%, transparent 34%);
+}
+.cpy-glow__glare {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  /* The ticket's glare turned half a circle: its bright arc runs along the bottom. */
+  background: conic-gradient(
+    from calc(var(--cpy-glare) + 180deg),
+    transparent 0 320deg,
+    color-mix(in srgb, var(--cpy-tint) 18%, transparent) 329deg,
+    color-mix(in srgb, var(--cpy-tint) 38%, transparent) 338deg,
+    color-mix(in srgb, var(--cpy-tint) 18%, transparent) 347deg,
+    transparent 356deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: cpy-glare 5.4s linear infinite;
+}
+@keyframes cpy-glare {
+  0%   { --cpy-glare: 325deg; }
+  84%  { --cpy-glare: 435deg; }
+  92%  { --cpy-glare: 560deg; }
+  100% { --cpy-glare: 685deg; }
+}
+.cpy-card--low .cpy-glow { display: none; }
+.cpy-card--mid .cpy-glow__glare { animation-duration: 8s; }
+@media (prefers-reduced-motion: reduce) {
+  .cpy-glow__glare { animation: none; }
+}
+.cpy-card:hover .cpy-glow,
+.cpy-card:focus-visible .cpy-glow { --cpy-wash: 15%; }
+
+/* --- the two sides' buttons: the ticket's buy and sell faces -------------------- */
+.cpy-copybtn--copy,
+.cpy-card--copy .cpy-copybtn:not(.is-copying) { background: linear-gradient(90deg, var(--pos) 0%, var(--pos-deep) 172%); color: var(--bg); }
+.cpy-copybtn--counter,
+.cpy-card--counter .cpy-copybtn:not(.is-copying) { background: linear-gradient(90deg, var(--neg) 0%, var(--neg-deep) 172%); color: var(--bg); }
+.cpy-copybtn--copy:hover,
+.cpy-copybtn--counter:hover { filter: brightness(1.08); }
+.cpy-copybtn--ghost.cpy-copybtn--counter {
+  background: color-mix(in srgb, var(--neg) 10%, transparent);
+  color: var(--neg);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 50%, transparent);
+}
+
+/* --- a counter score reads in the sell colour -------------------------------------- */
+.cpy-score--counter.cpy-score--high .cpy-score__bars i.is-on { background: var(--neg); }
+.cpy-score--counter.cpy-score--mid .cpy-score__bars i.is-on { background: color-mix(in srgb, var(--neg) 60%, var(--warn)); }
+.cpy-score--counter.cpy-score--low .cpy-score__bars i.is-on { background: var(--dim); }
+
+/* --- the Counter-trade tab ----------------------------------------------------------- */
+.cpy-cat--counter { display: inline-flex; align-items: center; gap: 6px; }
+.cpy-cat--counter::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--neg); box-shadow: 0 0 6px color-mix(in srgb, var(--neg) 70%, transparent); }
+.cpy-cat--counter.is-on {
+  color: var(--neg);
+  background: color-mix(in srgb, var(--neg) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 38%, transparent);
+}
+.cpy-counter-note {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--neg) 12%, transparent), transparent 80%);
+  border: 1px solid color-mix(in srgb, var(--neg) 24%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}

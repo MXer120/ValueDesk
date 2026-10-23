@@ -76,9 +76,11 @@ export function CopyPage(props: CopyPageProps) {
     window.scrollTo({ top: 0 });
   }, [c]);
 
-  const copyTrader = useCallback((row: TraderRow | null, address?: string, venue?: Venue) => {
+  /** Open the copy setup for a trader, in the direction the button said (Copy or Counter). */
+  const copyTrader = useCallback((direction: 'copy' | 'counter', row: TraderRow | null, address?: string, venue?: Venue) => {
     const a = row?.address ?? address;
     if (!a) return;
+    if (c.setup.direction !== direction) c.patchSetup({ direction });
     c.selectLeader(a, row?.venue ?? venue);
     setModal({ open: true, row });
   }, [c]);
@@ -109,11 +111,11 @@ export function CopyPage(props: CopyPageProps) {
           )}
         </div>
       ) : page === 'trader' && c.leader ? (
-        <TraderView c={c} onBack={() => { window.history.pushState(null, '', '/copy'); go('discover'); }} onCopy={() => copyTrader(null, c.leader!, c.venue)} copying={copying.has(`${c.venue}:${c.leader}`)} />
+        <TraderView c={c} onBack={() => { window.history.pushState(null, '', '/copy'); go('discover'); }} onCopy={(d) => copyTrader(d, null, c.leader!, c.venue)} copying={copying.has(`${c.venue}:${c.leader}`)} />
       ) : (
         <Discover
           onOpen={openTrader}
-          onCopy={(row) => copyTrader(row)}
+          onCopy={(row, d) => copyTrader(d, row)}
           copying={copying}
           onAddress={(address, venue) => openTrader({ address, venue })}
         />
@@ -147,7 +149,7 @@ export function CopyPage(props: CopyPageProps) {
   );
 }
 
-function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCopyContext>; onBack: () => void; onCopy: () => void; copying: boolean }) {
+function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCopyContext>; onBack: () => void; onCopy: (direction: 'copy' | 'counter') => void; copying: boolean }) {
   const leader = c.leader!;
   return (
     <div className="cpy-trader">
@@ -165,7 +167,10 @@ function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCo
         </div>
         <span className="cpy-tabs__fill" />
         <button type="button" className="cpy-chip" onClick={() => c.onScan(leader, c.venue)} title="Open this trader in Scan">Open in Scan</button>
-        <button type="button" className={`cpy-copybtn cpy-copybtn--lg${copying ? ' is-copying' : ''}`} onClick={onCopy}>
+        <button type="button" className="cpy-copybtn cpy-copybtn--counter cpy-copybtn--lg cpy-copybtn--ghost" onClick={() => onCopy('counter')} title="Take the other side of every trade">
+          Counter-trade
+        </button>
+        <button type="button" className={`cpy-copybtn cpy-copybtn--lg${copying ? ' is-copying' : ''}`} onClick={() => onCopy('copy')}>
           {copying ? 'Copying · add another' : 'Copy this trader'}
         </button>
       </header>

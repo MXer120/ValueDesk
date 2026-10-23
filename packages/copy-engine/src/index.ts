@@ -15,6 +15,7 @@ export * from './orders.ts';
 export * from './store.ts';
 export * from './runtime.ts';
 export * from './api.ts';
+export * from './priceGuard.ts';
 
 /** Shown by every copier and sent in the executor's info. 1.1: counter-trading. */
 export const COPY_ENGINE_VERSION = '1.1.0';

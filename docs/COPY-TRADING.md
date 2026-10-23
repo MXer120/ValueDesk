@@ -24,12 +24,28 @@ and the signed API contract (`api.ts`). The executor is `apps/executor` (MIT):
 `executor.ts` the API client, `sodexSetup.ts` the SoDEX signatures,
 `CopySetupSheet.tsx` the setup sheet and its steps) and the Copy page in
 `apps/web/src/components/copy/`: the trader grid (`Discover.tsx`, `TraderCard.tsx`,
-`gridModel.ts`) with the copy score (`copyScore.ts`: 30 profit, 25 return, 20 win
-rate, 15 account size, 10 track record, from the public board figures; a losing
-trader at most 35; shown with "not a recommendation"), the two-step copy dialog
+`gridModel.ts`) with the copy score and, on the Counter-trade tab (the boards'
+`side=worst` hundred), the counter score (`copyScore.ts`: 25 return, 20 edge per
+traded dollar beyond ~12 bps of copy costs, 15 profit, 15 win rate by the end of
+its 95% Wilson interval, 15 account size, 10 track record; return and profit as
+percentiles of the board on screen; a trader on the wrong side of the window at
+most 30; shown with "not a recommendation"; copy cards glow green, counter cards
+red, as the order ticket's two sides), the two-step copy dialog
 (`CopyModal.tsx`: rules with a replay of the trader's fills, then where it runs,
 the amount and the mode's signatures), one trader's page and My copies
 (`panels.tsx`).
+
+### Manipulation protection (ready, not wired in)
+
+`packages/copy-engine/src/priceGuard.ts` builds one reference price for a coin from
+SoDEX, Hyperliquid, Aster and Binance (`fetchQuotes`; each venue 5 s at most, 1000x
+contracts scaled to one coin) with a weight per venue, as a weighted mean or
+median, dropping stale quotes and outliers (`referencePrice`). Two checks use it:
+`triggerHit` (a stop or a conditional fires on the reference, not on one venue's
+wick) and the optional `marketOrderAllowed` toggle (a market order goes only while
+the venue is within the slippage range of the reference, against you). Nothing
+calls it yet - the planner, the guards, the order ticket and the algo orders can.
+A browser caller also needs fapi.asterdex.com and fapi.binance.com in the CSP.
 
 ### Counter-trading
 
