@@ -36,6 +36,7 @@ import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
 import { SizeCalc, SourceWidget } from './sourceWidgets';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
 import { NewsFeed } from '../components/news/NewsFeed';
+import { newsProps } from './newsProps';
 import { coinLabel } from '../format';
 import { ChartCard, TradeAccountBand } from './tradeTabs';
 
@@ -447,7 +448,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
       render: (c) => {
         if (id === 'sizecalc') return <SizeCalc price={c.lastPrice || c.price} />;
         if (id === 'livefeed') return <LiveFeed />;
-        if (id === 'news') return <NewsFeed coin={coinLabel(c.sym?.baseCoin) || null} />;
+        if (id === 'news') return <NewsFeed {...newsProps(c)} />;
         if (quick) {
           return (
             <OrderEntry

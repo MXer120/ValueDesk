@@ -27,6 +27,7 @@ import {
   type TabMenuItem,
 } from './tabExtras';
 import type { TradeContext } from './registry';
+import { newsProps } from './newsProps';
 
 /** One widget as a tab body; a duplicate keeps its own settings (`instance`). */
 function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: PanelTab['scroll'] } {
@@ -34,7 +35,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
   const instance = n ? String(n) : undefined;
   switch (baseOf(id)) {
     case 'trades': return { content: <Trades engine={c.engine} symbol={c.symbol} sym={c.sym} showTitle={false} onOpenScan={c.onOpenScan} />, scroll: 'auto' };
-    case 'news': return { content: <NewsFeed coin={coinLabel(c.sym?.baseCoin) || null} instance={instance} />, scroll: 'hidden' };
+    case 'news': return { content: <NewsFeed {...newsProps(c)} instance={instance} />, scroll: 'hidden' };
     case 'livefeed': return { content: <LiveFeed instance={instance} />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
     case 'sizecalc': return { content: <SizeCalc price={c.lastPrice || c.price} />, scroll: 'auto' };

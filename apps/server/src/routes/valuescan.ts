@@ -13,7 +13,7 @@
  *   GET /api/vs/fills?venue&address&from&to&limit
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
- *   GET /api/vs/news?feed&category&coin&q&page&limit   (SoSoValue; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/news?feed&category&coin&q&page&limit   (SoSoValue; coin is one or several, comma-separated; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/live?channel   (the YouTube channel's stream on air, for the Live Feed)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)

@@ -125,12 +125,18 @@ export interface NewsItem {
   /** Publish time, milliseconds. 0 when the feed omitted it. */
   time: number;
   author: string | null;
-  /** Matched coin symbols, at most three. */
+  /** Its coins' tickers (BTC), at most four: SoSoValue's match, or the coins its text names. */
   symbols: string[];
-  /** SoSoValue's category (1 news, 2 research, 3 institution, 4 insights, 7 announcements, 13 crypto stocks). */
+  /** SoSoValue's category (1 news, 2 research, 3 institution, 4 insights, 5 macro, 7 announcements, 13 crypto stocks). */
   category?: number | null;
   /** The body's first lines, when there is more than the title. */
   summary?: string | null;
+  /** SoSoValue's keywords for it (people, companies, places), at most five. */
+  tags?: string[];
+  /** A post on X: `title` is the post's text, not a headline. */
+  post?: boolean;
+  /** Its place in the hot list (1 is the hottest). */
+  rank?: number;
 }
 
 export interface VsPosition {
