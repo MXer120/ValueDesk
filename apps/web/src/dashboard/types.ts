@@ -270,4 +270,9 @@ export interface TerminalSeed {
   layouts?: Partial<Record<BreakpointName, PanelPlacement[]>>;
   shown?: string[];
   hidden?: string[];
+  /**
+   * The designs it shipped with before: a terminal still exactly as one of them
+   * (its owner never moved, sized, added or took out a panel) moves to this one.
+   */
+  was?: Array<{ layouts: Partial<Record<BreakpointName, PanelPlacement[]>>; shown?: string[] }>;
 }

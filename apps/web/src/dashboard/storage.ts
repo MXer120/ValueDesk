@@ -182,8 +182,43 @@ const seedSlot = (s: TerminalSeed): LayoutSlot => ({
  * default and stays active) and the others follow it; with slots, the first
  * unnamed one takes the default's name and every seed not added before is
  * appended. `seeded` remembers which, so a deleted terminal stays deleted.
+ * A shipped terminal still exactly as an earlier design of it moves to the
+ * current one (upgradeSeeded).
  */
 export function seedTerminals(state: SavedDashboard, seeds: readonly TerminalSeed[]): SavedDashboard {
+  return upgradeSeeded(seedFresh(state, seeds), seeds);
+}
+
+/** A placement list as data that compares: id, place and size, in id order. */
+const placed = (l: readonly PanelPlacement[] | undefined) => JSON.stringify([...(l ?? [])].map((p) => [p.i, p.x, p.y, p.w, p.h]).sort());
+const sameSet = (a: readonly string[] | undefined, b: readonly string[] | undefined) => JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort());
+
+/**
+ * A shipped terminal its owner never changed - still panel for panel and cell
+ * for cell one of its seed's earlier designs (TerminalSeed.was) - takes the
+ * seed's current design. Anything they moved, sized, added or took out stays
+ * theirs. The record comes back unchanged (the same object) when nothing moves.
+ */
+function upgradeSeeded(state: SavedDashboard, seeds: readonly TerminalSeed[]): SavedDashboard {
+  if (!state.slots?.length || !seeds.some((t) => t.was?.length)) return state;
+  let changed = false;
+  const slots = state.slots.map((slot) => {
+    const seed = seeds.find((t) => t.id === slot.id);
+    if (!seed?.was?.length) return slot;
+    // The canvas on screen is the top-level copy.
+    const view = slot.id === state.activeSlot ? { layouts: state.layouts, shown: state.shown } : { layouts: slot.layouts, shown: slot.shown };
+    const old = seed.was.find((w) => sameSet(w.shown, view.shown)
+      && (Object.keys(w.layouts) as BreakpointName[]).every((bp) => placed(w.layouts[bp]) === placed(view.layouts[bp])));
+    if (!old) return slot;
+    changed = true;
+    return { ...slot, layouts: { ...view.layouts, ...seed.layouts }, shown: seed.shown ?? [], hidden: seed.hidden ?? [] };
+  });
+  if (!changed) return state;
+  const active = slots.find((x) => x.id === state.activeSlot);
+  return active ? { ...state, slots, layouts: active.layouts, shown: active.shown, hidden: active.hidden } : { ...state, slots };
+}
+
+function seedFresh(state: SavedDashboard, seeds: readonly TerminalSeed[]): SavedDashboard {
   if (!seeds.length) return state;
   const seeded = new Set(state.seeded ?? []);
   const fresh = seeds.filter((s) => !seeded.has(s.id));

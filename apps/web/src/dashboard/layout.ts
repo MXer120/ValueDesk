@@ -427,7 +427,14 @@ const XS = pair({ markets: 2, ticker: 4, band: 24, positions: 11, account: 9 });
 /**
  * The trade page's terminals (DashboardConfig.terminals): Trade is the design
  * above, and the one on screen by default; News is a live channel, the news
- * feed and the chart, added beside it and one click away in the rail.
+ * feed, the chart and the order ticket - a story read, its chart looked at and
+ * the trade made without leaving it - added beside it and one click away in
+ * the rail.
+ *
+ * News, lg: the channel over the chart on the left (the chart the taller of
+ * the two), the news column beside them, the ticket over the account on the
+ * right, the Trade terminal's ticket and account in width and height. md: the
+ * channel and the news over the chart and the ticket.
  */
 const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
   { id: 'trade', name: 'Trade', icon: 'trade' },
@@ -436,19 +443,39 @@ const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
     name: 'News',
     icon: 'news',
     blank: true,
-    shown: ['livefeed', 'news', 'chart'],
+    shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
     layouts: {
       lg: [
-        { i: 'livefeed', x: 0, y: 0, w: 30, h: 52 },
-        { i: 'chart', x: 0, y: 52, w: 30, h: 38 },
-        { i: 'news', x: 30, y: 0, w: 18, h: 90 },
+        { i: 'livefeed', x: 0, y: 0, w: 26, h: 40 },
+        { i: 'chart', x: 0, y: 40, w: 26, h: 50 },
+        { i: 'news', x: 26, y: 0, w: 12, h: 90 },
+        { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
+        { i: 'account', x: 38, y: 60, w: 10, h: 30 },
       ],
       md: [
-        { i: 'livefeed', x: 0, y: 0, w: 48, h: 14 },
-        { i: 'news', x: 0, y: 14, w: 48, h: 16 },
-        { i: 'chart', x: 0, y: 30, w: 48, h: 17 },
+        { i: 'livefeed', x: 0, y: 0, w: 30, h: 14 },
+        { i: 'news', x: 30, y: 0, w: 18, h: 14 },
+        { i: 'chart', x: 0, y: 14, w: 30, h: 19 },
+        { i: 'exec', x: 30, y: 14, w: 18, h: 19 },
       ],
     },
+    // The first design (the channel, the news and a short chart, no ticket): an untouched
+    // News terminal from then moves to this one.
+    was: [{
+      shown: ['livefeed', 'news', 'chart'],
+      layouts: {
+        lg: [
+          { i: 'livefeed', x: 0, y: 0, w: 30, h: 52 },
+          { i: 'chart', x: 0, y: 52, w: 30, h: 38 },
+          { i: 'news', x: 30, y: 0, w: 18, h: 90 },
+        ],
+        md: [
+          { i: 'livefeed', x: 0, y: 0, w: 48, h: 14 },
+          { i: 'news', x: 0, y: 14, w: 48, h: 16 },
+          { i: 'chart', x: 0, y: 30, w: 48, h: 17 },
+        ],
+      },
+    }],
   },
 ];
 
