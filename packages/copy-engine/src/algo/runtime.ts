@@ -322,7 +322,8 @@ export class AlgoRuntime {
     this.algos.set(a.id, a);
     await this.host.store.saveAlgo(a);
     this.syncWatch();
-    await this.event(a, 'status', `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
+    const what = spec.kind === 'basket' ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === 'buy' ? 'buy' : 'sell'} on ${spec.symbol}`;
+    await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
     this.host.onChange?.(a.id);
     return a;
   }
@@ -686,7 +687,8 @@ export class AlgoRuntime {
     m: MarketInfo,
     q: Quote,
     mk: number,
-    o: { due: number; late: number; total: number; exec: ExecSpec; tag: string; maxChild?: number | null; minChild?: number | null; minRepriceMs?: number; side?: Side; reduceOnly?: boolean },
+    // more: the total grows later (a DCA installment still to come), so dust now is not the end.
+    o: { due: number; late: number; total: number; exec: ExecSpec; tag: string; maxChild?: number | null; minChild?: number | null; minRepriceMs?: number; side?: Side; reduceOnly?: boolean; more?: boolean },
   ): Promise<void> {
     const s = a.spec;
     const side = o.side ?? s.side;
@@ -723,7 +725,7 @@ export class AlgoRuntime {
       qty = Math.min(qty, floorStep(cap, m));
       if (qty < minQ) {
         // Less than SoDEX takes in one order: what is left at the very end is dust.
-        if (room < minQ && o.late >= o.total) await this.end(a, 'done', a.filled > 0 ? `Filled; ${dec(room)} ${m.base} under SoDEX's minimum order was left.` : 'Under SoDEX\'s minimum order size: nothing could be sent.');
+        if (room < minQ && o.late >= o.total && !o.more) await this.end(a, 'done', a.filled > 0 ? `Filled; ${dec(room)} ${m.base} under SoDEX's minimum order was left.` : 'Under SoDEX\'s minimum order size: nothing could be sent.');
         return;
       }
       const price = takerPrice(side, q, o.exec.slippageBps, m, mk, limit);
@@ -876,7 +878,7 @@ export class AlgoRuntime {
     if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, 'done', `${done} order${done === 1 ? '' : 's'} filled${skipped ? `, ${skipped} skipped` : ''}.`);
     const h = this.dueHistory(a, now, target);
     const late = s.exec.style === 'taker' ? target : s.exec.style === 'hybrid' ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : over ? target : 0;
-    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}` });
+    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
   }
 
   private async stepIceberg(a: AlgoRecord, m: MarketInfo, q: Quote, now: number): Promise<void> {

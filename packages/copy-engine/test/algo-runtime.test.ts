@@ -491,6 +491,22 @@ test('DCA: an amount per interval; outside the limit it is skipped', async () =>
   assert.equal(x.k.skipped, 1);
 });
 
+test('DCA: rounding dust after one installment does not end it; the dust rides on the next', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'dca', perOrderUsd: 70, orders: 2, intervalMs: 60_000, exec: { style: 'taker' } });
+  let x = await step(r, a.id);
+  const first = Number(r.sink.all[0]!.quantity);
+  assert.ok(first < 70 / 60_010, 'the first order is rounded down to the step');
+  x = await step(r, a.id, 500);
+  assert.equal(x.status, 'running', 'the second installment is still to come');
+  assert.equal(r.sink.all.length, 1);
+  x = await step(r, a.id, 60_000);
+  assert.equal(r.sink.all.length, 2);
+  assert.ok(Number(r.sink.all[1]!.quantity) > first, 'the dust is carried into the second order');
+  x = await step(r, a.id, 500);
+  assert.equal(x.status, 'done');
+});
+
 test('pause pulls the resting child; resume carries on; restarts ask SoDEX about live children', async () => {
   const r = await rig();
   const a = await add(r, { kind: 'chase', quantity: '0.002' });

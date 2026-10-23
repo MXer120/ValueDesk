@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
-import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoFeed, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
 import { loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
@@ -149,4 +149,84 @@ test('HTTP: POST /algos with a signed request, GET /algos and its events with th
   assert.equal(act.status, 200);
   server.close();
   await cleanup();
+});
+
+test('end to end, in paper: a signed TWAP with exits runs on the executor against the market it sees, fills, ends, keeps its exits, and survives a restart', async () => {
+  const realNow = Date.now;
+  let clock = Date.now();
+  Date.now = () => clock;
+  const dir = mkdtempSync(join(tmpdir(), 'vd-algo-e2e-'));
+  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted' });
+  const path = join(dir, 'executor.db');
+  const settle = async () => {
+    for (let i = 0; i < 3; i++) {
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 3));
+    }
+  };
+  try {
+    const db = new ExecutorDb(path);
+    const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(), factory: noWs, log: silent });
+    const w = new Wallet();
+    const ctx = { viewerCountry: 'SG' };
+    svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+    const spec = { kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '0.004', durationMs: 120_000, slices: 2, exec: { style: 'taker', slippageBps: 20 }, exits: { tpPct: 0.02, slPct: 0.01 }, paper: true };
+    const v = await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec, seed: 5 }), ctx);
+    const id = v.algo.id;
+    // What the executor's socket would bring: the book and the mark.
+    const feed = svc.algos.market as AlgoFeed;
+    const book = (bid: number, ask: number) => {
+      feed.handle({ channel: 'bookTicker', data: [{ s: 'BTC-USD', b: String(bid), a: String(ask) }] });
+      feed.handle({ channel: 'allMarkPrice', data: [{ s: 'BTC-USD', p: String((bid + ask) / 2) }] });
+    };
+    book(60_000, 60_010);
+    await svc.algos.stepNow(id, clock);
+    await settle();
+    assert.equal(svc.algos.get(id)!.filled, 0.002, 'the first slice took at the ask');
+    clock += 61_000;
+    book(60_100, 60_110);
+    await svc.algos.stepNow(id, clock);
+    await settle();
+    clock += 60_000;
+    book(60_100, 60_110);
+    await svc.algos.stepNow(id, clock);
+    await settle();
+    const done = svc.algos.get(id)!;
+    assert.equal(done.status, 'done');
+    assert.equal(done.filled, 0.004);
+    const exits = done.exitOrders!.filter((x) => x.state === 'open');
+    assert.deepEqual(exits.map((x) => x.exit).sort(), ['sl', 'tp']);
+    assert.ok(exits.every((x) => x.quantity === 0.004 && x.side === 'sell'));
+    const events = await svc.algoEvents(w.address, id, {});
+    assert.ok(events.some((e) => /Exits for 0.004/.test(e.text)));
+    await svc.stop();
+    db.close();
+    // A restart reads the books back from SQLite, exits and all.
+    const db2 = new ExecutorDb(path);
+    const svc2 = new ExecutorService(cfg, db2, new Secrets(dir), { fetch: fakeFetch(), factory: noWs, log: silent });
+    await svc2.algos.start();
+    const back = svc2.algos.get(id)!;
+    assert.equal(back.status, 'done');
+    assert.equal(back.exitOrders!.filter((x) => x.state === 'open').length, 2);
+    // The mark falls through the stop-loss: it fills (paper) and the take-profit is cancelled.
+    const feed2 = svc2.algos.market as AlgoFeed;
+    feed2.handle({ channel: 'allMarkPrice', data: [{ s: 'BTC-USD', p: '59000' }] });
+    svc2.algos.tick(clock);
+    await settle();
+    const after = svc2.algos.get(id)!;
+    // The latest pair (the first one, for 0.002, was replaced when the TWAP finished).
+    assert.equal(after.exitOrders!.filter((x) => x.exit === 'sl').at(-1)!.filled, 0.004);
+    assert.equal(after.exitOrders!.filter((x) => x.exit === 'tp').at(-1)!.state, 'done');
+    assert.equal(after.exitOrders!.filter((x) => x.exit === 'tp').at(-1)!.filled, 0);
+    await svc2.stop();
+    db2.close();
+  } finally {
+    Date.now = realNow;
+    // Windows may still hold SQLite's WAL files for a moment: a temp folder left behind is not a failure.
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    } catch {
+      /* left for the OS to clean */
+    }
+  }
 });

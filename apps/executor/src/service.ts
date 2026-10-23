@@ -143,6 +143,8 @@ export class ExecutorService {
       sinkFor: (a) => this.algoSink(a),
       builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
       problem: (a) => this.algoProblem(a),
+      // The copy region rules, from the country declared with the terms and the one the request came from.
+      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null),
     });
   }
 
@@ -484,8 +486,9 @@ export class ExecutorService {
 
   /**
    * Why a live algo cannot trade now (it waits, and goes on by itself once
-   * this clears): the key, the builder approval, the region - the same three
-   * things that block a copy.
+   * this clears): the key and the builder approval, as for a copy. The region
+   * rules (blocked countries, the EEA 2x ceiling on leverage and exposure) are
+   * applied by the runtime through `policyFor`.
    */
   private async algoProblem(a: AlgoRecord): Promise<string | null> {
     const key = await this.keyProblem(a.owner);
@@ -495,9 +498,6 @@ export class ExecutorService {
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
       if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
     }
-    const t = this.db.terms(a.owner);
-    const policy = regionPolicy(t?.country ?? null, null);
-    if (!policy.allowed) return policy.reason ?? 'Not available in your region.';
     return null;
   }
 
@@ -526,7 +526,8 @@ export class ExecutorService {
     }
     let a: AlgoRecord;
     try {
-      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed });
+      const t = this.db.terms(owner);
+      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
     } catch (e) {
       throw new ApiError(400, 'algo', e instanceof Error ? e.message : String(e));
     }
