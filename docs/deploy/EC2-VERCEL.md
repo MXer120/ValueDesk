@@ -512,9 +512,26 @@ nothing but Caddy starts.
 5b. Only if `DATA_VOLUME_GIB` is larger than Frankfurt's volume:
 `VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh run 'xfs_growfs /var/lib/valuescan'`.
 
-5c. Optional: a volume made from a snapshot fetches its blocks on first read, so the
-indexer's first minutes on the index can be slow. Reading it once in advance:
-`VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh run 'nohup dd if=/dev/sdf of=/dev/null bs=1M status=none >/dev/null 2>&1 &'`.
+5c. A volume made from a snapshot fetches each block from S3 on its first read. On
+2026-10-23 that held the indexer on the 18 GB index at ~90 % IO pressure (12 s of CPU in
+23 minutes, the board a week old), and a `dd` read-through managed 6 MiB/s next to it:
+hours. What worked: a second volume from the same snapshot with EBS's provisioned
+initialization rate, fully read in ~5 minutes while the first one still served, then
+swapped in (the filesystem UUID is the snapshot's, so `/etc/fstab` mounts it as is):
+
+```
+aws ec2 create-volume --profile claude --region ap-northeast-1 --availability-zone ap-northeast-1a \
+  --snapshot-id <copy> --volume-type gp3 --size 80 --encrypted --volume-initialization-rate 300 \
+  --tag-specifications 'ResourceType=volume,Tags=[{Key=project,Value=valuescan},{Key=env,Value=valuescan-tokyo},{Key=role,Value=data-next}]'
+aws ec2 describe-volume-status ... --volume-ids <new>      # until initialization-state=completed
+# on the instance: stop valuescan-health.timer, the indexer, the API and the executor; umount /var/lib/valuescan
+aws ec2 detach-volume --volume-id <old>; aws ec2 attach-volume --volume-id <new> --instance-id <i> --device /dev/sdf
+# on the instance: mount /var/lib/valuescan, bootstrap.sh's adopt + install -d lines (section 3), start the units
+```
+
+Then tag the new volume `role=data` and the old `role=data-replaced` (provision.sh finds
+the data volume by tag), and put the new id in `.out/state.tokyo.env`. Next time, create the
+volume like this in the first place (provision.sh `up` does not pass the rate yet).
 
 **6. The server release in Tokyo.**
 
