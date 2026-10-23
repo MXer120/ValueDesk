@@ -7,22 +7,27 @@
  * controls are a header that stays - LIVE with a slow red dot, the source,
  * play / pause, mute, fullscreen, clear - over a picture sized to exactly 16:9,
  * so there are no black bars. Without it the picture fills the panel and the
- * same controls float over its top edge, showing while the pointer moves and
- * hiding together a moment after it stops.
+ * same controls float over its top edge, showing while the pointer moves (and
+ * while it rests on them) and hiding together a moment after it stops.
  *
- * A YouTube stream sits under a transparent layer: its own controls (the
- * pause button that outstayed everything else) never show, and the widget
- * drives it through the player's commands - play, pause, mute, and captions
- * off, which YouTube otherwise turns on for a muted video. Twitch, Kick and
+ * A YouTube stream shows none of YouTube's own overlays. A transparent layer
+ * keeps its hover controls away; the player is made taller than its picture and
+ * clipped to it, so its title bar, logo and "More videos" land outside the clip
+ * (ytPlayer.ts playerBand); paused, or held up before it starts, the picture
+ * is covered by the widget's own play button. The widget drives it through the
+ * player's commands and reads back what it does (ytPlayer.ts), so play / pause
+ * and mute always show the player's real state; captions are unloaded each time
+ * it starts playing (YouTube turns them on for a muted video). Twitch, Kick and
  * Vimeo keep their own controls. It starts muted (a browser only autoplays a
  * muted video). The choice is remembered on this browser.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi } from '../../vsApi';
 import { FxSelect } from '../funds/ui';
 import { EmptyState } from '../EmptyState';
 import { CHANNELS, PLATFORM_NAME, embedUrl, isYouTube, parseStream, readChoice, streamOf, type FeedChoice } from './model';
+import { YT, YT_ORIGIN, fitVideo, playerBand, readYtMessage, ytCommand, ytListening, type YtReport } from './ytPlayer';
 import './LiveFeed.css';
 
 const CUSTOM = 'custom';
@@ -30,6 +35,10 @@ const CUSTOM = 'custom';
 const HEAD = 46;
 /** The floating controls hide this long after the pointer stops. */
 const IDLE_MS = 2200;
+/** A single click on the picture waits this long to tell itself from a double click (fullscreen). */
+const CLICK_MS = 220;
+/** A player that has not started this long after it answered is held up (autoplay refused): the widget offers play. */
+const STALL_MS = 3500;
 
 function useBoxSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -46,6 +55,66 @@ function useBoxSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
+interface PlayerView {
+  ready: boolean;
+  state: number | null;
+  muted: boolean | null;
+}
+const NO_VIEW: PlayerView = { ready: false, state: null, muted: null };
+
+/**
+ * What a YouTube embed reports about itself, from its frame's load on. It is
+ * told the widget listens until it answers; `assume` shows a command's outcome
+ * before the player confirms it.
+ */
+function useYouTube(frame: RefObject<HTMLIFrameElement | null>, src: string | null, on: boolean) {
+  const [view, setView] = useState<PlayerView>(NO_VIEW);
+  const heard = useRef(false);
+  const knock = useRef<number | null>(null);
+  const send = useCallback((msg: string) => frame.current?.contentWindow?.postMessage(msg, YT_ORIGIN), [frame]);
+  const stopKnocking = () => {
+    if (knock.current !== null) window.clearInterval(knock.current);
+    knock.current = null;
+  };
+
+  useEffect(() => {
+    setView(NO_VIEW);
+    heard.current = false;
+    if (!on) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== YT_ORIGIN || !frame.current || e.source !== frame.current.contentWindow) return;
+      const r = readYtMessage(e.data);
+      if (!r) return;
+      if (!heard.current) {
+        heard.current = true;
+        stopKnocking();
+        send(ytCommand('addEventListener', ['onStateChange']));
+      }
+      setView((p) => ({ ready: true, state: r.state ?? p.state, muted: r.muted ?? p.muted }));
+    };
+    window.addEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      stopKnocking();
+    };
+  }, [src, on, frame, send]);
+
+  const onLoad = useCallback(() => {
+    if (!on) return;
+    heard.current = false;
+    stopKnocking();
+    let tries = 0;
+    send(ytListening());
+    knock.current = window.setInterval(() => {
+      if (heard.current || ++tries > 60) stopKnocking();
+      else send(ytListening());
+    }, 250);
+  }, [on, send]);
+
+  const assume = useCallback((r: YtReport) => setView((p) => ({ ...p, state: r.state ?? p.state, muted: r.muted ?? p.muted })), []);
+  return { ...view, send, onLoad, assume };
+}
+
 export function LiveFeed({ instance }: {
   /** A duplicate tab's own settings (dashboard/tradeTabs.tsx): "2" for the second copy. */
   instance?: string;
@@ -53,7 +122,6 @@ export function LiveFeed({ instance }: {
   const [stored, setStored] = useStored<FeedChoice>(`vs.livefeed.choice${instance ? `.${instance}` : ''}`, { channel: CHANNELS[0]!.id });
   const choice = readChoice(stored);
   const [muted, setMuted] = useState(true);
-  const [paused, setPaused] = useState(false);
   const [draft, setDraft] = useState(choice && 'custom' in choice ? choice.custom : '');
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,6 +130,8 @@ export function LiveFeed({ instance }: {
   const [full, setFull] = useState(false);
   const [awake, setAwake] = useState(false);
   const idle = useRef<number | null>(null);
+  const holding = useRef(false);
+  const click = useRef<number | null>(null);
 
   const picked = streamOf(choice);
   // A channel plays its stream on air: the server reads which video that is (/api/vs/live).
@@ -76,61 +146,96 @@ export function LiveFeed({ instance }: {
   const src = stream
     ? embedUrl(stream, { muted: yt ? true : muted, host: window.location.hostname, origin: window.location.origin })
     : null;
+  const player = useYouTube(frame, src, yt);
 
   // Room above a 16:9 picture for the header: it stays, and the picture takes exactly 16:9.
   const docked = !!src && !full && size.w > 0 && size.h - HEAD >= (size.w * 9) / 16 - 2;
   const pic = docked ? { w: size.w, h: Math.round((size.w * 9) / 16) } : null;
+  const video = fitVideo(pic?.w ?? size.w, pic?.h ?? size.h);
+  const band = playerBand(video.h);
+
+  // What the player does, once it has said so; until then it is taken to autoplay.
+  const playing = player.state === null || player.state === YT.playing || player.state === YT.buffering;
+  const isMuted = yt ? player.muted ?? muted : muted;
+  const [stalled, setStalled] = useState(false);
+  const notStarted = player.state === null || player.state === YT.unstarted || player.state === YT.cued;
+  useEffect(() => {
+    setStalled(false);
+    if (!yt || !player.ready || !notStarted) return;
+    const t = window.setTimeout(() => setStalled(true), STALL_MS);
+    return () => window.clearTimeout(t);
+  }, [yt, player.ready, notStarted]);
+  const covered = yt && player.ready && (player.state === YT.paused || player.state === YT.ended || stalled);
 
   useEffect(() => {
     const on = () => setFull(document.fullscreenElement === box.current);
     document.addEventListener('fullscreenchange', on);
     return () => document.removeEventListener('fullscreenchange', on);
   }, [box]);
-  // A new stream starts muted and playing again.
+  // A new stream starts muted.
   const streamKey = stream ? JSON.stringify(stream) : '';
-  useEffect(() => {
-    setMuted(true);
-    setPaused(false);
-  }, [streamKey]);
+  useEffect(() => setMuted(true), [streamKey]);
 
-  const command = useCallback((func: string, args: unknown[] = []) => {
-    frame.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args }), 'https://www.youtube.com');
-  }, []);
-  /* Captions off: YouTube turns them on for a muted video. The player takes commands
-     once it has started, so the command goes again for the first few seconds. */
-  const onFrameLoad = () => {
-    if (!yt) return;
-    for (const ms of [600, 1800, 4000, 8000]) {
-      window.setTimeout(() => {
-        command('unloadModule', ['captions']);
-        command('unloadModule', ['cc']);
-      }, ms);
-    }
-  };
+  // Captions off each time it starts playing: YouTube turns them on for a muted video,
+  // and again when it resumes.
+  const { send } = player;
+  const reallyPlaying = player.state === YT.playing;
+  useEffect(() => {
+    if (!yt || !reallyPlaying) return;
+    const off = () => {
+      send(ytCommand('unloadModule', ['captions']));
+      send(ytCommand('unloadModule', ['cc']));
+    };
+    off();
+    const t = window.setTimeout(off, 1500);
+    return () => window.clearTimeout(t);
+  }, [yt, reallyPlaying, send]);
 
   const wake = () => {
     setAwake(true);
     if (idle.current !== null) window.clearTimeout(idle.current);
-    idle.current = window.setTimeout(() => setAwake(false), IDLE_MS);
+    // Resting on the controls keeps them: a click there never lands on a picture whose controls just left.
+    idle.current = holding.current ? null : window.setTimeout(() => setAwake(false), IDLE_MS);
   };
-  useEffect(() => () => { if (idle.current !== null) window.clearTimeout(idle.current); }, []);
+  useEffect(() => () => {
+    if (idle.current !== null) window.clearTimeout(idle.current);
+    if (click.current !== null) window.clearTimeout(click.current);
+  }, []);
+  const hold = (on: boolean) => {
+    holding.current = on;
+    wake();
+  };
 
-  const toggleMute = () => {
-    const next = !muted;
-    setMuted(next);
-    if (yt) {
-      command(next ? 'mute' : 'unMute');
-      if (!next) command('playVideo');
-    }
+  const setPlaying = (next: boolean) => {
+    player.assume({ state: next ? YT.playing : YT.paused });
+    setStalled(false);
+    send(ytCommand(next ? 'playVideo' : 'pauseVideo'));
   };
-  const togglePlay = () => {
-    const next = !paused;
-    setPaused(next);
-    command(next ? 'pauseVideo' : 'playVideo');
+  const toggleMute = () => {
+    const next = !isMuted;
+    setMuted(next);
+    if (!yt) return;
+    player.assume({ muted: next });
+    send(ytCommand(next ? 'mute' : 'unMute'));
+    // A browser may stop a video that is unmuted from outside; a playing one goes on playing.
+    if (!next && playing) send(ytCommand('playVideo'));
   };
   const toggleFull = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void box.current?.requestFullscreen?.();
+  };
+  // One click on the picture pauses or plays; a double click is fullscreen only.
+  const onPicClick = () => {
+    if (click.current !== null) window.clearTimeout(click.current);
+    click.current = window.setTimeout(() => {
+      click.current = null;
+      setPlaying(!playing);
+    }, CLICK_MS);
+  };
+  const onPicDouble = () => {
+    if (click.current !== null) window.clearTimeout(click.current);
+    click.current = null;
+    toggleFull();
   };
   const pick = (v: string) => {
     if (!v) return;
@@ -189,14 +294,29 @@ export function LiveFeed({ instance }: {
       )}
       <span className="lf__gap" />
       {stream && yt && (
-        <Btn label={paused ? 'Play' : 'Pause'} onClick={togglePlay}>{paused ? <IconPlay /> : <IconPause />}</Btn>
+        <Btn label={playing ? 'Pause' : 'Play'} onClick={() => setPlaying(!playing)}>{playing ? <IconPause /> : <IconPlay />}</Btn>
       )}
       {stream && (
-        <Btn label={muted ? 'Unmute' : 'Mute'} pressed={!muted} onClick={toggleMute}>{muted ? <IconMuted /> : <IconSound />}</Btn>
+        <Btn label={isMuted ? 'Unmute' : 'Mute'} pressed={!isMuted} onClick={toggleMute}>{isMuted ? <IconMuted /> : <IconSound />}</Btn>
       )}
       <Btn label={full ? 'Leave fullscreen' : 'Fullscreen'} onClick={toggleFull}>{full ? <IconShrink /> : <IconExpand />}</Btn>
       {choice && <Btn label="Clear the live feed" onClick={() => { setStored(null); setEditing(false); }}><IconClear /></Btn>}
     </>
+  );
+
+  const iframe = (cls: string, style?: CSSProperties) => src && (
+    <iframe
+      key={src}
+      ref={frame}
+      className={cls}
+      style={style}
+      src={src}
+      title="Live feed"
+      allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+      allowFullScreen
+      referrerPolicy="strict-origin-when-cross-origin"
+      onLoad={player.onLoad}
+    />
   );
 
   return (
@@ -205,24 +325,25 @@ export function LiveFeed({ instance }: {
       className={`lf${src ? '' : ' is-empty'}${editing ? ' is-editing' : ''}${docked ? ' is-docked' : ''}${awake ? ' is-awake' : ''}`}
       onPointerMove={wake}
       onPointerEnter={wake}
-      onPointerLeave={() => setAwake(false)}
+      onPointerLeave={() => { holding.current = false; setAwake(false); }}
     >
       {docked && <div className="lf__head">{controls}</div>}
       {src ? (
         <div className="lf__pic" style={pic ? { width: pic.w, height: pic.h } : undefined}>
-          <iframe
-            key={src}
-            ref={frame}
-            className="lf__frame"
-            src={src}
-            title="Live feed"
-            allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
-            allowFullScreen
-            referrerPolicy="strict-origin-when-cross-origin"
-            onLoad={onFrameLoad}
-          />
-          {/* YouTube under a layer: its own hover controls never show; the widget's do. */}
-          {yt && <div className="lf__shield" onDoubleClick={toggleFull} onClick={togglePlay} aria-hidden="true" />}
+          {yt ? (
+            <div className="lf__vid" style={{ left: video.x, top: video.y, width: video.w, height: video.h }}>
+              {iframe('lf__frame lf__frame--yt', { top: -band, height: video.h + 2 * band })}
+              {/* YouTube under a layer: its own hover controls never show; the widget's do. */}
+              <div className="lf__shield" onClick={onPicClick} onDoubleClick={onPicDouble} aria-hidden="true" />
+              {covered && (
+                <button type="button" className="lf__cover" onClick={() => setPlaying(true)} aria-label="Play">
+                  <span className="lf__big"><IconPlay /></span>
+                </button>
+              )}
+            </div>
+          ) : (
+            iframe('lf__frame')
+          )}
         </div>
       ) : lookingUp ? (
         <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Finding the stream…</p>
@@ -231,7 +352,11 @@ export function LiveFeed({ instance }: {
       ) : (
         <EmptyState icon="news" title="No live feed" line="Pick a news channel, or paste a YouTube, Twitch, Kick or Vimeo link." />
       )}
-      {!docked && <div className="lf__bar">{controls}</div>}
+      {!docked && (
+        <div className="lf__bar" onPointerEnter={() => hold(true)} onPointerLeave={() => hold(false)}>
+          {controls}
+        </div>
+      )}
       {error && <p className="lf__err" role="alert">{error}</p>}
     </div>
   );

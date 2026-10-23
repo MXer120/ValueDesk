@@ -21,7 +21,45 @@
 .lf__pic { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; background: #000; }
 .lf.is-docked .lf__pic { flex: none; border-radius: 0 0 var(--radius-card) var(--radius-card); overflow: hidden; }
 .lf__frame { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; }
+/* A YouTube player: clipped to its 16:9 picture, and taller than it (top and height
+   inline, ytPlayer.ts playerBand) so its title bar, logo and "More videos" sit on
+   letterbox bars outside the clip. */
+.lf__vid { position: absolute; overflow: hidden; background: #000; }
+.lf__frame--yt { bottom: auto; }
 .lf__shield { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
+/* Paused, or held up before it starts: the widget's own play button over a blurred
+   picture, where YouTube would show its big button and suggestions. */
+.lf__cover {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(18px) saturate(0.8);
+  backdrop-filter: blur(18px) saturate(0.8);
+  color: #fff;
+  cursor: pointer;
+  animation: lf-fade 160ms ease-out;
+}
+.lf__big {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  transition: transform 140ms, background 140ms;
+}
+.lf__big svg { width: 24px; height: 24px; margin-left: 2px; }
+.lf__cover:hover .lf__big { transform: scale(1.06); background: rgba(255, 255, 255, 0.2); }
+.lf__cover:focus-visible { outline: none; }
+.lf__cover:focus-visible .lf__big { box-shadow: 0 0 0 2px var(--text); }
+@keyframes lf-fade { from { opacity: 0; } }
 .lf.is-empty { align-items: center; justify-content: center; }
 
 .lf__head,
@@ -30,15 +68,18 @@
 .lf__bar {
   position: absolute;
   inset: 0 0 auto 0;
-  z-index: 2;
+  z-index: 3;
   background: linear-gradient(rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
   opacity: 0;
   transform: translateY(-4px);
   transition: opacity 180ms, transform 180ms;
   pointer-events: none;
 }
+/* Shown while the pointer moves or rests on them, while the keyboard is in them (not
+   after a click: a clicked button keeps focus), or with nothing to play. */
 .lf.is-awake .lf__bar,
-.lf:focus-within .lf__bar,
+.lf__bar:has(:focus-visible),
+.lf__bar:has([aria-expanded="true"]),
 .lf.is-empty .lf__bar,
 .lf.is-editing .lf__bar { opacity: 1; transform: none; pointer-events: auto; }
 .lf.is-empty .lf__bar { background: none; }
@@ -115,7 +156,7 @@
   font-size: var(--fs-xs);
 }
 .lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
-.lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 3; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
+.lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 4; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
 @media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }
 
