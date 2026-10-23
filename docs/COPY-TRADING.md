@@ -22,7 +22,14 @@ and the signed API contract (`api.ts`). The executor is `apps/executor` (MIT):
 `node:http`, `node:sqlite`, no framework. The web side is `apps/web/src/copy/`
 (`live.ts` is the store over the three modes, `browserCopier.ts` mode 1,
 `executor.ts` the API client, `sodexSetup.ts` the SoDEX signatures,
-`CopySetupSheet.tsx` the setup sheet) and the Copy page panels.
+`CopySetupSheet.tsx` the setup sheet and its steps) and the Copy page in
+`apps/web/src/components/copy/`: the trader grid (`Discover.tsx`, `TraderCard.tsx`,
+`gridModel.ts`) with the copy score (`copyScore.ts`: 30 profit, 25 return, 20 win
+rate, 15 account size, 10 track record, from the public board figures; a losing
+trader at most 35; shown with "not a recommendation"), the two-step copy dialog
+(`CopyModal.tsx`: rules with a replay of the trader's fills, then where it runs,
+the amount and the mode's signatures), one trader's page and My copies
+(`panels.tsx`).
 
 ### What a copy does
 

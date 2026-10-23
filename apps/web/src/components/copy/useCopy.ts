@@ -1,16 +1,17 @@
 /**
  * Everything the Copy page's panels read, in one context object.
  *
- * Same seam as usePortfolioContext / usePointsContext: the dashboard renders
- * panels as pure functions of this object, and all fetching and state lives
- * here. The trader data is /api/vs/* public reads; live copying is
- * copy/live.ts, where every change is the follower's own signature.
+ * Same seam as usePortfolioContext / usePointsContext: the page and its
+ * panels render as pure functions of this object, and all fetching and state
+ * lives here (the trader grid's boards are Discover.tsx's own). The trader
+ * data is /api/vs/* public reads; live copying is copy/live.ts, where every
+ * change is the follower's own signature.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStored } from '../../hooks';
 import { logLoadFailure, useLoadFailedToast } from '../LoadFailed';
 import {
-  vsApi, VsError, type TraderProfile, type TraderRow, type Venue, type VsFill, type Window,
+  vsApi, VsError, type TraderProfile, type Venue, type VsFill, type Window,
 } from '../../vsApi';
 import type { Eip1193Provider } from '../../wallet';
 import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim';
@@ -31,8 +32,6 @@ import {
  * capped answer is still contiguous up to now.
  */
 export const FILL_LIMIT = 5_000;
-/** Rows in the pick list. */
-export const PICK_ROWS = 8;
 
 /* ---------------------------------------------------------------- load ----- */
 
@@ -127,9 +126,6 @@ export interface CopyContext {
   leader: string | null;
   selectLeader: (address: string | null, venue?: Venue) => void;
 
-  query: string;
-  setQuery: (q: string) => void;
-  board: Load<{ rows: TraderRow[]; source: string; updatedAt: number }>;
 
   profile: Load<TraderProfile | null>;
   fills: Load<VsFill[]>;
@@ -168,8 +164,6 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
   const initial = useMemo(() => readTarget(window.location.search, storedVenue), []); // eslint-disable-line react-hooks/exhaustive-deps
   const [venue, setVenueState] = useState<Venue>(initial.venue);
   const [leader, setLeader] = useState<string | null>(initial.address);
-  const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
   const [win, setWindow] = useStored<Window>('vs.copy.window', '30d');
   const [stored, setStored] = useStored<SetupState>('vs.copy.setup', DEFAULT_SETUP);
   const setup = useMemo(() => normaliseSetup(stored), [stored]);
@@ -210,20 +204,6 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     writeUrl(next, nv);
   }, [venue, setStoredVenue, writeUrl]);
 
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(query.trim()), 300);
-    return () => window.clearTimeout(t);
-  }, [query]);
-
-  /* A full address in the box is a selection, not a search. */
-  const boardQuery = isAddress(debounced) ? '' : debounced;
-
-  const board = useLoad(
-    `${venue}|${boardQuery}`,
-    (signal) => vsApi
-      .leaderboard({ venue, window: '30d', sort: 'pnl', limit: PICK_ROWS, q: boardQuery || undefined }, signal)
-      .then((b) => ({ rows: b.rows, source: b.source, updatedAt: b.updatedAt })),
-  );
   const profile = useLoad(leader ? `${venue}|${leader}` : null, (signal) => vsApi.trader(venue, leader!, signal));
 
   /*
@@ -247,7 +227,6 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
   const fills = useLoad(fillsKey, (signal) =>
     vsApi.fills(venue, leader!, { from: from ?? undefined, limit: FILL_LIMIT }, signal));
 
-  useFailureToast(board, 'Top traders');
   useFailureToast(profile, 'Trader profile');
   useFailureToast(fills, 'Fills');
 
@@ -344,9 +323,6 @@ export function useCopyContext({ address, provider, onScan }: CopyPageProps): Co
     setVenue,
     leader,
     selectLeader,
-    query,
-    setQuery,
-    board,
     profile,
     fills,
     window: win,

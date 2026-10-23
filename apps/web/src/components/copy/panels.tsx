@@ -1,10 +1,12 @@
 /**
- * The Copy page's panels. Ids are permanent - they key the saved layout.
+ * The Copy page's panels: one trader (profile, replay, open positions) and My
+ * copies (every copy, its activity, the replay's trades). CopyPage.tsx lays
+ * them out; the trader grid and the copy dialog are Discover.tsx and
+ * CopyModal.tsx.
  *
- * Built from the design system the portfolio exports (Card, Group, Row, Stat)
- * and the order ticket's field classes (.oe-*), inside the `pf` scope the
- * dashboard root carries. Nothing here draws a style of its own that an
- * existing Valuetrade surface already has.
+ * Built from the design system the portfolio exports (Card, Group, Row, Stat),
+ * inside the `pf` scope CopyPage gives them. Nothing here draws a style of its
+ * own that an existing Valuetrade surface already has.
  *
  * HONESTY RULES this file keeps:
  *  - "Start copying" starts a real copy (or a paper one, labelled paper
@@ -16,34 +18,25 @@
  *  - Traders are shown by public, objective numbers, the same for everyone:
  *    nothing here recommends a trader to anyone.
  */
-import { useEffect, useId, useState, type ReactNode } from 'react';
-import { COPY_FEE_LADDER, SKIP_REASONS, feePercent, type ActivityEntry, type CopyView } from '@copy-engine';
+import { useEffect, useState, type ReactNode } from 'react';
+import { SKIP_REASONS, type ActivityEntry, type CopyView } from '@copy-engine';
 import { MODE_LABEL } from '../../copy/CopySetupSheet';
-import { commandCopy, copyActivity, copyRows, readiness, stopAllCopies, type CopyModeId, type CopyRow } from '../../copy/live';
+import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow } from '../../copy/live';
 import { notify, notifyError } from '../../toast';
 import { useConfirm } from '../Modal';
 import { DASH, fmt, fmtUsd, shortAddr, signClass } from '../../format';
 import { winRateView } from '../../winRateView';
 import { VENUE_LABEL, type TraderRow, type Venue, type VsPosition, type Window } from '../../vsApi';
-import type { PanelDefinition } from '../../dashboard';
 import { PanelTabs } from '../../dashboard/Panel';
 import { Card, Group, Row, Stat } from '../portfolio/parts';
 import { LoadFailed } from '../LoadFailed';
 import { EquityChart } from './EquityChart';
 import { CoinLabel } from '../CoinIcon';
-import { coinOf, skipReasonLabel, type SimResult, type SimTrade } from './sim';
-import {
-  BACKTEST_WINDOWS, MIN_ORDER_USD, COPY_BUILDER_TENTHS_BPS, SIZING_MODES, TAKER_RATE, WINDOW_LABEL,
-  fmtRate, fmtSignedPct, fmtSignedUsd, fmtSize, isAddress, workedExample, type SetupField, type SetupState,
-} from './setup';
+import { skipReasonLabel, type SimResult, type SimTrade } from './sim';
+import { BACKTEST_WINDOWS, WINDOW_LABEL, fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import { FILL_LIMIT, type CopyContext, type Load } from './useCopy';
 
 /* ------------------------------------------------------------ helpers ----- */
-
-const VENUES: ReadonlyArray<{ v: Venue; label: string }> = [
-  { v: 'sodex', label: VENUE_LABEL.sodex },
-  { v: 'hyperliquid', label: VENUE_LABEL.hyperliquid },
-];
 
 /**
  * The portfolio's segmented control (`.pf-seg` / `.pf-ctl`), typed for any
@@ -112,79 +105,9 @@ function loadNote(l: Load<unknown>, venue: Venue, what: string, plural: string):
   return <LoadFailed what={what} onRetry={l.reload} />;
 }
 
-/* ============================================================ traders ===== */
-
-function TradersPanel({ c }: { c: CopyContext }) {
-  const q = c.query.trim();
-  const pasted = isAddress(q);
-  const rows = c.board.data?.rows ?? [];
-
-  return (
-    <Card title="Traders" action={<Seg value={c.venue} options={VENUES} onChange={c.setVenue} label="Venue" />}>
-      <div className="scan-addr">
-        <input
-          value={c.query}
-          onChange={(e) => c.setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && pasted) c.selectLeader(q); }}
-          placeholder="0x… address, or search a name"
-          aria-label="Trader address or name"
-          spellCheck={false}
-        />
-        <button type="button" className="pf-btn" disabled={!pasted} onClick={() => c.selectLeader(q)}>
-          Load
-        </button>
-      </div>
-
-      <Group
-        title={q && !pasted ? `Matching “${q}”` : `Top ${VENUE_LABEL[c.venue]} traders · 30D PnL`}
-        action={c.board.loading ? <span className="pf-unit">Loading…</span> : undefined}
-      >
-        {c.board.error ? loadNote(c.board, c.venue, 'Rankings', 'rankings') : rows.length === 0 && !c.board.loading ? (
-          <p className="pf-note">{q && !pasted ? 'No trader matches that.' : 'No ranked traders.'}</p>
-        ) : (
-          <div className="acct">
-            <table className="acct-table copy-pick">
-              <thead>
-                <tr>
-                  <th>Trader</th>
-                  <th className="num">PnL</th>
-                  <th className="num">ROI</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => {
-                  const on = r.address.toLowerCase() === c.leader;
-                  const pnl = r.pnl['30d'] ?? null;
-                  const roi = r.roi['30d'] ?? null;
-                  return (
-                    <tr
-                      key={r.address}
-                      className={on ? 'is-on' : undefined}
-                      tabIndex={0}
-                      aria-selected={on}
-                      title={r.address}
-                      onClick={() => c.selectLeader(r.address)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); c.selectLeader(r.address); } }}
-                    >
-                      <td><span className="copy-addr">{nameOf(r)}</span></td>
-                      <td className={`num ${signClass(pnl)}`}>{pnl === null ? DASH : fmtSignedUsd(pnl, 0)}</td>
-                      <td className={`num ${signClass(roi)}`}>{fmtSignedPct(roi, 1)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Group>
-      {c.board.data?.source && <p className="pf-note">Source: {c.board.data.source}.</p>}
-    </Card>
-  );
-}
-
 /* ============================================================= trader ===== */
 
-function TraderPanel({ c }: { c: CopyContext }) {
+export function TraderPanel({ c }: { c: CopyContext }) {
   if (!c.leader) {
     return (
       <Card title="Trader">
@@ -242,7 +165,7 @@ function TraderPanel({ c }: { c: CopyContext }) {
 
 /* ========================================================== positions ===== */
 
-function PositionsPanel({ c }: { c: CopyContext }) {
+export function PositionsPanel({ c }: { c: CopyContext }) {
   const positions = c.profile.data?.positions ?? [];
   const total = positions.reduce((a, p) => a + Math.abs(p.notional), 0);
   return (
@@ -298,210 +221,9 @@ function PositionRow({ p }: { p: VsPosition }) {
   );
 }
 
-/* ============================================================= setup ====== */
-
-/** One ticket field: the label inside the box, the value right-aligned, a unit after it. */
-function Field({ id, label, value, onChange, suffix, placeholder, error, mode = 'decimal' }: {
-  id: string;
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  suffix?: string;
-  placeholder?: string;
-  error?: string;
-  mode?: 'decimal' | 'text';
-}) {
-  return (
-    <div className={`oe-inputrow${error ? ' copy-invalid' : ''}`} title={error}>
-      <label className="oe-inlabel" htmlFor={id}>{label}</label>
-      <input
-        id={id}
-        className="oe-input"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        inputMode={mode === 'decimal' ? 'decimal' : undefined}
-        placeholder={placeholder}
-        spellCheck={false}
-        aria-invalid={error ? true : undefined}
-      />
-      {suffix && <span className="oe-suffix">{suffix}</span>}
-    </div>
-  );
-}
-
-function SetupPanel({ c }: { c: CopyContext }) {
-  const uid = useId().replace(/:/g, '');
-  const { setup, parsed } = c;
-  const errs = parsed.errors;
-  const set = (k: SetupField) => (v: string) => c.patchSetup({ [k]: v } as Partial<SetupState>);
-  const taker = TAKER_RATE[c.venue];
-  const builder = COPY_BUILDER_TENTHS_BPS / 100_000;
-  const s = c.profile.data?.summary ?? null;
-  const example = workedExample(parsed, c.profile.data ?? null, (sym) => coinOf(c.venue, sym));
-  const errorList = Object.values(errs);
-  const canStart = !!c.leader && errorList.length === 0 && !!c.copySettings;
-  const [starting, setStarting] = useState(false);
-  const ready = readiness(c.live, c.runOn);
-  const missing = [
-    !ready.terms && 'accept the terms',
-    !ready.connected && (c.runOn === 'self' ? 'connect your copier' : 'sign in'),
-    !setup.paper && !ready.fee && 'approve the copy fee',
-    !setup.paper && !ready.key && 'approve a copy key',
-  ].filter(Boolean).join(', ');
-
-  return (
-    <Card
-      title="Copy setup"
-      action={<button type="button" className="pf-ctl" onClick={c.resetSetup} title="Back to the default setup">Reset</button>}
-    >
-      <div className="oe copy-ticket">
-        <dl className="oe-facts">
-          <div className="oe-facts__row">
-            <dt>Copying</dt>
-            <dd className={c.leader ? '' : 'is-dim'}>
-              {c.leader ? `${nameOf({ address: c.leader })} · ${VENUE_LABEL[c.venue]}` : 'No trader picked'}
-            </dd>
-          </div>
-          <div className="oe-facts__row">
-            <dt>Leader equity</dt>
-            <dd className={s?.accountValue == null ? 'is-dim' : ''}>{s?.accountValue == null ? DASH : fmtUsd(s.accountValue, 0)}</dd>
-          </div>
-        </dl>
-
-        <Field id={`${uid}-alloc`} label="Allocation" value={setup.allocation} onChange={set('allocation')} suffix="USDC" placeholder="1,000" error={errs.allocation} />
-
-        <Group title="Sizing">
-          <Seg value={setup.mode} options={SIZING_MODES} onChange={(m) => c.patchSetup({ mode: m })} label="Sizing mode" />
-          {setup.mode === 'fixedRatio' && (
-            <Field id={`${uid}-ratio`} label="Size" value={setup.ratioPct} onChange={set('ratioPct')} suffix="% of leader" error={errs.ratioPct} />
-          )}
-          {setup.mode === 'fixedNotional' && (
-            <Field id={`${uid}-notional`} label="Per trade" value={setup.notional} onChange={set('notional')} suffix="USDC" error={errs.notional} />
-          )}
-          <p className="oe-hint copy-example">
-            {example ? example.text
-              : c.leader && c.profile.data ? 'The leader is flat right now, so there is no position to size against.'
-              : SIZING_MODES.find((m) => m.v === setup.mode)?.hint}
-            {example?.caveat && <span className="copy-caveat"> {example.caveat}</span>}
-          </p>
-        </Group>
-
-        <Group title="Risk">
-          <div className="oe-exitgrid">
-            <Field id={`${uid}-lev`} label="Max leverage" value={setup.maxLeverage} onChange={set('maxLeverage')} suffix="x" error={errs.maxLeverage} />
-            <Field id={`${uid}-maxpos`} label="Max position" value={setup.maxPosition} onChange={set('maxPosition')} suffix="USDC" error={errs.maxPosition} />
-            <Field id={`${uid}-sl`} label="Stop loss" value={setup.stopLoss} onChange={set('stopLoss')} suffix="%" placeholder="off" error={errs.stopLoss} />
-            <Field id={`${uid}-tp`} label="Take profit" value={setup.takeProfit} onChange={set('takeProfit')} suffix="%" placeholder="off" error={errs.takeProfit} />
-            <Field id={`${uid}-dd`} label="Drawdown stop" value={setup.drawdown} onChange={set('drawdown')} suffix="%" placeholder="off" error={errs.drawdown} />
-            <Field id={`${uid}-slip`} label="Slippage cap" value={setup.slippageBps} onChange={set('slippageBps')} suffix="bps" error={errs.slippageBps} />
-          </div>
-          <p className="oe-hint copy-hint">
-            Stop loss and take profit are a percent of the copied position's margin at your max leverage.
-            The drawdown stop closes everything and stops the copy when your equity falls that far from its peak.
-          </p>
-          <div className="copy-coins">
-            <Field id={`${uid}-allow`} label="Only copy" value={setup.allow} onChange={set('allow')} mode="text" placeholder="all coins" error={errs.allow} />
-            <Field id={`${uid}-deny`} label="Never copy" value={setup.deny} onChange={set('deny')} mode="text" placeholder="none" error={errs.deny} />
-          </div>
-          <div className="oe-opts copy-opts">
-            <label className="oe-check">
-              <input type="checkbox" checked={setup.copyExisting} onChange={(e) => c.patchSetup({ copyExisting: e.target.checked })} />
-              Copy positions the leader already holds
-            </label>
-            <label className="oe-check" title="Isolated: each copied position has its own margin, so one cannot drain the others.">
-              <input type="checkbox" checked={setup.marginMode === 'isolated'} onChange={(e) => c.patchSetup({ marginMode: e.target.checked ? 'isolated' : 'cross' })} />
-              Isolated margin per copied position
-            </label>
-            {c.runOn === 'browser' && (
-              <label className="oe-check" title="Every copied order waits for your yes in this tab (60 seconds).">
-                <input type="checkbox" checked={setup.confirmEach} onChange={(e) => c.patchSetup({ confirmEach: e.target.checked })} />
-                Ask me before each copied trade
-              </label>
-            )}
-            <label className="oe-check" title="Runs against the leader's live trades and keeps books, but sends nothing to SoDEX.">
-              <input type="checkbox" checked={setup.paper} onChange={(e) => c.patchSetup({ paper: e.target.checked })} />
-              Paper copy (nothing is sent)
-            </label>
-          </div>
-        </Group>
-
-        <Group title="Runs on">
-          <div className="copy-runon">
-            <Seg value={c.runOn} options={RUN_ON} onChange={(m) => c.setRunOn(m)} label="Where the copier runs" />
-            <span className={`copy-ready${ready.ready ? ' is-ok' : ''}`}>
-              {!c.wallet ? 'Connect a wallet to set up copying.' : ready.ready ? `${MODE_LABEL[c.runOn]} is set up.` : `${MODE_LABEL[c.runOn]}: ${missing}.`}{' '}
-              <button type="button" className="fx-link" onClick={() => c.openSetup(false)}>{ready.ready ? 'Manage' : 'Set up'}</button>
-            </span>
-            {c.runOn === 'browser' && <span className="copy-ready">Copies only while a ValueDesk tab is open in this browser.</span>}
-          </div>
-        </Group>
-
-        <Group title="Fees">
-          <dl className="oe-out copy-fees">
-            <div className="oe-out__row">
-              <dt className="oe-out__k" title="SoDEX's published base-tier perps taker fee. Copied orders are IOC, so they take.">
-                Taker fee <span className="oe-tag">SoDEX, base tier</span>
-              </dt>
-              <dd className="oe-out__v">{fmtRate(taker)}</dd>
-            </div>
-            <div className="oe-out__row">
-              <dt className="oe-out__k" title={`The ValueDesk copy fee on every copied order (opens, adds, reductions, closes), by your 14-day volume: ${COPY_FEE_LADDER.map((s) => `${feePercent(s.fee)}${s.fromUsd ? ` from $${s.fromUsd.toLocaleString('en-US')}` : ''}`).join(', ')}. SoDEX charges it.`}>
-                Copy fee <span className="oe-tag">every copied order</span>
-              </dt>
-              <dd className="oe-out__v">{setup.paper ? fmtRate(0) : `${fmtRate(builder)} max`}</dd>
-            </div>
-            <div className="oe-out__row">
-              <dt className="oe-out__k" title="Taker and copy fee in and out. Slippage is extra.">
-                Round trip <span className="oe-tag">est.</span>
-              </dt>
-              <dd className="oe-out__v">{fmtRate(taker * 2 + (setup.paper ? 0 : builder * 2))}</dd>
-            </div>
-            <div className="oe-out__row">
-              <dt className="oe-out__k" title="The ceiling you approve on SoDEX for ValueDesk's builder fee. You can revoke it any time.">
-                Approval cap
-              </dt>
-              <dd className="oe-out__v">{fmtRate(builder)}</dd>
-            </div>
-          </dl>
-        </Group>
-
-        {(errorList.length > 0 || c.copyErrors.length > 0) && <p className="oe-note copy-errors">{(errorList.length ? errorList : c.copyErrors).join(' ')}</p>}
-
-        <button
-          type="button"
-          className="pf-btn pf-btn--primary pf-btn--wide"
-          disabled={!canStart || starting}
-          title={!c.leader ? 'Pick a trader first' : errorList.length ? 'Fix the setup first' : undefined}
-          onClick={() => {
-            setStarting(true);
-            c.startCopy()
-              .then((started) => {
-                if (started) notify('ok', setup.paper ? 'Paper copy started.' : 'Copying started.');
-              })
-              .catch((e) => notifyError('Start copying', e))
-              .finally(() => setStarting(false));
-          }}
-        >
-          {starting ? 'Starting…' : setup.paper ? 'Start paper copy' : 'Start copying'}
-        </button>
-        <p className="pf-note">
-          You choose the trader and every rule. Copies trade in your own SoDEX account; ValueDesk never holds your funds.
-          Not investment advice: past results do not predict future ones. <a className="fx-link" href="/copy-terms">Copy terms and risks</a>.
-        </p>
-      </div>
-    </Card>
-  );
-}
-
-const RUN_ON: ReadonlyArray<{ v: CopyModeId; label: string; hint: string }> = [
-  { v: 'browser', label: 'This browser', hint: 'Copies while this tab is open. The key stays in this browser.' },
-  { v: 'hosted', label: 'ValueDesk', hint: 'Copies around the clock from ValueDesk’s executor in Tokyo.' },
-  { v: 'self', label: 'Self-hosted', hint: 'Copies from a copier you run yourself.' },
-];
-
 /* ========================================================== backtest ====== */
 
-function BacktestPanel({ c }: { c: CopyContext }) {
+export function BacktestPanel({ c }: { c: CopyContext }) {
   const r = c.sim.result;
   const setWindow = (w: Window) => c.setWindow(w);
   const action = <Seg value={c.window} options={BACKTEST_WINDOWS} onChange={setWindow} label="Backtest window" />;
@@ -620,7 +342,7 @@ function BacktestResult({ c, r, action }: { c: CopyContext; r: SimResult; action
 
 /* ============================================================ copies ====== */
 
-function CopiesPanel({ c }: { c: CopyContext }) {
+export function CopiesPanel({ c }: { c: CopyContext }) {
   const trades = c.sim.result?.fills ?? [];
   const rows = copyRows(c.live);
   const running = rows.filter((r) => r.view.subscription.status !== 'stopped');
@@ -965,54 +687,3 @@ function TradeLog({ trades }: { trades: SimTrade[] }) {
     </div>
   );
 }
-
-/* =============================================================== how ====== */
-
-function HowPanel() {
-  return (
-    <Card title="How it works">
-      <div className="copy-how">
-        <Group title="Your funds stay yours">
-          <p>
-            Copies trade on SoDEX perps in your own account. ValueDesk never holds a deposit. A SoDEX or
-            Hyperliquid trader can be followed; every copy is placed on SoDEX.
-          </p>
-        </Group>
-        <Group title="You choose where it runs">
-          <p>
-            <b>This browser</b>: copies while a tab is open, with a key only this browser holds.{' '}
-            <b>ValueDesk executor</b>: around the clock from Tokyo, with a key it holds for you.{' '}
-            <b>Self-hosted</b>: an open-source copier on your own machine. Same engine in all three.
-          </p>
-        </Group>
-        <Group title="Your rules, your signatures">
-          <p>
-            You pick the trader and every limit. Each step (terms, fee, key, start, stop) is a signature of your
-            wallet; an executor keeps those as the record of your instructions. Copies are IOC limit orders inside
-            your slippage cap; positions open before you start are left alone unless you choose otherwise.
-          </p>
-        </Group>
-        <Group title="Stop at any time">
-          <p>Pause or stop a copy, stop all copies at once, or revoke the copy key on SoDEX - after that nothing can trade with it.</p>
-        </Group>
-        <p className="pf-note">
-          Copy fee up to {fmtRate(COPY_BUILDER_TENTHS_BPS / 100_000)} on every copied order (lower with volume), on top of
-          SoDEX's own fees. Minimum copied order {fmtUsd(MIN_ORDER_USD, 0)}. In the EU and EEA copies are limited to 2x leverage.
-          Not available in the US or sanctioned countries.
-        </p>
-      </div>
-    </Card>
-  );
-}
-
-/* ============================================================ registry ==== */
-
-export const COPY_PANELS: Array<PanelDefinition<CopyContext>> = [
-  { id: 'traders', title: 'Traders', pad: false, minW: 8, minH: 6, render: (c) => <TradersPanel c={c} /> },
-  { id: 'trader', title: 'Trader', pad: false, minW: 8, minH: 5, render: (c) => <TraderPanel c={c} /> },
-  { id: 'backtest', title: 'Backtest', pad: false, minW: 12, minH: 10, render: (c) => <BacktestPanel c={c} /> },
-  { id: 'positions', title: 'Leader positions', pad: false, minW: 12, minH: 4, render: (c) => <PositionsPanel c={c} /> },
-  { id: 'setup', title: 'Copy setup', pad: false, minW: 8, minH: 12, render: (c) => <SetupPanel c={c} /> },
-  { id: 'copies', title: 'My copies', pad: false, minW: 12, minH: 5, render: (c) => <CopiesPanel c={c} /> },
-  { id: 'how', title: 'How it works', pad: false, minW: 8, minH: 5, render: () => <HowPanel /> },
-];
