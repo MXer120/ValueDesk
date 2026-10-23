@@ -47,7 +47,7 @@ function useExecutorAlgos(address: string | null): { hosted: AlgoView[]; self: A
   return { ...rows, reload: () => setTick((x) => x + 1) };
 }
 
-const MARK: Record<string, string> = { twap: 'TW', vwap: 'VW', pov: 'PV', iceberg: 'IC', chase: 'CH', scale: 'SC', dca: 'DC', swarm: 'SW', conditional: 'IF', trailing: 'TS' };
+const MARK: Record<string, string> = { twap: 'TW', vwap: 'VW', pov: 'PV', iceberg: 'IC', chase: 'CH', scale: 'SC', dca: 'DC', swarm: 'SW', conditional: 'IF', trailing: 'TS', basket: 'BK', bracket: 'BR' };
 
 const STATUS_WORD: Record<string, string> = {
   scheduled: 'Scheduled', running: 'Running', waiting: 'Held', paused: 'Paused', done: 'Done', cancelled: 'Cancelled', expired: 'Ended', failed: 'Failed',
@@ -128,13 +128,19 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
   const sideWord = s.side === 'buy' ? 'Buy' : 'Sell';
   const target = v.target;
   const now = Date.now();
+  // A basket fills in its legs, on several markets: its progress is in USD.
+  const basket = s.kind === 'basket' ? { done: (v.legs ?? []).reduce((x, l) => x + l.filledValue, 0), total: s.legs.reduce((x, l) => x + l.usd, 0) } : null;
   return (
     <article className={`algo-card is-${s.side}`}>
       <button type="button" className="algo-card__head" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
         <span className="algo-card__mark" aria-hidden="true">{MARK[s.kind] ?? '··'}</span>
         <span className="algo-card__name">
           <b>
-            {ALGO_NAMES[s.kind]} <span className="algo-card__dir">{sideWord}</span> {base}
+            {s.kind === 'basket' ? (
+              <>{ALGO_NAMES[s.kind]} · {s.legs.length} markets</>
+            ) : (
+              <>{ALGO_NAMES[s.kind]} <span className="algo-card__dir">{sideWord}</span> {base}</>
+            )}
             {s.paper ? ' · paper' : ''}
             {place !== 'browser' ? ` · ${PLACE_WORD[place]}` : ''}
           </b>
@@ -145,10 +151,16 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
             <i style={{ width: `${pct}%` }} />
           </span>
           <span className="algo-card__nums">
-            <span>
-              <b>{fmtQ(a.filled)}</b>
-              {target !== null ? ` / ${fmtQ(target)}` : ''} {base}
-            </span>
+            {basket ? (
+              <span>
+                <b>{fmtUsd(basket.done, 0)}</b> / {fmtUsd(basket.total, 0)}
+              </span>
+            ) : (
+              <span>
+                <b>{fmtQ(a.filled)}</b>
+                {target !== null ? ` / ${fmtQ(target)}` : ''} {base}
+              </span>
+            )}
             <span>{pct}%</span>
           </span>
         </span>
@@ -219,6 +231,31 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
             <dt>Children</dt>
             <dd>{a.childCount}{a.rejects ? ` · ${a.rejects} refused` : ''}</dd>
           </dl>
+          {v.exits && v.exits.length > 0 && (
+            <ul className="algo-log" aria-label="Exits">
+              {v.exits.map((x, i) => (
+                <li key={`${x.kind}${i}`} className={x.filled > 0 ? 'is-fill' : ''}>
+                  <time>{x.live ? (s.paper ? 'watching' : 'on SoDEX') : x.filled > 0 ? 'filled' : 'gone'}</time>
+                  <span>
+                    {x.kind === 'tp' ? 'Take-profit' : 'Stop-loss'} at {fmtPx(x.price)} for {fmtQ(x.quantity)} {base}
+                    {x.filled > 0 ? ` (filled ${fmtQ(x.filled)})` : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+          {v.legs && v.legs.length > 0 && (
+            <ul className="algo-log" aria-label="Markets">
+              {v.legs.map((l) => (
+                <li key={l.id} className={l.status === 'done' ? 'is-fill' : ''}>
+                  <time>{STATUS_WORD[l.status] ?? l.status}</time>
+                  <span>
+                    {l.side === 'buy' ? 'Long' : 'Short'} {l.symbol}: {l.filledValue > 0 ? `${fmtUsd(l.filledValue, 2)} at ${fmtPx(l.avgPrice)}` : 'nothing filled yet'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {v.conditions && (
             <ul className="algo-log" aria-label="Conditions">
               {v.conditions.map((c) => (
@@ -239,11 +276,14 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
 export default function AlgoTable({ address }: { address: string | null }) {
   const { role, views: here } = useAlgos(address);
   const remote = useExecutorAlgos(address);
-  const rows: Array<{ v: AlgoView; place: Place }> = [
+  const all: Array<{ v: AlgoView; place: Place }> = [
     ...here.map((v) => ({ v, place: 'browser' as const })),
     ...remote.hosted.map((v) => ({ v, place: 'hosted' as const })),
     ...remote.self.map((v) => ({ v, place: 'self' as const })),
-  ].sort((a, b) => b.v.algo.createdAt - a.v.algo.createdAt);
+  ];
+  // A basket's legs are shown inside the basket's card, not as cards of their own.
+  const baskets = new Set(all.filter((r) => r.v.algo.spec.kind === 'basket').map((r) => r.v.algo.id));
+  const rows = all.filter((r) => !(r.v.algo.parentId && baskets.has(r.v.algo.parentId))).sort((a, b) => b.v.algo.createdAt - a.v.algo.createdAt);
   const isLive = (r: { v: AlgoView }) => !FINAL_STATUSES.has(r.v.algo.status);
   const live = rows.filter(isLive);
   const ended = rows.filter((r) => !isLive(r)).slice(0, 30);
@@ -253,11 +293,11 @@ export default function AlgoTable({ address }: { address: string | null }) {
     remote.reload();
   };
   const views = rows;
-  if (!address) {
+  if (!address && !views.length) {
     return (
       <div className="algos__empty">
         <b>No wallet connected</b>
-        <span>Connect a wallet to run TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional and trailing orders.</span>
+        <span>Connect a wallet to run TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing, bracket and basket orders - or switch on Paper in the ticket to try one without a wallet.</span>
       </div>
     );
   }
@@ -282,7 +322,7 @@ export default function AlgoTable({ address }: { address: string | null }) {
         {!views.length && (
           <div className="algos__empty">
             <b>No algo orders yet</b>
-            <span>Pick Algo in the order ticket: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional or a trailing stop.</span>
+            <span>Pick Algo in the order ticket: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, a trailing stop, a bracket or a basket.</span>
           </div>
         )}
         {live.map((r) => (

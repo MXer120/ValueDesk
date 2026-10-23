@@ -7,9 +7,8 @@
  * loaded already (an algo was started, or the Algos tab opened).
  */
 import { useEffect } from 'react';
-import { FINAL_STATUSES } from '@copy-engine';
 import type { Eip1193Provider } from '../wallet';
-import { isRunnerLoaded, setAlgoProvider } from './algoBus';
+import { algoOwner, isRunnerLoaded, needsRunner, setAlgoProvider } from './algoBus';
 import { openAlgoStore } from './algoStore';
 
 const runner = async () => (await import('./browserAlgos')).browserAlgos;
@@ -19,13 +18,10 @@ export default function AlgoRunner({ address, provider }: { address: string | nu
   useEffect(() => {
     let gone = false;
     void (async () => {
-      const owner = address?.toLowerCase() ?? null;
-      if (!owner) {
-        if (isRunnerLoaded()) await (await runner()).follow(null);
-        return;
-      }
+      // No wallet: the paper book (paper algos started without one).
+      const owner = algoOwner(address);
       if (!isRunnerLoaded()) {
-        const live = (await (await openAlgoStore()).algos()).some((a) => a.owner === owner && !FINAL_STATUSES.has(a.status));
+        const live = (await (await openAlgoStore()).algos()).some((a) => a.owner === owner && needsRunner(a));
         if (gone || !live) return;
       }
       if (!gone) await (await runner()).follow(owner);

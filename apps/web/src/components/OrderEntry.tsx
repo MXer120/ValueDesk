@@ -748,7 +748,7 @@ export function OrderEntry({
   const algoBtnRef = useRef<HTMLButtonElement>(null);
   const algoPopRef = useRef<HTMLDivElement>(null);
   const algoRef = useRef<AlgoTicketHandle>(null);
-  const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true });
+  const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true, walletFree: false, sided: true });
   /**
    * The review's "don't show again" tick, held until the order is actually
    * confirmed. Persisting it on change instead would mean opening the review,
@@ -909,6 +909,9 @@ export function OrderEntry({
 
   /* An algo is sized and valued like a market order (at the last price); its own rules price each child. */
   const isAlgo = type === 'algo';
+  /* A paper algo in this browser signs nothing: no wallet or trading key stands before its Start. */
+  const paperAlgo = isAlgo && algoState.walletFree;
+  const btnGate = paperAlgo ? null : gate;
   /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
   const sizedByAmount = !isAlgo || algoState.needsAmount;
   const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
@@ -1702,7 +1705,7 @@ export function OrderEntry({
               aria-haspopup="listbox"
               aria-expanded={pop === 'algo'}
               className={`oe-tab oe-tab--algo${isAlgo ? ' is-on' : ''}`}
-              title="Algo orders: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing"
+              title="Algo orders: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing, bracket, basket"
               onClick={() => {
                 if (!isAlgo) setType('algo');
                 setPop((p) => (p === 'algo' ? null : 'algo'));
@@ -2205,18 +2208,18 @@ export function OrderEntry({
               (account/useTradeGate.ts) and pressing it does that. */}
           <button
             type="button"
-            className={`oe-side__btn is-${side}${gate?.busy ? ' is-wait' : ''}`}
-            onClick={gate ? gate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
-            disabled={gate ? gate.busy : isAlgo ? !algoState.ready || accountMismatch : !canSend}
-            aria-busy={gate?.busy || busy || undefined}
-            title={gate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
+            className={`oe-side__btn is-${side}${btnGate?.busy ? ' is-wait' : ''}`}
+            onClick={btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            aria-busy={btnGate?.busy || busy || undefined}
+            title={btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
           >
-            {gate
-              ? (gate.approving ? <ApproveLabel /> : gate.label)
+            {btnGate
+              ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)
               : busy
                 ? 'Working…'
                 : isAlgo
-                  ? `${algoState.label} · ${side === 'buy' ? 'Long' : 'Short'}`
+                  ? algoState.sided ? `${algoState.label} · ${side === 'buy' ? 'Long' : 'Short'}` : algoState.label
                   : engine === 'perps'
                     ? (side === 'buy' ? 'Long' : 'Short')
                     : (side === 'buy' ? 'Buy' : 'Sell')}

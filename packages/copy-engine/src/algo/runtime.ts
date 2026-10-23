@@ -1150,7 +1150,7 @@ export class AlgoRuntime {
   private async stepBracket(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'bracket' }>;
     const total = Number(s.quantity);
-    if (!this.live(a).length && this.isDone(a, m)) return this.end(a, 'done', 'Entered; its exits are on SoDEX.');
+    if (!this.live(a).length && this.isDone(a, m)) return this.end(a, 'done', s.paper ? 'Entered; its exits are watched on the paper book.' : 'Entered; its exits are on SoDEX.');
     if (s.entry === 'market') {
       return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: 'taker', slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: 'entry' });
     }
@@ -1554,7 +1554,7 @@ export class AlgoRuntime {
       a.k.exitsSize = size;
       a.k.exitsAt = now;
       this.dirty.add(a.id);
-      await this.event(a, 'order', `Exits for ${dec(size)} ${m.base}: ${xs.map((x) => `${x.tag} at ${x.price}`).join(', ')} (SoDEX holds them; when one fills the other is cancelled).`);
+      await this.event(a, 'order', `Exits for ${dec(size)} ${m.base}: ${xs.map((x) => `${x.tag} at ${x.price}`).join(', ')} (${s.paper ? 'paper: watched against the mark' : 'SoDEX holds them'}; when one fills the other is cancelled).`);
       const sink = s.paper ? null : this.host.sinkFor(a);
       const results: ChildResult[] = s.paper
         ? stops.map((st) => ({ clOrdID: st.clOrdID, ok: true, orderId: `paper-${st.clOrdID}`, error: null, outcomeUnknown: false }))

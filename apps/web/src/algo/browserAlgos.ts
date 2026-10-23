@@ -23,6 +23,8 @@ import {
   SodexClient,
   WeightBudget,
   readBatch,
+  readStops,
+  regionPolicy,
   type AlgoEvent,
   type AlgoRecord,
   type AlgoSink,
@@ -33,11 +35,13 @@ import { builderRateToFraction, unwrapList } from '@sodex-core';
 import { activeBuilder } from '../trading/builder';
 import { tradingConfig } from '../trading/config';
 import { OutcomeUnknownError, readGateway } from '../trading/gateway';
-import { algoAccountId, cancelAlgoChildren, placeAlgoChildren, setLeverage } from '../trading/actions';
+import { algoAccountId, cancelAlgoChildren, placeAlgoChildren, placeAlgoStops, setLeverage } from '../trading/actions';
 import { getTradingState } from '../trading/session';
 import { feeNow } from '../trading/terms';
+import { getLiveCopy } from '../copy/live';
+import { localTerms } from '../copy/terms';
 import { logger } from '../log';
-import { noteRunnerLoaded, setLiveAlgos } from './algoBus';
+import { PAPER_OWNER, needsRunner, noteRunnerLoaded, setLiveAlgos } from './algoBus';
 import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
 
 const log = logger('algo');
@@ -72,6 +76,14 @@ const browserSink: AlgoSink = {
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
       return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: message(e), outcomeUnknown: unknown }));
+    }
+  },
+  async placeStops(_a, m, stops) {
+    try {
+      return readStops(await placeAlgoStops(m.name, stops), stops);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return stops.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: message(e), outcomeUnknown: unknown }));
     }
   },
   cancel: (_a, m, ids) => cancelAlgoChildren(m.name, ids),
@@ -116,7 +128,7 @@ class BrowserAlgos {
     for (const fn of this.listeners) fn();
   }
 
-  /** Follow the connected wallet: load its algos, and run them in one tab. */
+  /** Follow the connected wallet (or the paper book, PAPER_OWNER): load its algos, and run them in one tab. */
   async follow(owner: string | null): Promise<void> {
     const next = owner ? owner.toLowerCase() : null;
     if (next === this.owner) return;
@@ -132,7 +144,7 @@ class BrowserAlgos {
     this.store = await openAlgoStore();
     this.persistent = this.store.persistent;
     if (gen !== this.generation) return;
-    const live = (await this.store.algos()).filter((a) => a.owner === next && !FINAL_STATUSES.has(a.status));
+    const live = (await this.store.algos()).filter((a) => a.owner === next && needsRunner(a));
     if (!live.length) {
       this.role = 'off';
       await this.refreshViews();
@@ -233,6 +245,8 @@ class BrowserAlgos {
       factory: (url) => new WebSocket(url) as unknown as WebSocketLike,
       sinkFor: () => browserSink,
       builderRate: (a) => (activeBuilder(cfg.builder) ? builderRateToFraction(feeNow('perps', a.owner)) : 0),
+      // The copy region rules (policy.ts): the country declared in the copy terms and the one the executor saw, stricter wins.
+      policyFor: (a) => regionPolicy(localTerms(a.owner)?.country ?? a.country ?? null, getLiveCopy().viewerCountry ?? a.observedCountry ?? null),
       problem: async (a) => {
         const t = getTradingState();
         if (t.status !== 'enabled' || t.owner !== a.owner) return 'Held: enable trading in this browser - its children are signed with your trading key.';
@@ -310,7 +324,15 @@ class BrowserAlgos {
     switch (cmd.op) {
       case 'add': {
         const s = requireSignerOrPaper(cmd.spec, this.owner!);
-        const a = await rt.add({ owner: this.owner!, accountId: s.accountId, mode: 'browser', spec: cmd.spec, seed: cmd.seed });
+        const a = await rt.add({
+          owner: this.owner!,
+          accountId: s.accountId,
+          mode: 'browser',
+          spec: cmd.spec,
+          seed: cmd.seed,
+          country: localTerms(this.owner)?.country ?? null,
+          observedCountry: getLiveCopy().viewerCountry,
+        });
         id = a.id;
         break;
       }
@@ -376,14 +398,15 @@ class BrowserAlgos {
 /** The account a new algo trades: the trading key's (live), or the connected wallet's when it is paper. */
 function requireSignerOrPaper(spec: unknown, owner: string): { accountId: number } {
   const paper = !!(spec && typeof spec === 'object' && (spec as { paper?: unknown }).paper === true);
-  if (paper) return { accountId: getTradingState().accountId ?? 0 };
+  if (paper) return { accountId: owner === PAPER_OWNER ? 0 : (getTradingState().accountId ?? 0) };
+  if (owner === PAPER_OWNER) throw new Error('Connect your wallet to run a live algo. Without one, only paper algos run.');
   return { accountId: algoAccountId(owner) };
 }
 
 /** A view of a saved algo no tab runs right now (its books as last saved). */
 function staticView(a: AlgoRecord): AlgoView {
   const avg = a.filled > 0 ? a.filledValue / a.filled : null;
-  return { algo: a, target: null, progress: 0, avgPrice: avg, vsArrivalBps: null, vsMarketVwapBps: null, marketVwap: null, nextAt: null, endsAt: null, working: null, triggerPrice: null, conditions: null };
+  return { algo: a, target: null, progress: 0, avgPrice: avg, vsArrivalBps: null, vsMarketVwapBps: null, marketVwap: null, nextAt: null, endsAt: null, working: null, triggerPrice: null, conditions: null, exits: null, legs: null };
 }
 
 export const browserAlgos = new BrowserAlgos();

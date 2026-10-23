@@ -24,7 +24,9 @@ import {
   OrderType,
   OrderValidationError,
   SodexApiError,
+  StopType,
   TimeInForce,
+  TriggerType,
   decimalCompare,
   failedOrders,
   perpsActions,
@@ -242,6 +244,38 @@ export async function placeAlgoChildren(
   const result = await signAndSend(action, orders.length === 1 ? 'algo order' : 'algo orders');
   if (builder) hintTerms(s.meta.owner);
   return result;
+}
+
+/**
+ * ALGO EXITS: an algo's take-profit / stop-loss as SoDEX position stops - the
+ * same order as a position's TP/SL from the ticket (a reduce-only STOP market
+ * order on the mark), one signed batch, with the builder and the fee guard.
+ */
+export async function placeAlgoStops(
+  symbol: string,
+  stops: ReadonlyArray<{ clOrdID: string; side: 'buy' | 'sell'; quantity: string; triggerPrice: string; kind: 'tp' | 'sl' }>,
+): Promise<unknown> {
+  const s = requireSigner(undefined, 'perps');
+  const sym = await symbolFor('perps', symbol);
+  const builder = await builderForOrder('perps');
+  const action = perpsActions.newOrder(
+    s.meta.accountId,
+    sym.id,
+    stops.map((o) => ({
+      clOrdID: o.clOrdID,
+      modifier: OrderModifier.STOP,
+      side: o.side === 'buy' ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.MARKET,
+      timeInForce: TimeInForce.IOC,
+      quantity: o.quantity,
+      stopPrice: o.triggerPrice,
+      stopType: o.kind === 'tp' ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
+      triggerType: TriggerType.MARK_PRICE,
+      reduceOnly: true,
+    })),
+    builder,
+  );
+  return signAndSend(action, stops.length === 1 ? 'algo exit' : 'algo exits');
 }
 
 /**

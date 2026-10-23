@@ -32,6 +32,7 @@ import {
   type VolumeProfile,
 } from '@copy-engine';
 import { api, type Symbol as MarketSymbol } from '../../api';
+import { algoOwner } from '../../algo/algoBus';
 import { executorReady, startOn } from '../../algo/executorAlgos';
 import { getLiveCopy, subscribeLiveCopy } from '../../copy/live';
 import { DASH, fmtTime, fmtUsd } from '../../format';
@@ -62,6 +63,13 @@ interface CondDraft {
   usd: string;
   other: string;
   inMin: string;
+  pos: 'long' | 'short' | 'flat' | 'sizeAbove' | 'sizeBelow' | 'pnlAbove' | 'pnlBelow';
+}
+
+interface LegDraft {
+  symbol: string;
+  side: 'buy' | 'sell';
+  usd: string;
 }
 
 interface Draft {
@@ -144,11 +152,33 @@ interface Draft {
   paper: boolean;
   /** Where it runs: this browser, ValueDesk's executor (Tokyo, 24/7), or the trader's own. */
   place: 'browser' | 'hosted' | 'self';
+  /** TWAP: a time-sliced close of this share of the position, instead of an amount. */
+  twapClose: boolean;
+  twapCloseShare: string;
+  minSlice: string;
+  maxSlice: string;
+  /** Exits after the fills: a take-profit and a stop-loss, each a distance (%) or a price. */
+  exitsOn: boolean;
+  tpMode: 'pct' | 'price';
+  tp: string;
+  slMode: 'pct' | 'price';
+  sl: string;
+  /** Basket. */
+  legs: LegDraft[];
+  basketStyle: 'swarm' | 'twap';
+  /** Bracket. */
+  entry: 'market' | 'limit';
+  entryPrice: string;
 }
 
 const cond = (symbol: string, over: Partial<CondDraft> = {}): CondDraft => ({
-  type: 'price', symbol, source: 'mark', op: 'below', dir: 'either', value: '', pct: '1', windowMin: '5', bps: '10', usd: '1000000', other: 'BTC-USD', inMin: '60', ...over,
+  type: 'price', symbol, source: 'mark', op: 'below', dir: 'either', value: '', pct: '1', windowMin: '5', bps: '10', usd: '1000000', other: 'BTC-USD', inMin: '60', pos: 'flat', ...over,
 });
+
+const legs = (symbol: string, side: 'buy' | 'sell'): LegDraft[] => [
+  { symbol, side, usd: '100' },
+  { symbol: symbol === 'ETH-USD' ? 'BTC-USD' : 'ETH-USD', side: side === 'buy' ? 'sell' : 'buy', usd: '100' },
+];
 
 const DEFAULT: Draft = {
   dur: '30', durUnit: 'm', slices: '30', exec: 'hybrid', slip: '30', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
@@ -163,6 +193,10 @@ const DEFAULT: Draft = {
   limitPrice: '', startMode: 'now', startDelay: '5', startPrice: '', upper: '', upperThen: 'hold', lower: '', lowerThen: 'hold', maxSpread: '',
   paper: false,
   place: 'browser',
+  twapClose: false, twapCloseShare: '100', minSlice: '', maxSlice: '',
+  exitsOn: false, tpMode: 'pct', tp: '2', slMode: 'pct', sl: '1',
+  legs: [], basketStyle: 'swarm',
+  entry: 'market', entryPrice: '',
 };
 
 const DRAFT_KEY = 'vs.algo.draft.v1';
@@ -170,7 +204,7 @@ const DRAFT_KEY = 'vs.algo.draft.v1';
 function loadDraft(): Draft {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
-    if (raw) return { ...DEFAULT, ...(JSON.parse(raw) as Partial<Draft>), conds: [] };
+    if (raw) return { ...DEFAULT, ...(JSON.parse(raw) as Partial<Draft>), conds: [], legs: [] };
   } catch {
     /* storage blocked: defaults */
   }
@@ -179,7 +213,7 @@ function loadDraft(): Draft {
 
 function saveDraft(d: Draft): void {
   try {
-    const { conds: _c, from: _f, to: _t, icePrice: _i, limitPrice: _l, upper: _u, lower: _lo, startPrice: _s, thenPrice: _tp, activation: _a, ...keep } = d;
+    const { conds: _c, from: _f, to: _t, icePrice: _i, limitPrice: _l, upper: _u, lower: _lo, startPrice: _s, thenPrice: _tp, activation: _a, legs: _lg, entryPrice: _ep, ...keep } = d;
     localStorage.setItem(DRAFT_KEY, JSON.stringify(keep));
   } catch {
     /* storage blocked */
@@ -192,6 +226,8 @@ const n = (s: string): number => {
 };
 const opt = (s: string): number | null => (Number.isFinite(n(s)) && n(s) > 0 ? n(s) : null);
 const frac = (s: string): number => (Number.isFinite(n(s)) ? n(s) / 100 : 0);
+/** A price level as the preview shows it (SoDEX snaps it to the tick when it is placed). */
+const fmtLevel = (x: number): string => x.toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) >= 1000 ? 1 : Math.abs(x) >= 1 ? 4 : 6 });
 
 /* ------------------------------------------------------------ the spec ----- */
 
@@ -204,9 +240,27 @@ export interface TicketShared {
   marginMode: 'cross' | 'isolated';
 }
 
+/** Whether the ticket offers exits for this kind: anything that opens a position (a bracket always has them). */
+export function offersExits(kind: UiKind, d: Draft, reduceOnly: boolean): boolean {
+  if (reduceOnly || kind === 'trailing' || kind === 'basket') return false;
+  if (kind === 'twap' && d.twapClose) return false;
+  if (kind === 'conditional') return d.then !== 'close';
+  return true;
+}
+
+function exitsOf(d: Draft): Record<string, number | null> {
+  return {
+    tpPct: d.tpMode === 'pct' && opt(d.tp) ? frac(d.tp) : null,
+    tpPrice: d.tpMode === 'price' ? opt(d.tp) : null,
+    slPct: d.slMode === 'pct' && opt(d.sl) ? frac(d.sl) : null,
+    slPrice: d.slMode === 'price' ? opt(d.sl) : null,
+  };
+}
+
 /** The draft as an engine spec (unvalidated: checkAlgoSpec decides). */
 export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number): Record<string, unknown> {
   const k = engineKind(kind);
+  const withExits = offersExits(kind, d, p.reduceOnly) && (kind === 'bracket' || d.exitsOn);
   const base: Record<string, unknown> = {
     kind: k,
     symbol: p.symbol,
@@ -222,6 +276,7 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     marginMode: p.reduceOnly ? null : p.marginMode,
     paper: d.paper,
     label: null,
+    exits: withExits ? exitsOf(d) : null,
   };
   const exec = {
     style: kind === 'chasetwap' && d.exec === 'taker' ? 'hybrid' : d.exec,
@@ -233,8 +288,40 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
   const dur = n(d.dur) * UNIT_MS[d.durUnit];
   switch (kind) {
     case 'twap':
-    case 'chasetwap':
-      return { ...base, quantity: p.quantity, durationMs: Math.round(dur), slices: Math.trunc(n(d.slices)), urgency: d.urgency, sizeJitter: frac(d.sizeJitter), timeJitter: frac(d.timeJitter), exec, finish: d.finish, maxParticipation: opt(d.maxPart) ? frac(d.maxPart) : null };
+    case 'chasetwap': {
+      const close = kind === 'twap' && d.twapClose;
+      return {
+        ...base,
+        quantity: close ? '0' : p.quantity,
+        closeShare: close ? frac(d.twapCloseShare) : null,
+        minSliceQty: opt(d.minSlice) ? d.minSlice : null,
+        maxSliceQty: opt(d.maxSlice) ? d.maxSlice : null,
+        durationMs: Math.round(dur),
+        slices: Math.trunc(n(d.slices)),
+        urgency: d.urgency,
+        sizeJitter: frac(d.sizeJitter),
+        timeJitter: frac(d.timeJitter),
+        exec,
+        finish: d.finish,
+        maxParticipation: opt(d.maxPart) ? frac(d.maxPart) : null,
+      };
+    }
+    case 'bracket':
+      return { ...base, quantity: p.quantity, entry: d.entry, price: d.entry === 'limit' ? opt(d.entryPrice) : null, slippageBps: n(d.slip) };
+    case 'basket':
+      return {
+        ...base,
+        leverage: null,
+        marginMode: null,
+        legs: d.legs.map((l) => ({ symbol: l.symbol, side: l.side, usd: n(l.usd) })),
+        style: d.basketStyle,
+        durationMs: Math.round(dur),
+        slices: Math.trunc(n(d.slices)),
+        clips: Math.trunc(n(d.clips)),
+        inFlight: d.inFlight,
+        waveMs: Math.round((n(d.waveSec) || 0) * 1000),
+        slippageBps: n(d.slip),
+      };
     case 'vwap':
       return { ...base, quantity: p.quantity, durationMs: Math.round(dur), slices: Math.trunc(n(d.slices)), lookbackDays: d.lookback, adaptive: d.adaptive, sizeJitter: frac(d.sizeJitter), exec, finish: d.finish, maxParticipation: opt(d.maxPart) ? frac(d.maxPart) : null };
     case 'pov':
@@ -270,11 +357,15 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
             return { type: 'volume', symbol: c.symbol, windowMs: Math.round(n(c.windowMin) * 60_000), aboveUsd: n(c.usd) };
           case 'ratio':
             return { type: 'ratio', symbol: c.symbol, other: c.other, op: c.op, value: opt(c.value) };
+          case 'position':
+            return { type: 'position', symbol: c.symbol, op: c.pos, value: c.pos === 'long' || c.pos === 'short' || c.pos === 'flat' ? 0 : n(c.value) };
           case 'time':
             return { type: 'time', at: now + Math.max(0, n(c.inMin) || 0) * 60_000 };
         }
       });
-      const inner = { symbol: p.symbol, side: p.side, reduceOnly: p.reduceOnly, quantity: p.quantity, limitPrice: base.limitPrice, leverage: base.leverage, marginMode: base.marginMode, paper: d.paper };
+      // An algo it starts carries the exits itself (they follow that algo's fills).
+      const inner = { symbol: p.symbol, side: p.side, reduceOnly: p.reduceOnly, quantity: p.quantity, limitPrice: base.limitPrice, leverage: base.leverage, marginMode: base.marginMode, paper: d.paper, exits: base.exits };
+      if (d.then === 'twap' || d.then === 'chase') base.exits = null;
       const then =
         d.then === 'market' ? { type: 'market', quantity: p.quantity, slippageBps: n(d.slip) }
         : d.then === 'limit' ? { type: 'limit', quantity: p.quantity, price: opt(d.thenPrice), postOnly: d.postOnly }
@@ -329,7 +420,7 @@ function Field({ label, value, onChange, suffix, placeholder, int = false, signe
         value={value}
         placeholder={placeholder ?? ''}
         aria-label={label}
-        onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value))}
+        onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed }))}
       />
       {suffix !== undefined && <span className="oe-suffix">{suffix}</span>}
     </div>
@@ -382,6 +473,10 @@ export interface AlgoTicketState {
   label: string;
   why: string | null;
   needsAmount: boolean;
+  /** A paper algo in this browser: it signs nothing, so the ticket's wallet / trading gate does not stand before it. */
+  walletFree: boolean;
+  /** The ticket's Long / Short applies (not to a basket: each market has its own side). */
+  sided: boolean;
 }
 
 export interface AlgoTicketHandle {
@@ -429,11 +524,13 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         patch.to = r(p.side === 'buy' ? mid * 0.98 : mid * 1.02);
       }
       if (kind === 'conditional' && !x.conds.length) patch.conds = [cond(p.symbol, { value: r(p.side === 'buy' ? mid * 0.99 : mid * 1.01), op: p.side === 'buy' ? 'below' : 'above' })];
+      if (kind === 'basket' && !x.legs.length) patch.legs = legs(p.symbol, p.side);
+      if (kind === 'bracket' && !x.entryPrice) patch.entryPrice = r(p.side === 'buy' ? mid * 0.998 : mid * 1.002);
       return Object.keys(patch).length ? { ...x, ...patch } : x;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, p.symbol, p.side, !!mid]);
-  useEffect(() => setD((x) => ({ ...x, from: '', to: '', conds: [], icePrice: '' })), [p.symbol]);
+  useEffect(() => setD((x) => ({ ...x, from: '', to: '', conds: [], icePrice: '', entryPrice: '' })), [p.symbol]);
 
   // VWAP's profile and POV's pace: the market's hourly volume, from SoDEX.
   const wantsCandles = ek === 'vwap' || ek === 'pov';
@@ -475,18 +572,23 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     [check.spec, market, clock, mid, seed, profile, hourVolume],
   );
 
-  const needsAmount = usesAmount(kind, { trailWhole: d.trailWhole, thenClose: d.then === 'close' });
+  const needsAmount = usesAmount(kind, { trailWhole: d.trailWhole, thenClose: d.then === 'close', twapClose: d.twapClose });
   const amountMissing = needsAmount && !(Number(p.quantity) > 0);
   const errors = amountMissing ? [] : [...Object.values(check.errors), ...(plan?.errors ?? [])];
   // An executor needs the copy setup's steps (terms, sign-in, fee, key); the browser needs none of them.
   const copy = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
-  const where = d.place === 'browser' ? { ready: true, why: null } : executorReady(d.place, d.paper);
+  const walletFree = d.place === 'browser' && d.paper;
+  const where =
+    d.place === 'browser'
+      ? !p.address && !d.paper ? { ready: false, why: 'Connect a wallet to run it live, or switch on Paper.' } : { ready: true, why: null }
+      : executorReady(d.place, d.paper);
   const execFee = d.place === 'browser' ? null : copy[d.place].info?.builder?.ladder?.[0]?.fee ?? null;
   const feeFraction = d.place === 'browser' ? p.builderFee : (execFee ?? 0) / 100_000;
   const ready = !!market && !amountMissing && !!check.spec && !!plan && !plan.errors.length && where.ready;
   const label = `Start ${menuName(kind)}${d.paper ? ' (paper)' : ''}`;
   const why = !market ? 'Loading the market…' : amountMissing ? 'Enter an amount.' : errors[0] ?? where.why ?? null;
-  useEffect(() => p.onState({ ready, label, why, needsAmount }), [ready, label, why, needsAmount]); // eslint-disable-line react-hooks/exhaustive-deps
+  const sided = kind !== 'basket';
+  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided }), [ready, label, why, needsAmount, walletFree, sided]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useImperativeHandle(ref, () => ({
     async start() {
@@ -499,7 +601,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       const spec = fresh.spec;
       const real = p.network === 'mainnet' && !spec.paper;
       const ok = await confirm({
-        title: `${spec.paper ? 'Paper ' : ''}${menuName(kind)} ${p.side === 'buy' ? 'buy' : 'sell'} on ${p.symbol}${real ? ' — real funds' : ''}`,
+        title: `${spec.paper ? 'Paper ' : ''}${spec.kind === 'basket' ? `${menuName(kind)} of ${spec.legs.length} markets` : `${menuName(kind)} ${p.side === 'buy' ? 'buy' : 'sell'} on ${p.symbol}`}${real ? ' — real funds' : ''}`,
         size: 'md',
         danger: real,
         confirmLabel: label,
@@ -511,7 +613,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       try {
         if (d.place === 'browser') {
           const { browserAlgos } = await import('../../algo/browserAlgos');
-          await browserAlgos.follow(p.address);
+          await browserAlgos.follow(algoOwner(p.address));
           await browserAlgos.start(spec, seed);
         } else {
           await startOn(d.place, spec, seed);
@@ -530,10 +632,12 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const levels: Level[] = [];
   if (mid) levels.push({ label: 'Now', price: mid, tone: 'now' });
   if (check.spec) addLevels(levels, check.spec, { bid: p.bid, ask: p.ask, mid, market });
+  if (plan?.exits?.tp) levels.push({ label: 'Take-profit', price: plan.exits.tp, tone: 'pos' });
+  if (plan?.exits?.sl) levels.push({ label: 'Stop-loss', price: plan.exits.sl, tone: 'neg' });
 
   const rates = feeRates(market, feeFraction);
   const notional = plan?.notional ?? null;
-  const showTimeline = !!plan && (ek === 'twap' || ek === 'vwap' || ek === 'dca' || ek === 'swarm');
+  const showTimeline = !!plan && (ek === 'twap' || ek === 'vwap' || ek === 'dca' || ek === 'swarm') && !(ek === 'twap' && d.twapClose);
   const showLadder = !!plan && (ek === 'scale' || (ek === 'iceberg' && !d.icePeg));
   const showLevels = !showTimeline && !showLadder && levels.length > 1;
 
@@ -560,9 +664,38 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               <span className="algo-urgency__v">{d.urgency === 0 ? 'Even' : d.urgency > 0 ? `Front ${Math.round(d.urgency * 100)}` : `Back ${Math.round(-d.urgency * 100)}`}</span>
             </div>
           )}
+          {ek === 'twap' && (
+            <>
+              {kind === 'twap' && (
+                <div className="algo-row">
+                  <Switch label="Close position" checked={d.twapClose} onChange={(v) => set({ twapClose: v })} title="A time-sliced close: works a share of your position on this market, on the side that reduces it, reduce-only" />
+                  {d.twapClose && <Field label="Share" value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} suffix="%" title="Of the position when it starts" />}
+                </div>
+              )}
+              <div className="algo-grid">
+                <Field label="Smallest" value={d.minSlice} placeholder="min" onChange={(v) => set({ minSlice: v })} suffix={p.sym?.baseCoin} title="No slice below this: what is due waits until it reaches it (except at the end)" />
+                <Field label="Largest" value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} suffix={p.sym?.baseCoin} title="No slice above this" />
+              </div>
+            </>
+          )}
           <ExecFields d={d} set={set} chaseOnly={kind === 'chasetwap'} />
         </>
       )}
+
+      {ek === 'bracket' && (
+        <>
+          <div className="algo-row">
+            <Seg label="Entry" value={d.entry} onChange={(v) => set({ entry: v })} options={[['market', 'Market', 'Takes at once, within your max slippage'], ['limit', 'Limit', 'Rests at your price']]} />
+          </div>
+          {d.entry === 'limit' ? (
+            <Field label="Price" value={d.entryPrice} onChange={(v) => set({ entryPrice: v })} />
+          ) : (
+            <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
+          )}
+        </>
+      )}
+
+      {ek === 'basket' && <BasketFields d={d} set={set} />}
 
       {ek === 'pov' && (
         <>
@@ -708,6 +841,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 
       {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={p.sym?.baseCoin ?? ''} />}
 
+      {offersExits(kind, d, p.reduceOnly) && <ExitFields d={d} set={set} side={p.side} always={kind === 'bracket'} levels={plan?.exits ?? null} />}
+
       {/* Shared rules: a price limit, when to start, price bounds, the spread guard. */}
       <div className="algo-morehead">
         <button type="button" className="algo-more" aria-expanded={more} onClick={() => setMore((v) => !v)}>
@@ -728,13 +863,13 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       />
       <Collapse open={more}>
         <div className="algo-rules">
-          {ek !== 'scale' && ek !== 'trailing' && (
+          {ek !== 'scale' && ek !== 'trailing' && ek !== 'basket' && (
             <Field label="Limit" value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} title={`Never ${p.side === 'buy' ? 'buy above' : 'sell below'} this price`} />
           )}
           <Seg label="Start" value={d.startMode} onChange={(v) => set({ startMode: v })} options={[['now', 'Now'], ['delay', 'Later'], ['price', 'At a price']]} />
           {d.startMode === 'delay' && <Field label="In" value={d.startDelay} onChange={(v) => set({ startDelay: v })} suffix="min" />}
           {d.startMode === 'price' && <Field label="When mark" value={d.startPrice} onChange={(v) => set({ startPrice: v })} title="Starts once the mark reaches this, from wherever it is now" />}
-          {ek !== 'scale' && ek !== 'trailing' && ek !== 'conditional' && (
+          {ek !== 'scale' && ek !== 'trailing' && ek !== 'conditional' && ek !== 'basket' && ek !== 'bracket' && (
             <>
               <div className="algo-bound">
                 <Field label="Above" value={d.upper} placeholder="—" onChange={(v) => set({ upper: v })} />
@@ -818,6 +953,84 @@ function ExecFields({ d, set, chaseOnly = false }: { d: Draft; set: (p: Partial<
   );
 }
 
+/**
+ * Exits after the fills: SoDEX's own position stops (a reduce-only market
+ * order on the mark), resized as the algo fills; when one fills, the other is
+ * cancelled. Distances are from the average fill.
+ */
+function ExitFields({ d, set, side, always, levels }: { d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; always: boolean; levels: { tp: number | null; sl: number | null } | null }) {
+  const on = always || d.exitsOn;
+  const unit = (mode: 'pct' | 'price', key: 'tpMode' | 'slMode') => (
+    <button type="button" className="algo-unit" title="A distance from your average fill, or a price" onClick={() => set({ [key]: mode === 'pct' ? 'price' : 'pct' } as Partial<Draft>)}>
+      {mode === 'pct' ? '%' : 'USD'}
+    </button>
+  );
+  const at = (x: number | null | undefined) => (x ? ` · ${fmtLevel(x)}` : '');
+  return (
+    <div className="algo-exits">
+      {!always && <Switch label="Take-profit / stop-loss" checked={d.exitsOn} onChange={(v) => set({ exitsOn: v })} title="SoDEX holds them as position stops, resized as the algo fills; when one fills the other is cancelled" />}
+      {on && (
+        <div className="algo-grid">
+          <Field label="TP" value={d.tp} placeholder="none" onChange={(v) => set({ tp: v })} suffix={unit(d.tpMode, 'tpMode')} title={`Take-profit ${side === 'buy' ? 'above' : 'below'} your average fill${at(levels?.tp)}`} />
+          <Field label="SL" value={d.sl} placeholder="none" onChange={(v) => set({ sl: v })} suffix={unit(d.slMode, 'slMode')} title={`Stop-loss ${side === 'buy' ? 'below' : 'above'} your average fill${at(levels?.sl)}`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BasketFields({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
+  const edit = (i: number, patch: Partial<LegDraft>) => set({ legs: d.legs.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
+  const total = d.legs.reduce((a, l) => a + (Number(l.usd) || 0), 0);
+  return (
+    <>
+      <ol className="algo-legs">
+        {d.legs.map((l, i) => (
+          <li key={i} className="algo-leg">
+            <input className="algo-sym" value={l.symbol} aria-label={`Market ${i + 1}`} onChange={(e) => edit(i, { symbol: e.target.value.toUpperCase() })} />
+            <Seg value={l.side} onChange={(v) => edit(i, { side: v })} options={[['buy', 'Long'], ['sell', 'Short']]} />
+            <Field label="USD" value={l.usd} onChange={(v) => edit(i, { usd: v })} />
+            {d.legs.length > 2 && (
+              <button type="button" className="algo-x" aria-label={`Remove ${l.symbol}`} onClick={() => set({ legs: d.legs.filter((_, j) => j !== i) })}>×</button>
+            )}
+          </li>
+        ))}
+      </ol>
+      {d.legs.length < 10 && (
+        <button type="button" className="algo-add" onClick={() => set({ legs: [...d.legs, { symbol: '', side: 'buy', usd: '100' }] })}>
+          + Add a market
+        </button>
+      )}
+      <Seg label="Each market" value={d.basketStyle} onChange={(v) => set({ basketStyle: v })} options={[['swarm', 'Swarm', 'Small takers in waves, now'], ['twap', 'TWAP', 'Slices over a time you choose']]} />
+      {d.basketStyle === 'twap' ? (
+        <div className="algo-grid">
+          <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={<UnitSwitch value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />} />
+          <Field label="Slices" value={d.slices} int onChange={(v) => set({ slices: v })} />
+        </div>
+      ) : (
+        <div className="algo-grid">
+          <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} title="Per market" />
+          <Field label="Between" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" />
+        </div>
+      )}
+      <div className="algo-grid">
+        <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
+        <div className="algo-total">{total > 0 ? `${fmtUsd(total, 0)} in all` : ''}</div>
+      </div>
+    </>
+  );
+}
+
+const POS_OPS: ReadonlyArray<readonly [CondDraft['pos'], string]> = [
+  ['flat', 'Is flat'],
+  ['long', 'Is long'],
+  ['short', 'Is short'],
+  ['sizeAbove', 'Size ≥'],
+  ['sizeBelow', 'Size ≤'],
+  ['pnlAbove', 'PnL ≥'],
+  ['pnlBelow', 'PnL ≤'],
+];
+
 const COND_TYPES: ReadonlyArray<readonly [ConditionType, string]> = [
   ['price', 'Price'],
   ['cross', 'Crosses'],
@@ -827,6 +1040,7 @@ const COND_TYPES: ReadonlyArray<readonly [ConditionType, string]> = [
   ['spread', 'Spread'],
   ['volume', 'Volume'],
   ['ratio', 'Ratio'],
+  ['position', 'Position'],
   ['time', 'Time'],
 ];
 
@@ -904,6 +1118,18 @@ function CondBody({ c, edit }: { c: CondDraft; edit: (p: Partial<CondDraft>) => 
       return <div className="algo-cond__body"><div className="algo-grid"><Field label="Trades" value={c.usd} onChange={(v) => edit({ usd: v })} suffix="USD" /><Field label="Within" value={c.windowMin} onChange={(v) => edit({ windowMin: v })} suffix="min" /></div></div>;
     case 'ratio':
       return <div className="algo-cond__body"><input className="algo-sym" value={c.other} aria-label="Divided by" onChange={(e) => edit({ other: e.target.value.toUpperCase() })} />{op}<Field label="Ratio" value={c.value} onChange={(v) => edit({ value: v })} /></div>;
+    case 'position':
+      return (
+        <div className="algo-cond__body">
+          <select className="oe-select" value={c.pos} aria-label="Your position" onChange={(e) => edit({ pos: e.target.value as CondDraft['pos'] })}>
+            {POS_OPS.map(([v, t]) => (
+              <option key={v} value={v}>{t}</option>
+            ))}
+          </select>
+          {(c.pos === 'sizeAbove' || c.pos === 'sizeBelow') && <Field label="Size" value={c.value} onChange={(v) => edit({ value: v })} title="Your position's size in the base coin, long or short" />}
+          {(c.pos === 'pnlAbove' || c.pos === 'pnlBelow') && <Field label="PnL" value={c.value} signed onChange={(v) => edit({ value: v })} suffix="USD" title="Unrealised, at the mark (a loss is negative)" />}
+        </div>
+      );
     case 'time':
       return <div className="algo-cond__body"><Field label="In" value={c.inMin} onChange={(v) => edit({ inMin: v })} suffix="min" /></div>;
   }
@@ -946,6 +1172,13 @@ function Summary({ plan, kind, d, rates, notional, onShuffle }: { plan: AlgoPlan
     rows.push(['Pace', plan.endsAt ? `about ${fmtDuration(plan.endsAt - plan.startsAt)} at the last day's volume` : 'by the volume that prints']);
   } else if (ek === 'chase') {
     rows.push(['Order', 'one, post-only, re-priced']);
+  } else if (ek === 'basket') {
+    rows.push(['Markets', d.legs.map((l) => `${l.side === 'buy' ? '+' : '−'}${l.symbol.replace(/-USD$/, '')}`).join(' ')]);
+    rows.push(['Takes', plan.endsAt && plan.endsAt > plan.startsAt ? `about ${fmtDuration(plan.endsAt - plan.startsAt)}` : 'one wave']);
+  }
+  if (plan.exits && (plan.exits.tp || plan.exits.sl)) {
+    const f = (x: number | null) => (x ? fmtLevel(x) : DASH);
+    rows.push(['Exits', `TP ${f(plan.exits.tp)} · SL ${f(plan.exits.sl)}`]);
   }
   if (notional) {
     rows.push(['Value', fmtUsd(notional, 2)]);
@@ -1003,12 +1236,14 @@ function addLevels(out: Level[], s: AlgoSpec, ctx: { bid: number | null; ask: nu
     }
     if (s.then.type === 'limit') out.push({ label: 'Then limit', price: s.then.price, tone: s.side === 'buy' ? 'pos' : 'neg' });
   }
+  if (s.kind === 'bracket' && s.entry === 'limit' && s.price !== null) out.push({ label: 'Entry', price: s.price, tone: 'warn' });
 }
 
 function whatItDoes(kind: UiKind, d: Draft, side: 'buy' | 'sell'): string {
   const verb = side === 'buy' ? 'Buys' : 'Sells';
   switch (kind) {
     case 'twap':
+      if (d.twapClose) return `Closes ${d.twapCloseShare || '…'}% of your position in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}.`;
       return `${verb} the amount in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}.`;
     case 'chasetwap':
       return `${verb} in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}, each resting at the best price first.`;
@@ -1030,22 +1265,33 @@ function whatItDoes(kind: UiKind, d: Draft, side: 'buy' | 'sell'): string {
       return `Waits until ${d.match === 'all' ? 'every condition holds' : 'any condition holds'}, then acts.`;
     case 'trailing':
       return side === 'sell' ? 'Follows the high and sells when the price falls back by the trail (protects a long).' : 'Follows the low and buys when the price bounces by the trail (protects a short).';
+    case 'bracket':
+      return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${d.entry === 'limit' ? `at ${d.entryPrice || '…'}` : 'at market'}, then SoDEX holds the take-profit and stop-loss: when one fills, the other is cancelled.`;
+    case 'basket':
+      return `Trades ${d.legs.length || '…'} markets at once, each as its own ${d.basketStyle === 'twap' ? 'TWAP' : 'swarm'}; pause or cancel them together.`;
   }
 }
 
 function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: AlgoSpec; plan: AlgoPlan; kind: UiKind; feeRates: Rates; place: Draft['place']; location: string | null }) {
   const rows: Array<[string, string]> = [
-    ['Order', `${menuName(kind)} ${spec.side === 'buy' ? 'buy / long' : 'sell / short'} on ${spec.symbol}`],
+    ['Order', spec.kind === 'basket' ? `${menuName(kind)} of ${spec.legs.length} markets, ${fmtUsd(plan.notional ?? 0, 2)} in all` : `${menuName(kind)} ${spec.side === 'buy' ? 'buy / long' : 'sell / short'} on ${spec.symbol}`],
   ];
   if (plan.total !== null) rows.push(['Size', `${plan.total} ${spec.symbol.replace(/-USD$/, '')}${plan.notional ? ` (${fmtUsd(plan.notional, 2)})` : ''}`]);
   if (spec.kind === 'dca') rows.push(['Spend', `${spec.orders} × ${fmtUsd(spec.perOrderUsd, 2)}${spec.maxTotalUsd ? `, at most ${fmtUsd(spec.maxTotalUsd, 2)}` : ''}`]);
-  if (plan.children.length && spec.kind !== 'conditional' && spec.kind !== 'trailing' && spec.kind !== 'chase') rows.push(['Children', String(plan.children.filter((c) => c.qty > 0).length)]);
+  if (plan.children.length && spec.kind !== 'conditional' && spec.kind !== 'trailing' && spec.kind !== 'chase' && spec.kind !== 'basket') rows.push(['Children', String(plan.children.filter((c) => c.qty > 0).length)]);
   if (plan.endsAt) rows.push(['Until', `${fmtTime(plan.endsAt)} (${fmtDuration(plan.endsAt - plan.startsAt)})`]);
   if (spec.startAt) rows.push(['Starts', fmtTime(spec.startAt)]);
   if (spec.triggerPrice) rows.push(['Starts when the mark reaches', String(spec.triggerPrice)]);
   if (spec.limitPrice) rows.push(['Limit', `never ${spec.side === 'buy' ? 'above' : 'below'} ${spec.limitPrice}`]);
   if (spec.upper) rows.push(['Above ' + spec.upper.price, spec.upper.then]);
   if (spec.lower) rows.push(['Below ' + spec.lower.price, spec.lower.then]);
+  if (spec.kind === 'basket') rows.push(['Markets', spec.legs.map((l) => `${l.side === 'buy' ? 'long' : 'short'} ${fmtUsd(l.usd, 0)} ${l.symbol}`).join(', ')]);
+  if (spec.kind === 'twap' && spec.closeShare !== null) rows.push(['Closes', `${Math.round(spec.closeShare * 100)}% of your ${spec.symbol} position, reduce-only`]);
+  if (spec.kind === 'bracket') rows.push(['Entry', spec.entry === 'limit' ? `limit at ${spec.price}` : `market, at most ${spec.slippageBps} bp past the touch`]);
+  if (plan.exits && (plan.exits.tp || plan.exits.sl)) {
+    const f = (x: number | null) => (x ? fmtLevel(x) : 'none');
+    rows.push(['Exits', `take-profit ${f(plan.exits.tp)}, stop-loss ${f(plan.exits.sl)} - SoDEX position stops on the mark, resized as it fills; one fills, the other is cancelled`]);
+  }
   if (spec.reduceOnly) rows.push(['Reduce only', 'yes']);
   if (plan.notional) rows.push(['Fees', `${fmtUsd(plan.notional * r.maker, 2)} (all resting) to ${fmtUsd(plan.notional * r.taker, 2)} (all taking)`]);
   rows.push([

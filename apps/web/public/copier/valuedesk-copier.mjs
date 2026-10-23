@@ -2,16 +2,3981 @@
 // Run: node valuedesk-copier.mjs   (Node.js 22 or newer). Settings: see README (EXECUTOR_* variables).
 // It talks to SoDEX and Hyperliquid directly and to nothing else; your copy key stays in ./copier-data.
 import { createRequire as __vdRequire } from 'node:module'; const require = __vdRequire(import.meta.url);
+var __create = Object.create;
 var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __getProtoOf = Object.getPrototypeOf;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
+var __commonJS = (cb, mod2) => function __require2() {
+  try {
+    return mod2 || (0, cb[__getOwnPropNames(cb)[0]])((mod2 = { exports: {} }).exports, mod2), mod2.exports;
+  } catch (e) {
+    throw mod2 = 0, e;
+  }
+};
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, { get: all[name], enumerable: true });
 };
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key2 of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key2) && key2 !== except)
+        __defProp(to, key2, { get: () => from[key2], enumerable: !(desc = __getOwnPropDesc(from, key2)) || desc.enumerable });
+  }
+  return to;
+};
+var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__getProtoOf(mod2)) : {}, __copyProps(
+  // If the importer is in node compatibility mode or this is not an ESM
+  // file that has been converted to a CommonJS file using a Babel-
+  // compatible transform (i.e. "__esModule" has not been set), then set
+  // "default" to the CommonJS "module.exports" for node compatibility.
+  isNodeMode || !mod2 || !mod2.__esModule ? __defProp(target, "default", { value: mod2, enumerable: true }) : target,
+  mod2
+));
 
-// src/main.ts
+// ../valuescan/node_modules/ws/lib/constants.js
+var require_constants = __commonJS({
+  "../valuescan/node_modules/ws/lib/constants.js"(exports, module) {
+    "use strict";
+    var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
+    var hasBlob = typeof Blob !== "undefined";
+    if (hasBlob) BINARY_TYPES.push("blob");
+    module.exports = {
+      BINARY_TYPES,
+      CLOSE_TIMEOUT: 3e4,
+      EMPTY_BUFFER: Buffer.alloc(0),
+      GUID: "258EAFA5-E914-47DA-95CA-C5AB0DC85B11",
+      hasBlob,
+      kForOnEventAttribute: /* @__PURE__ */ Symbol("kIsForOnEventAttribute"),
+      kListener: /* @__PURE__ */ Symbol("kListener"),
+      kStatusCode: /* @__PURE__ */ Symbol("status-code"),
+      kWebSocket: /* @__PURE__ */ Symbol("websocket"),
+      NOOP: () => {
+      }
+    };
+  }
+});
+
+// ../valuescan/node_modules/node-gyp-build/node-gyp-build.js
+var require_node_gyp_build = __commonJS({
+  "../valuescan/node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+    var fs = __require("fs");
+    var path = __require("path");
+    var os = __require("os");
+    var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
+    var vars = process.config && process.config.variables || {};
+    var prebuildsOnly = !!process.env.PREBUILDS_ONLY;
+    var abi = process.versions.modules;
+    var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
+    var arch = process.env.npm_config_arch || os.arch();
+    var platform = process.env.npm_config_platform || os.platform();
+    var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
+    var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
+    var uv = (process.versions.uv || "").split(".")[0];
+    module.exports = load;
+    function load(dir) {
+      return runtimeRequire(load.resolve(dir));
+    }
+    load.resolve = load.path = function(dir) {
+      dir = path.resolve(dir || ".");
+      try {
+        var name = runtimeRequire(path.join(dir, "package.json")).name.toUpperCase().replace(/-/g, "_");
+        if (process.env[name + "_PREBUILD"]) dir = process.env[name + "_PREBUILD"];
+      } catch (err) {
+      }
+      if (!prebuildsOnly) {
+        var release = getFirst(path.join(dir, "build/Release"), matchBuild);
+        if (release) return release;
+        var debug = getFirst(path.join(dir, "build/Debug"), matchBuild);
+        if (debug) return debug;
+      }
+      var prebuild = resolve2(dir);
+      if (prebuild) return prebuild;
+      var nearby = resolve2(path.dirname(process.execPath));
+      if (nearby) return nearby;
+      var target = [
+        "platform=" + platform,
+        "arch=" + arch,
+        "runtime=" + runtime,
+        "abi=" + abi,
+        "uv=" + uv,
+        armv ? "armv=" + armv : "",
+        "libc=" + libc,
+        "node=" + process.versions.node,
+        process.versions.electron ? "electron=" + process.versions.electron : "",
+        typeof __webpack_require__ === "function" ? "webpack=true" : ""
+        // eslint-disable-line
+      ].filter(Boolean).join(" ");
+      throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
+      function resolve2(dir2) {
+        var tuples = readdirSync(path.join(dir2, "prebuilds")).map(parseTuple);
+        var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
+        if (!tuple) return;
+        var prebuilds = path.join(dir2, "prebuilds", tuple.name);
+        var parsed = readdirSync(prebuilds).map(parseTags);
+        var candidates = parsed.filter(matchTags(runtime, abi));
+        var winner = candidates.sort(compareTags(runtime))[0];
+        if (winner) return path.join(prebuilds, winner.file);
+      }
+    };
+    function readdirSync(dir) {
+      try {
+        return fs.readdirSync(dir);
+      } catch (err) {
+        return [];
+      }
+    }
+    function getFirst(dir, filter) {
+      var files = readdirSync(dir).filter(filter);
+      return files[0] && path.join(dir, files[0]);
+    }
+    function matchBuild(name) {
+      return /\.node$/.test(name);
+    }
+    function parseTuple(name) {
+      var arr = name.split("-");
+      if (arr.length !== 2) return;
+      var platform2 = arr[0];
+      var architectures = arr[1].split("+");
+      if (!platform2) return;
+      if (!architectures.length) return;
+      if (!architectures.every(Boolean)) return;
+      return { name, platform: platform2, architectures };
+    }
+    function matchTuple(platform2, arch2) {
+      return function(tuple) {
+        if (tuple == null) return false;
+        if (tuple.platform !== platform2) return false;
+        return tuple.architectures.includes(arch2);
+      };
+    }
+    function compareTuples(a, b) {
+      return a.architectures.length - b.architectures.length;
+    }
+    function parseTags(file) {
+      var arr = file.split(".");
+      var extension2 = arr.pop();
+      var tags = { file, specificity: 0 };
+      if (extension2 !== "node") return;
+      for (var i = 0; i < arr.length; i++) {
+        var tag = arr[i];
+        if (tag === "node" || tag === "electron" || tag === "node-webkit") {
+          tags.runtime = tag;
+        } else if (tag === "napi") {
+          tags.napi = true;
+        } else if (tag.slice(0, 3) === "abi") {
+          tags.abi = tag.slice(3);
+        } else if (tag.slice(0, 2) === "uv") {
+          tags.uv = tag.slice(2);
+        } else if (tag.slice(0, 4) === "armv") {
+          tags.armv = tag.slice(4);
+        } else if (tag === "glibc" || tag === "musl") {
+          tags.libc = tag;
+        } else {
+          continue;
+        }
+        tags.specificity++;
+      }
+      return tags;
+    }
+    function matchTags(runtime2, abi2) {
+      return function(tags) {
+        if (tags == null) return false;
+        if (tags.runtime && tags.runtime !== runtime2 && !runtimeAgnostic(tags)) return false;
+        if (tags.abi && tags.abi !== abi2 && !tags.napi) return false;
+        if (tags.uv && tags.uv !== uv) return false;
+        if (tags.armv && tags.armv !== armv) return false;
+        if (tags.libc && tags.libc !== libc) return false;
+        return true;
+      };
+    }
+    function runtimeAgnostic(tags) {
+      return tags.runtime === "node" && tags.napi;
+    }
+    function compareTags(runtime2) {
+      return function(a, b) {
+        if (a.runtime !== b.runtime) {
+          return a.runtime === runtime2 ? -1 : 1;
+        } else if (a.abi !== b.abi) {
+          return a.abi ? -1 : 1;
+        } else if (a.specificity !== b.specificity) {
+          return a.specificity > b.specificity ? -1 : 1;
+        } else {
+          return 0;
+        }
+      };
+    }
+    function isNwjs() {
+      return !!(process.versions && process.versions.nw);
+    }
+    function isElectron() {
+      if (process.versions && process.versions.electron) return true;
+      if (process.env.ELECTRON_RUN_AS_NODE) return true;
+      return typeof window !== "undefined" && window.process && window.process.type === "renderer";
+    }
+    function isAlpine(platform2) {
+      return platform2 === "linux" && fs.existsSync("/etc/alpine-release");
+    }
+    load.parseTags = parseTags;
+    load.matchTags = matchTags;
+    load.compareTags = compareTags;
+    load.parseTuple = parseTuple;
+    load.matchTuple = matchTuple;
+    load.compareTuples = compareTuples;
+  }
+});
+
+// ../valuescan/node_modules/node-gyp-build/index.js
+var require_node_gyp_build2 = __commonJS({
+  "../valuescan/node_modules/node-gyp-build/index.js"(exports, module) {
+    var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
+    if (typeof runtimeRequire.addon === "function") {
+      module.exports = runtimeRequire.addon.bind(runtimeRequire);
+    } else {
+      module.exports = require_node_gyp_build();
+    }
+  }
+});
+
+// ../valuescan/node_modules/bufferutil/fallback.js
+var require_fallback = __commonJS({
+  "../valuescan/node_modules/bufferutil/fallback.js"(exports, module) {
+    "use strict";
+    var mask = (source, mask2, output, offset, length) => {
+      for (var i = 0; i < length; i++) {
+        output[offset + i] = source[i] ^ mask2[i & 3];
+      }
+    };
+    var unmask = (buffer, mask2) => {
+      const length = buffer.length;
+      for (var i = 0; i < length; i++) {
+        buffer[i] ^= mask2[i & 3];
+      }
+    };
+    module.exports = { mask, unmask };
+  }
+});
+
+// ../valuescan/node_modules/bufferutil/index.js
+var require_bufferutil = __commonJS({
+  "../valuescan/node_modules/bufferutil/index.js"(exports, module) {
+    "use strict";
+    try {
+      module.exports = require_node_gyp_build2()(__dirname);
+    } catch (e) {
+      module.exports = require_fallback();
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/buffer-util.js
+var require_buffer_util = __commonJS({
+  "../valuescan/node_modules/ws/lib/buffer-util.js"(exports, module) {
+    "use strict";
+    var { EMPTY_BUFFER } = require_constants();
+    var FastBuffer = Buffer[Symbol.species];
+    function concat2(list, totalLength) {
+      if (list.length === 0) return EMPTY_BUFFER;
+      if (list.length === 1) return list[0];
+      const target = Buffer.allocUnsafe(totalLength);
+      let offset = 0;
+      for (let i = 0; i < list.length; i++) {
+        const buf = list[i];
+        target.set(buf, offset);
+        offset += buf.length;
+      }
+      if (offset < totalLength) {
+        return new FastBuffer(target.buffer, target.byteOffset, offset);
+      }
+      return target;
+    }
+    function _mask(source, mask, output, offset, length) {
+      for (let i = 0; i < length; i++) {
+        output[offset + i] = source[i] ^ mask[i & 3];
+      }
+    }
+    function _unmask(buffer, mask) {
+      for (let i = 0; i < buffer.length; i++) {
+        buffer[i] ^= mask[i & 3];
+      }
+    }
+    function toArrayBuffer(buf) {
+      if (buf.length === buf.buffer.byteLength) {
+        return buf.buffer;
+      }
+      return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length);
+    }
+    function toBuffer(data) {
+      toBuffer.readOnly = true;
+      if (Buffer.isBuffer(data)) return data;
+      let buf;
+      if (data instanceof ArrayBuffer) {
+        buf = new FastBuffer(data);
+      } else if (ArrayBuffer.isView(data)) {
+        buf = new FastBuffer(data.buffer, data.byteOffset, data.byteLength);
+      } else {
+        buf = Buffer.from(data);
+        toBuffer.readOnly = false;
+      }
+      return buf;
+    }
+    module.exports = {
+      concat: concat2,
+      mask: _mask,
+      toArrayBuffer,
+      toBuffer,
+      unmask: _unmask
+    };
+    if (!process.env.WS_NO_BUFFER_UTIL) {
+      try {
+        const bufferUtil = require_bufferutil();
+        module.exports.mask = function(source, mask, output, offset, length) {
+          if (length < 48) _mask(source, mask, output, offset, length);
+          else bufferUtil.mask(source, mask, output, offset, length);
+        };
+        module.exports.unmask = function(buffer, mask) {
+          if (buffer.length < 32) _unmask(buffer, mask);
+          else bufferUtil.unmask(buffer, mask);
+        };
+      } catch (e) {
+      }
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/limiter.js
+var require_limiter = __commonJS({
+  "../valuescan/node_modules/ws/lib/limiter.js"(exports, module) {
+    "use strict";
+    var kDone = /* @__PURE__ */ Symbol("kDone");
+    var kRun = /* @__PURE__ */ Symbol("kRun");
+    var Limiter2 = class {
+      /**
+       * Creates a new `Limiter`.
+       *
+       * @param {Number} [concurrency=Infinity] The maximum number of jobs allowed
+       *     to run concurrently
+       */
+      constructor(concurrency) {
+        this[kDone] = () => {
+          this.pending--;
+          this[kRun]();
+        };
+        this.concurrency = concurrency || Infinity;
+        this.jobs = [];
+        this.pending = 0;
+      }
+      /**
+       * Adds a job to the queue.
+       *
+       * @param {Function} job The job to run
+       * @public
+       */
+      add(job) {
+        this.jobs.push(job);
+        this[kRun]();
+      }
+      /**
+       * Removes a job from the queue and runs it if possible.
+       *
+       * @private
+       */
+      [kRun]() {
+        if (this.pending === this.concurrency) return;
+        if (this.jobs.length) {
+          const job = this.jobs.shift();
+          this.pending++;
+          job(this[kDone]);
+        }
+      }
+    };
+    module.exports = Limiter2;
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/permessage-deflate.js
+var require_permessage_deflate = __commonJS({
+  "../valuescan/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+    "use strict";
+    var zlib = __require("zlib");
+    var bufferUtil = require_buffer_util();
+    var Limiter2 = require_limiter();
+    var { kStatusCode } = require_constants();
+    var FastBuffer = Buffer[Symbol.species];
+    var TRAILER = Buffer.from([0, 0, 255, 255]);
+    var kPerMessageDeflate = /* @__PURE__ */ Symbol("permessage-deflate");
+    var kTotalLength = /* @__PURE__ */ Symbol("total-length");
+    var kCallback = /* @__PURE__ */ Symbol("callback");
+    var kBuffers = /* @__PURE__ */ Symbol("buffers");
+    var kError = /* @__PURE__ */ Symbol("error");
+    var zlibLimiter;
+    var PerMessageDeflate2 = class {
+      /**
+       * Creates a PerMessageDeflate instance.
+       *
+       * @param {Object} [options] Configuration options
+       * @param {(Boolean|Number)} [options.clientMaxWindowBits] Advertise support
+       *     for, or request, a custom client window size
+       * @param {Boolean} [options.clientNoContextTakeover=false] Advertise/
+       *     acknowledge disabling of client context takeover
+       * @param {Number} [options.concurrencyLimit=10] The number of concurrent
+       *     calls to zlib
+       * @param {Boolean} [options.isServer=false] Create the instance in either
+       *     server or client mode
+       * @param {Number} [options.maxPayload=0] The maximum allowed message length
+       * @param {(Boolean|Number)} [options.serverMaxWindowBits] Request/confirm the
+       *     use of a custom server window size
+       * @param {Boolean} [options.serverNoContextTakeover=false] Request/accept
+       *     disabling of server context takeover
+       * @param {Number} [options.threshold=1024] Size (in bytes) below which
+       *     messages should not be compressed if context takeover is disabled
+       * @param {Object} [options.zlibDeflateOptions] Options to pass to zlib on
+       *     deflate
+       * @param {Object} [options.zlibInflateOptions] Options to pass to zlib on
+       *     inflate
+       */
+      constructor(options) {
+        this._options = options || {};
+        this._threshold = this._options.threshold !== void 0 ? this._options.threshold : 1024;
+        this._maxPayload = this._options.maxPayload | 0;
+        this._isServer = !!this._options.isServer;
+        this._deflate = null;
+        this._inflate = null;
+        this.params = null;
+        if (!zlibLimiter) {
+          const concurrency = this._options.concurrencyLimit !== void 0 ? this._options.concurrencyLimit : 10;
+          zlibLimiter = new Limiter2(concurrency);
+        }
+      }
+      /**
+       * @type {String}
+       */
+      static get extensionName() {
+        return "permessage-deflate";
+      }
+      /**
+       * Create an extension negotiation offer.
+       *
+       * @return {Object} Extension parameters
+       * @public
+       */
+      offer() {
+        const params = {};
+        if (this._options.serverNoContextTakeover) {
+          params.server_no_context_takeover = true;
+        }
+        if (this._options.clientNoContextTakeover) {
+          params.client_no_context_takeover = true;
+        }
+        if (this._options.serverMaxWindowBits) {
+          params.server_max_window_bits = this._options.serverMaxWindowBits;
+        }
+        if (this._options.clientMaxWindowBits) {
+          params.client_max_window_bits = this._options.clientMaxWindowBits;
+        } else if (this._options.clientMaxWindowBits == null) {
+          params.client_max_window_bits = true;
+        }
+        return params;
+      }
+      /**
+       * Accept an extension negotiation offer/response.
+       *
+       * @param {Array} configurations The extension negotiation offers/reponse
+       * @return {Object} Accepted configuration
+       * @public
+       */
+      accept(configurations) {
+        configurations = this.normalizeParams(configurations);
+        this.params = this._isServer ? this.acceptAsServer(configurations) : this.acceptAsClient(configurations);
+        return this.params;
+      }
+      /**
+       * Releases all resources used by the extension.
+       *
+       * @public
+       */
+      cleanup() {
+        if (this._inflate) {
+          this._inflate.close();
+          this._inflate = null;
+        }
+        if (this._deflate) {
+          const callback = this._deflate[kCallback];
+          this._deflate.close();
+          this._deflate = null;
+          if (callback) {
+            callback(
+              new Error(
+                "The deflate stream was closed while data was being processed"
+              )
+            );
+          }
+        }
+      }
+      /**
+       *  Accept an extension negotiation offer.
+       *
+       * @param {Array} offers The extension negotiation offers
+       * @return {Object} Accepted configuration
+       * @private
+       */
+      acceptAsServer(offers) {
+        const opts = this._options;
+        const accepted = offers.find((params) => {
+          if (opts.serverNoContextTakeover === false && params.server_no_context_takeover || params.server_max_window_bits && (opts.serverMaxWindowBits === false || typeof opts.serverMaxWindowBits === "number" && opts.serverMaxWindowBits > params.server_max_window_bits) || typeof opts.clientMaxWindowBits === "number" && (typeof params.client_max_window_bits === "number" ? opts.clientMaxWindowBits > params.client_max_window_bits : !params.client_max_window_bits)) {
+            return false;
+          }
+          return true;
+        });
+        if (!accepted) {
+          throw new Error("None of the extension offers can be accepted");
+        }
+        if (opts.serverNoContextTakeover) {
+          accepted.server_no_context_takeover = true;
+        }
+        if (opts.clientNoContextTakeover) {
+          accepted.client_no_context_takeover = true;
+        }
+        if (typeof opts.serverMaxWindowBits === "number") {
+          accepted.server_max_window_bits = opts.serverMaxWindowBits;
+        }
+        if (typeof opts.clientMaxWindowBits === "number") {
+          accepted.client_max_window_bits = opts.clientMaxWindowBits;
+        } else if (accepted.client_max_window_bits === true || opts.clientMaxWindowBits === false) {
+          delete accepted.client_max_window_bits;
+        }
+        return accepted;
+      }
+      /**
+       * Accept the extension negotiation response.
+       *
+       * @param {Array} response The extension negotiation response
+       * @return {Object} Accepted configuration
+       * @private
+       */
+      acceptAsClient(response) {
+        const params = response[0];
+        if (this._options.clientNoContextTakeover === false && params.client_no_context_takeover) {
+          throw new Error('Unexpected parameter "client_no_context_takeover"');
+        }
+        if (!params.client_max_window_bits) {
+          if (typeof this._options.clientMaxWindowBits === "number") {
+            params.client_max_window_bits = this._options.clientMaxWindowBits;
+          }
+        } else if (this._options.clientMaxWindowBits === false || typeof this._options.clientMaxWindowBits === "number" && params.client_max_window_bits > this._options.clientMaxWindowBits) {
+          throw new Error(
+            'Unexpected or invalid parameter "client_max_window_bits"'
+          );
+        }
+        return params;
+      }
+      /**
+       * Normalize parameters.
+       *
+       * @param {Array} configurations The extension negotiation offers/reponse
+       * @return {Array} The offers/response with normalized parameters
+       * @private
+       */
+      normalizeParams(configurations) {
+        configurations.forEach((params) => {
+          Object.keys(params).forEach((key2) => {
+            let value = params[key2];
+            if (value.length > 1) {
+              throw new Error(`Parameter "${key2}" must have only a single value`);
+            }
+            value = value[0];
+            if (key2 === "client_max_window_bits") {
+              if (value !== true) {
+                const num3 = +value;
+                if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
+                  throw new TypeError(
+                    `Invalid value for parameter "${key2}": ${value}`
+                  );
+                }
+                value = num3;
+              } else if (!this._isServer) {
+                throw new TypeError(
+                  `Invalid value for parameter "${key2}": ${value}`
+                );
+              }
+            } else if (key2 === "server_max_window_bits") {
+              const num3 = +value;
+              if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
+                throw new TypeError(
+                  `Invalid value for parameter "${key2}": ${value}`
+                );
+              }
+              value = num3;
+            } else if (key2 === "client_no_context_takeover" || key2 === "server_no_context_takeover") {
+              if (value !== true) {
+                throw new TypeError(
+                  `Invalid value for parameter "${key2}": ${value}`
+                );
+              }
+            } else {
+              throw new Error(`Unknown parameter "${key2}"`);
+            }
+            params[key2] = value;
+          });
+        });
+        return configurations;
+      }
+      /**
+       * Decompress data. Concurrency limited.
+       *
+       * @param {Buffer} data Compressed data
+       * @param {Boolean} fin Specifies whether or not this is the last fragment
+       * @param {Function} callback Callback
+       * @public
+       */
+      decompress(data, fin, callback) {
+        zlibLimiter.add((done) => {
+          this._decompress(data, fin, (err, result) => {
+            done();
+            callback(err, result);
+          });
+        });
+      }
+      /**
+       * Compress data. Concurrency limited.
+       *
+       * @param {(Buffer|String)} data Data to compress
+       * @param {Boolean} fin Specifies whether or not this is the last fragment
+       * @param {Function} callback Callback
+       * @public
+       */
+      compress(data, fin, callback) {
+        zlibLimiter.add((done) => {
+          this._compress(data, fin, (err, result) => {
+            done();
+            callback(err, result);
+          });
+        });
+      }
+      /**
+       * Decompress data.
+       *
+       * @param {Buffer} data Compressed data
+       * @param {Boolean} fin Specifies whether or not this is the last fragment
+       * @param {Function} callback Callback
+       * @private
+       */
+      _decompress(data, fin, callback) {
+        const endpoint = this._isServer ? "client" : "server";
+        if (!this._inflate) {
+          const key2 = `${endpoint}_max_window_bits`;
+          const windowBits = typeof this.params[key2] !== "number" ? zlib.Z_DEFAULT_WINDOWBITS : this.params[key2];
+          this._inflate = zlib.createInflateRaw({
+            ...this._options.zlibInflateOptions,
+            windowBits
+          });
+          this._inflate[kPerMessageDeflate] = this;
+          this._inflate[kTotalLength] = 0;
+          this._inflate[kBuffers] = [];
+          this._inflate.on("error", inflateOnError);
+          this._inflate.on("data", inflateOnData);
+        }
+        this._inflate[kCallback] = callback;
+        this._inflate.write(data);
+        if (fin) this._inflate.write(TRAILER);
+        this._inflate.flush(() => {
+          const err = this._inflate[kError];
+          if (err) {
+            this._inflate.close();
+            this._inflate = null;
+            callback(err);
+            return;
+          }
+          const data2 = bufferUtil.concat(
+            this._inflate[kBuffers],
+            this._inflate[kTotalLength]
+          );
+          if (this._inflate._readableState.endEmitted) {
+            this._inflate.close();
+            this._inflate = null;
+          } else {
+            this._inflate[kTotalLength] = 0;
+            this._inflate[kBuffers] = [];
+            if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+              this._inflate.reset();
+            }
+          }
+          callback(null, data2);
+        });
+      }
+      /**
+       * Compress data.
+       *
+       * @param {(Buffer|String)} data Data to compress
+       * @param {Boolean} fin Specifies whether or not this is the last fragment
+       * @param {Function} callback Callback
+       * @private
+       */
+      _compress(data, fin, callback) {
+        const endpoint = this._isServer ? "server" : "client";
+        if (!this._deflate) {
+          const key2 = `${endpoint}_max_window_bits`;
+          const windowBits = typeof this.params[key2] !== "number" ? zlib.Z_DEFAULT_WINDOWBITS : this.params[key2];
+          this._deflate = zlib.createDeflateRaw({
+            ...this._options.zlibDeflateOptions,
+            windowBits
+          });
+          this._deflate[kTotalLength] = 0;
+          this._deflate[kBuffers] = [];
+          this._deflate.on("data", deflateOnData);
+        }
+        this._deflate[kCallback] = callback;
+        this._deflate.write(data);
+        this._deflate.flush(zlib.Z_SYNC_FLUSH, () => {
+          if (!this._deflate) {
+            return;
+          }
+          let data2 = bufferUtil.concat(
+            this._deflate[kBuffers],
+            this._deflate[kTotalLength]
+          );
+          if (fin) {
+            data2 = new FastBuffer(data2.buffer, data2.byteOffset, data2.length - 4);
+          }
+          this._deflate[kCallback] = null;
+          this._deflate[kTotalLength] = 0;
+          this._deflate[kBuffers] = [];
+          if (fin && this.params[`${endpoint}_no_context_takeover`]) {
+            this._deflate.reset();
+          }
+          callback(null, data2);
+        });
+      }
+    };
+    module.exports = PerMessageDeflate2;
+    function deflateOnData(chunk) {
+      this[kBuffers].push(chunk);
+      this[kTotalLength] += chunk.length;
+    }
+    function inflateOnData(chunk) {
+      this[kTotalLength] += chunk.length;
+      if (this[kPerMessageDeflate]._maxPayload < 1 || this[kTotalLength] <= this[kPerMessageDeflate]._maxPayload) {
+        this[kBuffers].push(chunk);
+        return;
+      }
+      this[kError] = new RangeError("Max payload size exceeded");
+      this[kError].code = "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH";
+      this[kError][kStatusCode] = 1009;
+      this.removeListener("data", inflateOnData);
+      this.reset();
+    }
+    function inflateOnError(err) {
+      this[kPerMessageDeflate]._inflate = null;
+      if (this[kError]) {
+        this[kCallback](this[kError]);
+        return;
+      }
+      err[kStatusCode] = 1007;
+      this[kCallback](err);
+    }
+  }
+});
+
+// ../valuescan/node_modules/utf-8-validate/fallback.js
+var require_fallback2 = __commonJS({
+  "../valuescan/node_modules/utf-8-validate/fallback.js"(exports, module) {
+    "use strict";
+    function isValidUTF8(buf) {
+      const len = buf.length;
+      let i = 0;
+      while (i < len) {
+        if ((buf[i] & 128) === 0) {
+          i++;
+        } else if ((buf[i] & 224) === 192) {
+          if (i + 1 === len || (buf[i + 1] & 192) !== 128 || (buf[i] & 254) === 192) {
+            return false;
+          }
+          i += 2;
+        } else if ((buf[i] & 240) === 224) {
+          if (i + 2 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || buf[i] === 224 && (buf[i + 1] & 224) === 128 || // overlong
+          buf[i] === 237 && (buf[i + 1] & 224) === 160) {
+            return false;
+          }
+          i += 3;
+        } else if ((buf[i] & 248) === 240) {
+          if (i + 3 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || (buf[i + 3] & 192) !== 128 || buf[i] === 240 && (buf[i + 1] & 240) === 128 || // overlong
+          buf[i] === 244 && buf[i + 1] > 143 || buf[i] > 244) {
+            return false;
+          }
+          i += 4;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    }
+    module.exports = isValidUTF8;
+  }
+});
+
+// ../valuescan/node_modules/utf-8-validate/index.js
+var require_utf_8_validate = __commonJS({
+  "../valuescan/node_modules/utf-8-validate/index.js"(exports, module) {
+    "use strict";
+    try {
+      module.exports = require_node_gyp_build2()(__dirname);
+    } catch (e) {
+      module.exports = require_fallback2();
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/validation.js
+var require_validation = __commonJS({
+  "../valuescan/node_modules/ws/lib/validation.js"(exports, module) {
+    "use strict";
+    var { isUtf8 } = __require("buffer");
+    var { hasBlob } = require_constants();
+    var tokenChars = [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      // 0 - 15
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      // 16 - 31
+      0,
+      1,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1,
+      1,
+      0,
+      // 32 - 47
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      // 48 - 63
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      // 64 - 79
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0,
+      0,
+      1,
+      1,
+      // 80 - 95
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      // 96 - 111
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      1,
+      0,
+      1,
+      0
+      // 112 - 127
+    ];
+    function isValidStatusCode(code) {
+      return code >= 1e3 && code <= 1014 && code !== 1004 && code !== 1005 && code !== 1006 || code >= 3e3 && code <= 4999;
+    }
+    function _isValidUTF8(buf) {
+      const len = buf.length;
+      let i = 0;
+      while (i < len) {
+        if ((buf[i] & 128) === 0) {
+          i++;
+        } else if ((buf[i] & 224) === 192) {
+          if (i + 1 === len || (buf[i + 1] & 192) !== 128 || (buf[i] & 254) === 192) {
+            return false;
+          }
+          i += 2;
+        } else if ((buf[i] & 240) === 224) {
+          if (i + 2 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || buf[i] === 224 && (buf[i + 1] & 224) === 128 || // Overlong
+          buf[i] === 237 && (buf[i + 1] & 224) === 160) {
+            return false;
+          }
+          i += 3;
+        } else if ((buf[i] & 248) === 240) {
+          if (i + 3 >= len || (buf[i + 1] & 192) !== 128 || (buf[i + 2] & 192) !== 128 || (buf[i + 3] & 192) !== 128 || buf[i] === 240 && (buf[i + 1] & 240) === 128 || // Overlong
+          buf[i] === 244 && buf[i + 1] > 143 || buf[i] > 244) {
+            return false;
+          }
+          i += 4;
+        } else {
+          return false;
+        }
+      }
+      return true;
+    }
+    function isBlob(value) {
+      return hasBlob && typeof value === "object" && typeof value.arrayBuffer === "function" && typeof value.type === "string" && typeof value.stream === "function" && (value[Symbol.toStringTag] === "Blob" || value[Symbol.toStringTag] === "File");
+    }
+    module.exports = {
+      isBlob,
+      isValidStatusCode,
+      isValidUTF8: _isValidUTF8,
+      tokenChars
+    };
+    if (isUtf8) {
+      module.exports.isValidUTF8 = function(buf) {
+        return buf.length < 24 ? _isValidUTF8(buf) : isUtf8(buf);
+      };
+    } else if (!process.env.WS_NO_UTF_8_VALIDATE) {
+      try {
+        const isValidUTF8 = require_utf_8_validate();
+        module.exports.isValidUTF8 = function(buf) {
+          return buf.length < 32 ? _isValidUTF8(buf) : isValidUTF8(buf);
+        };
+      } catch (e) {
+      }
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/receiver.js
+var require_receiver = __commonJS({
+  "../valuescan/node_modules/ws/lib/receiver.js"(exports, module) {
+    "use strict";
+    var { Writable } = __require("stream");
+    var PerMessageDeflate2 = require_permessage_deflate();
+    var {
+      BINARY_TYPES,
+      EMPTY_BUFFER,
+      kStatusCode,
+      kWebSocket
+    } = require_constants();
+    var { concat: concat2, toArrayBuffer, unmask } = require_buffer_util();
+    var { isValidStatusCode, isValidUTF8 } = require_validation();
+    var FastBuffer = Buffer[Symbol.species];
+    var GET_INFO = 0;
+    var GET_PAYLOAD_LENGTH_16 = 1;
+    var GET_PAYLOAD_LENGTH_64 = 2;
+    var GET_MASK = 3;
+    var GET_DATA = 4;
+    var INFLATING = 5;
+    var DEFER_EVENT = 6;
+    var Receiver2 = class extends Writable {
+      /**
+       * Creates a Receiver instance.
+       *
+       * @param {Object} [options] Options object
+       * @param {Boolean} [options.allowSynchronousEvents=true] Specifies whether
+       *     any of the `'message'`, `'ping'`, and `'pong'` events can be emitted
+       *     multiple times in the same tick
+       * @param {String} [options.binaryType=nodebuffer] The type for binary data
+       * @param {Object} [options.extensions] An object containing the negotiated
+       *     extensions
+       * @param {Boolean} [options.isServer=false] Specifies whether to operate in
+       *     client or server mode
+       * @param {Number} [options.maxBufferedChunks=0] The maximum number of
+       *     buffered data chunks
+       * @param {Number} [options.maxFragments=0] The maximum number of message
+       *     fragments
+       * @param {Number} [options.maxPayload=0] The maximum allowed message length
+       * @param {Boolean} [options.skipUTF8Validation=false] Specifies whether or
+       *     not to skip UTF-8 validation for text and close messages
+       */
+      constructor(options = {}) {
+        super();
+        this._allowSynchronousEvents = options.allowSynchronousEvents !== void 0 ? options.allowSynchronousEvents : true;
+        this._binaryType = options.binaryType || BINARY_TYPES[0];
+        this._extensions = options.extensions || {};
+        this._isServer = !!options.isServer;
+        this._maxBufferedChunks = options.maxBufferedChunks | 0;
+        this._maxFragments = options.maxFragments | 0;
+        this._maxPayload = options.maxPayload | 0;
+        this._skipUTF8Validation = !!options.skipUTF8Validation;
+        this[kWebSocket] = void 0;
+        this._bufferedBytes = 0;
+        this._buffers = [];
+        this._compressed = false;
+        this._payloadLength = 0;
+        this._mask = void 0;
+        this._fragmented = 0;
+        this._masked = false;
+        this._fin = false;
+        this._opcode = 0;
+        this._totalPayloadLength = 0;
+        this._messageLength = 0;
+        this._numFragments = 0;
+        this._fragments = [];
+        this._errored = false;
+        this._loop = false;
+        this._state = GET_INFO;
+      }
+      /**
+       * Implements `Writable.prototype._write()`.
+       *
+       * @param {Buffer} chunk The chunk of data to write
+       * @param {String} encoding The character encoding of `chunk`
+       * @param {Function} cb Callback
+       * @private
+       */
+      _write(chunk, encoding, cb) {
+        if (this._opcode === 8 && this._state == GET_INFO) return cb();
+        if (this._maxBufferedChunks > 0 && this._buffers.length >= this._maxBufferedChunks) {
+          cb(
+            this.createError(
+              RangeError,
+              "Too many buffered chunks",
+              false,
+              1008,
+              "WS_ERR_TOO_MANY_BUFFERED_PARTS"
+            )
+          );
+          return;
+        }
+        this._bufferedBytes += chunk.length;
+        this._buffers.push(chunk);
+        this.startLoop(cb);
+      }
+      /**
+       * Consumes `n` bytes from the buffered data.
+       *
+       * @param {Number} n The number of bytes to consume
+       * @return {Buffer} The consumed bytes
+       * @private
+       */
+      consume(n) {
+        this._bufferedBytes -= n;
+        if (n === this._buffers[0].length) return this._buffers.shift();
+        if (n < this._buffers[0].length) {
+          const buf = this._buffers[0];
+          this._buffers[0] = new FastBuffer(
+            buf.buffer,
+            buf.byteOffset + n,
+            buf.length - n
+          );
+          return new FastBuffer(buf.buffer, buf.byteOffset, n);
+        }
+        const dst = Buffer.allocUnsafe(n);
+        do {
+          const buf = this._buffers[0];
+          const offset = dst.length - n;
+          if (n >= buf.length) {
+            dst.set(this._buffers.shift(), offset);
+          } else {
+            dst.set(new Uint8Array(buf.buffer, buf.byteOffset, n), offset);
+            this._buffers[0] = new FastBuffer(
+              buf.buffer,
+              buf.byteOffset + n,
+              buf.length - n
+            );
+          }
+          n -= buf.length;
+        } while (n > 0);
+        return dst;
+      }
+      /**
+       * Starts the parsing loop.
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      startLoop(cb) {
+        this._loop = true;
+        do {
+          switch (this._state) {
+            case GET_INFO:
+              this.getInfo(cb);
+              break;
+            case GET_PAYLOAD_LENGTH_16:
+              this.getPayloadLength16(cb);
+              break;
+            case GET_PAYLOAD_LENGTH_64:
+              this.getPayloadLength64(cb);
+              break;
+            case GET_MASK:
+              this.getMask();
+              break;
+            case GET_DATA:
+              this.getData(cb);
+              break;
+            case INFLATING:
+            case DEFER_EVENT:
+              this._loop = false;
+              return;
+          }
+        } while (this._loop);
+        if (!this._errored) cb();
+      }
+      /**
+       * Reads the first two bytes of a frame.
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      getInfo(cb) {
+        if (this._bufferedBytes < 2) {
+          this._loop = false;
+          return;
+        }
+        const buf = this.consume(2);
+        if ((buf[0] & 48) !== 0) {
+          const error = this.createError(
+            RangeError,
+            "RSV2 and RSV3 must be clear",
+            true,
+            1002,
+            "WS_ERR_UNEXPECTED_RSV_2_3"
+          );
+          cb(error);
+          return;
+        }
+        const compressed = (buf[0] & 64) === 64;
+        if (compressed && !this._extensions[PerMessageDeflate2.extensionName]) {
+          const error = this.createError(
+            RangeError,
+            "RSV1 must be clear",
+            true,
+            1002,
+            "WS_ERR_UNEXPECTED_RSV_1"
+          );
+          cb(error);
+          return;
+        }
+        this._fin = (buf[0] & 128) === 128;
+        this._opcode = buf[0] & 15;
+        this._payloadLength = buf[1] & 127;
+        if (this._opcode === 0) {
+          if (compressed) {
+            const error = this.createError(
+              RangeError,
+              "RSV1 must be clear",
+              true,
+              1002,
+              "WS_ERR_UNEXPECTED_RSV_1"
+            );
+            cb(error);
+            return;
+          }
+          if (!this._fragmented) {
+            const error = this.createError(
+              RangeError,
+              "invalid opcode 0",
+              true,
+              1002,
+              "WS_ERR_INVALID_OPCODE"
+            );
+            cb(error);
+            return;
+          }
+          this._opcode = this._fragmented;
+        } else if (this._opcode === 1 || this._opcode === 2) {
+          if (this._fragmented) {
+            const error = this.createError(
+              RangeError,
+              `invalid opcode ${this._opcode}`,
+              true,
+              1002,
+              "WS_ERR_INVALID_OPCODE"
+            );
+            cb(error);
+            return;
+          }
+          this._compressed = compressed;
+        } else if (this._opcode > 7 && this._opcode < 11) {
+          if (!this._fin) {
+            const error = this.createError(
+              RangeError,
+              "FIN must be set",
+              true,
+              1002,
+              "WS_ERR_EXPECTED_FIN"
+            );
+            cb(error);
+            return;
+          }
+          if (compressed) {
+            const error = this.createError(
+              RangeError,
+              "RSV1 must be clear",
+              true,
+              1002,
+              "WS_ERR_UNEXPECTED_RSV_1"
+            );
+            cb(error);
+            return;
+          }
+          if (this._payloadLength > 125 || this._opcode === 8 && this._payloadLength === 1) {
+            const error = this.createError(
+              RangeError,
+              `invalid payload length ${this._payloadLength}`,
+              true,
+              1002,
+              "WS_ERR_INVALID_CONTROL_PAYLOAD_LENGTH"
+            );
+            cb(error);
+            return;
+          }
+        } else {
+          const error = this.createError(
+            RangeError,
+            `invalid opcode ${this._opcode}`,
+            true,
+            1002,
+            "WS_ERR_INVALID_OPCODE"
+          );
+          cb(error);
+          return;
+        }
+        if (!this._fin && !this._fragmented) this._fragmented = this._opcode;
+        this._masked = (buf[1] & 128) === 128;
+        if (this._isServer) {
+          if (!this._masked) {
+            const error = this.createError(
+              RangeError,
+              "MASK must be set",
+              true,
+              1002,
+              "WS_ERR_EXPECTED_MASK"
+            );
+            cb(error);
+            return;
+          }
+        } else if (this._masked) {
+          const error = this.createError(
+            RangeError,
+            "MASK must be clear",
+            true,
+            1002,
+            "WS_ERR_UNEXPECTED_MASK"
+          );
+          cb(error);
+          return;
+        }
+        if (this._payloadLength === 126) this._state = GET_PAYLOAD_LENGTH_16;
+        else if (this._payloadLength === 127) this._state = GET_PAYLOAD_LENGTH_64;
+        else this.haveLength(cb);
+      }
+      /**
+       * Gets extended payload length (7+16).
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      getPayloadLength16(cb) {
+        if (this._bufferedBytes < 2) {
+          this._loop = false;
+          return;
+        }
+        this._payloadLength = this.consume(2).readUInt16BE(0);
+        this.haveLength(cb);
+      }
+      /**
+       * Gets extended payload length (7+64).
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      getPayloadLength64(cb) {
+        if (this._bufferedBytes < 8) {
+          this._loop = false;
+          return;
+        }
+        const buf = this.consume(8);
+        const num3 = buf.readUInt32BE(0);
+        if (num3 > Math.pow(2, 53 - 32) - 1) {
+          const error = this.createError(
+            RangeError,
+            "Unsupported WebSocket frame: payload length > 2^53 - 1",
+            false,
+            1009,
+            "WS_ERR_UNSUPPORTED_DATA_PAYLOAD_LENGTH"
+          );
+          cb(error);
+          return;
+        }
+        this._payloadLength = num3 * Math.pow(2, 32) + buf.readUInt32BE(4);
+        this.haveLength(cb);
+      }
+      /**
+       * Payload length has been read.
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      haveLength(cb) {
+        if (this._payloadLength && this._opcode < 8) {
+          this._totalPayloadLength += this._payloadLength;
+          if (this._totalPayloadLength > this._maxPayload && this._maxPayload > 0) {
+            const error = this.createError(
+              RangeError,
+              "Max payload size exceeded",
+              false,
+              1009,
+              "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH"
+            );
+            cb(error);
+            return;
+          }
+        }
+        if (this._masked) this._state = GET_MASK;
+        else this._state = GET_DATA;
+      }
+      /**
+       * Reads mask bytes.
+       *
+       * @private
+       */
+      getMask() {
+        if (this._bufferedBytes < 4) {
+          this._loop = false;
+          return;
+        }
+        this._mask = this.consume(4);
+        this._state = GET_DATA;
+      }
+      /**
+       * Reads data bytes.
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      getData(cb) {
+        let data = EMPTY_BUFFER;
+        if (this._payloadLength) {
+          if (this._bufferedBytes < this._payloadLength) {
+            this._loop = false;
+            return;
+          }
+          data = this.consume(this._payloadLength);
+          if (this._masked && (this._mask[0] | this._mask[1] | this._mask[2] | this._mask[3]) !== 0) {
+            unmask(data, this._mask);
+          }
+        }
+        if (this._opcode > 7) {
+          this.controlMessage(data, cb);
+          return;
+        }
+        if (this._maxFragments > 0 && ++this._numFragments > this._maxFragments) {
+          const error = this.createError(
+            RangeError,
+            "Too many message fragments",
+            false,
+            1008,
+            "WS_ERR_TOO_MANY_BUFFERED_PARTS"
+          );
+          cb(error);
+          return;
+        }
+        if (this._compressed) {
+          this._state = INFLATING;
+          this.decompress(data, cb);
+          return;
+        }
+        if (data.length) {
+          this._messageLength = this._totalPayloadLength;
+          this._fragments.push(data);
+        }
+        this.dataMessage(cb);
+      }
+      /**
+       * Decompresses data.
+       *
+       * @param {Buffer} data Compressed data
+       * @param {Function} cb Callback
+       * @private
+       */
+      decompress(data, cb) {
+        const perMessageDeflate = this._extensions[PerMessageDeflate2.extensionName];
+        perMessageDeflate.decompress(data, this._fin, (err, buf) => {
+          if (err) return cb(err);
+          if (buf.length) {
+            this._messageLength += buf.length;
+            if (this._messageLength > this._maxPayload && this._maxPayload > 0) {
+              const error = this.createError(
+                RangeError,
+                "Max payload size exceeded",
+                false,
+                1009,
+                "WS_ERR_UNSUPPORTED_MESSAGE_LENGTH"
+              );
+              cb(error);
+              return;
+            }
+            this._fragments.push(buf);
+          }
+          this.dataMessage(cb);
+          if (this._state === GET_INFO) this.startLoop(cb);
+        });
+      }
+      /**
+       * Handles a data message.
+       *
+       * @param {Function} cb Callback
+       * @private
+       */
+      dataMessage(cb) {
+        if (!this._fin) {
+          this._state = GET_INFO;
+          return;
+        }
+        const messageLength = this._messageLength;
+        const fragments = this._fragments;
+        this._totalPayloadLength = 0;
+        this._messageLength = 0;
+        this._fragmented = 0;
+        this._numFragments = 0;
+        this._fragments = [];
+        if (this._opcode === 2) {
+          let data;
+          if (this._binaryType === "nodebuffer") {
+            data = concat2(fragments, messageLength);
+          } else if (this._binaryType === "arraybuffer") {
+            data = toArrayBuffer(concat2(fragments, messageLength));
+          } else if (this._binaryType === "blob") {
+            data = new Blob(fragments);
+          } else {
+            data = fragments;
+          }
+          if (this._allowSynchronousEvents) {
+            this.emit("message", data, true);
+            this._state = GET_INFO;
+          } else {
+            this._state = DEFER_EVENT;
+            setImmediate(() => {
+              this.emit("message", data, true);
+              this._state = GET_INFO;
+              this.startLoop(cb);
+            });
+          }
+        } else {
+          const buf = concat2(fragments, messageLength);
+          if (!this._skipUTF8Validation && !isValidUTF8(buf)) {
+            const error = this.createError(
+              Error,
+              "invalid UTF-8 sequence",
+              true,
+              1007,
+              "WS_ERR_INVALID_UTF8"
+            );
+            cb(error);
+            return;
+          }
+          if (this._state === INFLATING || this._allowSynchronousEvents) {
+            this.emit("message", buf, false);
+            this._state = GET_INFO;
+          } else {
+            this._state = DEFER_EVENT;
+            setImmediate(() => {
+              this.emit("message", buf, false);
+              this._state = GET_INFO;
+              this.startLoop(cb);
+            });
+          }
+        }
+      }
+      /**
+       * Handles a control message.
+       *
+       * @param {Buffer} data Data to handle
+       * @return {(Error|RangeError|undefined)} A possible error
+       * @private
+       */
+      controlMessage(data, cb) {
+        if (this._opcode === 8) {
+          if (data.length === 0) {
+            this._loop = false;
+            this.emit("conclude", 1005, EMPTY_BUFFER);
+            this.end();
+          } else {
+            const code = data.readUInt16BE(0);
+            if (!isValidStatusCode(code)) {
+              const error = this.createError(
+                RangeError,
+                `invalid status code ${code}`,
+                true,
+                1002,
+                "WS_ERR_INVALID_CLOSE_CODE"
+              );
+              cb(error);
+              return;
+            }
+            const buf = new FastBuffer(
+              data.buffer,
+              data.byteOffset + 2,
+              data.length - 2
+            );
+            if (!this._skipUTF8Validation && !isValidUTF8(buf)) {
+              const error = this.createError(
+                Error,
+                "invalid UTF-8 sequence",
+                true,
+                1007,
+                "WS_ERR_INVALID_UTF8"
+              );
+              cb(error);
+              return;
+            }
+            this._loop = false;
+            this.emit("conclude", code, buf);
+            this.end();
+          }
+          this._state = GET_INFO;
+          return;
+        }
+        if (this._allowSynchronousEvents) {
+          this.emit(this._opcode === 9 ? "ping" : "pong", data);
+          this._state = GET_INFO;
+        } else {
+          this._state = DEFER_EVENT;
+          setImmediate(() => {
+            this.emit(this._opcode === 9 ? "ping" : "pong", data);
+            this._state = GET_INFO;
+            this.startLoop(cb);
+          });
+        }
+      }
+      /**
+       * Builds an error object.
+       *
+       * @param {function(new:Error|RangeError)} ErrorCtor The error constructor
+       * @param {String} message The error message
+       * @param {Boolean} prefix Specifies whether or not to add a default prefix to
+       *     `message`
+       * @param {Number} statusCode The status code
+       * @param {String} errorCode The exposed error code
+       * @return {(Error|RangeError)} The error
+       * @private
+       */
+      createError(ErrorCtor, message, prefix, statusCode, errorCode) {
+        this._loop = false;
+        this._errored = true;
+        const err = new ErrorCtor(
+          prefix ? `Invalid WebSocket frame: ${message}` : message
+        );
+        Error.captureStackTrace(err, this.createError);
+        err.code = errorCode;
+        err[kStatusCode] = statusCode;
+        return err;
+      }
+    };
+    module.exports = Receiver2;
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/sender.js
+var require_sender = __commonJS({
+  "../valuescan/node_modules/ws/lib/sender.js"(exports, module) {
+    "use strict";
+    var { Duplex } = __require("stream");
+    var { randomFillSync } = __require("crypto");
+    var {
+      types: { isUint8Array }
+    } = __require("util");
+    var PerMessageDeflate2 = require_permessage_deflate();
+    var { EMPTY_BUFFER, kWebSocket, NOOP } = require_constants();
+    var { isBlob, isValidStatusCode } = require_validation();
+    var { mask: applyMask, toBuffer } = require_buffer_util();
+    var kByteLength = /* @__PURE__ */ Symbol("kByteLength");
+    var maskBuffer = Buffer.alloc(4);
+    var RANDOM_POOL_SIZE = 8 * 1024;
+    var randomPool;
+    var randomPoolPointer = RANDOM_POOL_SIZE;
+    var DEFAULT = 0;
+    var DEFLATING = 1;
+    var GET_BLOB_DATA = 2;
+    var Sender2 = class _Sender {
+      /**
+       * Creates a Sender instance.
+       *
+       * @param {Duplex} socket The connection socket
+       * @param {Object} [extensions] An object containing the negotiated extensions
+       * @param {Function} [generateMask] The function used to generate the masking
+       *     key
+       */
+      constructor(socket, extensions, generateMask) {
+        this._extensions = extensions || {};
+        if (generateMask) {
+          this._generateMask = generateMask;
+          this._maskBuffer = Buffer.alloc(4);
+        }
+        this._socket = socket;
+        this._firstFragment = true;
+        this._compress = false;
+        this._bufferedBytes = 0;
+        this._queue = [];
+        this._state = DEFAULT;
+        this.onerror = NOOP;
+        this[kWebSocket] = void 0;
+      }
+      /**
+       * Frames a piece of data according to the HyBi WebSocket protocol.
+       *
+       * @param {(Buffer|String)} data The data to frame
+       * @param {Object} options Options object
+       * @param {Boolean} [options.fin=false] Specifies whether or not to set the
+       *     FIN bit
+       * @param {Function} [options.generateMask] The function used to generate the
+       *     masking key
+       * @param {Boolean} [options.mask=false] Specifies whether or not to mask
+       *     `data`
+       * @param {Buffer} [options.maskBuffer] The buffer used to store the masking
+       *     key
+       * @param {Number} options.opcode The opcode
+       * @param {Boolean} [options.readOnly=false] Specifies whether `data` can be
+       *     modified
+       * @param {Boolean} [options.rsv1=false] Specifies whether or not to set the
+       *     RSV1 bit
+       * @return {(Buffer|String)[]} The framed data
+       * @public
+       */
+      static frame(data, options) {
+        let mask;
+        let merge = false;
+        let offset = 2;
+        let skipMasking = false;
+        if (options.mask) {
+          mask = options.maskBuffer || maskBuffer;
+          if (options.generateMask) {
+            options.generateMask(mask);
+          } else {
+            if (randomPoolPointer === RANDOM_POOL_SIZE) {
+              if (randomPool === void 0) {
+                randomPool = Buffer.alloc(RANDOM_POOL_SIZE);
+              }
+              randomFillSync(randomPool, 0, RANDOM_POOL_SIZE);
+              randomPoolPointer = 0;
+            }
+            mask[0] = randomPool[randomPoolPointer++];
+            mask[1] = randomPool[randomPoolPointer++];
+            mask[2] = randomPool[randomPoolPointer++];
+            mask[3] = randomPool[randomPoolPointer++];
+          }
+          skipMasking = (mask[0] | mask[1] | mask[2] | mask[3]) === 0;
+          offset = 6;
+        }
+        let dataLength;
+        if (typeof data === "string") {
+          if ((!options.mask || skipMasking) && options[kByteLength] !== void 0) {
+            dataLength = options[kByteLength];
+          } else {
+            data = Buffer.from(data);
+            dataLength = data.length;
+          }
+        } else {
+          dataLength = data.length;
+          merge = options.mask && options.readOnly && !skipMasking;
+        }
+        let payloadLength = dataLength;
+        if (dataLength >= 65536) {
+          offset += 8;
+          payloadLength = 127;
+        } else if (dataLength > 125) {
+          offset += 2;
+          payloadLength = 126;
+        }
+        const target = Buffer.allocUnsafe(merge ? dataLength + offset : offset);
+        target[0] = options.fin ? options.opcode | 128 : options.opcode;
+        if (options.rsv1) target[0] |= 64;
+        target[1] = payloadLength;
+        if (payloadLength === 126) {
+          target.writeUInt16BE(dataLength, 2);
+        } else if (payloadLength === 127) {
+          target[2] = target[3] = 0;
+          target.writeUIntBE(dataLength, 4, 6);
+        }
+        if (!options.mask) return [target, data];
+        target[1] |= 128;
+        target[offset - 4] = mask[0];
+        target[offset - 3] = mask[1];
+        target[offset - 2] = mask[2];
+        target[offset - 1] = mask[3];
+        if (skipMasking) return [target, data];
+        if (merge) {
+          applyMask(data, mask, target, offset, dataLength);
+          return [target];
+        }
+        applyMask(data, mask, data, 0, dataLength);
+        return [target, data];
+      }
+      /**
+       * Sends a close message to the other peer.
+       *
+       * @param {Number} [code] The status code component of the body
+       * @param {(String|Buffer)} [data] The message component of the body
+       * @param {Boolean} [mask=false] Specifies whether or not to mask the message
+       * @param {Function} [cb] Callback
+       * @public
+       */
+      close(code, data, mask, cb) {
+        let buf;
+        if (code === void 0) {
+          buf = EMPTY_BUFFER;
+        } else if (typeof code !== "number" || !isValidStatusCode(code)) {
+          throw new TypeError("First argument must be a valid error code number");
+        } else if (data === void 0 || !data.length) {
+          buf = Buffer.allocUnsafe(2);
+          buf.writeUInt16BE(code, 0);
+        } else {
+          const length = Buffer.byteLength(data);
+          if (length > 123) {
+            throw new RangeError("The message must not be greater than 123 bytes");
+          }
+          buf = Buffer.allocUnsafe(2 + length);
+          buf.writeUInt16BE(code, 0);
+          if (typeof data === "string") {
+            buf.write(data, 2);
+          } else if (isUint8Array(data)) {
+            buf.set(data, 2);
+          } else {
+            throw new TypeError("Second argument must be a string or a Uint8Array");
+          }
+        }
+        const options = {
+          [kByteLength]: buf.length,
+          fin: true,
+          generateMask: this._generateMask,
+          mask,
+          maskBuffer: this._maskBuffer,
+          opcode: 8,
+          readOnly: false,
+          rsv1: false
+        };
+        if (this._state !== DEFAULT) {
+          this.enqueue([this.dispatch, buf, false, options, cb]);
+        } else {
+          this.sendFrame(_Sender.frame(buf, options), cb);
+        }
+      }
+      /**
+       * Sends a ping message to the other peer.
+       *
+       * @param {*} data The message to send
+       * @param {Boolean} [mask=false] Specifies whether or not to mask `data`
+       * @param {Function} [cb] Callback
+       * @public
+       */
+      ping(data, mask, cb) {
+        let byteLength;
+        let readOnly;
+        if (typeof data === "string") {
+          byteLength = Buffer.byteLength(data);
+          readOnly = false;
+        } else if (isBlob(data)) {
+          byteLength = data.size;
+          readOnly = false;
+        } else {
+          data = toBuffer(data);
+          byteLength = data.length;
+          readOnly = toBuffer.readOnly;
+        }
+        if (byteLength > 125) {
+          throw new RangeError("The data size must not be greater than 125 bytes");
+        }
+        const options = {
+          [kByteLength]: byteLength,
+          fin: true,
+          generateMask: this._generateMask,
+          mask,
+          maskBuffer: this._maskBuffer,
+          opcode: 9,
+          readOnly,
+          rsv1: false
+        };
+        if (isBlob(data)) {
+          if (this._state !== DEFAULT) {
+            this.enqueue([this.getBlobData, data, false, options, cb]);
+          } else {
+            this.getBlobData(data, false, options, cb);
+          }
+        } else if (this._state !== DEFAULT) {
+          this.enqueue([this.dispatch, data, false, options, cb]);
+        } else {
+          this.sendFrame(_Sender.frame(data, options), cb);
+        }
+      }
+      /**
+       * Sends a pong message to the other peer.
+       *
+       * @param {*} data The message to send
+       * @param {Boolean} [mask=false] Specifies whether or not to mask `data`
+       * @param {Function} [cb] Callback
+       * @public
+       */
+      pong(data, mask, cb) {
+        let byteLength;
+        let readOnly;
+        if (typeof data === "string") {
+          byteLength = Buffer.byteLength(data);
+          readOnly = false;
+        } else if (isBlob(data)) {
+          byteLength = data.size;
+          readOnly = false;
+        } else {
+          data = toBuffer(data);
+          byteLength = data.length;
+          readOnly = toBuffer.readOnly;
+        }
+        if (byteLength > 125) {
+          throw new RangeError("The data size must not be greater than 125 bytes");
+        }
+        const options = {
+          [kByteLength]: byteLength,
+          fin: true,
+          generateMask: this._generateMask,
+          mask,
+          maskBuffer: this._maskBuffer,
+          opcode: 10,
+          readOnly,
+          rsv1: false
+        };
+        if (isBlob(data)) {
+          if (this._state !== DEFAULT) {
+            this.enqueue([this.getBlobData, data, false, options, cb]);
+          } else {
+            this.getBlobData(data, false, options, cb);
+          }
+        } else if (this._state !== DEFAULT) {
+          this.enqueue([this.dispatch, data, false, options, cb]);
+        } else {
+          this.sendFrame(_Sender.frame(data, options), cb);
+        }
+      }
+      /**
+       * Sends a data message to the other peer.
+       *
+       * @param {*} data The message to send
+       * @param {Object} options Options object
+       * @param {Boolean} [options.binary=false] Specifies whether `data` is binary
+       *     or text
+       * @param {Boolean} [options.compress=false] Specifies whether or not to
+       *     compress `data`
+       * @param {Boolean} [options.fin=false] Specifies whether the fragment is the
+       *     last one
+       * @param {Boolean} [options.mask=false] Specifies whether or not to mask
+       *     `data`
+       * @param {Function} [cb] Callback
+       * @public
+       */
+      send(data, options, cb) {
+        const perMessageDeflate = this._extensions[PerMessageDeflate2.extensionName];
+        let opcode = options.binary ? 2 : 1;
+        let rsv1 = options.compress;
+        let byteLength;
+        let readOnly;
+        if (typeof data === "string") {
+          byteLength = Buffer.byteLength(data);
+          readOnly = false;
+        } else if (isBlob(data)) {
+          byteLength = data.size;
+          readOnly = false;
+        } else {
+          data = toBuffer(data);
+          byteLength = data.length;
+          readOnly = toBuffer.readOnly;
+        }
+        if (this._firstFragment) {
+          this._firstFragment = false;
+          if (rsv1 && perMessageDeflate && perMessageDeflate.params[perMessageDeflate._isServer ? "server_no_context_takeover" : "client_no_context_takeover"]) {
+            rsv1 = byteLength >= perMessageDeflate._threshold;
+          }
+          this._compress = rsv1;
+        } else {
+          rsv1 = false;
+          opcode = 0;
+        }
+        if (options.fin) this._firstFragment = true;
+        const opts = {
+          [kByteLength]: byteLength,
+          fin: options.fin,
+          generateMask: this._generateMask,
+          mask: options.mask,
+          maskBuffer: this._maskBuffer,
+          opcode,
+          readOnly,
+          rsv1
+        };
+        if (isBlob(data)) {
+          if (this._state !== DEFAULT) {
+            this.enqueue([this.getBlobData, data, this._compress, opts, cb]);
+          } else {
+            this.getBlobData(data, this._compress, opts, cb);
+          }
+        } else if (this._state !== DEFAULT) {
+          this.enqueue([this.dispatch, data, this._compress, opts, cb]);
+        } else {
+          this.dispatch(data, this._compress, opts, cb);
+        }
+      }
+      /**
+       * Gets the contents of a blob as binary data.
+       *
+       * @param {Blob} blob The blob
+       * @param {Boolean} [compress=false] Specifies whether or not to compress
+       *     the data
+       * @param {Object} options Options object
+       * @param {Boolean} [options.fin=false] Specifies whether or not to set the
+       *     FIN bit
+       * @param {Function} [options.generateMask] The function used to generate the
+       *     masking key
+       * @param {Boolean} [options.mask=false] Specifies whether or not to mask
+       *     `data`
+       * @param {Buffer} [options.maskBuffer] The buffer used to store the masking
+       *     key
+       * @param {Number} options.opcode The opcode
+       * @param {Boolean} [options.readOnly=false] Specifies whether `data` can be
+       *     modified
+       * @param {Boolean} [options.rsv1=false] Specifies whether or not to set the
+       *     RSV1 bit
+       * @param {Function} [cb] Callback
+       * @private
+       */
+      getBlobData(blob, compress, options, cb) {
+        this._bufferedBytes += options[kByteLength];
+        this._state = GET_BLOB_DATA;
+        blob.arrayBuffer().then((arrayBuffer) => {
+          if (this._socket.destroyed) {
+            const err = new Error(
+              "The socket was closed while the blob was being read"
+            );
+            process.nextTick(callCallbacks, this, err, cb);
+            return;
+          }
+          this._bufferedBytes -= options[kByteLength];
+          const data = toBuffer(arrayBuffer);
+          if (!compress) {
+            this._state = DEFAULT;
+            this.sendFrame(_Sender.frame(data, options), cb);
+            this.dequeue();
+          } else {
+            this.dispatch(data, compress, options, cb);
+          }
+        }).catch((err) => {
+          process.nextTick(onError, this, err, cb);
+        });
+      }
+      /**
+       * Dispatches a message.
+       *
+       * @param {(Buffer|String)} data The message to send
+       * @param {Boolean} [compress=false] Specifies whether or not to compress
+       *     `data`
+       * @param {Object} options Options object
+       * @param {Boolean} [options.fin=false] Specifies whether or not to set the
+       *     FIN bit
+       * @param {Function} [options.generateMask] The function used to generate the
+       *     masking key
+       * @param {Boolean} [options.mask=false] Specifies whether or not to mask
+       *     `data`
+       * @param {Buffer} [options.maskBuffer] The buffer used to store the masking
+       *     key
+       * @param {Number} options.opcode The opcode
+       * @param {Boolean} [options.readOnly=false] Specifies whether `data` can be
+       *     modified
+       * @param {Boolean} [options.rsv1=false] Specifies whether or not to set the
+       *     RSV1 bit
+       * @param {Function} [cb] Callback
+       * @private
+       */
+      dispatch(data, compress, options, cb) {
+        if (!compress) {
+          this.sendFrame(_Sender.frame(data, options), cb);
+          return;
+        }
+        const perMessageDeflate = this._extensions[PerMessageDeflate2.extensionName];
+        this._bufferedBytes += options[kByteLength];
+        this._state = DEFLATING;
+        perMessageDeflate.compress(data, options.fin, (_, buf) => {
+          if (this._socket.destroyed) {
+            const err = new Error(
+              "The socket was closed while data was being compressed"
+            );
+            callCallbacks(this, err, cb);
+            return;
+          }
+          this._bufferedBytes -= options[kByteLength];
+          this._state = DEFAULT;
+          options.readOnly = false;
+          this.sendFrame(_Sender.frame(buf, options), cb);
+          this.dequeue();
+        });
+      }
+      /**
+       * Executes queued send operations.
+       *
+       * @private
+       */
+      dequeue() {
+        while (this._state === DEFAULT && this._queue.length) {
+          const params = this._queue.shift();
+          this._bufferedBytes -= params[3][kByteLength];
+          Reflect.apply(params[0], this, params.slice(1));
+        }
+      }
+      /**
+       * Enqueues a send operation.
+       *
+       * @param {Array} params Send operation parameters.
+       * @private
+       */
+      enqueue(params) {
+        this._bufferedBytes += params[3][kByteLength];
+        this._queue.push(params);
+      }
+      /**
+       * Sends a frame.
+       *
+       * @param {(Buffer | String)[]} list The frame to send
+       * @param {Function} [cb] Callback
+       * @private
+       */
+      sendFrame(list, cb) {
+        if (list.length === 2) {
+          this._socket.cork();
+          this._socket.write(list[0]);
+          this._socket.write(list[1], cb);
+          this._socket.uncork();
+        } else {
+          this._socket.write(list[0], cb);
+        }
+      }
+    };
+    module.exports = Sender2;
+    function callCallbacks(sender, err, cb) {
+      if (typeof cb === "function") cb(err);
+      for (let i = 0; i < sender._queue.length; i++) {
+        const params = sender._queue[i];
+        const callback = params[params.length - 1];
+        if (typeof callback === "function") callback(err);
+      }
+    }
+    function onError(sender, err, cb) {
+      callCallbacks(sender, err, cb);
+      sender.onerror(err);
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/event-target.js
+var require_event_target = __commonJS({
+  "../valuescan/node_modules/ws/lib/event-target.js"(exports, module) {
+    "use strict";
+    var { kForOnEventAttribute, kListener } = require_constants();
+    var kCode = /* @__PURE__ */ Symbol("kCode");
+    var kData = /* @__PURE__ */ Symbol("kData");
+    var kError = /* @__PURE__ */ Symbol("kError");
+    var kMessage = /* @__PURE__ */ Symbol("kMessage");
+    var kReason = /* @__PURE__ */ Symbol("kReason");
+    var kTarget = /* @__PURE__ */ Symbol("kTarget");
+    var kType = /* @__PURE__ */ Symbol("kType");
+    var kWasClean = /* @__PURE__ */ Symbol("kWasClean");
+    var Event = class {
+      /**
+       * Create a new `Event`.
+       *
+       * @param {String} type The name of the event
+       * @throws {TypeError} If the `type` argument is not specified
+       */
+      constructor(type) {
+        this[kTarget] = null;
+        this[kType] = type;
+      }
+      /**
+       * @type {*}
+       */
+      get target() {
+        return this[kTarget];
+      }
+      /**
+       * @type {String}
+       */
+      get type() {
+        return this[kType];
+      }
+    };
+    Object.defineProperty(Event.prototype, "target", { enumerable: true });
+    Object.defineProperty(Event.prototype, "type", { enumerable: true });
+    var CloseEvent = class extends Event {
+      /**
+       * Create a new `CloseEvent`.
+       *
+       * @param {String} type The name of the event
+       * @param {Object} [options] A dictionary object that allows for setting
+       *     attributes via object members of the same name
+       * @param {Number} [options.code=0] The status code explaining why the
+       *     connection was closed
+       * @param {String} [options.reason=''] A human-readable string explaining why
+       *     the connection was closed
+       * @param {Boolean} [options.wasClean=false] Indicates whether or not the
+       *     connection was cleanly closed
+       */
+      constructor(type, options = {}) {
+        super(type);
+        this[kCode] = options.code === void 0 ? 0 : options.code;
+        this[kReason] = options.reason === void 0 ? "" : options.reason;
+        this[kWasClean] = options.wasClean === void 0 ? false : options.wasClean;
+      }
+      /**
+       * @type {Number}
+       */
+      get code() {
+        return this[kCode];
+      }
+      /**
+       * @type {String}
+       */
+      get reason() {
+        return this[kReason];
+      }
+      /**
+       * @type {Boolean}
+       */
+      get wasClean() {
+        return this[kWasClean];
+      }
+    };
+    Object.defineProperty(CloseEvent.prototype, "code", { enumerable: true });
+    Object.defineProperty(CloseEvent.prototype, "reason", { enumerable: true });
+    Object.defineProperty(CloseEvent.prototype, "wasClean", { enumerable: true });
+    var ErrorEvent = class extends Event {
+      /**
+       * Create a new `ErrorEvent`.
+       *
+       * @param {String} type The name of the event
+       * @param {Object} [options] A dictionary object that allows for setting
+       *     attributes via object members of the same name
+       * @param {*} [options.error=null] The error that generated this event
+       * @param {String} [options.message=''] The error message
+       */
+      constructor(type, options = {}) {
+        super(type);
+        this[kError] = options.error === void 0 ? null : options.error;
+        this[kMessage] = options.message === void 0 ? "" : options.message;
+      }
+      /**
+       * @type {*}
+       */
+      get error() {
+        return this[kError];
+      }
+      /**
+       * @type {String}
+       */
+      get message() {
+        return this[kMessage];
+      }
+    };
+    Object.defineProperty(ErrorEvent.prototype, "error", { enumerable: true });
+    Object.defineProperty(ErrorEvent.prototype, "message", { enumerable: true });
+    var MessageEvent = class extends Event {
+      /**
+       * Create a new `MessageEvent`.
+       *
+       * @param {String} type The name of the event
+       * @param {Object} [options] A dictionary object that allows for setting
+       *     attributes via object members of the same name
+       * @param {*} [options.data=null] The message content
+       */
+      constructor(type, options = {}) {
+        super(type);
+        this[kData] = options.data === void 0 ? null : options.data;
+      }
+      /**
+       * @type {*}
+       */
+      get data() {
+        return this[kData];
+      }
+    };
+    Object.defineProperty(MessageEvent.prototype, "data", { enumerable: true });
+    var EventTarget = {
+      /**
+       * Register an event listener.
+       *
+       * @param {String} type A string representing the event type to listen for
+       * @param {(Function|Object)} handler The listener to add
+       * @param {Object} [options] An options object specifies characteristics about
+       *     the event listener
+       * @param {Boolean} [options.once=false] A `Boolean` indicating that the
+       *     listener should be invoked at most once after being added. If `true`,
+       *     the listener would be automatically removed when invoked.
+       * @public
+       */
+      addEventListener(type, handler, options = {}) {
+        for (const listener of this.listeners(type)) {
+          if (!options[kForOnEventAttribute] && listener[kListener] === handler && !listener[kForOnEventAttribute]) {
+            return;
+          }
+        }
+        let wrapper;
+        if (type === "message") {
+          wrapper = function onMessage(data, isBinary) {
+            const event = new MessageEvent("message", {
+              data: isBinary ? data : data.toString()
+            });
+            event[kTarget] = this;
+            callListener(handler, this, event);
+          };
+        } else if (type === "close") {
+          wrapper = function onClose(code, message) {
+            const event = new CloseEvent("close", {
+              code,
+              reason: message.toString(),
+              wasClean: this._closeFrameReceived && this._closeFrameSent
+            });
+            event[kTarget] = this;
+            callListener(handler, this, event);
+          };
+        } else if (type === "error") {
+          wrapper = function onError(error) {
+            const event = new ErrorEvent("error", {
+              error,
+              message: error.message
+            });
+            event[kTarget] = this;
+            callListener(handler, this, event);
+          };
+        } else if (type === "open") {
+          wrapper = function onOpen() {
+            const event = new Event("open");
+            event[kTarget] = this;
+            callListener(handler, this, event);
+          };
+        } else {
+          return;
+        }
+        wrapper[kForOnEventAttribute] = !!options[kForOnEventAttribute];
+        wrapper[kListener] = handler;
+        if (options.once) {
+          this.once(type, wrapper);
+        } else {
+          this.on(type, wrapper);
+        }
+      },
+      /**
+       * Remove an event listener.
+       *
+       * @param {String} type A string representing the event type to remove
+       * @param {(Function|Object)} handler The listener to remove
+       * @public
+       */
+      removeEventListener(type, handler) {
+        for (const listener of this.listeners(type)) {
+          if (listener[kListener] === handler && !listener[kForOnEventAttribute]) {
+            this.removeListener(type, listener);
+            break;
+          }
+        }
+      }
+    };
+    module.exports = {
+      CloseEvent,
+      ErrorEvent,
+      Event,
+      EventTarget,
+      MessageEvent
+    };
+    function callListener(listener, thisArg, event) {
+      if (typeof listener === "object" && listener.handleEvent) {
+        listener.handleEvent.call(listener, event);
+      } else {
+        listener.call(thisArg, event);
+      }
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/extension.js
+var require_extension = __commonJS({
+  "../valuescan/node_modules/ws/lib/extension.js"(exports, module) {
+    "use strict";
+    var { tokenChars } = require_validation();
+    function push(dest, name, elem) {
+      if (dest[name] === void 0) dest[name] = [elem];
+      else dest[name].push(elem);
+    }
+    function parse(header) {
+      const offers = /* @__PURE__ */ Object.create(null);
+      let params = /* @__PURE__ */ Object.create(null);
+      let mustUnescape = false;
+      let isEscaping = false;
+      let inQuotes = false;
+      let extensionName;
+      let paramName;
+      let start = -1;
+      let code = -1;
+      let end = -1;
+      let i = 0;
+      for (; i < header.length; i++) {
+        code = header.charCodeAt(i);
+        if (extensionName === void 0) {
+          if (end === -1 && tokenChars[code] === 1) {
+            if (start === -1) start = i;
+          } else if (i !== 0 && (code === 32 || code === 9)) {
+            if (end === -1 && start !== -1) end = i;
+          } else if (code === 59 || code === 44) {
+            if (start === -1) {
+              throw new SyntaxError(`Unexpected character at index ${i}`);
+            }
+            if (end === -1) end = i;
+            const name = header.slice(start, end);
+            if (code === 44) {
+              push(offers, name, params);
+              params = /* @__PURE__ */ Object.create(null);
+            } else {
+              extensionName = name;
+            }
+            start = end = -1;
+          } else {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+        } else if (paramName === void 0) {
+          if (end === -1 && tokenChars[code] === 1) {
+            if (start === -1) start = i;
+          } else if (code === 32 || code === 9) {
+            if (end === -1 && start !== -1) end = i;
+          } else if (code === 59 || code === 44) {
+            if (start === -1) {
+              throw new SyntaxError(`Unexpected character at index ${i}`);
+            }
+            if (end === -1) end = i;
+            push(params, header.slice(start, end), true);
+            if (code === 44) {
+              push(offers, extensionName, params);
+              params = /* @__PURE__ */ Object.create(null);
+              extensionName = void 0;
+            }
+            start = end = -1;
+          } else if (code === 61 && start !== -1 && end === -1) {
+            paramName = header.slice(start, i);
+            start = end = -1;
+          } else {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+        } else {
+          if (isEscaping) {
+            if (tokenChars[code] !== 1) {
+              throw new SyntaxError(`Unexpected character at index ${i}`);
+            }
+            if (start === -1) start = i;
+            else if (!mustUnescape) mustUnescape = true;
+            isEscaping = false;
+          } else if (inQuotes) {
+            if (tokenChars[code] === 1) {
+              if (start === -1) start = i;
+            } else if (code === 34 && start !== -1) {
+              inQuotes = false;
+              end = i;
+            } else if (code === 92) {
+              isEscaping = true;
+            } else {
+              throw new SyntaxError(`Unexpected character at index ${i}`);
+            }
+          } else if (code === 34 && header.charCodeAt(i - 1) === 61) {
+            inQuotes = true;
+          } else if (end === -1 && tokenChars[code] === 1) {
+            if (start === -1) start = i;
+          } else if (start !== -1 && (code === 32 || code === 9)) {
+            if (end === -1) end = i;
+          } else if (code === 59 || code === 44) {
+            if (start === -1) {
+              throw new SyntaxError(`Unexpected character at index ${i}`);
+            }
+            if (end === -1) end = i;
+            let value = header.slice(start, end);
+            if (mustUnescape) {
+              value = value.replace(/\\/g, "");
+              mustUnescape = false;
+            }
+            push(params, paramName, value);
+            if (code === 44) {
+              push(offers, extensionName, params);
+              params = /* @__PURE__ */ Object.create(null);
+              extensionName = void 0;
+            }
+            paramName = void 0;
+            start = end = -1;
+          } else {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+        }
+      }
+      if (start === -1 || inQuotes || code === 32 || code === 9) {
+        throw new SyntaxError("Unexpected end of input");
+      }
+      if (end === -1) end = i;
+      const token = header.slice(start, end);
+      if (extensionName === void 0) {
+        push(offers, token, params);
+      } else {
+        if (paramName === void 0) {
+          push(params, token, true);
+        } else if (mustUnescape) {
+          push(params, paramName, token.replace(/\\/g, ""));
+        } else {
+          push(params, paramName, token);
+        }
+        push(offers, extensionName, params);
+      }
+      return offers;
+    }
+    function format(extensions) {
+      return Object.keys(extensions).map((extension2) => {
+        let configurations = extensions[extension2];
+        if (!Array.isArray(configurations)) configurations = [configurations];
+        return configurations.map((params) => {
+          return [extension2].concat(
+            Object.keys(params).map((k) => {
+              let values = params[k];
+              if (!Array.isArray(values)) values = [values];
+              return values.map((v) => v === true ? k : `${k}=${v}`).join("; ");
+            })
+          ).join("; ");
+        }).join(", ");
+      }).join(", ");
+    }
+    module.exports = { format, parse };
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/websocket.js
+var require_websocket = __commonJS({
+  "../valuescan/node_modules/ws/lib/websocket.js"(exports, module) {
+    "use strict";
+    var EventEmitter = __require("events");
+    var https = __require("https");
+    var http = __require("http");
+    var net = __require("net");
+    var tls = __require("tls");
+    var { randomBytes: randomBytes4, createHash } = __require("crypto");
+    var { Duplex, Readable } = __require("stream");
+    var { URL: URL2 } = __require("url");
+    var PerMessageDeflate2 = require_permessage_deflate();
+    var Receiver2 = require_receiver();
+    var Sender2 = require_sender();
+    var { isBlob } = require_validation();
+    var {
+      BINARY_TYPES,
+      CLOSE_TIMEOUT,
+      EMPTY_BUFFER,
+      GUID,
+      kForOnEventAttribute,
+      kListener,
+      kStatusCode,
+      kWebSocket,
+      NOOP
+    } = require_constants();
+    var {
+      EventTarget: { addEventListener, removeEventListener }
+    } = require_event_target();
+    var { format, parse } = require_extension();
+    var { toBuffer } = require_buffer_util();
+    var kAborted = /* @__PURE__ */ Symbol("kAborted");
+    var protocolVersions = [8, 13];
+    var readyStates = ["CONNECTING", "OPEN", "CLOSING", "CLOSED"];
+    var subprotocolRegex = /^[!#$%&'*+\-.0-9A-Z^_`|a-z~]+$/;
+    var WebSocket2 = class _WebSocket extends EventEmitter {
+      /**
+       * Create a new `WebSocket`.
+       *
+       * @param {(String|URL)} address The URL to which to connect
+       * @param {(String|String[])} [protocols] The subprotocols
+       * @param {Object} [options] Connection options
+       */
+      constructor(address, protocols, options) {
+        super();
+        this._binaryType = BINARY_TYPES[0];
+        this._closeCode = 1006;
+        this._closeFrameReceived = false;
+        this._closeFrameSent = false;
+        this._closeMessage = EMPTY_BUFFER;
+        this._closeTimer = null;
+        this._errorEmitted = false;
+        this._extensions = {};
+        this._paused = false;
+        this._protocol = "";
+        this._readyState = _WebSocket.CONNECTING;
+        this._receiver = null;
+        this._sender = null;
+        this._socket = null;
+        if (address !== null) {
+          this._bufferedAmount = 0;
+          this._isServer = false;
+          this._redirects = 0;
+          if (protocols === void 0) {
+            protocols = [];
+          } else if (!Array.isArray(protocols)) {
+            if (typeof protocols === "object" && protocols !== null) {
+              options = protocols;
+              protocols = [];
+            } else {
+              protocols = [protocols];
+            }
+          }
+          initAsClient(this, address, protocols, options);
+        } else {
+          this._autoPong = options.autoPong;
+          this._closeTimeout = options.closeTimeout;
+          this._isServer = true;
+        }
+      }
+      /**
+       * For historical reasons, the custom "nodebuffer" type is used by the default
+       * instead of "blob".
+       *
+       * @type {String}
+       */
+      get binaryType() {
+        return this._binaryType;
+      }
+      set binaryType(type) {
+        if (!BINARY_TYPES.includes(type)) return;
+        this._binaryType = type;
+        if (this._receiver) this._receiver._binaryType = type;
+      }
+      /**
+       * @type {Number}
+       */
+      get bufferedAmount() {
+        if (!this._socket) return this._bufferedAmount;
+        return this._socket._writableState.length + this._sender._bufferedBytes;
+      }
+      /**
+       * @type {String}
+       */
+      get extensions() {
+        return Object.keys(this._extensions).join();
+      }
+      /**
+       * @type {Boolean}
+       */
+      get isPaused() {
+        return this._paused;
+      }
+      /**
+       * @type {Function}
+       */
+      /* istanbul ignore next */
+      get onclose() {
+        return null;
+      }
+      /**
+       * @type {Function}
+       */
+      /* istanbul ignore next */
+      get onerror() {
+        return null;
+      }
+      /**
+       * @type {Function}
+       */
+      /* istanbul ignore next */
+      get onopen() {
+        return null;
+      }
+      /**
+       * @type {Function}
+       */
+      /* istanbul ignore next */
+      get onmessage() {
+        return null;
+      }
+      /**
+       * @type {String}
+       */
+      get protocol() {
+        return this._protocol;
+      }
+      /**
+       * @type {Number}
+       */
+      get readyState() {
+        return this._readyState;
+      }
+      /**
+       * @type {String}
+       */
+      get url() {
+        return this._url;
+      }
+      /**
+       * Set up the socket and the internal resources.
+       *
+       * @param {Duplex} socket The network socket between the server and client
+       * @param {Buffer} head The first packet of the upgraded stream
+       * @param {Object} options Options object
+       * @param {Boolean} [options.allowSynchronousEvents=false] Specifies whether
+       *     any of the `'message'`, `'ping'`, and `'pong'` events can be emitted
+       *     multiple times in the same tick
+       * @param {Function} [options.generateMask] The function used to generate the
+       *     masking key
+       * @param {Number} [options.maxBufferedChunks=0] The maximum number of
+       *     buffered data chunks
+       * @param {Number} [options.maxFragments=0] The maximum number of message
+       *     fragments
+       * @param {Number} [options.maxPayload=0] The maximum allowed message size
+       * @param {Boolean} [options.skipUTF8Validation=false] Specifies whether or
+       *     not to skip UTF-8 validation for text and close messages
+       * @private
+       */
+      setSocket(socket, head, options) {
+        const receiver = new Receiver2({
+          allowSynchronousEvents: options.allowSynchronousEvents,
+          binaryType: this.binaryType,
+          extensions: this._extensions,
+          isServer: this._isServer,
+          maxBufferedChunks: options.maxBufferedChunks,
+          maxFragments: options.maxFragments,
+          maxPayload: options.maxPayload,
+          skipUTF8Validation: options.skipUTF8Validation
+        });
+        const sender = new Sender2(socket, this._extensions, options.generateMask);
+        this._receiver = receiver;
+        this._sender = sender;
+        this._socket = socket;
+        receiver[kWebSocket] = this;
+        sender[kWebSocket] = this;
+        socket[kWebSocket] = this;
+        receiver.on("conclude", receiverOnConclude);
+        receiver.on("drain", receiverOnDrain);
+        receiver.on("error", receiverOnError);
+        receiver.on("message", receiverOnMessage);
+        receiver.on("ping", receiverOnPing);
+        receiver.on("pong", receiverOnPong);
+        sender.onerror = senderOnError;
+        if (socket.setTimeout) socket.setTimeout(0);
+        if (socket.setNoDelay) socket.setNoDelay();
+        if (head.length > 0) socket.unshift(head);
+        socket.on("close", socketOnClose);
+        socket.on("data", socketOnData);
+        socket.on("end", socketOnEnd);
+        socket.on("error", socketOnError);
+        this._readyState = _WebSocket.OPEN;
+        this.emit("open");
+      }
+      /**
+       * Emit the `'close'` event.
+       *
+       * @private
+       */
+      emitClose() {
+        if (!this._socket) {
+          this._readyState = _WebSocket.CLOSED;
+          this.emit("close", this._closeCode, this._closeMessage);
+          return;
+        }
+        if (this._extensions[PerMessageDeflate2.extensionName]) {
+          this._extensions[PerMessageDeflate2.extensionName].cleanup();
+        }
+        this._receiver.removeAllListeners();
+        this._readyState = _WebSocket.CLOSED;
+        this.emit("close", this._closeCode, this._closeMessage);
+      }
+      /**
+       * Start a closing handshake.
+       *
+       *          +----------+   +-----------+   +----------+
+       *     - - -|ws.close()|-->|close frame|-->|ws.close()|- - -
+       *    |     +----------+   +-----------+   +----------+     |
+       *          +----------+   +-----------+         |
+       * CLOSING  |ws.close()|<--|close frame|<--+-----+       CLOSING
+       *          +----------+   +-----------+   |
+       *    |           |                        |   +---+        |
+       *                +------------------------+-->|fin| - - - -
+       *    |         +---+                      |   +---+
+       *     - - - - -|fin|<---------------------+
+       *              +---+
+       *
+       * @param {Number} [code] Status code explaining why the connection is closing
+       * @param {(String|Buffer)} [data] The reason why the connection is
+       *     closing
+       * @public
+       */
+      close(code, data) {
+        if (this.readyState === _WebSocket.CLOSED) return;
+        if (this.readyState === _WebSocket.CONNECTING) {
+          const msg = "WebSocket was closed before the connection was established";
+          abortHandshake(this, this._req, msg);
+          return;
+        }
+        if (this.readyState === _WebSocket.CLOSING) {
+          if (this._closeFrameSent && (this._closeFrameReceived || this._receiver._writableState.errorEmitted)) {
+            this._socket.end();
+          }
+          return;
+        }
+        this._readyState = _WebSocket.CLOSING;
+        this._sender.close(code, data, !this._isServer, (err) => {
+          if (err) return;
+          this._closeFrameSent = true;
+          if (this._closeFrameReceived || this._receiver._writableState.errorEmitted) {
+            this._socket.end();
+          }
+        });
+        setCloseTimer(this);
+      }
+      /**
+       * Pause the socket.
+       *
+       * @public
+       */
+      pause() {
+        if (this.readyState === _WebSocket.CONNECTING || this.readyState === _WebSocket.CLOSED) {
+          return;
+        }
+        this._paused = true;
+        this._socket.pause();
+      }
+      /**
+       * Send a ping.
+       *
+       * @param {*} [data] The data to send
+       * @param {Boolean} [mask] Indicates whether or not to mask `data`
+       * @param {Function} [cb] Callback which is executed when the ping is sent
+       * @public
+       */
+      ping(data, mask, cb) {
+        if (this.readyState === _WebSocket.CONNECTING) {
+          throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+        }
+        if (typeof data === "function") {
+          cb = data;
+          data = mask = void 0;
+        } else if (typeof mask === "function") {
+          cb = mask;
+          mask = void 0;
+        }
+        if (typeof data === "number") data = data.toString();
+        if (this.readyState !== _WebSocket.OPEN) {
+          sendAfterClose(this, data, cb);
+          return;
+        }
+        if (mask === void 0) mask = !this._isServer;
+        this._sender.ping(data || EMPTY_BUFFER, mask, cb);
+      }
+      /**
+       * Send a pong.
+       *
+       * @param {*} [data] The data to send
+       * @param {Boolean} [mask] Indicates whether or not to mask `data`
+       * @param {Function} [cb] Callback which is executed when the pong is sent
+       * @public
+       */
+      pong(data, mask, cb) {
+        if (this.readyState === _WebSocket.CONNECTING) {
+          throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+        }
+        if (typeof data === "function") {
+          cb = data;
+          data = mask = void 0;
+        } else if (typeof mask === "function") {
+          cb = mask;
+          mask = void 0;
+        }
+        if (typeof data === "number") data = data.toString();
+        if (this.readyState !== _WebSocket.OPEN) {
+          sendAfterClose(this, data, cb);
+          return;
+        }
+        if (mask === void 0) mask = !this._isServer;
+        this._sender.pong(data || EMPTY_BUFFER, mask, cb);
+      }
+      /**
+       * Resume the socket.
+       *
+       * @public
+       */
+      resume() {
+        if (this.readyState === _WebSocket.CONNECTING || this.readyState === _WebSocket.CLOSED) {
+          return;
+        }
+        this._paused = false;
+        if (!this._receiver._writableState.needDrain) this._socket.resume();
+      }
+      /**
+       * Send a data message.
+       *
+       * @param {*} data The message to send
+       * @param {Object} [options] Options object
+       * @param {Boolean} [options.binary] Specifies whether `data` is binary or
+       *     text
+       * @param {Boolean} [options.compress] Specifies whether or not to compress
+       *     `data`
+       * @param {Boolean} [options.fin=true] Specifies whether the fragment is the
+       *     last one
+       * @param {Boolean} [options.mask] Specifies whether or not to mask `data`
+       * @param {Function} [cb] Callback which is executed when data is written out
+       * @public
+       */
+      send(data, options, cb) {
+        if (this.readyState === _WebSocket.CONNECTING) {
+          throw new Error("WebSocket is not open: readyState 0 (CONNECTING)");
+        }
+        if (typeof options === "function") {
+          cb = options;
+          options = {};
+        }
+        if (typeof data === "number") data = data.toString();
+        if (this.readyState !== _WebSocket.OPEN) {
+          sendAfterClose(this, data, cb);
+          return;
+        }
+        const opts = {
+          binary: typeof data !== "string",
+          mask: !this._isServer,
+          compress: true,
+          fin: true,
+          ...options
+        };
+        if (!this._extensions[PerMessageDeflate2.extensionName]) {
+          opts.compress = false;
+        }
+        this._sender.send(data || EMPTY_BUFFER, opts, cb);
+      }
+      /**
+       * Forcibly close the connection.
+       *
+       * @public
+       */
+      terminate() {
+        if (this.readyState === _WebSocket.CLOSED) return;
+        if (this.readyState === _WebSocket.CONNECTING) {
+          const msg = "WebSocket was closed before the connection was established";
+          abortHandshake(this, this._req, msg);
+          return;
+        }
+        if (this._socket) {
+          this._readyState = _WebSocket.CLOSING;
+          this._socket.destroy();
+        }
+      }
+    };
+    Object.defineProperty(WebSocket2, "CONNECTING", {
+      enumerable: true,
+      value: readyStates.indexOf("CONNECTING")
+    });
+    Object.defineProperty(WebSocket2.prototype, "CONNECTING", {
+      enumerable: true,
+      value: readyStates.indexOf("CONNECTING")
+    });
+    Object.defineProperty(WebSocket2, "OPEN", {
+      enumerable: true,
+      value: readyStates.indexOf("OPEN")
+    });
+    Object.defineProperty(WebSocket2.prototype, "OPEN", {
+      enumerable: true,
+      value: readyStates.indexOf("OPEN")
+    });
+    Object.defineProperty(WebSocket2, "CLOSING", {
+      enumerable: true,
+      value: readyStates.indexOf("CLOSING")
+    });
+    Object.defineProperty(WebSocket2.prototype, "CLOSING", {
+      enumerable: true,
+      value: readyStates.indexOf("CLOSING")
+    });
+    Object.defineProperty(WebSocket2, "CLOSED", {
+      enumerable: true,
+      value: readyStates.indexOf("CLOSED")
+    });
+    Object.defineProperty(WebSocket2.prototype, "CLOSED", {
+      enumerable: true,
+      value: readyStates.indexOf("CLOSED")
+    });
+    [
+      "binaryType",
+      "bufferedAmount",
+      "extensions",
+      "isPaused",
+      "protocol",
+      "readyState",
+      "url"
+    ].forEach((property) => {
+      Object.defineProperty(WebSocket2.prototype, property, { enumerable: true });
+    });
+    ["open", "error", "close", "message"].forEach((method) => {
+      Object.defineProperty(WebSocket2.prototype, `on${method}`, {
+        enumerable: true,
+        get() {
+          for (const listener of this.listeners(method)) {
+            if (listener[kForOnEventAttribute]) return listener[kListener];
+          }
+          return null;
+        },
+        set(handler) {
+          for (const listener of this.listeners(method)) {
+            if (listener[kForOnEventAttribute]) {
+              this.removeListener(method, listener);
+              break;
+            }
+          }
+          if (typeof handler !== "function") return;
+          this.addEventListener(method, handler, {
+            [kForOnEventAttribute]: true
+          });
+        }
+      });
+    });
+    WebSocket2.prototype.addEventListener = addEventListener;
+    WebSocket2.prototype.removeEventListener = removeEventListener;
+    module.exports = WebSocket2;
+    function initAsClient(websocket, address, protocols, options) {
+      const opts = {
+        allowSynchronousEvents: true,
+        autoPong: true,
+        closeTimeout: CLOSE_TIMEOUT,
+        protocolVersion: protocolVersions[1],
+        maxBufferedChunks: 256 * 1024,
+        maxFragments: 16 * 1024,
+        maxPayload: 100 * 1024 * 1024,
+        skipUTF8Validation: false,
+        perMessageDeflate: true,
+        followRedirects: false,
+        maxRedirects: 10,
+        ...options,
+        socketPath: void 0,
+        hostname: void 0,
+        protocol: void 0,
+        timeout: void 0,
+        method: "GET",
+        host: void 0,
+        path: void 0,
+        port: void 0
+      };
+      websocket._autoPong = opts.autoPong;
+      websocket._closeTimeout = opts.closeTimeout;
+      if (!protocolVersions.includes(opts.protocolVersion)) {
+        throw new RangeError(
+          `Unsupported protocol version: ${opts.protocolVersion} (supported versions: ${protocolVersions.join(", ")})`
+        );
+      }
+      let parsedUrl;
+      if (address instanceof URL2) {
+        parsedUrl = address;
+      } else {
+        try {
+          parsedUrl = new URL2(address);
+        } catch {
+          throw new SyntaxError(`Invalid URL: ${address}`);
+        }
+      }
+      if (parsedUrl.protocol === "http:") {
+        parsedUrl.protocol = "ws:";
+      } else if (parsedUrl.protocol === "https:") {
+        parsedUrl.protocol = "wss:";
+      }
+      websocket._url = parsedUrl.href;
+      const isSecure = parsedUrl.protocol === "wss:";
+      const isIpcUrl = parsedUrl.protocol === "ws+unix:";
+      let invalidUrlMessage;
+      if (parsedUrl.protocol !== "ws:" && !isSecure && !isIpcUrl) {
+        invalidUrlMessage = `The URL's protocol must be one of "ws:", "wss:", "http:", "https:", or "ws+unix:"`;
+      } else if (isIpcUrl && !parsedUrl.pathname) {
+        invalidUrlMessage = "The URL's pathname is empty";
+      } else if (parsedUrl.hash) {
+        invalidUrlMessage = "The URL contains a fragment identifier";
+      }
+      if (invalidUrlMessage) {
+        const err = new SyntaxError(invalidUrlMessage);
+        if (websocket._redirects === 0) {
+          throw err;
+        } else {
+          emitErrorAndClose(websocket, err);
+          return;
+        }
+      }
+      const defaultPort = isSecure ? 443 : 80;
+      const key2 = randomBytes4(16).toString("base64");
+      const request = isSecure ? https.request : http.request;
+      const protocolSet = /* @__PURE__ */ new Set();
+      let perMessageDeflate;
+      opts.createConnection = opts.createConnection || (isSecure ? tlsConnect : netConnect);
+      opts.defaultPort = opts.defaultPort || defaultPort;
+      opts.port = parsedUrl.port || defaultPort;
+      opts.host = parsedUrl.hostname.startsWith("[") ? parsedUrl.hostname.slice(1, -1) : parsedUrl.hostname;
+      opts.headers = {
+        ...opts.headers,
+        "Sec-WebSocket-Version": opts.protocolVersion,
+        "Sec-WebSocket-Key": key2,
+        Connection: "Upgrade",
+        Upgrade: "websocket"
+      };
+      opts.path = parsedUrl.pathname + parsedUrl.search;
+      opts.timeout = opts.handshakeTimeout;
+      if (opts.perMessageDeflate) {
+        perMessageDeflate = new PerMessageDeflate2({
+          ...opts.perMessageDeflate,
+          isServer: false,
+          maxPayload: opts.maxPayload
+        });
+        opts.headers["Sec-WebSocket-Extensions"] = format({
+          [PerMessageDeflate2.extensionName]: perMessageDeflate.offer()
+        });
+      }
+      if (protocols.length) {
+        for (const protocol of protocols) {
+          if (typeof protocol !== "string" || !subprotocolRegex.test(protocol) || protocolSet.has(protocol)) {
+            throw new SyntaxError(
+              "An invalid or duplicated subprotocol was specified"
+            );
+          }
+          protocolSet.add(protocol);
+        }
+        opts.headers["Sec-WebSocket-Protocol"] = protocols.join(",");
+      }
+      if (opts.origin) {
+        if (opts.protocolVersion < 13) {
+          opts.headers["Sec-WebSocket-Origin"] = opts.origin;
+        } else {
+          opts.headers.Origin = opts.origin;
+        }
+      }
+      if (parsedUrl.username || parsedUrl.password) {
+        opts.auth = `${parsedUrl.username}:${parsedUrl.password}`;
+      }
+      if (isIpcUrl) {
+        const parts = opts.path.split(":");
+        opts.socketPath = parts[0];
+        opts.path = parts[1];
+      }
+      let req;
+      if (opts.followRedirects) {
+        if (websocket._redirects === 0) {
+          websocket._originalIpc = isIpcUrl;
+          websocket._originalSecure = isSecure;
+          websocket._originalHostOrSocketPath = isIpcUrl ? opts.socketPath : parsedUrl.host;
+          const headers = options && options.headers;
+          options = { ...options, headers: {} };
+          if (headers) {
+            for (const [key3, value] of Object.entries(headers)) {
+              options.headers[key3.toLowerCase()] = value;
+            }
+          }
+        } else if (websocket.listenerCount("redirect") === 0) {
+          const isSameHost = isIpcUrl ? websocket._originalIpc ? opts.socketPath === websocket._originalHostOrSocketPath : false : websocket._originalIpc ? false : parsedUrl.host === websocket._originalHostOrSocketPath;
+          if (!isSameHost || websocket._originalSecure && !isSecure) {
+            delete opts.headers.authorization;
+            delete opts.headers.cookie;
+            if (!isSameHost) delete opts.headers.host;
+            opts.auth = void 0;
+          }
+        }
+        if (opts.auth && !options.headers.authorization) {
+          options.headers.authorization = "Basic " + Buffer.from(opts.auth).toString("base64");
+        }
+        req = websocket._req = request(opts);
+        if (websocket._redirects) {
+          websocket.emit("redirect", websocket.url, req);
+        }
+      } else {
+        req = websocket._req = request(opts);
+      }
+      if (opts.timeout) {
+        req.on("timeout", () => {
+          abortHandshake(websocket, req, "Opening handshake has timed out");
+        });
+      }
+      req.on("error", (err) => {
+        if (req === null || req[kAborted]) return;
+        req = websocket._req = null;
+        emitErrorAndClose(websocket, err);
+      });
+      req.on("response", (res) => {
+        const location = res.headers.location;
+        const statusCode = res.statusCode;
+        if (location && opts.followRedirects && statusCode >= 300 && statusCode < 400) {
+          if (++websocket._redirects > opts.maxRedirects) {
+            abortHandshake(websocket, req, "Maximum redirects exceeded");
+            return;
+          }
+          req.abort();
+          let addr;
+          try {
+            addr = new URL2(location, address);
+          } catch (e) {
+            const err = new SyntaxError(`Invalid URL: ${location}`);
+            emitErrorAndClose(websocket, err);
+            return;
+          }
+          initAsClient(websocket, addr, protocols, options);
+        } else if (!websocket.emit("unexpected-response", req, res)) {
+          abortHandshake(
+            websocket,
+            req,
+            `Unexpected server response: ${res.statusCode}`
+          );
+        }
+      });
+      req.on("upgrade", (res, socket, head) => {
+        websocket.emit("upgrade", res);
+        if (websocket.readyState !== WebSocket2.CONNECTING) return;
+        req = websocket._req = null;
+        const upgrade = res.headers.upgrade;
+        if (upgrade === void 0 || upgrade.toLowerCase() !== "websocket") {
+          abortHandshake(websocket, socket, "Invalid Upgrade header");
+          return;
+        }
+        const digest = createHash("sha1").update(key2 + GUID).digest("base64");
+        if (res.headers["sec-websocket-accept"] !== digest) {
+          abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
+          return;
+        }
+        const serverProt = res.headers["sec-websocket-protocol"];
+        let protError;
+        if (serverProt !== void 0) {
+          if (!protocolSet.size) {
+            protError = "Server sent a subprotocol but none was requested";
+          } else if (!protocolSet.has(serverProt)) {
+            protError = "Server sent an invalid subprotocol";
+          }
+        } else if (protocolSet.size) {
+          protError = "Server sent no subprotocol";
+        }
+        if (protError) {
+          abortHandshake(websocket, socket, protError);
+          return;
+        }
+        if (serverProt) websocket._protocol = serverProt;
+        const secWebSocketExtensions = res.headers["sec-websocket-extensions"];
+        if (secWebSocketExtensions !== void 0) {
+          if (!perMessageDeflate) {
+            const message = "Server sent a Sec-WebSocket-Extensions header but no extension was requested";
+            abortHandshake(websocket, socket, message);
+            return;
+          }
+          let extensions;
+          try {
+            extensions = parse(secWebSocketExtensions);
+          } catch (err) {
+            const message = "Invalid Sec-WebSocket-Extensions header";
+            abortHandshake(websocket, socket, message);
+            return;
+          }
+          const extensionNames = Object.keys(extensions);
+          if (extensionNames.length !== 1 || extensionNames[0] !== PerMessageDeflate2.extensionName) {
+            const message = "Server indicated an extension that was not requested";
+            abortHandshake(websocket, socket, message);
+            return;
+          }
+          try {
+            perMessageDeflate.accept(extensions[PerMessageDeflate2.extensionName]);
+          } catch (err) {
+            const message = "Invalid Sec-WebSocket-Extensions header";
+            abortHandshake(websocket, socket, message);
+            return;
+          }
+          websocket._extensions[PerMessageDeflate2.extensionName] = perMessageDeflate;
+        }
+        websocket.setSocket(socket, head, {
+          allowSynchronousEvents: opts.allowSynchronousEvents,
+          generateMask: opts.generateMask,
+          maxBufferedChunks: opts.maxBufferedChunks,
+          maxFragments: opts.maxFragments,
+          maxPayload: opts.maxPayload,
+          skipUTF8Validation: opts.skipUTF8Validation
+        });
+      });
+      if (opts.finishRequest) {
+        opts.finishRequest(req, websocket);
+      } else {
+        req.end();
+      }
+    }
+    function emitErrorAndClose(websocket, err) {
+      websocket._readyState = WebSocket2.CLOSING;
+      websocket._errorEmitted = true;
+      websocket.emit("error", err);
+      websocket.emitClose();
+    }
+    function netConnect(options) {
+      options.path = options.socketPath;
+      return net.connect(options);
+    }
+    function tlsConnect(options) {
+      options.path = void 0;
+      if (!options.servername && options.servername !== "") {
+        options.servername = net.isIP(options.host) ? "" : options.host;
+      }
+      return tls.connect(options);
+    }
+    function abortHandshake(websocket, stream, message) {
+      websocket._readyState = WebSocket2.CLOSING;
+      const err = new Error(message);
+      Error.captureStackTrace(err, abortHandshake);
+      if (stream.setHeader) {
+        stream[kAborted] = true;
+        stream.abort();
+        if (stream.socket && !stream.socket.destroyed) {
+          stream.socket.destroy();
+        }
+        process.nextTick(emitErrorAndClose, websocket, err);
+      } else {
+        stream.destroy(err);
+        stream.once("error", websocket.emit.bind(websocket, "error"));
+        stream.once("close", websocket.emitClose.bind(websocket));
+      }
+    }
+    function sendAfterClose(websocket, data, cb) {
+      if (data) {
+        const length = isBlob(data) ? data.size : toBuffer(data).length;
+        if (websocket._socket) websocket._sender._bufferedBytes += length;
+        else websocket._bufferedAmount += length;
+      }
+      if (cb) {
+        const err = new Error(
+          `WebSocket is not open: readyState ${websocket.readyState} (${readyStates[websocket.readyState]})`
+        );
+        process.nextTick(cb, err);
+      }
+    }
+    function receiverOnConclude(code, reason) {
+      const websocket = this[kWebSocket];
+      websocket._closeFrameReceived = true;
+      websocket._closeMessage = reason;
+      websocket._closeCode = code;
+      if (websocket._socket[kWebSocket] === void 0) return;
+      websocket._socket.removeListener("data", socketOnData);
+      process.nextTick(resume, websocket._socket);
+      if (code === 1005) websocket.close();
+      else websocket.close(code, reason);
+    }
+    function receiverOnDrain() {
+      const websocket = this[kWebSocket];
+      if (!websocket.isPaused) websocket._socket.resume();
+    }
+    function receiverOnError(err) {
+      const websocket = this[kWebSocket];
+      if (websocket._socket[kWebSocket] !== void 0) {
+        websocket._socket.removeListener("data", socketOnData);
+        process.nextTick(resume, websocket._socket);
+        websocket.close(err[kStatusCode]);
+      }
+      if (!websocket._errorEmitted) {
+        websocket._errorEmitted = true;
+        websocket.emit("error", err);
+      }
+    }
+    function receiverOnFinish() {
+      this[kWebSocket].emitClose();
+    }
+    function receiverOnMessage(data, isBinary) {
+      this[kWebSocket].emit("message", data, isBinary);
+    }
+    function receiverOnPing(data) {
+      const websocket = this[kWebSocket];
+      if (websocket._autoPong) websocket.pong(data, !this._isServer, NOOP);
+      websocket.emit("ping", data);
+    }
+    function receiverOnPong(data) {
+      this[kWebSocket].emit("pong", data);
+    }
+    function resume(stream) {
+      stream.resume();
+    }
+    function senderOnError(err) {
+      const websocket = this[kWebSocket];
+      if (websocket.readyState === WebSocket2.CLOSED) return;
+      if (websocket.readyState === WebSocket2.OPEN) {
+        websocket._readyState = WebSocket2.CLOSING;
+        setCloseTimer(websocket);
+      }
+      this._socket.end();
+      if (!websocket._errorEmitted) {
+        websocket._errorEmitted = true;
+        websocket.emit("error", err);
+      }
+    }
+    function setCloseTimer(websocket) {
+      websocket._closeTimer = setTimeout(
+        websocket._socket.destroy.bind(websocket._socket),
+        websocket._closeTimeout
+      );
+    }
+    function socketOnClose() {
+      const websocket = this[kWebSocket];
+      this.removeListener("close", socketOnClose);
+      this.removeListener("data", socketOnData);
+      this.removeListener("end", socketOnEnd);
+      websocket._readyState = WebSocket2.CLOSING;
+      if (!this._readableState.endEmitted && !websocket._closeFrameReceived && !websocket._receiver._writableState.errorEmitted && this._readableState.length !== 0) {
+        const chunk = this.read(this._readableState.length);
+        websocket._receiver.write(chunk);
+      }
+      websocket._receiver.end();
+      this[kWebSocket] = void 0;
+      clearTimeout(websocket._closeTimer);
+      if (websocket._receiver._writableState.finished || websocket._receiver._writableState.errorEmitted) {
+        websocket.emitClose();
+      } else {
+        websocket._receiver.on("error", receiverOnFinish);
+        websocket._receiver.on("finish", receiverOnFinish);
+      }
+    }
+    function socketOnData(chunk) {
+      if (!this[kWebSocket]._receiver.write(chunk)) {
+        this.pause();
+      }
+    }
+    function socketOnEnd() {
+      const websocket = this[kWebSocket];
+      websocket._readyState = WebSocket2.CLOSING;
+      websocket._receiver.end();
+      this.end();
+    }
+    function socketOnError() {
+      const websocket = this[kWebSocket];
+      this.removeListener("error", socketOnError);
+      this.on("error", NOOP);
+      if (websocket) {
+        websocket._readyState = WebSocket2.CLOSING;
+        this.destroy();
+      }
+    }
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/stream.js
+var require_stream = __commonJS({
+  "../valuescan/node_modules/ws/lib/stream.js"(exports, module) {
+    "use strict";
+    var WebSocket2 = require_websocket();
+    var { Duplex } = __require("stream");
+    function emitClose(stream) {
+      stream.emit("close");
+    }
+    function duplexOnEnd() {
+      if (!this.destroyed && this._writableState.finished) {
+        this.destroy();
+      }
+    }
+    function duplexOnError(err) {
+      this.removeListener("error", duplexOnError);
+      this.destroy();
+      if (this.listenerCount("error") === 0) {
+        this.emit("error", err);
+      }
+    }
+    function createWebSocketStream2(ws, options) {
+      let terminateOnDestroy = true;
+      const duplex = new Duplex({
+        ...options,
+        autoDestroy: false,
+        emitClose: false,
+        objectMode: false,
+        writableObjectMode: false
+      });
+      ws.on("message", function message(msg, isBinary) {
+        const data = !isBinary && duplex._readableState.objectMode ? msg.toString() : msg;
+        if (!duplex.push(data)) ws.pause();
+      });
+      ws.once("error", function error(err) {
+        if (duplex.destroyed) return;
+        terminateOnDestroy = false;
+        duplex.destroy(err);
+      });
+      ws.once("close", function close() {
+        if (duplex.destroyed) return;
+        duplex.push(null);
+      });
+      duplex._destroy = function(err, callback) {
+        if (ws.readyState === ws.CLOSED) {
+          callback(err);
+          process.nextTick(emitClose, duplex);
+          return;
+        }
+        let called = false;
+        ws.once("error", function error(err2) {
+          called = true;
+          callback(err2);
+        });
+        ws.once("close", function close() {
+          if (!called) callback(err);
+          process.nextTick(emitClose, duplex);
+        });
+        if (terminateOnDestroy) ws.terminate();
+      };
+      duplex._final = function(callback) {
+        if (ws.readyState === ws.CONNECTING) {
+          ws.once("open", function open() {
+            duplex._final(callback);
+          });
+          return;
+        }
+        if (ws._socket === null) return;
+        if (ws._socket._writableState.finished) {
+          callback();
+          if (duplex._readableState.endEmitted) duplex.destroy();
+        } else {
+          ws._socket.once("finish", function finish() {
+            callback();
+          });
+          ws.close();
+        }
+      };
+      duplex._read = function() {
+        if (ws.isPaused) ws.resume();
+      };
+      duplex._write = function(chunk, encoding, callback) {
+        if (ws.readyState === ws.CONNECTING) {
+          ws.once("open", function open() {
+            duplex._write(chunk, encoding, callback);
+          });
+          return;
+        }
+        ws.send(chunk, callback);
+      };
+      duplex.on("end", duplexOnEnd);
+      duplex.on("error", duplexOnError);
+      return duplex;
+    }
+    module.exports = createWebSocketStream2;
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/subprotocol.js
+var require_subprotocol = __commonJS({
+  "../valuescan/node_modules/ws/lib/subprotocol.js"(exports, module) {
+    "use strict";
+    var { tokenChars } = require_validation();
+    function parse(header) {
+      const protocols = /* @__PURE__ */ new Set();
+      let start = -1;
+      let end = -1;
+      let i = 0;
+      for (i; i < header.length; i++) {
+        const code = header.charCodeAt(i);
+        if (end === -1 && tokenChars[code] === 1) {
+          if (start === -1) start = i;
+        } else if (i !== 0 && (code === 32 || code === 9)) {
+          if (end === -1 && start !== -1) end = i;
+        } else if (code === 44) {
+          if (start === -1) {
+            throw new SyntaxError(`Unexpected character at index ${i}`);
+          }
+          if (end === -1) end = i;
+          const protocol2 = header.slice(start, end);
+          if (protocols.has(protocol2)) {
+            throw new SyntaxError(`The "${protocol2}" subprotocol is duplicated`);
+          }
+          protocols.add(protocol2);
+          start = end = -1;
+        } else {
+          throw new SyntaxError(`Unexpected character at index ${i}`);
+        }
+      }
+      if (start === -1 || end !== -1) {
+        throw new SyntaxError("Unexpected end of input");
+      }
+      const protocol = header.slice(start, i);
+      if (protocols.has(protocol)) {
+        throw new SyntaxError(`The "${protocol}" subprotocol is duplicated`);
+      }
+      protocols.add(protocol);
+      return protocols;
+    }
+    module.exports = { parse };
+  }
+});
+
+// ../valuescan/node_modules/ws/lib/websocket-server.js
+var require_websocket_server = __commonJS({
+  "../valuescan/node_modules/ws/lib/websocket-server.js"(exports, module) {
+    "use strict";
+    var EventEmitter = __require("events");
+    var http = __require("http");
+    var { Duplex } = __require("stream");
+    var { createHash } = __require("crypto");
+    var extension2 = require_extension();
+    var PerMessageDeflate2 = require_permessage_deflate();
+    var subprotocol2 = require_subprotocol();
+    var WebSocket2 = require_websocket();
+    var { CLOSE_TIMEOUT, GUID, kWebSocket } = require_constants();
+    var keyRegex = /^[+/0-9A-Za-z]{22}==$/;
+    var RUNNING = 0;
+    var CLOSING = 1;
+    var CLOSED = 2;
+    var WebSocketServer2 = class extends EventEmitter {
+      /**
+       * Create a `WebSocketServer` instance.
+       *
+       * @param {Object} options Configuration options
+       * @param {Boolean} [options.allowSynchronousEvents=true] Specifies whether
+       *     any of the `'message'`, `'ping'`, and `'pong'` events can be emitted
+       *     multiple times in the same tick
+       * @param {Boolean} [options.autoPong=true] Specifies whether or not to
+       *     automatically send a pong in response to a ping
+       * @param {Number} [options.backlog=511] The maximum length of the queue of
+       *     pending connections
+       * @param {Boolean} [options.clientTracking=true] Specifies whether or not to
+       *     track clients
+       * @param {Number} [options.closeTimeout=30000] Duration in milliseconds to
+       *     wait for the closing handshake to finish after `websocket.close()` is
+       *     called
+       * @param {Function} [options.handleProtocols] A hook to handle protocols
+       * @param {String} [options.host] The hostname where to bind the server
+       * @param {Number} [options.maxBufferedChunks=262144] The maximum number of
+       *     buffered data chunks
+       * @param {Number} [options.maxFragments=16384] The maximum number of message
+       *     fragments
+       * @param {Number} [options.maxPayload=104857600] The maximum allowed message
+       *     size
+       * @param {Boolean} [options.noServer=false] Enable no server mode
+       * @param {String} [options.path] Accept only connections matching this path
+       * @param {(Boolean|Object)} [options.perMessageDeflate=false] Enable/disable
+       *     permessage-deflate
+       * @param {Number} [options.port] The port where to bind the server
+       * @param {(http.Server|https.Server)} [options.server] A pre-created HTTP/S
+       *     server to use
+       * @param {Boolean} [options.skipUTF8Validation=false] Specifies whether or
+       *     not to skip UTF-8 validation for text and close messages
+       * @param {Function} [options.verifyClient] A hook to reject connections
+       * @param {Function} [options.WebSocket=WebSocket] Specifies the `WebSocket`
+       *     class to use. It must be the `WebSocket` class or class that extends it
+       * @param {Function} [callback] A listener for the `listening` event
+       */
+      constructor(options, callback) {
+        super();
+        options = {
+          allowSynchronousEvents: true,
+          autoPong: true,
+          maxBufferedChunks: 256 * 1024,
+          maxFragments: 16 * 1024,
+          maxPayload: 100 * 1024 * 1024,
+          skipUTF8Validation: false,
+          perMessageDeflate: false,
+          handleProtocols: null,
+          clientTracking: true,
+          closeTimeout: CLOSE_TIMEOUT,
+          verifyClient: null,
+          noServer: false,
+          backlog: null,
+          // use default (511 as implemented in net.js)
+          server: null,
+          host: null,
+          path: null,
+          port: null,
+          WebSocket: WebSocket2,
+          ...options
+        };
+        if (options.port == null && !options.server && !options.noServer || options.port != null && (options.server || options.noServer) || options.server && options.noServer) {
+          throw new TypeError(
+            'One and only one of the "port", "server", or "noServer" options must be specified'
+          );
+        }
+        if (options.port != null) {
+          this._server = http.createServer((req, res) => {
+            const body = http.STATUS_CODES[426];
+            res.writeHead(426, {
+              "Content-Length": body.length,
+              "Content-Type": "text/plain"
+            });
+            res.end(body);
+          });
+          this._server.listen(
+            options.port,
+            options.host,
+            options.backlog,
+            callback
+          );
+        } else if (options.server) {
+          this._server = options.server;
+        }
+        if (this._server) {
+          const emitConnection = this.emit.bind(this, "connection");
+          this._removeListeners = addListeners(this._server, {
+            listening: this.emit.bind(this, "listening"),
+            error: this.emit.bind(this, "error"),
+            upgrade: (req, socket, head) => {
+              this.handleUpgrade(req, socket, head, emitConnection);
+            }
+          });
+        }
+        if (options.perMessageDeflate === true) options.perMessageDeflate = {};
+        if (options.clientTracking) {
+          this.clients = /* @__PURE__ */ new Set();
+          this._shouldEmitClose = false;
+        }
+        this.options = options;
+        this._state = RUNNING;
+      }
+      /**
+       * Returns the bound address, the address family name, and port of the server
+       * as reported by the operating system if listening on an IP socket.
+       * If the server is listening on a pipe or UNIX domain socket, the name is
+       * returned as a string.
+       *
+       * @return {(Object|String|null)} The address of the server
+       * @public
+       */
+      address() {
+        if (this.options.noServer) {
+          throw new Error('The server is operating in "noServer" mode');
+        }
+        if (!this._server) return null;
+        return this._server.address();
+      }
+      /**
+       * Stop the server from accepting new connections and emit the `'close'` event
+       * when all existing connections are closed.
+       *
+       * @param {Function} [cb] A one-time listener for the `'close'` event
+       * @public
+       */
+      close(cb) {
+        if (this._state === CLOSED) {
+          if (cb) {
+            this.once("close", () => {
+              cb(new Error("The server is not running"));
+            });
+          }
+          process.nextTick(emitClose, this);
+          return;
+        }
+        if (cb) this.once("close", cb);
+        if (this._state === CLOSING) return;
+        this._state = CLOSING;
+        if (this.options.noServer || this.options.server) {
+          if (this._server) {
+            this._removeListeners();
+            this._removeListeners = this._server = null;
+          }
+          if (this.clients) {
+            if (!this.clients.size) {
+              process.nextTick(emitClose, this);
+            } else {
+              this._shouldEmitClose = true;
+            }
+          } else {
+            process.nextTick(emitClose, this);
+          }
+        } else {
+          const server = this._server;
+          this._removeListeners();
+          this._removeListeners = this._server = null;
+          server.close(() => {
+            emitClose(this);
+          });
+        }
+      }
+      /**
+       * See if a given request should be handled by this server instance.
+       *
+       * @param {http.IncomingMessage} req Request object to inspect
+       * @return {Boolean} `true` if the request is valid, else `false`
+       * @public
+       */
+      shouldHandle(req) {
+        if (this.options.path) {
+          const index = req.url.indexOf("?");
+          const pathname = index !== -1 ? req.url.slice(0, index) : req.url;
+          if (pathname !== this.options.path) return false;
+        }
+        return true;
+      }
+      /**
+       * Handle a HTTP Upgrade request.
+       *
+       * @param {http.IncomingMessage} req The request object
+       * @param {Duplex} socket The network socket between the server and client
+       * @param {Buffer} head The first packet of the upgraded stream
+       * @param {Function} cb Callback
+       * @public
+       */
+      handleUpgrade(req, socket, head, cb) {
+        socket.on("error", socketOnError);
+        const key2 = req.headers["sec-websocket-key"];
+        const upgrade = req.headers.upgrade;
+        const version = +req.headers["sec-websocket-version"];
+        if (req.method !== "GET") {
+          const message = "Invalid HTTP method";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 405, message);
+          return;
+        }
+        if (upgrade === void 0 || upgrade.toLowerCase() !== "websocket") {
+          const message = "Invalid Upgrade header";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+          return;
+        }
+        if (key2 === void 0 || !keyRegex.test(key2)) {
+          const message = "Missing or invalid Sec-WebSocket-Key header";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+          return;
+        }
+        if (version !== 13 && version !== 8) {
+          const message = "Missing or invalid Sec-WebSocket-Version header";
+          abortHandshakeOrEmitwsClientError(this, req, socket, 400, message, {
+            "Sec-WebSocket-Version": "13, 8"
+          });
+          return;
+        }
+        if (!this.shouldHandle(req)) {
+          abortHandshake(socket, 400);
+          return;
+        }
+        const secWebSocketProtocol = req.headers["sec-websocket-protocol"];
+        let protocols = /* @__PURE__ */ new Set();
+        if (secWebSocketProtocol !== void 0) {
+          try {
+            protocols = subprotocol2.parse(secWebSocketProtocol);
+          } catch (err) {
+            const message = "Invalid Sec-WebSocket-Protocol header";
+            abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+            return;
+          }
+        }
+        const secWebSocketExtensions = req.headers["sec-websocket-extensions"];
+        const extensions = {};
+        if (this.options.perMessageDeflate && secWebSocketExtensions !== void 0) {
+          const perMessageDeflate = new PerMessageDeflate2({
+            ...this.options.perMessageDeflate,
+            isServer: true,
+            maxPayload: this.options.maxPayload
+          });
+          try {
+            const offers = extension2.parse(secWebSocketExtensions);
+            if (offers[PerMessageDeflate2.extensionName]) {
+              perMessageDeflate.accept(offers[PerMessageDeflate2.extensionName]);
+              extensions[PerMessageDeflate2.extensionName] = perMessageDeflate;
+            }
+          } catch (err) {
+            const message = "Invalid or unacceptable Sec-WebSocket-Extensions header";
+            abortHandshakeOrEmitwsClientError(this, req, socket, 400, message);
+            return;
+          }
+        }
+        if (this.options.verifyClient) {
+          const info = {
+            origin: req.headers[`${version === 8 ? "sec-websocket-origin" : "origin"}`],
+            secure: !!(req.socket.authorized || req.socket.encrypted),
+            req
+          };
+          if (this.options.verifyClient.length === 2) {
+            this.options.verifyClient(info, (verified, code, message, headers) => {
+              if (!verified) {
+                return abortHandshake(socket, code || 401, message, headers);
+              }
+              this.completeUpgrade(
+                extensions,
+                key2,
+                protocols,
+                req,
+                socket,
+                head,
+                cb
+              );
+            });
+            return;
+          }
+          if (!this.options.verifyClient(info)) return abortHandshake(socket, 401);
+        }
+        this.completeUpgrade(extensions, key2, protocols, req, socket, head, cb);
+      }
+      /**
+       * Upgrade the connection to WebSocket.
+       *
+       * @param {Object} extensions The accepted extensions
+       * @param {String} key The value of the `Sec-WebSocket-Key` header
+       * @param {Set} protocols The subprotocols
+       * @param {http.IncomingMessage} req The request object
+       * @param {Duplex} socket The network socket between the server and client
+       * @param {Buffer} head The first packet of the upgraded stream
+       * @param {Function} cb Callback
+       * @throws {Error} If called more than once with the same socket
+       * @private
+       */
+      completeUpgrade(extensions, key2, protocols, req, socket, head, cb) {
+        if (!socket.readable || !socket.writable) return socket.destroy();
+        if (socket[kWebSocket]) {
+          throw new Error(
+            "server.handleUpgrade() was called more than once with the same socket, possibly due to a misconfiguration"
+          );
+        }
+        if (this._state > RUNNING) return abortHandshake(socket, 503);
+        const digest = createHash("sha1").update(key2 + GUID).digest("base64");
+        const headers = [
+          "HTTP/1.1 101 Switching Protocols",
+          "Upgrade: websocket",
+          "Connection: Upgrade",
+          `Sec-WebSocket-Accept: ${digest}`
+        ];
+        const ws = new this.options.WebSocket(null, void 0, this.options);
+        if (protocols.size) {
+          const protocol = this.options.handleProtocols ? this.options.handleProtocols(protocols, req) : protocols.values().next().value;
+          if (protocol) {
+            headers.push(`Sec-WebSocket-Protocol: ${protocol}`);
+            ws._protocol = protocol;
+          }
+        }
+        if (extensions[PerMessageDeflate2.extensionName]) {
+          const params = extensions[PerMessageDeflate2.extensionName].params;
+          const value = extension2.format({
+            [PerMessageDeflate2.extensionName]: [params]
+          });
+          headers.push(`Sec-WebSocket-Extensions: ${value}`);
+          ws._extensions = extensions;
+        }
+        this.emit("headers", headers, req);
+        socket.write(headers.concat("\r\n").join("\r\n"));
+        socket.removeListener("error", socketOnError);
+        ws.setSocket(socket, head, {
+          allowSynchronousEvents: this.options.allowSynchronousEvents,
+          maxBufferedChunks: this.options.maxBufferedChunks,
+          maxFragments: this.options.maxFragments,
+          maxPayload: this.options.maxPayload,
+          skipUTF8Validation: this.options.skipUTF8Validation
+        });
+        if (this.clients) {
+          this.clients.add(ws);
+          ws.on("close", () => {
+            this.clients.delete(ws);
+            if (this._shouldEmitClose && !this.clients.size) {
+              process.nextTick(emitClose, this);
+            }
+          });
+        }
+        cb(ws, req);
+      }
+    };
+    module.exports = WebSocketServer2;
+    function addListeners(server, map) {
+      for (const event of Object.keys(map)) server.on(event, map[event]);
+      return function removeListeners() {
+        for (const event of Object.keys(map)) {
+          server.removeListener(event, map[event]);
+        }
+      };
+    }
+    function emitClose(server) {
+      server._state = CLOSED;
+      server.emit("close");
+    }
+    function socketOnError() {
+      this.destroy();
+    }
+    function abortHandshake(socket, code, message, headers) {
+      message = message || http.STATUS_CODES[code];
+      headers = {
+        Connection: "close",
+        "Content-Type": "text/html",
+        "Content-Length": Buffer.byteLength(message),
+        ...headers
+      };
+      socket.once("finish", socket.destroy);
+      socket.end(
+        `HTTP/1.1 ${code} ${http.STATUS_CODES[code]}\r
+` + Object.keys(headers).map((h) => `${h}: ${headers[h]}`).join("\r\n") + "\r\n\r\n" + message
+      );
+    }
+    function abortHandshakeOrEmitwsClientError(server, req, socket, code, message, headers) {
+      if (server.listenerCount("wsClientError")) {
+        const err = new Error(message);
+        Error.captureStackTrace(err, abortHandshakeOrEmitwsClientError);
+        server.emit("wsClientError", err, socket, req);
+      } else {
+        abortHandshake(socket, code, message, headers);
+      }
+    }
+  }
+});
+
+// apps/executor/src/main.ts
 import { join as join3 } from "node:path";
 
-// src/config.ts
+// apps/executor/src/config.ts
 import { join, resolve } from "node:path";
 var DEFAULT_ORIGINS = ["https://valuedeskapp.vercel.app", "https://valuexplorer.vercel.app", "http://localhost:5180", "http://127.0.0.1:5180"];
 var ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -42,12 +4007,80 @@ function loadConfig(env = process.env) {
     // 90 days is what the copy terms promise and what the web app registers at most.
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
+    maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
+    localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info"
   };
 }
 
-// src/db.ts
+// apps/executor/src/net.ts
+import { Agent, request as httpsRequest } from "node:https";
+import { isIPv6 } from "node:net";
+
+// ../valuescan/node_modules/ws/wrapper.mjs
+var import_stream = __toESM(require_stream(), 1);
+var import_extension = __toESM(require_extension(), 1);
+var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
+var import_receiver = __toESM(require_receiver(), 1);
+var import_sender = __toESM(require_sender(), 1);
+var import_subprotocol = __toESM(require_subprotocol(), 1);
+var import_websocket = __toESM(require_websocket(), 1);
+var import_websocket_server = __toESM(require_websocket_server(), 1);
+var wrapper_default = import_websocket.default;
+
+// apps/executor/src/net.ts
+function egress(localAddress) {
+  if (!localAddress) {
+    return {
+      fetch,
+      factory: (url) => new globalThis.WebSocket(url),
+      localAddress: null
+    };
+  }
+  const family = isIPv6(localAddress) ? 6 : 4;
+  const agent = new Agent({ keepAlive: true, localAddress, family, maxSockets: 64 });
+  const bound2 = (url, init) => new Promise((resolve2, reject) => {
+    const u = new URL(url);
+    if (u.protocol !== "https:") {
+      reject(new TypeError(`only https is allowed from the executor's own address (${u.protocol})`));
+      return;
+    }
+    const req = httpsRequest(u, { method: init?.method ?? "GET", headers: init?.headers, agent, family }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const status = res.statusCode ?? 0;
+        const body = Buffer.concat(chunks).toString("utf8");
+        resolve2({ status, ok: status >= 200 && status < 300, text: async () => body });
+      });
+      res.on("error", reject);
+    });
+    const signal = init?.signal;
+    if (signal?.aborted) req.destroy(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    signal?.addEventListener?.("abort", () => req.destroy(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    req.on("error", (e) => reject(e.name === "AbortError" ? e : Object.assign(new TypeError(`fetch failed: ${e.message}`), { cause: e })));
+    if (init?.body !== void 0) req.write(init.body);
+    req.end();
+  });
+  const factory = (url) => {
+    const ws = new wrapper_default(url, { localAddress, family, perMessageDeflate: false });
+    const like = ws;
+    return new Proxy(like, {
+      set(target, prop, value) {
+        if (prop === "onmessage" && typeof value === "function") {
+          target.onmessage = (ev) => value({ data: typeof ev.data === "string" ? ev.data : String(ev.data) });
+          return true;
+        }
+        target[prop] = value;
+        return true;
+      }
+    });
+  };
+  return { fetch: bound2, factory, localAddress };
+}
+
+// apps/executor/src/db.ts
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -85,6 +4118,10 @@ CREATE TABLE IF NOT EXISTS consents (
   viewer_country TEXT
 );
 CREATE INDEX IF NOT EXISTS consents_owner ON consents (owner, at);
+CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
+CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
 `;
 var ExecutorDb = class {
   constructor(path) {
@@ -148,13 +4185,35 @@ var ExecutorDb = class {
   async activity(q) {
     const limit = Math.max(1, Math.min(1e3, q.limit ?? 200));
     const before = q.before ?? Number.MAX_SAFE_INTEGER;
-    const rows = q.subId ? this.q("SELECT json FROM activity WHERE sub_id = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.subId, before, limit) : this.q("SELECT json FROM activity WHERE owner = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.owner ?? "", before, limit);
-    return rows.map((r) => JSON.parse(String(r.json)));
+    const rows2 = q.subId ? this.q("SELECT json FROM activity WHERE sub_id = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.subId, before, limit) : this.q("SELECT json FROM activity WHERE owner = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.owner ?? "", before, limit);
+    return rows2.map((r) => JSON.parse(String(r.json)));
   }
-  /** Activity older than `days` goes (the copy's books keep their totals). */
+  /** Activity (copies' and algos') older than `days` goes; the books keep their totals. */
   pruneActivity(days, now = Date.now()) {
     const r = this.q("DELETE FROM activity WHERE at < ?").run(now - days * 864e5);
-    return Number(r.changes);
+    const e = this.q("DELETE FROM algo_events WHERE at < ?").run(now - days * 864e5);
+    return Number(r.changes) + Number(e.changes);
+  }
+  /* ------------------------------------------------------ AlgoStore ----- */
+  async algos() {
+    return this.q("SELECT json FROM algos").all().map((r) => JSON.parse(String(r.json)));
+  }
+  async saveAlgo(a) {
+    this.q("INSERT INTO algos (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at").run(
+      a.id,
+      a.owner,
+      JSON.stringify(a),
+      Date.now()
+    );
+  }
+  async addAlgoEvent(e) {
+    this.q("INSERT OR IGNORE INTO algo_events (id, algo_id, owner, at, json) VALUES (?, ?, ?, ?, ?)").run(e.id, e.algoId, e.owner, e.at, JSON.stringify(e));
+  }
+  async algoEvents(q) {
+    const limit = Math.max(1, Math.min(1e3, q.limit ?? 200));
+    const before = q.before ?? Number.MAX_SAFE_INTEGER;
+    const rows2 = q.algoId ? this.q("SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.algoId, before, limit) : this.q("SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.owner ?? "", before, limit);
+    return rows2.map((r) => JSON.parse(String(r.json)));
   }
   /* ----------------------------------------------------------- keys ----- */
   key(owner, slot) {
@@ -243,12 +4302,12 @@ function keyOf(r) {
   };
 }
 
-// src/secrets.ts
+// apps/executor/src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync as mkdirSync2, readFileSync, writeFileSync } from "node:fs";
 import { join as join2 } from "node:path";
 
-// ../../packages/sodex-core/src/network.ts
+// packages/sodex-core/src/network.ts
 var ENGINES = ["spot", "perps"];
 var SODEX_CHAIN_ID = {
   mainnet: 286623,
@@ -267,7 +4326,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// ../../node_modules/@noble/hashes/esm/_u64.js
+// ../valuescan/node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -290,7 +4349,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// ../../node_modules/@noble/hashes/esm/utils.js
+// ../valuescan/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -358,7 +4417,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../../node_modules/@noble/hashes/esm/sha3.js
+// ../valuescan/node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -539,7 +4598,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -573,11 +4632,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -630,7 +4689,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -732,7 +4791,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -882,7 +4941,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -947,7 +5006,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// ../../node_modules/@noble/curves/esm/abstract/utils.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -1000,8 +5059,8 @@ function bytesToHex(bytes) {
   }
   return hex;
 }
-function numberToHexUnpadded(num2) {
-  const hex = num2.toString(16);
+function numberToHexUnpadded(num3) {
+  const hex = num3.toString(16);
   return hex.length & 1 ? "0" + hex : hex;
 }
 function hexToNumber(hex) {
@@ -1215,7 +5274,7 @@ function memoized(fn) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/modular.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -1229,7 +5288,7 @@ function mod(a, b) {
   const result = a % b;
   return result >= _0n3 ? result : b + result;
 }
-function pow(num2, power, modulo) {
+function pow(num3, power, modulo) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (modulo <= _0n3)
@@ -1239,8 +5298,8 @@ function pow(num2, power, modulo) {
   let res = _1n3;
   while (power > _0n3) {
     if (power & _1n3)
-      res = res * num2 % modulo;
-    num2 = num2 * num2 % modulo;
+      res = res * num3 % modulo;
+    num3 = num3 * num3 % modulo;
     power >>= _1n3;
   }
   return res;
@@ -1376,15 +5435,15 @@ function validateField(field) {
   }, initial);
   return validateObject(field, opts);
 }
-function FpPow(f, num2, power) {
+function FpPow(f, num3, power) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (power === _0n3)
     return f.ONE;
   if (power === _1n3)
-    return num2;
+    return num3;
   let p = f.ONE;
-  let d = num2;
+  let d = num3;
   while (power > _0n3) {
     if (power & _1n3)
       p = f.mul(p, d);
@@ -1395,18 +5454,18 @@ function FpPow(f, num2, power) {
 }
 function FpInvertBatch(f, nums) {
   const tmp = new Array(nums.length);
-  const lastMultiplied = nums.reduce((acc, num2, i) => {
-    if (f.is0(num2))
+  const lastMultiplied = nums.reduce((acc, num3, i) => {
+    if (f.is0(num3))
       return acc;
     tmp[i] = acc;
-    return f.mul(acc, num2);
+    return f.mul(acc, num3);
   }, f.ONE);
   const inverted = f.inv(lastMultiplied);
-  nums.reduceRight((acc, num2, i) => {
-    if (f.is0(num2))
+  nums.reduceRight((acc, num3, i) => {
+    if (f.is0(num3))
       return acc;
     tmp[i] = f.mul(acc, tmp[i]);
-    return f.mul(acc, num2);
+    return f.mul(acc, num3);
   }, inverted);
   return tmp;
 }
@@ -1430,28 +5489,28 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     MASK: bitMask(BITS),
     ZERO: _0n3,
     ONE: _1n3,
-    create: (num2) => mod(num2, ORDER),
-    isValid: (num2) => {
-      if (typeof num2 !== "bigint")
-        throw new Error("invalid field element: expected bigint, got " + typeof num2);
-      return _0n3 <= num2 && num2 < ORDER;
+    create: (num3) => mod(num3, ORDER),
+    isValid: (num3) => {
+      if (typeof num3 !== "bigint")
+        throw new Error("invalid field element: expected bigint, got " + typeof num3);
+      return _0n3 <= num3 && num3 < ORDER;
     },
-    is0: (num2) => num2 === _0n3,
-    isOdd: (num2) => (num2 & _1n3) === _1n3,
-    neg: (num2) => mod(-num2, ORDER),
+    is0: (num3) => num3 === _0n3,
+    isOdd: (num3) => (num3 & _1n3) === _1n3,
+    neg: (num3) => mod(-num3, ORDER),
     eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num2) => mod(num2 * num2, ORDER),
+    sqr: (num3) => mod(num3 * num3, ORDER),
     add: (lhs, rhs) => mod(lhs + rhs, ORDER),
     sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
     mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
-    pow: (num2, power) => FpPow(f, num2, power),
+    pow: (num3, power) => FpPow(f, num3, power),
     div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
     // Same as above, but doesn't normalize
-    sqrN: (num2) => num2 * num2,
+    sqrN: (num3) => num3 * num3,
     addN: (lhs, rhs) => lhs + rhs,
     subN: (lhs, rhs) => lhs - rhs,
     mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num2) => invert(num2, ORDER),
+    inv: (num3) => invert(num3, ORDER),
     sqrt: redef.sqrt || ((n) => {
       if (!sqrtP)
         sqrtP = FpSqrt(ORDER);
@@ -1461,7 +5520,7 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     // TODO: do we really need constant cmov?
     // We don't have const-time bigints anyway, so probably will be not very useful
     cmov: (a, b, c) => c ? b : a,
-    toBytes: (num2) => isLE2 ? numberToBytesLE(num2, BYTES) : numberToBytesBE(num2, BYTES),
+    toBytes: (num3) => isLE2 ? numberToBytesLE(num3, BYTES) : numberToBytesBE(num3, BYTES),
     fromBytes: (bytes) => {
       if (bytes.length !== BYTES)
         throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
@@ -1486,17 +5545,17 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   const minLen = getMinHashLength(fieldOrder);
   if (len < 16 || len < minLen || len > 1024)
     throw new Error("expected " + minLen + "-1024 bytes of input, got " + len);
-  const num2 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
-  const reduced = mod(num2, fieldOrder - _1n3) + _1n3;
+  const num3 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
+  const reduced = mod(num3, fieldOrder - _1n3) + _1n3;
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/curve.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
-function constTimeNegate(condition, item) {
+function constTimeNegate(condition2, item) {
   const neg = item.negate();
-  return condition ? neg : item;
+  return condition2 ? neg : item;
 }
 function validateW(W, bits) {
   if (!Number.isSafeInteger(W) || W <= 0 || W > bits)
@@ -1562,15 +5621,15 @@ function wNAF(c, bits) {
       const { windows, windowSize } = calcWOpts(W, bits);
       const points = [];
       let p = elm;
-      let base = p;
-      for (let window = 0; window < windows; window++) {
-        base = p;
-        points.push(base);
+      let base2 = p;
+      for (let window2 = 0; window2 < windows; window2++) {
+        base2 = p;
+        points.push(base2);
         for (let i = 1; i < windowSize; i++) {
-          base = base.add(p);
-          points.push(base);
+          base2 = base2.add(p);
+          points.push(base2);
         }
-        p = base.double();
+        p = base2.double();
       }
       return points;
     },
@@ -1588,8 +5647,8 @@ function wNAF(c, bits) {
       const mask = BigInt(2 ** W - 1);
       const maxNumber = 2 ** W;
       const shiftBy = BigInt(W);
-      for (let window = 0; window < windows; window++) {
-        const offset = window * windowSize;
+      for (let window2 = 0; window2 < windows; window2++) {
+        const offset = window2 * windowSize;
         let wbits = Number(n & mask);
         n >>= shiftBy;
         if (wbits > windowSize) {
@@ -1598,7 +5657,7 @@ function wNAF(c, bits) {
         }
         const offset1 = offset;
         const offset2 = offset + Math.abs(wbits) - 1;
-        const cond1 = window % 2 !== 0;
+        const cond1 = window2 % 2 !== 0;
         const cond2 = wbits < 0;
         if (wbits === 0) {
           f = f.add(constTimeNegate(cond1, precomputes[offset1]));
@@ -1621,8 +5680,8 @@ function wNAF(c, bits) {
       const mask = BigInt(2 ** W - 1);
       const maxNumber = 2 ** W;
       const shiftBy = BigInt(W);
-      for (let window = 0; window < windows; window++) {
-        const offset = window * windowSize;
+      for (let window2 = 0; window2 < windows; window2++) {
+        const offset = window2 * windowSize;
         if (n === _0n4)
           break;
         let wbits = Number(n & mask);
@@ -1718,7 +5777,7 @@ function validateBasic(curve) {
   });
 }
 
-// ../../node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -1816,11 +5875,11 @@ var DER = {
   // - add zero byte if exists
   // - if next byte doesn't have a flag, leading zero is not allowed (minimal encoding)
   _int: {
-    encode(num2) {
+    encode(num3) {
       const { Err: E } = DER;
-      if (num2 < _0n5)
+      if (num3 < _0n5)
         throw new E("integer: negative integers are not allowed");
-      let hex = numberToHexUnpadded(num2);
+      let hex = numberToHexUnpadded(num3);
       if (Number.parseInt(hex[0], 16) & 8)
         hex = "00" + hex;
       if (hex.length & 1)
@@ -1837,7 +5896,7 @@ var DER = {
     }
   },
   toSig(hex) {
-    const { Err: E, _int: int, _tlv: tlv } = DER;
+    const { Err: E, _int: int2, _tlv: tlv } = DER;
     const data = typeof hex === "string" ? h2b(hex) : hex;
     abytes3(data);
     const { v: seqBytes, l: seqLeftBytes } = tlv.decode(48, data);
@@ -1847,12 +5906,12 @@ var DER = {
     const { v: sBytes, l: sLeftBytes } = tlv.decode(2, rLeftBytes);
     if (sLeftBytes.length)
       throw new E("invalid signature: left bytes after parsing");
-    return { r: int.decode(rBytes), s: int.decode(sBytes) };
+    return { r: int2.decode(rBytes), s: int2.decode(sBytes) };
   },
   hexFromSig(sig) {
-    const { _tlv: tlv, _int: int } = DER;
-    const rs = tlv.encode(2, int.encode(sig.r));
-    const ss = tlv.encode(2, int.encode(sig.s));
+    const { _tlv: tlv, _int: int2 } = DER;
+    const rs = tlv.encode(2, int2.encode(sig.r));
+    const ss = tlv.encode(2, int2.encode(sig.s));
     const seq = rs + ss;
     return tlv.encode(48, seq);
   }
@@ -1884,8 +5943,8 @@ function weierstrassPoints(opts) {
   }
   if (!Fp.eql(Fp.sqr(CURVE.Gy), weierstrassEquation(CURVE.Gx)))
     throw new Error("bad generator point: equation left != right");
-  function isWithinCurveOrder(num2) {
-    return inRange(num2, _1n5, CURVE.n);
+  function isWithinCurveOrder(num3) {
+    return inRange(num3, _1n5, CURVE.n);
   }
   function normPrivateKeyToScalar(key2) {
     const { allowedPrivateKeyLengths: lengths, nByteLength, wrapPrivateKey, n: N } = CURVE;
@@ -1896,16 +5955,16 @@ function weierstrassPoints(opts) {
         throw new Error("invalid private key");
       key2 = key2.padStart(nByteLength * 2, "0");
     }
-    let num2;
+    let num3;
     try {
-      num2 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
+      num3 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
     } catch (error) {
       throw new Error("invalid private key, expected hex or " + nByteLength + " bytes, got " + typeof key2);
     }
     if (wrapPrivateKey)
-      num2 = mod(num2, N);
-    aInRange("private key", num2, _1n5, N);
-    return num2;
+      num3 = mod(num3, N);
+    aInRange("private key", num3, _1n5, N);
+    return num3;
   }
   function assertPrjPoint(other) {
     if (!(other instanceof Point2))
@@ -2327,7 +6386,7 @@ function weierstrass(curveDef) {
       }
     }
   });
-  const numToNByteStr = (num2) => bytesToHex(numberToBytesBE(num2, CURVE.nByteLength));
+  const numToNByteStr = (num3) => bytesToHex(numberToBytesBE(num3, CURVE.nByteLength));
   function isBiggerThanHalfOrder(number) {
     const HALF = CURVE_ORDER >> _1n5;
     return number > HALF;
@@ -2461,17 +6520,17 @@ function weierstrass(curveDef) {
   const bits2int = CURVE.bits2int || function(bytes) {
     if (bytes.length > 8192)
       throw new Error("input is too large");
-    const num2 = bytesToNumberBE(bytes);
+    const num3 = bytesToNumberBE(bytes);
     const delta = bytes.length * 8 - CURVE.nBitLength;
-    return delta > 0 ? num2 >> BigInt(delta) : num2;
+    return delta > 0 ? num3 >> BigInt(delta) : num3;
   };
   const bits2int_modN = CURVE.bits2int_modN || function(bytes) {
     return modN(bits2int(bytes));
   };
   const ORDER_MASK = bitMask(CURVE.nBitLength);
-  function int2octets(num2) {
-    aInRange("num < 2^" + CURVE.nBitLength, num2, _0n5, ORDER_MASK);
-    return numberToBytesBE(num2, CURVE.nByteLength);
+  function int2octets(num3) {
+    aInRange("num < 2^" + CURVE.nBitLength, num3, _0n5, ORDER_MASK);
+    return numberToBytesBE(num3, CURVE.nByteLength);
   }
   function prepSig(msgHash, privateKey, opts = defaultSigOpts) {
     if (["recovered", "canonical"].some((k) => k in opts))
@@ -2535,13 +6594,13 @@ function weierstrass(curveDef) {
     if (format !== void 0 && format !== "compact" && format !== "der")
       throw new Error("format must be compact or der");
     const isHex = typeof sg === "string" || isBytes3(sg);
-    const isObj = !isHex && !format && typeof sg === "object" && sg !== null && typeof sg.r === "bigint" && typeof sg.s === "bigint";
-    if (!isHex && !isObj)
+    const isObj2 = !isHex && !format && typeof sg === "object" && sg !== null && typeof sg.r === "bigint" && typeof sg.s === "bigint";
+    if (!isHex && !isObj2)
       throw new Error("invalid signature, expected Uint8Array, hex string or Signature instance");
     let _sig = void 0;
     let P;
     try {
-      if (isObj)
+      if (isObj2)
         _sig = new Signature(sg.r, sg.s);
       if (isHex) {
         try {
@@ -2587,7 +6646,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// ../../node_modules/@noble/curves/esm/_shortw_utils.js
+// ../valuescan/node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -2600,7 +6659,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// ../../node_modules/@noble/curves/esm/secp256k1.js
+// ../valuescan/node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -2674,7 +6733,7 @@ var secp256k1 = createCurve({
 var _0n6 = BigInt(0);
 var Point = secp256k1.ProjectivePoint;
 
-// ../../packages/sodex-core/src/eip712.ts
+// packages/sodex-core/src/eip712.ts
 var SignatureType = {
   /** Exchange actions (orders, cancels, transfers, revokeAPIKey) - engine-specific domain. */
   EIP712: 1,
@@ -2925,7 +6984,7 @@ function recoverAddress(digest, rsv) {
 }
 var privateKeyToAddress = (privateKey) => bytesToHex2(keccak_256(secp256k1.getPublicKey(privateKey, false).slice(1)).slice(12));
 
-// ../../packages/sodex-core/src/decimal.ts
+// packages/sodex-core/src/decimal.ts
 var DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 var DecimalError = class extends Error {
 };
@@ -3014,7 +7073,7 @@ function unscaleFromInt(n, scale) {
   return canonicalDecimal((neg ? "-" : "") + out);
 }
 
-// ../../packages/sodex-core/src/actions.ts
+// packages/sodex-core/src/actions.ts
 var OrderSide = { BUY: 1, SELL: 2 };
 var OrderType = { LIMIT: 1, MARKET: 2 };
 var TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 };
@@ -3205,7 +7264,7 @@ var perpsActions = {
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
 };
 
-// ../../packages/sodex-core/src/keys.ts
+// packages/sodex-core/src/keys.ts
 function defaultRandom(length) {
   const c = globalThis.crypto;
   if (!c?.getRandomValues) throw new Error("no CSPRNG available (globalThis.crypto.getRandomValues)");
@@ -3232,7 +7291,7 @@ var MAX_TRADING_KEY_TTL_MS = 7 * DAY_MS;
 var MIN_TRADING_KEY_TTL_MS = 5 * 6e4;
 var isKeyExpired = (expiresAt, now = Date.now()) => !!expiresAt && expiresAt <= now;
 
-// ../../packages/sodex-core/src/nonce.ts
+// packages/sodex-core/src/nonce.ts
 var NONCE_WINDOW = { pastMs: 2 * DAY_MS, futureMs: DAY_MS };
 var DEFAULT_NONCE_WINDOW_MARGIN_MS = 6e4;
 var NonceWindowError = class extends RangeError {
@@ -3444,7 +7503,7 @@ var Manager = class {
 };
 var createMemoryNonceManager = (opts = {}) => new Manager({ ...opts, storage: null, channel: null, locks: null }, false);
 
-// ../../packages/sodex-core/src/request.ts
+// packages/sodex-core/src/request.ts
 var HEADER = {
   key: "X-API-Key",
   sign: "X-API-Sign",
@@ -3459,8 +7518,8 @@ function signingKeyFrom(key2, registration) {
 var SigningError = class extends Error {
   name = "SigningError";
 };
-var joinBase = (base, path) => base.replace(/\/+$/, "") + path;
-function signAndBuild(action, key2, opts) {
+var joinBase = (base2, path) => base2.replace(/\/+$/, "") + path;
+function signAndBuild(action2, key2, opts) {
   const now = opts.now ?? Date.now();
   if (!Number.isSafeInteger(opts.chainId) || opts.chainId <= 0) {
     throw new SigningError("chainId must be the SoDEX chain id (286623 mainnet, 138565 testnet)");
@@ -3470,15 +7529,15 @@ function signAndBuild(action, key2, opts) {
   }
   if (key2.name !== void 0 && key2.name === "") throw new SigningError("API key name must not be empty");
   const nonce = assertNonceInWindow(opts.nonce, now, opts.nonceWindowMarginMs ?? DEFAULT_NONCE_WINDOW_MARGIN_MS);
-  const ep = endpointFor(action.engine, action.type);
-  const body = goJSONStringify(action.params);
-  const payloadHash = keccak256(utf8(payloadJSONFromBody(action.type, body)));
+  const ep = endpointFor(action2.engine, action2.type);
+  const body = goJSONStringify(action2.params);
+  const payloadHash = keccak256(utf8(payloadJSONFromBody(action2.type, body)));
   const digest = eip712Digest(
-    makeDomain(engineDomainName(action.engine), opts.chainId),
+    makeDomain(engineDomainName(action2.engine), opts.chainId),
     exchangeActionStructHash(payloadHash, nonce)
   );
   const signature = bytesToHex2(signDigest(digest, key2.privateKey, SignatureType.EIP712));
-  const gatewayPath = enginePath(action.engine) + ep.path;
+  const gatewayPath = enginePath(action2.engine) + ep.path;
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -3494,8 +7553,8 @@ function signAndBuild(action, key2, opts) {
     headers,
     body,
     meta: {
-      engine: action.engine,
-      actionType: action.type,
+      engine: action2.engine,
+      actionType: action2.type,
       nonce: nonce.toString(),
       signer: key2.address?.toLowerCase() ?? privateKeyToAddress(key2.privateKey),
       payloadHash: bytesToHex2(payloadHash),
@@ -3504,14 +7563,14 @@ function signAndBuild(action, key2, opts) {
     }
   };
 }
-async function signAndBuildWithNonceManager(action, key2, opts) {
+async function signAndBuildWithNonceManager(action2, key2, opts) {
   const signer = key2.address ?? privateKeyToAddress(key2.privateKey);
   const nonce = await opts.nonces.next(nonceKey(signer, opts.chainId));
   const ref = { privateKey: key2.privateKey, name: key2.name, expiresAt: key2.expiresAt, address: signer };
-  return signAndBuild(action, ref, { ...opts, nonce });
+  return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
-// ../../packages/sodex-core/src/builders.ts
+// packages/sodex-core/src/builders.ts
 var asRate = (v) => {
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -3521,9 +7580,9 @@ function approvedBuilderRates(data, builderID) {
   const out = { spot: null, perps: null };
   if (!data || typeof data !== "object") return out;
   for (const engine of ENGINES) {
-    const rows = data[engine];
-    if (!Array.isArray(rows)) continue;
-    for (const row of rows) {
+    const rows2 = data[engine];
+    if (!Array.isArray(rows2)) continue;
+    for (const row of rows2) {
       if (!row || typeof row !== "object") continue;
       const r = row;
       if (String(r["builderID"]) !== want) continue;
@@ -3534,7 +7593,7 @@ function approvedBuilderRates(data, builderID) {
   return out;
 }
 
-// ../../packages/sodex-core/src/envelope.ts
+// packages/sodex-core/src/envelope.ts
 var SodexApiError = class extends Error {
   constructor(code, message, httpStatus, path, body) {
     super(message);
@@ -3623,7 +7682,7 @@ function weightFor(path, limit = 0) {
   return 5;
 }
 
-// src/secrets.ts
+// apps/executor/src/secrets.ts
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
@@ -3701,11 +7760,11 @@ var Secrets = class {
 };
 var aad = (network, owner, address) => Buffer.from(`vd-copy-key:v1:${network}:${owner.toLowerCase()}:${address.toLowerCase()}`);
 
-// src/server.ts
+// apps/executor/src/server.ts
 import { createServer } from "node:http";
 import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 
-// ../../packages/copy-engine/src/io.ts
+// packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
 var host = globalThis;
 function unref(h) {
@@ -3740,7 +7799,7 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
-// ../../packages/copy-engine/src/policy.ts
+// packages/copy-engine/src/policy.ts
 var COPY_TERMS_VERSION = "2026-10-23";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var SANCTIONED = ["CU", "IR", "KP", "SY", "RU", "BY", "MM"];
@@ -3844,7 +7903,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   return fee;
 }
 
-// ../../packages/copy-engine/src/settings.ts
+// packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
@@ -3978,16 +8037,16 @@ var SettingsError = class extends Error {
   name = "SettingsError";
 };
 
-// ../../packages/copy-engine/src/markets.ts
+// packages/copy-engine/src/markets.ts
 var num = (v, fallback = NaN) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : fallback;
 };
 var str = (v, fallback) => typeof v === "string" && v.trim() !== "" ? v.trim() : fallback;
-function parseMarkets(rows) {
-  if (!Array.isArray(rows)) return [];
+function parseMarkets(rows2) {
+  if (!Array.isArray(rows2)) return [];
   const out = [];
-  for (const r of rows) {
+  for (const r of rows2) {
     const id = num(r.id);
     const name = str(r.name, "");
     const step = str(r.stepSize, "");
@@ -4008,6 +8067,7 @@ function parseMarkets(rows) {
       buyLimitUpRatio: num(r.buyLimitUpRatio, 0.05),
       sellLimitDownRatio: num(r.sellLimitDownRatio, 0.05),
       takerFee: num(r.takerFee, 4e-4),
+      ...Number.isFinite(num(r.makerFee)) ? { makerFee: num(r.makerFee) } : {},
       status: str(r.status, "TRADING")
     });
   }
@@ -4030,12 +8090,12 @@ var MarketBook = class {
   get(name) {
     return this.byName.get(name.toUpperCase()) ?? null;
   }
-  setMark(symbol, price, at = Date.now()) {
-    if (Number.isFinite(price) && price > 0) this.marks.set(symbol.toUpperCase(), { price, at });
+  setMark(symbol2, price2, at = Date.now()) {
+    if (Number.isFinite(price2) && price2 > 0) this.marks.set(symbol2.toUpperCase(), { price: price2, at });
   }
   /** The mark, if seen within `maxAgeMs`. */
-  mark(symbol, maxAgeMs = 6e4, now = Date.now()) {
-    const m = this.marks.get(symbol.toUpperCase());
+  mark(symbol2, maxAgeMs = 6e4, now = Date.now()) {
+    const m = this.marks.get(symbol2.toUpperCase());
     return m && now - m.at <= maxAgeMs ? m.price : null;
   }
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
@@ -4099,7 +8159,7 @@ var snapPrice = (p, m) => {
   return s === "0" ? m.tickSize : s;
 };
 
-// ../../packages/copy-engine/src/planner.ts
+// packages/copy-engine/src/planner.ts
 var FLAT_EPS = 1e-9;
 var isFlat = (x) => !Number.isFinite(x) || Math.abs(x) < FLAT_EPS;
 var sign = (x) => isFlat(x) ? 0 : x > 0 ? 1 : -1;
@@ -4376,27 +8436,27 @@ function noteSeen(state, id, cap = 500) {
   state.seen.push(id);
   if (state.seen.length > cap) state.seen.splice(0, state.seen.length - cap);
 }
-function applyFill(state, symbol, side, qty, price, fee, at) {
-  if (!(qty > 0) || !(price > 0)) return;
-  const d = side === "buy" ? qty : -qty;
-  const p = state.owned[symbol];
+function applyFill(state, symbol2, side, qty2, price2, fee, at) {
+  if (!(qty2 > 0) || !(price2 > 0)) return;
+  const d = side === "buy" ? qty2 : -qty2;
+  const p = state.owned[symbol2];
   const size = p?.size ?? 0;
   state.fees += Math.max(0, fee);
   if (isFlat(size) || sign(size) === sign(d)) {
     const next2 = size + d;
-    const entry = isFlat(size) ? price : (p.entry * Math.abs(size) + price * Math.abs(d)) / Math.abs(next2);
-    state.owned[symbol] = { size: next2, entry, openedAt: p?.openedAt ?? at };
+    const entry = isFlat(size) ? price2 : (p.entry * Math.abs(size) + price2 * Math.abs(d)) / Math.abs(next2);
+    state.owned[symbol2] = { size: next2, entry, openedAt: p?.openedAt ?? at };
     return;
   }
   const closing = Math.min(Math.abs(d), Math.abs(size));
-  state.realizedPnl += closing * (price - p.entry) * sign(size);
+  state.realizedPnl += closing * (price2 - p.entry) * sign(size);
   const next = size + d;
-  if (isFlat(next) || Math.abs(next) < 1e-12) delete state.owned[symbol];
-  else if (sign(next) === sign(size)) state.owned[symbol] = { size: next, entry: p.entry, openedAt: p.openedAt };
-  else state.owned[symbol] = { size: next, entry: price, openedAt: at };
+  if (isFlat(next) || Math.abs(next) < 1e-12) delete state.owned[symbol2];
+  else if (sign(next) === sign(size)) state.owned[symbol2] = { size: next, entry: p.entry, openedAt: p.openedAt };
+  else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
-// ../../packages/copy-engine/src/sodex.ts
+// packages/copy-engine/src/sodex.ts
 var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
@@ -4491,8 +8551,8 @@ var SodexClient = class {
     return parseMarkets(await this.get("/api/v1/perps/markets/symbols"));
   }
   async markPrices() {
-    const rows = await this.get("/api/v1/perps/markets/mark-prices");
-    return (rows ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice) })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
+    const rows2 = await this.get("/api/v1/perps/markets/mark-prices");
+    return (rows2 ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice) })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
   }
   /** The primary account id (0 when SoDEX has never seen a deposit from the wallet). */
   async accountId(address) {
@@ -4527,13 +8587,13 @@ var SodexClient = class {
   }
   /** The account's API keys on perps (names are public). */
   async apiKeys(address, engine = "perps") {
-    const rows = await this.get(`/api/v1/${engine}/accounts/${address.toLowerCase()}/api-keys`);
-    return Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
+    const rows2 = await this.get(`/api/v1/${engine}/accounts/${address.toLowerCase()}/api-keys`);
+    return Array.isArray(rows2) ? rows2 : rows2?.apiKeys ?? [];
   }
   /** Whether `keyAddress` is registered under `name` and not expired. */
   async keyRegistered(owner, name, keyAddress, now = Date.now()) {
-    const rows = await this.apiKeys(owner, "perps");
-    const row = rows.find((r) => r.name === name);
+    const rows2 = await this.apiKeys(owner, "perps");
+    const row = rows2.find((r) => r.name === name);
     if (!row || row.publicKey.toLowerCase() !== keyAddress.toLowerCase()) return { ok: false, expiresAt: null };
     if (row.expiresAt && row.expiresAt <= now) return { ok: false, expiresAt: row.expiresAt };
     return { ok: true, expiresAt: row.expiresAt || null };
@@ -4614,7 +8674,7 @@ var HyperliquidClient = class {
   }
 };
 
-// ../../packages/copy-engine/src/socket.ts
+// packages/copy-engine/src/socket.ts
 var LiveSocket = class {
   constructor(o) {
     this.o = o;
@@ -4715,8 +8775,8 @@ var LiveSocket = class {
   schedule() {
     if (!this.running) return;
     timers.cancel(this.retry);
-    const base = Math.min(3e4, 1e3 * 2 ** this.attempt++);
-    const delay = base / 2 + Math.random() * (base / 2);
+    const base2 = Math.min(3e4, 1e3 * 2 ** this.attempt++);
+    const delay = base2 / 2 + Math.random() * (base2 / 2);
     this.retry = timers.after(delay, () => {
       this.retry = null;
       this.connect();
@@ -4741,7 +8801,7 @@ var LiveSocket = class {
   }
 };
 
-// ../../packages/copy-engine/src/feeds.ts
+// packages/copy-engine/src/feeds.ts
 var COALESCE_MS = 150;
 var key = (l) => `${l.venue}:${l.address.toLowerCase()}`;
 var LeaderBook = class {
@@ -4757,8 +8817,8 @@ var LeaderBook = class {
   positions(l) {
     return Object.fromEntries(this.pos.get(key(l)) ?? []);
   }
-  position(l, symbol) {
-    return this.pos.get(key(l))?.get(symbol) ?? 0;
+  position(l, symbol2) {
+    return this.pos.get(key(l))?.get(symbol2) ?? 0;
   }
   equity(l) {
     return this.eq.get(key(l)) ?? null;
@@ -4769,25 +8829,25 @@ var LeaderBook = class {
     this.seededAt.delete(key(l));
   }
   /** A position change by `delta` from the stream. Null while the leader is not seeded. */
-  applyDelta(l, symbol, delta, price, time, id) {
+  applyDelta(l, symbol2, delta, price2, time2, id) {
     if (!this.seeded(l) || !Number.isFinite(delta) || delta === 0) return null;
     const m = this.map(l);
-    const before = m.get(symbol) ?? 0;
+    const before = m.get(symbol2) ?? 0;
     let after = before + delta;
     if (Math.abs(after) < 1e-12 * Math.max(1, Math.abs(before))) after = 0;
-    if (after === 0) m.delete(symbol);
-    else m.set(symbol, after);
-    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before, after, price, time, id, source: "stream" };
+    if (after === 0) m.delete(symbol2);
+    else m.set(symbol2, after);
+    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before, after, price: price2, time: time2, id, source: "stream" };
   }
   /** A position change to `after` (a source that knows the total). */
-  applyTotal(l, symbol, before, after, price, time, id) {
+  applyTotal(l, symbol2, before, after, price2, time2, id) {
     if (!this.seeded(l)) return null;
     const m = this.map(l);
-    const b = before ?? m.get(symbol) ?? 0;
-    if (after === 0) m.delete(symbol);
-    else m.set(symbol, after);
+    const b = before ?? m.get(symbol2) ?? 0;
+    if (after === 0) m.delete(symbol2);
+    else m.set(symbol2, after);
     if (b === after) return null;
-    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before: b, after, price, time, id, source: "stream" };
+    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before: b, after, price: price2, time: time2, id, source: "stream" };
   }
   /**
    * The REST truth. The first call seeds the leader (no events: whatever is
@@ -4812,8 +8872,8 @@ var LeaderBook = class {
       if (Math.abs(before - after) <= tol) continue;
       if (after === 0) m.delete(s);
       else m.set(s, after);
-      const price = marks[s] ?? priceOf(s) ?? 0;
-      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
+      const price2 = marks[s] ?? priceOf(s) ?? 0;
+      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price: price2, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
     }
     return out;
   }
@@ -4830,11 +8890,11 @@ var Coalescer = class {
   }
   flush;
   pending = /* @__PURE__ */ new Map();
-  add(l, symbol, delta, price, time, id) {
-    const k = `${key(l)}|${symbol}`;
+  add(l, symbol2, delta, price2, time2, id) {
+    const k = `${key(l)}|${symbol2}`;
     let p = this.pending.get(k);
     if (!p) {
-      p = { l, symbol, delta: 0, notional: 0, qty: 0, time, ids: [], timer: null };
+      p = { l, symbol: symbol2, delta: 0, notional: 0, qty: 0, time: time2, ids: [], timer: null };
       this.pending.set(k, p);
       const entry = p;
       p.timer = timers.after(COALESCE_MS, () => {
@@ -4843,9 +8903,9 @@ var Coalescer = class {
       });
     }
     p.delta += delta;
-    p.notional += Math.abs(delta) * price;
+    p.notional += Math.abs(delta) * price2;
     p.qty += Math.abs(delta);
-    p.time = Math.max(p.time, time);
+    p.time = Math.max(p.time, time2);
     p.ids.push(id);
   }
   stop() {
@@ -4875,8 +8935,8 @@ var Seen = class {
 var SodexFeed = class {
   constructor(o) {
     this.o = o;
-    this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+    this.coalesce = new Coalescer((l, symbol2, delta, vwap, time2, id) => {
+      const e = this.o.book.applyDelta(l, symbol2, delta, vwap, time2, id);
       if (e) this.o.sink.leader(e);
     });
     const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
@@ -4946,10 +9006,10 @@ var SodexFeed = class {
       if (!t.s || typeof t.t !== "number") continue;
       const id = `sodex:${t.s}:${t.t}`;
       if (!this.seen.add(id)) continue;
-      const price = Number(t.p);
-      const qty = Number(t.q);
-      const time = t.T ?? Date.now();
-      if (!(price > 0) || !(qty > 0)) continue;
+      const price2 = Number(t.p);
+      const qty2 = Number(t.q);
+      const time2 = t.T ?? Date.now();
+      if (!(price2 > 0) || !(qty2 > 0)) continue;
       const buyer = typeof t.bi === "number" ? t.bi : -1;
       const seller = typeof t.si === "number" ? t.si : -1;
       if (buyer === seller) continue;
@@ -4958,7 +9018,7 @@ var SodexFeed = class {
         const l = this.leadersById.get(acct);
         if (l) {
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.s, side === "buy" ? qty : -qty, price, time, id);
+          if (seed !== null && time2 >= seed) this.coalesce.add(l, t.s, side === "buy" ? qty2 : -qty2, price2, time2, id);
         }
         if (this.followers.has(acct)) {
           this.o.sink.follower?.({
@@ -4966,10 +9026,10 @@ var SodexFeed = class {
             accountId: acct,
             symbol: t.s,
             side,
-            price,
-            qty,
+            price: price2,
+            qty: qty2,
             taker: side === "buy" ? takerBuy : !takerBuy,
-            time,
+            time: time2,
             clOrdID: null,
             fee: null
           });
@@ -4982,8 +9042,8 @@ var HL_USER_LIMIT = 10;
 var HyperliquidFeed = class {
   constructor(o) {
     this.o = o;
-    this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+    this.coalesce = new Coalescer((l, symbol2, delta, vwap, time2, id) => {
+      const e = this.o.book.applyDelta(l, symbol2, delta, vwap, time2, id);
       if (e) this.o.sink.leader(e);
     });
     this.socket = new LiveSocket({
@@ -5069,20 +9129,20 @@ var HyperliquidFeed = class {
         const sz = Number(f.sz);
         const px = Number(f.px);
         const start = Number(f.startPosition);
-        const time = Number(f.time);
-        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time}`)}`;
+        const time2 = Number(f.time);
+        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time2}`)}`;
         if (!coin || !(sz > 0) || !(px > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
-        if (seed !== null && time < seed) continue;
+        if (seed !== null && time2 < seed) continue;
         if (coin.startsWith("@") || coin.includes("/")) continue;
         const signed = f.side === "B" ? sz : -sz;
-        const k = `${coin}|${String(f.oid ?? time)}`;
+        const k = `${coin}|${String(f.oid ?? time2)}`;
         const g = byOrder.get(k);
-        if (!g) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time, id });
+        if (!g) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time: time2, id });
         else {
           g.after += signed;
           g.notional += sz * px;
           g.qty += sz;
-          g.time = Math.max(g.time, time);
+          g.time = Math.max(g.time, time2);
         }
       }
       for (const g of byOrder.values()) {
@@ -5099,7 +9159,7 @@ var HyperliquidFeed = class {
         if (!this.seen.add(id)) continue;
         const px = Number(t.px);
         const sz = Number(t.sz);
-        const time = t.time ?? Date.now();
+        const time2 = t.time ?? Date.now();
         if (!(px > 0) || !(sz > 0)) continue;
         const [buyer, seller] = [t.users[0]?.toLowerCase(), t.users[1]?.toLowerCase()];
         if (buyer === seller) continue;
@@ -5107,14 +9167,14 @@ var HyperliquidFeed = class {
           const l = addr ? this.leaders.get(addr) : void 0;
           if (!l) continue;
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.coin, signed, px, time, id);
+          if (seed !== null && time2 >= seed) this.coalesce.add(l, t.coin, signed, px, time2, id);
         }
       }
     }
   }
 };
 
-// ../../packages/copy-engine/src/orders.ts
+// packages/copy-engine/src/orders.ts
 function intentsAction(accountId, market, intents, builder) {
   return perpsActions.newOrder(
     accountId,
@@ -5168,20 +9228,20 @@ var KeySink = class {
   nonces;
   chainId;
   paper = false;
-  async signAndSend(action) {
+  async signAndSend(action2) {
     const key2 = this.key();
     if (!key2) throw new SodexApiError(401, "no copy key is available", 401, "");
-    const req = await signAndBuildWithNonceManager(action, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
+    const req = await signAndBuildWithNonceManager(action2, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
     return this.client.send(req);
   }
   async place(accountId, market, intents, builder) {
     if (!intents.length) return [];
     try {
       const data = await this.signAndSend(intentsAction(accountId, market, intents, builder));
-      const rows = Array.isArray(data) ? data : unwrapList(data, "orders");
-      const failed = new Set(failedOrders(rows).map((r) => r.clOrdID));
+      const rows2 = Array.isArray(data) ? data : unwrapList(data, "orders");
+      const failed = new Set(failedOrders(rows2).map((r) => r.clOrdID));
       return intents.map((i) => {
-        const row = rows.find((r) => r.clOrdID === i.clOrdID);
+        const row = rows2.find((r) => r.clOrdID === i.clOrdID);
         const bad = failed.has(i.clOrdID);
         return {
           clOrdID: i.clOrdID,
@@ -5202,8 +9262,8 @@ var KeySink = class {
   async placeStop(accountId, market, stop, builder) {
     try {
       const data = await this.signAndSend(stopAction(accountId, market, stop, builder));
-      const rows = Array.isArray(data) ? data : unwrapList(data, "orders");
-      const bad = failedOrders(rows)[0];
+      const rows2 = Array.isArray(data) ? data : unwrapList(data, "orders");
+      const bad = failedOrders(rows2)[0];
       return { clOrdID: stop.clOrdID, ok: !bad, orderId: null, error: bad ? bad.error || `code ${bad.code}` : null, outcomeUnknown: false };
     } catch (e) {
       return { clOrdID: stop.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: e instanceof OutcomeUnknownError };
@@ -5236,7 +9296,7 @@ var PaperSink = class {
   }
 };
 
-// ../../packages/copy-engine/src/runtime.ts
+// packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
 var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
@@ -5362,8 +9422,8 @@ var CopyRuntime = class {
     if (this.live(s)) await this.checkReady(s);
     if (s.settings.copyExisting) {
       for (const [sym, size] of Object.entries(positions)) {
-        const price = this.priceFor(s.settings.leader.venue, sym) ?? 0;
-        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
+        const price2 = this.priceFor(s.settings.leader.venue, sym) ?? 0;
+        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price: price2, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
       }
     }
     void this.refreshFollower(s.owner);
@@ -5533,16 +9593,16 @@ var CopyRuntime = class {
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader });
   }
   /** Who holds the follower's position on `symbol` when this copy does not. */
-  heldBy(s, symbol) {
-    if (this.stateOf(s).owned[symbol]) return "nobody";
+  heldBy(s, symbol2) {
+    if (this.stateOf(s).owned[symbol2]) return "nobody";
     for (const o of this.list(s.owner)) {
       if (o.id === s.id || o.status === "stopped") continue;
       if (o.settings.paper !== s.settings.paper) continue;
-      if (this.stateOf(o).owned[symbol]) return "other-copy";
+      if (this.stateOf(o).owned[symbol2]) return "other-copy";
     }
     if (s.settings.paper) return "nobody";
     const f = this.followers.get(s.owner);
-    return f?.positions[symbol] ? "follower" : "nobody";
+    return f?.positions[symbol2] ? "follower" : "nobody";
   }
   async execute(s, market, intents, reference, leader) {
     const st = this.stateOf(s);
@@ -5610,18 +9670,18 @@ var CopyRuntime = class {
     return results;
   }
   /** Apply a fill to the copy's books; a reduce-only fill never opens the other side. */
-  fillBooks(s, symbol, side, qty, price, fee, reduceOnly) {
+  fillBooks(s, symbol2, side, qty2, price2, fee, reduceOnly) {
     const st = this.stateOf(s);
-    let q = qty;
+    let q = qty2;
     if (reduceOnly) {
-      const held = Math.abs(st.owned[symbol]?.size ?? 0);
+      const held = Math.abs(st.owned[symbol2]?.size ?? 0);
       q = Math.min(q, held);
       if (!(q > 0)) return;
     }
-    applyFill(st, symbol, side, q, price, fee, Date.now());
-    if (st.owned[symbol]) this.recentGrow.delete(`${s.id}|${symbol}`);
+    applyFill(st, symbol2, side, q, price2, fee, Date.now());
+    if (st.owned[symbol2]) this.recentGrow.delete(`${s.id}|${symbol2}`);
     this.dirty.add(s.id);
-    if (!s.settings.paper) this.scheduleStops(s, symbol);
+    if (!s.settings.paper) this.scheduleStops(s, symbol2);
   }
   onFollowerFill(f) {
     if (!f.taker) return;
@@ -5814,32 +9874,32 @@ var CopyRuntime = class {
     });
   }
   /* -------------------------------------------------- SoDEX position stops ----- */
-  scheduleStops(s, symbol) {
+  scheduleStops(s, symbol2) {
     if (s.settings.paper || s.settings.stopLossPct === null && s.settings.takeProfitPct === null) return;
-    const k = `${s.id}|${symbol}`;
+    const k = `${s.id}|${symbol2}`;
     timers.cancel(this.stopTimers.get(k));
     this.stopTimers.set(
       k,
       timers.after(2e3, () => {
         this.stopTimers.delete(k);
-        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol));
+        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
       })
     );
   }
   /** Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. */
-  async refreshStops(subId, symbol) {
+  async refreshStops(subId, symbol2) {
     const s = this.subs.get(subId);
     if (!s || s.status === "stopped") return;
     const st = this.stateOf(s);
     const sink = this.host.sinkFor(s);
-    const m = this.markets.get(symbol);
+    const m = this.markets.get(symbol2);
     if (!sink || sink.paper || !m) return;
-    const p = st.owned[symbol];
-    const cur = st.stops[symbol];
+    const p = st.owned[symbol2];
+    const cur = st.stops[symbol2];
     if (p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
     if (cur) {
       for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch((e) => this.host.log.warn("copy: stop not cancelled", { id, error: String(e) }));
-      delete st.stops[symbol];
+      delete st.stops[symbol2];
     }
     if (!p) return;
     const q = floorQuantity(p.size, m);
@@ -5850,17 +9910,17 @@ var CopyRuntime = class {
     for (const kind of ["stop-loss", "take-profit"]) {
       const trigger = guardTrigger(kind, p, s.settings, lev);
       if (trigger === null) continue;
-      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
+      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol2}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
       const r = await sink.placeStop(s.accountId, m, { clOrdID, side: p.size > 0 ? "sell" : "buy", quantity: q, triggerPrice: snapPrice(trigger, m), kind }, builder);
       if (r.ok) next[kind === "stop-loss" ? "sl" : "tp"] = clOrdID;
-      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol, detail: r.error });
+      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol: symbol2, detail: r.error });
     }
-    st.stops[symbol] = next;
+    st.stops[symbol2] = next;
     this.dirty.add(s.id);
   }
-  cancelStops(s, symbol) {
-    if (s.settings.paper || !this.stateOf(s).stops[symbol]) return;
-    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol));
+  cancelStops(s, symbol2) {
+    if (s.settings.paper || !this.stateOf(s).stops[symbol2]) return;
+    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
   }
   cancelAllStops(s) {
     for (const sym of Object.keys(this.stateOf(s).stops)) {
@@ -6058,10 +10118,10 @@ var CopyRuntime = class {
   }
 };
 
-// ../../packages/copy-engine/src/api.ts
+// packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
-var COPY_ACTIONS = ["session", "accept-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all"];
+var COPY_ACTIONS = ["session", "accept-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
 var COPY_REQUEST_FIELDS = [
   { name: "action", type: "string" },
   { name: "owner", type: "address" },
@@ -6102,14 +10162,14 @@ function copyRequestTypedData(r) {
 var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)));
 var REQUEST_TTL_MS = 5 * 6e4;
 var TERMS_TTL_MS = 365 * 864e5;
-var MAX_WINDOW_MS = (action) => action === "accept-terms" ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
+var MAX_WINDOW_MS = (action2) => action2 === "accept-terms" ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
 var ADDRESS3 = /^0x[0-9a-f]{40}$/;
 function verifyCopyRequest(r, o) {
   const now = o.now ?? Date.now();
   if (!r || typeof r !== "object") return { ok: false, error: "missing signed request" };
   const q = r;
-  const action = q.action;
-  if (!COPY_ACTIONS.includes(action)) return { ok: false, error: "unknown action" };
+  const action2 = q.action;
+  if (!COPY_ACTIONS.includes(action2)) return { ok: false, error: "unknown action" };
   const owner = typeof q.owner === "string" ? q.owner.toLowerCase() : "";
   if (!ADDRESS3.test(owner)) return { ok: false, error: "owner must be a 0x address" };
   if (q.executor !== o.executor) return { ok: false, error: "this request was signed for another executor" };
@@ -6122,9 +10182,9 @@ function verifyCopyRequest(r, o) {
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again" };
-  if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: "this request is valid for longer than allowed" };
+  if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
   const skew = o.maxAgeMs ?? 15 * 6e4;
-  if (nonce - now > skew || action !== "accept-terms" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
+  if (nonce - now > skew || action2 !== "accept-terms" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
   let payload;
   try {
     payload = JSON.parse(q.payload);
@@ -6132,7 +10192,7 @@ function verifyCopyRequest(r, o) {
     return { ok: false, error: "payload is not JSON" };
   }
   if (canonicalJSON(payload) !== q.payload) return { ok: false, error: "payload is not in canonical form" };
-  const req = { action, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
+  const req = { action: action2, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
   const digest = copyRequestDigest(req);
   let signer;
   try {
@@ -6144,10 +10204,2833 @@ function verifyCopyRequest(r, o) {
   return { ok: true, digest, payload };
 }
 
-// ../../packages/copy-engine/src/index.ts
+// packages/copy-engine/src/algo/types.ts
+var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket"];
+var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
+
+// packages/copy-engine/src/algo/math.ts
+var DAY_MS2 = 864e5;
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var newSeed = () => Math.floor(Math.random() * 4294967295) >>> 0;
+var jitter = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
+function normalise(w) {
+  const pos = w.map((x) => Number.isFinite(x) && x > 0 ? x : 0);
+  const sum = pos.reduce((a, b) => a + b, 0);
+  if (!(sum > 0)) return w.map(() => 1 / Math.max(1, w.length));
+  return pos.map((x) => x / sum);
+}
+function curveWeights(n, urgency, sizeJitter, rand) {
+  const k = Math.max(-1, Math.min(1, urgency)) * 3;
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    w.push(jitter(Math.exp(-k * x), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function sliceTimes(start, durationMs, n, timeJitter, rand) {
+  const step = durationMs / n;
+  const out = [];
+  let prev = start - 1;
+  for (let i = 0; i < n; i++) {
+    let t = start + i * step;
+    if (i > 0 && timeJitter > 0) t += (rand() * 2 - 1) * timeJitter * step;
+    t = Math.max(prev + 1, Math.min(start + durationMs - 1, t));
+    out.push(Math.round(t));
+    prev = t;
+  }
+  return out;
+}
+function dueShare(times, weights, now) {
+  let s = 0;
+  for (let i = 0; i < times.length; i++) if (times[i] <= now) s += weights[i] ?? 0;
+  return Math.min(1, s);
+}
+function nextSlice(times, now) {
+  for (let i = 0; i < times.length; i++) if (times[i] > now) return i;
+  return -1;
+}
+function allocateSteps(total, weights, step) {
+  const units = Math.floor(total / step + 1e-9);
+  const w = normalise(weights);
+  const raw = w.map((x) => x * units);
+  const out = raw.map((x) => Math.floor(x + 1e-9));
+  let left = units - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((x, i) => ({ i, f: x - Math.floor(x + 1e-9) })).sort((a, b) => b.f - a.f || a.i - b.i);
+  for (let j = 0; left > 0 && order.length; j = (j + 1) % order.length, left--) out[order[j].i] += 1;
+  return out.map((u) => u * step);
+}
+var isWeekend = (t) => {
+  const d = new Date(t).getUTCDay();
+  return d === 0 || d === 6;
+};
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function volumeProfile(candles, candleMs, start, durationMs, slices, lookbackDays) {
+  const byBucket = /* @__PURE__ */ new Map();
+  for (const c of candles) if (Number.isFinite(c.v) && c.v >= 0) byBucket.set(Math.floor(c.t / candleMs) * candleMs, c.v);
+  const volIn = (a, b) => {
+    let sum = 0;
+    let seen = false;
+    for (let t = Math.floor(a / candleMs) * candleMs; t < b; t += candleMs) {
+      const v = byBucket.get(t);
+      if (v === void 0) continue;
+      seen = true;
+      const lo = Math.max(a, t);
+      const hi = Math.min(b, t + candleMs);
+      if (hi > lo) sum += v * (hi - lo) / candleMs;
+    }
+    return seen ? sum : null;
+  };
+  const step = durationMs / slices;
+  const matchDays = lookbackDays >= 14;
+  const expected = [];
+  const daysSeen = /* @__PURE__ */ new Set();
+  for (let i = 0; i < slices; i++) {
+    const a = start + i * step;
+    const b = a + step;
+    const same = [];
+    const all = [];
+    for (let d = 1; d <= lookbackDays; d++) {
+      const v = volIn(a - d * DAY_MS2, b - d * DAY_MS2);
+      if (v === null) continue;
+      daysSeen.add(d);
+      all.push(v);
+      if (!matchDays || isWeekend(a - d * DAY_MS2) === isWeekend(a)) same.push(v);
+    }
+    expected.push(median(same.length >= 3 ? same : all));
+  }
+  const mean = expected.reduce((x, y) => x + y, 0) / Math.max(1, expected.length);
+  const floored = expected.map((v) => Math.max(v, mean / 10));
+  return { weights: normalise(floored), expected: floored, days: daysSeen.size };
+}
+function profileCandles(lookbackDays) {
+  return lookbackDays > 28 ? { interval: "30m", ms: 30 * 6e4 } : { interval: "15m", ms: 15 * 6e4 };
+}
+function adaptiveShare(staticShare, marketSoFar, expectedTotal) {
+  if (!(expectedTotal > 0) || staticShare >= 1) return Math.min(1, staticShare);
+  const live = marketSoFar / expectedTotal;
+  const blend = 0.5 * staticShare + 0.5 * live;
+  return Math.min(1, Math.max(staticShare * 0.5, Math.min(staticShare * 2, blend)));
+}
+function ladderWeights(n, distribution, skew, sizeJitter, rand) {
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let v = 1;
+    if (distribution === "linear") v = 1 + (skew - 1) * x;
+    else if (distribution === "exponential") v = Math.pow(skew, x);
+    else if (distribution === "bell") v = Math.exp(-0.5 * Math.pow((x - 0.5) / 0.22, 2));
+    w.push(jitter(Math.max(v, 1e-6), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function ladderPrices(from, to, n, spacing, tickSize) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let p;
+    if (spacing === "geometric" && from > 0 && to > 0) p = from * Math.pow(to / from, x);
+    else {
+      const f = spacing === "front" ? x * x : spacing === "back" ? 1 - (1 - x) * (1 - x) : x;
+      p = from + (to - from) * f;
+    }
+    const s = snapNearest(p, tickSize);
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+var dec2 = (n) => {
+  const s = Number(n.toPrecision(12)).toString();
+  if (!/e/i.test(s)) return s;
+  return Number(n.toPrecision(12)).toFixed(20).replace(/0+$/, "").replace(/\.$/, "");
+};
+function snapNearest(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "nearest"));
+}
+function snapDown(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "floor"));
+}
+function snapUp(p, tickSize) {
+  const down = snapDown(p, tickSize);
+  const tick = Number(tickSize);
+  return down + 1e-12 < p ? Number(roundToStep(dec2(down + tick), tickSize, "nearest")) : down;
+}
+var mid = (q) => (q.bid + q.ask) / 2;
+var spreadBps = (q) => (q.ask - q.bid) / mid(q) * 1e4;
+function makerPrice(side, q, offsetTicks, offsetBps, m, limit) {
+  const tick = Number(m.tickSize);
+  let p;
+  if (side === "buy") {
+    p = offsetBps !== null ? q.bid * (1 - offsetBps / 1e4) : q.bid - offsetTicks * tick;
+    p = Math.min(p, q.ask - tick);
+    if (limit !== null) p = Math.min(p, limit);
+    return snapDown(p, m.tickSize);
+  }
+  p = offsetBps !== null ? q.ask * (1 + offsetBps / 1e4) : q.ask + offsetTicks * tick;
+  p = Math.max(p, q.bid + tick);
+  if (limit !== null) p = Math.max(p, limit);
+  return snapUp(p, m.tickSize);
+}
+function takerPrice(side, q, slippageBps, m, mark, limit) {
+  const touch = side === "buy" ? q.ask : q.bid;
+  let p = Number(limitPrice(side, touch, slippageBps, m, mark));
+  if (limit !== null) {
+    if (side === "buy" && limit < touch) return null;
+    if (side === "sell" && limit > touch) return null;
+    p = side === "buy" ? Math.min(p, snapDown(limit, m.tickSize)) : Math.max(p, snapUp(limit, m.tickSize));
+  }
+  return p;
+}
+function minChildQty(m, price2) {
+  const step = Number(m.stepSize);
+  const minQ = Math.max(step, Number(m.minQuantity) || 0);
+  const byValue = price2 > 0 ? Math.ceil(m.minNotional / price2 / step - 1e-9) * step : minQ;
+  return Math.max(minQ, byValue);
+}
+var floorStep = (q, m) => {
+  const step = Number(m.stepSize);
+  return Math.floor(q / step + 1e-9) * step;
+};
+var DEFAULT_EXEC = { style: "hybrid", slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
+function trail(s, side, price2, o) {
+  let { armed, extreme } = s;
+  if (!armed) {
+    const a = o.activationPrice;
+    armed = a === null || (side === "sell" ? price2 >= a : price2 <= a);
+    if (armed) extreme = price2;
+  }
+  if (!armed) return { state: { armed, extreme }, stop: null, fired: false };
+  extreme = extreme === null ? price2 : side === "sell" ? Math.max(extreme, price2) : Math.min(extreme, price2);
+  const dist = o.trailAbs !== null ? o.trailAbs : extreme * (o.trailPct ?? 0);
+  const stop = side === "sell" ? extreme - dist : extreme + dist;
+  const fired = side === "sell" ? price2 <= stop : price2 >= stop;
+  return { state: { armed, extreme }, stop, fired };
+}
+
+// packages/copy-engine/src/algo/spec.ts
+var AlgoSpecError = class extends Error {
+  constructor(message, errors) {
+    super(message);
+    this.errors = errors;
+  }
+  errors;
+  name = "AlgoSpecError";
+};
+var MIN = 6e4;
+var HOUR = 60 * MIN;
+var DAY = 24 * HOUR;
+var ALGO_LIMITS = {
+  twap: { durationMs: { min: MIN, max: 30 * DAY }, slices: { min: 1, max: 2e3 }, minIntervalMs: 5e3 },
+  vwap: { durationMs: { min: 15 * MIN, max: 7 * DAY }, slices: { min: 2, max: 2e3 }, lookbackDays: { min: 1, max: 56 }, minIntervalMs: 5e3 },
+  pov: { rate: { min: 0.01, max: 0.5 } },
+  iceberg: { refillMs: { min: 0, max: 10 * MIN } },
+  chase: { offsetTicks: { min: -5, max: 1e4 }, offsetBps: { min: 0, max: 2e3 }, chaseTicks: { min: 1, max: 1e4 }, maxChaseBps: { min: 1, max: 5e3 }, timeoutMs: { min: 5e3, max: 7 * DAY }, minRepriceMs: { min: 250, max: MIN } },
+  scale: { orders: { min: 2, max: 100 }, skew: { min: 0.1, max: 10 }, sizeJitter: { min: 0, max: 0.3 } },
+  dca: { perOrderUsd: { min: 10, max: 1e6 }, orders: { min: 2, max: 1e3 }, intervalMs: { min: MIN, max: 30 * DAY }, dipPct: { min: 0.01, max: 0.9 }, dipMultiplier: { min: 1, max: 5 } },
+  swarm: { clips: { min: 2, max: 200 }, inFlight: { min: 1, max: 20 }, waveMs: { min: 0, max: MIN }, sizeJitter: { min: 0, max: 0.9 }, retries: { min: 0, max: 5 } },
+  conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5e3, max: HOUR } },
+  trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
+  basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
+  exitPct: { min: 1e-3, max: 10 },
+  exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 1e4 }, chaseTicks: { min: 1, max: 1e4 }, makerShare: { min: 0.1, max: 0.95 } },
+  jitter: { min: 0, max: 0.5 },
+  maxSpreadBps: { min: 1, max: 5e3 },
+  leverage: { min: 1, max: 100 },
+  label: 40
+};
+var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+function num2(o, key2, label, lim, e, path = key2) {
+  const raw = o[key2];
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    e[path] = `${label} must be a number.`;
+    return NaN;
+  }
+  if (n < lim.min || n > lim.max) e[path] = `${label} must be between ${lim.min} and ${lim.max}.`;
+  return n;
+}
+function int(o, key2, label, lim, e, path = key2) {
+  const n = num2(o, key2, label, lim, e, path);
+  if (Number.isFinite(n) && !Number.isInteger(n)) e[path] = `${label} must be a whole number.`;
+  return n;
+}
+function opt(o, key2, label, lim, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return num2(o, key2, label, lim, e, path);
+}
+function price(o, key2, label, e, path = key2) {
+  const raw = o[key2];
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0 || n > 1e12) {
+    e[path] = `${label} must be a price above 0.`;
+    return NaN;
+  }
+  return n;
+}
+function optPrice(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return price(o, key2, label, e, path);
+}
+function time(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 15e11 || n > 4e12) {
+    e[path] = `${label} must be a time.`;
+    return null;
+  }
+  return n;
+}
+function qty(o, key2, label, e, path = key2) {
+  const raw = o[key2];
+  const s = typeof raw === "number" && Number.isFinite(raw) ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d+(\.\d+)?$/.test(s) || !(Number(s) > 0)) {
+    e[path] = `${label} must be a positive amount.`;
+    return "0";
+  }
+  if (Number(s) > 1e12) {
+    e[path] = `${label} is too large.`;
+    return "0";
+  }
+  return canonicalDecimal(s);
+}
+function optQty(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return qty(o, key2, label, e, path);
+}
+function oneOf(o, key2, label, allowed, fallback, e, path = key2) {
+  const v = o[key2];
+  if (v === void 0 || v === null || v === "") return fallback;
+  if (typeof v === "string" && allowed.includes(v)) return v;
+  e[path] = `${label} must be one of ${allowed.join(", ")}.`;
+  return fallback;
+}
+var bool = (o, key2, fallback = false) => typeof o[key2] === "boolean" ? o[key2] : fallback;
+var SYMBOL = /^[A-Z0-9]{1,24}-USD$/;
+function symbol(o, key2, e, path = key2) {
+  const s = typeof o[key2] === "string" ? o[key2].trim().toUpperCase() : "";
+  if (!SYMBOL.test(s)) e[path] = "Choose a SoDEX perps market (like BTC-USD).";
+  return s;
+}
+var BOUND_ACTIONS = ["hold", "stop", "rush"];
+function bound(o, key2, label, e) {
+  const v = o[key2];
+  if (v === null || v === void 0) return null;
+  if (!isObj(v)) {
+    e[key2] = `${label} must be a price and what to do there.`;
+    return null;
+  }
+  return { price: price(v, "price", `${label} price`, e, `${key2}.price`), then: oneOf(v, "then", `${label} action`, BOUND_ACTIONS, "hold", e, `${key2}.then`) };
+}
+function exec(v, e, path) {
+  const o = isObj(v) ? v : {};
+  const L = ALGO_LIMITS.exec;
+  return {
+    style: oneOf(o, "style", "Execution", ["taker", "maker", "hybrid"], DEFAULT_EXEC.style, e, `${path}.style`),
+    slippageBps: o.slippageBps === void 0 ? DEFAULT_EXEC.slippageBps : num2(o, "slippageBps", "Max slippage", L.slippageBps, e, `${path}.slippageBps`),
+    offsetTicks: o.offsetTicks === void 0 ? DEFAULT_EXEC.offsetTicks : int(o, "offsetTicks", "Offset", L.offsetTicks, e, `${path}.offsetTicks`),
+    chaseTicks: o.chaseTicks === void 0 ? DEFAULT_EXEC.chaseTicks : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e, `${path}.chaseTicks`),
+    makerShare: o.makerShare === void 0 ? DEFAULT_EXEC.makerShare : num2(o, "makerShare", "Resting share", L.makerShare, e, `${path}.makerShare`)
+  };
+}
+function exits(o, side, e) {
+  const v = o.exits;
+  if (v === null || v === void 0) return null;
+  if (!isObj(v)) {
+    e.exits = "Exits must be a take-profit and/or a stop-loss.";
+    return null;
+  }
+  const x = {
+    tpPrice: optPrice(v, "tpPrice", "Take-profit price", e, "exits.tpPrice"),
+    slPrice: optPrice(v, "slPrice", "Stop-loss price", e, "exits.slPrice"),
+    tpPct: opt(v, "tpPct", "Take-profit distance", ALGO_LIMITS.exitPct, e, "exits.tpPct"),
+    slPct: opt(v, "slPct", "Stop-loss distance", { min: ALGO_LIMITS.exitPct.min, max: 0.99 }, e, "exits.slPct")
+  };
+  if (x.tpPrice !== null && x.tpPct !== null) e["exits.tpPct"] = "Set the take-profit as a price or a distance, not both.";
+  if (x.slPrice !== null && x.slPct !== null) e["exits.slPct"] = "Set the stop-loss as a price or a distance, not both.";
+  if (x.tpPrice !== null && x.slPrice !== null && (side === "buy" ? x.tpPrice <= x.slPrice : x.tpPrice >= x.slPrice)) {
+    e["exits.tpPrice"] = side === "buy" ? "A long's take-profit must be above its stop-loss." : "A short's take-profit must be below its stop-loss.";
+  }
+  return x.tpPrice === null && x.slPrice === null && x.tpPct === null && x.slPct === null ? null : x;
+}
+function base(o, kind, e) {
+  const label = typeof o.label === "string" ? o.label.trim().slice(0, ALGO_LIMITS.label) : "";
+  const marginMode = o.marginMode === null || o.marginMode === void 0 ? null : oneOf(o, "marginMode", "Margin mode", ["cross", "isolated"], "cross", e);
+  const b = {
+    kind,
+    symbol: symbol(o, "symbol", e),
+    side: oneOf(o, "side", "Side", ["buy", "sell"], "buy", e),
+    reduceOnly: bool(o, "reduceOnly"),
+    limitPrice: optPrice(o, "limitPrice", "Limit price", e),
+    upper: bound(o, "upper", "Upper bound", e),
+    lower: bound(o, "lower", "Lower bound", e),
+    triggerPrice: optPrice(o, "triggerPrice", "Start price", e),
+    startAt: time(o, "startAt", "Start time", e),
+    maxSpreadBps: opt(o, "maxSpreadBps", "Max spread", ALGO_LIMITS.maxSpreadBps, e),
+    leverage: o.leverage === null || o.leverage === void 0 || o.leverage === "" ? null : int(o, "leverage", "Leverage", ALGO_LIMITS.leverage, e),
+    marginMode,
+    paper: bool(o, "paper"),
+    label: label || null,
+    exits: null
+  };
+  b.exits = exits(o, b.side, e);
+  if (b.exits && b.reduceOnly) e.exits = "A reduce-only order opens nothing to protect: no exits on it.";
+  if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = "The upper bound must be above the lower bound.";
+  return b;
+}
+var SOURCES = ["mark", "last", "mid", "index"];
+function condition(v, e, path) {
+  if (!isObj(v)) {
+    e[path] = "Each condition needs a type.";
+    return null;
+  }
+  const L = ALGO_LIMITS.conditional;
+  const type = v.type;
+  const sym = () => symbol(v, "symbol", e, `${path}.symbol`);
+  const src = () => oneOf(v, "source", "Price source", SOURCES, "mark", e, `${path}.source`);
+  const op = () => oneOf(v, "op", "Comparison", ["above", "below"], "above", e, `${path}.op`);
+  const dir3 = () => oneOf(v, "dir", "Direction", ["up", "down", "either"], "either", e, `${path}.dir`);
+  const pct = () => num2(v, "pct", "Move", { min: 1e-4, max: 10 }, e, `${path}.pct`);
+  const win = () => int(v, "windowMs", "Window", L.windowMs, e, `${path}.windowMs`);
+  switch (type) {
+    case "price":
+      return { type, symbol: sym(), source: src(), op: op(), value: price(v, "value", "Price", e, `${path}.value`) };
+    case "cross":
+      return { type, symbol: sym(), source: src(), dir: oneOf(v, "dir", "Direction", ["up", "down"], "up", e, `${path}.dir`), value: price(v, "value", "Price", e, `${path}.value`) };
+    case "move":
+      return { type, symbol: sym(), source: src(), dir: dir3(), pct: pct(), windowMs: win() };
+    case "funding":
+      return { type, symbol: sym(), op: op(), value: num2(v, "value", "Funding rate", { min: -1, max: 1 }, e, `${path}.value`) };
+    case "oi":
+      return { type, symbol: sym(), dir: dir3(), pct: pct(), windowMs: win() };
+    case "spread":
+      return { type, symbol: sym(), op: op(), bps: num2(v, "bps", "Spread", { min: 0, max: 1e4 }, e, `${path}.bps`) };
+    case "volume":
+      return { type, symbol: sym(), windowMs: win(), aboveUsd: num2(v, "aboveUsd", "Volume", { min: 1, max: 1e12 }, e, `${path}.aboveUsd`) };
+    case "ratio": {
+      const other = symbol(v, "other", e, `${path}.other`);
+      return { type, symbol: sym(), other, op: op(), value: num2(v, "value", "Ratio", { min: 1e-12, max: 1e12 }, e, `${path}.value`) };
+    }
+    case "position": {
+      const pop = oneOf(v, "op", "Position", ["long", "short", "flat", "sizeAbove", "sizeBelow", "pnlAbove", "pnlBelow"], "long", e, `${path}.op`);
+      const needs = pop === "sizeAbove" || pop === "sizeBelow" || pop === "pnlAbove" || pop === "pnlBelow";
+      const value = needs ? num2(v, "value", pop.startsWith("pnl") ? "PnL" : "Size", pop.startsWith("pnl") ? { min: -1e12, max: 1e12 } : { min: 0, max: 1e12 }, e, `${path}.value`) : 0;
+      return { type, symbol: sym(), op: pop, value };
+    }
+    case "time": {
+      const at = time(v, "at", "Time", e, `${path}.at`);
+      return { type, at: at ?? 0 };
+    }
+    default:
+      e[path] = "Unknown condition.";
+      return null;
+  }
+}
+function action(v, e, depth) {
+  const o = isObj(v) ? v : {};
+  const t = o.type;
+  if (t === "market") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "limit") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), price: price(o, "price", "Price", e, "then.price"), postOnly: bool(o, "postOnly") };
+  if (t === "close") return { type: t, share: num2(o, "share", "Share of the position", { min: 0.01, max: 1 }, e, "then.share"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "algo") {
+    if (depth > 0) {
+      e.then = "A conditional cannot start another conditional.";
+      return { type: "market", quantity: "0", slippageBps: 30 };
+    }
+    const inner = checkAlgoSpec(o.algo, depth + 1);
+    for (const [k, m] of Object.entries(inner.errors)) e[`then.algo.${k}`] = m;
+    if (inner.spec?.kind === "conditional") e.then = "A conditional cannot start another conditional.";
+    return { type: "algo", algo: inner.spec ?? { kind: "twap" } };
+  }
+  e.then = "Choose what happens when the conditions hold.";
+  return { type: "market", quantity: "0", slippageBps: 30 };
+}
+function checkAlgoSpec(input, depth = 0) {
+  const e = {};
+  if (!isObj(input)) return { spec: null, errors: { kind: "Choose an order type." } };
+  const kind = input.kind;
+  if (!ALGO_KINDS.includes(kind)) return { spec: null, errors: { kind: "Unknown order type." } };
+  const o = input;
+  const b = base(o, kind, e);
+  const jit = (key2, label) => o[key2] === void 0 ? 0 : num2(o, key2, label, ALGO_LIMITS.jitter, e);
+  const finish = () => oneOf(o, "finish", "At the end", ["take", "leave"], "take", e);
+  let spec;
+  switch (kind) {
+    case "twap": {
+      const L = ALGO_LIMITS.twap;
+      const durationMs = int(o, "durationMs", "Duration", L.durationMs, e);
+      const slices = int(o, "slices", "Slices", L.slices, e);
+      if (durationMs / slices < L.minIntervalMs) e.slices = `At most one slice every ${L.minIntervalMs / 1e3} s: use at most ${Math.floor(durationMs / L.minIntervalMs)} slices.`;
+      const closeShare = opt(o, "closeShare", "Share of the position", { min: 0.01, max: 1 }, e);
+      const minSliceQty = optQty(o, "minSliceQty", "Smallest slice", e);
+      const maxSliceQty = optQty(o, "maxSliceQty", "Largest slice", e);
+      if (minSliceQty !== null && maxSliceQty !== null && Number(minSliceQty) > Number(maxSliceQty)) e.minSliceQty = "The smallest slice cannot be larger than the largest.";
+      if (closeShare !== null && b.exits) e.exits = "A close opens nothing to protect: no exits on it.";
+      spec = {
+        ...b,
+        kind,
+        // A time-sliced close takes its size from the position when it starts: always reduce-only.
+        reduceOnly: closeShare !== null ? true : b.reduceOnly,
+        quantity: closeShare !== null ? "0" : qty(o, "quantity", "Size", e),
+        closeShare,
+        minSliceQty,
+        maxSliceQty,
+        durationMs,
+        slices,
+        urgency: o.urgency === void 0 ? 0 : num2(o, "urgency", "Urgency", { min: -1, max: 1 }, e),
+        sizeJitter: jit("sizeJitter", "Size randomisation"),
+        timeJitter: jit("timeJitter", "Time randomisation"),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish(),
+        maxParticipation: opt(o, "maxParticipation", "Max participation", { min: 0.01, max: 1 }, e)
+      };
+      break;
+    }
+    case "vwap": {
+      const L = ALGO_LIMITS.vwap;
+      const durationMs = int(o, "durationMs", "Duration", L.durationMs, e);
+      const slices = int(o, "slices", "Slices", L.slices, e);
+      if (durationMs / slices < L.minIntervalMs) e.slices = `At most one slice every ${L.minIntervalMs / 1e3} s: use at most ${Math.floor(durationMs / L.minIntervalMs)} slices.`;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        durationMs,
+        slices,
+        lookbackDays: int(o, "lookbackDays", "History", L.lookbackDays, e),
+        adaptive: bool(o, "adaptive", true),
+        sizeJitter: jit("sizeJitter", "Size randomisation"),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish(),
+        maxParticipation: opt(o, "maxParticipation", "Max participation", { min: 0.01, max: 1 }, e)
+      };
+      break;
+    }
+    case "pov":
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        rate: num2(o, "rate", "Participation", ALGO_LIMITS.pov.rate, e),
+        maxChildQty: optQty(o, "maxChildQty", "Largest child", e),
+        endAt: time(o, "endAt", "End time", e),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish()
+      };
+      break;
+    case "iceberg": {
+      const quantity = qty(o, "quantity", "Size", e);
+      const displayQty = qty(o, "displayQty", "Visible size", e);
+      if (Number(displayQty) > Number(quantity)) e.displayQty = "The visible size cannot be more than the whole size.";
+      spec = {
+        ...b,
+        kind,
+        quantity,
+        displayQty,
+        displayJitter: jit("displayJitter", "Visible size randomisation"),
+        price: optPrice(o, "price", "Price", e),
+        pegOffsetTicks: o.pegOffsetTicks === void 0 ? 0 : int(o, "pegOffsetTicks", "Offset", ALGO_LIMITS.chase.offsetTicks, e),
+        chaseTicks: o.chaseTicks === void 0 ? 2 : int(o, "chaseTicks", "Re-price distance", ALGO_LIMITS.chase.chaseTicks, e),
+        postOnly: bool(o, "postOnly", true),
+        refillMs: o.refillMs === void 0 ? 0 : int(o, "refillMs", "Refill delay", ALGO_LIMITS.iceberg.refillMs, e),
+        refillJitter: o.refillJitter === void 0 ? 0 : num2(o, "refillJitter", "Refill randomisation", { min: 0, max: 1 }, e)
+      };
+      break;
+    }
+    case "chase": {
+      const L = ALGO_LIMITS.chase;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        offsetTicks: o.offsetTicks === void 0 ? 0 : int(o, "offsetTicks", "Offset", L.offsetTicks, e),
+        offsetBps: opt(o, "offsetBps", "Offset", L.offsetBps, e),
+        chaseTicks: o.chaseTicks === void 0 ? 1 : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e),
+        maxChaseBps: opt(o, "maxChaseBps", "Max chase", L.maxChaseBps, e),
+        timeoutMs: opt(o, "timeoutMs", "Time limit", L.timeoutMs, e),
+        onEnd: oneOf(o, "onEnd", "At the end", ["take", "cancel", "rest"], "take", e),
+        minRepriceMs: o.minRepriceMs === void 0 ? 1e3 : int(o, "minRepriceMs", "Re-price pause", L.minRepriceMs, e)
+      };
+      break;
+    }
+    case "scale": {
+      const L = ALGO_LIMITS.scale;
+      const from = price(o, "from", "First price", e);
+      const to = price(o, "to", "Last price", e);
+      if (from === to) e.to = "The last price must differ from the first.";
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        from,
+        to,
+        orders: int(o, "orders", "Orders", L.orders, e),
+        distribution: oneOf(o, "distribution", "Size curve", ["flat", "linear", "exponential", "bell"], "flat", e),
+        skew: o.skew === void 0 ? 1 : num2(o, "skew", "Size skew", L.skew, e),
+        spacing: oneOf(o, "spacing", "Price spacing", ["linear", "geometric", "front", "back"], "linear", e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Size randomisation", L.sizeJitter, e),
+        postOnly: bool(o, "postOnly")
+      };
+      break;
+    }
+    case "dca": {
+      const L = ALGO_LIMITS.dca;
+      const perOrderUsd = num2(o, "perOrderUsd", "Amount per order", L.perOrderUsd, e);
+      const maxTotalUsd = opt(o, "maxTotalUsd", "Total budget", { min: 10, max: 1e9 }, e);
+      if (maxTotalUsd !== null && maxTotalUsd < perOrderUsd) e.maxTotalUsd = "The budget must cover at least one order.";
+      spec = {
+        ...b,
+        kind,
+        perOrderUsd,
+        orders: int(o, "orders", "Orders", L.orders, e),
+        intervalMs: int(o, "intervalMs", "Every", L.intervalMs, e),
+        outOfBand: oneOf(o, "outOfBand", "Outside the limit", ["skip", "wait"], "skip", e),
+        dipPct: opt(o, "dipPct", "Dip", L.dipPct, e),
+        dipMultiplier: o.dipMultiplier === void 0 ? 1 : num2(o, "dipMultiplier", "Dip multiplier", L.dipMultiplier, e),
+        maxTotalUsd,
+        exec: exec(o.exec ?? { style: "taker" }, e, "exec")
+      };
+      break;
+    }
+    case "swarm": {
+      const L = ALGO_LIMITS.swarm;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        clips: int(o, "clips", "Clips", L.clips, e),
+        inFlight: int(o, "inFlight", "Clips per wave", L.inFlight, e),
+        waveMs: int(o, "waveMs", "Between waves", L.waveMs, e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Irregular clips", L.sizeJitter, e),
+        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e),
+        retries: o.retries === void 0 ? 2 : int(o, "retries", "Retries", L.retries, e)
+      };
+      break;
+    }
+    case "conditional": {
+      const L = ALGO_LIMITS.conditional;
+      const list = Array.isArray(o.conditions) ? o.conditions : [];
+      if (list.length < L.conditions.min || list.length > L.conditions.max) e.conditions = `Add 1 to ${L.conditions.max} conditions.`;
+      const conditions = list.slice(0, L.conditions.max).map((c, i) => condition(c, e, `conditions.${i}`)).filter((c) => c !== null);
+      spec = {
+        ...b,
+        kind,
+        match: oneOf(o, "match", "Match", ["all", "any"], "all", e),
+        conditions,
+        holdMs: o.holdMs === void 0 ? 0 : int(o, "holdMs", "Hold for", L.holdMs, e),
+        expiresAt: time(o, "expiresAt", "Expiry", e),
+        then: action(o.then, e, depth)
+      };
+      if (b.exits && (spec.then.type === "close" || spec.then.type === "algo")) e.exits = spec.then.type === "close" ? "A close opens nothing to protect: no exits on it." : "Set the exits on the algo it starts.";
+      break;
+    }
+    case "trailing": {
+      const L = ALGO_LIMITS.trailing;
+      const trailPct = opt(o, "trailPct", "Trail", L.trailPct, e);
+      const trailAbs = optPrice(o, "trailAbs", "Trail", e);
+      if (trailPct === null === (trailAbs === null)) e.trailPct = "Set the trail as a percentage or as a price distance (one of the two).";
+      spec = {
+        ...b,
+        kind,
+        quantity: optQty(o, "quantity", "Size", e),
+        trailPct,
+        trailAbs,
+        activationPrice: optPrice(o, "activationPrice", "Activation price", e),
+        source: oneOf(o, "source", "Price", ["mark", "last"], "mark", e),
+        exit: oneOf(o, "exit", "Exit", ["market", "chase"], "market", e),
+        chaseMs: o.chaseMs === void 0 ? 15e3 : int(o, "chaseMs", "Chase for", L.chaseMs, e),
+        slippageBps: o.slippageBps === void 0 ? 50 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      if (spec.quantity === null) spec.reduceOnly = true;
+      break;
+    }
+    case "basket": {
+      const L = ALGO_LIMITS.basket;
+      const raw = Array.isArray(o.legs) ? o.legs : [];
+      if (raw.length < L.legs.min || raw.length > L.legs.max) e.legs = `A basket has ${L.legs.min} to ${L.legs.max} markets.`;
+      const legs = raw.slice(0, L.legs.max).map((x, i) => {
+        const v = isObj(x) ? x : {};
+        return {
+          symbol: symbol(v, "symbol", e, `legs.${i}.symbol`),
+          side: oneOf(v, "side", "Side", ["buy", "sell"], "buy", e, `legs.${i}.side`),
+          usd: num2(v, "usd", "Amount", L.legUsd, e, `legs.${i}.usd`)
+        };
+      });
+      if (new Set(legs.map((l) => l.symbol)).size !== legs.length) e.legs = "Each market once in a basket.";
+      if (b.exits) e.exits = "Exits are set per market: not on a basket.";
+      const style = oneOf(o, "style", "Each leg", ["swarm", "twap"], "swarm", e);
+      const durationMs = style === "twap" ? int(o, "durationMs", "Duration", ALGO_LIMITS.twap.durationMs, e) : 0;
+      const slices = style === "twap" ? int(o, "slices", "Slices", ALGO_LIMITS.twap.slices, e) : 0;
+      if (style === "twap" && durationMs / slices < ALGO_LIMITS.twap.minIntervalMs) e.slices = `At most one slice every ${ALGO_LIMITS.twap.minIntervalMs / 1e3} s.`;
+      spec = {
+        ...b,
+        kind,
+        symbol: legs[0]?.symbol ?? b.symbol,
+        side: legs[0]?.side ?? b.side,
+        legs,
+        style,
+        durationMs,
+        slices,
+        clips: style === "swarm" ? int(o, "clips", "Clips", ALGO_LIMITS.swarm.clips, e) : 0,
+        inFlight: style === "swarm" ? int(o, "inFlight", "Clips per wave", ALGO_LIMITS.swarm.inFlight, e) : 0,
+        waveMs: style === "swarm" ? int(o, "waveMs", "Between waves", ALGO_LIMITS.swarm.waveMs, e) : 0,
+        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      break;
+    }
+    case "bracket": {
+      const entry = oneOf(o, "entry", "Entry", ["market", "limit"], "market", e);
+      if (!b.exits) e.exits = "A bracket needs a take-profit, a stop-loss, or both.";
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        entry,
+        price: entry === "limit" ? price(o, "price", "Entry price", e) : null,
+        slippageBps: o.slippageBps === void 0 ? 30 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      break;
+    }
+  }
+  return { spec: Object.keys(e).length ? null : spec, errors: e };
+}
+var opensPosition = (s) => !s.reduceOnly && s.kind !== "trailing" && s.kind !== "basket" && !(s.kind === "conditional" && (s.then.type === "close" || s.then.type === "algo"));
+function parseAlgoSpec(input) {
+  const r = checkAlgoSpec(input);
+  if (!r.spec) {
+    const first = Object.values(r.errors)[0] ?? "The order is not valid.";
+    throw new AlgoSpecError(first, r.errors);
+  }
+  return r.spec;
+}
+function algoQuantity(s) {
+  switch (s.kind) {
+    case "dca":
+    case "basket":
+      return null;
+    case "twap":
+      return s.closeShare !== null ? null : Number(s.quantity);
+    case "trailing":
+      return s.quantity === null ? null : Number(s.quantity);
+    case "conditional":
+      return s.then.type === "market" || s.then.type === "limit" ? Number(s.then.quantity) : null;
+    default:
+      return Number(s.quantity);
+  }
+}
+function algoSymbols(s) {
+  const out = /* @__PURE__ */ new Set([s.symbol]);
+  if (s.kind === "conditional") {
+    for (const c of s.conditions) {
+      if (c.type === "time") continue;
+      out.add(c.symbol);
+      if (c.type === "ratio") out.add(c.other);
+    }
+    if (s.then.type === "algo") for (const x of algoSymbols(s.then.algo)) out.add(x);
+  }
+  if (s.kind === "basket") for (const l of s.legs) out.add(l.symbol);
+  return [...out];
+}
+var ALGO_NAMES = {
+  twap: "TWAP",
+  vwap: "VWAP",
+  pov: "POV",
+  iceberg: "Iceberg",
+  chase: "Chase",
+  scale: "Scale",
+  dca: "DCA",
+  swarm: "Swarm",
+  conditional: "Conditional",
+  trailing: "Trailing stop",
+  basket: "Basket",
+  bracket: "Bracket"
+};
+
+// packages/copy-engine/src/algo/plan.ts
+function exitLevels(side, x, avg) {
+  const sign2 = side === "buy" ? 1 : -1;
+  return {
+    tp: x.tpPrice ?? (x.tpPct !== null ? avg * (1 + sign2 * x.tpPct) : null),
+    sl: x.slPrice ?? (x.slPct !== null ? avg * (1 - sign2 * x.slPct) : null)
+  };
+}
+function twapSchedule(s, start, seed) {
+  const rand = makeRng(seed);
+  const weights = curveWeights(s.slices, s.urgency, s.sizeJitter, rand);
+  const times = sliceTimes(start, s.durationMs, s.slices, s.timeJitter, rand);
+  return { times, weights };
+}
+function vwapSchedule(s, start, seed, profile) {
+  const rand = makeRng(seed);
+  const base2 = profile && profile.weights.length === s.slices ? profile.weights : new Array(s.slices).fill(1 / s.slices);
+  const weights = normalise(base2.map((w) => s.sizeJitter > 0 ? w * (1 + (rand() * 2 - 1) * s.sizeJitter) : w));
+  const times = sliceTimes(start, s.durationMs, s.slices, 0, rand);
+  return { times, weights };
+}
+function swarmClips(s, m, seed) {
+  const rand = makeRng(seed);
+  const w = new Array(s.clips).fill(1).map((x) => s.sizeJitter > 0 ? x * (1 + (rand() * 2 - 1) * s.sizeJitter) : x);
+  return allocateSteps(Number(s.quantity), w, Number(m.stepSize)).filter((q) => q > 0);
+}
+function scaleLadder(s, m, seed) {
+  const prices = ladderPrices(s.from, s.to, s.orders, s.spacing, m.tickSize);
+  const w = ladderWeights(prices.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
+  const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
+  return prices.map((price2, i) => ({ price: price2, qty: sizes[i] ?? 0 }));
+}
+
+// packages/copy-engine/src/algo/feed.ts
+var QUOTE_MAX_AGE_MS = 15e3;
+var HISTORY_MS = 60 * 6e4;
+var toNum = (v) => {
+  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+var rows = (d) => Array.isArray(d) ? d : d && typeof d === "object" ? [d] : [];
+var AlgoFeed = class {
+  constructor(o) {
+    this.o = o;
+    const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
+    this.socket = new LiveSocket({
+      url: `${origin}/ws/perps`,
+      factory: o.factory,
+      ping: '{"op":"ping"}',
+      name: "sodex-algo",
+      log: o.log,
+      subscribe: (send, fresh) => this.subscribeAll(send, fresh),
+      onMessage: (m) => this.handle(m),
+      onState: (up) => {
+        for (const cb of this.stateCbs) cb(up);
+      }
+    });
+  }
+  o;
+  socket;
+  symbols = /* @__PURE__ */ new Set();
+  owners = /* @__PURE__ */ new Set();
+  subscribed = { symbols: /* @__PURE__ */ new Set(), owners: /* @__PURE__ */ new Set(), marks: false };
+  quotes = /* @__PURE__ */ new Map();
+  lasts = /* @__PURE__ */ new Map();
+  marks = /* @__PURE__ */ new Map();
+  history = /* @__PURE__ */ new Map();
+  tape = /* @__PURE__ */ new Map();
+  seen = /* @__PURE__ */ new Set();
+  seenOrder = [];
+  printCbs = [];
+  orderCbs = [];
+  stateCbs = [];
+  sampler = null;
+  start() {
+    this.socket.start();
+    this.sampler ??= timers.every(1e3, () => this.sample());
+  }
+  stop() {
+    this.socket.stop();
+    timers.cancel(this.sampler);
+    this.sampler = null;
+  }
+  get up() {
+    return this.socket.up;
+  }
+  watch(symbols, owners) {
+    const s = new Set(symbols.map((x) => x.toUpperCase()));
+    const w = new Set(owners.map((x) => x.toLowerCase()));
+    const grew = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x));
+    this.symbols = s;
+    this.owners = w;
+    if (grew) this.socket.resubscribe();
+  }
+  subscribeAll(send, fresh) {
+    if (fresh) {
+      this.subscribed = { symbols: /* @__PURE__ */ new Set(), owners: /* @__PURE__ */ new Set(), marks: false };
+    }
+    let id = 500;
+    if (!this.subscribed.marks) {
+      send({ op: "subscribe", id: id++, params: { channel: "allMarkPrice" } });
+      this.subscribed.marks = true;
+    }
+    const add = [...this.symbols].filter((s) => !this.subscribed.symbols.has(s));
+    for (let i = 0; i < add.length; i += 40) {
+      const chunk = add.slice(i, i + 40);
+      send({ op: "subscribe", id: id++, params: { channel: "bookTicker", symbols: chunk } });
+      send({ op: "subscribe", id: id++, params: { channel: "trade", symbols: chunk } });
+      for (const s of chunk) this.subscribed.symbols.add(s);
+    }
+    for (const w of this.owners) {
+      if (this.subscribed.owners.has(w)) continue;
+      send({ op: "subscribe", id: id++, params: { channel: "accountOrderUpdate", user: w } });
+      this.subscribed.owners.add(w);
+    }
+  }
+  dedupe(id) {
+    if (this.seen.has(id)) return false;
+    this.seen.add(id);
+    this.seenOrder.push(id);
+    if (this.seenOrder.length > 2e4) for (const x of this.seenOrder.splice(0, 5e3)) this.seen.delete(x);
+    return true;
+  }
+  /** Feed one gateway message (also how tests drive it). */
+  handle(m) {
+    const msg = m;
+    const ch = msg?.channel;
+    if (!ch) return;
+    const now = Date.now();
+    if (ch === "bookTicker") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const bid = toNum(r.b);
+        const ask = toNum(r.a);
+        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) this.quotes.set(s, { bid, ask, at: now });
+      }
+      return;
+    }
+    if (ch === "allMarkPrice" || ch === "markPrice") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const p = toNum(r.p);
+        if (!s || p === null || !(p > 0)) continue;
+        const prev = this.marks.get(s);
+        this.marks.set(s, {
+          mark: p,
+          index: toNum(r.i) ?? prev?.index ?? null,
+          funding: toNum(r.r) ?? prev?.funding ?? null,
+          oi: toNum(r.oi) ?? prev?.oi ?? null,
+          at: now
+        });
+      }
+      return;
+    }
+    if (ch === "trade") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const price2 = toNum(r.p);
+        const qty2 = toNum(r.q);
+        if (!s || price2 === null || qty2 === null || !(price2 > 0) || !(qty2 > 0)) continue;
+        if (!this.dedupe(`t:${s}:${String(r.t ?? `${r.T}:${r.p}:${r.q}`)}`)) continue;
+        const at = toNum(r.T) ?? now;
+        this.lasts.set(s, { price: price2, at });
+        let list = this.tape.get(s);
+        if (!list) this.tape.set(s, list = []);
+        list.push({ t: at, q: qty2, usd: qty2 * price2 });
+        if (list.length > 5e4 || list[0] && list[0].t < at - HISTORY_MS) {
+          const cut = list.findIndex((x) => x.t >= at - HISTORY_MS);
+          list.splice(0, cut < 0 ? list.length : cut);
+        }
+        const p = {
+          symbol: s,
+          price: price2,
+          qty: qty2,
+          buyer: typeof r.bi === "number" ? r.bi : -1,
+          seller: typeof r.si === "number" ? r.si : -1,
+          taker: r.S === "SELL" ? "sell" : "buy",
+          at
+        };
+        for (const cb of this.printCbs) cb(p);
+      }
+      return;
+    }
+    if (ch === "accountOrderUpdate") {
+      for (const r of rows(msg.data)) {
+        const c = typeof r.c === "string" ? r.c : null;
+        if (!c) continue;
+        const u = {
+          clOrdID: c,
+          orderId: r.i === void 0 || r.i === null ? null : String(r.i),
+          symbol: typeof r.s === "string" ? r.s.toUpperCase() : "",
+          status: String(r.X ?? r.x ?? "").toUpperCase(),
+          filledQty: toNum(r.z) ?? 0,
+          filledValue: toNum(r.v) ?? 0,
+          maker: typeof r.m === "boolean" ? r.m : null,
+          reason: typeof r.r === "string" ? r.r : null,
+          at: toNum(r.E) ?? now
+        };
+        for (const cb of this.orderCbs) cb(u);
+      }
+    }
+  }
+  sample(now = Date.now()) {
+    for (const s of this.symbols) {
+      const q = this.quote(s);
+      const m = this.marks.get(s);
+      const l = this.lasts.get(s);
+      let list = this.history.get(s);
+      if (!list) this.history.set(s, list = []);
+      list.push({ t: now, mark: m?.mark ?? null, mid: q ? (q.bid + q.ask) / 2 : null, last: l?.price ?? null, index: m?.index ?? null, oi: m?.oi ?? null });
+      if (list.length > 3700) list.splice(0, list.length - 3600);
+    }
+  }
+  quote(symbol2) {
+    const q = this.quotes.get(symbol2.toUpperCase());
+    return q && Date.now() - q.at <= QUOTE_MAX_AGE_MS ? q : null;
+  }
+  last(symbol2) {
+    return this.lasts.get(symbol2.toUpperCase()) ?? null;
+  }
+  mark(symbol2) {
+    const m = this.marks.get(symbol2.toUpperCase());
+    return m && Date.now() - m.at <= 12e4 ? m : null;
+  }
+  price(symbol2, source) {
+    if (source === "mid") {
+      const q = this.quote(symbol2);
+      return q ? (q.bid + q.ask) / 2 : null;
+    }
+    if (source === "last") return this.last(symbol2)?.price ?? null;
+    const m = this.mark(symbol2);
+    return source === "index" ? m?.index ?? null : m?.mark ?? null;
+  }
+  sampleAgo(symbol2, agoMs) {
+    const list = this.history.get(symbol2.toUpperCase());
+    if (!list?.length) return null;
+    const want = Date.now() - agoMs;
+    if (list[0].t > want + 2e3) return null;
+    let best = list[0];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].t <= want) {
+        best = list[i];
+        break;
+      }
+    }
+    return best;
+  }
+  priceAgo(symbol2, source, agoMs) {
+    const s = this.sampleAgo(symbol2, agoMs);
+    if (!s) return null;
+    return source === "mid" ? s.mid : source === "last" ? s.last : source === "index" ? s.index : s.mark;
+  }
+  oiAgo(symbol2, agoMs) {
+    return this.sampleAgo(symbol2, agoMs)?.oi ?? null;
+  }
+  volume(symbol2, windowMs) {
+    const list = this.tape.get(symbol2.toUpperCase());
+    if (!list) return { qty: 0, usd: 0 };
+    const from = Date.now() - windowMs;
+    let qty2 = 0;
+    let usd = 0;
+    for (let i = list.length - 1; i >= 0 && list[i].t >= from; i--) {
+      qty2 += list[i].q;
+      usd += list[i].usd;
+    }
+    return { qty: qty2, usd };
+  }
+  onPrint(cb) {
+    this.printCbs.push(cb);
+  }
+  onOrder(cb) {
+    this.orderCbs.push(cb);
+  }
+  onState(cb) {
+    this.stateCbs.push(cb);
+  }
+};
+
+// packages/copy-engine/src/algo/sink.ts
+var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
+function stopsAction(accountId, market, stops, builder) {
+  return perpsActions.newOrder(
+    accountId,
+    market.id,
+    stops.map((s) => ({
+      clOrdID: s.clOrdID,
+      modifier: OrderModifier.STOP,
+      side: s.side === "buy" ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.MARKET,
+      timeInForce: TimeInForce.IOC,
+      quantity: s.quantity,
+      stopPrice: s.triggerPrice,
+      stopType: s.kind === "tp" ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
+      triggerType: TriggerType.MARK_PRICE,
+      reduceOnly: true
+    })),
+    builder ?? void 0
+  );
+}
+var readStops = (data, stops) => readBatch(
+  data,
+  stops.map((s) => ({ clOrdID: s.clOrdID, side: s.side, price: s.triggerPrice, quantity: s.quantity, tif: "ioc", reduceOnly: true }))
+);
+function childrenAction(accountId, market, orders, builder) {
+  return perpsActions.newOrder(
+    accountId,
+    market.id,
+    orders.map((o) => ({
+      clOrdID: o.clOrdID,
+      modifier: OrderModifier.NORMAL,
+      side: o.side === "buy" ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.LIMIT,
+      timeInForce: TIF[o.tif],
+      price: o.price,
+      quantity: o.quantity,
+      reduceOnly: o.reduceOnly
+    })),
+    builder ?? void 0
+  );
+}
+var describe2 = (e) => e instanceof SodexApiError ? `${e.message}${e.hint ? ` (${e.hint})` : ""}` : e instanceof Error ? e.message : String(e);
+function readBatch(data, orders) {
+  const list = Array.isArray(data) ? data : unwrapList(data, "orders");
+  const failed = new Set(failedOrders(list).map((r) => r.clOrdID));
+  return orders.map((o) => {
+    const row = list.find((r) => r.clOrdID === o.clOrdID);
+    const bad = failed.has(o.clOrdID);
+    return {
+      clOrdID: o.clOrdID,
+      ok: !bad,
+      orderId: row?.orderID !== void 0 ? String(row.orderID) : null,
+      error: bad ? row?.error || `code ${row?.code}` : null,
+      outcomeUnknown: false
+    };
+  });
+}
+var KeyAlgoSink = class {
+  constructor(client, key2, nonces, chainId, builder) {
+    this.client = client;
+    this.key = key2;
+    this.nonces = nonces;
+    this.chainId = chainId;
+    this.builder = builder;
+  }
+  client;
+  key;
+  nonces;
+  chainId;
+  builder;
+  paper = false;
+  async signAndSend(action2) {
+    const key2 = this.key();
+    if (!key2) throw new SodexApiError(401, "no trading key is available for this algo", 401, "");
+    const req = await signAndBuildWithNonceManager(action2, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
+    return this.client.send(req);
+  }
+  async place(a, market, orders) {
+    if (!orders.length) return [];
+    try {
+      const builder = await this.builder(a).catch(() => null);
+      return readBatch(await this.signAndSend(childrenAction(a.accountId, market, orders, builder)), orders);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: describe2(e), outcomeUnknown: unknown }));
+    }
+  }
+  async placeStops(a, market, stops) {
+    if (!stops.length) return [];
+    try {
+      const builder = await this.builder(a).catch(() => null);
+      return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe2(e), outcomeUnknown: unknown }));
+    }
+  }
+  async cancel(a, market, clOrdIDs) {
+    if (!clOrdIDs.length) return;
+    try {
+      await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+    } catch (e) {
+      if (e instanceof SodexApiError && /not found|unknown order|does not exist|already/i.test(e.message)) return;
+      throw e;
+    }
+  }
+  async setLeverage(a, market, leverage, margin) {
+    await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
+  }
+};
+
+// packages/copy-engine/src/algo/runtime.ts
+var ALGO_TICK_MS = 500;
+var FLUSH_MS = 2e3;
+var MARKETS_REFRESH_MS2 = 10 * 6e4;
+var STALE_IOC_MS = 8e3;
+var SENDING_MAX_MS = 2e4;
+var HISTORY_EVERY_MS = 2e4;
+var DONE_KEPT = 60;
+var MAX_CONSEC_REJECTS = 25;
+var PROBLEM_RECHECK_MS = 6e4;
+var LATE_MS = 3e4;
+var TAKER_RETRY_MS = 1e3;
+var POSITIONS_MS = 5e3;
+var ACCOUNT_MS = 1e4;
+var EXITS_RESIZE_MS = 5e3;
+var LIVE = /* @__PURE__ */ new Set(["sending", "open", "unknown"]);
+var FINAL_ORDER = /^(FILLED|CANCELED|CANCELLED|REJECTED|EXPIRED|REPLACED)$/;
+var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+var AlgoRuntime = class {
+  constructor(host2) {
+    this.host = host2;
+    if (host2.market) this.market = host2.market;
+    else {
+      if (!host2.factory) throw new Error("an algo runtime needs a market feed or a WebSocket factory");
+      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log });
+    }
+    this.market.onOrder((u) => this.onOrderUpdate(u));
+    this.market.onPrint((p) => this.onPrint(p));
+  }
+  host;
+  markets = new MarketBook();
+  market;
+  algos = /* @__PURE__ */ new Map();
+  byClOrd = /* @__PURE__ */ new Map();
+  busy = /* @__PURE__ */ new Set();
+  dirty = /* @__PURE__ */ new Set();
+  leverageSet = /* @__PURE__ */ new Set();
+  problems = /* @__PURE__ */ new Map();
+  lastHistoryAt = 0;
+  lookupBusy = false;
+  /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
+  heldNow = /* @__PURE__ */ new Set();
+  eventSeq = 0;
+  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling). */
+  positionsOf = /* @__PURE__ */ new Map();
+  accounts = /* @__PURE__ */ new Map();
+  /** Algos whose exits are being placed or resized right now. */
+  exitsBusy = /* @__PURE__ */ new Set();
+  paper = /* @__PURE__ */ new Map();
+  timers = [];
+  running = false;
+  /* ------------------------------------------------------------ lifecycle ----- */
+  async start() {
+    if (this.running) return;
+    this.running = true;
+    await this.loadMarkets();
+    for (const a of await this.host.store.algos()) {
+      this.algos.set(a.id, a);
+      for (const x of a.exitOrders ?? []) {
+        this.byClOrd.set(x.clOrdID, a.id);
+        if (x.state === "sending") x.state = "unknown";
+      }
+      if (FINAL_STATUSES.has(a.status)) continue;
+      for (const c of a.children) {
+        this.byClOrd.set(c.clOrdID, a.id);
+        if (LIVE.has(c.state) && !a.spec.paper) c.state = "unknown";
+        if (a.spec.paper && LIVE.has(c.state)) {
+          if (c.tif !== "ioc" && !c.cancelling) {
+            c.state = "open";
+            this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: a.spec.symbol, side: c.side, price: c.price, left: Math.max(0, c.quantity - c.filled), filled: c.filled, value: c.value });
+          } else {
+            c.state = "done";
+            c.cancelling = false;
+          }
+        }
+      }
+    }
+    this.market.start();
+    this.syncWatch();
+    if (this.host.autoTick !== false) {
+      this.timers.push(
+        timers.every(ALGO_TICK_MS, () => this.tick()),
+        timers.every(FLUSH_MS, () => void this.flush()),
+        timers.every(MARKETS_REFRESH_MS2, () => void this.loadMarkets())
+      );
+    }
+  }
+  async stop() {
+    this.running = false;
+    for (const t of this.timers) timers.cancel(t);
+    this.timers = [];
+    this.market.stop();
+    await this.flush();
+  }
+  async loadMarkets() {
+    try {
+      const list = await this.host.sodex.markets();
+      if (list.length) this.markets.load(list);
+    } catch (e) {
+      this.host.log.warn("algo: market list failed", { error: String(e) });
+    }
+  }
+  /** Subscribe the markets and wallets the live algos need. */
+  syncWatch() {
+    const symbols = /* @__PURE__ */ new Set();
+    const owners = /* @__PURE__ */ new Set();
+    for (const a of this.algos.values()) {
+      const exits2 = this.liveExits(a).length > 0;
+      if (FINAL_STATUSES.has(a.status) && !exits2) continue;
+      for (const s of algoSymbols(a.spec)) symbols.add(s);
+      if (!a.spec.paper) owners.add(a.owner);
+    }
+    this.market.watch([...symbols], [...owners]);
+  }
+  /** Exits still on SoDEX (or on the paper book), not yet settled. */
+  liveExits(a) {
+    return (a.exitOrders ?? []).filter((x) => LIVE.has(x.state));
+  }
+  /* ------------------------------------------------------------- the API ----- */
+  get(id) {
+    return this.algos.get(id) ?? null;
+  }
+  list(owner) {
+    const o = owner?.toLowerCase();
+    return [...this.algos.values()].filter((a) => !o || a.owner === o).sort((x, y) => y.createdAt - x.createdAt);
+  }
+  /** Start an algo. The spec is validated here as everywhere (parseAlgoSpec); its market must be listed. */
+  async add(n) {
+    const spec = parseAlgoSpec(n.spec);
+    if (!this.markets.size) await this.loadMarkets();
+    for (const sym of algoSymbols(spec)) {
+      const m2 = this.markets.get(sym);
+      if (!m2) throw new Error(`${sym} is not listed on SoDEX perps.`);
+    }
+    const m = this.markets.get(spec.symbol);
+    if (m.status !== "TRADING") throw new Error(`SoDEX is not trading ${m.name} right now.`);
+    const now = Date.now();
+    const a = {
+      id: n.id ?? randomId("a"),
+      owner: n.owner.toLowerCase(),
+      accountId: n.accountId,
+      mode: n.mode,
+      spec,
+      status: "scheduled",
+      statusReason: null,
+      createdAt: now,
+      updatedAt: now,
+      startedAt: null,
+      endedAt: null,
+      parentId: n.parentId ?? null,
+      consent: n.consent ?? null,
+      seed: n.seed ?? newSeed(),
+      filled: 0,
+      filledValue: 0,
+      makerQty: 0,
+      fees: 0,
+      arrival: null,
+      marketQty: 0,
+      marketValue: 0,
+      children: [],
+      childCount: 0,
+      rejects: 0,
+      exitOrders: [],
+      country: n.country ?? null,
+      observedCountry: n.observedCountry ?? null,
+      k: {}
+    };
+    if (spec.triggerPrice !== null) {
+      const mk = this.market.mark(spec.symbol)?.mark ?? null;
+      if (mk !== null) a.k.triggerFrom = mk;
+    }
+    this.algos.set(a.id, a);
+    await this.host.store.saveAlgo(a);
+    this.syncWatch();
+    const what = spec.kind === "basket" ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === "buy" ? "buy" : "sell"} on ${spec.symbol}`;
+    await this.event(a, "status", `${what} placed${spec.paper ? " (paper: nothing is sent)" : ""}.`);
+    this.host.onChange?.(a.id);
+    return a;
+  }
+  async pause(id) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
+    if (a.status === "paused") return a;
+    a.k.pausedFrom = a.status;
+    await this.setStatus(a, "paused", "Paused by you.");
+    await this.pullResting(a);
+    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
+    return a;
+  }
+  async resume(id) {
+    const a = this.need(id);
+    if (a.status !== "paused") return a;
+    const back = a.k.pausedFrom === "scheduled" ? "scheduled" : "running";
+    delete a.k.pausedFrom;
+    await this.setStatus(a, back, null);
+    for (const c of this.legsOf(a)) if (c.status === "paused") await this.resume(c.id);
+    return a;
+  }
+  /**
+   * Cancel an algo: its resting children are cancelled on SoDEX; what filled
+   * stays filled, and its exits stay on SoDEX to protect that (the log says so).
+   */
+  async cancel(id) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id);
+    await this.end(a, "cancelled", "Cancelled by you.");
+    return a;
+  }
+  /** A basket's legs (the algos it started). */
+  legsOf(a) {
+    return (a.k.legs ?? []).map((id) => this.algos.get(id)).filter((x) => !!x);
+  }
+  /** The kill switch: every algo of `owner` is cancelled. */
+  async cancelAll(owner) {
+    const out = [];
+    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status)) out.push(await this.cancel(a.id));
+    return out;
+  }
+  /**
+   * Change a running algo where that is safe: its limit price, bounds, spread
+   * guard and label any time; its size only upward of what has filled (and,
+   * for a schedule, from the next slice on).
+   */
+  async update(id, patch) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
+    const next = { ...a.spec, ...patch };
+    if (patch.quantity !== void 0) {
+      if (!("quantity" in a.spec) || a.spec.kind === "trailing") throw new Error("The size of this kind of algo cannot be changed.");
+      if (Number(patch.quantity) <= a.filled) throw new Error("The new size must be more than what has filled.");
+    }
+    const spec = parseAlgoSpec(next);
+    a.spec = spec;
+    await this.save(a);
+    await this.event(a, "info", "Changed by you.");
+    return a;
+  }
+  async events(id, q = {}) {
+    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
+  }
+  /* ---------------------------------------------------------------- views ----- */
+  view(id) {
+    const a = this.algos.get(id);
+    if (!a) return null;
+    const s = a.spec;
+    const target = this.targetOf(a);
+    const avg = a.filled > 0 ? a.filledValue / a.filled : null;
+    const sign2 = s.side === "buy" ? 1 : -1;
+    const bps = (ref) => avg !== null && ref ? (ref - avg) / ref * 1e4 * sign2 : null;
+    const marketVwap = a.marketQty > 0 ? a.marketValue / a.marketQty : null;
+    let progress = target ? Math.min(1, a.filled / target) : 0;
+    if (s.kind === "dca") progress = Math.min(1, (Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0)) / s.orders);
+    const legs = this.legsOf(a);
+    if (s.kind === "basket") {
+      const want = s.legs.reduce((x, l) => x + l.usd, 0);
+      progress = want > 0 ? Math.min(1, legs.reduce((x, c) => x + c.filledValue, 0) / want) : 0;
+    }
+    if (a.status === "done") progress = 1;
+    const now = Date.now();
+    let nextAt = null;
+    let endsAt = null;
+    if (s.kind === "twap" && a.startedAt !== null) {
+      const times = a.k.times ?? [];
+      const i = nextSlice(times, now);
+      nextAt = i >= 0 ? times[i] : null;
+      endsAt = a.startedAt + s.durationMs;
+    } else if (s.kind === "basket" && a.startedAt !== null && s.style === "twap") endsAt = a.startedAt + s.durationMs;
+    else if (s.kind === "vwap" && a.startedAt !== null) {
+      const times = a.k.times ?? [];
+      const i = nextSlice(times, now);
+      nextAt = i >= 0 ? times[i] : null;
+      endsAt = a.startedAt + s.durationMs;
+    } else if (s.kind === "dca" && a.startedAt !== null) {
+      const i = Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0);
+      nextAt = i < s.orders ? a.startedAt + i * s.intervalMs : null;
+      endsAt = a.startedAt + (s.orders - 1) * s.intervalMs;
+    } else if (s.kind === "pov") endsAt = s.endAt;
+    else if (s.kind === "chase" && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
+    else if (s.kind === "swarm") nextAt = a.k.waveAt ?? null;
+    else if (s.kind === "conditional") endsAt = s.expiresAt;
+    if (s.startAt && a.status === "scheduled") nextAt = s.startAt;
+    const live = a.children.filter((c) => LIVE.has(c.state));
+    const working = live.length ? live.length === 1 ? `${live[0].tif === "ioc" ? "Taking" : "Resting"} ${live[0].quantity - live[0].filled} at ${live[0].price}` : `${live.length} orders working` : null;
+    return {
+      algo: a,
+      target,
+      progress,
+      avgPrice: avg,
+      vsArrivalBps: bps(a.arrival),
+      vsMarketVwapBps: bps(marketVwap),
+      marketVwap,
+      nextAt,
+      endsAt,
+      working,
+      triggerPrice: s.kind === "trailing" ? a.k.stop ?? null : null,
+      conditions: s.kind === "conditional" ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean(a.k.ok?.[i]) })) : null,
+      exits: (a.exitOrders ?? []).length ? (a.exitOrders ?? []).filter((x) => LIVE.has(x.state) || x.filled > 0).map((x) => ({ kind: x.exit ?? "sl", price: x.price, quantity: x.quantity, filled: x.filled, live: LIVE.has(x.state) })) : null,
+      legs: s.kind === "basket" ? legs.map((c) => ({ id: c.id, symbol: c.spec.symbol, side: c.spec.side, status: c.status, filledValue: c.filledValue, avgPrice: c.filled > 0 ? c.filledValue / c.filled : null })) : null
+    };
+  }
+  /** The base quantity the algo is to fill, as far as it is known. */
+  targetOf(a) {
+    const s = a.spec;
+    if (s.kind === "dca") return typeof a.k.targetQty === "number" && a.k.targetQty > 0 ? a.k.targetQty : null;
+    if (s.kind === "trailing" || s.kind === "conditional") return typeof a.k.takeQty === "number" ? a.k.takeQty : algoQuantity(s);
+    if (s.kind === "twap" && s.closeShare !== null) return typeof a.k.total === "number" ? a.k.total : null;
+    return algoQuantity(s);
+  }
+  /* ---------------------------------------------------------------- ticks ----- */
+  /** One step for every live algo (the timer calls this; tests call it directly). */
+  tick(now = Date.now()) {
+    this.checkPaperExits();
+    for (const a of this.algos.values()) {
+      if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
+      this.busy.add(a.id);
+      void this.step(a, now).catch(async (e) => {
+        this.host.log.error("algo: a step failed", { algo: a.id, error: String(e) });
+        await this.event(a, "error", `Step failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {
+        });
+      }).finally(() => this.busy.delete(a.id));
+    }
+  }
+  /** Run one step of one algo and wait for it (tests). */
+  async stepNow(id, now = Date.now()) {
+    this.checkPaperExits();
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return;
+    while (this.busy.has(id)) await new Promise((r) => timers.after(5, () => r(void 0)));
+    this.busy.add(id);
+    try {
+      await this.step(a, now);
+    } finally {
+      this.busy.delete(id);
+    }
+  }
+  async step(a, now) {
+    const s = a.spec;
+    const m = this.markets.get(s.symbol);
+    if (!m) {
+      if (this.markets.size) await this.end(a, "failed", `${s.symbol} is no longer listed on SoDEX perps.`);
+      return;
+    }
+    await this.settleStale(a, m, now);
+    if (a.status === "paused") {
+      await this.pullResting(a);
+      return;
+    }
+    if (!s.paper) {
+      const problem = await this.problemOf(a, now);
+      if (problem) {
+        await this.hold(a, problem);
+        return;
+      }
+      const policy = this.host.policyFor?.(a) ?? null;
+      if (policy && !policy.allowed) {
+        await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
+        return;
+      }
+    }
+    if (m.status !== "TRADING") {
+      await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
+      return;
+    }
+    const q = this.market.quote(s.symbol);
+    if (!q) {
+      await this.hold(a, "Waiting for a price from SoDEX.");
+      return;
+    }
+    if (a.status === "scheduled") {
+      if (!await this.ready(a, now)) return;
+      await this.begin(a, m, now);
+      if (FINAL_STATUSES.has(a.status)) return;
+    }
+    const mk = this.market.mark(s.symbol)?.mark ?? mid(q);
+    const b = s.upper && mk >= s.upper.price ? { ...s.upper, which: "upper" } : s.lower && mk <= s.lower.price ? { ...s.lower, which: "lower" } : null;
+    if (b) {
+      const words = `the price is ${b.which === "upper" ? "at or above" : "at or below"} your ${b.which} bound of ${b.price}`;
+      if (b.then === "stop" || s.kind === "scale") {
+        await this.end(a, this.isDone(a, m) ? "done" : "expired", `Stopped: ${words}.`);
+        return;
+      }
+      if (b.then === "hold") {
+        await this.pullResting(a);
+        await this.hold(a, `Held: ${words}.`);
+        return;
+      }
+      if (!a.k.rush) {
+        a.k.rush = true;
+        await this.event(a, "info", `Taking the rest now: ${words}.`);
+      }
+    }
+    this.heldNow.delete(a.id);
+    await this.stepKind(a, m, q, mk, now);
+    if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+    if (!FINAL_STATUSES.has(a.status)) await this.syncExits(a, m, false);
+  }
+  async stepKind(a, m, q, mk, now) {
+    const s = a.spec;
+    switch (s.kind) {
+      case "twap":
+      case "vwap":
+        return this.stepSchedule(a, m, q, mk, now);
+      case "pov":
+        return this.stepPov(a, m, q, mk, now);
+      case "dca":
+        return this.stepDca(a, m, q, mk, now);
+      case "iceberg":
+        return this.stepIceberg(a, m, q, now);
+      case "chase":
+        return this.stepChase(a, m, q, mk, now);
+      case "scale":
+        return this.stepScale(a, m, q, now);
+      case "swarm":
+        return this.stepSwarm(a, m, q, mk, now);
+      case "conditional":
+        return this.stepConditional(a, m, q, mk, now);
+      case "trailing":
+        return this.stepTrailing(a, m, q, mk, now);
+      case "basket":
+        return this.stepBasket(a);
+      case "bracket":
+        return this.stepBracket(a, m, q, mk);
+    }
+  }
+  /** Whether a scheduled algo may begin: its start time and its start price. */
+  async ready(a, now) {
+    const s = a.spec;
+    if (s.startAt !== null && now < s.startAt) return false;
+    if (s.triggerPrice !== null) {
+      const mk = this.market.mark(s.symbol)?.mark ?? null;
+      if (mk === null) return false;
+      if (typeof a.k.triggerFrom !== "number") {
+        a.k.triggerFrom = mk;
+        this.dirty.add(a.id);
+      }
+      const from = a.k.triggerFrom;
+      const hit = from >= s.triggerPrice ? mk <= s.triggerPrice : mk >= s.triggerPrice;
+      if (!hit) return false;
+      await this.event(a, "info", `The mark reached your start price of ${s.triggerPrice}.`);
+    }
+    return true;
+  }
+  /** Start working: the arrival price, the schedule, the profile. */
+  async begin(a, m, now) {
+    const s = a.spec;
+    const q = this.market.quote(s.symbol);
+    a.startedAt = now;
+    a.arrival = q ? mid(q) : this.market.mark(s.symbol)?.mark ?? null;
+    if (s.kind === "twap") {
+      if (s.closeShare !== null) {
+        const pos = await this.positionOf(a, s.symbol);
+        const size = pos === null ? 0 : floorStep(Math.abs(pos) * s.closeShare, m);
+        if (!pos || size < Number(m.stepSize)) {
+          a.startedAt = null;
+          await this.end(a, "expired", pos === null ? `Your position on ${m.name} could not be read; nothing was closed.` : `There is no position on ${m.name} to close.`);
+          return;
+        }
+        a.k.total = size;
+        a.k.closeSide = pos > 0 ? "sell" : "buy";
+        await this.event(a, "info", `Closing ${Math.round(s.closeShare * 100)}% of your ${pos > 0 ? "long" : "short"}: ${dec3(size)} ${m.base}.`);
+      }
+      const { times, weights } = twapSchedule(s, now, a.seed);
+      a.k.times = times;
+      a.k.weights = weights;
+    } else if (s.kind === "vwap") {
+      const profile = await this.profileFor(s.symbol, now, s.durationMs, s.slices, s.lookbackDays).catch((e) => {
+        this.host.log.warn("algo: volume profile failed", { symbol: s.symbol, error: String(e) });
+        return null;
+      });
+      const { times, weights } = vwapSchedule(s, now, a.seed, profile);
+      a.k.times = times;
+      a.k.weights = weights;
+      a.k.expectedTotal = profile ? profile.expected.reduce((x, y) => x + y, 0) : 0;
+      if (!profile) await this.event(a, "info", "No volume history could be read: the schedule is even (a TWAP).");
+    } else if (s.kind === "chase") {
+      a.k.startRef = q ? s.side === "buy" ? q.bid : q.ask : null;
+    } else if (s.kind === "swarm") {
+      a.k.clips = swarmClips(s, m, a.seed);
+      a.k.next = 0;
+      a.k.retriesLeft = s.retries;
+      a.k.waveAt = now;
+    }
+    await this.setStatus(a, "running", null);
+    await this.event(a, "status", a.arrival ? `Started. Arrival price ${a.arrival}.` : "Started.");
+  }
+  /* ---------------------------------------------------------- the worker ----- */
+  /** Live children: sent and not settled. */
+  live(a) {
+    return a.children.filter((c) => LIVE.has(c.state));
+  }
+  /** What could still fill: everything live, in full. */
+  pendingQty(a) {
+    return this.live(a).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+  }
+  /**
+   * Keep the working order in line with the plan: `due` is what should be
+   * filled by now, `late` how much of it is overdue (taken at once), the rest
+   * of what is due may rest as one post-only child at the touch.
+   */
+  async work(a, m, q, mk, o) {
+    const s = a.spec;
+    const side = o.side ?? s.side;
+    const reduceOnly = o.reduceOnly ?? s.reduceOnly;
+    const live = this.live(a);
+    if (live.some((c) => c.state !== "open" || c.cancelling)) return;
+    const limit = side === s.side ? s.limitPrice : null;
+    const ref = side === "buy" ? q.ask : q.bid;
+    const finishing = o.late >= o.total;
+    const minQ = Math.max(minChildQty(m, ref), o.minChild && !finishing ? o.minChild : 0);
+    const cap = o.maxChild !== void 0 && o.maxChild !== null ? o.maxChild : Infinity;
+    const room = Math.max(0, o.total - a.filled);
+    const need = Math.min(room, o.due - a.filled);
+    const lateNeed = Math.min(need, o.late - a.filled);
+    const resting = live.find((c) => c.tif !== "ioc") ?? null;
+    const taking = live.find((c) => c.tif === "ioc") ?? null;
+    if (taking) return;
+    if (lateNeed >= minQ - 1e-12 || lateNeed > 0 && need >= room - 1e-12 && room > 0 && o.late >= o.total) {
+      if (resting) {
+        await this.cancelChildren(a, m, [resting]);
+        return;
+      }
+      if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+        await this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+        return;
+      }
+      if (Date.now() - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) return;
+      let qty2 = floorStep(lateNeed, m);
+      if (need - qty2 < minQ) qty2 = floorStep(need, m);
+      qty2 = Math.min(qty2, floorStep(cap, m));
+      if (qty2 < minQ) {
+        if (room < minQ && o.late >= o.total && !o.more) await this.end(a, "done", a.filled > 0 ? `Filled; ${dec3(room)} ${m.base} under SoDEX's minimum order was left.` : "Under SoDEX's minimum order size: nothing could be sent.");
+        return;
+      }
+      const price3 = takerPrice(side, q, o.exec.slippageBps, m, mk, limit);
+      if (price3 === null) {
+        await this.hold(a, `Held: the price is past your limit of ${limit}.`);
+        return;
+      }
+      await this.send(a, m, [{ side, price: price3, quantity: qty2, tif: "ioc", tag: o.tag, reduceOnly }]);
+      return;
+    }
+    if (o.exec.style === "taker") return;
+    const want = floorStep(Math.min(need, cap), m);
+    const price2 = makerPrice(side, q, o.exec.offsetTicks, null, m, limit);
+    if (resting) {
+      const tick = Number(m.tickSize);
+      const left = resting.quantity - resting.filled;
+      const off = Math.abs(resting.price - price2) / tick;
+      const since = Date.now() - resting.placedAt;
+      const reprice = off >= o.exec.chaseTicks - 1e-9 && since >= (o.minRepriceMs ?? 1500);
+      const grow = want - left >= minQ;
+      const shrink = left - want > 1e-12 && want < minQ;
+      if (reprice || grow || shrink) await this.cancelChildren(a, m, [resting]);
+      return;
+    }
+    if (want < minChildQty(m, price2)) return;
+    await this.send(a, m, [{ side, price: price2, quantity: want, tif: "gtx", tag: o.tag, reduceOnly }]);
+  }
+  /* ----------------------------------------------------------- the kinds ----- */
+  async stepSchedule(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = typeof a.k.total === "number" ? a.k.total : Number(s.quantity);
+    const closeSide = a.k.closeSide;
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const start = a.startedAt;
+    const end = start + s.durationMs;
+    const times = a.k.times ?? [];
+    const weights = a.k.weights ?? [];
+    const interval = s.durationMs / s.slices;
+    let share = dueShare(times, weights, now);
+    let lateShare = s.exec.style === "taker" ? share : s.exec.style === "hybrid" ? dueShare(times, weights, now - s.exec.makerShare * interval) : 0;
+    if (s.kind === "vwap" && s.adaptive) {
+      const exp = Number(a.k.expectedTotal ?? 0);
+      share = adaptiveShare(share, a.marketQty, exp);
+      if (s.exec.style === "taker") lateShare = share;
+    }
+    const finishing = now >= end || a.k.rush === true;
+    if (now >= end && s.finish === "leave" && !a.k.rush) {
+      if (this.live(a).length) {
+        await this.pullResting(a);
+        return;
+      }
+      return this.end(a, this.isDone(a, m) ? "done" : "expired", `Time is up; ${dec3(Math.max(0, total - a.filled))} ${m.base} left unfilled, as you chose.`);
+    }
+    const i = Math.max(0, nextSlice(times, now) < 0 ? times.length - 1 : nextSlice(times, now) - 1);
+    const vol = s.maxParticipation !== null ? this.market.volume(s.symbol, Math.max(interval, 5e3)).qty : null;
+    let maxChild = vol !== null && !finishing ? Math.max(0, vol * s.maxParticipation) : Infinity;
+    if (s.kind === "twap" && s.maxSliceQty !== null) maxChild = Math.min(maxChild, Number(s.maxSliceQty));
+    await this.work(a, m, q, mk, {
+      due: finishing ? total : total * share,
+      late: finishing ? total : total * lateShare,
+      total,
+      exec: s.exec,
+      tag: finishing ? "finish" : `slice ${i + 1}/${times.length}`,
+      maxChild: Number.isFinite(maxChild) ? maxChild : null,
+      minChild: s.kind === "twap" && s.minSliceQty !== null ? Number(s.minSliceQty) : null,
+      ...closeSide ? { side: closeSide, reduceOnly: true } : {}
+    });
+  }
+  dueHistory(a, now, due) {
+    const h = (a.k.hist ?? []).filter((x) => x[0] >= now - 10 * 6e4);
+    if (!h.length || h[h.length - 1][1] !== due) h.push([now, due]);
+    a.k.hist = h.slice(-300);
+    return a.k.hist;
+  }
+  dueAgo(h, at) {
+    let v = 0;
+    for (const [t, d] of h) if (t <= at) v = d;
+    return v;
+  }
+  async stepPov(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const ended = s.endAt !== null && now >= s.endAt;
+    if (ended && s.finish === "leave" && !a.k.rush) {
+      if (this.live(a).length) return this.pullResting(a);
+      return this.end(a, "expired", `End time reached; ${dec3(total - a.filled)} ${m.base} left unfilled, as you chose.`);
+    }
+    const due = Math.min(total, s.rate * a.marketQty);
+    const h = this.dueHistory(a, now, due);
+    const late = s.exec.style === "taker" ? due : s.exec.style === "hybrid" ? this.dueAgo(h, now - LATE_MS) : 0;
+    const finishing = ended || a.k.rush === true;
+    await this.work(a, m, q, mk, {
+      due: finishing ? total : due,
+      late: finishing ? total : late,
+      total,
+      exec: s.exec,
+      tag: finishing ? "finish" : `${Math.round(s.rate * 100)}% of volume`,
+      maxChild: s.maxChildQty !== null ? Number(s.maxChildQty) : null
+    });
+  }
+  async stepDca(a, m, q, mk, now) {
+    const s = a.spec;
+    const start = a.startedAt;
+    let done = Number(a.k.done ?? 0);
+    let skipped = Number(a.k.skipped ?? 0);
+    let spent = Number(a.k.spentUsd ?? 0);
+    let target = Number(a.k.targetQty ?? 0);
+    const budget = s.maxTotalUsd ?? Infinity;
+    while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
+      const px = s.side === "buy" ? q.ask : q.bid;
+      const outside = s.limitPrice !== null && (s.side === "buy" ? mk > s.limitPrice : mk < s.limitPrice);
+      if (outside) {
+        if (s.outOfBand === "wait") {
+          await this.hold(a, `Waiting: the price is ${s.side === "buy" ? "above" : "below"} your limit of ${s.limitPrice}.`);
+          break;
+        }
+        skipped++;
+        await this.event(a, "skip", `Order ${done + skipped} of ${s.orders} skipped: the price ${mk} is ${s.side === "buy" ? "above" : "below"} your limit.`);
+        continue;
+      }
+      let usd = s.perOrderUsd;
+      const avg = a.filled > 0 ? a.filledValue / a.filled : null;
+      if (s.dipPct !== null && avg !== null && (s.side === "buy" ? px <= avg * (1 - s.dipPct) : px >= avg * (1 + s.dipPct))) {
+        usd *= s.dipMultiplier;
+        await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px / avg - 1) * 100).toFixed(1)}% from your average).`);
+      }
+      usd = Math.min(usd, budget - spent);
+      target += usd / px;
+      spent += usd;
+      done++;
+    }
+    a.k.done = done;
+    a.k.skipped = skipped;
+    a.k.spentUsd = spent;
+    a.k.targetQty = target;
+    this.dirty.add(a.id);
+    const over = done + skipped >= s.orders || spent >= budget - 1e-9;
+    const left = target - a.filled - this.pendingQty(a);
+    if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
+    const h = this.dueHistory(a, now, target);
+    const late = s.exec.style === "taker" ? target : s.exec.style === "hybrid" ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : over ? target : 0;
+    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
+  }
+  async stepIceberg(a, m, q, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    const live = this.live(a);
+    if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const pegged = s.price === null;
+    const tif = s.postOnly ? "gtx" : "gtc";
+    const desired = pegged ? makerPrice(s.side, q, s.pegOffsetTicks, null, m, s.limitPrice) : s.price;
+    if (live.length) {
+      const c = live[0];
+      if (c.state !== "open" || c.cancelling) return;
+      if (pegged && Math.abs(c.price - desired) / Number(m.tickSize) >= s.chaseTicks - 1e-9 && now - c.placedAt >= 1e3) {
+        a.k.clipLeft = Math.max(0, c.quantity - c.filled);
+        await this.cancelChildren(a, m, [c]);
+      }
+      return;
+    }
+    if (a.k.rush) {
+      return this.work(a, m, q, this.market.mark(s.symbol)?.mark ?? mid(q), { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "rush" });
+    }
+    if (typeof a.k.refillAt === "number" && now < a.k.refillAt) return;
+    const room = total - a.filled;
+    const minQ = minChildQty(m, desired);
+    const refill = typeof a.k.clipLeft === "number" && a.k.clipLeft > 0;
+    let qty2 = refill ? a.k.clipLeft : floorStep(jitter(Number(s.displayQty), s.displayJitter, makeRng(a.seed + a.childCount)), m);
+    qty2 = Math.max(qty2, minQ);
+    if (room - qty2 < minQ) qty2 = room;
+    qty2 = floorStep(Math.min(qty2, room), m);
+    if (qty2 < minQ) return this.end(a, "done", a.filled > 0 ? "Filled (the rest is under SoDEX's minimum order)." : "Under SoDEX's minimum order size.");
+    delete a.k.clipLeft;
+    if (!refill) a.k.clip = Number(a.k.clip ?? 0) + 1;
+    await this.send(a, m, [{ side: s.side, price: desired, quantity: qty2, tif, tag: `clip ${a.k.clip}` }]);
+  }
+  async stepChase(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    const live = this.live(a);
+    if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const timedOut = s.timeoutMs !== null && now - a.startedAt >= s.timeoutMs;
+    if (timedOut || a.k.rush || a.k.ending) {
+      const how = a.k.rush ? "take" : s.onEnd;
+      a.k.ending = true;
+      if (how === "take") return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
+      if (how === "rest") {
+        const c = live.find((x) => x.tif !== "ioc");
+        if (c) c.tag = "left resting";
+        return this.end(a, "expired", c ? `Time is up: left resting at ${c.price} on SoDEX, as you chose.` : "Time is up.", { keep: c ? [c.clOrdID] : [] });
+      }
+      return this.end(a, "expired", `Time is up; ${dec3(total - a.filled)} ${m.base} left unfilled.`);
+    }
+    const startRef = typeof a.k.startRef === "number" ? a.k.startRef : s.side === "buy" ? q.bid : q.ask;
+    let cap = s.limitPrice;
+    if (s.maxChaseBps !== null) {
+      const c = s.side === "buy" ? startRef * (1 + s.maxChaseBps / 1e4) : startRef * (1 - s.maxChaseBps / 1e4);
+      cap = cap === null ? c : s.side === "buy" ? Math.min(cap, c) : Math.max(cap, c);
+    }
+    const price2 = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, cap);
+    const room = total - a.filled;
+    if (live.length) {
+      const c = live[0];
+      if (c.state !== "open" || c.cancelling) return;
+      const off = Math.abs(c.price - price2) / Number(m.tickSize);
+      if (off >= s.chaseTicks - 1e-9 && now - c.placedAt >= s.minRepriceMs) await this.cancelChildren(a, m, [c]);
+      return;
+    }
+    const qty2 = floorStep(room, m);
+    if (qty2 < minChildQty(m, price2)) return this.end(a, "done", a.filled > 0 ? "Filled." : "Under SoDEX's minimum order size.");
+    await this.send(a, m, [{ side: s.side, price: price2, quantity: qty2, tif: "gtx", tag: "chase" }]);
+  }
+  async stepScale(a, m, _q, _now) {
+    const s = a.spec;
+    if (!a.k.placed) {
+      const ladder = scaleLadder(s, m, a.seed).filter((l) => l.qty >= minChildQty(m, l.price));
+      if (!ladder.length) return this.end(a, "failed", "No level of this ladder reaches SoDEX's minimum order.");
+      a.k.placed = true;
+      a.k.levels = ladder.length;
+      const tif = s.postOnly ? "gtx" : "gtc";
+      for (let i = 0; i < ladder.length; i += 50) {
+        const chunk = ladder.slice(i, i + 50);
+        await this.send(a, m, chunk.map((l, j) => ({ side: s.side, price: l.price, quantity: l.qty, tif, tag: `level ${i + j + 1}/${ladder.length}` })));
+      }
+      return;
+    }
+    if (this.live(a).length) return;
+    const total = Number(s.quantity);
+    if (this.isDone(a, m)) return this.end(a, "done", "Every level filled.");
+    return this.end(a, "expired", `${dec3(total - a.filled)} ${m.base} of the ladder did not fill (cancelled or refused).`);
+  }
+  async stepSwarm(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (this.live(a).length) return;
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const waveAt = Number(a.k.waveAt ?? 0);
+    if (now < waveAt && !a.k.rush) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    const price2 = takerPrice(s.side, q, s.slippageBps, m, mk, s.limitPrice);
+    if (price2 === null) return this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
+    const clips = a.k.clips ?? [];
+    let next = Number(a.k.next ?? 0);
+    let pool = total - a.filled;
+    const minQ = minChildQty(m, price2);
+    const wave = [];
+    if (next < clips.length) {
+      while (wave.length < s.inFlight && next < clips.length && pool >= minQ) {
+        let qty2 = Math.min(clips[next], pool);
+        if (pool - qty2 < minQ) qty2 = pool;
+        qty2 = floorStep(qty2, m);
+        next++;
+        if (qty2 < minQ) continue;
+        wave.push(qty2);
+        pool -= qty2;
+      }
+      a.k.next = next;
+    } else {
+      const left = Number(a.k.retriesLeft ?? 0);
+      if (left <= 0 || pool < minQ) return this.end(a, "expired", `${dec3(pool)} ${m.base} did not fill after ${s.retries} retr${s.retries === 1 ? "y" : "ies"}.`);
+      a.k.retriesLeft = left - 1;
+      const avg = total / Math.max(1, clips.length);
+      const n = Math.max(1, Math.min(s.inFlight, Math.round(pool / avg)));
+      for (let i = 0; i < n && pool >= minQ; i++) {
+        let qty2 = i === n - 1 ? pool : floorStep(pool / (n - i), m);
+        if (pool - qty2 < minQ) qty2 = pool;
+        qty2 = floorStep(qty2, m);
+        if (qty2 < minQ) break;
+        wave.push(qty2);
+        pool -= qty2;
+      }
+      await this.event(a, "info", `Retrying ${dec3(total - a.filled)} ${m.base} that did not fill.`);
+    }
+    if (!wave.length) return;
+    a.k.waveAt = now + s.waveMs;
+    a.k.wave = Number(a.k.wave ?? 0) + 1;
+    await this.send(a, m, wave.map((qty2) => ({ side: s.side, price: price2, quantity: qty2, tif: "ioc", tag: `wave ${a.k.wave}` })));
+  }
+  async stepConditional(a, m, q, mk, now) {
+    const s = a.spec;
+    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    if (s.expiresAt !== null && now >= s.expiresAt) return this.end(a, "expired", "Its time ran out before the conditions held.");
+    const ok = s.conditions.map((c, i) => this.conditionHolds(a, c, i, now));
+    a.k.ok = ok;
+    const met = s.match === "all" ? ok.every(Boolean) : ok.some(Boolean);
+    if (!met) {
+      if (a.k.holdSince) delete a.k.holdSince;
+      this.dirty.add(a.id);
+      return;
+    }
+    if (typeof a.k.holdSince !== "number") a.k.holdSince = now;
+    if (now - a.k.holdSince < s.holdMs) return;
+    a.k.fired = now;
+    const t = s.then;
+    await this.event(a, "info", `Conditions held${s.holdMs ? ` for ${Math.round(s.holdMs / 1e3)} s` : ""}: acting.`);
+    if (t.type === "market") a.k.takeQty = Number(t.quantity);
+    else if (t.type === "close") {
+      const pos = await this.positionOf(a, s.symbol);
+      if (!pos) return this.end(a, "expired", `There was no position on ${s.symbol} to close.`);
+      a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
+      a.k.closeSide = pos > 0 ? "sell" : "buy";
+    } else if (t.type === "limit") {
+      await this.send(a, m, [{ side: s.side, price: t.price, quantity: Number(t.quantity), tif: t.postOnly ? "gtx" : "gtc", tag: "trigger", reduceOnly: s.reduceOnly }]);
+      return this.end(a, "done", `Placed a limit ${s.side} of ${t.quantity} at ${t.price}; it rests on SoDEX.`, { keep: a.children.filter((c) => LIVE.has(c.state)).map((c) => c.clOrdID) });
+    } else {
+      try {
+        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec: t.algo, parentId: a.id, consent: a.consent });
+        return this.end(a, "done", `Started a ${ALGO_NAMES[child.spec.kind]} on ${child.spec.symbol}.`);
+      } catch (e) {
+        return this.end(a, "failed", `Could not start the ${ALGO_NAMES[t.algo.kind]}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    this.dirty.add(a.id);
+    return this.afterFire(a, m, q, mk);
+  }
+  /** A fired conditional or trailing stop: take `k.takeQty` (a chase first, for a trailing stop that asks for one). */
+  async afterFire(a, m, q, mk) {
+    const s = a.spec;
+    const total = Number(a.k.takeQty ?? 0);
+    if (!(total > 0)) return this.end(a, "expired", "Nothing to send.");
+    if (!this.live(a).length && a.filled >= total - Number(m.stepSize) / 2) return this.end(a, "done", "Filled.");
+    const side = a.k.closeSide ?? s.side;
+    const slip = s.kind === "conditional" && (s.then.type === "market" || s.then.type === "close") ? s.then.slippageBps : s.kind === "trailing" ? s.slippageBps : 50;
+    const chasing = s.kind === "trailing" && s.exit === "chase" && Date.now() - Number(a.k.fired) < s.chaseMs;
+    await this.work(a, m, q, mk, {
+      side,
+      reduceOnly: a.k.closeSide !== void 0 ? true : void 0,
+      due: total,
+      late: chasing ? 0 : total,
+      total,
+      exec: { style: chasing ? "maker" : "taker", slippageBps: slip, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 },
+      tag: s.kind === "trailing" ? "trailing stop" : "trigger",
+      minRepriceMs: 1e3
+    });
+  }
+  async stepTrailing(a, m, q, mk, now) {
+    const s = a.spec;
+    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    const price2 = s.source === "last" ? this.market.last(s.symbol)?.price ?? mk : mk;
+    const st = a.k.trail ?? { armed: false, extreme: null };
+    const r = trail(st, s.side, price2, s);
+    const wasArmed = st.armed;
+    a.k.trail = r.state;
+    a.k.stop = r.stop;
+    this.dirty.add(a.id);
+    if (!wasArmed && r.state.armed && s.activationPrice !== null) await this.event(a, "info", `Activated at ${price2}; trailing from here.`);
+    if (!r.fired) return;
+    a.k.fired = now;
+    if (s.quantity !== null) a.k.takeQty = Number(s.quantity);
+    else {
+      const pos = await this.positionOf(a, s.symbol);
+      const right = pos !== null && (s.side === "sell" ? pos > 0 : pos < 0);
+      if (!right) return this.end(a, "expired", `Fired at ${price2}, but there was no ${s.side === "sell" ? "long" : "short"} position on ${s.symbol} to close.`);
+      a.k.takeQty = floorStep(Math.abs(pos), m);
+    }
+    await this.event(a, "info", `Fired: ${s.source} ${price2} reached the stop at ${r.stop?.toFixed(6).replace(/\.?0+$/, "")}.`);
+    return this.afterFire(a, m, q, mk);
+  }
+  /**
+   * A basket: each market becomes an algo of its own (a swarm or a TWAP),
+   * sized from its USD at the mark when it starts, all started together; the
+   * basket ends when every leg has.
+   */
+  async stepBasket(a) {
+    const s = a.spec;
+    if (!a.k.legs) {
+      const specs = [];
+      for (const l of s.legs) {
+        const lm = this.markets.get(l.symbol);
+        const lq = this.market.quote(l.symbol);
+        const px = this.market.mark(l.symbol)?.mark ?? (lq ? mid(lq) : null);
+        if (!lm || !px) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
+        const qty2 = floorStep(l.usd / px, lm);
+        if (qty2 < minChildQty(lm, px)) return this.end(a, "failed", `${l.symbol}: $${l.usd} is under SoDEX's minimum order.`);
+        const common = { symbol: l.symbol, side: l.side, reduceOnly: s.reduceOnly, leverage: s.leverage, marginMode: s.marginMode, paper: s.paper, maxSpreadBps: s.maxSpreadBps, label: `${s.label ?? "Basket"}: ${l.symbol}` };
+        specs.push(
+          s.style === "swarm" ? { ...common, kind: "swarm", quantity: dec3(qty2), clips: s.clips, inFlight: s.inFlight, waveMs: s.waveMs, sizeJitter: 0.2, slippageBps: s.slippageBps, retries: 2 } : { ...common, kind: "twap", quantity: dec3(qty2), durationMs: s.durationMs, slices: s.slices, sizeJitter: 0.15, timeJitter: 0.2, exec: { style: "taker", slippageBps: s.slippageBps }, finish: "take" }
+        );
+      }
+      const ids = [];
+      for (const [i, spec] of specs.entries()) {
+        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec, parentId: a.id, consent: a.consent, seed: a.seed + i + 1 >>> 0, country: a.country, observedCountry: a.observedCountry });
+        ids.push(child.id);
+      }
+      a.k.legs = ids;
+      this.dirty.add(a.id);
+      await this.event(a, "info", `Started ${ids.length} legs: ${s.legs.map((l) => `${l.side} $${l.usd} ${l.symbol}`).join(", ")}.`);
+      return;
+    }
+    const legs = this.legsOf(a);
+    if (legs.length && legs.every((c) => FINAL_STATUSES.has(c.status))) {
+      const short = legs.filter((c) => c.status !== "done");
+      return this.end(a, short.length ? "expired" : "done", short.length ? `${short.length} of ${legs.length} markets did not fill in full (${short.map((c) => c.spec.symbol).join(", ")}).` : "Every market filled.");
+    }
+  }
+  /** A bracket: the entry (a taker with a slippage cap, or one resting limit); its exits follow what fills. */
+  async stepBracket(a, m, q, mk) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (!this.live(a).length && this.isDone(a, m)) return this.end(a, "done", s.paper ? "Entered; its exits are watched on the paper book." : "Entered; its exits are on SoDEX.");
+    if (s.entry === "market") {
+      return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "entry" });
+    }
+    if (!a.k.placed) {
+      a.k.placed = true;
+      await this.send(a, m, [{ side: s.side, price: s.price, quantity: total, tif: "gtc", tag: "entry" }]);
+      return;
+    }
+    if (this.live(a).length) return;
+    return this.end(a, "expired", a.filled > 0 ? `The entry filled ${dec3(a.filled)} of ${s.quantity} and is no longer on SoDEX; its exits cover what filled.` : "The entry order is no longer on SoDEX (cancelled or refused).");
+  }
+  /* ---------------------------------------------------------- conditions ----- */
+  conditionHolds(a, c, i, now) {
+    const mk = this.market;
+    switch (c.type) {
+      case "time":
+        return now >= c.at;
+      case "price": {
+        const p = mk.price(c.symbol, c.source);
+        return p !== null && (c.op === "above" ? p >= c.value : p <= c.value);
+      }
+      case "cross": {
+        const p = mk.price(c.symbol, c.source);
+        if (p === null) return false;
+        const key2 = `x${i}`;
+        const other = c.dir === "up" ? p < c.value : p > c.value;
+        if (other) {
+          a.k[key2] = true;
+          return false;
+        }
+        return a.k[key2] === true;
+      }
+      case "move": {
+        const p = mk.price(c.symbol, c.source);
+        const then = mk.priceAgo(c.symbol, c.source, c.windowMs);
+        if (p === null || then === null || !(then > 0)) return false;
+        const ch = p / then - 1;
+        return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
+      }
+      case "funding": {
+        const f = mk.mark(c.symbol)?.funding ?? null;
+        return f !== null && (c.op === "above" ? f >= c.value : f <= c.value);
+      }
+      case "oi": {
+        const now0 = mk.mark(c.symbol)?.oi ?? null;
+        const then = mk.oiAgo(c.symbol, c.windowMs);
+        if (now0 === null || then === null || !(then > 0)) return false;
+        const ch = now0 / then - 1;
+        return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
+      }
+      case "spread": {
+        const q = mk.quote(c.symbol);
+        if (!q) return false;
+        const b = spreadBps(q);
+        return c.op === "above" ? b >= c.bps : b <= c.bps;
+      }
+      case "volume":
+        return mk.volume(c.symbol, c.windowMs).usd >= c.aboveUsd;
+      case "ratio": {
+        const x = mk.mark(c.symbol)?.mark ?? null;
+        const y = mk.mark(c.other)?.mark ?? null;
+        if (x === null || y === null || !(y > 0)) return false;
+        return c.op === "above" ? x / y >= c.value : x / y <= c.value;
+      }
+      case "position": {
+        const book = this.cachedPositions(a, now);
+        if (!book) return false;
+        const p = book[c.symbol] ?? { size: 0, entry: 0 };
+        const size = p.size;
+        switch (c.op) {
+          case "long":
+            return size > 0;
+          case "short":
+            return size < 0;
+          case "flat":
+            return size === 0;
+          case "sizeAbove":
+            return Math.abs(size) >= c.value;
+          case "sizeBelow":
+            return Math.abs(size) <= c.value;
+          case "pnlAbove":
+          case "pnlBelow": {
+            const px = mk.mark(c.symbol)?.mark ?? null;
+            if (px === null || size === 0) return false;
+            const pnl = size * (px - p.entry);
+            return c.op === "pnlAbove" ? pnl >= c.value : pnl <= c.value;
+          }
+        }
+        return false;
+      }
+    }
+  }
+  /** The owner's positions as last read; a read starts in the background when they are older than POSITIONS_MS. */
+  cachedPositions(a, now) {
+    const hit = this.positionsOf.get(a.owner);
+    if ((!hit || now - hit.at > POSITIONS_MS) && !hit?.loading) void this.loadPositions(a);
+    return hit && hit.at > 0 ? hit.data : null;
+  }
+  async loadPositions(a) {
+    const prev = this.positionsOf.get(a.owner);
+    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: true });
+    try {
+      let data;
+      if (this.host.positions) data = await this.host.positions(a);
+      else {
+        const snap = await this.host.sodex.follower(a.owner);
+        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry }]));
+      }
+      this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
+      return data;
+    } catch (e) {
+      this.host.log.warn("algo: positions read failed", { owner: a.owner, error: String(e) });
+      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: false });
+      return null;
+    }
+  }
+  describeCondition(c) {
+    const mins = (ms) => ms >= 6e4 ? `${Math.round(ms / 6e4)} min` : `${Math.round(ms / 1e3)} s`;
+    const pct = (x) => `${(x * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+    switch (c.type) {
+      case "time":
+        return `At ${new Date(c.at).toISOString().replace("T", " ").slice(0, 16)} UTC`;
+      case "price":
+        return `${c.symbol} ${c.source} ${c.op === "above" ? "\u2265" : "\u2264"} ${c.value}`;
+      case "cross":
+        return `${c.symbol} ${c.source} crosses ${c.dir === "up" ? "up through" : "down through"} ${c.value}`;
+      case "move":
+        return `${c.symbol} moves ${c.dir === "either" ? "\xB1" : c.dir === "up" ? "+" : "\u2212"}${pct(c.pct)} within ${mins(c.windowMs)}`;
+      case "funding":
+        return `${c.symbol} funding ${c.op === "above" ? "\u2265" : "\u2264"} ${pct(c.value)}`;
+      case "oi":
+        return `${c.symbol} open interest ${c.dir === "either" ? "\xB1" : c.dir === "up" ? "+" : "\u2212"}${pct(c.pct)} within ${mins(c.windowMs)}`;
+      case "spread":
+        return `${c.symbol} spread ${c.op === "above" ? "\u2265" : "\u2264"} ${c.bps} bp`;
+      case "volume":
+        return `${c.symbol} trades $${Math.round(c.aboveUsd).toLocaleString("en-US")} within ${mins(c.windowMs)}`;
+      case "ratio":
+        return `${c.symbol} / ${c.other} ${c.op === "above" ? "\u2265" : "\u2264"} ${c.value}`;
+      case "position": {
+        const what = {
+          long: "is long",
+          short: "is short",
+          flat: "is flat",
+          sizeAbove: `is at least ${c.value}`,
+          sizeBelow: `is at most ${c.value}`,
+          pnlAbove: `PnL \u2265 $${c.value}`,
+          pnlBelow: `PnL \u2264 $${c.value}`
+        };
+        return `Your ${c.symbol} position ${what[c.op]}`;
+      }
+    }
+  }
+  /* -------------------------------------------------------------- sending ----- */
+  clOrdIdFor(a) {
+    a.childCount += 1;
+    return `va-${a.id.slice(1, 13)}-${a.childCount.toString(36)}`;
+  }
+  /** Equity and gross exposure of the owner's account, read at most every ACCOUNT_MS. null: not readable. */
+  async accountOf(a) {
+    const hit = this.accounts.get(a.owner);
+    if (hit && Date.now() - hit.at < ACCOUNT_MS) return hit;
+    try {
+      let v;
+      if (this.host.account) v = await this.host.account(a);
+      else {
+        const snap = await this.host.sodex.follower(a.owner);
+        const gross = Object.entries(snap.positions).reduce((x, [sym, p]) => x + Math.abs(p.size) * (this.market.mark(sym)?.mark ?? p.entry), 0);
+        v = { equity: snap.equity, gross };
+      }
+      const row = { at: Date.now(), ...v };
+      this.accounts.set(a.owner, row);
+      return row;
+    } catch (e) {
+      this.host.log.warn("algo: account read failed", { owner: a.owner, error: String(e) });
+      return null;
+    }
+  }
+  /** Sign and send children (one batch on one market) and book them as live. */
+  async send(a, m, list) {
+    const s = a.spec;
+    const sink = s.paper ? null : this.host.sinkFor(a);
+    if (!s.paper && !sink) {
+      await this.hold(a, "The trading key for this algo is not available here.");
+      return;
+    }
+    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
+    const ceiling = !s.paper ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
+    const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
+    if (sink && opening && leverage !== null && !this.leverageSet.has(`${a.owner}|${m.name}`)) {
+      this.leverageSet.add(`${a.owner}|${m.name}`);
+      await sink.setLeverage(a, m, Math.min(leverage, m.maxLeverage), s.marginMode ?? "cross").catch((e) => this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`));
+    }
+    if (opening && ceiling !== null) {
+      const acct = await this.accountOf(a);
+      const room = acct ? acct.equity * ceiling - acct.gross : null;
+      const notional = list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+      if (room === null || notional > room) {
+        const one = list.length === 1 ? list[0] : null;
+        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
+        if (!one || fit < minChildQty(m, one.price)) {
+          await this.hold(a, room === null ? "Held: your account could not be read for the leverage cap of your region." : `Held: the ${ceiling}x leverage cap for your region is reached.`);
+          return;
+        }
+        list = [{ ...one, quantity: fit }];
+      }
+      const row = this.accounts.get(a.owner);
+      if (row) row.gross += list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+    }
+    const now = Date.now();
+    const children = [];
+    const reqs = [];
+    for (const x of list) {
+      const clOrdID = this.clOrdIdFor(a);
+      const price2 = Number(dec3(x.price));
+      const quantity = Number(dec3(x.quantity));
+      const c = { clOrdID, orderId: null, side: x.side, price: price2, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
+      children.push(c);
+      reqs.push({ clOrdID, side: c.side, price: dec3(price2), quantity: dec3(quantity), tif: c.tif, reduceOnly: c.reduceOnly });
+      a.children.push(c);
+      this.byClOrd.set(clOrdID, a.id);
+    }
+    this.trimChildren(a);
+    this.dirty.add(a.id);
+    for (const c of children) await this.event(a, "order", `${c.tif === "ioc" ? "Take" : "Rest"} ${c.side} ${c.quantity} @ ${c.price} (${c.tag}).`, c);
+    let results;
+    if (s.paper) results = this.paperPlace(a, m, children);
+    else results = await sink.place(a, m, reqs);
+    for (const c of children) {
+      const r = results.find((x) => x.clOrdID === c.clOrdID) ?? { clOrdID: c.clOrdID, ok: false, orderId: null, error: "no answer for this order", outcomeUnknown: true };
+      c.updatedAt = Date.now();
+      if (r.orderId) c.orderId = r.orderId;
+      if (r.ok) {
+        if (c.state === "sending") c.state = "open";
+        a.k.consecRejects = 0;
+      } else if (r.outcomeUnknown) {
+        c.state = "unknown";
+        await this.event(a, "error", `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
+      } else {
+        c.state = "done";
+        a.rejects++;
+        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+        await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
+      }
+    }
+    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+    this.host.onChange?.(a.id);
+  }
+  async cancelChildren(a, m, list) {
+    const open = list.filter((c) => LIVE.has(c.state) && !c.cancelling);
+    if (!open.length) return;
+    for (const c of open) {
+      c.cancelling = true;
+      c.updatedAt = Date.now();
+    }
+    this.dirty.add(a.id);
+    if (a.spec.paper) {
+      for (const c of open) this.paperCancel(c.clOrdID);
+      return;
+    }
+    const sink = this.host.sinkFor(a);
+    if (!sink) return;
+    try {
+      await sink.cancel(a, m, open.map((c) => c.clOrdID));
+    } catch (e) {
+      for (const c of open) c.cancelling = false;
+      await this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  /** Cancel every resting child (pause, hold, end). */
+  async pullResting(a, keep = []) {
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    const resting = this.live(a).filter((c) => !keep.includes(c.clOrdID) && c.state === "open" && !c.cancelling);
+    if (resting.length) await this.cancelChildren(a, m, resting);
+  }
+  trimChildren(a) {
+    const done = a.children.filter((c) => !LIVE.has(c.state));
+    if (done.length <= DONE_KEPT) return;
+    const drop = new Set(done.slice(0, done.length - DONE_KEPT).map((c) => c.clOrdID));
+    a.children = a.children.filter((c) => !drop.has(c.clOrdID));
+  }
+  /* ------------------------------------------------------------- the books ----- */
+  onOrderUpdate(u) {
+    const id = this.byClOrd.get(u.clOrdID);
+    const a = id ? this.algos.get(id) : void 0;
+    if (!a) return;
+    const c = a.children.find((x) => x.clOrdID === u.clOrdID);
+    if (!c) {
+      const x = (a.exitOrders ?? []).find((e) => e.clOrdID === u.clOrdID);
+      if (x) this.onExitUpdate(a, x, u);
+      return;
+    }
+    const before = a.filled;
+    this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
+      const m = this.markets.get(a.spec.symbol);
+      if (m) void this.syncExits(a, m, true);
+    }
+    if (u.orderId) c.orderId = u.orderId;
+    c.updatedAt = Date.now();
+    if (FINAL_ORDER.test(u.status)) {
+      const was = c.state;
+      c.state = "done";
+      c.cancelling = false;
+      if (c.tif === "ioc" && c.filled <= 1e-12) a.k.missAt = Date.now();
+      if (u.status === "REJECTED" && was !== "done") {
+        a.rejects++;
+        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+        void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+      }
+      this.onChildDone(a, c);
+    } else if (c.state === "sending" || c.state === "unknown") c.state = "open";
+    if (FINAL_STATUSES.has(a.status) && c.state === "open" && c.tif !== "ioc" && !c.cancelling && !(a.k.kept ?? []).includes(c.clOrdID)) {
+      const m = this.markets.get(a.spec.symbol);
+      if (m) void this.cancelChildren(a, m, [c]);
+    }
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
+  }
+  applyFill(a, c, cumQty, cumValue, maker) {
+    const dq = cumQty - c.filled;
+    if (!(dq > 1e-12)) return;
+    const dv = cumValue > c.value ? cumValue - c.value : dq * c.price;
+    c.filled = cumQty;
+    c.value = cumValue > 0 ? cumValue : c.value + dv;
+    a.filled += dq;
+    a.filledValue += dv;
+    const isMaker = maker ?? c.tif !== "ioc";
+    if (isMaker) a.makerQty += dq;
+    const m = this.markets.get(a.spec.symbol);
+    const rate = (isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4) + (this.host.builderRate?.(a) ?? 0);
+    a.fees += dv * rate;
+    if (a.k.consecRejects) a.k.consecRejects = 0;
+    void this.event(a, "fill", `Filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}${isMaker ? " (maker)" : ""}.`, { ...c, quantity: dq, price: dv / dq });
+  }
+  /* --------------------------------------------------------------- exits ----- */
+  /**
+   * Keep the exits in line with what the entry filled: a take-profit and/or a
+   * stop-loss, SoDEX position stops sized to the filled amount at the levels
+   * the spec names (a price, or a distance from the average fill). Resized at
+   * most every EXITS_RESIZE_MS while the entry fills (cancel, then place), at
+   * once when it ends (`final`). Nothing once one of them has filled.
+   */
+  async syncExits(a, m, final) {
+    const s = a.spec;
+    if (!s.exits || !opensPosition(s) || a.k.exitsDone || this.exitsBusy.has(a.id)) return;
+    this.exitsBusy.add(a.id);
+    try {
+      a.exitOrders ??= [];
+      const live = this.liveExits(a);
+      if (live.some((x) => x.state !== "open" || x.cancelling)) return;
+      const size = floorStep(a.filled, m);
+      if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return;
+      const covered = Number(a.k.exitsSize ?? 0);
+      if (live.length && Math.abs(size - covered) < Number(m.stepSize) / 2) return;
+      const now = Date.now();
+      if (!final && live.length && now - Number(a.k.exitsAt ?? 0) < EXITS_RESIZE_MS) return;
+      if (live.length) {
+        await this.cancelExits(a, m, live);
+        if (!final) return;
+      }
+      const lv = exitLevels(s.side, s.exits, a.filledValue / a.filled);
+      const close = s.side === "buy" ? "sell" : "buy";
+      const stops = [];
+      const xs = [];
+      for (const kind of ["tp", "sl"]) {
+        const p = kind === "tp" ? lv.tp : lv.sl;
+        if (p === null || !(p > 0)) continue;
+        const clOrdID = this.clOrdIdFor(a);
+        const triggerPrice = snapPrice(p, m);
+        stops.push({ clOrdID, side: close, quantity: dec3(size), triggerPrice, kind });
+        xs.push({ clOrdID, orderId: null, side: close, price: Number(triggerPrice), quantity: size, tif: "ioc", reduceOnly: true, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: kind === "tp" ? "take-profit" : "stop-loss", exit: kind });
+        this.byClOrd.set(clOrdID, a.id);
+      }
+      if (!stops.length) return;
+      a.exitOrders.push(...xs);
+      a.k.exitsSize = size;
+      a.k.exitsAt = now;
+      this.dirty.add(a.id);
+      await this.event(a, "order", `Exits for ${dec3(size)} ${m.base}: ${xs.map((x) => `${x.tag} at ${x.price}`).join(", ")} (${s.paper ? "paper: watched against the mark" : "SoDEX holds them"}; when one fills the other is cancelled).`);
+      const sink = s.paper ? null : this.host.sinkFor(a);
+      const results = s.paper ? stops.map((st) => ({ clOrdID: st.clOrdID, ok: true, orderId: `paper-${st.clOrdID}`, error: null, outcomeUnknown: false })) : sink ? await sink.placeStops(a, m, stops) : stops.map((st) => ({ clOrdID: st.clOrdID, ok: false, orderId: null, error: "the trading key is not available here", outcomeUnknown: false }));
+      for (const x of xs) {
+        const r = results.find((y) => y.clOrdID === x.clOrdID);
+        x.updatedAt = Date.now();
+        if (r?.orderId) x.orderId = r.orderId;
+        if (r?.ok) x.state = "open";
+        else if (r?.outcomeUnknown) x.state = "unknown";
+        else {
+          x.state = "done";
+          await this.event(a, "error", `SoDEX refused the ${x.tag}: ${r?.error ?? "no answer"}`);
+        }
+      }
+      const done = a.exitOrders.filter((x) => !LIVE.has(x.state));
+      if (done.length > 12) a.exitOrders = a.exitOrders.filter((x) => LIVE.has(x.state) || done.slice(-12).includes(x));
+      this.syncWatch();
+      this.host.onChange?.(a.id);
+    } finally {
+      this.exitsBusy.delete(a.id);
+    }
+  }
+  async cancelExits(a, m, list) {
+    const open = list.filter((x) => LIVE.has(x.state) && !x.cancelling);
+    if (!open.length) return;
+    for (const x of open) x.cancelling = true;
+    this.dirty.add(a.id);
+    if (a.spec.paper) {
+      for (const x of open) {
+        x.state = "done";
+        x.cancelling = false;
+      }
+      return;
+    }
+    const sink = this.host.sinkFor(a);
+    if (!sink) return;
+    try {
+      await sink.cancel(a, m, open.map((x) => x.clOrdID));
+    } catch (e) {
+      for (const x of open) x.cancelling = false;
+      await this.event(a, "error", `The exits could not be cancelled: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  /** An exit's update: its fill, and the other one cancelled when it fills (one cancels the other). */
+  onExitUpdate(a, x, u) {
+    const dq = u.filledQty - x.filled;
+    if (dq > 1e-12) {
+      const dv = u.filledValue > x.value ? u.filledValue - x.value : dq * x.price;
+      x.filled = u.filledQty;
+      x.value += dv;
+      void this.event(a, "fill", `${x.tag === "take-profit" ? "Take-profit" : "Stop-loss"} filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}.`, { ...x, quantity: dq, price: dv / dq });
+    }
+    if (u.orderId) x.orderId = u.orderId;
+    x.updatedAt = Date.now();
+    if (FINAL_ORDER.test(u.status)) {
+      x.state = "done";
+      x.cancelling = false;
+    } else if (x.state === "sending" || x.state === "unknown") x.state = "open";
+    if (x.filled > 1e-12 && !a.k.exitsDone) {
+      a.k.exitsDone = true;
+      const others = this.liveExits(a).filter((o) => o.clOrdID !== x.clOrdID);
+      const m = this.markets.get(a.spec.symbol);
+      if (others.length && m) {
+        void this.cancelExits(a, m, others);
+        void this.event(a, "info", `${x.tag === "take-profit" ? "Take-profit" : "Stop-loss"} hit: the ${others.map((o) => o.tag).join(" and ")} is cancelled (one cancels the other).`);
+      }
+    }
+    if (!this.liveExits(a).length) this.syncWatch();
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
+  }
+  /** Paper exits fire here, on the mark, as SoDEX would fire the real ones. */
+  checkPaperExits() {
+    for (const a of this.algos.values()) {
+      if (!a.spec.paper || a.k.exitsDone) continue;
+      const live = this.liveExits(a).filter((x) => x.state === "open" && !x.cancelling);
+      if (!live.length) continue;
+      const mk = this.market.mark(a.spec.symbol)?.mark ?? null;
+      if (mk === null) continue;
+      const long = a.spec.side === "buy";
+      const hit = live.find((x) => x.exit === "tp" ? long ? mk >= x.price : mk <= x.price : long ? mk <= x.price : mk >= x.price);
+      if (hit) this.onOrderUpdate({ clOrdID: hit.clOrdID, orderId: hit.orderId, symbol: a.spec.symbol, status: "FILLED", filledQty: hit.quantity, filledValue: hit.quantity * mk, maker: false, reason: null, at: Date.now() });
+    }
+  }
+  onChildDone(a, c) {
+    if (a.spec.kind === "iceberg" && c.filled >= c.quantity - 1e-12) {
+      const s = a.spec;
+      a.k.refillAt = Date.now() + Math.max(0, jitter(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
+    }
+  }
+  onPrint(p) {
+    for (const a of this.algos.values()) {
+      if (a.status !== "running" && a.status !== "waiting") continue;
+      if (a.spec.symbol !== p.symbol || a.startedAt === null || p.at < a.startedAt) continue;
+      if (p.buyer === a.accountId || p.seller === a.accountId) continue;
+      a.marketQty += p.qty;
+      a.marketValue += p.qty * p.price;
+      this.dirty.add(a.id);
+    }
+    if (this.paper.size) this.paperOnPrint(p);
+  }
+  /**
+   * Settle children SoDEX has not told us about: an IOC with no final update,
+   * a cancel with no answer, a write with no answer. Open orders first; the
+   * order history (drip-limited) only when an order is gone from them.
+   */
+  async settleStale(a, m, now) {
+    if (a.spec.paper || this.lookupBusy) return;
+    for (const c of a.children) if (c.state === "sending" && now - c.placedAt > SENDING_MAX_MS) c.state = "unknown";
+    const stale = a.children.filter((c) => c.state === "unknown" || c.state === "open" && (c.tif === "ioc" && now - c.updatedAt > STALE_IOC_MS || c.cancelling && now - c.updatedAt > STALE_IOC_MS));
+    if (!stale.length) return;
+    this.lookupBusy = true;
+    try {
+      const open = await this.lookupOrders(a, m.name, false);
+      const missing = [];
+      for (const c of stale) {
+        const row = open.find((r) => r.clOrdID === c.clOrdID);
+        if (row) {
+          this.applyFill(a, c, row.executedQty, row.executedValue, null);
+          c.state = "open";
+          c.orderId = row.orderId;
+          c.updatedAt = now;
+          if (c.cancelling) {
+            c.cancelling = false;
+            await this.cancelChildren(a, m, [c]);
+          }
+        } else missing.push(c);
+      }
+      if (missing.length && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
+        this.lastHistoryAt = now;
+        const hist = await this.lookupOrders(a, m.name, true);
+        for (const c of missing) {
+          const row = hist.find((r) => r.clOrdID === c.clOrdID);
+          if (row) this.applyFill(a, c, row.executedQty, row.executedValue, null);
+          if (row || now - c.placedAt > 12e4) {
+            if (!row) await this.event(a, "info", `SoDEX does not list ${c.tag}; counted as filled ${dec3(c.filled)}.`, c);
+            c.state = "done";
+            c.cancelling = false;
+            this.onChildDone(a, c);
+          }
+        }
+      }
+      this.dirty.add(a.id);
+    } catch (e) {
+      this.host.log.warn("algo: order lookup failed", { algo: a.id, error: String(e) });
+    } finally {
+      this.lookupBusy = false;
+    }
+  }
+  async lookupOrders(a, symbol2, history) {
+    if (this.host.lookup) return this.host.lookup(a, symbol2, history);
+    const path = `/api/v1/perps/accounts/${a.owner}/orders${history ? "/history" : ""}?symbol=${encodeURIComponent(symbol2)}${history ? "&limit=100" : ""}`;
+    const data = await this.host.sodex.get(path);
+    const list = Array.isArray(data) ? data : data?.orders ?? [];
+    return list.filter((r) => typeof r.clOrdID === "string").map((r) => ({ clOrdID: r.clOrdID, orderId: String(r.orderID ?? ""), status: String(r.status ?? ""), executedQty: Number(r.executedQty ?? 0) || 0, executedValue: Number(r.executedValue ?? 0) || 0 }));
+  }
+  /**
+   * The owner's signed position on `symbol`, read now. A paper algo uses what
+   * its own paper fills built, and otherwise the real position (only read).
+   */
+  async positionOf(a, symbol2) {
+    const paperPos = a.k.paperPos;
+    if (a.spec.paper && typeof paperPos === "number" && paperPos !== 0) return paperPos;
+    try {
+      if (this.host.position) return await this.host.position(a, symbol2);
+      const book = await this.loadPositions(a);
+      return book ? book[symbol2]?.size ?? 0 : null;
+    } catch (e) {
+      this.host.log.warn("algo: position read failed", { algo: a.id, error: String(e) });
+      return null;
+    }
+  }
+  async profileFor(symbol2, start, durationMs, slices, lookbackDays) {
+    const { interval, ms } = profileCandles(lookbackDays);
+    const from = start - lookbackDays * DAY_MS2;
+    const to = start - DAY_MS2 + durationMs;
+    const candles = [];
+    if (this.host.candles) candles.push(...await this.host.candles(symbol2, interval, from, to));
+    else {
+      for (let t = from; t < to; t += 1e3 * ms) {
+        const data = await this.host.sodex.get(`/api/v1/perps/markets/${encodeURIComponent(symbol2)}/klines?interval=${interval}&limit=1000&startTime=${t}&endTime=${Math.min(to, t + 1e3 * ms)}`);
+        const list = Array.isArray(data) ? data : data?.klines ?? [];
+        for (const k of list) {
+          const t0 = Array.isArray(k) ? Number(k[0]) : Number(k.t ?? k.openTime);
+          const v = Array.isArray(k) ? Number(k[5]) : Number(k.v ?? k.volume);
+          if (Number.isFinite(t0) && Number.isFinite(v)) candles.push({ t: t0, v });
+        }
+      }
+    }
+    if (!candles.length) return null;
+    return volumeProfile(candles, ms, start, durationMs, slices, lookbackDays);
+  }
+  async problemOf(a, now) {
+    if (!this.host.problem) return null;
+    const hit = this.problems.get(a.id);
+    if (hit && now - hit.at < PROBLEM_RECHECK_MS) return hit.problem;
+    let problem = null;
+    try {
+      problem = await this.host.problem(a);
+    } catch (e) {
+      this.host.log.warn("algo: readiness check failed", { algo: a.id, error: String(e) });
+      problem = hit?.problem ?? null;
+    }
+    this.problems.set(a.id, { at: now, problem });
+    return problem;
+  }
+  isDone(a, m) {
+    const t = this.targetOf(a);
+    if (t === null) return false;
+    return t - a.filled < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0) - 1e-12 && !this.live(a).length;
+  }
+  /* -------------------------------------------------------------- paper ----- */
+  paperPlace(a, m, children) {
+    const q = this.market.quote(m.name);
+    const out = [];
+    for (const c of children) {
+      out.push({ clOrdID: c.clOrdID, ok: true, orderId: `paper-${c.clOrdID}`, error: null, outcomeUnknown: false });
+      const touch = q ? c.side === "buy" ? q.ask : q.bid : null;
+      const crosses = touch !== null && (c.side === "buy" ? c.price >= touch : c.price <= touch);
+      const emit = (status, filled, value, maker) => timers.after(0, () => this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: `paper-${c.clOrdID}`, symbol: m.name, status, filledQty: filled, filledValue: value, maker, reason: status === "REJECTED" ? "post-only order would take" : null, at: Date.now() }));
+      if (c.tif === "ioc") {
+        if (crosses) {
+          this.paperPosition(a, c.side, c.quantity);
+          emit("FILLED", c.quantity, c.quantity * touch, false);
+        } else emit("CANCELED", 0, 0, null);
+        continue;
+      }
+      if (crosses) {
+        if (c.tif === "gtx") emit("REJECTED", 0, 0, null);
+        else {
+          this.paperPosition(a, c.side, c.quantity);
+          emit("FILLED", c.quantity, c.quantity * touch, false);
+        }
+        continue;
+      }
+      this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: m.name, side: c.side, price: c.price, left: c.quantity, filled: 0, value: 0 });
+      emit("NEW", 0, 0, null);
+    }
+    return out;
+  }
+  paperPosition(a, side, qty2) {
+    a.k.paperPos = Number(a.k.paperPos ?? 0) + (side === "buy" ? qty2 : -qty2);
+  }
+  paperCancel(clOrdID) {
+    const o = this.paper.get(clOrdID);
+    this.paper.delete(clOrdID);
+    const id = this.byClOrd.get(clOrdID);
+    const a = id ? this.algos.get(id) : void 0;
+    const c = a?.children.find((x) => x.clOrdID === clOrdID);
+    timers.after(0, () => this.onOrderUpdate({ clOrdID, orderId: `paper-${clOrdID}`, symbol: o?.symbol ?? a?.spec.symbol ?? "", status: "CANCELED", filledQty: o?.filled ?? c?.filled ?? 0, filledValue: o?.value ?? c?.value ?? 0, maker: null, reason: null, at: Date.now() }));
+  }
+  /** A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on). */
+  paperOnPrint(p) {
+    for (const o of this.paper.values()) {
+      if (o.symbol !== p.symbol) continue;
+      const through = o.side === "buy" ? p.price <= o.price && p.taker === "sell" : p.price >= o.price && p.taker === "buy";
+      if (!through) continue;
+      const q = Math.min(o.left, p.qty);
+      o.left -= q;
+      o.filled += q;
+      o.value += q * o.price;
+      const a = this.algos.get(o.algoId);
+      if (a) this.paperPosition(a, o.side, q);
+      const done = o.left <= 1e-12;
+      if (done) this.paper.delete(o.clOrdID);
+      this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? "FILLED" : "PARTIALLY_FILLED", filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
+    }
+  }
+  /* -------------------------------------------------------------- status ----- */
+  async setStatus(a, status, reason) {
+    if (a.status === status && a.statusReason === reason) return;
+    const changed = a.status !== status;
+    a.status = status;
+    a.statusReason = reason;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    if (changed && status !== "running") await this.event(a, "status", reason ?? status);
+    else if (reason && changed) await this.event(a, "status", reason);
+    this.host.onChange?.(a.id);
+  }
+  async hold(a, reason) {
+    this.heldNow.add(a.id);
+    if (a.status === "scheduled") {
+      if (a.statusReason !== reason) {
+        a.statusReason = reason;
+        this.dirty.add(a.id);
+      }
+      return;
+    }
+    if (a.status === "waiting" && a.statusReason === reason) return;
+    a.status = "waiting";
+    a.statusReason = reason;
+    a.updatedAt = Date.now();
+    this.dirty.add(a.id);
+    await this.event(a, "status", reason);
+    this.host.onChange?.(a.id);
+  }
+  async run(a) {
+    if (a.status === "running") return;
+    if (a.status === "waiting") {
+      a.status = "running";
+      a.statusReason = null;
+      a.updatedAt = Date.now();
+      this.dirty.add(a.id);
+      this.host.onChange?.(a.id);
+    }
+  }
+  async end(a, status, reason, o = {}) {
+    if (FINAL_STATUSES.has(a.status)) return;
+    await this.pullResting(a, o.keep ?? []);
+    if (o.keep?.length) a.k.kept = o.keep;
+    for (const id of o.keep ?? []) this.paper.delete(id);
+    const m = this.markets.get(a.spec.symbol);
+    if (m && a.spec.exits && a.filled > 0) await this.syncExits(a, m, true);
+    a.status = status;
+    a.statusReason = reason;
+    a.endedAt = Date.now();
+    a.updatedAt = a.endedAt;
+    await this.save(a);
+    await this.event(a, "status", reason);
+    if (status === "cancelled" && this.liveExits(a).length) await this.event(a, "info", "Its exits stay on SoDEX for what filled; cancel them in your open orders if you do not want them.");
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+  }
+  need(id) {
+    const a = this.algos.get(id);
+    if (!a) throw new Error("No such algo.");
+    return a;
+  }
+  async save(a) {
+    this.dirty.delete(a.id);
+    await this.host.store.saveAlgo(a).catch((e) => this.host.log.error("algo: not saved", { algo: a.id, error: String(e) }));
+  }
+  async flush() {
+    const ids = [...this.dirty];
+    this.dirty.clear();
+    for (const id of ids) {
+      const a = this.algos.get(id);
+      if (a) await this.host.store.saveAlgo(a).catch((e) => this.host.log.error("algo: not saved", { algo: id, error: String(e) }));
+      this.host.onChange?.(id);
+    }
+  }
+  async event(a, kind, text, c) {
+    const at = Date.now();
+    const e = {
+      // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
+      id: `e${at.toString(36)}${(++this.eventSeq).toString(36).padStart(6, "0")}${randomId().slice(0, 4)}`,
+      algoId: a.id,
+      owner: a.owner,
+      at,
+      kind,
+      text,
+      clOrdID: c?.clOrdID ?? null,
+      side: c?.side ?? null,
+      price: c?.price ?? null,
+      qty: c?.quantity ?? null,
+      paper: a.spec.paper
+    };
+    await this.host.store.addAlgoEvent(e).catch((err) => this.host.log.error("algo: event not saved", { error: String(err) }));
+  }
+};
+
+// packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.0.0";
 
-// src/service.ts
+// apps/executor/src/service.ts
 import { existsSync as existsSync2 } from "node:fs";
 import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
 var ApiError = class extends Error {
@@ -6185,6 +13068,18 @@ var ExecutorService = class {
       policyFor: (s) => regionPolicy(s.country, s.observedCountry),
       keyProblem: (s) => this.keyProblem(s.owner)
     });
+    this.algos = new AlgoRuntime({
+      store: db,
+      sodex: this.sodex,
+      network: cfg.network,
+      factory: deps.factory,
+      log: deps.log,
+      sinkFor: (a) => this.algoSink(a),
+      builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
+      problem: (a) => this.algoProblem(a),
+      // The copy region rules, from the country declared with the terms and the one the request came from.
+      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null)
+    });
   }
   cfg;
   db;
@@ -6193,6 +13088,12 @@ var ExecutorService = class {
   executorId;
   keyName;
   runtime;
+  /**
+   * Algo orders (TWAP, VWAP, POV, ...): the same engine package, the same key
+   * the follower registered for this executor, the same nonce sequence, the
+   * same builder (the copy fee ladder), the same terms and region rules.
+   */
+  algos;
   sodex;
   hyperliquid;
   nonces = createMemoryNonceManager();
@@ -6204,8 +13105,10 @@ var ExecutorService = class {
   pairingCode;
   async start() {
     await this.runtime.start();
+    await this.algos.start();
   }
   async stop() {
+    await this.algos.stop();
     await this.runtime.stop();
     this.builderDb?.close();
   }
@@ -6235,13 +13138,15 @@ var ExecutorService = class {
       termsVersion: COPY_TERMS_VERSION,
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
-      keyName: this.keyName
+      keyName: this.keyName,
+      algos: { maxPerOwner: this.cfg.maxAlgosPerOwner }
     };
   }
   health() {
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
-    return { ok: true, copies: all.length, active: all.filter((s) => s.status === "active").length, feeds: { sodex: v?.feeds.sodex ?? true } };
+    const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
+    return { ok: true, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex: v?.feeds.sodex ?? true } };
   }
   /* --------------------------------------------------------- requests ----- */
   /** Verify, check the action and the wallet, record. Returns the owner and the payload. */
@@ -6359,9 +13264,10 @@ var ExecutorService = class {
     }
     return this.keyInfo(owner);
   }
-  /** Stop every copy and forget the keys. The follower revokes the key on SoDEX with their wallet. */
+  /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
   async deleteKey(req, ctx) {
     const { owner, payload } = this.accept(req, "delete-key", ctx);
+    await this.algos.cancelAll(owner);
     await this.runtime.stopAll(owner, { close: payload.close === true });
     this.db.deleteKeys(owner);
     this.signers.delete(owner);
@@ -6457,7 +13363,7 @@ var ExecutorService = class {
   }
   async act(req, ctx) {
     const { owner, payload, consent } = this.accept(req, ["update", "pause", "resume", "stop", "stop-all"], ctx);
-    const action = req.action;
+    const action2 = req.action;
     const mine = (id) => {
       const s = typeof id === "string" ? this.runtime.get(id) : null;
       if (!s || s.owner !== owner) throw new ApiError(404, "copy", "No such copy.");
@@ -6467,11 +13373,11 @@ var ExecutorService = class {
       throw e instanceof ApiError ? e : new ApiError(409, "state", e instanceof Error ? e.message : String(e));
     };
     let touched = [];
-    if (action === "stop-all") {
+    if (action2 === "stop-all") {
       touched = await this.runtime.stopAll(owner, { close: payload.close === true }).catch(fail);
     } else {
       const s = mine(payload.id);
-      if (action === "update") {
+      if (action2 === "update") {
         this.needTerms(owner, ctx);
         let settings;
         try {
@@ -6480,8 +13386,8 @@ var ExecutorService = class {
           throw new ApiError(400, "settings", e instanceof SettingsError ? e.message : String(e));
         }
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
-      } else if (action === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
-      else if (action === "resume") {
+      } else if (action2 === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
+      else if (action2 === "resume") {
         this.needTerms(owner, ctx);
         touched = [await this.runtime.resume(s.id).catch(fail)];
       } else touched = [await this.runtime.stopCopy(s.id, { close: payload.close === true }).catch(fail)];
@@ -6492,6 +13398,96 @@ var ExecutorService = class {
     const s = this.runtime.get(subId);
     if (!s || s.owner !== owner) throw new ApiError(404, "copy", "No such copy.");
     return this.db.activity({ subId, limit: q.limit ?? 200, before: q.before });
+  }
+  /* ------------------------------------------------------------ algos ----- */
+  /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
+  algoSink(a) {
+    if (!this.db.key(a.owner, "active")) return null;
+    return new KeyAlgoSink(
+      this.sodex,
+      () => this.signer(a.owner),
+      this.nonces,
+      SODEX_CHAIN_ID[this.cfg.network],
+      async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(this.volumeOf(x.owner)) } : null
+    );
+  }
+  /**
+   * Why a live algo cannot trade now (it waits, and goes on by itself once
+   * this clears): the key and the builder approval, as for a copy. The region
+   * rules (blocked countries, the EEA 2x ceiling on leverage and exposure) are
+   * applied by the runtime through `policyFor`.
+   */
+  async algoProblem(a) {
+    const key2 = await this.keyProblem(a.owner);
+    if (key2) return key2;
+    if (this.cfg.builderId > 0) {
+      const fee = copyFeeFor(this.volumeOf(a.owner));
+      const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
+      if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
+    }
+    return null;
+  }
+  /** Start an algo order for the wallet that signed it. */
+  async algoStart(req, ctx) {
+    const { owner, payload, consent } = this.accept(req, "algo-start", ctx);
+    if (this.cfg.kind === "hosted" && !this.cfg.open) throw new ApiError(503, "closed", "The ValueDesk executor takes no new orders right now. Running ones continue.");
+    this.needTerms(owner, ctx);
+    let spec;
+    try {
+      spec = parseAlgoSpec(payload.spec);
+    } catch (e) {
+      throw new ApiError(400, "spec", e instanceof AlgoSpecError ? e.message : String(e));
+    }
+    const seed = Number(payload.seed);
+    if (!Number.isSafeInteger(seed) || seed < 0 || seed > 4294967295) throw new ApiError(400, "seed", "seed must be a 32-bit whole number.");
+    const live = this.algos.list(owner).filter((a2) => !FINAL_STATUSES.has(a2.status));
+    if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, "limit", `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    let accountId = 0;
+    if (!spec.paper) {
+      await this.verifyKey(owner);
+      const k = this.db.key(owner, "active");
+      if (!k || !k.registered) throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
+      accountId = await this.sodex.accountId(owner);
+      if (!accountId) throw new ApiError(412, "account", "This wallet has no SoDEX account yet. Deposit first.");
+    }
+    let a;
+    try {
+      const t = this.db.terms(owner);
+      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
+    } catch (e) {
+      throw new ApiError(400, "algo", e instanceof Error ? e.message : String(e));
+    }
+    this.deps.log.info("algo started", { owner, algo: a.id, kind: spec.kind, symbol: spec.symbol, paper: spec.paper });
+    return this.algos.view(a.id);
+  }
+  /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
+  async algoAct(req, ctx) {
+    const { owner, payload } = this.accept(req, "algo-action", ctx);
+    const op = payload.op;
+    const fail = (e) => {
+      throw e instanceof ApiError ? e : new ApiError(409, "state", e instanceof Error ? e.message : String(e));
+    };
+    let touched;
+    if (op === "cancel-all") touched = await this.algos.cancelAll(owner).catch(fail);
+    else {
+      const a = typeof payload.id === "string" ? this.algos.get(payload.id) : null;
+      if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
+      if (op === "pause") touched = [await this.algos.pause(a.id).catch(fail)];
+      else if (op === "resume") {
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.resume(a.id).catch(fail)];
+      } else if (op === "cancel") touched = [await this.algos.cancel(a.id).catch(fail)];
+      else throw new ApiError(400, "op", "op must be pause, resume, cancel or cancel-all.");
+    }
+    return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
+  }
+  algoList(owner) {
+    return this.algos.list(owner).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
+  }
+  async algoEvents(owner, id, q) {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
+    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
   }
   /** Every signed instruction of this wallet (newest first): the follower's own record. */
   consents(owner) {
@@ -6521,7 +13517,7 @@ var ExecutorService = class {
   }
 };
 
-// src/server.ts
+// apps/executor/src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
 var Limiter = class {
@@ -6626,6 +13622,13 @@ function createExecutorServer(svc, cfg, log) {
       if (req.method === "GET" && route === "/health") return send(res, 200, svc.health());
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
+      if (req.method === "GET" && route === "/algos") return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
+      if (req.method === "GET" && algoEv) {
+        const owner = svc.authenticate(bearer(req));
+        const before = url.searchParams.get("before");
+        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1], { limit: Number(url.searchParams.get("limit") ?? 200), before: before ? Number(before) : void 0 }) });
+      }
       const act2 = /^\/copies\/([A-Za-z0-9_-]{1,40})\/activity$/.exec(route);
       if (req.method === "GET" && act2) {
         const owner = svc.authenticate(bearer(req));
@@ -6642,6 +13645,8 @@ function createExecutorServer(svc, cfg, log) {
       if (route === "/keys/delete") return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === "/copies") return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === "/copies/action") return send(res, 200, await svc.act(body.request, ctx));
+      if (route === "/algos") return send(res, 200, await svc.algoStart(body.request, ctx));
+      if (route === "/algos/action") return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, "path", "not found");
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, "internal", "Something went wrong in the executor.");
@@ -6653,7 +13658,7 @@ function createExecutorServer(svc, cfg, log) {
   });
 }
 
-// src/main.ts
+// apps/executor/src/main.ts
 var LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 function logger(level) {
   const at = LEVELS[level];
@@ -6672,15 +13677,15 @@ async function main() {
   }
   const db = new ExecutorDb(join3(cfg.dataDir, "executor.db"));
   const secrets = new Secrets(cfg.dataDir);
-  const factory = (url) => new WebSocket(url);
-  const svc = new ExecutorService(cfg, db, secrets, { fetch, factory, log });
+  const out = egress(cfg.localAddress);
+  const svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log });
   await svc.start();
   const server = createExecutorServer(svc, cfg, log);
   await new Promise((resolve2, reject) => {
     server.once("error", reject);
     server.listen(cfg.port, cfg.host, () => resolve2());
   });
-  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir });
+  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route" });
   if (cfg.kind === "self") {
     const owner = svc.owner();
     const lines = owner ? [`ValueDesk copier for ${owner} is running on http://${cfg.host}:${cfg.port}.`, "In ValueDesk: Copy -> Set up -> Self-hosted, and enter that address."] : [
