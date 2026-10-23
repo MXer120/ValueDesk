@@ -9,13 +9,20 @@
 //   node deploy/smoke/prod-headers.mjs --json     the table, for the validator
 import { pathToFileURL } from 'node:url';
 
+// Order matters only for deploy/aws/validate_offline.py, which compares this list,
+// joined, with edge.yaml's text: keep both in the same order.
 const CONNECT_SRC = [
   "'self'",
   'https://mainnet-gw.sodex.dev', 'wss://mainnet-gw.sodex.dev',
   'https://testnet-gw.sodex.dev', 'wss://testnet-gw.sodex.dev',
   'https://mainnet-data.sodex.dev', 'https://testnet-data.sodex.dev',
   'https://alpha-biz.sodex.dev',
-  'https://api.hyperliquid.xyz', 'https://mainnet.zklighter.elliot.ai', 'https://api.arcus.xyz',
+  // wss: the browser copier's userFills stream.
+  'https://api.hyperliquid.xyz', 'wss://api.hyperliquid.xyz',
+  // A self-hosted copy executor on the follower's own machine (apps/executor: loopback,
+  // plain http, any port). Loopback only - never a scheme-wide http: source.
+  'http://127.0.0.1:*', 'http://localhost:*',
+  'https://mainnet.zklighter.elliot.ai', 'https://api.arcus.xyz',
   'wss://relay.walletconnect.org', 'https://api.web3modal.org',
   'https://main-scan.valuechain.xyz',
   'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
@@ -64,6 +71,29 @@ export const HEADERS = {
   'Cross-Origin-Resource-Policy': 'same-origin',
   'X-XSS-Protection': '0',
 };
+
+/**
+ * Whether a CSP source list allows an origin ("https://host[:port]"), for the checks
+ * that judge what a page contacted: an exact entry, or a host source with a port
+ * wildcard (http://127.0.0.1:* allows http://127.0.0.1:8799). Keywords and scheme
+ * sources are not interpreted - connect-src has none but 'self'. Stricter than a
+ * browser in one way: CSP 3 also lets http://h:* match https:// and ws(s):// on h;
+ * this does not.
+ */
+export function sourceAllows(sources, origin) {
+  const list = [...sources];
+  if (list.includes(origin)) return true;
+  let u;
+  try {
+    u = new URL(origin);
+  } catch {
+    return false;
+  }
+  return list.some((s) => {
+    const m = /^([a-z][a-z0-9+.-]*):\/\/([^/:]+):\*$/i.exec(s);
+    return !!m && u.protocol === `${m[1].toLowerCase()}:` && u.hostname === m[2].toLowerCase();
+  });
+}
 
 /** Which policy a path gets: the cache behaviours of edge.yaml, in CloudFront's precedence. */
 export function policyFor(pathname) {

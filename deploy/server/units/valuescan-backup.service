@@ -5,11 +5,15 @@
 # The copy is taken with VACUUM INTO from a read-only connection, so the indexer
 # keeps writing while it runs. Retention in S3 is the bucket's lifecycle rule (this
 # unit cannot delete a backup there); on the data volume backup.sh keeps BACKUP_KEEP.
+#
+# The copy executor's database is part of the same nightly backup: this unit wants
+# valuescan-executor-backup.service, which runs after it as the executor's own user
+# (the valuescan user cannot read the executor's directory).
 
 [Unit]
 Description=Valuescan index backup (to S3, or to the data volume)
 After=network-online.target
-Wants=network-online.target
+Wants=network-online.target valuescan-executor-backup.service
 RequiresMountsFor=/var/lib/valuescan
 ConditionPathExists=/var/lib/valuescan/index/valuescan-index.db
 

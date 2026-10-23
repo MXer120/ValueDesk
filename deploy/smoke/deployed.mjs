@@ -103,19 +103,20 @@ const connects = (host, port, timeoutMs) => new Promise((done) => {
  * edge 'vercel' (deploy/vercel: the /api function has no fixed addresses, so the
  * security group opens 443 to everyone):
  *   - the TLS port answers, but Caddy must refuse every request that does not carry
- *     the origin secret (deploy/server/caddy/Caddyfile.template): /api/health and an
- *     index route asked without it must not be served;
+ *     the origin secret (deploy/server/caddy/Caddyfile.template): /api/health, an
+ *     index route and the copy executor's /api/copy/v1/health asked without it must
+ *     not be served;
  * both:
- *   - the API's own port must not be reachable at all;
+ *   - the API's own port and the copy executor's must not be reachable at all;
  *   - port 80 may answer (Caddy's ACME challenge and its redirect) but must
  *     never serve the API.
  *
  * @param {string} host
- * @param {{ edge?: 'cloudfront' | 'vercel', tlsPort?: number, httpPort?: number, apiPort?: number, timeoutMs?: number, tlsScheme?: 'https' | 'http' }} [o]
+ * @param {{ edge?: 'cloudfront' | 'vercel', tlsPort?: number, httpPort?: number, apiPort?: number, executorPort?: number, timeoutMs?: number, tlsScheme?: 'https' | 'http' }} [o]
  *   the ports and tlsScheme are options for tests only
  * @returns {Promise<{ host: string, checks: Record<string, string>, problems: string[] }>}
  */
-export async function probeOrigin(host, { edge = 'cloudfront', tlsPort = 443, httpPort = 80, apiPort = 8797, timeoutMs = 6000, tlsScheme = 'https' } = {}) {
+export async function probeOrigin(host, { edge = 'cloudfront', tlsPort = 443, httpPort = 80, apiPort = 8797, executorPort = 8799, timeoutMs = 6000, tlsScheme = 'https' } = {}) {
   const checks = {};
   const problems = [];
   // A name that does not resolve would read as "closed" on every port: a typo must not pass.
@@ -123,12 +124,13 @@ export async function probeOrigin(host, { edge = 'cloudfront', tlsPort = 443, ht
     checks.address = (await lookup(host)).address;
   } catch (e) {
     checks.address = `does not resolve (${reason(e)})`;
-    return { host, checks: { ...checks, tls: 'not asked', api: 'not asked', http: 'not asked' }, problems: [`${host} does not resolve: is --origin the instance's name (ORIGIN_DOMAIN_NAME)?`] };
+    return { host, checks: { ...checks, tls: 'not asked', api: 'not asked', executor: 'not asked', http: 'not asked' }, problems: [`${host} does not resolve: is --origin the instance's name (ORIGIN_DOMAIN_NAME)?`] };
   }
   checks.tls = await connects(host, tlsPort, timeoutMs);
   if (edge === 'vercel') {
     // Open on purpose; what matters is that nothing passes without the secret.
-    for (const [key, path] of [['gateHealth', '/api/health'], ['gateIndex', '/api/vs/leaderboard?venue=hyperliquid&window=1d&limit=1']]) {
+    for (const [key, path] of [['gateHealth', '/api/health'], ['gateIndex', '/api/vs/leaderboard?venue=hyperliquid&window=1d&limit=1'],
+      ['gateCopy', '/api/copy/v1/health']]) {
       try {
         const r = await get(`${tlsScheme}://${host}:${tlsPort}${path}`, timeoutMs + 4000);
         checks[key] = `answers ${r.status} without the secret`;
@@ -144,6 +146,8 @@ export async function probeOrigin(host, { edge = 'cloudfront', tlsPort = 443, ht
   }
   checks.api = await connects(host, apiPort, timeoutMs);
   if (checks.api === 'open') problems.push(`${host}:${apiPort} is reachable: the API must listen on loopback only and its port must not be in the security group`);
+  checks.executor = await connects(host, executorPort, timeoutMs);
+  if (checks.executor === 'open') problems.push(`${host}:${executorPort} is reachable: the copy executor must listen on loopback only and its port must not be in the security group`);
   try {
     const r = await get(`http://${host}:${httpPort}/api/health`, timeoutMs + 4000);
     checks.http = `answers ${r.status}${r.headers.location ? ` -> ${r.headers.location}` : ''}`;

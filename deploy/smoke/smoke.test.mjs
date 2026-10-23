@@ -19,7 +19,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CSP, HEADERS, SCAN_SCRIPT_HASH, cacheControlFor, headersFor, policyFor, rewrite } from './prod-headers.mjs';
+import { CSP, HEADERS, SCAN_SCRIPT_HASH, cacheControlFor, headersFor, policyFor, rewrite, sourceAllows } from './prod-headers.mjs';
 import { checkDeployedHeaders, checkHttpsRedirect, probeOrigin } from './deployed.mjs';
 import { hostedRoutes, matchRoute, routeRegExp, startMockApi } from './mock-api.mjs';
 import { CONTENT_TYPES, startStaticServer } from './static-server.mjs';
@@ -82,9 +82,25 @@ test('the header table: one policy per path class, as the edge behaviours are', 
   }
   assert.match(CSP.site, /frame-ancestors 'none'/);
   assert.ok(!/connect-src[^;]*\s(wss?:|https?:|\*)(\s|;)/.test(CSP.site), 'no scheme-wide wildcard in connect-src');
+  const connect = CSP.site.split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src')).split(/\s+/).slice(1);
+  for (const s of ['wss://api.hyperliquid.xyz', 'http://127.0.0.1:*', 'http://localhost:*']) assert.ok(connect.includes(s), `connect-src has ${s}`);
+  assert.deepEqual(connect.filter((s) => s.startsWith('http://')), ['http://127.0.0.1:*', 'http://localhost:*'], 'plain http for loopback only');
   assert.equal(headersFor('/trade')['Content-Security-Policy'], CSP.site);
   assert.equal(headersFor('/trade')['X-Frame-Options'], 'DENY');
   assert.equal(HEADERS['Cross-Origin-Embedder-Policy'], undefined, 'COEP would break the wallet images');
+});
+
+test('what connect-src allows, as the smoke checks read it: exact origins, and loopback on any port', () => {
+  const connect = CSP.site.split(';').map((d) => d.trim()).find((d) => d.startsWith('connect-src')).split(/\s+/).slice(1);
+  assert.ok(sourceAllows(connect, 'https://api.hyperliquid.xyz'));
+  assert.ok(sourceAllows(connect, 'wss://api.hyperliquid.xyz'));
+  assert.ok(sourceAllows(new Set(connect), 'http://127.0.0.1:8799'), 'a self-hosted executor on its default port');
+  assert.ok(sourceAllows(connect, 'http://localhost:9000'));
+  assert.ok(sourceAllows(connect, 'http://127.0.0.1'), 'a port wildcard covers the default port');
+  for (const no of ['http://192.168.1.10:8799', 'http://127.0.0.2:8799', 'http://[::1]:8799',
+    'http://localhost.evil.example:8799', 'https://api.hyperliquid.xyz.evil.example', 'not a url']) {
+    assert.equal(sourceAllows(connect, no), false, no);
+  }
 });
 
 test('the SPA rewrite and Cache-Control match the CloudFront function and the publish script', () => {
@@ -179,7 +195,7 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 17, 'docs/ARCH-traffic.md section 5: 17 routes');
+  assert.equal(routes.length, 18, 'apps/server/src/hosted.ts HOSTED_ROUTES: 18 routes');
   assert.ok(routes.every((r) => r.method === 'GET' && r.url.startsWith('/api/')));
   assert.ok(matchRoute(routes, 'GET', '/api/vs/leaderboard'));
   assert.ok(matchRoute(routes, 'HEAD', '/api/health'));
@@ -352,24 +368,26 @@ test('a deployed site: the origin must be closed to everyone but the edge', asyn
   const closed = await freePort();
   try {
     // A correct origin from outside: nothing on 443, nothing on the API port, port 80 redirects.
-    const good = await probeOrigin('127.0.0.1', { tlsPort: closed, apiPort: closed, httpPort: caddy80.port, timeoutMs: 1500 });
+    const good = await probeOrigin('127.0.0.1', { tlsPort: closed, apiPort: closed, executorPort: closed, httpPort: caddy80.port, timeoutMs: 1500 });
     assert.deepEqual(good.problems, []);
     assert.match(good.checks.tls, /^closed \(/);
     assert.match(good.checks.api, /^closed \(/);
+    assert.match(good.checks.executor, /^closed \(/);
     assert.equal(good.checks.http, 'answers 308 -> https://origin.invalid/api/health');
 
     // Port 80 closed as well is fine.
-    const dark = await probeOrigin('127.0.0.1', { tlsPort: closed, apiPort: closed, httpPort: closed, timeoutMs: 1500 });
+    const dark = await probeOrigin('127.0.0.1', { tlsPort: closed, apiPort: closed, executorPort: closed, httpPort: closed, timeoutMs: 1500 });
     assert.deepEqual(dark.problems, []);
     assert.match(dark.checks.http, /^closed \(/);
 
-    // An origin open to the world: each of the three is named.
-    const open = await probeOrigin('127.0.0.1', { tlsPort: apiLike.port, apiPort: apiLike.port, httpPort: apiLike.port, timeoutMs: 1500 });
+    // An origin open to the world: each of the four is named.
+    const open = await probeOrigin('127.0.0.1', { tlsPort: apiLike.port, apiPort: apiLike.port, executorPort: apiLike.port, httpPort: apiLike.port, timeoutMs: 1500 });
     assert.equal(open.checks.tls, 'open');
-    assert.equal(open.problems.length, 3, open.problems.join(' | '));
+    assert.equal(open.problems.length, 4, open.problems.join(' | '));
     assert.match(open.problems[0], /security group is not limited to CloudFront/);
-    assert.match(open.problems[1], /must listen on loopback only/);
-    assert.match(open.problems[2], /served in clear text/);
+    assert.match(open.problems[1], /the API must listen on loopback only/);
+    assert.match(open.problems[2], /the copy executor must listen on loopback only/);
+    assert.match(open.problems[3], /served in clear text/);
 
     // Behind Vercel 443 is open on purpose: the gate is what is judged.
     const edgeValue = 'e'.repeat(40);
@@ -379,15 +397,17 @@ test('a deployed site: the origin must be closed to everyone but the edge', asyn
       res.end(ok ? '{"ok":true}' : '{"error":"forbidden"}');
     });
     try {
-      const v = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: gated.port, apiPort: closed, httpPort: caddy80.port, timeoutMs: 1500, tlsScheme: 'http' });
+      const v = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: gated.port, apiPort: closed, executorPort: closed, httpPort: caddy80.port, timeoutMs: 1500, tlsScheme: 'http' });
       assert.deepEqual(v.problems, []);
       assert.equal(v.checks.tls, 'open');
       assert.equal(v.checks.gateHealth, 'answers 403 without the secret');
       assert.equal(v.checks.gateIndex, 'answers 403 without the secret');
-      // ... and an origin that serves without the secret is named, twice.
-      const ungated = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: apiLike.port, apiPort: closed, httpPort: closed, timeoutMs: 1500, tlsScheme: 'http' });
-      assert.equal(ungated.problems.length, 2, ungated.problems.join(' | '));
+      assert.equal(v.checks.gateCopy, 'answers 403 without the secret');
+      // ... and an origin that serves without the secret is named, once per route asked.
+      const ungated = await probeOrigin('127.0.0.1', { edge: 'vercel', tlsPort: apiLike.port, apiPort: closed, executorPort: closed, httpPort: closed, timeoutMs: 1500, tlsScheme: 'http' });
+      assert.equal(ungated.problems.length, 3, ungated.problems.join(' | '));
       assert.match(ungated.problems[0], /Caddy gate \(X-Origin-Verify\) is not in effect/);
+      assert.match(ungated.problems[2], /\/api\/copy\/v1\/health answers 200 without the origin secret/);
     } finally {
       await gated.close();
     }

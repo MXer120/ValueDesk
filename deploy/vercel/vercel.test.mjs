@@ -80,7 +80,7 @@ test('every path gets exactly the headers of prod-headers.mjs, from exactly one 
 });
 
 test('/api/* goes to the function and nowhere else, without the site headers', () => {
-  for (const path of ['/api/health', '/api/vs/leaderboard', '/api/vs/cohorts/map', '/api/__vs_proxy', '/api/x.js']) {
+  for (const path of ['/api/health', '/api/vs/leaderboard', '/api/vs/cohorts/map', '/api/__vs_proxy', '/api/x.js', '/api/copy/v1/session', '/api/copy/v1/copies/abc/activity']) {
     const r = route(path, STATIC);
     assert.equal(r.fn, true, path);
     assert.deepEqual(r.headers, {}, `${path}: the API keeps its own headers`);
@@ -134,7 +134,7 @@ test('packaging writes the Build Output API layout and keeps the project link', 
     const fn = join(output, 'functions', 'api', '__vs_proxy.func');
     const vc = JSON.parse(readFileSync(join(fn, '.vc-config.json'), 'utf8'));
     assert.deepEqual(vc, functionConfig('https://1-2-3-4.sslip.io'));
-    assert.deepEqual(vc.regions, ['fra1']);
+    assert.deepEqual(vc.regions, ['hnd1'], 'Tokyo, next to the instance in ap-northeast-1');
     assert.equal(readFileSync(join(fn, 'index.js'), 'utf8'), readFileSync(new URL('./api-proxy.cjs', import.meta.url), 'utf8'));
     assert.match(readFileSync(join(out, '.vercel', 'project.json'), 'utf8'), /prj_test/, 'the project link survives');
     // No secret is ever part of the deployment's files.
@@ -199,7 +199,7 @@ async function withProxy(env, fn) {
   }
 }
 
-function request(port, path, { method = 'GET', headers = {} } = {}) {
+function request(port, path, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((ok, fail) => {
     const req = http.request({ host: '127.0.0.1', port, path, method, headers, agent: false }, (res) => {
       const chunks = [];
@@ -207,7 +207,7 @@ function request(port, path, { method = 'GET', headers = {} } = {}) {
       res.on('end', () => ok({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) }));
     });
     req.on('error', fail);
-    req.end();
+    req.end(body);
   });
 }
 
@@ -250,6 +250,110 @@ test('the function forwards path, query and the secret, the viewer address, and 
   }
 });
 
+test('the copy executor: POST under /api/copy/ only, body and token through, the country from Vercel, never cached', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, body: Buffer.concat(chunks).toString('utf8') });
+      // A misbehaving origin: a cacheable answer with CDN headers. The edge must keep none of it.
+      res.writeHead(200, {
+        'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30',
+        'cdn-cache-control': 'max-age=60', 'vercel-cdn-cache-control': 'max-age=60', 'set-cookie': 'a=b',
+      });
+      res.end('{"ok":true}');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const signed = JSON.stringify({ request: { action: 'session', payload: 'x'.repeat(2000) } });
+      const r = await request(port, '/api/copy/v1/session', {
+        method: 'POST', body: signed,
+        headers: {
+          'content-type': 'application/json', authorization: 'Bearer 0xabc.123.sig', 'x-real-ip': '203.0.113.9',
+          'x-vercel-ip-country': 'de', 'x-viewer-country': 'US', 'x-pairing-code': '123456', cookie: 'c=1',
+          origin: 'https://valuedeskapp.vercel.app',
+        },
+      });
+      assert.equal(r.status, 200, r.body.toString());
+      assert.equal(r.headers['cache-control'], 'no-store', 'one follower\'s answer: never kept, not even by the browser');
+      for (const name of ['cdn-cache-control', 'vercel-cdn-cache-control', 'set-cookie']) assert.equal(r.headers[name], undefined, name);
+      const s = seen.at(-1);
+      assert.equal(s.method, 'POST');
+      assert.equal(s.body, signed, 'the body is passed through as it came');
+      assert.equal(s.headers['content-length'], String(Buffer.byteLength(signed)));
+      assert.equal(s.headers['content-type'], 'application/json');
+      assert.equal(s.headers.authorization, 'Bearer 0xabc.123.sig');
+      assert.equal(s.headers['x-origin-verify'], SECRET);
+      assert.equal(s.headers['x-forwarded-for'], '203.0.113.9');
+      assert.equal(s.headers['x-viewer-country'], 'DE', 'Vercel\'s country, never the client\'s own header');
+      for (const name of ['x-pairing-code', 'cookie', 'x-vercel-ip-country']) assert.equal(s.headers[name], undefined, `${name} must not reach the origin`);
+
+      // A GET with a read token (GET /api/copy/v1/me) - and a client that names its own country with no Vercel one.
+      const me = await request(port, '/api/copy/v1/me', { headers: { authorization: 'Bearer t', 'x-viewer-country': 'US' } });
+      assert.equal(me.status, 200);
+      assert.equal(me.headers['cache-control'], 'no-store');
+      assert.equal(seen.at(-1).headers.authorization, 'Bearer t');
+      assert.equal(seen.at(-1).headers['x-viewer-country'], undefined, 'no country from Vercel: none at all');
+
+      // Outside /api/copy/ nothing of it: no POST, no token, no country.
+      const before = seen.length;
+      const post = await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' } });
+      assert.equal(post.status, 405);
+      assert.equal(post.headers.allow, 'GET, HEAD, OPTIONS');
+      assert.equal(seen.length, before, 'a POST outside /api/copy/ never reaches the origin');
+      const board = await request(port, '/api/vs/leaderboard', { headers: { authorization: 'Bearer t', 'x-vercel-ip-country': 'DE', 'content-type': 'text/plain' } });
+      assert.equal(board.status, 200);
+      assert.equal(board.headers['vercel-cdn-cache-control'], 'max-age=30', 'the index keeps its edge cache');
+      for (const name of ['authorization', 'x-viewer-country', 'content-type']) assert.equal(seen.at(-1).headers[name], undefined, `${name} only under /api/copy/`);
+
+      // Other writes stay refused under /api/copy/ too; the Allow header names POST there.
+      for (const method of ['PUT', 'DELETE', 'PATCH']) {
+        const w = await request(port, '/api/copy/v1/copies', { method, body: '{}' });
+        assert.equal(w.status, 405, method);
+        assert.equal(w.headers.allow, 'GET, HEAD, OPTIONS, POST');
+      }
+      assert.equal(seen.length, before + 1, 'only the board GET reached the origin');
+    });
+  } finally {
+    await origin.close();
+  }
+});
+
+test('the copy executor: a body over 64 KB is refused at the edge, and a path that could mean another path is a 404', async () => {
+  let hits = 0;
+  const origin = await listen((req, res) => { hits++; req.resume(); req.on('end', () => { res.writeHead(200); res.end('{}'); }); });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const big = await request(port, '/api/copy/v1/copies', { method: 'POST', body: 'x'.repeat(proxy.BODY_LIMIT + 1), headers: { 'content-type': 'application/json' } });
+      assert.equal(big.status, 413);
+      const chunked = await new Promise((ok, fail) => {
+        // No Content-Length: the limit holds on what arrives.
+        const req = http.request({ host: '127.0.0.1', port, path: '/api/copy/v1/copies', method: 'POST', agent: false, headers: { 'transfer-encoding': 'chunked' } }, (res) => { res.resume(); res.on('end', () => ok(res.statusCode)); });
+        req.on('error', fail);
+        for (let i = 0; i < 70; i++) req.write('y'.repeat(1024));
+        req.end();
+      });
+      assert.equal(chunked, 413);
+      const exact = await request(port, '/api/copy/v1/copies', { method: 'POST', body: 'z'.repeat(proxy.BODY_LIMIT) });
+      assert.equal(exact.status, 200, 'exactly the limit passes');
+      for (const p of ['/api/copy/../vs/leaderboard', '/api/copy/v1/%2e%2e/x', '/api/copy%2fv1/session', '/api//copy/v1/info', '/api/copy/./v1/info', '/api/copy/v1/%00']) {
+        const r = await request(port, p, { method: 'POST', body: '{}' });
+        assert.equal(r.status, 404, p);
+      }
+    });
+    assert.equal(hits, 1, 'only the request at the limit reached the origin');
+  } finally {
+    await origin.close();
+  }
+  assert.equal(proxy.oddPath('/api/vs/leaderboard'), false);
+  assert.equal(proxy.oddPath('/api/vs/'), false, 'a trailing slash is not odd');
+  assert.equal(proxy.viewerCountry({ 'x-vercel-ip-country': 'jp' }), 'JP');
+  assert.equal(proxy.viewerCountry({ 'x-vercel-ip-country': 'XYZ' }), null);
+  assert.equal(proxy.viewerCountry({}), null);
+});
+
 test('the edge cache follows the API: public max-age only, at most 60 s, never an error or a live answer', () => {
   const e = proxy.edgeCacheControl;
   assert.equal(e('GET', 200, 'public, max-age=10, stale-while-revalidate=20'), 'max-age=10, stale-while-revalidate=20');
@@ -264,6 +368,8 @@ test('the edge cache follows the API: public max-age only, at most 60 s, never a
   assert.equal(e('GET', 304, 'public, max-age=10'), null);
   assert.equal(e('OPTIONS', 200, 'public, max-age=10'), null);
   assert.equal(e('GET', 200, undefined), null);
+  assert.equal(e('GET', 200, 'public, max-age=10', '/api/vs/leaderboard'), 'max-age=10');
+  assert.equal(e('GET', 200, 'public, max-age=10', '/api/copy/v1/info'), null, 'the copy executor is never cached at the edge');
 });
 
 test('the viewer address is taken only from what Vercel sets, and must be an address', () => {

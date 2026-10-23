@@ -1,0 +1,119 @@
+/* ===========================================================================
+   COPY SETUP SHEET (CopySetupSheet.tsx) and the live copy rows.
+
+   Hyperdash's "Add existing wallet" sheet is the reference: a mode switch,
+   then one row per step - a numbered ring on a hairline rail, the title and
+   one line of detail, the step's own action on the right; the next step lit,
+   done steps ticked. Drawn in the sheet language of funds.css (`fx`): the same
+   glass card, tokens and type, no new colour.
+   ======================================================================== */
+
+.modal.fx.cs-sheet { max-width: 560px; }
+.cs-sub { margin: 0; color: var(--muted); font-size: var(--fs-sm, var(--fs-xs)); text-align: center; line-height: 1.45; }
+.cs-sheet .cp-seg { align-self: stretch; }
+.cs-sheet .cp-seg > button { flex: 1 1 0; justify-content: center; }
+
+.cs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cs-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3) 0;
+}
+/* The rail between two rings. */
+.cs-step + .cs-step::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: calc(-1 * var(--sp-3) + 13px);
+  height: calc(2 * var(--sp-3) - 2px);
+  width: 1px;
+  background: var(--panel-line);
+}
+.cs-step__dot {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 1px solid var(--panel-line);
+  color: var(--muted);
+  font-size: var(--fs-micro, 11px);
+  font-family: var(--font-num);
+}
+.cs-step.is-current .cs-step__dot { border-color: var(--text); color: var(--text); }
+.cs-step.is-done .cs-step__dot { border-color: color-mix(in srgb, var(--pos) 55%, transparent); color: var(--pos); background: color-mix(in srgb, var(--pos) 10%, transparent); }
+.cs-step__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }
+.cs-step__t { font-weight: 600; font-size: var(--fs-base); }
+.cs-step.is-done .cs-step__t { color: var(--muted); }
+.cs-step__d { margin-top: 2px; color: var(--muted); font-size: var(--fs-xs); line-height: 1.4; }
+.cs-step__act { flex: none; }
+
+.cs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 var(--sp-3);
+  border-radius: 8px;
+  border: 1px solid var(--panel-line);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cs-btn:hover:not(:disabled) { border-color: var(--line); background: var(--fx-well, var(--bg)); }
+.cs-btn--primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.cs-btn--primary:hover:not(:disabled) { filter: brightness(0.92); background: var(--text); }
+.cs-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.cs-form { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-3); }
+.cs-row { display: flex; gap: var(--sp-2); align-items: center; }
+.cs-row .fx-input { flex: 1 1 auto; min-width: 0; height: 34px; }
+.cs-select { height: 38px; appearance: auto; }
+.cs-risks { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-xs); line-height: 1.45; }
+.cs-checks { display: flex; flex-direction: column; gap: 6px; }
+.cs-check { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-xs); line-height: 1.4; }
+.cs-check input { margin-top: 2px; flex: none; }
+.cs-days { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cs-form code { font-family: var(--font-num); font-size: 0.95em; }
+.cs-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
+
+/* --- live copies (panels.tsx) ------------------------------------------------- */
+.copy-status { display: inline-flex; align-items: center; gap: 6px; }
+.copy-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.copy-status--active::before { background: var(--pos); }
+.copy-status--paused::before { background: var(--warn); }
+.copy-status--blocked::before,
+.copy-status--halted::before { background: var(--neg); }
+.copy-acts { display: inline-flex; gap: 4px; justify-content: flex-end; }
+.copy-acts .pf-ctl { height: 24px; padding: 0 8px; }
+.copy-mode { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.copy-reason { display: block; color: var(--muted); font-size: var(--fs-micro, 11px); max-width: 260px; white-space: normal; }
+.copy-killbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 6px var(--sp-2); }
+.copy-confirm { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 6px var(--sp-2); border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); border-radius: 8px; margin: 4px var(--sp-2); font-size: var(--fs-xs); }
+.copy-runon { display: flex; flex-direction: column; gap: 6px; }
+.copy-runon .pf-seg { width: 100%; }
+.copy-runon .pf-seg .pf-ctl { flex: 1 1 0; }
+.copy-ready { font-size: var(--fs-xs); color: var(--muted); }
+.copy-ready.is-ok { color: var(--pos); }
+
+/* --- "copy this trade?" prompts (CopyRunner.tsx) ------------------------------- */
+.copy-prompts { position: fixed; right: 16px; bottom: 56px; z-index: 1250; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 32px)); }
+.copy-prompt {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--panel-line));
+  background: var(--glass-sheet-bg, var(--bg-panel));
+  -webkit-backdrop-filter: var(--glass-sheet-blur);
+  backdrop-filter: var(--glass-sheet-blur);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+  font-size: var(--fs-xs);
+}
+.copy-prompt__head { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--fs-base); }
+.copy-prompt__what { margin: 6px 0; color: var(--muted); }
+.copy-prompt__orders { margin: 0 0 8px; padding-left: 1.1em; font-family: var(--font-num); }
+.copy-prompt__acts { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }

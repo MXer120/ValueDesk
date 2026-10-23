@@ -1,9 +1,10 @@
 # Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
 #
 # Caddy terminates TLS for the origin name: the edge (CloudFront, or the Vercel
-# function) -> Caddy (443) -> the API on 127.0.0.1:8797, and passes on only what
-# carries the origin secret. It obtains and renews its own certificate (Let's
-# Encrypt, HTTP-01 on port 80). Config: /etc/caddy/Caddyfile.
+# function) -> Caddy (443) -> the copy executor on 127.0.0.1:8799 for /api/copy/*,
+# the API on 127.0.0.1:8797 for everything else, and passes on only what carries
+# the origin secret. It obtains and renews its own certificate (Let's Encrypt,
+# HTTP-01 on port 80). Config: /etc/caddy/Caddyfile.
 
 [Unit]
 Description=Caddy (TLS for the Valuescan origin)

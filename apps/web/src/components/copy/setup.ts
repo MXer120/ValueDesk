@@ -6,6 +6,7 @@
  * The form keeps the RAW strings the person typed and parses on use: a half
  * typed "0." must stay on screen as "0.", not be rewritten under the cursor.
  */
+import { COPY_FEE_MAX, type CopySettings, type LeaderVenue } from '@copy-engine';
 import { FEE_TIERS } from '../../fees';
 import { DASH, MINUS, fmt, fmtUsd } from '../../format';
 import type { TraderProfile, Venue, VsPosition, Window } from '../../vsApi';
@@ -28,13 +29,13 @@ export const TAKER_RATE: Record<Venue, number> = {
 };
 
 /**
- * PLANNED builder fee, in tenths of a basis point (the unit both venues sign):
- * 50 = 5 bp = 0.05%, charged on copied orders that open or add, closes free.
- * Not charged by anything today - there is no copy executor. Research 06 is the
- * source: 5 bp is the going rate for copy trading, and the approval a follower
- * would sign is capped at the same 0.05% rather than the venue maximum.
+ * The copy fee on a copied order, in tenths of a basis point (the unit SoDEX
+ * signs): the copy ladder's default, 25 = 2.5 bp = 0.025%, lower with 14-day
+ * volume (packages/copy-engine/src/policy.ts COPY_FEE_LADDER). Charged on every
+ * copied order - opens, adds, reductions and closes - so the backtest charges
+ * it on every order too.
  */
-export const PLANNED_BUILDER_TENTHS_BPS = 50;
+export const COPY_BUILDER_TENTHS_BPS = COPY_FEE_MAX;
 
 /** Venue minimum order value, USD (perps on both venues). */
 export const MIN_ORDER_USD = 10;
@@ -105,6 +106,12 @@ export interface SetupState {
   allow: string;
   deny: string;
   copyExisting: boolean;
+  /** Margin mode of copied positions. */
+  marginMode: 'isolated' | 'cross';
+  /** Ask before each copied order (the browser copier only). */
+  confirmEach: boolean;
+  /** Paper copy: runs live against the leader, sends nothing to SoDEX. */
+  paper: boolean;
 }
 
 /**
@@ -127,6 +134,9 @@ export const DEFAULT_SETUP: SetupState = {
   allow: '',
   deny: '',
   copyExisting: false,
+  marginMode: 'isolated',
+  confirmEach: false,
+  paper: false,
 };
 
 export const SIZING_MODES: ReadonlyArray<{ v: CopySizingMode; label: string; hint: string }> = [
@@ -139,7 +149,38 @@ export const SIZING_MODES: ReadonlyArray<{ v: CopySizingMode; label: string; hin
 export function normaliseSetup(s: Partial<SetupState> | null | undefined): SetupState {
   const out = { ...DEFAULT_SETUP, ...(s ?? {}) };
   if (!SIZING_MODES.some((m) => m.v === out.mode)) out.mode = DEFAULT_SETUP.mode;
+  if (out.marginMode !== 'isolated' && out.marginMode !== 'cross') out.marginMode = DEFAULT_SETUP.marginMode;
+  out.confirmEach = out.confirmEach === true;
+  out.paper = out.paper === true;
   return out;
+}
+
+/**
+ * The form as the copy engine's rules for `leader`. The engine checks them
+ * again (`checkSettings`): where it is stricter than the backtest (a whole
+ * leverage, at least 1 bp of slippage, at least 10 USDC), the copy says so.
+ */
+export function toCopySettings(p: ParsedSetup, s: SetupState, leader: { venue: LeaderVenue; address: string }): CopySettings {
+  const c = p.config;
+  return {
+    leader: { venue: leader.venue, address: leader.address.toLowerCase() },
+    sizingMode: c.sizingMode,
+    allocationUsd: c.allocationUsd,
+    ratio: c.ratio,
+    fixedNotionalUsd: p.fixedNotionalUsd,
+    maxLeverage: Math.max(1, Math.floor(c.maxLeverage)),
+    maxPositionUsd: c.maxPositionUsd,
+    stopLossPct: c.stopLossPct,
+    takeProfitPct: c.takeProfitPct,
+    drawdownStopPct: c.drawdownStopPct,
+    assetAllow: c.assetAllow,
+    assetDeny: c.assetDeny,
+    copyExisting: c.copyExisting,
+    slippageBps: Math.max(1, c.slippageBps),
+    marginMode: s.marginMode,
+    approval: s.confirmEach ? 'confirm' : 'auto',
+    paper: s.paper,
+  };
 }
 
 const num = (s: string): number | null => {

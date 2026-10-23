@@ -155,6 +155,11 @@ export default defineConfig({
        * from source like @sign, so there is no build step between the two.
        */
       '@sodex-core': fileURLToPath(new URL('../../packages/sodex-core/src/index.ts', import.meta.url)),
+      /*
+       * The copy engine: the same planner, feeds and runtime the hosted and
+       * self-hosted executors run (packages/copy-engine), from source.
+       */
+      '@copy-engine': fileURLToPath(new URL('../../packages/copy-engine/src/index.ts', import.meta.url)),
     },
     /*
      * ONE React, whatever npm decides to hoist.
@@ -223,6 +228,11 @@ export default defineConfig({
     // Proxy keeps the browser same-origin, so there is no CORS preflight on the
     // hot path and the WebSocket upgrade works without extra configuration.
     proxy: {
+      // The copy executor (apps/executor, `npm start` there): hosted, the edge routes these the same way.
+      '/api/copy': {
+        target: 'http://127.0.0.1:8799',
+        changeOrigin: true,
+      },
       '/api': {
         target: 'http://127.0.0.1:8797',
         changeOrigin: true,

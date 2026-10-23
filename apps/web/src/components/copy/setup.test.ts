@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { TraderProfile, VsPosition } from '../../vsApi';
 import {
-  DEFAULT_SETUP, PLANNED_BUILDER_TENTHS_BPS, TAKER_RATE, fmtRate, fmtSignedPct, fmtSize, largestPosition,
+  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, fmtRate, fmtSignedPct, fmtSize, largestPosition,
   normaliseSetup, parseCoins, parseSetup, readTarget, windowStart, workedExample, type SetupState,
 } from './setup';
 
@@ -76,10 +76,10 @@ test('stored state from an older build is completed from the defaults', () => {
   assert.equal(s.slippageBps, DEFAULT_SETUP.slippageBps);
 });
 
-test('fees: base-tier taker and the planned 5 bp builder fee', () => {
+test('fees: base-tier taker and the 2.5 bp copy fee', () => {
   assert.equal(fmtRate(TAKER_RATE.sodex), '0.040%');
   assert.equal(fmtRate(TAKER_RATE.hyperliquid), '0.045%');
-  assert.equal(fmtRate(PLANNED_BUILDER_TENTHS_BPS / 100_000), '0.050%');
+  assert.equal(fmtRate(COPY_BUILDER_TENTHS_BPS / 100_000), '0.025%');
 });
 
 test('formatting: true minus sign, explicit plus, sizes by magnitude', () => {

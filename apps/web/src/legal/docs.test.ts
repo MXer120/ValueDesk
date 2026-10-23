@@ -3,7 +3,19 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { AcceptTermsPayload } from '../../../../packages/copy-engine/src/api.ts';
+import {
+  BLOCKED_COUNTRIES,
+  COPY_FEE_LADDER,
+  COPY_FEE_MAX,
+  COPY_FEE_WINDOW_DAYS,
+  COPY_TERMS_VERSION,
+  EEA_COUNTRIES,
+  EEA_MAX_LEVERAGE,
+  feePercent,
+} from '../../../../packages/copy-engine/src/policy.ts';
 import { LEGAL_PAGES, legalForPath, type LegalPage } from '../router';
+import { COPY_RISK_SUMMARY, COPY_STATEMENTS, COPY_TERMS, HOSTED_KEY_NOTICE } from './copyTerms';
 import { LEGAL_DOCS, assertLegalPagesComplete, legalPlaceholders } from './docs';
 import { isDraft, placeholderReport, placeholdersIn, type LegalDoc } from './model';
 
@@ -54,9 +66,10 @@ test('the check finds a placeholder wherever it is: title, intro, a section, the
   docs.terms = { ...docs.terms, title: 'Terms [[OWNER: x]]' };
   docs.privacy = { ...docs.privacy, intro: [{ p: '[[OWNER: y]]' }] };
   docs.impressum = { ...docs.impressum, updated: '[[OWNER: z]]' };
+  docs['copy-terms'] = { ...docs['copy-terms'], sections: [{ title: '7. Risk disclosure', blocks: [{ ul: ['[[OWNER: w]]'] }] }] };
   assert.deepEqual(
     legalPlaceholders(docs).map((l) => `${l.page}:${l.where}`).sort(),
-    ['impressum:updated', 'privacy:intro', 'terms:title'],
+    ['copy-terms:7. Risk disclosure', 'impressum:updated', 'privacy:intro', 'terms:title'],
   );
 });
 
@@ -65,6 +78,8 @@ test('each document is filed under its own page, in its language', () => {
   assert.equal(LEGAL_DOCS.impressum.lang, 'de');
   assert.equal(LEGAL_DOCS.privacy.lang, 'en');
   assert.equal(LEGAL_DOCS.terms.lang, 'en');
+  assert.equal(LEGAL_DOCS['copy-terms'].lang, 'en');
+  assert.equal(LEGAL_DOCS['copy-terms'], COPY_TERMS);
 });
 
 test('links in the texts go only to the legal pages, https or mailto', () => {
@@ -91,4 +106,71 @@ test('the privacy policy names every host the browser may contact (index.html CS
   const policy = JSON.stringify(LEGAL_DOCS.privacy);
   const missing = [...hosts].filter((h) => !policy.includes(h));
   assert.deepEqual(missing, [], 'a host the app connects to is missing from the privacy policy (src/legal/privacy.ts)');
+});
+
+/* ------------------------------------------------------- copy trading terms ----- */
+
+const text = (v: unknown): string => JSON.stringify(v);
+
+test('the copy terms show the version every follower signs, before the first heading', () => {
+  assert.match(COPY_TERMS_VERSION, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(text(COPY_TERMS.intro).includes(`Version ${COPY_TERMS_VERSION}`), 'the intro names the version');
+});
+
+test('COPY_STATEMENTS are exactly the four statements of AcceptTermsPayload, each with a label', () => {
+  // Typed as the payload: a statement added to or removed from AcceptTermsPayload breaks this line in tsc.
+  const signed: AcceptTermsPayload = {
+    termsVersion: COPY_TERMS_VERSION,
+    termsHash: `0x${'0'.repeat(64)}`,
+    country: 'DE',
+    adult: true,
+    notUsPerson: true,
+    ownDecision: true,
+    risksUnderstood: true,
+  };
+  const statements = Object.entries(signed).filter(([, v]) => v === true).map(([k]) => k).sort();
+  assert.deepEqual(COPY_STATEMENTS.map((s) => s.id).sort(), statements);
+  assert.equal(new Set(COPY_STATEMENTS.map((s) => s.id)).size, COPY_STATEMENTS.length, 'no statement twice');
+  for (const s of COPY_STATEMENTS) assert.ok(s.label.trim().length > 20, `${s.id} has a label`);
+});
+
+test('the copy terms disclose the fee ladder, the EEA cap and the excluded countries of policy.ts', () => {
+  const doc = text(COPY_TERMS);
+  for (const step of COPY_FEE_LADDER) {
+    const rate = feePercent(step.fee);
+    const line = step.fromUsd === 0
+      ? `under $${COPY_FEE_LADDER[1]!.fromUsd.toLocaleString('en-US')}: ${rate}`
+      : `from $${step.fromUsd.toLocaleString('en-US')}: ${rate}`;
+    assert.ok(doc.includes(line), `the ladder step "${line}" is in the copy terms`);
+  }
+  assert.ok(doc.includes(`last ${COPY_FEE_WINDOW_DAYS} days`), 'the volume window');
+  assert.ok(doc.includes(`ceiling of ${feePercent(COPY_FEE_MAX)}`), 'the approval ceiling');
+  assert.ok(text(COPY_RISK_SUMMARY).includes(`up to ${feePercent(COPY_FEE_MAX)}`), 'the setup sheet names the highest fee');
+
+  assert.ok(doc.includes(`at most ${EEA_MAX_LEVERAGE}x leverage`), 'the EEA cap');
+  assert.equal(EEA_COUNTRIES.length, 30, 'the EEA is the 27 EU member states, Iceland, Liechtenstein and Norway');
+  assert.ok(doc.includes('the 27 EU member states, Iceland, Liechtenstein and Norway'));
+
+  const NAMES: Record<string, string> = {
+    US: 'United States', PR: 'Puerto Rico', VI: 'US Virgin Islands', GU: 'Guam', AS: 'American Samoa',
+    MP: 'Northern Mariana Islands', UM: 'US Minor Outlying Islands',
+    CU: 'Cuba', IR: 'Iran', KP: 'North Korea', SY: 'Syria', RU: 'Russia', BY: 'Belarus', MM: 'Myanmar',
+  };
+  const statement = COPY_STATEMENTS.find((s) => s.id === 'notUsPerson')!.label;
+  for (const code of BLOCKED_COUNTRIES) {
+    const name = NAMES[code];
+    assert.ok(name, `${code} is excluded in policy.ts: name it in the copy terms and here`);
+    assert.ok(doc.includes(name), `the copy terms name ${name}`);
+    if (!['PR', 'VI', 'GU', 'AS', 'MP', 'UM'].includes(code)) assert.ok(statement.includes(name), `the notUsPerson statement names ${name}`);
+  }
+});
+
+test('the copy texts the app shows outside the legal pages hold no placeholder', () => {
+  // The build check reads LEGAL_DOCS only; these are shown on the Copy page itself.
+  assert.ok(COPY_RISK_SUMMARY.length >= 6 && COPY_RISK_SUMMARY.length <= 9, '6 to 9 bullets');
+  for (const s of COPY_RISK_SUMMARY) assert.ok(s.endsWith('.') && s.split(/\.\s/).length === 1, `one sentence: ${s}`);
+  assert.deepEqual(placeholdersIn([COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE]), []);
+  for (const must of ['encrypted', 'Tokyo', 'around the clock', 'without asking you', 'move funds', 'revoke']) {
+    assert.ok(HOSTED_KEY_NOTICE.includes(must), `the hosted key notice says "${must}"`);
+  }
 });

@@ -284,3 +284,29 @@ part optional (a missing one degrades to "not available" or "not run", never to 
 
 To add a check to stage B, add a probe to `ownApi.ts` (our API) or a check to `stageB.ts`; a route added to
 the hosted allow-list without a probe shows up as a warning in stage B.
+
+## Copy trading: the live check (owner, before showing it to anyone)
+
+Automated: `packages/copy-engine` (planner, guards, books, policy, signed requests,
+the runtime against a fake SoDEX), `apps/executor` (sessions, replay refusal,
+pairing, terms and regions, keys, copies, the HTTP gate), `apps/web/src/copy`.
+Verified by hand on 2026-10-23 without money: the engine in paper mode followed
+six live SoDEX traders for three minutes (two opened and closed; the paper copies
+followed), and the site ran all three modes end to end in paper mode with a
+throwaway test wallet (terms, sign-in, pairing, start, activity, stop all).
+
+What only a real wallet can show - use a NEW wallet with about 30 USDC on SoDEX
+perps, and a leader that trades often:
+
+1. Copy setup -> This browser: accept the terms, approve the copy fee, approve the
+   key (7 days). Start a copy with Fixed amount 12 USDC, max leverage 2, stop loss
+   on. Keep the tab open until the leader opens and closes once: an order and a fill
+   appear in Activity, the SoDEX account shows the position and a stop order, the
+   builder fee on the fill is 0.025%.
+2. Stop and close. The position closes; the stop order is cancelled.
+3. ValueDesk executor: sign in, approve its key (7 days), start the same copy,
+   close the tab, come back after the leader traded: the copy traded without you.
+   Then Stop all, and Revoke in the key step (one signature on ValueChain).
+4. Self-hosted: run `node valuedesk-copier.mjs` (from /copier on the site), pair,
+   approve its key, start, check, stop, revoke.
+5. Send Claude the activity CSVs of the three copies.

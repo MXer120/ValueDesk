@@ -546,12 +546,14 @@
    three actions survive at every width. */
 @media (max-width: 560px) {
   .sfoot-connword { display: none; }
-  /* A phone keeps the Impressum link only - the three words together would
-     squeeze the account chip to an ellipsis at 375px. Privacy and Terms are
-     one tap further, in the legal pages' own switch. (Two classes: the touch
-     block at the end of this file gives `.sfoot-link` a display of its own.) */
+  /* A phone keeps the Impressum link only - the legal words together would
+     squeeze the account chip to an ellipsis at 375px. Privacy, Terms and Copy
+     terms are one tap further, in the legal pages' own switch. (Two classes:
+     the touch block at the end of this file gives `.sfoot-link` a display of
+     its own.) */
   .sfoot-legal .sfoot-link--privacy,
-  .sfoot-legal .sfoot-link--terms { display: none; }
+  .sfoot-legal .sfoot-link--terms,
+  .sfoot-legal .sfoot-link--copy-terms { display: none; }
 }
 
 /* --- geometry --------------------------------------------------------------

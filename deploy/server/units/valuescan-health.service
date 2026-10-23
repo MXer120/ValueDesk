@@ -2,8 +2,9 @@
 #
 # One pass of deploy/server/bin/healthcheck.mjs: /api/health, the hosted
 # lock-down, an index read through the gate, the indexer's own status
-# (/api/vs/index/health), disk space, the last backup, the certificate. It logs
-# one line; on a change of state it publishes to the alert topic, if one is set.
+# (/api/vs/index/health), the copy executor (/api/copy/v1/health on 127.0.0.1:8799),
+# disk space, the last backup, the certificate. It logs one line; on a change of
+# state it publishes to the alert topic, if one is set.
 
 [Unit]
 Description=Valuescan health check

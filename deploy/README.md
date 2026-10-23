@@ -14,13 +14,14 @@ share the instance's setup:
 |---|---|---|
 | `aws/` | three CloudFormation stacks (network, compute, edge), `deploy.sh`, the offline validator | on your workstation, against AWS |
 | `aws/ec2/` | `provision.sh`: the EC2 test environment, found by tag, created once, never deleted by script | on your workstation, against AWS |
-| `server/` | the instance: bootstrap, systemd units, environment templates, Caddy, backup, restore, health check | on the instance |
+| `server/` | the instance: bootstrap, systemd units (API, indexer, copy executor), environment templates, Caddy, backup, restore, health check | on the instance |
 | `release/` | build and publish the web (S3 + CloudFront, or Vercel), release and roll back the server, operate the instance (SSM, or SSH) | on your workstation |
 | `vercel/` | the Vercel deployment: the routes with the production headers, the `/api` function | packaged on your workstation, runs on Vercel |
 | `smoke/` | the production smoke test: locally before a deploy, against the real site after one | on your workstation |
 
 What you fill in: `aws/ec2/ec2.env` (or `aws/params.env`) and `release/web.env`,
-each copied from its `.example`. They are ignored by git; none holds a secret.
+each copied from its `.example` - and, for the move to Tokyo, `aws/ec2/ec2.tokyo.env`
+from `aws/ec2/ec2.tokyo.env.example`, named with `VS_EC2_ENV` (EC2-VERCEL.md section 12). They are ignored by git; none holds a secret.
 Build outputs and temporary files go to `.out/` directories here, ignored as well.
 
 Nothing in this directory holds an account id, a key or a secret, and

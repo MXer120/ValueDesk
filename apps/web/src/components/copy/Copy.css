@@ -42,7 +42,7 @@
 .copy .copy-example { margin: 0; }
 .copy .copy-caveat { color: var(--warn); }
 .copy .copy-hint { margin: 0; }
-.copy .copy-opts { padding-left: var(--sp-1); }
+.copy .copy-opts { padding-left: var(--sp-1); flex-direction: column; align-items: flex-start; gap: 6px; }
 
 /* The read-out is pinned to the ticket's bottom edge on the trade page; here it
    is one group among others. */

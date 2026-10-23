@@ -1,30 +1,32 @@
 /**
- * My copies: the traders this wallet copies, once copying exists.
- *
- * It does not exist yet. Copying runs through an on-chain contract that has not
- * been deployed, so there is no source for any figure on this card - and the
- * portfolio's rule for a figure with no source is an em-dash with the reason in
- * its tooltip, never a zero. The rows are drawn anyway because they are the
- * shape of what the card will say, which is more useful than a blank box; the
- * one live thing on it is the way to the Copy page.
+ * My copies: what this wallet copies, in every mode (copy/live.ts), as the
+ * portfolio summarises it. Equity and PnL are each copy's own books - its
+ * allocation, the fills the copier saw and the marks it read - added up.
  */
+import { useSyncExternalStore } from 'react';
 import { Card, Group, Row } from '../portfolio/parts';
-import { DASH } from '../../format';
-
-const WHY = 'Copy trading launches with the on-chain copy contract. Until it is live, nothing is copied from this wallet.';
+import { DASH, fmt, fmtUsd, signClass } from '../../format';
+import { copyRows, getLiveCopy, subscribeLiveCopy } from '../../copy/live';
 
 export function MyCopiesCard() {
+  const live = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
+  const running = copyRows(live).filter((r) => r.view.subscription.status !== 'stopped');
+  const real = running.filter((r) => !r.view.subscription.settings.paper);
+  const allocated = real.reduce((a, r) => a + r.view.subscription.settings.allocationUsd, 0);
+  const pnl = real.reduce((a, r) => a + r.view.pnl, 0);
+  const none = real.length === 0;
+  const why = 'No live copy is running for this wallet. Paper copies are not counted here.';
   return (
     <Card title="My copies">
       <Group title="Active copies">
-        <Row label="Traders copied" value={DASH} cls="pf-dim" hint={WHY} />
-        <Row label="Allocated" value={DASH} cls="pf-dim" hint={WHY} />
-        <Row label="Copy PnL" privacy="pnl" value={DASH} cls="pf-dim" hint={WHY} />
+        <Row label="Traders copied" value={none ? DASH : fmt(real.length, 0)} cls={none ? 'pf-dim' : undefined} hint={none ? why : undefined} />
+        <Row label="Allocated" value={none ? DASH : fmtUsd(allocated, 0)} cls={none ? 'pf-dim' : undefined} hint={none ? why : undefined} />
+        <Row label="Copy PnL" privacy="pnl" value={none ? DASH : `${pnl > 0 ? '+' : ''}${fmtUsd(pnl, 2)}`} cls={none ? 'pf-dim' : signClass(pnl)} hint={none ? why : undefined} />
       </Group>
-      <p className="pf-note">{WHY}</p>
+      {running.length > real.length && <p className="pf-note">{running.length - real.length} paper {running.length - real.length === 1 ? 'copy' : 'copies'} running as well.</p>}
       <div className="pf-actions">
         <button type="button" className="pf-btn" onClick={() => { window.location.href = '/copy'; }}>
-          Find traders to copy
+          {none ? 'Find traders to copy' : 'Manage copies'}
         </button>
       </div>
     </Card>

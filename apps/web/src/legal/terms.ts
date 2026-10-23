@@ -4,13 +4,18 @@
  * the liability clause follows what §§ 307, 309 Nr. 7 BGB allow, and nothing
  * here takes away a consumer's mandatory protection (Art. 6 Rome I).
  *
- * The facts it states are the app's, as of 2026-10-03:
+ * The facts it states are the app's, as of 2026-10-23:
  *   - non-custodial: the trading key lives in the browser only (trading/vault.ts),
  *     orders and transfers go from the browser to SoDEX (docs/ARCH-traffic.md);
  *   - the builder fee, its disclosure, approval, revocation and tiers:
  *     docs/BUILDER-CODES.md §2.3-2.7 and docs/BUILDER-TIERS.md;
  *   - a changed order may be cancelled and placed again (BUILDER-CODES §2.2);
- *   - Copy places no trades (components/copy/CopyPage.tsx: not deployed).
+ *   - copy trading has terms of its own (copyTerms.ts, /copy-terms) and its own
+ *     fee ladder (packages/copy-engine/src/policy.ts). It is the one case where
+ *     orders do not go from the browser: the hosted executor (apps/executor)
+ *     places copied orders from ValueDesk's server with a SoDEX key the
+ *     follower registered for it - an ordinary key, which can also move funds
+ *     between the follower's own accounts and wallet (copyTerms.ts, section 2).
  */
 import type { LegalDoc } from './model';
 
@@ -20,25 +25,25 @@ export const TERMS: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'These terms apply to your use of ValueDesk at [[OWNER: the site\'s domain]], provided by the operator named in the [Impressum](/impressum) ("we"). By using ValueDesk you accept them. Please read the risk notice in section 6 before you trade.' },
+    { p: 'These terms apply to your use of ValueDesk at [[OWNER: the site\'s domain]], provided by the operator named in the [Impressum](/impressum) ("we"). By using ValueDesk you accept them. Please read the risk notice in section 7 before you trade.' },
   ],
   sections: [
     {
       title: '1. What ValueDesk is',
       blocks: [
         { p: 'ValueDesk is a free analytics site for public trading data from SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus - leaderboards, cohorts of traders, wallet scans - and an interface through which you can trade on the SoDEX exchange yourself.' },
-        { p: 'ValueDesk is not an exchange, a broker, an investment firm or a custodian. It is not a party to your trades, does not act on your behalf and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with the trading key your wallet authorised.' },
+        { p: 'ValueDesk is not an exchange, a broker, an investment firm or a custodian. It is not a party to your trades and does not decide anything for you: every order, deposit, transfer and withdrawal is made by you and signed with your own wallet or with a key your wallet authorised. Copy trading (section 5) places orders automatically, according to rules you set and sign.' },
       ],
     },
     {
-      title: '2. ValueDesk never holds your funds or your keys',
+      title: '2. ValueDesk never holds your funds or your wallet\'s keys',
       blocks: [
         {
           ul: [
-            'Your funds stay in your wallet and in your own account on SoDEX. ValueDesk cannot move, freeze, recover or return them.',
+            'Your funds stay in your wallet and in your own account on SoDEX. ValueDesk cannot freeze, recover or return them, and cannot send them to anyone else.',
             'Your wallet\'s private keys and recovery phrase never reach ValueDesk. Never enter them anywhere on this site - we will never ask for them.',
             'To trade without a wallet prompt for every order, you can enable trading: your browser creates a trading key and your wallet registers it with SoDEX. The key is kept only in your browser, encrypted; it can place and cancel orders but, according to SoDEX, cannot send funds to anyone but you; it expires after at most seven days, and you can turn it off or sign out at any time. Anyone who controls your device while the key is valid can trade with it - protect your device.',
-            'Orders, transfers and withdrawals go from your browser directly to SoDEX. ValueDesk\'s servers never receive, sign or forward them, and cannot cancel or reverse a transaction once it has been sent.',
+            'Orders, transfers and withdrawals go from your browser directly to SoDEX. ValueDesk\'s servers never receive, sign or forward them, and cannot cancel or reverse a transaction once it has been sent. The one exception is copy trading with the hosted ValueDesk executor (section 5): there, ValueDesk\'s server signs and sends the copied orders with the key you registered for it.',
           ],
         },
       ],
@@ -64,17 +69,23 @@ export const TERMS: LegalDoc = {
             'the fee is charged by SoDEX and paid to us by SoDEX. Fees already charged on fills are not refunded.',
           ],
         },
-        { p: 'ValueDesk charges nothing else. The Copy pages place no trades: what they show about following a trader is a simulation, and no fee is charged there.' },
+        { p: 'Copied orders carry a builder fee of their own (section 5). ValueDesk charges nothing else.' },
       ],
     },
     {
-      title: '5. No advice',
+      title: '5. Copy trading',
+      blocks: [
+        { p: 'ValueDesk lets you copy the trades of public addresses on SoDEX and Hyperliquid into your own SoDEX account, under rules you set yourself: in your browser, on ValueDesk\'s hosted executor, or on an executor you run yourself. Copy trading is governed by the [Copy trading terms and risk disclosure](/copy-terms), which you accept by signing them with your wallet before your first copy. They add to these terms and prevail for copy trading. They set out the copy fee, the regional limits, what the key used for copying can do and the risks of copying; paper copies send nothing to SoDEX and carry no fee.' },
+      ],
+    },
+    {
+      title: '6. No advice',
       blocks: [
         { p: 'Nothing on ValueDesk is investment, financial, legal or tax advice, or a recommendation to buy, sell or hold anything or to follow any trader. Leaderboards, rankings, cohorts, statistics and simulations describe what happened in public data; they do not say what will happen. Decide for yourself, and get independent advice where you need it.' },
       ],
     },
     {
-      title: '6. Risk notice',
+      title: '7. Risk notice',
       blocks: [
         { p: '**Trading crypto-assets, and perpetual futures in particular, carries a high risk of losing money quickly. Only trade with money you can afford to lose completely.**' },
         {
@@ -92,13 +103,13 @@ export const TERMS: LegalDoc = {
       ],
     },
     {
-      title: '7. Who may use ValueDesk',
+      title: '8. Who may use ValueDesk',
       blocks: [
         { p: 'You must be at least 18 years old and able to enter into binding contracts. You may not use ValueDesk to trade if the law where you live or are located forbids it, if you are subject to sanctions, or from [[OWNER: the excluded countries, matching GEO_RESTRICTION_COUNTRIES and SoDEX\'s own restricted jurisdictions]]. You may not hide your location to get around such a restriction.' },
       ],
     },
     {
-      title: '8. Fair use',
+      title: '9. Fair use',
       blocks: [
         {
           ul: [
@@ -112,25 +123,25 @@ export const TERMS: LegalDoc = {
       ],
     },
     {
-      title: '9. Availability and changes',
+      title: '10. Availability and changes',
       blocks: [
-        { p: 'ValueDesk is provided as it is, free of charge apart from the builder fee in section 4. We aim to keep it available but do not promise that it is always available, complete or free of errors. We may change, pause or end features - including turning trading through ValueDesk off - at any time. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
+        { p: 'ValueDesk is provided as it is, free of charge apart from the builder fees in sections 4 and 5. We aim to keep it available but do not promise that it is always available, complete or free of errors. We may change, pause or end features - including turning trading through ValueDesk off - at any time; for copy trading, section 14 of the [Copy trading terms](/copy-terms) applies. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
       ],
     },
     {
-      title: '10. Liability',
+      title: '11. Liability',
       blocks: [
         { p: 'We are liable without limitation for damage caused intentionally or by gross negligence, for injury to life, body or health, under the German Product Liability Act, and where we have given a guarantee. For slight negligence we are liable only for the breach of an obligation that is essential to the proper performance of these terms and on which you may regularly rely, and then only for the damage typical and foreseeable when the obligation was breached. Otherwise our liability is excluded. In particular we are not liable for trading losses, for decisions you base on data shown here, or for the acts and failures of SoDEX, the other venues, blockchains and wallet providers, unless one of the cases in the first sentence applies.' },
       ],
     },
     {
-      title: '11. Changes to these terms',
+      title: '12. Changes to these terms',
       blocks: [
         { p: 'We may change these terms for the future, for example when features or the law change. The version on this page at the time you use ValueDesk applies; we point out significant changes in the app.' },
       ],
     },
     {
-      title: '12. Law and place of jurisdiction',
+      title: '13. Law and place of jurisdiction',
       blocks: [
         { p: 'These terms are governed by the law of the Federal Republic of Germany, excluding the UN Convention on Contracts for the International Sale of Goods. If you are a consumer, the mandatory consumer protection of the country where you habitually reside still applies. If you are a merchant, a legal person under public law or a special fund under public law, the place of jurisdiction is [[OWNER: the city of the provider\'s registered office]].' },
         { p: 'If a provision of these terms is invalid, the rest remain in force. Questions: see the [Impressum](/impressum).' },

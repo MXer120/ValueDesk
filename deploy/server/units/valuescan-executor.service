@@ -1,0 +1,106 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The hosted copy executor (apps/executor): it watches the leaders' public trades
+# and places each follower's copies on SoDEX, with the key that follower registered.
+# A plain node:http server on loopback. Caddy sends /api/copy/* here, behind the
+# same origin-secret gate as the API (caddy/Caddyfile.template); every other path
+# goes to the API.
+#
+# ITS OWN USER, valuescan-executor, NOT valuescan. Its data directory
+# (/var/lib/valuescan/executor, 0700) holds every follower's trading key, sealed
+# under a key-encryption key that lives in the same directory (kek, session.key).
+# The API and the indexer run as valuescan and read untrusted input all day
+# (public requests, exchange streams). Under one user, a hole in either would open
+# the way to those keys. Under its own user, nothing that runs as valuescan can
+# read that directory.
+# The executor reads through its supplementary group valuescan: the release
+# (root:valuescan, g=rX), /etc/valuescan (0750) and the builder ledger in
+# /var/lib/valuescan/state (0750, files 0640). It cannot write any of them. What
+# that group may read, it may read: a file that is the API's alone - api.local.env
+# with SOSOVALUE_API_KEY - belongs to root with mode 0600 (systemd reads it as root).
+# The builder-terms signing key is 0600 valuescan already.
+#
+# INDEPENDENT OF THE API: no Requires=, BindsTo= or PartOf= on any other unit, so a
+# restart or a stop of the API (or the indexer) never touches it. A release
+# restarts it on its own (bin/release.sh), after the API.
+
+[Unit]
+Description=Valuescan copy executor (hosted: places the followers' copies on SoDEX)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+# No release with the executor installed yet: nothing to run (the release that brings it starts it).
+ConditionPathExists=/opt/valuescan/current/apps/executor/src/main.ts
+# Keep trying: an upstream outage must not leave the copies stopped for good.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=valuescan-executor
+Group=valuescan-executor
+SupplementaryGroups=valuescan
+WorkingDirectory=/opt/valuescan/current/apps/executor
+EnvironmentFile=/etc/valuescan/executor.env
+# Only EXECUTOR_ORIGIN_SECRET and EXECUTOR_ORIGIN_SECRET_2 (the values Caddy's gate
+# accepts). Root-only (0600): systemd reads it before it drops to the service user.
+EnvironmentFile=/etc/valuescan/executor.secret.env
+EnvironmentFile=-/etc/valuescan/executor.local.env
+# The heap is set, not derived (see valuescan-api.service): a full 384 MB heap plus
+# Node's own memory fits under MemoryMax; above MemoryHigh the kernel reclaims and
+# slows this unit before MemoryMax would kill it.
+ExecStart=/opt/node/current/bin/node --max-old-space-size=384 --disable-warning=ExperimentalWarning --import tsx src/main.ts
+Restart=always
+RestartSec=5
+# SIGTERM: it stops its feeds, closes the database and exits (src/main.ts).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+LimitNOFILE=65536
+# Sized for the 4 GiB t4g.medium next to the API (1300M/1500M) and the indexer
+# (1400M/1800M). The three ceilings are ceilings, not reservations: API and indexer
+# were measured together at about 0.9 GB; the executor has not been measured on the
+# instance yet (`systemctl status valuescan-executor` shows its memory). A runaway
+# is stopped inside its own unit and restarted, before it can take the box down.
+MemoryHigh=400M
+MemoryMax=600M
+# NEVER a core dump: one would hold the unsealed trading keys this process has in memory.
+LimitCORE=0
+SyslogIdentifier=valuescan-executor
+
+# --- hardening (as valuescan-api.service) ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RemoveIPC=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service @pkey
+SystemCallFilter=~@privileged
+SystemCallErrorNumber=EPERM
+UMask=0027
+# Its data directory (executor.db with its -wal and -shm, kek, session.key). And the
+# state directory: the builder ledger (EXECUTOR_BUILDER_DB) is opened read-only, but
+# a reader of a WAL database maps its -shm. The directory's owner and mode (valuescan,
+# 0750) still keep this user from writing there: SQLite then reads the ledger through
+# a read-only -shm, which works while the -wal and -shm exist - while the API has
+# the ledger open. When they do not, the read fails, is logged as a warning, and the
+# follower's volume counts as unknown (apps/executor/src/service.ts volumeOf).
+ReadWritePaths=/var/lib/valuescan/executor /var/lib/valuescan/state
+# MemoryDenyWriteExecute is deliberately NOT set: V8's JIT needs writable+executable memory.
+
+[Install]
+WantedBy=multi-user.target

@@ -7,12 +7,25 @@
 #   deploy/aws/ec2/provision.sh start          resume
 #   deploy/aws/ec2/provision.sh allow-ssh      port 22 for this machine's current address only
 #   deploy/aws/ec2/provision.sh snapshot       an EBS snapshot of the data volume (a backup off the box)
+#   deploy/aws/ec2/provision.sh copy-snapshot [snap-...]   copy the newest data snapshot of another
+#                                              environment (SNAPSHOT_SOURCE_REGION/_NAME) into REGION
 #   deploy/aws/ec2/provision.sh grow           raise the data volume to DATA_VOLUME_GIB, online
+#   deploy/aws/ec2/provision.sh executor-ip    a second private IP with an Elastic IP of its own, for the
+#                                              copy executor (EXECUTOR_LOCAL_ADDRESS)
 #   deploy/aws/ec2/provision.sh check          can this profile do what `up` needs? (dry runs, read-only)
 #
 # Every command prints each AWS call before it makes it. Values: deploy/aws/ec2/ec2.env
-# (copy ec2.env.example). What it found is written to deploy/aws/ec2/.out/state.env
-# (ignored by git) for the scripts in deploy/release.
+# (copy ec2.env.example) - or another file named by VS_EC2_ENV, for a second
+# environment next to the first (the move to Tokyo: docs/deploy/EC2-VERCEL.md):
+#   VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh up --print
+# What it found is written to deploy/aws/ec2/.out/state.env - state.<x>.env for
+# ec2.<x>.env - (ignored by git) for the scripts in deploy/release, which take the
+# same VS_EC2_ENV.
+#
+# A DATA VOLUME FROM A SNAPSHOT: DATA_VOLUME_SNAPSHOT=snap-... in the env file is
+# used when - and only when - `up` creates the data volume; a volume that exists is
+# never touched. The snapshot must be in REGION and completed (copy-snapshot brings
+# one from another region, tagged role=data-snapshot-copy).
 #
 # WHY A SCRIPT AND NOT CLOUDFORMATION. The account's deploying user may launch EC2
 # resources but may not use CloudFormation, IAM or SSM. This script is the
@@ -38,6 +51,8 @@
 #   Elastic IP       <NAME>-origin     the origin's fixed address (the origin name and Caddy's certificate)
 #   instance         <NAME>            INSTANCE_TYPE, AMI_ID, encrypted gp3 root, IMDSv2, no public IP of its own
 #   data volume      <NAME>-data       encrypted gp3, DATA_VOLUME_GIB, attached as /dev/sdf
+#                                      (blank, or from DATA_VOLUME_SNAPSHOT)
+#   snapshots        <NAME>-data-...   `snapshot` (role=data-snapshot), `copy-snapshot` (role=data-snapshot-copy); never deleted here
 # Taking it down at the end of the campaign is by hand, deliberately: docs/deploy/EC2-VERCEL.md.
 set -euo pipefail
 
@@ -47,44 +62,73 @@ export MSYS_NO_PATHCONV=1
 export MSYS2_ARG_CONV_EXCL='*'
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,56p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 ACTION="${1:-}"
 [ -n "$ACTION" ] || usage 2
 shift || true
 PRINT_ONLY=0
+ARG=""
 for arg in "$@"; do
   case "$arg" in
     --print) PRINT_ONLY=1 ;;
     -h|--help) usage 0 ;;
+    snap-*) [ "$ACTION" = copy-snapshot ] && [ -z "$ARG" ] || { echo "unexpected argument: $arg" >&2; usage 2; }; ARG="$arg" ;;
     *) echo "unknown option: $arg" >&2; usage 2 ;;
   esac
 done
 case "$ACTION" in -h|--help|help) usage 0 ;; esac
 
-ENV_FILE="${EC2_ENV_FILE:-$HERE/ec2.env}"
-[ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE - copy ec2.env.example and fill it in" >&2; exit 2; }
+# Which environment: VS_EC2_ENV (EC2_ENV_FILE, its older name) or ec2.env next to this
+# script. A relative name is taken from here, else from the repository root.
+ENV_FILE="${VS_EC2_ENV:-${EC2_ENV_FILE:-$HERE/ec2.env}}"
+if [ ! -f "$ENV_FILE" ] && [ "${ENV_FILE#/}" = "$ENV_FILE" ] && [ -f "$HERE/../../../$ENV_FILE" ]; then
+  ENV_FILE="$HERE/../../../$ENV_FILE"
+fi
+[ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE - copy ec2.env.example (or ec2.tokyo.env.example) and fill it in" >&2; exit 2; }
 set -a
 eval "$(tr -d '\r' < "$ENV_FILE")"
 set +a
+ENV_LABEL="$(basename "$ENV_FILE")"
 
-: "${REGION:?REGION is empty in ec2.env}"
-: "${NAME:?NAME is empty in ec2.env}"
-: "${AVAILABILITY_ZONE:?AVAILABILITY_ZONE is empty in ec2.env}"
+: "${REGION:?REGION is empty in $ENV_LABEL}"
+: "${NAME:?NAME is empty in $ENV_LABEL}"
+: "${AVAILABILITY_ZONE:?AVAILABILITY_ZONE is empty in $ENV_LABEL}"
 : "${INSTANCE_TYPE:=t4g.medium}"
 : "${CPU_CREDITS:=unlimited}"
-: "${AMI_ID:?AMI_ID is empty in ec2.env}"
+: "${AMI_ID:?AMI_ID is empty in $ENV_LABEL}"
 : "${ROOT_VOLUME_GIB:=16}"
 : "${DATA_VOLUME_GIB:=150}"
 : "${SSH_KEY_FILE:=$HOME/.ssh/$NAME.pem}"
 : "${SSH_USER:=ec2-user}"
+DATA_VOLUME_SNAPSHOT="${DATA_VOLUME_SNAPSHOT:-}"
+SNAPSHOT_SOURCE_REGION="${SNAPSHOT_SOURCE_REGION:-}"
+SNAPSHOT_SOURCE_NAME="${SNAPSHOT_SOURCE_NAME:-}"
+
+# The state file belongs to the env file: ec2.env -> state.env, ec2.<x>.env -> state.<x>.env
+# (deploy/release/lib.sh state_file_for: the same rule).
+state_file_for() {
+  local base; base="$(basename "$1" .env)"
+  case "$base" in
+    ec2) printf 'state.env' ;;
+    ec2.*) printf 'state.%s.env' "${base#ec2.}" ;;
+    *) printf 'state.%s.env' "$base" ;;
+  esac
+}
 STATE_DIR="$HERE/.out"
-STATE_FILE="$STATE_DIR/state.env"
+STATE_FILE="$STATE_DIR/$(state_file_for "$ENV_FILE")"
 
 [[ "$NAME" =~ ^[a-z][a-z0-9-]{2,40}$ ]] || { echo "NAME must be lower-case letters, digits and dashes" >&2; exit 2; }
-[[ "$AMI_ID" =~ ^ami-[0-9a-f]{8,17}$ ]] || { echo "AMI_ID is not an image id" >&2; exit 2; }
+if ! [[ "$AMI_ID" =~ ^ami-[0-9a-f]{8,17}$ ]]; then
+  echo "AMI_ID is not an image id ($ENV_LABEL). The newest Amazon Linux 2023 arm64 image in $REGION, without SSM:" >&2
+  echo "  aws ec2 describe-images --profile ${AWS_PROFILE:-claude} --region $REGION --owners amazon --filters 'Name=name,Values=al2023-ami-2023.*-kernel-6.1-arm64' 'Name=state,Values=available' --query 'sort_by(Images,&CreationDate)[-1].[ImageId,Name,CreationDate]' --output text" >&2
+  exit 2
+fi
 case "$ROOT_VOLUME_GIB$DATA_VOLUME_GIB" in *[!0-9]*) echo "volume sizes are whole GiB" >&2; exit 2 ;; esac
 case "$CPU_CREDITS" in unlimited|standard) ;; *) echo "CPU_CREDITS is unlimited or standard" >&2; exit 2 ;; esac
+[ -z "$DATA_VOLUME_SNAPSHOT" ] || [[ "$DATA_VOLUME_SNAPSHOT" =~ ^snap-[0-9a-f]{8,17}$ ]] || { echo "DATA_VOLUME_SNAPSHOT is not a snapshot id" >&2; exit 2; }
+[ -z "$SNAPSHOT_SOURCE_REGION" ] || [[ "$SNAPSHOT_SOURCE_REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || { echo "SNAPSHOT_SOURCE_REGION is not a region" >&2; exit 2; }
+[ -z "$SNAPSHOT_SOURCE_NAME" ] || [[ "$SNAPSHOT_SOURCE_NAME" =~ ^[a-z][a-z0-9-]{2,40}$ ]] || { echo "SNAPSHOT_SOURCE_NAME is not an environment name" >&2; exit 2; }
 
 AWS=(aws)
 [ -z "${AWS_PROFILE:-}" ] || AWS+=(--profile "$AWS_PROFILE")
@@ -93,6 +137,7 @@ AWS+=(--region "$REGION")
 log() { printf '[provision] %s\n' "$*" >&2; }
 die() { printf '[provision] error: %s\n' "$*" >&2; exit 1; }
 show() { { printf '+'; printf ' %q' "$@"; printf '\n'; } >&2; }
+log "environment $NAME in $REGION ($ENV_LABEL)"
 
 # A write: printed, then made - or, with --print, only printed.
 WOULD=0
@@ -161,7 +206,10 @@ origin_name() {   # public ip -> the origin's DNS name
 write_state() {   # instance, allocation, public ip, sg, volume
   mkdir -p "$STATE_DIR"
   {
-    echo "# Written by deploy/aws/ec2/provision.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ). Found by tag env=$NAME; no secret."
+    echo "# Written by deploy/aws/ec2/provision.sh at $(date -u +%Y-%m-%dT%H:%M:%SZ) from $ENV_LABEL. Found by tag env=$NAME; no secret."
+    # deploy/release/lib.sh refuses a state file of another environment than its env file's.
+    echo "STATE_NAME=$NAME"
+    echo "STATE_REGION=$REGION"
     echo "INSTANCE_ID=$1"
     echo "ALLOCATION_ID=$2"
     echo "PUBLIC_IP=$3"
@@ -282,13 +330,38 @@ ensure_instance() {
   write "${AWS[@]}" ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 }
 
+# DATA_VOLUME_SNAPSHOT, checked before the volume is made from it: in REGION, ours,
+# completed, not larger than DATA_VOLUME_GIB. Sets SNAP_GIB.
+SNAP_GIB=""
+check_source_snapshot() {
+  local info state progress
+  info="$(read_aws ec2 describe-snapshots --owner-ids self --snapshot-ids "$DATA_VOLUME_SNAPSHOT" \
+    --query 'Snapshots[0].[State,Progress,VolumeSize]' --output text)" || die "$DATA_VOLUME_SNAPSHOT is not a snapshot of this account in $REGION"
+  read -r state progress SNAP_GIB <<< "$info"
+  none "$state" && die "$DATA_VOLUME_SNAPSHOT is not a snapshot of this account in $REGION"
+  if [ "$state" != completed ]; then
+    [ "$PRINT_ONLY" = 1 ] || die "$DATA_VOLUME_SNAPSHOT is $state ($progress): wait until it is completed (provision.sh status shows it), then run up again"
+    log "NOTE: $DATA_VOLUME_SNAPSHOT is $state ($progress) - up would stop here until it is completed"
+  fi
+  [ "$SNAP_GIB" -le "$DATA_VOLUME_GIB" ] || die "$DATA_VOLUME_SNAPSHOT is of a $SNAP_GIB GiB volume, $ENV_LABEL asks for $DATA_VOLUME_GIB GiB: set DATA_VOLUME_GIB to at least $SNAP_GIB"
+}
+
 ensure_volume() {
-  local size attached=""
+  local size attached="" from_snap
   VOLUME_ID="$(find_volume)"
   if [ -z "$VOLUME_ID" ]; then
-    log "data volume $NAME-data: missing - creating it ($DATA_VOLUME_GIB GiB gp3, encrypted)"
+    local source=()
+    if [ -n "$DATA_VOLUME_SNAPSHOT" ]; then
+      check_source_snapshot
+      source=(--snapshot-id "$DATA_VOLUME_SNAPSHOT")
+      log "data volume $NAME-data: missing - creating it FROM $DATA_VOLUME_SNAPSHOT ($SNAP_GIB GiB of data; $DATA_VOLUME_GIB GiB gp3, encrypted)"
+      log "  its xfs filesystem is as large as the snapshot's volume; bootstrap.sh mounts it as it is (no format)"
+      [ "$SNAP_GIB" = "$DATA_VOLUME_GIB" ] || log "  then grow the filesystem to the volume: deploy/release/remote.sh run 'xfs_growfs /var/lib/valuescan'"
+    else
+      log "data volume $NAME-data: missing - creating it ($DATA_VOLUME_GIB GiB gp3, encrypted, blank)"
+    fi
     local create=("${AWS[@]}" ec2 create-volume --availability-zone "$AVAILABILITY_ZONE" --size "$DATA_VOLUME_GIB" --volume-type gp3
-      --encrypted --tag-specifications "$(tagspec volume data "$NAME-data")" --client-token "$NAME-data-1"
+      --encrypted ${source[@]+"${source[@]}"} --tag-specifications "$(tagspec volume data "$NAME-data")" --client-token "$NAME-data-1"
       --query VolumeId --output text)
     if [ "$PRINT_ONLY" = 1 ]; then write "${create[@]}"; VOLUME_ID='<new-volume>'
     else
@@ -296,9 +369,12 @@ ensure_volume() {
       write "${AWS[@]}" ec2 wait volume-available --volume-ids "$VOLUME_ID"
     fi
   else
-    size="$(read_aws ec2 describe-volumes --volume-ids "$VOLUME_ID" --query 'Volumes[0].Size' --output text)"
-    log "data volume $NAME-data: exists ($VOLUME_ID, $size GiB)"
-    [ "$size" -ge "$DATA_VOLUME_GIB" ] || log "NOTE: ec2.env asks for $DATA_VOLUME_GIB GiB: deploy/aws/ec2/provision.sh grow"
+    read -r size from_snap <<< "$(read_aws ec2 describe-volumes --volume-ids "$VOLUME_ID" --query 'Volumes[0].[Size,SnapshotId]' --output text)"
+    log "data volume $NAME-data: exists ($VOLUME_ID, $size GiB$(none "${from_snap:-}" || printf ', made from %s' "$from_snap"))"
+    [ "$size" -ge "$DATA_VOLUME_GIB" ] || log "NOTE: $ENV_LABEL asks for $DATA_VOLUME_GIB GiB: deploy/aws/ec2/provision.sh grow"
+    if [ -n "$DATA_VOLUME_SNAPSHOT" ] && [ "$DATA_VOLUME_SNAPSHOT" != "${from_snap:-}" ]; then
+      log "NOTE: DATA_VOLUME_SNAPSHOT=$DATA_VOLUME_SNAPSHOT is used only when the volume is created; this one exists and stays as it is"
+    fi
   fi
   if [[ "$VOLUME_ID" == vol-* ]]; then
     attached="$(read_aws ec2 describe-volumes --volume-ids "$VOLUME_ID" --query 'Volumes[0].Attachments[0].InstanceId' --output text)"
@@ -373,6 +449,15 @@ cmd_status() {
     read_aws ec2 describe-snapshots --owner-ids self --filters "${TAG_FILTERS[@]}" Name=tag:role,Values=data-snapshot \
       --query 'sort_by(Snapshots,&StartTime)[].[StartTime,SnapshotId,VolumeSize,State]' --output text | sed 's/^/  /'
   fi
+  # Copies of another environment's data (copy-snapshot), and what DATA_VOLUME_SNAPSHOT names.
+  local copies
+  copies="$(read_aws ec2 describe-snapshots --owner-ids self --filters "${TAG_FILTERS[@]}" Name=tag:role,Values=data-snapshot-copy \
+    --query 'sort_by(Snapshots,&StartTime)[].[StartTime,SnapshotId,VolumeSize,State,Progress,Tags[?Key==`source-snapshot`].Value|[0]]' --output text)"
+  if [ -n "$copies" ]; then
+    echo "copied data snapshots (newest last; start, id, GiB, state, progress, source):"
+    printf '%s\n' "$copies" | sed 's/^/  /'
+  fi
+  [ -z "$DATA_VOLUME_SNAPSHOT" ] || echo "DATA_VOLUME_SNAPSHOT  $DATA_VOLUME_SNAPSHOT (used only if the data volume is missing)"
   if [ -n "$inst" ] && [ -n "$alloc" ]; then write_state "$inst" "$alloc" "$ip" "$sg" "$vol"; fi
 }
 
@@ -430,6 +515,62 @@ cmd_snapshot() {
     --tag-specifications "$(tagspec snapshot data-snapshot "$NAME-data-$stamp")" --query SnapshotId --output text
 }
 
+# Copy a data snapshot of ANOTHER environment (SNAPSHOT_SOURCE_NAME, in
+# SNAPSHOT_SOURCE_REGION) into REGION, tagged for this one (role=data-snapshot-copy,
+# source-snapshot=<id>). The newest completed one, or the one named. Run twice, it
+# finds its first copy by that tag and makes no second. It never deletes anything.
+SRC_SNAP=""
+find_source_snapshot() {   # [snap-id] -> SRC_SNAP, the source environment's snapshot (completed)
+  local src_aws=(aws) info state env
+  [ -z "${AWS_PROFILE:-}" ] || src_aws+=(--profile "$AWS_PROFILE")
+  src_aws+=(--region "$SNAPSHOT_SOURCE_REGION")
+  if [ -n "${1:-}" ]; then
+    show "${src_aws[@]}" ec2 describe-snapshots --owner-ids self --snapshot-ids "$1" --query 'Snapshots[0].[State,Tags[?Key==`env`].Value|[0]]' --output text
+    info="$("${src_aws[@]}" ec2 describe-snapshots --owner-ids self --snapshot-ids "$1" --query 'Snapshots[0].[State,Tags[?Key==`env`].Value|[0]]' --output text | tr -d '\r')" \
+      || die "$1 is not a snapshot of this account in $SNAPSHOT_SOURCE_REGION"
+    read -r state env <<< "$info"
+    [ "$env" = "$SNAPSHOT_SOURCE_NAME" ] || die "$1 is tagged env=$env, not env=$SNAPSHOT_SOURCE_NAME - not this environment's data"
+    [ "$state" = completed ] || die "$1 is $state: wait until it is completed"
+    SRC_SNAP="$1"
+  else
+    show "${src_aws[@]}" ec2 describe-snapshots --owner-ids self --filters Name=tag:project,Values=valuescan "Name=tag:env,Values=$SNAPSHOT_SOURCE_NAME" Name=tag:role,Values=data-snapshot Name=status,Values=completed \
+      --query 'sort_by(Snapshots,&StartTime)[-1].SnapshotId' --output text
+    SRC_SNAP="$("${src_aws[@]}" ec2 describe-snapshots --owner-ids self --filters Name=tag:project,Values=valuescan "Name=tag:env,Values=$SNAPSHOT_SOURCE_NAME" Name=tag:role,Values=data-snapshot Name=status,Values=completed \
+      --query 'sort_by(Snapshots,&StartTime)[-1].SnapshotId' --output text | tr -d '\r')"
+    if none "$SRC_SNAP"; then SRC_SNAP=""; return 1; fi
+  fi
+  return 0
+}
+
+cmd_copy_snapshot() {
+  local existing id state progress
+  [ -n "$SNAPSHOT_SOURCE_REGION" ] && [ -n "$SNAPSHOT_SOURCE_NAME" ] \
+    || die "set SNAPSHOT_SOURCE_REGION and SNAPSHOT_SOURCE_NAME in $ENV_LABEL (where the data comes from: e.g. eu-central-1, valuescan-test)"
+  [ "$SNAPSHOT_SOURCE_REGION" != "$REGION" ] || die "the source is in $REGION already: put its snapshot id into DATA_VOLUME_SNAPSHOT instead"
+  find_source_snapshot "$ARG" \
+    || die "no completed data snapshot of env=$SNAPSHOT_SOURCE_NAME in $SNAPSHOT_SOURCE_REGION - take one there first (provision.sh snapshot with that environment's env file)"
+  log "source: $SRC_SNAP (env=$SNAPSHOT_SOURCE_NAME, $SNAPSHOT_SOURCE_REGION)"
+  existing="$(read_aws ec2 describe-snapshots --owner-ids self --filters "${TAG_FILTERS[@]}" Name=tag:role,Values=data-snapshot-copy "Name=tag:source-snapshot,Values=$SRC_SNAP" \
+    --query 'Snapshots[0].[SnapshotId,State,Progress]' --output text)"
+  read -r id state progress <<< "$existing"
+  if ! none "${id:-}"; then
+    log "already copied: $id in $REGION ($state, $progress) - nothing to do"
+    log "when it is completed: DATA_VOLUME_SNAPSHOT=$id in $ENV_LABEL, then provision.sh up"
+    return
+  fi
+  log "copying $SRC_SNAP from $SNAPSHOT_SOURCE_REGION to $REGION, encrypted with $REGION's default EBS key."
+  log "  Billed: the transfer between the regions (per GB of the snapshot's data, once) and the copy's storage in $REGION."
+  log "  It runs in the background: minutes to hours for tens of GB. Progress: provision.sh status"
+  local tags="ResourceType=snapshot,Tags=[{Key=project,Value=valuescan},{Key=env,Value=$NAME},{Key=role,Value=data-snapshot-copy},{Key=Name,Value=$NAME-data-from-$SRC_SNAP},{Key=source-snapshot,Value=$SRC_SNAP},{Key=source-region,Value=$SNAPSHOT_SOURCE_REGION}]"
+  local copy=("${AWS[@]}" ec2 copy-snapshot --source-region "$SNAPSHOT_SOURCE_REGION" --source-snapshot-id "$SRC_SNAP" --encrypted
+    --description "valuescan $NAME data volume, copied from $SNAPSHOT_SOURCE_NAME $SRC_SNAP ($SNAPSHOT_SOURCE_REGION)"
+    --tag-specifications "$tags" --query SnapshotId --output text)
+  if [ "$PRINT_ONLY" = 1 ]; then write "${copy[@]}"; log "--print: nothing was copied."; return; fi
+  id="$(write "${copy[@]}" | tr -d '\r')"
+  [[ "$id" =~ ^snap-[0-9a-f]+$ ]] || die "the copy did not return a snapshot id"
+  log "copy started: $id. When provision.sh status shows it completed: DATA_VOLUME_SNAPSHOT=$id in $ENV_LABEL, then provision.sh up"
+}
+
 cmd_grow() {
   local vol size
   vol="$(find_volume)"
@@ -465,6 +606,16 @@ cmd_check() {
   try create-security-group ec2 create-security-group --dry-run --vpc-id "$vpc" --group-name "$NAME-permission-check" --description check
   try allocate-address ec2 allocate-address --dry-run --domain vpc
   try create-volume ec2 create-volume --dry-run --availability-zone "$AVAILABILITY_ZONE" --size 1 --volume-type gp3 --encrypted
+  if [ -n "$DATA_VOLUME_SNAPSHOT" ] && [ -z "$vol" ]; then
+    try 'create-volume (from the snapshot)' ec2 create-volume --dry-run --availability-zone "$AVAILABILITY_ZONE" --size "$DATA_VOLUME_GIB" --volume-type gp3 --encrypted --snapshot-id "$DATA_VOLUME_SNAPSHOT"
+  fi
+  if [ -n "$SNAPSHOT_SOURCE_REGION" ] && [ -n "$SNAPSHOT_SOURCE_NAME" ] && [ "$SNAPSHOT_SOURCE_REGION" != "$REGION" ]; then
+    if find_source_snapshot ""; then
+      try copy-snapshot ec2 copy-snapshot --dry-run --source-region "$SNAPSHOT_SOURCE_REGION" --source-snapshot-id "$SRC_SNAP" --encrypted
+    else
+      echo "  (copy-snapshot: checkable once env=$SNAPSHOT_SOURCE_NAME has a completed data snapshot in $SNAPSHOT_SOURCE_REGION)"
+    fi
+  fi
   if [ -n "$sg" ]; then
     try run-instances ec2 run-instances --dry-run --image-id "$AMI_ID" --instance-type "$INSTANCE_TYPE" --subnet-id \
       "$(read_aws ec2 describe-subnets --filters Name=default-for-az,Values=true "Name=availability-zone,Values=$AVAILABILITY_ZONE" --query 'Subnets[0].SubnetId' --output text)" \
@@ -486,13 +637,67 @@ cmd_check() {
   [ -z "$alloc" ] || [ -z "$inst" ] || try associate-address ec2 associate-address --dry-run --allocation-id "$alloc" --instance-id "$inst"
 }
 
+# The copy executor's own address: a SECONDARY private IP on the instance's primary
+# interface, with an Elastic IP of its own (role=executor-ip). SoDEX's Cloudflare
+# bans an IP that asks too much on every path for minutes; with this, a ban the
+# indexer earns cannot stop the copies (apps/executor/src/net.ts). Created once,
+# found by tag, never released here. Amazon Linux 2023 configures the secondary
+# address itself (amazon-ec2-net-utils); the executor binds to it through
+# EXECUTOR_LOCAL_ADDRESS in /etc/valuescan/executor.local.env.
+secondary_ip() {   # eni -> its first secondary private IP, or None
+  read_aws ec2 describe-network-interfaces --network-interface-ids "$1" \
+    --query 'NetworkInterfaces[0].PrivateIpAddresses[?Primary==`false`].PrivateIpAddress | [0]' --output text
+}
+find_executor_eip() {
+  # shellcheck disable=SC2046
+  one 'executor Elastic IP' $(read_aws ec2 describe-addresses --filters "${TAG_FILTERS[@]}" Name=tag:role,Values=executor-ip \
+    --query 'Addresses[].AllocationId' --output text)
+}
+cmd_executor_ip() {
+  local inst eni priv alloc assoc pub
+  inst="$(find_instance)"
+  [ -n "$inst" ] || die "there is no instance tagged env=$NAME yet: run up first"
+  eni="$(read_aws ec2 describe-instances --instance-ids "$inst" \
+    --query 'Reservations[0].Instances[0].NetworkInterfaces[?Attachment.DeviceIndex==`0`].NetworkInterfaceId | [0]' --output text)"
+  none "$eni" && die "the instance $inst has no primary network interface"
+  priv="$(secondary_ip "$eni")"
+  if none "$priv"; then
+    log "secondary private IP on $eni: missing - assigning one"
+    write "${AWS[@]}" ec2 assign-private-ip-addresses --network-interface-id "$eni" --secondary-private-ip-address-count 1
+    if [ "$PRINT_ONLY" = 1 ]; then log "(--print: nothing assigned)"; return; fi
+    priv="$(secondary_ip "$eni")"
+    none "$priv" && die "AWS did not list the new secondary IP yet - run executor-ip again in a moment"
+  else
+    log "secondary private IP on $eni: $priv"
+  fi
+  alloc="$(find_executor_eip)"
+  if [ -z "$alloc" ]; then
+    log "executor Elastic IP: missing - allocating one (0.005 USD an hour, in use or not)"
+    write "${AWS[@]}" ec2 allocate-address --domain vpc --tag-specifications "$(tagspec elastic-ip executor-ip "$NAME-executor")" \
+      --query AllocationId --output text
+    if [ "$PRINT_ONLY" = 1 ]; then log "(--print: nothing allocated)"; return; fi
+    alloc="$(find_executor_eip)"
+  fi
+  assoc="$(read_aws ec2 describe-addresses --allocation-ids "$alloc" --query 'Addresses[0].PrivateIpAddress' --output text)"
+  if [ "$assoc" != "$priv" ]; then
+    none "$assoc" || die "the executor Elastic IP $alloc is associated with $assoc, not $priv - resolve that by hand"
+    write "${AWS[@]}" ec2 associate-address --allocation-id "$alloc" --network-interface-id "$eni" \
+      --private-ip-address "$priv" --no-allow-reassociation --query AssociationId --output text
+  fi
+  pub="$(read_aws ec2 describe-addresses --allocation-ids "$alloc" --query 'Addresses[0].PublicIp' --output text)"
+  log "the executor's own address: private $priv, public $pub"
+  printf 'EXECUTOR_LOCAL_ADDRESS=%s\n' "$priv"
+}
+
 case "$ACTION" in
   up) cmd_up ;;
   status) cmd_status ;;
   stop|start) cmd_power "$ACTION" ;;
   allow-ssh) cmd_allow_ssh ;;
   snapshot) cmd_snapshot ;;
+  copy-snapshot) cmd_copy_snapshot ;;
   grow) cmd_grow ;;
   check) cmd_check ;;
+  executor-ip) cmd_executor_ip ;;
   *) usage 2 ;;
 esac

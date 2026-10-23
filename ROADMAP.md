@@ -8,11 +8,11 @@ An on-chain address tracking and analytics platform on **ValueChain / SoDEX**, w
 Index and analyze on-chain trader addresses on **SoDEX** and **Hyperliquid** (more venues later), to find the ones with high win rates and high PnL.
 Pages: **Explore**, **Leaderboard**, **Scan** (address detail), **Trade**, **Portfolio**, and the Cmd+K search.
 
-### Step 2: Copy trading (opt-in)
-A user picks an address and switches on copy trading themselves. The actual trades are **executed on SoDEX**, in the user's own SoDEX account, through **SoDEX's SDK**, with **Valuescan's builder code** attached. The builder code is how Valuescan earns.
+### Step 2: Copy trading (opt-in) - live since 2026-10-23
+A user picks an address and switches on copy trading themselves. The actual trades are **executed on SoDEX**, in the user's own SoDEX account, with **Valuescan's builder code** attached (the copy fee ladder). The builder code is how Valuescan earns. Three modes - this browser, the hosted executor in Tokyo, a self-hosted copier - run one engine: see **docs/COPY-TRADING.md**.
 
 - **We never move funds.** SoDEX handles all funds, margin and settlement.
-- The only on-chain piece is the **copy trading contract**: a decentralised, public record of who copies whom, under which rules, through which executor, and at which maximum builder fee. It holds no funds.
+- The **copy trading contract** (a public on-chain record of who copies whom) is written and tested but not deployed; the live record is the follower-signed instructions each executor keeps.
 
 > **Hard rule:** nothing is deployed on-chain (mainnet or testnet) without an explicit go from the owner.
 > Contracts are written, tested and audited locally only.
@@ -24,6 +24,8 @@ A user picks an address and switches on copy trading themselves. The actual trad
 | Frontend (Valuetrade base + new pages) | `apps/web` |
 | Backend (Valuetrade server + `/api/vs/*` SoDEX/Hyperliquid trader data) | `apps/server` |
 | SoDEX signing library (browser-safe) | `packages/sodex-core` |
-| Copy trading contract (Foundry) | `contracts/` |
+| Copy engine (planner, feeds, runtime, signed API) | `packages/copy-engine` |
+| Copy executor (hosted + self-hosted) | `apps/executor` |
+| Copy trading contract (Foundry, not deployed) | `contracts/` |
 | Contract spec & integration | `docs/contracts/` |
 | Research | `docs/research/` (07 and 08 correct 01 and 03) |

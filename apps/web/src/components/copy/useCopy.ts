@@ -3,7 +3,8 @@
  *
  * Same seam as usePortfolioContext / usePointsContext: the dashboard renders
  * panels as pure functions of this object, and all fetching and state lives
- * here. Reads only - /api/vs/* public data. Nothing here signs or sends.
+ * here. The trader data is /api/vs/* public reads; live copying is
+ * copy/live.ts, where every change is the follower's own signature.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useStored } from '../../hooks';
@@ -13,8 +14,10 @@ import {
 } from '../../vsApi';
 import type { Eip1193Provider } from '../../wallet';
 import { simulate, toSimFills, type Reconstruction, type SimResult } from './sim';
+import { checkSettings, type CopySettings } from '@copy-engine';
+import { readiness, startCopy as startLiveCopy, useLiveCopy, type CopyModeId, type LiveCopy } from '../../copy/live';
 import {
-  DEFAULT_SETUP, PLANNED_BUILDER_TENTHS_BPS, normaliseSetup, parseSetup, readTarget, windowStart,
+  DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, normaliseSetup, parseSetup, readTarget, toCopySettings, windowStart,
   isAddress, type ParsedSetup, type SetupState,
 } from './setup';
 
@@ -140,14 +143,26 @@ export interface CopyContext {
 
   sim: SimState;
 
-  /** Set once "Start copying" was pressed for the current leader. */
-  startRequested: boolean;
-  requestStart: () => void;
+  /** Live copying across the three modes (copy/live.ts). */
+  live: LiveCopy;
+  /** Where a new copy runs. */
+  runOn: CopyModeId;
+  setRunOn: (m: CopyModeId) => void;
+  /** The setup sheet, and what its main button does (start this copy, or just close). */
+  setupOpen: boolean;
+  setupStarts: boolean;
+  openSetup: (start?: boolean) => void;
+  closeSetup: () => void;
+  /** The form as copy rules for the picked trader, or why it cannot be. */
+  copySettings: CopySettings | null;
+  copyErrors: string[];
+  /** Start copying the picked trader with this setup on `runOn`: true once it runs; false when setup opened instead. */
+  startCopy: () => Promise<boolean>;
 
   onScan: (address: string, venue?: Venue) => void;
 }
 
-export function useCopyContext({ address, onScan }: CopyPageProps): CopyContext {
+export function useCopyContext({ address, provider, onScan }: CopyPageProps): CopyContext {
   /* The venue the page opens on is remembered; a ?venue= in the link wins. */
   const [storedVenue, setStoredVenue] = useStored<Venue>('vs.copy.venue', 'hyperliquid');
   const initial = useMemo(() => readTarget(window.location.search, storedVenue), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -158,7 +173,10 @@ export function useCopyContext({ address, onScan }: CopyPageProps): CopyContext 
   const [win, setWindow] = useStored<Window>('vs.copy.window', '30d');
   const [stored, setStored] = useStored<SetupState>('vs.copy.setup', DEFAULT_SETUP);
   const setup = useMemo(() => normaliseSetup(stored), [stored]);
-  const [startedFor, setStartedFor] = useState<string | null>(null);
+  const live = useLiveCopy(address, provider);
+  const [runOn, setRunOn] = useStored<CopyModeId>('vs.copy.runOn', 'browser');
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [setupStarts, setSetupStarts] = useState(false);
 
   /* The URL is the selection, so a copy setup is a link you can send. */
   const writeUrl = useCallback((a: string | null, v: Venue) => {
@@ -275,8 +293,8 @@ export function useCopyContext({ address, onScan }: CopyPageProps): CopyContext 
           leaderEquity: p?.summary.accountValue ?? undefined,
           leaderEquitySeries: p?.equity[win] ?? p?.equity.all ?? undefined,
           fixedNotionalUsd: parsed.fixedNotionalUsd,
-          builderFeeTenthsBps: PLANNED_BUILDER_TENTHS_BPS,
-          builderFeeOnReduce: false,
+          builderFeeTenthsBps: COPY_BUILDER_TENTHS_BPS,
+          builderFeeOnReduce: true,
         });
         const inWorker = out instanceof Promise;
         const done = (result: SimResult) => {
@@ -301,7 +319,24 @@ export function useCopyContext({ address, onScan }: CopyPageProps): CopyContext 
     return () => window.clearTimeout(timer);
   }, [prepared, parsed, leader, venue, win, startAt, profile.data, fills.data]);
 
-  const requestStart = useCallback(() => setStartedFor(leader ? `${venue}|${leader}` : null), [leader, venue]);
+  const copyCheck = useMemo(() => {
+    if (!leader || (venue !== 'sodex' && venue !== 'hyperliquid')) return { settings: null as CopySettings | null, errors: leader ? ['Copies follow SoDEX and Hyperliquid traders only.'] : [] };
+    if (Object.keys(parsed.errors).length) return { settings: null, errors: Object.values(parsed.errors) as string[] };
+    const r = checkSettings(toCopySettings(parsed, setup, { venue, address: leader }));
+    return { settings: r.settings, errors: Object.values(r.errors) as string[] };
+  }, [leader, venue, parsed, setup]);
+
+  const openSetup = useCallback((start = false) => { setSetupStarts(start); setSetupOpen(true); }, []);
+  const closeSetup = useCallback(() => setSetupOpen(false), []);
+  const startCopy = useCallback(async () => {
+    const settings = copyCheck.settings;
+    if (!settings) throw new Error(copyCheck.errors[0] ?? 'Pick a trader first.');
+    const r = readiness(live, runOn);
+    const ok = settings.paper ? r.terms && r.connected : r.ready;
+    if (!ok) { openSetup(true); return false; }
+    await startLiveCopy(runOn, settings);
+    return true;
+  }, [copyCheck, live, runOn, openSetup]);
 
   return {
     wallet: address,
@@ -321,8 +356,16 @@ export function useCopyContext({ address, onScan }: CopyPageProps): CopyContext 
     resetSetup,
     parsed,
     sim,
-    startRequested: !!leader && startedFor === `${venue}|${leader}`,
-    requestStart,
+    live,
+    runOn,
+    setRunOn,
+    setupOpen,
+    setupStarts,
+    openSetup,
+    closeSetup,
+    copySettings: copyCheck.settings,
+    copyErrors: copyCheck.errors,
+    startCopy,
     onScan,
   };
 }

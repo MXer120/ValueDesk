@@ -132,20 +132,38 @@ ssm_run() {   # instance id, comment, command
 #                                   role, so commands and files go over SSH
 #
 # Chosen by the file that exists; VS_TARGET=cfn|ec2 when both do.
+#
+# A second EC2 environment next to the first (the move to Tokyo, docs/deploy/EC2-VERCEL.md):
+# VS_EC2_ENV names its env file, and every script here then works on that one -
+#   VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh health
+# Its state file is provision.sh's for that file (ec2.<x>.env -> .out/state.<x>.env).
 EC2_DIR="deploy/aws/ec2"
+EC2_ENV="${VS_EC2_ENV:-${EC2_ENV_FILE:-$EC2_DIR/ec2.env}}"
+# The same rule as deploy/aws/ec2/provision.sh state_file_for.
+state_file_for() {
+  local base; base="$(basename "$1" .env)"
+  case "$base" in
+    ec2) printf 'state.env' ;;
+    ec2.*) printf 'state.%s.env' "${base#ec2.}" ;;
+    *) printf 'state.%s.env' "$base" ;;
+  esac
+}
 select_target() {
   [ -z "${VS_TARGET:-}" ] || { case "$VS_TARGET" in cfn|ec2) return 0 ;; *) die "VS_TARGET is cfn or ec2" ;; esac; }
+  # An env file named on purpose is the target.
+  if [ -n "${VS_EC2_ENV:-}" ]; then VS_TARGET=ec2; return 0; fi
   local cfn=0 ec2=0
   [ -f "${PARAMS_FILE:-deploy/aws/params.env}" ] && cfn=1
-  [ -f "${EC2_ENV_FILE:-$EC2_DIR/ec2.env}" ] && ec2=1
-  if [ "$cfn" = 1 ] && [ "$ec2" = 1 ]; then die "both deploy/aws/params.env and $EC2_DIR/ec2.env exist: set VS_TARGET=cfn or VS_TARGET=ec2"; fi
+  [ -f "$EC2_ENV" ] && ec2=1
+  if [ "$cfn" = 1 ] && [ "$ec2" = 1 ]; then die "both deploy/aws/params.env and $EC2_ENV exist: set VS_TARGET=cfn or VS_TARGET=ec2"; fi
   if [ "$ec2" = 1 ]; then VS_TARGET=ec2; else VS_TARGET=cfn; fi
 }
 
-# The EC2 test instance: ec2.env, then what provision.sh found (its state file).
+# The EC2 test instance: its env file, then what provision.sh found (its state file).
 load_ec2() {
-  local file="${EC2_ENV_FILE:-$EC2_DIR/ec2.env}" state="$EC2_DIR/.out/state.env"
-  [ -f "$file" ] || die "missing $file - copy $EC2_DIR/ec2.env.example and fill it in"
+  local file="$EC2_ENV" state
+  state="$EC2_DIR/.out/$(state_file_for "$file")"
+  [ -f "$file" ] || die "missing $file - copy $EC2_DIR/ec2.env.example (or ec2.tokyo.env.example) and fill it in"
   load_env_file "$file"
   [ -n "${REGION:-}" ] || die "REGION is empty in $file"
   : "${NAME:=valuescan-test}"
@@ -153,7 +171,16 @@ load_ec2() {
   : "${SSH_KEY_FILE:=$HOME/.ssh/$NAME.pem}"
   : "${SSH_KNOWN_HOSTS:=$HOME/.ssh/$NAME.known_hosts}"
   : "${ORIGIN_SECRET_DIR:=$HOME/.valuescan/$NAME}"
-  if [ -f "$state" ]; then load_env_file "$state"; fi
+  local env_name="$NAME" env_region="$REGION"
+  if [ -f "$state" ]; then
+    STATE_NAME="" STATE_REGION=""
+    load_env_file "$state"
+    # Never the address of one environment with the settings of another (state files
+    # written before 2026-10-23 carry no name: they are taken as they are).
+    [ -z "${STATE_NAME:-}" ] || [ "$STATE_NAME" = "$env_name" ] || die "$state belongs to $STATE_NAME, $file to $env_name - run provision.sh status with VS_EC2_ENV=$file"
+    [ -z "${STATE_REGION:-}" ] || [ "$STATE_REGION" = "$env_region" ] || die "$state is in $STATE_REGION, $file says $env_region"
+  fi
+  note "environment: $NAME in $REGION ($file)"
   if [ "$PRINT_ONLY" != 1 ]; then
     [ -n "${PUBLIC_IP:-}" ] || die "no instance address in $state - run deploy/aws/ec2/provision.sh up (or status)"
     [ -f "$SSH_KEY_FILE" ] || die "the SSH key $SSH_KEY_FILE is not on this machine"

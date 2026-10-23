@@ -12,7 +12,7 @@
 #   1. the tarball is checked against its .sha256, unpacked and audited against the
 #      production CSP (deploy/smoke/audit-dist.mjs), as publish-web.sh does;
 #   2. deploy/vercel/package.mjs writes <dir>/.vercel/output: the build, the routes
-#      with the production headers, and the /api function (fra1) that forwards to
+#      with the production headers, and the /api function (hnd1, Tokyo) that forwards to
 #      https://<origin> with the origin secret;
 #   3. with --deploy:  npx vercel@latest deploy --prebuilt --prod --cwd <dir>
 #      (the directory must be linked once: npx vercel@latest link --yes --project

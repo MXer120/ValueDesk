@@ -19,6 +19,10 @@
 //
 // Runs on the instance (backup.sh) and on a developer machine alike (to seed a new
 // instance from a local index: see docs/deploy/DEPLOY.md). Node 22.13+, no dependencies.
+//
+// Any SQLite database: backup.sh --executor copies the copy executor's executor.db
+// with it the same way. The index-only facts in the report (schema, boards,
+// coverage) are null for a database without those tables.
 import { DatabaseSync } from 'node:sqlite';
 import { existsSync, statSync, unlinkSync } from 'node:fs';
 import { resolve } from 'node:path';

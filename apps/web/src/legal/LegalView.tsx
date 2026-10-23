@@ -1,13 +1,13 @@
 /**
- * The legal pages: /impressum, /privacy, /terms (texts in impressum.ts,
- * privacy.ts, terms.ts; the format in model.ts).
+ * The legal pages: /impressum, /privacy, /terms, /copy-terms (texts in
+ * impressum.ts, privacy.ts, terms.ts, copyTerms.ts; the format in model.ts).
  *
  * A chunk of its own (App.tsx lazyPage), so the texts cost the first load
  * nothing; it loads when a legal link is hovered, focused or followed, or when
  * the app starts on a legal URL.
  *
  * One card in the middle of the page: the panel header strip with the title
- * and the three pages as a segment (`.lbp-seg`), then the text at the base
+ * and the legal pages as a segment (`.lbp-seg`), then the text at the base
  * step. While a page still holds an `[[OWNER: ...]]` placeholder it says
  * "Draft - not yet legally reviewed", and the placeholders are highlighted.
  */

@@ -12,11 +12,12 @@
 //
 // WHAT GOES IN
 //   static/                      the build as it is (apps/web/dist)
-//   functions/api/__vs_proxy.func/   deploy/vercel/api-proxy.cjs, Node.js, region fra1,
+//   functions/api/__vs_proxy.func/   deploy/vercel/api-proxy.cjs, Node.js, region hnd1 (Tokyo),
 //                                VALUESCAN_ORIGIN_URL fixed here; the secret is a Vercel
 //                                environment variable (production only), never in here
 //   config.json                  the routes:
-//     1. /api/*      -> the function (nothing else applies to it: the API sends its own headers)
+//     1. /api/*      -> the function (nothing else applies to it: the API and the copy executor
+//                       send their own headers)
 //     2. the headers of every other path - deploy/smoke/prod-headers.mjs, the same table
 //        deploy/aws/edge.yaml is validated against: the security headers, the CSP of the
 //        path's class (site, /scan/*, /logos/* + /addrbook/*) and Cache-Control
@@ -34,8 +35,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The function's path; package.mjs routes /api/* to it. */
 export const FUNCTION_PATH = '/api/__vs_proxy';
-/** Frankfurt: next to the instance in eu-central-1. */
-export const FUNCTION_REGION = 'fra1';
+/** Tokyo: next to the instance in ap-northeast-1 (it was fra1 next to eu-central-1 until 2026-10-23). */
+export const FUNCTION_REGION = 'hnd1';
 export const NODE_RUNTIME = 'nodejs22.x';
 
 /** Extensions the build may contain (the same list deploy/release/publish-web.sh types by hand). */

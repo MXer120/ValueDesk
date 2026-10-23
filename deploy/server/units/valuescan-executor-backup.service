@@ -1,0 +1,65 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# One consistent copy of the copy executor's database
+# (/var/lib/valuescan/executor/executor.db) - part of every nightly backup:
+# valuescan-backup.service wants this unit, and it runs after the index copy is
+# done (deploy/server/bin/backup.sh --executor). By hand:
+#   sudo systemctl start valuescan-backup.service valuescan-executor-backup.service
+#
+# As valuescan-executor: the valuescan user cannot read the executor's directory.
+# The copy goes to the data volume (/var/lib/valuescan/backup/executor/archive,
+# 0700) or, with an ops bucket, to s3://<ops bucket>/backups/valuescan-executor-*.
+#
+# THE DATABASE ONLY. The files kek and session.key next to it are never copied:
+# the followers' keys in the database are sealed with the kek, so a backup without
+# it holds nothing a trade can be signed with. kek and session.key stay on the data
+# volume and in its EBS snapshots (provision.sh snapshot) only.
+
+[Unit]
+Description=Valuescan copy executor database backup (after the index backup)
+After=valuescan-backup.service
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/var/lib/valuescan/executor/executor.db
+
+[Service]
+Type=oneshot
+User=valuescan-executor
+Group=valuescan-executor
+SupplementaryGroups=valuescan
+EnvironmentFile=/etc/valuescan/ops.env
+EnvironmentFile=-/etc/valuescan/ops.local.env
+Environment=HOME=/var/lib/valuescan/executor
+ExecStart=/opt/valuescan/bin/backup.sh --executor
+TimeoutStartSec=30min
+SyslogIdentifier=valuescan-executor-backup
+
+# Stay out of the indexer's way, like the index backup.
+Nice=10
+CPUWeight=20
+IOWeight=20
+IOReadBandwidthMax=/var/lib/valuescan 40M
+IOWriteBandwidthMax=/var/lib/valuescan 40M
+LimitCORE=0
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+# Reads the database (and its -shm, which a WAL reader maps read-write); writes the staging copy.
+ReadWritePaths=/var/lib/valuescan/executor /var/lib/valuescan/backup/executor

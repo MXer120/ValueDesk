@@ -66,13 +66,19 @@ export const pathForTab = (tab: Tab): string => `/${tab}`;
  * in the nav, have no number-key shortcut and no dashboard; the status bar at
  * the bottom of every page links them. Kept out of TABS so the nav, the
  * shortcuts and the per-tab layout code never see them.
+ *
+ * `copy-terms` (/copy-terms) is the copy trading terms and risk disclosure
+ * that every follower signs before copying (legal/copyTerms.ts). One path
+ * segment, so `legalForPath` reads it like the others, and not a tab: /copy
+ * stays the Copy page.
  */
-export const LEGAL_PAGES = ['impressum', 'privacy', 'terms'] as const;
+export const LEGAL_PAGES = ['impressum', 'privacy', 'terms', 'copy-terms'] as const;
 export type LegalPage = (typeof LEGAL_PAGES)[number];
 export const LEGAL_LABELS: Record<LegalPage, string> = {
   impressum: 'Impressum',
   privacy: 'Privacy',
   terms: 'Terms',
+  'copy-terms': 'Copy terms',
 };
 export const pathForLegal = (page: LegalPage): string => `/${page}`;
 

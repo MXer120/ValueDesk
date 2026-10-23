@@ -9,11 +9,12 @@ deploy/server/
   versions.env             pinned Node and Caddy versions with their checksums
   units/                   systemd units and timers
   env/                     templates of /etc/valuescan/*.env (every variable, commented)
-  caddy/Caddyfile.template TLS in front of the API
+  caddy/Caddyfile.template TLS in front of the API and the copy executor (/api/copy/*)
   journald/valuescan.conf  log retention
   bin/                     installed to /opt/valuescan/bin
     release.sh             install a release, switch to it, restart in order, roll back
-    backup.sh              one index backup to S3 (run nightly by a timer)
+    backup.sh              one index backup to S3 or the data volume (run nightly by a timer);
+                           --executor: the copy executor's database
     backup-index.mjs       the consistent copy itself (VACUUM INTO, read-only)
     restore.sh             put a backup (or a seed) in place
     healthcheck.mjs        one health pass (run every minute by a timer)
@@ -43,14 +44,18 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 | `/opt/valuescan/current` | link to the active release | |
 | `/opt/valuescan/bin/` | the operations scripts | root |
 | `/etc/valuescan/api.env`, `indexer.env`, `ops.env` | rendered from `env/*.example` on every bootstrap | root:valuescan 0640 |
+| `/etc/valuescan/executor.env` | rendered from `env/executor.env.example` | root:valuescan-executor 0640 |
 | `/etc/valuescan/api.secret.env` | `VALUESCAN_ORIGIN_SECRET` (`current`, or `current,next` while it is rotated), from SSM Parameter Store or `ORIGIN_SECRET_FILE` | root:valuescan 0640 |
 | `/etc/valuescan/caddy.secret.env` | the same one or two values for Caddy's gate (`VALUESCAN_ORIGIN_SECRET_1`, `_2`) | root 0600 |
+| `/etc/valuescan/executor.secret.env` | the same values for the copy executor's own check (`EXECUTOR_ORIGIN_SECRET`, `_2`) | root 0600 |
 | `/etc/valuescan/*.local.env` | your own overrides; never touched | you create them |
 | `/etc/caddy/Caddyfile` | rendered from the template | root 0644 |
 | `/var/lib/valuescan/` | the data volume (xfs, encrypted EBS) | |
 | `/var/lib/valuescan/index/valuescan-index.db` (+ `-wal`, `-shm`) | the index | valuescan 0640 |
 | `/var/lib/valuescan/state/` | small state: health state, last backup marker | valuescan |
+| `/var/lib/valuescan/executor/` | the copy executor's data: `executor.db` (+ `-wal`, `-shm`), `kek` (the key that seals every follower's trading key), `session.key` | valuescan-executor 0700 |
 | `/var/lib/valuescan/backup/` | staging for the nightly copy; `archive/` holds the backups when there is no ops bucket; `seed/` a seed copied over SSH | valuescan (seed: root) |
+| `/var/lib/valuescan/backup/executor/` | the executor database's nightly copy: staging, `archive/` (the newest 7), `last-backup.json` | valuescan-executor 0700 |
 | `/var/lib/caddy/` | certificates and the ACME account | caddy |
 
 ## The units
@@ -59,21 +64,24 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 |---|---|---|---|
 | `valuescan-indexer.service` | `node --import tsx src/indexer/main.ts` as `valuescan` | always, after 30 s | the ONE writer of the index; holds the trade streams |
 | `valuescan-api.service` | `node --import tsx src/index.ts` as `valuescan`, hosted mode, `VALUESCAN_INDEXER=0`, `127.0.0.1:8797` | always, after 3 s | restarting it is cheap |
-| `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name; passes on only requests that carry the origin secret |
-| `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled | - | catches up after a stop |
+| `valuescan-executor.service` | `node --import tsx src/main.ts` in `apps/executor` as `valuescan-executor`, `EXECUTOR_KIND=hosted`, `127.0.0.1:8799` | always, after 5 s | the hosted copy executor; its own user, so nothing that runs as `valuescan` can read its keys; independent of the API (no dependency on it) |
+| `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name; passes on only requests that carry the origin secret; `/api/copy/*` to the executor, the rest to the API |
+| `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled | - | catches up after a stop; wants the next one |
+| `valuescan-executor-backup.service` | `backup.sh --executor` as `valuescan-executor`, after the index backup | - | the executor's database only, never `kek` or `session.key` |
 | `valuescan-health.timer` -> `.service` | `healthcheck.mjs`, every minute | - | alerts on a change of state |
 
 `node --import tsx` runs the TypeScript sources directly in one process (the server
 has no build step; `tsx` is a devDependency of the server workspace, which is why a
 release installs with `npm ci --workspace apps/server` and not with `--omit=dev`).
 
-Hardening, the same on both Valuescan services: `NoNewPrivileges`,
+Hardening, the same on the three Valuescan services: `NoNewPrivileges`,
 `ProtectSystem=strict` with `ReadWritePaths` limited to the index and state
-directories, `ProtectHome`, `PrivateTmp`, `PrivateDevices`, the `Protect*` kernel
+directories (the executor: its own directory and the state directory), `ProtectHome`, `PrivateTmp`, `PrivateDevices`, the `Protect*` kernel
 switches, `RestrictAddressFamilies`, `RestrictNamespaces`, an empty capability set,
 `SystemCallFilter=@system-service` without `@privileged`, `MemoryHigh`/`MemoryMax`
-(sized for a 4 GiB instance: API 640M/900M, indexer 1400M/1800M; on 8 GiB use a
-drop-in with 1500M/2G and 3G/4G). Not set, on purpose: `MemoryDenyWriteExecute`
+(sized for a 4 GiB instance: API 1300M/1500M, indexer 1400M/1800M, executor
+400M/600M; on 8 GiB use drop-ins with more for the API and the indexer, as their
+units say). Not set, on purpose: `MemoryDenyWriteExecute`
 (V8's JIT needs it off).
 `systemd-analyze security valuescan-api` rates both at about 1.4 ("OK").
 
@@ -89,7 +97,7 @@ the same address as the indexer - bounded, never per visitor
 (`apps/server/test/publicBudgets.test.ts`); an API-only process's Hyperliquid share
 defaults to 200 weight a minute.
 
-**Caddy's gate.** Caddy passes a request to the API only when it carries
+**Caddy's gate.** Caddy passes a request to the API or the copy executor only when it carries
 `X-Origin-Verify` with the current (or, during a rotation, the next) origin secret;
 anything else gets a 403 from Caddy (`caddy/Caddyfile.template`, `@edge`). Behind
 CloudFront the security group already admits nobody else; behind the Vercel function
@@ -98,8 +106,8 @@ port 443 is open to everyone, and the gate is what keeps the API - and the
 
 ## Environment
 
-`env/api.env.example`, `env/indexer.env.example` and `env/ops.env.example` list every
-variable with what it does. The hosted-mode ones in short:
+`env/api.env.example`, `env/indexer.env.example`, `env/executor.env.example` and
+`env/ops.env.example` list every variable with what it does. The hosted-mode ones in short:
 
 | Variable | Production value | |
 |---|---|---|
@@ -119,7 +127,7 @@ No secret is in a template, in this repository or in a release. The origin secre
 is created once in SSM Parameter Store (`deploy/aws/deploy.sh secret --execute`) -
 or, for the EC2 test instance, on the workstation by the first
 `bootstrap-instance.sh` - and the bootstrap copies it into
-`/etc/valuescan/api.secret.env` and `caddy.secret.env`; the edge gets the same value
+`/etc/valuescan/api.secret.env`, `caddy.secret.env` and `executor.secret.env`; the edge gets the same value
 (CloudFormation hands it to CloudFront; the Vercel function has it as a production
 environment variable).
 
@@ -133,11 +141,13 @@ journalctl -u valuescan-api -f
 journalctl -u valuescan-indexer -f               # one status line a minute
 journalctl -t valuescan-health -n 20 -o cat      # one JSON line per pass (-t: the check's own lines, without systemd's)
 journalctl -u valuescan-backup -n 50
+journalctl -u valuescan-executor -f
+journalctl -t valuescan-executor-backup -n 20
 journalctl -u caddy -f                           # certificate issuance and renewal
 ```
 
 From the workstation, without a shell on the instance:
-`deploy/release/remote.sh logs indexer 100` (and `api`, `caddy`, `health`, `backup`).
+`deploy/release/remote.sh logs indexer 100` (and `api`, `executor`, `caddy`, `health`, `backup`, `executor-backup`).
 
 - Retention: `journald/valuescan.conf` keeps 14 days and at most 1 GB. The API's
   request lines carry the client address (needed for abuse handling, personal data
@@ -150,9 +160,17 @@ From the workstation, without a shell on the instance:
 
 ## Backups
 
-- **What:** the index database. Nothing else on the instance is state (code comes
-  from a release, configuration from this directory and SSM, certificates are
-  re-issued).
+- **What:** the index database, and the copy executor's `executor.db`
+  (`valuescan-executor-backup.service`, right after the index, as the executor's own
+  user: `backup.sh --executor`, the same `VACUUM INTO` copy, to
+  `backups/valuescan-executor-<UTC time>.db.zst` or
+  `/var/lib/valuescan/backup/executor/archive`, the newest `EXECUTOR_BACKUP_KEEP` (7)).
+  **Never `kek` or `session.key`**: the followers' keys in the database are sealed with
+  the kek, so a backup holds nothing a trade could be signed with; those two files
+  exist only on the data volume and in its EBS snapshots. The builder ledger and
+  signing key in `/var/lib/valuescan/state` are not backed up either (DEPLOY.md
+  section 16). Nothing else on the instance is state (code comes from a release,
+  configuration from this directory and SSM, certificates are re-issued).
 - **How:** `backup-index.mjs` opens the database read-only and runs `VACUUM INTO`,
   one read transaction - a consistent copy while the indexer keeps writing. The
   copy is integrity-checked, compressed with zstd and streamed to
@@ -200,6 +218,11 @@ cold (`docs/INDEXER.md`, "Cold start"). Seed it instead:
 From the workstation the same commands are `deploy/release/remote.sh restore latest`
 (the dry run) and `deploy/release/remote.sh restore latest --yes`.
 
+`restore.sh` restores the index only, and refuses an executor backup. The copy
+executor's database is put back by hand (`docs/deploy/EC2-VERCEL.md`, "The copy
+executor"); the followers' keys in it open only with the `kek` of the data volume it
+came from.
+
 ## Health
 
 `healthcheck.mjs` runs every minute. By hand, for the same answer:
@@ -219,6 +242,7 @@ journalctl -t valuescan-health -n 1 --no-pager -o cat      # one JSON line: ok, 
 | `indexer` | `/api/vs/index/health` (the indexer's own status, published every 30 s) is older than 3 minutes, or no board was built for 15 minutes (a stream that is down is a warning; the API not answering makes this a warning too - `api` fails then) |
 | `disk` | the data or root volume is over 80 %, or there is no room for the next backup copy |
 | `backup` | the last successful backup is older than 36 hours |
+| `executor` | the copy executor (`EXECUTOR_URL`, 127.0.0.1:8799) does not answer `/api/copy/v1/health` with `ok` (its SoDEX feed down is a warning; skipped when `EXECUTOR_URL` is empty) |
 | `tls` | Caddy's certificate expires in under 14 days, or it serves its internal one |
 | `units` | a service is not active |
 

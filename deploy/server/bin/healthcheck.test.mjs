@@ -29,12 +29,18 @@ const PORTS = RANGE ? Array.from({ length: Number(RANGE[2]) - Number(RANGE[1]) +
  * /api/vs/index/health reports (null: the indexer has not published a status).
  * Like the real gate, that on-instance route needs no origin secret; every other
  * route but /api/health does, and exactly one value of it.
+ * It also plays the copy executor's public /api/copy/v1/health (apps/executor
+ * server.ts): `o.executor` is what that answers (a status and a body).
  */
 async function api(o = {}) {
   const handler = (req, res) => {
     const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const path = req.url.split('?')[0];
     if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true });
+    if (path === '/api/copy/v1/health') {
+      const e = o.executor ?? { status: 200, body: { ok: true, copies: 3, active: 2, feeds: { sodex: true } } };
+      return send(e.status, e.body);
+    }
     if (path === '/api/vs/index/health') return send(200, { ok: true, status: o.health === undefined ? indexerHealth() : o.health });
     if (!(o.secrets ?? [SECRET]).includes(req.headers['x-origin-verify'])) return send(403, { error: 'forbidden' });
     if (path === '/api/vs/index/status') return o.notHosted ? send(200, { ok: true, status: {} }) : send(404, { error: 'not found' });
@@ -97,7 +103,7 @@ function run(env) {
 }
 
 const env = (f, a, extra = {}) => ({
-  API_URL: a.url, VALUESCAN_INDEX_DB: f.db, HEALTH_STATE_DIR: join(f.dir, 'state'), VALUESCAN_ORIGIN_SECRET: SECRET,
+  API_URL: a.url, EXECUTOR_URL: a.url, VALUESCAN_INDEX_DB: f.db, HEALTH_STATE_DIR: join(f.dir, 'state'), VALUESCAN_ORIGIN_SECRET: SECRET,
   HEALTH_DISK_PCT: '100', ...extra,
 });
 
@@ -113,6 +119,7 @@ test('a healthy instance passes every check', async () => {
     assert.match(r.report.checks.lockdown.note, /hosted mode/);
     assert.match(r.report.checks.index.note, /board \d+ s old/);
     assert.match(r.report.checks.indexer.note, /loop lag 12 ms/);
+    assert.equal(r.report.checks.executor.note, '3 copies, 2 active');
     const after = statSync(f.db);
     assert.equal(after.size, before.size, 'the index file is never written');
     assert.equal(after.mtimeMs, before.mtimeMs, 'the index file is never written');
@@ -171,6 +178,43 @@ test('during a rotation the check sends the FIRST value of the secret list, neve
     assert.match(r.report.checks.lockdown.note, /hosted mode/);
   } finally {
     await a.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('the copy executor: down or unhealthy fails the pass, a feed that is down warns, no EXECUTOR_URL skips it', async () => {
+  const f = fixture();
+  const sick = await api({ executor: { status: 500, body: { ok: false, code: 'internal' } } });
+  const feedDown = await api({ executor: { status: 200, body: { ok: true, copies: 1, active: 1, feeds: { sodex: false } } } });
+  const fine = await api();
+  const closed = await api();
+  const closedUrl = closed.url;
+  await closed.close();
+  try {
+    const r1 = await run(env(f, sick));
+    assert.equal(r1.status, 1);
+    assert.deepEqual(r1.report.failed, ['executor'], 'only the executor fails: the API is fine');
+    assert.match(r1.report.checks.executor.note, /answered 500/);
+
+    // The API answers, nothing listens where the executor should: the executor alone fails.
+    const r2 = await run(env(f, fine, { EXECUTOR_URL: closedUrl }));
+    assert.equal(r2.status, 1);
+    assert.deepEqual(r2.report.failed, ['executor']);
+    assert.match(r2.report.checks.executor.note, /does not answer/);
+
+    const r3 = await run(env(f, feedDown));
+    assert.equal(r3.status, 0, JSON.stringify(r3.report));
+    assert.ok(r3.report.warned.includes('executor'));
+    assert.match(r3.report.checks.executor.note, /SoDEX feed is down/);
+
+    const r4 = await run(env(f, fine, { EXECUTOR_URL: '' }));
+    assert.equal(r4.status, 0, JSON.stringify(r4.report));
+    assert.ok(r4.report.warned.includes('executor'));
+    assert.match(r4.report.checks.executor.note, /skipped/);
+  } finally {
+    await sick.close();
+    await feedDown.close();
+    await fine.close();
     rmSync(f.dir, { recursive: true, force: true });
   }
 });

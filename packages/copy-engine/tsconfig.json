@@ -1,0 +1,23 @@
+{
+  // SOURCE ONLY, with NO ambient typings ("types": []) and no DOM lib, like
+  // sodex-core: the engine runs in the browser copier and in Node executors, so
+  // fetch and WebSocket are injected (src/io.ts), never reached for.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src", "../sodex-core/src"]
+}

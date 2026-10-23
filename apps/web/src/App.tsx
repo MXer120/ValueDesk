@@ -1,5 +1,5 @@
 import './cssOrder';
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { DEFAULT_TAB, TABS, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
@@ -49,6 +49,8 @@ const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_v
 const TradeDashboard = lazyPage('trade', () => import('./dashboard/TradeDashboard').then((m) => m.TradeDashboard));
 const Explore = lazyPage('explore', () => import('./components/explore/Explore').then((m) => m.Explore));
 const CopyPage = lazyPage('copy', () => import('./components/copy/CopyPage').then((m) => m.CopyPage));
+/** Live copy trading (copy/CopyRunner.tsx): mounted on every page, loaded after it. */
+const CopyRunner = lazy(() => import('./copy/CopyRunner'));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
@@ -503,6 +505,12 @@ function AppShell() {
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />
+        </Guarded>
+        {/* Live copy trading on every page: the browser copier runs whichever page is open. */}
+        <Guarded name="Copy trading">
+          <Suspense fallback={null}>
+            <CopyRunner address={address} provider={provider} />
+          </Suspense>
         </Guarded>
 
         {/* The workspace bar: connection + which account we are signing as on

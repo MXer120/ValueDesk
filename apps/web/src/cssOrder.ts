@@ -56,6 +56,7 @@ import './components/explore/Explore.css';
 import './components/leaderboard/LeaderboardPage.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/copy/Copy.css';
+import './copy/copy.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
    the four @fontsource sheets (main.tsx, first), chart/tv/*.css, which

@@ -5,13 +5,15 @@
 #
 #   deploy/release/remote.sh health                   one health pass, now (the JSON line of healthcheck.mjs)
 #   deploy/release/remote.sh status                   installed releases and what each unit runs
-#   deploy/release/remote.sh logs <unit> [lines]      the journal of indexer | api | caddy | health | backup (default 60)
-#   deploy/release/remote.sh restart api|indexer|caddy
-#   deploy/release/remote.sh backup                   one index backup now (to S3, or to the data volume)
+#   deploy/release/remote.sh logs <unit> [lines]      the journal of indexer | api | executor | caddy | health | backup
+#                                                     | executor-backup (default 60)
+#   deploy/release/remote.sh restart api|indexer|executor|caddy
+#   deploy/release/remote.sh backup                   one backup now: the index, then the executor's database
+#                                                     (to S3, or to the data volume)
 #   deploy/release/remote.sh restore <source>         DRY RUN: fetch, verify, print the plan
 #   deploy/release/remote.sh restore <source> --yes   do it (latest | backups/<file>.db.zst | seed/<file>.db.zst
 #                                                     | /var/lib/valuescan/backup/<...>.db.zst on the instance)
-#   deploy/release/remote.sh disk                     volumes, the index and its WAL
+#   deploy/release/remote.sh disk                     volumes, the index and its WAL, the executor's files, the backups
 #   deploy/release/remote.sh run '<command>'          anything else, as root
 #   deploy/release/remote.sh shell                    an interactive shell (EC2 test instance: SSH)
 #   ... --print                                       show the AWS / SSH commands, run none
@@ -26,7 +28,7 @@
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
-usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; }
 
 WHAT=""
 A1=""
@@ -51,10 +53,12 @@ unit_of() {
   case "$1" in
     api) echo valuescan-api ;;
     indexer) echo valuescan-indexer ;;
+    executor) echo valuescan-executor ;;
     caddy) echo caddy ;;
     health) echo valuescan-health ;;
     backup) echo valuescan-backup ;;
-    *) die "unknown unit: ${1:-<none>} (indexer | api | caddy | health | backup)" ;;
+    executor-backup) echo valuescan-executor-backup ;;
+    *) die "unknown unit: ${1:-<none>} (indexer | api | executor | caddy | health | backup | executor-backup)" ;;
   esac
 }
 
@@ -77,13 +81,14 @@ case "$WHAT" in
     command="journalctl -u $unit.service -n $lines --no-pager -o short-iso | $CUT"
     ;;
   restart)
-    case "$A1" in api|indexer|caddy) ;; *) die "restart api | indexer | caddy" ;; esac
+    case "$A1" in api|indexer|executor|caddy) ;; *) die "restart api | indexer | executor | caddy" ;; esac
     unit="$(unit_of "$A1")"
     [ "$A1" != indexer ] || note "note: restarting the indexer costs its Lighter stream 3.5-8 minutes (docs/deploy/DEPLOY.md, \"Release\")"
     command="systemctl restart $unit.service && sleep 3 && systemctl is-active $unit.service && journalctl -u $unit.service -n 15 --no-pager -o short-iso | $CUT"
     ;;
   backup)
-    command="systemctl start valuescan-backup.service; code=\$?; journalctl -t valuescan-backup -n 30 -o cat --no-pager | $CUT; exit \$code"
+    # Both, as the nightly timer runs them: the executor's unit waits for the index's.
+    command="systemctl start valuescan-backup.service valuescan-executor-backup.service; code=\$?; journalctl -t valuescan-backup -t valuescan-executor-backup -n 30 -o cat --no-pager | $CUT; exit \$code"
     ;;
   restore)
     case "$A1" in
@@ -101,7 +106,7 @@ case "$WHAT" in
     fi
     ;;
   disk)
-    command="df -h / /var/lib/valuescan; echo; ls -lR --block-size=M /var/lib/valuescan/index /var/lib/valuescan/backup 2>&1 | $CUT"
+    command="df -h / /var/lib/valuescan; echo; ls -lR --block-size=M /var/lib/valuescan/index /var/lib/valuescan/executor /var/lib/valuescan/backup 2>&1 | $CUT"
     ;;
   shell)
     load_params

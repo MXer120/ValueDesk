@@ -35,11 +35,14 @@ legacy `/scan/` redirect:
 - the app renders and ends on the expected route;
 - **no CSP violation**: the page's own `securitypolicyviolation` events, the
   SharedWorker's, DevTools' CSP issues and requests blocked by the policy;
-- **our API**: every `/api` request is one of the 17 routes hosted mode serves
+- **our API**: every `/api` request is one of the 18 routes hosted mode serves
   (read from `apps/server/src/hosted.ts`), and none is answered 403 or 404;
 - **WebSockets go to the exchanges, never to us**, and only to origins in
   `connect-src`;
-- every direct request goes to an origin the policy lists;
+- every direct request goes to an origin the policy lists (`prod-headers.mjs`
+  `sourceAllows`: exact origins, and `http://127.0.0.1:*` / `http://localhost:*`
+  for a self-hosted copy executor) - and none to the visitor's own machine, since no
+  run sets up a self-hosted executor;
 - every file of the site loads;
 - **console**: no error beyond the known harmless ones (Lighter / Arcus answering
   400 or 403 for an address they do not know). Judged only in a full run;
@@ -150,12 +153,12 @@ Nothing is built or started but the browser. On top of the page walk above:
   404, custodial routes gone, a write refused, a repeated parameter refused, HSTS
   on API responses;
 - **`--origin`: the instance is closed to you.** From a machine that is not
-  CloudFront, its port 443 and the API's port must not accept a connection, and
-  port 80 must never serve the API. A name that does not resolve is an error, not
-  a pass. With `--edge=vercel` port 443 is open on purpose (the Vercel function
-  has no fixed addresses): then `/api/health` and an index route asked there
-  without the origin secret must be refused - Caddy's gate - and the API's port
-  must still be closed.
+  CloudFront, its port 443, the API's port (8797) and the copy executor's (8799)
+  must not accept a connection, and port 80 must never serve the API. A name that
+  does not resolve is an error, not a pass. With `--edge=vercel` port 443 is open on
+  purpose (the Vercel function has no fixed addresses): then `/api/health`, an index
+  route and `/api/copy/v1/health` asked there without the origin secret must be
+  refused - Caddy's gate - and the two loopback ports must still be closed.
 - On Vercel the headers come from `deploy/vercel/package.mjs`, which writes the
   same `prod-headers.mjs` table into the deployment's routes
   (`deploy/vercel/vercel.test.mjs` checks they agree path by path). Vercel adds

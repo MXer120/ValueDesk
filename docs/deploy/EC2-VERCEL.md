@@ -2,31 +2,42 @@
 
 The deployment that is actually being set up (decided 2026-10-03): the site and
 `/api/*` on **Vercel** (`https://valuedeskapp.vercel.app`, no own domain yet), the
-index on **one EC2 instance** in eu-central-1. `docs/deploy/DEPLOY.md` stays the
-reference for everything on the instance and for the CloudFormation design this
-replaces for now; this file says what is different and how to run it.
+index and the hosted copy executor on **one EC2 instance** - in **ap-northeast-1
+(Tokyo)** from 2026-10-23, in eu-central-1 (Frankfurt) before (the move: section 12;
+the executor: section 13). `docs/deploy/DEPLOY.md` stays the reference for everything
+on the instance and for the CloudFormation design this replaces for now; this file
+says what is different and how to run it.
 
 The owner's short version is `docs/deploy/OWNER-STEPS.md`.
 
 > **State on 2026-10-03.** Prepared and tested offline; nothing is created yet. Every
 > AWS and Vercel write is run by hand from the list in section 6.
+>
+> **State on 2026-10-23.** Frankfurt runs (sections 1-11 describe it as it was set up).
+> The move to Tokyo and the copy executor are prepared and tested offline only;
+> nothing of section 12 has been run. Until it is, the live origin is Frankfurt's and
+> the function runs in fra1.
 
 ## 1. What runs where
 
 ```
 visitor ──HTTPS──> Vercel  valuedeskapp.vercel.app
                      ├── the built site (static files, the production headers and CSP of edge.yaml)
-                     └── /api/* ──> function api/__vs_proxy (Node.js, fra1)
-                                      ──HTTPS + X-Origin-Verify + the viewer's address──>
+                     └── /api/* ──> function api/__vs_proxy (Node.js, hnd1 Tokyo; fra1 before the move)
+                                      ──HTTPS + X-Origin-Verify + the viewer's address
+                                        (+ X-Viewer-Country on /api/copy/*)──>
                                     Caddy :443 on the instance (<elastic-ip-with-dashes>.sslip.io)
-                                      refuses anything without the secret, then ──> 127.0.0.1:8797
-                                    valuescan-api (hosted mode, 18 GET routes) + valuescan-indexer
+                                      refuses anything without the secret, then
+                                        /api/copy/* ──> 127.0.0.1:8799  valuescan-executor (hosted copy executor)
+                                        the rest    ──> 127.0.0.1:8797  valuescan-api (hosted mode, 18 GET routes)
+                                    + valuescan-indexer
 browser ──directly──> SoDEX, Hyperliquid, Lighter, Arcus, WalletConnect, public RPCs (as before)
+browser ──directly──> http://127.0.0.1:<port> - a follower's self-hosted executor, only when they set one up
 ```
 
 | Piece | Where it is defined |
 |---|---|
-| The instance, its data volume, the Elastic IP, the security group, the key pair | `deploy/aws/ec2/provision.sh` + `ec2.env` |
+| The instance, its data volume, the Elastic IP, the security group, the key pair | `deploy/aws/ec2/provision.sh` + `ec2.env` (Tokyo during the move: `ec2.tokyo.env`, `VS_EC2_ENV`) |
 | Everything on the instance | `deploy/server` (unchanged design, changes in section 3) |
 | Getting code and settings onto it | `deploy/release/*.sh`, over SSH (`deploy/release/lib.sh`: `ec2.env` exists, so `VS_TARGET=ec2`) |
 | The Vercel deployment: site, headers, routes, the `/api` function | `deploy/vercel/package.mjs`, `deploy/vercel/api-proxy.cjs`, `deploy/release/publish-vercel.sh` |
@@ -69,9 +80,10 @@ health check, the release order, the consistent backup copy.
 | A seed is copied over SSH into `/var/lib/valuescan/backup/seed/` | no S3 | `seed-index.sh` |
 | No SNS alerts, no CloudWatch alarms: the health check logs only | no IAM / CloudFormation | watch `https://valuedeskapp.vercel.app/api/health` from outside (section 7) |
 | **Port 443 is open to everyone**, and **Caddy refuses every request without the origin secret** before the API sees it. Without that gate a client could connect directly and set its own `X-Forwarded-For`, which the API keys its limits on. | Vercel functions have no published address range, so no security group can admit "Vercel only" | `Caddyfile.template` (`@edge`), `caddy.service` (`caddy.secret.env`), `deploy/smoke/deployed.mjs` (`--edge=vercel`) |
-| The edge is a Vercel function, not CloudFront: same methods (GET, HEAD, OPTIONS), same forwarded headers, same 60 s ceiling on caching, the viewer's address in `X-Forwarded-For` | the owner's choice | `deploy/vercel/api-proxy.cjs` |
+| The edge is a Vercel function, not CloudFront: same methods (GET, HEAD, OPTIONS), same forwarded headers, same 60 s ceiling on caching, the viewer's address in `X-Forwarded-For`. Beyond CloudFront, for the copy executor only (`/api/copy/*`): POST (64 KB), `Content-Type` and `Authorization`, `X-Viewer-Country` from Vercel's `x-vercel-ip-country`, never cached | the owner's choice; the executor | `deploy/vercel/api-proxy.cjs` |
+| The copy executor runs on the instance as its own user, behind the same Caddy gate (section 13) | its followers' sealed keys | `valuescan-executor.service`, `Caddyfile.template` |
 | No WAF and no country restriction at the edge. Left: Vercel's own DDoS mitigation, the API's per-client limits, Caddy's gate. Vercel's firewall can add custom rules (3 on Hobby) if needed. | no CloudFront | - |
-| Memory caps for 4 GiB: API 640M/900M, indexer 1400M/1800M (high/max) | `t4g.medium` | the two units |
+| Memory caps for 4 GiB: API 1300M/1500M, indexer 1400M/1800M, copy executor 400M/600M (high/max) | `t4g.medium` | the three units |
 | `VALUESCAN_INDEX_RETAIN_DAYS=31` | the 150 GiB volume | `indexer.env.example` |
 
 ## 4. Sizing and cost
@@ -111,6 +123,26 @@ a month is 730 hours. Vercel: vercel.com/docs (plans), October 2026.
 | Vercel Hobby | free, **non-commercial use only** | 0 | 0 |
 | Vercel Pro (needed for a launch that charges a builder fee) | 20 / developer seat, usage credit included | 20 | 20 |
 | **Total (Hobby)** | | **about 47.50 + CPU surplus + snapshots: roughly 57 to 75** | **about 19.50 + snapshots** |
+
+**Tokyo (ap-northeast-1), from the move on (section 12).** The same shape costs a
+little more there. These are the ap-northeast-1 list prices as known on 2026-10-23,
+**not checked against the live price list** - confirm them before relying on them
+(`pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEC2/current/ap-northeast-1/index.json`,
+or `aws pricing get-products --region us-east-1 --service-code AmazonEC2 --filters
+Type=TERM_MATCH,Field=regionCode,Value=ap-northeast-1
+Type=TERM_MATCH,Field=instanceType,Value=t4g.medium ...` if the profile may):
+
+| Item | Price (ap-northeast-1) | Running, USD/month | Stopped, USD/month |
+|---|---|---|---|
+| `t4g.medium` on demand | 0.0432 / hour | 31.54 | 0 |
+| CPU above the baseline (`unlimited`) | 0.04 / vCPU-hour | **estimate** 6 to 18, as above | 0 |
+| Root volume, gp3 16 GiB | 0.096 / GB-month | 1.54 | 1.54 |
+| Data volume, gp3 (80 GiB as Frankfurt's live one; 150 GiB as planned) | 0.096 / GB-month | 7.68 (80) / 14.40 (150) | same |
+| Elastic IP (public IPv4) | 0.005 / hour | 3.65 | 3.65 |
+| EBS snapshots | 0.05 / GB-month | **estimate** 3 to 9 | same |
+| Data out to the internet | first 100 GB a month free (all of AWS), then 0.114 / GB | **estimate** 0 | 0 |
+| The move, once: the snapshot copy from eu-central-1 | about 0.02 / GB transferred between regions | **estimate** 1 to 2, once | - |
+| **Total (Hobby, 80 GiB)** | | **about 44.40 + CPU surplus + snapshots** | **about 12.90 + snapshots** |
 
 Stopped means: `provision.sh stop`. The instance costs nothing then; the volumes,
 the address and the snapshots still do. The site keeps working while it is
@@ -160,10 +192,15 @@ All from the repository root in Git Bash, with AWS CLI v2 (profile `claude`), No
 24, the repository's `npm ci` done, and `ssh`. Every script prints each AWS or SSH
 command before it runs it; `--print` runs none.
 
+This is how the Frankfurt environment was set up (2026-10-03), with the values the
+template had then (eu-central-1a, `valuescan-test`, `ami-0fc2b4786eaf34856`). The
+template holds Tokyo's since 2026-10-23; moving the running environment, with its
+data, is section 12 - not these steps.
+
 **0. Settings** (both files are ignored by git; neither holds a secret).
 
 ```
-cp deploy/aws/ec2/ec2.env.example deploy/aws/ec2/ec2.env       # preset: eu-central-1a, t4g.medium, 150 GiB, valuedeskapp.vercel.app
+cp deploy/aws/ec2/ec2.env.example deploy/aws/ec2/ec2.env       # preset then: eu-central-1a, t4g.medium, 150 GiB, valuedeskapp.vercel.app
 cp deploy/release/web.env.example deploy/release/web.env       # the WalletConnect id and the builder values, when the owner has them
 ```
 
@@ -278,9 +315,11 @@ none), then `deploy/aws/ec2/provision.sh snapshot`.
 | What exists | `deploy/aws/ec2/provision.sh status` |
 | My address changed (SSH times out) | `deploy/aws/ec2/provision.sh allow-ssh` (opens 22 to the new address, closes the old one) |
 | Health, logs, a restart, a shell | `deploy/release/remote.sh health` / `logs api 100` / `restart api` / `shell` |
+| The copy executor | `remote.sh logs executor 100` / `restart executor`; a release of it alone: `release-server.sh <tag> --executor-only` (section 13) |
+| The Tokyo environment during the move | the same commands with `VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env` in front (section 12) |
 | A server release / rollback | `deploy/release/release-server.sh <tag> [--api-only]` / `deploy/release/rollback.sh server` |
 | A web release / rollback | `build-web.sh <tag>` + `publish-vercel.sh <tag> --out=... --deploy` / `npx vercel@latest rollback` |
-| A backup now; a snapshot | `deploy/release/remote.sh backup`; `deploy/aws/ec2/provision.sh snapshot` (weekly, and before a risky release) |
+| A backup now; a snapshot | `deploy/release/remote.sh backup` (the index, then the executor's database); `deploy/aws/ec2/provision.sh snapshot` (weekly, and before a risky release) |
 | Restore | `deploy/release/remote.sh restore latest` (dry run), then `--yes`; older: a snapshot -> a new volume, by hand |
 | More disk | raise `DATA_VOLUME_GIB` in `ec2.env`, `provision.sh grow`, then `remote.sh run 'xfs_growfs /var/lib/valuescan'` |
 | Trading off for every visitor | DEPLOY.md section 15 (`VALUETRADE_ALLOW_MAINNET=0`), unchanged |
@@ -355,3 +394,275 @@ script does this, on purpose.
 - An external uptime monitor on `/api/health` is not set up.
 - `docs/security/AUDIT-2026-09-30.md` still lists S-12 as open; it is fixed in
   `apps/server/src/localHost.ts` (any port on `127.0.0.1`, `localhost`, `[::1]`).
+- The move to Tokyo (section 12) and the copy executor (section 13) are prepared and
+  checked offline only: the scripts against a stand-in for the AWS CLI, the Vercel
+  function, the health check and the backup against loopback and local files. Not
+  checked: the Caddyfile with a Caddy binary (bootstrap.sh validates it on the
+  instance before it installs it), the units with systemd, a real snapshot copy.
+- `apps/executor` is not a workspace of the root `package.json`: on the instance it
+  runs on the `@noble/*` and `tsx` that the server workspace installs. Should it get
+  dependencies of its own, it has to become a workspace (`release.sh` then installs
+  it too).
+- Whether `upgrade-insecure-requests` leaves a request to a self-hosted executor on
+  `http://127.0.0.1:<port>` alone in every supported browser is to be confirmed in a
+  browser against the production header (SECURITY-HEADERS.md 1.2).
+- The Tokyo prices in section 4 are not checked against the live price list.
+
+## 12. Moving to Tokyo (2026-10-23)
+
+The instance moves from eu-central-1 (Frankfurt, environment `valuescan-test`) to
+ap-northeast-1 (Tokyo, environment `valuescan-tokyo`), and the `/api` function from
+`fra1` to `hnd1`. Nothing is replaced in place: Tokyo is a second environment, made
+from a copy of Frankfurt's data volume; Frankfurt is stopped at the end, not deleted.
+
+| | Moves with the data volume (snapshot -> copy -> new volume) | New in Tokyo | Stays the same |
+|---|---|---|---|
+| What | the index and its WAL, the nightly backup, `/var/lib/valuescan/state` (builder ledger `builder.db`, the builder-terms signing key, `device.key`) | instance, Elastic IP (so a new `<ip>.sslip.io` name and certificate), security group, key pair `valuescan-tokyo`, the root volume (Node, Caddy, `/etc/valuescan`, written by the bootstrap) | the site address, the origin secret (`~/.valuescan/valuescan-test/origin-secret`: the Vercel variable needs no change), the builder-terms public key in the web build |
+
+**Lost in the move:** what Frankfurt writes after its snapshot - index fills (the
+indexer re-reads the gap for the traders on the boards, as after any stop) and what
+its API counts into `builder.db` until Vercel points at Tokyo. Keep the time between
+step 2 and step 8 short; the snapshot copy (step 3) is the slow part.
+
+**The copy executor never runs in Frankfurt.** Two executors started from copies of
+one data directory would both trade for the same followers. Frankfurt has had no
+release with `apps/executor`, so its volume holds no executor data; step 0 checks it.
+Do not release a tag with the executor to Frankfurt (the commands without
+`VS_EC2_ENV` go to Frankfurt).
+
+Every Tokyo command below carries `VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env`; a
+command without it works on `deploy/aws/ec2/ec2.env`, which is Frankfurt. Each script
+first prints `environment: <name> in <region>` - read it. All from the repository
+root in Git Bash; `v0.2.0` stands for the tag that contains this `deploy/` and
+`apps/executor`.
+
+**0. Before.** The tag exists and is pushed; Frankfurt is healthy; no executor runs there.
+
+```
+git tag v0.2.0 && git push origin v0.2.0
+deploy/release/remote.sh health                                                   # Frankfurt: "ok":true
+deploy/release/remote.sh run 'systemctl is-active valuescan-executor || true'     # Frankfurt: "inactive" - nothing else
+```
+
+**1. Tokyo's settings** (ignored by git; no secret in them).
+
+```
+cp deploy/aws/ec2/ec2.tokyo.env.example deploy/aws/ec2/ec2.tokyo.env
+aws ec2 describe-images --profile claude --region ap-northeast-1 --owners amazon \
+  --filters 'Name=name,Values=al2023-ami-2023.*-kernel-6.1-arm64' 'Name=state,Values=available' \
+  --query 'sort_by(Images,&CreationDate)[-1].[ImageId,Name,CreationDate]' --output text
+```
+
+In `ec2.tokyo.env`: `AMI_ID=<that ImageId>`. `DATA_VOLUME_GIB`: at least the size of
+Frankfurt's volume (`ec2.env` says 80; `provision.sh status` shows it) - 80 moves it as
+it is; more needs step 5b.
+
+**2. Snapshot Frankfurt.**
+
+```
+deploy/release/remote.sh backup                 # a fresh consistent copy of the index onto the volume
+deploy/aws/ec2/provision.sh snapshot            # Frankfurt's data volume; prints snap-...
+deploy/aws/ec2/provision.sh status              # repeat until that snapshot is "completed"
+```
+
+**3. Copy it to Tokyo.**
+
+```
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh copy-snapshot --print
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh copy-snapshot      # prints the copy's snap-...
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh status             # "copied data snapshots": repeat until completed
+```
+
+`copy-snapshot` takes the newest completed `role=data-snapshot` of `valuescan-test` in
+eu-central-1 (`SNAPSHOT_SOURCE_*` in `ec2.tokyo.env`; a `snap-...` argument names one),
+copies it encrypted with ap-northeast-1's default EBS key and tags it
+`role=data-snapshot-copy`, `source-snapshot=<id>`; run again, it finds that copy and
+makes no second. When it is completed: `DATA_VOLUME_SNAPSHOT=<the copy's snap-...>` in
+`ec2.tokyo.env`.
+
+**4. The Tokyo environment, from the copy.**
+
+```
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh up --print   # 10 writes; "creating it FROM snap-..."
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh check
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh up
+```
+
+Creates the key pair `valuescan-tokyo` (private key to `~/.ssh/valuescan-tokyo.pem`),
+the security group, an Elastic IP, the instance and the data volume from the copy;
+writes `deploy/aws/ec2/.out/state.tokyo.env` (Frankfurt's `state.env` is not touched)
+and prints Tokyo's origin name, `<tokyo-ip-with-dashes>.sslip.io` - called `$TOKYO`
+below. `InsufficientInstanceCapacity` in ap-northeast-1a: `AVAILABILITY_ZONE=ap-northeast-1c`
+(or `-1d`; Tokyo has no `-1b` for most accounts) in `ec2.tokyo.env` - only while the
+data volume does not exist yet - and `up` again.
+
+**5. Bootstrap Tokyo** (give it a minute to boot).
+
+```
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/bootstrap-instance.sh
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh logs caddy 40     # "certificate obtained successfully" for $TOKYO
+```
+
+It mounts the copied volume as it is ("already holds an xfs filesystem"), hands the
+files over if the new instance's user ids differ from Frankfurt's ("belongs to ids
+..."), creates `valuescan-executor` and `/var/lib/valuescan/executor` (0700), and uses
+the existing origin secret - it generates none. No release is installed yet, so
+nothing but Caddy starts.
+
+5b. Only if `DATA_VOLUME_GIB` is larger than Frankfurt's volume:
+`VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh run 'xfs_growfs /var/lib/valuescan'`.
+
+5c. Optional: a volume made from a snapshot fetches its blocks on first read, so the
+indexer's first minutes on the index can be slow. Reading it once in advance:
+`VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh run 'nohup dd if=/dev/sdf of=/dev/null bs=1M status=none >/dev/null 2>&1 &'`.
+
+**6. The server release in Tokyo.**
+
+```
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/release-server.sh v0.2.0
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh status    # indexer, api, executor: active, release v0.2.0
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh health    # "ok":true; executor "0 copies, 0 active"
+```
+
+**7. Check Tokyo through its origin**, from the workstation, while Vercel still points
+at Frankfurt. The secret goes to curl on stdin, never on a command line:
+
+```
+TOKYO=<tokyo-ip-with-dashes>.sslip.io        # ORIGIN_NAME in deploy/aws/ec2/.out/state.tokyo.env
+printf 'X-Origin-Verify: %s\n' "$(cat ~/.valuescan/valuescan-test/origin-secret)" | curl -fsS -H @- "https://$TOKYO/api/health"
+printf 'X-Origin-Verify: %s\n' "$(cat ~/.valuescan/valuescan-test/origin-secret)" | curl -fsS -H @- "https://$TOKYO/api/vs/leaderboard?venue=hyperliquid&window=1d&limit=1" | head -c 300; echo
+printf 'X-Origin-Verify: %s\n' "$(cat ~/.valuescan/valuescan-test/origin-secret)" | curl -fsS -H @- "https://$TOKYO/api/copy/v1/info"
+node --input-type=module -e "const m = await import('./deploy/smoke/deployed.mjs'); console.log(JSON.stringify(await m.probeOrigin(process.argv[1], { edge: 'vercel' }), null, 2))" "$TOKYO"
+```
+
+The first three answer; the last must report `"problems": []` (nothing served without
+the secret, ports 8797 and 8799 closed).
+
+**8. Vercel: the function in `hnd1`, pointing at Tokyo.**
+
+```
+git checkout v0.2.0
+deploy/release/build-web.sh v0.2.0
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/publish-vercel.sh v0.2.0 --out=/c/Temp/valuedesk-deploy            # read: "the /api function in hnd1 -> https://$TOKYO"
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/publish-vercel.sh v0.2.0 --out=/c/Temp/valuedesk-deploy --deploy
+```
+
+The origin comes from Tokyo's state file, the region from `deploy/vercel/package.mjs`.
+No Vercel variable changes (the same origin secret). From here `/api` reaches Tokyo;
+Frankfurt still runs, but nothing reaches it.
+
+**9. Smoke test.**
+
+```
+node deploy/smoke/smoke.mjs --site=https://valuedeskapp.vercel.app --origin=$TOKYO --edge=vercel
+curl -fsS https://valuedeskapp.vercel.app/api/health
+curl -fsS https://valuedeskapp.vercel.app/api/copy/v1/health
+curl -fsSI https://valuedeskapp.vercel.app/api/health | grep -i x-vercel-id         # contains hnd1
+curl -fsSI https://valuedeskapp.vercel.app/api/copy/v1/info | grep -i cache-control  # no-store
+```
+
+**Going back**, any time before step 10: `npx vercel@latest rollback` (the previous
+production deployment: `fra1`, Frankfurt's origin). After step 10: `provision.sh start`
+first.
+
+**10. Stop Frankfurt - stop, never terminate.**
+
+```
+deploy/aws/ec2/provision.sh stop      # ec2.env: Frankfurt. Nothing is deleted; termination protection stays on
+deploy/aws/ec2/provision.sh status    # stopped; its volumes, address and snapshots are still there
+```
+
+**What still costs while Frankfurt is stopped** (eu-central-1 prices, section 4):
+
+| Item | USD/month |
+|---|---|
+| Elastic IP (billed in use or idle) | 3.65 |
+| Root volume, 16 GiB | 1.52 |
+| Data volume, 80 GiB | 7.62 |
+| Frankfurt's snapshots | 0.054 per GB-month of stored blocks |
+| Tokyo's copied snapshot (`role=data-snapshot-copy`) - a full copy, in ap-northeast-1 | 0.05 per GB-month; it can go once Tokyo has its own snapshot (step 11) |
+| **Frankfurt, stopped** | **about 12.80 + snapshots** |
+
+**11. After the first night in Tokyo.**
+
+```
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/release/remote.sh health      # the backup is fresh
+VS_EC2_ENV=deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/provision.sh snapshot # Tokyo's first own snapshot
+```
+
+Optional, later: make Tokyo the default, so the commands need no `VS_EC2_ENV` (the
+state files follow the env files' names):
+
+```
+mv deploy/aws/ec2/ec2.env deploy/aws/ec2/ec2.frankfurt.env && mv deploy/aws/ec2/.out/state.env deploy/aws/ec2/.out/state.frankfurt.env
+mv deploy/aws/ec2/ec2.tokyo.env deploy/aws/ec2/ec2.env && mv deploy/aws/ec2/.out/state.tokyo.env deploy/aws/ec2/.out/state.env
+```
+
+Frankfurt is then `VS_EC2_ENV=deploy/aws/ec2/ec2.frankfurt.env`.
+
+**Deleting Frankfurt is a separate decision**, the owner's, made by hand later - not
+part of the move. It is section 10 for Frankfurt only (eu-central-1, tag
+`env=valuescan-test`): termination protection off, terminate, the data volume (keep a
+snapshot or not), the Elastic IP, the security group, the key pair, the snapshots no
+longer wanted; then the Tokyo copy of its snapshot. No script does it. Until then,
+Frankfurt is the way back.
+
+## 13. The copy executor
+
+The hosted copy executor (`apps/executor`, `EXECUTOR_KIND=hosted`): it watches the
+leaders' public trades and places each follower's copies on SoDEX with the key that
+follower registered. The same program a follower can run on their own machine
+(`apps/executor/README.md`); this is ValueDesk's own instance of it.
+
+| | |
+|---|---|
+| Unit | `valuescan-executor.service`: `node --max-old-space-size=384 --import tsx src/main.ts` in `/opt/valuescan/current/apps/executor`, `Restart=always`, MemoryHigh 400M / MemoryMax 600M, no core dumps. Independent of the API: an API restart never touches it |
+| User | `valuescan-executor`, a member of the group `valuescan` (reads the release, `/etc/valuescan`, the builder ledger) - not `valuescan`, so the API and the indexer cannot read its keys. What the group may read, it may read: keep `/etc/valuescan/api.local.env` (the SoSoValue key) root-only, `chmod 600` - systemd reads it as root |
+| Listens | `127.0.0.1:8799` only. Caddy sends `/api/copy/*` there, behind the origin-secret gate; the executor checks the secret again (all but `/api/copy/v1/health`) |
+| The edge | `/api/copy/*` only: POST (64 KB), `Content-Type`, `Authorization`, `X-Viewer-Country` from Vercel's `x-vercel-ip-country`, never cached (`deploy/vercel/api-proxy.cjs`) |
+| Settings | `/etc/valuescan/executor.env` (from `deploy/server/env/executor.env.example`; `executor.local.env` for your own), `/etc/valuescan/executor.secret.env` (root only: the origin secret(s)) |
+| Data | `/var/lib/valuescan/executor` (0700): `executor.db` (+ `-wal`, `-shm`), `kek`, `session.key` |
+| Release | in the same tarball as the server; `release-server.sh` restarts it after the API; alone: `--executor-only` |
+| Health | `healthcheck.mjs` check `executor` (`/api/copy/v1/health`), and the unit in `units`. Its nightly backup is not in the health check (the marker is in its own 0700 directory): `remote.sh logs executor-backup` |
+| Logs | `remote.sh logs executor 100` (request lines only at `LOG_LEVEL=debug`) |
+
+**What is where - backup and snapshots:**
+
+| File | Nightly backup (`valuescan-executor-backup.service`, after the index's) | EBS snapshots of the data volume |
+|---|---|---|
+| `executor.db`: copies, activity, accepted terms, every signed instruction, the followers' keys **sealed** | yes: a consistent `VACUUM INTO` copy, `/var/lib/valuescan/backup/executor/archive/valuescan-executor-<time>.db.zst` (newest 7) or `s3://<ops bucket>/backups/valuescan-executor-*` | yes |
+| `kek` (the key that seals every follower's key), `session.key` (signs the followers' read tokens) | **never** | yes - only there |
+
+So a backup alone cannot sign a trade, and cannot bring the followers' keys back: on a
+new volume without a snapshot, every follower registers a new key. **A snapshot holds
+everything needed to trade for every follower** - treat it like a key (as the builder
+signing key, DEPLOY.md section 16): never share one, delete old ones.
+
+**Never two executors from copies of one data directory** - a volume made from a
+snapshot while the original still runs would place every copy twice. Before an
+executor's volume is copied elsewhere, stop and disable it at the source
+(`systemctl disable --now valuescan-executor`) and keep it so.
+
+**Restoring `executor.db`** (only when the live one is lost or damaged). A restored
+database knows nothing after its time: a copy stopped or a key deleted since then is
+back as it was - tell the followers concerned (their hard stop is revoking the key on
+SoDEX). On the instance (`remote.sh shell`):
+
+```
+sudo systemctl stop valuescan-executor
+B=/var/lib/valuescan/backup/executor/archive/valuescan-executor-<time>.db.zst
+D=/var/lib/valuescan/executor
+sudo -u valuescan-executor sh -c "zstd -d -q -c $B > $D/executor.db.restore"
+sudo sha256sum $D/executor.db.restore; sudo cat $B.sha256            # the same sum - or stop here
+sudo -u valuescan-executor mv $D/executor.db $D/executor.db.replaced-$(date -u +%Y%m%dT%H%M%SZ)
+sudo -u valuescan-executor rm -f $D/executor.db-wal $D/executor.db-shm
+sudo -u valuescan-executor mv $D/executor.db.restore $D/executor.db
+sudo systemctl start valuescan-executor
+```
+
+`restore.sh` (the index) refuses an executor backup.
+
+**A follower's self-hosted executor** listens on `http://127.0.0.1:<port>` on their own
+machine; the site's CSP allows `http://127.0.0.1:*` and `http://localhost:*` in
+`connect-src` for it (SECURITY-HEADERS.md 1.2), and the executor answers Chrome's
+Private Network Access preflight.

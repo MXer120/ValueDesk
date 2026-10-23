@@ -48,6 +48,18 @@ if [ -n "$crlf" ]; then
   die "the files above have Windows line endings (CRLF). Convert them to LF - the repository's .gitattributes asks for LF, so a fresh checkout has it - and run this again"
 fi
 
+# The copy executor's builder (deploy/server/env/executor.env.example EXECUTOR_BUILDER_ID)
+# is the web build's (deploy/release/web.env VITE_BUILDER_ID): copied orders must carry
+# the builder the site's own orders carry.
+exec_builder="$(sed -n 's/^EXECUTOR_BUILDER_ID=//p' deploy/server/env/executor.env.example | tr -d '\r' | tail -n 1)"
+web_builder=""
+if [ -f deploy/release/web.env ]; then
+  web_builder="$(tr -d '\r' < deploy/release/web.env | sed -n 's/^VITE_BUILDER_ID=//p' | tail -n 1)"
+fi
+if [ -n "$web_builder" ] && [ "$web_builder" != "$exec_builder" ]; then
+  die "deploy/release/web.env has VITE_BUILDER_ID=$web_builder, deploy/server/env/executor.env.example EXECUTOR_BUILDER_ID=$exec_builder - make them the same"
+fi
+
 if [ "$VS_TARGET" = ec2 ]; then
   # --- the EC2 test instance, over SSH ---------------------------------------------------------
   REMOTE_SECRET=/root/.valuescan/origin-secret

@@ -29,14 +29,17 @@
 #
 # WHAT IT DOES
 #   1. packages (tar, xz, zstd, xfsprogs), no SSH daemon
-#   2. the `valuescan` system user (no login, no shell)
-#   3. the data volume: formats it ONLY if it is blank, mounts it at /var/lib/valuescan
+#   2. the `valuescan` system user and the copy executor's own `valuescan-executor`
+#      (no login, no shell)
+#   3. the data volume: formats it ONLY if it is blank, mounts it at /var/lib/valuescan;
+#      the executor's directory /var/lib/valuescan/executor (0700, its user only)
 #   4. Node and Caddy at the pinned versions (versions.env), checksums verified
 #   5. /opt/valuescan (bin scripts), /etc/valuescan (env files; the origin secret
 #      from SSM Parameter Store), /etc/caddy/Caddyfile
 #   6. systemd units and timers, journald retention (14 days)
-#   7. starts Caddy and the timers; starts the API and the indexer if a release
-#      is installed (the first release does that otherwise)
+#   7. starts Caddy and the timers; starts the API, the indexer and the copy
+#      executor if a release with them is installed (the first such release does
+#      that otherwise)
 #
 # WHAT IT NEVER DOES: restart a running indexer (a restart costs the Lighter
 # stream minutes - it tells you when a restart is needed), delete data, or print
@@ -153,6 +156,15 @@ log "user valuescan"
 getent group valuescan >/dev/null || groupadd --system valuescan
 getent passwd valuescan >/dev/null || useradd --system --gid valuescan --home-dir "$DATA" --no-create-home --shell /usr/sbin/nologin valuescan
 
+# The copy executor's own user (units/valuescan-executor.service says why): what it
+# keeps - the followers' sealed keys and the key that seals them - must not be
+# readable by the valuescan processes. A member of the group valuescan, to read the
+# release, /etc/valuescan and the builder ledger (never to write them).
+log "user valuescan-executor"
+getent group valuescan-executor >/dev/null || groupadd --system valuescan-executor
+getent passwd valuescan-executor >/dev/null || useradd --system --gid valuescan-executor --groups valuescan --home-dir "$DATA/executor" --no-create-home --shell /usr/sbin/nologin valuescan-executor
+id -nG valuescan-executor | tr ' ' '\n' | grep -qx valuescan || usermod -a -G valuescan valuescan-executor
+
 # --- 3. the data volume ----------------------------------------------------------------------------
 
 log "data volume at $DATA"
@@ -198,7 +210,27 @@ if ! mountpoint -q "$DATA"; then
   mount "$DATA"
 fi
 install -d -m 0755 -o root -g root "$DATA"
+# A data volume made from another instance's snapshot (provision.sh: DATA_VOLUME_SNAPSHOT)
+# carries that instance's numeric user ids. Where a directory belongs to other ids
+# than its user has here, what belonged to those ids is handed over - and nothing
+# else (chown --from: a root-owned seed stays root's, the executor's files stay its).
+adopt() {   # directory, user
+  local dir="$1" user="$2" have want
+  [ -d "$dir" ] || return 0
+  have="$(stat -c '%u:%g' "$dir")"
+  want="$(id -u "$user"):$(getent group "$user" | cut -d: -f3)"
+  [ "$have" != "$want" ] && [ "$have" != 0:0 ] || return 0
+  log "$dir belongs to ids $have, $user is $want here (a volume from another instance): handing over what belonged to $have"
+  chown -R --from="$have" "$user:$user" "$dir"
+}
+adopt "$DATA/index" valuescan
+adopt "$DATA/state" valuescan
+adopt "$DATA/backup" valuescan
+adopt "$DATA/executor" valuescan-executor
+adopt "$DATA/backup/executor" valuescan-executor
 install -d -m 0750 -o valuescan -g valuescan "$DATA/index" "$DATA/state" "$DATA/backup"
+# The executor's data (executor.db, kek, session.key) and its backups: its user only.
+install -d -m 0700 -o valuescan-executor -g valuescan-executor "$DATA/executor" "$DATA/backup/executor"
 
 # --- 4. Node and Caddy, pinned ---------------------------------------------------------------------
 
@@ -217,7 +249,7 @@ if [ ! -x "$node_dir/bin/node" ] || [ "$("$node_dir/bin/node" --version 2>/dev/n
   rm -rf "$node_dir"; mkdir -p "$node_dir"
   tar -xJf "$tmp/node.tar.xz" -C "$node_dir" --strip-components=1 --no-same-owner
   rm -rf "$tmp"
-  [ -L /opt/node/current ] && NEEDS_RESTART+=(valuescan-indexer valuescan-api)
+  [ -L /opt/node/current ] && NEEDS_RESTART+=(valuescan-indexer valuescan-api valuescan-executor)
 else
   log "Node $NODE_VERSION is installed"
 fi
@@ -253,20 +285,30 @@ for f in "$HERE"/bin/*; do
 done
 
 log "env files in $ETC"
+# What the copy executor tells followers about where their copies run.
+case "$AWS_REGION" in
+  ap-northeast-1) region_city=Tokyo ;;
+  eu-central-1) region_city=Frankfurt ;;
+  us-east-1) region_city="N. Virginia" ;;
+  *) region_city="" ;;
+esac
+EXECUTOR_LOCATION="$AWS_REGION${region_city:+ ($region_city)}"
 render() {   # template -> stdout, placeholders filled
   sed -e "s|__SITE_DOMAIN__|$SITE_DOMAIN|g" -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" \
       -e "s|__AWS_REGION__|$AWS_REGION|g" -e "s|__OPS_BUCKET__|$OPS_BUCKET|g" \
-      -e "s|__ALERT_TOPIC_ARN__|$ALERT_TOPIC_ARN|g" "$1"
+      -e "s|__ALERT_TOPIC_ARN__|$ALERT_TOPIC_ARN|g" -e "s|__EXECUTOR_LOCATION__|$EXECUTOR_LOCATION|g" "$1"
 }
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 render "$HERE/env/api.env.example" > "$work/api.env"
 render "$HERE/env/indexer.env.example" > "$work/indexer.env"
 render "$HERE/env/ops.env.example" > "$work/ops.env"
+render "$HERE/env/executor.env.example" > "$work/executor.env"
 grep -l '__[A-Z_]*__' "$work"/*.env >/dev/null 2>&1 && die "a template placeholder was left unfilled in $(grep -l '__[A-Z_]*__' "$work"/*.env | tr '\n' ' ')"
 install_if_changed "$work/api.env" "$ETC/api.env" 0640 root:valuescan && NEEDS_RESTART+=(valuescan-api)
 install_if_changed "$work/indexer.env" "$ETC/indexer.env" 0640 root:valuescan && NEEDS_RESTART+=(valuescan-indexer)
 install_if_changed "$work/ops.env" "$ETC/ops.env" 0640 root:valuescan || true
+install_if_changed "$work/executor.env" "$ETC/executor.env" 0640 root:valuescan-executor && NEEDS_RESTART+=(valuescan-executor)
 
 # What this run was given, for the next one (no secret in it).
 {
@@ -276,9 +318,9 @@ install_if_changed "$work/ops.env" "$ETC/ops.env" 0640 root:valuescan || true
 } > "$work/bootstrap.env"
 install_if_changed "$work/bootstrap.env" "$ETC/bootstrap.env" 0640 root:root || true
 
-# The origin secret -> two root-owned files: api.secret.env (the API's group reads
-# it) and caddy.secret.env (only root - systemd hands it to Caddy). Never printed,
-# never on a command line.
+# The origin secret -> three root-owned files: api.secret.env (the API's group reads
+# it), caddy.secret.env and executor.secret.env (only root - systemd hands them to
+# Caddy and to the copy executor). Never printed, never on a command line.
 #   current   SSM <CONFIG_PREFIX>/origin-secret, or ORIGIN_SECRET_FILE
 #   next      SSM <CONFIG_PREFIX>/origin-secret-next, or <ORIGIN_SECRET_FILE>.next -
 #             there only while the secret is rotated; then both are accepted.
@@ -331,10 +373,13 @@ secret_file_ok() {   # a file only root can read
   # (caddy/Caddyfile.template). Both names are always set - to the same value when
   # nothing is being rotated - so the matcher never has an empty value.
   printf 'VALUESCAN_ORIGIN_SECRET_1=%s\nVALUESCAN_ORIGIN_SECRET_2=%s\n' "$current" "$second" > "$work/caddy.secret.env"
+  # The executor checks the same value(s) again behind Caddy (apps/executor/src/config.ts).
+  printf 'EXECUTOR_ORIGIN_SECRET=%s\nEXECUTOR_ORIGIN_SECRET_2=%s\n' "$current" "$second" > "$work/executor.secret.env"
 )
 install_if_changed "$work/api.secret.env" "$ETC/api.secret.env" 0640 root:valuescan && NEEDS_RESTART+=(valuescan-api)
 install_if_changed "$work/caddy.secret.env" "$ETC/caddy.secret.env" 0600 root:root && NEEDS_RESTART+=(caddy)
-rm -f "$work/api.secret.env" "$work/caddy.secret.env"
+install_if_changed "$work/executor.secret.env" "$ETC/executor.secret.env" 0600 root:root && NEEDS_RESTART+=(valuescan-executor)
+rm -f "$work/api.secret.env" "$work/caddy.secret.env" "$work/executor.secret.env"
 
 log "Caddyfile for $ORIGIN_DOMAIN"
 email_line="# (no ACME contact address was given)"
@@ -357,14 +402,15 @@ for f in "$HERE"/units/*.service "$HERE"/units/*.timer; do
   name="$(basename "$f")"
   if install_if_changed "$f" "/etc/systemd/system/$name" 0644; then
     units_changed=1
-    case "$name" in valuescan-indexer.service|valuescan-api.service|caddy.service) NEEDS_RESTART+=("${name%.service}") ;; esac
+    case "$name" in valuescan-indexer.service|valuescan-api.service|valuescan-executor.service|caddy.service) NEEDS_RESTART+=("${name%.service}") ;; esac
   fi
 done
 if install_if_changed "$HERE/journald/valuescan.conf" /etc/systemd/journald.conf.d/valuescan.conf 0644; then
   systemctl restart systemd-journald
 fi
 [ "$units_changed" = 0 ] || systemctl daemon-reload
-systemctl enable -q caddy.service valuescan-indexer.service valuescan-api.service valuescan-backup.timer valuescan-health.timer
+# valuescan-executor-backup.service has no [Install]: valuescan-backup.service wants it.
+systemctl enable -q caddy.service valuescan-indexer.service valuescan-api.service valuescan-executor.service valuescan-backup.timer valuescan-health.timer
 
 # --- 7. start what may be started ----------------------------------------------------------------------------
 
@@ -395,6 +441,17 @@ if [ -e "$VS_HOME/current/apps/server/src/index.ts" ]; then
 else
   log "no release is installed yet: the API and the indexer start with the first release"
 fi
+if [ -e "$VS_HOME/current/apps/executor/src/main.ts" ]; then
+  # The copy executor restarts in seconds, and a changed origin secret must reach it
+  # before the edge sends the new one: apply its changes now, like the API's.
+  if systemctl is-active -q valuescan-executor.service; then
+    if restart_wanted valuescan-executor; then log "restarting the copy executor (its configuration changed)"; systemctl restart valuescan-executor.service; fi
+  else
+    systemctl start valuescan-executor.service || warn "the copy executor did not start: journalctl -u valuescan-executor -n 50"
+  fi
+else
+  log "the installed release has no copy executor (apps/executor): it starts with the first release that has one"
+fi
 
 # --- summary ---------------------------------------------------------------------------------------------------
 
@@ -404,7 +461,8 @@ log "  node      $("$node_dir/bin/node" --version)        caddy   $(/usr/local/b
 log "  data      $(df -h --output=source,size,avail "$DATA" | tail -n 1 | xargs)"
 log "  index     $([ -f "$INDEX_DB" ] && du -h "$INDEX_DB" | awk '{print $1}' || echo 'not there yet (cold start, or restore a seed: restore.sh)')"
 log "  release   $([ -L "$VS_HOME/current" ] && basename "$(readlink -f "$VS_HOME/current")" || echo none)"
-log "  units     caddy=$(systemctl is-active caddy.service || true) api=$(systemctl is-active valuescan-api.service || true) indexer=$(systemctl is-active valuescan-indexer.service || true)"
+log "  executor  $DATA/executor ($(stat -c '%U %a' "$DATA/executor")), database $([ -f "$DATA/executor/executor.db" ] && du -h "$DATA/executor/executor.db" | awk '{print $1}' || echo 'not there yet'), kek $([ -f "$DATA/executor/kek" ] && echo present || echo 'not there yet (made on its first start)')"
+log "  units     caddy=$(systemctl is-active caddy.service || true) api=$(systemctl is-active valuescan-api.service || true) indexer=$(systemctl is-active valuescan-indexer.service || true) executor=$(systemctl is-active valuescan-executor.service || true)"
 if [ "${#pending[@]}" -gt 0 ]; then
   log "  RESTART NEEDED, at a time of your choosing: sudo systemctl restart ${pending[*]}"
   log "  (the indexer's configuration changed; restarting it costs the Lighter stream 3.5-8 minutes)"

@@ -71,7 +71,9 @@ connect-src 'self'
   https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
   https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
   https://alpha-biz.sodex.dev
-  https://api.hyperliquid.xyz https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
+  https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
+  http://127.0.0.1:* http://localhost:*
+  https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
   wss://relay.walletconnect.org https://api.web3modal.org
   https://main-scan.valuechain.xyz
   https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
@@ -90,9 +92,18 @@ upgrade-insecure-requests
   if `/api/*` is served from the site's own origin, because `'self'` covers it then.
 - **Keep the header equal to `index.html`.** When that policy changes, change this header in
   the same deploy. **Never reintroduce a `ws:`/`wss:`/`https:` wildcard.**
+- **`http://127.0.0.1:*` and `http://localhost:*`** (added 2026-10-23): a follower's
+  self-hosted copy executor (`apps/executor`) listens on loopback with plain HTTP, on a port
+  the follower chooses. Loopback only, any port - never `http:` on its own. Browsers treat
+  loopback as potentially trustworthy, so these are not mixed content. Whether
+  `upgrade-insecure-requests` leaves such a request on `http:` in every browser the app
+  supports has not been tested yet: confirm it in each one against the production header
+  (the self-hosted setup in Copy) before relying on it.
+- **`wss://api.hyperliquid.xyz`** (added 2026-10-23): the browser copier's `userFills`
+  stream.
 - **Testnet hosts:** a deployment that can only ever run mainnet may drop the testnet ones.
 - **Length:** a header is one line; join the policy with single spaces. CloudFront limits a
-  response headers policy's CSP value to 1783 characters, and this policy is about 900.
+  response headers policy's CSP value to 1783 characters, and this policy is about 1,020.
 
 ### 1.2.1 The SharedWorker script
 

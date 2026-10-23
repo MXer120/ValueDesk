@@ -34,6 +34,11 @@ viewer ──HTTPS──> CloudFront ──┬── site bucket (S3, private, O
                                                               on the instance, certificate for ORIGIN_DOMAIN_NAME
 ```
 
+(Caddy also sends `/api/copy/*` to the copy executor on 127.0.0.1:8799. Behind
+CloudFront that is reads only: the `/api/*` behaviour allows GET, HEAD and OPTIONS,
+and the executor's signed requests are POSTs - they need an `/api/copy/*` behaviour
+with POST, not built here. The EC2 + Vercel environment has it: `docs/deploy/EC2-VERCEL.md`.)
+
 - **CloudFront talks to the origin over HTTPS** (topology B of
   `docs/deploy/SECURITY-HEADERS.md` §2.3). Caddy on the instance terminates TLS
   with a Let's Encrypt certificate for the origin name. The alternative - plain

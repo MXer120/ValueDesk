@@ -48,6 +48,11 @@ YES=0
 [ "${2:-}" = "--yes" ] && YES=1
 [ -n "$SOURCE" ] || { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 [ "$(id -u)" = 0 ] || [ -n "${VS_ALLOW_NON_ROOT:-}" ] || die "run as root (sudo)"
+# The copy executor's backups (backup.sh --executor) sit next to the index's, in the
+# same bucket prefix: never put one in the index's place.
+case "$SOURCE" in
+  *valuescan-executor-*|*/backup/executor/*) die "$SOURCE is a backup of the copy executor's database, not of the index (restoring it: docs/deploy/EC2-VERCEL.md, \"The copy executor\")" ;;
+esac
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$STAGING"
@@ -79,7 +84,8 @@ else
   [ -n "$OPS_BUCKET" ] || die "$SOURCE is not a file here, and there is no ops bucket to fetch it from (backups: ls $BACKUP_DIR)"
   key="$SOURCE"
   if [ "$key" = latest ]; then
-    key="$(aws s3api list-objects-v2 --bucket "$OPS_BUCKET" --prefix backups/ \
+    # The index's backups only: the executor's (backups/valuescan-executor-*) are newer every night.
+    key="$(aws s3api list-objects-v2 --bucket "$OPS_BUCKET" --prefix backups/valuescan-index- \
       --query 'sort_by(Contents[?ends_with(Key, `.db.zst`)], &LastModified)[-1].Key' --output text)"
     [ -n "$key" ] && [ "$key" != None ] || die "no backup found under s3://$OPS_BUCKET/backups/"
   fi

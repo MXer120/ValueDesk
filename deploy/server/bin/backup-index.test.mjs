@@ -141,6 +141,40 @@ test('--check refuses a file that is not a healthy database', () => {
   }
 });
 
+test('the copy executor\'s database (another schema, WAL, a writer holding it open) is copied the same way', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vs-backup-'));
+  try {
+    // The shape of apps/executor/src/db.ts: meta (k, v), an append-only consent log.
+    const source = join(dir, 'executor.db');
+    const db = new DatabaseSync(source);
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('CREATE TABLE meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID');
+    db.exec('CREATE TABLE consents (seq INTEGER PRIMARY KEY AUTOINCREMENT, owner TEXT NOT NULL, payload TEXT NOT NULL)');
+    db.prepare("INSERT INTO meta (k, v) VALUES ('id', 'x')").run();
+    const ins = db.prepare('INSERT INTO consents (owner, payload) VALUES (?, ?)');
+    for (let i = 0; i < 100; i++) ins.run(`0x${String(i).padStart(40, '0')}`, '{}');
+    // Still open, as the running executor holds it: the last rows may live only in the -wal.
+    try {
+      const copy = join(dir, 'copy.db');
+      const out = run(source, copy);
+      assert.equal(out.status, 0, out.stderr);
+      const report = JSON.parse(out.stdout);
+      assert.equal(report.ok, true);
+      assert.equal(report.schema, null, 'no index tables: the index facts are null, not an error');
+      const c = new DatabaseSync(copy, { readOnly: true });
+      try {
+        assert.equal(c.prepare('SELECT count(*) AS n FROM consents').get().n, 100, 'what is only in the -wal is in the copy');
+      } finally {
+        c.close();
+      }
+    } finally {
+      db.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the source is opened read-only: its schema and data are untouched', () => {
   const dir = mkdtempSync(join(tmpdir(), 'vs-backup-'));
   try {

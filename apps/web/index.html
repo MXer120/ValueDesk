@@ -34,7 +34,8 @@
                     + exactly the exchanges this browser talks to DIRECTLY,
                                 https and wss: SoDEX (gateway REST + WebSocket,
                                 its data host, sodex.com's biz API), Hyperliquid
-                                /info, Lighter, Arcus - every user's exchange
+                                /info and its WebSocket (the browser copier follows
+                                a Hyperliquid trader's fills), Lighter, Arcus - every user's exchange
                                 traffic leaves from their own browser and IP,
                                 never through ValueDesk (docs/ARCH-traffic.md);
                                 the WalletConnect relay (wss) and its wallet list
@@ -42,8 +43,13 @@
                                 public RPCs the address menu reads wallet balances
                                 from (trading/walletBalances.ts: ValueChain, Arbitrum,
                                 Base, Ethereum, BNB Chain, Polygon) - read-only
-                                balance calls, nothing signed. No wildcard: a
-                                socket or fetch to any other host is refused.
+                                balance calls, nothing signed. And loopback
+                                (http://127.0.0.1:*, http://localhost:*): a copy
+                                executor the user runs on their own machine
+                                (apps/executor, "Self-hosted" in copy setup); a
+                                loopback address reaches nothing but that machine.
+                                No other wildcard: a socket or fetch to any other
+                                host is refused.
                                 (The SharedWorker holding the SoDEX sockets gets
                                 its policy from its own response headers - see
                                 docs/ARCH-traffic.md for what a host must send.)
@@ -100,7 +106,8 @@
           https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
           https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
           https://alpha-biz.sodex.dev
-          https://api.hyperliquid.xyz
+          https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
+          http://127.0.0.1:* http://localhost:*
           https://mainnet.zklighter.elliot.ai
           https://api.arcus.xyz
           wss://relay.walletconnect.org

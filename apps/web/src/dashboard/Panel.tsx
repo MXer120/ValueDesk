@@ -98,13 +98,21 @@ export interface PanelTab {
  * WebSocket subscription stops doing so while it is not selected.
  */
 export function PanelTabs({
-  tabs, actions: actionsFor,
+  tabs, actions: actionsFor, active: activeIn, onChange,
 }: {
   tabs: PanelTab[];
   /** Right-aligned controls; a function gets the active tab's key (the account band's filter bar). */
   actions?: ReactNode | ((activeKey: string) => ReactNode);
+  /** Controlled: the active tab's key (a parent that switches tabs itself, e.g. "Activity" from a row). */
+  active?: string;
+  onChange?: (key: string) => void;
 }) {
-  const [active, setActive] = useState(tabs[0]?.key);
+  const [activeOwn, setActiveOwn] = useState(tabs[0]?.key);
+  const active = activeIn ?? activeOwn;
+  const setActive = (key: string) => {
+    setActiveOwn(key);
+    onChange?.(key);
+  };
   const current = tabs.find((t) => t.key === active) ?? tabs[0];
   const actions = typeof actionsFor === 'function' ? actionsFor(current?.key ?? '') : actionsFor;
 

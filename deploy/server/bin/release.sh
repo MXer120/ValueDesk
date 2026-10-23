@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # /opt/valuescan/bin/release.sh - install a server release and switch to it.
 #
-#   sudo /opt/valuescan/bin/release.sh <tag>              install <tag>, restart indexer then API
+#   sudo /opt/valuescan/bin/release.sh <tag>              install <tag>, restart indexer, API, executor
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
-#   sudo /opt/valuescan/bin/release.sh --rollback [--api-only]   back to the release before
+#   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
+#   sudo /opt/valuescan/bin/release.sh --rollback [--api-only|--executor-only]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
 #   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
 #
@@ -25,6 +26,10 @@
 # in seconds, and while it is away CloudFront answers from its short cache or
 # with an error the web shows as "index unavailable" - trading and Scan go
 # browser-direct and are not affected.
+# Then the copy executor (apps/executor, in the same tarball since it exists):
+# back in seconds, its feeds reconnect, and the next read of each leader's and
+# follower's positions settles a change it missed meanwhile. A release without
+# apps/executor leaves a running executor alone.
 #
 # THE COST OF RESTARTING THE INDEXER: its trade streams reconnect. Hyperliquid
 # and SoDEX are back in seconds; Lighter needs 3.5-8 minutes to re-subscribe its
@@ -42,6 +47,7 @@ NODE_BIN_DIR="${NODE_BIN_DIR:-/opt/node/current/bin}"
 export PATH="$NODE_BIN_DIR:$PATH"
 SYSTEMCTL="${SYSTEMCTL:-systemctl}"
 API_URL="${API_URL:-http://127.0.0.1:8797}"
+EXECUTOR_URL="${EXECUTOR_URL:-http://127.0.0.1:8799}"
 RELEASES="$VS_HOME/releases"
 CURRENT="$VS_HOME/current"
 KEEP="${RELEASES_KEEP:-3}"
@@ -49,7 +55,7 @@ SERVICE_GROUP="${VS_SERVICE_GROUP:-valuescan}"
 
 log() { printf '[release] %s\n' "$*"; }
 die() { printf '[release] error: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-0}"; }
 
 current_tag() { if [ -L "$CURRENT" ]; then basename "$(readlink -f "$CURRENT")"; fi; }
 previous_tag() { if [ -f "$RELEASES/.previous" ]; then cat "$RELEASES/.previous"; fi; }
@@ -95,16 +101,34 @@ install_release() {
   # The server loads <release>/.env if it exists; a release must never bring one.
   [ ! -e "$inc/tree/.env" ] || die "the release contains a .env file - refusing it"
 
-  log "installing dependencies from the lockfile (server workspace, no install scripts)"
+  # The copy executor runs from the same tree (apps/executor with packages/copy-engine
+  # and packages/sodex-core). It needs @noble/* and tsx, which the server workspace
+  # installs into the root node_modules. Should apps/executor become a workspace of
+  # its own, its dependencies come from the lockfile too.
+  local ws=(--workspace apps/server)
+  if [ -f "$inc/tree/apps/executor/src/main.ts" ] && ( cd "$inc/tree" && node -e "const w = require('./package.json').workspaces || []; process.exit(w.includes('apps/executor') || w.includes('apps/*') ? 0 : 1)" ); then
+    ws+=(--workspace apps/executor)
+  fi
+  log "installing dependencies from the lockfile (${ws[*]}, no install scripts)"
   ( cd "$inc/tree"
     npm_config_cache="${NPM_CACHE_DIR:-/var/cache/valuescan/npm}" npm_config_update_notifier=false \
-      npm ci --workspace apps/server --ignore-scripts --no-audit --no-fund )
+      npm ci "${ws[@]}" --ignore-scripts --no-audit --no-fund )
 
   # Does it load at all? Importing the hosted gate starts nothing and touches no file.
   ( cd "$inc/tree/apps/server"
     node --disable-warning=ExperimentalWarning --import tsx --input-type=module \
       -e "const m = await import('./src/hosted.ts'); if (!m.HOSTED_ROUTES?.length) process.exit(1)" ) \
     || die "the release does not load under $(node --version)"
+  # The executor likewise: importing its HTTP layer loads the engine and the signing
+  # library (and their @noble imports), and starts nothing.
+  if [ -f "$inc/tree/apps/executor/src/main.ts" ]; then
+    ( cd "$inc/tree/apps/executor"
+      node --disable-warning=ExperimentalWarning --import tsx --input-type=module \
+        -e "const m = await import('./src/server.ts'); if (typeof m.createExecutorServer !== 'function') process.exit(1)" ) \
+      || die "the release's copy executor (apps/executor) does not load under $(node --version)"
+  else
+    log "this release has no copy executor (apps/executor)"
+  fi
   node --disable-warning=ExperimentalWarning -e "require('node:sqlite')" || die "this Node has no node:sqlite"
 
   printf '%s\n' "$tag" > "$inc/tree/.release"
@@ -134,15 +158,16 @@ wait_active() {
   return 1
 }
 
-wait_health() {
-  for _ in $(seq 1 "${1:-60}"); do
-    if curl -fsS --max-time 3 "$API_URL/api/health" 2>/dev/null | grep -q '"ok":true'; then return 0; fi
+wait_ok() {   # url, tries: until it answers {"ok":true...}
+  for _ in $(seq 1 "${2:-60}"); do
+    if curl -fsS --max-time 3 "$1" 2>/dev/null | grep -q '"ok":true'; then return 0; fi
     sleep 1
   done
   return 1
 }
+wait_health() { wait_ok "$API_URL/api/health" "${1:-60}"; }
 
-restart_units() {
+restart_indexer_and_api() {
   local api_only="$1"
   if [ "$api_only" != 1 ]; then
     log "restarting the indexer (its Lighter stream needs 3.5-8 minutes to be whole again)"
@@ -161,6 +186,39 @@ restart_units() {
   log "the API answers /api/health"
 }
 
+# The copy executor, from the release `current` points to - if that release has one.
+restart_executor() {
+  if [ ! -e "$CURRENT/apps/executor/src/main.ts" ]; then
+    if "$SYSTEMCTL" is-active --quiet valuescan-executor.service; then
+      log "this release has no copy executor: the running one keeps release $(release_of valuescan-executor.service)"
+    else
+      log "this release has no copy executor (apps/executor): nothing to start"
+    fi
+    return 0
+  fi
+  log "restarting the copy executor (its feeds reconnect in seconds; the next position read settles what it missed)"
+  "$SYSTEMCTL" restart valuescan-executor.service
+  wait_active valuescan-executor.service 30 || die "the executor did not become active - journalctl -u valuescan-executor -n 80"
+  wait_ok "$EXECUTOR_URL/api/copy/v1/health" 60 || die "the executor does not answer /api/copy/v1/health - journalctl -u valuescan-executor -n 80 ; roll back with: release.sh --rollback"
+  log "the executor answers /api/copy/v1/health"
+}
+
+restart_units() {   # all | api | executor
+  case "$1" in
+    all) restart_indexer_and_api 0; restart_executor ;;
+    api)
+      restart_indexer_and_api 1
+      if "$SYSTEMCTL" is-active --quiet valuescan-executor.service; then
+        log "API only: the executor keeps running release $(release_of valuescan-executor.service)"
+      fi
+      ;;
+    executor)
+      log "executor only: the indexer keeps running release $(indexer_release), the API release $(release_of valuescan-api.service)"
+      restart_executor
+      ;;
+  esac
+}
+
 # The release a running unit was started from (its working directory).
 unit_release() {
   local pid
@@ -169,18 +227,20 @@ unit_release() {
     readlink -f "/proc/$pid/cwd" | sed -n "s#^$RELEASES/\([^/]*\)/.*#\1#p"
   fi
 }
-indexer_release() { local r; r="$(unit_release valuescan-indexer.service)"; printf '%s' "${r:-unknown}"; }
+release_of() { local r; r="$(unit_release "$1")"; printf '%s' "${r:-unknown}"; }
+indexer_release() { release_of valuescan-indexer.service; }
 
 prune() {
   local cur prev n=0 d
   cur="$(current_tag)"; prev="$(previous_tag)"
   # Newest first; keep the current, the previous and whatever a unit still runs from.
-  local running_api running_idx
+  local running_api running_idx running_exec
   running_api="$(unit_release valuescan-api.service)"; running_idx="$(unit_release valuescan-indexer.service)"
+  running_exec="$(unit_release valuescan-executor.service)"
   while IFS= read -r d; do
     [ -n "$d" ] || continue
     n=$((n + 1))
-    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ]; then continue; fi
+    if [ "$n" -le "$KEEP" ] || [ "$d" = "$cur" ] || [ "$d" = "$prev" ] || [ "$d" = "$running_api" ] || [ "$d" = "$running_idx" ] || [ "$d" = "$running_exec" ]; then continue; fi
     log "removing old release $d"
     rm -rf "${RELEASES:?}/$d"
   done < <(find "$RELEASES" -mindepth 1 -maxdepth 1 -type d ! -name '.*' -printf '%T@ %f\n' 2>/dev/null | sort -rn | awk '{print $2}')
@@ -193,16 +253,19 @@ status() {
   echo "indexer:   $("$SYSTEMCTL" is-active valuescan-indexer.service 2>/dev/null || true), release $(indexer_release)"
   local api; api="$(unit_release valuescan-api.service)"
   echo "api:       $("$SYSTEMCTL" is-active valuescan-api.service 2>/dev/null || true), release ${api:-unknown}"
+  local exe; exe="$(unit_release valuescan-executor.service)"
+  echo "executor:  $("$SYSTEMCTL" is-active valuescan-executor.service 2>/dev/null || true), release ${exe:-unknown}"
   echo "node:      $(node --version 2>/dev/null || echo missing)"
 }
 
 TAG=""
-API_ONLY=0
+MODE=all
 ROLLBACK=0
 FROM=""
 for arg in "$@"; do
   case "$arg" in
-    --api-only) API_ONLY=1 ;;
+    --api-only) [ "$MODE" = all ] || die "--api-only and --executor-only exclude each other"; MODE=api ;;
+    --executor-only) [ "$MODE" = all ] || die "--api-only and --executor-only exclude each other"; MODE=executor ;;
     --from=*) FROM="${arg#--from=}" ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;
@@ -229,6 +292,6 @@ else
 fi
 
 activate "$TAG"
-restart_units "$API_ONLY"
+restart_units "$MODE"
 prune
 status

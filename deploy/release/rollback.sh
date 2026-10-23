@@ -4,6 +4,7 @@
 #   deploy/release/rollback.sh web <tag>             publish the stored build of <tag> again
 #   deploy/release/rollback.sh server                the release before the current one
 #   deploy/release/rollback.sh server --api-only     ... restarting the API only
+#   deploy/release/rollback.sh server --executor-only ... restarting the copy executor only
 #   deploy/release/rollback.sh status                what the instance runs
 #   ... --print                                       show the AWS commands, run none
 #
@@ -14,7 +15,7 @@
 # `npx vercel@latest rollback` (or publish-vercel.sh <older tag> --deploy).
 #
 # SERVER. The instance keeps the last few releases installed. A rollback switches
-# the `current` link back and restarts in order (indexer, then API). To go back
+# the `current` link back and restarts in order (indexer, API, copy executor). To go back
 # further than one release, release that tag again: release-server.sh <tag>.
 #
 # THE DATABASE IS NOT ROLLED BACK. Schema changes so far only add tables and
@@ -25,13 +26,13 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 WHAT="${1:-}"
-[ -n "$WHAT" ] || { sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$WHAT" ] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 shift
 TAG=""
 API_ONLY=""
 for arg in "$@"; do
   case "$arg" in
-    --api-only) API_ONLY=" --api-only" ;;
+    --api-only|--executor-only) [ -z "$API_ONLY" ] || die "--api-only and --executor-only exclude each other"; API_ONLY=" $arg" ;;
     --print) PRINT_ONLY=1 ;;
     -*) die "unknown option $arg" ;;
     *) TAG="$arg" ;;

@@ -60,7 +60,9 @@ export interface KeyVault {
   remove(network: Network, owner: string): Promise<void>;
 }
 
-const recordId = (network: Network, owner: string): string => `${network}:${owner.toLowerCase()}`;
+const baseId = (network: Network, owner: string): string => `${network}:${owner.toLowerCase()}`;
+/** A slot keeps a second key per wallet apart (the browser copier's, 'copy'); '' is the trading key. */
+const idIn = (slot: string) => (network: Network, owner: string): string => (slot ? `${slot}:${baseId(network, owner)}` : baseId(network, owner));
 const aad = (m: Pick<StoredKey, 'network' | 'owner' | 'keyAddress'>): Uint8Array<ArrayBuffer> =>
   new TextEncoder().encode(`vs-trading-key:v1:${m.network}:${m.owner.toLowerCase()}:${m.keyAddress.toLowerCase()}`);
 
@@ -108,7 +110,8 @@ export const newWrapKey = (): Promise<CryptoKey> =>
 
 // --- memory ------------------------------------------------------------------
 
-export function memoryVault(): KeyVault {
+export function memoryVault(slot = ''): KeyVault {
+  const recordId = idIn(slot);
   const keys = new Map<string, Unsealed>();
   return {
     persistent: false,
@@ -167,10 +170,11 @@ function openDb(): Promise<IDBDatabase> {
   });
 }
 
-function idbVault(): KeyVault {
+function idbVault(slot = ''): KeyVault {
+  const recordId = idIn(slot);
   let dbp: Promise<IDBDatabase> | null = null;
   const db = () => (dbp ??= openDb());
-  const session = memoryVault();
+  const session = memoryVault(slot);
 
   const wrapKey = async (): Promise<CryptoKey> => {
     const d = await db();
@@ -233,16 +237,16 @@ function idbVault(): KeyVault {
   };
 }
 
-/** The device's vault: IndexedDB + WebCrypto when both work, else memory. */
-export async function openVault(): Promise<KeyVault> {
+/** The device's vault: IndexedDB + WebCrypto when both work, else memory.  names a second key per wallet. */
+export async function openVault(slot = ''): Promise<KeyVault> {
   try {
-    if (typeof indexedDB === 'undefined' || !globalThis.crypto?.subtle) return memoryVault();
-    const v = idbVault();
+    if (typeof indexedDB === 'undefined' || !globalThis.crypto?.subtle) return memoryVault(slot);
+    const v = idbVault(slot);
     // Prove it works end to end before relying on it (private windows can
     // expose the API and then fail every request).
     await v.load('testnet', '0x0000000000000000000000000000000000000000');
     return v;
   } catch {
-    return memoryVault();
+    return memoryVault(slot);
   }
 }

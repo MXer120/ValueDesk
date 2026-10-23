@@ -24,7 +24,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
-import { CSP, SCAN_SCRIPT_HASH } from './prod-headers.mjs';
+import { CSP, SCAN_SCRIPT_HASH, sourceAllows } from './prod-headers.mjs';
 
 const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
@@ -181,7 +181,7 @@ if (flags.has('--hosts') || flags.has('--json')) {
     for (const m of src.matchAll(/\b(https?|wss?):\/\/([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::\d+)?/gi)) {
       const origin = `${m[1].toLowerCase()}://${m[2].toLowerCase()}`;
       if (!/\./.test(m[2]) || /\.(?:js|ts|json|md|html|svg|png)$/i.test(m[2])) continue;
-      const e = seen.get(origin) ?? { origin, allowed: connect.has(origin), files: new Set() };
+      const e = seen.get(origin) ?? { origin, allowed: sourceAllows(connect, origin), files: new Set() };
       e.files.add(rel(p));
       seen.set(origin, e);
     }

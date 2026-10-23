@@ -24,7 +24,12 @@
 //              the database free)
 //   backup     the last successful backup is not older than 36 hours
 //   tls        Caddy's certificate for the origin name is not about to expire
-//   units      systemd reports the three services active (best effort)
+//   executor   the copy executor (EXECUTOR_URL, http://127.0.0.1:8799) answers
+//              /api/copy/v1/health with ok - a public route, no secret needed.
+//              Its SoDEX feed being down is a warning. Skipped (a warning) when
+//              EXECUTOR_URL is empty.
+//   units      systemd reports the services active (best effort): indexer, API,
+//              Caddy, and the executor when EXECUTOR_URL is set
 //
 // ALERTS. With ALERT_TOPIC_ARN set it publishes to that SNS topic when the state
 // changes (after two failing passes in a row, and again on recovery), and every
@@ -50,6 +55,8 @@ const num = (k, d) => {
 };
 
 const API_URL = env('API_URL', 'http://127.0.0.1:8797').replace(/\/+$/, '');
+// Empty, or not set: the executor is not checked (ops.env sets it).
+const EXECUTOR_URL = env('EXECUTOR_URL').replace(/\/+$/, '');
 const INDEX_DB = env('VALUESCAN_INDEX_DB', '/var/lib/valuescan/index/valuescan-index.db');
 // The first entry of a rotation list ("current,next"): one value per header.
 const SECRET = env('VALUESCAN_ORIGIN_SECRET').split(',')[0].trim();
@@ -77,10 +84,10 @@ async function check(name, fn) {
 }
 
 /** One GET on its own connection (no keep-alive: the process must be able to end at once). */
-function getJson(path, headers = {}) {
+function getJson(path, headers = {}, base = API_URL) {
   return new Promise((resolve, reject) => {
-    const client = API_URL.startsWith('https:') ? https : http;
-    const req = client.get(API_URL + path, { headers: { accept: 'application/json', ...headers }, agent: false, timeout: 8000 }, (res) => {
+    const client = base.startsWith('https:') ? https : http;
+    const req = client.get(base + path, { headers: { accept: 'application/json', ...headers }, agent: false, timeout: 8000 }, (res) => {
       let text = '';
       res.setEncoding('utf8');
       res.on('data', (d) => { if (text.length < 1_000_000) text += d; });
@@ -174,6 +181,23 @@ await check('backup', async () => {
   return hours > BACKUP_MAX_AGE_H ? { ok: false, note: `the last backup is ${hours} h old` } : { ok: true, note: `last backup ${hours} h ago` };
 });
 
+await check('executor', async () => {
+  if (!EXECUTOR_URL) return { ok: true, warn: true, note: 'skipped: EXECUTOR_URL is not set' };
+  let r;
+  try {
+    // A public route of the executor (apps/executor/src/server.ts): no origin secret.
+    r = await getJson('/api/copy/v1/health', {}, EXECUTOR_URL);
+  } catch (e) {
+    return { ok: false, note: `the executor does not answer (${String(e?.message ?? e).slice(0, 80)}): journalctl -u valuescan-executor` };
+  }
+  if (r.status !== 200 || r.body?.ok !== true) return { ok: false, note: `/api/copy/v1/health answered ${r.status}` };
+  const b = r.body;
+  const note = `${b.copies ?? '?'} copies, ${b.active ?? '?'} active`;
+  // A feed that is down right after a restart reconnects by itself: a warning.
+  if (b.feeds?.sodex === false) return { ok: true, warn: true, note: `${note}, the SoDEX feed is down` };
+  return { ok: true, note };
+});
+
 await check('tls', async () => {
   if (!ORIGIN_DOMAIN) return { ok: true, warn: true, note: 'skipped: ORIGIN_DOMAIN is not set' };
   const cert = await new Promise((resolve, reject) => {
@@ -194,6 +218,7 @@ await check('tls', async () => {
 
 await check('units', async () => {
   const names = ['valuescan-indexer.service', 'valuescan-api.service', 'caddy.service'];
+  if (EXECUTOR_URL) names.push('valuescan-executor.service');
   const out = spawnSync('systemctl', ['is-active', ...names], { encoding: 'utf8', timeout: 5000 });
   if (out.error || !out.stdout) return { ok: true, warn: true, note: 'systemd could not be asked' };
   const states = out.stdout.trim().split('\n');

@@ -21,6 +21,9 @@
       ],
       "@sodex-core": [
         "../../packages/sodex-core/src/index.ts"
+      ],
+      "@copy-engine": [
+        "../../packages/copy-engine/src/index.ts"
       ]
     }
   },
@@ -28,6 +31,7 @@
     "src",
     "../server/src/signing",
     "../server/src/decimal.ts",
-    "../../packages/sodex-core/src"
+    "../../packages/sodex-core/src",
+    "../../packages/copy-engine/src"
   ]
 }

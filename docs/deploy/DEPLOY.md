@@ -277,7 +277,11 @@ activity counts keep a hole for the time it was away.
 - **What:** the index database, nightly at about 03:20 UTC, as one consistent copy
   (`VACUUM INTO` from a read-only connection - the indexer keeps writing),
   integrity-checked, compressed, with a checksum, in
-  `s3://<ops bucket>/backups/`. Nothing else on the instance is state.
+  `s3://<ops bucket>/backups/`. Right after it, the copy executor's database the same
+  way (`backups/valuescan-executor-*`, `valuescan-executor-backup.service`) - without
+  its key-encryption key and session key, which stay on the data volume and in its
+  snapshots only (EC2-VERCEL.md section 13). Nothing else on the instance is backed up
+  (the builder files of section 16 neither).
 - **Retention:** 14 days, by the bucket's lifecycle rule (`BackupRetentionDays`).
   The instance can write backups and cannot delete them.
 - **By hand:** `deploy/release/remote.sh backup`.
@@ -505,8 +509,10 @@ policy (`/privacy`, `apps/web/src/legal/`) has to say it:
 - **To Valuescan's edge, then the instance.** In this design: CloudFront and its
   firewall. In the test environment (`EC2-VERCEL.md`): **Vercel** - its CDN, in
   whichever of its regions is nearest the visitor, and the `/api` function in its
-  Frankfurt region (fra1) - in place of CloudFront; the privacy policy's list of
-  processors has to name Vercel (and AWS, eu-central-1, for the instance) instead.
+  Tokyo region (hnd1; Frankfurt, fra1, until 2026-10-23) - in place of CloudFront; the
+  privacy policy's list of processors has to name Vercel (and AWS, ap-northeast-1,
+  Tokyo, for the instance; eu-central-1 until 2026-10-23) instead. The instance is
+  outside the EU since then: the policy has to name the transfer to Japan and its basis.
   What arrives: the address of the connection and the pages' index requests.
   **Index requests can carry wallet addresses or search text**
   (`/api/vs/leaderboard?q=`, `/api/vs/lbrow?address=`, `/api/feed/account?id=`);
@@ -524,6 +530,15 @@ policy (`/privacy`, `apps/web/src/legal/`) has to say it:
   the app's key addresses. **Nothing expires by itself** - only
   `builderTiers.ts forget --address 0x...` removes a wallet. The retention period is
   the owner's to set (a placeholder in `/privacy`).
+- **The hosted copy executor** (`apps/executor`, on the instance; EC2-VERCEL.md
+  section 13). For each follower who uses it: the wallet address, every instruction the
+  wallet signed (an append-only log the executor never changes or deletes) with the
+  country Vercel's edge reported for that request (`x-vercel-ip-country`, sent on as
+  `X-Viewer-Country`), the copies, their activity (365 days, `EXECUTOR_ACTIVITY_DAYS`),
+  and the copy key the follower registered - sealed with a key that never leaves the
+  data volume. The request's address is used for the executor's per-client limits in
+  memory. The nightly backup carries the database (not the key that unseals it);
+  the EBS snapshots carry both.
 - **The index holds other people's public trading activity**: wallet addresses,
   fills, positions, PnL, and the venues' display names (stored, never shown). The
   privacy policy needs a section on it, and an objection needs a way to act on it:
@@ -742,7 +757,7 @@ deploy/release/remote.sh run "cd /opt/valuescan/current/apps/server && sudo -u v
   --volume-days 14`, then `fees.sh set-tier` for $1M / $5M / $25M / $100M (12, 10, 8, 5).
 - `builder-terms.key` - the Ed25519 signing key, created once, readable by `valuescan` only. Never copy
   it off the instance; it is in no release (the release refuses `*.key`) and no backup (the backup takes
-  the index only). Losing it means a new key and a new web build.
+  the index and the copy executor's database only). Losing it means a new key and a new web build.
 - `builder.db` - created by the API on first use: the counted volume. Not backed up; lost, every wallet
   starts again from the default fee (never from a lower one).
 - On the EC2 test instance the same commands work (`remote.sh run` goes over SSH there), and the files

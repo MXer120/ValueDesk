@@ -1,0 +1,162 @@
+/**
+ * Who may copy, under which limits, and at which fee.
+ *
+ * REGIONS (owner's decision, 2026-10-23):
+ *   - blocked: the United States and its territories, and the countries under
+ *     comprehensive sanctions or on FATF's call-for-action list. Nobody there
+ *     may start or keep a copy, in any mode;
+ *   - EEA (the EU plus Iceland, Liechtenstein, Norway): copies are capped at
+ *     2x leverage - the retail limit ESMA's CFD product-intervention measures
+ *     set for crypto, which ESMA said in February 2026 is likely to apply to
+ *     perpetual futures. The cap applies to the leverage set on each copied
+ *     position AND to the copy's gross exposure;
+ *   - everyone else: the follower's own leverage cap.
+ *
+ * WHICH COUNTRY. The country the follower declares when accepting the terms,
+ * and - where a server sees the request - the country of the IP address it
+ * came from. The STRICTER of the two applies, and a mismatch is recorded.
+ * Neither is proof (a VPN changes the second, a lie the first); the terms make
+ * the declaration the follower's own responsibility.
+ *
+ * THE COPY FEE (owner's decision, 2026-10-23): the copy ladder of
+ * docs/BUILDER-TIERS.md, by the follower's verified volume of the last 14
+ * days, in tenths of a basis point. It is disclosed before copying starts and
+ * every follower approves its ceiling on SoDEX themselves.
+ */
+
+/** The copy-trading terms every follower accepts (by wallet signature) before copying. */
+export const COPY_TERMS_VERSION = '2026-10-23';
+
+/** US and its territories (US persons). */
+export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
+
+/** Comprehensive sanctions (OFAC/EU/UN) and FATF's call-for-action list. */
+export const SANCTIONED: readonly string[] = ['CU', 'IR', 'KP', 'SY', 'RU', 'BY', 'MM'];
+
+export const BLOCKED_COUNTRIES: readonly string[] = [...US_REGIONS, ...SANCTIONED];
+
+/** The EU's 27 plus Iceland, Liechtenstein and Norway. */
+export const EEA_COUNTRIES: readonly string[] = [
+  'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT',
+  'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO',
+];
+
+/** ESMA's retail leverage limit for crypto CFDs: 50% initial margin. */
+export const EEA_MAX_LEVERAGE = 2;
+
+/** The highest leverage the copier ever sets, whatever the market allows. */
+export const ABSOLUTE_MAX_LEVERAGE = 50;
+
+export type Region = 'blocked' | 'eea' | 'other';
+
+export interface RegionPolicy {
+  region: Region;
+  allowed: boolean;
+  /** Leverage ceiling for this follower; null = the follower's own cap only. */
+  maxLeverage: number | null;
+  /** Why copying is refused or limited, in plain words. */
+  reason: string | null;
+  /** The country the policy was decided on (the stricter one). */
+  country: string | null;
+  /** Declared and observed differ. */
+  mismatch: boolean;
+}
+
+const ISO2 = /^[A-Z]{2}$/;
+
+/** 'de' / ' DE ' -> 'DE'; anything that is not two letters -> null. 'XX' / 'T1' (unknown, Tor) -> null. */
+export function normaliseCountry(c: string | null | undefined): string | null {
+  if (typeof c !== 'string') return null;
+  const t = c.trim().toUpperCase();
+  if (!ISO2.test(t) || t === 'XX' || t === 'ZZ') return null;
+  return t;
+}
+
+export const regionOf = (country: string | null): Region =>
+  country === null ? 'other' : BLOCKED_COUNTRIES.includes(country) ? 'blocked' : EEA_COUNTRIES.includes(country) ? 'eea' : 'other';
+
+const RANK: Record<Region, number> = { blocked: 2, eea: 1, other: 0 };
+
+/**
+ * The policy for a follower who DECLARED `declared` and was SEEN at `observed`
+ * (null where no server saw the request). A follower who declares nothing may
+ * not copy: the declaration is part of accepting the terms.
+ */
+export function regionPolicy(declared: string | null | undefined, observed?: string | null): RegionPolicy {
+  const d = normaliseCountry(declared);
+  const o = normaliseCountry(observed ?? null);
+  const mismatch = d !== null && o !== null && d !== o;
+  if (d === null) {
+    return { region: 'blocked', allowed: false, maxLeverage: null, reason: 'Choose your country of residence to copy trades.', country: null, mismatch };
+  }
+  const rd = regionOf(d);
+  const ro = o === null ? 'other' : regionOf(o);
+  const region = RANK[ro] > RANK[rd] ? ro : rd;
+  const country = RANK[ro] > RANK[rd] ? o : d;
+  if (region === 'blocked') {
+    const us = country !== null && US_REGIONS.includes(country);
+    return {
+      region,
+      allowed: false,
+      maxLeverage: null,
+      reason: us
+        ? 'Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there.'
+        : 'Copy trading is not available in your country or from where you are connecting.',
+      country,
+      mismatch,
+    };
+  }
+  if (region === 'eea') {
+    return {
+      region,
+      allowed: true,
+      maxLeverage: EEA_MAX_LEVERAGE,
+      reason: `In the EU and EEA, copies are limited to ${EEA_MAX_LEVERAGE}x leverage (the retail limit for leveraged crypto products).`,
+      country,
+      mismatch,
+    };
+  }
+  return { region, allowed: true, maxLeverage: null, reason: null, country, mismatch };
+}
+
+/** The leverage a copy may use: the follower's cap, the region's, the market's, and the absolute ceiling. */
+export function effectiveLeverage(settingsMax: number, policy: Pick<RegionPolicy, 'maxLeverage'>, marketMax?: number): number {
+  let lev = Math.min(settingsMax, ABSOLUTE_MAX_LEVERAGE);
+  if (policy.maxLeverage !== null) lev = Math.min(lev, policy.maxLeverage);
+  if (marketMax !== undefined && Number.isFinite(marketMax) && marketMax > 0) lev = Math.min(lev, marketMax);
+  return Math.max(1, Math.floor(lev));
+}
+
+/* ------------------------------------------------------------- the fee ----- */
+
+/** One step of the copy ladder: from `fromUsd` of 14-day volume, `fee` tenths of a bp. */
+export interface CopyFeeStep {
+  fromUsd: number;
+  fee: number;
+}
+
+/** docs/BUILDER-TIERS.md, "Copy trades" (owner, 2026-10-04; charged from 2026-10-23). */
+export const COPY_FEE_LADDER: readonly CopyFeeStep[] = [
+  { fromUsd: 0, fee: 25 },
+  { fromUsd: 100_000, fee: 20 },
+  { fromUsd: 500_000, fee: 15 },
+  { fromUsd: 2_000_000, fee: 12 },
+  { fromUsd: 10_000_000, fee: 10 },
+];
+
+/** The volume window the ladder counts. */
+export const COPY_FEE_WINDOW_DAYS = 14;
+
+/** The highest copy fee: what a follower's SoDEX approval must cover. */
+export const COPY_FEE_MAX = COPY_FEE_LADDER[0]!.fee;
+
+/** The copy fee for a follower with `volumeUsd` of verified 14-day volume (null = unknown: the default). */
+export function copyFeeFor(volumeUsd: number | null | undefined, ladder: readonly CopyFeeStep[] = COPY_FEE_LADDER): number {
+  let fee = ladder[0]!.fee;
+  if (typeof volumeUsd !== 'number' || !Number.isFinite(volumeUsd)) return fee;
+  for (const step of ladder) if (volumeUsd >= step.fromUsd) fee = step.fee;
+  return fee;
+}
+
+/** Tenths of a bp -> '0.025%'. */
+export const feePercent = (tenthsBps: number): string => `${(tenthsBps / 1000).toFixed(tenthsBps % 10 === 0 ? 2 : 3)}%`;

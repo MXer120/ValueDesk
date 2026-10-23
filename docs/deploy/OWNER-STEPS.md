@@ -1,8 +1,11 @@
 # Putting ValueDesk online: what you do
 
 The test site is live since 2026-10-03 at **https://valuedeskapp.vercel.app** - the
-web app on Vercel, the index on one small AWS server in Frankfurt (v0.1.1, started
-from a copy of the development index). Claude runs the AWS and Vercel commands (the
+web app on Vercel, the index and the hosted copy executor on one small AWS server in
+**Tokyo** (AWS ap-northeast-1). Until 2026-10-23 that server was in Frankfurt
+(eu-central-1); the move is EC2-VERCEL.md, section 12 ("Moving to Tokyo"), and the
+Frankfurt server is stopped, not deleted, afterwards - deleting it is your decision
+(section 8 below). Claude runs the AWS and Vercel commands (the
 list is `docs/deploy/EC2-VERCEL.md`, section 6). This page is only what needs
 **you**: accounts, decisions, texts, and the checks at the end. Each step says when
 it is needed.
@@ -72,11 +75,20 @@ authority if any, the retention periods, the excluded countries, the place of
 jurisdiction, the date.
 
 - Since the site runs on **Vercel** (not CloudFront), the privacy policy's section on
-  visiting the website has to name **Vercel** (its CDN worldwide, the function in
-  Frankfurt) and **AWS** (the server, eu-central-1, Frankfurt) as processors.
-  DEPLOY.md section 12 lists everything the policy has to cover, including the
-  builder-fee ledger, other people's public trading data in the index, WalletConnect,
-  and what stays in the visitor's browser.
+  visiting the website has to name **Vercel** (its CDN worldwide, the `/api` function
+  in **Tokyo**, Vercel region `hnd1`) and **AWS** (the server, **ap-northeast-1,
+  Tokyo**) as processors - both changed from Frankfurt (`fra1`, eu-central-1) on
+  2026-10-23. The server is **outside the EU** now: the policy has to say that the
+  data goes to Japan and on what basis (Japan has an EU adequacy decision; which basis
+  applies is for the lawyer). DEPLOY.md section 12 lists everything the policy has to
+  cover, including the builder-fee ledger, other people's public trading data in the
+  index, WalletConnect, and what stays in the visitor's browser.
+- **The hosted copy executor** (Copy -> Set up copy trading -> Hosted) runs on the same
+  Tokyo server and keeps, per follower: the wallet address, every signed instruction
+  (never changed, never deleted by the executor) with the country Vercel reported for
+  that request, the copies and their activity (365 days by default), and the copy key
+  the follower registered, encrypted. The country comes from Vercel's own lookup of
+  the visitor's address. The policy has to cover this too (DEPLOY.md section 12).
 - **Have them reviewed by a lawyer.** They are drafts.
 - The test site may go out with the placeholders (the build only warns). A **public**
   launch is built with `--public`, and that build is refused while one is left.
@@ -103,13 +115,24 @@ Before you show the site to anyone, run the guided test on your PC:
 
 ### 8. Stop and start - to save money
 
-| | What it means | Cost per month (eu-central-1) |
+| | What it means | Cost per month (ap-northeast-1, Tokyo) |
 |---|---|---|
-| **Running** | the server is on; everything works | about 41 USD (t4g.medium 28.03, disks 16 + 80 GiB 9.14, fixed address 3.65) + CPU above its baseline (estimated 6 to 18) + snapshots (estimated 3 to 10) |
-| **Stopped** | the server is off; nothing is deleted. The site still loads; trading, Portfolio and Scan still work (they talk to the exchanges directly); the leaderboard, Explore and Copy pages say the index is unavailable | about 13 USD (the disks and the fixed address) + snapshots |
+| **Running** | the server is on; everything works | about 44 USD (t4g.medium 31.54, disks 16 + 80 GiB 9.22, fixed address 3.65) + CPU above its baseline (estimated 6 to 18) + snapshots (estimated 3 to 9) |
+| **Stopped** | the server is off; nothing is deleted. The site still loads; trading, Portfolio and Scan still work (they talk to the exchanges directly); the leaderboard, Explore and Copy pages say the index is unavailable, and **hosted copies stop** (a follower's SoDEX stop orders stay) | about 13 USD (the disks and the fixed address) + snapshots |
+| **Frankfurt, stopped** (after the move, until you delete it) | the old server, off; it serves nothing | about 13 USD (disks 16 + 80 GiB 9.14, fixed address 3.65) + its snapshots (0.054 per GB-month) |
 | Vercel | Hobby free (non-commercial), Pro 20 USD | |
+
+The Tokyo prices are what Claude knows of AWS's ap-northeast-1 price list (t4g.medium
+0.0432 USD an hour, gp3 0.096 per GB-month, snapshots 0.05 per GB-month); they were
+not checked against the live list on 2026-10-23 - EC2-VERCEL.md section 4 says how.
+Tokyo costs about 3.60 USD a month more than Frankfurt while running.
 
 Ask Claude to **stop** (`deploy/aws/ec2/provision.sh stop`) or **start**
 (`... start`) it. After a start the index catches up by itself within minutes; it
 keeps a gap for the time it was off. Nothing is ever deleted by stopping - deleting
 the whole setup is a separate, manual decision (EC2-VERCEL.md, section 10).
+
+**The Frankfurt server after the move** keeps costing about 13 USD a month while it is
+stopped (its disks, its fixed address, its snapshots). Deleting it is **your decision**,
+made separately, once Tokyo has run well for a while: tell Claude, and it follows
+EC2-VERCEL.md section 10 for Frankfurt only. Until then it is the way back.

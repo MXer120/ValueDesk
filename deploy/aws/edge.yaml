@@ -280,7 +280,9 @@ Resources:
               https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
               https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
               https://alpha-biz.sodex.dev
-              https://api.hyperliquid.xyz https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
+              https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
+              http://127.0.0.1:* http://localhost:*
+              https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
               wss://relay.walletconnect.org https://api.web3modal.org
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
@@ -348,7 +350,9 @@ Resources:
               https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
               https://mainnet-data.sodex.dev https://testnet-data.sodex.dev
               https://alpha-biz.sodex.dev
-              https://api.hyperliquid.xyz https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
+              https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
+              http://127.0.0.1:* http://localhost:*
+              https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
               wss://relay.walletconnect.org https://api.web3modal.org
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org

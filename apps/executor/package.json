@@ -1,0 +1,30 @@
+{
+  "name": "@valuescan/executor",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "The ValueDesk copy executor: runs a follower's copy rules against a leader's public trades and places the copies on SoDEX with a key the follower registered. One codebase for the hosted executor (ValueDesk's server in Tokyo) and the self-hosted one (your own computer or server).",
+  "type": "module",
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "start": "tsx --disable-warning=ExperimentalWarning src/main.ts",
+    "dev": "tsx watch --disable-warning=ExperimentalWarning src/main.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "bundle": "node tools/bundle.mjs"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.7.0",
+    "@noble/hashes": "^1.6.1",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.1",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/ws": "^8.5.13"
+  }
+}

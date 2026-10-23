@@ -2,29 +2,33 @@
 # (__ORIGIN_DOMAIN__ and the email line are filled in). Topology B of
 # docs/deploy/SECURITY-HEADERS.md section 2.3:
 #
-#   viewer -> the edge -> Caddy :443 (this file) -> 127.0.0.1:8797 (valuescan-api)
+#   viewer -> the edge -> Caddy :443 (this file) -> /api/copy/*  127.0.0.1:8799 (valuescan-executor)
+#                                                -> anything else 127.0.0.1:8797 (valuescan-api)
 #
 # The edge is CloudFront (deploy/aws/edge.yaml) or the Vercel function that proxies
 # /api/* (deploy/vercel). Caddy is here for TLS between the edge and the origin,
 # with a certificate it obtains and renews by itself - and for one gate in front of
-# the API: only a request that carries the origin secret is passed on.
+# the API and the copy executor: only a request that carries the origin secret is
+# passed on, to either of them.
 
 {
 	__ACME_EMAIL_LINE__
 
 	# No admin endpoint. It listens on localhost:2019 by default, and anything on
-	# this box - the API process included - could reconfigure Caddy through it.
-	# A config change is "systemctl restart caddy".
+	# this box - the API and the executor processes included - could reconfigure
+	# Caddy through it. A config change is "systemctl restart caddy".
 	admin off
 
 	servers {
 		# Keep the edge's X-Forwarded-For instead of replacing it with the edge's
-		# own address: the API rate-limits by viewer (VALUESCAN_TRUST_PROXY=2).
-		# Trusting every peer is safe ONLY because nothing reaches the API through
-		# here without the origin secret (the @edge matcher below): a client that
-		# connects directly cannot choose its own rate-limit key. (Behind CloudFront
-		# the security group also admits CloudFront's addresses only; the Vercel
-		# functions have no published address range, so there port 443 is open.)
+		# own address: the API rate-limits by viewer (VALUESCAN_TRUST_PROXY=2), and
+		# the executor takes the first address as the viewer (EXECUTOR_TRUST_EDGE=1).
+		# Trusting every peer is safe ONLY because nothing reaches either of them
+		# through here without the origin secret (the @edge matcher below): a client
+		# that connects directly cannot choose its own rate-limit key - nor the
+		# X-Viewer-Country the executor applies the country rules by. (Behind
+		# CloudFront the security group also admits CloudFront's addresses only; the
+		# Vercel functions have no published address range, so there port 443 is open.)
 		trusted_proxies static 0.0.0.0/0 ::/0
 	}
 }
@@ -43,9 +47,10 @@ __ORIGIN_DOMAIN__ {
 	# two (the current secret and, while it is rotated, the next one - the same
 	# value twice otherwise). systemd hands them over from /etc/valuescan/caddy.secret.env
 	# (root only); they are never written into this file. A request without it is
-	# refused here, before the API: so the API's own check (it requires the secret
-	# on every route but /api/health) is never the only one, and nobody but the edge
-	# can set the X-Forwarded-For the API keys its limits on. Two lines for one
+	# refused here, before the API or the executor: so their own checks (the API
+	# requires the secret on every route but /api/health, the executor on every route
+	# but /api/copy/v1/health) are never the only ones, and nobody but the edge can
+	# set the X-Forwarded-For and X-Viewer-Country they rely on. Two lines for one
 	# field are OR-ed. (One line with two values is not valid Caddyfile: "malformed
 	# header matcher". Checked on the instance with Caddy 2.11.6: either value
 	# passes; a wrong value, none, or both joined by a comma get the 403.)
@@ -55,7 +60,19 @@ __ORIGIN_DOMAIN__ {
 	}
 
 	handle @edge {
-		reverse_proxy 127.0.0.1:8797
+		# Past the gate, by path. Nested handle blocks are mutually exclusive like
+		# the outer ones: the first that matches is the only one that runs.
+		# The copy executor (apps/executor): every path it serves is under
+		# /api/copy/v1/. Caddy's path matcher ignores case; the edge forwards paths
+		# exactly, and the executor answers 404 for a path it does not know.
+		handle /api/copy/* {
+			reverse_proxy 127.0.0.1:8799
+		}
+
+		# Everything else: the index API.
+		handle {
+			reverse_proxy 127.0.0.1:8797
+		}
 	}
 
 	handle {
@@ -68,6 +85,8 @@ __ORIGIN_DOMAIN__ {
 
 	# NO access log on purpose. Caddy logs request headers, and every request
 	# carries X-Origin-Verify - the origin secret would end up in the journal,
-	# next to query strings with wallet addresses. The API logs each request
-	# itself (path and client address, never the query string).
+	# next to query strings with wallet addresses (and, on the executor's routes,
+	# the followers' read tokens in Authorization). The API logs each request
+	# itself (path and client address, never the query string); the executor, at
+	# LOG_LEVEL=debug only, method, path and status.
 }

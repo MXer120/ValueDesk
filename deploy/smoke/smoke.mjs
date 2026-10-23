@@ -62,7 +62,7 @@ import { fileURLToPath } from 'node:url';
 import { evaluate, launchChrome, openPage, pressCtrlK, sleep, typeText, watchSharedWorkers } from './cdp.mjs';
 import { checkDeployedHeaders, checkHttpsRedirect, probeOrigin } from './deployed.mjs';
 import { hostedRoutes, matchRoute, startMockApi } from './mock-api.mjs';
-import { CSP } from './prod-headers.mjs';
+import { CSP, sourceAllows } from './prod-headers.mjs';
 import { startStaticServer } from './static-server.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -598,6 +598,14 @@ async function walk(dist, api, report) {
     // Our API: only allow-listed routes may be asked, and none may be refused.
     for (const r of apiReqs) {
       const u = new URL(r.url);
+      // /api/copy/* is the copy executor's (Caddy routes it there, not to the API). A local
+      // run has no executor, so its answers are not judged; against a deployed site an
+      // answer of 500 or more, or a failure, is a finding.
+      if (u.pathname.startsWith('/api/copy/')) {
+        if (REMOTE && r.status !== null && r.status >= 500) problems.push(`the copy executor answered ${r.status}: ${r.method} ${u.pathname}`);
+        if (REMOTE && r.failed && r.failed !== 'canceled') problems.push(`a copy executor request failed: ${u.pathname} (${r.failed})`);
+        continue;
+      }
       const route = matchRoute(routes, r.method, u.pathname);
       if (!route) problems.push(`a route hosted mode does not serve was requested: ${r.method} ${u.pathname}`);
       if (apiThere && r.status !== null && [403, 404].includes(r.status)) problems.push(`our API answered ${r.status}: ${r.method} ${u.pathname}${u.search}`);
@@ -611,12 +619,16 @@ async function walk(dist, api, report) {
       let host = '';
       try { host = new URL(s.url).hostname; } catch { /* judged by connect-src below */ }
       if (host === SITE_HOST || host === '127.0.0.1' || host === 'localhost') problems.push(`a WebSocket was opened to this site: ${s.url} [${s.where}]`);
-      else if (!connectSrc.has(o)) problems.push(`a WebSocket to an origin outside connect-src: ${o} [${s.where}]`);
+      else if (!sourceAllows(connectSrc, o)) problems.push(`a WebSocket to an origin outside connect-src: ${o} [${s.where}]`);
     }
     if (p.expectSockets && sockets.length === 0) problems.push('the trade page opened no exchange socket');
     // Direct requests: every origin must be one connect-src (or img-src) allows.
-    const strangers = [...new Set(direct.map((r) => originOf(r.url)))].filter((o) => !connectSrc.has(o) && o !== 'https://api.web3modal.org');
+    const strangers = [...new Set(direct.map((r) => originOf(r.url)))].filter((o) => !sourceAllows(connectSrc, o) && o !== 'https://api.web3modal.org');
     for (const o of strangers) problems.push(`a request to an origin the policy does not list: ${o}`);
+    // The policy allows loopback for a self-hosted copy executor, which nobody set up in
+    // this run: a page that reaches into the visitor's own machine anyway is a finding.
+    const loopback = [...new Set(direct.map((r) => originOf(r.url)))].filter((o) => /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(o));
+    for (const o of loopback) problems.push(`a request to the visitor's own machine, with no self-hosted executor set up: ${o}`);
 
     // The console. Error lines can only be judged when everything the page talks to
     // is really there; in a partial run they are listed, not judged. An uncaught
