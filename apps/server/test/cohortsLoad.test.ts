@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
 import { TAIL_RATE } from '../src/indexer/cohortTracker.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead } from '../src/indexer/read.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -251,16 +251,28 @@ test('a rebuild that fails leaves the load in use and waits before it tries agai
   assert.equal(_cohortLoad.state().armed, true, 'the next attempt is on a timer, not in a loop');
 });
 
-test('once nobody has asked for a while the rebuilds stop, and the next read builds in place as before', async () => {
+test('once nobody has asked for a while the rebuilds stop; the next read is answered from the old load at once and a rebuild starts behind it', async () => {
   _cohortLoad.reset();
-  cohortsRead(TWO, NONE);
+  const before = cohortsRead(TWO, NONE);
   _cohortLoad.age(KEEP_WARM_MS + 1_000);
   await _cohortLoad.rebuild();
   assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 }, 'nothing was rebuilt for nobody');
   assert.equal(_cohortLoad.state().armed, false);
-  cohortsRead(TWO, NONE);
-  assert.deepEqual(_cohortLoad.built, { inPlace: 2, behind: 0 });
-  assert.equal(_cohortLoad.state().armed, true);
+  assert.deepEqual(cohortsRead(TWO, NONE), before, 'answered from the load it has: no build inside the request');
+  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 0 });
+  assert.equal(_cohortLoad.state().rebuilding, true, 'a rebuild from behind is under way');
+  while (_cohortLoad.state().rebuilding) await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(_cohortLoad.built, { inPlace: 1, behind: 1 });
+  assert.equal(_cohortLoad.state().armed, true, 'and the next one is scheduled');
+});
+
+test('at the start the default page is built from behind, so its first read builds nothing', async () => {
+  _cohortLoad.reset();
+  await warmCohorts(ALL);
+  assert.deepEqual(_cohortLoad.built, { inPlace: 0, behind: 1 });
+  assert.ok(_cohortLoad.state().stats.includes(`${scopeKey(ALL)}|`), 'every venue, no filter: summed ahead');
+  assert.ok(cohortsRead(ALL, NONE));
+  assert.deepEqual(_cohortLoad.built, { inPlace: 0, behind: 1 }, 'the first read built nothing');
 });
 
 test('a rebuild from behind lets other work run: no gap near the time the whole build takes', async () => {

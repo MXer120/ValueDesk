@@ -534,15 +534,35 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
 function loadCohorts(s: IndexStore): CohortLoad {
   const now = Date.now();
   lastAsked = now;
-  // Nothing to answer from yet, or it expired with no rebuild on its way (nobody
-  // asked for a while): build it here. While a rebuild runs, the load in use
-  // answers for the few seconds that takes.
-  if (!cohortLoad || (now - cohortLoad.at >= LOAD_TTL_MS && !rebuilding)) {
+  // Nothing to answer from yet (this process has not built one, and the warm-up
+  // at start has not finished): build it here.
+  if (!cohortLoad) {
     cohortLoad = runNow(loadSteps(s, now, []));
     built.inPlace++;
+  } else if (now - cohortLoad.at >= LOAD_TTL_MS && !rebuilding) {
+    // It expired while nobody was asking (the rebuilds stop then). Building it
+    // here held this request - and, being synchronous, EVERY request on the API -
+    // for the whole build: 9 s on the production index (2026-10-23). This one
+    // read is answered from the load in use; a rebuild from behind starts now,
+    // giving the thread back between slices, and the page's next poll has it.
+    if (rebuildTimer) { clearTimeout(rebuildTimer); rebuildTimer = null; }
+    void rebuildBehind(s);
   }
   armRebuild(s);
   return cohortLoad;
+}
+
+/**
+ * At the API's start: build the load from behind for the page as it first
+ * opens (every venue, no filter), so the first visitor after a restart is not
+ * the one who waits for it. A read that arrives before it is done builds its own.
+ */
+export async function warmCohorts(venues: readonly Venue[]): Promise<void> {
+  const s = reader();
+  if (!s || cohortLoad || rebuilding) return;
+  note(venues, {});
+  lastAsked = Date.now();
+  await rebuildBehind(s);
 }
 
 function walletsOf(load: CohortLoad, venues: readonly Venue[]): NettedWallet[] {

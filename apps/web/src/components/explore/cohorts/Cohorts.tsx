@@ -24,7 +24,7 @@ import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../../vsApi';
 import { useStored } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
-import { emptyCohortText, emptyCohortsLine } from './emptyCopy';
+import { emptyCohortsLine } from './emptyCopy';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
 import { LoadFailed } from '../../LoadFailed';
@@ -167,17 +167,17 @@ function Overview({ data, onOpen }: { data: CohortsResponse | null; onOpen: (id:
   const byId = new Map((data?.cohorts ?? []).map((c) => [c.id, c]));
   const v = useCohortView();
   // Counts are exact once the first pass has run (`at` > 0); before that a zero is "not read yet".
-  const names = (data?.venues ?? []).map((x) => VENUE_LABEL[x]);
   const isEmpty = (d: CohortDef) => !!data && data.at > 0 && byId.get(d.id)?.wallets === 0;
   const section = (title: string, defs: readonly CohortDef[], part: 'pnl' | 'size') => {
-    const shown = defs.filter((d) => v.cohortOn(d.id));
+    // A cohort the chosen venues leave empty is not drawn: the line above the grid names it.
+    const shown = defs.filter((d) => v.cohortOn(d.id) && !isEmpty(d));
     if (!v.show('overview', part) || !shown.length) return null;
     return (
       <section className="coh-sec">
         <h2 className="coh-sec__title">{title}</h2>
         <div className="coh-grid">
           {shown.map((d) => (
-            <Card key={d.id} def={d} card={byId.get(d.id)} empty={isEmpty(d) ? emptyCohortText(d, names) : null} onOpen={() => onOpen(d.id)} />
+            <Card key={d.id} def={d} card={byId.get(d.id)} empty={null} onOpen={() => onOpen(d.id)} />
           ))}
         </div>
       </section>
@@ -562,6 +562,8 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
 
   const railItem = (d: CohortDef) => {
     const c = byId.get(d.id);
+    // Empty on the chosen venues (the counts are exact once the first pass has run): not offered.
+    if (list.data && list.data.at > 0 && c?.wallets === 0 && cohort !== d.id) return null;
     return (
       <li key={d.id}>
         <button type="button" className={`coh-rail__item${section === 'cohorts' && cohort === d.id ? ' is-on' : ''}`} onClick={() => open(d.id)}>

@@ -49,6 +49,7 @@ import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus, useStored } from '../hooks';
 import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
+import { AlgoIcon } from './algo/AlgoIcon';
 import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
 import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
@@ -1711,6 +1712,7 @@ export function OrderEntry({
                 setPop((p) => (p === 'algo' ? null : 'algo'));
               }}
             >
+              {isAlgo && <AlgoIcon kind={algoKind} size={14} />}
               {isAlgo ? menuName(algoKind) : 'Algo'}
               <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
                 <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -1765,15 +1767,16 @@ export function OrderEntry({
               role="option"
               aria-selected={algoKind === o.id}
               tabIndex={algoKind === o.id ? 0 : -1}
-              className={`oe-pop__opt${isAlgo && algoKind === o.id ? ' is-on' : ''}`}
+              className={`oe-pop__opt oe-pop__opt--algo${isAlgo && algoKind === o.id ? ' is-on' : ''}`}
+              title={o.detail}
               onClick={() => {
                 setAlgoKind(o.id);
                 setType('algo');
                 setPop(null);
               }}
             >
+              <AlgoIcon kind={o.id} />
               <b>{o.name}</b>
-              <span>{o.detail}</span>
             </button>
           ))}
         </div>,

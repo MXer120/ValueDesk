@@ -444,6 +444,15 @@ for (const sig of ['SIGINT', 'SIGTERM'] as const) {
 
 await app.listen({ host: HOST, port: PORT });
 
+// Cohorts: the first load is built from behind a few seconds after the start
+// (indexer/read.ts warmCohorts), so a restart does not leave the first visitor -
+// and, the read being synchronous, the whole API with them - waiting for it.
+setTimeout(() => {
+  void Promise.all([import('./indexer/read.js'), import('./valuescan/types.js')])
+    .then(([r, t]) => r.warmCohorts(t.VENUES))
+    .catch((e) => app.log.warn({ err: e }, 'cohorts warm-up failed'));
+}, 3_000).unref();
+
 // The leaderboard indexer (src/indexer): top and worst hundreds by PnL for
 // every window, with every board member's fills. It runs on a worker thread
 // so a board rebuild never holds an API request. Production runs it as its
