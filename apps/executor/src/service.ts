@@ -21,6 +21,7 @@ import {
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  EXECUTOR_FEATURES,
   CopyRuntime,
   HyperliquidClient,
   KeySink,
@@ -160,6 +161,7 @@ export class ExecutorService {
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
+      features: [...EXECUTOR_FEATURES],
     };
   }
 

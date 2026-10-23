@@ -21,7 +21,7 @@ import { notify } from '../../toast';
 import { WalletError } from '../../wallet';
 import { VENUE_LABEL, vsApi, type TraderRow } from '../../vsApi';
 import { CopySetupSteps, MODE_HINT, MODE_LABEL, copyReady } from '../../copy/CopySetupSheet';
-import { startCopy, type CopyModeId } from '../../copy/live';
+import { startCopy, supportsCounter, type CopyModeId } from '../../copy/live';
 import { EquityChart } from './EquityChart';
 import { Avatar, holdPeeks } from './TraderCard';
 import { coinOf } from './sim';
@@ -61,14 +61,17 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
   useEffect(() => (open ? holdPeeks() : undefined), [open]);
 
   if (!c.leader) return null;
+  const counter = c.setup.direction === 'counter';
   const title = (
     <span className="cpy-mtitle">
       <Avatar address={c.leader} size={22} />
-      Copy {shortAddr(c.leader)}
+      {counter ? 'Counter-trade' : 'Copy'} {shortAddr(c.leader)}
       <span className="cpy-mtitle__venue">{VENUE_LABEL[c.venue]}</span>
     </span>
   );
-  const ready = copyReady(c.live, c.runOn, c.setup.paper);
+  // A counter-trade needs a copier that knows the direction (copy/live.ts supportsCounter).
+  const counterBlocked = counter && !supportsCounter(c.live, c.runOn);
+  const ready = copyReady(c.live, c.runOn, c.setup.paper) && !counterBlocked;
   const errs = [...Object.values(c.parsed.errors), ...(Object.keys(c.parsed.errors).length ? [] : c.copyErrors)] as string[];
 
   const start = () => {
@@ -78,7 +81,10 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
     setStarting(true);
     startCopy(c.runOn, settings)
       .then(() => {
-        notify('ok', settings.paper ? `Paper copy of ${shortAddr(c.leader!)} started.` : `Copying ${shortAddr(c.leader!)}.`);
+        const who = shortAddr(c.leader!);
+        notify('ok', settings.direction === 'counter'
+          ? (settings.paper ? `Paper counter-trade of ${who} started.` : `Counter-trading ${who}.`)
+          : (settings.paper ? `Paper copy of ${who} started.` : `Copying ${who}.`));
         onClose();
         onStarted();
       }, (e: unknown) => { if (!isRejection(e)) setError(e instanceof Error ? e.message : String(e)); })
@@ -104,10 +110,10 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
               type="button"
               className="fx-cta"
               disabled={!ready || !c.copySettings || starting}
-              title={!ready ? 'Finish the steps above first' : undefined}
+              title={counterBlocked ? 'This copier cannot counter-trade' : !ready ? 'Finish the steps above first' : undefined}
               onClick={start}
             >
-              {starting ? 'Starting…' : c.setup.paper ? 'Start paper copy' : 'Start copying'}
+              {starting ? 'Starting…' : startLabel(c.setup.paper, counter)}
             </button>
           </>
         )}
@@ -122,6 +128,9 @@ export function CopyModal({ c, open, row, onClose, onStarted }: CopyModalProps) 
     </Modal>
   );
 }
+
+const startLabel = (paper: boolean, counter: boolean): string =>
+  counter ? (paper ? 'Start paper counter-trade' : 'Start counter-trading') : (paper ? 'Start paper copy' : 'Start copying');
 
 /* ============================================================ step 1 ====== */
 
@@ -138,13 +147,34 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
 
   return (
     <div className="cpy-step">
-      <p className="cs-sub">Set how this trader's trades are copied into your account.</p>
+      <p className="cs-sub">{c.setup.direction === 'counter' ? 'Set how you trade against this trader, in your own account.' : "Set how this trader's trades are copied into your account."}</p>
 
       <dl className="cpy-stats">
         <div><dt>Equity</dt><dd>{av === null ? DASH : fmtUsd(av, 0)}</dd></div>
         <div><dt>30D PnL</dt><dd className={pnl30 === null ? '' : pnl30 >= 0 ? 'pos' : 'neg'}>{fmtSignedUsd(pnl30, 0)}</dd></div>
         <div><dt>Win rate</dt><dd className={wr !== null && wr >= 0.5 ? 'pos' : ''}>{wr === null ? DASH : `${Math.round(wr * 100)}%`}</dd></div>
       </dl>
+
+      <div className="cpy-dir" role="radiogroup" aria-label="Direction">
+        {(['copy', 'counter'] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            role="radio"
+            aria-checked={c.setup.direction === d}
+            className={`cpy-dir__opt cpy-dir__opt--${d}${c.setup.direction === d ? ' is-on' : ''}`}
+            onClick={() => c.patchSetup({ direction: d })}
+          >
+            {d === 'copy' ? 'Copy' : 'Counter-trade'}
+          </button>
+        ))}
+      </div>
+      {c.setup.direction === 'counter' && (
+        <p className="cpy-dir__note">
+          You take the opposite side of every trade: their long is your short, their close is your close. You gain when they
+          lose, and lose when they win - a good record is your risk here.
+        </p>
+      )}
 
       <Replay c={c} />
 
@@ -223,7 +253,7 @@ function Replay({ c }: { c: CopyContext }) {
   const windows = [{ v: '7d', label: '7D' }, { v: '30d', label: '30D' }] as const;
   const head = (
     <div className="cpy-replay__head">
-      <span className="cpy-replay__k">Your copy, replayed</span>
+      <span className="cpy-replay__k">{c.setup.direction === 'counter' ? 'Your counter-trade, replayed' : 'Your copy, replayed'}</span>
       <span className="cpy-seg cpy-seg--sm" role="group" aria-label="Replay window">
         {windows.map((w) => (
           <button key={w.v} type="button" aria-pressed={c.window === w.v} className={c.window === w.v ? 'is-on' : undefined} onClick={() => c.setWindow(w.v)}>{w.label}</button>
@@ -306,6 +336,18 @@ function RunStep({ c }: { c: CopyContext }) {
           </button>
         ))}
       </div>
+
+      {c.setup.direction === 'counter' && !supportsCounter(c.live, c.runOn) && (
+        <p className="fx-note fx-note--err">
+          {c.runOn === 'self'
+            ? c.live.self.info
+              ? 'Your copier is older than counter-trading: download the current copier (Copy setup), start it again, then come back.'
+              : 'Connect your copier first; it must be a version that counter-trades.'
+            : c.live.hosted.info
+              ? 'The ValueDesk executor does not run counter-trades yet. Run it in this browser instead.'
+              : 'Checking the ValueDesk executor…'}
+        </p>
+      )}
 
       <div className="cpy-alloc">
         <label className="cpy-alloc__k" htmlFor={`${uid}-alloc`}>Trade with</label>

@@ -37,8 +37,16 @@ export interface LeaderRef {
 }
 
 /** The follower's copy rules. Every field is chosen by the follower; nothing is chosen for them. */
+/**
+ * copy     take the trader's side;
+ * counter  take the OTHER side: their long is your short, their close is your close,
+ *          sized and capped by the same rules. The follower wins when the trader loses.
+ */
+export type CopyDirection = 'copy' | 'counter';
+
 export interface CopySettings {
   leader: LeaderRef;
+  direction: CopyDirection;
   /**
    * proportional   the leader's position as a share of their equity, applied to `allocationUsd`;
    * fixedRatio     `ratio` x the leader's position (by notional);

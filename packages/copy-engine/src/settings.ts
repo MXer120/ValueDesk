@@ -6,13 +6,14 @@
  * all. `canonicalSettings` fixes key order and number formatting: the exact
  * JSON the follower's wallet signs is the JSON the executor stores.
  */
-import type { CopySettings, LeaderVenue, SizingMode } from './types.ts';
+import type { CopyDirection, CopySettings, LeaderVenue, SizingMode } from './types.ts';
 
 const ADDRESS = /^0x[0-9a-f]{40}$/;
 const COIN = /^[A-Z0-9]{1,20}$/;
 
 /** Research 03 section 11 defaults: proportional sizing, 5x cap, new positions only, isolated margin. */
 export const DEFAULT_SETTINGS: Omit<CopySettings, 'leader'> = {
+  direction: 'copy',
   sizingMode: 'proportional',
   allocationUsd: 1000,
   ratio: 0.1,
@@ -53,6 +54,7 @@ export interface SettingsCheck {
 
 const VENUES: readonly LeaderVenue[] = ['sodex', 'hyperliquid'];
 const MODES: readonly SizingMode[] = ['proportional', 'fixedRatio', 'fixedNotional'];
+const DIRECTIONS: readonly CopyDirection[] = ['copy', 'counter'];
 
 function numberIn(v: unknown, lim: { min: number; max: number }, label: string, errors: Record<string, string>, field: string): number {
   const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -94,6 +96,9 @@ export function checkSettings(input: unknown): SettingsCheck {
   if (!VENUES.includes(venue)) errors['leader.venue'] = 'The trader must be on SoDEX or Hyperliquid.';
 
   const pick = <K extends keyof typeof DEFAULT_SETTINGS>(k: K): unknown => (k in s ? s[k] : DEFAULT_SETTINGS[k]);
+  // Absent (rules from before counter-trading existed) or null is a plain copy.
+  const direction = ((s.direction ?? null) === null ? DEFAULT_SETTINGS.direction : s.direction) as CopyDirection;
+  if (!DIRECTIONS.includes(direction)) errors.direction = 'Choose copy or counter-trade.';
   const sizingMode = pick('sizingMode') as SizingMode;
   if (!MODES.includes(sizingMode)) errors.sizingMode = 'Choose proportional, fixed ratio or fixed amount.';
 
@@ -123,6 +128,7 @@ export function checkSettings(input: unknown): SettingsCheck {
   return {
     settings: {
       leader: { venue, address },
+      direction,
       sizingMode,
       allocationUsd,
       ratio,
@@ -161,7 +167,11 @@ export class SettingsError extends Error {
   }
 }
 
-/** Numbers as the shortest exact JSON form; key order fixed. */
+/**
+ * Numbers as the shortest exact JSON form; key order fixed. `direction` is
+ * written only for a counter-trade (at the end): the canonical form of every
+ * copy rule set signed before counter-trading existed stays byte for byte the same.
+ */
 const KEYS: ReadonlyArray<keyof CopySettings> = [
   'leader',
   'sizingMode',
@@ -190,6 +200,7 @@ export function canonicalSettings(s: CopySettings): Record<string, unknown> {
     else if (k === 'assetAllow' || k === 'assetDeny') out[k] = [...s[k]].map((c) => c.toUpperCase()).sort();
     else out[k] = s[k];
   }
+  if (s.direction === 'counter') out.direction = 'counter';
   return out;
 }
 
@@ -199,7 +210,7 @@ export function describeSettings(s: CopySettings): string {
   const pct = (f: number) => `${Math.round(f * 1000) / 10}%`;
   const sizing =
     s.sizingMode === 'proportional' ? `Proportional on ${usd(s.allocationUsd)}` : s.sizingMode === 'fixedRatio' ? `${pct(s.ratio)} of the leader's size` : `${usd(s.fixedNotionalUsd)} per trade`;
-  const parts = [sizing, `max ${s.maxLeverage}x`, `max ${usd(s.maxPositionUsd)} per position`];
+  const parts = [s.direction === 'counter' ? `Counter-trade: ${sizing.charAt(0).toLowerCase()}${sizing.slice(1)}` : sizing, `max ${s.maxLeverage}x`, `max ${usd(s.maxPositionUsd)} per position`];
   if (s.stopLossPct !== null) parts.push(`stop loss ${pct(s.stopLossPct)}`);
   if (s.takeProfitPct !== null) parts.push(`take profit ${pct(s.takeProfitPct)}`);
   if (s.drawdownStopPct !== null) parts.push(`drawdown stop ${pct(s.drawdownStopPct)}`);

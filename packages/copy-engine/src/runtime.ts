@@ -267,6 +267,9 @@ export class CopyRuntime {
     const s = this.need(id);
     if (patch.settings && lk(patch.settings.leader) !== lk(s.settings.leader)) throw new Error('The trader of a copy cannot change; start a new copy instead.');
     if (patch.settings && patch.settings.paper !== s.settings.paper) throw new Error('A copy cannot switch between paper and live; start a new copy instead.');
+    if (patch.settings && (patch.settings.direction ?? 'copy') !== (s.settings.direction ?? 'copy')) {
+      throw new Error('A copy cannot switch between copying and counter-trading; start a new copy instead.');
+    }
     const next: Subscription = { ...s, ...patch, updatedAt: Date.now() };
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);

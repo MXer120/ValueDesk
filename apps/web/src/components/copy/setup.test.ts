@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import type { TraderProfile, VsPosition } from '../../vsApi';
 import {
   DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, fmtRate, fmtSignedPct, fmtSize, largestPosition,
-  normaliseSetup, parseCoins, parseSetup, readTarget, windowStart, workedExample, type SetupState,
+  normaliseSetup, parseCoins, parseSetup, readTarget, toCopySettings, windowStart, workedExample, type SetupState,
 } from './setup';
 
 const setup = (o: Partial<SetupState> = {}): SetupState => ({ ...DEFAULT_SETUP, ...o });
@@ -128,4 +128,14 @@ test('URL target: address and venue are validated', () => {
 test('window start', () => {
   assert.equal(windowStart('7d', 1_000_000_000), 1_000_000_000 - 7 * 86_400_000);
   assert.equal(windowStart('all', 5), null);
+});
+
+test('counter-trade: the worked example takes the other side, and the signed rules say counter', () => {
+  const s = setup({ direction: 'counter', mode: 'fixedRatio', ratioPct: '1', maxPosition: '100000' });
+  const ex = workedExample(parseSetup(s), profile([pos({ side: 'long', size: 2, notional: 200_000 })]), coin);
+  assert.match(ex!.text, /^Leader long 2 BTC .*You: short 0\.02 BTC/);
+  const rules = toCopySettings(parseSetup(s), s, { venue: 'hyperliquid', address: '0x' + 'A'.repeat(40) });
+  assert.equal(rules.direction, 'counter');
+  assert.equal(toCopySettings(parseSetup(setup()), setup(), { venue: 'sodex', address: '0x' + '1'.repeat(40) }).direction, 'copy');
+  assert.equal(normaliseSetup({ direction: 'sideways' as never }).direction, 'copy');
 });

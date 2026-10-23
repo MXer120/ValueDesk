@@ -246,7 +246,16 @@ export interface ExecutorInfo {
   keyTtlDaysMax: number;
   /** The key name the follower registers on SoDEX for this executor. */
   keyName: string;
+  /**
+   * What this executor understands beyond the first release (EXECUTOR_FEATURES). An
+   * executor without 'counter' would IGNORE a counter-trade's direction (unknown rule
+   * fields are ignored) and copy the trader instead, so the site never sends one to it.
+   */
+  features?: string[];
 }
+
+/** 'counter': the rules may carry direction 'counter' (planner.ts). */
+export const EXECUTOR_FEATURES = ['counter'] as const;
 
 export interface SessionGrant {
   token: string;

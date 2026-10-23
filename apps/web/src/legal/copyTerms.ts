@@ -89,6 +89,7 @@ export const COPY_TERMS: LegalDoc = {
         { p: 'You set every rule of a copy yourself; nothing is chosen for you:' },
         {
           ul: [
+            '**direction**: copy (take the leader\'s side) or counter-trade (take the opposite side: when the leader opens or adds to a long, your copy opens or adds to a short of the size your sizing rule gives, and the other way round; when the leader reduces, closes or flips, your copy reduces by the same fraction, closes or flips the other way). The direction is set when a copy starts and cannot be changed while it runs;',
             '**allocation**: the amount in USD you set aside for this leader. It is a figure the copier sizes by, not a separate account: copies use the margin in your SoDEX perps account, and a loss is not limited to the allocation;',
             '**sizing**: proportional (the leader\'s position as a share of the leader\'s account value, applied to your allocation), fixed ratio (a fixed fraction of the leader\'s position) or fixed amount (a fixed USD amount per copied opening; when the leader reduces, the copy reduces by the same fraction);',
             '**limits**: maximum leverage (for each copied position and for the copy\'s total exposure), maximum size per position, stop-loss and take-profit (as a share of each copied position\'s margin), and a drawdown stop for the whole copy;',
@@ -188,6 +189,7 @@ export const COPY_TERMS: LegalDoc = {
             '**Software errors.** The copier and the executor are software and can contain errors - for example an order of the wrong size or direction, or a copy that is not placed. We test them but cannot rule errors out. An update can change how your rules are carried out.',
             '**The exchange.** SoDEX is a third-party exchange. Its insolvency, a hack, an outage, a halted market or a change of its rules can cause you losses that nobody makes good. Leader data from Hyperliquid can be wrong or unavailable.',
             '**Fees.** The builder fee is charged on every copied order, including reductions, closes and stop orders, on top of SoDEX\'s fees and funding. A leader who trades often causes many copied orders, and the fees can outweigh small gains.',
+            '**Counter-trading.** A counter-trade takes the side opposite the leader on every position. It gains when the leader\'s positions lose and loses when they gain, by roughly as much, plus fees and funding on both legs of every change. A leader with a good record is therefore a risk to a counter-trade, not a safeguard, and a losing past record does not mean the leader will keep losing. A position that is a hedge for the leader (see "The leader" above) is an unhedged position for you. Your loss is not limited by the leader\'s: a leader can win many times in a row, and your caps and stops apply as for any copy.',
             '**Paper copies** are simulations. Real copies can fill differently, later or not at all, and they carry fees.',
             '**Legal and tax risk.** Copy trading and perpetual futures may be restricted or forbidden where you live. The law on copy trading is changing, and the service may have to be limited or ended at short notice (section 14). Gains may be taxable.',
           ],
@@ -304,6 +306,7 @@ export const COPY_RISK_SUMMARY: string[] = [
   'You can lose your whole allocation quickly, and with leverage or cross margin more than that - up to everything in your SoDEX perps account.',
   'A trader\'s past results do not predict future results, and nothing on ValueDesk is a recommendation to copy anyone.',
   'The trader you copy has not agreed to be copied, owes you nothing, and can change style, raise leverage, be liquidated or trade against the traders who copy them at any time.',
+  'A counter-trade takes the opposite side of the trader: it loses whenever they win, and their good record is then your risk.',
   'Your results will differ from the trader\'s, because copies are placed later, at SoDEX\'s prices, fees and funding, and can be smaller, partly filled or skipped.',
   'In hosted mode, ValueDesk\'s server places your copies around the clock according to your rules, without asking you before each trade.',
   'Outages, delays and software errors can cause missed, late or wrong copies, and your copied positions stay open whenever copying stops.',

@@ -167,6 +167,8 @@ test('copies: paper needs no key; live needs a registered key; one copy per trad
   const v = await svc.subscribe(w.sign(svc.executorId, 'subscribe', { settings: settings({ paper: true }), termsVersion: COPY_TERMS_VERSION }), ctx);
   assert.equal(v.subscription.status, 'active');
   assert.equal(v.subscription.settings.paper, true);
+  assert.equal(v.subscription.settings.direction, 'copy', 'rules signed without a direction are a plain copy');
+  assert.ok(svc.info(ctx).features?.includes('counter'), 'the executor says it runs counter-trades');
   assert.ok(v.subscription.consent?.payload.includes('"subscribe"') === false && v.subscription.consent?.action === 'subscribe');
   assert.equal(await code(svc.subscribe(w.sign(svc.executorId, 'subscribe', { settings: settings({ paper: true }), termsVersion: COPY_TERMS_VERSION }), ctx)), '409:duplicate');
   assert.equal(await code(svc.subscribe(w.sign(svc.executorId, 'subscribe', { settings: settings({ paper: false }), termsVersion: COPY_TERMS_VERSION }), ctx)), '412:key');

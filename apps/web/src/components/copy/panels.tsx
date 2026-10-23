@@ -382,9 +382,10 @@ const STATUS_LABEL: Record<string, string> = { active: 'Copying', paused: 'Pause
 
 function sizingOf(v: CopyView): string {
   const s = v.subscription.settings;
-  if (s.sizingMode === 'proportional') return 'Proportional';
-  if (s.sizingMode === 'fixedRatio') return `${fmt(s.ratio * 100, 2)}% of leader`;
-  return `${fmtUsd(s.fixedNotionalUsd, 0)} / trade`;
+  const size = s.sizingMode === 'proportional' ? 'Proportional'
+    : s.sizingMode === 'fixedRatio' ? `${fmt(s.ratio * 100, 2)}% of leader`
+    : `${fmtUsd(s.fixedNotionalUsd, 0)} / trade`;
+  return s.direction === 'counter' ? `Counter · ${size}` : size;
 }
 
 function MyCopies({ c, rows, onActivity }: { c: CopyContext; rows: CopyRow[]; onActivity: (id: string) => void }) {

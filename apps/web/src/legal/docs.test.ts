@@ -113,7 +113,8 @@ test('the privacy policy names every host the browser may contact (index.html CS
 const text = (v: unknown): string => JSON.stringify(v);
 
 test('the copy terms show the version every follower signs, before the first heading', () => {
-  assert.match(COPY_TERMS_VERSION, /^\d{4}-\d{2}-\d{2}$/);
+  // A date, with a counter when the terms change more than once on one day (2026-10-23.2).
+  assert.match(COPY_TERMS_VERSION, /^\d{4}-\d{2}-\d{2}(\.\d+)?$/);
   assert.ok(text(COPY_TERMS.intro).includes(`Version ${COPY_TERMS_VERSION}`), 'the intro names the version');
 });
 

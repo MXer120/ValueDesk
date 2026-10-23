@@ -418,3 +418,14 @@
   .cpy-progress__bar { width: 56px; }
   .cpy-search { flex-basis: 100%; }
 }
+
+/* --- copy or counter-trade (CopyModal step 1) -------------------------------- */
+.cpy-dir { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border: 1px solid var(--panel-line); border-radius: 10px; background: var(--fx-well); }
+.cpy-dir__opt {
+  height: 34px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.cpy-dir__opt:hover { color: var(--text); }
+.cpy-dir__opt--copy.is-on { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent); }
+.cpy-dir__opt--counter.is-on { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neg) 45%, transparent); }
+.cpy-dir__note { margin: 0; padding: 8px 12px; border-radius: 8px; background: color-mix(in srgb, var(--neg) 8%, transparent); color: var(--text); font-size: var(--fs-xs); line-height: 1.45; }
