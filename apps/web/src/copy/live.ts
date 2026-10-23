@@ -44,6 +44,8 @@ export interface ExecutorSide {
 
 export interface LiveCopy {
   owner: string | null;
+  /** The wallet can sign here. False for an address restored read-only (no provider): every step is a signature. */
+  canSign: boolean;
   terms: LocalTerms | null;
   viewerCountry: string | null;
   fee: { checked: boolean; perps: number | null; covers: boolean; builderId: number | null };
@@ -72,6 +74,7 @@ const emptySide = (): ExecutorSide => ({ info: null, infoError: null, me: null, 
 
 let state: LiveCopy = {
   owner: null,
+  canSign: false,
   terms: null,
   viewerCountry: null,
   fee: { checked: false, perps: null, covers: false, builderId: null },
@@ -124,9 +127,14 @@ async function busyWith<T>(what: string, fn: () => Promise<T>): Promise<T> {
 export async function setCopyWallet(owner: string | null, p: Eip1193Provider | null): Promise<void> {
   provider = p;
   const o = owner ? owner.toLowerCase() : null;
-  if (o === state.owner) return;
+  const canSign = !!o && !!p;
+  if (o === state.owner) {
+    if (canSign !== state.canSign) set({ canSign });
+    return;
+  }
   set({
     owner: o,
+    canSign,
     terms: localTerms(o),
     fee: { checked: false, perps: null, covers: false, builderId: null },
     hosted: { ...emptySide(), info: state.hosted.info, infoError: state.hosted.infoError },
@@ -322,10 +330,25 @@ export async function revokeKey(mode: CopyModeId, closePositions: boolean): Prom
 
 /* -------------------------------------------------------------- copies ----- */
 
+/**
+ * Whether a mode can run a counter-trade. The browser runs this build's engine;
+ * an executor must say so in its info ('counter' in features): one from before
+ * counter-trading ignores the direction and would COPY the trader instead.
+ */
+export function supportsCounter(s: LiveCopy, mode: CopyModeId): boolean {
+  if (mode === 'browser') return true;
+  return !!s[mode].info?.features?.includes('counter');
+}
+
 export async function startCopy(mode: CopyModeId, settings: CopySettings): Promise<void> {
   const { owner, provider: p } = needWallet();
   const t = state.terms;
   if (!t) throw new Error('Accept the copy trading terms first.');
+  if (settings.direction === 'counter' && !supportsCounter(state, mode)) {
+    throw new Error(mode === 'self'
+      ? 'Your copier is older than counter-trading: download the current copier and start it again.'
+      : 'This executor does not run counter-trades yet.');
+  }
   if (mode === 'browser') {
     await browserCopier.start({ owner, settings, country: t.country, termsVersion: COPY_TERMS_VERSION });
     syncBrowser();

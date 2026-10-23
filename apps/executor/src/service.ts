@@ -23,6 +23,7 @@ import {
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  EXECUTOR_FEATURES,
   CopyRuntime,
   FINAL_STATUSES,
   KeyAlgoSink,
@@ -190,6 +191,7 @@ export class ExecutorService {
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
+      features: [...EXECUTOR_FEATURES],
     };
   }
 

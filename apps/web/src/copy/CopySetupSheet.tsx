@@ -113,7 +113,7 @@ export function copyReady(live: LiveCopy, mode: CopyModeId, paper?: boolean): bo
   const r = readiness(live, mode);
   const policy = regionPolicy(live.terms?.country ?? null, live.viewerCountry);
   if (live.terms && !policy.allowed) return false;
-  if (!live.owner || !r.terms) return false;
+  if (!live.owner || !live.canSign || !r.terms) return false;
   if (mode !== 'browser' && !r.connected) return false;
   return paper ? true : r.fee && r.key;
 }
@@ -161,13 +161,13 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   // The steps of this mode, in order; the first one not done is lit.
   type S = { id: string; done: boolean };
   const steps: S[] = useMemo(() => {
-    const out: S[] = [{ id: 'wallet', done: !!owner }];
+    const out: S[] = [{ id: 'wallet', done: !!owner && live.canSign }];
     if (mode === 'self') out.push({ id: 'copier', done: r.connected });
     if (mode === 'hosted') out.push({ id: 'signin', done: r.connected });
     out.push({ id: 'terms', done: r.terms });
     if (!paper) out.push({ id: 'fee', done: r.fee }, { id: 'key', done: r.key });
     return out;
-  }, [owner, mode, r.connected, r.terms, r.fee, r.key, paper]);
+  }, [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper]);
   const current = steps.find((s) => !s.done)?.id ?? null;
   const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
 
@@ -180,11 +180,17 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
     <ol className="cs-steps">
       <Step
         n={n('wallet')}
-        done={!!owner}
+        done={!!owner && live.canSign}
         current={current === 'wallet'}
         title="Connect wallet"
-        desc={owner ? `${owner.slice(0, 6)}…${owner.slice(-4)} - its SoDEX account is the one copies trade in.` : 'The wallet whose SoDEX account the copies trade in.'}
-        action={!owner && <ActBtn label="Connect" primary onClick={() => void openConnectDialog()} />}
+        desc={
+          owner && !live.canSign
+            ? `${owner.slice(0, 6)}…${owner.slice(-4)} is connected read-only. Every step here is a signature: reconnect it with your wallet.`
+            : owner
+              ? `${owner.slice(0, 6)}…${owner.slice(-4)} - its SoDEX account is the one copies trade in.`
+              : 'The wallet whose SoDEX account the copies trade in.'
+        }
+        action={(!owner || !live.canSign) && <ActBtn label={owner ? 'Reconnect' : 'Connect'} primary onClick={() => void openConnectDialog()} />}
       />
 
       {mode === 'hosted' && (

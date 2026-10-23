@@ -264,7 +264,16 @@ export interface ExecutorInfo {
   keyName: string;
   /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
   algos?: { maxPerOwner: number };
+  /**
+   * What this executor understands beyond the first release (EXECUTOR_FEATURES). An
+   * executor without 'counter' would IGNORE a counter-trade's direction (unknown rule
+   * fields are ignored) and copy the trader instead, so the site never sends one to it.
+   */
+  features?: string[];
 }
+
+/** 'counter': the rules may carry direction 'counter' (planner.ts). */
+export const EXECUTOR_FEATURES = ['counter'] as const;
 
 export interface SessionGrant {
   token: string;

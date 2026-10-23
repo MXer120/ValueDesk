@@ -20,6 +20,10 @@
  *   fixedRatio        L x price x ratio
  *   fixedNotional     sign(L) x fixedNotionalUsd
  *
+ * A counter-trade (settings.direction 'counter') runs the same table on the
+ * leader's position mirrored, -L: their long opens your short, their close
+ * closes it, their flip flips you the other way.
+ *
  * converted to SoDEX units at the SoDEX reference price (the mark). Opens and
  * increases are TARGET-based, so a growth too small to trade accumulates and
  * the next change picks it up; reductions are reduce-only and exempt from the
@@ -111,7 +115,7 @@ export interface Plan {
   attach: boolean;
 }
 
-const none = (leaderAfter: number, skip: SkipReason | null, extra: Partial<Plan> = {}): Plan => ({
+const noPlan = (leaderAfter: number, skip: SkipReason | null, extra: Partial<Plan> = {}): Plan => ({
   intents: [],
   skip,
   leaderAfter,
@@ -145,19 +149,29 @@ export function targetNotional(
   return sign(lSize) * s.fixedNotionalUsd;
 }
 
+/** +1 to take the trader's side, -1 to take the other side (a counter-trade). */
+export const directionSign = (s: Pick<CopySettings, 'direction'>): 1 | -1 => (s.direction === 'counter' ? -1 : 1);
+
 export function planLeaderEvent(ctx: PlanContext): Plan {
   const { sub, state, event, market } = ctx;
   const s = sub.settings;
   const lSym = event.symbol;
-  const lBefore = event.before ?? state.leaderPos[lSym] ?? 0;
-  const lAfter = isFlat(event.after) ? 0 : event.after;
+  // The trader's real position, before and after: what the runtime keeps in its books.
+  const realAfter = isFlat(event.after) ? 0 : event.after;
+  // What this copy follows: the real position, or its mirror for a counter-trade. Every
+  // decision below (open, increase, decrease, close, flip, detach) reads the mirror, so a
+  // counter-trade is the same machine on the opposite side; sizes and caps are unchanged.
+  const dir = directionSign(s);
+  const lBefore = dir * (event.before ?? state.leaderPos[lSym] ?? 0);
+  const lAfter = dir * realAfter;
+  const none = (skip: SkipReason | null, extra: Partial<Plan> = {}): Plan => noPlan(realAfter, skip, extra);
 
-  if (state.seen.includes(event.id)) return none(lAfter, 'duplicate');
-  if (isSpotSymbol(s.leader.venue, lSym)) return none(lAfter, 'spot-not-copied');
-  if (!market) return none(lAfter, 'not-on-sodex');
-  if (sub.status === 'paused') return none(lAfter, 'paused');
-  if (sub.status !== 'active') return none(lAfter, 'halted');
-  if (market.status !== 'TRADING') return none(lAfter, 'market-halted');
+  if (state.seen.includes(event.id)) return none('duplicate');
+  if (isSpotSymbol(s.leader.venue, lSym)) return none('spot-not-copied');
+  if (!market) return none('not-on-sodex');
+  if (sub.status === 'paused') return none('paused');
+  if (sub.status !== 'active') return none('halted');
+  if (market.status !== 'TRADING') return none('market-halted');
 
   const owned = state.owned[market.name];
   const F = owned?.size ?? 0;
@@ -167,12 +181,12 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
   let attach = false;
   let before = lBefore;
   if (detached) {
-    if (lAfter === 0) return none(lAfter, DETACH_SKIP[detached], { attach: true });
+    if (lAfter === 0) return none(DETACH_SKIP[detached], { attach: true });
     if (sign(lBefore) * sign(lAfter) < 0 && isFlat(F)) {
       attach = true;
       before = 0;
     } else {
-      return none(lAfter, DETACH_SKIP[detached]);
+      return none(DETACH_SKIP[detached]);
     }
   }
 
@@ -181,7 +195,7 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     s.assetAllow.length > 0 && !s.assetAllow.includes(coin) ? 'asset-not-allowed' : s.assetDeny.includes(coin) ? 'asset-denied' : null;
 
   const ref = ctx.markOf(market.name) ?? (s.leader.venue === 'sodex' && event.price > 0 ? event.price : null);
-  if (ref === null) return none(lAfter, 'no-price', { attach });
+  if (ref === null) return none('no-price', { attach });
 
   const equity = copyEquity(s, state, ctx.markOf);
   const lev = effectiveLeverage(s.maxLeverage, ctx.policy, market.maxLeverage);
@@ -273,7 +287,7 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
 
   if (lAfter === 0) {
     // Close.
-    if (isFlat(F)) return none(lAfter, 'no-follower-position', { attach });
+    if (isFlat(F)) return none('no-follower-position', { attach });
     reduce(0, 'close');
   } else if (sign(before) * sign(lAfter) < 0) {
     // Flip: close ours, open the new side fresh.
@@ -284,7 +298,7 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
   } else if (isFlat(before)) {
     // Open.
     const t = T(lAfter);
-    if (t === null) return none(lAfter, 'no-leader-equity', { attach });
+    if (t === null) return none('no-leader-equity', { attach });
     if (!isFlat(F) && sign(F) !== sign(t)) {
       // Our copy is on the other side (missed a flip): close it first.
       reduce(0, 'flip-close');
@@ -295,7 +309,7 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     let t: number | null;
     if (s.sizingMode === 'fixedNotional' && !isFlat(F)) t = (F * Math.abs(lAfter)) / Math.abs(before);
     else t = T(lAfter);
-    if (t === null) return none(lAfter, 'no-leader-equity', { attach });
+    if (t === null) return none('no-leader-equity', { attach });
     if (isFlat(F) || sign(F) === sign(t)) {
       if (Math.abs(t) <= Math.abs(F)) skip = 'at-target';
       else grow(F, t, 'increase');
@@ -305,14 +319,14 @@ export function planLeaderEvent(ctx: PlanContext): Plan {
     }
   } else if (Math.abs(lAfter) < Math.abs(before)) {
     // Decrease by the leader's fraction.
-    if (isFlat(F)) return none(lAfter, 'no-follower-position', { attach });
+    if (isFlat(F)) return none('no-follower-position', { attach });
     const to = (F * Math.abs(lAfter)) / Math.abs(before);
     reduce(to, 'decrease');
   } else {
     skip = 'at-target';
   }
 
-  return { intents, skip: intents.length ? (skip as SkipReason | null) : (skip ?? 'at-target'), leaderAfter: lAfter, detach: null, attach };
+  return { intents, skip: intents.length ? (skip as SkipReason | null) : (skip ?? 'at-target'), leaderAfter: realAfter, detach: null, attach };
 }
 
 /* ----------------------------------------------------------------- guards ----- */

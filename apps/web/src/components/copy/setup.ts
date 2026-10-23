@@ -89,6 +89,8 @@ export function windowStart(w: Window, now: number): number | null {
 
 /** What the form stores. Strings are what the person typed; see the header. */
 export interface SetupState {
+  /** 'copy' takes the trader's side; 'counter' the other side (counter-trading). */
+  direction: 'copy' | 'counter';
   allocation: string;
   mode: CopySizingMode;
   /** Fixed ratio, as a percent of the leader's size ("10" = 10%). */
@@ -121,6 +123,7 @@ export interface SetupState {
  * worst case from swamping the result.
  */
 export const DEFAULT_SETUP: SetupState = {
+  direction: 'copy',
   allocation: '1000',
   mode: 'proportional',
   ratioPct: '10',
@@ -150,6 +153,7 @@ export function normaliseSetup(s: Partial<SetupState> | null | undefined): Setup
   const out = { ...DEFAULT_SETUP, ...(s ?? {}) };
   if (!SIZING_MODES.some((m) => m.v === out.mode)) out.mode = DEFAULT_SETUP.mode;
   if (out.marginMode !== 'isolated' && out.marginMode !== 'cross') out.marginMode = DEFAULT_SETUP.marginMode;
+  if (out.direction !== 'copy' && out.direction !== 'counter') out.direction = DEFAULT_SETUP.direction;
   out.confirmEach = out.confirmEach === true;
   out.paper = out.paper === true;
   return out;
@@ -164,6 +168,7 @@ export function toCopySettings(p: ParsedSetup, s: SetupState, leader: { venue: L
   const c = p.config;
   return {
     leader: { venue: leader.venue, address: leader.address.toLowerCase() },
+    direction: s.direction,
     sizingMode: c.sizingMode,
     allocationUsd: c.allocationUsd,
     ratio: c.ratio,
@@ -250,6 +255,7 @@ export function parseSetup(s: SetupState): ParsedSetup {
       assetDeny: deny,
       copyExisting: s.copyExisting,
       slippageBps: slip !== null && slip >= 0 && slip <= 500 ? slip : Number(DEFAULT_SETUP.slippageBps),
+      direction: s.direction,
     },
     fixedNotionalUsd: notional ?? Number(DEFAULT_SETUP.notional),
     errors,
@@ -324,8 +330,10 @@ export function workedExample(
     caveat = `Below the ${fmtUsd(MIN_ORDER_USD, 0)} minimum order, so it would not be copied.`;
   }
   const size = mine / px;
+  // A counter-trade takes the other side of the same position, at the same size.
+  const yours = config.direction === 'counter' ? (pos.side === 'long' ? 'short' : 'long') : pos.side;
   return {
-    text: `Leader ${pos.side} ${fmtSize(pos.size)} ${coin} (${fmtUsd(notional, 0)})${basis}. You: ${pos.side} ${fmtSize(size)} ${coin} (${fmtUsd(mine, 2)}).`,
+    text: `Leader ${pos.side} ${fmtSize(pos.size)} ${coin} (${fmtUsd(notional, 0)})${basis}. You: ${yours} ${fmtSize(size)} ${coin} (${fmtUsd(mine, 2)}).`,
     caveat,
   };
 }

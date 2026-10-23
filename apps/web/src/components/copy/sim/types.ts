@@ -84,6 +84,11 @@ export interface CopyConfig {
   copyExisting: boolean;
   /** Max acceptable slippage per copied order, basis points. */
   slippageBps: number;
+  /**
+   * 'counter': take the other side of every leader position (the live planner's
+   * direction, packages/copy-engine planner.ts). Absent = 'copy'.
+   */
+  direction?: 'copy' | 'counter';
 }
 
 /** One entry of the per-trade log (copied or skipped). */

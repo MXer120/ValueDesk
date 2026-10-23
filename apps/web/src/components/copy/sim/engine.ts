@@ -556,6 +556,8 @@ export function downsampleIndices(ts: number[], a: number[], b: number[], max: n
 export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOptions = {}): SimResult {
   /* ---- config, sanitised (never trust UI input to be finite) ---- */
   const mode = config.sizingMode;
+  // A counter-trade decides on the leader's position mirrored; the leader's own books stay real.
+  const mirror = config.direction === 'counter' ? -1 : 1;
   const ratio = fin(config.ratio) && config.ratio > 0 ? config.ratio : 0;
   const maxLev = fin(config.maxLeverage) && config.maxLeverage > 0 ? config.maxLeverage : 0;
   const maxPosUsd = fin(config.maxPositionUsd) && config.maxPositionUsd > 0 ? config.maxPositionUsd : 0;
@@ -1009,23 +1011,26 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
     }
 
     // 6. Detached markets wait until the leader is flat (or flips to a fresh position).
+    //    From here on the copy reads cB / cA: the leader's position, mirrored for a counter-trade.
+    const cB = mirror * lBefore;
+    const cA = mirror * lAfter;
     let kind: SimAction;
     if (m.detached) {
       const reason: SkipReason =
         m.detached === 'pre-existing' ? 'pre-existing-position' : m.detached === 'stop-loss' ? 'after-stop-loss' : 'after-take-profit';
-      const flips = lAfter !== 0 && sgn(lAfter) !== sgn(lBefore);
-      if (lAfter === 0 || flips) m.detached = null;
+      const flips = cA !== 0 && sgn(cA) !== sgn(cB);
+      if (cA === 0 || flips) m.detached = null;
       if (!flips) {
         skip(ev, m, reason, lBefore, lAfter);
         record(ev.time);
         continue;
       }
       kind = 'open';
-    } else if (join) kind = lAfter === 0 ? 'close' : 'join';
-    else if (lBefore === 0) kind = 'open';
-    else if (lAfter === 0) kind = 'close';
-    else if (sgn(lAfter) !== sgn(lBefore)) kind = 'flip';
-    else kind = Math.abs(lAfter) > Math.abs(lBefore) ? 'increase' : 'decrease';
+    } else if (join) kind = cA === 0 ? 'close' : 'join';
+    else if (cB === 0) kind = 'open';
+    else if (cA === 0) kind = 'close';
+    else if (sgn(cA) !== sgn(cB)) kind = 'flip';
+    else kind = Math.abs(cA) > Math.abs(cB) ? 'increase' : 'decrease';
 
     // 7. Desired follower position D (signed base units).
     const F = m.fLots * m.lot;
@@ -1037,14 +1042,14 @@ export function runCopySimulation(fills: Fill[], config: CopyConfig, opts: SimOp
         record(ev.time);
         continue;
       }
-      D = kind === 'close' || sgn(F) !== sgn(lBefore) ? 0 : (F * Math.abs(lAfter)) / Math.abs(lBefore);
+      D = kind === 'close' || sgn(F) !== sgn(cB) ? 0 : (F * Math.abs(cA)) / Math.abs(cB);
     } else {
       const target =
-        kind === 'increase' && mode === 'fixedNotional' && F !== 0 && sgn(F) === sgn(lAfter)
-          ? (F * Math.abs(lAfter)) / Math.abs(lBefore)
-          : openTarget(m, lAfter, ev.time);
+        kind === 'increase' && mode === 'fixedNotional' && F !== 0 && sgn(F) === sgn(cA)
+          ? (F * Math.abs(cA)) / Math.abs(cB)
+          : openTarget(m, cA, ev.time);
       if (typeof target === 'string') {
-        if (F !== 0 && sgn(F) !== sgn(lAfter)) {
+        if (F !== 0 && sgn(F) !== sgn(cA)) {
           D = 0; // still close the old side of a flip
           note = `open leg skipped: ${target}`;
         } else {

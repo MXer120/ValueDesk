@@ -7800,7 +7800,7 @@ function randomId(prefix = "") {
 }
 
 // packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-10-23";
+var COPY_TERMS_VERSION = "2026-10-23.2";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var SANCTIONED = ["CU", "IR", "KP", "SY", "RU", "BY", "MM"];
 var BLOCKED_COUNTRIES = [...US_REGIONS, ...SANCTIONED];
@@ -7907,6 +7907,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
+  direction: "copy",
   sizingMode: "proportional",
   allocationUsd: 1e3,
   ratio: 0.1,
@@ -7938,6 +7939,7 @@ var LIMITS = {
 };
 var VENUES = ["sodex", "hyperliquid"];
 var MODES = ["proportional", "fixedRatio", "fixedNotional"];
+var DIRECTIONS = ["copy", "counter"];
 function numberIn(v, lim, label, errors, field) {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   if (typeof n !== "number" || !Number.isFinite(n)) {
@@ -7973,6 +7975,8 @@ function checkSettings(input) {
   const venue = leaderIn.venue;
   if (!VENUES.includes(venue)) errors["leader.venue"] = "The trader must be on SoDEX or Hyperliquid.";
   const pick = (k) => k in s ? s[k] : DEFAULT_SETTINGS[k];
+  const direction = (s.direction ?? null) === null ? DEFAULT_SETTINGS.direction : s.direction;
+  if (!DIRECTIONS.includes(direction)) errors.direction = "Choose copy or counter-trade.";
   const sizingMode = pick("sizingMode");
   if (!MODES.includes(sizingMode)) errors.sizingMode = "Choose proportional, fixed ratio or fixed amount.";
   const allocationUsd = numberIn(pick("allocationUsd"), LIMITS.allocationUsd, "Allocation", errors, "allocationUsd");
@@ -8000,6 +8004,7 @@ function checkSettings(input) {
   return {
     settings: {
       leader: { venue, address },
+      direction,
       sizingMode,
       allocationUsd,
       ratio,
@@ -8185,7 +8190,7 @@ function grossNotional(state, markOf, except) {
   }
   return g;
 }
-var none = (leaderAfter, skip, extra = {}) => ({
+var noPlan = (leaderAfter, skip, extra = {}) => ({
   intents: [],
   skip,
   leaderAfter,
@@ -8209,36 +8214,40 @@ function targetNotional(s, lSize, lPrice, equity, leaderEquity) {
   if (s.sizingMode === "fixedRatio") return lNotional * s.ratio;
   return sign(lSize) * s.fixedNotionalUsd;
 }
+var directionSign = (s) => s.direction === "counter" ? -1 : 1;
 function planLeaderEvent(ctx) {
   const { sub, state, event, market } = ctx;
   const s = sub.settings;
   const lSym = event.symbol;
-  const lBefore = event.before ?? state.leaderPos[lSym] ?? 0;
-  const lAfter = isFlat(event.after) ? 0 : event.after;
-  if (state.seen.includes(event.id)) return none(lAfter, "duplicate");
-  if (isSpotSymbol(s.leader.venue, lSym)) return none(lAfter, "spot-not-copied");
-  if (!market) return none(lAfter, "not-on-sodex");
-  if (sub.status === "paused") return none(lAfter, "paused");
-  if (sub.status !== "active") return none(lAfter, "halted");
-  if (market.status !== "TRADING") return none(lAfter, "market-halted");
+  const realAfter = isFlat(event.after) ? 0 : event.after;
+  const dir = directionSign(s);
+  const lBefore = dir * (event.before ?? state.leaderPos[lSym] ?? 0);
+  const lAfter = dir * realAfter;
+  const none = (skip2, extra = {}) => noPlan(realAfter, skip2, extra);
+  if (state.seen.includes(event.id)) return none("duplicate");
+  if (isSpotSymbol(s.leader.venue, lSym)) return none("spot-not-copied");
+  if (!market) return none("not-on-sodex");
+  if (sub.status === "paused") return none("paused");
+  if (sub.status !== "active") return none("halted");
+  if (market.status !== "TRADING") return none("market-halted");
   const owned = state.owned[market.name];
   const F = owned?.size ?? 0;
   const detached = state.detached[lSym];
   let attach = false;
   let before = lBefore;
   if (detached) {
-    if (lAfter === 0) return none(lAfter, DETACH_SKIP[detached], { attach: true });
+    if (lAfter === 0) return none(DETACH_SKIP[detached], { attach: true });
     if (sign(lBefore) * sign(lAfter) < 0 && isFlat(F)) {
       attach = true;
       before = 0;
     } else {
-      return none(lAfter, DETACH_SKIP[detached]);
+      return none(DETACH_SKIP[detached]);
     }
   }
   const coin = coinOf(s.leader.venue, lSym);
   const filtered = s.assetAllow.length > 0 && !s.assetAllow.includes(coin) ? "asset-not-allowed" : s.assetDeny.includes(coin) ? "asset-denied" : null;
   const ref = ctx.markOf(market.name) ?? (s.leader.venue === "sodex" && event.price > 0 ? event.price : null);
-  if (ref === null) return none(lAfter, "no-price", { attach });
+  if (ref === null) return none("no-price", { attach });
   const equity = copyEquity(s, state, ctx.markOf);
   const lev = effectiveLeverage(s.maxLeverage, ctx.policy, market.maxLeverage);
   const levNoRegion = effectiveLeverage(s.maxLeverage, { maxLeverage: null }, market.maxLeverage);
@@ -8322,7 +8331,7 @@ function planLeaderEvent(ctx) {
     return n === null ? null : n / ref;
   };
   if (lAfter === 0) {
-    if (isFlat(F)) return none(lAfter, "no-follower-position", { attach });
+    if (isFlat(F)) return none("no-follower-position", { attach });
     reduce(0, "close");
   } else if (sign(before) * sign(lAfter) < 0) {
     if (!isFlat(F)) reduce(0, "flip-close");
@@ -8331,7 +8340,7 @@ function planLeaderEvent(ctx) {
     else grow(0, t, "flip-open");
   } else if (isFlat(before)) {
     const t = T(lAfter);
-    if (t === null) return none(lAfter, "no-leader-equity", { attach });
+    if (t === null) return none("no-leader-equity", { attach });
     if (!isFlat(F) && sign(F) !== sign(t)) {
       reduce(0, "flip-close");
       grow(0, t, "flip-open");
@@ -8340,7 +8349,7 @@ function planLeaderEvent(ctx) {
     let t;
     if (s.sizingMode === "fixedNotional" && !isFlat(F)) t = F * Math.abs(lAfter) / Math.abs(before);
     else t = T(lAfter);
-    if (t === null) return none(lAfter, "no-leader-equity", { attach });
+    if (t === null) return none("no-leader-equity", { attach });
     if (isFlat(F) || sign(F) === sign(t)) {
       if (Math.abs(t) <= Math.abs(F)) skip = "at-target";
       else grow(F, t, "increase");
@@ -8349,13 +8358,13 @@ function planLeaderEvent(ctx) {
       grow(0, t, "flip-open");
     }
   } else if (Math.abs(lAfter) < Math.abs(before)) {
-    if (isFlat(F)) return none(lAfter, "no-follower-position", { attach });
+    if (isFlat(F)) return none("no-follower-position", { attach });
     const to = F * Math.abs(lAfter) / Math.abs(before);
     reduce(to, "decrease");
   } else {
     skip = "at-target";
   }
-  return { intents, skip: intents.length ? skip : skip ?? "at-target", leaderAfter: lAfter, detach: null, attach };
+  return { intents, skip: intents.length ? skip : skip ?? "at-target", leaderAfter: realAfter, detach: null, attach };
 }
 function planGuards(ctx) {
   const s = ctx.sub.settings;
@@ -9434,6 +9443,9 @@ var CopyRuntime = class {
     const s = this.need(id);
     if (patch.settings && lk(patch.settings.leader) !== lk(s.settings.leader)) throw new Error("The trader of a copy cannot change; start a new copy instead.");
     if (patch.settings && patch.settings.paper !== s.settings.paper) throw new Error("A copy cannot switch between paper and live; start a new copy instead.");
+    if (patch.settings && (patch.settings.direction ?? "copy") !== (s.settings.direction ?? "copy")) {
+      throw new Error("A copy cannot switch between copying and counter-trading; start a new copy instead.");
+    }
     const next = { ...s, ...patch, updatedAt: Date.now() };
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);
@@ -10203,6 +10215,7 @@ function verifyCopyRequest(r, o) {
   if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
   return { ok: true, digest, payload };
 }
+var EXECUTOR_FEATURES = ["counter"];
 
 // packages/copy-engine/src/algo/types.ts
 var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket"];
@@ -13028,7 +13041,7 @@ var AlgoRuntime = class {
 };
 
 // packages/copy-engine/src/index.ts
-var COPY_ENGINE_VERSION = "1.0.0";
+var COPY_ENGINE_VERSION = "1.1.0";
 
 // apps/executor/src/service.ts
 import { existsSync as existsSync2 } from "node:fs";
@@ -13139,7 +13152,8 @@ var ExecutorService = class {
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
-      algos: { maxPerOwner: this.cfg.maxAlgosPerOwner }
+      algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
+      features: [...EXECUTOR_FEATURES]
     };
   }
   health() {

@@ -42,6 +42,7 @@ test('the setup form becomes rules the engine accepts as they are', () => {
 
 const base = (): LiveCopy => ({
   owner: '0x' + '11'.repeat(20),
+  canSign: true,
   terms: null,
   viewerCountry: null,
   fee: { checked: true, perps: null, covers: false, builderId: 1 },

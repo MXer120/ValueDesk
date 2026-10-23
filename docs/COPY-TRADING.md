@@ -31,6 +31,25 @@ trader at most 35; shown with "not a recommendation"), the two-step copy dialog
 the amount and the mode's signatures), one trader's page and My copies
 (`panels.tsx`).
 
+### Counter-trading
+
+A copy has a direction (`CopySettings.direction`, 2026-10-23): `copy` takes the
+trader's side, `counter` the other side. The planner (and the backtest engine,
+`components/copy/sim/engine.ts`) then decides on the leader's position mirrored,
+-L: their long opens your short of the size your rules give, their reduce, close
+or flip is your reduce, close or flip the other way. Caps, stops and the region
+limit are unchanged; the leader's own books (positions, the leader curve) stay real.
+
+- **Signed only when it matters.** `canonicalSettings` writes `direction` only for a
+  counter-trade, so every copy signed before stays byte for byte the same; a missing
+  direction is a copy. A running copy cannot switch direction.
+- **Never to an executor that would ignore it.** Unknown rule fields are ignored, so an
+  older executor would COPY a counter-trade. Executors from 1.1.0 list `counter` in
+  `info.features`; the site (`copy/live.ts` `supportsCounter`) refuses to start a
+  counter-trade on one that does not, and says to update a self-hosted copier.
+- **Terms 2026-10-23.2** name the direction (section 3) and its risk (section 7), and the
+  risk summary in the app has a line for it: every follower accepts them again.
+
 ### What a copy does
 
 - Every leader position change (stream print, coalesced 150 ms per market, or a
