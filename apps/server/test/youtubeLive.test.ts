@@ -9,6 +9,12 @@ import { liveVideo, liveVideoIn, resetLiveCache } from '../src/valuescan/youtube
 const page = (id: string, live: boolean) =>
   `<html><link rel="canonical" href="https://www.youtube.com/watch?v=${id}">${live ? '{"isLive":true}' : '{"isUpcoming":true}'}</html>`;
 
+test('liveVideoIn: the copy a datacentre is served (sign-in wall, canonical undefined) still names the video', () => {
+  const tokyo = '<link rel="canonical" href="undefined">{"playabilityStatus":{"status":"LOGIN_REQUIRED"},"videoId":"qe9ePOlGdu4",'
+    + '"currentVideoEndpoint":{"clickTrackingParams":"x","commandMetadata":{"webCommandMetadata":{"url":"/watch?v=QB5BNdBFujE"}},"watchEndpoint":{"videoId":"QB5BNdBFujE"}},"isLive":true}';
+  assert.equal(liveVideoIn(tokyo), 'QB5BNdBFujE');
+});
+
 test('liveVideoIn: the canonical video while it is on air, nothing otherwise', () => {
   assert.equal(liveVideoIn(page('QB5BNdBFujE', true)), 'QB5BNdBFujE');
   assert.equal(liveVideoIn(page('QB5BNdBFujE', false)), null, 'scheduled, not live');

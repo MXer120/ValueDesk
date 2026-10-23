@@ -2,8 +2,9 @@
  * A YouTube channel's live stream right now, for the Live Feed widget.
  *
  * YouTube's `embed/live_stream?channel=` stopped resolving, so the stream is
- * found the way a browser finds it: the channel's /live page names it as its
- * canonical watch URL, and says "isLive" while it is on air. One fetch per
+ * found the way a browser finds it: the channel's /live page names the video it
+ * opens on (`currentVideoEndpoint`, or its canonical watch URL) and says "isLive"
+ * while it is on air. One fetch per
  * channel per three minutes (cached, one flight at a time); the host is fixed
  * and the channel id is checked, so nothing else can be asked for.
  */
@@ -23,9 +24,14 @@ export function resetLiveCache(): void {
 
 /** The live video id in a channel's /live page, or null when nothing is on air. */
 export function liveVideoIn(html: string): string | null {
-  const m = /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})"/.exec(html);
-  if (!m) return null;
-  return /"isLive":true/.test(html) ? m[1]! : null;
+  if (!/"isLive":true/.test(html)) return null;
+  // The video the page opens on. A datacentre address is served a copy behind a sign-in
+  // wall whose canonical link is "undefined"; this field is in both copies.
+  const at = html.indexOf('"currentVideoEndpoint"');
+  const current = at >= 0 ? /"videoId":"([A-Za-z0-9_-]{11})"/.exec(html.slice(at, at + 1200)) : null;
+  if (current) return current[1]!;
+  const canonical = /<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})"/.exec(html);
+  return canonical ? canonical[1]! : null;
 }
 
 export async function liveVideo(channel: string, fetchImpl: typeof fetch = fetch): Promise<string | null> {
