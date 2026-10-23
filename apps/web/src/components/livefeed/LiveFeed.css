@@ -1,30 +1,67 @@
-/* The Live Feed widget (LiveFeed.tsx): the player fills the panel; the controls
-   float over its top edge and show only while the pointer is over it (or the
-   keyboard is in it, or nothing is playing). */
-.lf { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 0; overflow: hidden; border-radius: inherit; background: #000; }
-.lf.is-empty { background: transparent; }
-.lf__frame { display: block; width: 100%; height: 100%; border: 0; }
+/* The Live Feed widget (LiveFeed.tsx). Rounded like the card it sits in, the
+   picture clipped to it. Docked: a header that stays, over a picture of exactly
+   16:9. Floating: the picture fills the card and the controls show over its top
+   edge while the pointer moves (or the keyboard is in it, or nothing plays). */
+.lf {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-card);
+  background: #000;
+  isolation: isolate;
+}
+.lf.is-empty,
+.lf.is-docked { background: transparent; justify-content: flex-start; }
+.lf__pic { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; background: #000; }
+.lf.is-docked .lf__pic { flex: none; border-radius: 0 0 var(--radius-card) var(--radius-card); overflow: hidden; }
+.lf__frame { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; }
+.lf__shield { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
+.lf.is-empty { align-items: center; justify-content: center; }
+
+.lf__head,
+.lf__bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; }
+.lf__head { flex: none; height: 46px; }
 .lf__bar {
   position: absolute;
   inset: 0 0 auto 0;
   z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px;
   background: linear-gradient(rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
   opacity: 0;
   transform: translateY(-4px);
-  transition: opacity 160ms, transform 160ms;
+  transition: opacity 180ms, transform 180ms;
   pointer-events: none;
 }
-.lf:hover .lf__bar,
-.lf.is-hover .lf__bar,
+.lf.is-awake .lf__bar,
 .lf:focus-within .lf__bar,
 .lf.is-empty .lf__bar,
 .lf.is-editing .lf__bar { opacity: 1; transform: none; pointer-events: auto; }
 .lf.is-empty .lf__bar { background: none; }
 .lf__gap { flex: 1 1 auto; }
+
+/* LIVE, with a red dot that breathes slowly. */
+.lf__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 7px;
+  border-radius: 6px;
+  background: rgba(239, 74, 60, 0.12);
+  color: #ff6b5c;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.lf__live i { width: 7px; height: 7px; border-radius: 50%; background: #ef4a3c; box-shadow: 0 0 6px rgba(239, 74, 60, 0.8); animation: lf-blink 2.4s ease-in-out infinite; }
+@keyframes lf-blink { 50% { opacity: 0.25; box-shadow: none; } }
+
 .lf__pick {
   display: inline-flex;
   flex-direction: row;
@@ -43,6 +80,8 @@
   font-weight: 500;
   cursor: pointer;
 }
+.lf.is-docked .lf__pick,
+.lf.is-docked .lf__btn { background: rgba(255, 255, 255, 0.04); border-color: rgba(255, 255, 255, 0.08); -webkit-backdrop-filter: none; backdrop-filter: none; }
 .lf__pick:hover { border-color: rgba(255, 255, 255, 0.26); }
 .lf__btn {
   display: grid;
@@ -76,5 +115,13 @@
   font-size: var(--fs-xs);
 }
 .lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
-.lf__err { position: absolute; left: 10px; right: 10px; top: 48px; z-index: 2; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
+.lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 3; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
+@media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }
+
+/* The panel around the feed shows nothing of its own at the edges: no ring and no
+   grey sliver while it is resized. */
+.dash-panel[data-panel="livefeed"] { background: #000; box-shadow: none; }
+.dash-panel[data-panel="livefeed"]:has(.lf.is-docked),
+.dash-panel[data-panel="livefeed"]:has(.lf.is-empty) { background: var(--bg-panel); }
+.dash-panel[data-panel="livefeed"] .dash-panel__body { border-radius: inherit; overflow: hidden; }

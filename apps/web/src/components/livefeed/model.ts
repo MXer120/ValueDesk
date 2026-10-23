@@ -123,6 +123,8 @@ export function embedUrl(s: Stream, o: { muted: boolean; host: string; origin: s
         // The widget's own controls (mute, fullscreen, clear) stand in for YouTube's.
         controls: '0',
         iv_load_policy: '3',
+        // Captions off at the start too (the widget also turns them off by command once it plays).
+        cc_load_policy: '0',
       });
       return `https://www.youtube.com/${path}?${q}`;
     }

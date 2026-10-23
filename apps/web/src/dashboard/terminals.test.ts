@@ -36,3 +36,30 @@ test('a deleted terminal stays deleted', () => {
   const gone = removeSlot(activateSlot(s, 'trade'), 'news');
   assert.deepEqual(terminalsOf(seedTerminals(gone, seeds)).map((t) => t.id), ['trade']);
 });
+
+test('reset: News goes back to the News layout, sizes only keeps the widgets', async () => {
+  const { resetSlot } = await import('./storage');
+  const s = activateSlot(seedTerminals(fresh, seeds), 'news');
+  const moved: SavedDashboard = {
+    ...s,
+    layouts: { lg: [{ i: 'livefeed', x: 0, y: 0, w: 20, h: 30 }, { i: 'trades', x: 20, y: 0, w: 10, h: 30 }] },
+    shown: ['livefeed', 'news', 'chart', 'trades'],
+  };
+  const sizes = resetSlot(moved, seeds, 'sizes');
+  assert.deepEqual(sizes.layouts, seeds[1]!.layouts, 'the seed’s sizes and places');
+  assert.deepEqual(sizes.shown, ['livefeed', 'news', 'chart', 'trades'], 'the added widget stays');
+  const all = resetSlot(moved, seeds, 'all');
+  assert.deepEqual(all.layouts, seeds[1]!.layouts);
+  assert.deepEqual(all.shown, ['livefeed', 'news', 'chart'], 'only the panels it started with');
+  assert.equal(all.slots!.find((x) => x.id === 'news')!.blank, true);
+  assert.deepEqual(all.slots!.find((x) => x.id === 'trade')!.layouts, fresh.layouts, 'the other terminal is untouched');
+});
+
+test('reset: Trade goes back to the designed default', async () => {
+  const { resetSlot } = await import('./storage');
+  const s = seedTerminals(fresh, seeds);
+  const all = resetSlot({ ...s, hidden: ['venue', 'book'] }, seeds, 'all');
+  assert.deepEqual(all.layouts, {});
+  assert.deepEqual(all.hidden, []);
+  assert.equal(all.slots!.find((x) => x.id === 'trade')!.blank, undefined);
+});

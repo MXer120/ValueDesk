@@ -213,6 +213,43 @@ export function seedTerminals(state: SavedDashboard, seeds: readonly TerminalSee
   return { ...state, slots, seeded: [...seeded] };
 }
 
+/** What "Reset layout" resets: sizes and places only, or the widgets too. */
+export type ResetMode = 'sizes' | 'all';
+
+/**
+ * The canvas on screen back to its own original: a shipped terminal to its seed
+ * (News to the News layout), any other to the designed default. `sizes` keeps
+ * which panels it shows; `all` takes those back too. Unlocks the grid.
+ */
+export function resetSlot(stateIn: SavedDashboard, seeds: readonly TerminalSeed[], mode: ResetMode): SavedDashboard {
+  // The canvas on screen is the top-level copy; its slot is brought up to it first.
+  const state = mirrorIntoActiveSlot(stateIn);
+  const seed = seeds.find((t) => t.id === state.activeSlot);
+  const layouts = seed?.layouts ?? {};
+  if (!state.slots?.length) {
+    return mode === 'all'
+      ? { v: state.v, layouts: {}, locked: false, ...(state.seeded ? { seeded: state.seeded } : {}) }
+      : { ...state, layouts: {}, locked: false };
+  }
+  const slots = state.slots.map((s) => {
+    if (s.id !== state.activeSlot) return s;
+    if (mode === 'sizes') return { ...s, layouts };
+    const next: LayoutSlot = { ...s, layouts, hidden: seed?.hidden ?? [], shown: seed?.shown ?? [] };
+    if (seed?.blank) next.blank = true;
+    else delete next.blank;
+    return next;
+  });
+  const active = slots.find((s) => s.id === state.activeSlot);
+  return {
+    ...state,
+    locked: false,
+    slots,
+    layouts: active?.layouts ?? {},
+    hidden: active?.hidden ?? [],
+    shown: active?.shown ?? [],
+  };
+}
+
 export interface TerminalView {
   id: string;
   name: string;

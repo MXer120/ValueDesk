@@ -29,8 +29,9 @@ import { PanelChrome } from './Panel';
 import { breakpointFor, resolveLayout, samePlacements, toPlacements } from './resolve';
 import {
   activateSlot, addEmptySlot, clearDashboard, ensureEditSlots, loadDashboard, mirrorIntoActiveSlot, removeSlot,
-  saveDashboard, seedTerminals, type SavedDashboard,
+  resetSlot, saveDashboard, seedTerminals, type ResetMode, type SavedDashboard,
 } from './storage';
+import { ResetDialog } from './ResetDialog';
 import { publishTerminals, registerTerminals, snapshotOf } from './terminals';
 import { SeamLayer } from './SeamLayer';
 import type { SeamBox } from './seams';
@@ -274,19 +275,18 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
   // results from them - so the flag is already set when the write arrives.
   const markDirty = useCallback(() => { dirty.current = true; }, []);
 
-  const reset = useCallback(() => {
+  /* "Reset layout" asks first (ResetDialog.tsx); the terminal on screen then goes back to
+     its own original - News to the News layout - sizes only, or widgets too. */
+  const [resetAsk, setResetAsk] = useState(false);
+  const reset = useCallback((mode: ResetMode) => {
     dirty.current = false;
+    setResetAsk(false);
     setSaved((prev) => {
-      if (!prev.slots?.length) {
+      const next = resetSlot(prev, config.terminals ?? [], mode);
+      if (!next.slots?.length && mode === 'all' && !next.seeded) {
         clearDashboard(config);
-        return { v: config.version, layouts: {}, locked: false };
+        return next;
       }
-      const slots = prev.slots.map((s) =>
-        s.id === prev.activeSlot ? { ...s, blank: false, layouts: {}, hidden: [], shown: [] } : s,
-      );
-      const next: SavedDashboard = {
-        ...prev, locked: false, layouts: {}, hidden: [], shown: [], slots,
-      };
       saveDashboard(config, next);
       return next;
     });
@@ -779,6 +779,12 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
         )}
       </div>
 
+      <ResetDialog
+        open={resetAsk}
+        name={saved.slots?.find((s) => s.id === saved.activeSlot)?.name ?? null}
+        onReset={reset}
+        onClose={() => setResetAsk(false)}
+      />
       {menuFx.value && (
         <LayoutMenu
           at={menuFx.value}
@@ -792,7 +798,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
           }))}
           hidden={hiddenSet}
           onTogglePanel={toggleHidden}
-          onReset={reset}
+          onReset={() => setResetAsk(true)}
           hasSaved={hasSaved}
           onEditLayout={enterEdit}
           onNotificationSettings={onNotificationSettings}
