@@ -21,8 +21,8 @@
 #      with a .sha256 of the UNCOMPRESSED file next to it;
 #   4. the staging copy is removed (or kept: BACKUP_KEEP_LOCAL=1, the index only).
 #
-# THE EXECUTOR: the database only. The files kek and session.key next to it are
-# never copied - the followers' keys in the database are sealed with the kek, so a
+# THE EXECUTOR: the database only. Its two secret files next to it (the kek and the
+# session secret) are never copied - the followers' keys in the database are sealed with the kek, so a
 # backup holds nothing a trade could be signed with. Those two files stay on the
 # data volume and in its EBS snapshots.
 #

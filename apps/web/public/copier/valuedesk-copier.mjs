@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// ../valuescan/node_modules/ws/lib/constants.js
+// node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "../valuescan/node_modules/ws/lib/constants.js"(exports, module) {
+  "node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/node-gyp-build/node-gyp-build.js
+// node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "../valuescan/node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/node-gyp-build/index.js
+// node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "../valuescan/node_modules/node-gyp-build/index.js"(exports, module) {
+  "node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/bufferutil/fallback.js
+// node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "../valuescan/node_modules/bufferutil/fallback.js"(exports, module) {
+  "node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/bufferutil/index.js
+// node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "../valuescan/node_modules/bufferutil/index.js"(exports, module) {
+  "node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/buffer-util.js
+// node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "../valuescan/node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/limiter.js
+// node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "../valuescan/node_modules/ws/lib/limiter.js"(exports, module) {
+  "node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/permessage-deflate.js
+// node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "../valuescan/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/utf-8-validate/fallback.js
+// node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "../valuescan/node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/utf-8-validate/index.js
+// node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "../valuescan/node_modules/utf-8-validate/index.js"(exports, module) {
+  "node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/validation.js
+// node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "../valuescan/node_modules/ws/lib/validation.js"(exports, module) {
+  "node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/receiver.js
+// node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "../valuescan/node_modules/ws/lib/receiver.js"(exports, module) {
+  "node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/sender.js
+// node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "../valuescan/node_modules/ws/lib/sender.js"(exports, module) {
+  "node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/event-target.js
+// node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "../valuescan/node_modules/ws/lib/event-target.js"(exports, module) {
+  "node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/extension.js
+// node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "../valuescan/node_modules/ws/lib/extension.js"(exports, module) {
+  "node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/websocket.js
+// node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "../valuescan/node_modules/ws/lib/websocket.js"(exports, module) {
+  "node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/stream.js
+// node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "../valuescan/node_modules/ws/lib/stream.js"(exports, module) {
+  "node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/subprotocol.js
+// node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "../valuescan/node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// ../valuescan/node_modules/ws/lib/websocket-server.js
+// node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "../valuescan/node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -4018,7 +4018,7 @@ function loadConfig(env = process.env) {
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// ../valuescan/node_modules/ws/wrapper.mjs
+// node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4326,7 +4326,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// ../valuescan/node_modules/@noble/hashes/esm/_u64.js
+// node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4349,7 +4349,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// ../valuescan/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4417,7 +4417,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// ../valuescan/node_modules/@noble/hashes/esm/sha3.js
+// node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4598,7 +4598,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4632,11 +4632,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -4689,7 +4689,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -4791,7 +4791,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -4941,7 +4941,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5006,7 +5006,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// ../valuescan/node_modules/@noble/curves/esm/abstract/utils.js
+// node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5274,7 +5274,7 @@ function memoized(fn) {
   };
 }
 
-// ../valuescan/node_modules/@noble/curves/esm/abstract/modular.js
+// node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5550,7 +5550,7 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// ../valuescan/node_modules/@noble/curves/esm/abstract/curve.js
+// node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -5777,7 +5777,7 @@ function validateBasic(curve) {
   });
 }
 
-// ../valuescan/node_modules/@noble/curves/esm/abstract/weierstrass.js
+// node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -6646,7 +6646,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// ../valuescan/node_modules/@noble/curves/esm/_shortw_utils.js
+// node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6659,7 +6659,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// ../valuescan/node_modules/@noble/curves/esm/secp256k1.js
+// node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
