@@ -61,7 +61,7 @@ import './components/algo/algo.css';
 import './copy/copy.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
-   the four @fontsource sheets (main.tsx, first), chart/tv/*.css, which
+   the @fontsource sheets (main.tsx, first), chart/tv/*.css, which
    belong to the optional TradingView chart and were already loaded on demand,
    and legal/legal.css: it arrives with the legal pages' chunk, and every rule
    in it is scoped to `.legal*` classes no other page has, so where it lands in

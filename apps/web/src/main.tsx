@@ -15,6 +15,9 @@ import '@fontsource/ibm-plex-sans/500.css';
 // advance width (digit run 64.20 vs DIN's 63.98, against Plex's 72.00).
 import '@fontsource/asap/400.css';
 import '@fontsource/asap/500.css';
+// Space Grotesk (SIL OFL): the display face of page headlines (--font-display),
+// one weight. Only the subset a page's text needs is fetched (unicode-range).
+import '@fontsource/space-grotesk/600.css';
 import { App } from './App';
 import { installGlobalLogging } from './log';
 import { installChunkErrorReload } from './lazyPage';

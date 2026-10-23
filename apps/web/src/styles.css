@@ -109,6 +109,13 @@
      look like a card deck. */
   --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.5);
   --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.55);
+  /* DEPTH, from the owner's dashboard (MissionControl, ds.css --ds-sh-*): no
+     border - a hairline ring of light and a soft drop shadow in one
+     box-shadow. 1 rests (pills, controls), 2 is a card, 3 floats (an open
+     list, a lifted card). */
+  --depth-1: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 2px 8px rgba(0, 0, 0, 0.32);
+  --depth-2: 0 0 0 1px rgba(255, 255, 255, 0.045), 0 8px 24px rgba(0, 0, 0, 0.42);
+  --depth-3: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 60px rgba(0, 0, 0, 0.6);
   /* Legend text sits directly on candles, so it needs its own contrast. */
   --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.6);
 
@@ -222,6 +229,8 @@
      axis labels. Labels and column HEADS stay --font-text. */
   --font-text: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-num: "Asap", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  /* Page headlines only (the Copy page hero): Space Grotesk 600, main.tsx. */
+  --font-display: "Space Grotesk", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
 
   /* Glass surfaces. Every floating panel that is not the page itself - menus,
      the leverage/margin popovers, modals - reads as glassmorphism: translucent
@@ -1198,6 +1207,49 @@ input:hover, select:hover { border-color: var(--line-strong); }
    is the one lever that actually themes it (color-scheme + option colours). */
 select { color-scheme: dark; }
 option { background: var(--bg-elevated); color: var(--text); }
+
+/* THE OPEN LIST OF EVERY NATIVE SELECT, where the browser lets CSS reach it
+   (Chromium 135+, the customizable select): the dashboard's floating depth,
+   rounded rows, a check on the chosen one - the same look as FxSelect's list
+   (funds.css .fx-list). Elsewhere the popup stays the platform's, themed by
+   the two lines above. The closed control keeps its own look: the gradient
+   chevron above stays, the browser's picker icon is hidden. */
+@supports (appearance: base-select) {
+  /* select[class] outranks a component's own "appearance: none" (.oe-select); it
+     sets nothing else. */
+  select, select[class], ::picker(select) { appearance: base-select; }
+  select::picker-icon { display: none; }
+  /* The copy setup's country select draws no caret of its own (copy.css): the
+     browser's, in the label colour. */
+  .cs-select::picker-icon { display: block; color: var(--muted); }
+  ::picker(select) {
+    margin-block: 4px;
+    padding: 5px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--glass-pop-bg);
+    -webkit-backdrop-filter: var(--glass-pop-blur);
+    backdrop-filter: var(--glass-pop-blur);
+    box-shadow: var(--depth-3);
+    color: var(--text);
+    /* A long list (the copy setup's countries) scrolls inside it. */
+    max-block-size: min(360px, 60vh);
+    overflow-y: auto;
+  }
+  select option {
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+  select option:hover,
+  select option:focus-visible { background: color-mix(in srgb, var(--bg-hover) 80%, transparent); color: var(--text); outline: none; }
+  select option:checked { color: var(--text); font-weight: 600; }
+  select option::checkmark { order: 1; margin-left: auto; color: var(--text); }
+}
 
 /* CHECKBOXES ARE HOLLOW SQUARES, NOT FILLED GREY BOXES.
  *

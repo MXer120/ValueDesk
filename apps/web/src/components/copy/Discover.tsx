@@ -1,27 +1,31 @@
 /**
- * The Copy page's front: who to copy.
+ * The Copy page's front: who to copy, and who to trade against.
  *
- * A hero with the three highest-scoring traders, then the grid of both copy
- * venues' top hundred - categories, filters, a sort, $ or %, cards or a list.
- * The Counter-trade tab is the boards' WORST hundred, ranked by the counter
- * score, its cards glowing red. A card opens the trader; its Copy (or Counter)
- * button opens the copy setup over the grid (CopyModal) in that direction. The figures are the public boards' (/api/vs/leaderboard); the
- * curve on a card is read from the venue in this browser when it scrolls into
- * view (TraderCard.tsx).
+ * A hero with a fanned deck of the best traders of both kinds, then the grid
+ * of both copy venues' boards - categories, filters, a sort, $ or %, cards or a
+ * list. Top traders (the default) mixes the boards' best hundred, to copy, with
+ * their worst hundred, to counter-trade, each card glowing in its side's colour
+ * (green or red) and read in its own kind; the Copy and Counter-trade tabs hold
+ * one kind each. A card opens the trader; its Copy (or Counter) button opens the
+ * copy setup over the grid (CopyModal) in that direction. The figures are the
+ * public boards' (/api/vs/leaderboard); the curve on a card is read from the
+ * venue in this browser when it scrolls into view (TraderCard.tsx).
  */
-import { useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { DASH, fmtUsd, shortAddr } from '../../format';
 import { LoadFailed, useLoadFailedToast } from '../LoadFailed';
+import { FxSelect } from '../funds/ui';
 import { VENUE_BRAND } from '../venueBrand';
 import { VENUE_LABEL, vsApi, type BoardWindow, type TraderRow, type Venue } from '../../vsApi';
 import {
   CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
-  filtersActive, kindOf, normaliseFilters, scoreRows, shapeGrid, type Category, type Filters, type Scored, type SortKey,
+  deckOf, filtersActive, kindOf, mixKinds, normaliseFilters, scoreRows, shapeGrid, winRateLabel,
+  type Category, type Filters, type GridKind, type Scored, type SortKey,
 } from './gridModel';
 import { Avatar, CoinRow, ScoreMeter, Spark, TraderCard, WINDOW_SHORT, useTraderPeek } from './TraderCard';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
-import { COPY_COST_BPS, WRONG_SIDE_CAP, type ScoreKind } from './copyScore';
+import { COPY_COST_BPS, WRONG_SIDE_CAP } from './copyScore';
 
 interface GridPrefs {
   category: Category;
@@ -51,7 +55,8 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
   const [stored, setStored] = useStored<GridPrefs>('vs.copy.grid', DEFAULT_PREFS);
   const prefs: GridPrefs = { ...DEFAULT_PREFS, ...stored, filters: normaliseFilters(stored?.filters) };
   if (!CATEGORIES.some((c) => c.id === prefs.category)) prefs.category = 'top';
-  const kind: ScoreKind = kindOf(prefs.category);
+  if (!SORTS[kindOf(prefs.category)].some((o) => o.id === prefs.sort)) prefs.sort = 'score';
+  const kind: GridKind = kindOf(prefs.category);
   const patch = (p: Partial<GridPrefs>) => setStored({ ...prefs, ...p });
   const [q, setQ] = useState('');
   const [shown, setShown] = useState(PAGE);
@@ -64,26 +69,30 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
     { pollMs: 60_000 },
   );
   useLoadFailedToast(boards.error, 'Top traders', boards.refresh);
-  // The Counter-trade tab: each venue's worst hundred, read only once the tab is open.
+  // Each venue's worst hundred: the traders to counter (all but the Copy tab show them).
   const worst = useAsync(
     () => Promise.all(COPY_VENUES.map((venue) =>
       vsApi.leaderboard({ venue, window: w, sort: 'pnl', limit: 100, side: 'worst' }).then((b) => b.rows, () => [] as TraderRow[]))),
     [w],
-    { pollMs: 60_000, enabled: kind === 'counter' },
+    { pollMs: 60_000 },
   );
   useLoadFailedToast(worst.error, 'Counter-trade candidates', worst.refresh);
 
   const scored = useMemo(() => scoreRows((boards.data ?? []).flat(), w, 'copy'), [boards.data, w]);
   const scoredCounter = useMemo(() => scoreRows((worst.data ?? []).flat(), w, 'counter'), [worst.data, w]);
   const pasted = isAddress(q) ? q.trim().toLowerCase() : null;
+  const mixed = useMemo(() => mixKinds(scored, scoredCounter), [scored, scoredCounter]);
   const grid = useMemo(
-    () => shapeGrid(kind === 'counter' ? scoredCounter : scored, { category: prefs.category, filters: prefs.filters, sort: prefs.sort, window: w, q: pasted ? '' : q }),
-    [kind, scored, scoredCounter, prefs.category, prefs.filters, prefs.sort, w, q, pasted],
+    () => shapeGrid(kind === 'counter' ? scoredCounter : kind === 'copy' ? scored : mixed, { category: prefs.category, filters: prefs.filters, sort: prefs.sort, window: w, q: pasted ? '' : q }),
+    [kind, scored, scoredCounter, mixed, prefs.category, prefs.filters, prefs.sort, w, q, pasted],
   );
-  const podium = useMemo(() => shapeGrid(scored, { category: 'top', filters: NO_FILTERS, sort: 'score', window: w }).slice(0, 3), [scored, w]);
+  const deck = useMemo(() => deckOf(scored, scoredCounter, w, 5), [scored, scoredCounter, w]);
   const nFilters = filtersActive(prefs.filters);
-  const source = kind === 'counter' ? worst : boards;
-  const loading = source.loading && !source.data;
+  // What the grid waits on: the board(s) its kind reads.
+  const sources = kind === 'counter' ? [worst] : kind === 'copy' ? [boards] : [boards, worst];
+  const loading = sources.some((x) => x.loading && !x.data);
+  const failed = sources.every((x) => x.error && !x.data) ? sources[0]! : null;
+  const what = kind === 'counter' ? 'Counter-trade candidates' : 'Top traders';
 
   return (
     <div className="cpy-discover">
@@ -91,8 +100,8 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         <div className="cpy-hero__text">
           <h1 className="cpy-hero__title">Copy the best traders, <em>trade for trade.</em></h1>
           <p className="cpy-hero__sub">
-            Follow profitable SoDEX and Hyperliquid traders. Every trade they make is copied into your own SoDEX account in
-            real time, under limits you set.
+            Follow profitable SoDEX and Hyperliquid traders, or trade against the worst. Each trade lands in your SoDEX
+            account, within your limits.
           </p>
           <ul className="cpy-hero__facts">
             <li>Funds stay in your account</li>
@@ -100,9 +109,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
             <li>Stop any time</li>
           </ul>
         </div>
-        <div className="cpy-hero__stack">
-          {podium.map((s, i) => <MiniCard key={keyOf(s.row)} s={s} w={w} i={i} onOpen={onOpen} />)}
-        </div>
+        <Deck picks={deck} w={w} total={mixed.length} loading={(boards.loading && !boards.data) || (worst.loading && !worst.data)} onOpen={onOpen} />
       </section>
 
       <div className="cpy-bar">
@@ -120,12 +127,22 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
           ))}
         </nav>
         <div className="cpy-bar__right">
-          <label className="cpy-select" title="Sort">
-            <span className="cpy-select__k" aria-hidden="true">⇅</span>
-            <select value={prefs.sort} onChange={(e) => patch({ sort: e.target.value as SortKey })} aria-label="Sort traders">
-              {SORTS[kind].map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-            </select>
-          </label>
+          <FxSelect
+            label="Sort traders"
+            value={prefs.sort}
+            options={SORTS[kind].map((o) => ({ value: o.id, label: o.label }))}
+            onChange={(v) => patch({ sort: v as SortKey })}
+            searchable={false}
+            triggerClassName="cpy-select"
+            listMinWidth={290}
+            listAlign="end"
+            trigger={(o) => (
+              <>
+                <SortIcon />
+                <span className="cpy-select__v">{o?.label}</span>
+              </>
+            )}
+          />
           <Toggle
             label="Window"
             value={w}
@@ -169,17 +186,17 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         <Pick
           label="PnL"
           value={prefs.filters.sideOnly ? 1 : 0}
-          options={[{ v: 0, label: 'Any' }, { v: 1, label: kind === 'copy' ? 'Profitable only' : 'Losing only' }]}
+          options={[{ v: 0, label: 'Any' }, kind === 'copy' ? { v: 1, label: 'Profitable only' } : kind === 'counter' ? { v: 1, label: 'Losing only' } : { v: 1, label: 'Winners to copy, losers to counter', short: 'Winners / losers' }]}
           onChange={(v) => patch({ filters: { ...prefs.filters, sideOnly: v === 1 } })}
         />
         <Pick
           label="Win rate"
-          value={WIN_RATE_STEPS[kind].includes(prefs.filters.winRate) ? prefs.filters.winRate : 0}
-          options={WIN_RATE_STEPS[kind].map((v) => ({ v, label: v === 0 ? 'Any' : `${kind === 'copy' ? '≥' : '≤'} ${Math.round(v * 100)}%` }))}
+          value={(WIN_RATE_STEPS as readonly number[]).includes(prefs.filters.winRate) ? prefs.filters.winRate : 0}
+          options={WIN_RATE_STEPS.map((v) => ({ v, label: winRateLabel(kind, v), short: winRateLabel(kind, v, true) }))}
           onChange={(v) => patch({ filters: { ...prefs.filters, winRate: v } })}
         />
         <Pick
-          label={kind === 'copy' ? 'Copy score' : 'Counter score'}
+          label={kind === 'copy' ? 'Copy score' : kind === 'counter' ? 'Counter score' : 'Score'}
           value={prefs.filters.minScore}
           options={SCORE_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${v}` }))}
           onChange={(v) => patch({ filters: { ...prefs.filters, minScore: v } })}
@@ -190,6 +207,14 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         <span className="cpy-count">{loading ? 'Loading traders…' : `${grid.length} trader${grid.length === 1 ? '' : 's'}`}</span>
       </div>
 
+      {kind === 'mixed' && !loading && grid.length > 0 && (
+        <p className="cpy-legend">
+          <span className="cpy-legend__copy">Green: copy them</span>
+          <span className="cpy-legend__counter">Red: trade against them</span>
+          <span className="cpy-legend__fine">One score for both, 0 to 100: how well copying, or countering, would have worked.</span>
+        </p>
+      )}
+
       {kind === 'counter' && (
         <p className="cpy-counter-note">
           Counter-trading takes the other side of every trade: these are the boards' biggest losers, ranked by how well
@@ -198,8 +223,8 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         </p>
       )}
 
-      {source.error && !source.data ? (
-        <div className="cpy-empty"><LoadFailed what={kind === 'counter' ? 'Counter-trade candidates' : 'Top traders'} onRetry={source.refresh} /></div>
+      {failed ? (
+        <div className="cpy-empty"><LoadFailed what={what} onRetry={() => sources.forEach((x) => x.refresh())} /></div>
       ) : loading ? (
         <div className="cpy-grid" aria-busy="true">
           {Array.from({ length: 8 }, (_, i) => <div key={i} className="cpy-card cpy-card--ghost" />)}
@@ -218,15 +243,15 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
               score={s.score}
               window={w}
               unit={prefs.unit}
-              kind={kind}
+              kind={s.score.kind}
               onOpen={onOpen}
-              onCopy={(r) => onCopy(r, kind)}
+              onCopy={(r) => onCopy(r, s.score.kind)}
               copying={copying.has(keyOf(s.row))}
             />
           ))}
         </div>
       ) : (
-        <TraderList rows={grid.slice(0, shown)} w={w} kind={kind} onOpen={onOpen} onCopy={(r) => onCopy(r, kind)} copying={copying} />
+        <TraderList rows={grid.slice(0, shown)} w={w} kind={kind} onOpen={onOpen} onCopy={onCopy} copying={copying} />
       )}
 
       {grid.length > shown && (
@@ -245,7 +270,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
 function Toggle<T extends string>({ label, value, options, onChange }: {
   label: string;
   value: T;
-  options: ReadonlyArray<{ id: T; label: React.ReactNode; title?: string }>;
+  options: ReadonlyArray<{ id: T; label: ReactNode; title?: string }>;
   onChange: (v: T) => void;
 }) {
   return (
@@ -259,22 +284,39 @@ function Toggle<T extends string>({ label, value, options, onChange }: {
   );
 }
 
+/** A filter: a pill that opens a list. `short`: what the pill shows for an option with a long label. */
 function Pick<T extends number>({ label, value, options, onChange }: {
   label: string;
   value: T;
-  options: ReadonlyArray<{ v: T; label: string }>;
+  options: ReadonlyArray<{ v: T; label: string; short?: string }>;
   onChange: (v: T) => void;
 }) {
   const on = value !== options[0]?.v;
+  const shortOf = (v: string | undefined) => options.find((o) => String(o.v) === v)?.short;
   return (
-    <label className={`cpy-pick${on ? ' is-on' : ''}`}>
-      <span className="cpy-pick__k">{label}</span>
-      <select value={String(value)} onChange={(e) => onChange(Number(e.target.value) as T)} aria-label={label}>
-        {options.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
-      </select>
-    </label>
+    <FxSelect
+      label={label}
+      value={String(value)}
+      options={options.map((o) => ({ value: String(o.v), label: o.label }))}
+      onChange={(v) => onChange(Number(v) as T)}
+      searchable={false}
+      triggerClassName={`cpy-pick${on ? ' is-on' : ''}`}
+      listMinWidth={270}
+      trigger={(o) => (
+        <>
+          <span className="cpy-pick__k">{label}</span>
+          <span className="cpy-pick__v">{shortOf(o?.value) ?? o?.label}</span>
+        </>
+      )}
+    />
   );
 }
+
+const SortIcon = () => (
+  <svg className="cpy-select__k" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+    <path d="M5 3v10M2.5 10.5 5 13l2.5-2.5M11 13V3M8.5 5.5 11 3l2.5 2.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 const GridIcon = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 2h5v5H2zM9 2h5v5H9zM2 9h5v5H2zM9 9h5v5H9z" fill="currentColor" /></svg>
@@ -283,20 +325,100 @@ const ListIcon = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 3h12v2H2zM2 7h12v2H2zM2 11h12v2H2z" fill="currentColor" /></svg>
 );
 
-function MiniCard({ s, w, i, onOpen }: { s: Scored; w: BoardWindow; i: number; onOpen: (r: TraderRow) => void }) {
+/** How often the deck deals its next card to the front. */
+const DEAL_MS = 4200;
+
+/**
+ * The hero: the best traders of both kinds fanned like a hand of cards, the
+ * best in front, with two speech chips - who is in front, and how many traders
+ * the grid has. It deals the next card to the front every few seconds (not
+ * with reduced motion, not while the pointer or the focus is on it). A card
+ * opens its trader.
+ */
+function Deck({ picks, w, total, loading, onOpen }: {
+  picks: readonly Scored[];
+  w: BoardWindow;
+  total: number;
+  loading: boolean;
+  onOpen: (r: TraderRow) => void;
+}) {
+  const [turn, setTurn] = useState(0);
+  const [held, setHeld] = useState(false);
+  const n = picks.length;
+  useEffect(() => {
+    if (n < 2 || held) return;
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+    const t = setInterval(() => setTurn((x) => x + 1), DEAL_MS);
+    return () => clearInterval(t);
+  }, [n, held]);
+
+  if (!n) {
+    return (
+      <div className="cpy-deck" aria-hidden="true">
+        {[2, 1, 0].map((slot) => <span key={slot} className="cpy-deck__card cpy-deck__card--ghost" data-slot={slot} />)}
+        {!loading && <span className="cpy-deck__chip cpy-deck__chip--count">No trader on the boards yet</span>}
+      </div>
+    );
+  }
+  const first = turn % n;
+  const front = picks[first]!;
+  return (
+    <div
+      className="cpy-deck"
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
+      onFocus={() => setHeld(true)}
+      onBlur={() => setHeld(false)}
+    >
+      {picks.map((s, i) => (
+        <DeckCard key={keyOf(s.row)} s={s} w={w} slot={(i - first + n) % n} onOpen={onOpen} />
+      ))}
+      <span className={`cpy-deck__chip cpy-deck__chip--who cpy-deck__chip--${front.score.kind}`}>
+        <Avatar address={front.row.address} size={16} />
+        <span>@{shortAddr(front.row.address)}</span>
+        <b>{front.score.kind === 'copy' ? 'to copy' : 'to counter'}</b>
+      </span>
+      <span className="cpy-deck__chip cpy-deck__chip--count">
+        <i className="cpy-deck__dot cpy-deck__dot--copy" />
+        <i className="cpy-deck__dot cpy-deck__dot--counter" />
+        {total} traders to copy or counter now
+      </span>
+    </div>
+  );
+}
+
+function DeckCard({ s, w, slot, onOpen }: { s: Scored; w: BoardWindow; slot: number; onOpen: (r: TraderRow) => void }) {
   const { ref, peek, loading } = useTraderPeek(s.row, w);
   const pnl = s.row.pnl[w] ?? null;
+  const kind = s.score.kind;
   return (
-    <button ref={ref} type="button" className={`cpy-mini cpy-mini--${i}`} onClick={() => onOpen(s.row)} title={`Open ${shortAddr(s.row.address)}`}>
-      <span className="cpy-mini__head">
-        <Avatar address={s.row.address} size={24} />
-        <span className="cpy-mini__addr">{shortAddr(s.row.address)}</span>
+    <button
+      ref={ref}
+      type="button"
+      className={`cpy-deck__card cpy-card--${kind}`}
+      data-slot={slot}
+      tabIndex={slot === 0 ? 0 : -1}
+      onClick={() => onOpen(s.row)}
+      aria-label={`${kind === 'copy' ? 'Copy' : 'Counter-trade'} pick ${shortAddr(s.row.address)} on ${VENUE_LABEL[s.row.venue]}`}
+    >
+      <span className="cpy-glow" aria-hidden="true">
+        <span className="cpy-glow__rim"><span className="cpy-glow__glare" /></span>
+      </span>
+      <span className="cpy-deck__head">
+        <Avatar address={s.row.address} size={26} />
+        <span className="cpy-deck__who">
+          <span className="cpy-deck__addr">{shortAddr(s.row.address)}</span>
+          <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[s.row.venue] } as CSSProperties}>{VENUE_LABEL[s.row.venue]}</span>
+        </span>
+        <span className={`cpy-deck__tag cpy-deck__tag--${kind}`}>{kind === 'copy' ? 'Copy' : 'Counter'}</span>
+      </span>
+      <span className={`cpy-deck__big ${s.score.roi !== null && s.score.roi < 0 ? 'neg' : 'pos'}`}>{fmtSignedPct(s.score.roi, 1)}</span>
+      <span className="cpy-deck__lbl">Return {WINDOW_SHORT[w]} · {fmtSignedUsd(pnl, 0)}</span>
+      <Spark values={peek?.spark ?? null} loading={loading} className="cpy-deck__spark" />
+      <span className="cpy-deck__foot">
+        <ScoreMeter s={s.score} />
         <CoinRow assets={s.row.assets} max={3} />
       </span>
-      <span className={`cpy-mini__big ${s.score.roi !== null && s.score.roi < 0 ? 'neg' : 'pos'}`}>{fmtSignedPct(s.score.roi, 1)}</span>
-      <span className="cpy-mini__lbl">Return {WINDOW_SHORT[w]} · {fmtSignedUsd(pnl, 0)}</span>
-      <Spark values={peek?.spark ?? null} loading={loading} className="cpy-mini__spark" />
-      <span className="cpy-mini__score"><ScoreMeter s={s.score} /></span>
     </button>
   );
 }
@@ -304,9 +426,9 @@ function MiniCard({ s, w, i, onOpen }: { s: Scored; w: BoardWindow; i: number; o
 function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
   rows: Scored[];
   w: BoardWindow;
-  kind: ScoreKind;
+  kind: GridKind;
   onOpen: (r: TraderRow) => void;
-  onCopy: (r: TraderRow) => void;
+  onCopy: (r: TraderRow, direction: 'copy' | 'counter') => void;
   copying: ReadonlySet<string>;
 }) {
   return (
@@ -315,7 +437,7 @@ function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
         <thead>
           <tr>
             <th>Trader</th>
-            <th>{kind === 'copy' ? 'Copy score' : 'Counter score'}</th>
+            <th>{kind === 'copy' ? 'Copy score' : kind === 'counter' ? 'Counter score' : 'Score'}</th>
             <th className="num">PnL {WINDOW_SHORT[w]}</th>
             <th className="num">Return</th>
             <th className="num">Equity</th>
@@ -343,8 +465,8 @@ function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
                 <td className="num">{row.winRate == null ? DASH : `${Math.round(row.winRate * 100)}%`}</td>
                 <td><CoinRow assets={row.assets} /></td>
                 <td className="num">
-                  <button type="button" className={`cpy-copybtn cpy-copybtn--${kind}${copying.has(keyOf(row)) ? ' is-copying' : ''}`} onClick={(e) => { e.stopPropagation(); onCopy(row); }}>
-                    {copying.has(keyOf(row)) ? 'Copying' : kind === 'copy' ? 'Copy' : 'Counter'}
+                  <button type="button" className={`cpy-copybtn cpy-copybtn--${score.kind}${copying.has(keyOf(row)) ? ' is-copying' : ''}`} onClick={(e) => { e.stopPropagation(); onCopy(row, score.kind); }}>
+                    {copying.has(keyOf(row)) ? 'Copying' : score.kind === 'copy' ? 'Copy' : 'Counter'}
                   </button>
                 </td>
               </tr>
@@ -358,7 +480,7 @@ function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
 
 function HowItWorks() {
   const steps = [
-    ['Pick a trader', `Sorted by a copy score from public figures: return, edge per traded dollar beyond ~${COPY_COST_BPS} bps of copy costs, profit, a win rate that holds up, account size and track record. Or trade against the worst, in the Counter-trade tab.`],
+    ['Pick a trader', `Sorted by a copy score from public figures: return, edge per traded dollar beyond ~${COPY_COST_BPS} bps of copy costs, profit, a win rate that holds up, account size and track record. The red cards are the worst traders, to trade against.`],
     ['Set your rules', 'Size, leverage cap, position cap, slippage, stop loss and drawdown stop. A replay of their last 30 days shows what those rules would have done.'],
     ['Choose where it runs', 'In this browser, on the ValueDesk executor in Tokyo around the clock, or on a copier you host yourself.'],
     ['Copy, pause, stop', 'Copies trade in your own SoDEX account. Pause or stop any copy, stop them all at once, or revoke the copy key on SoDEX.'],

@@ -107,13 +107,13 @@
   display: flex;
   flex-direction: column;
   min-width: 180px;
-  padding: var(--sp-1);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  padding: 5px;
+  border: 0;
+  border-radius: 14px;
   background: var(--glass-pop-bg);
   -webkit-backdrop-filter: var(--glass-pop-blur);
   backdrop-filter: var(--glass-pop-blur);
-  box-shadow: var(--shadow-modal);
+  box-shadow: var(--depth-3);
   font-size: var(--fs-base);
   animation: pop-in var(--dur-fast) var(--ease-spring);
 }
@@ -158,12 +158,22 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 8px var(--sp-2);
-  border-radius: 6px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  color: var(--muted);
   cursor: pointer;
+  transition: background 120ms, color 120ms;
 }
-.fx-opt-row.is-active { background: var(--bg-hover); }
+.fx-opt-row.is-active { background: color-mix(in srgb, var(--bg-hover) 80%, transparent); color: var(--text); }
+.fx-opt-row[aria-selected='true'] { color: var(--text); }
 .fx-opt-row[aria-selected='true'] .fx-opt-row__l { font-weight: 600; }
+/* The chosen option carries a check at the end of its row. */
+.fx-opt-row[aria-selected='true']::after {
+  content: ""; flex: none; width: 12px; height: 12px; margin-left: auto;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.4 4.9 8.7 9.6 3.5' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 6.4 4.9 8.7 9.6 3.5' fill='none' stroke='%23000' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
 .fx-opt-row.is-off { opacity: 0.45; cursor: not-allowed; }
 .fx-opt-row__l { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fx-opt-row__h { flex: none; color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
