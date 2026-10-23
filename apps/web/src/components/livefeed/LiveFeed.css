@@ -27,8 +27,10 @@
 .lf__vid { position: absolute; overflow: hidden; background: #000; }
 .lf__frame--yt { bottom: auto; }
 .lf__shield { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
-/* Paused, or held up before it starts: the widget's own play button over a blurred
-   picture, where YouTube would show its big button and suggestions. */
+/* The widget's cover over a blurred picture: a play button when paused, a spinner
+   while YouTube's own play / pause shows in the middle after a start. Its disc is
+   solid and larger than YouTube's button, so nothing of that shows through. It
+   fades in and out (is-on). */
 .lf__cover {
   position: absolute;
   inset: 0;
@@ -43,23 +45,36 @@
   backdrop-filter: blur(18px) saturate(0.8);
   color: #fff;
   cursor: pointer;
-  animation: lf-fade 160ms ease-out;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease-out;
 }
+.lf__cover.is-on { opacity: 1; pointer-events: auto; }
 .lf__big {
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border: 1px solid rgba(255, 255, 255, 0.22);
+  width: 72px;
+  height: 72px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.12);
-  transition: transform 140ms, background 140ms;
+  background: #141416;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  transition: transform 140ms, border-color 140ms;
 }
-.lf__big svg { width: 24px; height: 24px; margin-left: 2px; }
-.lf__cover:hover .lf__big { transform: scale(1.06); background: rgba(255, 255, 255, 0.2); }
+.lf:fullscreen .lf__big { width: 104px; height: 104px; }
+.lf__big svg { width: 26px; height: 26px; margin-left: 3px; }
+.lf__cover:hover .lf__big { transform: scale(1.05); border-color: rgba(255, 255, 255, 0.3); }
 .lf__cover:focus-visible { outline: none; }
 .lf__cover:focus-visible .lf__big { box-shadow: 0 0 0 2px var(--text); }
-@keyframes lf-fade { from { opacity: 0; } }
+.lf__spin {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: lf-spin 0.9s linear infinite;
+}
+@keyframes lf-spin { to { transform: rotate(360deg); } }
 .lf.is-empty { align-items: center; justify-content: center; }
 
 .lf__head,
@@ -158,7 +173,7 @@
 .lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
 .lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 4; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
-@media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } .lf__spin { animation-duration: 2.4s; } }
 
 /* The panel around the feed shows nothing of its own at the edges: no ring and no
    grey sliver while it is resized. */
