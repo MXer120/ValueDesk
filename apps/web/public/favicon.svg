@@ -1,15 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- ValueDesk mark: two candles standing on a desk, on the terminal's own surface colour.
+  <!-- ValueDesk mark: a "V" of five rounded blocks, white arms and a green point, on a dark tile.
        Rectangles only (tools/favicon.mjs draws favicon.ico from them; components/BrandMark.tsx
-       draws the same shapes next to the wordmark). Our own glyph - no borrowed brand. -->
-  <rect width="32" height="32" rx="6" fill="#1b1a14"/>
-  <rect x="9" y="8" width="4" height="12" rx="1" fill="#00b481"/>
-  <rect x="10.5" y="5" width="1" height="3" fill="#00b481"/>
-  <rect x="10.5" y="20" width="1" height="3" fill="#00b481"/>
-  <rect x="19" y="12" width="4" height="8" rx="1" fill="#ef4a3c"/>
-  <rect x="20.5" y="9" width="1" height="3" fill="#ef4a3c"/>
-  <rect x="20.5" y="20" width="1" height="3" fill="#ef4a3c"/>
-  <rect x="6" y="23" width="20" height="2" rx="1" fill="#e6e6e6"/>
-  <rect x="8" y="25" width="2" height="3" fill="#e6e6e6"/>
-  <rect x="22" y="25" width="2" height="3" fill="#e6e6e6"/>
+       draws the same five blocks, bare, beside the wordmark and in the rail). Our own glyph. -->
+  <rect width="32" height="32" rx="7" fill="#121212"/>
+  <rect x="4" y="8" width="4" height="5" rx="1" fill="#f4f4f4"/>
+  <rect x="24" y="8" width="4" height="5" rx="1" fill="#f4f4f4"/>
+  <rect x="9" y="14" width="4" height="5" rx="1" fill="#f4f4f4"/>
+  <rect x="19" y="14" width="4" height="5" rx="1" fill="#f4f4f4"/>
+  <rect x="14" y="20" width="4" height="5" rx="1" fill="#00b481"/>
 </svg>

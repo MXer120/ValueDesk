@@ -32,16 +32,17 @@ test('favicon.ico: an icon file with a 32-bit image for each size', () => {
   });
 });
 
-test('the drawing is the SVG: surface in the middle, transparent corners, the two candle colours on the desk', () => {
+test('the drawing is the SVG: the dark tile, transparent corners, the white arms of the V and its green point', () => {
   const shapes = shapesOf(svg);
-  assert.equal(shapes.rects.length, 10);
+  assert.equal(shapes.rects.length, 6);
   const px = rasterise(shapes, 32);
   const at = (x: number, y: number) => Array.from(px.slice((y * 32 + x) * 4, (y * 32 + x) * 4 + 4));
-  assert.deepEqual(at(16, 2), [0x1b, 0x1a, 0x14, 255], 'the surface colour');
+  assert.deepEqual(at(16, 2), [0x12, 0x12, 0x12, 255], 'the tile colour');
   assert.equal(at(0, 0)[3], 0, 'a rounded corner is transparent');
-  assert.deepEqual(at(10, 15), [0x00, 0xb4, 0x81, 255], 'the green candle');
-  assert.deepEqual(at(20, 18), [0xef, 0x4a, 0x3c, 255], 'the red candle');
-  assert.deepEqual(at(16, 23), [0xe6, 0xe6, 0xe6, 255], 'the desk');
+  assert.deepEqual(at(6, 10), [0xf4, 0xf4, 0xf4, 255], 'the left arm');
+  assert.deepEqual(at(25, 10), [0xf4, 0xf4, 0xf4, 255], 'the right arm');
+  assert.deepEqual(at(16, 22), [0x00, 0xb4, 0x81, 255], 'the green point');
+  assert.deepEqual(at(16, 10), [0x12, 0x12, 0x12, 255], 'the open middle of the V');
 });
 
 test('shapesOf refuses an SVG it cannot draw exactly', () => {

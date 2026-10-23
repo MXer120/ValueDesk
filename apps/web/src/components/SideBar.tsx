@@ -25,7 +25,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch }: {
   return (
     <aside className="side" aria-label="Tools">
       <a className="side__brand" href="/" aria-label="ValueDesk" title="ValueDesk">
-        <BrandMark size={26} />
+        <BrandMark size={28} />
       </a>
       <nav className="side__groups">
         <div className="side__group">

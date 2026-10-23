@@ -124,7 +124,9 @@
   overflow: visible;
   background: var(--bg-panel);
   border: none;
-  border-radius: var(--radius-sm);
+  /* The panel card's own corner (styles.css --radius-card): the green wash, rim and glare
+     below inherit it, so they follow the card instead of a 4px corner inside a 12px one. */
+  border-radius: var(--radius-card);
   padding: var(--sp-2) var(--oe-inset) var(--oe-inset);
 }
 .panel.oe.is-sell,

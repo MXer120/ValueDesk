@@ -1,21 +1,31 @@
 /**
- * The ValueDesk mark: two candles standing on a desk. The same rectangles as
- * public/favicon.svg (the tab icon), drawn inline so the navbar needs no extra
- * request. Decorative: the wordmark next to it carries the name.
+ * The ValueDesk mark: a "V" of five rounded blocks, a dot-matrix letter, the
+ * two arms in white and the point in the app's green. Drawn bare - no tile, no
+ * ring - for the rail and the navbar; public/favicon.svg (the tab icon) is the
+ * same five blocks on a dark tile, so it reads on a light tab bar too.
+ * Decorative: the wordmark or the link around it carries the name.
  */
+const COLS = [0, 4, 1, 3, 2] as const;
+const ROWS = [0, 0, 1, 1, 2] as const;
+const W = 5.6;
+const H = 7.2;
+const GAP = 1;
+const TOP = 4.2;
+
 export function BrandMark({ size = 20 }: { size?: number }) {
   return (
     <svg className="brand-mark" width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" focusable="false">
-      <rect width="32" height="32" rx="6" fill="#1b1a14" />
-      <rect x="9" y="8" width="4" height="12" rx="1" fill="#00b481" />
-      <rect x="10.5" y="5" width="1" height="3" fill="#00b481" />
-      <rect x="10.5" y="20" width="1" height="3" fill="#00b481" />
-      <rect x="19" y="12" width="4" height="8" rx="1" fill="#ef4a3c" />
-      <rect x="20.5" y="9" width="1" height="3" fill="#ef4a3c" />
-      <rect x="20.5" y="20" width="1" height="3" fill="#ef4a3c" />
-      <rect x="6" y="23" width="20" height="2" rx="1" fill="#e6e6e6" />
-      <rect x="8" y="25" width="2" height="3" fill="#e6e6e6" />
-      <rect x="22" y="25" width="2" height="3" fill="#e6e6e6" />
+      {COLS.map((c, i) => (
+        <rect
+          key={i}
+          x={c * (W + GAP)}
+          y={TOP + ROWS[i]! * (H + GAP)}
+          width={W}
+          height={H}
+          rx={1.5}
+          fill={ROWS[i] === 2 ? '#00b481' : '#f4f4f4'}
+        />
+      ))}
     </svg>
   );
 }

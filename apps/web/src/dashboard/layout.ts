@@ -272,8 +272,8 @@ const GRID: DashboardConfig['grid'] = {
  * the moment that inset does.
  */
 const LG: DashboardConfig['layouts']['lg'] = [
-  // v12: the favourites bar and the coin info row of the owner's reference -
-  // 44px chips and a 30px price need 6 and 8 rows; the chart gives up the 7.
+  // v13: the favourites bar of the owner's reference (44px chips) is 6 rows; the
+  // coin info row is the chart card's head now, so the chart takes the rest.
   { i: 'markets',   x: 0,  y: 0,  w: 28, h: 6 },
   // 5 -> 4 rows. The gate that shipped this file's "deliberately under-band"
   // strip/header pair reduced .mkt-header's own CSS floor from 40px to 35px
@@ -281,8 +281,7 @@ const LG: DashboardConfig['layouts']['lg'] = [
   // grid kept reserving the OLD floor's row count and the header sat at
   // 51.1px instead of moving with its own content. h:4 -> 4*11.02-4 = 40.08px,
   // still 5px clear of the 35px floor. Chart absorbs the freed row.
-  { i: 'ticker',    x: 0,  y: 6,  w: 28, h: 8 },
-  { i: 'chart',     x: 0,  y: 14, w: 28, h: 46 },
+  { i: 'chart',     x: 0,  y: 6,  w: 28, h: 54 },
   { i: 'book',      x: 28, y: 0,  w: 10, h: 60 },
   { i: 'exec',      x: 38, y: 0,  w: 10, h: 60 },
   { i: 'positions', x: 0,  y: 60, w: 38, h: 30 },
@@ -333,8 +332,7 @@ const LG: DashboardConfig['layouts']['lg'] = [
  */
 const MD: DashboardConfig['layouts']['md'] = [
   { i: 'markets',   x: 0,  y: 0,  w: 48, h: 2 },
-  { i: 'ticker',    x: 0,  y: 2,  w: 48, h: 2 },
-  { i: 'chart',     x: 0,  y: 4,  w: 48, h: 17 },
+  { i: 'chart',     x: 0,  y: 2,  w: 48, h: 19 },
   { i: 'book',      x: 0,  y: 21, w: 24, h: 18 },
   { i: 'exec',      x: 24, y: 21, w: 24, h: 18 },
   { i: 'positions', x: 0,  y: 39, w: 48, h: 12 },
@@ -462,7 +460,7 @@ export const TRADE_DASHBOARD: DashboardConfig = {
   // 47% short and the whole terminal would end in a 460px dead band, so this
   // bump is not optional either.
   id: 'trade',
-  version: 12, // lg favourites bar 6 rows and coin info 8 (the reference's chips and price), chart 46
+  version: 13, // the coin info row is the chart card's head from md up; no ticker panel there
   breakpoints: BREAKPOINTS,
   grid: GRID,
   layouts: { lg: LG, md: MD, sm: SM, xs: XS },

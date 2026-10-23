@@ -2,7 +2,8 @@
  * Named starting points for the trade page, in the shape of the layout-preset
  * cards: a picture of the grid, a title, and one line about it.
  * Placements are the lg grid (48 columns, 90 rows). Other breakpoints keep
- * the designed arrangement until the user moves something there.
+ * the designed arrangement until the user moves something there. The coin info
+ * row is the chart card's head (registry.tsx), so no preset places a ticker.
  */
 import type { PanelPlacement } from './types';
 
@@ -15,9 +16,8 @@ export interface LayoutPreset {
 }
 
 const price: PanelPlacement[] = [
-  { i: 'markets', x: 0, y: 0, w: 36, h: 3 },
-  { i: 'ticker', x: 0, y: 3, w: 36, h: 4 },
-  { i: 'chart', x: 0, y: 7, w: 36, h: 53 },
+  { i: 'markets', x: 0, y: 0, w: 36, h: 6 },
+  { i: 'chart', x: 0, y: 6, w: 36, h: 54 },
   { i: 'book', x: 36, y: 0, w: 6, h: 60 },
   { i: 'exec', x: 42, y: 0, w: 6, h: 60 },
   { i: 'positions', x: 0, y: 60, w: 36, h: 30 },
@@ -25,9 +25,8 @@ const price: PanelPlacement[] = [
 ];
 
 const flow: PanelPlacement[] = [
-  { i: 'markets', x: 0, y: 0, w: 20, h: 3 },
-  { i: 'ticker', x: 0, y: 3, w: 20, h: 4 },
-  { i: 'chart', x: 0, y: 7, w: 20, h: 53 },
+  { i: 'markets', x: 0, y: 0, w: 20, h: 6 },
+  { i: 'chart', x: 0, y: 6, w: 20, h: 54 },
   { i: 'book', x: 20, y: 0, w: 16, h: 60 },
   { i: 'exec', x: 36, y: 0, w: 12, h: 60 },
   { i: 'positions', x: 0, y: 60, w: 36, h: 30 },
@@ -35,9 +34,8 @@ const flow: PanelPlacement[] = [
 ];
 
 const review: PanelPlacement[] = [
-  { i: 'markets', x: 0, y: 0, w: 28, h: 3 },
-  { i: 'ticker', x: 0, y: 3, w: 28, h: 4 },
-  { i: 'chart', x: 0, y: 7, w: 28, h: 33 },
+  { i: 'markets', x: 0, y: 0, w: 28, h: 6 },
+  { i: 'chart', x: 0, y: 6, w: 28, h: 34 },
   { i: 'book', x: 28, y: 0, w: 10, h: 40 },
   { i: 'exec', x: 38, y: 0, w: 10, h: 40 },
   { i: 'positions', x: 0, y: 40, w: 28, h: 50 },

@@ -147,6 +147,10 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     // it does at 52px.
     id: 'ticker',
     title: 'Market summary',
+    // Its own strip only at the two narrow breakpoints, where the chart is a page
+    // of the book's carousel; from md up the coin info row is the chart card's
+    // head (the chart panel below renders it).
+    when: (_c, bp) => isNarrow(bp),
     resize: 'horizontal',
     minW: 16,
     minH: 2,
@@ -190,18 +194,31 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     // `onPrice` - the same channel the order book's click-to-price already uses.
     // `unlocked` false keeps the whole thing read-only: lines still draw, but
     // nothing can be dragged and the right-click menu does not open.
+    // The card's head is the coin info row (the owner's reference: the coin,
+    // the price, the day's figures, then the chart in the same card).
     render: (c) => (
-      <Chart
-        engine={c.engine}
-        symbol={c.symbol}
-        sym={c.sym}
-        address={c.address}
-        unlocked={c.unlocked}
-        refreshToken={c.refreshToken}
-        onChanged={c.onChanged}
-        onPrice={c.onPrice}
-        lastPrice={c.lastPrice}
-      />
+      <div className="chart-card">
+        <TickerBar
+          engine={c.engine}
+          symbol={c.symbol}
+          sym={c.sym}
+          onLast={c.onLastPrice}
+          onSymbolClick={() => c.onOpenSearch()}
+        />
+        <div className="chart-card__body">
+          <Chart
+            engine={c.engine}
+            symbol={c.symbol}
+            sym={c.sym}
+            address={c.address}
+            unlocked={c.unlocked}
+            refreshToken={c.refreshToken}
+            onChanged={c.onChanged}
+            onPrice={c.onPrice}
+            lastPrice={c.lastPrice}
+          />
+        </div>
+      </div>
     ),
   },
 

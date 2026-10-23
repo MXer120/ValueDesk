@@ -28,6 +28,7 @@
   min-height: 0;
   background: var(--bg);
 }
+/* The mark bare on the page: no tile, no ring (BrandMark.tsx). */
 .side__brand {
   display: grid;
   place-items: center;
@@ -35,11 +36,9 @@
   width: 42px;
   height: 42px;
   margin: calc((var(--navbar-h) - 42px) / 2) 0;
-  border-radius: 50%;
-  background: #050505;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
 }
-.side__brand .brand-mark { border-radius: 6px; }
+.side__brand:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
 .side__groups { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 6px; }
 .side__group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .side__sep { display: block; width: 36px; height: 1px; background: rgba(255, 255, 255, 0.08); }
