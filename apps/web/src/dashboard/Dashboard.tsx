@@ -666,9 +666,38 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
   // Seams where panels can be resized at all: not locked, not arranging, and not on the
   // two narrow breakpoints, whose arrangement is fixed (responsive.css).
   const seamsOn = !locked && !editing && (bp === 'lg' || bp === 'md');
+  // While a seam is dragged the panels follow it 1:1 (no eased transform).
+  const [seaming, setSeaming] = useState(false);
+
+  /*
+   * A terminal switch, smoothly: for a moment the panels both canvases have glide
+   * to their new place and size, and the ones only the new canvas has fade in
+   * (`is-switching`, `is-entering` - styles.css). Measured before paint, so a
+   * panel arriving is never drawn at full strength first.
+   */
+  const [swap, setSwap] = useState<Set<string> | null>(null);
+  const lastSlot = useRef(saved.activeSlot);
+  const lastVisible = useRef<Set<string>>(new Set(visible.map((p) => p.id)));
+  const swapTimer = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const now = new Set(visible.map((p) => p.id));
+    if (lastSlot.current !== saved.activeSlot) {
+      lastSlot.current = saved.activeSlot;
+      setSwap(new Set([...now].filter((id) => !lastVisible.current.has(id))));
+      if (swapTimer.current !== null) window.clearTimeout(swapTimer.current);
+      swapTimer.current = window.setTimeout(() => {
+        swapTimer.current = null;
+        setSwap(null);
+      }, 520);
+    }
+    lastVisible.current = now;
+    // visibleKey stands in for `visible`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saved.activeSlot, visibleKey]);
+  useEffect(() => () => { if (swapTimer.current !== null) window.clearTimeout(swapTimer.current); }, []);
 
   return (
-    <div className={`dash${locked ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${overPage && ghost ? ' is-drop' : ''}${className ? ` ${className}` : ''}`}>
+    <div className={`dash${locked ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${overPage && ghost ? ' is-drop' : ''}${swap ? ' is-switching' : ''}${seaming ? ' is-seaming' : ''}${className ? ` ${className}` : ''}`}>
       {/* The hover-revealed "Lock layout"/"Reset layout" text strip that used
           to live here is gone, not renamed - LayoutMenu.tsx now carries both
           actions (plus panel visibility and, when the caller wants one, a
@@ -724,6 +753,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
                     // row quantisation actually gave them, so the leftover
                     // reads as air rather than as a rendering fault.
                     panel.resize === 'horizontal' ? 'dash-panel--strip' : '',
+                    swap?.has(panel.id) ? 'is-entering' : '',
                   ].filter(Boolean).join(' ')}
                   role="group"
                   aria-label={name}
@@ -744,6 +774,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
             items={seamItems}
             grid={{ cols: metrics.cols, width: box.width, rowHeight, margin: metrics.margin, padding: metrics.containerPadding }}
             onMove={onSeamMove}
+            onDrag={setSeaming}
           />
         )}
       </div>

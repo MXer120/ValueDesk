@@ -29,7 +29,7 @@
  * to the rows each table already holds (accountTables/filters.ts), persist per
  * tab (`vs.acct.filter.<tab>`), and the counts in the tab labels follow them.
  */
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useLiveAlgos } from '../algo/algoBus';
 import { api, type Engine, type Symbol as MarketSymbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
@@ -95,12 +95,16 @@ function useBandFilters(): [Record<BandTab, TableFilter>, (tab: BandTab, f: Tabl
 export function AccountTabs({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged,
   market, positionCount, orderCount, onPositionCount, onOrderCount, accountScope = false, symbolsFor,
-  extraTabs, tabsAfter,
+  extraTabs, tabsAfter, onTabMenu, select,
 }: AccountTabsProps & {
   /** Tabs a trader added with the + (dashboard/tradeTabs.tsx), after the band's own. */
   extraTabs?: PanelTab[];
   /** The + itself. */
   tabsAfter?: ReactNode;
+  /** A right-click on any tab (the tab menu). */
+  onTabMenu?: (key: string, e: ReactMouseEvent) => void;
+  /** Switch to a tab just added. */
+  select?: { key: string; n: number } | null;
 }) {
   const [currentOnly, setCurrentOnly] = useSharedStored<boolean>('vs.acct.currentMarket', false);
   const [filters, setFilter] = useBandFilters();
@@ -322,7 +326,7 @@ export function AccountTabs({
   return (
     <div ref={bandRef} style={{ display: 'contents' }}>
       <AccountKeepAlive engine={eng} address={address} />
-      <PanelTabs tabs={extraTabs?.length ? [...tabs, ...extraTabs] : tabs} actions={actions} after={tabsAfter} />
+      <PanelTabs tabs={extraTabs?.length ? [...tabs, ...extraTabs] : tabs} actions={actions} after={tabsAfter} onTabContextMenu={onTabMenu} select={select} />
     </div>
   );
 }

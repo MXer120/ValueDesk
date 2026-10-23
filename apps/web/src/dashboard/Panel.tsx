@@ -16,7 +16,7 @@
  * direct children of `.react-grid-item`, which is what their positioning CSS
  * requires.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { onFontsSettled } from '../fontsSettled';
 import type { PanelScroll } from './types';
 
@@ -98,9 +98,13 @@ export interface PanelTab {
  * WebSocket subscription stops doing so while it is not selected.
  */
 export function PanelTabs({
-  tabs, actions: actionsFor, active: activeIn, onChange, after,
+  tabs, actions: actionsFor, active: activeIn, onChange, after, onTabContextMenu, select,
 }: {
   tabs: PanelTab[];
+  /** A right-click on a tab (the trade page's tab menu, tabExtras.tsx). */
+  onTabContextMenu?: (key: string, e: ReactMouseEvent) => void;
+  /** Switch to `key` - each new `n` once (a tab just added). */
+  select?: { key: string; n: number } | null;
   /** The + that adds a tab (tabExtras.tsx), first of the bar's right-hand controls. */
   after?: ReactNode;
   /** Right-aligned controls; a function gets the active tab's key (the account band's filter bar). */
@@ -116,6 +120,9 @@ export function PanelTabs({
     onChange?.(key);
   };
   const current = tabs.find((t) => t.key === active) ?? tabs[0];
+  useEffect(() => {
+    if (select && tabs.some((t) => t.key === select.key)) setActiveOwn(select.key);
+  }, [select?.n, tabs.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const actions = typeof actionsFor === 'function' ? actionsFor(current?.key ?? '') : actionsFor;
 
   /*
@@ -197,6 +204,7 @@ export function PanelTabs({
             aria-selected={t.key === current?.key}
             className={`dash-tab${t.key === current?.key ? ' is-active' : ''}`}
             onClick={() => pick(t.key)}
+            onContextMenu={onTabContextMenu ? (e) => onTabContextMenu(t.key, e) : undefined}
           >
             {t.label}
           </button>

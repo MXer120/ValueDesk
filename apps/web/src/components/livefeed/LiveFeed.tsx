@@ -19,8 +19,11 @@ import './LiveFeed.css';
 
 const CUSTOM = 'custom';
 
-export function LiveFeed() {
-  const [stored, setStored] = useStored<FeedChoice>('vs.livefeed.choice', { channel: CHANNELS[0]!.id });
+export function LiveFeed({ instance }: {
+  /** A duplicate tab's own settings (dashboard/tradeTabs.tsx): "2" for the second copy. */
+  instance?: string;
+} = {}) {
+  const [stored, setStored] = useStored<FeedChoice>(`vs.livefeed.choice${instance ? `.${instance}` : ''}`, { channel: CHANNELS[0]!.id });
   const choice = readChoice(stored);
   const [muted, setMuted] = useState(true);
   const [draft, setDraft] = useState(choice && 'custom' in choice ? choice.custom : '');

@@ -1881,6 +1881,28 @@ kbd { border: 1px solid var(--line); border-bottom-width: 2px; padding: 0 3px; f
     opacity var(--dur-fast) var(--ease-out);
 }
 .dash .dash-grid { transition: height var(--dur-med) var(--ease-out); }
+/* A terminal switch (Dashboard.tsx `swap`): for a moment the panels both canvases
+   have glide to their new place AND size, and a panel only the new canvas has
+   fades and settles in. Width and height ease here only - everywhere else they
+   snap, so a chart is never re-measured through a resize animation. */
+.dash.is-switching .dash-grid .react-grid-item.cssTransforms {
+  transition:
+    transform 420ms var(--ease-out),
+    width 420ms var(--ease-out),
+    height 420ms var(--ease-out),
+    opacity 240ms var(--ease-out);
+}
+.dash .dash-grid .react-grid-item.is-entering { animation: dash-enter 420ms var(--ease-out) both; }
+@keyframes dash-enter {
+  from { opacity: 0; scale: 0.985; }
+  to { opacity: 1; scale: 1; }
+}
+/* A seam drag (SeamLayer.tsx): the panels follow the pointer 1:1. */
+.dash.is-seaming .dash-grid .react-grid-item.cssTransforms { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .dash.is-switching .dash-grid .react-grid-item.cssTransforms { transition: none; }
+  .dash .dash-grid .react-grid-item.is-entering { animation: none; }
+}
 /* The panel UNDER THE POINTER follows it 1:1. The rule above is more specific
    than the library's own `.react-draggable-dragging { transition: none }`, so
    the dragged / resized panel used to chase the cursor through a 180ms

@@ -45,13 +45,16 @@ const ago = (t: number, now: number) => {
   return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: s > 300 * 86_400 ? 'numeric' : undefined });
 };
 
-export function NewsFeed({ coin }: {
+export function NewsFeed({ coin, instance }: {
   /** The market on screen's coin (BTC), offered as "This market". */
   coin?: string | null;
+  /** A duplicate tab's own filters (dashboard/tradeTabs.tsx): "2" for the second copy. */
+  instance?: string;
 }) {
-  const [feed, setFeed] = useStored<Feed>('vs.news.feed', 'latest');
-  const [type, setType] = useStored<number>('vs.news.type', 0);
-  const [asset, setAsset] = useStored<string>('vs.news.asset', 'all');
+  const ns = instance ? `.${instance}` : '';
+  const [feed, setFeed] = useStored<Feed>(`vs.news.feed${ns}`, 'latest');
+  const [type, setType] = useStored<number>(`vs.news.type${ns}`, 0);
+  const [asset, setAsset] = useStored<string>(`vs.news.asset${ns}`, 'all');
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState(1);

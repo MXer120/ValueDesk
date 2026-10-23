@@ -585,11 +585,16 @@ const HEADER_STATS: readonly StatDef[] = [
  * the page on something the picture already says. They remain one right-click
  * away for anyone who reads the numbers rather than the shape.
  */
-const DEFAULT_HEADER_STATS: readonly StatId[] = ['change', 'hilo', 'funding8', 'qvol', 'oi'];
-/** What the row used to be. A saved copy of exactly one of these is moved to the new default. */
+const DEFAULT_HEADER_STATS: readonly StatId[] = ['mark', 'index', 'change', 'qvol', 'oi', 'funding'];
+/**
+ * Rows the default used to be. A saved copy of exactly one of these is moved to the
+ * default: the first is the original row; the second is the reference's three-stat row
+ * from 2026-10-23, which the owner sent back the same day for the row above. Its two
+ * stats (24H High / Low, Est. 8H Funding) stay in the right-click menu.
+ */
 const PREVIOUS_HEADER_STATS: readonly (readonly string[])[] = [
   ['last', 'oracle', 'qvol', 'oi', 'funding'],
-  ['mark', 'index', 'change', 'qvol', 'oi', 'funding'],
+  ['change', 'hilo', 'funding8', 'qvol', 'oi'],
 ];
 
 /** Guard for whatever localStorage hands back - it is user-writable. */
@@ -607,7 +612,7 @@ function statLabel(id: StatId, sym?: Symbol): string {
     case 'mark': return 'Mark Price';
     case 'index':
     case 'oracle': return 'Index Price';
-    case 'change': return 'Change 24h';
+    case 'change': return '24h Change';
     case 'hilo': return '24H High / Low';
     case 'funding8': return 'Est. 8H Funding (L/S)';
     case 'open': return '24h Open';
@@ -734,7 +739,7 @@ export function TickerBar({
     const onMenu = (e: MouseEvent) => {
       const el = headerRef.current;
       if (!el) return;
-      if (e.target instanceof Element && e.target.closest('.menu-popup')) return;
+      if (e.target instanceof Element && (e.target.closest('.menu-popup') || e.target.closest('.mkt-aside'))) return;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
       if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) return;
@@ -801,14 +806,14 @@ export function TickerBar({
       case 'bid': return <Stat key={id} label={label} value={price(bidPx)} />;
       case 'ask': return <Stat key={id} label={label} value={price(askPx)} />;
       case 'change':
-        /* The reference's reading: the proportion first, in the colour of the
-           move, then the move in the quote currency. */
+        /* The move stated twice - in the quote currency and as a proportion -
+           on the stat row's own two-part line, in the colour of the move. */
         return (
           <Stat
             key={id}
             label={label}
-            value={fmtPct(changePct)}
-            sub={changeAbs === undefined || changeAbs === null || changeAbs === '' ? undefined : `(${fmtSigned(changeAbs, precisionOf(sym?.tickSize))})`}
+            value={fmtSigned(changeAbs, precisionOf(sym?.tickSize))}
+            sub={fmtPct(changePct)}
             tone={signClass(changePct)}
           />
         );

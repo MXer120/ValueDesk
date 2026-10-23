@@ -18,11 +18,13 @@ export interface SeamGrid {
 
 const HIT = 10;
 
-export function SeamLayer({ items, grid, onMove }: {
+export function SeamLayer({ items, grid, onMove, onDrag }: {
   items: readonly SeamBox[];
   grid: SeamGrid;
   /** The panels after a step of the drag. */
   onMove: (next: SeamBox[]) => void;
+  /** A drag starts (true) or ends (false): the grid stops easing panels meanwhile. */
+  onDrag?: (on: boolean) => void;
 }) {
   const seams = useMemo(() => findSeams(items), [items]);
   const drag = useRef<{ seam: Seam; start: number; base: readonly SeamBox[]; d: number } | null>(null);
@@ -39,6 +41,7 @@ export function SeamLayer({ items, grid, onMove }: {
     e.currentTarget.setPointerCapture(e.pointerId);
     drag.current = { seam: s, start: s.axis === 'h' ? e.clientY : e.clientX, base: items, d: 0 };
     setActive(keyOf(s));
+    onDrag?.(true);
   };
   const move = (e: ReactPointerEvent<HTMLDivElement>) => {
     const g = drag.current;
@@ -54,6 +57,7 @@ export function SeamLayer({ items, grid, onMove }: {
     if (!drag.current) return;
     drag.current = null;
     setActive(null);
+    onDrag?.(false);
     if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
   };
 

@@ -1,13 +1,15 @@
 /**
- * The trade page's two tabbed panels with a + (tabExtras.tsx): the account band
- * under the chart and the chart card itself.
+ * The trade page's two tabbed panels with extra tabs (tabExtras.tsx): the
+ * account band under the chart and the chart card itself.
  *
- * The band's + adds a widget tab after its own tabs. The chart card's tabs sit
- * at the end of its coin row: the market on screen first, then other markets'
- * charts and widget tabs; the coin row follows the tab (another market's tab
- * shows that market's figures; a widget tab keeps the market on screen's).
+ * The + opens the widget sidebar; a right-click on a tab offers Close tab, Add
+ * widget and Duplicate. The band's extras follow its own tabs. The chart card's
+ * tabs sit at the end of its coin row: the market on screen first, then other
+ * markets' charts and widget tabs; the coin row follows the tab (another
+ * market's tab shows that market's figures; a widget tab keeps the market on
+ * screen's), and the body fades across a switch.
  */
-import type { ReactNode } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { Chart } from '../components/Chart';
 import { TickerBar, Trades } from '../components/Market';
 import { AccountTabs } from '../components/AccountTabs';
@@ -20,15 +22,20 @@ import { coinLabel } from '../format';
 import { useStored } from '../hooks';
 import type { PanelTab } from './Panel';
 import { SizeCalc } from './sourceWidgets';
-import { AddTabButton, ExtraLabel, TAB_WIDGETS, assetOf, extraKey, isExtraKey, useExtraTabs } from './tabExtras';
+import {
+  AddTabButton, TAB_WIDGETS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
+  type TabMenuItem,
+} from './tabExtras';
 import type { TradeContext } from './registry';
 
-/** One widget as a tab body. */
+/** One widget as a tab body; a duplicate keeps its own settings (`instance`). */
 function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: PanelTab['scroll'] } {
-  switch (id) {
+  const n = copyOf(id);
+  const instance = n ? String(n) : undefined;
+  switch (baseOf(id)) {
     case 'trades': return { content: <Trades engine={c.engine} symbol={c.symbol} sym={c.sym} showTitle={false} onOpenScan={c.onOpenScan} />, scroll: 'auto' };
-    case 'news': return { content: <NewsFeed coin={coinLabel(c.sym?.baseCoin) || null} />, scroll: 'hidden' };
-    case 'livefeed': return { content: <LiveFeed />, scroll: 'hidden' };
+    case 'news': return { content: <NewsFeed coin={coinLabel(c.sym?.baseCoin) || null} instance={instance} />, scroll: 'hidden' };
+    case 'livefeed': return { content: <LiveFeed instance={instance} />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
     case 'sizecalc': return { content: <SizeCalc price={c.lastPrice || c.price} />, scroll: 'auto' };
     case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
@@ -36,6 +43,9 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
     default: return { content: null, scroll: 'auto' };
   }
 }
+
+/** A tab's name: the widget's, with its copy number. */
+const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
 
 const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'funding', 'sizecalc', 'feetier', 'venue'];
 const CHART_WIDGETS = ['livefeed', 'news', 'trades', 'funding'];
@@ -49,25 +59,51 @@ const accountCtx = (c: TradeContext) => ({
   onChanged: c.onChanged,
 });
 
-/** The account band with its + (the bottom panel). */
+/** The account band with its extra tabs (the bottom panel). */
 export function TradeAccountBand({ c }: { c: TradeContext }) {
   const extra = useExtraTabs('band');
-  const tabs: PanelTab[] = extra.ids.filter((id) => TAB_WIDGETS[id]).map((id) => {
+  const [side, setSide] = useState(false);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; key: string } | null>(null);
+  const [select, setSelect] = useState<{ key: string; n: number } | null>(null);
+  const ids = extra.ids.filter((id) => TAB_WIDGETS[baseOf(id)]);
+  const show = (id: string | null) => { if (id) setSelect((s) => ({ key: extraKey(id), n: (s?.n ?? 0) + 1 })); };
+  const tabs: PanelTab[] = ids.map((id) => {
     const w = widgetTab(id, c);
-    return { key: extraKey(id), label: <ExtraLabel name={TAB_WIDGETS[id]} onRemove={() => extra.remove(id)} />, content: w.content, scroll: w.scroll };
+    return { key: extraKey(id), label: widgetName(id), content: w.content, scroll: w.scroll };
   });
-  const options = BAND_WIDGETS.filter((id) => !extra.ids.includes(id)).map((id) => ({ id, name: TAB_WIDGETS[id]! }));
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const items = (key: string): TabMenuItem[] => {
+    const id = isExtraKey(key) ? key.slice(2) : null;
+    return [
+      { label: 'Close tab', disabled: !id, onClick: () => id && extra.remove(id) },
+      { label: 'Add widget…', onClick: () => setSide(true) },
+      { label: 'Duplicate', disabled: !id, onClick: () => id && show(extra.add(id)) },
+    ];
+  };
   return (
-    <AccountTabs
-      {...accountCtx(c)}
-      market={c.sym?.displayName ?? c.symbol}
-      positionCount={c.positionCount}
-      orderCount={c.orderCount}
-      onPositionCount={c.onPositionCount}
-      onOrderCount={c.onOrderCount}
-      extraTabs={tabs}
-      tabsAfter={<AddTabButton options={options} onAdd={extra.add} label="Add a tab to this panel" />}
-    />
+    <>
+      <AccountTabs
+        {...accountCtx(c)}
+        market={c.sym?.displayName ?? c.symbol}
+        positionCount={c.positionCount}
+        orderCount={c.orderCount}
+        onPositionCount={c.onPositionCount}
+        onOrderCount={c.onOrderCount}
+        extraTabs={tabs}
+        tabsAfter={<AddTabButton open={side} onOpen={() => setSide((v) => !v)} label="Add a tab to this panel" />}
+        onTabMenu={(key, e) => setMenu({ at: menuAt(e), key })}
+        select={select}
+      />
+      {menu && <TabMenu at={menu.at} items={items(menu.key)} onClose={closeMenu} />}
+      {side && (
+        <TabSidebar
+          title="Add a tab · Account"
+          widgets={BAND_WIDGETS}
+          onAdd={(id) => { show(extra.add(id)); setSide(false); }}
+          onClose={() => setSide(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -75,43 +111,68 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
 export function ChartCard({ c }: { c: TradeContext }) {
   const extra = useExtraTabs('chart');
   const [active, setActive] = useStored<string>('vs.tabs.chart.active', 'main');
-  const ids = extra.ids.filter((id) => TAB_WIDGETS[id] || (assetOf(id) && c.byName.has(assetOf(id)!)));
+  const [side, setSide] = useState(false);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; id: string } | null>(null);
+  const ids = extra.ids.filter((id) => TAB_WIDGETS[baseOf(id)] || (assetOf(id) && c.byName.has(assetOf(id)!)));
   const on = active !== 'main' && ids.includes(active) ? active : 'main';
   const asset = assetOf(on);
   const symbol = asset ?? c.symbol;
   const sym = asset ? c.byName.get(asset) : c.sym;
   const widget = !asset && on !== 'main' ? widgetTab(on, c) : null;
+  const add = (id: string) => {
+    const next = extra.add(id);
+    if (next) setActive(next);
+  };
   const remove = (id: string) => {
     extra.remove(id);
     if (on === id) setActive('main');
   };
-  const options = CHART_WIDGETS.filter((id) => !ids.includes(id)).map((id) => ({ id, name: TAB_WIDGETS[id]! }));
-  const markets = [...c.byName.keys()].filter((m) => m !== c.symbol && !ids.includes(`asset:${m}`));
-  const label = (id: string) => (assetOf(id) ? c.byName.get(assetOf(id)!)?.displayName ?? assetOf(id)! : TAB_WIDGETS[id] ?? id);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  const items = (id: string): TabMenuItem[] => [
+    { label: 'Close tab', disabled: id === 'main', onClick: () => remove(id) },
+    { label: 'Add widget…', onClick: () => setSide(true) },
+    // The market on screen duplicates as a chart tab of its own.
+    { label: 'Duplicate', onClick: () => add(id === 'main' ? `asset:${c.symbol}` : id) },
+  ];
+  const label = (id: string) => {
+    const a = assetOf(id);
+    if (!a) return widgetName(id);
+    // A copy of the market on screen counts the main tab as its first.
+    const n = a === c.symbol ? (copyOf(id) ?? 1) + 1 : copyOf(id);
+    return `${c.byName.get(a)?.displayName ?? a}${n ? ` ${n}` : ''}`;
+  };
+  const markets = [...c.byName.values()].map((s) => ({ name: s.name, label: s.displayName ?? s.name }));
 
   const tabs = (
     <div className="chart-tabs dash-nodrag" role="tablist" aria-label="Chart tabs">
       {ids.length > 0 && (
         <>
-          <button type="button" role="tab" aria-selected={on === 'main'} className={`chart-tab${on === 'main' ? ' is-on' : ''}`} onClick={() => setActive('main')}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={on === 'main'}
+            className={`chart-tab${on === 'main' ? ' is-on' : ''}`}
+            onClick={() => setActive('main')}
+            onContextMenu={(e) => setMenu({ at: menuAt(e), id: 'main' })}
+          >
             {c.sym?.displayName ?? c.symbol}
           </button>
           {ids.map((id) => (
-            <button key={id} type="button" role="tab" aria-selected={on === id} className={`chart-tab${on === id ? ' is-on' : ''}`} onClick={() => setActive(id)}>
-              <ExtraLabel name={label(id)} onRemove={() => remove(id)} />
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={on === id}
+              className={`chart-tab${on === id ? ' is-on' : ''}`}
+              onClick={() => setActive(id)}
+              onContextMenu={(e) => setMenu({ at: menuAt(e), id })}
+            >
+              {label(id)}
             </button>
           ))}
         </>
       )}
-      <AddTabButton
-        options={options}
-        markets={markets}
-        label="Add a chart or a widget tab"
-        onAdd={(id) => {
-          extra.add(id);
-          setActive(id);
-        }}
-      />
+      <AddTabButton open={side} onOpen={() => setSide((v) => !v)} label="Add a chart or a widget tab" />
     </div>
   );
 
@@ -132,7 +193,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
         onSymbolClick={() => c.onOpenSearch(asset ?? undefined)}
         aside={tabs}
       />
-      <div className={`chart-card__body${widget ? ' is-widget' : ''}`}>
+      <div key={on} className={`chart-card__body mo-switch${widget ? ' is-widget' : ''}`}>
         {widget ? widget.content : (
           <Chart
             key={symbol}
@@ -149,6 +210,16 @@ export function ChartCard({ c }: { c: TradeContext }) {
           />
         )}
       </div>
+      {menu && <TabMenu at={menu.at} items={items(menu.id)} onClose={closeMenu} />}
+      {side && (
+        <TabSidebar
+          title="Add a tab · Chart"
+          widgets={CHART_WIDGETS}
+          markets={markets}
+          onAdd={(id) => { add(id); setSide(false); }}
+          onClose={() => setSide(false)}
+        />
+      )}
     </div>
   );
 }

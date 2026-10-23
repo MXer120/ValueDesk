@@ -1883,22 +1883,23 @@
 .mkt-favs__add:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.28); }
 
 .mkt-header.mkt-header--info { gap: 14px; padding: 0 18px 0 10px; }
+/* The coin on its own - no box (the owner's call); a press opens the market search. */
 .mkt-info__coin {
   flex: none;
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   min-height: 0;
   padding: 0;
   border: 0;
-  border-radius: 10px;
-  background: #2b2b2e;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  border-radius: 50%;
+  background: transparent;
   cursor: pointer;
-  transition: background 140ms;
+  transition: opacity 140ms, transform 140ms;
 }
-.mkt-info__coin:hover { background: #333336; }
+.mkt-info__coin:hover { opacity: 0.85; }
+.mkt-info__coin:active { transform: scale(0.96); }
 .mkt-header--info .mkt-price { margin: 0; }
 .mkt-header--info .mkt-price-v,
 .mkt-header--info .mkt-price-v.up,
@@ -1924,7 +1925,7 @@
    has nothing to divide once they wrap. */
 @media (max-width: 567px) {
   .mkt-header.mkt-header--info { gap: 10px; row-gap: 6px; padding: 6px 12px; }
-  .mkt-info__coin { width: 36px; height: 36px; border-radius: 10px; }
+  .mkt-info__coin { width: 30px; height: 30px; }
   .mkt-header--info .mkt-price-v,
   .mkt-header--info .mkt-price-v.up,
   .mkt-header--info .mkt-price-v.down { font-size: 24px; line-height: 30px; }
