@@ -299,6 +299,8 @@ export interface MarketInfo {
   sellLimitDownRatio: number;
   /** Base-tier taker fee, fraction (copied IOCs are taker orders). */
   takerFee: number;
+  /** Base-tier maker fee, fraction (algo orders that rest), when SoDEX lists one. */
+  makerFee?: number;
   status: string;
 }
 

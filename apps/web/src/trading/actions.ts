@@ -19,10 +19,17 @@
  * server signed) - or, in a build that requires the builder, it is not sent.
  */
 import {
+  OrderModifier,
+  OrderSide,
+  OrderType,
   OrderValidationError,
   SodexApiError,
+  StopType,
+  TimeInForce,
+  TriggerType,
   decimalCompare,
   failedOrders,
+  perpsActions,
   signAndBuildWithNonceManager,
   unwrapList,
   type BuilderParams,
@@ -202,6 +209,95 @@ export async function placeOrder(engine: Engine, t: OrderTicket) {
   // It may have filled: the server is told to look at this wallet's volume (debounced, terms.ts).
   if (builder) hintTerms(s.meta.owner);
   return { engine, symbol: built.symbol, orderCount: built.orderCount, result };
+}
+
+/**
+ * ALGO CHILDREN: one signed batch of plain perps limit orders on one market
+ * (IOC to take, GTX to rest, GTC for a ladder), each with the client order id
+ * the algo engine chose, carrying the builder like every other order - the
+ * fee guard checks it here as anywhere. Returns SoDEX's answer as it is: the
+ * engine reads it order by order (one refused level does not fail a ladder).
+ */
+export async function placeAlgoChildren(
+  symbol: string,
+  orders: ReadonlyArray<{ clOrdID: string; side: 'buy' | 'sell'; price: string; quantity: string; tif: 'ioc' | 'gtx' | 'gtc'; reduceOnly: boolean }>,
+): Promise<unknown> {
+  const s = requireSigner(undefined, 'perps');
+  const sym = await symbolFor('perps', symbol);
+  const builder = await builderForOrder('perps');
+  const tif = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC } as const;
+  const action = perpsActions.newOrder(
+    s.meta.accountId,
+    sym.id,
+    orders.map((o) => ({
+      clOrdID: o.clOrdID,
+      modifier: OrderModifier.NORMAL,
+      side: o.side === 'buy' ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.LIMIT,
+      timeInForce: tif[o.tif],
+      price: o.price,
+      quantity: o.quantity,
+      reduceOnly: o.reduceOnly,
+    })),
+    builder,
+  );
+  const result = await signAndSend(action, orders.length === 1 ? 'algo order' : 'algo orders');
+  if (builder) hintTerms(s.meta.owner);
+  return result;
+}
+
+/**
+ * ALGO EXITS: an algo's take-profit / stop-loss as SoDEX position stops - the
+ * same order as a position's TP/SL from the ticket (a reduce-only STOP market
+ * order on the mark), one signed batch, with the builder and the fee guard.
+ */
+export async function placeAlgoStops(
+  symbol: string,
+  stops: ReadonlyArray<{ clOrdID: string; side: 'buy' | 'sell'; quantity: string; triggerPrice: string; kind: 'tp' | 'sl' }>,
+): Promise<unknown> {
+  const s = requireSigner(undefined, 'perps');
+  const sym = await symbolFor('perps', symbol);
+  const builder = await builderForOrder('perps');
+  const action = perpsActions.newOrder(
+    s.meta.accountId,
+    sym.id,
+    stops.map((o) => ({
+      clOrdID: o.clOrdID,
+      modifier: OrderModifier.STOP,
+      side: o.side === 'buy' ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.MARKET,
+      timeInForce: TimeInForce.IOC,
+      quantity: o.quantity,
+      stopPrice: o.triggerPrice,
+      stopType: o.kind === 'tp' ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
+      triggerType: TriggerType.MARK_PRICE,
+      reduceOnly: true,
+    })),
+    builder,
+  );
+  return signAndSend(action, stops.length === 1 ? 'algo exit' : 'algo exits');
+}
+
+/**
+ * The SoDEX account a new live algo of `owner` trades: the one trading is
+ * enabled for in this browser. Throws (as any order would) when it is not.
+ * The trading key itself never leaves this module.
+ */
+export function algoAccountId(owner: string): number {
+  return requireSigner(owner, 'perps').meta.accountId;
+}
+
+/** Cancel algo children by client order id (one signed request). An order already gone is not an error. */
+export async function cancelAlgoChildren(symbol: string, clOrdIDs: readonly string[]): Promise<void> {
+  if (!clOrdIDs.length) return;
+  const s = requireSigner(undefined, 'perps');
+  const sym = await symbolFor('perps', symbol);
+  try {
+    await signAndSend(perpsActions.cancelOrder(s.meta.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: sym.id, clOrdID }))), 'cancel');
+  } catch (e) {
+    if (e instanceof SodexApiError && /not found|unknown order|does not exist|already/i.test(e.message)) return;
+    throw e;
+  }
 }
 
 export async function cancelOrder(engine: Engine, b: { symbol: string; orderID?: number; clOrdID?: string }) {

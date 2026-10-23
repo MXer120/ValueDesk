@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// node_modules/ws/lib/constants.js
+// ../valuescan/node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/ws/lib/constants.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/node-gyp-build.js
+// ../valuescan/node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "../valuescan/node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/index.js
+// ../valuescan/node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "node_modules/node-gyp-build/index.js"(exports, module) {
+  "../valuescan/node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// node_modules/bufferutil/fallback.js
+// ../valuescan/node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "node_modules/bufferutil/fallback.js"(exports, module) {
+  "../valuescan/node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// node_modules/bufferutil/index.js
+// ../valuescan/node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "node_modules/bufferutil/index.js"(exports, module) {
+  "../valuescan/node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../valuescan/node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../valuescan/node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/ws/lib/limiter.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../valuescan/node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -595,26 +595,26 @@ var require_permessage_deflate = __commonJS({
             value = value[0];
             if (key2 === "client_max_window_bits") {
               if (value !== true) {
-                const num2 = +value;
-                if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
+                const num3 = +value;
+                if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
                   throw new TypeError(
                     `Invalid value for parameter "${key2}": ${value}`
                   );
                 }
-                value = num2;
+                value = num3;
               } else if (!this._isServer) {
                 throw new TypeError(
                   `Invalid value for parameter "${key2}": ${value}`
                 );
               }
             } else if (key2 === "server_max_window_bits") {
-              const num2 = +value;
-              if (!Number.isInteger(num2) || num2 < 8 || num2 > 15) {
+              const num3 = +value;
+              if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
                 throw new TypeError(
                   `Invalid value for parameter "${key2}": ${value}`
                 );
               }
-              value = num2;
+              value = num3;
             } else if (key2 === "client_no_context_takeover" || key2 === "server_no_context_takeover") {
               if (value !== true) {
                 throw new TypeError(
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/fallback.js
+// ../valuescan/node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "../valuescan/node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/index.js
+// ../valuescan/node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "node_modules/utf-8-validate/index.js"(exports, module) {
+  "../valuescan/node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../valuescan/node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/ws/lib/validation.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../valuescan/node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/ws/lib/receiver.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1377,8 +1377,8 @@ var require_receiver = __commonJS({
           return;
         }
         const buf = this.consume(8);
-        const num2 = buf.readUInt32BE(0);
-        if (num2 > Math.pow(2, 53 - 32) - 1) {
+        const num3 = buf.readUInt32BE(0);
+        if (num3 > Math.pow(2, 53 - 32) - 1) {
           const error = this.createError(
             RangeError,
             "Unsupported WebSocket frame: payload length > 2^53 - 1",
@@ -1389,7 +1389,7 @@ var require_receiver = __commonJS({
           cb(error);
           return;
         }
-        this._payloadLength = num2 * Math.pow(2, 32) + buf.readUInt32BE(4);
+        this._payloadLength = num3 * Math.pow(2, 32) + buf.readUInt32BE(4);
         this.haveLength(cb);
       }
       /**
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/ws/lib/sender.js
+// ../valuescan/node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/ws/lib/sender.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../valuescan/node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/ws/lib/event-target.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../valuescan/node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/ws/lib/extension.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket.js
+// ../valuescan/node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/ws/lib/websocket.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../valuescan/node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/ws/lib/stream.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../valuescan/node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../valuescan/node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "../valuescan/node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -4007,6 +4007,7 @@ function loadConfig(env = process.env) {
     // 90 days is what the copy terms promise and what the web app registers at most.
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
+    maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info"
@@ -4017,7 +4018,7 @@ function loadConfig(env = process.env) {
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// node_modules/ws/wrapper.mjs
+// ../valuescan/node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4039,7 +4040,7 @@ function egress(localAddress) {
   }
   const family = isIPv6(localAddress) ? 6 : 4;
   const agent = new Agent({ keepAlive: true, localAddress, family, maxSockets: 64 });
-  const bound = (url, init) => new Promise((resolve2, reject) => {
+  const bound2 = (url, init) => new Promise((resolve2, reject) => {
     const u = new URL(url);
     if (u.protocol !== "https:") {
       reject(new TypeError(`only https is allowed from the executor's own address (${u.protocol})`));
@@ -4076,7 +4077,7 @@ function egress(localAddress) {
       }
     });
   };
-  return { fetch: bound, factory, localAddress };
+  return { fetch: bound2, factory, localAddress };
 }
 
 // apps/executor/src/db.ts
@@ -4117,6 +4118,10 @@ CREATE TABLE IF NOT EXISTS consents (
   viewer_country TEXT
 );
 CREATE INDEX IF NOT EXISTS consents_owner ON consents (owner, at);
+CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
+CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
 `;
 var ExecutorDb = class {
   constructor(path) {
@@ -4180,13 +4185,35 @@ var ExecutorDb = class {
   async activity(q) {
     const limit = Math.max(1, Math.min(1e3, q.limit ?? 200));
     const before = q.before ?? Number.MAX_SAFE_INTEGER;
-    const rows = q.subId ? this.q("SELECT json FROM activity WHERE sub_id = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.subId, before, limit) : this.q("SELECT json FROM activity WHERE owner = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.owner ?? "", before, limit);
-    return rows.map((r) => JSON.parse(String(r.json)));
+    const rows2 = q.subId ? this.q("SELECT json FROM activity WHERE sub_id = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.subId, before, limit) : this.q("SELECT json FROM activity WHERE owner = ? AND at < ? ORDER BY at DESC LIMIT ?").all(q.owner ?? "", before, limit);
+    return rows2.map((r) => JSON.parse(String(r.json)));
   }
-  /** Activity older than `days` goes (the copy's books keep their totals). */
+  /** Activity (copies' and algos') older than `days` goes; the books keep their totals. */
   pruneActivity(days, now = Date.now()) {
     const r = this.q("DELETE FROM activity WHERE at < ?").run(now - days * 864e5);
-    return Number(r.changes);
+    const e = this.q("DELETE FROM algo_events WHERE at < ?").run(now - days * 864e5);
+    return Number(r.changes) + Number(e.changes);
+  }
+  /* ------------------------------------------------------ AlgoStore ----- */
+  async algos() {
+    return this.q("SELECT json FROM algos").all().map((r) => JSON.parse(String(r.json)));
+  }
+  async saveAlgo(a) {
+    this.q("INSERT INTO algos (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at").run(
+      a.id,
+      a.owner,
+      JSON.stringify(a),
+      Date.now()
+    );
+  }
+  async addAlgoEvent(e) {
+    this.q("INSERT OR IGNORE INTO algo_events (id, algo_id, owner, at, json) VALUES (?, ?, ?, ?, ?)").run(e.id, e.algoId, e.owner, e.at, JSON.stringify(e));
+  }
+  async algoEvents(q) {
+    const limit = Math.max(1, Math.min(1e3, q.limit ?? 200));
+    const before = q.before ?? Number.MAX_SAFE_INTEGER;
+    const rows2 = q.algoId ? this.q("SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.algoId, before, limit) : this.q("SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?").all(q.owner ?? "", before, limit);
+    return rows2.map((r) => JSON.parse(String(r.json)));
   }
   /* ----------------------------------------------------------- keys ----- */
   key(owner, slot) {
@@ -4299,7 +4326,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// node_modules/@noble/hashes/esm/_u64.js
+// ../valuescan/node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4322,7 +4349,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// node_modules/@noble/hashes/esm/utils.js
+// ../valuescan/node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4390,7 +4417,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/sha3.js
+// ../valuescan/node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4571,7 +4598,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4605,11 +4632,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -4662,7 +4689,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -4764,7 +4791,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -4914,7 +4941,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../valuescan/node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -4979,7 +5006,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// node_modules/@noble/curves/esm/abstract/utils.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5032,8 +5059,8 @@ function bytesToHex(bytes) {
   }
   return hex;
 }
-function numberToHexUnpadded(num2) {
-  const hex = num2.toString(16);
+function numberToHexUnpadded(num3) {
+  const hex = num3.toString(16);
   return hex.length & 1 ? "0" + hex : hex;
 }
 function hexToNumber(hex) {
@@ -5247,7 +5274,7 @@ function memoized(fn) {
   };
 }
 
-// node_modules/@noble/curves/esm/abstract/modular.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5261,7 +5288,7 @@ function mod(a, b) {
   const result = a % b;
   return result >= _0n3 ? result : b + result;
 }
-function pow(num2, power, modulo) {
+function pow(num3, power, modulo) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (modulo <= _0n3)
@@ -5271,8 +5298,8 @@ function pow(num2, power, modulo) {
   let res = _1n3;
   while (power > _0n3) {
     if (power & _1n3)
-      res = res * num2 % modulo;
-    num2 = num2 * num2 % modulo;
+      res = res * num3 % modulo;
+    num3 = num3 * num3 % modulo;
     power >>= _1n3;
   }
   return res;
@@ -5408,15 +5435,15 @@ function validateField(field) {
   }, initial);
   return validateObject(field, opts);
 }
-function FpPow(f, num2, power) {
+function FpPow(f, num3, power) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (power === _0n3)
     return f.ONE;
   if (power === _1n3)
-    return num2;
+    return num3;
   let p = f.ONE;
-  let d = num2;
+  let d = num3;
   while (power > _0n3) {
     if (power & _1n3)
       p = f.mul(p, d);
@@ -5427,18 +5454,18 @@ function FpPow(f, num2, power) {
 }
 function FpInvertBatch(f, nums) {
   const tmp = new Array(nums.length);
-  const lastMultiplied = nums.reduce((acc, num2, i) => {
-    if (f.is0(num2))
+  const lastMultiplied = nums.reduce((acc, num3, i) => {
+    if (f.is0(num3))
       return acc;
     tmp[i] = acc;
-    return f.mul(acc, num2);
+    return f.mul(acc, num3);
   }, f.ONE);
   const inverted = f.inv(lastMultiplied);
-  nums.reduceRight((acc, num2, i) => {
-    if (f.is0(num2))
+  nums.reduceRight((acc, num3, i) => {
+    if (f.is0(num3))
       return acc;
     tmp[i] = f.mul(acc, tmp[i]);
-    return f.mul(acc, num2);
+    return f.mul(acc, num3);
   }, inverted);
   return tmp;
 }
@@ -5462,28 +5489,28 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     MASK: bitMask(BITS),
     ZERO: _0n3,
     ONE: _1n3,
-    create: (num2) => mod(num2, ORDER),
-    isValid: (num2) => {
-      if (typeof num2 !== "bigint")
-        throw new Error("invalid field element: expected bigint, got " + typeof num2);
-      return _0n3 <= num2 && num2 < ORDER;
+    create: (num3) => mod(num3, ORDER),
+    isValid: (num3) => {
+      if (typeof num3 !== "bigint")
+        throw new Error("invalid field element: expected bigint, got " + typeof num3);
+      return _0n3 <= num3 && num3 < ORDER;
     },
-    is0: (num2) => num2 === _0n3,
-    isOdd: (num2) => (num2 & _1n3) === _1n3,
-    neg: (num2) => mod(-num2, ORDER),
+    is0: (num3) => num3 === _0n3,
+    isOdd: (num3) => (num3 & _1n3) === _1n3,
+    neg: (num3) => mod(-num3, ORDER),
     eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num2) => mod(num2 * num2, ORDER),
+    sqr: (num3) => mod(num3 * num3, ORDER),
     add: (lhs, rhs) => mod(lhs + rhs, ORDER),
     sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
     mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
-    pow: (num2, power) => FpPow(f, num2, power),
+    pow: (num3, power) => FpPow(f, num3, power),
     div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
     // Same as above, but doesn't normalize
-    sqrN: (num2) => num2 * num2,
+    sqrN: (num3) => num3 * num3,
     addN: (lhs, rhs) => lhs + rhs,
     subN: (lhs, rhs) => lhs - rhs,
     mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num2) => invert(num2, ORDER),
+    inv: (num3) => invert(num3, ORDER),
     sqrt: redef.sqrt || ((n) => {
       if (!sqrtP)
         sqrtP = FpSqrt(ORDER);
@@ -5493,7 +5520,7 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     // TODO: do we really need constant cmov?
     // We don't have const-time bigints anyway, so probably will be not very useful
     cmov: (a, b, c) => c ? b : a,
-    toBytes: (num2) => isLE2 ? numberToBytesLE(num2, BYTES) : numberToBytesBE(num2, BYTES),
+    toBytes: (num3) => isLE2 ? numberToBytesLE(num3, BYTES) : numberToBytesBE(num3, BYTES),
     fromBytes: (bytes) => {
       if (bytes.length !== BYTES)
         throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
@@ -5518,17 +5545,17 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   const minLen = getMinHashLength(fieldOrder);
   if (len < 16 || len < minLen || len > 1024)
     throw new Error("expected " + minLen + "-1024 bytes of input, got " + len);
-  const num2 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
-  const reduced = mod(num2, fieldOrder - _1n3) + _1n3;
+  const num3 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
+  const reduced = mod(num3, fieldOrder - _1n3) + _1n3;
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// node_modules/@noble/curves/esm/abstract/curve.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
-function constTimeNegate(condition, item) {
+function constTimeNegate(condition2, item) {
   const neg = item.negate();
-  return condition ? neg : item;
+  return condition2 ? neg : item;
 }
 function validateW(W, bits) {
   if (!Number.isSafeInteger(W) || W <= 0 || W > bits)
@@ -5594,15 +5621,15 @@ function wNAF(c, bits) {
       const { windows, windowSize } = calcWOpts(W, bits);
       const points = [];
       let p = elm;
-      let base = p;
+      let base2 = p;
       for (let window2 = 0; window2 < windows; window2++) {
-        base = p;
-        points.push(base);
+        base2 = p;
+        points.push(base2);
         for (let i = 1; i < windowSize; i++) {
-          base = base.add(p);
-          points.push(base);
+          base2 = base2.add(p);
+          points.push(base2);
         }
-        p = base.double();
+        p = base2.double();
       }
       return points;
     },
@@ -5750,7 +5777,7 @@ function validateBasic(curve) {
   });
 }
 
-// node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../valuescan/node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -5848,11 +5875,11 @@ var DER = {
   // - add zero byte if exists
   // - if next byte doesn't have a flag, leading zero is not allowed (minimal encoding)
   _int: {
-    encode(num2) {
+    encode(num3) {
       const { Err: E } = DER;
-      if (num2 < _0n5)
+      if (num3 < _0n5)
         throw new E("integer: negative integers are not allowed");
-      let hex = numberToHexUnpadded(num2);
+      let hex = numberToHexUnpadded(num3);
       if (Number.parseInt(hex[0], 16) & 8)
         hex = "00" + hex;
       if (hex.length & 1)
@@ -5869,7 +5896,7 @@ var DER = {
     }
   },
   toSig(hex) {
-    const { Err: E, _int: int, _tlv: tlv } = DER;
+    const { Err: E, _int: int2, _tlv: tlv } = DER;
     const data = typeof hex === "string" ? h2b(hex) : hex;
     abytes3(data);
     const { v: seqBytes, l: seqLeftBytes } = tlv.decode(48, data);
@@ -5879,12 +5906,12 @@ var DER = {
     const { v: sBytes, l: sLeftBytes } = tlv.decode(2, rLeftBytes);
     if (sLeftBytes.length)
       throw new E("invalid signature: left bytes after parsing");
-    return { r: int.decode(rBytes), s: int.decode(sBytes) };
+    return { r: int2.decode(rBytes), s: int2.decode(sBytes) };
   },
   hexFromSig(sig) {
-    const { _tlv: tlv, _int: int } = DER;
-    const rs = tlv.encode(2, int.encode(sig.r));
-    const ss = tlv.encode(2, int.encode(sig.s));
+    const { _tlv: tlv, _int: int2 } = DER;
+    const rs = tlv.encode(2, int2.encode(sig.r));
+    const ss = tlv.encode(2, int2.encode(sig.s));
     const seq = rs + ss;
     return tlv.encode(48, seq);
   }
@@ -5916,8 +5943,8 @@ function weierstrassPoints(opts) {
   }
   if (!Fp.eql(Fp.sqr(CURVE.Gy), weierstrassEquation(CURVE.Gx)))
     throw new Error("bad generator point: equation left != right");
-  function isWithinCurveOrder(num2) {
-    return inRange(num2, _1n5, CURVE.n);
+  function isWithinCurveOrder(num3) {
+    return inRange(num3, _1n5, CURVE.n);
   }
   function normPrivateKeyToScalar(key2) {
     const { allowedPrivateKeyLengths: lengths, nByteLength, wrapPrivateKey, n: N } = CURVE;
@@ -5928,16 +5955,16 @@ function weierstrassPoints(opts) {
         throw new Error("invalid private key");
       key2 = key2.padStart(nByteLength * 2, "0");
     }
-    let num2;
+    let num3;
     try {
-      num2 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
+      num3 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
     } catch (error) {
       throw new Error("invalid private key, expected hex or " + nByteLength + " bytes, got " + typeof key2);
     }
     if (wrapPrivateKey)
-      num2 = mod(num2, N);
-    aInRange("private key", num2, _1n5, N);
-    return num2;
+      num3 = mod(num3, N);
+    aInRange("private key", num3, _1n5, N);
+    return num3;
   }
   function assertPrjPoint(other) {
     if (!(other instanceof Point2))
@@ -6359,7 +6386,7 @@ function weierstrass(curveDef) {
       }
     }
   });
-  const numToNByteStr = (num2) => bytesToHex(numberToBytesBE(num2, CURVE.nByteLength));
+  const numToNByteStr = (num3) => bytesToHex(numberToBytesBE(num3, CURVE.nByteLength));
   function isBiggerThanHalfOrder(number) {
     const HALF = CURVE_ORDER >> _1n5;
     return number > HALF;
@@ -6493,17 +6520,17 @@ function weierstrass(curveDef) {
   const bits2int = CURVE.bits2int || function(bytes) {
     if (bytes.length > 8192)
       throw new Error("input is too large");
-    const num2 = bytesToNumberBE(bytes);
+    const num3 = bytesToNumberBE(bytes);
     const delta = bytes.length * 8 - CURVE.nBitLength;
-    return delta > 0 ? num2 >> BigInt(delta) : num2;
+    return delta > 0 ? num3 >> BigInt(delta) : num3;
   };
   const bits2int_modN = CURVE.bits2int_modN || function(bytes) {
     return modN(bits2int(bytes));
   };
   const ORDER_MASK = bitMask(CURVE.nBitLength);
-  function int2octets(num2) {
-    aInRange("num < 2^" + CURVE.nBitLength, num2, _0n5, ORDER_MASK);
-    return numberToBytesBE(num2, CURVE.nByteLength);
+  function int2octets(num3) {
+    aInRange("num < 2^" + CURVE.nBitLength, num3, _0n5, ORDER_MASK);
+    return numberToBytesBE(num3, CURVE.nByteLength);
   }
   function prepSig(msgHash, privateKey, opts = defaultSigOpts) {
     if (["recovered", "canonical"].some((k) => k in opts))
@@ -6567,13 +6594,13 @@ function weierstrass(curveDef) {
     if (format !== void 0 && format !== "compact" && format !== "der")
       throw new Error("format must be compact or der");
     const isHex = typeof sg === "string" || isBytes3(sg);
-    const isObj = !isHex && !format && typeof sg === "object" && sg !== null && typeof sg.r === "bigint" && typeof sg.s === "bigint";
-    if (!isHex && !isObj)
+    const isObj2 = !isHex && !format && typeof sg === "object" && sg !== null && typeof sg.r === "bigint" && typeof sg.s === "bigint";
+    if (!isHex && !isObj2)
       throw new Error("invalid signature, expected Uint8Array, hex string or Signature instance");
     let _sig = void 0;
     let P;
     try {
-      if (isObj)
+      if (isObj2)
         _sig = new Signature(sg.r, sg.s);
       if (isHex) {
         try {
@@ -6619,7 +6646,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// node_modules/@noble/curves/esm/_shortw_utils.js
+// ../valuescan/node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6632,7 +6659,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// node_modules/@noble/curves/esm/secp256k1.js
+// ../valuescan/node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -7491,8 +7518,8 @@ function signingKeyFrom(key2, registration) {
 var SigningError = class extends Error {
   name = "SigningError";
 };
-var joinBase = (base, path) => base.replace(/\/+$/, "") + path;
-function signAndBuild(action, key2, opts) {
+var joinBase = (base2, path) => base2.replace(/\/+$/, "") + path;
+function signAndBuild(action2, key2, opts) {
   const now = opts.now ?? Date.now();
   if (!Number.isSafeInteger(opts.chainId) || opts.chainId <= 0) {
     throw new SigningError("chainId must be the SoDEX chain id (286623 mainnet, 138565 testnet)");
@@ -7502,15 +7529,15 @@ function signAndBuild(action, key2, opts) {
   }
   if (key2.name !== void 0 && key2.name === "") throw new SigningError("API key name must not be empty");
   const nonce = assertNonceInWindow(opts.nonce, now, opts.nonceWindowMarginMs ?? DEFAULT_NONCE_WINDOW_MARGIN_MS);
-  const ep = endpointFor(action.engine, action.type);
-  const body = goJSONStringify(action.params);
-  const payloadHash = keccak256(utf8(payloadJSONFromBody(action.type, body)));
+  const ep = endpointFor(action2.engine, action2.type);
+  const body = goJSONStringify(action2.params);
+  const payloadHash = keccak256(utf8(payloadJSONFromBody(action2.type, body)));
   const digest = eip712Digest(
-    makeDomain(engineDomainName(action.engine), opts.chainId),
+    makeDomain(engineDomainName(action2.engine), opts.chainId),
     exchangeActionStructHash(payloadHash, nonce)
   );
   const signature = bytesToHex2(signDigest(digest, key2.privateKey, SignatureType.EIP712));
-  const gatewayPath = enginePath(action.engine) + ep.path;
+  const gatewayPath = enginePath(action2.engine) + ep.path;
   const headers = {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -7526,8 +7553,8 @@ function signAndBuild(action, key2, opts) {
     headers,
     body,
     meta: {
-      engine: action.engine,
-      actionType: action.type,
+      engine: action2.engine,
+      actionType: action2.type,
       nonce: nonce.toString(),
       signer: key2.address?.toLowerCase() ?? privateKeyToAddress(key2.privateKey),
       payloadHash: bytesToHex2(payloadHash),
@@ -7536,11 +7563,11 @@ function signAndBuild(action, key2, opts) {
     }
   };
 }
-async function signAndBuildWithNonceManager(action, key2, opts) {
+async function signAndBuildWithNonceManager(action2, key2, opts) {
   const signer = key2.address ?? privateKeyToAddress(key2.privateKey);
   const nonce = await opts.nonces.next(nonceKey(signer, opts.chainId));
   const ref = { privateKey: key2.privateKey, name: key2.name, expiresAt: key2.expiresAt, address: signer };
-  return signAndBuild(action, ref, { ...opts, nonce });
+  return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
 // packages/sodex-core/src/builders.ts
@@ -7553,9 +7580,9 @@ function approvedBuilderRates(data, builderID) {
   const out = { spot: null, perps: null };
   if (!data || typeof data !== "object") return out;
   for (const engine of ENGINES) {
-    const rows = data[engine];
-    if (!Array.isArray(rows)) continue;
-    for (const row of rows) {
+    const rows2 = data[engine];
+    if (!Array.isArray(rows2)) continue;
+    for (const row of rows2) {
       if (!row || typeof row !== "object") continue;
       const r = row;
       if (String(r["builderID"]) !== want) continue;
@@ -8021,10 +8048,10 @@ var num = (v, fallback = NaN) => {
   return Number.isFinite(n) ? n : fallback;
 };
 var str = (v, fallback) => typeof v === "string" && v.trim() !== "" ? v.trim() : fallback;
-function parseMarkets(rows) {
-  if (!Array.isArray(rows)) return [];
+function parseMarkets(rows2) {
+  if (!Array.isArray(rows2)) return [];
   const out = [];
-  for (const r of rows) {
+  for (const r of rows2) {
     const id = num(r.id);
     const name = str(r.name, "");
     const step = str(r.stepSize, "");
@@ -8045,6 +8072,7 @@ function parseMarkets(rows) {
       buyLimitUpRatio: num(r.buyLimitUpRatio, 0.05),
       sellLimitDownRatio: num(r.sellLimitDownRatio, 0.05),
       takerFee: num(r.takerFee, 4e-4),
+      ...Number.isFinite(num(r.makerFee)) ? { makerFee: num(r.makerFee) } : {},
       status: str(r.status, "TRADING")
     });
   }
@@ -8067,12 +8095,12 @@ var MarketBook = class {
   get(name) {
     return this.byName.get(name.toUpperCase()) ?? null;
   }
-  setMark(symbol, price, at = Date.now()) {
-    if (Number.isFinite(price) && price > 0) this.marks.set(symbol.toUpperCase(), { price, at });
+  setMark(symbol2, price2, at = Date.now()) {
+    if (Number.isFinite(price2) && price2 > 0) this.marks.set(symbol2.toUpperCase(), { price: price2, at });
   }
   /** The mark, if seen within `maxAgeMs`. */
-  mark(symbol, maxAgeMs = 6e4, now = Date.now()) {
-    const m = this.marks.get(symbol.toUpperCase());
+  mark(symbol2, maxAgeMs = 6e4, now = Date.now()) {
+    const m = this.marks.get(symbol2.toUpperCase());
     return m && now - m.at <= maxAgeMs ? m.price : null;
   }
   /** The SoDEX market a leader's market maps to, or null when SoDEX lists none. */
@@ -8417,24 +8445,24 @@ function noteSeen(state, id, cap = 500) {
   state.seen.push(id);
   if (state.seen.length > cap) state.seen.splice(0, state.seen.length - cap);
 }
-function applyFill(state, symbol, side, qty, price, fee, at) {
-  if (!(qty > 0) || !(price > 0)) return;
-  const d = side === "buy" ? qty : -qty;
-  const p = state.owned[symbol];
+function applyFill(state, symbol2, side, qty2, price2, fee, at) {
+  if (!(qty2 > 0) || !(price2 > 0)) return;
+  const d = side === "buy" ? qty2 : -qty2;
+  const p = state.owned[symbol2];
   const size = p?.size ?? 0;
   state.fees += Math.max(0, fee);
   if (isFlat(size) || sign(size) === sign(d)) {
     const next2 = size + d;
-    const entry = isFlat(size) ? price : (p.entry * Math.abs(size) + price * Math.abs(d)) / Math.abs(next2);
-    state.owned[symbol] = { size: next2, entry, openedAt: p?.openedAt ?? at };
+    const entry = isFlat(size) ? price2 : (p.entry * Math.abs(size) + price2 * Math.abs(d)) / Math.abs(next2);
+    state.owned[symbol2] = { size: next2, entry, openedAt: p?.openedAt ?? at };
     return;
   }
   const closing = Math.min(Math.abs(d), Math.abs(size));
-  state.realizedPnl += closing * (price - p.entry) * sign(size);
+  state.realizedPnl += closing * (price2 - p.entry) * sign(size);
   const next = size + d;
-  if (isFlat(next) || Math.abs(next) < 1e-12) delete state.owned[symbol];
-  else if (sign(next) === sign(size)) state.owned[symbol] = { size: next, entry: p.entry, openedAt: p.openedAt };
-  else state.owned[symbol] = { size: next, entry: price, openedAt: at };
+  if (isFlat(next) || Math.abs(next) < 1e-12) delete state.owned[symbol2];
+  else if (sign(next) === sign(size)) state.owned[symbol2] = { size: next, entry: p.entry, openedAt: p.openedAt };
+  else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
 // packages/copy-engine/src/sodex.ts
@@ -8532,8 +8560,8 @@ var SodexClient = class {
     return parseMarkets(await this.get("/api/v1/perps/markets/symbols"));
   }
   async markPrices() {
-    const rows = await this.get("/api/v1/perps/markets/mark-prices");
-    return (rows ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice) })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
+    const rows2 = await this.get("/api/v1/perps/markets/mark-prices");
+    return (rows2 ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice) })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
   }
   /** The primary account id (0 when SoDEX has never seen a deposit from the wallet). */
   async accountId(address) {
@@ -8568,13 +8596,13 @@ var SodexClient = class {
   }
   /** The account's API keys on perps (names are public). */
   async apiKeys(address, engine = "perps") {
-    const rows = await this.get(`/api/v1/${engine}/accounts/${address.toLowerCase()}/api-keys`);
-    return Array.isArray(rows) ? rows : rows?.apiKeys ?? [];
+    const rows2 = await this.get(`/api/v1/${engine}/accounts/${address.toLowerCase()}/api-keys`);
+    return Array.isArray(rows2) ? rows2 : rows2?.apiKeys ?? [];
   }
   /** Whether `keyAddress` is registered under `name` and not expired. */
   async keyRegistered(owner, name, keyAddress, now = Date.now()) {
-    const rows = await this.apiKeys(owner, "perps");
-    const row = rows.find((r) => r.name === name);
+    const rows2 = await this.apiKeys(owner, "perps");
+    const row = rows2.find((r) => r.name === name);
     if (!row || row.publicKey.toLowerCase() !== keyAddress.toLowerCase()) return { ok: false, expiresAt: null };
     if (row.expiresAt && row.expiresAt <= now) return { ok: false, expiresAt: row.expiresAt };
     return { ok: true, expiresAt: row.expiresAt || null };
@@ -8756,8 +8784,8 @@ var LiveSocket = class {
   schedule() {
     if (!this.running) return;
     timers.cancel(this.retry);
-    const base = Math.min(3e4, 1e3 * 2 ** this.attempt++);
-    const delay = base / 2 + Math.random() * (base / 2);
+    const base2 = Math.min(3e4, 1e3 * 2 ** this.attempt++);
+    const delay = base2 / 2 + Math.random() * (base2 / 2);
     this.retry = timers.after(delay, () => {
       this.retry = null;
       this.connect();
@@ -8798,8 +8826,8 @@ var LeaderBook = class {
   positions(l) {
     return Object.fromEntries(this.pos.get(key(l)) ?? []);
   }
-  position(l, symbol) {
-    return this.pos.get(key(l))?.get(symbol) ?? 0;
+  position(l, symbol2) {
+    return this.pos.get(key(l))?.get(symbol2) ?? 0;
   }
   equity(l) {
     return this.eq.get(key(l)) ?? null;
@@ -8810,25 +8838,25 @@ var LeaderBook = class {
     this.seededAt.delete(key(l));
   }
   /** A position change by `delta` from the stream. Null while the leader is not seeded. */
-  applyDelta(l, symbol, delta, price, time, id) {
+  applyDelta(l, symbol2, delta, price2, time2, id) {
     if (!this.seeded(l) || !Number.isFinite(delta) || delta === 0) return null;
     const m = this.map(l);
-    const before = m.get(symbol) ?? 0;
+    const before = m.get(symbol2) ?? 0;
     let after = before + delta;
     if (Math.abs(after) < 1e-12 * Math.max(1, Math.abs(before))) after = 0;
-    if (after === 0) m.delete(symbol);
-    else m.set(symbol, after);
-    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before, after, price, time, id, source: "stream" };
+    if (after === 0) m.delete(symbol2);
+    else m.set(symbol2, after);
+    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before, after, price: price2, time: time2, id, source: "stream" };
   }
   /** A position change to `after` (a source that knows the total). */
-  applyTotal(l, symbol, before, after, price, time, id) {
+  applyTotal(l, symbol2, before, after, price2, time2, id) {
     if (!this.seeded(l)) return null;
     const m = this.map(l);
-    const b = before ?? m.get(symbol) ?? 0;
-    if (after === 0) m.delete(symbol);
-    else m.set(symbol, after);
+    const b = before ?? m.get(symbol2) ?? 0;
+    if (after === 0) m.delete(symbol2);
+    else m.set(symbol2, after);
     if (b === after) return null;
-    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol, before: b, after, price, time, id, source: "stream" };
+    return { leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: symbol2, before: b, after, price: price2, time: time2, id, source: "stream" };
   }
   /**
    * The REST truth. The first call seeds the leader (no events: whatever is
@@ -8853,8 +8881,8 @@ var LeaderBook = class {
       if (Math.abs(before - after) <= tol) continue;
       if (after === 0) m.delete(s);
       else m.set(s, after);
-      const price = marks[s] ?? priceOf(s) ?? 0;
-      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
+      const price2 = marks[s] ?? priceOf(s) ?? 0;
+      out.push({ leader: { venue: l.venue, address: l.address.toLowerCase() }, symbol: s, before, after, price: price2, time: now, id: `rc:${s}:${now}`, source: "reconcile" });
     }
     return out;
   }
@@ -8871,11 +8899,11 @@ var Coalescer = class {
   }
   flush;
   pending = /* @__PURE__ */ new Map();
-  add(l, symbol, delta, price, time, id) {
-    const k = `${key(l)}|${symbol}`;
+  add(l, symbol2, delta, price2, time2, id) {
+    const k = `${key(l)}|${symbol2}`;
     let p = this.pending.get(k);
     if (!p) {
-      p = { l, symbol, delta: 0, notional: 0, qty: 0, time, ids: [], timer: null };
+      p = { l, symbol: symbol2, delta: 0, notional: 0, qty: 0, time: time2, ids: [], timer: null };
       this.pending.set(k, p);
       const entry = p;
       p.timer = timers.after(COALESCE_MS, () => {
@@ -8884,9 +8912,9 @@ var Coalescer = class {
       });
     }
     p.delta += delta;
-    p.notional += Math.abs(delta) * price;
+    p.notional += Math.abs(delta) * price2;
     p.qty += Math.abs(delta);
-    p.time = Math.max(p.time, time);
+    p.time = Math.max(p.time, time2);
     p.ids.push(id);
   }
   stop() {
@@ -8916,8 +8944,8 @@ var Seen = class {
 var SodexFeed = class {
   constructor(o) {
     this.o = o;
-    this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+    this.coalesce = new Coalescer((l, symbol2, delta, vwap, time2, id) => {
+      const e = this.o.book.applyDelta(l, symbol2, delta, vwap, time2, id);
       if (e) this.o.sink.leader(e);
     });
     const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
@@ -8987,10 +9015,10 @@ var SodexFeed = class {
       if (!t.s || typeof t.t !== "number") continue;
       const id = `sodex:${t.s}:${t.t}`;
       if (!this.seen.add(id)) continue;
-      const price = Number(t.p);
-      const qty = Number(t.q);
-      const time = t.T ?? Date.now();
-      if (!(price > 0) || !(qty > 0)) continue;
+      const price2 = Number(t.p);
+      const qty2 = Number(t.q);
+      const time2 = t.T ?? Date.now();
+      if (!(price2 > 0) || !(qty2 > 0)) continue;
       const buyer = typeof t.bi === "number" ? t.bi : -1;
       const seller = typeof t.si === "number" ? t.si : -1;
       if (buyer === seller) continue;
@@ -8999,7 +9027,7 @@ var SodexFeed = class {
         const l = this.leadersById.get(acct);
         if (l) {
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.s, side === "buy" ? qty : -qty, price, time, id);
+          if (seed !== null && time2 >= seed) this.coalesce.add(l, t.s, side === "buy" ? qty2 : -qty2, price2, time2, id);
         }
         if (this.followers.has(acct)) {
           this.o.sink.follower?.({
@@ -9007,10 +9035,10 @@ var SodexFeed = class {
             accountId: acct,
             symbol: t.s,
             side,
-            price,
-            qty,
+            price: price2,
+            qty: qty2,
             taker: side === "buy" ? takerBuy : !takerBuy,
-            time,
+            time: time2,
             clOrdID: null,
             fee: null
           });
@@ -9023,8 +9051,8 @@ var HL_USER_LIMIT = 10;
 var HyperliquidFeed = class {
   constructor(o) {
     this.o = o;
-    this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+    this.coalesce = new Coalescer((l, symbol2, delta, vwap, time2, id) => {
+      const e = this.o.book.applyDelta(l, symbol2, delta, vwap, time2, id);
       if (e) this.o.sink.leader(e);
     });
     this.socket = new LiveSocket({
@@ -9110,20 +9138,20 @@ var HyperliquidFeed = class {
         const sz = Number(f.sz);
         const px = Number(f.px);
         const start = Number(f.startPosition);
-        const time = Number(f.time);
-        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time}`)}`;
+        const time2 = Number(f.time);
+        const id = `hl:${String(f.tid ?? f.hash ?? `${coin}:${time2}`)}`;
         if (!coin || !(sz > 0) || !(px > 0) || !Number.isFinite(start) || !this.seen.add(id)) continue;
-        if (seed !== null && time < seed) continue;
+        if (seed !== null && time2 < seed) continue;
         if (coin.startsWith("@") || coin.includes("/")) continue;
         const signed = f.side === "B" ? sz : -sz;
-        const k = `${coin}|${String(f.oid ?? time)}`;
+        const k = `${coin}|${String(f.oid ?? time2)}`;
         const g = byOrder.get(k);
-        if (!g) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time, id });
+        if (!g) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time: time2, id });
         else {
           g.after += signed;
           g.notional += sz * px;
           g.qty += sz;
-          g.time = Math.max(g.time, time);
+          g.time = Math.max(g.time, time2);
         }
       }
       for (const g of byOrder.values()) {
@@ -9140,7 +9168,7 @@ var HyperliquidFeed = class {
         if (!this.seen.add(id)) continue;
         const px = Number(t.px);
         const sz = Number(t.sz);
-        const time = t.time ?? Date.now();
+        const time2 = t.time ?? Date.now();
         if (!(px > 0) || !(sz > 0)) continue;
         const [buyer, seller] = [t.users[0]?.toLowerCase(), t.users[1]?.toLowerCase()];
         if (buyer === seller) continue;
@@ -9148,7 +9176,7 @@ var HyperliquidFeed = class {
           const l = addr ? this.leaders.get(addr) : void 0;
           if (!l) continue;
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.coin, signed, px, time, id);
+          if (seed !== null && time2 >= seed) this.coalesce.add(l, t.coin, signed, px, time2, id);
         }
       }
     }
@@ -9209,20 +9237,20 @@ var KeySink = class {
   nonces;
   chainId;
   paper = false;
-  async signAndSend(action) {
+  async signAndSend(action2) {
     const key2 = this.key();
     if (!key2) throw new SodexApiError(401, "no copy key is available", 401, "");
-    const req = await signAndBuildWithNonceManager(action, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
+    const req = await signAndBuildWithNonceManager(action2, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
     return this.client.send(req);
   }
   async place(accountId, market, intents, builder) {
     if (!intents.length) return [];
     try {
       const data = await this.signAndSend(intentsAction(accountId, market, intents, builder));
-      const rows = Array.isArray(data) ? data : unwrapList(data, "orders");
-      const failed = new Set(failedOrders(rows).map((r) => r.clOrdID));
+      const rows2 = Array.isArray(data) ? data : unwrapList(data, "orders");
+      const failed = new Set(failedOrders(rows2).map((r) => r.clOrdID));
       return intents.map((i) => {
-        const row = rows.find((r) => r.clOrdID === i.clOrdID);
+        const row = rows2.find((r) => r.clOrdID === i.clOrdID);
         const bad = failed.has(i.clOrdID);
         return {
           clOrdID: i.clOrdID,
@@ -9243,8 +9271,8 @@ var KeySink = class {
   async placeStop(accountId, market, stop, builder) {
     try {
       const data = await this.signAndSend(stopAction(accountId, market, stop, builder));
-      const rows = Array.isArray(data) ? data : unwrapList(data, "orders");
-      const bad = failedOrders(rows)[0];
+      const rows2 = Array.isArray(data) ? data : unwrapList(data, "orders");
+      const bad = failedOrders(rows2)[0];
       return { clOrdID: stop.clOrdID, ok: !bad, orderId: null, error: bad ? bad.error || `code ${bad.code}` : null, outcomeUnknown: false };
     } catch (e) {
       return { clOrdID: stop.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: e instanceof OutcomeUnknownError };
@@ -9403,8 +9431,8 @@ var CopyRuntime = class {
     if (this.live(s)) await this.checkReady(s);
     if (s.settings.copyExisting) {
       for (const [sym, size] of Object.entries(positions)) {
-        const price = this.priceFor(s.settings.leader.venue, sym) ?? 0;
-        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
+        const price2 = this.priceFor(s.settings.leader.venue, sym) ?? 0;
+        this.dispatch(s, { leader: s.settings.leader, symbol: sym, before: 0, after: size, price: price2, time: now, id: `join:${sym}:${now}`, source: "reconcile" });
       }
     }
     void this.refreshFollower(s.owner);
@@ -9577,16 +9605,16 @@ var CopyRuntime = class {
     if (plan.skip && !QUIET_SKIPS.has(plan.skip)) await this.activity(s, { kind: "skip", reason: plan.skip, symbol: market.name, leader });
   }
   /** Who holds the follower's position on `symbol` when this copy does not. */
-  heldBy(s, symbol) {
-    if (this.stateOf(s).owned[symbol]) return "nobody";
+  heldBy(s, symbol2) {
+    if (this.stateOf(s).owned[symbol2]) return "nobody";
     for (const o of this.list(s.owner)) {
       if (o.id === s.id || o.status === "stopped") continue;
       if (o.settings.paper !== s.settings.paper) continue;
-      if (this.stateOf(o).owned[symbol]) return "other-copy";
+      if (this.stateOf(o).owned[symbol2]) return "other-copy";
     }
     if (s.settings.paper) return "nobody";
     const f = this.followers.get(s.owner);
-    return f?.positions[symbol] ? "follower" : "nobody";
+    return f?.positions[symbol2] ? "follower" : "nobody";
   }
   async execute(s, market, intents, reference, leader) {
     const st = this.stateOf(s);
@@ -9654,18 +9682,18 @@ var CopyRuntime = class {
     return results;
   }
   /** Apply a fill to the copy's books; a reduce-only fill never opens the other side. */
-  fillBooks(s, symbol, side, qty, price, fee, reduceOnly) {
+  fillBooks(s, symbol2, side, qty2, price2, fee, reduceOnly) {
     const st = this.stateOf(s);
-    let q = qty;
+    let q = qty2;
     if (reduceOnly) {
-      const held = Math.abs(st.owned[symbol]?.size ?? 0);
+      const held = Math.abs(st.owned[symbol2]?.size ?? 0);
       q = Math.min(q, held);
       if (!(q > 0)) return;
     }
-    applyFill(st, symbol, side, q, price, fee, Date.now());
-    if (st.owned[symbol]) this.recentGrow.delete(`${s.id}|${symbol}`);
+    applyFill(st, symbol2, side, q, price2, fee, Date.now());
+    if (st.owned[symbol2]) this.recentGrow.delete(`${s.id}|${symbol2}`);
     this.dirty.add(s.id);
-    if (!s.settings.paper) this.scheduleStops(s, symbol);
+    if (!s.settings.paper) this.scheduleStops(s, symbol2);
   }
   onFollowerFill(f) {
     if (!f.taker) return;
@@ -9858,32 +9886,32 @@ var CopyRuntime = class {
     });
   }
   /* -------------------------------------------------- SoDEX position stops ----- */
-  scheduleStops(s, symbol) {
+  scheduleStops(s, symbol2) {
     if (s.settings.paper || s.settings.stopLossPct === null && s.settings.takeProfitPct === null) return;
-    const k = `${s.id}|${symbol}`;
+    const k = `${s.id}|${symbol2}`;
     timers.cancel(this.stopTimers.get(k));
     this.stopTimers.set(
       k,
       timers.after(2e3, () => {
         this.stopTimers.delete(k);
-        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol));
+        this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
       })
     );
   }
   /** Keep one SoDEX stop-loss (and take-profit) per copied position, sized to it. */
-  async refreshStops(subId, symbol) {
+  async refreshStops(subId, symbol2) {
     const s = this.subs.get(subId);
     if (!s || s.status === "stopped") return;
     const st = this.stateOf(s);
     const sink = this.host.sinkFor(s);
-    const m = this.markets.get(symbol);
+    const m = this.markets.get(symbol2);
     if (!sink || sink.paper || !m) return;
-    const p = st.owned[symbol];
-    const cur = st.stops[symbol];
+    const p = st.owned[symbol2];
+    const cur = st.stops[symbol2];
     if (p && cur && Math.abs(cur.size - p.size) < 1e-12) return;
     if (cur) {
       for (const id of [cur.sl, cur.tp]) if (id) await sink.cancel(s.accountId, m, id).catch((e) => this.host.log.warn("copy: stop not cancelled", { id, error: String(e) }));
-      delete st.stops[symbol];
+      delete st.stops[symbol2];
     }
     if (!p) return;
     const q = floorQuantity(p.size, m);
@@ -9894,17 +9922,17 @@ var CopyRuntime = class {
     for (const kind of ["stop-loss", "take-profit"]) {
       const trigger = guardTrigger(kind, p, s.settings, lev);
       if (trigger === null) continue;
-      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
+      const clOrdID = `vds-${bytesToHex2(keccak256(utf8(`${s.id}|${symbol2}|${kind}|${p.size}|${next.at}`))).slice(2, 26)}`;
       const r = await sink.placeStop(s.accountId, m, { clOrdID, side: p.size > 0 ? "sell" : "buy", quantity: q, triggerPrice: snapPrice(trigger, m), kind }, builder);
       if (r.ok) next[kind === "stop-loss" ? "sl" : "tp"] = clOrdID;
-      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol, detail: r.error });
+      else await this.activity(s, { kind: "error", reason: `${kind}-not-placed`, symbol: symbol2, detail: r.error });
     }
-    st.stops[symbol] = next;
+    st.stops[symbol2] = next;
     this.dirty.add(s.id);
   }
-  cancelStops(s, symbol) {
-    if (s.settings.paper || !this.stateOf(s).stops[symbol]) return;
-    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol));
+  cancelStops(s, symbol2) {
+    if (s.settings.paper || !this.stateOf(s).stops[symbol2]) return;
+    this.enqueue(s.owner, () => this.refreshStops(s.id, symbol2));
   }
   cancelAllStops(s) {
     for (const sym of Object.keys(this.stateOf(s).stops)) {
@@ -10105,7 +10133,7 @@ var CopyRuntime = class {
 // packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
-var COPY_ACTIONS = ["session", "accept-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all"];
+var COPY_ACTIONS = ["session", "accept-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
 var COPY_REQUEST_FIELDS = [
   { name: "action", type: "string" },
   { name: "owner", type: "address" },
@@ -10146,14 +10174,14 @@ function copyRequestTypedData(r) {
 var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)));
 var REQUEST_TTL_MS = 5 * 6e4;
 var TERMS_TTL_MS = 365 * 864e5;
-var MAX_WINDOW_MS = (action) => action === "accept-terms" ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
+var MAX_WINDOW_MS = (action2) => action2 === "accept-terms" ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
 var ADDRESS3 = /^0x[0-9a-f]{40}$/;
 function verifyCopyRequest(r, o) {
   const now = o.now ?? Date.now();
   if (!r || typeof r !== "object") return { ok: false, error: "missing signed request" };
   const q = r;
-  const action = q.action;
-  if (!COPY_ACTIONS.includes(action)) return { ok: false, error: "unknown action" };
+  const action2 = q.action;
+  if (!COPY_ACTIONS.includes(action2)) return { ok: false, error: "unknown action" };
   const owner = typeof q.owner === "string" ? q.owner.toLowerCase() : "";
   if (!ADDRESS3.test(owner)) return { ok: false, error: "owner must be a 0x address" };
   if (q.executor !== o.executor) return { ok: false, error: "this request was signed for another executor" };
@@ -10166,9 +10194,9 @@ function verifyCopyRequest(r, o) {
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again" };
-  if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: "this request is valid for longer than allowed" };
+  if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
   const skew = o.maxAgeMs ?? 15 * 6e4;
-  if (nonce - now > skew || action !== "accept-terms" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
+  if (nonce - now > skew || action2 !== "accept-terms" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
   let payload;
   try {
     payload = JSON.parse(q.payload);
@@ -10176,7 +10204,7 @@ function verifyCopyRequest(r, o) {
     return { ok: false, error: "payload is not JSON" };
   }
   if (canonicalJSON(payload) !== q.payload) return { ok: false, error: "payload is not in canonical form" };
-  const req = { action, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
+  const req = { action: action2, owner, executor: o.executor, payload: q.payload, nonce: q.nonce, deadline: q.deadline, chainId };
   const digest = copyRequestDigest(req);
   let signer;
   try {
@@ -10188,6 +10216,2829 @@ function verifyCopyRequest(r, o) {
   return { ok: true, digest, payload };
 }
 var EXECUTOR_FEATURES = ["counter"];
+
+// packages/copy-engine/src/algo/types.ts
+var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket"];
+var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
+
+// packages/copy-engine/src/algo/math.ts
+var DAY_MS2 = 864e5;
+function makeRng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = a + 1831565813 >>> 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+var newSeed = () => Math.floor(Math.random() * 4294967295) >>> 0;
+var jitter = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
+function normalise(w) {
+  const pos = w.map((x) => Number.isFinite(x) && x > 0 ? x : 0);
+  const sum = pos.reduce((a, b) => a + b, 0);
+  if (!(sum > 0)) return w.map(() => 1 / Math.max(1, w.length));
+  return pos.map((x) => x / sum);
+}
+function curveWeights(n, urgency, sizeJitter, rand) {
+  const k = Math.max(-1, Math.min(1, urgency)) * 3;
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    w.push(jitter(Math.exp(-k * x), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function sliceTimes(start, durationMs, n, timeJitter, rand) {
+  const step = durationMs / n;
+  const out = [];
+  let prev = start - 1;
+  for (let i = 0; i < n; i++) {
+    let t = start + i * step;
+    if (i > 0 && timeJitter > 0) t += (rand() * 2 - 1) * timeJitter * step;
+    t = Math.max(prev + 1, Math.min(start + durationMs - 1, t));
+    out.push(Math.round(t));
+    prev = t;
+  }
+  return out;
+}
+function dueShare(times, weights, now) {
+  let s = 0;
+  for (let i = 0; i < times.length; i++) if (times[i] <= now) s += weights[i] ?? 0;
+  return Math.min(1, s);
+}
+function nextSlice(times, now) {
+  for (let i = 0; i < times.length; i++) if (times[i] > now) return i;
+  return -1;
+}
+function allocateSteps(total, weights, step) {
+  const units = Math.floor(total / step + 1e-9);
+  const w = normalise(weights);
+  const raw = w.map((x) => x * units);
+  const out = raw.map((x) => Math.floor(x + 1e-9));
+  let left = units - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((x, i) => ({ i, f: x - Math.floor(x + 1e-9) })).sort((a, b) => b.f - a.f || a.i - b.i);
+  for (let j = 0; left > 0 && order.length; j = (j + 1) % order.length, left--) out[order[j].i] += 1;
+  return out.map((u) => u * step);
+}
+var isWeekend = (t) => {
+  const d = new Date(t).getUTCDay();
+  return d === 0 || d === 6;
+};
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+function volumeProfile(candles, candleMs, start, durationMs, slices, lookbackDays) {
+  const byBucket = /* @__PURE__ */ new Map();
+  for (const c of candles) if (Number.isFinite(c.v) && c.v >= 0) byBucket.set(Math.floor(c.t / candleMs) * candleMs, c.v);
+  const volIn = (a, b) => {
+    let sum = 0;
+    let seen = false;
+    for (let t = Math.floor(a / candleMs) * candleMs; t < b; t += candleMs) {
+      const v = byBucket.get(t);
+      if (v === void 0) continue;
+      seen = true;
+      const lo = Math.max(a, t);
+      const hi = Math.min(b, t + candleMs);
+      if (hi > lo) sum += v * (hi - lo) / candleMs;
+    }
+    return seen ? sum : null;
+  };
+  const step = durationMs / slices;
+  const matchDays = lookbackDays >= 14;
+  const expected = [];
+  const daysSeen = /* @__PURE__ */ new Set();
+  for (let i = 0; i < slices; i++) {
+    const a = start + i * step;
+    const b = a + step;
+    const same = [];
+    const all = [];
+    for (let d = 1; d <= lookbackDays; d++) {
+      const v = volIn(a - d * DAY_MS2, b - d * DAY_MS2);
+      if (v === null) continue;
+      daysSeen.add(d);
+      all.push(v);
+      if (!matchDays || isWeekend(a - d * DAY_MS2) === isWeekend(a)) same.push(v);
+    }
+    expected.push(median(same.length >= 3 ? same : all));
+  }
+  const mean = expected.reduce((x, y) => x + y, 0) / Math.max(1, expected.length);
+  const floored = expected.map((v) => Math.max(v, mean / 10));
+  return { weights: normalise(floored), expected: floored, days: daysSeen.size };
+}
+function profileCandles(lookbackDays) {
+  return lookbackDays > 28 ? { interval: "30m", ms: 30 * 6e4 } : { interval: "15m", ms: 15 * 6e4 };
+}
+function adaptiveShare(staticShare, marketSoFar, expectedTotal) {
+  if (!(expectedTotal > 0) || staticShare >= 1) return Math.min(1, staticShare);
+  const live = marketSoFar / expectedTotal;
+  const blend = 0.5 * staticShare + 0.5 * live;
+  return Math.min(1, Math.max(staticShare * 0.5, Math.min(staticShare * 2, blend)));
+}
+function ladderWeights(n, distribution, skew, sizeJitter, rand) {
+  const w = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let v = 1;
+    if (distribution === "linear") v = 1 + (skew - 1) * x;
+    else if (distribution === "exponential") v = Math.pow(skew, x);
+    else if (distribution === "bell") v = Math.exp(-0.5 * Math.pow((x - 0.5) / 0.22, 2));
+    w.push(jitter(Math.max(v, 1e-6), sizeJitter, rand));
+  }
+  return normalise(w);
+}
+function ladderPrices(from, to, n, spacing, tickSize) {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const x = n <= 1 ? 0 : i / (n - 1);
+    let p;
+    if (spacing === "geometric" && from > 0 && to > 0) p = from * Math.pow(to / from, x);
+    else {
+      const f = spacing === "front" ? x * x : spacing === "back" ? 1 - (1 - x) * (1 - x) : x;
+      p = from + (to - from) * f;
+    }
+    const s = snapNearest(p, tickSize);
+    if (!out.includes(s)) out.push(s);
+  }
+  return out;
+}
+var dec2 = (n) => {
+  const s = Number(n.toPrecision(12)).toString();
+  if (!/e/i.test(s)) return s;
+  return Number(n.toPrecision(12)).toFixed(20).replace(/0+$/, "").replace(/\.$/, "");
+};
+function snapNearest(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "nearest"));
+}
+function snapDown(p, tickSize) {
+  return Number(roundToStep(dec2(Math.max(p, 0)), tickSize, "floor"));
+}
+function snapUp(p, tickSize) {
+  const down = snapDown(p, tickSize);
+  const tick = Number(tickSize);
+  return down + 1e-12 < p ? Number(roundToStep(dec2(down + tick), tickSize, "nearest")) : down;
+}
+var mid = (q) => (q.bid + q.ask) / 2;
+var spreadBps = (q) => (q.ask - q.bid) / mid(q) * 1e4;
+function makerPrice(side, q, offsetTicks, offsetBps, m, limit) {
+  const tick = Number(m.tickSize);
+  let p;
+  if (side === "buy") {
+    p = offsetBps !== null ? q.bid * (1 - offsetBps / 1e4) : q.bid - offsetTicks * tick;
+    p = Math.min(p, q.ask - tick);
+    if (limit !== null) p = Math.min(p, limit);
+    return snapDown(p, m.tickSize);
+  }
+  p = offsetBps !== null ? q.ask * (1 + offsetBps / 1e4) : q.ask + offsetTicks * tick;
+  p = Math.max(p, q.bid + tick);
+  if (limit !== null) p = Math.max(p, limit);
+  return snapUp(p, m.tickSize);
+}
+function takerPrice(side, q, slippageBps, m, mark, limit) {
+  const touch = side === "buy" ? q.ask : q.bid;
+  let p = Number(limitPrice(side, touch, slippageBps, m, mark));
+  if (limit !== null) {
+    if (side === "buy" && limit < touch) return null;
+    if (side === "sell" && limit > touch) return null;
+    p = side === "buy" ? Math.min(p, snapDown(limit, m.tickSize)) : Math.max(p, snapUp(limit, m.tickSize));
+  }
+  return p;
+}
+function minChildQty(m, price2) {
+  const step = Number(m.stepSize);
+  const minQ = Math.max(step, Number(m.minQuantity) || 0);
+  const byValue = price2 > 0 ? Math.ceil(m.minNotional / price2 / step - 1e-9) * step : minQ;
+  return Math.max(minQ, byValue);
+}
+var floorStep = (q, m) => {
+  const step = Number(m.stepSize);
+  return Math.floor(q / step + 1e-9) * step;
+};
+var DEFAULT_EXEC = { style: "hybrid", slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
+function trail(s, side, price2, o) {
+  let { armed, extreme } = s;
+  if (!armed) {
+    const a = o.activationPrice;
+    armed = a === null || (side === "sell" ? price2 >= a : price2 <= a);
+    if (armed) extreme = price2;
+  }
+  if (!armed) return { state: { armed, extreme }, stop: null, fired: false };
+  extreme = extreme === null ? price2 : side === "sell" ? Math.max(extreme, price2) : Math.min(extreme, price2);
+  const dist = o.trailAbs !== null ? o.trailAbs : extreme * (o.trailPct ?? 0);
+  const stop = side === "sell" ? extreme - dist : extreme + dist;
+  const fired = side === "sell" ? price2 <= stop : price2 >= stop;
+  return { state: { armed, extreme }, stop, fired };
+}
+
+// packages/copy-engine/src/algo/spec.ts
+var AlgoSpecError = class extends Error {
+  constructor(message, errors) {
+    super(message);
+    this.errors = errors;
+  }
+  errors;
+  name = "AlgoSpecError";
+};
+var MIN = 6e4;
+var HOUR = 60 * MIN;
+var DAY = 24 * HOUR;
+var ALGO_LIMITS = {
+  twap: { durationMs: { min: MIN, max: 30 * DAY }, slices: { min: 1, max: 2e3 }, minIntervalMs: 5e3 },
+  vwap: { durationMs: { min: 15 * MIN, max: 7 * DAY }, slices: { min: 2, max: 2e3 }, lookbackDays: { min: 1, max: 56 }, minIntervalMs: 5e3 },
+  pov: { rate: { min: 0.01, max: 0.5 } },
+  iceberg: { refillMs: { min: 0, max: 10 * MIN } },
+  chase: { offsetTicks: { min: -5, max: 1e4 }, offsetBps: { min: 0, max: 2e3 }, chaseTicks: { min: 1, max: 1e4 }, maxChaseBps: { min: 1, max: 5e3 }, timeoutMs: { min: 5e3, max: 7 * DAY }, minRepriceMs: { min: 250, max: MIN } },
+  scale: { orders: { min: 2, max: 100 }, skew: { min: 0.1, max: 10 }, sizeJitter: { min: 0, max: 0.3 } },
+  dca: { perOrderUsd: { min: 10, max: 1e6 }, orders: { min: 2, max: 1e3 }, intervalMs: { min: MIN, max: 30 * DAY }, dipPct: { min: 0.01, max: 0.9 }, dipMultiplier: { min: 1, max: 5 } },
+  swarm: { clips: { min: 2, max: 200 }, inFlight: { min: 1, max: 20 }, waveMs: { min: 0, max: MIN }, sizeJitter: { min: 0, max: 0.9 }, retries: { min: 0, max: 5 } },
+  conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5e3, max: HOUR } },
+  trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
+  basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
+  exitPct: { min: 1e-3, max: 10 },
+  exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 1e4 }, chaseTicks: { min: 1, max: 1e4 }, makerShare: { min: 0.1, max: 0.95 } },
+  jitter: { min: 0, max: 0.5 },
+  maxSpreadBps: { min: 1, max: 5e3 },
+  leverage: { min: 1, max: 100 },
+  label: 40
+};
+var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
+function num2(o, key2, label, lim, e, path = key2) {
+  const raw = o[key2];
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n)) {
+    e[path] = `${label} must be a number.`;
+    return NaN;
+  }
+  if (n < lim.min || n > lim.max) e[path] = `${label} must be between ${lim.min} and ${lim.max}.`;
+  return n;
+}
+function int(o, key2, label, lim, e, path = key2) {
+  const n = num2(o, key2, label, lim, e, path);
+  if (Number.isFinite(n) && !Number.isInteger(n)) e[path] = `${label} must be a whole number.`;
+  return n;
+}
+function opt(o, key2, label, lim, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return num2(o, key2, label, lim, e, path);
+}
+function price(o, key2, label, e, path = key2) {
+  const raw = o[key2];
+  const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
+  if (typeof n !== "number" || !Number.isFinite(n) || n <= 0 || n > 1e12) {
+    e[path] = `${label} must be a price above 0.`;
+    return NaN;
+  }
+  return n;
+}
+function optPrice(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return price(o, key2, label, e, path);
+}
+function time(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  const n = Number(v);
+  if (!Number.isSafeInteger(n) || n < 15e11 || n > 4e12) {
+    e[path] = `${label} must be a time.`;
+    return null;
+  }
+  return n;
+}
+function qty(o, key2, label, e, path = key2) {
+  const raw = o[key2];
+  const s = typeof raw === "number" && Number.isFinite(raw) ? String(raw) : typeof raw === "string" ? raw.trim() : "";
+  if (!/^\d+(\.\d+)?$/.test(s) || !(Number(s) > 0)) {
+    e[path] = `${label} must be a positive amount.`;
+    return "0";
+  }
+  if (Number(s) > 1e12) {
+    e[path] = `${label} is too large.`;
+    return "0";
+  }
+  return canonicalDecimal(s);
+}
+function optQty(o, key2, label, e, path = key2) {
+  const v = o[key2];
+  if (v === null || v === void 0 || v === "") return null;
+  return qty(o, key2, label, e, path);
+}
+function oneOf(o, key2, label, allowed, fallback, e, path = key2) {
+  const v = o[key2];
+  if (v === void 0 || v === null || v === "") return fallback;
+  if (typeof v === "string" && allowed.includes(v)) return v;
+  e[path] = `${label} must be one of ${allowed.join(", ")}.`;
+  return fallback;
+}
+var bool = (o, key2, fallback = false) => typeof o[key2] === "boolean" ? o[key2] : fallback;
+var SYMBOL = /^[A-Z0-9]{1,24}-USD$/;
+function symbol(o, key2, e, path = key2) {
+  const s = typeof o[key2] === "string" ? o[key2].trim().toUpperCase() : "";
+  if (!SYMBOL.test(s)) e[path] = "Choose a SoDEX perps market (like BTC-USD).";
+  return s;
+}
+var BOUND_ACTIONS = ["hold", "stop", "rush"];
+function bound(o, key2, label, e) {
+  const v = o[key2];
+  if (v === null || v === void 0) return null;
+  if (!isObj(v)) {
+    e[key2] = `${label} must be a price and what to do there.`;
+    return null;
+  }
+  return { price: price(v, "price", `${label} price`, e, `${key2}.price`), then: oneOf(v, "then", `${label} action`, BOUND_ACTIONS, "hold", e, `${key2}.then`) };
+}
+function exec(v, e, path) {
+  const o = isObj(v) ? v : {};
+  const L = ALGO_LIMITS.exec;
+  return {
+    style: oneOf(o, "style", "Execution", ["taker", "maker", "hybrid"], DEFAULT_EXEC.style, e, `${path}.style`),
+    slippageBps: o.slippageBps === void 0 ? DEFAULT_EXEC.slippageBps : num2(o, "slippageBps", "Max slippage", L.slippageBps, e, `${path}.slippageBps`),
+    offsetTicks: o.offsetTicks === void 0 ? DEFAULT_EXEC.offsetTicks : int(o, "offsetTicks", "Offset", L.offsetTicks, e, `${path}.offsetTicks`),
+    chaseTicks: o.chaseTicks === void 0 ? DEFAULT_EXEC.chaseTicks : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e, `${path}.chaseTicks`),
+    makerShare: o.makerShare === void 0 ? DEFAULT_EXEC.makerShare : num2(o, "makerShare", "Resting share", L.makerShare, e, `${path}.makerShare`)
+  };
+}
+function exits(o, side, e) {
+  const v = o.exits;
+  if (v === null || v === void 0) return null;
+  if (!isObj(v)) {
+    e.exits = "Exits must be a take-profit and/or a stop-loss.";
+    return null;
+  }
+  const x = {
+    tpPrice: optPrice(v, "tpPrice", "Take-profit price", e, "exits.tpPrice"),
+    slPrice: optPrice(v, "slPrice", "Stop-loss price", e, "exits.slPrice"),
+    tpPct: opt(v, "tpPct", "Take-profit distance", ALGO_LIMITS.exitPct, e, "exits.tpPct"),
+    slPct: opt(v, "slPct", "Stop-loss distance", { min: ALGO_LIMITS.exitPct.min, max: 0.99 }, e, "exits.slPct")
+  };
+  if (x.tpPrice !== null && x.tpPct !== null) e["exits.tpPct"] = "Set the take-profit as a price or a distance, not both.";
+  if (x.slPrice !== null && x.slPct !== null) e["exits.slPct"] = "Set the stop-loss as a price or a distance, not both.";
+  if (x.tpPrice !== null && x.slPrice !== null && (side === "buy" ? x.tpPrice <= x.slPrice : x.tpPrice >= x.slPrice)) {
+    e["exits.tpPrice"] = side === "buy" ? "A long's take-profit must be above its stop-loss." : "A short's take-profit must be below its stop-loss.";
+  }
+  return x.tpPrice === null && x.slPrice === null && x.tpPct === null && x.slPct === null ? null : x;
+}
+function base(o, kind, e) {
+  const label = typeof o.label === "string" ? o.label.trim().slice(0, ALGO_LIMITS.label) : "";
+  const marginMode = o.marginMode === null || o.marginMode === void 0 ? null : oneOf(o, "marginMode", "Margin mode", ["cross", "isolated"], "cross", e);
+  const b = {
+    kind,
+    symbol: symbol(o, "symbol", e),
+    side: oneOf(o, "side", "Side", ["buy", "sell"], "buy", e),
+    reduceOnly: bool(o, "reduceOnly"),
+    limitPrice: optPrice(o, "limitPrice", "Limit price", e),
+    upper: bound(o, "upper", "Upper bound", e),
+    lower: bound(o, "lower", "Lower bound", e),
+    triggerPrice: optPrice(o, "triggerPrice", "Start price", e),
+    startAt: time(o, "startAt", "Start time", e),
+    maxSpreadBps: opt(o, "maxSpreadBps", "Max spread", ALGO_LIMITS.maxSpreadBps, e),
+    leverage: o.leverage === null || o.leverage === void 0 || o.leverage === "" ? null : int(o, "leverage", "Leverage", ALGO_LIMITS.leverage, e),
+    marginMode,
+    paper: bool(o, "paper"),
+    label: label || null,
+    exits: null
+  };
+  b.exits = exits(o, b.side, e);
+  if (b.exits && b.reduceOnly) e.exits = "A reduce-only order opens nothing to protect: no exits on it.";
+  if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = "The upper bound must be above the lower bound.";
+  return b;
+}
+var SOURCES = ["mark", "last", "mid", "index"];
+function condition(v, e, path) {
+  if (!isObj(v)) {
+    e[path] = "Each condition needs a type.";
+    return null;
+  }
+  const L = ALGO_LIMITS.conditional;
+  const type = v.type;
+  const sym = () => symbol(v, "symbol", e, `${path}.symbol`);
+  const src = () => oneOf(v, "source", "Price source", SOURCES, "mark", e, `${path}.source`);
+  const op = () => oneOf(v, "op", "Comparison", ["above", "below"], "above", e, `${path}.op`);
+  const dir3 = () => oneOf(v, "dir", "Direction", ["up", "down", "either"], "either", e, `${path}.dir`);
+  const pct = () => num2(v, "pct", "Move", { min: 1e-4, max: 10 }, e, `${path}.pct`);
+  const win = () => int(v, "windowMs", "Window", L.windowMs, e, `${path}.windowMs`);
+  switch (type) {
+    case "price":
+      return { type, symbol: sym(), source: src(), op: op(), value: price(v, "value", "Price", e, `${path}.value`) };
+    case "cross":
+      return { type, symbol: sym(), source: src(), dir: oneOf(v, "dir", "Direction", ["up", "down"], "up", e, `${path}.dir`), value: price(v, "value", "Price", e, `${path}.value`) };
+    case "move":
+      return { type, symbol: sym(), source: src(), dir: dir3(), pct: pct(), windowMs: win() };
+    case "funding":
+      return { type, symbol: sym(), op: op(), value: num2(v, "value", "Funding rate", { min: -1, max: 1 }, e, `${path}.value`) };
+    case "oi":
+      return { type, symbol: sym(), dir: dir3(), pct: pct(), windowMs: win() };
+    case "spread":
+      return { type, symbol: sym(), op: op(), bps: num2(v, "bps", "Spread", { min: 0, max: 1e4 }, e, `${path}.bps`) };
+    case "volume":
+      return { type, symbol: sym(), windowMs: win(), aboveUsd: num2(v, "aboveUsd", "Volume", { min: 1, max: 1e12 }, e, `${path}.aboveUsd`) };
+    case "ratio": {
+      const other = symbol(v, "other", e, `${path}.other`);
+      return { type, symbol: sym(), other, op: op(), value: num2(v, "value", "Ratio", { min: 1e-12, max: 1e12 }, e, `${path}.value`) };
+    }
+    case "position": {
+      const pop = oneOf(v, "op", "Position", ["long", "short", "flat", "sizeAbove", "sizeBelow", "pnlAbove", "pnlBelow"], "long", e, `${path}.op`);
+      const needs = pop === "sizeAbove" || pop === "sizeBelow" || pop === "pnlAbove" || pop === "pnlBelow";
+      const value = needs ? num2(v, "value", pop.startsWith("pnl") ? "PnL" : "Size", pop.startsWith("pnl") ? { min: -1e12, max: 1e12 } : { min: 0, max: 1e12 }, e, `${path}.value`) : 0;
+      return { type, symbol: sym(), op: pop, value };
+    }
+    case "time": {
+      const at = time(v, "at", "Time", e, `${path}.at`);
+      return { type, at: at ?? 0 };
+    }
+    default:
+      e[path] = "Unknown condition.";
+      return null;
+  }
+}
+function action(v, e, depth) {
+  const o = isObj(v) ? v : {};
+  const t = o.type;
+  if (t === "market") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "limit") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), price: price(o, "price", "Price", e, "then.price"), postOnly: bool(o, "postOnly") };
+  if (t === "close") return { type: t, share: num2(o, "share", "Share of the position", { min: 0.01, max: 1 }, e, "then.share"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "algo") {
+    if (depth > 0) {
+      e.then = "A conditional cannot start another conditional.";
+      return { type: "market", quantity: "0", slippageBps: 30 };
+    }
+    const inner = checkAlgoSpec(o.algo, depth + 1);
+    for (const [k, m] of Object.entries(inner.errors)) e[`then.algo.${k}`] = m;
+    if (inner.spec?.kind === "conditional") e.then = "A conditional cannot start another conditional.";
+    return { type: "algo", algo: inner.spec ?? { kind: "twap" } };
+  }
+  e.then = "Choose what happens when the conditions hold.";
+  return { type: "market", quantity: "0", slippageBps: 30 };
+}
+function checkAlgoSpec(input, depth = 0) {
+  const e = {};
+  if (!isObj(input)) return { spec: null, errors: { kind: "Choose an order type." } };
+  const kind = input.kind;
+  if (!ALGO_KINDS.includes(kind)) return { spec: null, errors: { kind: "Unknown order type." } };
+  const o = input;
+  const b = base(o, kind, e);
+  const jit = (key2, label) => o[key2] === void 0 ? 0 : num2(o, key2, label, ALGO_LIMITS.jitter, e);
+  const finish = () => oneOf(o, "finish", "At the end", ["take", "leave"], "take", e);
+  let spec;
+  switch (kind) {
+    case "twap": {
+      const L = ALGO_LIMITS.twap;
+      const durationMs = int(o, "durationMs", "Duration", L.durationMs, e);
+      const slices = int(o, "slices", "Slices", L.slices, e);
+      if (durationMs / slices < L.minIntervalMs) e.slices = `At most one slice every ${L.minIntervalMs / 1e3} s: use at most ${Math.floor(durationMs / L.minIntervalMs)} slices.`;
+      const closeShare = opt(o, "closeShare", "Share of the position", { min: 0.01, max: 1 }, e);
+      const minSliceQty = optQty(o, "minSliceQty", "Smallest slice", e);
+      const maxSliceQty = optQty(o, "maxSliceQty", "Largest slice", e);
+      if (minSliceQty !== null && maxSliceQty !== null && Number(minSliceQty) > Number(maxSliceQty)) e.minSliceQty = "The smallest slice cannot be larger than the largest.";
+      if (closeShare !== null && b.exits) e.exits = "A close opens nothing to protect: no exits on it.";
+      spec = {
+        ...b,
+        kind,
+        // A time-sliced close takes its size from the position when it starts: always reduce-only.
+        reduceOnly: closeShare !== null ? true : b.reduceOnly,
+        quantity: closeShare !== null ? "0" : qty(o, "quantity", "Size", e),
+        closeShare,
+        minSliceQty,
+        maxSliceQty,
+        durationMs,
+        slices,
+        urgency: o.urgency === void 0 ? 0 : num2(o, "urgency", "Urgency", { min: -1, max: 1 }, e),
+        sizeJitter: jit("sizeJitter", "Size randomisation"),
+        timeJitter: jit("timeJitter", "Time randomisation"),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish(),
+        maxParticipation: opt(o, "maxParticipation", "Max participation", { min: 0.01, max: 1 }, e)
+      };
+      break;
+    }
+    case "vwap": {
+      const L = ALGO_LIMITS.vwap;
+      const durationMs = int(o, "durationMs", "Duration", L.durationMs, e);
+      const slices = int(o, "slices", "Slices", L.slices, e);
+      if (durationMs / slices < L.minIntervalMs) e.slices = `At most one slice every ${L.minIntervalMs / 1e3} s: use at most ${Math.floor(durationMs / L.minIntervalMs)} slices.`;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        durationMs,
+        slices,
+        lookbackDays: int(o, "lookbackDays", "History", L.lookbackDays, e),
+        adaptive: bool(o, "adaptive", true),
+        sizeJitter: jit("sizeJitter", "Size randomisation"),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish(),
+        maxParticipation: opt(o, "maxParticipation", "Max participation", { min: 0.01, max: 1 }, e)
+      };
+      break;
+    }
+    case "pov":
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        rate: num2(o, "rate", "Participation", ALGO_LIMITS.pov.rate, e),
+        maxChildQty: optQty(o, "maxChildQty", "Largest child", e),
+        endAt: time(o, "endAt", "End time", e),
+        exec: exec(o.exec, e, "exec"),
+        finish: finish()
+      };
+      break;
+    case "iceberg": {
+      const quantity = qty(o, "quantity", "Size", e);
+      const displayQty = qty(o, "displayQty", "Visible size", e);
+      if (Number(displayQty) > Number(quantity)) e.displayQty = "The visible size cannot be more than the whole size.";
+      spec = {
+        ...b,
+        kind,
+        quantity,
+        displayQty,
+        displayJitter: jit("displayJitter", "Visible size randomisation"),
+        price: optPrice(o, "price", "Price", e),
+        pegOffsetTicks: o.pegOffsetTicks === void 0 ? 0 : int(o, "pegOffsetTicks", "Offset", ALGO_LIMITS.chase.offsetTicks, e),
+        chaseTicks: o.chaseTicks === void 0 ? 2 : int(o, "chaseTicks", "Re-price distance", ALGO_LIMITS.chase.chaseTicks, e),
+        postOnly: bool(o, "postOnly", true),
+        refillMs: o.refillMs === void 0 ? 0 : int(o, "refillMs", "Refill delay", ALGO_LIMITS.iceberg.refillMs, e),
+        refillJitter: o.refillJitter === void 0 ? 0 : num2(o, "refillJitter", "Refill randomisation", { min: 0, max: 1 }, e)
+      };
+      break;
+    }
+    case "chase": {
+      const L = ALGO_LIMITS.chase;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        offsetTicks: o.offsetTicks === void 0 ? 0 : int(o, "offsetTicks", "Offset", L.offsetTicks, e),
+        offsetBps: opt(o, "offsetBps", "Offset", L.offsetBps, e),
+        chaseTicks: o.chaseTicks === void 0 ? 1 : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e),
+        maxChaseBps: opt(o, "maxChaseBps", "Max chase", L.maxChaseBps, e),
+        timeoutMs: opt(o, "timeoutMs", "Time limit", L.timeoutMs, e),
+        onEnd: oneOf(o, "onEnd", "At the end", ["take", "cancel", "rest"], "take", e),
+        minRepriceMs: o.minRepriceMs === void 0 ? 1e3 : int(o, "minRepriceMs", "Re-price pause", L.minRepriceMs, e)
+      };
+      break;
+    }
+    case "scale": {
+      const L = ALGO_LIMITS.scale;
+      const from = price(o, "from", "First price", e);
+      const to = price(o, "to", "Last price", e);
+      if (from === to) e.to = "The last price must differ from the first.";
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        from,
+        to,
+        orders: int(o, "orders", "Orders", L.orders, e),
+        distribution: oneOf(o, "distribution", "Size curve", ["flat", "linear", "exponential", "bell"], "flat", e),
+        skew: o.skew === void 0 ? 1 : num2(o, "skew", "Size skew", L.skew, e),
+        spacing: oneOf(o, "spacing", "Price spacing", ["linear", "geometric", "front", "back"], "linear", e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Size randomisation", L.sizeJitter, e),
+        postOnly: bool(o, "postOnly")
+      };
+      break;
+    }
+    case "dca": {
+      const L = ALGO_LIMITS.dca;
+      const perOrderUsd = num2(o, "perOrderUsd", "Amount per order", L.perOrderUsd, e);
+      const maxTotalUsd = opt(o, "maxTotalUsd", "Total budget", { min: 10, max: 1e9 }, e);
+      if (maxTotalUsd !== null && maxTotalUsd < perOrderUsd) e.maxTotalUsd = "The budget must cover at least one order.";
+      spec = {
+        ...b,
+        kind,
+        perOrderUsd,
+        orders: int(o, "orders", "Orders", L.orders, e),
+        intervalMs: int(o, "intervalMs", "Every", L.intervalMs, e),
+        outOfBand: oneOf(o, "outOfBand", "Outside the limit", ["skip", "wait"], "skip", e),
+        dipPct: opt(o, "dipPct", "Dip", L.dipPct, e),
+        dipMultiplier: o.dipMultiplier === void 0 ? 1 : num2(o, "dipMultiplier", "Dip multiplier", L.dipMultiplier, e),
+        maxTotalUsd,
+        exec: exec(o.exec ?? { style: "taker" }, e, "exec")
+      };
+      break;
+    }
+    case "swarm": {
+      const L = ALGO_LIMITS.swarm;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        clips: int(o, "clips", "Clips", L.clips, e),
+        inFlight: int(o, "inFlight", "Clips per wave", L.inFlight, e),
+        waveMs: int(o, "waveMs", "Between waves", L.waveMs, e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Irregular clips", L.sizeJitter, e),
+        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e),
+        retries: o.retries === void 0 ? 2 : int(o, "retries", "Retries", L.retries, e)
+      };
+      break;
+    }
+    case "conditional": {
+      const L = ALGO_LIMITS.conditional;
+      const list = Array.isArray(o.conditions) ? o.conditions : [];
+      if (list.length < L.conditions.min || list.length > L.conditions.max) e.conditions = `Add 1 to ${L.conditions.max} conditions.`;
+      const conditions = list.slice(0, L.conditions.max).map((c, i) => condition(c, e, `conditions.${i}`)).filter((c) => c !== null);
+      spec = {
+        ...b,
+        kind,
+        match: oneOf(o, "match", "Match", ["all", "any"], "all", e),
+        conditions,
+        holdMs: o.holdMs === void 0 ? 0 : int(o, "holdMs", "Hold for", L.holdMs, e),
+        expiresAt: time(o, "expiresAt", "Expiry", e),
+        then: action(o.then, e, depth)
+      };
+      if (b.exits && (spec.then.type === "close" || spec.then.type === "algo")) e.exits = spec.then.type === "close" ? "A close opens nothing to protect: no exits on it." : "Set the exits on the algo it starts.";
+      break;
+    }
+    case "trailing": {
+      const L = ALGO_LIMITS.trailing;
+      const trailPct = opt(o, "trailPct", "Trail", L.trailPct, e);
+      const trailAbs = optPrice(o, "trailAbs", "Trail", e);
+      if (trailPct === null === (trailAbs === null)) e.trailPct = "Set the trail as a percentage or as a price distance (one of the two).";
+      spec = {
+        ...b,
+        kind,
+        quantity: optQty(o, "quantity", "Size", e),
+        trailPct,
+        trailAbs,
+        activationPrice: optPrice(o, "activationPrice", "Activation price", e),
+        source: oneOf(o, "source", "Price", ["mark", "last"], "mark", e),
+        exit: oneOf(o, "exit", "Exit", ["market", "chase"], "market", e),
+        chaseMs: o.chaseMs === void 0 ? 15e3 : int(o, "chaseMs", "Chase for", L.chaseMs, e),
+        slippageBps: o.slippageBps === void 0 ? 50 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      if (spec.quantity === null) spec.reduceOnly = true;
+      break;
+    }
+    case "basket": {
+      const L = ALGO_LIMITS.basket;
+      const raw = Array.isArray(o.legs) ? o.legs : [];
+      if (raw.length < L.legs.min || raw.length > L.legs.max) e.legs = `A basket has ${L.legs.min} to ${L.legs.max} markets.`;
+      const legs = raw.slice(0, L.legs.max).map((x, i) => {
+        const v = isObj(x) ? x : {};
+        return {
+          symbol: symbol(v, "symbol", e, `legs.${i}.symbol`),
+          side: oneOf(v, "side", "Side", ["buy", "sell"], "buy", e, `legs.${i}.side`),
+          usd: num2(v, "usd", "Amount", L.legUsd, e, `legs.${i}.usd`)
+        };
+      });
+      if (new Set(legs.map((l) => l.symbol)).size !== legs.length) e.legs = "Each market once in a basket.";
+      if (b.exits) e.exits = "Exits are set per market: not on a basket.";
+      const style = oneOf(o, "style", "Each leg", ["swarm", "twap"], "swarm", e);
+      const durationMs = style === "twap" ? int(o, "durationMs", "Duration", ALGO_LIMITS.twap.durationMs, e) : 0;
+      const slices = style === "twap" ? int(o, "slices", "Slices", ALGO_LIMITS.twap.slices, e) : 0;
+      if (style === "twap" && durationMs / slices < ALGO_LIMITS.twap.minIntervalMs) e.slices = `At most one slice every ${ALGO_LIMITS.twap.minIntervalMs / 1e3} s.`;
+      spec = {
+        ...b,
+        kind,
+        symbol: legs[0]?.symbol ?? b.symbol,
+        side: legs[0]?.side ?? b.side,
+        legs,
+        style,
+        durationMs,
+        slices,
+        clips: style === "swarm" ? int(o, "clips", "Clips", ALGO_LIMITS.swarm.clips, e) : 0,
+        inFlight: style === "swarm" ? int(o, "inFlight", "Clips per wave", ALGO_LIMITS.swarm.inFlight, e) : 0,
+        waveMs: style === "swarm" ? int(o, "waveMs", "Between waves", ALGO_LIMITS.swarm.waveMs, e) : 0,
+        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      break;
+    }
+    case "bracket": {
+      const entry = oneOf(o, "entry", "Entry", ["market", "limit"], "market", e);
+      if (!b.exits) e.exits = "A bracket needs a take-profit, a stop-loss, or both.";
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        entry,
+        price: entry === "limit" ? price(o, "price", "Entry price", e) : null,
+        slippageBps: o.slippageBps === void 0 ? 30 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+      };
+      break;
+    }
+  }
+  return { spec: Object.keys(e).length ? null : spec, errors: e };
+}
+var opensPosition = (s) => !s.reduceOnly && s.kind !== "trailing" && s.kind !== "basket" && !(s.kind === "conditional" && (s.then.type === "close" || s.then.type === "algo"));
+function parseAlgoSpec(input) {
+  const r = checkAlgoSpec(input);
+  if (!r.spec) {
+    const first = Object.values(r.errors)[0] ?? "The order is not valid.";
+    throw new AlgoSpecError(first, r.errors);
+  }
+  return r.spec;
+}
+function algoQuantity(s) {
+  switch (s.kind) {
+    case "dca":
+    case "basket":
+      return null;
+    case "twap":
+      return s.closeShare !== null ? null : Number(s.quantity);
+    case "trailing":
+      return s.quantity === null ? null : Number(s.quantity);
+    case "conditional":
+      return s.then.type === "market" || s.then.type === "limit" ? Number(s.then.quantity) : null;
+    default:
+      return Number(s.quantity);
+  }
+}
+function algoSymbols(s) {
+  const out = /* @__PURE__ */ new Set([s.symbol]);
+  if (s.kind === "conditional") {
+    for (const c of s.conditions) {
+      if (c.type === "time") continue;
+      out.add(c.symbol);
+      if (c.type === "ratio") out.add(c.other);
+    }
+    if (s.then.type === "algo") for (const x of algoSymbols(s.then.algo)) out.add(x);
+  }
+  if (s.kind === "basket") for (const l of s.legs) out.add(l.symbol);
+  return [...out];
+}
+var ALGO_NAMES = {
+  twap: "TWAP",
+  vwap: "VWAP",
+  pov: "POV",
+  iceberg: "Iceberg",
+  chase: "Chase",
+  scale: "Scale",
+  dca: "DCA",
+  swarm: "Swarm",
+  conditional: "Conditional",
+  trailing: "Trailing stop",
+  basket: "Basket",
+  bracket: "Bracket"
+};
+
+// packages/copy-engine/src/algo/plan.ts
+function exitLevels(side, x, avg) {
+  const sign2 = side === "buy" ? 1 : -1;
+  return {
+    tp: x.tpPrice ?? (x.tpPct !== null ? avg * (1 + sign2 * x.tpPct) : null),
+    sl: x.slPrice ?? (x.slPct !== null ? avg * (1 - sign2 * x.slPct) : null)
+  };
+}
+function twapSchedule(s, start, seed) {
+  const rand = makeRng(seed);
+  const weights = curveWeights(s.slices, s.urgency, s.sizeJitter, rand);
+  const times = sliceTimes(start, s.durationMs, s.slices, s.timeJitter, rand);
+  return { times, weights };
+}
+function vwapSchedule(s, start, seed, profile) {
+  const rand = makeRng(seed);
+  const base2 = profile && profile.weights.length === s.slices ? profile.weights : new Array(s.slices).fill(1 / s.slices);
+  const weights = normalise(base2.map((w) => s.sizeJitter > 0 ? w * (1 + (rand() * 2 - 1) * s.sizeJitter) : w));
+  const times = sliceTimes(start, s.durationMs, s.slices, 0, rand);
+  return { times, weights };
+}
+function swarmClips(s, m, seed) {
+  const rand = makeRng(seed);
+  const w = new Array(s.clips).fill(1).map((x) => s.sizeJitter > 0 ? x * (1 + (rand() * 2 - 1) * s.sizeJitter) : x);
+  return allocateSteps(Number(s.quantity), w, Number(m.stepSize)).filter((q) => q > 0);
+}
+function scaleLadder(s, m, seed) {
+  const prices = ladderPrices(s.from, s.to, s.orders, s.spacing, m.tickSize);
+  const w = ladderWeights(prices.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
+  const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
+  return prices.map((price2, i) => ({ price: price2, qty: sizes[i] ?? 0 }));
+}
+
+// packages/copy-engine/src/algo/feed.ts
+var QUOTE_MAX_AGE_MS = 15e3;
+var HISTORY_MS = 60 * 6e4;
+var toNum = (v) => {
+  const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
+  return Number.isFinite(n) ? n : null;
+};
+var rows = (d) => Array.isArray(d) ? d : d && typeof d === "object" ? [d] : [];
+var AlgoFeed = class {
+  constructor(o) {
+    this.o = o;
+    const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
+    this.socket = new LiveSocket({
+      url: `${origin}/ws/perps`,
+      factory: o.factory,
+      ping: '{"op":"ping"}',
+      name: "sodex-algo",
+      log: o.log,
+      subscribe: (send, fresh) => this.subscribeAll(send, fresh),
+      onMessage: (m) => this.handle(m),
+      onState: (up) => {
+        for (const cb of this.stateCbs) cb(up);
+      }
+    });
+  }
+  o;
+  socket;
+  symbols = /* @__PURE__ */ new Set();
+  owners = /* @__PURE__ */ new Set();
+  subscribed = { symbols: /* @__PURE__ */ new Set(), owners: /* @__PURE__ */ new Set(), marks: false };
+  quotes = /* @__PURE__ */ new Map();
+  lasts = /* @__PURE__ */ new Map();
+  marks = /* @__PURE__ */ new Map();
+  history = /* @__PURE__ */ new Map();
+  tape = /* @__PURE__ */ new Map();
+  seen = /* @__PURE__ */ new Set();
+  seenOrder = [];
+  printCbs = [];
+  orderCbs = [];
+  stateCbs = [];
+  sampler = null;
+  start() {
+    this.socket.start();
+    this.sampler ??= timers.every(1e3, () => this.sample());
+  }
+  stop() {
+    this.socket.stop();
+    timers.cancel(this.sampler);
+    this.sampler = null;
+  }
+  get up() {
+    return this.socket.up;
+  }
+  watch(symbols, owners) {
+    const s = new Set(symbols.map((x) => x.toUpperCase()));
+    const w = new Set(owners.map((x) => x.toLowerCase()));
+    const grew = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x));
+    this.symbols = s;
+    this.owners = w;
+    if (grew) this.socket.resubscribe();
+  }
+  subscribeAll(send, fresh) {
+    if (fresh) {
+      this.subscribed = { symbols: /* @__PURE__ */ new Set(), owners: /* @__PURE__ */ new Set(), marks: false };
+    }
+    let id = 500;
+    if (!this.subscribed.marks) {
+      send({ op: "subscribe", id: id++, params: { channel: "allMarkPrice" } });
+      this.subscribed.marks = true;
+    }
+    const add = [...this.symbols].filter((s) => !this.subscribed.symbols.has(s));
+    for (let i = 0; i < add.length; i += 40) {
+      const chunk = add.slice(i, i + 40);
+      send({ op: "subscribe", id: id++, params: { channel: "bookTicker", symbols: chunk } });
+      send({ op: "subscribe", id: id++, params: { channel: "trade", symbols: chunk } });
+      for (const s of chunk) this.subscribed.symbols.add(s);
+    }
+    for (const w of this.owners) {
+      if (this.subscribed.owners.has(w)) continue;
+      send({ op: "subscribe", id: id++, params: { channel: "accountOrderUpdate", user: w } });
+      this.subscribed.owners.add(w);
+    }
+  }
+  dedupe(id) {
+    if (this.seen.has(id)) return false;
+    this.seen.add(id);
+    this.seenOrder.push(id);
+    if (this.seenOrder.length > 2e4) for (const x of this.seenOrder.splice(0, 5e3)) this.seen.delete(x);
+    return true;
+  }
+  /** Feed one gateway message (also how tests drive it). */
+  handle(m) {
+    const msg = m;
+    const ch = msg?.channel;
+    if (!ch) return;
+    const now = Date.now();
+    if (ch === "bookTicker") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const bid = toNum(r.b);
+        const ask = toNum(r.a);
+        if (s && bid !== null && ask !== null && bid > 0 && ask > 0 && ask >= bid) this.quotes.set(s, { bid, ask, at: now });
+      }
+      return;
+    }
+    if (ch === "allMarkPrice" || ch === "markPrice") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const p = toNum(r.p);
+        if (!s || p === null || !(p > 0)) continue;
+        const prev = this.marks.get(s);
+        this.marks.set(s, {
+          mark: p,
+          index: toNum(r.i) ?? prev?.index ?? null,
+          funding: toNum(r.r) ?? prev?.funding ?? null,
+          oi: toNum(r.oi) ?? prev?.oi ?? null,
+          at: now
+        });
+      }
+      return;
+    }
+    if (ch === "trade") {
+      for (const r of rows(msg.data)) {
+        const s = typeof r.s === "string" ? r.s.toUpperCase() : null;
+        const price2 = toNum(r.p);
+        const qty2 = toNum(r.q);
+        if (!s || price2 === null || qty2 === null || !(price2 > 0) || !(qty2 > 0)) continue;
+        if (!this.dedupe(`t:${s}:${String(r.t ?? `${r.T}:${r.p}:${r.q}`)}`)) continue;
+        const at = toNum(r.T) ?? now;
+        this.lasts.set(s, { price: price2, at });
+        let list = this.tape.get(s);
+        if (!list) this.tape.set(s, list = []);
+        list.push({ t: at, q: qty2, usd: qty2 * price2 });
+        if (list.length > 5e4 || list[0] && list[0].t < at - HISTORY_MS) {
+          const cut = list.findIndex((x) => x.t >= at - HISTORY_MS);
+          list.splice(0, cut < 0 ? list.length : cut);
+        }
+        const p = {
+          symbol: s,
+          price: price2,
+          qty: qty2,
+          buyer: typeof r.bi === "number" ? r.bi : -1,
+          seller: typeof r.si === "number" ? r.si : -1,
+          taker: r.S === "SELL" ? "sell" : "buy",
+          at
+        };
+        for (const cb of this.printCbs) cb(p);
+      }
+      return;
+    }
+    if (ch === "accountOrderUpdate") {
+      for (const r of rows(msg.data)) {
+        const c = typeof r.c === "string" ? r.c : null;
+        if (!c) continue;
+        const u = {
+          clOrdID: c,
+          orderId: r.i === void 0 || r.i === null ? null : String(r.i),
+          symbol: typeof r.s === "string" ? r.s.toUpperCase() : "",
+          status: String(r.X ?? r.x ?? "").toUpperCase(),
+          filledQty: toNum(r.z) ?? 0,
+          filledValue: toNum(r.v) ?? 0,
+          maker: typeof r.m === "boolean" ? r.m : null,
+          reason: typeof r.r === "string" ? r.r : null,
+          at: toNum(r.E) ?? now
+        };
+        for (const cb of this.orderCbs) cb(u);
+      }
+    }
+  }
+  sample(now = Date.now()) {
+    for (const s of this.symbols) {
+      const q = this.quote(s);
+      const m = this.marks.get(s);
+      const l = this.lasts.get(s);
+      let list = this.history.get(s);
+      if (!list) this.history.set(s, list = []);
+      list.push({ t: now, mark: m?.mark ?? null, mid: q ? (q.bid + q.ask) / 2 : null, last: l?.price ?? null, index: m?.index ?? null, oi: m?.oi ?? null });
+      if (list.length > 3700) list.splice(0, list.length - 3600);
+    }
+  }
+  quote(symbol2) {
+    const q = this.quotes.get(symbol2.toUpperCase());
+    return q && Date.now() - q.at <= QUOTE_MAX_AGE_MS ? q : null;
+  }
+  last(symbol2) {
+    return this.lasts.get(symbol2.toUpperCase()) ?? null;
+  }
+  mark(symbol2) {
+    const m = this.marks.get(symbol2.toUpperCase());
+    return m && Date.now() - m.at <= 12e4 ? m : null;
+  }
+  price(symbol2, source) {
+    if (source === "mid") {
+      const q = this.quote(symbol2);
+      return q ? (q.bid + q.ask) / 2 : null;
+    }
+    if (source === "last") return this.last(symbol2)?.price ?? null;
+    const m = this.mark(symbol2);
+    return source === "index" ? m?.index ?? null : m?.mark ?? null;
+  }
+  sampleAgo(symbol2, agoMs) {
+    const list = this.history.get(symbol2.toUpperCase());
+    if (!list?.length) return null;
+    const want = Date.now() - agoMs;
+    if (list[0].t > want + 2e3) return null;
+    let best = list[0];
+    for (let i = list.length - 1; i >= 0; i--) {
+      if (list[i].t <= want) {
+        best = list[i];
+        break;
+      }
+    }
+    return best;
+  }
+  priceAgo(symbol2, source, agoMs) {
+    const s = this.sampleAgo(symbol2, agoMs);
+    if (!s) return null;
+    return source === "mid" ? s.mid : source === "last" ? s.last : source === "index" ? s.index : s.mark;
+  }
+  oiAgo(symbol2, agoMs) {
+    return this.sampleAgo(symbol2, agoMs)?.oi ?? null;
+  }
+  volume(symbol2, windowMs) {
+    const list = this.tape.get(symbol2.toUpperCase());
+    if (!list) return { qty: 0, usd: 0 };
+    const from = Date.now() - windowMs;
+    let qty2 = 0;
+    let usd = 0;
+    for (let i = list.length - 1; i >= 0 && list[i].t >= from; i--) {
+      qty2 += list[i].q;
+      usd += list[i].usd;
+    }
+    return { qty: qty2, usd };
+  }
+  onPrint(cb) {
+    this.printCbs.push(cb);
+  }
+  onOrder(cb) {
+    this.orderCbs.push(cb);
+  }
+  onState(cb) {
+    this.stateCbs.push(cb);
+  }
+};
+
+// packages/copy-engine/src/algo/sink.ts
+var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
+function stopsAction(accountId, market, stops, builder) {
+  return perpsActions.newOrder(
+    accountId,
+    market.id,
+    stops.map((s) => ({
+      clOrdID: s.clOrdID,
+      modifier: OrderModifier.STOP,
+      side: s.side === "buy" ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.MARKET,
+      timeInForce: TimeInForce.IOC,
+      quantity: s.quantity,
+      stopPrice: s.triggerPrice,
+      stopType: s.kind === "tp" ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
+      triggerType: TriggerType.MARK_PRICE,
+      reduceOnly: true
+    })),
+    builder ?? void 0
+  );
+}
+var readStops = (data, stops) => readBatch(
+  data,
+  stops.map((s) => ({ clOrdID: s.clOrdID, side: s.side, price: s.triggerPrice, quantity: s.quantity, tif: "ioc", reduceOnly: true }))
+);
+function childrenAction(accountId, market, orders, builder) {
+  return perpsActions.newOrder(
+    accountId,
+    market.id,
+    orders.map((o) => ({
+      clOrdID: o.clOrdID,
+      modifier: OrderModifier.NORMAL,
+      side: o.side === "buy" ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.LIMIT,
+      timeInForce: TIF[o.tif],
+      price: o.price,
+      quantity: o.quantity,
+      reduceOnly: o.reduceOnly
+    })),
+    builder ?? void 0
+  );
+}
+var describe2 = (e) => e instanceof SodexApiError ? `${e.message}${e.hint ? ` (${e.hint})` : ""}` : e instanceof Error ? e.message : String(e);
+function readBatch(data, orders) {
+  const list = Array.isArray(data) ? data : unwrapList(data, "orders");
+  const failed = new Set(failedOrders(list).map((r) => r.clOrdID));
+  return orders.map((o) => {
+    const row = list.find((r) => r.clOrdID === o.clOrdID);
+    const bad = failed.has(o.clOrdID);
+    return {
+      clOrdID: o.clOrdID,
+      ok: !bad,
+      orderId: row?.orderID !== void 0 ? String(row.orderID) : null,
+      error: bad ? row?.error || `code ${row?.code}` : null,
+      outcomeUnknown: false
+    };
+  });
+}
+var KeyAlgoSink = class {
+  constructor(client, key2, nonces, chainId, builder) {
+    this.client = client;
+    this.key = key2;
+    this.nonces = nonces;
+    this.chainId = chainId;
+    this.builder = builder;
+  }
+  client;
+  key;
+  nonces;
+  chainId;
+  builder;
+  paper = false;
+  async signAndSend(action2) {
+    const key2 = this.key();
+    if (!key2) throw new SodexApiError(401, "no trading key is available for this algo", 401, "");
+    const req = await signAndBuildWithNonceManager(action2, key2, { chainId: this.chainId, nonces: this.nonces, base: "" });
+    return this.client.send(req);
+  }
+  async place(a, market, orders) {
+    if (!orders.length) return [];
+    try {
+      const builder = await this.builder(a).catch(() => null);
+      return readBatch(await this.signAndSend(childrenAction(a.accountId, market, orders, builder)), orders);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: describe2(e), outcomeUnknown: unknown }));
+    }
+  }
+  async placeStops(a, market, stops) {
+    if (!stops.length) return [];
+    try {
+      const builder = await this.builder(a).catch(() => null);
+      return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe2(e), outcomeUnknown: unknown }));
+    }
+  }
+  async cancel(a, market, clOrdIDs) {
+    if (!clOrdIDs.length) return;
+    try {
+      await this.signAndSend(perpsActions.cancelOrder(a.accountId, clOrdIDs.map((clOrdID) => ({ symbolID: market.id, clOrdID }))));
+    } catch (e) {
+      if (e instanceof SodexApiError && /not found|unknown order|does not exist|already/i.test(e.message)) return;
+      throw e;
+    }
+  }
+  async setLeverage(a, market, leverage, margin) {
+    await this.signAndSend(leverageAction(a.accountId, market, leverage, margin));
+  }
+};
+
+// packages/copy-engine/src/algo/runtime.ts
+var ALGO_TICK_MS = 500;
+var FLUSH_MS = 2e3;
+var MARKETS_REFRESH_MS2 = 10 * 6e4;
+var STALE_IOC_MS = 8e3;
+var SENDING_MAX_MS = 2e4;
+var HISTORY_EVERY_MS = 2e4;
+var DONE_KEPT = 60;
+var MAX_CONSEC_REJECTS = 25;
+var PROBLEM_RECHECK_MS = 6e4;
+var LATE_MS = 3e4;
+var TAKER_RETRY_MS = 1e3;
+var POSITIONS_MS = 5e3;
+var ACCOUNT_MS = 1e4;
+var EXITS_RESIZE_MS = 5e3;
+var LIVE = /* @__PURE__ */ new Set(["sending", "open", "unknown"]);
+var FINAL_ORDER = /^(FILLED|CANCELED|CANCELLED|REJECTED|EXPIRED|REPLACED)$/;
+var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
+var AlgoRuntime = class {
+  constructor(host2) {
+    this.host = host2;
+    if (host2.market) this.market = host2.market;
+    else {
+      if (!host2.factory) throw new Error("an algo runtime needs a market feed or a WebSocket factory");
+      this.market = new AlgoFeed({ network: host2.network, factory: host2.factory, log: host2.log });
+    }
+    this.market.onOrder((u) => this.onOrderUpdate(u));
+    this.market.onPrint((p) => this.onPrint(p));
+  }
+  host;
+  markets = new MarketBook();
+  market;
+  algos = /* @__PURE__ */ new Map();
+  byClOrd = /* @__PURE__ */ new Map();
+  busy = /* @__PURE__ */ new Set();
+  dirty = /* @__PURE__ */ new Set();
+  leverageSet = /* @__PURE__ */ new Set();
+  problems = /* @__PURE__ */ new Map();
+  lastHistoryAt = 0;
+  lookupBusy = false;
+  /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
+  heldNow = /* @__PURE__ */ new Set();
+  eventSeq = 0;
+  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling). */
+  positionsOf = /* @__PURE__ */ new Map();
+  accounts = /* @__PURE__ */ new Map();
+  /** Algos whose exits are being placed or resized right now. */
+  exitsBusy = /* @__PURE__ */ new Set();
+  paper = /* @__PURE__ */ new Map();
+  timers = [];
+  running = false;
+  /* ------------------------------------------------------------ lifecycle ----- */
+  async start() {
+    if (this.running) return;
+    this.running = true;
+    await this.loadMarkets();
+    for (const a of await this.host.store.algos()) {
+      this.algos.set(a.id, a);
+      for (const x of a.exitOrders ?? []) {
+        this.byClOrd.set(x.clOrdID, a.id);
+        if (x.state === "sending") x.state = "unknown";
+      }
+      if (FINAL_STATUSES.has(a.status)) continue;
+      for (const c of a.children) {
+        this.byClOrd.set(c.clOrdID, a.id);
+        if (LIVE.has(c.state) && !a.spec.paper) c.state = "unknown";
+        if (a.spec.paper && LIVE.has(c.state)) {
+          if (c.tif !== "ioc" && !c.cancelling) {
+            c.state = "open";
+            this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: a.spec.symbol, side: c.side, price: c.price, left: Math.max(0, c.quantity - c.filled), filled: c.filled, value: c.value });
+          } else {
+            c.state = "done";
+            c.cancelling = false;
+          }
+        }
+      }
+    }
+    this.market.start();
+    this.syncWatch();
+    if (this.host.autoTick !== false) {
+      this.timers.push(
+        timers.every(ALGO_TICK_MS, () => this.tick()),
+        timers.every(FLUSH_MS, () => void this.flush()),
+        timers.every(MARKETS_REFRESH_MS2, () => void this.loadMarkets())
+      );
+    }
+  }
+  async stop() {
+    this.running = false;
+    for (const t of this.timers) timers.cancel(t);
+    this.timers = [];
+    this.market.stop();
+    await this.flush();
+  }
+  async loadMarkets() {
+    try {
+      const list = await this.host.sodex.markets();
+      if (list.length) this.markets.load(list);
+    } catch (e) {
+      this.host.log.warn("algo: market list failed", { error: String(e) });
+    }
+  }
+  /** Subscribe the markets and wallets the live algos need. */
+  syncWatch() {
+    const symbols = /* @__PURE__ */ new Set();
+    const owners = /* @__PURE__ */ new Set();
+    for (const a of this.algos.values()) {
+      const exits2 = this.liveExits(a).length > 0;
+      if (FINAL_STATUSES.has(a.status) && !exits2) continue;
+      for (const s of algoSymbols(a.spec)) symbols.add(s);
+      if (!a.spec.paper) owners.add(a.owner);
+    }
+    this.market.watch([...symbols], [...owners]);
+  }
+  /** Exits still on SoDEX (or on the paper book), not yet settled. */
+  liveExits(a) {
+    return (a.exitOrders ?? []).filter((x) => LIVE.has(x.state));
+  }
+  /* ------------------------------------------------------------- the API ----- */
+  get(id) {
+    return this.algos.get(id) ?? null;
+  }
+  list(owner) {
+    const o = owner?.toLowerCase();
+    return [...this.algos.values()].filter((a) => !o || a.owner === o).sort((x, y) => y.createdAt - x.createdAt);
+  }
+  /** Start an algo. The spec is validated here as everywhere (parseAlgoSpec); its market must be listed. */
+  async add(n) {
+    const spec = parseAlgoSpec(n.spec);
+    if (!this.markets.size) await this.loadMarkets();
+    for (const sym of algoSymbols(spec)) {
+      const m2 = this.markets.get(sym);
+      if (!m2) throw new Error(`${sym} is not listed on SoDEX perps.`);
+    }
+    const m = this.markets.get(spec.symbol);
+    if (m.status !== "TRADING") throw new Error(`SoDEX is not trading ${m.name} right now.`);
+    const now = Date.now();
+    const a = {
+      id: n.id ?? randomId("a"),
+      owner: n.owner.toLowerCase(),
+      accountId: n.accountId,
+      mode: n.mode,
+      spec,
+      status: "scheduled",
+      statusReason: null,
+      createdAt: now,
+      updatedAt: now,
+      startedAt: null,
+      endedAt: null,
+      parentId: n.parentId ?? null,
+      consent: n.consent ?? null,
+      seed: n.seed ?? newSeed(),
+      filled: 0,
+      filledValue: 0,
+      makerQty: 0,
+      fees: 0,
+      arrival: null,
+      marketQty: 0,
+      marketValue: 0,
+      children: [],
+      childCount: 0,
+      rejects: 0,
+      exitOrders: [],
+      country: n.country ?? null,
+      observedCountry: n.observedCountry ?? null,
+      k: {}
+    };
+    if (spec.triggerPrice !== null) {
+      const mk = this.market.mark(spec.symbol)?.mark ?? null;
+      if (mk !== null) a.k.triggerFrom = mk;
+    }
+    this.algos.set(a.id, a);
+    await this.host.store.saveAlgo(a);
+    this.syncWatch();
+    const what = spec.kind === "basket" ? `Basket of ${spec.legs.length} markets` : `${ALGO_NAMES[spec.kind]} ${spec.side === "buy" ? "buy" : "sell"} on ${spec.symbol}`;
+    await this.event(a, "status", `${what} placed${spec.paper ? " (paper: nothing is sent)" : ""}.`);
+    this.host.onChange?.(a.id);
+    return a;
+  }
+  async pause(id) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
+    if (a.status === "paused") return a;
+    a.k.pausedFrom = a.status;
+    await this.setStatus(a, "paused", "Paused by you.");
+    await this.pullResting(a);
+    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
+    return a;
+  }
+  async resume(id) {
+    const a = this.need(id);
+    if (a.status !== "paused") return a;
+    const back = a.k.pausedFrom === "scheduled" ? "scheduled" : "running";
+    delete a.k.pausedFrom;
+    await this.setStatus(a, back, null);
+    for (const c of this.legsOf(a)) if (c.status === "paused") await this.resume(c.id);
+    return a;
+  }
+  /**
+   * Cancel an algo: its resting children are cancelled on SoDEX; what filled
+   * stays filled, and its exits stay on SoDEX to protect that (the log says so).
+   */
+  async cancel(id) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return a;
+    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id);
+    await this.end(a, "cancelled", "Cancelled by you.");
+    return a;
+  }
+  /** A basket's legs (the algos it started). */
+  legsOf(a) {
+    return (a.k.legs ?? []).map((id) => this.algos.get(id)).filter((x) => !!x);
+  }
+  /** The kill switch: every algo of `owner` is cancelled. */
+  async cancelAll(owner) {
+    const out = [];
+    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status)) out.push(await this.cancel(a.id));
+    return out;
+  }
+  /**
+   * Change a running algo where that is safe: its limit price, bounds, spread
+   * guard and label any time; its size only upward of what has filled (and,
+   * for a schedule, from the next slice on).
+   */
+  async update(id, patch) {
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
+    const next = { ...a.spec, ...patch };
+    if (patch.quantity !== void 0) {
+      if (!("quantity" in a.spec) || a.spec.kind === "trailing") throw new Error("The size of this kind of algo cannot be changed.");
+      if (Number(patch.quantity) <= a.filled) throw new Error("The new size must be more than what has filled.");
+    }
+    const spec = parseAlgoSpec(next);
+    a.spec = spec;
+    await this.save(a);
+    await this.event(a, "info", "Changed by you.");
+    return a;
+  }
+  async events(id, q = {}) {
+    return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
+  }
+  /* ---------------------------------------------------------------- views ----- */
+  view(id) {
+    const a = this.algos.get(id);
+    if (!a) return null;
+    const s = a.spec;
+    const target = this.targetOf(a);
+    const avg = a.filled > 0 ? a.filledValue / a.filled : null;
+    const sign2 = s.side === "buy" ? 1 : -1;
+    const bps = (ref) => avg !== null && ref ? (ref - avg) / ref * 1e4 * sign2 : null;
+    const marketVwap = a.marketQty > 0 ? a.marketValue / a.marketQty : null;
+    let progress = target ? Math.min(1, a.filled / target) : 0;
+    if (s.kind === "dca") progress = Math.min(1, (Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0)) / s.orders);
+    const legs = this.legsOf(a);
+    if (s.kind === "basket") {
+      const want = s.legs.reduce((x, l) => x + l.usd, 0);
+      progress = want > 0 ? Math.min(1, legs.reduce((x, c) => x + c.filledValue, 0) / want) : 0;
+    }
+    if (a.status === "done") progress = 1;
+    const now = Date.now();
+    let nextAt = null;
+    let endsAt = null;
+    if (s.kind === "twap" && a.startedAt !== null) {
+      const times = a.k.times ?? [];
+      const i = nextSlice(times, now);
+      nextAt = i >= 0 ? times[i] : null;
+      endsAt = a.startedAt + s.durationMs;
+    } else if (s.kind === "basket" && a.startedAt !== null && s.style === "twap") endsAt = a.startedAt + s.durationMs;
+    else if (s.kind === "vwap" && a.startedAt !== null) {
+      const times = a.k.times ?? [];
+      const i = nextSlice(times, now);
+      nextAt = i >= 0 ? times[i] : null;
+      endsAt = a.startedAt + s.durationMs;
+    } else if (s.kind === "dca" && a.startedAt !== null) {
+      const i = Number(a.k.done ?? 0) + Number(a.k.skipped ?? 0);
+      nextAt = i < s.orders ? a.startedAt + i * s.intervalMs : null;
+      endsAt = a.startedAt + (s.orders - 1) * s.intervalMs;
+    } else if (s.kind === "pov") endsAt = s.endAt;
+    else if (s.kind === "chase" && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
+    else if (s.kind === "swarm") nextAt = a.k.waveAt ?? null;
+    else if (s.kind === "conditional") endsAt = s.expiresAt;
+    if (s.startAt && a.status === "scheduled") nextAt = s.startAt;
+    const live = a.children.filter((c) => LIVE.has(c.state));
+    const working = live.length ? live.length === 1 ? `${live[0].tif === "ioc" ? "Taking" : "Resting"} ${live[0].quantity - live[0].filled} at ${live[0].price}` : `${live.length} orders working` : null;
+    return {
+      algo: a,
+      target,
+      progress,
+      avgPrice: avg,
+      vsArrivalBps: bps(a.arrival),
+      vsMarketVwapBps: bps(marketVwap),
+      marketVwap,
+      nextAt,
+      endsAt,
+      working,
+      triggerPrice: s.kind === "trailing" ? a.k.stop ?? null : null,
+      conditions: s.kind === "conditional" ? s.conditions.map((c, i) => ({ text: this.describeCondition(c), ok: Boolean(a.k.ok?.[i]) })) : null,
+      exits: (a.exitOrders ?? []).length ? (a.exitOrders ?? []).filter((x) => LIVE.has(x.state) || x.filled > 0).map((x) => ({ kind: x.exit ?? "sl", price: x.price, quantity: x.quantity, filled: x.filled, live: LIVE.has(x.state) })) : null,
+      legs: s.kind === "basket" ? legs.map((c) => ({ id: c.id, symbol: c.spec.symbol, side: c.spec.side, status: c.status, filledValue: c.filledValue, avgPrice: c.filled > 0 ? c.filledValue / c.filled : null })) : null
+    };
+  }
+  /** The base quantity the algo is to fill, as far as it is known. */
+  targetOf(a) {
+    const s = a.spec;
+    if (s.kind === "dca") return typeof a.k.targetQty === "number" && a.k.targetQty > 0 ? a.k.targetQty : null;
+    if (s.kind === "trailing" || s.kind === "conditional") return typeof a.k.takeQty === "number" ? a.k.takeQty : algoQuantity(s);
+    if (s.kind === "twap" && s.closeShare !== null) return typeof a.k.total === "number" ? a.k.total : null;
+    return algoQuantity(s);
+  }
+  /* ---------------------------------------------------------------- ticks ----- */
+  /** One step for every live algo (the timer calls this; tests call it directly). */
+  tick(now = Date.now()) {
+    this.checkPaperExits();
+    for (const a of this.algos.values()) {
+      if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
+      this.busy.add(a.id);
+      void this.step(a, now).catch(async (e) => {
+        this.host.log.error("algo: a step failed", { algo: a.id, error: String(e) });
+        await this.event(a, "error", `Step failed: ${e instanceof Error ? e.message : String(e)}`).catch(() => {
+        });
+      }).finally(() => this.busy.delete(a.id));
+    }
+  }
+  /** Run one step of one algo and wait for it (tests). */
+  async stepNow(id, now = Date.now()) {
+    this.checkPaperExits();
+    const a = this.need(id);
+    if (FINAL_STATUSES.has(a.status)) return;
+    while (this.busy.has(id)) await new Promise((r) => timers.after(5, () => r(void 0)));
+    this.busy.add(id);
+    try {
+      await this.step(a, now);
+    } finally {
+      this.busy.delete(id);
+    }
+  }
+  async step(a, now) {
+    const s = a.spec;
+    const m = this.markets.get(s.symbol);
+    if (!m) {
+      if (this.markets.size) await this.end(a, "failed", `${s.symbol} is no longer listed on SoDEX perps.`);
+      return;
+    }
+    await this.settleStale(a, m, now);
+    if (a.status === "paused") {
+      await this.pullResting(a);
+      return;
+    }
+    if (!s.paper) {
+      const problem = await this.problemOf(a, now);
+      if (problem) {
+        await this.hold(a, problem);
+        return;
+      }
+      const policy = this.host.policyFor?.(a) ?? null;
+      if (policy && !policy.allowed) {
+        await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
+        return;
+      }
+    }
+    if (m.status !== "TRADING") {
+      await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
+      return;
+    }
+    const q = this.market.quote(s.symbol);
+    if (!q) {
+      await this.hold(a, "Waiting for a price from SoDEX.");
+      return;
+    }
+    if (a.status === "scheduled") {
+      if (!await this.ready(a, now)) return;
+      await this.begin(a, m, now);
+      if (FINAL_STATUSES.has(a.status)) return;
+    }
+    const mk = this.market.mark(s.symbol)?.mark ?? mid(q);
+    const b = s.upper && mk >= s.upper.price ? { ...s.upper, which: "upper" } : s.lower && mk <= s.lower.price ? { ...s.lower, which: "lower" } : null;
+    if (b) {
+      const words = `the price is ${b.which === "upper" ? "at or above" : "at or below"} your ${b.which} bound of ${b.price}`;
+      if (b.then === "stop" || s.kind === "scale") {
+        await this.end(a, this.isDone(a, m) ? "done" : "expired", `Stopped: ${words}.`);
+        return;
+      }
+      if (b.then === "hold") {
+        await this.pullResting(a);
+        await this.hold(a, `Held: ${words}.`);
+        return;
+      }
+      if (!a.k.rush) {
+        a.k.rush = true;
+        await this.event(a, "info", `Taking the rest now: ${words}.`);
+      }
+    }
+    this.heldNow.delete(a.id);
+    await this.stepKind(a, m, q, mk, now);
+    if (!this.heldNow.has(a.id) && !FINAL_STATUSES.has(a.status)) await this.run(a);
+    if (!FINAL_STATUSES.has(a.status)) await this.syncExits(a, m, false);
+  }
+  async stepKind(a, m, q, mk, now) {
+    const s = a.spec;
+    switch (s.kind) {
+      case "twap":
+      case "vwap":
+        return this.stepSchedule(a, m, q, mk, now);
+      case "pov":
+        return this.stepPov(a, m, q, mk, now);
+      case "dca":
+        return this.stepDca(a, m, q, mk, now);
+      case "iceberg":
+        return this.stepIceberg(a, m, q, now);
+      case "chase":
+        return this.stepChase(a, m, q, mk, now);
+      case "scale":
+        return this.stepScale(a, m, q, now);
+      case "swarm":
+        return this.stepSwarm(a, m, q, mk, now);
+      case "conditional":
+        return this.stepConditional(a, m, q, mk, now);
+      case "trailing":
+        return this.stepTrailing(a, m, q, mk, now);
+      case "basket":
+        return this.stepBasket(a);
+      case "bracket":
+        return this.stepBracket(a, m, q, mk);
+    }
+  }
+  /** Whether a scheduled algo may begin: its start time and its start price. */
+  async ready(a, now) {
+    const s = a.spec;
+    if (s.startAt !== null && now < s.startAt) return false;
+    if (s.triggerPrice !== null) {
+      const mk = this.market.mark(s.symbol)?.mark ?? null;
+      if (mk === null) return false;
+      if (typeof a.k.triggerFrom !== "number") {
+        a.k.triggerFrom = mk;
+        this.dirty.add(a.id);
+      }
+      const from = a.k.triggerFrom;
+      const hit = from >= s.triggerPrice ? mk <= s.triggerPrice : mk >= s.triggerPrice;
+      if (!hit) return false;
+      await this.event(a, "info", `The mark reached your start price of ${s.triggerPrice}.`);
+    }
+    return true;
+  }
+  /** Start working: the arrival price, the schedule, the profile. */
+  async begin(a, m, now) {
+    const s = a.spec;
+    const q = this.market.quote(s.symbol);
+    a.startedAt = now;
+    a.arrival = q ? mid(q) : this.market.mark(s.symbol)?.mark ?? null;
+    if (s.kind === "twap") {
+      if (s.closeShare !== null) {
+        const pos = await this.positionOf(a, s.symbol);
+        const size = pos === null ? 0 : floorStep(Math.abs(pos) * s.closeShare, m);
+        if (!pos || size < Number(m.stepSize)) {
+          a.startedAt = null;
+          await this.end(a, "expired", pos === null ? `Your position on ${m.name} could not be read; nothing was closed.` : `There is no position on ${m.name} to close.`);
+          return;
+        }
+        a.k.total = size;
+        a.k.closeSide = pos > 0 ? "sell" : "buy";
+        await this.event(a, "info", `Closing ${Math.round(s.closeShare * 100)}% of your ${pos > 0 ? "long" : "short"}: ${dec3(size)} ${m.base}.`);
+      }
+      const { times, weights } = twapSchedule(s, now, a.seed);
+      a.k.times = times;
+      a.k.weights = weights;
+    } else if (s.kind === "vwap") {
+      const profile = await this.profileFor(s.symbol, now, s.durationMs, s.slices, s.lookbackDays).catch((e) => {
+        this.host.log.warn("algo: volume profile failed", { symbol: s.symbol, error: String(e) });
+        return null;
+      });
+      const { times, weights } = vwapSchedule(s, now, a.seed, profile);
+      a.k.times = times;
+      a.k.weights = weights;
+      a.k.expectedTotal = profile ? profile.expected.reduce((x, y) => x + y, 0) : 0;
+      if (!profile) await this.event(a, "info", "No volume history could be read: the schedule is even (a TWAP).");
+    } else if (s.kind === "chase") {
+      a.k.startRef = q ? s.side === "buy" ? q.bid : q.ask : null;
+    } else if (s.kind === "swarm") {
+      a.k.clips = swarmClips(s, m, a.seed);
+      a.k.next = 0;
+      a.k.retriesLeft = s.retries;
+      a.k.waveAt = now;
+    }
+    await this.setStatus(a, "running", null);
+    await this.event(a, "status", a.arrival ? `Started. Arrival price ${a.arrival}.` : "Started.");
+  }
+  /* ---------------------------------------------------------- the worker ----- */
+  /** Live children: sent and not settled. */
+  live(a) {
+    return a.children.filter((c) => LIVE.has(c.state));
+  }
+  /** What could still fill: everything live, in full. */
+  pendingQty(a) {
+    return this.live(a).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+  }
+  /**
+   * Keep the working order in line with the plan: `due` is what should be
+   * filled by now, `late` how much of it is overdue (taken at once), the rest
+   * of what is due may rest as one post-only child at the touch.
+   */
+  async work(a, m, q, mk, o) {
+    const s = a.spec;
+    const side = o.side ?? s.side;
+    const reduceOnly = o.reduceOnly ?? s.reduceOnly;
+    const live = this.live(a);
+    if (live.some((c) => c.state !== "open" || c.cancelling)) return;
+    const limit = side === s.side ? s.limitPrice : null;
+    const ref = side === "buy" ? q.ask : q.bid;
+    const finishing = o.late >= o.total;
+    const minQ = Math.max(minChildQty(m, ref), o.minChild && !finishing ? o.minChild : 0);
+    const cap = o.maxChild !== void 0 && o.maxChild !== null ? o.maxChild : Infinity;
+    const room = Math.max(0, o.total - a.filled);
+    const need = Math.min(room, o.due - a.filled);
+    const lateNeed = Math.min(need, o.late - a.filled);
+    const resting = live.find((c) => c.tif !== "ioc") ?? null;
+    const taking = live.find((c) => c.tif === "ioc") ?? null;
+    if (taking) return;
+    if (lateNeed >= minQ - 1e-12 || lateNeed > 0 && need >= room - 1e-12 && room > 0 && o.late >= o.total) {
+      if (resting) {
+        await this.cancelChildren(a, m, [resting]);
+        return;
+      }
+      if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+        await this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+        return;
+      }
+      if (Date.now() - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) return;
+      let qty2 = floorStep(lateNeed, m);
+      if (need - qty2 < minQ) qty2 = floorStep(need, m);
+      qty2 = Math.min(qty2, floorStep(cap, m));
+      if (qty2 < minQ) {
+        if (room < minQ && o.late >= o.total && !o.more) await this.end(a, "done", a.filled > 0 ? `Filled; ${dec3(room)} ${m.base} under SoDEX's minimum order was left.` : "Under SoDEX's minimum order size: nothing could be sent.");
+        return;
+      }
+      const price3 = takerPrice(side, q, o.exec.slippageBps, m, mk, limit);
+      if (price3 === null) {
+        await this.hold(a, `Held: the price is past your limit of ${limit}.`);
+        return;
+      }
+      await this.send(a, m, [{ side, price: price3, quantity: qty2, tif: "ioc", tag: o.tag, reduceOnly }]);
+      return;
+    }
+    if (o.exec.style === "taker") return;
+    const want = floorStep(Math.min(need, cap), m);
+    const price2 = makerPrice(side, q, o.exec.offsetTicks, null, m, limit);
+    if (resting) {
+      const tick = Number(m.tickSize);
+      const left = resting.quantity - resting.filled;
+      const off = Math.abs(resting.price - price2) / tick;
+      const since = Date.now() - resting.placedAt;
+      const reprice = off >= o.exec.chaseTicks - 1e-9 && since >= (o.minRepriceMs ?? 1500);
+      const grow = want - left >= minQ;
+      const shrink = left - want > 1e-12 && want < minQ;
+      if (reprice || grow || shrink) await this.cancelChildren(a, m, [resting]);
+      return;
+    }
+    if (want < minChildQty(m, price2)) return;
+    await this.send(a, m, [{ side, price: price2, quantity: want, tif: "gtx", tag: o.tag, reduceOnly }]);
+  }
+  /* ----------------------------------------------------------- the kinds ----- */
+  async stepSchedule(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = typeof a.k.total === "number" ? a.k.total : Number(s.quantity);
+    const closeSide = a.k.closeSide;
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const start = a.startedAt;
+    const end = start + s.durationMs;
+    const times = a.k.times ?? [];
+    const weights = a.k.weights ?? [];
+    const interval = s.durationMs / s.slices;
+    let share = dueShare(times, weights, now);
+    let lateShare = s.exec.style === "taker" ? share : s.exec.style === "hybrid" ? dueShare(times, weights, now - s.exec.makerShare * interval) : 0;
+    if (s.kind === "vwap" && s.adaptive) {
+      const exp = Number(a.k.expectedTotal ?? 0);
+      share = adaptiveShare(share, a.marketQty, exp);
+      if (s.exec.style === "taker") lateShare = share;
+    }
+    const finishing = now >= end || a.k.rush === true;
+    if (now >= end && s.finish === "leave" && !a.k.rush) {
+      if (this.live(a).length) {
+        await this.pullResting(a);
+        return;
+      }
+      return this.end(a, this.isDone(a, m) ? "done" : "expired", `Time is up; ${dec3(Math.max(0, total - a.filled))} ${m.base} left unfilled, as you chose.`);
+    }
+    const i = Math.max(0, nextSlice(times, now) < 0 ? times.length - 1 : nextSlice(times, now) - 1);
+    const vol = s.maxParticipation !== null ? this.market.volume(s.symbol, Math.max(interval, 5e3)).qty : null;
+    let maxChild = vol !== null && !finishing ? Math.max(0, vol * s.maxParticipation) : Infinity;
+    if (s.kind === "twap" && s.maxSliceQty !== null) maxChild = Math.min(maxChild, Number(s.maxSliceQty));
+    await this.work(a, m, q, mk, {
+      due: finishing ? total : total * share,
+      late: finishing ? total : total * lateShare,
+      total,
+      exec: s.exec,
+      tag: finishing ? "finish" : `slice ${i + 1}/${times.length}`,
+      maxChild: Number.isFinite(maxChild) ? maxChild : null,
+      minChild: s.kind === "twap" && s.minSliceQty !== null ? Number(s.minSliceQty) : null,
+      ...closeSide ? { side: closeSide, reduceOnly: true } : {}
+    });
+  }
+  dueHistory(a, now, due) {
+    const h = (a.k.hist ?? []).filter((x) => x[0] >= now - 10 * 6e4);
+    if (!h.length || h[h.length - 1][1] !== due) h.push([now, due]);
+    a.k.hist = h.slice(-300);
+    return a.k.hist;
+  }
+  dueAgo(h, at) {
+    let v = 0;
+    for (const [t, d] of h) if (t <= at) v = d;
+    return v;
+  }
+  async stepPov(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const ended = s.endAt !== null && now >= s.endAt;
+    if (ended && s.finish === "leave" && !a.k.rush) {
+      if (this.live(a).length) return this.pullResting(a);
+      return this.end(a, "expired", `End time reached; ${dec3(total - a.filled)} ${m.base} left unfilled, as you chose.`);
+    }
+    const due = Math.min(total, s.rate * a.marketQty);
+    const h = this.dueHistory(a, now, due);
+    const late = s.exec.style === "taker" ? due : s.exec.style === "hybrid" ? this.dueAgo(h, now - LATE_MS) : 0;
+    const finishing = ended || a.k.rush === true;
+    await this.work(a, m, q, mk, {
+      due: finishing ? total : due,
+      late: finishing ? total : late,
+      total,
+      exec: s.exec,
+      tag: finishing ? "finish" : `${Math.round(s.rate * 100)}% of volume`,
+      maxChild: s.maxChildQty !== null ? Number(s.maxChildQty) : null
+    });
+  }
+  async stepDca(a, m, q, mk, now) {
+    const s = a.spec;
+    const start = a.startedAt;
+    let done = Number(a.k.done ?? 0);
+    let skipped = Number(a.k.skipped ?? 0);
+    let spent = Number(a.k.spentUsd ?? 0);
+    let target = Number(a.k.targetQty ?? 0);
+    const budget = s.maxTotalUsd ?? Infinity;
+    while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
+      const px = s.side === "buy" ? q.ask : q.bid;
+      const outside = s.limitPrice !== null && (s.side === "buy" ? mk > s.limitPrice : mk < s.limitPrice);
+      if (outside) {
+        if (s.outOfBand === "wait") {
+          await this.hold(a, `Waiting: the price is ${s.side === "buy" ? "above" : "below"} your limit of ${s.limitPrice}.`);
+          break;
+        }
+        skipped++;
+        await this.event(a, "skip", `Order ${done + skipped} of ${s.orders} skipped: the price ${mk} is ${s.side === "buy" ? "above" : "below"} your limit.`);
+        continue;
+      }
+      let usd = s.perOrderUsd;
+      const avg = a.filled > 0 ? a.filledValue / a.filled : null;
+      if (s.dipPct !== null && avg !== null && (s.side === "buy" ? px <= avg * (1 - s.dipPct) : px >= avg * (1 + s.dipPct))) {
+        usd *= s.dipMultiplier;
+        await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px / avg - 1) * 100).toFixed(1)}% from your average).`);
+      }
+      usd = Math.min(usd, budget - spent);
+      target += usd / px;
+      spent += usd;
+      done++;
+    }
+    a.k.done = done;
+    a.k.skipped = skipped;
+    a.k.spentUsd = spent;
+    a.k.targetQty = target;
+    this.dirty.add(a.id);
+    const over = done + skipped >= s.orders || spent >= budget - 1e-9;
+    const left = target - a.filled - this.pendingQty(a);
+    if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
+    const h = this.dueHistory(a, now, target);
+    const late = s.exec.style === "taker" ? target : s.exec.style === "hybrid" ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : over ? target : 0;
+    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
+  }
+  async stepIceberg(a, m, q, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    const live = this.live(a);
+    if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const pegged = s.price === null;
+    const tif = s.postOnly ? "gtx" : "gtc";
+    const desired = pegged ? makerPrice(s.side, q, s.pegOffsetTicks, null, m, s.limitPrice) : s.price;
+    if (live.length) {
+      const c = live[0];
+      if (c.state !== "open" || c.cancelling) return;
+      if (pegged && Math.abs(c.price - desired) / Number(m.tickSize) >= s.chaseTicks - 1e-9 && now - c.placedAt >= 1e3) {
+        a.k.clipLeft = Math.max(0, c.quantity - c.filled);
+        await this.cancelChildren(a, m, [c]);
+      }
+      return;
+    }
+    if (a.k.rush) {
+      return this.work(a, m, q, this.market.mark(s.symbol)?.mark ?? mid(q), { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "rush" });
+    }
+    if (typeof a.k.refillAt === "number" && now < a.k.refillAt) return;
+    const room = total - a.filled;
+    const minQ = minChildQty(m, desired);
+    const refill = typeof a.k.clipLeft === "number" && a.k.clipLeft > 0;
+    let qty2 = refill ? a.k.clipLeft : floorStep(jitter(Number(s.displayQty), s.displayJitter, makeRng(a.seed + a.childCount)), m);
+    qty2 = Math.max(qty2, minQ);
+    if (room - qty2 < minQ) qty2 = room;
+    qty2 = floorStep(Math.min(qty2, room), m);
+    if (qty2 < minQ) return this.end(a, "done", a.filled > 0 ? "Filled (the rest is under SoDEX's minimum order)." : "Under SoDEX's minimum order size.");
+    delete a.k.clipLeft;
+    if (!refill) a.k.clip = Number(a.k.clip ?? 0) + 1;
+    await this.send(a, m, [{ side: s.side, price: desired, quantity: qty2, tif, tag: `clip ${a.k.clip}` }]);
+  }
+  async stepChase(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    const live = this.live(a);
+    if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const timedOut = s.timeoutMs !== null && now - a.startedAt >= s.timeoutMs;
+    if (timedOut || a.k.rush || a.k.ending) {
+      const how = a.k.rush ? "take" : s.onEnd;
+      a.k.ending = true;
+      if (how === "take") return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
+      if (how === "rest") {
+        const c = live.find((x) => x.tif !== "ioc");
+        if (c) c.tag = "left resting";
+        return this.end(a, "expired", c ? `Time is up: left resting at ${c.price} on SoDEX, as you chose.` : "Time is up.", { keep: c ? [c.clOrdID] : [] });
+      }
+      return this.end(a, "expired", `Time is up; ${dec3(total - a.filled)} ${m.base} left unfilled.`);
+    }
+    const startRef = typeof a.k.startRef === "number" ? a.k.startRef : s.side === "buy" ? q.bid : q.ask;
+    let cap = s.limitPrice;
+    if (s.maxChaseBps !== null) {
+      const c = s.side === "buy" ? startRef * (1 + s.maxChaseBps / 1e4) : startRef * (1 - s.maxChaseBps / 1e4);
+      cap = cap === null ? c : s.side === "buy" ? Math.min(cap, c) : Math.max(cap, c);
+    }
+    const price2 = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, cap);
+    const room = total - a.filled;
+    if (live.length) {
+      const c = live[0];
+      if (c.state !== "open" || c.cancelling) return;
+      const off = Math.abs(c.price - price2) / Number(m.tickSize);
+      if (off >= s.chaseTicks - 1e-9 && now - c.placedAt >= s.minRepriceMs) await this.cancelChildren(a, m, [c]);
+      return;
+    }
+    const qty2 = floorStep(room, m);
+    if (qty2 < minChildQty(m, price2)) return this.end(a, "done", a.filled > 0 ? "Filled." : "Under SoDEX's minimum order size.");
+    await this.send(a, m, [{ side: s.side, price: price2, quantity: qty2, tif: "gtx", tag: "chase" }]);
+  }
+  async stepScale(a, m, _q, _now) {
+    const s = a.spec;
+    if (!a.k.placed) {
+      const ladder = scaleLadder(s, m, a.seed).filter((l) => l.qty >= minChildQty(m, l.price));
+      if (!ladder.length) return this.end(a, "failed", "No level of this ladder reaches SoDEX's minimum order.");
+      a.k.placed = true;
+      a.k.levels = ladder.length;
+      const tif = s.postOnly ? "gtx" : "gtc";
+      for (let i = 0; i < ladder.length; i += 50) {
+        const chunk = ladder.slice(i, i + 50);
+        await this.send(a, m, chunk.map((l, j) => ({ side: s.side, price: l.price, quantity: l.qty, tif, tag: `level ${i + j + 1}/${ladder.length}` })));
+      }
+      return;
+    }
+    if (this.live(a).length) return;
+    const total = Number(s.quantity);
+    if (this.isDone(a, m)) return this.end(a, "done", "Every level filled.");
+    return this.end(a, "expired", `${dec3(total - a.filled)} ${m.base} of the ladder did not fill (cancelled or refused).`);
+  }
+  async stepSwarm(a, m, q, mk, now) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (this.live(a).length) return;
+    if (this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const waveAt = Number(a.k.waveAt ?? 0);
+    if (now < waveAt && !a.k.rush) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+    const price2 = takerPrice(s.side, q, s.slippageBps, m, mk, s.limitPrice);
+    if (price2 === null) return this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
+    const clips = a.k.clips ?? [];
+    let next = Number(a.k.next ?? 0);
+    let pool = total - a.filled;
+    const minQ = minChildQty(m, price2);
+    const wave = [];
+    if (next < clips.length) {
+      while (wave.length < s.inFlight && next < clips.length && pool >= minQ) {
+        let qty2 = Math.min(clips[next], pool);
+        if (pool - qty2 < minQ) qty2 = pool;
+        qty2 = floorStep(qty2, m);
+        next++;
+        if (qty2 < minQ) continue;
+        wave.push(qty2);
+        pool -= qty2;
+      }
+      a.k.next = next;
+    } else {
+      const left = Number(a.k.retriesLeft ?? 0);
+      if (left <= 0 || pool < minQ) return this.end(a, "expired", `${dec3(pool)} ${m.base} did not fill after ${s.retries} retr${s.retries === 1 ? "y" : "ies"}.`);
+      a.k.retriesLeft = left - 1;
+      const avg = total / Math.max(1, clips.length);
+      const n = Math.max(1, Math.min(s.inFlight, Math.round(pool / avg)));
+      for (let i = 0; i < n && pool >= minQ; i++) {
+        let qty2 = i === n - 1 ? pool : floorStep(pool / (n - i), m);
+        if (pool - qty2 < minQ) qty2 = pool;
+        qty2 = floorStep(qty2, m);
+        if (qty2 < minQ) break;
+        wave.push(qty2);
+        pool -= qty2;
+      }
+      await this.event(a, "info", `Retrying ${dec3(total - a.filled)} ${m.base} that did not fill.`);
+    }
+    if (!wave.length) return;
+    a.k.waveAt = now + s.waveMs;
+    a.k.wave = Number(a.k.wave ?? 0) + 1;
+    await this.send(a, m, wave.map((qty2) => ({ side: s.side, price: price2, quantity: qty2, tif: "ioc", tag: `wave ${a.k.wave}` })));
+  }
+  async stepConditional(a, m, q, mk, now) {
+    const s = a.spec;
+    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    if (s.expiresAt !== null && now >= s.expiresAt) return this.end(a, "expired", "Its time ran out before the conditions held.");
+    const ok = s.conditions.map((c, i) => this.conditionHolds(a, c, i, now));
+    a.k.ok = ok;
+    const met = s.match === "all" ? ok.every(Boolean) : ok.some(Boolean);
+    if (!met) {
+      if (a.k.holdSince) delete a.k.holdSince;
+      this.dirty.add(a.id);
+      return;
+    }
+    if (typeof a.k.holdSince !== "number") a.k.holdSince = now;
+    if (now - a.k.holdSince < s.holdMs) return;
+    a.k.fired = now;
+    const t = s.then;
+    await this.event(a, "info", `Conditions held${s.holdMs ? ` for ${Math.round(s.holdMs / 1e3)} s` : ""}: acting.`);
+    if (t.type === "market") a.k.takeQty = Number(t.quantity);
+    else if (t.type === "close") {
+      const pos = await this.positionOf(a, s.symbol);
+      if (!pos) return this.end(a, "expired", `There was no position on ${s.symbol} to close.`);
+      a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
+      a.k.closeSide = pos > 0 ? "sell" : "buy";
+    } else if (t.type === "limit") {
+      await this.send(a, m, [{ side: s.side, price: t.price, quantity: Number(t.quantity), tif: t.postOnly ? "gtx" : "gtc", tag: "trigger", reduceOnly: s.reduceOnly }]);
+      return this.end(a, "done", `Placed a limit ${s.side} of ${t.quantity} at ${t.price}; it rests on SoDEX.`, { keep: a.children.filter((c) => LIVE.has(c.state)).map((c) => c.clOrdID) });
+    } else {
+      try {
+        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec: t.algo, parentId: a.id, consent: a.consent });
+        return this.end(a, "done", `Started a ${ALGO_NAMES[child.spec.kind]} on ${child.spec.symbol}.`);
+      } catch (e) {
+        return this.end(a, "failed", `Could not start the ${ALGO_NAMES[t.algo.kind]}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    this.dirty.add(a.id);
+    return this.afterFire(a, m, q, mk);
+  }
+  /** A fired conditional or trailing stop: take `k.takeQty` (a chase first, for a trailing stop that asks for one). */
+  async afterFire(a, m, q, mk) {
+    const s = a.spec;
+    const total = Number(a.k.takeQty ?? 0);
+    if (!(total > 0)) return this.end(a, "expired", "Nothing to send.");
+    if (!this.live(a).length && a.filled >= total - Number(m.stepSize) / 2) return this.end(a, "done", "Filled.");
+    const side = a.k.closeSide ?? s.side;
+    const slip = s.kind === "conditional" && (s.then.type === "market" || s.then.type === "close") ? s.then.slippageBps : s.kind === "trailing" ? s.slippageBps : 50;
+    const chasing = s.kind === "trailing" && s.exit === "chase" && Date.now() - Number(a.k.fired) < s.chaseMs;
+    await this.work(a, m, q, mk, {
+      side,
+      reduceOnly: a.k.closeSide !== void 0 ? true : void 0,
+      due: total,
+      late: chasing ? 0 : total,
+      total,
+      exec: { style: chasing ? "maker" : "taker", slippageBps: slip, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 },
+      tag: s.kind === "trailing" ? "trailing stop" : "trigger",
+      minRepriceMs: 1e3
+    });
+  }
+  async stepTrailing(a, m, q, mk, now) {
+    const s = a.spec;
+    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    const price2 = s.source === "last" ? this.market.last(s.symbol)?.price ?? mk : mk;
+    const st = a.k.trail ?? { armed: false, extreme: null };
+    const r = trail(st, s.side, price2, s);
+    const wasArmed = st.armed;
+    a.k.trail = r.state;
+    a.k.stop = r.stop;
+    this.dirty.add(a.id);
+    if (!wasArmed && r.state.armed && s.activationPrice !== null) await this.event(a, "info", `Activated at ${price2}; trailing from here.`);
+    if (!r.fired) return;
+    a.k.fired = now;
+    if (s.quantity !== null) a.k.takeQty = Number(s.quantity);
+    else {
+      const pos = await this.positionOf(a, s.symbol);
+      const right = pos !== null && (s.side === "sell" ? pos > 0 : pos < 0);
+      if (!right) return this.end(a, "expired", `Fired at ${price2}, but there was no ${s.side === "sell" ? "long" : "short"} position on ${s.symbol} to close.`);
+      a.k.takeQty = floorStep(Math.abs(pos), m);
+    }
+    await this.event(a, "info", `Fired: ${s.source} ${price2} reached the stop at ${r.stop?.toFixed(6).replace(/\.?0+$/, "")}.`);
+    return this.afterFire(a, m, q, mk);
+  }
+  /**
+   * A basket: each market becomes an algo of its own (a swarm or a TWAP),
+   * sized from its USD at the mark when it starts, all started together; the
+   * basket ends when every leg has.
+   */
+  async stepBasket(a) {
+    const s = a.spec;
+    if (!a.k.legs) {
+      const specs = [];
+      for (const l of s.legs) {
+        const lm = this.markets.get(l.symbol);
+        const lq = this.market.quote(l.symbol);
+        const px = this.market.mark(l.symbol)?.mark ?? (lq ? mid(lq) : null);
+        if (!lm || !px) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
+        const qty2 = floorStep(l.usd / px, lm);
+        if (qty2 < minChildQty(lm, px)) return this.end(a, "failed", `${l.symbol}: $${l.usd} is under SoDEX's minimum order.`);
+        const common = { symbol: l.symbol, side: l.side, reduceOnly: s.reduceOnly, leverage: s.leverage, marginMode: s.marginMode, paper: s.paper, maxSpreadBps: s.maxSpreadBps, label: `${s.label ?? "Basket"}: ${l.symbol}` };
+        specs.push(
+          s.style === "swarm" ? { ...common, kind: "swarm", quantity: dec3(qty2), clips: s.clips, inFlight: s.inFlight, waveMs: s.waveMs, sizeJitter: 0.2, slippageBps: s.slippageBps, retries: 2 } : { ...common, kind: "twap", quantity: dec3(qty2), durationMs: s.durationMs, slices: s.slices, sizeJitter: 0.15, timeJitter: 0.2, exec: { style: "taker", slippageBps: s.slippageBps }, finish: "take" }
+        );
+      }
+      const ids = [];
+      for (const [i, spec] of specs.entries()) {
+        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec, parentId: a.id, consent: a.consent, seed: a.seed + i + 1 >>> 0, country: a.country, observedCountry: a.observedCountry });
+        ids.push(child.id);
+      }
+      a.k.legs = ids;
+      this.dirty.add(a.id);
+      await this.event(a, "info", `Started ${ids.length} legs: ${s.legs.map((l) => `${l.side} $${l.usd} ${l.symbol}`).join(", ")}.`);
+      return;
+    }
+    const legs = this.legsOf(a);
+    if (legs.length && legs.every((c) => FINAL_STATUSES.has(c.status))) {
+      const short = legs.filter((c) => c.status !== "done");
+      return this.end(a, short.length ? "expired" : "done", short.length ? `${short.length} of ${legs.length} markets did not fill in full (${short.map((c) => c.spec.symbol).join(", ")}).` : "Every market filled.");
+    }
+  }
+  /** A bracket: the entry (a taker with a slippage cap, or one resting limit); its exits follow what fills. */
+  async stepBracket(a, m, q, mk) {
+    const s = a.spec;
+    const total = Number(s.quantity);
+    if (!this.live(a).length && this.isDone(a, m)) return this.end(a, "done", s.paper ? "Entered; its exits are watched on the paper book." : "Entered; its exits are on SoDEX.");
+    if (s.entry === "market") {
+      return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "entry" });
+    }
+    if (!a.k.placed) {
+      a.k.placed = true;
+      await this.send(a, m, [{ side: s.side, price: s.price, quantity: total, tif: "gtc", tag: "entry" }]);
+      return;
+    }
+    if (this.live(a).length) return;
+    return this.end(a, "expired", a.filled > 0 ? `The entry filled ${dec3(a.filled)} of ${s.quantity} and is no longer on SoDEX; its exits cover what filled.` : "The entry order is no longer on SoDEX (cancelled or refused).");
+  }
+  /* ---------------------------------------------------------- conditions ----- */
+  conditionHolds(a, c, i, now) {
+    const mk = this.market;
+    switch (c.type) {
+      case "time":
+        return now >= c.at;
+      case "price": {
+        const p = mk.price(c.symbol, c.source);
+        return p !== null && (c.op === "above" ? p >= c.value : p <= c.value);
+      }
+      case "cross": {
+        const p = mk.price(c.symbol, c.source);
+        if (p === null) return false;
+        const key2 = `x${i}`;
+        const other = c.dir === "up" ? p < c.value : p > c.value;
+        if (other) {
+          a.k[key2] = true;
+          return false;
+        }
+        return a.k[key2] === true;
+      }
+      case "move": {
+        const p = mk.price(c.symbol, c.source);
+        const then = mk.priceAgo(c.symbol, c.source, c.windowMs);
+        if (p === null || then === null || !(then > 0)) return false;
+        const ch = p / then - 1;
+        return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
+      }
+      case "funding": {
+        const f = mk.mark(c.symbol)?.funding ?? null;
+        return f !== null && (c.op === "above" ? f >= c.value : f <= c.value);
+      }
+      case "oi": {
+        const now0 = mk.mark(c.symbol)?.oi ?? null;
+        const then = mk.oiAgo(c.symbol, c.windowMs);
+        if (now0 === null || then === null || !(then > 0)) return false;
+        const ch = now0 / then - 1;
+        return c.dir === "up" ? ch >= c.pct : c.dir === "down" ? ch <= -c.pct : Math.abs(ch) >= c.pct;
+      }
+      case "spread": {
+        const q = mk.quote(c.symbol);
+        if (!q) return false;
+        const b = spreadBps(q);
+        return c.op === "above" ? b >= c.bps : b <= c.bps;
+      }
+      case "volume":
+        return mk.volume(c.symbol, c.windowMs).usd >= c.aboveUsd;
+      case "ratio": {
+        const x = mk.mark(c.symbol)?.mark ?? null;
+        const y = mk.mark(c.other)?.mark ?? null;
+        if (x === null || y === null || !(y > 0)) return false;
+        return c.op === "above" ? x / y >= c.value : x / y <= c.value;
+      }
+      case "position": {
+        const book = this.cachedPositions(a, now);
+        if (!book) return false;
+        const p = book[c.symbol] ?? { size: 0, entry: 0 };
+        const size = p.size;
+        switch (c.op) {
+          case "long":
+            return size > 0;
+          case "short":
+            return size < 0;
+          case "flat":
+            return size === 0;
+          case "sizeAbove":
+            return Math.abs(size) >= c.value;
+          case "sizeBelow":
+            return Math.abs(size) <= c.value;
+          case "pnlAbove":
+          case "pnlBelow": {
+            const px = mk.mark(c.symbol)?.mark ?? null;
+            if (px === null || size === 0) return false;
+            const pnl = size * (px - p.entry);
+            return c.op === "pnlAbove" ? pnl >= c.value : pnl <= c.value;
+          }
+        }
+        return false;
+      }
+    }
+  }
+  /** The owner's positions as last read; a read starts in the background when they are older than POSITIONS_MS. */
+  cachedPositions(a, now) {
+    const hit = this.positionsOf.get(a.owner);
+    if ((!hit || now - hit.at > POSITIONS_MS) && !hit?.loading) void this.loadPositions(a);
+    return hit && hit.at > 0 ? hit.data : null;
+  }
+  async loadPositions(a) {
+    const prev = this.positionsOf.get(a.owner);
+    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: true });
+    try {
+      let data;
+      if (this.host.positions) data = await this.host.positions(a);
+      else {
+        const snap = await this.host.sodex.follower(a.owner);
+        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry }]));
+      }
+      this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
+      return data;
+    } catch (e) {
+      this.host.log.warn("algo: positions read failed", { owner: a.owner, error: String(e) });
+      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: false });
+      return null;
+    }
+  }
+  describeCondition(c) {
+    const mins = (ms) => ms >= 6e4 ? `${Math.round(ms / 6e4)} min` : `${Math.round(ms / 1e3)} s`;
+    const pct = (x) => `${(x * 100).toFixed(2).replace(/\.?0+$/, "")}%`;
+    switch (c.type) {
+      case "time":
+        return `At ${new Date(c.at).toISOString().replace("T", " ").slice(0, 16)} UTC`;
+      case "price":
+        return `${c.symbol} ${c.source} ${c.op === "above" ? "\u2265" : "\u2264"} ${c.value}`;
+      case "cross":
+        return `${c.symbol} ${c.source} crosses ${c.dir === "up" ? "up through" : "down through"} ${c.value}`;
+      case "move":
+        return `${c.symbol} moves ${c.dir === "either" ? "\xB1" : c.dir === "up" ? "+" : "\u2212"}${pct(c.pct)} within ${mins(c.windowMs)}`;
+      case "funding":
+        return `${c.symbol} funding ${c.op === "above" ? "\u2265" : "\u2264"} ${pct(c.value)}`;
+      case "oi":
+        return `${c.symbol} open interest ${c.dir === "either" ? "\xB1" : c.dir === "up" ? "+" : "\u2212"}${pct(c.pct)} within ${mins(c.windowMs)}`;
+      case "spread":
+        return `${c.symbol} spread ${c.op === "above" ? "\u2265" : "\u2264"} ${c.bps} bp`;
+      case "volume":
+        return `${c.symbol} trades $${Math.round(c.aboveUsd).toLocaleString("en-US")} within ${mins(c.windowMs)}`;
+      case "ratio":
+        return `${c.symbol} / ${c.other} ${c.op === "above" ? "\u2265" : "\u2264"} ${c.value}`;
+      case "position": {
+        const what = {
+          long: "is long",
+          short: "is short",
+          flat: "is flat",
+          sizeAbove: `is at least ${c.value}`,
+          sizeBelow: `is at most ${c.value}`,
+          pnlAbove: `PnL \u2265 $${c.value}`,
+          pnlBelow: `PnL \u2264 $${c.value}`
+        };
+        return `Your ${c.symbol} position ${what[c.op]}`;
+      }
+    }
+  }
+  /* -------------------------------------------------------------- sending ----- */
+  clOrdIdFor(a) {
+    a.childCount += 1;
+    return `va-${a.id.slice(1, 13)}-${a.childCount.toString(36)}`;
+  }
+  /** Equity and gross exposure of the owner's account, read at most every ACCOUNT_MS. null: not readable. */
+  async accountOf(a) {
+    const hit = this.accounts.get(a.owner);
+    if (hit && Date.now() - hit.at < ACCOUNT_MS) return hit;
+    try {
+      let v;
+      if (this.host.account) v = await this.host.account(a);
+      else {
+        const snap = await this.host.sodex.follower(a.owner);
+        const gross = Object.entries(snap.positions).reduce((x, [sym, p]) => x + Math.abs(p.size) * (this.market.mark(sym)?.mark ?? p.entry), 0);
+        v = { equity: snap.equity, gross };
+      }
+      const row = { at: Date.now(), ...v };
+      this.accounts.set(a.owner, row);
+      return row;
+    } catch (e) {
+      this.host.log.warn("algo: account read failed", { owner: a.owner, error: String(e) });
+      return null;
+    }
+  }
+  /** Sign and send children (one batch on one market) and book them as live. */
+  async send(a, m, list) {
+    const s = a.spec;
+    const sink = s.paper ? null : this.host.sinkFor(a);
+    if (!s.paper && !sink) {
+      await this.hold(a, "The trading key for this algo is not available here.");
+      return;
+    }
+    const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
+    const ceiling = !s.paper ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
+    const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
+    if (sink && opening && leverage !== null && !this.leverageSet.has(`${a.owner}|${m.name}`)) {
+      this.leverageSet.add(`${a.owner}|${m.name}`);
+      await sink.setLeverage(a, m, Math.min(leverage, m.maxLeverage), s.marginMode ?? "cross").catch((e) => this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`));
+    }
+    if (opening && ceiling !== null) {
+      const acct = await this.accountOf(a);
+      const room = acct ? acct.equity * ceiling - acct.gross : null;
+      const notional = list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+      if (room === null || notional > room) {
+        const one = list.length === 1 ? list[0] : null;
+        const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
+        if (!one || fit < minChildQty(m, one.price)) {
+          await this.hold(a, room === null ? "Held: your account could not be read for the leverage cap of your region." : `Held: the ${ceiling}x leverage cap for your region is reached.`);
+          return;
+        }
+        list = [{ ...one, quantity: fit }];
+      }
+      const row = this.accounts.get(a.owner);
+      if (row) row.gross += list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
+    }
+    const now = Date.now();
+    const children = [];
+    const reqs = [];
+    for (const x of list) {
+      const clOrdID = this.clOrdIdFor(a);
+      const price2 = Number(dec3(x.price));
+      const quantity = Number(dec3(x.quantity));
+      const c = { clOrdID, orderId: null, side: x.side, price: price2, quantity, tif: x.tif, reduceOnly: x.reduceOnly ?? s.reduceOnly, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: x.tag };
+      children.push(c);
+      reqs.push({ clOrdID, side: c.side, price: dec3(price2), quantity: dec3(quantity), tif: c.tif, reduceOnly: c.reduceOnly });
+      a.children.push(c);
+      this.byClOrd.set(clOrdID, a.id);
+    }
+    this.trimChildren(a);
+    this.dirty.add(a.id);
+    for (const c of children) await this.event(a, "order", `${c.tif === "ioc" ? "Take" : "Rest"} ${c.side} ${c.quantity} @ ${c.price} (${c.tag}).`, c);
+    let results;
+    if (s.paper) results = this.paperPlace(a, m, children);
+    else results = await sink.place(a, m, reqs);
+    for (const c of children) {
+      const r = results.find((x) => x.clOrdID === c.clOrdID) ?? { clOrdID: c.clOrdID, ok: false, orderId: null, error: "no answer for this order", outcomeUnknown: true };
+      c.updatedAt = Date.now();
+      if (r.orderId) c.orderId = r.orderId;
+      if (r.ok) {
+        if (c.state === "sending") c.state = "open";
+        a.k.consecRejects = 0;
+      } else if (r.outcomeUnknown) {
+        c.state = "unknown";
+        await this.event(a, "error", `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
+      } else {
+        c.state = "done";
+        a.rejects++;
+        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+        await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
+      }
+    }
+    if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
+    this.host.onChange?.(a.id);
+  }
+  async cancelChildren(a, m, list) {
+    const open = list.filter((c) => LIVE.has(c.state) && !c.cancelling);
+    if (!open.length) return;
+    for (const c of open) {
+      c.cancelling = true;
+      c.updatedAt = Date.now();
+    }
+    this.dirty.add(a.id);
+    if (a.spec.paper) {
+      for (const c of open) this.paperCancel(c.clOrdID);
+      return;
+    }
+    const sink = this.host.sinkFor(a);
+    if (!sink) return;
+    try {
+      await sink.cancel(a, m, open.map((c) => c.clOrdID));
+    } catch (e) {
+      for (const c of open) c.cancelling = false;
+      await this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  /** Cancel every resting child (pause, hold, end). */
+  async pullResting(a, keep = []) {
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    const resting = this.live(a).filter((c) => !keep.includes(c.clOrdID) && c.state === "open" && !c.cancelling);
+    if (resting.length) await this.cancelChildren(a, m, resting);
+  }
+  trimChildren(a) {
+    const done = a.children.filter((c) => !LIVE.has(c.state));
+    if (done.length <= DONE_KEPT) return;
+    const drop = new Set(done.slice(0, done.length - DONE_KEPT).map((c) => c.clOrdID));
+    a.children = a.children.filter((c) => !drop.has(c.clOrdID));
+  }
+  /* ------------------------------------------------------------- the books ----- */
+  onOrderUpdate(u) {
+    const id = this.byClOrd.get(u.clOrdID);
+    const a = id ? this.algos.get(id) : void 0;
+    if (!a) return;
+    const c = a.children.find((x) => x.clOrdID === u.clOrdID);
+    if (!c) {
+      const x = (a.exitOrders ?? []).find((e) => e.clOrdID === u.clOrdID);
+      if (x) this.onExitUpdate(a, x, u);
+      return;
+    }
+    const before = a.filled;
+    this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
+      const m = this.markets.get(a.spec.symbol);
+      if (m) void this.syncExits(a, m, true);
+    }
+    if (u.orderId) c.orderId = u.orderId;
+    c.updatedAt = Date.now();
+    if (FINAL_ORDER.test(u.status)) {
+      const was = c.state;
+      c.state = "done";
+      c.cancelling = false;
+      if (c.tif === "ioc" && c.filled <= 1e-12) a.k.missAt = Date.now();
+      if (u.status === "REJECTED" && was !== "done") {
+        a.rejects++;
+        a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
+        void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+      }
+      this.onChildDone(a, c);
+    } else if (c.state === "sending" || c.state === "unknown") c.state = "open";
+    if (FINAL_STATUSES.has(a.status) && c.state === "open" && c.tif !== "ioc" && !c.cancelling && !(a.k.kept ?? []).includes(c.clOrdID)) {
+      const m = this.markets.get(a.spec.symbol);
+      if (m) void this.cancelChildren(a, m, [c]);
+    }
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
+  }
+  applyFill(a, c, cumQty, cumValue, maker) {
+    const dq = cumQty - c.filled;
+    if (!(dq > 1e-12)) return;
+    const dv = cumValue > c.value ? cumValue - c.value : dq * c.price;
+    c.filled = cumQty;
+    c.value = cumValue > 0 ? cumValue : c.value + dv;
+    a.filled += dq;
+    a.filledValue += dv;
+    const isMaker = maker ?? c.tif !== "ioc";
+    if (isMaker) a.makerQty += dq;
+    const m = this.markets.get(a.spec.symbol);
+    const rate = (isMaker ? m?.makerFee ?? (m?.takerFee ?? 4e-4) / 2 : m?.takerFee ?? 4e-4) + (this.host.builderRate?.(a) ?? 0);
+    a.fees += dv * rate;
+    if (a.k.consecRejects) a.k.consecRejects = 0;
+    void this.event(a, "fill", `Filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}${isMaker ? " (maker)" : ""}.`, { ...c, quantity: dq, price: dv / dq });
+  }
+  /* --------------------------------------------------------------- exits ----- */
+  /**
+   * Keep the exits in line with what the entry filled: a take-profit and/or a
+   * stop-loss, SoDEX position stops sized to the filled amount at the levels
+   * the spec names (a price, or a distance from the average fill). Resized at
+   * most every EXITS_RESIZE_MS while the entry fills (cancel, then place), at
+   * once when it ends (`final`). Nothing once one of them has filled.
+   */
+  async syncExits(a, m, final) {
+    const s = a.spec;
+    if (!s.exits || !opensPosition(s) || a.k.exitsDone || this.exitsBusy.has(a.id)) return;
+    this.exitsBusy.add(a.id);
+    try {
+      a.exitOrders ??= [];
+      const live = this.liveExits(a);
+      if (live.some((x) => x.state !== "open" || x.cancelling)) return;
+      const size = floorStep(a.filled, m);
+      if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return;
+      const covered = Number(a.k.exitsSize ?? 0);
+      if (live.length && Math.abs(size - covered) < Number(m.stepSize) / 2) return;
+      const now = Date.now();
+      if (!final && live.length && now - Number(a.k.exitsAt ?? 0) < EXITS_RESIZE_MS) return;
+      if (live.length) {
+        await this.cancelExits(a, m, live);
+        if (!final) return;
+      }
+      const lv = exitLevels(s.side, s.exits, a.filledValue / a.filled);
+      const close = s.side === "buy" ? "sell" : "buy";
+      const stops = [];
+      const xs = [];
+      for (const kind of ["tp", "sl"]) {
+        const p = kind === "tp" ? lv.tp : lv.sl;
+        if (p === null || !(p > 0)) continue;
+        const clOrdID = this.clOrdIdFor(a);
+        const triggerPrice = snapPrice(p, m);
+        stops.push({ clOrdID, side: close, quantity: dec3(size), triggerPrice, kind });
+        xs.push({ clOrdID, orderId: null, side: close, price: Number(triggerPrice), quantity: size, tif: "ioc", reduceOnly: true, filled: 0, value: 0, state: "sending", placedAt: now, updatedAt: now, cancelling: false, tag: kind === "tp" ? "take-profit" : "stop-loss", exit: kind });
+        this.byClOrd.set(clOrdID, a.id);
+      }
+      if (!stops.length) return;
+      a.exitOrders.push(...xs);
+      a.k.exitsSize = size;
+      a.k.exitsAt = now;
+      this.dirty.add(a.id);
+      await this.event(a, "order", `Exits for ${dec3(size)} ${m.base}: ${xs.map((x) => `${x.tag} at ${x.price}`).join(", ")} (${s.paper ? "paper: watched against the mark" : "SoDEX holds them"}; when one fills the other is cancelled).`);
+      const sink = s.paper ? null : this.host.sinkFor(a);
+      const results = s.paper ? stops.map((st) => ({ clOrdID: st.clOrdID, ok: true, orderId: `paper-${st.clOrdID}`, error: null, outcomeUnknown: false })) : sink ? await sink.placeStops(a, m, stops) : stops.map((st) => ({ clOrdID: st.clOrdID, ok: false, orderId: null, error: "the trading key is not available here", outcomeUnknown: false }));
+      for (const x of xs) {
+        const r = results.find((y) => y.clOrdID === x.clOrdID);
+        x.updatedAt = Date.now();
+        if (r?.orderId) x.orderId = r.orderId;
+        if (r?.ok) x.state = "open";
+        else if (r?.outcomeUnknown) x.state = "unknown";
+        else {
+          x.state = "done";
+          await this.event(a, "error", `SoDEX refused the ${x.tag}: ${r?.error ?? "no answer"}`);
+        }
+      }
+      const done = a.exitOrders.filter((x) => !LIVE.has(x.state));
+      if (done.length > 12) a.exitOrders = a.exitOrders.filter((x) => LIVE.has(x.state) || done.slice(-12).includes(x));
+      this.syncWatch();
+      this.host.onChange?.(a.id);
+    } finally {
+      this.exitsBusy.delete(a.id);
+    }
+  }
+  async cancelExits(a, m, list) {
+    const open = list.filter((x) => LIVE.has(x.state) && !x.cancelling);
+    if (!open.length) return;
+    for (const x of open) x.cancelling = true;
+    this.dirty.add(a.id);
+    if (a.spec.paper) {
+      for (const x of open) {
+        x.state = "done";
+        x.cancelling = false;
+      }
+      return;
+    }
+    const sink = this.host.sinkFor(a);
+    if (!sink) return;
+    try {
+      await sink.cancel(a, m, open.map((x) => x.clOrdID));
+    } catch (e) {
+      for (const x of open) x.cancelling = false;
+      await this.event(a, "error", `The exits could not be cancelled: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+  /** An exit's update: its fill, and the other one cancelled when it fills (one cancels the other). */
+  onExitUpdate(a, x, u) {
+    const dq = u.filledQty - x.filled;
+    if (dq > 1e-12) {
+      const dv = u.filledValue > x.value ? u.filledValue - x.value : dq * x.price;
+      x.filled = u.filledQty;
+      x.value += dv;
+      void this.event(a, "fill", `${x.tag === "take-profit" ? "Take-profit" : "Stop-loss"} filled ${dec3(dq)} @ ${(dv / dq).toPrecision(8).replace(/\.?0+$/, "")}.`, { ...x, quantity: dq, price: dv / dq });
+    }
+    if (u.orderId) x.orderId = u.orderId;
+    x.updatedAt = Date.now();
+    if (FINAL_ORDER.test(u.status)) {
+      x.state = "done";
+      x.cancelling = false;
+    } else if (x.state === "sending" || x.state === "unknown") x.state = "open";
+    if (x.filled > 1e-12 && !a.k.exitsDone) {
+      a.k.exitsDone = true;
+      const others = this.liveExits(a).filter((o) => o.clOrdID !== x.clOrdID);
+      const m = this.markets.get(a.spec.symbol);
+      if (others.length && m) {
+        void this.cancelExits(a, m, others);
+        void this.event(a, "info", `${x.tag === "take-profit" ? "Take-profit" : "Stop-loss"} hit: the ${others.map((o) => o.tag).join(" and ")} is cancelled (one cancels the other).`);
+      }
+    }
+    if (!this.liveExits(a).length) this.syncWatch();
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
+  }
+  /** Paper exits fire here, on the mark, as SoDEX would fire the real ones. */
+  checkPaperExits() {
+    for (const a of this.algos.values()) {
+      if (!a.spec.paper || a.k.exitsDone) continue;
+      const live = this.liveExits(a).filter((x) => x.state === "open" && !x.cancelling);
+      if (!live.length) continue;
+      const mk = this.market.mark(a.spec.symbol)?.mark ?? null;
+      if (mk === null) continue;
+      const long = a.spec.side === "buy";
+      const hit = live.find((x) => x.exit === "tp" ? long ? mk >= x.price : mk <= x.price : long ? mk <= x.price : mk >= x.price);
+      if (hit) this.onOrderUpdate({ clOrdID: hit.clOrdID, orderId: hit.orderId, symbol: a.spec.symbol, status: "FILLED", filledQty: hit.quantity, filledValue: hit.quantity * mk, maker: false, reason: null, at: Date.now() });
+    }
+  }
+  onChildDone(a, c) {
+    if (a.spec.kind === "iceberg" && c.filled >= c.quantity - 1e-12) {
+      const s = a.spec;
+      a.k.refillAt = Date.now() + Math.max(0, jitter(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
+    }
+  }
+  onPrint(p) {
+    for (const a of this.algos.values()) {
+      if (a.status !== "running" && a.status !== "waiting") continue;
+      if (a.spec.symbol !== p.symbol || a.startedAt === null || p.at < a.startedAt) continue;
+      if (p.buyer === a.accountId || p.seller === a.accountId) continue;
+      a.marketQty += p.qty;
+      a.marketValue += p.qty * p.price;
+      this.dirty.add(a.id);
+    }
+    if (this.paper.size) this.paperOnPrint(p);
+  }
+  /**
+   * Settle children SoDEX has not told us about: an IOC with no final update,
+   * a cancel with no answer, a write with no answer. Open orders first; the
+   * order history (drip-limited) only when an order is gone from them.
+   */
+  async settleStale(a, m, now) {
+    if (a.spec.paper || this.lookupBusy) return;
+    for (const c of a.children) if (c.state === "sending" && now - c.placedAt > SENDING_MAX_MS) c.state = "unknown";
+    const stale = a.children.filter((c) => c.state === "unknown" || c.state === "open" && (c.tif === "ioc" && now - c.updatedAt > STALE_IOC_MS || c.cancelling && now - c.updatedAt > STALE_IOC_MS));
+    if (!stale.length) return;
+    this.lookupBusy = true;
+    try {
+      const open = await this.lookupOrders(a, m.name, false);
+      const missing = [];
+      for (const c of stale) {
+        const row = open.find((r) => r.clOrdID === c.clOrdID);
+        if (row) {
+          this.applyFill(a, c, row.executedQty, row.executedValue, null);
+          c.state = "open";
+          c.orderId = row.orderId;
+          c.updatedAt = now;
+          if (c.cancelling) {
+            c.cancelling = false;
+            await this.cancelChildren(a, m, [c]);
+          }
+        } else missing.push(c);
+      }
+      if (missing.length && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
+        this.lastHistoryAt = now;
+        const hist = await this.lookupOrders(a, m.name, true);
+        for (const c of missing) {
+          const row = hist.find((r) => r.clOrdID === c.clOrdID);
+          if (row) this.applyFill(a, c, row.executedQty, row.executedValue, null);
+          if (row || now - c.placedAt > 12e4) {
+            if (!row) await this.event(a, "info", `SoDEX does not list ${c.tag}; counted as filled ${dec3(c.filled)}.`, c);
+            c.state = "done";
+            c.cancelling = false;
+            this.onChildDone(a, c);
+          }
+        }
+      }
+      this.dirty.add(a.id);
+    } catch (e) {
+      this.host.log.warn("algo: order lookup failed", { algo: a.id, error: String(e) });
+    } finally {
+      this.lookupBusy = false;
+    }
+  }
+  async lookupOrders(a, symbol2, history) {
+    if (this.host.lookup) return this.host.lookup(a, symbol2, history);
+    const path = `/api/v1/perps/accounts/${a.owner}/orders${history ? "/history" : ""}?symbol=${encodeURIComponent(symbol2)}${history ? "&limit=100" : ""}`;
+    const data = await this.host.sodex.get(path);
+    const list = Array.isArray(data) ? data : data?.orders ?? [];
+    return list.filter((r) => typeof r.clOrdID === "string").map((r) => ({ clOrdID: r.clOrdID, orderId: String(r.orderID ?? ""), status: String(r.status ?? ""), executedQty: Number(r.executedQty ?? 0) || 0, executedValue: Number(r.executedValue ?? 0) || 0 }));
+  }
+  /**
+   * The owner's signed position on `symbol`, read now. A paper algo uses what
+   * its own paper fills built, and otherwise the real position (only read).
+   */
+  async positionOf(a, symbol2) {
+    const paperPos = a.k.paperPos;
+    if (a.spec.paper && typeof paperPos === "number" && paperPos !== 0) return paperPos;
+    try {
+      if (this.host.position) return await this.host.position(a, symbol2);
+      const book = await this.loadPositions(a);
+      return book ? book[symbol2]?.size ?? 0 : null;
+    } catch (e) {
+      this.host.log.warn("algo: position read failed", { algo: a.id, error: String(e) });
+      return null;
+    }
+  }
+  async profileFor(symbol2, start, durationMs, slices, lookbackDays) {
+    const { interval, ms } = profileCandles(lookbackDays);
+    const from = start - lookbackDays * DAY_MS2;
+    const to = start - DAY_MS2 + durationMs;
+    const candles = [];
+    if (this.host.candles) candles.push(...await this.host.candles(symbol2, interval, from, to));
+    else {
+      for (let t = from; t < to; t += 1e3 * ms) {
+        const data = await this.host.sodex.get(`/api/v1/perps/markets/${encodeURIComponent(symbol2)}/klines?interval=${interval}&limit=1000&startTime=${t}&endTime=${Math.min(to, t + 1e3 * ms)}`);
+        const list = Array.isArray(data) ? data : data?.klines ?? [];
+        for (const k of list) {
+          const t0 = Array.isArray(k) ? Number(k[0]) : Number(k.t ?? k.openTime);
+          const v = Array.isArray(k) ? Number(k[5]) : Number(k.v ?? k.volume);
+          if (Number.isFinite(t0) && Number.isFinite(v)) candles.push({ t: t0, v });
+        }
+      }
+    }
+    if (!candles.length) return null;
+    return volumeProfile(candles, ms, start, durationMs, slices, lookbackDays);
+  }
+  async problemOf(a, now) {
+    if (!this.host.problem) return null;
+    const hit = this.problems.get(a.id);
+    if (hit && now - hit.at < PROBLEM_RECHECK_MS) return hit.problem;
+    let problem = null;
+    try {
+      problem = await this.host.problem(a);
+    } catch (e) {
+      this.host.log.warn("algo: readiness check failed", { algo: a.id, error: String(e) });
+      problem = hit?.problem ?? null;
+    }
+    this.problems.set(a.id, { at: now, problem });
+    return problem;
+  }
+  isDone(a, m) {
+    const t = this.targetOf(a);
+    if (t === null) return false;
+    return t - a.filled < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0) - 1e-12 && !this.live(a).length;
+  }
+  /* -------------------------------------------------------------- paper ----- */
+  paperPlace(a, m, children) {
+    const q = this.market.quote(m.name);
+    const out = [];
+    for (const c of children) {
+      out.push({ clOrdID: c.clOrdID, ok: true, orderId: `paper-${c.clOrdID}`, error: null, outcomeUnknown: false });
+      const touch = q ? c.side === "buy" ? q.ask : q.bid : null;
+      const crosses = touch !== null && (c.side === "buy" ? c.price >= touch : c.price <= touch);
+      const emit = (status, filled, value, maker) => timers.after(0, () => this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: `paper-${c.clOrdID}`, symbol: m.name, status, filledQty: filled, filledValue: value, maker, reason: status === "REJECTED" ? "post-only order would take" : null, at: Date.now() }));
+      if (c.tif === "ioc") {
+        if (crosses) {
+          this.paperPosition(a, c.side, c.quantity);
+          emit("FILLED", c.quantity, c.quantity * touch, false);
+        } else emit("CANCELED", 0, 0, null);
+        continue;
+      }
+      if (crosses) {
+        if (c.tif === "gtx") emit("REJECTED", 0, 0, null);
+        else {
+          this.paperPosition(a, c.side, c.quantity);
+          emit("FILLED", c.quantity, c.quantity * touch, false);
+        }
+        continue;
+      }
+      this.paper.set(c.clOrdID, { algoId: a.id, clOrdID: c.clOrdID, symbol: m.name, side: c.side, price: c.price, left: c.quantity, filled: 0, value: 0 });
+      emit("NEW", 0, 0, null);
+    }
+    return out;
+  }
+  paperPosition(a, side, qty2) {
+    a.k.paperPos = Number(a.k.paperPos ?? 0) + (side === "buy" ? qty2 : -qty2);
+  }
+  paperCancel(clOrdID) {
+    const o = this.paper.get(clOrdID);
+    this.paper.delete(clOrdID);
+    const id = this.byClOrd.get(clOrdID);
+    const a = id ? this.algos.get(id) : void 0;
+    const c = a?.children.find((x) => x.clOrdID === clOrdID);
+    timers.after(0, () => this.onOrderUpdate({ clOrdID, orderId: `paper-${clOrdID}`, symbol: o?.symbol ?? a?.spec.symbol ?? "", status: "CANCELED", filledQty: o?.filled ?? c?.filled ?? 0, filledValue: o?.value ?? c?.value ?? 0, maker: null, reason: null, at: Date.now() }));
+  }
+  /** A resting paper order fills as the tape trades through its price (a sell print at or under a buy, and so on). */
+  paperOnPrint(p) {
+    for (const o of this.paper.values()) {
+      if (o.symbol !== p.symbol) continue;
+      const through = o.side === "buy" ? p.price <= o.price && p.taker === "sell" : p.price >= o.price && p.taker === "buy";
+      if (!through) continue;
+      const q = Math.min(o.left, p.qty);
+      o.left -= q;
+      o.filled += q;
+      o.value += q * o.price;
+      const a = this.algos.get(o.algoId);
+      if (a) this.paperPosition(a, o.side, q);
+      const done = o.left <= 1e-12;
+      if (done) this.paper.delete(o.clOrdID);
+      this.onOrderUpdate({ clOrdID: o.clOrdID, orderId: `paper-${o.clOrdID}`, symbol: o.symbol, status: done ? "FILLED" : "PARTIALLY_FILLED", filledQty: o.filled, filledValue: o.value, maker: true, reason: null, at: p.at });
+    }
+  }
+  /* -------------------------------------------------------------- status ----- */
+  async setStatus(a, status, reason) {
+    if (a.status === status && a.statusReason === reason) return;
+    const changed = a.status !== status;
+    a.status = status;
+    a.statusReason = reason;
+    a.updatedAt = Date.now();
+    await this.save(a);
+    if (changed && status !== "running") await this.event(a, "status", reason ?? status);
+    else if (reason && changed) await this.event(a, "status", reason);
+    this.host.onChange?.(a.id);
+  }
+  async hold(a, reason) {
+    this.heldNow.add(a.id);
+    if (a.status === "scheduled") {
+      if (a.statusReason !== reason) {
+        a.statusReason = reason;
+        this.dirty.add(a.id);
+      }
+      return;
+    }
+    if (a.status === "waiting" && a.statusReason === reason) return;
+    a.status = "waiting";
+    a.statusReason = reason;
+    a.updatedAt = Date.now();
+    this.dirty.add(a.id);
+    await this.event(a, "status", reason);
+    this.host.onChange?.(a.id);
+  }
+  async run(a) {
+    if (a.status === "running") return;
+    if (a.status === "waiting") {
+      a.status = "running";
+      a.statusReason = null;
+      a.updatedAt = Date.now();
+      this.dirty.add(a.id);
+      this.host.onChange?.(a.id);
+    }
+  }
+  async end(a, status, reason, o = {}) {
+    if (FINAL_STATUSES.has(a.status)) return;
+    await this.pullResting(a, o.keep ?? []);
+    if (o.keep?.length) a.k.kept = o.keep;
+    for (const id of o.keep ?? []) this.paper.delete(id);
+    const m = this.markets.get(a.spec.symbol);
+    if (m && a.spec.exits && a.filled > 0) await this.syncExits(a, m, true);
+    a.status = status;
+    a.statusReason = reason;
+    a.endedAt = Date.now();
+    a.updatedAt = a.endedAt;
+    await this.save(a);
+    await this.event(a, "status", reason);
+    if (status === "cancelled" && this.liveExits(a).length) await this.event(a, "info", "Its exits stay on SoDEX for what filled; cancel them in your open orders if you do not want them.");
+    this.syncWatch();
+    this.host.onChange?.(a.id);
+  }
+  need(id) {
+    const a = this.algos.get(id);
+    if (!a) throw new Error("No such algo.");
+    return a;
+  }
+  async save(a) {
+    this.dirty.delete(a.id);
+    await this.host.store.saveAlgo(a).catch((e) => this.host.log.error("algo: not saved", { algo: a.id, error: String(e) }));
+  }
+  async flush() {
+    const ids = [...this.dirty];
+    this.dirty.clear();
+    for (const id of ids) {
+      const a = this.algos.get(id);
+      if (a) await this.host.store.saveAlgo(a).catch((e) => this.host.log.error("algo: not saved", { algo: id, error: String(e) }));
+      this.host.onChange?.(id);
+    }
+  }
+  async event(a, kind, text, c) {
+    const at = Date.now();
+    const e = {
+      // Sorts by time, then by the order it was written: lines of one millisecond keep their order.
+      id: `e${at.toString(36)}${(++this.eventSeq).toString(36).padStart(6, "0")}${randomId().slice(0, 4)}`,
+      algoId: a.id,
+      owner: a.owner,
+      at,
+      kind,
+      text,
+      clOrdID: c?.clOrdID ?? null,
+      side: c?.side ?? null,
+      price: c?.price ?? null,
+      qty: c?.quantity ?? null,
+      paper: a.spec.paper
+    };
+    await this.host.store.addAlgoEvent(e).catch((err) => this.host.log.error("algo: event not saved", { error: String(err) }));
+  }
+};
 
 // packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.1.0";
@@ -10230,6 +13081,18 @@ var ExecutorService = class {
       policyFor: (s) => regionPolicy(s.country, s.observedCountry),
       keyProblem: (s) => this.keyProblem(s.owner)
     });
+    this.algos = new AlgoRuntime({
+      store: db,
+      sodex: this.sodex,
+      network: cfg.network,
+      factory: deps.factory,
+      log: deps.log,
+      sinkFor: (a) => this.algoSink(a),
+      builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
+      problem: (a) => this.algoProblem(a),
+      // The copy region rules, from the country declared with the terms and the one the request came from.
+      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null)
+    });
   }
   cfg;
   db;
@@ -10238,6 +13101,12 @@ var ExecutorService = class {
   executorId;
   keyName;
   runtime;
+  /**
+   * Algo orders (TWAP, VWAP, POV, ...): the same engine package, the same key
+   * the follower registered for this executor, the same nonce sequence, the
+   * same builder (the copy fee ladder), the same terms and region rules.
+   */
+  algos;
   sodex;
   hyperliquid;
   nonces = createMemoryNonceManager();
@@ -10249,8 +13118,10 @@ var ExecutorService = class {
   pairingCode;
   async start() {
     await this.runtime.start();
+    await this.algos.start();
   }
   async stop() {
+    await this.algos.stop();
     await this.runtime.stop();
     this.builderDb?.close();
   }
@@ -10281,13 +13152,15 @@ var ExecutorService = class {
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
+      algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       features: [...EXECUTOR_FEATURES]
     };
   }
   health() {
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
-    return { ok: true, copies: all.length, active: all.filter((s) => s.status === "active").length, feeds: { sodex: v?.feeds.sodex ?? true } };
+    const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
+    return { ok: true, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex: v?.feeds.sodex ?? true } };
   }
   /* --------------------------------------------------------- requests ----- */
   /** Verify, check the action and the wallet, record. Returns the owner and the payload. */
@@ -10405,9 +13278,10 @@ var ExecutorService = class {
     }
     return this.keyInfo(owner);
   }
-  /** Stop every copy and forget the keys. The follower revokes the key on SoDEX with their wallet. */
+  /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
   async deleteKey(req, ctx) {
     const { owner, payload } = this.accept(req, "delete-key", ctx);
+    await this.algos.cancelAll(owner);
     await this.runtime.stopAll(owner, { close: payload.close === true });
     this.db.deleteKeys(owner);
     this.signers.delete(owner);
@@ -10503,7 +13377,7 @@ var ExecutorService = class {
   }
   async act(req, ctx) {
     const { owner, payload, consent } = this.accept(req, ["update", "pause", "resume", "stop", "stop-all"], ctx);
-    const action = req.action;
+    const action2 = req.action;
     const mine = (id) => {
       const s = typeof id === "string" ? this.runtime.get(id) : null;
       if (!s || s.owner !== owner) throw new ApiError(404, "copy", "No such copy.");
@@ -10513,11 +13387,11 @@ var ExecutorService = class {
       throw e instanceof ApiError ? e : new ApiError(409, "state", e instanceof Error ? e.message : String(e));
     };
     let touched = [];
-    if (action === "stop-all") {
+    if (action2 === "stop-all") {
       touched = await this.runtime.stopAll(owner, { close: payload.close === true }).catch(fail);
     } else {
       const s = mine(payload.id);
-      if (action === "update") {
+      if (action2 === "update") {
         this.needTerms(owner, ctx);
         let settings;
         try {
@@ -10526,8 +13400,8 @@ var ExecutorService = class {
           throw new ApiError(400, "settings", e instanceof SettingsError ? e.message : String(e));
         }
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
-      } else if (action === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
-      else if (action === "resume") {
+      } else if (action2 === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
+      else if (action2 === "resume") {
         this.needTerms(owner, ctx);
         touched = [await this.runtime.resume(s.id).catch(fail)];
       } else touched = [await this.runtime.stopCopy(s.id, { close: payload.close === true }).catch(fail)];
@@ -10538,6 +13412,96 @@ var ExecutorService = class {
     const s = this.runtime.get(subId);
     if (!s || s.owner !== owner) throw new ApiError(404, "copy", "No such copy.");
     return this.db.activity({ subId, limit: q.limit ?? 200, before: q.before });
+  }
+  /* ------------------------------------------------------------ algos ----- */
+  /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
+  algoSink(a) {
+    if (!this.db.key(a.owner, "active")) return null;
+    return new KeyAlgoSink(
+      this.sodex,
+      () => this.signer(a.owner),
+      this.nonces,
+      SODEX_CHAIN_ID[this.cfg.network],
+      async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(this.volumeOf(x.owner)) } : null
+    );
+  }
+  /**
+   * Why a live algo cannot trade now (it waits, and goes on by itself once
+   * this clears): the key and the builder approval, as for a copy. The region
+   * rules (blocked countries, the EEA 2x ceiling on leverage and exposure) are
+   * applied by the runtime through `policyFor`.
+   */
+  async algoProblem(a) {
+    const key2 = await this.keyProblem(a.owner);
+    if (key2) return key2;
+    if (this.cfg.builderId > 0) {
+      const fee = copyFeeFor(this.volumeOf(a.owner));
+      const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
+      if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
+    }
+    return null;
+  }
+  /** Start an algo order for the wallet that signed it. */
+  async algoStart(req, ctx) {
+    const { owner, payload, consent } = this.accept(req, "algo-start", ctx);
+    if (this.cfg.kind === "hosted" && !this.cfg.open) throw new ApiError(503, "closed", "The ValueDesk executor takes no new orders right now. Running ones continue.");
+    this.needTerms(owner, ctx);
+    let spec;
+    try {
+      spec = parseAlgoSpec(payload.spec);
+    } catch (e) {
+      throw new ApiError(400, "spec", e instanceof AlgoSpecError ? e.message : String(e));
+    }
+    const seed = Number(payload.seed);
+    if (!Number.isSafeInteger(seed) || seed < 0 || seed > 4294967295) throw new ApiError(400, "seed", "seed must be a 32-bit whole number.");
+    const live = this.algos.list(owner).filter((a2) => !FINAL_STATUSES.has(a2.status));
+    if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, "limit", `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    let accountId = 0;
+    if (!spec.paper) {
+      await this.verifyKey(owner);
+      const k = this.db.key(owner, "active");
+      if (!k || !k.registered) throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
+      accountId = await this.sodex.accountId(owner);
+      if (!accountId) throw new ApiError(412, "account", "This wallet has no SoDEX account yet. Deposit first.");
+    }
+    let a;
+    try {
+      const t = this.db.terms(owner);
+      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed, country: t?.country ?? null, observedCountry: normaliseCountry(ctx.viewerCountry) });
+    } catch (e) {
+      throw new ApiError(400, "algo", e instanceof Error ? e.message : String(e));
+    }
+    this.deps.log.info("algo started", { owner, algo: a.id, kind: spec.kind, symbol: spec.symbol, paper: spec.paper });
+    return this.algos.view(a.id);
+  }
+  /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
+  async algoAct(req, ctx) {
+    const { owner, payload } = this.accept(req, "algo-action", ctx);
+    const op = payload.op;
+    const fail = (e) => {
+      throw e instanceof ApiError ? e : new ApiError(409, "state", e instanceof Error ? e.message : String(e));
+    };
+    let touched;
+    if (op === "cancel-all") touched = await this.algos.cancelAll(owner).catch(fail);
+    else {
+      const a = typeof payload.id === "string" ? this.algos.get(payload.id) : null;
+      if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
+      if (op === "pause") touched = [await this.algos.pause(a.id).catch(fail)];
+      else if (op === "resume") {
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.resume(a.id).catch(fail)];
+      } else if (op === "cancel") touched = [await this.algos.cancel(a.id).catch(fail)];
+      else throw new ApiError(400, "op", "op must be pause, resume, cancel or cancel-all.");
+    }
+    return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
+  }
+  algoList(owner) {
+    return this.algos.list(owner).map((a) => this.algos.view(a.id)).filter((v) => v !== null);
+  }
+  async algoEvents(owner, id, q) {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
+    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
   }
   /** Every signed instruction of this wallet (newest first): the follower's own record. */
   consents(owner) {
@@ -10672,6 +13636,13 @@ function createExecutorServer(svc, cfg, log) {
       if (req.method === "GET" && route === "/health") return send(res, 200, svc.health());
       if (req.method === "GET" && route === "/me") return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === "GET" && route === "/consents") return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
+      if (req.method === "GET" && route === "/algos") return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
+      if (req.method === "GET" && algoEv) {
+        const owner = svc.authenticate(bearer(req));
+        const before = url.searchParams.get("before");
+        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1], { limit: Number(url.searchParams.get("limit") ?? 200), before: before ? Number(before) : void 0 }) });
+      }
       const act2 = /^\/copies\/([A-Za-z0-9_-]{1,40})\/activity$/.exec(route);
       if (req.method === "GET" && act2) {
         const owner = svc.authenticate(bearer(req));
@@ -10688,6 +13659,8 @@ function createExecutorServer(svc, cfg, log) {
       if (route === "/keys/delete") return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === "/copies") return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === "/copies/action") return send(res, 200, await svc.act(body.request, ctx));
+      if (route === "/algos") return send(res, 200, await svc.algoStart(body.request, ctx));
+      if (route === "/algos/action") return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, "path", "not found");
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, "internal", "Something went wrong in the executor.");

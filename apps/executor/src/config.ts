@@ -15,6 +15,7 @@
  *   EXECUTOR_OPEN            hosted: 0 closes it to new followers (running copies continue)
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default 90)
  *   EXECUTOR_MAX_COPIES      copies per wallet (default 10)
+ *   EXECUTOR_MAX_ALGOS       live algo orders (TWAP, VWAP, ...) per wallet (default 20)
  *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from
  *   EXECUTOR_LOCAL_ADDRESS   send every request and socket to SoDEX / Hyperliquid from this local
  *                            IP (an address of its own, so another process's rate limit cannot stop copies)
@@ -39,6 +40,7 @@ export interface ExecutorConfig {
   open: boolean;
   keyTtlDaysMax: number;
   maxCopiesPerOwner: number;
+  maxAlgosPerOwner: number;
   builderDb: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
@@ -74,6 +76,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     // 90 days is what the copy terms promise and what the web app registers at most.
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
+    maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',

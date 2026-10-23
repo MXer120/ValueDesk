@@ -1413,3 +1413,9 @@ button.oe-select[aria-expanded='true'] {
   color: var(--muted); font-size: var(--fs-micro); font-weight: 400;
   line-height: 14px; white-space: normal; text-align: left;
 }
+
+/* The algo tab names the algo picked last, with a caret: pressed again it opens the menu of them. */
+.oe-tab--algo { display: inline-flex; align-items: center; gap: 4px; }
+.oe-tab--algo svg { opacity: 0.7; transition: transform var(--dur-fast) var(--ease-out); }
+.oe-tab--algo[aria-expanded='true'] svg { transform: rotate(180deg); }
+.oe-pop--algo { max-width: 320px; }

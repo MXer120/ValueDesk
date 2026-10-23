@@ -16,6 +16,10 @@
  *   POST /api/copy/v1/copies/action              {request: update|pause|resume|stop|stop-all}
  *   GET  /api/copy/v1/copies/:id/activity        Bearer, ?limit=&before=
  *   GET  /api/copy/v1/consents                   Bearer                      -> the wallet's signed instructions
+ *   GET  /api/copy/v1/algos                      Bearer                      -> the wallet's algo orders
+ *   GET  /api/copy/v1/algos/:id/events           Bearer, ?limit=&before=
+ *   POST /api/copy/v1/algos                      {request: algo-start}
+ *   POST /api/copy/v1/algos/action               {request: algo-action}
  *
  * HOSTED behind the edge: requests must carry the origin secret (Caddy checks
  * it first; this is the second check), and the viewer's country and address
@@ -141,6 +145,13 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (req.method === 'GET' && route === '/health') return send(res, 200, svc.health());
       if (req.method === 'GET' && route === '/me') return send(res, 200, svc.me(svc.authenticate(bearer(req)), ctx));
       if (req.method === 'GET' && route === '/consents') return send(res, 200, { consents: svc.consents(svc.authenticate(bearer(req))) });
+      if (req.method === 'GET' && route === '/algos') return send(res, 200, { algos: svc.algoList(svc.authenticate(bearer(req))) });
+      const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
+      if (req.method === 'GET' && algoEv) {
+        const owner = svc.authenticate(bearer(req));
+        const before = url.searchParams.get('before');
+        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1]!, { limit: Number(url.searchParams.get('limit') ?? 200), before: before ? Number(before) : undefined }) });
+      }
       const act = /^\/copies\/([A-Za-z0-9_-]{1,40})\/activity$/.exec(route);
       if (req.method === 'GET' && act) {
         const owner = svc.authenticate(bearer(req));
@@ -158,6 +169,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (route === '/keys/delete') return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === '/copies') return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === '/copies/action') return send(res, 200, await svc.act(body.request, ctx));
+      if (route === '/algos') return send(res, 200, await svc.algoStart(body.request, ctx));
+      if (route === '/algos/action') return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, 'path', 'not found');
     } catch (e) {
       const err = e instanceof ApiError ? e : new ApiError(500, 'internal', 'Something went wrong in the executor.');

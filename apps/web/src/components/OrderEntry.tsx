@@ -43,11 +43,13 @@
  * and states its own chrome in OrderEntry.css. Those five rules in styles.css
  * now match nothing and can be deleted by whoever owns that file.
  */
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
-import { useAsync, useChannel, useStatus } from '../hooks';
+import { useAsync, useChannel, useStatus, useStored } from '../hooks';
+import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
+import type { AlgoTicketHandle, AlgoTicketState } from './algo/AlgoTicket';
 import { DASH, USD_WHOLE_FROM, fmt, fmtPrice, fmtQty, fmtQuote, num, pick, precisionOf, shortAddr, coinLabel } from '../format';
 import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
@@ -69,6 +71,9 @@ import { publishOrderImpact, type RawTake } from '../orderImpact';
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
 import './OrderEntry.css';
+
+/** The algo half of the ticket (TWAP, VWAP, ... - components/algo): loaded the first time Algo is picked. */
+const AlgoTicket = lazy(() => import('./algo/AlgoTicket'));
 
 interface Props {
   engine: Engine;
@@ -93,9 +98,10 @@ interface Props {
   onPlaced: () => void;
 }
 
-type OrdType = 'market' | 'limit' | 'stop';
+/** 'algo': one of the algo order types (TWAP, VWAP, POV, ...), worked by the algo engine - see components/algo. */
+type OrdType = 'market' | 'limit' | 'stop' | 'algo';
 type SizeUnit = 'base' | 'quote';
-type Pop = null | 'margin' | 'leverage' | 'tif';
+type Pop = null | 'margin' | 'leverage' | 'tif' | 'algo';
 type Tif = 'gtc' | 'ioc' | 'gtx';
 
 /** Notch positions on the size slider, in percent. */
@@ -737,6 +743,12 @@ export function OrderEntry({
   const tifRef = useRef<HTMLDivElement>(null);
   const tifBtnRef = useRef<HTMLButtonElement>(null);
   const tifPopRef = useRef<HTMLDivElement>(null);
+  /* The algo tab names the algo picked last; pressed again it opens the menu of them. */
+  const [algoKind, setAlgoKind] = useStored<UiKind>('vs.oe.algo', 'twap');
+  const algoBtnRef = useRef<HTMLButtonElement>(null);
+  const algoPopRef = useRef<HTMLDivElement>(null);
+  const algoRef = useRef<AlgoTicketHandle>(null);
+  const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true, walletFree: false, sided: true });
   /**
    * The review's "don't show again" tick, held until the order is actually
    * confirmed. Persisting it on change instead would mean opening the review,
@@ -749,8 +761,20 @@ export function OrderEntry({
   useDismiss(pop === 'margin', [marginRef], closePop);
   useDismiss(pop === 'leverage', [levRef, levPopRef], closePop);
   useDismiss(pop === 'tif', [tifRef, tifPopRef], closePop);
+  useDismiss(pop === 'algo', [algoBtnRef, algoPopRef], closePop);
   const levPos = useFloatPop(pop === 'leverage', levBtnRef, levPopRef, modeRowRef);
   const tifPos = useMenuAnchor(pop === 'tif', tifBtnRef, tifPopRef);
+  const algoPos = useMenuAnchor(pop === 'algo', algoBtnRef, algoPopRef);
+  const algoPlaced = pop === 'algo' && algoPos !== null;
+  useEffect(() => {
+    if (!algoPlaced) return;
+    const btn = algoBtnRef.current;
+    algoPopRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus({ preventScroll: true });
+    return () => {
+      const active = document.activeElement;
+      if (!active || active === document.body) btn?.focus({ preventScroll: true });
+    };
+  }, [algoPlaced]);
 
   /**
    * Keyboard focus follows the leverage popover out of the panel.
@@ -872,7 +896,7 @@ export function OrderEntry({
   /* Switching perps -> spot with the Stop tab selected would leave a type this
      engine cannot express. Fall back to Limit rather than carrying it across. */
   useEffect(() => {
-    if (engine !== 'perps' && type === 'stop') setType('limit');
+    if (engine !== 'perps' && (type === 'stop' || type === 'algo')) setType('limit');
   }, [engine, type]);
 
   // A book or chart click can land off the grid. Correct it here so the box
@@ -883,7 +907,14 @@ export function OrderEntry({
     if (next !== price) onPrice(next);
   }, [price, sym?.tickSize, onPrice]);
 
-  const marketExec = type === 'market' || (type === 'stop' && stopExec === 'market');
+  /* An algo is sized and valued like a market order (at the last price); its own rules price each child. */
+  const isAlgo = type === 'algo';
+  /* A paper algo in this browser signs nothing: no wallet or trading key stands before its Start. */
+  const paperAlgo = isAlgo && algoState.walletFree;
+  const btnGate = paperAlgo ? null : gate;
+  /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
+  const sizedByAmount = !isAlgo || algoState.needsAmount;
+  const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
   useEffect(() => {
     if (marketExec) setPop((p) => (p === 'tif' ? null : p));
   }, [marketExec]);
@@ -1661,19 +1692,93 @@ export function OrderEntry({
         the tab is not offered rather than being offered and ignored.
       */}
       <div className="oe-tabs" role="tablist" aria-label="Order type">
-        {((engine === 'perps' ? ['market', 'limit', 'stop'] : ['market', 'limit']) as OrdType[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={type === t}
-            className={`oe-tab${type === t ? ' is-on' : ''}`}
-            onClick={() => setType(t)}
-          >
-            {t === 'market' ? 'Market' : t === 'limit' ? 'Limit' : 'Stop'}
-          </button>
-        ))}
+        {((engine === 'perps' ? ['market', 'limit', 'stop', 'algo'] : ['market', 'limit']) as OrdType[]).map((t) =>
+          t === 'algo' ? (
+            /* THE ALGO TAB NAMES THE ALGO, and opens the menu of all of them: picked
+               from the tab it selects Algo, pressed again it lets you change which. */
+            <button
+              key={t}
+              ref={algoBtnRef}
+              type="button"
+              role="tab"
+              aria-selected={isAlgo}
+              aria-haspopup="listbox"
+              aria-expanded={pop === 'algo'}
+              className={`oe-tab oe-tab--algo${isAlgo ? ' is-on' : ''}`}
+              title="Algo orders: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing, bracket, basket"
+              onClick={() => {
+                if (!isAlgo) setType('algo');
+                setPop((p) => (p === 'algo' ? null : 'algo'));
+              }}
+            >
+              {isAlgo ? menuName(algoKind) : 'Algo'}
+              <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
+                <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              key={t}
+              type="button"
+              role="tab"
+              aria-selected={type === t}
+              className={`oe-tab${type === t ? ' is-on' : ''}`}
+              onClick={() => setType(t)}
+            >
+              {t === 'market' ? 'Market' : t === 'limit' ? 'Limit' : 'Stop'}
+            </button>
+          ),
+        )}
       </div>
+      {pop === 'algo' && createPortal(
+        <div
+          ref={algoPopRef}
+          className="oe-pop oe-pop--float oe-pop--menu oe-pop--algo"
+          role="listbox"
+          aria-label="Algo order type"
+          tabIndex={-1}
+          onKeyDown={(e) => {
+            const opts = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
+            if (!opts.length) return;
+            const at = opts.indexOf(document.activeElement as HTMLButtonElement);
+            const go = (i: number) => {
+              e.preventDefault();
+              opts[(i + opts.length) % opts.length]!.focus();
+            };
+            if (e.key === 'ArrowDown') go(at + 1);
+            else if (e.key === 'ArrowUp') go(at - 1);
+            else if (e.key === 'Home') go(0);
+            else if (e.key === 'End') go(opts.length - 1);
+          }}
+          data-side={algoPos?.side ?? 'down'}
+          style={{
+            left: algoPos?.left ?? 0,
+            top: algoPos?.top ?? 0,
+            width: algoPos?.width,
+            visibility: algoPos ? undefined : 'hidden',
+          }}
+        >
+          {ALGO_MENU.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              role="option"
+              aria-selected={algoKind === o.id}
+              tabIndex={algoKind === o.id ? 0 : -1}
+              className={`oe-pop__opt${isAlgo && algoKind === o.id ? ' is-on' : ''}`}
+              onClick={() => {
+                setAlgoKind(o.id);
+                setType('algo');
+                setPop(null);
+              }}
+            >
+              <b>{o.name}</b>
+              <span>{o.detail}</span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
 
       <div className="oe-body">
         {/*
@@ -1774,6 +1879,11 @@ export function OrderEntry({
           </>
         )}
 
+        {/* An algo sized some other way (DCA in USD per order, a trailing stop on
+            the whole position) has no Amount: the field is not shown rather than
+            shown and ignored. */}
+        {(!isAlgo || algoState.needsAmount) && (
+        <>
         <div className="oe-field">
           <div className={`oe-inputrow${liveBelow || liveAbove ? ' is-bad' : ''}`}>
             <label className="oe-inlabel" htmlFor={`${uid}-size`}>Amount</label>
@@ -1862,6 +1972,8 @@ export function OrderEntry({
             <span className="oe-suffix">%</span>
           </div>
         </div>
+        </>
+        )}
 
         {/* 5. Flags, TIF and the attached exits.
             Two rows, each a checkbox on the left and its own control on the
@@ -1873,7 +1985,7 @@ export function OrderEntry({
             <span>Reduce only</span>
             <input type="checkbox" role="switch" checked={reduceOnly} onChange={(e) => setReduceOnly(e.target.checked)} />
           </label>
-          {marketExec ? (
+          {isAlgo ? null : marketExec ? (
             <span className="oe-compact oe-compact--fixed" title="A market order cannot rest on the book.">
               <span>TIF</span>
               <b>IOC</b>
@@ -1946,7 +2058,33 @@ export function OrderEntry({
           )}
         </div>
 
-        {engine === 'perps' && (
+        {/* THE ALGO'S OWN RULES, between the shared flags and the button: its
+            schedule or ladder or trigger, a preview drawn from the engine's own
+            plan, and where it runs. */}
+        {isAlgo && (
+          <Suspense fallback={<p className="oe-hint">Loading algo orders…</p>}>
+            <AlgoTicket
+              ref={algoRef}
+              kind={algoKind}
+              symbol={symbol}
+              sym={sym}
+              side={side}
+              quantity={liveQtyStr}
+              reduceOnly={reduceOnly}
+              leverage={lev > 0 ? lev : null}
+              marginMode={marginMode}
+              bid={bestBid > 0 ? bestBid : null}
+              ask={bestAsk > 0 ? bestAsk : null}
+              last={num(lastPrice) > 0 ? num(lastPrice) : null}
+              network={network}
+              builderFee={bNow}
+              address={connectedAddress ?? null}
+              onState={setAlgoState}
+            />
+          </Suspense>
+        )}
+
+        {engine === 'perps' && !isAlgo && (
           <div className="oe-exits">
             <div className="oe-exits__head">
               <label className="oe-switch">
@@ -2070,19 +2208,21 @@ export function OrderEntry({
               (account/useTradeGate.ts) and pressing it does that. */}
           <button
             type="button"
-            className={`oe-side__btn is-${side}${gate?.busy ? ' is-wait' : ''}`}
-            onClick={gate ? gate.act : () => place(side)}
-            disabled={gate ? gate.busy : !canSend}
-            aria-busy={gate?.busy || busy || undefined}
-            title={gate?.why}
+            className={`oe-side__btn is-${side}${btnGate?.busy ? ' is-wait' : ''}`}
+            onClick={btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            aria-busy={btnGate?.busy || busy || undefined}
+            title={btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
           >
-            {gate
-              ? (gate.approving ? <ApproveLabel /> : gate.label)
+            {btnGate
+              ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)
               : busy
                 ? 'Working…'
-                : engine === 'perps'
-                  ? (side === 'buy' ? 'Long' : 'Short')
-                  : (side === 'buy' ? 'Buy' : 'Sell')}
+                : isAlgo
+                  ? algoState.sided ? `${algoState.label} · ${side === 'buy' ? 'Long' : 'Short'}` : algoState.label
+                  : engine === 'perps'
+                    ? (side === 'buy' ? 'Long' : 'Short')
+                    : (side === 'buy' ? 'Buy' : 'Sell')}
           </button>
         </div>
 
@@ -2107,7 +2247,7 @@ export function OrderEntry({
                 Liq. price <span className="oe-tag">est.</span>
               </dt>
               <dd className="oe-out__v oe-out__v--small">
-                {(side === 'buy' ? liqLong : liqShort)?.price
+                {sizedByAmount && (side === 'buy' ? liqLong : liqShort)?.price
                   ? fmtPrice((side === 'buy' ? liqLong : liqShort)!.price!, sym?.tickSize)
                   : DASH}
               </dd>
@@ -2116,13 +2256,13 @@ export function OrderEntry({
           <div className="oe-out__row">
             <dt className="oe-out__k">Order value</dt>
             <dd className={`oe-out__v oe-out__v--small${liveBelow ? ' is-neg' : ''}`}>
-              {notionalExact !== null && effectivePrice > 0 ? fmtExactQuote(notionalExact, sym?.quoteCoin) : liveNotional > 0 ? fmtQuote(liveNotional, sym?.quoteCoin) : DASH}
+              {!sizedByAmount ? DASH : notionalExact !== null && effectivePrice > 0 ? fmtExactQuote(notionalExact, sym?.quoteCoin) : liveNotional > 0 ? fmtQuote(liveNotional, sym?.quoteCoin) : DASH}
             </dd>
           </div>
           {engine === 'perps' && (
             <div className="oe-out__row">
               <dt className="oe-out__k">Margin required</dt>
-              <dd className="oe-out__v oe-out__v--small">{liveNotional > 0 && lev > 0 ? fmtQuote(liveNotional / lev, sym?.quoteCoin) : DASH}</dd>
+              <dd className="oe-out__v oe-out__v--small">{sizedByAmount && liveNotional > 0 && lev > 0 ? fmtQuote(liveNotional / lev, sym?.quoteCoin) : DASH}</dd>
             </div>
           )}
           {/*
@@ -2138,6 +2278,8 @@ export function OrderEntry({
             The row is a button: it opens which tier produced the number, which is
             the only question the figure prompts.
           */}
+          {/* An algo carries its own slippage rules (each child is capped); the market order's figure is not its. */}
+          {!isAlgo && (
           <div className="oe-out__row oe-sliprow" ref={slipRef}>
             <dt className="oe-out__k" title="Estimated from walking this order through the live book. Max is the slippage you are willing to accept.">
               Slippage
@@ -2207,6 +2349,7 @@ export function OrderEntry({
               </div>
             )}
           </div>
+          )}
           <div className="oe-out__row">
             <dt className="oe-out__k">
               <button

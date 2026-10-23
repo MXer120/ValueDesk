@@ -1,0 +1,257 @@
+/* Algo orders: the ticket's algo half (AlgoTicket) and the Algos tab (AlgoTable).
+   The ticket's own controls (.oe-inputrow, .oe-mini, .oe-switch, .oe-hint) are
+   reused as they are; this sheet only lays them out and draws the previews.
+   Tokens only (docs/DESIGN.md). */
+
+.algo {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  min-width: 0;
+  --algo-dir: var(--pos);
+}
+.algo.is-sell { --algo-dir: var(--neg); }
+
+.algo-what {
+  margin: 0;
+  font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted);
+}
+
+/* Two fields a row, 36px like the exit grid. */
+.algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); min-width: 0; }
+.algo-grid > :only-child { grid-column: 1 / -1; }
+.algo-in { height: 36px; min-width: 0; }
+.algo-in .oe-input { height: 34px; line-height: 34px; font-size: var(--fs-xs); min-width: 36px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-in .oe-inlabel { padding-left: var(--sp-2); font-size: var(--fs-xs); line-height: 34px; white-space: nowrap; }
+.algo-in .oe-suffix { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); padding: 0 var(--sp-2); }
+
+.algo-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); min-width: 0; }
+.algo-row > .algo-in { flex: 1 1 120px; }
+
+/* One of N, the ticket's mini buttons in a strip. */
+.algo-seg { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.algo-seg__k { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); white-space: nowrap; }
+.algo-seg__opts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+.algo-seg .oe-mini { min-width: 0; padding: 0 var(--sp-2); }
+
+/* A unit inside a field's box: a word you can press. */
+.algo-unit {
+  height: 100%; padding: 0; border: none; background: none;
+  color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 500;
+  cursor: pointer; border-bottom: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
+  line-height: 1.2;
+}
+.algo-unit:hover { color: var(--accent); }
+.algo-unit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.algo-switch { gap: var(--sp-2); }
+
+.algo-urgency { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--sp-2); }
+.algo-urgency input[type='range'] { width: 100%; accent-color: var(--accent); }
+.algo-urgency__v { font-size: var(--fs-xs); font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--text); min-width: 52px; text-align: right; }
+
+.algo-chips { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
+
+/* Conditions. */
+.algo-conds { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.algo-cond {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.algo-cond__head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.algo-cond__head .oe-select { flex: none; }
+.algo-cond__body { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.algo-sym {
+  flex: 1 1 auto; min-width: 0; height: 24px; padding: 0 var(--sp-2);
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: none;
+  color: var(--text); font: inherit; font-size: var(--fs-xs);
+}
+.algo-sym:focus-visible { outline: none; border-color: var(--accent); }
+.algo-x {
+  flex: none; width: 24px; height: 24px; padding: 0;
+  border: none; border-radius: var(--radius-sm); background: none;
+  color: var(--muted); font-size: var(--fs-base); line-height: 24px; cursor: pointer;
+}
+.algo-x:hover { color: var(--text); background: var(--bg-hover); }
+
+/* Basket legs: market, long/short, USD, remove - one line each. */
+.algo-legs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+.algo-leg {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); grid-auto-flow: column; grid-auto-columns: 24px;
+  align-items: center; gap: var(--sp-1); min-width: 0;
+}
+.algo-leg > * { min-width: 0; }
+.algo-leg .algo-sym { height: 36px; }
+.algo-leg .algo-seg__opts { flex-wrap: nowrap; }
+.algo-total { align-self: center; justify-self: end; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+
+/* Exits: the switch, then TP and SL side by side. */
+.algo-exits { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
+.algo-add, .algo-more, .algo-shuffle {
+  align-self: flex-start; padding: 0; border: none; background: none;
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.algo-add:hover, .algo-more:hover, .algo-shuffle:hover { color: var(--text); }
+.algo-add:focus-visible, .algo-more:focus-visible, .algo-shuffle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.algo-morehead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
+.algo-more { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.algo-badge {
+  display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--text); font-size: var(--fs-micro); font-family: var(--font-num);
+}
+.algo-rules { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-1); }
+.algo-bound { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); }
+
+/* --- the preview ----------------------------------------------------------- */
+
+.algo-preview {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+.algo-pv { margin: 0; display: flex; flex-direction: column; gap: var(--sp-1); --algo-dir: var(--pos); }
+.algo-pv.is-sell { --algo-dir: var(--neg); }
+.algo-pv svg { display: block; width: 100%; height: 84px; overflow: visible; }
+.algo-pv__grid { stroke: var(--panel-line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.algo-pv__grid--even { stroke: color-mix(in srgb, var(--muted) 55%, transparent); stroke-dasharray: 3 3; }
+.algo-pv__bar { fill: color-mix(in srgb, var(--algo-dir) 55%, transparent); }
+.algo-pv__cum { fill: none; stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+.algo-pv__mid { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; }
+.algo-pv__avg { stroke: var(--algo-dir); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.algo-pv__axis {
+  display: flex; justify-content: space-between; gap: var(--sp-2);
+  font-size: var(--fs-micro); line-height: var(--lh-micro, 14px); color: var(--muted);
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
+.algo-pv__plot { position: relative; }
+.algo-pv__tag {
+  position: absolute; right: 0; transform: translateY(-50%);
+  padding: 0 4px; border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  font-size: var(--fs-micro); color: var(--muted);
+  font-family: var(--font-num); font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap;
+}
+.algo-pv__tag--avg { color: var(--algo-dir); }
+
+.algo-pv__plot--levels { height: 92px; }
+.algo-lv__rule {
+  position: absolute; left: 0; right: 0; height: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.algo-lv__text {
+  position: absolute; left: 0; transform: translateY(-50%);
+  padding: 0 4px 0 0; background: color-mix(in srgb, var(--bg) 82%, transparent);
+  font-size: var(--fs-micro); line-height: 14px; color: var(--muted); white-space: nowrap;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
+.algo-lv__text b { font-family: var(--font-text); font-weight: 500; color: var(--text); margin-right: 2px; }
+.algo-lv__text em { font-style: normal; color: var(--dim); }
+.algo-lv.is-now .algo-lv__rule { border-top-style: solid; border-top-color: var(--text); opacity: 0.6; }
+.algo-lv.is-pos .algo-lv__rule { border-top-color: var(--pos); border-top-style: solid; }
+.algo-lv.is-neg .algo-lv__rule { border-top-color: var(--neg); border-top-style: solid; }
+.algo-lv.is-pos .algo-lv__text b { color: var(--pos); }
+.algo-lv.is-neg .algo-lv__text b { color: var(--neg); }
+.algo-lv.is-warn .algo-lv__rule { border-top-color: var(--warn); }
+
+.algo-sum { margin: 0; display: flex; flex-direction: column; gap: 2px; }
+.algo-sum__row { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.algo-sum__row dt { color: var(--muted); }
+.algo-sum__row dd { margin: 0; color: var(--text); text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-shuffle { margin-top: 2px; }
+
+.algo-err { color: var(--neg); margin: 0; }
+.algo-warn { color: var(--warn); margin: 0; }
+.algo-where { margin: 0; color: var(--dim); }
+.algo-busy { font-size: var(--fs-xs); color: var(--muted); }
+
+.algo-review dl { margin: 0 0 var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }
+.algo-review dl > div { display: flex; justify-content: space-between; gap: var(--sp-3); font-size: var(--fs-base); }
+.algo-review dt { color: var(--muted); }
+.algo-review dd { margin: 0; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+.algo-review .oe-hint { margin: var(--sp-1) 0 0; }
+
+/* --- the Algos tab ------------------------------------------------------------- */
+
+.algos { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.algos__bar {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--panel-line);
+  font-size: var(--fs-xs); color: var(--muted);
+}
+.algos__bar b { color: var(--text); font-weight: 500; }
+.algos__list { overflow: auto; min-height: 0; flex: 1 1 auto; }
+.algos__empty { padding: var(--sp-5) var(--sp-3); text-align: center; }
+.algos__empty b { display: block; font-size: var(--fs-base); font-weight: 500; color: var(--text); margin-bottom: var(--sp-1); }
+.algos__empty span { font-size: var(--fs-xs); color: var(--muted); }
+
+.algo-card { border-bottom: 1px solid var(--panel-line); }
+.algo-card__head {
+  display: grid; grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
+  align-items: center; gap: var(--sp-3);
+  width: 100%; padding: var(--sp-2) var(--sp-3);
+  border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.algo-card__head:hover { background: var(--bg-hover); }
+.algo-card__head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.algo-card__mark {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: var(--fs-micro); font-weight: 500; letter-spacing: 0.02em; color: var(--text);
+  background: color-mix(in srgb, var(--algo-dir, var(--pos)) 16%, var(--bg-panel));
+  border: 1px solid color-mix(in srgb, var(--algo-dir, var(--pos)) 40%, transparent);
+}
+.algo-card.is-sell { --algo-dir: var(--neg); }
+.algo-card.is-buy { --algo-dir: var(--pos); }
+.algo-card__name { display: flex; flex-direction: column; min-width: 0; }
+.algo-card__name b { font-size: var(--fs-xs); font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.algo-card__name span { font-size: var(--fs-micro); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.algo-card__dir { color: var(--algo-dir); }
+.algo-card__prog { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.algo-card__bar { position: relative; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.algo-card__bar i {
+  position: absolute; inset: 0 auto 0 0; border-radius: 2px;
+  background: var(--algo-dir);
+  transition: width var(--dur-med) var(--ease-out);
+}
+.algo-card__nums { display: flex; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-micro); color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-card__nums b { color: var(--text); font-weight: 500; }
+.algo-card__q { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-micro); color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-card__q b { font-size: var(--fs-xs); font-weight: 500; }
+.algo-card__acts { display: flex; gap: var(--sp-1); }
+.algo-card__acts .oe-mini { height: 24px; }
+.algo-status {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+}
+.algo-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.algo-status.is-running { color: var(--pos); }
+.algo-status.is-waiting, .algo-status.is-scheduled { color: var(--warn); }
+.algo-status.is-failed { color: var(--neg); }
+.algo-status.is-running::before { animation: algo-pulse 1.6s ease-in-out infinite; }
+@keyframes algo-pulse { 50% { opacity: 0.35; } }
+
+.algo-card__body { padding: 0 var(--sp-3) var(--sp-3); display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--sp-3); }
+.algo-card__facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); font-size: var(--fs-xs); align-content: start; }
+.algo-card__facts dt { color: var(--muted); }
+.algo-card__facts dd { margin: 0; text-align: right; color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-card__reason { grid-column: 1 / -1; margin: 0; font-size: var(--fs-xs); color: var(--warn); }
+.algo-log { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow: auto; font-size: var(--fs-micro); }
+.algo-log li { display: grid; grid-template-columns: 54px 1fr; gap: var(--sp-2); padding: 2px 0; border-bottom: 1px solid var(--line-soft); color: var(--muted); }
+.algo-log time { font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--dim); }
+.algo-log .is-fill { color: var(--text); }
+.algo-log .is-error { color: var(--neg); }
+.algo-log .is-status { color: var(--text); }
+.algo-pos { color: var(--pos); }
+.algo-neg { color: var(--neg); }
+
+@container panel (max-width: 560px) {
+  .algo-card__head { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .algo-card__q, .algo-card__prog { grid-column: 2 / -1; }
+  .algo-card__body { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .algo-status.is-running::before { animation: none; }
+  .algo-card__bar i { transition: none; }
+}

@@ -51,6 +51,8 @@ const Explore = lazyPage('explore', () => import('./components/explore/Explore')
 const CopyPage = lazyPage('copy', () => import('./components/copy/CopyPage').then((m) => m.CopyPage));
 /** Live copy trading (copy/CopyRunner.tsx): mounted on every page, loaded after it. */
 const CopyRunner = lazy(() => import('./copy/CopyRunner'));
+/** Algo orders run in this browser (algo/AlgoRunner.tsx): mounted on every page, loaded after it. */
+const AlgoRunner = lazy(() => import('./algo/AlgoRunner'));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
@@ -510,6 +512,11 @@ function AppShell() {
         <Guarded name="Copy trading">
           <Suspense fallback={null}>
             <CopyRunner address={address} provider={provider} />
+          </Suspense>
+        </Guarded>
+        <Guarded name="Algo orders">
+          <Suspense fallback={null}>
+            <AlgoRunner address={address} provider={provider} />
           </Suspense>
         </Guarded>
 

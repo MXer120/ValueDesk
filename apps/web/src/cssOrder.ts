@@ -57,6 +57,7 @@ import './components/leaderboard/LeaderboardPage.css';
 import './components/explore/cohorts/Cohorts.css';
 import './components/copy/Copy.css';
 import './components/copy/CopyHome.css';
+import './components/algo/algo.css';
 import './copy/copy.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
