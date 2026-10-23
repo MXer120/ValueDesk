@@ -12,13 +12,24 @@
  *   scale        a ladder of resting orders between two prices, sized by a curve
  *   dca          a fixed amount every interval, with a price band and dip boost
  *   swarm        many small takers in waves instead of one big one, the book refilling between waves
- *   conditional  when market conditions hold (price, cross, move, funding, OI, spread, volume, ratio, time), act
+ *   conditional  when market, position or time conditions hold, act (and bracket what it opened)
  *   trailing     a stop that follows the price at a distance and takes when it turns
+ *   basket       one parent spread over several markets (each leg a swarm or a TWAP of its own)
+ *   bracket      an entry (market or limit) with a take-profit and a stop-loss, one cancelling the other
  *
  * Every child order is an ordinary SoDEX order (IOC to take, GTX to rest,
  * GTC for a ladder) carrying the ValueDesk builder fee, so it shows in the
  * account's open orders and fills like any other order and can be cancelled
- * there too.
+ * there too. Exits (take-profit / stop-loss after an entry) are SoDEX's own
+ * position stops - reduce-only market orders triggered on the mark, held by
+ * SoDEX - so they protect the position even while no runner is up; the
+ * runner cancels the other one when one of them fills (OCO).
+ *
+ * WHAT SODEX DOES NATIVELY, AND WHAT IS USED. SoDEX has stop orders (TP/SL on
+ * the mark) - used for every exit - and a TWAP endpoint, which is NOT used:
+ * its request has no builder field, so in a build that requires the builder
+ * fee the app's fee guard refuses it. Everything else here has no native
+ * SoDEX form and is worked by this engine.
  *
  * Money is USD as a plain number, times are milliseconds, sizes are base
  * units (positive; the side says which way). Quantities a trader TYPED are
@@ -26,9 +37,9 @@
  */
 import type { ConsentRecord, CopyMode } from '../types.ts';
 
-export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing';
+export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket';
 
-export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing'];
+export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket'];
 
 export type Side = 'buy' | 'sell';
 
@@ -65,6 +76,20 @@ export interface PriceBound {
   then: BoundAction;
 }
 
+/**
+ * The bracket an entry is followed by: a take-profit and/or a stop-loss on
+ * what it filled, at a price or a distance from the average fill (a fraction:
+ * 0.02 = 2%). They are SoDEX position stops (reduce-only, mark trigger) sized
+ * to the filled amount and resized as it grows; when one of them fills, the
+ * other is cancelled.
+ */
+export interface Exits {
+  tpPrice: number | null;
+  slPrice: number | null;
+  tpPct: number | null;
+  slPct: number | null;
+}
+
 /** Fields every algo has. */
 export interface AlgoBase {
   kind: AlgoKind;
@@ -90,11 +115,23 @@ export interface AlgoBase {
   paper: boolean;
   /** A name the trader gave it. */
   label: string | null;
+  /** Take-profit / stop-loss after what it fills (opening algos only). null = none. */
+  exits: Exits | null;
 }
 
 export interface TwapSpec extends AlgoBase {
   kind: 'twap';
+  /** Ignored when `closeShare` is set (then '0'). */
   quantity: string;
+  /**
+   * Time-sliced close: work this share (0.01..1) of the position on the market
+   * when it starts, on the side that reduces it, reduce-only. null = `quantity`.
+   */
+  closeShare: number | null;
+  /** No child below this size (what is due waits until it reaches it, except at the end). null = SoDEX's minimum. */
+  minSliceQty: string | null;
+  /** No child above this size. null = no cap. */
+  maxSliceQty: string | null;
   durationMs: number;
   slices: number;
   /** -1..1: 0 even; above 0 more early (front-loaded), below 0 more late. */
@@ -249,6 +286,12 @@ export type Condition =
   | { type: 'volume'; symbol: string; windowMs: number; aboveUsd: number }
   /** One market's price over another's (mark / mark), e.g. ETH-USD / BTC-USD. */
   | { type: 'ratio'; symbol: string; other: string; op: 'above' | 'below'; value: number }
+  /**
+   * The trader's own position on a market, as SoDEX reports it (read every few seconds):
+   * long / short / flat; its size above or below `value` (base units, either side);
+   * its unrealised PnL above or below `value` (USD, at the mark).
+   */
+  | { type: 'position'; symbol: string; op: 'long' | 'short' | 'flat' | 'sizeAbove' | 'sizeBelow' | 'pnlAbove' | 'pnlBelow'; value: number }
   | { type: 'time'; at: number };
 
 export type ConditionType = Condition['type'];
@@ -288,6 +331,43 @@ export interface TrailingSpec extends AlgoBase {
   slippageBps: number;
 }
 
+/** One market of a basket: its side and how much of it, in USD (turned into a size at the mark when it starts). */
+export interface BasketLeg {
+  symbol: string;
+  side: Side;
+  usd: number;
+}
+
+/**
+ * One parent order spread over several markets: each leg runs as an algo of
+ * its own (a swarm of takers, or a TWAP over the duration), started together,
+ * paused, resumed and cancelled together. The base `symbol` and `side` are the
+ * first leg's.
+ */
+export interface BasketSpec extends AlgoBase {
+  kind: 'basket';
+  legs: BasketLeg[];
+  style: 'swarm' | 'twap';
+  /** twap: over how long, and in how many slices each. */
+  durationMs: number;
+  slices: number;
+  /** swarm: clips per leg, per wave, and the pause between waves. */
+  clips: number;
+  inFlight: number;
+  waveMs: number;
+  slippageBps: number;
+}
+
+/** An entry with its exits (`exits` is required): at market (a taker with a slippage cap) or as a resting limit. */
+export interface BracketSpec extends AlgoBase {
+  kind: 'bracket';
+  quantity: string;
+  entry: 'market' | 'limit';
+  /** limit: the entry price. */
+  price: number | null;
+  slippageBps: number;
+}
+
 export type AlgoSpec =
   | TwapSpec
   | VwapSpec
@@ -298,7 +378,9 @@ export type AlgoSpec =
   | DcaSpec
   | SwarmSpec
   | ConditionalSpec
-  | TrailingSpec;
+  | TrailingSpec
+  | BasketSpec
+  | BracketSpec;
 
 /**
  * scheduled  waiting for its start time;
@@ -342,6 +424,8 @@ export interface ChildOrder {
   cancelling: boolean;
   /** 'slice 3/40', 'clip 2', 'level 5', 'finish', 'trigger'... */
   tag: string;
+  /** An exit: a SoDEX position stop (reduce-only market order) that fires when the mark reaches `price`. */
+  exit?: 'tp' | 'sl';
 }
 
 /** An algo: what the trader asked for, and where it stands. One JSON document. */
@@ -383,6 +467,11 @@ export interface AlgoRecord {
   children: ChildOrder[];
   childCount: number;
   rejects: number;
+  /** The exits (take-profit / stop-loss) it keeps on SoDEX for what it filled, live and done. */
+  exitOrders?: ChildOrder[];
+  /** The country the trader declared and the one their request came from (executors): the region rules that apply. */
+  country?: string | null;
+  observedCountry?: string | null;
   /** Kind-specific working state (schedules, peaks, holds, counters). */
   k: Record<string, unknown>;
 }
@@ -427,4 +516,8 @@ export interface AlgoView {
   triggerPrice: number | null;
   /** For a conditional: how far each condition is from holding, in words. */
   conditions: Array<{ text: string; ok: boolean }> | null;
+  /** Its exits on SoDEX (live ones, and any that filled). */
+  exits: Array<{ kind: 'tp' | 'sl'; price: number; quantity: number; filled: number; live: boolean }> | null;
+  /** A basket's legs. */
+  legs: Array<{ id: string; symbol: string; side: Side; status: AlgoStatus; filledValue: number; avgPrice: number | null }> | null;
 }

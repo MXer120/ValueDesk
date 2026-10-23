@@ -18,6 +18,7 @@ import {
   type Condition,
   type ConditionalAction,
   type ExecSpec,
+  type Exits,
   type PriceBound,
   type PriceSource,
   type Side,
@@ -48,6 +49,8 @@ export const ALGO_LIMITS = {
   swarm: { clips: { min: 2, max: 200 }, inFlight: { min: 1, max: 20 }, waveMs: { min: 0, max: MIN }, sizeJitter: { min: 0, max: 0.9 }, retries: { min: 0, max: 5 } },
   conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5_000, max: HOUR } },
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
+  basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
+  exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
   maxSpreadBps: { min: 1, max: 5_000 },
@@ -174,6 +177,27 @@ function exec(v: unknown, e: Errors, path: string): ExecSpec {
   };
 }
 
+function exits(o: Obj, side: Side, e: Errors): Exits | null {
+  const v = o.exits;
+  if (v === null || v === undefined) return null;
+  if (!isObj(v)) {
+    e.exits = 'Exits must be a take-profit and/or a stop-loss.';
+    return null;
+  }
+  const x: Exits = {
+    tpPrice: optPrice(v, 'tpPrice', 'Take-profit price', e, 'exits.tpPrice'),
+    slPrice: optPrice(v, 'slPrice', 'Stop-loss price', e, 'exits.slPrice'),
+    tpPct: opt(v, 'tpPct', 'Take-profit distance', ALGO_LIMITS.exitPct, e, 'exits.tpPct'),
+    slPct: opt(v, 'slPct', 'Stop-loss distance', { min: ALGO_LIMITS.exitPct.min, max: 0.99 }, e, 'exits.slPct'),
+  };
+  if (x.tpPrice !== null && x.tpPct !== null) e['exits.tpPct'] = 'Set the take-profit as a price or a distance, not both.';
+  if (x.slPrice !== null && x.slPct !== null) e['exits.slPct'] = 'Set the stop-loss as a price or a distance, not both.';
+  if (x.tpPrice !== null && x.slPrice !== null && (side === 'buy' ? x.tpPrice <= x.slPrice : x.tpPrice >= x.slPrice)) {
+    e['exits.tpPrice'] = side === 'buy' ? 'A long\'s take-profit must be above its stop-loss.' : 'A short\'s take-profit must be below its stop-loss.';
+  }
+  return x.tpPrice === null && x.slPrice === null && x.tpPct === null && x.slPct === null ? null : x;
+}
+
 function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
   const label = typeof o.label === 'string' ? o.label.trim().slice(0, ALGO_LIMITS.label) : '';
   const marginMode = o.marginMode === null || o.marginMode === undefined ? null : oneOf(o, 'marginMode', 'Margin mode', ['cross', 'isolated'] as const, 'cross', e);
@@ -192,7 +216,10 @@ function base(o: Obj, kind: AlgoKind, e: Errors): AlgoBase {
     marginMode,
     paper: bool(o, 'paper'),
     label: label || null,
+    exits: null,
   };
+  b.exits = exits(o, b.side, e);
+  if (b.exits && b.reduceOnly) e.exits = 'A reduce-only order opens nothing to protect: no exits on it.';
   if (b.upper && b.lower && b.upper.price <= b.lower.price) e.upper = 'The upper bound must be above the lower bound.';
   return b;
 }
@@ -232,6 +259,12 @@ function condition(v: unknown, e: Errors, path: string): Condition | null {
     case 'ratio': {
       const other = symbol(v, 'other', e, `${path}.other`);
       return { type, symbol: sym(), other, op: op(), value: num(v, 'value', 'Ratio', { min: 1e-12, max: 1e12 }, e, `${path}.value`) };
+    }
+    case 'position': {
+      const pop = oneOf(v, 'op', 'Position', ['long', 'short', 'flat', 'sizeAbove', 'sizeBelow', 'pnlAbove', 'pnlBelow'] as const, 'long', e, `${path}.op`);
+      const needs = pop === 'sizeAbove' || pop === 'sizeBelow' || pop === 'pnlAbove' || pop === 'pnlBelow';
+      const value = needs ? num(v, 'value', pop.startsWith('pnl') ? 'PnL' : 'Size', pop.startsWith('pnl') ? { min: -1e12, max: 1e12 } : { min: 0, max: 1e12 }, e, `${path}.value`) : 0;
+      return { type, symbol: sym(), op: pop, value };
     }
     case 'time': {
       const at = time(v, 'at', 'Time', e, `${path}.at`);
@@ -287,10 +320,20 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       const durationMs = int(o, 'durationMs', 'Duration', L.durationMs, e);
       const slices = int(o, 'slices', 'Slices', L.slices, e);
       if (durationMs / slices < L.minIntervalMs) e.slices = `At most one slice every ${L.minIntervalMs / 1000} s: use at most ${Math.floor(durationMs / L.minIntervalMs)} slices.`;
+      const closeShare = opt(o, 'closeShare', 'Share of the position', { min: 0.01, max: 1 }, e);
+      const minSliceQty = optQty(o, 'minSliceQty', 'Smallest slice', e);
+      const maxSliceQty = optQty(o, 'maxSliceQty', 'Largest slice', e);
+      if (minSliceQty !== null && maxSliceQty !== null && Number(minSliceQty) > Number(maxSliceQty)) e.minSliceQty = 'The smallest slice cannot be larger than the largest.';
+      if (closeShare !== null && b.exits) e.exits = 'A close opens nothing to protect: no exits on it.';
       spec = {
         ...b,
         kind,
-        quantity: qty(o, 'quantity', 'Size', e),
+        // A time-sliced close takes its size from the position when it starts: always reduce-only.
+        reduceOnly: closeShare !== null ? true : b.reduceOnly,
+        quantity: closeShare !== null ? '0' : qty(o, 'quantity', 'Size', e),
+        closeShare,
+        minSliceQty,
+        maxSliceQty,
         durationMs,
         slices,
         urgency: o.urgency === undefined ? 0 : num(o, 'urgency', 'Urgency', { min: -1, max: 1 }, e),
@@ -437,6 +480,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         expiresAt: time(o, 'expiresAt', 'Expiry', e),
         then: action(o.then, e, depth),
       };
+      if (b.exits && (spec.then.type === 'close' || spec.then.type === 'algo')) e.exits = spec.then.type === 'close' ? 'A close opens nothing to protect: no exits on it.' : 'Set the exits on the algo it starts.';
       break;
     }
     case 'trailing': {
@@ -459,9 +503,60 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       if (spec.quantity === null) spec.reduceOnly = true;
       break;
     }
+    case 'basket': {
+      const L = ALGO_LIMITS.basket;
+      const raw = Array.isArray(o.legs) ? o.legs : [];
+      if (raw.length < L.legs.min || raw.length > L.legs.max) e.legs = `A basket has ${L.legs.min} to ${L.legs.max} markets.`;
+      const legs = raw.slice(0, L.legs.max).map((x, i) => {
+        const v = isObj(x) ? x : {};
+        return {
+          symbol: symbol(v, 'symbol', e, `legs.${i}.symbol`),
+          side: oneOf<Side>(v, 'side', 'Side', ['buy', 'sell'], 'buy', e, `legs.${i}.side`),
+          usd: num(v, 'usd', 'Amount', L.legUsd, e, `legs.${i}.usd`),
+        };
+      });
+      if (new Set(legs.map((l) => l.symbol)).size !== legs.length) e.legs = 'Each market once in a basket.';
+      if (b.exits) e.exits = 'Exits are set per market: not on a basket.';
+      const style = oneOf(o, 'style', 'Each leg', ['swarm', 'twap'] as const, 'swarm', e);
+      const durationMs = style === 'twap' ? int(o, 'durationMs', 'Duration', ALGO_LIMITS.twap.durationMs, e) : 0;
+      const slices = style === 'twap' ? int(o, 'slices', 'Slices', ALGO_LIMITS.twap.slices, e) : 0;
+      if (style === 'twap' && durationMs / slices < ALGO_LIMITS.twap.minIntervalMs) e.slices = `At most one slice every ${ALGO_LIMITS.twap.minIntervalMs / 1000} s.`;
+      spec = {
+        ...b,
+        kind,
+        symbol: legs[0]?.symbol ?? b.symbol,
+        side: legs[0]?.side ?? b.side,
+        legs,
+        style,
+        durationMs,
+        slices,
+        clips: style === 'swarm' ? int(o, 'clips', 'Clips', ALGO_LIMITS.swarm.clips, e) : 0,
+        inFlight: style === 'swarm' ? int(o, 'inFlight', 'Clips per wave', ALGO_LIMITS.swarm.inFlight, e) : 0,
+        waveMs: style === 'swarm' ? int(o, 'waveMs', 'Between waves', ALGO_LIMITS.swarm.waveMs, e) : 0,
+        slippageBps: num(o, 'slippageBps', 'Max slippage', ALGO_LIMITS.exec.slippageBps, e),
+      };
+      break;
+    }
+    case 'bracket': {
+      const entry = oneOf(o, 'entry', 'Entry', ['market', 'limit'] as const, 'market', e);
+      if (!b.exits) e.exits = 'A bracket needs a take-profit, a stop-loss, or both.';
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, 'quantity', 'Size', e),
+        entry,
+        price: entry === 'limit' ? price(o, 'price', 'Entry price', e) : null,
+        slippageBps: o.slippageBps === undefined ? 30 : num(o, 'slippageBps', 'Max slippage', ALGO_LIMITS.exec.slippageBps, e),
+      };
+      break;
+    }
   }
   return { spec: Object.keys(e).length ? null : spec, errors: e };
 }
+
+/** Whether an algo opens (or adds to) a position, so exits can follow it. */
+export const opensPosition = (s: AlgoSpec): boolean =>
+  !s.reduceOnly && s.kind !== 'trailing' && s.kind !== 'basket' && !(s.kind === 'conditional' && (s.then.type === 'close' || s.then.type === 'algo'));
 
 /** Validate, or throw an AlgoSpecError naming the first problem. */
 export function parseAlgoSpec(input: unknown): AlgoSpec {
@@ -477,7 +572,10 @@ export function parseAlgoSpec(input: unknown): AlgoSpec {
 export function algoQuantity(s: AlgoSpec): number | null {
   switch (s.kind) {
     case 'dca':
+    case 'basket':
       return null;
+    case 'twap':
+      return s.closeShare !== null ? null : Number(s.quantity);
     case 'trailing':
       return s.quantity === null ? null : Number(s.quantity);
     case 'conditional':
@@ -498,6 +596,7 @@ export function algoSymbols(s: AlgoSpec): string[] {
     }
     if (s.then.type === 'algo') for (const x of algoSymbols(s.then.algo)) out.add(x);
   }
+  if (s.kind === 'basket') for (const l of s.legs) out.add(l.symbol);
   return [...out];
 }
 
@@ -512,4 +611,6 @@ export const ALGO_NAMES: Readonly<Record<AlgoKind, string>> = {
   swarm: 'Swarm',
   conditional: 'Conditional',
   trailing: 'Trailing stop',
+  basket: 'Basket',
+  bracket: 'Bracket',
 };

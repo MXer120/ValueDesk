@@ -16,7 +16,9 @@ import {
   OrderSide,
   OrderType,
   SodexApiError,
+  StopType,
   TimeInForce,
+  TriggerType,
   failedOrders,
   perpsActions,
   signAndBuildWithNonceManager,
@@ -51,16 +53,61 @@ export interface ChildResult {
   outcomeUnknown: boolean;
 }
 
+/**
+ * An exit, as it is signed: a SoDEX position stop - a reduce-only market order
+ * that SoDEX fires itself when the MARK reaches `triggerPrice` (the only
+ * trigger SoDEX accepts on placement). The same order the copier keeps for a
+ * copy's stop-loss / take-profit (orders.ts stopAction).
+ */
+export interface StopRequest {
+  clOrdID: string;
+  /** The side that closes the position. */
+  side: Side;
+  quantity: string;
+  triggerPrice: string;
+  kind: 'tp' | 'sl';
+}
+
 export interface AlgoSink {
   readonly paper: boolean;
   /** One signed batch on one market (at most 100 children). */
   place(a: AlgoRecord, market: MarketInfo, orders: ChildRequest[]): Promise<ChildResult[]>;
+  /** Exits (take-profit / stop-loss) on one market, one signed batch. */
+  placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]): Promise<ChildResult[]>;
   /** Cancel by client order id. An order already gone is not an error. */
   cancel(a: AlgoRecord, market: MarketInfo, clOrdIDs: string[]): Promise<void>;
   setLeverage(a: AlgoRecord, market: MarketInfo, leverage: number, margin: MarginChoice): Promise<void>;
 }
 
 const TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC } as const;
+
+/** Exits as one perps batch: STOP modifier, market type, IOC, the mark trigger, reduce-only. */
+export function stopsAction(accountId: number, market: MarketInfo, stops: readonly StopRequest[], builder: BuilderParams | null): SignableAction {
+  return perpsActions.newOrder(
+    accountId,
+    market.id,
+    stops.map((s) => ({
+      clOrdID: s.clOrdID,
+      modifier: OrderModifier.STOP,
+      side: s.side === 'buy' ? OrderSide.BUY : OrderSide.SELL,
+      type: OrderType.MARKET,
+      timeInForce: TimeInForce.IOC,
+      quantity: s.quantity,
+      stopPrice: s.triggerPrice,
+      stopType: s.kind === 'tp' ? StopType.TAKE_PROFIT : StopType.STOP_LOSS,
+      triggerType: TriggerType.MARK_PRICE,
+      reduceOnly: true,
+    })),
+    builder ?? undefined,
+  );
+}
+
+/** Answer rows matched to stops (their client order ids). */
+export const readStops = (data: unknown, stops: readonly StopRequest[]): ChildResult[] =>
+  readBatch(
+    data,
+    stops.map((s) => ({ clOrdID: s.clOrdID, side: s.side, price: s.triggerPrice, quantity: s.quantity, tif: 'ioc' as const, reduceOnly: true })),
+  );
 
 export function childrenAction(accountId: number, market: MarketInfo, orders: readonly ChildRequest[], builder: BuilderParams | null): SignableAction {
   return perpsActions.newOrder(
@@ -125,6 +172,17 @@ export class KeyAlgoSink implements AlgoSink {
     } catch (e) {
       const unknown = e instanceof OutcomeUnknownError;
       return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown }));
+    }
+  }
+
+  async placeStops(a: AlgoRecord, market: MarketInfo, stops: StopRequest[]): Promise<ChildResult[]> {
+    if (!stops.length) return [];
+    try {
+      const builder = await this.builder(a).catch(() => null);
+      return readStops(await this.signAndSend(stopsAction(a.accountId, market, stops, builder)), stops);
+    } catch (e) {
+      const unknown = e instanceof OutcomeUnknownError;
+      return stops.map((s) => ({ clOrdID: s.clOrdID, ok: false, orderId: null, error: describe(e), outcomeUnknown: unknown }));
     }
   }
 

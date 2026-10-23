@@ -42,6 +42,8 @@ export interface AlgoPlan {
   maxChildUsd: number | null;
   /** Ladder: the size-weighted average price if every level fills. */
   avgPrice: number | null;
+  /** Where its exits would sit (against the expected average fill). */
+  exits: { tp: number | null; sl: number | null } | null;
   warnings: string[];
   errors: string[];
 }
@@ -55,6 +57,19 @@ export interface AlgoPlanContext {
   profile?: VolumeProfile | null;
   /** Base units traded on the market in the last hour (POV's pace estimate). */
   hourVolume?: number | null;
+  /** The trader's signed position on the market now (a time-sliced close is sized from it). */
+  positionSize?: number | null;
+  /** Prices of other markets (a basket's legs), where known. */
+  prices?: (symbol: string) => number | null;
+}
+
+/** Where an entry's exits would sit for an average fill of `avg` (prices win over distances). */
+export function exitLevels(side: 'buy' | 'sell', x: { tpPrice: number | null; slPrice: number | null; tpPct: number | null; slPct: number | null }, avg: number): { tp: number | null; sl: number | null } {
+  const sign = side === 'buy' ? 1 : -1;
+  return {
+    tp: x.tpPrice ?? (x.tpPct !== null ? avg * (1 + sign * x.tpPct) : null),
+    sl: x.slPrice ?? (x.slPct !== null ? avg * (1 - sign * x.slPct) : null),
+  };
 }
 
 /** TWAP: the slices' times and weights. Weights first, then times, from one generator. */
@@ -91,11 +106,31 @@ export function scaleLadder(s: Extract<AlgoSpec, { kind: 'scale' }>, m: Pick<Mar
 
 const usd = (n: number): string => (n >= 1000 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
 
+/**
+ * Slices as they go out under a smallest and a largest slice: what is due
+ * waits until it reaches the smallest, and no child is above the largest (the
+ * excess stays due and goes with a later slice, or at the end). Whole steps.
+ */
+export function sliceBounds(sizes: readonly number[], min: number, max: number, step: number): number[] {
+  const out: number[] = [];
+  let due = 0;
+  for (const q of sizes) {
+    due += q;
+    let send = due >= min - 1e-12 ? Math.min(due, max) : 0;
+    send = Math.floor(send / step + 1e-9) * step;
+    out.push(send);
+    due -= send;
+  }
+  return out;
+}
+
 /** The plan of `s` on `m`. Pure. */
 export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): AlgoPlan {
   const start = Math.max(ctx.now, s.startAt ?? ctx.now);
   const px = ctx.price;
-  const total = algoQuantity(s);
+  const pos = ctx.positionSize ?? null;
+  // A time-sliced close is sized from the position (floored to the step); everything else from its spec.
+  const total = s.kind === 'twap' && s.closeShare !== null ? (pos ? Math.floor((Math.abs(pos) * s.closeShare) / Number(m.stepSize) + 1e-9) * Number(m.stepSize) : null) : algoQuantity(s);
   const out: AlgoPlan = {
     title: ALGO_NAMES[s.kind],
     total,
@@ -108,6 +143,7 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
     minChildUsd: null,
     maxChildUsd: null,
     avgPrice: null,
+    exits: null,
     warnings: [],
     errors: [],
   };
@@ -143,13 +179,28 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
   switch (s.kind) {
     case 'twap': {
       const { times, weights } = twapSchedule(s, start, ctx.seed);
-      const sizes = allocateSteps(total!, weights, step);
+      if (s.closeShare !== null) {
+        if (pos === null) out.warnings.push('Sized from your position when it starts.');
+        else if (pos === 0) out.errors.push(`You hold no position on ${m.name} to close.`);
+        else {
+          const closing = pos > 0 ? 'sell' : 'buy';
+          if (closing !== s.side) out.warnings.push(`It closes your ${pos > 0 ? 'long' : 'short'}: it ${closing === 'sell' ? 'sells' : 'buys'}, reduce-only, whatever side the ticket shows.`);
+        }
+      }
+      const raw = total ? allocateSteps(total, weights, step) : weights.map(() => 0);
+      const sizes = sliceBounds(raw, s.minSliceQty !== null ? Number(s.minSliceQty) : 0, s.maxSliceQty !== null ? Number(s.maxSliceQty) : Infinity, step);
       out.children = times.map((at, i) => ({ at, qty: sizes[i] ?? 0, price: null, tag: `slice ${i + 1}/${times.length}` }));
+      const carry = raw.reduce((a, b) => a + b, 0) - sizes.reduce((a, b) => a + b, 0);
+      if (carry > step / 2) {
+        out.children.push({ at: start + s.durationMs, qty: carry, price: null, tag: 'finish' });
+        if (s.maxSliceQty !== null) out.warnings.push(`The largest slice (${s.maxSliceQty} ${m.base}) holds back ${carry.toPrecision(4).replace(/\.?0+$/, '')} ${m.base} for the end${s.finish === 'leave' ? ', where it is left' : ''}.`);
+      }
       out.endsAt = start + s.durationMs;
       out.intervalMs = s.durationMs / s.slices;
       summarise();
       checkSchedule('slice');
       limitWarn();
+      if (s.minSliceQty !== null && total && out.children.filter((c) => c.qty > 0).length < times.length) out.warnings.push(`Slices under ${s.minSliceQty} ${m.base} wait and go out together.`);
       if (s.exec.style !== 'taker' && s.finish === 'leave') out.warnings.push('Resting slices that have not filled when the time is up are left unfilled.');
       break;
     }
@@ -245,6 +296,41 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       else if (px && Number(s.quantity) * px < m.minNotional) out.errors.push(`The order is under SoDEX's ${usd(m.minNotional)} minimum.`);
       break;
     }
+    case 'basket': {
+      const each = s.style === 'swarm' ? Math.max(1, s.clips) : Math.max(1, s.slices);
+      out.children = s.legs.map((l) => {
+        const p = ctx.prices?.(l.symbol) ?? (l.symbol === m.name ? px : null);
+        return { at: start, qty: p ? l.usd / p : 0, price: p, tag: `${l.side === 'buy' ? 'buy' : 'sell'} ${l.symbol}` };
+      });
+      out.notional = s.legs.reduce((a, l) => a + l.usd, 0);
+      if (s.style === 'twap') {
+        out.endsAt = start + s.durationMs;
+        out.intervalMs = s.durationMs / s.slices;
+      } else {
+        out.endsAt = start + Math.max(0, Math.ceil(s.clips / Math.max(1, s.inFlight)) - 1) * s.waveMs;
+        out.intervalMs = s.waveMs;
+      }
+      const small = s.legs.filter((l) => l.usd / each < m.minNotional);
+      if (small.length) out.errors.push(`${small.map((l) => l.symbol).join(', ')}: each ${s.style === 'swarm' ? 'clip' : 'slice'} would be under SoDEX's ${usd(m.minNotional)} minimum. Use fewer ${s.style === 'swarm' ? 'clips' : 'slices'} or more per market.`);
+      break;
+    }
+    case 'bracket': {
+      const entryPx = s.entry === 'limit' ? s.price : px;
+      out.children = [{ at: null, qty: total!, price: s.entry === 'limit' ? s.price : null, tag: 'entry' }];
+      summarise();
+      if (entryPx && total! * entryPx < m.minNotional) out.errors.push(`The entry is under SoDEX's ${usd(m.minNotional)} minimum.`);
+      if (s.entry === 'limit' && px && s.price !== null && (s.side === 'buy' ? s.price >= px : s.price <= px)) out.warnings.push('The entry price is at or through the market: it fills at once.');
+      break;
+    }
+  }
+  // Exits: where they sit against the average fill this plan expects, and never on the wrong side of the price now.
+  if (s.exits && px) {
+    const ref = out.avgPrice ?? (s.kind === 'bracket' && s.entry === 'limit' && s.price ? s.price : px);
+    const lv = exitLevels(s.side, s.exits, ref);
+    out.exits = lv;
+    const long = s.side === 'buy';
+    if (s.exits.tpPrice !== null && (long ? s.exits.tpPrice <= px : s.exits.tpPrice >= px)) out.errors.push(`The take-profit ${s.exits.tpPrice} is on the wrong side of the price now: it would fire at once.`);
+    if (s.exits.slPrice !== null && (long ? s.exits.slPrice >= px : s.exits.slPrice <= px)) out.errors.push(`The stop-loss ${s.exits.slPrice} is on the wrong side of the price now: it would fire at once.`);
   }
   return out;
 }

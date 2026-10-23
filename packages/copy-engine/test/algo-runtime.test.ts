@@ -14,9 +14,11 @@ import {
   type Print,
   type PriceSource,
   type Quote,
+  type RegionPolicy,
   type SodexClient,
+  type StopRequest,
 } from '../src/index.ts';
-import { BTC, FOLLOWER } from './helpers.ts';
+import { BTC, ETH, FOLLOWER } from './helpers.ts';
 
 const ACCOUNT = 42;
 let clock = 1_800_000_000_000;
@@ -30,6 +32,9 @@ afterEach(() => {
 });
 
 const settle = async (n = 6) => {
+  for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+  // Paper fills arrive on a 0 ms timer (as a socket message would, after the request's answer).
+  await new Promise((r) => setTimeout(r, 5));
   for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
 };
 
@@ -105,11 +110,11 @@ class FakeSink implements AlgoSink {
   get all(): ChildRequest[] {
     return this.placed.flat();
   }
-  async place(_a: AlgoRecord, _m: unknown, orders: ChildRequest[]): Promise<ChildResult[]> {
+  async place(_a: AlgoRecord, mk: { name: string }, orders: ChildRequest[]): Promise<ChildResult[]> {
     this.placed.push(orders);
     if (this.mode !== 'ok') return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: this.mode === 'reject' ? 'nope' : 'timeout', outcomeUnknown: this.mode === 'unknown' }));
     for (const o of orders) {
-      const q = this.m.quote('BTC-USD')!;
+      const q = this.m.quote(mk.name)!;
       const touch = o.side === 'buy' ? q.ask : q.bid;
       const reaches = o.side === 'buy' ? Number(o.price) >= touch : Number(o.price) <= touch;
       setImmediate(() => {
@@ -135,6 +140,16 @@ class FakeSink implements AlgoSink {
   async setLeverage(_a: AlgoRecord, _m: unknown, lev: number): Promise<void> {
     this.leverage.push(lev);
   }
+  stops: StopRequest[][] = [];
+  async placeStops(_a: AlgoRecord, _m: unknown, stops: StopRequest[]): Promise<ChildResult[]> {
+    this.stops.push(stops);
+    for (const s of stops) setImmediate(() => this.m.order({ clOrdID: s.clOrdID, status: 'NEW' }));
+    return stops.map((s) => ({ clOrdID: s.clOrdID, ok: true, orderId: '2', error: null, outcomeUnknown: false }));
+  }
+  /** SoDEX fires a stop: it fills in full at `price`. */
+  fireStop(id: string, qty: number, price: number): void {
+    this.m.order({ clOrdID: id, status: 'FILLED', filledQty: qty, filledValue: qty * price, maker: false });
+  }
   /** Fill a resting order (part or all). */
   fill(id: string, qty: number): void {
     const r = this.resting.get(id)!;
@@ -151,7 +166,10 @@ interface Rig {
   sink: FakeSink;
   store: MemoryAlgoStore;
   lookups: Array<{ history: boolean }>;
-  position: { size: number };
+  position: { size: number; entry: number };
+  /** The region rules the host reports (null: none) and the account it reads. */
+  policy: { value: RegionPolicy | null };
+  account: { equity: number; gross: number };
   lookupRows: Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>;
 }
 
@@ -159,10 +177,10 @@ async function rig(): Promise<Rig> {
   const market = new FakeMarket();
   const sink = new FakeSink(market);
   const store = new MemoryAlgoStore();
-  const position = { size: 0 };
+  const position = { size: 0, entry: 0 };
   const lookups: Rig['lookups'] = [];
-  const r: Rig = { rt: null as unknown as AlgoRuntime, market, sink, store, lookups, position, lookupRows: [] };
-  const sodex = { markets: async () => [BTC], follower: async () => ({ positions: { 'BTC-USD': { size: position.size } } }), get: async () => [] } as unknown as SodexClient;
+  const r: Rig = { rt: null as unknown as AlgoRuntime, market, sink, store, lookups, position, policy: { value: null }, account: { equity: 1_000, gross: 0 }, lookupRows: [] };
+  const sodex = { markets: async () => [BTC, ETH], follower: async () => ({ positions: { 'BTC-USD': { size: position.size, entry: position.entry } } }), get: async () => [] } as unknown as SodexClient;
   r.rt = new AlgoRuntime({
     store,
     sodex,
@@ -171,6 +189,8 @@ async function rig(): Promise<Rig> {
     sinkFor: () => sink,
     log: silentLogger,
     autoTick: false,
+    policyFor: () => r.policy.value,
+    account: async () => ({ ...r.account }),
     lookup: async (_a, _s, history) => {
       lookups.push({ history });
       return history ? r.lookupRows : [];
@@ -501,4 +521,143 @@ test('pause pulls the resting child; resume carries on; restarts ask SoDEX about
   await again.stepNow(a.id, clock + 500);
   await settle();
   assert.equal(r.sink.all.length, 2, 'nothing new while it is unknown');
+});
+
+test('bracket: the entry fills, then a take-profit and a stop-loss on SoDEX; when one fills the other is cancelled', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'bracket', quantity: '0.002', entry: 'market', slippageBps: 20, exits: { tpPct: 0.02, slPct: 0.01 } });
+  let x = await step(r, a.id);
+  assert.equal(r.sink.all.length, 1, 'the entry: one taker');
+  x = await step(r, a.id, 500);
+  assert.equal(x.status, 'done');
+  assert.equal(r.sink.stops.length, 1, 'exits placed once the entry filled');
+  const [tp, sl] = r.sink.stops[0]!;
+  assert.deepEqual([tp!.kind, tp!.side, tp!.quantity, tp!.triggerPrice], ['tp', 'sell', '0.002', '61210']);
+  assert.deepEqual([sl!.kind, sl!.side, sl!.quantity, sl!.triggerPrice], ['sl', 'sell', '0.002', '59410']);
+  await settle();
+  r.sink.fireStop(tp!.clOrdID, 0.002, 61_210);
+  await settle();
+  assert.deepEqual(r.sink.cancelled, [sl!.clOrdID], 'one cancels the other');
+  const v = r.rt.view(a.id)!;
+  assert.equal(v.exits!.find((e) => e.kind === 'tp')!.filled, 0.002);
+});
+
+test('exits follow a TWAP as it fills: resized (cancel, then place) at most every 5 s while it runs, final at the end', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 120_000, slices: 2, exec: { style: 'taker' }, exits: { slPct: 0.05 } });
+  await step(r, a.id);
+  await step(r, a.id, 500);
+  assert.equal(r.sink.stops.length, 1);
+  assert.equal(r.sink.stops[0]![0]!.quantity, '0.002');
+  await step(r, a.id, 60_000);
+  await step(r, a.id, 500);
+  assert.ok(r.sink.cancelled.includes(r.sink.stops[0]![0]!.clOrdID), 'the first stop-loss is replaced');
+  const x = await step(r, a.id, 61_000);
+  assert.equal(x.status, 'done');
+  assert.equal(r.sink.stops.at(-1)![0]!.quantity, '0.004');
+});
+
+test('paper exits fire on the mark, and one cancels the other there too', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'bracket', quantity: '0.002', entry: 'market', paper: true, exits: { tpPrice: 60_500, slPrice: 59_500 } });
+  await step(r, a.id);
+  const x = await step(r, a.id, 500);
+  assert.equal(x.status, 'done');
+  assert.equal(x.exitOrders!.filter((e) => e.state === 'open').length, 2);
+  r.market.set('BTC-USD', 59_400, 59_410, 59_405);
+  r.rt.tick(clock);
+  await settle();
+  const y = r.rt.get(a.id)!;
+  assert.equal(y.exitOrders!.find((e) => e.exit === 'sl')!.filled, 0.002);
+  assert.equal(y.exitOrders!.find((e) => e.exit === 'tp')!.state, 'done');
+  assert.equal(r.sink.stops.length, 0, 'paper: nothing sent');
+});
+
+test('basket: one algo per market, sized at the mark, cancelled together, done when every leg is', async () => {
+  const r = await rig();
+  r.market.set('ETH-USD', 2_999, 3_001, 3_000);
+  const a = await add(r, { kind: 'basket', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 120 }, { symbol: 'ETH-USD', side: 'sell', usd: 60 }], style: 'swarm', clips: 2, inFlight: 2, waveMs: 0, slippageBps: 20 });
+  await step(r, a.id);
+  const legs = r.rt.list(FOLLOWER).filter((c) => c.parentId === a.id);
+  assert.equal(legs.length, 2);
+  const eth = legs.find((c) => c.spec.symbol === 'ETH-USD')!;
+  assert.equal(eth.spec.side, 'sell');
+  assert.equal((eth.spec as { quantity: string }).quantity, '0.02');
+  for (const c of legs) {
+    await step(r, c.id);
+    await step(r, c.id, 500);
+  }
+  assert.ok(legs.every((c) => r.rt.get(c.id)!.status === 'done'));
+  const x = await step(r, a.id, 500);
+  assert.equal(x.status, 'done');
+  assert.equal(r.rt.view(a.id)!.progress, 1);
+  const b = await add(r, { kind: 'basket', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 120 }, { symbol: 'ETH-USD', side: 'buy', usd: 60 }], style: 'twap', durationMs: 600_000, slices: 2, slippageBps: 20 });
+  await step(r, b.id);
+  await r.rt.cancel(b.id);
+  assert.ok(r.rt.list(FOLLOWER).filter((c) => c.parentId === b.id).every((c) => c.status === 'cancelled'));
+});
+
+test('a position condition: it fires on the position as SoDEX reports it, read in the background', async () => {
+  const r = await rig();
+  r.position.size = 0.01;
+  r.position.entry = 59_000;
+  const a = await add(r, { kind: 'conditional', conditions: [{ type: 'position', symbol: 'BTC-USD', op: 'pnlAbove', value: 5 }], then: { type: 'market', quantity: '0.001', slippageBps: 20 } });
+  await step(r, a.id);
+  await step(r, a.id, 500);
+  assert.equal(r.sink.all.length, 1, 'PnL 0.01 x (60005 - 59000) = $10 >= $5');
+  const b = await add(r, { kind: 'conditional', conditions: [{ type: 'position', symbol: 'BTC-USD', op: 'flat' }], then: { type: 'market', quantity: '0.001', slippageBps: 20 } });
+  await step(r, b.id);
+  await step(r, b.id, 500);
+  assert.equal(r.sink.all.length, 1, 'not flat yet');
+  r.position.size = 0;
+  await step(r, b.id, 6_000);
+  await step(r, b.id, 500);
+  assert.equal(r.sink.all.length, 2);
+});
+
+test('region rules: a blocked region holds a live algo; the EEA 2x ceiling caps the leverage and the gross exposure', async () => {
+  const r = await rig();
+  r.policy.value = { region: 'blocked', allowed: false, maxLeverage: null, reason: 'Copy trading is not available in your region.', country: 'US', mismatch: false };
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 240_000, slices: 4, exec: { style: 'taker' }, leverage: 10 });
+  let x = await step(r, a.id);
+  assert.equal(x.status, 'scheduled');
+  assert.match(x.statusReason!, /not available in your region/);
+  r.policy.value = { region: 'eea', allowed: true, maxLeverage: 2, reason: null, country: 'DE', mismatch: false };
+  r.account = { equity: 100, gross: 150 };
+  x = await step(r, a.id, 61_000);
+  assert.deepEqual(r.sink.leverage, [2], 'leverage set to the ceiling, not the 10x asked');
+  assert.equal(r.sink.all.length, 1);
+  assert.equal(r.sink.all[0]!.quantity, '0.00083', 'cut to the $50 of room left under 2x');
+  r.account = { equity: 100, gross: 200 };
+  x = await step(r, a.id, 61_000);
+  assert.equal(x.status, 'waiting');
+  assert.match(x.statusReason!, /2x leverage cap/);
+  const p = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 240_000, slices: 4, exec: { style: 'taker' }, paper: true });
+  await step(r, p.id);
+  assert.ok(r.rt.get(p.id)!.filled > 0, 'paper sends nothing, so the region rules do not hold it');
+});
+
+test("a time-sliced close: the position's size and side when it starts, reduce-only", async () => {
+  const r = await rig();
+  r.position.size = -0.004;
+  const a = await add(r, { kind: 'twap', side: 'sell', closeShare: 1, durationMs: 120_000, slices: 2, exec: { style: 'taker' } });
+  await step(r, a.id);
+  assert.deepEqual([r.sink.all[0]!.side, r.sink.all[0]!.quantity, r.sink.all[0]!.reduceOnly], ['buy', '0.002', true]);
+  r.position.size = 0;
+  const b = await add(r, { kind: 'twap', closeShare: 0.5, durationMs: 120_000, slices: 2, exec: { style: 'taker' } });
+  const y = await step(r, b.id);
+  assert.equal(y.status, 'expired');
+  assert.match(y.statusReason!, /no position/);
+});
+
+test('smallest and largest slice: due quantity waits for the smallest; no child above the largest', async () => {
+  const r = await rig();
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 240_000, slices: 4, minSliceQty: '0.002', exec: { style: 'taker' } });
+  await step(r, a.id);
+  assert.equal(r.sink.all.length, 0, '0.001 due: under the smallest slice');
+  await step(r, a.id, 60_000);
+  assert.equal(r.sink.all[0]!.quantity, '0.002');
+  const b = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 120_000, slices: 2, maxSliceQty: '0.0015', exec: { style: 'taker' } });
+  await step(r, b.id);
+  assert.equal(r.sink.all.at(-1)!.quantity, '0.0015');
 });
