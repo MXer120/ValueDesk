@@ -22,6 +22,11 @@
 # names another env file.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/../.."
+# On a Windows PC whose AWS CLI is unpacked under %LOCALAPPDATA%\ddx-tools, not on PATH.
+if ! command -v aws >/dev/null 2>&1 && [ -n "${LOCALAPPDATA:-}" ] && command -v cygpath >/dev/null 2>&1; then
+  aws_dir="$(cygpath -u "$LOCALAPPDATA")/ddx-tools/awscli/Amazon/AWSCLIV2"
+  [ -x "$aws_dir/aws.exe" ] && PATH="$aws_dir:$PATH"
+fi
 : "${VS_EC2_ENV:=deploy/aws/ec2/ec2.tokyo.env}"
 export VS_EC2_ENV
 . deploy/release/lib.sh
