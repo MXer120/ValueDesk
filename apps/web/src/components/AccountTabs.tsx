@@ -29,7 +29,8 @@
  * to the rows each table already holds (accountTables/filters.ts), persist per
  * tab (`vs.acct.filter.<tab>`), and the counts in the tab labels follow them.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useLiveAlgos } from '../algo/algoBus';
 import { api, type Engine, type Symbol as MarketSymbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
 import { num, pick } from '../format';
@@ -66,6 +67,9 @@ export interface AccountTabsProps {
   /** Each engine's markets, so a table switched to the other engine can name them. */
   symbolsFor?: (engine: Engine) => Map<string, MarketSymbol>;
 }
+
+/** Algo orders (TWAP, VWAP, ...): the runner signs orders, so its table loads when the tab is opened. */
+const AlgoTable = lazy(() => import('./algo/AlgoTable'));
 
 const TABS: BandTab[] = [
   'positions', 'orders', 'balances', 'order-history', 'trade-history', 'funding-history', 'position-history', 'account-history',
@@ -159,6 +163,7 @@ export function AccountTabs({
    */
   const hideCounts = usePrivacy().isHidden('counts');
   const tally = (n: number | undefined) => (n === undefined || hideCounts ? '' : ` (${n})`);
+  const liveAlgos = useLiveAlgos();
 
   /*
    * The counts come from the SAME shared feeds the tables read (accountFeeds.ts,
@@ -205,6 +210,20 @@ export function AccountTabs({
       label: `Open Orders${tally(labelCount(orderCount, liveOrders))}`,
       content: <OpenOrders {...acct} {...band('orders')} showTitle={false} headAction={switcher} />,
     },
+    // Algo orders run in perps; someone else's account (Scan) has none of ours to show.
+    ...(perpsTabs && !readOnly
+      ? [
+          {
+            key: 'algos',
+            label: `Algos${liveAlgos ? tally(liveAlgos) : ''}`,
+            content: (
+              <Suspense fallback={null}>
+                <AlgoTable address={address} />
+              </Suspense>
+            ),
+          },
+        ]
+      : []),
     {
       key: 'balances',
       label: 'Balances',
@@ -251,6 +270,7 @@ export function AccountTabs({
   ];
 
   const actions = (active: string): ReactNode => {
+    if (active === 'algos') return null;
     const t = (TABS as string[]).includes(active) ? (active as BandTab) : 'positions';
     if (t === 'balances') {
       return (

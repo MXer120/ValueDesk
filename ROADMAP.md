@@ -26,6 +26,7 @@ A user picks an address and switches on copy trading themselves. The actual trad
 | SoDEX signing library (browser-safe) | `packages/sodex-core` |
 | Copy engine (planner, feeds, runtime, signed API) | `packages/copy-engine` |
 | Copy executor (hosted + self-hosted) | `apps/executor` |
+| Algo orders (TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing): engine, browser runner, ticket, Algos tab, executor routes | `packages/copy-engine/src/algo`, `apps/web/src/algo`, `apps/web/src/components/algo` - see **docs/ALGO-ORDERS.md** |
 | Copy trading contract (Foundry, not deployed) | `contracts/` |
 | Contract spec & integration | `docs/contracts/` |
 | Research | `docs/research/` (07 and 08 correct 01 and 03) |

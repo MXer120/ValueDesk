@@ -16,12 +16,16 @@
 import { existsSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import {
+  AlgoRuntime,
+  AlgoSpecError,
   COPY_ENGINE_VERSION,
   COPY_FEE_LADDER,
   COPY_FEE_WINDOW_DAYS,
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
   CopyRuntime,
+  FINAL_STATUSES,
+  KeyAlgoSink,
   HyperliquidClient,
   KeySink,
   PaperSink,
@@ -30,12 +34,17 @@ import {
   canonicalSettings,
   copyFeeFor,
   normaliseCountry,
+  parseAlgoSpec,
   parseSettings,
   randomId,
   regionPolicy,
   verifyCopyRequest,
   type AcceptTermsPayload,
   type ActivityEntry,
+  type AlgoEvent,
+  type AlgoRecord,
+  type AlgoSink,
+  type AlgoView,
   type CopyAction,
   type CopyView,
   type CreateKeyPayload,
@@ -85,6 +94,12 @@ export class ExecutorService {
   readonly executorId: string;
   readonly keyName: string;
   readonly runtime: CopyRuntime;
+  /**
+   * Algo orders (TWAP, VWAP, POV, ...): the same engine package, the same key
+   * the follower registered for this executor, the same nonce sequence, the
+   * same builder (the copy fee ladder), the same terms and region rules.
+   */
+  readonly algos: AlgoRuntime;
   readonly sodex: SodexClient;
   private readonly hyperliquid: HyperliquidClient;
   private readonly nonces = createMemoryNonceManager();
@@ -119,13 +134,25 @@ export class ExecutorService {
       policyFor: (s) => regionPolicy(s.country, s.observedCountry),
       keyProblem: (s) => this.keyProblem(s.owner),
     });
+    this.algos = new AlgoRuntime({
+      store: db,
+      sodex: this.sodex,
+      network: cfg.network,
+      factory: deps.factory,
+      log: deps.log,
+      sinkFor: (a) => this.algoSink(a),
+      builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
+      problem: (a) => this.algoProblem(a),
+    });
   }
 
   async start(): Promise<void> {
     await this.runtime.start();
+    await this.algos.start();
   }
 
   async stop(): Promise<void> {
+    await this.algos.stop();
     await this.runtime.stop();
     this.builderDb?.close();
   }
@@ -160,13 +187,15 @@ export class ExecutorService {
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
+      algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
     };
   }
 
-  health(): { ok: boolean; copies: number; active: number; feeds: { sodex: boolean } } {
+  health(): { ok: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean } } {
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
-    return { ok: true, copies: all.length, active: all.filter((s) => s.status === 'active').length, feeds: { sodex: v?.feeds.sodex ?? true } };
+    const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
+    return { ok: true, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex: v?.feeds.sodex ?? true } };
   }
 
   /* --------------------------------------------------------- requests ----- */
@@ -299,9 +328,10 @@ export class ExecutorService {
     return this.keyInfo(owner);
   }
 
-  /** Stop every copy and forget the keys. The follower revokes the key on SoDEX with their wallet. */
+  /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
   async deleteKey(req: unknown, ctx: RequestContext): Promise<MeResponse> {
     const { owner, payload } = this.accept(req, 'delete-key', ctx);
+    await this.algos.cancelAll(owner);
     await this.runtime.stopAll(owner, { close: payload.close === true });
     this.db.deleteKeys(owner);
     this.signers.delete(owner);
@@ -440,6 +470,103 @@ export class ExecutorService {
     const s = this.runtime.get(subId);
     if (!s || s.owner !== owner) throw new ApiError(404, 'copy', 'No such copy.');
     return this.db.activity({ subId, limit: q.limit ?? 200, before: q.before });
+  }
+
+  /* ------------------------------------------------------------ algos ----- */
+
+  /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
+  private algoSink(a: AlgoRecord): AlgoSink | null {
+    if (!this.db.key(a.owner, 'active')) return null;
+    return new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
+      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(this.volumeOf(x.owner)) } : null,
+    );
+  }
+
+  /**
+   * Why a live algo cannot trade now (it waits, and goes on by itself once
+   * this clears): the key, the builder approval, the region - the same three
+   * things that block a copy.
+   */
+  private async algoProblem(a: AlgoRecord): Promise<string | null> {
+    const key = await this.keyProblem(a.owner);
+    if (key) return key;
+    if (this.cfg.builderId > 0) {
+      const fee = copyFeeFor(this.volumeOf(a.owner));
+      const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
+      if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
+    }
+    const t = this.db.terms(a.owner);
+    const policy = regionPolicy(t?.country ?? null, null);
+    if (!policy.allowed) return policy.reason ?? 'Not available in your region.';
+    return null;
+  }
+
+  /** Start an algo order for the wallet that signed it. */
+  async algoStart(req: unknown, ctx: RequestContext): Promise<AlgoView> {
+    const { owner, payload, consent } = this.accept(req, 'algo-start', ctx);
+    if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new orders right now. Running ones continue.');
+    this.needTerms(owner, ctx);
+    let spec;
+    try {
+      spec = parseAlgoSpec(payload.spec);
+    } catch (e) {
+      throw new ApiError(400, 'spec', e instanceof AlgoSpecError ? e.message : String(e));
+    }
+    const seed = Number(payload.seed);
+    if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
+    const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
+    if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, 'limit', `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    let accountId = 0;
+    if (!spec.paper) {
+      await this.verifyKey(owner);
+      const k = this.db.key(owner, 'active');
+      if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
+      accountId = await this.sodex.accountId(owner);
+      if (!accountId) throw new ApiError(412, 'account', 'This wallet has no SoDEX account yet. Deposit first.');
+    }
+    let a: AlgoRecord;
+    try {
+      a = await this.algos.add({ owner, accountId, mode: this.cfg.kind, spec, consent, seed });
+    } catch (e) {
+      throw new ApiError(400, 'algo', e instanceof Error ? e.message : String(e));
+    }
+    this.deps.log.info('algo started', { owner, algo: a.id, kind: spec.kind, symbol: spec.symbol, paper: spec.paper });
+    return this.algos.view(a.id)!;
+  }
+
+  /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
+  async algoAct(req: unknown, ctx: RequestContext): Promise<{ algos: AlgoView[] }> {
+    const { owner, payload } = this.accept(req, 'algo-action', ctx);
+    const op = payload.op;
+    const fail = (e: unknown): never => {
+      throw e instanceof ApiError ? e : new ApiError(409, 'state', e instanceof Error ? e.message : String(e));
+    };
+    let touched: AlgoRecord[];
+    if (op === 'cancel-all') touched = await this.algos.cancelAll(owner).catch(fail);
+    else {
+      const a = typeof payload.id === 'string' ? this.algos.get(payload.id) : null;
+      if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
+      if (op === 'pause') touched = [await this.algos.pause(a.id).catch(fail)];
+      else if (op === 'resume') {
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.resume(a.id).catch(fail)];
+      } else if (op === 'cancel') touched = [await this.algos.cancel(a.id).catch(fail)];
+      else throw new ApiError(400, 'op', 'op must be pause, resume, cancel or cancel-all.');
+    }
+    return { algos: touched.map((a) => this.algos.view(a.id)).filter((v): v is AlgoView => v !== null) };
+  }
+
+  algoList(owner: string): AlgoView[] {
+    return this.algos
+      .list(owner)
+      .map((a) => this.algos.view(a.id))
+      .filter((v): v is AlgoView => v !== null);
+  }
+
+  async algoEvents(owner: string, id: string, q: { limit?: number; before?: number }): Promise<AlgoEvent[]> {
+    const a = this.algos.get(id);
+    if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
+    return this.algos.events(id, { limit: q.limit ?? 200, before: q.before });
   }
 
   /** Every signed instruction of this wallet (newest first): the follower's own record. */

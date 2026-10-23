@@ -48,6 +48,7 @@ export function parseMarkets(rows: unknown): MarketInfo[] {
       buyLimitUpRatio: num(r.buyLimitUpRatio, 0.05),
       sellLimitDownRatio: num(r.sellLimitDownRatio, 0.05),
       takerFee: num(r.takerFee, 0.0004),
+      ...(Number.isFinite(num(r.makerFee)) ? { makerFee: num(r.makerFee) } : {}),
       status: str(r.status, 'TRADING'),
     });
   }

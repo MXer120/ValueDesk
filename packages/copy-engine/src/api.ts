@@ -42,9 +42,13 @@ export type CopyAction =
   | 'pause'
   | 'resume'
   | 'stop'
-  | 'stop-all';
+  | 'stop-all'
+  /** Start an algo order (TWAP, VWAP, ...): the payload is its spec, as the wallet displays it. */
+  | 'algo-start'
+  /** Pause, resume or cancel an algo order, or cancel all of them. */
+  | 'algo-action';
 
-export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all'];
+export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action'];
 
 export const COPY_REQUEST_FIELDS = [
   { name: 'action', type: 'string' },
@@ -225,6 +229,18 @@ export interface UpdatePayload {
   settings: Record<string, unknown>;
 }
 
+/** 'algo-start': the algo's spec (parseAlgoSpec form) and the seed of its random choices, so it runs the schedule the ticket previewed. */
+export interface AlgoStartPayload {
+  spec: Record<string, unknown>;
+  seed: number;
+}
+
+export interface AlgoActionPayload {
+  op: 'pause' | 'resume' | 'cancel' | 'cancel-all';
+  /** Every op but 'cancel-all'. */
+  id?: string;
+}
+
 /* -------------------------------------------------------------- responses ----- */
 
 export interface ExecutorInfo {
@@ -246,6 +262,8 @@ export interface ExecutorInfo {
   keyTtlDaysMax: number;
   /** The key name the follower registers on SoDEX for this executor. */
   keyName: string;
+  /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
+  algos?: { maxPerOwner: number };
 }
 
 export interface SessionGrant {

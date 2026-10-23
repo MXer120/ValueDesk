@@ -42,6 +42,7 @@ import './components/MarketPanels.css';
 import './chart/chart.css';
 import './components/ReviewPosition.css';
 import './components/OrderEntry.css';
+import './components/algo/algo.css';
 import './dashboard/carousel.css';
 import './components/Stats.css';
 import './dashboard/sourceWidgets.css';

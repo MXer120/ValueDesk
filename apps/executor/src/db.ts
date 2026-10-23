@@ -9,7 +9,7 @@
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import type { ActivityEntry, CopyStore, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
+import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS consents (
   viewer_country TEXT
 );
 CREATE INDEX IF NOT EXISTS consents_owner ON consents (owner, at);
+CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
+CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
 `;
 
 export interface KeyRow {
@@ -73,7 +77,7 @@ export interface ConsentRow {
 
 type Row = Record<string, unknown>;
 
-export class ExecutorDb implements CopyStore {
+export class ExecutorDb implements CopyStore, AlgoStore {
   readonly db: DatabaseSync;
   private stmts = new Map<string, StatementSync>();
 
@@ -153,10 +157,39 @@ export class ExecutorDb implements CopyStore {
     return rows.map((r) => JSON.parse(String(r.json)) as ActivityEntry);
   }
 
-  /** Activity older than `days` goes (the copy's books keep their totals). */
+  /** Activity (copies' and algos') older than `days` goes; the books keep their totals. */
   pruneActivity(days: number, now = Date.now()): number {
     const r = this.q('DELETE FROM activity WHERE at < ?').run(now - days * 86_400_000);
-    return Number(r.changes);
+    const e = this.q('DELETE FROM algo_events WHERE at < ?').run(now - days * 86_400_000);
+    return Number(r.changes) + Number(e.changes);
+  }
+
+  /* ------------------------------------------------------ AlgoStore ----- */
+
+  async algos(): Promise<AlgoRecord[]> {
+    return (this.q('SELECT json FROM algos').all() as Row[]).map((r) => JSON.parse(String(r.json)) as AlgoRecord);
+  }
+
+  async saveAlgo(a: AlgoRecord): Promise<void> {
+    this.q('INSERT INTO algos (id, owner, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at').run(
+      a.id,
+      a.owner,
+      JSON.stringify(a),
+      Date.now(),
+    );
+  }
+
+  async addAlgoEvent(e: AlgoEvent): Promise<void> {
+    this.q('INSERT OR IGNORE INTO algo_events (id, algo_id, owner, at, json) VALUES (?, ?, ?, ?, ?)').run(e.id, e.algoId, e.owner, e.at, JSON.stringify(e));
+  }
+
+  async algoEvents(q: { algoId?: string; owner?: string; limit?: number; before?: number }): Promise<AlgoEvent[]> {
+    const limit = Math.max(1, Math.min(1000, q.limit ?? 200));
+    const before = q.before ?? Number.MAX_SAFE_INTEGER;
+    const rows = q.algoId
+      ? (this.q('SELECT json FROM algo_events WHERE algo_id = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.algoId, before, limit) as Row[])
+      : (this.q('SELECT json FROM algo_events WHERE owner = ? AND at < ? ORDER BY at DESC, id DESC LIMIT ?').all(q.owner ?? '', before, limit) as Row[]);
+    return rows.map((r) => JSON.parse(String(r.json)) as AlgoEvent);
   }
 
   /* ----------------------------------------------------------- keys ----- */
