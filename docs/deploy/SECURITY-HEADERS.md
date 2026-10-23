@@ -39,7 +39,7 @@ counterpart.
 | `X-Frame-Options` | `DENY` | Anti-framing for browsers without CSP level 2. |
 | `X-Content-Type-Options` | `nosniff` | |
 | `Referrer-Policy` | `strict-origin-when-cross-origin` | Other sites see our origin, never a path or query. Our paths and queries carry wallet addresses. `no-referrer` (the dev value) also works, but it may stop WalletConnect Verify from attesting the domain. |
-| `Permissions-Policy` | `accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)` | The app uses clipboard writes (copy buttons) and fullscreen (charts), nothing else. Wallet popups are their own browsing contexts and are not affected. |
+| `Permissions-Policy` | `accelerometer=(), autoplay=(self "https://www.youtube.com" "https://player.twitch.tv" "https://player.kick.com" "https://player.vimeo.com"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)` | The app uses clipboard writes (copy buttons), fullscreen (charts) and, for the Live Feed's video players only, autoplay: without it a browser stops a stream the moment it is unmuted. Nothing else. Wallet popups are their own browsing contexts and are not affected. |
 | `Cross-Origin-Opener-Policy` | `same-origin-allow-popups` | Isolates the window from pages that open it. Wallet popups the app opens itself, such as the Coinbase Wallet SDK, keep their `window.opener`. Plain `same-origin` would break those popups. |
 | `Cross-Origin-Resource-Policy` | `same-origin` | Other sites cannot embed our assets. |
 | `X-XSS-Protection` | `0` | Turns off the legacy XSS auditor, which could itself be abused. |
@@ -266,7 +266,7 @@ file://site-headers.json` takes:
   "CustomHeadersConfig": {
     "Quantity": 3,
     "Items": [
-      { "Header": "Permissions-Policy", "Override": true, "Value": "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)" },
+      { "Header": "Permissions-Policy", "Override": true, "Value": "accelerometer=(), autoplay=(self \"https://www.youtube.com\" \"https://player.twitch.tv\" \"https://player.kick.com\" \"https://player.vimeo.com\"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)" },
       { "Header": "Cross-Origin-Opener-Policy", "Override": true, "Value": "same-origin-allow-popups" },
       { "Header": "Cross-Origin-Resource-Policy", "Override": true, "Value": "same-origin" }
     ]
@@ -308,7 +308,7 @@ valuescan.example {
 		X-Frame-Options "DENY"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)"
+		Permissions-Policy "accelerometer=(), autoplay=(self \"https://www.youtube.com\" \"https://player.twitch.tv\" \"https://player.kick.com\" \"https://player.vimeo.com\"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)"
 		Cross-Origin-Opener-Policy "same-origin-allow-popups"
 		Cross-Origin-Resource-Policy "same-origin"
 		X-XSS-Protection "0"

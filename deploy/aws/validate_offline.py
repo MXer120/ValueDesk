@@ -91,7 +91,7 @@ CSP_HEADER_ONLY = {"manifest-src": ["'self'"], "frame-ancestors": ["'none'"], "u
 CSP_MAX_LEN = 1783  # CloudFront's limit for a response headers policy
 IMAGES_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox"
 PERMISSIONS_POLICY = (
-    "accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), "
+    "accelerometer=(), autoplay=(self \"https://www.youtube.com\" \"https://player.twitch.tv\" \"https://player.kick.com\" \"https://player.vimeo.com\"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), "
     "gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), "
     "xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)"
 )

@@ -314,7 +314,7 @@ Resources:
           Items:
             - Header: Permissions-Policy
               Override: true
-              Value: accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
+              Value: accelerometer=(), autoplay=(self "https://www.youtube.com" "https://player.twitch.tv" "https://player.kick.com" "https://player.vimeo.com"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
             - Header: Cross-Origin-Opener-Policy
               Override: true
               Value: same-origin-allow-popups
@@ -384,7 +384,7 @@ Resources:
           Items:
             - Header: Permissions-Policy
               Override: true
-              Value: accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
+              Value: accelerometer=(), autoplay=(self "https://www.youtube.com" "https://player.twitch.tv" "https://player.kick.com" "https://player.vimeo.com"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
             - Header: Cross-Origin-Opener-Policy
               Override: true
               Value: same-origin-allow-popups
@@ -427,7 +427,7 @@ Resources:
           Items:
             - Header: Permissions-Policy
               Override: true
-              Value: accelerometer=(), autoplay=(), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
+              Value: accelerometer=(), autoplay=(self "https://www.youtube.com" "https://player.twitch.tv" "https://player.kick.com" "https://player.vimeo.com"), camera=(), display-capture=(), encrypted-media=(), geolocation=(), gyroscope=(), hid=(), magnetometer=(), microphone=(), midi=(), payment=(), serial=(), usb=(), xr-spatial-tracking=(), browsing-topics=(), clipboard-read=(), clipboard-write=(self), fullscreen=(self)
             - Header: Cross-Origin-Opener-Policy
               Override: true
               Value: same-origin-allow-popups
