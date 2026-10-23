@@ -37,7 +37,7 @@ export interface TvPalette {
 
 /** styles.css :root values at the time of writing. */
 export const FALLBACK_PALETTE: TvPalette = {
-  panel: '#151515',
+  panel: '#1a1a1b',
   elevated: '#272727',
   hover: '#363636',
   control: '#4e4e4e',

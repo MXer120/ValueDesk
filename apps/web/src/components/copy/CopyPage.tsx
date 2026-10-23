@@ -24,7 +24,7 @@ import { VENUE_LABEL, type TraderRow, type Venue } from '../../vsApi';
 import { BacktestPanel, CopiesPanel, PositionsPanel, TraderPanel } from './panels';
 import { CopyModal } from './CopyModal';
 import { Discover } from './Discover';
-import { Avatar, holdPeeks } from './TraderCard';
+import { Avatar, CopyButton, holdPeeks } from './TraderCard';
 import { useCopyContext, type CopyPageProps } from './useCopy';
 import './Copy.css';
 import './CopyHome.css';
@@ -167,12 +167,8 @@ function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCo
         </div>
         <span className="cpy-tabs__fill" />
         <button type="button" className="cpy-chip" onClick={() => c.onScan(leader, c.venue)} title="Open this trader in Scan">Open in Scan</button>
-        <button type="button" className="cpy-copybtn cpy-copybtn--counter cpy-copybtn--lg cpy-copybtn--ghost" onClick={() => onCopy('counter')} title="Take the other side of every trade">
-          Counter-trade
-        </button>
-        <button type="button" className={`cpy-copybtn cpy-copybtn--lg${copying ? ' is-copying' : ''}`} onClick={() => onCopy('copy')}>
-          {copying ? 'Copying · add another' : 'Copy this trader'}
-        </button>
+        <CopyButton kind="counter" size="lg" label="Counter-trade" title="Take the other side of every trade" onClick={() => onCopy('counter')} />
+        <CopyButton kind="copy" size="lg" copying={copying} label={copying ? 'Copying · add another' : 'Copy this trader'} onClick={() => onCopy('copy')} />
       </header>
       <div className="pf copy cpy-trader__grid">
         <div className="cpy-trader__side"><TraderPanel c={c} /></div>

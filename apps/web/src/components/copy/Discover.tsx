@@ -11,7 +11,7 @@
  * public boards' (/api/vs/leaderboard); the curve on a card is read from the
  * venue in this browser when it scrolls into view (TraderCard.tsx).
  */
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useMemo, useState, type CSSProperties, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { DASH, fmtUsd, shortAddr } from '../../format';
 import { LoadFailed, useLoadFailedToast } from '../LoadFailed';
@@ -23,7 +23,8 @@ import {
   deckOf, filtersActive, kindOf, mixKinds, normaliseFilters, scoreRows, shapeGrid, winRateLabel,
   type Category, type Filters, type GridKind, type Scored, type SortKey,
 } from './gridModel';
-import { Avatar, CoinRow, ScoreMeter, Spark, TraderCard, WINDOW_SHORT, useTraderPeek } from './TraderCard';
+import { Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, WINDOW_SHORT, WinRate, useTraderPeek } from './TraderCard';
+import { Deck } from './Deck';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
 import { COPY_COST_BPS, WRONG_SIDE_CAP } from './copyScore';
 
@@ -86,7 +87,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
     () => shapeGrid(kind === 'counter' ? scoredCounter : kind === 'copy' ? scored : mixed, { category: prefs.category, filters: prefs.filters, sort: prefs.sort, window: w, q: pasted ? '' : q }),
     [kind, scored, scoredCounter, mixed, prefs.category, prefs.filters, prefs.sort, w, q, pasted],
   );
-  const deck = useMemo(() => deckOf(scored, scoredCounter, w, 5), [scored, scoredCounter, w]);
+  const deck = useMemo(() => deckOf(scored, scoredCounter, w, 10), [scored, scoredCounter, w]);
   const nFilters = filtersActive(prefs.filters);
   // What the grid waits on: the board(s) its kind reads.
   const sources = kind === 'counter' ? [worst] : kind === 'copy' ? [boards] : [boards, worst];
@@ -204,16 +205,16 @@ export function Discover({ onOpen, onCopy, copying, onAddress }: DiscoverProps) 
         {nFilters > 0 && (
           <button type="button" className="cpy-clear" onClick={() => patch({ filters: NO_FILTERS })}>Clear {nFilters}</button>
         )}
-        <span className="cpy-count">{loading ? 'Loading traders…' : `${grid.length} trader${grid.length === 1 ? '' : 's'}`}</span>
+        <span className="cpy-count" title={kind === 'mixed' ? 'One score for both, 0 to 100: how well copying, or countering, would have worked.' : undefined}>
+          {kind === 'mixed' && !loading && grid.length > 0 && (
+            <span className="cpy-legend" aria-label="Green cards are traders to copy, red ones traders to counter">
+              <span className="cpy-legend__copy">copy</span>
+              <span className="cpy-legend__counter">counter</span>
+            </span>
+          )}
+          {loading ? 'Loading traders…' : `${grid.length} trader${grid.length === 1 ? '' : 's'}`}
+        </span>
       </div>
-
-      {kind === 'mixed' && !loading && grid.length > 0 && (
-        <p className="cpy-legend">
-          <span className="cpy-legend__copy">Green: copy them</span>
-          <span className="cpy-legend__counter">Red: trade against them</span>
-          <span className="cpy-legend__fine">One score for both, 0 to 100: how well copying, or countering, would have worked.</span>
-        </p>
-      )}
 
       {kind === 'counter' && (
         <p className="cpy-counter-note">
@@ -325,104 +326,6 @@ const ListIcon = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path d="M2 3h12v2H2zM2 7h12v2H2zM2 11h12v2H2z" fill="currentColor" /></svg>
 );
 
-/** How often the deck deals its next card to the front. */
-const DEAL_MS = 4200;
-
-/**
- * The hero: the best traders of both kinds fanned like a hand of cards, the
- * best in front, with two speech chips - who is in front, and how many traders
- * the grid has. It deals the next card to the front every few seconds (not
- * with reduced motion, not while the pointer or the focus is on it). A card
- * opens its trader.
- */
-function Deck({ picks, w, total, loading, onOpen }: {
-  picks: readonly Scored[];
-  w: BoardWindow;
-  total: number;
-  loading: boolean;
-  onOpen: (r: TraderRow) => void;
-}) {
-  const [turn, setTurn] = useState(0);
-  const [held, setHeld] = useState(false);
-  const n = picks.length;
-  useEffect(() => {
-    if (n < 2 || held) return;
-    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const t = setInterval(() => setTurn((x) => x + 1), DEAL_MS);
-    return () => clearInterval(t);
-  }, [n, held]);
-
-  if (!n) {
-    return (
-      <div className="cpy-deck" aria-hidden="true">
-        {[2, 1, 0].map((slot) => <span key={slot} className="cpy-deck__card cpy-deck__card--ghost" data-slot={slot} />)}
-        {!loading && <span className="cpy-deck__chip cpy-deck__chip--count">No trader on the boards yet</span>}
-      </div>
-    );
-  }
-  const first = turn % n;
-  const front = picks[first]!;
-  return (
-    <div
-      className="cpy-deck"
-      onMouseEnter={() => setHeld(true)}
-      onMouseLeave={() => setHeld(false)}
-      onFocus={() => setHeld(true)}
-      onBlur={() => setHeld(false)}
-    >
-      {picks.map((s, i) => (
-        <DeckCard key={keyOf(s.row)} s={s} w={w} slot={(i - first + n) % n} onOpen={onOpen} />
-      ))}
-      <span className={`cpy-deck__chip cpy-deck__chip--who cpy-deck__chip--${front.score.kind}`}>
-        <Avatar address={front.row.address} size={16} />
-        <span>@{shortAddr(front.row.address)}</span>
-        <b>{front.score.kind === 'copy' ? 'to copy' : 'to counter'}</b>
-      </span>
-      <span className="cpy-deck__chip cpy-deck__chip--count">
-        <i className="cpy-deck__dot cpy-deck__dot--copy" />
-        <i className="cpy-deck__dot cpy-deck__dot--counter" />
-        {total} traders to copy or counter now
-      </span>
-    </div>
-  );
-}
-
-function DeckCard({ s, w, slot, onOpen }: { s: Scored; w: BoardWindow; slot: number; onOpen: (r: TraderRow) => void }) {
-  const { ref, peek, loading } = useTraderPeek(s.row, w);
-  const pnl = s.row.pnl[w] ?? null;
-  const kind = s.score.kind;
-  return (
-    <button
-      ref={ref}
-      type="button"
-      className={`cpy-deck__card cpy-card--${kind}`}
-      data-slot={slot}
-      tabIndex={slot === 0 ? 0 : -1}
-      onClick={() => onOpen(s.row)}
-      aria-label={`${kind === 'copy' ? 'Copy' : 'Counter-trade'} pick ${shortAddr(s.row.address)} on ${VENUE_LABEL[s.row.venue]}`}
-    >
-      <span className="cpy-glow" aria-hidden="true">
-        <span className="cpy-glow__rim"><span className="cpy-glow__glare" /></span>
-      </span>
-      <span className="cpy-deck__head">
-        <Avatar address={s.row.address} size={26} />
-        <span className="cpy-deck__who">
-          <span className="cpy-deck__addr">{shortAddr(s.row.address)}</span>
-          <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[s.row.venue] } as CSSProperties}>{VENUE_LABEL[s.row.venue]}</span>
-        </span>
-        <span className={`cpy-deck__tag cpy-deck__tag--${kind}`}>{kind === 'copy' ? 'Copy' : 'Counter'}</span>
-      </span>
-      <span className={`cpy-deck__big ${s.score.roi !== null && s.score.roi < 0 ? 'neg' : 'pos'}`}>{fmtSignedPct(s.score.roi, 1)}</span>
-      <span className="cpy-deck__lbl">Return {WINDOW_SHORT[w]} · {fmtSignedUsd(pnl, 0)}</span>
-      <Spark values={peek?.spark ?? null} loading={loading} className="cpy-deck__spark" />
-      <span className="cpy-deck__foot">
-        <ScoreMeter s={s.score} />
-        <CoinRow assets={s.row.assets} max={3} />
-      </span>
-    </button>
-  );
-}
-
 function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
   rows: Scored[];
   w: BoardWindow;
@@ -441,40 +344,53 @@ function TraderList({ rows, w, kind, onOpen, onCopy, copying }: {
             <th className="num">PnL {WINDOW_SHORT[w]}</th>
             <th className="num">Return</th>
             <th className="num">Equity</th>
+            <th>PnL curve</th>
             <th className="num">Win rate</th>
             <th>Trades</th>
             <th aria-label="Copy" />
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ row, score }) => {
-            const pnl = row.pnl[w] ?? null;
-            return (
-              <tr key={keyOf(row)} tabIndex={0} onClick={() => onOpen(row)} onKeyDown={(e) => { if (e.key === 'Enter') onOpen(row); }}>
-                <td>
-                  <span className="cpy-list__who">
-                    <Avatar address={row.address} size={22} />
-                    <span className="cpy-card__addr">{shortAddr(row.address)}</span>
-                    <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[row.venue] } as CSSProperties}>{VENUE_LABEL[row.venue]}</span>
-                  </span>
-                </td>
-                <td><ScoreMeter s={score} /></td>
-                <td className={`num ${pnl === null ? '' : pnl >= 0 ? 'pos' : 'neg'}`}>{fmtSignedUsd(pnl, 0)}</td>
-                <td className={`num ${score.roi === null ? '' : score.roi >= 0 ? 'pos' : 'neg'}`}>{fmtSignedPct(score.roi, 1)}</td>
-                <td className="num">{row.accountValue == null ? DASH : fmtUsd(row.accountValue, 0)}</td>
-                <td className="num">{row.winRate == null ? DASH : `${Math.round(row.winRate * 100)}%`}</td>
-                <td><CoinRow assets={row.assets} /></td>
-                <td className="num">
-                  <button type="button" className={`cpy-copybtn cpy-copybtn--${score.kind}${copying.has(keyOf(row)) ? ' is-copying' : ''}`} onClick={(e) => { e.stopPropagation(); onCopy(row, score.kind); }}>
-                    {copying.has(keyOf(row)) ? 'Copying' : score.kind === 'copy' ? 'Copy' : 'Counter'}
-                  </button>
-                </td>
-              </tr>
-            );
-          })}
+          {rows.map((s) => (
+            <ListRow key={keyOf(s.row)} s={s} w={w} onOpen={onOpen} onCopy={onCopy} copying={copying.has(keyOf(s.row))} />
+          ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** One trader in the list; its curve is read from the venue once the row is on screen, like a card's. */
+function ListRow({ s, w, onOpen, onCopy, copying }: {
+  s: Scored;
+  w: BoardWindow;
+  onOpen: (r: TraderRow) => void;
+  onCopy: (r: TraderRow, direction: 'copy' | 'counter') => void;
+  copying: boolean;
+}) {
+  const { row, score } = s;
+  const { ref, peek, loading } = useTraderPeek(row, w);
+  const pnl = row.pnl[w] ?? null;
+  return (
+    <tr ref={ref} className={`cpy-list__row cpy-list__row--${score.kind}`} tabIndex={0} onClick={() => onOpen(row)} onKeyDown={(e) => { if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(row); }}>
+      <td>
+        <span className="cpy-list__who">
+          <Avatar address={row.address} size={22} />
+          <span className="cpy-card__addr">{shortAddr(row.address)}</span>
+          <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[row.venue] } as CSSProperties}>{VENUE_LABEL[row.venue]}</span>
+        </span>
+      </td>
+      <td><ScoreMeter s={score} /></td>
+      <td className={`num ${pnl === null ? '' : pnl >= 0 ? 'pos' : 'neg'}`}>{fmtSignedUsd(pnl, 0)}</td>
+      <td className={`num ${score.roi === null ? '' : score.roi >= 0 ? 'pos' : 'neg'}`}>{fmtSignedPct(score.roi, 1)}</td>
+      <td className="num">{row.accountValue == null ? DASH : fmtUsd(row.accountValue, 0)}</td>
+      <td className="cpy-list__curve"><Spark values={peek?.spark ?? null} loading={loading} className="cpy-list__spark" /></td>
+      <td className="num"><WinRate value={row.winRate} closes={row.winRateCloses} /></td>
+      <td><CoinRow assets={row.assets} /></td>
+      <td className="num">
+        <CopyButton kind={score.kind} copying={copying} onClick={(e) => { e.stopPropagation(); onCopy(row, score.kind); }} />
+      </td>
+    </tr>
   );
 }
 

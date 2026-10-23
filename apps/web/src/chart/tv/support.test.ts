@@ -128,12 +128,12 @@ test('candles, pane and scales use the app colours', () => {
   assert.equal(o['mainSeriesProperties.candleStyle.upColor'], '#00b481');
   assert.equal(o['mainSeriesProperties.candleStyle.downColor'], '#ef4a3c');
   assert.equal(o['mainSeriesProperties.candleStyle.wickDownColor'], '#ef4a3c');
-  assert.equal(o['paneProperties.background'], '#151515');
+  assert.equal(o['paneProperties.background'], '#1a1a1b');
   assert.equal(o['paneProperties.backgroundType'], 'solid');
   assert.equal(o['paneProperties.horzGridProperties.color'], FALLBACK_PALETTE.grid);
   assert.equal(o['scalesProperties.fontSize'], 12);
   const css = cssProperties(FALLBACK_PALETTE);
-  assert.equal(css['--tv-color-platform-background'], '#151515');
+  assert.equal(css['--tv-color-platform-background'], '#1a1a1b');
   assert.equal(css['--tv-color-toolbar-button-text-active'], '#f7f7f7');
   for (const k of Object.keys(css)) assert.match(k, /^--tv-color-/);
 });

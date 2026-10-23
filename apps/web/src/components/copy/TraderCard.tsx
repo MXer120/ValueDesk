@@ -203,6 +203,66 @@ export function CoinRow({ assets, max = 4 }: { assets: readonly string[] | undef
 
 export const WINDOW_SHORT: Record<BoardWindow, string> = { '1d': '24H', '7d': '7D', '30d': '30D', '90d': '90D', ytd: 'YTD', all: 'All' };
 
+/* ------------------------------------------------------- the two buttons ---- */
+
+const CopyGlyph = () => (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+    <rect x="5.5" y="5.5" width="8" height="8" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    <path d="M10.5 3.4A1.9 1.9 0 0 0 8.6 1.5H4.4a1.9 1.9 0 0 0-1.9 1.9v4.2a1.9 1.9 0 0 0 1.9 1.9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+  </svg>
+);
+const CounterGlyph = () => (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+    <path d="M2.5 5.5H12M9.5 3 12 5.5 9.5 8M13.5 10.5H4M6.5 8 4 10.5 6.5 13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/**
+ * Copy or Counter: the two sides' buttons, ONE width whatever the word, so a
+ * grid of green and red cards lines its buttons up. `label` replaces the word
+ * (the trader page's larger pair, 'lg', which share a width of their own).
+ */
+export function CopyButton({ kind, copying, onClick, size = 'md', label, title }: {
+  kind: 'copy' | 'counter';
+  copying?: boolean;
+  onClick: (e: MouseEvent) => void;
+  size?: 'md' | 'lg';
+  label?: string;
+  title?: string;
+}) {
+  const text = label ?? (copying ? 'Copying' : kind === 'copy' ? 'Copy' : 'Counter');
+  return (
+    <button type="button" title={title} className={`cpy-copybtn cpy-copybtn--${kind} cpy-copybtn--${size}${copying ? ' is-copying' : ''}`} onClick={onClick}>
+      {copying ? <span className="cpy-copybtn__live" aria-hidden="true" /> : kind === 'copy' ? <CopyGlyph /> : <CounterGlyph />}
+      <span>{text}</span>
+    </button>
+  );
+}
+
+/** Fewer closed trades than this and a win rate says little: it is shown, but not coloured. */
+const THIN_CLOSES = 5;
+
+/**
+ * A win rate in the colour of its value - neutral at 50%, greener above, redder
+ * below - over a small bar. From fewer than THIN_CLOSES closed trades it stays
+ * grey (a 0% from one losing close is not a signal); the count is in its title.
+ */
+export function WinRate({ value, closes }: { value: number | null | undefined; closes?: number | null }) {
+  if (value == null) return <span className="cpy-wr is-none">{DASH}</span>;
+  const thin = closes != null && closes < THIN_CLOSES;
+  const t = thin ? 0 : Math.max(-1, Math.min(1, (value - 0.5) / 0.2));
+  const tone = t >= 0
+    ? `color-mix(in srgb, var(--pos) ${Math.round(t * 100)}%, var(--muted))`
+    : `color-mix(in srgb, var(--neg) ${Math.round(-t * 100)}%, var(--muted))`;
+  const pct = Math.round(value * 100);
+  return (
+    <span className={`cpy-wr${thin ? ' is-thin' : ''}`} style={{ '--wr': tone } as CSSProperties} title={`Win rate ${pct}%${closes != null ? ` from ${closes} closed trade${closes === 1 ? '' : 's'}` : ''}`}>
+      <b>{pct}%</b>
+      <span className="cpy-wr__bar" aria-hidden="true"><span style={{ width: `${pct}%` }} /></span>
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------- the card ---- */
 
 export interface TraderCardProps {
@@ -265,9 +325,7 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
 
       <footer className="cpy-card__foot">
         <ScoreMeter s={score} />
-        <button type="button" className={`cpy-copybtn cpy-copybtn--${kind}${copying ? ' is-copying' : ''}`} onClick={copy}>
-          {copying ? 'Copying' : kind === 'copy' ? 'Copy' : 'Counter'}
-        </button>
+        <CopyButton kind={kind} copying={copying} onClick={copy} />
       </footer>
     </article>
   );

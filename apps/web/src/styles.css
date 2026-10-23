@@ -33,11 +33,15 @@
      Only THREE surfaces exist. There is no fourth step to reach for: if
      something needs to separate from its neighbour, it wants the 4px gutter
      or a --line, not another shade. */
-  /* One step darker than the reference (was #131313 / #1a1a1a), on the
-     owner's call: the same 7-level step between the two, so panels still
-     separate from the page exactly as before. */
+  /* The page one step darker than the reference (was #131313), on the
+     owner's call. The panel is TWELVE levels above it, the step of the owner's
+     dashboard (MissionControl: #0f1012 field, #1b1c1f surface): its boxes have
+     no outline, so depth has to come from the surface being lighter than the
+     field, with a ring of light at a few percent for the edge (--depth-*, and
+     "DEPTH, EVERYWHERE" at the end of this sheet). It was 7 levels while every
+     panel carried a hairline border. */
   --bg: #0e0e0e;         /* page base, darkest */
-  --bg-panel: #151515;   /* panel / navbar / tab-bar fill */
+  --bg-panel: #1a1a1b;   /* panel / navbar / tab-bar fill */
   --bg-elevated: #272727;
   --bg-hover: #363636;
   /* Raised CONTROL fill (segmented buttons, active toggles). Deliberately far
@@ -116,6 +120,11 @@
   --depth-1: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 2px 8px rgba(0, 0, 0, 0.32);
   --depth-2: 0 0 0 1px rgba(255, 255, 255, 0.045), 0 8px 24px rgba(0, 0, 0, 0.42);
   --depth-3: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 60px rgba(0, 0, 0, 0.6);
+  /* The dashboard's radii (26 / 20 / 14 there), a step tighter for a terminal:
+     a trading panel sits in a 4px gutter, a page card has room around it. */
+  --radius-card: 12px;   /* a trading panel */
+  --radius-page: 18px;   /* a card on a page, a dialog */
+  --radius-tile: 12px;   /* a tile inside a card */
   /* Legend text sits directly on candles, so it needs its own contrast. */
   --shadow-text: 0 1px 2px rgba(0, 0, 0, 0.6);
 
@@ -2911,3 +2920,156 @@ input[inputmode="decimal"], input[inputmode="numeric"],
   .toast, .toast.is-leaving { animation: none; }
   .toast__timer { display: none; }
 }
+
+/* ===========================================================================
+   DEPTH, EVERYWHERE: THE OWNER'S DASHBOARD'S LANGUAGE (MissionControl,
+   spread/dashboard/static: ds.css, theme-soft.css, theme-dark.css).
+
+   A box is not outlined. It is a surface a step lighter than the field
+   (--bg-panel), with no border, a large radius, and one box-shadow that is
+   both its edge and its lift: a 1px ring of light at a few percent plus a soft
+   drop shadow (--depth-1/2/3). On a near-black field a shadow alone cannot be
+   seen, so the ring carries the edge where two surfaces meet - the "border
+   made of shadow". Tiles inside a card are the SAME surface as the card,
+   separated from it only by that ring and a gap.
+
+   Four kinds, as in theme-soft.css "The rest of the boxes":
+     cards     raised on the field                  --depth-2, --radius-card/-page
+     tiles     a box inside a card                  --depth-1, --radius-tile
+     controls  pills, segmented groups, chips       --depth-1, pill radius
+     floating  menus, popovers, dialogs, sheets     --depth-3
+   Dividers INSIDE a box (table rows, section rules) stay hairlines: the
+   dashboard keeps those too.
+
+   It sits at the end of this sheet - the last in the cascade - so a
+   component's own rule of equal specificity yields to it; a selector here is
+   the component's selector, copied, so specificity matches.
+   ======================================================================== */
+
+/* --- cards: the trading panels ------------------------------------------- */
+.dash-panel {
+  border: 0;
+  border-radius: var(--radius-card);
+  box-shadow: var(--depth-2);
+}
+/* A .panel nested in a panel body is no box of its own (dashboard.css): no
+   ring either, or every table would sit in a frame inside its frame. */
+.dash-panel__body > .panel,
+.dash-panel__body > .private-scope > .panel,
+.dash-tabs__body > .panel,
+.dash-tabs__body > .private-scope > .panel,
+.dash-filtered > .panel,
+.dash-filtered > .private-scope > .panel,
+.private-scope > .panel { box-shadow: none; }
+.dash-edit-bar,
+.dash-edit-palette,
+.dash-edit-confirm,
+.dash-edit-ghost { border: 0; box-shadow: var(--depth-3); }
+
+/* --- cards: on a page ----------------------------------------------------- */
+.panel,
+.pf-card,
+.scan-head,
+.scan-find__row,
+.scan-choose,
+button.scan-card,
+.lbp-sheet,
+.lbp-skel__rows,
+button.lbp-card, .lbp-card,
+.legal-card,
+button.coh-card,
+.coh-d__head,
+.coh-d__meters,
+.coh-d__panel,
+.coh-chart,
+.vs-explore .ex-ticker,
+.fee-sched__card {
+  border: 0;
+  border-radius: var(--radius-page);
+  box-shadow: var(--depth-2);
+}
+.panel { border-radius: var(--radius-card); }
+button.scan-card:hover,
+button.lbp-card:hover,
+button.coh-card:hover { box-shadow: var(--depth-3); }
+.pts-card { border: 0; box-shadow: var(--depth-2); border-radius: var(--radius-page); }
+
+/* --- tiles: a box inside a card ------------------------------------------- */
+.coh-kpis > div,
+.coh-net,
+.coh-multi__readout,
+.feetier-stat,
+.feetier-cf,
+.feetier-flag,
+.stats-sync,
+.mt-status,
+.kc-feed-card.boxed,
+.fee-sched__frame,
+.algo-cond,
+.algo-preview,
+.wg-src,
+.fx-box,
+.fx-review,
+.fx-route,
+.vs-tpsl__facts,
+.cpy-stats > div,
+.cpy-replay,
+.cpy-rule,
+.cpy-mode,
+.cpy-adv,
+.cpy-fees {
+  border: 0;
+  border-radius: var(--radius-tile);
+  box-shadow: var(--depth-1);
+}
+.cpy-mode:hover { box-shadow: var(--depth-2); }
+.cpy-mode.is-on { box-shadow: 0 0 0 1.5px var(--text), 0 2px 8px rgba(0, 0, 0, 0.32); }
+
+/* --- controls: pills and segmented groups --------------------------------- */
+.segmented,
+.badge,
+.lbp-seg,
+button.lbp-chip,
+.lbp-search,
+.cp-seg, .cp-tabs,
+.cp-chip, .cp-pick,
+.cp-vchip,
+.kc-feed-pill,
+.acct-switch,
+.acct-more > .acct-morebtn,
+button.coh-pick__btn,
+.coh-tree__ctl,
+.fx-pill,
+.fx-pillbtn,
+.cpy-seg,
+.cpy-dir,
+.dash-edit-switch {
+  border: 0;
+  box-shadow: var(--depth-1);
+}
+.lbp-seg, button.lbp-chip, .lbp-search, button.coh-pick__btn, .cpy-seg, .cpy-dir { border-radius: var(--radius-full); }
+
+/* --- floating: menus, popovers, dialogs, sheets --------------------------- */
+.menu-popup,
+.modal,
+.modal.fx,
+.cp,
+.cdlg,
+.oe-pop,
+.acctf-pop,
+.acct-hc,
+.kc-rail-popup,
+.mkt-spark-tip,
+.mkt-bookpop,
+.mkdepth-tip,
+.sfoot-pop,
+.navnotes__panel,
+.coh-pick__pop,
+.coh-lean__tip,
+.pf-chart__tip,
+.cp-menu, .cp-fpop,
+.devp__sheet {
+  border: 0;
+  box-shadow: var(--depth-3);
+}
+.modal, .modal.fx, .cp, .cdlg { border-radius: var(--radius-page); }

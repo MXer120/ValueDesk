@@ -49,7 +49,7 @@ function background(el: HTMLElement | null): string {
     const c = parseColor(bg);
     if (c && c[3] > 0.99) return bg;
   }
-  return '#151515';
+  return '#1a1a1b';
 }
 
 interface Cover {

@@ -8,15 +8,16 @@
    Drawn in this app's tokens: no new colour, the green is --pos.
    Everything is `cpy-` (the command palette already owns `cp-`).
 
-   DEPTH is the owner's dashboard's (styles.css --depth-1/2/3): cards and
-   controls have no border, a surface a step lighter than the page and a ring
-   of light with a soft shadow; large radii, pill-shaped controls.
+   DEPTH is the owner's dashboard's (styles.css --depth-1/2/3 and "DEPTH,
+   EVERYWHERE"): cards and controls have no border, the panel surface a step
+   lighter than the page and a ring of light with a soft shadow; large radii,
+   pill-shaped controls, and - as there - the chosen pill of a group is white.
    ======================================================================== */
 
 .cpy {
-  --cpy-card: #19191a;
-  --cpy-surface: #1d1d1e;
-  --cpy-surface-2: #252526;
+  --cpy-card: var(--bg-panel);
+  --cpy-surface: var(--bg-panel);
+  --cpy-surface-2: #232325;
   --cpy-line: var(--panel-line);
   --cpy-r: 18px;
   max-width: 1720px;
@@ -62,17 +63,29 @@
 .cpy-chip:hover { background: var(--cpy-surface-2, var(--bg-hover)); box-shadow: var(--depth-2); }
 
 .cpy-copybtn {
-  height: 28px; padding: 0 14px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 30px; padding: 0 14px;
   border: 0; border-radius: var(--radius-full); background: var(--text); color: var(--bg);
-  font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; white-space: nowrap;
-  transition: filter 120ms var(--ease-out, ease);
+  font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.01em; cursor: pointer; white-space: nowrap;
+  transition: filter 140ms var(--ease-out, ease), transform 140ms var(--ease-out, ease), box-shadow 160ms;
 }
-.cpy-copybtn:hover { filter: brightness(0.9); }
+.cpy-copybtn:hover { filter: brightness(0.92); }
+.cpy-copybtn svg { flex: none; }
+/* Copy and Counter (TraderCard.tsx CopyButton): ONE width whatever the word,
+   so the buttons of a mixed grid line up; the trader page's pair likewise. */
+.cpy-copybtn--md { width: 104px; padding: 0 10px; }
+.cpy-copybtn--lg { min-width: 184px; height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-base); }
 .cpy-copybtn.is-copying {
-  background: color-mix(in srgb, var(--pos) 24%, transparent); color: var(--pos);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 50%, transparent);
+  background: color-mix(in srgb, var(--pos) 16%, var(--bg-panel)); color: var(--pos);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent);
 }
-.cpy-copybtn--lg { height: 36px; padding: 0 var(--sp-4); font-size: var(--fs-base); }
+.cpy-copybtn__live {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--pos);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--pos) 60%, transparent);
+  animation: cpy-live 1.8s ease-out infinite;
+}
+@keyframes cpy-live { to { box-shadow: 0 0 0 6px transparent; } }
+@media (prefers-reduced-motion: reduce) { .cpy-copybtn__live { animation: none; } }
 
 .cpy-venue {
   display: inline-flex; align-items: center; gap: 4px;
@@ -102,38 +115,35 @@
 .cpy-hero__facts { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: var(--sp-4) 0 0; padding: 0; list-style: none; color: var(--text); font-size: var(--fs-xs); }
 .cpy-hero__facts li { display: inline-flex; align-items: center; gap: 6px; }
 .cpy-hero__facts li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); }
-/* The deck: the best of both kinds fanned like a hand of cards (Discover.tsx
-   Deck). Each card's place is its data-slot - 0 in front, then alternately left
-   and right behind it, further out and turned more; a card dealt to another
-   slot glides there. Hovering the deck spreads the fan. */
+/* The wheel (Deck.tsx): the cards turn on a circle whose front arc shows
+   five. Deck.tsx writes each card's transform, opacity and stacking on every
+   frame of a turn, so nothing here animates them. The ring clips and fades
+   its sides: a card rises in there as it comes round. */
+.cpy-hero { margin-bottom: var(--sp-2); }
 .cpy-deck {
-  --spread: 1;
-  position: relative; height: 290px; isolation: isolate;
+  position: relative; height: 340px; isolation: isolate;
+  touch-action: pan-y; user-select: none; -webkit-user-select: none;
 }
-.cpy-deck:hover { --spread: 1.22; }
+.cpy-deck.is-live { cursor: grab; }
+.cpy-deck.is-live:active { cursor: grabbing; }
+.cpy-deck__ring {
+  position: absolute; inset: 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
+}
 .cpy-deck__card {
-  --x: 0px; --y: 0px; --r: 0deg; --s: 1;
-  position: absolute; left: 50%; top: 22px; width: 248px; margin-left: -124px;
+  position: absolute; left: calc(50% - 124px); top: 44px; width: 248px;
   display: flex; flex-direction: column; gap: 2px;
   padding: 14px 16px 12px; border: 0; border-radius: var(--cpy-r);
-  background: var(--cpy-card); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  background: var(--cpy-card); color: var(--text); font: inherit; text-align: left; cursor: inherit;
   box-shadow: var(--depth-3);
-  transform-origin: 50% 115%;
-  transform: translate(calc(var(--x) * var(--spread)), var(--y)) rotate(calc(var(--r) * var(--spread))) scale(var(--s));
-  transition: transform 520ms cubic-bezier(0.2, 0.8, 0.2, 1), filter 300ms, box-shadow 200ms;
+  will-change: transform, opacity;
   isolation: isolate;
 }
-.cpy-deck__card[data-slot="0"] { z-index: 5; --r: -2deg; }
-.cpy-deck__card[data-slot="1"] { z-index: 4; --x: -70px; --y: 12px; --r: -10deg; --s: 0.97; filter: brightness(0.9); }
-.cpy-deck__card[data-slot="2"] { z-index: 3; --x: 70px; --y: 14px; --r: 9deg; --s: 0.97; filter: brightness(0.9); }
-.cpy-deck__card[data-slot="3"] { z-index: 2; --x: -128px; --y: 34px; --r: -18deg; --s: 0.93; filter: brightness(0.78); }
-.cpy-deck__card[data-slot="4"] { z-index: 1; --x: 128px; --y: 38px; --r: 17deg; --s: 0.93; filter: brightness(0.78); }
-.cpy-deck__card:hover { filter: none; }
-.cpy-deck__card[data-slot="0"]:hover { --y: -6px; }
 .cpy-deck__card:focus-visible { outline: 1px solid var(--focus); outline-offset: 3px; }
-.cpy-deck__card > :not(.cpy-glow) { position: relative; z-index: 1; }
+.cpy-deck__card > :not(.cpy-glow) { position: relative; z-index: 1; pointer-events: none; }
 .cpy-deck__card--ghost {
-  height: 214px; cursor: default; pointer-events: none;
+  height: 214px; pointer-events: none;
   background: linear-gradient(100deg, var(--cpy-card) 40%, var(--cpy-surface-2) 50%, var(--cpy-card) 60%) 0 0 / 300% 100%;
   animation: cpy-shimmer 1.4s linear infinite;
 }
@@ -157,7 +167,7 @@
 /* The two speech chips, after the reference: who is in front (top left), how
    many traders there are (bottom right), each with its tail toward the cards. */
 .cpy-deck__chip {
-  position: absolute; z-index: 6;
+  position: absolute; z-index: 2;
   display: inline-flex; align-items: center; gap: 7px;
   height: 32px; padding: 0 14px 0 8px;
   border-radius: var(--radius-full); background: var(--cpy-surface-2);
@@ -169,13 +179,13 @@
   content: ""; position: absolute; width: 10px; height: 10px; background: inherit;
   transform: rotate(45deg); border-radius: 2px;
 }
-.cpy-deck__chip--who { left: max(0px, calc(50% - 250px)); top: 0; transform: rotate(-4deg); }
+.cpy-deck__chip--who { left: 7%; top: 6px; transform: rotate(-4deg); }
 .cpy-deck__chip--who::after { right: 22px; bottom: -4px; }
 .cpy-deck__chip--who span { font-family: var(--font-num); }
 .cpy-deck__chip--who b { font-weight: 500; color: var(--muted); }
 .cpy-deck__chip--copy b { color: var(--pos); }
 .cpy-deck__chip--counter b { color: var(--neg); }
-.cpy-deck__chip--count { right: max(0px, calc(50% - 260px)); bottom: 6px; padding-left: 12px; transform: rotate(3deg); }
+.cpy-deck__chip--count { right: 6%; bottom: 4px; padding-left: 12px; transform: rotate(3deg); }
 .cpy-deck__chip--count::after { left: 26px; top: -4px; }
 .cpy-deck__dot { width: 7px; height: 7px; border-radius: 50%; }
 .cpy-deck__dot + .cpy-deck__dot { margin-left: -9px; box-shadow: 0 0 0 2px var(--cpy-surface-2); }
@@ -192,7 +202,7 @@
   transition: background 160ms, box-shadow 160ms, color 160ms;
 }
 .cpy-cat:hover { color: var(--text); background: var(--tint); }
-.cpy-cat.is-on { color: var(--text); background: var(--cpy-surface-2); box-shadow: var(--depth-1); }
+.cpy-cat.is-on { color: var(--bg); background: var(--text); box-shadow: var(--depth-1); }
 .cpy-bar__right { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 
 /* The sort and the filters are FxSelect listboxes (funds/ui.tsx) with these
@@ -227,7 +237,7 @@
   transition: background 160ms, color 160ms, box-shadow 160ms;
 }
 .cpy-toggle > button:hover { color: var(--text); }
-.cpy-toggle > button.is-on { background: var(--cpy-surface-2); color: var(--text); box-shadow: var(--depth-1); }
+.cpy-toggle > button.is-on { background: var(--text); color: var(--bg); box-shadow: var(--depth-1); }
 
 .cpy-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .cpy-search { position: relative; display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 340px; min-width: 220px; }
@@ -245,7 +255,7 @@
 .cpy-pick.is-on .cpy-pick__v { color: var(--text); font-weight: 600; }
 .cpy-clear { height: 30px; padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-decoration: underline; cursor: pointer; }
 .cpy-clear:hover { color: var(--text); }
-.cpy-count { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); }
+.cpy-count { display: inline-flex; align-items: center; gap: 14px; margin-left: auto; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); white-space: nowrap; }
 
 /* --- the grid and the card -------------------------------------------------- */
 .cpy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
@@ -303,12 +313,17 @@
 
 .cpy-score { display: inline-flex; align-items: center; gap: 10px; cursor: help; }
 .cpy-score__n { color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); white-space: nowrap; }
-.cpy-score__n b { color: var(--text); font-size: var(--fs-base); }
+.cpy-score { --score-c: var(--muted); }
+.cpy-score--high { --score-c: var(--pos); }
+.cpy-score--mid { --score-c: var(--warn); }
+.cpy-score--low { --score-c: var(--neg); }
+.cpy-score__n b { color: var(--text); font-size: var(--fs-base); text-shadow: 0 0 12px color-mix(in srgb, var(--score-c) 55%, transparent); }
 .cpy-score__bars { display: inline-flex; gap: 2px; }
 .cpy-score__bars i { width: 4px; height: 14px; border-radius: 1px; background: var(--line-soft); }
-.cpy-score--high .cpy-score__bars i.is-on { background: var(--pos); }
-.cpy-score--mid .cpy-score__bars i.is-on { background: var(--warn); }
-.cpy-score--low .cpy-score__bars i.is-on { background: var(--neg); }
+.cpy-score__bars i.is-on {
+  background: var(--score-c);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--score-c) 70%, transparent), 0 0 1px var(--score-c);
+}
 
 /* --- the list --------------------------------------------------------------- */
 .cpy-list { overflow-x: auto; border: 0; border-radius: var(--cpy-r); background: var(--cpy-card); box-shadow: var(--depth-2); }
@@ -322,6 +337,17 @@
 .cpy-list .pos { color: var(--pos); }
 .cpy-list .neg { color: var(--neg); }
 .cpy-list__who { display: inline-flex; align-items: center; gap: 8px; }
+.cpy-list__row td:first-child { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--pos) 70%, transparent); }
+.cpy-list__row--counter td:first-child { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--neg) 70%, transparent); }
+.cpy-list__curve { width: 128px; padding-top: 6px; padding-bottom: 6px; }
+.cpy-list__spark { width: 116px; height: 28px; }
+.cpy-wr { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.cpy-wr b { color: var(--wr, var(--text)); font-weight: 600; }
+.cpy-wr__bar { width: 44px; height: 3px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.cpy-wr__bar > span { display: block; height: 100%; border-radius: inherit; background: var(--wr); box-shadow: 0 0 6px color-mix(in srgb, var(--wr) 60%, transparent); }
+.cpy-wr.is-none { color: var(--dim); }
+.cpy-wr.is-thin b { color: var(--dim); font-weight: 500; }
+.cpy-wr.is-thin .cpy-wr__bar > span { background: var(--dim); box-shadow: none; }
 
 .cpy-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); padding: var(--sp-6) var(--sp-4); color: var(--muted); text-align: center; }
 .cpy-empty p { margin: 0; }
@@ -599,12 +625,20 @@
 .cpy-card:focus-visible .cpy-glow { --cpy-wash: 15%; }
 
 /* --- the two sides' buttons: the ticket's buy and sell faces -------------------- */
-.cpy-copybtn--copy,
-.cpy-card--copy .cpy-copybtn:not(.is-copying) { background: linear-gradient(90deg, var(--pos) 0%, var(--pos-deep) 172%); color: var(--bg); }
-.cpy-copybtn--counter,
-.cpy-card--counter .cpy-copybtn:not(.is-copying) { background: linear-gradient(90deg, var(--neg) 0%, var(--neg-deep) 172%); color: var(--bg); }
-.cpy-copybtn--copy:hover,
-.cpy-copybtn--counter:hover { filter: brightness(1.08); }
+.cpy-copybtn--copy:not(.is-copying) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--pos) 82%, #fff) 0%, var(--pos) 48%, color-mix(in srgb, var(--pos) 70%, var(--pos-deep)) 100%);
+  color: #03140e;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 6px 16px -6px color-mix(in srgb, var(--pos) 75%, transparent);
+}
+.cpy-copybtn--counter:not(.is-copying) {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--neg) 80%, #fff) 0%, var(--neg) 48%, color-mix(in srgb, var(--neg) 70%, var(--neg-deep)) 100%);
+  color: #1d0604;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 6px 16px -6px color-mix(in srgb, var(--neg) 75%, transparent);
+}
+.cpy-copybtn--copy:not(.is-copying):hover,
+.cpy-copybtn--counter:not(.is-copying):hover { filter: brightness(1.07); transform: translateY(-1px); }
+.cpy-copybtn--copy:active,
+.cpy-copybtn--counter:active { filter: brightness(0.96); transform: none; }
 .cpy-copybtn--ghost.cpy-copybtn--counter {
   background: color-mix(in srgb, var(--neg) 10%, transparent);
   color: var(--neg);
@@ -612,9 +646,9 @@
 }
 
 /* --- a counter score reads in the sell colour -------------------------------------- */
-.cpy-score--counter.cpy-score--high .cpy-score__bars i.is-on { background: var(--neg); }
-.cpy-score--counter.cpy-score--mid .cpy-score__bars i.is-on { background: color-mix(in srgb, var(--neg) 60%, var(--warn)); }
-.cpy-score--counter.cpy-score--low .cpy-score__bars i.is-on { background: var(--dim); }
+.cpy-score--counter.cpy-score--high { --score-c: var(--neg); }
+.cpy-score--counter.cpy-score--mid { --score-c: color-mix(in srgb, var(--neg) 60%, var(--warn)); }
+.cpy-score--counter.cpy-score--low { --score-c: var(--dim); }
 
 /* --- the Counter-trade tab ----------------------------------------------------------- */
 .cpy-cat--counter { display: inline-flex; align-items: center; gap: 6px; }
@@ -635,12 +669,11 @@
   line-height: 1.5;
 }
 
-/* Top traders mixes both kinds: what the two colours mean. */
-.cpy-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; margin: 0; color: var(--muted); font-size: var(--fs-xs); }
+/* Top traders mixes both kinds: what the two colours mean, beside the count. */
+.cpy-legend { display: inline-flex; align-items: center; gap: 12px; font-family: var(--font-text); }
 .cpy-legend__copy,
-.cpy-legend__counter { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-weight: 500; }
+.cpy-legend__counter { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
 .cpy-legend__copy::before,
-.cpy-legend__counter::before { content: ""; width: 8px; height: 8px; border-radius: 50%; }
+.cpy-legend__counter::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
 .cpy-legend__copy::before { background: var(--pos); box-shadow: 0 0 8px color-mix(in srgb, var(--pos) 70%, transparent); }
 .cpy-legend__counter::before { background: var(--neg); box-shadow: 0 0 8px color-mix(in srgb, var(--neg) 70%, transparent); }
-.cpy-legend__fine { color: var(--dim); }

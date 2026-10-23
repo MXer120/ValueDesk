@@ -445,7 +445,7 @@ export function CandleMorph({ state, chart, priceHint, hollow, morphable = true,
       width: Math.max(0, bw - (main?.left ?? 0) - axis),
       height: main?.height ?? Math.max(0, bh - X_AXIS_SIZE),
     };
-    const panel = readColor(el, '--bg-panel', [21, 21, 21, 1]);
+    const panel = readColor(el, '--bg-panel', [26, 26, 27, 1]);
     const soft = readColor(el, '--line-soft', [255, 255, 255, 0.1]);
     const strong = readColor(el, '--line-strong', [255, 255, 255, 0.2]);
     // Two tones from the skeleton tokens - down the quieter, up the lighter,
