@@ -2,6 +2,10 @@
  * The Copy page's trader grid: categories, filters and sorts over the board
  * rows of both copy venues. Pure, so what the grid shows can be tested.
  *
+ * The traders come from any of the indexed platforms (GRID_VENUES, chosen on
+ * the page); a copy can follow SoDEX and Hyperliquid traders only
+ * (COPY_VENUES): the others are shown, to look at, not to copy.
+ *
  * Every trader is scored in one of two kinds. 'copy' is a trader from the
  * boards' best (side=top), scored by the copy score; 'counter' one from their
  * worst (side=worst), scored by the counter score, for trading against. Every
@@ -15,17 +19,26 @@
 import type { BoardWindow, TraderRow, Venue } from '../../vsApi';
 import { cohortOf, copyScore, counterScore, type CopyScore, type ScoreKind } from './copyScore';
 
-/** The venues a copy can follow. */
+/** The venues a copy can follow (the copy engine's LeaderVenue). */
 export const COPY_VENUES = ['sodex', 'hyperliquid'] as const satisfies readonly Venue[];
+/** The platforms the grid can show traders of: every venue the index ranks. */
+export const GRID_VENUES = ['sodex', 'hyperliquid', 'tradexyz', 'lighter', 'arcus'] as const satisfies readonly Venue[];
 
-export type Category = 'top' | 'copy' | 'counter' | 'sodex' | 'hyperliquid' | 'btc' | 'eth' | 'sol' | 'hype';
+/** A copy can follow this trader's venue. */
+export const isCopyable = (v: Venue): boolean => (COPY_VENUES as readonly Venue[]).includes(v);
+
+/** The chosen platforms, from what a browser stored: known venues, in GRID_VENUES order, never none. */
+export function normaliseVenues(v: unknown): Venue[] {
+  const got = Array.isArray(v) ? v.filter((x): x is Venue => (GRID_VENUES as readonly string[]).includes(x)) : [];
+  return got.length ? GRID_VENUES.filter((x) => got.includes(x)) : [...GRID_VENUES];
+}
+
+export type Category = 'top' | 'copy' | 'counter' | 'btc' | 'eth' | 'sol' | 'hype';
 
 export const CATEGORIES: ReadonlyArray<{ id: Category; label: string; coin?: string }> = [
   { id: 'top', label: 'Top traders' },
   { id: 'copy', label: 'Copy' },
   { id: 'counter', label: 'Counter-trade' },
-  { id: 'sodex', label: 'SoDEX' },
-  { id: 'hyperliquid', label: 'Hyperliquid' },
   { id: 'btc', label: 'BTC traders', coin: 'BTC' },
   { id: 'eth', label: 'ETH traders', coin: 'ETH' },
   { id: 'sol', label: 'SOL traders', coin: 'SOL' },
@@ -35,7 +48,7 @@ export const CATEGORIES: ReadonlyArray<{ id: Category; label: string; coin?: str
 /** What a grid holds: traders to copy, traders to counter, or both. */
 export type GridKind = ScoreKind | 'mixed';
 
-/** The Copy tab ranks the winners, the Counter-trade tab the losers, every other tab both. */
+/** The Copy tab ranks the winners, the Counter-trade tab the losers, every other tab both (the coin tabs too). */
 export const kindOf = (c: Category): GridKind => (c === 'counter' ? 'counter' : c === 'copy' ? 'copy' : 'mixed');
 
 export type SortKey = 'score' | 'pnl' | 'roi' | 'equity' | 'winRate';
@@ -177,7 +190,7 @@ const sortValue = (s: Scored, key: SortKey, w: BoardWindow): number | null => {
 /** What the grid shows: the category, the filters and the search, then the sort (unknowns last, ties by score). */
 export function shapeGrid(
   all: readonly Scored[],
-  o: { category: Category; filters: Filters; sort: SortKey; window: BoardWindow; q?: string },
+  o: { category: Category; filters: Filters; sort: SortKey; window: BoardWindow; q?: string; venues?: readonly Venue[] },
 ): Scored[] {
   const kind = kindOf(o.category);
   const cat = CATEGORIES.find((c) => c.id === o.category);
@@ -185,8 +198,8 @@ export function shapeGrid(
   const f = o.filters;
   const kept = all.filter(({ row, score }) => {
     if (kind !== 'mixed' && score.kind !== kind) return false;
-    if (o.category === 'sodex' || o.category === 'hyperliquid') { if (row.venue !== o.category) return false; }
-    else if (cat?.coin && !tradesCoin(row, cat.coin)) return false;
+    if (o.venues && !o.venues.includes(row.venue)) return false;
+    if (cat?.coin && !tradesCoin(row, cat.coin)) return false;
     if (q && !row.address.toLowerCase().includes(q)) return false;
     if (f.minEquity > 0 && !((row.accountValue ?? 0) >= f.minEquity)) return false;
     const pnl = row.pnl[o.window] ?? 0;
@@ -229,10 +242,10 @@ function interleave(sorted: readonly Scored[]): Scored[] {
 /**
  * The hero's deck: the best of each kind, both kinds shown - up to `n`
  * cards, the counter picks a third of them (at least one when there is one),
- * highest score first.
+ * highest score first. Only traders a copy can follow are dealt.
  */
 export function deckOf(copy: readonly Scored[], counter: readonly Scored[], w: BoardWindow, n = 5): Scored[] {
-  const by = (list: readonly Scored[]) => shapeGrid(list, { category: 'top', filters: { ...NO_FILTERS, sideOnly: true }, sort: 'score', window: w });
+  const by = (list: readonly Scored[]) => shapeGrid(list.filter((s) => isCopyable(s.row.venue)), { category: 'top', filters: { ...NO_FILTERS, sideOnly: true }, sort: 'score', window: w });
   const c = by(copy);
   const k = by(counter);
   const nk = Math.min(k.length, Math.max(1, Math.round(n / 3)));

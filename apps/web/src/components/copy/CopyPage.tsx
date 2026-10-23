@@ -14,17 +14,15 @@
  * trader and My copies views reuse the dashboard panels (panels.tsx) inside
  * the portfolio's `pf` design-system scope.
  */
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CopySetupSheet } from '../../copy/CopySetupSheet';
 import { copyRows, startCopy } from '../../copy/live';
 import { notify } from '../../toast';
-import { shortAddr } from '../../format';
-import { VENUE_BRAND } from '../venueBrand';
-import { VENUE_LABEL, type TraderRow, type Venue } from '../../vsApi';
-import { BacktestPanel, CopiesPanel, PositionsPanel, TraderPanel } from './panels';
+import type { TraderRow, Venue } from '../../vsApi';
+import { BacktestPanel, CopiesPanel, PositionsPanel, TraderHero } from './panels';
 import { CopyModal } from './CopyModal';
 import { Discover } from './Discover';
-import { Avatar, CopyButton, holdPeeks } from './TraderCard';
+import { holdPeeks } from './TraderCard';
 import { useCopyContext, type CopyPageProps } from './useCopy';
 import './Copy.css';
 import './CopyHome.css';
@@ -118,6 +116,7 @@ export function CopyPage(props: CopyPageProps) {
           onCopy={(row, d) => copyTrader(d, row)}
           copying={copying}
           onAddress={(address, venue) => openTrader({ address, venue })}
+          onScan={(row) => c.onScan(row.address, row.venue)}
         />
       )}
 
@@ -149,33 +148,14 @@ export function CopyPage(props: CopyPageProps) {
   );
 }
 
+/** One trader: the hero (who, the buttons, the figures, the curve), then the replay and what they hold. */
 function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCopyContext>; onBack: () => void; onCopy: (direction: 'copy' | 'counter') => void; copying: boolean }) {
-  const leader = c.leader!;
   return (
     <div className="cpy-trader">
-      <header className="cpy-trader__head">
-        <button type="button" className="cpy-back" onClick={onBack} aria-label="Back to all traders">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          All traders
-        </button>
-        <div className="cpy-trader__who">
-          <Avatar address={leader} size={40} />
-          <div>
-            <h1 className="cpy-trader__addr" title={leader}>{shortAddr(leader)}</h1>
-            <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[c.venue] } as CSSProperties}>{VENUE_LABEL[c.venue]}</span>
-          </div>
-        </div>
-        <span className="cpy-tabs__fill" />
-        <button type="button" className="cpy-chip" onClick={() => c.onScan(leader, c.venue)} title="Open this trader in Scan">Open in Scan</button>
-        <CopyButton kind="counter" size="lg" label="Counter-trade" title="Take the other side of every trade" onClick={() => onCopy('counter')} />
-        <CopyButton kind="copy" size="lg" copying={copying} label={copying ? 'Copying · add another' : 'Copy this trader'} onClick={() => onCopy('copy')} />
-      </header>
-      <div className="pf copy cpy-trader__grid">
-        <div className="cpy-trader__side"><TraderPanel c={c} /></div>
-        <div className="cpy-trader__main">
-          <BacktestPanel c={c} />
-          <PositionsPanel c={c} />
-        </div>
+      <TraderHero c={c} onBack={onBack} onCopy={onCopy} copying={copying} />
+      <div className="pf copy cpy-trader__main">
+        <BacktestPanel c={c} />
+        <PositionsPanel c={c} />
       </div>
     </div>
   );

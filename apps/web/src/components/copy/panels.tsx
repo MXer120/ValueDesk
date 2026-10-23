@@ -18,7 +18,7 @@
  *  - Traders are shown by public, objective numbers, the same for everyone:
  *    nothing here recommends a trader to anyone.
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import { SKIP_REASONS, type ActivityEntry, type CopyView } from '@copy-engine';
 import { MODE_LABEL } from '../../copy/CopySetupSheet';
 import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow } from '../../copy/live';
@@ -35,6 +35,9 @@ import { CoinLabel } from '../CoinIcon';
 import { skipReasonLabel, type SimResult, type SimTrade } from './sim';
 import { BACKTEST_WINDOWS, WINDOW_LABEL, fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import { FILL_LIMIT, type CopyContext, type Load } from './useCopy';
+import { Avatar, CopyButton, Spark, WinRate } from './TraderCard';
+import { VENUE_BRAND } from '../venueBrand';
+import { useMask, type PrivacyKey } from '../../privacy';
 
 /* ------------------------------------------------------------ helpers ----- */
 
@@ -90,9 +93,6 @@ const fmtStamp = (ms: number): string =>
 const fmtDay = (ms: number): string =>
   new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' });
 
-/** A trader is shown by short address only; a row's `label` is never rendered. */
-const nameOf = (r: Pick<TraderRow, 'address'>): string => shortAddr(r.address);
-
 /**
  * One sentence for a failed load: "<What> couldn't load." with Retry, never the
  * reason (that is in the console). "Not implemented yet" is a state, not an
@@ -107,59 +107,92 @@ function loadNote(l: Load<unknown>, venue: Venue, what: string, plural: string):
 
 /* ============================================================= trader ===== */
 
-export function TraderPanel({ c }: { c: CopyContext }) {
-  if (!c.leader) {
-    return (
-      <Card title="Trader">
-        <p className="pf-note">Pick a trader from the list, paste an address, or open one from Explore or the Leaderboard.</p>
-      </Card>
-    );
-  }
+/** One figure of the trader hero, masked like the rows it replaces (privacy.tsx). */
+function Kv({ label, value, cls, privacy, hint }: { label: string; value: ReactNode; cls?: string; privacy: PrivacyKey; hint?: string }) {
+  const mask = useMask(privacy);
+  return (
+    <div className="cpy-kv__tile" title={hint}>
+      <dt>{label}</dt>
+      <dd className={cls}>{mask(value)}</dd>
+    </div>
+  );
+}
+
+/**
+ * The trader page's head: who it is, the two buttons, the window, the
+ * figures as tiles (the owner's dashboard's KPI row) and the PnL curve. It
+ * replaces the old profile rail; the backtest and the positions follow it.
+ */
+export function TraderHero({ c, onBack, onCopy, copying }: {
+  c: CopyContext;
+  onBack: () => void;
+  onCopy: (direction: 'copy' | 'counter') => void;
+  copying: boolean;
+}) {
+  const leader = c.leader!;
   const p = c.profile.data;
   const s = p?.summary;
   const w = c.window;
-  const title = nameOf({ address: c.leader });
-
+  const series = p?.equity[w] ?? p?.equity['30d'] ?? [];
+  const curve = series.flatMap((pt) => (pt.pnl === null ? [] : [pt.pnl]));
+  const wr = s ? winRateView(s, { context: 'sample', fmtDate: fmtDay }) : null;
   return (
-    <Card
-      title={title}
-      action={
-        <button type="button" className="pf-ctl" onClick={() => c.onScan(c.leader!, c.venue)} title="Open this trader in Scan">
-          Scan
+    <section className="cpy-thero">
+      <div className="cpy-thero__bar">
+        <button type="button" className="cpy-back" onClick={onBack} aria-label="Back to all traders">
+          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          All traders
         </button>
-      }
-    >
-      {c.profile.loading ? <p className="pf-note">Loading…</p>
+        <span className="cpy-tabs__fill" />
+        <Seg value={w} options={BACKTEST_WINDOWS} onChange={(v) => c.setWindow(v)} label="Window" />
+        <button type="button" className="cpy-chip" onClick={() => c.onScan(leader, c.venue)} title="Open this trader in Scan">Open in Scan</button>
+      </div>
+
+      <div className="cpy-thero__main">
+        <div className="cpy-thero__who">
+          <Avatar address={leader} size={56} />
+          <div className="cpy-thero__id">
+            <h1 className="cpy-thero__addr" title={leader}>{shortAddr(leader)}</h1>
+            <div className="cpy-thero__meta">
+              <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[c.venue] } as CSSProperties}>{VENUE_LABEL[c.venue]}</span>
+              {s?.tags?.map((t) => <span key={t} className="cpy-thero__tag">{t}</span>)}
+              {p && <span className="cpy-thero__upd">Updated {fmtAgo(p.updatedAt)}</span>}
+            </div>
+          </div>
+        </div>
+        <div className="cpy-thero__acts">
+          <CopyButton kind="counter" size="lg" label="Counter-trade" title="Take the other side of every trade" onClick={() => onCopy('counter')} />
+          <CopyButton kind="copy" size="lg" copying={copying} label={copying ? 'Copying · add another' : 'Copy this trader'} onClick={() => onCopy('copy')} />
+        </div>
+      </div>
+
+      {c.profile.loading ? <p className="pf-note">Loading the trader…</p>
         : c.profile.error ? loadNote(c.profile, c.venue, 'Trader profile', 'trader profiles')
         : !p || !s ? <p className="pf-note">No {VENUE_LABEL[c.venue]} activity for this address.</p>
         : (
-          <>
-            <Group title={`${VENUE_LABEL[c.venue]} · ${WINDOW_LABEL[w]}`}>
-              <Row label="Address" value={<span className="copy-addr" title={s.address}>{shortAddr(s.address)}</span>} privacy="history" />
-              <Row label="Account value" value={s.accountValue === null ? DASH : fmtUsd(s.accountValue, 2)} cls={s.accountValue === null ? 'pf-dim' : undefined} />
-              <Row label="PnL" privacy="pnl" value={fmtSignedUsd(s.pnl[w] ?? null)} cls={s.pnl[w] == null ? 'pf-dim' : signClass(s.pnl[w])} />
-              <Row label="ROI" privacy="pnl" value={fmtSignedPct(s.roi[w] ?? null)} cls={s.roi[w] == null ? 'pf-dim' : signClass(s.roi[w])} />
-              <Row label="Volume" value={s.volume[w] == null ? DASH : fmtUsd(s.volume[w]!, 0)} cls={s.volume[w] == null ? 'pf-dim' : undefined} />
-              <Row
-                label="Win rate"
+          <div className="cpy-thero__body">
+            <dl className="cpy-kv">
+              <Kv label={`PnL ${WINDOW_LABEL[w]}`} privacy="pnl" value={fmtSignedUsd(s.pnl[w] ?? null)} cls={s.pnl[w] == null ? 'pf-dim' : signClass(s.pnl[w])} />
+              <Kv label="Return" privacy="pnl" value={fmtSignedPct(s.roi[w] ?? null)} cls={s.roi[w] == null ? 'pf-dim' : signClass(s.roi[w])} />
+              <Kv label="Account value" privacy="funds" value={s.accountValue === null ? DASH : fmtUsd(s.accountValue, 0)} cls={s.accountValue === null ? 'pf-dim' : undefined} />
+              <Kv label="Volume" privacy="funds" value={s.volume[w] == null ? DASH : fmtUsd(s.volume[w]!, 0)} cls={s.volume[w] == null ? 'pf-dim' : undefined} />
+              <Kv
+                label={wr?.approx ? 'Win rate (est.)' : 'Win rate'}
                 privacy="pnl"
-                value={s.winRate != null && winRateView(s).approx ? `≈${pctOf(s.winRate)}` : pctOf(s.winRate)}
-                cls={s.winRate == null ? 'pf-dim' : undefined}
-                hint={winRateView(s, { context: 'sample', fmtDate: fmtDay }).title}
+                value={<WinRate value={s.winRate} closes={s.winRateCloses ?? null} />}
+                hint={wr?.title}
               />
-              <Row label="Trades" privacy="counts" value={s.trades == null ? DASH : fmt(s.trades, 0)} cls={s.trades == null ? 'pf-dim' : undefined} />
-              <Row label="Max drawdown" privacy="pnl" value={pctOf(s.maxDrawdown)} cls={s.maxDrawdown == null ? 'pf-dim' : undefined} />
-              <Row label="Last trade" privacy="history" value={fmtAgo(s.lastActive)} cls={s.lastActive ? undefined : 'pf-dim'} />
-            </Group>
-            {s.tags && s.tags.length > 0 && (
-              <div className="copy-tags">
-                {s.tags.map((t) => <span key={t} className="pf-chip">{t}</span>)}
-              </div>
-            )}
-            <p className="pf-note">Source: {p.source}. Updated {fmtAgo(p.updatedAt)}.</p>
-          </>
+              <Kv label="Max drawdown" privacy="pnl" value={pctOf(s.maxDrawdown)} cls={s.maxDrawdown ? 'neg' : 'pf-dim'} />
+              <Kv label="Trades" privacy="counts" value={s.trades == null ? DASH : fmt(s.trades, 0)} cls={s.trades == null ? 'pf-dim' : undefined} />
+              <Kv label="Last trade" privacy="history" value={fmtAgo(s.lastActive)} cls={s.lastActive ? undefined : 'pf-dim'} />
+            </dl>
+            <div className="cpy-thero__curve">
+              <span className="cpy-thero__k">PnL · {WINDOW_LABEL[w]}</span>
+              <Spark values={curve.length > 1 ? curve : null} className="cpy-thero__spark" />
+            </div>
+          </div>
         )}
-    </Card>
+    </section>
   );
 }
 
@@ -225,8 +258,8 @@ function PositionRow({ p }: { p: VsPosition }) {
 
 export function BacktestPanel({ c }: { c: CopyContext }) {
   const r = c.sim.result;
-  const setWindow = (w: Window) => c.setWindow(w);
-  const action = <Seg value={c.window} options={BACKTEST_WINDOWS} onChange={setWindow} label="Backtest window" />;
+  // The window is the trader hero's (TraderHero): one switch for the figures, the curve and this replay.
+  const action = <span className="pf-unit">{WINDOW_LABEL[c.window]}</span>;
 
   const empty = (text: ReactNode) => (
     <Card title="Backtest" action={action}>

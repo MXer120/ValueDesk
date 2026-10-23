@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { TraderRow } from '../../vsApi';
-import { NO_FILTERS, deckOf, filtersActive, kindOf, mixKinds, normaliseFilters, scoreRows, shapeGrid, tradesCoin, winRateLabel } from './gridModel';
+import { GRID_VENUES, NO_FILTERS, deckOf, filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, tradesCoin, winRateLabel } from './gridModel';
 
 const addr = (n: number) => '0x' + n.toString(16).padStart(40, '0');
 const row = (n: number, o: Partial<TraderRow> = {}): TraderRow => ({
@@ -27,9 +27,11 @@ test('the score sort puts a losing trader below the profitable ones', () => {
   assert.equal(grid[grid.length - 1]!.row.address, addr(1));
 });
 
-test('venue and coin categories', () => {
-  const all = scoreRows([row(1), row(2, { venue: 'sodex', assets: ['ETH-USD'] }), row(3, { assets: ['xyz:SP500', 'SOL'] })], '30d');
-  assert.deepEqual(shapeGrid(all, { ...base, category: 'sodex' }).map((s) => s.row.address), [addr(2)]);
+test('chosen platforms and coin categories', () => {
+  const all = scoreRows([row(1), row(2, { venue: 'sodex', assets: ['ETH-USD'] }), row(3, { assets: ['xyz:SP500', 'SOL'] }), row(4, { venue: 'lighter' })], '30d');
+  assert.deepEqual(shapeGrid(all, { ...base, venues: ['sodex'] }).map((s) => s.row.address), [addr(2)]);
+  assert.equal(shapeGrid(all, { ...base, venues: ['hyperliquid', 'lighter'] }).length, 3);
+  assert.equal(shapeGrid(all, base).length, 4, 'no venue filter: every platform');
   assert.deepEqual(shapeGrid(all, { ...base, category: 'eth' }).map((s) => s.row.address), [addr(2)]);
   assert.deepEqual(shapeGrid(all, { ...base, category: 'sol' }).map((s) => s.row.address), [addr(3)]);
   assert.ok(tradesCoin(row(9, { assets: ['xyz:BTC'] }), 'BTC'));
@@ -76,7 +78,7 @@ test('a sort key a row lacks puts it last', () => {
 test('Top traders mixes both kinds, each read its own way; the Copy and Counter-trade tabs hold one kind', () => {
   assert.equal(kindOf('top'), 'mixed');
   assert.equal(kindOf('copy'), 'copy');
-  assert.equal(kindOf('sodex'), 'mixed');
+  assert.equal(kindOf('btc'), 'mixed');
   const copy = scoreRows([row(1), row(2, { winRate: 0.55 })], '30d');
   const counter = scoreRows([
     row(11, { pnl: { '30d': -80_000 }, winRate: 0.3, winRateCloses: 200, trades: 200 }),
@@ -121,4 +123,15 @@ test('the hero deck shows both kinds, best first, only traders on their side of 
   assert.ok(!deck.some((s) => s.row.address === addr(23)), 'a winner is never dealt as a counter-trade');
   for (let i = 1; i < deck.length; i++) assert.ok(deck[i - 1]!.score.score >= deck[i]!.score.score);
   assert.equal(deckOf(copy, [], '30d', 5).length, 5, 'no counter candidates: all copy');
+});
+
+test('platforms: every indexed venue can be shown, only SoDEX and Hyperliquid copied; a stored choice is cleaned', () => {
+  assert.ok(isCopyable('sodex') && isCopyable('hyperliquid'));
+  assert.ok(!isCopyable('lighter') && !isCopyable('arcus') && !isCopyable('tradexyz'));
+  assert.deepEqual(normaliseVenues(['lighter', 'nope', 'sodex']), ['sodex', 'lighter'], 'known ones, in order');
+  assert.deepEqual(normaliseVenues([]), [...GRID_VENUES], 'never none');
+  assert.deepEqual(normaliseVenues(undefined), [...GRID_VENUES]);
+  // The hero deals only traders a copy can follow.
+  const copy = scoreRows([row(1, { venue: 'lighter', pnl: { '30d': 9e6 } }), row(2), row(3)], '30d');
+  assert.ok(deckOf(copy, [], '30d', 5).every((s) => isCopyable(s.row.venue)));
 });

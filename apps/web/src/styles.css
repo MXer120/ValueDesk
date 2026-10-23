@@ -488,7 +488,7 @@ button.navicon { position: relative; min-height: 0; }
   inset: 0;
   z-index: 70;
   background: none;
-  border: 0;
+  border-color: transparent;
   min-height: 0;
   padding: 0;
 }
@@ -566,7 +566,7 @@ button.navicon { position: relative; min-height: 0; }
      --radius-md (8) and :root is final, so it is stated here as a literal
      rather than by rounding the design to a token it does not use. */
   border-radius: 6px;
-  background: none; border: 0;
+  background: none; border-color: transparent;
   color: var(--text); font-size: var(--fs-base); font-weight: 400; line-height: var(--lh-base);
   white-space: nowrap;
 }
@@ -582,7 +582,7 @@ button.navicon { position: relative; min-height: 0; }
 /* Colour only. A tint on hover was a surface change, and the measured hover
    system has exactly one move in it: the text goes to --text and the surface is
    left alone. See the block above the tab bars. */
-.navbtn:hover:not(:disabled) { background: none; border: 0; color: var(--text); }
+.navbtn:hover:not(:disabled) { background: none; border-color: transparent; color: var(--text); }
 
 .statusdot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
 .statusdot.ok { background: var(--pos); }
@@ -1234,7 +1234,7 @@ option { background: var(--bg-elevated); color: var(--text); }
   ::picker(select) {
     margin-block: 4px;
     padding: 5px;
-    border: 0;
+    border-color: transparent;
     border-radius: 14px;
     background: var(--glass-pop-bg);
     -webkit-backdrop-filter: var(--glass-pop-blur);
@@ -2484,7 +2484,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
   color: var(--muted); font-size: var(--fs-micro); letter-spacing: var(--ls-micro);
 }
 .privacy__all {
-  height: auto; padding: 0; border: 0; background: none;
+  height: auto; padding: 0; border-color: transparent; background: none;
   color: var(--muted); font-size: var(--fs-micro); cursor: pointer;
   border-bottom: 1px dotted var(--dim); border-radius: 0;
 }
@@ -2531,7 +2531,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 }
 .settings .privacy__menu { max-height: calc(100vh - 80px); overflow-y: auto; }
 .settings__main { color: var(--text); font-weight: 500; margin-bottom: var(--sp-2); }
-.settings__action { width: 100%; height: auto; border: 0; background: none; text-align: left; font: inherit; font-size: var(--fs-xs); }
+.settings__action { width: 100%; height: auto; border-color: transparent; background: none; text-align: left; font: inherit; font-size: var(--fs-xs); }
 .settings__action:disabled, .privacy__item.is-off { color: var(--disabled); cursor: default; }
 
 /* ---------------------------------------------------------------------------
@@ -2566,7 +2566,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 .navaddr__item {
   display: block; width: 100%;
   height: auto; padding: 6px var(--sp-1);
-  border: 0; background: none; border-radius: var(--radius-sm);
+  border-color: transparent; background: none; border-radius: var(--radius-sm);
   color: var(--muted); font-size: var(--fs-xs); text-align: left; cursor: pointer;
 }
 .navaddr__item:hover { background: var(--bg-hover); color: var(--text); }
@@ -2941,6 +2941,11 @@ input[inputmode="decimal"], input[inputmode="numeric"],
    Dividers INSIDE a box (table rows, section rules) stay hairlines: the
    dashboard keeps those too.
 
+   The border is made TRANSPARENT, not removed: a box keeps its 1px, so nothing
+   moves, and a state a component draws with its border colour (a selected
+   venue chip, the podium's metal, a focused field, a deposit step) still shows,
+   because those rules are more specific than these.
+
    It sits at the end of this sheet - the last in the cascade - so a
    component's own rule of equal specificity yields to it; a selector here is
    the component's selector, copied, so specificity matches.
@@ -2948,7 +2953,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 
 /* --- cards: the trading panels ------------------------------------------- */
 .dash-panel {
-  border: 0;
+  border-color: transparent;
   border-radius: var(--radius-card);
   box-shadow: var(--depth-2);
 }
@@ -2964,7 +2969,7 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 .dash-edit-bar,
 .dash-edit-palette,
 .dash-edit-confirm,
-.dash-edit-ghost { border: 0; box-shadow: var(--depth-3); }
+.dash-edit-ghost { border-color: transparent; box-shadow: var(--depth-3); }
 
 /* --- cards: on a page ----------------------------------------------------- */
 .panel,
@@ -2984,7 +2989,7 @@ button.coh-card,
 .coh-chart,
 .vs-explore .ex-ticker,
 .fee-sched__card {
-  border: 0;
+  border-color: transparent;
   border-radius: var(--radius-page);
   box-shadow: var(--depth-2);
 }
@@ -2992,7 +2997,7 @@ button.coh-card,
 button.scan-card:hover,
 button.lbp-card:hover,
 button.coh-card:hover { box-shadow: var(--depth-3); }
-.pts-card { border: 0; box-shadow: var(--depth-2); border-radius: var(--radius-page); }
+.pts-card { border-color: transparent; box-shadow: var(--depth-2); border-radius: var(--radius-page); }
 
 /* --- tiles: a box inside a card ------------------------------------------- */
 .coh-kpis > div,
@@ -3018,12 +3023,11 @@ button.coh-card:hover { box-shadow: var(--depth-3); }
 .cpy-mode,
 .cpy-adv,
 .cpy-fees {
-  border: 0;
+  border-color: transparent;
   border-radius: var(--radius-tile);
   box-shadow: var(--depth-1);
 }
 .cpy-mode:hover { box-shadow: var(--depth-2); }
-.cpy-mode.is-on { box-shadow: 0 0 0 1.5px var(--text), 0 2px 8px rgba(0, 0, 0, 0.32); }
 
 /* --- controls: pills and segmented groups --------------------------------- */
 .segmented,
@@ -3044,7 +3048,7 @@ button.coh-pick__btn,
 .cpy-seg,
 .cpy-dir,
 .dash-edit-switch {
-  border: 0;
+  border-color: transparent;
   box-shadow: var(--depth-1);
 }
 .lbp-seg, button.lbp-chip, .lbp-search, button.coh-pick__btn, .cpy-seg, .cpy-dir { border-radius: var(--radius-full); }
@@ -3069,7 +3073,7 @@ button.coh-pick__btn,
 .pf-chart__tip,
 .cp-menu, .cp-fpop,
 .devp__sheet {
-  border: 0;
+  border-color: transparent;
   box-shadow: var(--depth-3);
 }
 .modal, .modal.fx, .cp, .cdlg { border-radius: var(--radius-page); }

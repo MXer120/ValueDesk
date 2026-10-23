@@ -65,7 +65,7 @@
 .cpy-copybtn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 30px; padding: 0 14px;
-  border: 0; border-radius: var(--radius-full); background: var(--text); color: var(--bg);
+  border: 0; border-radius: 9px; background: var(--text); color: var(--bg);
   font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.01em; cursor: pointer; white-space: nowrap;
   transition: filter 140ms var(--ease-out, ease), transform 140ms var(--ease-out, ease), box-shadow 160ms;
 }
@@ -74,7 +74,7 @@
 /* Copy and Counter (TraderCard.tsx CopyButton): ONE width whatever the word,
    so the buttons of a mixed grid line up; the trader page's pair likewise. */
 .cpy-copybtn--md { width: 104px; padding: 0 10px; }
-.cpy-copybtn--lg { min-width: 184px; height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-base); }
+.cpy-copybtn--lg { min-width: 184px; height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-base); border-radius: 11px; }
 .cpy-copybtn.is-copying {
   background: color-mix(in srgb, var(--pos) 16%, var(--bg-panel)); color: var(--pos);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent);
@@ -121,7 +121,7 @@
    its sides: a card rises in there as it comes round. */
 .cpy-hero { margin-bottom: var(--sp-2); }
 .cpy-deck {
-  position: relative; height: 340px; isolation: isolate;
+  position: relative; height: 384px; isolation: isolate;
   touch-action: pan-y; user-select: none; -webkit-user-select: none;
 }
 .cpy-deck.is-live { cursor: grab; }
@@ -132,7 +132,7 @@
   mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
 }
 .cpy-deck__card {
-  position: absolute; left: calc(50% - 124px); top: 44px; width: 248px;
+  position: absolute; left: calc(50% - 124px); top: 40px; width: 248px;
   display: flex; flex-direction: column; gap: 2px;
   padding: 14px 16px 12px; border: 0; border-radius: var(--cpy-r);
   background: var(--cpy-card); color: var(--text); font: inherit; text-align: left; cursor: inherit;
@@ -179,13 +179,13 @@
   content: ""; position: absolute; width: 10px; height: 10px; background: inherit;
   transform: rotate(45deg); border-radius: 2px;
 }
-.cpy-deck__chip--who { left: 7%; top: 6px; transform: rotate(-4deg); }
+.cpy-deck__chip--who { left: 6%; top: 2px; transform: rotate(-4deg); }
 .cpy-deck__chip--who::after { right: 22px; bottom: -4px; }
 .cpy-deck__chip--who span { font-family: var(--font-num); }
 .cpy-deck__chip--who b { font-weight: 500; color: var(--muted); }
 .cpy-deck__chip--copy b { color: var(--pos); }
 .cpy-deck__chip--counter b { color: var(--neg); }
-.cpy-deck__chip--count { right: 6%; bottom: 4px; padding-left: 12px; transform: rotate(3deg); }
+.cpy-deck__chip--count { right: 6%; bottom: 2px; padding-left: 12px; transform: rotate(3deg); }
 .cpy-deck__chip--count::after { left: 26px; top: -4px; }
 .cpy-deck__dot { width: 7px; height: 7px; border-radius: 50%; }
 .cpy-deck__dot + .cpy-deck__dot { margin-left: -9px; box-shadow: 0 0 0 2px var(--cpy-surface-2); }
@@ -240,7 +240,7 @@
 .cpy-toggle > button.is-on { background: var(--text); color: var(--bg); box-shadow: var(--depth-1); }
 
 .cpy-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.cpy-search { position: relative; display: flex; align-items: center; gap: var(--sp-2); flex: 0 1 340px; min-width: 220px; }
+.cpy-search { position: relative; display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 200px; min-width: 180px; max-width: 340px; }
 .cpy-search input {
   width: 100%; height: 32px; padding: 0 14px;
   border: 0; border-radius: var(--radius-full); background: color-mix(in srgb, var(--bg) 70%, var(--cpy-card));
@@ -255,7 +255,7 @@
 .cpy-pick.is-on .cpy-pick__v { color: var(--text); font-weight: 600; }
 .cpy-clear { height: 30px; padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-decoration: underline; cursor: pointer; }
 .cpy-clear:hover { color: var(--text); }
-.cpy-count { display: inline-flex; align-items: center; gap: 14px; margin-left: auto; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); white-space: nowrap; }
+.cpy-count { display: inline-flex; align-items: center; gap: 14px; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); white-space: nowrap; }
 
 /* --- the grid and the card -------------------------------------------------- */
 .cpy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
@@ -317,13 +317,10 @@
 .cpy-score--high { --score-c: var(--pos); }
 .cpy-score--mid { --score-c: var(--warn); }
 .cpy-score--low { --score-c: var(--neg); }
-.cpy-score__n b { color: var(--text); font-size: var(--fs-base); text-shadow: 0 0 12px color-mix(in srgb, var(--score-c) 55%, transparent); }
+.cpy-score__n b { color: var(--text); font-size: var(--fs-base); }
 .cpy-score__bars { display: inline-flex; gap: 2px; }
 .cpy-score__bars i { width: 4px; height: 14px; border-radius: 1px; background: var(--line-soft); }
-.cpy-score__bars i.is-on {
-  background: var(--score-c);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--score-c) 70%, transparent), 0 0 1px var(--score-c);
-}
+.cpy-score__bars i.is-on { background: var(--score-c); }
 
 /* --- the list --------------------------------------------------------------- */
 .cpy-list { overflow-x: auto; border: 0; border-radius: var(--cpy-r); background: var(--cpy-card); box-shadow: var(--depth-2); }
@@ -366,22 +363,94 @@
 .cpy-how__note { margin: var(--sp-3) 0 0; color: var(--dim); font-size: var(--fs-micro); line-height: 1.6; }
 
 /* --- one trader ------------------------------------------------------------- */
-.cpy-trader { display: flex; flex-direction: column; gap: var(--sp-3); }
-.cpy-trader__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.cpy-trader { display: flex; flex-direction: column; gap: 14px; }
 .cpy-back {
   display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 12px;
   border: 0; border-radius: var(--radius-full); background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
 }
 .cpy-back:hover { color: var(--text); background: var(--tint); }
-.cpy-trader__who { display: flex; align-items: center; gap: var(--sp-3); }
-.cpy-trader__addr { margin: 0 0 4px; font-family: var(--font-num); font-size: var(--fs-xl); font-weight: 600; }
-.cpy-trader__grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: var(--sp-3); align-items: start; }
-.cpy-trader__main { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
-.cpy-trader__grid .pf-card,
-.cpy-mine .pf-card { border: 0; border-radius: var(--cpy-r); overflow: hidden; box-shadow: var(--depth-2); }
-.cpy-trader__main .copy-chart { min-height: 260px; }
+
+/* The hero (panels.tsx TraderHero): one raised card - the bar, who, the two
+   buttons, then the figures as tiles beside the PnL curve. */
+.cpy-thero {
+  display: flex; flex-direction: column; gap: 16px;
+  padding: 14px 20px 20px;
+  border-radius: var(--cpy-r); background: var(--cpy-card); box-shadow: var(--depth-2);
+}
+.cpy-thero__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 -8px; }
+.cpy-thero__main { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.cpy-thero__who { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.cpy-thero__id { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.cpy-thero__addr { margin: 0; font-family: var(--font-display); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+.cpy-thero__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cpy-thero__tag {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: var(--radius-full);
+  background: var(--cpy-surface-2); color: var(--muted); font-size: var(--fs-micro); font-weight: 500;
+}
+.cpy-thero__upd { color: var(--dim); font-size: var(--fs-micro); }
+.cpy-thero__acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.cpy-thero__body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: stretch; }
+.cpy-kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.cpy-kv__tile {
+  display: flex; flex-direction: column; gap: 5px; min-width: 0;
+  padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1);
+}
+.cpy-kv__tile dt { color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpy-kv__tile dd { margin: 0; font-family: var(--font-num); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cpy-kv__tile dd.pos { color: var(--pos); }
+.cpy-kv__tile dd.neg { color: var(--neg); }
+.cpy-kv__tile dd.pf-dim { color: var(--dim); }
+.cpy-kv__tile .cpy-wr { align-items: flex-start; }
+.cpy-kv__tile .cpy-wr b { font-size: 17px; }
+.cpy-thero__curve {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  padding: 12px 14px 10px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1);
+}
+.cpy-thero__k { color: var(--muted); font-size: var(--fs-micro); }
+.cpy-thero__spark { flex: 1 1 auto; height: 132px; min-height: 96px; }
+/* The window switch, as the copy page's toggles: a pill, the chosen one white. */
+.cpy-thero .pf-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-full); background: var(--cpy-surface); box-shadow: var(--depth-1); }
+.cpy-thero .pf-ctl {
+  height: 26px; min-width: 34px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
+  background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.cpy-thero .pf-ctl:hover { color: var(--text); }
+.cpy-thero .pf-ctl.is-on { background: var(--text); color: var(--bg); }
+
+/* The backtest and the positions: the portfolio's cards in the copy page's language. */
+.cpy-trader__main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cpy-trader .pf-card,
+.cpy-mine .pf-card { border-color: transparent; border-radius: var(--cpy-r); overflow: hidden; background: var(--cpy-card); box-shadow: var(--depth-2); }
+.cpy-trader .pf-card__head { height: auto; min-height: 52px; padding: 12px 18px 4px 20px; border-bottom: 0; }
+.cpy-trader .pf .pf-h { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.cpy-trader .pf-card__body { padding: 8px 20px 20px; }
+.cpy-trader .pf-seg { padding: 3px; border: 0; border-radius: var(--radius-full); background: var(--cpy-surface); box-shadow: var(--depth-1); }
+.cpy-trader .pf .pf-ctl { border-radius: var(--radius-full); }
+.cpy-trader .pf .pf-ctl.is-on { background: var(--text); color: var(--bg); }
+.cpy-trader .pf-readout__value { font-family: var(--font-display); font-size: 34px; letter-spacing: -0.02em; }
+.cpy-trader .copy .pf-chart.copy-chart { height: 260px; }
+.cpy-trader .pf-chart--empty.copy-chart { min-height: 220px; border-radius: var(--radius-tile); background: color-mix(in srgb, var(--bg) 40%, var(--cpy-card)); }
+/* The stat strip becomes three tiles; the two lists below it, two more. */
+.cpy-trader .pf-statstrip { gap: 8px; margin: 14px 0 0; border-top: 0; }
+.cpy-trader .pf-stat { min-height: 0; padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1); }
+.cpy-trader .pf-stat + .pf-stat { border-left: 0; }
+.cpy-trader .pf-duo { gap: 8px; margin-top: 8px; }
+.cpy-trader .pf-duo > * { padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1); }
+.cpy-trader .pf-duo > div > .pf-group { padding: 0; box-shadow: none; }
+/* The leader's positions: a quieter table, rows on hairlines. */
+.cpy-trader .acct-table th { color: var(--muted); font-weight: 500; }
+.cpy-trader .acct-table td,
+.cpy-trader .acct-table th { border-bottom-color: rgba(255, 255, 255, 0.05); }
+.cpy-trader .acct-table tbody tr:hover td { background: var(--tint); }
 .cpy-mine { display: flex; flex-direction: column; gap: var(--sp-3); }
 .cpy-mine .pf-card--band { min-height: 320px; }
+@media (max-width: 1100px) {
+  .cpy-thero__body { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 720px) {
+  .cpy-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cpy-thero__addr { font-size: 22px; }
+}
 
 /* --- the copy dialog ---------------------------------------------------------- */
 .modal.fx.cpy-modal { max-width: 600px; max-height: calc(100vh - 32px); }
@@ -508,7 +577,6 @@
   .cpy { padding: var(--sp-2) var(--sp-3) var(--sp-5); }
   .cpy-hero { grid-template-columns: minmax(0, 1fr); min-height: 0; }
   .cpy-deck { max-width: 560px; width: 100%; margin: 0 auto; }
-  .cpy-trader__grid { grid-template-columns: minmax(0, 1fr); }
   .cpy-count { margin-left: 0; }
 }
 @media (max-width: 640px) {
@@ -637,6 +705,9 @@
 }
 .cpy-copybtn--copy:not(.is-copying):hover,
 .cpy-copybtn--counter:not(.is-copying):hover { filter: brightness(1.07); transform: translateY(-1px); }
+/* A trader on a platform a copy cannot follow: the same place and width, a neutral face. */
+.cpy-copybtn--view { background: var(--cpy-surface-2); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cpy-copybtn--view:hover { background: var(--bg-hover); filter: none; }
 .cpy-copybtn--copy:active,
 .cpy-copybtn--counter:active { filter: brightness(0.96); transform: none; }
 .cpy-copybtn--ghost.cpy-copybtn--counter {

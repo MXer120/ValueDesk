@@ -239,6 +239,31 @@ export function CopyButton({ kind, copying, onClick, size = 'md', label, title }
   );
 }
 
+const ViewGlyph = () => (
+  <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+    <path d="M1.6 8S4 3.6 8 3.6 14.4 8 14.4 8 12 12.4 8 12.4 1.6 8 1.6 8Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    <circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" strokeWidth="1.5" />
+  </svg>
+);
+
+/**
+ * A trader on a platform a copy cannot follow (Lighter, Arcus, trade.xyz): the
+ * Copy button's place and width, opening the trader in Scan instead.
+ */
+export function ViewButton({ venue, onClick }: { venue: TraderRow['venue']; onClick: (e: MouseEvent) => void }) {
+  return (
+    <button
+      type="button"
+      className="cpy-copybtn cpy-copybtn--view cpy-copybtn--md"
+      onClick={onClick}
+      title={`Copying ${VENUE_LABEL[venue]} traders is not supported yet - this opens the trader in Scan`}
+    >
+      <ViewGlyph />
+      <span>View</span>
+    </button>
+  );
+}
+
 /** Fewer closed trades than this and a win rate says little: it is shown, but not coloured. */
 const THIN_CLOSES = 5;
 
@@ -277,9 +302,11 @@ export interface TraderCardProps {
   onCopy: (row: TraderRow) => void;
   /** Already copying this trader: the button says so. */
   copying?: boolean;
+  /** A copy can follow this trader's platform; when not, the button is View (onOpen opens Scan). */
+  copyable?: boolean;
 }
 
-export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen, onCopy, copying }: TraderCardProps) {
+export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen, onCopy, copying, copyable = true }: TraderCardProps) {
   const { ref, peek, loading } = useTraderPeek(row, w);
   const pnl = row.pnl[w] ?? null;
   const big = unit === 'usd' ? fmtSignedUsd(pnl, 0) : fmtSignedPct(score.roi, 1);
@@ -325,7 +352,9 @@ export function TraderCard({ row, score, window: w, unit, kind = 'copy', onOpen,
 
       <footer className="cpy-card__foot">
         <ScoreMeter s={score} />
-        <CopyButton kind={kind} copying={copying} onClick={copy} />
+        {copyable
+          ? <CopyButton kind={kind} copying={copying} onClick={copy} />
+          : <ViewButton venue={row.venue} onClick={(e) => { e.stopPropagation(); onOpen(row); }} />}
       </footer>
     </article>
   );
