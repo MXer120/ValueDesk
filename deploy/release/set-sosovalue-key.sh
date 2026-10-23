@@ -31,6 +31,15 @@ fi
 export VS_EC2_ENV
 . deploy/release/lib.sh
 
+# Opened in a window of its own (a double click), the window would close on exit and take
+# the reason with it: wait for Enter first, success or not. set-sosovalue-key.cmd pauses itself.
+on_exit() {
+  local rc=$?
+  if [ "$rc" != 0 ]; then echo; echo "Stopped (exit $rc). Nothing past the step above was changed."; fi
+  if [ -z "${VS_KEY_NO_PAUSE:-}" ] && [ -t 0 ] && [ -t 1 ]; then read -r -p "Press Enter to close. " _ || true; fi
+}
+trap on_exit EXIT
+
 for arg in "$@"; do
   case "$arg" in
     --print) PRINT_ONLY=1 ;;
@@ -48,10 +57,15 @@ ask() {   # question, default (y|n)
 }
 
 echo "SoSoValue API key - from https://sosovalue.com/developer/dashboard"
-read -r -s -p "Paste the key (it is not shown): " KEY; echo
-KEY="$(printf '%s' "$KEY" | tr -d '[:space:]')"
-[ -n "$KEY" ] || die "no key given"
-case "$KEY" in *[!A-Za-z0-9._-]*) die "that does not look like a SoSoValue key (letters, digits, . _ - only)" ;; esac
+echo "In a Git Bash window paste with a right-click or Shift+Insert (Ctrl+V does not paste there)."
+read -r -s -p "Paste the key and press Enter (it is not shown): " KEY || true; echo
+KEY="$(printf '%s' "${KEY:-}" | tr -d '[:space:]')"
+[ -n "$KEY" ] || die "no key came through - paste it with a right-click or Shift+Insert, then press Enter"
+case "$KEY" in
+  *[[:cntrl:]]*) die "the key came through with a control character (${#KEY} characters) - Ctrl+V does not paste in a Git Bash window: paste with a right-click or Shift+Insert" ;;
+  *[\"\\]*) die "the key holds a quote or a backslash, which a SoSoValue key does not - check what was copied" ;;
+esac
+echo "Got a key of ${#KEY} characters."
 
 # The key against SoSoValue itself: one news item. The header goes to curl on stdin.
 # SoSoValue can refuse with HTTP 200 and a non-zero "code" in the body, so both count.

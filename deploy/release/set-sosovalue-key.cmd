@@ -9,6 +9,8 @@ if not exist "%GITBASH%" (
   exit /b 1
 )
 cd /d "%~dp0..\.."
+rem This window pauses below; the script need not.
+set "VS_KEY_NO_PAUSE=1"
 "%GITBASH%" deploy/release/set-sosovalue-key.sh %*
 echo.
 pause
