@@ -540,6 +540,13 @@ the secret, ports 8797 and 8799 closed).
 
 **8. Vercel: the function in `hnd1`, pointing at Tokyo.**
 
+Since 2026-10-23 the `valuedesk` project is connected to the repository and builds a
+commit itself (`vercel.json` -> `deploy/vercel/build.sh`, the same build, checks and
+Build Output as below). Then this step is: `VALUESCAN_ORIGIN=$TOKYO` in
+`deploy/vercel/production.settings`, commit, push to a branch (Vercel builds a preview:
+check it built), then to `main` (production). The upload below still works when the
+CLI is logged in:
+
 ```
 git checkout v0.2.0
 deploy/release/build-web.sh v0.2.0

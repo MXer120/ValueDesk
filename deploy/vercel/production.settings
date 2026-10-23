@@ -10,9 +10,9 @@
 # A change here reaches the site with the next production deployment of main.
 
 # The instance behind /api/* (and /api/copy/* - the hosted copy executor):
-# ValueDesk's server, its Elastic IP's sslip.io name (Frankfurt until the Tokyo
-# instance in ap-northeast-1 takes over).
-VALUESCAN_ORIGIN=63-178-187-165.sslip.io
+# ValueDesk's server in ap-northeast-1 (Tokyo), instance i-0d7d32ee79072083a, its
+# Elastic IP 54.150.61.169 by its sslip.io name (deploy/aws/ec2/.out/state.tokyo.env).
+VALUESCAN_ORIGIN=54-150-61-169.sslip.io
 
 VITE_WALLETCONNECT_PROJECT_ID=3a5409a71d931809f4c0838b7a7d56fd
 

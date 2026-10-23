@@ -102,12 +102,19 @@ install_release() {
   [ ! -e "$inc/tree/.env" ] || die "the release contains a .env file - refusing it"
 
   # The copy executor runs from the same tree (apps/executor with packages/copy-engine
-  # and packages/sodex-core). It needs @noble/* and tsx, which the server workspace
-  # installs into the root node_modules. Should apps/executor become a workspace of
-  # its own, its dependencies come from the lockfile too.
+  # and packages/sodex-core). Those two packages are workspaces whose @noble/* the
+  # lockfile hoists to the ROOT node_modules - a version the server workspace alone
+  # does not install (it keeps its own newer @noble nested under apps/server), so they
+  # are installed with it: without them the executor's imports of @noble fail.
+  # Should apps/executor become a workspace of its own, its dependencies come too.
   local ws=(--workspace apps/server)
-  if [ -f "$inc/tree/apps/executor/src/main.ts" ] && ( cd "$inc/tree" && node -e "const w = require('./package.json').workspaces || []; process.exit(w.includes('apps/executor') || w.includes('apps/*') ? 0 : 1)" ); then
-    ws+=(--workspace apps/executor)
+  if [ -f "$inc/tree/apps/executor/src/main.ts" ]; then
+    for p in packages/sodex-core packages/copy-engine; do
+      [ -f "$inc/tree/$p/package.json" ] && ws+=(--workspace "$p")
+    done
+    if ( cd "$inc/tree" && node -e "const w = require('./package.json').workspaces || []; process.exit(w.includes('apps/executor') || w.includes('apps/*') ? 0 : 1)" ); then
+      ws+=(--workspace apps/executor)
+    fi
   fi
   log "installing dependencies from the lockfile (${ws[*]}, no install scripts)"
   ( cd "$inc/tree"
