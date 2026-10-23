@@ -76,7 +76,7 @@ content_type() {
     js|mjs) echo 'text/javascript; charset=utf-8' ;;
     css) echo 'text/css; charset=utf-8' ;;
     json|map) echo 'application/json; charset=utf-8' ;;
-    txt) echo 'text/plain; charset=utf-8' ;;
+    txt|sha256) echo 'text/plain; charset=utf-8' ;;
     xml) echo 'application/xml; charset=utf-8' ;;
     svg) echo 'image/svg+xml' ;;
     png) echo 'image/png' ;;

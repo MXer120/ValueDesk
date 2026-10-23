@@ -40,7 +40,7 @@ export const FUNCTION_REGION = 'hnd1';
 export const NODE_RUNTIME = 'nodejs22.x';
 
 /** Extensions the build may contain (the same list deploy/release/publish-web.sh types by hand). */
-export const KNOWN_EXTENSIONS = new Set(['html', 'js', 'mjs', 'css', 'json', 'map', 'txt', 'xml', 'svg', 'png', 'jpg', 'jpeg',
+export const KNOWN_EXTENSIONS = new Set(['html', 'js', 'mjs', 'css', 'json', 'map', 'txt', 'sha256', 'xml', 'svg', 'png', 'jpg', 'jpeg',
   'webp', 'avif', 'gif', 'ico', 'woff2', 'woff', 'ttf', 'otf', 'wasm', 'webmanifest']);
 
 // Path classes. Each route below matches one class only, so no header is ever set twice

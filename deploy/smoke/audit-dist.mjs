@@ -36,7 +36,7 @@ if (!args.find((a) => !a.startsWith('--'))) {
 
 /** Extensions deploy/release/publish-web.sh has a content type for. Keep in step with its content_type(). */
 export const KNOWN_EXTENSIONS = new Set([
-  'html', 'js', 'mjs', 'css', 'json', 'map', 'txt', 'xml', 'svg', 'png', 'jpg', 'jpeg', 'webp', 'avif', 'gif', 'ico',
+  'html', 'js', 'mjs', 'css', 'json', 'map', 'txt', 'sha256', 'xml', 'svg', 'png', 'jpg', 'jpeg', 'webp', 'avif', 'gif', 'ico',
   'woff2', 'woff', 'ttf', 'otf', 'wasm', 'webmanifest',
 ]);
 
