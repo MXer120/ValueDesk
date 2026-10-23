@@ -98,9 +98,11 @@ export interface PanelTab {
  * WebSocket subscription stops doing so while it is not selected.
  */
 export function PanelTabs({
-  tabs, actions: actionsFor, active: activeIn, onChange,
+  tabs, actions: actionsFor, active: activeIn, onChange, after,
 }: {
   tabs: PanelTab[];
+  /** The + that adds a tab (tabExtras.tsx), first of the bar's right-hand controls. */
+  after?: ReactNode;
   /** Right-aligned controls; a function gets the active tab's key (the account band's filter bar). */
   actions?: ReactNode | ((activeKey: string) => ReactNode);
   /** Controlled: the active tab's key (a parent that switches tabs itself, e.g. "Activity" from a row). */
@@ -147,6 +149,19 @@ export function PanelTabs({
 
   const [leaving, setLeaving] = useState<{ key: string; content: ReactNode; fit: boolean } | null>(null);
   const shown = useRef<{ key: string; content: ReactNode; fit: boolean } | null>(null);
+  // A tab chosen off the strip's edge scrolls into it - the strip only, never the page, and not on mount.
+  const mounted = useRef(false);
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return; }
+    const b = current ? btns.current.get(current.key) : undefined;
+    const list = bar.current;
+    if (!b || !list) return;
+    const l = b.offsetLeft;
+    const r = l + b.offsetWidth;
+    if (l < list.scrollLeft) list.scrollTo({ left: l - 8, behavior: 'smooth' });
+    else if (r > list.scrollLeft + list.clientWidth) list.scrollTo({ left: r - list.clientWidth + 8, behavior: 'smooth' });
+  }, [current?.key]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const pick = (key: string) => {
     if (key === current?.key) return;
     if (shown.current) setLeaving(shown.current);
@@ -161,7 +176,18 @@ export function PanelTabs({
 
   return (
     <div className="dash-tabs">
-      <div ref={bar} className="dash-tabs__bar dash-panel__handle has-ink" role="tablist">
+      <div className="dash-tabs__bar dash-panel__handle has-ink">
+        {/* The tabs scroll sideways in their own strip once the bar is full, so the controls
+            at the right keep their width and never sit on a tab. */}
+        <div
+          ref={bar}
+          className="dash-tabs__list"
+          role="tablist"
+          onWheel={(e) => {
+            const el = e.currentTarget;
+            if (e.deltaY && el.scrollWidth > el.clientWidth) el.scrollLeft += e.deltaY;
+          }}
+        >
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -176,7 +202,10 @@ export function PanelTabs({
           </button>
         ))}
         {ink && <span className={`dash-tabs__ink${ink.ready ? ' is-ready' : ''}`} style={{ transform: `translateX(${ink.x}px)` }} aria-hidden="true" />}
-        {actions ? <div className="dash-tabs__actions dash-nodrag">{actions}</div> : null}
+        </div>
+        {/* The + ends the pinned controls: they overflow leftward when the bar is full, so the
+            far right is the one place nothing can cover it. */}
+        {actions || after ? <div className="dash-tabs__actions dash-nodrag">{actions}{after ? <span className="dash-tabs__after">{after}</span> : null}</div> : null}
       </div>
       <div className="dash-tabs__stack">
         {leaving && leaving.key !== current?.key && (

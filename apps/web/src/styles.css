@@ -117,9 +117,10 @@
      border - a hairline ring of light and a soft drop shadow in one
      box-shadow. 1 rests (pills, controls), 2 is a card, 3 floats (an open
      list, a lifted card). */
-  --depth-1: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 2px 8px rgba(0, 0, 0, 0.32);
-  --depth-2: 0 0 0 1px rgba(255, 255, 255, 0.045), 0 8px 24px rgba(0, 0, 0, 0.42);
-  --depth-3: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 24px 60px rgba(0, 0, 0, 0.6);
+  /* Tight drop shadows: a wide soft one read as a halo around every card. */
+  --depth-1: 0 0 0 1px rgba(255, 255, 255, 0.035), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --depth-2: 0 0 0 1px rgba(255, 255, 255, 0.045), 0 2px 6px rgba(0, 0, 0, 0.36);
+  --depth-3: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 22px rgba(0, 0, 0, 0.5);
   /* The dashboard's radii (26 / 20 / 14 there), a step tighter for a terminal:
      a trading panel sits in a 4px gutter, a page card has room around it. */
   --radius-card: 12px;   /* a trading panel */

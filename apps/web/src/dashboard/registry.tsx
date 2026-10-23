@@ -26,7 +26,6 @@ import { Chart } from '../components/Chart';
 import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
 import { OrderEntry } from '../components/OrderEntry';
 import { AccountPanel } from '../components/Account';
-import { AccountTabs } from '../components/AccountTabs';
 import { MobileCarousel } from './MobileCarousel';
 import { PanelTabs } from './Panel';
 import { Leaderboard } from '../components/Leaderboard';
@@ -35,6 +34,10 @@ import { Stats } from '../components/Stats';
 import type { BreakpointName, PanelDefinition } from './types';
 import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
 import { SizeCalc, SourceWidget } from './sourceWidgets';
+import { LiveFeed } from '../components/livefeed/LiveFeed';
+import { NewsFeed } from '../components/news/NewsFeed';
+import { coinLabel } from '../format';
+import { ChartCard, TradeAccountBand } from './tradeTabs';
 
 /**
  * The two breakpoints where the terminal has no column to spare for the chart.
@@ -106,9 +109,6 @@ const accountCtx = (c: TradeContext) => ({
   refreshToken: c.refreshToken,
   onChanged: c.onChanged,
 });
-
-/** How a market is spelled in an account table's Market column. */
-const marketLabel = (c: TradeContext) => c.sym?.displayName ?? c.symbol;
 
 /** Accessible name. The painted heading is Account, with the book chosen beside it. */
 
@@ -196,30 +196,8 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     // nothing can be dragged and the right-click menu does not open.
     // The card's head is the coin info row (the owner's reference: the coin,
     // the price, the day's figures, then the chart in the same card).
-    render: (c) => (
-      <div className="chart-card">
-        <TickerBar
-          engine={c.engine}
-          symbol={c.symbol}
-          sym={c.sym}
-          onLast={c.onLastPrice}
-          onSymbolClick={() => c.onOpenSearch()}
-        />
-        <div className="chart-card__body">
-          <Chart
-            engine={c.engine}
-            symbol={c.symbol}
-            sym={c.sym}
-            address={c.address}
-            unlocked={c.unlocked}
-            refreshToken={c.refreshToken}
-            onChanged={c.onChanged}
-            onPrice={c.onPrice}
-            lastPrice={c.lastPrice}
-          />
-        </div>
-      </div>
-    ),
+    // Tabs at the coin row's end (tradeTabs.tsx): other markets' charts and widgets, added with +.
+    render: (c) => <ChartCard c={c} />,
   },
 
   {
@@ -389,16 +367,8 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
      * the tab labels - is passed in; a page that does not know them omits them
      * and the band drops the control rather than inventing a value for it.
      */
-    render: (c) => (
-      <AccountTabs
-        {...accountCtx(c)}
-        market={marketLabel(c)}
-        positionCount={c.positionCount}
-        orderCount={c.orderCount}
-        onPositionCount={c.onPositionCount}
-        onOrderCount={c.onOrderCount}
-      />
-    ),
+    // With a + after the band's own tabs for a widget tab (tradeTabs.tsx).
+    render: (c) => <TradeAccountBand c={c} />,
   },
 
   {
@@ -463,17 +433,21 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     const face = faceFor(id);
     const name = face?.name ?? id;
     const quick = id === 'quick';
+    // The two news widgets draw their own insets and scroll inside themselves.
+    const own = id === 'news' || id === 'livefeed';
     return {
       id,
       title: name,
       defaultHidden: true,
       minW: quick ? 8 : 10,
       minH: quick ? 12 : 8,
-      pad: !quick,
-      scroll: quick ? 'auto' : 'auto',
+      pad: !quick && !own,
+      scroll: own ? 'hidden' : 'auto',
       when: quick ? (_c, bp) => !isNarrow(bp) : undefined,
       render: (c) => {
         if (id === 'sizecalc') return <SizeCalc price={c.lastPrice || c.price} />;
+        if (id === 'livefeed') return <LiveFeed />;
+        if (id === 'news') return <NewsFeed coin={coinLabel(c.sym?.baseCoin) || null} />;
         if (quick) {
           return (
             <OrderEntry

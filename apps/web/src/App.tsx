@@ -395,7 +395,7 @@ function AppShell() {
     <PrivacyProvider>
     <div className={`shell${rail ? ' shell--rail' : ''}`}>
       {rail && (
-        <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} />
+        <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} tab={shown} onNavigate={setTab} />
       )}
       {/* ONE bar of chrome at the top, 56px, and nothing underneath it.
        *

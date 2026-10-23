@@ -39,7 +39,7 @@ const sitePolicy = (scriptSrc) => [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https://api.web3modal.org",
   "font-src 'self'",
-  'frame-src https://verify.walletconnect.org',
+  'frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com',
   "worker-src 'self'",
   `connect-src ${CONNECT_SRC.join(' ')}`,
   "form-action 'none'",

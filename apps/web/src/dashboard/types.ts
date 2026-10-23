@@ -250,4 +250,24 @@ export interface DashboardConfig {
 
   /** Default placements per breakpoint. */
   layouts: Record<BreakpointName, PanelPlacement[]>;
+
+  /**
+   * Named canvases the dashboard ships with, switched from the icon rail
+   * (SideBar.tsx). The first is the designed default and becomes the user's
+   * current arrangement; the others are added once each (storage.ts
+   * seedTerminals), so deleting one keeps it deleted.
+   */
+  terminals?: TerminalSeed[];
+}
+
+export interface TerminalSeed {
+  id: string;
+  name: string;
+  /** The rail's glyph for it (SideBar.tsx). */
+  icon?: string;
+  /** An allow-list canvas: only `shown` panels are on it. */
+  blank?: boolean;
+  layouts?: Partial<Record<BreakpointName, PanelPlacement[]>>;
+  shown?: string[];
+  hidden?: string[];
 }

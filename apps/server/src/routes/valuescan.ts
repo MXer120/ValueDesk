@@ -13,7 +13,8 @@
  *   GET /api/vs/fills?venue&address&from&to&limit
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
- *   GET /api/vs/news?limit     (SoSoValue; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/news?feed&category&coin&q&page&limit   (SoSoValue; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/live?channel   (the YouTube channel's stream on air, for the Live Feed)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
@@ -46,7 +47,8 @@ import { buildScreener } from '../valuescan/screener.js';
 import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
-import { latestNews, newsKey } from '../valuescan/sosovalue/news.js';
+import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
+import { CHANNEL_ID, liveVideo } from '../valuescan/youtube/live.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -223,16 +225,30 @@ export async function valuescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * SoSoValue news for Explore. The key stays on this process. Without it the
-   * section is told the feed is not available, rather than shown made-up rows.
+   * SoSoValue news (the News widget, Explore): the latest, hot or featured list,
+   * by type and coin, or a keyword search - sosovalue/news.ts. The key stays on
+   * this process. Without it the widget is told the feed is not available,
+   * rather than shown made-up rows.
    */
   app.get('/api/vs/news', async (req, reply) => {
     try {
-      const q = req.query as Q;
-      const limit = intOf(q.limit, 8, 1, 12);
       if (!newsKey()) throw new NotAvailable('SoSoValue news is not configured');
-      const items = await latestNews(limit);
-      return { ok: true, items, source: 'SoSoValue' };
+      const page = await news(parseNewsQuery(req.query as Record<string, unknown>));
+      return { ok: true, ...page, source: 'SoSoValue' };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The video a YouTube channel has on air (the Live Feed widget), or null - one
+   * cached look at the channel's /live page per channel (valuescan/youtube/live.ts).
+   */
+  app.get('/api/vs/live', async (req, reply) => {
+    try {
+      const channel = String((req.query as Q).channel ?? '');
+      if (!CHANNEL_ID.test(channel)) throw new NotAvailable('Name a YouTube channel id');
+      return { ok: true, channel, video: await liveVideo(channel) };
     } catch (e) {
       return fail(reply, e);
     }

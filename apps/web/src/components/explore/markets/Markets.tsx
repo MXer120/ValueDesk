@@ -20,6 +20,7 @@ import { VENUE_LABEL, vsApi, type Venue } from '../../../vsApi';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
 import { FxSelect } from '../../funds/ui';
+import { EmptyState } from '../../EmptyState';
 import { PlatformSelect } from '../../PlatformSelect';
 import { PriceChart, toCandles, type Candle, type PriceKind } from '../cohorts/PriceChart';
 import { FundingScanner } from '../FundingScanner';
@@ -94,7 +95,7 @@ export function Markets({ enabled, onOpenSymbol, onOpenScanner }: {
   if (!rows.length) {
     return (
       <div className="mk">
-        <p className="mk-empty">Markets did not load. {hl.error ?? tickers.error}</p>
+        <EmptyState icon="chart" title="Markets did not load" line={hl.error ?? tickers.error ?? undefined} />
       </div>
     );
   }
@@ -361,7 +362,7 @@ function Rail({ rows, watch, active, onPick }: {
         ))}
       </ol>
       {!shown.length && (
-        <p className="mk-rail__empty">{id === 'watch' ? 'Star a market to keep it here.' : 'Nothing here right now.'}</p>
+        <EmptyState compact icon={id === 'watch' ? 'positions' : 'search'} title={id === 'watch' ? 'No markets starred' : 'Nothing here right now'} line={id === 'watch' ? 'Star a market to keep it here.' : undefined} />
       )}
     </aside>
   );
@@ -563,7 +564,7 @@ function MarketTable({ anchor, rows, sector, onSector, active, watch, onWatch, o
             })}
           </tbody>
         </table>
-        {!list.length && <p className="mk-empty">No market matches.</p>}
+        {!list.length && <EmptyState icon="search" title="No market matches" line="Try another search, sector or platform." />}
       </div>
       {list.length > shown && (
         <button type="button" className="mk-more" onClick={() => setShown((n) => n + PAGE)}>

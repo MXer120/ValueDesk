@@ -83,6 +83,10 @@
       of ours. The directive has to be explicit: with no frame-src, framing falls
       back to default-src 'self', which is what was refusing it.
 
+      The Live Feed widget (components/livefeed) plays a channel's stream in an
+      iframe: YouTube (www.youtube.com, the news channels), and a pasted Twitch,
+      Kick or Vimeo link. Those four players are the only other frames allowed.
+
       NOTE FOR ANY FUTURE EDIT: a CSP policy string has NO comment syntax, and
       this attribute is delimited by double quotes. A /* */ block placed inside
       the content attribute does not merely fail to parse as CSP - a quote inside
@@ -98,7 +102,7 @@
         script-src 'self';
         style-src 'self' 'unsafe-inline';
         img-src 'self' data: blob: https://api.web3modal.org;
-        frame-src https://verify.walletconnect.org;
+        frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
         worker-src 'self';
         font-src 'self';
         connect-src 'self'

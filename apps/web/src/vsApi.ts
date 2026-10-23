@@ -144,9 +144,16 @@ export const vsApi = {
   positioning: (o: { venue?: Venue | 'all'; symbol?: string } = {}, signal?: AbortSignal) =>
     unwrap<{ rows: Positioning[] }>(`/api/vs/positioning${qs(o)}`, signal).then((b) => b.rows),
 
-  /** SoSoValue news, already reduced by the server. The key never reaches this browser. */
-  news: (limit = 8, signal?: AbortSignal) =>
-    unwrap<{ items: NewsItem[]; source: string }>(`/api/vs/news${qs({ limit })}`, signal),
+  /**
+   * SoSoValue news, already reduced by the server (the key never reaches this browser):
+   * the latest, hot or featured list, by type (`category`) and coin, or a keyword search.
+   */
+  news: (o: { feed?: 'latest' | 'hot' | 'featured'; category?: number; coin?: string; q?: string; page?: number; limit?: number } = {}, signal?: AbortSignal) =>
+    unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
+
+  /** The video a YouTube channel has on air now, or null (the Live Feed widget). */
+  live: (channel: string, signal?: AbortSignal) =>
+    unwrap<{ channel: string; video: string | null }>(`/api/vs/live${qs({ channel })}`, signal).then((b) => b.video),
 
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>

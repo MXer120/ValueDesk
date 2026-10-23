@@ -1822,7 +1822,7 @@
   transition: background 140ms, box-shadow 140ms;
 }
 .mkt-favchip:hover { background: #212123; }
-.mkt-favchip.is-active { background: #262628; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 4px 14px rgba(0, 0, 0, 0.35); }
+.mkt-favchip.is-active { background: #262628; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 2px 6px rgba(0, 0, 0, 0.32); }
 .mkt-favchip__open {
   display: flex;
   align-items: center;
@@ -1939,3 +1939,27 @@
 .chart-card > .mkt-header.mkt-header--info { flex: none; height: 52px; min-height: 52px; padding-top: 6px; background: transparent; border-radius: 0; }
 .chart-card__body { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
 .chart-card__body > * { flex: 1 1 auto; min-height: 0; }
+
+/* The chart card's tabs (dashboard/tradeTabs.tsx) at the coin row's end. */
+.mkt-header--info .mkt-aside { flex: none; margin-left: auto; padding-left: 12px; }
+.chart-tabs { display: flex; align-items: center; gap: 4px; }
+.chart-tab {
+  display: inline-flex; align-items: center; height: 26px; min-height: 0; padding: 0 8px;
+  border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--muted);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; white-space: nowrap; cursor: pointer;
+}
+.chart-tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.04); }
+.chart-tab.is-on { color: var(--text); background: rgba(255, 255, 255, 0.07); border-color: rgba(255, 255, 255, 0.08); }
+.chart-card__body.is-widget { overflow: hidden; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+/* With tabs at the row's end the stats give way: they scroll under a fade instead of
+   running into the tabs. */
+.mkt-header--info:has(> .mkt-aside) .mkt-stats {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+}
+.mkt-header--info:has(> .mkt-aside) .mkt-stats::-webkit-scrollbar { display: none; }
+.mkt-header--info .mkt-stats > .mkt-stat { flex: none; }

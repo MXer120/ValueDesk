@@ -116,13 +116,14 @@ export function NavBar({
    */
   const hasAddress = !!address;
   useEffect(() => {
+    if (rail) return;
     const onMenu = () => {
       if (hasAddress) setAddrMenu(true);
       else openConnectDialog();
     };
     window.addEventListener(WALLET_EVENTS.menu, onMenu);
     return () => window.removeEventListener(WALLET_EVENTS.menu, onMenu);
-  }, [hasAddress]);
+  }, [hasAddress, rail]);
 
   return (
     <header className={`navbar${rail ? ' navbar--rail' : ''}`}>
@@ -197,7 +198,7 @@ export function NavBar({
             what you can do with it: copy it, arm trading, the advanced key
             options, drop it.
           */}
-          {address ? (
+          {rail ? null : address ? (
             <div className="navaddr">
               <button
                 className="navbtn navaddr__btn"
@@ -270,7 +271,7 @@ const SearchIcon = () => (
  * The actions run in AccountController (mounted once in App.tsx), so the menu
  * closes the moment a row is pressed without cancelling anything.
  */
-function AddressMenu({ address, onClose, closing = false, onExited }: {
+export function AddressMenu({ address, onClose, closing = false, onExited }: {
   address: string;
   onClose: () => void;
   /** Playing its exit (motion.css) - `onExited` unmounts it. */

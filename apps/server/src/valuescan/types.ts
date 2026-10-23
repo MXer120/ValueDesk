@@ -127,6 +127,10 @@ export interface NewsItem {
   author: string | null;
   /** Matched coin symbols, at most three. */
   symbols: string[];
+  /** SoSoValue's category (1 news, 2 research, 3 institution, 4 insights, 7 announcements, 13 crypto stocks). */
+  category?: number | null;
+  /** The body's first lines, when there is more than the title. */
+  summary?: string | null;
 }
 
 export interface VsPosition {

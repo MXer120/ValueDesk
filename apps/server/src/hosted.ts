@@ -99,6 +99,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // SoSoValue news. The process caches the page (valuescan/sosovalue/news.ts);
   // without SOSOVALUE_API_KEY the route answers not_available.
   { method: 'GET', url: '/api/vs/news', cls: 'read' },
+  // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
+  // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
+  { method: 'GET', url: '/api/vs/live', cls: 'upstream' },
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },

@@ -57,7 +57,8 @@ export const WIDGET_FACES: readonly WidgetFace[] = [
   { id: 'heatmap', name: 'Price heatmap', kind: 'heatmap', group: 'Charts', source: true },
 
   { id: 'tape', name: 'Trades', kind: 'trades', group: 'Tools', source: true },
-  { id: 'news', name: 'News', kind: 'news', group: 'Tools', source: true },
+  { id: 'news', name: 'News', kind: 'news', group: 'Tools', source: false },
+  { id: 'livefeed', name: 'Live feed', kind: 'news', group: 'Tools', source: false },
   { id: 'tracked', name: 'Tracked', kind: 'table', group: 'Tools', source: true },
   { id: 'toptraders', name: 'Top traders', kind: 'table', group: 'Tools', source: true },
   { id: 'cohorts', name: 'Cohorts', kind: 'cohort', group: 'Tools', source: true },
@@ -91,5 +92,5 @@ export function positionSize(equity: number, riskPct: number, stopPct: number, p
 export const EXTRA_WIDGET_IDS: readonly string[] = [
   'liq', 'poschg', 'copy', 'assets', 'orders', 'twap', 'history', 'fills',
   'transfers', 'twaplive', 'watch', 'quick', 'stops', 'funding', 'cohort', 'heatmap',
-  'tape', 'news', 'tracked', 'toptraders', 'cohorts', 'sizecalc',
+  'tape', 'news', 'livefeed', 'tracked', 'toptraders', 'cohorts', 'sizecalc',
 ];

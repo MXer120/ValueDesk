@@ -25,6 +25,7 @@ import { CopyModal } from './CopyModal';
 import { Discover } from './Discover';
 import { isCopyable } from './gridModel';
 import { useCopyContext, type CopyPageProps } from './useCopy';
+import { EmptyState } from '../EmptyState';
 import './Copy.css';
 import './CopyHome.css';
 
@@ -109,10 +110,12 @@ export function CopyPage(props: CopyPageProps) {
         <div className="pf copy cpy-mine">
           <CopiesPanel c={c} />
           {rows.length === 0 && (
-            <div className="cpy-empty">
-              <p>{c.wallet ? 'No copies yet.' : 'Connect a wallet to see your copies.'}</p>
-              <button type="button" className="cpy-copybtn" onClick={() => go('discover')}>Find a trader</button>
-            </div>
+            <EmptyState
+              icon={c.wallet ? 'positions' : 'wallet'}
+              title={c.wallet ? 'No copies yet' : 'No wallet connected'}
+              line={c.wallet ? 'Copy a trader and their trades show up here.' : 'Connect a wallet to see your copies.'}
+              action={<button type="button" className="empty-state__cta" onClick={() => go('discover')}>Find a trader</button>}
+            />
           )}
         </div>
       ) : (

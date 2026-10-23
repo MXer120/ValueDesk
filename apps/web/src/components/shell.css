@@ -69,7 +69,7 @@
   border-radius: 14px;
   background: #242426;
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 6px 16px rgba(0, 0, 0, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 .side__btn.is-raised:hover { background: #2a2a2d; }
 .side .navnotes__dot,
@@ -136,3 +136,55 @@
 
 /* The status bar spans its own column, not the window (StatusFooter.css widens it to 100vw). */
 .shell--rail .sfoot { margin-inline: calc(-1 * var(--sp-1)); }
+
+/* The wallet at the foot of the rail (SideBar.tsx SideWallet): Connect in the app's
+   green, raised like the market search; once connected, the wallet's logo. */
+.side__wallet { position: relative; display: flex; justify-content: center; margin-top: auto; padding: 12px 0 14px; }
+.side__btn.side__connect {
+  width: 52px;
+  height: 52px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--pos) 30%, #0b0d0c);
+  color: color-mix(in srgb, var(--pos) 18%, #fff);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent), 0 2px 8px color-mix(in srgb, var(--pos) 22%, transparent);
+}
+.side__btn.side__connect:hover { background: color-mix(in srgb, var(--pos) 42%, #0b0d0c); color: #fff; }
+.side__btn.side__connect:disabled { opacity: 0.7; cursor: progress; }
+.side__connect-t { font-size: 10px; font-weight: 600; line-height: 1; letter-spacing: 0.01em; }
+.side__btn.side__addr { width: 44px; height: 44px; border-radius: 12px; background: #1c1c1e; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.side__btn.side__addr:hover,
+.side__btn.side__addr[aria-expanded="true"] { background: #262628; }
+/* The address menu opens beside the rail, its foot level with the button. */
+.side .navaddr__menu {
+  position: fixed;
+  top: auto;
+  right: auto;
+  bottom: 14px;
+  left: calc(var(--rail-w) + 8px);
+  transform-origin: bottom left;
+  max-height: calc(100vh - 28px);
+  overflow-y: auto;
+}
+
+/* Terminals (SideBar.tsx): the one on screen is the raised square; on another page
+   it keeps a quiet ring, so the rail still says which one Trade opens on. */
+.side__btn.is-current { color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+.side__add {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 22px;
+  min-height: 0;
+  padding: 0;
+  border: 1px dashed rgba(255, 255, 255, 0.14);
+  border-radius: 7px;
+  background: transparent;
+  color: #7a7a80;
+  cursor: pointer;
+}
+.side__add:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }

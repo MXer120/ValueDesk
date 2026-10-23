@@ -29,8 +29,11 @@ import { PanelChrome } from './Panel';
 import { breakpointFor, resolveLayout, samePlacements, toPlacements } from './resolve';
 import {
   activateSlot, addEmptySlot, clearDashboard, ensureEditSlots, loadDashboard, mirrorIntoActiveSlot, removeSlot,
-  saveDashboard, type SavedDashboard,
+  saveDashboard, seedTerminals, type SavedDashboard,
 } from './storage';
+import { publishTerminals, registerTerminals, snapshotOf } from './terminals';
+import { SeamLayer } from './SeamLayer';
+import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
 import { faceFor } from './widgetCatalog';
 import type { DashboardConfig, PanelDefinition } from './types';
@@ -127,9 +130,15 @@ function useBox(): [RefObject<HTMLDivElement>, Box] {
 
 export function Dashboard<C>({ config, panels, context, className, onNotificationSettings }: DashboardProps<C>) {
   const [scrollRef, box] = useBox();
-  const [saved, setSaved] = useState<SavedDashboard>(
-    () => loadDashboard(config) ?? { v: config.version, layouts: {}, locked: false },
-  );
+  const [saved, setSaved] = useState<SavedDashboard>(() => {
+    const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: false };
+    // The shipped terminals (Trade, News) join a record once; written below.
+    return config.terminals ? seedTerminals(base, config.terminals) : base;
+  });
+  const seededOnLoad = useRef(saved);
+  useEffect(() => {
+    if (config.terminals && seededOnLoad.current.seeded?.length) saveDashboard(config, seededOnLoad.current);
+  }, [config]);
 
   /**
    * Set by a drag/resize gesture and cleared once that gesture has been
@@ -429,6 +438,33 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
     setHolding(false);
   }, []);
 
+  /* The icon rail's terminals (terminals.ts): this dashboard says which canvases
+     it has and which is on screen, and switches or adds one when asked. */
+  useEffect(() => {
+    if (config.terminals) publishTerminals(snapshotOf(saved));
+  }, [config.terminals, saved]);
+  useEffect(() => {
+    if (!config.terminals) return;
+    return registerTerminals({
+      activate: (id) => {
+        setSaved((prev) => {
+          const next = activateSlot(prev, id);
+          if (next === prev) return prev;
+          saveDashboard(config, next);
+          return next;
+        });
+      },
+      add: () => {
+        setSaved((prev) => {
+          const next = addEmptySlot(prev);
+          saveDashboard(config, next);
+          return next;
+        });
+        setEditing(true);
+      },
+    });
+  }, [config]);
+
   useLayoutEffect(() => {
     const shell = scrollRef.current?.closest('.shell');
     if (!(shell instanceof HTMLElement)) return;
@@ -605,6 +641,32 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
 
   const hasSaved = Object.keys(saved.layouts).length > 0 || activeBlank;
 
+  /* The seams between panels (SeamLayer.tsx): each side's resize ability is the
+     grid item's own (`resizeHandles`), so a strip that only grows sideways never
+     gets a seam that would change its height. */
+  const seamItems = useMemo<SeamBox[]>(() => layout.map((item) => {
+    const handles = item.resizeHandles ?? ['se'];
+    const resizable = item.isResizable !== false && item.static !== true;
+    return {
+      i: item.i, x: item.x, y: item.y, w: item.w, h: item.h,
+      minW: item.minW, minH: item.minH, maxW: item.maxW, maxH: item.maxH,
+      growH: resizable && handles.some((hd) => hd.includes('n') || hd.includes('s')),
+      growW: resizable && handles.some((hd) => hd.includes('e') || hd.includes('w')),
+    };
+  }), [layout]);
+  const onSeamMove = useCallback((next: SeamBox[]) => {
+    const placements = next.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }));
+    setSaved((prev) => {
+      if (samePlacements(prev.layouts[bp], placements)) return prev;
+      const updated = mirrorIntoActiveSlot({ ...prev, layouts: { ...prev.layouts, [bp]: placements } });
+      saveDashboard(config, updated);
+      return updated;
+    });
+  }, [bp, config]);
+  // Seams where panels can be resized at all: not locked, not arranging, and not on the
+  // two narrow breakpoints, whose arrangement is fixed (responsive.css).
+  const seamsOn = !locked && !editing && (bp === 'lg' || bp === 'md');
+
   return (
     <div className={`dash${locked ? ' is-locked' : ''}${arrange ? ' is-arrange' : ''}${overPage && ghost ? ' is-drop' : ''}${className ? ` ${className}` : ''}`}>
       {/* The hover-revealed "Lock layout"/"Reset layout" text strip that used
@@ -676,6 +738,13 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
               );
             })}
           </GridLayout>
+        )}
+        {box.width > 0 && seamsOn && (
+          <SeamLayer
+            items={seamItems}
+            grid={{ cols: metrics.cols, width: box.width, rowHeight, margin: metrics.margin, padding: metrics.containerPadding }}
+            onMove={onSeamMove}
+          />
         )}
       </div>
 

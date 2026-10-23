@@ -7,7 +7,7 @@
  * never to a crash and never to a panel positioned at NaN - on a trading screen
  * a layout that fails to render is a layout that hides a position.
  */
-import type { BreakpointName, DashboardConfig, PanelPlacement } from './types';
+import type { BreakpointName, DashboardConfig, PanelPlacement, TerminalSeed } from './types';
 import { BREAKPOINT_ORDER } from './types';
 
 const KEY_PREFIX = 'ot.dashboard.';
@@ -23,6 +23,9 @@ const KEY_PREFIX = 'ot.dashboard.';
  */
 export interface LayoutSlot {
   id: string;
+  /** What the rail calls it ("Trade", "News"); unnamed slots are "Layout N". */
+  name?: string;
+  icon?: string;
   blank?: boolean;
   layouts: Partial<Record<BreakpointName, PanelPlacement[]>>;
   hidden?: string[];
@@ -52,6 +55,8 @@ export interface SavedDashboard {
   slots?: LayoutSlot[];
   /** Which slot is mirrored into `layouts` / `hidden` / `shown`. */
   activeSlot?: string;
+  /** Terminal seeds already added once (DashboardConfig.terminals), so a deleted one stays deleted. */
+  seeded?: string[];
 }
 
 const keyFor = (id: string): string => `${KEY_PREFIX}${id}`;
@@ -95,6 +100,8 @@ const readSlots = (raw: unknown): LayoutSlot[] | null => {
     seen.add(id);
     slots.push({
       id,
+      ...(typeof rec['name'] === 'string' && rec['name'].trim() ? { name: rec['name'].trim().slice(0, 40) } : {}),
+      ...(typeof rec['icon'] === 'string' && rec['icon'] ? { icon: rec['icon'] } : {}),
       ...(rec['blank'] === true ? { blank: true } : {}),
       layouts: readLayouts(rec['layouts']),
       hidden: idList(rec['hidden']),
@@ -131,8 +138,9 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
     // user's choice. Slots mirror the same list, so it has to survive.
     const shown = idList(rec.shown);
     const parsedSlots = readSlots(rec.slots);
+    const seeded = idList(rec.seeded);
     if (!parsedSlots) {
-      return { v: config.version, layouts, locked: rec.locked === true, hidden, shown };
+      return { v: config.version, layouts, locked: rec.locked === true, hidden, shown, ...(seeded.length ? { seeded } : {}) };
     }
     // The top-level fields are the active canvas. Copy them onto that slot so
     // a write that updated the mirror and not the slot (or the other way
@@ -151,10 +159,69 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
       shown,
       slots,
       ...(activeSlot ? { activeSlot } : {}),
+      ...(seeded.length ? { seeded } : {}),
     };
   } catch {
     return null;
   }
+}
+
+const seedSlot = (s: TerminalSeed): LayoutSlot => ({
+  id: s.id,
+  name: s.name,
+  ...(s.icon ? { icon: s.icon } : {}),
+  ...(s.blank ? { blank: true } : {}),
+  layouts: s.layouts ?? {},
+  hidden: s.hidden ?? [],
+  shown: s.shown ?? [],
+});
+
+/**
+ * The dashboard's shipped terminals, added to a saved record once each. With no
+ * slots yet the first seed takes the arrangement on screen (it stays the
+ * default and stays active) and the others follow it; with slots, the first
+ * unnamed one takes the default's name and every seed not added before is
+ * appended. `seeded` remembers which, so a deleted terminal stays deleted.
+ */
+export function seedTerminals(state: SavedDashboard, seeds: readonly TerminalSeed[]): SavedDashboard {
+  if (!seeds.length) return state;
+  const seeded = new Set(state.seeded ?? []);
+  const fresh = seeds.filter((s) => !seeded.has(s.id));
+  if (!fresh.length) return state;
+  const [first, ...rest] = seeds;
+  if (!first) return state;
+  if (!state.slots?.length) {
+    const primary: LayoutSlot = { ...seedSlot(first), blank: false, layouts: state.layouts, hidden: state.hidden ?? [], shown: state.shown ?? [] };
+    if (!first.blank) delete primary.blank;
+    return {
+      ...state,
+      slots: [primary, ...rest.filter((s) => !seeded.has(s.id)).map(seedSlot)],
+      activeSlot: first.id,
+      seeded: [...new Set([...seeded, ...seeds.map((s) => s.id)])],
+    };
+  }
+  let slots = [...state.slots];
+  for (const s of fresh) {
+    seeded.add(s.id);
+    if (s === first) {
+      const i = slots.findIndex((x) => !x.name);
+      if (i >= 0 && !slots.some((x) => x.id === s.id)) slots[i] = { ...slots[i]!, name: s.name, ...(s.icon ? { icon: s.icon } : {}) };
+      continue;
+    }
+    if (!slots.some((x) => x.id === s.id)) slots = [...slots, seedSlot(s)];
+  }
+  return { ...state, slots, seeded: [...seeded] };
+}
+
+export interface TerminalView {
+  id: string;
+  name: string;
+  icon: string | null;
+}
+
+/** The canvases as the rail lists them: unnamed ones are "Layout N". */
+export function terminalsOf(state: SavedDashboard): TerminalView[] {
+  return (state.slots ?? []).map((s, i) => ({ id: s.id, name: s.name ?? `Layout ${i + 1}`, icon: s.icon ?? null }));
 }
 
 export function saveDashboard(config: DashboardConfig, state: SavedDashboard): void {

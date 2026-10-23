@@ -95,7 +95,13 @@ function useBandFilters(): [Record<BandTab, TableFilter>, (tab: BandTab, f: Tabl
 export function AccountTabs({
   engine, address, unlocked, readOnly = false, byName, refreshToken, onChanged,
   market, positionCount, orderCount, onPositionCount, onOrderCount, accountScope = false, symbolsFor,
-}: AccountTabsProps) {
+  extraTabs, tabsAfter,
+}: AccountTabsProps & {
+  /** Tabs a trader added with the + (dashboard/tradeTabs.tsx), after the band's own. */
+  extraTabs?: PanelTab[];
+  /** The + itself. */
+  tabsAfter?: ReactNode;
+}) {
   const [currentOnly, setCurrentOnly] = useSharedStored<boolean>('vs.acct.currentMarket', false);
   const [filters, setFilter] = useBandFilters();
   const [view, setView] = useSharedStored<CardView>('vs.acct.poshist.view', 'card');
@@ -270,7 +276,7 @@ export function AccountTabs({
   ];
 
   const actions = (active: string): ReactNode => {
-    if (active === 'algos') return null;
+    if (active === 'algos' || active.startsWith('x:')) return null;
     const t = (TABS as string[]).includes(active) ? (active as BandTab) : 'positions';
     if (t === 'balances') {
       return (
@@ -316,7 +322,7 @@ export function AccountTabs({
   return (
     <div ref={bandRef} style={{ display: 'contents' }}>
       <AccountKeepAlive engine={eng} address={address} />
-      <PanelTabs tabs={tabs} actions={actions} />
+      <PanelTabs tabs={extraTabs?.length ? [...tabs, ...extraTabs] : tabs} actions={actions} after={tabsAfter} />
     </div>
   );
 }

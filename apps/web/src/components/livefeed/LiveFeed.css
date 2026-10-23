@@ -1,0 +1,80 @@
+/* The Live Feed widget (LiveFeed.tsx): the player fills the panel; the controls
+   float over its top edge and show only while the pointer is over it (or the
+   keyboard is in it, or nothing is playing). */
+.lf { position: relative; display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; min-height: 0; overflow: hidden; border-radius: inherit; background: #000; }
+.lf.is-empty { background: transparent; }
+.lf__frame { display: block; width: 100%; height: 100%; border: 0; }
+.lf__bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px;
+  background: linear-gradient(rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 160ms, transform 160ms;
+  pointer-events: none;
+}
+.lf:hover .lf__bar,
+.lf.is-hover .lf__bar,
+.lf:focus-within .lf__bar,
+.lf.is-empty .lf__bar,
+.lf.is-editing .lf__bar { opacity: 1; transform: none; pointer-events: auto; }
+.lf.is-empty .lf__bar { background: none; }
+.lf__gap { flex: 1 1 auto; }
+.lf__pick {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.78);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  cursor: pointer;
+}
+.lf__pick:hover { border-color: rgba(255, 255, 255, 0.26); }
+.lf__btn {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.78);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  color: var(--text);
+  cursor: pointer;
+}
+.lf__btn:hover { border-color: rgba(255, 255, 255, 0.3); }
+.lf__btn[aria-pressed="true"] { color: var(--pos); }
+.lf__btn--go { width: auto; padding: 0 12px; font: inherit; font-size: var(--fs-xs); font-weight: 600; background: color-mix(in srgb, var(--pos) 34%, #0b0d0c); border-color: transparent; }
+.lf__custom { display: flex; gap: 6px; flex: 1 1 260px; max-width: 420px; min-width: 0; }
+.lf__custom input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(20, 20, 22, 0.85);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+}
+.lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
+.lf__err { position: absolute; left: 10px; right: 10px; top: 48px; z-index: 2; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
+.lf:fullscreen { border-radius: 0; }

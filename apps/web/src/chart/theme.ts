@@ -172,8 +172,9 @@ export const DEFAULT_OFFSET_RIGHT = 80;
 const ON_ACCENT = T.bg;
 
 export const chartStyles: DeepPartial<Styles> = {
+  // Off by default (the owner's call): the candles on the plain panel, no lines behind them.
   grid: {
-    show: true,
+    show: false,
     horizontal: { show: true, size: 1, style: 'solid', color: T.grid },
     vertical: { show: true, size: 1, style: 'solid', color: T.grid },
   },

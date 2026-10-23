@@ -18,7 +18,7 @@
  * indistinguishable from a minus sign in a column of signed numbers, so
  * everything user-visible goes through `` below.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLatched } from './motion';
 import { createPortal, flushSync } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol, type Ticker } from '../api';
@@ -631,8 +631,10 @@ function statLabel(id: StatId, sym?: Symbol): string {
 }
 
 export function TickerBar({
-  engine, symbol, sym, onLast, onSymbolClick,
+  engine, symbol, sym, onLast, onSymbolClick, aside,
 }: {
+  /** At the row's end, outside the stats' scroll (the chart card's tabs). */
+  aside?: ReactNode;
   engine: Engine; symbol: string; sym?: Symbol;
   /** Reports the live last price so order entry can value market orders. */
   onLast?: (p: string) => void;
@@ -915,6 +917,7 @@ export function TickerBar({
       <div className="mkt-stats">
         {available.filter((s) => selected.has(s.id)).map((s) => statNode(s.id))}
       </div>
+      {aside ? <div className="mkt-aside">{aside}</div> : null}
 
 
       {statFx.value && (

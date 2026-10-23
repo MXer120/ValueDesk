@@ -11,6 +11,9 @@ import { DASH, MINUS, fmt, marketName, pick } from '../../format';
 import { CoinIcon } from '../CoinIcon';
 import type { Direction, OrderSource } from './filters';
 import { StatusIcon } from './StatusIcon';
+import { EmptyState } from '../EmptyState';
+import { emptyCopy } from '../emptyCopy';
+import { openConnectDialog } from '../account/connect';
 import { formatPct, orderStatusInfo, statusTitle, type StatusInput } from './orderStatus';
 import { formatNumber } from '../../intlCache';
 import { AUTO_LOAD_START, onEndSeen, type AutoLoadState } from './autoLoad';
@@ -197,10 +200,25 @@ export const toneOf = (v: number | null | undefined): '' | 'pos' | 'neg' =>
 // --- the quiet lines -------------------------------------------------------------
 
 /** The one quiet line an empty panel shows; "Loading…" gets the sheets' spinner. */
+/**
+ * A panel's empty or loading line. A sentence we know ("No open positions.") is drawn
+ * as the owner's empty state - an icon, a title, one line (EmptyState.tsx); a missing
+ * wallet offers Connect. Anything else keeps the plain line.
+ */
 export function Note({ children }: { children: ReactNode }) {
-  return children === 'Loading…'
-    ? <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />{children}</p>
-    : <p className="acct-empty">{children}</p>;
+  if (typeof children === 'string' && children.endsWith('…')) {
+    return <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />{children}</p>;
+  }
+  if (typeof children !== 'string') return <p className="acct-empty">{children}</p>;
+  const copy = emptyCopy(children);
+  return (
+    <EmptyState
+      icon={copy.icon}
+      title={copy.title}
+      line={copy.line}
+      action={copy.wallet ? <button type="button" className="empty-state__cta" onClick={() => openConnectDialog()}>Connect wallet</button> : undefined}
+    />
+  );
 }
 
 /** Rows exist, the view hides all of them - say so, with the way back. */

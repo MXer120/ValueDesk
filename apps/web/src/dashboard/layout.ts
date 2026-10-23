@@ -424,6 +424,34 @@ const SM = pair({ markets: 2, ticker: 2, band: 22, positions: 12, account: 7 });
 const XS = pair({ markets: 2, ticker: 4, band: 24, positions: 11, account: 9 });
 
 /** The trade page dashboard. */
+/**
+ * The trade page's terminals (DashboardConfig.terminals): Trade is the design
+ * above, and the one on screen by default; News is a live channel, the news
+ * feed and the chart, added beside it and one click away in the rail.
+ */
+const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
+  { id: 'trade', name: 'Trade', icon: 'trade' },
+  {
+    id: 'news',
+    name: 'News',
+    icon: 'news',
+    blank: true,
+    shown: ['livefeed', 'news', 'chart'],
+    layouts: {
+      lg: [
+        { i: 'livefeed', x: 0, y: 0, w: 30, h: 52 },
+        { i: 'chart', x: 0, y: 52, w: 30, h: 38 },
+        { i: 'news', x: 30, y: 0, w: 18, h: 90 },
+      ],
+      md: [
+        { i: 'livefeed', x: 0, y: 0, w: 48, h: 14 },
+        { i: 'news', x: 0, y: 14, w: 48, h: 16 },
+        { i: 'chart', x: 0, y: 30, w: 48, h: 17 },
+      ],
+    },
+  },
+];
+
 export const TRADE_DASHBOARD: DashboardConfig = {
   // Bump to invalidate every saved layout and push these defaults to everyone.
   // v2: retuned every breakpoint against measured content minimums, and moved
@@ -460,6 +488,7 @@ export const TRADE_DASHBOARD: DashboardConfig = {
   // 47% short and the whole terminal would end in a 460px dead band, so this
   // bump is not optional either.
   id: 'trade',
+  terminals: TRADE_TERMINALS,
   version: 13, // the coin info row is the chart card's head from md up; no ticker panel there
   breakpoints: BREAKPOINTS,
   grid: GRID,
