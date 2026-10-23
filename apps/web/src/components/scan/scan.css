@@ -82,7 +82,8 @@
   padding-left: var(--sp-2);
   align-items: stretch;
 }
-.scan-head .scan-head__copy { align-self: center; }
+.scan-head .scan-head__copy { align-self: center; display: inline-flex; gap: 6px; margin-left: 8px; }
+.scan-head .scan-head__nocopy { align-self: center; margin-left: 8px; color: var(--dim); font-size: var(--fs-xs); }
 
 /* An inactive venue stays clickable. --disabled is the gray; --muted is the
    word, one step up so the label is still readable on the selected tab. */

@@ -1,15 +1,17 @@
 /**
  * Explore.
  *
- * One page, two readings, then Cohorts on its own view. The landing is the
- * funding scanner's short list and the leaderboard under it. The scanner
- * itself is the Funding view. This is not a grid of cards.
+ * Three views. Markets is the landing (markets/Markets.tsx): the board's
+ * pulse, a featured market and its chart, the day's heatmap, the sectors, the
+ * funding spreads and every market in one table. Funding is the full spread
+ * scanner; Cohorts is the tracked wallets' positioning. The leaderboard has its
+ * own page.
  */
 import { useEffect, useState } from 'react';
 import type { Venue } from '../../vsApi';
-import { LeaderboardPage } from '../leaderboard/LeaderboardPage';
 import { FundingScanner } from './FundingScanner';
 import { Cohorts } from './cohorts/Cohorts';
+import { Markets } from './markets/Markets';
 import './Explore.css';
 
 type ExploreView = 'overview' | 'funding' | 'cohorts';
@@ -42,7 +44,7 @@ function usePageVisible(): boolean {
   return visible;
 }
 
-export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExploreProps) {
+export function Explore({ onOpenSymbol }: ExploreProps) {
   const pageVisible = usePageVisible();
   const [view, setViewState] = useState<ExploreView>(viewFromUrl);
   useEffect(() => {
@@ -74,16 +76,12 @@ export function Explore({ address, onScan, onOpenCopy, onOpenSymbol }: ExplorePr
         <div className="pf ex-cohorts">
           <Cohorts onScan={(a) => { window.location.href = `/scan?find=${encodeURIComponent(a)}`; }} />
         </div>
-      ) : (
+      ) : view === 'funding' ? (
         <div className="ex-desk">
-          <FundingScanner
-            enabled={pageVisible}
-            mode={view === 'funding' ? 'full' : 'compact'}
-            onOpenSymbol={onOpenSymbol}
-            onOpenScanner={() => setView('funding')}
-          />
-          {view === 'overview' && <LeaderboardPage address={address} onScan={onScan} onOpenCopy={onOpenCopy} />}
+          <FundingScanner enabled={pageVisible} mode="full" onOpenSymbol={onOpenSymbol} />
         </div>
+      ) : (
+        <Markets enabled={pageVisible} onOpenSymbol={onOpenSymbol} onOpenScanner={() => setView('funding')} />
       )}
     </div>
   );

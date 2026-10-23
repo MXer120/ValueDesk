@@ -14,21 +14,20 @@
  * band's `.acct-table.acct-t`, the long / short bars the exposure card's
  * `.pf-split`. Cohorts.css only lays them out.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BIAS_LABEL, COHORT_BY_ID, LEAN_LABEL, PNL_COHORTS, SECTORS, SIZE_COHORTS, biasOf, isBullish, isCohortId, isSector, leanOf, longShare,
   type CohortCard, type CohortDef, type CohortDetailResponse, type CohortFilter, type CohortId, type CohortRange,
   type CohortWalletRow, type CohortWalletsResponse, type CohortsResponse, type Lean, type Sector, type WalletSort,
 } from '@sign/valuescan/cohorts/model.js';
-import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../../vsApi';
+import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
 import { useStored } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
 import { emptyCohortsLine } from './emptyCopy';
 import { CoinIcon } from '../../CoinIcon';
-import { VenueLogo } from '../../VenueLogo';
 import { LoadFailed } from '../../LoadFailed';
-import { VENUE_BRAND } from '../../venueBrand';
+import { PlatformSelect } from '../../PlatformSelect';
 import { fmtCount, fmtUsdShort } from '../model';
 import { CohortIcon } from './CohortIcon';
 import { LeanChart } from './LeanChart';
@@ -544,11 +543,6 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
     setFilterState(f);
     writeParams({ sector: f.sector ?? null, coin: f.coin ?? null }, false);
   };
-  const toggle = (v: Venue) => {
-    const on = venues.includes(v);
-    if (on && venues.length === 1) return;
-    setStored(on ? venues.filter((x) => x !== v) : [...venues, v]);
-  };
 
   const listKey = `${venues.join(',')}|${filter.sector ?? ''}|${filter.coin ?? ''}`;
   const list = usePolled<CohortsResponse>(listKey, (signal) => vsApi.cohorts(venues, filter, signal));
@@ -578,25 +572,7 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
   return (
     <section className="panel lbp coh" aria-busy={list.loading}>
       <div className="lbp-bar">
-        <div className="lbp-venues" role="group" aria-label="Venues">
-          {SCAN_VENUES.map((v) => {
-            const on = venues.includes(v);
-            return (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={on}
-                className={`lbp-chip${on ? ' is-on' : ''}`}
-                style={{ '--brand': VENUE_BRAND[v] } as CSSProperties}
-                onClick={() => toggle(v)}
-                title={on && venues.length === 1 ? 'At least one venue stays selected' : undefined}
-              >
-                <VenueLogo venue={v} size={14} />
-                {VENUE_LABEL[v]}
-              </button>
-            );
-          })}
-        </div>
+        <PlatformSelect options={SCAN_VENUES} value={venues} onChange={setStored} />
         {venues.length > 1 && <span className="coh-net" title="A wallet on several of these venues counts once: PnL, perp equity and positions summed">Netted</span>}
         {section === 'cohorts' && <div className="coh-filters">
           <Picker label="Sector" value={filter.sector ? SECTOR_LABEL[filter.sector] : null} onClear={() => setFilter({})}>

@@ -272,15 +272,17 @@ const GRID: DashboardConfig['grid'] = {
  * the moment that inset does.
  */
 const LG: DashboardConfig['layouts']['lg'] = [
-  { i: 'markets',   x: 0,  y: 0,  w: 28, h: 3 },
+  // v12: the favourites bar and the coin info row of the owner's reference -
+  // 44px chips and a 30px price need 6 and 8 rows; the chart gives up the 7.
+  { i: 'markets',   x: 0,  y: 0,  w: 28, h: 6 },
   // 5 -> 4 rows. The gate that shipped this file's "deliberately under-band"
   // strip/header pair reduced .mkt-header's own CSS floor from 40px to 35px
   // (Market.css) in the same pass but did not follow through here, so the
   // grid kept reserving the OLD floor's row count and the header sat at
   // 51.1px instead of moving with its own content. h:4 -> 4*11.02-4 = 40.08px,
   // still 5px clear of the 35px floor. Chart absorbs the freed row.
-  { i: 'ticker',    x: 0,  y: 3,  w: 28, h: 4 },
-  { i: 'chart',     x: 0,  y: 7,  w: 28, h: 53 },
+  { i: 'ticker',    x: 0,  y: 6,  w: 28, h: 8 },
+  { i: 'chart',     x: 0,  y: 14, w: 28, h: 46 },
   { i: 'book',      x: 28, y: 0,  w: 10, h: 60 },
   { i: 'exec',      x: 38, y: 0,  w: 10, h: 60 },
   { i: 'positions', x: 0,  y: 60, w: 38, h: 30 },
@@ -420,7 +422,8 @@ const SM = pair({ markets: 2, ticker: 2, band: 22, positions: 12, account: 7 });
  *   positions 11 = 326
  *   account  9 = 266 narrow, so the summary is ONE column and 206px tall
  */
-const XS = pair({ markets: 2, ticker: 3, band: 24, positions: 11, account: 9 });
+// v12: the coin info row wraps to the coin and price over the stats, which takes 4 rows.
+const XS = pair({ markets: 2, ticker: 4, band: 24, positions: 11, account: 9 });
 
 /** The trade page dashboard. */
 export const TRADE_DASHBOARD: DashboardConfig = {
@@ -459,7 +462,7 @@ export const TRADE_DASHBOARD: DashboardConfig = {
   // 47% short and the whole terminal would end in a 460px dead band, so this
   // bump is not optional either.
   id: 'trade',
-  version: 11, // xs ticker is 3 rows so the price stays put and the stats wrap under it
+  version: 12, // lg favourites bar 6 rows and coin info 8 (the reference's chips and price), chart 46
   breakpoints: BREAKPOINTS,
   grid: GRID,
   layouts: { lg: LG, md: MD, sm: SM, xs: XS },

@@ -1,8 +1,7 @@
 /**
- * The Copy page's panels: one trader (profile, replay, open positions) and My
- * copies (every copy, its activity, the replay's trades). CopyPage.tsx lays
- * them out; the trader grid and the copy dialog are Discover.tsx and
- * CopyModal.tsx.
+ * The Copy page's My copies panel: every copy, its activity, the replay's
+ * trades. A trader opens on the Scan page; the trader grid and the copy dialog
+ * are Discover.tsx and CopyModal.tsx.
  *
  * Built from the design system the portfolio exports (Card, Group, Row, Stat),
  * inside the `pf` scope CopyPage gives them. Nothing here draws a style of its
@@ -18,26 +17,20 @@
  *  - Traders are shown by public, objective numbers, the same for everyone:
  *    nothing here recommends a trader to anyone.
  */
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { SKIP_REASONS, type ActivityEntry, type CopyView } from '@copy-engine';
 import { MODE_LABEL } from '../../copy/CopySetupSheet';
 import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow } from '../../copy/live';
 import { notify, notifyError } from '../../toast';
 import { useConfirm } from '../Modal';
 import { DASH, fmt, fmtUsd, shortAddr, signClass } from '../../format';
-import { winRateView } from '../../winRateView';
-import { VENUE_LABEL, type TraderRow, type Venue, type VsPosition, type Window } from '../../vsApi';
+import { VENUE_LABEL } from '../../vsApi';
 import { PanelTabs } from '../../dashboard/Panel';
 import { Card, Group, Row, Stat } from '../portfolio/parts';
-import { LoadFailed } from '../LoadFailed';
-import { EquityChart } from './EquityChart';
 import { CoinLabel } from '../CoinIcon';
-import { skipReasonLabel, type SimResult, type SimTrade } from './sim';
-import { BACKTEST_WINDOWS, WINDOW_LABEL, fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
-import { FILL_LIMIT, type CopyContext, type Load } from './useCopy';
-import { Avatar, CopyButton, Spark, WinRate } from './TraderCard';
-import { VENUE_BRAND } from '../venueBrand';
-import { useMask, type PrivacyKey } from '../../privacy';
+import { skipReasonLabel, type SimTrade } from './sim';
+import { fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
+import type { CopyContext } from './useCopy';
 
 /* ------------------------------------------------------------ helpers ----- */
 
@@ -75,303 +68,11 @@ function Seg<T extends string>({ value, options, onChange, label }: {
 const fmtPx = (v: number | null | undefined): string =>
   v === null || v === undefined || !Number.isFinite(v) ? DASH : fmt(Number(v.toPrecision(6)));
 
-const pctOf = (frac: number | null | undefined, dp = 1): string =>
-  frac === null || frac === undefined || !Number.isFinite(frac) ? DASH : `${(frac * 100).toFixed(dp)}%`;
-
-function fmtAgo(ms: number | null | undefined): string {
-  if (!ms) return DASH;
-  const s = Math.max(0, (Date.now() - ms) / 1000);
-  if (s < 90) return 'just now';
-  if (s < 5400) return `${Math.round(s / 60)}m ago`;
-  if (s < 129_600) return `${Math.round(s / 3600)}h ago`;
-  return `${Math.round(s / 86_400)}d ago`;
-}
-
 const fmtStamp = (ms: number): string =>
   new Date(ms).toLocaleString('en-US', { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 
 const fmtDay = (ms: number): string =>
   new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: '2-digit' });
-
-/**
- * One sentence for a failed load: "<What> couldn't load." with Retry, never the
- * reason (that is in the console). "Not implemented yet" is a state, not an
- * error: `plural` names it in that sentence.
- */
-function loadNote(l: Load<unknown>, venue: Venue, what: string, plural: string): ReactNode {
-  if (l.code === 'not_available') {
-    return <p className="pf-note">{VENUE_LABEL[venue]} {plural} are not available here yet.</p>;
-  }
-  return <LoadFailed what={what} onRetry={l.reload} />;
-}
-
-/* ============================================================= trader ===== */
-
-/** One figure of the trader hero, masked like the rows it replaces (privacy.tsx). */
-function Kv({ label, value, cls, privacy, hint }: { label: string; value: ReactNode; cls?: string; privacy: PrivacyKey; hint?: string }) {
-  const mask = useMask(privacy);
-  return (
-    <div className="cpy-kv__tile" title={hint}>
-      <dt>{label}</dt>
-      <dd className={cls}>{mask(value)}</dd>
-    </div>
-  );
-}
-
-/**
- * The trader page's head: who it is, the two buttons, the window, the
- * figures as tiles (the owner's dashboard's KPI row) and the PnL curve. It
- * replaces the old profile rail; the backtest and the positions follow it.
- */
-export function TraderHero({ c, onBack, onCopy, copying }: {
-  c: CopyContext;
-  onBack: () => void;
-  onCopy: (direction: 'copy' | 'counter') => void;
-  copying: boolean;
-}) {
-  const leader = c.leader!;
-  const p = c.profile.data;
-  const s = p?.summary;
-  const w = c.window;
-  const series = p?.equity[w] ?? p?.equity['30d'] ?? [];
-  const curve = series.flatMap((pt) => (pt.pnl === null ? [] : [pt.pnl]));
-  const wr = s ? winRateView(s, { context: 'sample', fmtDate: fmtDay }) : null;
-  return (
-    <section className="cpy-thero">
-      <div className="cpy-thero__bar">
-        <button type="button" className="cpy-back" onClick={onBack} aria-label="Back to all traders">
-          <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></svg>
-          All traders
-        </button>
-        <span className="cpy-tabs__fill" />
-        <Seg value={w} options={BACKTEST_WINDOWS} onChange={(v) => c.setWindow(v)} label="Window" />
-        <button type="button" className="cpy-chip" onClick={() => c.onScan(leader, c.venue)} title="Open this trader in Scan">Open in Scan</button>
-      </div>
-
-      <div className="cpy-thero__main">
-        <div className="cpy-thero__who">
-          <Avatar address={leader} size={56} />
-          <div className="cpy-thero__id">
-            <h1 className="cpy-thero__addr" title={leader}>{shortAddr(leader)}</h1>
-            <div className="cpy-thero__meta">
-              <span className="cpy-venue" style={{ '--venue': VENUE_BRAND[c.venue] } as CSSProperties}>{VENUE_LABEL[c.venue]}</span>
-              {s?.tags?.map((t) => <span key={t} className="cpy-thero__tag">{t}</span>)}
-              {p && <span className="cpy-thero__upd">Updated {fmtAgo(p.updatedAt)}</span>}
-            </div>
-          </div>
-        </div>
-        <div className="cpy-thero__acts">
-          <CopyButton kind="counter" size="lg" label="Counter-trade" title="Take the other side of every trade" onClick={() => onCopy('counter')} />
-          <CopyButton kind="copy" size="lg" copying={copying} label={copying ? 'Copying · add another' : 'Copy this trader'} onClick={() => onCopy('copy')} />
-        </div>
-      </div>
-
-      {c.profile.loading ? <p className="pf-note">Loading the trader…</p>
-        : c.profile.error ? loadNote(c.profile, c.venue, 'Trader profile', 'trader profiles')
-        : !p || !s ? <p className="pf-note">No {VENUE_LABEL[c.venue]} activity for this address.</p>
-        : (
-          <div className="cpy-thero__body">
-            <dl className="cpy-kv">
-              <Kv label={`PnL ${WINDOW_LABEL[w]}`} privacy="pnl" value={fmtSignedUsd(s.pnl[w] ?? null)} cls={s.pnl[w] == null ? 'pf-dim' : signClass(s.pnl[w])} />
-              <Kv label="Return" privacy="pnl" value={fmtSignedPct(s.roi[w] ?? null)} cls={s.roi[w] == null ? 'pf-dim' : signClass(s.roi[w])} />
-              <Kv label="Account value" privacy="funds" value={s.accountValue === null ? DASH : fmtUsd(s.accountValue, 0)} cls={s.accountValue === null ? 'pf-dim' : undefined} />
-              <Kv label="Volume" privacy="funds" value={s.volume[w] == null ? DASH : fmtUsd(s.volume[w]!, 0)} cls={s.volume[w] == null ? 'pf-dim' : undefined} />
-              <Kv
-                label={wr?.approx ? 'Win rate (est.)' : 'Win rate'}
-                privacy="pnl"
-                value={<WinRate value={s.winRate} closes={s.winRateCloses ?? null} />}
-                hint={wr?.title}
-              />
-              <Kv label="Max drawdown" privacy="pnl" value={pctOf(s.maxDrawdown)} cls={s.maxDrawdown ? 'neg' : 'pf-dim'} />
-              <Kv label="Trades" privacy="counts" value={s.trades == null ? DASH : fmt(s.trades, 0)} cls={s.trades == null ? 'pf-dim' : undefined} />
-              <Kv label="Last trade" privacy="history" value={fmtAgo(s.lastActive)} cls={s.lastActive ? undefined : 'pf-dim'} />
-            </dl>
-            <div className="cpy-thero__curve">
-              <span className="cpy-thero__k">PnL · {WINDOW_LABEL[w]}</span>
-              <Spark values={curve.length > 1 ? curve : null} className="cpy-thero__spark" />
-            </div>
-          </div>
-        )}
-    </section>
-  );
-}
-
-/* ========================================================== positions ===== */
-
-export function PositionsPanel({ c }: { c: CopyContext }) {
-  const positions = c.profile.data?.positions ?? [];
-  const total = positions.reduce((a, p) => a + Math.abs(p.notional), 0);
-  return (
-    <Card
-      title="Leader positions"
-      action={positions.length > 0 ? <span className="pf-unit">{positions.length} open · {fmtUsd(total, 0)}</span> : undefined}
-    >
-      {!c.leader ? <p className="pf-note">Pick a trader to see what they hold right now.</p>
-        : c.profile.loading ? <p className="pf-note">Loading…</p>
-        : c.profile.error ? loadNote(c.profile, c.venue, 'Positions', 'positions')
-        : positions.length === 0 ? <p className="pf-note">No open positions.</p>
-        : (
-          <div className="acct pf-tablewrap">
-            <table className="acct-table">
-              <thead>
-                <tr>
-                  <th>Market</th>
-                  <th>Side</th>
-                  <th className="num">Size</th>
-                  <th className="num">Notional</th>
-                  <th className="num">Entry</th>
-                  <th className="num">Mark</th>
-                  <th className="num">Unreal. PnL</th>
-                  <th className="num">Lev.</th>
-                  <th className="num">Liq.</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...positions].sort((a, b) => Math.abs(b.notional) - Math.abs(a.notional)).map((p) => (
-                  <PositionRow key={`${p.symbol}-${p.side}`} p={p} />
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-    </Card>
-  );
-}
-
-function PositionRow({ p }: { p: VsPosition }) {
-  return (
-    <tr>
-      <td>{p.symbol}{p.marginMode ? <span className="acct-tag"> {p.marginMode}</span> : null}</td>
-      <td className={p.side === 'long' ? 'pos' : 'neg'}>{p.side === 'long' ? 'Long' : 'Short'}</td>
-      <td className="num">{fmtSize(p.size)}</td>
-      <td className="num">{fmtUsd(Math.abs(p.notional), 2)}</td>
-      <td className="num">{fmtPx(p.entryPx)}</td>
-      <td className="num">{fmtPx(p.markPx)}</td>
-      <td className={`num ${signClass(p.uPnl)}`}>{p.uPnl === null ? DASH : fmtSignedUsd(p.uPnl)}</td>
-      <td className="num">{p.leverage === null ? DASH : `${fmt(p.leverage, 0)}x`}</td>
-      <td className="num">{fmtPx(p.liqPx)}</td>
-    </tr>
-  );
-}
-
-/* ========================================================== backtest ====== */
-
-export function BacktestPanel({ c }: { c: CopyContext }) {
-  const r = c.sim.result;
-  // The window is the trader hero's (TraderHero): one switch for the figures, the curve and this replay.
-  const action = <span className="pf-unit">{WINDOW_LABEL[c.window]}</span>;
-
-  const empty = (text: ReactNode) => (
-    <Card title="Backtest" action={action}>
-      <div className="pf-chart pf-chart--empty copy-chart">{typeof text === 'string' ? <p>{text}</p> : text}</div>
-    </Card>
-  );
-
-  if (!c.leader) return empty('Pick a trader to replay their fills under your setup.');
-  if (c.fills.loading) return empty('Loading fills…');
-  if (c.fills.error) {
-    return empty(c.fills.code === 'not_available'
-      ? `${VENUE_LABEL[c.venue]} fills are not available here yet, so there is nothing to replay.`
-      : <LoadFailed what="Fills" onRetry={c.fills.reload} />);
-  }
-  if (c.fills.data && c.fills.data.length === 0) return empty(`No fills in the last ${WINDOW_LABEL[c.window]}.`);
-  if (Object.keys(c.parsed.errors).length) return empty('Fix the setup to run the backtest.');
-  if (c.sim.error) return empty(<LoadFailed what="Backtest" onRetry={c.fills.reload} />);
-  if (!r) return empty(c.sim.busy || c.profile.loading ? `Replaying ${fmt(c.fills.data?.length ?? 0, 0)} fills…` : 'Waiting for data…');
-
-  if (r.copiedFills + r.skippedFills === 0) return empty(`No fills in the last ${WINDOW_LABEL[c.window]}.`);
-
-  return <BacktestResult c={c} r={r} action={action} />;
-}
-
-function BacktestResult({ c, r, action }: { c: CopyContext; r: SimResult; action: ReactNode }) {
-  const skipped = Object.entries(r.skippedByReason).sort((a, b) => b[1] - a[1]);
-  const inWindow = r.copiedFills + r.skippedFills;
-  const rec = c.sim.reconstruction;
-  const notes: string[] = [...r.notes];
-  if (c.sim.truncated) {
-    notes.unshift(`Only the latest ${fmt(FILL_LIMIT, 0)} fills were replayed, back to ${fmtDay(r.from)}.`);
-  }
-  if (rec && rec.markets.length) {
-    notes.push(`Leader positions before each fill were worked back from their current positions on ${rec.markets.length} market${rec.markets.length === 1 ? '' : 's'}.`);
-  }
-  if (rec && rec.rejected.length) {
-    notes.push(`${rec.rejected.join(', ')}: current positions did not match the fill history, so those markets were rebuilt from fills alone.`);
-  }
-
-  return (
-    <Card title="Backtest" action={action}>
-      <div className="pf-readout copy-readout">
-        <span className="pf-readout__label">Your copy · {WINDOW_LABEL[c.window]}{c.sim.busy ? ' · updating…' : ''}</span>
-        <span className={`pf-readout__value ${signClass(r.roi)}`}>{fmtSignedPct(r.roi)}</span>
-        <span className="pf-readout__sub">
-          {fmtSignedUsd(r.pnl)} on {fmtUsd(r.startEquity, 0)} · leader {fmtSignedPct(r.leaderRoi)} on the same fills ·{' '}
-          {fmtDay(r.from)} to {fmtDay(r.to)}
-        </span>
-      </div>
-
-      <div className="copy-legend" aria-hidden="true">
-        <span><i className="copy-swatch copy-swatch--you" />Your copy</span>
-        <span><i className="copy-swatch copy-swatch--leader" />Leader, scaled to your allocation</span>
-      </div>
-      <EquityChart you={r.equityCurve} leader={r.leaderCurve} base={r.startEquity} />
-
-      <div className="pf-statstrip copy-strip">
-        <Stat label="Max drawdown" value={pctOf(r.maxDrawdown)} cls={r.maxDrawdown > 0 ? 'neg' : undefined}>
-          <span className="pf-stat__sub">leader {pctOf(r.leaderMaxDrawdown)}</span>
-        </Stat>
-        <Stat label="Copied" value={`${fmt(r.copiedFills, 0)} of ${fmt(inWindow, 0)}`}>
-          <span className="pf-stat__sub">{fmt(r.skippedFills, 0)} skipped{r.clampedFills ? ` · ${fmt(r.clampedFills, 0)} capped` : ''}</span>
-        </Stat>
-        <Stat label="Fees" value={fmtUsd(r.feesUsd, 2)}>
-          <span className="pf-stat__sub">builder {fmtUsd(r.builderFeesUsd, 2)} planned</span>
-        </Stat>
-      </div>
-
-      <div className="pf-duo copy-duo">
-        <div>
-          <Group title="Skipped, by reason">
-            {skipped.length === 0 ? <p className="pf-note">Every fill in the window was copied.</p>
-              : skipped.map(([reason, n]) => (
-                <Row key={reason} label={<span title={reason}>{skipReasonLabel(reason)}</span>} value={fmt(n, 0)} privacy="counts" />
-              ))}
-          </Group>
-          <Group title="Risk events">
-            <Row label="Stop losses" value={fmt(r.riskEvents.stopLoss, 0)} privacy="counts" cls={r.riskEvents.stopLoss ? undefined : 'pf-dim'} />
-            <Row label="Take profits" value={fmt(r.riskEvents.takeProfit, 0)} privacy="counts" cls={r.riskEvents.takeProfit ? undefined : 'pf-dim'} />
-            <Row
-              label="Copy stopped"
-              value={r.haltReason === 'liquidation' ? `liquidated ${fmtStamp(r.stoppedAt!)}`
-                : r.haltReason === 'drawdownStop' ? `drawdown stop ${fmtStamp(r.stoppedAt!)}` : 'no'}
-              cls={r.haltReason ? 'neg' : 'pf-dim'}
-              privacy="history"
-            />
-          </Group>
-        </div>
-        <Group title="Costs and volume">
-          <Row label="Taker fees" value={fmtUsd(r.feesUsd - r.builderFeesUsd, 2)} privacy="fees" />
-          <Row label="Builder fee (planned)" value={fmtUsd(r.builderFeesUsd, 2)} privacy="fees" />
-          <Row label="Slippage (full cap)" value={fmtUsd(r.slippageUsd, 2)} privacy="fees" />
-          <Row label="Traded volume" value={fmtUsd(r.volumeUsd, 0)} />
-          <Row label="Realised PnL" privacy="pnl" value={fmtSignedUsd(r.realizedPnl)} cls={signClass(r.realizedPnl)} />
-          <Row
-            label="Still open at the end"
-            privacy="pnl"
-            value={r.openPositions.length ? `${r.openPositions.length} · ${fmtSignedUsd(r.unrealizedPnl)}` : 'none'}
-            cls={r.openPositions.length ? signClass(r.unrealizedPnl) : 'pf-dim'}
-            hint="Copied positions the leader had not closed by the end of the window, marked at the last fill price."
-          />
-        </Group>
-      </div>
-
-      {notes.map((n) => <p key={n} className="pf-note">{n}</p>)}
-      <p className="pf-note">
-        A replay of the leader's past fills: every copy fills at the leader's price plus your full slippage cap.
-        Funding, detection latency and order-book depth are not modelled. Past results say nothing certain about the future.
-      </p>
-    </Card>
-  );
-}
 
 /* ============================================================ copies ====== */
 

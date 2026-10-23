@@ -3017,17 +3017,15 @@ button.coh-card:hover { box-shadow: var(--depth-3); }
 .fx-review,
 .fx-route,
 .vs-tpsl__facts,
-.cpy-stats > div,
+.cpy-mstats > div,
 .cpy-replay,
 .cpy-rule,
-.cpy-mode,
 .cpy-adv,
 .cpy-fees {
   border-color: transparent;
   border-radius: var(--radius-tile);
   box-shadow: var(--depth-1);
 }
-.cpy-mode:hover { box-shadow: var(--depth-2); }
 
 /* --- controls: pills and segmented groups --------------------------------- */
 .segmented,

@@ -18,10 +18,10 @@
  * list. Those cells stay a dash, or the venue mark, until a row actually
  * carries the figure. Nothing here is invented.
  */
-import { useCallback, useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useAsync } from '../../hooks';
 import { fmtUsd, marketName, shortAddr, signClass } from '../../format';
-import { VENUE_BRAND } from '../venueBrand';
+import { PlatformSelect } from '../PlatformSelect';
 import { LoadFailed, useLoadFailedToast } from '../LoadFailed';
 import { maskAddress, useMask, usePrivacy } from '../../privacy';
 import {
@@ -297,14 +297,7 @@ export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
     setView((v) => ({ ...v, page: 1, ...patch }));
   }, []);
   /** Toggle a venue; the last selected one stays selected. */
-  const toggleVenue = (v: Venue) => {
-    setView((cur) => {
-      const on = cur.venues.includes(v);
-      if (on && cur.venues.length === 1) return cur;
-      const next = on ? cur.venues.filter((x) => x !== v) : LB_VENUES.filter((x) => x === v || cur.venues.includes(x));
-      return { ...cur, venues: next, page: 1 };
-    });
-  };
+  const setVenues = (next: Venue[]) => setView((cur) => ({ ...cur, venues: next, page: 1 }));
   const multi = view.venues.length > 1;
   const pickSort = (s: SortKey) => {
     if (s === 'winRate' || s === 'trades') setStatSort(s);
@@ -406,25 +399,7 @@ export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
             </button>
           ))}
         </div>
-        <div className="lbp-venues" role="group" aria-label="Venues">
-          {LB_VENUES.map((v) => {
-            const on = view.venues.includes(v);
-            return (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={on}
-                className={`lbp-chip${on ? ' is-on' : ''}`}
-                style={{ '--brand': VENUE_BRAND[v] } as CSSProperties}
-                onClick={() => toggleVenue(v)}
-                title={on && view.venues.length === 1 ? 'At least one venue stays selected' : undefined}
-              >
-                <VenueMark venue={v} size={14} />
-                {VENUE_LABEL[v]}
-              </button>
-            );
-          })}
-        </div>
+        <PlatformSelect options={LB_VENUES} value={view.venues} onChange={setVenues} />
         {multi && (
           <div className="lbp-seg" role="radiogroup" aria-label="Net or single">
             {(['net', 'single'] as LbMode[]).map((m) => (

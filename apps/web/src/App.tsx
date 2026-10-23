@@ -2,9 +2,11 @@ import './cssOrder';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
+import { SideBar } from './components/SideBar';
+import './components/shell.css';
 import { DEFAULT_TAB, TABS, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
-import { useAsync, useConnState, useSession, useStored, useSymbols } from './hooks';
+import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
 import { Guarded } from './components/ErrorBoundary';
 import { StatusFooter } from './components/StatusFooter';
@@ -113,6 +115,14 @@ export function App() {
 function AppShell() {
   const [engine, setEngine] = useStored<Engine>('ot.engine', 'perps');
   const [symbol, setSymbol] = useStored<string>('ot.symbol', DEFAULT_SYMBOL.perps);
+  /* The navbar's Futures / Spot switch: the other book opens on its default market. */
+  const switchEngine = useCallback((e: Engine) => {
+    if (e === engine) return;
+    setEngine(e);
+    setSymbol(DEFAULT_SYMBOL[e]);
+  }, [engine, setEngine, setSymbol]);
+  /* The icon rail (SideBar.tsx) from 761px up; below it the navbar carries its tools. */
+  const rail = useMediaQuery('(min-width: 761px)');
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
@@ -244,7 +254,8 @@ function AppShell() {
   // Lifted so the ticker bar's star and the search modal's watchlist never go
   // stale against each other - both are mounted continuously, and useStored
   // is a plain useState under the hood with no cross-instance sync.
-  const [favorites, setFavorites] = useStored<string[]>('ot.favorites', []);
+  /* A first visit starts with the four busiest perps starred, so the favourites bar has something to show. */
+  const [favorites, setFavorites] = useStored<string[]>('ot.favorites', ['perps:BTC-USD', 'perps:ETH-USD', 'perps:SOL-USD', 'perps:BNB-USD']);
   const toggleFavorite = useCallback(
     (key: string) => setFavorites(favorites.includes(key) ? favorites.filter((k) => k !== key) : [...favorites, key]),
     [favorites, setFavorites],
@@ -355,6 +366,8 @@ function AppShell() {
       onChanged: bump,
       onToggleFavorite: toggleFavorite,
       onOpenSearch: openSearch,
+      /* The favourites bar's chips switch the market in place. */
+      onSelectSymbol: setSymbol,
       onPositionCount: setPosCount,
       onOrderCount: setOrderCount,
       onOpenScan: openScanAccountId,
@@ -362,7 +375,7 @@ function AppShell() {
     [
       engine, symbol, sym, health?.network, session?.unlocked, session?.session?.address,
       address, byName, refreshToken, price, lastPrice, favorites, posCount, orderCount,
-      bump, toggleFavorite, openSearch, setTab, openScanAccountId,
+      bump, toggleFavorite, openSearch, setTab, openScanAccountId, setSymbol,
     ],
   );
 
@@ -380,7 +393,10 @@ function AppShell() {
        chip reads it, and so does every page below. */}
     <ToastProvider>
     <PrivacyProvider>
-    <div className="shell">
+    <div className={`shell${rail ? ' shell--rail' : ''}`}>
+      {rail && (
+        <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} />
+      )}
       {/* ONE bar of chrome at the top, 56px, and nothing underneath it.
        *
        * Hierarchy here is carried by colour alone: the wordmark and the current
@@ -400,6 +416,9 @@ function AppShell() {
         hasLayout={hasLayout}
         dashLocked={dashLocked}
         onOpenSearch={() => openSearch()}
+        rail={rail}
+        engine={engine}
+        onEngine={switchEngine}
       />
 
       {/* The venue-status line is the ONLY full-width strip allowed under the

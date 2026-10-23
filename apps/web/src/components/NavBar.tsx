@@ -18,7 +18,13 @@
  * Hierarchy is carried by colour alone: the wordmark and the current page are
  * --text, every other link is --muted, and the active item gets no pill, no box
  * and no underline.
+ *
+ * WITH THE RAIL (`rail`, from 761px up) the mark and the tool icons live in the
+ * icon rail beside it (SideBar.tsx), and the bar is the owner's reference: on
+ * Trade a Futures / Spot switch, a divider, then the pages; the wallet at the
+ * end. Below 761px there is no rail and the bar carries them again.
  */
+import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
@@ -68,10 +74,15 @@ export interface NavBarProps {
   /** Mirrors the mounted Dashboard's own `locked`, when there is one. */
   dashLocked: boolean;
   onOpenSearch: () => void;
+  /** The icon rail is showing (SideBar.tsx): the mark and the tool icons are there, not here. */
+  rail?: boolean;
+  /** Futures or spot, for the switch on Trade. */
+  engine?: Engine;
+  onEngine?: (e: Engine) => void;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -114,12 +125,26 @@ export function NavBar({
   }, [hasAddress]);
 
   return (
-    <header className="navbar">
+    <header className={`navbar${rail ? ' navbar--rail' : ''}`}>
       <div className="navbar-inner">
-        <span className="brand">
-          <BrandMark />
-          ValueDesk
-        </span>
+        {!rail && (
+          <span className="brand">
+            <BrandMark />
+            ValueDesk
+          </span>
+        )}
+        {rail && tab === 'trade' && engine && onEngine && (
+          <>
+            <div className="nav-seg" role="radiogroup" aria-label="Market type">
+              {(['perps', 'spot'] as const).map((e) => (
+                <button key={e} type="button" role="radio" aria-checked={engine === e} className={engine === e ? 'is-on' : ''} onClick={() => onEngine(e)}>
+                  {e === 'perps' ? 'Futures' : 'Spot'}
+                </button>
+              ))}
+            </div>
+            <span className="nav-div" aria-hidden="true" />
+          </>
+        )}
         <nav className="navlinks">
           {TABS.map((t) => (
             /*
@@ -149,15 +174,19 @@ export function NavBar({
         </nav>
 
         <div className="navstatus">
-          {/* ONE settings gear: hide mode, and the page layout (lock / edit). */}
-          <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
-          <Notices address={address} />
-          <button
-            type="button" className="navicon" title="Search markets (⌘K)"
-            aria-label="Search markets" onClick={onOpenSearch}
-          >
-            <SearchIcon />
-          </button>
+          {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
+          {!rail && (
+            <>
+              <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
+              <Notices address={address} />
+              <button
+                type="button" className="navicon" title="Search markets (⌘K)"
+                aria-label="Search markets" onClick={onOpenSearch}
+              >
+                <SearchIcon />
+              </button>
+            </>
+          )}
           {/*
             CONNECTED AND DISCONNECTED ARE DIFFERENT CONTROLS.
 

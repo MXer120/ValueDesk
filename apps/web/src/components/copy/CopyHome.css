@@ -65,7 +65,7 @@
 .cpy-copybtn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 30px; padding: 0 14px;
-  border: 0; border-radius: 9px; background: var(--text); color: var(--bg);
+  border: 0; border-radius: 6px; background: var(--text); color: var(--bg);
   font: inherit; font-size: var(--fs-xs); font-weight: 600; letter-spacing: 0.01em; cursor: pointer; white-space: nowrap;
   transition: filter 140ms var(--ease-out, ease), transform 140ms var(--ease-out, ease), box-shadow 160ms;
 }
@@ -74,7 +74,7 @@
 /* Copy and Counter (TraderCard.tsx CopyButton): ONE width whatever the word,
    so the buttons of a mixed grid line up; the trader page's pair likewise. */
 .cpy-copybtn--md { width: 104px; padding: 0 10px; }
-.cpy-copybtn--lg { min-width: 184px; height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-base); border-radius: 11px; }
+.cpy-copybtn--lg { min-width: 184px; height: 38px; padding: 0 var(--sp-4); font-size: var(--fs-base); border-radius: 7px; }
 .cpy-copybtn.is-copying {
   background: color-mix(in srgb, var(--pos) 16%, var(--bg-panel)); color: var(--pos);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pos) 45%, transparent);
@@ -103,16 +103,16 @@
 /* --- hero ----------------------------------------------------------------- */
 .cpy-hero {
   position: relative;
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 560px); align-items: center; gap: var(--sp-5);
-  min-height: 300px; padding: var(--sp-4) var(--sp-2) var(--sp-3);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 520px); align-items: center; gap: var(--sp-5);
+  min-height: 0; padding: var(--sp-2) var(--sp-2) 0;
 }
 .cpy-hero__title {
-  margin: 0; max-width: 12.5em;
-  font-family: var(--font-display); font-size: clamp(30px, 3.4vw, 52px); line-height: 1.04; font-weight: 600; letter-spacing: -0.035em;
+  margin: 0; max-width: 24em;
+  font-family: var(--font-display); font-size: clamp(26px, 2.3vw, 34px); line-height: 1.1; font-weight: 600; letter-spacing: -0.03em;
 }
 .cpy-hero__title em { font-style: normal; color: var(--pos); }
-.cpy-hero__sub { margin: var(--sp-3) 0 0; max-width: 520px; color: var(--muted); font-size: var(--fs-base); line-height: 1.55; }
-.cpy-hero__facts { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); margin: var(--sp-4) 0 0; padding: 0; list-style: none; color: var(--text); font-size: var(--fs-xs); }
+.cpy-hero__sub { margin: 8px 0 0; max-width: 560px; color: var(--muted); font-size: var(--fs-base); line-height: 1.5; }
+.cpy-hero__facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-xs); }
 .cpy-hero__facts li { display: inline-flex; align-items: center; gap: 6px; }
 .cpy-hero__facts li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); }
 /* The wheel (Deck.tsx): the cards turn on a circle whose front arc shows
@@ -121,7 +121,7 @@
    its sides: a card rises in there as it comes round. */
 .cpy-hero { margin-bottom: var(--sp-2); }
 .cpy-deck {
-  position: relative; height: 384px; isolation: isolate;
+  position: relative; height: 312px; isolation: isolate;
   touch-action: pan-y; user-select: none; -webkit-user-select: none;
 }
 .cpy-deck.is-live { cursor: grab; }
@@ -132,7 +132,7 @@
   mask-image: linear-gradient(to right, transparent 0, #000 13%, #000 87%, transparent 100%);
 }
 .cpy-deck__card {
-  position: absolute; left: calc(50% - 124px); top: 40px; width: 248px;
+  position: absolute; left: calc(50% - 110px); top: 36px; width: 220px;
   display: flex; flex-direction: column; gap: 2px;
   padding: 14px 16px 12px; border: 0; border-radius: var(--cpy-r);
   background: var(--cpy-card); color: var(--text); font: inherit; text-align: left; cursor: inherit;
@@ -157,11 +157,11 @@
 }
 .cpy-deck__tag--copy { background: color-mix(in srgb, var(--pos) 16%, transparent); color: var(--pos); }
 .cpy-deck__tag--counter { background: color-mix(in srgb, var(--neg) 16%, transparent); color: var(--neg); }
-.cpy-deck__big { font-family: var(--font-num); font-size: 26px; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em; }
+.cpy-deck__big { font-family: var(--font-num); font-size: 22px; font-weight: 600; line-height: 1.1; letter-spacing: -0.01em; }
 .cpy-deck__big.pos { color: var(--pos); }
 .cpy-deck__big.neg { color: var(--neg); }
 .cpy-deck__lbl { color: var(--muted); font-size: var(--fs-micro); font-family: var(--font-num); }
-.cpy-deck__spark { height: 56px; margin-top: 8px; }
+.cpy-deck__spark { height: 44px; margin-top: 6px; }
 .cpy-deck__foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; }
 
 /* The two speech chips, after the reference: who is in front (top left), how
@@ -192,70 +192,88 @@
 .cpy-deck__dot--copy { background: var(--pos); box-shadow: 0 0 8px color-mix(in srgb, var(--pos) 70%, transparent); }
 .cpy-deck__dot--counter { background: var(--neg); }
 
-/* --- category bar and filters ---------------------------------------------- */
-.cpy-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.cpy-cats { display: flex; flex-wrap: wrap; gap: 4px; }
-.cpy-cat {
-  height: 32px; padding: 0 14px;
-  border: 0; border-radius: var(--radius-full); background: transparent; color: var(--muted);
-  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
-  transition: background 160ms, box-shadow 160ms, color 160ms;
+/* --- the toolbar ----------------------------------------------------------------
+   After Hyperdash's copy trading page, measured: every control 28px (26 for a
+   filter), 12px/500 text, a 6px corner, a faint fill and a hairline edge; the
+   chosen tab is a lifted tint, the rest muted text. Two rows: the categories
+   and the view, then the filters and the search. */
+.cpy {
+  --cpy-ctl-h: 28px;
+  --cpy-ctl-r: 6px;
+  --cpy-ctl-bg: rgba(255, 255, 255, 0.04);
+  --cpy-ctl-bg-on: rgba(255, 255, 255, 0.075);
+  --cpy-ctl-edge: rgba(255, 255, 255, 0.08);
+  --cpy-ctl-edge-on: rgba(255, 255, 255, 0.16);
 }
-.cpy-cat:hover { color: var(--text); background: var(--tint); }
-.cpy-cat.is-on { color: var(--bg); background: var(--text); box-shadow: var(--depth-1); }
-.cpy-bar__right { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.cpy-toolbar { display: flex; flex-direction: column; gap: 8px; padding: 10px 0 6px; border-top: 1px solid rgba(255, 255, 255, 0.05); }
+.cpy-toolbar__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.cpy-toolbar__end,
+.cpy-toolbar__filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 
-/* The sort and the filters are FxSelect listboxes (funds/ui.tsx) with these
-   triggers: a pill, its value bold, the shared chevron at the end. */
+.cpy-cats { display: flex; flex-wrap: wrap; gap: 2px; }
+.cpy-cat {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: var(--cpy-ctl-h); padding: 0 10px;
+  border: 1px solid transparent; border-radius: var(--cpy-ctl-r); background: transparent; color: var(--muted);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+  transition: background 140ms, color 140ms, border-color 140ms;
+}
+.cpy-cat:hover { color: var(--text); background: var(--cpy-ctl-bg); }
+.cpy-cat.is-on { color: var(--text); background: var(--cpy-ctl-bg-on); border-color: var(--cpy-ctl-edge); }
+
+/* The sort and the filters: FxSelect listboxes (funds/ui.tsx) with these triggers. */
 .cpy-select,
 .cpy-pick {
   display: inline-flex; flex-direction: row; align-items: center; gap: 6px;
-  height: 32px; padding: 0 10px 0 12px;
-  border: 0; border-radius: var(--radius-full); background: var(--cpy-surface);
-  box-shadow: var(--depth-1);
-  color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; white-space: nowrap;
-  transition: box-shadow 160ms, background 160ms;
+  height: var(--cpy-ctl-h); padding: 0 8px;
+  border: 1px solid var(--cpy-ctl-edge); border-radius: var(--cpy-ctl-r); background: var(--cpy-ctl-bg);
+  color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer; white-space: nowrap;
+  transition: background 140ms, border-color 140ms;
 }
+.cpy-pick { height: 26px; }
 .cpy-select:hover,
 .cpy-pick:hover,
 .cpy-select[aria-expanded="true"],
-.cpy-pick[aria-expanded="true"] { background: var(--cpy-surface-2); box-shadow: var(--depth-2); }
+.cpy-pick[aria-expanded="true"] { background: var(--cpy-ctl-bg-on); border-color: var(--cpy-ctl-edge-on); }
 .cpy-select:focus-visible,
-.cpy-pick:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.cpy-pick:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
 .cpy-select__k { flex: none; color: var(--muted); }
-.cpy-select__v { font-weight: 600; }
+.cpy-select__v { font-weight: 500; }
 .cpy-select .fx-chev,
-.cpy-pick .fx-chev { margin-left: 2px; transition: transform 200ms var(--ease-out, ease); }
+.cpy-pick .fx-chev { margin-left: 0; color: var(--dim); transition: transform 200ms var(--ease-out, ease); }
 .cpy-select[aria-expanded="true"] .fx-chev,
 .cpy-pick[aria-expanded="true"] .fx-chev { transform: rotate(180deg); }
+.cpy-pick__ic { flex: none; color: var(--muted); }
+.cpy-pick__k { color: var(--text); }
+.cpy-pick__v { color: var(--muted); }
+.cpy-pick.is-on { background: color-mix(in srgb, var(--pos) 9%, var(--cpy-ctl-bg)); border-color: color-mix(in srgb, var(--pos) 38%, transparent); }
+.cpy-pick.is-on .cpy-pick__v { color: var(--text); }
 
-.cpy-toggle { display: inline-flex; height: 32px; padding: 3px; border-radius: var(--radius-full); background: var(--cpy-surface); box-shadow: var(--depth-1); }
+/* $ / %, the layout, the window: a segmented group in the same face. */
+.cpy-toggle { display: inline-flex; height: var(--cpy-ctl-h); padding: 2px; gap: 2px; border: 1px solid var(--cpy-ctl-edge); border-radius: var(--cpy-ctl-r); background: var(--cpy-ctl-bg); }
+.cpy-toolbar__filters .cpy-toggle { height: 26px; }
 .cpy-toggle > button {
-  display: inline-grid; place-items: center; min-width: 30px; height: 26px; padding: 0 10px;
-  border: 0; border-radius: var(--radius-full); background: transparent; color: var(--muted);
-  font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
-  transition: background 160ms, color 160ms, box-shadow 160ms;
+  display: inline-grid; place-items: center; min-width: 26px; padding: 0 7px;
+  border: 0; border-radius: 4px; background: transparent; color: var(--muted);
+  font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+  transition: background 140ms, color 140ms;
 }
 .cpy-toggle > button:hover { color: var(--text); }
-.cpy-toggle > button.is-on { background: var(--text); color: var(--bg); box-shadow: var(--depth-1); }
+.cpy-toggle > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
 
-.cpy-filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.cpy-search { position: relative; display: flex; align-items: center; gap: var(--sp-2); flex: 1 1 200px; min-width: 180px; max-width: 340px; }
+.cpy-search { position: relative; display: flex; align-items: center; gap: 6px; flex: 0 1 260px; min-width: 180px; }
+.cpy-search > .cpy-pick__ic { position: absolute; left: 9px; pointer-events: none; }
 .cpy-search input {
-  width: 100%; height: 32px; padding: 0 14px;
-  border: 0; border-radius: var(--radius-full); background: color-mix(in srgb, var(--bg) 70%, var(--cpy-card));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 1px 3px rgba(0, 0, 0, 0.35);
-  color: var(--text); font: inherit; font-size: var(--fs-xs);
+  width: 100%; height: 26px; padding: 0 10px 0 28px;
+  border: 1px solid var(--cpy-ctl-edge); border-radius: var(--cpy-ctl-r); background: var(--cpy-ctl-bg);
+  box-shadow: none; color: var(--text); font: inherit; font-size: var(--fs-xs);
 }
-.cpy-search input:focus { outline: none; box-shadow: inset 0 0 0 1px var(--line-strong), inset 0 1px 3px rgba(0, 0, 0, 0.35); }
+.cpy-search input::placeholder { color: var(--dim); }
+.cpy-search input:focus { outline: none; border-color: var(--cpy-ctl-edge-on); background: var(--cpy-ctl-bg-on); }
 .cpy-search__open { display: inline-flex; gap: 4px; }
-.cpy-pick__k { color: var(--muted); }
-.cpy-pick__v { color: var(--muted); font-weight: 500; }
-.cpy-pick.is-on { background: color-mix(in srgb, var(--pos) 10%, var(--cpy-surface)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--pos) 40%, transparent), 0 2px 8px rgba(0, 0, 0, 0.32); }
-.cpy-pick.is-on .cpy-pick__v { color: var(--text); font-weight: 600; }
-.cpy-clear { height: 30px; padding: 0 var(--sp-2); border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); text-decoration: underline; cursor: pointer; }
+.cpy-clear { height: 26px; padding: 0 6px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
 .cpy-clear:hover { color: var(--text); }
-.cpy-count { display: inline-flex; align-items: center; gap: 14px; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); white-space: nowrap; }
+.cpy-count { display: inline-flex; align-items: center; gap: 12px; margin-right: 4px; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); white-space: nowrap; }
 
 /* --- the grid and the card -------------------------------------------------- */
 .cpy-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
@@ -362,98 +380,13 @@
 .cpy-how__n { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--cpy-surface-2); box-shadow: var(--depth-1); color: var(--text); font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 600; }
 .cpy-how__note { margin: var(--sp-3) 0 0; color: var(--dim); font-size: var(--fs-micro); line-height: 1.6; }
 
-/* --- one trader ------------------------------------------------------------- */
-.cpy-trader { display: flex; flex-direction: column; gap: 14px; }
-.cpy-back {
-  display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 12px;
-  border: 0; border-radius: var(--radius-full); background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
-}
-.cpy-back:hover { color: var(--text); background: var(--tint); }
-
-/* The hero (panels.tsx TraderHero): one raised card - the bar, who, the two
-   buttons, then the figures as tiles beside the PnL curve. */
-.cpy-thero {
-  display: flex; flex-direction: column; gap: 16px;
-  padding: 14px 20px 20px;
-  border-radius: var(--cpy-r); background: var(--cpy-card); box-shadow: var(--depth-2);
-}
-.cpy-thero__bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); margin: 0 -8px; }
-.cpy-thero__main { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-3); }
-.cpy-thero__who { display: flex; align-items: center; gap: 14px; min-width: 0; }
-.cpy-thero__id { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.cpy-thero__addr { margin: 0; font-family: var(--font-display); font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
-.cpy-thero__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.cpy-thero__tag {
-  display: inline-flex; align-items: center; height: 18px; padding: 0 8px; border-radius: var(--radius-full);
-  background: var(--cpy-surface-2); color: var(--muted); font-size: var(--fs-micro); font-weight: 500;
-}
-.cpy-thero__upd { color: var(--dim); font-size: var(--fs-micro); }
-.cpy-thero__acts { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.cpy-thero__body { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: stretch; }
-.cpy-kv { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 0; }
-.cpy-kv__tile {
-  display: flex; flex-direction: column; gap: 5px; min-width: 0;
-  padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1);
-}
-.cpy-kv__tile dt { color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cpy-kv__tile dd { margin: 0; font-family: var(--font-num); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cpy-kv__tile dd.pos { color: var(--pos); }
-.cpy-kv__tile dd.neg { color: var(--neg); }
-.cpy-kv__tile dd.pf-dim { color: var(--dim); }
-.cpy-kv__tile .cpy-wr { align-items: flex-start; }
-.cpy-kv__tile .cpy-wr b { font-size: 17px; }
-.cpy-thero__curve {
-  display: flex; flex-direction: column; gap: 6px; min-width: 0;
-  padding: 12px 14px 10px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1);
-}
-.cpy-thero__k { color: var(--muted); font-size: var(--fs-micro); }
-.cpy-thero__spark { flex: 1 1 auto; height: 132px; min-height: 96px; }
-/* The window switch, as the copy page's toggles: a pill, the chosen one white. */
-.cpy-thero .pf-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-full); background: var(--cpy-surface); box-shadow: var(--depth-1); }
-.cpy-thero .pf-ctl {
-  height: 26px; min-width: 34px; padding: 0 10px; border: 0; border-radius: var(--radius-full);
-  background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
-}
-.cpy-thero .pf-ctl:hover { color: var(--text); }
-.cpy-thero .pf-ctl.is-on { background: var(--text); color: var(--bg); }
-
-/* The backtest and the positions: the portfolio's cards in the copy page's language. */
-.cpy-trader__main { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
-.cpy-trader .pf-card,
-.cpy-mine .pf-card { border-color: transparent; border-radius: var(--cpy-r); overflow: hidden; background: var(--cpy-card); box-shadow: var(--depth-2); }
-.cpy-trader .pf-card__head { height: auto; min-height: 52px; padding: 12px 18px 4px 20px; border-bottom: 0; }
-.cpy-trader .pf .pf-h { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
-.cpy-trader .pf-card__body { padding: 8px 20px 20px; }
-.cpy-trader .pf-seg { padding: 3px; border: 0; border-radius: var(--radius-full); background: var(--cpy-surface); box-shadow: var(--depth-1); }
-.cpy-trader .pf .pf-ctl { border-radius: var(--radius-full); }
-.cpy-trader .pf .pf-ctl.is-on { background: var(--text); color: var(--bg); }
-.cpy-trader .pf-readout__value { font-family: var(--font-display); font-size: 34px; letter-spacing: -0.02em; }
-.cpy-trader .copy .pf-chart.copy-chart { height: 260px; }
-.cpy-trader .pf-chart--empty.copy-chart { min-height: 220px; border-radius: var(--radius-tile); background: color-mix(in srgb, var(--bg) 40%, var(--cpy-card)); }
-/* The stat strip becomes three tiles; the two lists below it, two more. */
-.cpy-trader .pf-statstrip { gap: 8px; margin: 14px 0 0; border-top: 0; }
-.cpy-trader .pf-stat { min-height: 0; padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1); }
-.cpy-trader .pf-stat + .pf-stat { border-left: 0; }
-.cpy-trader .pf-duo { gap: 8px; margin-top: 8px; }
-.cpy-trader .pf-duo > * { padding: 12px 14px; border-radius: var(--radius-tile); background: var(--cpy-card); box-shadow: var(--depth-1); }
-.cpy-trader .pf-duo > div > .pf-group { padding: 0; box-shadow: none; }
-/* The leader's positions: a quieter table, rows on hairlines. */
-.cpy-trader .acct-table th { color: var(--muted); font-weight: 500; }
-.cpy-trader .acct-table td,
-.cpy-trader .acct-table th { border-bottom-color: rgba(255, 255, 255, 0.05); }
-.cpy-trader .acct-table tbody tr:hover td { background: var(--tint); }
+/* --- My copies ------------------------------------------------------------- */
 .cpy-mine { display: flex; flex-direction: column; gap: var(--sp-3); }
+.cpy-mine .pf-card { border-color: transparent; border-radius: var(--cpy-r); overflow: hidden; background: var(--cpy-card); box-shadow: var(--depth-2); }
 .cpy-mine .pf-card--band { min-height: 320px; }
-@media (max-width: 1100px) {
-  .cpy-thero__body { grid-template-columns: minmax(0, 1fr); }
-}
-@media (max-width: 720px) {
-  .cpy-kv { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cpy-thero__addr { font-size: 22px; }
-}
 
 /* --- the copy dialog ---------------------------------------------------------- */
-.modal.fx.cpy-modal { max-width: 600px; max-height: calc(100vh - 32px); }
+.modal.fx.cpy-modal { max-width: 940px; max-height: calc(100vh - 32px); }
 .cpy-modal .modal-body { overflow-y: auto; overscroll-behavior: contain; }
 .cpy-modal .modal-head h2 { font-size: var(--fs-base); }
 .cpy-mtitle { display: inline-flex; align-items: center; gap: 8px; font-family: var(--font-num); }
@@ -462,21 +395,12 @@
 .cpy-mfoot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .cpy-mfoot__acts { display: flex; gap: var(--sp-2); }
 .cpy-mfoot__acts .fx-cta { width: auto; min-width: 104px; height: 38px; padding: 0 var(--sp-4); }
-.cpy-progress { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--font-num); font-size: var(--fs-xs); }
-.cpy-progress__bar { width: 96px; height: 4px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
-.cpy-progress__bar i { display: block; height: 100%; border-radius: 2px; background: var(--pos); transition: width 260ms var(--ease-out, ease); }
 
 .cpy-step { display: flex; flex-direction: column; gap: var(--sp-3); }
 .cpy-step .cs-sub { text-align: left; }
 .cpy-h { margin: var(--sp-2) 0 0; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; }
 
-.cpy-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); margin: 0; }
-.cpy-stats > div { padding: 10px 12px; border: 1px solid var(--panel-line); border-radius: 10px; background: var(--fx-well); }
-.cpy-stats dt { color: var(--muted); font-size: var(--fs-micro); letter-spacing: var(--ls-caps); text-transform: uppercase; }
-.cpy-stats dd { margin: 4px 0 0; font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; }
-.cpy-stats .pos,
 .cpy-replay .pos { color: var(--pos); }
-.cpy-stats .neg,
 .cpy-replay .neg { color: var(--neg); }
 
 .cpy-replay { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--panel-line); border-radius: 12px; background: var(--fx-well); }
@@ -542,18 +466,6 @@
 .cpy-adv > .cpy-rows { padding: 0 8px 8px; }
 .cpy-reset { margin: 0 12px 10px; font-size: var(--fs-micro); }
 
-.cpy-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
-.cpy-mode {
-  display: flex; flex-direction: column; gap: 4px; padding: 12px;
-  border: 1px solid var(--panel-line); border-radius: 12px; background: var(--tint);
-  color: var(--text); font: inherit; text-align: left; cursor: pointer; transition: border-color 140ms, background 140ms;
-}
-.cpy-mode:hover { border-color: var(--line-strong); }
-.cpy-mode.is-on { border-color: var(--text); background: var(--tint-strong); box-shadow: inset 0 0 0 1px var(--text); }
-.cpy-mode__t { font-size: var(--fs-xs); font-weight: 600; }
-.cpy-mode__b { align-self: flex-start; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--pos) 14%, transparent); color: var(--pos); font-size: var(--fs-micro); font-weight: 600; }
-.cpy-mode__d { color: var(--muted); font-size: var(--fs-micro); line-height: 1.45; }
-
 .cpy-alloc { display: flex; flex-direction: column; gap: 6px; }
 .cpy-alloc__k { color: var(--muted); font-size: var(--fs-xs); }
 .cpy-alloc__box { display: flex; align-items: center; height: 48px; border: 1px solid var(--panel-line); border-radius: 12px; background: var(--fx-well); }
@@ -586,11 +498,9 @@
   .cpy-cats { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; scrollbar-width: none; }
   .cpy-cats::-webkit-scrollbar { display: none; }
   .cpy-cat { flex: none; }
-  .cpy-modes,
-  .cpy-stats { grid-template-columns: minmax(0, 1fr); }
+  .cpy-mstats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .cpy-rule { flex-direction: column; align-items: stretch; }
   .cpy-rule__ctl { justify-content: flex-start; }
-  .cpy-progress__bar { width: 56px; }
   .cpy-search { flex-basis: 100%; }
 }
 
@@ -694,17 +604,17 @@
 
 /* --- the two sides' buttons: the ticket's buy and sell faces -------------------- */
 .cpy-copybtn--copy:not(.is-copying) {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--pos) 82%, #fff) 0%, var(--pos) 48%, color-mix(in srgb, var(--pos) 70%, var(--pos-deep)) 100%);
-  color: #03140e;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 6px 16px -6px color-mix(in srgb, var(--pos) 75%, transparent);
+  background: color-mix(in srgb, var(--pos) 30%, #0b0d0c);
+  color: color-mix(in srgb, var(--pos) 22%, #fff);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 .cpy-copybtn--counter:not(.is-copying) {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--neg) 80%, #fff) 0%, var(--neg) 48%, color-mix(in srgb, var(--neg) 70%, var(--neg-deep)) 100%);
-  color: #1d0604;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -1px 0 rgba(0, 0, 0, 0.18), 0 6px 16px -6px color-mix(in srgb, var(--neg) 75%, transparent);
+  background: color-mix(in srgb, var(--neg) 30%, #0d0b0b);
+  color: color-mix(in srgb, var(--neg) 22%, #fff);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
 }
-.cpy-copybtn--copy:not(.is-copying):hover,
-.cpy-copybtn--counter:not(.is-copying):hover { filter: brightness(1.07); transform: translateY(-1px); }
+.cpy-copybtn--copy:not(.is-copying):hover { background: color-mix(in srgb, var(--pos) 42%, #0b0d0c); }
+.cpy-copybtn--counter:not(.is-copying):hover { background: color-mix(in srgb, var(--neg) 42%, #0d0b0b); }
 /* A trader on a platform a copy cannot follow: the same place and width, a neutral face. */
 .cpy-copybtn--view { background: var(--cpy-surface-2); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
 .cpy-copybtn--view:hover { background: var(--bg-hover); filter: none; }
@@ -748,3 +658,67 @@
 .cpy-legend__counter::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
 .cpy-legend__copy::before { background: var(--pos); box-shadow: 0 0 8px color-mix(in srgb, var(--pos) 70%, transparent); }
 .cpy-legend__counter::before { background: var(--neg); box-shadow: 0 0 8px color-mix(in srgb, var(--neg) 70%, transparent); }
+
+/* --- the copy dialog, two columns (CopyModal.tsx) ---------------------------------
+   What you copy on the left (the trader, the direction, the replay), what you
+   decide on the right (the rules; then where it runs and the steps). The header
+   names the two steps; the footer says what comes next. */
+.cpy-mtitle { flex-wrap: wrap; row-gap: 6px; }
+.cpy-msteps { display: inline-flex; align-items: center; gap: 6px; margin-left: 14px; font-family: var(--font-text); }
+.cpy-msteps__s {
+  display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px 0 4px;
+  border: 1px solid transparent; border-radius: var(--radius-full); background: transparent;
+  color: var(--dim); font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+}
+.cpy-msteps__s:disabled { cursor: default; }
+.cpy-msteps__s i {
+  display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--tint-strong); color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; font-weight: 600;
+}
+.cpy-msteps__s.is-on { color: var(--text); background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.08); }
+.cpy-msteps__s.is-on i { background: var(--text); color: var(--bg); }
+.cpy-msteps__s.is-done { color: var(--muted); }
+.cpy-msteps__s.is-done i { background: color-mix(in srgb, var(--pos) 25%, transparent); color: var(--pos); }
+.cpy-msteps__line { width: 18px; height: 1px; background: var(--line-soft); }
+
+.cpy-mgrid { display: grid; grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr); gap: 20px; align-items: start; }
+.cpy-mside, .cpy-mmain { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cpy-mside { position: sticky; top: 0; }
+.cpy-mstats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.cpy-mstats > div { padding: 10px 12px; border-radius: var(--radius-tile); background: var(--fx-well); box-shadow: var(--depth-1); }
+.cpy-mstats dt { color: var(--muted); font-size: var(--fs-micro); }
+.cpy-mstats dd { margin: 4px 0 0; font-family: var(--font-num); font-size: var(--fs-base); font-weight: 600; }
+.cpy-mstats dd.pos { color: var(--pos); }
+.cpy-mstats dd.neg { color: var(--neg); }
+.cpy-mstats .cpy-wr { align-items: flex-start; }
+.cpy-mgroup { display: flex; flex-direction: column; gap: 6px; }
+.cpy-mmain .cpy-h,
+.cpy-mmain .cpy-alloc__k { margin: 0 0 2px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: var(--ls-caps); text-transform: uppercase; }
+
+/* The direction: the two buttons' faces, one chosen. */
+.cpy-dir { padding: 3px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; background: var(--fx-well); }
+.cpy-dir__opt { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 32px; border-radius: 6px; }
+.cpy-dir__opt--copy.is-on { background: color-mix(in srgb, var(--pos) 30%, #0b0d0c); color: color-mix(in srgb, var(--pos) 22%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+.cpy-dir__opt--counter.is-on { background: color-mix(in srgb, var(--neg) 30%, #0d0b0b); color: color-mix(in srgb, var(--neg) 22%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08); }
+
+/* A rule: its name and an info mark, its control; the row is a compact tile. */
+.cpy-rule { padding: 9px 12px; border-radius: 10px; }
+.cpy-rule__t { display: inline-flex; align-items: center; gap: 6px; }
+.cpy-rule__i { display: inline-grid; place-items: center; color: var(--dim); cursor: help; }
+.cpy-rule__i:hover { color: var(--muted); }
+.cpy-num { height: 30px; width: 120px; border-radius: 7px; }
+.cpy-num--text { width: 170px; }
+.cpy-seg { border-radius: 7px; }
+
+.cpy-mfoot__note { color: var(--muted); font-size: var(--fs-xs); }
+.cpy-mfoot__err { color: var(--neg); }
+.cpy-mfoot__acts .fx-cta { height: 36px; border-radius: 8px; }
+.cpy-mstart--copy:not(:disabled) { background: color-mix(in srgb, var(--pos) 34%, #0b0d0c); color: color-mix(in srgb, var(--pos) 18%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.cpy-mstart--counter:not(:disabled) { background: color-mix(in srgb, var(--neg) 34%, #0d0b0b); color: color-mix(in srgb, var(--neg) 18%, #fff); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1); }
+.cpy-mstart--copy:not(:disabled):hover { background: color-mix(in srgb, var(--pos) 46%, #0b0d0c); }
+.cpy-mstart--counter:not(:disabled):hover { background: color-mix(in srgb, var(--neg) 46%, #0d0b0b); }
+@media (max-width: 860px) {
+  .cpy-mgrid { grid-template-columns: minmax(0, 1fr); }
+  .cpy-mside { position: static; }
+  .cpy-msteps { margin-left: 0; }
+}

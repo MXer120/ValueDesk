@@ -24,6 +24,7 @@ import './components/CoinIcon.css';
 import './components/account/account.css';
 import './components/TapeFilter.css';
 import './components/Market.css';
+import './components/PlatformSelect.css';
 import './components/StatusFooter.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -55,10 +56,12 @@ import './components/dev/DevPanel.css';
 import './components/explore/Explore.css';
 import './components/leaderboard/LeaderboardPage.css';
 import './components/explore/cohorts/Cohorts.css';
+import './components/explore/markets/Markets.css';
 import './components/copy/Copy.css';
 import './components/copy/CopyHome.css';
 import './components/algo/algo.css';
 import './copy/copy.css';
+import './components/shell.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
    the @fontsource sheets (main.tsx, first), chart/tv/*.css, which

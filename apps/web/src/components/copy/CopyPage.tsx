@@ -2,40 +2,46 @@
  * Copy trading.
  *
  *   Discover    the trader grid (Discover.tsx): hero, categories, filters, cards
- *   Trader      one trader (?address=&venue=): profile, a replay under your
- *               rules, their open positions, and Copy
  *   My copies   every copy of this wallet in every mode, their activity
+ *
+ * A trader opens on the Scan page, the app's one trader page (as a trader
+ * opens on Hyperdash's address page): its header has Copy and Counter-trade,
+ * which come back here as /copy?address=&venue=&direction= and open the setup.
  *
  * "Copy" opens the two-step setup (CopyModal.tsx) over whatever is on screen;
  * "Start copying" there starts the copy in the mode chosen, once that mode's
  * steps are the follower's own signatures (copy/CopySetupSheet.tsx).
  *
- * One context hook (useCopy.ts) owns every fetch and the setup form; the
- * trader and My copies views reuse the dashboard panels (panels.tsx) inside
- * the portfolio's `pf` design-system scope.
+ * One context hook (useCopy.ts) owns every fetch and the setup form; My copies
+ * reuses the dashboard panels (panels.tsx) inside the portfolio's `pf` scope.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CopySetupSheet } from '../../copy/CopySetupSheet';
 import { copyRows, startCopy } from '../../copy/live';
 import { notify } from '../../toast';
 import type { TraderRow, Venue } from '../../vsApi';
-import { BacktestPanel, CopiesPanel, PositionsPanel, TraderHero } from './panels';
+import { CopiesPanel } from './panels';
 import { CopyModal } from './CopyModal';
 import { Discover } from './Discover';
-import { holdPeeks } from './TraderCard';
+import { isCopyable } from './gridModel';
 import { useCopyContext, type CopyPageProps } from './useCopy';
 import './Copy.css';
 import './CopyHome.css';
 
 export type { CopyPageProps } from './useCopy';
 
-type Page = 'discover' | 'trader' | 'mine';
+type Page = 'discover' | 'mine';
 
-const pageFromUrl = (): Page => {
+const pageFromUrl = (): Page => (new URLSearchParams(window.location.search).get('tab') === 'mine' ? 'mine' : 'discover');
+
+/** /copy?address=&venue=&direction=: the setup to open for that trader (from Scan, Explore, the Leaderboard). */
+function setupFromUrl(): { address: string; venue: Venue; direction: 'copy' | 'counter' } | null {
   const p = new URLSearchParams(window.location.search);
-  if (p.get('tab') === 'mine') return 'mine';
-  return p.get('address') ? 'trader' : 'discover';
-};
+  const address = p.get('address');
+  const venue = p.get('venue') as Venue | null;
+  if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address) || !venue || !isCopyable(venue)) return null;
+  return { address: address.toLowerCase(), venue, direction: p.get('direction') === 'counter' ? 'counter' : 'copy' };
+}
 
 export function CopyPage(props: CopyPageProps) {
   const c = useCopyContext(props);
@@ -50,10 +56,6 @@ export function CopyPage(props: CopyPageProps) {
     [running],
   );
 
-  /* A trader's page reads their fills for the replay: the grid's card reads wait meanwhile. */
-  useEffect(() => (page === 'trader' ? holdPeeks() : undefined), [page]);
-
-  /* Back and forward move between the grid and a trader, like links. */
   useEffect(() => {
     const onPop = () => setPage(pageFromUrl());
     window.addEventListener('popstate', onPop);
@@ -63,14 +65,7 @@ export function CopyPage(props: CopyPageProps) {
   const go = useCallback((p: Page) => {
     setPage(p);
     if (p === 'discover') c.selectLeader(null);
-    if (p === 'mine') window.history.replaceState(null, '', '/copy?tab=mine');
-    window.scrollTo({ top: 0 });
-  }, [c]);
-
-  const openTrader = useCallback((row: Pick<TraderRow, 'address' | 'venue'>) => {
-    window.history.pushState(null, '', `/copy?address=${row.address.toLowerCase()}&venue=${row.venue}`);
-    c.selectLeader(row.address, row.venue);
-    setPage('trader');
+    window.history.replaceState(null, '', p === 'mine' ? '/copy?tab=mine' : '/copy');
     window.scrollTo({ top: 0 });
   }, [c]);
 
@@ -82,6 +77,18 @@ export function CopyPage(props: CopyPageProps) {
     c.selectLeader(a, row?.venue ?? venue);
     setModal({ open: true, row });
   }, [c]);
+
+  /* Arrived with a trader in the link (Scan's Copy / Counter-trade): their setup, over the grid. */
+  const opened = useRef(false);
+  useEffect(() => {
+    if (opened.current) return;
+    opened.current = true;
+    const t = setupFromUrl();
+    if (t) copyTrader(t.direction, null, t.address, t.venue);
+  }, [copyTrader]);
+
+  /** A trader opens on Scan: the universal trader page. */
+  const openTrader = useCallback((row: Pick<TraderRow, 'address' | 'venue'>) => c.onScan(row.address, row.venue), [c]);
 
   return (
     <div className="cpy">
@@ -108,15 +115,13 @@ export function CopyPage(props: CopyPageProps) {
             </div>
           )}
         </div>
-      ) : page === 'trader' && c.leader ? (
-        <TraderView c={c} onBack={() => { window.history.pushState(null, '', '/copy'); go('discover'); }} onCopy={(d) => copyTrader(d, null, c.leader!, c.venue)} copying={copying.has(`${c.venue}:${c.leader}`)} />
       ) : (
         <Discover
           onOpen={openTrader}
           onCopy={(row, d) => copyTrader(d, row)}
           copying={copying}
           onAddress={(address, venue) => openTrader({ address, venue })}
-          onScan={(row) => c.onScan(row.address, row.venue)}
+          onScan={openTrader}
         />
       )}
 
@@ -124,7 +129,7 @@ export function CopyPage(props: CopyPageProps) {
         c={c}
         open={modal.open}
         row={modal.row}
-        onClose={() => setModal({ open: false, row: null })}
+        onClose={() => { setModal({ open: false, row: null }); if (window.location.search.includes('address=')) window.history.replaceState(null, '', '/copy'); }}
         onStarted={() => go('mine')}
       />
       <CopySetupSheet
@@ -144,19 +149,6 @@ export function CopyPage(props: CopyPageProps) {
         }
         startLabel={c.setup.paper ? 'Start paper copy' : 'Start copying'}
       />
-    </div>
-  );
-}
-
-/** One trader: the hero (who, the buttons, the figures, the curve), then the replay and what they hold. */
-function TraderView({ c, onBack, onCopy, copying }: { c: ReturnType<typeof useCopyContext>; onBack: () => void; onCopy: (direction: 'copy' | 'counter') => void; copying: boolean }) {
-  return (
-    <div className="cpy-trader">
-      <TraderHero c={c} onBack={onBack} onCopy={onCopy} copying={copying} />
-      <div className="pf copy cpy-trader__main">
-        <BacktestPanel c={c} />
-        <PositionsPanel c={c} />
-      </div>
     </div>
   );
 }

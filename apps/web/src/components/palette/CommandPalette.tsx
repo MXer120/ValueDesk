@@ -93,7 +93,6 @@ import {
   Seg,
   SkeletonRows,
   TraderListRow,
-  VenueChip,
   VenueNote,
   useInk,
   usePresence,
@@ -139,7 +138,6 @@ import {
   screenerQuery,
   signOf,
   sortAssets,
-  toggleVenueIn,
   traderKey,
   venueList,
   writeList,
@@ -165,6 +163,7 @@ import {
   overviewCards, overviewLead, useAddressVenues, VENUE_CHECK,
 } from '../scan/addressVenues';
 import { VenueChooser } from '../scan/VenueChooser';
+import { PlatformSelect } from '../PlatformSelect';
 import './CommandPalette.css';
 
 export interface CommandPaletteProps {
@@ -1521,11 +1520,7 @@ function PaletteDialog(
                 <Ink ink={tabInk} />
               </div>
               {tab !== 'assets' && (
-                <span className="cp-venues" role="group" aria-label="Venues">
-                  {PALETTE_VENUES.map((v) => (
-                    <VenueChip key={v} venue={v} on={venues.includes(v)} last={venues.length === 1} onToggle={() => setVenues(toggleVenueIn(venues, v))} />
-                  ))}
-                </span>
+                <PlatformSelect className="cp-venues" options={PALETTE_VENUES} value={venues} onChange={setVenues} align="end" />
               )}
               {tab === 'assets' && <span className="cp-nav__note">Markets on SoDEX, where ValueDesk trades</span>}
             </div>

@@ -17,7 +17,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { COPY_FEE_LADDER, COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../components/Modal';
-import { Seg } from '../components/palette/ui';
 import { openConnectDialog } from '../components/account/connect';
 import { notify } from '../toast';
 import { tradingConfig } from '../trading/config';
@@ -37,6 +36,7 @@ import {
   type LiveCopy,
 } from './live';
 import { MAX_BROWSER_KEY_DAYS } from './sodexSetup';
+import { ModeCards } from './ModeCards';
 import '../components/funds/funds.css';
 import './copy.css';
 
@@ -118,6 +118,17 @@ export function copyReady(live: LiveCopy, mode: CopyModeId, paper?: boolean): bo
   return paper ? true : r.fee && r.key;
 }
 
+/** The steps a copy in `mode` needs, in order, and which are done (a paper copy needs no fee and no key). */
+export function setupSteps(live: LiveCopy, mode: CopyModeId, paper?: boolean): Array<{ id: string; done: boolean }> {
+  const r = readiness(live, mode);
+  const out = [{ id: 'wallet', done: !!live.owner && live.canSign }];
+  if (mode === 'self') out.push({ id: 'copier', done: r.connected });
+  if (mode === 'hosted') out.push({ id: 'signin', done: r.connected });
+  out.push({ id: 'terms', done: r.terms });
+  if (!paper) out.push({ id: 'fee', done: r.fee }, { id: 'key', done: r.key });
+  return out;
+}
+
 /**
  * The steps of one mode, each with its own action: connect, sign in or pair,
  * terms, copy fee, copy key. Used by the setup sheet and by the copy modal's
@@ -159,15 +170,8 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   };
 
   // The steps of this mode, in order; the first one not done is lit.
-  type S = { id: string; done: boolean };
-  const steps: S[] = useMemo(() => {
-    const out: S[] = [{ id: 'wallet', done: !!owner && live.canSign }];
-    if (mode === 'self') out.push({ id: 'copier', done: r.connected });
-    if (mode === 'hosted') out.push({ id: 'signin', done: r.connected });
-    out.push({ id: 'terms', done: r.terms });
-    if (!paper) out.push({ id: 'fee', done: r.fee }, { id: 'key', done: r.key });
-    return out;
-  }, [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const steps = useMemo(() => setupSteps(live, mode, paper), [owner, live.canSign, mode, r.connected, r.terms, r.fee, r.key, paper]);
   const current = steps.find((s) => !s.done)?.id ?? null;
   const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
 
@@ -388,6 +392,18 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   );
 }
 
+/** "2 of 4 done", over a bar: how far this mode's steps are. */
+export function SetupProgress({ live, mode, paper }: { live: LiveCopy; mode: CopyModeId; paper?: boolean }) {
+  const steps = setupSteps(live, mode, paper);
+  const done = steps.filter((x) => x.done).length;
+  return (
+    <div className="cs-progress" aria-label={`${done} of ${steps.length} steps done`}>
+      <span className="cs-progress__t">{done === steps.length ? 'Ready to copy' : `${done} of ${steps.length} steps done`}</span>
+      <span className="cs-progress__bar"><i style={{ width: `${(done / steps.length) * 100}%` }} /></span>
+    </div>
+  );
+}
+
 export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, startLabel, paper }: CopySetupSheetProps) {
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -397,17 +413,12 @@ export function CopySetupSheet({ open, onClose, mode, onMode, live, onStart, sta
   const ready = copyReady(live, mode, paper);
 
   return (
-    <Modal open={open} title="Set up copy trading" onClose={onClose} size="md" className="fx cs-sheet">
-      <p className="cs-sub">Copies run in your own SoDEX account, under your rules. Choose where the copier runs.</p>
+    <Modal open={open} title="Copy setup" onClose={onClose} size="md" className="fx cs-sheet">
+      <p className="cs-sub">Copies trade in your own SoDEX account, under your rules. Pick where the copier runs.</p>
 
-      <Seg
-        label="Where the copier runs"
-        value={mode}
-        onChange={(m) => onMode(m)}
-        options={(['browser', 'hosted', 'self'] as const).map((id) => ({ id, label: MODE_LABEL[id], title: MODE_HINT[id] }))}
-      />
-      <p className="fx-note">{MODE_HINT[mode]}</p>
+      <ModeCards value={mode} onChange={onMode} />
 
+      <SetupProgress live={live} mode={mode} paper={paper} />
       <CopySetupSteps mode={mode} live={live} paper={paper} />
       {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
 

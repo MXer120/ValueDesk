@@ -89,7 +89,7 @@ export function FundingScanner({
           </p>
         </div>
         {mode === 'compact' && onOpenScanner && (
-          <button type="button" className="acct-link" onClick={onOpenScanner}>Scanner</button>
+          <button type="button" className="acct-link" onClick={onOpenScanner}>Open the scanner</button>
         )}
       </header>
       {mode === 'full' && (

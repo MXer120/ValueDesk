@@ -444,89 +444,76 @@ const chipLabel = (name: string, byName?: Map<string, Symbol>): string =>
   byName?.get(name)?.displayName ?? name;
 
 /**
- * A single scrolling row of market chips - ticker plus 24h change.
+ * The favourites bar, after the owner's reference: one chip per starred market
+ * of this book - its coin in a dark square, the market and its last price, an
+ * x to unpin it - and the market on screen first when it is not starred (with a
+ * star to pin it instead of the x). A + at the end opens the market search.
  *
- * Ordering is favourites first, then the rest by 24h QUOTE volume descending.
- * Quote volume, not base volume: base volume ranks by units traded, which puts
- * a million-unit meme coin above BTC and makes the strip useless as a "where
- * is the flow" glance.
- *
- * A chip is TEXT. No border, no fill, no pill - at 24 chips a row of outlined
- * capsules is a second navbar, and the strip is meant to be read past, not
- * read. The active market is marked by colouring its name amber, which costs
- * no geometry and so cannot re-flow the row when the selection moves.
+ * Hiding favourites (privacy) leaves only the market on screen: which markets
+ * someone starred is itself information.
  */
 export function MarketStrip({
-  engine, symbol, favorites = [], byName, onSelect, limit = 24,
+  engine, symbol, favorites = [], byName, onSelect, onToggleFavorite, onAdd,
 }: {
   engine: Engine;
   /** Currently active market; its chip is marked selected. */
   symbol: string;
   /** Watchlist keys, `${engine}:${symbol}` - the same array TickerBar takes. */
   favorites?: string[];
-  /** Symbol metadata, only used to label a chip. */
+  /** Symbol metadata: a chip's label, coin and price precision. */
   byName?: Map<string, Symbol>;
   onSelect?: (symbol: string) => void;
-  limit?: number;
+  onToggleFavorite?: (key: string) => void;
+  /** The + at the end: find a market to add. */
+  onAdd?: () => void;
 }) {
   // Shares TickerBar's poll - see useTickers. No second request is made.
   const rows = useTickers(engine);
-
-  /* WHICH MARKETS YOU STARRED IS ITSELF INFORMATION. Hiding favourites has to
-     drop the favourites-FIRST ordering too, not just the star glyph: a strip
-     whose first three chips are not the three highest-volume markets has already
-     told you which three someone picked. */
   const hideFavs = usePrivacy().isHidden('favorites');
 
   const chips = useMemo(() => {
-    if (!rows) return [];
-    const favSet = new Set(
-      hideFavs
-        ? []
-        : favorites.filter((k) => k.startsWith(`${engine}:`)).map((k) => k.slice(engine.length + 1)),
-    );
-    const byVol = [...rows].sort((a, b) => num(b.quoteVolume) - num(a.quoteVolume));
-    const favRows = byVol.filter((t) => favSet.has(t.symbol));
-    const rest = byVol.filter((t) => !favSet.has(t.symbol));
-    // The active market always has a chip even if it is neither a favourite
-    // nor in the volume head - a strip that cannot show you where you are is
-    // worse than one row too long.
-    const head = [...favRows, ...rest].slice(0, Math.max(1, limit));
-    if (!head.some((t) => t.symbol === symbol)) {
-      const active = rows.find((t) => t.symbol === symbol);
-      if (active) head.unshift(active);
-    }
-    return head.map((t) => ({ t, fav: favSet.has(t.symbol) }));
-  }, [rows, favorites, engine, symbol, limit, hideFavs]);
+    const favs = hideFavs
+      ? []
+      : favorites.filter((k) => k.startsWith(`${engine}:`)).map((k) => k.slice(engine.length + 1));
+    const list = favs.includes(symbol) ? favs : [symbol, ...favs];
+    const bySym = new Map((rows ?? []).map((t) => [t.symbol, t]));
+    return list.map((s) => ({ s, t: bySym.get(s), fav: favs.includes(s) }));
+  }, [rows, favorites, engine, symbol, hideFavs]);
 
   /* `group`, not `tablist`: these chips change the app's market and there is no
-     tabpanel behind them, so a tablist made assistive tech announce "tab 3 of
-     24" for what is plain navigation. The children follow: `aria-pressed`, not
-     `role="tab"` + `aria-selected`. */
+     tabpanel behind them. */
   return (
-    <div className="mkt-strip" role="group" aria-label="Markets">
-      {chips.length === 0 && <span className="mkt-strip-empty">{DASH}</span>}
-      {chips.map(({ t, fav }) => (
-        <button
-          key={t.symbol}
-          aria-pressed={t.symbol === symbol}
-          className={`mkt-chip ${t.symbol === symbol ? 'is-active' : ''}`}
-          onClick={() => onSelect?.(t.symbol)}
-          title={t.symbol}
-        >
-          {/* The SAME drawn star as the header's, at 10px. It was the literal
-              `★`, which is the exact codepoint the header's glyph was drawn to
-              escape - not in IBM Plex Sans, so it resolves to whatever symbol
-              font the platform has and arrives at a size nobody here chose. */}
-          {fav && (
-            <span className="mkt-chip-fav" aria-hidden="true">
-              <Star size={10} />
-            </span>
-          )}
-          <span className="mkt-chip-sym">{chipLabel(t.symbol, byName)}</span>
-          <span className={`mkt-chip-chg ${signClass(t.changePct)}`}>{fmtPct(t.changePct)}</span>
+    <div className="mkt-favs" role="group" aria-label="Favourite markets">
+      {chips.map(({ s, t, fav }) => {
+        const meta = byName?.get(s);
+        const label = chipLabel(s, byName);
+        const last = t?.lastPx;
+        return (
+          <div key={s} className={`mkt-favchip${s === symbol ? ' is-active' : ''}`}>
+            <button type="button" className="mkt-favchip__open" aria-pressed={s === symbol} onClick={() => onSelect?.(s)} title={label}>
+              <span className="mkt-favchip__ic"><CoinIcon coin={meta?.baseCoin ?? s} size={20} /></span>
+              <span className="mkt-favchip__t">
+                <b>{label}</b>
+                <small>{last ? `${quoteGlyph(meta)}${fmtPrice(last, meta?.tickSize)}` : DASH}</small>
+              </span>
+            </button>
+            {fav ? (
+              <button type="button" className="mkt-favchip__x" aria-label={`Remove ${label} from favourites`} title="Remove from favourites" onClick={() => onToggleFavorite?.(`${engine}:${s}`)}>
+                <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+              </button>
+            ) : (
+              <button type="button" className="mkt-favchip__x mkt-favchip__pin" aria-label={`Add ${label} to favourites`} title="Add to favourites" onClick={() => onToggleFavorite?.(`${engine}:${s}`)}>
+                <Star size={13} />
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {onAdd && (
+        <button type="button" className="mkt-favs__add" aria-label="Add a market" title="Add a market" onClick={onAdd}>
+          <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
         </button>
-      ))}
+      )}
     </div>
   );
 }
@@ -561,7 +548,7 @@ export function MarketStrip({
  * it reappears where it always sat.
  */
 type StatId =
-  | 'last' | 'mark' | 'index' | 'oracle' | 'change' | 'open' | 'high' | 'low'
+  | 'last' | 'mark' | 'index' | 'oracle' | 'change' | 'hilo' | 'funding8' | 'open' | 'high' | 'low'
   | 'qvol' | 'bvol' | 'vwap' | 'oi' | 'funding' | 'bid' | 'ask';
 
 interface StatDef {
@@ -575,6 +562,8 @@ const HEADER_STATS: readonly StatDef[] = [
   { id: 'mark', perps: true },
   { id: 'index', perps: true },
   { id: 'change' },
+  { id: 'hilo' },
+  { id: 'funding8', perps: true },
   { id: 'open' },
   { id: 'high' },
   { id: 'low' },
@@ -596,9 +585,12 @@ const HEADER_STATS: readonly StatDef[] = [
  * the page on something the picture already says. They remain one right-click
  * away for anyone who reads the numbers rather than the shape.
  */
-const DEFAULT_HEADER_STATS: readonly StatId[] = ['mark', 'index', 'change', 'qvol', 'oi', 'funding'];
-/** What the row used to be. A saved copy of exactly this is moved to the new default. */
-const PREVIOUS_HEADER_STATS = ['last', 'oracle', 'qvol', 'oi', 'funding'];
+const DEFAULT_HEADER_STATS: readonly StatId[] = ['change', 'hilo', 'funding8', 'qvol', 'oi'];
+/** What the row used to be. A saved copy of exactly one of these is moved to the new default. */
+const PREVIOUS_HEADER_STATS: readonly (readonly string[])[] = [
+  ['last', 'oracle', 'qvol', 'oi', 'funding'],
+  ['mark', 'index', 'change', 'qvol', 'oi', 'funding'],
+];
 
 /** Guard for whatever localStorage hands back - it is user-writable. */
 const HEADER_STAT_IDS = new Set<string>(HEADER_STATS.map((s) => s.id));
@@ -615,7 +607,9 @@ function statLabel(id: StatId, sym?: Symbol): string {
     case 'mark': return 'Mark Price';
     case 'index':
     case 'oracle': return 'Index Price';
-    case 'change': return '24h Change';
+    case 'change': return 'Change 24h';
+    case 'hilo': return '24H High / Low';
+    case 'funding8': return 'Est. 8H Funding (L/S)';
     case 'open': return '24h Open';
     case 'high': return '24h High';
     case 'low': return '24h Low';
@@ -637,12 +631,13 @@ function statLabel(id: StatId, sym?: Symbol): string {
 }
 
 export function TickerBar({
-  engine, symbol, sym, onLast, onSymbolClick, favorites, onToggleFavorite,
+  engine, symbol, sym, onLast, onSymbolClick,
 }: {
   engine: Engine; symbol: string; sym?: Symbol;
   /** Reports the live last price so order entry can value market orders. */
   onLast?: (p: string) => void;
   onSymbolClick?: () => void;
+  /** Starring moved to the favourites bar (MarketStrip); still accepted, unused here. */
   favorites?: string[];
   onToggleFavorite?: (key: string) => void;
 }) {
@@ -659,7 +654,7 @@ export function TickerBar({
   );
   const headerStats = useMemo(() => {
     const raw = Array.isArray(storedStats) ? storedStats : [];
-    const sameAsBefore = raw.length === PREVIOUS_HEADER_STATS.length && raw.every((id, i) => id === PREVIOUS_HEADER_STATS[i]);
+    const sameAsBefore = PREVIOUS_HEADER_STATS.some((p) => raw.length === p.length && raw.every((id, i) => id === p[i]));
     const ids = (sameAsBefore ? DEFAULT_HEADER_STATS : raw).map((id) => (id === 'oracle' ? 'index' : id));
     return ids.filter((id) => HEADER_STAT_IDS.has(id));
   }, [storedStats]);
@@ -748,11 +743,6 @@ export function TickerBar({
     return () => window.removeEventListener('contextmenu', onMenu, true);
   }, []);
 
-  const favKey = `${engine}:${symbol}`;
-  /* Drawn unstarred while favourites are hidden. The toggle still WORKS - this
-     hides the indicator, it does not take the feature away. */
-  const hideFavs = usePrivacy().isHidden('favorites');
-  const isFav = !hideFavs && (favorites?.includes(favKey) ?? false);
   const perps = engine === 'perps';
   // TWO DIRECTIONS, TWO PLACES. The 20px price takes the last TICK's direction
   // and the line under it takes the 24h sign, so the pair can disagree - and
@@ -809,18 +799,35 @@ export function TickerBar({
       case 'bid': return <Stat key={id} label={label} value={price(bidPx)} />;
       case 'ask': return <Stat key={id} label={label} value={price(askPx)} />;
       case 'change':
-        /* The move stated twice - in the quote currency and as a proportion -
-           on the stat row's own two-part line, the same slot the funding
-           countdown uses. No sign colour: see `.mkt-stat-v` in Market.css for
-           why this row is scanned as a block. */
+        /* The reference's reading: the proportion first, in the colour of the
+           move, then the move in the quote currency. */
         return (
           <Stat
             key={id}
             label={label}
-            value={fmtSigned(changeAbs, precisionOf(sym?.tickSize))}
-            sub={fmtPct(changePct)}
+            value={fmtPct(changePct)}
+            sub={changeAbs === undefined || changeAbs === null || changeAbs === '' ? undefined : `(${fmtSigned(changeAbs, precisionOf(sym?.tickSize))})`}
+            tone={signClass(changePct)}
           />
         );
+      case 'hilo':
+        return <Stat key={id} label={label} value={`${high ? quoteGlyph(sym) : ''}${price(high)} / ${low ? quoteGlyph(sym) : ''}${price(low)}`} />;
+      case 'funding8': {
+        /* What a long pays and a short receives over 8 hours at the current
+           rate (the venue states it per funding interval; an hour when it does
+           not say). Unsigned when positive, like the reference. */
+        const rate = funding !== undefined && funding !== null && funding !== '' ? num(funding) : NaN;
+        const per8h = rate * ((8 * 3600) / (sym?.fundingInterval && sym.fundingInterval > 0 ? sym.fundingInterval : 3600));
+        const pct4 = (v: number) => `${v < 0 ? '-' : ''}${Math.abs(v * 100).toFixed(4)}%`;
+        return (
+          <Stat
+            key={id}
+            label={label}
+            hint={`Next funding in ${fmtCountdown(nextFunding)}. Longs pay the first rate; shorts the second.`}
+            value={Number.isFinite(per8h) ? `${pct4(per8h)} / ${pct4(-per8h)}` : DASH}
+          />
+        );
+      }
       /* Quote volume, so the number is comparable across markets without first
          knowing what a unit of the base asset is worth. Base volume is offered
          beside it for the reading that is about units traded. */
@@ -882,29 +889,24 @@ export function TickerBar({
        "anywhere" means the whole visible rectangle, grips included. The listener
        is on the window and tests the pointer against this element's box; see the
        effect above for why ancestry was the wrong test. */
-    <div className="mkt-header" ref={headerRef}>
-      <div className="mkt-ident">
-        <button
-          className={`mkt-fav ${isFav ? 'is-on' : ''}`}
-          onClick={() => onToggleFavorite?.(favKey)}
-          aria-label={isFav ? 'Remove from watchlist' : 'Add to watchlist'}
-          aria-pressed={isFav}
-        >
-          {/* No `on` prop: the glyph is identical in both states and the STATE
-              is the colour, which `.mkt-fav.is-on` puts on the button. */}
-          <Star />
-        </button>
-        <button className="mkt-symbtn" onClick={onSymbolClick} aria-label="Search markets">
-          <CoinIcon coin={sym?.baseCoin ?? symbol} size={24} className="mkt-coin" />
-          <span className="mkt-symname">{sym?.displayName ?? symbol}</span>
-          <span className="mkt-kind">{perps ? 'Futures' : 'Spot'}</span>
-          <Chevron />
-        </button>
-      </div>
+    <div className="mkt-header mkt-header--info" ref={headerRef}>
+      {/* The owner's reference: the coin in a square, the price large, a
+          divider, then the stats. The market's name is on its favourites chip;
+          the coin opens the market search. Starring is on the chip too. */}
+      <button
+        type="button"
+        className="mkt-info__coin"
+        onClick={onSymbolClick}
+        aria-label={`${sym?.displayName ?? symbol} ${perps ? 'futures' : 'spot'}: change market`}
+        title={`${sym?.displayName ?? symbol} · ${perps ? 'Futures' : 'Spot'} · change market`}
+      >
+        <CoinIcon coin={sym?.baseCoin ?? symbol} size={30} />
+      </button>
 
       <div className="mkt-price">
-        <span className={`mkt-price-v ${tickDir ?? ''}`}>{fmtPrice(last, sym?.tickSize)}</span>
+        <span className={`mkt-price-v ${tickDir ?? ''}`}>{last ? quoteGlyph(sym) : ''}{fmtPrice(last, sym?.tickSize)}</span>
       </div>
+      <span className="mkt-info__div" aria-hidden="true" />
 
       {/* Which columns these are is the user's, and it persists - see
           HEADER_STATS. Oracle, mark, funding and open interest are perp-only
@@ -1049,15 +1051,17 @@ function StatMenu({
 }
 
 /** Label above value. The label is the quietest thing in the header; the value is not. */
-const Stat = ({ label, value, sub, hint }: {
+const Stat = ({ label, value, sub, hint, tone = '' }: {
   label: string; value: string; sub?: string;
+  /** `pos` / `neg`: the value in the colour of its sign (the day's change). */
+  tone?: string;
   /** Why this number is what it is. Used where a figure is DERIVED and would
    *  otherwise be indistinguishable from a venue reading. */
   hint?: string;
 }) => (
   <div className="mkt-stat" title={hint}>
     <span className="mkt-stat-l">{label}</span>
-    <span className="mkt-stat-v">
+    <span className={`mkt-stat-v${tone ? ` ${tone}` : ''}`}>
       {value}
       {sub && <span className="mkt-stat-sub">{sub}</span>}
     </span>

@@ -17,7 +17,7 @@ import { DASH, fmtUsd, shortAddr } from '../../format';
 import { LoadFailed, useLoadFailedToast } from '../LoadFailed';
 import { FxSelect } from '../funds/ui';
 import { VENUE_BRAND } from '../venueBrand';
-import { VenueLogo } from '../VenueLogo';
+import { PlatformSelect } from '../PlatformSelect';
 import { VENUE_LABEL, vsApi, type BoardWindow, type TraderRow, type Venue } from '../../vsApi';
 import {
   CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_VENUES, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
@@ -73,12 +73,6 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
   // The chosen platforms, plus the two a copy follows: the hero deals from those whatever is chosen.
   const read = [...new Set<Venue>([...prefs.venues, ...COPY_VENUES])];
   const readKey = read.join(',');
-  const toggleVenue = (v: Venue) => {
-    const on = prefs.venues.includes(v);
-    if (on && prefs.venues.length === 1) return;
-    patch({ venues: on ? prefs.venues.filter((x) => x !== v) : GRID_VENUES.filter((x) => x === v || prefs.venues.includes(x)) });
-    setShown(PAGE);
-  };
 
   const boards = useAsync(
     () => Promise.all(read.map((venue) =>
@@ -118,10 +112,7 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
       <section className="cpy-hero">
         <div className="cpy-hero__text">
           <h1 className="cpy-hero__title">Copy the best traders, <em>trade for trade.</em></h1>
-          <p className="cpy-hero__sub">
-            Follow profitable SoDEX and Hyperliquid traders, or trade against the worst. Each trade lands in your SoDEX
-            account, within your limits.
-          </p>
+          <p className="cpy-hero__sub">Or trade against the worst. Every trade lands in your own SoDEX account, within your limits.</p>
           <ul className="cpy-hero__facts">
             <li>Funds stay in your account</li>
             <li>Your limits on every copy</li>
@@ -131,130 +122,123 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
         <Deck picks={deck} w={w} total={mixed.filter((s) => isCopyable(s.row.venue)).length} loading={(boards.loading && !boards.data) || (worst.loading && !worst.data)} onOpen={onOpen} />
       </section>
 
-      <div className="cpy-bar">
-        <nav className="cpy-cats" aria-label="Trader categories">
-          {CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`cpy-cat${c.id === 'counter' ? ' cpy-cat--counter' : ''}${prefs.category === c.id ? ' is-on' : ''}`}
-              aria-pressed={prefs.category === c.id}
-              onClick={() => { patch({ category: c.id }); setShown(PAGE); }}
-            >
-              {c.label}
-            </button>
-          ))}
-        </nav>
-        <span className="cpy-count" title={kind === 'mixed' ? 'One score for both, 0 to 100: how well copying, or countering, would have worked.' : undefined}>
-          {kind === 'mixed' && !loading && grid.length > 0 && (
-            <span className="cpy-legend" aria-label="Green cards are traders to copy, red ones traders to counter">
-              <span className="cpy-legend__copy">copy</span>
-              <span className="cpy-legend__counter">counter</span>
-            </span>
-          )}
-          {loading ? 'Loading traders…' : `${grid.length} trader${grid.length === 1 ? '' : 's'}`}
-        </span>
-      </div>
-
-      <div className="cpy-bar">
-        {/* The platforms, as the cohorts and the leaderboard pick them: several at once, at least one. */}
-        <div className="lbp-venues cpy-venues" role="group" aria-label="Platforms">
-          {GRID_VENUES.map((v) => {
-            const on = prefs.venues.includes(v);
-            return (
+      {/* The toolbar, as Hyperdash's: the categories and the view on one row, the filters on the next. */}
+      <div className="cpy-toolbar">
+        <div className="cpy-toolbar__row">
+          <nav className="cpy-cats" aria-label="Trader categories">
+            {CATEGORIES.map((c) => (
               <button
-                key={v}
+                key={c.id}
                 type="button"
-                aria-pressed={on}
-                className={`lbp-chip${on ? ' is-on' : ''}${isCopyable(v) ? '' : ' cpy-venues__view'}`}
-                style={{ '--brand': VENUE_BRAND[v] } as CSSProperties}
-                onClick={() => toggleVenue(v)}
-                title={on && prefs.venues.length === 1 ? 'At least one platform stays selected' : isCopyable(v) ? undefined : `${VENUE_LABEL[v]} traders are shown to look at: copying them is not supported yet`}
+                className={`cpy-cat${c.id === 'counter' ? ' cpy-cat--counter' : ''}${prefs.category === c.id ? ' is-on' : ''}`}
+                aria-pressed={prefs.category === c.id}
+                onClick={() => { patch({ category: c.id }); setShown(PAGE); }}
               >
-                <VenueLogo venue={v} size={14} />
-                {VENUE_LABEL[v]}
+                {c.label}
               </button>
-            );
-          })}
-        </div>
-        <div className="cpy-bar__right">
-          <FxSelect
-            label="Sort traders"
-            value={prefs.sort}
-            options={SORTS[kind].map((o) => ({ value: o.id, label: o.label }))}
-            onChange={(v) => patch({ sort: v as SortKey })}
-            searchable={false}
-            triggerClassName="cpy-select"
-            listMinWidth={290}
-            listAlign="end"
-            trigger={(o) => (
-              <>
-                <SortIcon />
-                <span className="cpy-select__v">{o?.label}</span>
-              </>
-            )}
-          />
-          <Toggle
-            label="Window"
-            value={w}
-            options={GRID_WINDOWS.map((g) => ({ id: g.id, label: g.label }))}
-            onChange={(v) => patch({ window: v })}
-          />
-          <Toggle label="Show" value={prefs.unit} options={[{ id: 'usd', label: '$', title: 'PnL in dollars' }, { id: 'pct', label: '%', title: 'Return in percent' }]} onChange={(v) => patch({ unit: v })} />
-          <Toggle
-            label="Layout"
-            value={prefs.view}
-            options={[{ id: 'grid', label: <GridIcon />, title: 'Cards' }, { id: 'list', label: <ListIcon />, title: 'List' }]}
-            onChange={(v) => patch({ view: v })}
-          />
-        </div>
-      </div>
-
-      <div className="cpy-filters">
-        <div className="cpy-search">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && pasted) onAddress(pasted, 'hyperliquid'); }}
-            placeholder="Search an address, or paste one"
-            aria-label="Search traders by address"
-            spellCheck={false}
-          />
-          {pasted && (
-            <span className="cpy-search__open">
-              {COPY_VENUES.map((v) => (
-                <button key={v} type="button" className="cpy-chip" onClick={() => onAddress(pasted, v)}>Open on {VENUE_LABEL[v]}</button>
-              ))}
+            ))}
+          </nav>
+          <div className="cpy-toolbar__end">
+            <span className="cpy-count" title={kind === 'mixed' ? 'One score for both, 0 to 100: how well copying, or countering, would have worked.' : undefined}>
+              {kind === 'mixed' && !loading && grid.length > 0 && (
+                <span className="cpy-legend" aria-label="Green cards are traders to copy, red ones traders to counter">
+                  <span className="cpy-legend__copy">copy</span>
+                  <span className="cpy-legend__counter">counter</span>
+                </span>
+              )}
+              {loading ? 'Loading…' : `${grid.length} traders`}
             </span>
-          )}
+            <FxSelect
+              label="Sort traders"
+              value={prefs.sort}
+              options={SORTS[kind].map((o) => ({ value: o.id, label: o.label }))}
+              onChange={(v) => patch({ sort: v as SortKey })}
+              searchable={false}
+              triggerClassName="cpy-select"
+              listMinWidth={290}
+              listAlign="end"
+              trigger={(o) => (
+                <>
+                  <span className="cpy-select__v">{o?.label}</span>
+                  <SortIcon />
+                </>
+              )}
+            />
+            <Toggle label="Show" value={prefs.unit} options={[{ id: 'usd', label: '$', title: 'PnL in dollars' }, { id: 'pct', label: '%', title: 'Return in percent' }]} onChange={(v) => patch({ unit: v })} />
+            <Toggle
+              label="Layout"
+              value={prefs.view}
+              options={[{ id: 'grid', label: <GridIcon />, title: 'Cards' }, { id: 'list', label: <ListIcon />, title: 'List' }]}
+              onChange={(v) => patch({ view: v })}
+            />
+          </div>
         </div>
-        <Pick
-          label="Account value"
-          value={prefs.filters.minEquity}
-          options={EQUITY_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${fmtUsd(v, 0).replace(',000,000', 'M').replace(',000', 'k')}` }))}
-          onChange={(v) => patch({ filters: { ...prefs.filters, minEquity: v } })}
-        />
-        <Pick
-          label="PnL"
-          value={prefs.filters.sideOnly ? 1 : 0}
-          options={[{ v: 0, label: 'Any' }, kind === 'copy' ? { v: 1, label: 'Profitable only' } : kind === 'counter' ? { v: 1, label: 'Losing only' } : { v: 1, label: 'Winners to copy, losers to counter', short: 'Winners / losers' }]}
-          onChange={(v) => patch({ filters: { ...prefs.filters, sideOnly: v === 1 } })}
-        />
-        <Pick
-          label="Win rate"
-          value={(WIN_RATE_STEPS as readonly number[]).includes(prefs.filters.winRate) ? prefs.filters.winRate : 0}
-          options={WIN_RATE_STEPS.map((v) => ({ v, label: winRateLabel(kind, v), short: winRateLabel(kind, v, true) }))}
-          onChange={(v) => patch({ filters: { ...prefs.filters, winRate: v } })}
-        />
-        <Pick
-          label={kind === 'copy' ? 'Copy score' : kind === 'counter' ? 'Counter score' : 'Score'}
-          value={prefs.filters.minScore}
-          options={SCORE_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${v}` }))}
-          onChange={(v) => patch({ filters: { ...prefs.filters, minScore: v } })}
-        />
-        {nFilters > 0 && (
-          <button type="button" className="cpy-clear" onClick={() => patch({ filters: NO_FILTERS })}>Clear {nFilters}</button>
-        )}
+
+        <div className="cpy-toolbar__row">
+          <div className="cpy-toolbar__filters">
+            <PlatformSelect
+              options={GRID_VENUES}
+              value={prefs.venues}
+              onChange={(next) => { patch({ venues: next }); setShown(PAGE); }}
+              tag={(v) => (isCopyable(v) ? null : { text: 'View only', title: `${VENUE_LABEL[v]} traders are shown to look at: copying them is not supported yet` })}
+            />
+            <Pick
+              icon={<WalletIcon />}
+              label="Account value"
+              value={prefs.filters.minEquity}
+              options={EQUITY_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${fmtUsd(v, 0).replace(',000,000', 'M').replace(',000', 'k')}` }))}
+              onChange={(v) => patch({ filters: { ...prefs.filters, minEquity: v } })}
+            />
+            <Pick
+              icon={<PnlIcon />}
+              label="PnL"
+              value={prefs.filters.sideOnly ? 1 : 0}
+              options={[{ v: 0, label: 'Any' }, kind === 'copy' ? { v: 1, label: 'Profitable only' } : kind === 'counter' ? { v: 1, label: 'Losing only' } : { v: 1, label: 'Winners to copy, losers to counter', short: 'Winners / losers' }]}
+              onChange={(v) => patch({ filters: { ...prefs.filters, sideOnly: v === 1 } })}
+            />
+            <Pick
+              icon={<TargetIcon />}
+              label="Win rate"
+              value={(WIN_RATE_STEPS as readonly number[]).includes(prefs.filters.winRate) ? prefs.filters.winRate : 0}
+              options={WIN_RATE_STEPS.map((v) => ({ v, label: winRateLabel(kind, v), short: winRateLabel(kind, v, true) }))}
+              onChange={(v) => patch({ filters: { ...prefs.filters, winRate: v } })}
+            />
+            <Pick
+              icon={<GaugeIcon />}
+              label={kind === 'copy' ? 'Copy score' : kind === 'counter' ? 'Counter score' : 'Score'}
+              value={prefs.filters.minScore}
+              options={SCORE_STEPS.map((v) => ({ v, label: v === 0 ? 'Any' : `≥ ${v}` }))}
+              onChange={(v) => patch({ filters: { ...prefs.filters, minScore: v } })}
+            />
+            <Toggle
+              label="Window"
+              value={w}
+              options={GRID_WINDOWS.map((g) => ({ id: g.id, label: g.label }))}
+              onChange={(v) => patch({ window: v })}
+            />
+            {nFilters > 0 && (
+              <button type="button" className="cpy-clear" onClick={() => patch({ filters: NO_FILTERS })}>Clear {nFilters}</button>
+            )}
+          </div>
+          <div className="cpy-search">
+            <SearchGlyph />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && pasted) onAddress(pasted, 'hyperliquid'); }}
+              placeholder="Search an address"
+              aria-label="Search traders by address"
+              spellCheck={false}
+            />
+            {pasted && (
+              <span className="cpy-search__open">
+                {COPY_VENUES.map((v) => (
+                  <button key={v} type="button" className="cpy-chip" onClick={() => onAddress(pasted, v)}>Open on {VENUE_LABEL[v]}</button>
+                ))}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
 
       {kind === 'counter' && (
@@ -327,8 +311,9 @@ function Toggle<T extends string>({ label, value, options, onChange }: {
   );
 }
 
-/** A filter: a pill that opens a list. `short`: what the pill shows for an option with a long label. */
-function Pick<T extends number>({ label, value, options, onChange }: {
+/** A filter: a button that opens a list. `short`: what it shows for an option with a long label. */
+function Pick<T extends number>({ icon, label, value, options, onChange }: {
+  icon?: ReactNode;
   label: string;
   value: T;
   options: ReadonlyArray<{ v: T; label: string; short?: string }>;
@@ -347,6 +332,7 @@ function Pick<T extends number>({ label, value, options, onChange }: {
       listMinWidth={270}
       trigger={(o) => (
         <>
+          {icon}
           <span className="cpy-pick__k">{label}</span>
           <span className="cpy-pick__v">{shortOf(o?.value) ?? o?.label}</span>
         </>
@@ -354,6 +340,16 @@ function Pick<T extends number>({ label, value, options, onChange }: {
     />
   );
 }
+
+/* The filters' marks, after Hyperdash's: one small line drawing each. */
+const glyph = (d: ReactNode) => (
+  <svg className="cpy-pick__ic" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+);
+const WalletIcon = () => glyph(<><rect x="2" y="4" width="12" height="9" rx="2" /><path d="M2 6.5h12M10.5 9.5h1.5" /></>);
+const PnlIcon = () => glyph(<path d="M2 12.5 6 8l2.5 2.5L14 4.5M10.5 4.5H14V8" />);
+const TargetIcon = () => glyph(<><circle cx="8" cy="8" r="5.5" /><circle cx="8" cy="8" r="2.5" /></>);
+const GaugeIcon = () => glyph(<><path d="M2.5 11a5.5 5.5 0 0 1 11 0" /><path d="M8 11 10.5 7" /></>);
+const SearchGlyph = () => glyph(<><circle cx="7" cy="7" r="4.5" /><path d="m10.5 10.5 3 3" /></>);
 
 const SortIcon = () => (
   <svg className="cpy-select__k" viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">

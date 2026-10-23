@@ -205,13 +205,13 @@ export const WINDOW_SHORT: Record<BoardWindow, string> = { '1d': '24H', '7d': '7
 
 /* ------------------------------------------------------- the two buttons ---- */
 
-const CopyGlyph = () => (
+export const CopyGlyph = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
     <rect x="5.5" y="5.5" width="8" height="8" rx="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
     <path d="M10.5 3.4A1.9 1.9 0 0 0 8.6 1.5H4.4a1.9 1.9 0 0 0-1.9 1.9v4.2a1.9 1.9 0 0 0 1.9 1.9" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 );
-const CounterGlyph = () => (
+export const CounterGlyph = () => (
   <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
     <path d="M2.5 5.5H12M9.5 3 12 5.5 9.5 8M13.5 10.5H4M6.5 8 4 10.5 6.5 13" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
   </svg>

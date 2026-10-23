@@ -125,7 +125,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     resize: 'horizontal',
     minW: 8,
     minH: 1,
-    maxH: 4,
+    maxH: 8,
     render: (c) => (
       <MarketStrip
         engine={c.engine}
@@ -135,6 +135,8 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         // App.tsx may not expose a symbol setter (see TradeContext); seeding the
         // search with the chip's market gets you there either way.
         onSelect={(s) => (c.onSelectSymbol ? c.onSelectSymbol(s) : c.onOpenSearch(s))}
+        onToggleFavorite={c.onToggleFavorite}
+        onAdd={() => c.onOpenSearch()}
       />
     ),
   },
@@ -148,7 +150,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     resize: 'horizontal',
     minW: 16,
     minH: 2,
-    maxH: 6,
+    maxH: 10,
     render: (c) => (
       <TickerBar
         engine={c.engine}

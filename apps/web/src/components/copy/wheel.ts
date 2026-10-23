@@ -8,8 +8,8 @@ export function wheelPlace(d: number): { x: number; y: number; r: number; s: num
   const a = Math.abs(d);
   const theta = d * 0.42; // radians per card along the circle
   return {
-    x: Math.sin(theta) * 360,
-    y: (1 - Math.cos(theta)) * 180,
+    x: Math.sin(theta) * 330,
+    y: (1 - Math.cos(theta)) * 160,
     r: d * 11,
     s: 1 - Math.min(a, 3) * 0.06,
     // Whole to one and a half cards out, then fading: a card two and a half out is gone.

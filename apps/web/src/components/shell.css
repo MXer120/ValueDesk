@@ -1,0 +1,139 @@
+/* ===========================================================================
+   THE SHELL WITH THE ICON RAIL (SideBar.tsx, NavBar.tsx `rail`), from 761px.
+
+   The owner's reference: the rail and the navbar sit on the page itself (no
+   bar of their own), so the panels below are the only raised surfaces. The
+   rail runs the full height beside everything; the navbar, the maintenance
+   banner and the page take the column to its right.
+   ======================================================================== */
+
+.shell.shell--rail {
+  --rail-w: 68px;
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.shell--rail > .side { grid-column: 1; grid-row: 1 / 4; }
+.shell--rail > .navbar { grid-column: 2; grid-row: 1; }
+.shell--rail > .banner { grid-column: 2; grid-row: 2; }
+.shell--rail > .app { grid-column: 2; grid-row: 3; }
+
+/* --- the rail ------------------------------------------------------------- */
+.side {
+  position: relative;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 0;
+  background: var(--bg);
+}
+.side__brand {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 42px;
+  height: 42px;
+  margin: calc((var(--navbar-h) - 42px) / 2) 0;
+  border-radius: 50%;
+  background: #050505;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.side__brand .brand-mark { border-radius: 6px; }
+.side__groups { display: flex; flex-direction: column; align-items: center; gap: 12px; padding-top: 6px; }
+.side__group { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.side__sep { display: block; width: 36px; height: 1px; background: rgba(255, 255, 255, 0.08); }
+
+.side__btn,
+.side .navicon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #8e8e93;
+  cursor: pointer;
+  transition: background 140ms, color 140ms, box-shadow 140ms;
+}
+.side__btn:hover,
+.side .navicon:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.side__btn:focus-visible,
+.side .navicon:focus-visible { outline: 1px solid var(--focus); outline-offset: 2px; }
+.side .navicon svg { width: 20px; height: 20px; }
+/* The one raised button: a lifted square, like the reference's current tool. */
+.side__btn.is-raised {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: #242426;
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 0 0 1px rgba(255, 255, 255, 0.06), 0 6px 16px rgba(0, 0, 0, 0.45);
+}
+.side__btn.is-raised:hover { background: #2a2a2d; }
+.side .navnotes__dot,
+.side .settings__dot { top: 10px; right: 10px; }
+
+/* The notifications and settings menus open beside the rail, under the navbar, and scroll
+   rather than run off the bottom of a short window. */
+.side .navnotes__panel,
+.side .privacy__menu {
+  position: fixed;
+  top: calc(var(--navbar-h) + 8px);
+  right: auto;
+  left: calc(var(--rail-w) + 8px);
+  max-height: calc(100vh - var(--navbar-h) - 48px);
+  overflow-y: auto;
+}
+
+/* --- the navbar beside it -------------------------------------------------- */
+.shell--rail .navbar { background: var(--bg); }
+.navbar--rail .navbar-inner { gap: 14px; padding: 0 20px 0 8px; }
+.navbar--rail .navlinks { gap: 4px; margin-left: 0; }
+.navbar--rail .navlinks a {
+  padding: 0 11px;
+  color: #8e8e93;
+  font-size: 15px;
+  font-weight: 400;
+  letter-spacing: -0.005em;
+  transition: color 140ms;
+}
+.navbar--rail .navlinks a:hover { color: var(--text); }
+.navbar--rail .navlinks a.active { color: var(--text); font-weight: 500; }
+
+/* Futures / Spot: a pill in a well, the chosen one lifted. */
+.nav-seg {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: #18181a;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.nav-seg > button {
+  height: 32px;
+  min-height: 0;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #8e8e93;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms, color 140ms, box-shadow 140ms;
+}
+.nav-seg > button:hover { color: var(--text); }
+.nav-seg > button.is-on {
+  background: #2b2b2e;
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.nav-div { flex: none; width: 1px; height: 24px; background: rgba(255, 255, 255, 0.12); }
+
+/* The status bar spans its own column, not the window (StatusFooter.css widens it to 100vw). */
+.shell--rail .sfoot { margin-inline: calc(-1 * var(--sp-1)); }

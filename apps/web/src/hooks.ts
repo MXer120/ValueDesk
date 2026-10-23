@@ -117,6 +117,19 @@ export function useSession(): {
 }
 const noop = () => {};
 
+/** Whether a media query matches, kept current as the window changes. */
+export function useMediaQuery(query: string): boolean {
+  return useSyncExternalStore(
+    (on) => {
+      const mq = window.matchMedia(query);
+      mq.addEventListener('change', on);
+      return () => mq.removeEventListener('change', on);
+    },
+    () => window.matchMedia(query).matches,
+    () => false,
+  );
+}
+
 /** Persisted-to-localStorage state, for things like the selected market. */
 export function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(() => {

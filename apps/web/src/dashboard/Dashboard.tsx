@@ -665,6 +665,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
                   ].filter(Boolean).join(' ')}
                   role="group"
                   aria-label={name}
+                  data-panel={panel.id}
                 >
                   <PanelChrome scroll={panel.scroll} pad={panel.pad}>
                     {/* Per panel, so one bad API response cannot blank the

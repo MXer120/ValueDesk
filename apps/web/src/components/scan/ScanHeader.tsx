@@ -8,12 +8,17 @@
  * included, and says which kind of quiet it is: "Inactive" (an account with no
  * equity and nothing in 30 days) or "No account". Both can still be opened.
  *
- * COPY TRADER is the page's one primary action, so it is the portfolio's one
- * primary button: `.pf-btn--primary`, accent fill, --accent-text ink.
+ * COPY OR COUNTER-TRADE are the page's actions: the copy page's two buttons
+ * (copy/TraderCard.tsx CopyButton), opening the copy setup for this trader on
+ * the copy page (/copy?address=&venue=&direction=). Scan is the one trader page:
+ * a trader picked on the copy page opens here. A venue a copy cannot follow
+ * (Lighter, Arcus, trade.xyz) says so in their place.
  */
 import { VenueLogo } from '../VenueLogo';
 import { SCAN_VENUES, VENUE_LABEL, type Venue } from '../../vsApi';
 import type { Presence } from './useVs';
+import { CopyButton } from '../copy/TraderCard';
+import { isCopyable } from '../copy/gridModel';
 import './scan.css';
 
 export interface ScanHeaderProps {
@@ -50,9 +55,9 @@ const TITLE: Record<Presence, string> = {
 
 export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch }: ScanHeaderProps) {
   const note = scanned ? presenceNote(venue, presence) : null;
-  const copy = () => {
+  const copy = (direction: 'copy' | 'counter') => {
     if (!scanned) return;
-    window.location.href = `/copy?address=${encodeURIComponent(scanned)}&venue=${venue}`;
+    window.location.href = `/copy?address=${encodeURIComponent(scanned)}&venue=${venue}&direction=${direction}`;
   };
 
   return (
@@ -87,15 +92,14 @@ export function ScanHeader({ venue, onVenue, presence, scanned, onNewSearch }: S
           {onNewSearch && (
             <button type="button" className="dash-tab" onClick={onNewSearch}>New search</button>
           )}
-          <button
-            type="button"
-            className="pf-btn pf-btn--primary scan-head__copy"
-            disabled={!scanned}
-            title={scanned ? `Set up copying ${VENUE_LABEL[venue]} trades from this address` : 'Scan an address first'}
-            onClick={copy}
-          >
-            Copy trader
-          </button>
+          {scanned && (isCopyable(venue) ? (
+            <span className="scan-head__copy">
+              <CopyButton kind="counter" label="Counter-trade" title="Take the other side of every trade" onClick={() => copy('counter')} />
+              <CopyButton kind="copy" label="Copy trader" title={`Set up copying ${VENUE_LABEL[venue]} trades from this address`} onClick={() => copy('copy')} />
+            </span>
+          ) : (
+            <span className="scan-head__nocopy">Copying {VENUE_LABEL[venue]} traders is not supported yet</span>
+          ))}
         </div>
       </div>
     </div>
