@@ -61,3 +61,6 @@ local-api.token
 # builder fee tiers: the live config and the terms signing key stay on the machine
 builder-tiers.json
 builder-terms.key*
+
+# Vercel: the link of `vercel link` and the Build Output of deploy/vercel/build.sh
+.vercel/

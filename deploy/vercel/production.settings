@@ -1,0 +1,35 @@
+# The production site's build settings when Vercel builds a commit itself
+# (vercel.json -> deploy/vercel/build.sh). The same names and meaning as
+# deploy/release/web.env.example, plus the origin.
+#
+# Committed on purpose: NOTHING HERE IS A SECRET. Every VITE_* value is inlined
+# into the public JavaScript of the site, and the origin is a public DNS name.
+# A secret never goes here - the origin secret is the Vercel environment variable
+# VALUESCAN_ORIGIN_SECRET (production only, sensitive).
+#
+# A change here reaches the site with the next production deployment of main.
+
+# The instance behind /api/* (and /api/copy/* - the hosted copy executor):
+# ValueDesk's server, its Elastic IP's sslip.io name (Frankfurt until the Tokyo
+# instance in ap-northeast-1 takes over).
+VALUESCAN_ORIGIN=63-178-187-165.sslip.io
+
+VITE_WALLETCONNECT_PROJECT_ID=3a5409a71d931809f4c0838b7a7d56fd
+
+# ValueDesk's SoDEX builder account; 1.5 bp per order, 2.5 bp ceiling (the copy
+# fee ladder's top tier, packages/copy-engine/src/policy.ts COPY_FEE_MAX).
+VITE_BUILDER_ID=221909
+VITE_BUILDER_FEE_PERPS=15
+VITE_BUILDER_FEE_SPOT=15
+VITE_BUILDER_MAX_FEE=25
+VITE_BUILDER_REQUIRED=
+VITE_BUILDER_TERMS_KEYS=OsA3xzwLL7bwWLXEYIP7VJdYmvjnfNwnZtHNmsaJgyI
+
+VITE_SODEX_NETWORK=mainnet
+VITE_SODEX_GATEWAY=
+
+# The owner turned trading on for this deployment (2026-10-04).
+VITE_ALLOW_MAINNET_TRADING=1
+VITE_TRADING_DISABLED=
+VITE_TRADING_KEY_TTL_H=
+VITE_CHART=

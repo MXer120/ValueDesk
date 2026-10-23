@@ -4,6 +4,9 @@
 #   deploy/release/build-web.sh <tag>
 #   deploy/release/build-web.sh <tag> --allow-dirty      build what is checked out now (smoke tests)
 #   deploy/release/build-web.sh <tag> --public           a build for the public: the legal pages must be complete
+#   deploy/release/build-web.sh <name> --checkout        build a checkout that has no tag or no .git (Vercel's
+#                                                        build of a commit, deploy/vercel/build.sh): every
+#                                                        release check except the tag's
 #
 # Output: deploy/.out/valuescan-web-<tag>.tar.gz (+ .sha256) - what
 # publish-web.sh publishes and what a rollback re-publishes.
@@ -23,11 +26,13 @@ set -euo pipefail
 TAG=""
 ALLOW_DIRTY=0
 PUBLIC=0
+CHECKOUT=0
 for arg in "$@"; do
   case "$arg" in
     --allow-dirty) ALLOW_DIRTY=1 ;;
     --public) PUBLIC=1 ;;
-    -h|--help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --checkout) CHECKOUT=1 ;;
+    -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $arg" ;;
     *) [ -z "$TAG" ] || die "one tag at a time"; TAG="$arg" ;;
   esac
@@ -36,6 +41,9 @@ done
 if [ "$ALLOW_DIRTY" = 1 ]; then
   valid_tag "$TAG" || die "not a usable name: $TAG"
   note "building the working tree as it is, under the name $TAG (--allow-dirty: not a release)"
+elif [ "$CHECKOUT" = 1 ]; then
+  valid_tag "$TAG" || die "not a usable name: $TAG"
+  note "building the checkout as it is, under the name $TAG (--checkout: a commit's build, release checks apply)"
 else
   require_tag "$TAG"
   require_clean_checkout "$TAG"
