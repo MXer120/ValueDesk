@@ -1031,3 +1031,265 @@ html.kc-drag * {
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .kc-feed-card.boxed { background: var(--bg-elevated); }
 }
+
+/* --- indicator legends (chart/IndicatorLegend.tsx) ------------------------- */
+
+/* One row per study: its name, its values in its figures' colours, and -
+   under the pointer - eye / settings / remove / more. The rows are the only
+   part of the legend that takes the pointer; everything else in it lets the
+   crosshair through. */
+.kc-ind-legend {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+.kc-ind-row {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: calc(100% - 96px);
+  height: 20px;
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--kc-ink);
+  white-space: nowrap;
+  pointer-events: auto;
+  text-shadow: 0 0 3px var(--bg-panel), 0 0 2px var(--bg-panel);
+}
+.kc-ind-row:hover,
+.kc-ind-row.is-open { background: color-mix(in srgb, var(--bg-elevated) 82%, transparent); text-shadow: none; }
+.kc-ind-name {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.kc-ind-row.is-off .kc-ind-name { color: var(--dim); }
+.kc-ind-val { font-family: var(--font-num); }
+.kc-ind-ctl {
+  display: none;
+  align-items: center;
+  gap: 1px;
+}
+.kc-ind-row:hover .kc-ind-ctl,
+.kc-ind-row.is-open .kc-ind-ctl,
+.kc-ind-row:focus-within .kc-ind-ctl,
+.kc-ind-row.is-off .kc-ind-ctl { display: inline-flex; }
+@media (hover: none) {
+  .kc-ind-ctl { display: inline-flex; }
+}
+.kc-ind-ctl button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.kc-ind-ctl button:hover { color: var(--text); background: var(--bg-hover); }
+.kc-ind-ctl button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.kc-ind-ctl .kc-ind-rm:hover { color: var(--neg); }
+.kc-ind-more { position: relative; display: inline-flex; }
+.menu-popup.kc-ind-menu {
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 160px;
+  z-index: 8;
+}
+
+/* The Indicators menu: search, then every study by its full name. */
+.kc-ind-search {
+  width: 100%;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+}
+.kc-menu-list > button.kc-ind-add {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.kc-ind-short { color: var(--dim); font-family: var(--font-num); }
+
+/* --- time zone (footer clock) --------------------------------------------- */
+
+.kc-tz { position: relative; }
+.kc-status .kc-clock {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out);
+}
+.kc-status .kc-clock:hover { color: var(--text); }
+/* The footer is at the floor of the card, so the menu opens upward. */
+.menu-popup.kc-tz-menu {
+  top: auto;
+  bottom: calc(100% + 6px);
+  right: 0;
+  left: auto;
+  min-width: 170px;
+}
+
+/* --- indicator settings (chart/IndicatorSettings.tsx) ---------------------- */
+
+.modal.kc-set { max-width: 380px; }
+.kc-set-tabs {
+  display: flex;
+  gap: var(--sp-3);
+  margin: calc(-1 * var(--sp-1)) 0 var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+.kc-set-tabs button {
+  border: 0;
+  border-radius: 0;
+  padding: var(--sp-1) 0;
+  background: none;
+  color: var(--muted);
+  font-size: var(--fs-base);
+  box-shadow: none;
+}
+.kc-set-tabs button.on { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+.kc-set-body { display: flex; flex-direction: column; gap: var(--sp-2); min-height: 120px; }
+.kc-set-row {
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text);
+}
+.kc-set-row input[type='number'] { width: 100%; text-align: right; font-family: var(--font-num); }
+.kc-set-line { display: grid; grid-template-columns: 1fr 24px; align-items: center; gap: var(--sp-1); }
+.kc-set-x { padding: 0; width: 24px; height: 24px; color: var(--muted); }
+.kc-set-add { align-self: flex-start; }
+.kc-set-note { margin: 0; color: var(--muted); }
+.kc-set-style { grid-template-columns: 1fr 28px 64px; }
+.kc-set-check { display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); min-width: 0; color: var(--text); font-size: var(--fs-xs); }
+.kc-set-check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kc-set-foot { display: flex; align-items: center; gap: var(--sp-2); width: 100%; }
+.kc-set-gap { flex: 1; }
+
+.kc-swatch {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.kc-swatch.on { outline: 2px solid var(--text); outline-offset: 1px; }
+/* The palette opens IN FLOW under its row: a popover would be clipped by the
+   dialog's scrolling body. */
+.kc-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 22px);
+  gap: 8px;
+  justify-content: end;
+  padding: var(--sp-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+}
+.kc-swatch-custom {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.kc-swatch-custom input { width: 28px; height: 22px; padding: 0; border: 0; background: none; }
+
+/* A study's newest value on its pane's scale (IndicatorLegend.tsx readTags):
+   the box and type of the canvas's last-price badge, so the two read as one
+   family; text colour is picked against the fill. */
+.kc-ind-tag {
+  position: absolute;
+  transform: translateY(-50%);
+  box-sizing: border-box;
+  padding: 1px 4px;
+  font-family: var(--font-num);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* --- drawing style bar (chart/DrawingStyleBar.tsx) ------------------------- */
+
+/* Floats at the top centre of the plot while a drawing is selected: a glass
+   strip like the rail's flyouts, every control a 26px square. */
+.kc-stylebar {
+  position: absolute;
+  top: var(--sp-2);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  max-width: calc(100% - 24px);
+  padding: 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--glass-pop-bg, var(--bg-elevated));
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal);
+  font-size: var(--fs-xs);
+}
+.kc-stylebar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  box-shadow: none;
+}
+.kc-stylebar button:hover { color: var(--text); background: var(--bg-hover); }
+.kc-stylebar button.on { color: var(--accent); }
+.kc-stylebar button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.kc-stylebar .kc-stylebar-del:hover { color: var(--neg); }
+.kc-stylebar .kc-swatch { width: 18px; height: 18px; margin: 0 4px; border: 1px solid var(--line-strong); }
+.kc-stylebar-name { padding: 0 6px; color: var(--text); white-space: nowrap; }
+.kc-stylebar-sep { width: 1px; height: 18px; margin: 0 3px; background: var(--line); }
+.kc-stylebar-group { display: inline-flex; gap: 1px; }
+.kc-stylebar-color { position: relative; display: inline-flex; }
+.kc-stylebar-palette {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -6px;
+  z-index: 7;
+  display: grid;
+  grid-template-columns: repeat(6, 22px);
+  gap: 8px;
+  padding: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-modal);
+}
+.kc-stylebar-palette .kc-swatch { width: 22px; height: 22px; margin: 0; }
+.kc-stylebar-text { width: 150px; height: 26px; font-size: var(--fs-xs); }
+/* "Move to" inside a study's ⋯ menu. */
+.kc-ind-menu-head { margin: var(--sp-2) 0 var(--sp-1); }
+.kc-ind-menu-foot { margin-top: var(--sp-1); padding-top: var(--sp-1); border-top: 1px solid var(--line); }

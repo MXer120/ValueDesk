@@ -448,3 +448,54 @@
   .kc-rail-popup { min-width: 180px; }
 }
 
+
+/* --- families and their flyouts (TradingView layout) ---------------------- */
+
+/* A family button and the small arrow beside it that opens the family's
+   flyout. The arrow sits in the rail's right margin (the rail is 52px, the
+   button 34), so it costs no pitch; it is quiet until the button is hovered
+   or the flyout is open. */
+.kc-rail-tool {
+  position: relative;
+  flex: none;
+  display: flex;
+}
+.kc-rail-fly {
+  position: absolute;
+  top: 0;
+  right: -9px;
+  width: 9px;
+  height: var(--rail-btn);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+  transition:
+    opacity var(--rail-dur) var(--rail-ease),
+    color var(--rail-dur) var(--rail-ease);
+}
+.kc-rail-tool:hover .kc-rail-fly,
+.kc-rail-tool.is-open .kc-rail-fly,
+.kc-rail-fly:focus-visible { opacity: 1; }
+.kc-rail-fly:hover:not(:disabled),
+.kc-rail-tool.is-open .kc-rail-fly { color: var(--text); }
+.kc-rail-fly:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+.kc-rail-fly:disabled { cursor: default; }
+@media (hover: none) {
+  /* No hover on touch: the arrow stays visible so the flyout is findable. */
+  .kc-rail-fly { opacity: 1; }
+}
+
+/* A family's flyout opens level with its button (top set inline), not at the
+   foot of the rail like the overflow. */
+.kc-rail-popup.is-anchored { min-width: 220px; }
+/* The body spans the rail's full 52px (its buttons stay centred), so the
+   family arrows in the right margin are inside it rather than clipped by its
+   overflow. */
+.kc-rail-body { align-self: stretch; }

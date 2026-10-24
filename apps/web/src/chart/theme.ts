@@ -21,6 +21,7 @@ import type {
   Styles,
   YAxisTemplate,
 } from 'klinecharts';
+import { compactNumber } from './volumeAxis';
 
 /** Values copied from :root in web/src/styles.css. */
 export const T = {
@@ -283,9 +284,17 @@ export const chartStyles: DeepPartial<Styles> = {
       { color: T.line5 },
     ],
     circles: [{ style: 'fill', upColor: POS_FILL, downColor: NEG_FILL, noChangeColor: POS_FILL }],
+    /* OFF on the canvas. The newest value of each study in its own pane is
+       tagged on that pane's scale by the DOM legend layer instead
+       (chart/IndicatorLegend.tsx): the library paints every tag with one text
+       colour, which is unreadable on the light lines of the warm ramp, while
+       the DOM tag picks dark or light text per background. */
     lastValueMark: { show: false },
+    /* OFF: every indicator now has a DOM legend row (chart/IndicatorLegend.tsx)
+       carrying its name, its values and its eye / settings / remove controls,
+       so the canvas copy would print the same numbers twice. */
     tooltip: {
-      showRule: 'always',
+      showRule: 'none',
       showType: 'standard',
       /* Both neutral, like every other pixel of text inside the canvas. The
          title is the indicator's NAME — "MA(5,10,20)" — so it keeps the text
@@ -360,7 +369,15 @@ export const chartStyles: DeepPartial<Styles> = {
     },
   },
   overlay: {
-    point: { color: T.accent, borderColor: 'rgba(255, 181, 71, 0.35)', activeBorderColor: T.accent },
+    /* The handle under the pointer keeps the accent too - the library's
+       default active colour is its own blue, the one cold hue that would
+       otherwise appear on this canvas the moment a drawing is hovered. */
+    point: {
+      color: T.accent,
+      borderColor: 'rgba(255, 181, 71, 0.35)',
+      activeColor: T.accent,
+      activeBorderColor: 'rgba(255, 181, 71, 0.35)',
+    },
     line: { color: T.accent },
     rect: { color: 'rgba(255, 181, 71, 0.14)', borderColor: T.accent },
     polygon: { color: T.accent, borderColor: T.accent },
@@ -793,16 +810,15 @@ export const createDenseYTicks: AxisCreateTicksCallback = (params) =>
  * the built-in date formatter already renders through `Intl.DateTimeFormat('en')`
  * into explicit YYYY-MM-DD/HH:mm templates, so it needs no override (overriding
  * it could only reintroduce the locale ambiguity format.ts exists to prevent).
- * Big numbers are the one place the default differs from the rest of the
- * terminal, so they get pinned to the same 1-2 decimal K/M/B shape.
+ * From a thousand up a value folds to K/M/B with at most two decimals and no
+ * padding zeros (5K, 2.5K, 1.28K). Below that it comes back AS GIVEN: the
+ * library has already printed it at the series' own precision (the volume
+ * step size), and re-rounding it here is what turned SoDEX's 696.15681 into
+ * our 696.24 and 0.9 into "0.9000".
  */
 export function formatBigNumber(value: string | number): string {
   const v = typeof value === 'number' ? value : Number.parseFloat(value);
   if (!Number.isFinite(v)) return String(value);
-  const sign = v < 0 ? '-' : '';
-  const a = Math.abs(v);
-  if (a >= 1e9) return `${sign}${(a / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${sign}${(a / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${sign}${(a / 1e3).toFixed(2)}K`;
-  return `${sign}${a.toFixed(a >= 1 ? 2 : 4)}`;
+  if (Math.abs(v) < 1e3) return String(value);
+  return compactNumber(v);
 }
