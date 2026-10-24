@@ -23,8 +23,9 @@
 //     nowhere else.
 //   - A POST's body is read here first and sent on with its length (413 above the
 //     limit): 64 KB for the executor, 640 KB for a folder item, 4.25 MB for a file
-//     uploaded to a folder (Vercel itself takes 4.5 MB at most). A body is never sent
-//     with any other method.
+//     uploaded to a folder through the API (a server without the S3 bucket; with it,
+//     files go from the browser to S3 directly and never pass here - Vercel itself
+//     takes 4.5 MB at most). A body is never sent with any other method.
 //   - Adds X-Origin-Verify (VALUESCAN_ORIGIN_SECRET, a Vercel environment variable
 //     of the production environment only) and X-Forwarded-For: the viewer's address
 //     as Vercel reports it (x-real-ip; Vercel overwrites these headers, a client
@@ -108,7 +109,7 @@ const FOLDERS_BODY_LIMIT = 640 * 1024;
 const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
 /** How large a POST's body may be on this path. */
 function bodyLimitFor(path) {
-  if (path === '/api/folders/upload') return FOLDERS_UPLOAD_LIMIT;
+  if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
   if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
 }

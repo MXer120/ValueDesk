@@ -57,7 +57,7 @@ export const COOKIES: LegalDoc = {
             '**Copies of public data, for speed:** the trading history of wallets you looked at and statistics built from it.',
             '**Your wallet connection:** the connected address and, if you connect through WalletConnect, its session (kept by Reown\'s software in this browser).',
             '**Trading, algo orders and copy trading in this browser:** the trading key and the copy key, each encrypted with a key your browser generates and cannot export, valid for at most seven days; your algo orders and copy rules, their state and their activity log.',
-            '**Your knowledge folders:** the sign-in token for your wallet\'s folders, valid for seven days. Your browser sends it with each request to your folders - the one entry here that ValueDesk\'s server reads. The folders themselves are kept on ValueDesk\'s server ([Privacy policy](/privacy), section 12).',
+            '**Your knowledge folders:** the sign-in token for your wallet\'s folders, valid for seven days. Your browser sends it with each request to your folders - the one entry here that ValueDesk\'s server reads. The folders themselves are kept by ValueDesk - their files in Amazon S3 ([Privacy policy](/privacy), section 12).',
             '**For the current tab only:** a deposit or withdrawal in progress, diagnostic settings, a session with ValueDesk\'s copy executor.',
           ],
         },
@@ -88,7 +88,7 @@ export const COOKIES: LegalDoc = {
       title: '6. Deleting it',
       blocks: [
         { p: 'You can delete everything ValueDesk keeps in your browser at any time by clearing this site\'s data in your browser\'s settings. Settings, lists and keys are then gone from this device; your funds are not affected, because they stay in your wallet and your SoDEX account. Signing out removes the trading key at once.' },
-        { p: 'Your knowledge folders are not in your browser but on ValueDesk\'s server: delete an item or a folder in the folders, or everything at once with "Delete everything" in the folders\' menu ([Privacy policy](/privacy), section 12).' },
+        { p: 'Your knowledge folders are not in your browser but with ValueDesk (their files in Amazon S3): delete an item or a folder in the folders, or everything at once with "Delete everything" in the folders\' menu ([Privacy policy](/privacy), section 12).' },
       ],
     },
   ],

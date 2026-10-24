@@ -568,11 +568,11 @@ test('knowledge folders: POST and the wallet token under /api/folders only, a fi
       assert.equal(seen.at(-1).headers.authorization, 'Bearer t');
 
       const file = Buffer.alloc(4 * 1024 * 1024, 1);
-      const up = await request(port, '/api/folders/upload?folderId=f&name=a.pdf', { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', authorization: 'Bearer t' } });
+      const up = await request(port, '/api/folders/upload/put?id=u', { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', authorization: 'Bearer t' } });
       assert.equal(up.status, 200);
       assert.equal(seen.at(-1).size, file.length, 'a 4 MB file reaches the origin whole');
       const before = seen.length;
-      const huge = await request(port, '/api/folders/upload?folderId=f&name=a.pdf', { method: 'POST', body: Buffer.alloc(proxy.bodyLimitFor('/api/folders/upload') + 1), headers: { 'content-type': 'application/octet-stream' } });
+      const huge = await request(port, '/api/folders/upload/put?id=u', { method: 'POST', body: Buffer.alloc(proxy.bodyLimitFor('/api/folders/upload/put') + 1), headers: { 'content-type': 'application/octet-stream' } });
       assert.equal(huge.status, 413);
       const bigItem = await request(port, '/api/folders/item/create', { method: 'POST', body: 'x'.repeat(640 * 1024 + 1) });
       assert.equal(bigItem.status, 413, 'an item is held to 640 KB');

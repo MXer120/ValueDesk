@@ -55,7 +55,7 @@ export default function FoldersView() {
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [uploading, setUploading] = useState<string | null>(null);
+  const [uploading, setUploading] = useState<{ name: string; share: number } | null>(null);
   const [dropping, setDropping] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
 
@@ -96,8 +96,11 @@ export default function FoldersView() {
         await confirm({ title: 'Too large for a folder', body: <p className="fx-note">{f.name} is {mb(f.size)}. A file can be at most {mb(limits.fileBytes)}.</p>, confirmLabel: 'OK' });
         continue;
       }
-      setUploading(f.name);
-      const it = await change((t) => foldersApi.upload(t, { folderId: folder.id, file: f, name: f.name }), (r) => void putSummary(r, true));
+      setUploading({ name: f.name, share: 0 });
+      const it = await change(
+        (t) => foldersApi.upload(t, { folderId: folder.id, file: f, name: f.name }, (share) => setUploading({ name: f.name, share })),
+        (r) => void putSummary(r, true),
+      );
       setUploading(null);
       if (!it) break;
     }
@@ -335,7 +338,7 @@ export default function FoldersView() {
                   <KindIcon kind="table" /> Table
                 </button>
                 <button type="button" className="kf__addbtn" disabled={folderFull || !!uploading} onClick={() => fileInput.current?.click()}>
-                  <KindIcon kind="file" /> {uploading ? 'Uploading…' : 'File'}
+                  <KindIcon kind="file" /> {uploading ? `Uploading ${Math.round(uploading.share * 100)}%` : 'File'}
                 </button>
                 <input
                   ref={fileInput}

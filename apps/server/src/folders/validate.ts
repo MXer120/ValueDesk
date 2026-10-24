@@ -227,7 +227,10 @@ export function checkItemData(kind: JsonKind, raw: unknown, limits: FolderLimits
 const startsWith = (b: Uint8Array, sig: readonly number[], at = 0): boolean => sig.every((x, i) => b[at + i] === x);
 
 /** What a file is, from its first bytes; null when it is none of the kinds a folder keeps. */
-export function sniffFile(b: Uint8Array): FileType | null {
+export function sniffFile(b: Uint8Array, complete = true): FileType | null {
+  // Only the first bytes of a large upload are read (blobs.ts HEAD_BYTES): a character cut in two
+  // at their end is not the file's fault.
+  if (!complete) b = trimUtf8Tail(b);
   if (b.length < 4) return b.length > 0 && isPlainText(b) ? 'text' : null;
   if (startsWith(b, [0x25, 0x50, 0x44, 0x46, 0x2d])) return 'pdf'; // %PDF-
   if (startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'png';
@@ -235,6 +238,17 @@ export function sniffFile(b: Uint8Array): FileType | null {
   if (startsWith(b, [0x52, 0x49, 0x46, 0x46]) && startsWith(b, [0x57, 0x45, 0x42, 0x50], 8)) return 'webp'; // RIFF....WEBP
   if (startsWith(b, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) || startsWith(b, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])) return 'gif';
   return isPlainText(b) ? 'text' : null;
+}
+
+/** Bytes without a UTF-8 sequence that their end cuts off (at most three bytes go). */
+export function trimUtf8Tail(b: Uint8Array): Uint8Array {
+  for (let back = 1; back <= Math.min(3, b.length); back++) {
+    const c = b[b.length - back]!;
+    if ((c & 0xc0) === 0x80) continue; // a continuation byte: look further back for its lead
+    const need = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : c >= 0xc0 ? 2 : 1;
+    return need > back ? b.subarray(0, b.length - back) : b;
+  }
+  return b;
 }
 
 /**

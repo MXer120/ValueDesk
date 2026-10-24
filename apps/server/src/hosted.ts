@@ -126,6 +126,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/folders', cls: 'read' },
   { method: 'GET', url: '/api/folders/item', cls: 'read' },
   { method: 'GET', url: '/api/folders/file', cls: 'read' },
+  { method: 'GET', url: '/api/folders/file/url', cls: 'read' },
   { method: 'POST', url: '/api/folders/folder/create', cls: 'write' },
   { method: 'POST', url: '/api/folders/folder/rename', cls: 'write' },
   { method: 'POST', url: '/api/folders/folder/delete', cls: 'write' },
@@ -134,7 +135,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/folders/item/update', cls: 'write' },
   { method: 'POST', url: '/api/folders/item/move', cls: 'write' },
   { method: 'POST', url: '/api/folders/item/delete', cls: 'write' },
-  { method: 'POST', url: '/api/folders/upload', cls: 'write' },
+  { method: 'POST', url: '/api/folders/upload/start', cls: 'write' },
+  { method: 'POST', url: '/api/folders/upload/put', cls: 'write' },
+  { method: 'POST', url: '/api/folders/upload/finish', cls: 'write' },
   { method: 'POST', url: '/api/folders/erase', cls: 'write' },
 ];
 

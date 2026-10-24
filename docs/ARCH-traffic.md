@@ -328,11 +328,14 @@ Against this inventory, HOSTED_ROUTES should be:
   itself, from its own address, on a budget of its own (§6 there).
 - **Add**: the knowledge folders (`routes/folders.ts`), one wallet's own research:
   `POST /api/folders/session` (cls `auth`: a signed `FoldersSignIn`, free typed data,
-  for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file`
-  (cls `read`, the wallet's token), and the changes - `POST /api/folders/folder/
-  {create,rename,delete,order}`, `/api/folders/item/{create,update,move,delete}`,
-  `/api/folders/upload`, `/api/folders/erase` (cls `write`: per client here, per
-  wallet in the route, and the site's Origin). The only POSTs of the index API; the
+  for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file/url`
+  (where to fetch a file: S3's signed link, or) `/api/folders/file` (cls `read`, the
+  wallet's token), and the changes - `POST /api/folders/folder/{create,rename,delete,order}`,
+  `/api/folders/item/{create,update,move,delete}`, `/api/folders/upload/{start,put,finish}`,
+  `/api/folders/erase` (cls `write`: per client here, per wallet in the route, and the
+  site's Origin). With FOLDERS_S3_BUCKET a file's bytes go from the browser to S3 and back
+  directly (links signed per object; the bucket is in the CSP's connect-src) and never pass
+  the Vercel function; `upload/put` and `file` are the bucket-less fallback. The only POSTs of the index API; the
   Vercel function lets POST, Content-Type and Authorization through under
   `/api/folders` as under `/api/copy/`, and never caches either.
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,

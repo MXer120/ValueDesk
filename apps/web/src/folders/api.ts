@@ -94,18 +94,17 @@ async function call<T>(
   token: string | null,
   method: 'GET' | 'POST',
   path: string,
-  o: { json?: unknown; bytes?: Blob } = {},
+  o: { json?: unknown } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (o.json !== undefined) headers['Content-Type'] = 'application/json';
-  if (o.bytes) headers['Content-Type'] = 'application/octet-stream';
   let res: Response;
   try {
     res = await fetch(path, {
       method,
       headers,
-      body: o.json !== undefined ? JSON.stringify(o.json) : o.bytes,
+      body: o.json !== undefined ? JSON.stringify(o.json) : undefined,
       credentials: 'omit',
       cache: 'no-store',
     });
@@ -129,29 +128,105 @@ async function call<T>(
 
 const q = (id: string) => encodeURIComponent(id);
 
+/** Where an upload's bytes go (apps/server/src/folders/blobs.ts UploadTarget). */
+interface UploadTarget {
+  method: 'PUT' | 'POST';
+  url: string;
+  headers: Record<string, string>;
+  /** Our own route: with the wallet's token. Never true for S3. */
+  bearer: boolean;
+}
+
+/** The bytes to their target, with progress (XMLHttpRequest: fetch reports none for uploads). */
+function send(target: UploadTarget, file: Blob, token: string, onProgress?: (share: number) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open(target.method, target.url);
+    for (const [k, v] of Object.entries(target.headers)) x.setRequestHeader(k, v);
+    if (target.bearer) x.setRequestHeader('Authorization', `Bearer ${token}`);
+    x.upload.onprogress = (e) => {
+      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+    };
+    x.onload = () => {
+      if (x.status >= 200 && x.status < 300) return resolve();
+      let msg = `The upload was refused (HTTP ${x.status}).`;
+      try {
+        const d = JSON.parse(x.responseText) as Partial<FoldersError>;
+        if (d.error) msg = d.error;
+      } catch {
+        /* S3 answers XML: its own words are not for the user */
+      }
+      reject(new FoldersApiError(msg, x.status, 'http'));
+    };
+    x.onerror = () => reject(new FoldersApiError('The upload did not get through. Check the connection and try again.', 0, 'network'));
+    x.send(file);
+  });
+}
+
+async function fetchFile(t: string, id: string, thumb: boolean): Promise<Blob> {
+  const link = await call<{ ok: true; url: string; bearer: boolean }>(t, 'GET', `/api/folders/file/url?id=${q(id)}${thumb ? '&thumb=1' : ''}`);
+  let res: Response;
+  try {
+    res = await fetch(link.url, { headers: link.bearer ? { Authorization: `Bearer ${t}` } : {}, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+  } catch {
+    throw new FoldersApiError('The file could not be loaded.', 0, 'network');
+  }
+  if (!res.ok) {
+    let d: Partial<FoldersError> = {};
+    try {
+      d = (await res.json()) as Partial<FoldersError>;
+    } catch {
+      /* not JSON (S3 answers XML) */
+    }
+    throw new FoldersApiError(d.error || 'The file could not be loaded.', res.status, d.code ?? 'http');
+  }
+  return res.blob();
+}
+
+/**
+ * Files fetched in this tab, the newest first, up to FILE_CACHE_BYTES: an item opened again shows at
+ * once and does not count against the day's downloads again. A file's bytes never change (a new
+ * upload is a new item), so nothing in here goes stale.
+ */
+const FILE_CACHE_BYTES = 80 * 1024 * 1024;
+const fileCache = new Map<string, Blob>();
+const fetching = new Map<string, Promise<Blob>>();
+function keep(key: string, blob: Blob): void {
+  if (blob.size > FILE_CACHE_BYTES / 2) return;
+  fileCache.delete(key);
+  fileCache.set(key, blob);
+  let total = 0;
+  for (const b of fileCache.values()) total += b.size;
+  for (const [k, b] of fileCache) {
+    if (total <= FILE_CACHE_BYTES) break;
+    fileCache.delete(k);
+    total -= b.size;
+  }
+}
+
 /** Every call takes the wallet's token; a 401 means "sign in again". */
 export const foldersApi = {
   list: (t: string) => call<FoldersList>(t, 'GET', '/api/folders'),
   item: (t: string, id: string) => call<{ ok: true; item: FolderItem }>(t, 'GET', `/api/folders/item?id=${q(id)}`).then((r) => r.item),
 
-  /** An upload's (or a chart's thumbnail's) bytes, typed as the server says they are. */
+  /**
+   * An upload's (or a chart's thumbnail's) bytes, typed as the server says they are: the server
+   * hands out where to fetch them - S3, with a link signed for a minute (the wallet's token is
+   * never sent there), or its own route (without the bucket).
+   */
   async file(t: string, id: string, thumb = false): Promise<Blob> {
-    let res: Response;
-    try {
-      res = await fetch(`/api/folders/file?id=${q(id)}${thumb ? '&thumb=1' : ''}`, { headers: { Authorization: `Bearer ${t}` }, credentials: 'omit', cache: 'no-store' });
-    } catch {
-      throw new FoldersApiError('The file could not be loaded.', 0, 'network');
+    const key = `${id}|${thumb ? 't' : 'f'}`;
+    const held = fileCache.get(key);
+    if (held) return held;
+    // Two views asking at once (a card and the pane, an effect run twice) share one download.
+    let pending = fetching.get(key);
+    if (!pending) {
+      pending = fetchFile(t, id, thumb).finally(() => fetching.delete(key));
+      fetching.set(key, pending);
     }
-    if (!res.ok) {
-      let d: Partial<FoldersError> = {};
-      try {
-        d = (await res.json()) as Partial<FoldersError>;
-      } catch {
-        /* not JSON */
-      }
-      throw new FoldersApiError(d.error || 'The file could not be loaded.', res.status, d.code ?? 'http');
-    }
-    return res.blob();
+    const blob = await pending;
+    keep(key, blob);
+    return blob;
   },
 
   createFolder: (t: string, name: string) => call<FoldersList & { folder: { id: string } }>(t, 'POST', '/api/folders/folder/create', { json: { name } }),
@@ -166,8 +241,16 @@ export const foldersApi = {
   moveItem: (t: string, o: { id: string; folderId: string; index: number }) => call<FoldersList>(t, 'POST', '/api/folders/item/move', { json: o }),
   deleteItem: (t: string, id: string) => call<FoldersList>(t, 'POST', '/api/folders/item/delete', { json: { id } }),
 
-  upload: (t: string, o: { folderId: string; file: Blob; name: string; title?: string }) =>
-    call<{ ok: true; item: ItemSummary }>(t, 'POST', `/api/folders/upload?folderId=${q(o.folderId)}&name=${q(o.name)}${o.title ? `&title=${q(o.title)}` : ''}`, { bytes: o.file }).then((r) => r.item),
+  /**
+   * An upload: the server reserves it (its size and place counted), says where the bytes go - S3
+   * with a link for exactly this file's size, or its own route - and lists it once it has checked
+   * what arrived. `onProgress` gets 0..1 while the bytes travel.
+   */
+  async upload(t: string, o: { folderId: string; file: Blob; name: string; title?: string }, onProgress?: (share: number) => void): Promise<ItemSummary> {
+    const s = await call<{ ok: true; id: string; target: UploadTarget }>(t, 'POST', '/api/folders/upload/start', { json: { folderId: o.folderId, name: o.name, size: o.file.size, ...(o.title ? { title: o.title } : {}) } });
+    await send(s.target, o.file, t, onProgress);
+    return call<{ ok: true; item: ItemSummary }>(t, 'POST', '/api/folders/upload/finish', { json: { id: s.id } }).then((r) => r.item);
+  },
 
   erase: (t: string) => call<{ ok: true; erased: { items: number; folders: number } }>(t, 'POST', '/api/folders/erase', { json: { confirm: 'erase-everything' } }),
 };

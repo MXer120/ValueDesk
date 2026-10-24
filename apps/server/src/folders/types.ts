@@ -111,8 +111,9 @@ export interface ItemMeta {
   /** file: what it is (sniffed) and the name it was uploaded with. */
   fileType?: FileType;
   fileName?: string;
-  /** chart: a thumbnail is kept (GET /api/folders/file?id=&thumb=1). */
+  /** chart: a thumbnail is kept (GET /api/folders/file/url?id=&thumb=1), and what it is. */
   thumb?: boolean;
+  thumbType?: 'png' | 'jpeg';
 }
 
 export interface ItemSummary {

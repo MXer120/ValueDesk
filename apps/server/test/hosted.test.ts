@@ -242,6 +242,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/feed/account upstream',
       'GET /api/folders read',
       'GET /api/folders/file read',
+      'GET /api/folders/file/url read',
       'GET /api/folders/item read',
       'GET /api/health read',
       'GET /api/vs/builder/terms read',
@@ -268,7 +269,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/folders/item/move write',
       'POST /api/folders/item/update write',
       'POST /api/folders/session auth',
-      'POST /api/folders/upload write',
+      'POST /api/folders/upload/finish write',
+      'POST /api/folders/upload/put write',
+      'POST /api/folders/upload/start write',
     ],
   );
   // Nothing is left marked provisional: the list is final.

@@ -287,7 +287,8 @@ Resources:
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io;
+              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
+              https://valuedesk-folders-tokyo.s3.ap-northeast-1.amazonaws.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
@@ -357,7 +358,8 @@ Resources:
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io;
+              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
+              https://valuedesk-folders-tokyo.s3.ap-northeast-1.amazonaws.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
