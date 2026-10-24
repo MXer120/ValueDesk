@@ -40,7 +40,7 @@ export const COOKIES: LegalDoc = {
           ul: [
             'ValueDesk itself sets no cookies - neither on this site nor through its servers.',
             'There is no analytics of our own, no advertising, no tracking pixel, no fingerprinting and no social media plugin, and no data is sold or shared for advertising. The one third-party usage report - Reown\'s, when you connect a wallet - is sent only with your consent (section 4).',
-            'ValueDesk\'s servers do not recognise you from one visit to the next: there are no accounts and no identifiers we hand out.',
+            'ValueDesk\'s servers do not recognise you from one visit to the next: there are no accounts. The only identifiers they hand out are the sign-in tokens your wallet\'s signature obtains for the copy executor and for your knowledge folders, which your browser sends to those two only (section 2).',
           ],
         },
       ],
@@ -48,7 +48,7 @@ export const COOKIES: LegalDoc = {
     {
       title: '2. Storage in your browser that the site needs',
       blocks: [
-        { p: 'So that the functions you use keep working between visits, ValueDesk stores the following in your browser (local storage, session storage and IndexedDB). It stays on your device; ValueDesk\'s servers never read it. Most of ValueDesk\'s own entries are named "vs…", "vd…" or "valuescan…" (a few older ones "ot…", "opentrade…" or "scan-aliases"); once you connect a wallet, Reown\'s software adds its own, named "@appkit…" and "wc@2…".' },
+        { p: 'So that the functions you use keep working between visits, ValueDesk stores the following in your browser (local storage, session storage and IndexedDB). It stays on your device; ValueDesk\'s servers never read it, except the knowledge folders\' sign-in token below. Most of ValueDesk\'s own entries are named "vs…", "vd…" or "valuescan…" (a few older ones "ot…", "opentrade…" or "scan-aliases"); once you connect a wallet, Reown\'s software adds its own, named "@appkit…" and "wc@2…".' },
         {
           ul: [
             '**Your choices:** layouts, dashboards, chart settings and drawings, the selected market, filters, the privacy mode, the Live Feed channel and the players you allowed (section 3), notices you have seen.',
@@ -57,6 +57,7 @@ export const COOKIES: LegalDoc = {
             '**Copies of public data, for speed:** the trading history of wallets you looked at and statistics built from it.',
             '**Your wallet connection:** the connected address and, if you connect through WalletConnect, its session (kept by Reown\'s software in this browser).',
             '**Trading, algo orders and copy trading in this browser:** the trading key and the copy key, each encrypted with a key your browser generates and cannot export, valid for at most seven days; your algo orders and copy rules, their state and their activity log.',
+            '**Your knowledge folders:** the sign-in token for your wallet\'s folders, valid for seven days. Your browser sends it with each request to your folders - the one entry here that ValueDesk\'s server reads. The folders themselves are kept on ValueDesk\'s server ([Privacy policy](/privacy), section 12).',
             '**For the current tab only:** a deposit or withdrawal in progress, diagnostic settings, a session with ValueDesk\'s copy executor.',
           ],
         },
@@ -87,6 +88,7 @@ export const COOKIES: LegalDoc = {
       title: '6. Deleting it',
       blocks: [
         { p: 'You can delete everything ValueDesk keeps in your browser at any time by clearing this site\'s data in your browser\'s settings. Settings, lists and keys are then gone from this device; your funds are not affected, because they stay in your wallet and your SoDEX account. Signing out removes the trading key at once.' },
+        { p: 'Your knowledge folders are not in your browser but on ValueDesk\'s server: delete an item or a folder in the folders, or everything at once with "Delete everything" in the folders\' menu ([Privacy policy](/privacy), section 12).' },
       ],
     },
   ],

@@ -28,6 +28,7 @@ import { lazyPage, type LazyPage } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, TermsGate } from './legal/LegalGate';
+import { FoldersHost } from './folders/FoldersHost';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
@@ -542,6 +543,10 @@ function AppShell() {
             a legal page, so what it links to can be read first. */}
         <Guarded name="Terms">
           <TermsGate hidden={!!legal} onOpen={openLegal} address={address} provider={provider} />
+        </Guarded>
+        {/* The knowledge folders (folders/): the rail's folder view, and "Save to folder" from the chart and News. */}
+        <Guarded name="Folders">
+          <FoldersHost address={address} provider={provider} />
         </Guarded>
         {/* Live copy trading on every page: the browser copier runs whichever page is open. */}
         <Guarded name="Copy trading">

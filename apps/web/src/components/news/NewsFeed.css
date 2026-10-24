@@ -92,3 +92,16 @@
 .csel__list { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; }
 .csel__hint { flex: none; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: var(--fs-micro); font-weight: 400; }
 .csel__none { margin: 6px 8px; color: var(--dim); font-size: var(--fs-micro); }
+
+/* Save to a knowledge folder (folders/bridge.ts): a quiet bookmark at the story's top
+   right, shown while the pointer is on the story or the button has focus. */
+.nw__body { position: relative; }
+.nw__save {
+  position: absolute; top: 6px; right: 4px;
+  display: grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 0;
+  border: 0; border-radius: 7px; background: var(--bg-elevated, #1c1c1e); color: var(--muted);
+  opacity: 0; cursor: pointer; transition: opacity 120ms, color 120ms, background 120ms;
+}
+.nw__row:hover .nw__save, .nw__save:focus-visible { opacity: 1; }
+.nw__save:hover { color: var(--text); background: rgba(255, 255, 255, 0.1); }
+@media (hover: none) { .nw__save { opacity: 0.7; } }

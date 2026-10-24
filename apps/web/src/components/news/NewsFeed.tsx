@@ -12,14 +12,20 @@
  * headline - or a post's own text - two lines of the story, and, when the
  * filter is not one coin, its coins: a coin this terminal trades opens its
  * chart. Page one refreshes every two minutes; more pages load on demand.
+ *
+ * Each story can be saved to one of the wallet's knowledge folders (its
+ * bookmark button, or a right-click): folders/bridge.ts saveToFolder - shown
+ * only where the folders are mounted.
  */
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useMemo, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi, type NewsItem } from '../../vsApi';
 import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
+import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
+import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
 import './NewsFeed.css';
 
 type Feed = 'latest' | 'hot' | 'featured';
@@ -87,6 +93,18 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState(1);
+  const canSave = useSyncExternalStore(onBridgeChange, foldersAvailable, foldersAvailable);
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
+  const storyMenu = (e: ReactMouseEvent, n: NewsItem) => {
+    if (!canSave) return;
+    setMenu({
+      at: menuAt(e),
+      items: [
+        { label: 'Open story', icon: MENU_ICONS.open, onClick: () => window.open(n.href, '_blank', 'noopener,noreferrer') },
+        { label: 'Save to folder', icon: MENU_ICONS.folder, onClick: () => void saveStory(n) },
+      ],
+    });
+  };
   const f: Feed = FEEDS.some((x) => x.id === feed) ? feed : 'latest';
   const here = coin ? coin.toUpperCase() : null;
   const list = markets?.length ? markets : MAJORS;
@@ -208,7 +226,7 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
         ) : (
           <ol className="nw__items">
             {items.map((n) => (
-              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`}>
+              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} onContextMenu={(e) => storyMenu(e, n)}>
                 {ranked && n.rank != null && <span className={`nw__rank${n.rank <= 3 ? ' is-top' : ''}`} aria-label={`Number ${n.rank}`}>{n.rank}</span>}
                 <div className="nw__body">
                   <a className="nw__item" href={n.href} target="_blank" rel="noopener noreferrer">
@@ -236,6 +254,11 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
                       )))}
                     </span>
                   )}
+                  {canSave && (
+                    <button type="button" className="nw__save" aria-label={`Save to folder: ${n.title}`} title="Save to folder" onClick={() => void saveStory(n)}>
+                      <SaveIcon />
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
@@ -247,9 +270,25 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
           </button>
         )}
       </div>
+      {menu && <TabMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
     </section>
   );
 }
+
+/** A story into a folder, as the widget shows it. */
+const saveStory = (n: NewsItem) =>
+  saveToFolder({
+    kind: 'news',
+    title: n.title.length > 120 ? `${n.title.slice(0, 117)}…` : n.title,
+    data: { id: n.id, title: n.title, href: n.href, time: n.time, author: n.author, symbols: n.symbols, summary: n.summary ?? null, ...(n.post ? { post: true } : {}) },
+  });
+
+const SaveIcon = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M2.5 4.5c0-.6.4-1 1-1h3l1.4 1.5h4.6c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1h-9c-.6 0-1-.4-1-1z" />
+    <path d="M8 7.5v3.6M6.2 9.3h3.6" />
+  </svg>
+);
 
 const FlameIcon = () => (
   <svg className="nw__flame" viewBox="0 0 16 16" width="11" height="11" aria-hidden="true">

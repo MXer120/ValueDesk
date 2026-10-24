@@ -135,6 +135,9 @@ logger.error = (msg, options) => {
   logError(msg, options);
 };
 
+/** The local API's port: 8797, or another checkout's (VALUETRADE_DEV_API_PORT) when two run side by side. */
+const DEV_API_PORT = /^\d{2,5}$/.test(process.env.VALUETRADE_DEV_API_PORT ?? '') ? process.env.VALUETRADE_DEV_API_PORT : '8797';
+
 export default defineConfig({
   customLogger: logger,
   plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
@@ -235,7 +238,7 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://127.0.0.1:8797',
+        target: `http://127.0.0.1:${DEV_API_PORT}`,
         changeOrigin: true,
         configure: (proxy) => {
           proxy.on('proxyReq', (proxyReq, req) => {
@@ -246,7 +249,7 @@ export default defineConfig({
         },
       },
       '/ws': {
-        target: 'ws://127.0.0.1:8797',
+        target: `ws://127.0.0.1:${DEV_API_PORT}`,
         ws: true,
         configure: (proxy) => {
           proxy.on('proxyReqWs', (proxyReq, req) => {

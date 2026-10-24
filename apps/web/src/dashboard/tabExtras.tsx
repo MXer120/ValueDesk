@@ -83,6 +83,13 @@ export const MENU_ICONS = {
   duplicate: menuIcon(<><rect x="5.5" y="5.5" width="8" height="8" rx="1.6" /><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" /></>),
   close: menuIcon(<path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />),
   remove: menuIcon(<path d="M3 4.5h10M6.5 4.5V3.3c0-.5.3-.8.8-.8h1.4c.5 0 .8.3.8.8v1.2M4.5 4.5l.6 8c.1.6.5 1 1.1 1h3.6c.6 0 1-.4 1.1-1l.6-8M6.8 7v4M9.2 7v4" />),
+  // The knowledge folders' menus (folders/FoldersView.tsx): a folder's and an item's.
+  rename: menuIcon(<><path d="M9.8 3.4 12.6 6.2 6 12.8l-3.3.5.5-3.3z" /><path d="M8.6 4.6l2.8 2.8" /></>),
+  open: menuIcon(<><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5" /><path d="M11.5 9.5v2.5a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V6A1.5 1.5 0 0 1 4 4.5h2.5" /></>),
+  download: menuIcon(<><path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2" /><path d="M2.8 11v1.2c0 .7.6 1.3 1.3 1.3h7.8c.7 0 1.3-.6 1.3-1.3V11" /></>),
+  folder: menuIcon(<path d="M2.5 4.5c0-.6.4-1 1-1h3l1.4 1.5h4.6c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1h-9c-.6 0-1-.4-1-1z" />),
+  moveTo: menuIcon(<><path d="M2.5 4.5c0-.6.4-1 1-1h3l1.4 1.5h4.6c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1h-9c-.6 0-1-.4-1-1z" /><path d="M6 9.3h4M8.6 7.8 10 9.3l-1.4 1.5" /></>),
+  signOut: menuIcon(<><path d="M6.5 13.5H4A1.5 1.5 0 0 1 2.5 12V4A1.5 1.5 0 0 1 4 2.5h2.5" /><path d="M10.5 11 13.5 8l-3-3M13.5 8H6.5" /></>),
   settings: menuIcon(<><path d="M6.9 2.3h2.2l.4 1.6 1.2.7 1.6-.5 1.1 1.9-1.2 1.2v1.6l1.2 1.2-1.1 1.9-1.6-.5-1.2.7-.4 1.6H6.9l-.4-1.6-1.2-.7-1.6.5-1.1-1.9 1.2-1.2V7.2L2.6 6l1.1-1.9 1.6.5 1.2-.7z" /><circle cx="8" cy="8" r="1.9" /></>),
   show: menuIcon(<><path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8Z" /><circle cx="8" cy="8" r="1.9" /></>),
   hide: menuIcon(<><path d="M6.3 4a6 6 0 0 1 1.7-.2c4 0 6.2 4.2 6.2 4.2a10 10 0 0 1-1.6 2.1M4.3 5A10 10 0 0 0 1.8 8s2.2 4.2 6.2 4.2a6 6 0 0 0 2.7-.6" /><path d="m2.5 2.5 11 11" /></>),
