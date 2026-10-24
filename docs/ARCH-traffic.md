@@ -326,6 +326,15 @@ Against this inventory, HOSTED_ROUTES should be:
   (`docs/BUILDER-TIERS.md` §3). The one per-wallet route: it names the wallet the
   app trades with, and a hint makes the server read that wallet's fills from SoDEX
   itself, from its own address, on a budget of its own (§6 there).
+- **Add**: the knowledge folders (`routes/folders.ts`), one wallet's own research:
+  `POST /api/folders/session` (cls `auth`: a signed `FoldersSignIn`, free typed data,
+  for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file`
+  (cls `read`, the wallet's token), and the changes - `POST /api/folders/folder/
+  {create,rename,delete,order}`, `/api/folders/item/{create,update,move,delete}`,
+  `/api/folders/upload`, `/api/folders/erase` (cls `write`: per client here, per
+  wallet in the route, and the site's Origin). The only POSTs of the index API; the
+  Vercel function lets POST, Content-Type and Authorization through under
+  `/api/folders` as under `/api/copy/`, and never caches either.
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,
   `/api/vs/fills`, `/api/vs/account`, `/api/external/leaderboard`,
   `/api/external/leaderboard/rank`, `/api/external/resolve-account`,

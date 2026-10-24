@@ -535,6 +535,56 @@ test('the viewer address is taken only from what Vercel sets, and must be an add
   assert.equal(v({}), null);
 });
 
+test('knowledge folders: POST and the wallet token under /api/folders only, a file up to 4.25 MB, never cached', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    let size = 0;
+    req.on('data', (c) => { size += c.length; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, size });
+      res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30', 'cdn-cache-control': 'max-age=60' });
+      res.end('{"ok":true}');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const item = JSON.stringify({ folderId: 'f', kind: 'note', title: 't', data: { blocks: [] }, pad: 'x'.repeat(300 * 1024) });
+      const r = await request(port, '/api/folders/item/create', {
+        method: 'POST', body: item,
+        headers: { 'content-type': 'application/json', authorization: 'Bearer 0xabc.1.0.mac', origin: 'https://valuedeskapp.vercel.app', 'x-vercel-ip-country': 'DE' },
+      });
+      assert.equal(r.status, 200, r.body.toString());
+      assert.equal(r.headers['cache-control'], 'no-store', "one wallet's answer: never kept");
+      assert.equal(r.headers['cdn-cache-control'], undefined);
+      const s = seen.at(-1);
+      assert.equal(s.headers.authorization, 'Bearer 0xabc.1.0.mac');
+      assert.equal(s.headers['content-type'], 'application/json');
+      assert.equal(s.headers['x-viewer-country'], undefined, 'the country is for the copy executor only');
+      assert.equal(s.size, Buffer.byteLength(item), 'an item over 64 KB passes');
+
+      const list = await request(port, '/api/folders', { headers: { authorization: 'Bearer t' } });
+      assert.equal(list.headers['cache-control'], 'no-store');
+      assert.equal(list.headers['vercel-cdn-cache-control'], undefined, 'a wallet\'s list is never kept at the edge');
+      assert.equal(seen.at(-1).headers.authorization, 'Bearer t');
+
+      const file = Buffer.alloc(4 * 1024 * 1024, 1);
+      const up = await request(port, '/api/folders/upload?folderId=f&name=a.pdf', { method: 'POST', body: file, headers: { 'content-type': 'application/octet-stream', authorization: 'Bearer t' } });
+      assert.equal(up.status, 200);
+      assert.equal(seen.at(-1).size, file.length, 'a 4 MB file reaches the origin whole');
+      const before = seen.length;
+      const huge = await request(port, '/api/folders/upload?folderId=f&name=a.pdf', { method: 'POST', body: Buffer.alloc(proxy.bodyLimitFor('/api/folders/upload') + 1), headers: { 'content-type': 'application/octet-stream' } });
+      assert.equal(huge.status, 413);
+      const bigItem = await request(port, '/api/folders/item/create', { method: 'POST', body: 'x'.repeat(640 * 1024 + 1) });
+      assert.equal(bigItem.status, 413, 'an item is held to 640 KB');
+      assert.equal(seen.length, before, 'neither reached the origin');
+      assert.equal(proxy.bodyLimitFor('/api/copy/v1/copies'), proxy.BODY_LIMIT, 'the executor keeps its 64 KB');
+      assert.equal(proxy.isFoldersPath('/api/foldersx'), false);
+    });
+  } finally {
+    await origin.close();
+  }
+});
+
 test('writes, a missing secret, the function\'s own path and a stopped instance never reach (or hang on) the origin', async () => {
   let hits = 0;
   const origin = await listen((_req, res) => { hits++; res.writeHead(200); res.end('{}'); });

@@ -195,9 +195,12 @@ test('the edge stand-in forwards /api like CloudFront: secret, viewer address, G
 
 test('the allow-list is read from the server source and matched like the gate', () => {
   const routes = hostedRoutes();
-  assert.equal(routes.length, 19, 'apps/server/src/hosted.ts HOSTED_ROUTES: 19 routes');
+  assert.equal(routes.length, 33, 'apps/server/src/hosted.ts HOSTED_ROUTES: 33 routes (19 of the index, 14 of the knowledge folders)');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/live'), 'the Live Feed finds the stream a channel has on air');
-  assert.ok(routes.every((r) => r.method === 'GET' && r.url.startsWith('/api/')));
+  // The index is GET only; a POST only ever changes a wallet's own knowledge folders.
+  assert.ok(routes.every((r) => r.url.startsWith('/api/') && (r.method === 'GET' || r.url.startsWith('/api/folders/'))));
+  assert.ok(matchRoute(routes, 'POST', '/api/folders/item/create'), 'a folder item is saved');
+  assert.ok(matchRoute(routes, 'GET', '/api/folders/file'), 'an upload is read back');
   assert.ok(matchRoute(routes, 'GET', '/api/vs/leaderboard'));
   assert.ok(matchRoute(routes, 'HEAD', '/api/health'));
   assert.ok(matchRoute(routes, 'GET', '/api/external/announcements/42'));

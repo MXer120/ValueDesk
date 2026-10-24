@@ -32,6 +32,7 @@ import { scanRoutes } from './routes/scan.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { valuescanRoutes } from './routes/valuescan.js';
 import { builderRoutes } from './routes/builder.js';
+import { foldersRoutes } from './routes/folders.js';
 import { hexToBytes, privateKeyToAddress } from './signing/eip712.js';
 import { canMoveFunds } from './signing/actions.js';
 import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
@@ -201,6 +202,9 @@ void pointsAuthRoutes;
 await app.register(valuescanRoutes);
 // Builder fee tiers: the signed terms of the fee a wallet owes - see routes/builder.ts.
 await app.register(builderRoutes);
+// Knowledge folders: each wallet's own research (notes, tables, chart snapshots, news,
+// files), behind a signed sign-in - see routes/folders.ts.
+await app.register(foldersRoutes);
 
 // --- browser websocket -------------------------------------------------------
 

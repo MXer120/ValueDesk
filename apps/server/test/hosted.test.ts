@@ -78,18 +78,20 @@ test('hosted config: defaults, overrides, and malformed values stop the boot', (
     VALUESCAN_RATE_UPSTREAM_PER_MIN: '60',
     VALUESCAN_RATE_AUTH_PER_MIN: '5',
     VALUESCAN_RATE_AUTH_GLOBAL_PER_MIN: '50',
+    VALUESCAN_RATE_WRITE_PER_MIN: '30',
   });
   assert.deepEqual(tuned.trustProxy, ['loopback', '10.0.0.0/8']);
   assert.deepEqual(tuned.originSecrets, ['x'.repeat(40)]);
   assert.deepEqual(
     Object.fromEntries(Object.entries(tuned.limits).map(([k, l]) => [k, l.max])),
-    { read: 900, upstream: 60, auth: 5, authGlobal: 50 },
+    { read: 900, upstream: 60, auth: 5, authGlobal: 50, write: 30 },
   );
 
   for (const bad of [
     { VALUESCAN_RATE_READ_PER_MIN: '0' },
     { VALUESCAN_RATE_UPSTREAM_PER_MIN: '-5' },
     { VALUESCAN_RATE_AUTH_PER_MIN: '1e3' },
+    { VALUESCAN_RATE_WRITE_PER_MIN: '0' },
     { VALUESCAN_ORIGIN_SECRET: 'too-short' },
     { VALUESCAN_TRUST_PROXY: 'true' },
   ]) {
@@ -238,6 +240,9 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/external/announcements/:id upstream',
       'GET /api/external/maintenance/status read',
       'GET /api/feed/account upstream',
+      'GET /api/folders read',
+      'GET /api/folders/file read',
+      'GET /api/folders/item read',
       'GET /api/health read',
       'GET /api/vs/builder/terms read',
       'GET /api/vs/cohorts read',
@@ -253,6 +258,17 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/positioning read',
       'GET /api/vs/screener read',
       'GET /api/vs/whales read',
+      'POST /api/folders/erase write',
+      'POST /api/folders/folder/create write',
+      'POST /api/folders/folder/delete write',
+      'POST /api/folders/folder/order write',
+      'POST /api/folders/folder/rename write',
+      'POST /api/folders/item/create write',
+      'POST /api/folders/item/delete write',
+      'POST /api/folders/item/move write',
+      'POST /api/folders/item/update write',
+      'POST /api/folders/session auth',
+      'POST /api/folders/upload write',
     ],
   );
   // Nothing is left marked provisional: the list is final.
@@ -269,7 +285,9 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
   ];
   for (const r of HOSTED_ROUTES) {
     for (const re of forbidden) assert.ok(!re.test(r.url), `${r.method} ${r.url} must not be public`);
-    assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
+    // The index is read-only; the one thing a visitor changes is their own knowledge folders.
+    if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
+    else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
   }
   // HEAD follows GET; nothing else is implied.
   assert.ok(hostedRoute('HEAD', '/api/vs/leaderboard'));
@@ -758,4 +776,16 @@ test('index health: whatever the status holds, only a name, a number or a boolea
   const capped = indexerHealth({ sockets: many, lanes: Object.fromEntries(Object.keys(many).map((k) => [k, { queued: 1 }])) })!;
   assert.equal(Object.keys(capped.streams).length, 16);
   assert.equal(Object.keys(capped.lanes).length, 16);
+});
+
+test('gate: a change to knowledge folders needs the site Origin and is counted as a write', async () => {
+  const app = await hostedApp({ limits: { write: { max: 2, windowMs: 60_000 } } });
+  const post = (headers: Record<string, string>) => app.inject({ method: 'POST', url: '/api/folders/item/create', headers, payload: {} });
+  assert.equal((await post({})).statusCode, 403, 'no Origin');
+  assert.equal((await post({ origin: 'https://evil.example' })).statusCode, 403);
+  assert.equal((await post({ origin: SITE })).statusCode, 200);
+  assert.equal((await post({ origin: SITE })).statusCode, 200);
+  assert.equal((await post({ origin: SITE })).statusCode, 429, 'the write budget is per client');
+  assert.equal((await app.inject({ method: 'GET', url: '/api/folders' })).statusCode, 200, 'reading is not a write');
+  assert.equal((await app.inject({ method: 'DELETE', url: '/api/folders' })).statusCode, 404);
 });

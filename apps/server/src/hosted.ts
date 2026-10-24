@@ -16,8 +16,9 @@
  *     are forced off (config.ts), the custodial route plugins are not even
  *     registered (index.ts), and their paths still answer 410.
  *   - NO LOCAL TOKEN. It keeps other processes on one machine out; a public
- *     read API has no such boundary. Every listed route is a GET today; a
- *     state-changing one, if ever listed, needs the site's own Origin, exactly.
+ *     read API has no such boundary. The index is GET only. The one thing a
+ *     visitor changes is their own knowledge folders (routes/folders.ts): POST
+ *     routes that need the site's own Origin, exactly, and the wallet's token.
  *   - PER-CLIENT RATE LIMITS keyed by the address Fastify derives through
  *     `trustProxy`, which believes X-Forwarded-For ONLY from the configured
  *     proxy hops (VALUESCAN_TRUST_PROXY). IPv6 clients are grouped by /64.
@@ -47,11 +48,15 @@ import { isSiteOrigin, normaliseOrigin } from './origin.js';
  *            an account id), so it is limited much tighter - it is how one
  *            client could otherwise spend this server's exchange budgets and get
  *            its egress address rate-limited for everyone, indexer included.
- * `auth`     a sign-in relay (the SoPoints one, when listed): rare for a
- *            human, and every call is a request to a third party from this
- *            server's address - capped per client and overall.
+ * `auth`     a sign-in: rare for a human - the knowledge folders' wallet
+ *            sign-in (one signature per browser), and the SoPoints relay if it
+ *            is ever listed again, whose every call is a request to a third
+ *            party from this server's address - capped per client and overall.
+ * `write`    a change to a wallet's own knowledge folders: counted per client
+ *            here, per wallet in the route (routes/folders.ts), and only ever
+ *            with the site's Origin.
  */
-export type RateClass = 'read' | 'upstream' | 'auth';
+export type RateClass = 'read' | 'upstream' | 'auth' | 'write';
 
 export interface HostedRoute {
   method: 'GET' | 'POST';
@@ -115,6 +120,22 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/external/maintenance/status', cls: 'read' },
   { method: 'GET', url: '/api/external/announcements', cls: 'read' },
   { method: 'GET', url: '/api/external/announcements/:id', cls: 'upstream' },
+  // Knowledge folders (routes/folders.ts): one wallet's own research, behind its token. The
+  // sign-in is the only route without one; every POST needs the site's Origin as well.
+  { method: 'POST', url: '/api/folders/session', cls: 'auth' },
+  { method: 'GET', url: '/api/folders', cls: 'read' },
+  { method: 'GET', url: '/api/folders/item', cls: 'read' },
+  { method: 'GET', url: '/api/folders/file', cls: 'read' },
+  { method: 'POST', url: '/api/folders/folder/create', cls: 'write' },
+  { method: 'POST', url: '/api/folders/folder/rename', cls: 'write' },
+  { method: 'POST', url: '/api/folders/folder/delete', cls: 'write' },
+  { method: 'POST', url: '/api/folders/folder/order', cls: 'write' },
+  { method: 'POST', url: '/api/folders/item/create', cls: 'write' },
+  { method: 'POST', url: '/api/folders/item/update', cls: 'write' },
+  { method: 'POST', url: '/api/folders/item/move', cls: 'write' },
+  { method: 'POST', url: '/api/folders/item/delete', cls: 'write' },
+  { method: 'POST', url: '/api/folders/upload', cls: 'write' },
+  { method: 'POST', url: '/api/folders/erase', cls: 'write' },
 ];
 
 /**
@@ -144,10 +165,12 @@ export interface HostedLimits {
   read: Limit;
   /** Per client, requests that can cost upstream calls. */
   upstream: Limit;
-  /** Per client, `auth` routes (none listed today). */
+  /** Per client, `auth` routes (the folders' sign-in). */
   auth: Limit;
   /** All clients together, `auth` routes. */
   authGlobal: Limit;
+  /** Per client, `write` routes (changes to knowledge folders). */
+  write: Limit;
 }
 
 export interface HostedConfig {
@@ -174,6 +197,7 @@ export const DEFAULT_LIMITS: HostedLimits = {
   upstream: { max: 120, windowMs: MINUTE },
   auth: { max: 20, windowMs: MINUTE },
   authGlobal: { max: 300, windowMs: MINUTE },
+  write: { max: 120, windowMs: MINUTE },
 };
 
 const OFF: HostedConfig = { enabled: false, trustProxy: false, originSecrets: [], limits: DEFAULT_LIMITS };
@@ -288,6 +312,7 @@ export function hostedConfigFromEnv(env: Readonly<Record<string, string | undefi
       upstream: perMinute('VALUESCAN_RATE_UPSTREAM_PER_MIN', get('VALUESCAN_RATE_UPSTREAM_PER_MIN'), DEFAULT_LIMITS.upstream),
       auth: perMinute('VALUESCAN_RATE_AUTH_PER_MIN', get('VALUESCAN_RATE_AUTH_PER_MIN'), DEFAULT_LIMITS.auth),
       authGlobal: perMinute('VALUESCAN_RATE_AUTH_GLOBAL_PER_MIN', get('VALUESCAN_RATE_AUTH_GLOBAL_PER_MIN'), DEFAULT_LIMITS.authGlobal),
+      write: perMinute('VALUESCAN_RATE_WRITE_PER_MIN', get('VALUESCAN_RATE_WRITE_PER_MIN'), DEFAULT_LIMITS.write),
     },
   };
 }
@@ -434,6 +459,12 @@ export function limitsFor(
     return [
       { key: `auth|${who}`, limit: limits.auth },
       { key: 'auth|*', limit: limits.authGlobal },
+    ];
+  }
+  if (route.cls === 'write') {
+    return [
+      { key: `read|${who}`, limit: limits.read },
+      { key: `write|${who}`, limit: limits.write },
     ];
   }
   const q = (query && typeof query === 'object' ? query : {}) as Record<string, unknown>;

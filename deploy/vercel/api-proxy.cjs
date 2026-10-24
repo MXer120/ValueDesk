@@ -10,16 +10,21 @@
 //
 // WHAT IT DOES, AND WHAT IT LEAVES TO THE ORIGIN
 //   - GET, HEAD and OPTIONS (CloudFront's AllowedMethods). POST as well, but only
-//     under /api/copy/ - the copy executor's signed requests (apps/executor). Any
-//     other method or path is a 405 here and never reaches the origin.
+//     under /api/copy/ - the copy executor's signed requests (apps/executor) - and
+//     under /api/folders/ - a wallet's own knowledge folders (apps/server
+//     routes/folders.ts). Any other method or path is a 405 here and never reaches
+//     the origin.
 //   - A path with a dot segment, an encoded slash, backslash, dot or NUL is a 404
 //     here: what this function judges is then the path the origin routes.
 //   - Forwards the path and query unchanged, and only the request headers the
 //     origin reads (Accept, Accept-Encoding, If-None-Match, If-Modified-Since,
-//     Origin). No cookie, no user agent. Under /api/copy/ also Content-Type and
-//     Authorization (a follower's read token, Bearer) - nowhere else.
-//   - A POST's body is read here first (at most 64 KB, 413 above) and sent on with
-//     its length; a body is never sent with any other method.
+//     Origin). No cookie, no user agent. Under /api/copy/ and /api/folders also
+//     Content-Type and Authorization (a follower's or a wallet's token, Bearer) -
+//     nowhere else.
+//   - A POST's body is read here first and sent on with its length (413 above the
+//     limit): 64 KB for the executor, 640 KB for a folder item, 4.25 MB for a file
+//     uploaded to a folder (Vercel itself takes 4.5 MB at most). A body is never sent
+//     with any other method.
 //   - Adds X-Origin-Verify (VALUESCAN_ORIGIN_SECRET, a Vercel environment variable
 //     of the production environment only) and X-Forwarded-For: the viewer's address
 //     as Vercel reports it (x-real-ip; Vercel overwrites these headers, a client
@@ -40,9 +45,9 @@
 //     `public, max-age=N` may be kept at the edge N seconds (at most 60), with the
 //     API's stale-while-revalidate (at most 60), through Vercel-CDN-Cache-Control,
 //     which Vercel never passes on. The browser keeps the API's own Cache-Control.
-//     /api/copy/* is NEVER cached: its answers belong to one follower. They go out
-//     with Cache-Control: no-store (the executor's own value), and any CDN cache
-//     header from the origin is dropped.
+//     /api/copy/* and /api/folders* are NEVER cached: their answers belong to one
+//     follower or one wallet. They go out with Cache-Control: no-store (the origin's
+//     own value), and any CDN cache header from the origin is dropped.
 //   - An origin that does not answer (a stopped instance) is a 502 within about 10 s
 //     (two connection attempts of 5 s, like CloudFront), never a hang; the web then
 //     says the index is unavailable. No answer in 30 s: 504. Only a connection that
@@ -77,7 +82,7 @@ const BODY_LIMIT = 64 * 1024;
 const BODY_TIMEOUT_MS = 10000;
 const FORWARDED_REQUEST_HEADERS = ['accept', 'accept-encoding', 'if-none-match', 'if-modified-since', 'origin',
   'access-control-request-method', 'access-control-request-headers'];
-/** Only under /api/copy/: the signed request's type and a follower's read token. */
+/** Only under /api/copy/ and /api/folders: the request's type and a follower's or a wallet's token. */
 const COPY_REQUEST_HEADERS = ['content-type', 'authorization'];
 const DROPPED_RESPONSE_HEADERS = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te',
   'trailer', 'transfer-encoding', 'upgrade', 'set-cookie', 'server']);
@@ -93,6 +98,20 @@ const SELF = '/api/__vs_proxy';
 const GEO_PATH = '/api/edge/geo';
 
 const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
+/** The knowledge folders' paths (apps/server/src/routes/folders.ts): /api/folders and below. */
+const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/api/folders' || p.startsWith('/api/folders/'); };
+/** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
+const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path);
+/** A folder item (a chart snapshot and its thumbnail at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
+const FOLDERS_BODY_LIMIT = 640 * 1024;
+/** A file uploaded to a folder (apps/server folders/limits.ts FILE_BYTES_CEILING, and a little room). */
+const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
+/** How large a POST's body may be on this path. */
+function bodyLimitFor(path) {
+  if (path === '/api/folders/upload') return FOLDERS_UPLOAD_LIMIT;
+  if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
+  return BODY_LIMIT;
+}
 
 /** A path whose meaning could differ between this check and the origin's router. */
 function oddPath(path) {
@@ -152,7 +171,7 @@ function geoBlocked(block, country, region) {
  * Never for the copy executor's paths.
  */
 function edgeCacheControl(method, status, cacheControl, path) {
-  if (isCopyPath(path)) return null;
+  if (isPrivatePath(path)) return null;
   if (method !== 'GET' && method !== 'HEAD') return null;
   if (status !== 200) return null;
   const cc = String(cacheControl ?? '').toLowerCase();
@@ -265,7 +284,8 @@ async function handler(req, res) {
     return sendJson(res, 451, { error: 'ValueDesk is not available in your country or region: the sanctions and legal restrictions that apply there do not allow us to offer it.', code: 'region', source: 'edge' });
   }
   const copy = isCopyPath(path);
-  const methods = copy ? COPY_METHODS : ALLOWED_METHODS;
+  const priv = isPrivatePath(path);
+  const methods = priv ? COPY_METHODS : ALLOWED_METHODS;
   if (!methods.has(method)) {
     return sendJson(res, 405, { error: 'method not allowed', source: 'edge' }, { allow: [...methods].join(', ') });
   }
@@ -280,7 +300,7 @@ async function handler(req, res) {
   let body;
   if (method === 'POST') {
     try {
-      body = await readBody(req, BODY_LIMIT);
+      body = await readBody(req, bodyLimitFor(path));
     } catch (e) {
       if (e.code === 'TOO_LARGE') return sendJson(res, 413, { error: 'the request is too large', source: 'edge' });
       console.error(`api-proxy: ${method} ${path}: the request body could not be read (${e.code ?? 'error'})`);
@@ -289,7 +309,7 @@ async function handler(req, res) {
   }
 
   const headers = { 'x-origin-verify': secret, 'x-forwarded-proto': 'https' };
-  for (const name of copy ? [...FORWARDED_REQUEST_HEADERS, ...COPY_REQUEST_HEADERS] : FORWARDED_REQUEST_HEADERS) {
+  for (const name of priv ? [...FORWARDED_REQUEST_HEADERS, ...COPY_REQUEST_HEADERS] : FORWARDED_REQUEST_HEADERS) {
     const v = req.headers[name];
     if (v !== undefined) headers[name] = Array.isArray(v) ? v.join(', ') : v;
   }
@@ -318,11 +338,11 @@ async function handler(req, res) {
   for (const [name, value] of Object.entries(upstream.headers)) {
     const lower = name.toLowerCase();
     if (DROPPED_RESPONSE_HEADERS.has(lower)) continue;
-    if (copy && CDN_CACHE_HEADERS.has(lower)) continue;
+    if (priv && CDN_CACHE_HEADERS.has(lower)) continue;
     out[name] = value;
   }
-  if (copy) {
-    // One follower's answers: never kept by the CDN, nor by the browser.
+  if (priv) {
+    // One follower's or one wallet's answers: never kept by the CDN, nor by the browser.
     for (const k of Object.keys(out)) if (k.toLowerCase() === 'cache-control') delete out[k];
     out['cache-control'] = 'no-store';
   } else {
@@ -351,3 +371,5 @@ module.exports.edgeCacheControl = edgeCacheControl;
 module.exports.originFrom = originFrom;
 module.exports.oddPath = oddPath;
 module.exports.BODY_LIMIT = BODY_LIMIT;
+module.exports.bodyLimitFor = bodyLimitFor;
+module.exports.isFoldersPath = isFoldersPath;
