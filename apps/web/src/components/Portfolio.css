@@ -174,7 +174,8 @@
 @media (min-width: 1241px) {
   .pf-rail {
     position: sticky;
-    top: 0;
+    /* --page-top: under the navbar, which the page scrolls behind (shell.css). */
+    top: var(--page-top, 0px);
     align-self: start;
     /*
      * `height`, not `max-height`. It was a maximum, which meant the rail ended

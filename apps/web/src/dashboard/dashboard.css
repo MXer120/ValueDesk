@@ -900,10 +900,10 @@
 .tabmenu__item:disabled .tabmenu__ic { color: var(--dim); cursor: default; }
 .tabmenu__sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.08); }
 
-/* The widget sidebar for tabs (tabExtras.tsx TabSidebar): a glass drawer down the
-   right edge, from just under the navbar to the bottom of the window, over the page,
-   which dims and blurs a little behind it. Its cards are edit mode's. */
-.tabside-root { position: fixed; inset: var(--navbar-h) 0 0 0; z-index: 70; }
+/* The widget sidebar for tabs (tabExtras.tsx TabSidebar): a glass sheet down the
+   right edge, floating 8px clear of the navbar, the window's edge and its bottom,
+   over the page, which dims and blurs a little behind it. Its cards are edit mode's. */
+.tabside-root { position: fixed; inset: var(--navbar-live, var(--navbar-h)) 0 0 0; z-index: 70; }
 .tabside-scrim {
   position: absolute; inset: 0;
   background: rgba(0, 0, 0, 0.2);
@@ -911,10 +911,10 @@
   animation: tabside-fade 200ms var(--ease-out, ease) both;
 }
 .tabside {
-  position: absolute; top: 0; right: 0; bottom: 0;
+  position: absolute; top: 8px; right: 8px; bottom: 8px;
   display: flex; flex-direction: column; gap: 12px;
-  width: min(440px, 100vw); padding: 16px 16px 14px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  width: min(440px, calc(100vw - 16px)); padding: 16px 16px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px;
   background: var(--glass-sheet-bg);
   -webkit-backdrop-filter: var(--glass-sheet-blur); backdrop-filter: var(--glass-sheet-blur);
   box-shadow: -24px 0 56px rgba(0, 0, 0, 0.38);

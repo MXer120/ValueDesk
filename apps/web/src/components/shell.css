@@ -88,7 +88,46 @@
 }
 
 /* --- the navbar beside it -------------------------------------------------- */
-.shell--rail .navbar { background: var(--bg); }
+/* The navbar floats over the page. The page's scroller (`.appcontent`) starts at the
+   top of the window with the bar's height as padding, so a page scrolled up slides
+   under the bar instead of being cut at its edge. The bar's ground is a blur that is
+   full at the top and fades out towards its bottom edge: what passes under it softens
+   gradually, with no hard line. At rest nothing moves - the page still starts 4px under
+   the bar - and a page that does not scroll (the trade grid) looks as before. While the
+   maintenance banner shows, the page keeps its own row under both. Page-level sticky
+   rails and table heads stick under the bar through --page-top. --navbar-live is the
+   bar's measured height (NavBar.tsx): 56px on desktop, 46px from 761px to 840px.
+
+   The ground (NavBar.tsx `navbar__glass`): six bands of blur, 16px at the top down to
+   1px at the bottom edge, under a tint of the page colour that fades to nothing. Bands,
+   not one blur under a gradient mask: a masked backdrop filter paints nothing at all
+   in some Chromium builds, which would leave the links over bare page content. */
+.shell--rail > .navbar { position: relative; z-index: 60; background: transparent; }
+.navbar__glass { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.navbar__glass > i { position: absolute; left: 0; right: 0; }
+.navbar__glass > i:nth-child(1) { top: 0; height: 36%; -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.navbar__glass > i:nth-child(2) { top: 36%; height: 16%; -webkit-backdrop-filter: blur(11px); backdrop-filter: blur(11px); }
+.navbar__glass > i:nth-child(3) { top: 52%; height: 14%; -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
+.navbar__glass > i:nth-child(4) { top: 66%; height: 12%; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+.navbar__glass > i:nth-child(5) { top: 78%; height: 11%; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
+.navbar__glass > i:nth-child(6) { top: 89%; height: 11%; -webkit-backdrop-filter: blur(1px); backdrop-filter: blur(1px); }
+.navbar__glass::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom,
+    var(--bg) 0%,
+    color-mix(in srgb, var(--bg) 90%, transparent) 40%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 72%,
+    transparent 100%);
+}
+.shell--rail:not(:has(> .banner)) > .app { grid-row: 1 / 4; padding-top: 0; }
+.shell--rail:not(:has(> .banner)) > .app > .marketbar:first-child { margin-top: calc(var(--navbar-live, var(--navbar-h)) + var(--sp-1)); }
+.shell--rail:not(:has(> .banner)) > .app > .appcontent:first-child {
+  --page-top: var(--navbar-live, var(--navbar-h));
+  padding-top: calc(var(--navbar-live, var(--navbar-h)) + var(--sp-1));
+  scroll-padding-top: calc(var(--navbar-live, var(--navbar-h)) + var(--sp-1));
+}
 .navbar--rail .navbar-inner { gap: 14px; padding: 0 20px 0 8px; }
 .navbar--rail .navlinks { gap: 4px; margin-left: 0; }
 .navbar--rail .navlinks a {

@@ -129,8 +129,28 @@ export function NavBar({
     return () => window.removeEventListener(WALLET_EVENTS.menu, onMenu);
   }, [hasAddress, rail]);
 
+  /*
+   * The bar's real height as `--navbar-live` on the root. The page scrolls behind
+   * the bar (shell.css) and starts that far down, and --navbar-h is the desktop
+   * row's 56px only: from 761px to 840px the row is 46px, and it wraps when it
+   * runs out of room.
+   */
+  const bar = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const root = document.documentElement;
+    const put = () => root.style.setProperty('--navbar-live', `${Math.round(el.getBoundingClientRect().height)}px`);
+    put();
+    const ro = new ResizeObserver(put);
+    ro.observe(el);
+    return () => { ro.disconnect(); root.style.removeProperty('--navbar-live'); };
+  }, []);
+
   return (
-    <header className={`navbar${rail ? ' navbar--rail' : ''}`}>
+    <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>
+      {/* The bar's ground over the page that scrolls behind it: blur bands under a tint (shell.css). */}
+      {rail && <div className="navbar__glass" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>}
       <div className="navbar-inner">
         {!rail && (
           <span className="brand">
