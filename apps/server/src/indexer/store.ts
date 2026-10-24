@@ -221,6 +221,15 @@ export interface CohortMemberRow {
   pnl30d?: number | null;
 }
 
+/** A cohort wallet's PnL read from the venue itself (store.putCohortPnl). */
+export interface CohortPnlRow {
+  address: string;
+  pnl: number | null;
+  pnl1d: number | null;
+  pnl7d: number | null;
+  pnl30d: number | null;
+}
+
 export interface WindowStats {
   trades: number;
   volume: number;
@@ -300,6 +309,9 @@ CREATE TABLE IF NOT EXISTS cohort_mark (
 CREATE TABLE IF NOT EXISTS cohort_mix (
   scope TEXT NOT NULL, cohort TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (scope, cohort, t)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS cohort_pnl (
+  venue TEXT NOT NULL, address TEXT NOT NULL, pnl REAL, pnl_1d REAL, pnl_7d REAL, pnl_30d REAL, at INTEGER NOT NULL,
+  PRIMARY KEY (venue, address)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS cohort_series (
   scope TEXT NOT NULL, cohort TEXT NOT NULL, t INTEGER NOT NULL, lng REAL NOT NULL, shrt REAL NOT NULL,
   wallets INTEGER NOT NULL, covered INTEGER NOT NULL,
@@ -2607,6 +2619,27 @@ export class IndexStore {
 
   pruneCohortMix(beforeT: number): void {
     this.q('DELETE FROM cohort_mix WHERE t < ?').run(beforeT);
+  }
+
+  /**
+   * PnL read for a cohort wallet the venue's own list does not rank (Hyperliquid:
+   * its portfolio, for a holder missing from the leaderboard file) - all-time and
+   * the 1d / 7d / 30d windows, and when it was read.
+   */
+  putCohortPnl(venue: Venue, rows: ReadonlyArray<CohortPnlRow>, at: number): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO cohort_pnl (venue, address, pnl, pnl_1d, pnl_7d, pnl_30d, at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const r of rows) ins.run(venue, r.address, r.pnl, r.pnl1d, r.pnl7d, r.pnl30d, at);
+    });
+  }
+
+  cohortPnl(venue: Venue): Map<string, CohortPnlRow & { at: number }> {
+    const out = new Map<string, CohortPnlRow & { at: number }>();
+    const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    for (const r of this.q('SELECT address, pnl, pnl_1d, pnl_7d, pnl_30d, at FROM cohort_pnl WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
+      out.set(r.address as string, { address: r.address as string, pnl: n(r.pnl), pnl1d: n(r.pnl_1d), pnl7d: n(r.pnl_7d), pnl30d: n(r.pnl_30d), at: r.at as number });
+    }
+    return out;
   }
 
   /** All-time PnL of every wallet the venue's lists gave the index. */

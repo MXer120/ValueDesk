@@ -44,9 +44,9 @@ export const HL_WEIGHT_API_ONLY = 200;
  *   a process that only serves the    200. The indexer reads Hyperliquid from the
  *   API (VALUESCAN_INDEXER=0 or       same address under its own lanes - 500 for the
  *   VALUESCAN_HOSTED=1)               boards (VALUESCAN_INDEX_HL_WEIGHT, at most 900)
- *                                     and 200 for the cohort books
+ *                                     and 400 for the cohort books and holders' PnL
  *                                     (VALUESCAN_INDEX_HL_COHORT) - and those plus
- *                                     this must fit 1,200: 900 by default. It used
+ *                                     this must fit 1,200: 1,100 by default. It used
  *                                     to be 1,000 here too, which with the indexer's
  *                                     700 is 1,700 from one address. Such a process
  *                                     needs next to nothing: positioning is answered

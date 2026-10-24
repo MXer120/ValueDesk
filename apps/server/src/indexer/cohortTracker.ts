@@ -30,6 +30,14 @@
  *     2): a unified account keeps its perps collateral there. Books read
  *     before this existed are read again once, largest first (needsSpot).
  *
+ * PNL. A PnL cohort needs a wallet's all-time PnL. Hyperliquid's leaderboard file
+ * ranks ~47k accounts; the books hold positions for several times that. Every
+ * other Hyperliquid holder's PnL is read from its portfolio (weight 20), $100K+
+ * holders just behind new wallets' first reads and the tail after the position
+ * reads, and read again daily ($1M+), every 3 days ($100K+) or weekly
+ * (planPnl, cohort_pnl). Before this (2026-10-24) the PnL cohorts held some
+ * 10k wallets against the size cohorts' 51k.
+ *
  * MEMBERS. Every wallet the index can value: Hyperliquid's leaderboard file
  * (equity + all-time PnL), SoDEX's and Lighter's lists, Arcus portfolios,
  * trade.xyz traders the stream saw, and any wallet a read has valued.
@@ -49,7 +57,8 @@ import { mark } from './busy.js';
 import type { Print } from './streams.js';
 import type { IndexStore } from './store.js';
 import { DAY_MS, dayOf } from './windows.js';
-import { READ_COST, arcusPositions, hlPositions, lighterPositions, sodexPositions, type PositionRead } from './cohortSource.js';
+import { PNL_READ_COST, READ_COST, arcusPositions, hlPortfolioPnl, hlPositions, lighterPositions, sodexPositions, type PositionRead } from './cohortSource.js';
+import type { CohortPnlRow } from './store.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -122,6 +131,19 @@ export function staleEquity(book: Pick<Book, 'equity' | 'collateral' | 'at'>, no
 export function needsSpot(total: number | null | undefined, perpsValue: number | null, positions: number): boolean {
   if (!positions || total == null || !(total > 0)) return false;
   return total - Math.max(0, perpsValue ?? 0) > Math.max(1_000, 0.1 * total);
+}
+
+/** From here a unified account's spot is valued token by token (cohortSource.ts spotCollateral); before, stablecoins only. */
+export const SPOT_VALUE_SINCE = Date.UTC(2026, 9, 25);
+
+/**
+ * A Hyperliquid book whose spot state should be read: never looked at while the
+ * leaderboard says the account holds more than its perps (needsSpot), or a
+ * unified account's spot valued by the rule before SPOT_VALUE_SINCE (once).
+ */
+export function spotDue(book: { spotAt?: number | null; collateral?: number | null; equity: number | null; pos: { size: number } }, total: number | null | undefined): boolean {
+  if (book.spotAt == null) return needsSpot(total, book.equity, book.pos.size);
+  return book.collateral != null && book.spotAt < SPOT_VALUE_SINCE && book.pos.size > 0;
 }
 
 /** A book no stream moves: re-read after this long. */
@@ -203,9 +225,30 @@ export interface CohortDeps {
   sodexGate: () => number;
 }
 
+/** Portfolio reads queued at a time (the plan tops them up every minute). */
+const PNL_QUEUE_CAP = 60;
+/** A holder's portfolio PnL is read again after this long: often for the large, weekly for the rest. */
+export function pnlTtl(equity: number): number {
+  return equity >= 1_000_000 ? DAY_MS : equity >= 100_000 ? 3 * DAY_MS : 7 * DAY_MS;
+}
+/**
+ * Where a portfolio read queues among the position reads (new 1,000+, re-reads
+ * 400-1,300): a $100K+ holder's just under a new wallet's first read - it moves
+ * the money in the PnL cohorts - and the rest of the tail after every position read.
+ */
+export function pnlPrio(equity: number): number {
+  const size = Math.round(Math.log10(Math.max(1, equity)) * 10);
+  return equity >= 100_000 ? 920 + size : 300 + size;
+}
+
 export class CohortTracker {
-  /** Hyperliquid + its xyz dex: clearinghouseState reads, weight / minute. */
-  readonly hlc = new Lane({ name: 'hlc', perMin: envNum('VALUESCAN_INDEX_HL_COHORT', 200, 20, 800) });
+  /**
+   * Hyperliquid + its xyz dex: clearinghouseState reads (2) and, for a holder the
+   * leaderboard does not rank, portfolio reads (20), weight / minute. 400 by
+   * default (raised from 200 on 2026-10-24 for the portfolio reads): with the
+   * boards' 500 and the API's 200 that is 1,100 of HL's 1,200 per IP.
+   */
+  readonly hlc = new Lane({ name: 'hlc', perMin: envNum('VALUESCAN_INDEX_HL_COHORT', 400, 20, 800) });
   /** SoDEX perps state reads, requests / minute (weight 5 each). */
   readonly scoh: Lane;
   private books = new Map<Venue, Map<string, Book>>();
@@ -216,6 +259,8 @@ export class CohortTracker {
   private memberSig = new Map<string, string>();
   /** Wallets a stream saw trade that have no book yet. */
   private wanted = new Map<string, number>();
+  /** Hyperliquid holders' PnL from their portfolio (cohort_pnl), loaded at the first plan. */
+  private pnlRead: Map<string, CohortPnlRow & { at: number }> | null = null;
   private span = new Map<Venue, number | null>();
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
@@ -373,7 +418,61 @@ export class CohortTracker {
       if (venue === 'hyperliquid' && out.get(a)?.equity != null) continue;
       put(a, { equity: b.equity });
     }
+    // A holder the leaderboard does not rank: its PnL as its portfolio last read it,
+    // so it sits in a PnL cohort as it does in a size cohort.
+    if (venue === 'hyperliquid') {
+      for (const [a, r] of this.pnls()) {
+        const cur = out.get(a);
+        if (!cur || cur.pnl != null || r.pnl == null) continue;
+        cur.pnl = r.pnl;
+        cur.pnlRange = { '1d': r.pnl1d, '7d': r.pnl7d, '30d': r.pnl30d };
+      }
+    }
     return out;
+  }
+
+  private pnls(): Map<string, CohortPnlRow & { at: number }> {
+    if (!this.pnlRead) this.pnlRead = this.d.store.cohortPnl('hyperliquid');
+    return this.pnlRead;
+  }
+
+  /**
+   * Portfolio reads for Hyperliquid holders the leaderboard does not rank (its
+   * file has ~47k accounts; the books hold positions for far more): without an
+   * all-time PnL a holder is in a size cohort but in no PnL cohort. Largest
+   * first; each read again after pnlTtl.
+   */
+  private planPnl(members: Map<string, Member>, books: Map<string, Book>, now: number): void {
+    const lane = this.hlc;
+    const queued = lane.countPrefix('cohpnl:');
+    if (queued >= PNL_QUEUE_CAP) return;
+    const done = this.pnls();
+    const due: Array<[string, number]> = [];
+    for (const [address, book] of books) {
+      if (!book.pos.size) continue;
+      const m = members.get(address);
+      const read = done.get(address);
+      // Ranked by the leaderboard (its PnL is the leaderboard's), unless only our read gave it.
+      if (m?.pnl != null && !read) continue;
+      const eq = m?.equity ?? book.equity ?? 0;
+      if (read && now - read.at < pnlTtl(eq)) continue;
+      due.push([address, pnlPrio(eq)]);
+    }
+    due.sort((a, b) => b[1] - a[1]);
+    for (const [address, prio] of due.slice(0, PNL_QUEUE_CAP - queued)) {
+      lane.add({
+        key: `cohpnl:${address}`,
+        prio,
+        run: async () => {
+          const r = await hlPortfolioPnl(address);
+          const at = this.d.now();
+          const row: CohortPnlRow = r ?? { address, pnl: null, pnl1d: null, pnl7d: null, pnl30d: null };
+          this.d.store.putCohortPnl('hyperliquid', [row], at);
+          done.set(address, { ...row, at });
+          return PNL_READ_COST;
+        },
+      });
+    }
   }
 
   /** Changed members to the table the API thread reads, a slice at a time. */
@@ -436,6 +535,10 @@ export class CohortTracker {
       await breath();
       this.members.set(venue, members);
       await this.saveMembers(venue, members);
+      if (venue === 'hyperliquid') {
+        this.planPnl(members, this.books.get(venue)!, now);
+        await breath();
+      }
       // A new continuous stream span means an outage: large books are unknown again.
       const since = this.d.streamSince(venue);
       if (STREAMED.has(venue) && since !== null && this.span.has(venue) && this.span.get(venue) !== since) {
@@ -480,7 +583,7 @@ export class CohortTracker {
         if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
         // Read before the spot state was looked at, and the leaderboard says it may matter.
-        else if (venue === 'hyperliquid' && book.spotAt == null && needsSpot(m?.equity, book.equity, book.pos.size)) push(900 + size);
+        else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
         else if (age >= (follows ? reconcileTtl(eq) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
