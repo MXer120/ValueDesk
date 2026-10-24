@@ -629,11 +629,11 @@ function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, c
   };
   try {
     if (!f.coin && !f.sector) {
-      for (const p of s.cohortSeries(scope, fromT, cohort)) push(p.cohort, { t: p.t, long: p.long, short: p.short });
+      for (const p of s.cohortSeries(scope, fromT, cohort)) push(p.cohort, { t: p.t, long: p.long, short: p.short, ...(p.rebuilt ? { rebuilt: true } : {}) });
     } else {
       for (const r of s.cohortMix(scope, fromT, cohort)) {
         const x = f.coin ? r.c[f.coin] : r.s[f.sector!];
-        if (x) push(r.cohort, { t: r.t, long: x[0], short: x[1] });
+        if (x) push(r.cohort, { t: r.t, long: x[0], short: x[1], ...(r.rebuilt ? { rebuilt: true } : {}) });
       }
     }
   } catch { /* the tables arrive with the worker's first start */ }

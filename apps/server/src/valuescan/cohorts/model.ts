@@ -735,6 +735,8 @@ export interface CohortPoint {
   t: number;
   long: number;
   short: number;
+  /** Rebuilt from funding history for an hour the index did not record (indexer/cohortRebuild.ts). */
+  rebuilt?: true;
 }
 
 export interface CohortDetailResponse {

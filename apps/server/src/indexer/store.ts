@@ -316,6 +316,9 @@ CREATE TABLE IF NOT EXISTS cohort_series (
   scope TEXT NOT NULL, cohort TEXT NOT NULL, t INTEGER NOT NULL, lng REAL NOT NULL, shrt REAL NOT NULL,
   wallets INTEGER NOT NULL, covered INTEGER NOT NULL,
   PRIMARY KEY (scope, cohort, t)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS cohort_hist (
+  span INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL,
+  PRIMARY KEY (span, kind, key)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS board_meta (
   venue TEXT NOT NULL, win TEXT NOT NULL, side TEXT NOT NULL, filter TEXT NOT NULL,
   updated_at INTEGER NOT NULL, source_at INTEGER NOT NULL, complete INTEGER NOT NULL,
@@ -370,6 +373,9 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   ['fill_day', 'frozen', 'INTEGER'],
   // 2 = every live day row of the trader carries `fills` and `net` (built by this code).
   ['fill_agg', 'def', 'INTEGER'],
+  // 1 = rebuilt from the venues' funding history for hours the index did not record (cohortRebuild.ts).
+  ['cohort_series', 'src', 'INTEGER NOT NULL DEFAULT 0'],
+  ['cohort_mix', 'src', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 /** Every table the schema creates (what a reader checks for: schemaReady). */
@@ -2567,18 +2573,25 @@ export class IndexStore {
     return out;
   }
 
-  putCohortSeries(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; long: number; short: number }>): void {
+  /** `rebuilt`: rebuilt for an hour the index did not record (cohortRebuild.ts), not recorded. */
+  putCohortSeries(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; long: number; short: number; rebuilt?: boolean }>): void {
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO cohort_series (scope, cohort, t, lng, shrt, wallets, covered) VALUES (?, ?, ?, ?, ?, 0, 0)');
-      for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.long, r.short);
+      const ins = this.q('INSERT OR REPLACE INTO cohort_series (scope, cohort, t, lng, shrt, wallets, covered, src) VALUES (?, ?, ?, ?, ?, 0, 0, ?)');
+      for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.long, r.short, r.rebuilt ? 1 : 0);
     });
   }
 
-  cohortSeries(scope: string, fromT: number, cohort?: string): Array<{ cohort: string; t: number; long: number; short: number }> {
+  cohortSeries(scope: string, fromT: number, cohort?: string, toT = Number.MAX_SAFE_INTEGER): Array<{ cohort: string; t: number; long: number; short: number; rebuilt: boolean }> {
     const rows = (cohort
-      ? this.q('SELECT cohort, t, lng, shrt FROM cohort_series WHERE scope = ? AND cohort = ? AND t >= ? ORDER BY t').all(scope, cohort, fromT)
-      : this.q('SELECT cohort, t, lng, shrt FROM cohort_series WHERE scope = ? AND t >= ? ORDER BY t').all(scope, fromT)) as Array<Record<string, unknown>>;
-    return rows.map((r) => ({ cohort: String(r.cohort), t: Number(r.t), long: Number(r.lng), short: Number(r.shrt) }));
+      ? this.q('SELECT cohort, t, lng, shrt, src FROM cohort_series WHERE scope = ? AND cohort = ? AND t >= ? AND t <= ? ORDER BY t').all(scope, cohort, fromT, toT)
+      : this.q('SELECT cohort, t, lng, shrt, src FROM cohort_series WHERE scope = ? AND t >= ? AND t <= ? ORDER BY t').all(scope, fromT, toT)) as Array<Record<string, unknown>>;
+    return rows.map((r) => ({ cohort: String(r.cohort), t: Number(r.t), long: Number(r.lng), short: Number(r.shrt), rebuilt: Number(r.src) === 1 }));
+  }
+
+  /** When a scope's cohort was recorded (not rebuilt), from `fromT` on: the gaps between are what a rebuild fills. */
+  cohortSeriesRecorded(scope: string, cohort: string, fromT: number): number[] {
+    return (this.q('SELECT t FROM cohort_series WHERE scope = ? AND cohort = ? AND t >= ? AND src = 0 ORDER BY t').all(scope, cohort, fromT) as Array<{ t: number }>)
+      .map((r) => Number(r.t));
   }
 
   cohortSeriesLastT(): number {
@@ -2590,26 +2603,58 @@ export class IndexStore {
     this.q('DELETE FROM cohort_series WHERE t < ?').run(beforeT);
   }
 
-  putCohortMix(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; data: string }>): void {
+  putCohortMix(rows: ReadonlyArray<{ scope: string; cohort: string; t: number; data: string; rebuilt?: boolean }>): void {
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO cohort_mix (scope, cohort, t, data) VALUES (?, ?, ?, ?)');
-      for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.data);
+      const ins = this.q('INSERT OR REPLACE INTO cohort_mix (scope, cohort, t, data, src) VALUES (?, ?, ?, ?, ?)');
+      for (const r of rows) ins.run(r.scope, r.cohort, r.t, r.data, r.rebuilt ? 1 : 0);
     });
   }
 
   /** Hourly per-coin and per-sector [long, short] of a cohort. */
-  cohortMix(scope: string, fromT: number, cohort?: string): Array<{ cohort: string; t: number; c: Record<string, [number, number]>; s: Record<string, [number, number]> }> {
+  cohortMix(scope: string, fromT: number, cohort?: string, toT = Number.MAX_SAFE_INTEGER): Array<{ cohort: string; t: number; c: Record<string, [number, number]>; s: Record<string, [number, number]>; rebuilt: boolean }> {
     const rows = (cohort
-      ? this.q('SELECT cohort, t, data FROM cohort_mix WHERE scope = ? AND cohort = ? AND t >= ? ORDER BY t').all(scope, cohort, fromT)
-      : this.q('SELECT cohort, t, data FROM cohort_mix WHERE scope = ? AND t >= ? ORDER BY t').all(scope, fromT)) as Array<Record<string, unknown>>;
+      ? this.q('SELECT cohort, t, data, src FROM cohort_mix WHERE scope = ? AND cohort = ? AND t >= ? AND t <= ? ORDER BY t').all(scope, cohort, fromT, toT)
+      : this.q('SELECT cohort, t, data, src FROM cohort_mix WHERE scope = ? AND t >= ? AND t <= ? ORDER BY t').all(scope, fromT, toT)) as Array<Record<string, unknown>>;
     return rows.flatMap((r) => {
       try {
         const d = JSON.parse(String(r.data)) as { c?: Record<string, [number, number]>; s?: Record<string, [number, number]> };
-        return [{ cohort: String(r.cohort), t: Number(r.t), c: d.c ?? {}, s: d.s ?? {} }];
+        return [{ cohort: String(r.cohort), t: Number(r.t), c: d.c ?? {}, s: d.s ?? {}, rebuilt: Number(r.src) === 1 }];
       } catch {
         return [];
       }
     });
+  }
+
+  /**
+   * A history rebuild's reads (cohortRebuild.ts), per span (its first missing
+   * hour): `kind` 'w' = a wallet's positions hour by hour (key: address), 'px' =
+   * a symbol's hourly prices (key: symbol). JSON as the rebuild writes it.
+   */
+  putCohortHist(span: number, kind: string, rows: ReadonlyArray<[string, string]>, at: number): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO cohort_hist (span, kind, key, data, at) VALUES (?, ?, ?, ?, ?)');
+      for (const [key, data] of rows) ins.run(span, kind, key, data, at);
+    });
+  }
+
+  cohortHist(span: number, kind: string): Map<string, string> {
+    const out = new Map<string, string>();
+    for (const r of this.q('SELECT key, data FROM cohort_hist WHERE span = ? AND kind = ?').all(span, kind) as Array<{ key: string; data: string }>) out.set(r.key, r.data);
+    return out;
+  }
+
+  /** The keys of a span's kind read so far. */
+  cohortHistKeys(span: number, kind: string): Set<string> {
+    return new Set((this.q('SELECT key FROM cohort_hist WHERE span = ? AND kind = ?').all(span, kind) as Array<{ key: string }>).map((r) => r.key));
+  }
+
+  /** Spans with reads kept. */
+  cohortHistSpans(): number[] {
+    return (this.q('SELECT DISTINCT span FROM cohort_hist').all() as Array<{ span: number }>).map((r) => Number(r.span));
+  }
+
+  dropCohortHist(span: number): void {
+    this.q('DELETE FROM cohort_hist WHERE span = ?').run(span);
   }
 
   cohortMixLastT(): number {
