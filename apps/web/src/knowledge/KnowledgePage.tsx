@@ -482,7 +482,7 @@ function Gate({ title, line, children }: { title: string; line: string; children
       <p className="kn-gate__l">{line}</p>
       <ul className="kn-gate__kinds" aria-label="What a folder holds">
         {kinds.map((k) => (
-          <li key={k}><KindIcon kind={k} size={12} />{k === 'file' ? 'PDFs & images' : k === 'tweet' ? 'Posts from X' : `${KIND_LABEL[k]}s`}</li>
+          <li key={k}><KindIcon kind={k} size={12} />{k === 'file' ? 'PDFs & images' : k === 'tweet' ? 'Posts from X' : k === 'news' ? 'News' : `${KIND_LABEL[k]}s`}</li>
         ))}
       </ul>
       {children}
