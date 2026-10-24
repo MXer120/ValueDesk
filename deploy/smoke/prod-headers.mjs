@@ -30,8 +30,6 @@ const CONNECT_SRC = [
   'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
   'https://ethereum-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org',
   'https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org', 'https://1rpc.io',
-  // The knowledge folders' files: uploaded to and fetched from S3 with links the API signs per object.
-  'https://valuedesk-folders-tokyo.s3.ap-northeast-1.amazonaws.com',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */

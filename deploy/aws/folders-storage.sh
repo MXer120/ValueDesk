@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# The knowledge folders' file storage in AWS, in one run - for the OWNER, with an AWS
+# OPTIONAL - NOT USED TODAY. The knowledge folders keep their files on the instance's data
+# volume and move them through the site's /api in 4 MB pieces (apps/server/src/folders/limits.ts),
+# which needs nothing of this. Run it only to move the files to S3 instead - and before the API
+# is told so (step 4), add https://<bucket>.s3.ap-northeast-1.amazonaws.com to connect-src in
+# apps/web/index.html, deploy/smoke/prod-headers.mjs and deploy/aws/edge.yaml, and ship that.
+#
+# The knowledge folders' file storage in S3, in one run - for the OWNER, with an AWS
 # profile that may create S3 buckets and IAM roles (the `claude` profile manages EC2 only):
 #
 #   AWS_PROFILE=<admin profile> deploy/aws/folders-storage.sh           creates, attaches, asks before the instance
@@ -45,7 +51,7 @@ export VS_EC2_ENV
 for arg in "$@"; do
   case "$arg" in
     --print) PRINT_ONLY=1 ;;
-    -h|--help) sed -n '2,35p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $arg (try --help)" ;;
   esac
 done
@@ -143,7 +149,7 @@ esac
 
 # --- 4. the API's setting -------------------------------------------------------------------------------
 
-if ask "Write FOLDERS_S3_BUCKET=$BUCKET into /etc/valuescan/api.local.env on the instance?" y; then
+if ask "Switch the API to S3 now (FOLDERS_S3_BUCKET=$BUCKET in /etc/valuescan/api.local.env)? Only once the CSP names the bucket" n; then
   ssh_run "set FOLDERS_S3_BUCKET" "set -e
 f=/etc/valuescan/api.local.env
 umask 077

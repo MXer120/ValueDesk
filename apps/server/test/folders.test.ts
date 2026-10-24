@@ -2,7 +2,7 @@
  * Knowledge folders as a request sees them (routes/folders.ts, src/folders/):
  * the wallet sign-in and its token, the limits - counts, bytes, rates, the
  * server's own room - enforced by the server, an upload reserved, sent and
- * checked (to disk through the API, or straight to S3 with a signed link), how
+ * checked (to disk through the API in pieces, or straight to S3 with a signed link), how
  * a file is fetched back, that one wallet never reaches another's, moving and
  * reordering, erasing everything, and the S3 signing against AWS's own examples.
  */
@@ -96,10 +96,14 @@ async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => 
   const upload = async (token: string, folderId: string, bytes: Buffer, name = 'a.pdf', o2: { size?: number } = {}) => {
     const start = await call(token, 'POST', '/api/folders/upload/start', { folderId, name, size: o2.size ?? bytes.length });
     if (start.statusCode !== 200) return start;
-    const { id, target } = start.json() as { id: string; target: { method: 'PUT' | 'POST'; url: string; headers: Record<string, string>; bearer: boolean } };
+    const { id, target } = start.json() as { id: string; target: { method: 'PUT' | 'POST'; url: string; headers: Record<string, string>; bearer: boolean; partBytes?: number } };
     if (target.bearer) {
-      const put = await app.inject({ method: target.method, url: target.url, headers: { ...target.headers, authorization: `Bearer ${token}` }, payload: bytes });
-      if (put.statusCode !== 200) return put;
+      // Through the API: in pieces, in order, as the web sends them.
+      const step = target.partBytes ?? bytes.length;
+      for (let n = 0; n * step < Math.max(1, bytes.length); n++) {
+        const put = await app.inject({ method: target.method, url: `${target.url}&part=${n}`, headers: { ...target.headers, authorization: `Bearer ${token}` }, payload: bytes.subarray(n * step, (n + 1) * step) });
+        if (put.statusCode !== 200) return put;
+      }
     } else {
       const res = await fetch(target.url, { method: target.method, headers: target.headers, body: bytes });
       assert.ok(res.status < 300 || res.status === 403, `S3 stand-in answered ${res.status}`);
@@ -110,10 +114,19 @@ async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => 
   const fetchFile = async (token: string, id: string, thumb = false) => {
     const u = await call(token, 'GET', `/api/folders/file/url?id=${id}${thumb ? '&thumb=1' : ''}`);
     if (u.statusCode !== 200) return { status: u.statusCode, body: u.json() as { code?: string } };
-    const link = u.json() as { url: string; bearer: boolean };
+    const link = u.json() as { url: string; bearer: boolean; mime: string; partBytes?: number; size?: number };
     if (link.bearer) {
-      const r = await call(token, 'GET', link.url);
-      return { status: r.statusCode, headers: r.headers as Record<string, string>, bytes: r.rawPayload, link };
+      // Through the API: piece by piece, put together here as the web does.
+      const parts: Buffer[] = [];
+      let headers: Record<string, string> = {};
+      const count = link.partBytes ? Math.max(1, Math.ceil((link.size ?? 0) / link.partBytes)) : 1;
+      for (let n = 0; n < count; n++) {
+        const r = await call(token, 'GET', `${link.url}&part=${n}`);
+        if (r.statusCode !== 200) return { status: r.statusCode, body: r.json() as { code?: string } };
+        if (n === 0) headers = r.headers as Record<string, string>;
+        parts.push(r.rawPayload);
+      }
+      return { status: 200, headers, bytes: Buffer.concat(parts), link };
     }
     const r = await fetch(link.url);
     return { status: r.status, headers: Object.fromEntries(r.headers.entries()), bytes: Buffer.from(await r.arrayBuffer()), link };
@@ -305,12 +318,13 @@ test('uploads: sniffed from the bytes - PDF, images and plain text only; fetched
   const id = pdf.json().item.id;
   const got = await s.fetchFile(a.token, id);
   assert.equal(got.status, 200);
-  assert.equal(got.headers!['content-type'], 'application/pdf');
+  assert.equal(got.link!.mime, 'application/pdf', 'the type the bytes are, for the browser to put the pieces together as');
+  assert.equal(got.headers!['content-type'], 'application/octet-stream', 'a piece is never served as something a browser renders');
   assert.match(String(got.headers!['content-disposition']), /^attachment; filename="Q3 report.pdf"; filename\*=UTF-8''Q3%20report.pdf$/);
   assert.match(String(got.headers!['content-security-policy']), /sandbox/);
   assert.match(String(got.headers!['cache-control']), /no-store/);
   assert.deepEqual(got.bytes, PDF);
-  assert.equal((await s.fetchFile(a.token, txt.json().item.id)).headers!['content-type'], 'text/plain; charset=utf-8');
+  assert.equal((await s.fetchFile(a.token, txt.json().item.id)).link!.mime, 'text/plain; charset=utf-8');
 
   // Another wallet: the same id is not there.
   assert.equal((await s.call(b.token, 'GET', `/api/folders/file/url?id=${id}`)).statusCode, 404);
@@ -325,6 +339,35 @@ test('uploads: sniffed from the bytes - PDF, images and plain text only; fetched
   assert.equal(put.statusCode, 404);
   assert.equal((await s.call(b.token, 'POST', '/api/folders/upload/finish', { id: res })).statusCode, 404);
   assert.equal((await s.call(b.token, 'GET', '/api/folders')).json().folders.length, 0);
+});
+
+test('pieces: a file larger than the edge carries goes up and comes back in 4 MB pieces, in order, each checked', async () => {
+  const s = await setup();
+  const { token, address } = await s.login();
+  const folderId = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'Big' })).json().folder.id;
+  const big = Buffer.concat([Buffer.from('%PDF-1.7\n'), randomBytes(9 * 1024 * 1024)]);
+  const done = await s.upload(token, folderId, big, 'big.pdf');
+  assert.equal(done.statusCode, 200, done.body);
+  assert.equal(done.json().item.bytes, big.length);
+  const back = await s.fetchFile(token, done.json().item.id);
+  assert.equal(back.status, 200);
+  assert.equal(back.link!.partBytes, 4 * 1024 * 1024);
+  assert.ok(back.bytes!.equals(big), 'the pieces put together are the file, byte for byte');
+
+  const put = (id: string, part: number | string, bytes: Buffer) =>
+    s.app.inject({ method: 'POST', url: `/api/folders/upload/put?id=${id}&part=${part}`, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, payload: bytes });
+  const P = 4 * 1024 * 1024;
+  const r = (await s.call(token, 'POST', '/api/folders/upload/start', { folderId, name: 'r.pdf', size: big.length })).json();
+  assert.equal(r.target.partBytes, P);
+  assert.equal((await put(r.id, 1, big.subarray(P, 2 * P))).statusCode, 409, 'not before the piece ahead of it');
+  assert.equal((await put(r.id, 0, big.subarray(0, P - 1))).statusCode, 400, 'a piece is exactly as long as its place says');
+  assert.equal((await put(r.id, 3, big.subarray(0, 10))).statusCode, 400, 'there is no fourth piece');
+  assert.equal((await put(r.id, 'x', big.subarray(0, P))).statusCode, 400);
+  assert.equal((await put(r.id, 0, big.subarray(0, P))).statusCode, 200);
+  assert.equal((await put(r.id, 0, big.subarray(0, P))).statusCode, 200, 'a piece sent again (a lost answer) changes nothing');
+  assert.equal((await s.call(token, 'POST', '/api/folders/upload/finish', { id: r.id })).statusCode, 400, 'two pieces missing: not the size reserved');
+  assert.ok(!existsSync(join(s.cfg.dir, 'files', address, r.id)), 'and its bytes are gone');
+  assert.equal((await s.call(token, 'GET', `/api/folders/file?id=${done.json().item.id}&part=3`)).statusCode, 400, 'no piece past the end');
 });
 
 test('downloads: what one wallet, and everyone, may fetch per day is counted when a link is issued', async () => {
@@ -617,15 +660,15 @@ test('sniffing: what a file is comes from its first bytes', () => {
   assert.equal(trimUtf8Tail(Buffer.from('ab€', 'utf8')).length, 5, 'a complete character stays');
 });
 
-test('limits: the defaults are the proposal - S3 lifts the file size; the environment changes them within bounds', () => {
+test('limits: the defaults are the owner\'s (25 MB a file, 100 MB a wallet); the environment changes them within bounds', () => {
   const d = foldersConfigFromEnv({});
   assert.equal(d.s3, null);
   assert.deepEqual(
     [d.limits.folders, d.limits.itemsPerFolder, d.limits.fileBytes, d.limits.walletBytes, d.limits.writesPerMinute, d.limits.uploadsPerHour, d.signInsPerDay],
-    [3, 50, 4 * 1048576, 25 * 1048576, 60, 20, 10],
+    [3, 50, 25 * 1048576, 100 * 1048576, 60, 20, 10],
   );
   assert.equal(d.totalBytes, 20 * 1073741824);
-  assert.equal(d.minFreeBytes, 5 * 1073741824);
+  assert.equal(d.minFreeBytes, 10 * 1073741824, 'the index lives on the same volume');
   assert.equal(d.retentionMs, 365 * 86_400_000);
   const s3 = foldersConfigFromEnv({ FOLDERS_S3_BUCKET: 'valuedesk-folders-tokyo' });
   assert.deepEqual(s3.s3, { bucket: 'valuedesk-folders-tokyo', region: 'ap-northeast-1' });
@@ -633,7 +676,7 @@ test('limits: the defaults are the proposal - S3 lifts the file size; the enviro
   assert.equal(s3.downloadBytesPerDay, 1024 * 1048576);
   assert.equal(foldersConfigFromEnv({ FOLDERS_S3_BUCKET: 'b-1', FOLDERS_MAX_FILE_MB: '80' }).limits.fileBytes, 80 * 1048576);
   assert.throws(() => foldersConfigFromEnv({ FOLDERS_S3_BUCKET: 'b-1', FOLDERS_MAX_FILE_MB: '200' }), /maximum/);
-  assert.throws(() => foldersConfigFromEnv({ FOLDERS_MAX_FILE_MB: '10' }), /maximum/, 'without S3, more than the edge can carry');
+  assert.equal(foldersConfigFromEnv({ FOLDERS_MAX_FILE_MB: '60' }).limits.fileBytes, 60 * 1048576, 'pieces carry more than the edge does in one request');
   assert.throws(() => foldersConfigFromEnv({ FOLDERS_S3_BUCKET: 'Not_A_Bucket' }));
   assert.throws(() => foldersConfigFromEnv({ FOLDERS_S3_BUCKET: 'b-1', FOLDERS_S3_REGION: 'tokyo' }));
   const e = foldersConfigFromEnv({ FOLDERS_MAX_ITEMS: '100', FOLDERS_MAX_FILE_MB: '2.5', FOLDERS_DIR: '/x/folders' });

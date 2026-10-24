@@ -22,10 +22,9 @@
 //     Content-Type and Authorization (a follower's or a wallet's token, Bearer) -
 //     nowhere else.
 //   - A POST's body is read here first and sent on with its length (413 above the
-//     limit): 64 KB for the executor, 640 KB for a folder item, 4.25 MB for a file
-//     uploaded to a folder through the API (a server without the S3 bucket; with it,
-//     files go from the browser to S3 directly and never pass here - Vercel itself
-//     takes 4.5 MB at most). A body is never sent with any other method.
+//     limit): 64 KB for the executor, 640 KB for a folder item, 4.25 MB for one piece
+//     of a file uploaded to a folder (files go in 4 MB pieces because Vercel itself
+//     takes 4.5 MB at most, each way). A body is never sent with any other method.
 //   - Adds X-Origin-Verify (VALUESCAN_ORIGIN_SECRET, a Vercel environment variable
 //     of the production environment only) and X-Forwarded-For: the viewer's address
 //     as Vercel reports it (x-real-ip; Vercel overwrites these headers, a client

@@ -4,8 +4,8 @@
  *   POST /api/folders/session          {signIn}                     -> a token (auth.ts)
  *   GET  /api/folders                  Bearer                       -> folders, items, usage, limits
  *   GET  /api/folders/item?id=         Bearer                       -> one item with its content
- *   GET  /api/folders/file/url?id=[&thumb=1]  Bearer                -> where to fetch an upload (or a chart's thumbnail)
- *   GET  /api/folders/file?id=[&thumb=1]      Bearer                -> its bytes (disk mode; with S3 the link above is S3's)
+ *   GET  /api/folders/file/url?id=[&thumb=1]  Bearer                -> where to fetch an upload (or a chart's thumbnail), its size
+ *   GET  /api/folders/file?id=[&thumb=1]&part=  Bearer              -> one piece of its bytes (PART_BYTES; S3 mode: the link is S3's)
  *   POST /api/folders/folder/create    Bearer {name}
  *   POST /api/folders/folder/rename    Bearer {id, name}
  *   POST /api/folders/folder/delete    Bearer {id}                  (with everything in it)
@@ -15,7 +15,7 @@
  *   POST /api/folders/item/move        Bearer {id, folderId, index}  (reorder, or to another folder)
  *   POST /api/folders/item/delete      Bearer {id}
  *   POST /api/folders/upload/start     Bearer {folderId, name, size, title?} -> {id, target}: where the bytes go
- *   POST /api/folders/upload/put?id=   Bearer, application/octet-stream  (disk mode's target)
+ *   POST /api/folders/upload/put?id=&part=  Bearer, application/octet-stream: one piece, in order
  *   POST /api/folders/upload/finish    Bearer {id}                  -> the item, once the bytes are checked
  *   POST /api/folders/erase            Bearer {confirm: 'erase-everything'}
  *
@@ -42,8 +42,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { clientKey } from '../hosted.js';
 import { KeyedLimiter } from '../rateLimit.js';
 import { checkSignIn, SessionTokens } from '../folders/auth.js';
-import { attachment, DiskBlobs, S3Blobs, type BlobStore } from '../folders/blobs.js';
-import { foldersConfigFromEnv, FILE_BYTES_CEILING, type FoldersConfig } from '../folders/limits.js';
+import { attachment, DiskBlobs, partLength, partsOf, S3Blobs, type BlobStore } from '../folders/blobs.js';
+import { foldersConfigFromEnv, PART_BODY_CEILING, type FoldersConfig } from '../folders/limits.js';
 import { asFailure, FoldersFailure, FoldersStore, mimeOf, type Gone } from '../folders/store.js';
 import type { FoldersError } from '../folders/types.js';
 import { sniffFile } from '../folders/validate.js';
@@ -208,14 +208,22 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
     req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? (req.body as Record<string, unknown>) : {};
   const query = (req: FastifyRequest): Record<string, unknown> => (req.query ?? {}) as Record<string, unknown>;
   const list = (owner: string) => ({ ok: true as const, ...store!.list(owner), limits: cfg!.limits });
+  /** `part`: 0 when absent, else a whole number below `parts`. */
+  const partParam = (req: FastifyRequest, parts: number): number => {
+    const raw = query(req).part;
+    if (raw === undefined) return 0;
+    const n = typeof raw === 'string' && /^\d{1,4}$/.test(raw) ? Number(raw) : -1;
+    if (n < 0 || n >= parts) throw new FoldersFailure(400, 'input', `part must be 0 to ${parts - 1}`);
+    return n;
+  };
   const thumbParam = (req: FastifyRequest): boolean => {
     const t = query(req).thumb;
     if (t !== undefined && t !== '1') throw new FoldersFailure(400, 'input', 'thumb, when given, must be 1');
     return t === '1';
   };
 
-  // Disk mode's upload: the file's bytes as they are - no multipart, no base64.
-  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: FILE_BYTES_CEILING + KB }, (_req, payload, done) => done(null, payload));
+  // A piece of an upload: its bytes as they are - no multipart, no base64.
+  app.addContentTypeParser('application/octet-stream', { parseAs: 'buffer', bodyLimit: PART_BODY_CEILING + KB }, (_req, payload, done) => done(null, payload));
 
   app.post('/api/folders/session', async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
@@ -241,24 +249,32 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
     const f = store!.fileInfo(owner, query(req).id, thumb);
     const ok = downloads.take([{ key: owner, max: cfg!.downloadBytesPerDay }, { key: '*', max: cfg!.downloadBytesPerDayTotal }], f.bytes, now());
     if (!ok) return fail(reply, 429, 'rate', 'You have opened a lot of files today. Try again tomorrow.');
-    const link = await blobs!.downloadLink(owner, f.name, { mime: mimeOf(f.type), fileName: f.fileName, thumb, id: String(query(req).id) });
-    return { ok: true, ...link };
+    const link = await blobs!.downloadLink(owner, f.name, { mime: mimeOf(f.type), fileName: f.fileName, thumb, id: String(query(req).id), size: f.bytes });
+    return { ok: true, mime: mimeOf(f.type), ...link };
   }));
 
+  /**
+   * One piece of a file. Every piece is sent as application/octet-stream, as an attachment, with a
+   * sandboxing CSP: the browser puts the pieces together and types the whole itself (from file/url).
+   * The first piece is sniffed again on the way out - what is served is what the bytes are.
+   */
   app.get('/api/folders/file', withOwner('file', (owner, req, reply) => {
     if (!(blobs instanceof DiskBlobs)) return fail(reply, 404, 'not-found', 'Files are fetched from their own link (GET /api/folders/file/url).');
     const thumb = thumbParam(req);
     const f = store!.fileInfo(owner, query(req).id, thumb);
-    const bytes = blobs.read(owner, f.name);
-    // Sniffed again on the way out: what is served is what the bytes are.
-    const type = bytes ? sniffFile(bytes) : null;
-    if (!bytes || !type || (!thumb && type !== f.type)) return fail(reply, 404, 'not-found', 'The file cannot be served.');
+    const n = partParam(req, partsOf(f.bytes));
+    const got = blobs.readPart(owner, f.name, n);
+    if (!got || got.size !== f.bytes) return fail(reply, 404, 'not-found', 'The file cannot be served.');
+    if (n === 0) {
+      const type = sniffFile(got.bytes, got.bytes.length >= got.size);
+      if (!type || (!thumb && type !== f.type)) return fail(reply, 404, 'not-found', 'The file cannot be served.');
+    }
     reply
-      .header('Content-Type', mimeOf(type))
+      .header('Content-Type', 'application/octet-stream')
       .header('Content-Disposition', attachment(f.fileName))
       .header('Content-Security-Policy', "default-src 'none'; sandbox")
       .header('Cache-Control', 'private, no-store');
-    return reply.send(bytes);
+    return reply.send(got.bytes);
   }));
 
   app.post('/api/folders/folder/create', withOwner('write', (owner, req) => {
@@ -328,13 +344,16 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
     }
   }));
 
-  app.post('/api/folders/upload/put', { bodyLimit: FILE_BYTES_CEILING + KB }, withOwner('write', (owner, req, reply) => {
+  /** One piece of a reserved upload, in order (DiskBlobs.appendPart); each is exactly as long as its place says. */
+  app.post('/api/folders/upload/put', { bodyLimit: PART_BODY_CEILING + KB }, withOwner('write', (owner, req, reply) => {
     if (!(blobs instanceof DiskBlobs)) return fail(reply, 404, 'not-found', 'Uploads go to their own link (POST /api/folders/upload/start).');
     if (!Buffer.isBuffer(req.body)) return fail(reply, 415, 'input', 'Send the file as application/octet-stream.');
     const u = store!.pendingUpload(owner, query(req).id);
-    if (req.body.length !== u.size) return fail(reply, 400, 'input', 'This is not the size announced for the upload.');
-    blobs.receive(owner, u.id, req.body);
-    return { ok: true };
+    const n = partParam(req, partsOf(u.size));
+    if (req.body.length !== partLength(u.size, n)) return fail(reply, 400, 'input', 'This piece is not the size its place in the upload says.');
+    const r = blobs.appendPart(owner, u.id, n, req.body, u.size);
+    if (r === 'out-of-order') return fail(reply, 409, 'conflict', 'A piece of the upload is missing. Start the upload again.');
+    return { ok: true, part: n, parts: partsOf(u.size) };
   }));
 
   app.post('/api/folders/upload/finish', withOwner('write', async (owner, req) => {

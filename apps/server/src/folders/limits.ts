@@ -4,35 +4,38 @@
  * Every limit is enforced HERE, on the server - the web shows the same numbers
  * (GET /api/folders reports them) but a client that ignores them gets the
  * refusal. The defaults are the owner's: 3 folders (the brief), 25 MB a file and
- * 100 MB a wallet with S3 (confirmed 2026-10-24); the rest as proposed with them.
- * Each can be changed in the API's environment without a release (a restart
- * reads them).
+ * 100 MB a wallet (confirmed 2026-10-24); the rest as proposed with them. Each
+ * can be changed in the API's environment without a release (a restart reads
+ * them).
  *
- * WHERE FILES GO. With FOLDERS_S3_BUCKET set (production), uploads and
- * thumbnails are objects in that Amazon S3 bucket: the browser sends a file
- * straight to S3 and fetches it from there, each time with a link this server
- * signed for that one object for minutes (blobs.ts, s3.ts) - so a file is not
- * held to what the Vercel function carries. Without it (local development, or a
- * server without the bucket), they are files under FOLDERS_DIR and travel
- * through the API, which caps one file at FILE_BYTES_CEILING. The folders, the
- * items and their text are always in FOLDERS_DIR's database.
+ * WHERE FILES GO. On the server's data volume (an EBS volume in Tokyo), under
+ * FOLDERS_DIR/files, beside the folders' database. They travel through the
+ * site's own /api - the Vercel edge, its origin secret, its geo-blocking and
+ * this API's limits - in pieces of PART_BYTES each way, because the Vercel
+ * function carries at most 4.5 MB a request or an answer (blobs.ts DiskBlobs;
+ * POST /api/folders/upload/put, GET /api/folders/file, both with &part=).
  *
- *                                                                        S3       disk
- *   FOLDERS_MAX_FOLDERS            folders per wallet                     3          3
- *   FOLDERS_MAX_ITEMS              items per folder                      50         50
- *   FOLDERS_MAX_FILE_MB            one uploaded file                     25          4   (disk: at most 4.25)
- *   FOLDERS_MAX_WALLET_MB          everything one wallet keeps          100         25
- *   FOLDERS_WRITES_PER_MIN         changes per wallet per minute         60         60
- *   FOLDERS_UPLOADS_PER_HOUR       uploads per wallet per hour           20         20
- *   FOLDERS_DOWNLOAD_MB_PER_DAY    what one wallet may fetch per day   1024       1024
- *   FOLDERS_DOWNLOAD_GB_PER_DAY    what all wallets may fetch per day   100        100   (S3's traffic out is billed)
- *   FOLDERS_SIGNINS_PER_DAY        wallets one address signs in per day  10         10
- *   FOLDERS_MAX_TOTAL_GB           all wallets together                 200         20
- *   FOLDERS_MIN_FREE_GB            refuse growth below this much free     -          5   (the index lives on the volume)
- *   FOLDERS_RETENTION_DAYS         a wallet unseen this long is deleted 365        365
- *   FOLDERS_DIR                    the database (and disk-mode files)   <the device key's directory>/folders
+ * With FOLDERS_S3_BUCKET set they are objects in that S3 bucket instead, sent
+ * and fetched by the browser directly with links this server signs (S3Blobs).
+ * That needs the owner's IAM step (deploy/aws/folders-storage.sh) AND the
+ * bucket's host in the site's CSP (connect-src, in the three places) - it is
+ * not used today.
+ *
+ *   FOLDERS_MAX_FOLDERS            folders per wallet                     3
+ *   FOLDERS_MAX_ITEMS              items per folder                      50
+ *   FOLDERS_MAX_FILE_MB            one uploaded file                     25   (at most 100)
+ *   FOLDERS_MAX_WALLET_MB          everything one wallet keeps          100
+ *   FOLDERS_WRITES_PER_MIN         changes per wallet per minute         60   (a 25 MB upload is 7 of them)
+ *   FOLDERS_UPLOADS_PER_HOUR       uploads per wallet per hour           20
+ *   FOLDERS_DOWNLOAD_MB_PER_DAY    what one wallet may fetch per day   1024
+ *   FOLDERS_DOWNLOAD_GB_PER_DAY    what all wallets may fetch per day   100
+ *   FOLDERS_SIGNINS_PER_DAY        wallets one address signs in per day  10
+ *   FOLDERS_MAX_TOTAL_GB           all wallets together                  20   (S3: 200)
+ *   FOLDERS_MIN_FREE_GB            refuse growth below this much free    10   (the index lives on the volume; S3: -)
+ *   FOLDERS_RETENTION_DAYS         a wallet unseen this long is deleted 365
+ *   FOLDERS_DIR                    the database and the files           <the device key's directory>/folders
  *                                  (production: /var/lib/valuescan/state/folders, on the data volume)
- *   FOLDERS_S3_BUCKET              the bucket; empty = disk mode        (production: valuedesk-folders-tokyo)
+ *   FOLDERS_S3_BUCKET              files in S3 instead (see above)      empty
  *   FOLDERS_S3_REGION              its region                           ap-northeast-1
  *   FOLDERS_S3_ENDPOINT            local testing: an S3 stand-in        http://127.0.0.1:<port> only
  *
@@ -51,13 +54,13 @@ const GB = 1024 * MB;
 export interface FoldersConfig {
   dir: string;
   limits: FolderLimits;
-  /** The bucket for files and thumbnails; null: they are files under `dir`. */
+  /** The bucket for files and thumbnails; null (today): they are files under `dir`. */
   s3: { bucket: string; region: string; endpoint?: string } | null;
   /** Wallets one client address may sign in per day. */
   signInsPerDay: number;
   /** All wallets together, bytes. */
   totalBytes: number;
-  /** Disk mode: growth is refused while the volume has less than this free. */
+  /** Files on disk: growth is refused while the volume has less than this free. */
   minFreeBytes: number;
   /** What one wallet, and all wallets together, may fetch per day (bytes of files and thumbnails). */
   downloadBytesPerDay: number;
@@ -69,8 +72,8 @@ export interface FoldersConfig {
 export const DEFAULT_LIMITS: FolderLimits = {
   folders: 3,
   itemsPerFolder: 50,
-  fileBytes: 4 * MB,
-  walletBytes: 25 * MB,
+  fileBytes: 25 * MB,
+  walletBytes: 100 * MB,
   jsonBytes: { note: 200 * KB, table: 200 * KB, chart: 256 * KB, news: 8 * KB },
   thumbBytes: 200 * KB,
   writesPerMinute: 60,
@@ -79,13 +82,15 @@ export const DEFAULT_LIMITS: FolderLimits = {
   titleChars: 120,
 };
 
-/** S3 mode's defaults where they differ from disk mode's. */
-export const S3_DEFAULTS = { fileBytes: 25 * MB, walletBytes: 100 * MB, totalBytes: 200 * GB } as const;
-
-/** Disk mode: the most an upload can be - what the Vercel function forwards (4.5 MB, less the request's own overhead). */
-export const FILE_BYTES_CEILING = Math.floor(4.25 * MB);
-/** S3 mode: one PUT from the browser; kept well under what a phone uploads before the signed link lapses. */
-export const S3_FILE_BYTES_CEILING = 100 * MB;
+/**
+ * One piece of a file through the API, each way: what the Vercel function carries
+ * (4.5 MB a request or an answer) with room for the request's own overhead.
+ */
+export const PART_BYTES = 4 * MB;
+/** What a request that carries a piece may hold (routes/folders.ts, the Vercel function). */
+export const PART_BODY_CEILING = Math.floor(4.25 * MB);
+/** One file, however it travels. */
+export const FILE_BYTES_CEILING = 100 * MB;
 
 function num(env: Readonly<Record<string, string | undefined>>, name: string, dflt: number, o: { min?: number; max?: number; scale?: number } = {}): number {
   const raw = env[name]?.trim();
@@ -119,12 +124,8 @@ export function foldersConfigFromEnv(env: Readonly<Record<string, string | undef
     ...DEFAULT_LIMITS,
     folders: num(env, 'FOLDERS_MAX_FOLDERS', DEFAULT_LIMITS.folders, { min: 1, max: 20 }),
     itemsPerFolder: num(env, 'FOLDERS_MAX_ITEMS', DEFAULT_LIMITS.itemsPerFolder, { min: 1, max: 500 }),
-    fileBytes: num(env, 'FOLDERS_MAX_FILE_MB', s3 ? S3_DEFAULTS.fileBytes : DEFAULT_LIMITS.fileBytes, {
-      scale: MB,
-      min: 64 * KB,
-      max: s3 ? S3_FILE_BYTES_CEILING : FILE_BYTES_CEILING,
-    }),
-    walletBytes: num(env, 'FOLDERS_MAX_WALLET_MB', s3 ? S3_DEFAULTS.walletBytes : DEFAULT_LIMITS.walletBytes, { scale: MB, min: MB, max: 10 * GB }),
+    fileBytes: num(env, 'FOLDERS_MAX_FILE_MB', DEFAULT_LIMITS.fileBytes, { scale: MB, min: 64 * KB, max: FILE_BYTES_CEILING }),
+    walletBytes: num(env, 'FOLDERS_MAX_WALLET_MB', DEFAULT_LIMITS.walletBytes, { scale: MB, min: MB, max: 10 * GB }),
     writesPerMinute: num(env, 'FOLDERS_WRITES_PER_MIN', DEFAULT_LIMITS.writesPerMinute, { min: 1, max: 10_000 }),
     uploadsPerHour: num(env, 'FOLDERS_UPLOADS_PER_HOUR', DEFAULT_LIMITS.uploadsPerHour, { min: 1, max: 10_000 }),
   };
@@ -133,8 +134,8 @@ export function foldersConfigFromEnv(env: Readonly<Record<string, string | undef
     limits,
     s3,
     signInsPerDay: num(env, 'FOLDERS_SIGNINS_PER_DAY', 10, { min: 1, max: 100_000 }),
-    totalBytes: num(env, 'FOLDERS_MAX_TOTAL_GB', s3 ? S3_DEFAULTS.totalBytes : 20 * GB, { scale: GB, min: 64 * MB }),
-    minFreeBytes: s3 ? 0 : num(env, 'FOLDERS_MIN_FREE_GB', 5 * GB, { scale: GB }),
+    totalBytes: num(env, 'FOLDERS_MAX_TOTAL_GB', s3 ? 200 * GB : 20 * GB, { scale: GB, min: 64 * MB }),
+    minFreeBytes: s3 ? 0 : num(env, 'FOLDERS_MIN_FREE_GB', 10 * GB, { scale: GB }),
     downloadBytesPerDay: num(env, 'FOLDERS_DOWNLOAD_MB_PER_DAY', 1024 * MB, { scale: MB, min: MB }),
     downloadBytesPerDayTotal: num(env, 'FOLDERS_DOWNLOAD_GB_PER_DAY', 100 * GB, { scale: GB, min: 64 * MB }),
     // 0 = never; otherwise at least 30 days, well past a session token's 7 (auth.ts).

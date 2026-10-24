@@ -135,17 +135,39 @@ interface UploadTarget {
   headers: Record<string, string>;
   /** Our own route: with the wallet's token. Never true for S3. */
   bearer: boolean;
+  /** In pieces of this size, each to `url` + `&part=<n>`, in order (the site's edge carries 4.5 MB at most). */
+  partBytes?: number;
 }
 
-/** The bytes to their target, with progress (XMLHttpRequest: fetch reports none for uploads). */
-function send(target: UploadTarget, file: Blob, token: string, onProgress?: (share: number) => void): Promise<void> {
+/**
+ * The bytes to their target, with progress: one request, or one per piece, in order (the server
+ * takes them in order only). A piece is tried again once before the upload gives up.
+ */
+async function send(target: UploadTarget, file: Blob, token: string, onProgress?: (share: number) => void): Promise<void> {
+  if (!target.partBytes) return sendOne(target.url, target, file, token, onProgress && ((d) => onProgress(d / Math.max(1, file.size))));
+  const step = target.partBytes;
+  const parts = Math.max(1, Math.ceil(file.size / step));
+  for (let n = 0; n < parts; n++) {
+    const piece = file.slice(n * step, (n + 1) * step);
+    const report = onProgress && ((d: number) => onProgress((n * step + d) / Math.max(1, file.size)));
+    try {
+      await sendOne(`${target.url}&part=${n}`, target, piece, token, report);
+    } catch (e) {
+      if (!(e instanceof FoldersApiError) || e.code !== 'network') throw e;
+      await sendOne(`${target.url}&part=${n}`, target, piece, token, report);
+    }
+  }
+}
+
+/** One request (XMLHttpRequest: fetch reports no upload progress); `onBytes` gets the bytes sent so far. */
+function sendOne(url: string, target: UploadTarget, body: Blob, token: string, onBytes?: (sent: number) => void): Promise<void> {
   return new Promise((resolve, reject) => {
     const x = new XMLHttpRequest();
-    x.open(target.method, target.url);
+    x.open(target.method, url);
     for (const [k, v] of Object.entries(target.headers)) x.setRequestHeader(k, v);
     if (target.bearer) x.setRequestHeader('Authorization', `Bearer ${token}`);
     x.upload.onprogress = (e) => {
-      if (e.lengthComputable && onProgress) onProgress(e.loaded / e.total);
+      if (onBytes) onBytes(e.loaded);
     };
     x.onload = () => {
       if (x.status >= 200 && x.status < 300) return resolve();
@@ -159,15 +181,27 @@ function send(target: UploadTarget, file: Blob, token: string, onProgress?: (sha
       reject(new FoldersApiError(msg, x.status, 'http'));
     };
     x.onerror = () => reject(new FoldersApiError('The upload did not get through. Check the connection and try again.', 0, 'network'));
-    x.send(file);
+    x.send(body);
   });
 }
 
+/**
+ * A file's bytes: one request to S3's link, or its pieces from the API in order, put together here
+ * and typed as the server sniffed them (every piece itself comes as application/octet-stream).
+ */
 async function fetchFile(t: string, id: string, thumb: boolean): Promise<Blob> {
-  const link = await call<{ ok: true; url: string; bearer: boolean }>(t, 'GET', `/api/folders/file/url?id=${q(id)}${thumb ? '&thumb=1' : ''}`);
+  const link = await call<{ ok: true; url: string; bearer: boolean; mime: string; partBytes?: number; size?: number }>(t, 'GET', `/api/folders/file/url?id=${q(id)}${thumb ? '&thumb=1' : ''}`);
+  if (!link.partBytes) return (await fetchOne(link.url, link.bearer, t)).blob();
+  const parts = Math.max(1, Math.ceil((link.size ?? 0) / link.partBytes));
+  const pieces: ArrayBuffer[] = [];
+  for (let n = 0; n < parts; n++) pieces.push(await (await fetchOne(`${link.url}&part=${n}`, link.bearer, t)).arrayBuffer());
+  return new Blob(pieces, { type: link.mime });
+}
+
+async function fetchOne(url: string, bearer: boolean, t: string): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(link.url, { headers: link.bearer ? { Authorization: `Bearer ${t}` } : {}, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+    res = await fetch(url, { headers: bearer ? { Authorization: `Bearer ${t}` } : {}, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
   } catch {
     throw new FoldersApiError('The file could not be loaded.', 0, 'network');
   }
@@ -180,7 +214,7 @@ async function fetchFile(t: string, id: string, thumb: boolean): Promise<Blob> {
     }
     throw new FoldersApiError(d.error || 'The file could not be loaded.', res.status, d.code ?? 'http');
   }
-  return res.blob();
+  return res;
 }
 
 /**

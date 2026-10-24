@@ -45,12 +45,7 @@
                                 public RPCs the address menu reads wallet balances
                                 from (trading/walletBalances.ts: ValueChain, Arbitrum,
                                 Base, Ethereum, BNB Chain, Polygon) - read-only
-                                balance calls, nothing signed. The knowledge
-                                folders' S3 bucket in Tokyo (valuedesk-folders-tokyo):
-                                a file is uploaded to it and fetched from it
-                                directly, each time with a link the server signed
-                                for that one object (apps/server/src/folders/blobs.ts).
-                                And loopback
+                                balance calls, nothing signed. And loopback
                                 (http://127.0.0.1:*, http://localhost:*): a copy
                                 executor the user runs on their own machine
                                 (apps/executor, "Self-hosted" in copy setup); a
@@ -126,8 +121,7 @@
           https://main-scan.valuechain.xyz
           https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
           https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-          https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
-          https://valuedesk-folders-tokyo.s3.ap-northeast-1.amazonaws.com;
+          https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io;
         form-action 'none';
         base-uri 'none';
         object-src 'none';
