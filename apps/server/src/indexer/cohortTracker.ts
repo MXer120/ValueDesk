@@ -292,8 +292,13 @@ export function pnlPrio(equity: number): number {
  * written in the first 70 minutes after v0.2.13.
  */
 export const PNL_SHARE = 0.4;
-/** Cohort reads in flight at once (lanes.ts CONCURRENCY): one at a time made ~20 a minute. */
-export const HLC_CONCURRENCY = 8;
+/**
+ * Cohort reads in flight at once (lanes.ts CONCURRENCY). One at a time made ~20
+ * a minute; 8 made ~46 (v0.2.16, 2026-10-24), still bound by the event loop's
+ * stalls on the disk rather than by the 400 weight - a read waits out a stall
+ * whatever else is in flight. The spend cap is the lane's either way.
+ */
+export const HLC_CONCURRENCY = 24;
 
 export class CohortTracker {
   /**
