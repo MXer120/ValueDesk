@@ -928,36 +928,74 @@
 }
 .tab-add:hover,
 .tab-add[aria-expanded="true"] { color: var(--text); border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.07); }
-/* A tab's right-click menu (tabExtras.tsx TabMenu): the app's pop-up surface. */
-.menu-popup.tabmenu { position: fixed; z-index: 1300; display: flex; flex-direction: column; min-width: 170px; padding: 5px; }
+/* A right-click menu (tabExtras.tsx TabMenu: a tab's, the chart's): the app's pop-up
+   surface, an icon before every item, the destructive ones last, in red, under a line. */
+.menu-popup.tabmenu { position: fixed; z-index: 1300; display: flex; flex-direction: column; gap: 1px; min-width: 184px; padding: 5px; }
 .tabmenu__item {
-  height: 30px; min-height: 0; padding: 0 10px; border: 0; border-radius: 7px; background: transparent;
-  color: var(--text); font: inherit; font-size: var(--fs-xs); text-align: left; cursor: pointer;
+  display: flex; align-items: center; gap: 9px;
+  height: 32px; min-height: 0; padding: 0 10px 0 8px; border: 0; border-radius: 8px; background: transparent;
+  color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 500; text-align: left; cursor: pointer;
+  transition: background 120ms, color 120ms;
 }
+.tabmenu__ic { display: grid; place-items: center; flex: none; width: 16px; height: 16px; color: var(--muted); transition: color 120ms; }
 .tabmenu__item:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
-.tabmenu__item:disabled { color: var(--dim); cursor: default; }
+.tabmenu__item:hover:not(:disabled) .tabmenu__ic { color: var(--text); }
+.tabmenu__item.is-danger,
+.tabmenu__item.is-danger .tabmenu__ic { color: var(--neg); }
+.tabmenu__item.is-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--neg) 12%, transparent); }
+.tabmenu__item:disabled,
+.tabmenu__item:disabled .tabmenu__ic { color: var(--dim); cursor: default; }
+.tabmenu__sep { height: 1px; margin: 4px 6px; background: rgba(255, 255, 255, 0.08); }
 
-/* The widget sidebar for tabs (tabExtras.tsx TabSidebar): edit mode's palette window,
-   shown on its own over the page. */
-.tabside-root { position: fixed; inset: 0 auto auto 0; z-index: 70; }
-.dash-edit-side.tabside { animation: tabside-in 200ms var(--ease-out, ease) both; }
-@keyframes tabside-in { from { opacity: 0; transform: translateX(12px); } }
-.tabside__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 4px 0; }
-.tabside__head b { font-size: var(--fs-xs); font-weight: 600; }
+/* The widget sidebar for tabs (tabExtras.tsx TabSidebar): a glass drawer down the
+   right edge, from just under the navbar to the bottom of the window, over the page,
+   which dims and blurs a little behind it. Its cards are edit mode's. */
+.tabside-root { position: fixed; inset: var(--navbar-h) 0 0 0; z-index: 70; }
+.tabside-scrim {
+  position: absolute; inset: 0;
+  background: rgba(0, 0, 0, 0.2);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  animation: tabside-fade 200ms var(--ease-out, ease) both;
+}
+.tabside {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; gap: 12px;
+  width: min(440px, 100vw); padding: 16px 16px 14px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--glass-sheet-bg);
+  -webkit-backdrop-filter: var(--glass-sheet-blur); backdrop-filter: var(--glass-sheet-blur);
+  box-shadow: -24px 0 56px rgba(0, 0, 0, 0.38);
+  animation: tabside-in 240ms var(--ease-out, ease) both;
+}
+@keyframes tabside-in { from { opacity: 0; transform: translateX(28px); } }
+@keyframes tabside-fade { from { opacity: 0; } }
+.tabside__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tabside__head b { font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
 .tabside__close {
-  display: grid; place-items: center; width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: 6px;
-  background: transparent; color: var(--muted); cursor: pointer;
+  display: grid; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06); color: var(--muted); cursor: pointer; transition: background 140ms, color 140ms;
 }
-.tabside__close:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
-.dash-edit-wcard.tabside__card { display: block; width: 100%; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-.dash-edit-wcard.tabside__card:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--panel-line)); }
-.tabside__find {
-  width: 100%; height: 30px; margin: 0 0 8px; padding: 0 10px; border: 1px solid var(--panel-line); border-radius: 8px;
-  background: var(--bg); color: var(--text); font: inherit; font-size: var(--fs-xs);
+.tabside__close:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.tabside__list { flex: 1 1 auto; margin: 0 -4px; padding: 0 4px; }
+.tabside .dash-edit-palette__group p { margin: 12px 2px 8px; color: var(--muted); font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.tabside .dash-edit-palette__group:first-child p { margin-top: 0; }
+.tabside .dash-edit-palette__grid { gap: 10px; }
+.dash-edit-wcard.tabside__card {
+  display: block; width: 100%; padding: 7px; border-color: rgba(255, 255, 255, 0.07); border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03); color: var(--text); font: inherit; text-align: left; cursor: pointer;
+  transition: border-color 140ms, background 140ms, transform 140ms;
 }
-.tabside__find:focus { outline: none; border-color: color-mix(in srgb, var(--text) 30%, var(--panel-line)); }
-.tabside__hint { margin: 0; padding: 0 4px; color: var(--dim); font-size: var(--fs-micro); }
-@media (prefers-reduced-motion: reduce) { .dash-edit-side.tabside { animation: none; } }
+.dash-edit-wcard.tabside__card:hover { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); transform: translateY(-1px); }
+.dash-edit-wcard.tabside__card .dash-edit-card__screen { border-radius: 8px; }
+.tabside__find { position: relative; display: flex; align-items: center; margin: 0 0 10px; color: var(--dim); }
+.tabside__find svg { position: absolute; left: 11px; pointer-events: none; }
+.tabside__find input {
+  width: 100%; height: 34px; padding: 0 12px 0 32px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs);
+}
+.tabside__find input:focus { outline: none; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); }
+.tabside__hint { flex: none; margin: 0; padding: 10px 2px 0; border-top: 1px solid rgba(255, 255, 255, 0.06); color: var(--dim); font-size: var(--fs-micro); }
+@media (prefers-reduced-motion: reduce) { .tabside, .tabside-scrim { animation: none; } }
 
 /* The tabs' own strip inside the bar (Panel.tsx PanelTabs): it takes the room the
    controls leave and scrolls sideways when the tabs need more; the controls keep

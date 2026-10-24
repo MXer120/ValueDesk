@@ -23,7 +23,7 @@ import { useStored } from '../hooks';
 import type { PanelTab } from './Panel';
 import { SizeCalc } from './sourceWidgets';
 import {
-  AddTabButton, TAB_WIDGETS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
+  AddTabButton, MENU_ICONS, TAB_WIDGETS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
   type TabMenuItem,
 } from './tabExtras';
 import type { TradeContext } from './registry';
@@ -76,9 +76,9 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
   const items = (key: string): TabMenuItem[] => {
     const id = isExtraKey(key) ? key.slice(2) : null;
     return [
-      { label: 'Close tab', disabled: !id, onClick: () => id && extra.remove(id) },
-      { label: 'Add widget…', onClick: () => setSide(true) },
-      { label: 'Duplicate', disabled: !id, onClick: () => id && show(extra.add(id)) },
+      { label: 'Add widget…', icon: MENU_ICONS.widget, onClick: () => setSide(true) },
+      { label: 'Duplicate', icon: MENU_ICONS.duplicate, disabled: !id, onClick: () => id && show(extra.add(id)) },
+      { label: 'Close tab', icon: MENU_ICONS.close, danger: true, disabled: !id, onClick: () => id && extra.remove(id) },
     ];
   };
   return (
@@ -130,10 +130,10 @@ export function ChartCard({ c }: { c: TradeContext }) {
   };
   const closeMenu = useCallback(() => setMenu(null), []);
   const items = (id: string): TabMenuItem[] => [
-    { label: 'Close tab', disabled: id === 'main', onClick: () => remove(id) },
-    { label: 'Add widget…', onClick: () => setSide(true) },
+    { label: 'Add widget…', icon: MENU_ICONS.widget, onClick: () => setSide(true) },
     // The market on screen duplicates as a chart tab of its own.
-    { label: 'Duplicate', onClick: () => add(id === 'main' ? `asset:${c.symbol}` : id) },
+    { label: 'Duplicate', icon: MENU_ICONS.duplicate, onClick: () => add(id === 'main' ? `asset:${c.symbol}` : id) },
+    { label: 'Close tab', icon: MENU_ICONS.close, danger: true, disabled: id === 'main', onClick: () => remove(id) },
   ];
   const label = (id: string) => {
     const a = assetOf(id);

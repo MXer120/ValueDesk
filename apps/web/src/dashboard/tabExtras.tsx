@@ -8,7 +8,7 @@
  * tab offers Close tab, Add widget and Duplicate. Kept per panel on this
  * browser; a duplicate (`news#2`) keeps its own settings.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useStored } from '../hooks';
 import { Sketch } from './sketches';
@@ -63,9 +63,36 @@ export interface TabMenuItem {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Its icon, drawn in the text's colour: one of MENU_ICONS. */
+  icon?: ReactNode;
+  /** Closes or deletes something: red, and set off from the items above it by a line. */
+  danger?: boolean;
 }
 
-/** A tab's right-click menu: Close tab, Add widget, Duplicate. */
+const menuIcon = (d: ReactNode) => (
+  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
+);
+/**
+ * The icons of the app's right-click menus (a tab's here, a drawing's and an
+ * indicator's on the chart), so every menu reads the same: 16px outlines in the
+ * text's colour.
+ */
+export const MENU_ICONS = {
+  add: menuIcon(<path d="M8 3.5v9M3.5 8h9" />),
+  widget: menuIcon(<><rect x="2.5" y="2.5" width="4.6" height="4.6" rx="1.2" /><rect x="8.9" y="2.5" width="4.6" height="4.6" rx="1.2" /><rect x="2.5" y="8.9" width="4.6" height="4.6" rx="1.2" /><path d="M11.2 9.3v4M9.2 11.3h4" /></>),
+  duplicate: menuIcon(<><rect x="5.5" y="5.5" width="8" height="8" rx="1.6" /><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" /></>),
+  close: menuIcon(<path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />),
+  remove: menuIcon(<path d="M3 4.5h10M6.5 4.5V3.3c0-.5.3-.8.8-.8h1.4c.5 0 .8.3.8.8v1.2M4.5 4.5l.6 8c.1.6.5 1 1.1 1h3.6c.6 0 1-.4 1.1-1l.6-8M6.8 7v4M9.2 7v4" />),
+  settings: menuIcon(<><path d="M6.9 2.3h2.2l.4 1.6 1.2.7 1.6-.5 1.1 1.9-1.2 1.2v1.6l1.2 1.2-1.1 1.9-1.6-.5-1.2.7-.4 1.6H6.9l-.4-1.6-1.2-.7-1.6.5-1.1-1.9 1.2-1.2V7.2L2.6 6l1.1-1.9 1.6.5 1.2-.7z" /><circle cx="8" cy="8" r="1.9" /></>),
+  show: menuIcon(<><path d="M1.8 8S4 3.8 8 3.8 14.2 8 14.2 8 12 12.2 8 12.2 1.8 8 1.8 8Z" /><circle cx="8" cy="8" r="1.9" /></>),
+  hide: menuIcon(<><path d="M6.3 4a6 6 0 0 1 1.7-.2c4 0 6.2 4.2 6.2 4.2a10 10 0 0 1-1.6 2.1M4.3 5A10 10 0 0 0 1.8 8s2.2 4.2 6.2 4.2a6 6 0 0 0 2.7-.6" /><path d="m2.5 2.5 11 11" /></>),
+  lock: menuIcon(<><rect x="3.5" y="7.2" width="9" height="6.3" rx="1.5" /><path d="M5.5 7.2V5.3a2.5 2.5 0 0 1 5 0v1.9" /></>),
+  unlock: menuIcon(<><rect x="3.5" y="7.2" width="9" height="6.3" rx="1.5" /><path d="M5.5 7.2V5.3a2.5 2.5 0 0 1 4.8-1" /></>),
+  front: menuIcon(<><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M2.5 9.5v-6a1 1 0 0 1 1-1h6" opacity="0.55" /></>),
+  back: menuIcon(<><rect x="2.5" y="2.5" width="8" height="8" rx="1.5" opacity="0.55" /><path d="M13.5 6.5v6a1 1 0 0 1-1 1h-6" /></>),
+} as const;
+
+/** A right-click menu (a tab's: Add widget, Duplicate, Close tab), with icons; the destructive items last, in red. */
 export function TabMenu({ at, items, onClose }: { at: { x: number; y: number }; items: readonly TabMenuItem[]; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState(at);
@@ -90,17 +117,20 @@ export function TabMenu({ at, items, onClose }: { at: { x: number; y: number }; 
   }, [onClose]);
   return createPortal(
     <div ref={ref} className="menu-popup tabmenu" role="menu" style={{ left: place.x, top: place.y }} onContextMenu={(e) => e.preventDefault()}>
-      {items.map((it) => (
-        <button
-          key={it.label}
-          type="button"
-          role="menuitem"
-          className="tabmenu__item"
-          disabled={it.disabled}
-          onClick={() => { onClose(); it.onClick(); }}
-        >
-          {it.label}
-        </button>
+      {items.map((it, i) => (
+        <Fragment key={it.label}>
+          {it.danger && i > 0 && !items[i - 1]!.danger && <span className="tabmenu__sep" role="separator" />}
+          <button
+            type="button"
+            role="menuitem"
+            className={`tabmenu__item${it.danger ? ' is-danger' : ''}`}
+            disabled={it.disabled}
+            onClick={() => { onClose(); it.onClick(); }}
+          >
+            <span className="tabmenu__ic">{it.icon}</span>
+            <span>{it.label}</span>
+          </button>
+        </Fragment>
       ))}
     </div>,
     document.body,
@@ -147,27 +177,31 @@ export function TabSidebar({ title, widgets, markets, onAdd, onClose }: {
   const found = markets && term ? markets.filter((m) => m.label.toUpperCase().includes(term) || m.name.toUpperCase().includes(term)).slice(0, 10) : [];
 
   return createPortal(
-    <div className="dash-edit-root tabside-root">
-      <aside ref={ref} className="dash-edit-side dash-edit-palette tabside" aria-label={title}>
+    <div className="tabside-root">
+      {/* The page under it, slightly blurred; a press there closes the sidebar. */}
+      <div className="tabside-scrim" aria-hidden="true" />
+      <aside ref={ref} className="tabside" aria-label={title}>
         <header className="tabside__head">
           <b>{title}</b>
           <button type="button" className="tabside__close" aria-label="Close" title="Close (Esc)" onClick={onClose}>
             <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
           </button>
         </header>
-        <div className="dash-edit-palette__list">
+        <div className="dash-edit-palette__list tabside__list">
           {markets && (
             <section className="dash-edit-palette__group">
               <p>Charts</p>
-              <input
-                className="tabside__find"
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Another market: ETH, SOL, HYPE…"
-                aria-label="Find a market for a chart tab"
-                autoFocus
-                onKeyDown={(e) => { if (e.key === 'Enter' && found[0]) onAdd(`asset:${found[0].name}`); }}
-              />
+              <label className="tabside__find">
+                <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="Another market: ETH, SOL, HYPE…"
+                  aria-label="Find a market for a chart tab"
+                  autoFocus
+                  onKeyDown={(e) => { if (e.key === 'Enter' && found[0]) onAdd(`asset:${found[0].name}`); }}
+                />
+              </label>
               {found.length > 0 && (
                 <div className="dash-edit-palette__grid" role="list">
                   {found.map((m) => (
