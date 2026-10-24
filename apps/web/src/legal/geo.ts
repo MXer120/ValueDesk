@@ -109,6 +109,11 @@ export function useViewerAccess(): SiteAccess {
   return useSyncExternalStore(subscribeGeo, viewerAccess, viewerAccess);
 }
 
+/** Where the edge saw the visitor, re-rendering when the answer arrives (the terms' country of residence). */
+export function useViewerGeo(): ViewerGeo {
+  return useSyncExternalStore(subscribeGeo, viewerGeo, viewerGeo);
+}
+
 /** For tests: forget the answer. */
 export function _resetGeoForTests(next: ViewerGeo = UNKNOWN): void {
   asked = null;

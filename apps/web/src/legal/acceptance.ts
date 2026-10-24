@@ -9,8 +9,9 @@
  * they are not part of the fingerprint.
  *
  * ONE STEP, WITH THE WALLET (LegalGate.tsx TermsGate):
- *   - a visitor with a connected wallet ticks the four statements, names the
- *     country of residence and signs ONE message with that wallet - free: an
+ *   - a visitor with a connected wallet ticks "I confirm" over the four
+ *     statements and signs ONE message with that wallet, for the country of
+ *     residence the edge saw (geo.ts; shown, and changeable) - free: an
  *     EIP-712 signature, not a transaction, no gas, no funds move. The signed
  *     request is a CopyRequest 'accept-site-terms' (packages/copy-engine/src/
  *     api.ts) whose payload carries the version, the fingerprint, the country,
@@ -19,9 +20,9 @@
  *     it to its log of signed requests with the country the edge saw
  *     (apps/executor, POST /api/copy/v1/site-terms); until the executor has it,
  *     it is sent again on the next visit;
- *   - a visitor without a wallet ticks the same statements ("Agree and continue"):
- *     kept in this browser only. When a wallet connects later, it is asked to sign
- *     what was ticked (the statements are shown again, not re-ticked);
+ *   - a visitor without a wallet confirms the same statements ("Agree and
+ *     continue"): kept in this browser only. When a wallet connects later, it is
+ *     asked once to sign them;
  *   - a wallet from a close-only place cannot sign (its country restricts
  *     trading): it browses on the ticked statements and can close positions.
  * Copy trading asks for its own signature on top - the copy terms, before the
@@ -62,10 +63,10 @@ export type StatementId = 'agree' | 'eligible' | 'risks' | 'ownDecisions';
  * AcceptSiteTermsPayload.
  */
 export const STATEMENTS: ReadonlyArray<{ id: StatementId; label: string }> = [
-  { id: 'agree', label: 'I have read and agree to the [Terms of use](/terms) and the [Risk disclosure](/risk), and I have read the [Privacy policy](/privacy).' },
-  { id: 'eligible', label: 'I am at least 18 years old and act for myself. I am not in, and do not live in, a country or region where ValueDesk, or the trading I use it for, is not allowed (Terms of use, section 3); I am not subject to sanctions; and I do not hide where I am, for example with a VPN.' },
-  { id: 'risks', label: 'I understand that trading perpetual futures and crypto-assets can lose me all the money I put in, quickly, and that orders can fill late, partly, at worse prices or not at all.' },
-  { id: 'ownDecisions', label: 'Every trade, copy and algo order is my own decision: ValueDesk gives no advice, owes me no fiduciary duty, does not check whether trading suits me, and never holds my funds.' },
+  { id: 'agree', label: 'I agree to the [Terms of use](/terms) and the [Risk disclosure](/risk), and have read the [Privacy policy](/privacy).' },
+  { id: 'eligible', label: 'I am 18 or older, not in or resident of a restricted or sanctioned place, and do not hide where I am (e.g. with a VPN).' },
+  { id: 'risks', label: 'I understand that trading perpetual futures can lose me all the money I put in.' },
+  { id: 'ownDecisions', label: 'My trades are my own decisions: ValueDesk gives no advice and never holds my funds.' },
 ];
 
 /** A statement as plain text: [label](/page) -> label. */

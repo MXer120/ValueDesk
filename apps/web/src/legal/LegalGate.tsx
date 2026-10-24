@@ -22,7 +22,8 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { Modal } from '../components/Modal';
-import { countries } from '../copy/countries';
+import { FxSelect } from '../components/funds/ui';
+import { countries, countryName } from '../copy/countries';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, pathForLegal, type LegalPage } from '../router';
 import type { Eip1193Provider } from '../wallet';
 import { WalletError } from '../wallet';
@@ -36,10 +37,9 @@ import {
   signSiteTerms,
   signedTerms,
   useAcceptanceRevision,
-  type StatementId,
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from './embeds';
-import { useViewerAccess } from './geo';
+import { useViewerAccess, useViewerGeo } from './geo';
 import { screeningOf, useScreening } from './screening';
 import { NOTICES, type NoticeId } from './notices';
 import './gate.css';
@@ -147,36 +147,42 @@ const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject
 /** Wallets that chose "Not now" for the signature in this page load: the gate does not ask them again. */
 const skipped = new Set<string>();
 
+const shortAddress = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
+
 interface TermsFormProps {
-  /** The statements must be ticked here (false: they were ticked before and are shown for the signature). */
-  needTicks: boolean;
-  /** The connected wallet that signs - null: no wallet, the statements are only ticked. */
+  /** The connected wallet that signs - null: no wallet, the statements are only confirmed. */
   signer: { owner: string; provider: Eip1193Provider } | null;
   onOpen?: (p: LegalPage) => void;
-  /** Accepted: 'signed' by the wallet, or only 'ticked'. */
-  onDone: (how: 'signed' | 'ticked') => void;
-  /** The second button: accept without the signature, or put the signature off. */
-  secondary?: { label: string; onClick: () => void; needsTicks?: boolean } | null;
+  /** Accepted: 'signed' by the wallet, or only 'confirmed' in this browser. */
+  onDone: (how: 'signed' | 'confirmed') => void;
+  /** The quiet second button: accept without the signature, or put the signature off. */
+  secondary?: { label: string; onClick: () => void } | null;
 }
 
 /**
- * The statements and, with a wallet, the country of residence and ONE free
- * signature (acceptance.ts) - the body of the first-visit gate and of the
- * sheet before trading.
+ * The four statements under ONE "I confirm" and, with a wallet, ONE free
+ * signature (acceptance.ts) - the body of the first-visit gate and of the sheet
+ * before trading. The country of residence is the one the edge saw (geo.ts),
+ * shown with the wallet; it is asked only where the edge could not tell, and
+ * can be changed (a traveller).
  */
-function TermsForm({ needTicks, signer, onOpen, onDone, secondary }: TermsFormProps) {
-  const [ticks, setTicks] = useState<Partial<Record<StatementId, boolean>>>({});
-  const [country, setCountry] = useState('');
+function TermsForm({ signer, onOpen, onDone, secondary }: TermsFormProps) {
+  const geo = useViewerGeo();
+  const [confirmed, setConfirmed] = useState(false);
+  const [picked, setPicked] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const allTicked = !needTicks || STATEMENTS.every((s) => ticks[s.id]);
+  const detected = geo.country && !countryProblem(geo.country) ? geo.country : null;
+  const country = picked ?? detected ?? '';
   const problem = country ? countryProblem(country) : null;
+  const choosing = !!signer && (changing || !detected);
 
   const primary = async () => {
     setError(null);
     if (!signer) {
       acceptBrowse(STATEMENTS.map((s) => s.id));
-      onDone('ticked');
+      onDone('confirmed');
       return;
     }
     setBusy(true);
@@ -184,7 +190,7 @@ function TermsForm({ needTicks, signer, onOpen, onDone, secondary }: TermsFormPr
       await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
       onDone('signed');
     } catch (e) {
-      setError(isRejection(e) ? 'Nothing was signed. Sign the message in your wallet to accept the terms.' : e instanceof Error ? e.message : String(e));
+      setError(isRejection(e) ? 'Nothing was signed. Approve the message in your wallet to continue.' : e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -192,65 +198,89 @@ function TermsForm({ needTicks, signer, onOpen, onDone, secondary }: TermsFormPr
 
   return (
     <>
-      {needTicks ? (
-        <div className="lg-checks">
-          {STATEMENTS.map((s) => (
-            <label key={s.id} className="lg-check">
-              <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
-              <span><LegalText text={s.label} onOpen={onOpen} /></span>
-            </label>
-          ))}
-        </div>
-      ) : (
-        <ul className="lg-confirm">
+      <label className={`lg-card lg-card--confirm${confirmed ? ' is-on' : ''}`}>
+        <span className="lg-card__head">
+          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+          <span>I confirm that</span>
+        </span>
+        <ul className="lg-points">
           {STATEMENTS.map((s) => <li key={s.id}><LegalText text={s.label} onOpen={onOpen} /></li>)}
         </ul>
-      )}
+      </label>
+
       {signer && (
-        <>
-          <label className="fx-lbl" htmlFor="lg-country">Country of residence</label>
-          <select id="lg-country" className="fx-sel lg-select" value={country} onChange={(e) => setCountry(e.target.value)}>
-            <option value="">Choose…</option>
-            {countries().map((c) => (
-              <option key={c.code} value={c.code} disabled={!!countryProblem(c.code)}>
-                {c.name}
-                {countryProblem(c.code) ? ' - not available' : ''}
-              </option>
-            ))}
-          </select>
-          {problem && <p className="fx-note fx-note--err">{problem}</p>}
-          <p className="lg-fine">
-            Your wallet signs one message with these statements and the terms&rsquo; version. It is free: a signature, not a transaction - no gas, and no funds move.
-          </p>
-        </>
+        <div className="lg-card lg-card--wallet">
+          <div className="lg-kv">
+            <span>Wallet</span>
+            <b>{shortAddress(signer.owner)}</b>
+          </div>
+          <div className="lg-kv">
+            <span>Resident of</span>
+            {choosing ? (
+              <FxSelect
+                label="Country of residence"
+                value={country}
+                onChange={(v) => setPicked(v || null)}
+                options={[
+                  ...(country ? [] : [{ value: '', label: 'Choose…' }]),
+                  ...countries().map((c) => ({ value: c.code, label: c.name, disabled: !!countryProblem(c.code), hint: countryProblem(c.code) ? 'not available' : undefined })),
+                ]}
+                searchable
+                searchPlaceholder="Search countries"
+                triggerClassName="fx-sel lg-pick"
+                listMinWidth={240}
+                listAlign="end"
+              />
+            ) : (
+              <b>
+                {countryName(country)}{' '}
+                <button type="button" className="lg-inline" onClick={() => setChanging(true)}>Change</button>
+              </b>
+            )}
+          </div>
+          {problem && <p className="lg-err">{problem}</p>}
+        </div>
       )}
-      {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
-      <div className="lg-actions">
-        <button
-          type="button"
-          className="fx-cta"
-          disabled={!allTicked || busy || (!!signer && (!country || !!problem))}
-          aria-busy={busy || undefined}
-          onClick={() => void primary()}
-        >
-          {busy ? 'Waiting for wallet…' : signer ? 'Sign and accept' : 'Agree and continue'}
+
+      {error && <p className="lg-err" role="alert">{error}</p>}
+      <button
+        type="button"
+        className="lg-cta"
+        disabled={!confirmed || busy || (!!signer && (!country || !!problem))}
+        aria-busy={busy || undefined}
+        onClick={() => void primary()}
+      >
+        {busy ? 'Waiting for your wallet…' : signer ? 'Sign and continue' : 'Agree and continue'}
+      </button>
+      {signer && <p className="lg-hint">A free signature in your wallet: not a transaction, no gas, no funds move.</p>}
+      {secondary && (
+        <button type="button" className="lg-quiet" disabled={busy || !confirmed} onClick={secondary.onClick}>
+          {secondary.label}
         </button>
-        {secondary && (
-          <button type="button" className="fx-link" disabled={busy || (!!secondary.needsTicks && !allTicked)} onClick={secondary.onClick}>
-            {secondary.label}
-          </button>
-        )}
-      </div>
+      )}
     </>
+  );
+}
+
+/** The links and the version, at the foot of both sheets. */
+function TermsFoot({ onOpen }: { onOpen?: (p: LegalPage) => void }) {
+  return (
+    <p className="lg-foot">
+      <LegalLink page="terms" onOpen={onOpen}>Terms</LegalLink>
+      <LegalLink page="risk" onOpen={onOpen}>Risk</LegalLink>
+      <LegalLink page="privacy" onOpen={onOpen}>Privacy</LegalLink>
+      <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>
+      <span>Version {SITE_TERMS_VERSION}</span>
+    </p>
   );
 }
 
 /**
  * The first-visit gate (App.tsx), until this browser has accepted the current
  * terms - signed by the connected wallet where there is one that may trade, in
- * the same step. A wallet that connects after the statements were ticked is
- * asked once to sign them (it may put that off: trading asks again). Never over
- * a legal page (`hidden`), so what it links to can be read first.
+ * the same step. A wallet that connects after the terms were accepted is asked
+ * once to sign them (it may put that off: trading asks again). Never over a
+ * legal page (`hidden`), so what it links to can be read first.
  */
 export function TermsGate({ hidden, onOpen, address, provider }: {
   hidden: boolean;
@@ -275,36 +305,33 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
   return (
     <Modal
       open={!hidden}
-      size="md"
-      title={accepted ? 'Sign the terms with your wallet' : changed ? 'Our terms have changed' : 'Before you use ValueDesk'}
-      className={`fx${accepted ? '' : ' lg-gate'}`}
-      // Accepting is the only way on; once the statements are ticked, the signature can wait.
+      size="sm"
+      title={accepted ? 'Sign the terms' : changed ? 'Our terms have changed' : 'Welcome to ValueDesk'}
+      className={`lg-sheet${accepted ? '' : ' lg-gate'}`}
+      // Accepting is the only way on; once the terms are accepted, the signature can wait.
       onClose={() => { if (accepted) skip(); }}
       dismissOnBackdrop={false}
     >
-      <p className="fx-note">
+      <p className="lg-lead">
         {accepted
-          ? 'You accepted these terms in this browser. Sign them with this wallet, once, so it can trade: ValueDesk keeps the signature as its record of what you agreed to.'
+          ? 'Sign the terms you accepted with this wallet, once, so it can trade.'
           : changed
-            ? `Please read and accept the current version (${SITE_TERMS_VERSION}) to go on using ValueDesk.`
-            : 'ValueDesk is a non-custodial interface to the SoDEX exchange, with market data, copy trading and algo orders. Please read and accept the terms first.'}
+            ? 'Please confirm the current version to go on.'
+            : 'Non-custodial trading on SoDEX. Perpetual futures are high-risk: you can lose everything you put in.'}
       </p>
-      {access.level === 'close-only' && <p className="fx-note fx-note--warn">{access.reason}</p>}
+      {access.level === 'close-only' && <p className="lg-warn">{access.reason}</p>}
       <TermsForm
-        key={signer ? `sign:${signer.owner}` : 'tick'}
-        needTicks={!accepted}
+        key={signer ? `sign:${signer.owner}` : 'confirm'}
         signer={signer}
         onOpen={onOpen}
         onDone={() => setTick((n) => n + 1)}
         secondary={
           !signer ? null
           : accepted ? { label: 'Not now', onClick: skip }
-          : { label: 'Agree, and sign before I trade', needsTicks: true, onClick: () => { acceptBrowse(STATEMENTS.map((s) => s.id)); skip(); } }
+          : { label: 'Continue without signing - sign before I trade', onClick: () => { acceptBrowse(STATEMENTS.map((s) => s.id)); skip(); } }
         }
       />
-      <p className="lg-fine">
-        Version {SITE_TERMS_VERSION}. ValueDesk sets no cookies and uses no tracking: <LegalLink page="cookies" onOpen={onOpen}>Cookies and storage</LegalLink>. Copy trading asks for its own terms before the first copy.
-      </p>
+      <TermsFoot onOpen={onOpen} />
     </Modal>
   );
 }
@@ -343,17 +370,15 @@ export function useSiteTermsSheet(): { ask: (o: { owner: string; provider: Eip11
   }, []);
 
   const dialog = req ? (
-    <Modal open size="md" title="Sign the terms to trade" className="fx lg-sign" onClose={() => close(false)} dismissOnBackdrop={false}>
-      <p className="fx-note">
-        Before you trade through ValueDesk, your wallet signs the <LegalLink page="terms">Terms of use</LegalLink> and the <LegalLink page="risk">Risk disclosure</LegalLink> (version {SITE_TERMS_VERSION}) with your country of residence - our record of what you agreed to.
-      </p>
+    <Modal open size="sm" title="Sign the terms to trade" className="lg-sheet" onClose={() => close(false)} dismissOnBackdrop={false}>
+      <p className="lg-lead">Your wallet signs the terms once before it trades through ValueDesk: our record of what you agreed to.</p>
       <TermsForm
         key={req.owner}
-        needTicks={!browseAccepted()}
         signer={{ owner: req.owner, provider: req.provider }}
         onDone={() => close(true)}
         secondary={{ label: 'Not now', onClick: () => close(false) }}
       />
+      <TermsFoot />
     </Modal>
   ) : null;
 

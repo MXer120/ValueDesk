@@ -1,6 +1,6 @@
-/* The legal gates and notices (legal/LegalGate.tsx). Tokens only; the sheets
-   are `.fx` modals like the funds sheets, so their notes, labels, selects and
-   buttons are funds.css's. Everything here starts at an `.lg-` class. */
+/* The legal gates and notices (legal/LegalGate.tsx). Tokens only; the terms
+   sheets are drawn like the Connect dialog (account/ConnectDialog.css).
+   Everything here starts at an `.lg-` class. */
 
 /* A one-line notice in a panel: the panel's own muted type, never a banner. */
 .lg-note {
@@ -17,59 +17,207 @@
 }
 .lg-link:hover { color: var(--text); }
 
-/* The statements of the two sheets. */
-.lg-checks {
+/* --- the terms sheets (TermsGate, useSiteTermsSheet) ---------------------------
+   Drawn like the Connect dialog (account/ConnectDialog.css): the glass panel,
+   a left-aligned 20px title at weight 500, a round filled close button,
+   filled rounded cards, one full-width call to action. Tokens only. */
+.modal.lg-sheet {
+  max-width: 440px;
+  border-radius: var(--radius-md);
+}
+.lg-sheet .modal-head {
+  position: relative;
+  padding: var(--sp-6) var(--sp-6) 0;
+  border-bottom: 0;
+}
+.lg-sheet .modal-head h2 {
+  margin: 0;
+  padding-right: 48px;
+  font-size: var(--fs-xl);
+  line-height: var(--lh-xl);
+  font-weight: 500;
+  letter-spacing: var(--ls-read, normal);
+  color: var(--text);
+}
+.lg-sheet .modal-close {
+  position: absolute;
+  top: var(--sp-4);
+  right: var(--sp-4);
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-control) 30%, transparent);
+  color: var(--muted);
+  font-size: 18px;
+}
+.lg-sheet .modal-close:hover { color: var(--text); }
+/* The clickwrap cannot be closed: accepting is the way on. */
+.lg-gate .modal-close { visibility: hidden; }
+.lg-sheet .modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-6) var(--sp-5);
+}
+
+.lg-lead {
+  margin: 0 0 var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+}
+.lg-warn,
+.lg-err {
+  margin: 0;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.lg-warn { color: var(--warn); }
+.lg-err { color: var(--neg); }
+
+/* A filled card, as a Connect row - here the statements, there the wallet. */
+.lg-card {
   display: flex;
   flex-direction: column;
   gap: var(--sp-2);
-  margin: var(--sp-3) 0;
-}
-.lg-check {
-  display: flex;
-  flex-direction: row; /* styles.css stacks every label */
-  align-items: flex-start;
-  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-control) 30%, transparent);
   color: var(--text);
-  font-size: var(--fs-xs);
-  line-height: 1.45;
+}
+/* The whole statements card is the checkbox's label: a click anywhere ticks it. */
+.lg-card--confirm {
   cursor: pointer;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
 }
-.lg-check input {
-  flex: none;
-  width: 14px;
-  height: 14px;
-  margin: 2px 0 0;
-  accent-color: var(--accent);
-}
-.lg-check .lg-link { color: var(--text); }
-/* The statements again, read-only, when the wallet signs what was ticked before. */
-.lg-confirm {
-  margin: var(--sp-3) 0;
-  padding-left: 18px;
-  color: var(--text);
-  font-size: var(--fs-xs);
-  line-height: 1.45;
-}
-.lg-confirm li + li { margin-top: var(--sp-1); }
-.lg-confirm .lg-link { color: var(--text); }
-.lg-actions {
+.lg-card--confirm:hover { background: color-mix(in srgb, var(--bg-control) 45%, transparent); }
+.lg-card--confirm.is-on { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); }
+.lg-card__head {
   display: flex;
   align-items: center;
-  gap: var(--sp-3);
-  margin-top: var(--sp-2);
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  font-weight: 500;
 }
-.lg-actions .fx-cta { flex: 1; }
-.lg-fine {
-  margin: var(--sp-3) 0 0;
+.lg-points {
+  margin: 0;
+  padding: 0 0 0 22px;
+  list-style: none;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
+.lg-points li { position: relative; }
+.lg-points li + li { margin-top: 6px; }
+.lg-points li::before {
+  content: '';
+  position: absolute;
+  left: -14px;
+  top: 0.6em;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+.lg-points .lg-link { color: var(--text); }
+
+.lg-kv {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 24px;
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  color: var(--muted);
+}
+.lg-kv b {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text);
+  font-weight: 500;
+}
+.lg-inline {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.lg-inline:hover { color: var(--text); }
+/* The country picker (FxSelect's button) as a compact value, not a full-width field. */
+.lg-kv .fx-selwrap { max-width: 62%; }
+.lg-pick.fx-sel {
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+}
+
+/* The one action: full width, the app's accent, as tall as a Connect row. */
+.lg-cta {
+  width: 100%;
+  min-height: 48px;
+  margin-top: var(--sp-1);
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: var(--fs-base);
+  font-weight: 500;
+  cursor: pointer;
+}
+.lg-cta:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
+.lg-cta:disabled { opacity: 0.4; cursor: not-allowed; }
+.lg-hint {
+  margin: calc(-1 * var(--sp-1)) 0 0;
+  text-align: center;
   color: var(--muted);
   font-size: var(--fs-micro, var(--fs-xs));
-  line-height: 1.4;
+  line-height: var(--lh-micro, 1.4);
 }
-.lg-select { width: 100%; }
-.lg-sign .fx-lbl { margin-top: var(--sp-3); }
+.lg-quiet {
+  align-self: center;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+.lg-quiet:hover:not(:disabled) { color: var(--text); }
+.lg-quiet:disabled { opacity: 0.4; cursor: not-allowed; }
+.lg-foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px var(--sp-3);
+  margin: var(--sp-2) 0 0;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-soft, var(--line));
+  color: var(--muted);
+  font-size: var(--fs-micro, var(--fs-xs));
+  line-height: var(--lh-micro, 1.4);
+}
+.lg-foot .lg-link { text-decoration-color: transparent; }
+.lg-foot .lg-link:hover { text-decoration-color: currentColor; }
 
-/* The clickwrap cannot be closed: accepting is the way on. */
-.lg-gate .modal-close { visibility: hidden; }
 
 /* A sanctioned place (SiteGate): the legal pages and a notice, nothing else. */
 .lg-blocked {
