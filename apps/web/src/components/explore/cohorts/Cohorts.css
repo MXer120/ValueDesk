@@ -364,6 +364,10 @@ button.coh-pick__opt:hover, button.coh-pick__opt.is-on { background: color-mix(i
 /* Only the label stretches: a coin's letter avatar is a span too, and must keep its size. */
 .coh-pick__opt .coh-pick__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coh-pick__opt .coin-ic { flex: none; }
+/* A sector's icon (SectorIcon.tsx): muted, lit with the row. */
+.coh-pick__ic { display: grid; flex: none; place-items: center; width: 18px; color: var(--muted); transition: color 140ms; }
+button.coh-pick__opt:hover .coh-pick__ic, button.coh-pick__opt.is-on .coh-pick__ic { color: var(--text); }
+.coh-pick__coin svg { flex: none; color: var(--muted); }
 .coh-pick__head {
   display: flex;
   justify-content: space-between;
@@ -394,6 +398,15 @@ button.coh-pick__opt:hover, button.coh-pick__opt.is-on { background: color-mix(i
 .coh-d__title h2 { margin: 0; font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.01em; }
 .coh-d__title span { color: var(--muted); font-size: var(--fs-micro); }
 .coh-d__count { margin-left: auto; color: var(--muted); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+/* An asset page's way to its chart on the trade page (MarketSection.tsx FocusPage). */
+.coh-d__chart {
+  display: inline-flex; flex: none; align-items: center; gap: 6px; height: 30px; min-height: 0; padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 9px; background: rgba(255, 255, 255, 0.04);
+  color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
+  transition: background 140ms, border-color 140ms;
+}
+.coh-d__chart:hover { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.08); }
+.coh-d__chart svg { color: var(--muted); }
 .coh-d__meters {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

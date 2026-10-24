@@ -120,14 +120,19 @@ export function MarketMapPage({
 /* --- one asset or sector ------------------------------------------------------------------ */
 
 export function FocusPage({
-  venues, focus, onBack, onOpenCohort, onAsset,
+  venues, focus, onBack, onOpenCohort, onAsset, chartFor, onOpenChart,
 }: {
   venues: readonly Venue[];
   focus: CohortFilter;
   onBack: () => void;
   onOpenCohort: (id: CohortId, f: CohortFilter) => void;
   onAsset: (coin: string) => void;
+  /** The SoDEX market an asset charts as (null: not listed there). */
+  chartFor?: (coin: string) => string | null;
+  /** Its chart on the trade page. */
+  onOpenChart?: (symbol: string) => void;
 }) {
+  const chartSym = focus.coin && onOpenChart ? chartFor?.(focus.coin) ?? null : null;
   const [range, setRange] = useState<CohortRange>('7d');
   const [group, setGroup] = useState<'pnl' | 'size'>('pnl');
   /** The chart's hovered time: the table shows each cohort as it stood then. */
@@ -180,6 +185,14 @@ export function FocusPage({
         </div>
         {t && <BiasPill long={t.long} short={t.short} />}
         {t && <span className="coh-d__count">{fmtCount(t.wallets)} wallets holding</span>}
+        {chartSym && (
+          <button type="button" className="coh-d__chart" onClick={() => onOpenChart!(chartSym)} title={`Open ${marketName(focus.coin!)} on the trade page`}>
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 20h16M7 16V9M7 9V6M12 16v-3M12 13V5M17 16v-5M17 11V8" /><path d="M5.5 9h3v6h-3zM10.5 7h3v6h-3zM15.5 9h3v4h-3z" />
+            </svg>
+            Open chart
+          </button>
+        )}
       </div>
 
       {r.error && !d ? <LoadFailed what={name} onRetry={r.retry} /> : (

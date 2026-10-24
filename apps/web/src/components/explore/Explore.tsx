@@ -74,7 +74,7 @@ export function Explore({ onOpenSymbol }: ExploreProps) {
       </div>
       {view === 'cohorts' ? (
         <div className="pf ex-cohorts">
-          <Cohorts onScan={(a) => { window.location.href = `/scan?find=${encodeURIComponent(a)}`; }} />
+          <Cohorts onScan={(a) => { window.location.href = `/scan?find=${encodeURIComponent(a)}`; }} onOpenSymbol={onOpenSymbol} />
         </div>
       ) : view === 'funding' ? (
         <div className="ex-desk">
