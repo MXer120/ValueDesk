@@ -9,8 +9,10 @@
  * AS HYPERDASH COUNTS (compared 2026-10-03). A cohort is the wallets in it that
  * hold an open position: a wallet with none is not part of any figure, count
  * or list. Size cohorts weigh PERP EQUITY - what the wallet's perps account is
- * worth (perpEquity), not its spot tokens or staked HYPE. PnL cohorts stay
- * all-time PnL.
+ * worth (perpEquity): for a unified Hyperliquid account, whose spot is its
+ * margin, everything its spot holds at market prices; never staked HYPE. PnL
+ * cohorts stay all-time PnL - for a Hyperliquid holder the leaderboard does not
+ * rank, read from its portfolio (indexer/cohortTracker.ts planPnl).
  *
  * NETTING. A wallet on several of the chosen venues is ONE wallet: its PnL and
  * perp equity are summed across them and it lands in one cohort, and its
@@ -260,9 +262,11 @@ export const MARGIN_SIBLING: Partial<Record<Venue, Venue>> = { hyperliquid: 'tra
  * A wallet's PERP EQUITY on a venue - what the size cohorts weigh, as Hyperdash
  * does (its "perp equity": verified 2026-10-03 against its wallet pages).
  *
- *   Hyperliquid  a unified / portfolio-margin account: its stablecoin collateral
- *                (one pool for every dex); otherwise the main dex's account value
- *                plus the xyz dex's (separate margin books). `sibling` = the xyz book.
+ *   Hyperliquid  a unified / portfolio-margin account: its spot holdings, every
+ *                token at its spot price (one pool for every dex; re-checked
+ *                2026-10-24 - indexer/cohortSource.ts spotCollateral); otherwise
+ *                the main dex's account value plus the xyz dex's (separate
+ *                margin books). `sibling` = the xyz book.
  *   trade.xyz    the shared collateral when the Hyperliquid book has it, else the
  *                xyz dex's own account value. `sibling` = the Hyperliquid book.
  *   SoDEX        the perps account's value (`av`; spot is a separate account).

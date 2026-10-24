@@ -159,7 +159,17 @@ test('the spot state: unified collateral in stablecoins; a standard account has 
       { coin: 'USDT0', token: 268, total: '8' }, { coin: 'USDH', token: 360, total: '0.01' },
     ],
     tokenToAvailableAfterMaintenance: [[0, '162591964.9'], [268, '8'], [360, '0.01']],
-  }), 191147342.25 + 8 + 0.01);
+  }), 191147342.25 + 8 + 0.01, 'no prices: the stablecoins alone, as before');
+  // With prices every token counts at its spot price (Hyperdash's "perp equity"), HYPE here.
+  const px = new Map([['HYPE', 40], ['PURR', 0.2]]);
+  assert.equal(spotCollateral({
+    balances: [
+      { coin: 'USDC', token: 0, total: '1000' }, { coin: 'HYPE', token: 150, total: '50' },
+      { coin: 'PURR', token: 1, total: '100' }, { coin: 'NOPRICE', token: 9, total: '5' },
+    ],
+    tokenToAvailableAfterMaintenance: [[0, '900']],
+  }, px), 1000 + 50 * 40 + 100 * 0.2);
+  assert.equal(spotCollateral({ balances: [{ coin: 'HYPE', token: 150, total: '50' }] }, px), null, 'standard: spot is still spot');
   assert.equal(needsSpot(252.9e6, 159e6, 17), true, 'the leaderboard sees far more than the perps value');
   assert.equal(needsSpot(1_050_000, 1_000_000, 3), false, 'within 10%');
   assert.equal(needsSpot(5e6, 0, 0), false, 'no positions: nothing to size');

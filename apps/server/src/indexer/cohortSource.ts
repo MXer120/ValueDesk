@@ -20,7 +20,9 @@
  */
 import type { Venue } from '../valuescan/types.js';
 import { hlInfo } from '../valuescan/hyperliquid/index.js';
-import type { HlClearinghouseState } from '../valuescan/hyperliquid/raw.js';
+import type { HlClearinghouseState, HlPortfolio } from '../valuescan/hyperliquid/raw.js';
+import { portfolioWindow } from '../valuescan/hyperliquid/mappers.js';
+import type { CohortPnlRow } from './store.js';
 import { perpsState } from '../valuescan/sodex/gateway.js';
 import { arcusAccount } from '../valuescan/extra/arcus.js';
 import { LIGHTER_API } from '../valuescan/extra/lighter.js';
@@ -55,22 +57,62 @@ interface HlSpotState {
 const STABLE_COLLATERAL = /^(USDC|USDT0?|USDE|USDH|USDG)$/i;
 
 /**
- * A unified / portfolio-margin account's perp equity from its spot state: the
- * stablecoins it lists as collateral (verified 2026-10-03: Hyperdash's "perps"
- * for 0x7737...bf66 is its $20.1M USDC while each dex's account value only
- * holds the margin in use there; for a standard account Hyperdash's figure is
- * the dexes' account values summed). Null for a standard account - its spot
- * is spot, not perps. Collateral that is not a stablecoin is not counted.
+ * A unified / portfolio-margin account's perp equity from its spot state: what
+ * its spot holds, every token at its spot price (stablecoins at $1). Null for a
+ * standard account - its spot is spot, not perps.
+ *
+ * As Hyperdash's "perp equity" reads (checked 2026-10-24 on its Apex list):
+ * 0x8af7...fa05 $33.2M against our spot total $33.6M, where its stablecoins
+ * alone were $22.8M; RTB 2 $11.7M against $11.7M. Staked HYPE is not in it (RTB
+ * 2 has $2M staked). The rule before (2026-10-03, from 0x7737...bf66, then all
+ * USDC) counted the stablecoins only, which put accounts holding HYPE or other
+ * tokens as margin a size cohort too low. Without prices (`px` missing) the
+ * stablecoins alone are counted, as before.
  */
-export function spotCollateral(st: HlSpotState | null | undefined): number | null {
+export function spotCollateral(st: HlSpotState | null | undefined, px?: ReadonlyMap<string, number> | null): number | null {
   const pool = st?.tokenToAvailableAfterMaintenance;
   if (!Array.isArray(pool)) return null;
   const tokens = new Set(pool.map((e) => Number(e?.[0])));
   let sum = 0;
   for (const b of st?.balances ?? []) {
-    if (tokens.has(Number(b.token)) && STABLE_COLLATERAL.test(String(b.coin ?? ''))) sum += num(b.total) ?? 0;
+    const coin = String(b.coin ?? '');
+    const total = num(b.total) ?? 0;
+    if (STABLE_COLLATERAL.test(coin)) {
+      if (px || tokens.has(Number(b.token))) sum += total;
+    } else if (px) {
+      sum += total * (px.get(coin) ?? 0);
+    }
   }
   return sum;
+}
+
+type HlSpotMetaCtxs = [
+  { tokens?: Array<{ name?: string; index?: number }>; universe?: Array<{ tokens?: [number, number]; index?: number }> },
+  Array<{ markPx?: string | null; midPx?: string | null }>,
+];
+
+/** Spot tokens' prices in USDC (token name -> mark), from spotMetaAndAssetCtxs: the pairs quoted in USDC (token 0). */
+export function spotPrices(raw: HlSpotMetaCtxs | null | undefined): Map<string, number> {
+  const out = new Map<string, number>();
+  if (!Array.isArray(raw)) return out;
+  const [meta, ctxs] = raw;
+  const name = new Map((meta?.tokens ?? []).map((t) => [Number(t.index), String(t.name ?? '')]));
+  for (const u of meta?.universe ?? []) {
+    const [base, quote] = u.tokens ?? [];
+    if (quote !== 0 || base === undefined) continue;
+    const c = ctxs?.[Number(u.index)];
+    const p = num(c?.markPx ?? c?.midPx ?? null);
+    const n = name.get(Number(base));
+    if (n && p && p > 0 && !out.has(n)) out.set(n, p);
+  }
+  return out;
+}
+
+/** HL's spot prices, cached by the client for five minutes (weight 20 a read). Null when they cannot be read. */
+export async function hlSpotPrices(): Promise<Map<string, number> | null> {
+  const raw = await hlInfo.post<HlSpotMetaCtxs | null>({ type: 'spotMetaAndAssetCtxs' }, { ttlMs: 5 * 60_000 }).catch(() => null);
+  const px = spotPrices(raw);
+  return px.size ? px : null;
 }
 
 /** Hyperliquid's default dex, or a HIP-3 dex (`xyz` = trade.xyz); `spot` decides whether the default dex's read also reads the spot state. */
@@ -94,12 +136,44 @@ export async function hlPositions(address: string, dex?: string, spot?: (r: Posi
   }
   const out: PositionRead = { equity: num(st.marginSummary?.accountValue), positions, marks };
   if (!dex && spot?.(out)) {
-    const sp = await hlInfo.post<HlSpotState | null>({ type: 'spotClearinghouseState', user: address }, { ttlMs: 0 });
-    out.collateral = spotCollateral(sp);
+    const [sp, px] = await Promise.all([
+      hlInfo.post<HlSpotState | null>({ type: 'spotClearinghouseState', user: address }, { ttlMs: 0 }),
+      hlSpotPrices(),
+    ]);
+    out.collateral = spotCollateral(sp, px);
     out.spotAt = Date.now();
     out.extraCost = 2;
   }
   return out;
+}
+
+/** A Hyperliquid portfolio read (POST /info portfolio): HL's weight for it. */
+export const PNL_READ_COST = 20;
+
+/** The last point of a portfolio window's cumulative PnL (null when the window is missing). */
+export function portfolioPnl(p: HlPortfolio | null | undefined, window: string): number | null {
+  const h = portfolioWindow(p, window)?.pnlHistory;
+  if (!Array.isArray(h) || !h.length) return null;
+  return num(h[h.length - 1]?.[1]);
+}
+
+/**
+ * A Hyperliquid wallet's PnL from its portfolio chart, for a holder the
+ * leaderboard file does not rank: all-time and the day / week / month windows.
+ * The whole account, spot included - the leaderboard's own measure (checked
+ * 2026-10-24: its all-time figure matches the portfolio's `allTime`, not
+ * `perpAllTime`). Null when Hyperliquid has no chart for it.
+ */
+export async function hlPortfolioPnl(address: string): Promise<CohortPnlRow | null> {
+  const p = await hlInfo.post<HlPortfolio | null>({ type: 'portfolio', user: address }, { ttlMs: 0 });
+  if (!Array.isArray(p)) return null;
+  return {
+    address,
+    pnl: portfolioPnl(p, 'allTime'),
+    pnl1d: portfolioPnl(p, 'day'),
+    pnl7d: portfolioPnl(p, 'week'),
+    pnl30d: portfolioPnl(p, 'month'),
+  };
 }
 
 export async function sodexPositions(address: string): Promise<PositionRead> {

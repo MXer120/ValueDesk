@@ -82,8 +82,9 @@ export const SODEX_HISTORY_PAIR_PER_MIN = 2;
 export const INDEXER_ENV = {
   /**
    * HL /info weight per minute for the boards' fill reads. HL allows 1,200 per
-   * IP: 500 here + 200 for the cohorts' position reads (VALUESCAN_INDEX_HL_COHORT)
-   * leaves ~500 for the app's own reads. Raised from 300 on 2026-09-29 - the
+   * IP: 500 here + 400 for the cohorts' position and portfolio reads
+   * (VALUESCAN_INDEX_HL_COHORT) leaves ~300 for the app's own reads (it is given
+   * 200). Raised from 300 on 2026-09-29 - the
    * boards' histories (and trade.xyz, which is computed from them) lagged by hours.
    */
   hlWeightPerMin: () => envNum('VALUESCAN_INDEX_HL_WEIGHT', 500, 30, 900),
