@@ -3700,19 +3700,29 @@ function Chart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey, snapView]);
 
-  // News: this coin's latest stories, or the macro ones - one read per market
-  // and choice (the server caches it a minute), again every ten minutes.
+  // News: this coin's stories, or the macro ones, as far back as the server
+  // keeps them (history: up to SoSoValue's 7 days, hot ones ranked) - one read
+  // per market and choice (the server caches it a minute), again every ten minutes.
   const coin = newsCoin(sym?.baseCoin);
   const news = useAsync(
     () =>
-      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', topic: 'macro', limit: 50 })
-      : show.newsScope === 'all' ? vsApi.news({ feed: 'latest', limit: 50 })
-      : vsApi.news({ feed: 'latest', coin, limit: 50 }),
+      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', topic: 'macro', limit: 300, history: 1 })
+      : show.newsScope === 'all' ? vsApi.news({ feed: 'latest', limit: 300, history: 1 })
+      : vsApi.news({ feed: 'latest', coin, limit: 300, history: 1 }),
     [show.newsScope, coin],
     { enabled: show.news && (show.newsScope !== 'coin' || !!coin), pollMs: 10 * 60_000 },
   );
-  // The economic calendar (the Fed, BLS, BEA, SoSoValue): read again every hour while it shows.
-  const cal = useAsync(() => vsApi.calendar(), [], { enabled: show.news && show.calendar, pollMs: 60 * 60_000 });
+  // The economic calendar (the Fed, BLS, BEA, SoSoValue): the official calendars
+  // reach back to last December - eleven months back, two ahead, from the day's
+  // start so the address (and the CDN's copy) holds all day; read again hourly.
+  const cal = useAsync(
+    () => {
+      const day = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      return vsApi.calendar({ from: day - 330 * 86_400_000, to: day + 61 * 86_400_000 });
+    },
+    [],
+    { enabled: show.news && show.calendar, pollMs: 60 * 60_000 },
+  );
   /** The stories on the bars they came out in (NewsMarkers.tsx places and merges them). */
   const newsList = useMemo(
     () =>
@@ -4433,6 +4443,7 @@ function Chart({
             leaving={newsLayer.closing}
             left={holder.current?.offsetLeft ?? 0}
             top={holder.current?.offsetTop ?? 0}
+            barMs={intervalToMs(interval)}
             coin={coin}
             mode={show.newsScope}
             tz={tz}

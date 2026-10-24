@@ -1,17 +1,23 @@
 /**
- * News on the chart (Chart.tsx, toolbar's news button): SoSoValue stories as
- * markers along the foot of the price pane, on the bar each came out in.
+ * News on the chart (Chart.tsx, toolbar's news button): SoSoValue stories and
+ * the economic calendar's releases as markers along the foot of the price pane,
+ * one row, each on the bar it came out in.
  *
  * A marker shows what it is (chartMarks.ts markFace): the logo of the coin a
  * story is about, X's mark for a post, the globe for macro, an icon for
- * research, an announcement, an institution... and a count only where several
- * stories share it. Markers that would overlap at the zoom on screen are one
- * (clusterNews), so a busy hour is one marker with a count, not a row of them.
+ * research, an announcement, an institution, the calendar for a release... and
+ * a count only where several share it. Markers that would overlap at the zoom
+ * on screen are one (clusterNews), so a busy hour is one marker with a count,
+ * not a row of them; a release and the stories beside it share one too. A
+ * marker's edge glows with its hottest story (chartMarks.ts storyHeat: its
+ * place on SoSoValue's hot list, a post's views and likes - nothing guessed).
  *
- * Hover a marker for its stories; click to keep them open until a click
- * elsewhere or Escape. The card is a glass sheet like the app's drawers; every
- * story opens its article in a new tab, and can be saved to a knowledge folder
- * where the folders are there.
+ * Hover a marker for its stories, hot ones first; click to keep them open until
+ * a click elsewhere or Escape. While a marker is open - or a list points at one
+ * of its stories (newsFocus.ts: the News widget, the calendar) - the bars its
+ * stories came out in are lit. The card is a glass sheet like the app's
+ * drawers; every story opens its article in a new tab, and can be saved to a
+ * knowledge folder where the folders are there.
  *
  * A DOM layer, not canvas: logos are images, and the hover is the browser's.
  * Positions follow the chart frame by frame, re-rendering this layer alone.
@@ -27,16 +33,22 @@ import {
   NEWS_KIND_LABEL,
   clusterNews,
   fomcWindow,
+  hotFirst,
+  isFocused,
   isFomc,
   markFace,
+  markHeat,
   nearRelease,
   newsKind,
   showsAhead,
+  showsFomcWindow,
+  storyHeat,
   type NewsMark,
   type NewsScope,
   type NewsStory,
   type PlacedNews,
 } from './chartMarks';
+import { useNewsFocus } from './newsFocus';
 import { PoweredBy } from '../components/news/PoweredBy';
 import { useLatched } from '../components/motion';
 import type { TimeZoneMode } from './timeAxis';
@@ -47,6 +59,8 @@ const GAP = 28;
 /** From the pane's foot to the marker's top. */
 const FOOT = 32;
 const CARD_W = 348;
+/** Between a marker's top and its card. */
+const CARD_GAP = 12;
 
 export interface NewsMarkersProps {
   chart: KChart | null;
@@ -54,6 +68,8 @@ export interface NewsMarkersProps {
   /** The canvas's place in the pane (its offset), where the price pane starts. */
   left: number;
   top: number;
+  /** The chart's bar, ms: an FOMC decision's window shows on bars under an hour. */
+  barMs: number;
   /** The chart's coin as the news names it (BTC). */
   coin: string;
   /** Whose news it is: this coin's, macro, or all of crypto. */
@@ -89,7 +105,7 @@ const IMPACT: Record<'high' | 'medium' | 'low', string> = { high: 'High impact',
 /** Releases in date order. */
 const byDate = (list: readonly NewsStory[]) => [...list].sort((a, b) => a.time - b.time);
 const WEIGHT = { high: 3, medium: 2, low: 1 } as const;
-/** The release a pill is named for: the next one that matters most, else the latest. */
+/** The release a marker is named for: the next one that matters most, else the latest. */
 function leadRelease(list: readonly NewsStory[], now: number): NewsStory {
   const coming = list.filter((s) => s.time >= now);
   if (coming.length) return [...coming].sort((a, b) => WEIGHT[b.event!.importance] - WEIGHT[a.event!.importance] || a.time - b.time)[0]!;
@@ -99,24 +115,38 @@ function leadRelease(list: readonly NewsStory[], now: number): NewsStory {
 /** An all-day release's date ("Wed 28 Oct"): its time is midday UTC of that date, read in UTC. */
 const releaseDay = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = false, tz, canSave, onSave }: NewsMarkersProps) {
+const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+/** Why a story counts as hot, in a few words: its place on the hot list, or a post's reach. */
+function hotNote(s: NewsStory): string | null {
+  if (!storyHeat(s)) return null;
+  if (s.rank && s.rank <= 50) return `Hot #${s.rank}`;
+  if (s.views) return `${compact.format(s.views)} views`;
+  if (s.likes) return `${compact.format(s.likes)} likes`;
+  return null;
+}
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leaving = false, tz, canSave, onSave }: NewsMarkersProps) {
+  /** The row: stories and releases, merged where they would overlap. */
   const [placed, setPlaced] = useState<PlacedNews[]>([]);
-  /** The economic calendar's releases: a row of their own, above the news. */
-  const [releases, setReleases] = useState<PlacedNews[]>([]);
   /** FOMC decisions on screen: the statement and the press conference, x from-to in the pane. */
   const [fomc, setFomc] = useState<Array<{ key: string; x1: number; x2: number; x3: number }>>([]);
-  const [pane, setPane] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [pane, setPane] = useState<{ width: number; height: number; bar: number }>({ width: 0, height: 0, bar: 0 });
   const [open, setOpen] = useState<{ key: string; pinned: boolean } | null>(null);
+  /** Each story's bar on screen (x in the pane), for lighting it. */
+  const barX = useRef(new Map<string, number>());
   const layer = useRef<HTMLDivElement>(null);
   const closeTimer = useRef(0);
   /** The card stays a moment as it closes, to fade out. */
   const card = useLatched(open?.key ?? null, 140);
+  const focus = useNewsFocus();
+  const windowsShown = showsFomcWindow(barMs);
 
   // Where each marker is, every frame; a render only when one moved.
   useEffect(() => {
     if (!chart || marks.length === 0) {
       setPlaced([]);
-      setReleases([]);
       setFomc([]);
       return;
     }
@@ -127,17 +157,17 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
       const width = size?.width ?? 0;
       const height = size?.height ?? 0;
       const on: PlacedNews[] = [];
-      const due: PlacedNews[] = [];
       const later: NewsStory[] = [];
       const windows: Array<{ key: string; x1: number; x2: number; x3: number }> = [];
+      const xs = new Map<string, number>();
       const now = Date.now();
       const xOf = (timestamp: number) => (chart.convertToPixel({ timestamp, value: 0 }, { paneId: PANE }) as { x?: number }).x;
       for (const m of marks) {
         const x = xOf(m.timestamp);
         if (typeof x !== 'number' || !Number.isFinite(x)) continue;
         const events = m.stories.filter((s) => s.event);
-        // An FOMC decision: its statement and press conference as a window, where on screen.
-        for (const e of events.filter(isFomc)) {
+        // An FOMC decision: its statement and press conference as a window, on bars short enough to show it.
+        for (const e of windowsShown ? events.filter(isFomc) : []) {
           const w = fomcWindow(e.time);
           const [x1, x2, x3] = [xOf(w.statement[0]), xOf(w.press[0]), xOf(w.press[1])];
           if ([x1, x2, x3].every((v) => typeof v === 'number' && Number.isFinite(v)) && x3! >= 0 && x1! <= width) {
@@ -150,31 +180,34 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
           continue;
         }
         if (x < 6) continue;
-        const stories = m.stories.filter((s) => !s.event);
-        if (stories.length) on.push({ key: m.key, x: Math.round(x), timestamp: m.timestamp, stories });
-        if (events.length) due.push({ key: `ev:${m.key}`, x: Math.round(x), timestamp: m.timestamp, stories: events });
+        for (const s of m.stories) xs.set(s.id, Math.round(x));
+        on.push({ key: m.key, x: Math.round(x), timestamp: m.timestamp, stories: m.stories });
       }
-      const next = clusterNews(on, GAP);
-      // Releases are circles like the news; one where "Next" sits joins it.
-      const nextDue: PlacedNews[] = [];
-      for (const p of clusterNews(due, GAP)) {
-        if (later.length && p.x >= width - GAP * 1.5) later.push(...p.stories);
-        else nextDue.push({ ...p, stories: byDate(p.stories) });
+      // One row; what sits where "Next" does joins it.
+      const row: PlacedNews[] = [];
+      const atEdge: NewsStory[] = [];
+      for (const p of clusterNews(on, GAP)) {
+        if (later.length && p.x >= width - GAP * 1.5) atEdge.push(...p.stories);
+        else row.push(p);
       }
-      if (later.length) nextDue.push({ key: 'ev:ahead', x: width - 4, timestamp: later[0]!.time, stories: byDate(later).slice(0, 12) });
-      const sig = `${width}x${height}|${next.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${nextDue.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${windows.map((w) => `${w.x1}:${w.x3}`).join(',')}|${Math.floor(now / 60_000)}`;
+      if (later.length) {
+        const events = byDate([...later, ...atEdge.filter((s) => s.event)]).slice(0, 12);
+        row.push({ key: 'ev:ahead', x: width - 4, timestamp: later[0]!.time, stories: [...events, ...atEdge.filter((s) => !s.event)] });
+      }
+      const bar = Math.round((chart.getBarSpace()?.bar ?? 0) * 10) / 10;
+      const sig = `${width}x${height}:${bar}|${row.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${windows.map((w) => `${w.x1}:${w.x3}`).join(',')}|${Math.floor(now / 60_000)}`;
       if (sig !== last) {
         last = sig;
-        setPlaced(next);
-        setReleases(nextDue);
+        barX.current = xs;
+        setPlaced(row);
         setFomc(windows);
-        setPane({ width, height });
+        setPane({ width, height, bar });
       }
       raf = requestAnimationFrame(tick);
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  }, [chart, marks]);
+  }, [chart, marks, windowsShown]);
 
   // A pinned card closes on a press elsewhere or Escape.
   useEffect(() => {
@@ -210,9 +243,10 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
     closeTimer.current = window.setTimeout(() => setOpen((o) => (o?.pinned ? o : null)), 220);
   };
 
-  if (placed.length === 0 && releases.length === 0 && fomc.length === 0) return null;
-  const shown = card.value ? placed.find((p) => p.key === card.value) ?? releases.find((p) => p.key === card.value) : undefined;
-  const isRelease = !!shown?.stories[0]?.event;
+  if (placed.length === 0 && fomc.length === 0) return null;
+  const shown = card.value ? placed.find((p) => p.key === card.value) : undefined;
+  const releases = shown ? byDate(shown.stories.filter((s) => s.event)) : [];
+  const stories = shown ? hotFirst(shown.stories.filter((s) => !s.event)) : [];
   const box = layer.current?.getBoundingClientRect();
   const now = Date.now();
   const hover = (key: string) => ({
@@ -226,6 +260,15 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
       setOpen((o) => (o?.key === key && o.pinned ? null : { key, pinned: true }));
     },
   });
+
+  // The bars lit: the open marker's stories', else the one a list points at.
+  const openMark = open ? placed.find((p) => p.key === open.key) : undefined;
+  const litStories = openMark ? openMark.stories : focus ? placed.flatMap((p) => p.stories).filter((s) => isFocused(s, focus)) : [];
+  const litX = litStories.map((s) => barX.current.get(s.id)).filter((x): x is number => x !== undefined);
+  const half = Math.max(1, pane.bar / 2);
+  const lit = litX.length ? { x1: Math.min(...litX) - half, x2: Math.max(...litX) + half } : null;
+
+  const title = mode === 'macro' ? 'Macro news' : mode === 'all' ? 'Crypto news' : `${coin} news`;
 
   return (
     <>
@@ -252,23 +295,28 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
           )}
         </div>
       ))}
-      {releases.length > 0 && (
-        <div className={`kc-calmarks${leaving ? ' is-leaving' : ''}`} style={{ left, top: top + pane.height - FOOT - 28, width: pane.width }} aria-label="Economic calendar on the chart">
-          {releases.map((p) => {
-            const lead = leadRelease(p.stories, now);
-            const n = p.stories.length;
+      {lit && !leaving && (
+        <div className="kc-newslit" style={{ left: left + lit.x1, top, height: Math.max(0, pane.height - FOOT - 4), width: Math.max(2, lit.x2 - lit.x1) }} aria-hidden />
+      )}
+      <div className={`kc-newsmarks${leaving ? ' is-leaving' : ''}`} ref={layer} style={{ left, top: top + pane.height - FOOT, width: pane.width }} aria-label="News and the economic calendar on the chart">
+        {placed.map((p) => {
+          const n = p.stories.length;
+          const heat = markHeat(p.stories);
+          const isOpen = open?.key === p.key;
+          const state = `${heat ? ` kc-heat-${heat}` : ''}${isOpen ? ' is-open' : ''}${focus && p.stories.some((s) => isFocused(s, focus)) ? ' is-focus' : ''}`;
+          const events = p.stories.filter((s) => s.event);
+          if (events.length) {
+            const lead = leadRelease(byDate(events), now);
             const ahead = p.key === 'ev:ahead';
-            const imp = lead.event!.importance;
             // A circle; it opens to its name and countdown on hover, or as the release comes near.
-            const near = nearRelease(lead.time, now);
             return (
               <button
                 key={p.key}
                 type="button"
-                className={`kc-calmark kc-calmark--${imp}${ahead ? ' kc-calmark--ahead' : ''}${open?.key === p.key ? ' is-open' : ''}${lead.time > now ? ' is-due' : ''}${near ? ' is-near' : ''}`}
+                className={`kc-calmark kc-calmark--${lead.event!.importance}${ahead ? ' kc-calmark--ahead' : ''}${lead.time > now ? ' is-due' : ''}${nearRelease(lead.time, now) ? ' is-near' : ''}${state}`}
                 style={{ left: p.x }}
                 aria-label={`${ahead ? 'Coming up: ' : ''}${lead.title}, ${countdown(lead.time, now)}${n > 1 ? `, and ${n - 1} more` : ''}`}
-                aria-expanded={open?.key === p.key}
+                aria-expanded={isOpen}
                 {...hover(p.key)}
               >
                 {NEWS_ICONS.event}
@@ -280,32 +328,19 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
                 {n > 1 && <span className="kc-newsmark__n">{n > 99 ? '99+' : n}</span>}
               </button>
             );
-          })}
-        </div>
-      )}
-      <div className={`kc-newsmarks${leaving ? ' is-leaving' : ''}`} ref={layer} style={{ left, top: top + pane.height - FOOT, width: pane.width }} aria-label="News on the chart">
-        {placed.map((p) => {
+          }
           // Among macro or all-crypto stories every coin is news; on a coin's chart, another coin is.
           const face = markFace(p, mode === 'coin' ? coin : '');
-          const n = p.stories.length;
           const lead = p.stories[0]!;
           return (
             <button
               key={p.key}
               type="button"
-              className={`kc-newsmark kc-newsmark--${face.kind}${open?.key === p.key ? ' is-open' : ''}`}
+              className={`kc-newsmark kc-newsmark--${face.kind}${state}`}
               style={{ left: p.x }}
-              aria-label={`${n === 1 ? NEWS_KIND_LABEL[newsKind(lead)] : `${n} stories`}: ${lead.title}`}
-              aria-expanded={open?.key === p.key}
-              onMouseEnter={() => {
-                hold();
-                setOpen((o) => (o?.pinned ? o : { key: p.key, pinned: false }));
-              }}
-              onMouseLeave={letGo}
-              onClick={() => {
-                hold();
-                setOpen((o) => (o?.key === p.key && o.pinned ? null : { key: p.key, pinned: true }));
-              }}
+              aria-label={`${n === 1 ? NEWS_KIND_LABEL[newsKind(lead)] : `${n} stories`}${heat ? ', hot' : ''}: ${lead.title}`}
+              aria-expanded={isOpen}
+              {...hover(p.key)}
             >
               {face.coin ? <CoinIcon coin={face.coin} size={16} /> : NEWS_ICONS[face.kind]}
               {n > 1 && <span className="kc-newsmark__n">{n > 99 ? '99+' : n}</span>}
@@ -318,25 +353,26 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
           <div
             className={`kc-newspop${open?.pinned ? ' is-pinned' : ''}${card.closing ? ' is-closing' : ''}`}
             role="dialog"
-            aria-label="News on this bar"
+            aria-label={releases.length && !stories.length ? 'Releases on this bar' : 'News on this bar'}
             style={{
               left: Math.max(8, Math.min(window.innerWidth - CARD_W - 8, box.left + shown.x - 28)),
-              bottom: Math.max(8, window.innerHeight - box.top + 8),
+              // Clear above the marker (and its lift on hover), never on it.
+              bottom: Math.max(8, window.innerHeight - box.top + CARD_GAP),
               width: CARD_W,
               // Never past the top of the window: what does not fit scrolls.
-              maxHeight: Math.max(180, Math.min(440, box.top - 16)),
+              maxHeight: Math.max(180, Math.min(440, box.top - CARD_GAP - 8)),
             }}
             onMouseEnter={hold}
             onMouseLeave={letGo}
           >
             <header className="kc-newspop__head">
-              <span className="kc-newspop__title">{isRelease ? 'Economic calendar' : mode === 'macro' ? 'Macro news' : mode === 'all' ? 'Crypto news' : `${coin} news`}</span>
+              <span className="kc-newspop__title">{releases.length && !stories.length ? 'Economic calendar' : releases.length ? `Economic calendar · ${title}` : title}</span>
               <span className="kc-newspop__count">
-                {isRelease ? (shown.stories.length === 1 ? '1 release' : `${shown.stories.length} releases`) : shown.stories.length === 1 ? '1 story' : `${shown.stories.length} stories`}
+                {[releases.length ? plural(releases.length, 'release', 'releases') : '', stories.length ? plural(stories.length, 'story', 'stories') : ''].filter(Boolean).join(' · ')}
               </span>
             </header>
             <ol className="kc-newspop__list">
-              {isRelease && shown.stories.map((s) => (
+              {releases.map((s) => (
                 <li key={s.id} className="kc-newspop__row">
                   <a className="kc-newspop__item" href={s.href} target="_blank" rel="noopener noreferrer">
                     <span className="kc-newspop__meta">
@@ -358,9 +394,10 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
                   )}
                 </li>
               ))}
-              {!isRelease && shown.stories.map((s) => {
+              {stories.map((s) => {
                 const kind = newsKind(s);
                 const coins = (s.symbols ?? []).slice(0, 4);
+                const hotText = hotNote(s);
                 return (
                   <li key={s.id} className="kc-newspop__row">
                     <a className="kc-newspop__item" href={s.href} target="_blank" rel="noopener noreferrer">
@@ -370,6 +407,11 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
                           {NEWS_ICONS[kind]}
                           {NEWS_KIND_LABEL[kind]}
                         </span>
+                        {hotText && (
+                          <span className={`kc-newspop__hot kc-heat-${storyHeat(s)}`} title={s.rank ? "Its place on SoSoValue's hot list now" : 'Seen on X when SoSoValue read it'}>
+                            {hotText}
+                          </span>
+                        )}
                         {s.author && <span className="kc-newspop__by">{s.author}</span>}
                       </span>
                       <span className={`kc-newspop__headline${s.post ? ' is-post' : ''}`}>{s.title}</span>
@@ -395,7 +437,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
               })}
             </ol>
             <footer className="kc-newspop__foot">
-              <PoweredBy more={isRelease} />
+              <PoweredBy more={releases.length > 0} />
             </footer>
           </div>,
           document.body,

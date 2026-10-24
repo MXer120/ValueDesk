@@ -151,7 +151,7 @@ export const vsApi = {
    * the latest, hot or featured list, by type (`category`) and coin, or a keyword search.
    */
   news: (
-    o: { feed?: 'latest' | 'hot' | 'featured'; category?: number; coin?: string; q?: string; page?: number; limit?: number; topic?: 'macro'; posts?: 'all' } = {},
+    o: { feed?: 'latest' | 'hot' | 'featured'; category?: number; coin?: string; q?: string; page?: number; limit?: number; topic?: 'macro'; posts?: 'all'; history?: 1 } = {},
     signal?: AbortSignal,
   ) => unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
 

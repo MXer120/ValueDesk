@@ -135,10 +135,10 @@ test('latestNews asks once and serves the cache', () => withKey(async () => {
 
 test('parseNewsQuery: known values pass, anything else falls back; coins come comma-separated', () => {
   const { parseNewsQuery } = mod;
-  assert.deepEqual(parseNewsQuery({}), { feed: 'latest', category: null, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable' });
+  assert.deepEqual(parseNewsQuery({}), { feed: 'latest', category: null, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable', history: false });
   assert.deepEqual(
     parseNewsQuery({ feed: 'hot', category: '2', coin: ' btc ', q: '  etf   flows ', page: '3', limit: '200', topic: 'macro', posts: 'all' }),
-    { feed: 'hot', category: 2, coins: ['BTC'], q: 'etf flows', page: 3, limit: 50, topic: 'macro', posts: 'all' },
+    { feed: 'hot', category: 2, coins: ['BTC'], q: 'etf flows', page: 3, limit: 50, topic: 'macro', posts: 'all', history: false },
   );
   assert.equal(parseNewsQuery({ topic: 'sports' }).topic, null);
   assert.deepEqual(parseNewsQuery({ coin: 'btc,eth, sol,btc,BTC; DROP,a,b,c,d' }).coins, ['BTC', 'ETH', 'SOL', 'A', 'B'], 'valid, distinct, five at most');
@@ -306,4 +306,55 @@ test('news: the macro topic is the economics of SoSoValue\'s macro stream, CNBC\
   assert.deepEqual(page.items.map((n) => n.id), ['b1', 'c1', 'n2']);
   assert.ok(page.items.every((n) => n.topic === 'macro'));
   assert.deepEqual(asked.sort(), ['1', '5', '6']);
+}));
+
+test('parseNewsQuery: the history is the latest feed\'s, from its first page, up to HISTORY_LIMIT', () => {
+  const { parseNewsQuery, HISTORY_LIMIT } = mod;
+  const h = parseNewsQuery({ history: '1', page: '4', limit: '999', coin: 'btc' });
+  assert.deepEqual([h.history, h.page, h.limit], [true, 1, HISTORY_LIMIT]);
+  assert.equal(parseNewsQuery({ history: '1', feed: 'hot' }).history, false, 'not the hot list');
+  assert.equal(parseNewsQuery({ history: '1', q: 'etf' }).history, false, 'not a search');
+  assert.equal(parseNewsQuery({ limit: '999' }).limit, 50, 'without it, a page is 50 at most');
+});
+
+test('news history: the older pages are read once, every first page is merged in, hot stories ranked', (t) => withKey(async () => {
+  const { news, parseNewsQuery } = mod;
+  const now = Date.now();
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const H = 3_600_000;
+  const asked: string[] = [];
+  let fresh = false;
+  const row = (id: string, hoursAgo: number, title = `Bitcoin story ${id}`) => ({
+    id, title, source_link: `https://example.com/${id}`, release_time: String(now - hoursAgo * H), category: 1,
+    matched_currencies: [{ currency_id: '1', symbol: 'BTC', name: 'Bitcoin' }],
+  });
+  const fetchImpl: typeof fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname.endsWith('/currencies')) return json({ code: 0, data: CURRENCIES });
+    if (u.pathname.endsWith('/news/hot')) {
+      asked.push('hot');
+      return json({ data: { list: [{ id: '901', title: 'Something else' }, { id: '902', title: 'Bitcoin story p3b!' }] } });
+    }
+    const page = u.searchParams.get('page') ?? '';
+    asked.push(`p${page}`);
+    const pages: Record<string, unknown[]> = {
+      '1': fresh ? [row('n0', 0.1), row('p1a', 1)] : [row('p1a', 1), row('p1b', 2)],
+      '2': [row('p1b', 2), row('p2a', 10)],
+      '3': [row('p3a', 30), row('p3b', 40)],
+      '4': [row('old', 24 * 9)],
+    };
+    return json({ data: { list: pages[page] ?? [] } });
+  };
+  const first = await news(parseNewsQuery({ history: '1', coin: 'BTC', limit: '300' }), fetchImpl);
+  assert.deepEqual(first.items.map((n) => n.id), ['p1a', 'p1b', 'p2a', 'p3a', 'p3b'], 'newest first, once each; past 8 days left out');
+  assert.equal(first.items.find((n) => n.id === 'p3b')?.rank, 2, 'on the hot list by its headline');
+  assert.equal(first.items.find((n) => n.id === 'p1a')?.rank, undefined);
+  assert.deepEqual(asked, ['p1', 'p2', 'p3', 'p4', 'hot']);
+  // Five minutes on, a new first page: merged in, the older pages not read again.
+  t.mock.timers.tick(6 * 60_000);
+  fresh = true;
+  asked.length = 0;
+  const again = await news(parseNewsQuery({ history: '1', coin: 'BTC', limit: '3' }), fetchImpl);
+  assert.deepEqual(again.items.map((n) => n.id), ['n0', 'p1a', 'p1b']);
+  assert.deepEqual(asked, ['p1'], 'the hot list too is the copy of ten minutes');
 }));

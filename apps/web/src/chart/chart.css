@@ -1719,11 +1719,13 @@ html.kc-drag * {
 .kc-mark-dim { color: var(--muted); }
 
 /* --- news on the chart (NewsMarkers.tsx) -------------------------------------- */
-/* The row of markers along the foot of the price pane: only the markers take
-   the pointer, the strip between them is the chart's. */
+/* The row of markers along the foot of the price pane - stories and the
+   economic calendar's releases on one line: only the markers take the pointer,
+   the strip between them is the chart's. */
 .kc-newsmarks { position: absolute; z-index: 4; height: 24px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
 .kc-newsmarks.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
-.kc-newsmarks.is-leaving .kc-newsmark { pointer-events: none; }
+.kc-newsmarks.is-leaving .kc-newsmark,
+.kc-newsmarks.is-leaving .kc-calmark { pointer-events: none; }
 @keyframes kc-newsmarks-in { from { opacity: 0; transform: translateY(8px); } }
 @keyframes kc-newsmarks-out { to { opacity: 0; transform: translateY(8px); } }
 .kc-newsmark {
@@ -1750,6 +1752,45 @@ html.kc-drag * {
 .kc-newsmark:hover,
 .kc-newsmark.is-open { border-color: rgba(255, 255, 255, 0.45); color: var(--text); transform: translateY(-2px); }
 .kc-newsmark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+/* The one under the pointer, open or about to be released stands over its neighbours. */
+.kc-newsmark:hover,
+.kc-newsmark.is-open,
+.kc-calmark:hover,
+.kc-calmark.is-open,
+.kc-calmark.is-near { z-index: 2; }
+/* A marker's heat: its hottest story's (chartMarks.ts storyHeat - SoSoValue's
+   hot list, a post's reach). A warm story only warms the count; a hot one
+   colours the marker, the hottest glow. */
+.kc-heat-1 { --heat: #d9a441; }
+.kc-heat-2 { --heat: #ee8433; }
+.kc-heat-3 { --heat: #f0533f; }
+.kc-newsmark.kc-heat-2,
+.kc-newsmark.kc-heat-3 { border-color: color-mix(in srgb, var(--heat) 80%, transparent); color: var(--heat); }
+.kc-newsmark.kc-heat-2,
+.kc-newsmark.kc-heat-3 { background: color-mix(in srgb, var(--heat) 18%, var(--bg-elevated)); }
+.kc-newsmark.kc-heat-3 { box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35), 0 0 10px color-mix(in srgb, var(--heat) 60%, transparent); }
+.kc-newsmark.kc-heat-1 .kc-newsmark__n,
+.kc-newsmark.kc-heat-2 .kc-newsmark__n,
+.kc-newsmark.kc-heat-3 .kc-newsmark__n,
+.kc-calmark.kc-heat-1 .kc-newsmark__n,
+.kc-calmark.kc-heat-2 .kc-newsmark__n,
+.kc-calmark.kc-heat-3 .kc-newsmark__n { background: var(--heat); color: #111; }
+/* The marker of the story a list points at (the News widget, the calendar). */
+.kc-newsmark.is-focus,
+.kc-calmark.is-focus { z-index: 3; border-color: var(--text); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 24%, transparent), 0 2px 6px rgba(0, 0, 0, 0.35); }
+.kc-newsmark.is-focus { transform: translateY(-3px) scale(1.12); }
+.kc-calmark.is-focus { transform: translateX(-50%) translateY(-3px); }
+/* The bars of the open marker's stories, or of the story a list points at. */
+.kc-newslit {
+  position: absolute;
+  z-index: 3;
+  border-right: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  border-left: 1px solid color-mix(in srgb, var(--text) 30%, transparent);
+  background: linear-gradient(to top, color-mix(in srgb, var(--text) 14%, transparent), color-mix(in srgb, var(--text) 4%, transparent));
+  pointer-events: none;
+  animation: kc-newslit-in 140ms var(--ease-out, ease) both;
+}
+@keyframes kc-newslit-in { from { opacity: 0; } }
 .kc-newsmark svg { width: 14px; height: 14px; }
 .kc-newsmark--macro { color: #c9d4ff; }
 .kc-newsmark--post { color: var(--text); }
@@ -1797,6 +1838,7 @@ html.kc-drag * {
   .kc-side-wrap.is-closing,
   .kc-newsmarks,
   .kc-newsmarks.is-leaving,
+  .kc-newslit,
   .kc-newspop,
   .kc-newspop.is-closing { animation-duration: 1ms; }
 }
@@ -1823,13 +1865,10 @@ html.kc-drag * {
 .kc-newspop__impact { flex: none; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 .kc-newspop__impact--high { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .kc-newspop__src { color: var(--dim); font-size: var(--fs-micro); }
+.kc-newspop__hot { flex: none; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--heat) 18%, transparent); color: var(--heat); font-weight: 600; }
 
-/* The economic calendar's releases: a row of circles above the news markers,
-   their edge in the release's weight; one still to come is dashed. */
-.kc-calmarks { position: absolute; z-index: 4; height: 24px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
-.kc-calmarks.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
-.kc-calmarks.is-leaving .kc-calmark { pointer-events: none; }
-/* A release is a circle like a story's marker; it opens to its name and
+/* The economic calendar's releases: circles in the news markers' row, their
+   edge in the release's weight; one still to come is dashed. A release is a circle like a story's marker; it opens to its name and
    countdown on hover, when its card is open, or as the release comes near. */
 .kc-calmark {
   position: absolute;
@@ -1884,10 +1923,6 @@ html.kc-drag * {
 .kc-calmark--high.is-open,
 .kc-calmark--high.is-near { border-color: var(--warn); color: var(--warn); }
 .kc-calmark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-@media (prefers-reduced-motion: reduce) {
-  .kc-calmarks,
-  .kc-calmarks.is-leaving { animation-duration: 1ms; }
-}
 .kc-newspop__save {
   position: absolute;
   top: 7px;
@@ -1993,6 +2028,7 @@ html.kc-drag * {
 .kc-calmark.kc-calmark--ahead { transform: translateX(-100%); }
 .kc-calmark.kc-calmark--ahead:hover,
 .kc-calmark.kc-calmark--ahead.is-open { transform: translateX(-100%) translateY(-2px); }
+.kc-calmark.kc-calmark--ahead.is-focus { transform: translateX(-100%) translateY(-3px); }
 
 /* An FOMC decision on the chart (NewsMarkers.tsx): the statement (2:00 pm ET) to
    the press conference (2:30 pm) shaded, the press conference to its estimated

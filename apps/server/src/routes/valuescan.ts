@@ -13,7 +13,7 @@
  *   GET /api/vs/fills?venue&address&from&to&limit
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
- *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts&history   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; history=1 the chart's: the feed as far back as kept, up to 300, hot ones ranked; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
