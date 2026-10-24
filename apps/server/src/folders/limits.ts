@@ -3,8 +3,10 @@
  *
  * Every limit is enforced HERE, on the server - the web shows the same numbers
  * (GET /api/folders reports them) but a client that ignores them gets the
- * refusal. The defaults are the ones proposed to the owner; each can be changed
- * in the API's environment without a release (a restart reads them).
+ * refusal. The defaults are the owner's: 3 folders (the brief), 25 MB a file and
+ * 100 MB a wallet with S3 (confirmed 2026-10-24); the rest as proposed with them.
+ * Each can be changed in the API's environment without a release (a restart
+ * reads them).
  *
  * WHERE FILES GO. With FOLDERS_S3_BUCKET set (production), uploads and
  * thumbnails are objects in that Amazon S3 bucket: the browser sends a file
