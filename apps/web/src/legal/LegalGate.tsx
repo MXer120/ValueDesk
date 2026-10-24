@@ -159,9 +159,16 @@ interface TermsFormProps {
  * THE OPTIONAL EXTRAS, LAWFULLY. Consent to the Live Feed's YouTube / Twitch /
  * Kick / Vimeo players and to Reown's usage reports when a wallet connects
  * (§ 25(1) TDDDG, Art. 6(1)(a) GDPR; embeds.ts, reownConsent.ts) is offered in the
- * same step but stays a choice of its own: two equally sized buttons, "Only
- * necessary" and "Accept all", both accepting the terms, only the second allowing
- * the extras.
+ * same step but stays a choice of its own: two equally sized buttons side by
+ * side, "Only necessary" and "Accept all", both accepting the terms, only the
+ * second allowing the extras. "Accept all" is the primary (accent) button at the
+ * owner's wish; "Only necessary" stays a full button of the same size, plainly
+ * readable - colour may lead, the refusal may not be hidden or made harder
+ * (DSK guidance; EDPB cookie banner taskforce report, 2023). One line above the
+ * buttons says what "Accept all" adds, with "Details" (the Cookies page): consent
+ * must be informed when it is given (Art. 4(11) GDPR, CJEU C-673/17), so the
+ * extras are named there, the full explanation being on the Cookies page and in
+ * the privacy policy.
  * Nothing is pre-selected (CJEU C-673/17 Planet49), refusing is as easy as
  * accepting (DSK guidance on digital services), and the terms never depend on it
  * (Art. 7(4) GDPR). A visitor who chose "Only necessary" turns a platform on in
@@ -252,23 +259,18 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
         </div>
       )}
 
-      {offerOptional && (
-        <div className="lg-card lg-card--players">
-          <span className="lg-card__title">With "Accept all" <span className="lg-tag">optional</span></span>
-          <ul className="lg-small lg-optional">
-            <li><b>Live video players:</b> YouTube, Twitch, Kick and Vimeo streams in the Live Feed. They receive your IP address and may set cookies, also for advertising and with transfers to the US.</li>
-            <li><b>Usage reports to Reown</b> when you connect a wallet: your wallet address, the page&rsquo;s address and technical details, so Reown can count the use of its wallet connection (transfer to the US).</li>
-          </ul>
-          <p className="lg-small">Change it any time under <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>.</p>
-        </div>
-      )}
 
       {error && <p className="lg-err" role="alert">{error}</p>}
       {offerOptional ? (
-        <div className="lg-pair">
-          <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
-          <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
-        </div>
+        <>
+          <p className="lg-small lg-extras">
+            &ldquo;Accept all&rdquo; also allows the Live Feed&rsquo;s video players and usage reports to Reown. <LegalLink page="cookies" onOpen={onOpen}>Details</LegalLink>
+          </p>
+          <div className="lg-pair">
+            <button type="button" className="lg-cta lg-cta--secondary" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
+            <button type="button" className="lg-cta" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
+          </div>
+        </>
       ) : (
         <button type="button" className="lg-cta" disabled={!ready} aria-busy={!!busy || undefined} onClick={() => void accept(false)}>{label(false)}</button>
       )}

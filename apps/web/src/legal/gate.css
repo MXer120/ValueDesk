@@ -177,8 +177,9 @@
 }
 .lg-cta:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
 .lg-cta:disabled { opacity: 0.4; cursor: not-allowed; }
-/* "Only necessary" and "Accept all": the same size, the same look, side by side -
-   refusing the players is exactly as easy as allowing them (DSK guidance). */
+/* "Only necessary" and "Accept all": the same size, side by side - refusing is
+   exactly as easy as allowing (DSK guidance). "Accept all" is the accent button;
+   "Only necessary" is outlined, in the text colour, never faded or smaller. */
 .lg-pair {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -186,9 +187,13 @@
   margin-top: var(--sp-1);
 }
 .lg-pair .lg-cta { margin-top: 0; }
-.lg-card--players { gap: 6px; }
-.lg-optional { display: grid; gap: 4px; margin: 0; padding-left: 16px; }
-.lg-optional b { color: var(--text); font-weight: 500; }
+.lg-cta--secondary {
+  border: 1px solid var(--line-strong);
+  background: color-mix(in srgb, var(--bg-control) 60%, transparent);
+  color: var(--text);
+}
+.lg-cta--secondary:hover:not(:disabled) { background: var(--bg-control); }
+.lg-extras { margin: var(--sp-1) 0 0; }
 .lg-card__title {
   display: flex;
   align-items: center;
