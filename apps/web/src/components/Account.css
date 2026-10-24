@@ -399,25 +399,10 @@
   right: 0;
   left: auto;
   z-index: 40;
-  min-width: 148px;
-  padding: 4px;
+  min-width: 168px;
+  padding: 5px;
 }
-.acct-book__menu button {
-  display: block;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--fs-xs);
-  line-height: 18px;
-  text-align: left;
-  cursor: pointer;
-}
-.acct-book__menu button:hover { background: var(--bg-elevated); }
-.acct-book__menu button.is-on { color: var(--accent); }
+/* Its rows are the app's menu rows (styles.css .menu-row), the chosen book ticked. */
 
 /* Coin rows, the same arrangement as the wallet menu's holdings: icon, the
    chain as a badge, name over the chain, amount on the right. */

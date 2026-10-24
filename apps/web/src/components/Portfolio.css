@@ -1323,7 +1323,9 @@
 .perf-settingsbtn:hover { color: var(--text); border-color: var(--pf-line); background: var(--bg-elevated); }
 /* Two classes on purpose: `.menu-popup` alone ties on specificity and the
    right/left override would never apply. */
-.menu-popup.perf-settingsmenu { right: 0; left: auto; min-width: 210px; }
+.menu-popup.perf-settingsmenu { right: 0; left: auto; min-width: 236px; padding: 6px; }
+/* The airdrop note under its switch, in the menu row's inset. */
+.perf-settingsnote { margin: 4px 8px 2px; }
 
 /* The scan page's one control the design system has no equivalent for: an
    address field with its buttons. Same 32px control height as `.pf-btn`. */

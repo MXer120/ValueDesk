@@ -70,92 +70,45 @@
 
 /* --- panel right-click menu (LayoutMenu.tsx) ------------------------------- */
 
-/* `.menu-popup .dash-layoutmenu` is (0,2,0) for the same reason the header
+/* `.menu-popup.dash-layoutmenu` is (0,2,0) for the same reason the header
    stat menu needs two classes in Market.css: `.menu-popup` on its own is
    (0,1,0) and this sheet is not guaranteed to load after that one wins the
    tie. `position: fixed` for the same reason too - this is placed from a
    pointer event in viewport coordinates and portalled to <body>, since the
    panel it was summoned from clips its own children and the grid item around
-   it carries react-grid-layout's own transform. */
+   it carries react-grid-layout's own transform. The rows are the app's menu
+   rows (styles.css .menu-row); the panel list scrolls in its own area. */
 .menu-popup.dash-layoutmenu {
   position: fixed;
   top: auto;
   left: auto;
   right: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 252px;
   max-height: calc(100vh - 16px);
-  overflow-y: auto;
-  scrollbar-width: thin;
+  padding: 5px;
+  overflow: hidden;
 }
-/* The one place this menu is not a plain checklist: a section label on the
-   left and the single dashboard-wide lock toggle on the right, sharing a row
-   instead of the lock being a fifteenth list item indistinguishable from a
-   panel. `menu-group-label` is reused as-is (styles.css) rather than
-   restated, so this heading matches every other menu's in the app. */
-.dash-layoutmenu-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
-  margin-bottom: var(--sp-1);
+.dash-layoutmenu .menu-row__ic.is-warn { color: var(--warn); }
+.dash-layoutmenu-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding-right: 8px; }
+.dash-layoutmenu-head .menu-group-label { margin-bottom: 2px; }
+.dash-layoutmenu-count { color: var(--dim); font-size: var(--fs-micro); font-family: var(--font-num); }
+.dash-layoutmenu-find { position: relative; display: flex; align-items: center; flex: none; margin: 2px 2px 4px; color: var(--dim); }
+.dash-layoutmenu-find svg { position: absolute; left: 9px; pointer-events: none; }
+.dash-layoutmenu-find input {
+  width: 100%; height: 30px; padding: 0 10px 0 28px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs);
 }
-.dash-layoutmenu-head .menu-group-label { margin-bottom: 0; }
-/* Ghost icon button, ink-only - the same ghost-role reasoning `.dash-
-   toolbar__btn` above uses, and the same --warn "this is frozen" colour while
-   locked, so the icon and the text button it duplicates never disagree about
-   what colour "locked" is. */
-.dash-layoutmenu-lock {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  background: none;
-  border-color: transparent;
-  box-shadow: none;
-  color: var(--dim);
-  transition: color var(--dur-fast) var(--ease-out);
+.dash-layoutmenu-find input:focus { outline: none; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); }
+.dash-layoutmenu-list {
+  display: flex; flex-direction: column; gap: 1px; flex: 1 1 auto; min-height: 0; max-height: 300px;
+  overflow-y: auto; scrollbar-width: thin;
 }
-.dash-layoutmenu-lock:hover { color: var(--text); background: none; border-color: transparent; }
-.dash-layoutmenu-lock[aria-pressed='true'] { color: var(--warn); }
-
-/* Row, mark, label - identical shape to `.mkt-statmenu-item` in Market.css
-   (a fixed mark slot then the label, so labels line up in one column
-   whether their panel is on or off), restated here rather than shared
-   because that file belongs to Market.tsx's own header menu, not to the
-   dashboard shell. */
-.dash-layoutmenu-item {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  padding: 3px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
-  background: none;
-  color: var(--muted);
-  font-size: var(--fs-data);
-  font-weight: 400;
-  line-height: var(--ctl-lh);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
-}
-.dash-layoutmenu-item:hover:not(:disabled) { color: var(--text); background: none; border-color: transparent; }
-.dash-layoutmenu-item.is-on { color: var(--text); }
-.dash-layoutmenu-item:disabled { cursor: default; opacity: 0.5; }
-.dash-layoutmenu-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 10px;
-  flex: none;
-  color: var(--accent);
-}
-.dash-layoutmenu-foot {
-  margin-top: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--panel-line);
-}
+.dash-layoutmenu-sub { margin: 6px 8px 2px; color: var(--dim); font-size: var(--fs-micro); }
+.dash-layoutmenu-sub:first-child { margin-top: 0; }
+.dash-layoutmenu-none { margin: 6px 8px; color: var(--dim); font-size: var(--fs-micro); }
 
 /* The grid scrolls, the page does not. On desktop styles.css pins .appcontent
    to the viewport, so this is the only scroller between the navbar and the

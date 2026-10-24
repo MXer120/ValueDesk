@@ -258,7 +258,7 @@ button.tape-id-agg.neg { color: var(--neg); }
    tie to source order - which left this popup keeping `.menu-popup`'s own
    `left: 0` and growing off the right edge of a narrow panel instead of
    right-aligning under the trigger. */
-.menu-popup.tape-settingsmenu { right: 0; left: auto; min-width: 220px; }
+.menu-popup.tape-settingsmenu { right: 0; left: auto; min-width: 236px; padding: 6px; }
 .tape-settings-cols {
   display: flex;
   align-items: start;
@@ -271,16 +271,5 @@ button.tape-id-agg.neg { color: var(--neg); }
   border-top: none;
 }
 .tape-settingsmenu .menu-grid { grid-template-columns: 1fr; gap: 1px; }
-.tape-settingsmenu .menu-grid button { text-align: left; }
+.menu-popup.tape-settingsmenu .menu-grid button { text-align: left; }
 
-.tape-settings-check {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  font-size: var(--fs-ctl);
-  color: var(--muted);
-  cursor: pointer;
-  padding: 3px 6px;
-}
-.tape-settings-check input { accent-color: var(--accent); margin: 0; }
-.tape-settings-check:hover { color: var(--text); }

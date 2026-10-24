@@ -353,10 +353,17 @@ function BookSelect({ book, onChange }: { book: Book; onChange: (b: Book) => voi
               type="button"
               role="menuitemradio"
               aria-checked={b.id === book}
-              className={b.id === book ? 'is-on' : ''}
+              className={`menu-row${b.id === book ? '' : ' is-off'}`}
               onClick={() => { onChange(b.id); setOpen(false); }}
             >
-              {b.label}
+              <span className="menu-row__label">{b.label}</span>
+              <span className="menu-tick" aria-hidden="true">
+                {b.id === book && (
+                  <svg width="11" height="9" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
+                    <path d="M1 4.3 3.7 7 9 1.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
             </button>
           ))}
         </div>

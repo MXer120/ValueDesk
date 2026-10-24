@@ -6,21 +6,25 @@
  * DOM ancestry, so the resize grip and the drag strip sitting on top of a
  * panel do not swallow the click).
  *
- * ONE lock control, not one per panel - the lock is a single fact about the
- * whole dashboard (`Dashboard.tsx`'s own `locked`), so every panel's menu
- * shows and drives the exact same toggle rather than each pretending to own
- * a private one. "View" is the panel checklist: which of the panels this
- * screen size can show are actually in the grid right now, with the same
- * add/remove-by-ticking interaction Market.tsx's header stat menu already
- * uses for exactly the same kind of question.
+ * The app's menu rows (styles.css `.menu-row`): the actions first, each with
+ * its icon - Edit layout, Lock / Unlock panels (ONE lock for the whole
+ * dashboard, `Dashboard.tsx`'s own `locked`, so every panel's menu drives the
+ * same toggle), Reset layout, Notification settings - then the panels this
+ * screen size can show, the ones on screen first, each with a box that adds it
+ * to the grid or takes it off. The panel list scrolls in its own area, and a
+ * search narrows it once there are more than a handful.
  */
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { MENU_ICONS } from './tabExtras';
 
 export interface LayoutMenuPanel {
   id: string;
   name: string;
 }
+
+/** A search is offered past this many panels. */
+const SEARCH_FROM = 8;
 
 function useDismiss(ref: React.RefObject<HTMLElement>, close: () => void): void {
   const closeRef = useRef(close);
@@ -41,27 +45,22 @@ function useDismiss(ref: React.RefObject<HTMLElement>, close: () => void): void 
   }, [ref]);
 }
 
-/** Closed shackle when locked, swung open (one leg lifted clear of the body)
- *  when not - the same shape change a real padlock icon makes, so the icon
- *  carries the state and not just the tooltip text next to it. */
-const LockIcon = ({ locked }: { locked: boolean }) => (
-  <svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
-    <path
-      d={locked ? 'M4.5 6.3V4.5a2.5 2.5 0 0 1 5 0v1.8' : 'M4.5 6.3V4.5a2.5 2.5 0 0 1 4.5-1.5'}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.2"
-      strokeLinecap="round"
-    />
-    <rect x="3" y="6.3" width="8" height="6" rx="1.3" fill="none" stroke="currentColor" strokeWidth="1.2" />
+const Tick = () => (
+  <svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
+    <path d="M1 4.3 3.7 7 9 1.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
   </svg>
 );
 
-const Tick = () => (
-  <svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
-    <path d="M1 4.3 3.7 7 9 1.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
+interface Action {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+  run: () => void;
+  disabled?: boolean;
+  hint?: string;
+  title?: string;
+  pressed?: boolean;
+}
 
 export function LayoutMenu({
   at, locked, onToggleLock, panels, hidden, onTogglePanel, onReset, hasSaved, onEditLayout, onNotificationSettings, onClose, closing = false, onExit,
@@ -88,6 +87,7 @@ export function LayoutMenu({
   const ref = useRef<HTMLDivElement>(null);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
   const [idx, setIdx] = useState(0);
+  const [q, setQ] = useState('');
   const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
 
   useDismiss(ref, onClose);
@@ -102,20 +102,63 @@ export function LayoutMenu({
     });
   }, [at]);
 
-  useEffect(() => {
-    if (place) items.current[idx]?.focus();
-  }, [idx, place]);
+  const actions: Action[] = [
+    ...(onEditLayout ? [{ key: 'edit', label: 'Edit layout', icon: MENU_ICONS.edit, hint: '\\', title: 'Arrange the panels (Backslash)', run: () => { onEditLayout(); onClose(); } }] : []),
+    {
+      key: 'lock',
+      label: locked ? 'Unlock panels' : 'Lock panels',
+      icon: locked ? MENU_ICONS.unlock : MENU_ICONS.lock,
+      title: locked ? 'Panels are locked in place' : 'Stop panels being dragged or resized',
+      pressed: locked,
+      run: onToggleLock,
+    },
+    { key: 'reset', label: 'Reset layout…', icon: MENU_ICONS.reset, disabled: !hasSaved && !locked, run: onReset },
+    ...(onNotificationSettings ? [{ key: 'notes', label: 'Notification settings', icon: MENU_ICONS.bell, run: () => { onNotificationSettings(); onClose(); } }] : []),
+  ];
 
-  // Reset is always there. Edit layout and notification settings are optional.
-  const editIndex = onEditLayout ? panels.length : -1;
-  const resetIndex = panels.length + (onEditLayout ? 1 : 0);
-  const noteIndex = onNotificationSettings ? resetIndex + 1 : -1;
-  const count = panels.length + 1 + (onEditLayout ? 1 : 0) + (onNotificationSettings ? 1 : 0);
+  // The panels on screen first, then the rest, each in the grid's own order; a search narrows both.
+  const term = q.trim().toLowerCase();
+  const { onScreen, offScreen } = useMemo(() => {
+    const match = panels.filter((p) => !term || p.name.toLowerCase().includes(term));
+    return { onScreen: match.filter((p) => !hidden.has(p.id)), offScreen: match.filter((p) => hidden.has(p.id)) };
+  }, [panels, hidden, term]);
+  const listed = [...onScreen, ...offScreen];
+  const count = actions.length + listed.length;
+  // Focus starts on the first action, and stays inside what is listed as a search narrows it.
+  const at0 = Math.min(idx, Math.max(0, count - 1));
+
+  useEffect(() => {
+    if (place && document.activeElement?.tagName !== 'INPUT') items.current[at0]?.focus();
+  }, [at0, place]);
+
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => (i + 1) % count); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => (i - 1 + count) % count); }
-    else if (e.key === 'Home') { e.preventDefault(); setIdx(0); }
-    else if (e.key === 'End') { e.preventDefault(); setIdx(count - 1); }
+    const inSearch = (e.target as HTMLElement).tagName === 'INPUT';
+    if (e.key === 'ArrowDown') { e.preventDefault(); setIdx(inSearch ? actions.length : (at0 + 1) % count); if (inSearch) items.current[actions.length]?.focus(); }
+    else if (e.key === 'ArrowUp' && !inSearch) { e.preventDefault(); setIdx((at0 - 1 + count) % count); }
+    else if (e.key === 'Home' && !inSearch) { e.preventDefault(); setIdx(0); }
+    else if (e.key === 'End' && !inSearch) { e.preventDefault(); setIdx(count - 1); }
+  };
+
+  const shownCount = panels.filter((p) => !hidden.has(p.id)).length;
+  const row = (p: LayoutMenuPanel, i: number) => {
+    const shown = !hidden.has(p.id);
+    const n = actions.length + i;
+    return (
+      <button
+        key={p.id}
+        ref={(el) => { items.current[n] = el; }}
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={shown}
+        tabIndex={n === at0 ? 0 : -1}
+        className={`menu-row${shown ? '' : ' is-off'}`}
+        onFocus={() => setIdx(n)}
+        onClick={() => onTogglePanel(p.id)}
+      >
+        <span className="menu-row__label">{p.name}</span>
+        <span className="menu-box" aria-hidden="true">{shown && <Tick />}</span>
+      </button>
+    );
   };
 
   return createPortal(
@@ -132,80 +175,42 @@ export function LayoutMenu({
         visibility: place ? undefined : 'hidden',
       }}
     >
-      <div className="dash-layoutmenu-head">
-        <span className="menu-group-label">View</span>
+      {actions.map((a, i) => (
         <button
-          type="button"
-          className="dash-layoutmenu-lock"
-          aria-pressed={locked}
-          onClick={onToggleLock}
-          title={locked ? 'Panels are locked in place' : 'Prevent panels being dragged or resized'}
-        >
-          <LockIcon locked={locked} />
-        </button>
-      </div>
-      {panels.map((p, i) => {
-        const shown = !hidden.has(p.id);
-        return (
-          <button
-            key={p.id}
-            ref={(el) => { items.current[i] = el; }}
-            type="button"
-            role="menuitemcheckbox"
-            aria-checked={shown}
-            tabIndex={i === idx ? 0 : -1}
-            className={`dash-layoutmenu-item ${shown ? 'is-on' : ''}`}
-            onFocus={() => setIdx(i)}
-            onClick={() => onTogglePanel(p.id)}
-          >
-            <span className="dash-layoutmenu-mark" aria-hidden="true">{shown && <Tick />}</span>
-            <span>{p.name}</span>
-          </button>
-        );
-      })}
-      <div className="dash-layoutmenu-foot">
-        {onEditLayout && (
-          <button
-            ref={(el) => { items.current[editIndex] = el; }}
-            type="button"
-            role="menuitem"
-            tabIndex={idx === editIndex ? 0 : -1}
-            className="dash-layoutmenu-item"
-            title="Backslash"
-            onFocus={() => setIdx(editIndex)}
-            onClick={() => { onEditLayout(); onClose(); }}
-          >
-            <span className="dash-layoutmenu-mark" aria-hidden="true" />
-            <span>Edit layout</span>
-          </button>
-        )}
-        <button
-          ref={(el) => { items.current[resetIndex] = el; }}
+          key={a.key}
+          ref={(el) => { items.current[i] = el; }}
           type="button"
           role="menuitem"
-          tabIndex={idx === resetIndex ? 0 : -1}
-          className="dash-layoutmenu-item"
-          disabled={!hasSaved && !locked}
-          onFocus={() => setIdx(resetIndex)}
-          onClick={onReset}
+          tabIndex={i === at0 ? 0 : -1}
+          className="menu-row"
+          disabled={a.disabled}
+          aria-pressed={a.pressed}
+          title={a.title}
+          onFocus={() => setIdx(i)}
+          onClick={a.run}
         >
-          <span className="dash-layoutmenu-mark" aria-hidden="true" />
-          <span>Reset layout</span>
+          <span className={`menu-row__ic${a.pressed ? ' is-warn' : ''}`}>{a.icon}</span>
+          <span className="menu-row__label">{a.label}</span>
+          {a.hint && <kbd className="menu-row__hint">{a.hint}</kbd>}
         </button>
-        {onNotificationSettings && (
-          <button
-            ref={(el) => { items.current[noteIndex] = el; }}
-            type="button"
-            role="menuitem"
-            tabIndex={idx === noteIndex ? 0 : -1}
-            className="dash-layoutmenu-item"
-            onFocus={() => setIdx(noteIndex)}
-            onClick={() => { onNotificationSettings(); onClose(); }}
-          >
-            <span className="dash-layoutmenu-mark" aria-hidden="true" />
-            <span>Notification settings</span>
-          </button>
-        )}
+      ))}
+      <span className="menu-sep" role="separator" />
+      <div className="dash-layoutmenu-head">
+        <span className="menu-group-label">Panels</span>
+        <span className="dash-layoutmenu-count">{shownCount} of {panels.length} on screen</span>
+      </div>
+      {panels.length > SEARCH_FROM && (
+        <label className="dash-layoutmenu-find">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a panel" aria-label="Find a panel" spellCheck={false} autoComplete="off" />
+        </label>
+      )}
+      <div className="dash-layoutmenu-list">
+        {onScreen.length > 0 && <p className="dash-layoutmenu-sub">On screen</p>}
+        {onScreen.map((p, i) => row(p, i))}
+        {offScreen.length > 0 && <p className="dash-layoutmenu-sub">Add to the screen</p>}
+        {offScreen.map((p, i) => row(p, onScreen.length + i))}
+        {listed.length === 0 && <p className="dash-layoutmenu-none">No panel matches “{q.trim()}”</p>}
       </div>
     </div>,
     document.body,

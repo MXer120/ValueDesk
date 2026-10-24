@@ -37,8 +37,8 @@
  * The library is imported dynamically so it lands in its own chunk and never
  * blocks first paint.
  */
-import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
-import { useLatched } from './motion';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
+import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
   AxisRange,
@@ -110,7 +110,6 @@ import { SelectionMarks } from '../chart/SelectionMarks';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
-  NEWS_OVERLAY,
   SHOW_KEY,
   SYSTEM_OVERLAYS,
   fillMarks,
@@ -119,9 +118,12 @@ import {
   registerMarkOverlays,
   sanitizeShow,
   type ChartShow,
+  newsKind,
   type FillMark,
-  type NewsMark,
+  type NewsStory,
 } from '../chart/chartMarks';
+import { NewsMarkers } from '../chart/NewsMarkers';
+import { NewsSettings } from '../chart/NewsSettings';
 import { ChartSidebar } from '../chart/ChartSidebar';
 import { CHART_ICONS } from '../chart/chartIcons';
 import {
@@ -754,6 +756,28 @@ function Chart({
   /** The object list on the right (ChartSidebar.tsx). */
   const [sidebar, setSidebar] = useStored<boolean>('chart.sidebar', false);
   const [newsMenu, setNewsMenu] = useState(false);
+  const nm = useLatched(newsMenu);
+  const newsPress = useRef(0);
+  /** The long press opened the settings: the click that follows is not a toggle. */
+  const newsHeld = useRef(false);
+  useEffect(() => {
+    if (!newsMenu) return;
+    const away = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === 'Escape') setNewsMenu(false);
+        return;
+      }
+      if (e.target instanceof Element && e.target.closest('.kc-news-tb')) return;
+      setNewsMenu(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', away);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', away);
+    };
+  }, [newsMenu]);
+
   /** Re-mount the studies / re-load the drawings (a snapshot view opened or closed). */
   const [indGen, setIndGen] = useState(0);
   const [drawGen, setDrawGen] = useState(0);
@@ -818,6 +842,8 @@ function Chart({
    *  and a fresh history fetch; collapsing it to 0×0 makes klinecharts refit
    *  the price axis to 0–10. */
   const [view, setView] = useState<ViewId>('chart');
+  /** The object list slides in and out (usePresence keeps it while it leaves). */
+  const side = usePresence(sidebar && view === 'chart', 240);
   const [ready, setReady] = useState(false);
   /**
    * Which klinecharts instance the effects below are wired to: bumped every
@@ -3626,9 +3652,7 @@ function Chart({
     return list[lo]!.timestamp;
   };
   /** A hovered or clicked mark: its tip (executions) or its story list (news). */
-  const [markTip, setMarkTip] = useState<
-    { kind: 'exec'; mark: FillMark; x: number; y: number } | { kind: 'news'; mark: NewsMark; x: number; y: number; pinned: boolean } | null
-  >(null);
+  const [markTip, setMarkTip] = useState<{ kind: 'exec'; mark: FillMark; x: number; y: number } | null>(null);
   const markAt = (e: OverlayEvent<unknown>) => ({ x: (e.pageX ?? 0) - window.scrollX, y: (e.pageY ?? 0) - window.scrollY });
 
   // The account's fills on this market: one read per market, wallet and
@@ -3679,61 +3703,32 @@ function Chart({
   // and choice (the server caches it a minute), again every ten minutes.
   const coin = newsCoin(sym?.baseCoin);
   const news = useAsync(
-    () => (show.news === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 }) : vsApi.news({ feed: 'latest', coin, limit: 50 })),
-    [show.news, coin],
-    { enabled: show.news === 'macro' || (show.news === 'coin' && !!coin), pollMs: 10 * 60_000 },
+    () =>
+      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 })
+      : show.newsScope === 'all' ? vsApi.news({ feed: 'latest', limit: 50 })
+      : vsApi.news({ feed: 'latest', coin, limit: 50 }),
+    [show.newsScope, coin],
+    { enabled: show.news && (show.newsScope !== 'coin' || !!coin), pollMs: 10 * 60_000 },
   );
-  // Badges are 14px: zoomed out, the bars that many pixels span share one.
-  const [newsMergeBars, setNewsMergeBars] = useState(1);
-  useEffect(() => {
-    const c = chart.current;
-    if (!ready || !c || show.news === 'off') return;
-    const read = () => setNewsMergeBars(Math.max(1, Math.ceil(18 / Math.max(0.5, c.getBarSpace().bar))));
-    read();
-    c.subscribeAction('onZoom', read);
-    return () => c.unsubscribeAction('onZoom', read);
-  }, [ready, chartGen, show.news]);
-  useEffect(() => {
-    const c = chart.current;
-    if (!ready || !c) return;
-    c.removeOverlay({ name: NEWS_OVERLAY });
-    setMarkTip((t) => (t?.kind === 'news' ? null : t));
-    if (show.news === 'off' || masked) return;
-    const items = news.data?.items ?? [];
-    for (const m of newsMarks(items, interval, barLookup, newsMergeBars * intervalToMs(interval))) {
-      c.createOverlay({
-        name: NEWS_OVERLAY,
-        // The badge sits at the foot of the pane whatever the price; the
-        // value only has to be one the pane can place.
-        points: [{ timestamp: m.timestamp, value: lastBar.current?.close ?? 0 }],
-        extendData: m,
-        lock: true,
-        onRightClick: (e) => e.preventDefault?.(),
-        onMouseMove: (e) => setMarkTip((t) => (t?.kind === 'news' && (t.pinned || t.mark.key === m.key) ? t : { kind: 'news', mark: m, ...markAt(e), pinned: false })),
-        onMouseLeave: () => setMarkTip((t) => (t?.kind === 'news' && !t.pinned && t.mark.key === m.key ? null : t)),
-        onClick: (e) => setMarkTip({ kind: 'news', mark: m, ...markAt(e), pinned: true }),
-      });
-    }
+  /** The stories on the bars they came out in (NewsMarkers.tsx places and merges them). */
+  const newsList = useMemo(
+    () =>
+      !show.news || masked ? []
+      : newsMarks(((news.data?.items ?? []) as NewsStory[]).filter((n) => show.newsKinds.includes(newsKind(n))), interval, barLookup),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen, news.data, show.news, interval, masked, wantKey, newsMergeBars]);
-  // A pinned story list closes on Escape or a press anywhere else.
-  useEffect(() => {
-    if (!(markTip?.kind === 'news' && markTip.pinned)) return;
-    const close = (e: Event) => {
-      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
-      if (e.target instanceof Element && e.target.closest('.kc-news-pop')) return;
-      setMarkTip(null);
-    };
-    const t = window.setTimeout(() => {
-      document.addEventListener('pointerdown', close);
-      document.addEventListener('keydown', close);
-    }, 0);
-    return () => {
-      window.clearTimeout(t);
-      document.removeEventListener('pointerdown', close);
-      document.removeEventListener('keydown', close);
-    };
-  }, [markTip]);
+    [news.data, show.news, show.newsKinds.join(), interval, masked, wantKey],
+  );
+  /** The markers stay a moment as news goes off, to fade out. */
+  const newsLayer = useLatched(newsList.length ? newsList : null, 200);
+  /** A story into a knowledge folder, as the News widget saves one. */
+  const saveStory = async (n: NewsStory) => {
+    const saved = await saveToFolder({
+      kind: 'news',
+      title: n.title.length > 120 ? `${n.title.slice(0, 117)}…` : n.title,
+      data: { id: n.id, title: n.title, href: n.href, time: n.time, author: n.author ?? null, symbols: n.symbols ?? [], summary: n.summary ?? null, ...(n.post ? { post: true } : {}) },
+    });
+    if (saved) notify('ok', 'Story saved to the folder');
+  };
 
   // --- snapshot: this chart for a research folder, and back (chart/snapshot.ts) -
   /** A range to show once the snapshot's bars are on screen. */
@@ -4283,36 +4278,38 @@ function Chart({
           <div className="menu kc-news-tb" onMouseDown={(e) => e.stopPropagation()}>
             <button
               type="button"
-              className={`kc-ico kc-tb-ico${show.news !== 'off' ? ' on' : ''}`}
-              title="News on the chart"
+              className={`kc-ico kc-tb-ico${show.news ? ' on' : ''}`}
+              title={show.news ? 'News on the chart: on (right-click for settings)' : 'News on the chart: off (right-click for settings)'}
               aria-label="News on the chart"
-              aria-haspopup="menu"
-              aria-expanded={newsMenu}
-              onClick={() => setNewsMenu((o) => !o)}
+              aria-pressed={show.news}
+              onClick={() => {
+                if (newsHeld.current) {
+                  newsHeld.current = false;
+                  return;
+                }
+                patchShow({ news: !show.news });
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setNewsMenu((o) => !o);
+              }}
+              onPointerDown={(e) => {
+                // A long press is the right-click on touch.
+                if (e.pointerType !== 'touch') return;
+                window.clearTimeout(newsPress.current);
+                newsPress.current = window.setTimeout(() => {
+                  newsHeld.current = true;
+                  setNewsMenu(true);
+                }, 500);
+              }}
+              onPointerUp={() => window.clearTimeout(newsPress.current)}
+              onPointerLeave={() => window.clearTimeout(newsPress.current)}
             >
               {CHART_ICONS.news}
             </button>
-            {newsMenu && (
-              <div className="menu-popup kc-news-menu" role="menu">
-                <div className="kc-menu-label">News on the chart</div>
-                <div className="kc-menu-list">
-                  {([['off', 'Off'], ['coin', coin ? `${coin} news` : 'This coin'], ['macro', 'Macro']] as const).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={show.news === id}
-                      className={show.news === id ? 'on' : ''}
-                      disabled={id === 'coin' && !coin}
-                      onClick={() => {
-                        patchShow({ news: id });
-                        setNewsMenu(false);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            {nm.value && (
+              <div className={`menu-popup kc-news-menu${nm.closing ? ' is-closing' : ''}`} role="dialog" aria-label="News settings" onAnimationEnd={nm.onExit}>
+                <NewsSettings show={show} coin={coin} onChange={patchShow} />
               </div>
             )}
           </div>
@@ -4419,6 +4416,20 @@ function Chart({
         <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
+        {newsLayer.value && (
+          <NewsMarkers
+            chart={ready ? chart.current : null}
+            marks={newsLayer.value}
+            leaving={newsLayer.closing}
+            left={holder.current?.offsetLeft ?? 0}
+            top={holder.current?.offsetTop ?? 0}
+            coin={coin}
+            mode={show.newsScope}
+            tz={tz}
+            canSave={folders}
+            onSave={(n) => void saveStory(n)}
+          />
+        )}
         <FeedOverlay
           bare
           // While the invariant guard is reloading, the feed can still say
@@ -4730,13 +4741,19 @@ function Chart({
           </div>
         </div>
         </div>
-        {sidebar && view === 'chart' && chart.current && (() => {
+        {side.mounted && chart.current && (() => {
           const c = chart.current!;
           const front = [...userDrawings(c)]
             .filter((o) => o.id !== drawingId.current)
             .sort((a, b) => realZ(b) - realZ(a));
           const text = (o: (typeof front)[number]) => (typeof o.extendData === 'string' && o.extendData.trim() ? `: ${o.extendData.trim().slice(0, 24)}` : '');
           return (
+            <div
+              className={`kc-side-wrap${side.closing ? ' is-closing' : ''}`}
+              onAnimationEnd={(e) => {
+                if (e.target === e.currentTarget && side.closing) side.done();
+              }}
+            >
             <ChartSidebar
               symbol={sym?.displayName ?? symbol}
               coin={coin}
@@ -4754,7 +4771,7 @@ function Chart({
                 position: !address ? 'Connect a wallet to see it' : engine !== 'perps' ? 'Spot has no positions' : undefined,
                 orders: !address ? 'Connect a wallet to see them' : undefined,
                 executions: !address ? 'Connect a wallet to see your fills' : undefined,
-                news: news.error && show.news !== 'off' ? 'News did not load' : undefined,
+                news: news.error && show.news ? 'News did not load' : undefined,
               }}
               onShow={patchShow}
               onSelect={(id, add) => {
@@ -4808,6 +4825,7 @@ function Chart({
               onSave={() => setExportOpen(true)}
               onClose={() => setSidebar(false)}
             />
+            </div>
           );
         })()}
       </div>
@@ -4821,35 +4839,12 @@ function Chart({
       {ctxMenu && <TabMenu at={ctxMenu.at} items={ctxMenu.items} onClose={closeCtxMenu} />}
 
       {markTip && createPortal(
-        markTip.kind === 'exec' ? (
-          <div className="kc-mark-tip" role="tooltip" style={{ left: markTip.x + 12, top: markTip.y + 12 }}>
-            <span className={markTip.mark.side === 'buy' ? 'pos' : 'neg'}>{markTip.mark.side === 'buy' ? 'Bought' : 'Sold'}</span>{' '}
-            {fmtQty(markTip.mark.qty, sym?.stepSize)} at {fmtPrice(markTip.mark.price, sym?.tickSize)}
-            {markTip.mark.count > 1 && <span className="kc-mark-dim"> · {markTip.mark.count} fills</span>}
-            <span className="kc-mark-dim"> · {clockText(markTip.mark.last, tz)}</span>
-          </div>
-        ) : (
-          <div
-            className={`kc-news-pop${markTip.pinned ? ' is-pinned' : ''}`}
-            role={markTip.pinned ? 'dialog' : 'tooltip'}
-            aria-label="News on this bar"
-            style={{ left: Math.min(markTip.x - 12, window.innerWidth - 336), top: Math.max(8, markTip.y - 16), transform: 'translateY(-100%)' }}
-          >
-            <div className="kc-news-pop__head">{show.news === 'macro' ? 'Macro news' : `${coin} news`} · {crosshairLabel(markTip.mark.timestamp, intervalToMs(interval), tz)}</div>
-            <ol className="kc-news-pop__list">
-              {(markTip.pinned ? markTip.mark.stories : markTip.mark.stories.slice(0, 3)).map((n) => (
-                <li key={n.id}>
-                  <a href={n.href} target="_blank" rel="noopener noreferrer" className="kc-news-pop__item" tabIndex={markTip.pinned ? 0 : -1}>
-                    <span className="kc-news-pop__time">{clockText(n.time, tz)}{n.author ? ` · ${n.author}` : ''}</span>
-                    <span className="kc-news-pop__title">{n.title}</span>
-                  </a>
-                </li>
-              ))}
-            </ol>
-            {!markTip.pinned && markTip.mark.stories.length > 3 && <div className="kc-news-pop__more">+{markTip.mark.stories.length - 3} more - click to list them</div>}
-            <div className="kc-news-pop__src">SoSoValue</div>
-          </div>
-        ),
+        <div className="kc-mark-tip" role="tooltip" style={{ left: markTip.x + 12, top: markTip.y + 12 }}>
+          <span className={markTip.mark.side === 'buy' ? 'pos' : 'neg'}>{markTip.mark.side === 'buy' ? 'Bought' : 'Sold'}</span>{' '}
+          {fmtQty(markTip.mark.qty, sym?.stepSize)} at {fmtPrice(markTip.mark.price, sym?.tickSize)}
+          {markTip.mark.count > 1 && <span className="kc-mark-dim"> · {markTip.mark.count} fills</span>}
+          <span className="kc-mark-dim"> · {clockText(markTip.mark.last, tz)}</span>
+        </div>,
         document.body,
       )}
 

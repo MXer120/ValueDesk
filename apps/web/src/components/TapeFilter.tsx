@@ -496,6 +496,12 @@ export function TapeControls({
 }
 
 const GearIcon = () => <PrefsIcon size={14} />;
+/** The tick in a checklist row's box (styles.css `.menu-box`). */
+const BoxTick = () => (
+  <svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
+    <path d="M1 4.3 3.7 7 9 1.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
 
 /**
  * The tape's own settings: size unit, data source, and the known-market-maker
@@ -567,10 +573,16 @@ export function TapeSettings({
             </div>
           </div>
           <div className="menu-group">
-            <label className="tape-settings-check">
-              <input type="checkbox" checked={hideMakers} onChange={(e) => onHideMakers(e.target.checked)} />
-              Hide likely market makers
-            </label>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={hideMakers}
+              className={`menu-row${hideMakers ? '' : ' is-off'}`}
+              onClick={() => onHideMakers(!hideMakers)}
+            >
+              <span className="menu-row__label">Hide likely market makers</span>
+              <span className="menu-box" aria-hidden="true">{hideMakers && <BoxTick />}</span>
+            </button>
           </div>
           {/* No market/limit filter here, on purpose - the feed carries no
               order-type field on a print (t, T, s, S, p, q, bi, si only; see

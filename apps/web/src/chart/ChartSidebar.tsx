@@ -18,8 +18,9 @@
  */
 import { useState, type DragEvent } from 'react';
 import { MENU_ICONS } from '../dashboard/tabExtras';
-import { CHART_ICONS } from './chartIcons';
-import type { ChartShow, NewsMode } from './chartMarks';
+import { CoinIcon } from '../components/CoinIcon';
+import { CHART_ICONS, NEWS_ICONS } from './chartIcons';
+import type { ChartShow, NewsScope } from './chartMarks';
 
 export interface SidebarDrawing {
   id: string;
@@ -79,7 +80,11 @@ function Switch({ label, on, onChange, note }: { label: string; on: boolean; onC
 export function ChartSidebar(p: ChartSidebarProps) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropAt, setDropAt] = useState<number | null>(null);
-  const news: Array<[NewsMode, string]> = [['off', 'Off'], ['coin', p.coin || 'Coin'], ['macro', 'Macro']];
+  const scopes: Array<[NewsScope, string, JSX.Element]> = [
+    ['coin', p.coin || 'Coin', p.coin ? <CoinIcon coin={p.coin} size={14} /> : NEWS_ICONS.news],
+    ['macro', 'Macro', NEWS_ICONS.macro],
+    ['all', 'All', CHART_ICONS.news],
+  ];
 
   const overRow = (e: DragEvent, i: number) => {
     if (!dragId) return;
@@ -114,25 +119,26 @@ export function ChartSidebar(p: ChartSidebarProps) {
           <Switch label="Position line" on={p.show.position} note={p.why.position} onChange={(position) => p.onShow({ position })} />
           <Switch label="Order lines" on={p.show.orders} note={p.why.orders} onChange={(orders) => p.onShow({ orders })} />
           <Switch label="Executions" on={p.show.executions} note={p.why.executions} onChange={(executions) => p.onShow({ executions })} />
-          <div className="kc-side-news">
-            <span className="kc-side-news__label">News</span>
-            <span className="kc-side-seg" role="radiogroup" aria-label="News on the chart">
-              {news.map(([id, label]) => (
+          <Switch label="News" on={p.show.news} note={p.why.news} onChange={(news) => p.onShow({ news })} />
+          <div className={`kc-side-news${p.show.news ? '' : ' is-off'}`}>
+            <span className="kc-side-news__label">From</span>
+            <span className="kc-side-seg" role="radiogroup" aria-label="Whose news">
+              {scopes.map(([id, label, icon]) => (
                 <button
                   key={id}
                   type="button"
                   role="radio"
-                  aria-checked={p.show.news === id}
-                  className={p.show.news === id ? 'on' : ''}
+                  aria-checked={p.show.newsScope === id}
+                  className={p.show.newsScope === id ? 'on' : ''}
                   disabled={id === 'coin' && !p.coin}
-                  title={id === 'coin' ? `${p.coin || 'This coin'}'s news` : id === 'macro' ? 'Macro news' : 'No news'}
-                  onClick={() => p.onShow({ news: id })}
+                  title={id === 'coin' ? `${p.coin || 'This coin'} news only` : id === 'macro' ? 'Macro and economy' : 'All of crypto'}
+                  onClick={() => p.onShow({ newsScope: id, news: true })}
                 >
+                  {icon}
                   {label}
                 </button>
               ))}
             </span>
-            {p.why.news && <span className="kc-side-note">{p.why.news}</span>}
           </div>
         </section>
 

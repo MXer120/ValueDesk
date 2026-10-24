@@ -6,13 +6,16 @@
  *               above; fills of one side in one bar are one arrow (their
  *               size-weighted price, their total size, how many).
  *   News        SoSoValue stories (server /api/vs/news) on the bar they came
- *               out in, as a badge along the foot of the price pane - this
- *               coin's stories, or the macro ones (category 5). A click lists
- *               them; each opens the story.
+ *               out in - this coin's, or the macro ones (category 5) - as
+ *               markers along the foot of the price pane (NewsMarkers.tsx,
+ *               a DOM layer: a marker shows what it is - a coin's logo, an X
+ *               post, macro, research... - and a count only where several
+ *               stories share it). The same story twice is shown once.
  *
- * Both are overlays the user cannot select, move, style or save: Chart.tsx
- * keeps them out of everything that handles drawings (SYSTEM_OVERLAYS), so
- * "remove all", "hide all", the object list and the snapshot never see them.
+ * The arrows are an overlay the user cannot select, move, style or save:
+ * Chart.tsx keeps the chart's own overlays out of everything that handles
+ * drawings (SYSTEM_OVERLAYS), so "remove all", "hide all", the object list and
+ * the snapshot never see them.
  *
  * The grouping below is pure and covered by chartMarks.test.ts.
  */
@@ -101,7 +104,7 @@ export function fillMarks(rows: readonly unknown[], symbol: string, interval: st
 
 // --- news ---------------------------------------------------------------------------
 
-/** What a news badge needs of a story (vsApi NewsItem). */
+/** What a news marker needs of a story (vsApi NewsItem). */
 export interface NewsStory {
   id: string;
   title: string;
@@ -110,7 +113,38 @@ export interface NewsStory {
   time: number;
   author?: string | null;
   post?: boolean;
+  /** SoSoValue's category (1 news, 2 research, 3 institution, 4 insights, 5 macro, 7 announcements, 13 crypto stocks). */
+  category?: number | null;
+  /** Its coins (BTC), SoSoValue's match. */
+  symbols?: string[];
+  summary?: string | null;
 }
+
+export type NewsKind = 'news' | 'research' | 'institution' | 'insight' | 'macro' | 'announcement' | 'stocks' | 'post';
+
+export const NEWS_KIND_LABEL: Record<NewsKind, string> = {
+  news: 'News',
+  research: 'Research',
+  institution: 'Institution',
+  insight: 'Insights',
+  macro: 'Macro',
+  announcement: 'Announcement',
+  stocks: 'Crypto stocks',
+  post: 'Post on X',
+};
+
+const BY_CATEGORY: Record<number, NewsKind> = { 1: 'news', 2: 'research', 3: 'institution', 4: 'insight', 5: 'macro', 7: 'announcement', 13: 'stocks' };
+
+/** What a story is: a post on X, else its SoSoValue category. */
+export const newsKind = (s: NewsStory): NewsKind => (s.post ? 'post' : BY_CATEGORY[s.category ?? 1] ?? 'news');
+
+/** A title as two copies of one story share it: its letters and digits, case, punctuation and spacing aside. */
+const sameStory = (title: string) =>
+  title
+    .toLowerCase()
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .slice(0, 80);
 
 export interface NewsMark {
   key: string;
@@ -127,9 +161,12 @@ export interface NewsMark {
 export function newsMarks(stories: readonly NewsStory[], interval: string, lookup?: (ts: number) => number | null, mergeMs = 0): NewsMark[] {
   const by = new Map<number, NewsStory[]>();
   const seen = new Set<string>();
-  for (const s of stories) {
-    if (!(s.time > 0) || seen.has(s.id)) continue;
+  // Newest first, so the copy kept of a story told twice is its latest.
+  for (const s of [...stories].sort((a, b) => b.time - a.time)) {
+    const same = sameStory(s.title);
+    if (!(s.time > 0) || seen.has(s.id) || (same && seen.has(same))) continue;
     seen.add(s.id);
+    if (same) seen.add(same);
     const t = barOpen(s.time, interval, lookup);
     by.set(t, [...(by.get(t) ?? []), s]);
   }
@@ -140,6 +177,43 @@ export function newsMarks(stories: readonly NewsStory[], interval: string, looku
     else out.push({ key: `news:${timestamp}`, timestamp, stories: [...list] });
   }
   for (const m of out) m.stories.sort((a, b) => b.time - a.time);
+  return out;
+}
+
+/**
+ * What a marker shows for its newest story: the logo of the coin it is about
+ * where that says something (another coin than the chart's; among the macro
+ * stories, pass '' and any coin does), else X's mark for a post, the globe for
+ * macro, or the icon of its kind.
+ */
+export function markFace(m: Pick<NewsMark, 'stories'>, chartCoin: string): { kind: NewsKind; coin: string | null } {
+  const s = m.stories[0];
+  if (!s) return { kind: 'news', coin: null };
+  const coin = (s.symbols ?? []).find((c) => c && c !== chartCoin) ?? null;
+  return { kind: newsKind(s), coin };
+}
+
+/** A marker on screen: where, and the stories it holds. */
+export interface PlacedNews {
+  key: string;
+  x: number;
+  timestamp: number;
+  stories: NewsStory[];
+}
+
+/**
+ * Markers closer than `gap` pixels become one (at the first one's place,
+ * holding all their stories, newest first) - so zoomed out, a run of them is
+ * one marker with a count rather than a row of overlapping ones.
+ */
+export function clusterNews(placed: ReadonlyArray<PlacedNews>, gap: number): PlacedNews[] {
+  const out: PlacedNews[] = [];
+  for (const p of [...placed].sort((a, b) => a.x - b.x)) {
+    const prev = out[out.length - 1];
+    if (prev && p.x - prev.x < gap) prev.stories = [...prev.stories, ...p.stories];
+    else out.push({ ...p, stories: [...p.stories] });
+  }
+  for (const p of out) p.stories.sort((a, b) => b.time - a.time);
   return out;
 }
 
@@ -194,45 +268,20 @@ const execTemplate: OverlayTemplate = {
   },
 };
 
-const BADGE_R = 7;
-
-/** One news badge at the foot of the price pane; its NewsMark rides in extendData. */
-const newsTemplate: OverlayTemplate = {
-  name: NEWS_OVERLAY,
-  totalStep: 2,
-  lock: true,
-  needDefaultPointFigure: false,
-  needDefaultXAxisFigure: false,
-  needDefaultYAxisFigure: false,
-  createPointFigures: ({ coordinates, overlay, bounding }) => {
-    const p = coordinates[0];
-    const m = overlay.extendData as NewsMark | undefined;
-    if (!p || !m) return [];
-    const y = bounding.height - BADGE_R - 6;
-    const n = m.stories.length;
-    return [
-      { type: 'circle', attrs: { x: p.x, y, r: BADGE_R }, styles: { style: 'stroke_fill', color: T.elevated, borderColor: T.muted, borderSize: 1 } },
-      {
-        type: 'text',
-        ignoreEvent: true,
-        attrs: { x: p.x, y: y + 0.5, text: n > 9 ? '9+' : n > 1 ? String(n) : 'N', align: 'center', baseline: 'middle' },
-        styles: { color: T.text, size: n > 9 ? 8 : 9, family: FAMILY, weight: 700, backgroundColor: 'transparent', borderSize: 0, paddingLeft: 0, paddingRight: 0, paddingTop: 0, paddingBottom: 0 },
-      },
-    ];
-  },
-};
-
 /** Idempotent, like the other registrations. */
 export function registerMarkOverlays(kc: typeof import('klinecharts')): void {
   kc.registerOverlay(execTemplate);
-  kc.registerOverlay(newsTemplate);
 }
 
 // --- what the chart shows besides the candles -----------------------------------------
 
-export type NewsMode = 'off' | 'coin' | 'macro';
+/** Whose news: this coin's, the macro (economy) stories, or all of crypto. */
+export type NewsScope = 'coin' | 'macro' | 'all';
 
-/** The chart's own layers, each on or off (the object list and the snapshot). */
+/** Every kind of story, in the order the settings list them. */
+export const NEWS_KINDS: readonly NewsKind[] = ['news', 'post', 'research', 'insight', 'institution', 'announcement', 'macro', 'stocks'];
+
+/** The chart's own layers, each on or off (the object list and the toolbar). */
 export interface ChartShow {
   /** The open position's entry line. */
   position: boolean;
@@ -240,21 +289,31 @@ export interface ChartShow {
   orders: boolean;
   /** The account's fills as arrows. */
   executions: boolean;
-  /** News badges: this coin's, the macro ones, or none. */
-  news: NewsMode;
+  /** News on the chart, on or off (the toolbar's button). */
+  news: boolean;
+  /** Whose news (its right-click settings). */
+  newsScope: NewsScope;
+  /** Which kinds of story show; never none. */
+  newsKinds: NewsKind[];
 }
 
 /** Where the chart keeps them. */
 export const SHOW_KEY = 'chart.show.v1';
 
-export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: 'off' };
+export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS] };
 
 export function sanitizeShow(raw: unknown): ChartShow {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof ChartShow, unknown>>;
+  // Before the switch: news was 'off', 'coin' or 'macro' in one.
+  const legacy = r.news === 'coin' || r.news === 'macro' ? r.news : null;
+  const scope = r.newsScope === 'coin' || r.newsScope === 'macro' || r.newsScope === 'all' ? r.newsScope : (legacy ?? 'coin');
+  const kinds = Array.isArray(r.newsKinds) ? NEWS_KINDS.filter((k) => (r.newsKinds as unknown[]).includes(k)) : [];
   return {
     position: r.position !== false,
     orders: r.orders !== false,
     executions: r.executions !== false,
-    news: r.news === 'coin' || r.news === 'macro' ? r.news : 'off',
+    news: r.news === true || legacy !== null,
+    newsScope: scope,
+    newsKinds: kinds.length ? kinds : [...NEWS_KINDS],
   };
 }
