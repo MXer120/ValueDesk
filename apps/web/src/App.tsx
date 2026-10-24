@@ -86,9 +86,10 @@ const PAGES: Record<Tab, LazyPage<any>> = {
 
 /** The page the first render shows, and the one an old URL is then moved to (router.ts). */
 const bootTabs = (): Tab[] => {
-  const asked = tabForPath(window.location.pathname) ?? DEFAULT_TAB;
-  const first = asked === 'knowledge' && !knowledgeOnAtBoot() ? DEFAULT_TAB : asked;
-  const settled = landingTab(window.location.pathname);
+  // /knowledge while Knowledge is off lands on the default page: its code is not even fetched.
+  const off = (t: Tab): Tab => (t === 'knowledge' && !knowledgeOnAtBoot() ? DEFAULT_TAB : t);
+  const first = off(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
+  const settled = off(landingTab(window.location.pathname));
   return first === settled ? [first] : [first, settled];
 };
 /** The code the first render needs: a legal page's, or the landing tab's (above). */
