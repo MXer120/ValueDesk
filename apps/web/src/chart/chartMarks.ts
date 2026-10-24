@@ -244,6 +244,9 @@ export interface ChartShow {
   news: NewsMode;
 }
 
+/** Where the chart keeps them. */
+export const SHOW_KEY = 'chart.show.v1';
+
 export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: 'off' };
 
 export function sanitizeShow(raw: unknown): ChartShow {

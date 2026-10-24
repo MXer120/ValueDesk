@@ -10,7 +10,8 @@
  *                 pins it, the arrows bring it forward or send it back a layer,
  *                 a drag moves it anywhere in the stack; the bin deletes it.
  *   Indicators    each study with its eye, settings and remove.
- *   Save to folder  the chart as it is, filed for research (snapshot.ts).
+ *   Save to folder  the chart as it is, filed for research (snapshot.ts) - or,
+ *                 where no folders are available yet, downloaded as a file.
  *
  * Toggled from the chart toolbar; it remembers whether it was open.
  */
@@ -54,6 +55,8 @@ export interface ChartSidebarProps {
   onIndicatorToggle: (id: string) => void;
   onIndicatorSettings: (id: string) => void;
   onIndicatorRemove: (id: string) => void;
+  /** Research folders are there: the button saves into one (else it downloads the snapshot). */
+  folders: boolean;
   onSave: () => void;
   onClose: () => void;
 }
@@ -225,9 +228,9 @@ export function ChartSidebar(p: ChartSidebarProps) {
       </div>
 
       <footer className="kc-side-foot">
-        <button type="button" className="kc-side-save" onClick={p.onSave} title="Save the chart as it is - drawings, indicators, what it shows - to a research folder">
+        <button type="button" className="kc-side-save" onClick={p.onSave} title="Save the chart as it is - range, drawings, indicators, and your position and fills if you choose - for research">
           {CHART_ICONS.folder}
-          Save to folder
+          {p.folders ? 'Save to folder' : 'Download snapshot'}
         </button>
       </footer>
     </aside>
