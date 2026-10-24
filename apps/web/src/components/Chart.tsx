@@ -105,6 +105,8 @@ import {
 } from '../chart/drawingOverlays';
 import { drawingsKey, loadDrawings, parseDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
+import { boxOf, marqueeHits, type Pt } from '../chart/marquee';
+import { SelectionMarks } from '../chart/SelectionMarks';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
@@ -2701,6 +2703,14 @@ function Chart({
   const [selected, setSelected] = useState<{ id: string; focusText: boolean } | null>(null);
   /** Re-render after a style change: the bar reads the overlay itself. */
   const [, bumpStyle] = useReducer((n: number) => n + 1, 0);
+  /** Drawings picked together: a marked area (Ctrl / ⌘ + drag) or Ctrl / ⌘ + click. */
+  const [multi, setMulti] = useState<string[]>([]);
+  const multiRef = useRef(multi);
+  multiRef.current = multi;
+  /** The area while it is dragged: drawn straight into the DOM, no render per move. */
+  const marqueeEl = useRef<HTMLDivElement>(null);
+  /** Ctrl / ⌘ is down over the chart: the plot's cursor says an area can be marked. */
+  const [marking, setMarking] = useState(false);
   /** A drawing's settings dialog, and the drawing as it was when it opened (Cancel). */
   const [drawingSettings, setDrawingSettings] = useState<{ id: string; original: DrawingDraft } | null>(null);
   /** A drawing (or one of its handles) is being dragged: the style bar steps
@@ -2725,6 +2735,7 @@ function Chart({
       },
       onClick: (e: OverlayEvent<unknown>) => {
         if (fresh(e.overlay.id) || e.overlay.currentStep !== -1 || e.overlay.id === drawingId.current) return;
+        setMulti((m) => (m.length ? [] : m));
         selectedDrawing.current = e.overlay.id;
         setSelected((s) => (s?.id === e.overlay.id ? s : { id: e.overlay.id, focusText: false }));
       },
@@ -2762,6 +2773,7 @@ function Chart({
       },
       onRemoved: (e: OverlayEvent<unknown>) => {
         hiddenDrawings.current.delete(e.overlay.id);
+        setMulti((m) => (m.includes(e.overlay.id) ? m.filter((x) => x !== e.overlay.id) : m));
         if (selectedDrawing.current === e.overlay.id) selectedDrawing.current = null;
         setSelected((s) => (s?.id === e.overlay.id ? null : s));
         if (drawingId.current === e.overlay.id || drawingId.current === null) {
@@ -2827,6 +2839,7 @@ function Chart({
     setSelected(null);
     drawingsKeyRef.current = key;
     hiddenDrawings.current.clear();
+    setMulti([]);
     const known = new Set(lib.current?.getSupportedOverlays() ?? []);
     // Another market leaves the snapshot view (the mobile carousel keeps one
     // chart across markets): that market's own drawings and the studies return.
@@ -2869,6 +2882,7 @@ function Chart({
       setOpenMenu(null);
       setDrawing(name);
       setSelected(null);
+      setMulti([]);
       // Drawing while everything is hidden would draw something you cannot see.
       if (drawHiddenRef.current) onHideDrawings(false);
       const text = DEFAULT_TEXT.get(name);
@@ -3023,6 +3037,150 @@ function Chart({
     setDrawingSettings({ id, original: draftOf(o) });
   };
 
+  // --- several drawings at once ----------------------------------------------------
+  /**
+   * The drawings a marked area takes in (chart/marquee.ts: whatever of them
+   * crosses it, as drawn) join the group; a Ctrl / ⌘ + click without a drag
+   * adds or drops the topmost drawing under the pointer. Points are the
+   * holder's, which are the price pane's.
+   */
+  const pickArea = (a: Pt, b: Pt) => {
+    const c = chart.current;
+    if (!c) return;
+    const click = Math.abs(a.x - b.x) < 4 && Math.abs(a.y - b.y) < 4;
+    const box = click ? boxOf({ x: a.x - 5, y: a.y - 5 }, { x: a.x + 5, y: a.y + 5 }) : boxOf(a, b);
+    const pane = c.getSize(CANDLE_PANE_ID);
+    const items = userDrawings(c)
+      .filter((o) => o.visible && o.id !== drawingId.current)
+      .map((o) => ({
+        id: o.id,
+        name: o.name,
+        z: realZ(o),
+        pts: c.convertToPixel(
+          o.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+          { paneId: CANDLE_PANE_ID },
+        ) as Array<Partial<Pt>>,
+      }));
+    const hit = marqueeHits(items, box, pane?.width ?? 0, pane?.height ?? 0);
+    selectedDrawing.current = null;
+    setSelected(null);
+    if (click) {
+      const top = items.filter((i) => hit.includes(i.id)).sort((x, y) => y.z - x.z)[0];
+      if (top) setMulti((m) => (m.includes(top.id) ? m.filter((x) => x !== top.id) : [...m, top.id]));
+      return;
+    }
+    if (hit.length) setMulti((m) => [...new Set([...m, ...hit])]);
+  };
+  const pickAreaRef = useRef(pickArea);
+  pickAreaRef.current = pickArea;
+  // Ctrl / ⌘ + drag on the plot marks an area. The press never reaches the
+  // library (capture phase, stopped), so the chart does not pan meanwhile; a
+  // plain press anywhere on the plot lets the group go.
+  useEffect(() => {
+    const el = holder.current;
+    if (!ready || !el) return;
+    const down = (e: MouseEvent) => {
+      if (e.button !== 0) return;
+      if (!(e.ctrlKey || e.metaKey)) {
+        if (multiRef.current.length) setMulti([]);
+        return;
+      }
+      if (drawingRef.current || maskedRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = el.getBoundingClientRect();
+      const a = { x: e.clientX - r.left, y: e.clientY - r.top };
+      let b = a;
+      const shape = marqueeEl.current;
+      const move = (m: MouseEvent) => {
+        m.preventDefault();
+        m.stopPropagation();
+        b = { x: Math.max(0, Math.min(r.width, m.clientX - r.left)), y: Math.max(0, Math.min(r.height, m.clientY - r.top)) };
+        if (!shape) return;
+        const q = boxOf(a, b);
+        shape.style.display = 'block';
+        shape.style.left = `${el.offsetLeft + q.left}px`;
+        shape.style.top = `${el.offsetTop + q.top}px`;
+        shape.style.width = `${q.right - q.left}px`;
+        shape.style.height = `${q.bottom - q.top}px`;
+      };
+      const up = (u: MouseEvent) => {
+        window.removeEventListener('mousemove', move, true);
+        window.removeEventListener('mouseup', up, true);
+        // Not a click on whatever drawing the release lands on.
+        u.stopPropagation();
+        if (shape) shape.style.display = 'none';
+        pickAreaRef.current(a, b);
+      };
+      window.addEventListener('mousemove', move, true);
+      window.addEventListener('mouseup', up, true);
+    };
+    // A Mac turns Ctrl + click into a right-click: not here.
+    const menu = (e: MouseEvent) => {
+      if (e.ctrlKey && e.button === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    el.addEventListener('mousedown', down, true);
+    el.addEventListener('contextmenu', menu, true);
+    return () => {
+      el.removeEventListener('mousedown', down, true);
+      el.removeEventListener('contextmenu', menu, true);
+    };
+  }, [ready, chartGen]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => setMarking(e.ctrlKey || e.metaKey);
+    const off = () => setMarking(false);
+    window.addEventListener('keydown', key);
+    window.addEventListener('keyup', key);
+    window.addEventListener('blur', off);
+    return () => {
+      window.removeEventListener('keydown', key);
+      window.removeEventListener('keyup', key);
+      window.removeEventListener('blur', off);
+    };
+  }, []);
+
+  /** The group's drawings that are still on the chart. */
+  const groupOf = (): Array<Overlay<unknown>> => {
+    const c = chart.current;
+    return c ? multiRef.current.map((id) => c.getOverlays({ id })[0]).filter((o): o is Overlay<unknown> => !!o) : [];
+  };
+  const styleGroup = (patch: { color?: string; size?: number; dashed?: boolean }) => {
+    const c = chart.current;
+    if (!c) return;
+    for (const o of groupOf()) {
+      const now = paintOf(o);
+      c.overrideOverlay({ id: o.id, styles: drawingStyles(patch.color ?? now.color, patch.size ?? now.size, patch.dashed ?? now.dashed) });
+    }
+    persistDrawings();
+    bumpStyle();
+  };
+  const lockGroup = (lock: boolean) => {
+    const c = chart.current;
+    if (!c) return;
+    for (const o of groupOf()) c.overrideOverlay({ id: o.id, lock });
+    persistDrawings();
+    bumpStyle();
+  };
+  const hideGroup = () => {
+    const c = chart.current;
+    if (!c) return;
+    for (const o of groupOf()) {
+      c.overrideOverlay({ id: o.id, visible: false });
+      hiddenDrawings.current.add(o.id);
+    }
+    setMulti([]);
+    persistDrawings();
+  };
+  const deleteGroup = () => {
+    const c = chart.current;
+    if (!c) return;
+    for (const o of groupOf()) c.removeOverlay({ id: o.id });
+    setMulti([]);
+  };
+
   // --- right-click menus --------------------------------------------------------
   /** The chart's right-click menu - a drawing's or a study's - at a viewport point. */
   const [ctxMenu, setCtxMenu] = useState<{ at: { x: number; y: number }; items: ChartMenuItem[] } | null>(null);
@@ -3032,6 +3190,19 @@ function Chart({
     const c = chart.current;
     const o = c?.getOverlays({ id })[0];
     if (!c || !o) return;
+    if (multiRef.current.length > 1 && multiRef.current.includes(id)) {
+      const n = multiRef.current.length;
+      const allLocked = groupOf().every((d) => d.lock);
+      setCtxMenu({
+        at,
+        items: [
+          { label: `Hide ${n} drawings`, icon: MENU_ICONS.hide, onClick: hideGroup },
+          { label: `${allLocked ? 'Unlock' : 'Lock'} ${n} drawings`, icon: allLocked ? MENU_ICONS.unlock : MENU_ICONS.lock, onClick: () => lockGroup(!allLocked) },
+          { label: `Delete ${n} drawings`, icon: MENU_ICONS.remove, danger: true, onClick: deleteGroup },
+        ],
+      });
+      return;
+    }
     const stack = (dir: 1 | -1) => {
       const zs = userDrawings(c).filter((d) => d.id !== id).map(realZ);
       const z = dir > 0 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
@@ -3133,10 +3304,24 @@ function Chart({
   // while a text field has the keyboard.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && multiRef.current.length) {
+        setMulti([]);
+        return;
+      }
       if (e.key !== 'Delete' && e.key !== 'Backspace') return;
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       const c = chart.current;
+      // A group: every drawing in it that is not locked, as for one.
+      if (c && multiRef.current.length) {
+        e.preventDefault();
+        for (const id of multiRef.current) {
+          const o = c.getOverlays({ id })[0];
+          if (o && !SYSTEM_OVERLAYS.has(o.name) && !o.lock) c.removeOverlay({ id });
+        }
+        setMulti([]);
+        return;
+      }
       const id = selectedDrawing.current;
       if (!c || !id) return;
       const o = c.getOverlays({ id })[0];
@@ -4231,7 +4416,9 @@ function Chart({
           onLand={showCandles}
           onDone={endArrival}
         />
-        <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}`} />
+        <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
+        <div ref={marqueeEl} className="kc-marquee" aria-hidden />
+        <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
         <FeedOverlay
           bare
           // While the invariant guard is reloading, the feed can still say
@@ -4277,6 +4464,34 @@ function Chart({
             </span>
           </div>
         )}
+        {multi.length > 0 && !selected && !drawingSettings && (() => {
+          const group = groupOf();
+          if (group.length === 0) return null;
+          const paints = group.map((o) => paintOf(o));
+          const first = paints[0]!;
+          return (
+            <DrawingStyleBar
+              key="group"
+              label={`${group.length} drawing${group.length === 1 ? '' : 's'}`}
+              count={group.length}
+              color={first.color}
+              // Mixed widths light none of the width buttons.
+              size={paints.every((p) => p.size === first.size) ? first.size : 0}
+              dashed={paints.every((p) => p.dashed)}
+              locked={group.every((o) => o.lock)}
+              text={null}
+              focusText={false}
+              onColor={(color) => styleGroup({ color })}
+              onSize={(size) => styleGroup({ size })}
+              onDashed={(dashed) => styleGroup({ dashed })}
+              onText={() => undefined}
+              onLock={lockGroup}
+              onHide={hideGroup}
+              onDelete={deleteGroup}
+              onClose={() => setMulti([])}
+            />
+          );
+        })()}
         {selected && selDrawing && !drawingSettings && (
           <DrawingStyleBar
             key={selected.id}
@@ -4532,7 +4747,7 @@ function Chart({
                 visible: !hiddenDrawings.current.has(o.id) && !drawHidden,
                 locked: o.lock,
               }))}
-              selectedId={selected?.id ?? null}
+              selectedIds={multi.length ? multi : selected ? [selected.id] : []}
               indicators={indicators.map((i) => ({ id: i.id, label: legendName(i.name, i.spec.calcParams ?? [], i.spec.source), visible: i.visible }))}
               show={show}
               why={{
@@ -4542,7 +4757,15 @@ function Chart({
                 news: news.error && show.news !== 'off' ? 'News did not load' : undefined,
               }}
               onShow={patchShow}
-              onSelect={(id) => {
+              onSelect={(id, add) => {
+                if (add) {
+                  const from = multiRef.current.length ? multiRef.current : selected ? [selected.id] : [];
+                  selectedDrawing.current = null;
+                  setSelected(null);
+                  setMulti(from.includes(id) ? from.filter((x) => x !== id) : [...from, id]);
+                  return;
+                }
+                setMulti([]);
                 selectedDrawing.current = id;
                 setSelected({ id, focusText: false });
               }}

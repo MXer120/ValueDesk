@@ -6,7 +6,8 @@
  *                 and news (this coin's, the macro ones, or none) - each on or
  *                 off, saying why when it has nothing to show.
  *   Drawings      every drawing on this market, the front one first: a click
- *                 selects it (its style bar opens), the eye hides it, the lock
+ *                 selects it (its style bar opens), Ctrl / ⌘ + click picks
+ *                 several (as Ctrl / ⌘ + drag does on the chart), the eye hides it, the lock
  *                 pins it, the arrows bring it forward or send it back a layer,
  *                 a drag moves it anywhere in the stack; the bin deletes it.
  *   Indicators    each study with its eye, settings and remove.
@@ -40,13 +41,15 @@ export interface ChartSidebarProps {
   coin: string;
   /** Front first. */
   drawings: SidebarDrawing[];
-  selectedId: string | null;
+  /** The drawing whose bar is open, or the group picked together. */
+  selectedIds: readonly string[];
   indicators: SidebarIndicator[];
   show: ChartShow;
   /** Why a layer has nothing to show (no wallet, spot), by layer. */
   why: Partial<Record<keyof ChartShow, string>>;
   onShow: (patch: Partial<ChartShow>) => void;
-  onSelect: (id: string) => void;
+  /** add: Ctrl / ⌘ + click - adds the drawing to the group, or drops it. */
+  onSelect: (id: string, add: boolean) => void;
   onToggle: (id: string) => void;
   onLock: (id: string) => void;
   onDelete: (id: string) => void;
@@ -146,7 +149,7 @@ export function ChartSidebar(p: ChartSidebarProps) {
                   key={d.id}
                   className={[
                     'kc-side-row',
-                    d.id === p.selectedId ? 'is-sel' : '',
+                    p.selectedIds.includes(d.id) ? 'is-sel' : '',
                     d.visible ? '' : 'is-off',
                     d.id === dragId ? 'is-drag' : '',
                     dropAt === i ? 'drop-above' : '',
@@ -170,7 +173,7 @@ export function ChartSidebar(p: ChartSidebarProps) {
                 >
                   <span className="kc-side-grip" aria-hidden title="Drag to restack">{CHART_ICONS.grip}</span>
                   <span className="kc-side-dot" style={{ background: d.color }} aria-hidden />
-                  <button type="button" className="kc-side-name" onClick={() => p.onSelect(d.id)} title="Select">
+                  <button type="button" className="kc-side-name" onClick={(e) => p.onSelect(d.id, e.ctrlKey || e.metaKey)} title="Select (Ctrl / ⌘ + click: several)">
                     {d.label}
                   </button>
                   <span className="kc-side-ctl">
@@ -194,6 +197,7 @@ export function ChartSidebar(p: ChartSidebarProps) {
               ))}
             </ol>
           )}
+          {p.drawings.length > 1 && <p className="kc-side-tip">Ctrl / ⌘ + drag on the chart picks every drawing in an area - then style, lock, hide or delete them together.</p>}
         </section>
 
         <section className="kc-side-sec" aria-label="Indicators">

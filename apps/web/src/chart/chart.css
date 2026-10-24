@@ -1661,3 +1661,42 @@ html.kc-drag * {
 .modal.fx.kc-set .kc-export-what { color: var(--muted); line-height: 1.45; }
 .modal.fx.kc-set .kc-export-what strong { color: var(--text); font-weight: 600; }
 .modal.fx.kc-set .kc-export-note { display: block; color: var(--dim); font-size: var(--fs-micro, 11px); font-weight: 400; }
+
+/* --- several drawings at once (Ctrl / ⌘ + drag) ----------------------------- */
+.kc-marquee {
+  position: absolute;
+  display: none;
+  z-index: 5;
+  border: 1px dashed rgba(255, 255, 255, 0.75);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+/* Ctrl / ⌘ held: the plot can be marked, not panned. */
+.chartholder.is-marking,
+.chartholder.is-marking canvas { cursor: crosshair !important; }
+/* The picked drawings' anchors (SelectionMarks.tsx). */
+.kc-multi-marks {
+  position: absolute;
+  z-index: 5;
+  width: 1px;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+}
+.kc-multi-marks rect { fill: var(--bg); stroke: #fff; stroke-width: 1.5; }
+.kc-stylebar-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  margin-right: 2px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  font-weight: 600;
+  font-family: var(--font-num);
+}
+.kc-side-tip { margin: 6px var(--sp-1) 0; color: var(--dim); font-size: var(--fs-micro, 11px); line-height: 1.4; }
