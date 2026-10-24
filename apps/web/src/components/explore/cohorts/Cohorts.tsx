@@ -21,7 +21,7 @@ import {
   type CohortWalletRow, type CohortWalletsResponse, type CohortsResponse, type Lean, type Sector, type WalletSort,
 } from '@sign/valuescan/cohorts/model.js';
 import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
-import { useStored } from '../../../hooks';
+import { useStored, useSymbols } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
 import { emptyCohortsLine } from './emptyCopy';
@@ -32,6 +32,7 @@ import { fmtCount, fmtUsdShort } from '../model';
 import { CohortIcon } from './CohortIcon';
 import { LeanChart } from './LeanChart';
 import { Treemap } from './Treemap';
+import { SectorIcon } from './SectorIcon';
 import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled } from './parts';
 import { CrossFade, FadeView } from '../../motion';
 import { FocusPage, MarketMapPage } from './MarketSection';
@@ -360,7 +361,7 @@ function MarketsTable({ markets, onPick }: { markets: CohortDetailResponse['coho
 }
 
 function Detail({
-  venues, id, range, setRange, filter, setCoin, onScan,
+  venues, id, range, setRange, filter, setCoin, onScan, chartFor, onOpenChart,
 }: {
   venues: readonly Venue[];
   id: CohortId;
@@ -369,7 +370,15 @@ function Detail({
   filter: CohortFilter;
   setCoin: (c: string) => void;
   onScan: (address: string) => void;
+  chartFor: (coin: string) => string | null;
+  onOpenChart?: (symbol: string) => void;
 }) {
+  /* The chosen asset picked again (its tile or its row): its chart on the trade page. */
+  const pickCoin = (c: string) => {
+    const sym = c === filter.coin && onOpenChart ? chartFor(c) : null;
+    if (sym) onOpenChart!(sym);
+    else setCoin(c);
+  };
   const def = COHORT_BY_ID[id];
   const v = useCohortView();
   const showMeters = v.show('detail', 'meters');
@@ -452,7 +461,7 @@ function Detail({
               </div>
             </section>}
             {showMap && <section className="coh-d__panel coh-d__tree">
-              <Treemap markets={st?.markets ?? []} onPick={setCoin} active={filter.coin ?? null} resetKey={`${venues.join(',')}|${id}|${filter.sector ?? ''}|${filter.coin ?? ''}`} />
+              <Treemap markets={st?.markets ?? []} onPick={setCoin} active={filter.coin ?? null} chartFor={chartFor} onOpenChart={onOpenChart} resetKey={`${venues.join(',')}|${id}|${filter.sector ?? ''}|${filter.coin ?? ''}`} />
             </section>}
           </div>}
 
@@ -468,7 +477,7 @@ function Detail({
             <CrossFade viewKey={tab}>
               {tab === 'wallets'
                 ? <WalletsTable venues={venues} id={id} filter={filter} range={range} onScan={onScan} />
-                : <MarketsTable markets={st?.markets ?? []} onPick={setCoin} />}
+                : <MarketsTable markets={st?.markets ?? []} onPick={pickCoin} />}
             </CrossFade>
           </section>}
         </>
@@ -479,7 +488,29 @@ function Detail({
 
 /* --- the page ------------------------------------------------------------------------------- */
 
-export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
+/**
+ * The SoDEX perp an asset charts as on the trade page, or null when SoDEX does not
+ * list it. Matched on the base the way the Markets page matches (`xyz:GOLD` is GOLD,
+ * Hyperliquid's 1000x `kPEPE` also tries PEPE).
+ */
+function useChartFor(): (coin: string) => string | null {
+  const { symbols } = useSymbols('perps');
+  return useMemo(() => {
+    const byBase = new Map<string, string>();
+    for (const s of symbols) {
+      if (s.status && s.status !== 'TRADING') continue;
+      const base = (s.name.split(/[-_/]/)[0] ?? s.name).trim().toUpperCase();
+      if (!byBase.has(base)) byBase.set(base, s.name);
+    }
+    return (coin: string) => {
+      const name = marketName(coin).toUpperCase();
+      return byBase.get(name) ?? (/^K[A-Z]/.test(name) ? byBase.get(name.slice(1)) ?? null : null);
+    };
+  }, [symbols]);
+}
+
+export function Cohorts({ onScan, onOpenSymbol }: { onScan: (address: string) => void; onOpenSymbol?: (symbol: string) => void }) {
+  const chartFor = useChartFor();
   const [stored, setStored] = useStored<Venue[]>('vs.cohorts.venues', [...SCAN_VENUES]);
   const venues = useMemo(() => {
     const v = (Array.isArray(stored) ? stored : []).filter((x): x is Venue => (SCAN_VENUES as readonly string[]).includes(x));
@@ -575,14 +606,24 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
         <PlatformSelect options={SCAN_VENUES} value={venues} onChange={setStored} />
         {venues.length > 1 && <span className="coh-net" title="A wallet on several of these venues counts once: PnL, perp equity and positions summed">Netted</span>}
         {section === 'cohorts' && <div className="coh-filters">
-          <Picker label="Sector" value={filter.sector ? SECTOR_LABEL[filter.sector] : null} onClear={() => setFilter({})}>
+          <Picker
+            label="Sector"
+            value={filter.sector ? <span className="coh-pick__coin"><SectorIcon sector={filter.sector} size={14} />{SECTOR_LABEL[filter.sector]}</span> : null}
+            onClear={() => setFilter({})}
+          >
             {(close) => (
               <div className="coh-pick__list">
                 <button type="button" role="option" aria-selected={!filter.sector} className={`coh-pick__opt${!filter.sector ? ' is-on' : ''}`} onClick={() => { setFilter(filter.coin ? { coin: filter.coin } : {}); close(); }}>
+                  <span className="coh-pick__ic">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" aria-hidden="true">
+                      <rect x="3.5" y="3.5" width="17" height="17" rx="2" /><path d="M12 3.5v17M12 11h8.5M3.5 14H12M16 11v9.5" />
+                    </svg>
+                  </span>
                   <span className="coh-pick__label">All sectors</span>
                 </button>
                 {SECTORS.map((s) => (
                   <button key={s.id} type="button" role="option" aria-selected={filter.sector === s.id} className={`coh-pick__opt${filter.sector === s.id ? ' is-on' : ''}`} onClick={() => { setFilter({ sector: s.id }); close(); }}>
+                    <span className="coh-pick__ic"><SectorIcon sector={s.id} /></span>
                     <span className="coh-pick__label">{s.label}</span>
                   </button>
                 ))}
@@ -642,10 +683,10 @@ export function Cohorts({ onScan }: { onScan: (address: string) => void }) {
             <FadeView viewKey={section === 'map' ? (focus ? `focus:${focusParam(focus)}` : 'map') : cohort ? 'detail' : 'overview'}>
               {section === 'map'
                 ? focus
-                  ? <FocusPage venues={venues} focus={focus} onBack={() => openMap(null)} onOpenCohort={openCohortOn} onAsset={(c) => openMap({ coin: c })} />
+                  ? <FocusPage venues={venues} focus={focus} onBack={() => openMap(null)} onOpenCohort={openCohortOn} onAsset={(c) => openMap({ coin: c })} chartFor={chartFor} onOpenChart={onOpenSymbol} />
                   : <MarketMapPage venues={venues} onSector={(sec) => openMap({ sector: sec })} onAsset={(c) => openMap({ coin: c })} />
                 : cohort
-                  ? <Detail venues={venues} id={cohort} range={range} setRange={setRange} filter={filter} setCoin={(c) => setFilter({ coin: c })} onScan={onScan} />
+                  ? <Detail venues={venues} id={cohort} range={range} setRange={setRange} filter={filter} setCoin={(c) => setFilter({ coin: c })} onScan={onScan} chartFor={chartFor} onOpenChart={onOpenSymbol} />
                   : <div className={`coh-over${list.stale ? ' is-stale' : ''}`}><Overview data={list.data} onOpen={open} /></div>}
             </FadeView>
           )}

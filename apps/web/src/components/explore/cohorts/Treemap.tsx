@@ -84,12 +84,14 @@ const GAP = 2;
 
 /** One market's tile at a screen rect: what fits of logo, name, uPnL and lean. */
 export function MarketTile({
-  m, rect, active, onClick,
+  m, rect, active, onClick, hint,
 }: {
   m: CohortMarket;
   rect: Rect;
   active: boolean;
   onClick: () => void;
+  /** Added to the tooltip: what a click does next. */
+  hint?: string;
 }) {
   const { x, y, w, h } = rect;
   const share = longShare(m.long, m.short);
@@ -103,7 +105,7 @@ export function MarketTile({
       type="button"
       className={`coh-tree__tile is-t${tier}${logoOnly ? ' is-logo' : ''}${active ? ' is-on' : ''}`}
       style={{ left: x + GAP / 2, top: y + GAP / 2, width: Math.max(0, w - GAP), height: Math.max(0, h - GAP), background: tone(share) }}
-      title={`${marketName(m.coin)} · long ${fmtUsdShort(m.long)} · short ${fmtUsdShort(m.short)} · uPnL ${fmtUsdShort(m.upnl, true)} · ${m.holders} wallets`}
+      title={`${marketName(m.coin)} · long ${fmtUsdShort(m.long)} · short ${fmtUsdShort(m.short)} · uPnL ${fmtUsdShort(m.upnl, true)} · ${m.holders} wallets${hint ? ` · ${hint}` : ''}`}
       onClick={onClick}
     >
       {logoOnly && <CoinIcon coin={m.coin} size={logoSize} />}
@@ -137,11 +139,15 @@ export function ZoomControls({ zoom }: { zoom: ReturnType<typeof useMapZoom> }) 
 }
 
 export function Treemap({
-  markets, onPick, active, resetKey,
+  markets, onPick, active, resetKey, chartFor, onOpenChart,
 }: {
   markets: readonly CohortMarket[];
   onPick: (coin: string) => void;
   active?: string | null;
+  /** The SoDEX market an asset charts as (null: not listed there). */
+  chartFor?: (coin: string) => string | null;
+  /** The chosen asset clicked again: its chart on the trade page. */
+  onOpenChart?: (symbol: string) => void;
   /** A new cohort or filter: back to the whole map (a data refresh keeps the zoom). */
   resetKey: string;
 }) {
@@ -155,7 +161,15 @@ export function Treemap({
         {tiles.map((t) => {
           const r = zoom.toScreen(t);
           if (!visible(r, zoom.size)) return null;
-          return <MarketTile key={t.item.coin} m={t.item} rect={r} active={active === t.item.coin} onClick={() => { if (zoom.isClick()) onPick(t.item.coin); }} />;
+          const on = active === t.item.coin;
+          const sym = on && onOpenChart ? chartFor?.(t.item.coin) ?? null : null;
+          return (
+            <MarketTile
+              key={t.item.coin} m={t.item} rect={r} active={on}
+              hint={sym ? 'click again for its chart' : on && onOpenChart ? 'not listed on SoDEX' : undefined}
+              onClick={() => { if (!zoom.isClick()) return; if (sym) onOpenChart!(sym); else onPick(t.item.coin); }}
+            />
+          );
         })}
         {!tiles.length && <p className="coh-tree__empty">No open positions in this view.</p>}
       </div>
