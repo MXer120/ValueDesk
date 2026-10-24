@@ -104,7 +104,6 @@ import {
 import { drawingsKey, loadDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
 import { MENU_ICONS, TabMenu, type TabMenuItem } from '../dashboard/tabExtras';
-import { ArrowDownIcon, ArrowUpIcon, MainChartIcon, MergePaneIcon, NewPaneIcon } from '../chart/chartIcons';
 import {
   INTERVAL_GROUPS,
   PERIOD_BY_INTERVAL,
@@ -2939,16 +2938,16 @@ function Chart({
     ];
     if (own) {
       items.push(
-        { label: 'Move pane up', icon: ArrowUpIcon, disabled: at0 <= 0, onClick: () => moveIndicator(id, -1) },
-        { label: 'Move pane down', icon: ArrowDownIcon, disabled: at0 < 0 || at0 >= panes.length - 1, onClick: () => moveIndicator(id, 1) },
+        { label: 'Move pane up', icon: MENU_ICONS.up, disabled: at0 <= 0, onClick: () => moveIndicator(id, -1) },
+        { label: 'Move pane down', icon: MENU_ICONS.down, disabled: at0 < 0 || at0 >= panes.length - 1, onClick: () => moveIndicator(id, 1) },
       );
     }
-    if (!own || shared) items.push({ label: 'Move to a new pane', icon: NewPaneIcon, onClick: () => moveIndicatorTo(id, 'new') });
-    if (own) items.push({ label: 'Move to the main chart', icon: MainChartIcon, onClick: () => moveIndicatorTo(id, 'main') });
+    if (!own || shared) items.push({ label: 'Move to a new pane', icon: MENU_ICONS.newPane, onClick: () => moveIndicatorTo(id, 'new') });
+    if (own) items.push({ label: 'Move to the main chart', icon: MENU_ICONS.mainChart, onClick: () => moveIndicatorTo(id, 'main') });
     for (const p of panes) {
       if (p === ind.paneId) continue;
       const first = list.find((i) => i.paneId === p);
-      if (first) items.push({ label: `Move to the pane with ${nameOf(first)}`, icon: MergePaneIcon, onClick: () => moveIndicatorTo(id, first.id) });
+      if (first) items.push({ label: `Move to the pane with ${nameOf(first)}`, icon: MENU_ICONS.intoPane, onClick: () => moveIndicatorTo(id, first.id) });
     }
     items.push({ label: 'Remove', icon: MENU_ICONS.remove, danger: true, onClick: () => removeIndicator(id) });
     setCtxMenu({ at, items });

@@ -90,6 +90,13 @@ export const MENU_ICONS = {
   unlock: menuIcon(<><rect x="3.5" y="7.2" width="9" height="6.3" rx="1.5" /><path d="M5.5 7.2V5.3a2.5 2.5 0 0 1 4.8-1" /></>),
   front: menuIcon(<><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" /><path d="M2.5 9.5v-6a1 1 0 0 1 1-1h6" opacity="0.55" /></>),
   back: menuIcon(<><rect x="2.5" y="2.5" width="8" height="8" rx="1.5" opacity="0.55" /><path d="M13.5 6.5v6a1 1 0 0 1-1 1h-6" /></>),
+  // An indicator's menu on the chart: its "more" button and the pane moves.
+  more: menuIcon(<><circle cx="3.5" cy="8" r="0.9" /><circle cx="8" cy="8" r="0.9" /><circle cx="12.5" cy="8" r="0.9" /></>),
+  up: menuIcon(<path d="M8 13V3.5M4.5 7 8 3.5 11.5 7" />),
+  down: menuIcon(<path d="M8 3v9.5M4.5 9 8 12.5 11.5 9" />),
+  newPane: menuIcon(<><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M2.5 9.5h11" /></>),
+  mainChart: menuIcon(<path d="M5 2.5v11M11 4v9M3.5 5.5h3v5h-3zM9.5 6.5h3v4h-3z" />),
+  intoPane: menuIcon(<><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M2.5 8.5h11M8 4.5V11M6 9l2 2 2-2" /></>),
 } as const;
 
 /** A right-click menu (a tab's: Add widget, Duplicate, Close tab), with icons; the destructive items last, in red. */

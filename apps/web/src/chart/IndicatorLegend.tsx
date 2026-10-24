@@ -19,7 +19,6 @@ import { CANDLE_PANE_ID } from './theme';
 import { BAR_DOWN, BAR_UP, legendName, stylesFor, type IndicatorSpec } from './indicators';
 import { compactNumber } from './volumeAxis';
 import { MENU_ICONS } from '../dashboard/tabExtras';
-import { MoreIcon } from './chartIcons';
 
 export interface LegendIndicator {
   id: string;
@@ -277,7 +276,7 @@ export function IndicatorLegend({
                   onMenu(ind.id, { x: r.left, y: r.bottom + 4 });
                 }}
               >
-                {MoreIcon}
+                {MENU_ICONS.more}
               </button>
             </span>
           </div>
