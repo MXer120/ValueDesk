@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SYSTEM_OVERLAYS, barOpen, fillMarks, newsCoin, newsMarks } from './chartMarks';
+import { SYSTEM_OVERLAYS, barOpen, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks } from './chartMarks';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -71,4 +71,49 @@ test('a market names its coin the way the news does', () => {
 test('the marks and order lines are never user drawings', () => {
   for (const n of ['vs_exec', 'vs_news', 'ot_order_line']) assert.ok(SYSTEM_OVERLAYS.has(n), n);
   assert.ok(!SYSTEM_OVERLAYS.has('segment'));
+});
+
+test('the same story told twice is one marker entry, the latest copy kept', () => {
+  const at = Date.UTC(2026, 9, 24, 14, 0);
+  const marks = newsMarks(
+    [
+      { id: 'a', title: 'BTC breaks $80,000!', href: 'https://x/a', time: at + 5_000 },
+      { id: 'b', title: 'btc breaks 80000 ', href: 'https://x/b', time: at + 40_000 },
+      { id: 'c', title: 'ETH ETF inflows', href: 'https://x/c', time: at + 50_000 },
+    ],
+    '1m',
+  );
+  assert.deepEqual(marks[0]!.stories.map((s) => s.id), ['c', 'b']);
+});
+
+test('a marker shows what its newest story is', () => {
+  const s = (o: object) => ({ id: 'x', title: 't', href: 'h', time: 1, ...o });
+  assert.equal(newsKind(s({ post: true, category: 5 })), 'post');
+  assert.equal(newsKind(s({ category: 2 })), 'research');
+  assert.equal(newsKind(s({ category: 99 })), 'news');
+  assert.equal(newsKind(s({})), 'news');
+  // On the BTC chart a BTC story shows its kind; an ETH one, ETH's logo.
+  assert.deepEqual(markFace({ stories: [s({ category: 7, symbols: ['BTC'] })] }, 'BTC'), { kind: 'announcement', coin: null });
+  assert.deepEqual(markFace({ stories: [s({ category: 1, symbols: ['BTC', 'ETH'] })] }, 'BTC'), { kind: 'news', coin: 'ETH' });
+  // Among the macro stories any coin's logo says what it is about; none, the globe.
+  assert.deepEqual(markFace({ stories: [s({ category: 5, symbols: ['BTC'] })] }, ''), { kind: 'macro', coin: 'BTC' });
+  assert.deepEqual(markFace({ stories: [s({ category: 5 })] }, ''), { kind: 'macro', coin: null });
+  // A post about another coin shows that coin; about this one, X's mark.
+  assert.deepEqual(markFace({ stories: [s({ post: true, symbols: ['SOL'] })] }, 'BTC'), { kind: 'post', coin: 'SOL' });
+  assert.deepEqual(markFace({ stories: [s({ post: true, symbols: ['BTC'] })] }, 'BTC'), { kind: 'post', coin: null });
+  assert.deepEqual(markFace({ stories: [] }, 'BTC'), { kind: 'news', coin: null });
+});
+
+test('markers closer than the gap become one, holding all their stories', () => {
+  const st = (id: string, time: number) => ({ id, title: id, href: id, time });
+  const placed = [
+    { key: 'c', x: 140, timestamp: 3, stories: [st('c', 3)] },
+    { key: 'a', x: 100, timestamp: 1, stories: [st('a', 1)] },
+    { key: 'b', x: 120, timestamp: 2, stories: [st('b', 2)] },
+    { key: 'd', x: 200, timestamp: 4, stories: [st('d', 4)] },
+  ];
+  const out = clusterNews(placed, 28);
+  assert.deepEqual(out.map((p) => [p.key, p.x, p.stories.map((s) => s.id)]), [['a', 100, ['b', 'a']], ['c', 140, ['c']], ['d', 200, ['d']]]);
+  // The input is left as it was.
+  assert.equal(placed[1]!.stories.length, 1);
 });
