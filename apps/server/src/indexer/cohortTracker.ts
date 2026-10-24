@@ -754,7 +754,9 @@ export class CohortTracker {
         key: `hist:${address}`,
         prio: 1_000 + Math.round(Math.log10(Math.max(1, eq)) * 100),
         run: async () => {
-          const read = await hlFundingRows(address, from, to).catch((e: unknown) => {
+          // Half an hour either side: a funding row is stamped a little after its hour,
+          // so a read ending on the hour missed that hour (seen 2026-10-25 checking it).
+          const read = await hlFundingRows(address, from - HOUR_MS / 2, to + HOUR_MS / 2).catch((e: unknown) => {
             const n = (r.fails.get(address) ?? 0) + 1;
             r.fails.set(address, n);
             if (n >= REBUILD_TRIES) {
