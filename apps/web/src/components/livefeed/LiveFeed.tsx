@@ -3,44 +3,34 @@
  * News, Yahoo Finance, the White House and more - model.ts CHANNELS), or a
  * pasted YouTube, Twitch, Kick or Vimeo link.
  *
- * Two shapes, by the panel's own size. With room above a 16:9 picture the
- * controls are a header that stays - LIVE with a slow red dot, the source,
- * play / pause, mute, fullscreen, clear - over a picture sized to exactly 16:9,
- * so there are no black bars. Without it the picture fills the panel and the
- * same controls float over its top edge, showing while the pointer moves (and
- * while it rests on them) and hiding together a moment after it stops.
- *
- * A YouTube stream shows none of YouTube's own overlays. A transparent layer
- * keeps its hover controls away; the player is made taller than its picture and
- * clipped to it, so its title bar, logo and "More videos" land outside the clip
- * (ytPlayer.ts playerBand). YouTube also draws a small pause sign in the middle
- * for a few seconds each time playback starts - on load and on resume, whatever
- * its controls setting (paused, it draws nothing). The widget has its own centre
- * play / pause on that spot, shown with the other controls, and after a start
- * the controls stay up as long as YouTube's sign would, so it never shows. The
- * widget drives the player through its commands and reads back what it does
- * (ytPlayer.ts), so play / pause shows the real state and really pauses; the
- * sound follows the viewer's choice; captions are unloaded each time it starts
- * playing (YouTube turns them on for a muted video). Twitch, Kick and Vimeo keep
- * their own controls. It starts muted (a browser only autoplays a muted video;
- * the site's Permissions-Policy lets these players play sound once unmuted). The
- * choice is remembered on this browser.
+ * THE PLATFORM'S PLAYER, AS IT COMES. The widget never covers, crops or drives a
+ * player: YouTube's and Twitch's terms forbid overlays, frames or anything else in
+ * front of any part of their players, hiding their logo, title or links, and
+ * changing a player beyond its documented options (YouTube API Services Required
+ * Minimum Functionality; Twitch Developer Services Agreement - docs/legal/
+ * TECH-AUDIT.md). So the widget's controls - LIVE with a slow red dot, the source,
+ * mute, fullscreen, clear - sit in a header ABOVE the player, the player shows its
+ * own controls, and it is never shown smaller than its platform allows
+ * (MIN_PLAYER): a panel too small says so instead. The picture is 16:9 where the
+ * panel allows, otherwise the platform letterboxes it. Mute reloads the player
+ * with the setting (a stream starts muted: a browser only autoplays a muted
+ * video). With nothing to play, the same controls float at the panel's top.
  *
  * CONSENT FIRST. No platform's player - no frame, no script - loads before the
- * viewer allows that platform in the widget (legal/embeds.ts; § 25 TDDDG, the
- * two-click solution). The consent is remembered on this browser and withdrawn
- * on the Cookies page.
+ * viewer allows that platform (legal/embeds.ts; § 25 TDDDG, the two-click
+ * solution). The consent is remembered on this browser and withdrawn on the
+ * Cookies page.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi } from '../../vsApi';
 import { FxSelect } from '../funds/ui';
 import { EmptyState } from '../EmptyState';
-import { CHANNELS, PLATFORM_NAME, PLATFORM_OF, embedUrl, isYouTube, parseStream, readChoice, streamOf, type FeedChoice } from './model';
+import { CHANNELS, PLATFORM_NAME, PLATFORM_OF, embedUrl, parseStream, readChoice, streamOf, type FeedChoice, type Stream } from './model';
 import { EMBED_PROVIDERS, allowEmbed, useEmbedConsent } from '../../legal/embeds';
 import { LegalLink } from '../../legal/LegalGate';
 import { EMBED_NOTICE } from '../../legal/notices';
-import { YT, YT_ORIGIN, fitVideo, playerBand, readYtMessage, ytCommand, ytListening, type YtReport } from './ytPlayer';
+import { fitVideo } from './ytPlayer';
 import './LiveFeed.css';
 
 const CUSTOM = 'custom';
@@ -48,14 +38,17 @@ const CUSTOM = 'custom';
 const HEAD = 46;
 /** The floating controls hide this long after the pointer stops. */
 const IDLE_MS = 2200;
-/** A single click on the picture waits this long to tell itself from a double click (fullscreen). */
-const CLICK_MS = 220;
-/** A player that has not started this long after it answered is held up (autoplay refused): the widget offers play. */
-const STALL_MS = 3500;
-/** How long YouTube's own pause sign shows in the middle after playback starts: the widget's controls stay this long. */
-const SETTLE_MS = 4500;
-/** A frame that never reports (its messages blocked) lets its controls hide after this long. */
-const LOAD_MS = 10_000;
+/**
+ * The smallest player each platform allows: YouTube 200 x 200 (Required Minimum
+ * Functionality), Twitch 400 x 300 (its embed documentation); the others the same
+ * as YouTube.
+ */
+const MIN_PLAYER: Record<'youtube' | 'twitch' | 'other', { w: number; h: number }> = {
+  youtube: { w: 200, h: 200 },
+  twitch: { w: 400, h: 300 },
+  other: { w: 200, h: 200 },
+};
+const minPlayer = (s: Stream) => MIN_PLAYER[PLATFORM_OF[s.kind] === 'youtube' ? 'youtube' : PLATFORM_OF[s.kind] === 'twitch' ? 'twitch' : 'other'];
 
 function useBoxSize<T extends HTMLElement>() {
   const ref = useRef<T>(null);
@@ -72,104 +65,6 @@ function useBoxSize<T extends HTMLElement>() {
   return [ref, size] as const;
 }
 
-interface PlayerView {
-  ready: boolean;
-  state: number | null;
-  muted: boolean | null;
-}
-const NO_VIEW: PlayerView = { ready: false, state: null, muted: null };
-
-/**
- * What a YouTube embed reports about itself, from its frame's load on. It is
- * told the widget listens until it answers; `assume` shows a command's outcome
- * before the player confirms it.
- */
-function useYouTube(frame: RefObject<HTMLIFrameElement | null>, src: string | null, on: boolean) {
-  const [view, setView] = useState<PlayerView>(NO_VIEW);
-  const heard = useRef(false);
-  const knock = useRef<number | null>(null);
-  const send = useCallback((msg: string) => frame.current?.contentWindow?.postMessage(msg, YT_ORIGIN), [frame]);
-  const stopKnocking = () => {
-    if (knock.current !== null) window.clearInterval(knock.current);
-    knock.current = null;
-  };
-
-  useEffect(() => {
-    setView(NO_VIEW);
-    heard.current = false;
-    if (!on) return;
-    const onMessage = (e: MessageEvent) => {
-      if (e.origin !== YT_ORIGIN || !frame.current || e.source !== frame.current.contentWindow) return;
-      const r = readYtMessage(e.data);
-      if (!r) return;
-      if (!heard.current) {
-        heard.current = true;
-        stopKnocking();
-        send(ytCommand('addEventListener', ['onStateChange']));
-      }
-      setView((p) => ({ ready: true, state: r.state ?? p.state, muted: r.muted ?? p.muted }));
-    };
-    window.addEventListener('message', onMessage);
-    return () => {
-      window.removeEventListener('message', onMessage);
-      stopKnocking();
-    };
-  }, [src, on, frame, send]);
-
-  const onLoad = useCallback(() => {
-    if (!on) return;
-    heard.current = false;
-    stopKnocking();
-    let tries = 0;
-    send(ytListening());
-    knock.current = window.setInterval(() => {
-      if (heard.current || ++tries > 60) stopKnocking();
-      else send(ytListening());
-    }, 250);
-  }, [on, send]);
-
-  const assume = useCallback((r: YtReport) => setView((p) => ({ ...p, state: r.state ?? p.state, muted: r.muted ?? p.muted })), []);
-  return { ...view, send, onLoad, assume };
-}
-
-/**
- * Whether YouTube's own pause sign has left the middle of the picture: false
- * from a frame's load until SETTLE_MS after its player starts playing, and again
- * after each later start (a resume) - a rebuffer inside a run is no start. A frame
- * that never reports is taken as settled after LOAD_MS.
- */
-function useSettled(src: string | null, state: number | null, ready: boolean) {
-  const [settled, setSettled] = useState(false);
-  const inRun = useRef(false);
-  const timer = useRef<number | null>(null);
-  const clear = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
-  };
-  useEffect(() => {
-    setSettled(false);
-    inRun.current = false;
-    clear();
-  }, [src]);
-  useEffect(() => {
-    if (!src || ready) return;
-    const t = window.setTimeout(() => setSettled(true), LOAD_MS);
-    return () => window.clearTimeout(t);
-  }, [src, ready]);
-  useEffect(() => {
-    if (state === YT.playing && !inRun.current) {
-      inRun.current = true;
-      setSettled(false);
-      clear();
-      timer.current = window.setTimeout(() => setSettled(true), SETTLE_MS);
-    } else if (state !== YT.playing && state !== YT.buffering) {
-      inRun.current = false;
-    }
-  }, [state]);
-  useEffect(() => clear, []);
-  return settled;
-}
-
 export function LiveFeed({ instance }: {
   /** A duplicate tab's own settings (dashboard/tradeTabs.tsx): "2" for the second copy. */
   instance?: string;
@@ -182,12 +77,10 @@ export function LiveFeed({ instance }: {
   const [editing, setEditing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [box, size] = useBoxSize<HTMLDivElement>();
-  const frame = useRef<HTMLIFrameElement>(null);
   const [full, setFull] = useState(false);
   const [awake, setAwake] = useState(false);
   const idle = useRef<number | null>(null);
   const holding = useRef(false);
-  const click = useRef<number | null>(null);
 
   const picked = streamOf(choice);
   // A channel plays its stream on air: the server reads which video that is (/api/vs/live).
@@ -197,42 +90,22 @@ export function LiveFeed({ instance }: {
   const stream = channel ? (onAir.data ? { kind: 'youtube' as const, video: onAir.data } : null) : picked;
   const offAir = !!channel && !lookingUp && !stream;
   const channelName = choice && 'channel' in choice ? CHANNELS.find((c) => c.id === choice.channel)?.name ?? 'This channel' : 'This channel';
-  const yt = stream ? isYouTube(stream) : false;
   /* No platform's player loads before the viewer allows that platform (§ 25 TDDDG,
      legal/embeds.ts): until then there is no frame at all, only what loading it means. */
   const consent = useEmbedConsent();
   const platform = stream ? PLATFORM_OF[stream.kind] : null;
   const needsConsent = !!platform && consent.allowed[platform] === undefined;
-  // YouTube's mute is a command, so its URL keeps the muted start; the others reload with the setting.
-  const src = stream && !needsConsent
-    ? embedUrl(stream, { muted: yt ? true : !sound, host: window.location.hostname, origin: window.location.origin })
-    : null;
-  const player = useYouTube(frame, src, yt);
+  // Every player reloads with the sound setting: nothing is ever sent into a platform's player.
+  const src = stream && !needsConsent ? embedUrl(stream, { muted: !sound, host: window.location.hostname }) : null;
 
-  // Room above a 16:9 picture for the header: it stays, and the picture takes exactly 16:9.
-  const docked = !!src && !full && size.w > 0 && size.h - HEAD >= (size.w * 9) / 16 - 2;
-  const pic = docked ? { w: size.w, h: Math.round((size.w * 9) / 16) } : null;
-  const video = fitVideo(pic?.w ?? size.w, pic?.h ?? size.h);
-  const band = playerBand(video.h);
-
-  // What the player does, once it has said so; until then it is taken to autoplay.
-  const playing = player.state === null || player.state === YT.playing || player.state === YT.buffering;
-  const stopped = player.ready && (player.state === YT.paused || player.state === YT.ended);
-  const [stalled, setStalled] = useState(false);
-  const notStarted = player.state === null || player.state === YT.unstarted || player.state === YT.cued;
-  useEffect(() => {
-    setStalled(false);
-    if (!yt || !player.ready || !notStarted) return;
-    const t = window.setTimeout(() => setStalled(true), STALL_MS);
-    return () => window.clearTimeout(t);
-  }, [yt, player.ready, notStarted]);
-  /* After each start YouTube shows a pause sign in the middle for a few seconds. The
-     widget's own centre button sits over it, and while it does the controls stay up
-     with it (is-settling), so the two never part. Paused, the centre button stays. */
-  const settled = useSettled(yt ? src : null, player.state, player.ready);
-  const settling = yt && !settled;
-  const paused = yt && (stopped || stalled);
-  const loading = yt && !paused && player.state !== YT.playing;
+  // A player: the header above it, the player in the rest - 16:9 where it fits, never
+  // smaller than its platform allows, and nothing of the widget's over it.
+  const docked = !!src;
+  const area = { w: size.w, h: Math.max(0, size.h - HEAD) };
+  const min = stream ? minPlayer(stream) : MIN_PLAYER.other;
+  const fit = fitVideo(area.w, area.h);
+  const pic = { w: Math.min(area.w, Math.max(fit.w, min.w)), h: Math.min(area.h, Math.max(fit.h, min.h)) };
+  const tooSmall = !!src && size.w > 0 && (area.w < min.w || area.h < min.h);
 
   useEffect(() => {
     const on = () => setFull(document.fullscreenElement === box.current);
@@ -243,26 +116,6 @@ export function LiveFeed({ instance }: {
   const streamKey = stream ? JSON.stringify(stream) : '';
   useEffect(() => setSound(false), [streamKey]);
 
-  // The player's sound follows the viewer's choice.
-  const { send } = player;
-  useEffect(() => {
-    if (yt && player.ready) send(ytCommand(sound ? 'unMute' : 'mute'));
-  }, [yt, player.ready, sound, send]);
-
-  // Captions off each time it starts playing: YouTube turns them on for a muted video,
-  // and again when it resumes.
-  const reallyPlaying = player.state === YT.playing;
-  useEffect(() => {
-    if (!yt || !reallyPlaying) return;
-    const off = () => {
-      send(ytCommand('unloadModule', ['captions']));
-      send(ytCommand('unloadModule', ['cc']));
-    };
-    off();
-    const t = window.setTimeout(off, 1500);
-    return () => window.clearTimeout(t);
-  }, [yt, reallyPlaying, send]);
-
   const wake = () => {
     setAwake(true);
     if (idle.current !== null) window.clearTimeout(idle.current);
@@ -271,38 +124,16 @@ export function LiveFeed({ instance }: {
   };
   useEffect(() => () => {
     if (idle.current !== null) window.clearTimeout(idle.current);
-    if (click.current !== null) window.clearTimeout(click.current);
   }, []);
   const hold = (on: boolean) => {
     holding.current = on;
     wake();
   };
 
-  // Pause stops the player, play starts it again.
-  const togglePlay = () => {
-    if (!yt) return;
-    const next = !playing;
-    player.assume({ state: next ? YT.playing : YT.paused });
-    setStalled(false);
-    send(ytCommand(next ? 'playVideo' : 'pauseVideo'));
-  };
   const toggleMute = () => setSound((s) => !s);
   const toggleFull = () => {
     if (document.fullscreenElement) void document.exitFullscreen();
     else void box.current?.requestFullscreen?.();
-  };
-  // One click on the picture pauses or plays; a double click is fullscreen only.
-  const onPicClick = () => {
-    if (click.current !== null) window.clearTimeout(click.current);
-    click.current = window.setTimeout(() => {
-      click.current = null;
-      togglePlay();
-    }, CLICK_MS);
-  };
-  const onPicDouble = () => {
-    if (click.current !== null) window.clearTimeout(click.current);
-    click.current = null;
-    toggleFull();
   };
   const pick = (v: string) => {
     if (!v) return;
@@ -360,9 +191,6 @@ export function LiveFeed({ instance }: {
         </form>
       )}
       <span className="lf__gap" />
-      {stream && yt && (
-        <Btn label={playing ? 'Pause' : 'Play'} onClick={togglePlay}>{playing ? <IconPause /> : <IconPlay />}</Btn>
-      )}
       {stream && (
         <Btn label={sound ? 'Mute' : 'Unmute'} pressed={sound} onClick={toggleMute}>{sound ? <IconSound /> : <IconMuted />}</Btn>
       )}
@@ -371,25 +199,22 @@ export function LiveFeed({ instance }: {
     </>
   );
 
-  const iframe = (cls: string, style?: CSSProperties) => src && (
+  const iframe = src && (
     <iframe
       key={src}
-      ref={frame}
-      className={cls}
-      style={style}
+      className="lf__frame"
       src={src}
       title="Live feed"
       allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
       allowFullScreen
       referrerPolicy="strict-origin-when-cross-origin"
-      onLoad={player.onLoad}
     />
   );
 
   return (
     <div
       ref={box}
-      className={`lf${src ? '' : ' is-empty'}${editing ? ' is-editing' : ''}${docked ? ' is-docked' : ''}${awake ? ' is-awake' : ''}${settling ? ' is-settling' : ''}${paused ? ' is-paused' : ''}`}
+      className={`lf${src ? '' : ' is-empty'}${editing ? ' is-editing' : ''}${docked ? ' is-docked' : ''}${awake ? ' is-awake' : ''}`}
       onPointerMove={wake}
       onPointerEnter={wake}
       onPointerLeave={() => { holding.current = false; setAwake(false); }}
@@ -405,23 +230,10 @@ export function LiveFeed({ instance }: {
             <LegalLink page="cookies">Withdraw at any time</LegalLink>
           </div>
         </div>
+      ) : src && stream && tooSmall ? (
+        <EmptyState icon="news" title="Make this panel larger to play" line={`${PLATFORM_NAME[stream.kind]}'s player needs at least ${min.w} \u00d7 ${min.h} pixels.`} />
       ) : src ? (
-        <div className="lf__pic" style={pic ? { width: pic.w, height: pic.h } : undefined}>
-          {yt ? (
-            <div className="lf__vid" style={{ left: video.x, top: video.y, width: video.w, height: video.h }}>
-              {iframe('lf__frame lf__frame--yt', { top: -band, height: video.h + 2 * band })}
-              {/* YouTube under a layer: its own hover controls never show; the widget's do. */}
-              <div className="lf__shield" onClick={onPicClick} onDoubleClick={onPicDouble} aria-hidden="true" />
-              {/* The centre play / pause, over the spot where YouTube draws its own. The bar's
-                  button does the same for the keyboard, so this one takes no focus. */}
-              <button type="button" className="lf__mid" onClick={togglePlay} tabIndex={-1} aria-hidden="true">
-                {loading ? <span className="lf__spin" /> : playing ? <IconPause /> : <IconPlay />}
-              </button>
-            </div>
-          ) : (
-            iframe('lf__frame')
-          )}
-        </div>
+        <div className="lf__pic" style={{ width: pic.w, height: pic.h }}>{iframe}</div>
       ) : lookingUp ? (
         <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Finding the stream…</p>
       ) : offAir ? (
@@ -450,8 +262,6 @@ function Btn({ label, onClick, pressed, children }: { label: string; onClick: ()
 const icon = (d: ReactNode) => (
   <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{d}</svg>
 );
-const IconPlay = () => icon(<path d="M7 5.5v9l7.5-4.5z" fill="currentColor" />);
-const IconPause = () => icon(<path d="M7.5 5v10M12.5 5v10" />);
 const IconSound = () => icon(<><path d="M3.5 8v4h3l4 3.5v-11l-4 3.5z" /><path d="M13.5 7.5a3.5 3.5 0 0 1 0 5M15.5 5.5a6.5 6.5 0 0 1 0 9" /></>);
 const IconMuted = () => icon(<><path d="M3.5 8v4h3l4 3.5v-11l-4 3.5z" /><path d="m13.5 8 4 4M17.5 8l-4 4" /></>);
 const IconExpand = () => icon(<path d="M3.5 7.5v-4h4M12.5 3.5h4v4M16.5 12.5v4h-4M7.5 16.5h-4v-4" />);

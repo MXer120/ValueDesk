@@ -78,7 +78,7 @@ function route(path, staticFiles, requestHeaders = {}) {
   return { headers, matchedHeaderRoutes, served: dest, notFound: !dest };
 }
 
-const STATIC = new Set(['/index.html', '/favicon.svg', '/favicon.ico', '/robots.txt', '/assets/index-abc.js', '/assets/index-abc.css',
+const STATIC = new Set(['/index.html', '/favicon.svg', '/favicon.ico', '/robots.txt', '/third-party-licenses.txt','/assets/index-abc.js', '/assets/index-abc.css',
   '/assets/sw-worker-1.js', '/logos/btc.svg', '/addrbook/a.png', '/scan/index.html', '/scan/legacy.js']);
 
 const PATHS = [
@@ -86,7 +86,7 @@ const PATHS = [
   '/favicon.svg', '/robots.txt', '/assets/index-abc.js', '/assets/index-abc.css', '/assets/sw-worker-1.js',
   '/assets/missing.js', '/assets/', '/assets/noext', '/logos/btc.svg', '/logos/', '/logos/x', '/logos/x.html',
   '/addrbook/a.png', '/a.b/c', '/deep/path/route', '/deep/file.txt', '/page.html', '/apix', '/api', '/LOGOS/btc.svg',
-  '/Assets/x.js', '/scanner', '/scan.html', '/favicon.ico', '/impressum', '/privacy',
+  '/Assets/x.js', '/scanner', '/scan.html', '/favicon.ico', '/impressum', '/privacy', '/third-party-licenses.txt',
 ];
 
 test('every path gets exactly the headers of prod-headers.mjs, from exactly one route', () => {
@@ -125,7 +125,7 @@ const GEO_STATIC = new Set([...STATIC, '/restricted.html', '/restricted.json']);
 
 test('a visitor from a sanctioned country gets 451 for every page and API path, never cached', () => {
   for (const code of SANCTIONED_CODES) {
-    for (const path of PATHS.filter((p) => !LEGAL.includes(p) && !p.startsWith('/assets/') && !/^\/favicon\.|^\/robots\.txt$/.test(p))) {
+    for (const path of PATHS.filter((p) => !LEGAL.includes(p) && !p.startsWith('/assets/') && !/^\/favicon\.|^\/robots\.txt$|^\/third-party-licenses\.txt$/.test(p))) {
       const r = route(path, GEO_STATIC, FROM(code));
       assert.equal(r.status, 451, `${code} ${path}`);
       assert.equal(r.served, '/restricted.html', `${code} ${path}`);
@@ -142,7 +142,7 @@ test('a visitor from a sanctioned country gets 451 for every page and API path, 
 });
 
 test('from a sanctioned place, the legal pages, the files they load and the geo answer stay reachable', () => {
-  for (const path of [...LEGAL, '/assets/index-abc.js', '/assets/index-abc.css', '/favicon.svg', '/favicon.ico', '/robots.txt', '/restricted.html']) {
+  for (const path of [...LEGAL, '/assets/index-abc.js', '/assets/index-abc.css', '/favicon.svg', '/favicon.ico', '/robots.txt', '/third-party-licenses.txt', '/restricted.html']) {
     const r = route(path, GEO_STATIC, FROM('IR'));
     assert.equal(r.status, undefined, path);
     assert.deepEqual(r.headers, headersFor(path), `${path}: its normal headers`);

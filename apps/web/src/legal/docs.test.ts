@@ -96,11 +96,12 @@ test('the section numbers of each document run 1, 2, 3 ... and every "section N"
   }
 });
 
-test('links in the texts go only to the legal pages, https or mailto', () => {
+test('links in the texts go only to the legal pages, https, mailto or the build\'s licence file', () => {
   const text = JSON.stringify(LEGAL_DOCS);
   for (const m of text.matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)) {
     const href = m[1]!;
-    assert.ok(legalForPath(href) !== null || /^https:\/\//.test(href) || /^mailto:/.test(href), `unexpected link target ${href}`);
+    const ok = legalForPath(href) !== null || /^https:\/\//.test(href) || /^mailto:/.test(href) || href === '/third-party-licenses.txt';
+    assert.ok(ok, `unexpected link target ${href}`);
   }
 });
 

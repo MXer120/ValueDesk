@@ -38,9 +38,6 @@ export type Stream =
   | { kind: 'kick'; channel: string }
   | { kind: 'vimeo'; video: string };
 
-/** Which player the mute button can talk to without reloading it. */
-export const isYouTube = (s: Stream) => s.kind === 'youtube' || s.kind === 'youtube-live';
-
 /** Whose player a stream plays in: the platform the visitor must allow first (legal/embeds.ts). */
 export const PLATFORM_OF: Record<Stream['kind'], EmbedPlatform> = {
   'youtube-live': 'youtube',
@@ -113,10 +110,11 @@ export function parseStream(input: string): Stream | { error: string } {
 }
 
 /**
- * The player URL. \`host\` is this page's hostname (Twitch refuses an embed
- * whose \`parent\` is not it); \`origin\` lets YouTube take mute commands from it.
+ * The player URL: each platform's documented options only, its own controls on
+ * (LiveFeed.tsx: nothing covers or drives a player). \`host\` is this page's
+ * hostname (Twitch refuses an embed whose \`parent\` is not it).
  */
-export function embedUrl(s: Stream, o: { muted: boolean; host: string; origin: string }): string {
+export function embedUrl(s: Stream, o: { muted: boolean; host: string }): string {
   const mute = o.muted ? '1' : '0';
   switch (s.kind) {
     case 'youtube-live':
@@ -126,16 +124,8 @@ export function embedUrl(s: Stream, o: { muted: boolean; host: string; origin: s
         ...(s.kind === 'youtube-live' ? { channel: s.channel } : {}),
         autoplay: '1',
         mute,
-        enablejsapi: '1',
-        origin: o.origin,
         playsinline: '1',
         rel: '0',
-        modestbranding: '1',
-        // The widget's own controls (mute, fullscreen, clear) stand in for YouTube's.
-        controls: '0',
-        iv_load_policy: '3',
-        // Captions off at the start too (the widget also turns them off by command once it plays).
-        cc_load_policy: '0',
       });
       return `https://www.youtube.com/${path}?${q}`;
     }

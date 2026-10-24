@@ -53,7 +53,7 @@ const log = logger('legal');
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
 export const SITE_TERMS_VERSION = '2026-10-24.2';
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */
-export const SITE_TERMS_HASH = '0x4c598a7b65a5fb6683f6e2815261c38d22c40d457f69deeb4fa8a06c5f5c687e';
+export const SITE_TERMS_HASH = '0xd5b6c1a4158abfbd4877b401e5920a43be8f7d22316706fcbb310a047d12272e';
 
 /* ------------------------------------------------------------- statements ----- */
 

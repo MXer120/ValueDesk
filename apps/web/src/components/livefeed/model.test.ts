@@ -1,8 +1,18 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { CHANNELS, embedUrl, parseStream, readChoice, streamOf } from './model';
 
-const at = { muted: true, host: 'valuedeskapp.vercel.app', origin: 'https://valuedeskapp.vercel.app' };
+test('the server looks up exactly these channels (apps/server/src/valuescan/youtube/live.ts LIVE_CHANNELS)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../server/src/valuescan/youtube/live.ts'), 'utf8');
+  const list = /export const LIVE_CHANNELS[^=]*= new Set\(\[([\s\S]*?)\]\)/.exec(src)?.[1] ?? '';
+  const server = [...list.matchAll(/'(UC[A-Za-z0-9_-]{22})'/g)].map((m) => m[1]).sort();
+  assert.deepEqual(server, CHANNELS.map((c) => c.youtube).sort());
+});
+
+const at = { muted: true, host: 'valuedeskapp.vercel.app' };
 
 test('the owner’s five channels lead the list, each a YouTube channel id', () => {
   assert.deepEqual(CHANNELS.slice(0, 5).map((c) => c.name), ['Bloomberg TV', 'CNBC Television', 'CBS News', 'Yahoo Finance', 'The White House']);
@@ -27,13 +37,12 @@ test('Twitch, Kick and Vimeo links; anything else is refused with a reason', () 
   assert.ok('error' in parseStream(''));
 });
 
-test('embeds start muted; Twitch names this page as its parent; YouTube takes commands', () => {
+test('embeds start muted; Twitch names this page as its parent; YouTube keeps its own controls and takes no commands', () => {
   const yt = new URL(embedUrl({ kind: 'youtube-live', channel: 'UCIALMKvObZNtJ6AmdCLP7Lg' }, at));
   assert.equal(yt.pathname, '/embed/live_stream');
   assert.equal(yt.searchParams.get('channel'), 'UCIALMKvObZNtJ6AmdCLP7Lg');
   assert.equal(yt.searchParams.get('mute'), '1');
-  assert.equal(yt.searchParams.get('enablejsapi'), '1');
-  assert.equal(yt.searchParams.get('origin'), 'https://valuedeskapp.vercel.app');
+  for (const p of ['enablejsapi', 'origin', 'controls', 'modestbranding', 'iv_load_policy', 'cc_load_policy']) assert.equal(yt.searchParams.get(p), null, p);
   const tw = new URL(embedUrl({ kind: 'twitch', channel: 'shroud' }, { ...at, muted: false }));
   assert.equal(tw.searchParams.get('parent'), 'valuedeskapp.vercel.app');
   assert.equal(tw.searchParams.get('muted'), 'false');

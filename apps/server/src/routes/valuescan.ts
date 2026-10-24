@@ -14,7 +14,7 @@
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/news?feed&category&coin&q&page&limit   (SoSoValue; coin is one or several, comma-separated; SOSOVALUE_API_KEY, else not_available)
- *   GET /api/vs/live?channel   (the YouTube channel's stream on air, for the Live Feed)
+ *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
@@ -48,7 +48,7 @@ import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
 import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
-import { CHANNEL_ID, liveVideo } from '../valuescan/youtube/live.js';
+import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -241,13 +241,15 @@ export async function valuescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * The video a YouTube channel has on air (the Live Feed widget), or null - one
-   * cached look at the channel's /live page per channel (valuescan/youtube/live.ts).
+   * The video one of the Live Feed's YouTube channels has on air, or null - asked of
+   * the YouTube Data API with this server's key, cached per channel
+   * (valuescan/youtube/live.ts). No key, or not one of the widget's channels: not_available.
    */
   app.get('/api/vs/live', async (req, reply) => {
     try {
       const channel = String((req.query as Q).channel ?? '');
-      if (!CHANNEL_ID.test(channel)) throw new NotAvailable('Name a YouTube channel id');
+      if (!LIVE_CHANNELS.has(channel)) throw new NotAvailable("Not one of the Live Feed's channels");
+      if (!youtubeKey()) throw new NotAvailable('The live lookup is not configured on this server (YOUTUBE_API_KEY)');
       return { ok: true, channel, video: await liveVideo(channel) };
     } catch (e) {
       return fail(reply, e);

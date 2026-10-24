@@ -142,6 +142,9 @@ function Inline({ text, onOpen }: { text: string; onOpen: (p: LegalPage) => void
       out.push(<a key={i} href={href} target="_blank" rel="noopener noreferrer">{label}</a>);
     } else if (/^mailto:/.test(href)) {
       out.push(<a key={i} href={href}>{label}</a>);
+    } else if (/^\/[\w-]+\.txt$/.test(href)) {
+      // A plain-text file the site serves (the build's third-party-licenses.txt).
+      out.push(<a key={i} href={href} target="_blank" rel="noopener">{label}</a>);
     } else {
       out.push(label);
     }

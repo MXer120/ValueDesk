@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { LEGAL_LABELS, LEGAL_PAGES, TABS, legalForPath, pathForLegal, tabForPath } from './router';
 
 test('the legal pages are routes of their own, outside the nav', () => {
-  assert.deepEqual([...LEGAL_PAGES], ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms']);
+  assert.deepEqual([...LEGAL_PAGES], ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms', 'licenses']);
   for (const p of LEGAL_PAGES) {
     assert.ok(!(TABS as readonly string[]).includes(p), `${p} is not a tab (no nav link, no number key)`);
     assert.equal(legalForPath(pathForLegal(p)), p);

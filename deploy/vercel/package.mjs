@@ -74,7 +74,7 @@ export const HEADER_CLASSES = [
 // --- the sanctioned places (jurisdictions.mjs) ----------------------------------------------------
 
 /** What a visitor from a blocked place still gets: the legal pages and what they load. */
-export const GEO_OPEN = `(?:assets/|restricted\\.(?:html|json)$|favicon\\.(?:svg|ico)$|robots\\.txt$|(?:${LEGAL_PATHS.join('|')})/?$)`;
+export const GEO_OPEN = `(?:assets/|restricted\\.(?:html|json)$|favicon\\.(?:svg|ico)$|robots\\.txt$|third-party-licenses\\.txt$|(?:${LEGAL_PATHS.join('|')})/?$)`;
 /** The answer's headers: the site's, never cached anywhere (the same path is the app elsewhere). */
 export const GEO_PAGE_HEADERS = { ...HEADERS, 'Content-Security-Policy': CSP.site, 'Cache-Control': 'no-store' };
 export const GEO_API_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };

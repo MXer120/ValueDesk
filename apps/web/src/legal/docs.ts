@@ -12,6 +12,7 @@ import type { LegalPage } from '../router';
 import { COOKIES } from './cookies';
 import { COPY_TERMS } from './copyTerms';
 import { IMPRESSUM } from './impressum';
+import { LICENSES } from './licenses';
 import { PRIVACY } from './privacy';
 import { RISK } from './risk';
 import { TERMS } from './terms';
@@ -24,6 +25,7 @@ export const LEGAL_DOCS: Record<LegalPage, LegalDoc> = {
   terms: TERMS,
   risk: RISK,
   'copy-terms': COPY_TERMS,
+  licenses: LICENSES,
 };
 
 /** Every placeholder still in the legal pages. */

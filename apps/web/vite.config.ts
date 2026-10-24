@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { fromAppOrigin } from './src/devOrigin';
+import { thirdPartyLicences } from './tools/licenses.mjs';
 
 /**
  * The local API token, injected into proxied requests from the app itself.
@@ -136,7 +137,7 @@ logger.error = (msg, options) => {
 
 export default defineConfig({
   customLogger: logger,
-  plugins: [react(), trackAppOrigin(), preloadPalette()],
+  plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
    *

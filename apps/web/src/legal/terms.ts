@@ -170,7 +170,7 @@ export const TERMS: LegalDoc = {
           ul: [
             '**Our data.** We compute leaderboards, statistics, scans and the screener from what the venues in section 1 publish. We take care, but we do not guarantee that they are complete, current or correct; they can be delayed, attributed to the wrong wallet or wrong, and they can change when the venues correct their data.',
             '**News.** The News widget shows articles and posts from SoSoValue and the outlets it collects, as received, with the source named. We do not write, edit, check or endorse them, and we do not adopt them as our own. The coins shown with a story can be assigned automatically and wrongly.',
-            '**Live streams and videos.** The Live Feed plays channels and links you choose in the platform\'s own player (YouTube, Twitch, Kick, Vimeo), once you allow that platform. What is broadcast is the broadcaster\'s responsibility, and the platform\'s own terms and privacy policy apply to its player.',
+            '**Live streams and videos.** The Live Feed plays channels and links you choose in the platform\'s own player (YouTube, Twitch, Kick, Vimeo), once you allow that platform. What is broadcast is the broadcaster\'s responsibility, and the platform\'s own terms and privacy policy apply to its player. ValueDesk uses YouTube API Services to find a channel\'s live stream; by watching YouTube content in ValueDesk you agree to be bound by the [YouTube Terms of Service](https://www.youtube.com/t/terms).',
             '**Links** to other sites are offered for convenience. We are not responsible for their content.',
             'If you come across unlawful content through ValueDesk, tell us at the address in the [Impressum](/impressum): we will remove or block access to it once we know of it, where it is in our control.',
           ],
@@ -216,7 +216,7 @@ export const TERMS: LegalDoc = {
     {
       title: '14. Our rights in ValueDesk',
       blocks: [
-        { p: 'The site, its software, design, texts, logos, the name ValueDesk and the data compilations we create are protected by copyright, database and trademark rights. We grant you a personal, non-exclusive, non-transferable and revocable right to use ValueDesk in your browser for its purpose, in line with these terms. Software we publish under an open-source licence - such as the ValueDesk copier (MIT licence) - is governed by that licence. Trademarks and logos of exchanges, coins and other third parties belong to their owners and are shown to identify them, not as an endorsement. If you send us suggestions or feedback, we may use them freely.' },
+        { p: 'The site, its software, design, texts and the data compilations we create are protected by copyright and database rights. We grant you a personal, non-exclusive, non-transferable and revocable right to use ValueDesk in your browser for its purpose, in line with these terms. Software we publish under an open-source licence - such as the ValueDesk copier (MIT licence) - is governed by that licence. Names, logos and other marks of cryptoassets, exchanges, networks, wallets and other third parties belong to their owners and are used only to identify them; this does not mean that their owners endorse ValueDesk or are connected with it ([Licences and notices](/licenses)). If you send us suggestions or feedback, we may use them freely.' },
       ],
     },
     {

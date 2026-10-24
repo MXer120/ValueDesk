@@ -95,7 +95,7 @@ export const PRIVACY: LegalDoc = {
       title: '4. ValueDesk\'s data service',
       blocks: [
         { p: 'Leaderboards, cohorts, the screener, Explore, the News widget and parts of the search come from ValueDesk\'s own server. Some of these requests carry what you entered or opened: a wallet address or search text you typed into the search, the address whose rank Scan shows on Hyperliquid, a SoDEX account number from a link, or the coins and words you filter the News by. They are used only to answer the request; the query part is not written to the server log (section 2).' },
-        { p: 'News comes from SoSoValue (SoSoValue\'s news API): ValueDesk\'s server asks SoSoValue for the stories you filter by - the type, the coins and any search words - in its own name. SoSoValue does not receive your IP address. For the Live Feed\'s channels, ValueDesk\'s server finds the stream on air from the channel\'s public YouTube page; that lookup carries nothing about you.' },
+        { p: 'News comes from SoSoValue (SoSoValue\'s news API): ValueDesk\'s server asks SoSoValue for the stories you filter by - the type, the coins and any search words - in its own name. SoSoValue does not receive your IP address. For the Live Feed\'s channels, ValueDesk\'s server asks the YouTube Data API which video the channel has on air; that lookup carries nothing about you. ValueDesk uses YouTube API Services; when you watch YouTube content, the [Google Privacy Policy](https://policies.google.com/privacy) applies to it as well.' },
         { p: 'Legal basis: Art. 6(1)(f) GDPR - answering the request you made.' },
       ],
     },
@@ -200,6 +200,7 @@ export const PRIVACY: LegalDoc = {
           ul: [
             'copy rules and the state of a copy: while the copy exists, and [[OWNER: how long after a copy is stopped]];',
             'the activity log: [[OWNER: retention period - the executor deletes entries older than 365 days by default (EXECUTOR_ACTIVITY_DAYS)]];',
+            'the executor\'s operating log, kept to run and secure the service (Art. 6(1)(f) GDPR): events such as a pairing, a copy key created or a copy or algo order started, with your wallet address and the leader copied, and the path of a request that failed - not your IP address; deleted automatically after 14 days;',
             'the signed requests and the accepted terms: [[OWNER: retention period, e.g. until the end of the N-th year after your last copy ended (limitation periods) - the executor never deletes them on its own]];',
             'the encrypted key: until you delete it with a signed request [[OWNER: and whether an expired or revoked key is deleted automatically, and when]].',
           ],

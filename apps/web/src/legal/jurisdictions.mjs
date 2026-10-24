@@ -83,7 +83,7 @@ export const CLOSE_ONLY_COUNTRIES = Object.freeze([
  * edge serves them even where the rest of the site is blocked, so who runs the site,
  * what it does with data and why it is blocked can be read from anywhere.
  */
-export const LEGAL_PATHS = Object.freeze(['impressum', 'privacy', 'terms', 'risk', 'cookies', 'copy-terms']);
+export const LEGAL_PATHS = Object.freeze(['impressum', 'privacy', 'terms', 'risk', 'cookies', 'copy-terms', 'licenses']);
 
 const codes = (list) => list.map((c) => c.code);
 export const SANCTIONED_CODES = Object.freeze(codes(SANCTIONED_COUNTRIES));

@@ -102,7 +102,7 @@ export const IMPRESSUM: LegalDoc = {
     {
       title: 'Urheberrecht und Marken',
       blocks: [
-        { p: 'Texte, Gestaltung, Software und Datenzusammenstellungen dieser Seite sind urheberrechtlich geschützt, soweit sie nicht unter einer offenen Lizenz veröffentlicht sind (etwa der ValueDesk-Copier unter der MIT-Lizenz). Namen, Marken und Logos von Börsen, Kryptowerten und anderen Dritten gehören ihren Inhabern; sie dienen nur der Kennzeichnung und bedeuten keine Partnerschaft oder Empfehlung.' },
+        { p: 'Texte, Gestaltung, Software und Datenzusammenstellungen dieser Seite sind urheberrechtlich geschützt, soweit sie nicht unter einer offenen Lizenz veröffentlicht sind (etwa der ValueDesk-Copier unter der MIT-Lizenz). Namen, Logos und sonstige Kennzeichen von Kryptowerten, Handelsplätzen, Blockchains, Wallets, Unternehmen und Plattformen gehören ihren jeweiligen Inhabern. ValueDesk verwendet sie nur, um den jeweiligen Wert, Handelsplatz oder Dienst zu bezeichnen; das bedeutet keine Empfehlung, Förderung oder Verbindung durch den Inhaber und keine Anlageempfehlung. Inhaber, die einer Verwendung widersprechen, erreichen uns über die oben genannten Kontaktdaten; wir entfernen das Kennzeichen umgehend. Verwendete Open-Source-Software, ihre Lizenzen und die Quellen von Daten und Logos: [Licences and notices](/licenses).' },
       ],
     },
   ],

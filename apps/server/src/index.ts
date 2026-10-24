@@ -190,9 +190,12 @@ await app.register(statsRoutes);
 // Backend for the ported static Scan page (web/public/scan/) - see that
 // file's own header comment for the full /api/scan/* contract this serves.
 await app.register(scanRoutes);
-// SoPoints login, proxied so Privy's origin allowlist does not pin this app to
-// one port in dev and one domain in production - see routes/pointsAuth.ts.
-await app.register(pointsAuthRoutes);
+// SoPoints login (routes/pointsAuth.ts) is NOT registered: it relays SoDEX's private
+// sign-in API under a forged `Origin: https://sodex.com` to get past the allowlist SoDEX
+// chose, which SoDEX's terms forbid (s. 5.6; docs/legal/TECH-AUDIT.md). The Points page is
+// not mounted either. Bring it back only with SoDEX's written OK or an official API - and
+// without the forged headers.
+void pointsAuthRoutes;
 // Valuescan: multi-venue traders (SoDEX + Hyperliquid) for Explore,
 // Leaderboard, Scan and Copy. Read-only - see routes/valuescan.ts.
 await app.register(valuescanRoutes);
@@ -273,7 +276,7 @@ else app.addHook('onRequest', async (req, reply) => {
   }
   if (TOKEN_REQUIRED && !tokenMatches(req.headers[LOCAL_TOKEN_HEADER] as string | undefined)) {
     app.log.warn(
-      { path: req.url, origin: req.headers.origin ?? null },
+      { path: req.url.split('?')[0], origin: req.headers.origin ?? null },
       'rejected a mutating request with no valid local token',
     );
     return reply.code(401).send({
@@ -288,7 +291,7 @@ else app.addHook('onRequest', async (req, reply) => {
   for (const { key, limit } of classify(req.routeOptions?.url ?? req.url.split('?')[0] ?? '')) {
     const retryAfter = take(key, limit);
     if (retryAfter !== null) {
-      app.log.warn({ path: req.url, key }, 'rate limit hit');
+      app.log.warn({ path: req.url.split('?')[0], key }, 'rate limit hit');
       reply.header('Retry-After', String(retryAfter));
       return reply.code(429).send({
         error: `too many ${key} requests - wait ${retryAfter}s`,

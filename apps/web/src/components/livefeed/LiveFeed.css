@@ -1,7 +1,8 @@
-/* The Live Feed widget (LiveFeed.tsx). Rounded like the card it sits in, the
-   picture clipped to it. Docked: a header that stays, over a picture of exactly
-   16:9. Floating: the picture fills the card and the controls show over its top
-   edge while the pointer moves (or the keyboard is in it, or nothing plays). */
+/* The Live Feed widget (LiveFeed.tsx). Rounded like the card it sits in. With a
+   player: a header that stays, over the player - 16:9 where the card allows,
+   centred - and nothing of the widget's over the player (the platforms' terms).
+   With nothing to play: the controls show at the card's top while the pointer
+   moves (or the keyboard is in them). */
 .lf {
   position: relative;
   display: flex;
@@ -19,56 +20,8 @@
 .lf.is-empty,
 .lf.is-docked { background: transparent; justify-content: flex-start; }
 .lf__pic { position: relative; flex: 1 1 auto; min-height: 0; width: 100%; background: #000; }
-.lf.is-docked .lf__pic { flex: none; border-radius: 0 0 var(--radius-card) var(--radius-card); overflow: hidden; }
+.lf.is-docked .lf__pic { flex: none; align-self: center; border-radius: 0 0 var(--radius-card) var(--radius-card); overflow: hidden; }
 .lf__frame { position: absolute; inset: 0; display: block; width: 100%; height: 100%; border: 0; }
-/* A YouTube player: clipped to its 16:9 picture, and taller than it (top and height
-   inline, ytPlayer.ts playerBand) so its title bar, logo and "More videos" sit on
-   letterbox bars outside the clip. */
-.lf__vid { position: absolute; overflow: hidden; background: #000; }
-.lf__frame--yt { bottom: auto; }
-.lf__shield { position: absolute; inset: 0; z-index: 1; cursor: pointer; }
-/* The widget's centre play / pause, on the spot where YouTube draws its own pause
-   sign after a start; larger than that sign and nearly opaque, so the sign under it
-   never shows. It comes and goes with the other controls (is-awake, is-settling)
-   and stays while paused. */
-.lf__mid {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 2;
-  display: grid;
-  place-items: center;
-  width: 60px;
-  height: 60px;
-  margin: -30px 0 0 -30px;
-  padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 50%;
-  background: rgba(14, 14, 16, 0.78);
-  -webkit-backdrop-filter: blur(10px);
-  backdrop-filter: blur(10px);
-  color: #fff;
-  cursor: pointer;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 180ms, transform 140ms, border-color 140ms;
-}
-.lf.is-awake .lf__mid,
-.lf.is-settling .lf__mid,
-.lf.is-paused .lf__mid { opacity: 1; pointer-events: auto; }
-.lf__mid:hover { transform: scale(1.05); border-color: rgba(255, 255, 255, 0.28); }
-.lf__mid svg { width: 24px; height: 24px; }
-.lf:fullscreen .lf__mid { width: 84px; height: 84px; margin: -42px 0 0 -42px; }
-.lf:fullscreen .lf__mid svg { width: 32px; height: 32px; }
-.lf__spin {
-  width: 22px;
-  height: 22px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  animation: lf-spin 0.9s linear infinite;
-}
-@keyframes lf-spin { to { transform: rotate(360deg); } }
 .lf.is-empty { align-items: center; justify-content: center; }
 
 .lf__head,
@@ -84,11 +37,9 @@
   transition: opacity 180ms, transform 180ms;
   pointer-events: none;
 }
-/* Shown while the pointer moves or rests on them, for a few seconds after playback
-   starts (with the centre button), while the keyboard is in them (not after a click:
-   a clicked button keeps focus), or with nothing to play. */
+/* Shown while the pointer moves or rests on them, while the keyboard is in them (not
+   after a click: a clicked button keeps focus), or with nothing to play. */
 .lf.is-awake .lf__bar,
-.lf.is-settling .lf__bar,
 .lf__bar:has(:focus-visible),
 .lf__bar:has([aria-expanded="true"]),
 .lf.is-empty .lf__bar,
@@ -169,7 +120,7 @@
 .lf__custom input:focus { outline: none; border-color: rgba(255, 255, 255, 0.34); }
 .lf__err { position: absolute; left: 10px; right: 10px; top: 52px; z-index: 4; margin: 0; padding: 6px 10px; border-radius: 8px; background: rgba(20, 20, 22, 0.9); color: var(--neg); font-size: var(--fs-xs); }
 .lf:fullscreen { border-radius: 0; }
-@media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } .lf__spin { animation-duration: 2.4s; } }
+@media (prefers-reduced-motion: reduce) { .lf__live i { animation: none; } }
 
 /* The panel around the feed shows nothing of its own at the edges: no ring and no
    grey sliver while it is resized. */

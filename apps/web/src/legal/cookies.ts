@@ -46,7 +46,7 @@ export const COOKIES: LegalDoc = {
     {
       title: '2. Storage in your browser that the site needs',
       blocks: [
-        { p: 'So that the functions you use keep working between visits, ValueDesk stores the following in your browser (local storage, session storage and IndexedDB). It stays on your device; ValueDesk\'s servers never read it. Every entry\'s name starts with "vs", "vd" or "valuescan".' },
+        { p: 'So that the functions you use keep working between visits, ValueDesk stores the following in your browser (local storage, session storage and IndexedDB). It stays on your device; ValueDesk\'s servers never read it. Most of ValueDesk\'s own entries are named "vs…", "vd…" or "valuescan…" (a few older ones "ot…", "opentrade…" or "scan-aliases"); once you connect a wallet, Reown\'s software adds its own, named "@appkit…" and "wc@2…".' },
         {
           ul: [
             '**Your choices:** layouts, dashboards, chart settings and drawings, the selected market, filters, the privacy mode, the Live Feed channel and the players you allowed (section 3), notices you have seen.',

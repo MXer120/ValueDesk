@@ -77,7 +77,7 @@ export const pathForTab = (tab: Tab): string => `/${tab}`;
  * is blocked (legal/jurisdictions.mjs LEGAL_PATHS - docs.test.ts checks the
  * two lists agree).
  */
-export const LEGAL_PAGES = ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms'] as const;
+export const LEGAL_PAGES = ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms', 'licenses'] as const;
 export type LegalPage = (typeof LEGAL_PAGES)[number];
 export const LEGAL_LABELS: Record<LegalPage, string> = {
   impressum: 'Impressum',
@@ -86,6 +86,7 @@ export const LEGAL_LABELS: Record<LegalPage, string> = {
   terms: 'Terms',
   risk: 'Risk',
   'copy-terms': 'Copy terms',
+  licenses: 'Licences',
 };
 export const pathForLegal = (page: LegalPage): string => `/${page}`;
 
