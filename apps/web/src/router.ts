@@ -70,14 +70,21 @@ export const pathForTab = (tab: Tab): string => `/${tab}`;
  * `copy-terms` (/copy-terms) is the copy trading terms and risk disclosure
  * that every follower signs before copying (legal/copyTerms.ts). One path
  * segment, so `legalForPath` reads it like the others, and not a tab: /copy
- * stays the Copy page.
+ * stays the Copy page. `risk` (/risk) is the risk disclosure, part of what
+ * every visitor accepts with the terms (legal/acceptance.ts); `cookies`
+ * (/cookies) the cookie and storage notice with the switches for the Live
+ * Feed's players. The edge serves all of them even where the rest of the site
+ * is blocked (legal/jurisdictions.mjs LEGAL_PATHS - docs.test.ts checks the
+ * two lists agree).
  */
-export const LEGAL_PAGES = ['impressum', 'privacy', 'terms', 'copy-terms'] as const;
+export const LEGAL_PAGES = ['impressum', 'privacy', 'cookies', 'terms', 'risk', 'copy-terms'] as const;
 export type LegalPage = (typeof LEGAL_PAGES)[number];
 export const LEGAL_LABELS: Record<LegalPage, string> = {
   impressum: 'Impressum',
   privacy: 'Privacy',
+  cookies: 'Cookies',
   terms: 'Terms',
+  risk: 'Risk',
   'copy-terms': 'Copy terms',
 };
 export const pathForLegal = (page: LegalPage): string => `/${page}`;

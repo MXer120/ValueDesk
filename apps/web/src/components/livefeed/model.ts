@@ -5,6 +5,7 @@
  * player URL for each - muted at first, since a browser only autoplays a
  * muted video.
  */
+import type { EmbedPlatform } from '../../legal/embeds';
 
 export interface Channel {
   id: string;
@@ -39,6 +40,16 @@ export type Stream =
 
 /** Which player the mute button can talk to without reloading it. */
 export const isYouTube = (s: Stream) => s.kind === 'youtube' || s.kind === 'youtube-live';
+
+/** Whose player a stream plays in: the platform the visitor must allow first (legal/embeds.ts). */
+export const PLATFORM_OF: Record<Stream['kind'], EmbedPlatform> = {
+  'youtube-live': 'youtube',
+  youtube: 'youtube',
+  twitch: 'twitch',
+  'twitch-video': 'twitch',
+  kick: 'kick',
+  vimeo: 'vimeo',
+};
 
 export const PLATFORM_NAME: Record<Stream['kind'], string> = {
   'youtube-live': 'YouTube',

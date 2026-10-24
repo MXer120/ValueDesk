@@ -40,6 +40,7 @@ import { setTradingConfig, type BuilderConfig } from './config';
 import { _setBuilderPollDelaysForTests } from './builderApproval';
 import type { BuilderTerms } from './builder';
 import { memoryVault } from './vault';
+import { _signedTermsForTests } from '../legal/acceptance';
 import {
   _resetTradingForTests,
   approveBuilderFee,
@@ -298,6 +299,8 @@ beforeEach(() => {
   configure(B);
   _setBuilderPollDelaysForTests([0, 2, 2, 2]);
   _resetTradingForTests(memoryVault());
+  // The wallet has signed ValueDesk's terms (legalGate.ts): these tests are about the fee and the key.
+  _signedTermsForTests(OWNER);
   resetReadBudget();
   logMark = recentLogs().at(-1) ?? null;
 });

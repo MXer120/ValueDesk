@@ -1,0 +1,148 @@
+/* The legal gates and notices (legal/LegalGate.tsx). Tokens only; the sheets
+   are `.fx` modals like the funds sheets, so their notes, labels, selects and
+   buttons are funds.css's. Everything here starts at an `.lg-` class. */
+
+/* A one-line notice in a panel: the panel's own muted type, never a banner. */
+.lg-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-micro, var(--fs-xs));
+  line-height: var(--lh-micro, 1.4);
+}
+.lg-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  text-underline-offset: 2px;
+}
+.lg-link:hover { color: var(--text); }
+
+/* The statements of the two sheets. */
+.lg-checks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0;
+}
+.lg-check {
+  display: flex;
+  flex-direction: row; /* styles.css stacks every label */
+  align-items: flex-start;
+  gap: var(--sp-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  cursor: pointer;
+}
+.lg-check input {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.lg-check .lg-link { color: var(--text); }
+.lg-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+.lg-actions .fx-cta { flex: 1; }
+.lg-fine {
+  margin: var(--sp-3) 0 0;
+  color: var(--muted);
+  font-size: var(--fs-micro, var(--fs-xs));
+  line-height: 1.4;
+}
+.lg-select { width: 100%; }
+.lg-sign .fx-lbl { margin-top: var(--sp-3); }
+
+/* The clickwrap cannot be closed: accepting is the way on. */
+.lg-gate .modal-close { visibility: hidden; }
+
+/* A sanctioned place (SiteGate): the legal pages and a notice, nothing else. */
+.lg-blocked {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-3);
+  background: var(--bg);
+  color: var(--muted);
+}
+.lg-blocked__card {
+  width: 100%;
+  max-width: 560px;
+  padding: var(--sp-5) var(--sp-4);
+  background: var(--bg-panel);
+  border: 1px solid var(--panel-line);
+  border-radius: 12px;
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+}
+.lg-blocked__card h1 {
+  margin: 0 0 var(--sp-3);
+  color: var(--text);
+  font-size: var(--fs-head, var(--fs-base));
+  font-weight: 500;
+}
+.lg-blocked__card p { margin: 0 0 var(--sp-2); }
+.lg-blocked__page { width: 100%; }
+.lg-blocked__nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-xs);
+}
+
+/* The Live Feed before a platform is allowed (LiveFeed.tsx). */
+.lg-consent {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  height: 100%;
+  max-width: 520px;
+  margin: 0 auto;
+  padding: var(--sp-4);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+.lg-consent__title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+.lg-consent p { margin: 0; }
+.lg-consent__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin-top: var(--sp-1);
+}
+
+/* The Cookies page's switches. */
+.lg-embeds {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--panel-line);
+  border-radius: 10px;
+}
+.lg-embeds li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-xs);
+}
+.lg-embeds li + li { border-top: 1px solid var(--panel-line); }
+.lg-embeds b { color: var(--text); font-weight: 500; }

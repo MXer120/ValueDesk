@@ -21,6 +21,11 @@ import { openConnectDialog } from './connect';
 import { getTradingState, subscribeTrading } from '../../trading/session';
 import { activeBuilder } from '../../trading/builder';
 import { tradingConfig } from '../../trading/config';
+import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
+import { useAcceptanceRevision } from '../../legal/acceptance';
+import { useViewerAccess } from '../../legal/geo';
+import { openLegalPage } from '../../legal/LegalGate';
+import { useScreening } from '../../legal/screening';
 
 export interface TradeGate {
   /** The button's words. */
@@ -76,4 +81,35 @@ export function useTradeGate(address: string | null | undefined, unlocked: boole
         ? 'Opening…'
         : base.label;
   return { label, why: base.why, act: base.act, busy, approving: busy && route === 'enable' && !restoring };
+}
+
+/**
+ * What the button says, with trading enabled, where the legal gate
+ * (trading/legalGate.ts) would refuse the order in the ticket: a restricted
+ * place or wallet, or terms this wallet has not signed. Null when the order may
+ * go - and always for an order that only closes (`opening` false), which the
+ * gate never refuses outside a sanctioned place.
+ */
+export function useLegalTradeGate(address: string | null | undefined, opening: boolean): TradeGate | null {
+  useViewerAccess();
+  useAcceptanceRevision();
+  useScreening(address);
+  if (!address) return null;
+  const st = legalStateFor(address);
+  const terms = () => openLegalPage('terms');
+  if (st.access.level === 'blocked') return { label: 'Not available', why: st.access.reason ?? '', act: terms, busy: false, approving: false };
+  if (!opening) return null;
+  if (st.access.level === 'close-only') {
+    return { label: 'Close-only here', why: `${st.access.reason ?? ''} Tick Reduce only to close a position.`, act: terms, busy: false, approving: false };
+  }
+  if (!st.signed) {
+    return {
+      label: 'Accept the terms',
+      why: 'Your wallet signs the current Terms of use and Risk disclosure before it opens a position. Closing, cancelling and withdrawing work without it.',
+      act: () => window.dispatchEvent(new CustomEvent(SIGN_TERMS_EVENT)),
+      busy: false,
+      approving: false,
+    };
+  }
+  return null;
 }

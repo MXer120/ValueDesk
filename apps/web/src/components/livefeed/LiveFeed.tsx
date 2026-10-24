@@ -25,13 +25,21 @@
  * their own controls. It starts muted (a browser only autoplays a muted video;
  * the site's Permissions-Policy lets these players play sound once unmuted). The
  * choice is remembered on this browser.
+ *
+ * CONSENT FIRST. No platform's player - no frame, no script - loads before the
+ * viewer allows that platform in the widget (legal/embeds.ts; § 25 TDDDG, the
+ * two-click solution). The consent is remembered on this browser and withdrawn
+ * on the Cookies page.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi } from '../../vsApi';
 import { FxSelect } from '../funds/ui';
 import { EmptyState } from '../EmptyState';
-import { CHANNELS, PLATFORM_NAME, embedUrl, isYouTube, parseStream, readChoice, streamOf, type FeedChoice } from './model';
+import { CHANNELS, PLATFORM_NAME, PLATFORM_OF, embedUrl, isYouTube, parseStream, readChoice, streamOf, type FeedChoice } from './model';
+import { EMBED_PROVIDERS, allowEmbed, useEmbedConsent } from '../../legal/embeds';
+import { LegalLink } from '../../legal/LegalGate';
+import { EMBED_NOTICE } from '../../legal/notices';
 import { YT, YT_ORIGIN, fitVideo, playerBand, readYtMessage, ytCommand, ytListening, type YtReport } from './ytPlayer';
 import './LiveFeed.css';
 
@@ -190,8 +198,13 @@ export function LiveFeed({ instance }: {
   const offAir = !!channel && !lookingUp && !stream;
   const channelName = choice && 'channel' in choice ? CHANNELS.find((c) => c.id === choice.channel)?.name ?? 'This channel' : 'This channel';
   const yt = stream ? isYouTube(stream) : false;
+  /* No platform's player loads before the viewer allows that platform (§ 25 TDDDG,
+     legal/embeds.ts): until then there is no frame at all, only what loading it means. */
+  const consent = useEmbedConsent();
+  const platform = stream ? PLATFORM_OF[stream.kind] : null;
+  const needsConsent = !!platform && consent.allowed[platform] === undefined;
   // YouTube's mute is a command, so its URL keeps the muted start; the others reload with the setting.
-  const src = stream
+  const src = stream && !needsConsent
     ? embedUrl(stream, { muted: yt ? true : !sound, host: window.location.hostname, origin: window.location.origin })
     : null;
   const player = useYouTube(frame, src, yt);
@@ -382,7 +395,17 @@ export function LiveFeed({ instance }: {
       onPointerLeave={() => { holding.current = false; setAwake(false); }}
     >
       {docked && <div className="lf__head">{controls}</div>}
-      {src ? (
+      {needsConsent && platform ? (
+        <div className="lg-consent" role="group" aria-label={`Allow ${EMBED_PROVIDERS[platform].name}`}>
+          <p className="lg-consent__title">Load the {EMBED_PROVIDERS[platform].name} player?</p>
+          <p>{EMBED_NOTICE(EMBED_PROVIDERS[platform].name, EMBED_PROVIDERS[platform].operator)}</p>
+          <div className="lg-consent__actions">
+            <button type="button" className="fx-cta" onClick={() => allowEmbed(platform)}>Allow {EMBED_PROVIDERS[platform].name} and play</button>
+            <a className="lg-link" href={EMBED_PROVIDERS[platform].policy} target="_blank" rel="noopener noreferrer">{EMBED_PROVIDERS[platform].name}&rsquo;s privacy policy</a>
+            <LegalLink page="cookies">Withdraw at any time</LegalLink>
+          </div>
+        </div>
+      ) : src ? (
         <div className="lf__pic" style={pic ? { width: pic.w, height: pic.h } : undefined}>
           {yt ? (
             <div className="lf__vid" style={{ left: video.x, top: video.y, width: video.w, height: video.h }}>

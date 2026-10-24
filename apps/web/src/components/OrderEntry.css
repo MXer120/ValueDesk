@@ -1429,3 +1429,11 @@ button.oe-select[aria-expanded='true'] {
 .oe-pop__opt--algo.is-on .oe-algo-ic { color: var(--text); }
 .oe-pop__opt--algo b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .oe-tab--algo .oe-algo-ic { flex: none; }
+
+/* --- 8. the legal line ------------------------------------------------------ */
+
+/* Under the read-out, in its muted micro type: the risk and where it is set out
+   (legal/notices.ts). One line on a normal ticket width; it wraps, never clips. */
+.oe-legal {
+  margin-top: var(--sp-2);
+}

@@ -27,6 +27,7 @@ import { FillToasts } from './components/FillToasts';
 import { lazyPage, type LazyPage } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
+import { OPEN_LEGAL_EVENT, TermsGate } from './legal/LegalGate';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
@@ -154,6 +155,15 @@ function AppShell() {
     };
     LegalDoc.preload().then(go, go);
   }, [navigateLegal]);
+  /* A legal link anywhere in the app (legal/LegalGate.tsx LegalLink) opens its page in place. */
+  useEffect(() => {
+    const on = (e: Event) => {
+      const page = (e as CustomEvent<LegalPage>).detail;
+      if (typeof page === 'string' && legalForPath(`/${page}`)) openLegal(page);
+    };
+    window.addEventListener(OPEN_LEGAL_EVENT, on);
+    return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
+  }, [openLegal]);
   /* The tab whose page is on screen - none while a legal page is. */
   const shown: Tab | null = legal ? null : tab;
   usePagePrefetch();
@@ -526,6 +536,11 @@ function AppShell() {
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />
+        </Guarded>
+        {/* The first-visit clickwrap (legal/acceptance.ts): until this browser accepts the
+            current terms. Not over a legal page, so what it links to can be read first. */}
+        <Guarded name="Terms">
+          <TermsGate hidden={!!legal} onOpen={openLegal} />
         </Guarded>
         {/* Live copy trading on every page: the browser copier runs whichever page is open. */}
         <Guarded name="Copy trading">

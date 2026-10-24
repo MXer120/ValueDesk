@@ -8,6 +8,7 @@
  *   GET  /api/copy/v1/health                     liveness (public)
  *   POST /api/copy/v1/session                    {request: session}          -> a read token
  *   POST /api/copy/v1/terms                      {request: accept-terms}
+ *   POST /api/copy/v1/site-terms                 {request: accept-site-terms}  (hosted: ValueDesk's own terms, recorded)
  *   GET  /api/copy/v1/me                         Bearer                      -> terms, policy, key, copies
  *   POST /api/copy/v1/keys                       {request: create-key}       -> the key to register
  *   POST /api/copy/v1/keys/verify                Bearer                      -> registered?
@@ -164,6 +165,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       const body = (await readJson(req)) as { request?: unknown };
       if (route === '/session') return send(res, 200, svc.session(body.request, ctx));
       if (route === '/terms') return send(res, 200, svc.acceptTerms(body.request, ctx));
+      if (route === '/site-terms') return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === '/keys') return send(res, 200, svc.createKey(body.request, ctx));
       if (route === '/keys/verify') return send(res, 200, { key: await svc.verifyKey(svc.authenticate(bearer(req))) });
       if (route === '/keys/delete') return send(res, 200, await svc.deleteKey(body.request, ctx));

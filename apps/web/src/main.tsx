@@ -21,6 +21,8 @@ import '@fontsource/space-grotesk/600.css';
 import { App } from './App';
 import { installGlobalLogging } from './log';
 import { installChunkErrorReload } from './lazyPage';
+import { SiteGate } from './legal/LegalGate';
+import { loadViewerGeo } from './legal/geo';
 import './styles.css';
 
 // Before the first render, so an error thrown while mounting is logged too.
@@ -28,9 +30,14 @@ import './styles.css';
 installGlobalLogging();
 // A release replaced the file names while this tab was open: load the current build once (lazyPage.ts).
 installChunkErrorReload();
+// Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.
+void loadViewerGeo();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    {/* In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx). */}
+    <SiteGate>
+      <App />
+    </SiteGate>
   </StrictMode>,
 );

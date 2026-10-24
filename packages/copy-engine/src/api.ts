@@ -32,9 +32,19 @@ export const COPY_DOMAIN = { name: 'ValueDesk Copy', version: '1' } as const;
  */
 export const COPY_TERMS_EXECUTOR = 'valuedesk-copy-terms';
 
+/**
+ * The `executor` an 'accept-site-terms' request names: ValueDesk's Terms of use
+ * and Risk disclosure (apps/web/src/legal/acceptance.ts), signed by a wallet
+ * before it trades through ValueDesk and recorded by ValueDesk's executor in
+ * the same append-only log as every other signed instruction.
+ */
+export const SITE_TERMS_EXECUTOR = 'valuedesk-site-terms';
+
 export type CopyAction =
   | 'session'
   | 'accept-terms'
+  /** ValueDesk's own terms (not the copy terms): a statement like 'accept-terms'. */
+  | 'accept-site-terms'
   | 'create-key'
   | 'delete-key'
   | 'subscribe'
@@ -48,7 +58,7 @@ export type CopyAction =
   /** Pause, resume or cancel an algo order, or cancel all of them. */
   | 'algo-action';
 
-export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action'];
+export const COPY_ACTIONS: readonly CopyAction[] = ['session', 'accept-terms', 'accept-site-terms', 'create-key', 'delete-key', 'subscribe', 'update', 'pause', 'resume', 'stop', 'stop-all', 'algo-start', 'algo-action'];
 
 export const COPY_REQUEST_FIELDS = [
   { name: 'action', type: 'string' },
@@ -120,7 +130,9 @@ export const copyRequestDigest = (r: CopyRequest): string => bytesToHex(hashType
  */
 export const REQUEST_TTL_MS = 5 * 60_000;
 export const TERMS_TTL_MS = 365 * 86_400_000;
-const MAX_WINDOW_MS = (action: CopyAction): number => (action === 'accept-terms' ? TERMS_TTL_MS + 86_400_000 : 60 * 60_000);
+/** An acceptance of terms - the copy terms or ValueDesk's own: a statement, valid a year. */
+export const isStatement = (action: CopyAction): boolean => action === 'accept-terms' || action === 'accept-site-terms';
+const MAX_WINDOW_MS = (action: CopyAction): number => (isStatement(action) ? TERMS_TTL_MS + 86_400_000 : 60 * 60_000);
 
 /** Build an unsigned request for `action` with `payload`, valid for `ttlMs`. */
 export function buildCopyRequest(o: { action: CopyAction; owner: string; executor: string; payload: unknown; chainId: number; now?: number; ttlMs?: number }): CopyRequest {
@@ -131,7 +143,7 @@ export function buildCopyRequest(o: { action: CopyAction; owner: string; executo
     executor: o.executor,
     payload: canonicalJSON(o.payload ?? {}),
     nonce: String(now),
-    deadline: String(now + (o.ttlMs ?? (o.action === 'accept-terms' ? TERMS_TTL_MS : REQUEST_TTL_MS))),
+    deadline: String(now + (o.ttlMs ?? (isStatement(o.action) ? TERMS_TTL_MS : REQUEST_TTL_MS))),
     chainId: o.chainId,
   };
 }
@@ -165,7 +177,7 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (deadline < now) return { ok: false, error: 'this request has expired; sign it again' };
   if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: 'this request is valid for longer than allowed' };
   const skew = o.maxAgeMs ?? 15 * 60_000;
-  if (nonce - now > skew || (action !== 'accept-terms' && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
+  if (nonce - now > skew || (!isStatement(action) && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };
   let payload: unknown;
   try {
     payload = JSON.parse(q.payload);
@@ -198,6 +210,31 @@ export interface AcceptTermsPayload {
   notUsPerson: true;
   ownDecision: true;
   risksUnderstood: true;
+}
+
+/** 'accept-site-terms': ValueDesk's Terms of use and Risk disclosure, as the wallet saw them. */
+export interface AcceptSiteTermsPayload {
+  /** SITE_TERMS_VERSION (apps/web/src/legal/acceptance.ts): a date, with a counter for a second change on one day. */
+  termsVersion: string;
+  /** keccak256 of the texts the wallet's owner saw (0x hex). */
+  termsHash: string;
+  /** Country of residence, ISO alpha-2. */
+  country: string;
+  /** The statements, each one ticked. */
+  adult: true;
+  notRestricted: true;
+  risksUnderstood: true;
+  ownDecisions: true;
+}
+
+/** What the executor answers to 'accept-site-terms'. */
+export interface SiteTermsRecord {
+  recorded: true;
+  termsVersion: string;
+  country: string;
+  /** The country the executor saw the request come from (hosted, behind the edge). */
+  observedCountry: string | null;
+  acceptedAt: number;
 }
 
 export interface CreateKeyPayload {
@@ -272,8 +309,11 @@ export interface ExecutorInfo {
   features?: string[];
 }
 
-/** 'counter': the rules may carry direction 'counter' (planner.ts). */
-export const EXECUTOR_FEATURES = ['counter'] as const;
+/**
+ * 'counter': the rules may carry direction 'counter' (planner.ts).
+ * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
+ */
+export const EXECUTOR_FEATURES = ['counter', 'site-terms'] as const;
 
 export interface SessionGrant {
   token: string;

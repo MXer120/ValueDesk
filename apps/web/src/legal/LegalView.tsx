@@ -1,6 +1,7 @@
 /**
- * The legal pages: /impressum, /privacy, /terms, /copy-terms (texts in
- * impressum.ts, privacy.ts, terms.ts, copyTerms.ts; the format in model.ts).
+ * The legal pages: /impressum, /privacy, /cookies, /terms, /risk, /copy-terms
+ * (texts in impressum.ts, privacy.ts, cookies.ts, terms.ts, risk.ts,
+ * copyTerms.ts; the format in model.ts).
  *
  * A chunk of its own (App.tsx lazyPage), so the texts cost the first load
  * nothing; it loads when a legal link is hovered, focused or followed, or when
@@ -13,7 +14,9 @@
  */
 import { useLayoutEffect, useRef, type MouseEvent, type ReactNode } from 'react';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, type LegalPage } from '../router';
+import { EMBED_SECTION_TITLE } from './cookies';
 import { LEGAL_DOCS } from './docs';
+import { EmbedSwitches } from './LegalGate';
 import { MARKER_INLINE, isDraft, type Block } from './model';
 import './legal.css';
 
@@ -61,6 +64,8 @@ export function LegalView({ page, onOpen }: LegalViewProps) {
             <section key={i} className="legal-section" lang={s.lang}>
               <h2><Inline text={s.title} onOpen={onOpen} /></h2>
               <Blocks blocks={s.blocks} onOpen={onOpen} />
+              {/* The one control on a legal page: withdrawing consent for a video platform. */}
+              {page === 'cookies' && s.title === EMBED_SECTION_TITLE && <EmbedSwitches />}
             </section>
           ))}
           <p className="legal-updated">

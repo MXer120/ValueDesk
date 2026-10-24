@@ -40,6 +40,9 @@ import {
   TradingError,
 } from './session';
 import { cancelAll, placeOrder, withdraw } from './actions';
+import { SIGN_TERMS_EVENT } from './legalGate';
+import { _resetAcceptanceForTests, _signedTermsForTests } from '../legal/acceptance';
+import { _resetGeoForTests } from '../legal/geo';
 
 // --- a wallet and a gateway --------------------------------------------------
 
@@ -144,6 +147,9 @@ beforeEach(() => {
     builder: null,
   });
   _resetTradingForTests(memoryVault());
+  // The wallet has signed ValueDesk's terms (legalGate.ts); the test below takes the signature away.
+  _resetAcceptanceForTests();
+  _signedTermsForTests(OWNER);
 });
 
 /** Who signed an exchange-action request (X-API-Sign over {type, params}). */
@@ -295,6 +301,47 @@ test('cancel-all reads open orders fresh and cancels them in one signed request'
   assert.equal(r.cancelled, 2);
   const del = sent.find((s) => s.method === 'DELETE')!;
   assert.deepEqual(del.body.cancels.map((c: any) => c.orderID), [11, 12]);
+});
+
+// --- the legal gate (legalGate.ts), where every action is signed ----------------
+
+test('terms not signed by this wallet, or a close-only place: no opening order is signed or sent; a close, a cancel and a withdrawal still are', async () => {
+  await enableTrading({ owner: OWNER, provider: wallet });
+  reply = (s) =>
+    /trade\/orders$/.test(s.url) && s.method === 'POST' ? ok([{ code: 0, clOrdID: 'x', orderID: 1 }])
+    : s.url.includes('/orders') && s.method === 'GET' ? ok({ orders: [{ si: 7, i: 11 }] })
+    : s.method === 'DELETE' ? ok([{ code: 0, clOrdID: '' }])
+    : undefined;
+  const asks: Event[] = [];
+  const g = globalThis as { window?: EventTarget };
+  const hadWindow = 'window' in g;
+  const target = new EventTarget();
+  if (!hadWindow) g.window = target;
+  const listen = (e: Event) => asks.push(e);
+  (g.window as EventTarget).addEventListener(SIGN_TERMS_EVENT, listen);
+  try {
+    for (const restrict of [() => _resetAcceptanceForTests(), () => _resetGeoForTests({ country: 'US', region: null, known: true })]) {
+      _signedTermsForTests(OWNER);
+      _resetGeoForTests();
+      restrict();
+      sent = [];
+      await assert.rejects(
+        placeOrder('perps', { symbol: 'BTC-USD', side: 'buy', price: '84000', quantity: '0.01' }),
+        (e: unknown) => e instanceof TradingError && e.kind === 'legal',
+      );
+      assert.equal(sent.filter((s) => s.method === 'POST' && /trade\/orders$/.test(s.url)).length, 0, 'nothing was sent');
+      await placeOrder('perps', { symbol: 'BTC-USD', side: 'sell', price: '84000', quantity: '0.01', reduceOnly: true });
+      assert.equal(sent.filter((s) => s.method === 'POST' && /trade\/orders$/.test(s.url)).length, 1, 'the close was sent');
+      assert.equal((await cancelAll('perps')).cancelled, 1);
+      await withdraw({ engine: 'spot', coinId: 0, amount: '1' });
+    }
+    assert.equal(asks.length, 1, 'only the missing signature asks for the terms; a close-only place does not');
+  } finally {
+    (g.window as EventTarget).removeEventListener(SIGN_TERMS_EVENT, listen);
+    if (!hadWindow) delete g.window;
+    _resetGeoForTests();
+    _signedTermsForTests(OWNER);
+  }
 });
 
 // --- money ----------------------------------------------------------------------

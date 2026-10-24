@@ -10133,7 +10133,8 @@ var CopyRuntime = class {
 // packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
-var COPY_ACTIONS = ["session", "accept-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
+var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
+var COPY_ACTIONS = ["session", "accept-terms", "accept-site-terms", "create-key", "delete-key", "subscribe", "update", "pause", "resume", "stop", "stop-all", "algo-start", "algo-action"];
 var COPY_REQUEST_FIELDS = [
   { name: "action", type: "string" },
   { name: "owner", type: "address" },
@@ -10174,7 +10175,8 @@ function copyRequestTypedData(r) {
 var copyRequestDigest = (r) => bytesToHex2(hashTypedData(copyRequestTypedData(r)));
 var REQUEST_TTL_MS = 5 * 6e4;
 var TERMS_TTL_MS = 365 * 864e5;
-var MAX_WINDOW_MS = (action2) => action2 === "accept-terms" ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
+var isStatement = (action2) => action2 === "accept-terms" || action2 === "accept-site-terms";
+var MAX_WINDOW_MS = (action2) => isStatement(action2) ? TERMS_TTL_MS + 864e5 : 60 * 6e4;
 var ADDRESS3 = /^0x[0-9a-f]{40}$/;
 function verifyCopyRequest(r, o) {
   const now = o.now ?? Date.now();
@@ -10196,7 +10198,7 @@ function verifyCopyRequest(r, o) {
   if (deadline < now) return { ok: false, error: "this request has expired; sign it again" };
   if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
   const skew = o.maxAgeMs ?? 15 * 6e4;
-  if (nonce - now > skew || action2 !== "accept-terms" && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
+  if (nonce - now > skew || !isStatement(action2) && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
   let payload;
   try {
     payload = JSON.parse(q.payload);
@@ -10215,7 +10217,7 @@ function verifyCopyRequest(r, o) {
   if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
   return { ok: true, digest, payload };
 }
-var EXECUTOR_FEATURES = ["counter"];
+var EXECUTOR_FEATURES = ["counter", "site-terms"];
 
 // packages/copy-engine/src/algo/types.ts
 var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket"];
@@ -13169,7 +13171,8 @@ var ExecutorService = class {
   accept(req, want, ctx) {
     const q = req;
     const termsWide = want === "accept-terms" && q?.action === "accept-terms" && q.executor === COPY_TERMS_EXECUTOR;
-    const v = verifyCopyRequest(req, { executor: termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
+    const siteTerms = want === "accept-site-terms";
+    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
     if (!v.ok) throw new ApiError(401, "signature", v.error);
     const r = req;
     const wanted = Array.isArray(want) ? want : [want];
@@ -13232,6 +13235,28 @@ var ExecutorService = class {
     this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
     if (!policy.allowed) throw new ApiError(451, "region", policy.reason ?? "Copy trading is not available in your region.");
     return this.me(owner, ctx);
+  }
+  /**
+   * ValueDesk's own Terms of use and Risk disclosure, signed by a wallet before
+   * it trades through ValueDesk (apps/web/src/legal/acceptance.ts). Recorded
+   * only: the consent log keeps the signed request with the country the edge
+   * saw, like every instruction. The version is the site's - its terms change
+   * without a release of this executor - so its form is checked, not its value;
+   * so are the fingerprint, the country and the statements. Hosted only: it is
+   * ValueDesk's record, not a follower's own executor's.
+   */
+  acceptSiteTerms(req, ctx) {
+    if (this.cfg.kind !== "hosted") throw new ApiError(404, "path", "ValueDesk's terms are recorded by ValueDesk's own executor.");
+    const { payload } = this.accept(req, "accept-site-terms", ctx);
+    const p = payload;
+    if (typeof p.termsVersion !== "string" || !/^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(p.termsVersion)) throw new ApiError(400, "terms-version", "termsVersion must be the version of the terms shown.");
+    if (typeof p.termsHash !== "string" || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, "terms-hash", "termsHash must be the keccak256 of the terms text.");
+    const country = normaliseCountry(p.country);
+    if (!country) throw new ApiError(400, "country", "Choose your country of residence.");
+    for (const k of ["adult", "notRestricted", "risksUnderstood", "ownDecisions"]) {
+      if (p[k] !== true) throw new ApiError(400, "statements", "Every statement must be confirmed to trade through ValueDesk.");
+    }
+    return { recorded: true, termsVersion: p.termsVersion, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
   }
   me(owner, ctx) {
     const terms = this.db.terms(owner);
@@ -13656,6 +13681,7 @@ function createExecutorServer(svc, cfg, log) {
       const body = await readJson(req);
       if (route === "/session") return send(res, 200, svc.session(body.request, ctx));
       if (route === "/terms") return send(res, 200, svc.acceptTerms(body.request, ctx));
+      if (route === "/site-terms") return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === "/keys") return send(res, 200, svc.createKey(body.request, ctx));
       if (route === "/keys/verify") return send(res, 200, { key: await svc.verifyKey(svc.authenticate(bearer(req))) });
       if (route === "/keys/delete") return send(res, 200, await svc.deleteKey(body.request, ctx));

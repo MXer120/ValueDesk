@@ -42,6 +42,7 @@ import { api } from '../api';
 import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
 import { tradingConfig } from './config';
 import { guardAction, mustRecreate } from './feeGuard';
+import { guardLegal } from './legalGate';
 import { readGateway, sendSigned } from './gateway';
 import {
   cancelManyActions,
@@ -148,12 +149,14 @@ function noteBuilderRejection(e: unknown): void {
 
 /**
  * Sign one exchange action with the trading key and send it. EVERY signed
- * action of the app goes through here, so the fee guard stands here: an action
- * that would create or change an order outside the builder rules is refused
- * before anything is signed (feeGuard.ts).
+ * action of the app goes through here, so the guards stand here: an action
+ * that would open a position where the terms do not allow it (legalGate.ts),
+ * or create or change an order outside the builder rules (feeGuard.ts), is
+ * refused before anything is signed.
  */
 async function signAndSend<T = unknown>(action: SignableAction, what: string): Promise<T> {
   const s = requireSigner(undefined, action.engine);
+  guardLegal(action, s.meta.owner);
   guardAction(action, s.meta.owner);
   const cfg = tradingConfig();
   const req = await signAndBuildWithNonceManager(action, s.key, { chainId: cfg.chainId, nonces: nonces(), base: '' });

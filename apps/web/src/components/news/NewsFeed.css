@@ -78,6 +78,8 @@
   border-radius: 14px; background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer;
 }
 .nw__more:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+/* Third-party content, as received: one muted line at the foot of the list (legal/notices.ts). */
+.nw__legal { padding: 10px 2px 2px; }
 
 /* The coin filter's list (CoinSelect.tsx): the platform list's rows, a search on
    top and a scroll of its own. */

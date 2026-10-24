@@ -24,6 +24,7 @@ import {
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
   EXECUTOR_FEATURES,
+  SITE_TERMS_EXECUTOR,
   CopyRuntime,
   FINAL_STATUSES,
   KeyAlgoSink,
@@ -40,6 +41,7 @@ import {
   randomId,
   regionPolicy,
   verifyCopyRequest,
+  type AcceptSiteTermsPayload,
   type AcceptTermsPayload,
   type ActivityEntry,
   type AlgoEvent,
@@ -57,6 +59,7 @@ import {
   type OrderSink,
   type SessionGrant,
   type SignedCopyRequest,
+  type SiteTermsRecord,
   type Subscription,
   type WebSocketFactory,
 } from '../../../packages/copy-engine/src/index.ts';
@@ -208,7 +211,9 @@ export class ExecutorService {
   private accept(req: unknown, want: CopyAction | readonly CopyAction[], ctx: RequestContext): { owner: string; payload: Record<string, unknown>; consent: Subscription['consent'] } {
     const q = req as Partial<SignedCopyRequest> | null;
     const termsWide = want === 'accept-terms' && q?.action === 'accept-terms' && q.executor === COPY_TERMS_EXECUTOR;
-    const v = verifyCopyRequest(req, { executor: termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
+    // ValueDesk's own terms always name SITE_TERMS_EXECUTOR: one statement, whoever records it.
+    const siteTerms = want === 'accept-site-terms';
+    const v = verifyCopyRequest(req, { executor: siteTerms ? SITE_TERMS_EXECUTOR : termsWide ? COPY_TERMS_EXECUTOR : this.executorId });
     if (!v.ok) throw new ApiError(401, 'signature', v.error);
     const r = req as SignedCopyRequest;
     const wanted = Array.isArray(want) ? want : [want];
@@ -274,6 +279,29 @@ export class ExecutorService {
     this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
     if (!policy.allowed) throw new ApiError(451, 'region', policy.reason ?? 'Copy trading is not available in your region.');
     return this.me(owner, ctx);
+  }
+
+  /**
+   * ValueDesk's own Terms of use and Risk disclosure, signed by a wallet before
+   * it trades through ValueDesk (apps/web/src/legal/acceptance.ts). Recorded
+   * only: the consent log keeps the signed request with the country the edge
+   * saw, like every instruction. The version is the site's - its terms change
+   * without a release of this executor - so its form is checked, not its value;
+   * so are the fingerprint, the country and the statements. Hosted only: it is
+   * ValueDesk's record, not a follower's own executor's.
+   */
+  acceptSiteTerms(req: unknown, ctx: RequestContext): SiteTermsRecord {
+    if (this.cfg.kind !== 'hosted') throw new ApiError(404, 'path', 'ValueDesk\'s terms are recorded by ValueDesk\'s own executor.');
+    const { payload } = this.accept(req, 'accept-site-terms', ctx);
+    const p = payload as Partial<AcceptSiteTermsPayload>;
+    if (typeof p.termsVersion !== 'string' || !/^\d{4}-\d{2}-\d{2}(\.\d+)?$/.test(p.termsVersion)) throw new ApiError(400, 'terms-version', 'termsVersion must be the version of the terms shown.');
+    if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
+    const country = normaliseCountry(p.country);
+    if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
+    for (const k of ['adult', 'notRestricted', 'risksUnderstood', 'ownDecisions'] as const) {
+      if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to trade through ValueDesk.');
+    }
+    return { recorded: true, termsVersion: p.termsVersion, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
   }
 
   me(owner: string, ctx: RequestContext): MeResponse {

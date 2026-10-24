@@ -16,7 +16,20 @@ deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuedesk-deploy           
 deploy/release/publish-vercel.sh <tag> --out=/c/Temp/valuedesk-deploy --deploy   # ... and deploy to production
 ```
 
-**The routes** (`config.json`, in order): `/api/*` to the function and nothing
+**Sanctioned places first.** A request whose `x-vercel-ip-country` is a sanctioned
+country, or whose `x-vercel-ip-country-region` is a sanctioned region of one
+(`apps/web/src/legal/jurisdictions.mjs`: Cuba, Iran, North Korea, Syria, Russia,
+Belarus, Myanmar; Crimea, Sevastopol, Donetsk, Luhansk), is answered **451** with
+`/restricted.html` (or `/restricted.json` under `/api/`), `Cache-Control: no-store`,
+before any other route - except the legal pages (`/impressum`, `/privacy`,
+`/cookies`, `/terms`, `/risk`, `/copy-terms`), the files they load (`/assets/*`,
+the favicon, `robots.txt`) and `/api/edge/geo`. The function refuses the same
+places itself (`VALUESCAN_GEO_BLOCK`, written into its config from the same list),
+and answers `GET /api/edge/geo` - `{"country","region"}` as Vercel reports them,
+no-store, never forwarded - so the app can apply the same rules (`legal/geo.ts`).
+The test drives every sanctioned country and region through the routes.
+
+**The routes** (`config.json`, in order): the 451 routes above; `/api/*` to the function and nothing
 else; the headers of every other path from `deploy/smoke/prod-headers.mjs` - the
 table `edge.yaml` is validated against - one route per path class, so a header is
 never set twice; `/scan/` to the legacy redirect page; the files; any path whose

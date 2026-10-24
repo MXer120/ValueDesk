@@ -84,7 +84,25 @@ export const IMPRESSUM: LegalDoc = {
     {
       title: 'Hinweis',
       blocks: [
-        { p: 'ValueDesk ist ein Analysewerkzeug für öffentliche Handelsdaten und eine Oberfläche, über die Nutzer selbst und in eigenem Namen auf SoDEX handeln. ValueDesk verwahrt keine Kundengelder und keine privaten Schlüssel und erbringt keine Anlageberatung. Einzelheiten: [Nutzungsbedingungen](/terms) und [Datenschutzerklärung](/privacy).' },
+        { p: 'ValueDesk ist ein Analysewerkzeug für öffentliche Handelsdaten und eine Oberfläche, über die Nutzer selbst und in eigenem Namen auf SoDEX handeln. ValueDesk verwahrt keine Kundengelder und keine privaten Schlüssel und erbringt keine Anlageberatung. Der Handel mit Kryptowerten und Perpetual Futures ist mit hohen Risiken bis zum Totalverlust verbunden. Einzelheiten: [Nutzungsbedingungen](/terms), [Risikohinweise](/risk) und [Datenschutzerklärung](/privacy).' },
+      ],
+    },
+    {
+      title: 'Haftung für Inhalte',
+      blocks: [
+        { p: 'Wir erstellen die Inhalte dieser Seite mit Sorgfalt. Marktdaten, Ranglisten, Statistiken und Auswertungen berechnen wir aus öffentlichen Daten Dritter (SoDEX, Hyperliquid, Lighter, Arcus); für ihre Richtigkeit, Vollständigkeit und Aktualität übernehmen wir keine Gewähr, und sie sind keine Anlageempfehlung. Nachrichten (von SoSoValue) und Live-Streams sind Inhalte Dritter, die wir nicht prüfen und uns nicht zu eigen machen. Erfahren wir von einem rechtswidrigen Inhalt, entfernen wir ihn oder sperren den Zugang dazu, soweit er in unserem Einflussbereich liegt. Hinweise bitte an die oben genannte E-Mail-Adresse.' },
+      ],
+    },
+    {
+      title: 'Haftung für Links',
+      blocks: [
+        { p: 'Diese Seite enthält Links zu Websites Dritter, auf deren Inhalte wir keinen Einfluss haben. Für diese Inhalte ist der jeweilige Anbieter verantwortlich. Bei der Verlinkung waren uns keine Rechtsverstöße erkennbar; werden uns solche bekannt, entfernen wir den Link.' },
+      ],
+    },
+    {
+      title: 'Urheberrecht und Marken',
+      blocks: [
+        { p: 'Texte, Gestaltung, Software und Datenzusammenstellungen dieser Seite sind urheberrechtlich geschützt, soweit sie nicht unter einer offenen Lizenz veröffentlicht sind (etwa der ValueDesk-Copier unter der MIT-Lizenz). Namen, Marken und Logos von Börsen, Kryptowerten und anderen Dritten gehören ihren Inhabern; sie dienen nur der Kennzeichnung und bedeuten keine Partnerschaft oder Empfehlung.' },
       ],
     },
   ],

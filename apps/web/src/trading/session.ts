@@ -143,7 +143,9 @@ export class TradingError extends Error {
       /** An order was changed as cancel + new order, and the new order was not accepted. */
       | 'recreate-failed'
       /** The user closed the builder-fee dialog: nothing was signed, nothing changed. */
-      | 'cancelled',
+      | 'cancelled'
+      /** The legal gate refused to sign an action (legalGate.ts): restricted place, or the terms not signed. */
+      | 'legal',
   ) {
     super(message);
   }

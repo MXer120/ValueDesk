@@ -18,6 +18,13 @@
  * ever holds a key that can trade. A wallet with no SoDEX account yet gets the
  * Deposit sheet (funds/DepositModal.tsx) instead - its first deposit opens the account.
  *
+ * THE TERMS COME FIRST (legal/acceptance.ts, trading/legalGate.ts): a wallet that
+ * has not signed the current Terms of use and Risk disclosure signs them - with
+ * its country of residence - before its key is registered; a wallet on a
+ * sanctions list, or a sanctioned place, gets nothing; a close-only place
+ * (the US) may enable trading to close positions. A refused opening order asks
+ * for the signature here too (SIGN_TERMS_EVENT).
+ *
  * WITH A BUILDER FEE CONFIGURED (trading/config.ts; off by default) there is one
  * dialog in between, and only the first time: when SoDEX does not already list
  * the account's approval, BuilderConsent.tsx discloses the fee and asks, and a
@@ -47,6 +54,10 @@ import { WithdrawModal } from '../funds/WithdrawModal';
 import { TransferModal } from '../funds/TransferModal';
 import { openConnectDialog } from './connect';
 import { useWalletSnapshot } from './useWallet';
+import { recordPendingSiteTerms } from '../../legal/acceptance';
+import { useSiteTermsSheet } from '../../legal/LegalGate';
+import { SANCTIONED_WALLET_REASON, screenWallet } from '../../legal/screening';
+import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
 
 interface Props {
   address: string | null;
@@ -64,6 +75,9 @@ export function AccountController({ address, provider, session, onSession }: Pro
   /* The builder-fee disclosure (only ever opened by a build that configures a builder). */
   const builderConsent = useBuilderConsent();
   const askBuilderFee = builderConsent.ask;
+  /* The wallet signs ValueDesk's terms before it trades (legal/acceptance.ts). */
+  const siteTerms = useSiteTermsSheet();
+  const askSiteTerms = siteTerms.ask;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const wallet = useWalletSnapshot();
 
@@ -100,6 +114,21 @@ export function AccountController({ address, provider, session, onSession }: Pro
       void connect();
       return false;
     }
+    /* The legal gate first (trading/legalGate.ts): a wallet on a sanctions list or a
+       sanctioned place gets nothing; in an open place the wallet signs the current
+       terms before its key is registered. A close-only place may enable trading -
+       to close positions, cancel orders and withdraw - without them. */
+    if ((await screenWallet(addr)) === 'sanctioned') {
+      notify('error', SANCTIONED_WALLET_REASON);
+      return false;
+    }
+    const legalNow = legalStateFor(addr);
+    if (legalNow.access.level === 'blocked') {
+      notify('error', legalNow.access.reason ?? 'ValueDesk is not available here.');
+      return false;
+    }
+    if (legalNow.access.level === 'close-only') notify('warn', legalNow.access.reason ?? 'Only closing is possible from here.');
+    if (legalNow.access.level === 'open' && !legalNow.signed && !(await askSiteTerms({ owner: addr, provider: p }))) return false;
     setAccountPending('enable');
     try {
       const where = walletName || 'your wallet';
@@ -154,7 +183,29 @@ export function AccountController({ address, provider, session, onSession }: Pro
     } finally {
       setAccountPending(null);
     }
-  }, [connect, askBuilderFee]);
+  }, [connect, askBuilderFee, askSiteTerms]);
+
+  /* A new version of the terms (or a key from before they were signed): an opening
+     order was refused (legalGate.ts) and asks for the signature here. */
+  const signSiteTermsNow = useCallback(async () => {
+    const { address: addr, provider: p } = latest.current;
+    if (!addr || !p) {
+      void connect();
+      return;
+    }
+    if (await askSiteTerms({ owner: addr, provider: p })) notify('ok', 'Terms accepted. You can open positions again.');
+  }, [connect, askSiteTerms]);
+
+  /* On connect: send a signed acceptance ValueDesk has not recorded yet, and screen the wallet. */
+  useEffect(() => {
+    if (!address) return;
+    void recordPendingSiteTerms(address);
+    void screenWallet(address).then((s) => {
+      if (s !== 'sanctioned') return;
+      notify('error', SANCTIONED_WALLET_REASON);
+      window.dispatchEvent(new CustomEvent(WALLET_EVENTS.signOut));
+    });
+  }, [address]);
 
   const disableTrading = useCallback(async () => {
     if (getAccountPending()) return;
@@ -245,17 +296,19 @@ export function AccountController({ address, provider, session, onSession }: Pro
       [WALLET_EVENTS.disableTrading, () => { void disableTrading(); }],
       [WALLET_EVENTS.advanced, () => setAdvancedOpen(true)],
       [WALLET_EVENTS.signOut, () => { void signOut(); }],
+      [SIGN_TERMS_EVENT, () => { void signSiteTermsNow(); }],
     ];
     for (const [name, fn] of on) window.addEventListener(name, fn);
     return () => {
       for (const [name, fn] of on) window.removeEventListener(name, fn);
     };
-  }, [connect, enableTrading, disableTrading, signOut]);
+  }, [connect, enableTrading, disableTrading, signOut, signSiteTermsNow]);
 
   return (
     <>
       {dialog}
       {builderConsent.dialog}
+      {siteTerms.dialog}
       {/* Renders nothing: after a fill it has the fee terms re-checked (only in a build whose fee has volume tiers). */}
       <BuilderTermsFollower address={address} />
       <AdvancedKeysModal

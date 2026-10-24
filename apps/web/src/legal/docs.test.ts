@@ -67,19 +67,33 @@ test('the check finds a placeholder wherever it is: title, intro, a section, the
   docs.privacy = { ...docs.privacy, intro: [{ p: '[[OWNER: y]]' }] };
   docs.impressum = { ...docs.impressum, updated: '[[OWNER: z]]' };
   docs['copy-terms'] = { ...docs['copy-terms'], sections: [{ title: '7. Risk disclosure', blocks: [{ ul: ['[[OWNER: w]]'] }] }] };
+  docs.risk = { ...docs.risk, sections: [{ title: '1. Leverage', blocks: [{ p: '[[OWNER: v]]' }] }] };
+  docs.cookies = { ...docs.cookies, updated: '[[OWNER: u]]' };
   assert.deepEqual(
     legalPlaceholders(docs).map((l) => `${l.page}:${l.where}`).sort(),
-    ['copy-terms:7. Risk disclosure', 'impressum:updated', 'privacy:intro', 'terms:title'],
+    ['cookies:updated', 'copy-terms:7. Risk disclosure', 'impressum:updated', 'privacy:intro', 'risk:1. Leverage', 'terms:title'],
   );
 });
 
 test('each document is filed under its own page, in its language', () => {
   for (const page of LEGAL_PAGES) assert.equal(LEGAL_DOCS[page].page, page);
   assert.equal(LEGAL_DOCS.impressum.lang, 'de');
-  assert.equal(LEGAL_DOCS.privacy.lang, 'en');
-  assert.equal(LEGAL_DOCS.terms.lang, 'en');
-  assert.equal(LEGAL_DOCS['copy-terms'].lang, 'en');
+  for (const page of ['privacy', 'cookies', 'terms', 'risk', 'copy-terms'] as const) assert.equal(LEGAL_DOCS[page].lang, 'en', page);
   assert.equal(LEGAL_DOCS['copy-terms'], COPY_TERMS);
+});
+
+test('the section numbers of each document run 1, 2, 3 ... and every "section N" it cites exists', () => {
+  for (const page of LEGAL_PAGES) {
+    const doc = LEGAL_DOCS[page];
+    const numbered = doc.sections.map((s) => /^(\d+)\./.exec(s.title)?.[1]).filter((n): n is string => !!n).map(Number);
+    if (!numbered.length) continue;
+    assert.deepEqual(numbered, numbered.map((_, i) => i + 1), `${page}: sections numbered in order`);
+    // A reference to this document's own section: "section N" not preceded by a link to another page.
+    const own = JSON.stringify([doc.intro ?? [], doc.sections]).replace(/\]\(\/[a-z-]+\)(,)? sections? \d+/g, '');
+    for (const m of own.matchAll(/sections? (\d+)(?: and (\d+))?/g)) {
+      for (const n of [m[1], m[2]].filter(Boolean).map(Number)) assert.ok(n >= 1 && n <= numbered.length, `${page} cites section ${n}, which it does not have`);
+    }
+  }
 });
 
 test('links in the texts go only to the legal pages, https or mailto', () => {

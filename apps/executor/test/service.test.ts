@@ -9,6 +9,7 @@ import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/s
 import {
   COPY_TERMS_EXECUTOR,
   COPY_TERMS_VERSION,
+  SITE_TERMS_EXECUTOR,
   buildCopyRequest,
   canonicalSettings,
   copyRequestDigest,
@@ -117,6 +118,35 @@ test('terms: every statement, a country, and a region that allows copying', asyn
   assert.equal(me.policy.maxLeverage, 2);
   assert.equal(me.terms?.country, 'DE');
   await cleanup();
+});
+
+const SITE_TERMS = { termsVersion: '2026-10-24', termsHash: `0x${'cd'.repeat(32)}`, country: 'SG', adult: true, notRestricted: true, risksUnderstood: true, ownDecisions: true };
+
+test('site terms: ValueDesk\'s executor records a signed acceptance with the country it saw; once; every statement; hosted only', async () => {
+  const { svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
+  const w = new Wallet();
+  const signedAt = Date.now() - 3 * 86_400_000;
+  const signed = w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', SITE_TERMS, signedAt);
+  const r = svc.acceptSiteTerms(signed, { viewerCountry: 'SG' });
+  assert.deepEqual({ ...r, acceptedAt: 0 }, { recorded: true, termsVersion: '2026-10-24', country: 'SG', observedCountry: 'SG', acceptedAt: 0 });
+  const log = db.consents(w.address);
+  assert.equal(log.length, 1);
+  assert.equal(log[0]!.action, 'accept-site-terms');
+  assert.equal(log[0]!.viewerCountry, 'SG');
+  assert.equal(log[0]!.signature, signed.signature, 'the signature itself is the record');
+  assert.equal(await code(() => svc.acceptSiteTerms(signed, { viewerCountry: 'SG' })), '409:replay');
+  // It must name ValueDesk's terms, not this executor, and be the right action.
+  assert.equal(await code(() => svc.acceptSiteTerms(w.sign(svc.executorId, 'accept-site-terms', SITE_TERMS), { viewerCountry: null })), '401:signature');
+  assert.equal(await code(() => svc.acceptSiteTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-terms', SITE_TERMS), { viewerCountry: null })), '400:action');
+  assert.equal(await code(() => svc.acceptTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', TERMS), { viewerCountry: null })), '401:signature');
+  for (const bad of [{ ownDecisions: false }, { notRestricted: undefined }, { country: 'Singapore' }, { termsHash: '0x12' }, { termsVersion: 'latest' }]) {
+    const res = await code(() => svc.acceptSiteTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', { ...SITE_TERMS, ...bad }), { viewerCountry: null }));
+    assert.match(res, /^400:/, JSON.stringify(bad));
+  }
+  await cleanup();
+  const self = make({ EXECUTOR_KIND: 'self' });
+  assert.equal(await code(() => self.svc.acceptSiteTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', SITE_TERMS), { viewerCountry: null })), '404:path');
+  await self.cleanup();
 });
 
 test('one terms signature is accepted by ValueDesk and by a self-hosted copier, a week later too', async () => {

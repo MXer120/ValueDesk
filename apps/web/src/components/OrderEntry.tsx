@@ -56,7 +56,8 @@ import { useMask } from '../privacy';
 import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
-import { useTradeGate } from './account/useTradeGate';
+import { useLegalTradeGate, useTradeGate } from './account/useTradeGate';
+import { LegalNote } from '../legal/LegalGate';
 import { useBuilderFee } from './account/useBuilderFee';
 import { FeeSchedule } from './FeeSchedule';
 import { useVenueFees } from './useVenueFees';
@@ -912,7 +913,12 @@ export function OrderEntry({
   const isAlgo = type === 'algo';
   /* A paper algo in this browser signs nothing: no wallet or trading key stands before its Start. */
   const paperAlgo = isAlgo && algoState.walletFree;
-  const btnGate = paperAlgo ? null : gate;
+  /* Where the legal gate would refuse this order (trading/legalGate.ts) - a restricted
+     place, or terms the wallet has not signed - the button says so; a reduce-only order
+     or a spot sell only closes, and stays possible. */
+  const opening = isAlgo || (engine === 'perps' ? !reduceOnly : side === 'buy');
+  const legalBtn = useLegalTradeGate(unlocked ? connectedAddress : null, opening);
+  const btnGate = paperAlgo ? null : gate ?? legalBtn;
   /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
   const sizedByAmount = !isAlgo || algoState.needsAmount;
   const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
@@ -2388,6 +2394,8 @@ export function OrderEntry({
             </dd>
           </div>
         </dl>
+        {/* 8. The one legal line: the risk, in the read-out's own muted type, and where it is set out. */}
+        <LegalNote id={isAlgo ? 'algo' : 'trade'} className="oe-legal" />
       </div>
 
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}

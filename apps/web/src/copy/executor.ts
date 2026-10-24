@@ -19,6 +19,7 @@ import {
   type MeResponse,
   type SessionGrant,
   type SignedCopyRequest,
+  type SiteTermsRecord,
 } from '@copy-engine';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
@@ -162,6 +163,8 @@ export class ExecutorClient {
   /* ----------------------------------------------------------- writes ----- */
 
   acceptTerms = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/terms', { body: { request } });
+  /** ValueDesk's own terms (legal/acceptance.ts): recorded by the hosted executor only. */
+  acceptSiteTerms = (request: SignedCopyRequest) => this.call<SiteTermsRecord>('POST', '/site-terms', { body: { request } });
   createKey = (request: SignedCopyRequest) => this.call<{ address: string; name: string; maxDays: number; days: number }>('POST', '/keys', { body: { request } });
   deleteKey = (request: SignedCopyRequest) => this.call<MeResponse>('POST', '/keys/delete', { body: { request } });
   subscribe = (request: SignedCopyRequest) => this.call<CopyView>('POST', '/copies', { body: { request } });

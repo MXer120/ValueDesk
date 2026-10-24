@@ -49,6 +49,15 @@
 //     never stood is retried, so a POST reaches the origin at most once.
 //   - Never logs the secret, a query string, a body or a header; an error line names
 //     the path and the reason only.
+//   - GET /api/edge/geo is answered HERE, never by the origin (so also in a preview, and
+//     while the instance is down): the viewer's country and region as Vercel's edge
+//     reports them - {"country":"DE","region":"BY"}, null where unknown - no-store. The
+//     web reads it to apply the regional rules site-wide (apps/web/src/legal/geo.ts);
+//     nothing is logged or stored.
+//   - A viewer from a sanctioned country or region (VALUESCAN_GEO_BLOCK, written by
+//     package.mjs from apps/web/src/legal/jurisdictions.mjs) gets 451 for every other
+//     /api path - the routes already answer 451 before this function; this is the
+//     second check.
 //
 // Configuration (deploy/vercel/package.mjs writes the first into the function's
 // .vc-config.json; the second is set with `vercel env add ... production --sensitive`):
@@ -80,6 +89,8 @@ const READ_TIMEOUT_MS = 30000;
 const EDGE_MAX_TTL_S = 60;
 /** The function's own path: never forwarded (it is only ever reached through the /api rewrite). */
 const SELF = '/api/__vs_proxy';
+/** Answered here: where the viewer is, as Vercel's edge sees it. */
+const GEO_PATH = '/api/edge/geo';
 
 const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
 
@@ -104,6 +115,35 @@ function viewerCountry(headers) {
   const c = headers['x-vercel-ip-country'];
   const v = String(Array.isArray(c) ? c[0] : c ?? '').trim().toUpperCase();
   return /^[A-Z]{2}$/.test(v) ? v : null;
+}
+
+/** The viewer's first-level region (x-vercel-ip-country-region: ISO 3166-2 without the country), or null. */
+function viewerRegion(headers) {
+  const c = headers['x-vercel-ip-country-region'];
+  const v = String(Array.isArray(c) ? c[0] : c ?? '').trim().toUpperCase();
+  return /^[A-Z0-9]{1,3}$/.test(v) ? v : null;
+}
+
+/** The blocked places from the environment ({countries, regions}), or none. A broken value blocks nothing and says so. */
+function geoBlockFrom(env) {
+  const raw = String(env.VALUESCAN_GEO_BLOCK ?? '').trim();
+  if (!raw) return { countries: [], regions: [] };
+  try {
+    const v = JSON.parse(raw);
+    const countries = Array.isArray(v.countries) ? v.countries.filter((c) => /^[A-Z]{2}$/.test(c)) : [];
+    const regions = Array.isArray(v.regions) ? v.regions.filter((r) => r && /^[A-Z]{2}$/.test(r.country) && /^[A-Z0-9]{1,3}$/.test(r.region)) : [];
+    return { countries, regions };
+  } catch {
+    console.error('api-proxy: VALUESCAN_GEO_BLOCK is not JSON; no place is refused here (the routes still refuse them)');
+    return { countries: [], regions: [] };
+  }
+}
+
+/** Whether the viewer is in a blocked place. */
+function geoBlocked(block, country, region) {
+  if (!country) return false;
+  if (block.countries.includes(country)) return true;
+  return !!region && block.regions.some((r) => r.country === country && r.region === region);
 }
 
 /**
@@ -215,6 +255,15 @@ async function handler(req, res) {
   if (!url.startsWith('/api/') || url.length > 4096 || url.includes('\\') || path === SELF || oddPath(path)) {
     return sendJson(res, 404, { error: 'not found', source: 'edge' });
   }
+  const country = viewerCountry(req.headers);
+  const region = viewerRegion(req.headers);
+  if (path === GEO_PATH) {
+    if (method !== 'GET' && method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed', source: 'edge' }, { allow: 'GET, HEAD' });
+    return sendJson(res, 200, { country, region });
+  }
+  if (geoBlocked(geoBlockFrom(process.env), country, region)) {
+    return sendJson(res, 451, { error: 'ValueDesk is not available in your country or region: the sanctions and legal restrictions that apply there do not allow us to offer it.', code: 'region', source: 'edge' });
+  }
   const copy = isCopyPath(path);
   const methods = copy ? COPY_METHODS : ALLOWED_METHODS;
   if (!methods.has(method)) {
@@ -246,10 +295,7 @@ async function handler(req, res) {
   }
   const viewer = viewerAddress(req.headers);
   if (viewer) headers['x-forwarded-for'] = viewer;
-  if (copy) {
-    const country = viewerCountry(req.headers);
-    if (country) headers['x-viewer-country'] = country;
-  }
+  if (copy && country) headers['x-viewer-country'] = country;
   if (body !== undefined) headers['content-length'] = String(body.length);
 
   let upstream;
@@ -298,6 +344,9 @@ module.exports.default = handler;
 // For the tests (deploy/vercel/vercel.test.mjs).
 module.exports.viewerAddress = viewerAddress;
 module.exports.viewerCountry = viewerCountry;
+module.exports.viewerRegion = viewerRegion;
+module.exports.geoBlockFrom = geoBlockFrom;
+module.exports.geoBlocked = geoBlocked;
 module.exports.edgeCacheControl = edgeCacheControl;
 module.exports.originFrom = originFrom;
 module.exports.oddPath = oddPath;

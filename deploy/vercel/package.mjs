@@ -16,6 +16,10 @@
 //                                VALUESCAN_ORIGIN_URL fixed here; the secret is a Vercel
 //                                environment variable (production only), never in here
 //   config.json                  the routes:
+//     0. a visitor from a sanctioned country or region (apps/web/src/legal/jurisdictions.mjs,
+//        by Vercel's x-vercel-ip-country / x-vercel-ip-country-region): 451 Unavailable For
+//        Legal Reasons for every path - /restricted.html, or /restricted.json under /api/ -
+//        except the legal pages, the files they need and /api/edge/geo (geoRoutes below)
 //     1. /api/*      -> the function (nothing else applies to it: the API and the copy executor
 //                       send their own headers)
 //     2. the headers of every other path - deploy/smoke/prod-headers.mjs, the same table
@@ -29,7 +33,8 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { headersFor } from '../smoke/prod-headers.mjs';
+import { CSP, HEADERS, headersFor } from '../smoke/prod-headers.mjs';
+import { LEGAL_PATHS, edgeBlockList } from '../../apps/web/src/legal/jurisdictions.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -66,9 +71,41 @@ export const HEADER_CLASSES = [
   [`^${NOT_HTML}/scan/${DOT_LAST}`, '/scan/x.js'],
 ];
 
+// --- the sanctioned places (jurisdictions.mjs) ----------------------------------------------------
+
+/** What a visitor from a blocked place still gets: the legal pages and what they load. */
+export const GEO_OPEN = `(?:assets/|restricted\\.(?:html|json)$|favicon\\.(?:svg|ico)$|robots\\.txt$|(?:${LEGAL_PATHS.join('|')})/?$)`;
+/** The answer's headers: the site's, never cached anywhere (the same path is the app elsewhere). */
+export const GEO_PAGE_HEADERS = { ...HEADERS, 'Content-Security-Policy': CSP.site, 'Cache-Control': 'no-store' };
+export const GEO_API_HEADERS = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+
+/**
+ * The 451 routes, first of all: each matches one class of path (an /api/ path or a
+ * site path) for one condition (a country, or a region of a country), and ends the
+ * routing with its own headers - no other route adds any to it.
+ */
+export function geoRoutes(block = edgeBlockList()) {
+  const conditions = [];
+  if (block.countries.length) conditions.push([{ type: 'header', key: 'x-vercel-ip-country', value: { inc: [...block.countries] } }]);
+  const byCountry = new Map();
+  for (const r of block.regions) byCountry.set(r.country, [...(byCountry.get(r.country) ?? []), r.region]);
+  for (const [country, regions] of byCountry) {
+    conditions.push([
+      { type: 'header', key: 'x-vercel-ip-country', value: { eq: country } },
+      { type: 'header', key: 'x-vercel-ip-country-region', value: { inc: regions } },
+    ]);
+  }
+  return conditions.flatMap((has) => [
+    { src: '^/api/(?!edge/geo$).*$', has, dest: '/restricted.json', status: 451, headers: GEO_API_HEADERS, caseSensitive: true },
+    { src: `^/(?!api/)(?!${GEO_OPEN}).*$`, has, dest: '/restricted.html', status: 451, headers: GEO_PAGE_HEADERS, caseSensitive: true },
+  ]);
+}
+
 /** The routes of config.json. */
 export function routes() {
   return [
+    // A sanctioned place: 451, whatever was asked for (apart from the legal pages).
+    ...geoRoutes(),
     // The index API: only the function, which forwards the API's own headers.
     { src: '^/api/.*$', dest: FUNCTION_PATH, caseSensitive: true },
     ...HEADER_CLASSES.map(([src, sample]) => ({ src, headers: headersFor(sample), continue: true, caseSensitive: true })),
@@ -98,7 +135,8 @@ export function functionConfig(originUrl) {
     supportsResponseStreaming: true,
     regions: [FUNCTION_REGION],
     maxDuration: 35,
-    environment: { VALUESCAN_ORIGIN_URL: originUrl },
+    // The function refuses the same places as the routes (a second check: api-proxy.cjs).
+    environment: { VALUESCAN_ORIGIN_URL: originUrl, VALUESCAN_GEO_BLOCK: JSON.stringify(edgeBlockList()) },
   };
 }
 

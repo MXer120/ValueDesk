@@ -45,6 +45,7 @@ import { builderNow } from './feeGuard';
 import { _resetTradingForTests, approveBuilderFee, enableTrading, getTradingState, restoreTrading, TradingError, type BuilderChoice } from './session';
 import { TERMS_PATH, _resetTermsForTests, configureTerms, feeNow, refreshTerms } from './terms';
 import { memoryVault, type KeyVault } from './vault';
+import { _signedTermsForTests } from '../legal/acceptance';
 
 // --- a wallet -----------------------------------------------------------------------
 
@@ -318,6 +319,8 @@ beforeEach(() => {
   _setBuilderPollDelaysForTests([0, 2, 2]);
   _resetTradingForTests(vault);
   resetReadBudget();
+  // The wallet has signed ValueDesk's terms (legalGate.ts): these tests are about the fee.
+  _signedTermsForTests(OWNER);
 });
 
 // --- what an order carries -----------------------------------------------------------------------

@@ -12,19 +12,34 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { headersFor, rewrite } from '../smoke/prod-headers.mjs';
-import { FUNCTION_PATH, HEADER_CLASSES, checkDist, config, functionConfig, packageSite, routes } from './package.mjs';
+import { LEGAL_PATHS, SANCTIONED_CODES, SANCTIONED_REGIONS, edgeBlockList } from '../../apps/web/src/legal/jurisdictions.mjs';
+import {
+  FUNCTION_PATH, GEO_API_HEADERS, GEO_PAGE_HEADERS, HEADER_CLASSES, checkDist, config, functionConfig, geoRoutes, packageSite, routes,
+} from './package.mjs';
 
 const require = createRequire(import.meta.url);
 const proxy = require('./api-proxy.cjs');
 
 // --- the routes ---------------------------------------------------------------------------
 
+/** A `has` value (Build Output API MatchableValue, as these routes use it: eq or inc). */
+function matches(value, want) {
+  if (value === undefined) return false;
+  if (want === undefined) return true;
+  if (typeof want === 'string') return new RegExp(want).test(value);
+  if (want.eq !== undefined) return value === String(want.eq);
+  if (want.inc) return want.inc.includes(value);
+  throw new Error(`a has value this simulation does not know: ${JSON.stringify(want)}`);
+}
+
 /**
  * Vercel's routing for these routes, as far as they use it: in order, a match with
  * `continue` adds its headers and goes on, a match without it ends the phase with its
- * `dest`; then the filesystem; then the routes after `handle: filesystem`.
+ * `dest` (and its `status`); then the filesystem; then the routes after `handle:
+ * filesystem`. A route with `has` matches only when every condition holds for the
+ * request's headers (lower-case names, as Vercel's edge sets them).
  */
-function route(path, staticFiles) {
+function route(path, staticFiles, requestHeaders = {}) {
   const headers = {};
   const matchedHeaderRoutes = [];
   let phase = 'start';
@@ -44,6 +59,7 @@ function route(path, staticFiles) {
     }
     const re = new RegExp(r.src, r.caseSensitive ? '' : 'i');
     if (!re.test(path)) continue;
+    if (r.has && !r.has.every((h) => h.type === 'header' && matches(requestHeaders[h.key], h.value))) continue;
     if (r.continue) {
       if (phase !== 'start') continue;
       Object.assign(headers, r.headers);
@@ -51,11 +67,13 @@ function route(path, staticFiles) {
       continue;
     }
     dest = r.dest;
+    if (r.headers) Object.assign(headers, r.headers);
+    const status = r.status;
     if (phase === 'start') {
       if (dest === FUNCTION_PATH) return { headers, matchedHeaderRoutes, fn: true };
-      return { headers, matchedHeaderRoutes, served: dest };
+      return { headers, matchedHeaderRoutes, served: dest, status };
     }
-    return { headers, matchedHeaderRoutes, served: dest };
+    return { headers, matchedHeaderRoutes, served: dest, status };
   }
   return { headers, matchedHeaderRoutes, served: dest, notFound: !dest };
 }
@@ -97,6 +115,78 @@ test('app routes get the shell, /scan/ the legacy page, files themselves, a miss
     else if (want !== path) assert.equal(r.served, want, `${path} -> ${want}`);
     else assert.ok(r.notFound, `${path}: a missing file must not be answered with the shell (got ${r.served})`);
   }
+});
+
+// --- the sanctioned places (apps/web/src/legal/jurisdictions.mjs) --------------------------------
+
+const FROM = (country, region) => ({ 'x-vercel-ip-country': country, ...(region ? { 'x-vercel-ip-country-region': region } : {}) });
+const LEGAL = LEGAL_PATHS.map((p) => `/${p}`);
+const GEO_STATIC = new Set([...STATIC, '/restricted.html', '/restricted.json']);
+
+test('a visitor from a sanctioned country gets 451 for every page and API path, never cached', () => {
+  for (const code of SANCTIONED_CODES) {
+    for (const path of PATHS.filter((p) => !LEGAL.includes(p) && !p.startsWith('/assets/') && !/^\/favicon\.|^\/robots\.txt$/.test(p))) {
+      const r = route(path, GEO_STATIC, FROM(code));
+      assert.equal(r.status, 451, `${code} ${path}`);
+      assert.equal(r.served, '/restricted.html', `${code} ${path}`);
+      assert.deepEqual(r.headers, GEO_PAGE_HEADERS, `${code} ${path}: the site's security headers, no-store, from the geo route alone`);
+      assert.equal(r.headers['Cache-Control'], 'no-store');
+    }
+    for (const path of ['/api/vs/leaderboard', '/api/copy/v1/session', '/api/health', '/api/__vs_proxy']) {
+      const r = route(path, GEO_STATIC, FROM(code));
+      assert.equal(r.status, 451, `${code} ${path}`);
+      assert.equal(r.served, '/restricted.json', `${code} ${path}: the function is never reached`);
+      assert.deepEqual(r.headers, GEO_API_HEADERS);
+    }
+  }
+});
+
+test('from a sanctioned place, the legal pages, the files they load and the geo answer stay reachable', () => {
+  for (const path of [...LEGAL, '/assets/index-abc.js', '/assets/index-abc.css', '/favicon.svg', '/favicon.ico', '/robots.txt', '/restricted.html']) {
+    const r = route(path, GEO_STATIC, FROM('IR'));
+    assert.equal(r.status, undefined, path);
+    assert.deepEqual(r.headers, headersFor(path), `${path}: its normal headers`);
+  }
+  assert.equal(route('/impressum', GEO_STATIC, FROM('KP')).served, '/index.html', 'the legal pages are app routes: the shell');
+  assert.equal(route('/api/edge/geo', GEO_STATIC, FROM('CU')).fn, true, 'the function answers where the visitor is');
+  // Exact paths only: a page under a legal path, or a near-miss, is blocked.
+  for (const path of ['/impressum/x', '/termsx', '/Impressum', '/api/edge/geox', '/api/edge/geo/']) {
+    assert.equal(route(path, GEO_STATIC, FROM('RU')).status, 451, path);
+  }
+});
+
+test('the sanctioned regions of Ukraine are blocked by region; the rest of Ukraine is not', () => {
+  for (const { region } of SANCTIONED_REGIONS) {
+    assert.equal(route('/trade', GEO_STATIC, FROM('UA', region)).status, 451, `UA-${region}`);
+    assert.equal(route('/api/vs/leaderboard', GEO_STATIC, FROM('UA', region)).served, '/restricted.json', `UA-${region}`);
+  }
+  for (const [c, r] of [['UA', '30'], ['UA', '46'], ['UA', undefined], ['RO', '43'], ['DE', 'BY']]) {
+    const res = route('/trade', GEO_STATIC, FROM(c, r));
+    assert.equal(res.status, undefined, `${c}-${r}`);
+    assert.equal(res.served, '/index.html');
+  }
+});
+
+test('everyone else, and a request without a country, is served as before', () => {
+  for (const headers of [{}, FROM('DE'), FROM('US'), FROM('SG'), FROM('XX'), FROM('ir')]) {
+    for (const path of PATHS) {
+      const r = route(path, GEO_STATIC, headers);
+      assert.equal(r.status, undefined, `${JSON.stringify(headers)} ${path}`);
+      if (!r.fn) assert.deepEqual(r.headers, headersFor(path), path);
+    }
+  }
+});
+
+test('the geo routes come first and carry the lists of jurisdictions.mjs', () => {
+  const all = routes();
+  const geo = geoRoutes();
+  assert.deepEqual(all.slice(0, geo.length), geo);
+  assert.equal(geo.length, 4, 'pages and API, for the countries and for the regions of one country');
+  const block = edgeBlockList();
+  assert.deepEqual(geo[0].has[0].value.inc, block.countries);
+  assert.ok(geo.every((r) => r.status === 451 && r.caseSensitive && !r.continue));
+  assert.deepEqual(geoRoutes({ countries: [], regions: [] }), [], 'empty lists: no route');
+  assert.equal(JSON.parse(functionConfig('https://1-2-3-4.sslip.io').environment.VALUESCAN_GEO_BLOCK).countries.length, SANCTIONED_CODES.length);
 });
 
 test('the header classes are what their sample paths say', () => {
@@ -178,7 +268,7 @@ function listen(handler) {
 
 /** The function behind a local server, with the environment it runs with on Vercel. */
 async function withProxy(env, fn) {
-  const saved = { url: process.env.VALUESCAN_ORIGIN_URL, secret: process.env.VALUESCAN_ORIGIN_SECRET };
+  const saved = { url: process.env.VALUESCAN_ORIGIN_URL, secret: process.env.VALUESCAN_ORIGIN_SECRET, geo: process.env.VALUESCAN_GEO_BLOCK };
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) delete process.env[k];
     else process.env[k] = v;
@@ -192,7 +282,7 @@ async function withProxy(env, fn) {
   } finally {
     console.error = realError;
     await front.close();
-    for (const [k, v] of [['VALUESCAN_ORIGIN_URL', saved.url], ['VALUESCAN_ORIGIN_SECRET', saved.secret]]) {
+    for (const [k, v] of [['VALUESCAN_ORIGIN_URL', saved.url], ['VALUESCAN_ORIGIN_SECRET', saved.secret], ['VALUESCAN_GEO_BLOCK', saved.geo]]) {
       if (v === undefined) delete process.env[k];
       else process.env[k] = v;
     }
@@ -370,6 +460,71 @@ test('the edge cache follows the API: public max-age only, at most 60 s, never a
   assert.equal(e('GET', 200, undefined), null);
   assert.equal(e('GET', 200, 'public, max-age=10', '/api/vs/leaderboard'), 'max-age=10');
   assert.equal(e('GET', 200, 'public, max-age=10', '/api/copy/v1/info'), null, 'the copy executor is never cached at the edge');
+});
+
+test('/api/edge/geo is answered by the function itself: the country and region Vercel saw, never cached, also without an origin', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => { seen.push(req.url); res.end('{}'); });
+  try {
+    for (const env of [
+      { VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET },
+      { VALUESCAN_ORIGIN_URL: undefined, VALUESCAN_ORIGIN_SECRET: undefined },
+    ]) {
+      await withProxy(env, async (port) => {
+        let r = await request(port, '/api/edge/geo', { headers: { 'x-vercel-ip-country': 'de', 'x-vercel-ip-country-region': 'BY' } });
+        assert.equal(r.status, 200);
+        assert.deepEqual(JSON.parse(r.body.toString()), { country: 'DE', region: 'BY' });
+        assert.equal(r.headers['cache-control'], 'no-store');
+        r = await request(port, '/api/edge/geo?x=1');
+        assert.deepEqual(JSON.parse(r.body.toString()), { country: null, region: null }, 'unknown: nulls, not a guess');
+        r = await request(port, '/api/edge/geo', { headers: { 'x-vercel-ip-country': 'Germany', 'x-vercel-ip-country-region': 'not a region' } });
+        assert.deepEqual(JSON.parse(r.body.toString()), { country: null, region: null });
+        r = await request(port, '/api/edge/geo', { method: 'POST', body: '{}' });
+        assert.equal(r.status, 405);
+      });
+    }
+    assert.deepEqual(seen, [], 'the origin never sees these requests');
+  } finally {
+    await origin.close();
+  }
+});
+
+test('the function refuses a sanctioned country or region itself (451), the second check behind the routes', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => { seen.push(req.url); res.end('{}'); });
+  try {
+    const env = { VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET, VALUESCAN_GEO_BLOCK: functionConfig('https://x.example').environment.VALUESCAN_GEO_BLOCK };
+    await withProxy(env, async (port) => {
+      for (const h of [FROM('IR'), FROM('KP'), FROM('UA', '43'), FROM('UA', '09')]) {
+        for (const [path, method] of [['/api/vs/leaderboard', 'GET'], ['/api/copy/v1/session', 'POST']]) {
+          const r = await request(port, path, { method, headers: h, body: method === 'POST' ? '{}' : undefined });
+          assert.equal(r.status, 451, `${JSON.stringify(h)} ${method} ${path}`);
+          assert.equal(JSON.parse(r.body.toString()).code, 'region');
+          assert.equal(r.headers['cache-control'], 'no-store');
+        }
+      }
+      // Where they are can still be read, and everyone else is forwarded.
+      assert.equal((await request(port, '/api/edge/geo', { headers: FROM('IR') })).status, 200);
+      assert.equal((await request(port, '/api/vs/leaderboard', { headers: FROM('UA', '30') })).status, 200);
+      assert.equal((await request(port, '/api/vs/leaderboard', { headers: FROM('US') })).status, 200, 'close-only is the app\'s rule, not the edge\'s');
+    });
+    assert.deepEqual(seen, ['/api/vs/leaderboard', '/api/vs/leaderboard']);
+    const logged = [];
+    const realError = console.error;
+    console.error = (...a) => logged.push(a.join(' '));
+    try {
+      assert.deepEqual(proxy.geoBlockFrom({ VALUESCAN_GEO_BLOCK: 'not json' }), { countries: [], regions: [] });
+    } finally {
+      console.error = realError;
+    }
+    assert.match(logged.join('\n'), /not JSON; no place is refused here/, 'a broken setting is said, not silent');
+    assert.deepEqual(proxy.geoBlockFrom({}), { countries: [], regions: [] });
+    assert.deepEqual(proxy.geoBlockFrom({ VALUESCAN_GEO_BLOCK: '{"countries":["IR","x"],"regions":[{"country":"UA","region":"43"},{"country":"U","region":"1"}]}' }),
+      { countries: ['IR'], regions: [{ country: 'UA', region: '43' }] });
+    assert.equal(proxy.geoBlocked({ countries: ['IR'], regions: [] }, null, null), false);
+  } finally {
+    await origin.close();
+  }
 });
 
 test('the viewer address is taken only from what Vercel sets, and must be an address', () => {
