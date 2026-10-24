@@ -8,6 +8,7 @@ import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { PREVIEW_HOLD_MS, type ThumbBlock } from './editPlace';
 import { Sketch } from './sketches';
+import { MENU_ICONS, TabMenu, menuAt } from './tabExtras';
 import { WIDGET_FACES, WIDGET_GROUPS, faceFor, type WidgetGroup } from './widgetCatalog';
 import './editMode.css';
 
@@ -180,6 +181,8 @@ export function EditMode({
 
   const side = quiet ? ' is-quiet' : '';
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  // A layout card's right-click menu: open it, or delete it (which still asks first).
+  const [slotMenu, setSlotMenu] = useState<{ at: { x: number; y: number }; id: string } | null>(null);
   const [rail, setRail] = useState<'widgets' | 'layouts'>('widgets');
   const faceOrder = new Map(WIDGET_FACES.map((face, index) => [face.id, index]));
   const widgetGroups = WIDGET_GROUPS
@@ -203,13 +206,9 @@ export function EditMode({
                 blocks={thumb.blocks}
                 active={thumb.active}
                 title={`Layout ${i + 1}`}
-                blurb="Right-click to delete."
+                blurb="Right-click for options."
                 onClick={() => onSwitch(thumb.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setConfirmId(thumb.id);
-                }}
+                onContextMenu={(e) => setSlotMenu({ at: menuAt(e), id: thumb.id })}
               />
               {confirmId === thumb.id && onDeleteSlot && (
                 <DeleteConfirm
@@ -224,6 +223,16 @@ export function EditMode({
           <Plus />
           <span>New layout</span>
         </button>
+        {slotMenu && (
+          <TabMenu
+            at={slotMenu.at}
+            onClose={() => setSlotMenu(null)}
+            items={[
+              { label: 'Open layout', icon: MENU_ICONS.open, onClick: () => onSwitch(slotMenu.id) },
+              { label: 'Delete layout…', icon: MENU_ICONS.remove, danger: true, disabled: !onDeleteSlot, onClick: () => setConfirmId(slotMenu.id) },
+            ]}
+          />
+        )}
       </aside>
       <div className="dash-edit-bar" role="toolbar" aria-label="Layout edit" onContextMenu={(e) => e.preventDefault()}>
         <button

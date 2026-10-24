@@ -820,19 +820,6 @@
    `min-width` is deliberately NOT restated - the shared 190px plate is wide
    enough for both columns and the two menus should be the same width. */
 .menu-popup.mkt-unitmenu { right: 0; left: auto; }
-/* Sentence case here too - styles.css uppercases `.menu-group-label`, and a
-   micro-caps heading inside a menu whose own options are sentence case is two
-   type systems inside 168px. (0,2,0) beats it. */
-.mkt-unitmenu .menu-group-label,
-.mkt-statmenu .menu-group-label {
-  text-transform: none;
-  letter-spacing: inherit;
-  font-size: var(--fs-label);
-  font-weight: 400;
-  line-height: var(--mkt-lh-micro);
-  color: var(--muted);
-}
-
 /* TWO COLUMNS, NOT TWO STACKED ROWS.
  *
  * Display unit and price grouping are INDEPENDENT settings - one names the
@@ -867,7 +854,7 @@
    of right-aligned figures over a left-aligned heading reads as a table with a
    missing column. */
 .mkt-unitmenu .menu-grid { grid-template-columns: 1fr; gap: 1px; }
-.mkt-unitmenu .menu-grid button { text-align: left; }
+.menu-popup.mkt-unitmenu .menu-grid button { text-align: left; }
 
 /* --- header stat configuration menu -------------------------------------- */
 
@@ -896,73 +883,18 @@
   top: auto;
   left: auto;
   right: auto;
-  max-height: calc(100vh - 16px);
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-
-/* A row, not a grid cell: a fixed mark slot then the label, so the labels line
-   up in one column whether their stat is on or off and nothing shifts sideways
-   as you tick through them. Ghost chrome, and hover changes COLOUR only - the
-   one interaction this app has. `button:where(...)` in styles.css is (0,0,1),
-   so a single class here already outranks it. */
-.mkt-statmenu-item {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  width: 100%;
-  padding: 3px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-xs);
-  background: none;
-  color: var(--muted);
-  font-size: var(--fs-data);
-  font-weight: 400;
-  line-height: var(--mkt-lh-xs);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-  transition: color var(--mkt-hover) var(--mkt-ease);
+  flex-direction: column;
+  width: 236px;
+  max-height: min(520px, calc(100vh - 16px));
+  padding: 5px;
+  overflow: hidden;
 }
-.mkt-statmenu-item:hover { color: var(--text); background: none; border-color: transparent; }
-/* A shown stat is --text and a hidden one is --muted, which is the same
-   colour-carries-rank distinction the watchlist star and every other toggle in
-   this app makes. The tick is the redundant second signal, and `aria-checked`
-   on the button is the one assistive tech reads, so nothing depends on hue. */
-.mkt-statmenu-item.is-on { color: var(--text); }
-/* NO FOCUS RULE HERE ON PURPOSE. styles.css draws one ring for the whole app -
-   `2px solid var(--focus)` on `:focus-visible`, never on bare `:focus` - and
-   these items carry a `tabindex` for the roving cursor, so `[tabindex]:focus-
-   visible` already reaches them at (0,2,0). A local override would have to beat
-   a tie against the sheet that is injected last, and it should not want to: the
-   ring is amber because --focus is amber everywhere, and the menu having its
-   own focus colour is one design language more than the app has. The tick and
-   the ring share a hue but not a shape or a position, and `aria-checked` is
-   what carries "shown" to anything that cannot see either. */
-.mkt-statmenu-item:focus-visible { color: var(--text); }
 
-/* The mark's slot. Always present, only sometimes inked - see the `Tick`
-   comment in Market.tsx for why an appearing-and-disappearing box is the one
-   thing a checkbox list must not do. Amber, because this is the app's single
-   "on" colour and the item's own label is already carrying the --muted/--text
-   step. */
-.mkt-statmenu-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 10px;
-  flex: none;
-  color: var(--accent);
-}
-.mkt-statmenu-tick { display: block; }
-
-/* Reset is not a stat, so it is fenced off by the same hairline styles.css uses
-   between menu groups rather than sitting as a fifteenth checkbox. */
-.mkt-statmenu-foot {
-  margin-top: var(--sp-2);
-  padding-top: var(--sp-2);
-  border-top: 1px solid var(--panel-line);
-}
+/* Its rows are the app's menu rows (styles.css .menu-row: a stat's label, then
+   its box), and the list scrolls in its own area so Reset, under its hairline,
+   is always in reach. */
+.mkt-statmenu-list { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; scrollbar-width: thin; }
 
 /* --- the table ----------------------------------------------------------- */
 

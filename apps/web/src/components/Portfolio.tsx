@@ -1116,17 +1116,24 @@ function SeriesMenu({ mode, onMode, airdrops, onAirdrops, airdropNote }: {
           )}
           <div className="menu-group">
             <div className="menu-group-label">Airdrops</div>
-            <div className="menu-grid">
-              <button
-                type="button"
-                className={airdrops ? 'active' : ''}
-                onClick={() => onAirdrops(!airdrops)}
-                title="Include claimed airdrops in the series"
-              >
-                {airdrops ? 'Included' : 'Excluded'}
-              </button>
-            </div>
-            <p className="pf-note">{airdropNote}</p>
+            <button
+              type="button"
+              role="menuitemcheckbox"
+              aria-checked={airdrops}
+              className={`menu-row${airdrops ? '' : ' is-off'}`}
+              onClick={() => onAirdrops(!airdrops)}
+              title="Include claimed airdrops in the series"
+            >
+              <span className="menu-row__label">Include airdrops</span>
+              <span className="menu-box" aria-hidden="true">
+                {airdrops && (
+                  <svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
+                    <path d="M1 4.3 3.7 7 9 1.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+            </button>
+            <p className="pf-note perf-settingsnote">{airdropNote}</p>
           </div>
         </div>
       )}

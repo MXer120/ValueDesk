@@ -57,6 +57,7 @@ import { bpsMinSpan, fmtBps } from './orderbook/bpsPrecision';
 import { useBpsDecimals } from './orderbook/useBpsDecimals';
 import './Market.css';
 import { CoinIcon } from './CoinIcon';
+import { MENU_ICONS } from '../dashboard/tabExtras';
 import { usePrivacy } from '../privacy';
 import { logger } from '../log';
 
@@ -253,13 +254,11 @@ const SpreadMark = () => (
  * own x-height and take `currentColor`, so the one hover rule this app has
  * still reaches them.
  *
- * The SLOT it sits in is always rendered (see `.mkt-statmenu-mark`), ticked or
- * not: a mark that only occupies space when checked shifts every label in the
- * menu sideways as you toggle, which is the one thing a list of checkboxes must
- * not do.
+ * It sits in the row's box (styles.css `.menu-box`), which is always drawn,
+ * ticked or not, at the row's end, so nothing shifts as you tick through them.
  */
 const Tick = () => (
-  <svg className="mkt-statmenu-tick" width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
+  <svg width="10" height="8" viewBox="0 0 10 8" aria-hidden="true" focusable="false">
     <path
       d="M1 4.3 3.7 7 9 1.2"
       fill="none"
@@ -1023,36 +1022,37 @@ function StatMenu({
       }}
     >
       <div className="menu-group-label">Header stats</div>
-      {available.map((s, i) => (
-        <button
-          key={s.id}
-          ref={(el) => { items.current[i] = el; }}
-          type="button"
-          role="menuitemcheckbox"
-          aria-checked={selected.has(s.id)}
-          tabIndex={i === idx ? 0 : -1}
-          className={`mkt-statmenu-item ${selected.has(s.id) ? 'is-on' : ''}`}
-          onFocus={() => setIdx(i)}
-          onClick={() => onToggle(s.id)}
-        >
-          <span className="mkt-statmenu-mark" aria-hidden="true">{selected.has(s.id) && <Tick />}</span>
-          <span>{statLabel(s.id, sym)}</span>
-        </button>
-      ))}
-      <div className="mkt-statmenu-foot">
-        <button
-          ref={(el) => { items.current[available.length] = el; }}
-          type="button"
-          role="menuitem"
-          tabIndex={idx === available.length ? 0 : -1}
-          className="mkt-statmenu-item mkt-statmenu-reset"
-          onFocus={() => setIdx(available.length)}
-          onClick={onReset}
-        >
-          <span className="mkt-statmenu-mark" aria-hidden="true" />
-          <span>Reset to defaults</span>
-        </button>
+      <div className="mkt-statmenu-list">
+        {available.map((s, i) => (
+          <button
+            key={s.id}
+            ref={(el) => { items.current[i] = el; }}
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={selected.has(s.id)}
+            tabIndex={i === idx ? 0 : -1}
+            className={`menu-row${selected.has(s.id) ? '' : ' is-off'}`}
+            onFocus={() => setIdx(i)}
+            onClick={() => onToggle(s.id)}
+          >
+            <span className="menu-row__label">{statLabel(s.id, sym)}</span>
+            <span className="menu-box" aria-hidden="true">{selected.has(s.id) && <Tick />}</span>
+          </button>
+        ))}
       </div>
+      <span className="menu-sep" role="separator" />
+      <button
+        ref={(el) => { items.current[available.length] = el; }}
+        type="button"
+        role="menuitem"
+        tabIndex={idx === available.length ? 0 : -1}
+        className="menu-row"
+        onFocus={() => setIdx(available.length)}
+        onClick={onReset}
+      >
+        <span className="menu-row__ic">{MENU_ICONS.reset}</span>
+        <span className="menu-row__label">Reset to defaults</span>
+      </button>
     </div>,
     document.body,
   );

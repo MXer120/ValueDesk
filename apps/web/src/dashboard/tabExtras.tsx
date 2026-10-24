@@ -104,6 +104,10 @@ export const MENU_ICONS = {
   newPane: menuIcon(<><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M2.5 9.5h11" /></>),
   mainChart: menuIcon(<path d="M5 2.5v11M11 4v9M3.5 5.5h3v5h-3zM9.5 6.5h3v4h-3z" />),
   intoPane: menuIcon(<><rect x="2.5" y="2.5" width="11" height="11" rx="1.5" /><path d="M2.5 8.5h11M8 4.5V11M6 9l2 2 2-2" /></>),
+  // The layout menu's and the header's: arrange the panels, back to the default, alerts.
+  edit: menuIcon(<><rect x="2.5" y="2.5" width="5" height="5" rx="1.2" /><rect x="2.5" y="9.5" width="5" height="4" rx="1.2" /><path d="M9.5 13.5h1.2l3-3-1.2-1.2-3 3zM12.5 8.3 13.7 9.5" /><rect x="9.5" y="2.5" width="4" height="4" rx="1.2" /></>),
+  reset: menuIcon(<><path d="M3 8a5 5 0 1 0 1.5-3.6" /><path d="M3 2.8v2.6h2.6" /></>),
+  bell: menuIcon(<><path d="M4.2 11V7.5a3.8 3.8 0 0 1 7.6 0V11l1.2 1.5H3L4.2 11Z" /><path d="M6.6 13.5a1.5 1.5 0 0 0 2.8 0" /></>),
 } as const;
 
 /** A right-click menu (a tab's: Add widget, Duplicate, Close tab), with icons; the destructive items last, in red. */
