@@ -11,10 +11,12 @@
  *                       visitor may look around first), and as a gate at every action
  *                       that needs the terms (acceptance.ts requireTerms). With a
  *                       connected wallet, confirmed AND signed in one step (one free
- *                       signature); the Live Feed's players offered beside it as a
+ *                       signature); the optional extras (the Live Feed's players,
+ *                       Reown's usage reports) offered beside it as a
  *                       choice of their own. Never over a legal page.
  *   <RegionPill>        NavBar: the red pill in a restricted (close-only) place.
  *   <EmbedSwitches>     the Cookies page: withdraw consent for a video platform.
+ *   <ReownSwitch>       the Cookies page: allow or withdraw Reown's usage reports.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
@@ -40,6 +42,7 @@ import {
   type TermsRequest,
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, allEmbedsAllowed, allowAllEmbeds, revokeEmbed, useEmbedConsent } from './embeds';
+import { allowReownReports, reownReportsAllowed, revokeReownReports, useReownReportsAllowedAt } from './reownConsent';
 import { useViewerAccess, useViewerGeo } from './geo';
 import { siteAccess } from './jurisdictions.mjs';
 import { screeningOf, useScreening } from './screening';
@@ -140,8 +143,8 @@ const shortAddress = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
 interface TermsFormProps {
   /** The connected wallet that signs - null: no wallet, the statements are only confirmed. */
   signer: { owner: string; provider: Eip1193Provider } | null;
-  /** Offer the Live Feed's players: "Only necessary" and "Accept all", side by side. */
-  offerPlayers: boolean;
+  /** Offer the optional extras (the Live Feed's players, Reown's usage reports): "Only necessary" and "Accept all", side by side. */
+  offerOptional: boolean;
   onOpen?: (p: LegalPage) => void;
   /** Accepted: 'signed' by the wallet, or only 'confirmed' in this browser. */
   onDone: (how: 'signed' | 'confirmed') => void;
@@ -153,16 +156,18 @@ interface TermsFormProps {
  * (geo.ts), shown with the wallet; it is asked only where the edge could not
  * tell, and can be changed (a traveller).
  *
- * THE PLAYERS, LAWFULLY. Consent to the Live Feed's YouTube / Twitch / Kick /
- * Vimeo players (§ 25(1) TDDDG, Art. 6(1)(a) GDPR) is offered in the same step
- * but stays a choice of its own: two equally sized buttons, "Only necessary" and
- * "Accept all", both accepting the terms, only the second allowing the players.
+ * THE OPTIONAL EXTRAS, LAWFULLY. Consent to the Live Feed's YouTube / Twitch /
+ * Kick / Vimeo players and to Reown's usage reports when a wallet connects
+ * (§ 25(1) TDDDG, Art. 6(1)(a) GDPR; embeds.ts, reownConsent.ts) is offered in the
+ * same step but stays a choice of its own: two equally sized buttons, "Only
+ * necessary" and "Accept all", both accepting the terms, only the second allowing
+ * the extras.
  * Nothing is pre-selected (CJEU C-673/17 Planet49), refusing is as easy as
  * accepting (DSK guidance on digital services), and the terms never depend on it
  * (Art. 7(4) GDPR). A visitor who chose "Only necessary" turns a platform on in
- * the Live Feed itself, and withdraws on the Cookies page.
+ * the Live Feed itself, Reown's reports on the Cookies page, and withdraws there.
  */
-function TermsForm({ signer, offerPlayers, onOpen, onDone }: TermsFormProps) {
+function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
   const geo = useViewerGeo();
   const [confirmed, setConfirmed] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
@@ -175,16 +180,19 @@ function TermsForm({ signer, offerPlayers, onOpen, onDone }: TermsFormProps) {
   const choosing = !!signer && (changing || !detected);
   const ready = confirmed && !busy && (!signer || (!!country && !problem));
 
-  const accept = async (players: boolean) => {
+  const accept = async (all: boolean) => {
     setError(null);
-    setBusy(players ? 'all' : 'necessary');
+    setBusy(all ? 'all' : 'necessary');
     try {
       if (signer) {
         await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
       } else {
         acceptBrowse(STATEMENTS.map((s) => s.id));
       }
-      if (players) allowAllEmbeds();
+      if (all) {
+        allowAllEmbeds();
+        allowReownReports();
+      }
       onDone(signer ? 'signed' : 'confirmed');
     } catch (e) {
       setError(isRejection(e) ? 'Nothing was signed. Approve the message in your wallet to continue.' : e instanceof Error ? e.message : String(e));
@@ -192,10 +200,10 @@ function TermsForm({ signer, offerPlayers, onOpen, onDone }: TermsFormProps) {
       setBusy(null);
     }
   };
-  const label = (players: boolean): string => {
-    if (busy === (players ? 'all' : 'necessary')) return 'Waiting for your wallet…';
-    if (!offerPlayers) return signer ? 'Sign and continue' : 'Agree and continue';
-    return players ? 'Accept all' : 'Only necessary';
+  const label = (all: boolean): string => {
+    if (busy === (all ? 'all' : 'necessary')) return 'Waiting for your wallet…';
+    if (!offerOptional) return signer ? 'Sign and continue' : 'Agree and continue';
+    return all ? 'Accept all' : 'Only necessary';
   };
 
   return (
@@ -244,17 +252,19 @@ function TermsForm({ signer, offerPlayers, onOpen, onDone }: TermsFormProps) {
         </div>
       )}
 
-      {offerPlayers && (
+      {offerOptional && (
         <div className="lg-card lg-card--players">
-          <span className="lg-card__title">Live video players <span className="lg-tag">optional</span></span>
-          <p className="lg-small">
-            YouTube, Twitch, Kick and Vimeo streams in the Live Feed. Allowing them sends your IP address to these platforms, which may set cookies, also for advertising and with transfers to the US. Change it any time under <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>.
-          </p>
+          <span className="lg-card__title">With "Accept all" <span className="lg-tag">optional</span></span>
+          <ul className="lg-small lg-optional">
+            <li><b>Live video players:</b> YouTube, Twitch, Kick and Vimeo streams in the Live Feed. They receive your IP address and may set cookies, also for advertising and with transfers to the US.</li>
+            <li><b>Usage reports to Reown</b> when you connect a wallet: your wallet address, the page&rsquo;s address and technical details, so Reown can count the use of its wallet connection (transfer to the US).</li>
+          </ul>
+          <p className="lg-small">Change it any time under <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>.</p>
         </div>
       )}
 
       {error && <p className="lg-err" role="alert">{error}</p>}
-      {offerPlayers ? (
+      {offerOptional ? (
         <div className="lg-pair">
           <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
           <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
@@ -375,7 +385,7 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
       <TermsForm
         key={signer ? `sign:${signer.owner}` : 'confirm'}
         signer={signer}
-        offerPlayers={!allEmbedsAllowed()}
+        offerOptional={!allEmbedsAllowed() || !reownReportsAllowed()}
         onOpen={onOpen}
         onDone={() => (pending ? finish(true) : setTick((n) => n + 1))}
       />
@@ -417,7 +427,26 @@ export function RegionPill({ address }: { address: string | null }) {
 }
 
 
-/* ----------------------------------------------- the video players' consent ----- */
+/* ------------------------------------------------- the Cookies page's switches ----- */
+
+/** The Cookies page's switch for Reown's usage reports (reownConsent.ts). */
+export function ReownSwitch() {
+  const at = useReownReportsAllowedAt();
+  return (
+    <ul className="lg-embeds">
+      <li>
+        <span>
+          <b>Reown usage reports</b>{' '}
+          {at !== null ? `allowed on ${new Date(at).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}` : 'not allowed - they are not sent'}
+        </span>
+        {at !== null
+          ? <button type="button" className="fx-link" onClick={revokeReownReports}>Withdraw consent</button>
+          : <button type="button" className="fx-link" onClick={() => allowReownReports()}>Allow</button>}
+      </li>
+    </ul>
+  );
+}
+
 
 /** The Cookies page's switches: which platforms' players may load, and withdrawing that. */
 export function EmbedSwitches() {

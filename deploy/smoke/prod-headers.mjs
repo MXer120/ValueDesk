@@ -24,6 +24,8 @@ const CONNECT_SRC = [
   'http://127.0.0.1:*', 'http://localhost:*',
   'https://mainnet.zklighter.elliot.ai', 'https://api.arcus.xyz',
   'wss://relay.walletconnect.org', 'https://api.web3modal.org',
+  // Reown's usage reports: sent only with the visitor's consent (legal/reownConsent.ts).
+  'https://pulse.walletconnect.org',
   'https://main-scan.valuechain.xyz',
   'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
   'https://ethereum-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org',

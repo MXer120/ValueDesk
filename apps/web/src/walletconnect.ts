@@ -45,7 +45,8 @@
  *  - no balance or identity lookups (CSP-blocked hosts, and an address leak);
  *  - WalletConnect sessions request only the methods this app calls;
  *  - "basic" mode, so the modal is connect-only whatever the Reown dashboard says;
- *  - AppKit's telemetry (event beacons and error reports) is dropped;
+ *  - AppKit's telemetry (event beacons and error reports) goes out only with the
+ *    visitor's consent (legal/reownConsent.ts), and is dropped otherwise;
  *  - its "Connect Wallet" list names MetaMask, OKX, SafePal and Bitget, shows
  *    the WalletConnect icon, and is redrawn once its wallets have loaded - the
  *    three things basic mode otherwise leaves out of the owner's reference;
@@ -66,6 +67,7 @@ import type { EthersAdapter } from '@reown/appkit-adapter-ethers';
    import statically on first paint. */
 import { PACKAGE_VERSION as APPKIT_VERSION } from '@reown/appkit/constants';
 import { api } from './api';
+import { reownReportsAllowed } from './legal/reownConsent';
 import { startLater } from './startLater';
 import { EVM_CHAINS } from './trading/onboard';
 import {
@@ -248,14 +250,17 @@ function themeVariables() {
  * ------------------------------------------------------------------------ */
 
 /**
- * OPT OUT OF APPKIT'S TELEMETRY, which has no configuration switch.
+ * APPKIT'S TELEMETRY ONLY WITH CONSENT, as it has no configuration switch.
  *
  * `features.analytics: false` does not stop it. AppKit's EventsController sends
  * when analytics is enabled OR when the event is one of a hardcoded
  * MANDATORY_EVENTS list - and `INITIALIZE` and `CONNECT_SUCCESS` are on that
  * list, so they fire regardless of configuration. The payload includes
  * `metadata.url`: it reports the origin this app is deployed at, and the address
- * that connected, to a third party.
+ * that connected, to a third party. Under § 25(1) TDDDG that needs the visitor's
+ * consent: "Accept all" in the terms popup, or the Cookies page
+ * (legal/reownConsent.ts). Without it, the requests are dropped here; with it they
+ * go out as AppKit sends them (still only the mandatory events: analytics stays off).
  *
  * There are two transports, both in AppKit's FetchUtil: `navigator.sendBeacon`
  * for the event batch, and a plain `fetch` POST for its error reports
@@ -263,9 +268,9 @@ function themeVariables() {
  * narrow guard on each is enough. It drops ONLY requests aimed at the telemetry
  * host and answers the way a delivered one would (`true` from the beacon, an
  * empty 200 JSON from fetch), so the SDK carries on believing it was sent.
+ * Consent is asked at every request, so a withdrawal takes effect at once.
  * Every other beacon and fetch on the page, from any other code, is untouched.
- * This is why `pulse.walletconnect.org` is absent from the CSP: the request is
- * never made, rather than made, refused, and logged as a CSP error.
+ * `pulse.walletconnect.org` is in the CSP for the consented case.
  */
 const TELEMETRY_HOSTS = ['pulse.walletconnect.org'];
 /* Carried across dev hot reloads (see HOT RELOAD below): a second copy of this
@@ -289,12 +294,12 @@ function blockVendorTelemetry(): void {
   if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
     const beacon = navigator.sendBeacon.bind(navigator);
     navigator.sendBeacon = (url: string | URL, data?: BodyInit | null): boolean =>
-      isTelemetryUrl(url) ? true : beacon(url, data);
+      isTelemetryUrl(url) && !reownReportsAllowed() ? true : beacon(url, data);
   }
   if (typeof window.fetch === 'function') {
     const fetchOriginal = window.fetch.bind(window);
     window.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> =>
-      isTelemetryUrl(input)
+      isTelemetryUrl(input) && !reownReportsAllowed()
         ? Promise.resolve(new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }))
         : fetchOriginal(input, init);
   }

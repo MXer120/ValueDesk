@@ -21,6 +21,8 @@ import type { LegalDoc } from './model';
 
 /** The section LegalView puts the player switches under. */
 export const EMBED_SECTION_TITLE = '3. Third-party players in the Live Feed';
+/** The section LegalView puts the Reown switch under (reownConsent.ts). */
+export const REOWN_SECTION_TITLE = '4. Usage reports to Reown when you connect a wallet';
 
 export const COOKIES: LegalDoc = {
   page: 'cookies',
@@ -28,16 +30,16 @@ export const COOKIES: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'In short: ValueDesk sets no cookies of its own and uses no analytics, advertising or tracking. It keeps what its functions need in your browser\'s own storage, on your device. Third-party video players load only after you allow them. Details on all personal data: [Privacy policy](/privacy).' },
+    { p: 'In short: ValueDesk sets no cookies of its own and uses no advertising or tracking of its own. It keeps what its functions need in your browser\'s own storage, on your device. Third-party video players, and the usage reports Reown\'s wallet software sends when you connect a wallet, only run after you allow them. Details on all personal data: [Privacy policy](/privacy).' },
   ],
   sections: [
     {
-      title: '1. No cookies, no tracking',
+      title: '1. No cookies of our own, no tracking',
       blocks: [
         {
           ul: [
             'ValueDesk itself sets no cookies - neither on this site nor through its servers.',
-            'There is no analytics, no advertising, no tracking pixel, no fingerprinting and no social media plugin, and no data is sold or shared for advertising.',
+            'There is no analytics of our own, no advertising, no tracking pixel, no fingerprinting and no social media plugin, and no data is sold or shared for advertising. The one third-party usage report - Reown\'s, when you connect a wallet - is sent only with your consent (section 4).',
             'ValueDesk\'s servers do not recognise you from one visit to the next: there are no accounts and no identifiers we hand out.',
           ],
         },
@@ -69,13 +71,20 @@ export const COOKIES: LegalDoc = {
       ],
     },
     {
-      title: '4. Other services your browser connects to',
+      title: '4. Usage reports to Reown when you connect a wallet',
       blocks: [
-        { p: 'Market data, your account and your orders come straight from SoDEX, Hyperliquid, Lighter, Arcus and public blockchain nodes; your wallet connects through its extension or Reown / WalletConnect. These connections set no cookies on this site, but each service receives your IP address. Which services, and why: [Privacy policy](/privacy), section 5.' },
+        { p: 'Wallets connect through Reown\'s software (Reown AppKit and WalletConnect, Reown, Inc., USA). It reports to Reown (pulse.walletconnect.org) that it has started and that a wallet has connected - with the wallet\'s address and network, the address of the page you are on, your IP address and technical details of your browser - and sends Reown error reports with the page address. Reown uses them to count and improve the use of its wallet connection, under its own [privacy policy](https://reown.com/privacy-policy); data goes to the United States on the basis of standard contractual clauses.' },
+        { p: 'These reports are sent only if you allow them - with "Accept all" in the terms window, or with the switch below - and are blocked in your browser otherwise; connecting a wallet works either way. Legal basis: your consent (§ 25(1) TDDDG, Art. 6(1)(a) GDPR), which you can withdraw at any time with effect for the future.' },
       ],
     },
     {
-      title: '5. Deleting it',
+      title: '5. Other services your browser connects to',
+      blocks: [
+        { p: 'Market data, your account and your orders come straight from SoDEX, Hyperliquid, Lighter, Arcus and public blockchain nodes; your wallet connects through its extension or Reown / WalletConnect. These connections set no cookies on this site, but each service receives your IP address. Which services, and why: [Privacy policy](/privacy), section 8.' },
+      ],
+    },
+    {
+      title: '6. Deleting it',
       blocks: [
         { p: 'You can delete everything ValueDesk keeps in your browser at any time by clearing this site\'s data in your browser\'s settings. Settings, lists and keys are then gone from this device; your funds are not affected, because they stay in your wallet and your SoDEX account. Signing out removes the trading key at once.' },
       ],

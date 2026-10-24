@@ -187,6 +187,8 @@
 }
 .lg-pair .lg-cta { margin-top: 0; }
 .lg-card--players { gap: 6px; }
+.lg-optional { display: grid; gap: 4px; margin: 0; padding-left: 16px; }
+.lg-optional b { color: var(--text); font-weight: 500; }
 .lg-card__title {
   display: flex;
   align-items: center;

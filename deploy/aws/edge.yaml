@@ -283,7 +283,7 @@ Resources:
               https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
               http://127.0.0.1:* http://localhost:*
               https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
-              wss://relay.walletconnect.org https://api.web3modal.org
+              wss://relay.walletconnect.org https://api.web3modal.org https://pulse.walletconnect.org
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
@@ -353,7 +353,7 @@ Resources:
               https://api.hyperliquid.xyz wss://api.hyperliquid.xyz
               http://127.0.0.1:* http://localhost:*
               https://mainnet.zklighter.elliot.ai https://api.arcus.xyz
-              wss://relay.walletconnect.org https://api.web3modal.org
+              wss://relay.walletconnect.org https://api.web3modal.org https://pulse.walletconnect.org
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
