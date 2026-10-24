@@ -2,7 +2,17 @@
    filters under it, then the stories - the clock and how long ago, type and
    author, the headline (a post's text in plain weight), two lines of the story,
    its coins. Hot numbers its stories, the top three in the flame's colour. */
-.nw { --nw-hot: #ff8a3d; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.nw { --nw-hot: #ff8a3d; position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+/* The source's credit: a small glass pill centred over the bottom of the feed, which
+   scrolls on under it (the list keeps room for it at its end). */
+.nw__credit {
+  position: absolute; left: 50%; bottom: 8px; z-index: 2; transform: translateX(-50%);
+  display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--bg-panel) 62%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.nw .nw__list { padding-bottom: 40px; }
 .nw__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 6px; }
 .nw__feeds { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
 .nw__feeds > button {

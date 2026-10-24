@@ -150,7 +150,7 @@ export function NavBar({
   return (
     <header ref={bar} className={`navbar${rail ? ' navbar--rail' : ''}`}>
       {/* The bar's ground over the page that scrolls behind it: blur bands under a tint (shell.css). */}
-      {rail && <div className="navbar__glass" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>}
+      <div className="navbar__glass" aria-hidden="true"><i /><i /><i /><i /><i /><i /></div>
       <div className="navbar-inner">
         {!rail && (
           <span className="brand">

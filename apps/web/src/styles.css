@@ -357,7 +357,8 @@ h3 { font-size: var(--fs-xs); line-height: 18px; margin: 0 0 var(--sp-1); font-w
  * separating, the same way it does between every panel below. A border here
  * plus a border on the strip under it was two lines within 40px of each other
  * doing one line's job. */
-.navbar { background: var(--bg-panel); }
+/* Transparent: its ground is the blur bands under a light veil (NavBar.tsx navbar__glass, shell.css). */
+.navbar { position: relative; z-index: 60; background: transparent; }
 /* FULL BLEED, like `.app` below it, and 24px of gutter at each end.
  *
  * This row used to clamp at --content-max and pad 16px, which on a 1920 screen
