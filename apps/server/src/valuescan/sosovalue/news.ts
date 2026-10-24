@@ -25,6 +25,13 @@
  * macro stream (Bloomberg's), CNBC's and the news, kept where a story is about
  * rates, inflation, jobs, growth, central banks, bonds, trade and the like.
  *
+ * The chart's history (`history`): a feed's first page shows hours (BTC's 50
+ * stories are ~14 h, the macro topic's a handful), so for the chart a feed is
+ * kept here - its older pages read once, every newer first page merged in as it
+ * is read - up to SoSoValue's 7 days. Each story on SoSoValue's hot list now
+ * gets its place there (`rank`); posts carry their views and likes. Articles
+ * come without either, so a story is hot only where SoSoValue ranks it.
+ *
  * The key is SOSOVALUE_API_KEY, read here and sent as `x-soso-api-key`. It is
  * never logged, never put on a URL, and never returned to the browser. When it
  * is absent the route answers `not_available` and the page says so.
@@ -33,7 +40,8 @@
  * a page of visitors must not spend that once each: every distinct query is
  * cached (5 minutes; search 10), one flight at a time, the currency list is read
  * once a day, and past 15 upstream calls in a minute a query is answered from
- * its last copy or refused as busy.
+ * its last copy or refused as busy. The history's older pages (once per feed)
+ * and the hot list (every 10 minutes) are read only from what is spare.
  */
 import { NotAvailable, type NewsItem } from '../types.js';
 import { coinIndex, coinsIn, stockName, type CoinIndex } from './coins.js';
@@ -63,6 +71,16 @@ const MACRO_SOURCES = [5, 6, 1] as const;
 /** Stories mapped from one upstream page before the filters here thin it. */
 const MAP_ALL = 100;
 
+/** The chart's history: pages 2.. of a feed read to fill it, the stories it may return, how far back it keeps. */
+const HISTORY_PAGES = 4;
+export const HISTORY_LIMIT = 300;
+const HISTORY_KEEP = 400;
+const HISTORY_SPAN_MS = 8 * 86_400_000;
+const MAX_ARCHIVED = 32;
+/** Calls a minute left for the pages people are reading: the history and the hot list never take them. */
+const RESERVE = 4;
+const HOT_MS = 10 * 60_000;
+
 export interface NewsQuery {
   feed: NewsFeed;
   /** One of NEWS_CATEGORIES, or every category. The feed and search only. */
@@ -77,6 +95,8 @@ export interface NewsQuery {
   topic: 'macro' | null;
   /** The latest feed's posts on X: the notable ones (the default), or all. */
   posts: 'notable' | 'all';
+  /** The chart's history: the feed as far back as it is kept (up to HISTORY_LIMIT stories), hot ones ranked. */
+  history: boolean;
 }
 
 export interface NewsPage {
@@ -101,15 +121,19 @@ export function parseNewsQuery(raw: Record<string, unknown>): NewsQuery {
   const coinRaw = typeof raw.coin === 'string' ? raw.coin : '';
   const coins = [...new Set(coinRaw.split(',').map((s) => s.trim().toUpperCase()).filter((s) => /^[A-Z0-9]{1,15}$/.test(s)))].slice(0, MAX_COINS);
   const qRaw = typeof raw.q === 'string' ? raw.q.replace(/\s+/g, ' ').trim().slice(0, 80) : '';
+  const q = qRaw.length >= 2 ? qRaw : null;
+  // The history is the latest feed's, from its first page.
+  const history = (raw.history === '1' || raw.history === 'true' || raw.history === true) && feed === 'latest' && !q;
   return {
     feed,
     category: (NEWS_CATEGORIES as readonly number[]).includes(cat) ? cat : null,
     coins,
-    q: qRaw.length >= 2 ? qRaw : null,
-    page: int(raw.page, 1, 1, 50),
-    limit: int(raw.limit, 12, 1, 50),
+    q,
+    page: history ? 1 : int(raw.page, 1, 1, 50),
+    limit: int(raw.limit, 12, 1, history ? HISTORY_LIMIT : 50),
     topic: raw.topic === 'macro' ? 'macro' : null,
     posts: raw.posts === 'all' ? 'all' : 'notable',
+    history,
   };
 }
 
@@ -258,6 +282,8 @@ export function mapNewsList(body: unknown, limit: number, opts: { index?: CoinIn
     // The body's first lines, when the title is not already all of it.
     const summary = !post && titleRaw && content && content !== titleRaw ? content.slice(0, 240) : null;
     const quiet = post && !notablePost(r);
+    const views = post ? num(r.impression_count) : 0;
+    const likes = post ? num(r.like_count) : 0;
     out.push({
       id: id || href,
       title,
@@ -271,6 +297,8 @@ export function mapNewsList(body: unknown, limit: number, opts: { index?: CoinIn
       ...(post ? { post: true } : {}),
       ...(quiet ? { notable: false } : {}),
       ...(opts.rankFrom ? { rank: opts.rankFrom + i } : {}),
+      ...(views > 0 ? { views } : {}),
+      ...(likes > 0 ? { likes } : {}),
     });
     if (out.length >= limit) break;
   }
@@ -284,6 +312,12 @@ const inflight = new Map<string, Promise<NewsPage>>();
 let calls: number[] = [];
 let currencies: { at: number; ids: Map<string, string>; index: CoinIndex } | null = null;
 let currenciesFailed = 0;
+/** The chart's history per feed (category, coins, posts): newest first; `filled` - its older pages read. */
+const archive = new Map<string, { items: NewsItem[]; filled: Set<number> }>();
+const filling = new Map<string, Promise<void>>();
+/** SoSoValue's hot list as places by headline, read at most every HOT_MS. */
+let hot: { at: number; ranks: Map<string, number> } | null = null;
+let hotFlight: Promise<void> | null = null;
 
 /** Tests only. */
 export function resetNewsCache(): void {
@@ -292,6 +326,10 @@ export function resetNewsCache(): void {
   calls = [];
   currencies = null;
   currenciesFailed = 0;
+  archive.clear();
+  filling.clear();
+  hot = null;
+  hotFlight = null;
 }
 
 function spend(): boolean {
@@ -300,6 +338,13 @@ function spend(): boolean {
   if (calls.length >= BUDGET_PER_MIN) return false;
   calls.push(now);
   return true;
+}
+
+/** Room this minute beyond the RESERVE kept for the pages people are reading. */
+function spare(): boolean {
+  const now = Date.now();
+  calls = calls.filter((t) => now - t < 60_000);
+  return calls.length < BUDGET_PER_MIN - RESERVE;
 }
 
 async function getJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
@@ -373,12 +418,97 @@ export function newsUrl(q: NewsQuery, currency: string | null): string {
 
 const byTime = (a: NewsItem, b: NewsItem) => b.time - a.time;
 
+/** One upstream page of a query through the filters here, not yet cut to its limit. */
+async function readPage(q: NewsQuery, fetchImpl: typeof fetch): Promise<{ items: NewsItem[]; total: number | null }> {
+  const list = await currencyList(fetchImpl);
+  const coin = q.coins[0];
+  const byCurrency = q.feed === 'latest' && !q.q && !!coin;
+  // A coin SoSoValue does not list has no news of its own: an empty page, not every coin's.
+  const currency = byCurrency && list ? list.ids.get(coin!) ?? null : null;
+  if (byCurrency && list && !currency) return { items: [], total: 0 };
+  const body = await getJson(newsUrl(q, currency), fetchImpl);
+  // Without the currency list the feed is filtered here, by the coins its stories name.
+  const here = filteredHere(q) || (byCurrency && !currency);
+  const rankFrom = q.feed === 'hot' && !q.q ? (q.page - 1) * pageSize(q) + 1 : undefined;
+  let items = mapNewsList(body, MAP_ALL, { index: list?.index, rankFrom });
+  if (here) items = items.filter((n) => n.symbols.some((s) => q.coins.includes(s)));
+  // A coin's feed: the stories that are about it, not every one that touches it.
+  if (byCurrency) items = items.filter((n) => namesCoin(n, coin!, list?.index));
+  if (thinsPosts(q)) items = items.filter((n) => n.notable !== false);
+  return { items, total: here ? null : pageOf(body).total };
+}
+
+const archiveKey = (q: NewsQuery) => JSON.stringify([q.category, q.coins, q.posts]);
+
+/**
+ * A page of the latest feed into its history. A first page that does not reach
+ * what is kept (nobody asked for a while) starts the history again: what lies
+ * between them was never read.
+ */
+function remember(q: NewsQuery, items: readonly NewsItem[], page: number): void {
+  const key = archiveKey(q);
+  let kept = archive.get(key);
+  const timed = items.filter((n) => n.time > 0);
+  if (kept && page === 1 && timed.length && kept.items.length && Math.min(...timed.map((n) => n.time)) > kept.items[0]!.time) kept = undefined;
+  kept ??= { items: [], filled: new Set() };
+  archive.delete(key);
+  archive.set(key, kept);
+  if (archive.size > MAX_ARCHIVED) archive.delete(archive.keys().next().value!);
+  const since = Date.now() - HISTORY_SPAN_MS;
+  const seen = new Set<string>();
+  kept.items = [...timed, ...kept.items]
+    .filter((n) => n.time >= since && !seen.has(n.id) && !seen.has(sameStory(n.title)) && !!seen.add(n.id) && !!seen.add(sameStory(n.title)))
+    .sort(byTime)
+    .slice(0, HISTORY_KEEP);
+  if (page > 1) kept.filled.add(page);
+}
+
+/** A feed's older pages, once, one at a time and only from the spare budget; a page not read now is read on a later ask. */
+function fill(q: NewsQuery, fetchImpl: typeof fetch): Promise<void> {
+  const key = archiveKey(q);
+  let flight = filling.get(key);
+  if (!flight) {
+    flight = (async () => {
+      for (let p = 2; p <= HISTORY_PAGES; p++) {
+        if (archive.get(key)?.filled.has(p)) continue;
+        if (!spare()) return;
+        try {
+          remember(q, (await readPage({ ...q, page: p }, fetchImpl)).items, p);
+        } catch {
+          return;
+        }
+      }
+    })().finally(() => filling.delete(key));
+    filling.set(key, flight);
+  }
+  return flight;
+}
+
+/** SoSoValue's hot list (its first 50 - the chart's heat reads no further) by headline; the last copy, or none, when the budget has no room. */
+async function hotRanks(fetchImpl: typeof fetch): Promise<Map<string, number>> {
+  if ((!hot || Date.now() - hot.at >= HOT_MS) && !hotFlight && spare()) {
+    hotFlight = (async () => {
+      try {
+        const body = await getJson(`${BASE}/news/hot?${new URLSearchParams({ language: 'en', page: '1', page_size: '50' })}`, fetchImpl);
+        const ranks = new Map<string, number>();
+        for (const n of mapNewsList(body, 50, { rankFrom: 1 })) if (!ranks.has(sameStory(n.title))) ranks.set(sameStory(n.title), n.rank!);
+        hot = { at: Date.now(), ranks };
+      } catch {
+        // Asked again in a minute.
+        hot = { at: Date.now() - HOT_MS + 60_000, ranks: hot?.ranks ?? new Map() };
+      }
+    })().finally(() => (hotFlight = null));
+  }
+  if (hotFlight) await hotFlight;
+  return hot?.ranks ?? new Map();
+}
+
 /** One page of news for a query, cached; a failed refresh keeps the last copy. */
 export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promise<NewsPage> {
   // The macro topic: each source's latest (cached) page, the economics kept, merged by time.
   if (q.topic === 'macro' && q.feed === 'latest' && !q.q) {
     const pages = await Promise.allSettled(
-      MACRO_SOURCES.map((category) => news({ ...q, topic: null, category, coins: [], page: 1, limit: 50 }, fetchImpl)),
+      MACRO_SOURCES.map((category) => news({ ...q, topic: null, category, coins: [], page: 1, limit: q.history ? HISTORY_LIMIT : 50 }, fetchImpl)),
     );
     const ok = pages.filter((p): p is PromiseFulfilledResult<NewsPage> => p.status === 'fulfilled').map((p) => p.value);
     if (!ok.length) throw (pages[0] as PromiseRejectedResult).reason;
@@ -400,6 +530,19 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
     const items = ok.flatMap((p) => p.items).filter((n) => !seen.has(n.id) && !!seen.add(n.id)).sort(byTime).slice(0, q.limit);
     return { items, page: q.page, total: null };
   }
+  // The chart's history: the first page (cached as any), the older ones once, what is kept; hot ones ranked.
+  if (q.history) {
+    const base: NewsQuery = { ...q, history: false, page: 1, limit: 50 };
+    const first = await news(base, fetchImpl);
+    remember(base, first.items, 1);
+    await fill(base, fetchImpl);
+    const ranks = await hotRanks(fetchImpl);
+    const items = (archive.get(archiveKey(base))?.items ?? first.items).slice(0, q.limit).map((n) => {
+      const rank = ranks.get(sameStory(n.title));
+      return rank ? { ...n, rank } : n;
+    });
+    return { items, page: 1, total: first.total };
+  }
   const key = JSON.stringify([q.feed, q.category, q.coins, q.q, q.page, q.limit, q.posts]);
   const hit = cache.get(key);
   const ttl = q.q ? SEARCH_CACHE_MS : CACHE_MS;
@@ -408,25 +551,13 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
   if (!flight) {
     flight = (async () => {
       try {
-        const list = await currencyList(fetchImpl);
-        const coin = q.coins[0];
-        const byCurrency = q.feed === 'latest' && !q.q && !!coin;
-        // A coin SoSoValue does not list has no news of its own: an empty page, not every coin's.
-        const currency = byCurrency && list ? list.ids.get(coin!) ?? null : null;
-        if (byCurrency && list && !currency) return { items: [], page: q.page, total: 0 };
-        const body = await getJson(newsUrl(q, currency), fetchImpl);
-        // Without the currency list the feed is filtered here, by the coins its stories name.
-        const here = filteredHere(q) || (byCurrency && !currency);
-        const rankFrom = q.feed === 'hot' && !q.q ? (q.page - 1) * pageSize(q) + 1 : undefined;
-        let items = mapNewsList(body, MAP_ALL, { index: list?.index, rankFrom });
-        if (here) items = items.filter((n) => n.symbols.some((s) => q.coins.includes(s)));
-        // A coin's feed: the stories that are about it, not every one that touches it.
-        if (byCurrency) items = items.filter((n) => namesCoin(n, coin!, list?.index));
-        if (thinsPosts(q)) items = items.filter((n) => n.notable !== false);
-        items = items.slice(0, q.limit);
+        const read = await readPage(q, fetchImpl);
+        // Every first page of the latest feed keeps its history current.
+        if (q.feed === 'latest' && !q.q && q.page === 1) remember(q, read.items, 1);
+        let items = read.items.slice(0, q.limit);
         // A search comes back by relevance; the widget lists it by time like the rest.
         if (q.q) items = items.sort(byTime);
-        const page: NewsPage = { items, page: q.page, total: here ? null : pageOf(body).total };
+        const page: NewsPage = { items, page: q.page, total: read.total };
         cache.set(key, { at: Date.now(), page });
         if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value!);
         return page;
@@ -442,6 +573,6 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
 
 /** The latest news, sliced (Explore's short list). */
 export async function latestNews(limit: number, fetchImpl: typeof fetch = fetch): Promise<NewsItem[]> {
-  const page = await news({ feed: 'latest', category: 1, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable' }, fetchImpl);
+  const page = await news({ feed: 'latest', category: 1, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable', history: false }, fetchImpl);
   return page.items.slice(0, limit);
 }

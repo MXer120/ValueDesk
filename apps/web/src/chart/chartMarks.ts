@@ -124,6 +124,11 @@ export interface NewsStory {
   summary?: string | null;
   /** It came as macro news (the server's macro topic). */
   topic?: 'macro';
+  /** Its place on SoSoValue's hot list now (1 is the hottest), where it is on it. */
+  rank?: number;
+  /** A post's views and likes on X when SoSoValue read it. */
+  views?: number;
+  likes?: number;
   /** A release on the economic calendar rather than a story. */
   event?: { short: string; importance: 'high' | 'medium' | 'low'; allDay: boolean; source: CalendarSource };
 }
@@ -149,7 +154,7 @@ export const newsKind = (s: NewsStory): NewsKind =>
   s.event ? 'event' : s.topic === 'macro' || s.category === 5 ? 'macro' : s.post ? 'post' : BY_CATEGORY[s.category ?? 1] ?? 'news';
 
 /** A title as two copies of one story share it: its letters and digits, case, punctuation and spacing aside. */
-const sameStory = (title: string) =>
+export const sameStory = (title: string) =>
   title
     .toLowerCase()
     .replace(/https?:\/\/\S+/g, '')
@@ -399,3 +404,37 @@ export function fomcWindow(statement: number): { statement: [number, number]; pr
 /** The FOMC's live stream: the Fed's own YouTube channel (the Live Feed has it too). */
 export const FED_LIVE_URL = 'https://www.youtube.com/@federalreserve/live';
 export const isFomc = (s: Pick<NewsStory, 'event'>): boolean => s.event?.short === 'FOMC' && s.event.source === 'fed';
+
+/** Bars of an hour or longer: an FOMC window is under an hour and too narrow to see there. */
+export const showsFomcWindow = (barMs: number): boolean => barMs > 0 && barMs < HOUR;
+
+export type Heat = 0 | 1 | 2 | 3;
+
+/**
+ * How hot a story is, from what is measured and nothing guessed: its place on
+ * SoSoValue's hot list now (its top 50), or a post's views and likes on X past
+ * what nearly every post reaches (a coin feed's posts: ~15k views at the median,
+ * ~130k at the 97th percentile). Articles carry no counts, so an article off
+ * the hot list is 0 - it is not known to be hot.
+ */
+export function storyHeat(s: Pick<NewsStory, 'rank' | 'views' | 'likes' | 'event'>): Heat {
+  if (s.event) return 0;
+  const byRank: Heat = !s.rank ? 0 : s.rank <= 10 ? 3 : s.rank <= 25 ? 2 : s.rank <= 50 ? 1 : 0;
+  const v = s.views ?? 0;
+  const l = s.likes ?? 0;
+  const byReach: Heat = v >= 1_000_000 || l >= 10_000 ? 3 : v >= 300_000 || l >= 3_000 ? 2 : v >= 150_000 || l >= 1_000 ? 1 : 0;
+  return Math.max(byRank, byReach) as Heat;
+}
+
+/** A marker's heat: its hottest story's. */
+export const markHeat = (stories: readonly NewsStory[]): Heat => stories.reduce<Heat>((h, s) => Math.max(h, storyHeat(s)) as Heat, 0);
+
+/** A marker's stories for its card: the hot ones first (hottest, then highest on the list), then newest first. */
+export function hotFirst(stories: readonly NewsStory[]): NewsStory[] {
+  return [...stories].sort((a, b) => storyHeat(b) - storyHeat(a) || (a.rank ?? Infinity) - (b.rank ?? Infinity) || b.time - a.time);
+}
+
+/** What a list points at (NewsFocus): this story, or the same story told under another id (the hot list's). */
+export function isFocused(s: Pick<NewsStory, 'id' | 'title'>, focus: { id: string; title: string } | null): boolean {
+  return !!focus && (s.id === focus.id || (!!focus.title && sameStory(s.title) === sameStory(focus.title)));
+}

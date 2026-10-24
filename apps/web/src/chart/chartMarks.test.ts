@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, calendarStories, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow } from './chartMarks';
+import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, calendarStories, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow, type NewsStory } from './chartMarks';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -165,4 +165,22 @@ test('the calendar\'s timing: "Next" only within a screen ahead or a day for hig
   assert.deepEqual([w.statement[1] - now, w.press[0] - now, w.press[1] - now], [30 * 60_000, 30 * 60_000, 90 * 60_000]);
   assert.equal(isFomc({ event: { short: 'FOMC', importance: 'high', allDay: false, source: 'fed' } }), true);
   assert.equal(isFomc({ event: { short: 'FOMC', importance: 'high', allDay: true, source: 'sosovalue' } }), false);
+});
+
+test('heat is measured, not guessed: the hot list\'s place, a post\'s reach; hot ones lead the card', async () => {
+  const { storyHeat, markHeat, hotFirst, showsFomcWindow, isFocused } = await import('./chartMarks');
+  const s = (id: string, time: number, more: Partial<NewsStory> = {}): NewsStory => ({ id, title: `Story ${id}`, href: '', time, ...more });
+  assert.equal(storyHeat(s('a', 1)), 0, 'an article off the hot list is not known to be hot');
+  assert.deepEqual([3, 10, 11, 25, 26, 50, 51].map((rank) => storyHeat(s('r', 1, { rank }))), [3, 3, 2, 2, 1, 1, 0]);
+  assert.deepEqual([130_000, 150_000, 300_000, 1_000_000].map((views) => storyHeat(s('p', 1, { post: true, views }))), [0, 1, 2, 3], 'past what nearly every post reaches');
+  assert.equal(storyHeat(s('p', 1, { post: true, likes: 3_000 })), 2);
+  assert.equal(storyHeat(s('e', 1, { rank: 1, event: { short: 'CPI', importance: 'high', allDay: false, source: 'bls' } })), 0, 'a release has no heat');
+  const list = [s('old', 1), s('warm', 2, { rank: 40 }), s('new', 3), s('hot', 0.5, { rank: 4 }), s('hotter', 0.4, { rank: 2 })];
+  assert.equal(markHeat(list), 3);
+  assert.deepEqual(hotFirst(list).map((x) => x.id), ['hotter', 'hot', 'warm', 'new', 'old']);
+  assert.deepEqual([60_000, 15 * MIN, 30 * MIN, 60 * MIN, 4 * 60 * MIN, 0].map(showsFomcWindow), [true, true, true, false, false, false], 'under an hour only');
+  assert.equal(isFocused(s('1', 1), { id: '1', title: '' }), true);
+  assert.equal(isFocused(s('1', 1), { id: '902', title: 'STORY 1!' }), true, 'the hot list\'s copy of the story');
+  assert.equal(isFocused(s('1', 1), { id: '2', title: '' }), false, 'a release is matched by its id alone');
+  assert.equal(isFocused(s('1', 1), null), false);
 });

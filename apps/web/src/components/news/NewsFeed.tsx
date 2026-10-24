@@ -27,6 +27,7 @@ import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { EconCalendar } from './EconCalendar';
 import { PoweredBy } from './PoweredBy';
+import { focusProps } from '../../chart/newsFocus';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
 import { DRAG_NEWS } from '../../folders/drag';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
@@ -238,7 +239,7 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
         ) : (
           <ol className="nw__items">
             {items.map((n) => (
-              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} onContextMenu={(e) => storyMenu(e, n)} onDragStart={(e) => e.dataTransfer.setData(DRAG_NEWS, JSON.stringify(storyData(n)))}>
+              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} {...focusProps({ id: n.id, title: n.title })} onContextMenu={(e) => storyMenu(e, n)} onDragStart={(e) => e.dataTransfer.setData(DRAG_NEWS, JSON.stringify(storyData(n)))}>
                 {ranked && n.rank != null && <span className={`nw__rank${n.rank <= 3 ? ' is-top' : ''}`} aria-label={`Number ${n.rank}`}>{n.rank}</span>}
                 <div className="nw__body">
                   <a className="nw__item" href={n.href} target="_blank" rel="noopener noreferrer">

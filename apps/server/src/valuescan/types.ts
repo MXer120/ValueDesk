@@ -139,8 +139,11 @@ export interface NewsItem {
   notable?: boolean;
   /** 'macro': it came as macro news (the macro topic: economics). */
   topic?: 'macro';
-  /** Its place in the hot list (1 is the hottest). */
+  /** Its place in the hot list (1 is the hottest); in the chart's history, a story of the feed that is on it now. */
   rank?: number;
+  /** A post's views and likes on X when SoSoValue read it (articles come without). */
+  views?: number;
+  likes?: number;
 }
 
 export interface VsPosition {

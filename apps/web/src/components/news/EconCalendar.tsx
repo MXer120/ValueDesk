@@ -13,6 +13,7 @@ import { useMemo } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi, type CalendarEvent } from '../../vsApi';
 import { EmptyState } from '../EmptyState';
+import { focusProps } from '../../chart/newsFocus';
 
 const DAY = 86_400_000;
 const IMPACT_LABEL: Record<CalendarEvent['importance'], string> = { high: 'High impact', medium: 'Medium impact', low: 'Low impact' };
@@ -94,7 +95,7 @@ export function EconCalendar({ instance }: { instance?: string }) {
                 <div className="nwc__date">{d.label}</div>
                 <ol className="nwc__events">
                   {d.events.map((e) => (
-                    <li key={e.id}>
+                    <li key={e.id} {...focusProps({ id: e.id, title: '' })}>
                       <a
                         className={`nwc__row nwc__row--${e.importance}${e.time < now ? ' is-past' : ''}${e === next ? ' is-next' : ''}`}
                         href={e.href}
