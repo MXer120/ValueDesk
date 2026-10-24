@@ -20,7 +20,8 @@
  *
  * THE TERMS COME FIRST (legal/acceptance.ts, trading/legalGate.ts): a wallet that
  * has not signed the current Terms of use and Risk disclosure signs them - with
- * its country of residence - before its key is registered; a wallet on a
+ * its country of residence - in the terms popup (requireTerms), before its key
+ * is registered; a wallet on a
  * sanctions list, or a sanctioned place, gets nothing; a close-only place
  * (the US) may enable trading to close positions. A refused opening order asks
  * for the signature here too (SIGN_TERMS_EVENT).
@@ -54,8 +55,7 @@ import { WithdrawModal } from '../funds/WithdrawModal';
 import { TransferModal } from '../funds/TransferModal';
 import { openConnectDialog } from './connect';
 import { useWalletSnapshot } from './useWallet';
-import { recordPendingSiteTerms } from '../../legal/acceptance';
-import { useSiteTermsSheet } from '../../legal/LegalGate';
+import { recordPendingSiteTerms, requireTerms } from '../../legal/acceptance';
 import { SANCTIONED_WALLET_REASON, screenWallet } from '../../legal/screening';
 import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
 
@@ -75,9 +75,6 @@ export function AccountController({ address, provider, session, onSession }: Pro
   /* The builder-fee disclosure (only ever opened by a build that configures a builder). */
   const builderConsent = useBuilderConsent();
   const askBuilderFee = builderConsent.ask;
-  /* The wallet signs ValueDesk's terms before it trades (legal/acceptance.ts). */
-  const siteTerms = useSiteTermsSheet();
-  const askSiteTerms = siteTerms.ask;
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const wallet = useWalletSnapshot();
 
@@ -128,7 +125,9 @@ export function AccountController({ address, provider, session, onSession }: Pro
       return false;
     }
     if (legalNow.access.level === 'close-only') notify('warn', legalNow.access.reason ?? 'Only closing is possible from here.');
-    if (legalNow.access.level === 'open' && !legalNow.signed && !(await askSiteTerms({ owner: addr, provider: p }))) return false;
+    // The terms popup as a gate (legal/LegalGate.tsx): accepted - and signed by this wallet where it may trade.
+    // Close-only: trading is enabled only to close, which never waits for the terms.
+    if (legalNow.access.level === 'open' && !(await requireTerms({ owner: addr, reason: 'enable trading' }))) return false;
     setAccountPending('enable');
     try {
       const where = walletName || 'your wallet';
@@ -183,7 +182,7 @@ export function AccountController({ address, provider, session, onSession }: Pro
     } finally {
       setAccountPending(null);
     }
-  }, [connect, askBuilderFee, askSiteTerms]);
+  }, [connect, askBuilderFee]);
 
   /* A new version of the terms (or a key from before they were signed): an opening
      order was refused (legalGate.ts) and asks for the signature here. */
@@ -193,8 +192,8 @@ export function AccountController({ address, provider, session, onSession }: Pro
       void connect();
       return;
     }
-    if (await askSiteTerms({ owner: addr, provider: p })) notify('ok', 'Terms accepted. You can open positions again.');
-  }, [connect, askSiteTerms]);
+    if (await requireTerms({ owner: addr, reason: 'open positions' })) notify('ok', 'Terms accepted. You can open positions again.');
+  }, [connect]);
 
   /* On connect: send a signed acceptance ValueDesk has not recorded yet, and screen the wallet. */
   useEffect(() => {
@@ -308,7 +307,6 @@ export function AccountController({ address, provider, session, onSession }: Pro
     <>
       {dialog}
       {builderConsent.dialog}
-      {siteTerms.dialog}
       {/* Renders nothing: after a fill it has the fee terms re-checked (only in a build whose fee has volume tiers). */}
       <BuilderTermsFollower address={address} />
       <AdvancedKeysModal

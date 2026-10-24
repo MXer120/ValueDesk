@@ -57,7 +57,6 @@ import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useLegalTradeGate, useTradeGate } from './account/useTradeGate';
-import { LegalNote } from '../legal/LegalGate';
 import { useBuilderFee } from './account/useBuilderFee';
 import { FeeSchedule } from './FeeSchedule';
 import { useVenueFees } from './useVenueFees';
@@ -2394,8 +2393,6 @@ export function OrderEntry({
             </dd>
           </div>
         </dl>
-        {/* 8. The one legal line: the risk, in the read-out's own muted type, and where it is set out. */}
-        <LegalNote id={isAlgo ? 'algo' : 'trade'} className="oe-legal" />
       </div>
 
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}

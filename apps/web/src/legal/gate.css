@@ -2,13 +2,6 @@
    sheets are drawn like the Connect dialog (account/ConnectDialog.css).
    Everything here starts at an `.lg-` class. */
 
-/* A one-line notice in a panel: the panel's own muted type, never a banner. */
-.lg-note {
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--fs-micro, var(--fs-xs));
-  line-height: var(--lh-micro, 1.4);
-}
 .lg-link {
   color: inherit;
   text-decoration: underline;
@@ -184,6 +177,38 @@
 }
 .lg-cta:hover:not(:disabled) { background: var(--accent-hover, var(--accent)); }
 .lg-cta:disabled { opacity: 0.4; cursor: not-allowed; }
+/* "Only necessary" and "Accept all": the same size, the same look, side by side -
+   refusing the players is exactly as easy as allowing them (DSK guidance). */
+.lg-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.lg-pair .lg-cta { margin-top: 0; }
+.lg-card--players { gap: 6px; }
+.lg-card__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-base);
+  line-height: var(--lh-base);
+  font-weight: 500;
+}
+.lg-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--bg-control) 70%, transparent);
+  color: var(--muted);
+  font-size: var(--fs-micro, var(--fs-xs));
+  font-weight: 500;
+}
+.lg-small {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+}
 .lg-hint {
   margin: calc(-1 * var(--sp-1)) 0 0;
   text-align: center;
@@ -218,6 +243,31 @@
 .lg-foot .lg-link { text-decoration-color: transparent; }
 .lg-foot .lg-link:hover { text-decoration-color: currentColor; }
 
+
+/* The navbar's restricted-region pill (RegionPill): red, small, a link to the terms. */
+.lg-region {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--neg) 55%, transparent);
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--neg) 14%, transparent);
+  color: var(--neg);
+  font-size: var(--fs-xs);
+  line-height: 1;
+  font-weight: 500;
+  white-space: nowrap;
+  text-decoration: none;
+}
+.lg-region:hover { background: color-mix(in srgb, var(--neg) 22%, transparent); }
+.lg-region__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
 
 /* A sanctioned place (SiteGate): the legal pages and a notice, nothing else. */
 .lg-blocked {

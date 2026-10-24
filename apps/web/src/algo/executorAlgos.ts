@@ -10,6 +10,7 @@
  */
 import type { AlgoEvent, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
+import { requireTermsOrThrow } from '../legal/acceptance';
 import { getLiveCopy, readiness, type CopyModeId } from '../copy/live';
 import { algoProvider } from './algoBus';
 
@@ -81,6 +82,7 @@ export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): 
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
+  await requireTermsOrThrow({ owner, reason: 'start this algo order' });
   const request = await signCopy(provider, owner, info.executorId, 'algo-start', { spec, seed });
   return call<AlgoView>(client, 'POST', '/algos', { body: { request } });
 }

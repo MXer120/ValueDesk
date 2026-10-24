@@ -12,7 +12,8 @@
  *   - Reown / WalletConnect keeps its pairing in this browser's storage once a
  *     wallet is connected through it (walletconnect.ts);
  *   - the Live Feed's players (YouTube, Twitch, Kick, Vimeo) load only after the
- *     visitor allows that platform (legal/embeds.ts, LiveFeed.tsx), and can be
+ *     visitor allows them ("Accept all" in the terms popup, LegalGate.tsx, or one
+ *     platform in the widget: legal/embeds.ts, LiveFeed.tsx), and can be
  *     turned off again on this page (LegalView renders the switches under the
  *     "Third-party players" section).
  */
@@ -63,7 +64,7 @@ export const COOKIES: LegalDoc = {
     {
       title: '3. Third-party players in the Live Feed',
       blocks: [
-        { p: 'The Live Feed widget plays live streams and videos in the platform\'s own player: YouTube (Google Ireland Ltd., Gordon House, Barrow Street, Dublin 4, Ireland), Twitch (Twitch Interactive, Inc.), Kick and Vimeo. A player is loaded only after you allow its platform, in the widget. When it loads, the platform receives your IP address, the page it is embedded in and the technical details of your browser, and it may store cookies or similar information on your device and use them under its own privacy policy - including, for some of them, to recognise you and for advertising, and with transfers to the United States.' },
+        { p: 'The Live Feed widget plays live streams and videos in the platform\'s own player: YouTube (Google Ireland Ltd., Gordon House, Barrow Street, Dublin 4, Ireland), Twitch (Twitch Interactive, Inc.), Kick and Vimeo. A player is loaded only after you allow it: all four at once with "Accept all" in the terms window (next to "Only necessary", which loads none and changes nothing else), or one platform at a time in the widget. Nothing is allowed in advance, and the terms do not depend on this choice. When it loads, the platform receives your IP address, the page it is embedded in and the technical details of your browser, and it may store cookies or similar information on your device and use them under its own privacy policy - including, for some of them, to recognise you and for advertising, and with transfers to the United States.' },
         { p: 'Legal basis: your consent (§ 25(1) TDDDG, Art. 6(1)(a) GDPR). You can withdraw it at any time, with effect for the future, with the switches below: the player is then no longer loaded until you allow it again. What a platform has already stored can be deleted in your browser\'s settings; what it does with your data is explained in its own privacy policy.' },
       ],
     },

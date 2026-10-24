@@ -42,7 +42,8 @@ import { api } from '../api';
 import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
 import { tradingConfig } from './config';
 import { guardAction, mustRecreate } from './feeGuard';
-import { guardLegal } from './legalGate';
+import { guardLegal, isOpening } from './legalGate';
+import { requireTerms } from '../legal/acceptance';
 import { readGateway, sendSigned } from './gateway';
 import {
   cancelManyActions,
@@ -156,6 +157,11 @@ function noteBuilderRejection(e: unknown): void {
  */
 async function signAndSend<T = unknown>(action: SignableAction, what: string): Promise<T> {
   const s = requireSigner(undefined, action.engine);
+  // An order that opens or increases a position waits for the terms (the popup, as a gate);
+  // closing, cancelling and withdrawing never do.
+  if (isOpening(action) && !(await requireTerms({ owner: s.meta.owner, reason: 'place this order' }))) {
+    throw new TradingError('Cancelled: the terms were not accepted, so nothing was sent.', 'legal');
+  }
   guardLegal(action, s.meta.owner);
   guardAction(action, s.meta.owner);
   const cfg = tradingConfig();

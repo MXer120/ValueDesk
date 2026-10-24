@@ -83,6 +83,7 @@ import { VALUECHAIN_RPC, balanceOfCall, hexUnits, nativeBalanceCall, rpcBatch } 
 import { openingWalletStep } from '../components/funds/openingStep';
 import { _clearReceiverCache, arrivalCheck, receiverAccount } from '../components/funds/depositGuard';
 import { logger } from '../log';
+import { requireTermsOrThrow } from '../legal/acceptance';
 
 const log = logger('trade');
 
@@ -524,6 +525,8 @@ export async function depositFromWallet(o: {
   const dp = coin.valuechain.decimals;
   const units = parseUnits(o.amount, dp); // refuses more precision than the token has
   if (units <= 0n) throw new RangeError('Enter an amount.');
+  // A deposit is the start of trading through ValueDesk: the terms first (the popup, as a gate).
+  await requireTermsOrThrow({ owner, reason: 'make this deposit' });
   const native = coin.valuechain.native;
   // Before the balance, chain and nonce reads. The button would otherwise sit
   // on "Confirming…" until the first real prompt (openingStep.ts).

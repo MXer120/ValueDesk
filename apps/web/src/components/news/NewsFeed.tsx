@@ -20,7 +20,6 @@ import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
-import { LegalNote } from '../../legal/LegalGate';
 import './NewsFeed.css';
 
 type Feed = 'latest' | 'hot' | 'featured';
@@ -247,8 +246,6 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
             {more.loading ? 'Loading…' : 'More'}
           </button>
         )}
-        {/* Third-party content, as received (legal/notices.ts): at the foot of the list, never over it. */}
-        {items.length > 0 && <LegalNote id="news" className="nw__legal" />}
       </div>
     </section>
   );

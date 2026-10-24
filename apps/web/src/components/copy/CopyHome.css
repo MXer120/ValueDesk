@@ -115,8 +115,6 @@
 .cpy-hero__facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-xs); }
 .cpy-hero__facts li { display: inline-flex; align-items: center; gap: 6px; }
 .cpy-hero__facts li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); }
-/* The risk next to the promise (legal/notices.ts): muted, under the facts. */
-.cpy-hero__legal { margin-top: 10px; max-width: 520px; }
 /* The wheel (Deck.tsx): the cards turn on a circle whose front arc shows
    five. Deck.tsx writes each card's transform, opacity and stacking on every
    frame of a turn, so nothing here animates them. The ring clips and fades

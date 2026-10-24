@@ -21,8 +21,11 @@
  *     (apps/executor, POST /api/copy/v1/site-terms); until the executor has it,
  *     it is sent again on the next visit;
  *   - a visitor without a wallet confirms the same statements ("Agree and
- *     continue"): kept in this browser only. When a wallet connects later, it is
- *     asked once to sign them;
+ *     continue"): kept in this browser only. A wallet that connects later signs
+ *     them at its first action that needs the terms;
+ *   - or the visitor looks around first ("Just look around", or the popup's X):
+ *     nothing is accepted, the public data stays open, and the popup comes back
+ *     as a gate at the first action that needs the terms (requireTerms below);
  *   - a wallet from a close-only place cannot sign (its country restricts
  *     trading): it browses on the ticked statements and can close positions.
  * Copy trading asks for its own signature on top - the copy terms, before the
@@ -48,9 +51,9 @@ import { normaliseCountry, siteAccess } from './jurisdictions.mjs';
 const log = logger('legal');
 
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
-export const SITE_TERMS_VERSION = '2026-10-24';
+export const SITE_TERMS_VERSION = '2026-10-24.2';
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */
-export const SITE_TERMS_HASH = '0xd8d0319542240ab1ec021110bd83548f27e6f0e808bf2f4a2435b3a73a465494';
+export const SITE_TERMS_HASH = '0x4c598a7b65a5fb6683f6e2815261c38d22c40d457f69deeb4fa8a06c5f5c687e';
 
 /* ------------------------------------------------------------- statements ----- */
 
@@ -64,7 +67,7 @@ export type StatementId = 'agree' | 'eligible' | 'risks' | 'ownDecisions';
  */
 export const STATEMENTS: ReadonlyArray<{ id: StatementId; label: string }> = [
   { id: 'agree', label: 'I agree to the [Terms of use](/terms) and the [Risk disclosure](/risk), and have read the [Privacy policy](/privacy).' },
-  { id: 'eligible', label: 'I am 18 or older, not in or resident of a restricted or sanctioned place, and do not hide where I am (e.g. with a VPN).' },
+  { id: 'eligible', label: 'I am 18 or older, not subject to sanctions, and will not use ValueDesk where it is not allowed or hide where I am (e.g. a VPN).' },
   { id: 'risks', label: 'I understand that trading perpetual futures can lose me all the money I put in.' },
   { id: 'ownDecisions', label: 'My trades are my own decisions: ValueDesk gives no advice and never holds my funds.' },
 ];
@@ -242,14 +245,77 @@ export async function recordPendingSiteTerms(owner: string | null | undefined): 
   await sendRecord(owner.toLowerCase(), t);
 }
 
+/* ------------------------------------------- browsing first, terms at action ----- */
+
+/*
+ * A visitor may close the first-visit popup ("Just look around") and browse the
+ * public data without accepting anything. The terms are then asked for - as a
+ * gate, at the moment of the action - by everything that makes ValueDesk do
+ * something for the visitor: an order that opens or increases a position, an
+ * algo, enabling trading, a deposit, accepting the copy terms, creating a copy
+ * key, starting, changing or resuming a copy (requireTerms below; LegalGate.tsx
+ * TermsGate answers). Closing, cancelling, reducing and withdrawing are never
+ * held up: nobody is kept in a position until they accept terms.
+ */
+const LOOK_KEY = 'vd.site.terms.look';
+
+/** The visitor chose to look around first (for the current version): the popup does not open by itself. */
+export const lookedAround = (): boolean => read<string>(LOOK_KEY) === SITE_TERMS_VERSION;
+export const lookAround = (): void => write(LOOK_KEY, SITE_TERMS_VERSION);
+
+/** What an action needs: this browser's acceptance, and the wallet's signature where it can sign. */
+export interface TermsRequest {
+  /** The wallet the action is for (its signature is asked where it can sign). */
+  owner?: string | null;
+  /** What the visitor is about to do, for the popup ("place this order"). */
+  reason: string;
+}
+
+type GateHandler = (r: TermsRequest) => Promise<boolean>;
+let gate: GateHandler | null = null;
+
+/** TermsGate registers itself; null when it unmounts. */
+export function setTermsGate(h: GateHandler | null): void {
+  gate = h;
+}
+
+/**
+ * Resolves true once the terms the action needs are accepted - at once when
+ * they already are, otherwise after the visitor accepted them in the popup;
+ * false when they closed it. In a page without the popup (it failed to mount):
+ * true only if they are accepted already. Outside a browser - the unit tests,
+ * the Node live runner, which use these modules without the web app - there is
+ * no one to ask: true (the signature rules of trading/legalGate.ts still hold).
+ */
+export function requireTerms(r: TermsRequest): Promise<boolean> {
+  if (gate) return gate(r);
+  if (typeof window === 'undefined') return Promise.resolve(true);
+  return Promise.resolve(!!browseAccepted() && (!r.owner || !!signedTerms(r.owner)));
+}
+
+/** The refusal of an action whose terms were not accepted: the user's decision, said quietly. */
+export class TermsNotAccepted extends Error {
+  override name = 'TermsNotAccepted';
+  constructor(reason: string) {
+    super(`Cancelled: the terms were not accepted, so ValueDesk did not ${reason}.`);
+  }
+}
+
+/** requireTerms, throwing TermsNotAccepted when the visitor closed the popup. */
+export async function requireTermsOrThrow(r: TermsRequest): Promise<void> {
+  if (!(await requireTerms(r))) throw new TermsNotAccepted(r.reason);
+}
+
 /** For tests. */
 export function _resetAcceptanceForTests(): void {
   memory.clear();
+  gate = null;
   changed();
 }
 
-/** For tests of the order flow: `owner` has signed the current terms (no real signature behind it). */
+/** For tests of the order flow: `owner` has accepted and signed the current terms (no real signature behind it). */
 export function _signedTermsForTests(owner: string, country = 'DE'): void {
   const request = { action: 'accept-site-terms', owner: owner.toLowerCase(), executor: SITE_TERMS_EXECUTOR, payload: '{}', nonce: '0', deadline: '0', chainId: 1, signature: '0x' } as SignedCopyRequest;
   write(signedKey(owner), { termsVersion: SITE_TERMS_VERSION, termsHash: SITE_TERMS_HASH, country, acceptedAt: 0, recorded: true, request } satisfies SignedSiteTerms);
+  acceptBrowse(STATEMENTS.map((s) => s.id), 0, owner.toLowerCase());
 }

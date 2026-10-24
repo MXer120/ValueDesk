@@ -48,6 +48,7 @@ import { openConnectDialog } from './account/connect';
 import { prefetchAccountTotals, useAccountTotals } from './account/useAccountTotals';
 import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExists';
 import { useWalletSnapshot } from './account/useWallet';
+import { RegionPill } from '../legal/LegalGate';
 import './account/account.css';
 
 /** `/scan/index.html?address=0x...` - scan.js reads `address` (or `wallet`) off
@@ -175,6 +176,8 @@ export function NavBar({
         </nav>
 
         <div className="navstatus">
+          {/* A restricted (close-only) place: the red pill, always, rail or not (legal/LegalGate.tsx). */}
+          <RegionPill address={address} />
           {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
           {!rail && (
             <>

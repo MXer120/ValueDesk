@@ -7,20 +7,17 @@
  *                       runners - only the legal pages and a notice of why. The
  *                       edge already answers 451 there (deploy/vercel); this is the
  *                       second check, for a legal page the edge let through.
- *   <TermsGate>         App.tsx: the first-visit clickwrap, until this browser has
- *                       accepted the current SITE_TERMS_VERSION - with a connected
- *                       wallet, ticked AND signed in one step (one free signature);
- *                       a wallet that connects later is asked once to sign what was
- *                       ticked. Never over a legal page, so what it links to can be
- *                       read first.
- *   useSiteTermsSheet() AccountController: the same form, when trading is enabled
- *                       by a wallet that has not signed, or a new version asks for it
- *                       (legalGate.ts SIGN_TERMS_EVENT).
- *   <LegalNote>         a one-line notice where it matters (notices.ts).
+ *   <TermsGate>         App.tsx: the terms popup - on the first visit (closable: a
+ *                       visitor may look around first), and as a gate at every action
+ *                       that needs the terms (acceptance.ts requireTerms). With a
+ *                       connected wallet, confirmed AND signed in one step (one free
+ *                       signature); the Live Feed's players offered beside it as a
+ *                       choice of their own. Never over a legal page.
+ *   <RegionPill>        NavBar: the red pill in a restricted (close-only) place.
  *   <EmbedSwitches>     the Cookies page: withdraw consent for a video platform.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
-import { lazy, Suspense, useCallback, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Modal } from '../components/Modal';
 import { FxSelect } from '../components/funds/ui';
 import { countries, countryName } from '../copy/countries';
@@ -34,14 +31,18 @@ import {
   acceptedBefore,
   browseAccepted,
   countryProblem,
+  lookAround,
+  lookedAround,
+  setTermsGate,
   signSiteTerms,
   signedTerms,
   useAcceptanceRevision,
+  type TermsRequest,
 } from './acceptance';
-import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from './embeds';
+import { EMBED_PLATFORMS, EMBED_PROVIDERS, allEmbedsAllowed, allowAllEmbeds, revokeEmbed, useEmbedConsent } from './embeds';
 import { useViewerAccess, useViewerGeo } from './geo';
+import { siteAccess } from './jurisdictions.mjs';
 import { screeningOf, useScreening } from './screening';
-import { NOTICES, type NoticeId } from './notices';
 import './gate.css';
 
 /* ------------------------------------------------------------ open a page ----- */
@@ -83,16 +84,6 @@ export function LegalText({ text, onOpen }: { text: string; onOpen?: (p: LegalPa
         return page ? <LegalLink key={i} page={page} onOpen={onOpen}>{m![1]}</LegalLink> : part;
       })}
     </>
-  );
-}
-
-/** One notice line (notices.ts) with its link. */
-export function LegalNote({ id, className }: { id: NoticeId; className?: string }) {
-  const n = NOTICES[id];
-  return (
-    <p className={`lg-note${className ? ` ${className}` : ''}`}>
-      {n.text} <LegalLink page={n.page}>{n.label}</LegalLink>
-    </p>
   );
 }
 
@@ -144,56 +135,67 @@ function BlockedShell({ reason }: { reason: string }) {
 
 const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
 
-/** Wallets that chose "Not now" for the signature in this page load: the gate does not ask them again. */
-const skipped = new Set<string>();
-
 const shortAddress = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
 interface TermsFormProps {
   /** The connected wallet that signs - null: no wallet, the statements are only confirmed. */
   signer: { owner: string; provider: Eip1193Provider } | null;
+  /** Offer the Live Feed's players: "Only necessary" and "Accept all", side by side. */
+  offerPlayers: boolean;
   onOpen?: (p: LegalPage) => void;
   /** Accepted: 'signed' by the wallet, or only 'confirmed' in this browser. */
   onDone: (how: 'signed' | 'confirmed') => void;
-  /** The quiet second button: accept without the signature, or put the signature off. */
-  secondary?: { label: string; onClick: () => void } | null;
 }
 
 /**
- * The four statements under ONE "I confirm" and, with a wallet, ONE free
- * signature (acceptance.ts) - the body of the first-visit gate and of the sheet
- * before trading. The country of residence is the one the edge saw (geo.ts),
- * shown with the wallet; it is asked only where the edge could not tell, and
- * can be changed (a traveller).
+ * The four statements under ONE "I confirm that" and, with a wallet, ONE free
+ * signature (acceptance.ts). The country of residence is the one the edge saw
+ * (geo.ts), shown with the wallet; it is asked only where the edge could not
+ * tell, and can be changed (a traveller).
+ *
+ * THE PLAYERS, LAWFULLY. Consent to the Live Feed's YouTube / Twitch / Kick /
+ * Vimeo players (§ 25(1) TDDDG, Art. 6(1)(a) GDPR) is offered in the same step
+ * but stays a choice of its own: two equally sized buttons, "Only necessary" and
+ * "Accept all", both accepting the terms, only the second allowing the players.
+ * Nothing is pre-selected (CJEU C-673/17 Planet49), refusing is as easy as
+ * accepting (DSK guidance on digital services), and the terms never depend on it
+ * (Art. 7(4) GDPR). A visitor who chose "Only necessary" turns a platform on in
+ * the Live Feed itself, and withdraws on the Cookies page.
  */
-function TermsForm({ signer, onOpen, onDone, secondary }: TermsFormProps) {
+function TermsForm({ signer, offerPlayers, onOpen, onDone }: TermsFormProps) {
   const geo = useViewerGeo();
   const [confirmed, setConfirmed] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'necessary' | 'all' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const detected = geo.country && !countryProblem(geo.country) ? geo.country : null;
   const country = picked ?? detected ?? '';
   const problem = country ? countryProblem(country) : null;
   const choosing = !!signer && (changing || !detected);
+  const ready = confirmed && !busy && (!signer || (!!country && !problem));
 
-  const primary = async () => {
+  const accept = async (players: boolean) => {
     setError(null);
-    if (!signer) {
-      acceptBrowse(STATEMENTS.map((s) => s.id));
-      onDone('confirmed');
-      return;
-    }
-    setBusy(true);
+    setBusy(players ? 'all' : 'necessary');
     try {
-      await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
-      onDone('signed');
+      if (signer) {
+        await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
+      } else {
+        acceptBrowse(STATEMENTS.map((s) => s.id));
+      }
+      if (players) allowAllEmbeds();
+      onDone(signer ? 'signed' : 'confirmed');
     } catch (e) {
       setError(isRejection(e) ? 'Nothing was signed. Approve the message in your wallet to continue.' : e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
+  };
+  const label = (players: boolean): string => {
+    if (busy === (players ? 'all' : 'necessary')) return 'Waiting for your wallet…';
+    if (!offerPlayers) return signer ? 'Sign and continue' : 'Agree and continue';
+    return players ? 'Accept all' : 'Only necessary';
   };
 
   return (
@@ -242,27 +244,30 @@ function TermsForm({ signer, onOpen, onDone, secondary }: TermsFormProps) {
         </div>
       )}
 
-      {error && <p className="lg-err" role="alert">{error}</p>}
-      <button
-        type="button"
-        className="lg-cta"
-        disabled={!confirmed || busy || (!!signer && (!country || !!problem))}
-        aria-busy={busy || undefined}
-        onClick={() => void primary()}
-      >
-        {busy ? 'Waiting for your wallet…' : signer ? 'Sign and continue' : 'Agree and continue'}
-      </button>
-      {signer && <p className="lg-hint">A free signature in your wallet: not a transaction, no gas, no funds move.</p>}
-      {secondary && (
-        <button type="button" className="lg-quiet" disabled={busy || !confirmed} onClick={secondary.onClick}>
-          {secondary.label}
-        </button>
+      {offerPlayers && (
+        <div className="lg-card lg-card--players">
+          <span className="lg-card__title">Live video players <span className="lg-tag">optional</span></span>
+          <p className="lg-small">
+            YouTube, Twitch, Kick and Vimeo streams in the Live Feed. Allowing them sends your IP address to these platforms, which may set cookies, also for advertising and with transfers to the US. Change it any time under <LegalLink page="cookies" onOpen={onOpen}>Cookies</LegalLink>.
+          </p>
+        </div>
       )}
+
+      {error && <p className="lg-err" role="alert">{error}</p>}
+      {offerPlayers ? (
+        <div className="lg-pair">
+          <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'necessary' || undefined} onClick={() => void accept(false)}>{label(false)}</button>
+          <button type="button" className="lg-cta lg-cta--even" disabled={!ready} aria-busy={busy === 'all' || undefined} onClick={() => void accept(true)}>{label(true)}</button>
+        </div>
+      ) : (
+        <button type="button" className="lg-cta" disabled={!ready} aria-busy={!!busy || undefined} onClick={() => void accept(false)}>{label(false)}</button>
+      )}
+      {signer && <p className="lg-hint">Your wallet signs once - free: not a transaction, no gas, no funds move.</p>}
     </>
   );
 }
 
-/** The links and the version, at the foot of both sheets. */
+/** The links and the version, at the foot of the popup. */
 function TermsFoot({ onOpen }: { onOpen?: (p: LegalPage) => void }) {
   return (
     <p className="lg-foot">
@@ -275,12 +280,21 @@ function TermsFoot({ onOpen }: { onOpen?: (p: LegalPage) => void }) {
   );
 }
 
+interface PendingAction extends TermsRequest {
+  resolve: (ok: boolean) => void;
+}
+
 /**
- * The first-visit gate (App.tsx), until this browser has accepted the current
- * terms - signed by the connected wallet where there is one that may trade, in
- * the same step. A wallet that connects after the terms were accepted is asked
- * once to sign them (it may put that off: trading asks again). Never over a
- * legal page (`hidden`), so what it links to can be read first.
+ * The terms popup (App.tsx), in two moments:
+ *   - on the first visit, until the visitor accepts the current version or looks
+ *     around first (its X, or "Just look around"): then it does not open by itself
+ *     again for this version;
+ *   - at an action that needs the terms (acceptance.ts requireTerms - an opening
+ *     order, an algo, enabling trading, a deposit, copy trading): it opens as a
+ *     gate, says what for, and the action goes on once the terms are accepted -
+ *     and signed, where a wallet is connected that may trade - or is dropped when
+ *     the visitor closes it.
+ * Never over a legal page (`hidden`), so what it links to can be read first.
  */
 export function TermsGate({ hidden, onOpen, address, provider }: {
   hidden: boolean;
@@ -290,99 +304,116 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
 }) {
   useAcceptanceRevision();
   useScreening(address);
+  useEmbedConsent();
   const access = useViewerAccess();
+  const [pending, setPending] = useState<PendingAction | null>(null);
   const [, setTick] = useState(0);
-  const accepted = !!browseAccepted();
+
   const owner = address ? address.toLowerCase() : null;
-  const mayTrade = !!owner && !!provider && access.level === 'open' && screeningOf(owner) !== 'sanctioned';
-  const signer = mayTrade && !signedTerms(owner) && !skipped.has(owner!) ? { owner: owner!, provider: provider! } : null;
-  if (access.level === 'blocked' || (accepted && !signer)) return null;
-  const changed = acceptedBefore();
-  const skip = () => {
-    if (owner) skipped.add(owner);
+  /** The wallet that signs: connected, in a place that may trade, not screened out. */
+  const signerFor = (o: string | null | undefined) =>
+    o && o.toLowerCase() === owner && provider && access.level === 'open' && screeningOf(o) !== 'sanctioned'
+      ? { owner: o.toLowerCase(), provider }
+      : null;
+  const doneFor = (o: string | null | undefined): boolean => {
+    if (!browseAccepted()) return false;
+    const s = signerFor(o ?? owner);
+    return !s || !!signedTerms(s.owner);
+  };
+
+  /* The latest view of the props for the handler, which actions call at any time. */
+  const latest = useRef({ doneFor });
+  latest.current = { doneFor };
+  useEffect(() => {
+    setTermsGate((r) => new Promise<boolean>((resolve) => {
+      if (latest.current.doneFor(r.owner)) {
+        resolve(true);
+        return;
+      }
+      setPending((cur) => {
+        cur?.resolve(false);
+        return { ...r, resolve };
+      });
+    }));
+    return () => setTermsGate(null);
+  }, []);
+
+  const finish = (ok: boolean) => {
+    setPending((cur) => {
+      cur?.resolve(ok);
+      return null;
+    });
     setTick((n) => n + 1);
   };
+
+  if (access.level === 'blocked') return null;
+  const accepted = !!browseAccepted();
+  const intro = !pending && !accepted && !lookedAround();
+  if (!pending && !intro) return null;
+  const signer = signerFor(pending?.owner ?? owner);
+  const changed = acceptedBefore();
+  const close = () => {
+    if (pending) finish(false);
+    else {
+      lookAround();
+      setTick((n) => n + 1);
+    }
+  };
+  const title = pending
+    ? accepted ? 'Sign the terms to continue' : 'Accept the terms to continue'
+    : changed ? 'Our terms have changed' : 'Welcome to ValueDesk';
   return (
-    <Modal
-      open={!hidden}
-      size="sm"
-      title={accepted ? 'Sign the terms' : changed ? 'Our terms have changed' : 'Welcome to ValueDesk'}
-      className={`lg-sheet${accepted ? '' : ' lg-gate'}`}
-      // Accepting is the only way on; once the terms are accepted, the signature can wait.
-      onClose={() => { if (accepted) skip(); }}
-      dismissOnBackdrop={false}
-    >
+    <Modal open={!hidden} size="sm" title={title} className="lg-sheet" onClose={close} dismissOnBackdrop={false}>
       <p className="lg-lead">
-        {accepted
-          ? 'Sign the terms you accepted with this wallet, once, so it can trade.'
+        {pending
+          ? `To ${pending.reason}, ${signer ? 'your wallet signs' : 'please accept'} the terms once.${accepted ? '' : ' Perpetual futures are high-risk: you can lose everything you put in.'}`
           : changed
-            ? 'Please confirm the current version to go on.'
+            ? 'Please confirm the current version - or look around first.'
             : 'Non-custodial trading on SoDEX. Perpetual futures are high-risk: you can lose everything you put in.'}
       </p>
       {access.level === 'close-only' && <p className="lg-warn">{access.reason}</p>}
       <TermsForm
         key={signer ? `sign:${signer.owner}` : 'confirm'}
         signer={signer}
+        offerPlayers={!allEmbedsAllowed()}
         onOpen={onOpen}
-        onDone={() => setTick((n) => n + 1)}
-        secondary={
-          !signer ? null
-          : accepted ? { label: 'Not now', onClick: skip }
-          : { label: 'Continue without signing - sign before I trade', onClick: () => { acceptBrowse(STATEMENTS.map((s) => s.id)); skip(); } }
-        }
+        onDone={() => (pending ? finish(true) : setTick((n) => n + 1))}
       />
+      <button type="button" className="lg-quiet" onClick={close}>{pending ? 'Not now' : 'Just look around'}</button>
       <TermsFoot onOpen={onOpen} />
     </Modal>
   );
 }
 
-interface SheetRequest {
-  owner: string;
-  provider: Eip1193Provider;
-  resolve: (signed: boolean) => void;
-}
+/* ------------------------------------------------- the restricted-region pill ----- */
 
 /**
- * `ask({owner, provider})` opens the signing sheet and resolves true once the
- * wallet has signed the current terms (false when closed); render `dialog`
- * once. AccountController asks before it enables trading, and when an opening
- * order was refused for a missing signature (legalGate.ts SIGN_TERMS_EVENT).
+ * The navbar's red pill wherever the edge puts the visitor in a restricted
+ * place (jurisdictions.mjs): close-only from the US, and what a connected
+ * wallet declared. A sanctioned place never gets this far (SiteGate). It opens
+ * the Terms of use, where section 3 says what applies.
  */
-export function useSiteTermsSheet(): { ask: (o: { owner: string; provider: Eip1193Provider }) => Promise<boolean>; dialog: ReactNode } {
-  const [req, setReq] = useState<SheetRequest | null>(null);
+export function RegionPill({ address }: { address: string | null }) {
   useAcceptanceRevision();
-
-  const ask = useCallback(
-    (o: { owner: string; provider: Eip1193Provider }) =>
-      new Promise<boolean>((resolve) => {
-        setReq((cur) => {
-          cur?.resolve(false);
-          return { ...o, resolve };
-        });
-      }),
-    [],
+  const seen = useViewerAccess();
+  const declared = signedTerms(address)?.country ?? null;
+  const access = declared && seen.level === 'open' ? siteAccess({ declared }) : seen;
+  if (access.level === 'open') return null;
+  return (
+    <a
+      href={pathForLegal('terms')}
+      className="lg-region"
+      title={access.reason ?? undefined}
+      onClick={(e) => {
+        if (!isPlainClick(e)) return;
+        e.preventDefault();
+        openLegalPage('terms');
+      }}
+    >
+      <span className="lg-region__dot" aria-hidden="true" />
+      {access.level === 'close-only' ? 'Restricted region · close-only' : 'Not available in your region'}
+    </a>
   );
-  const close = useCallback((signed: boolean) => {
-    setReq((cur) => {
-      cur?.resolve(signed);
-      return null;
-    });
-  }, []);
-
-  const dialog = req ? (
-    <Modal open size="sm" title="Sign the terms to trade" className="lg-sheet" onClose={() => close(false)} dismissOnBackdrop={false}>
-      <p className="lg-lead">Your wallet signs the terms once before it trades through ValueDesk: our record of what you agreed to.</p>
-      <TermsForm
-        key={req.owner}
-        signer={{ owner: req.owner, provider: req.provider }}
-        onDone={() => close(true)}
-        secondary={{ label: 'Not now', onClick: () => close(false) }}
-      />
-      <TermsFoot />
-    </Modal>
-  ) : null;
-
-  return { ask, dialog };
 }
 
 

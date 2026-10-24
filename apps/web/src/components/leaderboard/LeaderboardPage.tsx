@@ -53,7 +53,6 @@ import { Section, Seg } from '../accountTables/FilterBar';
 import '../Account.css';
 import '../Leaderboard.css';
 import './LeaderboardPage.css';
-import { LegalNote } from '../../legal/LegalGate';
 import { formatNumber } from '../../intlCache';
 
 function VenueMark({ venue, size = 16 }: { venue: Venue; size?: number }) {
@@ -506,8 +505,6 @@ export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
           empty={minTrades === 2 ? 'No indexed trader has more than one trade in this window yet.' : view.q || board !== 'all' ? 'No trader in this hundred matches.' : 'No traders in this hundred.'}
         />
       )}
-      {/* What a ranking is and is not (legal/notices.ts), under the table like its other notes. */}
-      <LegalNote id="data" className="lbp-note" />
     </section>
   );
 }

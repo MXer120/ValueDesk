@@ -22,6 +22,7 @@
 import { addOrSwitchChain, sendTransaction, WalletError, type Eip1193Provider } from '../wallet';
 import { readGateway } from './gateway';
 import { logger } from '../log';
+import { requireTermsOrThrow } from '../legal/acceptance';
 
 const log = logger('trade');
 
@@ -198,6 +199,8 @@ export async function sendUsdcDeposit(o: {
   const units = parseUnits(o.amount, route.decimals);
   const min = parseUnits(route.minDeposit, route.decimals);
   if (units < min) throw new RangeError(`The minimum deposit on ${route.chain.name} is ${route.minDeposit} USDC.`);
+  // The first deposit opens a SoDEX account to trade through ValueDesk: the terms first (the popup, as a gate).
+  await requireTermsOrThrow({ owner, reason: 'make this deposit' });
 
   await addOrSwitchChain(provider, {
     chainId: `0x${route.chain.chainId.toString(16)}`,

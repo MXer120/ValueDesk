@@ -12,11 +12,18 @@ import {
   acceptBrowse,
   acceptedBefore,
   browseAccepted,
+  TermsNotAccepted,
   countryProblem,
+  lookAround,
+  lookedAround,
+  requireTerms,
+  requireTermsOrThrow,
+  setTermsGate,
   signSiteTerms,
   signedTerms,
   signedText,
   siteTermsPayload,
+  type TermsRequest,
 } from './acceptance';
 import { placeholdersIn } from './model';
 
@@ -85,6 +92,30 @@ test('signing: ONE free wallet signature (typed data, no transaction) that verif
   assert.equal(browseAccepted()?.signedBy, owner, 'the signature is this browser\'s acceptance too');
   await assert.rejects(signSiteTerms({ provider: wallet, owner, country: 'US' }), /United States/);
   _resetAcceptanceForTests();
+});
+
+test('looking around first: nothing accepted, the popup stays closed for this version, and an action asks the popup (its answer decides)', async () => {
+  _resetAcceptanceForTests();
+  assert.equal(lookedAround(), false);
+  lookAround();
+  assert.equal(lookedAround(), true);
+  assert.equal(browseAccepted(), null, 'looking around accepts nothing');
+  // Outside a browser and without the popup: nobody to ask (the tests, the Node runner).
+  assert.equal(await requireTerms({ reason: 'place this order' }), true);
+  const asked: TermsRequest[] = [];
+  let answer = false;
+  setTermsGate(async (r) => {
+    asked.push(r);
+    return answer;
+  });
+  assert.equal(await requireTerms({ owner: '0xabc', reason: 'make this deposit' }), false, 'closed: the action is dropped');
+  await assert.rejects(requireTermsOrThrow({ reason: 'make this deposit' }), (e: unknown) => e instanceof TermsNotAccepted && /did not make this deposit/.test(String(e)));
+  answer = true;
+  assert.equal(await requireTerms({ owner: '0xabc', reason: 'start this copy' }), true, 'accepted in the popup: the action goes on');
+  assert.deepEqual(asked.map((r) => r.reason), ['make this deposit', 'make this deposit', 'start this copy']);
+  assert.equal(asked[0]!.owner, '0xabc');
+  _resetAcceptanceForTests();
+  assert.equal(lookedAround(), false, 'reset');
 });
 
 test('a restricted country of residence cannot sign; others can', () => {

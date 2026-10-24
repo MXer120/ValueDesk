@@ -28,7 +28,6 @@ import { Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, ViewButton,
 import { Deck } from './Deck';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
 import { COPY_COST_BPS, WRONG_SIDE_CAP } from './copyScore';
-import { LegalNote } from '../../legal/LegalGate';
 
 interface GridPrefs {
   category: Category;
@@ -119,8 +118,6 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
             <li>Your limits on every copy</li>
             <li>Stop any time</li>
           </ul>
-          {/* The risk next to the promise, not only at the foot of the page (legal/notices.ts). */}
-          <LegalNote id="copy" className="cpy-hero__legal" />
         </div>
         <Deck picks={deck} w={w} total={mixed.filter((s) => isCopyable(s.row.venue)).length} loading={(boards.loading && !boards.data) || (worst.loading && !worst.data)} onOpen={onOpen} />
       </section>

@@ -29,6 +29,7 @@ import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type
 import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBase, selfUrlProblem, signCopy } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
 import { acceptCopyTerms, localTerms, recordPendingTerms, sendTermsTo, type LocalTerms } from './terms';
+import { requireTermsOrThrow } from '../legal/acceptance';
 
 const log = logger('copy');
 
@@ -255,6 +256,8 @@ export async function refreshSelf(): Promise<void> {
 
 export async function acceptTerms(country: string): Promise<void> {
   const { owner, provider: p } = needWallet();
+  // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
+  await requireTermsOrThrow({ owner, reason: 'start copy trading' });
   const t = await busyWith('wallet', () => acceptCopyTerms({ provider: p, owner, country }));
   set({ terms: t });
   if (selfClient && state.self.signedIn) await sendTermsTo(selfClient, owner).catch((e) => log.warn('copy: terms not sent to the copier', { error: String(e) }));
@@ -263,6 +266,8 @@ export async function acceptTerms(country: string): Promise<void> {
 
 export async function approveFee(): Promise<void> {
   const { owner, provider: p } = needWallet();
+  // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
+  await requireTermsOrThrow({ owner, reason: 'approve the copy fee' });
   await busyWith('wallet', () => approveCopyFee({ owner, provider: p }));
   await refreshFee();
 }
@@ -270,6 +275,8 @@ export async function approveFee(): Promise<void> {
 /** Approve the copy key of `mode` for `days`. Two signatures for an executor (its request, then SoDEX's), one for this browser. */
 export async function approveKey(mode: CopyModeId, days: number): Promise<void> {
   const { owner, provider: p } = needWallet();
+  // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
+  await requireTermsOrThrow({ owner, reason: 'set up the copy key' });
   if (mode === 'browser') {
     await busyWith('wallet', async () => {
       const k = browserCopier.newKey();
@@ -342,6 +349,8 @@ export function supportsCounter(s: LiveCopy, mode: CopyModeId): boolean {
 
 export async function startCopy(mode: CopyModeId, settings: CopySettings): Promise<void> {
   const { owner, provider: p } = needWallet();
+  // ValueDesk's own terms first (the popup, as a gate): copy trading adds to them.
+  await requireTermsOrThrow({ owner, reason: 'start this copy' });
   const t = state.terms;
   if (!t) throw new Error('Accept the copy trading terms first.');
   if (settings.direction === 'counter' && !supportsCounter(state, mode)) {
@@ -368,6 +377,8 @@ export async function startCopy(mode: CopyModeId, settings: CopySettings): Promi
 export type CopyCommand = 'pause' | 'resume' | 'stop' | 'stop-close';
 
 export async function commandCopy(mode: CopyModeId, id: string, cmd: CopyCommand): Promise<void> {
+  // Resuming copies again: the terms first. Pausing and stopping never wait for them.
+  if (cmd === 'resume' && state.owner) await requireTermsOrThrow({ owner: state.owner, reason: 'resume this copy' });
   if (mode === 'browser') {
     if (cmd === 'pause') await browserCopier.pause(id);
     else if (cmd === 'resume') await browserCopier.resume(id);
@@ -389,6 +400,7 @@ export async function commandCopy(mode: CopyModeId, id: string, cmd: CopyCommand
 }
 
 export async function updateCopy(mode: CopyModeId, id: string, settings: CopySettings): Promise<void> {
+  if (state.owner) await requireTermsOrThrow({ owner: state.owner, reason: 'change this copy' });
   if (mode === 'browser') {
     await browserCopier.update(id, settings);
     syncBrowser();

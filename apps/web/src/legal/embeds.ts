@@ -1,8 +1,11 @@
 /**
  * Consent for the Live Feed's third-party players (§ 25(1) TDDDG): a YouTube,
- * Twitch, Kick or Vimeo player is never loaded until the visitor allows that
- * platform in the widget (LiveFeed.tsx), and the choice can be withdrawn on the
- * Cookies page (cookies.ts, LegalView.tsx). Kept in this browser only.
+ * Twitch, Kick or Vimeo player is never loaded until the visitor allows it -
+ * with "Accept all" in the terms popup (offered next to an equally visible
+ * "Only necessary", never pre-selected and never part of accepting the terms:
+ * the terms are accepted either way), or for one platform in the widget itself
+ * (LiveFeed.tsx). The choice can be withdrawn on the Cookies page (cookies.ts,
+ * LegalView.tsx). Kept in this browser only.
  *
  * Before consent the widget shows what loading the player means and nothing of
  * the platform: no iframe, no script, no thumbnail. The server-side stream
@@ -64,6 +67,16 @@ export const embedAllowed = (p: EmbedPlatform): boolean => load().allowed[p] !==
 export function allowEmbed(p: EmbedPlatform, now = Date.now()): void {
   save({ allowed: { ...load().allowed, [p]: now } });
 }
+
+/** "Accept all" in the terms popup: every platform at once (a choice made next to an equal "Only necessary"). */
+export function allowAllEmbeds(now = Date.now()): void {
+  const allowed = { ...load().allowed };
+  for (const p of EMBED_PLATFORMS) allowed[p] ??= now;
+  save({ allowed });
+}
+
+/** Every platform's player may load: the terms popup does not offer them again. */
+export const allEmbedsAllowed = (): boolean => EMBED_PLATFORMS.every((p) => embedAllowed(p));
 
 export function revokeEmbed(p: EmbedPlatform): void {
   const allowed = { ...load().allowed };
