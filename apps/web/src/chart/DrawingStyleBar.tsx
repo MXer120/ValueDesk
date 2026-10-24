@@ -5,7 +5,9 @@
  * top centre of the plot rather than chasing the drawing - at the foot of the
  * price pane when the drawing's handles are up there (Chart.tsx places it) -
  * and steps aside while the drawing is dragged, so it never covers a handle.
- * The gear opens the full settings (DrawingSettings.tsx).
+ * The gear opens the full settings (DrawingSettings.tsx). For drawings picked
+ * together by a marked area it shows how many and styles, locks, hides or
+ * deletes them all at once.
  *
  * Everything applies at once and is saved with the drawing (Chart.tsx).
  */
@@ -32,7 +34,12 @@ export interface DrawingStyleBarProps {
   onLock: (locked: boolean) => void;
   onDelete: () => void;
   onClose: () => void;
-  onSettings: () => void;
+  /** The full settings (one drawing only). */
+  onSettings?: () => void;
+  /** Drawings picked together: how many (shown as a chip). */
+  count?: number;
+  /** Hide them (the group bar; one drawing hides from its menu). */
+  onHide?: () => void;
   /** While the drawing is dragged: out of the way, and no pointer. */
   hidden?: boolean;
   /** Its top in the plot, when not the default (the top of the plot). */
@@ -41,7 +48,7 @@ export interface DrawingStyleBarProps {
 
 export function DrawingStyleBar({
   label, color, size, dashed, locked, text, focusText,
-  onColor, onSize, onDashed, onText, onLock, onDelete, onClose, onSettings, hidden = false, top,
+  onColor, onSize, onDashed, onText, onLock, onDelete, onClose, onSettings, count, onHide, hidden = false, top,
 }: DrawingStyleBarProps) {
   const [palette, setPalette] = useState(false);
   const field = useRef<HTMLInputElement>(null);
@@ -61,6 +68,7 @@ export function DrawingStyleBar({
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
+      {count !== undefined && <span className="kc-stylebar-count" title={label}>{count}</span>}
       <span className="kc-stylebar-color">
         <button
           type="button"
@@ -134,13 +142,20 @@ export function DrawingStyleBar({
         />
       )}
       <span className="kc-stylebar-sep" />
-      <button type="button" title="Settings" aria-label="Drawing settings" onClick={onSettings}>
-        {MENU_ICONS.settings}
-      </button>
+      {onSettings && (
+        <button type="button" title="Settings" aria-label="Drawing settings" onClick={onSettings}>
+          {MENU_ICONS.settings}
+        </button>
+      )}
+      {onHide && (
+        <button type="button" title="Hide" aria-label={`Hide ${label}`} onClick={onHide}>
+          {MENU_ICONS.hide}
+        </button>
+      )}
       <button type="button" className={locked ? 'on' : ''} title={locked ? 'Unlock' : 'Lock'} aria-label={locked ? 'Unlock drawing' : 'Lock drawing'} aria-pressed={locked} onClick={() => onLock(!locked)}>
         {locked ? MENU_ICONS.lock : MENU_ICONS.unlock}
       </button>
-      <button type="button" className="kc-stylebar-del" title="Delete (Del)" aria-label="Delete drawing" onClick={onDelete}>
+      <button type="button" className="kc-stylebar-del" title="Delete (Del)" aria-label={count !== undefined ? `Delete ${label}` : "Delete drawing"} onClick={onDelete}>
         {MENU_ICONS.remove}
       </button>
       <button type="button" title="Close" aria-label="Close style bar" onClick={onClose}>
