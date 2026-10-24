@@ -236,8 +236,11 @@ export function LiveFeed({ instance }: {
         <div className="lf__pic" style={{ width: pic.w, height: pic.h }}>{iframe}</div>
       ) : lookingUp ? (
         <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Finding the stream…</p>
+      ) : offAir && onAir.error ? (
+        // The lookup itself is unavailable (no YouTube key on the server, or YouTube down): say so plainly.
+        <EmptyState icon="news" title="The news channels are unavailable right now" line="Paste a YouTube, Twitch, Kick or Vimeo link to watch meanwhile." />
       ) : offAir ? (
-        <EmptyState icon="news" title={`${channelName} is not live right now`} line={onAir.error ? onAir.error : 'Pick another channel; this one is checked again every few minutes.'} />
+        <EmptyState icon="news" title={`${channelName} is not live right now`} line="Pick another channel; this one is checked again every few minutes." />
       ) : (
         <EmptyState icon="news" title="No live feed" line="Pick a news channel, or paste a YouTube, Twitch, Kick or Vimeo link." />
       )}

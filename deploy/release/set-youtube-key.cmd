@@ -1,0 +1,16 @@
+@echo off
+rem Double-click (or run from cmd / PowerShell): set-youtube-key.sh in Git Bash, which
+rem asks for the YouTube Data API key and sets it for local testing and production.
+setlocal
+set "GITBASH=%ProgramFiles%\Git\bin\bash.exe"
+if not exist "%GITBASH%" (
+  echo Git Bash was not found at "%GITBASH%". Install Git for Windows, or run set-youtube-key.sh from Git Bash.
+  pause
+  exit /b 1
+)
+cd /d "%~dp0..\.."
+rem This window pauses below; the script need not.
+set "VS_KEY_NO_PAUSE=1"
+"%GITBASH%" deploy/release/set-youtube-key.sh %*
+echo.
+pause
