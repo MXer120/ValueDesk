@@ -33,7 +33,8 @@
 
 .coh-rail {
   position: sticky;
-  top: 8px;
+  /* --page-top: under the navbar, which the page scrolls behind (shell.css). */
+  top: calc(var(--page-top, 0px) + 8px);
   align-self: start;
   display: flex;
   flex-direction: column;
