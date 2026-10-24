@@ -28,7 +28,7 @@ node deploy/smoke/smoke.mjs --help
 ## What is checked
 
 Per page - Trade, Explore (overview, cohorts, market map, an asset page),
-Leaderboard, Copy, Portfolio, the legal pages (`/impressum`, `/privacy`, `/terms`),
+Leaderboard, Copy, Portfolio, the legal pages (`/impressum`, `/privacy`, `/terms`, `/cookies`, `/risk`),
 Scan for one wallet on each of the five venues, the Cmd/Ctrl+K palette, and the
 legacy `/scan/` redirect:
 

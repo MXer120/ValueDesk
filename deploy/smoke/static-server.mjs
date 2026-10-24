@@ -18,6 +18,7 @@
 //     address appended to X-Forwarded-For; the API's own headers left alone, HSTS
 //     added only when it sent none
 //   - no API configured: 503, the way a stopped instance looks through CloudFront
+//   - /api/edge/geo answered here, as the Vercel function does: an unknown country
 //
 // WHAT IT DOES NOT COPY: TLS, compression, edge caching, WAF.
 import http from 'node:http';
@@ -25,6 +26,9 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HEADERS, headersFor, rewrite } from './prod-headers.mjs';
+
+/** Answered by the edge itself, never by the API (deploy/vercel/api-proxy.cjs GEO_PATH). */
+export const GEO_PATH = '/api/edge/geo';
 
 /** Content types exactly as deploy/release/publish-web.sh stores them on the objects. */
 export const CONTENT_TYPES = {
@@ -101,6 +105,14 @@ export function startStaticServer({ dist, port, host = '127.0.0.1', api = null }
   }
 
   function serveApi(req, res) {
+    // The edge's own answer (deploy/vercel/api-proxy.cjs): where the viewer is. A local
+    // stand-in knows no country, as an unknown place looks on Vercel.
+    if (new URL(req.url ?? '/', 'http://x').pathname === GEO_PATH && (req.method === 'GET' || req.method === 'HEAD')) {
+      const body = JSON.stringify({ country: null, region: null });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Length': Buffer.byteLength(body) });
+      res.end(req.method === 'HEAD' ? undefined : body);
+      return record(req, 200, 'api', {});
+    }
     if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end('This distribution is not configured to allow the HTTP request that was used.');

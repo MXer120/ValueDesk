@@ -63,7 +63,7 @@ import { evaluate, launchChrome, openPage, pressCtrlK, sleep, typeText, watchSha
 import { checkDeployedHeaders, checkHttpsRedirect, probeOrigin } from './deployed.mjs';
 import { hostedRoutes, matchRoute, startMockApi } from './mock-api.mjs';
 import { CSP, sourceAllows } from './prod-headers.mjs';
-import { startStaticServer } from './static-server.mjs';
+import { GEO_PATH, startStaticServer } from './static-server.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..', '..');
@@ -408,6 +408,8 @@ function pages(wallets) {
     { id: 'impressum', path: '/impressum', expectPath: '/impressum' },
     { id: 'privacy', path: '/privacy', expectPath: '/privacy' },
     { id: 'terms', path: '/terms', expectPath: '/terms' },
+    { id: 'cookies', path: '/cookies', expectPath: '/cookies' },
+    { id: 'risk', path: '/risk', expectPath: '/risk' },
     ...scan,
     { id: 'palette', path: '/trade', expectPath: '/trade', palette: true },
     { id: 'legacy-scan', path: `/scan/?address=${wallets.sodex}`, expectPath: '/scan' },
@@ -604,6 +606,11 @@ async function walk(dist, api, report) {
       if (u.pathname.startsWith('/api/copy/')) {
         if (REMOTE && r.status !== null && r.status >= 500) problems.push(`the copy executor answered ${r.status}: ${r.method} ${u.pathname}`);
         if (REMOTE && r.failed && r.failed !== 'canceled') problems.push(`a copy executor request failed: ${u.pathname} (${r.failed})`);
+        continue;
+      }
+      // Where the viewer is: the edge's own answer (api-proxy.cjs, static-server.mjs), never the API's.
+      if (u.pathname === GEO_PATH) {
+        if (r.status !== null && r.status !== 200) problems.push(`the edge answered ${r.status} for where the viewer is: ${r.method} ${u.pathname}`);
         continue;
       }
       const route = matchRoute(routes, r.method, u.pathname);
