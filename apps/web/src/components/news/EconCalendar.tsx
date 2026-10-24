@@ -7,6 +7,7 @@
  * By day in the viewer's time, from three days back to six weeks ahead; the
  * next release says how long until it. Each opens its publisher's page. The
  * key releases show by default; the minor ones (PMIs, housing) on request.
+ * The widget's header credits it: "Powered by SoSoValue & more".
  */
 import { useMemo } from 'react';
 import { useAsync, useStored } from '../../hooks';
@@ -61,7 +62,6 @@ export function EconCalendar({ instance }: { instance?: string }) {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events]);
-  const down = cal.data ? Object.entries(cal.data.sources).filter(([, v]) => v === 'none').map(([k]) => cal.data!.sourceNames[k as CalendarEvent['source']] ?? k) : [];
 
   return (
     <>
@@ -119,10 +119,6 @@ export function EconCalendar({ instance }: { instance?: string }) {
             ))}
           </ol>
         )}
-        <p className="nw__note nwc__foot">
-          From the Federal Reserve, BLS and BEA, with SoSoValue's macro calendar for the rest. Times are the official release times in your time zone
-          {down.length ? `; ${down.join(', ')} did not answer just now` : ''}.
-        </p>
       </div>
     </>
   );

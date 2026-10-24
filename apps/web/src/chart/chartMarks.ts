@@ -366,3 +366,36 @@ export function sanitizeShow(raw: unknown): ChartShow {
     calendarMinor: r.calendarMinor === true,
   };
 }
+
+// --- the calendar's timing ------------------------------------------------------------------
+
+const HOUR = 3_600_000;
+
+/**
+ * A release past the right edge shows at it ("Next") while it is within one
+ * screen's width of time ahead - so on a minute chart next week's CPI stays
+ * off it - or a high-impact one within a day, whatever the zoom.
+ * `x` is where it would be, `width` the pane's.
+ */
+export function showsAhead(x: number, width: number, s: Pick<NewsStory, 'time' | 'event'>, now: number): boolean {
+  if (!s.event || s.time < now) return false;
+  return x <= 2 * width || (s.event.importance === 'high' && s.time - now <= 24 * HOUR);
+}
+
+/** From two hours before a release to an hour and a half after: its marker opens by itself. */
+export const nearRelease = (time: number, now: number): boolean => time - now <= 2 * HOUR && now - time <= 1.5 * HOUR;
+
+/**
+ * An FOMC decision on the chart. The Fed sets two times - the statement at
+ * 2:00 pm ET and the chair's press conference at 2:30 pm ET - and not the
+ * end: the press conference has run about an hour, so its end is marked as
+ * an estimate.
+ */
+export function fomcWindow(statement: number): { statement: [number, number]; press: [number, number]; endEstimated: true } {
+  const press = statement + 30 * 60_000;
+  return { statement: [statement, press], press: [press, press + HOUR], endEstimated: true };
+}
+
+/** The FOMC's live stream: the Fed's own YouTube channel (the Live Feed has it too). */
+export const FED_LIVE_URL = 'https://www.youtube.com/@federalreserve/live';
+export const isFomc = (s: Pick<NewsStory, 'event'>): boolean => s.event?.short === 'FOMC' && s.event.source === 'fed';

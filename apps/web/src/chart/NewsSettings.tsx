@@ -5,6 +5,7 @@
  * The button itself only switches news on and off.
  */
 import { CoinIcon } from '../components/CoinIcon';
+import { PoweredBy } from '../components/news/PoweredBy';
 import { CHART_ICONS, NEWS_ICONS } from './chartIcons';
 import { NEWS_KINDS, NEWS_KIND_LABEL, type ChartShow, type NewsKind, type NewsScope } from './chartMarks';
 
@@ -81,7 +82,9 @@ export function NewsSettings({ show, coin, onChange }: NewsSettingsProps) {
         <input type="checkbox" checked={show.calendarMinor} disabled={!show.calendar} onChange={(e) => onChange({ calendarMinor: e.target.checked })} />
         Minor releases too (PMIs, housing)
       </label>
-      <p className="kc-newsset__src">News: SoSoValue · calendar: Federal Reserve, BLS, BEA, SoSoValue · the button switches it all on and off</p>
+      <p className="kc-newsset__src">
+        <PoweredBy more />
+      </p>
     </div>
   );
 }

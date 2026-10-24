@@ -146,3 +146,23 @@ test('calendar releases are marker entries of their own: credited, linked, the m
   // Two decisions with one title are two entries.
   assert.equal(newsMarks(key, '1D').length, 2);
 });
+
+test('the calendar\'s timing: "Next" only within a screen ahead or a day for high impact; near; the FOMC window', async () => {
+  const { showsAhead, nearRelease, fomcWindow, isFomc } = await import('./chartMarks');
+  const now = Date.UTC(2026, 9, 25, 12);
+  const H = 3_600_000;
+  const ev = (importance: 'high' | 'low', time: number) => ({ time, event: { short: 'CPI', importance, allDay: false, source: 'bls' as const } });
+  assert.equal(showsAhead(1500, 800, ev('low', now + 72 * H), now), true, 'within a screen');
+  assert.equal(showsAhead(9000, 800, ev('low', now + 72 * H), now), false, 'far past it');
+  assert.equal(showsAhead(9000, 800, ev('high', now + 20 * H), now), true, 'high impact within a day');
+  assert.equal(showsAhead(9000, 800, ev('high', now + 30 * H), now), false);
+  assert.equal(showsAhead(900, 800, ev('high', now - H), now), false, 'already out');
+  assert.equal(nearRelease(now + 90 * 60_000, now), true);
+  assert.equal(nearRelease(now + 3 * H, now), false);
+  assert.equal(nearRelease(now - H, now), true);
+  assert.equal(nearRelease(now - 2 * H, now), false);
+  const w = fomcWindow(now);
+  assert.deepEqual([w.statement[1] - now, w.press[0] - now, w.press[1] - now], [30 * 60_000, 30 * 60_000, 90 * 60_000]);
+  assert.equal(isFomc({ event: { short: 'FOMC', importance: 'high', allDay: false, source: 'fed' } }), true);
+  assert.equal(isFomc({ event: { short: 'FOMC', importance: 'high', allDay: true, source: 'sosovalue' } }), false);
+});

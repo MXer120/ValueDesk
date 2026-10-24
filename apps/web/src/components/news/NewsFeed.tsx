@@ -26,6 +26,7 @@ import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { EconCalendar } from './EconCalendar';
+import { PoweredBy } from './PoweredBy';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
 import { DRAG_NEWS } from '../../folders/drag';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
@@ -181,7 +182,7 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
             </button>
           ))}
         </div>
-        <span className="nw__src">{onCalendar ? 'Fed · BLS · BEA' : 'SoSoValue'}</span>
+        <span className="nw__src"><PoweredBy more={onCalendar} /></span>
       </header>
       {onCalendar ? <EconCalendar instance={instance} /> : <>
       <div className="nw__filters">

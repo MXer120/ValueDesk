@@ -62,7 +62,7 @@ test('a long-running stream older than the uploads: found by search, at most onc
 test('only the Live Feed\'s channels, only with a key; YouTube\'s pages are never asked', async () => {
   resetLiveCache();
   const api = fakeApi({ live: new Set(), uploads: [], search: [] });
-  assert.equal(LIVE_CHANNELS.size, 12);
+  assert.equal(LIVE_CHANNELS.size, 13);
   await assert.rejects(liveVideo('UC0000000000000000000000', KEY, api.fetchImpl), /Live Feed's channels/);
   await assert.rejects(liveVideo('https://evil.example/x', KEY, api.fetchImpl), /Live Feed's channels/);
   await assert.rejects(liveVideo(BLOOMBERG, '', api.fetchImpl), /YOUTUBE_API_KEY/);

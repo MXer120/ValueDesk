@@ -90,6 +90,24 @@ export function LiveFeed({ instance }: {
   const stream = channel ? (onAir.data ? { kind: 'youtube' as const, video: onAir.data } : null) : picked;
   const offAir = !!channel && !lookingUp && !stream;
   const channelName = choice && 'channel' in choice ? CHANNELS.find((c) => c.id === choice.channel)?.name ?? 'This channel' : 'This channel';
+  /*
+   * The next FOMC press conference (the economic calendar, server
+   * valuescan/calendar.ts): 30 minutes after the 2:00 pm ET statement, on the
+   * Fed's own channel. Within three days, or while it runs, the feed offers it.
+   */
+  const cal = useAsync(() => vsApi.calendar(), [], { pollMs: 60 * 60_000 });
+  // A minute's clock, so the countdown and "live now" keep up between polls.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  const fomc = (cal.data?.events ?? []).find((e) => e.short === 'FOMC' && e.source === 'fed' && e.time + 90 * 60_000 >= now) ?? null;
+  const pressAt = fomc ? fomc.time + 30 * 60_000 : 0;
+  const fomcLive = !!fomc && now >= fomc.time - 15 * 60_000 && now <= fomc.time + 90 * 60_000;
+  const fomcSoon = !!fomc && (fomcLive || fomc.time - now <= 3 * 86_400_000);
+  const onFed = !!choice && 'channel' in choice && choice.channel === 'fed';
+  const pressWhen = fomc ? new Date(pressAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   /* No platform's player loads before the viewer allows that platform (§ 25 TDDDG,
      legal/embeds.ts): until then there is no frame at all, only what loading it means. */
   const consent = useEmbedConsent();
@@ -239,6 +257,8 @@ export function LiveFeed({ instance }: {
       ) : offAir && onAir.error ? (
         // The lookup itself is unavailable (no YouTube key on the server, or YouTube down): say so plainly.
         <EmptyState icon="news" title="The news channels are unavailable right now" line="Paste a YouTube, Twitch, Kick or Vimeo link to watch meanwhile." />
+      ) : offAir && onFed && fomc ? (
+        <EmptyState icon="news" title="The Federal Reserve is not live right now" line={`The next FOMC press conference: ${pressWhen} (${untilText(pressAt, now)}). It plays here once it starts.`} />
       ) : offAir ? (
         <EmptyState icon="news" title={`${channelName} is not live right now`} line="Pick another channel; this one is checked again every few minutes." />
       ) : (
@@ -250,8 +270,30 @@ export function LiveFeed({ instance }: {
         </div>
       )}
       {error && <p className="lf__err" role="alert">{error}</p>}
+      {fomcSoon && !(onFed && src) && (
+        <div className={`lf__fomc${fomcLive ? ' is-live' : ''}`} role="status">
+          <span>
+            <b>{fomcLive ? 'FOMC live now' : 'FOMC press conference'}</b>
+            {!fomcLive && ` · ${pressWhen} · ${untilText(pressAt, now)}`}
+          </span>
+          {!onFed && (
+            <button type="button" className="lf__btn lf__btn--go" onClick={() => { setEditing(false); setStored({ channel: 'fed' }); }}>
+              Watch
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
+}
+
+/** "in 3d 4h", "in 45m", "now". */
+function untilText(t: number, now: number): string {
+  const m = Math.round((t - now) / 60_000);
+  if (m <= 0) return 'now';
+  if (m >= 1440) return `in ${Math.floor(m / 1440)}d ${Math.floor((m % 1440) / 60)}h`;
+  if (m >= 60) return `in ${Math.floor(m / 60)}h ${m % 60}m`;
+  return `in ${m}m`;
 }
 
 function Btn({ label, onClick, pressed, children }: { label: string; onClick: () => void; pressed?: boolean; children: ReactNode }) {

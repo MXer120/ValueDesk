@@ -21,6 +21,8 @@ export const CHANNELS: readonly Channel[] = [
   { id: 'cbs', name: 'CBS News', youtube: 'UC8p1vwvWtl6T73JiExfWs1g' },
   { id: 'yahoo', name: 'Yahoo Finance', youtube: 'UCEAZeUIeJs0IjQiqTCdVSIg' },
   { id: 'whitehouse', name: 'The White House', youtube: 'UCYxRlFDqcWM4y7FfpiAN3KQ' },
+  // The Fed's own channel: the FOMC's press conferences live (@federalreserve).
+  { id: 'fed', name: 'Federal Reserve (FOMC)', youtube: 'UCAzhpt9DmG6PnHXjmJTvRGQ' },
   { id: 'cnbcintl', name: 'CNBC', youtube: 'UCvJJ_dzjViJCoLf5uKUTwoA' },
   { id: 'reuters', name: 'Reuters', youtube: 'UChqUTb7kYRX8-EiaN3XFrSQ' },
   { id: 'sky', name: 'Sky News', youtube: 'UCoMdktPbSTixAyNGwb-UYkQ' },

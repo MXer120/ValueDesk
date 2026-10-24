@@ -1824,22 +1824,26 @@ html.kc-drag * {
 .kc-newspop__impact--high { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
 .kc-newspop__src { color: var(--dim); font-size: var(--fs-micro); }
 
-/* The economic calendar's releases: a row of pills above the news markers,
+/* The economic calendar's releases: a row of circles above the news markers,
    their edge in the release's weight; one still to come is dashed. */
-.kc-calmarks { position: absolute; z-index: 4; height: 22px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
+.kc-calmarks { position: absolute; z-index: 4; height: 24px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
 .kc-calmarks.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
 .kc-calmarks.is-leaving .kc-calmark { pointer-events: none; }
+/* A release is a circle like a story's marker; it opens to its name and
+   countdown on hover, when its card is open, or as the release comes near. */
 .kc-calmark {
   position: absolute;
   top: 0;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 22px;
+  justify-content: center;
+  gap: 0;
+  height: 24px;
+  min-width: 24px;
   min-height: 0;
-  padding: 0 7px 0 5px;
+  padding: 0 5px;
   border: 1px solid rgba(255, 255, 255, 0.16);
-  border-radius: 7px;
+  border-radius: 12px;
   background: var(--glass-pop-bg, var(--bg-elevated));
   -webkit-backdrop-filter: var(--glass-pop-blur);
   backdrop-filter: var(--glass-pop-blur);
@@ -1847,24 +1851,39 @@ html.kc-drag * {
   color: var(--muted);
   font: inherit;
   font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
   white-space: nowrap;
   cursor: pointer;
   pointer-events: auto;
   transform: translateX(-50%);
-  transition: transform 140ms var(--ease-out, ease), border-color 140ms, color 140ms;
+  transition: transform 140ms var(--ease-out, ease), border-color 140ms, color 140ms, gap 160ms var(--ease-out, ease);
 }
-.kc-calmark svg { width: 12px; height: 12px; }
+.kc-calmark svg { flex: none; width: 13px; height: 13px; }
 .kc-calmark.is-due { border-style: dashed; }
 .kc-calmark--high { border-color: color-mix(in srgb, var(--warn) 70%, transparent); color: var(--warn); }
 .kc-calmark--medium { color: var(--text); }
+.kc-calmark__more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-width 200ms var(--ease-out, ease), opacity 160ms;
+}
+.kc-calmark__more b { font-weight: 700; letter-spacing: 0.02em; }
+.kc-calmark__dim { color: var(--muted); font-weight: 500; }
+.kc-calmark:hover,
+.kc-calmark.is-open,
+.kc-calmark.is-near { gap: 4px; padding: 0 8px 0 6px; }
+.kc-calmark:hover .kc-calmark__more,
+.kc-calmark.is-open .kc-calmark__more,
+.kc-calmark.is-near .kc-calmark__more { max-width: 160px; opacity: 1; }
 .kc-calmark:hover,
 .kc-calmark.is-open { transform: translateX(-50%) translateY(-2px); border-color: rgba(255, 255, 255, 0.5); color: var(--text); }
 .kc-calmark--high:hover,
-.kc-calmark--high.is-open { border-color: var(--warn); color: var(--warn); }
+.kc-calmark--high.is-open,
+.kc-calmark--high.is-near { border-color: var(--warn); color: var(--warn); }
 .kc-calmark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
-.kc-calmark__n { color: var(--muted); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   .kc-calmarks,
   .kc-calmarks.is-leaving { animation-duration: 1ms; }
@@ -1974,3 +1993,39 @@ html.kc-drag * {
 .kc-calmark.kc-calmark--ahead { transform: translateX(-100%); }
 .kc-calmark.kc-calmark--ahead:hover,
 .kc-calmark.kc-calmark--ahead.is-open { transform: translateX(-100%) translateY(-2px); }
+
+/* An FOMC decision on the chart (NewsMarkers.tsx): the statement (2:00 pm ET) to
+   the press conference (2:30 pm) shaded, the press conference to its estimated
+   end dotted - the Fed sets the two starts, not the end. Never takes the pointer. */
+.kc-fomc { position: absolute; z-index: 2; display: flex; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
+.kc-fomc.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
+.kc-fomc__statement { flex: none; height: 100%; border-left: 1px solid color-mix(in srgb, var(--warn) 80%, transparent); background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.kc-fomc__press {
+  flex: 1 1 auto;
+  height: 100%;
+  border-right: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent);
+  background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--warn) 9%, transparent) 0 4px, transparent 4px 8px);
+}
+.kc-fomc__label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  max-width: calc(100% - 8px);
+  overflow: hidden;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--bg-panel) 85%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+.kc-fomc__label b { color: var(--warn); }
+.kc-fomc__label span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kc-newspop__live { display: inline-flex; margin: 0 8px 8px; color: var(--text); font-size: var(--fs-micro); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.kc-newspop__live:hover { color: var(--warn); }
+@media (prefers-reduced-motion: reduce) {
+  .kc-fomc, .kc-fomc.is-leaving { animation-duration: 1ms; }
+}

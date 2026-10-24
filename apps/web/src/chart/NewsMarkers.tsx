@@ -22,7 +22,22 @@ import type { Chart as KChart } from 'klinecharts';
 import { CoinIcon } from '../components/CoinIcon';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 import { NEWS_ICONS } from './chartIcons';
-import { NEWS_KIND_LABEL, clusterNews, markFace, newsKind, type NewsMark, type NewsScope, type NewsStory, type PlacedNews } from './chartMarks';
+import {
+  FED_LIVE_URL,
+  NEWS_KIND_LABEL,
+  clusterNews,
+  fomcWindow,
+  isFomc,
+  markFace,
+  nearRelease,
+  newsKind,
+  showsAhead,
+  type NewsMark,
+  type NewsScope,
+  type NewsStory,
+  type PlacedNews,
+} from './chartMarks';
+import { PoweredBy } from '../components/news/PoweredBy';
 import { useLatched } from '../components/motion';
 import type { TimeZoneMode } from './timeAxis';
 
@@ -88,6 +103,8 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
   const [placed, setPlaced] = useState<PlacedNews[]>([]);
   /** The economic calendar's releases: a row of their own, above the news. */
   const [releases, setReleases] = useState<PlacedNews[]>([]);
+  /** FOMC decisions on screen: the statement and the press conference, x from-to in the pane. */
+  const [fomc, setFomc] = useState<Array<{ key: string; x1: number; x2: number; x3: number }>>([]);
   const [pane, setPane] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [open, setOpen] = useState<{ key: string; pinned: boolean } | null>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -100,6 +117,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
     if (!chart || marks.length === 0) {
       setPlaced([]);
       setReleases([]);
+      setFomc([]);
       return;
     }
     let raf = 0;
@@ -111,14 +129,24 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
       const on: PlacedNews[] = [];
       const due: PlacedNews[] = [];
       const later: NewsStory[] = [];
+      const windows: Array<{ key: string; x1: number; x2: number; x3: number }> = [];
+      const now = Date.now();
+      const xOf = (timestamp: number) => (chart.convertToPixel({ timestamp, value: 0 }, { paneId: PANE }) as { x?: number }).x;
       for (const m of marks) {
-        const px = chart.convertToPixel({ timestamp: m.timestamp, value: 0 }, { paneId: PANE }) as { x?: number };
-        const x = px.x;
+        const x = xOf(m.timestamp);
         if (typeof x !== 'number' || !Number.isFinite(x)) continue;
         const events = m.stories.filter((s) => s.event);
-        // Past the right edge: still to come, gathered at the edge.
+        // An FOMC decision: its statement and press conference as a window, where on screen.
+        for (const e of events.filter(isFomc)) {
+          const w = fomcWindow(e.time);
+          const [x1, x2, x3] = [xOf(w.statement[0]), xOf(w.press[0]), xOf(w.press[1])];
+          if ([x1, x2, x3].every((v) => typeof v === 'number' && Number.isFinite(v)) && x3! >= 0 && x1! <= width) {
+            windows.push({ key: e.id, x1: Math.round(x1!), x2: Math.round(x2!), x3: Math.round(x3!) });
+          }
+        }
+        // Past the right edge: still to come - at the edge while it is near for this zoom.
         if (x > width - 6) {
-          later.push(...events);
+          later.push(...events.filter((e) => showsAhead(x, width, e, now)));
           continue;
         }
         if (x < 6) continue;
@@ -127,18 +155,19 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
         if (events.length) due.push({ key: `ev:${m.key}`, x: Math.round(x), timestamp: m.timestamp, stories: events });
       }
       const next = clusterNews(on, GAP);
-      // A release's pill is wider than a story's marker; one where "Next" sits joins it.
+      // Releases are circles like the news; one where "Next" sits joins it.
       const nextDue: PlacedNews[] = [];
-      for (const p of clusterNews(due, GAP * 1.8)) {
-        if (later.length && p.x >= width - 120) later.push(...p.stories);
+      for (const p of clusterNews(due, GAP)) {
+        if (later.length && p.x >= width - GAP * 1.5) later.push(...p.stories);
         else nextDue.push({ ...p, stories: byDate(p.stories) });
       }
       if (later.length) nextDue.push({ key: 'ev:ahead', x: width - 4, timestamp: later[0]!.time, stories: byDate(later).slice(0, 12) });
-      const sig = `${width}x${height}|${next.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${nextDue.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}`;
+      const sig = `${width}x${height}|${next.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${nextDue.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${windows.map((w) => `${w.x1}:${w.x3}`).join(',')}|${Math.floor(now / 60_000)}`;
       if (sig !== last) {
         last = sig;
         setPlaced(next);
         setReleases(nextDue);
+        setFomc(windows);
         setPane({ width, height });
       }
       raf = requestAnimationFrame(tick);
@@ -181,7 +210,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
     closeTimer.current = window.setTimeout(() => setOpen((o) => (o?.pinned ? o : null)), 220);
   };
 
-  if (placed.length === 0 && releases.length === 0) return null;
+  if (placed.length === 0 && releases.length === 0 && fomc.length === 0) return null;
   const shown = card.value ? placed.find((p) => p.key === card.value) ?? releases.find((p) => p.key === card.value) : undefined;
   const isRelease = !!shown?.stories[0]?.event;
   const box = layer.current?.getBoundingClientRect();
@@ -200,6 +229,29 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
 
   return (
     <>
+      {fomc.map((w) => (
+        <div
+          key={w.key}
+          className={`kc-fomc${leaving ? ' is-leaving' : ''}`}
+          style={{ left: left + w.x1, top, height: pane.height, width: Math.max(2, w.x3 - w.x1) }}
+          aria-hidden
+        >
+          <div className="kc-fomc__statement" style={{ width: Math.max(1, w.x2 - w.x1) }} />
+          <div className="kc-fomc__press" />
+          {w.x3 - w.x1 >= 44 && (
+            <div className="kc-fomc__label">
+              <b>FOMC</b>
+              {w.x3 - w.x1 >= 90 && (
+                <>
+                  <span>Statement 2:00 pm ET</span>
+                  <span>Press conference 2:30 pm</span>
+                  <span>End ~3:30 pm (estimated)</span>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
       {releases.length > 0 && (
         <div className={`kc-calmarks${leaving ? ' is-leaving' : ''}`} style={{ left, top: top + pane.height - FOOT - 28, width: pane.width }} aria-label="Economic calendar on the chart">
           {releases.map((p) => {
@@ -207,20 +259,25 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
             const n = p.stories.length;
             const ahead = p.key === 'ev:ahead';
             const imp = lead.event!.importance;
+            // A circle; it opens to its name and countdown on hover, or as the release comes near.
+            const near = nearRelease(lead.time, now);
             return (
               <button
                 key={p.key}
                 type="button"
-                className={`kc-calmark kc-calmark--${imp}${ahead ? ' kc-calmark--ahead' : ''}${open?.key === p.key ? ' is-open' : ''}${lead.time > now ? ' is-due' : ''}`}
+                className={`kc-calmark kc-calmark--${imp}${ahead ? ' kc-calmark--ahead' : ''}${open?.key === p.key ? ' is-open' : ''}${lead.time > now ? ' is-due' : ''}${near ? ' is-near' : ''}`}
                 style={{ left: p.x }}
                 aria-label={`${ahead ? 'Coming up: ' : ''}${lead.title}, ${countdown(lead.time, now)}${n > 1 ? `, and ${n - 1} more` : ''}`}
                 aria-expanded={open?.key === p.key}
                 {...hover(p.key)}
               >
                 {NEWS_ICONS.event}
-                {ahead && <span className="kc-calmark__n">Next</span>}
-                <span className="kc-calmark__t">{lead.event!.short}</span>
-                {ahead ? <span className="kc-calmark__n">{countdown(lead.time, now).replace(/^in /, '')}</span> : n > 1 && <span className="kc-calmark__n">+{n - 1}</span>}
+                <span className="kc-calmark__more">
+                  {ahead && <span className="kc-calmark__dim">Next</span>}
+                  <b>{lead.event!.short}</b>
+                  <span className="kc-calmark__dim">{countdown(lead.time, now).replace(/^in /, '')}</span>
+                </span>
+                {n > 1 && <span className="kc-newsmark__n">{n > 99 ? '99+' : n}</span>}
               </button>
             );
           })}
@@ -294,6 +351,11 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
                       {s.author}
                     </span>
                   </a>
+                  {isFomc(s) && (
+                    <a className="kc-newspop__live" href={FED_LIVE_URL} target="_blank" rel="noopener noreferrer">
+                      Watch live on the Federal Reserve's channel
+                    </a>
+                  )}
                 </li>
               ))}
               {!isRelease && shown.stories.map((s) => {
@@ -333,7 +395,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
               })}
             </ol>
             <footer className="kc-newspop__foot">
-              {isRelease ? 'From the Federal Reserve, BLS, BEA and SoSoValue · opens the publisher’s page' : 'SoSoValue · each story opens in a new tab'}
+              <PoweredBy more={isRelease} />
             </footer>
           </div>,
           document.body,

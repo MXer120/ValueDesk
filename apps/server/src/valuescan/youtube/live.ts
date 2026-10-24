@@ -29,6 +29,7 @@ export const LIVE_CHANNELS: ReadonlySet<string> = new Set([
   'UC8p1vwvWtl6T73JiExfWs1g', // CBS News
   'UCEAZeUIeJs0IjQiqTCdVSIg', // Yahoo Finance
   'UCYxRlFDqcWM4y7FfpiAN3KQ', // The White House
+  'UCAzhpt9DmG6PnHXjmJTvRGQ', // Federal Reserve (@federalreserve): the FOMC's press conferences
   'UCvJJ_dzjViJCoLf5uKUTwoA', // CNBC
   'UChqUTb7kYRX8-EiaN3XFrSQ', // Reuters
   'UCoMdktPbSTixAyNGwb-UYkQ', // Sky News
