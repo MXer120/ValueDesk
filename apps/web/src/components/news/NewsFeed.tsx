@@ -182,8 +182,9 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
             </button>
           ))}
         </div>
-        <span className="nw__src"><PoweredBy more={onCalendar} /></span>
       </header>
+      {/* The source's credit floats centred over the bottom of the feed (NewsFeed.css). */}
+      <div className="nw__credit"><PoweredBy more={onCalendar} /></div>
       {onCalendar ? <EconCalendar instance={instance} /> : <>
       <div className="nw__filters">
         {(f === 'latest' || search) && (

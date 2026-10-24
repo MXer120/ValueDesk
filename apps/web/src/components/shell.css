@@ -98,15 +98,15 @@
    rails and table heads stick under the bar through --page-top. --navbar-live is the
    bar's measured height (NavBar.tsx): 56px on desktop, 46px from 761px to 840px.
 
-   The ground (NavBar.tsx `navbar__glass`): six bands of blur, 16px at the top down to
+   The ground (NavBar.tsx `navbar__glass`): six bands of blur, 20px at the top down to
    1px at the bottom edge, under a tint of the page colour that fades to nothing. Bands,
    not one blur under a gradient mask: a masked backdrop filter paints nothing at all
    in some Chromium builds, which would leave the links over bare page content. */
 .shell--rail > .navbar { position: relative; z-index: 60; background: transparent; }
 .navbar__glass { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
 .navbar__glass > i { position: absolute; left: 0; right: 0; }
-.navbar__glass > i:nth-child(1) { top: 0; height: 36%; -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
-.navbar__glass > i:nth-child(2) { top: 36%; height: 16%; -webkit-backdrop-filter: blur(11px); backdrop-filter: blur(11px); }
+.navbar__glass > i:nth-child(1) { top: 0; height: 36%; -webkit-backdrop-filter: blur(20px); backdrop-filter: blur(20px); }
+.navbar__glass > i:nth-child(2) { top: 36%; height: 16%; -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
 .navbar__glass > i:nth-child(3) { top: 52%; height: 14%; -webkit-backdrop-filter: blur(7px); backdrop-filter: blur(7px); }
 .navbar__glass > i:nth-child(4) { top: 66%; height: 12%; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
 .navbar__glass > i:nth-child(5) { top: 78%; height: 11%; -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
@@ -115,10 +115,11 @@
   content: "";
   position: absolute;
   inset: 0;
+  /* See-through: a light veil of the page colour that thins to nothing, so the blur
+     does the work and the page reads through it. */
   background: linear-gradient(to bottom,
-    var(--bg) 0%,
-    color-mix(in srgb, var(--bg) 90%, transparent) 40%,
-    color-mix(in srgb, var(--bg) 55%, transparent) 72%,
+    color-mix(in srgb, var(--bg) 55%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 38%, transparent) 50%,
     transparent 100%);
 }
 .shell--rail:not(:has(> .banner)) > .app { grid-row: 1 / 4; padding-top: 0; }

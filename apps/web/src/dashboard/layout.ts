@@ -431,10 +431,12 @@ const XS = pair({ markets: 2, ticker: 4, band: 24, positions: 11, account: 9 });
  * the trade made without leaving it - added beside it and one click away in
  * the rail.
  *
- * News, lg: the channel over the chart on the left (the chart the taller of
- * the two), the news column beside them, the ticket over the account on the
- * right, the Trade terminal's ticket and account in width and height. md: the
- * channel and the news over the chart and the ticket.
+ * News, lg: the channel and the news side by side on top, the chart the full
+ * width of both under them, the ticket over the account on the right (the Trade
+ * terminal's ticket and account in width and height). The channel's cell is
+ * about 16:9 under its header, so the stream fills it: the cell before was
+ * nearly twice as wide as its height, and the stream sat in ~300px of black on
+ * each side. md: the channel and the news over the chart and the ticket.
  */
 const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
   { id: 'trade', name: 'Trade', icon: 'trade' },
@@ -446,22 +448,40 @@ const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
     shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
     layouts: {
       lg: [
-        { i: 'livefeed', x: 0, y: 0, w: 26, h: 40 },
-        { i: 'chart', x: 0, y: 40, w: 26, h: 50 },
-        { i: 'news', x: 26, y: 0, w: 12, h: 90 },
+        { i: 'livefeed', x: 0, y: 0, w: 19, h: 42 },
+        { i: 'news', x: 19, y: 0, w: 19, h: 42 },
+        { i: 'chart', x: 0, y: 42, w: 38, h: 48 },
         { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
         { i: 'account', x: 38, y: 60, w: 10, h: 30 },
       ],
       md: [
-        { i: 'livefeed', x: 0, y: 0, w: 30, h: 14 },
-        { i: 'news', x: 30, y: 0, w: 18, h: 14 },
-        { i: 'chart', x: 0, y: 14, w: 30, h: 19 },
-        { i: 'exec', x: 30, y: 14, w: 18, h: 19 },
+        { i: 'livefeed', x: 0, y: 0, w: 30, h: 16 },
+        { i: 'news', x: 30, y: 0, w: 18, h: 16 },
+        { i: 'chart', x: 0, y: 16, w: 30, h: 19 },
+        { i: 'exec', x: 30, y: 16, w: 18, h: 19 },
       ],
     },
-    // The first design (the channel, the news and a short chart, no ticket): an untouched
-    // News terminal from then moves to this one.
+    // Earlier designs: an untouched News terminal in one of them moves to this one.
     was: [{
+      // The channel over the chart, the news a narrow column beside them (the stream letterboxed).
+      shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
+      layouts: {
+        lg: [
+          { i: 'livefeed', x: 0, y: 0, w: 26, h: 40 },
+          { i: 'chart', x: 0, y: 40, w: 26, h: 50 },
+          { i: 'news', x: 26, y: 0, w: 12, h: 90 },
+          { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
+          { i: 'account', x: 38, y: 60, w: 10, h: 30 },
+        ],
+        md: [
+          { i: 'livefeed', x: 0, y: 0, w: 30, h: 14 },
+          { i: 'news', x: 30, y: 0, w: 18, h: 14 },
+          { i: 'chart', x: 0, y: 14, w: 30, h: 19 },
+          { i: 'exec', x: 30, y: 14, w: 18, h: 19 },
+        ],
+      },
+    }, {
+      // The first design (the channel, the news and a short chart, no ticket).
       shown: ['livefeed', 'news', 'chart'],
       layouts: {
         lg: [
