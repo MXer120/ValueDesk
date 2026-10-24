@@ -49,7 +49,6 @@ import { prefetchAccountTotals, useAccountTotals } from './account/useAccountTot
 import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExists';
 import { useWalletSnapshot } from './account/useWallet';
 import { RegionPill } from '../legal/LegalGate';
-import { toggleFolders } from '../folders/state';
 import { FOLDER_ICON } from '../folders/icons';
 import './account/account.css';
 
@@ -82,10 +81,12 @@ export interface NavBarProps {
   /** Futures or spot, for the switch on Trade. */
   engine?: Engine;
   onEngine?: (e: Engine) => void;
+  /** Knowledge is on (folders/access.ts): its link and, without the rail, its button. Off, neither exists. */
+  knowledge?: boolean;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -150,7 +151,7 @@ export function NavBar({
           </>
         )}
         <nav className="navlinks">
-          {TABS.map((t) => (
+          {TABS.filter((t) => t !== 'knowledge' || knowledge).map((t) => (
             /*
              * A REAL ANCHOR with a real href, not a button.
              *
@@ -185,9 +186,11 @@ export function NavBar({
             <>
               <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
               <Notices address={address} />
-              <button type="button" className="navicon" title="Knowledge folders" aria-label="Knowledge folders" onClick={toggleFolders}>
-                <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><FOLDER_ICON /></svg>
-              </button>
+              {knowledge && (
+                <button type="button" className="navicon" title="Knowledge" aria-label="Knowledge" onClick={() => onNavigate('knowledge')}>
+                  <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><FOLDER_ICON /></svg>
+                </button>
+              )}
               <button
                 type="button" className="navicon" title="Search markets (⌘K)"
                 aria-label="Search markets" onClick={onOpenSearch}

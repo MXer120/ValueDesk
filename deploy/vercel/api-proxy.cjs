@@ -102,8 +102,8 @@ const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
 const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/api/folders' || p.startsWith('/api/folders/'); };
 /** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
 const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path);
-/** A folder item (a chart snapshot and its thumbnail at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
-const FOLDERS_BODY_LIMIT = 640 * 1024;
+/** A folder item (a sheet or a board at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
+const FOLDERS_BODY_LIMIT = 1792 * 1024;
 /** A file uploaded to a folder (apps/server folders/limits.ts FILE_BYTES_CEILING, and a little room). */
 const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
 /** How large a POST's body may be on this path. */

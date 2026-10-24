@@ -1,0 +1,280 @@
+/* The spreadsheet (SheetEditor.tsx): toolbar, formula bar, the virtualized grid with
+   its sticky headers and frozen panes, the cell editor and its suggestions, the tabs
+   and the status line. Dark, quiet, thin lines; the only hues are the references
+   being edited and what the user picks. */
+
+.ks {
+  --ks-bg: var(--bg);
+  --ks-head: var(--bg-panel);
+  --ks-line: rgba(255, 255, 255, 0.065);
+  --ks-head-line: rgba(255, 255, 255, 0.085);
+  --ks-freeze: rgba(255, 255, 255, 0.2);
+  --ks-sel: rgba(255, 255, 255, 0.075);
+  --ks-sel-line: rgba(255, 255, 255, 0.42);
+  --ks-active: #f2f2f2;
+  --ks-hover: rgba(255, 255, 255, 0.07);
+  --ks-pop: var(--bg-elevated);
+  display: flex; flex-direction: column; height: 100%; min-height: 0; min-width: 0;
+  color: var(--text); font-size: var(--fs-xs);
+}
+
+/* --- toolbar ------------------------------------------------------------------------ */
+.ks-bar {
+  display: flex; align-items: center; gap: 2px; flex: none; min-width: 0;
+  padding: 6px 8px; border-bottom: 1px solid var(--panel-line);
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.ks-bar::-webkit-scrollbar { display: none; }
+.ks-tool {
+  position: relative; display: grid; place-items: center; flex: none; width: 28px; height: 28px; min-height: 0; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.ks-tool:hover:not(:disabled) { background: var(--ks-hover); color: var(--text); }
+.ks-tool.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.ks-tool:disabled { opacity: 0.32; cursor: default; }
+.ks-tool:focus-visible, .ks-select:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+.ks-tool--text { width: auto; padding: 0 6px; font-family: var(--font-num); font-size: 11.5px; letter-spacing: 0.01em; }
+.ks-tool--text small { margin-left: 1px; font-size: 10px; color: var(--dim); }
+.ks-tool--text:hover small { color: inherit; }
+.ks-sep { flex: none; width: 1px; height: 16px; margin: 0 5px; background: var(--panel-line); }
+.ks-fill { flex: 1 0 8px; }
+.ks-select {
+  flex: none; height: 28px; padding: 0 22px 0 9px; margin: 0 2px;
+  border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 7px; background-color: rgba(255, 255, 255, 0.04);
+  color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer; appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='m2.5 4 2.5 2.5L7.5 4' fill='none' stroke='%23bcbcbc' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 6px center; background-size: 10px;
+}
+.ks-select:hover { border-color: rgba(255, 255, 255, 0.16); }
+.ks-select option { background: var(--bg-elevated); color: var(--text); }
+
+.ks-swatch { position: relative; display: inline-flex; flex: none; }
+.ks-swatch__bar { position: absolute; left: 8px; right: 8px; bottom: 4px; height: 2.5px; border-radius: 2px; }
+.ks-swatch__menu {
+  position: fixed; z-index: 1300; display: grid; grid-template-columns: repeat(6, 22px); gap: 6px; padding: 9px;
+  border-radius: 10px; background: var(--ks-pop); box-shadow: var(--depth-3);
+  animation: ks-pop 120ms var(--ease-out, ease);
+}
+.ks-swatch__c, .ks-swatch__none {
+  width: 22px; height: 22px; min-height: 0; padding: 0; border: 0; border-radius: 6px; cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); transition: transform 100ms;
+}
+.ks-swatch__c:hover, .ks-swatch__none:hover { transform: scale(1.1); }
+.ks-swatch__c.is-on { box-shadow: 0 0 0 2px var(--ks-pop), 0 0 0 3.5px var(--text); }
+.ks-swatch__none { background: linear-gradient(135deg, transparent 45%, var(--neg) 45% 55%, transparent 55%), rgba(255, 255, 255, 0.04); }
+
+/* --- formula bar -------------------------------------------------------------------- */
+.ks-fx { position: relative; z-index: 6; display: flex; align-items: stretch; flex: none; min-height: 31px; border-bottom: 1px solid var(--panel-line); }
+.ks-name {
+  flex: none; width: 96px; min-height: 0; padding: 0 10px; border: 0; border-right: 1px solid var(--panel-line); border-radius: 0;
+  background: transparent; color: var(--text); font-family: var(--font-num); font-size: 12px; outline: none;
+}
+.ks-name:hover { background: rgba(255, 255, 255, 0.025); }
+.ks-name:focus { background: rgba(255, 255, 255, 0.05); box-shadow: inset 0 -1px 0 var(--ks-active); }
+.ks-fx__label {
+  display: grid; place-items: center; flex: none; width: 32px; border-right: 1px solid var(--panel-line);
+  color: var(--dim); font: italic 13px/1 Georgia, 'Times New Roman', serif;
+}
+.ks-fx__field { position: relative; flex: 1; min-width: 0; }
+
+/* The text being edited, over its coloured copy (FormulaField). */
+.ks-ff { position: relative; display: grid; min-width: 0; }
+.ks-ff > * { grid-area: 1 / 1; }
+.ks-ff__mirror, .ks-ff__input {
+  box-sizing: border-box; margin: 0; border: 0; font: inherit; font-size: 12.5px; line-height: 18px; letter-spacing: normal;
+  white-space: pre; tab-size: 4; overflow: hidden; word-break: normal;
+}
+.ks-ff__mirror { color: var(--text); pointer-events: none; }
+.ks-ff__input {
+  width: 100%; height: 100%; min-height: 0; resize: none; outline: none; background: transparent;
+  color: transparent; caret-color: var(--text); -webkit-text-fill-color: transparent;
+}
+.ks-ff__input::selection { background: rgba(255, 255, 255, 0.22); color: transparent; }
+.ks-ff--bar { height: calc(var(--lines, 1) * 18px + 12px); }
+.ks-ff--bar .ks-ff__mirror, .ks-ff--bar .ks-ff__input { width: 100%; height: 100%; padding: 6px 10px; }
+.ks-ff--bar .ks-ff__input:focus { box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.35); }
+.ks-ff--cell { min-width: 100%; min-height: 100%; }
+.ks-ff--cell .ks-ff__mirror, .ks-ff--cell .ks-ff__input { padding: 3px 6px; line-height: 19px; }
+.ks-ff--cell .ks-ff__mirror { max-width: 100%; }
+.ks-ff--cell.is-b { font-weight: 600; }
+.ks-ff--cell.is-i { font-style: italic; }
+
+/* Function suggestions and the signature of the call being typed. */
+.ks-assist {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; min-width: 250px; max-width: min(420px, 90vw); padding: 4px;
+  border-radius: 10px; background: var(--ks-pop); box-shadow: var(--depth-3); font-size: 12px; text-align: left;
+  animation: ks-pop 120ms var(--ease-out, ease);
+}
+.ks-assist__item {
+  display: flex; align-items: baseline; gap: 2px; width: 100%; min-height: 0; padding: 5px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--dim); font: inherit; text-align: left; cursor: pointer;
+}
+.ks-assist__item b { color: var(--text); font-weight: 600; }
+.ks-assist__item span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ks-assist__item.is-on, .ks-assist__item:hover { background: rgba(255, 255, 255, 0.08); }
+.ks-assist__tip { margin: 3px 8px 2px; color: var(--dim); font-size: var(--fs-micro); }
+.ks-assist--sig { min-width: 0; padding: 6px 10px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ks-assist--sig b { color: var(--muted); font-weight: 600; }
+.ks-assist--sig em { color: var(--text); font-style: normal; font-weight: 600; }
+
+/* --- grid --------------------------------------------------------------------------- */
+.ks-grid { position: relative; flex: 1; min-height: 0; background: var(--ks-bg); }
+.ks-keys {
+  position: absolute; left: 0; top: 0; width: 1px; height: 1px; padding: 0; border: 0;
+  opacity: 0; resize: none; overflow: hidden; pointer-events: none;
+}
+.ks-scroll {
+  position: absolute; inset: 0; overflow: auto; overscroll-behavior: contain;
+  font-size: 12.5px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.ks-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.ks-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 6px; background: rgba(255, 255, 255, 0.16) padding-box; }
+.ks-scroll::-webkit-scrollbar-thumb:hover { background-color: rgba(255, 255, 255, 0.28); }
+.ks-scroll::-webkit-scrollbar-corner { background: transparent; }
+.ks-canvas { position: relative; min-height: 100%; }
+
+/* Panes: the header row and frozen rows stick to the top, the row numbers and frozen
+   columns to the left, the corner to both; the body scrolls under them. */
+.ks-top { position: sticky; top: 0; z-index: 3; background: var(--ks-bg); }
+.ks-top.is-frozen { box-shadow: 0 1px 0 var(--ks-freeze); }
+.ks-top__left { position: sticky; left: 0; z-index: 2; background: var(--ks-bg); }
+.ks-top__left.is-frozen, .ks-left.is-frozen { box-shadow: 1px 0 0 var(--ks-freeze); }
+.ks-left { position: sticky; left: 0; z-index: 2; background: var(--ks-bg); }
+.ks-body { position: absolute; inset: 0; z-index: 1; }
+
+.ks-corner {
+  position: absolute; left: 0; top: 0; width: 46px; height: 24px; z-index: 3; cursor: pointer;
+  background: var(--ks-head); box-shadow: inset -1px -1px 0 var(--ks-head-line);
+}
+.ks-corner::after {
+  content: ''; position: absolute; right: 4px; bottom: 4px; border: 4px solid transparent;
+  border-right-color: var(--dim); border-bottom-color: var(--dim); opacity: 0.6;
+}
+.ks-corner:hover::after { opacity: 1; }
+.ks-ch, .ks-rh {
+  position: absolute; display: grid; place-items: center; box-sizing: border-box; overflow: visible;
+  background: var(--ks-head); color: var(--dim); font-family: var(--font-num); font-size: 11px; line-height: 1;
+  cursor: pointer; transition: background 80ms, color 80ms;
+}
+.ks-ch { top: 0; height: 24px; box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -1px 0 var(--ks-head-line); }
+.ks-rh { left: 0; width: 46px; box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -1px 0 var(--ks-head-line); }
+.ks-ch:hover, .ks-rh:hover { color: var(--muted); }
+.ks-ch.is-sel, .ks-rh.is-sel { background: #242425; color: var(--text); }
+.ks-ch.is-sel { box-shadow: inset -1px 0 0 var(--ks-head-line), inset 0 -2px 0 rgba(255, 255, 255, 0.55); }
+.ks-rh.is-sel { box-shadow: inset 0 -1px 0 var(--ks-head-line), inset -2px 0 0 rgba(255, 255, 255, 0.55); }
+.ks-ch.is-all, .ks-rh.is-all { background: #333334; }
+.ks-ch__size, .ks-rh__size { position: absolute; z-index: 2; }
+.ks-ch__size { top: 0; right: -4px; width: 8px; height: 100%; cursor: col-resize; }
+.ks-rh__size { left: 0; bottom: -4px; width: 100%; height: 8px; cursor: row-resize; }
+.ks-ch__size::after, .ks-rh__size::after { content: ''; position: absolute; background: transparent; transition: background 100ms; }
+.ks-ch__size::after { left: 3px; top: 3px; bottom: 3px; width: 2px; border-radius: 1px; }
+.ks-rh__size::after { top: 3px; left: 4px; right: 4px; height: 2px; border-radius: 1px; }
+.ks-ch__size:hover::after, .ks-rh__size:hover::after { background: var(--text); }
+
+/* Gridlines, then cells over them (a fill hides its lines, as in a spreadsheet). */
+.ks-vl, .ks-hl { position: absolute; display: block; background: var(--ks-line); pointer-events: none; }
+.ks-vl { width: 1px; }
+.ks-hl { height: 1px; }
+.ks-c {
+  position: absolute; display: flex; align-items: center; box-sizing: border-box; padding: 0 6px 1px;
+  overflow: hidden; white-space: pre; line-height: 1.3; color: var(--text); pointer-events: none;
+}
+.ks-c--num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.ks-c--err { color: var(--neg); font-family: var(--font-num); font-size: 11.5px; letter-spacing: 0.02em; }
+.ks-c--bool { font-family: var(--font-num); font-size: 11.5px; letter-spacing: 0.03em; color: var(--muted); }
+.ks-c.is-r { justify-content: flex-end; text-align: right; }
+.ks-c.is-c { justify-content: center; text-align: center; }
+.ks-c.is-wrap { align-items: flex-start; padding-top: 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ks-c.is-spill { z-index: 1; background: linear-gradient(var(--ks-bg), var(--ks-bg)) top / 100% calc(100% - 1px) no-repeat; }
+
+/* Selection, references being edited, fill preview, the copied block. */
+.ks-sel, .ks-ref, .ks-fillto, .ks-clip, .ks-active { position: absolute; box-sizing: border-box; pointer-events: none; }
+.ks-sel { z-index: 2; background: var(--ks-sel); border: 0 solid var(--ks-sel-line); }
+.ks-ref { z-index: 2; background: color-mix(in srgb, var(--ref) 13%, transparent); border: 0 solid var(--ref); }
+.ks-fillto { z-index: 3; border: 0 dashed var(--ks-active); }
+.ks-sel.t, .ks-fillto.t { border-top-width: 1px; }
+.ks-sel.b, .ks-fillto.b { border-bottom-width: 1px; }
+.ks-sel.l, .ks-fillto.l { border-left-width: 1px; }
+.ks-sel.r, .ks-fillto.r { border-right-width: 1px; }
+.ks-ref.t { border-top-width: 2px; }
+.ks-ref.b { border-bottom-width: 2px; }
+.ks-ref.l { border-left-width: 2px; }
+.ks-ref.r { border-right-width: 2px; }
+.ks-active { z-index: 3; box-shadow: 0 0 0 1px var(--ks-active), inset 0 0 0 1px var(--ks-active); }
+.ks-grid:not(:focus-within) .ks-active { --ks-active: rgba(255, 255, 255, 0.5); }
+.ks-fillh {
+  position: absolute; z-index: 4; width: 8px; height: 8px; box-sizing: border-box;
+  border: 1.5px solid var(--ks-bg); border-radius: 2px; background: var(--ks-active); cursor: crosshair;
+}
+.ks-fillh::before { content: ''; position: absolute; inset: -6px; }
+.ks-clip {
+  z-index: 3; --ant: rgba(255, 255, 255, 0.8);
+  background-image:
+    linear-gradient(90deg, var(--ant) 50%, transparent 50%), linear-gradient(90deg, var(--ant) 50%, transparent 50%),
+    linear-gradient(0deg, var(--ant) 50%, transparent 50%), linear-gradient(0deg, var(--ant) 50%, transparent 50%);
+  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y;
+  background-size: 8px 1px, 8px 1px, 1px 8px, 1px 8px;
+  background-position: 0 0, 0 100%, 0 0, 100% 0;
+  animation: ks-ants 0.7s linear infinite;
+}
+@keyframes ks-ants { to { background-position: 8px 0, -8px 100%, 0 -8px, 100% 8px; } }
+
+/* The cell being edited: over the cell, growing to the right as the text does. */
+.ks-editor {
+  position: absolute; z-index: 20; display: flex; box-sizing: border-box;
+  background: #161617; box-shadow: 0 0 0 2px var(--ks-active), 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.ks-editor .ks-assist { top: calc(100% + 6px); left: -2px; }
+
+/* More rows at the bottom of the grid, kept in view when scrolled sideways. */
+.ks-more { position: relative; z-index: 2; }
+.ks-more__in { position: sticky; left: 0; display: flex; align-items: center; gap: 12px; height: 100%; padding-left: 56px; width: max-content; }
+.ks-more__btn {
+  height: 28px; min-height: 0; padding: 0 14px; border: 0; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06); color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.ks-more__btn:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+.ks-more__hint { color: var(--dim); font-size: var(--fs-micro); font-family: var(--font-num); }
+
+/* --- tabs and status ---------------------------------------------------------------- */
+.ks-foot {
+  display: flex; align-items: center; gap: 10px; flex: none; min-width: 0; height: 36px; padding: 0 10px 0 6px;
+  border-top: 1px solid var(--panel-line);
+}
+.ks-tabs { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ks-tabs::-webkit-scrollbar { display: none; }
+.ks-tab {
+  flex: none; height: 26px; min-height: 0; max-width: 220px; padding: 0 12px; overflow: hidden; text-overflow: ellipsis;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-xs);
+  white-space: nowrap; cursor: pointer; transition: background 120ms, color 120ms;
+}
+.ks-tab:hover { background: rgba(255, 255, 255, 0.06); color: var(--text); }
+.ks-tab.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); font-weight: 500; }
+.ks-tab:focus-visible, .ks-tabadd:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+.ks-tab--edit { width: auto; max-width: 260px; padding: 0 8px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); color: var(--text); outline: none; cursor: text; }
+.ks-tabadd {
+  display: grid; place-items: center; flex: none; width: 26px; height: 26px; min-height: 0; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer;
+}
+.ks-tabadd:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: var(--text); }
+.ks-tabadd:disabled { opacity: 0.3; cursor: default; }
+.ks-stat {
+  flex: none; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: pre;
+  color: var(--muted); font-family: var(--font-num); font-size: 11.5px; font-variant-numeric: tabular-nums;
+}
+
+@keyframes ks-pop { from { opacity: 0; transform: translateY(-3px); } }
+
+@media (max-width: 640px) {
+  .ks-bar { padding: 5px 6px; }
+  .ks-name { width: 70px; padding: 0 8px; }
+  .ks-fx__label { width: 26px; }
+  .ks-stat { max-width: 45%; font-size: 11px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ks-clip, .ks-assist, .ks-swatch__menu { animation: none; }
+}

@@ -1,0 +1,115 @@
+/* The board (BoardEditor.tsx): an endless canvas filling the item, its world moved and scaled
+   by one transform; the tools along the bottom, the view's controls in a corner, the selected
+   things' properties along the top. Everything inside the world is in board units, so lines
+   meant to stay thin on screen are drawn 1/zoom wide (inline, from the editor). */
+
+.kb { container-type: inline-size; position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.kb .kn-conflict { position: absolute; top: 8px; left: 50%; z-index: 6; transform: translateX(-50%); margin: 0; }
+.kb-canvas { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; outline: none; touch-action: none; user-select: none; -webkit-user-select: none; background-color: var(--bg); }
+.kb-world { position: absolute; left: 0; top: 0; width: 0; height: 0; transform-origin: 0 0; }
+
+.kb-thing { position: absolute; box-sizing: border-box; }
+.kb-text { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.32; pointer-events: none; }
+.kb-text--free { height: auto; min-height: 100%; }
+
+.kb-sticky { padding: 16px; border-radius: 4px; box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18), 0 8px 18px rgba(0, 0, 0, 0.32); }
+.kb-textel { padding: 2px 0; }
+.kb-shape { display: flex; }
+.kb-shape__svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.kb-text--shape { position: relative; padding: 10px 14px; }
+.kb-frame { border-style: solid; border-radius: 6px; }
+.kb-frame__name { position: absolute; left: 0; color: var(--dim); font-weight: 500; white-space: nowrap; pointer-events: none; }
+.kb-image { overflow: hidden; border-radius: 6px; background: rgba(255, 255, 255, 0.03); }
+.kb-image img { display: block; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.kb-image__wait { display: grid; place-items: center; width: 100%; height: 100%; }
+.kb-stroke { overflow: visible; pointer-events: none; }
+.kb-stroke path, .kb-stroke circle { pointer-events: none; }
+.kb-stroke .kb-stroke__hit { fill: none; stroke: transparent; pointer-events: stroke; cursor: move; }
+
+.kb-item {
+  display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; background: #1b1b1e; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); color: var(--text);
+}
+.kb-item.is-gone { opacity: 0.6; border-style: dashed; }
+.kb-item__pic { flex: 1 1 auto; min-height: 0; margin: -12px -12px 0; overflow: hidden; background: var(--bg); }
+.kb-item__pic img { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+.kb-item__row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kb-item__row .kf-kind { width: 32px; height: 32px; border-radius: 9px; }
+.kb-item__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kb-item__body b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 600; }
+.kb-item__body small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: 11px; }
+.kb-item__x { color: var(--muted); font-size: 12.5px; line-height: 1.45; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; }
+
+/* Selection: outlines, handles, an arrow's ends, the guides, the marquee. */
+.kb-outline { position: absolute; border: 0 solid #4c9dff; pointer-events: none; }
+.kb-outline.is-locked { border-color: var(--dim); border-style: dashed; }
+.kb-outline--group { border-style: dashed; border-color: rgba(76, 157, 255, 0.7); }
+.kb-handle { position: absolute; z-index: 2; box-sizing: border-box; border: 0 solid #4c9dff; background: #fff; }
+.kb-handle--nw, .kb-handle--se { cursor: nwse-resize; }
+.kb-handle--ne, .kb-handle--sw { cursor: nesw-resize; }
+.kb-handle--n, .kb-handle--s { cursor: ns-resize; }
+.kb-handle--e, .kb-handle--w { cursor: ew-resize; }
+.kb-end { position: absolute; z-index: 2; box-sizing: border-box; border: 0 solid #4c9dff; border-radius: 999px; background: #fff; cursor: grab; }
+.kb-end.is-attached { background: #4c9dff; }
+.kb-guide { position: absolute; background: #ff4fa3; pointer-events: none; }
+.kb-marquee { position: absolute; border: 0 solid rgba(76, 157, 255, 0.9); background: rgba(76, 157, 255, 0.08); pointer-events: none; }
+
+.kb-edit {
+  position: absolute; z-index: 3; box-sizing: border-box; margin: 0; padding: 2px 0; resize: none; overflow: hidden;
+  border: 0; outline: none; background: transparent; font-family: inherit; line-height: 1.32; white-space: pre-wrap; overflow-wrap: anywhere; caret-color: #4c9dff;
+}
+.kb-edit.is-sticky { padding: 16px; }
+.kb-edit.is-centered { padding: 10px 14px; display: block; }
+
+.kb-empty {
+  position: absolute; left: 50%; top: 42%; display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(420px, 80%);
+  transform: translate(-50%, -50%); color: var(--dim); font-size: var(--fs-xs); line-height: 1.5; text-align: center; pointer-events: none;
+}
+.kb-empty b { color: var(--muted); font-size: var(--fs-base); }
+
+/* The tools (bottom), the view (bottom right), the selected things' properties (top). */
+.kb-tools, .kb-zoom, .kb-props {
+  position: absolute; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; background: rgba(28, 28, 31, 0.92);
+  -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.kb-tools { left: 50%; bottom: 14px; transform: translateX(-50%); max-width: calc(100% - 24px); overflow-x: auto; }
+.kb-zoom { right: 14px; bottom: 14px; }
+.kb-tool { display: grid; place-items: center; flex: none; width: 34px; height: 34px; min-height: 0; padding: 0; border: 0; border-radius: 9px; background: transparent; color: var(--muted); cursor: pointer; transition: background 120ms, color 120ms; }
+.kb-tool:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.kb-tool.is-on { background: #4c9dff; color: #fff; }
+.kb-tool:disabled { opacity: 0.35; cursor: default; }
+.kb-tools__sep { flex: none; width: 1px; height: 20px; margin: 0 4px; background: rgba(255, 255, 255, 0.1); }
+.kb-zoom__pct { min-width: 52px; height: 34px; padding: 0 6px; border: 0; border-radius: 9px; background: transparent; color: var(--text); font: inherit; font-family: var(--font-num); font-size: var(--fs-xs); cursor: pointer; }
+.kb-zoom__pct:hover { background: rgba(255, 255, 255, 0.08); }
+.kb-stickies { display: inline-flex; gap: 4px; padding: 0 4px; }
+.kb-stickies__c { width: 20px; height: 20px; padding: 0; border: 2px solid transparent; border-radius: 5px; cursor: pointer; }
+.kb-stickies__c.is-on { border-color: #fff; }
+.kb-busy { position: absolute; left: 14px; bottom: 14px; z-index: 5; display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: 10px; background: rgba(28, 28, 31, 0.92); color: var(--muted); font-size: var(--fs-micro); }
+
+.kb-props { top: 12px; left: 50%; transform: translateX(-50%); flex-wrap: nowrap; gap: 6px; max-width: calc(100% - 24px); overflow-x: auto; padding: 5px 8px; }
+.kb-props > * { flex: none; }
+.kb-props__group { position: relative; display: inline-flex; }
+.kb-props__chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: var(--text); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.kb-props__chip:hover { background: rgba(255, 255, 255, 0.1); }
+.kb-props__dot { width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25); }
+.kb-props__dot--ring { background: transparent; border: 3px solid; box-shadow: none; border-radius: 999px; }
+.kb-props__pop { display: inline-flex; align-items: center; gap: 4px; padding: 0 4px; }
+.kb-props__c { flex: none; width: 20px; height: 20px; padding: 0; border: 1px solid rgba(255, 255, 255, 0.18); border-radius: 6px; cursor: pointer; }
+.kb-props__c:hover { transform: scale(1.1); }
+.kb-props__c.is-none { background: linear-gradient(135deg, transparent 45%, var(--neg) 45%, var(--neg) 55%, transparent 55%); }
+.kb-props__seg { display: inline-flex; align-items: center; gap: 1px; padding: 2px; border-radius: 9px; background: rgba(255, 255, 255, 0.04); }
+.kb-props__seg button { display: grid; place-items: center; min-width: 28px; height: 26px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.kb-props__seg button:hover { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.kb-props__seg button.is-on { background: rgba(255, 255, 255, 0.14); color: var(--text); }
+.kb-props__seg button.is-danger { color: var(--neg); }
+.kb-props__seg button > span { display: block; border-radius: 2px; background: currentColor; }
+.kb-props__seg select { height: 26px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.kb-props__seg select:hover { color: var(--text); }
+.kb-props__op { display: inline-flex; align-items: center; padding: 0 4px; }
+.kb-props__op input { width: 70px; accent-color: #4c9dff; }
+
+/* A narrow board: the view's controls above the tools, not beside them. */
+@container (max-width: 760px) {
+  .kb-zoom { bottom: 64px; }
+}

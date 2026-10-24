@@ -1,51 +1,55 @@
 /**
- * One folder item, open: its title (renamed in place), then what it is -
+ * The item views the Knowledge page shares (KnowledgePage.tsx, ItemView.tsx):
+ * each kind's icon and its line in a list, and the views of what keeps what
+ * was saved -
  *
- *   note    the rich-text editor (NoteEditor.tsx), saved as you type
- *   table   the grid (TableEditor.tsx), saved as you type
  *   chart   the snapshot: market, timeframe, what it holds, its picture or the
  *           chart's own live preview, and Open chart (bridge.ts openChartSnapshot)
  *   news    the story as it was saved, with its link
  *   file    an image shown, a text file read, a PDF opened in the browser's own
  *           viewer in a new tab - always from bytes fetched with the wallet's
  *           token and typed by this page, never a link to the server
+ *
+ * The editors (doc/, sheet/, board/) and the saved posts (tweets.tsx) are their own.
  */
-import { useEffect, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import type { FolderItem, ItemKind, ItemSummary, NoteData, SavedNewsData, TableData } from '@sign/folders/types.js';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import type { ItemKind, ItemSummary, SavedNewsData } from '@sign/folders/types.js';
 import { FILE_TYPES, isImageType } from '@sign/folders/types.js';
-import { MENU_ICONS } from '../dashboard/tabExtras';
 import { CoinIcon } from '../components/CoinIcon';
-import { chartOpenerRegistered, chartPreviewComponent, onBridgeChange, openChartSnapshot, type ChartSnapshot } from './bridge';
-import { foldersApi } from './api';
-import { NameInput, mb, saveBlob } from './ui';
-import { NoteEditor } from './NoteEditor';
-import { TableEditor } from './TableEditor';
-import { change, closeFolders, foldersState, putSummary, useFolders } from './state';
+import { chartOpenerRegistered, chartPreviewComponent, onBridgeChange, openChartSnapshot, type ChartSnapshot } from '../folders/bridge';
+import { foldersApi } from '../folders/api';
+import { mb, saveBlob } from '../folders/ui';
+import { change } from '../folders/state';
 
 const KIND_PATH: Record<ItemKind, ReactNode> = {
-  note: <><path d="M4.5 2.5h5l2.5 2.5v8a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z" /><path d="M6 7.5h4M6 10h4" /></>,
-  table: <><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M2.5 6.5h11M2.5 9.8h11M6.5 3v10" /></>,
+  doc: <><path d="M4.5 2.5h5l2.5 2.5v8a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z" /><path d="M6 7h4M6 9.3h4M6 11.6h2.5" /></>,
+  sheet: <><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M2.5 6.5h11M2.5 9.8h11M6.2 3v10M9.8 3v10" /></>,
+  board: <><rect x="2.5" y="2.5" width="11" height="11" rx="2" /><rect x="4.6" y="4.6" width="3.2" height="3.2" rx=".6" /><circle cx="10.6" cy="10.4" r="1.6" /><path d="M7.8 7.8 9.4 9.2" /></>,
+  // A post: a speech bubble (not X's own mark).
+  tweet: <><path d="M3 4.6A1.6 1.6 0 0 1 4.6 3h6.8A1.6 1.6 0 0 1 13 4.6v4.8A1.6 1.6 0 0 1 11.4 11H7.2L4.4 13.3V11A1.6 1.6 0 0 1 3 9.4Z" /><path d="M5.6 6.2h4.8M5.6 8.2h3" /></>,
   chart: <><path d="M3 13.5h10.5" /><path d="M4.5 10.5 7 7.5l2 2 3.5-4.5" /><circle cx="12.5" cy="5" r=".6" /></>,
   news: <><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><path d="M5 6h6M5 8.5h6M5 11h3.5" /></>,
   file: <><path d="M4.5 2.5h4.8l2.7 2.7v8.3a.5.5 0 0 1-.5.5h-7a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5Z" /><path d="M9.3 2.5v2.7H12" /></>,
 };
 const IMAGE_PATH = <><rect x="2.5" y="3" width="11" height="10" rx="1.5" /><circle cx="6" cy="6.5" r="1.1" /><path d="m3 12 3.5-3.5 2.5 2.5 1.8-1.8L13.5 12" /></>;
 
-export function KindIcon({ kind, item }: { kind?: ItemKind; item?: ItemSummary }) {
-  const k = item?.kind ?? kind ?? 'note';
+export const KIND_LABEL: Record<ItemKind, string> = { doc: 'Doc', sheet: 'Sheet', board: 'Board', tweet: 'Post', chart: 'Chart', news: 'Story', file: 'File' };
+
+export function KindIcon({ kind, item, size = 15 }: { kind?: ItemKind; item?: ItemSummary; size?: number }) {
+  const k = item?.kind ?? kind ?? 'doc';
   const img = item?.kind === 'file' && isImageType(item.meta.fileType);
   return (
     <span className={`kf-kind kf-kind--${k}`} aria-hidden="true">
-      <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <svg viewBox="0 0 16 16" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
         {img ? IMAGE_PATH : KIND_PATH[k]}
       </svg>
     </span>
   );
 }
 
-const when = (t: number): string => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+export const when = (t: number): string => new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: new Date(t).getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
 
-/** The second line of an item in the list: what it is, briefly. */
+/** The second line of an item in a list: what it is, briefly. */
 export function itemLine(it: ItemSummary): string {
   const m = it.meta;
   switch (it.kind) {
@@ -53,8 +57,12 @@ export function itemLine(it: ItemSummary): string {
       return [m.symbol, m.interval, m.engine === 'spot' ? 'Spot' : 'Perps'].filter(Boolean).join(' · ');
     case 'news':
       return [m.author, m.time ? when(m.time) : null].filter(Boolean).join(' · ') || 'News';
-    case 'table':
-      return `${m.rows ?? 0} rows · ${m.cols ?? 0} columns`;
+    case 'tweet':
+      return [m.handle ? `@${m.handle}` : m.author, m.time ? when(m.time) : null].filter(Boolean).join(' · ') || 'Post on X';
+    case 'sheet':
+      return `${m.cells ?? 0} cells${(m.sheets ?? 1) > 1 ? ` · ${m.sheets} tabs` : ''}`;
+    case 'board':
+      return `${m.elements ?? 0} on the board`;
     case 'file':
       return `${m.fileType ? FILE_TYPES[m.fileType].label : 'File'} · ${mb(it.bytes)}`;
     default:
@@ -62,75 +70,11 @@ export function itemLine(it: ItemSummary): string {
   }
 }
 
-export function ItemPane({ summary, renaming, onRenamed, onMenu, onBack }: {
-  summary: ItemSummary;
-  renaming: boolean;
-  onRenamed: () => void;
-  onMenu: (e: ReactMouseEvent) => void;
-  onBack: () => void;
-}) {
-  const s = useFolders();
-  const [item, setItem] = useState<FolderItem | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [editingTitle, setEditingTitle] = useState(false);
-  const limits = s.list?.limits;
-
-  // Files have nothing to load here (their bytes come below); everything else is read once.
-  useEffect(() => {
-    let live = true;
-    if (summary.kind === 'file') return;
-    void change((t) => foldersApi.item(t, summary.id)).then((r) => {
-      if (!live) return;
-      if (r) setItem(r);
-      else setFailed(foldersState().error ?? 'This item could not be loaded.');
-    });
-    return () => {
-      live = false;
-    };
-    // The summary's rev changes with every save of ours; the item is read once per opening.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [summary.id]);
-
-  const rename = async (title: string | null) => {
-    setEditingTitle(false);
-    onRenamed();
-    if (!title || title === summary.title) return;
-    await change((t) => foldersApi.updateItem(t, { id: summary.id, title }), (r) => void putSummary(r));
-  };
-
-  let body: ReactNode;
-  if (failed) body = <p className="fx-note fx-note--err">{failed}</p>;
-  else if (summary.kind === 'file') body = <FileView summary={summary} />;
-  else if (!item) body = <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />Loading…</p>;
-  else if (item.kind === 'note') body = <NoteEditor item={item} data={item.data as NoteData} />;
-  else if (item.kind === 'table') body = <TableEditor item={item} data={item.data as TableData} />;
-  else if (item.kind === 'news') body = <NewsView news={item.data as SavedNewsData} />;
-  else if (item.kind === 'chart') body = <ChartView summary={summary} snapshot={item.data as unknown as ChartSnapshot} />;
-
-  return (
-    <article className={`kf-pane kf-pane--${summary.kind}`}>
-      <header className="kf-pane__head">
-        <button type="button" className="kf__iconbtn kf-pane__back" aria-label="Back to the folder" title="Back" onClick={onBack}>
-          <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5" /></svg>
-        </button>
-        <KindIcon item={summary} />
-        {renaming || editingTitle ? (
-          <NameInput initial={summary.title} max={limits?.titleChars ?? 120} label="Title" onDone={(t) => void rename(t)} />
-        ) : (
-          <h2 className="kf-pane__title" title="Double-click to rename" onDoubleClick={() => setEditingTitle(true)}>{summary.title}</h2>
-        )}
-        <button type="button" className="kf__iconbtn" aria-label="Item options" title="Options" onClick={onMenu}>{MENU_ICONS.more}</button>
-      </header>
-      <div className="kf-pane__body">{body}</div>
-    </article>
-  );
-}
-
 /* --------------------------------------------------------------- chart ----- */
 
 const useBridge = () => useSyncExternalStore(onBridgeChange, () => `${chartOpenerRegistered()}|${chartPreviewComponent() ? 1 : 0}`);
 
-function ChartView({ summary, snapshot }: { summary: ItemSummary; snapshot: ChartSnapshot }) {
+export function ChartView({ summary, snapshot }: { summary: ItemSummary; snapshot: ChartSnapshot }) {
   useBridge();
   const Preview = chartPreviewComponent();
   const canOpen = chartOpenerRegistered();
@@ -168,7 +112,7 @@ function ChartView({ summary, snapshot }: { summary: ItemSummary; snapshot: Char
           className="fx-cta kf-pane__cta"
           disabled={!canOpen}
           onClick={() => {
-            if (openChartSnapshot(snapshot)) closeFolders();
+            openChartSnapshot(snapshot);
           }}
         >
           Open chart with its drawings
@@ -181,7 +125,7 @@ function ChartView({ summary, snapshot }: { summary: ItemSummary; snapshot: Char
 
 /* ---------------------------------------------------------------- news ----- */
 
-function NewsView({ news }: { news: SavedNewsData }) {
+export function NewsView({ news }: { news: SavedNewsData }) {
   return (
     <div className="kf-news">
       <p className="kf-news__meta">
@@ -202,7 +146,7 @@ function NewsView({ news }: { news: SavedNewsData }) {
 /* ---------------------------------------------------------------- file ----- */
 
 /** A blob URL for an item's bytes (or its thumbnail), fetched with the token; revoked when done. */
-function useFileUrl(id: string | null, thumb = false): string | null {
+export function useFileUrl(id: string | null, thumb = false): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     if (!id) return;
@@ -222,7 +166,7 @@ function useFileUrl(id: string | null, thumb = false): string | null {
   return url;
 }
 
-function FileView({ summary }: { summary: ItemSummary }) {
+export function FileView({ summary }: { summary: ItemSummary }) {
   const type = summary.meta.fileType;
   const [text, setText] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

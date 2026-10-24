@@ -83,7 +83,7 @@ export const MENU_ICONS = {
   duplicate: menuIcon(<><rect x="5.5" y="5.5" width="8" height="8" rx="1.6" /><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" /></>),
   close: menuIcon(<path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />),
   remove: menuIcon(<path d="M3 4.5h10M6.5 4.5V3.3c0-.5.3-.8.8-.8h1.4c.5 0 .8.3.8.8v1.2M4.5 4.5l.6 8c.1.6.5 1 1.1 1h3.6c.6 0 1-.4 1.1-1l.6-8M6.8 7v4M9.2 7v4" />),
-  // The knowledge folders' menus (folders/FoldersView.tsx): a folder's and an item's.
+  // The knowledge folders' menus (knowledge/): a folder's and an item's.
   rename: menuIcon(<><path d="M9.8 3.4 12.6 6.2 6 12.8l-3.3.5.5-3.3z" /><path d="M8.6 4.6l2.8 2.8" /></>),
   open: menuIcon(<><path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5" /><path d="M11.5 9.5v2.5a1.5 1.5 0 0 1-1.5 1.5H4A1.5 1.5 0 0 1 2.5 12V6A1.5 1.5 0 0 1 4 4.5h2.5" /></>),
   download: menuIcon(<><path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2" /><path d="M2.8 11v1.2c0 .7.6 1.3 1.3 1.3h7.8c.7 0 1.3-.6 1.3-1.3V11" /></>),

@@ -574,8 +574,8 @@ test('knowledge folders: POST and the wallet token under /api/folders only, a fi
       const before = seen.length;
       const huge = await request(port, '/api/folders/upload/put?id=u', { method: 'POST', body: Buffer.alloc(proxy.bodyLimitFor('/api/folders/upload/put') + 1), headers: { 'content-type': 'application/octet-stream' } });
       assert.equal(huge.status, 413);
-      const bigItem = await request(port, '/api/folders/item/create', { method: 'POST', body: 'x'.repeat(640 * 1024 + 1) });
-      assert.equal(bigItem.status, 413, 'an item is held to 640 KB');
+      const bigItem = await request(port, '/api/folders/item/create', { method: 'POST', body: 'x'.repeat(1792 * 1024 + 1) });
+      assert.equal(bigItem.status, 413, 'an item is held to 1.75 MB');
       assert.equal(seen.length, before, 'neither reached the origin');
       assert.equal(proxy.bodyLimitFor('/api/copy/v1/copies'), proxy.BODY_LIMIT, 'the executor keeps its 64 KB');
       assert.equal(proxy.isFoldersPath('/api/foldersx'), false);

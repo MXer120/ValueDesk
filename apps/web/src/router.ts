@@ -28,7 +28,8 @@ import { useCallback, useEffect, useState } from 'react';
  *
  * `portfolio` is last on purpose. `useKeyboardShortcuts` maps the number keys
  * against its own list, so moving portfolio up would silently shift every
- * existing shortcut onto a different page.
+ * existing shortcut onto a different page. A new page goes at the END for the
+ * same reason: `knowledge` (the knowledge folders, knowledge/) is 7.
  *
  * THERE IS NO WALLET PAGE. Connecting is a modal - the official one - and the
  * things that used to sit on that page (enable trading, turn it off, the local
@@ -36,7 +37,7 @@ import { useCallback, useEffect, useState } from 'react';
  * over whatever you were already looking at. A whole route whose only job was to
  * hold a Connect button made connecting a place you had to navigate to first.
  */
-export const TABS = ['trade', 'explore', 'copy', 'leaderboard', 'portfolio', 'scan'] as const;
+export const TABS = ['trade', 'explore', 'copy', 'leaderboard', 'portfolio', 'scan', 'knowledge'] as const;
 
 /**
  * Pages that were removed, and where their old links now land (Account's
@@ -57,9 +58,20 @@ export const TAB_LABELS: Record<Tab, string> = {
   leaderboard: 'Leaderboard',
   portfolio: 'Portfolio',
   scan: 'Scan',
+  knowledge: 'Knowledge',
 };
 
 export const pathForTab = (tab: Tab): string => `/${tab}`;
+
+/**
+ * Change page from outside the shell's own props (the rail's quick drop, the
+ * save sheet's "Open in Knowledge"): App.tsx listens and navigates as its own
+ * links do, once the page's code is in.
+ */
+export const OPEN_TAB_EVENT = 'vs:open-tab';
+export const openTab = (tab: Tab): void => {
+  window.dispatchEvent(new CustomEvent<Tab>(OPEN_TAB_EVENT, { detail: tab }));
+};
 
 /**
  * The legal texts (src/legal): pages of their own, but NOT tabs. They are not

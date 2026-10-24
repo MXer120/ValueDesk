@@ -24,6 +24,7 @@ import { openConnectDialog } from '../account/connect';
 import { FeeSchedule } from '../FeeSchedule';
 import { openPalette } from '../palette/lazyPalette';
 import { readPotatoOn, writePotato } from '../../setup/device';
+import { isKnowledgeOwner, setKnowledgeSwitch, useKnowledgeSwitch } from '../../folders/access';
 import { indexEnabled, resetIndex, setIndexEnabled, setIndexSpeed } from '../../setup/indexer';
 import { SPEED_ORDER, SPEEDS, readSpeed, type SpeedId } from '../../setup/stats';
 import './DevPanel.css';
@@ -110,6 +111,7 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
   const ref = useRef<HTMLElement>(null);
   const drag = useRef<{ dx: number; dy: number; x0: number; y0: number; moved: boolean } | null>(null);
   const builderConsent = useBuilderConsent();
+  const knowledgeSwitch = useKnowledgeSwitch();
 
   useEffect(() => {
     const onToggle = () => setOpen((v) => !v);
@@ -251,6 +253,15 @@ export function DevPanel({ address, engine }: { address: string | null; engine: 
               <span className="devp__meta">{potato ? 'On' : 'Off'}</span>
             </button>
             <button type="button" className="devp__btn" title="Clears the finished flag and shows account setup again. The wallet, trading key, and trade index stay." onClick={forget}>Forget setup</button>
+            <button
+              type="button"
+              className="devp__btn"
+              title="Knowledge (folders, docs, sheets, boards, saved posts): off by default. On in this browser, for the owner's wallet only."
+              onClick={() => setKnowledgeSwitch(!knowledgeSwitch)}
+            >
+              Knowledge
+              <span className="devp__meta">{!knowledgeSwitch ? 'Off' : isKnowledgeOwner(address) ? 'On' : 'On · not this wallet'}</span>
+            </button>
             <div className="devp__row">
               <button type="button" className="devp__mini" onClick={() => notify('ok', 'Saved.')}>Ok</button>
               <button type="button" className="devp__mini" onClick={() => notify('info', 'Heads up.')}>Info</button>

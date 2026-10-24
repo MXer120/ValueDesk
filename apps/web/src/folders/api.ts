@@ -19,6 +19,7 @@ import {
   type FoldersSession,
   type ItemSummary,
   type JsonKind,
+  type TweetData,
 } from '@sign/folders/types.js';
 import { getChainId, signTypedData, type Eip1193Provider } from '../wallet';
 
@@ -280,11 +281,16 @@ export const foldersApi = {
    * with a link for exactly this file's size, or its own route - and lists it once it has checked
    * what arrived. `onProgress` gets 0..1 while the bytes travel.
    */
-  async upload(t: string, o: { folderId: string; file: Blob; name: string; title?: string }, onProgress?: (share: number) => void): Promise<ItemSummary> {
-    const s = await call<{ ok: true; id: string; target: UploadTarget }>(t, 'POST', '/api/folders/upload/start', { json: { folderId: o.folderId, name: o.name, size: o.file.size, ...(o.title ? { title: o.title } : {}) } });
+  async upload(t: string, o: { folderId: string; file: Blob; name: string; title?: string; parentId?: string }, onProgress?: (share: number) => void): Promise<ItemSummary> {
+    const s = await call<{ ok: true; id: string; target: UploadTarget }>(t, 'POST', '/api/folders/upload/start', {
+      json: { folderId: o.folderId, name: o.name, size: o.file.size, ...(o.title ? { title: o.title } : {}), ...(o.parentId ? { parentId: o.parentId } : {}) },
+    });
     await send(s.target, o.file, t, onProgress);
     return call<{ ok: true; item: ItemSummary }>(t, 'POST', '/api/folders/upload/finish', { json: { id: s.id } }).then((r) => r.item);
   },
+
+  /** A post on X as X's embed shows it, read by the server (nothing is saved yet). */
+  tweet: (t: string, url: string) => call<{ ok: true; tweet: TweetData }>(t, 'GET', `/api/folders/tweet?url=${encodeURIComponent(url)}`).then((r) => r.tweet),
 
   erase: (t: string) => call<{ ok: true; erased: { items: number; folders: number } }>(t, 'POST', '/api/folders/erase', { json: { confirm: 'erase-everything' } }),
 };

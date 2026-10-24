@@ -18,7 +18,39 @@ const EXEMPT = new Set([
   'chart/tv/tv.css', // the optional TradingView chart loads its own sheets on demand
   'chart/tv/tv-theme.css',
   'legal/legal.css', // loads with the legal pages; only `.legal*` selectors (see below)
+  // The Knowledge page's: they load with its chunk, which is off unless the owner turns it on
+  // (folders/access.ts); each styles only its own prefix (see below).
+  'folders/folders.css',
+  'knowledge/knowledge.css',
+  'knowledge/doc/doc.css',
+  'knowledge/sheet/sheet.css',
+  'knowledge/board/board.css',
 ]);
+
+/** Every selector in a stylesheet (at-rule preludes skipped, keyframe steps left out). */
+function selectorsOf(file: string): string[] {
+  const css = readFileSync(join(SRC, file), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/@[^{]+\{/g, '');
+  return [...css.matchAll(/([^{}@]+)\{/g)]
+    .map((m) => m[1]!.trim())
+    .filter((s) => s && !/^(?:from|to|\d+%)$/.test(s))
+    .flatMap((g) => g.split(',').map((s) => s.trim()));
+}
+
+test('the Knowledge page\'s sheets only style the Knowledge page, so they may load with it', () => {
+  for (const [file, prefix] of [
+    ['folders/folders.css', /^\.(kf|kq)[\w-]*\b/],
+    ['knowledge/knowledge.css', /^\.(kn|kt)[\w-]*\b/],
+    ['knowledge/doc/doc.css', /^\.kd[\w-]*\b/],
+    ['knowledge/sheet/sheet.css', /^\.ks[\w-]*\b/],
+    ['knowledge/board/board.css', /^\.kb[\w-]*\b/],
+  ] as const) {
+    const sels = selectorsOf(file);
+    assert.ok(sels.length > 5, `${file}: the selectors were read`);
+    for (const sel of sels) assert.match(sel, prefix, `${file}: "${sel}" must start at its own class`);
+  }
+});
 
 test('legal.css only styles the legal pages, so it may load with them', () => {
   const css = readFileSync(join(SRC, 'legal', 'legal.css'), 'utf8')

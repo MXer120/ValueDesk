@@ -6,6 +6,7 @@
  *   GET  /api/folders/item?id=         Bearer                       -> one item with its content
  *   GET  /api/folders/file/url?id=[&thumb=1]  Bearer                -> where to fetch an upload (or a chart's thumbnail), its size
  *   GET  /api/folders/file?id=[&thumb=1]&part=  Bearer              -> one piece of its bytes (PART_BYTES; S3 mode: the link is S3's)
+ *   GET  /api/folders/tweet?url=       Bearer                       -> a post on X, read for saving (tweets.ts; nothing is stored)
  *   POST /api/folders/folder/create    Bearer {name}
  *   POST /api/folders/folder/rename    Bearer {id, name}
  *   POST /api/folders/folder/delete    Bearer {id}                  (with everything in it)
@@ -14,7 +15,8 @@
  *   POST /api/folders/item/update      Bearer {id, title?, data?, rev?}
  *   POST /api/folders/item/move        Bearer {id, folderId, index}  (reorder, or to another folder)
  *   POST /api/folders/item/delete      Bearer {id}
- *   POST /api/folders/upload/start     Bearer {folderId, name, size, title?} -> {id, target}: where the bytes go
+ *   POST /api/folders/upload/start     Bearer {folderId, name, size, title?, parentId?} -> {id, target}: where the bytes go
+ *                                      (parentId: an image of that doc or board, not listed in the folder)
  *   POST /api/folders/upload/put?id=&part=  Bearer, application/octet-stream: one piece, in order
  *   POST /api/folders/upload/finish    Bearer {id}                  -> the item, once the bytes are checked
  *   POST /api/folders/erase            Bearer {confirm: 'erase-everything'}
@@ -23,6 +25,10 @@
  * and every read and write is scoped to that wallet in the store's queries -
  * an id of another wallet's item is "not found", exactly like one that does
  * not exist. A signed S3 link names one key under the wallet's own prefix.
+ *
+ * WHICH WALLETS. Only those FOLDERS_WALLETS names - the owner's alone until it
+ * says otherwise (limits.ts FOLDERS_OWNER): any other is refused at the sign-in,
+ * and a token it may hold from before is refused on every route ('closed').
  *
  * LIMITS, SERVER-SIDE. The store enforces the counts and the bytes (store.ts);
  * here are the rates: changes per wallet per minute, uploads per wallet per
@@ -43,10 +49,11 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter } from '../rateLimit.js';
 import { checkSignIn, SessionTokens } from '../folders/auth.js';
 import { attachment, DiskBlobs, partLength, partsOf, S3Blobs, type BlobStore } from '../folders/blobs.js';
-import { foldersConfigFromEnv, PART_BODY_CEILING, type FoldersConfig } from '../folders/limits.js';
+import { foldersConfigFromEnv, PART_BODY_CEILING, walletAllowed, type FoldersConfig } from '../folders/limits.js';
 import { asFailure, FoldersFailure, FoldersStore, mimeOf, type Gone } from '../folders/store.js';
 import type { FoldersError } from '../folders/types.js';
 import { sniffFile } from '../folders/validate.js';
+import { TweetReader } from '../folders/tweets.js';
 
 export interface FoldersRouteOptions {
   /** A store to answer from instead of one opened from the environment (tests). */
@@ -57,14 +64,17 @@ export interface FoldersRouteOptions {
   blobs?: BlobStore;
   /** The hourly sweep and the daily backup (off in tests). */
   upkeep?: boolean;
+  /** Reads posts on X (tests: a stand-in for X's embed endpoint). */
+  tweets?: TweetReader;
   now?: () => number;
 }
 
 const KB = 1024;
-/** A chart snapshot (256 KB) and its thumbnail (200 KB as base64), with room for the JSON around them. */
-export const CREATE_BODY_LIMIT = 640 * KB;
-/** A note or a table (200 KB), as JSON text. */
-export const UPDATE_BODY_LIMIT = 320 * KB;
+/** The largest item - a sheet or a board, 1.5 MB as stored - with room for the JSON around it (and a chart's thumbnail). */
+export const CREATE_BODY_LIMIT = 1792 * KB;
+export const UPDATE_BODY_LIMIT = 1792 * KB;
+/** Posts on X looked up per wallet per minute. */
+const TWEETS_PER_MIN = 30;
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -130,6 +140,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
   const limiter = new KeyedLimiter();
   const signIns = new SignInCounter();
   const downloads = new DailyBytes();
+  const tweets = opts.tweets ?? new TweetReader();
 
   /** Blobs of deleted items: removed after the rows (a failure is logged; the rows are gone already). */
   const removeGone = async (gone: readonly Gone[]): Promise<void> => {
@@ -172,9 +183,10 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
 
   const fail = (reply: FastifyReply, status: number, code: FoldersError['code'], error: string) =>
     reply.code(status).send({ ok: false, code, error } satisfies FoldersError);
+  const CLOSED = 'Knowledge is not open for this wallet.';
 
   /** Runs `fn` for the wallet behind the request's token; every refusal in one shape. */
-  const withOwner = (kind: 'read' | 'write' | 'file' | 'upload', fn: (owner: string, req: FastifyRequest, reply: FastifyReply) => unknown) =>
+  const withOwner = (kind: 'read' | 'write' | 'file' | 'upload' | 'tweet', fn: (owner: string, req: FastifyRequest, reply: FastifyReply) => unknown) =>
     async (req: FastifyRequest, reply: FastifyReply) => {
       reply.header('Cache-Control', 'no-store');
       if (!store || !tokens || !cfg || !blobs) return fail(reply, 503, 'unavailable', 'Folders are not available right now.');
@@ -182,10 +194,12 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
       const session = tokens.read(typeof h === 'string' && h.startsWith('Bearer ') ? h.slice(7) : null, now());
       if (!session || session.epoch !== store.epoch(session.owner)) return fail(reply, 401, 'session', 'Sign in to your folders again.');
       const owner = session.owner;
+      if (!walletAllowed(cfg, owner)) return fail(reply, 403, 'closed', CLOSED);
       const rates =
         kind === 'write' ? [{ key: `w|${owner}`, limit: { max: cfg.limits.writesPerMinute, windowMs: MINUTE } }]
         : kind === 'upload' ? [{ key: `w|${owner}`, limit: { max: cfg.limits.writesPerMinute, windowMs: MINUTE } }, { key: `u|${owner}`, limit: { max: cfg.limits.uploadsPerHour, windowMs: HOUR } }]
         : kind === 'file' ? [{ key: `f|${owner}`, limit: { max: FILE_LINKS_PER_MIN, windowMs: MINUTE } }]
+        : kind === 'tweet' ? [{ key: `t|${owner}`, limit: { max: TWEETS_PER_MIN, windowMs: MINUTE } }]
         : [];
       for (const r of rates) {
         const wait = limiter.take(r.key, r.limit, now());
@@ -230,6 +244,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
     if (!store || !tokens || !cfg) return fail(reply, 503, 'unavailable', 'Folders are not available right now.');
     const v = checkSignIn(body(req).signIn, now());
     if (!v.ok) return fail(reply, 401, 'signature', v.error);
+    if (!walletAllowed(cfg, v.owner)) return fail(reply, 403, 'closed', CLOSED);
     if (!signIns.allow(clientKey(req.ip), v.owner, cfg.signInsPerDay, now())) {
       return fail(reply, 429, 'rate', 'Too many wallets signed in from this address today.');
     }
@@ -276,6 +291,9 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
       .header('Cache-Control', 'private, no-store');
     return reply.send(got.bytes);
   }));
+
+  /** A post on X as X's embed shows it - for the browser to save as a tweet item (or to show before saving). */
+  app.get('/api/folders/tweet', withOwner('tweet', async (_owner, req) => ({ ok: true, tweet: await tweets.read(query(req).url) })));
 
   app.post('/api/folders/folder/create', withOwner('write', (owner, req) => {
     const folder = store!.createFolder(owner, body(req).name);
@@ -330,7 +348,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
   /** Reserve an upload and say where its bytes go: S3 (a link for exactly this key and size) or upload/put. */
   app.post('/api/folders/upload/start', withOwner('upload', async (owner, req) => {
     const b = body(req);
-    const u = store!.startUpload(owner, { folderId: b.folderId, name: b.name, title: b.title, size: b.size });
+    const u = store!.startUpload(owner, { folderId: b.folderId, name: b.name, title: b.title, size: b.size, parentId: b.parentId });
     try {
       return { ok: true, id: u.id, target: await blobs!.uploadTarget(owner, u.id, u.size) };
     } catch (e) {
