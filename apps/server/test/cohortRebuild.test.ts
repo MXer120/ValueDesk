@@ -14,6 +14,8 @@ import {
   type Bridge, type RebuildWallet,
 } from '../src/indexer/cohortRebuild.js';
 import { IndexStore } from '../src/indexer/store.js';
+import { hlFundingRows } from '../src/indexer/cohortSource.js';
+import { hlInfo } from '../src/valuescan/hyperliquid/index.js';
 import { allScopes } from '../src/indexer/cohortTracker.js';
 import { scopeKey } from '../src/valuescan/cohorts/model.js';
 
@@ -156,6 +158,27 @@ test('the check: long share and gross against the recording at the edges', () =>
   );
   assert.equal(c.hours, 1);
   assert.deepEqual(c.cohorts.apex, { sharePts: 5, grossPct: 0 });
+});
+
+test('funding reads take every page\'s weight from the rebuild\'s bucket first, and refuse a history past the page cap', async () => {
+  const calls: string[] = [];
+  const pace = { reserve: (w: number) => { calls.push(`reserve ${w}`); return 0; }, charge: (w: number) => { calls.push(`charge ${w}`); } };
+  const page = (t0: number, n: number) => Array.from({ length: n }, (_, i) => ({ time: t0 + Math.floor(i / 50) * H, delta: { coin: `C${i % 50}`, szi: '1' } }));
+  const post = hlInfo.post.bind(hlInfo);
+  try {
+    let n = 0;
+    hlInfo.post = (async () => [page(T0, 500), page(T0 + 10 * H, 500), page(T0 + 20 * H, 10)][n++]) as typeof hlInfo.post;
+    const { rows, cost } = await hlFundingRows('0xa', T0, T0 + 30 * H, pace);
+    assert.equal(rows.length, 1_010);
+    assert.deepEqual(calls, ['reserve 20', 'charge 25', 'reserve 20', 'charge 25', 'reserve 20', 'charge 1']);
+    assert.equal(cost, 20 + 25 + 20 + 25 + 20 + 1);
+    // A wallet whose pages never end is refused, not cut short.
+    let t = T0;
+    hlInfo.post = (async () => page((t += H), 500)) as typeof hlInfo.post;
+    await assert.rejects(hlFundingRows('0xb', T0, T0 + 1e6 * H), /over \d+ pages/);
+  } finally {
+    hlInfo.post = post;
+  }
 });
 
 test('store: rebuilt rows are marked and never count as recorded; reads per span come and go', () => {

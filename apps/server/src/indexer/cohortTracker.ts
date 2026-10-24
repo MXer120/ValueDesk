@@ -57,6 +57,7 @@ import {
   type CohortRange, type Position, type WalletVenue,
 } from '../valuescan/cohorts/model.js';
 import { Lane } from './lanes.js';
+import { WeightBudget } from '../valuescan/hyperliquid/info.js';
 import { mark } from './busy.js';
 import type { Print } from './streams.js';
 import type { IndexStore } from './store.js';
@@ -313,8 +314,16 @@ export class CohortTracker {
     concurrency: HLC_CONCURRENCY,
     shares: [{ prefix: 'cohpnl:', share: PNL_SHARE }],
   });
-  /** History rebuild reads (userFunding, candles): a lane of its own, so a rebuild never slows the books or the PnL reads. */
-  readonly hlh = new Lane({ name: 'hlh', perMin: envNum('VALUESCAN_INDEX_HL_REBUILD', REBUILD_PER_MIN, 20, 400), concurrency: 4 });
+  /** History rebuild reads, weight / minute (lent by the boards lane while it reads). */
+  private readonly rebuildRate = envNum('VALUESCAN_INDEX_HL_REBUILD', REBUILD_PER_MIN, 20, 400);
+  /**
+   * History rebuild reads (userFunding, candles): a lane of its own, so a rebuild
+   * never slows the books or the PnL reads. It does not rest by itself: every
+   * request takes its weight from `histPace` first (cohortSource.ts HistPace), so
+   * a wallet of many pages spends at the rebuild's rate, not in one burst.
+   */
+  readonly hlh = new Lane({ name: 'hlh', perMin: 1e9, concurrency: 4 });
+  private readonly histPace = new WeightBudget(this.rebuildRate, 40);
   private rebuild: RebuildState | null = null;
   /** What the boards lane lends the rebuild now. */
   private lent = 0;
@@ -671,7 +680,7 @@ export class CohortTracker {
     if (r.phase === 'reads') {
       const unread = [...r.plan].filter(([a]) => !r.read.has(a));
       if (unread.length) {
-        this.lend(this.hlh.perMin);
+        this.lend(this.rebuildRate);
         this.queueRebuildReads(r, unread);
         return;
       }
@@ -683,14 +692,14 @@ export class CohortTracker {
     }
     const unpriced = [...r.symbols].filter((x) => !r.priced.has(x));
     if (unpriced.length) {
-      this.lend(this.hlh.perMin);
+      this.lend(this.rebuildRate);
       const { from, to } = readRange(r.span);
       for (const symbol of unpriced) {
         this.hlh.add({
           key: `hpx:${symbol}`,
           prio: 2_000,
           run: async () => {
-            const { px, cost } = await hlHourlyPrices(symbol, from - HOUR_MS, to + HOUR_MS);
+            const { px, cost } = await hlHourlyPrices(symbol, from - HOUR_MS, to + HOUR_MS, this.histPace);
             s.putCohortHist(r.span.from, 'px', [[symbol, JSON.stringify(px)]], this.d.now());
             r.priced.add(symbol);
             return cost;
@@ -761,7 +770,7 @@ export class CohortTracker {
         run: async () => {
           // Half an hour either side: a funding row is stamped a little after its hour,
           // so a read ending on the hour missed that hour (seen 2026-10-25 checking it).
-          const read = await hlFundingRows(address, from - HOUR_MS / 2, to + HOUR_MS / 2).catch((e: unknown) => {
+          const read = await hlFundingRows(address, from - HOUR_MS / 2, to + HOUR_MS / 2, this.histPace).catch((e: unknown) => {
             const n = (r.fails.get(address) ?? 0) + 1;
             r.fails.set(address, n);
             if (n >= REBUILD_TRIES) {
@@ -775,7 +784,7 @@ export class CohortTracker {
           let extra = 0;
           const peak = peakNotional(hist, (sym) => this.marks.get(`${venueOfSymbol(sym)}|${sym}`) ?? null);
           if (needsEquityHistory(peak, this.equityNow(address))) {
-            hist.eq = (await hlEquityHistory(address)) ?? undefined;
+            hist.eq = (await hlEquityHistory(address, this.histPace)) ?? undefined;
             extra = PNL_READ_COST;
           }
           s.putCohortHist(r.span.from, 'w', [[address, JSON.stringify(hist)]], this.d.now());

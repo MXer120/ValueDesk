@@ -181,23 +181,46 @@ export async function hlPortfolioPnl(address: string): Promise<CohortPnlRow | nu
 
 /** userFunding rows per response. */
 const FUNDING_PAGE = 500;
+/** Pages read for one wallet at most: 200k rows, a vault holding every market for six weeks. */
+const FUNDING_PAGES_MAX = 400;
+
+/**
+ * The history reads' own weight bucket (info.ts WeightBudget): every request
+ * takes its weight from it first. A wallet is many requests - one of 132 coins
+ * over a week is 42 pages, ~1,900 weight - and counted only once its read was
+ * done, four of those at once drained the indexer's whole Hyperliquid budget
+ * for a minute (2026-10-24), stalling every other lane.
+ */
+export interface HistPace {
+  reserve(w: number): number;
+  charge(w: number): void;
+}
+
+async function paced(pace: HistPace | undefined, w: number): Promise<void> {
+  const ms = pace?.reserve(w) ?? 0;
+  if (ms > 0) await new Promise<void>((r) => setTimeout(r, ms));
+}
 
 /**
  * A Hyperliquid wallet's funding over [from, to]: one row per hour and coin it
  * held (trade.xyz's `xyz:` coins included), with the position's size then -
  * POST /info userFunding, weight 20 + 1 per 20 rows, paged by time. Returns the
- * rows and the weight spent.
+ * rows and the weight spent. Throws past FUNDING_PAGES_MAX rather than return a
+ * history cut short.
  */
-export async function hlFundingRows(address: string, from: number, to: number): Promise<{ rows: FundingRow[]; cost: number }> {
+export async function hlFundingRows(address: string, from: number, to: number, pace?: HistPace): Promise<{ rows: FundingRow[]; cost: number }> {
   const rows: FundingRow[] = [];
   let cost = 0;
   let start = from;
-  for (let page = 0; page < 100; page++) {
+  for (let page = 0; ; page++) {
+    if (page >= FUNDING_PAGES_MAX) throw new Error(`userFunding ${address}: over ${FUNDING_PAGES_MAX} pages`);
+    await paced(pace, 20);
     const r = await hlInfo.post<Array<{ time?: number; delta?: { coin?: string; szi?: string } }> | null>(
       { type: 'userFunding', user: address, startTime: start, endTime: to },
       { ttlMs: 0, timeoutMs: 25_000 },
     );
     const list = Array.isArray(r) ? r : [];
+    pace?.charge(Math.ceil(list.length / 20));
     cost += 20 + Math.ceil(list.length / 20);
     for (const x of list) rows.push({ time: Number(x.time), coin: String(x.delta?.coin ?? ''), szi: Number(x.delta?.szi) });
     if (list.length < FUNDING_PAGE) break;
@@ -209,12 +232,14 @@ export async function hlFundingRows(address: string, from: number, to: number): 
 }
 
 /** A symbol's hourly prices over [from, to] (1h candles' opens): POST /info candleSnapshot, weight 20 + 1 per 60. */
-export async function hlHourlyPrices(symbol: string, from: number, to: number): Promise<{ px: Array<[number, number]>; cost: number }> {
+export async function hlHourlyPrices(symbol: string, from: number, to: number, pace?: HistPace): Promise<{ px: Array<[number, number]>; cost: number }> {
+  await paced(pace, 20);
   const k = await hlInfo.post<Array<{ t?: number; o?: string }> | null>(
     { type: 'candleSnapshot', req: { coin: symbol, interval: '1h', startTime: from, endTime: to } },
     { ttlMs: 0, timeoutMs: 25_000 },
   ).catch(() => null);
   const list = Array.isArray(k) ? k : [];
+  pace?.charge(Math.ceil(list.length / 60));
   const px: Array<[number, number]> = [];
   for (const c of list) {
     const o = num(c.o ?? null);
@@ -224,7 +249,8 @@ export async function hlHourlyPrices(symbol: string, from: number, to: number): 
 }
 
 /** A Hyperliquid wallet's account value over the last month: its portfolio's month (daily), week (4-hourly) and day points. */
-export async function hlEquityHistory(address: string): Promise<Array<[number, number]> | null> {
+export async function hlEquityHistory(address: string, pace?: HistPace): Promise<Array<[number, number]> | null> {
+  await paced(pace, 20);
   const p = await hlInfo.post<HlPortfolio | null>({ type: 'portfolio', user: address }, { ttlMs: 0 });
   if (!Array.isArray(p)) return null;
   const at = new Map<number, number>();
