@@ -29,6 +29,7 @@ import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, TermsGate } from './legal/LegalGate';
 import { FoldersHost } from './folders/FoldersHost';
+import { registerChartOpener } from './folders/bridge';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
@@ -144,6 +145,23 @@ function AppShell() {
     };
     page.preload().then(go, go);
   }, [navigate]);
+  /* A chart saved to a research folder, opened again (folders/bridge.ts): on its
+     market, in the Trade page, where the chart shows it as a snapshot view
+     (chart/snapshot.ts - loaded on demand, so the chart code stays out of here). */
+  useEffect(
+    () =>
+      registerChartOpener((raw) => {
+        void import('./chart/snapshot').then(({ openSnapshot, parseChartSnapshot }) => {
+          const s = parseChartSnapshot(raw);
+          if (!s) return;
+          openSnapshot(s);
+          setEngine(s.engine);
+          setSymbol(s.symbol);
+          setTab('trade');
+        });
+      }),
+    [setEngine, setSymbol, setTab],
+  );
   /* The legal pages the same way: their chunk first, then the page. */
   const openLegal = useCallback((next: LegalPage) => {
     const seq = ++navSeq.current;

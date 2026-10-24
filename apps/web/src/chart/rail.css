@@ -252,14 +252,17 @@
   transition: color var(--rail-dur) var(--rail-ease);
 }
 
-.kc-rail-btn:hover:not(:disabled) { color: var(--text); background: transparent; }
+/* Hover is a faint tint; the armed tool (below) is a step whiter on every
+   count - glyph, fill and ring - so the two never read alike (the accent is a
+   near-white, a shade DIMMER than the hover text, so colour alone inverted them). */
+.kc-rail-btn:hover:not(:disabled) { color: var(--text); background: var(--tint); }
 
 .kc-rail-btn:focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: -1px;
 }
 
-/* Armed. Amber, and only amber.
+/* Armed: a white glyph on a lit chip.
  *
  * box-shadow: none is NOT redundant. The global sheet gives every
  * `button.active` an `inset 0 -2px 0 var(--accent)` rule along the bottom edge,
@@ -270,10 +273,10 @@
  * the fill both have to be cancelled explicitly. */
 .kc-rail-btn.active,
 .kc-rail-btn.active:hover {
-  color: var(--accent);
-  background: transparent;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
   border-color: transparent;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
 .kc-rail-btn:disabled {
@@ -430,8 +433,9 @@
 .kc-rail-popup button:hover { background-color: var(--bg-hover); }
 .kc-rail-popup button:hover .kc-rail-popup-ico { color: var(--text); }
 .kc-rail-popup button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
-.kc-rail-popup button.active { color: var(--accent); background-color: transparent; box-shadow: none; }
-.kc-rail-popup button.active .kc-rail-popup-ico { color: var(--accent); }
+.kc-rail-popup button.active,
+.kc-rail-popup button.active:hover { color: #fff; background-color: rgba(255, 255, 255, 0.12); box-shadow: none; }
+.kc-rail-popup button.active .kc-rail-popup-ico { color: #fff; }
 
 /* --- narrow panels --------------------------------------------------------- */
 

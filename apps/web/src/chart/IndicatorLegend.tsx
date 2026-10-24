@@ -253,6 +253,7 @@ export function IndicatorLegend({
             <span className="kc-ind-ctl">
               <button
                 type="button"
+                className="kc-ind-eye"
                 title={ind.visible ? 'Hide' : 'Show'}
                 aria-label={ind.visible ? `Hide ${name}` : `Show ${name}`}
                 aria-pressed={!ind.visible}

@@ -47,7 +47,7 @@ export interface IndicatorSettingsProps {
 }
 
 /** A colour well: the current colour; a click opens the palette under the row. */
-function Well({ value, label, open, onToggle }: { value: string; label: string; open: boolean; onToggle: () => void }) {
+export function Well({ value, label, open, onToggle }: { value: string; label: string; open: boolean; onToggle: () => void }) {
   return (
     <button
       type="button"
@@ -63,7 +63,7 @@ function Well({ value, label, open, onToggle }: { value: string; label: string; 
 
 /** The palette, full width under the row it belongs to (a popover would be
  *  clipped by the sheet's scrolling body). */
-function Palette({ value, label, onPick }: { value: string; label: string; onPick: (c: string) => void }) {
+export function Palette({ value, label, onPick }: { value: string; label: string; onPick: (c: string) => void }) {
   return (
     <div className="kc-palette" role="group" aria-label={`${label} colour`}>
       {SWATCHES.map((c) => (
@@ -89,7 +89,7 @@ function Palette({ value, label, onPick }: { value: string; label: string; onPic
 }
 
 /** Line width as four line glyphs, the style bar's picker. */
-function Widths({ value, label, onPick }: { value: number; label: string; onPick: (w: number) => void }) {
+export function Widths({ value, label, onPick }: { value: number; label: string; onPick: (w: number) => void }) {
   return (
     <span className="kc-set-seg" role="group" aria-label={`${label} width`}>
       {[1, 2, 3, 4].map((w) => (

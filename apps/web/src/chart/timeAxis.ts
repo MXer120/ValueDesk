@@ -305,3 +305,24 @@ export function timestampLookup(
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + k, d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes());
   };
 }
+
+/** A timestamp as a `<input type="datetime-local">` value ("2026-10-24T14:45") on the chosen clock. */
+export function inputTime(ts: number, tz: TimeZoneMode): string {
+  const p = partsOf(ts, tz);
+  return `${p.y}-${pad2(p.mo + 1)}-${pad2(p.d)}T${pad2(p.h)}:${pad2(p.mi)}`;
+}
+
+/**
+ * Such a value back to a timestamp, on the bar it falls in (a drawing's anchor
+ * sits on a bar's open time). Null for anything that is not a date and time.
+ * Up to a day, bars open on whole multiples of their length since the epoch
+ * (UTC midnight for 1D); longer bars are left where the user put them.
+ */
+export function parseInputTime(value: string, tz: TimeZoneMode, intervalMs: number): number | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return null;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number) as [number, number, number, number, number];
+  const ts = tz === 'utc' ? Date.UTC(y, mo - 1, d, h, mi) : new Date(y, mo - 1, d, h, mi).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return intervalMs > 0 && intervalMs <= DAY ? Math.floor(ts / intervalMs) * intervalMs : ts;
+}

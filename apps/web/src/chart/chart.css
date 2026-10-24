@@ -1085,6 +1085,9 @@ html.kc-drag * {
 .kc-ind-row.is-open .kc-ind-ctl,
 .kc-ind-row:focus-within .kc-ind-ctl,
 .kc-ind-row.is-off .kc-ind-ctl { display: inline-flex; }
+/* Hidden: folded to its name and the eye that brings it back; the rest of
+   its controls come with the pointer. */
+.kc-ind-row.is-off:not(:hover):not(:focus-within):not(.is-open) .kc-ind-ctl > :not(.kc-ind-eye) { display: none; }
 @media (hover: none) {
   .kc-ind-ctl { display: inline-flex; }
 }
@@ -1149,7 +1152,8 @@ html.kc-drag * {
 /* Inputs | Style: the chart toolbar's recessed track with a raised chip. */
 .modal.fx.kc-set .kc-set-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 2px;
   padding: 3px;
   border-radius: 10px;
@@ -1192,6 +1196,12 @@ html.kc-drag * {
 .modal.fx.kc-set .kc-set-x:disabled { opacity: 0.4; cursor: not-allowed; }
 .modal.fx.kc-set .kc-set-add { height: 40px; }
 .modal.fx.kc-set .kc-set-note { margin: 0; color: var(--muted); font-size: var(--fs-xs); }
+/* A drawing's words, and its anchors one titled pair at a time. */
+.modal.fx.kc-set .kc-set-text { height: auto; min-height: 96px; padding: var(--sp-2) var(--sp-3); resize: vertical; font: inherit; line-height: 1.4; }
+.modal.fx.kc-set .kc-set-coords { gap: var(--sp-2); max-height: 52vh; overflow-y: auto; }
+.modal.fx.kc-set .kc-set-coords__n { margin-top: var(--sp-1); color: var(--text); font-weight: 500; }
+.modal.fx.kc-set .kc-set-coords__n:first-child { margin-top: 0; }
+.modal.fx.kc-set input[type='datetime-local'].fx-input { font-family: var(--font-num); color-scheme: dark; }
 
 /* A line of the study: switch, name, colour well, width - one 48px well. */
 .modal.fx.kc-set .kc-set-line {
@@ -1351,7 +1361,10 @@ html.kc-drag * {
   backdrop-filter: var(--glass-pop-blur);
   box-shadow: var(--shadow-modal);
   font-size: var(--fs-xs);
+  transition: opacity 120ms ease;
 }
+/* Stepped aside while the drawing is dragged (it would cover the handle). */
+.kc-stylebar.is-hidden { opacity: 0; pointer-events: none; }
 .kc-stylebar button {
   display: inline-flex;
   align-items: center;
@@ -1402,3 +1415,249 @@ html.kc-drag * {
   clip-path: inset(50%);
   white-space: nowrap;
 }
+
+/* --- toolbar: news and the object list ------------------------------------- */
+.kc-toolbar .kc-news-tb { position: relative; display: inline-flex; }
+.kc-toolbar .kc-tb-ico { margin-left: 2px; }
+/* On: a lit chip and a white glyph, as the rail's armed tool - never the
+   accent alone, which is a shade dimmer than hover. */
+.kc-toolbar .kc-tb-ico.on,
+.kc-toolbar .kc-tb-ico.on:hover { color: #fff; background: rgba(255, 255, 255, 0.12); border-radius: var(--radius-sm); }
+.menu-popup.kc-news-menu { left: auto; right: 0; min-width: 170px; z-index: 30; }
+
+/* --- the object list (ChartSidebar.tsx) ------------------------------------ */
+.kc-side {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  width: 236px;
+  min-height: 0;
+  border-left: 1px solid var(--panel-line);
+  background: var(--bg-panel);
+  font-size: var(--fs-xs);
+  color: var(--text);
+}
+/* A narrow screen keeps its plot: the list floats over the right edge instead. */
+@media (max-width: 700px) {
+  .kc-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; box-shadow: var(--shadow-pop); }
+}
+.kc-side-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 36px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  border-bottom: 1px solid var(--panel-line);
+}
+.kc-side-title { font-weight: 600; font-size: var(--fs-sm); }
+.kc-side-sym { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.kc-side button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  box-shadow: none;
+  cursor: pointer;
+}
+.kc-side button:hover:not(:disabled) { color: var(--text); }
+.kc-side button:disabled { opacity: 0.35; cursor: default; }
+.kc-side button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
+.kc-side-x { width: 26px; height: 26px; border-radius: var(--radius-sm); }
+.kc-side .kc-side-x:hover { background: var(--tint); }
+.kc-side-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: var(--sp-2) 0; }
+.kc-side-sec { padding: 0 var(--sp-2) var(--sp-3); }
+.kc-side-sec + .kc-side-sec { border-top: 1px solid var(--panel-line); padding-top: var(--sp-2); }
+.kc-side-h {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  padding: 0 var(--sp-1);
+  color: var(--muted);
+  font-size: var(--fs-micro, 11px);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.kc-side-count { color: var(--dim); font-weight: 500; }
+.kc-side-empty { margin: 4px var(--sp-1) 0; color: var(--dim); }
+.kc-side-note { display: block; color: var(--dim); font-size: var(--fs-micro, 11px); }
+
+/* A layer's switch: the settings sheet's, a size down. */
+.kc-side-switch { display: flex; flex-direction: row; align-items: center; gap: var(--sp-2); min-height: 32px; padding: 2px var(--sp-1); border-radius: var(--radius-sm); cursor: pointer; }
+.kc-side-switch:hover { background: var(--tint); }
+.kc-side-switch input[role='switch'] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2a;
+  cursor: pointer;
+}
+.kc-side-switch input[role='switch']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  clip-path: none;
+  transform: none;
+  transition: transform 0.16s var(--ease-out);
+}
+.kc-side-switch input[role='switch']:checked { background: var(--pos); }
+.kc-side-switch input[role='switch']:checked::after { transform: translateX(12px); }
+.kc-side-switch input[role='switch']:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.kc-side-switch.is-off .kc-side-switch__text { color: var(--muted); }
+.kc-side-news { display: flex; flex-wrap: wrap; align-items: center; gap: 6px var(--sp-2); padding: 6px var(--sp-1) 2px; }
+.kc-side-news__label { flex: 1 1 auto; }
+.kc-side-news .kc-side-note { flex-basis: 100%; }
+.kc-side-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg); border: 1px solid var(--panel-line); }
+.kc-side .kc-side-seg button { height: 22px; padding: 0 8px; border-radius: 6px; }
+.kc-side .kc-side-seg button.on { background: var(--bg-elevated); color: var(--text); }
+
+/* Rows: drawings (draggable) and studies. */
+.kc-side-list { list-style: none; margin: 0; padding: 0; }
+.kc-side-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 2px 0 var(--sp-1);
+  border-radius: var(--radius-sm);
+}
+.kc-side-row:hover { background: var(--tint); }
+.kc-side-row.is-sel { background: rgba(255, 255, 255, 0.08); }
+.kc-side-row.is-off .kc-side-name { color: var(--dim); }
+.kc-side-row.is-drag { opacity: 0.4; }
+.kc-side-row.drop-above::before,
+.kc-side-row.drop-below::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--text);
+}
+.kc-side-row.drop-above::before { top: -1px; }
+.kc-side-row.drop-below::after { bottom: -1px; }
+.kc-side-grip { flex: none; display: inline-flex; color: var(--dim); cursor: grab; }
+.kc-side-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.kc-side .kc-side-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-start;
+  height: 26px;
+  padding: 0 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+  text-align: left;
+}
+.kc-side-ctl { flex: none; display: inline-flex; }
+.kc-side button svg { flex: none; }
+.kc-side .kc-side-ctl button { width: 24px; height: 24px; border-radius: var(--radius-sm); }
+.kc-side .kc-side-ctl button.on { color: var(--text); }
+.kc-side .kc-side-ctl .kc-side-del:hover:not(:disabled) { color: var(--neg); }
+/* The row's lesser controls come with the pointer; eye and lock stay. */
+.kc-side-row:not(:hover):not(:focus-within) .kc-side-more { display: none; }
+@media (hover: none) {
+  .kc-side-row .kc-side-more { display: inline-flex; }
+}
+.kc-side-foot { padding: var(--sp-2); border-top: 1px solid var(--panel-line); }
+.kc-side .kc-side-save {
+  width: 100%;
+  height: 34px;
+  gap: var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-weight: 500;
+}
+.kc-side .kc-side-save:hover { background: var(--tint); border-color: var(--muted); }
+
+/* --- a fill's tip and a bar's news (chartMarks.ts) -------------------------- */
+.kc-mark-tip,
+.kc-news-pop {
+  position: fixed;
+  z-index: 1700;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--glass-pop-bg, var(--bg-elevated));
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-pop);
+  color: var(--text);
+  font-size: var(--fs-xs);
+}
+.kc-mark-tip { padding: 5px 8px; pointer-events: none; white-space: nowrap; font-family: var(--font-num); }
+.kc-mark-tip .pos { color: var(--pos); }
+.kc-mark-tip .neg { color: var(--neg); }
+.kc-mark-dim { color: var(--muted); }
+.kc-news-pop { width: 320px; max-height: 60vh; overflow-y: auto; padding: var(--sp-2); pointer-events: none; }
+.kc-news-pop.is-pinned { pointer-events: auto; }
+.kc-news-pop__head { padding: 0 4px 6px; color: var(--muted); font-weight: 600; }
+.kc-news-pop__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.kc-news-pop__item { display: flex; flex-direction: column; gap: 2px; padding: 6px; border-radius: var(--radius-sm); color: var(--text); text-decoration: none; }
+.kc-news-pop.is-pinned .kc-news-pop__item:hover { background: var(--tint); }
+.kc-news-pop__time { color: var(--dim); font-size: var(--fs-micro, 11px); font-family: var(--font-num); }
+.kc-news-pop__title { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.35; }
+.kc-news-pop__more { padding: 4px 6px 0; color: var(--muted); }
+.kc-news-pop__src { padding: 6px 6px 0; color: var(--dim); font-size: var(--fs-micro, 11px); text-align: right; }
+
+/* --- a snapshot from a folder on screen (Chart.tsx snapView) ---------------- */
+.kc-snapbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px var(--sp-2);
+  padding: 6px 6px 6px var(--sp-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--glass-pop-bg, var(--bg-elevated));
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  font-size: var(--fs-xs);
+}
+.kc-snapbar-title { font-weight: 600; color: var(--text); }
+.kc-snapbar-when { color: var(--muted); font-family: var(--font-num); }
+.kc-snapbar-note { flex: 1 1 auto; color: var(--dim); }
+.kc-snapbar-actions { display: inline-flex; gap: 4px; margin-left: auto; }
+.kc-snapbar-actions button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  box-shadow: none;
+  cursor: pointer;
+}
+.kc-snapbar-actions button:hover { border-color: var(--muted); }
+.kc-snapbar-actions .kc-snapbar-keep { border-color: transparent; background: var(--accent); color: var(--accent-text); }
+.kc-snapbar-actions .kc-snapbar-keep:hover { background: var(--accent-hover); }
+
+/* The export sheet's notes under each switch. */
+.modal.fx.kc-set .kc-export-what { color: var(--muted); line-height: 1.45; }
+.modal.fx.kc-set .kc-export-what strong { color: var(--text); font-weight: 600; }
+.modal.fx.kc-set .kc-export-note { display: block; color: var(--dim); font-size: var(--fs-micro, 11px); font-weight: 400; }
