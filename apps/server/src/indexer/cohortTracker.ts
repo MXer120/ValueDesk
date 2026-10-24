@@ -32,24 +32,28 @@
  *
  * PNL. A PnL cohort needs a wallet's all-time PnL. Hyperliquid's leaderboard file
  * ranks ~47k accounts; the books hold positions for several times that. Every
- * other Hyperliquid holder's PnL is read from its portfolio (weight 20), $100K+
- * holders just behind new wallets' first reads and the tail after the position
- * reads, and read again daily ($1M+), every 3 days ($100K+) or weekly
- * (planPnl, cohort_pnl). Before this (2026-10-24) the PnL cohorts held some
- * 10k wallets against the size cohorts' 51k.
+ * other Hyperliquid holder's PnL - trade.xyz's included, the same accounts
+ * (accountPnl) - is read from its portfolio (weight 20), largest
+ * first, with a guaranteed share of the cohort lane's spend (PNL_SHARE), and read
+ * again daily ($1M+), every 3 days ($100K+) or weekly (planPnl, cohort_pnl).
+ * Before this (2026-10-24) the PnL cohorts held some 10k wallets against the
+ * size cohorts' 51k.
  *
  * MEMBERS. Every wallet the index can value: Hyperliquid's leaderboard file
  * (equity + all-time PnL), SoDEX's and Lighter's lists, Arcus portfolios,
  * trade.xyz traders the stream saw, and any wallet a read has valued.
  * Written to `cohort_member` for the API thread, which nets and filters on
  * request (indexer/read.ts); this worker only records the history:
- * `cohort_series` every 15 minutes, `cohort_mix` (per coin and sector) hourly.
+ * `cohort_series` every 15 minutes, `cohort_mix` (per coin and sector) hourly -
+ * and rebuilds the hours it missed while it was down, from Hyperliquid's funding
+ * history (cohortRebuild.ts, planRebuild), in a lane the boards lend 200 weight
+ * a minute to while it reads.
  */
 import { VENUES, type Venue } from '../valuescan/types.js';
 import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
 import type { Pacer } from '../valuescan/extra/http.js';
 import {
-  Aggregator, MARGIN_SIBLING, TAIL_EQUITY, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
+  Aggregator, COHORTS, MARGIN_SIBLING, TAIL_EQUITY, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
   type CohortRange, type Position, type WalletVenue,
 } from '../valuescan/cohorts/model.js';
 import { Lane } from './lanes.js';
@@ -57,7 +61,15 @@ import { mark } from './busy.js';
 import type { Print } from './streams.js';
 import type { IndexStore } from './store.js';
 import { DAY_MS, dayOf } from './windows.js';
-import { PNL_READ_COST, READ_COST, arcusPositions, hlPortfolioPnl, hlPositions, lighterPositions, sodexPositions, type PositionRead } from './cohortSource.js';
+import {
+  PNL_READ_COST, READ_COST, arcusPositions, hlEquityHistory, hlFundingRows, hlHourlyPrices, hlPortfolioPnl, hlPositions,
+  lighterPositions, sodexPositions, type PositionRead,
+} from './cohortSource.js';
+import {
+  HOUR_MS, REBUILD_WINDOW_MS, REBUILT_VENUES, checkEdges, histOf, missingSpans, needsEquityHistory, peakNotional, priceAt,
+  readRange, rebuildHour, rebuildSample, resumedAfterOutage, sizeProxy, venueOfSymbol,
+  type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
+} from './cohortRebuild.js';
 import type { CohortPnlRow } from './store.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
@@ -96,10 +108,14 @@ export function gapRereadFloor(downMs: number): number {
 }
 const SHORT_OUTAGE_MS = 2 * 60_000;
 
-/** A streamed book: re-read to reconcile after this long. */
-export function reconcileTtl(equity: number): number {
+/**
+ * A streamed book: re-read to reconcile after this long. Every SoDEX book daily:
+ * they are few (~11k, 20 reads a minute is the lane) and its stream misses prints
+ * (2026-10-25: 2 of 8 random holders off after a day or more, one flipped side).
+ */
+export function reconcileTtl(equity: number, venue?: Venue): number {
   if (equity >= 1_000_000) return 6 * 60 * 60_000;
-  if (equity >= 100_000) return 24 * 60 * 60_000;
+  if (equity >= 100_000 || venue === 'sodex') return 24 * 60 * 60_000;
   return 7 * DAY_MS;
 }
 
@@ -223,7 +239,32 @@ export interface CohortDeps {
   arcus: { lane: Lane; pacer: Pacer };
   /** SoDEX's shared gateway gate (cooldowns, busy budget). */
   sodexGate: () => number;
+  /** Lend this much of the Hyperliquid boards lane's weight a minute to the history rebuild (0 = give it back). */
+  lendHl?: (weight: number) => void;
 }
+
+/** History rebuild reads (cohortRebuild.ts), weight / minute: lent by the boards lane while a rebuild has reads to do. */
+export const REBUILD_PER_MIN = 200;
+/** Rebuild reads queued at a time (the plan tops them up every minute). */
+const REBUILD_QUEUE = 120;
+
+interface RebuildState {
+  span: Span;
+  /** The wallets to read and how many each stands for (cohortRebuild.ts rebuildSample). */
+  plan: Map<string, number>;
+  read: Set<string>;
+  phase: 'reads' | 'prices' | 'writing';
+  /** Symbols the reads hold, and those whose prices are read. */
+  symbols: Set<string>;
+  priced: Set<string>;
+  startedAt: number;
+  check: RebuildCheck | null;
+  lastError: string | null;
+  /** Failed reads per wallet: after REBUILD_TRIES the wallet is left out (counted in `skipped`). */
+  fails: Map<string, number>;
+  skipped: number;
+}
+const REBUILD_TRIES = 3;
 
 /** Portfolio reads queued at a time (the plan tops them up every minute). */
 const PNL_QUEUE_CAP = 60;
@@ -232,14 +273,27 @@ export function pnlTtl(equity: number): number {
   return equity >= 1_000_000 ? DAY_MS : equity >= 100_000 ? 3 * DAY_MS : 7 * DAY_MS;
 }
 /**
- * Where a portfolio read queues among the position reads (new 1,000+, re-reads
- * 400-1,300): a $100K+ holder's just under a new wallet's first read - it moves
- * the money in the PnL cohorts - and the rest of the tail after every position read.
+ * Where a portfolio read queues among the position reads, on their scale (size =
+ * log10(equity) x 100; new 1,000 + size, stale 950 + size, gap and spot 900 +
+ * size, reconcile 400 + size): a $100K+ holder's just under a stale book of its
+ * size - it moves the money in the PnL cohorts - and the rest of the tail after
+ * every position read. (Until 2026-10-25 the size here was x10: a $100K+
+ * holder's read sat below every gap re-read and most reconciles.)
  */
 export function pnlPrio(equity: number): number {
-  const size = Math.round(Math.log10(Math.max(1, equity)) * 10);
-  return equity >= 100_000 ? 920 + size : 300 + size;
+  const size = Math.round(Math.log10(Math.max(1, equity)) * 100);
+  return equity >= 100_000 ? 940 + size : 300 + Math.round(size / 10);
 }
+/**
+ * The share of the cohort lane's spend portfolio reads are guaranteed while any
+ * wait: a portfolio read is 20 weight against a position read's 2, so 40% is one
+ * for every 15 position reads - at the lane's 400, 8 a minute, 11k a day.
+ * Without it they waited behind a queue the plan refills every minute: two
+ * written in the first 70 minutes after v0.2.13.
+ */
+export const PNL_SHARE = 0.4;
+/** Cohort reads in flight at once (lanes.ts CONCURRENCY): one at a time made ~20 a minute. */
+export const HLC_CONCURRENCY = 8;
 
 export class CohortTracker {
   /**
@@ -248,7 +302,17 @@ export class CohortTracker {
    * default (raised from 200 on 2026-10-24 for the portfolio reads): with the
    * boards' 500 and the API's 200 that is 1,100 of HL's 1,200 per IP.
    */
-  readonly hlc = new Lane({ name: 'hlc', perMin: envNum('VALUESCAN_INDEX_HL_COHORT', 400, 20, 800) });
+  readonly hlc = new Lane({
+    name: 'hlc',
+    perMin: envNum('VALUESCAN_INDEX_HL_COHORT', 400, 20, 800),
+    concurrency: HLC_CONCURRENCY,
+    shares: [{ prefix: 'cohpnl:', share: PNL_SHARE }],
+  });
+  /** History rebuild reads (userFunding, candles): a lane of its own, so a rebuild never slows the books or the PnL reads. */
+  readonly hlh = new Lane({ name: 'hlh', perMin: envNum('VALUESCAN_INDEX_HL_REBUILD', REBUILD_PER_MIN, 20, 400), concurrency: 4 });
+  private rebuild: RebuildState | null = null;
+  /** What the boards lane lends the rebuild now. */
+  private lent = 0;
   /** SoDEX perps state reads, requests / minute (weight 5 each). */
   readonly scoh: Lane;
   private books = new Map<Venue, Map<string, Book>>();
@@ -265,6 +329,8 @@ export class CohortTracker {
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
   private gapFloor = new Map<Venue, number>();
+  /** When the recording resumed after its last outage (cohortRebuild.ts resumedAfterOutage): streamed books read before are re-read. */
+  private staleBefore = 0;
   private timers: NodeJS.Timeout[] = [];
   private lastSeriesT = 0;
   private lastMixT = 0;
@@ -302,6 +368,7 @@ export class CohortTracker {
     this.lastSeriesT = s.cohortSeriesLastT();
     this.lastMixT = s.cohortMixLastT();
     this.hlc.start();
+    this.hlh.start();
     this.scoh.start();
     const every = (ms: number, fn: () => Promise<void> | void, name: string) => {
       const t = setInterval(() => { mark(name); void Promise.resolve(fn()).catch((e) => (this.lastError = String(e))); }, ms);
@@ -320,6 +387,8 @@ export class CohortTracker {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
     this.hlc.stop();
+    this.hlh.stop();
+    this.lend(0);
     this.scoh.stop();
     this.flush();
   }
@@ -360,6 +429,15 @@ export class CohortTracker {
       recordMs: this.recordMs,
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
+      hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
+      staleBefore: this.staleBefore,
+      rebuild: this.rebuild
+        ? {
+          span: this.rebuild.span, phase: this.rebuild.phase, planned: this.rebuild.plan.size, read: this.rebuild.read.size,
+          symbols: this.rebuild.symbols.size, priced: this.rebuild.priced.size, startedAt: this.rebuild.startedAt,
+          skipped: this.rebuild.skipped, lastError: this.rebuild.lastError,
+        }
+        : null,
       lastSeriesT: this.lastSeriesT,
       lastMixT: this.lastMixT,
       lastError: this.lastError,
@@ -442,14 +520,17 @@ export class CohortTracker {
    * all-time PnL a holder is in a size cohort but in no PnL cohort. Largest
    * first; each read again after pnlTtl.
    */
-  private planPnl(members: Map<string, Member>, books: Map<string, Book>, now: number): void {
+  private planPnl(members: Map<string, Member>, now: number): void {
     const lane = this.hlc;
     const queued = lane.countPrefix('cohpnl:');
     if (queued >= PNL_QUEUE_CAP) return;
     const done = this.pnls();
     const due: Array<[string, number]> = [];
-    for (const [address, book] of books) {
-      if (!book.pos.size) continue;
+    // Holders on the main dex and on trade.xyz (the same accounts: accountPnl).
+    const seen = new Set<string>();
+    for (const [address, book] of [...this.books.get('hyperliquid')!, ...this.books.get('tradexyz')!]) {
+      if (!book.pos.size || seen.has(address)) continue;
+      seen.add(address);
       const m = members.get(address);
       const read = done.get(address);
       // Ranked by the leaderboard (its PnL is the leaderboard's), unless only our read gave it.
@@ -472,6 +553,28 @@ export class CohortTracker {
           return PNL_READ_COST;
         },
       });
+    }
+  }
+
+  /**
+   * trade.xyz is a dex of Hyperliquid accounts: its wallets sit in the PnL cohort
+   * of the account's all-time PnL (the leaderboard's, else its portfolio's - the
+   * measure Hyperdash places the same address by), the venue's own figure only
+   * where the account has none. Before 2026-10-25 only the ~80 holders the boards
+   * track had one, from their xyz fills.
+   */
+  private accountPnl(members: Map<string, Member>, hlMembers: Map<string, Member>): void {
+    const read = this.pnls();
+    for (const [a, m] of members) {
+      const h = hlMembers.get(a);
+      const r = read.get(a);
+      if (h?.pnl != null) {
+        m.pnl = h.pnl;
+        m.pnlRange = h.pnlRange;
+      } else if (r?.pnl != null) {
+        m.pnl = r.pnl;
+        m.pnlRange = { '1d': r.pnl1d, '7d': r.pnl7d, '30d': r.pnl30d };
+      }
     }
   }
 
@@ -520,10 +623,238 @@ export class CohortTracker {
     } finally {
       this.planMs = Date.now() - t0;
     }
+    try {
+      await this.planRebuild();
+    } catch (e) {
+      if (this.rebuild) this.rebuild.lastError = String(e);
+      this.lastError = `cohort rebuild: ${String(e)}`;
+    }
+  }
+
+  // --- history rebuild (cohortRebuild.ts) --------------------------------------------------
+
+  private lend(weight: number): void {
+    if (weight === this.lent) return;
+    this.lent = weight;
+    this.d.lendHl?.(weight);
+  }
+
+  /**
+   * The newest span the recording missed: read wallet by wallet in the rebuild
+   * lane, then priced, then written - every minute, the next step. The reads
+   * are kept (cohort_hist), so a restart carries on where it stopped.
+   */
+  private async planRebuild(): Promise<void> {
+    const s = this.d.store;
+    const now = this.d.now();
+    if (!this.rebuild) {
+      if (!this.members.size || !this.lastSeriesT) return;
+      const recorded = s.cohortSeriesRecorded(scopeKey(VENUES), COHORTS[0]!.id, now - REBUILD_WINDOW_MS);
+      const span = missingSpans(recorded, now).filter((x) => s.getMeta(`cohort_rebuilt:${x.from}`) == null).at(-1);
+      for (const old of s.cohortHistSpans()) if (old !== span?.from) s.dropCohortHist(old);
+      if (!span) {
+        this.lend(0);
+        return;
+      }
+      this.rebuild = {
+        span, plan: await this.rebuildPlan(), read: s.cohortHistKeys(span.from, 'w'), phase: 'reads',
+        symbols: new Set(), priced: new Set(), startedAt: now, check: null, lastError: null, fails: new Map(), skipped: 0,
+      };
+    }
+    const r = this.rebuild;
+    if (r.phase === 'writing') return;
+    if (r.phase === 'reads') {
+      const unread = [...r.plan].filter(([a]) => !r.read.has(a));
+      if (unread.length) {
+        this.lend(this.hlh.perMin);
+        this.queueRebuildReads(r, unread);
+        return;
+      }
+      for (const data of s.cohortHist(r.span.from, 'w').values()) {
+        for (const sym of Object.keys((JSON.parse(data) as WalletHist).p)) if (venueOfSymbol(sym)) r.symbols.add(sym);
+      }
+      r.priced = s.cohortHistKeys(r.span.from, 'px');
+      r.phase = 'prices';
+    }
+    const unpriced = [...r.symbols].filter((x) => !r.priced.has(x));
+    if (unpriced.length) {
+      this.lend(this.hlh.perMin);
+      const { from, to } = readRange(r.span);
+      for (const symbol of unpriced) {
+        this.hlh.add({
+          key: `hpx:${symbol}`,
+          prio: 2_000,
+          run: async () => {
+            const { px, cost } = await hlHourlyPrices(symbol, from - HOUR_MS, to + HOUR_MS);
+            s.putCohortHist(r.span.from, 'px', [[symbol, JSON.stringify(px)]], this.d.now());
+            r.priced.add(symbol);
+            return cost;
+          },
+        });
+      }
+      return;
+    }
+    this.lend(0);
+    r.phase = 'writing';
+    try {
+      await this.writeRebuild(r);
+      s.setMeta(`cohort_rebuilt:${r.span.from}`, JSON.stringify({ to: r.span.to, at: this.d.now(), wallets: r.read.size - r.skipped, skipped: r.skipped, check: r.check }));
+      s.dropCohortHist(r.span.from);
+      this.rebuild = null;
+    } catch (e) {
+      r.phase = 'prices';
+      throw e;
+    }
+  }
+
+  /** Which Hyperliquid / trade.xyz wallets a rebuild reads (cohortRebuild.ts WHICH WALLETS). */
+  private async rebuildPlan(): Promise<Map<string, number>> {
+    const vol = new Map<string, number>();
+    const snap = await this.d.hlSnapshot();
+    const v30 = snap?.data.cols['volume:30d'];
+    if (snap && v30) snap.data.addresses.forEach((a, i) => { if (!Number.isNaN(v30[i]!)) vol.set(a, v30[i]!); });
+    const hl = this.members.get('hyperliquid') ?? new Map<string, Member>();
+    const xyz = this.members.get('tradexyz') ?? new Map<string, Member>();
+    const hb = this.books.get('hyperliquid')!;
+    const xb = this.books.get('tradexyz')!;
+    const out = new Map<string, number>();
+    let t0 = Date.now();
+    for (const a of new Set([...hl.keys(), ...xyz.keys(), ...hb.keys(), ...xb.keys()])) {
+      const eq = Math.max(hl.get(a)?.equity ?? 0, perpEquity('hyperliquid', hb.get(a), xb.get(a)) ?? 0);
+      const pick = rebuildSample(a, sizeProxy(eq, vol.get(a)));
+      if (pick.counts) out.set(a, pick.weight);
+      if (Date.now() - t0 > SLICE_MS) {
+        await new Promise<void>((res) => setImmediate(res));
+        mark('coh:plan');
+        t0 = Date.now();
+      }
+    }
+    return out;
+  }
+
+  /** A wallet's equity now on Hyperliquid: its perp equity, else the leaderboard's account value. */
+  private equityNow(address: string): number | null {
+    const hb = this.books.get('hyperliquid')!.get(address);
+    const xb = this.books.get('tradexyz')!.get(address);
+    return perpEquity('hyperliquid', hb, xb) ?? this.members.get('hyperliquid')?.get(address)?.equity ?? null;
+  }
+
+  private queueRebuildReads(r: RebuildState, unread: Array<[string, number]>): void {
+    const queued = this.hlh.countPrefix('hist:');
+    if (queued >= REBUILD_QUEUE) return;
+    // Largest first: the money the charts show.
+    const ranked = unread
+      .filter(([a]) => !this.hlh.has(`hist:${a}`))
+      .map(([a, w]) => [a, w, this.equityNow(a) ?? 0] as const)
+      .sort((x, y) => y[2] - x[2]);
+    const { from, to } = readRange(r.span);
+    const s = this.d.store;
+    for (const [address, weight, eq] of ranked.slice(0, REBUILD_QUEUE - queued)) {
+      this.hlh.add({
+        key: `hist:${address}`,
+        prio: 1_000 + Math.round(Math.log10(Math.max(1, eq)) * 100),
+        run: async () => {
+          const read = await hlFundingRows(address, from, to).catch((e: unknown) => {
+            const n = (r.fails.get(address) ?? 0) + 1;
+            r.fails.set(address, n);
+            if (n >= REBUILD_TRIES) {
+              r.read.add(address);
+              r.skipped++;
+            }
+            throw e;
+          });
+          const { rows, cost } = read;
+          const hist = histOf(rows, weight);
+          let extra = 0;
+          const peak = peakNotional(hist, (sym) => this.marks.get(`${venueOfSymbol(sym)}|${sym}`) ?? null);
+          if (needsEquityHistory(peak, this.equityNow(address))) {
+            hist.eq = (await hlEquityHistory(address)) ?? undefined;
+            extra = PNL_READ_COST;
+          }
+          s.putCohortHist(r.span.from, 'w', [[address, JSON.stringify(hist)]], this.d.now());
+          r.read.add(address);
+          return cost + extra;
+        },
+      });
+    }
+  }
+
+  /** The venues the reads do not rebuild, at their recorded points either side of the span (cohortRebuild.ts Bridge). */
+  private bridges(span: Span): Map<Venue, Bridge> {
+    const s = this.d.store;
+    const out = new Map<Venue, Bridge>();
+    const near = 3 * HOUR_MS;
+    for (const v of VENUES) {
+      if (REBUILT_VENUES.includes(v)) continue;
+      const before = s.cohortSeries(v, span.from - near, undefined, span.from).filter((x) => !x.rebuilt);
+      const after = s.cohortSeries(v, span.to, undefined, span.to + near).filter((x) => !x.rebuilt);
+      const lt = before.at(-1)?.t;
+      const rt = after[0]?.t;
+      if (lt === undefined || rt === undefined) continue;
+      const at = (rows: typeof before, t: number) => ({ t, series: new Map(rows.filter((x) => x.t === t).map((x) => [x.cohort, [x.long, x.short] as [number, number]])) });
+      const mb = s.cohortMix(v, span.from - near, undefined, span.from).filter((x) => !x.rebuilt);
+      const ma = s.cohortMix(v, span.to, undefined, span.to + near).filter((x) => !x.rebuilt);
+      const mixAt = (rows: typeof mb, t: number | undefined) =>
+        t === undefined ? null : { t, mix: new Map(rows.filter((x) => x.t === t).map((x) => [x.cohort, { c: x.c, s: x.s }])) };
+      out.set(v, { left: at(before, lt), right: at(after, rt), mixLeft: mixAt(mb, mb.at(-1)?.t), mixRight: mixAt(ma, ma[0]?.t) });
+    }
+    return out;
+  }
+
+  /** Every missing hour of the span from the reads: checked against the recording at its edges, then written. */
+  private async writeRebuild(r: RebuildState): Promise<void> {
+    const s = this.d.store;
+    const px = new Map<string, Map<number, number>>();
+    for (const [symbol, data] of s.cohortHist(r.span.from, 'px')) px.set(symbol, new Map(JSON.parse(data) as Array<[number, number]>));
+    const price = (symbol: string, t: number) => priceAt(px.get(symbol), t);
+    const hl = this.members.get('hyperliquid') ?? new Map<string, Member>();
+    const xyz = this.members.get('tradexyz') ?? new Map<string, Member>();
+    const hb = this.books.get('hyperliquid')!;
+    const xb = this.books.get('tradexyz')!;
+    const wallets: RebuildWallet[] = [];
+    for (const [address, data] of s.cohortHist(r.span.from, 'w')) {
+      const m = hl.get(address);
+      const x = xyz.get(address);
+      const now: RebuildWallet['now'] = {
+        hyperliquid: { pnl: m?.pnl ?? null, equity: perpEquity('hyperliquid', hb.get(address), xb.get(address)) ?? m?.equity ?? null, label: m?.label ?? null },
+      };
+      if (x || xb.has(address)) {
+        now.tradexyz = { pnl: x?.pnl ?? null, equity: perpEquity('tradexyz', xb.get(address), hb.get(address)) ?? x?.equity ?? null, label: x?.label ?? null };
+      }
+      wallets.push({ address, hist: JSON.parse(data) as WalletHist, now });
+    }
+    const bridges = this.bridges(r.span);
+    const breath = async () => {
+      await new Promise<void>((res) => setImmediate(res));
+      mark('coh:rebuild');
+    };
+    // The edges: the rebuild against what was recorded there (Hyperliquid's own scope).
+    const { from, to } = readRange(r.span);
+    const recorded = new Map<number, Map<string, [number, number]>>();
+    for (const x of s.cohortSeries('hyperliquid', from, undefined, to)) {
+      if (x.rebuilt || (x.t >= r.span.from && x.t <= r.span.to)) continue;
+      const m = recorded.get(x.t) ?? new Map<string, [number, number]>();
+      m.set(x.cohort, [x.long, x.short]);
+      recorded.set(x.t, m);
+    }
+    const rebuilt = new Map<number, Map<string, [number, number]>>();
+    for (const t of recorded.keys()) {
+      if (t % HOUR_MS) continue;
+      rebuilt.set(t, rebuildHour(t, wallets, price, bridges, false).base.get('hyperliquid')!);
+      await breath();
+    }
+    r.check = checkEdges(rebuilt, recorded);
+    for (let t = r.span.from; t <= r.span.to; t += HOUR_MS) {
+      const h = rebuildHour(t, wallets, price, bridges, true);
+      s.putCohortSeries(h.series);
+      s.putCohortMix(h.mix);
+      await breath();
+    }
   }
 
   private async planVenues(): Promise<void> {
     const now = this.d.now();
+    this.staleBefore = resumedAfterOutage(this.d.store.cohortSeriesRecorded(scopeKey(VENUES), COHORTS[0]!.id, now - REBUILD_WINDOW_MS));
     const hlMembers = await this.membersOf('hyperliquid');
     const breath = async () => {
       await new Promise<void>((r) => setImmediate(r));
@@ -532,11 +863,12 @@ export class CohortTracker {
     for (const venue of VENUES) {
       await breath();
       const members = venue === 'hyperliquid' ? hlMembers : await this.membersOf(venue);
+      if (venue === 'tradexyz') this.accountPnl(members, hlMembers);
       await breath();
       this.members.set(venue, members);
       await this.saveMembers(venue, members);
       if (venue === 'hyperliquid') {
-        this.planPnl(members, this.books.get(venue)!, now);
+        this.planPnl(members, now);
         await breath();
       }
       // A new continuous stream span means an outage: large books are unknown again.
@@ -582,9 +914,11 @@ export class CohortTracker {
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
         if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
+        // Read before the last outage ended: it missed that outage's prints, at any size.
+        else if (follows && book.at < this.staleBefore) push(900 + size);
         // Read before the spot state was looked at, and the leaderboard says it may matter.
         else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
-        else if (age >= (follows ? reconcileTtl(eq) : pollTtl(eq))) push(400 + size);
+        else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
       for (const [address, m] of members) {

@@ -1,5 +1,6 @@
 /**
- * Serial task lanes with priorities and a spend-rate cap.
+ * Task lanes with priorities and a spend-rate cap, one task at a time unless
+ * told otherwise.
  *
  * One lane per upstream budget (HL /info, SoDEX gateway, SoDEX data host), so
  * a slow venue never holds the other back and each budget is paced on its
@@ -11,6 +12,16 @@
  * Tasks are keyed: adding a key that is already queued only raises its
  * priority. A task that throws is dropped (the next board pass re-adds it if
  * it is still needed); a rate limit pauses the whole lane.
+ *
+ * CONCURRENCY. A lane runs its tasks one after another by default. One that
+ * waits mostly on the network can run several at once (`concurrency`): every
+ * await in a task costs a turn of the event loop, and while the indexer's
+ * thread is held by synchronous SQLite work (a 20 GB index in 1.5 GB of page
+ * cache, 2026-10-24: ~40% of its time stalled on the disk) a turn can take
+ * seconds - the Hyperliquid cohort lane managed ~20 reads a minute of the 200
+ * its budget allows. Run in parallel, one slow turn finishes several reads.
+ * The spend cap is the same: what the finished tasks spent is rested off
+ * before the next one starts.
  *
  * An upstream that is struggling (5xx, "Request Timeout", our own abort) is
  * backed off: 15 s after the first such failure, doubling to 5 minutes while
@@ -48,6 +59,8 @@ export interface LaneOptions {
    * 1-request position read are not the same share of a budget.
    */
   shares?: ReadonlyArray<{ prefix: string; share: number }>;
+  /** Tasks in flight at once (default 1: one after another). */
+  concurrency?: number;
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -67,8 +80,14 @@ export class Lane {
   private seq = 0;
   private running = false;
   private stopped = false;
-  private active: string | null = null;
-  private activeAt = 0;
+  /** Running tasks: key -> when each started. */
+  private active = new Map<string, number>();
+  /** Spend of finished tasks not rested off yet. */
+  private owed = 0;
+  /** A rate limit's pause, taken before the next task. */
+  private pauseMs = 0;
+  /** Wake-ups for a loop waiting on a free slot. */
+  private waiters: Array<() => void> = [];
   /** The prefixes and spend of the last tasks, for `shares`. */
   private recent: Array<{ prefix: string; cost: number }> = [];
   private transientStreak = 0;
@@ -79,7 +98,21 @@ export class Lane {
   spent = 0;
   lastError: string | null = null;
 
-  constructor(private readonly o: LaneOptions) {}
+  /** The spend cap now (`setPerMin`: another lane can lend it part of its own, or take it back). */
+  private rate: number;
+
+  constructor(private readonly o: LaneOptions) {
+    this.rate = o.perMin;
+  }
+
+  get perMin(): number {
+    return this.rate;
+  }
+
+  /** A new spend cap, from the next rest on. */
+  setPerMin(n: number): void {
+    if (Number.isFinite(n) && n > 0) this.rate = n;
+  }
 
   get size(): number {
     return this.queue.size;
@@ -104,14 +137,17 @@ export class Lane {
 
   /** Queued or running tasks whose key starts with `prefix`. */
   countPrefix(prefix: string): number {
-    let n = this.active?.startsWith(prefix) ? 1 : 0;
+    let n = 0;
+    for (const k of this.active.keys()) if (k.startsWith(prefix)) n++;
     for (const k of this.queue.keys()) if (k.startsWith(prefix)) n++;
     return n;
   }
 
-  /** The task running now and for how long (ms) - a lane that stops moving shows why. */
+  /** The longest-running task and for how long (ms) - a lane that stops moving shows why. */
   get current(): { key: string; forMs: number } | null {
-    return this.active ? { key: this.active, forMs: Date.now() - this.activeAt } : null;
+    let oldest: [string, number] | null = null;
+    for (const e of this.active) if (!oldest || e[1] < oldest[1]) oldest = e;
+    return oldest ? { key: oldest[0], forMs: Date.now() - oldest[1] } : null;
   }
 
   /** A queued task's priority (undefined when not queued). */
@@ -131,11 +167,11 @@ export class Lane {
   }
 
   has(key: string): boolean {
-    return this.queue.has(key) || this.active === key;
+    return this.queue.has(key) || this.active.has(key);
   }
 
   add(t: LaneTask): void {
-    if (this.active === t.key) return;
+    if (this.active.has(t.key)) return;
     const cur = this.queue.get(t.key);
     if (cur) {
       if (t.prio > cur.prio) {
@@ -172,11 +208,27 @@ export class Lane {
       }
       return best;
     };
+    const spent = new Map<string, { cost: number; n: number }>();
     let total = 0;
-    for (const r of this.recent) total += r.cost;
+    for (const r of this.recent) {
+      const x = spent.get(r.prefix) ?? { cost: 0, n: 0 };
+      x.cost += r.cost;
+      x.n++;
+      spent.set(r.prefix, x);
+      total += r.cost;
+    }
+    // Running tasks count at their prefix's recent average: without it, parallel
+    // slots all went to a share that had not finished a task yet (64% for a 40% share).
+    const running = new Map<string, number>();
+    for (const k of this.active.keys()) {
+      const p = this.prefixOf(k);
+      const x = spent.get(p);
+      const cost = x ? x.cost / x.n : 1;
+      running.set(p, (running.get(p) ?? 0) + cost);
+      total += cost;
+    }
     for (const s of this.o.shares ?? []) {
-      let served = 0;
-      for (const r of this.recent) if (r.prefix === s.prefix) served += r.cost;
+      const served = (spent.get(s.prefix)?.cost ?? 0) + (running.get(s.prefix) ?? 0);
       if (total > 0 && served / total >= s.share) continue;
       const e = pick(s.prefix);
       if (e) return e;
@@ -195,10 +247,28 @@ export class Lane {
 
   private async loop(): Promise<void> {
     const sleep = this.o.sleep ?? realSleep;
+    const slots = Math.max(1, Math.floor(this.o.concurrency ?? 1));
     while (!this.stopped) {
+      if (this.owed > 0) {
+        // Rest so the average spend stays at perMin.
+        const ms = (this.owed / this.rate) * 60_000;
+        this.owed = 0;
+        await sleep(ms);
+        continue;
+      }
+      if (this.pauseMs > 0) {
+        const ms = this.pauseMs;
+        this.pauseMs = 0;
+        await sleep(ms);
+        continue;
+      }
       const gate = Math.max(this.o.gate?.() ?? 0, this.backoffUntil - Date.now());
       if (gate > 0) {
         await sleep(Math.min(gate, 5_000));
+        continue;
+      }
+      if (this.active.size >= slots) {
+        await new Promise<void>((r) => this.waiters.push(r));
         continue;
       }
       const e = this.next();
@@ -209,30 +279,34 @@ export class Lane {
       const [key, task] = e;
       this.queue.delete(key);
       mark(`lane:${this.o.name}:${key.split(':')[0]}`);
-      this.activeAt = Date.now();
-      this.active = key;
-      let cost = 1;
-      try {
-        cost = Math.max(0, await task.run());
-        this.done++;
-        this.transientStreak = 0;
-      } catch (err) {
-        this.failed++;
-        this.lastError = err instanceof Error ? err.message : String(err);
-        if (isRateLimit(err)) await sleep(this.o.rateLimitPauseMs ?? 60_000);
-        else if (isTransient(err)) {
-          const base = this.o.transientBaseMs ?? 15_000;
-          const wait = Math.min(this.o.transientMaxMs ?? 5 * 60_000, base * 2 ** this.transientStreak++);
-          this.backoffUntil = Date.now() + wait;
-        }
-      } finally {
-        this.active = null;
-      }
-      this.note(key, cost);
-      this.spent += cost;
-      // Rest so the average spend stays at perMin.
-      await sleep((cost / this.o.perMin) * 60_000);
+      this.active.set(key, Date.now());
+      const run = this.run(key, task.run);
+      if (slots === 1) await run;
     }
     this.running = false;
+  }
+
+  private async run(key: string, run: () => Promise<number>): Promise<void> {
+    let cost = 1;
+    try {
+      cost = Math.max(0, await run());
+      this.done++;
+      this.transientStreak = 0;
+    } catch (err) {
+      this.failed++;
+      this.lastError = err instanceof Error ? err.message : String(err);
+      if (isRateLimit(err)) this.pauseMs = Math.max(this.pauseMs, this.o.rateLimitPauseMs ?? 60_000);
+      else if (isTransient(err)) {
+        const base = this.o.transientBaseMs ?? 15_000;
+        const wait = Math.min(this.o.transientMaxMs ?? 5 * 60_000, base * 2 ** this.transientStreak++);
+        this.backoffUntil = Date.now() + wait;
+      }
+    } finally {
+      this.active.delete(key);
+    }
+    this.note(key, cost);
+    this.spent += cost;
+    this.owed += cost;
+    for (const wake of this.waiters.splice(0)) wake();
   }
 }

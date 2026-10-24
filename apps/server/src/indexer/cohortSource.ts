@@ -23,6 +23,7 @@ import { hlInfo } from '../valuescan/hyperliquid/index.js';
 import type { HlClearinghouseState, HlPortfolio } from '../valuescan/hyperliquid/raw.js';
 import { portfolioWindow } from '../valuescan/hyperliquid/mappers.js';
 import type { CohortPnlRow } from './store.js';
+import type { FundingRow } from './cohortRebuild.js';
 import { perpsState } from '../valuescan/sodex/gateway.js';
 import { arcusAccount } from '../valuescan/extra/arcus.js';
 import { LIGHTER_API } from '../valuescan/extra/lighter.js';
@@ -174,6 +175,66 @@ export async function hlPortfolioPnl(address: string): Promise<CohortPnlRow | nu
     pnl7d: portfolioPnl(p, 'week'),
     pnl30d: portfolioPnl(p, 'month'),
   };
+}
+
+// --- history reads (cohortRebuild.ts) ----------------------------------------------------
+
+/** userFunding rows per response. */
+const FUNDING_PAGE = 500;
+
+/**
+ * A Hyperliquid wallet's funding over [from, to]: one row per hour and coin it
+ * held (trade.xyz's `xyz:` coins included), with the position's size then -
+ * POST /info userFunding, weight 20 + 1 per 20 rows, paged by time. Returns the
+ * rows and the weight spent.
+ */
+export async function hlFundingRows(address: string, from: number, to: number): Promise<{ rows: FundingRow[]; cost: number }> {
+  const rows: FundingRow[] = [];
+  let cost = 0;
+  let start = from;
+  for (let page = 0; page < 100; page++) {
+    const r = await hlInfo.post<Array<{ time?: number; delta?: { coin?: string; szi?: string } }> | null>(
+      { type: 'userFunding', user: address, startTime: start, endTime: to },
+      { ttlMs: 0, timeoutMs: 25_000 },
+    );
+    const list = Array.isArray(r) ? r : [];
+    cost += 20 + Math.ceil(list.length / 20);
+    for (const x of list) rows.push({ time: Number(x.time), coin: String(x.delta?.coin ?? ''), szi: Number(x.delta?.szi) });
+    if (list.length < FUNDING_PAGE) break;
+    // A full page can end inside an hour's rows (one per coin): ask from that hour again.
+    const last = Number(list[list.length - 1]?.time);
+    start = last > start ? last : last + 1;
+  }
+  return { rows, cost };
+}
+
+/** A symbol's hourly prices over [from, to] (1h candles' opens): POST /info candleSnapshot, weight 20 + 1 per 60. */
+export async function hlHourlyPrices(symbol: string, from: number, to: number): Promise<{ px: Array<[number, number]>; cost: number }> {
+  const k = await hlInfo.post<Array<{ t?: number; o?: string }> | null>(
+    { type: 'candleSnapshot', req: { coin: symbol, interval: '1h', startTime: from, endTime: to } },
+    { ttlMs: 0, timeoutMs: 25_000 },
+  ).catch(() => null);
+  const list = Array.isArray(k) ? k : [];
+  const px: Array<[number, number]> = [];
+  for (const c of list) {
+    const o = num(c.o ?? null);
+    if (typeof c.t === 'number' && o && o > 0) px.push([c.t, o]);
+  }
+  return { px, cost: 20 + Math.ceil(list.length / 60) };
+}
+
+/** A Hyperliquid wallet's account value over the last month: its portfolio's month (daily), week (4-hourly) and day points. */
+export async function hlEquityHistory(address: string): Promise<Array<[number, number]> | null> {
+  const p = await hlInfo.post<HlPortfolio | null>({ type: 'portfolio', user: address }, { ttlMs: 0 });
+  if (!Array.isArray(p)) return null;
+  const at = new Map<number, number>();
+  for (const w of ['month', 'week', 'day']) {
+    for (const [t, v] of portfolioWindow(p, w)?.accountValueHistory ?? []) {
+      const x = num(v);
+      if (typeof t === 'number' && x !== null) at.set(t, x);
+    }
+  }
+  return at.size ? [...at].sort((a, b) => a[0] - b[0]) : null;
 }
 
 export async function sodexPositions(address: string): Promise<PositionRead> {

@@ -30,7 +30,7 @@ import { LoadFailed } from '../../LoadFailed';
 import { PlatformSelect } from '../../PlatformSelect';
 import { fmtCount, fmtUsdShort } from '../model';
 import { CohortIcon } from './CohortIcon';
-import { LeanChart } from './LeanChart';
+import { LeanChart, bandsOf } from './LeanChart';
 import { Treemap } from './Treemap';
 import { BiasPill, LeanPill, Meter, POLL_MS, Picker, Split, VenueMarks, pctText, usePolled } from './parts';
 import { CrossFade, FadeView } from '../../motion';
@@ -388,6 +388,7 @@ function Detail({
     }),
     [r.data],
   );
+  const bands = useMemo(() => bandsOf(r.data?.series ?? []), [r.data]);
   // The wallet count in the tab: the table's total under the filter.
   useEffect(() => {
     let alive = true;
@@ -436,7 +437,7 @@ function Detail({
                 </div>
               </div>
               <div className="coh-d__plot">
-                <LeanChart points={points} height={380} full label={RANGE_WORD[range]} />
+                <LeanChart points={points} height={380} full label={RANGE_WORD[range]} bands={bands} />
                 {points.length < 2 && (
                   r.loading && !r.data ? <span className="coh-chart__skel" aria-hidden="true" /> : (
                     <div className="coh-chart__empty" role="status">

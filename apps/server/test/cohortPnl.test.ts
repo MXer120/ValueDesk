@@ -9,7 +9,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { portfolioPnl } from '../src/indexer/cohortSource.js';
-import { pnlPrio, pnlTtl } from '../src/indexer/cohortTracker.js';
+import { PNL_SHARE, pnlPrio, pnlTtl } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
 import type { HlPortfolio } from '../src/valuescan/hyperliquid/raw.js';
 
@@ -28,11 +28,17 @@ test('portfolioPnl: the last point of the window asked for, the whole account (a
   assert.equal(portfolioPnl([['allTime', { accountValueHistory: [], pnlHistory: [], vlm: '0' }]], 'allTime'), null, 'an empty chart');
 });
 
-test('a $100K+ holder is read just behind new wallets, the tail after every position read; the large again sooner', () => {
-  // Position reads queue at 1,000+ (new) and 400-1,300 (re-reads).
+test('a $100K+ holder is read just under a stale book of its size, the tail after every position read; the large again sooner', () => {
+  // Position reads (cohortTracker.ts plan): size = log10(equity) x 100.
+  const size = (eq: number) => Math.round(Math.log10(Math.max(1, eq)) * 100);
+  for (const eq of [100_000, 150_000, 5_000_000, 80_000_000]) {
+    const p = pnlPrio(eq);
+    assert.ok(p < 1_000 + size(eq) && p < 950 + size(eq), `${eq}: under a first read and a stale book`);
+    assert.ok(p > 900 + size(eq) && p > 400 + size(eq), `${eq}: over a gap / spot re-read and a reconcile`);
+  }
   assert.ok(pnlPrio(5_000_000) > pnlPrio(150_000));
-  assert.ok(pnlPrio(150_000) >= 920 && pnlPrio(5_000_000) < 1_000, 'under a first read');
-  assert.ok(pnlPrio(50_000) < 400 && pnlPrio(0) >= 300, 'the tail after every re-read');
+  for (const eq of [0, 50, 9_999, 99_999]) assert.ok(pnlPrio(eq) < 400 && pnlPrio(eq) >= 300, `${eq}: the tail after every position read`);
+  assert.ok(PNL_SHARE > 0 && PNL_SHARE < 1);
   assert.equal(pnlTtl(2_000_000), DAY);
   assert.equal(pnlTtl(200_000), 3 * DAY);
   assert.equal(pnlTtl(5_000), 7 * DAY);

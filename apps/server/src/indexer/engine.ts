@@ -353,6 +353,8 @@ export class Indexer {
       arcus: { lane: arcus.lane, pacer: arcus.pacer },
       sodexGate,
       socketUp: (v) => this.socketOf(v) !== null,
+      // A history rebuild's reads come out of the boards' share while they run (cohortTracker REBUILD_PER_MIN).
+      lendHl: (w) => this.hl.setPerMin(Math.max(60, INDEXER_ENV.hlWeightPerMin() - w)),
     });
   }
 

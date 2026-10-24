@@ -500,6 +500,22 @@ button.coh-th.is-on { color: var(--text); }
 .coh-lean__badge b.pos { color: var(--pos); }
 .coh-lean__badge b.neg { color: var(--neg); }
 .coh-lean__date { position: absolute; bottom: 0; transform: translateX(-50%); color: var(--muted); font-size: var(--fs-micro); white-space: nowrap; pointer-events: none; }
+/* Rebuilt and missing stretches (LeanChart bands): shaded behind the line, named along the bottom. */
+.coh-lean__band { pointer-events: none; }
+.coh-lean__band.is-rebuilt { fill: color-mix(in srgb, var(--muted) 9%, transparent); }
+.coh-lean__band.is-gap { fill: color-mix(in srgb, var(--muted) 16%, transparent); }
+.coh-lean__band-label {
+  position: absolute;
+  display: flex;
+  justify-content: center;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: help;
+}
 
 /* --- treemap -------------------------------------------------------------------------------- */
 
