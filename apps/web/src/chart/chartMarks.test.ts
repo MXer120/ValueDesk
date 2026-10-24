@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SYSTEM_OVERLAYS, barOpen, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks } from './chartMarks';
+import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow } from './chartMarks';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -116,4 +116,15 @@ test('markers closer than the gap become one, holding all their stories', () => 
   assert.deepEqual(out.map((p) => [p.key, p.x, p.stories.map((s) => s.id)]), [['a', 100, ['b', 'a']], ['c', 140, ['c']], ['d', 200, ['d']]]);
   // The input is left as it was.
   assert.equal(placed[1]!.stories.length, 1);
+});
+
+test('news is a switch with its own settings; older saved choices carry over', () => {
+  assert.deepEqual(sanitizeShow(null), { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS] });
+  // 'macro' used to mean on and macro.
+  assert.deepEqual([sanitizeShow({ news: 'macro' }).news, sanitizeShow({ news: 'macro' }).newsScope], [true, 'macro']);
+  assert.equal(sanitizeShow({ news: 'off' }).news, false);
+  const s = sanitizeShow({ news: true, newsScope: 'all', newsKinds: ['post', 'bogus', 'research'], position: false });
+  assert.deepEqual([s.news, s.newsScope, s.newsKinds, s.position], [true, 'all', ['post', 'research'], false]);
+  // Never no kind at all.
+  assert.deepEqual(sanitizeShow({ newsKinds: [] }).newsKinds, [...NEWS_KINDS]);
 });

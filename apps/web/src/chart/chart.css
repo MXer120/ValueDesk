@@ -1423,14 +1423,106 @@ html.kc-drag * {
    accent alone, which is a shade dimmer than hover. */
 .kc-toolbar .kc-tb-ico.on,
 .kc-toolbar .kc-tb-ico.on:hover { color: #fff; background: rgba(255, 255, 255, 0.12); border-radius: var(--radius-sm); }
-.menu-popup.kc-news-menu { left: auto; right: 0; min-width: 170px; z-index: 30; }
+.menu-popup.kc-news-menu { left: auto; right: 0; width: 292px; min-width: 0; padding: 10px; z-index: 30; }
+
+/* The news settings (NewsSettings.tsx): on / off, whose news, which kinds. */
+.kc-newsset { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-xs); }
+.kc-newsset .kc-menu-label { margin: 6px 2px 0; }
+.kc-newsset__switch { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 2px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); color: var(--text); font-weight: 600; cursor: pointer; }
+.kc-newsset__switch input[role='switch'] {
+  appearance: none;
+  -webkit-appearance: none;
+  position: relative;
+  flex: none;
+  width: 32px;
+  height: 18px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #2a2a2a;
+  cursor: pointer;
+}
+.kc-newsset__switch input[role='switch']::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  clip-path: none;
+  transform: none;
+  transition: transform 0.16s var(--ease-out);
+}
+.kc-newsset__switch input[role='switch']:checked { background: var(--pos); }
+.kc-newsset__switch input[role='switch']:checked::after { transform: translateX(14px); }
+.kc-newsset .kc-newsset__scopes { display: flex; flex-direction: column; gap: 2px; }
+.kc-newsset .kc-newsset__scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+.kc-newsset .kc-newsset__scope:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); color: var(--text); }
+.kc-newsset .kc-newsset__scope.on { border-color: rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.kc-newsset .kc-newsset__scope:disabled { opacity: 0.4; cursor: default; }
+.kc-newsset__ico { display: grid; place-items: center; flex: none; width: 26px; height: 26px; border-radius: 50%; background: rgba(255, 255, 255, 0.06); }
+.kc-newsset__txt { display: flex; flex-direction: column; min-width: 0; font-weight: 600; }
+.kc-newsset__hint { color: var(--dim); font-size: var(--fs-micro); font-weight: 400; }
+.kc-newsset .kc-newsset__kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.kc-newsset .kc-newsset__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--fs-micro);
+  box-shadow: none;
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.kc-newsset .kc-newsset__kind svg { flex: none; width: 13px; height: 13px; }
+.kc-newsset .kc-newsset__kind:hover { color: var(--text); }
+.kc-newsset .kc-newsset__kind.on { border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); color: var(--text); }
+.kc-newsset__src { margin: 4px 2px 0; color: var(--dim); font-size: var(--fs-micro); }
 
 /* --- the object list (ChartSidebar.tsx) ------------------------------------ */
+/* The wrap opens and closes the space (Chart.tsx usePresence); the list in it
+   keeps its width and slides, so nothing inside reflows as it goes. */
+.kc-side-wrap {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  width: 236px;
+  overflow: hidden;
+  animation: kc-side-in 240ms var(--ease-out, ease) both;
+}
+.kc-side-wrap.is-closing { animation: kc-side-out 220ms var(--ease-out, ease) both; }
+@keyframes kc-side-in { from { width: 0; opacity: 0; } }
+@keyframes kc-side-out { to { width: 0; opacity: 0; } }
 .kc-side {
   flex: none;
   display: flex;
   flex-direction: column;
   width: 236px;
+  min-width: 236px;
   min-height: 0;
   border-left: 1px solid var(--panel-line);
   background: var(--bg-panel);
@@ -1439,8 +1531,11 @@ html.kc-drag * {
 }
 /* A narrow screen keeps its plot: the list floats over the right edge instead. */
 @media (max-width: 700px) {
-  .kc-side { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; box-shadow: var(--shadow-pop); }
+  .kc-side-wrap { position: absolute; top: 0; right: 0; bottom: 0; z-index: 8; box-shadow: var(--shadow-pop); animation-name: kc-side-slide-in; }
+  .kc-side-wrap.is-closing { animation-name: kc-side-slide-out; }
 }
+@keyframes kc-side-slide-in { from { transform: translateX(100%); } }
+@keyframes kc-side-slide-out { to { transform: translateX(100%); } }
 .kc-side-head {
   display: flex;
   align-items: center;
@@ -1528,7 +1623,9 @@ html.kc-drag * {
 .kc-side-news__label { flex: 1 1 auto; }
 .kc-side-news .kc-side-note { flex-basis: 100%; }
 .kc-side-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--bg); border: 1px solid var(--panel-line); }
-.kc-side .kc-side-seg button { height: 22px; padding: 0 8px; border-radius: 6px; }
+.kc-side .kc-side-seg button { gap: 4px; height: 22px; padding: 0 7px; border-radius: 6px; }
+.kc-side .kc-side-seg button svg { width: 12px; height: 12px; }
+.kc-side-news.is-off { opacity: 0.5; }
 .kc-side .kc-side-seg button.on { background: var(--bg-elevated); color: var(--text); }
 
 /* Rows: drawings (draggable) and studies. */
@@ -1618,7 +1715,11 @@ html.kc-drag * {
 /* --- news on the chart (NewsMarkers.tsx) -------------------------------------- */
 /* The row of markers along the foot of the price pane: only the markers take
    the pointer, the strip between them is the chart's. */
-.kc-newsmarks { position: absolute; z-index: 4; height: 24px; pointer-events: none; }
+.kc-newsmarks { position: absolute; z-index: 4; height: 24px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
+.kc-newsmarks.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
+.kc-newsmarks.is-leaving .kc-newsmark { pointer-events: none; }
+@keyframes kc-newsmarks-in { from { opacity: 0; transform: translateY(8px); } }
+@keyframes kc-newsmarks-out { to { opacity: 0; transform: translateY(8px); } }
 .kc-newsmark {
   position: absolute;
   top: 0;
@@ -1683,6 +1784,16 @@ html.kc-drag * {
   animation: kc-newspop-in 140ms var(--ease-out, ease) both;
 }
 @keyframes kc-newspop-in { from { opacity: 0; transform: translateY(4px); } }
+.kc-newspop.is-closing { animation: kc-newspop-out 140ms var(--ease-out, ease) both; pointer-events: none; }
+@keyframes kc-newspop-out { to { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+  .kc-side-wrap,
+  .kc-side-wrap.is-closing,
+  .kc-newsmarks,
+  .kc-newsmarks.is-leaving,
+  .kc-newspop,
+  .kc-newspop.is-closing { animation-duration: 1ms; }
+}
 .kc-newspop.is-pinned { border-color: rgba(255, 255, 255, 0.16); }
 .kc-newspop__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 0 8px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
 .kc-newspop__title { font-size: var(--fs-sm); font-weight: 600; letter-spacing: -0.01em; }

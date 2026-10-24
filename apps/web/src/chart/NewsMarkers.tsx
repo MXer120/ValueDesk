@@ -22,7 +22,8 @@ import type { Chart as KChart } from 'klinecharts';
 import { CoinIcon } from '../components/CoinIcon';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 import { NEWS_ICONS } from './chartIcons';
-import { NEWS_KIND_LABEL, clusterNews, markFace, newsKind, type NewsMark, type NewsStory, type PlacedNews } from './chartMarks';
+import { NEWS_KIND_LABEL, clusterNews, markFace, newsKind, type NewsMark, type NewsScope, type NewsStory, type PlacedNews } from './chartMarks';
+import { useLatched } from '../components/motion';
 import type { TimeZoneMode } from './timeAxis';
 
 const PANE = 'candle_pane';
@@ -40,7 +41,10 @@ export interface NewsMarkersProps {
   top: number;
   /** The chart's coin as the news names it (BTC). */
   coin: string;
-  mode: 'coin' | 'macro';
+  /** Whose news it is: this coin's, macro, or all of crypto. */
+  mode: NewsScope;
+  /** News is going off: the markers fade out. */
+  leaving?: boolean;
   tz: TimeZoneMode;
   /** Folders are there: each story offers "Save to folder". */
   canSave: boolean;
@@ -57,12 +61,14 @@ function storyTime(t: number, tz: TimeZoneMode): string {
   return `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone })} ${hm}`;
 }
 
-export function NewsMarkers({ chart, marks, left, top, coin, mode, tz, canSave, onSave }: NewsMarkersProps) {
+export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = false, tz, canSave, onSave }: NewsMarkersProps) {
   const [placed, setPlaced] = useState<PlacedNews[]>([]);
   const [pane, setPane] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [open, setOpen] = useState<{ key: string; pinned: boolean } | null>(null);
   const layer = useRef<HTMLDivElement>(null);
   const closeTimer = useRef(0);
+  /** The card stays a moment as it closes, to fade out. */
+  const card = useLatched(open?.key ?? null, 140);
 
   // Where each marker is, every frame; a render only when one moved.
   useEffect(() => {
@@ -123,15 +129,15 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, tz, canSave, 
   };
 
   if (placed.length === 0) return null;
-  const shown = open ? placed.find((p) => p.key === open.key) : undefined;
+  const shown = card.value ? placed.find((p) => p.key === card.value) : undefined;
   const box = layer.current?.getBoundingClientRect();
 
   return (
     <>
-      <div className="kc-newsmarks" ref={layer} style={{ left, top: top + pane.height - FOOT, width: pane.width }} aria-label="News on the chart">
+      <div className={`kc-newsmarks${leaving ? ' is-leaving' : ''}`} ref={layer} style={{ left, top: top + pane.height - FOOT, width: pane.width }} aria-label="News on the chart">
         {placed.map((p) => {
-          // Among macro stories every coin is news; on a coin's chart, another coin is.
-          const face = markFace(p, mode === 'macro' ? '' : coin);
+          // Among macro or all-crypto stories every coin is news; on a coin's chart, another coin is.
+          const face = markFace(p, mode === 'coin' ? coin : '');
           const n = p.stories.length;
           const lead = p.stories[0]!;
           return (
@@ -161,7 +167,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, tz, canSave, 
       {shown && box &&
         createPortal(
           <div
-            className={`kc-newspop${open?.pinned ? ' is-pinned' : ''}`}
+            className={`kc-newspop${open?.pinned ? ' is-pinned' : ''}${card.closing ? ' is-closing' : ''}`}
             role="dialog"
             aria-label="News on this bar"
             style={{
@@ -173,7 +179,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, tz, canSave, 
             onMouseLeave={letGo}
           >
             <header className="kc-newspop__head">
-              <span className="kc-newspop__title">{mode === 'macro' ? 'Macro news' : `${coin} news`}</span>
+              <span className="kc-newspop__title">{mode === 'macro' ? 'Macro news' : mode === 'all' ? 'Crypto news' : `${coin} news`}</span>
               <span className="kc-newspop__count">
                 {shown.stories.length === 1 ? '1 story' : `${shown.stories.length} stories`}
               </span>

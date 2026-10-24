@@ -275,9 +275,13 @@ export function registerMarkOverlays(kc: typeof import('klinecharts')): void {
 
 // --- what the chart shows besides the candles -----------------------------------------
 
-export type NewsMode = 'off' | 'coin' | 'macro';
+/** Whose news: this coin's, the macro (economy) stories, or all of crypto. */
+export type NewsScope = 'coin' | 'macro' | 'all';
 
-/** The chart's own layers, each on or off (the object list and the snapshot). */
+/** Every kind of story, in the order the settings list them. */
+export const NEWS_KINDS: readonly NewsKind[] = ['news', 'post', 'research', 'insight', 'institution', 'announcement', 'macro', 'stocks'];
+
+/** The chart's own layers, each on or off (the object list and the toolbar). */
 export interface ChartShow {
   /** The open position's entry line. */
   position: boolean;
@@ -285,21 +289,31 @@ export interface ChartShow {
   orders: boolean;
   /** The account's fills as arrows. */
   executions: boolean;
-  /** News badges: this coin's, the macro ones, or none. */
-  news: NewsMode;
+  /** News on the chart, on or off (the toolbar's button). */
+  news: boolean;
+  /** Whose news (its right-click settings). */
+  newsScope: NewsScope;
+  /** Which kinds of story show; never none. */
+  newsKinds: NewsKind[];
 }
 
 /** Where the chart keeps them. */
 export const SHOW_KEY = 'chart.show.v1';
 
-export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: 'off' };
+export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS] };
 
 export function sanitizeShow(raw: unknown): ChartShow {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof ChartShow, unknown>>;
+  // Before the switch: news was 'off', 'coin' or 'macro' in one.
+  const legacy = r.news === 'coin' || r.news === 'macro' ? r.news : null;
+  const scope = r.newsScope === 'coin' || r.newsScope === 'macro' || r.newsScope === 'all' ? r.newsScope : (legacy ?? 'coin');
+  const kinds = Array.isArray(r.newsKinds) ? NEWS_KINDS.filter((k) => (r.newsKinds as unknown[]).includes(k)) : [];
   return {
     position: r.position !== false,
     orders: r.orders !== false,
     executions: r.executions !== false,
-    news: r.news === 'coin' || r.news === 'macro' ? r.news : 'off',
+    news: r.news === true || legacy !== null,
+    newsScope: scope,
+    newsKinds: kinds.length ? kinds : [...NEWS_KINDS],
   };
 }

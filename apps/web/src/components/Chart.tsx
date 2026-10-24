@@ -38,7 +38,7 @@
  * blocks first paint.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent } from 'react';
-import { useLatched } from './motion';
+import { useLatched, usePresence } from './motion';
 import { createPortal } from 'react-dom';
 import type {
   AxisRange,
@@ -118,10 +118,12 @@ import {
   registerMarkOverlays,
   sanitizeShow,
   type ChartShow,
+  newsKind,
   type FillMark,
   type NewsStory,
 } from '../chart/chartMarks';
 import { NewsMarkers } from '../chart/NewsMarkers';
+import { NewsSettings } from '../chart/NewsSettings';
 import { ChartSidebar } from '../chart/ChartSidebar';
 import { CHART_ICONS } from '../chart/chartIcons';
 import {
@@ -754,6 +756,28 @@ function Chart({
   /** The object list on the right (ChartSidebar.tsx). */
   const [sidebar, setSidebar] = useStored<boolean>('chart.sidebar', false);
   const [newsMenu, setNewsMenu] = useState(false);
+  const nm = useLatched(newsMenu);
+  const newsPress = useRef(0);
+  /** The long press opened the settings: the click that follows is not a toggle. */
+  const newsHeld = useRef(false);
+  useEffect(() => {
+    if (!newsMenu) return;
+    const away = (e: Event) => {
+      if (e instanceof KeyboardEvent) {
+        if (e.key === 'Escape') setNewsMenu(false);
+        return;
+      }
+      if (e.target instanceof Element && e.target.closest('.kc-news-tb')) return;
+      setNewsMenu(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', away);
+    return () => {
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', away);
+    };
+  }, [newsMenu]);
+
   /** Re-mount the studies / re-load the drawings (a snapshot view opened or closed). */
   const [indGen, setIndGen] = useState(0);
   const [drawGen, setDrawGen] = useState(0);
@@ -818,6 +842,8 @@ function Chart({
    *  and a fresh history fetch; collapsing it to 0×0 makes klinecharts refit
    *  the price axis to 0–10. */
   const [view, setView] = useState<ViewId>('chart');
+  /** The object list slides in and out (usePresence keeps it while it leaves). */
+  const side = usePresence(sidebar && view === 'chart', 240);
   const [ready, setReady] = useState(false);
   /**
    * Which klinecharts instance the effects below are wired to: bumped every
@@ -3677,16 +3703,23 @@ function Chart({
   // and choice (the server caches it a minute), again every ten minutes.
   const coin = newsCoin(sym?.baseCoin);
   const news = useAsync(
-    () => (show.news === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 }) : vsApi.news({ feed: 'latest', coin, limit: 50 })),
-    [show.news, coin],
-    { enabled: show.news === 'macro' || (show.news === 'coin' && !!coin), pollMs: 10 * 60_000 },
+    () =>
+      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 })
+      : show.newsScope === 'all' ? vsApi.news({ feed: 'latest', limit: 50 })
+      : vsApi.news({ feed: 'latest', coin, limit: 50 }),
+    [show.newsScope, coin],
+    { enabled: show.news && (show.newsScope !== 'coin' || !!coin), pollMs: 10 * 60_000 },
   );
   /** The stories on the bars they came out in (NewsMarkers.tsx places and merges them). */
   const newsList = useMemo(
-    () => (show.news === 'off' || masked ? [] : newsMarks((news.data?.items ?? []) as NewsStory[], interval, barLookup)),
+    () =>
+      !show.news || masked ? []
+      : newsMarks(((news.data?.items ?? []) as NewsStory[]).filter((n) => show.newsKinds.includes(newsKind(n))), interval, barLookup),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [news.data, show.news, interval, masked, wantKey],
+    [news.data, show.news, show.newsKinds.join(), interval, masked, wantKey],
   );
+  /** The markers stay a moment as news goes off, to fade out. */
+  const newsLayer = useLatched(newsList.length ? newsList : null, 200);
   /** A story into a knowledge folder, as the News widget saves one. */
   const saveStory = async (n: NewsStory) => {
     const saved = await saveToFolder({
@@ -4245,36 +4278,38 @@ function Chart({
           <div className="menu kc-news-tb" onMouseDown={(e) => e.stopPropagation()}>
             <button
               type="button"
-              className={`kc-ico kc-tb-ico${show.news !== 'off' ? ' on' : ''}`}
-              title="News on the chart"
+              className={`kc-ico kc-tb-ico${show.news ? ' on' : ''}`}
+              title={show.news ? 'News on the chart: on (right-click for settings)' : 'News on the chart: off (right-click for settings)'}
               aria-label="News on the chart"
-              aria-haspopup="menu"
-              aria-expanded={newsMenu}
-              onClick={() => setNewsMenu((o) => !o)}
+              aria-pressed={show.news}
+              onClick={() => {
+                if (newsHeld.current) {
+                  newsHeld.current = false;
+                  return;
+                }
+                patchShow({ news: !show.news });
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setNewsMenu((o) => !o);
+              }}
+              onPointerDown={(e) => {
+                // A long press is the right-click on touch.
+                if (e.pointerType !== 'touch') return;
+                window.clearTimeout(newsPress.current);
+                newsPress.current = window.setTimeout(() => {
+                  newsHeld.current = true;
+                  setNewsMenu(true);
+                }, 500);
+              }}
+              onPointerUp={() => window.clearTimeout(newsPress.current)}
+              onPointerLeave={() => window.clearTimeout(newsPress.current)}
             >
               {CHART_ICONS.news}
             </button>
-            {newsMenu && (
-              <div className="menu-popup kc-news-menu" role="menu">
-                <div className="kc-menu-label">News on the chart</div>
-                <div className="kc-menu-list">
-                  {([['off', 'Off'], ['coin', coin ? `${coin} news` : 'This coin'], ['macro', 'Macro']] as const).map(([id, label]) => (
-                    <button
-                      key={id}
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={show.news === id}
-                      className={show.news === id ? 'on' : ''}
-                      disabled={id === 'coin' && !coin}
-                      onClick={() => {
-                        patchShow({ news: id });
-                        setNewsMenu(false);
-                      }}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+            {nm.value && (
+              <div className={`menu-popup kc-news-menu${nm.closing ? ' is-closing' : ''}`} role="dialog" aria-label="News settings" onAnimationEnd={nm.onExit}>
+                <NewsSettings show={show} coin={coin} onChange={patchShow} />
               </div>
             )}
           </div>
@@ -4381,14 +4416,15 @@ function Chart({
         <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
-        {show.news !== 'off' && newsList.length > 0 && (
+        {newsLayer.value && (
           <NewsMarkers
             chart={ready ? chart.current : null}
-            marks={newsList}
+            marks={newsLayer.value}
+            leaving={newsLayer.closing}
             left={holder.current?.offsetLeft ?? 0}
             top={holder.current?.offsetTop ?? 0}
             coin={coin}
-            mode={show.news}
+            mode={show.newsScope}
             tz={tz}
             canSave={folders}
             onSave={(n) => void saveStory(n)}
@@ -4705,13 +4741,19 @@ function Chart({
           </div>
         </div>
         </div>
-        {sidebar && view === 'chart' && chart.current && (() => {
+        {side.mounted && chart.current && (() => {
           const c = chart.current!;
           const front = [...userDrawings(c)]
             .filter((o) => o.id !== drawingId.current)
             .sort((a, b) => realZ(b) - realZ(a));
           const text = (o: (typeof front)[number]) => (typeof o.extendData === 'string' && o.extendData.trim() ? `: ${o.extendData.trim().slice(0, 24)}` : '');
           return (
+            <div
+              className={`kc-side-wrap${side.closing ? ' is-closing' : ''}`}
+              onAnimationEnd={(e) => {
+                if (e.target === e.currentTarget && side.closing) side.done();
+              }}
+            >
             <ChartSidebar
               symbol={sym?.displayName ?? symbol}
               coin={coin}
@@ -4729,7 +4771,7 @@ function Chart({
                 position: !address ? 'Connect a wallet to see it' : engine !== 'perps' ? 'Spot has no positions' : undefined,
                 orders: !address ? 'Connect a wallet to see them' : undefined,
                 executions: !address ? 'Connect a wallet to see your fills' : undefined,
-                news: news.error && show.news !== 'off' ? 'News did not load' : undefined,
+                news: news.error && show.news ? 'News did not load' : undefined,
               }}
               onShow={patchShow}
               onSelect={(id, add) => {
@@ -4783,6 +4825,7 @@ function Chart({
               onSave={() => setExportOpen(true)}
               onClose={() => setSidebar(false)}
             />
+            </div>
           );
         })()}
       </div>
