@@ -25,6 +25,16 @@ test('an overlay is stored as tool, anchors, style, text and lock - nothing deri
   });
 });
 
+test('hidden on its own and the stacking order are kept; defaults are not written', () => {
+  const base = { name: 'segment', points: [{ timestamp: 1, value: 2 }], styles: null, extendData: undefined, lock: false };
+  assert.deepEqual(toStored({ ...base, zLevel: 3 }, true), { name: 'segment', points: [{ timestamp: 1, value: 2 }], hidden: true, z: 3 });
+  assert.deepEqual(toStored({ ...base, zLevel: 0 }), { name: 'segment', points: [{ timestamp: 1, value: 2 }] });
+  // The selection's temporary lift is never kept, from the overlay or from storage.
+  assert.equal(toStored({ ...base, zLevel: Number.MAX_SAFE_INTEGER })?.z, undefined);
+  assert.equal(parseDrawings([{ ...base, z: Number.MAX_SAFE_INTEGER }], known)[0]?.z, undefined);
+  assert.deepEqual(parseDrawings([{ ...base, hidden: true, z: -2 }], known), [{ name: 'segment', points: [{ timestamp: 1, value: 2 }], hidden: true, z: -2 }]);
+});
+
 test('an overlay with no complete anchor is not stored', () => {
   assert.equal(toStored({ name: 'segment', points: [{ value: 1 }], styles: null, extendData: undefined, lock: false }), null);
 });

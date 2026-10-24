@@ -1,6 +1,7 @@
 /**
  * The floating bar over a selected drawing, TradingView's: colour, line width,
- * solid or dashed, the words of a text tool, lock, delete. It floats at the
+ * solid or dashed, the words of a text tool, lock, delete - icons only, no
+ * words over the chart (the drawing's name is its aria-label). It floats at the
  * top centre of the plot rather than chasing the drawing, so it never covers
  * the thing being styled and never jumps while the drawing is dragged.
  *
@@ -8,6 +9,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { SWATCHES } from './indicators';
+import { MENU_ICONS } from '../dashboard/tabExtras';
+import { lineIcon } from './chartIcons';
 
 export interface DrawingStyleBarProps {
   /** The tool's display name ("Trend line"). */
@@ -29,40 +32,6 @@ export interface DrawingStyleBarProps {
   onClose: () => void;
 }
 
-const G = {
-  viewBox: '-0.5 -0.5 16 16',
-  width: 16,
-  height: 16,
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-  'aria-hidden': true,
-  focusable: false,
-} as const;
-
-const LockIcon = (
-  <svg {...G}>
-    <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 0 1 5 0v2" />
-  </svg>
-);
-const UnlockIcon = (
-  <svg {...G}>
-    <path d="M4 7h8v7H4zM5.5 7V5a2.5 2.5 0 0 1 4.9-.6" />
-  </svg>
-);
-const TrashIcon = (
-  <svg {...G}>
-    <path d="M2 4h12M6 4V2.5h4V4M3.5 4l.7 10h7.6l.7-10M6.5 7v4.5M9.5 7v4.5" />
-  </svg>
-);
-const CloseIcon = (
-  <svg {...G}>
-    <path d="M4 4l8 8M12 4l-8 8" />
-  </svg>
-);
-
 export function DrawingStyleBar({
   label, color, size, dashed, locked, text, focusText,
   onColor, onSize, onDashed, onText, onLock, onDelete, onClose,
@@ -83,8 +52,6 @@ export function DrawingStyleBar({
       onMouseDown={(e) => e.stopPropagation()}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      <span className="kc-stylebar-name">{label}</span>
-      <span className="kc-stylebar-sep" />
       <span className="kc-stylebar-color">
         <button
           type="button"
@@ -128,22 +95,16 @@ export function DrawingStyleBar({
             aria-pressed={size === w}
             onClick={() => onSize(w)}
           >
-            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable={false}>
-              <path d="M2 8h12" stroke="currentColor" strokeWidth={w} strokeLinecap="round" />
-            </svg>
+            {lineIcon(w)}
           </button>
         ))}
       </span>
       <span className="kc-stylebar-group" role="group" aria-label="Line style">
         <button type="button" className={dashed ? '' : 'on'} title="Solid" aria-label="Solid line" aria-pressed={!dashed} onClick={() => onDashed(false)}>
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable={false}>
-            <path d="M2 8h12" stroke="currentColor" strokeWidth={1.5} />
-          </svg>
+          {lineIcon(1.5)}
         </button>
         <button type="button" className={dashed ? 'on' : ''} title="Dashed" aria-label="Dashed line" aria-pressed={dashed} onClick={() => onDashed(true)}>
-          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable={false}>
-            <path d="M2 8h12" stroke="currentColor" strokeWidth={1.5} strokeDasharray="3 2" />
-          </svg>
+          {lineIcon(1.5, true)}
         </button>
       </span>
       {text !== null && (
@@ -165,13 +126,13 @@ export function DrawingStyleBar({
       )}
       <span className="kc-stylebar-sep" />
       <button type="button" className={locked ? 'on' : ''} title={locked ? 'Unlock' : 'Lock'} aria-label={locked ? 'Unlock drawing' : 'Lock drawing'} aria-pressed={locked} onClick={() => onLock(!locked)}>
-        {locked ? LockIcon : UnlockIcon}
+        {locked ? MENU_ICONS.lock : MENU_ICONS.unlock}
       </button>
       <button type="button" className="kc-stylebar-del" title="Delete (Del)" aria-label="Delete drawing" onClick={onDelete}>
-        {TrashIcon}
+        {MENU_ICONS.remove}
       </button>
       <button type="button" title="Close" aria-label="Close style bar" onClick={onClose}>
-        {CloseIcon}
+        {MENU_ICONS.close}
       </button>
     </div>
   );

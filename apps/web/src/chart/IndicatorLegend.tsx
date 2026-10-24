@@ -1,8 +1,9 @@
 /**
  * One legend row per indicator, TradingView style: the study's name and its
  * values at the bar under the crosshair (or the newest bar), and - under the
- * pointer - the controls that act on it: show/hide, settings, remove, and a
- * menu that moves its pane up or down or the study into another pane.
+ * pointer - the controls that act on it: show/hide, settings, remove, and
+ * "more", which opens the study's menu (as does a right-click on the row):
+ * the chart owns that menu, so every right-click menu on it is the same one.
  *
  * Rows for studies drawn over the candles stack under the OHLC legend; a study
  * with a pane of its own gets its row at the top-left of that pane, which is
@@ -12,11 +13,13 @@
  * resizes and reorders without a subscription of its own; a pointer release
  * anywhere re-reads them too, which covers a pane separator being dragged.
  */
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 import type { Chart as KChart, KLineData } from 'klinecharts';
 import { CANDLE_PANE_ID } from './theme';
 import { BAR_DOWN, BAR_UP, legendName, stylesFor, type IndicatorSpec } from './indicators';
 import { compactNumber } from './volumeAxis';
+import { MENU_ICONS } from '../dashboard/tabExtras';
+import { MoreIcon } from './chartIcons';
 
 export interface LegendIndicator {
   id: string;
@@ -39,63 +42,14 @@ export interface IndicatorLegendProps {
   holder: HTMLElement | null;
   /** Decimals of the volume step size (BTC: 5). */
   volumeDecimals: number;
-  /** Pane ids in display order, so the move menu knows what is first/last. */
+  /** Pane ids in display order. */
   paneOrder: string[];
   onToggle: (id: string) => void;
   onSettings: (id: string) => void;
   onRemove: (id: string) => void;
-  onMove: (id: string, dir: -1 | 1) => void;
-  /** Into 'main' (over the candles), 'new' (a pane of its own) or another
-   *  study's pane (that study's id). */
-  onMoveTo: (id: string, target: string) => void;
+  /** Open the study's menu at a viewport point. */
+  onMenu: (id: string, at: { x: number; y: number }) => void;
 }
-
-/* 16px glyphs on a 1:1 grid, -0.5 origin so 1px strokes land on whole pixels
-   (the rail's technique - see DrawingRail.tsx). */
-const G = {
-  viewBox: '-0.5 -0.5 16 16',
-  width: 16,
-  height: 16,
-  fill: 'none',
-  stroke: 'currentColor',
-  strokeWidth: 1,
-  strokeLinecap: 'round' as const,
-  strokeLinejoin: 'round' as const,
-  'aria-hidden': true,
-  focusable: false,
-} as const;
-
-const EyeIcon = (
-  <svg {...G}>
-    <path d="M1 8c1.8-3.2 4.2-4.8 7-4.8s5.2 1.6 7 4.8c-1.8 3.2-4.2 4.8-7 4.8S2.8 11.2 1 8z" />
-    <circle cx="8" cy="8" r="2.2" />
-  </svg>
-);
-const EyeOffIcon = (
-  <svg {...G}>
-    <path d="M3.2 5.3C2.4 6 1.6 6.9 1 8c1.8 3.2 4.2 4.8 7 4.8 1.1 0 2.1-.2 3-.7M6 3.5c.6-.2 1.3-.3 2-.3 2.8 0 5.2 1.6 7 4.8-.5.9-1 1.6-1.6 2.3" />
-    <path d="M2 2l12 12" />
-  </svg>
-);
-const GearIcon = (
-  <svg {...G}>
-    <circle cx="8" cy="8" r="2" />
-    <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4" />
-    <circle cx="8" cy="8" r="4.6" />
-  </svg>
-);
-const CloseIcon = (
-  <svg {...G}>
-    <path d="M3.5 3.5l9 9M12.5 3.5l-9 9" />
-  </svg>
-);
-const MoreIcon = (
-  <svg {...G}>
-    <circle cx="3" cy="8" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="8" cy="8" r="1.2" fill="currentColor" stroke="none" />
-    <circle cx="13" cy="8" r="1.2" fill="currentColor" stroke="none" />
-  </svg>
-);
 
 const grouped = (v: number, decimals: number): string =>
   v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -235,12 +189,9 @@ export function IndicatorLegend({
   onToggle,
   onSettings,
   onRemove,
-  onMove,
-  onMoveTo,
+  onMenu,
 }: IndicatorLegendProps) {
   const [, rerender] = useReducer((n: number) => n + 1, 0);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const root = useRef<HTMLDivElement>(null);
 
   // A separator drag resizes panes without re-rendering anything of ours.
   useEffect(() => {
@@ -256,40 +207,16 @@ export function IndicatorLegend({
     return () => cancelAnimationFrame(id);
   }, [indicators]);
 
-  useEffect(() => {
-    if (!menuFor) return;
-    const close = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) setMenuFor(null);
-    };
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setMenuFor(null);
-    document.addEventListener('mousedown', close);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('mousedown', close);
-      document.removeEventListener('keydown', esc);
-    };
-  }, [menuFor]);
-
   if (!chart || indicators.length === 0) return null;
   const list = chart.getDataList();
   const index = bar ? indexAt(list, bar.timestamp) : list.length - 1;
   const offTop = holder?.offsetTop ?? 0;
   const offLeft = holder?.offsetLeft ?? 0;
   const panes = [...new Set(paneOrder)].filter((p) => p !== CANDLE_PANE_ID);
-  /** Which study names a pane, for "Move to": its first study's name. */
-  const paneName = (paneId: string) => {
-    const first = indicators.find((i) => i.paneId === paneId);
-    return first ? legendName(first.name, chart.getIndicators({ id: first.id })[0]?.calcParams ?? []) : paneId;
-  };
   const rowInPane = new Map<string, number>();
-  /** A menu item: close the menu, then act. */
-  const pick = (run: () => void) => () => {
-    setMenuFor(null);
-    run();
-  };
 
   return (
-    <div className="kc-ind-legend" ref={root}>
+    <div className="kc-ind-legend">
       {indicators.map((ind) => {
         const own = ind.paneId !== CANDLE_PANE_ID;
         const n = rowInPane.get(ind.paneId) ?? 0;
@@ -305,14 +232,16 @@ export function IndicatorLegend({
         const live = chart.getIndicators({ id: ind.id })[0];
         const name = legendName(ind.name, live?.calcParams ?? ind.spec.calcParams ?? [], ind.spec.source);
         const values = ind.visible ? readValues(chart, ind, index, volumeDecimals) : [];
-        const at = panes.indexOf(ind.paneId);
-        const shared = indicators.filter((i) => i.paneId === ind.paneId).length > 1;
-        const others = panes.filter((p) => p !== ind.paneId);
         return (
           <div
             key={ind.id}
-            className={`kc-ind-row${ind.visible ? '' : ' is-off'}${menuFor === ind.id ? ' is-open' : ''}`}
+            className={`kc-ind-row${ind.visible ? '' : ' is-off'}`}
             style={{ top, left: offLeft + 4 }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onMenu(ind.id, { x: e.clientX, y: e.clientY });
+            }}
           >
             <button type="button" className="kc-ind-name" onClick={() => onSettings(ind.id)} title="Settings">
               {name}
@@ -330,73 +259,26 @@ export function IndicatorLegend({
                 aria-pressed={!ind.visible}
                 onClick={() => onToggle(ind.id)}
               >
-                {ind.visible ? EyeIcon : EyeOffIcon}
+                {ind.visible ? MENU_ICONS.show : MENU_ICONS.hide}
               </button>
               <button type="button" title="Settings" aria-label={`${name} settings`} onClick={() => onSettings(ind.id)}>
-                {GearIcon}
+                {MENU_ICONS.settings}
               </button>
               <button type="button" title="Remove" aria-label={`Remove ${name}`} className="kc-ind-rm" onClick={() => onRemove(ind.id)}>
-                {CloseIcon}
+                {MENU_ICONS.close}
               </button>
-              <span className="kc-ind-more">
-                <button
-                  type="button"
-                  title="More"
-                  aria-label={`More for ${name}`}
-                  aria-haspopup="menu"
-                  aria-expanded={menuFor === ind.id}
-                  onClick={() => setMenuFor((m) => (m === ind.id ? null : ind.id))}
-                >
-                  {MoreIcon}
-                </button>
-                {menuFor === ind.id && (
-                  <div className="menu-popup kc-ind-menu" role="menu">
-                    <div className="kc-menu-list">
-                      {own && (
-                        <>
-                          <button type="button" role="menuitem" disabled={at <= 0} onClick={pick(() => onMove(ind.id, -1))}>
-                            Move pane up
-                          </button>
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={at < 0 || at >= panes.length - 1}
-                            onClick={pick(() => onMove(ind.id, 1))}
-                          >
-                            Move pane down
-                          </button>
-                        </>
-                      )}
-                    </div>
-                    <div className="kc-menu-label kc-ind-menu-head">Move to</div>
-                    <div className="kc-menu-list">
-                      {(!own || shared) && (
-                        <button type="button" role="menuitem" onClick={pick(() => onMoveTo(ind.id, 'new'))}>
-                          New pane
-                        </button>
-                      )}
-                      {own && (
-                        <button type="button" role="menuitem" onClick={pick(() => onMoveTo(ind.id, 'main'))}>
-                          Main chart
-                        </button>
-                      )}
-                      {others.map((p) => {
-                        const target = indicators.find((i) => i.paneId === p);
-                        return target ? (
-                          <button key={p} type="button" role="menuitem" onClick={pick(() => onMoveTo(ind.id, target.id))}>
-                            Pane with {paneName(p)}
-                          </button>
-                        ) : null;
-                      })}
-                    </div>
-                    <div className="kc-menu-list kc-ind-menu-foot">
-                      <button type="button" role="menuitem" onClick={pick(() => onSettings(ind.id))}>
-                        Settings…
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </span>
+              <button
+                type="button"
+                title="More"
+                aria-label={`More for ${name}`}
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  onMenu(ind.id, { x: r.left, y: r.bottom + 4 });
+                }}
+              >
+                {MoreIcon}
+              </button>
             </span>
           </div>
         );

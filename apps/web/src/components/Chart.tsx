@@ -84,6 +84,7 @@ import {
   INDICATOR_INFO,
   STORAGE_KEY as INDICATORS_KEY,
   indicatorTitle,
+  legendName,
   sanitizeSpecs,
   stylesFor,
   withSource,
@@ -100,8 +101,10 @@ import {
   paintOf,
   registerDrawingOverlays,
 } from '../chart/drawingOverlays';
-import { drawingsKey, loadDrawings, saveDrawings, toStored, type StoredDrawing } from '../chart/drawingStore';
+import { drawingsKey, loadDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
+import { MENU_ICONS, TabMenu, type TabMenuItem } from '../dashboard/tabExtras';
+import { ArrowDownIcon, ArrowUpIcon, MainChartIcon, MergePaneIcon, NewPaneIcon } from '../chart/chartIcons';
 import {
   INTERVAL_GROUPS,
   PERIOD_BY_INTERVAL,
@@ -390,6 +393,9 @@ interface ActiveIndicator {
   /** What the user set - the thing that is stored and re-mounted. */
   spec: IndicatorSpec;
 }
+
+/** One row of the chart's right-click menus: the app's own menu item. */
+type ChartMenuItem = TabMenuItem;
 
 /** The tools that carry words, and the words they start with. */
 const DEFAULT_TEXT = new Map<string, string>([
@@ -2556,6 +2562,25 @@ function Chart({
   /** Set while one market's drawings are swapped for another's: the removals
    *  that fires must not be saved over the market being left. */
   const restoringDrawings = useRef(false);
+  /** Drawings hidden one by one from their menu ("hide all" is drawHidden). */
+  const hiddenDrawings = useRef(new Set<string>());
+  /** The drawing just finished, and when: the library selects it, and the
+   *  click that finished it reaches it as a click too; neither opens the bar. */
+  const justDrew = useRef<{ id: string; at: number } | null>(null);
+  const fresh = (id: string) => justDrew.current?.id === id && performance.now() - justDrew.current.at < 300;
+  /**
+   * A right-click on a drawing, waiting for its contextmenu event.
+   *
+   * klinecharts reports the right-click on mousedown; the browser's
+   * contextmenu event follows on release, and a menu opened in between would
+   * take that event as a click outside itself and close at once. So the press
+   * only notes the drawing, and the menu opens on the contextmenu event (the
+   * plot's own order menu stands down for it) - or after a moment, where no
+   * such event comes.
+   */
+  const pendingDrawingMenu = useRef<{ id: string; at: { x: number; y: number }; t: number } | null>(null);
+  /** Opens a drawing's menu (set below, read by the overlay events). */
+  const drawingMenuRef = useRef<(id: string, at: { x: number; y: number }) => void>(() => undefined);
   /** Save the drawings on screen as this market's. Never the one being drawn. */
   const persistDrawings = useCallback(() => {
     const c = chart.current;
@@ -2563,7 +2588,7 @@ function Chart({
     if (!c || !key || restoringDrawings.current) return;
     const list = userDrawings(c)
       .filter((o) => o.id !== drawingId.current)
-      .map(toStored)
+      .map((o) => toStored(o, hiddenDrawings.current.has(o.id)))
       .filter((d): d is StoredDrawing => d !== null);
     saveDrawings(key, list);
   }, []);
@@ -2578,9 +2603,33 @@ function Chart({
     () => ({
       onSelected: (e: OverlayEvent<unknown>) => {
         selectedDrawing.current = e.overlay.id;
-        // The library selects a text tool it just finished drawing; keep the
-        // "type over the words" that onDrawEnd asked for.
+        // The library selects what it just finished drawing. Nothing opens
+        // over the chart for that (the owner's rule: no words at the top of
+        // the chart while drawing); a click on the drawing opens its bar.
+        if (fresh(e.overlay.id)) return;
+        // A text tool keeps the "type over the words" onDrawEnd asked for.
         setSelected((s) => (s?.id === e.overlay.id ? s : { id: e.overlay.id, focusText: false }));
+      },
+      onClick: (e: OverlayEvent<unknown>) => {
+        if (fresh(e.overlay.id)) return;
+        selectedDrawing.current = e.overlay.id;
+        setSelected((s) => (s?.id === e.overlay.id ? s : { id: e.overlay.id, focusText: false }));
+      },
+      // Right-click never deletes (the library's default does, unless told
+      // not to): it opens the drawing's menu.
+      onRightClick: (e: OverlayEvent<unknown>) => {
+        e.preventDefault?.();
+        const pend = {
+          id: e.overlay.id,
+          at: { x: (e.pageX ?? 0) - window.scrollX, y: (e.pageY ?? 0) - window.scrollY },
+          t: performance.now(),
+        };
+        pendingDrawingMenu.current = pend;
+        window.setTimeout(() => {
+          if (pendingDrawingMenu.current !== pend) return;
+          pendingDrawingMenu.current = null;
+          drawingMenuRef.current(pend.id, pend.at);
+        }, 700);
       },
       onDeselected: (e: OverlayEvent<unknown>) => {
         if (selectedDrawing.current === e.overlay.id) selectedDrawing.current = null;
@@ -2589,6 +2638,7 @@ function Chart({
       // A drawing dragged to a new place, or one of its handles moved.
       onPressedMoveEnd: () => persistDrawings(),
       onRemoved: (e: OverlayEvent<unknown>) => {
+        hiddenDrawings.current.delete(e.overlay.id);
         if (selectedDrawing.current === e.overlay.id) selectedDrawing.current = null;
         setSelected((s) => (s?.id === e.overlay.id ? null : s));
         if (drawingId.current === e.overlay.id || drawingId.current === null) {
@@ -2628,7 +2678,11 @@ function Chart({
   const onHideDrawings = useCallback(
     (on: boolean) => {
       setDrawHidden(on);
+      // Showing all shows every drawing, the ones hidden one by one too:
+      // a hidden drawing has no surface left to right-click.
+      if (!on) hiddenDrawings.current.clear();
       applyToDrawings({ visible: !on });
+      bumpStyle();
     },
     [applyToDrawings],
   );
@@ -2649,18 +2703,21 @@ function Chart({
     setDrawing(null);
     setSelected(null);
     drawingsKeyRef.current = key;
+    hiddenDrawings.current.clear();
     const stored = loadDrawings(key, new Set(lib.current?.getSupportedOverlays() ?? []));
     for (const d of stored) {
-      c.createOverlay({
+      const id = c.createOverlay({
         name: d.name,
         points: d.points,
         ...(d.styles ? { styles: d.styles } : {}),
         ...(d.extendData !== undefined ? { extendData: d.extendData } : {}),
+        ...(d.z !== undefined ? { zLevel: d.z } : {}),
         lock: d.lock === true,
-        visible: !drawHiddenRef.current,
+        visible: !drawHiddenRef.current && !d.hidden,
         mode: drawModes.current.magnet,
         ...drawingEvents(),
       });
+      if (d.hidden && typeof id === 'string') hiddenDrawings.current.add(id);
     }
     // The rail's lock reflects what came back: all locked reads as locked.
     setDrawLocked(stored.length > 0 && stored.every((d) => d.lock === true));
@@ -2705,10 +2762,14 @@ function Chart({
           else finishDrawing(c, e.overlay);
           if (drawModes.current.locked) c.overrideOverlay({ id: e.overlay.id, lock: true });
           persistDrawings();
-          // A text tool opens its style bar with the words selected to type over.
+          // A text tool opens its style bar with the words selected to type
+          // over; anything else leaves the chart clear (justDrew).
           if (TEXT_TOOLS.has(name)) {
             selectedDrawing.current = e.overlay.id;
             setSelected({ id: e.overlay.id, focusText: true });
+          } else {
+            justDrew.current = { id: e.overlay.id, at: performance.now() };
+            setSelected((s) => (s?.id === e.overlay.id ? null : s));
           }
           // Stay in drawing mode: the same tool is armed again for the next one.
           if (drawModes.current.stay) window.setTimeout(() => startRef.current(name), 0);
@@ -2783,6 +2844,115 @@ function Chart({
     },
     [persistDrawings],
   );
+
+  // --- right-click menus --------------------------------------------------------
+  /** The chart's right-click menu - a drawing's or a study's - at a viewport point. */
+  const [ctxMenu, setCtxMenu] = useState<{ at: { x: number; y: number }; items: ChartMenuItem[] } | null>(null);
+  const closeCtxMenu = useCallback(() => setCtxMenu(null), []);
+
+  const openDrawingMenu = (id: string, at: { x: number; y: number }) => {
+    const c = chart.current;
+    const o = c?.getOverlays({ id })[0];
+    if (!c || !o) return;
+    const select = () => {
+      selectedDrawing.current = id;
+      setSelected({ id, focusText: TEXT_TOOLS.has(o.name) });
+    };
+    const stack = (dir: 1 | -1) => {
+      const zs = userDrawings(c).filter((d) => d.id !== id).map(realZ);
+      const z = dir > 0 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
+      setRealZ(o, z, (zLevel) => c.overrideOverlay({ id, zLevel }));
+      persistDrawings();
+    };
+    const clone = () => {
+      // Three bars to the right of the original, so the copy is seen.
+      const shift = 3 * intervalToMs(interval);
+      const points = o.points
+        .filter((p) => typeof p.timestamp === 'number' && typeof p.value === 'number')
+        .map((p) => ({ timestamp: (p.timestamp as number) + shift, value: p.value as number }));
+      if (points.length === 0) return;
+      const copy = c.createOverlay({
+        name: o.name,
+        points,
+        ...(o.styles ? { styles: o.styles } : {}),
+        ...(o.extendData !== undefined ? { extendData: o.extendData } : {}),
+        mode: drawModes.current.magnet,
+        visible: !drawHiddenRef.current,
+        ...drawingEvents(),
+      });
+      persistDrawings();
+      if (typeof copy === 'string') {
+        selectedDrawing.current = copy;
+        setSelected({ id: copy, focusText: false });
+      }
+    };
+    setCtxMenu({
+      at,
+      items: [
+        { label: 'Settings…', icon: MENU_ICONS.settings, onClick: select },
+        {
+          label: 'Hide',
+          icon: MENU_ICONS.hide,
+          onClick: () => {
+            c.overrideOverlay({ id, visible: false });
+            hiddenDrawings.current.add(id);
+            setSelected((s) => (s?.id === id ? null : s));
+            persistDrawings();
+            bumpStyle();
+          },
+        },
+        {
+          label: 'Lock',
+          icon: MENU_ICONS.lock,
+          onClick: () => {
+            // A locked drawing takes no pointer at all; "unlock all" on the
+            // rail (lit while anything is locked) gives it back.
+            c.overrideOverlay({ id, lock: true });
+            setSelected((s) => (s?.id === id ? null : s));
+            persistDrawings();
+            bumpStyle();
+          },
+        },
+        { label: 'Bring to front', icon: MENU_ICONS.front, onClick: () => stack(1) },
+        { label: 'Send to back', icon: MENU_ICONS.back, onClick: () => stack(-1) },
+        { label: 'Clone', icon: MENU_ICONS.duplicate, onClick: clone },
+        { label: 'Delete', icon: MENU_ICONS.remove, danger: true, onClick: () => c.removeOverlay({ id }) },
+      ],
+    });
+  };
+  drawingMenuRef.current = openDrawingMenu;
+
+  const openIndicatorMenu = (id: string, at: { x: number; y: number }) => {
+    const c = chart.current;
+    const ind = byId(id);
+    if (!c || !ind) return;
+    const list = indicatorsRef.current;
+    const panes = paneList(list);
+    const own = ind.paneId !== CANDLE_PANE_ID;
+    const at0 = panes.indexOf(ind.paneId);
+    const shared = list.filter((i) => i.paneId === ind.paneId).length > 1;
+    const nameOf = (i: ActiveIndicator) =>
+      legendName(i.name, c.getIndicators({ id: i.id })[0]?.calcParams ?? i.spec.calcParams ?? [], i.spec.source);
+    const items: ChartMenuItem[] = [
+      { label: 'Settings…', icon: MENU_ICONS.settings, onClick: () => setSettingsFor({ id, original: ind.spec }) },
+      { label: ind.visible ? 'Hide' : 'Show', icon: ind.visible ? MENU_ICONS.hide : MENU_ICONS.show, onClick: () => toggleIndicator(id) },
+    ];
+    if (own) {
+      items.push(
+        { label: 'Move pane up', icon: ArrowUpIcon, disabled: at0 <= 0, onClick: () => moveIndicator(id, -1) },
+        { label: 'Move pane down', icon: ArrowDownIcon, disabled: at0 < 0 || at0 >= panes.length - 1, onClick: () => moveIndicator(id, 1) },
+      );
+    }
+    if (!own || shared) items.push({ label: 'Move to a new pane', icon: NewPaneIcon, onClick: () => moveIndicatorTo(id, 'new') });
+    if (own) items.push({ label: 'Move to the main chart', icon: MainChartIcon, onClick: () => moveIndicatorTo(id, 'main') });
+    for (const p of panes) {
+      if (p === ind.paneId) continue;
+      const first = list.find((i) => i.paneId === p);
+      if (first) items.push({ label: `Move to the pane with ${nameOf(first)}`, icon: MergePaneIcon, onClick: () => moveIndicatorTo(id, first.id) });
+    }
+    items.push({ label: 'Remove', icon: MENU_ICONS.remove, danger: true, onClick: () => removeIndicator(id) });
+    setCtxMenu({ at, items });
+  };
 
   // Delete / Backspace removes the drawing that was clicked last, as in every
   // charting terminal. Never an order line, never a locked drawing, and never
@@ -2885,6 +3055,14 @@ function Chart({
    */
   const onContextMenu = useCallback(
     (e: ReactMouseEvent) => {
+      // The right-click landed on a drawing: its menu opens, not this one.
+      const pend = pendingDrawingMenu.current;
+      if (pend && performance.now() - pend.t < 700) {
+        pendingDrawingMenu.current = null;
+        e.preventDefault();
+        drawingMenuRef.current(pend.id, { x: e.clientX, y: e.clientY });
+        return;
+      }
       const c = chart.current;
       const el = holder.current;
       // A read-only session is offered nothing: every item in this menu is a
@@ -3333,7 +3511,7 @@ function Chart({
                         aria-label={ind.visible ? `Hide ${ind.name}` : `Show ${ind.name}`}
                         onClick={() => toggleIndicator(ind.id)}
                       >
-                        {ind.visible ? '◉' : '○'}
+                        {ind.visible ? MENU_ICONS.show : MENU_ICONS.hide}
                       </button>
                       <button
                         className="kc-icon"
@@ -3344,7 +3522,7 @@ function Chart({
                           setSettingsFor({ id: ind.id, original: ind.spec });
                         }}
                       >
-                        ⚙
+                        {MENU_ICONS.settings}
                       </button>
                       <button
                         className="kc-icon kc-remove"
@@ -3352,7 +3530,7 @@ function Chart({
                         aria-label={`Remove ${ind.name}`}
                         onClick={() => removeIndicator(ind.id)}
                       >
-                        ✕
+                        {MENU_ICONS.remove}
                       </button>
                     </div>
                   ))}
@@ -3439,15 +3617,12 @@ function Chart({
         {/* Transient strip. It lives in the flexible middle so that a hint
             appearing can never push the right-hand group onto a second row. */}
         <div className="kc-tb-mid">
-          {drawing && (
-            <span className="kc-hint warn">
-              Drawing {overlayLabel(drawing)} —{' '}
-              {DRAW_HINT.get(drawing) ?? 'click on the chart'}
-              <button className="link" onClick={cancelDrawing}>
-                cancel
-              </button>
-            </span>
-          )}
+          {/* No words over the chart while drawing (the owner's rule): the
+              armed tool is lit on the rail, Escape or the cursor disarms it,
+              and what to click is said to screen readers only. */}
+          <span className="kc-sr" aria-live="polite">
+            {drawing ? `Drawing ${overlayLabel(drawing)}: ${DRAW_HINT.get(drawing) ?? 'click on the chart'}. Escape cancels.` : ''}
+          </span>
         </div>
 
         <div className="kc-tb-group kc-tb-right">
@@ -3515,9 +3690,11 @@ function Chart({
           onMagnet={onMagnet}
           stay={stayDrawing}
           onStay={setStayDrawing}
-          locked={drawLocked}
+          // Lit while anything is locked or hidden, so the same button
+          // gives back what a drawing's own menu took away.
+          locked={drawLocked || (chart.current ? userDrawings(chart.current).some((o) => o.lock) : false)}
           onLock={onLockDrawings}
-          hidden={drawHidden}
+          hidden={drawHidden || hiddenDrawings.current.size > 0}
           onHide={onHideDrawings}
         />
         {/* Plot column. The footer strip lives in here rather than beside the
@@ -3644,8 +3821,7 @@ function Chart({
               if (ind) setSettingsFor({ id, original: ind.spec });
             }}
             onRemove={removeIndicator}
-            onMove={moveIndicator}
-            onMoveTo={moveIndicatorTo}
+            onMenu={openIndicatorMenu}
           />
         )}
 
@@ -3821,6 +3997,8 @@ function Chart({
       {view === 'depth' && <DepthView engine={engine} symbol={symbol} sym={sym} />}
       {view === 'market' && <MarketInfoView engine={engine} symbol={symbol} sym={sym} />}
       </div>
+
+      {ctxMenu && <TabMenu at={ctxMenu.at} items={ctxMenu.items} onClose={closeCtxMenu} />}
 
       {settingsFor && settingsInd && (
         <IndicatorSettings
