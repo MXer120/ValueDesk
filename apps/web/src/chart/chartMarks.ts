@@ -11,6 +11,9 @@
  *               a DOM layer: a marker shows what it is - a coin's logo, an X
  *               post, macro, research... - and a count only where several
  *               stories share it). The same story twice is shown once.
+ *   Calendar    the economic calendar's releases (server valuescan/calendar.ts:
+ *               the FOMC, CPI, jobs, GDP, PCE...) on the bar they are due,
+ *               the coming ones in the space right of the last bar.
  *
  * The arrows are an overlay the user cannot select, move, style or save:
  * Chart.tsx keeps the chart's own overlays out of everything that handles
@@ -20,6 +23,7 @@
  * The grouping below is pure and covered by chartMarks.test.ts.
  */
 import type { OverlayTemplate } from 'klinecharts';
+import type { CalendarEvent, CalendarSource } from '../vsApi';
 import { ORDER_LINE_OVERLAY } from './orderOverlays';
 import { FAMILY, T } from './theme';
 import { intervalToMs } from './timeAxis';
@@ -118,9 +122,13 @@ export interface NewsStory {
   /** Its coins (BTC), SoSoValue's match. */
   symbols?: string[];
   summary?: string | null;
+  /** It came as macro news (the server's macro topic). */
+  topic?: 'macro';
+  /** A release on the economic calendar rather than a story. */
+  event?: { short: string; importance: 'high' | 'medium' | 'low'; allDay: boolean; source: CalendarSource };
 }
 
-export type NewsKind = 'news' | 'research' | 'institution' | 'insight' | 'macro' | 'announcement' | 'stocks' | 'post';
+export type NewsKind = 'news' | 'research' | 'institution' | 'insight' | 'macro' | 'announcement' | 'stocks' | 'post' | 'event';
 
 export const NEWS_KIND_LABEL: Record<NewsKind, string> = {
   news: 'News',
@@ -131,12 +139,14 @@ export const NEWS_KIND_LABEL: Record<NewsKind, string> = {
   announcement: 'Announcement',
   stocks: 'Crypto stocks',
   post: 'Post on X',
+  event: 'Economic calendar',
 };
 
 const BY_CATEGORY: Record<number, NewsKind> = { 1: 'news', 2: 'research', 3: 'institution', 4: 'insight', 5: 'macro', 7: 'announcement', 13: 'stocks' };
 
-/** What a story is: a post on X, else its SoSoValue category. */
-export const newsKind = (s: NewsStory): NewsKind => (s.post ? 'post' : BY_CATEGORY[s.category ?? 1] ?? 'news');
+/** What a story is: a calendar release, macro news (Bloomberg's come as posts), a post on X, else its SoSoValue category. */
+export const newsKind = (s: NewsStory): NewsKind =>
+  s.event ? 'event' : s.topic === 'macro' || s.category === 5 ? 'macro' : s.post ? 'post' : BY_CATEGORY[s.category ?? 1] ?? 'news';
 
 /** A title as two copies of one story share it: its letters and digits, case, punctuation and spacing aside. */
 const sameStory = (title: string) =>
@@ -163,7 +173,8 @@ export function newsMarks(stories: readonly NewsStory[], interval: string, looku
   const seen = new Set<string>();
   // Newest first, so the copy kept of a story told twice is its latest.
   for (const s of [...stories].sort((a, b) => b.time - a.time)) {
-    const same = sameStory(s.title);
+    // Two FOMC decisions share a title and are two events.
+    const same = s.event ? '' : sameStory(s.title);
     if (!(s.time > 0) || seen.has(s.id) || (same && seen.has(same))) continue;
     seen.add(s.id);
     if (same) seen.add(same);
@@ -189,6 +200,7 @@ export function newsMarks(stories: readonly NewsStory[], interval: string, looku
 export function markFace(m: Pick<NewsMark, 'stories'>, chartCoin: string): { kind: NewsKind; coin: string | null } {
   const s = m.stories[0];
   if (!s) return { kind: 'news', coin: null };
+  if (s.event) return { kind: 'event', coin: null };
   const coin = (s.symbols ?? []).find((c) => c && c !== chartCoin) ?? null;
   return { kind: newsKind(s), coin };
 }
@@ -215,6 +227,28 @@ export function clusterNews(placed: ReadonlyArray<PlacedNews>, gap: number): Pla
   }
   for (const p of out) p.stories.sort((a, b) => b.time - a.time);
   return out;
+}
+
+/**
+ * The economic calendar's releases as marker entries: titled, linked to the
+ * publisher's page, credited to it, the minor ones only when asked for.
+ */
+export function calendarStories(
+  events: readonly CalendarEvent[],
+  sourceNames: Partial<Record<CalendarSource, string>>,
+  minor: boolean,
+): NewsStory[] {
+  return events
+    .filter((e) => minor || e.importance !== 'low')
+    .map((e) => ({
+      id: e.id,
+      title: e.title,
+      href: e.href,
+      time: e.time,
+      author: sourceNames[e.source] ?? e.source,
+      summary: e.detail,
+      event: { short: e.short, importance: e.importance, allDay: e.allDay, source: e.source },
+    }));
 }
 
 /** A market's coin as the news names it: BTC for a spot market's vBTC too, PEPE for 1000PEPE. */
@@ -295,12 +329,25 @@ export interface ChartShow {
   newsScope: NewsScope;
   /** Which kinds of story show; never none. */
   newsKinds: NewsKind[];
+  /** The economic calendar's releases, with the news. */
+  calendar: boolean;
+  /** Its minor releases too (PMIs, home sales), not only the ones that move markets. */
+  calendarMinor: boolean;
 }
 
 /** Where the chart keeps them. */
 export const SHOW_KEY = 'chart.show.v1';
 
-export const DEFAULT_SHOW: ChartShow = { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS] };
+export const DEFAULT_SHOW: ChartShow = {
+  position: true,
+  orders: true,
+  executions: true,
+  news: false,
+  newsScope: 'coin',
+  newsKinds: [...NEWS_KINDS],
+  calendar: true,
+  calendarMinor: false,
+};
 
 export function sanitizeShow(raw: unknown): ChartShow {
   const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<Record<keyof ChartShow, unknown>>;
@@ -315,5 +362,7 @@ export function sanitizeShow(raw: unknown): ChartShow {
     news: r.news === true || legacy !== null,
     newsScope: scope,
     newsKinds: kinds.length ? kinds : [...NEWS_KINDS],
+    calendar: r.calendar !== false,
+    calendarMinor: r.calendarMinor === true,
   };
 }

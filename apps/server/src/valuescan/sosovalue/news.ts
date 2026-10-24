@@ -14,7 +14,16 @@
  *
  * Coins filter every list: the feed by SoSoValue's currency (several coins:
  * each coin's feed, merged by time), the hot and featured lists and a search
- * by the coins of their stories.
+ * by the coins of their stories. A coin's feed keeps only the stories that
+ * name the coin (SoSoValue tags a story with every coin it touches).
+ *
+ * Posts on X come from any account; the latest feed keeps the notable ones -
+ * an organisation's or a government's account (X's verified type), or a post
+ * many have seen or liked - and leaves out the rest unless asked for all.
+ *
+ * The macro topic is economics, not everything SoSoValue files as macro: its
+ * macro stream (Bloomberg's), CNBC's and the news, kept where a story is about
+ * rates, inflation, jobs, growth, central banks, bonds, trade and the like.
  *
  * The key is SOSOVALUE_API_KEY, read here and sent as `x-soso-api-key`. It is
  * never logged, never put on a URL, and never returned to the browser. When it
@@ -47,8 +56,12 @@ const FILTERED_PAGE = 50;
 
 export type NewsFeed = 'latest' | 'hot' | 'featured';
 
-/** SoSoValue's categories (the `category` parameter). */
-export const NEWS_CATEGORIES = [1, 2, 3, 4, 7, 13] as const;
+/** SoSoValue's categories (the `category` parameter); 5 is its macro stream. */
+export const NEWS_CATEGORIES = [1, 2, 3, 4, 5, 7, 13] as const;
+/** Where the macro topic is looked for: SoSoValue's macro stream, CNBC's (6), the news. */
+const MACRO_SOURCES = [5, 6, 1] as const;
+/** Stories mapped from one upstream page before the filters here thin it. */
+const MAP_ALL = 100;
 
 export interface NewsQuery {
   feed: NewsFeed;
@@ -60,6 +73,10 @@ export interface NewsQuery {
   q: string | null;
   page: number;
   limit: number;
+  /** 'macro': economics only, from several streams (the chart's macro news). */
+  topic: 'macro' | null;
+  /** The latest feed's posts on X: the notable ones (the default), or all. */
+  posts: 'notable' | 'all';
 }
 
 export interface NewsPage {
@@ -91,7 +108,47 @@ export function parseNewsQuery(raw: Record<string, unknown>): NewsQuery {
     q: qRaw.length >= 2 ? qRaw : null,
     page: int(raw.page, 1, 1, 50),
     limit: int(raw.limit, 12, 1, 50),
+    topic: raw.topic === 'macro' ? 'macro' : null,
+    posts: raw.posts === 'all' ? 'all' : 'notable',
   };
+}
+
+/**
+ * A post worth showing: an organisation's or a government's account (X's
+ * verified type - the blue tick alone is bought), or one many have seen or
+ * liked by the time SoSoValue read it.
+ */
+export function notablePost(r: Record<string, unknown>): boolean {
+  const type = typeof r.verified_type === 'string' ? r.verified_type.toLowerCase() : '';
+  if (type === 'business' || type === 'government') return true;
+  return num(r.impression_count) >= 10_000 || num(r.like_count) >= 100 || num(r.retweet_count) >= 25;
+}
+
+/**
+ * Economics: what a macro story is about, in its headline - whole words, and
+ * phrases where a word alone is crypto's too (a company's bitcoin "treasury",
+ * a staking "yield", a "bond" of validators).
+ */
+const MACRO_WORDS = [
+  'fed', 'federal reserve', 'fomc', 'powell', 'rate (cut|cuts|hike|hikes|decision)', 'interest rates?', 'inflation', 'deflation',
+  'cpi', 'pce', 'ppi', 'payrolls?', 'nonfarm', 'non-farm', 'jobs (report|data)', 'jobless', 'unemployment', 'labou?r market',
+  'wages?', 'gdp', 'recession', 'econom(y|ic|ics|ist|ists)', 'treasuries', 'treasury (yields?|bonds?|bills?|notes?|secretary|market|auctions?)',
+  '(bond|bonds|junk bonds?|government bonds?|gilts?|bunds?) (market|markets|yields?|sales?|selloff|rally|traders?|prices?)', 'junk bonds?',
+  'bond yields?', 'yield curve', '10-year', 'tariffs?', 'trade (war|deal|deficit|talks)', 'central banks?', 'ecb', 'boj', 'boe', 'pboc',
+  'rba', 'snb', 'lagarde', 'bessent', 'yellen', 'dollar (index|strength|weakness)', 'dxy', 'yuan', 'yen', 'stimulus', 'deficits?',
+  'debt ceiling', 'fiscal', 'monetary', 'opec', 'oil prices?', 'crude', 'consumer (spending|confidence|sentiment|prices)',
+  'retail sales', 'pmi', 'manufacturing', 'home sales', 'housing (market|starts)', 'mortgage rates?', 'imf', 'world bank', 'g7', 'g20',
+  'quantitative (easing|tightening)', 'stagflation', 'credit rating',
+];
+const MACRO_RE = new RegExp(`(?<![A-Za-z0-9])(${MACRO_WORDS.join('|')})(?![A-Za-z])`, 'i');
+/** Its headline (a post: its text) is economics; the summary is not read - crypto stories mention a rate in passing. */
+export const isMacroStory = (n: Pick<NewsItem, 'title'> & Partial<Pick<NewsItem, 'summary'>>): boolean => MACRO_RE.test(n.title);
+
+/** A coin's story: it names the coin (ticker or name), or SoSoValue tagged that coin alone. */
+export function namesCoin(n: Pick<NewsItem, 'title' | 'summary' | 'symbols'>, coin: string, index: CoinIndex | null | undefined): boolean {
+  if (n.symbols.length === 1 && n.symbols[0] === coin) return true;
+  if (!index) return n.symbols.includes(coin);
+  return coinsIn(`${n.title} ${n.summary ?? ''}`, index, 8).includes(coin);
 }
 
 /** Tags out, a handful of entities back, whitespace collapsed. Titles are plain; bodies are HTML. */
@@ -200,6 +257,7 @@ export function mapNewsList(body: unknown, limit: number, opts: { index?: CoinIn
     const category = typeof r.category === 'number' && Number.isFinite(r.category) ? r.category : null;
     // The body's first lines, when the title is not already all of it.
     const summary = !post && titleRaw && content && content !== titleRaw ? content.slice(0, 240) : null;
+    const quiet = post && !notablePost(r);
     out.push({
       id: id || href,
       title,
@@ -211,6 +269,7 @@ export function mapNewsList(body: unknown, limit: number, opts: { index?: CoinIn
       summary,
       tags,
       ...(post ? { post: true } : {}),
+      ...(quiet ? { notable: false } : {}),
       ...(opts.rankFrom ? { rank: opts.rankFrom + i } : {}),
     });
     if (out.length >= limit) break;
@@ -261,6 +320,9 @@ async function getJson(url: string, fetchImpl: typeof fetch): Promise<unknown> {
   }
 }
 
+/** Another SoSoValue read (its macro calendar, calendar.ts), on the same key and the same budget. */
+export const sosoValueJson = (path: string, fetchImpl: typeof fetch = fetch): Promise<unknown> => getJson(`${BASE}${path}`, fetchImpl);
+
 /**
  * SoSoValue's currency list (read once a day): each symbol's currency id, and
  * the index that finds coins in a story's text. Null while it cannot be read -
@@ -290,7 +352,9 @@ async function currencyList(fetchImpl: typeof fetch): Promise<typeof currencies>
 
 /** The coins of a query are filtered here (not by SoSoValue): the hot and featured lists, and a search. */
 const filteredHere = (q: NewsQuery) => q.coins.length > 0 && (q.feed !== 'latest' || !!q.q);
-const pageSize = (q: NewsQuery) => (filteredHere(q) ? FILTERED_PAGE : Math.min(100, Math.max(q.limit, 12)));
+/** The latest feed leaves out posts that are not notable: it reads twice the page. */
+const thinsPosts = (q: NewsQuery) => q.feed === 'latest' && !q.q && q.posts === 'notable';
+const pageSize = (q: NewsQuery) => (filteredHere(q) ? FILTERED_PAGE : Math.min(100, Math.max(q.limit, 12) * (thinsPosts(q) ? 2 : 1)));
 
 /** The upstream URL for a query (the currency id already resolved). */
 export function newsUrl(q: NewsQuery, currency: string | null): string {
@@ -311,6 +375,22 @@ const byTime = (a: NewsItem, b: NewsItem) => b.time - a.time;
 
 /** One page of news for a query, cached; a failed refresh keeps the last copy. */
 export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promise<NewsPage> {
+  // The macro topic: each source's latest (cached) page, the economics kept, merged by time.
+  if (q.topic === 'macro' && q.feed === 'latest' && !q.q) {
+    const pages = await Promise.allSettled(
+      MACRO_SOURCES.map((category) => news({ ...q, topic: null, category, coins: [], page: 1, limit: 50 }, fetchImpl)),
+    );
+    const ok = pages.filter((p): p is PromiseFulfilledResult<NewsPage> => p.status === 'fulfilled').map((p) => p.value);
+    if (!ok.length) throw (pages[0] as PromiseRejectedResult).reason;
+    const seen = new Set<string>();
+    const items = ok
+      .flatMap((p) => p.items)
+      .filter((n) => isMacroStory(n) && !seen.has(sameStory(n.title)) && !!seen.add(sameStory(n.title)))
+      .map((n) => ({ ...n, topic: 'macro' as const }))
+      .sort(byTime)
+      .slice(0, q.limit);
+    return { items, page: q.page, total: null };
+  }
   // Several coins in the feed: each coin's own (cached) page, merged by time.
   if (q.feed === 'latest' && !q.q && q.coins.length > 1) {
     const pages = await Promise.allSettled(q.coins.map((c) => news({ ...q, coins: [c] }, fetchImpl)));
@@ -320,7 +400,7 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
     const items = ok.flatMap((p) => p.items).filter((n) => !seen.has(n.id) && !!seen.add(n.id)).sort(byTime).slice(0, q.limit);
     return { items, page: q.page, total: null };
   }
-  const key = JSON.stringify([q.feed, q.category, q.coins, q.q, q.page, q.limit]);
+  const key = JSON.stringify([q.feed, q.category, q.coins, q.q, q.page, q.limit, q.posts]);
   const hit = cache.get(key);
   const ttl = q.q ? SEARCH_CACHE_MS : CACHE_MS;
   if (hit && Date.now() - hit.at < ttl) return hit.page;
@@ -338,8 +418,12 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
         // Without the currency list the feed is filtered here, by the coins its stories name.
         const here = filteredHere(q) || (byCurrency && !currency);
         const rankFrom = q.feed === 'hot' && !q.q ? (q.page - 1) * pageSize(q) + 1 : undefined;
-        let items = mapNewsList(body, here ? FILTERED_PAGE : q.limit, { index: list?.index, rankFrom });
-        if (here) items = items.filter((n) => n.symbols.some((s) => q.coins.includes(s))).slice(0, q.limit);
+        let items = mapNewsList(body, MAP_ALL, { index: list?.index, rankFrom });
+        if (here) items = items.filter((n) => n.symbols.some((s) => q.coins.includes(s)));
+        // A coin's feed: the stories that are about it, not every one that touches it.
+        if (byCurrency) items = items.filter((n) => namesCoin(n, coin!, list?.index));
+        if (thinsPosts(q)) items = items.filter((n) => n.notable !== false);
+        items = items.slice(0, q.limit);
         // A search comes back by relevance; the widget lists it by time like the rest.
         if (q.q) items = items.sort(byTime);
         const page: NewsPage = { items, page: q.page, total: here ? null : pageOf(body).total };
@@ -358,6 +442,6 @@ export async function news(q: NewsQuery, fetchImpl: typeof fetch = fetch): Promi
 
 /** The latest news, sliced (Explore's short list). */
 export async function latestNews(limit: number, fetchImpl: typeof fetch = fetch): Promise<NewsItem[]> {
-  const page = await news({ feed: 'latest', category: 1, coins: [], q: null, page: 1, limit: 12 }, fetchImpl);
+  const page = await news({ feed: 'latest', category: 1, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable' }, fetchImpl);
   return page.items.slice(0, limit);
 }

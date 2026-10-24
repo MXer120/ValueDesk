@@ -24,15 +24,18 @@ import { CoinIcon } from '../CoinIcon';
 import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
+import { EconCalendar } from './EconCalendar';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
 import './NewsFeed.css';
 
-type Feed = 'latest' | 'hot' | 'featured';
+type Feed = 'latest' | 'hot' | 'featured' | 'calendar';
 const FEEDS: ReadonlyArray<{ id: Feed; label: string }> = [
   { id: 'latest', label: 'Latest' },
   { id: 'hot', label: 'Hot' },
   { id: 'featured', label: 'Featured' },
+  // The economic calendar (EconCalendar.tsx): what is scheduled, not what happened.
+  { id: 'calendar', label: 'Calendar' },
 ];
 /** SoSoValue's categories (the type filter). */
 export const NEWS_TYPES: ReadonlyArray<{ id: number; label: string }> = [
@@ -133,11 +136,14 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   const queryKey = `${f}|${category ?? ''}|${coinParam}|${search}`;
   useEffect(() => setPages(1), [queryKey]);
 
-  const ask = (page: number) => vsApi.news({ feed: f, category, coin: coinParam || undefined, q: search || undefined, page, limit: PAGE });
-  const first = useAsync(() => ask(1), [queryKey], { pollMs: 2 * 60_000 });
+  const onCalendar = f === 'calendar' && !search;
+  const ask = (page: number) => vsApi.news({ feed: f === 'calendar' ? 'latest' : f, category, coin: coinParam || undefined, q: search || undefined, page, limit: PAGE });
+  // The calendar reads its own (EconCalendar.tsx): no news is asked for meanwhile.
+  const first = useAsync(() => ask(1), [queryKey], { pollMs: 2 * 60_000, enabled: !onCalendar });
   const more = useAsync(
     () => (pages < 2 ? Promise.resolve([] as NewsItem[][]) : Promise.all(Array.from({ length: pages - 1 }, (_, i) => ask(i + 2).then((r) => r.items)))),
     [queryKey, pages],
+    { enabled: !onCalendar },
   );
   const items = useMemo(() => {
     const seen = new Set<string>();
@@ -168,12 +174,14 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
               }}
             >
               {x.id === 'hot' && <FlameIcon />}
+              {x.id === 'calendar' && <CalendarIcon />}
               {x.label}
             </button>
           ))}
         </div>
-        <span className="nw__src">SoSoValue</span>
+        <span className="nw__src">{onCalendar ? 'Fed · BLS · BEA' : 'SoSoValue'}</span>
       </header>
+      {onCalendar ? <EconCalendar instance={instance} /> : <>
       <div className="nw__filters">
         {(f === 'latest' || search) && (
           <FxSelect
@@ -270,6 +278,7 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
           </button>
         )}
       </div>
+      </>}
       {menu && <TabMenu at={menu.at} items={menu.items} onClose={() => setMenu(null)} />}
     </section>
   );
@@ -287,6 +296,13 @@ const SaveIcon = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M2.5 4.5c0-.6.4-1 1-1h3l1.4 1.5h4.6c.6 0 1 .4 1 1v6c0 .6-.4 1-1 1h-9c-.6 0-1-.4-1-1z" />
     <path d="M8 7.5v3.6M6.2 9.3h3.6" />
+  </svg>
+);
+
+const CalendarIcon = () => (
+  <svg className="nw__flame" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+    <rect x="2.5" y="3.5" width="11" height="10" rx="1.6" />
+    <path d="M2.5 6.5h11M5.5 2.3v2.4M10.5 2.3v2.4" />
   </svg>
 );
 

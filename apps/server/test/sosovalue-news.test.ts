@@ -135,13 +135,15 @@ test('latestNews asks once and serves the cache', () => withKey(async () => {
 
 test('parseNewsQuery: known values pass, anything else falls back; coins come comma-separated', () => {
   const { parseNewsQuery } = mod;
-  assert.deepEqual(parseNewsQuery({}), { feed: 'latest', category: null, coins: [], q: null, page: 1, limit: 12 });
+  assert.deepEqual(parseNewsQuery({}), { feed: 'latest', category: null, coins: [], q: null, page: 1, limit: 12, topic: null, posts: 'notable' });
   assert.deepEqual(
-    parseNewsQuery({ feed: 'hot', category: '2', coin: ' btc ', q: '  etf   flows ', page: '3', limit: '200' }),
-    { feed: 'hot', category: 2, coins: ['BTC'], q: 'etf flows', page: 3, limit: 50 },
+    parseNewsQuery({ feed: 'hot', category: '2', coin: ' btc ', q: '  etf   flows ', page: '3', limit: '200', topic: 'macro', posts: 'all' }),
+    { feed: 'hot', category: 2, coins: ['BTC'], q: 'etf flows', page: 3, limit: 50, topic: 'macro', posts: 'all' },
   );
+  assert.equal(parseNewsQuery({ topic: 'sports' }).topic, null);
   assert.deepEqual(parseNewsQuery({ coin: 'btc,eth, sol,btc,BTC; DROP,a,b,c,d' }).coins, ['BTC', 'ETH', 'SOL', 'A', 'B'], 'valid, distinct, five at most');
-  assert.equal(parseNewsQuery({ category: '5' }).category, null, 'not a SoSoValue category');
+  assert.equal(parseNewsQuery({ category: '5' }).category, 5, 'SoSoValue\'s macro stream');
+  assert.equal(parseNewsQuery({ category: '6' }).category, null, 'not a type the widget offers');
   assert.deepEqual(parseNewsQuery({ coin: 'BTC; DROP' }).coins, []);
   assert.equal(parseNewsQuery({ q: 'x' }).q, null, 'one letter is not a search');
 });
@@ -195,8 +197,8 @@ test('news: several coins in the feed are each coin\'s page, merged by time; the
     }
     const c = u.searchParams.get('currency_id');
     return json({ data: { total: 99, list: [
-      { id: `a${c}`, title: `Story ${c} new`, source_link: `https://example.com/a${c}`, release_time: c === '1' ? '30' : '20' },
-      { id: `b${c}`, title: `Story ${c} old`, source_link: `https://example.com/b${c}`, release_time: c === '1' ? '10' : '15' },
+      { id: `a${c}`, title: `${c === '1' ? 'BTC' : 'ETH'} story new`, source_link: `https://example.com/a${c}`, release_time: c === '1' ? '30' : '20' },
+      { id: `b${c}`, title: `${c === '1' ? 'Bitcoin' : 'Ethereum'} story old`, source_link: `https://example.com/b${c}`, release_time: c === '1' ? '10' : '15' },
     ] } });
   };
   const merged = await news(parseNewsQuery({ coin: 'BTC,ETH', limit: '3' }), fetchImpl);
@@ -217,4 +219,91 @@ test('news: past the budget a query is refused as busy, never sent', () => withK
   for (let p = 1; p <= 14; p++) await news(parseNewsQuery({ page: String(p) }), fetchImpl);
   await assert.rejects(news(parseNewsQuery({ page: '15' }), fetchImpl), /busy/);
   assert.equal(calls, 15);
+}));
+
+test('notablePost: an organisation\'s or a government\'s account, or a post with reach - not the bought tick alone', () => {
+  const { notablePost } = mod;
+  assert.equal(notablePost({ verified_type: 'Business', impression_count: '12' }), true);
+  assert.equal(notablePost({ verified_type: 'Government' }), true);
+  assert.equal(notablePost({ is_blue_verified: true, impression_count: '700', like_count: '3' }), false);
+  assert.equal(notablePost({ impression_count: '20329' }), true);
+  assert.equal(notablePost({ like_count: '168' }), true);
+  assert.equal(notablePost({ retweet_count: '40' }), true);
+  assert.equal(notablePost({}), false);
+});
+
+test('isMacroStory: economics in the headline, not any business story', () => {
+  const { isMacroStory } = mod;
+  for (const t of ['Fed holds rates steady', 'US CPI rises 0.3% in September', 'The riskiest junk bonds are reaching their highest yields', 'Payrolls beat estimates', 'ECB\'s Lagarde signals a December cut']) {
+    assert.equal(isMacroStory({ title: t, summary: null }), true, t);
+  }
+  for (const t of ['Netflix built a global entertainment colossus', 'Technical colleges are betting on skilled workers', 'A billion-dollar deal for a studio', 'Federated learning startup raises']) {
+    assert.equal(isMacroStory({ title: t, summary: null }), false, t);
+  }
+  assert.equal(isMacroStory({ title: 'Markets this week', summary: 'Treasury yields climbed after the data.' }), false, 'the headline decides');
+  for (const t of ['Strategy adds BTC to its treasury', 'Lido raises staking yield', 'Bank of Israel says crypto cannot evade sanctions', 'Validators post a bond to join']) {
+    assert.equal(isMacroStory({ title: t }), false, t);
+  }
+  for (const t of ['Treasury yields jump after data', "Moody's holds France's credit rating", 'Bond markets brace for supply', 'Yen slides past 156']) {
+    assert.equal(isMacroStory({ title: t }), true, t);
+  }
+});
+
+test('namesCoin: a coin\'s feed keeps the stories that name it', () => {
+  const { namesCoin } = mod;
+  const index = coinIndex(CURRENCIES);
+  const story = (title: string, symbols: string[], summary: string | null = null) => ({ title, summary, symbols });
+  assert.equal(namesCoin(story('Bitcoin breaks out', ['BTC', 'ETH']), 'BTC', index), true);
+  assert.equal(namesCoin(story('$BTC short update', []), 'BTC', index), true);
+  assert.equal(namesCoin(story('Ethereum gas falls', ['ETH', 'BTC']), 'BTC', index), false, 'tagged, not about it');
+  assert.equal(namesCoin(story('A market wrap', ['BTC']), 'BTC', index), true, 'tagged with that coin alone');
+  assert.equal(namesCoin(story('Weekly wrap', ['ETH']), 'BTC', index, ), false);
+  assert.equal(namesCoin(story('Weekly wrap', ['ETH', 'BTC']), 'BTC', null), true, 'without the currency list, the tags decide');
+});
+
+test('news: the latest feed leaves out posts few have seen; posts=all keeps them', () => withKey(async () => {
+  const { news, parseNewsQuery } = mod;
+  const sizes: string[] = [];
+  const fetchImpl: typeof fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname.endsWith('/currencies')) return json({ code: 0, data: CURRENCIES });
+    sizes.push(u.searchParams.get('page_size') ?? '');
+    return json({ data: { list: [
+      { id: 'n', title: 'A story', source_link: 'https://example.com/n', release_time: '9', category: 1 },
+      { id: 'p1', content: 'gm, my take on the market', original_link: 'https://x.com/someone/status/1', release_time: '8', category: 4, impression_count: '40' },
+      { id: 'p2', content: 'Tether adds mining partners', original_link: 'https://x.com/Cointelegraph/status/2', release_time: '7', category: 7, verified_type: 'Business' },
+    ] } });
+  };
+  const notable = await news(parseNewsQuery({ limit: '20' }), fetchImpl);
+  assert.deepEqual(notable.items.map((n) => n.id), ['n', 'p2']);
+  assert.equal(sizes[0], '40', 'twice the page, since some are left out');
+  const all = await news(parseNewsQuery({ limit: '20', posts: 'all' }), fetchImpl);
+  assert.deepEqual(all.items.map((n) => [n.id, n.notable]), [['n', undefined], ['p1', false], ['p2', undefined]]);
+}));
+
+test('news: the macro topic is the economics of SoSoValue\'s macro stream, CNBC\'s and the news, merged by time', () => withKey(async () => {
+  const { news, parseNewsQuery } = mod;
+  const asked: string[] = [];
+  const fetchImpl: typeof fetch = async (url) => {
+    const u = new URL(String(url));
+    if (u.pathname.endsWith('/currencies')) return json({ code: 0, data: CURRENCIES });
+    const cat = u.searchParams.get('category') ?? '';
+    asked.push(cat);
+    const rows: Record<string, unknown[]> = {
+      '5': [
+        { id: 'b1', content: 'The riskiest junk bonds are reaching their highest yields', original_link: 'https://twitter.com/business/status/1', release_time: '50', category: 5, verified_type: 'Business' },
+        { id: 'b2', content: 'Netflix built a global entertainment colossus', original_link: 'https://twitter.com/business/status/2', release_time: '40', category: 5, verified_type: 'Business' },
+      ],
+      '6': [{ id: 'c1', title: 'Fed seen cutting rates in December', source_link: 'https://cnbc.com/c1', release_time: '45', category: 6 }],
+      '1': [
+        { id: 'n1', title: 'Exchange lists a new token', source_link: 'https://example.com/n1', release_time: '60', category: 1 },
+        { id: 'n2', title: 'US CPI rises 0.3%', source_link: 'https://example.com/n2', release_time: '30', category: 1 },
+      ],
+    };
+    return json({ data: { list: rows[cat] ?? [] } });
+  };
+  const page = await news(parseNewsQuery({ topic: 'macro', limit: '10' }), fetchImpl);
+  assert.deepEqual(page.items.map((n) => n.id), ['b1', 'c1', 'n2']);
+  assert.ok(page.items.every((n) => n.topic === 'macro'));
+  assert.deepEqual(asked.sort(), ['1', '5', '6']);
 }));

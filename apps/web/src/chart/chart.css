@@ -1429,7 +1429,7 @@ html.kc-drag * {
 .kc-newsset { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-xs); }
 .kc-newsset .kc-menu-label { margin: 6px 2px 0; }
 .kc-newsset__switch { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 2px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); color: var(--text); font-weight: 600; cursor: pointer; }
-.kc-newsset__switch input[role='switch'] {
+.kc-newsset input[role='switch'] {
   appearance: none;
   -webkit-appearance: none;
   position: relative;
@@ -1444,7 +1444,7 @@ html.kc-drag * {
   background: #2a2a2a;
   cursor: pointer;
 }
-.kc-newsset__switch input[role='switch']::after {
+.kc-newsset input[role='switch']::after {
   content: '';
   position: absolute;
   top: 2px;
@@ -1457,8 +1457,8 @@ html.kc-drag * {
   transform: none;
   transition: transform 0.16s var(--ease-out);
 }
-.kc-newsset__switch input[role='switch']:checked { background: var(--pos); }
-.kc-newsset__switch input[role='switch']:checked::after { transform: translateX(14px); }
+.kc-newsset input[role='switch']:checked { background: var(--pos); }
+.kc-newsset input[role='switch']:checked::after { transform: translateX(14px); }
 .kc-newsset .kc-newsset__scopes { display: flex; flex-direction: column; gap: 2px; }
 .kc-newsset .kc-newsset__scope {
   display: flex;
@@ -1501,7 +1501,13 @@ html.kc-drag * {
 .kc-newsset .kc-newsset__kind svg { flex: none; width: 13px; height: 13px; }
 .kc-newsset .kc-newsset__kind:hover { color: var(--text); }
 .kc-newsset .kc-newsset__kind.on { border-color: rgba(255, 255, 255, 0.14); background: rgba(255, 255, 255, 0.07); color: var(--text); }
-.kc-newsset__src { margin: 4px 2px 0; color: var(--dim); font-size: var(--fs-micro); }
+.kc-newsset__src { margin: 4px 2px 0; color: var(--dim); font-size: var(--fs-micro); line-height: 1.4; }
+.kc-newsset__cal { display: flex; flex-direction: row; align-items: center; gap: 10px; min-height: 40px; padding: 5px 8px; border-radius: 9px; color: var(--text); cursor: pointer; }
+.kc-newsset__cal:hover { background: rgba(255, 255, 255, 0.05); }
+.kc-newsset__cal .kc-newsset__txt { flex: 1 1 auto; }
+.kc-newsset__minor { display: flex; flex-direction: row; align-items: center; gap: 8px; padding: 2px 8px 4px 44px; color: var(--muted); font-size: var(--fs-micro); cursor: pointer; }
+.kc-newsset__minor.is-off { opacity: 0.45; cursor: default; }
+.kc-newsset__minor input { width: 13px; height: 13px; min-height: 0; margin: 0; accent-color: var(--pos); }
 
 /* --- the object list (ChartSidebar.tsx) ------------------------------------ */
 /* The wrap opens and closes the space (Chart.tsx usePresence); the list in it
@@ -1771,11 +1777,11 @@ html.kc-drag * {
   z-index: 1700;
   display: flex;
   flex-direction: column;
-  max-height: min(440px, 70vh);
   padding: 10px 6px 8px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 14px;
-  background: var(--glass-sheet-bg, var(--bg-elevated));
+  /* The drawers' glass, more opaque: it lies over candles, not over a page. */
+  background: color-mix(in srgb, var(--bg-panel) 90%, transparent);
   -webkit-backdrop-filter: var(--glass-sheet-blur);
   backdrop-filter: var(--glass-sheet-blur);
   box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
@@ -1814,6 +1820,55 @@ html.kc-drag * {
 .kc-newspop__sum { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--muted); font-size: var(--fs-micro); line-height: 1.5; }
 .kc-newspop__coins { display: flex; flex-wrap: wrap; gap: 4px; }
 .kc-newspop__coin { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px 0 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.05); color: var(--muted); font-size: 10px; font-weight: 600; }
+.kc-newspop__impact { flex: none; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--muted); }
+.kc-newspop__impact--high { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.kc-newspop__src { color: var(--dim); font-size: var(--fs-micro); }
+
+/* The economic calendar's releases: a row of pills above the news markers,
+   their edge in the release's weight; one still to come is dashed. */
+.kc-calmarks { position: absolute; z-index: 4; height: 22px; pointer-events: none; animation: kc-newsmarks-in 260ms var(--ease-out, ease) both; }
+.kc-calmarks.is-leaving { animation: kc-newsmarks-out 200ms var(--ease-out, ease) both; }
+.kc-calmarks.is-leaving .kc-calmark { pointer-events: none; }
+.kc-calmark {
+  position: absolute;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  min-height: 0;
+  padding: 0 7px 0 5px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 7px;
+  background: var(--glass-pop-bg, var(--bg-elevated));
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  transform: translateX(-50%);
+  transition: transform 140ms var(--ease-out, ease), border-color 140ms, color 140ms;
+}
+.kc-calmark svg { width: 12px; height: 12px; }
+.kc-calmark.is-due { border-style: dashed; }
+.kc-calmark--high { border-color: color-mix(in srgb, var(--warn) 70%, transparent); color: var(--warn); }
+.kc-calmark--medium { color: var(--text); }
+.kc-calmark:hover,
+.kc-calmark.is-open { transform: translateX(-50%) translateY(-2px); border-color: rgba(255, 255, 255, 0.5); color: var(--text); }
+.kc-calmark--high:hover,
+.kc-calmark--high.is-open { border-color: var(--warn); color: var(--warn); }
+.kc-calmark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.kc-calmark__n { color: var(--muted); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) {
+  .kc-calmarks,
+  .kc-calmarks.is-leaving { animation-duration: 1ms; }
+}
 .kc-newspop__save {
   position: absolute;
   top: 7px;
@@ -1915,3 +1970,7 @@ html.kc-drag * {
   font-family: var(--font-num);
 }
 .kc-side-tip { margin: 6px var(--sp-1) 0; color: var(--dim); font-size: var(--fs-micro, 11px); line-height: 1.4; }
+/* "Next: FOMC 3d" at the right edge: what is still to come past the last candle. */
+.kc-calmark.kc-calmark--ahead { transform: translateX(-100%); }
+.kc-calmark.kc-calmark--ahead:hover,
+.kc-calmark.kc-calmark--ahead.is-open { transform: translateX(-100%) translateY(-2px); }

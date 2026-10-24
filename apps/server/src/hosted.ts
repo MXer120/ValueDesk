@@ -104,6 +104,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // SoSoValue news. The process caches the page (valuescan/sosovalue/news.ts);
   // without SOSOVALUE_API_KEY the route answers not_available.
   { method: 'GET', url: '/api/vs/news', cls: 'read' },
+  // The economic calendar: the Fed's, BLS's and BEA's public calendars and
+  // SoSoValue's, each read at most twice a day (valuescan/calendar.ts).
+  { method: 'GET', url: '/api/vs/calendar', cls: 'read' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },

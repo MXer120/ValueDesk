@@ -13,7 +13,8 @@
  *   GET /api/vs/fills?venue&address&from&to&limit
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
- *   GET /api/vs/news?feed&category&coin&q&page&limit   (SoSoValue; coin is one or several, comma-separated; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
@@ -48,6 +49,7 @@ import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
 import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
+import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuescan/calendar.js';
 import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
@@ -235,6 +237,22 @@ export async function valuescanRoutes(app: FastifyInstance) {
       if (!newsKey()) throw new NotAvailable('SoSoValue news is not configured');
       const page = await news(parseNewsQuery(req.query as Record<string, unknown>));
       return { ok: true, ...page, source: 'SoSoValue' };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The economic calendar (the chart's news layer, the News widget's Calendar):
+   * the FOMC's meetings, BLS and BEA releases and SoSoValue's macro events,
+   * each source read at most twice a day - valuescan/calendar.ts. A source
+   * that does not answer is left out and said so in `sources`.
+   */
+  app.get('/api/vs/calendar', async (req, reply) => {
+    try {
+      const { from, to } = parseCalendarQuery(req.query as Record<string, unknown>);
+      const page = await calendar(from, to);
+      return { ok: true, ...page, sourceNames: SOURCE_NAME };
     } catch (e) {
       return fail(reply, e);
     }

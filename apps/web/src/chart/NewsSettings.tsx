@@ -1,8 +1,8 @@
 /**
  * The news button's settings (a right-click on it; Chart.tsx): news on or
- * off, whose news - this coin's, macro and economy, or all of crypto - and
- * which kinds of story, each with its icon. The button itself only switches
- * news on and off.
+ * off, whose news - this coin's, macro and economy, or all of crypto - which
+ * kinds of story, each with its icon, and the economic calendar's releases.
+ * The button itself only switches news on and off.
  */
 import { CoinIcon } from '../components/CoinIcon';
 import { CHART_ICONS, NEWS_ICONS } from './chartIcons';
@@ -68,7 +68,20 @@ export function NewsSettings({ show, coin, onChange }: NewsSettingsProps) {
           );
         })}
       </div>
-      <p className="kc-newsset__src">SoSoValue · the button switches news on and off</p>
+      <div className="kc-menu-label">Economic calendar</div>
+      <label className="kc-newsset__cal">
+        <span className="kc-newsset__ico">{NEWS_ICONS.event}</span>
+        <span className="kc-newsset__txt">
+          <span>Releases on the chart</span>
+          <span className="kc-newsset__hint">Fed meetings, CPI, jobs, GDP, PCE - the coming ones right of the last candle</span>
+        </span>
+        <input type="checkbox" role="switch" checked={show.calendar} onChange={(e) => onChange({ calendar: e.target.checked })} />
+      </label>
+      <label className={`kc-newsset__minor${show.calendar ? '' : ' is-off'}`}>
+        <input type="checkbox" checked={show.calendarMinor} disabled={!show.calendar} onChange={(e) => onChange({ calendarMinor: e.target.checked })} />
+        Minor releases too (PMIs, housing)
+      </label>
+      <p className="kc-newsset__src">News: SoSoValue · calendar: Federal Reserve, BLS, BEA, SoSoValue · the button switches it all on and off</p>
     </div>
   );
 }

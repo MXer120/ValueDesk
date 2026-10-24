@@ -61,8 +61,33 @@ function storyTime(t: number, tz: TimeZoneMode): string {
   return `${d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: zone })} ${hm}`;
 }
 
+/** "in 3d 4h", "in 45m", "2h ago": from now to a release. */
+function countdown(t: number, now: number): string {
+  const m = Math.round((t - now) / 60_000);
+  const a = Math.abs(m);
+  const text = a >= 1440 ? `${Math.floor(a / 1440)}d ${Math.floor((a % 1440) / 60)}h` : a >= 60 ? `${Math.floor(a / 60)}h ${a % 60}m` : `${a}m`;
+  return m >= 0 ? `in ${text}` : `${text} ago`;
+}
+
+const IMPACT: Record<'high' | 'medium' | 'low', string> = { high: 'High impact', medium: 'Medium impact', low: 'Low impact' };
+
+/** Releases in date order. */
+const byDate = (list: readonly NewsStory[]) => [...list].sort((a, b) => a.time - b.time);
+const WEIGHT = { high: 3, medium: 2, low: 1 } as const;
+/** The release a pill is named for: the next one that matters most, else the latest. */
+function leadRelease(list: readonly NewsStory[], now: number): NewsStory {
+  const coming = list.filter((s) => s.time >= now);
+  if (coming.length) return [...coming].sort((a, b) => WEIGHT[b.event!.importance] - WEIGHT[a.event!.importance] || a.time - b.time)[0]!;
+  return list[list.length - 1]!;
+}
+
+/** An all-day release's date ("Wed 28 Oct"): its time is midday UTC of that date, read in UTC. */
+const releaseDay = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+
 export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = false, tz, canSave, onSave }: NewsMarkersProps) {
   const [placed, setPlaced] = useState<PlacedNews[]>([]);
+  /** The economic calendar's releases: a row of their own, above the news. */
+  const [releases, setReleases] = useState<PlacedNews[]>([]);
   const [pane, setPane] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [open, setOpen] = useState<{ key: string; pinned: boolean } | null>(null);
   const layer = useRef<HTMLDivElement>(null);
@@ -74,6 +99,7 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
   useEffect(() => {
     if (!chart || marks.length === 0) {
       setPlaced([]);
+      setReleases([]);
       return;
     }
     let raf = 0;
@@ -83,16 +109,36 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
       const width = size?.width ?? 0;
       const height = size?.height ?? 0;
       const on: PlacedNews[] = [];
+      const due: PlacedNews[] = [];
+      const later: NewsStory[] = [];
       for (const m of marks) {
         const px = chart.convertToPixel({ timestamp: m.timestamp, value: 0 }, { paneId: PANE }) as { x?: number };
         const x = px.x;
-        if (typeof x === 'number' && Number.isFinite(x) && x >= 6 && x <= width - 6) on.push({ key: m.key, x: Math.round(x), timestamp: m.timestamp, stories: m.stories });
+        if (typeof x !== 'number' || !Number.isFinite(x)) continue;
+        const events = m.stories.filter((s) => s.event);
+        // Past the right edge: still to come, gathered at the edge.
+        if (x > width - 6) {
+          later.push(...events);
+          continue;
+        }
+        if (x < 6) continue;
+        const stories = m.stories.filter((s) => !s.event);
+        if (stories.length) on.push({ key: m.key, x: Math.round(x), timestamp: m.timestamp, stories });
+        if (events.length) due.push({ key: `ev:${m.key}`, x: Math.round(x), timestamp: m.timestamp, stories: events });
       }
       const next = clusterNews(on, GAP);
-      const sig = `${width}x${height}|${next.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}`;
+      // A release's pill is wider than a story's marker; one where "Next" sits joins it.
+      const nextDue: PlacedNews[] = [];
+      for (const p of clusterNews(due, GAP * 1.8)) {
+        if (later.length && p.x >= width - 120) later.push(...p.stories);
+        else nextDue.push({ ...p, stories: byDate(p.stories) });
+      }
+      if (later.length) nextDue.push({ key: 'ev:ahead', x: width - 4, timestamp: later[0]!.time, stories: byDate(later).slice(0, 12) });
+      const sig = `${width}x${height}|${next.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}|${nextDue.map((p) => `${p.key}@${p.x}:${p.stories.length}`).join(',')}`;
       if (sig !== last) {
         last = sig;
         setPlaced(next);
+        setReleases(nextDue);
         setPane({ width, height });
       }
       raf = requestAnimationFrame(tick);
@@ -109,14 +155,21 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
         if (e.key === 'Escape') setOpen(null);
         return;
       }
-      if (e.target instanceof Element && e.target.closest('.kc-newspop, .kc-newsmark')) return;
+      if (e.target instanceof Element && e.target.closest('.kc-newspop, .kc-newsmark, .kc-calmark')) return;
+      setOpen(null);
+    };
+    // The card is placed against the marker once: a scroll would leave it behind.
+    const scrolled = (e: Event) => {
+      if (e.target instanceof Element && e.target.closest('.kc-newspop')) return;
       setOpen(null);
     };
     document.addEventListener('pointerdown', away, true);
     document.addEventListener('keydown', away);
+    window.addEventListener('scroll', scrolled, true);
     return () => {
       document.removeEventListener('pointerdown', away, true);
       document.removeEventListener('keydown', away);
+      window.removeEventListener('scroll', scrolled, true);
     };
   }, [open?.pinned]);
   useEffect(() => () => window.clearTimeout(closeTimer.current), []);
@@ -128,12 +181,51 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
     closeTimer.current = window.setTimeout(() => setOpen((o) => (o?.pinned ? o : null)), 220);
   };
 
-  if (placed.length === 0) return null;
-  const shown = card.value ? placed.find((p) => p.key === card.value) : undefined;
+  if (placed.length === 0 && releases.length === 0) return null;
+  const shown = card.value ? placed.find((p) => p.key === card.value) ?? releases.find((p) => p.key === card.value) : undefined;
+  const isRelease = !!shown?.stories[0]?.event;
   const box = layer.current?.getBoundingClientRect();
+  const now = Date.now();
+  const hover = (key: string) => ({
+    onMouseEnter: () => {
+      hold();
+      setOpen((o) => (o?.pinned ? o : { key, pinned: false }));
+    },
+    onMouseLeave: letGo,
+    onClick: () => {
+      hold();
+      setOpen((o) => (o?.key === key && o.pinned ? null : { key, pinned: true }));
+    },
+  });
 
   return (
     <>
+      {releases.length > 0 && (
+        <div className={`kc-calmarks${leaving ? ' is-leaving' : ''}`} style={{ left, top: top + pane.height - FOOT - 28, width: pane.width }} aria-label="Economic calendar on the chart">
+          {releases.map((p) => {
+            const lead = leadRelease(p.stories, now);
+            const n = p.stories.length;
+            const ahead = p.key === 'ev:ahead';
+            const imp = lead.event!.importance;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                className={`kc-calmark kc-calmark--${imp}${ahead ? ' kc-calmark--ahead' : ''}${open?.key === p.key ? ' is-open' : ''}${lead.time > now ? ' is-due' : ''}`}
+                style={{ left: p.x }}
+                aria-label={`${ahead ? 'Coming up: ' : ''}${lead.title}, ${countdown(lead.time, now)}${n > 1 ? `, and ${n - 1} more` : ''}`}
+                aria-expanded={open?.key === p.key}
+                {...hover(p.key)}
+              >
+                {NEWS_ICONS.event}
+                {ahead && <span className="kc-calmark__n">Next</span>}
+                <span className="kc-calmark__t">{lead.event!.short}</span>
+                {ahead ? <span className="kc-calmark__n">{countdown(lead.time, now).replace(/^in /, '')}</span> : n > 1 && <span className="kc-calmark__n">+{n - 1}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className={`kc-newsmarks${leaving ? ' is-leaving' : ''}`} ref={layer} style={{ left, top: top + pane.height - FOOT, width: pane.width }} aria-label="News on the chart">
         {placed.map((p) => {
           // Among macro or all-crypto stories every coin is news; on a coin's chart, another coin is.
@@ -174,18 +266,37 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
               left: Math.max(8, Math.min(window.innerWidth - CARD_W - 8, box.left + shown.x - 28)),
               bottom: Math.max(8, window.innerHeight - box.top + 8),
               width: CARD_W,
+              // Never past the top of the window: what does not fit scrolls.
+              maxHeight: Math.max(180, Math.min(440, box.top - 16)),
             }}
             onMouseEnter={hold}
             onMouseLeave={letGo}
           >
             <header className="kc-newspop__head">
-              <span className="kc-newspop__title">{mode === 'macro' ? 'Macro news' : mode === 'all' ? 'Crypto news' : `${coin} news`}</span>
+              <span className="kc-newspop__title">{isRelease ? 'Economic calendar' : mode === 'macro' ? 'Macro news' : mode === 'all' ? 'Crypto news' : `${coin} news`}</span>
               <span className="kc-newspop__count">
-                {shown.stories.length === 1 ? '1 story' : `${shown.stories.length} stories`}
+                {isRelease ? (shown.stories.length === 1 ? '1 release' : `${shown.stories.length} releases`) : shown.stories.length === 1 ? '1 story' : `${shown.stories.length} stories`}
               </span>
             </header>
             <ol className="kc-newspop__list">
-              {shown.stories.map((s) => {
+              {isRelease && shown.stories.map((s) => (
+                <li key={s.id} className="kc-newspop__row">
+                  <a className="kc-newspop__item" href={s.href} target="_blank" rel="noopener noreferrer">
+                    <span className="kc-newspop__meta">
+                      <time dateTime={new Date(s.time).toISOString()}>{s.event!.allDay ? releaseDay(s.time) : storyTime(s.time, tz)}</time>
+                      <span className={`kc-newspop__impact kc-newspop__impact--${s.event!.importance}`}>{IMPACT[s.event!.importance]}</span>
+                      <span className="kc-newspop__by">{countdown(s.time, now)}</span>
+                    </span>
+                    <span className="kc-newspop__headline">{s.title}</span>
+                    {s.summary && <span className="kc-newspop__sum">{s.summary}</span>}
+                    <span className="kc-newspop__src">
+                      {s.event!.allDay ? 'Time not published · ' : ''}
+                      {s.author}
+                    </span>
+                  </a>
+                </li>
+              ))}
+              {!isRelease && shown.stories.map((s) => {
                 const kind = newsKind(s);
                 const coins = (s.symbols ?? []).slice(0, 4);
                 return (
@@ -221,7 +332,9 @@ export function NewsMarkers({ chart, marks, left, top, coin, mode, leaving = fal
                 );
               })}
             </ol>
-            <footer className="kc-newspop__foot">SoSoValue · each story opens in a new tab</footer>
+            <footer className="kc-newspop__foot">
+              {isRelease ? 'From the Federal Reserve, BLS, BEA and SoSoValue · opens the publisher’s page' : 'SoSoValue · each story opens in a new tab'}
+            </footer>
           </div>,
           document.body,
         )}

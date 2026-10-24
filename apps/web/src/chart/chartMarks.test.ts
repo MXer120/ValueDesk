@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow } from './chartMarks';
+import { NEWS_KINDS, SYSTEM_OVERLAYS, barOpen, calendarStories, clusterNews, fillMarks, markFace, newsCoin, newsKind, newsMarks, sanitizeShow } from './chartMarks';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -88,7 +88,10 @@ test('the same story told twice is one marker entry, the latest copy kept', () =
 
 test('a marker shows what its newest story is', () => {
   const s = (o: object) => ({ id: 'x', title: 't', href: 'h', time: 1, ...o });
-  assert.equal(newsKind(s({ post: true, category: 5 })), 'post');
+  // Bloomberg's macro stories come as posts: they are macro.
+  assert.equal(newsKind(s({ post: true, category: 5 })), 'macro');
+  assert.equal(newsKind(s({ post: true, category: 4 })), 'post');
+  assert.equal(newsKind(s({ category: 1, topic: 'macro' })), 'macro');
   assert.equal(newsKind(s({ category: 2 })), 'research');
   assert.equal(newsKind(s({ category: 99 })), 'news');
   assert.equal(newsKind(s({})), 'news');
@@ -119,7 +122,8 @@ test('markers closer than the gap become one, holding all their stories', () => 
 });
 
 test('news is a switch with its own settings; older saved choices carry over', () => {
-  assert.deepEqual(sanitizeShow(null), { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS] });
+  assert.deepEqual(sanitizeShow(null), { position: true, orders: true, executions: true, news: false, newsScope: 'coin', newsKinds: [...NEWS_KINDS], calendar: true, calendarMinor: false });
+  assert.deepEqual([sanitizeShow({ calendar: false, calendarMinor: true }).calendar, sanitizeShow({ calendar: false, calendarMinor: true }).calendarMinor], [false, true]);
   // 'macro' used to mean on and macro.
   assert.deepEqual([sanitizeShow({ news: 'macro' }).news, sanitizeShow({ news: 'macro' }).newsScope], [true, 'macro']);
   assert.equal(sanitizeShow({ news: 'off' }).news, false);
@@ -127,4 +131,18 @@ test('news is a switch with its own settings; older saved choices carry over', (
   assert.deepEqual([s.news, s.newsScope, s.newsKinds, s.position], [true, 'all', ['post', 'research'], false]);
   // Never no kind at all.
   assert.deepEqual(sanitizeShow({ newsKinds: [] }).newsKinds, [...NEWS_KINDS]);
+});
+
+test('calendar releases are marker entries of their own: credited, linked, the minor ones on request, never merged by title', () => {
+  const ev = (id: string, short: string, importance: 'high' | 'medium' | 'low', time: number) => ({
+    id, time, allDay: false, short, title: short === 'FOMC' ? 'FOMC rate decision' : short, detail: null, importance, country: 'US' as const, source: 'fed' as const, href: 'https://www.federalreserve.gov/x',
+  });
+  const events = [ev('a', 'FOMC', 'high', 1_000), ev('b', 'FOMC', 'high', 9 * 86_400_000), ev('c', 'PMI', 'low', 5_000)];
+  const key = calendarStories(events, { fed: 'Federal Reserve' }, false);
+  assert.deepEqual(key.map((x) => [x.id, x.author, x.event?.short]), [['a', 'Federal Reserve', 'FOMC'], ['b', 'Federal Reserve', 'FOMC']]);
+  assert.equal(calendarStories(events, {}, true).length, 3);
+  assert.equal(newsKind(key[0]!), 'event');
+  assert.deepEqual(markFace({ stories: [key[0]!] }, 'BTC'), { kind: 'event', coin: null });
+  // Two decisions with one title are two entries.
+  assert.equal(newsMarks(key, '1D').length, 2);
 });

@@ -135,6 +135,10 @@ export interface NewsItem {
   tags?: string[];
   /** A post on X: `title` is the post's text, not a headline. */
   post?: boolean;
+  /** false: a post from an account few follow and few have seen (left out of the latest feed unless asked for all). */
+  notable?: boolean;
+  /** 'macro': it came as macro news (the macro topic: economics). */
+  topic?: 'macro';
   /** Its place in the hot list (1 is the hottest). */
   rank?: number;
 }

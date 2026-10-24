@@ -118,6 +118,7 @@ import {
   registerMarkOverlays,
   sanitizeShow,
   type ChartShow,
+  calendarStories,
   newsKind,
   type FillMark,
   type NewsStory,
@@ -3704,19 +3705,28 @@ function Chart({
   const coin = newsCoin(sym?.baseCoin);
   const news = useAsync(
     () =>
-      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 })
+      show.newsScope === 'macro' ? vsApi.news({ feed: 'latest', topic: 'macro', limit: 50 })
       : show.newsScope === 'all' ? vsApi.news({ feed: 'latest', limit: 50 })
       : vsApi.news({ feed: 'latest', coin, limit: 50 }),
     [show.newsScope, coin],
     { enabled: show.news && (show.newsScope !== 'coin' || !!coin), pollMs: 10 * 60_000 },
   );
+  // The economic calendar (the Fed, BLS, BEA, SoSoValue): read again every hour while it shows.
+  const cal = useAsync(() => vsApi.calendar(), [], { enabled: show.news && show.calendar, pollMs: 60 * 60_000 });
   /** The stories on the bars they came out in (NewsMarkers.tsx places and merges them). */
   const newsList = useMemo(
     () =>
       !show.news || masked ? []
-      : newsMarks(((news.data?.items ?? []) as NewsStory[]).filter((n) => show.newsKinds.includes(newsKind(n))), interval, barLookup),
+      : newsMarks(
+          [
+            ...((news.data?.items ?? []) as NewsStory[]).filter((n) => show.newsKinds.includes(newsKind(n))),
+            ...(show.calendar ? calendarStories(cal.data?.events ?? [], cal.data?.sourceNames ?? {}, show.calendarMinor) : []),
+          ],
+          interval,
+          barLookup,
+        ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [news.data, show.news, show.newsKinds.join(), interval, masked, wantKey],
+    [news.data, cal.data, show.news, show.newsKinds.join(), show.calendar, show.calendarMinor, interval, masked, wantKey],
   );
   /** The markers stay a moment as news goes off, to fade out. */
   const newsLayer = useLatched(newsList.length ? newsList : null, 200);

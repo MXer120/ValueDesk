@@ -42,4 +42,6 @@ export const NEWS_ICONS: Record<NewsKind, ReactElement> = {
   stocks: glyph(<><path d="M5 2.5v11M11 3.5v9" /><rect x="3.5" y="5" width="3" height="5" rx=".6" /><rect x="9.5" y="6" width="3" height="4" rx=".6" /></>),
   // X's mark, drawn in the set's hand.
   post: glyph(<><path d="M3.2 3h2.6l7 10h-2.6z" /><path d="M12.6 3 8.9 7.2M7.1 8.8 3.4 13" /></>),
+  /** A release on the economic calendar. */
+  event: glyph(<><rect x="2.5" y="3.5" width="11" height="10" rx="1.6" /><path d="M2.5 6.5h11M5.5 2.3v2.4M10.5 2.3v2.4M5.3 9h1.4M7.3 9h1.4M9.3 9h1.4M5.3 11h1.4" /></>),
 };

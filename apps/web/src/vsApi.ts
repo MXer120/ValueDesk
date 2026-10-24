@@ -32,8 +32,10 @@ import type {
 } from '@sign/valuescan/types.js';
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
+import type { CalendarEvent, CalendarSource } from '@sign/valuescan/calendar.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuescan/cohorts/model.js';
 
+export type { CalendarEvent, CalendarSource };
 export type {
   VsBalance,
   VsFunding,
@@ -148,8 +150,21 @@ export const vsApi = {
    * SoSoValue news, already reduced by the server (the key never reaches this browser):
    * the latest, hot or featured list, by type (`category`) and coin, or a keyword search.
    */
-  news: (o: { feed?: 'latest' | 'hot' | 'featured'; category?: number; coin?: string; q?: string; page?: number; limit?: number } = {}, signal?: AbortSignal) =>
-    unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
+  news: (
+    o: { feed?: 'latest' | 'hot' | 'featured'; category?: number; coin?: string; q?: string; page?: number; limit?: number; topic?: 'macro'; posts?: 'all' } = {},
+    signal?: AbortSignal,
+  ) => unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
+
+  /**
+   * The economic calendar: the FOMC's meetings, BLS and BEA releases and
+   * SoSoValue's macro events (server valuescan/calendar.ts), a week back to
+   * two months ahead unless asked otherwise.
+   */
+  calendar: (o: { from?: number; to?: number } = {}, signal?: AbortSignal) =>
+    unwrap<{ events: CalendarEvent[]; sources: Record<CalendarSource, 'ok' | 'stale' | 'none'>; sourceNames: Record<CalendarSource, string> }>(
+      `/api/vs/calendar${qs(o)}`,
+      signal,
+    ),
 
   /** The video a YouTube channel has on air now, or null (the Live Feed widget). */
   live: (channel: string, signal?: AbortSignal) =>
