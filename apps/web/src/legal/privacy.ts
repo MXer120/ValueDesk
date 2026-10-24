@@ -43,9 +43,11 @@
  *     store.ts). Hosting: Vercel (site and /api, Tokyo hnd1) and AWS
  *     ap-northeast-1 (Tokyo).
  *   - knowledge folders, as of 2026-10-24 (section 12): apps/server/src/folders and
- *     routes/folders.ts - per wallet: folder names, items (notes, tables, chart
- *     snapshots with the position and fills only when chosen, saved stories,
- *     uploaded files and their names), times, the sign-in nonces until they expire
+ *     routes/folders.ts - per wallet: folder names, items (docs, sheets, boards,
+ *     posts from X with their text as X's embed gave it and the user's note and
+ *     tags, chart snapshots with the position and fills only when chosen, saved
+ *     stories, uploaded files and their names, images attached to a doc or a
+ *     board), times, the sign-in nonces until they expire
  *     and when the wallet last signed in; a 7-day token in localStorage
  *     (vd.folders.session:<wallet>); erase removes everything and ends every token;
  *     a wallet unseen for FOLDERS_RETENTION_DAYS (365) is deleted; the database is
@@ -63,7 +65,7 @@ export const PRIVACY: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'This policy explains which personal data ValueDesk processes, why, and what your rights are. In short: ValueDesk has no user accounts, sets no cookies and uses no analytics or advertising of its own; the one third-party usage report (Reown\'s, when you connect a wallet) is sent only with your consent. It never holds your funds or your wallet\'s keys; only if you use hosted copy trading does its server keep a SoDEX API key for you (section 11). If you use knowledge folders, what you keep in them is stored on ValueDesk\'s server for your wallet (section 12). Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through ValueDesk.' },
+    { p: 'This policy explains which personal data ValueDesk processes, why, and what your rights are. In short: ValueDesk has no user accounts, sets no cookies and uses no analytics or advertising of its own; the one third-party usage report (Reown\'s, when you connect a wallet) is sent only with your consent. It never holds your funds or your wallet\'s keys; only if you use hosted copy trading does its server keep a SoDEX API key for you (section 11). If you use knowledge folders (the Knowledge page), what you keep in them is stored on ValueDesk\'s server for your wallet (section 12). Most of what you see is loaded by your own browser directly from the exchanges and blockchains, not through ValueDesk.' },
   ],
   sections: [
     {
@@ -224,18 +226,20 @@ export const PRIVACY: LegalDoc = {
     {
       title: '12. Knowledge folders',
       blocks: [
-        { p: 'Knowledge folders keep your research - up to three folders of notes, tables, chart snapshots, saved news stories and files you upload - on ValueDesk\'s server, for your wallet. To open them in a browser, your wallet signs a short sign-in message (a free signature, never a transaction); the server then gives that browser a token valid for seven days (section 9). Only a browser signed in with your wallet can read or change your folders.' },
+        { p: 'Knowledge folders (the Knowledge page) keep your research - up to three folders of docs, sheets, boards, posts from X you save, chart snapshots, news stories and files you upload - on ValueDesk\'s server, for your wallet. To open them in a browser, your wallet signs a short sign-in message (a free signature, never a transaction); the server then gives that browser a token valid for seven days (section 9). Only a browser signed in with your wallet can read or change your folders.' },
         { p: 'ValueDesk\'s server keeps, for your wallet address:' },
         {
           ul: [
-            'the names of your folders and the items in them: the text of your notes and tables, the chart snapshots you export (the market, the timeframe, your drawings and studies, and - only if you choose to include them - your position and your fills at that time), the news stories you save, and the files you upload (PDFs, images, text files) with their names;',
+            'the names of your folders and the items in them: what you write in your docs, sheets (the values and formulas you enter) and boards (what you place on them), the chart snapshots you export (the market, the timeframe, your drawings and studies, and - only if you choose to include them - your position and your fills at that time), the news stories you save, and the files you upload (PDFs, images, text files) with their names, including images you add to a doc or a board;',
+            'for each post from X you save: its link, and its text, author and date as X\'s public embed showed them when you saved it, with the note and tags you add;',
             'when each folder and item was made and last changed, and how much space they take;',
             'the sign-in you signed, until it expires (so that it cannot be used twice), and when your wallet last signed in.',
           ],
         },
         { p: 'What you put into your folders is yours: ValueDesk does not look at it, analyse it, use it for anything else or share it, except where that is needed to keep the service running and secure or where the law requires it. Please do not upload other people\'s personal data unless you are allowed to. To protect the service against misuse, the server counts, in its memory only, how many changes and uploads each wallet and each IP address make and how many wallets sign in from one address, and refuses what goes beyond the limits.' },
+        { p: 'Posts from X: when you save a post by its link, ValueDesk\'s server - not your browser - asks X\'s public embed service (publish.x.com, operated by X Corp.) for the post\'s text, author and date. That request carries only the post\'s link and comes from the server\'s own address, so X does not learn your IP address or your wallet; the answer is kept in the server\'s memory for up to an hour, so that the same post saved twice is asked for once. Nothing from X is loaded into the page: a saved post is shown as plain text.' },
         { p: 'Purposes and legal bases: keeping the folders you asked for (Art. 6(1)(b) GDPR); protecting the service against misuse (Art. 6(1)(f) GDPR). Your requests reach the server through Vercel\'s edge and the /api function in Tokyo, which pass on your IP address for the limits; the server logs the path of each request, without its query and without the content (section 2). Recipients and transfers are as for the copy executor (section 11): Amazon Web Services (the server, region ap-northeast-1, Tokyo) and Vercel Inc. process this data on our behalf; for Japan the European Commission has decided that it ensures an adequate level of protection.' },
-        { p: 'Retention: everything stays until you delete it. You can delete an item or a folder at any time, or everything at once with "Delete everything" in the folders\' menu, which also signs out every browser that was signed in to your folders. The server deletes what it holds at once; its nightly copy of the folders\' database (text, not files), kept to recover from faults, still holds deleted text for up to seven days. A file you started to upload but that never arrived in full is deleted within two hours. A wallet that has not signed in to its folders for 365 days is deleted with everything in it. [[OWNER: whether snapshots of the server\'s disk are taken (they would contain uploaded files), and how long they are kept]]' },
+        { p: 'Retention: everything stays until you delete it. You can delete an item or a folder at any time, or everything at once with "Delete everything" in the folders\' menu, which also signs out every browser that was signed in to your folders. The server deletes what it holds at once; its nightly copy of the folders\' database (text, not files), kept to recover from faults, still holds deleted text for up to seven days. A file you started to upload but that never arrived in full is deleted within two hours; an image you removed from a doc or a board is deleted a day later (so that undoing the removal still finds it), and the images in a doc or a board are deleted with it. A wallet that has not signed in to its folders for 365 days is deleted with everything in it. [[OWNER: whether snapshots of the server\'s disk are taken (they would contain uploaded files), and how long they are kept]]' },
       ],
     },
     {

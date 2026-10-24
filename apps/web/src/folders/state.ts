@@ -1,8 +1,8 @@
 /**
- * The knowledge folders' state in this tab: whether the folders view is open,
- * whose folders are shown (the connected wallet), its token, the list as the
- * server last answered it, and what is selected. One store, read with
- * useFolders() from the rail button, the view and the save sheet alike.
+ * The knowledge folders' state in this tab: whose folders are shown (the
+ * connected wallet), its token, the list as the server last answered it, and
+ * what is selected on the Knowledge page. One store, read with useFolders()
+ * from the page, the rail's quick drop and the save sheet alike.
  *
  * Every change goes to the server first and the list on screen is the server's
  * answer to it - so a limit the server refuses (a fourth folder, a full folder,
@@ -11,10 +11,13 @@
 import { useSyncExternalStore } from 'react';
 import type { FoldersList, ItemSummary } from '@sign/folders/types.js';
 import type { Eip1193Provider } from '../wallet';
+import { openTab } from '../router';
 import { FoldersApiError, foldersApi, forgetToken, heldToken, signIn } from './api';
 
+/** What the Knowledge page shows when no item is open: a folder's items, or every saved post. */
+export type FoldersView = 'folder' | 'posts';
+
 export interface FoldersState {
-  open: boolean;
   /** The connected wallet, lowercase; null without one. */
   owner: string | null;
   token: string | null;
@@ -25,9 +28,10 @@ export interface FoldersState {
   error: string | null;
   folderId: string | null;
   itemId: string | null;
+  view: FoldersView;
 }
 
-let state: FoldersState = { open: false, owner: null, token: null, list: null, loading: false, signing: false, error: null, folderId: null, itemId: null };
+let state: FoldersState = { owner: null, token: null, list: null, loading: false, signing: false, error: null, folderId: null, itemId: null, view: 'folder' };
 let provider: Eip1193Provider | null = null;
 const subs = new Set<() => void>();
 
@@ -49,18 +53,6 @@ export function useFolders(): FoldersState {
   );
 }
 
-/** Only whether the folders view is open (the rail's button): no re-render on every save. */
-export function useFoldersOpen(): boolean {
-  return useSyncExternalStore(
-    (f) => {
-      subs.add(f);
-      return () => subs.delete(f);
-    },
-    () => state.open,
-    () => state.open,
-  );
-}
-
 /** The selection kept valid against a new list: the same folder and item when they still exist. */
 function settle(list: FoldersList, prefer?: { folderId?: string | null; itemId?: string | null }): Partial<FoldersState> {
   const folderId = [prefer?.folderId, state.folderId].find((id) => id && list.folders.some((f) => f.id === id)) ?? list.folders[0]?.id ?? null;
@@ -75,19 +67,27 @@ export function bindWallet(address: string | null, p: Eip1193Provider | null): v
   const owner = address ? address.toLowerCase() : null;
   if (owner === state.owner) return;
   set({ owner, token: heldToken(owner), list: null, folderId: null, itemId: null, error: null });
-  if (state.open && state.token) void refresh();
 }
 
-export function openFolders(at?: { folderId?: string; itemId?: string }): void {
-  set({ open: true, ...(at?.folderId ? { folderId: at.folderId } : {}), ...(at?.itemId !== undefined ? { itemId: at.itemId } : {}) });
+/** The list, once: what the page, the quick drop and the save sheet call when they show. */
+export function ensureList(): void {
+  if (state.token && !state.list && !state.loading) void refresh();
+}
+
+/** The Knowledge page, on a folder or an item when given. */
+export function openFolders(at?: { folderId?: string; itemId?: string | null; view?: FoldersView }): void {
+  set({
+    ...(at?.folderId ? { folderId: at.folderId } : {}),
+    ...(at?.itemId !== undefined ? { itemId: at.itemId } : {}),
+    ...(at?.view ? { view: at.view } : at?.itemId || at?.folderId ? { view: 'folder' as const } : {}),
+  });
+  openTab('knowledge');
   if (state.token && (!state.list || at)) void refresh();
 }
 
-export const closeFolders = (): void => set({ open: false });
-export const toggleFolders = (): void => (state.open ? closeFolders() : openFolders());
-
-export const selectFolder = (folderId: string): void => set({ folderId, itemId: null });
+export const selectFolder = (folderId: string): void => set({ folderId, itemId: null, view: 'folder' });
 export const selectItem = (itemId: string | null): void => set({ itemId });
+export const selectView = (view: FoldersView): void => set({ view, itemId: null });
 
 /** Ask the wallet for its one signature, then load the folders. */
 export async function signInToFolders(): Promise<boolean> {

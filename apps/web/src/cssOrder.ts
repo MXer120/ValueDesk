@@ -66,6 +66,10 @@ import './components/algo/algo.css';
 import './copy/copy.css';
 import './legal/gate.css';
 import './folders/folders.css';
+import './knowledge/knowledge.css';
+import './knowledge/doc/doc.css';
+import './knowledge/sheet/sheet.css';
+import './knowledge/board/board.css';
 import './components/shell.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),

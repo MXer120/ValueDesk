@@ -26,7 +26,7 @@
  *   FOLDERS_MAX_FILE_MB            one uploaded file                     25   (at most 100)
  *   FOLDERS_MAX_WALLET_MB          everything one wallet keeps          100
  *   FOLDERS_WRITES_PER_MIN         changes per wallet per minute         60   (a 25 MB upload is 7 of them)
- *   FOLDERS_UPLOADS_PER_HOUR       uploads per wallet per hour           20
+ *   FOLDERS_UPLOADS_PER_HOUR       uploads per wallet per hour           60   (images pasted into docs and boards are uploads)
  *   FOLDERS_DOWNLOAD_MB_PER_DAY    what one wallet may fetch per day   1024
  *   FOLDERS_DOWNLOAD_GB_PER_DAY    what all wallets may fetch per day   100
  *   FOLDERS_SIGNINS_PER_DAY        wallets one address signs in per day  10
@@ -39,9 +39,11 @@
  *   FOLDERS_S3_REGION              its region                           ap-northeast-1
  *   FOLDERS_S3_ENDPOINT            local testing: an S3 stand-in        http://127.0.0.1:<port> only
  *
- * Fixed in code: one item's JSON by kind (a note or a table 200 KB, a chart
- * snapshot 256 KB, a news story 8 KB), a chart thumbnail 200 KB, names 60 and
- * titles 120 characters.
+ * Fixed in code: one item's JSON by kind (a doc 768 KB; a sheet or a board
+ * 1.5 MB; a chart snapshot 256 KB; a saved post 48 KB; a news story 8 KB), a
+ * chart thumbnail 200 KB, 200 attachments (images) to a doc or a board, names
+ * 60 and titles 120 characters. Attachments count against the wallet's bytes,
+ * not against the folder's items.
  */
 import { dirname, join } from 'node:path';
 import { deviceKeyPath } from '../deviceKey.js';
@@ -74,10 +76,11 @@ export const DEFAULT_LIMITS: FolderLimits = {
   itemsPerFolder: 50,
   fileBytes: 25 * MB,
   walletBytes: 100 * MB,
-  jsonBytes: { note: 200 * KB, table: 200 * KB, chart: 256 * KB, news: 8 * KB },
+  jsonBytes: { doc: 768 * KB, sheet: 1536 * KB, board: 1536 * KB, tweet: 48 * KB, chart: 256 * KB, news: 8 * KB },
   thumbBytes: 200 * KB,
   writesPerMinute: 60,
-  uploadsPerHour: 20,
+  uploadsPerHour: 60,
+  attachmentsPerItem: 200,
   nameChars: 60,
   titleChars: 120,
 };

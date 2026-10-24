@@ -127,6 +127,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/folders/item', cls: 'read' },
   { method: 'GET', url: '/api/folders/file', cls: 'read' },
   { method: 'GET', url: '/api/folders/file/url', cls: 'read' },
+  // A post on X read for saving: this server asks X's embed endpoint (folders/tweets.ts) - upstream.
+  { method: 'GET', url: '/api/folders/tweet', cls: 'upstream' },
   { method: 'POST', url: '/api/folders/folder/create', cls: 'write' },
   { method: 'POST', url: '/api/folders/folder/rename', cls: 'write' },
   { method: 'POST', url: '/api/folders/folder/delete', cls: 'write' },

@@ -1,31 +1,46 @@
 /**
  * What may be stored in a folder, checked before anything is written.
  *
- * Every kind is rebuilt field by field from what the client sent - a NOTE as
- * blocks of plain-text spans with known marks, a TABLE as strings, a NEWS story
- * with an http(s) link - so what is kept is exactly the shape the web renders,
- * and nothing in it can turn into markup. A CHART snapshot is the chart's own
- * format (apps/web/src/folders/bridge.ts): kept as sent, after its identity
- * (v, engine, symbol, interval) and its size are checked.
+ * Every kind is rebuilt field by field from what the client sent, keeping only
+ * what is listed here - a DOC as nodes and marks of known types with known
+ * attributes (text as text, links http(s) or mailto), a SHEET as text cells and
+ * known styles, a BOARD as elements of known types with numbers in range, a
+ * TWEET and a NEWS story with their http(s) links - so what is kept is exactly
+ * the shape the web renders, and nothing in it can turn into markup. A CHART
+ * snapshot is the chart's own format (apps/web/src/folders/bridge.ts): kept as
+ * sent, after its identity (v, engine, symbol, interval) and its size are
+ * checked.
  *
  * An UPLOAD is judged by its bytes, never by the name or type the client gives:
  * PDF, PNG, JPEG, WebP, GIF or UTF-8 text. Nothing else - no HTML, no SVG, no
  * archive - is accepted, so nothing a folder serves can run in a browser.
  */
 import {
-  NOTE_MARKS,
-  NOTE_TEXT_BLOCKS,
-  TABLE_MAX,
+  BOARD_ENDS,
+  BOARD_MAX,
+  BOARD_TYPES,
+  COLOR_RE,
+  DOC_MAX,
+  ITEM_ID_RE,
+  SHEET_MAX,
+  TWEET_MAX,
+  type BoardData,
+  type BoardElement,
+  type DocData,
+  type DocMark,
+  type DocNode,
   type FileType,
   type FolderLimits,
   type ItemMeta,
   type JsonKind,
-  type NoteBlock,
-  type NoteData,
-  type NoteSpan,
   type SavedNewsData,
-  type TableData,
+  type SheetCell,
+  type SheetCellStyle,
+  type SheetData,
+  type SheetTab,
+  type TweetData,
 } from './types.js';
+import { parseTweetUrl } from './tweetUrl.js';
 
 export class InputError extends Error {
   constructor(
@@ -68,79 +83,345 @@ export function safeHref(raw: unknown, allowMailto = true): string | null {
   return null;
 }
 
-/* ------------------------------------------------------------------- note ----- */
+const color = (v: unknown): string | undefined => (typeof v === 'string' && COLOR_RE.test(v) ? v.toLowerCase() : undefined);
+const int = (v: unknown, min: number, max: number): number | undefined =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : undefined;
+const num = (v: unknown, min: number, max: number): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max ? v : undefined;
+const oneOf = <T extends string>(v: unknown, list: readonly T[]): T | undefined => (typeof v === 'string' && (list as readonly string[]).includes(v) ? (v as T) : undefined);
+const str = (v: unknown, max: number): string => (typeof v === 'string' ? cleanText(v).slice(0, max) : '');
+/** Only the keys whose value is not undefined. */
+const defined = <T extends Record<string, unknown>>(o: T): T => {
+  for (const k of Object.keys(o)) if (o[k] === undefined) delete o[k];
+  return o;
+};
 
-const MAX_BLOCKS = 4000;
-const MAX_SPANS = 2000;
+/* -------------------------------------------------------------------- doc ----- */
 
-function spans(raw: unknown): NoteSpan[] {
-  if (!Array.isArray(raw)) throw new InputError('a note block needs its spans');
-  if (raw.length > MAX_SPANS) throw new InputError('a note block has too many pieces');
-  const out: NoteSpan[] = [];
-  for (const r of raw) {
-    if (!isObj(r) || typeof r.text !== 'string') throw new InputError('a note span needs its text');
-    const text = cleanText(r.text);
-    if (!text) continue;
-    const marks = Array.isArray(r.marks) ? NOTE_MARKS.filter((m) => (r.marks as unknown[]).includes(m)) : [];
-    const href = r.href === undefined ? null : safeHref(r.href);
-    out.push({ text, ...(marks.length ? { marks } : {}), ...(href ? { href } : {}) });
+const ALIGN = ['left', 'center', 'right', 'justify'] as const;
+const textAlign = (a: Record<string, unknown>) => ({ textAlign: oneOf(a.textAlign, ALIGN) ?? null });
+const cellAttrs = (a: Record<string, unknown>) => ({
+  colspan: int(a.colspan, 1, 50) ?? 1,
+  rowspan: int(a.rowspan, 1, 50) ?? 1,
+  colwidth: Array.isArray(a.colwidth) && a.colwidth.length <= 50 && a.colwidth.every((w) => int(w, 10, 4000) !== undefined) ? (a.colwidth as number[]) : null,
+});
+
+/** The node types a doc keeps, each with the attributes it keeps (rebuilt; anything else is dropped). */
+const DOC_NODES: Record<string, ((a: Record<string, unknown>) => Record<string, unknown> | null) | null> = {
+  doc: null,
+  paragraph: textAlign,
+  heading: (a) => ({ level: int(a.level, 1, 3) ?? 1, ...textAlign(a) }),
+  blockquote: null,
+  bulletList: null,
+  orderedList: (a) => ({ start: int(a.start, 0, 1_000_000) ?? 1 }),
+  listItem: null,
+  taskList: null,
+  taskItem: (a) => ({ checked: a.checked === true }),
+  codeBlock: (a) => ({ language: typeof a.language === 'string' && /^[A-Za-z0-9_+#.-]{1,24}$/.test(a.language) ? a.language : null }),
+  horizontalRule: null,
+  hardBreak: null,
+  table: null,
+  tableRow: null,
+  tableHeader: cellAttrs,
+  tableCell: cellAttrs,
+  // An image is an attachment of the doc, by id; its bytes are fetched with the token, never from a URL.
+  image: (a) => (typeof a.file === 'string' && ITEM_ID_RE.test(a.file) ? { file: a.file, alt: str(a.alt, 300), width: int(a.width, 10, 4000) ?? null } : null),
+  // A card of another item in the wallet's folders.
+  itemRef: (a) => (typeof a.id === 'string' && ITEM_ID_RE.test(a.id) ? { id: a.id } : null),
+};
+
+const DOC_MARKS: Record<string, ((a: Record<string, unknown>) => Record<string, unknown> | null) | null> = {
+  bold: null,
+  italic: null,
+  underline: null,
+  strike: null,
+  code: null,
+  link: (a) => {
+    const href = safeHref(a.href);
+    return href ? { href } : null;
+  },
+  highlight: (a) => ({ color: color(a.color) ?? null }),
+  textStyle: (a) => {
+    const c = color(a.color);
+    return c ? { color: c } : null;
+  },
+};
+
+function docMarks(raw: unknown): DocMark[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: DocMark[] = [];
+  const seen = new Set<string>();
+  for (const m of raw.slice(0, 16)) {
+    if (!isObj(m) || typeof m.type !== 'string' || !(m.type in DOC_MARKS) || seen.has(m.type)) continue;
+    const spec = DOC_MARKS[m.type];
+    if (spec === null) out.push({ type: m.type });
+    else {
+      const attrs = spec!(isObj(m.attrs) ? m.attrs : {});
+      if (!attrs) continue;
+      out.push({ type: m.type, attrs });
+    }
+    seen.add(m.type);
+  }
+  return out.length ? out : undefined;
+}
+
+export function checkDoc(raw: unknown): DocData {
+  if (!isObj(raw) || raw.v !== 1 || !isObj(raw.doc) || raw.doc.type !== 'doc') throw new InputError('a doc is the editor\'s document (v 1)');
+  let nodes = 0;
+  const walk = (n: Record<string, unknown>, depth: number): DocNode | null => {
+    if (++nodes > DOC_MAX.nodes) throw new InputError('this doc is too long', 'too-large');
+    if (depth > DOC_MAX.depth) throw new InputError('this doc nests too deeply');
+    if (typeof n.type !== 'string' || !(n.type in DOC_NODES)) return null;
+    if (n.type === 'doc' && depth > 0) return null;
+    const spec = DOC_NODES[n.type];
+    const out: DocNode = { type: n.type };
+    if (spec) {
+      const attrs = spec(isObj(n.attrs) ? n.attrs : {});
+      if (!attrs) return null;
+      out.attrs = attrs;
+    }
+    if (Array.isArray(n.content)) {
+      const kids: DocNode[] = [];
+      for (const c of n.content) {
+        if (!isObj(c)) continue;
+        if (c.type === 'text') {
+          if (++nodes > DOC_MAX.nodes) throw new InputError('this doc is too long', 'too-large');
+          const text = typeof c.text === 'string' ? cleanText(c.text) : '';
+          if (!text) continue;
+          const marks = docMarks(c.marks);
+          kids.push({ type: 'text', text, ...(marks ? { marks } : {}) });
+        } else {
+          const k = walk(c, depth + 1);
+          if (k) kids.push(k);
+        }
+      }
+      if (kids.length) out.content = kids;
+    }
+    return out;
+  };
+  const doc = walk(raw.doc, 0)!;
+  return { v: 1, doc };
+}
+
+/** All of a doc's text, blocks apart (search, the excerpt). */
+export function docText(d: DocData, max = Infinity): string {
+  const parts: string[] = [];
+  let len = 0;
+  const walk = (n: DocNode): void => {
+    if (len >= max) return;
+    if (n.type === 'text' && n.text) {
+      parts.push(n.text);
+      len += n.text.length;
+      return;
+    }
+    if (n.type === 'hardBreak') parts.push(' ');
+    for (const c of n.content ?? []) walk(c);
+    if (n.type !== 'text' && n.type !== 'doc' && n.type !== 'hardBreak') parts.push('\n');
+  };
+  walk(d.doc);
+  return parts.join('');
+}
+
+const excerptOf = (text: string, max = 140): string => {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/* ------------------------------------------------------------------ sheet ----- */
+
+const CELL_KEY = /^([A-Z]{1,2})([1-9][0-9]{0,3})$/;
+const colOf = (letters: string): number => [...letters].reduce((n, ch) => n * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
+const SHEET_ID = /^[A-Za-z0-9_-]{1,24}$/;
+const FMTS = ['num', 'pct', 'usd', 'date', 'text'] as const;
+
+function cellStyle(raw: unknown): SheetCellStyle | undefined {
+  if (!isObj(raw)) return undefined;
+  const s: SheetCellStyle = defined({
+    b: raw.b === true ? (true as const) : undefined,
+    i: raw.i === true ? (true as const) : undefined,
+    u: raw.u === true ? (true as const) : undefined,
+    s: raw.s === true ? (true as const) : undefined,
+    al: oneOf(raw.al, ['l', 'c', 'r'] as const),
+    fg: color(raw.fg),
+    bg: color(raw.bg),
+    fmt: oneOf(raw.fmt, FMTS),
+    dp: int(raw.dp, 0, 10),
+    wrap: raw.wrap === true ? (true as const) : undefined,
+  });
+  return Object.keys(s).length ? s : undefined;
+}
+
+function sizes(raw: unknown, maxIndex: number, min: number, max: number): Record<string, number> | undefined {
+  if (!isObj(raw)) return undefined;
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(raw)) {
+    if (!/^\d{1,4}$/.test(k) || Number(k) >= maxIndex) continue;
+    const n = num(v, min, max);
+    if (n !== undefined) out[String(Number(k))] = Math.round(n);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function checkSheet(raw: unknown): SheetData {
+  if (!isObj(raw) || raw.v !== 1 || !Array.isArray(raw.sheets)) throw new InputError('a sheet is a list of tabs (v 1)');
+  if (raw.sheets.length < 1 || raw.sheets.length > SHEET_MAX.sheets) throw new InputError(`a sheet has 1 to ${SHEET_MAX.sheets} tabs`);
+  let cells = 0;
+  const names = new Set<string>();
+  const ids = new Set<string>();
+  const sheets: SheetTab[] = raw.sheets.map((t, i) => {
+    if (!isObj(t)) throw new InputError('a sheet tab is an object');
+    const id = typeof t.id === 'string' && SHEET_ID.test(t.id) && !ids.has(t.id) ? t.id : `s${i + 1}`;
+    ids.add(id);
+    const name = cleanName(t.name ?? `Sheet${i + 1}`, SHEET_MAX.nameChars, 'A tab name');
+    if (names.has(name.toLowerCase())) throw new InputError(`two tabs are called "${name}"`);
+    names.add(name.toLowerCase());
+    if (!isObj(t.cells)) throw new InputError('a sheet tab holds its cells');
+    const out: Record<string, SheetCell> = {};
+    for (const [key, c] of Object.entries(t.cells)) {
+      const m = CELL_KEY.exec(key);
+      if (!m || colOf(m[1]!) >= SHEET_MAX.cols || Number(m[2]) > SHEET_MAX.rows) throw new InputError(`"${key.slice(0, 12)}" is not a cell of a sheet`);
+      if (!isObj(c)) throw new InputError('a cell is an object');
+      const v = typeof c.v === 'string' ? cleanText(c.v) : typeof c.v === 'number' && Number.isFinite(c.v) ? String(c.v) : '';
+      if (v.length > SHEET_MAX.cellChars) throw new InputError(`a cell holds at most ${SHEET_MAX.cellChars} characters`);
+      const s = cellStyle(c.s);
+      if (!v && !s) continue;
+      if (++cells > SHEET_MAX.cells) throw new InputError(`a sheet holds at most ${SHEET_MAX.cells} cells`, 'too-large');
+      out[key] = s ? { v, s } : { v };
+    }
+    const freeze = isObj(t.freeze) ? { r: int(t.freeze.r, 0, 50) ?? 0, c: int(t.freeze.c, 0, 20) ?? 0 } : undefined;
+    return defined({
+      id,
+      name,
+      cells: out,
+      cols: sizes(t.cols, SHEET_MAX.cols, 24, 1200),
+      rows: sizes(t.rows, SHEET_MAX.rows, 16, 600),
+      freeze: freeze && (freeze.r || freeze.c) ? freeze : undefined,
+    }) as SheetTab;
+  });
+  const active = int(raw.active, 0, sheets.length - 1);
+  return { v: 1, sheets, ...(active ? { active } : {}) };
+}
+
+/* ------------------------------------------------------------------ board ----- */
+
+const BOARD_ID = /^[A-Za-z0-9_-]{1,24}$/;
+
+function boardElement(raw: unknown, seen: Set<string>): BoardElement | null {
+  if (!isObj(raw)) return null;
+  const type = oneOf(raw.type, BOARD_TYPES);
+  if (!type || typeof raw.id !== 'string' || !BOARD_ID.test(raw.id) || seen.has(raw.id)) return null;
+  const C = BOARD_MAX.coord;
+  const x = num(raw.x, -C, C);
+  const y = num(raw.y, -C, C);
+  const w = num(raw.w, 0, BOARD_MAX.size);
+  const h = num(raw.h, 0, BOARD_MAX.size);
+  if (x === undefined || y === undefined || w === undefined || h === undefined) return null;
+  let points: number[] | undefined;
+  if (type === 'pen' || type === 'line' || type === 'arrow') {
+    if (!Array.isArray(raw.points) || raw.points.length < 4 || raw.points.length % 2 || raw.points.length > BOARD_MAX.points) return null;
+    if (!raw.points.every((p) => typeof p === 'number' && Number.isFinite(p) && Math.abs(p) <= C)) return null;
+    points = (raw.points as number[]).map((p) => Math.round(p * 10) / 10);
+  }
+  const file = type === 'image' ? (typeof raw.file === 'string' && ITEM_ID_RE.test(raw.file) ? raw.file : null) : undefined;
+  const ref = type === 'item' ? (typeof raw.ref === 'string' && ITEM_ID_RE.test(raw.ref) ? raw.ref : null) : undefined;
+  if (file === null || ref === null) return null;
+  const link = (v: unknown) => (typeof v === 'string' && BOARD_ID.test(v) ? v : undefined);
+  const text = typeof raw.text === 'string' ? cleanText(raw.text).slice(0, BOARD_MAX.text) : undefined;
+  seen.add(raw.id);
+  return defined({
+    id: raw.id,
+    type,
+    x,
+    y,
+    w,
+    h,
+    rot: num(raw.rot, -360, 360) || undefined,
+    text: text || undefined,
+    fill: color(raw.fill),
+    stroke: color(raw.stroke),
+    sw: num(raw.sw, 0, 40),
+    op: num(raw.op, 0.05, 1),
+    fs: num(raw.fs, 6, 400),
+    align: oneOf(raw.align, ['l', 'c', 'r'] as const),
+    valign: oneOf(raw.valign, ['t', 'm', 'b'] as const),
+    bold: raw.bold === true ? true : undefined,
+    dash: oneOf(raw.dash, ['solid', 'dashed', 'dotted'] as const),
+    radius: num(raw.radius, 0, 1000),
+    points,
+    from: link(raw.from),
+    to: link(raw.to),
+    head: oneOf(raw.head, BOARD_ENDS),
+    tail: oneOf(raw.tail, BOARD_ENDS),
+    file,
+    ref,
+    name: typeof raw.name === 'string' ? cleanText(raw.name).replace(/\s+/g, ' ').trim().slice(0, 120) || undefined : undefined,
+    lock: raw.lock === true ? true : undefined,
+    group: link(raw.group),
+  }) as BoardElement;
+}
+
+export function checkBoard(raw: unknown): BoardData {
+  if (!isObj(raw) || raw.v !== 1 || !Array.isArray(raw.elements)) throw new InputError('a board is a list of elements (v 1)');
+  if (raw.elements.length > BOARD_MAX.elements) throw new InputError(`a board holds at most ${BOARD_MAX.elements} things`, 'too-large');
+  const seen = new Set<string>();
+  const elements = raw.elements.map((e) => boardElement(e, seen)).filter((e): e is BoardElement => e !== null);
+  const bg = oneOf(raw.bg, ['dots', 'grid', 'none'] as const);
+  return { v: 1, elements, ...(bg ? { bg } : {}) };
+}
+
+/** The ids of the attachments a doc or a board shows (the sweep keeps these). */
+export function attachmentRefs(kind: JsonKind, data: unknown): string[] {
+  const out = new Set<string>();
+  if (kind === 'board' && isObj(data) && Array.isArray(data.elements)) {
+    for (const e of data.elements) if (isObj(e) && typeof e.file === 'string') out.add(e.file);
+  } else if (kind === 'doc' && isObj(data) && isObj(data.doc)) {
+    const walk = (n: unknown): void => {
+      if (!isObj(n)) return;
+      if (n.type === 'image' && isObj(n.attrs) && typeof n.attrs.file === 'string') out.add(n.attrs.file);
+      if (Array.isArray(n.content)) n.content.forEach(walk);
+    };
+    walk(data.doc);
+  }
+  return [...out];
+}
+
+/* ------------------------------------------------------------------ tweet ----- */
+
+const TAG = /^[\p{L}\p{N}_-]{1,32}$/u;
+
+export function cleanTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const t of raw) {
+    if (typeof t !== 'string') continue;
+    const tag = t.trim().replace(/^#/, '').toLowerCase();
+    if (TAG.test(tag) && !out.includes(tag)) out.push(tag);
+    if (out.length >= TWEET_MAX.tags) break;
   }
   return out;
 }
 
-export function checkNote(raw: unknown): NoteData {
-  if (!isObj(raw) || !Array.isArray(raw.blocks)) throw new InputError('a note is a list of blocks');
-  if (raw.blocks.length > MAX_BLOCKS) throw new InputError('this note has too many paragraphs');
-  const blocks: NoteBlock[] = [];
-  for (const b of raw.blocks) {
-    if (!isObj(b) || typeof b.type !== 'string') throw new InputError('a note block needs its type');
-    if (b.type === 'hr') blocks.push({ type: 'hr' });
-    else if (b.type === 'ul' || b.type === 'ol') {
-      if (!Array.isArray(b.items) || b.items.length > MAX_SPANS) throw new InputError('a list needs its items');
-      blocks.push({ type: b.type, items: b.items.map(spans) });
-    } else if ((NOTE_TEXT_BLOCKS as readonly string[]).includes(b.type)) {
-      blocks.push({ type: b.type as (typeof NOTE_TEXT_BLOCKS)[number], spans: spans(b.spans) });
-    } else throw new InputError(`a note cannot hold a "${String(b.type).slice(0, 20)}" block`);
-  }
-  return { blocks };
-}
-
-/** The first words of a note, for the list. */
-export function noteExcerpt(n: NoteData, max = 140): string {
-  const parts: string[] = [];
-  let len = 0;
-  for (const b of n.blocks) {
-    const text = 'spans' in b ? b.spans.map((s) => s.text).join('') : 'items' in b ? b.items.map((i) => i.map((s) => s.text).join('')).join(' · ') : '';
-    const t = text.replace(/\s+/g, ' ').trim();
-    if (!t) continue;
-    parts.push(t);
-    len += t.length;
-    if (len >= max) break;
-  }
-  const all = parts.join(' — ');
-  return all.length > max ? `${all.slice(0, max - 1)}…` : all;
-}
-
-/* ------------------------------------------------------------------ table ----- */
-
-export function checkTable(raw: unknown): TableData {
-  if (!isObj(raw) || !Array.isArray(raw.columns) || !Array.isArray(raw.rows)) throw new InputError('a table has columns and rows');
-  if (raw.columns.length < 1 || raw.columns.length > TABLE_MAX.columns) throw new InputError(`a table has 1 to ${TABLE_MAX.columns} columns`);
-  if (raw.rows.length > TABLE_MAX.rows) throw new InputError(`a table has at most ${TABLE_MAX.rows} rows`);
-  const cell = (v: unknown): string => {
-    const s = typeof v === 'string' ? cleanText(v) : typeof v === 'number' && Number.isFinite(v) ? String(v) : v == null ? '' : null;
-    if (s === null) throw new InputError('a table cell holds text');
-    if (s.length > TABLE_MAX.cellChars) throw new InputError(`a table cell holds at most ${TABLE_MAX.cellChars} characters`);
-    return s;
-  };
-  const columns = raw.columns.map(cell);
-  const rows = raw.rows.map((r) => {
-    if (!Array.isArray(r)) throw new InputError('a table row is a list of cells');
-    const row = r.slice(0, columns.length).map(cell);
-    while (row.length < columns.length) row.push('');
-    return row;
-  });
-  return { columns, rows };
+export function checkTweet(raw: unknown): TweetData {
+  if (!isObj(raw)) throw new InputError('a saved post is an object');
+  const ref = parseTweetUrl(raw.url);
+  if (!ref) throw new InputError('a saved post needs its link on x.com');
+  const handle = typeof raw.handle === 'string' && /^[A-Za-z0-9_]{1,15}$/.test(raw.handle) ? raw.handle : ref.handle;
+  const time = typeof raw.time === 'number' && Number.isFinite(raw.time) && raw.time > 0 ? Math.round(raw.time) : null;
+  const lang = typeof raw.lang === 'string' && /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(raw.lang) ? raw.lang : undefined;
+  const note = str(raw.note, TWEET_MAX.note).trim();
+  const tags = cleanTags(raw.tags);
+  return defined({
+    url: handle ? `https://x.com/${handle}/status/${ref.id}` : ref.url,
+    id: ref.id,
+    handle,
+    author: str(raw.author, 100).replace(/\s+/g, ' ').trim(),
+    text: str(raw.text, TWEET_MAX.text).trim(),
+    time,
+    lang,
+    fetched: raw.fetched === true,
+    note: note || undefined,
+    tags: tags.length ? tags : undefined,
+  }) as TweetData;
 }
 
 /* ------------------------------------------------------------------- news ----- */
@@ -149,20 +430,20 @@ export function checkNews(raw: unknown): SavedNewsData {
   if (!isObj(raw)) throw new InputError('a news story is an object');
   const href = safeHref(raw.href, false);
   if (!href) throw new InputError('a news story needs its http(s) link');
-  const str = (v: unknown, max: number): string => (typeof v === 'string' ? cleanText(v).trim().slice(0, max) : '');
-  const title = str(raw.title, 600);
+  const s = (v: unknown, max: number): string => str(v, max).trim();
+  const title = s(raw.title, 600);
   if (!title) throw new InputError('a news story needs its title');
   const time = typeof raw.time === 'number' && Number.isFinite(raw.time) && raw.time >= 0 ? Math.round(raw.time) : 0;
   const symbols = Array.isArray(raw.symbols)
-    ? raw.symbols.filter((s): s is string => typeof s === 'string' && /^[A-Za-z0-9.]{1,16}$/.test(s)).slice(0, 8)
+    ? raw.symbols.filter((x): x is string => typeof x === 'string' && /^[A-Za-z0-9.]{1,16}$/.test(x)).slice(0, 8)
     : [];
-  const summary = str(raw.summary, 1200);
+  const summary = s(raw.summary, 1200);
   return {
-    id: str(raw.id, 120),
+    id: s(raw.id, 120),
     title,
     href,
     time,
-    author: str(raw.author, 120) || null,
+    author: s(raw.author, 120) || null,
     symbols,
     ...(summary ? { summary } : {}),
     ...(raw.post === true ? { post: true } : {}),
@@ -191,16 +472,29 @@ export function checkItemData(kind: JsonKind, raw: unknown, limits: FolderLimits
   let data: unknown;
   let meta: ItemMeta = {};
   switch (kind) {
-    case 'note': {
-      const n = checkNote(raw);
-      data = n;
-      meta = { excerpt: noteExcerpt(n) };
+    case 'doc': {
+      const d = checkDoc(raw);
+      data = d;
+      meta = { excerpt: excerptOf(docText(d, 400)) };
       break;
     }
-    case 'table': {
-      const t = checkTable(raw);
+    case 'sheet': {
+      const s = checkSheet(raw);
+      data = s;
+      meta = { sheets: s.sheets.length, cells: s.sheets.reduce((n, t) => n + Object.keys(t.cells).length, 0) };
+      break;
+    }
+    case 'board': {
+      const b = checkBoard(raw);
+      data = b;
+      meta = { elements: b.elements.length };
+      break;
+    }
+    case 'tweet': {
+      // A longer excerpt: the page's wall of saved posts shows it without loading each one.
+      const t = checkTweet(raw);
       data = t;
-      meta = { rows: t.rows.length, cols: t.columns.length };
+      meta = defined({ href: t.url, author: t.author || null, handle: t.handle || undefined, time: t.time, excerpt: excerptOf(t.text || t.note || '', 400), tags: t.tags });
       break;
     }
     case 'news': {

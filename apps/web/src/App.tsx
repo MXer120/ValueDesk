@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, TABS, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, OPEN_TAB_EVENT, TABS, landingTab, legalForPath, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -61,6 +61,8 @@ const AlgoRunner = lazy(() => import('./algo/AlgoRunner'));
 const LeaderboardPage = lazyPage('leaderboard', () => import('./components/leaderboard/LeaderboardPage').then((m) => m.LeaderboardPage));
 const PortfolioDashboard = lazyPage('portfolio', () => import('./dashboard/PortfolioDashboard').then((m) => m.PortfolioDashboard));
 const ScanDashboard = lazyPage('scan', () => import('./dashboard/ScanDashboard').then((m) => m.ScanDashboard));
+/* The knowledge folders' own page: docs, sheets, boards, saved posts, files (knowledge/). */
+const KnowledgePage = lazyPage('knowledge', () => import('./knowledge/KnowledgePage').then((m) => m.KnowledgePage));
 /* The market strip below is shown on no page today, so this never loads. */
 const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m) => m.TickerBar));
 /* Impressum, privacy policy, terms (src/legal): one chunk for the three, loaded
@@ -76,6 +78,7 @@ const PAGES: Record<Tab, LazyPage<any>> = {
   leaderboard: LeaderboardPage,
   portfolio: PortfolioDashboard,
   scan: ScanDashboard,
+  knowledge: KnowledgePage,
 };
 
 /** The page the first render shows, and the one an old URL is then moved to (router.ts). */
@@ -183,6 +186,15 @@ function AppShell() {
     window.addEventListener(OPEN_LEGAL_EVENT, on);
     return () => window.removeEventListener(OPEN_LEGAL_EVENT, on);
   }, [openLegal]);
+  /* A page opened from outside the shell's props (router.ts openTab): the rail's quick drop, the save sheet. */
+  useEffect(() => {
+    const on = (e: Event) => {
+      const t = (e as CustomEvent<Tab>).detail;
+      if ((TABS as readonly string[]).includes(t)) setTab(t);
+    };
+    window.addEventListener(OPEN_TAB_EVENT, on);
+    return () => window.removeEventListener(OPEN_TAB_EVENT, on);
+  }, [setTab]);
   /* The tab whose page is on screen - none while a legal page is. */
   const shown: Tab | null = legal ? null : tab;
   usePagePrefetch();
@@ -477,8 +489,8 @@ function AppShell() {
             is the loudest thing on screen answering a question nobody asked, and
             it pushed the account card - the only thing you can act on before
             scanning - below the fold. */}
-        {/* Explore and Copy are about traders, not one market: no strip there either. */}
-        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && (
+        {/* Explore and Copy are about traders, not one market: no strip there either. Knowledge is the user's own writing. */}
+        {tab !== 'trade' && tab !== 'portfolio' && tab !== 'scan' && tab !== 'leaderboard' && tab !== 'explore' && tab !== 'copy' && tab !== 'knowledge' && (
           <div className="marketbar">
             <Guarded name="Ticker">
               <TickerBar
@@ -527,6 +539,10 @@ function AppShell() {
           </Guarded>
         )}
 
+        {shown === 'knowledge' && (
+          <Guarded name="Knowledge"><KnowledgePage address={address} /></Guarded>
+        )}
+
         {legal && (
           <Guarded name="Legal"><LegalDoc page={legal} onOpen={openLegal} /></Guarded>
         )}
@@ -562,7 +578,7 @@ function AppShell() {
         <Guarded name="Terms">
           <TermsGate hidden={!!legal} onOpen={openLegal} address={address} provider={provider} />
         </Guarded>
-        {/* The knowledge folders (folders/): the rail's folder view, and "Save to folder" from the chart and News. */}
+        {/* The knowledge folders (folders/): the wallet's sign-in, and "Save to folder" from the chart and News. */}
         <Guarded name="Folders">
           <FoldersHost address={address} provider={provider} />
         </Guarded>

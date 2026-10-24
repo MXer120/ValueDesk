@@ -5,6 +5,9 @@
  * checked (to disk through the API in pieces, or straight to S3 with a signed link), how
  * a file is fetched back, that one wallet never reaches another's, moving and
  * reordering, erasing everything, and the S3 signing against AWS's own examples.
+ * And what each kind keeps (a doc, a sheet, a board, a post on X), the images
+ * attached to a doc or a board, and the first release's notes and tables
+ * upgraded in place.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +26,9 @@ import { DiskBlobs, S3Blobs, type BlobStore } from '../src/folders/blobs.js';
 import { DEFAULT_LIMITS, foldersConfigFromEnv, type FoldersConfig } from '../src/folders/limits.js';
 import { credentialSource, EMPTY_SHA256, presignUrl, signHeaders, type AwsCredentials } from '../src/folders/s3.js';
 import { FoldersStore, UPLOAD_TTL_MS } from '../src/folders/store.js';
-import { checkNote, isPlainText, safeHref, sniffFile, trimUtf8Tail } from '../src/folders/validate.js';
+import { checkBoard, checkDoc, checkSheet, checkTweet, isPlainText, safeHref, sniffFile, trimUtf8Tail } from '../src/folders/validate.js';
+import { findTweetUrl, parseTweetUrl } from '../src/folders/tweetUrl.js';
+import { dayToMs, textOfEmbed, TweetReader } from '../src/folders/tweets.js';
 import { SIGN_IN_STATEMENT, type SignIn } from '../src/folders/types.js';
 import { foldersRoutes } from '../src/routes/folders.js';
 import { HOSTED_ROUTES, hostedRoute, limitsFor, DEFAULT_LIMITS as HOSTED_LIMITS } from '../src/hosted.js';
@@ -76,14 +81,14 @@ function signIn(w: { key: Uint8Array; address: string }, o: Partial<SignIn> = {}
   return { ...base, signature: bytesToHex(rsv), ...(o.signature ? { signature: o.signature } : {}) };
 }
 
-async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => number; blobs?: (cfg: FoldersConfig) => BlobStore } = {}) {
+async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => number; blobs?: (cfg: FoldersConfig) => BlobStore; tweets?: TweetReader } = {}) {
   const cfg = o.cfg ?? config();
   const store = new FoldersStore(cfg, { freeBytes: o.free, now: o.now });
   OPEN.push(store);
   const tokens = new SessionTokens(cfg.dir);
   const blobs = o.blobs?.(cfg) ?? new DiskBlobs(cfg.dir);
   const app = Fastify();
-  await app.register(foldersRoutes, { store, tokens, cfg, blobs, upkeep: false, now: o.now });
+  await app.register(foldersRoutes, { store, tokens, cfg, blobs, upkeep: false, now: o.now, tweets: o.tweets });
   await app.ready();
   const login = async (w = wallet()) => {
     const r = await app.inject({ method: 'POST', url: '/api/folders/session', payload: { signIn: signIn(w, {}, o.now?.()) } });
@@ -93,8 +98,8 @@ async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => 
   const call = (token: string | null, method: 'GET' | 'POST', url: string, payload?: unknown) =>
     app.inject({ method, url, headers: token ? { authorization: `Bearer ${token}` } : {}, ...(payload === undefined ? {} : { payload: payload as object }) });
   /** An upload as the web makes one: reserve, send the bytes where the server says, finish. */
-  const upload = async (token: string, folderId: string, bytes: Buffer, name = 'a.pdf', o2: { size?: number } = {}) => {
-    const start = await call(token, 'POST', '/api/folders/upload/start', { folderId, name, size: o2.size ?? bytes.length });
+  const upload = async (token: string, folderId: string, bytes: Buffer, name = 'a.pdf', o2: { size?: number; parentId?: string } = {}) => {
+    const start = await call(token, 'POST', '/api/folders/upload/start', { folderId, name, size: o2.size ?? bytes.length, ...(o2.parentId ? { parentId: o2.parentId } : {}) });
     if (start.statusCode !== 200) return start;
     const { id, target } = start.json() as { id: string; target: { method: 'PUT' | 'POST'; url: string; headers: Record<string, string>; bearer: boolean; partBytes?: number } };
     if (target.bearer) {
@@ -134,8 +139,22 @@ async function setup(o: { cfg?: FoldersConfig; free?: () => number; now?: () => 
   return { app, store, cfg, login, call, upload, fetchFile };
 }
 
-const NOTE = { blocks: [{ type: 'h1', spans: [{ text: 'Thesis' }] }, { type: 'p', spans: [{ text: 'BTC ', marks: ['b'] }, { text: 'breaks out' }] }] };
-const TABLE = { columns: ['Level', 'Why'], rows: [['64000', 'weekly high'], ['58000', 'gap']] };
+const DOC = {
+  v: 1,
+  doc: {
+    type: 'doc',
+    content: [
+      { type: 'heading', attrs: { level: 1, textAlign: null }, content: [{ type: 'text', text: 'Thesis' }] },
+      { type: 'paragraph', attrs: { textAlign: null }, content: [{ type: 'text', text: 'BTC ', marks: [{ type: 'bold' }] }, { type: 'text', text: 'breaks out' }] },
+    ],
+  },
+};
+const docOf = (text: string) => ({ v: 1, doc: { type: 'doc', content: [{ type: 'paragraph', attrs: { textAlign: null }, content: [{ type: 'text', text }] }] } });
+const SHEET = { v: 1, sheets: [{ id: 's1', name: 'Levels', cells: { A1: { v: 'Level', s: { b: true } }, A2: { v: '64000' }, A3: { v: '=A2*0.9' } } }] };
+const BOARD = { v: 1, elements: [{ id: 'a', type: 'sticky', x: 0, y: 0, w: 200, h: 200, text: 'Idea', fill: '#ffe066' }, { id: 'b', type: 'arrow', x: 0, y: 0, w: 100, h: 1, points: [0, 0, 100, 0], from: 'a', head: 'arrow' }] };
+const TWEET = { url: 'https://twitter.com/jack/status/20?s=1', handle: 'jack', author: 'jack', text: 'just setting up my twttr', time: 1142942400000, fetched: true, tags: ['#OG', 'history', 'OG'] };
+const NOTE_V0 = { blocks: [{ type: 'h1', spans: [{ text: 'Thesis' }] }, { type: 'p', spans: [{ text: 'BTC ', marks: ['b'] }, { text: 'breaks\nout', href: 'https://example.com/' }] }, { type: 'ul', items: [[{ text: 'one' }]] }] };
+const TABLE_V0 = { columns: ['Level', 'Why'], rows: [['64000', 'weekly high'], ['58000', 'gap']] };
 const NEWS = { id: 'n1', title: 'ETF flows turn', href: 'https://sosovalue.com/news/1', time: 1_760_000_000_000, author: 'SoSoValue', symbols: ['BTC'], summary: 'Inflows.' };
 const CHART = { v: 1, engine: 'perps', symbol: 'BTC-USD', interval: '1h', drawings: [{ name: 'segment', points: [{ timestamp: 1, value: 2 }] }], indicators: [{ name: 'VOL', visible: true }], include: { position: false, executions: false }, at: 1 };
 const PDF = Buffer.concat([Buffer.from('%PDF-1.4\n'), randomBytes(2000), Buffer.from('\n%%EOF\n')]);
@@ -227,42 +246,219 @@ test('items: each kind is stored as its own shape; a folder holds a limited numb
   const folderId = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'BTC' })).json().folder.id;
   const make = (kind: string, data: unknown, title = kind) => s.call(token, 'POST', '/api/folders/item/create', { folderId, kind, title, data });
 
-  const note = await make('note', NOTE, 'Thesis');
-  assert.equal(note.statusCode, 200, note.body);
-  assert.equal(note.json().item.meta.excerpt, 'Thesis — BTC breaks out');
-  const table = (await make('table', TABLE)).json().item;
-  assert.deepEqual([table.meta.rows, table.meta.cols], [2, 2]);
-  const news = (await make('news', NEWS)).json().item;
-  assert.equal(news.meta.href, NEWS.href);
-  const chart = (await make('chart', CHART)).json().item;
-  assert.deepEqual([chart.meta.symbol, chart.meta.interval, chart.meta.engine], ['BTC-USD', '1h', 'perps']);
+  const doc = await make('doc', DOC, 'Thesis');
+  assert.equal(doc.statusCode, 200, doc.body);
+  assert.equal(doc.json().item.meta.excerpt, 'Thesis BTC breaks out');
+  const sheet = (await make('sheet', SHEET)).json().item;
+  assert.deepEqual([sheet.meta.sheets, sheet.meta.cells], [1, 3]);
+  const board = (await make('board', BOARD)).json().item;
+  assert.equal(board.meta.elements, 2);
+  const tweet = (await make('tweet', TWEET)).json().item;
+  assert.deepEqual([tweet.meta.href, tweet.meta.handle, tweet.meta.tags], ['https://x.com/jack/status/20', 'jack', ['og', 'history']]);
 
-  const full = await make('note', NOTE);
+  const full = await make('doc', DOC);
   assert.equal(full.statusCode, 409);
   assert.equal(full.json().code, 'folder-full');
   const fullUpload = await s.upload(token, folderId, PDF);
   assert.equal(fullUpload.json().code, 'folder-full', 'a reservation counts like an item');
+  await s.call(token, 'POST', '/api/folders/item/delete', { id: board.id });
+  const chart = (await make('chart', CHART)).json().item;
+  assert.deepEqual([chart.meta.symbol, chart.meta.interval, chart.meta.engine], ['BTC-USD', '1h', 'perps']);
+  assert.deepEqual((await s.call(token, 'GET', `/api/folders/item?id=${chart.id}`)).json().item.data, CHART, 'a chart snapshot comes back as the chart wrote it');
+  await s.call(token, 'POST', '/api/folders/item/delete', { id: chart.id });
+  assert.equal((await make('news', NEWS)).json().item.meta.href, NEWS.href);
+  assert.equal((await s.call(token, 'POST', '/api/folders/item/update', { id: tweet.id, data: { ...TWEET, note: 'the first', tags: ['og'] } })).json().item.meta.tags[0], 'og', 'a post keeps the note and tags it is given');
 
-  const got = (await s.call(token, 'GET', `/api/folders/item?id=${chart.id}`)).json().item;
-  assert.deepEqual(got.data, CHART, 'a chart snapshot comes back as the chart wrote it');
+  assert.deepEqual((await s.call(token, 'GET', `/api/folders/item?id=${sheet.id}`)).json().item.data, SHEET, 'a sheet comes back as it was saved');
   assert.equal((await make('file', {})).statusCode, 400, 'files are uploaded');
+  assert.equal((await make('note', NOTE_V0)).statusCode, 400, 'the first release\'s kinds are not made any more');
   assert.equal((await make('chart', { ...CHART, v: 2 })).statusCode, 400);
   assert.equal((await make('news', { ...NEWS, href: 'javascript:alert(1)' })).statusCode, 400);
 });
 
-test('items: a note keeps text and known marks only - no markup, no script links', () => {
-  const n = checkNote({
-    blocks: [
-      { type: 'p', spans: [{ text: '<img src=x onerror=alert(1)>', marks: ['b', 'onclick'] }, { text: 'link', href: 'javascript:alert(1)' }, { text: 'ok', href: 'https://example.com/a' }] },
-      { type: 'ul', items: [[{ text: 'one' }], [{ text: 'two\u0000' }]] },
-      { type: 'hr' },
+test('items: a doc keeps known nodes, marks and attributes only - no markup, no script links, no image by URL', () => {
+  const d = checkDoc({
+    v: 1,
+    doc: {
+      type: 'doc',
+      content: [
+        {
+          type: 'paragraph',
+          attrs: { textAlign: 'center', onclick: 'x' },
+          content: [
+            { type: 'text', text: '<img src=x onerror=alert(1)>', marks: [{ type: 'bold' }, { type: 'onclick' }] },
+            { type: 'text', text: 'link', marks: [{ type: 'link', attrs: { href: 'javascript:alert(1)' } }] },
+            { type: 'text', text: 'ok\u0000', marks: [{ type: 'link', attrs: { href: 'https://example.com/a', target: '_top' } }, { type: 'textStyle', attrs: { color: 'red; background:url(x)' } }] },
+            { type: 'text', text: '' },
+          ],
+        },
+        { type: 'script', content: [{ type: 'text', text: 'alert(1)' }] },
+        { type: 'image', attrs: { src: 'https://evil.example/x.png', file: 'not-an-id' } },
+        { type: 'image', attrs: { file: 'AAAAAAAAAAAAAAAA', alt: 'chart', src: 'https://evil.example/x.png' } },
+        { type: 'heading', attrs: { level: 9 }, content: [{ type: 'text', text: 'H', marks: [{ type: 'highlight', attrs: { color: '#FFE066' } }] }] },
+        { type: 'doc', content: [] },
+      ],
+    },
+  });
+  assert.deepEqual(d.doc.content![0], {
+    type: 'paragraph',
+    attrs: { textAlign: 'center' },
+    content: [
+      { type: 'text', text: '<img src=x onerror=alert(1)>', marks: [{ type: 'bold' }] },
+      { type: 'text', text: 'link' },
+      { type: 'text', text: 'ok', marks: [{ type: 'link', attrs: { href: 'https://example.com/a' } }] },
     ],
   });
-  assert.deepEqual(n.blocks[0], { type: 'p', spans: [{ text: '<img src=x onerror=alert(1)>', marks: ['b'] }, { text: 'link' }, { text: 'ok', href: 'https://example.com/a' }] });
-  assert.deepEqual(n.blocks[1], { type: 'ul', items: [[{ text: 'one' }], [{ text: 'two' }]] });
-  assert.throws(() => checkNote({ blocks: [{ type: 'script', spans: [] }] }));
+  assert.equal(d.doc.content!.length, 3, 'the script, the image by URL and a nested doc are gone');
+  assert.deepEqual(d.doc.content![1], { type: 'image', attrs: { file: 'AAAAAAAAAAAAAAAA', alt: 'chart', width: null } });
+  assert.deepEqual(d.doc.content![2], { type: 'heading', attrs: { level: 1, textAlign: null }, content: [{ type: 'text', text: 'H', marks: [{ type: 'highlight', attrs: { color: '#ffe066' } }] }] });
+  assert.throws(() => checkDoc({ blocks: [] }), /editor/);
+  let deep: Record<string, unknown> = { type: 'paragraph' };
+  for (let i = 0; i < 30; i++) deep = { type: 'blockquote', content: [deep] };
+  assert.throws(() => checkDoc({ v: 1, doc: { type: 'doc', content: [deep] } }), /nests too deeply/);
   assert.equal(safeHref('data:text/html,<b>'), null);
   assert.equal(safeHref('https://user:pw@example.com/'), null);
+});
+
+test('items: a sheet keeps text cells and known styles; a board keeps known elements, numbers in range, links to its own', () => {
+  const sh = checkSheet({
+    v: 1,
+    sheets: [{ id: 's1', name: '  Levels ', cells: { A1: { v: 'Level', s: { b: true, bg: '#FF0000', onclick: 'x', fmt: 'weird' } }, B2: { v: 42 }, C3: { v: '' }, CV5000: { v: 'edge' } }, cols: { 0: 120, 999: 50, x: 5 }, freeze: { r: 1, c: 0 } }],
+  });
+  assert.deepEqual(sh.sheets[0]!.cells, { A1: { v: 'Level', s: { b: true, bg: '#ff0000' } }, B2: { v: '42' }, CV5000: { v: 'edge' } });
+  assert.deepEqual([sh.sheets[0]!.name, sh.sheets[0]!.cols, sh.sheets[0]!.freeze], ['Levels', { 0: 120 }, { r: 1, c: 0 }]);
+  assert.throws(() => checkSheet({ v: 1, sheets: [{ name: 'a', cells: { CW1: { v: 'x' } } }] }), /not a cell/);
+  assert.throws(() => checkSheet({ v: 1, sheets: [{ name: 'a', cells: { A5001: { v: 'x' } } }] }), /not a cell/);
+  assert.throws(() => checkSheet({ v: 1, sheets: [{ name: 'a', cells: {} }, { name: 'A', cells: {} }] }), /two tabs/);
+
+  const b = checkBoard({
+    v: 1,
+    bg: 'dots',
+    elements: [
+      { id: 'a', type: 'sticky', x: 0, y: 0, w: 10, h: 10, text: 'hi', fill: 'url(x)', onclick: 'x', sw: 99 },
+      { id: 'a', type: 'rect', x: 0, y: 0, w: 1, h: 1 },
+      { id: 'c', type: 'script', x: 0, y: 0, w: 1, h: 1 },
+      { id: 'd', type: 'pen', x: 0, y: 0, w: 1, h: 1, points: [0, 0, 1] },
+      { id: 'e', type: 'image', x: 0, y: 0, w: 1, h: 1, file: 'https://evil.example/x.png' },
+      { id: 'f', type: 'arrow', x: 1e9, y: 0, w: 1, h: 1, points: [0, 0, 1, 1] },
+      { id: 'g', type: 'line', x: 0, y: 0, w: 5, h: 5, points: [0, 0, 5.123, 5], from: 'a', to: 'nope!' },
+    ],
+  });
+  assert.deepEqual(b.elements.map((e) => e.id), ['a', 'g']);
+  assert.deepEqual([b.elements[0]!.fill, b.elements[0]!.sw, b.elements[0]!.text], [undefined, undefined, 'hi']);
+  assert.deepEqual([b.elements[1]!.from, b.elements[1]!.to, b.elements[1]!.points], ['a', undefined, [0, 0, 5.1, 5]]);
+  assert.equal(b.bg, 'dots');
+});
+
+test('tweets: a post on X by any of its links; its text out of X\'s embed, as plain text', () => {
+  for (const u of ['https://x.com/jack/status/20', 'twitter.com/jack/status/20?s=20', 'https://mobile.twitter.com/jack/status/20#m', 'https://x.com/i/web/status/20']) assert.equal(parseTweetUrl(u)?.id, '20', u);
+  for (const u of ['https://x.com/jack', 'https://evil.example/jack/status/20', 'javascript:alert(1)//x.com/jack/status/20', 'https://x.com.evil.example/jack/status/20', 'https://x.com/jack/status/abc']) assert.equal(parseTweetUrl(u), null, u);
+  assert.equal(findTweetUrl('look at https://x.com/jack/status/20?s=1 wow')?.url, 'https://x.com/jack/status/20');
+  const e = textOfEmbed('<blockquote class="twitter-tweet"><p lang="en" dir="ltr">Entering &amp; HQ<br>line <a href="https://t.co/x">pic.twitter.com/x</a> <script>x</script>&#127881;</p>&mdash; Elon (@elonmusk) <a href="https://x.com/elonmusk/status/1?ref_src=x">October 26, 2022</a></blockquote>');
+  assert.deepEqual(e, { text: 'Entering & HQ\nline pic.twitter.com/x x🎉', lang: 'en', day: 'October 26, 2022' });
+  assert.equal(new Date(dayToMs('October 26, 2022')!).toISOString(), '2022-10-26T12:00:00.000Z');
+  const t = checkTweet(TWEET);
+  assert.deepEqual([t.url, t.id, t.tags], ['https://x.com/jack/status/20', '20', ['og', 'history']]);
+  assert.throws(() => checkTweet({ ...TWEET, url: 'https://example.com/jack/status/20' }), /x\.com/);
+});
+
+test('tweets: the server reads a post from X\'s embed endpoint, once an hour, and says so when X will not show it', async () => {
+  const asked: string[] = [];
+  const fake = (async (input: string | URL) => {
+    const u = new URL(String(input));
+    asked.push(u.searchParams.get('url') ?? '');
+    assert.equal(u.origin + u.pathname, 'https://publish.x.com/oembed');
+    assert.equal(u.searchParams.get('omit_script'), '1');
+    if (u.searchParams.get('url')!.endsWith('/404')) return new Response('{}', { status: 404 });
+    const html = '<blockquote class="twitter-tweet"><p lang="en" dir="ltr">just setting up my twttr</p>&mdash; jack (@jack) <a href="https://x.com/jack/status/20?ref_src=twsrc%5Etfw">March 21, 2006</a></blockquote>';
+    return new Response(JSON.stringify({ author_name: 'jack', author_url: 'https://x.com/jack', html }), { status: 200, headers: { 'content-type': 'application/json' } });
+  }) as typeof fetch;
+  const s = await setup({ tweets: new TweetReader(fake) });
+  const { token } = await s.login();
+  const r = await s.call(token, 'GET', `/api/folders/tweet?url=${encodeURIComponent('https://twitter.com/jack/status/20?s=20')}`);
+  assert.equal(r.statusCode, 200, r.body);
+  assert.deepEqual(r.json().tweet, { url: 'https://x.com/jack/status/20', id: '20', handle: 'jack', author: 'jack', text: 'just setting up my twttr', time: Date.parse('2006-03-21T12:00:00Z'), lang: 'en', fetched: true });
+  await s.call(token, 'GET', '/api/folders/tweet?url=https://x.com/jack/status/20');
+  assert.deepEqual(asked, ['https://x.com/jack/status/20'], 'asked once');
+  assert.equal((await s.call(token, 'GET', '/api/folders/tweet?url=https://x.com/jack/status/404')).json().code, 'not-found');
+  assert.equal((await s.call(token, 'GET', '/api/folders/tweet?url=https://example.com/a')).statusCode, 400);
+  assert.equal((await s.call(null, 'GET', '/api/folders/tweet?url=https://x.com/jack/status/20')).statusCode, 401);
+});
+
+test('attachments: an image of a doc or a board is no folder item, moves and goes with it, and is swept a day after it is no longer shown', async () => {
+  let now = Date.now();
+  const s = await setup({ cfg: config({ limits: { itemsPerFolder: 2 } }), now: () => now });
+  const { token, address } = await s.login();
+  const f1 = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'A' })).json().folder.id;
+  const f2 = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'B' })).json().folder.id;
+  const board = (await s.call(token, 'POST', '/api/folders/item/create', { folderId: f1, kind: 'board', title: 'Map', data: BOARD })).json().item;
+  const doc = (await s.call(token, 'POST', '/api/folders/item/create', { folderId: f1, kind: 'doc', title: 'Notes', data: DOC })).json().item;
+
+  // The folder is full, and an image still goes into the board: it is not one of the folder's items.
+  const img = await s.upload(token, f2, PNG, 'shot.png', { parentId: board.id });
+  assert.equal(img.statusCode, 200, img.body);
+  const image = img.json().item;
+  assert.deepEqual([image.parentId, image.folderId], [board.id, f1], 'it goes where its board is');
+  const listed = (await s.call(token, 'GET', '/api/folders')).json();
+  assert.deepEqual(listed.folders[0].items.map((i: { id: string }) => i.id), [board.id, doc.id]);
+  assert.equal(listed.usage.items, 2);
+  assert.equal(listed.usage.bytes, board.bytes + doc.bytes + PNG.length, 'its bytes count');
+  assert.equal((await s.upload(token, f1, PNG, 'x.png', { parentId: image.id })).statusCode, 400, 'not an image of an image');
+  const sheet = (await s.call(token, 'POST', '/api/folders/item/create', { folderId: f2, kind: 'sheet', title: 'S', data: SHEET })).json().item;
+  assert.equal((await s.upload(token, f2, PNG, 'x.png', { parentId: sheet.id })).statusCode, 400, 'a sheet has no images');
+  assert.equal((await s.call(token, 'POST', '/api/folders/item/move', { id: image.id, folderId: f2, index: 0 })).statusCode, 400);
+
+  // The board shows it; a second image it never shows.
+  const shown = { ...BOARD, elements: [...BOARD.elements, { id: 'i', type: 'image', x: 0, y: 0, w: 50, h: 50, file: image.id }] };
+  assert.equal((await s.call(token, 'POST', '/api/folders/item/update', { id: board.id, data: shown })).statusCode, 200);
+  const unused = (await s.upload(token, f1, PNG, 'unused.png', { parentId: board.id })).json().item;
+
+  // Moving the board takes its images along; deleting the folder it left does not touch them.
+  await s.call(token, 'POST', '/api/folders/item/move', { id: board.id, folderId: f2, index: 0 });
+  await s.call(token, 'POST', '/api/folders/item/delete', { id: doc.id });
+  assert.equal((await s.call(token, 'POST', '/api/folders/folder/delete', { id: f1 })).statusCode, 200);
+  assert.equal((await s.fetchFile(token, image.id)).status, 200);
+
+  now += 25 * 3_600_000;
+  const swept = s.store.sweep();
+  assert.ok(swept.gone.some((g) => g.names.includes(unused.id)), 'the one never shown is swept');
+  assert.equal((await s.fetchFile(token, unused.id)).status, 404);
+  assert.equal((await s.fetchFile(token, image.id)).status, 200, 'the one shown stays');
+
+  const file = join(s.cfg.dir, 'files', address, image.id);
+  assert.ok(existsSync(file));
+  await s.call(token, 'POST', '/api/folders/item/delete', { id: board.id });
+  assert.ok(!existsSync(file), 'its images go with the board');
+  assert.equal((await s.call(token, 'GET', '/api/folders')).json().usage.bytes, sheet.bytes);
+});
+
+test('legacy: the first release\'s notes and tables are docs and sheets once the store opens', () => {
+  const cfg = config();
+  const owner = '0x' + 'ab'.repeat(20);
+  const first = new FoldersStore(cfg);
+  const folder = first.createFolder(owner, 'Old');
+  const now = Date.now();
+  const put = first.db.prepare('INSERT INTO items (id, owner, folder_id, kind, title, position, data, meta, bytes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  put.run('NNNNNNNNNNNNNNNN', owner, folder.id, 'note', 'Thesis', 0, JSON.stringify(NOTE_V0), '{}', 100, now, now);
+  put.run('TTTTTTTTTTTTTTTT', owner, folder.id, 'table', 'Levels', 1, JSON.stringify(TABLE_V0), '{}', 100, now, now);
+  first.close();
+
+  const store = new FoldersStore(cfg);
+  OPEN.push(store);
+  const items = store.list(owner).folders[0]!.items;
+  assert.deepEqual(items.map((i) => [i.title, i.kind]), [['Thesis', 'doc'], ['Levels', 'sheet']]);
+  const doc = store.getItem(owner, 'NNNNNNNNNNNNNNNN').data as ReturnType<typeof checkDoc>;
+  assert.deepEqual(doc.doc.content![0], { type: 'heading', attrs: { level: 1, textAlign: null }, content: [{ type: 'text', text: 'Thesis' }] });
+  assert.deepEqual(doc.doc.content![1]!.content, [
+    { type: 'text', text: 'BTC ', marks: [{ type: 'bold' }] },
+    { type: 'text', text: 'breaks', marks: [{ type: 'link', attrs: { href: 'https://example.com/' } }] },
+    { type: 'hardBreak' },
+    { type: 'text', text: 'out', marks: [{ type: 'link', attrs: { href: 'https://example.com/' } }] },
+  ]);
+  assert.equal(doc.doc.content![2]!.type, 'bulletList');
+  const sheet = store.getItem(owner, 'TTTTTTTTTTTTTTTT').data as ReturnType<typeof checkSheet>;
+  assert.deepEqual(sheet.sheets[0]!.cells, { A1: { v: 'Level', s: { b: true } }, B1: { v: 'Why', s: { b: true } }, A2: { v: '64000' }, B2: { v: 'weekly high' }, A3: { v: '58000' }, B3: { v: 'gap' } });
+  assert.equal(items[0]!.meta.excerpt, 'Thesis BTC breaks out one');
 });
 
 test('items: the wallet storage quota and the server room are enforced on the server, reservations included', async () => {
@@ -403,7 +599,7 @@ test('items: renamed, edited with a revision check, moved and reordered, deleted
   const { token } = await s.login();
   const f1 = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'One' })).json().folder.id;
   const f2 = (await s.call(token, 'POST', '/api/folders/folder/create', { name: 'Two' })).json().folder.id;
-  const mk = async (folderId: string, title: string) => (await s.call(token, 'POST', '/api/folders/item/create', { folderId, kind: 'note', title, data: NOTE })).json().item;
+  const mk = async (folderId: string, title: string) => (await s.call(token, 'POST', '/api/folders/item/create', { folderId, kind: 'doc', title, data: DOC })).json().item;
   const a = await mk(f1, 'a');
   const b = await mk(f1, 'b');
   const c = await mk(f1, 'c');
@@ -411,9 +607,9 @@ test('items: renamed, edited with a revision check, moved and reordered, deleted
 
   const renamed = await s.call(token, 'POST', '/api/folders/item/update', { id: a.id, title: 'Alpha', rev: a.rev });
   assert.equal(renamed.json().item.title, 'Alpha');
-  const stale = await s.call(token, 'POST', '/api/folders/item/update', { id: a.id, data: NOTE, rev: a.rev });
+  const stale = await s.call(token, 'POST', '/api/folders/item/update', { id: a.id, data: DOC, rev: a.rev });
   assert.equal(stale.statusCode, 409, 'another tab saved first');
-  const edited = await s.call(token, 'POST', '/api/folders/item/update', { id: a.id, data: { blocks: [{ type: 'p', spans: [{ text: 'new' }] }] }, rev: renamed.json().item.rev });
+  const edited = await s.call(token, 'POST', '/api/folders/item/update', { id: a.id, data: docOf('new'), rev: renamed.json().item.rev });
   assert.equal(edited.json().item.meta.excerpt, 'new');
 
   const order = (r: { json(): { folders: Array<{ id: string; items: Array<{ title: string }> }> } }, f: string) => r.json().folders.find((x) => x.id === f)!.items.map((i) => i.title);
@@ -665,7 +861,7 @@ test('limits: the defaults are the owner\'s (25 MB a file, 100 MB a wallet); the
   assert.equal(d.s3, null);
   assert.deepEqual(
     [d.limits.folders, d.limits.itemsPerFolder, d.limits.fileBytes, d.limits.walletBytes, d.limits.writesPerMinute, d.limits.uploadsPerHour, d.signInsPerDay],
-    [3, 50, 25 * 1048576, 100 * 1048576, 60, 20, 10],
+    [3, 50, 25 * 1048576, 100 * 1048576, 60, 60, 10],
   );
   assert.equal(d.totalBytes, 20 * 1073741824);
   assert.equal(d.minFreeBytes, 10 * 1073741824, 'the index lives on the same volume');
@@ -687,11 +883,11 @@ test('limits: the defaults are the owner\'s (25 MB a file, 100 MB a wallet); the
   assert.throws(() => foldersConfigFromEnv({ FOLDERS_MAX_FOLDERS: 'many' }));
 });
 
-test('hosted: the folders routes are listed, POSTs as writes or the sign-in, counted per client', () => {
+test('hosted: the folders routes are listed, POSTs as writes or the sign-in, a post on X as upstream, counted per client', () => {
   const folders = HOSTED_ROUTES.filter((r) => r.url.startsWith('/api/folders'));
-  assert.equal(folders.length, 17);
+  assert.equal(folders.length, 18);
   for (const r of folders) {
-    if (r.method === 'GET') assert.equal(r.cls, 'read', r.url);
+    if (r.method === 'GET') assert.equal(r.cls, r.url === '/api/folders/tweet' ? 'upstream' : 'read', r.url);
     else assert.equal(r.cls, r.url === '/api/folders/session' ? 'auth' : 'write', r.url);
   }
   assert.deepEqual(limitsFor(hostedRoute('POST', '/api/folders/item/create')!, {}, HOSTED_LIMITS, 'c').map((l) => l.key), ['read|c', 'write|c']);

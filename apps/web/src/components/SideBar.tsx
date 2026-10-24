@@ -3,7 +3,8 @@
  * reference: the mark at the top, level with the navbar; the trade page's
  * terminals (Trade, News, and any the user adds - dashboard/terminals.ts), the
  * one on screen raised, and a + for a new one; then the tools that are the same
- * on every page - the market search and the knowledge folders (folders/), the
+ * on every page - the market search and Knowledge (the knowledge folders' page;
+ * anything dragged onto its button is saved into a folder, folders/QuickDrop.tsx), the
  * money (deposit, transfer, withdraw), the app's own (notifications, settings) -
  * and the wallet at the foot. The pages themselves are the navbar's links.
  * Below 761px there is no rail and the tools sit in the navbar again (NavBar.tsx
@@ -27,7 +28,7 @@ import { warmWalletModal } from '../walletconnect';
 import type { Tab } from '../router';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { activateTerminal, addTerminal, useTerminals } from '../dashboard/terminals';
-import { toggleFolders, useFoldersOpen } from '../folders/state';
+import { KnowledgeRailButton } from '../folders/QuickDrop';
 import { FOLDER_ICON } from '../folders/icons';
 
 export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
@@ -40,7 +41,6 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   onNavigate: (tab: Tab) => void;
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
-  const foldersOpen = useFoldersOpen();
   const onTrade = tab === 'trade';
   const open = (id: string) => {
     activateTerminal(TRADE_DASHBOARD, id);
@@ -87,9 +87,9 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
             <circle cx="13" cy="12.6" r="4.6" />
             <path d="M11.6 11.4h2.2M11.6 13.8h2.2" />
           </SideButton>
-          <SideButton label={foldersOpen ? 'Knowledge folders (open)' : 'Knowledge folders'} onClick={toggleFolders} pressed={foldersOpen} current={foldersOpen}>
+          <KnowledgeRailButton current={tab === 'knowledge'} onOpen={() => onNavigate('knowledge')}>
             <FOLDER_ICON />
-          </SideButton>
+          </KnowledgeRailButton>
         </div>
         <span className="side__sep" aria-hidden="true" />
         <div className="side__group">

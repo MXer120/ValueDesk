@@ -1,11 +1,10 @@
 /**
  * The knowledge folders in the app shell (App.tsx mounts this once): it hands
- * the connected wallet to the folders' state, answers saveToFolder (bridge.ts)
- * with the save sheet - pick a folder or make one, sign in when needed - and
- * shows the folders view while it is open (the rail's folder button, or the
- * navbar's below 761px).
+ * the connected wallet to the folders' state and answers saveToFolder
+ * (bridge.ts) with the save sheet - pick a folder or make one, sign in when
+ * needed. The folders themselves are the Knowledge page's (knowledge/).
  */
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FolderSummary } from '@sign/folders/types.js';
 import { Modal } from '../components/Modal';
 import { openConnectDialog } from '../components/account/connect';
@@ -16,15 +15,12 @@ import { foldersApi } from './api';
 import './folders.css';
 import { bindWallet, createFolder, foldersState, openFolders, putSummary, refresh, signInToFolders, useFolders } from './state';
 
-const FoldersView = lazy(() => import('./FoldersView'));
-
 interface Pending {
   draft: FolderDraft;
   resolve: (r: SavedTo | null) => void;
 }
 
 export function FoldersHost({ address, provider }: { address: string | null; provider: Eip1193Provider | null }) {
-  const s = useFolders();
   const [pending, setPending] = useState<Pending | null>(null);
   useEffect(() => bindWallet(address, provider), [address, provider]);
   useEffect(
@@ -42,11 +38,6 @@ export function FoldersHost({ address, provider }: { address: string | null; pro
   );
   return (
     <>
-      {s.open && (
-        <Suspense fallback={null}>
-          <FoldersView />
-        </Suspense>
-      )}
       {pending && (
         <SaveSheet
           draft={pending.draft}
@@ -188,7 +179,7 @@ function SaveSheet({ draft, onDone }: { draft: FolderDraft; onDone: (r: SavedTo 
       {body}
       {s.token && list && (
         <button type="button" className="fx-link kf-save__open" onClick={() => { onDone(null); openFolders(); }}>
-          Open your folders
+          Open Knowledge
         </button>
       )}
     </Modal>

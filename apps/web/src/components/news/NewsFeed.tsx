@@ -15,7 +15,8 @@
  *
  * Each story can be saved to one of the wallet's knowledge folders (its
  * bookmark button, or a right-click): folders/bridge.ts saveToFolder - shown
- * only where the folders are mounted.
+ * only where the folders are mounted. Or dragged onto the rail's Knowledge
+ * button, or a folder on the Knowledge page.
  */
 import { Fragment, useEffect, useMemo, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { useAsync, useStored } from '../../hooks';
@@ -25,6 +26,7 @@ import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
+import { DRAG_NEWS } from '../../folders/quick';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
 import './NewsFeed.css';
 
@@ -226,7 +228,7 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
         ) : (
           <ol className="nw__items">
             {items.map((n) => (
-              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} onContextMenu={(e) => storyMenu(e, n)}>
+              <li key={n.id} className={`nw__row${ranked && n.rank ? ' has-rank' : ''}`} onContextMenu={(e) => storyMenu(e, n)} onDragStart={(e) => e.dataTransfer.setData(DRAG_NEWS, JSON.stringify(storyData(n)))}>
                 {ranked && n.rank != null && <span className={`nw__rank${n.rank <= 3 ? ' is-top' : ''}`} aria-label={`Number ${n.rank}`}>{n.rank}</span>}
                 <div className="nw__body">
                   <a className="nw__item" href={n.href} target="_blank" rel="noopener noreferrer">
@@ -275,12 +277,15 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   );
 }
 
-/** A story into a folder, as the widget shows it. */
+/** A story as a folder keeps it. */
+const storyData = (n: NewsItem) => ({ id: n.id, title: n.title, href: n.href, time: n.time, author: n.author, symbols: n.symbols, summary: n.summary ?? null, ...(n.post ? { post: true } : {}) });
+
+/** A story into a folder, as the widget shows it. Dragged (its link), it carries the same to the rail's Knowledge button (folders/QuickDrop.tsx). */
 const saveStory = (n: NewsItem) =>
   saveToFolder({
     kind: 'news',
     title: n.title.length > 120 ? `${n.title.slice(0, 117)}…` : n.title,
-    data: { id: n.id, title: n.title, href: n.href, time: n.time, author: n.author, symbols: n.symbols, summary: n.summary ?? null, ...(n.post ? { post: true } : {}) },
+    data: storyData(n),
   });
 
 const SaveIcon = () => (

@@ -19,6 +19,12 @@
  * the bytes are - and lists it, or deletes the row (the caller deletes the
  * blob). A reservation not finished within an hour is swept with its blob.
  *
+ * AN ATTACHMENT is a file that belongs to a doc or a board (an image in it):
+ * a row with parent_id, in its parent's folder but not listed there and not
+ * counted against the folder's items (the wallet's bytes count it). It moves
+ * and is deleted with its parent; one the parent no longer shows for a day is
+ * swept (an undo within that day still finds it).
+ *
  * Deleting is deleting: an item's row and its blobs go at once; erasing a
  * wallet removes all of it and ends its sessions (auth.ts, the epoch). What
  * remains for a while is the nightly copy of this database (text, never files),
@@ -30,7 +36,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { FoldersConfig } from './limits.js';
 import { checkItemData, cleanFileName, cleanName, decodeThumb, InputError, sniffFile } from './validate.js';
+import { checkNote, checkTable, noteToDoc, tableToSheet } from './legacy.js';
 import {
+  ATTACHING_KINDS,
+  EDITABLE_KINDS,
   FILE_TYPES,
   ITEM_KINDS,
   type FileType,
@@ -60,6 +69,10 @@ const BACKUPS_KEPT = 7;
 const FREE_SPACE_TTL_MS = 10_000;
 /** How long a reserved upload waits for its bytes before it is swept. */
 export const UPLOAD_TTL_MS = 60 * 60_000;
+/** An attachment its doc or board no longer shows is kept this long (an undo still finds it), then swept. */
+export const UNUSED_ATTACHMENT_MS = 24 * 60 * 60_000;
+/** Items listed in a folder: not attachments. */
+const LISTED = 'parent_id IS NULL';
 
 interface ItemRow {
   id: string;
@@ -77,6 +90,7 @@ interface ItemRow {
   rev: number;
   state: 'ready' | 'pending';
   expires_at: number | null;
+  parent_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -179,7 +193,10 @@ export class FoldersStore {
     const cols = new Set((this.db.prepare('PRAGMA table_info(items)').all() as Array<{ name: string }>).map((c) => c.name));
     if (!cols.has('state')) this.db.exec("ALTER TABLE items ADD COLUMN state TEXT NOT NULL DEFAULT 'ready'");
     if (!cols.has('expires_at')) this.db.exec('ALTER TABLE items ADD COLUMN expires_at INTEGER');
+    if (!cols.has('parent_id')) this.db.exec('ALTER TABLE items ADD COLUMN parent_id TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS items_pending ON items (state, expires_at)');
+    this.db.exec('CREATE INDEX IF NOT EXISTS items_parent ON items (parent_id)');
+    this.upgradeLegacy();
     this.total = Number((this.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM items').get() as { n: number }).n);
   }
 
@@ -231,12 +248,14 @@ export class FoldersStore {
     const items = this.db.prepare("SELECT * FROM items WHERE owner = ? AND state = 'ready' ORDER BY position, created_at").all(owner) as unknown as ItemRow[];
     const byFolder = new Map<string, ItemSummary[]>();
     for (const r of items) {
+      if (r.parent_id) continue;
       const list = byFolder.get(r.folder_id) ?? [];
       list.push(summary(r));
       byFolder.set(r.folder_id, list);
     }
     const out: FolderSummary[] = folders.map((f) => ({ id: f.id, name: f.name, createdAt: f.created_at, updatedAt: f.updated_at, items: byFolder.get(f.id) ?? [] }));
-    return { owner, folders: out, usage: { bytes: items.reduce((n, r) => n + r.bytes, 0), folders: folders.length, items: items.length } };
+    const listed = items.filter((r) => !r.parent_id).length;
+    return { owner, folders: out, usage: { bytes: items.reduce((n, r) => n + r.bytes, 0), folders: folders.length, items: listed } };
   }
 
   getItem(owner: string, id: unknown): FolderItem {
@@ -310,7 +329,7 @@ export class FoldersStore {
   prepareItem(owner: string, o: { folderId: unknown; kind: unknown; title: unknown; data: unknown; thumb?: unknown }): PreparedItem {
     const folderId = this.folder(owner, o.folderId).id;
     if (typeof o.kind !== 'string' || !(ITEM_KINDS as readonly string[]).includes(o.kind) || o.kind === 'file') {
-      throw new FoldersFailure(400, 'input', 'Choose a note, a table, a chart or a news story (files are uploaded).');
+      throw new FoldersFailure(400, 'input', 'Choose a doc, a sheet, a board, a post, a chart or a news story (files are uploaded).');
     }
     const kind = o.kind as JsonKind;
     const title = cleanName(o.title, this.cfg.limits.titleChars, 'A title');
@@ -327,7 +346,7 @@ export class FoldersStore {
     this.tx(() => {
       this.folder(owner, p.folderId);
       this.roomFor(owner, p.folderId, p.bytes, 1);
-      const position = this.count('SELECT COUNT(*) AS n FROM items WHERE folder_id = ?', p.folderId);
+      const position = this.count(`SELECT COUNT(*) AS n FROM items WHERE folder_id = ? AND ${LISTED}`, p.folderId);
       this.db
         .prepare("INSERT INTO items (id, owner, folder_id, kind, title, position, data, meta, file_type, file_bytes, thumb_bytes, bytes, rev, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, 0, ?, ?, 1, 'ready', ?, ?)")
         .run(p.id, owner, p.folderId, p.kind, p.title, position, p.json, JSON.stringify({ ...p.meta, ...(p.thumb ? { thumb: true, thumbType: sniffFile(p.thumb) === 'png' ? 'png' : 'jpeg' } : {}) }), p.thumb?.length ?? 0, p.bytes, now, now);
@@ -344,7 +363,7 @@ export class FoldersStore {
     let json = r.data;
     let meta = JSON.parse(r.meta) as ItemMeta;
     if (o.data !== undefined) {
-      if (r.kind === 'file' || r.kind === 'news' || r.kind === 'chart') throw new FoldersFailure(400, 'input', `A ${r.kind} keeps what was saved; only its title can change.`);
+      if (r.kind === 'file' || !EDITABLE_KINDS.includes(r.kind)) throw new FoldersFailure(400, 'input', `A ${r.kind} keeps what was saved; only its title can change.`);
       const c = this.checked(r.kind, o.data);
       json = c.json;
       meta = c.meta;
@@ -364,32 +383,44 @@ export class FoldersStore {
   /** Move an item to `index` in a folder - its own (reorder) or another. */
   moveItem(owner: string, o: { id: unknown; folderId: unknown; index: unknown }): void {
     const r = this.item(owner, o.id);
+    if (r.parent_id) throw new FoldersFailure(400, 'input', 'An image in a doc or a board moves with it.');
     const to = this.folder(owner, o.folderId).id;
     const index = typeof o.index === 'number' && Number.isInteger(o.index) && o.index >= 0 ? o.index : Number.MAX_SAFE_INTEGER;
     this.tx(() => {
       if (to !== r.folder_id) {
-        const n = this.count('SELECT COUNT(*) AS n FROM items WHERE folder_id = ?', to);
+        const n = this.count(`SELECT COUNT(*) AS n FROM items WHERE folder_id = ? AND ${LISTED}`, to);
         if (n >= this.cfg.limits.itemsPerFolder) throw new FoldersFailure(409, 'folder-full', `A folder holds ${this.cfg.limits.itemsPerFolder} items. That one is full.`);
       }
-      const ids = (this.db.prepare('SELECT id FROM items WHERE folder_id = ? AND id <> ? ORDER BY position, created_at').all(to, r.id) as Array<{ id: string }>).map((x) => x.id);
+      const ids = (this.db.prepare(`SELECT id FROM items WHERE folder_id = ? AND id <> ? AND ${LISTED} ORDER BY position, created_at`).all(to, r.id) as Array<{ id: string }>).map((x) => x.id);
       ids.splice(Math.min(index, ids.length), 0, r.id);
       this.db.prepare('UPDATE items SET folder_id = ?, updated_at = ? WHERE id = ? AND owner = ?').run(to, this.now(), r.id, owner);
+      this.db.prepare('UPDATE items SET folder_id = ? WHERE parent_id = ? AND owner = ?').run(to, r.id, owner);
       ids.forEach((id, i) => this.db.prepare('UPDATE items SET position = ? WHERE id = ?').run(i, id));
       if (to !== r.folder_id) this.renumberItems(r.folder_id);
     });
   }
 
+  /** The item, and its attachments when it is a doc or a board; answers with their blobs. */
   deleteItem(owner: string, id: unknown): Gone {
     const r = this.item(owner, id);
-    this.drop(r);
-    return { owner, names: namesOf(r) };
+    const attached = this.db.prepare('SELECT * FROM items WHERE parent_id = ? AND owner = ?').all(r.id, owner) as unknown as ItemRow[];
+    this.tx(() => {
+      for (const a of attached) this.drop(a);
+      this.drop(r);
+    });
+    return { owner, names: [r, ...attached].flatMap(namesOf) };
   }
 
   /* ----------------------------------------------------------- uploads ----- */
 
   /** Reserve an upload: its size and its place are counted now; it is listed once finished. */
-  startUpload(owner: string, o: { folderId: unknown; name: unknown; title?: unknown; size: unknown }): { id: string; size: number } {
-    const folderId = this.folder(owner, o.folderId).id;
+  startUpload(owner: string, o: { folderId: unknown; name: unknown; title?: unknown; size: unknown; parentId?: unknown }): { id: string; size: number } {
+    // An attachment goes where its doc or board is, whatever folder was named.
+    const parent = o.parentId === undefined || o.parentId === null ? null : this.item(owner, o.parentId);
+    if (parent && (parent.kind === 'file' || !ATTACHING_KINDS.includes(parent.kind) || parent.parent_id)) {
+      throw new FoldersFailure(400, 'input', 'Images can be added to a doc or a board.');
+    }
+    const folderId = parent ? parent.folder_id : this.folder(owner, o.folderId).id;
     const size = o.size;
     if (typeof size !== 'number' || !Number.isSafeInteger(size) || size <= 0) throw new FoldersFailure(400, 'input', 'The file is empty.');
     if (size > this.cfg.limits.fileBytes) throw new FoldersFailure(413, 'too-large', `A file can be at most ${mb(this.cfg.limits.fileBytes)}.`);
@@ -401,11 +432,15 @@ export class FoldersStore {
     const id = newId();
     const now = this.now();
     this.tx(() => {
-      this.roomFor(owner, folderId, size, 1);
-      const position = this.count('SELECT COUNT(*) AS n FROM items WHERE folder_id = ?', folderId);
+      if (parent) {
+        const n = this.count('SELECT COUNT(*) AS n FROM items WHERE parent_id = ?', parent.id);
+        if (n >= this.cfg.limits.attachmentsPerItem) throw new FoldersFailure(409, 'folder-full', `A ${parent.kind} holds ${this.cfg.limits.attachmentsPerItem} images. Remove some first.`);
+      }
+      this.roomFor(owner, folderId, size, parent ? 0 : 1);
+      const position = parent ? -1 : this.count(`SELECT COUNT(*) AS n FROM items WHERE folder_id = ? AND ${LISTED}`, folderId);
       this.db
-        .prepare("INSERT INTO items (id, owner, folder_id, kind, title, position, data, meta, file_type, file_bytes, thumb_bytes, bytes, rev, state, expires_at, created_at, updated_at) VALUES (?, ?, ?, 'file', ?, ?, NULL, ?, NULL, ?, 0, ?, 1, 'pending', ?, ?, ?)")
-        .run(id, owner, folderId, title, position, JSON.stringify({ fileName } satisfies ItemMeta), size, size, now + UPLOAD_TTL_MS, now, now);
+        .prepare("INSERT INTO items (id, owner, folder_id, kind, title, position, data, meta, file_type, file_bytes, thumb_bytes, bytes, rev, state, expires_at, created_at, updated_at, parent_id) VALUES (?, ?, ?, 'file', ?, ?, NULL, ?, NULL, ?, 0, ?, 1, 'pending', ?, ?, ?, ?)")
+        .run(id, owner, folderId, title, position, JSON.stringify({ fileName } satisfies ItemMeta), size, size, now + UPLOAD_TTL_MS, now, now, parent?.id ?? null);
     });
     this.total += size;
     return { id, size };
@@ -476,6 +511,16 @@ export class FoldersStore {
       this.drop(r);
       gone.push({ owner: r.owner, names: namesOf(r) });
     }
+    // An image its doc or board has not shown for a day (or whose parent is gone).
+    const unused = this.db
+      .prepare(
+        "SELECT a.* FROM items a LEFT JOIN items p ON p.id = a.parent_id WHERE a.parent_id IS NOT NULL AND a.state = 'ready' AND a.updated_at < ? AND (p.id IS NULL OR instr(COALESCE(p.data, ''), a.id) = 0)",
+      )
+      .all(now - UNUSED_ATTACHMENT_MS) as unknown as ItemRow[];
+    for (const r of unused) {
+      this.drop(r);
+      gone.push({ owner: r.owner, names: namesOf(r) });
+    }
     if (!this.cfg.retentionMs) return { owners: 0, uploads: stalled.length, gone };
     const stale = (this.db.prepare('SELECT owner FROM owners WHERE last_seen < ?').all(now - this.cfg.retentionMs) as Array<{ owner: string }>).map((r) => r.owner);
     for (const owner of stale) {
@@ -521,7 +566,7 @@ export class FoldersStore {
   private drop(r: ItemRow): void {
     this.tx(() => {
       this.db.prepare('DELETE FROM items WHERE id = ? AND owner = ?').run(r.id, r.owner);
-      this.renumberItems(r.folder_id);
+      if (!r.parent_id) this.renumberItems(r.folder_id);
     });
     this.total -= r.bytes;
   }
@@ -530,7 +575,7 @@ export class FoldersStore {
   private roomFor(owner: string, folderId: string | null, bytes: number, items: number): void {
     const l = this.cfg.limits;
     if (folderId && items > 0) {
-      const n = this.count('SELECT COUNT(*) AS n FROM items WHERE folder_id = ?', folderId);
+      const n = this.count(`SELECT COUNT(*) AS n FROM items WHERE folder_id = ? AND ${LISTED}`, folderId);
       if (n + items > l.itemsPerFolder) throw new FoldersFailure(409, 'folder-full', `A folder holds ${l.itemsPerFolder} items. Delete one or use another folder.`);
     }
     const used = this.count('SELECT COALESCE(SUM(bytes), 0) AS n FROM items WHERE owner = ?', owner);
@@ -580,8 +625,33 @@ export class FoldersStore {
   }
 
   private renumberItems(folderId: string): void {
-    const ids = (this.db.prepare('SELECT id FROM items WHERE folder_id = ? ORDER BY position, created_at').all(folderId) as Array<{ id: string }>).map((x) => x.id);
+    const ids = (this.db.prepare(`SELECT id FROM items WHERE folder_id = ? AND ${LISTED} ORDER BY position, created_at`).all(folderId) as Array<{ id: string }>).map((x) => x.id);
     ids.forEach((id, i) => this.db.prepare('UPDATE items SET position = ? WHERE id = ?').run(i, id));
+  }
+
+  /**
+   * Notes and tables of the first release become docs and sheets, in place: the
+   * same id, title, folder and place, the content converted (legacy.ts). At
+   * every start, so a copy restored from a backup is upgraded too. One that
+   * cannot be read is left as it was (it can still be deleted).
+   */
+  private upgradeLegacy(): number {
+    const rows = this.db.prepare("SELECT * FROM items WHERE kind IN ('note', 'table')").all() as unknown as ItemRow[];
+    let done = 0;
+    for (const r of rows) {
+      try {
+        const raw = JSON.parse(r.data ?? 'null') as unknown;
+        const kind: JsonKind = (r.kind as string) === 'note' ? 'doc' : 'sheet';
+        const converted = kind === 'doc' ? noteToDoc(checkNote(raw)) : tableToSheet(checkTable(raw));
+        const c = checkItemData(kind, converted, this.cfg.limits);
+        const bytes = Buffer.byteLength(c.json) + r.file_bytes + r.thumb_bytes;
+        this.db.prepare('UPDATE items SET kind = ?, data = ?, meta = ?, bytes = ?, rev = rev + 1 WHERE id = ?').run(kind, c.json, JSON.stringify(c.meta), bytes, r.id);
+        done++;
+      } catch {
+        /* unreadable: kept as it was */
+      }
+    }
+    return done;
   }
 
   private renumberFolders(owner: string): void {
@@ -619,6 +689,7 @@ function summary(r: ItemRow): ItemSummary {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
     rev: r.rev,
+    ...(r.parent_id ? { parentId: r.parent_id } : {}),
   };
 }
 

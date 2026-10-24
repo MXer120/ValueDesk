@@ -5,23 +5,40 @@
  * A wallet keeps up to FolderLimits.folders folders; a folder holds items of a
  * few kinds:
  *
- *   note    rich text, as blocks of styled spans (NoteData) - never HTML, so
- *           nothing stored can run as markup when it is shown again
- *   table   a grid of text cells with a header row (TableData)
+ *   doc     a rich document, as the editor's tree of nodes and marks (DocData;
+ *           apps/web/src/knowledge/doc) - never HTML, so nothing stored can run
+ *           as markup when it is shown again
+ *   sheet   a spreadsheet: tabs of sparse cells, each the text the user typed -
+ *           a value or a formula, computed in the browser (SheetData)
+ *   board   a canvas of shapes, sticky notes, text, arrows, pen strokes, images
+ *           and cards of other items (BoardData)
+ *   tweet   a post on X saved by its link, with its text as X's embed gave it
+ *           (TweetData), the user's own note and tags
  *   chart   a chart snapshot as the chart exports it (apps/web/src/folders/bridge.ts
  *           ChartSnapshot): reopened as a live chart, not a picture
  *   news    a story saved from the News widget (SavedNews)
  *   file    an uploaded PDF, image or text file; the bytes are kept apart and
- *           served to their wallet only
+ *           served to their wallet only. A file can belong to a doc or a board
+ *           (an image in it): an ATTACHMENT, not listed in the folder, deleted
+ *           with it (ItemSummary.parentId)
+ *
+ * The first release (2026-10-24) had `note` (blocks of spans) and `table` (a
+ * plain grid); the store turns any it finds into a doc and a sheet (legacy.ts).
  *
  * Pure types and constants: no Node import, so the browser bundle can use it.
  */
 
-export const ITEM_KINDS = ['note', 'table', 'chart', 'news', 'file'] as const;
+export const ITEM_KINDS = ['doc', 'sheet', 'board', 'tweet', 'chart', 'news', 'file'] as const;
 export type ItemKind = (typeof ITEM_KINDS)[number];
 
 /** The kinds made from JSON (everything but an upload). */
 export type JsonKind = Exclude<ItemKind, 'file'>;
+
+/** The kinds whose content changes after it is saved (the rest keep what was saved; a title always can). */
+export const EDITABLE_KINDS: readonly JsonKind[] = ['doc', 'sheet', 'board', 'tweet'];
+
+/** The kinds a file can be attached to (an image in it). */
+export const ATTACHING_KINDS: readonly JsonKind[] = ['doc', 'board'];
 
 /** The limits a server enforces, as it reports them to the web (GET /api/folders). */
 export interface FolderLimits {
@@ -41,6 +58,8 @@ export interface FolderLimits {
   writesPerMinute: number;
   /** Uploads a wallet may make per hour. */
   uploadsPerHour: number;
+  /** Files attached to one doc or board (its images). */
+  attachmentsPerItem: number;
   /** Characters in a folder's name and an item's title. */
   nameChars: number;
   titleChars: number;
@@ -58,7 +77,170 @@ export const FILE_TYPES = {
 export type FileType = keyof typeof FILE_TYPES;
 export const isImageType = (t: FileType | null | undefined): boolean => t === 'png' || t === 'jpeg' || t === 'webp' || t === 'gif';
 
-/** A rich-text span: its text and its marks; a link only to http(s) or mailto. */
+/** A color a doc, a sheet or a board may use: #rrggbb, or #rrggbbaa with its opacity. */
+export const COLOR_RE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+
+/** An item's or a board element's id: what newId() makes (16 base64url characters), or a board's own shorter ones. */
+export const ITEM_ID_RE = /^[A-Za-z0-9_-]{16}$/;
+
+/* ------------------------------------------------------------------- doc ----- */
+
+/**
+ * A doc is the editor's (TipTap / ProseMirror) JSON tree: nodes with a type,
+ * attributes and children, text nodes with marks. Only the types and the
+ * attributes below are kept (validate.ts checkDoc rebuilds every node):
+ *
+ *   blocks   paragraph, heading (1-3), blockquote, bulletList, orderedList,
+ *            listItem, taskList, taskItem, codeBlock, horizontalRule, table,
+ *            tableRow, tableHeader, tableCell, image (an attachment, by id),
+ *            itemRef (a card of another item in the wallet's folders)
+ *   inline   text, hardBreak
+ *   marks    bold, italic, underline, strike, code, link (http, https, mailto),
+ *            highlight and textStyle (a color)
+ */
+export interface DocMark {
+  type: string;
+  attrs?: Record<string, unknown>;
+}
+export interface DocNode {
+  type: string;
+  attrs?: Record<string, unknown>;
+  content?: DocNode[];
+  marks?: DocMark[];
+  text?: string;
+}
+export interface DocData {
+  v: 1;
+  doc: DocNode;
+}
+export const DOC_MAX = { depth: 24, nodes: 60_000 } as const;
+
+/* ----------------------------------------------------------------- sheet ----- */
+
+/** A cell's look: marks, alignment, colors, and how its number is shown. */
+export interface SheetCellStyle {
+  b?: true;
+  i?: true;
+  u?: true;
+  s?: true;
+  al?: 'l' | 'c' | 'r';
+  fg?: string;
+  bg?: string;
+  fmt?: 'num' | 'pct' | 'usd' | 'date' | 'text';
+  /** Decimals shown (0-10). */
+  dp?: number;
+  wrap?: true;
+}
+/** One cell: what the user typed (a value, or a formula starting with "="), and its look. */
+export interface SheetCell {
+  v: string;
+  s?: SheetCellStyle;
+}
+export interface SheetTab {
+  id: string;
+  name: string;
+  /** Sparse, keyed "A1". */
+  cells: Record<string, SheetCell>;
+  /** Column widths and row heights that differ from the default, px, by index ("0" is A / row 1). */
+  cols?: Record<string, number>;
+  rows?: Record<string, number>;
+  /** Rows and columns kept in view while scrolling. */
+  freeze?: { r: number; c: number };
+}
+export interface SheetData {
+  v: 1;
+  sheets: SheetTab[];
+  active?: number;
+}
+export const SHEET_MAX = { sheets: 12, rows: 5000, cols: 100, cells: 60_000, cellChars: 4000, nameChars: 40 } as const;
+
+/* ----------------------------------------------------------------- board ----- */
+
+export const BOARD_TYPES = ['sticky', 'text', 'rect', 'ellipse', 'diamond', 'line', 'arrow', 'pen', 'image', 'item', 'frame'] as const;
+export type BoardType = (typeof BOARD_TYPES)[number];
+export const BOARD_ENDS = ['none', 'arrow', 'triangle', 'dot', 'bar'] as const;
+export type BoardEnd = (typeof BOARD_ENDS)[number];
+
+/**
+ * One thing on a board, in board units (its box: x, y, w, h). Order in the
+ * list is the order on screen (last on top).
+ *
+ *   line, arrow   points = [x1, y1, x2, y2] relative to the box; `from`/`to` are
+ *                 the elements its ends are attached to (they follow them)
+ *   pen           points = [x0, y0, x1, y1, …] relative to the box
+ *   image         file = an attachment of the board
+ *   item          ref = another item in the wallet's folders, shown as its card
+ *   frame         a titled area (name); what lies inside moves with it
+ */
+export interface BoardElement {
+  id: string;
+  type: BoardType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Degrees, clockwise. */
+  rot?: number;
+  text?: string;
+  fill?: string;
+  stroke?: string;
+  /** Stroke width. */
+  sw?: number;
+  /** Opacity, 0.05-1. */
+  op?: number;
+  /** Font size. */
+  fs?: number;
+  align?: 'l' | 'c' | 'r';
+  valign?: 't' | 'm' | 'b';
+  bold?: boolean;
+  dash?: 'solid' | 'dashed' | 'dotted';
+  radius?: number;
+  points?: number[];
+  from?: string;
+  to?: string;
+  head?: BoardEnd;
+  tail?: BoardEnd;
+  file?: string;
+  ref?: string;
+  name?: string;
+  lock?: boolean;
+  group?: string;
+}
+export interface BoardData {
+  v: 1;
+  elements: BoardElement[];
+  bg?: 'dots' | 'grid' | 'none';
+}
+export const BOARD_MAX = { elements: 4000, points: 8000, text: 10_000, coord: 10_000_000, size: 1_000_000 } as const;
+
+/* ----------------------------------------------------------------- tweet ----- */
+
+/**
+ * A post on X, saved by its link. `text`, `author` and `time` are what X's own
+ * embed endpoint (publish.x.com/oembed) said when it was saved, fetched by the
+ * server (routes/folders.ts GET /api/folders/tweet) - the browser never loads
+ * anything from X. `fetched` is false when X would not show it (deleted,
+ * private): then only the link is kept, with what the user writes.
+ */
+export interface TweetData {
+  url: string;
+  id: string;
+  handle: string;
+  author: string;
+  text: string;
+  /** When it was posted (ms), as far as the embed says (a day). */
+  time: number | null;
+  lang?: string;
+  fetched: boolean;
+  /** The user's own words about it. */
+  note?: string;
+  tags?: string[];
+}
+export const TWEET_MAX = { text: 30_000, note: 5000, tags: 12, tagChars: 32 } as const;
+
+/* ---------------------------------------------------------------- legacy ----- */
+
+/** The first release's note (2026-10-24): blocks of spans. Turned into a doc (legacy.ts). */
 export type NoteMark = 'b' | 'i' | 'u' | 's' | 'code';
 export const NOTE_MARKS: readonly NoteMark[] = ['b', 'i', 'u', 's', 'code'];
 export interface NoteSpan {
@@ -74,7 +256,7 @@ export interface NoteData {
   blocks: NoteBlock[];
 }
 
-/** A table: column names, then rows of text cells (each row as long as `columns`). */
+/** The first release's table: column names, then rows of text cells. Turned into a sheet (legacy.ts). */
 export interface TableData {
   columns: string[];
   rows: string[][];
@@ -99,15 +281,20 @@ export interface ItemMeta {
   engine?: string;
   symbol?: string;
   interval?: string;
-  /** news: where it links, when it was published, who wrote it. */
+  /** news, tweet: where it links, when it was published, who wrote it. */
   href?: string;
-  time?: number;
+  time?: number | null;
   author?: string | null;
-  /** note: its first words. */
+  /** tweet: the account's handle (without @); its tags. */
+  handle?: string;
+  tags?: string[];
+  /** doc, tweet: the first words. */
   excerpt?: string;
-  /** table: its size. */
-  rows?: number;
-  cols?: number;
+  /** sheet: its tabs and the cells that hold something. */
+  sheets?: number;
+  cells?: number;
+  /** board: how many things are on it. */
+  elements?: number;
   /** file: what it is (sniffed) and the name it was uploaded with. */
   fileType?: FileType;
   fileName?: string;
@@ -128,6 +315,8 @@ export interface ItemSummary {
   updatedAt: number;
   /** Bumped by every change; an update that names an older one is refused (another tab changed it). */
   rev: number;
+  /** An attachment: the doc or board it belongs to (not listed in the folder, deleted with it). */
+  parentId?: string;
 }
 
 export interface FolderSummary {
@@ -156,7 +345,7 @@ export interface FoldersList {
 
 /** GET /api/folders/item: one item with its content (a file's bytes come from /api/folders/file). */
 export interface FolderItem extends ItemSummary {
-  data: NoteData | TableData | SavedNewsData | Record<string, unknown> | null;
+  data: DocData | SheetData | BoardData | TweetData | SavedNewsData | Record<string, unknown> | null;
 }
 
 /** A refusal: `code` says which rule, `error` says it in a sentence for the user. */

@@ -49,7 +49,6 @@ import { prefetchAccountTotals, useAccountTotals } from './account/useAccountTot
 import { NO_ACCOUNT_TRANSFER, useAccountExists } from './account/useAccountExists';
 import { useWalletSnapshot } from './account/useWallet';
 import { RegionPill } from '../legal/LegalGate';
-import { toggleFolders } from '../folders/state';
 import { FOLDER_ICON } from '../folders/icons';
 import './account/account.css';
 
@@ -185,7 +184,7 @@ export function NavBar({
             <>
               <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
               <Notices address={address} />
-              <button type="button" className="navicon" title="Knowledge folders" aria-label="Knowledge folders" onClick={toggleFolders}>
+              <button type="button" className="navicon" title="Knowledge" aria-label="Knowledge" onClick={() => onNavigate('knowledge')}>
                 <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><FOLDER_ICON /></svg>
               </button>
               <button
