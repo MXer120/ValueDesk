@@ -50,6 +50,7 @@ import {
 import { ItemView } from './ItemView';
 import { AddTweetDialog, TweetsWall } from './tweets';
 import { KindIcon, KIND_LABEL, itemLine, useFileUrl, when } from './views';
+import '../folders/folders.css';
 import './knowledge.css';
 
 const ACCEPT = '.pdf,.png,.jpg,.jpeg,.webp,.gif,.txt,.csv,.md,application/pdf,image/png,image/jpeg,image/webp,image/gif,text/plain,text/csv,text/markdown';

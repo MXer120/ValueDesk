@@ -46,6 +46,7 @@ let caseNo = 0;
 function config(over: Omit<Partial<FoldersConfig>, 'limits'> & { limits?: Partial<FoldersConfig['limits']> } = {}): FoldersConfig {
   return {
     dir: join(ROOT, `case-${caseNo++}`),
+    wallets: '*',
     s3: null,
     signInsPerDay: 10,
     totalBytes: 1 << 30,
@@ -194,6 +195,27 @@ test('sign-in: a wallet signs once and gets a token; a replay, another signer, a
   assert.equal((await s.call(t, 'GET', '/api/folders')).statusCode, 200);
   assert.equal((await s.call(null, 'GET', '/api/folders')).statusCode, 401);
   assert.equal((await s.call(t.slice(0, -2) + 'xx', 'GET', '/api/folders')).statusCode, 401, 'a forged mac');
+});
+
+test('wallets: only the owner wallet by default; any other is refused at the sign-in and with a token it holds', async () => {
+  assert.deepEqual(foldersConfigFromEnv({}).wallets, ['0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d']);
+  assert.equal(foldersConfigFromEnv({ FOLDERS_WALLETS: '*' }).wallets, '*');
+  assert.deepEqual(foldersConfigFromEnv({ FOLDERS_WALLETS: ' 0xAB' + 'cd'.repeat(19) + ' ,' }).wallets, ['0xab' + 'cd'.repeat(19)]);
+  assert.throws(() => foldersConfigFromEnv({ FOLDERS_WALLETS: 'everyone' }), /not a wallet address/);
+
+  const allowed = wallet();
+  const other = wallet();
+  const s = await setup({ cfg: config({ wallets: [allowed.address] }) });
+  const refused = await s.app.inject({ method: 'POST', url: '/api/folders/session', payload: { signIn: signIn(other) } });
+  assert.deepEqual([refused.statusCode, refused.json().code], [403, 'closed']);
+  const { token } = await s.login(allowed);
+  assert.equal((await s.call(token, 'GET', '/api/folders')).statusCode, 200);
+  // A token issued before the wallet was taken off the list: refused on every route.
+  const t2 = new SessionTokens(s.cfg.dir).issue(other.address, 0, Date.now()).token;
+  for (const [m, u] of [['GET', '/api/folders'], ['GET', '/api/folders/tweet?url=https://x.com/a/status/1'], ['POST', '/api/folders/folder/create']] as const) {
+    const r = await s.call(t2, m, u, m === 'POST' ? { name: 'x' } : undefined);
+    assert.deepEqual([r.statusCode, r.json().code], [403, 'closed'], u);
+  }
 });
 
 test('sign-in: one address signs in a limited number of wallets a day', async () => {

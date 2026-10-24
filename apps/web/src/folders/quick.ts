@@ -25,9 +25,9 @@ export type Dropped =
   | { kind: 'news'; news: SavedNews }
   | { kind: 'text'; text: string };
 
-/** The drag types this app sets itself. */
-export const DRAG_ITEM = 'application/x-vd-folder-item';
-export const DRAG_NEWS = 'application/x-vd-news';
+/** The drag types this app sets itself (drag.ts, so a drag source need not load this module). */
+import { DRAG_ITEM, DRAG_NEWS } from './drag';
+export { DRAG_ITEM, DRAG_NEWS };
 
 /** Whether a drag carries something a folder can keep (checked on dragenter, before the data can be read). */
 export function canKeep(types: readonly string[]): boolean {

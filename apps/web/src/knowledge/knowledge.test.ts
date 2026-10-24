@@ -167,3 +167,11 @@ test('markdown: headings, marks, nested and to-do lists, quotes, code, tables, i
     ].join('\n\n') + '\n',
   );
 });
+
+test('access: Knowledge is the owner wallet\'s only (any case), never for no wallet', async () => {
+  const { isKnowledgeOwner, KNOWLEDGE_OWNER } = await import('../folders/access');
+  assert.equal(isKnowledgeOwner('0x04Fb8f9d0D8cd5495aa47e81Ca9804cdf32a277d'), true);
+  assert.equal(isKnowledgeOwner(KNOWLEDGE_OWNER), true);
+  assert.equal(isKnowledgeOwner('0x' + '11'.repeat(20)), false);
+  assert.equal(isKnowledgeOwner(null), false);
+});

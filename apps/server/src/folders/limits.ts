@@ -33,6 +33,8 @@
  *   FOLDERS_MAX_TOTAL_GB           all wallets together                  20   (S3: 200)
  *   FOLDERS_MIN_FREE_GB            refuse growth below this much free    10   (the index lives on the volume; S3: -)
  *   FOLDERS_RETENTION_DAYS         a wallet unseen this long is deleted 365
+ *   FOLDERS_WALLETS                the wallets that may use the folders  the owner's wallet only (FOLDERS_OWNER)
+ *                                  - comma-separated 0x addresses, or * for every wallet
  *   FOLDERS_DIR                    the database and the files           <the device key's directory>/folders
  *                                  (production: /var/lib/valuescan/state/folders, on the data volume)
  *   FOLDERS_S3_BUCKET              files in S3 instead (see above)      empty
@@ -53,8 +55,18 @@ const KB = 1024;
 const MB = 1024 * KB;
 const GB = 1024 * MB;
 
+/**
+ * The owner's wallet (2026-10-24: "make any knowledge features ONLY accessible
+ * for my wallet"). Until FOLDERS_WALLETS says otherwise, no other wallet can sign
+ * in to the folders or use a token it has - the server's rule, whatever a
+ * browser shows (the web hides Knowledge too: apps/web/src/folders/access.ts).
+ */
+export const FOLDERS_OWNER = '0x04fb8f9d0d8cd5495aa47e81ca9804cdf32a277d';
+
 export interface FoldersConfig {
   dir: string;
+  /** The wallets that may use the folders (lowercase), or '*' for every wallet. */
+  wallets: readonly string[] | '*';
   limits: FolderLimits;
   /** The bucket for files and thumbnails; null (today): they are files under `dir`. */
   s3: { bucket: string; region: string; endpoint?: string } | null;
@@ -105,6 +117,19 @@ function num(env: Readonly<Record<string, string | undefined>>, name: string, df
   return Math.floor(v);
 }
 
+/** FOLDERS_WALLETS: unset is the owner alone; '*' every wallet; else a list of addresses. */
+export function walletsFrom(raw: string | undefined): readonly string[] | '*' {
+  const s = raw?.trim() ?? '';
+  if (!s) return [FOLDERS_OWNER];
+  if (s === '*') return '*';
+  const list = s.split(',').map((a) => a.trim().toLowerCase()).filter(Boolean);
+  for (const a of list) if (!/^0x[0-9a-f]{40}$/.test(a)) throw new Error(`FOLDERS_WALLETS holds "${a.slice(0, 12)}…", which is not a wallet address`);
+  return list;
+}
+
+/** Whether this wallet may use the folders. */
+export const walletAllowed = (cfg: Pick<FoldersConfig, 'wallets'>, owner: string): boolean => cfg.wallets === '*' || cfg.wallets.includes(owner.toLowerCase());
+
 const retentionDays = (d: number): number => {
   if (d !== 0 && d < 30) throw new Error('FOLDERS_RETENTION_DAYS must be 0 (never) or at least 30');
   return d;
@@ -134,6 +159,7 @@ export function foldersConfigFromEnv(env: Readonly<Record<string, string | undef
   };
   return {
     dir: env.FOLDERS_DIR?.trim() || join(dirname(deviceKeyPath()), 'folders'),
+    wallets: walletsFrom(env.FOLDERS_WALLETS),
     limits,
     s3,
     signInsPerDay: num(env, 'FOLDERS_SIGNINS_PER_DAY', 10, { min: 1, max: 100_000 }),

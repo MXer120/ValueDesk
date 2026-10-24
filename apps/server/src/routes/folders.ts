@@ -26,6 +26,10 @@
  * an id of another wallet's item is "not found", exactly like one that does
  * not exist. A signed S3 link names one key under the wallet's own prefix.
  *
+ * WHICH WALLETS. Only those FOLDERS_WALLETS names - the owner's alone until it
+ * says otherwise (limits.ts FOLDERS_OWNER): any other is refused at the sign-in,
+ * and a token it may hold from before is refused on every route ('closed').
+ *
  * LIMITS, SERVER-SIDE. The store enforces the counts and the bytes (store.ts);
  * here are the rates: changes per wallet per minute, uploads per wallet per
  * hour, download links per wallet per minute and the bytes they may fetch per
@@ -45,7 +49,7 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter } from '../rateLimit.js';
 import { checkSignIn, SessionTokens } from '../folders/auth.js';
 import { attachment, DiskBlobs, partLength, partsOf, S3Blobs, type BlobStore } from '../folders/blobs.js';
-import { foldersConfigFromEnv, PART_BODY_CEILING, type FoldersConfig } from '../folders/limits.js';
+import { foldersConfigFromEnv, PART_BODY_CEILING, walletAllowed, type FoldersConfig } from '../folders/limits.js';
 import { asFailure, FoldersFailure, FoldersStore, mimeOf, type Gone } from '../folders/store.js';
 import type { FoldersError } from '../folders/types.js';
 import { sniffFile } from '../folders/validate.js';
@@ -179,6 +183,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
 
   const fail = (reply: FastifyReply, status: number, code: FoldersError['code'], error: string) =>
     reply.code(status).send({ ok: false, code, error } satisfies FoldersError);
+  const CLOSED = 'Knowledge is not open for this wallet.';
 
   /** Runs `fn` for the wallet behind the request's token; every refusal in one shape. */
   const withOwner = (kind: 'read' | 'write' | 'file' | 'upload' | 'tweet', fn: (owner: string, req: FastifyRequest, reply: FastifyReply) => unknown) =>
@@ -189,6 +194,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
       const session = tokens.read(typeof h === 'string' && h.startsWith('Bearer ') ? h.slice(7) : null, now());
       if (!session || session.epoch !== store.epoch(session.owner)) return fail(reply, 401, 'session', 'Sign in to your folders again.');
       const owner = session.owner;
+      if (!walletAllowed(cfg, owner)) return fail(reply, 403, 'closed', CLOSED);
       const rates =
         kind === 'write' ? [{ key: `w|${owner}`, limit: { max: cfg.limits.writesPerMinute, windowMs: MINUTE } }]
         : kind === 'upload' ? [{ key: `w|${owner}`, limit: { max: cfg.limits.writesPerMinute, windowMs: MINUTE } }, { key: `u|${owner}`, limit: { max: cfg.limits.uploadsPerHour, windowMs: HOUR } }]
@@ -238,6 +244,7 @@ export async function foldersRoutes(app: FastifyInstance, opts: FoldersRouteOpti
     if (!store || !tokens || !cfg) return fail(reply, 503, 'unavailable', 'Folders are not available right now.');
     const v = checkSignIn(body(req).signIn, now());
     if (!v.ok) return fail(reply, 401, 'signature', v.error);
+    if (!walletAllowed(cfg, v.owner)) return fail(reply, 403, 'closed', CLOSED);
     if (!signIns.allow(clientKey(req.ip), v.owner, cfg.signInsPerDay, now())) {
       return fail(reply, 429, 'rate', 'Too many wallets signed in from this address today.');
     }

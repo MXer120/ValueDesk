@@ -190,6 +190,20 @@
 .kt-add__body { display: flex; flex-direction: column; gap: 10px; }
 .kt-add__body .kt-post { margin: 2px 0 4px; }
 
+/* Picking an item for a card (picker.tsx): in a doc and on a board. */
+.kn-picker { position: fixed; inset: 0; z-index: 95; display: grid; place-items: start center; padding-top: 12vh; background: rgba(0, 0, 0, 0.35); }
+.kn-picker__panel { display: flex; flex-direction: column; gap: 10px; width: min(440px, calc(100vw - 32px)); max-height: 66vh; padding: 14px; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px; background: #1a1a1c; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6); }
+.kn-picker__panel header { display: flex; align-items: center; justify-content: space-between; }
+.kn-picker__panel header b { font-size: var(--fs-xs); }
+.kn-picker__list { overflow-y: auto; }
+.kn-picker__folder { display: block; margin: 8px 4px 4px; color: var(--dim); font-size: var(--fs-micro); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.kn-picker__item { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 8px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+.kn-picker__item:hover { background: rgba(255, 255, 255, 0.07); }
+.kn-picker__item span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kn-picker__item small { color: var(--dim); font-size: var(--fs-micro); }
+.kn-picker__item .kf-kind { width: 20px; height: 20px; border-radius: 6px; }
+
+
 /* --- phones: one side at a time ---------------------------------------------------------------- */
 @media (max-width: 760px) {
   .kn { grid-template-columns: 1fr; }

@@ -26,7 +26,7 @@ import { EmptyState } from '../EmptyState';
 import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
-import { DRAG_NEWS } from '../../folders/quick';
+import { DRAG_NEWS } from '../../folders/drag';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
 import './NewsFeed.css';
 

@@ -13,7 +13,7 @@
  * Every button carries its name as a tooltip and an accessible name; the
  * notifications and settings menus open to the right of the rail (shell.css).
  */
-import { useEffect, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 import { Notices } from './Notices';
 import { SettingsMenu } from './SettingsMenu';
@@ -28,10 +28,12 @@ import { warmWalletModal } from '../walletconnect';
 import type { Tab } from '../router';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { activateTerminal, addTerminal, useTerminals } from '../dashboard/terminals';
-import { KnowledgeRailButton } from '../folders/QuickDrop';
 import { FOLDER_ICON } from '../folders/icons';
 
-export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate }: {
+/* Knowledge's button and its quick drop: fetched only once Knowledge is on (folders/access.ts). */
+const KnowledgeRailButton = lazy(() => import('../folders/QuickDrop').then((m) => ({ default: m.KnowledgeRailButton })));
+
+export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onNavigate, knowledge = false }: {
   address: string | null;
   hasLayout: boolean;
   dashLocked: boolean;
@@ -39,6 +41,8 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
   /** The page on screen: a terminal is raised only on Trade. */
   tab: Tab | null;
   onNavigate: (tab: Tab) => void;
+  /** Knowledge is on (folders/access.ts): its button and quick drop. Off, it is not there. */
+  knowledge?: boolean;
 }) {
   const terminals = useTerminals(TRADE_DASHBOARD);
   const onTrade = tab === 'trade';
@@ -87,9 +91,13 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
             <circle cx="13" cy="12.6" r="4.6" />
             <path d="M11.6 11.4h2.2M11.6 13.8h2.2" />
           </SideButton>
-          <KnowledgeRailButton current={tab === 'knowledge'} onOpen={() => onNavigate('knowledge')}>
-            <FOLDER_ICON />
-          </KnowledgeRailButton>
+          {knowledge && (
+            <Suspense fallback={null}>
+              <KnowledgeRailButton current={tab === 'knowledge'} onOpen={() => onNavigate('knowledge')}>
+                <FOLDER_ICON />
+              </KnowledgeRailButton>
+            </Suspense>
+          )}
         </div>
         <span className="side__sep" aria-hidden="true" />
         <div className="side__group">

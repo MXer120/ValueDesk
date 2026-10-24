@@ -1,4 +1,6 @@
-/* The knowledge folders' pieces outside the Knowledge page (knowledge/knowledge.css):
+/* Loads with the folders' code (FoldersHost.tsx, the Knowledge page), only while Knowledge is on
+   (access.ts) - every rule starts at a .kf or .kq class (cssOrder.test.ts).
+   The knowledge folders' pieces outside the Knowledge page (knowledge/knowledge.css):
    the save sheet (FoldersHost.tsx), the rail's quick drop (QuickDrop.tsx), and what the
    page shares from here - the small icon button, the usage bar, an inline name field,
    the kinds' tinted squares, and the views of a chart, a story and a file. */
@@ -83,7 +85,7 @@
 .kf-save__open { align-self: flex-start; margin-top: 12px; }
 
 /* --- the rail's quick drop (QuickDrop.tsx): beside the button, over the page ------------ */
-.side__btn.is-dropping { background: color-mix(in srgb, var(--pos) 26%, #1c1c1e); color: #fff; box-shadow: 0 0 0 1px color-mix(in srgb, var(--pos) 70%, transparent); }
+.kq-btn.is-dropping { background: color-mix(in srgb, var(--pos) 26%, #1c1c1e); color: #fff; box-shadow: 0 0 0 1px color-mix(in srgb, var(--pos) 70%, transparent); }
 .kq {
   position: fixed; z-index: 90; width: 290px; padding: 12px;
   display: flex; flex-direction: column; gap: 10px;

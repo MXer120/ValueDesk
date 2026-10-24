@@ -353,7 +353,7 @@ export interface FoldersError {
   ok: false;
   code:
     | 'session' | 'signature' | 'replay' | 'input' | 'not-found' | 'conflict'
-    | 'folders-full' | 'folder-full' | 'too-large' | 'quota' | 'storage-full' | 'rate' | 'file-type' | 'unavailable';
+    | 'folders-full' | 'folder-full' | 'too-large' | 'quota' | 'storage-full' | 'rate' | 'file-type' | 'unavailable' | 'closed';
   error: string;
 }
 

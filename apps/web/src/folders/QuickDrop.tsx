@@ -17,6 +17,7 @@ import { createPortal } from 'react-dom';
 import { openConnectDialog } from '../components/account/connect';
 import { notify } from '../toast';
 import { FOLDER_ICON } from './icons';
+import './folders.css';
 import { canKeep, readDrop, saveDropped, saveText, type Dropped } from './quick';
 import { createFolder, ensureList, foldersState, openFolders, signInToFolders, useFolders } from './state';
 
@@ -239,7 +240,7 @@ export function KnowledgeRailButton({ current, onOpen, children }: { current: bo
       <button
         ref={btn}
         type="button"
-        className={`side__btn${current ? ' is-raised' : ''}${over === 'button' ? ' is-dropping' : ''}`}
+        className={`side__btn kq-btn${current ? ' is-raised' : ''}${over === 'button' ? ' is-dropping' : ''}`}
         aria-label="Knowledge (drop things here to save them; right-click for a quick note)"
         title="Knowledge · drop anything here to save it · right-click for a quick note"
         aria-current={current ? 'page' : undefined}
