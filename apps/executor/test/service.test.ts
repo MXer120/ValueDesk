@@ -120,7 +120,10 @@ test('terms: every statement, a country, and a region that allows copying', asyn
   await cleanup();
 });
 
-const SITE_TERMS = { termsVersion: '2026-10-24', termsHash: `0x${'cd'.repeat(32)}`, country: 'SG', adult: true, notRestricted: true, risksUnderstood: true, ownDecisions: true };
+const SITE_TERMS = {
+  termsVersion: '2026-10-24', termsHash: `0x${'cd'.repeat(32)}`, country: 'SG', agree: true, eligible: true, risks: true, ownDecisions: true,
+  text: 'ValueDesk - Terms of use and Risk disclosure, version 2026-10-24. Country of residence: SG. I have read and agree to the Terms of use.',
+};
 
 test('site terms: ValueDesk\'s executor records a signed acceptance with the country it saw; once; every statement; hosted only', async () => {
   const { svc, db, cleanup } = make({ EXECUTOR_KIND: 'hosted' });
@@ -139,7 +142,7 @@ test('site terms: ValueDesk\'s executor records a signed acceptance with the cou
   assert.equal(await code(() => svc.acceptSiteTerms(w.sign(svc.executorId, 'accept-site-terms', SITE_TERMS), { viewerCountry: null })), '401:signature');
   assert.equal(await code(() => svc.acceptSiteTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-terms', SITE_TERMS), { viewerCountry: null })), '400:action');
   assert.equal(await code(() => svc.acceptTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', TERMS), { viewerCountry: null })), '401:signature');
-  for (const bad of [{ ownDecisions: false }, { notRestricted: undefined }, { country: 'Singapore' }, { termsHash: '0x12' }, { termsVersion: 'latest' }]) {
+  for (const bad of [{ ownDecisions: false }, { eligible: undefined }, { country: 'Singapore' }, { termsHash: '0x12' }, { termsVersion: 'latest' }, { text: undefined }, { text: 'too short' }]) {
     const res = await code(() => svc.acceptSiteTerms(w.sign(SITE_TERMS_EXECUTOR, 'accept-site-terms', { ...SITE_TERMS, ...bad }), { viewerCountry: null }));
     assert.match(res, /^400:/, JSON.stringify(bad));
   }

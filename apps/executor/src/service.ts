@@ -298,9 +298,10 @@ export class ExecutorService {
     if (typeof p.termsHash !== 'string' || !/^0x[0-9a-f]{64}$/.test(p.termsHash)) throw new ApiError(400, 'terms-hash', 'termsHash must be the keccak256 of the terms text.');
     const country = normaliseCountry(p.country);
     if (!country) throw new ApiError(400, 'country', 'Choose your country of residence.');
-    for (const k of ['adult', 'notRestricted', 'risksUnderstood', 'ownDecisions'] as const) {
+    for (const k of ['agree', 'eligible', 'risks', 'ownDecisions'] as const) {
       if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to trade through ValueDesk.');
     }
+    if (typeof p.text !== 'string' || p.text.length < 40 || p.text.length > 4000) throw new ApiError(400, 'text', 'The signed message must carry the statements as text.');
     return { recorded: true, termsVersion: p.termsVersion, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() };
   }
 

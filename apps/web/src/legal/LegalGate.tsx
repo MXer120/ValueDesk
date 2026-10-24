@@ -8,11 +8,14 @@
  *                       edge already answers 451 there (deploy/vercel); this is the
  *                       second check, for a legal page the edge let through.
  *   <TermsGate>         App.tsx: the first-visit clickwrap, until this browser has
- *                       accepted the current SITE_TERMS_VERSION. Never over a legal
- *                       page, so what it links to can be read first.
- *   useSiteTermsSheet() AccountController: the wallet signs the terms with its
- *                       country of residence before trading is enabled, and when a
- *                       new version asks for it (legalGate.ts SIGN_TERMS_EVENT).
+ *                       accepted the current SITE_TERMS_VERSION - with a connected
+ *                       wallet, ticked AND signed in one step (one free signature);
+ *                       a wallet that connects later is asked once to sign what was
+ *                       ticked. Never over a legal page, so what it links to can be
+ *                       read first.
+ *   useSiteTermsSheet() AccountController: the same form, when trading is enabled
+ *                       by a wallet that has not signed, or a new version asks for it
+ *                       (legalGate.ts SIGN_TERMS_EVENT).
  *   <LegalNote>         a one-line notice where it matters (notices.ts).
  *   <EmbedSwitches>     the Cookies page: withdraw consent for a video platform.
  *   openLegalPage()     any component: show a legal page in place (App listens).
@@ -24,20 +27,20 @@ import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, pathForLegal, type LegalPage }
 import type { Eip1193Provider } from '../wallet';
 import { WalletError } from '../wallet';
 import {
-  BROWSE_STATEMENTS,
   SITE_TERMS_VERSION,
-  TRADE_STATEMENTS,
+  STATEMENTS,
   acceptBrowse,
   acceptedBefore,
   browseAccepted,
   countryProblem,
   signSiteTerms,
+  signedTerms,
   useAcceptanceRevision,
-  type BrowseStatementId,
-  type TradeStatementId,
+  type StatementId,
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from './embeds';
 import { useViewerAccess } from './geo';
+import { screeningOf, useScreening } from './screening';
 import { NOTICES, type NoticeId } from './notices';
 import './gate.css';
 
@@ -137,53 +140,174 @@ function BlockedShell({ reason }: { reason: string }) {
   );
 }
 
-/* ------------------------------------------------- the first-visit clickwrap ----- */
+/* ------------------------------------------------- accepting, and signing ----- */
 
-/** The clickwrap, until this browser has accepted the current terms. `hidden` while a legal page is on screen. */
-export function TermsGate({ hidden, onOpen }: { hidden: boolean; onOpen: (p: LegalPage) => void }) {
+const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
+
+/** Wallets that chose "Not now" for the signature in this page load: the gate does not ask them again. */
+const skipped = new Set<string>();
+
+interface TermsFormProps {
+  /** The statements must be ticked here (false: they were ticked before and are shown for the signature). */
+  needTicks: boolean;
+  /** The connected wallet that signs - null: no wallet, the statements are only ticked. */
+  signer: { owner: string; provider: Eip1193Provider } | null;
+  onOpen?: (p: LegalPage) => void;
+  /** Accepted: 'signed' by the wallet, or only 'ticked'. */
+  onDone: (how: 'signed' | 'ticked') => void;
+  /** The second button: accept without the signature, or put the signature off. */
+  secondary?: { label: string; onClick: () => void; needsTicks?: boolean } | null;
+}
+
+/**
+ * The statements and, with a wallet, the country of residence and ONE free
+ * signature (acceptance.ts) - the body of the first-visit gate and of the
+ * sheet before trading.
+ */
+function TermsForm({ needTicks, signer, onOpen, onDone, secondary }: TermsFormProps) {
+  const [ticks, setTicks] = useState<Partial<Record<StatementId, boolean>>>({});
+  const [country, setCountry] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const allTicked = !needTicks || STATEMENTS.every((s) => ticks[s.id]);
+  const problem = country ? countryProblem(country) : null;
+
+  const primary = async () => {
+    setError(null);
+    if (!signer) {
+      acceptBrowse(STATEMENTS.map((s) => s.id));
+      onDone('ticked');
+      return;
+    }
+    setBusy(true);
+    try {
+      await signSiteTerms({ provider: signer.provider, owner: signer.owner, country });
+      onDone('signed');
+    } catch (e) {
+      setError(isRejection(e) ? 'Nothing was signed. Sign the message in your wallet to accept the terms.' : e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      {needTicks ? (
+        <div className="lg-checks">
+          {STATEMENTS.map((s) => (
+            <label key={s.id} className="lg-check">
+              <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
+              <span><LegalText text={s.label} onOpen={onOpen} /></span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <ul className="lg-confirm">
+          {STATEMENTS.map((s) => <li key={s.id}><LegalText text={s.label} onOpen={onOpen} /></li>)}
+        </ul>
+      )}
+      {signer && (
+        <>
+          <label className="fx-lbl" htmlFor="lg-country">Country of residence</label>
+          <select id="lg-country" className="fx-sel lg-select" value={country} onChange={(e) => setCountry(e.target.value)}>
+            <option value="">Choose…</option>
+            {countries().map((c) => (
+              <option key={c.code} value={c.code} disabled={!!countryProblem(c.code)}>
+                {c.name}
+                {countryProblem(c.code) ? ' - not available' : ''}
+              </option>
+            ))}
+          </select>
+          {problem && <p className="fx-note fx-note--err">{problem}</p>}
+          <p className="lg-fine">
+            Your wallet signs one message with these statements and the terms&rsquo; version. It is free: a signature, not a transaction - no gas, and no funds move.
+          </p>
+        </>
+      )}
+      {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
+      <div className="lg-actions">
+        <button
+          type="button"
+          className="fx-cta"
+          disabled={!allTicked || busy || (!!signer && (!country || !!problem))}
+          aria-busy={busy || undefined}
+          onClick={() => void primary()}
+        >
+          {busy ? 'Waiting for wallet…' : signer ? 'Sign and accept' : 'Agree and continue'}
+        </button>
+        {secondary && (
+          <button type="button" className="fx-link" disabled={busy || (!!secondary.needsTicks && !allTicked)} onClick={secondary.onClick}>
+            {secondary.label}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The first-visit gate (App.tsx), until this browser has accepted the current
+ * terms - signed by the connected wallet where there is one that may trade, in
+ * the same step. A wallet that connects after the statements were ticked is
+ * asked once to sign them (it may put that off: trading asks again). Never over
+ * a legal page (`hidden`), so what it links to can be read first.
+ */
+export function TermsGate({ hidden, onOpen, address, provider }: {
+  hidden: boolean;
+  onOpen: (p: LegalPage) => void;
+  address: string | null;
+  provider: Eip1193Provider | null;
+}) {
   useAcceptanceRevision();
+  useScreening(address);
   const access = useViewerAccess();
-  const [ticks, setTicks] = useState<Partial<Record<BrowseStatementId, boolean>>>({});
+  const [, setTick] = useState(0);
   const accepted = !!browseAccepted();
-  if (accepted || access.level === 'blocked') return null;
-  const all = BROWSE_STATEMENTS.every((s) => ticks[s.id]);
+  const owner = address ? address.toLowerCase() : null;
+  const mayTrade = !!owner && !!provider && access.level === 'open' && screeningOf(owner) !== 'sanctioned';
+  const signer = mayTrade && !signedTerms(owner) && !skipped.has(owner!) ? { owner: owner!, provider: provider! } : null;
+  if (access.level === 'blocked' || (accepted && !signer)) return null;
   const changed = acceptedBefore();
+  const skip = () => {
+    if (owner) skipped.add(owner);
+    setTick((n) => n + 1);
+  };
   return (
     <Modal
       open={!hidden}
       size="md"
-      title={changed ? 'Our terms have changed' : 'Before you use ValueDesk'}
-      className="fx lg-gate"
-      onClose={() => { /* accepting is the only way on; the legal pages stay open to read */ }}
+      title={accepted ? 'Sign the terms with your wallet' : changed ? 'Our terms have changed' : 'Before you use ValueDesk'}
+      className={`fx${accepted ? '' : ' lg-gate'}`}
+      // Accepting is the only way on; once the statements are ticked, the signature can wait.
+      onClose={() => { if (accepted) skip(); }}
       dismissOnBackdrop={false}
     >
       <p className="fx-note">
-        {changed
-          ? `Please read and accept the current version (${SITE_TERMS_VERSION}) to go on using ValueDesk.`
-          : 'ValueDesk is a non-custodial interface to the SoDEX exchange, with market data, copy trading and algo orders. Please read and accept the terms first.'}
+        {accepted
+          ? 'You accepted these terms in this browser. Sign them with this wallet, once, so it can trade: ValueDesk keeps the signature as its record of what you agreed to.'
+          : changed
+            ? `Please read and accept the current version (${SITE_TERMS_VERSION}) to go on using ValueDesk.`
+            : 'ValueDesk is a non-custodial interface to the SoDEX exchange, with market data, copy trading and algo orders. Please read and accept the terms first.'}
       </p>
       {access.level === 'close-only' && <p className="fx-note fx-note--warn">{access.reason}</p>}
-      <div className="lg-checks">
-        {BROWSE_STATEMENTS.map((s) => (
-          <label key={s.id} className="lg-check">
-            <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
-            <span><LegalText text={s.label} onOpen={onOpen} /></span>
-          </label>
-        ))}
-      </div>
-      <div className="lg-actions">
-        <button type="button" className="fx-cta" disabled={!all} onClick={() => acceptBrowse(BROWSE_STATEMENTS.filter((s) => ticks[s.id]).map((s) => s.id))}>
-          Agree and continue
-        </button>
-      </div>
+      <TermsForm
+        key={signer ? `sign:${signer.owner}` : 'tick'}
+        needTicks={!accepted}
+        signer={signer}
+        onOpen={onOpen}
+        onDone={() => setTick((n) => n + 1)}
+        secondary={
+          !signer ? null
+          : accepted ? { label: 'Not now', onClick: skip }
+          : { label: 'Agree, and sign before I trade', needsTicks: true, onClick: () => { acceptBrowse(STATEMENTS.map((s) => s.id)); skip(); } }
+        }
+      />
       <p className="lg-fine">
-        Version {SITE_TERMS_VERSION}. Your acceptance is kept in this browser only. ValueDesk sets no cookies and uses no tracking: <LegalLink page="cookies" onOpen={onOpen}>Cookies and storage</LegalLink>.
+        Version {SITE_TERMS_VERSION}. ValueDesk sets no cookies and uses no tracking: <LegalLink page="cookies" onOpen={onOpen}>Cookies and storage</LegalLink>. Copy trading asks for its own terms before the first copy.
       </p>
     </Modal>
   );
 }
-
-/* --------------------------------------------- the wallet signs the terms ----- */
 
 interface SheetRequest {
   owner: string;
@@ -191,24 +315,19 @@ interface SheetRequest {
   resolve: (signed: boolean) => void;
 }
 
-const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
-
 /**
- * `ask({owner, provider})` opens the sheet and resolves true once the wallet has
- * signed the current terms (false when closed); render `dialog` once.
+ * `ask({owner, provider})` opens the signing sheet and resolves true once the
+ * wallet has signed the current terms (false when closed); render `dialog`
+ * once. AccountController asks before it enables trading, and when an opening
+ * order was refused for a missing signature (legalGate.ts SIGN_TERMS_EVENT).
  */
 export function useSiteTermsSheet(): { ask: (o: { owner: string; provider: Eip1193Provider }) => Promise<boolean>; dialog: ReactNode } {
   const [req, setReq] = useState<SheetRequest | null>(null);
-  const [country, setCountry] = useState('');
-  const [ticks, setTicks] = useState<Partial<Record<TradeStatementId, boolean>>>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  useAcceptanceRevision();
 
   const ask = useCallback(
     (o: { owner: string; provider: Eip1193Provider }) =>
       new Promise<boolean>((resolve) => {
-        setError(null);
-        setBusy(false);
         setReq((cur) => {
           cur?.resolve(false);
           return { ...o, resolve };
@@ -223,58 +342,24 @@ export function useSiteTermsSheet(): { ask: (o: { owner: string; provider: Eip11
     });
   }, []);
 
-  const problem = country ? countryProblem(country) : null;
-  const all = TRADE_STATEMENTS.every((s) => ticks[s.id]);
-  const sign = async () => {
-    if (!req) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await signSiteTerms({ provider: req.provider, owner: req.owner, country });
-      close(true);
-    } catch (e) {
-      setError(isRejection(e) ? 'Nothing was signed. Sign in your wallet to accept the terms.' : e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const dialog = req ? (
-    <Modal open size="md" title="Accept the terms to trade" className="fx lg-sign" onClose={() => close(false)} dismissOnBackdrop={false}>
+    <Modal open size="md" title="Sign the terms to trade" className="fx lg-sign" onClose={() => close(false)} dismissOnBackdrop={false}>
       <p className="fx-note">
-        Before you trade through ValueDesk, your wallet signs the <LegalLink page="terms">Terms of use</LegalLink> and the <LegalLink page="risk">Risk disclosure</LegalLink> (version {SITE_TERMS_VERSION}) with your country of residence - our record of what you agreed to. The signature costs nothing and moves no funds.
+        Before you trade through ValueDesk, your wallet signs the <LegalLink page="terms">Terms of use</LegalLink> and the <LegalLink page="risk">Risk disclosure</LegalLink> (version {SITE_TERMS_VERSION}) with your country of residence - our record of what you agreed to.
       </p>
-      <label className="fx-lbl" htmlFor="lg-country">Country of residence</label>
-      <select id="lg-country" className="fx-sel lg-select" value={country} onChange={(e) => setCountry(e.target.value)}>
-        <option value="">Choose…</option>
-        {countries().map((c) => (
-          <option key={c.code} value={c.code} disabled={!!countryProblem(c.code)}>
-            {c.name}
-            {countryProblem(c.code) ? ' - not available' : ''}
-          </option>
-        ))}
-      </select>
-      {problem && <p className="fx-note fx-note--err">{problem}</p>}
-      <div className="lg-checks">
-        {TRADE_STATEMENTS.map((s) => (
-          <label key={s.id} className="lg-check">
-            <input type="checkbox" checked={!!ticks[s.id]} onChange={(e) => setTicks({ ...ticks, [s.id]: e.target.checked })} />
-            <span>{s.label}</span>
-          </label>
-        ))}
-      </div>
-      {error && <p className="fx-note fx-note--err" role="alert">{error}</p>}
-      <div className="lg-actions">
-        <button type="button" className="fx-cta" disabled={!country || !!problem || !all || busy} aria-busy={busy || undefined} onClick={() => void sign()}>
-          {busy ? 'Waiting for wallet…' : 'Sign and accept'}
-        </button>
-        <button type="button" className="fx-link" onClick={() => close(false)}>Not now</button>
-      </div>
+      <TermsForm
+        key={req.owner}
+        needTicks={!browseAccepted()}
+        signer={{ owner: req.owner, provider: req.provider }}
+        onDone={() => close(true)}
+        secondary={{ label: 'Not now', onClick: () => close(false) }}
+      />
     </Modal>
   ) : null;
 
   return { ask, dialog };
 }
+
 
 /* ----------------------------------------------- the video players' consent ----- */
 

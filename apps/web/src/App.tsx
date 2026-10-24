@@ -538,9 +538,10 @@ function AppShell() {
           <IndexPrompt address={address} />
         </Guarded>
         {/* The first-visit clickwrap (legal/acceptance.ts): until this browser accepts the
-            current terms. Not over a legal page, so what it links to can be read first. */}
+            current terms - with a connected wallet, ticked and signed in one step. Not over
+            a legal page, so what it links to can be read first. */}
         <Guarded name="Terms">
-          <TermsGate hidden={!!legal} onOpen={openLegal} />
+          <TermsGate hidden={!!legal} onOpen={openLegal} address={address} provider={provider} />
         </Guarded>
         {/* Live copy trading on every page: the browser copier runs whichever page is open. */}
         <Guarded name="Copy trading">

@@ -1,30 +1,38 @@
 /**
- * Accepting ValueDesk's terms: a clickwrap with a versioned record.
+ * Accepting ValueDesk's terms: a clickwrap with a versioned record, signed by
+ * the visitor's own wallet.
  *
  * WHAT IS ACCEPTED. The Terms of use and the Risk disclosure (terms.ts,
  * risk.ts) as one version, SITE_TERMS_VERSION, fingerprinted by SITE_TERMS_HASH
- * (keccak256 of the two texts, canonical JSON). The privacy policy and the
- * cookie notice inform; they are not agreed to, so they are not part of it.
+ * (keccak256 of the two texts, canonical JSON), with the four STATEMENTS below.
+ * The privacy policy and the cookie notice inform; they are not agreed to, so
+ * they are not part of the fingerprint.
  *
- * TWO STEPS
- *   1. Everyone who opens the site: the first-visit sheet (LegalGate.tsx) - three
- *      statements, each ticked, then "Agree and continue". Kept in this browser
- *      only: the version, the fingerprint, the time and the statements. No
- *      personal data, nothing sent anywhere.
- *   2. A wallet, before it trades: when trading is enabled (AccountController),
- *      the wallet signs the same version and fingerprint, its country of
- *      residence and four statements - a CopyRequest 'accept-site-terms'
- *      (EIP-712, packages/copy-engine/src/api.ts). Kept in this browser, and sent
- *      to ValueDesk's executor, which appends it to its log of signed requests
- *      with the country the edge saw (apps/executor, POST /api/copy/v1/site-terms).
- *      Until the executor has it, it is sent again on the next visit.
+ * ONE STEP, WITH THE WALLET (LegalGate.tsx TermsGate):
+ *   - a visitor with a connected wallet ticks the four statements, names the
+ *     country of residence and signs ONE message with that wallet - free: an
+ *     EIP-712 signature, not a transaction, no gas, no funds move. The signed
+ *     request is a CopyRequest 'accept-site-terms' (packages/copy-engine/src/
+ *     api.ts) whose payload carries the version, the fingerprint, the country,
+ *     the four statements as flags and, word for word, as the text the wallet
+ *     shows. Kept in this browser, and sent to ValueDesk's executor, which appends
+ *     it to its log of signed requests with the country the edge saw
+ *     (apps/executor, POST /api/copy/v1/site-terms); until the executor has it,
+ *     it is sent again on the next visit;
+ *   - a visitor without a wallet ticks the same statements ("Agree and continue"):
+ *     kept in this browser only. When a wallet connects later, it is asked to sign
+ *     what was ticked (the statements are shown again, not re-ticked);
+ *   - a wallet from a close-only place cannot sign (its country restricts
+ *     trading): it browses on the ticked statements and can close positions.
+ * Copy trading asks for its own signature on top - the copy terms, before the
+ * first copy in any mode (copy/terms.ts).
  *
- * A NEW VERSION asks both again: the sheet comes back ("the terms have
- * changed"), and new positions wait for the new signature - closing, cancelling
- * and withdrawing never wait (trading/legalGate.ts). acceptance.test.ts
- * recomputes the fingerprint from the texts: change terms.ts or risk.ts (or a
- * list in jurisdictions.mjs, which the terms name) without raising the version
- * and pinning the new hash here, and the test fails.
+ * A NEW VERSION asks again: the gate comes back ("the terms have changed"), and
+ * new positions wait for the new signature - closing, cancelling and
+ * withdrawing never wait (trading/legalGate.ts). acceptance.test.ts recomputes
+ * the fingerprint from the texts: change terms.ts or risk.ts (or a list in
+ * jurisdictions.mjs, which the terms name) without raising the version and
+ * pinning the new hash here, and the test fails.
  *
  * The texts themselves stay out of the first load (they are the legal chunk):
  * this module only holds the version and the fingerprint.
@@ -41,28 +49,37 @@ const log = logger('legal');
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
 export const SITE_TERMS_VERSION = '2026-10-24';
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */
-export const SITE_TERMS_HASH = '0xe2043d05d08184e57b9df4eeab33c36dcf3ed640095202ce22bee5116bf179e0';
+export const SITE_TERMS_HASH = '0xd8d0319542240ab1ec021110bd83548f27e6f0e808bf2f4a2435b3a73a465494';
 
 /* ------------------------------------------------------------- statements ----- */
 
-export type BrowseStatementId = 'agree' | 'eligible' | 'risk';
+export type StatementId = 'agree' | 'eligible' | 'risks' | 'ownDecisions';
 
-/** The first-visit sheet's statements, in the order shown. Links in [label](/page) form (LegalGate renders them). */
-export const BROWSE_STATEMENTS: ReadonlyArray<{ id: BrowseStatementId; label: string }> = [
+/**
+ * What every visitor confirms, in the order shown - ticked without a wallet,
+ * ticked and signed with one. Links in [label](/page) form (LegalGate renders
+ * them; the signed text drops the link syntax). The ids are the flags of
+ * AcceptSiteTermsPayload.
+ */
+export const STATEMENTS: ReadonlyArray<{ id: StatementId; label: string }> = [
   { id: 'agree', label: 'I have read and agree to the [Terms of use](/terms) and the [Risk disclosure](/risk), and I have read the [Privacy policy](/privacy).' },
-  { id: 'eligible', label: 'I am at least 18 years old. I am not in, and do not live in, a country or region where ValueDesk is not available, I am not subject to sanctions, and I do not hide where I am (for example with a VPN).' },
-  { id: 'risk', label: 'I understand that trading perpetual futures and crypto-assets can lose me all the money I put in, that nothing on ValueDesk is advice, and that ValueDesk never holds my funds.' },
+  { id: 'eligible', label: 'I am at least 18 years old and act for myself. I am not in, and do not live in, a country or region where ValueDesk, or the trading I use it for, is not allowed (Terms of use, section 3); I am not subject to sanctions; and I do not hide where I am, for example with a VPN.' },
+  { id: 'risks', label: 'I understand that trading perpetual futures and crypto-assets can lose me all the money I put in, quickly, and that orders can fill late, partly, at worse prices or not at all.' },
+  { id: 'ownDecisions', label: 'Every trade, copy and algo order is my own decision: ValueDesk gives no advice, owes me no fiduciary duty, does not check whether trading suits me, and never holds my funds.' },
 ];
 
-export type TradeStatementId = 'adult' | 'notRestricted' | 'risksUnderstood' | 'ownDecisions';
+/** A statement as plain text: [label](/page) -> label. */
+const plain = (s: string): string => s.replace(/\[([^\]]+)\]\(\/[a-z-]+\)/g, '$1');
 
-/** The statements a wallet signs before it trades (AcceptSiteTermsPayload), in the order shown. */
-export const TRADE_STATEMENTS: ReadonlyArray<{ id: TradeStatementId; label: string }> = [
-  { id: 'adult', label: 'I am at least 18 years old and able to enter into binding contracts, and I trade for myself, not for anyone else.' },
-  { id: 'notRestricted', label: 'I do not live in, and do not trade from, the United States or its territories, a sanctioned country or region named in the Terms of use, or any place where this trading is not lawful for me; I am not subject to sanctions, and I do not hide where I am.' },
-  { id: 'risksUnderstood', label: 'I have read the Terms of use and the Risk disclosure. I understand that leveraged trading can lose me my whole margin within minutes, and that orders can fill late, partly, at worse prices or not at all.' },
-  { id: 'ownDecisions', label: 'Every trade, copy and algo order is my own decision. ValueDesk gives no advice, owes me no duty to act in my interest, and does not check whether trading is suitable for me.' },
-];
+/** What the wallet shows and signs, word for word (the payload's `text`). */
+export function signedText(country: string): string {
+  return [
+    `ValueDesk - Terms of use and Risk disclosure, version ${SITE_TERMS_VERSION} (fingerprint ${SITE_TERMS_HASH}).`,
+    `Country of residence: ${country}.`,
+    ...STATEMENTS.map((s) => plain(s.label)),
+    'This signature is free: it is not a transaction and moves no funds.',
+  ].join(' ');
+}
 
 /* --------------------------------------------------------------- storage ----- */
 
@@ -70,7 +87,9 @@ export interface BrowseRecord {
   termsVersion: string;
   termsHash: string;
   acceptedAt: number;
-  statements: BrowseStatementId[];
+  statements: StatementId[];
+  /** The wallet that signed it, when the acceptance was signed. */
+  signedBy?: string;
 }
 
 export interface SignedSiteTerms {
@@ -121,18 +140,24 @@ const current = (r: { termsVersion?: unknown; termsHash?: unknown } | null): boo
 /** This browser's acceptance of the CURRENT terms, or null. */
 export function browseAccepted(): BrowseRecord | null {
   const r = read<BrowseRecord>(BROWSE_KEY);
-  return current(r) && BROWSE_STATEMENTS.every((s) => r!.statements?.includes(s.id)) ? r : null;
+  return current(r) && STATEMENTS.every((s) => r!.statements?.includes(s.id)) ? r : null;
 }
 
-/** An earlier version was accepted here (the sheet then says the terms changed). */
+/** An earlier version was accepted here (the gate then says the terms changed). */
 export function acceptedBefore(): boolean {
   const r = read<BrowseRecord>(BROWSE_KEY);
   return !!r && !current(r);
 }
 
-export function acceptBrowse(statements: readonly BrowseStatementId[], now = Date.now()): BrowseRecord {
-  if (!BROWSE_STATEMENTS.every((s) => statements.includes(s.id))) throw new Error('Tick every statement to continue.');
-  const r: BrowseRecord = { termsVersion: SITE_TERMS_VERSION, termsHash: SITE_TERMS_HASH, acceptedAt: now, statements: BROWSE_STATEMENTS.map((s) => s.id) };
+export function acceptBrowse(statements: readonly StatementId[], now = Date.now(), signedBy?: string): BrowseRecord {
+  if (!STATEMENTS.every((s) => statements.includes(s.id))) throw new Error('Tick every statement to continue.');
+  const r: BrowseRecord = {
+    termsVersion: SITE_TERMS_VERSION,
+    termsHash: SITE_TERMS_HASH,
+    acceptedAt: now,
+    statements: STATEMENTS.map((s) => s.id),
+    ...(signedBy ? { signedBy } : {}),
+  };
   write(BROWSE_KEY, r);
   return r;
 }
@@ -157,7 +182,7 @@ export function useAcceptanceRevision(): number {
 
 /* ---------------------------------------------------------------- signing ----- */
 
-/** The payload a wallet signs for `country` (every statement true). */
+/** The payload a wallet signs for `country` (every statement true, and its text). */
 export function siteTermsPayload(country: string): AcceptSiteTermsPayload {
   const c = normaliseCountry(country);
   if (!c) throw new Error('Choose your country of residence.');
@@ -165,10 +190,11 @@ export function siteTermsPayload(country: string): AcceptSiteTermsPayload {
     termsVersion: SITE_TERMS_VERSION,
     termsHash: SITE_TERMS_HASH,
     country: c,
-    adult: true,
-    notRestricted: true,
-    risksUnderstood: true,
+    agree: true,
+    eligible: true,
+    risks: true,
     ownDecisions: true,
+    text: signedText(c),
   };
 }
 
@@ -179,8 +205,9 @@ export function countryProblem(country: string): string | null {
 }
 
 /**
- * The wallet signs the current terms for `country`; the signature is kept here
- * and sent to ValueDesk's executor (again later if that fails now).
+ * The wallet signs the current terms for `country` - one free signature; the
+ * signature is kept here, counts as this browser's acceptance too, and is sent
+ * to ValueDesk's executor (again later if that fails now).
  */
 export async function signSiteTerms(o: { provider: Eip1193Provider; owner: string; country: string }): Promise<SignedSiteTerms> {
   const owner = o.owner.toLowerCase();
@@ -190,6 +217,7 @@ export async function signSiteTerms(o: { provider: Eip1193Provider; owner: strin
   const request = await signCopy(o.provider, owner, SITE_TERMS_EXECUTOR, 'accept-site-terms', payload);
   const t: SignedSiteTerms = { termsVersion: SITE_TERMS_VERSION, termsHash: SITE_TERMS_HASH, country: payload.country, acceptedAt: Date.now(), recorded: false, request };
   write(signedKey(owner), t);
+  acceptBrowse(STATEMENTS.map((s) => s.id), t.acceptedAt, owner);
   await sendRecord(owner, t);
   return signedTerms(owner) ?? t;
 }

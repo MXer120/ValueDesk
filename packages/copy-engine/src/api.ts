@@ -220,11 +220,13 @@ export interface AcceptSiteTermsPayload {
   termsHash: string;
   /** Country of residence, ISO alpha-2. */
   country: string;
-  /** The statements, each one ticked. */
-  adult: true;
-  notRestricted: true;
-  risksUnderstood: true;
+  /** The four statements (apps/web/src/legal/acceptance.ts STATEMENTS), each one ticked. */
+  agree: true;
+  eligible: true;
+  risks: true;
   ownDecisions: true;
+  /** The statements word for word, as the wallet showed them: the readable record. */
+  text: string;
 }
 
 /** What the executor answers to 'accept-site-terms'. */

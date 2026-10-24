@@ -48,7 +48,7 @@ export const TERMS: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: 'These terms apply to your use of ValueDesk at [[OWNER: the site\'s domain]], provided by the operator named in the [Impressum](/impressum) ("we", "us"). Together with the [Risk disclosure](/risk) they are the agreement between you and us; copy trading adds the [Copy trading terms](/copy-terms). Please read them, and the risk disclosure in particular, before you use ValueDesk.' },
+    { p: 'These terms apply to your use of ValueDesk at valuedeskapp.vercel.app (and any other address it is offered at), provided by the operator named in the [Impressum](/impressum) ("we", "us"). Together with the [Risk disclosure](/risk) they are the agreement between you and us; copy trading adds the [Copy trading terms](/copy-terms). Please read them, and the risk disclosure in particular, before you use ValueDesk.' },
     { p: '**ValueDesk is a tool. You make every decision, you keep your funds, and you carry the risk of every trade. Trading perpetual futures and crypto-assets can lose you all the money you put in.**' },
   ],
   sections: [
@@ -64,8 +64,8 @@ export const TERMS: LegalDoc = {
       blocks: [
         {
           ul: [
-            '**When you first open ValueDesk** you confirm, by ticking each statement and pressing "Agree and continue", that you accept these terms and the risk disclosure and that you meet the conditions in section 3. Your browser keeps the version you accepted and when.',
-            '**Before you trade**, your wallet signs the same terms - their version and a fingerprint (hash) of their text - together with your country of residence and the statements shown to you. This signature is our record of who accepted which version; we keep it as set out in the [Privacy policy](/privacy).',
+            '**When you first open ValueDesk** you confirm, by ticking each statement, that you accept these terms and the risk disclosure and that you meet the conditions in section 3. Your browser keeps the version you accepted and when.',
+            '**With your wallet.** If a wallet is connected, it signs the same terms in the same step - their version and a fingerprint (hash) of their text, your country of residence and the statements, word for word. A wallet that connects later is asked to sign them, and no wallet opens a position through ValueDesk before it has signed. The signature is free: it is a message, not a transaction, and moves no funds. It is our record of who accepted which version; we keep it as set out in the [Privacy policy](/privacy).',
             '**New versions.** We may change these terms for the future, for example when features, fees or the law change. Every version has its own number, shown when you accept it. A new version applies to you only once you accept it: the site asks you to on your next visit, and new positions can be opened through ValueDesk only once your wallet has signed it. Until then you can still close positions, cancel orders and withdraw. If you do not accept a new version, stop using ValueDesk.',
             'These terms are in English. A translation, where we offer one, is for convenience; the English version prevails, unless mandatory law where you live says otherwise.',
           ],
