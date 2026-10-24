@@ -2,8 +2,10 @@
  * The floating bar over a selected drawing, TradingView's: colour, line width,
  * solid or dashed, the words of a text tool, lock, delete - icons only, no
  * words over the chart (the drawing's name is its aria-label). It floats at the
- * top centre of the plot rather than chasing the drawing, so it never covers
- * the thing being styled and never jumps while the drawing is dragged.
+ * top centre of the plot rather than chasing the drawing - at the foot of the
+ * price pane when the drawing's handles are up there (Chart.tsx places it) -
+ * and steps aside while the drawing is dragged, so it never covers a handle.
+ * The gear opens the full settings (DrawingSettings.tsx).
  *
  * Everything applies at once and is saved with the drawing (Chart.tsx).
  */
@@ -30,11 +32,16 @@ export interface DrawingStyleBarProps {
   onLock: (locked: boolean) => void;
   onDelete: () => void;
   onClose: () => void;
+  onSettings: () => void;
+  /** While the drawing is dragged: out of the way, and no pointer. */
+  hidden?: boolean;
+  /** Its top in the plot, when not the default (the top of the plot). */
+  top?: number;
 }
 
 export function DrawingStyleBar({
   label, color, size, dashed, locked, text, focusText,
-  onColor, onSize, onDashed, onText, onLock, onDelete, onClose,
+  onColor, onSize, onDashed, onText, onLock, onDelete, onClose, onSettings, hidden = false, top,
 }: DrawingStyleBarProps) {
   const [palette, setPalette] = useState(false);
   const field = useRef<HTMLInputElement>(null);
@@ -45,8 +52,10 @@ export function DrawingStyleBar({
 
   return (
     <div
-      className="kc-stylebar"
+      className={`kc-stylebar${hidden ? ' is-hidden' : ''}`}
+      style={top !== undefined ? { top } : undefined}
       role="toolbar"
+      aria-hidden={hidden || undefined}
       aria-label={`${label} style`}
       // The canvas would take this press as a click on the chart and deselect.
       onMouseDown={(e) => e.stopPropagation()}
@@ -125,6 +134,9 @@ export function DrawingStyleBar({
         />
       )}
       <span className="kc-stylebar-sep" />
+      <button type="button" title="Settings" aria-label="Drawing settings" onClick={onSettings}>
+        {MENU_ICONS.settings}
+      </button>
       <button type="button" className={locked ? 'on' : ''} title={locked ? 'Unlock' : 'Lock'} aria-label={locked ? 'Unlock drawing' : 'Lock drawing'} aria-pressed={locked} onClick={() => onLock(!locked)}>
         {locked ? MENU_ICONS.lock : MENU_ICONS.unlock}
       </button>

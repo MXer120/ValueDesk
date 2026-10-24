@@ -49,6 +49,7 @@ import type {
   Indicator,
   IndicatorSeries,
   KLineData,
+  Overlay,
   OverlayEvent,
   Point,
 } from 'klinecharts';
@@ -67,6 +68,7 @@ import {
   createDenseYTicks,
   formatBigNumber,
   registerChartAxes,
+  T,
   X_AXIS_NAME,
 } from '../chart/theme';
 import {
@@ -103,6 +105,35 @@ import {
 } from '../chart/drawingOverlays';
 import { drawingsKey, loadDrawings, realZ, saveDrawings, setRealZ, toStored, type StoredDrawing } from '../chart/drawingStore';
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
+import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
+import {
+  EXEC_OVERLAY,
+  NEWS_OVERLAY,
+  SYSTEM_OVERLAYS,
+  fillMarks,
+  newsCoin,
+  newsMarks,
+  registerMarkOverlays,
+  sanitizeShow,
+  type ChartShow,
+  type FillMark,
+  type NewsMark,
+} from '../chart/chartMarks';
+import { ChartSidebar } from '../chart/ChartSidebar';
+import { CHART_ICONS } from '../chart/chartIcons';
+import {
+  CHART_SAVE_EVENT,
+  SHOW_KEY,
+  registerLiveChart,
+  snapshotFileName,
+  takePendingSnapshot,
+  touchChart,
+  type ChartSaveDetail,
+  type ChartSnapshot,
+  type LiveChart,
+} from '../chart/snapshot';
+import { vsApi } from '../vsApi';
+import { account as sodexAccount } from '../exchange/sodexAccount';
 import { MENU_ICONS, TabMenu, type TabMenuItem } from '../dashboard/tabExtras';
 import {
   INTERVAL_GROUPS,
@@ -112,7 +143,6 @@ import {
   intervalOf,
 } from '../chart/intervals';
 import {
-  ORDER_LINE_OVERLAY,
   OrderLineLayer,
   orderLines,
   positionLines,
@@ -208,6 +238,8 @@ const HISTORY_AHEAD = 2;
 /** A new pane's share of the plot height, and its bounds. */
 const PANE_SHARE = 0.2;
 const PANE_HEIGHT_MIN = 40;
+/** A pane whose studies are all hidden folds to its legend row. */
+const PANE_FOLDED = 26;
 const PANE_HEIGHT_MAX = 400;
 /** Indicator panes are ordered after the candle pane (order 0). */
 const PANE_ORDER_BASE = 10;
@@ -706,6 +738,18 @@ function Chart({
   const selectedDrawing = useRef<string | null>(null);
   /** Clock the axis, the crosshair and the footer read (chart/timeAxis.ts). */
   const [tz, setTz] = useStored<TimeZoneMode>('chart.tz', 'local');
+  /** The chart's own layers: position, orders, executions, news (chartMarks.ts). */
+  const [storedShow, setStoredShow] = useStored<ChartShow>(SHOW_KEY, sanitizeShow(null));
+  const show = sanitizeShow(storedShow);
+  const showRef = useRef(show);
+  showRef.current = show;
+  const patchShow = useCallback((p: Partial<ChartShow>) => setStoredShow({ ...showRef.current, ...p }), [setStoredShow]);
+  /** The object list on the right (ChartSidebar.tsx). */
+  const [sidebar, setSidebar] = useStored<boolean>('chart.sidebar', false);
+  const [newsMenu, setNewsMenu] = useState(false);
+  /** Re-mount the studies / re-load the drawings from storage (a snapshot was put back). */
+  const [indGen, setIndGen] = useState(0);
+  const [drawGen, setDrawGen] = useState(0);
   const tzRef = useRef(tz);
   tzRef.current = tz;
   /** Drawing modes on the rail. Magnet and stay-in-drawing persist; lock and
@@ -1554,6 +1598,8 @@ function Chart({
       registerMeasureOverlay(kc);
       // The rest of the TradingView set (chart/drawingOverlays.ts), the same way.
       registerDrawingOverlays(kc);
+      // The chart's own marks (fills, news): registered, never offered as tools.
+      registerMarkOverlays(kc);
       // Same shape: registers the x-axis whose tick filter drops a time label
       // that would be drawn half outside the canvas. Must land before init, so
       // the name is in the registry by the time the axis is overridden below.
@@ -1653,7 +1699,7 @@ function Chart({
       // it is not a drawing tool.
       setSupported({
         indicators: kc.getSupportedIndicators(),
-        overlays: kc.getSupportedOverlays().filter((n) => n !== ORDER_LINE_OVERLAY),
+        overlays: kc.getSupportedOverlays().filter((n) => !SYSTEM_OVERLAYS.has(n)),
       });
       if (tzRef.current === 'utc') c.setTimezone('UTC');
       // A fresh instance holds no bars: the plot stays masked until the load
@@ -1819,10 +1865,10 @@ function Chart({
       canModify,
       ...(modifyBlocked === null ? {} : { cannotModifyReason: modifyBlocked }),
     };
-    l.sync([...orderLines(rawOrders, opts), ...positionLines(rawPositions, opts)]);
+    l.sync([...(show.orders ? orderLines(rawOrders, opts) : []), ...(show.position ? positionLines(rawPositions, opts) : [])]);
     const px = Number(lastBar.current?.close ?? lastPriceRef.current ?? Number.NaN);
     l.notePrice(Number.isFinite(px) ? px : null);
-  }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked]);
+  }, [ready, chartGen, address, engine, orders.data, positions.data, symbol, sym, canModify, modifyBlocked, show.orders, show.position]);
 
   // Switching market invalidates every price on screen, including any the user
   // was in the middle of dragging. Drop the interaction state rather than let a
@@ -2001,6 +2047,8 @@ function Chart({
   /** When the last reset started: one double click reaches resetView twice
    *  (its release, below, and the `dblclick` fallback on the pane). */
   const lastReset = useRef(-Infinity);
+  /** When a double click last landed on a drawing: that one is not a reset. */
+  const drawingDblAt = useRef(-Infinity);
   /** Double-click anywhere on the chart resets zoom, pan AND the price axis -
    *  back to exactly what a fresh chart shows (`DEFAULT_BAR_SPACE`, newest bar
    *  `DEFAULT_OFFSET_RIGHT` from the axis, the axis fitting the candles),
@@ -2016,6 +2064,8 @@ function Chart({
       return;
     }
     const now = performance.now();
+    // A double click on a drawing opens its settings (drawingEvents).
+    if (now - drawingDblAt.current < 600) return;
     if (now - lastReset.current < 600) return;
     lastReset.current = now;
     const keepManual = !autoRef.current;
@@ -2208,10 +2258,39 @@ function Chart({
    * current list without a stale closure and still keep the updaters pure.
    */
   const indicatorsRef = useRef<ActiveIndicator[]>([]);
+  /** A new pane's height: a fifth of the plot, within bounds. */
+  const paneHeight = useCallback((): number => {
+    const h = holder.current?.clientHeight ?? 0;
+    return Math.max(PANE_HEIGHT_MIN, Math.min(140, Math.round(h * PANE_SHARE) || 80));
+  }, []);
+  /** Own panes folded down to their legend row: every study in them is hidden. */
+  const foldedPanes = useRef(new Set<string>());
+  /** Fold the panes whose studies are all hidden; give the others back their height. */
+  const fitPanes = useCallback(
+    (c: KChart, list: ActiveIndicator[]) => {
+      const byPane = new Map<string, ActiveIndicator[]>();
+      for (const i of list) if (i.paneId !== CANDLE_PANE_ID) byPane.set(i.paneId, [...(byPane.get(i.paneId) ?? []), i]);
+      for (const p of [...foldedPanes.current]) if (!byPane.has(p)) foldedPanes.current.delete(p);
+      for (const [paneId, studies] of byPane) {
+        const hidden = studies.every((i) => !i.visible);
+        if (hidden === foldedPanes.current.has(paneId)) continue;
+        if (hidden) {
+          foldedPanes.current.add(paneId);
+          c.setPaneOptions({ id: paneId, height: PANE_FOLDED, minHeight: PANE_FOLDED, dragEnabled: false });
+        } else {
+          foldedPanes.current.delete(paneId);
+          const h = studies.find((i) => i.spec.height)?.spec.height ?? paneHeight();
+          c.setPaneOptions({ id: paneId, height: Math.max(PANE_HEIGHT_MIN, Math.min(PANE_HEIGHT_MAX, h)), minHeight: PANE_HEIGHT_MIN, dragEnabled: true });
+        }
+      }
+    },
+    [paneHeight],
+  );
   const commitIndicators = useCallback(
     (next: ActiveIndicator[], persist = true) => {
       indicatorsRef.current = next;
       setIndicators(next);
+      if (chart.current) fitPanes(chart.current, next);
       // The pane is stored as a group key - the pane id it has now - so studies
       // that share a pane come back sharing one (mountIndicator).
       if (persist) {
@@ -2220,14 +2299,9 @@ function Chart({
         );
       }
     },
-    [setStoredSpecs],
+    [setStoredSpecs, fitPanes],
   );
 
-  /** A new pane's height: a fifth of the plot, within bounds. */
-  const paneHeight = useCallback((): number => {
-    const h = holder.current?.clientHeight ?? 0;
-    return Math.max(PANE_HEIGHT_MIN, Math.min(140, Math.round(h * PANE_SHARE) || 80));
-  }, []);
 
   /** Each study's own calculation, before any price source wrapped it. */
   const baseCalc = useRef(new Map<string, Indicator['calc']>());
@@ -2350,7 +2424,7 @@ function Chart({
     }
     commitIndicators(out, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen]);
+  }, [ready, chartGen, indGen]);
 
   /** Distinct indicator panes, top to bottom. */
   const paneList = (list: ActiveIndicator[]) => [...new Set(list.map((i) => i.paneId))].filter((p) => p !== CANDLE_PANE_ID);
@@ -2533,7 +2607,8 @@ function Chart({
     if (!c) return;
     let changed = false;
     const next = indicatorsRef.current.map((i) => {
-      if (i.paneId === CANDLE_PANE_ID) return i;
+      // A folded pane's height is not the user's: theirs comes back on show.
+      if (i.paneId === CANDLE_PANE_ID || foldedPanes.current.has(i.paneId)) return i;
       const h = Math.round(c.getSize(i.paneId)?.height ?? 0);
       if (h <= 0 || h === i.spec.height) return i;
       changed = true;
@@ -2554,7 +2629,7 @@ function Chart({
 
   // --- drawing tools ---------------------------------------------------------
   /** Every overlay the user drew - never an order or position line. */
-  const userDrawings = (c: KChart) => c.getOverlays().filter((o) => o.name !== ORDER_LINE_OVERLAY);
+  const userDrawings = (c: KChart) => c.getOverlays().filter((o) => !SYSTEM_OVERLAYS.has(o.name));
 
   /** Storage key of the market whose drawings are on the chart (drawingStore.ts). */
   const drawingsKeyRef = useRef<string | null>(null);
@@ -2580,6 +2655,8 @@ function Chart({
   const pendingDrawingMenu = useRef<{ id: string; at: { x: number; y: number }; t: number } | null>(null);
   /** Opens a drawing's menu (set below, read by the overlay events). */
   const drawingMenuRef = useRef<(id: string, at: { x: number; y: number }) => void>(() => undefined);
+  /** The object list reads the overlays themselves: this re-renders it. */
+  const [, bumpList] = useReducer((n: number) => n + 1, 0);
   /** Save the drawings on screen as this market's. Never the one being drawn. */
   const persistDrawings = useCallback(() => {
     const c = chart.current;
@@ -2590,18 +2667,28 @@ function Chart({
       .map((o) => toStored(o, hiddenDrawings.current.has(o.id)))
       .filter((d): d is StoredDrawing => d !== null);
     saveDrawings(key, list);
+    bumpList();
   }, []);
 
   /** The drawing whose style bar is open, if any. */
   const [selected, setSelected] = useState<{ id: string; focusText: boolean } | null>(null);
   /** Re-render after a style change: the bar reads the overlay itself. */
   const [, bumpStyle] = useReducer((n: number) => n + 1, 0);
+  /** A drawing's settings dialog, and the drawing as it was when it opened (Cancel). */
+  const [drawingSettings, setDrawingSettings] = useState<{ id: string; original: DrawingDraft } | null>(null);
+  /** A drawing (or one of its handles) is being dragged: the style bar steps
+   *  aside so it never covers the handle under the pointer. */
+  const [movingDrawing, setMovingDrawing] = useState(false);
+  /** Opens a drawing's settings (set below, read by the overlay events). */
+  const drawingSettingsRef = useRef<(id: string) => void>(() => undefined);
 
   /** The events every user drawing carries, whether drawn now or restored. */
   const drawingEvents = useCallback(
     () => ({
       onSelected: (e: OverlayEvent<unknown>) => {
         selectedDrawing.current = e.overlay.id;
+        // Still being placed: nothing opens over the chart until it is done.
+        if (e.overlay.currentStep !== -1 || e.overlay.id === drawingId.current) return;
         // The library selects what it just finished drawing. Nothing opens
         // over the chart for that (the owner's rule: no words at the top of
         // the chart while drawing); a click on the drawing opens its bar.
@@ -2610,7 +2697,7 @@ function Chart({
         setSelected((s) => (s?.id === e.overlay.id ? s : { id: e.overlay.id, focusText: false }));
       },
       onClick: (e: OverlayEvent<unknown>) => {
-        if (fresh(e.overlay.id)) return;
+        if (fresh(e.overlay.id) || e.overlay.currentStep !== -1 || e.overlay.id === drawingId.current) return;
         selectedDrawing.current = e.overlay.id;
         setSelected((s) => (s?.id === e.overlay.id ? s : { id: e.overlay.id, focusText: false }));
       },
@@ -2634,8 +2721,18 @@ function Chart({
         if (selectedDrawing.current === e.overlay.id) selectedDrawing.current = null;
         setSelected((s) => (s?.id === e.overlay.id ? null : s));
       },
+      // TradingView's: a double click on a drawing opens its settings.
+      onDoubleClick: (e: OverlayEvent<unknown>) => {
+        if (e.overlay.currentStep !== -1 || e.overlay.id === drawingId.current) return;
+        drawingDblAt.current = performance.now();
+        drawingSettingsRef.current(e.overlay.id);
+      },
+      onPressedMoveStart: () => setMovingDrawing(true),
       // A drawing dragged to a new place, or one of its handles moved.
-      onPressedMoveEnd: () => persistDrawings(),
+      onPressedMoveEnd: () => {
+        setMovingDrawing(false);
+        persistDrawings();
+      },
       onRemoved: (e: OverlayEvent<unknown>) => {
         hiddenDrawings.current.delete(e.overlay.id);
         if (selectedDrawing.current === e.overlay.id) selectedDrawing.current = null;
@@ -2721,8 +2818,9 @@ function Chart({
     // The rail's lock reflects what came back: all locked reads as locked.
     setDrawLocked(stored.length > 0 && stored.every((d) => d.lock === true));
     restoringDrawings.current = false;
+    bumpList();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, chartGen, engine, symbol]);
+  }, [ready, chartGen, engine, symbol, drawGen]);
 
   const startRef = useRef<(name: string) => void>(() => undefined);
   const startDrawing = useCallback(
@@ -2733,6 +2831,7 @@ function Chart({
       if (drawingId.current) c.removeOverlay({ id: drawingId.current });
       setOpenMenu(null);
       setDrawing(name);
+      setSelected(null);
       // Drawing while everything is hidden would draw something you cannot see.
       if (drawHiddenRef.current) onHideDrawings(false);
       const text = DEFAULT_TEXT.get(name);
@@ -2844,6 +2943,49 @@ function Chart({
     [persistDrawings],
   );
 
+  /** A drawing as its settings dialog edits it. */
+  const draftOf = (o: Overlay<unknown>): DrawingDraft => {
+    const p = paintOf(o);
+    return {
+      color: p.color,
+      size: p.size,
+      dashed: p.dashed,
+      text: TEXT_TOOLS.has(o.name) ? (typeof o.extendData === 'string' ? o.extendData : '') : null,
+      points: o.points
+        .filter((q) => typeof q.timestamp === 'number' && typeof q.value === 'number')
+        .map((q) => ({ timestamp: q.timestamp as number, value: q.value as number })),
+      lock: o.lock,
+      visible: !hiddenDrawings.current.has(o.id),
+    };
+  };
+  /** Puts a draft on the chart and saves it. */
+  const applyDraft = useCallback(
+    (id: string, d: DrawingDraft) => {
+      const c = chart.current;
+      const o = c?.getOverlays({ id })[0];
+      if (!c || !o) return;
+      if (d.visible) hiddenDrawings.current.delete(id);
+      else hiddenDrawings.current.add(id);
+      c.overrideOverlay({
+        id,
+        styles: drawingStyles(d.color, d.size, d.dashed),
+        lock: d.lock,
+        visible: d.visible && !drawHiddenRef.current,
+        ...(d.points.length === o.points.length ? { points: d.points } : {}),
+        ...(d.text !== null ? { extendData: o.name === 'simpleTag' && d.text === '' ? null : d.text } : {}),
+      });
+      persistDrawings();
+      bumpStyle();
+    },
+    [persistDrawings],
+  );
+  drawingSettingsRef.current = (id: string) => {
+    const o = chart.current?.getOverlays({ id })[0];
+    if (!o) return;
+    setSelected(null);
+    setDrawingSettings({ id, original: draftOf(o) });
+  };
+
   // --- right-click menus --------------------------------------------------------
   /** The chart's right-click menu - a drawing's or a study's - at a viewport point. */
   const [ctxMenu, setCtxMenu] = useState<{ at: { x: number; y: number }; items: ChartMenuItem[] } | null>(null);
@@ -2853,10 +2995,6 @@ function Chart({
     const c = chart.current;
     const o = c?.getOverlays({ id })[0];
     if (!c || !o) return;
-    const select = () => {
-      selectedDrawing.current = id;
-      setSelected({ id, focusText: TEXT_TOOLS.has(o.name) });
-    };
     const stack = (dir: 1 | -1) => {
       const zs = userDrawings(c).filter((d) => d.id !== id).map(realZ);
       const z = dir > 0 ? Math.max(0, ...zs) + 1 : Math.min(0, ...zs) - 1;
@@ -2888,7 +3026,7 @@ function Chart({
     setCtxMenu({
       at,
       items: [
-        { label: 'Settings…', icon: MENU_ICONS.settings, onClick: select },
+        { label: 'Settings…', icon: MENU_ICONS.settings, onClick: () => drawingSettingsRef.current(id) },
         {
           label: 'Hide',
           icon: MENU_ICONS.hide,
@@ -2965,7 +3103,7 @@ function Chart({
       const id = selectedDrawing.current;
       if (!c || !id) return;
       const o = c.getOverlays({ id })[0];
-      if (!o || o.name === ORDER_LINE_OVERLAY || o.lock) return;
+      if (!o || SYSTEM_OVERLAYS.has(o.name) || o.lock) return;
       e.preventDefault();
       c.removeOverlay({ id });
       selectedDrawing.current = null;
@@ -3013,7 +3151,7 @@ function Chart({
     // resting orders off the chart is the kind of thing you only notice after
     // you have stopped watching a stop-loss.
     for (const o of c.getOverlays()) {
-      if (o.name !== ORDER_LINE_OVERLAY) c.removeOverlay({ id: o.id });
+      if (!SYSTEM_OVERLAYS.has(o.name)) c.removeOverlay({ id: o.id });
     }
     drawingId.current = null;
     selectedDrawing.current = null;
@@ -3248,6 +3386,234 @@ function Chart({
   const masked = shownFeed.phase !== 'ready' || guarded;
   maskedRef.current = masked;
 
+  // --- the chart's own marks: executions and news (chartMarks.ts) ------------
+  /** The bar a moment falls in, from the loaded bars (null outside them). */
+  const barLookup = (ts: number): number | null => {
+    const list = chart.current?.getDataList() ?? [];
+    if (list.length === 0 || ts < list[0]!.timestamp) return null;
+    let lo = 0;
+    let hi = list.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (list[mid]!.timestamp <= ts) lo = mid;
+      else hi = mid - 1;
+    }
+    const last = list.length - 1;
+    // Past the newest bar by more than a bar: not loaded, the arithmetic decides.
+    if (lo === last && ts >= list[last]!.timestamp + 2 * intervalToMs(interval)) return null;
+    return list[lo]!.timestamp;
+  };
+  /** A hovered or clicked mark: its tip (executions) or its story list (news). */
+  const [markTip, setMarkTip] = useState<
+    { kind: 'exec'; mark: FillMark; x: number; y: number } | { kind: 'news'; mark: NewsMark; x: number; y: number; pinned: boolean } | null
+  >(null);
+  const markAt = (e: OverlayEvent<unknown>) => ({ x: (e.pageX ?? 0) - window.scrollX, y: (e.pageY ?? 0) - window.scrollY });
+
+  // The account's fills on this market: one read per market, wallet and
+  // account change - through the exchange layer's background queue, so it
+  // waits behind every table on screen.
+  const [fills, setFills] = useState<unknown[]>([]);
+  useEffect(() => {
+    if (!address || !show.executions) {
+      setFills([]);
+      return;
+    }
+    const ctl = new AbortController();
+    sodexAccount
+      .trades(engine, address, { symbol, limit: 200, priority: 'background', signal: ctl.signal })
+      .then((r) => {
+        if (!ctl.signal.aborted) setFills(r.trades);
+      })
+      .catch(() => {
+        /* no arrows this time; the next account change asks again */
+      });
+    return () => ctl.abort();
+  }, [address, engine, symbol, show.executions, refreshToken]);
+
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c) return;
+    c.removeOverlay({ name: EXEC_OVERLAY });
+    setMarkTip((t) => (t?.kind === 'exec' ? null : t));
+    if (!show.executions || masked) return;
+    for (const m of fillMarks(fills, symbol, interval, barLookup)) {
+      c.createOverlay({
+        name: EXEC_OVERLAY,
+        points: [{ timestamp: m.timestamp, value: m.price }],
+        extendData: m,
+        lock: true,
+        onRightClick: (e) => e.preventDefault?.(),
+        // klinecharts 10 never calls onMouseEnter for these (measured); the
+        // first move over the arrow opens its tip instead.
+        onMouseMove: (e) => setMarkTip((t) => (t?.kind === 'exec' && t.mark.key === m.key ? t : { kind: 'exec', mark: m, ...markAt(e) })),
+        onMouseLeave: () => setMarkTip((t) => (t?.kind === 'exec' && t.mark.key === m.key ? null : t)),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, chartGen, fills, show.executions, symbol, interval, masked, wantKey]);
+
+  // News: this coin's latest stories, or the macro ones - one read per market
+  // and choice (the server caches it a minute), again every ten minutes.
+  const coin = newsCoin(sym?.baseCoin);
+  const news = useAsync(
+    () => (show.news === 'macro' ? vsApi.news({ feed: 'latest', category: 5, limit: 50 }) : vsApi.news({ feed: 'latest', coin, limit: 50 })),
+    [show.news, coin],
+    { enabled: show.news === 'macro' || (show.news === 'coin' && !!coin), pollMs: 10 * 60_000 },
+  );
+  // Badges are 14px: zoomed out, the bars that many pixels span share one.
+  const [newsMergeBars, setNewsMergeBars] = useState(1);
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c || show.news === 'off') return;
+    const read = () => setNewsMergeBars(Math.max(1, Math.ceil(18 / Math.max(0.5, c.getBarSpace().bar))));
+    read();
+    c.subscribeAction('onZoom', read);
+    return () => c.unsubscribeAction('onZoom', read);
+  }, [ready, chartGen, show.news]);
+  useEffect(() => {
+    const c = chart.current;
+    if (!ready || !c) return;
+    c.removeOverlay({ name: NEWS_OVERLAY });
+    setMarkTip((t) => (t?.kind === 'news' ? null : t));
+    if (show.news === 'off' || masked) return;
+    const items = news.data?.items ?? [];
+    for (const m of newsMarks(items, interval, barLookup, newsMergeBars * intervalToMs(interval))) {
+      c.createOverlay({
+        name: NEWS_OVERLAY,
+        // The badge sits at the foot of the pane whatever the price; the
+        // value only has to be one the pane can place.
+        points: [{ timestamp: m.timestamp, value: lastBar.current?.close ?? 0 }],
+        extendData: m,
+        lock: true,
+        onRightClick: (e) => e.preventDefault?.(),
+        onMouseMove: (e) => setMarkTip((t) => (t?.kind === 'news' && (t.pinned || t.mark.key === m.key) ? t : { kind: 'news', mark: m, ...markAt(e), pinned: false })),
+        onMouseLeave: () => setMarkTip((t) => (t?.kind === 'news' && !t.pinned && t.mark.key === m.key ? null : t)),
+        onClick: (e) => setMarkTip({ kind: 'news', mark: m, ...markAt(e), pinned: true }),
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, chartGen, news.data, show.news, interval, masked, wantKey, newsMergeBars]);
+  // A pinned story list closes on Escape or a press anywhere else.
+  useEffect(() => {
+    if (!(markTip?.kind === 'news' && markTip.pinned)) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent && e.key !== 'Escape') return;
+      if (e.target instanceof Element && e.target.closest('.kc-news-pop')) return;
+      setMarkTip(null);
+    };
+    const t = window.setTimeout(() => {
+      document.addEventListener('pointerdown', close);
+      document.addEventListener('keydown', close);
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      document.removeEventListener('pointerdown', close);
+      document.removeEventListener('keydown', close);
+    };
+  }, [markTip]);
+
+  // --- snapshot: this chart as data, and back (chart/snapshot.ts) ------------
+  /** A view to show once the snapshot's bars are on screen. */
+  const pendingView = useRef<{ key: string; from: number; to: number } | null>(null);
+  const captureSnapshot = (): ChartSnapshot | null => {
+    const c = chart.current;
+    if (!c) return null;
+    const list = c.getDataList();
+    const range = c.getVisibleRange();
+    const first = list[Math.max(0, Math.min(list.length - 1, range.realFrom))];
+    const last = list[Math.max(0, Math.min(list.length - 1, range.realTo - 1))];
+    return {
+      kind: 'valuedesk.chart',
+      v: 1,
+      takenAt: Date.now(),
+      engine,
+      symbol,
+      interval,
+      priceSource: src,
+      tz,
+      view: first && last ? { from: first.timestamp, to: last.timestamp } : null,
+      lastPrice: list[list.length - 1]?.close ?? null,
+      drawings: userDrawings(c)
+        .filter((o) => o.id !== drawingId.current)
+        .map((o) => toStored(o, hiddenDrawings.current.has(o.id)))
+        .filter((d): d is StoredDrawing => d !== null),
+      indicators: indicatorsRef.current.map((i) => ({ ...i.spec, visible: i.visible, pane: i.paneId === CANDLE_PANE_ID ? 'main' : i.paneId })),
+      show: showRef.current,
+    };
+  };
+  const captureImage = (): string | null => {
+    try {
+      return chart.current?.getConvertPictureUrl(true, 'png', T.bg) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  /** Show a snapshot of this market: its settings, studies, drawings, interval and view. */
+  const applySnapshot = (snap: ChartSnapshot) => {
+    // restoreChart (snapshot.ts) already wrote the drawings, studies and
+    // settings where this chart reads them; these setters show them now.
+    setStoredShow(snap.show);
+    setTz(snap.tz);
+    setPriceSource(snap.priceSource);
+    if (snap.indicators.length) {
+      storedRef.current = snap.indicators;
+      setStoredSpecs(snap.indicators);
+      setIndGen((g) => g + 1);
+    }
+    setDrawGen((g) => g + 1);
+    if (PERIOD_BY_INTERVAL[snap.interval]) setIntervalValue(snap.interval);
+    const toSeries = PERIOD_BY_INTERVAL[snap.interval] ? snap.interval : interval;
+    pendingView.current = snap.view ? { key: feedKey(engine, seriesTicker, toSeries), ...snap.view } : null;
+  };
+  const snapRef = useRef({ capture: captureSnapshot, image: captureImage, apply: applySnapshot, engine, symbol });
+  snapRef.current = { capture: captureSnapshot, image: captureImage, apply: applySnapshot, engine, symbol };
+  const liveChart = useRef<LiveChart | null>(null);
+  if (!liveChart.current) {
+    liveChart.current = {
+      engine: () => snapRef.current.engine,
+      symbol: () => snapRef.current.symbol,
+      capture: () => snapRef.current.capture(),
+      image: () => snapRef.current.image(),
+      apply: (snap) => snapRef.current.apply(snap),
+    };
+  }
+  useEffect(() => registerLiveChart(liveChart.current!), []);
+  // A snapshot restored while this market's chart was not on screen.
+  useEffect(() => {
+    if (!ready) return;
+    const snap = takePendingSnapshot(engine, symbol);
+    if (snap) applySnapshot(snap);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, engine, symbol]);
+  // The snapshot's view, once its bars are on screen.
+  useEffect(() => {
+    const c = chart.current;
+    const v = pendingView.current;
+    if (!c || !v || masked || v.key !== wantKey) return;
+    pendingView.current = null;
+    const list = c.getDataList();
+    const bars = Math.max(1, list.filter((b) => b.timestamp >= v.from && b.timestamp <= v.to).length);
+    const width = c.getSize(CANDLE_PANE_ID)?.width ?? 0;
+    if (width > 0) c.setBarSpace(Math.max(1, Math.min(50, width / (bars + DEFAULT_OFFSET_RIGHT / 4))));
+    c.scrollToTimestamp(v.to);
+  }, [masked, wantKey]);
+
+  /** "Save to folder": the folders UI files it; with none listening, a JSON file. */
+  const saveToFolder = () => {
+    const snap = captureSnapshot();
+    if (!snap) return;
+    const title = `${sym?.displayName ?? symbol} · ${intervalLabel(interval)} · ${new Date(snap.takenAt).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
+    const detail: ChartSaveDetail = { snapshot: snap, title, image: captureImage(), handled: false };
+    window.dispatchEvent(new CustomEvent<ChartSaveDetail>(CHART_SAVE_EVENT, { detail }));
+    if (detail.handled) return;
+    const url = URL.createObjectURL(new Blob([JSON.stringify(snap, null, 2)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = snapshotFileName(snap);
+    a.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
   // A stays off across a new series or scale type (the owner's rule: only the
   // user switches A). klinecharts refits the rebuilt or reloaded axis; once
   // real bars are on screen, hold that fit so the axis is manual again.
@@ -3388,9 +3754,30 @@ function Chart({
   const settingsInd = settingsFor ? indicators.find((i) => i.id === settingsFor.id) : undefined;
   const selDrawing = selected ? chart.current?.getOverlays({ id: selected.id })[0] : undefined;
   const selPaint = selDrawing ? paintOf(selDrawing) : null;
+  /*
+   * Where the style bar sits: the top centre of the plot - unless a handle of
+   * the drawing is up there, where the bar would cover the very point to be
+   * grabbed. Then it sits at the foot of the price pane instead (and back at
+   * the top if handles are at both).
+   */
+  const styleBarTop = (() => {
+    const c = chart.current;
+    if (!c || !selDrawing || selDrawing.points.length === 0) return undefined;
+    const pane = c.getSize(CANDLE_PANE_ID);
+    if (!pane) return undefined;
+    const px = c.convertToPixel(
+      selDrawing.points.map((p) => ({ timestamp: p.timestamp, value: p.value })),
+      { paneId: CANDLE_PANE_ID },
+    ) as Array<{ x?: number; y?: number }>;
+    const ys = px.map((p) => p.y).filter((y): y is number => typeof y === 'number' && Number.isFinite(y));
+    const BAND = 56;
+    const atTop = ys.some((y) => y < BAND);
+    const atFoot = ys.some((y) => y > pane.height - BAND);
+    return atTop && !atFoot ? pane.top + pane.height - 40 : undefined;
+  })();
 
   return (
-    <section className="panel chart kc-panel" ref={root}>
+    <section className="panel chart kc-panel" ref={root} onPointerDownCapture={() => liveChart.current && touchChart(liveChart.current)}>
       <div className="kc-toolbar" ref={toolbar}>
         <div className="kc-tb-group">
           {/* The selected timeframe is WHITE, not amber — see chart.css. Colour
@@ -3642,6 +4029,52 @@ function Chart({
           {/* `kc-fs` only sets it apart from the view group beside it — see
               chart.css. It is not a fifth view, so it does not sit on the
               group's rhythm. */}
+          <div className="menu kc-news-tb" onMouseDown={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className={`kc-ico kc-tb-ico${show.news !== 'off' ? ' on' : ''}`}
+              title="News on the chart"
+              aria-label="News on the chart"
+              aria-haspopup="menu"
+              aria-expanded={newsMenu}
+              onClick={() => setNewsMenu((o) => !o)}
+            >
+              {CHART_ICONS.news}
+            </button>
+            {newsMenu && (
+              <div className="menu-popup kc-news-menu" role="menu">
+                <div className="kc-menu-label">News on the chart</div>
+                <div className="kc-menu-list">
+                  {([['off', 'Off'], ['coin', coin ? `${coin} news` : 'This coin'], ['macro', 'Macro']] as const).map(([id, label]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={show.news === id}
+                      className={show.news === id ? 'on' : ''}
+                      disabled={id === 'coin' && !coin}
+                      onClick={() => {
+                        patchShow({ news: id });
+                        setNewsMenu(false);
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+          <button
+            type="button"
+            className={`kc-ico kc-tb-ico${sidebar ? ' on' : ''}`}
+            title={sidebar ? 'Hide the object list' : 'Object list: drawings, indicators, what the chart shows'}
+            aria-label="Object list"
+            aria-pressed={sidebar}
+            onClick={() => setSidebar(!sidebar)}
+          >
+            {CHART_ICONS.sidebar}
+          </button>
           {canFullscreen && (
             <button
               className={`kc-ico kc-fs${isFull ? ' on' : ''}`}
@@ -3778,9 +4211,12 @@ function Chart({
             </span>
           </div>
         )}
-        {selected && selDrawing && (
+        {selected && selDrawing && !drawingSettings && (
           <DrawingStyleBar
             key={selected.id}
+            hidden={movingDrawing}
+            top={styleBarTop}
+            onSettings={() => drawingSettingsRef.current(selected.id)}
             label={overlayLabel(selDrawing.name)}
             color={selPaint!.color}
             size={selPaint!.size}
@@ -3989,6 +4425,77 @@ function Chart({
           </div>
         </div>
         </div>
+        {sidebar && view === 'chart' && chart.current && (() => {
+          const c = chart.current!;
+          const front = [...userDrawings(c)]
+            .filter((o) => o.id !== drawingId.current)
+            .sort((a, b) => realZ(b) - realZ(a));
+          const text = (o: (typeof front)[number]) => (typeof o.extendData === 'string' && o.extendData.trim() ? `: ${o.extendData.trim().slice(0, 24)}` : '');
+          return (
+            <ChartSidebar
+              symbol={sym?.displayName ?? symbol}
+              coin={coin}
+              drawings={front.map((o) => ({
+                id: o.id,
+                label: `${overlayLabel(o.name)}${text(o)}`,
+                color: paintOf(o).color,
+                visible: !hiddenDrawings.current.has(o.id) && !drawHidden,
+                locked: o.lock,
+              }))}
+              selectedId={selected?.id ?? null}
+              indicators={indicators.map((i) => ({ id: i.id, label: legendName(i.name, i.spec.calcParams ?? [], i.spec.source), visible: i.visible }))}
+              show={show}
+              why={{
+                position: !address ? 'Connect a wallet to see it' : engine !== 'perps' ? 'Spot has no positions' : undefined,
+                orders: !address ? 'Connect a wallet to see them' : undefined,
+                executions: !address ? 'Connect a wallet to see your fills' : undefined,
+                news: news.error && show.news !== 'off' ? 'News did not load' : undefined,
+              }}
+              onShow={patchShow}
+              onSelect={(id) => {
+                selectedDrawing.current = id;
+                setSelected({ id, focusText: false });
+              }}
+              onToggle={(id) => {
+                const hidden = hiddenDrawings.current.has(id) || drawHidden;
+                if (hidden) {
+                  hiddenDrawings.current.delete(id);
+                  if (drawHidden) onHideDrawings(false);
+                  else c.overrideOverlay({ id, visible: true });
+                } else {
+                  hiddenDrawings.current.add(id);
+                  c.overrideOverlay({ id, visible: false });
+                  setSelected((x) => (x?.id === id ? null : x));
+                }
+                persistDrawings();
+              }}
+              onLock={(id) => {
+                const o = c.getOverlays({ id })[0];
+                if (!o) return;
+                c.overrideOverlay({ id, lock: !o.lock });
+                persistDrawings();
+              }}
+              onDelete={(id) => c.removeOverlay({ id })}
+              onMove={(id, to) => {
+                const order = front.filter((o) => o.id !== id);
+                const moved = front.find((o) => o.id === id);
+                if (!moved) return;
+                order.splice(Math.max(0, Math.min(order.length, to)), 0, moved);
+                // Front first: the top of the list gets the highest level.
+                order.forEach((o, i) => setRealZ(o, order.length - i, (zLevel) => c.overrideOverlay({ id: o.id, zLevel })));
+                persistDrawings();
+              }}
+              onIndicatorToggle={toggleIndicator}
+              onIndicatorSettings={(id) => {
+                const ind = indicators.find((i) => i.id === id);
+                if (ind) setSettingsFor({ id, original: ind.spec });
+              }}
+              onIndicatorRemove={removeIndicator}
+              onSave={saveToFolder}
+              onClose={() => setSidebar(false)}
+            />
+          );
+        })()}
       </div>
 
       {/* Depth and Market info mount only while selected. The chart above
@@ -3998,6 +4505,60 @@ function Chart({
       </div>
 
       {ctxMenu && <TabMenu at={ctxMenu.at} items={ctxMenu.items} onClose={closeCtxMenu} />}
+
+      {markTip && createPortal(
+        markTip.kind === 'exec' ? (
+          <div className="kc-mark-tip" role="tooltip" style={{ left: markTip.x + 12, top: markTip.y + 12 }}>
+            <span className={markTip.mark.side === 'buy' ? 'pos' : 'neg'}>{markTip.mark.side === 'buy' ? 'Bought' : 'Sold'}</span>{' '}
+            {fmtQty(markTip.mark.qty, sym?.stepSize)} at {fmtPrice(markTip.mark.price, sym?.tickSize)}
+            {markTip.mark.count > 1 && <span className="kc-mark-dim"> · {markTip.mark.count} fills</span>}
+            <span className="kc-mark-dim"> · {clockText(markTip.mark.last, tz)}</span>
+          </div>
+        ) : (
+          <div
+            className={`kc-news-pop${markTip.pinned ? ' is-pinned' : ''}`}
+            role={markTip.pinned ? 'dialog' : 'tooltip'}
+            aria-label="News on this bar"
+            style={{ left: Math.min(markTip.x - 12, window.innerWidth - 336), top: Math.max(8, markTip.y - 16), transform: 'translateY(-100%)' }}
+          >
+            <div className="kc-news-pop__head">{show.news === 'macro' ? 'Macro news' : `${coin} news`} · {crosshairLabel(markTip.mark.timestamp, intervalToMs(interval), tz)}</div>
+            <ol className="kc-news-pop__list">
+              {(markTip.pinned ? markTip.mark.stories : markTip.mark.stories.slice(0, 3)).map((n) => (
+                <li key={n.id}>
+                  <a href={n.href} target="_blank" rel="noopener noreferrer" className="kc-news-pop__item" tabIndex={markTip.pinned ? 0 : -1}>
+                    <span className="kc-news-pop__time">{clockText(n.time, tz)}{n.author ? ` · ${n.author}` : ''}</span>
+                    <span className="kc-news-pop__title">{n.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+            {!markTip.pinned && markTip.mark.stories.length > 3 && <div className="kc-news-pop__more">+{markTip.mark.stories.length - 3} more - click to list them</div>}
+            <div className="kc-news-pop__src">SoSoValue</div>
+          </div>
+        ),
+        document.body,
+      )}
+
+      {drawingSettings && (() => {
+        const o = chart.current?.getOverlays({ id: drawingSettings.id })[0];
+        if (!o) return null;
+        return (
+          <DrawingSettings
+            key={drawingSettings.id}
+            label={overlayLabel(o.name)}
+            name={o.name}
+            draft={draftOf(o)}
+            tz={tz}
+            intervalMs={intervalToMs(interval)}
+            precision={sym ? precisionOf(sym.tickSize) : 2}
+            onChange={(d) => applyDraft(drawingSettings.id, d)}
+            onClose={(keep) => {
+              if (!keep) applyDraft(drawingSettings.id, drawingSettings.original);
+              setDrawingSettings(null);
+            }}
+          />
+        );
+      })()}
 
       {settingsFor && settingsInd && (
         <IndicatorSettings

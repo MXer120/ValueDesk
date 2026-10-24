@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chooseStep, crosshairLabel, intervalToMs, timeTicks, timestampLookup } from './timeAxis';
+import { chooseStep, crosshairLabel, inputTime, intervalToMs, parseInputTime, timeTicks, timestampLookup } from './timeAxis';
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -88,4 +88,16 @@ test('crosshair label carries the weekday, and the time only intraday', () => {
   assert.equal(crosshairLabel(ts, 5 * MIN, 'utc'), "Sat 24 Oct '26  14:45");
   assert.equal(crosshairLabel(ts, DAY, 'utc'), "Sat 24 Oct '26");
   assert.equal(crosshairLabel(ts, 30 * DAY, 'utc'), "Oct '26");
+});
+
+test('a drawing anchor round-trips through the date field, snapped to its bar', () => {
+  const ts = Date.UTC(2026, 9, 24, 14, 45);
+  assert.equal(inputTime(ts, 'utc'), '2026-10-24T14:45');
+  assert.equal(parseInputTime('2026-10-24T14:45', 'utc', MIN), ts);
+  // 14:47 on a 5m chart is the 14:45 bar; on a daily chart, that day.
+  assert.equal(parseInputTime('2026-10-24T14:47', 'utc', 5 * MIN), ts);
+  assert.equal(parseInputTime('2026-10-24T14:47', 'utc', DAY), Date.UTC(2026, 9, 24));
+  assert.equal(parseInputTime(inputTime(ts, 'local'), 'local', MIN), ts);
+  assert.equal(parseInputTime('', 'utc', MIN), null);
+  assert.equal(parseInputTime('yesterday', 'utc', MIN), null);
 });
