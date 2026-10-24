@@ -105,7 +105,8 @@ function SaveSheet({ draft, onDone }: { draft: FolderDraft; onDone: (r: SavedTo 
       });
       putSummary(item);
       const name = foldersState().list?.folders.find((f) => f.id === folderId)?.name ?? 'your folder';
-      notify('ok', `Saved to ${name}`);
+      // The chart says "Saved <title> to the folder" itself (Chart.tsx exportChart): one toast, not two.
+      if (draft.kind !== 'chart') notify('ok', `Saved to ${name}`);
       onDone({ folderId, itemId: item.id });
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That did not save.');
