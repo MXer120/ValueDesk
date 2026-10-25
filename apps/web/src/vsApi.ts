@@ -156,6 +156,10 @@ export const vsApi = {
     signal?: AbortSignal,
   ) => unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
 
+  /** News from the sources beside SoSoValue (server valuescan/feeds.ts): `ids` comma-separated, newest first. */
+  newsSources: (o: { ids: string; coin?: string; q?: string; limit?: number }, signal?: AbortSignal) =>
+    unwrap<{ items: NewsItem[] }>(`/api/vs/news/sources${qs(o)}`, signal),
+
   /**
    * The economic calendar: the FOMC's meetings, BLS and BEA releases and
    * SoSoValue's macro events (server valuescan/calendar.ts), a week back to

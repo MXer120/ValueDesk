@@ -14,6 +14,8 @@
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts&history   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; history=1 the chart's: the feed as far back as kept, up to 300, hot ones ranked; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/news/sources?ids=whitehouse,watcherguru&coin&q&limit   (news from other sources' RSS feeds, newest first - valuescan/feeds.ts)
+ *   GET /api/vs/logo?domain   (a news source's site icon, read and cached here so the page asks only this origin)
  *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
  *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuescan/releases.ts)
  *   GET /api/vs/fed/live   (the Federal Reserve's current broadcast: its Brightcove HLS stream)
@@ -57,6 +59,7 @@ import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
 import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
 import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
+import { feedNews, logoDomain, parseFeedQuery, siteLogo } from '../valuescan/feeds.js';
 import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuescan/calendar.js';
 import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
 import { fedLive, releaseResults } from '../valuescan/releases.js';
@@ -252,6 +255,28 @@ export async function valuescanRoutes(app: FastifyInstance) {
     } catch (e) {
       return fail(reply, e);
     }
+  });
+
+  /**
+   * News from sources beside SoSoValue (the White House, Watcher.Guru), read from
+   * their RSS feeds and cached - valuescan/feeds.ts. The widget merges them in.
+   */
+  app.get('/api/vs/news/sources', async (req, reply) => {
+    try {
+      const items = await feedNews(parseFeedQuery(req.query as Record<string, unknown>));
+      return { ok: true, items };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** A news source's site icon (feeds.ts siteLogo), a day in the browser too; 404 when the site has none. */
+  app.get('/api/vs/logo', async (req, reply) => {
+    const domain = logoDomain((req.query as Record<string, unknown>).domain);
+    if (!domain) return reply.code(400).send({ ok: false, error: 'domain is not a hostname' });
+    const logo = await siteLogo(domain);
+    if (!logo.body) return reply.code(404).header('cache-control', 'public, max-age=86400').send({ ok: false, error: 'no icon' });
+    return reply.header('content-type', logo.type).header('cache-control', 'public, max-age=86400').send(logo.body);
   });
 
   /**

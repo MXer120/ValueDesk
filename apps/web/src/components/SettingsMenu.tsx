@@ -7,6 +7,7 @@
  *   Layout      lock the trade page's panels, edit them
  *   Security    this browser's trading key: its state, a password or passkey lock
  *               on it (trading/keyLock.ts), auto-lock, a check before money moves
+ *   News        the News widget's sources, each on or off, and its SoSoValue credit
  *   Players     the consents for the Live Feed's and Fed live's players
  *   Legal       the legal pages
  *
@@ -33,13 +34,15 @@ import {
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from '../legal/embeds';
 import { LegalLink } from '../legal/LegalGate';
 import { LEGAL_LABELS, LEGAL_PAGES } from '../router';
+import { NEWS_SOURCES, useCreditHidden, useNewsSources } from './news/newsSources';
 import './SettingsMenu.css';
 
-type Section = 'privacy' | 'layout' | 'security' | 'players' | 'legal';
+type Section = 'privacy' | 'layout' | 'security' | 'news' | 'players' | 'legal';
 const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNode }> = [
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
   { id: 'security', label: 'Security', hint: 'Trading key, lock', icon: <><rect x="4.5" y="9" width="11" height="8" rx="2" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></> },
+  { id: 'news', label: 'News', hint: 'Sources', icon: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 7.5h5M6 10h8M6 12.5h8" /></> },
   { id: 'players', label: 'Players & cookies', hint: 'Video consents', icon: <><rect x="2.5" y="4.5" width="15" height="11" rx="2" /><path d="m8.5 8 4 2-4 2Z" /></> },
   { id: 'legal', label: 'Legal', hint: 'Terms, privacy, licences', icon: <><path d="M6 3h6l3 3v11H6Z" /><path d="M12 3v3h3M8.5 10h4M8.5 13h4" /></> },
 ];
@@ -82,6 +85,7 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
             {section === 'privacy' && <PrivacySection />}
             {section === 'layout' && <LayoutSection hasLayout={hasLayout} dashLocked={dashLocked} gear={gear} close={() => setOpen(false)} />}
             {section === 'security' && <SecuritySection />}
+            {section === 'news' && <NewsSection />}
             {section === 'players' && <PlayersSection />}
             {section === 'legal' && <LegalSection />}
           </div>
@@ -286,6 +290,31 @@ function SecuritySection() {
         </Row>
       </div>
       <p className="stg__note">Withdrawals and transfers are always signed by your wallet too: the lock adds a check here, it does not replace your wallet's.</p>
+    </>
+  );
+}
+
+function NewsSection() {
+  const [isOn, setOn] = useNewsSources();
+  const [creditHidden, setCreditHidden] = useCreditHidden();
+  return (
+    <>
+      <Head title="News" line="Where the News widget's stories come from. Switched off, a source's stories leave every list." />
+      <div className="stg__card">
+        {NEWS_SOURCES.map((s) => (
+          <Row key={s.id} title={s.name} line={s.line}>
+            <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} />
+          </Row>
+        ))}
+        <Row title="The Kobeissi Letter" line="Posts only on X, which needs X's paid API to read" off>
+          <span className="stg__pill">Not available</span>
+        </Row>
+      </div>
+      <div className="stg__card">
+        <Row title="Powered by SoSoValue" line="The credit under the news">
+          <Toggle checked={!creditHidden} onChange={(v) => setCreditHidden(!v)} label="Show the SoSoValue credit" />
+        </Row>
+      </div>
     </>
   );
 }

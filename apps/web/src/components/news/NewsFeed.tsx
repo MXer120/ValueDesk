@@ -8,10 +8,18 @@
  * few - CoinSelect.tsx; every list) and a keyword search, which goes back
  * further than the latest list's 7 days and lists its finds newest first.
  *
- * A story shows its time (the clock, and how long ago), type and author, the
- * headline - or a post's own text - two lines of the story, and, when the
- * filter is not one coin, its coins: a coin this terminal trades opens its
- * chart. Page one refreshes every two minutes; more pages load on demand.
+ * A story shows its source on the left - the outlet's icon and name
+ * (newsSources.tsx) - and its time on the right (the clock, and how long ago),
+ * the headline - or a post's own text - two lines of the story, and, when the
+ * filter is not one coin, its coins, each with its move since the story came
+ * out (moves.ts): a coin this terminal trades opens its chart. Page one
+ * refreshes every two minutes; more pages load on demand.
+ *
+ * Sources (owner, 2026-10-26): SoSoValue's feed, and the White House and
+ * Watcher.Guru (server valuescan/feeds.ts) merged into Latest and a search by
+ * time - each switched on or off in Settings. Their stories have no type, so a
+ * type filter shows SoSoValue's alone. The "Powered by SoSoValue" pill can be
+ * dismissed for good (its x on hover; Settings brings it back).
  *
  * Each story can be saved to one of the wallet's knowledge folders (its
  * bookmark button, or a right-click): folders/bridge.ts saveToFolder - shown
@@ -27,6 +35,8 @@ import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { EconCalendar } from './EconCalendar';
 import { PoweredBy } from './PoweredBy';
+import { FEED_IDS, SourceMark, useCreditHidden, useNewsSources } from './newsSources';
+import { moveSince, useCoinSeries, type PriceSource } from './moves';
 import { focusProps } from '../../chart/newsFocus';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
 import { DRAG_NEWS } from '../../folders/drag';
@@ -50,8 +60,6 @@ export const NEWS_TYPES: ReadonlyArray<{ id: number; label: string }> = [
   { id: 7, label: 'Announcements' },
   { id: 13, label: 'Crypto stocks' },
 ];
-// 5 is not a documented category, and not a filter; SoSoValue files macro news (Bloomberg's) under it.
-const TYPE_LABEL = new Map([...NEWS_TYPES.map((t) => [t.id, t.label] as const), [5, 'Macro'] as const]);
 const MAJORS: CoinChoice[] = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'HYPE'].map((symbol) => ({ symbol }));
 const PAGE = 20;
 
@@ -83,7 +91,7 @@ function marked(text: string, search: string): ReactNode {
   return parts.map((p, i) => (i % 2 ? <mark key={i}>{p}</mark> : <Fragment key={i}>{p}</Fragment>));
 }
 
-export function NewsFeed({ coin, instance, markets, onCoin }: {
+export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
   /** The market on screen's coin (BTC), offered as "This market". */
   coin?: string | null;
   /** A duplicate tab's own filters (dashboard/tradeTabs.tsx): "2" for the second copy. */
@@ -92,6 +100,8 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   markets?: readonly CoinChoice[];
   /** Opens a coin's chart (a coin of `markets`). */
   onCoin?: (symbol: string) => void;
+  /** Where a coin's price is read, for its move since a story (moves.ts). */
+  prices?: PriceSource;
 }) {
   const ns = instance ? `.${instance}` : '';
   const [feed, setFeed] = useStored<Feed>(`vs.news.feed${ns}`, 'latest');
@@ -101,6 +111,8 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   const [search, setSearch] = useState('');
   const [pages, setPages] = useState(1);
   const canSave = useSyncExternalStore(onBridgeChange, foldersAvailable, foldersAvailable);
+  const [isOn] = useNewsSources();
+  const [creditHidden, setCreditHidden] = useCreditHidden();
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
   const storyMenu = (e: ReactMouseEvent, n: NewsItem) => {
     if (!canSave) return;
@@ -141,22 +153,44 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
   useEffect(() => setPages(1), [queryKey]);
 
   const onCalendar = f === 'calendar' && !search;
+  const soso = isOn('sosovalue');
+  // The other sources: in Latest and a search, not under a type (they have none).
+  const extraIds = FEED_IDS.filter((id) => isOn(id));
+  const extrasOn = !onCalendar && extraIds.length > 0 && (f === 'latest' || !!search) && !category;
   const ask = (page: number) => vsApi.news({ feed: f === 'calendar' ? 'latest' : f, category, coin: coinParam || undefined, q: search || undefined, page, limit: PAGE });
   // The calendar reads its own (EconCalendar.tsx): no news is asked for meanwhile.
-  const first = useAsync(() => ask(1), [queryKey], { pollMs: 2 * 60_000, enabled: !onCalendar });
+  const first = useAsync(() => ask(1), [queryKey], { pollMs: 2 * 60_000, enabled: !onCalendar && soso });
   const more = useAsync(
     () => (pages < 2 ? Promise.resolve([] as NewsItem[][]) : Promise.all(Array.from({ length: pages - 1 }, (_, i) => ask(i + 2).then((r) => r.items)))),
     [queryKey, pages],
-    { enabled: !onCalendar },
+    { enabled: !onCalendar && soso },
   );
-  const items = useMemo(() => {
+  const extras = useAsync(
+    () => vsApi.newsSources({ ids: extraIds.join(','), coin: coinParam || undefined, q: search || undefined, limit: 60 }),
+    [extraIds.join(','), coinParam, search, extrasOn],
+    { pollMs: 2 * 60_000, enabled: extrasOn },
+  );
+  const sosoItems = useMemo(() => {
     const seen = new Set<string>();
     return [...(first.data?.items ?? []), ...(more.data ?? []).flat()].filter((n) => !seen.has(n.id) && seen.add(n.id));
   }, [first.data, more.data]);
-  const total = first.data?.total ?? null;
-  const canMore = total !== null ? items.length < total : (first.data?.items.length ?? 0) >= PAGE && pages * PAGE <= items.length;
+  const total = soso ? first.data?.total ?? null : 0;
+  const canMore = soso && (total !== null ? sosoItems.length < total : (first.data?.items.length ?? 0) >= PAGE && pages * PAGE <= sosoItems.length);
+  // The other sources' stories, as far back as SoSoValue's pages reach (all of them once there is no more).
+  const items = useMemo(() => {
+    const more = extrasOn ? extras.data?.items ?? [] : [];
+    if (!more.length) return sosoItems;
+    if (!soso) return more;
+    const reach = canMore && sosoItems.length ? Math.min(...sosoItems.map((n) => n.time || Infinity)) : 0;
+    const ranked = f === 'hot' && !search;
+    const merged = [...sosoItems, ...more.filter((n) => n.time >= reach)];
+    return ranked ? merged : merged.sort((a, b) => b.time - a.time);
+  }, [sosoItems, extras.data, extrasOn, soso, canMore, f, search]);
+  const moves = useCoinSeries(items, prices);
   const now = Date.now();
-  const notSetUp = !!first.error && /not configured|not_available/i.test(first.error);
+  const notSetUp = soso && !!first.error && /not configured|not_available/i.test(first.error);
+  const nothingOn = !soso && !extraIds.length;
+  const loading = soso ? !first.data : extrasOn && !extras.data;
   const ranked = f === 'hot' && !search;
   // One coin chosen: every story is about it, so its coins are not repeated under each.
   const chips = chosen.length !== 1;
@@ -184,8 +218,15 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
           ))}
         </div>
       </header>
-      {/* The source's credit floats centred over the bottom of the feed (NewsFeed.css). */}
-      <div className="nw__credit"><PoweredBy more={onCalendar} /></div>
+      {/* The source's credit floats centred over the bottom of the feed (NewsFeed.css); its x dismisses it for good. */}
+      {!creditHidden && (
+        <div className="nw__credit">
+          <PoweredBy more={onCalendar} />
+          <button type="button" className="nw__credit-x" onClick={() => setCreditHidden(true)} aria-label="Hide this for good" title="Hide for good (Settings brings it back)">
+            <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+          </button>
+        </div>
+      )}
       {onCalendar ? <EconCalendar instance={instance} /> : <>
       <div className="nw__filters">
         {(f === 'latest' || search) && (
@@ -224,11 +265,13 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
       {ranked && <p className="nw__note">SoSoValue's hottest stories right now, hottest first.</p>}
 
       <div className="nw__list">
-        {notSetUp ? (
+        {nothingOn ? (
+          <EmptyState icon="news" title="Every news source is off" line="Switch one on in Settings, under News." />
+        ) : notSetUp && !extrasOn ? (
           <EmptyState icon="news" title="News is not set up yet" line="The SoSoValue key has not been added to the server." />
-        ) : first.error && !first.data ? (
+        ) : soso && first.error && !first.data && !extras.data?.items.length ? (
           <EmptyState icon="news" title="News did not load" line={first.error} />
-        ) : !first.data ? (
+        ) : loading && !items.length ? (
           <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading…</p>
         ) : items.length === 0 ? (
           <EmptyState
@@ -244,27 +287,30 @@ export function NewsFeed({ coin, instance, markets, onCoin }: {
                 <div className="nw__body">
                   <a className="nw__item" href={n.href} target="_blank" rel="noopener noreferrer">
                     <span className="nw__meta">
+                      <SourceMark n={n} />
                       {n.time > 0 && (
                         <time dateTime={new Date(n.time).toISOString()} title={new Date(n.time).toLocaleString()}>
                           <span className="nw__clock">{clock(n.time, now)}</span>
                           <span className="nw__ago">{ago(n.time, now)}</span>
                         </time>
                       )}
-                      {n.category != null && TYPE_LABEL.has(n.category) && <span className="nw__tag">{TYPE_LABEL.get(n.category)}</span>}
-                      {n.author && <span className="nw__by">{n.author}</span>}
                     </span>
                     <span className={`nw__title${n.post ? ' is-post' : ''}`}>{search ? marked(n.title, search) : n.title}</span>
                     {n.summary && <span className="nw__sum">{n.summary}</span>}
                   </a>
                   {chips && n.symbols.length > 0 && (
                     <span className="nw__coins">
-                      {n.symbols.map((s) => (tradeable.has(s) && onCoin ? (
-                        <button key={s} type="button" className="nw__coin is-link" onClick={() => onCoin(s)} title={`Open the ${s} chart`}>
-                          <CoinIcon coin={s} size={13} />{s}
-                        </button>
-                      ) : (
-                        <span key={s} className="nw__coin"><CoinIcon coin={s} size={13} />{s}</span>
-                      )))}
+                      {n.symbols.map((s) => {
+                        const mv = moveSince(moves.get(s), n.time);
+                        const pct = mv == null ? null : <span className={`nw__move ${mv > 0 ? 'is-up' : mv < 0 ? 'is-down' : ''}`} title={`${s} since this story came out`}>{`${mv > 0 ? '+' : ''}${mv.toFixed(Math.abs(mv) < 10 ? 2 : 1)}%`}</span>;
+                        return tradeable.has(s) && onCoin ? (
+                          <button key={s} type="button" className="nw__coin is-link" onClick={() => onCoin(s)} title={`Open the ${s} chart`}>
+                            <CoinIcon coin={s} size={13} />{s}{pct}
+                          </button>
+                        ) : (
+                          <span key={s} className="nw__coin"><CoinIcon coin={s} size={13} />{s}{pct}</span>
+                        );
+                      })}
                     </span>
                   )}
                   {canSave && (
