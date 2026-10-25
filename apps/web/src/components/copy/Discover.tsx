@@ -1,7 +1,7 @@
 /**
  * The Copy page's front: who to copy, and who to trade against.
  *
- * A hero with a fanned deck of the best traders of both kinds, then the grid
+ * A hero with a whale drawn in dots (DotWhale.tsx), then the grid
  * of both copy venues' boards - categories, filters, a sort, $ or %, cards or a
  * list. Top traders (the default) mixes the boards' best hundred, to copy, with
  * their worst hundred, to counter-trade, each card glowing in its side's colour
@@ -21,11 +21,11 @@ import { PlatformSelect } from '../PlatformSelect';
 import { VENUE_LABEL, vsApi, type BoardWindow, type TraderRow, type Venue } from '../../vsApi';
 import {
   CATEGORIES, COPY_VENUES, EQUITY_STEPS, GRID_VENUES, GRID_WINDOWS, NO_FILTERS, SCORE_STEPS, SORTS, WIN_RATE_STEPS,
-  deckOf, filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, winRateLabel,
+  filtersActive, isCopyable, kindOf, mixKinds, normaliseFilters, normaliseVenues, scoreRows, shapeGrid, winRateLabel,
   type Category, type Filters, type GridKind, type Scored, type SortKey,
 } from './gridModel';
 import { Avatar, CoinRow, CopyButton, ScoreMeter, Spark, TraderCard, ViewButton, WINDOW_SHORT, WinRate, useTraderPeek } from './TraderCard';
-import { Deck } from './Deck';
+import { DotWhale } from './DotWhale';
 import { fmtSignedPct, fmtSignedUsd, isAddress } from './setup';
 import { COPY_COST_BPS, WRONG_SIDE_CAP } from './copyScore';
 
@@ -99,7 +99,6 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [kind, scored, scoredCounter, mixed, prefs.category, prefs.filters, prefs.sort, w, q, pasted, prefs.venues.join(',')],
   );
-  const deck = useMemo(() => deckOf(scored, scoredCounter, w, 10), [scored, scoredCounter, w]);
   const nFilters = filtersActive(prefs.filters);
   // What the grid waits on: the board(s) its kind reads.
   const sources = kind === 'counter' ? [worst] : kind === 'copy' ? [boards] : [boards, worst];
@@ -119,7 +118,8 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
             <li>Stop any time</li>
           </ul>
         </div>
-        <Deck picks={deck} w={w} total={mixed.filter((s) => isCopyable(s.row.venue)).length} loading={(boards.loading && !boards.data) || (worst.loading && !worst.data)} onOpen={onOpen} />
+        {/* The hero's art: a whale in dots (owner, 2026-10-25), where the card deck was. */}
+        <DotWhale />
       </section>
 
       {/* The toolbar, as Hyperdash's: the categories and the view on one row, the filters on the next. */}

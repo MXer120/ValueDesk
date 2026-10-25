@@ -186,7 +186,7 @@ export function FocusPage({
         {t && <BiasPill long={t.long} short={t.short} />}
         {t && <span className="coh-d__count">{fmtCount(t.wallets)} wallets holding</span>}
         {chartSym && (
-          <button type="button" className="coh-d__chart" onClick={() => onOpenChart!(chartSym)} title={`Open ${marketName(focus.coin!)} on the trade page`}>
+          <button type="button" className="coh-d__openchart" onClick={() => onOpenChart!(chartSym)} title={`Open ${marketName(focus.coin!)} on the trade page`}>
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <path d="M4 20h16M7 16V9M7 9V6M12 16v-3M12 13V5M17 16v-5M17 11V8" /><path d="M5.5 9h3v6h-3zM10.5 7h3v6h-3zM15.5 9h3v4h-3z" />
             </svg>
