@@ -112,11 +112,6 @@ export function Discover({ onOpen, onCopy, copying, onAddress, onScan }: Discove
         <div className="cpy-hero__text">
           <h1 className="cpy-hero__title">Copy the best traders, <em>trade for trade.</em></h1>
           <p className="cpy-hero__sub">Or trade against the worst. Every trade lands in your own SoDEX account, within your limits.</p>
-          <ul className="cpy-hero__facts">
-            <li>Funds stay in your account</li>
-            <li>Your limits on every copy</li>
-            <li>Stop any time</li>
-          </ul>
         </div>
         {/* The hero's art: a whale in dots (owner, 2026-10-25), where the card deck was. */}
         <DotWhale />
