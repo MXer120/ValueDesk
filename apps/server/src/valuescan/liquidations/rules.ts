@@ -84,7 +84,8 @@ export function sodexTiers(list: readonly SodexSymbol[]): Map<string, Tiers> {
       lb = num(t.maxNotionalValue) ?? Infinity;
       return row;
     });
-    const t = tiersOf(rows);
+    // SoDEX states its liquidation prices at the tier the position is in now (math.ts Tiers.now).
+    const t = tiersOf(rows, { now: true });
     if (t.length) out.set(s.name, t);
   }
   return out;

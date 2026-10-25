@@ -32,13 +32,19 @@ export interface Tier {
   r: number;
   ded: number;
 }
-export type Tiers = readonly Tier[];
+/**
+ * A market's tiers. `now`: the venue publishes liquidation prices at the rate of the
+ * tier the position is in now (SoDEX); without it, at the tier it reaches at that
+ * price (Hyperliquid: an account of shorts on tiered markets, 2026-10-25, implies
+ * rates between two tiers - the deduction of the upper one at the solution).
+ */
+export type Tiers = readonly Tier[] & { readonly now?: boolean };
 
 /**
  * Tiers from lower bounds and rates. A missing deduction is the one that keeps
  * the margin continuous at each bound (Hyperliquid's rule; SoDEX publishes its own).
  */
-export function tiersOf(rows: ReadonlyArray<{ lb: number; r: number; ded?: number | null }>): Tiers {
+export function tiersOf(rows: ReadonlyArray<{ lb: number; r: number; ded?: number | null }>, o: { now?: boolean } = {}): Tiers {
   const sorted = rows.filter((t) => Number.isFinite(t.lb) && t.r > 0 && t.r < 1).slice().sort((a, b) => a.lb - b.lb);
   const out: Tier[] = [];
   for (const t of sorted) {
@@ -46,28 +52,44 @@ export function tiersOf(rows: ReadonlyArray<{ lb: number; r: number; ded?: numbe
     const ded = t.ded != null && Number.isFinite(t.ded) ? t.ded : prev ? prev.ded + t.lb * (t.r - prev.r) : 0;
     out.push({ lb: out.length ? t.lb : 0, r: t.r, ded });
   }
-  return out;
+  return o.now ? Object.assign(out, { now: true }) : out;
 }
 
 /** One rate for every size (Lighter, Arcus). */
 export const flatTiers = (r: number): Tiers => (r > 0 && r < 1 ? [{ lb: 0, r, ded: 0 }] : []);
 
-/** The maintenance margin on a notional. */
-export function mmOf(t: Tiers, notional: number): number {
+/** The tier a notional falls in. */
+export function tierAt(t: Tiers, notional: number): Tier | undefined {
   let tier = t[0];
-  if (!tier) return 0;
   for (const x of t) if (notional >= x.lb) tier = x;
-  return notional * tier.r - tier.ded;
+  return tier;
+}
+
+/** The maintenance margin on a notional; `at`: at the rate of the tier that notional falls in (default: its own). */
+export function mmOf(t: Tiers, notional: number, at = notional): number {
+  const tier = tierAt(t, at);
+  return tier ? notional * tier.r - tier.ded : 0;
 }
 
 /**
  * The price p > 0 where `fixed + s·p = mm(|s|·p)`: a position of signed size s
  * whose account holds `fixed` beside it. Null when there is none - a long whose
  * account can carry it to zero.
+ *
+ * `now`, the position's notional now: on a venue whose tiers say so (Tiers.now:
+ * SoDEX, 2026-10-25 - an account of 92 small shorts whose far liquidation prices
+ * would cross tier bounds; every published figure is the current tier's line) the
+ * rate is that tier's. Otherwise the tier is the one at the solution.
  */
-export function solveLiq(t: Tiers, s: number, fixed: number): number | null {
+export function solveLiq(t: Tiers, s: number, fixed: number, now?: number): number | null {
   if (!s || !t.length || !Number.isFinite(fixed)) return null;
   const a = Math.abs(s);
+  if (now !== undefined && t.now) {
+    const { r, ded } = tierAt(t, now)!;
+    const den = s - a * r;
+    const p = den ? (-ded - fixed) / den : NaN;
+    return p > 0 ? p : null;
+  }
   for (let i = 0; i < t.length; i++) {
     const { r, ded, lb } = t[i]!;
     const den = s - a * r;
@@ -118,9 +140,11 @@ export function accountLiqs(cash: number | null, pos: readonly LiqPos[], priceOf
     if (p.fix != null) return p.fix > 0 ? p.fix : null;
     const t = tiersFor(p.symbol);
     if (!t?.length) return null;
-    if (p.iso !== undefined) return p.iso === null ? null : solveLiq(t, p.szi, p.iso);
+    const px = priceOf(p.symbol);
+    const now = px !== null && px > 0 ? Math.abs(p.szi) * px : undefined;
+    if (p.iso !== undefined) return p.iso === null ? null : solveLiq(t, p.szi, p.iso, now);
     if (!crossOk) return null;
-    return solveLiq(t, p.szi, cash! + cross - parts[i]!);
+    return solveLiq(t, p.szi, cash! + cross - parts[i]!, now);
   });
 }
 
@@ -180,7 +204,7 @@ export function calibrate(read: { cash0: number | null; positions: readonly Read
     if (!p.isolated) return;
     const t = tiersFor(p.symbol);
     let iso: number | null = null;
-    if (p.vliq && t?.length) iso = mmOf(t, Math.abs(p.szi) * p.vliq) - p.szi * p.vliq;
+    if (p.vliq && t?.length) iso = mmOf(t, Math.abs(p.szi) * p.vliq, t.now && p.mark !== null ? Math.abs(p.szi) * p.mark : undefined) - p.szi * p.vliq;
     else if (p.isoValue != null && p.mark !== null) iso = p.isoValue - p.szi * p.mark;
     out.pos[i] = { iso, lev: p.lev ?? null };
   });
@@ -203,7 +227,7 @@ export function calibrate(read: { cash0: number | null; positions: readonly Read
   if (ok && best >= 0) {
     const p = ps[best]!;
     const t = tiersFor(p.symbol)!;
-    const fixed = mmOf(t, Math.abs(p.szi) * p.vliq!) - p.szi * p.vliq!;
+    const fixed = mmOf(t, Math.abs(p.szi) * p.vliq!, t.now ? Math.abs(p.szi) * p.mark! : undefined) - p.szi * p.vliq!;
     out.cash = fixed - (cross - parts[best]!);
   } else if (ok && read.cash0 !== null && Number.isFinite(read.cash0)) {
     let cash = read.cash0;

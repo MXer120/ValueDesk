@@ -105,6 +105,23 @@ test('prices move every cross figure; a print moves the cash', () => {
   assert.ok(moved[0]! > after[0]!);
 });
 
+test('tiers: SoDEX prices at the tier the position is in now, Hyperliquid at the tier it reaches', () => {
+  // A small short (tier 0 now) whose liquidation price is far enough to reach tier 1 there.
+  const rows = [{ lb: 0, r: 0.05 }, { lb: 125_000, r: 0.1, ded: 6250 }];
+  const hl = tiersOf(rows);
+  const sd = tiersOf(rows, { now: true });
+  const s = -0.038;
+  const fixed = 15_000_000; // the account's cash beside it
+  const now = 0.038 * 160; // $6 of notional now
+  const atNow = solveLiq(sd, s, fixed, now)!;
+  near(atNow, fixed / (0.038 * 1.05)); // tier 0's line
+  const atPrice = solveLiq(hl, s, fixed, now)!;
+  near(atPrice, (fixed + 6250) / (0.038 * 1.1)); // tier 1 at the solution
+  // From SoDEX's figure, its calibration reproduces it (the venue's live check: 260/260).
+  const c = calibrate({ cash0: null, positions: [{ symbol: 'X', szi: s, mark: 160, vliq: atNow }] }, () => sd);
+  assert.equal(c.matched, 1);
+});
+
 test('a long the venue says cannot be liquidated stays so; a missed figure is kept as read', () => {
   // cash0 says it could be, the venue says none: the cash is raised to keep it none.
   const c = calibrate({ cash0: -50_000, positions: [{ symbol: 'BTC', szi: 1, mark: 80_000, vliq: null }] }, tiersFor);
