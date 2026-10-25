@@ -11,7 +11,7 @@ import {
 } from '../src/valuescan/liquidations/math.js';
 import { SnapBuilder, bucketize, coinLevels, type LevelPos } from '../src/valuescan/liquidations/levels.js';
 import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuescan/liquidations/rules.js';
-import { applyFill, type Book } from '../src/indexer/cohortTracker.js';
+import { applyFill, liqBacklogPrio, type Book } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
 
 const near = (a: number | null, b: number, tol = 1e-6) => assert.ok(a !== null && Math.abs(a - b) <= tol * Math.abs(b), `${a} vs ${b}`);
@@ -230,4 +230,14 @@ test('store: books keep the cash and the extras; snapshots thin and prune', () =
 test('liquidation levels type check helper', () => {
   const l: LevelPos = { venue: 'sodex', address: '0x', symbol: 'BTC-USD', szi: 1, liq: null };
   assert.equal(bucketize([l], 1, 0, 10).buckets.length, 0);
+});
+
+test('the one-time re-read for liquidation prices goes by leverage: the books whose liquidations sit nearest the price first', () => {
+  const size = (eq: number) => Math.round(Math.log10(eq) * 100);
+  const whale = liqBacklogPrio(2_000_000, 10_000_000, size(10_000_000)); // 0.2x
+  const degen = liqBacklogPrio(400_000, 20_000, size(20_000)); // 20x
+  assert.ok(degen > whale);
+  // Above a stale re-read of a large book, below a new wallet the stream saw trade.
+  assert.ok(degen > 900 + size(10_000_000));
+  assert.ok(liqBacklogPrio(1e9, 1, size(1)) <= 1600);
 });

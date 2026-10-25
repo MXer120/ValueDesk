@@ -98,8 +98,8 @@
 .lqm-cum { fill: none; stroke-width: 1.4; }
 .lqm-cum.is-long { stroke: #f28b9a; }
 .lqm-cum.is-short { stroke: #7fe0bd; }
-.lqm-area.is-long { fill: rgba(239, 74, 60, 0.09); }
-.lqm-area.is-short { fill: rgba(0, 180, 129, 0.08); }
+.lqm-area.is-long { fill: rgba(239, 74, 60, 0.16); }
+.lqm-area.is-short { fill: rgba(0, 180, 129, 0.15); }
 .lqm-now { stroke: var(--muted); stroke-dasharray: 4 4; }
 .lqm-now-tag { fill: var(--bg-elevated); stroke: var(--line); }
 .lqm-now-tag.is-solid { fill: var(--neg); stroke: none; }
@@ -184,3 +184,36 @@
 }
 .lqm-cov-row { display: inline-flex; align-items: center; gap: 5px; cursor: help; font-variant-numeric: tabular-nums; }
 .lqm-cov-dim { color: var(--dim); }
+
+/* Zoom and pan (LiveView, ChartView). */
+.lqm-plot { touch-action: none; user-select: none; }
+.lqm-plot.is-drag { cursor: grabbing; }
+.lqm-axis-hit { fill: transparent; cursor: ns-resize; }
+.lqm-zoom {
+  position: absolute;
+  top: 8px;
+  left: 62px;
+  z-index: 2;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(26, 26, 27, 0.85);
+  box-shadow: 0 0 0 1px var(--line-soft);
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.lqm-plot:hover .lqm-zoom { opacity: 1; }
+.lqm-zoom button {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.lqm-zoom button:hover { background: var(--bg-hover); color: var(--text); }
