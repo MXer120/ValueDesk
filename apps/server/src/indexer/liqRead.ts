@@ -2,26 +2,28 @@
  * The liquidation heatmap's reads (API thread): one coin's levels across the
  * chosen venues, the wallets in a price range, and the levels over time.
  *
- * The positions are the cohort books (cohortTracker.ts), as the cohort load
- * holds them (read.ts cohortBooksNow), and their liquidation prices come from
- * liquidations/math.ts at the last prices. Coverage is said, not assumed: per
+ * THE HEATMAP IS A ROW READ. The indexer prices every position of every coin a
+ * minute apart and writes each coin's buckets (cohortTracker.ts recordLiq ->
+ * liq_now); a request reads one row, sums the venues asked for, and leaves the
+ * route edge-cacheable (perf.ts), so a thousand viewers of BTC cost one read a
+ * minute. Only a bucket's wallets (a click) walk the books, from the cohort load
+ * (read.ts cohortBooksNow), where the positions carry their addresses.
+ * Coverage is said, not assumed: per
  * venue, the size the books hold against the venue's own open interest, how
  * much of it has a known liquidation price, and how the math has matched the
  * venue's figures at reads and re-reads (the tracker's DriftStats).
  */
 import type { Venue } from '../valuescan/types.js';
-import { coinOf, type WalletVenue } from '../valuescan/cohorts/model.js';
-import { RESOLUTION, emptyDrift, niceStep, type DriftStats, type Resolution, type Tiers } from '../valuescan/liquidations/math.js';
-import { bucketize, coinLevels, type Bucket, type LevelPos, type LiqSnap } from '../valuescan/liquidations/levels.js';
+import type { WalletVenue } from '../valuescan/cohorts/model.js';
+import { emptyDrift, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
+import { coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuescan/liquidations/levels.js';
+import { inflateRawSync } from 'node:zlib';
 import { venueMarkets, type VenueMarkets } from '../valuescan/liquidations/rules.js';
 import { shownLabel } from '../valuescan/labels.js';
 import { cohortBooksNow } from './read.js';
 import { reader } from './reader.js';
 import { LIQ_ACC_META } from './cohortTracker.js';
 
-/** Levels kept between these shares of the price (the rest is counted as outside). */
-const LO = 0.2;
-const HI = 3;
 const PRICE_ORDER: readonly Venue[] = ['hyperliquid', 'tradexyz', 'lighter', 'sodex', 'arcus'];
 
 export interface VenueCoverage {
@@ -35,7 +37,8 @@ export interface VenueCoverage {
   longKnown: number;
   shortKnown: number;
   positions: number;
-  wallets: number;
+  /** Size whose liquidation price the price has already crossed (being liquidated, or a book a print has not reached): not in the buckets. */
+  past: number;
   price: number | null;
   /** The math against the venue's figures (null when the venue publishes none: Arcus). */
   accuracy: (DriftStats & { window: 'today' | 'yesterday' }) | null;
@@ -48,13 +51,13 @@ export interface VenueCoverage {
 export interface LiqHeatmap {
   coin: string;
   venues: Venue[];
-  resolution: Resolution;
-  /** When the books were last written, and when the load was read. */
+  /** When the indexer priced the books. */
   at: number;
   price: number | null;
+  /** The bucket width; the web groups buckets by what is on screen. */
   step: number;
-  /** [low price, long USD, short USD, long size, short size, long n, short n]. */
-  buckets: Bucket[];
+  /** [bucket index (low price = index x step), long USD, short USD, long n, short n]. */
+  buckets: Array<[number, number, number, number, number]>;
   outside: { long: number; short: number; longN: number; shortN: number };
   coverage: Partial<Record<Venue, VenueCoverage>>;
 }
@@ -103,7 +106,7 @@ function coinIndex(load: Load): Map<string, Map<Venue, Array<[string, WalletVenu
       if (!w.positions?.length) continue;
       const seen = new Set<string>();
       for (const p of w.positions) {
-        const c = coinOf(p.symbol);
+        const c = liqCoin(p.symbol);
         if (seen.has(c)) continue;
         seen.add(c);
         let v = by.get(c);
@@ -138,7 +141,7 @@ function shownAccuracy(a: { cur: DriftStats; prev: DriftStats | null } | undefin
 function marketsOfCoin(m: VenueMarkets | null, coin: string): Array<{ symbol: string; oi: number; px: number | null }> {
   if (!m) return [];
   const out: Array<{ symbol: string; oi: number; px: number | null }> = [];
-  for (const [symbol, x] of m.oi) if (coinOf(symbol) === coin) out.push({ symbol, ...x });
+  for (const [symbol, x] of m.oi) if (liqCoin(symbol) === coin) out.push({ symbol, ...x });
   return out;
 }
 
@@ -168,7 +171,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
     const wallets = idx?.get(venue) ?? [];
     const cov: VenueCoverage = {
       oi: mk.length ? mk.reduce((a, x) => a + x.oi, 0) : null, oiUsd: null,
-      long: 0, short: 0, longKnown: 0, shortKnown: 0, positions: 0, wallets: wallets.length,
+      long: 0, short: 0, longKnown: 0, shortKnown: 0, positions: 0, past: 0,
       price: null, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
     };
     const main = mk.slice().sort((a, b) => b.oi - a.oi)[0];
@@ -188,26 +191,72 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
   return { load, price: ref ? prices.get(ref)! : null, levels, coverage, labels };
 }
 
-const isRes = (r: unknown): r is Resolution => r === 'fine' || r === 'medium' || r === 'coarse';
+/** Parsed liq_now rows, kept until the indexer writes the next (it does a minute apart). */
+const nowCache = new Map<string, { at: number; read: number; row: LiqNow | null }>();
+const NOW_REREAD_MS = 10_000;
 
-export async function liqHeatmap(coin: string, venues: readonly Venue[], res: unknown): Promise<LiqHeatmap | null> {
-  const g = await gather(coin, venues);
-  if (!g) return null;
-  const resolution: Resolution = isRes(res) ? res : 'fine';
-  const price = g.price;
-  const step = price ? niceStep(price * RESOLUTION[resolution]) : 1;
-  const { buckets, outside } = price ? bucketize(g.levels, step, price * LO, price * HI) : { buckets: [], outside: { long: 0, short: 0, longN: 0, shortN: 0 } };
-  return { coin, venues: [...venues], resolution, at: g.load.booksAt, price, step, buckets: buckets.map(roundBucket), outside, coverage: g.coverage };
+function nowRow(coin: string): { at: number; row: LiqNow | null } | null {
+  const s = reader();
+  if (!s) return null;
+  const hit = nowCache.get(coin);
+  if (hit && Date.now() - hit.read < NOW_REREAD_MS) return hit;
+  let got: { at: number; data: Uint8Array } | null = null;
+  try { got = s.liqNow(coin); } catch { /* the table arrives with the indexer's first start */ }
+  let row: LiqNow | null = null;
+  if (got) {
+    if (hit && hit.at === got.at) row = hit.row;
+    else try { row = JSON.parse(inflateRawSync(got.data).toString('utf8')) as LiqNow; } catch { row = null; }
+  }
+  const out = { at: got?.at ?? 0, read: Date.now(), row };
+  if (nowCache.size > 2_000) nowCache.clear();
+  nowCache.set(coin, out);
+  return out;
+}
+
+/** A coin's liquidation levels over the venues asked for, from the indexer's minute row. */
+export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promise<LiqHeatmap | null> {
+  const got = nowRow(coin);
+  if (!got) return null;
+  const row = got.row;
+  const markets = new Map(await Promise.all(venues.map(async (v) => [v, await venueMarkets(v, { oi: true }).catch(() => null)] as const)));
+  const acc = accuracyOf();
+  const sum = new Map<number, [number, number, number, number, number]>();
+  const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
+  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
+  for (const venue of venues) {
+    const m = markets.get(venue) ?? null;
+    const mk = marketsOfCoin(m, coin);
+    const x = row?.v[venue];
+    const main = mk.slice().sort((a, b) => b.oi - a.oi)[0];
+    const price = main?.px ?? null;
+    const oi = mk.length ? mk.reduce((a, y) => a + y.oi, 0) : null;
+    coverage[venue] = {
+      oi, oiUsd: oi !== null && price !== null ? oi * price : null,
+      long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
+      price, accuracy: shownAccuracy(acc[venue]), computed: venue === 'arcus', ...(m ? {} : { noRules: true }),
+    };
+    if (!x) continue;
+    for (const [i, l, sh, ln, sn] of x.b) {
+      const b = sum.get(i);
+      if (b) { b[1] += l; b[2] += sh; b[3] += ln; b[4] += sn; } else sum.set(i, [i, l, sh, ln, sn]);
+    }
+    outside.long += x.o[0]; outside.short += x.o[1]; outside.longN += x.o[2]; outside.shortN += x.o[3];
+  }
+  return {
+    coin, venues: [...venues], at: got.at, price: row?.p ?? null, step: row?.st ?? 1,
+    buckets: [...sum.values()].sort((a, b) => a[0] - b[0]), outside, coverage,
+  };
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
-const roundBucket = (b: Bucket): Bucket => [b[0], Math.round(b[1]), Math.round(b[2]), b[3], b[4], b[5], b[6]];
 
 /** The wallets whose `side` liquidates in [from, to), largest first. */
 export async function liqWallets(coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, limit = 25): Promise<LiqWallets | null> {
   const g = await gather(coin, venues);
   if (!g) return null;
-  const hits = g.levels.filter((l) => l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 : l.szi < 0));
+  const p = g.price;
+  // As the buckets: a long priced above the price (a short below) is past, not a level.
+  const hits = g.levels.filter((l) => l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 && !(p && l.liq >= p) : l.szi < 0 && !(p && l.liq <= p)));
   const rows = hits.map((l): LiqWallet => {
     const usd = Math.abs(l.szi) * l.liq!;
     return {

@@ -13,7 +13,7 @@
  * (server indexer/liqRead.ts) - the heatmap is only as complete as that.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import type { LiqHeatmap as Heat, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
+import type { LiqHeatmap as HeatApi, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
 import { api, type Engine, type Kline } from '../../api';
 import { useStored } from '../../hooks';
 import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
@@ -48,7 +48,21 @@ export function coinOfSymbol(symbol: string): string {
   return head.replace(/^v(?=[A-Z])/, '').toUpperCase();
 }
 
-type Bucket = Heat['buckets'][number];
+/** [low price, long USD, short USD, long size, short size, long n, short n]. */
+type Bucket = [number, number, number, number, number, number, number];
+type Heat = Omit<HeatApi, 'buckets'> & { buckets: Bucket[] };
+
+/** The API's rows ([index, long USD, short USD, long n, short n]) as buckets; sizes are USD over the bucket's middle (0.02% buckets). */
+function fromApi(a: HeatApi): Heat {
+  return {
+    ...a,
+    buckets: a.buckets.map(([i, l, sh, ln, sn]): Bucket => {
+      const lo = +(i * a.step).toPrecision(12);
+      const mid = lo + a.step / 2;
+      return [lo, l, sh, l / mid, sh / mid, ln, sn];
+    }),
+  };
+}
 /** One bucket's figure in the unit shown: [long, short]. */
 const valOf = (b: Bucket, unit: Unit): [number, number] => (unit === 'usd' ? [b[1], b[2]] : [b[3], b[4]]);
 
@@ -134,22 +148,20 @@ function cumulative(h: Heat, unit: Unit): { long: Array<[number, number]>; short
 
 interface Pick { from: number; to: number; side: 'long' | 'short' }
 
-/** Bucket width per resolution, as a share of the price (0.1% read too thin across a wide window). */
-const RES_SHARE: Record<Res, number> = { fine: 0.0025, medium: 0.005, coarse: 0.0125 };
+/** Pixels a bucket takes on screen per resolution: the bucket width follows the zoom and the timeframe. */
+const RES_PX: Record<Res, number> = { fine: 3, medium: 7, coarse: 16 };
+/** Multiples of the server's bucket a group may span: the widths stay round numbers. */
+const MULTIPLES = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
 
-/** A step that reads well: 1, 2, 2.5 or 5 times a power of ten (server liquidations/math.ts niceStep). */
-function niceStep(raw: number): number {
-  if (!(raw > 0) || !Number.isFinite(raw)) return 1;
-  const base = 10 ** Math.floor(Math.log10(raw));
-  const f = raw / base;
-  return (f < 1.5 ? 1 : f < 2.25 ? 2 : f < 3.75 ? 2.5 : f < 7.5 ? 5 : 10) * base;
+/** How many server buckets make one on screen: `span` of price across `px` pixels. */
+export function groupFor(step: number, span: number, px: number, res: Res): number {
+  const want = (span * RES_PX[res]) / Math.max(1, px);
+  return MULTIPLES.find((k) => step * k >= want) ?? MULTIPLES[MULTIPLES.length - 1]!;
 }
 
-/** The server's fine buckets summed into the resolution's: a whole multiple of its step. */
-export function regroup(h: Heat, res: Res): Heat {
-  if (!h.price) return h;
-  const k = Math.max(1, Math.round(niceStep(h.price * RES_SHARE[res]) / h.step));
-  if (k === 1) return h;
+/** Buckets summed `k` server buckets at a time. */
+export function regroup(h: Heat, k: number): Heat {
+  if (k <= 1) return h;
   const step = +(h.step * k).toPrecision(12);
   const by = new Map<number, Bucket>();
   for (const b of h.buckets) {
@@ -172,10 +184,10 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
   useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res]);
 
   const vkey = chosen.join(',');
-  // The server's fine buckets, grouped here: a resolution switch needs no read.
-  const heat = usePolled<Heat>(prefs.view === 'history' ? null : `${coin}|${vkey}`, (s) => vsApi.liquidations(coin, chosen, 'fine', s), 30_000);
-  const raw = heat.data;
-  const h = useMemo(() => (raw ? regroup(raw, prefs.res) : null), [raw, prefs.res]);
+  // One read a minute (the indexer writes the levels a minute apart); the views group the buckets by what is on screen.
+  const heat = usePolled<HeatApi>(prefs.view === 'history' ? null : `${coin}|${vkey}`, (s) => vsApi.liquidations(coin, chosen, 'fine', s), 60_000);
+  const raw = useMemo(() => (heat.data ? fromApi(heat.data) : null), [heat.data]);
+  const h = raw;
 
   return (
     <div className="lqm">
@@ -229,9 +241,9 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
         ) : !h.price || !h.buckets.length ? (
           <p className="lqm-empty">No tracked {coin} positions with a liquidation price on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
         ) : prefs.view === 'live' ? (
-          <LiveView h={h} unit={prefs.unit} onPick={setPick} pick={pick} />
+          <LiveView h={h} unit={prefs.unit} res={prefs.res} onPick={setPick} pick={pick} />
         ) : (
-          <ChartView h={h} unit={prefs.unit} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+          <ChartView h={h} unit={prefs.unit} res={prefs.res} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
         )}
         {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} onClose={() => setPick(null)} />}
       </div>
@@ -321,26 +333,26 @@ const sideOf = (b: Bucket | null, from: number, step: number, p: number): 'long'
 
 const M = { l: 56, r: 60, t: 10, b: 24 };
 
-function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: Pick) => void; pick: Pick | null }) {
+function LiveView({ h: base, unit, res, onPick, pick }: { h: Heat; unit: Unit; res: Res; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
   const [hover, setHover] = useState<number | null>(null);
-  const auto = useMemo(() => windowOf(h), [h]);
+  const auto = useMemo(() => windowOf(base), [base]);
   const [view, setView] = useState<[number, number] | null>(null);
   /** Manual axis scales (null = fit what is shown). */
   const [barMax, setBarMax] = useState<number | null>(null);
   const [cumMax, setCumMax] = useState<number | null>(null);
-  useEffect(() => { setView(null); setBarMax(null); setCumMax(null); }, [h.coin, unit]);
-  const cum = useMemo(() => cumulative(h, unit), [h, unit]);
+  useEffect(() => { setView(null); setBarMax(null); setCumMax(null); }, [base.coin, unit]);
+  const cum = useMemo(() => cumulative(base, unit), [base, unit]);
   const W = Math.max(1, w - M.l - M.r);
   const H = Math.max(1, ht - M.t - M.b);
   // Zoom and pan stay between 0 and the highest short liquidation (or a little past the price).
   const top = useMemo(() => {
-    let t = (h.price ?? 0) * 1.1;
-    for (const b of h.buckets) if (b[2] > 0) t = Math.max(t, b[0] + h.step);
+    let t = (base.price ?? 0) * 1.1;
+    for (const b of base.buckets) if (b[2] > 0) t = Math.max(t, b[0] + base.step);
     return t;
-  }, [h]);
+  }, [base]);
   const clamp = ([a, b]: [number, number]): [number, number] => {
     const span = Math.min(b - a, top);
     let lo2 = a;
@@ -350,13 +362,15 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
     return [lo2, hi2];
   };
   const win = view ?? (auto && clamp(auto));
-  const p = h.price!;
+  const p = base.price!;
   const [lo, hi] = win ?? [p * 0.5, p * 1.5];
+  const k = groupFor(base.step, hi - lo, W, res);
+  const h = useMemo(() => regroup(base, k), [base, k]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
   const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
   const fitCum = Math.max(1e-12, ...[...cum.long, ...cum.short].filter(([px]) => px >= lo && px <= hi).map(([, v]) => v));
-  const maxBar = barMax ?? fitBar * 1.05;
-  const maxCum = cumMax ?? fitCum * 1.05;
+  const maxBar = barMax === null ? fitBar * 1.05 : Math.min(fitBar * 1.05, Math.max(fitBar * 0.02, barMax));
+  const maxCum = cumMax === null ? fitCum * 1.05 : Math.min(fitCum * 1.05, Math.max(fitCum * 0.02, cumMax));
   const x = (v: number) => M.l + ((v - lo) / (hi - lo)) * W;
   const priceAt = (cx: number) => lo + ((cx - M.l) / W) * (hi - lo);
   const yBar = (v: number) => M.t + H - Math.min(1, v / maxBar) * H;
@@ -382,14 +396,15 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
     const r = el!.getBoundingClientRect();
     const cx = e.clientX - r.left;
     const f = wheelFactor(e);
-    if (cx < M.l) setBarMax(maxBar * f);
-    else if (cx > M.l + W) setCumMax(maxCum * f);
+    // A side axis scales its bars up (to read small ones) and back to fit, never smaller than fit.
+    if (cx < M.l) setBarMax(Math.min(fitBar * 1.05, Math.max(fitBar * 0.02, maxBar * f)));
+    else if (cx > M.l + W) setCumMax(Math.min(fitCum * 1.05, Math.max(fitCum * 0.02, maxCum * f)));
     else zoom(f, (cx - M.l) / W);
   });
   const drag = useDrag((dx, dy, start) => {
     setHover(null);
-    if (start.x < M.l) { setBarMax(Math.max(1e-12, maxBar * Math.exp(dy / 150))); return; }
-    if (start.x > M.l + W) { setCumMax(Math.max(1e-12, maxCum * Math.exp(dy / 150))); return; }
+    // A drag that starts on a side axis does nothing (it used to rescale it, and a stray one hid the bars).
+    if (start.x < M.l || start.x > M.l + W) return;
     setView((v) => {
       const [a, b] = v ?? [lo, hi];
       const d = (dx / W) * (b - a);
@@ -436,8 +451,7 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
           ))}
           {ticks(0, maxCum, 4).map((v) => <text key={`r${v}`} x={M.l + W + 6} y={yCum(v) + 3} className="lqm-ax">{fmtAx(v)}</text>)}
           {xs.map((v) => <text key={`x${v}`} x={x(v)} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtPx(v)}</text>)}
-          <rect x={0} y={M.t} width={M.l} height={H} className="lqm-axis-hit" />
-          <rect x={M.l + W} y={M.t} width={M.r} height={H} className="lqm-axis-hit" />
+          
           <g clipPath="url(#lqm-clip-live)">
             {longPath && <path d={`${longPath} V${yCum(0)} Z`} className="lqm-area is-long" />}
             {shortPath && <path d={`${shortPath} V${yCum(0)} Z`} className="lqm-area is-short" />}
@@ -488,22 +502,22 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
 const TF_POLL: Record<Tf, number> = { '1m': 10_000, '5m': 20_000, '15m': 30_000, '1h': 60_000, '4h': 60_000, '1D': 120_000 };
 const CANDLES = 500;
 
-function ChartView({ h, unit, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
+function ChartView({ h: base, unit, res, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; res: Res; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
   const [hover, setHover] = useState<number | null>(null);
   const k = usePolled<Kline[]>(`${engine}|${symbol}|${tf}`, () => api.klines(engine, symbol, tf, CANDLES).then((r) => r.klines), TF_POLL[tf]);
   const candles = useMemo(() => (k.data ?? []).map((c) => ({ t: c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c })).filter((c) => c.h > 0).sort((a, b) => a.t - b.t), [k.data]);
-  const cum = useMemo(() => cumulative(h, unit), [h, unit]);
+  const cum = useMemo(() => cumulative(base, unit), [base, unit]);
   /** Candles shown, and how many back from the newest the view ends. */
   const [span, setSpan] = useState(120);
   const [back, setBack] = useState(0);
   /** The price axis: null follows the candles shown. */
   const [yv, setYv] = useState<[number, number] | null>(null);
   const [profMax, setProfMax] = useState<number | null>(null);
-  useEffect(() => { setYv(null); setBack(0); setProfMax(null); }, [h.coin, tf]);
-  const p = h.price!;
+  useEffect(() => { setYv(null); setBack(0); setProfMax(null); }, [base.coin, tf]);
+  const p = base.price!;
   const R = Math.min(240, Math.max(130, w * 0.28));
   const ML = 8;
   const MR = 62;
@@ -523,6 +537,8 @@ function ChartView({ h, unit, engine, symbol, tf, onPick, pick }: { h: Heat; uni
   const [lo, hi] = yv ?? [aLo - padY, aHi + padY];
   const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
   const priceAt = (py: number) => lo + ((M.t + H - py) / H) * (hi - lo);
+  const group = groupFor(base.step, hi - lo, H, res);
+  const h = useMemo(() => regroup(base, group), [base, group]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
   const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
   const maxBar = profMax ?? fitBar;
@@ -560,7 +576,7 @@ function ChartView({ h, unit, engine, symbol, tf, onPick, pick }: { h: Heat; uni
   const drag = useDrag((dx, dy, start) => {
     setHover(null);
     if (start.x > ML + W) { zoomY(Math.exp(dy / 150)); return; }
-    if (start.x > ML + cw - 4 && start.x <= ML + W) { setProfMax(Math.max(1e-12, maxBar * Math.exp(dx / 150))); return; }
+    if (start.x > ML + cw - 4 && start.x <= ML + W) return;
     setBack((b) => Math.max(0, Math.min(Math.max(0, n - 10), b + dx / slot)));
     const d = (dy / H) * (hi - lo);
     setYv([lo + d, hi + d]);
@@ -837,7 +853,8 @@ function Coverage({ h, coin }: { h: Heat; coin: string }) {
         const matched = acc && acc.checked ? acc.matched / acc.checked : null;
         const tracked = acc && acc.n ? acc.within1 / acc.n : null;
         const title = [
-          `${VENUE_LABEL[v]} ${coin}: the books hold ${fmtSize(c.long)} long and ${fmtSize(c.short)} short in ${c.positions} positions (${c.wallets} wallets)`,
+          `${VENUE_LABEL[v]} ${coin}: the books hold ${fmtSize(c.long)} long and ${fmtSize(c.short)} short in ${c.positions} positions`,
+          c.past > 0 ? `${fmtSize(c.past)} ${coin} more is past its liquidation price (being liquidated, or a book not caught up yet): not in the bars` : '',
           c.oi !== null ? `against open interest of ${fmtSize(c.oi)} ${coin}${c.oiUsd ? ` (${fmtUsdShort(c.oiUsd)})` : ''}` : 'open interest unavailable',
           known !== null ? `${(known * 100).toFixed(1)}% of that size has a known liquidation price` : '',
           c.computed ? `${VENUE_LABEL[v]} publishes no liquidation price: computed from its maintenance margin rules` : '',

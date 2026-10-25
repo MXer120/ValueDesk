@@ -428,7 +428,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
-      const body = await liqHeatmap(coin, cohortVenues(q), q.res);
+      const body = await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

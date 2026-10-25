@@ -74,7 +74,8 @@ import {
 import type { BookPosition, CohortPnlRow } from './store.js';
 import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
 import { setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
-import { SnapBuilder, eachLevel } from '../valuescan/liquidations/levels.js';
+import { LevelsBuilder, eachLevel, liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
+import { deflateRawSync } from 'node:zlib';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -91,7 +92,8 @@ const QUEUE_CAP = 400;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
 
-/** Liquidation snapshots (liq_hist): this often, for this many coins (the most open notional tracked). */
+/** Every coin's liquidation levels (liq_now) this often; a snapshot (liq_hist) every LIQ_STEP_MS, for SoDEX's perps and this many more coins. */
+export const LIQ_NOW_MS = 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
 const LIQ_COINS = 30;
 /** Kept 30 days; past 3 days only the hourly ones. */
@@ -391,6 +393,9 @@ export class CohortTracker {
   private liqAccDirty = false;
   private lastLiqT = 0;
   private liqRecording = false;
+  private lastNowAt = 0;
+  /** How long the last liquidation pass took (status). */
+  private liqMs = 0;
   /** When this tracker started (books read before it without liquidation data are read once more). */
   private startedAt = 0;
   private planMs = 0;
@@ -492,6 +497,7 @@ export class CohortTracker {
       printsApplied: this.applied,
       planMs: this.planMs,
       recordMs: this.recordMs,
+      liqMs: this.liqMs,
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
@@ -1113,37 +1119,45 @@ export class CohortTracker {
     });
   }
 
-  /** Every LIQ_STEP_MS: the liquidation levels of the LIQ_COINS largest coins, per venue (liq_hist). */
+  /**
+   * Every LIQ_NOW_MS: every coin's liquidation levels on every venue, in one pass
+   * over the books in memory (liq_now, deflated: the API serves these rows and
+   * never walks the books for the heatmap). Every LIQ_STEP_MS the same pass also
+   * keeps a snapshot for the historical view (liq_hist) of every coin SoDEX lists
+   * as a perp and of the LIQ_COINS others with the most open notional tracked.
+   */
   private async recordLiq(): Promise<void> {
     const now = this.d.now();
-    const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
-    if (this.liqRecording || t <= this.lastLiqT || !this.members.size) return;
+    if (this.liqRecording || !this.members.size || now - this.lastNowAt < LIQ_NOW_MS - 5_000) return;
     this.liqRecording = true;
+    const started = Date.now();
     try {
       // A coin's price: Hyperliquid's print first, then the other venues'.
       const px = new Map<string, number>();
       for (const v of LIQ_PRICE_ORDER) {
         for (const [k, p] of this.marks) {
           if (!k.startsWith(`${v}|`) || !(p > 0)) continue;
-          const c = coinOf(k.slice(v.length + 1));
+          const c = liqCoin(k.slice(v.length + 1));
           if (!px.has(c)) px.set(c, p);
         }
       }
-      const snaps = new SnapBuilder((c) => px.get(c) ?? null);
+      const levels = new LevelsBuilder((c) => px.get(c) ?? null);
+      const sodexCoins = new Set<string>();
       for (const venue of VENUES) {
         const m = await venueMarkets(venue).catch(() => null);
-        if (!m) continue;
-        const tiersFor = (s: string): Tiers | null => m.tiers.get(s) ?? null;
+        if (venue === 'sodex') for (const sym of m?.tiers.keys() ?? []) sodexCoins.add(liqCoin(sym));
+        const tiersFor = (s: string): Tiers | null => m?.tiers.get(s) ?? null;
         const priceOf = (s: string) => this.marks.get(`${venue}|${s}`) ?? null;
         let batch: Array<[string, { cash: number | null; positions: Array<{ symbol: string; szi: number; iso?: number | null; lev?: number | null; fix?: number | null }> }]> = [];
         const run = () => {
-          eachLevel(venue, batch, priceOf, tiersFor, (coin, szi, liq) => snaps.add(venue, coin, szi, liq));
+          eachLevel(venue, batch, priceOf, tiersFor, (coin, szi, liq, p) => levels.add(venue, coin, szi, liq, p));
           batch = [];
         };
         let t0 = Date.now();
         for (const [address, b] of this.books.get(venue) ?? []) {
-          if (!b.pos.size || b.cash === undefined) continue;
-          batch.push([address, { cash: b.cash, positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) }]);
+          if (!b.pos.size) continue;
+          // A book not priced yet still counts: its size shows as held, not priced.
+          batch.push([address, { cash: b.cash ?? null, positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) }]);
           if (batch.length >= 500) {
             run();
             if (Date.now() - t0 > SLICE_MS) {
@@ -1155,13 +1169,27 @@ export class CohortTracker {
         }
         run();
       }
-      const rows = snaps.top(LIQ_COINS).map(([coin, snap]): [string, string] => [coin, JSON.stringify(snap)]);
+      const rows = levels.rows();
       const s = this.d.store;
-      if (rows.length) s.putLiqHist(t, rows);
-      s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
-      this.lastLiqT = t;
+      s.putLiqNow(now, [...rows].map(([coin, row]): [string, Uint8Array] => [coin, deflateRawSync(JSON.stringify(row))]));
+      this.lastNowAt = now;
+      const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
+      if (t > this.lastLiqT) {
+        const keep = new Set([...sodexCoins, ...levels.ranked().slice(0, LIQ_COINS)]);
+        const hist: Array<[string, string]> = [];
+        for (const coin of keep) {
+          const row = rows.get(coin);
+          if (row) hist.push([coin, JSON.stringify(snapOfNow(row))]);
+        }
+        if (hist.length) s.putLiqHist(t, hist);
+        s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
+        this.lastLiqT = t;
+      }
+    } catch (e) {
+      this.lastError = `liquidations: ${String(e)}`;
     } finally {
       this.liqRecording = false;
+      this.liqMs = Date.now() - started;
     }
   }
 
