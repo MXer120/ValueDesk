@@ -10,14 +10,16 @@
  * the whale so its dark skin spreads over the whole range. The map is inlined in
  * the page's code (no second request), and read as soon as this module loads.
  *
- * The whole body (owner, 2026-10-26): the photo stops at the waterline, so the
- * body is carried on below it (extend()) - the tail stock narrowing along the
- * line of the tail, then a humpback's flukes across its end (notched in the
- * middle, the trailing edge serrated), strongly foreshortened as the tail runs
- * away from a camera below, so the flukes lie in the toolbar's see-through band
- * rather than behind the cards - and drawn past the hero's bottom edge, behind the toolbar and
- * the cards, blurred and dimmer there as if under water. The hero's bottom edge,
- * on the toolbar's divider line, is the surface: everything above it is sharp.
+ * The whole body (owner, 2026-10-26: "fully realistic"): the photo stops at the
+ * waterline, so the body is carried on below it (extend()) at a humpback's
+ * proportions - the body as wide as at the waterline at first, narrowing slowly
+ * into the long slim tail stock, then the flukes: a crescent about one and a half
+ * body widths across, the lobes sweeping back to pointed tips, the trailing edge
+ * concave and scalloped, a deep notch at the middle. It is drawn past the hero's
+ * bottom edge (the surface, on the toolbar's divider line), behind the toolbar and
+ * the cards, blurred and dimmer as if under water - the two crossfaded over a
+ * band either side of the surface, so the whale sinks into the water rather than
+ * being cut there.
  *
  * Little moves: a slow small dip, the dots giving where the pointer passes, the
  * stars twinkling. Still under reduced motion.
@@ -33,11 +35,11 @@ const W = TW + PAD * 2;
 /** How far the whale sinks past the box's bottom edge (tone units). */
 const SINK = 5;
 /** The body carried on below the photo's waterline (tone units), flukes and all, drawn under water. */
-const EXT = 60;
-/** The tail stock's length below the waterline, and the flukes' half-span and deepest chord (tone units). */
-const STOCK = 24;
-const FLUKE_SPAN = 72;
-const FLUKE_CHORD = 17;
+const EXT = 200;
+/** The body and tail stock below the waterline, to where the flukes join (tone units). */
+const STOCK = 150;
+/** Half the band over which sharp turns to under water, either side of the surface (CSS px). */
+const SURFACE_BAND = 14;
 const TE = TH + EXT;
 
 /** `bottom`: the photo's lowest row of whale (the waterline), put on the box's bottom edge. */
@@ -50,12 +52,15 @@ const sm = (a: number, b: number, x: number) => {
 };
 
 /**
- * The body below the waterline. The tail stock: each row's span carried on along
- * the line the tail runs (its centre's drift over the last 40 rows), narrowing to
- * about a third, its shading the average of the photo's last rows at the same
- * place across, darker with depth, with a little grain. Then the flukes across
- * the stock's end: two lobes whose leading edges sweep back from the stock and
- * whose trailing edge is serrated and notched at the middle.
+ * The body below the waterline, at a humpback's proportions. The body and tail
+ * stock: each row's span carried on along the line the tail runs (its centre's
+ * drift over the last 40 rows), as wide as at the waterline at first, then
+ * narrowing slowly to a fifth - the slim stock where the flukes join. Its shading
+ * starts as the photo's last row and turns over 16 rows into the average of the
+ * photo's last rows at the same place across, a little darker with depth, with a
+ * little grain. Then the flukes, across the stock's end: a crescent whose lobes
+ * sweep back to pointed tips, the trailing edge concave and lightly scalloped,
+ * notched deep at the middle; lighter along the leading edge.
  */
 function extend(l: Float32Array, a: Float32Array, bottom: number): void {
   const span = (y: number) => {
@@ -71,22 +76,24 @@ function extend(l: Float32Array, a: Float32Array, bottom: number): void {
   const c0 = (last.lo + last.hi) / 2;
   const w0 = (last.hi - last.lo) / 2;
   const drift = up ? (c0 - (up.lo + up.hi) / 2) / 40 : 0;
-  // The photo's last rows, averaged per place across (-1..1 of the span), for the stock's shading.
+  // The photo's last row, and its last rows averaged, per place across (-1..1 of the span).
+  const lastRow = new Float32Array(41);
   const shade = new Float32Array(41);
   for (let k = 0; k <= 40; k++) {
+    const at = (r: { lo: number; hi: number }) => Math.round((r.lo + r.hi) / 2 + ((k - 20) / 20) * ((r.hi - r.lo) / 2) * 0.92);
+    lastRow[k] = l[base * TW + at(last)]!;
     let sum = 0;
     let n = 0;
     for (let y = base - 24; y <= base; y++) {
       const r = span(y);
       if (!r) continue;
-      const x = Math.round((r.lo + r.hi) / 2 + ((k - 20) / 20) * ((r.hi - r.lo) / 2) * 0.92);
-      sum += l[y * TW + x]!;
+      sum += l[y * TW + at(r)]!;
       n++;
     }
     shade[k] = n ? sum / n : 0.3;
   }
-  const shadeAt = (u: number) => shade[Math.round((Math.max(-1, Math.min(1, u)) + 1) * 20)]!;
-  const grain = (x: number, y: number) => Math.sin(x * 12.9898 + y * 78.233) * 43758.5453 % 1;
+  const across = (arr: Float32Array, u: number) => arr[Math.round((Math.max(-1, Math.min(1, u)) + 1) * 20)]!;
+  const grain = (x: number, y: number) => Math.abs((Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1);
   const put = (x: number, y: number, alpha: number, lum: number) => {
     if (x < 0 || x >= TW || y < 0 || y >= TE) return;
     const i = y * TW + x;
@@ -94,52 +101,55 @@ function extend(l: Float32Array, a: Float32Array, bottom: number): void {
     a[i] = alpha;
     l[i] = Math.max(0, Math.min(1, lum));
   };
-  // The tail stock.
-  const wEnd = w0 * 0.4;
+  // The body and tail stock.
   for (let y = base + 1; y <= base + STOCK; y++) {
     const d = y - base;
     const c = c0 + drift * d;
-    const w = w0 - (w0 - wEnd) * sm(0, STOCK, d) ** 0.85;
-    const dark = 1 - 0.15 * (d / STOCK);
+    const w = w0 * (1 - 0.8 * sm(0.08, 1, d / STOCK) ** 1.2);
+    const dark = 1 - 0.25 * (d / STOCK);
+    const turn = sm(0, 16, d);
     for (let x = Math.floor(c - w - 2); x <= Math.ceil(c + w + 2); x++) {
       const u = (x - c) / w;
-      const edge = 1 - sm(0.9, 1.05, Math.abs(u));
-      if (edge > 0) put(x, y, edge, shadeAt(u) * dark + 0.12 * Math.abs(grain(x, y)) - 0.06);
+      const edge = 1 - sm(0.88, 1.05, Math.abs(u));
+      if (edge <= 0) continue;
+      const tone = across(lastRow, u) * (1 - turn) + across(shade, u) * dark * turn;
+      put(x, y, edge, tone + (0.12 * grain(x, y) - 0.06) * turn);
     }
   }
   // The flukes: across the stock's end, perpendicular to the tail's line.
+  const span2 = 1.45 * w0;
+  const tipSweep = 0.62 * span2;
+  const chord0 = 0.44 * span2;
   const len = Math.hypot(drift, 1);
   const ax = drift / len;
   const ay = 1 / len;
   const px = ay;
   const py = -ax;
   const fx = c0 + drift * STOCK;
-  const fy = base + STOCK - 4;
-  const sweep = 11 / FLUKE_SPAN ** 1.5;
-  const lead = (sAbs: number) => sweep * sAbs ** 1.5;
+  const fy = base + STOCK - 3;
+  const lead = (sAbs: number) => tipSweep * (sAbs / span2) ** 1.7;
   const trail = (s: number) => {
     const sAbs = Math.abs(s);
-    const t = sAbs / FLUKE_SPAN;
-    let chord = FLUKE_CHORD * (1 - t * t) ** 0.55 + 3;
-    chord += 1.6 * Math.abs(Math.sin(s * 0.55)) * (1 - t);
-    chord -= 6 * Math.exp(-(sAbs * sAbs) / 16);
-    return lead(sAbs) + chord;
+    const t = sAbs / span2;
+    let chord = chord0 * (1 - t) ** 0.75;
+    chord += 0.9 * Math.abs(Math.sin(s * 0.8)) * (1 - t) * t * 4;
+    chord -= 0.24 * span2 * Math.exp(-((s / (0.08 * span2)) ** 2));
+    return lead(sAbs) + Math.max(0, chord);
   };
-  const depth = FLUKE_CHORD + lead(FLUKE_SPAN) + 6;
-  for (let y = Math.floor(fy - 6); y <= Math.min(TE - 1, Math.ceil(fy + depth + 6)); y++) {
-    for (let x = Math.floor(fx - FLUKE_SPAN - 6); x <= Math.ceil(fx + FLUKE_SPAN + 6); x++) {
+  const deep = Math.max(chord0, tipSweep) + 6;
+  for (let y = Math.floor(fy - 4); y <= Math.min(TE - 1, Math.ceil(fy + deep + 4)); y++) {
+    for (let x = Math.floor(fx - span2 - 6); x <= Math.ceil(fx + span2 + 6); x++) {
       const dx = x - fx;
       const dy = y - fy;
       const s = dx * px + dy * py;
       const u = dx * ax + dy * ay;
       const sAbs = Math.abs(s);
-      if (sAbs > FLUKE_SPAN) continue;
+      if (sAbs > span2) continue;
       const lo = lead(sAbs);
       const hi = trail(s);
-      if (u < lo - 1.5 || u > hi + 1.5) continue;
-      const edge = Math.min(sm(lo - 1.5, lo + 1, u), 1 - sm(hi - 1, hi + 1.5, u), 1 - sm(FLUKE_SPAN - 3, FLUKE_SPAN, sAbs));
-      // Lighter along the leading edge (as a humpback's underside), darker toward the tips.
-      const lum = 0.6 + 0.25 * (1 - sm(lo, lo + 6, u)) - 0.15 * (sAbs / FLUKE_SPAN) + 0.12 * Math.abs(grain(x, y)) - 0.06;
+      if (u < lo - 1.5 || u > hi + 1.5 || hi - lo < 0.4) continue;
+      const edge = Math.min(sm(lo - 1.5, lo + 1, u), 1 - sm(hi - 1, hi + 1.5, u));
+      const lum = (0.5 + 0.22 * (1 - sm(lo, lo + 5, u)) - 0.1 * (sAbs / span2)) * 0.75 + 0.12 * grain(x, y) - 0.06;
       if (edge > 0) put(x, y, edge, lum);
     }
   }
@@ -228,7 +238,9 @@ export function DotWhale() {
     // The dots are drawn here first, then onto the canvas twice: sharp above the surface, blurred below.
     const off = document.createElement('canvas');
     const octx = off.getContext('2d');
-    if (!ctx || !octx) return;
+    const low = document.createElement('canvas');
+    const lctx = low.getContext('2d');
+    if (!ctx || !octx || !lctx) return;
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let tone: Tone | null = null;
     let dots: Dot[] = [];
@@ -252,8 +264,8 @@ export function DotWhale() {
       canvas.height = Math.max(1, Math.round((r.height + below) * dpr));
       canvas.style.width = `${r.width}px`;
       canvas.style.height = `${r.height + below}px`;
-      off.width = canvas.width;
-      off.height = canvas.height;
+      off.width = low.width = canvas.width;
+      off.height = low.height = canvas.height;
       scale = cssScale * dpr;
       surface = Math.round(r.height * dpr);
       ox = Math.round((canvas.width - W * scale) / 2 + PAD * scale);
@@ -295,34 +307,35 @@ export function DotWhale() {
         octx.arc(ox + (d.x + d.dx) * scale, oy + (d.y + bob + d.dy) * scale, d.r * scale, 0, Math.PI * 2);
         octx.fill();
       }
-      // Above the surface: sharp.
+      // Under water: blurred and dimmer, a little more so with depth, coming in over the band.
+      const band = SURFACE_BAND * dpr;
+      const top = Math.max(0, surface - band);
+      lctx.globalCompositeOperation = 'source-over';
+      lctx.clearRect(0, 0, low.width, low.height);
+      lctx.filter = `blur(${(2 * dpr).toFixed(1)}px)`;
+      lctx.drawImage(off, 0, 0);
+      lctx.filter = 'none';
+      lctx.globalCompositeOperation = 'destination-in';
+      const under = lctx.createLinearGradient(0, top, 0, low.height);
+      const at = (y: number) => Math.min(1, Math.max(0, (y - top) / Math.max(1, low.height - top)));
+      under.addColorStop(0, 'rgba(0,0,0,0)');
+      under.addColorStop(at(surface + band), 'rgba(0,0,0,0.62)');
+      under.addColorStop(1, 'rgba(0,0,0,0.34)');
+      lctx.fillStyle = under;
+      lctx.fillRect(0, 0, low.width, low.height);
+      // Above it: sharp, giving way over the same band.
+      octx.globalAlpha = 1;
+      octx.globalCompositeOperation = 'destination-in';
+      // (destination-in clears whatever it does not cover: the whole canvas is filled, opaque above the band.)
+      const over = octx.createLinearGradient(0, 0, 0, off.height);
+      over.addColorStop(top / off.height, 'rgba(0,0,0,1)');
+      over.addColorStop(Math.min(1, (surface + band) / off.height), 'rgba(0,0,0,0)');
+      octx.fillStyle = over;
+      octx.fillRect(0, 0, off.width, off.height);
+      octx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, canvas.width, surface);
-      ctx.clip();
       ctx.drawImage(off, 0, 0);
-      ctx.restore();
-      // Below it: blurred, dimmer, a little more so with depth.
-      const depth = canvas.height - surface;
-      if (depth > 0) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(0, surface, canvas.width, depth);
-        ctx.clip();
-        ctx.filter = `blur(${(2 * dpr).toFixed(1)}px)`;
-        ctx.globalAlpha = 0.62;
-        ctx.drawImage(off, 0, 0);
-        ctx.filter = 'none';
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = 'destination-out';
-        const fade = ctx.createLinearGradient(0, surface, 0, canvas.height);
-        fade.addColorStop(0, 'rgba(0,0,0,0)');
-        fade.addColorStop(1, 'rgba(0,0,0,0.45)');
-        ctx.fillStyle = fade;
-        ctx.fillRect(0, surface, canvas.width, depth);
-        ctx.restore();
-      }
+      ctx.drawImage(low, 0, 0);
     };
     const loop = (t: number) => {
       if (t - last > 32) { draw(t); last = t; }
