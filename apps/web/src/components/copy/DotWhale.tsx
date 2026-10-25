@@ -3,17 +3,20 @@
  * humpback breaching, taken from a photo and printed four ways, picked with the
  * small switch under it (remembered per browser):
  *
- *   Dots        a stipple print, the dots denser where the photo is lighter.
+ *   Dots        a stipple print, the dots denser where the photo is lighter, round
+ *               stars around it.
  *   Guilloche   a duotone with the crossed wavy lines of a banknote engraving.
  *   Engraving   cream paper and blue ink, lines running along the body, thicker
  *               where the photo is darker (an etching).
- *   Pixel       a dithered grid of dots on black, with a few stars around it.
+ *   Pixel       a dithered grid of dots on black, square stars around it.
  *
  * The photo is cut out by hand and kept as a tone map (whale-tone.png: grey =
  * the photo's light, alpha = the whale), equalised over the whale so its dark
- * skin spreads over the whole range. Little moves (owner, 2026-10-25): a slow
- * small bob, water falling off the tail, the dots giving where the pointer passes,
- * the stars twinkling. Still under reduced motion.
+ * skin spreads over the whole range. The photo hides the far flipper, which read
+ * as a whale with one fin, so the near one is mirrored in behind the body, down
+ * under the throat and in shadow, like the other wing (owner, 2026-10-25).
+ * Little moves: a slow small bob, the dots giving where the pointer passes, the
+ * stars twinkling; no falling water (owner, 2026-10-25). Still under reduced motion.
  */
 import { useEffect, useRef, useState } from 'react';
 import toneUrl from './whale-tone.png';
@@ -27,17 +30,16 @@ const STYLES: Array<{ id: WhaleStyle; label: string }> = [
 ];
 const KEY = 'vs:whale-style';
 
-/** The tone map's size; the box adds room under it for the falling water. */
+/** The tone map's size; the box adds a little room around it. */
 const TW = 478;
 const TH = 252;
 /** Room either side, so the fin tip clears the hero's edge fade. */
 const PAD = 18;
 const W = TW + PAD * 2;
-const H = 290;
+const H = 262;
 
-interface Tone { l: Float32Array; a: Float32Array; drips: Array<[number, number]> }
+interface Tone { l: Float32Array; a: Float32Array }
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
-interface Drop { x: number; y: number; vx: number; vy: number; r: number; life: number; max: number }
 
 let toneOnce: Promise<Tone> | null = null;
 function loadTone(): Promise<Tone> {
@@ -66,12 +68,7 @@ function loadTone(): Promise<Tone> {
       for (let v = 0; v < 256; v++) { run += hist[v]!; cdf[v] = total ? run / total : v / 255; }
       const l = new Float32Array(n);
       for (let i = 0; i < n; i++) l[i] = cdf[raw[i]!]!;
-      // Where water falls off: the tail's right edge, near the surface.
-      const drips: Array<[number, number]> = [];
-      for (let y = TH - 60; y < TH - 2; y += 2) {
-        for (let x = TW - 1; x > TW / 2; x--) if (a[y * TW + x]! > 0.5) { drips.push([x, y]); break; }
-      }
-      ok({ l, a, drips });
+      ok({ l, a });
     };
     img.onerror = () => fail(new Error('whale tone did not load'));
     img.src = toneUrl;
@@ -200,6 +197,9 @@ function sideField(line: Array<[number, number]>): Float32Array {
 /** The body's spine, head tip to tail, and the fin's axis (tone coordinates). */
 const SPINE: Array<[number, number]> = [[0, 44], [60, 50], [130, 58], [200, 72], [262, 94], [312, 124], [352, 160], [384, 202], [410, 252], [420, 290]];
 const FIN_AXIS: Array<[number, number]> = [[270, 70], [330, 38], [400, 18], [470, 14]];
+/** The far flipper (mirrored in behind the body, see the header), and its axis. */
+const FIN2: Array<[number, number]> = [[202, 89], [185, 109], [166, 129], [142, 161], [127, 187], [116, 211], [114, 229], [119, 241], [129, 237], [145, 216], [162, 195], [182, 176], [200, 166], [206, 143]];
+const FIN2_AXIS: Array<[number, number]> = [[232, 110], [183, 144], [139, 189], [107, 241]];
 /** The fin, where the engraving's lines follow its axis instead of the body's. */
 const FIN: Array<[number, number]> = [[264, 26], [294, 19], [324, 11], [369, 4], [404, 3], [434, 5], [454, 14], [463, 26], [454, 34], [424, 39], [394, 46], [364, 56], [344, 69], [318, 62]];
 function inPoly(p: Array<[number, number]>, x: number, y: number): boolean {
@@ -212,12 +212,18 @@ function inPoly(p: Array<[number, number]>, x: number, y: number): boolean {
   return c;
 }
 
-let fields: { body: Float32Array; fin: Float32Array; finMask: Float32Array } | null = null;
+let fields: { body: Float32Array; fin: Float32Array; finMask: Float32Array; fin2: Float32Array; fin2Mask: Float32Array } | null = null;
 function engravingFields() {
   if (fields) return fields;
   const mask = new Float32Array(TW * TH);
-  for (let y = 0; y < TH; y++) for (let x = 0; x < TW; x++) mask[y * TW + x] = inPoly(FIN, x, y) ? 1 : 0;
-  fields = { body: sideField(SPINE), fin: sideField(FIN_AXIS), finMask: mask };
+  const mask2 = new Float32Array(TW * TH);
+  for (let y = 0; y < TH; y++) {
+    for (let x = 0; x < TW; x++) {
+      mask[y * TW + x] = inPoly(FIN, x, y) ? 1 : 0;
+      mask2[y * TW + x] = inPoly(FIN2, x, y) ? 1 : 0;
+    }
+  }
+  fields = { body: sideField(SPINE), fin: sideField(FIN_AXIS), finMask: mask, fin2: sideField(FIN2_AXIS), fin2Mask: mask2 };
   return fields;
 }
 
@@ -233,7 +239,9 @@ function engraving(t: Tone, w: number, h: number, scale: number, ox: number, oy:
     if (a <= 0.01) return;
     const l = samp(t.l, u, v);
     const m = samp(f.finMask, u, v);
-    const dist = samp(f.body, u, v) * (1 - m) + samp(f.fin, u, v) * m;
+    // The far flipper only where the body does not cover it.
+    const m2 = samp(f.fin2Mask, u, v) * (1 - m) * (samp(f.body, u, v) > 0 ? 1 : 0);
+    const dist = samp(f.body, u, v) * (1 - m - m2) + samp(f.fin, u, v) * m + samp(f.fin2, u, v) * m2;
     // The burin's hand: the lines wander a little, and break up in the lights.
     const phase = dist / period + 0.18 * Math.sin(u / 3.3 + v / 9) + 0.1 * Math.sin(u / 1.3 - v / 2.1);
     const off = Math.abs((((phase % 1) + 1) % 1) - 0.5) * 2;
@@ -317,7 +325,6 @@ export function DotWhale() {
     let tone: Tone | null = null;
     let dots: Dot[] = [];
     let print: HTMLCanvasElement | null = null;
-    const drops: Drop[] = [];
     const stars = Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() < 0.15 ? 2 : 1, a: 0.15 + Math.random() * 0.6, ph: Math.random() * Math.PI * 2, sp: 0.3 + Math.random() * 0.8 }));
     const pointer = { x: -1e4, y: -1e4 };
     let scale = 1;
@@ -325,16 +332,8 @@ export function DotWhale() {
     let oy = 0;
     let raf = 0;
     let last = 0;
-    let prev = 0;
     let gone = false;
 
-    const dropColor = style === 'guilloche' ? '#f1d9d6' : style === 'engraving' ? '#f7eedd' : style === 'pixel' ? '#e4e4e4' : '';
-    const spawn = () => {
-      const drips = tone?.drips;
-      if (!drips?.length) return;
-      const [x, y] = drips[Math.floor(Math.random() * drips.length)]!;
-      drops.push({ x: x + (Math.random() - 0.5) * 3, y: y - Math.random() * 3, vx: (Math.random() - 0.5) * 2, vy: 1 + Math.random() * 5, r: 0.7 + Math.random() * 0.9, life: 0, max: 1.4 + Math.random() * 1.8 });
-    };
 
     const build = () => {
       if (!tone) return;
@@ -362,21 +361,27 @@ export function DotWhale() {
       ctx.fill();
     };
     const draw = (t: number) => {
-      const dt = prev ? Math.min(0.05, (t - prev) / 1000) : 0;
-      prev = t;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!tone) return;
       const bob = still ? 0 : Math.sin(t / 4200) * 1.4;
-      if (style === 'pixel') {
-        ctx.fillStyle = '#e4e4e4';
+      if (style === 'pixel' || style === 'dots') {
+        ctx.fillStyle = style === 'pixel' ? '#e4e4e4' : getComputedStyle(el).color || '#e8e8e8';
+        const dpr = Math.min(2, window.devicePixelRatio || 1);
         for (const s of stars) {
           ctx.globalAlpha = s.a * (still ? 1 : 0.55 + 0.45 * Math.sin((t / 1000) * s.sp + s.ph));
-          ctx.fillRect(Math.round(s.x * canvas.width), Math.round(s.y * canvas.height), s.s, s.s);
+          const x = Math.round(s.x * canvas.width);
+          const y = Math.round(s.y * canvas.height);
+          if (style === 'pixel') ctx.fillRect(x, y, s.s, s.s);
+          else {
+            ctx.beginPath();
+            ctx.arc(x, y, s.s * 0.6 * dpr, 0, Math.PI * 2);
+            ctx.fill();
+          }
         }
         ctx.globalAlpha = 1;
       }
       if (print) ctx.drawImage(print, 0, Math.round(bob * scale));
-      ctx.fillStyle = dropColor || getComputedStyle(el).color || '#e8e8e8';
+      ctx.fillStyle = getComputedStyle(el).color || '#e8e8e8';
       if (style === 'dots') {
         const reach = 70 * scale;
         for (const d of dots) {
@@ -395,25 +400,6 @@ export function DotWhale() {
           const tw = still ? 1 : 0.88 + 0.12 * Math.sin((t / 1300) * d.sp + d.ph);
           dot(d.x + d.dx, d.y + bob + d.dy, d.r, d.a * tw);
         }
-      }
-      // The water running off the tail: down under gravity, fading as it falls.
-      if (!still) {
-        if (Math.random() < 0.7) spawn();
-        for (let i = drops.length - 1; i >= 0; i--) {
-          const p = drops[i]!;
-          p.life += dt;
-          p.vy += 55 * dt;
-          p.x += p.vx * dt;
-          p.y += p.vy * dt;
-          if (p.life > p.max || p.y > H + 4) { drops.splice(i, 1); continue; }
-          const a = 0.9 * (1 - p.life / p.max);
-          if (style === 'pixel') {
-            const cell = 2.6 * scale;
-            ctx.globalAlpha = a;
-            ctx.fillRect(Math.round(ox + Math.round(p.x / 2.6) * cell), Math.round(oy + Math.round((p.y + bob) / 2.6) * cell), Math.max(1, cell * 0.42), Math.max(1, cell * 0.42));
-          } else dot(p.x, p.y + bob, p.r, a);
-        }
-        if (drops.length > 700) drops.splice(0, drops.length - 700);
       }
       ctx.globalAlpha = 1;
     };
@@ -438,7 +424,6 @@ export function DotWhale() {
       if (gone) return;
       tone = t;
       build();
-      if (!still) for (let i = 0; i < 45; i++) { spawn(); drops[drops.length - 1]!.life = Math.random() * 1.4; }
       if (still) draw(0);
     }).catch(() => { /* no art, the hero still reads */ });
     if (!still) raf = requestAnimationFrame(loop);
