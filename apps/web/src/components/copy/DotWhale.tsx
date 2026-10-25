@@ -5,7 +5,7 @@
  *
  * The photo (owner, 2026-10-26: a full-body humpback cut out on white) is cut
  * out, its outline smoothed (points and knobs rounded off), its raised flipper
- * bent 40 degrees toward the body at a joint where it leaves it, mirrored so it heads
+ * bent 50 degrees toward the body at a joint where it leaves it, so it lies low, mirrored so it heads
  * left and tilted 26 degrees into a breach (owner, 2026-10-26), and kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
@@ -15,9 +15,9 @@
  * it - the head, both flippers, the front of the body (rows above WATERLINE) - the
  * whale is sharp and fills the hero's box; below it the rest of the body and the
  * flukes run on behind the toolbar and the cards, blurred and dimmer as if under
- * water. The sharp body stays whole down to the surface and gives way to the
- * blurred one over a band below it, so the whale sinks into the water rather than
- * being cut, or thinned above it.
+ * water. The sharp body stays whole down to the surface, gives way over a band
+ * below it to a lightly blurred one at full strength, and that to the blurred,
+ * dimmer one - so the whale sinks into the water with no step in its brightness.
  *
  * Little moves: a slow small dip, the dots giving where the pointer passes, the
  * stars twinkling. Still under reduced motion.
@@ -27,8 +27,8 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 682;
-const WATERLINE = 300;
+const TH = 654;
+const WATERLINE = 288;
 const PAD = 18;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
@@ -93,7 +93,8 @@ function samp(f: Float32Array, x: number, y: number): number {
 /**
  * The stipple: dots dropped where the whale is, kept more often where it is light -
  * the dark skin (the raised flipper) still dotted, so it reads as skin, not a hole -
- * and thinning out over the soft edge.
+ * and dense along the outline whatever the skin there, so the silhouette reads as a
+ * smooth line even where the whale is dark.
  */
 function stipple(t: Tone, count: number): Dot[] {
   const dots: Dot[] = [];
@@ -104,8 +105,9 @@ function stipple(t: Tone, count: number): Dot[] {
     const y = Math.random() * TH;
     const edge = samp(t.a, x, y);
     if (edge < 0.04) continue;
-    const v = 0.16 + 0.84 * Math.pow(samp(t.l, x, y), 1.5);
-    if (Math.random() > v * sm(0.15, 0.7, edge)) continue;
+    let v = 0.16 + 0.84 * Math.pow(samp(t.l, x, y), 1.5);
+    if (edge < 0.92) v = Math.max(v, 0.62);
+    if (Math.random() > v * sm(0.1, 0.5, edge)) continue;
     dots.push({ x, y, r: 0.4 + Math.random() * 0.45 * (0.5 + v), a: 0.3 + 0.7 * v, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
   }
   return dots;
@@ -125,7 +127,9 @@ export function DotWhale() {
     const octx = off.getContext('2d');
     const low = document.createElement('canvas');
     const lctx = low.getContext('2d');
-    if (!ctx || !octx || !lctx) return;
+    const mid = document.createElement('canvas');
+    const mctx = mid.getContext('2d');
+    if (!ctx || !octx || !lctx || !mctx) return;
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let tone: Tone | null = null;
     let dots: Dot[] = [];
@@ -149,8 +153,8 @@ export function DotWhale() {
       canvas.height = Math.max(1, Math.round((r.height + below) * dpr));
       canvas.style.width = `${r.width}px`;
       canvas.style.height = `${r.height + below}px`;
-      off.width = low.width = canvas.width;
-      off.height = low.height = canvas.height;
+      off.width = low.width = mid.width = canvas.width;
+      off.height = low.height = mid.height = canvas.height;
       scale = cssScale * dpr;
       surface = Math.round(r.height * dpr);
       ox = Math.round((canvas.width - W * scale) / 2 + PAD * scale);
@@ -202,13 +206,27 @@ export function DotWhale() {
       lctx.drawImage(off, 0, 0);
       lctx.filter = 'none';
       lctx.globalCompositeOperation = 'destination-in';
+      const at = (y: number) => Math.min(1, Math.max(0, y / low.height));
       const under = lctx.createLinearGradient(0, 0, 0, low.height);
-      under.addColorStop(top / low.height, 'rgba(0,0,0,0)');
-      under.addColorStop(Math.min(1, (surface + band) / low.height), 'rgba(0,0,0,0.85)');
-      under.addColorStop(Math.min(1, (surface + band * 4) / low.height), 'rgba(0,0,0,0.62)');
+      under.addColorStop(at(surface + band), 'rgba(0,0,0,0)');
+      under.addColorStop(at(surface + band * 3), 'rgba(0,0,0,0.85)');
+      under.addColorStop(at(surface + band * 6), 'rgba(0,0,0,0.62)');
       under.addColorStop(1, 'rgba(0,0,0,0.34)');
       lctx.fillStyle = under;
       lctx.fillRect(0, 0, low.width, low.height);
+      // Just under the surface: lightly blurred at full strength, between the sharp body and the blurred one.
+      mctx.globalCompositeOperation = 'source-over';
+      mctx.clearRect(0, 0, mid.width, mid.height);
+      mctx.filter = `blur(${(0.7 * dpr).toFixed(1)}px)`;
+      mctx.drawImage(off, 0, 0);
+      mctx.filter = 'none';
+      mctx.globalCompositeOperation = 'destination-in';
+      const near = mctx.createLinearGradient(0, 0, 0, mid.height);
+      near.addColorStop(at(surface), 'rgba(0,0,0,0)');
+      near.addColorStop(at(surface + band), 'rgba(0,0,0,1)');
+      near.addColorStop(at(surface + band * 3), 'rgba(0,0,0,0)');
+      mctx.fillStyle = near;
+      mctx.fillRect(0, 0, mid.width, mid.height);
       // Above it: sharp, giving way over the same band. (destination-in clears whatever it
       // does not cover: the whole canvas is filled, opaque above the band.)
       octx.globalAlpha = 1;
@@ -221,6 +239,7 @@ export function DotWhale() {
       octx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = 1;
       ctx.drawImage(off, 0, 0);
+      ctx.drawImage(mid, 0, 0);
       ctx.drawImage(low, 0, 0);
     };
     const loop = (t: number) => {
