@@ -66,7 +66,6 @@ import { Collapse } from './motion';
 import { notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
-import { notify } from '../toast';
 import { publishOrderImpact, type RawTake } from '../orderImpact';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
@@ -1305,17 +1304,17 @@ export function OrderEntry({
     engine === 'perps' && activeSl > 0 && effectivePrice > 0
       ? checkStopAgainstLiquidation(activeSl, { ...riskBase, side })
       : null;
-  const stopWarn = stopCheck?.severity === 'warn' ? stopCheck.verdict : null;
-  const warned = useRef<string | null>(null);
-  useEffect(() => {
-    if (!stopWarn || !stopCheck?.message) {
-      warned.current = null;
-      return;
-    }
-    if (warned.current === stopWarn) return;
-    warned.current = stopWarn;
-    notify('warn', stopCheck.message);
-  }, [stopWarn, stopCheck?.message]);
+  /*
+   * A stop against the estimated liquidation price is said by the SL field itself, not
+   * in words (owner, 2026-10-25): red on or past it - the exchange liquidates first -
+   * orange close to it. Only a stop on the wrong side of entry still gets a line.
+   */
+  const slTone = stopCheck?.verdict === 'at-liquidation' || stopCheck?.verdict === 'beyond-liquidation'
+    ? ' is-liq'
+    : stopCheck?.verdict === 'near-liquidation' ? ' is-near-liq' : '';
+  const slTitle = slTone && stopCheck?.liquidationPrice != null
+    ? `Estimated liquidation ${fmtPrice(stopCheck.liquidationPrice, sym?.tickSize)} for a ${side === 'buy' ? 'long' : 'short'}`
+    : undefined;
 
   const liveNotional = sizingPx * liveQty;
   const liveBelow = minNotional !== null && liveNotional > 0 && liveNotional < num(minNotional);
@@ -1847,7 +1846,8 @@ export function OrderEntry({
         {type === 'stop' && (
           <>
             <div className="oe-field">
-              <div className="oe-inputrow">
+              {/* A stop-loss trigger is judged against liquidation like the SL field (slTone). */}
+              <div className={`oe-inputrow${stopKind === 'sl' && !useSl ? slTone : ''}`} title={stopKind === 'sl' && !useSl ? slTitle : undefined}>
                 <label className="oe-inlabel" htmlFor={`${uid}-stop`}>Trigger</label>
                 <input
                   id={`${uid}-stop`}
@@ -2151,7 +2151,7 @@ export function OrderEntry({
                   <span className="oe-suffix">{exitUnit === 'usd' ? '$' : '%'}</span>
                 </div>
 
-                <div className="oe-inputrow">
+                <div className={`oe-inputrow${useSl ? slTone : ''}`} title={useSl ? slTitle : undefined}>
                   <label className="oe-inlabel" htmlFor={`${uid}-sl`}>SL Price</label>
                   <input
                     id={`${uid}-sl`}
@@ -2190,20 +2190,7 @@ export function OrderEntry({
             <strong>{shortAddr(signingAddress ?? undefined)}</strong>.
           </p>
         )}
-        {stopCheck?.message && (
-          <p className={`status ${stopCheck.severity === 'error' ? 'err' : 'warn'}`}>
-            {stopCheck.message}
-            {stopCheck.liquidationPrice !== null && (
-              <>
-                {' '}
-                <span className="muted">
-                  (est. liquidation {fmtPrice(stopCheck.liquidationPrice, sym?.tickSize)} for a{' '}
-                  {side === 'buy' ? 'long' : 'short'})
-                </span>
-              </>
-            )}
-          </p>
-        )}
+        {stopCheck?.severity === 'error' && stopCheck.message && <p className="status err">{stopCheck.message}</p>}
 
         {/* 6. The irreversible control.
          *

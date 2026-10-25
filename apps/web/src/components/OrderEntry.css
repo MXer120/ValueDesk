@@ -1429,3 +1429,10 @@ button.oe-select[aria-expanded='true'] {
 .oe-pop__opt--algo.is-on .oe-algo-ic { color: var(--text); }
 .oe-pop__opt--algo b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .oe-tab--algo .oe-algo-ic { flex: none; }
+
+/* A stop loss against the estimated liquidation price (OrderEntry.tsx slTone): the
+   field says it - red on or past liquidation, orange close to it. */
+.oe-inputrow.is-liq { border-color: var(--neg); background: color-mix(in srgb, var(--neg) 8%, transparent); }
+.oe-inputrow.is-liq .oe-inlabel, .oe-inputrow.is-liq .oe-input { color: var(--neg); }
+.oe-inputrow.is-near-liq { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 8%, transparent); }
+.oe-inputrow.is-near-liq .oe-inlabel, .oe-inputrow.is-near-liq .oe-input { color: #f59e0b; }
