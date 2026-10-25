@@ -723,8 +723,8 @@
   .cpy-msteps { margin-left: 0; }
 }
 
-/* The hero's art (DotWhale.tsx): a whale breaching out of a sea of dots, where the card
-   deck was - large, the hero's wider column, the sea running to its foot; in the text's
+/* The hero's art (DotWhale.tsx): a whale breaching in dots, water running off it, where the card
+   deck was - large, the hero's wider column; in the text's
    own light grey, a soft glow behind the whale. */
 .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); align-items: end; }
 .cpy-whale {
