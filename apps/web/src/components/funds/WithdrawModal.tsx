@@ -57,6 +57,7 @@ import { KNOWN_COINS, chainById } from './addrbook/ContactAvatar';
 import { resolveLook } from './addrbook/detect';
 import { ADDRESS_KIND_LABEL, addressKinds, type AddressKind } from '../../trading/addresses';
 import { ApproveLabel, Avatar, FxSelect, Info, Label, ONE_CONFIRM, SodexMark, Spinner, WalletIcon, WalletMark, short, useStepLabel } from './ui';
+import { announceMoney } from './moneyNotice';
 import './funds.css';
 
 interface Props {
@@ -338,6 +339,10 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       } else {
         setResult({ text: `Withdrew ${amount} ${coin.coin} to your ValueChain wallet.` });
       }
+      // On the wallet button (moneyNotice.ts): a chain withdrawal is submitted here, the rest is done.
+      announceMoney('withdrawId' in r
+        ? { kind: 'withdraw', status: 'sent', text: `Withdrawal of ${amount} ${coin.coin} submitted` }
+        : { kind: 'withdraw', status: 'done', text: `Withdrawal of ${amount} ${coin.coin} completed` });
       markUsed(dest);
       setAmount('');
       setReview(false);

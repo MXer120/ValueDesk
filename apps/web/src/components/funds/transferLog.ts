@@ -4,6 +4,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { pushNotice } from '../../notices';
+import { announceMoney } from './moneyNotice';
 
 export type TransferEnd = 'spot' | 'perps' | 'evm';
 export type TransferStatus = 'pending' | 'success' | 'failed';
@@ -113,8 +114,17 @@ export function finishTransfer(id: string, status: 'success' | 'failed', error?:
   // A failure keeps `settling`, so the drawer marks Pending rather than the last signature.
   write(read().map((e) => (e.id === id ? { ...e, status, settling: status === 'failed' ? e.settling : false, error } : e)));
   const row = read().find((e) => e.id === id);
-  if (row) pushNotice(noticeFor(row));
+  if (row) {
+    pushNotice(noticeFor(row));
+    // On the wallet button too (moneyNotice.ts): money in and out is announced there.
+    const kind = row.from === 'evm' ? 'deposit' : row.to === 'evm' ? 'withdraw' : 'transfer';
+    const what = kind === 'deposit' ? 'Deposit' : kind === 'withdraw' ? 'Withdrawal' : 'Transfer';
+    const where = kind === 'transfer' ? ` to ${END_NAME[row.to] ?? row.to}` : '';
+    announceMoney({ kind, status: status === 'success' ? 'done' : 'failed', text: `${what} of ${row.amount} ${row.coin}${where} ${status === 'success' ? 'completed' : 'failed'}` });
+  }
 }
+
+const END_NAME: Record<string, string> = { spot: 'Spot', perps: 'Futures', evm: 'EVM' };
 
 function noticeFor(e: TransferLogEntry): Parameters<typeof pushNotice>[0] {
   const route = `${e.amount} ${e.coin}`;

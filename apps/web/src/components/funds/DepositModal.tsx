@@ -22,7 +22,7 @@
  * USDC / 1 SOSO activation fee); the sheet then carries on in place: account
  * ready -> Enable trading (one signature) -> move the deposit to Perps.
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
 import { AutoHeight, Collapse, FadeView } from '../motion';
 import { api, type MirrorAsset } from '../../api';
@@ -38,6 +38,7 @@ import { NO_ACCOUNT_TRANSFER } from '../account/useAccountExists';
 import { TransferPanel } from './TransferModal';
 import { useDepositWatch, type DepositStage, type DepositWatch } from './depositWatch';
 import { ApproveLabel, Arrow, Avatar, Chevron, CopyIcon, FxSelect, Info, Label, ONE_CONFIRM, QrIcon, Spinner, WalletMark, short, useStepLabel } from './ui';
+import { announceMoney } from './moneyNotice';
 import './funds.css';
 
 interface Props {
@@ -271,6 +272,14 @@ function TransferCrypto({ owner, mirror, onMirror, configs, firstDeposit }: {
   const [acked, setAcked] = useState<ReadonlySet<string>>(() => new Set());
   /** A deposit that arrived while this sheet was open (SoDEX's own deposit history). */
   const watch = useDepositWatch(owner, true);
+  // An arrived deposit is announced on the wallet button too (moneyNotice.ts), once.
+  const told = useRef<string | null>(null);
+  useEffect(() => {
+    if (!watch || (watch.stage !== 'done' && watch.stage !== 'failed') || told.current === watch.row.id) return;
+    told.current = watch.row.id;
+    const what = `Deposit of ${watch.row.amount ?? ''} ${watch.row.coin}`.replace(/  +/g, ' ');
+    announceMoney({ kind: 'deposit', status: watch.stage === 'done' ? 'done' : 'failed', text: `${what} ${watch.stage === 'done' ? 'completed' : 'failed'}` });
+  }, [watch]);
   /** SoDEX's maintenance for the chosen token (null: being read). */
   const [maint, setMaint] = useState<Maintenance | null>(null);
 

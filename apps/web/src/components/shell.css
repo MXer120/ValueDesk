@@ -228,3 +228,88 @@
   cursor: pointer;
 }
 .side__add:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.3); }
+
+/* --- the notifications' lane in the navbar (NavBar.tsx #vs-notify-slot, toast.tsx) ----
+   The bar's empty right side holds the toasts and the indexing card as compact pills,
+   newest at the right next to the bell; at most three show (older ones step out as new
+   ones come). Each kind reads apart at a glance: its own tint, edge and glyph. */
+.navstatus--rail { flex: 1 1 auto; min-width: 0; justify-content: flex-end; gap: 12px; }
+.navnotify { display: flex; flex: 0 1 auto; justify-content: flex-end; min-width: 0; }
+.toasts.is-docked {
+  position: static; z-index: auto; display: flex; flex-direction: row; align-items: center; gap: 6px;
+  width: auto; max-width: 100%; pointer-events: auto;
+}
+.toasts.is-docked .toasts__live { display: flex; flex-direction: row; align-items: center; gap: 6px; }
+.toasts.is-docked .toasts__live > .toast:nth-last-child(n + 4) { display: none; }
+.toasts.is-docked .toast {
+  flex: 0 1 auto; height: 38px; max-width: 300px; min-width: 0; padding: 0 6px 0 7px; gap: 8px;
+  border-radius: 12px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+  background: color-mix(in srgb, var(--tone, var(--text)) 11%, rgba(24, 24, 26, 0.88));
+  border: 1px solid color-mix(in srgb, var(--tone, var(--text)) 34%, transparent);
+  animation: lane-in 260ms var(--ease-spring);
+}
+.toasts.is-docked .toast.is-leaving { animation: lane-out 170ms var(--ease-out) forwards; }
+@keyframes lane-in { from { opacity: 0; transform: translateY(-8px) scale(0.96); } to { opacity: 1; transform: none; } }
+@keyframes lane-out { to { opacity: 0; transform: translateY(-6px) scale(0.96); } }
+.toasts.is-docked .toast__ic,
+.toasts.is-docked .toast__glyph { width: 24px; height: 24px; }
+.toasts.is-docked .toast__ic .coin-ic { width: 24px !important; height: 24px !important; }
+.toasts.is-docked .toast__badge { right: -3px; bottom: -3px; width: 14px; height: 14px; }
+.toasts.is-docked .toast__badge > svg { width: 9px; height: 9px; }
+.toasts.is-docked .toast__body { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
+.toasts.is-docked .toast__title,
+.toasts.is-docked .toast__detail,
+.toasts.is-docked .toast__msg { overflow: hidden; margin: 0; font-size: 11.5px; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.toasts.is-docked .toast__title { font-size: 12px; }
+.toasts.is-docked .toast__meta { display: none; }
+.toasts.is-docked .toast__retry { height: 22px; border-radius: 7px; }
+.toasts.is-docked .toast__x { width: 20px; height: 20px; }
+.toasts.is-docked .toast__timer { height: 1.5px; }
+/* The kinds: failures red, warnings amber, fills and good news green, a placed order
+   blue, a cancel grey, plain news white. */
+.toasts.is-docked .toast--placed { --tone: #5b8def; }
+.toasts.is-docked .toast--cancelled { --tone: #9aa0a6; }
+.toasts.is-docked .toast--error { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35), 0 0 0 1px color-mix(in srgb, var(--neg) 20%, transparent); }
+
+/* The indexing card in the lane: a pill like the rest; its controls drop below it. */
+.toasts.is-docked .toast.ix-note { height: auto; min-height: 38px; padding-bottom: 0; justify-content: center; overflow: visible; --tone: var(--text); }
+.toasts.is-docked .ix-note__top { gap: 8px; height: 36px; }
+.toasts.is-docked .ix-note__more {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; width: 300px; padding: 0 12px;
+  border-radius: 12px; background: var(--glass-pop-bg); -webkit-backdrop-filter: var(--glass-pop-blur); backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--depth-3, 0 12px 32px rgba(0, 0, 0, 0.5));
+}
+.toasts.is-docked .ix-note__panel { padding: 0; }
+.toasts.is-docked .ix-note:hover .ix-note__panel,
+.toasts.is-docked .ix-note:focus-within .ix-note__panel,
+.toasts.is-docked .ix-note.is-open .ix-note__panel { padding: 12px 0; }
+.toasts.is-docked .ix-note__bar { border-radius: 0 0 12px 12px; }
+@media (prefers-reduced-motion: reduce) { .toasts.is-docked .toast, .toasts.is-docked .toast.is-leaving { animation: none; } }
+
+/* --- money in and out on the wallet button (SideBar.tsx, funds/moneyNotice.ts) ---------
+   A pill widens out of the wallet logo to the right, over the page, and folds back after
+   a few seconds: green when done, blue while a withdrawal is on its way, red on failure. */
+.side__wallet { position: relative; }
+.side__wallet.is-money .side__addr { position: relative; z-index: 2; }
+.side__money {
+  position: absolute; left: 0; bottom: 50%; z-index: 1; display: flex; align-items: center; gap: 8px;
+  height: 44px; max-width: 360px; padding: 0 16px 0 52px; overflow: hidden; transform: translateY(50%);
+  border-radius: 14px; white-space: nowrap;
+  background: color-mix(in srgb, var(--tone) 14%, rgba(22, 22, 24, 0.94));
+  border: 1px solid color-mix(in srgb, var(--tone) 40%, transparent);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  animation: money-open 6.5s var(--ease-out) forwards;
+}
+.side__money.is-done { --tone: var(--pos); }
+.side__money.is-sent { --tone: #5b8def; }
+.side__money.is-failed { --tone: var(--neg); }
+.side__money-ic { display: grid; flex: none; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--tone); background: color-mix(in srgb, var(--tone) 18%, transparent); }
+.side__money-t { color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
+@keyframes money-open {
+  0% { clip-path: inset(0 calc(100% - 44px) 0 0 round 14px); opacity: 0.6; }
+  7% { clip-path: inset(0 0 0 0 round 14px); opacity: 1; }
+  90% { clip-path: inset(0 0 0 0 round 14px); opacity: 1; }
+  100% { clip-path: inset(0 calc(100% - 44px) 0 0 round 14px); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .side__money { animation: none; } }

@@ -198,9 +198,17 @@ export function NavBar({
           ))}
         </nav>
 
-        <div className="navstatus">
+        <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
+          {/*
+           * THE NOTIFICATIONS' LANE (owner, 2026-10-25): the toasts and the indexing card dock
+           * here, in the bar's empty right side, newest at the right (toast.tsx ToastRail portals
+           * into this slot); the bell with its list beside them. Deposits, withdrawals and
+           * transfers announce themselves on the wallet button instead (SideBar.tsx).
+           */}
+          {rail && <div id="vs-notify-slot" className="navnotify" />}
           {/* A restricted (close-only) place: the red pill, always, rail or not (legal/LegalGate.tsx). */}
           <RegionPill address={address} />
+          {rail && <Notices address={address} />}
           {/* ONE settings gear: hide mode, and the page layout (lock / edit). In the rail when it shows. */}
           {!rail && (
             <>

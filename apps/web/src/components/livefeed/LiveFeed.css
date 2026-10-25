@@ -129,15 +129,3 @@
 .dash-panel[data-panel="livefeed"]:has(.lf.is-empty) { background: var(--bg-panel); }
 .dash-panel[data-panel="livefeed"] .dash-panel__body { border-radius: inherit; overflow: hidden; }
 
-/* The next FOMC press conference (the economic calendar): when, and a button to
-   the Fed's own channel; amber while it is live. */
-.lf__fomc {
-  position: absolute; left: 10px; top: 10px; z-index: 4; display: inline-flex; align-items: center; gap: 10px;
-  max-width: calc(100% - 20px); padding: 5px 6px 5px 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px;
-  background: rgba(20, 20, 22, 0.86); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
-  color: var(--muted); font-size: var(--fs-xs);
-}
-.lf__fomc span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lf__fomc b { color: var(--text); font-weight: 600; }
-.lf__fomc.is-live { border-color: color-mix(in srgb, var(--warn) 60%, transparent); }
-.lf__fomc.is-live b { color: var(--warn); }

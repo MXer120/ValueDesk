@@ -93,7 +93,8 @@ export function LiveFeed({ instance }: {
   /*
    * The next FOMC press conference (the economic calendar, server
    * valuescan/calendar.ts): 30 minutes after the 2:00 pm ET statement, on the
-   * Fed's own channel. Within three days, or while it runs, the feed offers it.
+   * Fed's own channel: an off-air Fed channel says when it is next on (no strip over
+   * the player - owner, 2026-10-25).
    */
   const cal = useAsync(() => vsApi.calendar(), [], { pollMs: 60 * 60_000 });
   // A minute's clock, so the countdown and "live now" keep up between polls.
@@ -104,8 +105,6 @@ export function LiveFeed({ instance }: {
   }, []);
   const fomc = (cal.data?.events ?? []).find((e) => e.short === 'FOMC' && e.source === 'fed' && e.time + 90 * 60_000 >= now) ?? null;
   const pressAt = fomc ? fomc.time + 30 * 60_000 : 0;
-  const fomcLive = !!fomc && now >= fomc.time - 15 * 60_000 && now <= fomc.time + 90 * 60_000;
-  const fomcSoon = !!fomc && (fomcLive || fomc.time - now <= 3 * 86_400_000);
   const onFed = !!choice && 'channel' in choice && choice.channel === 'fed';
   const pressWhen = fomc ? new Date(pressAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
   /* No platform's player loads before the viewer allows that platform (§ 25 TDDDG,
@@ -270,19 +269,6 @@ export function LiveFeed({ instance }: {
         </div>
       )}
       {error && <p className="lf__err" role="alert">{error}</p>}
-      {fomcSoon && !(onFed && src) && (
-        <div className={`lf__fomc${fomcLive ? ' is-live' : ''}`} role="status">
-          <span>
-            <b>{fomcLive ? 'FOMC live now' : 'FOMC press conference'}</b>
-            {!fomcLive && ` · ${pressWhen} · ${untilText(pressAt, now)}`}
-          </span>
-          {!onFed && (
-            <button type="button" className="lf__btn lf__btn--go" onClick={() => { setEditing(false); setStored({ channel: 'fed' }); }}>
-              Watch
-            </button>
-          )}
-        </div>
-      )}
     </div>
   );
 }

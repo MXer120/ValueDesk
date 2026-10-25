@@ -15,7 +15,6 @@
  */
 import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
-import { Notices } from './Notices';
 import { SettingsMenu } from './SettingsMenu';
 import { AddressMenu } from './NavBar';
 import { ConnectedWalletLogo } from './funds/ui';
@@ -28,6 +27,7 @@ import { warmWalletModal } from '../walletconnect';
 import type { Tab } from '../router';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
 import { activateTerminal, addTerminal, useTerminals } from '../dashboard/terminals';
+import { useMoneyNotice } from './funds/moneyNotice';
 import { FOLDER_ICON } from '../folders/icons';
 
 /* Knowledge's button and its quick drop: fetched only once Knowledge is on (folders/access.ts). */
@@ -115,7 +115,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
         </div>
         <span className="side__sep" aria-hidden="true" />
         <div className="side__group">
-          <Notices address={address} />
+          {/* The bell lives in the navbar with the other notifications (NavBar.tsx). */}
           <SettingsMenu hasLayout={hasLayout} dashLocked={dashLocked} />
         </div>
       </nav>
@@ -148,6 +148,7 @@ function SideWallet({ address }: { address: string | null }) {
     return () => window.removeEventListener(WALLET_EVENTS.menu, onMenu);
   }, [hasAddress]);
 
+  const money = useMoneyNotice();
   if (!address) {
     return (
       <div className="side__wallet">
@@ -172,7 +173,18 @@ function SideWallet({ address }: { address: string | null }) {
     );
   }
   return (
-    <div className="side__wallet navaddr">
+    <div className={`side__wallet navaddr${money ? ' is-money' : ''}`}>
+      {/* Money in and out widens out of the wallet logo and says it (funds/moneyNotice.ts). */}
+      {money && (
+        <div key={money.text} className={`side__money is-${money.status}`} role="status" aria-live="polite">
+          <span className={`side__money-ic is-${money.kind}`} aria-hidden="true">
+            <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              {money.kind === 'deposit' ? <path d="M10 3v9M6.5 8.5 10 12l3.5-3.5M3.5 15.5h13" /> : money.kind === 'withdraw' ? <path d="M10 12V3M6.5 6.5 10 3l3.5 3.5M3.5 15.5h13" /> : <path d="M6 3.5v13M3 6.5l3-3 3 3M14 16.5v-13M11 13.5l3 3 3-3" />}
+            </svg>
+          </span>
+          <span className="side__money-t">{money.text}</span>
+        </div>
+      )}
       <button
         type="button"
         className="side__btn side__addr"
