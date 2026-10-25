@@ -33,7 +33,7 @@ const CONNECT_SRC = [
   // The Fed live widget: the Federal Reserve's broadcast (Brightcove: manifests, segments).
   'https://*.boltdns.net', 'https://*.brightcovecdn.com',
   // The live liquidation heatmap: a WebSocket straight to the instance (apps/server routes/liqWs.ts).
-  'wss://54-150-61-169.sslip.io',
+  'wss://161-97-154-121.sslip.io',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */

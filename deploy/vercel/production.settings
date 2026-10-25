@@ -9,14 +9,14 @@
 #
 # A change here reaches the site with the next production deployment of main.
 
-# The instance behind /api/* (and /api/copy/* - the hosted copy executor):
-# ValueDesk's server in ap-northeast-1 (Tokyo), instance i-0d7d32ee79072083a, its
-# Elastic IP 54.150.61.169 by its sslip.io name (deploy/aws/ec2/.out/state.tokyo.env).
-VALUESCAN_ORIGIN=54-150-61-169.sslip.io
+# The server behind /api/* (its Caddy passes /api/copy/* on to the copy executor on server 2,
+# 13.140.77.201 in Japan):
+# Contabo server 1 (161.97.154.121, since 2026-10-25) by its sslip.io name (deploy/aws/ec2/.out/state.contabo.env).
+VALUESCAN_ORIGIN=161-97-154-121.sslip.io
 
 # The live liquidation heatmap's WebSocket: straight to the instance (Vercel's functions hold no
 # socket); Caddy passes this one path without the origin secret (deploy/server/caddy/Caddyfile.template).
-VITE_LIQ_WS_URL=wss://54-150-61-169.sslip.io/ws/liq
+VITE_LIQ_WS_URL=wss://161-97-154-121.sslip.io/ws/liq
 
 VITE_WALLETCONNECT_PROJECT_ID=3a5409a71d931809f4c0838b7a7d56fd
 
