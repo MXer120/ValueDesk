@@ -313,6 +313,9 @@ Against this inventory, HOSTED_ROUTES should be:
 
 - **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`,
   `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`),
+  `/api/vs/news/sources` (the White House's and Watcher.Guru's RSS feeds, each read at most every
+  5 minutes; valuescan/feeds.ts), `/api/vs/logo` (a news source's site icon from DuckDuckGo's icon
+  service, kept a day per site, so the page asks only this origin),
   `/api/vs/calendar` (the economic calendar: federalreserve.gov, bls.gov, bea.gov and SoSoValue,
   each read at most twice a day), `/api/vs/calendar/results` (its releases' official figures,
   read by one watcher in the API process from the publishers' pages at the release second),

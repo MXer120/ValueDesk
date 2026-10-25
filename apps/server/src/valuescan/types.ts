@@ -144,6 +144,8 @@ export interface NewsItem {
   /** A post's views and likes on X when SoSoValue read it (articles come without). */
   views?: number;
   likes?: number;
+  /** A source beside SoSoValue (feeds.ts FEED_SOURCES): its id. Absent on SoSoValue's stories. */
+  source?: string;
 }
 
 export interface VsPosition {

@@ -1,7 +1,8 @@
-/* The News widget (NewsFeed.tsx): the list switch and the source on top, the
-   filters under it, then the stories - the clock and how long ago, type and
-   author, the headline (a post's text in plain weight), two lines of the story,
-   its coins. Hot numbers its stories, the top three in the flame's colour. */
+/* The News widget (NewsFeed.tsx): the list switch on top, the filters under it,
+   then the stories - the source (its icon and name) on the left and the clock and
+   how long ago on the right, the headline (a post's text in plain weight), two
+   lines of the story, its coins with their move since. Hot numbers its stories,
+   the top three in the flame's colour. */
 .nw { --nw-hot: #ff8a3d; position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
 /* The source's credit: a small glass pill centred over the bottom of the feed, which
    scrolls on under it (the list keeps room for it at its end). */
@@ -12,6 +13,16 @@
   background: color-mix(in srgb, var(--bg-panel) 62%, transparent);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
 }
+/* Its x: slides in on hover, and hides the credit for good (newsSources.tsx useCreditHidden). */
+.nw__credit-x {
+  display: grid; place-items: center; width: 0; height: 16px; min-height: 0; margin-left: 0; padding: 0; overflow: hidden;
+  border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.08); color: var(--muted); opacity: 0; cursor: pointer;
+  transition: width 180ms ease, margin-left 180ms ease, opacity 160ms ease, background 140ms, color 140ms;
+}
+.nw__credit:hover .nw__credit-x, .nw__credit-x:focus-visible { width: 16px; margin-left: 6px; opacity: 1; }
+.nw__credit-x:hover { background: rgba(255, 255, 255, 0.16); color: var(--text); }
+@media (hover: none) { .nw__credit-x { width: 16px; margin-left: 6px; opacity: 0.8; } }
+@media (prefers-reduced-motion: reduce) { .nw__credit-x { transition: none; } }
 .nw .nw__list { padding-bottom: 40px; }
 .nw__bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 6px; }
 .nw__feeds { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
@@ -24,7 +35,6 @@
 .nw__feeds > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
 .nw__flame { flex: none; color: var(--dim); }
 .nw__feeds > button.is-on .nw__flame { color: var(--nw-hot); }
-.nw__src { color: var(--dim); font-size: var(--fs-micro); }
 .nw__filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
 .nw__select {
   display: inline-flex; flex-direction: row; align-items: center; gap: 6px; height: 28px; padding: 0 8px;
@@ -62,10 +72,13 @@
 .nw__item { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px; color: var(--text); text-decoration: none; }
 .nw__item:not(:only-child) { padding-bottom: 6px; }
 .nw__meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--dim); font-size: var(--fs-micro); }
-.nw__meta time { display: inline-flex; gap: 5px; flex: none; font-family: var(--font-num); }
+.nw__meta time { display: inline-flex; gap: 5px; flex: none; margin-left: auto; font-family: var(--font-num); }
+/* The source: its site's icon (or its initial) and its name. */
+.nw__src { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; color: var(--muted); font-weight: 600; }
+.nw__logo { display: block; flex: none; width: 14px; height: 14px; border-radius: 4px; object-fit: cover; background: rgba(255, 255, 255, 0.06); }
+.nw__logo.is-letter { display: grid; place-items: center; color: var(--text); font-size: 9px; font-weight: 700; line-height: 1; }
 .nw__clock { color: var(--muted); font-weight: 600; }
 .nw__ago::before { content: '·'; margin-right: 5px; color: var(--dim); }
-.nw__tag { flex: none; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--muted); }
 .nw__by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nw__title {
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
@@ -83,6 +96,10 @@
 .nw__coin.is-link { cursor: pointer; transition: background 140ms, border-color 140ms, color 140ms, transform 140ms; }
 .nw__coin.is-link:hover { border-color: rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.1); color: var(--text); transform: translateY(-1px); }
 .nw__coin.is-link:active { transform: none; }
+/* The coin's move since the story came out (moves.ts). */
+.nw__move { margin-left: 2px; font-family: var(--font-num); font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted); }
+.nw__move.is-up { color: var(--pos); }
+.nw__move.is-down { color: var(--neg); }
 .nw__more {
   display: block; margin: 8px auto 0; height: 28px; min-height: 0; padding: 0 16px; border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 14px; background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs); cursor: pointer;
@@ -103,11 +120,12 @@
 .csel__hint { flex: none; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: var(--fs-micro); font-weight: 400; }
 .csel__none { margin: 6px 8px; color: var(--dim); font-size: var(--fs-micro); }
 
-/* Save to a knowledge folder (folders/bridge.ts): a quiet bookmark at the story's top
-   right, shown while the pointer is on the story or the button has focus. */
+/* Save to a knowledge folder (folders/bridge.ts): a quiet bookmark at the story's bottom
+   right (the time has the top right), shown while the pointer is on the story or the
+   button has focus. */
 .nw__body { position: relative; }
 .nw__save {
-  position: absolute; top: 6px; right: 4px;
+  position: absolute; bottom: 6px; right: 4px;
   display: grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 0;
   border: 0; border-radius: 7px; background: var(--bg-elevated, #1c1c1e); color: var(--muted);
   opacity: 0; cursor: pointer; transition: opacity 120ms, color 120ms, background 120ms;

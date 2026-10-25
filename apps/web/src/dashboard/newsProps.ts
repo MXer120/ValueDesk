@@ -7,8 +7,9 @@ const NEWS_FIRST = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'HYPE'];
 
 /**
  * What the News widget takes from the trade page (NewsFeed.tsx): the chart's
- * coin, the coins this book trades - the majors first, then A to Z - and the
- * switch that opens a coin's chart from a story.
+ * coin, the coins this book trades - the majors first, then A to Z - the switch
+ * that opens a coin's chart from a story, and where a coin's price is read (its
+ * move since a story came out, news/moves.ts).
  */
 export function newsProps(c: TradeContext) {
   const market = new Map<string, string>();
@@ -23,5 +24,6 @@ export function newsProps(c: TradeContext) {
     coin: newsCoin(c.sym?.baseCoin) || null,
     markets,
     onCoin: open ? (symbol: string) => { const m = market.get(symbol); if (m) open(m); } : undefined,
+    prices: { engine: c.engine, market: (coin: string) => market.get(coin) },
   };
 }

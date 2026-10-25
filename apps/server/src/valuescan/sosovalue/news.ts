@@ -319,6 +319,9 @@ const filling = new Map<string, Promise<void>>();
 let hot: { at: number; ranks: Map<string, number> } | null = null;
 let hotFlight: Promise<void> | null = null;
 
+/** SoSoValue's coin index, once its currency list has loaded (feeds.ts finds coins in other sources' stories with it). */
+export const newsCoinIndex = (): CoinIndex | null => currencies?.index ?? null;
+
 /** Tests only. */
 export function resetNewsCache(): void {
   cache.clear();
