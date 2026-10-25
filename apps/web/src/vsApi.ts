@@ -33,6 +33,7 @@ import type {
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
 import type { CalendarEvent, CalendarSource } from '@sign/valuescan/calendar.js';
+import type { LiqHeatmap, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
 import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuescan/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource };
@@ -169,6 +170,16 @@ export const vsApi = {
   /** The video a YouTube channel has on air now, or null (the Live Feed widget). */
   live: (channel: string, signal?: AbortSignal) =>
     unwrap<{ channel: string; video: string | null }>(`/api/vs/live${qs({ channel })}`, signal).then((b) => b.video),
+
+  /** A coin's liquidation levels over a set of venues (the cohort books, priced: server indexer/liqRead.ts). */
+  liquidations: (coin: string, venues: readonly Venue[], res: 'fine' | 'medium' | 'coarse', signal?: AbortSignal) =>
+    unwrap<LiqHeatmap>(`/api/vs/liquidations${qs({ coin, venues: venues.join(','), res })}`, signal),
+  /** The wallets whose longs (or shorts) liquidate in [from, to). */
+  liquidationWallets: (coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, signal?: AbortSignal) =>
+    unwrap<LiqWallets>(`/api/vs/liquidations/wallets${qs({ coin, venues: venues.join(','), side, from, to })}`, signal),
+  /** The levels over time: the indexer's 15-minute snapshots (hourly past 3 days). */
+  liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '7d' | '30d', signal?: AbortSignal) =>
+    unwrap<LiqHistory>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), range })}`, signal),
 
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
   cohorts: (venues: readonly Venue[], f: CohortFilter, signal?: AbortSignal) =>

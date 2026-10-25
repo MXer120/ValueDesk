@@ -1,0 +1,657 @@
+/**
+ * The liquidation heatmap widget: where the positions of the market on screen
+ * get liquidated, across the venues picked (all by default).
+ *
+ *   Live        notional per price bucket - longs (red) below the price, shorts
+ *               (green) above - with the cumulative curves on a second axis.
+ *   Chart       the same levels as horizontal bars beside the market's candles.
+ *   Historical  the levels over time, from the indexer's 15-minute snapshots.
+ *
+ * A bar opens its wallets (address, size @ liquidation price, USD, distance).
+ * The strip at the bottom says how much of each venue's open interest the books
+ * hold and how well the math has matched the venue's own liquidation prices
+ * (server indexer/liqRead.ts) - the heatmap is only as complete as that.
+ */
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import type { LiqHeatmap as Heat, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
+import { api, type Engine, type Kline } from '../../api';
+import { useStored } from '../../hooks';
+import { SCAN_VENUES, VENUE_LABEL, vsApi, type Venue } from '../../vsApi';
+import { PlatformSelect } from '../PlatformSelect';
+import { VenueLogo } from '../VenueLogo';
+import { fmtPx, fmtUsdShort } from '../explore/model';
+import { usePolled } from '../explore/cohorts/parts';
+import { shortAddr } from '../../format';
+import './LiqHeatmap.css';
+
+type View = 'live' | 'chart' | 'history';
+type Res = 'fine' | 'medium' | 'coarse';
+type Unit = 'usd' | 'coin';
+type Range = '1d' | '7d' | '30d';
+const TFS = ['1m', '5m', '15m', '1h', '4h', '1D'] as const;
+type Tf = (typeof TFS)[number];
+
+interface Prefs {
+  view: View;
+  res: Res;
+  unit: Unit;
+  venues: Venue[];
+  tf: Tf;
+  range: Range;
+}
+const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', range: '1d' };
+
+/** A market's coin, as the server nets it (cohorts/model.ts coinOf): `BTC-USD` -> BTC, `vETH_vUSDC` -> ETH, `xyz:TSLA` -> TSLA. */
+export function coinOfSymbol(symbol: string): string {
+  const tail = symbol.includes(':') ? symbol.slice(symbol.indexOf(':') + 1) : symbol;
+  const head = tail.split(/[-/_]/)[0] ?? tail;
+  return head.replace(/^v(?=[A-Z])/, '').toUpperCase();
+}
+
+type Bucket = Heat['buckets'][number];
+/** One bucket's figure in the unit shown: [long, short]. */
+const valOf = (b: Bucket, unit: Unit): [number, number] => (unit === 'usd' ? [b[1], b[2]] : [b[3], b[4]]);
+
+const fmtSize = (v: number) => (Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : Math.abs(v) >= 1e4 ? `${(v / 1e3).toFixed(1)}K` : v.toLocaleString('en-US', { maximumSignificantDigits: 5 }));
+const fmtVal = (v: number, unit: Unit, coin: string) => (unit === 'usd' ? fmtUsdShort(v) : `${fmtSize(v)} ${coin}`);
+const pct = (v: number | null, signed = true) => (v === null || !Number.isFinite(v) ? '–' : `${signed && v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+
+/** The element's size, kept current. */
+function useSize<T extends HTMLElement>(): [(el: T | null) => void, { w: number; h: number }] {
+  // A callback ref: the element can mount after the first render (the history view waits for its data).
+  const [el, setEl] = useState<T | null>(null);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => {
+      const r = e!.contentRect;
+      setSize((s) => (Math.abs(s.w - r.width) < 1 && Math.abs(s.h - r.height) < 1 ? s : { w: Math.floor(r.width), h: Math.floor(r.height) }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, size];
+}
+
+/** Round axis ticks across [lo, hi]. */
+function ticks(lo: number, hi: number, n: number): number[] {
+  if (!(hi > lo)) return [lo];
+  const raw = (hi - lo) / n;
+  const e = 10 ** Math.floor(Math.log10(raw));
+  const f = raw / e;
+  const step = (f < 1.5 ? 1 : f < 3 ? 2 : f < 7 ? 5 : 10) * e;
+  const out: number[] = [];
+  for (let v = Math.ceil(lo / step) * step; v <= hi + 1e-9 * step; v += step) out.push(+v.toPrecision(12));
+  return out;
+}
+
+/** The price window the levels fill, with the price inside and a margin. */
+function windowOf(h: Heat): [number, number] | null {
+  const p = h.price;
+  if (!p) return null;
+  let lo = p;
+  let hi = p;
+  let total = 0;
+  for (const b of h.buckets) total += b[1] + b[2];
+  // Leave out the thinnest tails (0.5% of the notional each side) so one far order does not flatten the rest.
+  let acc = 0;
+  for (const b of h.buckets) {
+    acc += b[1] + b[2];
+    if (acc >= total * 0.005) { lo = Math.min(lo, b[0]); break; }
+  }
+  acc = 0;
+  for (let i = h.buckets.length - 1; i >= 0; i--) {
+    const b = h.buckets[i]!;
+    acc += b[1] + b[2];
+    if (acc >= total * 0.005) { hi = Math.max(hi, b[0] + h.step); break; }
+  }
+  lo = Math.max(p * 0.4, Math.min(lo, p * 0.9));
+  hi = Math.min(p * 1.8, Math.max(hi, p * 1.1));
+  const pad = (hi - lo) * 0.02;
+  return [lo - pad, hi + pad];
+}
+
+/** Long cumulative: everything liquidated as the price falls to each bucket; short likewise as it rises. */
+function cumulative(h: Heat, unit: Unit): { long: Array<[number, number]>; short: Array<[number, number]> } {
+  const p = h.price ?? 0;
+  const long: Array<[number, number]> = [];
+  const short: Array<[number, number]> = [];
+  let acc = 0;
+  for (let i = h.buckets.length - 1; i >= 0; i--) {
+    const b = h.buckets[i]!;
+    if (b[0] + h.step > p) continue;
+    acc += valOf(b, unit)[0];
+    long.push([b[0], acc]);
+  }
+  acc = 0;
+  for (const b of h.buckets) {
+    if (b[0] < p) continue;
+    acc += valOf(b, unit)[1];
+    short.push([b[0] + h.step, acc]);
+  }
+  return { long, short };
+}
+
+interface Pick { from: number; to: number; side: 'long' | 'short' }
+
+export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engine: Engine; instance?: string }) {
+  const [stored, setStored] = useStored<Prefs>(`vs.liqmap${instance ? `.${instance}` : ''}`, DEFAULTS);
+  const prefs: Prefs = { ...DEFAULTS, ...(stored && typeof stored === 'object' ? stored : {}) };
+  const venues = (Array.isArray(prefs.venues) ? prefs.venues : []).filter((v): v is Venue => (SCAN_VENUES as readonly string[]).includes(v));
+  const chosen = venues.length ? venues : [...SCAN_VENUES];
+  const set = (p: Partial<Prefs>) => setStored({ ...prefs, ...p });
+  const coin = coinOfSymbol(symbol);
+  const [pick, setPick] = useState<Pick | null>(null);
+  useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res]);
+
+  const vkey = chosen.join(',');
+  const heat = usePolled<Heat>(prefs.view === 'history' ? null : `${coin}|${vkey}|${prefs.res}`, (s) => vsApi.liquidations(coin, chosen, prefs.res, s), 30_000);
+  const h = heat.data;
+
+  return (
+    <div className="lqm">
+      <div className="lqm-bar">
+        <div className="lqm-seg" role="tablist" aria-label="View">
+          {(['live', 'chart', 'history'] as const).map((v) => (
+            <button key={v} type="button" role="tab" aria-selected={prefs.view === v} className={prefs.view === v ? 'is-on' : ''} onClick={() => set({ view: v })}>
+              {v === 'live' ? <><span className="lqm-dot" aria-hidden="true" />Live</> : v === 'chart' ? 'Chart' : 'Historical'}
+            </button>
+          ))}
+        </div>
+        <span className="lqm-coin" title="The market on screen">{coin}</span>
+        <span className="lqm-grow" />
+        <PlatformSelect options={SCAN_VENUES} value={chosen} onChange={(v) => set({ venues: v })} align="end" />
+        {prefs.view !== 'history' && (
+          <div className="lqm-seg" aria-label="Bucket size">
+            {(['fine', 'medium', 'coarse'] as const).map((r) => (
+              <button key={r} type="button" aria-pressed={prefs.res === r} className={prefs.res === r ? 'is-on' : ''} onClick={() => set({ res: r })}>{r[0]!.toUpperCase() + r.slice(1)}</button>
+            ))}
+          </div>
+        )}
+        {prefs.view === 'chart' && (
+          <div className="lqm-seg" aria-label="Timeframe">
+            {TFS.map((t) => <button key={t} type="button" aria-pressed={prefs.tf === t} className={prefs.tf === t ? 'is-on' : ''} onClick={() => set({ tf: t })}>{t}</button>)}
+          </div>
+        )}
+        {prefs.view === 'history' && (
+          <div className="lqm-seg" aria-label="Range">
+            {(['1d', '7d', '30d'] as const).map((r) => <button key={r} type="button" aria-pressed={prefs.range === r} className={prefs.range === r ? 'is-on' : ''} onClick={() => set({ range: r })}>{r.toUpperCase()}</button>)}
+          </div>
+        )}
+        {prefs.view !== 'history' && (
+          <div className="lqm-seg" aria-label="Unit">
+            <button type="button" aria-pressed={prefs.unit === 'coin'} className={prefs.unit === 'coin' ? 'is-on' : ''} onClick={() => set({ unit: 'coin' })}>{coin}</button>
+            <button type="button" aria-pressed={prefs.unit === 'usd'} className={prefs.unit === 'usd' ? 'is-on' : ''} onClick={() => set({ unit: 'usd' })}>USD</button>
+          </div>
+        )}
+      </div>
+      {prefs.view !== 'history' && (
+        <div className="lqm-legend">
+          <span><i className="lqm-sw is-long" />Long liquidations</span>
+          <span><i className="lqm-sw is-short" />Short liquidations</span>
+          {prefs.view === 'live' && <><span><i className="lqm-ln is-long" />Cumulative longs</span><span><i className="lqm-ln is-short" />Cumulative shorts</span></>}
+        </div>
+      )}
+      <div className="lqm-body">
+        {prefs.view === 'history' ? (
+          <HistoryView coin={coin} venues={chosen} range={prefs.range} />
+        ) : !h ? (
+          <p className="lqm-empty">{heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…'}</p>
+        ) : !h.price || !h.buckets.length ? (
+          <p className="lqm-empty">No tracked {coin} positions with a liquidation price on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
+        ) : prefs.view === 'live' ? (
+          <LiveView h={h} unit={prefs.unit} onPick={setPick} pick={pick} />
+        ) : (
+          <ChartView h={h} unit={prefs.unit} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+        )}
+        {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} onClose={() => setPick(null)} />}
+      </div>
+      {h && prefs.view !== 'history' && <Coverage h={h} coin={coin} />}
+    </div>
+  );
+}
+
+// --- live ---------------------------------------------------------------------------------
+
+const M = { l: 52, r: 56, t: 10, b: 24 };
+
+function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: Pick) => void; pick: Pick | null }) {
+  const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const win = useMemo(() => windowOf(h), [h]);
+  const cum = useMemo(() => cumulative(h, unit), [h, unit]);
+  const W = Math.max(0, w - M.l - M.r);
+  const H = Math.max(0, ht - M.t - M.b);
+  if (!win) return <div ref={ref} className="lqm-plot" />;
+  const [lo, hi] = win;
+  const x = (p: number) => M.l + ((p - lo) / (hi - lo)) * W;
+  const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
+  const maxBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
+  const maxCum = Math.max(1e-12, cum.long.at(-1)?.[1] ?? 0, cum.short.at(-1)?.[1] ?? 0);
+  const yBar = (v: number) => M.t + H - (v / maxBar) * H;
+  const yCum = (v: number) => M.t + H - (v / maxCum) * H;
+  const bw = Math.max(1, (h.step / (hi - lo)) * W - (W / ((hi - lo) / h.step) > 3 ? 1 : 0));
+  const p = h.price!;
+  const xs = ticks(lo, hi, Math.max(2, Math.floor(W / 90)));
+  const path = (pts: Array<[number, number]>, toward: 'lo' | 'hi') => {
+    const inWin = pts.filter(([px]) => px >= lo && px <= hi);
+    if (!inWin.length) return '';
+    let d = `M${x(p)},${yCum(0)}`;
+    for (const [px, v] of inWin) d += ` H${x(px)} V${yCum(v)}`;
+    return d + ` H${x(toward === 'hi' ? hi : lo)}`;
+  };
+  const longPath = path(cum.long, 'lo');
+  const shortPath = path(cum.short, 'hi');
+  const bucketAt = (cx: number) => {
+    const price = lo + ((cx - M.l) / W) * (hi - lo);
+    return Math.floor(price / h.step) * h.step;
+  };
+  const move = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - r.left;
+    setHover(cx >= M.l && cx <= M.l + W ? bucketAt(cx) : null);
+  };
+  const hb = hover !== null ? h.buckets.find((b) => Math.abs(b[0] - hover) < h.step / 2) ?? null : null;
+  const click = (e: ReactMouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const cx = e.clientX - r.left;
+    if (cx < M.l || cx > M.l + W) return;
+    // A thin bar is hard to hit: the nearest bucket with liquidations within a few pixels.
+    const price = lo + ((cx - M.l) / W) * (hi - lo);
+    const tol = (10 / Math.max(1, W)) * (hi - lo);
+    let b: Bucket | null = null;
+    for (const x of shown) {
+      const d = Math.abs(x[0] + h.step / 2 - price);
+      if (d <= Math.max(tol, h.step / 2) && (!b || d < Math.abs(b[0] + h.step / 2 - price))) b = x;
+    }
+    const from = b ? b[0] : bucketAt(cx);
+    // The side that liquidates here: the one the bucket holds, or by where it sits against the price.
+    const below = from + h.step / 2 < p;
+    const side = b && (b[1] > 0) !== (b[2] > 0) ? (b[1] > 0 ? 'long' : 'short') : below ? 'long' : 'short';
+    setHover(from);
+    onPick({ from, to: from + h.step, side });
+  };
+  const cumAt = (b: number, side: 'long' | 'short') => {
+    const list = side === 'long' ? cum.long : cum.short;
+    const hit = side === 'long' ? list.find(([px]) => px <= b) : list.find(([px]) => px >= b + h.step);
+    return hit?.[1] ?? 0;
+  };
+  return (
+    <div ref={ref} className="lqm-plot">
+      {w > 0 && (
+        <svg width={w} height={ht} onPointerMove={move} onPointerLeave={() => setHover(null)} onClick={click} role="img" aria-label={`Liquidation levels of ${h.coin}`}>
+          {ticks(0, maxBar, 4).map((v) => (
+            <g key={`l${v}`}>
+              <line x1={M.l} x2={M.l + W} y1={yBar(v)} y2={yBar(v)} className="lqm-grid" />
+              <text x={M.l - 6} y={yBar(v) + 3} className="lqm-ax" textAnchor="end">{unit === 'usd' ? fmtUsdShort(v) : fmtSize(v)}</text>
+            </g>
+          ))}
+          {ticks(0, maxCum, 4).map((v) => <text key={`r${v}`} x={M.l + W + 6} y={yCum(v) + 3} className="lqm-ax">{unit === 'usd' ? fmtUsdShort(v) : fmtSize(v)}</text>)}
+          {xs.map((v) => <text key={`x${v}`} x={x(v)} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtPx(v)}</text>)}
+          {longPath && <path d={`${longPath} V${yCum(0)} Z`} className="lqm-area is-long" />}
+          {shortPath && <path d={`${shortPath} V${yCum(0)} Z`} className="lqm-area is-short" />}
+          {shown.map((b) => {
+            const [l, s] = valOf(b, unit);
+            const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
+            return (
+              <g key={b[0]} className={on ? 'is-picked' : ''}>
+                {l > 0 && <rect x={x(b[0])} y={yBar(l)} width={bw} height={M.t + H - yBar(l)} className="lqm-bar-long" />}
+                {s > 0 && <rect x={x(b[0])} y={yBar(s)} width={bw} height={M.t + H - yBar(s)} className="lqm-bar-short" />}
+              </g>
+            );
+          })}
+          {longPath && <path d={longPath} className="lqm-cum is-long" />}
+          {shortPath && <path d={shortPath} className="lqm-cum is-short" />}
+          <line x1={x(p)} x2={x(p)} y1={M.t} y2={M.t + H} className="lqm-now" />
+          <g transform={`translate(${x(p)},${M.t + H + 2})`}>
+            <rect x={-48} y={0} width={96} height={18} rx={4} className="lqm-now-tag" />
+            <text y={13} textAnchor="middle" className="lqm-now-text">Current: {fmtPx(p)}</text>
+          </g>
+          {hover !== null && hover + h.step > lo && hover < hi && <rect x={x(hover)} y={M.t} width={bw} height={H} className="lqm-hover" />}
+        </svg>
+      )}
+      {hover !== null && (
+        <div className="lqm-tip" style={{ left: Math.min(w - 210, Math.max(0, x(hover) + 12)), top: M.t + 6 }}>
+          <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>
+          <span>{pct(hover / p - 1)} from current</span>
+          {hb ? (
+            <>
+              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)} · {hb[5]} positions</span>}
+              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)} · {hb[6]} positions</span>}
+            </>
+          ) : <span>No liquidations here</span>}
+          <span className="lqm-tip-sub">Cumulative {hover < p ? `longs ${fmtVal(cumAt(hover, 'long'), unit, h.coin)}` : `shorts ${fmtVal(cumAt(hover, 'short'), unit, h.coin)}`}</span>
+          <span className="lqm-tip-sub">Click for the wallets</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- chart --------------------------------------------------------------------------------
+
+const TF_POLL: Record<Tf, number> = { '1m': 10_000, '5m': 20_000, '15m': 30_000, '1h': 60_000, '4h': 60_000, '1D': 120_000 };
+
+function ChartView({ h, unit, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
+  const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
+  const [hover, setHover] = useState<number | null>(null);
+  const k = usePolled<Kline[]>(`${engine}|${symbol}|${tf}`, () => api.klines(engine, symbol, tf, 200).then((r) => r.klines), TF_POLL[tf]);
+  const candles = useMemo(() => (k.data ?? []).map((c) => ({ t: c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c })).filter((c) => c.h > 0).sort((a, b) => a.t - b.t), [k.data]);
+  const win = useMemo(() => windowOf(h), [h]);
+  const cum = useMemo(() => cumulative(h, unit), [h, unit]);
+  if (!win) return <div ref={ref} className="lqm-plot" />;
+  const p = h.price!;
+  let [lo, hi] = win;
+  for (const c of candles) { lo = Math.min(lo, c.l); hi = Math.max(hi, c.h); }
+  const R = Math.min(220, Math.max(120, w * 0.28));
+  const ML = 8;
+  const MR = 58;
+  const W = Math.max(0, w - ML - MR);
+  const H = Math.max(0, ht - M.t - M.b);
+  const cw = Math.max(0, W - R);
+  const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
+  const n = candles.length;
+  const slot = n ? cw / n : 0;
+  const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
+  const maxBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
+  const maxCum = Math.max(1e-12, cum.long.at(-1)?.[1] ?? 0, cum.short.at(-1)?.[1] ?? 0);
+  const x0 = ML + W; // the bars grow left from the price axis
+  const bx = (v: number) => (v / maxBar) * (R - 8);
+  const cx = (v: number) => x0 - (v / maxCum) * (R - 8);
+  const bh = Math.max(1, (h.step / (hi - lo)) * H - (H / ((hi - lo) / h.step) > 3 ? 0.5 : 0));
+  const curve = (pts: Array<[number, number]>) => {
+    const inWin = pts.filter(([px]) => px >= lo && px <= hi);
+    if (!inWin.length) return '';
+    let d = `M${x0},${y(p)}`;
+    for (const [px, v] of inWin) d += ` V${y(px)} H${cx(v)}`;
+    return d;
+  };
+  const ys = ticks(lo, hi, Math.max(2, Math.floor(H / 50)));
+  const fmtT = (t: number) => {
+    const d = new Date(t);
+    return tf === '1D' ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
+  const move = (e: ReactPointerEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const py = e.clientY - r.top;
+    const px = e.clientX - r.left;
+    if (px < ML + cw - 4 || py < M.t || py > M.t + H) { setHover(null); return; }
+    const price = lo + ((M.t + H - py) / H) * (hi - lo);
+    setHover(Math.floor(price / h.step) * h.step);
+  };
+  const hb = hover !== null ? h.buckets.find((b) => Math.abs(b[0] - hover) < h.step / 2) ?? null : null;
+  const click = (e: ReactMouseEvent<SVGSVGElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const py = e.clientY - r.top;
+    if (e.clientX - r.left < ML + cw - 4 || py < M.t || py > M.t + H) return;
+    const price = lo + ((M.t + H - py) / H) * (hi - lo);
+    const tol = (8 / Math.max(1, H)) * (hi - lo);
+    let b: Bucket | null = null;
+    for (const x of shown) {
+      const d = Math.abs(x[0] + h.step / 2 - price);
+      if (d <= Math.max(tol, h.step / 2) && (!b || d < Math.abs(b[0] + h.step / 2 - price))) b = x;
+    }
+    const from = b ? b[0] : Math.floor(price / h.step) * h.step;
+    const side = b && (b[1] > 0) !== (b[2] > 0) ? (b[1] > 0 ? 'long' : 'short') : from + h.step / 2 < p ? 'long' : 'short';
+    setHover(from);
+    onPick({ from, to: from + h.step, side });
+  };
+  return (
+    <div ref={ref} className="lqm-plot">
+      {w > 0 && (
+        <svg width={w} height={ht} onPointerMove={move} onPointerLeave={() => setHover(null)} onClick={click} role="img" aria-label={`${h.coin} candles with liquidation levels`}>
+          {ys.map((v) => (
+            <g key={v}>
+              <line x1={ML} x2={ML + W} y1={y(v)} y2={y(v)} className="lqm-grid" />
+              <text x={ML + W + 6} y={y(v) + 3} className="lqm-ax">{fmtPx(v)}</text>
+            </g>
+          ))}
+          {candles.map((c, i) => {
+            const xc = ML + slot * (i + 0.5);
+            const up = c.c >= c.o;
+            return (
+              <g key={c.t} className={up ? 'lqm-up' : 'lqm-down'}>
+                <line x1={xc} x2={xc} y1={y(c.h)} y2={y(c.l)} />
+                <rect x={xc - Math.max(0.5, slot * 0.35)} width={Math.max(1, slot * 0.7)} y={y(Math.max(c.o, c.c))} height={Math.max(1, Math.abs(y(c.o) - y(c.c)))} />
+              </g>
+            );
+          })}
+          {n > 0 && ticks(0, n - 1, Math.max(2, Math.floor(cw / 90))).map((i) => {
+            const c = candles[Math.round(i)];
+            return c ? <text key={`t${i}`} x={ML + slot * (Math.round(i) + 0.5)} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtT(c.t)}</text> : null;
+          })}
+          {curve(cum.short) && <path d={curve(cum.short)} className="lqm-cum is-short" />}
+          {curve(cum.long) && <path d={curve(cum.long)} className="lqm-cum is-long" />}
+          {shown.map((b) => {
+            const [l, s] = valOf(b, unit);
+            const on = pick && Math.abs(pick.from - b[0]) < h.step / 2;
+            const yy = y(b[0] + h.step);
+            return (
+              <g key={b[0]} className={on ? 'is-picked' : ''}>
+                {l > 0 && <rect x={x0 - bx(l)} y={yy} width={bx(l)} height={bh} className="lqm-bar-long" />}
+                {s > 0 && <rect x={x0 - bx(s)} y={yy} width={bx(s)} height={bh} className="lqm-bar-short" />}
+              </g>
+            );
+          })}
+          <line x1={ML} x2={ML + W} y1={y(p)} y2={y(p)} className="lqm-now" />
+          <g transform={`translate(${ML + W + 2},${y(p) - 9})`}>
+            <rect width={MR - 4} height={18} rx={3} className="lqm-now-tag is-solid" />
+            <text x={(MR - 4) / 2} y={13} textAnchor="middle" className="lqm-now-text">{fmtPx(p)}</text>
+          </g>
+          {hover !== null && <rect x={ML} y={y(hover + h.step)} width={W} height={bh} className="lqm-hover" />}
+          {!n && <text x={ML + cw / 2} y={M.t + H / 2} textAnchor="middle" className="lqm-ax">{k.error ? 'No candles for this market' : 'Loading candles…'}</text>}
+        </svg>
+      )}
+      {hover !== null && (
+        <div className="lqm-tip" style={{ right: R + MR, top: Math.min(ht - 120, Math.max(0, y(hover) - 20)) }}>
+          <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>
+          <span>{pct(hover / p - 1)} from current</span>
+          {hb ? (
+            <>
+              {hb[1] > 0 && <span className="is-long">Longs {fmtVal(valOf(hb, unit)[0], unit, h.coin)} · {hb[5]}</span>}
+              {hb[2] > 0 && <span className="is-short">Shorts {fmtVal(valOf(hb, unit)[1], unit, h.coin)} · {hb[6]}</span>}
+            </>
+          ) : <span>No liquidations here</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- history ------------------------------------------------------------------------------
+
+function HistoryView({ coin, venues, range }: { coin: string; venues: Venue[]; range: Range }) {
+  const r = usePolled<LiqHistory>(`${coin}|${venues.join(',')}|${range}`, (s) => vsApi.liquidationHistory(coin, venues, range, s), 5 * 60_000);
+  const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [tip, setTip] = useState<{ x: number; y: number; text: string[] } | null>(null);
+  const pts = r.data?.points ?? [];
+  const geo = useMemo(() => {
+    if (!pts.length) return null;
+    let lo = Infinity;
+    let hi = -Infinity;
+    let max = 0;
+    for (const q of pts) {
+      lo = Math.min(lo, q.p * 0.75);
+      hi = Math.max(hi, q.p * 1.25);
+      for (const [, l, s] of q.b) max = Math.max(max, l + s);
+    }
+    return { lo, hi, max, t0: pts[0]!.t, t1: pts.at(-1)!.t };
+  }, [pts]);
+  const ML = 8;
+  const MR = 58;
+  const W = Math.max(0, w - ML - MR);
+  const H = Math.max(0, ht - M.t - M.b);
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c || !geo || !w) return;
+    const dpr = window.devicePixelRatio || 1;
+    c.width = w * dpr;
+    c.height = ht * dpr;
+    const g = c.getContext('2d')!;
+    g.scale(dpr, dpr);
+    g.clearRect(0, 0, w, ht);
+    const { lo, hi, max, t0, t1 } = geo;
+    const span = Math.max(1, t1 - t0);
+    const colW = Math.max(1, W / Math.max(1, pts.length));
+    const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
+    const lmax = Math.log1p(max);
+    pts.forEach((q, i) => {
+      const x = ML + (pts.length > 1 ? ((q.t - t0) / span) * (W - colW) : 0);
+      for (const [bi, l, s] of q.b) {
+        const v = l + s;
+        if (!(v > 0)) continue;
+        const a = Math.log1p(v) / lmax;
+        const top = y((bi + 1) * q.st);
+        const hh = Math.max(1, y(bi * q.st) - top);
+        // Long-heavy cells lean red, short-heavy green; brightness is the notional (log).
+        const share = l / v;
+        const rr = Math.round(239 * share + 0 * (1 - share));
+        const gg = Math.round(74 * share + 180 * (1 - share));
+        const bb = Math.round(60 * share + 129 * (1 - share));
+        g.fillStyle = `rgba(${rr},${gg},${bb},${(0.12 + 0.88 * a).toFixed(3)})`;
+        g.fillRect(x, top, colW + 0.5, hh);
+      }
+      void i;
+    });
+    // The price over time.
+    g.strokeStyle = 'rgba(247,247,247,0.85)';
+    g.lineWidth = 1.25;
+    g.beginPath();
+    pts.forEach((q, i) => {
+      const x = ML + (pts.length > 1 ? ((q.t - t0) / span) * (W - colW) : 0) + colW / 2;
+      if (i) g.lineTo(x, y(q.p)); else g.moveTo(x, y(q.p));
+    });
+    g.stroke();
+  }, [geo, pts, w, ht, W, H]);
+  if (r.error && !r.data) return <p className="lqm-empty">History unavailable: {r.error}</p>;
+  if (!r.data) return <p className="lqm-empty">Reading the snapshots…</p>;
+  if (!pts.length) {
+    return (
+      <p className="lqm-empty">
+        No snapshots of {coin} yet. The index keeps the levels of the {r.data.coins.length || 30} coins with the most open interest tracked, every 15 minutes
+        {r.data.coins.length ? ` (now: ${r.data.coins.slice(0, 12).join(', ')}…)` : ''}.
+      </p>
+    );
+  }
+  const g = geo!;
+  const y = (v: number) => M.t + H - ((v - g.lo) / (g.hi - g.lo)) * H;
+  const move = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    if (px < ML || px > ML + W || py < M.t || py > M.t + H) { setTip(null); return; }
+    const t = g.t0 + ((px - ML) / Math.max(1, W)) * (g.t1 - g.t0);
+    let q = pts[0]!;
+    for (const x of pts) if (Math.abs(x.t - t) < Math.abs(q.t - t)) q = x;
+    const price = g.lo + ((M.t + H - py) / H) * (g.hi - g.lo);
+    const bi = Math.floor(price / q.st);
+    const cell = q.b.find((b) => b[0] === bi);
+    setTip({
+      x: px, y: py,
+      text: [
+        new Date(q.t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }),
+        `${fmtPx(bi * q.st)} – ${fmtPx((bi + 1) * q.st)} (${pct(bi * q.st / q.p - 1)} from ${fmtPx(q.p)})`,
+        cell ? `Longs ${fmtUsdShort(cell[1])} · Shorts ${fmtUsdShort(cell[2])}` : 'No liquidations here',
+      ],
+    });
+  };
+  return (
+    <div ref={ref} className="lqm-plot" onPointerMove={move} onPointerLeave={() => setTip(null)}>
+      <canvas ref={canvas} style={{ width: w, height: ht }} />
+      <svg width={w} height={ht} className="lqm-over">
+        {ticks(g.lo, g.hi, Math.max(2, Math.floor(H / 50))).map((v) => <text key={v} x={ML + W + 6} y={y(v) + 3} className="lqm-ax">{fmtPx(v)}</text>)}
+        {ticks(g.t0, g.t1, Math.max(2, Math.floor(W / 110))).map((t) => (
+          <text key={t} x={ML + ((t - g.t0) / Math.max(1, g.t1 - g.t0)) * W} y={M.t + H + 16} textAnchor="middle" className="lqm-ax">
+            {new Date(t).toLocaleString('en-US', range === '1d' ? { hour: '2-digit', minute: '2-digit', hour12: false } : { month: 'short', day: 'numeric' })}
+          </text>
+        ))}
+      </svg>
+      {tip && <div className="lqm-tip" style={{ left: Math.min(w - 230, tip.x + 12), top: Math.max(0, tip.y - 40) }}>{tip.text.map((t, i) => (i ? <span key={i}>{t}</span> : <b key={i}>{t}</b>))}</div>}
+    </div>
+  );
+}
+
+// --- details ------------------------------------------------------------------------------
+
+function Details({ coin, venues, pick, price, onClose }: { coin: string; venues: Venue[]; pick: Pick; price: number | null; onClose: () => void }) {
+  const [side, setSide] = useState(pick.side);
+  useEffect(() => setSide(pick.side), [pick]);
+  const fetcher = useCallback((s: AbortSignal) => vsApi.liquidationWallets(coin, venues, side, pick.from, pick.to, s), [coin, venues, side, pick]);
+  const r = usePolled<LiqWallets>(`${coin}|${venues.join(',')}|${side}|${pick.from}|${pick.to}`, fetcher, 30_000);
+  const mid = (pick.from + pick.to) / 2;
+  const d = r.data;
+  return (
+    <aside className="lqm-det" aria-label="Liquidation details">
+      <header>
+        <b>Liquidation details</b>
+        <button type="button" aria-label="Close" onClick={onClose}>×</button>
+      </header>
+      <dl>
+        <dt>Price range</dt><dd>{fmtPx(pick.from)} – {fmtPx(pick.to)}</dd>
+        <dt>From current</dt><dd>{price ? pct(mid / price - 1) : '–'}</dd>
+        <dt>As of</dt><dd>{new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</dd>
+      </dl>
+      <div className="lqm-seg lqm-det-side">
+        <button type="button" className={side === 'long' ? 'is-on' : ''} onClick={() => setSide('long')}>Longs</button>
+        <button type="button" className={side === 'short' ? 'is-on' : ''} onClick={() => setSide('short')}>Shorts</button>
+      </div>
+      <p className="lqm-det-sum">
+        {side === 'long' ? 'Long' : 'Short'} liquidations{d ? ` (${d.count})` : ''}
+        <strong className={side === 'long' ? 'is-long' : 'is-short'}>{d ? fmtUsdShort(d.total) : '…'}</strong>
+      </p>
+      <p className="lqm-det-h">Top {side} liquidations</p>
+      <ol className="lqm-det-list">
+        {r.error && !d && <li className="lqm-empty">{r.error}</li>}
+        {d && !d.wallets.length && <li className="lqm-empty">None in this range.</li>}
+        {d?.wallets.map((w) => (
+          <li key={`${w.venue}|${w.address}`} className={side === 'long' ? 'is-long' : 'is-short'}>
+            <span className="lqm-det-who" title={`${VENUE_LABEL[w.venue]} · ${w.address}`}>
+              <VenueLogo venue={w.venue} size={12} />
+              {w.label ?? shortAddr(w.address)}
+            </span>
+            <span className="lqm-det-usd">{fmtUsdShort(w.usd)}</span>
+            <span className="lqm-det-sz">{fmtSize(Math.abs(w.szi))} {coin} @ {fmtPx(w.liq)}</span>
+            <span className="lqm-det-dist">{w.dist === null ? '' : `${(Math.abs(w.dist) * 100).toFixed(1)}% away`}</span>
+          </li>
+        ))}
+      </ol>
+    </aside>
+  );
+}
+
+// --- coverage -----------------------------------------------------------------------------
+
+function Coverage({ h, coin }: { h: Heat; coin: string }) {
+  const rows = (Object.entries(h.coverage) as Array<[Venue, NonNullable<Heat['coverage'][Venue]>]>).filter(([, c]) => c.oi !== null || c.positions > 0);
+  if (!rows.length) return null;
+  return (
+    <div className="lqm-cov" aria-label="Coverage">
+      {rows.map(([v, c]) => {
+        const held = (c.long + c.short) / 2;
+        const share = c.oi ? held / c.oi : null;
+        const known = c.long + c.short > 0 ? (c.longKnown + c.shortKnown) / (c.long + c.short) : null;
+        const acc = c.accuracy;
+        const matched = acc && acc.checked ? acc.matched / acc.checked : null;
+        const tracked = acc && acc.n ? acc.within1 / acc.n : null;
+        const title = [
+          `${VENUE_LABEL[v]} ${coin}: the books hold ${fmtSize(c.long)} long and ${fmtSize(c.short)} short in ${c.positions} positions (${c.wallets} wallets)`,
+          c.oi !== null ? `against open interest of ${fmtSize(c.oi)} ${coin}${c.oiUsd ? ` (${fmtUsdShort(c.oiUsd)})` : ''}` : 'open interest unavailable',
+          known !== null ? `${(known * 100).toFixed(1)}% of that size has a known liquidation price` : '',
+          c.computed ? `${VENUE_LABEL[v]} publishes no liquidation price: computed from its maintenance margin rules` : '',
+          matched !== null ? `At reads ${acc!.window === 'today' ? 'today' : 'yesterday'}: ${acc!.matched} of ${acc!.checked} venue figures reproduced to 0.01%` : '',
+          tracked !== null ? `At re-reads: ${(tracked * 100).toFixed(1)}% of ${acc!.n} figures within 1% of the venue's new one (${acc!.moved} positions had changed size)` : '',
+          c.noRules ? 'The market list could not be read: no levels' : '',
+        ].filter(Boolean).join('\n');
+        return (
+          <span key={v} className="lqm-cov-row" title={title}>
+            <VenueLogo venue={v} size={12} />
+            <span>{share === null ? 'OI –' : `${share > 1.05 ? '>100' : Math.round(share * 100)}% of OI`}</span>
+            {known !== null && known < 0.995 && <span className="lqm-cov-dim">{Math.round(known * 100)}% priced</span>}
+            <span className="lqm-cov-dim">{c.computed ? 'computed' : matched !== null ? `${(matched * 100).toFixed(matched >= 0.9995 ? 0 : 1)}% exact` : 'checking'}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}

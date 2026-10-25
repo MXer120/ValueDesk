@@ -319,6 +319,9 @@ CREATE TABLE IF NOT EXISTS cohort_series (
 CREATE TABLE IF NOT EXISTS cohort_hist (
   span INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (span, kind, key)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS liq_hist (
+  coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
+  PRIMARY KEY (coin, t)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS board_meta (
   venue TEXT NOT NULL, win TEXT NOT NULL, side TEXT NOT NULL, filter TEXT NOT NULL,
   updated_at INTEGER NOT NULL, source_at INTEGER NOT NULL, complete INTEGER NOT NULL,
@@ -363,6 +366,8 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   // stablecoins), and when a read last looked at the spot state (cohortSource.ts).
   ['cohort_book', 'collateral', 'REAL'],
   ['cohort_book', 'spot_at', 'INTEGER'],
+  // The account's cross cash for its liquidation prices (valuescan/liquidations/math.ts).
+  ['cohort_book', 'cash', 'REAL'],
   // What a day row must carry once its raw rows are gone (retention): how many
   // fills it had, their realised PnL net of fees, the first one's time, the
   // newest position-open among its SoDEX closes - and whether it is final.
@@ -411,12 +416,36 @@ const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFi
 export interface CohortBookRow {
   /** The read's perps account value (on Hyperliquid / trade.xyz: that dex's own margin book). */
   equity: number | null;
-  positions: Array<{ symbol: string; szi: number; entry: number | null }>;
+  positions: Array<BookPosition>;
   at: number;
   /** Hyperliquid: a unified / portfolio-margin account's stablecoin collateral (model.ts perpEquity); null = standard, or not looked at. */
   collateral: number | null;
   /** Hyperliquid: when the read looked at the spot state (null = it did not). */
   spotAt: number | null;
+  /** The account's cross cash for its liquidation prices (liquidations/math.ts); null = not known. */
+  cash: number | null;
+}
+
+/** A book's position; `iso` / `lev` / `fix` as liquidations/math.ts LiqPos (absent on a cross position). */
+export interface BookPosition {
+  symbol: string;
+  szi: number;
+  entry: number | null;
+  iso?: number | null;
+  lev?: number | null;
+  fix?: number | null;
+}
+
+/** [symbol, szi, entry] and, when the position has any, {i, l, f} (iso, lev, fix; `i` present = isolated). */
+function bookEntry(p: BookPosition): unknown[] {
+  const e: unknown[] = [p.symbol, p.szi, p.entry];
+  if (p.iso !== undefined || p.fix != null) {
+    const x: Record<string, number | null> = {};
+    if (p.iso !== undefined) { x.i = p.iso; x.l = p.lev ?? null; }
+    if (p.fix != null) x.f = p.fix;
+    e.push(x);
+  }
+  return e;
 }
 
 const memberRow = (r: Record<string, unknown>): CohortMemberRow => ({
@@ -430,11 +459,19 @@ function bookRow(r: Record<string, unknown>): CohortBookRow {
   try {
     const x = JSON.parse(String(r.positions ?? '[]'));
     if (Array.isArray(x)) {
-      positions = x.flatMap((e) => (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number'
-        ? [{ symbol: e[0], szi: e[1], entry: typeof e[2] === 'number' ? e[2] : null }] : []));
+      positions = x.flatMap((e): BookPosition[] => {
+        if (!(Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number')) return [];
+        const p: BookPosition = { symbol: e[0], szi: e[1], entry: typeof e[2] === 'number' ? e[2] : null };
+        const x = e[3] as { i?: number | null; l?: number | null; f?: number | null } | undefined;
+        if (x && typeof x === 'object') {
+          if ('i' in x) { p.iso = typeof x.i === 'number' ? x.i : null; p.lev = typeof x.l === 'number' ? x.l : null; }
+          if (typeof x.f === 'number') p.fix = x.f;
+        }
+        return [p];
+      });
     }
   } catch { /* none */ }
-  return { equity: num(r.equity), positions, at: Number(r.at) || 0, collateral: num(r.collateral), spotAt: num(r.spot_at) };
+  return { equity: num(r.equity), positions, at: Number(r.at) || 0, collateral: num(r.collateral), spotAt: num(r.spot_at), cash: num(r.cash) };
 }
 
 /**
@@ -2527,13 +2564,13 @@ export class IndexStore {
   }
 
   putCohortBooks(rows: ReadonlyArray<{
-    venue: Venue; address: string; equity: number | null; positions: ReadonlyArray<{ symbol: string; szi: number; entry: number | null }>; at: number;
-    collateral?: number | null; spotAt?: number | null;
+    venue: Venue; address: string; equity: number | null; positions: ReadonlyArray<BookPosition>; at: number;
+    collateral?: number | null; spotAt?: number | null; cash?: number | null;
   }>): void {
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const ins = this.q('INSERT OR REPLACE INTO cohort_book (venue, address, equity, positions, at, collateral, spot_at, cash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
       for (const r of rows) {
-        ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map((p) => [p.symbol, p.szi, p.entry])), r.at, r.collateral ?? null, r.spotAt ?? null);
+        ins.run(r.venue, r.address, r.equity, JSON.stringify(r.positions.map(bookEntry)), r.at, r.collateral ?? null, r.spotAt ?? null, r.cash ?? null);
       }
     });
   }
@@ -2541,7 +2578,7 @@ export class IndexStore {
   /** Every wallet's book on a venue: positions as the stream keeps them. */
   cohortBooks(venue: Venue): Map<string, CohortBookRow> {
     const out = new Map<string, CohortBookRow>();
-    for (const r of this.q('SELECT address, equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
+    for (const r of this.q('SELECT address, equity, positions, at, collateral, spot_at, cash FROM cohort_book WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {
       out.set(r.address as string, bookRow(r));
     }
     return out;
@@ -2549,13 +2586,13 @@ export class IndexStore {
 
   /** One wallet's book on a venue (null if it was never read). */
   cohortBook(venue: Venue, address: string): CohortBookRow | null {
-    const r = this.q('SELECT equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ? AND address = ?').get(venue, address) as Record<string, unknown> | undefined;
+    const r = this.q('SELECT equity, positions, at, collateral, spot_at, cash FROM cohort_book WHERE venue = ? AND address = ?').get(venue, address) as Record<string, unknown> | undefined;
     return r ? bookRow(r) : null;
   }
 
   /** cohortBooks a page at a time, in the same (address) order (see cohortMembersPage). */
   cohortBooksPage(venue: Venue, after: string, limit: number): Array<[string, CohortBookRow]> {
-    return (this.q('SELECT address, equity, positions, at, collateral, spot_at FROM cohort_book WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
+    return (this.q('SELECT address, equity, positions, at, collateral, spot_at, cash FROM cohort_book WHERE venue = ? AND address > ? ORDER BY address LIMIT ?')
       .all(venue, after, limit) as Array<Record<string, unknown>>).map((r) => [r.address as string, bookRow(r)]);
   }
 
@@ -2664,6 +2701,36 @@ export class IndexStore {
 
   pruneCohortMix(beforeT: number): void {
     this.q('DELETE FROM cohort_mix WHERE t < ?').run(beforeT);
+  }
+
+  // --- liquidation levels over time (cohortTracker.ts recordLiq) ---------------------------
+
+  putLiqHist(t: number, rows: ReadonlyArray<[string, string]>): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO liq_hist (coin, t, data) VALUES (?, ?, ?)');
+      for (const [coin, data] of rows) ins.run(coin, t, data);
+    });
+  }
+
+  /** One coin's snapshots from `fromT`, oldest first (data as written). */
+  liqHist(coin: string, fromT: number): Array<{ t: number; data: string }> {
+    return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: string }>;
+  }
+
+  /** The coins of the newest snapshot. */
+  liqHistCoins(): string[] {
+    return (this.q('SELECT coin FROM liq_hist WHERE t = (SELECT MAX(t) FROM liq_hist)').all() as Array<{ coin: string }>).map((r) => r.coin);
+  }
+
+  liqHistLastT(): number {
+    const r = this.q('SELECT MAX(t) AS t FROM liq_hist').get() as { t: number | null } | undefined;
+    return r?.t ?? 0;
+  }
+
+  /** Drop everything before `beforeT`, and between it and `thinBeforeT` all but the hourly snapshots. */
+  pruneLiqHist(beforeT: number, thinBeforeT: number, hourMs: number): void {
+    this.q('DELETE FROM liq_hist WHERE t < ?').run(beforeT);
+    this.q('DELETE FROM liq_hist WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
   }
 
   /**

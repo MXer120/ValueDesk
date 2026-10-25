@@ -40,6 +40,7 @@ import { FedWatch } from '../components/macro/FedWatch';
 import { IndicatorWidget } from '../components/macro/IndicatorView';
 import { EtfFlows } from '../components/macro/EtfFlows';
 import { NewsFeed } from '../components/news/NewsFeed';
+import { LiqHeatmap } from '../components/liqmap/LiqHeatmap';
 import { newsProps } from './newsProps';
 import { coinLabel } from '../format';
 import { ChartCard, TradeAccountBand } from './tradeTabs';
@@ -439,7 +440,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     const name = face?.name ?? id;
     const quick = id === 'quick';
     // The two news widgets draw their own insets and scroll inside themselves.
-    const own = id === 'news' || id === 'livefeed' || id === 'fedlive' || id === 'fedwatch' || id === 'indicator' || id === 'etfflows';
+    const own = id === 'news' || id === 'livefeed' || id === 'fedlive' || id === 'fedwatch' || id === 'indicator' || id === 'etfflows' || id === 'liqmap';
     return {
       id,
       title: name,
@@ -456,6 +457,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         if (id === 'fedwatch') return <FedWatch />;
         if (id === 'indicator') return <IndicatorWidget />;
         if (id === 'etfflows') return <EtfFlows />;
+        if (id === 'liqmap') return <LiqHeatmap symbol={c.symbol} engine={c.engine} />;
         if (id === 'news') return <NewsFeed {...newsProps(c)} />;
         if (quick) {
           return (

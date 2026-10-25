@@ -640,6 +640,18 @@ function history(s: IndexStore, scope: string, fromT: number, f: CohortFilter, c
   return out;
 }
 
+/**
+ * The books as the cohort load holds them (per venue, every wallet), with the
+ * last prices: for the liquidation heatmap (liqRead.ts). Keeps the load warm
+ * like a cohort read, without netting anything.
+ */
+export function cohortBooksNow(): { at: number; booksAt: number; per: ReadonlyMap<Venue, ReadonlyMap<string, WalletVenue>>; marks: ReadonlyMap<string, number> } | null {
+  const s = reader();
+  if (!s) return null;
+  const load = loadCohorts(s);
+  return { at: load.at, booksAt: load.booksAt, per: load.per, marks: load.marks };
+}
+
 /** Every cohort for a set of venues (netted when more than one), under a sector / coin filter. */
 export function cohortsRead(venues: readonly Venue[], f: CohortFilter): CohortsResponse | null {
   const s = reader();

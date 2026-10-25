@@ -55,6 +55,7 @@ export const WIDGET_FACES: readonly WidgetFace[] = [
   { id: 'funding', name: 'Historical funding', kind: 'funding', group: 'Charts', source: true },
   { id: 'cohort', name: 'Cohort heatmap', kind: 'cohort', group: 'Charts', source: true },
   { id: 'heatmap', name: 'Price heatmap', kind: 'heatmap', group: 'Charts', source: true },
+  { id: 'liqmap', name: 'Liquidation heatmap', kind: 'liq', group: 'Charts', source: false },
 
   { id: 'tape', name: 'Trades', kind: 'trades', group: 'Tools', source: true },
   { id: 'news', name: 'News', kind: 'news', group: 'Tools', source: false },
@@ -95,6 +96,6 @@ export function positionSize(equity: number, riskPct: number, stopPct: number, p
 /** Ids that are not already a hand-built panel in the registry. */
 export const EXTRA_WIDGET_IDS: readonly string[] = [
   'liq', 'poschg', 'copy', 'assets', 'orders', 'twap', 'history', 'fills',
-  'transfers', 'twaplive', 'watch', 'quick', 'stops', 'funding', 'cohort', 'heatmap',
+  'transfers', 'twaplive', 'watch', 'quick', 'stops', 'funding', 'cohort', 'heatmap', 'liqmap',
   'tape', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'tracked', 'toptraders', 'cohorts', 'sizecalc',
 ];

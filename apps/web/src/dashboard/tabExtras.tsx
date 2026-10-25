@@ -24,12 +24,13 @@ export const TAB_WIDGETS: Record<string, string> = {
   indicator: 'Indicator',
   etfflows: 'ETF flows',
   funding: 'Funding spreads',
+  liqmap: 'Liq. heatmap',
   sizecalc: 'Position size',
   feetier: 'Fee tier',
   venue: 'Venue status',
 };
 /** The edit palette's sketch for each (widgetCatalog ids). */
-const SKETCH: Record<string, string> = { trades: 'tape', news: 'news', livefeed: 'livefeed', fedlive: 'livefeed', fedwatch: 'tape', indicator: 'funding', etfflows: 'funding', funding: 'funding', sizecalc: 'sizecalc', feetier: 'feetier', venue: 'venue' };
+const SKETCH: Record<string, string> = { trades: 'tape', news: 'news', livefeed: 'livefeed', fedlive: 'livefeed', fedwatch: 'tape', indicator: 'funding', etfflows: 'funding', funding: 'funding', liqmap: 'liq', sizecalc: 'sizecalc', feetier: 'feetier', venue: 'venue' };
 
 export { assetOf, baseOf, copyOf, extraKey, isExtraKey, nextCopy } from './tabIds';
 import { nextCopy } from './tabIds';
