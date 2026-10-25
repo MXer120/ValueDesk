@@ -2065,3 +2065,12 @@ html.kc-drag * {
 @media (prefers-reduced-motion: reduce) {
   .kc-fomc, .kc-fomc.is-leaving { animation-duration: 1ms; }
 }
+
+/* A release's official figures in its card (NewsMarkers.tsx, releases.tsx): the actual
+   large, the previous under it; empty dashes until it lands. */
+.kc-newspop__figs { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 6px; margin-top: 6px; }
+.kc-newspop__fig { display: flex; flex-direction: column; gap: 1px; padding: 6px 8px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.kc-newspop__fig small { color: var(--dim); font-size: 10px; }
+.kc-newspop__fig b { color: var(--text); font-family: var(--font-num); font-size: var(--fs-sm, 13px); }
+.kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
+.kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }

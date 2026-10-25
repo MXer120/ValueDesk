@@ -150,3 +150,35 @@
 .nwc__src { color: var(--dim); font-size: var(--fs-micro); white-space: nowrap; }
 .nwc__row.is-next .nwc__src { color: var(--text); font-weight: 600; }
 .nwc__foot { margin-top: 10px; }
+
+/* A calendar row is a button now (it opens its card, releases.tsx). */
+button.nwc__row { width: 100%; min-height: 34px; border: 0; background: none; font: inherit; font-size: var(--fs-xs); text-align: left; cursor: pointer; }
+button.nwc__row:hover { background: rgba(255, 255, 255, 0.05); }
+.nwc__row.is-out { opacity: 1; }
+.nwc__val { color: var(--text); font-family: var(--font-num); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; }
+.nwc__val.is-wait { color: var(--warn); font-weight: 500; animation: evc-pulse 1.2s ease-in-out infinite; }
+
+/* The event card (releases.tsx EventCard): its state and date, the figures with
+   the actual beside the previous, the release's first sentence, its page. */
+.evc__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 12px; color: var(--muted); font-size: var(--fs-xs); }
+.evc__state { padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); color: var(--text); font-weight: 600; }
+.evc__state.is-out { background: color-mix(in srgb, var(--pos) 18%, transparent); color: var(--pos); }
+.evc__state.is-wait { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); animation: evc-pulse 1.2s ease-in-out infinite; }
+.evc__table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm, 13px); }
+.evc__table th { padding: 6px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); color: var(--dim); font-size: var(--fs-micro); font-weight: 600; letter-spacing: 0.04em; text-align: left; text-transform: uppercase; }
+.evc__table td { padding: 9px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.045); }
+.evc__table td small { color: var(--dim); }
+.evc__table .num { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.evc__actual { color: var(--text); font-size: var(--fs-base); font-weight: 700; }
+.evc__actual.is-empty { color: var(--dim); font-weight: 500; }
+.evc__actual.is-wait { color: var(--warn); animation: evc-pulse 1.2s ease-in-out infinite; }
+.evc__actual.is-up { color: var(--pos); }
+.evc__actual.is-down { color: var(--neg); }
+.evc__prior { color: var(--muted); }
+.evc__none, .evc__headline { margin: 12px 0 0; color: var(--muted); font-size: var(--fs-xs); line-height: 1.55; }
+.evc__headline { color: var(--text); }
+.evc__foot { margin: 8px 0 0; color: var(--dim); font-size: var(--fs-micro); }
+.evc__actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+a.fx-cta.evc__open { display: inline-flex; align-items: center; justify-content: center; width: auto; height: 34px; padding: 0 16px; text-decoration: none; }
+@keyframes evc-pulse { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .nwc__val.is-wait, .evc__state.is-wait, .evc__actual.is-wait { animation: none; } }

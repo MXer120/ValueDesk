@@ -64,3 +64,4 @@ builder-terms.key*
 
 # Vercel: the link of `vercel link` and the Build Output of deploy/vercel/build.sh
 .vercel/
+apps/web/public/models/

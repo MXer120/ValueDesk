@@ -90,6 +90,7 @@ content_type() {
     ttf) echo 'font/ttf' ;;
     otf) echo 'font/otf' ;;
     wasm) echo 'application/wasm' ;;
+    onnx) echo 'application/octet-stream' ;;
     webmanifest) echo 'application/manifest+json' ;;
     *) return 1 ;;
   esac

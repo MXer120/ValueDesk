@@ -16,6 +16,7 @@ import { AccountTabs } from '../components/AccountTabs';
 import { FeeTier } from '../components/FeeTier';
 import { Stats } from '../components/Stats';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
+import { FedLive } from '../components/fedlive/FedLive';
 import { NewsFeed } from '../components/news/NewsFeed';
 import { FundingScanner } from '../components/explore/FundingScanner';
 import { coinLabel } from '../format';
@@ -37,6 +38,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
     case 'trades': return { content: <Trades engine={c.engine} symbol={c.symbol} sym={c.sym} showTitle={false} onOpenScan={c.onOpenScan} />, scroll: 'auto' };
     case 'news': return { content: <NewsFeed {...newsProps(c)} instance={instance} />, scroll: 'hidden' };
     case 'livefeed': return { content: <LiveFeed instance={instance} />, scroll: 'hidden' };
+    case 'fedlive': return { content: <FedLive />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
     case 'sizecalc': return { content: <SizeCalc price={c.lastPrice || c.price} />, scroll: 'auto' };
     case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
@@ -48,8 +50,8 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
 /** A tab's name: the widget's, with its copy number. */
 const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
 
-const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'funding', 'sizecalc', 'feetier', 'venue'];
-const CHART_WIDGETS = ['livefeed', 'news', 'trades', 'funding'];
+const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'fedlive', 'funding', 'sizecalc', 'feetier', 'venue'];
+const CHART_WIDGETS = ['livefeed', 'fedlive', 'news', 'trades', 'funding'];
 
 const accountCtx = (c: TradeContext) => ({
   engine: c.engine,

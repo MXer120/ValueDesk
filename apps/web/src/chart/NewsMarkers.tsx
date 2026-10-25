@@ -22,7 +22,7 @@
  * A DOM layer, not canvas: logos are images, and the hover is the browser's.
  * Positions follow the chart frame by frame, re-rendering this layer alone.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Chart as KChart } from 'klinecharts';
 import { CoinIcon } from '../components/CoinIcon';
@@ -50,6 +50,8 @@ import {
 } from './chartMarks';
 import { useNewsFocus } from './newsFocus';
 import { PoweredBy } from '../components/news/PoweredBy';
+import { RELEASE_EVENT, fmtField, useReleaseResults, type ReleaseResult } from '../components/news/releases';
+import type { CalendarEvent } from '../vsApi';
 import { useLatched } from '../components/motion';
 import type { TimeZoneMode } from './timeAxis';
 
@@ -142,6 +144,23 @@ export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leavin
   const card = useLatched(open?.key ?? null, 140);
   const focus = useNewsFocus();
   const windowsShown = showsFomcWindow(barMs);
+  // The official figures of the releases on the chart (releases.tsx): filled in the second
+  // they land, and a release that lands while the chart is open opens its marker.
+  const releaseEvents = useMemo(() => marks.flatMap((m) => m.stories)
+    .filter((st) => st.event && st.event.source !== 'sosovalue')
+    .map((st) => ({ id: st.id, time: st.time, source: st.event!.source }) as CalendarEvent), [marks]);
+  const results = useReleaseResults(releaseEvents);
+  const placedRef = useRef(placed);
+  placedRef.current = placed;
+  useEffect(() => {
+    const landed = (e: Event) => {
+      const id = (e as CustomEvent<ReleaseResult>).detail?.id;
+      const mark = placedRef.current.find((pm) => pm.stories.some((st) => st.id === id));
+      if (mark) setOpen({ key: mark.key, pinned: true });
+    };
+    window.addEventListener(RELEASE_EVENT, landed);
+    return () => window.removeEventListener(RELEASE_EVENT, landed);
+  }, []);
 
   // Where each marker is, every frame; a render only when one moved.
   useEffect(() => {
@@ -381,7 +400,22 @@ export function NewsMarkers({ chart, marks, left, top, barMs, coin, mode, leavin
                       <span className="kc-newspop__by">{countdown(s.time, now)}</span>
                     </span>
                     <span className="kc-newspop__headline">{s.title}</span>
-                    {s.summary && <span className="kc-newspop__sum">{s.summary}</span>}
+                    {(() => {
+                      const r = results[s.id];
+                      const figs = r ? r.fields.filter((f) => f.value !== null || f.prior !== null).slice(0, 4) : [];
+                      if (!figs.length) return s.summary ? <span className="kc-newspop__sum">{s.summary}</span> : null;
+                      return (
+                        <span className={`kc-newspop__figs${r!.state === 'released' ? ' is-out' : ''}`}>
+                          {figs.map((f) => (
+                            <span key={f.key} className="kc-newspop__fig">
+                              <small>{f.label}</small>
+                              <b>{fmtField(f, f.value)}</b>
+                              <i>prev {fmtField(f, f.prior)}</i>
+                            </span>
+                          ))}
+                        </span>
+                      );
+                    })()}
                     <span className="kc-newspop__src">
                       {s.event!.allDay ? 'Time not published · ' : ''}
                       {s.author}

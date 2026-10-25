@@ -1,0 +1,10 @@
+#EXTM3U
+#EXT-X-VERSION:4
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-0",NAME="en (Main)",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/1891dfb8-eae7-4659-8348-f0ff8e285cef/10s/rendition.m3u8?fastly_token=REDACTED"
+#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitles-0",NAME="en",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/0f3a034b-b968-4513-872f-66507b131c8d/rendition.m3u8?fastly_token=REDACTED"
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=871200,CODECS="mp4a.40.2,avc1.42001e",RESOLUTION=640x360,AUDIO="audio-0",CLOSED-CAPTIONS=NONE,SUBTITLES="subtitles-0"
+https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/173e808b-5d53-4274-bc5b-43ad809f75a6/10s/rendition.m3u8?fastly_token=REDACTED
+#EXT-X-I-FRAME-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=871200,CODECS="mp4a.40.2,avc1.42001e",RESOLUTION=640x360,URI="https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/173e808b-5d53-4274-bc5b-43ad809f75a6/iframe.m3u8?fastly_token=REDACTED"
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio-1",NAME="en (Main)",DEFAULT=YES,AUTOSELECT=YES,LANGUAGE="en",URI="https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/84c03286-0833-4210-bc2d-8e6b8f9997f9/10s/rendition.m3u8?fastly_token=REDACTED"
+#EXT-X-STREAM-INF:PROGRAM-ID=0,BANDWIDTH=561000,CODECS="mp4a.40.2,avc1.420015",RESOLUTION=480x270,AUDIO="audio-1",CLOSED-CAPTIONS=NONE,SUBTITLES="subtitles-0"
+https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/de1a9a00-b6cf-4225-a010-228813869cd4/10s/rendition.m3u8?fastly_token=REDACTED

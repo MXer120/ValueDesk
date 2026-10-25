@@ -41,6 +41,8 @@ test('parseFomc: the decision at 2 pm ET on the last day, projections where star
     ],
   );
   assert.ok(ev.every((e) => e.source === 'fed' && e.href.startsWith('https://www.federalreserve.gov/')));
+  // What its result card shows (releases.ts RELEASE_FIELDS).
+  assert.deepEqual(ev[0]!.fields?.map((f) => f.key), ['decision', 'range', 'votes']);
   assert.deepEqual(parseFomc('<p>No calendar here</p>'), []);
 });
 

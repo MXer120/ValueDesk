@@ -15,6 +15,8 @@
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts&history   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; history=1 the chart's: the feed as far back as kept, up to 300, hot ones ranked; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
+ *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuescan/releases.ts)
+ *   GET /api/vs/fed/live   (the Federal Reserve's current broadcast: its Brightcove HLS stream)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
@@ -51,6 +53,7 @@ import { indexerHealth } from '../hosted.js';
 import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
 import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuescan/calendar.js';
 import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
+import { fedLive, releaseResults } from '../valuescan/releases.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -253,6 +256,38 @@ export async function valuescanRoutes(app: FastifyInstance) {
       const { from, to } = parseCalendarQuery(req.query as Record<string, unknown>);
       const page = await calendar(from, to);
       return { ok: true, ...page, sourceNames: SOURCE_NAME };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * The official results of calendar events (`ids`, comma-separated, the first
+   * 50 kept): what the release watcher read from the publisher's page at the
+   * release second, and the prior release's figures (valuescan/releases.ts).
+   * An id the watcher has nothing on yet is 'scheduled', with the prior values
+   * when known. An edge may keep it a second while a release is near, else 30 s.
+   */
+  app.get('/api/vs/calendar/results', async (req, reply) => {
+    const raw = String((req.query as Q).ids ?? '');
+    const ids = [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))].slice(0, 50);
+    const now = Date.now();
+    const { results, hot } = releaseResults(ids, now);
+    reply.header('Cache-Control', hot ? 'public, max-age=0, s-maxage=1' : 'public, max-age=0, s-maxage=30');
+    return { ok: true, now, results };
+  });
+
+  /**
+   * The Federal Reserve's current broadcast (FOMC press conferences, testimony):
+   * the video its live-broadcast page embeds, as an HLS stream from Brightcove's
+   * playback API, read at most every 15 s (valuescan/releases.ts fedLive). The
+   * stream URLs carry expiring tokens, so an edge keeps the answer 10 s at most.
+   */
+  app.get('/api/vs/fed/live', async (_req, reply) => {
+    try {
+      const live = await fedLive();
+      reply.header('Cache-Control', 'public, max-age=0, s-maxage=10');
+      return { ok: true, ...live };
     } catch (e) {
       return fail(reply, e);
     }

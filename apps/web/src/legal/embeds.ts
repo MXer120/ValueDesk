@@ -13,8 +13,13 @@
  */
 import { useSyncExternalStore } from 'react';
 
-export type EmbedPlatform = 'youtube' | 'twitch' | 'kick' | 'vimeo';
-export const EMBED_PLATFORMS: readonly EmbedPlatform[] = ['youtube', 'twitch', 'kick', 'vimeo'];
+/**
+ * `fed`: the Fed live widget (components/fedlive): the Federal Reserve's own
+ * broadcast from Brightcove's servers - nothing of it loads before consent. (Its
+ * speech model is served by this site, not a third party.)
+ */
+export type EmbedPlatform = 'youtube' | 'twitch' | 'kick' | 'vimeo' | 'fed';
+export const EMBED_PLATFORMS: readonly EmbedPlatform[] = ['youtube', 'twitch', 'kick', 'vimeo', 'fed'];
 
 /** Who runs each player and where its privacy policy is - shown before consent. */
 export const EMBED_PROVIDERS: Readonly<Record<EmbedPlatform, { name: string; operator: string; policy: string }>> = {
@@ -22,6 +27,7 @@ export const EMBED_PROVIDERS: Readonly<Record<EmbedPlatform, { name: string; ope
   twitch: { name: 'Twitch', operator: 'Twitch Interactive, Inc.', policy: 'https://www.twitch.tv/p/legal/privacy-notice/' },
   kick: { name: 'Kick', operator: 'Kick Streaming Pty Ltd', policy: 'https://kick.com/privacy-policy' },
   vimeo: { name: 'Vimeo', operator: 'Vimeo.com, Inc.', policy: 'https://vimeo.com/privacy' },
+  fed: { name: 'Federal Reserve broadcast', operator: 'Brightcove Inc. (the Federal Reserve’s video host)', policy: 'https://www.brightcove.com/en/legal/privacy' },
 };
 
 const KEY = 'vd.embeds.v1';

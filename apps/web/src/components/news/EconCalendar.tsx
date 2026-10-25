@@ -5,15 +5,18 @@
  * the rest (server valuescan/calendar.ts).
  *
  * By day in the viewer's time, from three days back to six weeks ahead; the
- * next release says how long until it. Each opens its publisher's page. The
+ * next release says how long until it. Each opens its card (releases.tsx): the
+ * official figures, empty until they land and filled the second they do, with
+ * the publisher's page one click on. The
  * key releases show by default; the minor ones (PMIs, housing) on request.
  * The widget's header credits it: "Powered by SoSoValue & more".
  */
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { vsApi, type CalendarEvent } from '../../vsApi';
 import { EmptyState } from '../EmptyState';
 import { focusProps } from '../../chart/newsFocus';
+import { EventCard, fmtField, hasResults, useReleaseResults } from './releases';
 
 const DAY = 86_400_000;
 const IMPACT_LABEL: Record<CalendarEvent['importance'], string> = { high: 'High impact', medium: 'Medium impact', low: 'Low impact' };
@@ -52,6 +55,8 @@ export function EconCalendar({ instance }: { instance?: string }) {
   const now = Date.now();
   const events = useMemo(() => (cal.data?.events ?? []).filter((e) => minor || e.importance !== 'low'), [cal.data, minor]);
   const next = events.find((e) => e.time > now);
+  const results = useReleaseResults(events);
+  const [open, setOpen] = useState<CalendarEvent | null>(null);
   const days = useMemo(() => {
     const out: Array<{ key: string; label: string; events: CalendarEvent[] }> = [];
     for (const e of events) {
@@ -96,11 +101,10 @@ export function EconCalendar({ instance }: { instance?: string }) {
                 <ol className="nwc__events">
                   {d.events.map((e) => (
                     <li key={e.id} {...focusProps({ id: e.id, title: '' })}>
-                      <a
-                        className={`nwc__row nwc__row--${e.importance}${e.time < now ? ' is-past' : ''}${e === next ? ' is-next' : ''}`}
-                        href={e.href}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                      <button
+                        type="button"
+                        className={`nwc__row nwc__row--${e.importance}${e.time < now ? ' is-past' : ''}${e === next ? ' is-next' : ''}${results[e.id]?.state === 'released' ? ' is-out' : ''}`}
+                        onClick={() => setOpen(e)}
                         title={`${e.title} - ${IMPACT_LABEL[e.importance]}, ${cal.data!.sourceNames[e.source] ?? e.source}`}
                       >
                         <span className="nwc__time">{e.allDay ? 'Day' : new Date(e.time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
@@ -111,8 +115,14 @@ export function EconCalendar({ instance }: { instance?: string }) {
                         </span>
                         <span className="nwc__short">{e.short}</span>
                         <span className="nwc__title">{e.title}</span>
-                        <span className="nwc__src">{e === next ? until(e.time, now) : SHORT_SOURCE[e.source]}</span>
-                      </a>
+                        {(() => {
+                          const r = results[e.id];
+                          const f = r?.state === 'released' ? r.fields.find((x) => x.value !== null) : undefined;
+                          if (f) return <span className="nwc__val" title={`${f.label}${f.prior !== null ? `, previous ${fmtField(f, f.prior)}` : ''}`}>{fmtField(f, f.value)}</span>;
+                          if (hasResults(e) && Math.abs(e.time - now) < 60_000 && r?.state !== 'released') return <span className="nwc__val is-wait">waiting…</span>;
+                          return <span className="nwc__src">{e === next ? until(e.time, now) : SHORT_SOURCE[e.source]}</span>;
+                        })()}
+                      </button>
                     </li>
                   ))}
                 </ol>
@@ -121,6 +131,7 @@ export function EconCalendar({ instance }: { instance?: string }) {
           </ol>
         )}
       </div>
+      {open && <EventCard event={open} result={results[open.id]} sourceName={cal.data?.sourceNames[open.source]} onClose={() => setOpen(null)} />}
     </>
   );
 }

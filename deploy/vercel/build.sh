@@ -23,4 +23,6 @@ name="commit-${sha:0:12}"
 echo "building $name (${VERCEL_GIT_COMMIT_REF:-local}) for https://$VALUESCAN_ORIGIN" >&2
 
 WEB_ENV_FILE="$SETTINGS" bash deploy/release/build-web.sh "$name" --checkout
+# The Fed live widget's speech model, served from the site itself.
+bash deploy/vercel/fetch-model.sh apps/web/dist
 node deploy/vercel/package.mjs --dist=apps/web/dist "--origin=https://$VALUESCAN_ORIGIN" --out=.

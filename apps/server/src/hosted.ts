@@ -107,6 +107,10 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // The economic calendar: the Fed's, BLS's and BEA's public calendars and
   // SoSoValue's, each read at most twice a day (valuescan/calendar.ts).
   { method: 'GET', url: '/api/vs/calendar', cls: 'read' },
+  // Official results of its releases, read by one watcher in this process at the release second,
+  // and the Fed's current broadcast (both valuescan/releases.ts): cached reads, whoever asks.
+  { method: 'GET', url: '/api/vs/calendar/results', cls: 'read' },
+  { method: 'GET', url: '/api/vs/fed/live', cls: 'read' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },
