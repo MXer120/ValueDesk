@@ -723,11 +723,18 @@
   .cpy-msteps { margin-left: 0; }
 }
 
-/* The hero's art (DotWhale.tsx): a whale in dots where the card deck was, in the text's
-   own light grey, a soft glow behind it. */
+/* The hero's art (DotWhale.tsx): a whale breaching out of a sea of dots, where the card
+   deck was - large, the hero's wider column, the sea running to its foot; in the text's
+   own light grey, a soft glow behind the whale. */
+.cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); align-items: end; }
 .cpy-whale {
-  position: relative; height: 312px; color: #e9e9ea;
-  background: radial-gradient(60% 55% at 55% 50%, rgba(255, 255, 255, 0.05), transparent 70%);
+  position: relative; height: 440px; margin: -24px 0 -8px; color: #e9e9ea;
+  background: radial-gradient(55% 50% at 52% 42%, rgba(255, 255, 255, 0.06), transparent 70%);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
 }
 .cpy-whale canvas { display: block; }
-@media (max-width: 1100px) { .cpy-whale { max-width: 560px; width: 100%; margin: 0 auto; } }
+@media (max-width: 1100px) {
+  .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
+  .cpy-whale { height: 360px; margin: 0; }
+}
