@@ -12,7 +12,9 @@
  *
  * Hyperliquid's rate per tier is 1 / (2 x that tier's max leverage) - its docs,
  * and what its `crossMaintenanceMarginUsed` adds up to (checked 2026-10-25).
- * Open interest is in coins, one side (Lighter's `open_interest_usd` counts both).
+ * Open interest is kept in coins, ONE side: Hyperliquid, trade.xyz and SoDEX report both sides
+ * added (BTC 2026-10-25: 42.4K against books of 21.4K long and 21.9K short), so theirs is halved;
+ * Lighter's `open_interest` and Arcus's `openInterest` are one side already.
  */
 import { VENUES, type Venue } from '../types.js';
 import { hlInfo } from '../hyperliquid/index.js';
@@ -66,7 +68,7 @@ async function readHl(dex: string | null, withRules: boolean): Promise<Partial<V
   (meta?.universe ?? []).forEach((u, i) => {
     const c = ctxs?.[i];
     const n = num(c?.openInterest ?? null);
-    if (u.name && n !== null) oi.set(u.name, { oi: n, px: num(c?.markPx ?? null) });
+    if (u.name && n !== null) oi.set(u.name, { oi: n / 2, px: num(c?.markPx ?? null) });
   });
   return withRules ? { tiers: hlTiers(meta), oi } : { oi };
 }
@@ -101,7 +103,7 @@ async function readSodex(withRules: boolean): Promise<Partial<VenueMarkets>> {
   const oi = new Map<string, { oi: number; px: number | null }>();
   for (const t of listOf<{ symbol?: string; openInterest?: string; markPrice?: string }>(tickers)) {
     const n = num(t.openInterest ?? null);
-    if (t.symbol && n !== null) oi.set(t.symbol, { oi: n, px: num(t.markPrice ?? null) });
+    if (t.symbol && n !== null) oi.set(t.symbol, { oi: n / 2, px: num(t.markPrice ?? null) });
   }
   return withRules ? { tiers: sodexTiers(listOf<SodexSymbol>(syms)), oi } : { oi };
 }
