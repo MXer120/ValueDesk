@@ -19,15 +19,122 @@ import { useEffect, useRef } from 'react';
  * The silhouette in a 400 x 300 box, drawn from a photo of a breaching humpback:
  * the long rostrum up and to the left, the head's flat top, the back arching down
  * to where the body leaves the water (bottom right, no tail showing), the throat
- * and belly beneath.
+ * and belly beneath. The outline is roughened afterwards (see rough()), since a
+ * real whale's skin is knobbly and scarred, never a clean curve.
  */
-const BODY = 'M44 108 C50 97 66 90 88 87 C120 83 160 81 196 85 C232 89 263 100 290 118 C330 145 362 187 381 234 C389 254 393 268 396 282 L300 282 C292 254 270 224 244 205 C212 185 176 169 140 157 C108 147 80 135 62 125 C54 121 47 115 44 108 Z';
-/** The pectoral fin, reaching up and to the right from behind the head; knobs along its leading (top) edge. */
-const FIN = 'M226 138 C238 118 262 102 288 92 C292 87 298 88 302 85 C306 80 312 81 316 78 C320 74 327 75 331 73 C336 69 343 70 348 69 C356 66 364 66 372 67 C381 67 389 70 391 76 C392 83 386 89 377 93 C346 104 306 121 270 148 Z';
+const BODY = 'M44 108 C50 97 66 90 88 87 C120 83 160 81 196 85 C232 89 263 100 290 118 C326 144 354 184 368 226 C376 248 380 266 381 282 L322 282 C314 256 292 228 256 207 C220 187 180 170 140 157 C108 147 80 135 62 125 C54 121 47 115 44 108 Z';
 const W = 400;
 const H = 300;
 /** Where the body leaves the water. */
 const WATERLINE = 282;
+
+type Pt = [number, number];
+
+/** Points along a path of absolute M / C / L / Z commands, about every `step` px. */
+function flatten(d: string, step = 1.5): Pt[] {
+  const tok = d.match(/[MCLZ]|-?\d*\.?\d+/g) ?? [];
+  const pts: Pt[] = [];
+  let i = 0;
+  let cur: Pt = [0, 0];
+  const num = () => Number(tok[i++]);
+  while (i < tok.length) {
+    const cmd = tok[i++];
+    if (cmd === 'M') { cur = [num(), num()]; pts.push(cur); }
+    else if (cmd === 'L') {
+      const to: Pt = [num(), num()];
+      const n = Math.max(1, Math.ceil(Math.hypot(to[0] - cur[0], to[1] - cur[1]) / step));
+      for (let k = 1; k <= n; k++) pts.push([cur[0] + (to[0] - cur[0]) * k / n, cur[1] + (to[1] - cur[1]) * k / n]);
+      cur = to;
+    } else if (cmd === 'C') {
+      const a: Pt = [num(), num()];
+      const b: Pt = [num(), num()];
+      const to: Pt = [num(), num()];
+      const len = Math.hypot(a[0] - cur[0], a[1] - cur[1]) + Math.hypot(b[0] - a[0], b[1] - a[1]) + Math.hypot(to[0] - b[0], to[1] - b[1]);
+      const n = Math.max(2, Math.ceil(len / step));
+      for (let k = 1; k <= n; k++) {
+        const t = k / n;
+        const u = 1 - t;
+        pts.push([
+          u * u * u * cur[0] + 3 * u * u * t * a[0] + 3 * u * t * t * b[0] + t * t * t * to[0],
+          u * u * u * cur[1] + 3 * u * u * t * a[1] + 3 * u * t * t * b[1] + t * t * t * to[1],
+        ]);
+      }
+      cur = to;
+    }
+  }
+  return pts;
+}
+
+/**
+ * The outline pushed in and out along its normal: uneven skin everywhere, and the
+ * knobs (tubercles) standing proud along the head's top. Fixed phases, so the
+ * whale is the same on every load. The waterline itself stays straight.
+ */
+function rough(pts: Pt[]): Pt[] {
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i]!;
+    const [x2, y2] = pts[(i + 1) % pts.length]!;
+    area += x1 * y2 - x2 * y1;
+  }
+  const out = area > 0 ? -1 : 1;
+  let s = 0;
+  return pts.map(([x, y], i) => {
+    const [px, py] = pts[(i - 1 + pts.length) % pts.length]!;
+    const [nx, ny] = pts[(i + 1) % pts.length]!;
+    s += Math.hypot(x - px, y - py);
+    if (y > WATERLINE - 3) return [x, y] as Pt;
+    const tx = nx - px;
+    const ty = ny - py;
+    const tl = Math.hypot(tx, ty) || 1;
+    let k = 1.4 * Math.sin(s / 9 + 1.3) + 1 * Math.sin(s / 3.7 + 0.4) + 0.6 * Math.sin(s / 1.9 + 2.2);
+    // The head's top, rostrum tip to behind the blowhole: a row of knobs.
+    if (x < 175 && y < 100) k += 3.4 * Math.pow(Math.max(0, Math.sin(s / 2.6)), 3);
+    // The chin and throat: barnacle lumps.
+    if (x < 120 && y > 108) k += 2.6 * Math.pow(Math.max(0, Math.sin(s / 3.3 + 1)), 4);
+    return [x + out * (ty / tl) * k, y - out * (tx / tl) * k] as Pt;
+  });
+}
+
+/**
+ * The pectoral fin, built along a curved spine from its root behind the head to
+ * the tip: narrow and long like a humpback's (about a third of the body), widest
+ * near the root, its leading (upper) edge scalloped with big knobs, its trailing
+ * edge almost straight with a few nicks.
+ */
+function flipper(): Pt[] {
+  const root: Pt = [236, 152];
+  const ctl: Pt = [296, 86];
+  const tip: Pt = [392, 70];
+  const n = 120;
+  const lead: Pt[] = [];
+  const trail: Pt[] = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const u = 1 - t;
+    const x = u * u * root[0] + 2 * u * t * ctl[0] + t * t * tip[0];
+    const y = u * u * root[1] + 2 * u * t * ctl[1] + t * t * tip[1];
+    const dx = 2 * u * (ctl[0] - root[0]) + 2 * t * (tip[0] - ctl[0]);
+    const dy = 2 * u * (ctl[1] - root[1]) + 2 * t * (tip[1] - ctl[1]);
+    const dl = Math.hypot(dx, dy);
+    const ux = dy / dl;
+    const uy = -dx / dl;
+    const w = t < 0.2 ? 13 + (t / 0.2) * 5 : 18 * (1 - Math.pow((t - 0.2) / 0.8, 1.9)) + 2;
+    const fade = t < 0.1 ? 0 : Math.min(1, (t - 0.1) / 0.08) * (1 - t * 0.55);
+    const knob = 4 * fade * Math.pow(Math.abs(Math.sin(t * Math.PI * 11)), 0.55);
+    const nick = 0.5 * Math.sin(t * 61) + 0.35 * Math.sin(t * 23 + 1);
+    lead.push([x + ux * (w * 0.55 + knob), y + uy * (w * 0.55 + knob)]);
+    trail.push([x - ux * (w * 0.45 + nick * (1 - t)), y - uy * (w * 0.45 + nick * (1 - t))]);
+  }
+  return [...lead, ...trail.reverse()];
+}
+
+const toPath = (pts: Pt[]) => {
+  const p = new Path2D();
+  pts.forEach(([x, y], i) => (i ? p.lineTo(x, y) : p.moveTo(x, y)));
+  p.closePath();
+  return p;
+};
 
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 interface Drop { x: number; y: number; vx: number; vy: number; r: number; life: number; max: number }
@@ -39,8 +146,8 @@ function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
   c.height = H;
   const g = c.getContext('2d', { willReadFrequently: true });
   if (!g) return { dots: [], drips: [] };
-  const body = new Path2D(BODY);
-  const fin = new Path2D(FIN);
+  const body = toPath(rough(flatten(BODY)));
+  const fin = toPath(flipper());
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
   // The shade map (red channel = dot density). As in the photo: the back and the
@@ -93,24 +200,38 @@ function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
   wet.addColorStop(0, 'rgba(0,0,0,0)');
   wet.addColorStop(1, 'rgba(0,0,0,0.7)');
   g.fillStyle = wet;
-  g.fillRect(280, 238, 120, WATERLINE - 238);
-  // The fin: its top light (sparse), its edge drawn dense.
-  g.fillStyle = 'rgb(55,0,0)';
-  g.fill(fin);
-  g.strokeStyle = 'rgba(255,0,0,0.95)';
-  g.lineWidth = 2;
-  g.stroke(fin);
+  g.fillRect(300, 238, 100, WATERLINE - 238);
   // Every edge of the body darker, so the shape reads crisply (not along the surface).
   g.save();
   g.clip(new Path2D('M0 0H400V250H0Z'));
+  g.strokeStyle = 'rgba(255,0,0,0.95)';
   g.lineWidth = 1.8;
   g.stroke(body);
   g.restore();
-  // The knobs on the head and along the fin's leading edge, and the eye.
+  // The fin, drawn last so it covers the body behind it: its upper face light
+  // (sparse), a shadow along the trailing edge, its whole edge dense.
+  // A thin empty gap around it, so it reads as standing in front of the body.
+  g.strokeStyle = '#000';
+  g.lineWidth = 6;
+  g.stroke(fin);
+  g.fillStyle = 'rgb(120,0,0)';
+  g.fill(fin);
+  g.save();
+  g.clip(fin);
+  g.strokeStyle = 'rgba(255,0,0,0.8)';
+  g.lineWidth = 12;
+  g.beginPath();
+  g.moveTo(228, 166);
+  g.quadraticCurveTo(292, 104, 392, 82);
+  g.stroke();
+  g.restore();
+  g.strokeStyle = 'rgba(255,0,0,0.95)';
+  g.lineWidth = 2;
+  g.stroke(fin);
+  // The knobs on the head, and the eye.
   g.fillStyle = 'rgba(255,0,0,1)';
   const dotAt = (x: number, y: number, r: number) => { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); };
   for (const [x, y, r] of [[56, 99, 1.7], [68, 94, 2], [81, 91, 2.1], [95, 89, 2], [109, 88, 1.9], [124, 87, 1.8], [62, 103, 1.4], [75, 98, 1.6], [89, 95, 1.5], [103, 93, 1.6], [118, 92, 1.4]] as const) dotAt(x, y, r);
-  for (const [x, y] of [[296, 86], [309, 80], [322, 76], [336, 72], [351, 68], [366, 67], [380, 68]] as const) dotAt(x, y, 2.3);
   dotAt(164, 124, 2.8);
 
   const px = g.getImageData(0, 0, W, H).data;
@@ -128,7 +249,7 @@ function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
   // The spray it leaves the water through: loose dots around its base, thinning outward.
   for (let i = 0; i < count * 0.04; i++) {
     const t = Math.random();
-    dots.push({ x: 288 + Math.random() * 118, y: WATERLINE - 14 + t * 18, r: 0.5 + Math.random() * 0.7, a: 0.5 * (1 - t) + 0.06, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random(), dx: 0, dy: 0 });
+    dots.push({ x: 312 + Math.random() * 80, y: WATERLINE - 14 + t * 18, r: 0.5 + Math.random() * 0.7, a: 0.5 * (1 - t) + 0.06, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random(), dx: 0, dy: 0 });
   }
   // Where water falls off: the back's lower stretch near the surface.
   const drips: Array<[number, number]> = [];
