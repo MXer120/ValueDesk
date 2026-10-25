@@ -4,7 +4,9 @@
  * the dots denser where the photo is lighter - with faint round stars around it.
  *
  * The photo (owner, 2026-10-26: a full-body humpback cut out on white) is cut
- * out, mirrored so it heads left, tilted into a breach, and kept as a tone map
+ * out (its edge softened a little), mirrored so it heads left, tilted into a
+ * breach, its raised flipper turned a little further right about its root (owner,
+ * 2026-10-26), and kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
  * the page's code (no second request), and read as soon as this module loads.
@@ -24,14 +26,19 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 557;
-const WATERLINE = 279;
+const TH = 541;
+const WATERLINE = 271;
 const PAD = 18;
 const W = TW + PAD * 2;
 /** Half the band over which sharp turns to under water, either side of the surface (CSS px). */
-const SURFACE_BAND = 14;
+const SURFACE_BAND = 26;
 
 interface Tone { l: Float32Array; a: Float32Array }
+
+const sm = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+};
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 
 let toneOnce: Promise<Tone> | null = null;
@@ -82,7 +89,11 @@ function samp(f: Float32Array, x: number, y: number): number {
   return (f[i]! * (1 - fx) + f[i + 1]! * fx) * (1 - fy) + (f[i + TW]! * (1 - fx) + f[i + TW + 1]! * fx) * fy;
 }
 
-/** The stipple: dots dropped where the whale is, kept more often where it is light. */
+/**
+ * The stipple: dots dropped where the whale is, kept more often where it is light -
+ * the dark skin (the raised flipper) still dotted, so it reads as skin, not a hole -
+ * and thinning out over the soft edge.
+ */
 function stipple(t: Tone, count: number): Dot[] {
   const dots: Dot[] = [];
   let tries = 0;
@@ -90,9 +101,10 @@ function stipple(t: Tone, count: number): Dot[] {
     tries++;
     const x = Math.random() * TW;
     const y = Math.random() * TH;
-    if (samp(t.a, x, y) < 0.5) continue;
-    const v = 0.07 + 0.93 * Math.pow(samp(t.l, x, y), 1.5);
-    if (Math.random() > v) continue;
+    const edge = samp(t.a, x, y);
+    if (edge < 0.04) continue;
+    const v = 0.2 + 0.8 * Math.pow(samp(t.l, x, y), 1.35);
+    if (Math.random() > v * sm(0.04, 0.85, edge)) continue;
     dots.push({ x, y, r: 0.4 + Math.random() * 0.45 * (0.5 + v), a: 0.3 + 0.7 * v, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
   }
   return dots;
@@ -191,7 +203,8 @@ export function DotWhale() {
       lctx.globalCompositeOperation = 'destination-in';
       const under = lctx.createLinearGradient(0, 0, 0, low.height);
       under.addColorStop(top / low.height, 'rgba(0,0,0,0)');
-      under.addColorStop(Math.min(1, (surface + band) / low.height), 'rgba(0,0,0,0.62)');
+      under.addColorStop(Math.min(1, (surface + band) / low.height), 'rgba(0,0,0,0.85)');
+      under.addColorStop(Math.min(1, (surface + band * 4) / low.height), 'rgba(0,0,0,0.62)');
       under.addColorStop(1, 'rgba(0,0,0,0.34)');
       lctx.fillStyle = under;
       lctx.fillRect(0, 0, low.width, low.height);
