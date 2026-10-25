@@ -734,6 +734,20 @@
   mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
 }
 .cpy-whale canvas { display: block; }
+.cpy-whalewrap { position: relative; min-width: 0; }
+.cpy-whale--pixel { background: none; }
+.cpy-whale__styles {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 1;
+  display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+  background: rgba(20, 20, 22, 0.72); border: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.cpy-whale__styles button {
+  border: 0; background: none; color: var(--text-dim, #9a9aa0); font: inherit; font-size: 11.5px;
+  padding: 4px 10px; border-radius: 999px; cursor: pointer;
+}
+.cpy-whale__styles button:hover { color: var(--text, #e9e9ea); }
+.cpy-whale__styles button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text, #e9e9ea); }
 @media (max-width: 1100px) {
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
   .cpy-whale { height: 360px; margin: 0; }
