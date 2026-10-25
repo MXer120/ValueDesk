@@ -4,9 +4,9 @@
  * the dots denser where the photo is lighter - with faint round stars around it.
  *
  * The photo (owner, 2026-10-26: a full-body humpback cut out on white) is cut
- * out (its edge softened a little), mirrored so it heads left, tilted into a
- * breach, its raised flipper turned a little further right about its root (owner,
- * 2026-10-26), and kept as a tone map
+ * out, its outline smoothed (points and knobs rounded off), its raised flipper
+ * bent 40 degrees toward the body at a joint where it leaves it, mirrored so it heads
+ * left and tilted 26 degrees into a breach (owner, 2026-10-26), and kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
  * the page's code (no second request), and read as soon as this module loads.
@@ -15,8 +15,9 @@
  * it - the head, both flippers, the front of the body (rows above WATERLINE) - the
  * whale is sharp and fills the hero's box; below it the rest of the body and the
  * flukes run on behind the toolbar and the cards, blurred and dimmer as if under
- * water, the two crossfaded over a band either side of the surface so the whale
- * sinks into the water rather than being cut there.
+ * water. The sharp body stays whole down to the surface and gives way to the
+ * blurred one over a band below it, so the whale sinks into the water rather than
+ * being cut, or thinned above it.
  *
  * Little moves: a slow small dip, the dots giving where the pointer passes, the
  * stars twinkling. Still under reduced motion.
@@ -26,11 +27,11 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 541;
-const WATERLINE = 271;
+const TH = 682;
+const WATERLINE = 300;
 const PAD = 18;
 const W = TW + PAD * 2;
-/** Half the band over which sharp turns to under water, either side of the surface (CSS px). */
+/** The band below the surface over which sharp turns to under water (CSS px). */
 const SURFACE_BAND = 26;
 
 interface Tone { l: Float32Array; a: Float32Array }
@@ -103,8 +104,8 @@ function stipple(t: Tone, count: number): Dot[] {
     const y = Math.random() * TH;
     const edge = samp(t.a, x, y);
     if (edge < 0.04) continue;
-    const v = 0.2 + 0.8 * Math.pow(samp(t.l, x, y), 1.35);
-    if (Math.random() > v * sm(0.04, 0.85, edge)) continue;
+    const v = 0.16 + 0.84 * Math.pow(samp(t.l, x, y), 1.5);
+    if (Math.random() > v * sm(0.15, 0.7, edge)) continue;
     dots.push({ x, y, r: 0.4 + Math.random() * 0.45 * (0.5 + v), a: 0.3 + 0.7 * v, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
   }
   return dots;
@@ -194,7 +195,7 @@ export function DotWhale() {
       }
       // Under water: blurred and dimmer, a little more so with depth, coming in over the band.
       const band = SURFACE_BAND * dpr;
-      const top = Math.max(0, surface - band);
+      const top = surface;
       lctx.globalCompositeOperation = 'source-over';
       lctx.clearRect(0, 0, low.width, low.height);
       lctx.filter = `blur(${(2 * dpr).toFixed(1)}px)`;
@@ -242,7 +243,7 @@ export function DotWhale() {
     loadTone().then((t) => {
       if (gone) return;
       tone = t;
-      dots = stipple(t, 14000);
+      dots = stipple(t, 18000);
       fit();
       if (still) draw(0);
     }).catch(() => { /* no art, the hero still reads */ });
