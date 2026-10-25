@@ -43,7 +43,7 @@
  * and states its own chrome in OrderEntry.css. Those five rules in styles.css
  * now match nothing and can be deleted by whoever owns that file.
  */
-import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
 import { useAccountResource } from '../accountFeeds';
@@ -57,6 +57,8 @@ import { checkStopAgainstLiquidation, estimateLiquidationPrice } from '../risk';
 import { useConfirm } from './Modal';
 import { ReviewPosition, setReviewSuppressed, shouldReview, type ReviewOrder } from './ReviewPosition';
 import { useLegalTradeGate, useTradeGate } from './account/useTradeGate';
+import { getTradingState, subscribeTrading } from '../trading/session';
+import { requestUnlock } from '../trading/keyLock';
 import { useBuilderFee } from './account/useBuilderFee';
 import { FeeSchedule } from './FeeSchedule';
 import { useVenueFees } from './useVenueFees';
@@ -661,7 +663,20 @@ export function OrderEntry({
 }: Props) {
   const [type, setType] = useState<OrdType>('limit');
   /** While the ticket cannot trade, the order button connects or enables instead. */
-  const gate = useTradeGate(connectedAddress, unlocked);
+  const tradeGate = useTradeGate(connectedAddress, unlocked);
+  /* A stored key the user lock holds shut (trading/keyLock.ts): the button unlocks it,
+     instead of offering Enable trading - which would register a second key. */
+  const trading = useSyncExternalStore(subscribeTrading, getTradingState, getTradingState);
+  const lockedHere = !unlocked && trading.locked && !!connectedAddress && trading.owner === connectedAddress.toLowerCase();
+  const gate = lockedHere
+    ? {
+        label: 'Unlock to trade',
+        why: 'Trading is locked with your password or passkey. Unlock it to place orders.',
+        act: () => void requestUnlock(trading.owner, 'Unlock trading'),
+        busy: false,
+        approving: false,
+      }
+    : tradeGate;
   const [sizeInput, setSizeInput] = useState('');
   /** Percent shown before a balance exists. Applied once that basis appears and the size field is still empty. */
   const [pctDraft, setPctDraft] = useState(0);

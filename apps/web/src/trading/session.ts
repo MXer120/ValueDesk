@@ -57,6 +57,14 @@
  * USDC or SOSO creates one (CreateAccount.tsx). `accountStatus` says which it is,
  * so the order button can offer "Create account" instead of a dead end.
  *
+ * THE USER LOCK (keyLock.ts, optional). With a password or passkey set, the
+ * stored key is sealed under the user's key as well (vault.ts) and a reload
+ * shows trading as enabled but LOCKED (`locked: true`, no signer): the order
+ * button reads "Unlock to trade", and anything that asks for the signer opens
+ * the unlock dialog instead of failing silently. After the idle auto-lock the
+ * private key in memory is zeroed and the state is locked again. Without a lock
+ * nothing here changes.
+ *
  * The master wallet's key is never read; the wallet only ever signs typed data.
  */
 import {
@@ -91,7 +99,8 @@ import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from './bui
 import { tradingConfig } from './config';
 import { followTerms } from './terms';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
-import { openVault, type KeyVault, type StoredKey } from './vault';
+import { KeyLockedError, openVault, type KeyVault, type StoredKey } from './vault';
+import { lockKind, lockNow, onLockEvent, requestUnlock, setLockResealer, touch as touchLock, userKeyFor } from './keyLock';
 import { addOrSwitchChain, getChainId, isUserRejection, signTypedData, type Eip1193Provider } from '../wallet';
 import { logger } from '../log';
 
@@ -122,6 +131,12 @@ export interface TradingState {
   builder: BuilderApproval | null;
   /** Why trading went off, when it went off on its own (expired, revoked). */
   reason: string | null;
+  /**
+   * A key is stored for this wallet (status 'enabled'; its name, address and
+   * expiry are shown) but the user lock holds it shut: nothing can be signed
+   * until `requestUnlock` (keyLock.ts) succeeds.
+   */
+  locked: boolean;
 }
 
 export class TradingError extends Error {
@@ -145,7 +160,9 @@ export class TradingError extends Error {
       /** The user closed the builder-fee dialog: nothing was signed, nothing changed. */
       | 'cancelled'
       /** The legal gate refused to sign an action (legalGate.ts): restricted place, or the terms not signed. */
-      | 'legal',
+      | 'legal'
+      /** The user lock (keyLock.ts) holds the key shut: the unlock dialog was opened. */
+      | 'locked',
   ) {
     super(message);
   }
@@ -171,11 +188,14 @@ const OFF = (owner: string | null, reason: string | null = null): TradingState =
     remembered: false,
     builder: null,
     reason,
+    locked: false,
   };
 };
 
 let state: TradingState = OFF(null);
 let signer: { key: SigningKeyRef; meta: StoredKey } | null = null;
+/** The stored key's record while the user lock holds it shut (nothing secret: no private key). */
+let held: StoredKey | null = null;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 /** An approval SoDEX accepted (or may have) that its reads do not list on every engine yet. */
 let builderPending = false;
@@ -232,6 +252,7 @@ function clearBuilderTimers(): void {
 function dropSigner(): void {
   if (signer) (signer.key.privateKey as Uint8Array).fill(0);
   signer = null;
+  held = null;
   if (expiryTimer) clearTimeout(expiryTimer);
   expiryTimer = undefined;
   clearBuilderTimers();
@@ -258,9 +279,14 @@ function adopt(meta: StoredKey, privateKey: Uint8Array, remembered: boolean): vo
     remembered,
     builder: meta.builder,
     reason: null,
+    locked: false,
   });
   // The fee this wallet owes: asked for now (enabled or restored), then kept current (terms.ts).
   followTerms(meta.owner);
+  armExpiry(meta);
+}
+
+function armExpiry(meta: StoredKey): void {
   // Browsers clamp long timers; re-arm in at most a day.
   const arm = () => {
     const left = meta.expiresAt - Date.now();
@@ -273,6 +299,111 @@ function adopt(meta: StoredKey, privateKey: Uint8Array, remembered: boolean): vo
   };
   arm();
 }
+
+/** A key is stored but the user lock holds it shut: show it, hold no private key. */
+function showLocked(meta: StoredKey, remembered: boolean): void {
+  dropSigner();
+  held = meta;
+  noteAccount(meta.network, meta.owner, meta.accountId);
+  set({
+    status: 'enabled',
+    owner: meta.owner,
+    network: meta.network,
+    accountId: meta.accountId,
+    accountStatus: 'ready',
+    keyName: meta.name,
+    keyAddress: meta.keyAddress,
+    expiresAt: meta.expiresAt,
+    engines: meta.engines ?? BOTH,
+    remembered,
+    builder: meta.builder,
+    reason: null,
+    locked: true,
+  });
+  armExpiry(meta);
+}
+
+/**
+ * Save the key as the owner's lock wants it: sealed under the user key when a
+ * lock is set - never in the clear then, so a lock that is not unlocked right
+ * now refuses the save instead.
+ */
+async function saveKey(v: KeyVault, meta: StoredKey, privateKey: Uint8Array, persist: boolean): Promise<void> {
+  const lockedHere = lockKind(meta.owner) !== 'none';
+  const userKey = lockedHere ? userKeyFor(meta.owner) : null;
+  if (lockedHere && !userKey) throw new TradingError('Trading is locked. Unlock it and try again.', 'locked');
+  await v.save(meta, privateKey, { persist, userKey });
+}
+
+/** After an unlock (keyLock.ts): open the held key with the user key and trade again. */
+async function openHeld(owner: string): Promise<void> {
+  const { network } = tradingConfig();
+  const v = await vault();
+  for (let tries = 0; tries < 2; tries++) {
+    const userKey = userKeyFor(owner);
+    if (!userKey || state.owner !== owner || !state.locked) return;
+    let hit;
+    try {
+      hit = await v.load(network, owner, Date.now(), userKey);
+    } catch (e) {
+      if (!(e instanceof KeyLockedError)) {
+        log.warn('the locked trading key could not be opened', { error: String(e) });
+        return;
+      }
+      // The lock was changed meanwhile (this tab, or another): try the new key once.
+      if (userKeyFor(owner) !== userKey) continue;
+      // A key the lock just verified does not open it: sealed under a lock that no longer exists.
+      log.warn('the stored trading key was sealed under an earlier lock; dropping it');
+      await v.remove(network, owner);
+      if (state.owner === owner) {
+        dropSigner();
+        set({ ...OFF(owner, 'Your stored trading key was locked with an earlier password or passkey. Enable trading again.'), status: 'expired' });
+      }
+      return;
+    }
+    if (state.owner !== owner || !state.locked) {
+      hit?.privateKey.fill(0);
+      return;
+    }
+    if (!hit) {
+      dropSigner();
+      set(OFF(owner));
+      return;
+    }
+    const remembered = state.remembered;
+    if (!hit.locked) {
+      // A lock exists but the record is in the clear (it could not be re-sealed when the lock was set): seal it now.
+      try {
+        await v.save(hit.meta, hit.privateKey, { persist: remembered, userKey });
+      } catch (e) {
+        log.warn('the trading key could not be sealed under the lock', { error: String(e) });
+      }
+    }
+    adopt(hit.meta, hit.privateKey, remembered);
+    void confirmKeyStillRegistered(hit.meta);
+    if (activeBuilder(tradingConfig().builder)) void refreshBuilderApproval();
+    return;
+  }
+}
+
+onLockEvent((owner, unlocked) => {
+  if (state.owner !== owner) return;
+  if (unlocked) {
+    // Returned, not fired off: requestUnlock resolves once the key is open again.
+    return state.locked ? openHeld(owner) : undefined;
+  }
+  // Auto-lock or Lock now: the private key leaves memory (dropSigner zeroes it).
+  if (signer && !state.locked && lockKind(owner) !== 'none') showLocked(signer.meta, state.remembered);
+});
+
+/** A lock was set, changed or removed: the stored key follows it (keyLock.ts calls this first). */
+setLockResealer(async (owner, from, to) => {
+  const { network } = tradingConfig();
+  const v = await vault();
+  await v.reseal(network, owner, from, to);
+  // Other tabs re-read the record: a new lock locks them too, a removed one opens them.
+  announce(owner, network);
+});
 
 function expire(reason: string): void {
   const owner = state.owner;
@@ -369,10 +500,35 @@ export async function restoreTrading(address: string | null): Promise<TradingSta
   }
   try {
     const v = await vault();
-    const hit = await v.load(network, owner);
+    let hit;
+    try {
+      hit = await v.load(network, owner, Date.now(), userKeyFor(owner));
+    } catch (e) {
+      if (!(e instanceof KeyLockedError)) throw e;
+      if ((state.owner ?? owner) !== owner) return state;
+      if (lockKind(owner) === 'none') {
+        // Sealed under a lock that was removed without re-sealing it: nobody can open it.
+        await v.remove(network, owner);
+        dropSigner();
+        set({ ...OFF(owner, 'Your stored trading key was locked with a password or passkey that is no longer set. Enable trading again.'), status: 'expired' });
+        void refreshAccount(owner);
+        return state;
+      }
+      // An in-memory user key that does not open it is stale (the lock was changed in another tab).
+      if (e.wrongKey) lockNow(owner);
+      showLocked(e.meta, v.persistent);
+      return state;
+    }
     // The wallet may have switched again while the vault was read.
-    if ((state.owner ?? owner) !== owner) return state;
-    if (hit) {
+    if ((state.owner ?? owner) !== owner) {
+      hit?.privateKey.fill(0);
+      return state;
+    }
+    if (hit && lockKind(owner) !== 'none' && !userKeyFor(owner)) {
+      // A lock is set and not unlocked: the key waits, whatever its record says.
+      hit.privateKey.fill(0);
+      showLocked(hit.meta, v.persistent);
+    } else if (hit) {
       adopt(hit.meta, hit.privateKey, v.persistent);
       void confirmKeyStillRegistered(hit.meta);
       // The approval is the account's, and can change behind this key's back
@@ -502,6 +658,10 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
   if (!cfg.writesAllowed) {
     throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
   }
+  // With a lock the new key is sealed under it: unlock BEFORE anything is signed.
+  if (lockKind(owner) !== 'none' && !(await requestUnlock(owner, 'Unlock to enable trading'))) {
+    throw new TradingError('Enabling trading was cancelled.', 'cancelled');
+  }
   const accountId = await sodexAccountId(owner);
   noteAccount(cfg.network, owner, accountId);
   if (!accountId) {
@@ -595,7 +755,7 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
     };
     const v = await vault();
     const remember = o.remember !== false && v.persistent;
-    await v.save(meta, tk.privateKey, { persist: remember });
+    await saveKey(v, meta, tk.privateKey, remember);
     adopt(meta, tk.privateKey.slice(), remember);
     if (fee.pending) watchPendingBuilderApproval();
     announce(owner, cfg.network);
@@ -728,7 +888,7 @@ async function setBuilderApproval(next: BuilderApproval | null): Promise<void> {
   signer = { key: s.key, meta };
   if (state.status === 'enabled') set({ ...state, builder: next });
   try {
-    await (await vault()).save(meta, s.key.privateKey, { persist: state.remembered });
+    await saveKey(await vault(), meta, s.key.privateKey as Uint8Array, state.remembered);
   } catch (e) {
     log.warn('the builder approval could not be stored with the trading key (it is re-read on the next load)', { error: String(e) });
   }
@@ -993,7 +1153,8 @@ export async function disableTrading(
 ): Promise<void> {
   const owner = state.owner;
   const net = state.network;
-  const meta = signer?.meta ?? null;
+  // A locked key can be revoked too: the WALLET signs the revocation, not the key.
+  const meta = signer?.meta ?? held ?? null;
   try {
     if (o.revoke && meta && o.provider) {
       const cfg = tradingConfig();
@@ -1050,6 +1211,11 @@ export function requireSigner(owner?: string | null, engine?: Engine): { key: Si
   const cfg = tradingConfig();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  if (!signer && state.locked && state.owner) {
+    // Not a silent failure: the unlock dialog opens, and the caller says why nothing was sent.
+    void requestUnlock(state.owner, 'Unlock trading');
+    throw new TradingError('Trading is locked. Unlock it, then try again.', 'locked');
+  }
   if (!signer || state.status !== 'enabled') {
     throw new TradingError(
       state.status === 'expired' ? state.reason ?? 'Your trading key expired. Enable trading again.' : 'Enable trading first - it takes one wallet signature.',
@@ -1069,6 +1235,8 @@ export function requireSigner(owner?: string | null, engine?: Engine): { key: Si
     expire('Your trading key expired. Enable trading again - it takes one wallet signature.');
     throw new TradingError('Your trading key expired. Enable trading again.', 'expired');
   }
+  // Signing is activity: the idle auto-lock starts over (a no-op without a lock).
+  touchLock(signer.meta.owner);
   return signer;
 }
 
@@ -1097,7 +1265,8 @@ export function sessionInfoOf(t: TradingState): {
   autoUnlock: boolean;
   legacyKeystore: null;
 } {
-  const on = t.status === 'enabled' && !!t.owner && !!t.keyName && !!t.keyAddress && t.accountId !== null;
+  // A locked key cannot sign: to the ticket it is "not unlocked" (OrderEntry says "Unlock to trade").
+  const on = t.status === 'enabled' && !t.locked && !!t.owner && !!t.keyName && !!t.keyAddress && t.accountId !== null;
   return {
     network: t.network,
     chainId: tradingConfig().chainId,

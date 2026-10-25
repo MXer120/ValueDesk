@@ -20,6 +20,18 @@
  * Opting out ("don't remember this device") keeps it in memory only. Without
  * IndexedDB or WebCrypto (some private windows) the vault falls back to memory
  * and says so.
+ *
+ * THE USER LOCK (keyLock.ts, optional). The device key only proves "this
+ * browser profile": anyone at the unlocked computer, or script in this origin,
+ * can use it. With a password or passkey lock the private key is sealed TWICE:
+ * first under the user's key (derived from the password / passkey PRF, held in
+ * memory only while unlocked), then that ciphertext under the device key as
+ * above, both bound to the same additional data. Such a record says `lock: 1`;
+ * without a lock the record is byte for byte what it always was, so nobody who
+ * never sets a lock is migrated. A locked record without the right user key
+ * throws KeyLockedError and is KEPT: a wrong password must never delete a key.
+ * The memory vault seals locked keys under the user key too, so after an
+ * auto-lock no plaintext copy is left in the tab.
  */
 import { privateKeyToAddress, type Engine, type Network } from '@sodex-core';
 import type { BuilderApproval } from './builder';
@@ -50,14 +62,47 @@ export interface StoredKey {
 export interface Unsealed {
   meta: StoredKey;
   privateKey: Uint8Array;
+  /** The record was sealed under a user key (keyLock.ts). */
+  locked?: boolean;
+}
+
+/** The lock version a locked record is sealed with (the inner layer's format). */
+export const LOCK_VERSION = 1 as const;
+
+/**
+ * A locked record whose user key was not given, or did not open it. The record
+ * is kept; `meta` is what the UI may show meanwhile (it holds nothing secret).
+ */
+export class KeyLockedError extends Error {
+  override name = 'KeyLockedError';
+  constructor(
+    readonly meta: StoredKey,
+    /** True when a user key was given and did not open the record. */
+    readonly wrongKey: boolean,
+  ) {
+    super(wrongKey ? 'The trading key is locked with another password or passkey.' : 'The trading key is locked.');
+  }
+}
+
+export interface SaveOptions {
+  persist?: boolean;
+  /** Seal under this user key too (keyLock.ts); absent = an unlocked record, as before. */
+  userKey?: CryptoKey | null;
 }
 
 export interface KeyVault {
   /** True when keys survive a reload. */
   readonly persistent: boolean;
-  save(meta: StoredKey, privateKey: Uint8Array, opts?: { persist?: boolean }): Promise<void>;
-  load(network: Network, owner: string, now?: number): Promise<Unsealed | null>;
+  save(meta: StoredKey, privateKey: Uint8Array, opts?: SaveOptions): Promise<void>;
+  /** Throws KeyLockedError for a locked record without the right `userKey`. */
+  load(network: Network, owner: string, now?: number, userKey?: CryptoKey | null): Promise<Unsealed | null>;
   remove(network: Network, owner: string): Promise<void>;
+  /**
+   * Seal the stored key again, from `from` (null: it is unlocked now) to `to`
+   * (null: unlock it), keeping where it lives (device or this tab). False when
+   * there is nothing stored. Throws KeyLockedError when `from` does not open it.
+   */
+  reseal(network: Network, owner: string, from: CryptoKey | null, to: CryptoKey | null, now?: number): Promise<boolean>;
 }
 
 const baseId = (network: Network, owner: string): string => `${network}:${owner.toLowerCase()}`;
@@ -108,32 +153,123 @@ export async function openKey(
 export const newWrapKey = (): Promise<CryptoKey> =>
   crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']) as Promise<CryptoKey>;
 
+/** Inner layer: `iv (12) || AES-GCM(userKey, privateKey)`, bound to the record like the outer one. */
+async function lockSeal(userKey: CryptoKey, meta: StoredKey, privateKey: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+  const { iv, ct } = await sealKey(userKey, meta, privateKey);
+  const out = new Uint8Array(12 + ct.byteLength);
+  out.set(iv, 0);
+  out.set(new Uint8Array(ct), 12);
+  return out;
+}
+
+/** The inner layer's private key, checked against its address; null when `userKey` is not the one. */
+async function lockOpen(userKey: CryptoKey, meta: StoredKey, inner: Uint8Array): Promise<Uint8Array | null> {
+  if (inner.length <= 12) return null;
+  return openKey(userKey, meta, { iv: inner.slice(0, 12), ct: inner.slice(12).buffer });
+}
+
+/** A stored record: the device-key seal of the private key, or (locked) of its user-key seal. */
+export interface SealedRecord {
+  id: string;
+  meta: StoredKey;
+  iv: Uint8Array;
+  ct: ArrayBuffer;
+  /** Present on a locked record: the lock version its inner layer was sealed with. */
+  lock?: typeof LOCK_VERSION;
+}
+
+/** Seal a record under the device key, and first under `userKey` when one is given. */
+export async function sealRecord(
+  deviceKey: CryptoKey,
+  id: string,
+  meta: StoredKey,
+  privateKey: Uint8Array,
+  userKey?: CryptoKey | null,
+): Promise<SealedRecord> {
+  if (!userKey) return { id, meta, ...(await sealKey(deviceKey, meta, privateKey)) };
+  const inner = await lockSeal(userKey, meta, privateKey);
+  // The outer layer is the same AES-GCM seal; what it seals is the inner ciphertext, not a key.
+  const iv = crypto.getRandomValues(new Uint8Array(new ArrayBuffer(12)));
+  const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(meta) }, deviceKey, inner);
+  return { id, meta, iv, ct, lock: LOCK_VERSION };
+}
+
+/**
+ * Open a record. Null when the DEVICE layer fails (corrupt, or another
+ * browser's key: unusable here for good). A locked record without the right
+ * `userKey` throws KeyLockedError - it is not broken, it is waiting.
+ */
+export async function openRecord(deviceKey: CryptoKey, rec: SealedRecord, userKey?: CryptoKey | null): Promise<Unsealed | null> {
+  if (!rec.lock) {
+    const pk = await openKey(deviceKey, rec.meta, rec);
+    return pk ? { meta: rec.meta, privateKey: pk } : null;
+  }
+  if (rec.lock !== LOCK_VERSION) return null;
+  let inner: Uint8Array;
+  try {
+    inner = new Uint8Array(
+      await crypto.subtle.decrypt({ name: 'AES-GCM', iv: new Uint8Array(rec.iv), additionalData: aad(rec.meta) }, deviceKey, rec.ct),
+    );
+  } catch {
+    return null;
+  }
+  if (!userKey) throw new KeyLockedError(rec.meta, false);
+  const pk = await lockOpen(userKey, rec.meta, inner);
+  if (!pk) throw new KeyLockedError(rec.meta, true);
+  return { meta: rec.meta, privateKey: pk, locked: true };
+}
+
 // --- memory ------------------------------------------------------------------
+
+type MemoryEntry = { meta: StoredKey; privateKey: Uint8Array; inner?: undefined } | { meta: StoredKey; privateKey?: undefined; inner: Uint8Array };
 
 export function memoryVault(slot = ''): KeyVault {
   const recordId = idIn(slot);
-  const keys = new Map<string, Unsealed>();
-  return {
+  const keys = new Map<string, MemoryEntry>();
+  const forget = (id: string) => {
+    const e = keys.get(id);
+    e?.privateKey?.fill(0);
+    e?.inner?.fill(0);
+    keys.delete(id);
+  };
+  const v: KeyVault = {
     persistent: false,
-    async save(meta, privateKey) {
-      keys.get(recordId(meta.network, meta.owner))?.privateKey.fill(0);
-      keys.set(recordId(meta.network, meta.owner), { meta: { ...meta }, privateKey: privateKey.slice() });
+    async save(meta, privateKey, opts) {
+      const id = recordId(meta.network, meta.owner);
+      // Sealed before the old entry goes, so a failing seal leaves what was there.
+      const inner = opts?.userKey ? await lockSeal(opts.userKey, meta, privateKey) : null;
+      forget(id);
+      keys.set(id, inner ? { meta: { ...meta }, inner } : { meta: { ...meta }, privateKey: privateKey.slice() });
     },
-    async load(network, owner, now = Date.now()) {
-      const hit = keys.get(recordId(network, owner));
+    async load(network, owner, now = Date.now(), userKey) {
+      const id = recordId(network, owner);
+      const hit = keys.get(id);
       if (!hit) return null;
       if (hit.meta.expiresAt <= now) {
-        hit.privateKey.fill(0);
-        keys.delete(recordId(network, owner));
+        forget(id);
         return null;
       }
-      return { meta: { ...hit.meta }, privateKey: hit.privateKey.slice() };
+      if (hit.privateKey) return { meta: { ...hit.meta }, privateKey: hit.privateKey.slice() };
+      if (!userKey) throw new KeyLockedError({ ...hit.meta }, false);
+      const pk = await lockOpen(userKey, hit.meta, hit.inner);
+      if (!pk) throw new KeyLockedError({ ...hit.meta }, true);
+      return { meta: { ...hit.meta }, privateKey: pk, locked: true };
     },
     async remove(network, owner) {
-      keys.get(recordId(network, owner))?.privateKey.fill(0);
-      keys.delete(recordId(network, owner));
+      forget(recordId(network, owner));
+    },
+    async reseal(network, owner, from, to, now = Date.now()) {
+      const hit = await v.load(network, owner, now, from);
+      if (!hit) return false;
+      try {
+        await v.save(hit.meta, hit.privateKey, { userKey: to });
+      } finally {
+        hit.privateKey.fill(0);
+      }
+      return true;
     },
   };
+  return v;
 }
 
 // --- IndexedDB ---------------------------------------------------------------
@@ -142,13 +278,6 @@ const DB_NAME = 'vs-trading';
 const DB_VERSION = 1;
 const KEYS = 'keys';
 const WRAP = 'wrap';
-
-interface SealedRecord {
-  id: string;
-  meta: StoredKey;
-  iv: Uint8Array;
-  ct: ArrayBuffer;
-}
 
 const req = <T>(r: IDBRequest<T>): Promise<T> =>
   new Promise((resolve, reject) => {
@@ -199,42 +328,56 @@ function idbVault(slot = ''): KeyVault {
     }
   };
 
-  return {
+  const readRecord = async (network: Network, owner: string): Promise<SealedRecord | undefined> =>
+    (await req((await db()).transaction(KEYS, 'readonly').objectStore(KEYS).get(recordId(network, owner)))) as SealedRecord | undefined;
+
+  const v: KeyVault = {
     persistent: true,
     remove,
     async save(meta, privateKey, opts) {
       if (opts?.persist === false) {
         await remove(meta.network, meta.owner);
-        await session.save(meta, privateKey);
+        await session.save(meta, privateKey, { userKey: opts.userKey });
         return;
       }
       await session.remove(meta.network, meta.owner);
       const k = await wrapKey();
-      const sealed = await sealKey(k, meta, privateKey);
-      const rec: SealedRecord = { id: recordId(meta.network, meta.owner), meta, ...sealed };
+      const rec = await sealRecord(k, recordId(meta.network, meta.owner), meta, privateKey, opts?.userKey);
       await req((await db()).transaction(KEYS, 'readwrite').objectStore(KEYS).put(rec));
     },
-    async load(network, owner, now = Date.now()) {
-      const inMemory = await session.load(network, owner, now);
+    async load(network, owner, now = Date.now(), userKey) {
+      const inMemory = await session.load(network, owner, now, userKey);
       if (inMemory) return inMemory;
-      const d = await db();
-      const rec = (await req(d.transaction(KEYS, 'readonly').objectStore(KEYS).get(recordId(network, owner)))) as
-        | SealedRecord
-        | undefined;
+      const rec = await readRecord(network, owner);
       if (!rec) return null;
       if (rec.meta?.v !== 1 || !(rec.meta.expiresAt > now)) {
         await remove(network, owner);
         return null;
       }
-      const pk = await openKey(await wrapKey(), rec.meta, rec);
-      if (!pk) {
+      // A locked record without its user key throws KeyLockedError out of here, and stays.
+      const hit = await openRecord(await wrapKey(), rec, userKey);
+      if (!hit) {
         // Corrupt, or sealed under a device key this browser no longer has.
         await remove(network, owner);
         return null;
       }
-      return { meta: rec.meta, privateKey: pk };
+      return hit;
+    },
+    async reseal(network, owner, from, to, now = Date.now()) {
+      // Where it lives is kept: a tab-only key stays tab-only.
+      const inTab = await session.reseal(network, owner, from, to, now);
+      if (inTab) return true;
+      const hit = await v.load(network, owner, now, from);
+      if (!hit) return false;
+      try {
+        await v.save(hit.meta, hit.privateKey, { persist: true, userKey: to });
+      } finally {
+        hit.privateKey.fill(0);
+      }
+      return true;
     },
   };
+  return v;
 }
 
 /** The device's vault: IndexedDB + WebCrypto when both work, else memory.  names a second key per wallet. */
