@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Modal } from '../Modal';
 import { getTradingState, subscribeTrading } from '../../trading/session';
+import { confirmMoneyMove } from '../../trading/keyLock';
 import {
   ACCOUNT_LABEL,
   balancesOf,
@@ -245,6 +246,8 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
       }
       return;
     }
+    // The user lock (trading/keyLock.ts) asks again before money moves; cancel = nothing happens.
+    if (!(await confirmMoneyMove(owner, `Transfer ${show(amtUnits)} ${coin.coin}`))) return;
     const opening = from === 'evm' ? openingWalletStep(coin.valuechain.native) : null;
     const id = beginTransfer({
       coin: coin.coin,

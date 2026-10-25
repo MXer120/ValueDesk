@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
 import { getTradingState, subscribeTrading } from '../../trading/session';
+import { confirmMoneyMove } from '../../trading/keyLock';
 import {
   assetConfigs,
   balancesOf,
@@ -315,6 +316,9 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       }
       return;
     }
+    // The user lock (trading/keyLock.ts) asks again before money leaves; cancel = nothing happens.
+    setError(null);
+    if (!(await confirmMoneyMove(owner, `Withdraw ${amount} ${coin.coin}`))) return;
     setBusy(true);
     setError(null);
     setResult(null);

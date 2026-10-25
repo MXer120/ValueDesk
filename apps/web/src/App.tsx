@@ -15,6 +15,7 @@ import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
+import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { IndexPrompt } from './components/IndexPrompt';
 import { DevPanel } from './components/dev/DevPanel';
@@ -576,6 +577,10 @@ function AppShell() {
             session={session}
             onSession={refreshSession}
           />
+        </Guarded>
+        {/* The trading key's user lock (trading/keyLock.ts): one dialog for every unlock and money confirmation. */}
+        <Guarded name="Unlock">
+          <UnlockDialog />
         </Guarded>
         <Guarded name="Account setup">
           <AccountSetup address={address} />

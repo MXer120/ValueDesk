@@ -3,7 +3,7 @@
  * gateway: enable (one wallet signature, sodex.com's own registration on both
  * engines), sign and send orders with the trading key, per-order rejections, a
  * key SoDEX no longer knows or replaced, partial registration, no account,
- * expiry, withdrawals, turning off.
+ * expiry, withdrawals, turning off, and the user lock (keyLock.ts).
  *   npx tsx --test src/trading/session.test.ts
  */
 import { test, beforeEach } from 'node:test';
@@ -26,7 +26,8 @@ import {
   type Engine,
 } from '@sodex-core';
 import { setTradingConfig } from './config';
-import { memoryVault } from './vault';
+import { KeyLockedError, memoryVault } from './vault';
+import { _resetKeyLockForTests, currentUnlockRequest, lockNow, removeLock, requestUnlock, setPasswordLock } from './keyLock';
 import {
   _resetTradingForTests,
   checkKeyAfterRejection,
@@ -36,6 +37,7 @@ import {
   refreshAccount,
   restoreTrading,
   requireSigner,
+  sessionInfoOf,
   tradingKeyName,
   TradingError,
 } from './session';
@@ -146,6 +148,7 @@ beforeEach(() => {
     builder: null,
   });
   _resetTradingForTests(memoryVault());
+  _resetKeyLockForTests({ failDelayMs: 0 });
   // The wallet has signed ValueDesk's terms (legalGate.ts); the test below takes the signature away.
   _resetAcceptanceForTests();
   _signedTermsForTests(OWNER);
@@ -413,4 +416,125 @@ test('the wallet is only ever asked for typed data, and hashes what it is shown'
   await enableTrading({ owner: OWNER, provider: spy });
   assert.ok(seen, 'typed data, not a raw message');
   assert.equal(hashTypedData(seen as never).length, 32);
+});
+
+// --- the user lock (keyLock.ts) ----------------------------------------------------
+
+const PW = 'correct horse battery';
+
+/** Answer the unlock dialog (UnlockDialog.tsx) once it opens. */
+async function answerDialog(password: string): Promise<string | null> {
+  for (let i = 0; i < 500; i++) {
+    const r = currentUnlockRequest();
+    if (r) return r.submitPassword(password);
+    await new Promise((res) => setImmediate(res));
+  }
+  throw new Error('the unlock dialog never opened');
+}
+
+test('lock set while trading: the stored key is re-sealed; a reload shows it locked and nothing signs until unlocked', async () => {
+  _resetKeyLockForTests({ failDelayMs: 0 });
+  const vault = memoryVault();
+  _resetTradingForTests(vault);
+  const st = await enableTrading({ owner: OWNER, provider: wallet });
+  assert.equal(st.locked, false);
+
+  await setPasswordLock(OWNER, PW);
+  await assert.rejects(vault.load('mainnet', OWNER), KeyLockedError, 'sealed under the user key now');
+  assert.equal(getTradingState().locked, false, 'this tab stays unlocked');
+
+  // A reload: the user key is gone with the old page.
+  lockNow(OWNER);
+  _resetTradingForTests(vault);
+  const back = await restoreTrading(OWNER);
+  assert.equal(back.status, 'enabled');
+  assert.equal(back.locked, true);
+  assert.equal(back.keyName, st.keyName, 'the key is shown');
+  assert.equal(sessionInfoOf(back).unlocked, false, 'to the ticket: not unlocked');
+  assert.equal(sessionInfoOf(back).session, null);
+
+  // Signing asks for the unlock instead of failing silently.
+  assert.throws(() => requireSigner(), (e: unknown) => e instanceof TradingError && e.kind === 'locked');
+  assert.equal(currentUnlockRequest()?.reason, 'Unlock trading');
+  assert.equal(await answerDialog('wrong password'), 'Wrong password.');
+  assert.equal(getTradingState().locked, true);
+  assert.equal(await answerDialog(PW), null);
+  assert.equal(getTradingState().locked, false, 'open as soon as the unlock resolves');
+  assert.equal(requireSigner().meta.keyAddress, st.keyAddress);
+
+  reply = (s) => (/trade\/orders$/.test(s.url) ? ok([{ code: 0, clOrdID: 'x', orderID: 1 }]) : undefined);
+  const r = await placeOrder('perps', { symbol: 'BTC-USD', side: 'buy', price: '84000', quantity: '0.01' });
+  assert.equal(r.orderCount, 1);
+});
+
+test('auto-lock / Lock now: the private key in memory is zeroed and trading shows locked again', async () => {
+  _resetKeyLockForTests({ failDelayMs: 0 });
+  _resetTradingForTests(memoryVault());
+  await setPasswordLock(OWNER, PW);
+  await enableTrading({ owner: OWNER, provider: wallet });
+  const pk = requireSigner().key.privateKey as Uint8Array;
+  assert.ok(pk.some((b) => b !== 0));
+  lockNow(OWNER); // what the idle timer calls
+  assert.ok(pk.every((b) => b === 0), 'wiped');
+  assert.equal(getTradingState().locked, true);
+  assert.equal(getTradingState().status, 'enabled');
+  const p = requestUnlock(OWNER, 'Unlock trading');
+  assert.equal(await answerDialog(PW), null);
+  assert.equal(await p, true);
+  assert.equal(getTradingState().locked, false);
+});
+
+test('enable with a lock set: unlock first, and the new key is stored sealed; cancelling signs nothing', async () => {
+  _resetKeyLockForTests({ failDelayMs: 0 });
+  const vault = memoryVault();
+  _resetTradingForTests(vault);
+  await setPasswordLock(OWNER, PW);
+  lockNow(OWNER);
+  const cancelled = enableTrading({ owner: OWNER, provider: wallet });
+  for (let i = 0; i < 100 && !currentUnlockRequest(); i++) await new Promise((res) => setImmediate(res));
+  currentUnlockRequest()!.cancel();
+  await assert.rejects(cancelled, (e: unknown) => e instanceof TradingError && e.kind === 'cancelled');
+  assert.equal(wallet.prompts, 0, 'nothing signed');
+
+  const enabling = enableTrading({ owner: OWNER, provider: wallet });
+  assert.equal(await answerDialog(PW), null);
+  await enabling;
+  assert.equal(wallet.prompts, 1);
+  await assert.rejects(vault.load('mainnet', OWNER), KeyLockedError);
+});
+
+test('removing the lock re-seals the key unlocked; a reload then needs no unlock', async () => {
+  _resetKeyLockForTests({ failDelayMs: 0 });
+  const vault = memoryVault();
+  _resetTradingForTests(vault);
+  await setPasswordLock(OWNER, PW);
+  await enableTrading({ owner: OWNER, provider: wallet });
+  const removing = removeLock(OWNER);
+  assert.equal(await answerDialog(PW), null);
+  await removing;
+  const plain = await vault.load('mainnet', OWNER);
+  assert.ok(plain && !plain.locked);
+  _resetTradingForTests(vault);
+  const back = await restoreTrading(OWNER);
+  assert.equal(back.locked, false);
+  assert.equal(back.status, 'enabled');
+});
+
+test('memory-only (not remembered): the lock still gates use within the tab', async () => {
+  _resetKeyLockForTests({ failDelayMs: 0 });
+  const vault = memoryVault();
+  _resetTradingForTests(vault);
+  await setPasswordLock(OWNER, PW);
+  const st = await enableTrading({ owner: OWNER, provider: wallet, remember: false });
+  assert.equal(st.remembered, false);
+  lockNow(OWNER);
+  assert.equal(getTradingState().locked, true);
+  assert.throws(() => requireSigner(), (e: unknown) => e instanceof TradingError && e.kind === 'locked');
+  assert.equal(await answerDialog(PW), null);
+  assert.equal(getTradingState().locked, false);
+  // Turning off still works while locked.
+  lockNow(OWNER);
+  await disableTrading();
+  assert.equal(getTradingState().status, 'off');
+  _resetKeyLockForTests({ failDelayMs: 0 });
 });
