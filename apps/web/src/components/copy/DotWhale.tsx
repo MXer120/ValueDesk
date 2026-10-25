@@ -1,7 +1,14 @@
 /**
  * The Copy page's hero art (Discover.tsx, in place of the trader card deck): a
- * humpback breaching, taken from a photo and printed four ways, picked with the
- * small switch under it (remembered per browser):
+ * humpback breaching, taken from a photo, in two views and printed four ways,
+ * picked with the small switches under it (remembered per browser). Views, both
+ * swimming to the left:
+ *
+ *   Side        from its side, the near flipper raised (whale-tone.png).
+ *   Belly       from below, throat pleats and both flippers (whale-tone-belly.png,
+ *               mirrored from the photo so it heads left).
+ *
+ * Prints:
  *
  *   Dots        a stipple print, the dots denser where the photo is lighter, round
  *               stars around it.
@@ -10,16 +17,16 @@
  *               where the photo is darker (an etching).
  *   Pixel       a dithered grid of dots on black, square stars around it.
  *
- * The photo is cut out by hand and kept as a tone map (whale-tone.png: grey =
- * the photo's light, alpha = the whale), equalised over the whale so its dark
- * skin spreads over the whole range. The photo hides the far flipper, which read
- * as a whale with one fin, so the near one is mirrored in behind the body, down
- * under the throat and in shadow, like the other wing (owner, 2026-10-25).
+ * Each photo is cut out by hand and kept as a tone map (grey = the photo's light,
+ * alpha = the whale), equalised over the whale so its dark skin spreads over the
+ * whole range. A made-up far flipper on the side view did not read as anatomy
+ * (owner, 2026-10-25), so the belly view shows both flippers as photographed.
  * Little moves: a slow small bob, the dots giving where the pointer passes, the
  * stars twinkling; no falling water (owner, 2026-10-25). Still under reduced motion.
  */
 import { useEffect, useRef, useState } from 'react';
-import toneUrl from './whale-tone.png';
+import sideUrl from './whale-tone.png';
+import bellyUrl from './whale-tone-belly.png';
 
 export type WhaleStyle = 'dots' | 'guilloche' | 'engraving' | 'pixel';
 const STYLES: Array<{ id: WhaleStyle; label: string }> = [
@@ -29,6 +36,13 @@ const STYLES: Array<{ id: WhaleStyle; label: string }> = [
   { id: 'pixel', label: 'Pixel' },
 ];
 const KEY = 'vs:whale-style';
+
+export type WhaleView = 'side' | 'belly';
+const VIEWS: Array<{ id: WhaleView; label: string; url: string }> = [
+  { id: 'side', label: 'Side', url: sideUrl },
+  { id: 'belly', label: 'Belly', url: bellyUrl },
+];
+const VIEW_KEY = 'vs:whale-view';
 
 /** The tone map's size; the box adds a little room around it. */
 const TW = 478;
@@ -41,9 +55,11 @@ const H = 262;
 interface Tone { l: Float32Array; a: Float32Array }
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 
-let toneOnce: Promise<Tone> | null = null;
-function loadTone(): Promise<Tone> {
-  toneOnce ??= new Promise<Tone>((ok, fail) => {
+const tones = new Map<WhaleView, Promise<Tone>>();
+function loadTone(view: WhaleView): Promise<Tone> {
+  const had = tones.get(view);
+  if (had) return had;
+  const p = new Promise<Tone>((ok, fail) => {
     const img = new Image();
     img.onload = () => {
       const c = document.createElement('canvas');
@@ -71,9 +87,10 @@ function loadTone(): Promise<Tone> {
       ok({ l, a });
     };
     img.onerror = () => fail(new Error('whale tone did not load'));
-    img.src = toneUrl;
+    img.src = VIEWS.find((v) => v.id === view)!.url;
   });
-  return toneOnce;
+  tones.set(view, p);
+  return p;
 }
 
 /** A tone map value at (x, y), bilinear; 0 outside. */
@@ -194,14 +211,24 @@ function sideField(line: Array<[number, number]>): Float32Array {
   return f;
 }
 
-/** The body's spine, head tip to tail, and the fin's axis (tone coordinates). */
-const SPINE: Array<[number, number]> = [[0, 44], [60, 50], [130, 58], [200, 72], [262, 94], [312, 124], [352, 160], [384, 202], [410, 252], [420, 290]];
-const FIN_AXIS: Array<[number, number]> = [[270, 70], [330, 38], [400, 18], [470, 14]];
-/** The far flipper (mirrored in behind the body, see the header), and its axis. */
-const FIN2: Array<[number, number]> = [[202, 89], [185, 109], [166, 129], [142, 161], [127, 187], [116, 211], [114, 229], [119, 241], [129, 237], [145, 216], [162, 195], [182, 176], [200, 166], [206, 143]];
-const FIN2_AXIS: Array<[number, number]> = [[232, 110], [183, 144], [139, 189], [107, 241]];
-/** The fin, where the engraving's lines follow its axis instead of the body's. */
-const FIN: Array<[number, number]> = [[264, 26], [294, 19], [324, 11], [369, 4], [404, 3], [434, 5], [454, 14], [463, 26], [454, 34], [424, 39], [394, 46], [364, 56], [344, 69], [318, 62]];
+type Poly = Array<[number, number]>;
+/**
+ * Where the engraving's lines run, per view (tone coordinates): along the body's
+ * spine, head tip to tail, and on each flipper along its own axis.
+ */
+const GEOMETRY: Record<WhaleView, { spine: Poly; fins: Array<{ shape: Poly; axis: Poly }> }> = {
+  side: {
+    spine: [[0, 44], [60, 50], [130, 58], [200, 72], [262, 94], [312, 124], [352, 160], [384, 202], [410, 252], [420, 290]],
+    fins: [{ shape: [[264, 26], [294, 19], [324, 11], [369, 4], [404, 3], [434, 5], [454, 14], [463, 26], [454, 34], [424, 39], [394, 46], [364, 56], [344, 69], [318, 62]], axis: [[270, 70], [330, 38], [400, 18], [470, 14]] }],
+  },
+  belly: {
+    spine: [[113, 14], [186, 72], [244, 120], [290, 171], [317, 221], [321, 262]],
+    fins: [
+      { shape: [[338, 140], [359, 148], [368, 162], [363, 170], [340, 167], [311, 162], [305, 144]], axis: [[297, 152], [367, 165]] },
+      { shape: [[265, 64], [301, 69], [321, 77], [326, 88], [318, 97], [305, 96], [290, 89], [269, 81]], axis: [[261, 75], [325, 89]] },
+    ],
+  },
+};
 function inPoly(p: Array<[number, number]>, x: number, y: number): boolean {
   let c = false;
   for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
@@ -212,24 +239,26 @@ function inPoly(p: Array<[number, number]>, x: number, y: number): boolean {
   return c;
 }
 
-let fields: { body: Float32Array; fin: Float32Array; finMask: Float32Array; fin2: Float32Array; fin2Mask: Float32Array } | null = null;
-function engravingFields() {
-  if (fields) return fields;
-  const mask = new Float32Array(TW * TH);
-  const mask2 = new Float32Array(TW * TH);
-  for (let y = 0; y < TH; y++) {
-    for (let x = 0; x < TW; x++) {
-      mask[y * TW + x] = inPoly(FIN, x, y) ? 1 : 0;
-      mask2[y * TW + x] = inPoly(FIN2, x, y) ? 1 : 0;
-    }
-  }
-  fields = { body: sideField(SPINE), fin: sideField(FIN_AXIS), finMask: mask, fin2: sideField(FIN2_AXIS), fin2Mask: mask2 };
-  return fields;
+const fields = new Map<WhaleView, { body: Float32Array; fins: Array<{ field: Float32Array; mask: Float32Array }> }>();
+function engravingFields(view: WhaleView) {
+  const had = fields.get(view);
+  if (had) return had;
+  const g = GEOMETRY[view];
+  const made = {
+    body: sideField(g.spine),
+    fins: g.fins.map((fin) => {
+      const mask = new Float32Array(TW * TH);
+      for (let y = 0; y < TH; y++) for (let x = 0; x < TW; x++) mask[y * TW + x] = inPoly(fin.shape, x, y) ? 1 : 0;
+      return { field: sideField(fin.axis), mask };
+    }),
+  };
+  fields.set(view, made);
+  return made;
 }
 
 /** Image 2: cream paper, blue ink lines running along the body, heavier in the shadows. */
-function engraving(t: Tone, w: number, h: number, scale: number, ox: number, oy: number): HTMLCanvasElement {
-  const f = engravingFields();
+function engraving(t: Tone, w: number, h: number, scale: number, ox: number, oy: number, view: WhaleView): HTMLCanvasElement {
+  const f = engravingFields(view);
   const period = 2.5;
   const px = 1 / (period * scale);
   const ink: Rgb = [34, 64, 176];
@@ -238,10 +267,14 @@ function engraving(t: Tone, w: number, h: number, scale: number, ox: number, oy:
     const a = samp(t.a, u, v);
     if (a <= 0.01) return;
     const l = samp(t.l, u, v);
-    const m = samp(f.finMask, u, v);
-    // The far flipper only where the body does not cover it.
-    const m2 = samp(f.fin2Mask, u, v) * (1 - m) * (samp(f.body, u, v) > 0 ? 1 : 0);
-    const dist = samp(f.body, u, v) * (1 - m - m2) + samp(f.fin, u, v) * m + samp(f.fin2, u, v) * m2;
+    let rest = 1;
+    let dist = 0;
+    for (const fin of f.fins) {
+      const m = samp(fin.mask, u, v) * rest;
+      dist += samp(fin.field, u, v) * m;
+      rest -= m;
+    }
+    dist += samp(f.body, u, v) * rest;
     // The burin's hand: the lines wander a little, and break up in the lights.
     const phase = dist / period + 0.18 * Math.sin(u / 3.3 + v / 9) + 0.1 * Math.sin(u / 1.3 - v / 2.1);
     const off = Math.abs((((phase % 1) + 1) % 1) - 0.5) * 2;
@@ -297,23 +330,24 @@ function pixelGrid(t: Tone, w: number, h: number, scale: number, ox: number, oy:
   return c;
 }
 
-function readStyle(): WhaleStyle {
+function readPick<T extends string>(key: string, ids: readonly T[], fallback: T): T {
   try {
-    const s = localStorage.getItem(KEY);
-    if (s && STYLES.some((x) => x.id === s)) return s as WhaleStyle;
+    const s = localStorage.getItem(key);
+    if (s && (ids as readonly string[]).includes(s)) return s as T;
   } catch { /* storage blocked */ }
-  return 'dots';
+  return fallback;
+}
+function savePick(key: string, value: string) {
+  try { localStorage.setItem(key, value); } catch { /* storage blocked */ }
 }
 
 export function DotWhale() {
   const box = useRef<HTMLDivElement>(null);
   const cv = useRef<HTMLCanvasElement>(null);
-  const [style, setStyle] = useState<WhaleStyle>(readStyle);
-
-  const pick = (s: WhaleStyle) => {
-    setStyle(s);
-    try { localStorage.setItem(KEY, s); } catch { /* storage blocked */ }
-  };
+  const [style, setStyle] = useState<WhaleStyle>(() => readPick(KEY, STYLES.map((x) => x.id), 'dots'));
+  const [view, setView] = useState<WhaleView>(() => readPick(VIEW_KEY, VIEWS.map((x) => x.id), 'side'));
+  const pick = (s: WhaleStyle) => { setStyle(s); savePick(KEY, s); };
+  const look = (v: WhaleView) => { setView(v); savePick(VIEW_KEY, v); };
 
   useEffect(() => {
     const el = box.current;
@@ -338,8 +372,9 @@ export function DotWhale() {
     const build = () => {
       if (!tone) return;
       if (style === 'dots') { if (!dots.length) dots = stipple(tone, 9000); print = null; return; }
-      const make = style === 'guilloche' ? guilloche : style === 'engraving' ? engraving : pixelGrid;
-      print = make(tone, canvas.width, canvas.height, scale, ox, oy);
+      print = style === 'guilloche' ? guilloche(tone, canvas.width, canvas.height, scale, ox, oy)
+        : style === 'engraving' ? engraving(tone, canvas.width, canvas.height, scale, ox, oy, view)
+          : pixelGrid(tone, canvas.width, canvas.height, scale, ox, oy);
     };
     const fit = () => {
       const r = el.getBoundingClientRect();
@@ -420,7 +455,7 @@ export function DotWhale() {
     const leave = () => { pointer.x = -1e4; pointer.y = -1e4; };
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerleave', leave);
-    loadTone().then((t) => {
+    loadTone(view).then((t) => {
       if (gone) return;
       tone = t;
       build();
@@ -434,17 +469,24 @@ export function DotWhale() {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerleave', leave);
     };
-  }, [style]);
+  }, [style, view]);
 
   return (
     <div className="cpy-whalewrap">
       <div ref={box} className={`cpy-whale cpy-whale--${style}`} aria-hidden="true">
         <canvas ref={cv} />
       </div>
-      <div className="cpy-whale__styles" role="group" aria-label="Whale print style">
-        {STYLES.map((s) => (
-          <button key={s.id} type="button" className={s.id === style ? 'is-on' : ''} aria-pressed={s.id === style} onClick={() => pick(s.id)}>{s.label}</button>
-        ))}
+      <div className="cpy-whale__switches">
+        <div className="cpy-whale__styles" role="group" aria-label="Whale view">
+          {VIEWS.map((v) => (
+            <button key={v.id} type="button" className={v.id === view ? 'is-on' : ''} aria-pressed={v.id === view} onClick={() => look(v.id)}>{v.label}</button>
+          ))}
+        </div>
+        <div className="cpy-whale__styles" role="group" aria-label="Whale print style">
+          {STYLES.map((s) => (
+            <button key={s.id} type="button" className={s.id === style ? 'is-on' : ''} aria-pressed={s.id === style} onClick={() => pick(s.id)}>{s.label}</button>
+          ))}
+        </div>
       </div>
     </div>
   );
