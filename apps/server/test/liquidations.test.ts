@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import {
   accountLiqs, addDrift, calibrate, emptyDrift, fillCash, flatTiers, mmOf, niceStep, solveLiq, tiersOf, type FillBook, type ReadPos,
 } from '../src/valuescan/liquidations/math.js';
-import { SnapBuilder, bucketize, coinLevels, type LevelPos } from '../src/valuescan/liquidations/levels.js';
+import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuescan/liquidations/levels.js';
 import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuescan/liquidations/rules.js';
 import { applyFill, liqBacklogPrio, type Book } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
@@ -182,20 +182,39 @@ test('levels and buckets: longs below, shorts above, notional at the liquidation
   assert.equal(niceStep(3.1), 2.5);
 });
 
-test('snapshots: buckets per venue within the span, the coins with the most notional', () => {
-  const sb = new SnapBuilder((c) => (c === 'BTC' ? 1000 : c === 'ETH' ? 10 : null));
-  sb.add('hyperliquid', 'BTC', 1, 800);
-  sb.add('lighter', 'BTC', -1, 1100);
-  sb.add('hyperliquid', 'BTC', 1, 100); // outside the span
-  sb.add('hyperliquid', 'ETH', 1, 8);
-  sb.add('hyperliquid', 'DOGE', 1, 0.1); // no price: left out
-  const top = sb.top(1);
-  assert.equal(top.length, 1);
-  const [coin, snap] = top[0]!;
-  assert.equal(coin, 'BTC');
+test('minute rows: every coin per venue, past liquidations kept out, snapshots from the same rows', () => {
+  const lb = new LevelsBuilder((c) => (c === 'BTC' ? 1000 : c === 'ETH' ? 10 : null));
+  lb.add('hyperliquid', 'BTC', 1, 800, 1000);
+  lb.add('lighter', 'BTC', -1, 1100, 1000);
+  lb.add('hyperliquid', 'BTC', 2, null, 1000); // held, not priced
+  lb.add('hyperliquid', 'BTC', 1, 1010, 1000); // a long priced above the price: past
+  lb.add('hyperliquid', 'BTC', 1, 100, 1000); // outside the buckets
+  lb.add('hyperliquid', 'ETH', 1, 8, 10);
+  lb.add('hyperliquid', 'DOGE', 1, 0.1, 0.12); // no price for the coin: left out
+  const rows = lb.rows();
+  assert.deepEqual([...rows.keys()].sort(), ['BTC', 'ETH']);
+  assert.deepEqual(lb.ranked(), ['BTC', 'ETH']);
+  const btc = rows.get('BTC')!;
+  assert.equal(btc.st, 0.2);
+  const hl = btc.v.hyperliquid!;
+  assert.deepEqual(hl.b, [[4000, 800, 0, 1, 0]]);
+  assert.deepEqual(hl.c, [5, 0, 3, 0, 4, 1]);
+  assert.deepEqual(hl.o, [100, 0, 1, 0]);
+  assert.deepEqual(btc.v.lighter!.b, [[5500, 0, 1100, 0, 1]]);
+  const snap = snapOfNow(btc);
   assert.equal(snap.st, 2.5);
   assert.deepEqual(snap.v.hyperliquid, [[320, 800, 0]]);
   assert.deepEqual(snap.v.lighter, [[440, 0, 1100]]);
+});
+
+test('the same market under other names counts as one coin', () => {
+  assert.equal(liqCoin('kPEPE'), '1000PEPE');
+  assert.equal(liqCoin('1000PEPE-USD'), '1000PEPE');
+  assert.equal(liqCoin('KBONK-USD'), '1000BONK');
+  assert.equal(liqCoin('xyz:XYZ100'), 'USTECH100');
+  assert.equal(liqCoin('xyz:SP500'), 'US500');
+  assert.equal(liqCoin('xyz:GOLD'), 'XAUT');
+  assert.equal(liqCoin('KAS'), 'KAS');
 });
 
 test('drift counts', () => {
@@ -224,6 +243,12 @@ test('store: books keep the cash and the extras; snapshots thin and prune', () =
   assert.deepEqual(s.liqHistCoins().sort(), ['BTC', 'ETH']);
   s.pruneLiqHist(0, 15 * H, H);
   assert.deepEqual(s.liqHist('BTC', 0).map((r) => r.t), [10 * H, 20 * H]);
+  const z = new Uint8Array([1, 2, 3]);
+  s.putLiqNow(5, [['BTC', z], ['ETH', z]]);
+  s.putLiqNow(6, [['BTC', z]]);
+  assert.equal(s.liqNow('ETH'), null, 'a coin the last pass did not write is dropped');
+  assert.equal(s.liqNow('BTC')!.at, 6);
+  assert.deepEqual([...s.liqNow('BTC')!.data], [1, 2, 3]);
   s.close?.();
 });
 

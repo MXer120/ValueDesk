@@ -322,6 +322,8 @@ CREATE TABLE IF NOT EXISTS cohort_hist (
 CREATE TABLE IF NOT EXISTS liq_hist (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS liq_now (
+  coin TEXT PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS board_meta (
   venue TEXT NOT NULL, win TEXT NOT NULL, side TEXT NOT NULL, filter TEXT NOT NULL,
   updated_at INTEGER NOT NULL, source_at INTEGER NOT NULL, complete INTEGER NOT NULL,
@@ -2715,6 +2717,20 @@ export class IndexStore {
   /** One coin's snapshots from `fromT`, oldest first (data as written). */
   liqHist(coin: string, fromT: number): Array<{ t: number; data: string }> {
     return this.q('SELECT t, data FROM liq_hist WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: string }>;
+  }
+
+  /** Every coin's levels now (cohortTracker.ts recordLiq), replacing the last pass; coins not in it are dropped. */
+  putLiqNow(at: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO liq_now (coin, at, data) VALUES (?, ?, ?)');
+      for (const [coin, data] of rows) ins.run(coin, at, data);
+      this.q('DELETE FROM liq_now WHERE at < ?').run(at);
+    });
+  }
+
+  /** One coin's levels now (deflated JSON, liquidations/levels.ts LiqNow), or null. */
+  liqNow(coin: string): { at: number; data: Uint8Array } | null {
+    return (this.q('SELECT at, data FROM liq_now WHERE coin = ?').get(coin) as { at: number; data: Uint8Array } | undefined) ?? null;
   }
 
   /** The coins of the newest snapshot. */

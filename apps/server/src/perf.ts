@@ -80,6 +80,12 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // One Hyperliquid leaderboard row: it moves when the leaderboard file does.
   '/api/vs/lbrow': BOARD,
   '/api/vs/price': PRICE,
+  // The liquidation heatmap: the indexer writes each coin's levels a minute apart, so every
+  // viewer of a coin can share one answer for half a minute (the edge keeps it: api-proxy.cjs).
+  '/api/vs/liquidations': { cacheControl: 'public, max-age=30, stale-while-revalidate=30' },
+  '/api/vs/liquidations/wallets': BOARD,
+  // Snapshots are written every 15 minutes.
+  '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
   '/api/vs/whales': LIVE,
   '/api/vs/positioning': LIVE,
   // The process already holds the page for five minutes. The edge may keep a minute of it.
