@@ -112,9 +112,6 @@
 }
 .cpy-hero__title em { font-style: normal; color: var(--pos); }
 .cpy-hero__sub { margin: 8px 0 0; max-width: 560px; color: var(--muted); font-size: var(--fs-base); line-height: 1.5; }
-.cpy-hero__facts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 14px 0 0; padding: 0; list-style: none; color: var(--muted); font-size: var(--fs-xs); }
-.cpy-hero__facts li { display: inline-flex; align-items: center; gap: 6px; }
-.cpy-hero__facts li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--pos); }
 /* The wheel (Deck.tsx): the cards turn on a circle whose front arc shows
    five. Deck.tsx writes each card's transform, opacity and stacking on every
    frame of a turn, so nothing here animates them. The ring clips and fades
@@ -723,36 +720,26 @@
   .cpy-msteps { margin-left: 0; }
 }
 
-/* The hero's art (DotWhale.tsx): a whale breaching in dots, water running off it, where the card
-   deck was - large, the hero's wider column; in the text's
-   own light grey, a soft glow behind the whale. */
-.cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); align-items: end; }
+/* The hero's art (DotWhale.tsx): a whale breaching in dots where the card deck was - large,
+   the hero's wider column, in the text's own light grey, a soft glow behind it. It sits
+   behind the text on the hero's bottom edge, sunk a touch past it and cut off there by its
+   own canvas; the hero clips too, so nothing of it ever shows outside the hero (owner,
+   2026-10-25). The text stays centred on the hero's height. */
+.cpy-hero:has(.cpy-whale) {
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr); align-items: center;
+  overflow: hidden; isolation: isolate; padding-bottom: 0;
+}
+.cpy-hero:has(.cpy-whale) .cpy-hero__text { position: relative; z-index: 1; }
 .cpy-whale {
-  position: relative; height: 440px; margin: -24px 0 -8px; color: #e9e9ea;
+  /* The box takes the whale's shape (DotWhale's 514 x 252), so the whale fills it at any width. */
+  position: relative; z-index: 0; align-self: end; aspect-ratio: 514 / 252; max-height: 440px; color: #e9e9ea;
   background: radial-gradient(55% 50% at 52% 42%, rgba(255, 255, 255, 0.06), transparent 70%);
   -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
   mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
 }
-.cpy-whale canvas { display: block; }
-.cpy-whalewrap { position: relative; min-width: 0; }
-.cpy-whale--pixel { background: none; }
-.cpy-whale__switches { position: absolute; left: 8%; bottom: 4px; z-index: 1; display: flex; gap: 8px; white-space: nowrap; }
-.cpy-whale__styles {
-  position: relative;
-  display: flex; gap: 2px; padding: 3px; border-radius: 999px;
-  background: rgba(20, 20, 22, 0.72); border: 1px solid rgba(255, 255, 255, 0.08);
-  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
-}
-.cpy-whale__styles button {
-  border: 0; background: none; color: var(--text-dim, #9a9aa0); font: inherit; font-size: 11.5px;
-  padding: 4px 10px; border-radius: 999px; cursor: pointer;
-}
-.cpy-whale__styles button:hover { color: var(--text, #e9e9ea); }
-.cpy-whale__styles button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text, #e9e9ea); }
+/* Out of flow, so the canvas's last size never holds the box open (it follows the box). */
+.cpy-whale canvas { position: absolute; inset: 0; display: block; }
 @media (max-width: 1100px) {
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
-  /* The box takes the whale's shape (DotWhale's 514 x 252), so it fills it and sits on its bottom edge. */
-  .cpy-whale { height: auto; aspect-ratio: 514 / 252; max-height: 360px; margin: 0; }
-  .cpy-whalewrap { display: flex; flex-direction: column-reverse; gap: 8px; }
-  .cpy-whale__switches { position: static; justify-content: center; flex-wrap: wrap; white-space: normal; }
+  .cpy-whale { max-height: 360px; }
 }
