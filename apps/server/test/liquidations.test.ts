@@ -257,12 +257,14 @@ test('liquidation levels type check helper', () => {
   assert.equal(bucketize([l], 1, 0, 10).buckets.length, 0);
 });
 
-test('the one-time re-read for liquidation prices goes by leverage: the books whose liquidations sit nearest the price first', () => {
+test('books without liquidation data are read by what they add to the map: notional times leverage', () => {
   const size = (eq: number) => Math.round(Math.log10(eq) * 100);
-  const whale = liqBacklogPrio(2_000_000, 10_000_000, size(10_000_000)); // 0.2x
-  const degen = liqBacklogPrio(400_000, 20_000, size(20_000)); // 20x
-  assert.ok(degen > whale);
+  const leveredWhale = liqBacklogPrio(5_000_000, 500_000); // $5M at 10x
+  const flatWhale = liqBacklogPrio(2_000_000, 10_000_000); // 0.2x: its longs never liquidate
+  const tinyDegen = liqBacklogPrio(2_000, 100); // $2K at 20x
+  assert.ok(leveredWhale > tinyDegen && leveredWhale > flatWhale);
+  assert.ok(flatWhale > tinyDegen, 'a large book still outranks a tiny one');
   // Above a stale re-read of a large book, below a new wallet the stream saw trade.
-  assert.ok(degen > 900 + size(10_000_000));
-  assert.ok(liqBacklogPrio(1e9, 1, size(1)) <= 1600);
+  assert.ok(leveredWhale > 900 + size(100_000), "above the stale re-read of a mid-sized book (a stale read prices a book too)");
+  assert.ok(liqBacklogPrio(1e12, 1) <= 1600);
 });
