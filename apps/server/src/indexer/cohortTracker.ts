@@ -185,6 +185,18 @@ export function pollTtl(equity: number): number {
   return 48 * 60 * 60_000;
 }
 
+/**
+ * Where a book read before liquidation prices were kept queues for its one re-read:
+ * by leverage (20x and up at the top), above the stale and gap re-reads of its size,
+ * below a new wallet the stream saw trade. Largest-first (by equity) took the big,
+ * low-leverage books first: an hour after v0.2.22 the BTC buckets next to the price
+ * held a seventh of what Hyperdash shows, while the far ones matched.
+ */
+export function liqBacklogPrio(notional: number, equity: number | null, size: number): number {
+  const lev = equity && equity > 0 ? notional / equity : 50;
+  return 1100 + Math.min(500, Math.round(lev * 25)) + Math.round(size / 10);
+}
+
 /** Whether a book carries liquidation data (a calibrated read): a cross cash, or an isolated / kept figure. */
 export function liqKnown(b: Pick<Book, 'cash' | 'pos'>): boolean {
   if (b.cash != null) return true;
@@ -967,14 +979,15 @@ export class CohortTracker {
         const age = now - book.at;
         // Lighter prints name sub-accounts: a book follows them only once its indices are known.
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
-        if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
+        // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
+        // their liquidations sit nearest the price, where the heatmap is read.
+        if (book.pos.size && book.at < this.startedAt && !liqKnown(book)) push(liqBacklogPrio(notional(book), book.collateral ?? book.equity, size));
+        else if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
         // Read before the last outage ended: it missed that outage's prints, at any size.
         else if (follows && book.at < this.staleBefore) push(900 + size);
         // Read before the spot state was looked at, and the leaderboard says it may matter.
         else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
-        // Read before the books kept liquidation prices (2026-10-25): once, largest first, before the reconciles.
-        else if (book.pos.size && book.at < this.startedAt && !liqKnown(book)) push(850 + size);
         else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
