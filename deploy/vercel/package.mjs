@@ -44,9 +44,13 @@ export const FUNCTION_PATH = '/api/__vs_proxy';
 export const FUNCTION_REGION = 'hnd1';
 export const NODE_RUNTIME = 'nodejs22.x';
 
-/** Extensions the build may contain (the same list deploy/release/publish-web.sh types by hand). */
+/**
+ * Extensions the build may contain (the same list deploy/release/publish-web.sh types by hand).
+ * onnx: the Fed live widget's speech model (fetch-model.sh), served as application/octet-stream and
+ * read with fetch() - no type-sensitive use.
+ */
 export const KNOWN_EXTENSIONS = new Set(['html', 'js', 'mjs', 'css', 'json', 'map', 'txt', 'sha256', 'xml', 'svg', 'png', 'jpg', 'jpeg',
-  'webp', 'avif', 'gif', 'ico', 'woff2', 'woff', 'ttf', 'otf', 'wasm', 'webmanifest']);
+  'webp', 'avif', 'gif', 'ico', 'woff2', 'woff', 'ttf', 'otf', 'wasm', 'onnx', 'webmanifest']);
 
 // Path classes. Each route below matches one class only, so no header is ever set twice
 // for one path (Vercel's order of precedence between two matching routes then never matters).
