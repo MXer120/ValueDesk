@@ -734,8 +734,8 @@
 .cpy-hero:has(.cpy-whale) ~ .cpy-toolbar { z-index: 2; }
 .cpy-hero:has(.cpy-whale) .cpy-hero__text { position: relative; z-index: 1; }
 .cpy-whale {
-  /* The box takes the whale's shape (DotWhale's 514 x 252), so the whale fills it at any width. */
-  position: relative; z-index: 0; align-self: end; aspect-ratio: 514 / 252; max-height: 360px; color: #e9e9ea;
+  /* Its shape is the whale's above the surface (set by DotWhale), so the whale fills it at any width. */
+  position: relative; z-index: 0; align-self: end; max-height: 304px; color: #e9e9ea;
   background: radial-gradient(55% 50% at 52% 42%, rgba(255, 255, 255, 0.06), transparent 70%);
 }
 /* Out of flow (its last size never holds the box open), taller than the box by the body
