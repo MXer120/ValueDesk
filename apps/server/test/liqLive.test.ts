@@ -80,6 +80,20 @@ test('the engine equals a full recompute through adds, prints, price moves and a
   assert.equal(bt.v.lighter?.b.length ?? 0, 0);
 });
 
+test('only the coins asked for are bucketed; the others still count toward the margin of the account', () => {
+  const books = new Map<string, LiveAccount>([['hyperliquid|0xb', { cash: 50_000, priced: true, positions: [{ symbol: 'BTC', szi: 2 }, { symbol: 'ETH', szi: -20 }] }]]);
+  const marks = new Map([['hyperliquid|BTC', 80_000], ['hyperliquid|ETH', 2_000]]);
+  const mk = (wanted?: (c: string) => boolean) => new LiqLive({
+    account: (v, a) => books.get(`${v}|${a}`), priceOf: (v, s) => marks.get(`${v}|${s}`) ?? null, tiersOf: () => T,
+    priceOfCoin: (c) => (c === 'BTC' ? 80_000 : 2_000), wanted,
+  });
+  const all = mk();
+  const btcOnly = mk((c) => c === 'BTC');
+  for (const l of [all, btcOnly]) { l.touch('hyperliquid', '0xb'); l.work(); }
+  assert.deepEqual([...btcOnly.rows().keys()], ['BTC']);
+  assert.deepEqual(btcOnly.rows().get('BTC'), all.rows().get('BTC'), 'BTC priced the same: the ETH short still counts');
+});
+
 test('the feed: whole coins to a new reader, then changes; the API side holds them whole', async () => {
   const { books, live } = world();
   books.set('hyperliquid|0xa', { cash: 90_000, priced: true, positions: [{ symbol: 'BTC', szi: -1 }] });
