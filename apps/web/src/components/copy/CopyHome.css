@@ -736,7 +736,7 @@
 .cpy-whale canvas { display: block; }
 .cpy-whalewrap { position: relative; min-width: 0; }
 .cpy-whale--pixel { background: none; }
-.cpy-whale__switches { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 1; display: flex; gap: 8px; white-space: nowrap; }
+.cpy-whale__switches { position: absolute; left: 8%; bottom: 4px; z-index: 1; display: flex; gap: 8px; white-space: nowrap; }
 .cpy-whale__styles {
   position: relative;
   display: flex; gap: 2px; padding: 3px; border-radius: 999px;
@@ -751,5 +751,8 @@
 .cpy-whale__styles button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text, #e9e9ea); }
 @media (max-width: 1100px) {
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
-  .cpy-whale { height: 360px; margin: 0; }
+  /* The box takes the whale's shape (DotWhale's 514 x 252), so it fills it and sits on its bottom edge. */
+  .cpy-whale { height: auto; aspect-ratio: 514 / 252; max-height: 360px; margin: 0; }
+  .cpy-whalewrap { display: flex; flex-direction: column-reverse; gap: 8px; }
+  .cpy-whale__switches { position: static; justify-content: center; flex-wrap: wrap; white-space: normal; }
 }
