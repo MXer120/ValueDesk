@@ -736,8 +736,9 @@
 .cpy-whale canvas { display: block; }
 .cpy-whalewrap { position: relative; min-width: 0; }
 .cpy-whale--pixel { background: none; }
+.cpy-whale__switches { position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 1; display: flex; gap: 8px; white-space: nowrap; }
 .cpy-whale__styles {
-  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); z-index: 1;
+  position: relative;
   display: flex; gap: 2px; padding: 3px; border-radius: 999px;
   background: rgba(20, 20, 22, 0.72); border: 1px solid rgba(255, 255, 255, 0.08);
   -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
