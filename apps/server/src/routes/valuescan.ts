@@ -17,6 +17,11 @@
  *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
  *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuescan/releases.ts)
  *   GET /api/vs/fed/live   (the Federal Reserve's current broadcast: its Brightcove HLS stream)
+ *   GET /api/vs/fedwatch   (the coming FOMC meetings' decision probabilities: Kalshi, Polymarket beside - valuescan/fedwatch.ts)
+ *   GET /api/vs/fedwatch/history?meeting=YYYY-MM-DD&range=7d|30d|90d   (one meeting's probabilities over time, Kalshi's candlesticks)
+ *   GET /api/vs/indicators   (the catalog of the calendar's indicators - valuescan/indicators.ts)
+ *   GET /api/vs/indicator?id&range=1y|5y|10y|max   (one indicator's history from FRED, its table and next release)
+ *   GET /api/vs/etf/flows?asset=BTC|ETH|SOL..&range=1m|3m|1y|all   (US spot ETF flows and funds, SoSoValue - valuescan/sosovalue/etf.ts; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
@@ -54,6 +59,9 @@ import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
 import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuescan/calendar.js';
 import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
 import { fedLive, releaseResults } from '../valuescan/releases.js';
+import { fedWatch, fedWatchHistory, parseFedHistoryRange } from '../valuescan/fedwatch.js';
+import { INDICATORS, indicator, indicatorList, parseIndicatorRange } from '../valuescan/indicators.js';
+import { etfFlows, parseEtfAsset, parseEtfRange } from '../valuescan/sosovalue/etf.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
   sodex: sodexProvider,
@@ -288,6 +296,76 @@ export async function valuescanRoutes(app: FastifyInstance) {
       const live = await fedLive();
       reply.header('Cache-Control', 'public, max-age=0, s-maxage=10');
       return { ok: true, ...live };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * What the markets expect of the FOMC (valuescan/fedwatch.ts): the next
+   * meetings, nearest first, each decision's probability from Kalshi's order
+   * books, Polymarket's beside where its meeting matches, and the target range
+   * each would leave. Read at most once a minute, whoever asks.
+   */
+  app.get('/api/vs/fedwatch', async (_req, reply) => {
+    try {
+      const page = await fedWatch();
+      reply.header('Cache-Control', 'public, max-age=0, s-maxage=30');
+      return { ok: true, ...page };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** One meeting's probabilities over `range` (Kalshi's hourly candles for 7d, daily for 30d / 90d), cached 10 minutes. */
+  app.get('/api/vs/fedwatch/history', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const meeting = String(q.meeting ?? '');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(meeting)) throw bad('meeting must be YYYY-MM-DD');
+      const range = parseFedHistoryRange(q.range);
+      const series = await fedWatchHistory(meeting, range);
+      if (!series) throw new NotAvailable('Not one of the coming FOMC meetings');
+      reply.header('Cache-Control', 'public, max-age=0, s-maxage=300');
+      return { ok: true, meeting, range, series };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** The indicators the calendar's releases publish, each with its kind and release-card field (valuescan/indicators.ts). */
+  app.get('/api/vs/indicators', async () => ({ ok: true, indicators: indicatorList() }));
+
+  /**
+   * One indicator's history from FRED (read at most every 6 hours, sooner
+   * after a release of its kind): the chart's points over `range`, the last
+   * 24 periods with their priors, and the next release on the calendar.
+   */
+  app.get('/api/vs/indicator', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const id = String(q.id ?? '');
+      if (!INDICATORS[id]) throw new NotAvailable('Not one of the indicators');
+      const page = await indicator(id, parseIndicatorRange(q.range));
+      reply.header('Cache-Control', 'public, max-age=0, s-maxage=300');
+      return { ok: true, ...page! };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * US spot ETF flows for an asset from SoSoValue (valuescan/sosovalue/etf.ts):
+   * the daily totals over `range` (SoSoValue gives a month; older days are the
+   * ones this server kept) and the funds by size. Without the key: not_available.
+   */
+  app.get('/api/vs/etf/flows', async (req, reply) => {
+    try {
+      if (!newsKey()) throw new NotAvailable('SoSoValue ETF data is not configured');
+      const q = req.query as Q;
+      const page = await etfFlows(parseEtfAsset(q.asset), parseEtfRange(q.range));
+      reply.header('Cache-Control', 'public, max-age=0, s-maxage=300');
+      return { ok: true, ...page, source: 'SoSoValue' };
     } catch (e) {
       return fail(reply, e);
     }

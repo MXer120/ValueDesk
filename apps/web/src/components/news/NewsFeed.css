@@ -182,3 +182,6 @@ button.nwc__row:hover { background: rgba(255, 255, 255, 0.05); }
 a.fx-cta.evc__open { display: inline-flex; align-items: center; justify-content: center; width: auto; height: 34px; padding: 0 16px; text-decoration: none; }
 @keyframes evc-pulse { 50% { opacity: 0.45; } }
 @media (prefers-reduced-motion: reduce) { .nwc__val.is-wait, .evc__state.is-wait, .evc__actual.is-wait { animation: none; } }
+.evc__hist { width: 32px; padding-left: 0; text-align: right; }
+.evc__chart { display: inline-grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 0; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.05); color: var(--muted); cursor: pointer; transition: background 140ms, color 140ms; }
+.evc__chart:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }

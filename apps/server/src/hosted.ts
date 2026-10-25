@@ -111,6 +111,16 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // and the Fed's current broadcast (both valuescan/releases.ts): cached reads, whoever asks.
   { method: 'GET', url: '/api/vs/calendar/results', cls: 'read' },
   { method: 'GET', url: '/api/vs/fed/live', cls: 'read' },
+  // What the markets expect of the FOMC (Kalshi, Polymarket), one meeting's history, and the
+  // indicators' history from FRED (valuescan/fedwatch.ts, indicators.ts): public data, cached on the
+  // process; a meeting or an indicator not in their lists is answered without a fetch.
+  { method: 'GET', url: '/api/vs/fedwatch', cls: 'read' },
+  { method: 'GET', url: '/api/vs/fedwatch/history', cls: 'read' },
+  { method: 'GET', url: '/api/vs/indicators', cls: 'read' },
+  { method: 'GET', url: '/api/vs/indicator', cls: 'read' },
+  // SoSoValue's US spot ETF flows (valuescan/sosovalue/etf.ts), on the news key's budget, cached
+  // 30 minutes per asset; not_available without SOSOVALUE_API_KEY.
+  { method: 'GET', url: '/api/vs/etf/flows', cls: 'read' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },
