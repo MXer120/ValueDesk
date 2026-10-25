@@ -6,7 +6,8 @@
  *
  *   Side        from its side, the near flipper raised (whale-tone.png).
  *   Belly       from below, throat pleats and both flippers (whale-tone-belly.png,
- *               mirrored from the photo so it heads left).
+ *               mirrored from the photo so it heads left, its upper body bent a
+ *               little further over for more curve).
  *
  * Prints:
  *
@@ -21,7 +22,9 @@
  * alpha = the whale), equalised over the whale so its dark skin spreads over the
  * whole range. A made-up far flipper on the side view did not read as anatomy
  * (owner, 2026-10-25), so the belly view shows both flippers as photographed.
- * Little moves: a slow small bob, the dots giving where the pointer passes, the
+ * The whale sits on the bottom edge of its box at every size (it comes out of the
+ * page's edge as out of the water). Little moves: a slow small dip (never up, so
+ * no gap opens under it), the dots giving where the pointer passes, the
  * stars twinkling; no falling water (owner, 2026-10-25). Still under reduced motion.
  */
 import { useEffect, useRef, useState } from 'react';
@@ -44,15 +47,15 @@ const VIEWS: Array<{ id: WhaleView; label: string; url: string }> = [
 ];
 const VIEW_KEY = 'vs:whale-view';
 
-/** The tone map's size; the box adds a little room around it. */
+/** The tone map's size; the box adds a little room either side. */
 const TW = 478;
 const TH = 252;
 /** Room either side, so the fin tip clears the hero's edge fade. */
 const PAD = 18;
 const W = TW + PAD * 2;
-const H = 262;
 
-interface Tone { l: Float32Array; a: Float32Array }
+/** `bottom`: the whale's lowest row, put on the box's bottom edge. */
+interface Tone { l: Float32Array; a: Float32Array; bottom: number }
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 
 const tones = new Map<WhaleView, Promise<Tone>>();
@@ -84,7 +87,13 @@ function loadTone(view: WhaleView): Promise<Tone> {
       for (let v = 0; v < 256; v++) { run += hist[v]!; cdf[v] = total ? run / total : v / 255; }
       const l = new Float32Array(n);
       for (let i = 0; i < n; i++) l[i] = cdf[raw[i]!]!;
-      ok({ l, a });
+      let bottom = TH;
+      for (let y = TH - 1; y > 0; y--) {
+        let row = 0;
+        for (let x = 0; x < TW; x++) row = Math.max(row, a[y * TW + x]!);
+        if (row > 0.5) { bottom = y + 1; break; }
+      }
+      ok({ l, a, bottom });
     };
     img.onerror = () => fail(new Error('whale tone did not load'));
     img.src = VIEWS.find((v) => v.id === view)!.url;
@@ -222,10 +231,10 @@ const GEOMETRY: Record<WhaleView, { spine: Poly; fins: Array<{ shape: Poly; axis
     fins: [{ shape: [[264, 26], [294, 19], [324, 11], [369, 4], [404, 3], [434, 5], [454, 14], [463, 26], [454, 34], [424, 39], [394, 46], [364, 56], [344, 69], [318, 62]], axis: [[270, 70], [330, 38], [400, 18], [470, 14]] }],
   },
   belly: {
-    spine: [[112, 17], [184, 75], [240, 122], [286, 172], [312, 222], [316, 262]],
+    spine: [[97, 44], [179, 89], [245, 126], [297, 172], [324, 222], [328, 262]],
     fins: [
-      { shape: [[333, 140], [354, 148], [370, 164], [363, 174], [335, 170], [310, 163], [303, 146]], axis: [[292, 153], [369, 165]] },
-      { shape: [[263, 66], [297, 71], [323, 78], [328, 91], [316, 102], [301, 99], [286, 92], [267, 84]], axis: [[257, 78], [328, 91]] },
+      { shape: [[341, 139], [363, 147], [381, 163], [374, 174], [346, 170], [321, 163], [312, 146]], axis: [[302, 154], [380, 164]] },
+      { shape: [[255, 73], [290, 74], [318, 78], [326, 91], [317, 102], [301, 101], [284, 95], [264, 89]], axis: [[252, 85], [326, 91]] },
     ],
   },
 };
@@ -383,9 +392,9 @@ export function DotWhale() {
       canvas.height = Math.max(1, Math.round(r.height * dpr));
       canvas.style.width = `${r.width}px`;
       canvas.style.height = `${r.height}px`;
-      scale = Math.min(r.width / W, r.height / H) * dpr;
+      scale = Math.min(r.width / W, r.height / TH) * dpr;
       ox = Math.round((canvas.width - W * scale) / 2 + PAD * scale);
-      oy = Math.round((canvas.height - H * scale) / 2);
+      oy = Math.round(canvas.height - (tone?.bottom ?? TH) * scale);
       build();
     };
     const dot = (x: number, y: number, r: number, a: number) => {
@@ -398,7 +407,7 @@ export function DotWhale() {
     const draw = (t: number) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (!tone) return;
-      const bob = still ? 0 : Math.sin(t / 4200) * 1.4;
+      const bob = still ? 0 : (1 - Math.cos(t / 4200)) * 0.8;
       if (style === 'pixel' || style === 'dots') {
         ctx.fillStyle = style === 'pixel' ? '#e4e4e4' : getComputedStyle(el).color || '#e8e8e8';
         const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -458,7 +467,7 @@ export function DotWhale() {
     loadTone(view).then((t) => {
       if (gone) return;
       tone = t;
-      build();
+      fit();
       if (still) draw(0);
     }).catch(() => { /* no art, the hero still reads */ });
     if (!still) raf = requestAnimationFrame(loop);
