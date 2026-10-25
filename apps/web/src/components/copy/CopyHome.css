@@ -722,3 +722,12 @@
   .cpy-mside { position: static; }
   .cpy-msteps { margin-left: 0; }
 }
+
+/* The hero's art (DotWhale.tsx): a whale in dots where the card deck was, in the text's
+   own light grey, a soft glow behind it. */
+.cpy-whale {
+  position: relative; height: 312px; color: #e9e9ea;
+  background: radial-gradient(60% 55% at 55% 50%, rgba(255, 255, 255, 0.05), transparent 70%);
+}
+.cpy-whale canvas { display: block; }
+@media (max-width: 1100px) { .cpy-whale { max-width: 560px; width: 100%; margin: 0 auto; } }
