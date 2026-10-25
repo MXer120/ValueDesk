@@ -72,8 +72,10 @@ import {
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
 import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
-import { setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
-import { LevelsBuilder, eachLevel, liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
+import { marketsNow, setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
+import { liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
+import { LiqLive } from '../valuescan/liquidations/live.js';
+import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
@@ -93,6 +95,14 @@ const MIX_COINS = 120;
 
 /** Every coin's liquidation levels (liq_now) this often; a snapshot (liq_hist) every LIQ_STEP_MS, for SoDEX's perps and this many more coins. */
 /** Every 2 minutes: a pass over ~90k books took 14-26 s of a disk-bound loop (2026-10-25); the edge serves the row in between. */
+/** The liquidation backlog takes the reads above this many books (updateLiqBoost)... */
+export const LIQ_BOOST_MIN = 300;
+/** ...with the boards lane's loan to the history rebuild, and the PnL reads' share cut to this. */
+const LIQ_BOOST_LEND = 200;
+const LIQ_BOOST_PNL_SHARE = 0.1;
+/** The live engine's beat, and how many changed accounts one beat prices at most (a start primes ~90k books in ~20 beats). */
+const LIVE_TICK_MS = 1_000;
+const LIVE_SLICE = 5_000;
 export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
 const LIQ_COINS = 30;
@@ -356,6 +366,33 @@ export class CohortTracker {
   /** History rebuild reads (userFunding, candles): a lane of its own, so a rebuild never slows the books or the PnL reads. */
   readonly hlh = new Lane({ name: 'hlh', perMin: envNum('VALUESCAN_INDEX_HL_REBUILD', REBUILD_PER_MIN, 20, 400), concurrency: 4 });
   private rebuild: RebuildState | null = null;
+  /** The lanes' own rates, to come back to after the liquidation backlog (updateLiqBoost). */
+  private readonly hlcBase = this.hlc.perMin;
+  private readonly hlhBase = this.hlh.perMin;
+  /** Books per venue waiting for liquidation data at the last plan, and whether the backlog has the reads. */
+  private liqDue = new Map<Venue, number>();
+  private liqBoost = false;
+  /** coin -> its reference price and the venue rank it came from (LIQ_PRICE_ORDER: Hyperliquid's first). */
+  private coinPx = new Map<string, { px: number; rank: number }>();
+  /**
+   * The live liquidation levels (valuescan/liquidations/live.ts): every account
+   * priced into its coins' buckets, re-priced when a print or a read moves its
+   * book or another of its prices moves; flushed to the API every second (liqFeed.ts).
+   */
+  readonly live = new LiqLive({
+    account: (venue, address) => {
+      const b = this.books.get(venue)?.get(address);
+      return b ? { cash: b.cash ?? null, priced: liqKnown(b), positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) } : undefined;
+    },
+    priceOf: (venue, symbol) => this.marks.get(`${venue}|${symbol}`) ?? null,
+    tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,
+    priceOfCoin: (coin) => this.coinPx.get(coin)?.px ?? null,
+  });
+  private feed = new LiqFeedServer(() => this.live.resendAll());
+  /** Every book priced into the engine once since the start. */
+  private liveReady = false;
+  private liveMs = 0;
+  private liveWholeAt = 0;
   /** What the boards lane lends the rebuild now. */
   private lent = 0;
   /** SoDEX perps state reads, requests / minute (weight 5 each). */
@@ -421,7 +458,7 @@ export class CohortTracker {
         this.gapFloor.set(v, gapRereadFloor(lastUp > 0 ? now - lastUp : Number.POSITIVE_INFINITY));
       }
     }
-    for (const [k, px] of s.cohortMarks()) this.marks.set(k, px);
+    for (const [k, px] of s.cohortMarks()) { this.marks.set(k, px); this.noteCoinPx(k, px); }
     this.lastSeriesT = s.cohortSeriesLastT();
     this.lastMixT = s.cohortMixLastT();
     this.lastLiqT = s.liqHistLastT();
@@ -442,6 +479,10 @@ export class CohortTracker {
     every(FLUSH_MS, () => this.flush(), 'coh:flush');
     every(60_000, () => this.record(), 'coh:record');
     every(60_000, () => this.recordLiq(), 'coh:liq');
+    // The live engine: every book in at the start (priced a few thousand a second), then what changes.
+    for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) this.live.touch(v, a);
+    this.feed.start();
+    every(LIVE_TICK_MS, () => this.liveTick(), 'coh:live');
     const first = setTimeout(() => void this.plan().catch((e) => (this.lastError = String(e))), 15_000);
     first.unref?.();
     this.timers.push(first);
@@ -454,6 +495,7 @@ export class CohortTracker {
     this.hlh.stop();
     this.lend(0);
     this.scoh.stop();
+    this.feed.stop();
     this.flush();
   }
 
@@ -464,6 +506,8 @@ export class CohortTracker {
     if (!bookable(p.venue, p.symbol)) return;
     const mk = `${p.venue}|${p.symbol}`;
     this.marks.set(mk, p.px);
+    this.noteCoinPx(mk, p.px);
+    this.live.mark(p.venue, p.symbol, p.px);
     this.dirtyMarks.add(mk);
     const books = this.books.get(p.venue);
     if (!books) return;
@@ -477,6 +521,7 @@ export class CohortTracker {
         continue;
       }
       applyFill(book, p.symbol, d, p.px);
+      this.live.touch(p.venue, address);
       this.dirtyBooks.add(`${p.venue}|${address}`);
       this.applied++;
     }
@@ -492,6 +537,7 @@ export class CohortTracker {
       planMs: this.planMs,
       recordMs: this.recordMs,
       liqMs: this.liqMs,
+      liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError } },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
@@ -683,6 +729,7 @@ export class CohortTracker {
 
   private async plan(): Promise<void> {
     const t0 = Date.now();
+    this.updateLiqBoost();
     try {
       await this.planVenues();
     } finally {
@@ -701,7 +748,35 @@ export class CohortTracker {
   private lend(weight: number): void {
     if (weight === this.lent) return;
     this.lent = weight;
-    this.d.lendHl?.(weight);
+    this.applyLending();
+  }
+
+  /**
+   * What the boards lane lends now: to the history rebuild while it reads, or -
+   * while the liquidation backlog is on (liqBoost) - to the cohort lane instead.
+   */
+  private applyLending(): void {
+    const liq = this.liqBoost ? LIQ_BOOST_LEND : 0;
+    this.d.lendHl?.((this.liqBoost ? 0 : this.lent) + liq);
+    this.hlc.setPerMin(this.hlcBase + liq);
+  }
+
+  /**
+   * The liquidation backlog (Hyperliquid and trade.xyz books holding positions with
+   * no liquidation data) gets the reads first while it is large: the history rebuild
+   * pauses and lends its 200 a minute to the cohort lane, and the PnL reads' share
+   * drops to LIQ_BOOST_PNL_SHARE. Both come back once it is down to LIQ_BOOST_MIN.
+   * (The owner, 2026-10-25: a fully indexed liquidation map first.)
+   */
+  private updateLiqBoost(): void {
+    const due = (this.liqDue.get('hyperliquid') ?? 0) + (this.liqDue.get('tradexyz') ?? 0);
+    const on = this.liqBoost ? due > LIQ_BOOST_MIN / 2 : due > LIQ_BOOST_MIN;
+    if (on === this.liqBoost) return;
+    this.liqBoost = on;
+    this.hlc.setShare('cohpnl:', on ? LIQ_BOOST_PNL_SHARE : PNL_SHARE);
+    // A rebuild task already running finishes on its own budget; no new one starts.
+    this.hlh.setPerMin(on ? 1 : this.hlhBase);
+    this.applyLending();
   }
 
   /**
@@ -710,6 +785,8 @@ export class CohortTracker {
    * are kept (cohort_hist), so a restart carries on where it stopped.
    */
   private async planRebuild(): Promise<void> {
+    // Paused while the liquidation backlog takes the reads (updateLiqBoost); it carries on after.
+    if (this.liqBoost) return;
     const s = this.d.store;
     const now = this.d.now();
     if (!this.rebuild) {
@@ -955,6 +1032,7 @@ export class CohortTracker {
       const gap = this.gapAt.get(venue) ?? 0;
       const floor = this.gapFloor.get(venue) ?? 100_000;
       const due: Array<[string, number]> = [];
+      let liqDue = 0;
       const totals = new Map<string, number | null>();
       const notional = (book: Book): number => {
         let v = 0;
@@ -981,7 +1059,10 @@ export class CohortTracker {
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
         // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
         // their liquidations sit nearest the price, where the heatmap is read.
-        if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss)) push(liqBacklogPrio(notional(book), book.collateral ?? book.equity));
+        if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss)) {
+          push(liqBacklogPrio(notional(book), book.collateral ?? book.equity));
+          liqDue++;
+        }
         else if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
         // Read before the last outage ended: it missed that outage's prints, at any size.
@@ -1004,6 +1085,7 @@ export class CohortTracker {
         const address = k.slice(venue.length + 1);
         if (!members.has(address)) consider(address, undefined);
       }
+      this.liqDue.set(venue, liqDue);
       due.sort((a, b) => b[1] - a[1]);
       for (const [address, prio] of due.slice(0, QUEUE_CAP - queued)) {
         lane.add({
@@ -1019,6 +1101,7 @@ export class CohortTracker {
             };
             await this.liquidationSide(venue, r, books.get(address), book);
             books.set(address, book);
+            this.live.touch(venue, address);
             this.dirtyBooks.add(`${venue}|${address}`);
             this.wanted.delete(`${venue}|${address}`);
             for (const [sym, px] of r.marks) {
@@ -1115,66 +1198,51 @@ export class CohortTracker {
   }
 
   /**
-   * Every LIQ_NOW_MS: every coin's liquidation levels on every venue, in one pass
-   * over the books in memory (liq_now, deflated: the API serves these rows and
-   * never walks the books for the heatmap). Every LIQ_STEP_MS the same pass also
-   * keeps a snapshot for the historical view (liq_hist) of every coin SoDEX lists
-   * as a perp and of the LIQ_COINS others with the most open notional tracked.
+   * Every LIQ_NOW_MS: every coin's levels, as the live engine holds them, to the
+   * index file (liq_now, deflated: what the API answers from when the live feed is
+   * not there). Every LIQ_STEP_MS also a snapshot for the historical view
+   * (liq_hist) of every coin SoDEX lists as a perp and of the LIQ_COINS others with
+   * the most open notional tracked.
    */
+  /** A venue's price for a symbol: its coin's reference price when the venue ranks first among those seen. */
+  private noteCoinPx(key: string, px: number): void {
+    if (!(px > 0)) return;
+    const i = key.indexOf('|');
+    const rank = LIQ_PRICE_ORDER.indexOf(key.slice(0, i) as Venue);
+    const coin = liqCoin(key.slice(i + 1));
+    const cur = this.coinPx.get(coin);
+    if (!cur || rank <= cur.rank) this.coinPx.set(coin, { px, rank: rank < 0 ? 99 : rank });
+  }
+
+  /** Every LIVE_TICK_MS: price what changed (a bounded slice), and send the changes to the API. */
+  private liveTick(): void {
+    const t0 = Date.now();
+    // Every coin whole once a minute: the deltas leave out moves under 1% (live.ts SEND_MOVE: 1%), this puts the API's copy back to exact.
+    if (t0 - this.liveWholeAt >= 60_000) { this.liveWholeAt = t0; this.live.resendAll(); }
+    const left = this.live.work(LIVE_SLICE);
+    if (!left && !this.liveReady) this.liveReady = true;
+    const deltas = this.live.flush();
+    this.feed.send(deltas, { at: this.d.now(), ready: this.liveReady });
+    this.liveMs = Date.now() - t0;
+  }
+
   private async recordLiq(): Promise<void> {
     const now = this.d.now();
     if (this.liqRecording || !this.members.size || now - this.lastNowAt < LIQ_NOW_MS - 5_000) return;
     this.liqRecording = true;
     const started = Date.now();
     try {
-      // A coin's price: Hyperliquid's print first, then the other venues'.
-      const px = new Map<string, number>();
-      for (const v of LIQ_PRICE_ORDER) {
-        for (const [k, p] of this.marks) {
-          if (!k.startsWith(`${v}|`) || !(p > 0)) continue;
-          const c = liqCoin(k.slice(v.length + 1));
-          if (!px.has(c)) px.set(c, p);
-        }
-      }
-      const levels = new LevelsBuilder((c) => px.get(c) ?? null);
+      // Until every book is priced into the engine once (seconds after a start), the last rows stand.
+      if (!this.liveReady) return;
       const sodexCoins = new Set<string>();
-      for (const venue of VENUES) {
-        const m = await venueMarkets(venue).catch(() => null);
-        if (venue === 'sodex') for (const sym of m?.tiers.keys() ?? []) sodexCoins.add(liqCoin(sym));
-        const tiersFor = (s: string): Tiers | null => m?.tiers.get(s) ?? null;
-        const priceOf = (s: string) => this.marks.get(`${venue}|${s}`) ?? null;
-        let batch: Array<[string, { cash: number | null; positions: Array<{ symbol: string; szi: number; iso?: number | null; lev?: number | null; fix?: number | null }> }]> = [];
-        const run = () => {
-          eachLevel(venue, batch, priceOf, tiersFor, (coin, szi, liq, p) => levels.add(venue, coin, szi, liq, p));
-          batch = [];
-        };
-        let t0 = Date.now();
-        for (const [address, b] of this.books.get(venue) ?? []) {
-          if (!b.pos.size) continue;
-          // A book not priced yet still counts: its size shows as held, not priced (and needs no math).
-          if (!liqKnown(b)) {
-            for (const [symbol, p] of b.pos) if (p.szi) levels.add(venue, liqCoin(symbol), p.szi, null, null);
-            continue;
-          }
-          batch.push([address, { cash: b.cash ?? null, positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) }]);
-          if (batch.length >= 500) {
-            run();
-            if (Date.now() - t0 > SLICE_MS) {
-              await new Promise<void>((r) => setImmediate(r));
-              mark('coh:liq');
-              t0 = Date.now();
-            }
-          }
-        }
-        run();
-      }
-      const rows = levels.rows();
+      for (const sym of (await venueMarkets('sodex').catch(() => null))?.tiers.keys() ?? []) sodexCoins.add(liqCoin(sym));
+      const rows = this.live.rows();
       const s = this.d.store;
       s.putLiqNow(now, [...rows].map(([coin, row]): [string, Uint8Array] => [coin, deflateRawSync(JSON.stringify(row))]));
       this.lastNowAt = now;
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
       if (t > this.lastLiqT) {
-        const keep = new Set([...sodexCoins, ...levels.ranked().slice(0, LIQ_COINS)]);
+        const keep = new Set([...sodexCoins, ...this.live.ranked().slice(0, LIQ_COINS)]);
         const hist: Array<[string, string]> = [];
         for (const coin of keep) {
           const row = rows.get(coin);

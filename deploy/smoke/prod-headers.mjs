@@ -32,6 +32,8 @@ const CONNECT_SRC = [
   'https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org', 'https://1rpc.io',
   // The Fed live widget: the Federal Reserve's broadcast (Brightcove: manifests, segments).
   'https://*.boltdns.net', 'https://*.brightcovecdn.com',
+  // The live liquidation heatmap: a WebSocket straight to the instance (apps/server routes/liqWs.ts).
+  'wss://54-150-61-169.sslip.io',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */

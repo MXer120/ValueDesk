@@ -289,7 +289,8 @@ Resources:
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
               https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
-              https://*.boltdns.net https://*.brightcovecdn.com;
+              https://*.boltdns.net https://*.brightcovecdn.com
+              wss://54-150-61-169.sslip.io;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
@@ -361,7 +362,8 @@ Resources:
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
               https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
-              https://*.boltdns.net https://*.brightcovecdn.com;
+              https://*.boltdns.net https://*.brightcovecdn.com
+              wss://54-150-61-169.sslip.io;
               form-action 'none';
               base-uri 'none';
               object-src 'none';

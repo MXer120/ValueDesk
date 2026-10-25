@@ -65,7 +65,7 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 
 | Call (web) | Path | Class | Why it stays |
 |---|---|---|---|
-| Leaderboards, Explore, cohorts (+ detail, map, focus, wallets), liquidation heatmap (+ wallets, history), screener | `/api/vs/leaderboard`, `/explore`, `/cohorts*`, `/liquidations*`, `/screener` | (b) | the index is the server's job |
+| Leaderboards, Explore, cohorts (+ detail, map, focus, wallets), liquidation heatmap (+ wallets, history; live over `/ws/liq`, browser to instance), screener | `/api/vs/leaderboard`, `/explore`, `/cohorts*`, `/liquidations*`, `/ws/liq`, `/screener` | (b) | the index is the server's job |
 | Whales tape, positioning | `/api/vs/whales`, `/api/vs/positioning` | (b) | aggregated server-side from venue trade streams; not one user's traffic |
 | Deep link by SoDEX account id (App.tsx) | `/api/feed/account` | (b) | resolved from the index's leaderboard map, on-chain only as a fallback |
 | Server status and network | `/api/health` | (c) | about Valuescan itself |

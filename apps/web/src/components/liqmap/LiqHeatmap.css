@@ -217,3 +217,8 @@
   cursor: pointer;
 }
 .lqm-zoom button:hover { background: var(--bg-hover); color: var(--text); }
+
+/* Streaming: the Live dot pulses. */
+.lqm-dot.is-on { background: var(--pos); animation: lqm-pulse 1.6s ease-in-out infinite; }
+@keyframes lqm-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .lqm-dot.is-on { animation: none; } }

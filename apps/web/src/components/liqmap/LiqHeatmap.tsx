@@ -21,6 +21,7 @@ import { PlatformSelect } from '../PlatformSelect';
 import { VenueLogo } from '../VenueLogo';
 import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
+import { useLiveHeat } from './liveHeat';
 import { shortAddr } from '../../format';
 import './LiqHeatmap.css';
 
@@ -54,14 +55,20 @@ type Heat = Omit<HeatApi, 'buckets'> & { buckets: Bucket[] };
 
 /** The API's rows ([index, long USD, short USD, long n, short n]) as buckets; sizes are USD over the bucket's middle (0.02% buckets). */
 function fromApi(a: HeatApi): Heat {
-  return {
-    ...a,
-    buckets: a.buckets.map(([i, l, sh, ln, sn]): Bucket => {
-      const lo = +(i * a.step).toPrecision(12);
-      const mid = lo + a.step / 2;
-      return [lo, l, sh, l / mid, sh / mid, ln, sn];
-    }),
-  };
+  const p = a.price;
+  const buckets: Bucket[] = [];
+  for (const [i, l0, s0, ln0, sn0] of a.buckets) {
+    const lo = +(i * a.step).toPrecision(12);
+    // A level the price has already crossed (a long priced above it, a short below) is past, not a level.
+    const pastL = p !== null && lo >= p;
+    const pastS = p !== null && lo + a.step <= p;
+    const l = pastL ? 0 : l0;
+    const sh = pastS ? 0 : s0;
+    if (!l && !sh) continue;
+    const mid = lo + a.step / 2;
+    buckets.push([lo, l, sh, l / mid, sh / mid, pastL ? 0 : ln0, pastS ? 0 : sn0]);
+  }
+  return { ...a, buckets };
 }
 /** One bucket's figure in the unit shown: [long, short]. */
 const valOf = (b: Bucket, unit: Unit): [number, number] => (unit === 'usd' ? [b[1], b[2]] : [b[3], b[4]]);
@@ -159,6 +166,20 @@ export function groupFor(step: number, span: number, px: number, res: Res): numb
   return MULTIPLES.find((k) => step * k >= want) ?? MULTIPLES[MULTIPLES.length - 1]!;
 }
 
+/**
+ * The bar width a view draws, in the server's buckets, told to the stream a quarter
+ * second after it settles (a zoom subscribes again at the new width); drawn at once
+ * from what is held meanwhile.
+ */
+function useStreamWidth(rawStep: number, span: number, px: number, res: Res, onWant: (k: number) => void): number {
+  const want = groupFor(rawStep, span, px, res);
+  useEffect(() => {
+    const t = setTimeout(() => onWant(want), 250);
+    return () => clearTimeout(t);
+  }, [want, onWant]);
+  return want;
+}
+
 /** Buckets summed `k` server buckets at a time. */
 export function regroup(h: Heat, k: number): Heat {
   if (k <= 1) return h;
@@ -184,9 +205,14 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
   useEffect(() => setPick(null), [coin, chosen.join(','), prefs.res]);
 
   const vkey = chosen.join(',');
-  // One read a minute (the indexer writes the levels a minute apart); the views group the buckets by what is on screen.
-  const heat = usePolled<HeatApi>(prefs.view === 'history' ? null : `${coin}|${vkey}`, (s) => vsApi.liquidations(coin, chosen, 'fine', s), 60_000);
-  const raw = useMemo(() => (heat.data ? fromApi(heat.data) : null), [heat.data]);
+  // Live over the WebSocket (a second apart); over HTTP, a read a minute, while the socket is down.
+  // The stream is summed to the bar width the view draws (in server buckets); the views ask for it as they zoom.
+  const [wantK, setWantK] = useState(5);
+  const live = useLiveHeat(coin, chosen, prefs.view !== 'history', wantK);
+  const streamK = live.data ? live.k : 1;
+  const heat = usePolled<HeatApi>(prefs.view === 'history' || live.connected ? null : `${coin}|${vkey}`, (s) => vsApi.liquidations(coin, chosen, 'fine', s), 60_000);
+  const apiData = live.data ?? heat.data;
+  const raw = useMemo(() => (apiData ? fromApi(apiData) : null), [apiData]);
   const h = raw;
 
   return (
@@ -195,7 +221,7 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
         <div className="lqm-seg" role="tablist" aria-label="View">
           {(['live', 'chart', 'history'] as const).map((v) => (
             <button key={v} type="button" role="tab" aria-selected={prefs.view === v} className={prefs.view === v ? 'is-on' : ''} onClick={() => set({ view: v })}>
-              {v === 'live' ? <><span className="lqm-dot" aria-hidden="true" />Live</> : v === 'chart' ? 'Chart' : 'Historical'}
+              {v === 'live' ? <><span className={`lqm-dot${live.connected ? ' is-on' : ''}`} aria-hidden="true" title={live.connected ? 'Streaming: updates every second' : 'Not streaming: refreshed every minute'} />Live</> : v === 'chart' ? 'Chart' : 'Historical'}
             </button>
           ))}
         </div>
@@ -241,9 +267,9 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
         ) : !h.price || !h.buckets.length ? (
           <p className="lqm-empty">No tracked {coin} positions with a liquidation price on {chosen.length === SCAN_VENUES.length ? 'any platform' : chosen.map((v) => VENUE_LABEL[v]).join(', ')}.</p>
         ) : prefs.view === 'live' ? (
-          <LiveView h={h} unit={prefs.unit} res={prefs.res} onPick={setPick} pick={pick} />
+          <LiveView h={h} unit={prefs.unit} res={prefs.res} streamK={streamK} onWant={setWantK} onPick={setPick} pick={pick} />
         ) : (
-          <ChartView h={h} unit={prefs.unit} res={prefs.res} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
+          <ChartView h={h} unit={prefs.unit} res={prefs.res} streamK={streamK} onWant={setWantK} engine={engine} symbol={symbol} tf={prefs.tf} onPick={setPick} pick={pick} />
         )}
         {pick && h && prefs.view !== 'history' && <Details coin={coin} venues={chosen} pick={pick} price={h.price} onClose={() => setPick(null)} />}
       </div>
@@ -333,7 +359,7 @@ const sideOf = (b: Bucket | null, from: number, step: number, p: number): 'long'
 
 const M = { l: 56, r: 60, t: 10, b: 24 };
 
-function LiveView({ h: base, unit, res, onPick, pick }: { h: Heat; unit: Unit; res: Res; onPick: (p: Pick) => void; pick: Pick | null }) {
+function LiveView({ h: base, unit, res, streamK, onWant, onPick, pick }: { h: Heat; unit: Unit; res: Res; streamK: number; onWant: (k: number) => void; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -364,7 +390,8 @@ function LiveView({ h: base, unit, res, onPick, pick }: { h: Heat; unit: Unit; r
   const win = view ?? (auto && clamp(auto));
   const p = base.price!;
   const [lo, hi] = win ?? [p * 0.5, p * 1.5];
-  const k = groupFor(base.step, hi - lo, W, res);
+  const want = useStreamWidth(base.step / streamK, hi - lo, W, res, onWant);
+  const k = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, k), [base, k]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
   const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));
@@ -502,7 +529,7 @@ function LiveView({ h: base, unit, res, onPick, pick }: { h: Heat; unit: Unit; r
 const TF_POLL: Record<Tf, number> = { '1m': 10_000, '5m': 20_000, '15m': 30_000, '1h': 60_000, '4h': 60_000, '1D': 120_000 };
 const CANDLES = 500;
 
-function ChartView({ h: base, unit, res, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; res: Res; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
+function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; res: Res; streamK: number; onWant: (k: number) => void; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
   const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
@@ -537,7 +564,8 @@ function ChartView({ h: base, unit, res, engine, symbol, tf, onPick, pick }: { h
   const [lo, hi] = yv ?? [aLo - padY, aHi + padY];
   const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
   const priceAt = (py: number) => lo + ((M.t + H - py) / H) * (hi - lo);
-  const group = groupFor(base.step, hi - lo, H, res);
+  const want = useStreamWidth(base.step / streamK, hi - lo, H, res, onWant);
+  const group = Math.max(1, Math.round(want / streamK));
   const h = useMemo(() => regroup(base, group), [base, group]);
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
   const fitBar = Math.max(1e-12, ...shown.map((b) => Math.max(...valOf(b, unit))));

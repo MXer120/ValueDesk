@@ -98,11 +98,21 @@ export class Lane {
   spent = 0;
   lastError: string | null = null;
 
+  /** The guaranteed shares in force (`setShare` changes one). */
+  private shares: Array<{ prefix: string; share: number }>;
+
   /** The spend cap now (`setPerMin`: another lane can lend it part of its own, or take it back). */
   private rate: number;
 
   constructor(private readonly o: LaneOptions) {
     this.rate = o.perMin;
+    this.shares = (o.shares ?? []).map((x) => ({ ...x }));
+  }
+
+  /** A guaranteed share of the spend for a prefix, from the next pick on (one of the lane's own prefixes). */
+  setShare(prefix: string, share: number): void {
+    const x = this.shares.find((y) => y.prefix === prefix);
+    if (x && Number.isFinite(share) && share >= 0 && share <= 1) x.share = share;
   }
 
   get perMin(): number {
@@ -227,7 +237,7 @@ export class Lane {
       running.set(p, (running.get(p) ?? 0) + cost);
       total += cost;
     }
-    for (const s of this.o.shares ?? []) {
+    for (const s of this.shares) {
       const served = (spent.get(s.prefix)?.cost ?? 0) + (running.get(s.prefix) ?? 0);
       if (total > 0 && served / total >= s.share) continue;
       const e = pick(s.prefix);
@@ -237,7 +247,7 @@ export class Lane {
   }
 
   private prefixOf(key: string): string {
-    return this.o.shares?.find((s) => key.startsWith(s.prefix))?.prefix ?? '';
+    return this.shares.find((s) => key.startsWith(s.prefix))?.prefix ?? '';
   }
 
   private note(key: string, cost: number): void {

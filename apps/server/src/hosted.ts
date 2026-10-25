@@ -102,6 +102,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/liquidations', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/wallets', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/history', cls: 'read' },
+  // ...and live: one WebSocket per viewer, straight from the browser to the instance (routes/liqWs.ts).
+  { method: 'GET', url: '/ws/liq', cls: 'read' },
   { method: 'GET', url: '/api/vs/screener', cls: 'read' },
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
@@ -536,7 +538,9 @@ export function installHostedGate(app: FastifyInstance, o: GateOptions): KeyedLi
     if (req.method === 'OPTIONS') return;
     const pattern = req.routeOptions?.url;
     const local = isOnInstanceRequest(req.raw.socket?.remoteAddress, req.headers) ? hostedRoute(req.method, pattern, onInstance) : null;
-    if (!local && secrets.length && pattern !== '/api/health' && !originSecretAccepted(req.headers[ORIGIN_SECRET_HEADER], secrets)) {
+    // The live heatmap's WebSocket comes straight from the browser (Vercel's functions hold no socket):
+    // Caddy passes it without the secret, and the route checks the site Origin (routes/liqWs.ts).
+    if (!local && secrets.length && pattern !== '/api/health' && pattern !== '/ws/liq' && !originSecretAccepted(req.headers[ORIGIN_SECRET_HEADER], secrets)) {
       return reply.code(403).send({ error: 'forbidden', source: 'server' });
     }
     const route = local ?? hostedRoute(req.method, pattern, routes);
