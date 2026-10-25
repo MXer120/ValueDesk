@@ -36,6 +36,9 @@ import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
 import { SizeCalc, SourceWidget } from './sourceWidgets';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
 import { FedLive } from '../components/fedlive/FedLive';
+import { FedWatch } from '../components/macro/FedWatch';
+import { IndicatorWidget } from '../components/macro/IndicatorView';
+import { EtfFlows } from '../components/macro/EtfFlows';
 import { NewsFeed } from '../components/news/NewsFeed';
 import { newsProps } from './newsProps';
 import { coinLabel } from '../format';
@@ -436,7 +439,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     const name = face?.name ?? id;
     const quick = id === 'quick';
     // The two news widgets draw their own insets and scroll inside themselves.
-    const own = id === 'news' || id === 'livefeed' || id === 'fedlive';
+    const own = id === 'news' || id === 'livefeed' || id === 'fedlive' || id === 'fedwatch' || id === 'indicator' || id === 'etfflows';
     return {
       id,
       title: name,
@@ -450,6 +453,9 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         if (id === 'sizecalc') return <SizeCalc price={c.lastPrice || c.price} />;
         if (id === 'livefeed') return <LiveFeed />;
         if (id === 'fedlive') return <FedLive />;
+        if (id === 'fedwatch') return <FedWatch />;
+        if (id === 'indicator') return <IndicatorWidget />;
+        if (id === 'etfflows') return <EtfFlows />;
         if (id === 'news') return <NewsFeed {...newsProps(c)} />;
         if (quick) {
           return (

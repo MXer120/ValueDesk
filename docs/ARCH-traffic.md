@@ -315,8 +315,17 @@ Against this inventory, HOSTED_ROUTES should be:
   `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`),
   `/api/vs/calendar` (the economic calendar: federalreserve.gov, bls.gov, bea.gov and SoSoValue,
   each read at most twice a day), `/api/vs/calendar/results` (its releases' official figures,
-  read by one watcher in the API process from the publishers' pages at the release second) and
-  `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuescan/releases.ts)
+  read by one watcher in the API process from the publishers' pages at the release second),
+  `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuescan/releases.ts),
+  `/api/vs/fedwatch` (the coming FOMC meetings' decision probabilities from Kalshi's public market
+  data, Polymarket's beside; read at most once a minute; valuescan/fedwatch.ts),
+  `/api/vs/fedwatch/history` (one listed meeting's probabilities over 7/30/90 days from Kalshi's
+  candlesticks, cached 10 minutes per meeting and range),
+  `/api/vs/indicators` (the indicator catalog, no fetch), `/api/vs/indicator` (one catalog
+  indicator's history from FRED's public CSV, read at most every 6 hours; valuescan/indicators.ts),
+  and `/api/vs/etf/flows` (SoSoValue's US spot ETF flows and funds per asset, cached 30 minutes on the
+  news key's budget, at most 5 calls a minute; `not_available` without `SOSOVALUE_API_KEY`;
+  valuescan/sosovalue/etf.ts)
   (index, drop their `provisional`); `/api/feed/account`;
   `/api/external/maintenance/status`, `/api/external/announcements(/:id)` (until
   they go direct).

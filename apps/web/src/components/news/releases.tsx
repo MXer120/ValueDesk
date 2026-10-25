@@ -9,13 +9,17 @@
  *                      (a toast, and a `vs:release` event the chart listens for).
  *   EventCard          one event: its fields with the actual and the previous
  *                      figure (empty until it lands), the countdown, the
- *                      release's first sentence and its official page.
+ *                      release's first sentence and its official page; each
+ *                      figure opens its history (macro/IndicatorView.tsx).
  */
 import { useEffect, useRef, useState } from 'react';
 import type { ReleaseResult, ReleaseResultField } from '@sign/valuescan/releases.js';
 import type { CalendarEvent } from '../../vsApi';
 import { notify } from '../../toast';
+import { useAsync } from '../../hooks';
 import { Modal } from '../Modal';
+import { IndicatorModal } from '../macro/IndicatorView';
+import { macroApi } from '../macro/api';
 
 export type { ReleaseResult };
 
@@ -115,6 +119,10 @@ export function EventCard({ event, result, onClose, sourceName }: {
   sourceName?: string;
 }) {
   const [, tick] = useState(0);
+  const [chart, setChart] = useState<{ id: string; title: string } | null>(null);
+  const catalog = useAsync(() => macroApi.indicators(), [], {});
+  /** The indicator a figure of this event is: the calendar kind and the release field. */
+  const indicatorOf = (key: string) => catalog.data?.indicators.find((x) => x.kind === event.short && x.field === key) ?? null;
   useEffect(() => {
     const t = window.setInterval(() => tick((n) => n + 1), 1000);
     return () => window.clearInterval(t);
@@ -139,7 +147,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
       </div>
       {fields.length > 0 ? (
         <table className="evc__table">
-          <thead><tr><th>Figure</th><th className="num">Actual</th><th className="num">Previous</th></tr></thead>
+          <thead><tr><th>Figure</th><th className="num">Actual</th><th className="num">Previous</th><th aria-label="History" /></tr></thead>
           <tbody>
             {fields.map((f) => {
               const d = dir(f.value, f.prior);
@@ -148,6 +156,16 @@ export function EventCard({ event, result, onClose, sourceName }: {
                   <td>{f.label}{f.note && <small title={f.note}> · {f.note}</small>}</td>
                   <td className={`num evc__actual${f.value === null ? (waiting ? ' is-wait' : ' is-empty') : ''}${d ? ` is-${d}` : ''}`}>{fmtField(f, f.value)}</td>
                   <td className="num evc__prior">{fmtField(f, f.prior)}</td>
+                  <td className="evc__hist">
+                    {(() => {
+                      const ind = indicatorOf(f.key);
+                      return ind ? (
+                        <button type="button" className="evc__chart" title={`${ind.name}: history, chart and table`} aria-label={`History of ${ind.name}`} onClick={() => setChart({ id: ind.id, title: ind.name })}>
+                          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 13.5h12M3.5 11 6.5 7.5l2.5 2 4-5" /></svg>
+                        </button>
+                      ) : null;
+                    })()}
+                  </td>
                 </tr>
               );
             })}
@@ -159,6 +177,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
       {result?.headline && <p className="evc__headline">{result.headline}</p>}
       {result?.priorPeriod && <p className="evc__foot">Previous: {result.priorPeriod}. Consensus forecasts are not published by the official sources.</p>}
       {lag !== null && lag >= 0 && <p className="evc__foot">Read from {host} {lag.toFixed(1)}s after the scheduled time.</p>}
+      {chart && <IndicatorModal id={chart.id} title={chart.title} onClose={() => setChart(null)} />}
       <div className="evc__actions">
         <a className="fx-cta evc__open" href={result?.href ?? event.href} target="_blank" rel="noopener noreferrer">Open on {host}</a>
       </div>

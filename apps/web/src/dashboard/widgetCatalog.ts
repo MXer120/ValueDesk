@@ -60,6 +60,9 @@ export const WIDGET_FACES: readonly WidgetFace[] = [
   { id: 'news', name: 'News', kind: 'news', group: 'Tools', source: false },
   { id: 'livefeed', name: 'Live feed', kind: 'news', group: 'Tools', source: false },
   { id: 'fedlive', name: 'Fed live', kind: 'news', group: 'Tools', source: false },
+  { id: 'fedwatch', name: 'FOMC rate odds', kind: 'table', group: 'Tools', source: false },
+  { id: 'indicator', name: 'Economic indicator', kind: 'funding', group: 'Charts', source: false },
+  { id: 'etfflows', name: 'ETF flows', kind: 'funding', group: 'Charts', source: false },
   { id: 'tracked', name: 'Tracked', kind: 'table', group: 'Tools', source: true },
   { id: 'toptraders', name: 'Top traders', kind: 'table', group: 'Tools', source: true },
   { id: 'cohorts', name: 'Cohorts', kind: 'cohort', group: 'Tools', source: true },
@@ -93,5 +96,5 @@ export function positionSize(equity: number, riskPct: number, stopPct: number, p
 export const EXTRA_WIDGET_IDS: readonly string[] = [
   'liq', 'poschg', 'copy', 'assets', 'orders', 'twap', 'history', 'fills',
   'transfers', 'twaplive', 'watch', 'quick', 'stops', 'funding', 'cohort', 'heatmap',
-  'tape', 'news', 'livefeed', 'fedlive', 'tracked', 'toptraders', 'cohorts', 'sizecalc',
+  'tape', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'tracked', 'toptraders', 'cohorts', 'sizecalc',
 ];

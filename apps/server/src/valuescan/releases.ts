@@ -608,6 +608,21 @@ export function resetReleases(): void {
   known = new Map();
 }
 
+/** Told a kind's `short` each time one of its releases is read (indicators.ts re-reads that kind's series). */
+const releaseListeners = new Set<(short: string) => void>();
+
+/** Listen for releases; the function returned stops listening. */
+export function onRelease(fn: (short: string) => void): () => void {
+  releaseListeners.add(fn);
+  return () => releaseListeners.delete(fn);
+}
+
+/** The target range the newest FOMC statement read set ("3.75–4.00" -> 3.75, 4), or null before one is read. */
+export function latestTargetRange(): { lower: number; upper: number } | null {
+  const m = /^(\d+(?:\.\d+)?)–(\d+(?:\.\d+)?)$/.exec(store.latest.FOMC?.values.range?.value ?? '');
+  return m ? { lower: Number(m[1]), upper: Number(m[2]) } : null;
+}
+
 function loadStore(path: string): Store {
   try {
     const s = JSON.parse(readFileSync(path, 'utf8')) as Store;
@@ -757,6 +772,13 @@ export function startReleaseWatcher(opts: ReleaseWatcherOptions = {}): ReleaseWa
 
   const released = (r: StoredResult, e: EventRef, got: { href: string; parsed: ParsedRelease }, seenAt: number | null) => {
     Object.assign(r, { state: 'released', releasedAt: e.time, seenAt, period: got.parsed.period, headline: got.parsed.headline, values: got.parsed.values, href: got.href });
+    for (const fn of releaseListeners) {
+      try {
+        fn(e.short);
+      } catch {
+        /* a listener's trouble is its own */
+      }
+    }
     const cur = store.latest[e.short];
     if (got.parsed.releaseDate && (!cur || cur.releaseDate <= got.parsed.releaseDate)) {
       store.latest[e.short] = { releaseDate: got.parsed.releaseDate, period: got.parsed.period, headline: got.parsed.headline, values: got.parsed.values, href: got.href, readAt: now() };
