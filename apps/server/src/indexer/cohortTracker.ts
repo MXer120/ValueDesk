@@ -92,7 +92,8 @@ const QUEUE_CAP = 400;
 const MIX_COINS = 120;
 
 /** Every coin's liquidation levels (liq_now) this often; a snapshot (liq_hist) every LIQ_STEP_MS, for SoDEX's perps and this many more coins. */
-export const LIQ_NOW_MS = 60_000;
+/** Every 2 minutes: a pass over ~90k books took 14-26 s of a disk-bound loop (2026-10-25); the edge serves the row in between. */
+export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
 const LIQ_COINS = 30;
 /** Kept 30 days; past 3 days only the hourly ones. */
@@ -187,15 +188,19 @@ export function pollTtl(equity: number): number {
 }
 
 /**
- * Where a book read before liquidation prices were kept queues for its one re-read:
- * by leverage (20x and up at the top), above the stale and gap re-reads of its size,
- * below a new wallet the stream saw trade. Largest-first (by equity) took the big,
- * low-leverage books first: an hour after v0.2.22 the BTC buckets next to the price
- * held a seventh of what Hyperdash shows, while the far ones matched.
+ * Where a book without liquidation data queues for its read: by what it adds to
+ * the heatmap - its notional times its leverage (capped at 25x), so a large
+ * leveraged book first, a large unleveraged one (whose longs never liquidate) and
+ * a tiny one late. Above the stale and gap re-reads, below a new wallet the stream
+ * saw trade. History: largest-first (by equity) took the big low-leverage books
+ * first, and the buckets next to the price stayed thin; leverage-first (v0.2.24)
+ * then read thousands of tiny books that hardly move the map - 2026-10-25 15:15,
+ * 51k of 55k Hyperliquid books holding positions still unpriced, though they held
+ * under half the size.
  */
-export function liqBacklogPrio(notional: number, equity: number | null, size: number): number {
-  const lev = equity && equity > 0 ? notional / equity : 50;
-  return 1100 + Math.min(500, Math.round(lev * 25)) + Math.round(size / 10);
+export function liqBacklogPrio(notional: number, equity: number | null): number {
+  const lev = equity && equity > 0 ? Math.min(25, notional / equity) : 25;
+  return 1100 + Math.min(500, Math.max(0, Math.round(Math.log10(Math.max(1, notional * lev)) * 60)));
 }
 
 /** Whether a book carries liquidation data (a calibrated read): a cross cash, or an isolated / kept figure. */
@@ -219,6 +224,8 @@ export interface Book {
   pos: Map<string, { szi: number; entry: number | null; iso?: number | null; lev?: number | null; fix?: number | null }>;
   /** The account's cross cash for its liquidation prices (liquidations/math.ts calibrate); null = not known. */
   cash?: number | null;
+  /** A read that could not be priced (the venue's margin rules were not loaded yet): read again soon. */
+  liqMiss?: boolean;
   /** When the snapshot was read. */
   at: number;
   /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
@@ -418,6 +425,7 @@ export class CohortTracker {
     this.lastSeriesT = s.cohortSeriesLastT();
     this.lastMixT = s.cohortMixLastT();
     this.lastLiqT = s.liqHistLastT();
+    for (const v of VENUES) void venueMarkets(v).catch(() => null);
     try {
       const saved = JSON.parse(s.getMeta(LIQ_ACC_META) ?? '{}') as Record<string, { cur: DriftStats; prev: DriftStats | null }>;
       for (const v of VENUES) if (saved[v]?.cur) this.liqAcc.set(v, saved[v]!);
@@ -973,7 +981,7 @@ export class CohortTracker {
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
         // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
         // their liquidations sit nearest the price, where the heatmap is read.
-        if (book.pos.size && book.at < this.startedAt && !liqKnown(book)) push(liqBacklogPrio(notional(book), book.collateral ?? book.equity, size));
+        if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss)) push(liqBacklogPrio(notional(book), book.collateral ?? book.equity));
         else if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
         // Read before the last outage ended: it missed that outage's prints, at any size.
@@ -1078,7 +1086,8 @@ export class CohortTracker {
   private async liquidationSide(venue: Venue, r: PositionRead, prev: Book | undefined, book: Book): Promise<void> {
     if (!r.liq) return;
     const m = await venueMarkets(venue).catch(() => null);
-    if (!m) return;
+    // No margin rules yet (the first minutes after a start: 14% of Hyperliquid's reads after v0.2.22 went unpriced and stayed so).
+    if (!m || !m.tiers.size) { if (book.pos.size) book.liqMiss = true; return; }
     const tiersFor = (s: string): Tiers | null => m.tiers.get(s) ?? null;
     const cal = calibrate(r.liq, tiersFor);
     book.cash = cal.cash;
@@ -1142,7 +1151,11 @@ export class CohortTracker {
         let t0 = Date.now();
         for (const [address, b] of this.books.get(venue) ?? []) {
           if (!b.pos.size) continue;
-          // A book not priced yet still counts: its size shows as held, not priced.
+          // A book not priced yet still counts: its size shows as held, not priced (and needs no math).
+          if (!liqKnown(b)) {
+            for (const [symbol, p] of b.pos) if (p.szi) levels.add(venue, liqCoin(symbol), p.szi, null, null);
+            continue;
+          }
           batch.push([address, { cash: b.cash ?? null, positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) }]);
           if (batch.length >= 500) {
             run();

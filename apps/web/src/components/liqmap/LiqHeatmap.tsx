@@ -149,7 +149,7 @@ function cumulative(h: Heat, unit: Unit): { long: Array<[number, number]>; short
 interface Pick { from: number; to: number; side: 'long' | 'short' }
 
 /** Pixels a bucket takes on screen per resolution: the bucket width follows the zoom and the timeframe. */
-const RES_PX: Record<Res, number> = { fine: 3, medium: 7, coarse: 16 };
+const RES_PX: Record<Res, number> = { fine: 2, medium: 5, coarse: 12 };
 /** Multiples of the server's bucket a group may span: the widths stay round numbers. */
 const MULTIPLES = [1, 2, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
 
