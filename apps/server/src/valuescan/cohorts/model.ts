@@ -220,6 +220,10 @@ export interface Position {
   symbol: string;
   szi: number;
   entry: number | null;
+  /** Liquidation extras (valuescan/liquidations/math.ts LiqPos): absent on a cross position. */
+  iso?: number | null;
+  lev?: number | null;
+  fix?: number | null;
 }
 
 /** One wallet on one venue. */
@@ -237,6 +241,8 @@ export interface WalletVenue {
   at: number;
   /** How many wallets this one stands for (1, or 1 / rate for a sampled tail wallet). */
   weight: number;
+  /** The account's cross cash for its liquidation prices (liquidations/math.ts); null / absent = not known. */
+  cash?: number | null;
 }
 
 /** A price for a venue's symbol right now. */
@@ -423,7 +429,7 @@ export function sampleRule(rate: number, address: string, equity: number | null)
 export function sampledVenue(
   rate: number, address: string,
   m: { pnl: number | null; equity: number | null; label: string | null; pnlRange?: Partial<Record<CohortRange, number | null>> } | undefined,
-  book: { equity: number | null; positions: readonly Position[]; at: number } | undefined,
+  book: { equity: number | null; positions: readonly Position[]; at: number; cash?: number | null } | undefined,
   perp: number | null = book?.equity ?? null,
 ): WalletVenue {
   const rule = sampleRule(rate, address, m?.equity ?? book?.equity ?? null);
@@ -431,6 +437,7 @@ export function sampledVenue(
   return {
     pnl: m?.pnl ?? null, pnlRange: m?.pnlRange, equity: perp, label: m?.label ?? null,
     positions: read ? book.positions : null, at: read ? book.at : 0, weight: rule.weight,
+    ...(read && book.cash != null ? { cash: book.cash } : {}),
   };
 }
 

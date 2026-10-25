@@ -29,6 +29,19 @@ import { arcusAccount } from '../valuescan/extra/arcus.js';
 import { LIGHTER_API } from '../valuescan/extra/lighter.js';
 import { num, type Pacer } from '../valuescan/extra/http.js';
 import type { Position } from '../valuescan/cohorts/model.js';
+import type { ReadPos } from '../valuescan/liquidations/math.js';
+
+/** The cross cash an account value implies: its value with every cross position at 0. */
+const cashOf = (value: number | null, ps: readonly ReadPos[]): number | null => {
+  if (value === null) return null;
+  let c = value;
+  for (const p of ps) {
+    if (p.isolated) c -= p.isoValue ?? 0;
+    else if (p.mark !== null) c -= p.szi * p.mark;
+    else return null;
+  }
+  return c;
+};
 
 export interface PositionRead {
   /** The perps account value (model.ts perpEquity says per venue what it is). */
@@ -44,6 +57,12 @@ export interface PositionRead {
   spotAt?: number;
   /** What the read spent beyond READ_COST (the spot state). */
   extraCost?: number;
+  /**
+   * What the liquidation math needs (valuescan/liquidations/math.ts calibrate):
+   * each position's mark, the venue's liquidation price where it gives one, its
+   * margin mode, and the cross cash the account value implies (`cash0`).
+   */
+  liq?: { cash0: number | null; positions: ReadPos[]; split?: boolean };
 }
 
 const EMPTY: PositionRead = { equity: null, positions: [], marks: [] };
@@ -128,14 +147,32 @@ export async function hlPositions(address: string, dex?: string, spot?: (r: Posi
   if (!st) return EMPTY;
   const positions: Position[] = [];
   const marks: Array<[string, number]> = [];
+  const lp: ReadPos[] = [];
   for (const { position: p } of st.assetPositions ?? []) {
     const szi = num(p.szi) ?? 0;
     if (!szi) continue;
     positions.push({ symbol: p.coin, szi, entry: num(p.entryPx) });
     const value = Math.abs(num(p.positionValue) ?? 0);
-    if (value > 0) marks.push([p.coin, value / Math.abs(szi)]);
+    const mark = value > 0 ? value / Math.abs(szi) : null;
+    if (mark !== null) marks.push([p.coin, mark]);
+    const isolated = p.leverage?.type === 'isolated';
+    // An isolated position's rawUsd is its margin less s x mark: its value at the mark is that plus s x mark.
+    const raw = num(p.leverage?.rawUsd ?? null);
+    lp.push({
+      symbol: p.coin, szi, mark, vliq: num(p.liquidationPx) || null, isolated, lev: p.leverage?.value ?? null,
+      isoValue: isolated ? (raw !== null && mark !== null ? raw + szi * mark : num(p.marginUsed)) : undefined,
+    });
   }
-  const out: PositionRead = { equity: num(st.marginSummary?.accountValue), positions, marks };
+  const out: PositionRead = {
+    equity: num(st.marginSummary?.accountValue), positions, marks,
+    // The cross summary leaves the isolated positions out; the whole account's has them in.
+    liq: {
+      cash0: st.crossMarginSummary
+        ? cashOf(num(st.crossMarginSummary.accountValue), lp.filter((p) => !p.isolated))
+        : cashOf(num(st.marginSummary?.accountValue), lp),
+      positions: lp,
+    },
+  };
   if (!dex && spot?.(out)) {
     const [sp, px] = await Promise.all([
       hlInfo.post<HlSpotState | null>({ type: 'spotClearinghouseState', user: address }, { ttlMs: 0 }),
@@ -242,15 +279,20 @@ export async function sodexPositions(address: string): Promise<PositionRead> {
   if (!st || !st.aid) return EMPTY;
   const positions: Position[] = [];
   const marks: Array<[string, number]> = [];
+  const lp: ReadPos[] = [];
   for (const p of st.P ?? []) {
     const szi = num(p?.sz);
     if (!p?.s || !szi) continue;
     const entry = num(p.ep);
     positions.push({ symbol: p.s, szi, entry });
     const ur = num(p.ur);
-    if (entry !== null && ur !== null) marks.push([p.s, entry + ur / szi]);
+    const mark = entry !== null && ur !== null ? entry + ur / szi : null;
+    if (mark !== null) marks.push([p.s, mark]);
+    // "0" is SoDEX's "no liquidation price" (sodex/mappers.ts).
+    lp.push({ symbol: p.s, szi, mark, vliq: num(p.lp) || null, isolated: p.m === 'ISOLATED', lev: p.l ?? null });
   }
-  return { equity: num(st.av), positions, marks };
+  const equity = num(st.av);
+  return { equity, positions, marks, liq: { cash0: cashOf(equity, lp), positions: lp } };
 }
 
 /** Every sub-account of an L1 address, positions included, in one request. */
@@ -268,16 +310,32 @@ export async function lighterPositions(address: string, pacer: Pacer): Promise<P
   const by = new Map<string, Position>();
   const marks: Array<[string, number]> = [];
   const indices: number[] = [];
+  // Each sub-account is its own margin account: the liquidation math follows one, and keeps
+  // the venue's figures as read when positions sit in several (math.ts calibrate `split`).
+  const lp: ReadPos[] = [];
+  let holding = 0;
+  let cash0: number | null = null;
   for (const a of j.accounts ?? []) {
     const idx = num(a.index) ?? num(a.account_index);
     if (idx !== null) indices.push(idx);
     const v = num(a.total_asset_value) ?? num(a.collateral);
     if (v !== null) equity = (equity ?? 0) + v;
+    const mine: ReadPos[] = [];
     for (const p of (a.positions as Array<Record<string, unknown>> | undefined) ?? []) {
       const size = Math.abs(num(p.position) ?? 0);
       if (!size) continue;
       const symbol = String(p.symbol ?? p.market_id);
       const szi = (num(p.sign) ?? 1) < 0 ? -size : size;
+      const pv = Math.abs(num(p.position_value) ?? 0);
+      const isolated = num(p.margin_mode) === 1;
+      mine.push({
+        symbol, szi, mark: pv > 0 ? pv / size : null,
+        // "0" is Lighter's "no liquidation price".
+        vliq: num(p.liquidation_price) || null,
+        isolated,
+        isoValue: isolated ? (num(p.allocated_margin) ?? 0) + (num(p.unrealized_pnl) ?? 0) : undefined,
+        lev: isolated && (num(p.initial_margin_fraction) ?? 0) > 0 ? 100 / num(p.initial_margin_fraction)! : null,
+      });
       const entry = num(p.avg_entry_price);
       const cur = by.get(symbol);
       if (!cur) by.set(symbol, { symbol, szi, entry });
@@ -290,9 +348,19 @@ export async function lighterPositions(address: string, pacer: Pacer): Promise<P
       const value = Math.abs(num(p.position_value) ?? 0);
       if (value > 0) marks.push([symbol, value / size]);
     }
+    if (mine.length) {
+      holding++;
+      cash0 = cashOf(v, mine);
+      for (const p of mine) {
+        // Several sub-accounts in one market: the larger part's figure stands for the book's position.
+        const i = lp.findIndex((x) => x.symbol === p.symbol);
+        if (i < 0) lp.push(p);
+        else if (Math.abs(p.szi) > Math.abs(lp[i]!.szi)) lp[i] = p;
+      }
+    }
   }
   const positions = [...by.values()].filter((p) => p.szi !== 0);
-  return { equity, positions, marks, indices };
+  return { equity, positions, marks, indices, liq: { cash0: holding > 1 ? null : cash0, positions: lp, split: holding > 1 } };
 }
 
 export async function arcusPositions(address: string, pacer: Pacer): Promise<PositionRead> {
@@ -300,12 +368,19 @@ export async function arcusPositions(address: string, pacer: Pacer): Promise<Pos
   if (!a) return EMPTY;
   const positions: Position[] = [];
   const marks: Array<[string, number]> = [];
+  const lp: ReadPos[] = [];
   for (const p of a.positions) {
     if (!p.size) continue;
     positions.push({ symbol: p.symbol, szi: p.size, entry: p.entry });
-    if (p.mark !== null && p.mark > 0) marks.push([p.symbol, p.mark]);
+    const mark = p.mark !== null && p.mark > 0 ? p.mark : null;
+    if (mark !== null) marks.push([p.symbol, mark]);
+    // Arcus's account read gives no liquidation price (`vliq` absent): the math works it out.
+    lp.push({
+      symbol: p.symbol, szi: p.size, mark, isolated: p.isolated, lev: p.leverage,
+      isoValue: p.isolated && p.marginUsed !== null ? p.marginUsed + (p.uPnl ?? 0) : undefined,
+    });
   }
-  return { equity: a.equity, positions, marks };
+  return { equity: a.equity, positions, marks, liq: { cash0: cashOf(a.equity, lp), positions: lp } };
 }
 
 /** What one read costs in its lane's unit. */

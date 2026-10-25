@@ -53,7 +53,7 @@ import { VENUES, type Venue } from '../valuescan/types.js';
 import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
 import type { Pacer } from '../valuescan/extra/http.js';
 import {
-  Aggregator, COHORTS, MARGIN_SIBLING, TAIL_EQUITY, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
+  Aggregator, COHORTS, MARGIN_SIBLING, TAIL_EQUITY, coinOf, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
   type CohortRange, type Position, type WalletVenue,
 } from '../valuescan/cohorts/model.js';
 import { Lane } from './lanes.js';
@@ -70,7 +70,10 @@ import {
   readRange, rebuildHour, rebuildSample, resumedAfterOutage, sizeProxy, venueOfSymbol,
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
-import type { CohortPnlRow } from './store.js';
+import type { BookPosition, CohortPnlRow } from './store.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
+import { setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
+import { SnapBuilder, eachLevel } from '../valuescan/liquidations/levels.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -86,6 +89,16 @@ const SERIES_KEEP_MS = 35 * DAY_MS;
 const QUEUE_CAP = 400;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
+
+/** Liquidation snapshots (liq_hist): this often, for this many coins (the most open notional tracked). */
+export const LIQ_STEP_MS = 15 * 60_000;
+const LIQ_COINS = 30;
+/** Kept 30 days; past 3 days only the hourly ones. */
+const LIQ_KEEP_MS = 30 * DAY_MS;
+const LIQ_THIN_MS = 3 * DAY_MS;
+/** Where the liquidation math's accuracy is kept for the API (DriftStats per venue). */
+export const LIQ_ACC_META = 'liq_acc';
+const LIQ_PRICE_ORDER: readonly Venue[] = ['hyperliquid', 'tradexyz', 'lighter', 'sodex', 'arcus'];
 
 /** Venues whose trades the indexer streams (their books follow the prints). */
 const STREAMED: ReadonlySet<Venue> = new Set(['hyperliquid', 'tradexyz', 'sodex', 'arcus', 'lighter']);
@@ -171,6 +184,13 @@ export function pollTtl(equity: number): number {
   return 48 * 60 * 60_000;
 }
 
+/** Whether a book carries liquidation data (a calibrated read): a cross cash, or an isolated / kept figure. */
+export function liqKnown(b: Pick<Book, 'cash' | 'pos'>): boolean {
+  if (b.cash != null) return true;
+  for (const p of b.pos.values()) if (p.iso !== undefined || p.fix != null) return true;
+  return false;
+}
+
 /** Every non-empty set of venues, as scopes. */
 export function allScopes(venues: readonly Venue[] = VENUES): Venue[][] {
   const out: Venue[][] = [];
@@ -181,7 +201,10 @@ export function allScopes(venues: readonly Venue[] = VENUES): Venue[][] {
 export interface Book {
   /** The read's perps account value (that dex's own on Hyperliquid / trade.xyz). */
   equity: number | null;
-  pos: Map<string, { szi: number; entry: number | null }>;
+  /** Size and entry, and the liquidation extras (liquidations/math.ts LiqPos: iso, lev, fix). */
+  pos: Map<string, { szi: number; entry: number | null; iso?: number | null; lev?: number | null; fix?: number | null }>;
+  /** The account's cross cash for its liquidation prices (liquidations/math.ts calibrate); null = not known. */
+  cash?: number | null;
   /** When the snapshot was read. */
   at: number;
   /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
@@ -196,6 +219,7 @@ export interface Book {
  * at the print's price.
  */
 export function applyFill(book: Book, symbol: string, d: number, px: number): void {
+  fillCash(book, symbol, d, px);
   const cur = book.pos.get(symbol) ?? { szi: 0, entry: null };
   const s = cur.szi;
   const n = s + d;
@@ -209,7 +233,7 @@ export function applyFill(book: Book, symbol: string, d: number, px: number): vo
   } else if (Math.sign(n) !== Math.sign(s)) {
     entry = px;
   }
-  book.pos.set(symbol, { szi: n, entry });
+  book.pos.set(symbol, { ...cur, szi: n, entry });
 }
 
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
@@ -336,23 +360,32 @@ export class CohortTracker {
   private lastMixT = 0;
   private recording = false;
   private applied = 0;
+  /** The liquidation math against the venues' figures, per venue (liquidations/math.ts DriftStats): this day's and the last. */
+  private liqAcc = new Map<Venue, { cur: DriftStats; prev: DriftStats | null }>();
+  private liqAccDirty = false;
+  private lastLiqT = 0;
+  private liqRecording = false;
+  /** When this tracker started (books read before it without liquidation data are read once more). */
+  private startedAt = 0;
   private planMs = 0;
   private recordMs = 0;
   lastError: string | null = null;
 
   constructor(private readonly d: CohortDeps) {
+    setRulesPacers({ lighter: d.lighter.pacer, arcus: d.arcus.pacer });
     this.scoh = new Lane({ name: 'scoh', perMin: envNum('VALUESCAN_INDEX_SODEX_COHORT', 20, 1, 60), gate: d.sodexGate, rateLimitPauseMs: 15 * 60_000 });
   }
 
   start(): void {
     const s = this.d.store;
     const now = this.d.now();
+    this.startedAt = now;
     for (const v of VENUES) {
       const m = new Map<string, Book>();
       for (const [a, b] of s.cohortBooks(v)) {
         m.set(a, {
-          equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt,
-          pos: new Map(b.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
+          equity: b.equity, at: b.at, collateral: b.collateral, spotAt: b.spotAt, cash: b.cash,
+          pos: new Map(b.positions.map(({ symbol, ...p }) => [symbol, p])),
         });
       }
       this.books.set(v, m);
@@ -367,6 +400,11 @@ export class CohortTracker {
     for (const [k, px] of s.cohortMarks()) this.marks.set(k, px);
     this.lastSeriesT = s.cohortSeriesLastT();
     this.lastMixT = s.cohortMixLastT();
+    this.lastLiqT = s.liqHistLastT();
+    try {
+      const saved = JSON.parse(s.getMeta(LIQ_ACC_META) ?? '{}') as Record<string, { cur: DriftStats; prev: DriftStats | null }>;
+      for (const v of VENUES) if (saved[v]?.cur) this.liqAcc.set(v, saved[v]!);
+    } catch { /* starts afresh */ }
     this.hlc.start();
     this.hlh.start();
     this.scoh.start();
@@ -378,6 +416,7 @@ export class CohortTracker {
     every(PLAN_MS, () => this.plan(), 'coh:plan');
     every(FLUSH_MS, () => this.flush(), 'coh:flush');
     every(60_000, () => this.record(), 'coh:record');
+    every(60_000, () => this.recordLiq(), 'coh:liq');
     const first = setTimeout(() => void this.plan().catch((e) => (this.lastError = String(e))), 15_000);
     first.unref?.();
     this.timers.push(first);
@@ -920,6 +959,8 @@ export class CohortTracker {
         else if (follows && book.at < this.staleBefore) push(900 + size);
         // Read before the spot state was looked at, and the leaderboard says it may matter.
         else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
+        // Read before the books kept liquidation prices (2026-10-25): once, largest first, before the reconciles.
+        else if (book.pos.size && book.at < this.startedAt && !liqKnown(book)) push(850 + size);
         else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();
@@ -945,10 +986,12 @@ export class CohortTracker {
             const r = await this.readOne(venue, address, totals.get(address) ?? null);
             if (venue === 'lighter' && r.indices?.length) this.d.lighter.learn?.(address, r.indices);
             const at = this.d.now();
-            books.set(address, {
+            const book: Book = {
               equity: r.equity, at, collateral: r.collateral ?? null, spotAt: r.spotAt ?? null,
               pos: new Map(r.positions.map((p) => [p.symbol, { szi: p.szi, entry: p.entry }])),
-            });
+            };
+            await this.liquidationSide(venue, r, books.get(address), book);
+            books.set(address, book);
             this.dirtyBooks.add(`${venue}|${address}`);
             this.wanted.delete(`${venue}|${address}`);
             for (const [sym, px] of r.marks) {
@@ -966,7 +1009,7 @@ export class CohortTracker {
     const s = this.d.store;
     try {
       if (this.dirtyBooks.size) {
-        const rows: Array<{ venue: Venue; address: string; equity: number | null; positions: Position[]; at: number; collateral: number | null; spotAt: number | null }> = [];
+        const rows: Array<{ venue: Venue; address: string; equity: number | null; positions: BookPosition[]; at: number; collateral: number | null; spotAt: number | null; cash: number | null }> = [];
         for (const k of this.dirtyBooks) {
           const i = k.indexOf('|');
           const venue = k.slice(0, i) as Venue;
@@ -974,12 +1017,16 @@ export class CohortTracker {
           const b = this.books.get(venue)?.get(address);
           if (!b) continue;
           rows.push({
-            venue, address, equity: b.equity, at: b.at, collateral: b.collateral ?? null, spotAt: b.spotAt ?? null,
-            positions: [...b.pos].map(([symbol, p]) => ({ symbol, szi: p.szi, entry: p.entry })),
+            venue, address, equity: b.equity, at: b.at, collateral: b.collateral ?? null, spotAt: b.spotAt ?? null, cash: b.cash ?? null,
+            positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })),
           });
         }
         this.dirtyBooks.clear();
         s.putCohortBooks(rows);
+      }
+      if (this.liqAccDirty) {
+        this.liqAccDirty = false;
+        s.setMeta(LIQ_ACC_META, JSON.stringify(Object.fromEntries(this.liqAcc)));
       }
       if (this.dirtyMarks.size) {
         const rows: Array<[string, number]> = [];
@@ -989,6 +1036,105 @@ export class CohortTracker {
       }
     } catch (e) {
       this.lastError = `cohort flush: ${String(e)}`;
+    }
+  }
+
+  // --- liquidation prices -----------------------------------------------------------------
+
+  private accOf(venue: Venue): DriftStats {
+    const now = this.d.now();
+    let a = this.liqAcc.get(venue);
+    if (!a) { a = { cur: emptyDrift(now), prev: null }; this.liqAcc.set(venue, a); }
+    if (now - a.cur.since >= DAY_MS) a = { cur: emptyDrift(now), prev: a.cur };
+    this.liqAcc.set(venue, a);
+    return a.cur;
+  }
+
+  /**
+   * A fresh read's liquidation side: the book's cash and isolated extras from the
+   * venue's own figures (liquidations/math.ts calibrate), and how far the book it
+   * replaces had drifted from them - the old book's figures at the read's marks
+   * against the venue's new ones, for positions whose size is unchanged.
+   */
+  private async liquidationSide(venue: Venue, r: PositionRead, prev: Book | undefined, book: Book): Promise<void> {
+    if (!r.liq) return;
+    const m = await venueMarkets(venue).catch(() => null);
+    if (!m) return;
+    const tiersFor = (s: string): Tiers | null => m.tiers.get(s) ?? null;
+    const cal = calibrate(r.liq, tiersFor);
+    book.cash = cal.cash;
+    r.liq.positions.forEach((p, i) => {
+      const x = book.pos.get(p.symbol);
+      const c = cal.pos[i]!;
+      if (!x) return;
+      if (c.iso !== undefined) { x.iso = c.iso; x.lev = c.lev ?? null; }
+      if (c.fix != null) x.fix = c.fix;
+    });
+    const st = this.accOf(venue);
+    st.checked += cal.checked;
+    st.matched += cal.matched;
+    this.liqAccDirty = true;
+    if (!prev || !liqKnown(prev) || r.liq.split) return;
+    const now = new Map(r.liq.positions.map((p) => [p.symbol, p]));
+    const was = [...prev.pos].map(([symbol, p]) => ({ symbol, ...p }));
+    const liq = accountLiqs(prev.cash ?? null, was, (s) => now.get(s)?.mark ?? this.marks.get(`${venue}|${s}`) ?? null, tiersFor);
+    was.forEach((p, i) => {
+      const q = now.get(p.symbol);
+      if (!q || Math.abs(q.szi - p.szi) > 1e-9 * Math.abs(p.szi)) { st.moved++; return; }
+      if (q.vliq === undefined) return;
+      addDrift(st, liq[i] ?? null, q.vliq ?? null, Math.abs(q.szi) * (q.vliq ?? q.mark ?? 0));
+    });
+  }
+
+  /** Every LIQ_STEP_MS: the liquidation levels of the LIQ_COINS largest coins, per venue (liq_hist). */
+  private async recordLiq(): Promise<void> {
+    const now = this.d.now();
+    const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
+    if (this.liqRecording || t <= this.lastLiqT || !this.members.size) return;
+    this.liqRecording = true;
+    try {
+      // A coin's price: Hyperliquid's print first, then the other venues'.
+      const px = new Map<string, number>();
+      for (const v of LIQ_PRICE_ORDER) {
+        for (const [k, p] of this.marks) {
+          if (!k.startsWith(`${v}|`) || !(p > 0)) continue;
+          const c = coinOf(k.slice(v.length + 1));
+          if (!px.has(c)) px.set(c, p);
+        }
+      }
+      const snaps = new SnapBuilder((c) => px.get(c) ?? null);
+      for (const venue of VENUES) {
+        const m = await venueMarkets(venue).catch(() => null);
+        if (!m) continue;
+        const tiersFor = (s: string): Tiers | null => m.tiers.get(s) ?? null;
+        const priceOf = (s: string) => this.marks.get(`${venue}|${s}`) ?? null;
+        let batch: Array<[string, { cash: number | null; positions: Array<{ symbol: string; szi: number; iso?: number | null; lev?: number | null; fix?: number | null }> }]> = [];
+        const run = () => {
+          eachLevel(venue, batch, priceOf, tiersFor, (coin, szi, liq) => snaps.add(venue, coin, szi, liq));
+          batch = [];
+        };
+        let t0 = Date.now();
+        for (const [address, b] of this.books.get(venue) ?? []) {
+          if (!b.pos.size || b.cash === undefined) continue;
+          batch.push([address, { cash: b.cash, positions: [...b.pos].map(([symbol, p]) => ({ symbol, ...p })) }]);
+          if (batch.length >= 500) {
+            run();
+            if (Date.now() - t0 > SLICE_MS) {
+              await new Promise<void>((r) => setImmediate(r));
+              mark('coh:liq');
+              t0 = Date.now();
+            }
+          }
+        }
+        run();
+      }
+      const rows = snaps.top(LIQ_COINS).map(([coin, snap]): [string, string] => [coin, JSON.stringify(snap)]);
+      const s = this.d.store;
+      if (rows.length) s.putLiqHist(t, rows);
+      s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
+      this.lastLiqT = t;
+    } finally {
+      this.liqRecording = false;
     }
   }
 

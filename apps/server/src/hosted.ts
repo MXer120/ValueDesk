@@ -97,6 +97,11 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/cohorts/map', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/focus', cls: 'read' },
   { method: 'GET', url: '/api/vs/cohorts/wallets', cls: 'read' },
+  // The liquidation heatmap (indexer/liqRead.ts): the cohort books, priced; the venues' market
+  // lists (margin rules, open interest) are cached on the process, a minute to an hour.
+  { method: 'GET', url: '/api/vs/liquidations', cls: 'read' },
+  { method: 'GET', url: '/api/vs/liquidations/wallets', cls: 'read' },
+  { method: 'GET', url: '/api/vs/liquidations/history', cls: 'read' },
   { method: 'GET', url: '/api/vs/screener', cls: 'read' },
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },

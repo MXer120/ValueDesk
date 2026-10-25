@@ -48,6 +48,7 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuescan/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuescan/cohorts/model.js';
+import { isLiqRange, liqHeatmap, liqHistory, liqWallets } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuescan/types.js';
 import { buildExplore } from '../valuescan/explore.js';
@@ -411,6 +412,55 @@ export async function valuescanRoutes(app: FastifyInstance) {
     try {
       const q = req.query as Q;
       const body = cohortsRead(cohortVenues(q), cohortFilter(q));
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /**
+   * Liquidation levels of `coin` over `venues` (indexer/liqRead.ts): buckets at
+   * `res` = fine | medium | coarse, with each venue's coverage and accuracy.
+   */
+  app.get('/api/vs/liquidations', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const coin = cohortFilter(q).coin;
+      if (!coin) throw bad('coin= is required');
+      const body = await liqHeatmap(coin, cohortVenues(q), q.res);
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** The wallets whose `side` (long / short) of `coin` liquidates in [`from`, `to`). */
+  app.get('/api/vs/liquidations/wallets', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const coin = cohortFilter(q).coin;
+      const from = Number(q.from);
+      const to = Number(q.to);
+      if (!coin) throw bad('coin= is required');
+      if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
+      if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
+      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to);
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** `coin`'s liquidation levels over `range` (1d / 7d / 30d): the indexer's 15-minute snapshots. */
+  app.get('/api/vs/liquidations/history', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const coin = cohortFilter(q).coin;
+      if (!coin) throw bad('coin= is required');
+      const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d');
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

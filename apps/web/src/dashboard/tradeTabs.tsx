@@ -21,6 +21,7 @@ import { FedWatch } from '../components/macro/FedWatch';
 import { IndicatorWidget } from '../components/macro/IndicatorView';
 import { EtfFlows } from '../components/macro/EtfFlows';
 import { NewsFeed } from '../components/news/NewsFeed';
+import { LiqHeatmap } from '../components/liqmap/LiqHeatmap';
 import { FundingScanner } from '../components/explore/FundingScanner';
 import { coinLabel } from '../format';
 import { useStored } from '../hooks';
@@ -46,6 +47,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
     case 'indicator': return { content: <IndicatorWidget instance={instance} />, scroll: 'hidden' };
     case 'etfflows': return { content: <EtfFlows instance={instance} />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
+    case 'liqmap': return { content: <LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} />, scroll: 'hidden' };
     case 'sizecalc': return { content: <SizeCalc price={c.lastPrice || c.price} />, scroll: 'auto' };
     case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
     case 'venue': return { content: <Stats address={c.address} showTitle={false} />, scroll: 'auto' };
@@ -56,8 +58,8 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
 /** A tab's name: the widget's, with its copy number. */
 const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
 
-const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'sizecalc', 'feetier', 'venue'];
-const CHART_WIDGETS = ['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding'];
+const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'liqmap', 'sizecalc', 'feetier', 'venue'];
+const CHART_WIDGETS = ['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding', 'liqmap'];
 
 const accountCtx = (c: TradeContext) => ({
   engine: c.engine,

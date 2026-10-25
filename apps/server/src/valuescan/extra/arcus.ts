@@ -164,6 +164,10 @@ export interface ArcusPosition {
   uPnl: number | null;
   liq: number | null;
   leverage: number | null;
+  /** marginMode ISOLATED (else CROSS). */
+  isolated: boolean;
+  /** The margin held against it: an isolated position's own. */
+  marginUsed: number | null;
 }
 
 /** Balances and open positions (verified shape: `positions` keyed by market id, signed `size`). */
@@ -185,6 +189,8 @@ export async function arcusAccount(address: string, pacer = arcusPacer): Promise
       uPnl: num(p.unrealizedPnl),
       liq: null,
       leverage: num(p.leverage),
+      isolated: String(p.marginMode ?? '').toUpperCase() === 'ISOLATED',
+      marginUsed: num(p.marginUsed),
     }];
   });
   return { positions, equity: num(j.equity) };
