@@ -727,7 +727,8 @@
    layer under what follows it. The text stays centred on the hero's height. */
 .cpy-hero:has(.cpy-whale) {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center;
-  position: relative; z-index: 0; padding-bottom: 0;
+  /* No gap under it: its bottom edge (the surface) is the toolbar's divider line. */
+  position: relative; z-index: 0; padding-bottom: 0; margin-bottom: 0;
 }
 .cpy-hero:has(.cpy-whale) ~ * { position: relative; z-index: 1; }
 .cpy-hero:has(.cpy-whale) ~ .cpy-toolbar { z-index: 2; }
