@@ -1,15 +1,13 @@
 /**
  * The Copy page's hero art (Discover.tsx, in place of the trader card deck): a
- * humpback breaching, drawn in dots like a stipple print - no sea drawn, only the
- * water running off its tail as it comes up.
+ * humpback breaching (drawn from a photo), in dots like a stipple print - no sea
+ * drawn, only the water falling off it where it leaves the surface.
  *
  *   The whale   sampled from a silhouette and a shade map: dense on the belly, the
- *               raised fin and along every edge, thin on its back; the long flat
- *               head has its knobs (tubercles), the mouth, the throat grooves and
- *               an eye, the raised fin a knobbly leading edge, the long fin a
- *               scalloped trailing one; the tail stock narrows to spread flukes
- *               that thin out into loose dots.
- *   The water   a slow trickle of drops off the flukes only, falling and fading.
+ *               flank and along every edge, light on its back and head top; the
+ *               long rostrum with its knobs (tubercles), the mouth, the throat
+ *               grooves and an eye; the pectoral fin with its knobbly leading edge.
+ *   The water   a slow trickle off its back near the surface, spray at its base.
  *
  * Little moves (owner, 2026-10-25): a slow small bob, a faint twinkle, a light
  * give where the pointer passes. Drawn on a canvas (no image file); still under
@@ -17,21 +15,24 @@
  */
 import { useEffect, useRef } from 'react';
 
-/** The silhouette in a 400 x 300 box. */
-const BODY = 'M38 110 C50 100 80 90 112 84 C146 77 176 80 202 90 C254 110 294 150 314 206 C320 222 322 238 322 250 L318 262 C312 264 304 264 298 262 L292 248 C282 218 252 190 210 172 C176 158 140 148 104 138 C80 132 56 124 38 116 Z';
-/** The flukes, spread at the end of the tail stock, dissolving into the water running off them. */
-const FLUKES = 'M302 254 C292 264 278 270 262 274 C278 280 296 279 308 272 C318 280 336 286 354 286 C344 277 332 266 322 254 Z';
-/** The raised fin: a knobbly leading edge (left), a smooth trailing one. */
-const FIN_UP = 'M136 92 C131 84 133 76 136 70 C133 66 136 60 139 56 C137 51 141 46 145 43 C145 38 150 34 155 33 C162 33 166 40 167 50 C169 64 167 80 161 94 C158 101 154 105 149 106 Z';
-/** The long fin: a scalloped trailing edge along its underside. */
-const FIN_LONG = 'M194 88 C238 66 290 52 340 52 C346 58 336 66 322 70 C318 74 310 72 304 76 C298 80 290 78 284 82 C276 86 268 84 260 88 C248 94 230 98 206 104 Z';
+/**
+ * The silhouette in a 400 x 300 box, drawn from a photo of a breaching humpback:
+ * the long rostrum up and to the left, the head's flat top, the back arching down
+ * to where the body leaves the water (bottom right, no tail showing), the throat
+ * and belly beneath.
+ */
+const BODY = 'M44 108 C50 97 66 90 88 87 C120 83 160 81 196 85 C232 89 263 100 290 118 C330 145 362 187 381 234 C389 254 393 268 396 282 L300 282 C292 254 270 224 244 205 C212 185 176 169 140 157 C108 147 80 135 62 125 C54 121 47 115 44 108 Z';
+/** The pectoral fin, reaching up and to the right from behind the head; knobs along its leading (top) edge. */
+const FIN = 'M226 138 C238 118 262 102 288 92 C292 87 298 88 302 85 C306 80 312 81 316 78 C320 74 327 75 331 73 C336 69 343 70 348 69 C356 66 364 66 372 67 C381 67 389 70 391 76 C392 83 386 89 377 93 C346 104 306 121 270 148 Z';
 const W = 400;
 const H = 300;
+/** Where the body leaves the water. */
+const WATERLINE = 282;
 
 interface Dot { x: number; y: number; r: number; a: number; ph: number; sp: number; dx: number; dy: number }
 interface Drop { x: number; y: number; vx: number; vy: number; r: number; life: number; max: number }
 
-/** The whale's dots and where water runs off it (points on its underside and tail). */
+/** The whale's dots, and where water falls off it (the back's lower stretch near the surface). */
 function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
   const c = document.createElement('canvas');
   c.width = W;
@@ -39,74 +40,78 @@ function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
   const g = c.getContext('2d', { willReadFrequently: true });
   if (!g) return { dots: [], drips: [] };
   const body = new Path2D(BODY);
-  const finUp = new Path2D(FIN_UP);
-  const finLong = new Path2D(FIN_LONG);
+  const fin = new Path2D(FIN);
   g.fillStyle = '#000';
   g.fillRect(0, 0, W, H);
-  // The shade map (red channel = density): the back light, the belly dark.
-  const shade = g.createLinearGradient(150, 66, 226, 220);
-  shade.addColorStop(0, 'rgb(38,0,0)');
-  shade.addColorStop(0.5, 'rgb(130,0,0)');
-  shade.addColorStop(1, 'rgb(235,0,0)');
+  // The shade map (red channel = dot density). As in the photo: the back and the
+  // head's top catch the light (sparse), the flank and belly are dark (dense).
+  const shade = g.createLinearGradient(190, 84, 150, 190);
+  shade.addColorStop(0, 'rgb(70,0,0)');
+  shade.addColorStop(0.45, 'rgb(150,0,0)');
+  shade.addColorStop(1, 'rgb(245,0,0)');
   g.fillStyle = shade;
   g.fill(body);
-  g.fillStyle = 'rgb(250,0,0)';
-  g.fill(finUp);
-  g.fillStyle = 'rgb(110,0,0)';
-  g.fill(finLong);
-  const flukes = new Path2D(FLUKES);
-  g.fillStyle = 'rgb(150,0,0)';
-  g.fill(flukes);
   g.save();
   g.clip(body);
-  // Where the fin meets the body, in shadow.
-  const blot = g.createRadialGradient(176, 120, 2, 176, 120, 44);
-  blot.addColorStop(0, 'rgba(255,0,0,0.9)');
-  blot.addColorStop(1, 'rgba(255,0,0,0)');
-  g.fillStyle = blot;
+  // The flank toward the water: dark, thinning where the body is still wet with spray.
+  const flank = g.createLinearGradient(260, 140, 360, 260);
+  flank.addColorStop(0, 'rgba(255,0,0,0)');
+  flank.addColorStop(0.5, 'rgba(255,0,0,0.5)');
+  flank.addColorStop(1, 'rgba(255,0,0,0.2)');
+  g.fillStyle = flank;
   g.fillRect(0, 0, W, H);
-  // The throat grooves: dark lines from the jaw back along the underside.
-  g.strokeStyle = 'rgba(255,0,0,0.85)';
-  g.lineWidth = 1.6;
-  for (let i = 0; i < 7; i++) {
+  // The shadow under the fin's root.
+  const root = g.createRadialGradient(240, 150, 2, 240, 150, 40);
+  root.addColorStop(0, 'rgba(255,0,0,0.95)');
+  root.addColorStop(1, 'rgba(255,0,0,0)');
+  g.fillStyle = root;
+  g.fillRect(0, 0, W, H);
+  // The throat grooves: long lines from the chin back along the underside.
+  g.strokeStyle = 'rgba(255,0,0,0.9)';
+  g.lineWidth = 1.5;
+  for (let i = 0; i < 8; i++) {
     g.beginPath();
-    g.moveTo(52 + i * 3, 117 + i * 2.2);
-    g.bezierCurveTo(84, 124 + i * 2.8, 118, 134 + i * 3, 156 + i * 4, 148 + i * 3.4);
+    g.moveTo(60 + i * 4, 122 + i * 3);
+    g.bezierCurveTo(110, 136 + i * 3.4, 170, 156 + i * 3.4, 236 + i * 3, 196 + i * 3.6);
     g.stroke();
   }
-  // The mouth: from the tip of the head back under the eye.
-  g.lineWidth = 2;
-  g.beginPath();
-  g.moveTo(40, 113);
-  g.bezierCurveTo(66, 116, 96, 118, 124, 124);
-  g.stroke();
-  g.restore();
-  // Toward the flukes the dots thin out, so the tail dissolves into its water.
-  const thin = g.createLinearGradient(0, 228, 0, 290);
-  thin.addColorStop(0, 'rgba(0,0,0,0)');
-  thin.addColorStop(1, 'rgba(0,0,0,0.6)');
-  g.fillStyle = thin;
-  g.fillRect(250, 228, 150, 62);
-  // Every edge drawn darker, so the shape reads crisply.
-  g.strokeStyle = 'rgba(255,0,0,0.9)';
+  // The mouth: from the rostrum's tip back to under the eye.
   g.lineWidth = 2.2;
-  g.stroke(finUp);
-  g.lineWidth = 1.6;
-  g.stroke(finLong);
+  g.beginPath();
+  g.moveTo(46, 110);
+  g.bezierCurveTo(80, 114, 120, 118, 160, 128);
+  g.stroke();
+  // The head's top: light.
+  const top = g.createLinearGradient(0, 84, 0, 104);
+  top.addColorStop(0, 'rgba(0,0,0,0.55)');
+  top.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = top;
+  g.fillRect(40, 80, 200, 26);
+  g.restore();
+  // Where it leaves the water, the last part above the surface thins into spray.
+  const wet = g.createLinearGradient(0, 238, 0, WATERLINE);
+  wet.addColorStop(0, 'rgba(0,0,0,0)');
+  wet.addColorStop(1, 'rgba(0,0,0,0.7)');
+  g.fillStyle = wet;
+  g.fillRect(280, 238, 120, WATERLINE - 238);
+  // The fin: its top light (sparse), its edge drawn dense.
+  g.fillStyle = 'rgb(55,0,0)';
+  g.fill(fin);
+  g.strokeStyle = 'rgba(255,0,0,0.95)';
+  g.lineWidth = 2;
+  g.stroke(fin);
+  // Every edge of the body darker, so the shape reads crisply (not along the surface).
+  g.save();
+  g.clip(new Path2D('M0 0H400V250H0Z'));
   g.lineWidth = 1.8;
   g.stroke(body);
-  g.lineWidth = 1.2;
-  g.stroke(flukes);
-  // The tubercles: knobs along the top of the head, and the eye.
+  g.restore();
+  // The knobs on the head and along the fin's leading edge, and the eye.
   g.fillStyle = 'rgba(255,0,0,1)';
-  for (const [x, y, r] of [[50, 103, 1.9], [62, 97, 2.2], [74, 92, 2.3], [87, 88, 2.2], [100, 85, 2.2], [58, 104, 1.5], [70, 99, 1.7], [83, 94, 1.6], [96, 90, 1.7], [109, 87, 1.5]] as const) {
-    g.beginPath();
-    g.arc(x, y, r, 0, Math.PI * 2);
-    g.fill();
-  }
-  g.beginPath();
-  g.arc(128, 116, 2.6, 0, Math.PI * 2);
-  g.fill();
+  const dotAt = (x: number, y: number, r: number) => { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); };
+  for (const [x, y, r] of [[56, 99, 1.7], [68, 94, 2], [81, 91, 2.1], [95, 89, 2], [109, 88, 1.9], [124, 87, 1.8], [62, 103, 1.4], [75, 98, 1.6], [89, 95, 1.5], [103, 93, 1.6], [118, 92, 1.4]] as const) dotAt(x, y, r);
+  for (const [x, y] of [[296, 86], [309, 80], [322, 76], [336, 72], [351, 68], [366, 67], [380, 68]] as const) dotAt(x, y, 2.3);
+  dotAt(164, 124, 2.8);
 
   const px = g.getImageData(0, 0, W, H).data;
   const density = (x: number, y: number) => px[(Math.floor(y) * W + Math.floor(x)) * 4]! / 255;
@@ -120,16 +125,16 @@ function whale(count: number): { dots: Dot[]; drips: Array<[number, number]> } {
     if (d <= 0 || Math.random() > d) continue;
     dots.push({ x, y, r: 0.5 + Math.random() * 0.7 * (0.5 + d), a: 0.3 + d * 0.7, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
   }
-  // The tail dissolving: loose dots scattered below and beside its end.
-  for (let i = 0; i < count * 0.035; i++) {
+  // The spray it leaves the water through: loose dots around its base, thinning outward.
+  for (let i = 0; i < count * 0.04; i++) {
     const t = Math.random();
-    dots.push({ x: 262 + Math.random() * 92, y: 276 + t * 18, r: 0.5 + Math.random() * 0.7, a: 0.55 * (1 - t) + 0.08, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random(), dx: 0, dy: 0 });
+    dots.push({ x: 288 + Math.random() * 118, y: WATERLINE - 14 + t * 18, r: 0.5 + Math.random() * 0.7, a: 0.5 * (1 - t) + 0.06, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random(), dx: 0, dy: 0 });
   }
-  // Where water runs off: the lowest point of the body in each column from the belly to the tail.
+  // Where water falls off: the back's lower stretch near the surface.
   const drips: Array<[number, number]> = [];
-  for (let x = 262; x <= 354; x += 2) {
-    for (let y = H - 1; y > 230; y--) {
-      if (g.isPointInPath(flukes, x, y) || g.isPointInPath(body, x, y)) { drips.push([x, y]); break; }
+  for (let y = 200; y <= WATERLINE - 4; y += 2) {
+    for (let x = W - 1; x > 250; x--) {
+      if (g.isPointInPath(body, x, y)) { drips.push([x, y]); break; }
     }
   }
   return { dots, drips };
