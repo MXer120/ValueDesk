@@ -94,7 +94,7 @@ const QUEUE_CAP = 400;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
 
-/** Every coin's liquidation levels (liq_now) this often; a snapshot (liq_hist) every LIQ_STEP_MS, for SoDEX's perps and this many more coins. */
+/** Every coin's liquidation levels (liq_now) this often; a snapshot (liq_hist) every LIQ_STEP_MS. */
 /** Every 2 minutes: a pass over ~90k books took 14-26 s of a disk-bound loop (2026-10-25); the edge serves the row in between. */
 /** The liquidation backlog takes the reads above this many books (updateLiqBoost)... */
 export const LIQ_BOOST_MIN = 300;
@@ -106,7 +106,6 @@ const LIVE_TICK_MS = 1_000;
 const LIVE_SLICE = 5_000;
 export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
-const LIQ_COINS = 30;
 /** Kept 30 days; past 3 days only the hourly ones. */
 const LIQ_KEEP_MS = 30 * DAY_MS;
 const LIQ_THIN_MS = 3 * DAY_MS;
@@ -401,7 +400,36 @@ export class CohortTracker {
     priceOf: (venue, symbol) => this.marks.get(`${venue}|${symbol}`) ?? null,
     tiersOf: (venue, symbol) => marketsNow(venue)?.tiers.get(symbol) ?? null,
     priceOfCoin: (coin) => this.coinPx.get(coin)?.px ?? null,
+    wanted: (coin) => this.sodexCoins.has(coin),
   });
+  /**
+   * The coins the heatmap covers: every perp SoDEX lists (liqCoin of its symbols, so
+   * Hyperliquid's kPEPE counts as 1000PEPE). The owner, 2026-10-25: maps for SoDEX's
+   * coins only. A wallet's positions in other coins still count toward its margin.
+   */
+  private sodexCoins = new Set<string>();
+
+  /** SoDEX's list, as its markets read gives it; books holding a coin new to it are priced in. */
+  private refreshSodexCoins(): void {
+    const tiers = marketsNow('sodex')?.tiers;
+    if (!tiers?.size) return;
+    const next = new Set([...tiers.keys()].map(liqCoin));
+    const added = [...next].filter((c) => !this.sodexCoins.has(c));
+    if (!added.length && next.size === this.sodexCoins.size) return;
+    this.sodexCoins = next;
+    const fresh = new Set(added);
+    for (const v of VENUES) {
+      for (const [a, b] of this.books.get(v) ?? []) {
+        for (const sym of b.pos.keys()) if (fresh.has(liqCoin(sym))) { this.live.touch(v, a); break; }
+      }
+    }
+  }
+
+  /** Whether a book holds any coin the heatmap covers. */
+  private holdsSodexCoin(b: Book): boolean {
+    for (const sym of b.pos.keys()) if (this.sodexCoins.has(liqCoin(sym))) return true;
+    return false;
+  }
   private feed = new LiqFeedServer(() => this.live.resendAll());
   /** Every book priced into the engine once since the start. */
   private liveReady = false;
@@ -1073,7 +1101,7 @@ export class CohortTracker {
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
         // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
         // their liquidations sit nearest the price, where the heatmap is read.
-        if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss)) {
+        if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss) && this.holdsSodexCoin(book)) {
           push(liqBacklogPrio(notional(book), book.collateral ?? book.equity));
           liqDue++;
         }
@@ -1215,8 +1243,7 @@ export class CohortTracker {
    * Every LIQ_NOW_MS: every coin's levels, as the live engine holds them, to the
    * index file (liq_now, deflated: what the API answers from when the live feed is
    * not there). Every LIQ_STEP_MS also a snapshot for the historical view
-   * (liq_hist) of every coin SoDEX lists as a perp and of the LIQ_COINS others with
-   * the most open notional tracked.
+   * (liq_hist) of every coin SoDEX lists as a perp (the only coins the heatmap covers).
    */
   /** A venue's price for a symbol: its coin's reference price when the venue ranks first among those seen. */
   private noteCoinPx(key: string, px: number): void {
@@ -1231,6 +1258,9 @@ export class CohortTracker {
   /** Every LIVE_TICK_MS: price what changed (a bounded slice), and send the changes to the API. */
   private liveTick(): void {
     const t0 = Date.now();
+    this.refreshSodexCoins();
+    // Nothing is bucketed before SoDEX's list is known (the first seconds after a start).
+    if (!this.sodexCoins.size) return;
     // Every coin whole once a minute: the deltas leave out moves under 1% (live.ts SEND_MOVE: 1%), this puts the API's copy back to exact.
     if (t0 - this.liveWholeAt >= 60_000) { this.liveWholeAt = t0; this.live.resendAll(); }
     const left = this.live.work(LIVE_SLICE);
@@ -1248,15 +1278,13 @@ export class CohortTracker {
     try {
       // Until every book is priced into the engine once (seconds after a start), the last rows stand.
       if (!this.liveReady) return;
-      const sodexCoins = new Set<string>();
-      for (const sym of (await venueMarkets('sodex').catch(() => null))?.tiers.keys() ?? []) sodexCoins.add(liqCoin(sym));
       const rows = this.live.rows();
       const s = this.d.store;
       s.putLiqNow(now, [...rows].map(([coin, row]): [string, Uint8Array] => [coin, deflateRawSync(JSON.stringify(row))]));
       this.lastNowAt = now;
       const t = Math.floor(now / LIQ_STEP_MS) * LIQ_STEP_MS;
       if (t > this.lastLiqT) {
-        const keep = new Set([...sodexCoins, ...this.live.ranked().slice(0, LIQ_COINS)]);
+        const keep = this.sodexCoins;
         const hist: Array<[string, string]> = [];
         for (const coin of keep) {
           const row = rows.get(coin);

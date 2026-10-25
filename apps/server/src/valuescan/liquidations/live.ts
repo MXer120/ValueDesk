@@ -100,6 +100,8 @@ export class LiqLive {
     tiersOf: (venue: Venue, symbol: string) => Tiers | null;
     /** A coin's reference price (Hyperliquid's first). */
     priceOfCoin: (coin: string) => number | null;
+    /** The coins kept (the ones SoDEX lists); others are priced as part of an account's margin, never bucketed. */
+    wanted?: (coin: string) => boolean;
   }) {}
 
   /** The account changed (a print, a read): re-priced at the next flush. */
@@ -276,6 +278,7 @@ export class LiqLive {
     const entries: Entry[] = [];
     ps.forEach((p, j) => {
       const coinName = liqCoin(p.symbol);
+      if (this.o.wanted && !this.o.wanted(coinName)) return;
       const c = this.coin(coinName);
       if (!c) return;
       let h = this.holders.get(coinName);
