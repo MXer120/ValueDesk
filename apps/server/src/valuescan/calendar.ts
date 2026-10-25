@@ -17,6 +17,8 @@
  * parsers below are pure and covered by test/econ-calendar.test.ts.
  */
 import { sosoValueJson, newsKey } from './sosovalue/news.js';
+// Used inside functions only: releases.ts imports this file too.
+import { RELEASE_FIELDS, type ReleaseField } from './releases.js';
 
 export type CalendarSource = 'fed' | 'bls' | 'bea' | 'sosovalue';
 export type Importance = 'high' | 'medium' | 'low';
@@ -39,7 +41,11 @@ export interface CalendarEvent {
   source: CalendarSource;
   /** The publisher's page for it. */
   href: string;
+  /** The figures its result card shows (releases.ts RELEASE_FIELDS); official releases only. */
+  fields?: ReleaseField[];
 }
+
+const fieldsOf = (short: string): { fields?: ReleaseField[] } => (RELEASE_FIELDS[short] ? { fields: RELEASE_FIELDS[short]!.map((f) => ({ ...f })) } : {});
 
 export const SOURCE_NAME: Record<CalendarSource, string> = {
   fed: 'Federal Reserve',
@@ -127,6 +133,7 @@ export function parseFomc(html: string): CalendarEvent[] {
         country: 'US',
         source: 'fed',
         href: FED_URL,
+        ...fieldsOf('FOMC'),
       });
     }
   }
@@ -236,6 +243,7 @@ export function pickReleases(events: readonly IcsEvent[], source: 'bls' | 'bea')
       country: 'US',
       source,
       href: p.href,
+      ...fieldsOf(p.short),
     });
   }
   return out;

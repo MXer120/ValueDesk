@@ -30,6 +30,8 @@ const CONNECT_SRC = [
   'https://rpc.valuechain.xyz', 'https://arb1.arbitrum.io', 'https://mainnet.base.org',
   'https://ethereum-rpc.publicnode.com', 'https://bsc-dataseed.bnbchain.org',
   'https://polygon-bor-rpc.publicnode.com', 'https://polygon.drpc.org', 'https://1rpc.io',
+  // The Fed live widget: the Federal Reserve's broadcast (Brightcove: manifests, segments).
+  'https://*.boltdns.net', 'https://*.brightcovecdn.com',
 ];
 
 /** The inline script of apps/web/public/scan/index.html (the redirect for old links). */
@@ -39,10 +41,12 @@ const sitePolicy = (scriptSrc) => [
   "default-src 'self'",
   `script-src ${scriptSrc}`,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https://api.web3modal.org",
+  "img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net",
   "font-src 'self'",
   'frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com',
   "worker-src 'self'",
+  // The Fed live widget's player (Media Source Extensions).
+  "media-src 'self' blob:",
   `connect-src ${CONNECT_SRC.join(' ')}`,
   "form-action 'none'",
   "base-uri 'none'",
@@ -54,9 +58,10 @@ const sitePolicy = (scriptSrc) => [
 
 export const CSP = {
   /** Every site response, /assets/*.js included (the SharedWorker reads it from its own script). */
-  site: sitePolicy("'self'"),
+  // wasm-unsafe-eval: WebAssembly only (the Fed live widget's speech model), never eval.
+  site: sitePolicy("'self' 'wasm-unsafe-eval'"),
   /** /scan/*: the site policy plus the hash of the one inline script. */
-  scan: sitePolicy(`'self' ${SCAN_SCRIPT_HASH}`),
+  scan: sitePolicy(`'self' 'wasm-unsafe-eval' ${SCAN_SCRIPT_HASH}`),
   /** /logos/* and /addrbook/*: third-party SVGs - nothing may run in one opened directly. */
   images: "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
 };

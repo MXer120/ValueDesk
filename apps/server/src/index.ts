@@ -460,6 +460,14 @@ setTimeout(() => {
     .catch((e) => app.log.warn({ err: e }, 'cohorts warm-up failed'));
 }, 3_000).unref();
 
+// Official economic results at the release second (valuescan/releases.ts): one
+// watcher in this process, hosted or not; idle but for a minute's look at the
+// calendar outside the minutes around a release. VALUESCAN_RELEASES=0 turns it off.
+if (process.env.VALUESCAN_RELEASES !== '0') {
+  const { startReleaseWatcher } = await import('./valuescan/releases.js');
+  startReleaseWatcher({ log: app.log });
+}
+
 // The leaderboard indexer (src/indexer): top and worst hundreds by PnL for
 // every window, with every board member's fills. It runs on a worker thread
 // so a board rebuild never holds an API request. Production runs it as its

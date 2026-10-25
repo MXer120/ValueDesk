@@ -60,12 +60,13 @@ matter in production:
 
 ```
 default-src 'self';
-script-src 'self';
+script-src 'self' 'wasm-unsafe-eval';
 style-src 'self' 'unsafe-inline';
-img-src 'self' data: blob: https://api.web3modal.org;
+img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
 font-src 'self';
 frame-src https://verify.walletconnect.org;
 worker-src 'self';
+media-src 'self' blob:;
 connect-src 'self'
   https://mainnet-gw.sodex.dev wss://mainnet-gw.sodex.dev
   https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
@@ -79,6 +80,7 @@ connect-src 'self'
   https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
   https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
   https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
+  https://*.boltdns.net https://*.brightcovecdn.com
   __API_ORIGIN__;
 form-action 'none';
 base-uri 'none';
@@ -101,6 +103,15 @@ upgrade-insecure-requests
   (the self-hosted setup in Copy) before relying on it.
 - **`wss://api.hyperliquid.xyz`** (added 2026-10-23): the browser copier's `userFills`
   stream.
+- **The Fed live widget** (added 2026-10-25, `apps/web/src/components/fedlive`):
+  `https://*.boltdns.net https://*.brightcovecdn.com` in `connect-src` (and the first in
+  `img-src`, for the poster) - Brightcove, the Federal Reserve's video host, serves the
+  broadcast's playlists and segments from per-region hosts under these two domains, so these
+  are the one host wildcard here (never a scheme wildcard). `media-src 'self' blob:` - the
+  player feeds the `<video>` through Media Source Extensions. `'wasm-unsafe-eval'` in
+  `script-src` - the in-browser speech model runs as WebAssembly; it allows compiling
+  WebAssembly only, not `eval` (`'unsafe-eval'` stays forbidden). The model and its runtime
+  are served from the site itself (`deploy/vercel/fetch-model.sh`), so no model host is listed.
 - **Testnet hosts:** a deployment that can only ever run mainnet may drop the testnet ones.
 - **Length:** a header is one line; join the policy with single spaces. CloudFront limits a
   response headers policy's CSP value to 1783 characters, and this policy is about 1,020.

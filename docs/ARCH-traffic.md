@@ -314,7 +314,9 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`,
   `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`),
   `/api/vs/calendar` (the economic calendar: federalreserve.gov, bls.gov, bea.gov and SoSoValue,
-  each read at most twice a day)
+  each read at most twice a day), `/api/vs/calendar/results` (its releases' official figures,
+  read by one watcher in the API process from the publishers' pages at the release second) and
+  `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuescan/releases.ts)
   (index, drop their `provisional`); `/api/feed/account`;
   `/api/external/maintenance/status`, `/api/external/announcements(/:id)` (until
   they go direct).

@@ -1,0 +1,54 @@
+/* The Fed live widget (FedLive.tsx): a header, then the picture beside the
+   transcript (under it when the panel is narrow). Lines still ahead of the
+   picture are bright with their countdown; said lines dim. */
+.fl { display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; border-radius: var(--radius-card); container-type: inline-size; }
+.fl--gate { align-items: center; justify-content: center; padding: 16px; }
+.fl__head { display: flex; flex: none; align-items: center; gap: 8px; height: 44px; padding: 0 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.fl__badge { flex: none; padding: 2px 7px; border-radius: 5px; background: rgba(255, 255, 255, 0.08); color: var(--muted); font-size: var(--fs-micro); font-weight: 700; letter-spacing: 0.06em; }
+.fl__badge.is-live { background: color-mix(in srgb, var(--neg) 22%, transparent); color: var(--neg); }
+.fl__name { min-width: 0; overflow: hidden; color: var(--text); font-size: var(--fs-xs); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.fl__lead { flex: none; color: var(--pos); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.fl__spacer { flex: 1; }
+.fl__seg { display: inline-flex; flex: none; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); }
+.fl__seg > button { height: 24px; min-height: 0; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: var(--fs-micro); font-weight: 500; cursor: pointer; }
+.fl__seg > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+.fl__seg > button:disabled { cursor: default; }
+.fl__btn { flex: none; height: 28px; min-height: 0; padding: 0 12px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; background: rgba(255, 255, 255, 0.05); color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; }
+.fl__btn.is-go { border-color: transparent; background: var(--text); color: var(--bg); }
+.fl__btn:disabled { opacity: 0.45; cursor: default; }
+
+.fl__body { display: flex; flex: 1 1 auto; min-height: 0; }
+.fl__pic { position: relative; flex: 1 1 58%; min-width: 0; background: #000; }
+.fl__pic video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.fl__over { position: absolute; inset: auto 0 0 0; padding: 14px 16px; background: linear-gradient(transparent, rgba(0, 0, 0, 0.82)); color: var(--muted); font-size: var(--fs-xs); line-height: 1.5; pointer-events: none; }
+.fl__over p { margin: 0; }
+.fl__over b { color: var(--text); font-variant-numeric: tabular-nums; }
+.fl__side { display: flex; flex: 1 1 42%; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid rgba(255, 255, 255, 0.06); }
+@container (max-width: 640px) {
+  .fl__body { flex-direction: column; }
+  .fl__pic { flex: none; aspect-ratio: 16 / 9; }
+  .fl__side { flex: 1 1 auto; border-left: 0; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+}
+
+.fl__tally { display: flex; flex: none; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; }
+.fl__chip { padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.05); color: var(--muted); font-size: var(--fs-micro); }
+.fl__chip b { margin-left: 3px; color: var(--text); font-variant-numeric: tabular-nums; }
+.fl__chip.is-dove b { color: var(--pos); }
+.fl__chip.is-hawk b { color: var(--neg); }
+.fl__dev { margin-left: auto; color: var(--dim); font-size: var(--fs-micro); }
+.fl__status, .fl__error { margin: 0 10px 8px; color: var(--muted); font-size: var(--fs-xs); }
+.fl__error { color: var(--neg); }
+.fl__bar { display: block; height: 3px; margin-top: 6px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.fl__bar i { display: block; height: 100%; background: var(--text); transition: width 200ms; }
+
+.fl__lines { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0 6px 10px; overflow-y: auto; list-style: none; }
+.fl__lines li { display: flex; gap: 10px; padding: 7px 6px; border-radius: 8px; font-size: var(--fs-sm, 13px); line-height: 1.5; }
+.fl__lines li + li { margin-top: 2px; }
+.fl__lines li.is-ahead { background: rgba(255, 255, 255, 0.045); color: var(--text); }
+.fl__lines li.is-said { color: var(--muted); }
+.fl__when { flex: none; width: 46px; padding-top: 1px; color: var(--dim); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.fl__lines li.is-ahead .fl__when { color: var(--pos); font-weight: 600; }
+.fl__text { min-width: 0; }
+.fl__text mark { padding: 0 2px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); color: var(--text); font-weight: 600; }
+.fl__text mark.is-dove { background: color-mix(in srgb, var(--pos) 20%, transparent); color: var(--pos); }
+.fl__text mark.is-hawk { background: color-mix(in srgb, var(--neg) 20%, transparent); color: var(--neg); }

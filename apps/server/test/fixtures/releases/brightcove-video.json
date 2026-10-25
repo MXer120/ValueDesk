@@ -1,0 +1,86 @@
+{
+ "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/jit/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/main/640x360/14m21s237ms/match/image.jpg",
+ "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/jit/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/main/160x90/14m21s237ms/match/image.jpg",
+ "name": "FOMC Press Conference September 16, 2026",
+ "duration": 1722475,
+ "account_id": "66043936001",
+ "id": "6405157968112",
+ "tags": [
+  "federal reserve",
+  "federal reserve board",
+  "fomc",
+  "fomc press conference",
+  "kevin warsh",
+  "chairman warsh",
+  "featured"
+ ],
+ "custom_fields": {
+  "actualdatetext": "September 16, 2026",
+  "primarycategory": "FOMC Press Conferences",
+  "transcriptlinkurl": "https://www.federalreserve.gov/mediacenter/files/FOMCpresconf20260916.pdf",
+  "transcripttext": "Transcript (PDF)"
+ },
+ "sources": [
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/10s/master.m3u8?fastly_token=REDACTED",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/10s/master.m3u8?fastly_token=REDACTED",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/6s/manifest.mpd?fastly_token=REDACTED",
+   "type": "application/dash+xml"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/6s/manifest.mpd?fastly_token=REDACTED",
+   "type": "application/dash+xml"
+  }
+ ],
+ "text_tracks": [
+  {
+   "id": "0f3a034b-b968-4513-872f-66507b131c8d",
+   "account_id": "66043936001",
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/0f3a034b-b968-4513-872f-66507b131c8d/text.vtt?fastly_token=REDACTED",
+   "srclang": "en",
+   "label": "en",
+   "kind": "captions",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": [
+    {
+     "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/0f3a034b-b968-4513-872f-66507b131c8d/text.vtt?fastly_token=REDACTED"
+    },
+    {
+     "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/0f3a034b-b968-4513-872f-66507b131c8d/text.vtt?fastly_token=REDACTED"
+    }
+   ],
+   "in_band_metadata_track_dispatch_type": "",
+   "default": false
+  },
+  {
+   "id": null,
+   "account_id": "66043936001",
+   "src": "http://manifest.prod.boltdns.net/thumbnail/v1/66043936001/9ab2a73b-07b8-4847-9f11-95551d672d0b/de1a9a00-b6cf-4225-a010-228813869cd4/thumbnail.webvtt?fastly_token=REDACTED",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 449
+  }
+ ]
+}

@@ -269,12 +269,13 @@ Resources:
             Override: true
             ContentSecurityPolicy: >-
               default-src 'self';
-              script-src 'self';
+              script-src 'self' 'wasm-unsafe-eval';
               style-src 'self' 'unsafe-inline';
-              img-src 'self' data: blob: https://api.web3modal.org;
+              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
               font-src 'self';
               frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
               worker-src 'self';
+              media-src 'self' blob:;
               connect-src 'self'
               https://mainnet-gw.sodex.dev wss://mainnet-gw.sodex.dev
               https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
@@ -287,7 +288,8 @@ Resources:
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io;
+              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
+              https://*.boltdns.net https://*.brightcovecdn.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
@@ -339,12 +341,13 @@ Resources:
             Override: true
             ContentSecurityPolicy: >-
               default-src 'self';
-              script-src 'self' 'sha256-bXJtqdhzu4xrNuZI44nF3t24LtnovVLjGKp0GValFLk=';
+              script-src 'self' 'wasm-unsafe-eval' 'sha256-bXJtqdhzu4xrNuZI44nF3t24LtnovVLjGKp0GValFLk=';
               style-src 'self' 'unsafe-inline';
-              img-src 'self' data: blob: https://api.web3modal.org;
+              img-src 'self' data: blob: https://api.web3modal.org https://*.boltdns.net;
               font-src 'self';
               frame-src https://verify.walletconnect.org https://www.youtube.com https://player.twitch.tv https://player.kick.com https://player.vimeo.com;
               worker-src 'self';
+              media-src 'self' blob:;
               connect-src 'self'
               https://mainnet-gw.sodex.dev wss://mainnet-gw.sodex.dev
               https://testnet-gw.sodex.dev wss://testnet-gw.sodex.dev
@@ -357,7 +360,8 @@ Resources:
               https://main-scan.valuechain.xyz
               https://rpc.valuechain.xyz https://arb1.arbitrum.io https://mainnet.base.org
               https://ethereum-rpc.publicnode.com https://bsc-dataseed.bnbchain.org
-              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io;
+              https://polygon-bor-rpc.publicnode.com https://polygon.drpc.org https://1rpc.io
+              https://*.boltdns.net https://*.brightcovecdn.com;
               form-action 'none';
               base-uri 'none';
               object-src 'none';
