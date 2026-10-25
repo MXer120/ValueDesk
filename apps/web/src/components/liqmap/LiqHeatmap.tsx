@@ -335,7 +335,21 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
   const cum = useMemo(() => cumulative(h, unit), [h, unit]);
   const W = Math.max(1, w - M.l - M.r);
   const H = Math.max(1, ht - M.t - M.b);
-  const win = view ?? auto;
+  // Zoom and pan stay between 0 and the highest short liquidation (or a little past the price).
+  const top = useMemo(() => {
+    let t = (h.price ?? 0) * 1.1;
+    for (const b of h.buckets) if (b[2] > 0) t = Math.max(t, b[0] + h.step);
+    return t;
+  }, [h]);
+  const clamp = ([a, b]: [number, number]): [number, number] => {
+    const span = Math.min(b - a, top);
+    let lo2 = a;
+    let hi2 = a + span;
+    if (lo2 < 0) { lo2 = 0; hi2 = span; }
+    if (hi2 > top) { hi2 = top; lo2 = top - span; }
+    return [lo2, hi2];
+  };
+  const win = view ?? (auto && clamp(auto));
   const p = h.price!;
   const [lo, hi] = win ?? [p * 0.5, p * 1.5];
   const shown = h.buckets.filter((b) => b[0] + h.step > lo && b[0] < hi);
@@ -359,21 +373,28 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
   };
   const longPath = path(cum.long, 'lo');
   const shortPath = path(cum.short, 'hi');
-  const zoom = (f: number, at = (lo + hi) / 2) => setView(zoomAt([lo, hi], at, f));
+  /** Zoom by `f` around a point `frac` of the way across the window (functional: fast wheel ticks each count). */
+  const zoom = (f: number, frac = 0.5) => setView((v) => {
+    const [a, b] = v ?? [lo, hi];
+    return clamp(zoomAt([a, b], a + frac * (b - a), f));
+  });
   useWheel(el, (e) => {
     const r = el!.getBoundingClientRect();
     const cx = e.clientX - r.left;
     const f = wheelFactor(e);
     if (cx < M.l) setBarMax(maxBar * f);
     else if (cx > M.l + W) setCumMax(maxCum * f);
-    else zoom(f, priceAt(cx));
+    else zoom(f, (cx - M.l) / W);
   });
   const drag = useDrag((dx, dy, start) => {
     setHover(null);
     if (start.x < M.l) { setBarMax(Math.max(1e-12, maxBar * Math.exp(dy / 150))); return; }
     if (start.x > M.l + W) { setCumMax(Math.max(1e-12, maxCum * Math.exp(dy / 150))); return; }
-    const d = (dx / W) * (hi - lo);
-    setView([lo - d, hi - d]);
+    setView((v) => {
+      const [a, b] = v ?? [lo, hi];
+      const d = (dx / W) * (b - a);
+      return clamp([a - d, b - d]);
+    });
   }, (cx) => {
     if (cx < M.l || cx > M.l + W) return;
     const { from, b } = nearestBucket(h, shown, priceAt(cx), (10 / W) * (hi - lo));
@@ -443,7 +464,7 @@ function LiveView({ h, unit, onPick, pick }: { h: Heat; unit: Unit; onPick: (p: 
           )}
         </svg>
       )}
-      <ZoomButtons onIn={() => zoom(0.7, p >= lo && p <= hi ? p : undefined)} onOut={() => zoom(1 / 0.7, p >= lo && p <= hi ? p : undefined)} onReset={reset} hint="Wheel zooms the price, drag pans; wheel or drag on a side axis scales it." />
+      <ZoomButtons onIn={() => zoom(0.7, p >= lo && p <= hi ? (p - lo) / (hi - lo) : 0.5)} onOut={() => zoom(1 / 0.7, p >= lo && p <= hi ? (p - lo) / (hi - lo) : 0.5)} onReset={reset} hint="Wheel zooms the price, drag pans; wheel or drag on a side axis scales it." />
       {hover !== null && !drag.dragging() && (
         <div className="lqm-tip" style={{ left: Math.min(w - 210, Math.max(0, x(hover) + 12)), top: M.t + 6 }}>
           <b>{fmtPx(hover)} – {fmtPx(hover + h.step)}</b>
