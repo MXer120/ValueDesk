@@ -14,6 +14,10 @@
 # Elastic IP 54.150.61.169 by its sslip.io name (deploy/aws/ec2/.out/state.tokyo.env).
 VALUESCAN_ORIGIN=54-150-61-169.sslip.io
 
+# The live liquidation heatmap's WebSocket: straight to the instance (Vercel's functions hold no
+# socket); Caddy passes this one path without the origin secret (deploy/server/caddy/Caddyfile.template).
+VITE_LIQ_WS_URL=wss://54-150-61-169.sslip.io/ws/liq
+
 VITE_WALLETCONNECT_PROJECT_ID=3a5409a71d931809f4c0838b7a7d56fd
 
 # ValueDesk's SoDEX builder account; 1.5 bp per order, 2.5 bp ceiling (the copy

@@ -38,7 +38,8 @@ import { canMoveFunds } from './signing/actions.js';
 import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
 import { KeystoreError } from './keystore.js';
 import * as ks from './keystore.js';
-import { isAllowedOrigin } from './origin.js';
+import { isAllowedOrigin, isSiteOrigin } from './origin.js';
+import { liqWsRoute } from './routes/liqWs.js';
 import { CHAIN } from './sodex/chain.js';
 import { localToken, localTokenPath, tokenMatches, LOCAL_TOKEN_HEADER, TOKEN_REQUIRED } from './localToken.js';
 import { ElevationError, revokeAllElevations } from './elevation.js';
@@ -91,7 +92,8 @@ await app.register(perfPlugin);
 if (!SERVER_SIGNING) installServerSigningGate(app);
 // The hub is a local-only feature: hosted, the web opens its own streams.
 // Client messages are small subscribe/unsubscribe ops; 64 KiB is far above them.
-if (!HOSTED) await app.register(websocket, { options: { maxPayload: 64 * 1024 } });
+// The hub is local-only (below); hosted mode serves one WebSocket, the live liquidation heatmap (routes/liqWs.ts).
+await app.register(websocket, { options: { maxPayload: HOSTED ? 4 * 1024 : 64 * 1024 } });
 
 /** One error shape for the whole API, with an actionable hint where we have one. */
 app.setErrorHandler((err, _req, reply) => {
@@ -207,6 +209,9 @@ await app.register(builderRoutes);
 await app.register(foldersRoutes);
 
 // --- browser websocket -------------------------------------------------------
+
+// The live liquidation heatmap: public, read-only; the site's own origins only (hosted), or the local ones.
+liqWsRoute(app, (origin) => (HOSTED ? isSiteOrigin(origin, SITE_ORIGINS) : isAllowedOrigin(origin, ALLOWED_ORIGINS)));
 
 if (!HOSTED) app.get('/ws', { websocket: true }, (socket, req) => {
   const origin = req.headers.origin;

@@ -1,0 +1,108 @@
+/**
+ * The liquidation heatmap, live: one WebSocket to the API's /ws/liq (server
+ * routes/liqWs.ts) per widget. It sends the whole heatmap on subscribing and every
+ * 30 s, and the changed buckets every second in between; this keeps them merged
+ * into one heatmap in the API's own shape, so the widget draws it exactly as it
+ * draws an HTTP answer.
+ *
+ * In production the socket goes straight to the instance (VITE_LIQ_WS_URL: Vercel's
+ * functions hold no socket); in dev through Vite's /ws proxy to the local API.
+ * While it is not connected the widget polls over HTTP instead (`connected`).
+ */
+import { useEffect, useRef, useState } from 'react';
+import type { LiqHeatmap } from '@sign/indexer/liqRead.js';
+import type { Venue } from '../../vsApi';
+
+type Row = LiqHeatmap['buckets'][number];
+
+/** Where the socket goes. */
+export function liqWsUrl(): string | null {
+  const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+  const set = env?.VITE_LIQ_WS_URL?.trim();
+  if (set) return set;
+  if (typeof location === 'undefined') return null;
+  // Dev: the Vite server proxies /ws to the local API (vite.config.ts).
+  if (!env?.DEV) return null;
+  return `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/liq`;
+}
+
+/** A delta frame merged into the heatmap held (exported for tests). */
+export function mergeDelta(h: LiqHeatmap, d: { at: number; p: number; b: Row[]; cov?: Partial<Record<Venue, number[]>> }): LiqHeatmap {
+  const by = new Map<number, Row>(h.buckets.map((r) => [r[0], r]));
+  for (const r of d.b) {
+    if (!r[3] && !r[4]) by.delete(r[0]);
+    else by.set(r[0], r);
+  }
+  const coverage = { ...h.coverage };
+  for (const [v, c] of Object.entries(d.cov ?? {}) as Array<[Venue, number[]]>) {
+    const was = coverage[v];
+    if (was) coverage[v] = { ...was, long: c[0]!, short: c[1]!, longKnown: c[2]!, shortKnown: c[3]!, positions: c[4]! };
+  }
+  return { ...h, at: d.at, price: d.p, buckets: [...by.values()].sort((a, b) => a[0] - b[0]), coverage };
+}
+
+export function useLiveHeat(coin: string, venues: readonly Venue[], on: boolean, k = 5): { data: LiqHeatmap | null; connected: boolean; k: number } {
+  const [data, setData] = useState<LiqHeatmap | null>(null);
+  /** The width (server buckets per bar) the data held is summed to. */
+  const [dataK, setDataK] = useState(1);
+  const [connected, setConnected] = useState(false);
+  const want = useRef({ coin, venues, k });
+  want.current = { coin, venues, k };
+  const ws = useRef<WebSocket | null>(null);
+  const key = `${coin}|${venues.join(',')}`;
+  const subKey = `${key}|${k}`;
+
+  // One socket for the widget's life; it resubscribes when the coin or the venues change.
+  useEffect(() => {
+    const url = on ? liqWsUrl() : null;
+    if (!url) return;
+    let closed = false;
+    let backoff = 1_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const open = () => {
+      const s = new WebSocket(url);
+      ws.current = s;
+      s.onopen = () => {
+        backoff = 1_000;
+        setConnected(true);
+        s.send(JSON.stringify({ op: 'sub', coin: want.current.coin, venues: want.current.venues, k: want.current.k }));
+      };
+      s.onmessage = (ev) => {
+        let m: { t?: string; coin?: string } & Record<string, unknown>;
+        try { m = JSON.parse(String(ev.data)); } catch { return; }
+        if (m.coin !== want.current.coin) return;
+        if (m.t === 's') {
+          const { t: _t, live: _l, k: sk, ...heat } = m as unknown as LiqHeatmap & { t: string; live: boolean; k?: number };
+          setDataK(Number(sk) || 1);
+          setData(heat);
+        } else if (m.t === 'd') {
+          setData((h) => (h && h.coin === m.coin ? mergeDelta(h, m as never) : h));
+        }
+      };
+      s.onclose = () => {
+        if (ws.current === s) ws.current = null;
+        setConnected(false);
+        if (closed) return;
+        timer = setTimeout(open, backoff);
+        backoff = Math.min(30_000, backoff * 2);
+      };
+      s.onerror = () => s.close();
+    };
+    open();
+    return () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      ws.current?.close();
+      ws.current = null;
+      setConnected(false);
+    };
+  }, [on]);
+
+  useEffect(() => {
+    setData((h) => (h && h.coin === coin && h.venues.join(',') === venues.join(',') ? h : null));
+    const s = ws.current;
+    if (s?.readyState === 1) s.send(JSON.stringify({ op: 'sub', coin, venues, k }));
+  }, [subKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { data: data && data.coin === coin ? data : null, connected, k: dataK };
+}

@@ -59,6 +59,23 @@ __ORIGIN_DOMAIN__ {
 		header X-Origin-Verify {$VALUESCAN_ORIGIN_SECRET_2}
 	}
 
+	# THE ONE PATH WITHOUT THE SECRET: the live liquidation heatmap's WebSocket
+	# (apps/server/src/routes/liqWs.ts). Browsers open it here directly - Vercel's
+	# functions hold no socket - so it cannot carry the secret. It is read-only public
+	# data; the API checks the site Origin, allows one subscription per connection and
+	# a dozen connections per address. That address is the viewer's own: whatever
+	# X-Forwarded-For it sent is replaced (trusted_proxies above would keep it, and
+	# a client could then choose its own limit key).
+	@liqws path /ws/liq
+	handle @liqws {
+		reverse_proxy 127.0.0.1:8797 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Viewer-Country
+			lb_try_duration 15s
+			lb_try_interval 250ms
+		}
+	}
+
 	handle @edge {
 		# Past the gate, by path. Nested handle blocks are mutually exclusive like
 		# the outer ones: the first that matches is the only one that runs.

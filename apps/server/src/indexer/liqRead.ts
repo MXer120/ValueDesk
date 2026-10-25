@@ -22,6 +22,7 @@ import { venueMarkets, type VenueMarkets } from '../valuescan/liquidations/rules
 import { shownLabel } from '../valuescan/labels.js';
 import { cohortBooksNow } from './read.js';
 import { reader } from './reader.js';
+import { liqFeed } from './liqFeed.js';
 import { LIQ_ACC_META } from './cohortTracker.js';
 
 const PRICE_ORDER: readonly Venue[] = ['hyperliquid', 'tradexyz', 'lighter', 'sodex', 'arcus'];
@@ -213,12 +214,19 @@ function nowRow(coin: string): { at: number; row: LiqNow | null } | null {
   return out;
 }
 
-/** A coin's liquidation levels over the venues asked for, from the indexer's minute row. */
-export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promise<LiqHeatmap | null> {
-  const got = nowRow(coin);
-  if (!got) return null;
-  const row = got.row;
-  const markets = new Map(await Promise.all(venues.map(async (v) => [v, await venueMarkets(v, { oi: true }).catch(() => null)] as const)));
+/** One coin's levels on one venue, from the live feed or a minute row. */
+interface VenueSrc {
+  b: Iterable<[number, number, number, number, number]>;
+  c: ArrayLike<number>;
+  o: ArrayLike<number>;
+}
+
+/** The heatmap over the venues asked for, from one source's per-venue levels. */
+export function heatOf(
+  coin: string, venues: readonly Venue[],
+  src: { at: number; p: number | null; st: number; v: (venue: Venue) => VenueSrc | undefined },
+  markets: ReadonlyMap<Venue, VenueMarkets | null>,
+): LiqHeatmap {
   const acc = accuracyOf();
   const sum = new Map<number, [number, number, number, number, number]>();
   const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
@@ -226,10 +234,10 @@ export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promis
   for (const venue of venues) {
     const m = markets.get(venue) ?? null;
     const mk = marketsOfCoin(m, coin);
-    const x = row?.v[venue];
-    const main = mk.slice().sort((a, b) => b.oi - a.oi)[0];
+    const x = src.v(venue);
+    const main = mk.slice().sort((p, q) => q.oi - p.oi)[0];
     const price = main?.px ?? null;
-    const oi = mk.length ? mk.reduce((a, y) => a + y.oi, 0) : null;
+    const oi = mk.length ? mk.reduce((n, y) => n + y.oi, 0) : null;
     coverage[venue] = {
       oi, oiUsd: oi !== null && price !== null ? oi * price : null,
       long: x?.c[0] ?? 0, short: x?.c[1] ?? 0, longKnown: x?.c[2] ?? 0, shortKnown: x?.c[3] ?? 0, positions: x?.c[4] ?? 0, past: x?.c[5] ?? 0,
@@ -237,15 +245,48 @@ export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promis
     };
     if (!x) continue;
     for (const [i, l, sh, ln, sn] of x.b) {
-      const b = sum.get(i);
-      if (b) { b[1] += l; b[2] += sh; b[3] += ln; b[4] += sn; } else sum.set(i, [i, l, sh, ln, sn]);
+      const e = sum.get(i);
+      if (e) { e[1] += l; e[2] += sh; e[3] += ln; e[4] += sn; } else sum.set(i, [i, l, sh, ln, sn]);
     }
-    outside.long += x.o[0]; outside.short += x.o[1]; outside.longN += x.o[2]; outside.shortN += x.o[3];
+    outside.long += x.o[0]!; outside.short += x.o[1]!; outside.longN += x.o[2]!; outside.shortN += x.o[3]!;
   }
   return {
-    coin, venues: [...venues], at: got.at, price: row?.p ?? null, step: row?.st ?? 1,
-    buckets: [...sum.values()].sort((a, b) => a[0] - b[0]), outside, coverage,
+    coin, venues: [...venues], at: src.at, price: src.p, step: src.st,
+    buckets: [...sum.values()].sort((p, q) => p[0] - q[0]), outside, coverage,
   };
+}
+
+/** A coin's live levels as heatOf reads them (null when the feed does not hold the coin). */
+export function liveSrc(coin: string): Parameters<typeof heatOf>[2] | null {
+  const feed = liqFeed();
+  const c = feed.live ? feed.coins.get(coin) : undefined;
+  if (!c) return null;
+  return {
+    at: c.at, p: c.p, st: c.st,
+    v: (venue) => {
+      const x = c.v.get(venue);
+      return x && { b: [...x.b].map(([i, y]): [number, number, number, number, number] => [i, y[0], y[1], y[2], y[3]]), c: x.c, o: x.o };
+    },
+  };
+}
+
+/** The venues' market lists, read where stale (open interest a minute old at most). */
+export async function marketsFor(venues: readonly Venue[]): Promise<Map<Venue, VenueMarkets | null>> {
+  return new Map(await Promise.all(venues.map(async (v) => [v, await venueMarkets(v, { oi: true }).catch(() => null)] as const)));
+}
+
+/**
+ * A coin's liquidation levels over the venues asked for: from the live feed (the
+ * indexer's engine, a second old) when the API has it, else from the minute row.
+ */
+export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promise<LiqHeatmap | null> {
+  const markets = await marketsFor(venues);
+  const live = liveSrc(coin);
+  if (live) return heatOf(coin, venues, live, markets);
+  const got = nowRow(coin);
+  if (!got) return null;
+  const row = got.row;
+  return heatOf(coin, venues, { at: got.at, p: row?.p ?? null, st: row?.st ?? 1, v: (venue) => row?.v[venue] }, markets);
 }
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
