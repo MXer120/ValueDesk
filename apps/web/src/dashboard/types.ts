@@ -275,4 +275,18 @@ export interface TerminalSeed {
    * (its owner never moved, sized, added or took out a panel) moves to this one.
    */
   was?: Array<{ layouts: Partial<Record<BreakpointName, PanelPlacement[]>>; shown?: string[] }>;
+  /**
+   * The design worked out from the measured grid, per breakpoint, while the
+   * terminal is still exactly its shipped design (`layouts`): a panel that must
+   * keep a shape (the News terminal's stream, 16:9) gets the rows that give it
+   * that shape at this width. A design its owner changed is never refitted.
+   */
+  fit?: Partial<Record<BreakpointName, (geo: GridGeometry) => PanelPlacement[]>>;
+}
+
+/** One grid's measured cell: a column's and a row's width and height in px, and the gutters. */
+export interface GridGeometry {
+  colW: number;
+  rowH: number;
+  margin: [number, number];
 }

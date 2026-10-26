@@ -121,7 +121,12 @@ export function LiveFeed({ instance }: {
   const area = { w: size.w, h: Math.max(0, size.h - HEAD) };
   const min = stream ? minPlayer(stream) : MIN_PLAYER.other;
   const fit = fitVideo(area.w, area.h);
-  const pic = { w: Math.min(area.w, Math.max(fit.w, min.w)), h: Math.min(area.h, Math.max(fit.h, min.h)) };
+  // A cell within a few percent of 16:9 (the News terminal sizes its rows to it, to a
+  // row's rounding) is filled outright: no sliver of a bar beside or under the stream.
+  const near = area.h > 0 && Math.abs(area.w / area.h / (16 / 9) - 1) < 0.04;
+  const pic = near
+    ? { w: Math.max(area.w, min.w), h: Math.max(area.h, min.h) }
+    : { w: Math.min(area.w, Math.max(fit.w, min.w)), h: Math.min(area.h, Math.max(fit.h, min.h)) };
   const tooSmall = !!src && size.w > 0 && (area.w < min.w || area.h < min.h);
 
   useEffect(() => {
