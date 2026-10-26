@@ -128,12 +128,20 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
   );
 }
 
-/** A switch with its state beside it ("Enabled" / "Disabled"), the whole of it pressable. */
-function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
+/** A switch's state words: what is hidden, what is shown. */
+const HIDE = ['Hidden', 'Shown'] as const;
+const SHOW = ['Shown', 'Hidden'] as const;
+
+/**
+ * A switch with its state beside it, the whole of it pressable. The state says
+ * what it means for this setting ("Hidden" / "Shown", "Locked" / "Unlocked");
+ * On / Off where nothing says it better.
+ */
+function Toggle({ checked, onChange, disabled, label, words = ['On', 'Off'] }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string; words?: readonly [on: string, off: string] }) {
   return (
     <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`stg__switch${checked ? ' is-on' : ''}`} onClick={() => onChange(!checked)}>
       <i className="stg__track"><i /></i>
-      <span aria-hidden="true">{checked ? 'Enabled' : 'Disabled'}</span>
+      <span aria-hidden="true">{checked ? words[0] : words[1]}</span>
     </button>
   );
 }
@@ -160,7 +168,7 @@ function PrivacySection() {
       <Head title="Privacy" line="Hide your own figures for screenshots or a shared screen. Market data stays visible." />
       <div className="stg__card">
         <Row title="Hide my data" line="Balances, positions and your address, in one press">
-          <Toggle checked={anyHidden} onChange={() => toggle()} label="Hide my data" />
+          <Toggle checked={anyHidden} onChange={() => toggle()} label="Hide my data" words={HIDE} />
         </Row>
       </div>
       <div className="stg__label">
@@ -170,7 +178,7 @@ function PrivacySection() {
       <div className="stg__card">
         {PRIVACY_KEYS.map((k) => (
           <Row key={k} title={PRIVACY_LABELS[k]} line={PRIVACY_HINTS[k]}>
-            <Toggle checked={hidden[k]} onChange={(v) => set(k, v)} label={PRIVACY_LABELS[k]} />
+            <Toggle checked={hidden[k]} onChange={(v) => set(k, v)} label={PRIVACY_LABELS[k]} words={HIDE} />
           </Row>
         ))}
       </div>
@@ -195,7 +203,7 @@ function LayoutSection({ hasLayout, dashLocked, gear, close }: { hasLayout: bool
       <Head title="Layout" line="The trade page's panels: keep them where they are, or arrange them." />
       <div className="stg__card">
         <Row title="Lock layout" line={hasLayout ? 'Panels cannot be moved or resized' : 'This page has no movable layout'} off={!hasLayout}>
-          <Toggle checked={hasLayout && dashLocked} disabled={!hasLayout} onChange={() => window.dispatchEvent(new CustomEvent('dash:lock:toggle'))} label="Lock layout" />
+          <Toggle checked={hasLayout && dashLocked} disabled={!hasLayout} onChange={() => window.dispatchEvent(new CustomEvent('dash:lock:toggle'))} label="Lock layout" words={['Locked', 'Unlocked']} />
         </Row>
         <Row title="Edit layout" line="Arrange, add and take out panels" off={!hasLayout}>
           <button
@@ -331,7 +339,7 @@ function SecuritySection() {
           </select>
         </Row>
         <Row title="Confirm withdrawals and transfers" line="Asks for the lock before your wallet is asked to sign" off={lock.kind === 'none'}>
-          <Toggle checked={lock.kind !== 'none' && lock.askOnMoney} disabled={lock.kind === 'none'} onChange={setAskOnMoney} label="Confirm withdrawals and transfers" />
+          <Toggle checked={lock.kind !== 'none' && lock.askOnMoney} disabled={lock.kind === 'none'} onChange={setAskOnMoney} label="Confirm withdrawals and transfers" words={['Asks first', 'Wallet only']} />
         </Row>
         <Row title="Lock now" line="Until you unlock it again" off={lock.kind === 'none' || !lock.unlocked}>
           <button type="button" className="stg__btn" disabled={!owner || lock.kind === 'none' || !lock.unlocked} onClick={() => owner && lockNow(owner)}>Lock</button>
@@ -351,13 +359,13 @@ function NewsSection() {
       <div className="stg__card">
         {NEWS_SOURCES.map((s) => (
           <Row key={s.id} title={s.name} line={s.line} icon={<img className="stg__logo" src={logoUrl(s.site)} alt="" width={20} height={20} />}>
-            <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} />
+            <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} words={SHOW} />
           </Row>
         ))}
       </div>
       <div className="stg__card">
         <Row title="Powered by SoSoValue" line="The credit under the news">
-          <Toggle checked={!creditHidden} onChange={(v) => setCreditHidden(!v)} label="Show the SoSoValue credit" />
+          <Toggle checked={!creditHidden} onChange={(v) => setCreditHidden(!v)} label="Show the SoSoValue credit" words={SHOW} />
         </Row>
       </div>
       <OutletList />
@@ -394,7 +402,7 @@ function OutletList() {
           <div className="stg__card stg__card--outlets">
             {g.list.map(([site, name]) => (
               <Row key={site} title={name} line={site} icon={<img className="stg__logo" src={logoUrl(site)} alt="" width={20} height={20} loading="lazy" />}>
-                <Toggle checked={!off.has(site)} onChange={(v) => setOutlet(site, v)} label={name} />
+                <Toggle checked={!off.has(site)} onChange={(v) => setOutlet(site, v)} label={name} words={SHOW} />
               </Row>
             ))}
           </div>

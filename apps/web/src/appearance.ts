@@ -35,24 +35,25 @@ export interface Appearance {
   pageGlow2Alpha: number;
 }
 
+/** The owner's own settings (2026-10-26), the glass on the trading page included. */
 export const APPEARANCE_DEFAULT: Appearance = {
-  tint: '#262320',
+  tint: '#1c1f21',
   tintAlpha: 74,
   shade: 45,
-  shadeAlpha: 82,
-  blur: 40,
-  saturate: 1.5,
-  glow: '#ffecd6',
+  shadeAlpha: 50,
+  blur: 20,
+  saturate: 1,
+  glow: '#e0e0e0',
   glowAlpha: 5,
   lift: 5,
   innerGlow: 9,
-  trade: false,
-  panelAlpha: 72,
-  panelBlur: 28,
-  pageGlow: '#8a5a32',
-  pageGlowAlpha: 45,
+  trade: true,
+  panelAlpha: 49,
+  panelBlur: 25,
+  pageGlow: '#1c1f21',
+  pageGlowAlpha: 8,
   pageGlow2: '#2f4a6b',
-  pageGlow2Alpha: 30,
+  pageGlow2Alpha: 15,
 };
 
 const KEY = 'vs.appearance';
