@@ -19,9 +19,9 @@
  * it - the head, both flippers, the front of the body (rows above WATERLINE) - the
  * whale is sharp and fills the hero's box; below it the rest of the body and the
  * flukes run on behind the toolbar and the cards, blurred and dimmer as if under
- * water. The sharp body stays whole down to the surface, gives way over a band
- * below it to a lightly blurred one at full strength, and that to the blurred,
- * dimmer one - so the whale sinks into the water with no step in its brightness.
+ * water. The sharp body stays whole down to the surface and gives way, over a
+ * short band below it, to the blurred and dimmer one (a lighter blur bridging the
+ * two), so the whale is blurred from just under the surface (owner, 2026-10-26).
  *
  * Little moves: a slow small dip, the dots giving where the pointer passes, the
  * stars twinkling. Still under reduced motion.
@@ -212,24 +212,23 @@ export function DotWhale() {
       lctx.globalCompositeOperation = 'destination-in';
       const at = (y: number) => Math.min(1, Math.max(0, y / low.height));
       const under = lctx.createLinearGradient(0, 0, 0, low.height);
-      under.addColorStop(at(surface + band * 2), 'rgba(0,0,0,0)');
-      under.addColorStop(at(surface + band * 5), 'rgba(0,0,0,0.85)');
-      under.addColorStop(at(surface + band * 8), 'rgba(0,0,0,0.62)');
+      under.addColorStop(at(surface), 'rgba(0,0,0,0)');
+      under.addColorStop(at(surface + band), 'rgba(0,0,0,0.85)');
+      under.addColorStop(at(surface + band * 4), 'rgba(0,0,0,0.62)');
       under.addColorStop(1, 'rgba(0,0,0,0.34)');
       lctx.fillStyle = under;
       lctx.fillRect(0, 0, low.width, low.height);
-      // Just under the surface: lightly blurred at full strength, between the sharp body and the blurred one.
+      // Just under the surface: a lighter blur bridging the sharp body and the blurred one.
       mctx.globalCompositeOperation = 'source-over';
       mctx.clearRect(0, 0, mid.width, mid.height);
-      mctx.filter = `blur(${(0.7 * dpr).toFixed(1)}px)`;
+      mctx.filter = `blur(${(1.2 * dpr).toFixed(1)}px)`;
       mctx.drawImage(off, 0, 0);
       mctx.filter = 'none';
       mctx.globalCompositeOperation = 'destination-in';
       const near = mctx.createLinearGradient(0, 0, 0, mid.height);
       near.addColorStop(at(surface), 'rgba(0,0,0,0)');
-      near.addColorStop(at(surface + band), 'rgba(0,0,0,1)');
-      near.addColorStop(at(surface + band * 2), 'rgba(0,0,0,1)');
-      near.addColorStop(at(surface + band * 5), 'rgba(0,0,0,0)');
+      near.addColorStop(at(surface + band * 0.5), 'rgba(0,0,0,0.7)');
+      near.addColorStop(at(surface + band * 1.5), 'rgba(0,0,0,0)');
       mctx.fillStyle = near;
       mctx.fillRect(0, 0, mid.width, mid.height);
       // Above it: sharp, giving way over the same band. (destination-in clears whatever it

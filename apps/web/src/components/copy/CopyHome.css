@@ -733,6 +733,11 @@
 .cpy-hero:has(.cpy-whale) ~ * { position: relative; z-index: 1; }
 .cpy-hero:has(.cpy-whale) ~ .cpy-toolbar { z-index: 2; }
 .cpy-hero:has(.cpy-whale) .cpy-hero__text { position: relative; z-index: 1; }
+/* The trader cards over the whale: a little see-through, the whale blurred behind them. */
+.cpy-hero:has(.cpy-whale) ~ .cpy-grid .cpy-card {
+  background: color-mix(in srgb, var(--cpy-card) 74%, transparent);
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+}
 .cpy-whale {
   /* Its shape is the whale's above the surface (set by DotWhale), so the whale fills it at any width. */
   position: relative; z-index: 0; align-self: end; max-height: 304px; color: #e9e9ea;
