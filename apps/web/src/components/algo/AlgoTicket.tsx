@@ -662,6 +662,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           book={bid && ask ? { bid, ask } : null}
           refs={{ mid: bid && ask ? (bid + ask) / 2 : null, mark: markPx, index: indexPx, oracleMid, oracleFair }}
           bandDepth={bandDepth}
+          tickSize={tick > 0 ? tick : undefined}
           farBook={(() => {
             const b = snap?.books?.[snap.books.length - 1] ?? null;
             return b ? (p.side === 'buy' ? b.asks : b.bids).map(([px, sz]) => [Number(px), Number(sz)] as [number, number]) : null;
@@ -882,7 +883,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         exitsHere={exitsHere}
         preview={previewNode}
         summary={summaryNode}
-        hasOrder={needsAmount && !!p.onQuantity || ek === 'bracket' || ek === 'basket' || ek === 'conditional'}
+        hasOrder
         canReset={changes.length > 0}
         onReset={() => setD((x) => resetAdvanced(kind, x))}
         runsOn={<RunsOn place={place} onChange={setPlace} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
@@ -891,6 +892,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} err={err}
           quantity={p.quantity} onQuantity={p.onQuantity} sizePct={p.sizePct} onSizePct={p.onSizePct} positionQty={p.positionQty ?? null}
           symbol={p.symbol} needsAmount={needsAmount} exits={plan?.exits ?? null}
+          total={plan?.total ?? null} notional={plan?.notional ?? null} stepSize={p.sym?.stepSize}
         />
         <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} oracleLive={oracle ? { used: oracle.used, stale: oracle.stale } : null} />
       </AdvancedWindow>
@@ -1167,37 +1169,91 @@ function PostOnly({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
  * the slicing, a max slippage with the execution, a start price with the start), in the window's own
  * controls. The same draft as the ticket: a change here is a change there.
  */
-function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantity, onQuantity, sizePct, onSizePct, positionQty, symbol, needsAmount, exits }: {
+/** Where an order type not sized by the Amount gets its size. */
+const SIZED_BY: Partial<Record<string, string>> = {
+  dca: 'All its orders together, from the USD of each and how many (below).',
+  basket: 'Sized by the USD of each market (below). Here, all of them together.',
+  trailing: 'It closes the whole position on this market when it fires (Price & execution: Size).',
+  conditional: 'It closes a share of the position when it fires (below).',
+  twap: 'It closes a share of your position (below).',
+};
+
+/** A size on the market's step, as typed text. */
+const toStep = (x: number, step: string | undefined): string => {
+  const st = Number(step);
+  if (!(st > 0)) return String(Number(x.toPrecision(8)));
+  const dp = (String(st).split('.')[1] ?? '').length;
+  return (Math.floor(x / st + 1e-9) * st).toFixed(dp);
+};
+
+function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantity, onQuantity, sizePct, onSizePct, positionQty, symbol, needsAmount, exits, total, notional, stepSize }: {
   kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; roundTick: (x: number) => string;
   err: (...keys: string[]) => string | undefined; quantity: string; onQuantity?: (v: string) => void; sizePct?: number; onSizePct?: (pct: number) => void;
   positionQty: number | null; symbol: string; needsAmount: boolean; exits: { tp: number | null; sl: number | null } | null;
+  total: number | null; notional: number | null; stepSize?: string;
 }) {
   const ek = engineKind(kind);
+  // The USD box while it is typed in (the coin amount follows it); otherwise it shows the amount's value.
+  const [usdDraft, setUsdDraft] = useState<string | null>(null);
   const durUnit = <ATime label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
   const duration = <AField title="Duration" hint="How long it takes from its first slice to its last." value={d.dur} onChange={(v) => set({ dur: v })} unit={durUnit} err={err('durationMs')} />;
   const pct = sizePct ?? 0;
   return (
     <>
-      {needsAmount && onQuantity && (
-        <Group label="Amount" sec="order">
-          <AField title="Amount" hint={kind === 'trailing' ? 'How much of the position it closes when it fires.' : 'The whole order, in the coin.'} value={quantity} onChange={onQuantity} unit={base} />
-          {onSizePct && (
-            <Row title={kind === 'trailing' ? 'Share of the position' : 'Share of what is available'} hint={kind === 'trailing' ? (positionQty ? `Of your ${fmtQ(Math.abs(positionQty))} ${base} ${positionQty > 0 ? 'long' : 'short'} on ${symbol}.` : `No open position on ${symbol}: nothing to measure.`) : 'As the order panel’s slider: of the margin available times the leverage.'}>
-              <div className="oe-slider algo-slider">
-                <div className="oe-slider__rail" style={{ ['--oe-p' as string]: pct / 100 } as CSSProperties}>
-                  <div className="oe-slider__fill" />
-                  {[0, 25, 50, 75, 100].map((n) => (
-                    <i key={n} className={`oe-slider__notch${pct >= n ? ' is-past' : ''}`} style={{ left: `${n}%` }} aria-hidden="true" />
-                  ))}
-                  <input className="oe-slider__input" type="range" min={0} max={100} step={1} value={pct} aria-label="Share" onChange={(e) => onSizePct(Number(e.currentTarget.value))} />
+      <Group label="Size" sec="order">
+        {needsAmount && onQuantity ? (
+          <>
+            <Row title="Amount" hint={kind === 'trailing' ? 'How much of the position it closes when it fires: in the coin or in USD.' : 'The whole order: in the coin or in USD at the price now.'}>
+              <div className="algo-pair">
+                <div className="algo-sf">
+                  <input autoComplete="off" inputMode="decimal" aria-label={`Amount in ${base}`} value={quantity} placeholder="0" onChange={(e) => onQuantity(decimalInput(e.target.value))} />
+                  <span className="algo-sf__unit">{base}</span>
                 </div>
-                <span className="algo-slider__v">{Math.round(pct)}%</span>
+                <div className="algo-sf">
+                  <input
+                    autoComplete="off"
+                    inputMode="decimal"
+                    aria-label="Amount in USD"
+                    value={usdDraft ?? (Number(quantity) > 0 && mid ? (Number(quantity) * mid).toFixed(2) : '')}
+                    placeholder="0"
+                    onFocus={() => setUsdDraft(Number(quantity) > 0 && mid ? (Number(quantity) * mid).toFixed(2) : '')}
+                    onBlur={() => setUsdDraft(null)}
+                    onChange={(e) => {
+                      const v = decimalInput(e.target.value);
+                      setUsdDraft(v);
+                      onQuantity(Number(v) > 0 && mid ? toStep(Number(v) / mid, stepSize) : '');
+                    }}
+                  />
+                  <span className="algo-sf__unit">USD</span>
+                </div>
               </div>
             </Row>
-          )}
-          {kind === 'twap' && d.twapClose && <AField title="Close" hint="The share of your position it closes, reduce-only." value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} unit="% of position" err={err('closeShare')} />}
-        </Group>
-      )}
+            {onSizePct && (
+              <Row
+                title={kind === 'trailing' ? 'Share of the position' : 'Share of what is available'}
+                hint={kind === 'trailing' ? (positionQty ? `Of your ${fmtQ(Math.abs(positionQty))} ${base} ${positionQty > 0 ? 'long' : 'short'} on ${symbol}.` : `No open position on ${symbol}: nothing to measure.`) : undefined}
+              >
+                <div className="oe-slider algo-slider">
+                  <div className="oe-slider__rail" style={{ ['--oe-p' as string]: pct / 100 } as CSSProperties}>
+                    <div className="oe-slider__fill" />
+                    {[0, 25, 50, 75, 100].map((n) => (
+                      <i key={n} className={`oe-slider__notch${pct >= n ? ' is-past' : ''}`} style={{ left: `${n}%` }} aria-hidden="true" />
+                    ))}
+                    <input className="oe-slider__input" type="range" min={0} max={100} step={1} value={pct} aria-label="Share" onChange={(e) => onSizePct(Number(e.currentTarget.value))} />
+                  </div>
+                  <span className="algo-slider__v">{Math.round(pct)}%</span>
+                </div>
+              </Row>
+            )}
+            {kind === 'twap' && d.twapClose && <AField title="Close" hint="The share of your position it closes, reduce-only." value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} unit="% of position" err={err('closeShare')} />}
+          </>
+        ) : (
+          // Sized another way (DCA by USD per order, a basket per market, a close or a whole position): what that comes to.
+          <Row title="Amount" hint={SIZED_BY[ek] ?? 'Sized by its own settings.'}>
+            <span className="algo-readout">{total && total > 0 ? `${fmtQ(total)} ${base}` : '—'}{notional ? ` · ${fmtUsd(notional, 2)}` : ''}</span>
+          </Row>
+        )}
+      </Group>
 
       {(ek === 'twap' || ek === 'vwap') && <Group label="Time" sec="slicing">{duration}{hasRandomize(kind) && <ASwitch title="Randomize" hint="Varies each slice’s size and time a little, so the order is harder to spot (how much: below)." checked={randomizeOn(kind, d)} onChange={(v) => set(setRandomize(kind, v))} on="On · harder to spot" off="Off · even slices" />}</Group>}
 
@@ -1234,7 +1290,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
       )}
 
       {ek === 'dca' && (
-        <Group label="Orders" sec="slicing">
+        <Group label="Orders" sec="order">
           <AField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint="The first order’s size in USD; each later one is Size × times the one before." value={d.perOrder} onChange={(v) => set({ perOrder: v })} unit="USD" err={err('perOrderUsd', 'quantity')} />
           <ASeg title="First" hint="The first order: at once, or resting at a price." value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once.'], ['price', 'Price', 'Rests at a price you set.']]} />
           {d.dcaFirst === 'price' && <AField title="First at" hint="The first order’s price." value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} unit="USD" err={err('from')} />}

@@ -73,6 +73,8 @@ export interface StoryProps {
   refs?: { mid: number | null; mark: number | null; index: number | null; oracleMid: number | null; oracleFair: number | null } | null;
   /** Fill fast: what SoDEX's book holds within the max slippage, on average (base units). */
   bandDepth?: number | null;
+  /** The market's tick size: price axes step in whole ticks and print its decimals. */
+  tickSize?: number;
   /** SoDEX's book on the side a taker takes from (a buy: the asks), best first, when the window opened. */
   farBook?: Array<[number, number]> | null;
   /** The chart's time zone. */
@@ -151,20 +153,27 @@ function usePlayhead(key: string) {
 
 /** A tick label with as many decimals as the tick step has (0.25 -> 2), so a label is the gridline's own price. */
 export function tickLabel(v: number, ticks: number[]): string {
-  const step = ticks.length > 1 ? Math.abs(ticks[1]! - ticks[0]!) : 0;
+  // The market's tick decides the decimals (its prices have no more); a step finer than a tick is never made.
+  const step = TICK.size > 0 ? TICK.size : ticks.length > 1 ? Math.abs(ticks[1]! - ticks[0]!) : 0;
   const dp = step > 0 ? (String(Number(step.toPrecision(6))).split('.')[1] ?? '').length : 2;
   return v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
+/** The market's tick size (set by sceneFor): price ticks are whole multiples of it. */
+const TICK = { size: 0 };
+
 function niceTicks(lo: number, hi: number, n = 4): number[] {
   if (!(hi > lo)) return [lo];
-  const raw = (hi - lo) / n;
+  const raw = Math.max((hi - lo) / n, TICK.size);
   const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-  const step = [1, 2, 2.5, 5, 10].map((x) => x * mag).find((x) => x >= raw) ?? raw;
+  const nice = [1, 2, 2.5, 5, 10].map((x) => x * mag).find((x) => x >= raw) ?? raw;
+  // A whole number of ticks (2.5 x 0.1 is not one), so every gridline is a price the market can have.
+  const step = TICK.size > 0 ? Number((Math.ceil(nice / TICK.size - 1e-9) * TICK.size).toPrecision(12)) : nice;
   const out: number[] = [];
   for (let v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) out.push(Number(v.toPrecision(12)));
   return out;
 }
+
 
 /** A price axis over these prices, padded. */
 function priceScale(prices: number[], padShare = 0.14) {
@@ -1239,6 +1248,7 @@ export function viewsFor(p: StoryProps): View[] {
 }
 
 export function sceneFor(t: number, p: StoryProps, view: View = viewsFor(p)[0]!): Scene | null {
+  TICK.size = p.tickSize ?? 0;
   const { spec, plan } = p;
   // Real recent prices behind the price-level pictures; not behind one slice or Fill fast's rounds (their seconds vanish against 90 minutes).
   const hist = view === 'chart' ? (p.history ?? []).filter((h) => h.p > 0) : [];

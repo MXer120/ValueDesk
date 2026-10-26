@@ -39,6 +39,7 @@ export interface PreviewProps {
   dayVolume?: { from: number; v: number[] } | null;
   refs?: { mid: number | null; mark: number | null; index: number | null; oracleMid: number | null; oracleFair: number | null } | null;
   bandDepth?: number | null;
+  tickSize?: number;
   farBook?: Array<[number, number]> | null;
   tz?: 'local' | 'utc';
 }
@@ -103,7 +104,7 @@ export function PlanPreview(p: PreviewProps) {
   return (
     <div className={`algo-pvw is-${p.side}`}>
       <p className="algo-pvw__words">{p.words}</p>
-      <AlgoStory plan={plan} spec={spec} side={p.side} mid={p.mid} levels={p.levels} base={p.base} sweepRef={p.sweepRef} onShuffle={p.onShuffle} uiKind={p.uiKind} history={p.history} book={p.book} profile={p.profile} dayVolume={p.dayVolume} refs={p.refs} bandDepth={p.bandDepth} farBook={p.farBook} tz={p.tz} />
+      <AlgoStory plan={plan} spec={spec} side={p.side} mid={p.mid} levels={p.levels} base={p.base} sweepRef={p.sweepRef} onShuffle={p.onShuffle} uiKind={p.uiKind} history={p.history} book={p.book} profile={p.profile} dayVolume={p.dayVolume} refs={p.refs} bandDepth={p.bandDepth} tickSize={p.tickSize} farBook={p.farBook} tz={p.tz} />
       <dl className="algo-pvw__facts">
         {facts.map(([k, v]) => (
           <div key={k}>
