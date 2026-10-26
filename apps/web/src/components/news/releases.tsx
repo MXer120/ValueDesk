@@ -7,19 +7,23 @@
  *                      second around a release (else every minute); a release
  *                      that lands while the page is open is announced once
  *                      (a toast, and a `vs:release` event the chart listens for).
- *   EventCard          one event: its fields with the actual and the previous
- *                      figure (empty until it lands), the countdown, the
- *                      release's first sentence and its official page; each
- *                      figure opens its history (macro/IndicatorView.tsx).
+ *   EventCard          one event: a tile per figure - the actual, the previous
+ *                      (from the history when the release gives none) and the
+ *                      change - the countdown, and, shown by default, the
+ *                      history of the figure picked (the first one charted),
+ *                      the release marked on it; the full history and table
+ *                      one click away (macro/IndicatorView.tsx); the release's
+ *                      first sentence and its official page.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReleaseResult, ReleaseResultField } from '@sign/valuescan/releases.js';
 import type { CalendarEvent } from '../../vsApi';
 import { notify } from '../../toast';
-import { useAsync } from '../../hooks';
+import { useAsync, useStored } from '../../hooks';
 import { Modal } from '../Modal';
 import { IndicatorModal } from '../macro/IndicatorView';
-import { macroApi } from '../macro/api';
+import { fmtValue, macroApi } from '../macro/api';
+import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 
 export type { ReleaseResult };
 
@@ -112,6 +116,99 @@ function dir(v: string | null, p: string | null): 'up' | 'down' | null {
   return v !== null && p !== null && Number.isFinite(a) && Number.isFinite(b) && a !== b ? (a > b ? 'up' : 'down') : null;
 }
 
+/** A release's period as the history names it: "Q2 2026 (third estimate)" is the history's "Q2 2026". */
+const basePeriod = (p: string | null | undefined) => (p ?? '').replace(/\s*\(.*\)\s*$/, '').trim();
+
+const RANGES = [['1y', '1Y'], ['5y', '5Y'], ['10y', '10Y'], ['max', 'All']] as const;
+
+/**
+ * One figure's history in the card, shown by default: the chart (bars for a
+ * change, a line for a level or a rate), the release's own period marked on it
+ * when the history has it, a range switch, and a line saying how far the history
+ * reaches when it is behind the release (FRED publishes after the agency).
+ */
+function EventChart({ ind, period, onFull }: { ind: { id: string; name: string }; period: string | null; onFull: () => void }) {
+  const [range, setRange] = useStored<string>('vs.event.range', '5y');
+  const r = useAsync(() => macroApi.indicator(ind.id, range), [ind.id, range], { pollMs: 10 * 60_000 });
+  const d = r.data;
+  const bars = !!d && (d.unit === 'k' || /_mm$|_qq$/.test(d.id));
+  const want = basePeriod(period);
+  const series = useMemo<ChartSeries[]>(() => {
+    if (!d) return [];
+    // The table runs newest first, the points oldest first: the same observations.
+    const pts = [...d.points].sort((x, y) => x[0] - y[0]);
+    const i = want ? d.table.findIndex((t) => t.period === want) : -1;
+    const at = i >= 0 && d.table.length === pts.length ? pts[pts.length - 1 - i] : undefined;
+    return [{
+      key: d.id,
+      kind: bars ? 'bars' : 'line',
+      color: bars ? '#00b481' : '#f7f7f7',
+      negColor: '#ef4a3c',
+      points: d.points,
+      format: (v: number) => fmtValue(d.unit, v),
+      ...(at ? { mark: { time: at[0], text: 'This release', color: '#ffb547' } } : {}),
+    }];
+  }, [d, bars, want]);
+
+  return (
+    <div className="evc__graph">
+      <div className="evc__graphbar">
+        <span className="evc__graphtitle">{ind.name}</span>
+        <span className="mc__spacer" />
+        <div className="mc__seg" role="radiogroup" aria-label="Range">
+          {RANGES.map(([v, label]) => (
+            <button key={v} type="button" role="radio" aria-checked={range === v} className={range === v ? 'is-on' : ''} onClick={() => setRange(v)}>{label}</button>
+          ))}
+        </div>
+      </div>
+      {r.error && !d ? (
+        <p className="evc__none">The history did not load: {r.error}</p>
+      ) : !d ? (
+        <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading the history…</p>
+      ) : (
+        <>
+          <SeriesChart series={series} height={230} />
+          <p className="evc__foot">
+            {want && d.latest && basePeriod(d.latest.period) !== want && !d.table.some((t) => t.period === want)
+              ? `History through ${d.latest.period}; ${want} is added once ${d.source.name} publishes it. `
+              : ''}
+            Source: <a href={d.source.href} target="_blank" rel="noopener noreferrer">{d.source.name} · {d.source.series}</a>
+            {' · '}
+            <button type="button" className="evc__link" onClick={onFull}>Full history and table</button>
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The previous figure of each field, from the history when the release did not
+ * give one: for a release that is out, the figure before its period; for one
+ * still to come, the latest figure out.
+ */
+function usePriors(fields: ReleaseResultField[], indOf: (key: string) => { id: string } | null, period: string | null): Record<string, number | null> {
+  const want = basePeriod(period);
+  const ids = fields.filter((f) => f.prior === null && indOf(f.key)).map((f) => `${f.key}:${indOf(f.key)!.id}`);
+  const r = useAsync(
+    async () => {
+      const out: Record<string, number | null> = {};
+      await Promise.all(ids.map(async (pair) => {
+        const [key, id] = pair.split(':') as [string, string];
+        const d = await macroApi.indicator(id, '1y');
+        // In the history: its row carries the one before. Not in it yet (still to come,
+        // or FRED not caught up): the previous figure is the latest one out.
+        const row = want ? d.table.find((t) => t.period === want) : undefined;
+        out[key] = row ? row.prior : d.latest?.value ?? null;
+      }));
+      return out;
+    },
+    [ids.join(','), want],
+    { enabled: ids.length > 0 },
+  );
+  return r.data ?? {};
+}
+
 export function EventCard({ event, result, onClose, sourceName }: {
   event: CalendarEvent;
   result: ReleaseResult | undefined;
@@ -119,7 +216,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
   sourceName?: string;
 }) {
   const [, tick] = useState(0);
-  const [chart, setChart] = useState<{ id: string; title: string } | null>(null);
+  const [full, setFull] = useState<{ id: string; title: string } | null>(null);
   const catalog = useAsync(() => macroApi.indicators(), [], {});
   /** The indicator a figure of this event is: the calendar kind and the release field. */
   const indicatorOf = (key: string) => catalog.data?.indicators.find((x) => x.kind === event.short && x.field === key) ?? null;
@@ -131,53 +228,67 @@ export function EventCard({ event, result, onClose, sourceName }: {
   const released = result?.state === 'released';
   const waiting = !released && now >= event.time - HOT_BEFORE && now < event.time + HOT_AFTER;
   const fields: ReleaseResultField[] = result?.fields ?? (event.fields ?? []).map((f) => ({ ...f, value: null, prior: null }));
+  const charted = fields.filter((f) => indicatorOf(f.key));
+  const [pick, setPick] = useState<string | null>(null);
+  const shown = charted.find((f) => f.key === pick) ?? charted[0] ?? null;
+  const shownInd = shown ? indicatorOf(shown.key) : null;
+  const priors = usePriors(fields, indicatorOf, result?.period ?? null);
   const when = new Date(event.time).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const lag = released && result?.seenAt && result.releasedAt ? (result.seenAt - result.releasedAt) / 1000 : null;
   const host = (() => { try { return new URL(result?.href ?? event.href).hostname.replace(/^www\./, ''); } catch { return 'the source'; } })();
 
   return (
-    <Modal open title={event.title} onClose={onClose} size="md" className="evc">
+    <Modal open title={event.title} onClose={onClose} size="lg" className="evc">
       <div className="evc__meta">
         <span className={`evc__state is-${released ? 'out' : waiting ? 'wait' : 'sched'}`}>
           {released ? 'Released' : waiting ? 'Waiting for the release…' : event.time > now ? `In ${countdown(event.time - now)}` : 'Not read yet'}
         </span>
         <span>{event.allDay ? new Date(event.time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : when}</span>
+        <span className="evc__dot" aria-hidden="true" />
         <span>{sourceName ?? event.source.toUpperCase()}</span>
-        {result?.period && <span>{result.period}</span>}
+        {result?.period && <><span className="evc__dot" aria-hidden="true" /><span>{result.period}</span></>}
       </div>
+
       {fields.length > 0 ? (
-        <table className="evc__table">
-          <thead><tr><th>Figure</th><th className="num">Actual</th><th className="num">Previous</th><th aria-label="History" /></tr></thead>
-          <tbody>
-            {fields.map((f) => {
-              const d = dir(f.value, f.prior);
-              return (
-                <tr key={f.key}>
-                  <td>{f.label}{f.note && <small title={f.note}> · {f.note}</small>}</td>
-                  <td className={`num evc__actual${f.value === null ? (waiting ? ' is-wait' : ' is-empty') : ''}${d ? ` is-${d}` : ''}`}>{fmtField(f, f.value)}</td>
-                  <td className="num evc__prior">{fmtField(f, f.prior)}</td>
-                  <td className="evc__hist">
-                    {(() => {
-                      const ind = indicatorOf(f.key);
-                      return ind ? (
-                        <button type="button" className="evc__chart" title={`${ind.name}: history, chart and table`} aria-label={`History of ${ind.name}`} onClick={() => setChart({ id: ind.id, title: ind.name })}>
-                          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M2 13.5h12M3.5 11 6.5 7.5l2.5 2 4-5" /></svg>
-                        </button>
-                      ) : null;
-                    })()}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="evc__figs">
+          {fields.map((f) => {
+            const prior = f.prior ?? (priors[f.key] != null ? String(priors[f.key]) : null);
+            const d = dir(f.value, prior);
+            const delta = f.value !== null && prior !== null && Number.isFinite(Number(f.value)) && Number.isFinite(Number(prior)) ? Number(f.value) - Number(prior) : null;
+            const can = !!indicatorOf(f.key);
+            const on = shown?.key === f.key;
+            const Tag = can ? 'button' : 'div';
+            return (
+              <Tag
+                key={f.key}
+                {...(can ? { type: 'button' as const, onClick: () => setPick(f.key), 'aria-pressed': on, title: `Show the ${f.label} history` } : {})}
+                className={`evc__fig${can ? ' is-pick' : ''}${on ? ' is-on' : ''}`}
+              >
+                <span className="evc__figlabel">{f.label}{f.note && <small title={f.note}> · {f.note}</small>}</span>
+                <b className={`evc__figval${f.value === null ? (waiting ? ' is-wait' : ' is-empty') : ''}${d ? ` is-${d}` : ''}`}>{fmtField(f, f.value)}</b>
+                <span className="evc__figprev">
+                  Prev <b>{fmtField(f, prior)}</b>
+                  {delta !== null && delta !== 0 && (
+                    <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(f.unit === 'k' ? 0 : 1)}{f.unit === 'k' ? 'k' : f.unit === '%' ? ' pp' : ''}</em>
+                  )}
+                </span>
+              </Tag>
+            );
+          })}
+        </div>
       ) : (
         <p className="evc__none">{event.detail ?? 'This calendar publishes the date only; there are no official figures to show here.'}</p>
       )}
+
+      {shown && shownInd && <EventChart key={shownInd.id} ind={shownInd} period={result?.period ?? null} onFull={() => setFull({ id: shownInd.id, title: shownInd.name })} />}
+
       {result?.headline && <p className="evc__headline">{result.headline}</p>}
-      {result?.priorPeriod && <p className="evc__foot">Previous: {result.priorPeriod}. Consensus forecasts are not published by the official sources.</p>}
-      {lag !== null && lag >= 0 && <p className="evc__foot">Read from {host} {lag.toFixed(1)}s after the scheduled time.</p>}
-      {chart && <IndicatorModal id={chart.id} title={chart.title} onClose={() => setChart(null)} />}
+      <p className="evc__foot">
+        {result?.priorPeriod ? `Previous: ${result.priorPeriod}. ` : ''}
+        Consensus forecasts are not published by the official sources.
+        {lag !== null && lag >= 0 ? ` Read from ${host} ${lag.toFixed(1)}s after the scheduled time.` : ''}
+      </p>
+      {full && <IndicatorModal id={full.id} title={full.title} onClose={() => setFull(null)} />}
       <div className="evc__actions">
         <a className="fx-cta evc__open" href={result?.href ?? event.href} target="_blank" rel="noopener noreferrer">Open on {host}</a>
       </div>

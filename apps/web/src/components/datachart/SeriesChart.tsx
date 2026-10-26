@@ -5,8 +5,9 @@
  * the app, sized to its box.
  *
  * Each series is a line or bars; `scale: 'left'` puts one on a second axis (ETF
- * flows: the daily bars on the right, the running total on the left). Times are
- * ms; a daily or monthly series is drawn by its UTC day.
+ * flows: the daily bars on the right, the running total on the left); `mark`
+ * picks out one point. Times are ms; a daily or monthly series is drawn by its
+ * UTC day.
  */
 import { useEffect, useRef } from 'react';
 import { ColorType, LineStyle, createChart, type IChartApi, type ISeriesApi, type Time, type UTCTimestamp } from 'lightweight-charts';
@@ -22,6 +23,8 @@ export interface ChartSeries {
   /** How values print on the axis and crosshair. */
   format?: (v: number) => string;
   title?: string;
+  /** One point picked out with a dot and a label (a calendar card: the release just out). Time in ms. */
+  mark?: { time: number; text?: string; color?: string };
 }
 
 const css = (name: string, fallback: string) => {
@@ -75,6 +78,7 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
         .map(([t, v]) => ({ time: Math.floor(t / 1000) as UTCTimestamp, value: v, ...(s.kind === 'bars' && s.negColor && v < 0 ? { color: s.negColor } : {}) }))
         .filter((p) => (seen.has(p.time) ? false : (seen.add(p.time), true)));
       (api as ISeriesApi<'Line'>).setData(data as Array<{ time: Time; value: number }>);
+      api.setMarkers(s.mark ? [{ time: Math.floor(s.mark.time / 1000) as UTCTimestamp, position: 'aboveBar', shape: 'circle', color: s.mark.color ?? s.color, text: s.mark.text ?? '' }] : []);
     }
     c.applyOptions({ leftPriceScale: { visible: left, borderVisible: false } });
     c.timeScale().fitContent();
