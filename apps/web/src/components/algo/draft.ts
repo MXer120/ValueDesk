@@ -9,7 +9,7 @@
  * Advanced pop-up, with the value it always had (ADVANCED_KEYS), under where
  * the algo runs.
  */
-import { ORACLE_VENUES, type BoundAction, type ConditionType, type OracleVenue, type SweepReferenceKind } from '@copy-engine';
+import { ORACLE_VENUES, SLIP_FROM, type SlipFrom, type BoundAction, type ConditionType, type OracleVenue, type SweepReferenceKind } from '@copy-engine';
 import { engineKind, type UiKind } from './menu';
 
 export type Unit = 's' | 'm' | 'h' | 'd';
@@ -45,7 +45,11 @@ export interface Draft {
   /** The slice count follows the duration (one a minute) until the trader sets one. */
   slicesAuto: boolean;
   exec: 'taker' | 'maker' | 'hybrid';
+  /** 2: saved since TWAP takes by default (Chase TWAP is the resting one); 3: since a trailing stop is sized by Amount by default. */
+  execVer?: number;
   slip: string;
+  /** What a slice's max slippage is measured from (the engine's ExecSpec.slipFrom). */
+  slipFrom: SlipFrom;
   makerShare: string;
   offsetTicks: string;
   chaseTicks: string;
@@ -165,7 +169,7 @@ export const legs = (symbol: string, side: 'buy' | 'sell'): LegDraft[] => [
 ];
 
 export const DEFAULT: Draft = {
-  dur: '30', durUnit: 'm', slices: '30', slicesAuto: true, exec: 'hybrid', slip: '30', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
+  dur: '30', durUnit: 'm', slices: '30', slicesAuto: true, exec: 'taker', execVer: 3, slip: '30', slipFrom: 'touch', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
   finish: 'take', maxPart: '', lookback: 14, adaptive: true, rate: '10', maxChild: '', endIn: '', endUnit: 'h',
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
   offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
@@ -173,14 +177,14 @@ export const DEFAULT: Draft = {
   perOrder: '50', dcaOrders: '10', dcaStep: '2', dcaMult: '1', dcaFirst: 'market', dcaStart: '', dcaLevels: 'step', dcaPrices: '', dcaStepScale: '1',
   clips: '10', inFlight: 2, waveSec: '3', retries: '2',
   match: 'all', conds: [], holdSec: '0', expires: '', expiresUnit: 'd', then: 'market', thenPrice: '', closePct: '100', thenMin: '15', thenSlices: '15',
-  trailMode: 'pct', trail: '1', activation: '', trailWhole: true, source: 'mark', exit: 'market', chaseSec: '15',
+  trailMode: 'pct', trail: '1', activation: '', trailWhole: false, source: 'mark', exit: 'market', chaseSec: '15',
   limitPrice: '', startMode: 'now', startDelay: '5', startPrice: '', upper: '', upperThen: 'hold', lower: '', lowerThen: 'hold', maxSpread: '',
   paper: false,
   twapClose: false, twapCloseShare: '100', minSlice: '', maxSlice: '',
   exitsOn: false, tpMode: 'pct', tp: '2', slMode: 'pct', sl: '1',
   legs: [], basketStyle: 'swarm',
   entry: 'market', entryPrice: '',
-  sweepSlip: '0.1', sweepRound: '1', sweepGiveUp: '', sweepRef: 'oracleMid', sweepVenues: [...ORACLE_VENUES],
+  sweepSlip: '0.1', sweepRound: '0.5', sweepGiveUp: '', sweepRef: 'oracleMid', sweepVenues: [...ORACLE_VENUES],
 };
 
 /** The draft in storage. Where the algo runs is not in it any more (executor.ts keeps that). */
@@ -228,6 +232,14 @@ export function loadDraft(store: Store | null = local()): Draft {
     if (raw) {
       const saved = JSON.parse(raw) as Partial<Draft> & { place?: unknown; maxChase?: unknown };
       delete saved.place;
+      // Until 2026-10-26 every TWAP rested first by default, so it worked as Chase TWAP does:
+      // a draft saved with that default takes now. A choice of Maker stays.
+      if (saved.slipFrom !== undefined && !(SLIP_FROM as readonly string[]).includes(saved.slipFrom)) delete saved.slipFrom;
+      // 2026-10-27: a trailing stop is sized by the ticket's Amount (with its slider over the position) by default.
+      const ver = typeof saved.execVer === 'number' ? saved.execVer : 1;
+      if (ver < 2 && saved.exec === 'hybrid') saved.exec = 'taker';
+      if (ver < 3) saved.trailWhole = false;
+      saved.execVer = 3;
       // A chase's max distance was kept in bp before the field took % (2026-10-26).
       const oldChase = saved.maxChase;
       delete saved.maxChase;
@@ -239,7 +251,10 @@ export function loadDraft(store: Store | null = local()): Draft {
       // Fill fast's venues: known ones only, never none.
       if (saved.sweepVenues !== undefined) {
         const vs = Array.isArray(saved.sweepVenues) ? saved.sweepVenues.filter((v) => (ORACLE_VENUES as readonly string[]).includes(v)) : [];
-        saved.sweepVenues = vs.length ? [...new Set(vs)] : [...ORACLE_VENUES];
+        const uniq = [...new Set(vs)];
+        // All six of the venues there were before 2026-10-26 meant "all": all of today's.
+        const allOld = uniq.length === 6 && ['binanceFutures', 'binanceSpot', 'bitget', 'hyperliquid', 'okx', 'bybit'].every((v) => uniq.includes(v as OracleVenue));
+        saved.sweepVenues = uniq.length && !allOld ? uniq : [...ORACLE_VENUES];
       }
       const d: Draft = { ...DEFAULT, ...saved, conds: [], legs: [] };
       if (saved.slicesAuto === undefined) d.slicesAuto = d.slices === autoSlices(d.dur, d.durUnit);
@@ -378,12 +393,14 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     leverage: p.reduceOnly ? null : p.leverage,
     marginMode: p.reduceOnly ? null : p.marginMode,
     paper: d.paper,
-    label: null,
+    label: kind === 'chasetwap' ? 'Chase TWAP' : null,
     exits: withExits ? exitsOf(d) : null,
   };
   const exec = {
     style: kind === 'chasetwap' && d.exec === 'taker' ? 'hybrid' : d.exec,
     slippageBps: n(d.slip),
+    // Only when it is not the touch: a spec from the default reads as every earlier one did.
+    ...(d.slipFrom && d.slipFrom !== 'touch' ? { slipFrom: d.slipFrom } : {}),
     offsetTicks: Math.trunc(n(d.offsetTicks) || 0),
     chaseTicks: Math.max(1, Math.trunc(n(d.chaseTicks) || 1)),
     makerShare: frac(d.makerShare),
@@ -415,7 +432,7 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
         ...base,
         quantity: p.quantity,
         slippageBps: pctToBps(d.sweepSlip) ?? 0,
-        roundMs: Math.round((n(d.sweepRound) || 1) * 1000),
+        roundMs: Math.round((n(d.sweepRound) || 0.5) * 1000),
         timeoutMs: opt(d.sweepGiveUp) ? Math.round(n(d.sweepGiveUp) * 60_000) : null,
         reference: d.sweepRef,
         venues: d.sweepRef === 'mark' || d.sweepRef === 'index' ? [...ORACLE_VENUES] : [...d.sweepVenues],
@@ -498,7 +515,7 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
 
 /* ------------------------------------------------------ advanced settings ----- */
 
-const EXEC_KEYS: ReadonlyArray<keyof Draft> = ['exec', 'slip', 'makerShare', 'chaseTicks', 'sizeJitter', 'timeJitter', 'maxPart', 'finish'];
+const EXEC_KEYS: ReadonlyArray<keyof Draft> = ['exec', 'slip', 'slipFrom', 'makerShare', 'chaseTicks', 'sizeJitter', 'timeJitter', 'maxPart', 'finish'];
 
 /**
  * Per kind, what the ticket itself shows (beside the ticket's own Amount and
@@ -608,7 +625,7 @@ export function setScaleSize(d: Pick<Draft, 'distribution' | 'skew'>, v: ScaleSi
 
 const ADV_LABEL: Partial<Record<keyof Draft, string>> = {
   slicesAuto: 'slices', urgency: 'urgency', twapClose: 'close position', minSlice: 'smallest slice', maxSlice: 'largest slice',
-  exec: 'execution', slip: 'max slippage', makerShare: 'rest share', chaseTicks: 're-price', sizeJitter: 'size varies', timeJitter: 'time varies', maxPart: 'max of volume', finish: 'at the end',
+  exec: 'execution', slip: 'max slippage', slipFrom: 'slippage from', makerShare: 'rest share', chaseTicks: 're-price', sizeJitter: 'size varies', timeJitter: 'time varies', maxPart: 'max of volume', finish: 'at the end',
   lookback: 'history', adaptive: 'adaptive', maxChild: 'largest child', endIn: 'stop after',
   displayJitter: 'size varies', offsetTicks: 'offset', refill: 'refill', postOnly: 'post only',
   offsetMode: 'rest', offsetBps: 'behind', timeout: 'give up after', onEnd: 'then',

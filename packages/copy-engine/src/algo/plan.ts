@@ -380,8 +380,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.intervalMs = s.roundMs;
       summarise();
       if (band && total! * band < m.minNotional) out.errors.push(`The order is about ${usd(total! * band)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
-      if (!px) out.warnings.push('The band is set from the reference price when it starts.');
-      else out.warnings.push('Each round re-prices from its reference price when it runs; the band here is drawn from the reference as it is now.');
       break;
     }
     case 'bracket': {

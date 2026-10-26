@@ -15,7 +15,11 @@
  * edge: buy at ref x (1 + slip) rounded DOWN to the tick, sell at ref x
  * (1 - slip) rounded UP, so the rounding never widens the band. Whatever the
  * book holds inside the band fills; the rest is cancelled by the IOC, and the
- * next round (after `roundMs`) re-prices from the reference as it moves.
+ * next round (after `roundMs`, at least 500 ms: the time a reference read,
+ * SoDEX's book and a fill confirmation take) re-prices from the reference as
+ * it moves. While SoDEX's own best ask (a sell: bid) is outside the band no
+ * round goes out - it could fill nothing - so it never sends IOCs into an
+ * empty band; it waits for the book or the reference to move.
  * It ends when filled, on cancel, or after `timeoutMs`.
  *
  * Everything here is pure: the runtime calls `sweepReference` and `sweepStep`
@@ -131,6 +135,8 @@ export interface SweepState {
   /** SoDEX's minimum order at a price, base units. */
   minQty: (price: number) => number;
   ref: SweepReference | null;
+  /** SoDEX's best ask (a buy) or bid (a sell) now, fresh; null when not known. */
+  touch?: number | null;
 }
 
 export type SweepAction =
@@ -152,6 +158,8 @@ export function sweepStep(s: SweepState): SweepAction {
   if (s.lastRoundAt !== null && s.now - s.lastRoundAt < s.roundMs) return { type: 'wait', reason: null };
   const price = sweepBand(s.side, s.ref.price, s.slippageBps, s.tickSize);
   if (!(price > 0)) return { type: 'wait', reason: 'Paused: the band price is not valid.' };
+  // The book is outside the band: an IOC now could fill nothing, so none is sent until it comes back.
+  if (s.touch != null && s.touch > 0 && (s.side === 'buy' ? s.touch > price : s.touch < price)) return { type: 'wait', reason: null };
   if (left < s.minQty(price)) return s.filled > 0 ? { type: 'done' } : { type: 'expired', left };
   return { type: 'send', price, qty: left };
 }

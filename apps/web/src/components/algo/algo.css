@@ -167,10 +167,15 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-more__icon { flex: none; }
 .algo-morehead .oe-switch { width: auto; font-weight: 400; color: var(--muted); }
 .algo-badge {
-  display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-block; box-sizing: border-box; min-width: 16px; height: 16px; padding: 0 4px;
   border-radius: 8px; background: color-mix(in srgb, var(--accent) 22%, transparent);
-  color: var(--text); font-size: var(--fs-micro); font-family: var(--font-num);
+  color: var(--text); font-size: 10px; line-height: 16px; text-align: center; vertical-align: middle;
+  font-family: var(--font-num); font-variant-numeric: tabular-nums;
 }
+.algo-amt { display: grid; grid-template-columns: minmax(0, 1fr) 3em; align-items: center; gap: var(--sp-2); }
+.algo-amt input[type='range'] { width: 100%; accent-color: var(--oe-tint, var(--pos)); }
+.algo-amt span { color: var(--muted); font-family: var(--font-num); text-align: right; }
+.algo-ordersec .algo-fields { margin-bottom: var(--sp-2); }
 .algo-bound { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); }
 
 /* --- the preview ----------------------------------------------------------- */
@@ -322,42 +327,138 @@ select.algo-sf__pick option { background: #1c1b1a; }
 /* The Preview section (AlgoPreview.tsx PlanPreview): words, a chart with axes, facts, every child. */
 .algo-pvw { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .algo-pvw__words { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.45; }
-.algo-pvw__chart { margin: 0; --algo-dir: var(--pos); }
-.algo-pvw__chart.is-sell { --algo-dir: var(--neg); }
-.algo-ch { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
-.algo-ch__grid { stroke: var(--panel-line); stroke-width: 1; }
-.algo-ch__axis { stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 1; }
-.algo-ch__tick { fill: var(--muted); font-size: 10.5px; }
-.algo-ch__tick--cum { fill: var(--dim); }
-.algo-ch__label { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
-.algo-ch__bar { fill: color-mix(in srgb, var(--algo-dir) 60%, transparent); }
-.algo-ch__bar.is-buy { fill: color-mix(in srgb, var(--pos) 60%, transparent); }
-.algo-ch__bar.is-sell { fill: color-mix(in srgb, var(--neg) 60%, transparent); }
-.algo-ch__cum { fill: none; stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1.5; stroke-linejoin: round; }
-.algo-ch__rule line { stroke: color-mix(in srgb, var(--muted) 70%, transparent); stroke-width: 1; stroke-dasharray: 4 3; }
-.algo-ch__rule text { fill: var(--muted); font-size: 10.5px; }
-.algo-ch__rule.is-now line { stroke: var(--text); stroke-opacity: 0.7; stroke-dasharray: none; }
-.algo-ch__rule.is-now text { fill: var(--text); }
-.algo-ch__rule.is-pos line { stroke: var(--pos); stroke-dasharray: none; }
-.algo-ch__rule.is-pos text { fill: var(--pos); }
-.algo-ch__rule.is-neg line { stroke: var(--neg); stroke-dasharray: none; }
-.algo-ch__rule.is-neg text { fill: var(--neg); }
-.algo-ch__rule.is-warn line { stroke: var(--warn); }
-.algo-ch__rule.is-warn text { fill: var(--warn); }
-.algo-ch__rule.is-dir line { stroke: var(--algo-dir); stroke-dasharray: none; }
-.algo-ch__rule.is-dir text { fill: var(--algo-dir); }
-.algo-ch__band rect { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
-.algo-ch__band text { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
+.algo-st { margin: 0; display: flex; flex-direction: column; gap: 8px; --st-dir: var(--pos); }
+.algo-st.is-sell { --st-dir: var(--neg); }
+.algo-st__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; }
+.algo-st__status { color: var(--text); font-size: 13px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-st__ctl { display: inline-flex; gap: 6px; }
+.algo-st__ctl .algo-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; }
+.algo-st__meter { height: 3px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.algo-st__meter span { display: block; height: 100%; background: var(--st-dir); border-radius: inherit; transition: width 0.25s ease-out; }
+.algo-st__svg { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-st__grid { stroke: var(--panel-line); stroke-width: 1; }
+.algo-st__axis { stroke: color-mix(in srgb, var(--muted) 45%, transparent); stroke-width: 1; }
+.algo-st__tick { fill: var(--dim); font-size: 10.5px; }
+.algo-st__tick.is-cum { fill: var(--dim); font-size: 10px; }
+.algo-st__unit { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
+.algo-st__clock { fill: var(--text); font-size: 10.5px; }
+
+/* the price, drawn as it goes; the whole example path faint behind it */
+.algo-st__path { fill: none; stroke: var(--text); stroke-opacity: 0.85; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.algo-st__path.is-ghost { stroke-opacity: 0.12; stroke-dasharray: 2 3; }
+.algo-st__path.is-ref { stroke: var(--muted); stroke-opacity: 0.9; }
+.algo-st__order { fill: none; stroke: var(--st-dir); stroke-width: 2; stroke-linejoin: round; }
+.algo-st__order.is-neg { stroke: var(--neg); }
+.algo-st__order.is-pos { stroke: var(--pos); }
+.algo-st__head line { stroke: var(--text); stroke-opacity: 0.18; stroke-width: 1; }
+.algo-st__head circle { fill: var(--text); }
+.algo-st__cum { fill: none; stroke: var(--text); stroke-opacity: 0.7; stroke-width: 1.6; stroke-linejoin: round; }
+
+/* children over time: a ghost until due, then filled; the newest lit */
+.algo-st__bar { fill: color-mix(in srgb, var(--muted) 14%, transparent); transition: fill 0.2s; }
+.algo-st__bar.is-on.is-pos { fill: color-mix(in srgb, var(--pos) 62%, transparent); }
+.algo-st__bar.is-on.is-neg { fill: color-mix(in srgb, var(--neg) 62%, transparent); }
+.algo-st__bar.is-fresh.is-pos { fill: var(--pos); }
+.algo-st__bar.is-fresh.is-neg { fill: var(--neg); }
+
+/* resting levels: dashed and faint until filled */
+.algo-st__lvl line { stroke: color-mix(in srgb, var(--st-dir) 40%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+.algo-st__lvl rect { fill: color-mix(in srgb, var(--st-dir) 22%, transparent); }
+.algo-st__lvl.is-on line { stroke: var(--st-dir); stroke-opacity: 0.55; stroke-dasharray: none; }
+.algo-st__lvl.is-on rect { fill: var(--st-dir); }
+
+/* price tags at the right */
+.algo-st__rule line { stroke: var(--muted); stroke-opacity: 0.7; stroke-width: 1; }
+.algo-st__rule.is-dashed line { stroke-dasharray: 4 3; }
+.algo-st__rule rect { fill: color-mix(in srgb, var(--muted) 16%, transparent); }
+.algo-st__rule text { fill: var(--text); font-size: 10.5px; }
+.algo-st__rule.is-now line { stroke: var(--text); stroke-opacity: 0.45; }
+.algo-st__rule.is-pos line { stroke: var(--pos); }
+.algo-st__rule.is-pos rect { fill: color-mix(in srgb, var(--pos) 22%, transparent); }
+.algo-st__rule.is-neg line { stroke: var(--neg); }
+.algo-st__rule.is-neg rect { fill: color-mix(in srgb, var(--neg) 22%, transparent); }
+.algo-st__rule.is-warn line { stroke: var(--warn); }
+.algo-st__rule.is-warn rect { fill: color-mix(in srgb, var(--warn) 22%, transparent); }
+.algo-st__rule.is-dir line { stroke: var(--st-dir); }
+.algo-st__rule.is-dir rect { fill: color-mix(in srgb, var(--st-dir) 28%, transparent); }
+.algo-st__rule { transition: opacity 0.3s; }
+.algo-st__rule.is-faded { opacity: 0.32; }
+.algo-st__lead { stroke: var(--muted); stroke-opacity: 0.5; }
+
+.algo-st__band { fill: color-mix(in srgb, var(--accent) 10%, transparent); }
+.algo-st__band.is-pos { fill: color-mix(in srgb, var(--pos) 12%, transparent); }
+.algo-st__band.is-neg { fill: color-mix(in srgb, var(--neg) 12%, transparent); }
+.algo-st__ioc line { stroke-width: 2; stroke-linecap: round; }
+.algo-st__ioc.is-pos line { stroke: var(--pos); }
+.algo-st__ioc.is-neg line { stroke: var(--neg); }
+.algo-st__ioc text { fill: var(--text); font-size: 10px; }
+.algo-st__met line { stroke: var(--warn); stroke-opacity: 0.6; stroke-dasharray: 2 3; }
+.algo-st__met text { fill: var(--warn); font-size: 10px; font-family: var(--font-text); }
+
+/* the iceberg's column: filled, the clip shown, the hidden rest */
+.algo-st__ice rect { rx: 2px; transition: height 0.3s, y 0.3s; }
+.algo-st__ice .is-hidden { fill: color-mix(in srgb, var(--muted) 14%, transparent); stroke: color-mix(in srgb, var(--muted) 35%, transparent); stroke-dasharray: 2 2; }
+.algo-st__ice .is-show.is-pos { fill: var(--pos); }
+.algo-st__ice .is-show.is-neg { fill: var(--neg); }
+.algo-st__ice .is-done.is-pos { fill: color-mix(in srgb, var(--pos) 40%, transparent); }
+.algo-st__ice .is-done.is-neg { fill: color-mix(in srgb, var(--neg) 40%, transparent); }
+.algo-st__ice text { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
+
+/* fills: a dot and one ping */
+.algo-st__dot circle { stroke: var(--panel, var(--bg)); stroke-width: 1.5; }
+.algo-st__dot.is-pos circle { fill: var(--pos); }
+.algo-st__dot.is-neg circle { fill: var(--neg); }
+.algo-st__dot .algo-st__ping { fill: none; stroke-width: 1.5; transform-box: fill-box; transform-origin: center; animation: algo-st-ping 0.7s ease-out forwards; }
+.algo-st__dot.is-pos .algo-st__ping { stroke: var(--pos); }
+.algo-st__dot.is-neg .algo-st__ping { stroke: var(--neg); }
+@keyframes algo-st-ping { from { transform: scale(1); opacity: 0.9; } to { transform: scale(3.2); opacity: 0; } }
+
+/* what happens, in order; the step now lit */
+.algo-st__steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.algo-st__steps li { display: flex; align-items: baseline; gap: 8px; color: var(--dim); font-size: 12.5px; line-height: 1.4; transition: color 0.25s; }
+.algo-st__steps li.is-past { color: var(--muted); }
+.algo-st__steps li.is-on { color: var(--text); }
+.algo-st__n { flex: none; width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 10.5px; font-family: var(--font-num); background: var(--line-soft); color: var(--muted); transition: background 0.25s, color 0.25s; }
+.algo-st__steps li.is-past .algo-st__n { background: color-mix(in srgb, var(--st-dir) 25%, transparent); color: var(--text); }
+.algo-st__steps li.is-on .algo-st__n { background: var(--st-dir); color: var(--bg); }
+.algo-st__note { color: var(--dim); font-size: 11.5px; }
+@media (prefers-reduced-motion: reduce) {
+  .algo-st__dot .algo-st__ping { display: none; }
+  .algo-st__meter span, .algo-st__bar, .algo-st__steps li, .algo-st__n, .algo-st__ice rect { transition: none; }
+}
 .algo-pvw__facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; }
 .algo-pvw__facts div { min-width: 0; }
 .algo-pvw__facts dt { color: var(--dim); font-size: 11.5px; }
 .algo-pvw__facts dd { margin: 0; color: var(--text); font-size: 13px; font-family: var(--font-num); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.algo-pvw__tablewrap { max-height: 240px; overflow: auto; border-top: 1px solid var(--line-soft); }
-.algo-pvw__table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
-.algo-pvw__table th { position: sticky; top: 0; background: var(--panel, var(--bg)); color: var(--dim); font-weight: 500; text-align: right; padding: 4px 6px; white-space: nowrap; }
-.algo-pvw__table td { padding: 3px 6px; text-align: right; color: var(--text); white-space: nowrap; border-top: 1px solid var(--line-soft); }
-.algo-pvw__table th:nth-child(2), .algo-pvw__table td:nth-child(2) { text-align: left; color: var(--muted); }
-.algo-pvw__table tfoot td { color: var(--text); font-weight: 500; }
+.algo-pvw__tabhead { display: flex; align-items: baseline; justify-content: space-between; margin-top: 4px; }
+.algo-pvw__tabhead span { color: var(--dim); font-size: 11.5px; }
+.algo-pvw__tablewrap {
+  max-height: 280px; overflow: auto; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025); border: 1px solid rgba(255, 255, 255, 0.07);
+}
+.algo-pvw__table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12.5px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-pvw__table th {
+  position: sticky; top: 0; z-index: 1; padding: 8px 10px; text-align: right; white-space: nowrap;
+  font-family: var(--font-text); font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim);
+  background: color-mix(in srgb, var(--panel, var(--bg)) 92%, #fff 3%); border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.algo-pvw__table td { padding: 7px 10px; text-align: right; color: var(--text); white-space: nowrap; border-top: 1px solid rgba(255, 255, 255, 0.045); }
+.algo-pvw__table tbody tr:first-child td { border-top: 0; }
+.algo-pvw__table tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.018); }
+.algo-pvw__table tbody tr:hover td { background: rgba(255, 255, 255, 0.05); }
+.algo-pvw__table th:first-child, .algo-pvw__table td:first-child { color: var(--dim); width: 1%; }
+.algo-pvw__table th:nth-child(2), .algo-pvw__table td:nth-child(2) { text-align: left; color: var(--muted); font-family: var(--font-text); }
+.algo-pvw__table td.is-size { color: var(--st-dir, var(--text)); }
+.algo-pvw.is-buy .algo-pvw__table td.is-size { color: var(--pos); }
+.algo-pvw.is-sell .algo-pvw__table td.is-size { color: var(--neg); }
+.algo-pvw__table td small { color: var(--dim); font-size: 11px; margin-left: 4px; }
+.algo-pvw__done { display: inline-flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.algo-pvw__done i { display: block; width: 36px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.algo-pvw__done i b { display: block; height: 100%; background: var(--muted); }
+.algo-pvw__table tfoot td {
+  position: sticky; bottom: 0; font-weight: 600; color: var(--text);
+  background: color-mix(in srgb, var(--panel, var(--bg)) 92%, #fff 3%); border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
 
 /* Fill fast's venues: several of a few, at least one. */
 .algo-chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; }
@@ -369,3 +470,143 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-chip.is-on { background: rgba(255, 255, 255, 0.13); color: var(--text); border-color: transparent; }
 .algo-chip:disabled { cursor: default; }
 .algo-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* A practice run, unmistakable in the Algos tab: a badge and an edge on its card. */
+.algo-card.is-paper { box-shadow: inset 3px 0 0 var(--warn); background: color-mix(in srgb, var(--warn) 4%, transparent); }
+.algo-card.is-paper .algo-card__mark { border-style: dashed; border-color: var(--warn); }
+.algo-card__tags { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.algo-practice {
+  flex: none; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase;
+  color: var(--warn) !important; border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+.algo-vstate.is-live { color: var(--pos); }
+.algo-vstate.is-bad { color: var(--warn); }
+
+/* the live frame: real prices solid up to now, the example future dashed on a darker ground */
+.algo-st__future { fill: rgba(0, 0, 0, 0.22); }
+.algo-st__hist { fill: none; stroke: var(--text); stroke-opacity: 0.9; stroke-width: 1.5; stroke-linejoin: round; }
+.algo-st__nowline { stroke: var(--text); stroke-opacity: 0.35; stroke-width: 1; }
+.algo-st__tick.is-now { fill: var(--text); }
+.algo-st__path { stroke-dasharray: 4 3; }
+.algo-st__path.is-live, .algo-st__path.is-touch.is-live { stroke-dasharray: none; }
+.algo-st__path.is-touch { stroke: var(--text); stroke-opacity: 0.9; }
+.algo-st__path.is-ref { stroke-dasharray: 2 3; }
+.algo-st__edge { fill: none; stroke-width: 1.6; stroke-dasharray: 5 3; }
+.algo-st__edge.is-pos { stroke: var(--pos); }
+.algo-st__edge.is-neg { stroke: var(--neg); }
+.algo-st__bandarea.is-pos { fill: color-mix(in srgb, var(--pos) 12%, transparent); }
+.algo-st__bandarea.is-neg { fill: color-mix(in srgb, var(--neg) 12%, transparent); }
+.algo-st__wait { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+.algo-st__strip { fill: color-mix(in srgb, var(--muted) 22%, transparent); }
+.algo-st__strip.is-pos { fill: var(--pos); }
+.algo-st__strip.is-neg { fill: var(--neg); }
+.algo-st__dot.is-muted circle { fill: var(--muted); }
+.algo-st__profile { fill: color-mix(in srgb, var(--accent, var(--muted)) 14%, transparent); stroke: color-mix(in srgb, var(--accent, var(--muted)) 45%, transparent); stroke-width: 1; }
+.algo-st__unit.is-profile { fill: var(--muted); }
+.algo-st__pace { stroke: var(--muted); stroke-opacity: 0.6; stroke-dasharray: 3 4; }
+.algo-st__views { display: flex; flex-wrap: wrap; gap: 6px; }
+.algo-st__live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.algo-st__live i { width: 7px; height: 7px; border-radius: 50%; background: var(--pos); animation: algo-st-live 1.6s ease-in-out infinite; }
+@keyframes algo-st-live { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .algo-st__live i { animation: none; } }
+
+/* A conditional's conditions: each a soft card; the market and the choices as the ticket's dropdowns. */
+.algo-cond {
+  display: flex; flex-direction: column; gap: var(--sp-2);
+  padding: 10px; border: 1px solid var(--line); border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.025);
+}
+.algo-cond__head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); }
+.algo-cond__head:has(.algo-cond__join) { grid-template-columns: auto auto minmax(0, 1fr) auto; }
+.algo-cond__join { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+.algo-cond__line { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--sp-2); }
+.algo-cond__word { color: var(--muted); font-size: var(--fs-base); white-space: nowrap; }
+.algo-msel {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 6px;
+  height: 40px; min-width: 0; width: 100%; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: none;
+  color: var(--text); font: inherit; font-size: var(--fs-base); cursor: pointer; white-space: nowrap;
+  transition: border-color var(--oe-hover, 0.15s) var(--oe-ease, ease);
+}
+.algo-msel:hover { border-color: color-mix(in srgb, var(--text) 30%, var(--line)); }
+.algo-msel[aria-expanded='true'] { border-color: var(--accent); }
+.algo-msel.is-compact { height: 32px; }
+.algo-msel.is-mini { width: auto; height: 32px; padding: 0 8px; color: var(--muted); }
+.algo-cond__line .algo-msel.is-mini { height: 40px; }
+.algo-msel .fx-sel__v { min-width: 0; }
+.algo-addcond {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 100%; height: 34px;
+  border: 1px dashed var(--line); border-radius: var(--radius-md); background: none;
+  color: var(--muted); font: inherit; font-size: var(--fs-sm, 13px); cursor: pointer;
+}
+.algo-addcond:hover { color: var(--text); border-color: color-mix(in srgb, var(--text) 35%, var(--line)); }
+.algo-addcond:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+/* a running order's window */
+.algo-st__resting { stroke-width: 2; stroke-linecap: round; }
+.algo-st__resting.is-pos { stroke: var(--pos); }
+.algo-st__resting.is-neg { stroke: var(--neg); }
+.algo-st__fill { stroke: var(--panel, var(--bg)); stroke-width: 1.5; }
+.algo-st__fill.is-pos { fill: var(--pos); }
+.algo-st__fill.is-neg { fill: var(--neg); }
+.algo-st__due { stroke-width: 2; stroke-dasharray: 2 2; }
+.algo-st__due.is-pos { stroke: color-mix(in srgb, var(--pos) 70%, transparent); }
+.algo-st__due.is-neg { stroke: color-mix(in srgb, var(--neg) 70%, transparent); }
+.algo-st__need path { fill: none; stroke: var(--warn); stroke-width: 1.4; stroke-dasharray: 3 3; }
+.algo-st__need text { fill: var(--warn); font-size: 10.5px; }
+.algo-st__nowdot { fill: var(--text); }
+.algo-practice--nav { align-self: flex-start; margin: 6px 0 0; }
+.algo-sheet.is-paper .stg__nav { box-shadow: inset 0 3px 0 var(--warn); }
+
+/* VWAP's usual volume by hour */
+.algo-st__hour { fill: color-mix(in srgb, var(--muted) 26%, transparent); }
+.algo-st__hour.is-pos { fill: color-mix(in srgb, var(--pos) 70%, transparent); }
+.algo-st__hour.is-neg { fill: color-mix(in srgb, var(--neg) 70%, transparent); }
+.algo-st__window { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 3 3; }
+.algo-st__due:not(.is-on) { opacity: 0.35; }
+.algo-st__rule.is-end .algo-st__lead { fill: none; stroke-dasharray: 2 2; }
+
+/* a resting slice's limit part: dotted, as the order book draws a resting limit */
+.algo-st__bar.is-limit { fill: transparent; stroke-width: 1; stroke-dasharray: 2 2; }
+.algo-st__bar.is-limit.is-pos { stroke: color-mix(in srgb, var(--pos) 55%, transparent); }
+.algo-st__bar.is-limit.is-neg { stroke: color-mix(in srgb, var(--neg) 55%, transparent); }
+.algo-st__bar.is-limit.is-on.is-pos { stroke: var(--pos); fill: color-mix(in srgb, var(--pos) 10%, transparent); }
+.algo-st__bar.is-limit.is-on.is-neg { stroke: var(--neg); fill: color-mix(in srgb, var(--neg) 10%, transparent); }
+/* a max slippage far past the book: marked at the edge */
+.algo-st__offscale path { fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.algo-st__offscale.is-pos path { stroke: var(--pos); }
+.algo-st__offscale.is-neg path { stroke: var(--neg); }
+.algo-st__offscale rect { fill: color-mix(in srgb, var(--muted) 16%, transparent); }
+.algo-st__offscale text { fill: var(--text); font-size: 10.5px; }
+/* VWAP: a bracket from nothing to the busiest hour, named */
+.algo-st__range line { stroke: var(--muted); stroke-width: 1.2; }
+.algo-st__range text { fill: var(--muted); font-size: 10px; font-family: var(--font-text); }
+
+/* what the marks mean: under the picture, never in it */
+.algo-st__key { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+.algo-st__key li { display: inline-flex; align-items: center; gap: 6px; }
+.algo-st__sw { flex: none; display: inline-block; width: 14px; height: 10px; border-radius: 2px; --c: var(--muted); }
+.algo-st__sw.is-pos { --c: var(--pos); }
+.algo-st__sw.is-neg { --c: var(--neg); }
+.algo-st__sw.is-warn { --c: var(--warn); }
+.algo-st__sw--bar { background: color-mix(in srgb, var(--c) 70%, transparent); }
+.algo-st__sw--limit { border: 1px dashed var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.algo-st__sw--area { background: color-mix(in srgb, var(--c) 18%, transparent); }
+.algo-st__sw--line, .algo-st__sw--dotline, .algo-st__sw--dash, .algo-st__sw--order, .algo-st__sw--cum, .algo-st__sw--pace { height: 0; border-radius: 0; border-top: 2px solid var(--text); }
+.algo-st__sw--dotline { border-top: 2px dotted var(--muted); }
+.algo-st__sw--dash { border-top: 2px dashed var(--c); }
+.algo-st__sw--order { border-top-color: var(--c); }
+.algo-st__sw--cum { border-top-color: color-mix(in srgb, var(--text) 70%, transparent); }
+.algo-st__sw--pace { border-top: 2px dashed var(--muted); }
+.algo-st__sw--dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); }
+.algo-st__sw--ring { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.algo-st__sw--tick { width: 2px; height: 12px; background: var(--c); }
+
+/* the table: words left, figures right, the time muted; the total row not stuck over the rows */
+.algo-pvw__table:not(.is-orders) th:nth-child(3), .algo-pvw__table:not(.is-orders) td:nth-child(3) { text-align: left; color: var(--muted); font-family: var(--font-text); }
+.algo-pvw__table td:nth-child(2), .algo-pvw__table td:nth-child(3) { white-space: nowrap; }
+.algo-pvw__table tfoot td { position: static; }
+.algo-pvw__table td small { display: inline-block; min-width: 3.6em; text-align: right; }
+
+.algo-st__break > path { fill: none; stroke: var(--muted); stroke-width: 1.2; }

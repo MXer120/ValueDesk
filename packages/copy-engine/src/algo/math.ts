@@ -112,7 +112,7 @@ export interface Candle {
   v: number;
 }
 
-const isWeekend = (t: number): boolean => {
+export const isWeekend = (t: number): boolean => {
   const d = new Date(t).getUTCDay();
   return d === 0 || d === 6;
 };
@@ -288,9 +288,10 @@ export function makerPrice(side: Side, q: Quote, offsetTicks: number, offsetBps:
  * Returns null when the limit price leaves nothing to take (a buy limit under
  * the ask): there is nothing to send.
  */
-export function takerPrice(side: Side, q: Quote, slippageBps: number, m: MarketInfo, mark: number | null, limit: number | null): number | null {
+export function takerPrice(side: Side, q: Quote, slippageBps: number, m: MarketInfo, mark: number | null, limit: number | null, from: number | null = null): number | null {
   const touch = side === 'buy' ? q.ask : q.bid;
-  let p = Number(takerLimit(side, touch, slippageBps, m, mark));
+  // The slippage is measured from `from` (a mid, mark, index or oracle price) when given, else from the touch.
+  let p = Number(takerLimit(side, from !== null && from > 0 ? from : touch, slippageBps, m, mark));
   if (limit !== null) {
     if (side === 'buy' && limit < touch) return null;
     if (side === 'sell' && limit > touch) return null;

@@ -25,7 +25,7 @@ export const ALGO_MENU: readonly AlgoMenuItem[] = [
   { id: 'swarm', name: 'Swarm', detail: 'Many small takers in waves, so the book refills between them.' },
   { id: 'conditional', name: 'Conditional', detail: 'When price, a move, funding, OI, spread, volume or time say so: act.' },
   { id: 'trailing', name: 'Trailing stop', detail: 'A stop that follows the price at a distance and closes when it turns.' },
-  { id: 'sweep', name: 'Fill fast', detail: 'Fills as fast as the book allows: IOC limits, round after round, never further than your slippage from the Binance price.' },
+  { id: 'sweep', name: 'Fill fast', detail: 'Fills as fast as the book allows: IOC limits, round after round, never past your max slippage from an oracle or SoDEX price.' },
   { id: 'bracket', name: 'Bracket', detail: 'An entry with its take-profit and stop-loss on SoDEX: when one fills, the other is cancelled.' },
   { id: 'basket', name: 'Basket', detail: 'One order over several markets at once, long and short, in USD per market.' },
 ];

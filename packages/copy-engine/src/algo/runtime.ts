@@ -47,7 +47,7 @@ import {
   type Quote,
   type TrailState,
 } from './math.ts';
-import type { OracleVenue, VenueQuote } from '../oracle.ts';
+import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
@@ -55,6 +55,7 @@ import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } f
 import type { AlgoStore } from './store.ts';
 import {
   FINAL_STATUSES,
+  SLIP_FROM_NAMES,
   type AlgoEvent,
   type AlgoEventKind,
   type AlgoRecord,
@@ -621,6 +622,22 @@ export class AlgoRuntime {
     }
   }
 
+  /** What a taker leg's slippage is measured from: null for the touch, a price, or undefined when that price is not fresh. */
+  private slipBase(symbol: string, exec: ExecSpec, q: Quote): number | null | undefined {
+    const from = exec.slipFrom ?? 'touch';
+    if (from === 'touch') return null;
+    if (from === 'mid') return mid(q);
+    const now = Date.now();
+    if (from === 'mark' || from === 'index') {
+      const mk = this.market.mark(symbol);
+      const p = mk && now - mk.at <= SWEEP_MAX_AGE_MS ? (from === 'mark' ? mk.mark : mk.index) : null;
+      return p && p > 0 ? p : undefined;
+    }
+    const c = combineOracle(this.oracleFor(symbol.replace(/-USD$/, ''), now), now, { maxAgeMs: SWEEP_MAX_AGE_MS });
+    const p = from === 'oracleFair' ? c.fair : c.mid;
+    return p !== null && p > 0 ? p : undefined;
+  }
+
   /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
   private oracleFor(coin: string, now: number, venues?: readonly OracleVenue[]): VenueQuote[] {
     // Per coin and venue set: a browser's API gives several venues only as their combined price.
@@ -656,6 +673,7 @@ export class AlgoRuntime {
     const mark = this.market.mark(s.symbol);
     // SoDEX's own prices only when the spec asks for them or as the fallback: the oracle is not read for a mark or index sweep.
     const own = s.reference === 'mark' || s.reference === 'index';
+    const book = this.market.quote(s.symbol);
     const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now, s.venues), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
     const act = sweepStep({
       side: s.side,
@@ -672,6 +690,7 @@ export class AlgoRuntime {
       stepSize: m.stepSize,
       minQty: (p) => minChildQty(m, p),
       ref,
+      touch: book ? (s.side === 'buy' ? book.ask : book.bid) : null,
     });
     switch (act.type) {
       case 'done':
@@ -819,7 +838,12 @@ export class AlgoRuntime {
         if (room < minQ && o.late >= o.total && !o.more) await this.end(a, 'done', a.filled > 0 ? `Filled; ${dec(room)} ${m.base} under SoDEX's minimum order was left.` : 'Under SoDEX\'s minimum order size: nothing could be sent.');
         return;
       }
-      const price = takerPrice(side, q, o.exec.slippageBps, m, mk, limit);
+      const from = this.slipBase(s.symbol, o.exec, q);
+      if (from === undefined) {
+        await this.hold(a, `Held: no fresh ${SLIP_FROM_NAMES[o.exec.slipFrom ?? 'touch'].toLowerCase()} to measure your max slippage from.`);
+        return;
+      }
+      const price = takerPrice(side, q, o.exec.slippageBps, m, mk, limit, from);
       if (price === null) {
         await this.hold(a, `Held: the price is past your limit of ${limit}.`);
         return;

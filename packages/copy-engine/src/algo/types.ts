@@ -53,10 +53,28 @@ export type Side = 'buy' | 'sell';
  */
 export type ExecStyle = 'taker' | 'maker' | 'hybrid';
 
+/**
+ * What a taker leg's max slippage is measured from: SoDEX's best price on the
+ * far side (the default, and every spec from before 2026-10-26), its mid, its
+ * mark or index, or the shared oracle's mid or fair price (all venues).
+ */
+export type SlipFrom = 'touch' | 'mid' | 'mark' | 'index' | 'oracleMid' | 'oracleFair';
+export const SLIP_FROM: readonly SlipFrom[] = ['touch', 'mid', 'mark', 'index', 'oracleMid', 'oracleFair'];
+export const SLIP_FROM_NAMES: Readonly<Record<SlipFrom, string>> = {
+  touch: 'Best price',
+  mid: 'SoDEX mid',
+  mark: 'SoDEX mark',
+  index: 'SoDEX index',
+  oracleMid: 'Oracle mid',
+  oracleFair: 'Oracle fair price',
+};
+
 export interface ExecSpec {
   style: ExecStyle;
-  /** Taker legs: the worst price per child, basis points past the touch. */
+  /** Taker legs: the worst price per child, basis points past `slipFrom`. */
   slippageBps: number;
+  /** What the slippage is measured from; absent: the touch. */
+  slipFrom?: SlipFrom;
   /** Maker legs: ticks behind the best price (0 = join it; -1 = one tick inside the spread where there is room). */
   offsetTicks: number;
   /** Maker legs: re-price once the best price is this many ticks away from the order. */

@@ -1460,3 +1460,17 @@ button.oe-select[aria-expanded='true'] {
 .oe--blocked .oe-dir__btn.is-on.is-sell { background: var(--warn); color: var(--bg); }
 .oe--blocked .oe-dir--tabs .oe-dir__btn.is-on.is-buy,
 .oe--blocked .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: none; color: var(--warn); box-shadow: inset 0 -2px 0 var(--warn); }
+/* ALGO, PRACTICE RUN. Nothing reaches SoDEX: the ticket's accent is blue for
+   Long and Short alike, in place of long-green / short-red - the wash, rim and
+   glare, the slider, the switches, the Long / Short switch and the main button.
+   Only the algo tab sets the class (AlgoTicket's `paper`); blocked wins. */
+.panel.oe.oe--paper,
+.dash-panel__body > .panel.oe.oe--paper { --oe-tint: var(--oe-paper); }
+.oe--paper { --oe-paper: #4c8dff; }
+.oe--paper .oe-side__btn.is-buy,
+.oe--paper .oe-side__btn.is-sell { background: linear-gradient(90deg, var(--oe-paper) 0%, color-mix(in srgb, var(--oe-paper), #000 45%) var(--oe-ramp-end)); color: var(--bg); }
+.oe--paper .oe-dir__btn.is-on.is-buy,
+.oe--paper .oe-dir__btn.is-on.is-sell { background: var(--oe-paper); color: var(--bg); }
+.oe--paper .oe-dir--tabs .oe-dir__btn.is-on.is-buy,
+.oe--paper .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: none; color: var(--oe-paper); box-shadow: inset 0 -2px 0 var(--oe-paper); }
+

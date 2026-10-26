@@ -17,6 +17,9 @@ import { ORACLE_VENUES, combineOracle, type OracleCombined, type OracleVenue, ty
 
 export interface OracleRead {
   quotes: VenueQuote[];
+  /** Venues the server found stale or could not read (a combined answer names them; its quotes are not handed out). */
+  stale: OracleVenue[];
+  missing: OracleVenue[];
   /** When this browser received it. */
   at: number;
 }
@@ -28,6 +31,8 @@ type Answer = {
   mid?: number | null;
   fair?: number | null;
   used?: OracleVenue[];
+  stale?: OracleVenue[];
+  missing?: OracleVenue[];
   ageMs?: number | null;
 };
 
@@ -49,7 +54,7 @@ export async function readOracle(coin: string, venues: readonly OracleVenue[] = 
   const j = (await r.json().catch(() => null)) as Answer | null;
   if (!j?.ok) throw new Error(j?.error ?? `The oracle did not answer (${r.status})`);
   const now = Date.now();
-  return { at: now, quotes: quotesOf(j, now) };
+  return { at: now, quotes: quotesOf(j, now), stale: Array.isArray(j.stale) ? j.stale : [], missing: Array.isArray(j.missing) ? j.missing : [] };
 }
 
 /** The coin of a SoDEX symbol ('BTC-USD' -> 'BTC'). */
@@ -83,5 +88,9 @@ export function useOracle(coin: string | null, venues: readonly OracleVenue[], o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [coin, on, venueKey]);
   if (!read) return null;
-  return { ...combineOracle(read.quotes, now, { venues }), quotes: read.quotes };
+  const c = combineOracle(read.quotes, now, { venues });
+  // The server's word on the venues it did not use: a combined answer carries no quotes for them.
+  const stale = [...new Set([...c.stale, ...read.stale.filter((v) => venues.includes(v) && !c.used.includes(v))])];
+  const missing = c.missing.filter((v) => !stale.includes(v) && (read.missing.includes(v) || !c.used.includes(v)));
+  return { ...c, stale, missing, quotes: read.quotes };
 }

@@ -942,6 +942,20 @@ export function OrderEntry({
      refuses with the executor's reason, even before a wallet is connected -
      the executor is the fix, not Connect wallet. */
   const algoBlocked = isAlgo && algoState.blocked !== null;
+  // A trailing stop only ever closes: Reduce only is on the moment it is chosen (long or short alike),
+  // and goes back to what it was when another order type is picked.
+  const reduceBefore = useRef<boolean | null>(null);
+  const trailingNow = isAlgo && algoKind === 'trailing';
+  useEffect(() => {
+    if (trailingNow) {
+      if (reduceBefore.current === null) reduceBefore.current = reduceOnly;
+      setReduceOnly(true);
+    } else if (reduceBefore.current !== null) {
+      setReduceOnly(reduceBefore.current);
+      reduceBefore.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trailingNow]);
   /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
   const sizedByAmount = !isAlgo || algoState.needsAmount;
   const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
@@ -1211,8 +1225,13 @@ export function OrderEntry({
    * side until a button is pressed, so that caveat is printed rather than
    * papered over.
    */
-  const sliderBasis =
-    available === null || available <= 0
+  /* A trailing stop closes what is open: its slider is a share of the position (its value at the
+     price), not of the balance - 50% is half the position, MAX all of it. */
+  const trailing = isAlgo && algoKind === 'trailing';
+  const positionValue = positionQty !== null && positionQty !== 0 && effectivePrice > 0 ? Math.abs(positionQty) * effectivePrice : null;
+  const sliderBasis = trailing
+    ? positionValue
+    : available === null || available <= 0
       ? null
       : engine === 'perps'
         ? (lev > 0 ? available * lev : null)
@@ -1575,7 +1594,7 @@ export function OrderEntry({
 
   return (
     <section
-      className={`panel oe is-${side}${algoBlocked ? ' oe--blocked' : ''}`}
+      className={`panel oe is-${side}${algoBlocked ? ' oe--blocked' : isAlgo && algoState.paper ? ' oe--paper' : ''}`}
       style={{
         ['--oe-wash' as string]: `${Math.round(7 + heat * 11)}%`,
         ['--oe-edge' as string]: `${Math.round(22 + heat * 28)}%`,
@@ -2165,6 +2184,15 @@ export function OrderEntry({
               marginMode={marginMode}
               bid={bestBid > 0 ? bestBid : null}
               ask={bestAsk > 0 ? bestAsk : null}
+              depth={book}
+              positionQty={positionQty}
+              sizePct={shownPct}
+              onSizePct={setSizePct}
+              onQuantity={(v) => {
+                sizeBySlider.current = false;
+                setSizeUnit('base');
+                setSizeInput(v);
+              }}
               last={num(lastPrice) > 0 ? num(lastPrice) : null}
               network={network}
               builderFee={bNow}

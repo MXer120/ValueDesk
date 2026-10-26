@@ -5,7 +5,7 @@
  *   ORACLE MID   the median of the fresh venues' mids ((bid + ask) / 2).
  *   ORACLE FAIR  the median of the fresh venues' fair prices, where a venue's
  *                fair price is its own MARK price when it publishes one (the
- *                perpetual venues: Binance USD-M, Bitget, OKX, Bybit - each
+ *                perpetual venues: Binance USD-M, Bitget, OKX, Bybit, Gate, MEXC, Deribit - each
  *                venue's manipulation-resistant, index-anchored price that it
  *                liquidates on), and its mid where it does not (Binance spot,
  *                Hyperliquid's book read here). A median, so one venue's wick
@@ -28,6 +28,22 @@
  *   hyperliquid     POST api.hyperliquid.xyz/info {type: l2Book} (bid, ask)
  *   okx             GET www.okx.com/api/v5/market/ticker + /api/v5/public/mark-price (SWAP)
  *   bybit           GET api.bybit.com/v5/market/tickers?category=linear (bid, ask, mark)
+ *   bybitSpot       GET api.bybit.com/v5/market/tickers?category=spot
+ *   okxSpot         GET www.okx.com/api/v5/market/ticker (BTC-USDT)
+ *   bitgetSpot      GET api.bitget.com/api/v2/spot/market/tickers
+ *   coinbase        GET api.exchange.coinbase.com/products/BTC-USD/ticker (USD)
+ *   kraken          GET api.kraken.com/0/public/Ticker?pair=BTCUSD (USD)
+ *   gateFutures     GET api.gateio.ws/api/v4/futures/usdt/tickers (bid, ask, mark)
+ *   gateSpot        GET api.gateio.ws/api/v4/spot/tickers
+ *   mexcFutures     GET contract.mexc.com/api/v1/contract/ticker (bid, ask, fair price)
+ *   mexcSpot        GET api.mexc.com/api/v3/ticker/bookTicker
+ *   kucoinFutures   GET api-futures.kucoin.com/api/v1/ticker (XBTUSDTM)
+ *   kucoinSpot      GET api.kucoin.com/api/v1/market/orderbook/level1
+ *   htx             GET api.huobi.pro/market/detail/merged
+ *   deribit         GET www.deribit.com/api/v2/public/ticker (BTC-PERPETUAL; others _USDC-PERPETUAL; mark)
+ *
+ * Most quote in USDT; Coinbase, Kraken and Deribit in USD. The median keeps
+ * the small USDT/USD basis from moving the price while most venues are USDT.
  *
  * Prices are per ONE unit of the coin (a 1000x contract is scaled on the way in).
  *
@@ -39,15 +55,33 @@ import type { FetchLike } from './io.ts';
 
 // ---- shared with apps/server/src/valuescan/oracle.ts below this line ----
 
-export type OracleVenue = 'binanceFutures' | 'binanceSpot' | 'bitget' | 'hyperliquid' | 'okx' | 'bybit';
-export const ORACLE_VENUES: readonly OracleVenue[] = ['binanceFutures', 'binanceSpot', 'bitget', 'hyperliquid', 'okx', 'bybit'];
+export type OracleVenue =
+  | 'binanceFutures' | 'binanceSpot' | 'bybit' | 'bybitSpot' | 'okx' | 'okxSpot' | 'bitget' | 'bitgetSpot' | 'hyperliquid'
+  | 'coinbase' | 'kraken' | 'gateFutures' | 'gateSpot' | 'mexcFutures' | 'mexcSpot' | 'kucoinFutures' | 'kucoinSpot' | 'htx' | 'deribit';
+export const ORACLE_VENUES: readonly OracleVenue[] = [
+  'binanceFutures', 'binanceSpot', 'bybit', 'bybitSpot', 'okx', 'okxSpot', 'bitget', 'bitgetSpot', 'hyperliquid',
+  'coinbase', 'kraken', 'gateFutures', 'gateSpot', 'mexcFutures', 'mexcSpot', 'kucoinFutures', 'kucoinSpot', 'htx', 'deribit',
+];
 export const ORACLE_VENUE_NAMES: Readonly<Record<OracleVenue, string>> = {
   binanceFutures: 'Binance futures',
   binanceSpot: 'Binance spot',
-  bitget: 'Bitget',
+  bybit: 'Bybit futures',
+  bybitSpot: 'Bybit spot',
+  okx: 'OKX futures',
+  okxSpot: 'OKX spot',
+  bitget: 'Bitget futures',
+  bitgetSpot: 'Bitget spot',
   hyperliquid: 'Hyperliquid',
-  okx: 'OKX',
-  bybit: 'Bybit',
+  coinbase: 'Coinbase',
+  kraken: 'Kraken',
+  gateFutures: 'Gate futures',
+  gateSpot: 'Gate spot',
+  mexcFutures: 'MEXC futures',
+  mexcSpot: 'MEXC spot',
+  kucoinFutures: 'KuCoin futures',
+  kucoinSpot: 'KuCoin spot',
+  htx: 'HTX',
+  deribit: 'Deribit',
 };
 export const isOracleVenue = (v: unknown): v is OracleVenue => typeof v === 'string' && (ORACLE_VENUES as readonly string[]).includes(v);
 
@@ -145,14 +179,23 @@ export function oracleSymbol(venue: OracleVenue, coin: string): { symbol: string
   switch (venue) {
     case 'hyperliquid': return { symbol: c, units: 1 };
     case 'okx': return { symbol: `${c}-USDT-SWAP`, units: 1 };
+    case 'okxSpot': return { symbol: `${c}-USDT`, units: 1 };
+    case 'coinbase': return { symbol: `${c}-USD`, units: 1 };
+    case 'kraken': return { symbol: `${c}USD`, units: 1 };
+    case 'gateFutures': case 'gateSpot': case 'mexcFutures': return { symbol: `${c}_USDT`, units: 1 };
+    case 'kucoinFutures': return { symbol: `${c === 'BTC' ? 'XBT' : c}USDTM`, units: 1 };
+    case 'kucoinSpot': return { symbol: `${c}-USDT`, units: 1 };
+    case 'htx': return { symbol: `${c.toLowerCase()}usdt`, units: 1 };
+    case 'deribit': return { symbol: c === 'BTC' || c === 'ETH' ? `${c}-PERPETUAL` : `${c}_USDC-PERPETUAL`, units: 1 };
     default: return { symbol: `${c}USDT`, units: 1 };
   }
 }
 
 const num = (x: unknown): number => (typeof x === 'string' || typeof x === 'number' ? Number(x) : NaN);
+/** The venue's own stamp, but never later than when we read it (a venue's clock ahead of ours is not a fresher quote). */
 const stamp = (x: unknown, now: number): number => {
   const t = num(x);
-  return Number.isFinite(t) && t > 1e12 ? t : now;
+  return Number.isFinite(t) && t > 1e12 ? Math.min(t, now) : now;
 };
 
 function quote(venue: OracleVenue, bid: number, ask: number, mark: number | null, at: number, units = 1): VenueQuote | null {
@@ -199,6 +242,70 @@ export async function readVenue(fetch: FetchLike, venue: OracleVenue, coin: stri
       const r = await getJson<{ result?: { list?: Array<{ bid1Price?: string; ask1Price?: string; markPrice?: string }> }; time?: number }>(fetch, `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`);
       const d = r?.result?.list?.[0];
       return d ? quote(venue, num(d.bid1Price), num(d.ask1Price), num(d.markPrice), stamp(r?.time, now()), vs.units) : null;
+    }
+    case 'bybitSpot': {
+      const r = await getJson<{ result?: { list?: Array<{ bid1Price?: string; ask1Price?: string }> }; time?: number }>(fetch, `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${s}`);
+      const d = r?.result?.list?.[0];
+      return d ? quote(venue, num(d.bid1Price), num(d.ask1Price), null, stamp(r?.time, now())) : null;
+    }
+    case 'okxSpot': {
+      const r = await getJson<{ data?: Array<{ bidPx?: string; askPx?: string; ts?: string }> }>(fetch, `https://www.okx.com/api/v5/market/ticker?instId=${s}`);
+      const d = r?.data?.[0];
+      return d ? quote(venue, num(d.bidPx), num(d.askPx), null, stamp(d.ts, now())) : null;
+    }
+    case 'bitgetSpot': {
+      const r = await getJson<{ data?: Array<{ bidPr?: string; askPr?: string; ts?: string }> }>(fetch, `https://api.bitget.com/api/v2/spot/market/tickers?symbol=${s}`);
+      const d = r?.data?.[0];
+      return d ? quote(venue, num(d.bidPr), num(d.askPr), null, stamp(d.ts, now())) : null;
+    }
+    case 'coinbase': {
+      const r = await getJson<{ bid?: string; ask?: string; time?: string }>(fetch, `https://api.exchange.coinbase.com/products/${s}/ticker`);
+      return quote(venue, num(r?.bid), num(r?.ask), null, stamp(r?.time ? Date.parse(r.time) : null, now()));
+    }
+    case 'kraken': {
+      const r = await getJson<{ result?: Record<string, { a?: string[]; b?: string[] }> }>(fetch, `https://api.kraken.com/0/public/Ticker?pair=${s}`);
+      const d = r?.result ? Object.values(r.result)[0] : undefined;
+      return d ? quote(venue, num(d.b?.[0]), num(d.a?.[0]), null, now()) : null;
+    }
+    case 'gateFutures': {
+      const r = await getJson<Array<{ highest_bid?: string; lowest_ask?: string; mark_price?: string }>>(fetch, `https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=${s}`);
+      const d = Array.isArray(r) ? r[0] : undefined;
+      return d ? quote(venue, num(d.highest_bid), num(d.lowest_ask), num(d.mark_price), now()) : null;
+    }
+    case 'gateSpot': {
+      const r = await getJson<Array<{ highest_bid?: string; lowest_ask?: string }>>(fetch, `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${s}`);
+      const d = Array.isArray(r) ? r[0] : undefined;
+      return d ? quote(venue, num(d.highest_bid), num(d.lowest_ask), null, now()) : null;
+    }
+    case 'mexcFutures': {
+      const r = await getJson<{ data?: { bid1?: number; ask1?: number; fairPrice?: number; timestamp?: number } }>(fetch, `https://contract.mexc.com/api/v1/contract/ticker?symbol=${s}`);
+      const d = r?.data;
+      return d ? quote(venue, num(d.bid1), num(d.ask1), num(d.fairPrice), stamp(d.timestamp, now())) : null;
+    }
+    case 'mexcSpot': {
+      const r = await getJson<{ bidPrice?: string; askPrice?: string }>(fetch, `https://api.mexc.com/api/v3/ticker/bookTicker?symbol=${s}`);
+      return quote(venue, num(r?.bidPrice), num(r?.askPrice), null, now());
+    }
+    case 'kucoinFutures': {
+      const r = await getJson<{ data?: { bestBidPrice?: string; bestAskPrice?: string; ts?: number } }>(fetch, `https://api-futures.kucoin.com/api/v1/ticker?symbol=${s}`);
+      const d = r?.data;
+      // Its `ts` is the last trade's, not the book's: read time instead.
+      return d ? quote(venue, num(d.bestBidPrice), num(d.bestAskPrice), null, now()) : null;
+    }
+    case 'kucoinSpot': {
+      const r = await getJson<{ data?: { bestBid?: string; bestAsk?: string; time?: number } | null }>(fetch, `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${s}`);
+      const d = r?.data;
+      return d ? quote(venue, num(d.bestBid), num(d.bestAsk), null, stamp(d.time, now())) : null;
+    }
+    case 'htx': {
+      const r = await getJson<{ ts?: number; tick?: { bid?: number[]; ask?: number[] } }>(fetch, `https://api.huobi.pro/market/detail/merged?symbol=${s}`);
+      const d = r?.tick;
+      return d ? quote(venue, num(d.bid?.[0]), num(d.ask?.[0]), null, stamp(r?.ts, now())) : null;
+    }
+    case 'deribit': {
+      const r = await getJson<{ result?: { best_bid_price?: number; best_ask_price?: number; mark_price?: number; timestamp?: number } }>(fetch, `https://www.deribit.com/api/v2/public/ticker?instrument_name=${s}`);
+      const d = r?.result;
+      return d ? quote(venue, num(d.best_bid_price), num(d.best_ask_price), num(d.mark_price), stamp(d.timestamp, now())) : null;
     }
   }
 }

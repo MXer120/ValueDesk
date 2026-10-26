@@ -65,6 +65,16 @@ test('it waits while a round is out and between rounds', () => {
   assert.equal(sweepStep(st({ lastRoundAt: NOW - 1_000 })).type, 'send');
 });
 
+test('no round while the book is outside the band: an IOC could fill nothing', () => {
+  // Band edge 100,500 (buy) / 99,500 (sell).
+  assert.deepEqual(sweepStep(st({ touch: 100_600 })), { type: 'wait', reason: null });
+  assert.equal(sweepStep(st({ touch: 100_500 })).type, 'send');
+  assert.equal(sweepStep(st({ touch: 100_100 })).type, 'send');
+  assert.deepEqual(sweepStep(st({ side: 'sell', touch: 99_400 })), { type: 'wait', reason: null });
+  assert.equal(sweepStep(st({ side: 'sell', touch: 99_600 })).type, 'send');
+  assert.equal(sweepStep(st({ touch: null })).type, 'send', 'no book known: the IOC decides');
+});
+
 test('a stale oracle pauses it: nothing is sent', () => {
   const a = sweepStep(st({ ref: null }));
   assert.equal(a.type, 'wait');
@@ -83,7 +93,7 @@ test('it stops when filled, when the rest is under the minimum, and when time is
 test('the spec and its plan', () => {
   const c = checkAlgoSpec({ kind: 'sweep', symbol: 'BTC-USD', side: 'buy', quantity: '0.5', slippageBps: 30 });
   assert.deepEqual(c.errors, {});
-  assert.equal(c.spec!.kind === 'sweep' && c.spec!.roundMs, 1_000);
+  assert.equal(c.spec!.kind === 'sweep' && c.spec!.roundMs, 500);
   assert.ok(checkAlgoSpec({ kind: 'sweep', symbol: 'BTC-USD', side: 'buy', quantity: '0.5', slippageBps: 0 }).errors.slippageBps);
   const m = { name: 'BTC-USD', base: 'BTC', tickSize: '0.1', stepSize: '0.001', minNotional: 10, maxNotional: null, status: 'TRADING' } as never;
   const plan = planAlgo(c.spec!, m, { now: NOW, price: 100_000, seed: 1 });

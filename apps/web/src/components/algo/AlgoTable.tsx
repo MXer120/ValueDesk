@@ -11,12 +11,14 @@
  * resting children pulled from SoDEX; what filled stays filled.
  */
 import { useEffect, useState } from 'react';
-import { ALGO_NAMES, FINAL_STATUSES, type AlgoEvent, type AlgoView } from '@copy-engine';
+import { ALGO_NAMES, FINAL_STATUSES, type AlgoEvent, type AlgoSpec, type AlgoView } from '@copy-engine';
 import { DASH, fmtTime, fmtUsd } from '../../format';
 import { notify } from '../../toast';
 import { actOn, eventsOn, listOn, type ExecutorMode } from '../../algo/executorAlgos';
 import { useAlgos } from '../../algo/useAlgos';
-import { fmtDuration } from './menu';
+import { fmtDuration, menuName, type UiKind } from './menu';
+import { AlgoIcon } from './AlgoIcon';
+import { RunningWindow } from './RunningWindow';
 import './algo.css';
 
 type Place = 'browser' | ExecutorMode;
@@ -47,7 +49,12 @@ function useExecutorAlgos(address: string | null): { hosted: AlgoView[]; self: A
   return { ...rows, reload: () => setTick((x) => x + 1) };
 }
 
-const MARK: Record<string, string> = { twap: 'TW', vwap: 'VW', pov: 'PV', iceberg: 'IC', chase: 'CH', scale: 'SC', dca: 'DC', swarm: 'SW', conditional: 'IF', trailing: 'TS', basket: 'BK', bracket: 'BR' };
+/** The ticket's order type a spec was made as: DCA is a scale and Chase TWAP a TWAP, each named by its label. */
+export function uiKindOf(s: AlgoSpec): UiKind {
+  if (s.kind === 'scale' && s.label === 'DCA') return 'dca';
+  if (s.kind === 'twap' && s.label === 'Chase TWAP') return 'chasetwap';
+  return s.kind;
+}
 
 const STATUS_WORD: Record<string, string> = {
   scheduled: 'Scheduled', running: 'Running', waiting: 'Held', paused: 'Paused', done: 'Done', cancelled: 'Cancelled', expired: 'Ended', failed: 'Failed',
@@ -117,6 +124,7 @@ function Log({ id, live, place }: { id: string; live: boolean; place: Place }) {
 
 function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [win, setWin] = useState(false);
   const doAct = (what: 'pause' | 'resume' | 'cancel') => void act(place, what, v.algo.id).then(() => onActed?.());
   const a = v.algo;
   const s = a.spec;
@@ -130,65 +138,8 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
   const now = Date.now();
   // A basket fills in its legs, on several markets: its progress is in USD.
   const basket = s.kind === 'basket' ? { done: (v.legs ?? []).reduce((x, l) => x + l.filledValue, 0), total: s.legs.reduce((x, l) => x + l.usd, 0) } : null;
-  return (
-    <article className={`algo-card is-${s.side}`}>
-      <button type="button" className="algo-card__head" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
-        <span className="algo-card__mark" aria-hidden="true">{MARK[s.kind] ?? '··'}</span>
-        <span className="algo-card__name">
-          <b>
-            {s.kind === 'basket' ? (
-              <>{ALGO_NAMES[s.kind]} · {s.legs.length} markets</>
-            ) : (
-              <>{s.kind === 'scale' && s.label === 'DCA' ? 'DCA' : ALGO_NAMES[s.kind]} <span className="algo-card__dir">{sideWord}</span> {base}</>
-            )}
-            {s.paper ? ' · paper' : ''}
-            {place !== 'browser' ? ` · ${PLACE_WORD[place]}` : ''}
-          </b>
-          <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
-        </span>
-        <span className="algo-card__prog">
-          <span className="algo-card__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <i style={{ width: `${pct}%` }} />
-          </span>
-          <span className="algo-card__nums">
-            {basket ? (
-              <span>
-                <b>{fmtUsd(basket.done, 0)}</b> / {fmtUsd(basket.total, 0)}
-              </span>
-            ) : (
-              <span>
-                <b>{fmtQ(a.filled)}</b>
-                {target !== null ? ` / ${fmtQ(target)}` : ''} {base}
-              </span>
-            )}
-            <span>{pct}%</span>
-          </span>
-        </span>
-        <span className="algo-card__q">
-          <b>{v.avgPrice !== null ? fmtPx(v.avgPrice) : DASH}</b>
-          <span className={arr.cls} title="Average fill against the mid when it started; positive is better for you">vs arrival {arr.text}</span>
-        </span>
-        <span className="algo-card__acts" onClick={(e) => e.stopPropagation()}>
-          {live && a.status !== 'paused' && (
-            <button type="button" className="oe-mini" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">
-              Pause
-            </button>
-          )}
-          {a.status === 'paused' && (
-            <button type="button" className="oe-mini" onClick={() => doAct('resume')}>
-              Resume
-            </button>
-          )}
-          {live && (
-            <button type="button" className="oe-mini" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled on SoDEX; what filled stays filled">
-              Cancel
-            </button>
-          )}
-        </span>
-      </button>
-      {open && (
-        <div className="algo-card__body">
-          {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
+  const facts = (
+    <>
           <dl className="algo-card__facts">
             <dt>Started</dt>
             <dd>{a.startedAt ? fmtTime(a.startedAt) : s.startAt ? `at ${fmtTime(s.startAt)}` : s.triggerPrice ? `at ${fmtPx(s.triggerPrice)}` : DASH}</dd>
@@ -266,8 +217,92 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
               ))}
             </ul>
           )}
+    </>
+  );
+  return (
+    <article className={`algo-card is-${s.side}${s.paper ? ' is-paper' : ''}`}>
+      <button type="button" className="algo-card__head" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
+        <span className="algo-card__mark" aria-hidden="true"><AlgoIcon kind={uiKindOf(s)} size={16} /></span>
+        <span className="algo-card__name">
+          <b>
+            {s.kind === 'basket' ? (
+              <>{ALGO_NAMES[s.kind]} · {s.legs.length} markets</>
+            ) : (
+              <>{menuName(uiKindOf(s))} <span className="algo-card__dir">{sideWord}</span> {base}</>
+            )}
+            {place !== 'browser' ? ` · ${PLACE_WORD[place]}` : ''}
+          </b>
+          <span className="algo-card__tags">
+            {s.paper && <span className="algo-practice" title="A practice run: worked against the live market, nothing is sent to SoDEX">Practice · no real orders</span>}
+            <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
+          </span>
+        </span>
+        <span className="algo-card__prog">
+          <span className="algo-card__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+            <i style={{ width: `${pct}%` }} />
+          </span>
+          <span className="algo-card__nums">
+            {basket ? (
+              <span>
+                <b>{fmtUsd(basket.done, 0)}</b> / {fmtUsd(basket.total, 0)}
+              </span>
+            ) : (
+              <span>
+                <b>{fmtQ(a.filled)}</b>
+                {target !== null ? ` / ${fmtQ(target)}` : ''} {base}
+              </span>
+            )}
+            <span>{pct}%</span>
+          </span>
+        </span>
+        <span className="algo-card__q">
+          <b>{v.avgPrice !== null ? fmtPx(v.avgPrice) : DASH}</b>
+          <span className={arr.cls} title="Average fill against the mid when it started; positive is better for you">vs arrival {arr.text}</span>
+        </span>
+        <span className="algo-card__acts" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="oe-mini" onClick={() => setWin(true)} title="Open it in its own window: the live chart, every order and the log">
+            Open
+          </button>
+          {live && a.status !== 'paused' && (
+            <button type="button" className="oe-mini" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">
+              Pause
+            </button>
+          )}
+          {a.status === 'paused' && (
+            <button type="button" className="oe-mini" onClick={() => doAct('resume')}>
+              Resume
+            </button>
+          )}
+          {live && (
+            <button type="button" className="oe-mini" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled on SoDEX; what filled stays filled">
+              Cancel
+            </button>
+          )}
+        </span>
+      </button>
+      {open && (
+        <div className="algo-card__body">
+          {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
+          {facts}
           <Log id={a.id} live={live} place={place} />
         </div>
+      )}
+      {win && (
+        <RunningWindow
+          v={v}
+          kind={uiKindOf(s)}
+          open={win}
+          onClose={() => setWin(false)}
+          facts={facts}
+          log={<Log id={a.id} live={live} place={place} />}
+          actions={
+            <>
+              {live && a.status !== 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('pause')}>Pause</button>}
+              {a.status === 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('resume')}>Resume</button>}
+              {live && <button type="button" className="algo-chip" onClick={() => doAct('cancel')}>Cancel</button>}
+            </>
+          }
+        />
       )}
     </article>
   );

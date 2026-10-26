@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { OracleFeed, combineOracle, type FetchLike, type VenueQuote } from '../src/valuescan/oracle.js';
+import { ORACLE_VENUES, OracleFeed, combineOracle, type FetchLike, type VenueQuote } from '../src/valuescan/oracle.js';
 import { oracleRoutes, parseOracleQuery } from '../src/routes/oracle.js';
 
 const MARKER = '// ---- shared with apps/server/src/valuescan/oracle.ts below this line ----\n';
@@ -25,9 +25,9 @@ test("the API's oracle is the engine's, below the marker", () => {
 test('the query: a coin, and known venues (all when none)', () => {
   assert.deepEqual(parseOracleQuery({ coin: 'btc', venues: 'bybit,okx,bybit' }), { coin: 'BTC', venues: ['bybit', 'okx'] });
   assert.equal(parseOracleQuery({ coin: 'BTC-USD' }).coin, 'BTC');
-  assert.equal(parseOracleQuery({ coin: 'ETH' }).venues.length, 6);
+  assert.equal(parseOracleQuery({ coin: 'ETH' }).venues.length, ORACLE_VENUES.length);
   assert.throws(() => parseOracleQuery({ coin: '' }), /coin/);
-  assert.throws(() => parseOracleQuery({ coin: 'BTC', venues: 'kraken' }), /unknown venue kraken/);
+  assert.throws(() => parseOracleQuery({ coin: 'BTC', venues: 'moonex' }), /unknown venue moonex/);
 });
 
 test('combined over the same quotes as the engine', () => {
@@ -36,7 +36,7 @@ test('combined over the same quotes as the engine', () => {
     { venue: 'binanceFutures', bid: 99, ask: 101, mid: 100, mark: 100.2, at },
     { venue: 'okx', bid: 101, ask: 103, mid: 102, mark: null, at: at - 9_000 },
   ];
-  assert.deepEqual(combineOracle(qs, at), { mid: 100, fair: 100.2, used: ['binanceFutures'], stale: ['okx'], missing: ['binanceSpot', 'bitget', 'hyperliquid', 'bybit'] });
+  assert.deepEqual(combineOracle(qs, at), { mid: 100, fair: 100.2, used: ['binanceFutures'], stale: ['okx'], missing: ORACLE_VENUES.filter((v) => v !== 'binanceFutures' && v !== 'okx') });
 });
 
 test('the route answers every caller from one read per venue and coin a second', async () => {

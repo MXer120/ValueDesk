@@ -20,6 +20,7 @@ import {
   type BoundAction,
   type Condition,
   type ConditionalAction,
+  SLIP_FROM,
   type ExecSpec,
   type Exits,
   type PriceBound,
@@ -53,7 +54,7 @@ export const ALGO_LIMITS = {
   conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5_000, max: HOUR } },
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
-  sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 250, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
+  sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
   exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -178,6 +179,8 @@ function exec(v: unknown, e: Errors, path: string): ExecSpec {
     offsetTicks: o.offsetTicks === undefined ? DEFAULT_EXEC.offsetTicks : int(o, 'offsetTicks', 'Offset', L.offsetTicks, e, `${path}.offsetTicks`),
     chaseTicks: o.chaseTicks === undefined ? DEFAULT_EXEC.chaseTicks : int(o, 'chaseTicks', 'Re-price distance', L.chaseTicks, e, `${path}.chaseTicks`),
     makerShare: o.makerShare === undefined ? DEFAULT_EXEC.makerShare : num(o, 'makerShare', 'Resting share', L.makerShare, e, `${path}.makerShare`),
+    // Only when given: a spec without it measures from the touch, as before.
+    ...(o.slipFrom === undefined ? {} : { slipFrom: oneOf(o, 'slipFrom', 'Slippage from', SLIP_FROM, 'touch', e, `${path}.slipFrom`) }),
   };
 }
 
@@ -570,7 +573,7 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         kind,
         quantity: qty(o, 'quantity', 'Size', e),
         slippageBps: num(o, 'slippageBps', 'Max slippage', L.slippageBps, e),
-        roundMs: o.roundMs === undefined ? 1_000 : int(o, 'roundMs', 'Between rounds', L.roundMs, e),
+        roundMs: o.roundMs === undefined ? 500 : int(o, 'roundMs', 'Between rounds', L.roundMs, e),
         timeoutMs: opt(o, 'timeoutMs', 'Give up after', L.timeoutMs, e),
       };
       const sw = spec as SweepSpec;

@@ -22,6 +22,7 @@ import {
   DAY_MS,
 } from '../src/index.ts';
 import { BTC } from './helpers.ts';
+import { checkAlgoSpec as parseCheck } from '../src/algo/spec.ts';
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} != ${b}`);
@@ -120,6 +121,19 @@ test('taker price: touch plus slippage, capped by the limit; nothing when the li
   assert.equal(takerPrice('buy', q, 10, BTC, 60_005, 60_000), null);
   assert.equal(takerPrice('sell', q, 10, BTC, 60_005, 59_990), 59_990);
   assert.equal(takerPrice('sell', q, 10, BTC, 60_005, null), 59_940);
+});
+
+test('taker price measured from a chosen reference (mid, mark, index, oracle) instead of the touch', () => {
+  const q = { bid: 60_000, ask: 60_010, at: 0 };
+  // 10 bp from a 59,990 oracle price: 60,049.99 floored to the 1 USD tick, under the 60,070 the touch gives.
+  assert.equal(takerPrice('buy', q, 10, BTC, 60_005, null, 59_990), 60_049);
+  assert.equal(takerPrice('sell', q, 10, BTC, 60_005, null, 60_100), 60_040);
+  assert.equal(takerPrice('buy', q, 10, BTC, 60_005, null, null), 60_070, 'none given: the touch');
+  const c = parseCheck({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '1', durationMs: 600_000, slices: 10, exec: { style: 'taker', slippageBps: 10, slipFrom: 'oracleMid' } });
+  assert.equal(c.spec?.kind === 'twap' && c.spec.exec.slipFrom, 'oracleMid');
+  const old = parseCheck({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '1', durationMs: 600_000, slices: 10, exec: { style: 'taker', slippageBps: 10 } });
+  assert.equal(old.spec?.kind === 'twap' && 'slipFrom' in old.spec.exec, false, 'an old spec is unchanged');
+  assert.ok(parseCheck({ kind: 'twap', symbol: 'BTC-USD', side: 'buy', quantity: '1', durationMs: 600_000, slices: 10, exec: { slipFrom: 'moon' } }).errors['exec.slipFrom']);
 });
 
 test('min child: one step, the minimum quantity, and the minimum order value', () => {
