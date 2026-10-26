@@ -781,13 +781,18 @@ export function OrderEntry({
   const tifPos = useMenuAnchor(pop === 'tif', tifBtnRef, tifPopRef);
   const algoPos = useMenuAnchor(pop === 'algo', algoBtnRef, algoPopRef);
   const algoPlaced = pop === 'algo' && algoPos !== null;
+  /* Whether the algo menu was last used from the keyboard. Only then does focus
+     go back to the tab when it closes: handed back after a mouse pick, the
+     tab took the keyboard ring - a stray box around "TWAP" on every click. */
+  const algoByKey = useRef(false);
   useEffect(() => {
     if (!algoPlaced) return;
     const btn = algoBtnRef.current;
     algoPopRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus({ preventScroll: true });
     return () => {
       const active = document.activeElement;
-      if (!active || active === document.body) btn?.focus({ preventScroll: true });
+      if (algoByKey.current && (!active || active === document.body)) btn?.focus({ preventScroll: true });
+      algoByKey.current = false;
     };
   }, [algoPlaced]);
 
@@ -1747,7 +1752,7 @@ export function OrderEntry({
                 setPop((p) => (p === 'algo' ? null : 'algo'));
               }}
             >
-              {isAlgo && <AlgoIcon kind={algoKind} size={14} />}
+              {isAlgo && <AlgoIcon kind={algoKind} />}
               {isAlgo ? menuName(algoKind) : 'Algo'}
               <svg viewBox="0 0 10 10" width="9" height="9" aria-hidden="true">
                 <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -1775,6 +1780,7 @@ export function OrderEntry({
           aria-label="Algo order type"
           tabIndex={-1}
           onKeyDown={(e) => {
+            algoByKey.current = true;
             const opts = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="option"]'));
             if (!opts.length) return;
             const at = opts.indexOf(document.activeElement as HTMLButtonElement);
@@ -1782,10 +1788,16 @@ export function OrderEntry({
               e.preventDefault();
               opts[(i + opts.length) % opts.length]!.focus();
             };
-            if (e.key === 'ArrowDown') go(at + 1);
-            else if (e.key === 'ArrowUp') go(at - 1);
+            // Two columns: left / right step one, up / down a row.
+            if (e.key === 'ArrowRight') go(at + 1);
+            else if (e.key === 'ArrowLeft') go(at - 1);
+            else if (e.key === 'ArrowDown') go(at + 2 < opts.length ? at + 2 : at + 1);
+            else if (e.key === 'ArrowUp') go(at - 2 >= 0 ? at - 2 : at - 1);
             else if (e.key === 'Home') go(0);
             else if (e.key === 'End') go(opts.length - 1);
+          }}
+          onPointerDown={() => {
+            algoByKey.current = false;
           }}
           data-side={algoPos?.side ?? 'down'}
           style={{

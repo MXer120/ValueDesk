@@ -10,41 +10,44 @@
 }
 .algo.is-sell { --algo-dir: var(--neg); }
 
+/* The one summary line under the fields. */
 .algo-what {
   margin: 0;
   font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted);
 }
 
-/* Two fields a row, 36px like the exit grid. */
+/* The fields an order type needs, one a row, like the ticket's Price and Amount. */
+.algo-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.algo-fields:empty { display: none; }
+
+/* A field IS the ticket's .oe-inputrow (40px, label left, value right, unit
+   right); only numbers are set in the tabular face. */
+.algo-in { min-width: 0; }
+.algo-in .oe-input { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+/* A unit picker in the box: the ticket's .oe-unit, in the unit's own colour. */
+.algo-in .oe-unit.algo-unitsel { color: var(--muted); cursor: pointer; }
+.algo-in .oe-unit.algo-unitsel:hover { color: var(--text); }
+.algo-in .oe-unit.algo-unitsel:focus-visible { outline: none; color: var(--text); }
+
+/* Two fields a row: only inside a condition's card. */
 .algo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); min-width: 0; }
 .algo-grid > :only-child { grid-column: 1 / -1; }
-.algo-in { height: 36px; min-width: 0; }
-.algo-in .oe-input { height: 34px; line-height: 34px; font-size: var(--fs-xs); min-width: 36px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
-.algo-in .oe-inlabel { padding-left: var(--sp-2); font-size: var(--fs-xs); line-height: 34px; white-space: nowrap; }
-.algo-in .oe-suffix { font-size: var(--fs-xs); font-weight: 400; color: var(--muted); padding: 0 var(--sp-2); }
 
 .algo-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); min-width: 0; }
 .algo-row > .algo-in { flex: 1 1 120px; }
 
-/* One of N, the ticket's mini buttons in a strip. */
-.algo-seg { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; }
-.algo-seg__k { font-size: var(--fs-xs); line-height: var(--lh-xs); color: var(--muted); white-space: nowrap; }
+/* One of N: the name on the left, the ticket's mini buttons on the right. */
+.algo-seg { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-2); min-width: 0; min-height: 24px; }
+.algo-seg__k { font-size: var(--fs-base); line-height: var(--lh-base); color: var(--muted); white-space: nowrap; }
 .algo-seg__opts { display: flex; flex-wrap: wrap; gap: var(--sp-1); }
 .algo-seg .oe-mini { min-width: 0; padding: 0 var(--sp-2); }
-
-/* A unit inside a field's box: a word you can press. */
-.algo-unit {
-  height: 100%; padding: 0; border: none; background: none;
-  color: var(--text); font: inherit; font-size: var(--fs-xs); font-weight: 500;
-  cursor: pointer; border-bottom: 1px dashed color-mix(in srgb, var(--muted) 55%, transparent);
-  line-height: 1.2;
-}
-.algo-unit:hover { color: var(--accent); }
-.algo-unit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.algo-seg:not(:has(.algo-seg__k)) { justify-content: flex-start; }
 
 .algo-switch { gap: var(--sp-2); }
+.algo-rules > .oe-switch, .algo-exits > .oe-switch { font-weight: 400; color: var(--muted); }
 
 .algo-urgency { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--sp-2); }
+.algo-urgency .algo-seg__k { font-size: var(--fs-base); }
 .algo-urgency input[type='range'] { width: 100%; accent-color: var(--accent); }
 .algo-urgency__v { font-size: var(--fs-xs); font-family: var(--font-num); font-variant-numeric: tabular-nums; color: var(--text); min-width: 52px; text-align: right; }
 
@@ -79,12 +82,12 @@
   align-items: center; gap: var(--sp-1); min-width: 0;
 }
 .algo-leg > * { min-width: 0; }
-.algo-leg .algo-sym { height: 36px; }
+.algo-leg .algo-sym { height: 40px; border-radius: var(--radius-md); font-size: var(--fs-base); }
 .algo-leg .algo-seg__opts { flex-wrap: nowrap; }
 .algo-total { align-self: center; justify-self: end; color: var(--muted); font-size: var(--fs-xs); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
 
 /* Exits: the switch, then TP and SL side by side. */
-.algo-exits { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
+.algo-exits { display: flex; flex-direction: column; gap: var(--sp-2); }
 .algo-add, .algo-more, .algo-shuffle {
   align-self: flex-start; padding: 0; border: none; background: none;
   color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
@@ -94,7 +97,10 @@
 .algo-add:focus-visible, .algo-more:focus-visible, .algo-shuffle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
 .algo-morehead { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-top: var(--sp-1); border-top: 1px solid var(--line-soft); }
-.algo-more { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.algo-more { display: inline-flex; align-items: center; gap: 6px; align-self: center; font-size: var(--fs-base); line-height: var(--lh-base); }
+.algo-more__caret { flex: none; transition: transform var(--dur-fast) var(--ease-out); }
+.algo-more[aria-expanded='true'] .algo-more__caret { transform: rotate(90deg); }
+.algo-morehead .oe-switch { width: auto; font-weight: 400; color: var(--muted); }
 .algo-badge {
   display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px;
   border-radius: 8px; background: color-mix(in srgb, var(--accent) 22%, transparent);

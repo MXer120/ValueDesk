@@ -15,7 +15,7 @@
  * Every rule is validated by the engine's parser (checkAlgoSpec), the one the
  * runner and the executors use, so the ticket cannot start what they refuse.
  */
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
   checkAlgoSpec,
@@ -407,22 +407,28 @@ const wholeInput = (raw: string, signed: boolean): string => {
   return (neg ? '-' : '') + integerInput(raw, 5);
 };
 
+/**
+ * One number, drawn like the ticket's own Price and Amount boxes: the name on
+ * the left, the value right-aligned, the unit on the right (a word, or a unit
+ * picker drawn like the Amount field's).
+ */
 function Field({ label, value, onChange, suffix, placeholder, int = false, signed = false, title, bad = false }: {
   label: string; value: string; onChange: (v: string) => void; suffix?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; title?: string; bad?: boolean;
 }) {
+  const id = useId();
   return (
     <div className={`oe-inputrow algo-in${bad ? ' is-bad' : ''}`} title={title}>
-      <label className="oe-inlabel">{label}</label>
+      <label className="oe-inlabel" htmlFor={id}>{label}</label>
       <input
+        id={id}
         className="oe-input"
         autoComplete="off"
         inputMode={int ? 'numeric' : 'decimal'}
         value={value}
         placeholder={placeholder ?? ''}
-        aria-label={label}
         onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed }))}
       />
-      {suffix !== undefined && <span className="oe-suffix">{suffix}</span>}
+      {suffix === undefined || suffix === '' ? null : typeof suffix === 'string' ? <span className="oe-suffix">{suffix}</span> : suffix}
     </div>
   );
 }
@@ -444,17 +450,19 @@ function Seg<T extends string | number>({ label, value, options, onChange, title
   );
 }
 
-function UnitSwitch({ value, units, onChange }: { value: Unit; units: readonly Unit[]; onChange: (u: Unit) => void }) {
+/** A unit inside a field's box, picked like the Amount field's unit. */
+function ModeSelect<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<readonly [T, string]>; onChange: (v: T) => void }) {
   return (
-    <button
-      type="button"
-      className="algo-unit"
-      title="Change the unit"
-      onClick={() => onChange(units[(units.indexOf(value) + 1) % units.length]!)}
-    >
-      {UNIT_NAME[value]}
-    </button>
+    <select className="oe-unit algo-unitsel" aria-label={`${label} unit`} value={value} onChange={(e) => onChange(e.target.value as T)}>
+      {options.map(([v, t]) => (
+        <option key={v} value={v}>{t}</option>
+      ))}
+    </select>
   );
+}
+
+function UnitSelect({ label, value, units, onChange }: { label: string; value: Unit; units: readonly Unit[]; onChange: (u: Unit) => void }) {
+  return <ModeSelect label={label} value={value} options={units.map((u) => [u, UNIT_NAME[u]] as const)} onChange={onChange} />;
 }
 
 function Switch({ label, checked, onChange, title }: { label: string; checked: boolean; onChange: (v: boolean) => void; title?: string }) {
@@ -638,245 +646,252 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const rates = feeRates(market, feeFraction);
   const notional = plan?.notional ?? null;
   const showTimeline = !!plan && (ek === 'twap' || ek === 'vwap' || ek === 'dca' || ek === 'swarm') && !(ek === 'twap' && d.twapClose);
-  const showLadder = !!plan && (ek === 'scale' || (ek === 'iceberg' && !d.icePeg));
+  const showLadder = !!plan && (ek === 'scale' || (ek === 'iceberg' && !d.icePeg && !!opt(d.icePrice)));
   const showLevels = !showTimeline && !showLadder && levels.length > 1;
+
+  const base = p.sym?.baseCoin ?? '';
+  const exitsHere = offersExits(kind, d, p.reduceOnly);
+  const changed = moreChanged(kind, d, exitsHere);
+  const dur = <UnitSelect label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
 
   return (
     <div className={`algo is-${p.side}`}>
-      <p className="algo-what">{whatItDoes(kind, d, p.side)}</p>
+      {/* WHAT THE ORDER TYPE ESSENTIALLY NEEDS, in plain words; every other
+          setting is under More options with the value it always had. */}
+      <div className="algo-fields">
+        {(ek === 'twap' || ek === 'vwap') && (
+          <>
+            {kind === 'twap' && d.twapClose && <Field label="Close" value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} suffix="% of position" />}
+            <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={dur} />
+          </>
+        )}
 
-      {(ek === 'twap' || ek === 'vwap') && (
-        <>
-          <div className="algo-grid">
-            <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={<UnitSwitch value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />} />
-            <Field label="Slices" value={d.slices} int onChange={(v) => set({ slices: v })} title="How many child orders" />
-          </div>
-          {ek === 'vwap' && (
-            <div className="algo-row">
-              <Seg label="History" value={d.lookback} onChange={(v) => set({ lookback: v })} options={[[7, '7 d'], [14, '14 d'], [28, '28 d'], [41, '6 w']]} title="Days of volume the profile is the median of (weekdays and weekends apart from 14 days)" />
-              <Switch label="Adaptive" checked={d.adaptive} onChange={(v) => set({ adaptive: v })} title="Faster while the market trades more than usual, slower while it trades less" />
-            </div>
-          )}
-          {ek === 'twap' && kind === 'twap' && (
-            <div className="algo-urgency" title="Front-loaded puts more early; back-loaded more late">
-              <span className="algo-seg__k">Urgency</span>
-              <input type="range" min={-1} max={1} step={0.1} value={d.urgency} aria-label="Urgency" onChange={(e) => set({ urgency: Number(e.target.value) })} />
-              <span className="algo-urgency__v">{d.urgency === 0 ? 'Even' : d.urgency > 0 ? `Front ${Math.round(d.urgency * 100)}` : `Back ${Math.round(-d.urgency * 100)}`}</span>
-            </div>
-          )}
-          {ek === 'twap' && (
-            <>
-              {kind === 'twap' && (
-                <div className="algo-row">
-                  <Switch label="Close position" checked={d.twapClose} onChange={(v) => set({ twapClose: v })} title="A time-sliced close: works a share of your position on this market, on the side that reduces it, reduce-only" />
-                  {d.twapClose && <Field label="Share" value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} suffix="%" title="Of the position when it starts" />}
-                </div>
-              )}
-              <div className="algo-grid">
-                <Field label="Smallest" value={d.minSlice} placeholder="min" onChange={(v) => set({ minSlice: v })} suffix={p.sym?.baseCoin} title="No slice below this: what is due waits until it reaches it (except at the end)" />
-                <Field label="Largest" value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} suffix={p.sym?.baseCoin} title="No slice above this" />
-              </div>
-            </>
-          )}
-          <ExecFields d={d} set={set} chaseOnly={kind === 'chasetwap'} />
-        </>
-      )}
-
-      {ek === 'bracket' && (
-        <>
-          <div className="algo-row">
+        {ek === 'bracket' && (
+          <>
             <Seg label="Entry" value={d.entry} onChange={(v) => set({ entry: v })} options={[['market', 'Market', 'Takes at once, within your max slippage'], ['limit', 'Limit', 'Rests at your price']]} />
-          </div>
-          {d.entry === 'limit' ? (
-            <Field label="Price" value={d.entryPrice} onChange={(v) => set({ entryPrice: v })} />
-          ) : (
-            <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
-          )}
-        </>
-      )}
+            {d.entry === 'limit' && <Field label="Price" value={d.entryPrice} onChange={(v) => set({ entryPrice: v })} suffix="USD" />}
+            <ExitFields d={d} set={set} side={p.side} always levels={plan?.exits ?? null} />
+          </>
+        )}
 
-      {ek === 'basket' && <BasketFields d={d} set={set} />}
+        {ek === 'basket' && <BasketLegs d={d} set={set} />}
 
-      {ek === 'pov' && (
-        <>
-          <div className="algo-row">
-            <Seg label="Share of volume" value={d.rate} onChange={(v) => set({ rate: v })} options={[['5', '5%', 'Low urgency'], ['10', '10%', 'Medium'], ['20', '20%', 'High']]} />
-          </div>
-          <div className="algo-grid">
-            <Field label="Rate" value={d.rate} onChange={(v) => set({ rate: v })} suffix="%" />
-            <Field label="Largest" value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} suffix={p.sym?.baseCoin} title="The largest single child" />
-          </div>
-          <Field label="Stop after" value={d.endIn} placeholder="when filled" onChange={(v) => set({ endIn: v })} suffix={<UnitSwitch value={d.endUnit} units={['m', 'h', 'd']} onChange={(u) => set({ endUnit: u })} />} />
-          <ExecFields d={d} set={set} />
-        </>
-      )}
+        {ek === 'pov' && <Field label="Share of volume" value={d.rate} onChange={(v) => set({ rate: v })} suffix="%" title="Of what everyone else trades, while they trade it" />}
 
-      {ek === 'iceberg' && (
-        <>
-          <div className="algo-grid">
-            <Field label="Visible" value={d.display} onChange={(v) => set({ display: v })} suffix={p.sym?.baseCoin} title="The size shown at once" />
-            <Field label="± random" value={d.displayJitter} onChange={(v) => set({ displayJitter: v })} suffix="%" />
-          </div>
-          <div className="algo-row">
-            <Seg value={d.icePeg ? 'peg' : 'fixed'} onChange={(v) => set({ icePeg: v === 'peg' })} options={[['peg', 'Pegged', 'Follows the best price'], ['fixed', 'At a price']]} />
-            <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
-          </div>
-          {d.icePeg ? (
-            <div className="algo-grid">
-              <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="Ticks behind the best price" />
-              <Field label="Refill" value={d.refill} onChange={(v) => set({ refill: v })} suffix="s" title="Wait between clips" />
-            </div>
-          ) : (
-            <div className="algo-grid">
-              <Field label="Price" value={d.icePrice} onChange={(v) => set({ icePrice: v })} />
-              <Field label="Refill" value={d.refill} onChange={(v) => set({ refill: v })} suffix="s" />
-            </div>
-          )}
-        </>
-      )}
+        {ek === 'iceberg' && (
+          <>
+            <Field
+              label="Price"
+              value={d.icePeg ? '' : d.icePrice}
+              placeholder="Best price"
+              onChange={(v) => set({ icePrice: v, icePeg: v.trim() === '' })}
+              suffix="USD"
+              title="Empty: pegged to the best price"
+            />
+            <Field label="Visible size" value={d.display} onChange={(v) => set({ display: v })} suffix={base} title="The size shown at once" />
+          </>
+        )}
 
-      {ek === 'chase' && (
-        <>
-          <div className="algo-row">
-            <Seg label="Rest" value={d.offsetMode} onChange={(v) => set({ offsetMode: v })} options={[['ticks', 'At the touch'], ['bps', 'Stalk', 'Rest a set distance behind the best price']]} />
-          </div>
-          <div className="algo-grid">
-            {d.offsetMode === 'ticks' ? (
-              <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="0 joins the best price; -1 steps inside the spread" />
-            ) : (
-              <Field label="Behind" value={d.offsetBps} onChange={(v) => set({ offsetBps: v })} suffix="bp" />
-            )}
-            <Field label="Re-price" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" title="Move once the best price is this far away" />
-            <Field label="Max chase" value={d.maxChase} placeholder="none" onChange={(v) => set({ maxChase: v })} suffix="bp" title="How far from where it started it may follow" />
-            <Field label="Give up" value={d.timeout} placeholder="never" onChange={(v) => set({ timeout: v })} suffix={<UnitSwitch value={d.timeoutUnit} units={['s', 'm', 'h']} onChange={(u) => set({ timeoutUnit: u })} />} />
-          </div>
-          {opt(d.timeout) && (
-            <Seg label="Then" value={d.onEnd} onChange={(v) => set({ onEnd: v })} options={[['take', 'Take the rest'], ['cancel', 'Cancel'], ['rest', 'Leave resting']]} />
-          )}
-        </>
-      )}
-
-      {ek === 'scale' && (
-        <>
-          <div className="algo-grid">
-            <Field label="From" value={d.from} onChange={(v) => set({ from: v })} title="The first order (nearest the market, usually)" />
-            <Field label="To" value={d.to} onChange={(v) => set({ to: v })} />
-          </div>
-          {mid && (
-            <div className="algo-chips" aria-label="Range from the price">
-              {[0.5, 1, 2, 5, 10].map((x) => (
-                <button
-                  key={x}
-                  type="button"
-                  className="oe-mini"
-                  onClick={() => {
-                    const r = (v: number) => String(Math.round(v / tick) * tick).replace(/(\.\d*?)0{6,}\d*$/, '$1');
-                    const s = p.side === 'buy' ? -1 : 1;
-                    set({ from: r(mid * (1 + s * 0.001)), to: r(mid * (1 + (s * x) / 100)) });
-                  }}
-                >
-                  {x}%
-                </button>
-              ))}
-            </div>
-          )}
-          <div className="algo-grid">
+        {ek === 'scale' && (
+          <>
+            <Field label="From" value={d.from} onChange={(v) => set({ from: v })} suffix="USD" title="The first order (nearest the market, usually)" />
+            <Field label="To" value={d.to} onChange={(v) => set({ to: v })} suffix="USD" />
             <Field label="Orders" value={d.orders} int onChange={(v) => set({ orders: v })} />
-            <Field label="Skew" value={d.skew} onChange={(v) => set({ skew: v })} suffix="×" title="The last order's size over the first's" />
-          </div>
-          <Seg label="Size" value={d.distribution} onChange={(v) => set({ distribution: v })} options={[['flat', 'Flat'], ['linear', 'Linear'], ['exponential', 'Exp'], ['bell', 'Bell']]} />
-          <Seg label="Spacing" value={d.spacing} onChange={(v) => set({ spacing: v })} options={[['linear', 'Even'], ['geometric', '%', 'Even in percent'], ['front', 'Front', 'Denser near the first price'], ['back', 'Back', 'Denser near the last price']]} />
-          <div className="algo-row">
-            <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
-            <Field label="± random" value={d.scaleJitter} onChange={(v) => set({ scaleJitter: v })} suffix="%" />
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {ek === 'dca' && (
-        <>
-          <div className="algo-grid">
-            <Field label="Each" value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" />
-            <Field label="Orders" value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} />
-            <Field label="Every" value={d.every} onChange={(v) => set({ every: v })} suffix={<UnitSwitch value={d.everyUnit} units={['m', 'h', 'd']} onChange={(u) => set({ everyUnit: u })} />} />
-            <Field label="Budget" value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} suffix="USD" />
-          </div>
-          <div className="algo-grid">
-            <Field label="Dip" value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} suffix="%" title={`Buy more when the price is this far ${p.side === 'buy' ? 'below' : 'above'} your average so far`} />
-            <Field label="× more" value={d.dipMult} onChange={(v) => set({ dipMult: v })} suffix="×" />
-          </div>
-          <Seg label="Execution" value={d.exec === 'hybrid' ? 'hybrid' : d.exec} onChange={(v) => set({ exec: v })} options={[['taker', 'Taker'], ['hybrid', 'Rest, then take'], ['maker', 'Maker']]} />
-        </>
-      )}
+        {ek === 'dca' && (
+          <>
+            <Field label="Amount per buy" value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" />
+            <Field label="Every" value={d.every} onChange={(v) => set({ every: v })} suffix={<UnitSelect label="Every" value={d.everyUnit} units={['m', 'h', 'd']} onChange={(u) => set({ everyUnit: u })} />} />
+            <Field label="Count" value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} suffix="buys" />
+          </>
+        )}
 
-      {ek === 'swarm' && (
-        <>
-          <div className="algo-grid">
-            <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} />
-            <Field label="Between" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" title="Pause between waves, so the book can refill" />
-            <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
-            <Field label="Retries" value={d.retries} int onChange={(v) => set({ retries: v })} title="What did not fill goes again this many times" />
-          </div>
-          <Seg label="Per wave" value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} title="Aggression: clips sent at once" />
-          <Field label="Irregular" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="%" title="Each clip's size moves up to this much either way" />
-        </>
-      )}
+        {ek === 'swarm' && <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="orders" />}
 
-      {ek === 'trailing' && (
-        <>
-          <div className="algo-grid">
-            <Field label="Trail" value={d.trail} onChange={(v) => set({ trail: v })} suffix={<button type="button" className="algo-unit" onClick={() => set({ trailMode: d.trailMode === 'pct' ? 'abs' : 'pct' })}>{d.trailMode === 'pct' ? '%' : 'USD'}</button>} />
-            <Field label="From" value={d.activation} placeholder="now" onChange={(v) => set({ activation: v })} title={`Start trailing once the price reaches this (${p.side === 'sell' ? 'at or above' : 'at or below'})`} />
-          </div>
-          <div className="algo-row">
-            <Seg value={d.trailWhole ? 'pos' : 'amt'} onChange={(v) => set({ trailWhole: v === 'pos' })} options={[['pos', 'Whole position'], ['amt', 'Amount']]} />
-            <Seg value={d.source} onChange={(v) => set({ source: v })} options={[['mark', 'Mark'], ['last', 'Last']]} />
-          </div>
-          <div className="algo-row">
-            <Seg label="Exit" value={d.exit} onChange={(v) => set({ exit: v })} options={[['market', 'Market'], ['chase', 'Chase', 'Rest at the best price first, then take']]} />
-            {d.exit === 'chase' ? <Field label="For" value={d.chaseSec} onChange={(v) => set({ chaseSec: v })} suffix="s" /> : <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />}
-          </div>
-        </>
-      )}
+        {ek === 'trailing' && (
+          <Field
+            label="Trail"
+            value={d.trail}
+            onChange={(v) => set({ trail: v })}
+            suffix={<ModeSelect label="Trail" value={d.trailMode} options={[['pct', '%'], ['abs', 'USD']]} onChange={(v) => set({ trailMode: v })} />}
+          />
+        )}
 
-      {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={p.sym?.baseCoin ?? ''} />}
+        {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={base} />}
+      </div>
 
-      {offersExits(kind, d, p.reduceOnly) && <ExitFields d={d} set={set} side={p.side} always={kind === 'bracket'} levels={plan?.exits ?? null} />}
+      <p className="algo-what">{oneLine(kind, d, p.side, p.quantity, base)}</p>
 
-      {/* Shared rules: a price limit, when to start, price bounds, the spread guard. */}
       <div className="algo-morehead">
         <button type="button" className="algo-more" aria-expanded={more} onClick={() => setMore((v) => !v)}>
-          {more ? 'Fewer rules' : 'Limit, start, bounds'}
-          {!more && activeRules(d) > 0 && <span className="algo-badge">{activeRules(d)}</span>}
+          <svg className="algo-more__caret" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
+            <path d="M3.5 2 6.5 5 3.5 8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+          More options
+          {changed > 0 && <span className="algo-badge" title="Settings changed from the defaults">{changed}</span>}
         </button>
         <Switch label="Paper" checked={d.paper} onChange={(v) => set({ paper: v })} title="Run against the live market and send nothing" />
       </div>
-      <Seg
-        label="Runs"
-        value={d.place}
-        onChange={(v) => set({ place: v })}
-        options={[
-          ['browser', 'This browser', 'Signed with your trading key, while a ValueDesk tab is open'],
-          ['hosted', 'ValueDesk 24/7', 'On the ValueDesk executor, with the key you registered for it - keeps running while your browser is closed'],
-          ['self', 'Self-hosted', 'On the copier you run yourself'],
-        ]}
-      />
       <Collapse open={more}>
         <div className="algo-rules">
+          {(ek === 'twap' || ek === 'vwap') && (
+            <>
+              <Field label="Slices" value={d.slices} int onChange={(v) => set({ slices: v })} title="How many child orders" />
+              {ek === 'vwap' && (
+                <>
+                  <Seg label="History" value={d.lookback} onChange={(v) => set({ lookback: v })} options={[[7, '7 d'], [14, '14 d'], [28, '28 d'], [41, '6 w']]} title="Days of volume the profile is the median of" />
+                  <Switch label="Adaptive" checked={d.adaptive} onChange={(v) => set({ adaptive: v })} title="Faster while the market trades more than usual, slower while it trades less" />
+                </>
+              )}
+              {kind === 'twap' && (
+                <>
+                  <div className="algo-urgency" title="Front-loaded puts more early; back-loaded more late">
+                    <span className="algo-seg__k">Urgency</span>
+                    <input type="range" min={-1} max={1} step={0.1} value={d.urgency} aria-label="Urgency" onChange={(e) => set({ urgency: Number(e.target.value) })} />
+                    <span className="algo-urgency__v">{d.urgency === 0 ? 'Even' : d.urgency > 0 ? `Front ${Math.round(d.urgency * 100)}` : `Back ${Math.round(-d.urgency * 100)}`}</span>
+                  </div>
+                  <Switch label="Close position" checked={d.twapClose} onChange={(v) => set({ twapClose: v })} title="Works a share of your position on this market instead of an amount, reduce-only" />
+                </>
+              )}
+              {ek === 'twap' && (
+                <>
+                  <Field label="Smallest slice" value={d.minSlice} placeholder="any" onChange={(v) => set({ minSlice: v })} suffix={base} title="No slice below this: what is due waits until it reaches it (except at the end)" />
+                  <Field label="Largest slice" value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} suffix={base} />
+                </>
+              )}
+              <ExecFields d={d} set={set} chaseOnly={kind === 'chasetwap'} />
+            </>
+          )}
+
+          {ek === 'bracket' && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="A market entry takes at most this far past the touch" />}
+
+          {ek === 'basket' && <BasketMore d={d} set={set} dur={dur} />}
+
+          {ek === 'pov' && (
+            <>
+              <Field label="Largest child" value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} suffix={base} />
+              <Field label="Stop after" value={d.endIn} placeholder="when filled" onChange={(v) => set({ endIn: v })} suffix={<UnitSelect label="Stop after" value={d.endUnit} units={['m', 'h', 'd']} onChange={(u) => set({ endUnit: u })} />} />
+              <ExecFields d={d} set={set} />
+            </>
+          )}
+
+          {ek === 'iceberg' && (
+            <>
+              <Field label="Size varies" value={d.displayJitter} onChange={(v) => set({ displayJitter: v })} suffix="± %" title="Each visible clip's size moves up to this much either way" />
+              {d.icePeg && <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="Ticks behind the best price" />}
+              <Field label="Refill after" value={d.refill} onChange={(v) => set({ refill: v })} suffix="s" title="Wait between clips" />
+              <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
+            </>
+          )}
+
+          {ek === 'chase' && (
+            <>
+              <Seg label="Rest" value={d.offsetMode} onChange={(v) => set({ offsetMode: v })} options={[['ticks', 'At the touch'], ['bps', 'Behind', 'Rest a set distance behind the best price']]} />
+              {d.offsetMode === 'ticks' ? (
+                <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="0 joins the best price; -1 steps inside the spread" />
+              ) : (
+                <Field label="Behind" value={d.offsetBps} onChange={(v) => set({ offsetBps: v })} suffix="bp" />
+              )}
+              <Field label="Re-price after" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" title="Move once the best price is this far away" />
+              <Field label="Max chase" value={d.maxChase} placeholder="none" onChange={(v) => set({ maxChase: v })} suffix="bp" title="How far from where it started it may follow" />
+              <Field label="Give up after" value={d.timeout} placeholder="never" onChange={(v) => set({ timeout: v })} suffix={<UnitSelect label="Give up after" value={d.timeoutUnit} units={['s', 'm', 'h']} onChange={(u) => set({ timeoutUnit: u })} />} />
+              {opt(d.timeout) && (
+                <Seg label="Then" value={d.onEnd} onChange={(v) => set({ onEnd: v })} options={[['take', 'Take'], ['cancel', 'Cancel'], ['rest', 'Leave']]} />
+              )}
+            </>
+          )}
+
+          {ek === 'scale' && (
+            <>
+              {mid && (
+                <div className="algo-seg" aria-label="Range from the price">
+                  <span className="algo-seg__k">Range</span>
+                  <div className="algo-seg__opts">
+                    {[0.5, 1, 2, 5, 10].map((x) => (
+                      <button
+                        key={x}
+                        type="button"
+                        className="oe-mini"
+                        onClick={() => {
+                          const r = (v: number) => String(Math.round(v / tick) * tick).replace(/(\.\d*?)0{6,}\d*$/, '$1');
+                          const s = p.side === 'buy' ? -1 : 1;
+                          set({ from: r(mid * (1 + s * 0.001)), to: r(mid * (1 + (s * x) / 100)) });
+                        }}
+                      >
+                        {x}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Seg label="Size" value={d.distribution} onChange={(v) => set({ distribution: v })} options={[['flat', 'Flat'], ['linear', 'Linear'], ['exponential', 'Exp'], ['bell', 'Bell']]} />
+              <Field label="Skew" value={d.skew} onChange={(v) => set({ skew: v })} suffix="×" title="The last order's size over the first's" />
+              <Seg label="Spacing" value={d.spacing} onChange={(v) => set({ spacing: v })} options={[['linear', 'Even'], ['geometric', '%', 'Even in percent'], ['front', 'Front', 'Denser near the first price'], ['back', 'Back', 'Denser near the last price']]} />
+              <Field label="Size varies" value={d.scaleJitter} onChange={(v) => set({ scaleJitter: v })} suffix="± %" />
+              <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
+            </>
+          )}
+
+          {ek === 'dca' && (
+            <>
+              <Field label="Budget" value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} suffix="USD" />
+              <Field label="Dip" value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} suffix="%" title={`Buy more when the price is this far ${p.side === 'buy' ? 'below' : 'above'} your average so far`} />
+              {opt(d.dip) && <Field label="Then buy" value={d.dipMult} onChange={(v) => set({ dipMult: v })} suffix="× more" />}
+              <Seg label="Execution" value={d.exec === 'hybrid' ? 'hybrid' : d.exec} onChange={(v) => set({ exec: v })} options={[['taker', 'Taker'], ['hybrid', 'Hybrid', 'Rest, then take'], ['maker', 'Maker']]} />
+            </>
+          )}
+
+          {ek === 'swarm' && (
+            <>
+              <Seg label="Per wave" value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} title="Clips sent at once" />
+              <Field label="Between waves" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" title="Pause between waves, so the book can refill" />
+              <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
+              <Field label="Retries" value={d.retries} int onChange={(v) => set({ retries: v })} title="What did not fill goes again this many times" />
+              <Field label="Size varies" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="± %" />
+            </>
+          )}
+
+          {ek === 'trailing' && (
+            <>
+              <Field label="Start at" value={d.activation} placeholder="now" onChange={(v) => set({ activation: v })} suffix="USD" title={`Start trailing once the price reaches this (${p.side === 'sell' ? 'at or above' : 'at or below'})`} />
+              <Seg label="Size" value={d.trailWhole ? 'pos' : 'amt'} onChange={(v) => set({ trailWhole: v === 'pos' })} options={[['pos', 'Position'], ['amt', 'Amount']]} />
+              <Seg label="Price" value={d.source} onChange={(v) => set({ source: v })} options={[['mark', 'Mark'], ['last', 'Last']]} />
+              <Seg label="Exit" value={d.exit} onChange={(v) => set({ exit: v })} options={[['market', 'Market'], ['chase', 'Chase', 'Rest at the best price first, then take']]} />
+              {d.exit === 'chase' ? <Field label="Chase for" value={d.chaseSec} onChange={(v) => set({ chaseSec: v })} suffix="s" /> : <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />}
+            </>
+          )}
+
+          {ek === 'conditional' && <ConditionalMore d={d} set={set} />}
+
+          {exitsHere && kind !== 'bracket' && <ExitFields d={d} set={set} side={p.side} always={false} levels={plan?.exits ?? null} />}
+
+          {/* Shared rules: where it runs, a price limit, when to start, price bounds, the spread guard. */}
+          <Seg
+            label="Runs"
+            value={d.place}
+            onChange={(v) => set({ place: v })}
+            options={[
+              ['browser', 'Browser', 'Signed with your trading key, while a ValueDesk tab is open'],
+              ['hosted', '24/7', 'On the ValueDesk executor, with the key you registered for it - keeps running while your browser is closed'],
+              ['self', 'Self-hosted', 'On the copier you run yourself'],
+            ]}
+          />
           {ek !== 'scale' && ek !== 'trailing' && ek !== 'basket' && (
-            <Field label="Limit" value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} title={`Never ${p.side === 'buy' ? 'buy above' : 'sell below'} this price`} />
+            <Field label="Limit" value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} suffix="USD" title={`Never ${p.side === 'buy' ? 'buy above' : 'sell below'} this price`} />
           )}
           <Seg label="Start" value={d.startMode} onChange={(v) => set({ startMode: v })} options={[['now', 'Now'], ['delay', 'Later'], ['price', 'At a price']]} />
-          {d.startMode === 'delay' && <Field label="In" value={d.startDelay} onChange={(v) => set({ startDelay: v })} suffix="min" />}
-          {d.startMode === 'price' && <Field label="When mark" value={d.startPrice} onChange={(v) => set({ startPrice: v })} title="Starts once the mark reaches this, from wherever it is now" />}
+          {d.startMode === 'delay' && <Field label="Start in" value={d.startDelay} onChange={(v) => set({ startDelay: v })} suffix="min" />}
+          {d.startMode === 'price' && <Field label="When mark" value={d.startPrice} onChange={(v) => set({ startPrice: v })} suffix="USD" title="Starts once the mark reaches this, from wherever it is now" />}
           {ek !== 'scale' && ek !== 'trailing' && ek !== 'conditional' && ek !== 'basket' && ek !== 'bracket' && (
             <>
               <div className="algo-bound">
-                <Field label="Above" value={d.upper} placeholder="—" onChange={(v) => set({ upper: v })} />
+                <Field label="Above" value={d.upper} placeholder="none" onChange={(v) => set({ upper: v })} suffix="USD" />
                 <Seg value={d.upperThen} onChange={(v) => set({ upperThen: v })} options={BOUND_OPTS} />
               </div>
               <div className="algo-bound">
-                <Field label="Below" value={d.lower} placeholder="—" onChange={(v) => set({ lower: v })} />
+                <Field label="Below" value={d.lower} placeholder="none" onChange={(v) => set({ lower: v })} suffix="USD" />
                 <Seg value={d.lowerThen} onChange={(v) => set({ lowerThen: v })} options={BOUND_OPTS} />
               </div>
               <Field label="Max spread" value={d.maxSpread} placeholder="any" onChange={(v) => set({ maxSpread: v })} suffix="bp" title="Take nothing while the spread is wider" />
@@ -940,15 +955,13 @@ function ExecFields({ d, set, chaseOnly = false }: { d: Draft; set: (p: Partial<
   return (
     <>
       <Seg label="Each slice" value={style} onChange={(v) => set({ exec: v })} options={opts} />
-      <div className="algo-grid">
-        {style !== 'maker' && <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="Worst price per taker child, past the touch" />}
-        {style === 'hybrid' && <Field label="Rest for" value={d.makerShare} onChange={(v) => set({ makerShare: v })} suffix="%" title="Share of each slice spent resting before the rest is taken" />}
-        {style !== 'taker' && <Field label="Re-price" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" />}
-        <Field label="± size" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="%" title="Randomise each slice's size (the total stays)" />
-        <Field label="± time" value={d.timeJitter} onChange={(v) => set({ timeJitter: v })} suffix="%" title="Randomise each slice's time, as a share of the interval" />
-        <Field label="Max part." value={d.maxPart} placeholder="off" onChange={(v) => set({ maxPart: v })} suffix="%" title="A slice takes at most this share of the volume printed in the last interval" />
-      </div>
-      <Seg label="When time is up" value={d.finish} onChange={(v) => set({ finish: v })} options={[['take', 'Take the rest'], ['leave', 'Leave it']]} />
+      {style !== 'maker' && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="Worst price per taker child, past the touch" />}
+      {style === 'hybrid' && <Field label="Rest for" value={d.makerShare} onChange={(v) => set({ makerShare: v })} suffix="% of slice" title="Share of each slice spent resting before the rest is taken" />}
+      {style !== 'taker' && <Field label="Re-price after" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" />}
+      <Field label="Size varies" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="± %" title="Randomise each slice's size (the total stays)" />
+      <Field label="Time varies" value={d.timeJitter} onChange={(v) => set({ timeJitter: v })} suffix="± %" title="Randomise each slice's time, as a share of the interval" />
+      <Field label="Max of volume" value={d.maxPart} placeholder="off" onChange={(v) => set({ maxPart: v })} suffix="%" title="A slice takes at most this share of the volume printed in the last interval" />
+      <Seg label="At the end" value={d.finish} onChange={(v) => set({ finish: v })} options={[['take', 'Take rest'], ['leave', 'Leave it']]} />
     </>
   );
 }
@@ -960,28 +973,25 @@ function ExecFields({ d, set, chaseOnly = false }: { d: Draft; set: (p: Partial<
  */
 function ExitFields({ d, set, side, always, levels }: { d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; always: boolean; levels: { tp: number | null; sl: number | null } | null }) {
   const on = always || d.exitsOn;
-  const unit = (mode: 'pct' | 'price', key: 'tpMode' | 'slMode') => (
-    <button type="button" className="algo-unit" title="A distance from your average fill, or a price" onClick={() => set({ [key]: mode === 'pct' ? 'price' : 'pct' } as Partial<Draft>)}>
-      {mode === 'pct' ? '%' : 'USD'}
-    </button>
+  const unit = (label: string, mode: 'pct' | 'price', key: 'tpMode' | 'slMode') => (
+    <ModeSelect label={label} value={mode} options={[['pct', '%'], ['price', 'USD']]} onChange={(v) => set({ [key]: v } as Partial<Draft>)} />
   );
   const at = (x: number | null | undefined) => (x ? ` · ${fmtLevel(x)}` : '');
   return (
     <div className="algo-exits">
       {!always && <Switch label="Take-profit / stop-loss" checked={d.exitsOn} onChange={(v) => set({ exitsOn: v })} title="SoDEX holds them as position stops, resized as the algo fills; when one fills the other is cancelled" />}
       {on && (
-        <div className="algo-grid">
-          <Field label="TP" value={d.tp} placeholder="none" onChange={(v) => set({ tp: v })} suffix={unit(d.tpMode, 'tpMode')} title={`Take-profit ${side === 'buy' ? 'above' : 'below'} your average fill${at(levels?.tp)}`} />
-          <Field label="SL" value={d.sl} placeholder="none" onChange={(v) => set({ sl: v })} suffix={unit(d.slMode, 'slMode')} title={`Stop-loss ${side === 'buy' ? 'below' : 'above'} your average fill${at(levels?.sl)}`} />
-        </div>
+        <>
+          <Field label="Take-profit" value={d.tp} placeholder="none" onChange={(v) => set({ tp: v })} suffix={unit('Take-profit', d.tpMode, 'tpMode')} title={`${side === 'buy' ? 'Above' : 'Below'} your average fill${at(levels?.tp)}`} />
+          <Field label="Stop-loss" value={d.sl} placeholder="none" onChange={(v) => set({ sl: v })} suffix={unit('Stop-loss', d.slMode, 'slMode')} title={`${side === 'buy' ? 'Below' : 'Above'} your average fill${at(levels?.sl)}`} />
+        </>
       )}
     </div>
   );
 }
 
-function BasketFields({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
+function BasketLegs({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
   const edit = (i: number, patch: Partial<LegDraft>) => set({ legs: d.legs.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
-  const total = d.legs.reduce((a, l) => a + (Number(l.usd) || 0), 0);
   return (
     <>
       <ol className="algo-legs">
@@ -1001,22 +1011,26 @@ function BasketFields({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }
           + Add a market
         </button>
       )}
+    </>
+  );
+}
+
+function BasketMore({ d, set, dur }: { d: Draft; set: (p: Partial<Draft>) => void; dur: ReactNode }) {
+  return (
+    <>
       <Seg label="Each market" value={d.basketStyle} onChange={(v) => set({ basketStyle: v })} options={[['swarm', 'Swarm', 'Small takers in waves, now'], ['twap', 'TWAP', 'Slices over a time you choose']]} />
       {d.basketStyle === 'twap' ? (
-        <div className="algo-grid">
-          <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={<UnitSwitch value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />} />
+        <>
+          <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={dur} />
           <Field label="Slices" value={d.slices} int onChange={(v) => set({ slices: v })} />
-        </div>
+        </>
       ) : (
-        <div className="algo-grid">
-          <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} title="Per market" />
-          <Field label="Between" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" />
-        </div>
+        <>
+          <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="per market" />
+          <Field label="Between waves" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" />
+        </>
       )}
-      <div className="algo-grid">
-        <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
-        <div className="algo-total">{total > 0 ? `${fmtUsd(total, 0)} in all` : ''}</div>
-      </div>
+      <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
     </>
   );
 }
@@ -1048,9 +1062,6 @@ function ConditionalFields({ d, set, symbol, base }: { d: Draft; set: (p: Partia
   const edit = (i: number, patch: Partial<CondDraft>) => set({ conds: d.conds.map((c, j) => (j === i ? { ...c, ...patch } : c)) });
   return (
     <>
-      <div className="algo-row">
-        <Seg label="When" value={d.match} onChange={(v) => set({ match: v })} options={[['all', 'All hold'], ['any', 'Any holds']]} />
-      </div>
       <ol className="algo-conds">
         {d.conds.map((c, i) => (
           <li key={i} className="algo-cond">
@@ -1074,25 +1085,23 @@ function ConditionalFields({ d, set, symbol, base }: { d: Draft; set: (p: Partia
           + Add a condition
         </button>
       )}
-      <div className="algo-grid">
-        <Field label="Hold for" value={d.holdSec} onChange={(v) => set({ holdSec: v })} suffix="s" title="It acts only once the conditions held this long (no firing on a wick)" />
-        <Field label="Expires" value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} suffix={<UnitSwitch value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} />
-      </div>
       <Seg label="Then" value={d.then} onChange={(v) => set({ then: v })} options={[['market', 'Market'], ['limit', 'Limit'], ['close', 'Close'], ['twap', 'TWAP'], ['chase', 'Chase']]} />
-      {d.then === 'market' && <Field label="Max slip" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />}
-      {d.then === 'limit' && (
-        <div className="algo-row">
-          <Field label="Price" value={d.thenPrice} onChange={(v) => set({ thenPrice: v })} />
-          <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
-        </div>
-      )}
-      {d.then === 'close' && <Field label="Close" value={d.closePct} onChange={(v) => set({ closePct: v })} suffix={`% of the ${base} position`} />}
-      {d.then === 'twap' && (
-        <div className="algo-grid">
-          <Field label="Over" value={d.thenMin} onChange={(v) => set({ thenMin: v })} suffix="min" />
-          <Field label="Slices" value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} />
-        </div>
-      )}
+      {d.then === 'limit' && <Field label="Price" value={d.thenPrice} onChange={(v) => set({ thenPrice: v })} suffix="USD" />}
+      {d.then === 'close' && <Field label="Close" value={d.closePct} onChange={(v) => set({ closePct: v })} suffix={base ? `% of ${base}` : '%'} />}
+      {d.then === 'twap' && <Field label="Over" value={d.thenMin} onChange={(v) => set({ thenMin: v })} suffix="min" />}
+    </>
+  );
+}
+
+function ConditionalMore({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
+  return (
+    <>
+      {d.conds.length > 1 && <Seg label="When" value={d.match} onChange={(v) => set({ match: v })} options={[['all', 'All hold'], ['any', 'Any holds']]} />}
+      <Field label="Hold for" value={d.holdSec} onChange={(v) => set({ holdSec: v })} suffix="s" title="It acts only once the conditions held this long (no firing on a wick)" />
+      <Field label="Expires in" value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} suffix={<UnitSelect label="Expires in" value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} />
+      {(d.then === 'market' || d.then === 'close') && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />}
+      {d.then === 'limit' && <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />}
+      {d.then === 'twap' && <Field label="Slices" value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} />}
     </>
   );
 }
@@ -1239,37 +1248,73 @@ function addLevels(out: Level[], s: AlgoSpec, ctx: { bid: number | null; ask: nu
   if (s.kind === 'bracket' && s.entry === 'limit' && s.price !== null) out.push({ label: 'Entry', price: s.price, tone: 'warn' });
 }
 
-function whatItDoes(kind: UiKind, d: Draft, side: 'buy' | 'sell'): string {
+/** The one summary line under the fields: "Buys 0.5 BTC in 30 slices over 30 min". */
+function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string, base: string): string {
   const verb = side === 'buy' ? 'Buys' : 'Sells';
+  const q = Number(quantity) > 0 ? `${quantity} ${base}`.trim() : 'the amount';
+  const x = (s: string) => (s.trim() === '' ? '…' : s);
+  const over = `${x(d.dur)} ${UNIT_NAME[d.durUnit]}`;
   switch (kind) {
     case 'twap':
-      if (d.twapClose) return `Closes ${d.twapCloseShare || '…'}% of your position in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}.`;
-      return `${verb} the amount in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}.`;
+      if (d.twapClose) return `Closes ${x(d.twapCloseShare)}% of your position in ${x(d.slices)} slices over ${over}`;
+      return `${verb} ${q} in ${x(d.slices)} slices over ${over}`;
     case 'chasetwap':
-      return `${verb} in ${d.slices || '…'} slices over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}, each resting at the best price first.`;
+      return `${verb} ${q} in ${x(d.slices)} resting slices over ${over}`;
     case 'vwap':
-      return `${verb} over ${d.dur || '…'} ${UNIT_NAME[d.durUnit]}, faster in the hours the market usually trades most.`;
+      return `${verb} ${q} over ${over}, with the market's volume`;
     case 'pov':
-      return `${verb} ${d.rate || '…'}% of what everyone else trades, as they trade it.`;
+      return `${verb} ${q} as ${x(d.rate)}% of market volume`;
     case 'iceberg':
-      return `Shows ${d.display || '…'} at a time and refills it until the amount is done.`;
+      return `${verb} ${q}, showing ${x(d.display)} ${base} at a time${!d.icePeg && opt(d.icePrice) ? ` at ${d.icePrice}` : ' at the best price'}`;
     case 'chase':
-      return 'Rests one post-only order at the best price and follows it until it fills.';
+      return `${verb} ${q} with one order that follows the best price`;
     case 'scale':
-      return `Rests ${d.orders || '…'} orders between your two prices at once.`;
-    case 'dca':
-      return `${verb} $${d.perOrder || '…'} every ${d.every || '…'} ${UNIT_NAME[d.everyUnit]}, ${d.dcaOrders || '…'} times.`;
+      return `${verb} ${q} in ${x(d.orders)} orders from ${x(d.from)} to ${x(d.to)}`;
+    case 'dca': {
+      const total = n(d.perOrder) * n(d.dcaOrders);
+      return `${verb} $${x(d.perOrder)} every ${x(d.every)} ${UNIT_NAME[d.everyUnit]}, ${x(d.dcaOrders)} times${Number.isFinite(total) && total > 0 ? ` (${fmtUsd(total, 0)})` : ''}`;
+    }
     case 'swarm':
-      return `${verb} in ${d.clips || '…'} small takers, ${d.inFlight} at a time.`;
-    case 'conditional':
-      return `Waits until ${d.match === 'all' ? 'every condition holds' : 'any condition holds'}, then acts.`;
-    case 'trailing':
-      return side === 'sell' ? 'Follows the high and sells when the price falls back by the trail (protects a long).' : 'Follows the low and buys when the price bounces by the trail (protects a short).';
+      return `${verb} ${q} in ${x(d.clips)} clips, ${d.inFlight} at a time`;
+    case 'conditional': {
+      const then = d.then === 'close' ? `close ${x(d.closePct)}%` : d.then === 'limit' ? `limit ${side === 'buy' ? 'buy' : 'sell'} at ${x(d.thenPrice)}` : d.then === 'twap' ? `TWAP over ${x(d.thenMin)} min` : `${d.then} ${side === 'buy' ? 'buy' : 'sell'}`;
+      return `${d.conds.length > 1 ? (d.match === 'all' ? 'When all conditions hold' : 'When any condition holds') : 'When the condition holds'}: ${then}`;
+    }
+    case 'trailing': {
+      const t = d.trailMode === 'pct' ? `${x(d.trail)}%` : `$${x(d.trail)}`;
+      return side === 'sell' ? `Sells when the price falls ${t} from its high` : `Buys when the price rises ${t} from its low`;
+    }
     case 'bracket':
-      return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${d.entry === 'limit' ? `at ${d.entryPrice || '…'}` : 'at market'}, then SoDEX holds the take-profit and stop-loss: when one fills, the other is cancelled.`;
-    case 'basket':
-      return `Trades ${d.legs.length || '…'} markets at once, each as its own ${d.basketStyle === 'twap' ? 'TWAP' : 'swarm'}; pause or cancel them together.`;
+      return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${q} ${d.entry === 'limit' ? `at ${x(d.entryPrice)}` : 'at market'}, with take-profit and stop-loss`;
+    case 'basket': {
+      const total = d.legs.reduce((a, l) => a + (Number(l.usd) || 0), 0);
+      return `Trades ${d.legs.length || '…'} markets at once${total > 0 ? `, ${fmtUsd(total, 0)} in all` : ''}`;
+    }
   }
+}
+
+/** Settings under More options, per kind (the shared rules are counted apart). */
+const EXEC_KEYS: ReadonlyArray<keyof Draft> = ['exec', 'slip', 'makerShare', 'chaseTicks', 'sizeJitter', 'timeJitter', 'maxPart', 'finish'];
+const MORE_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
+  twap: ['slices', 'urgency', 'twapClose', 'minSlice', 'maxSlice', ...EXEC_KEYS],
+  chasetwap: ['slices', 'minSlice', 'maxSlice', ...EXEC_KEYS],
+  vwap: ['slices', 'lookback', 'adaptive', ...EXEC_KEYS],
+  pov: ['maxChild', 'endIn', ...EXEC_KEYS],
+  iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
+  chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'maxChase', 'timeout', 'onEnd'],
+  scale: ['distribution', 'skew', 'spacing', 'scaleJitter', 'postOnly'],
+  dca: ['budget', 'dip', 'dipMult', 'exec'],
+  swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
+  trailing: ['activation', 'trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
+  conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],
+  bracket: ['slip'],
+  basket: ['basketStyle', 'dur', 'slices', 'clips', 'waveSec', 'slip'],
+};
+
+/** How many settings under More options differ from the defaults: the row's badge. */
+function moreChanged(kind: UiKind, d: Draft, exits: boolean): number {
+  const own = MORE_KEYS[kind].filter((k) => d[k] !== DEFAULT[k]).length;
+  return own + activeRules(d) + (d.place !== DEFAULT.place ? 1 : 0) + (exits && kind !== 'bracket' && d.exitsOn ? 1 : 0);
 }
 
 function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: AlgoSpec; plan: AlgoPlan; kind: UiKind; feeRates: Rates; place: Draft['place']; location: string | null }) {

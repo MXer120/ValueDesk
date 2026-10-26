@@ -66,6 +66,16 @@ import './components/algo/algo.css';
 import './copy/copy.css';
 import './legal/gate.css';
 import './components/shell.css';
+// The macro widgets, the liquidation map, the Fed's broadcast, the data charts,
+// the key lock, Settings, and last the glass look (appearance.css), whose
+// `html`-led rules restyle every pop-up and the trading page's panels.
+import './components/liqmap/LiqHeatmap.css';
+import './components/datachart/SeriesChart.css';
+import './components/macro/macro.css';
+import './components/fedlive/FedLive.css';
+import './components/account/UnlockDialog.css';
+import './components/SettingsMenu.css';
+import './appearance.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
    the @fontsource sheets (main.tsx, first), chart/tv/*.css, which

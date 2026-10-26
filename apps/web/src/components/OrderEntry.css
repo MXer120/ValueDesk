@@ -1417,18 +1417,26 @@ button.oe-select[aria-expanded='true'] {
 }
 
 /* The algo tab names the algo picked last, with a caret: pressed again it opens the menu of them. */
-.oe-tab--algo { display: inline-flex; align-items: center; gap: 4px; }
+.oe-tab--algo { display: inline-flex; align-items: center; gap: 6px; }
 .oe-tab--algo svg:not(.oe-algo-ic) { opacity: 0.7; transition: transform var(--dur-fast) var(--ease-out); }
 .oe-tab--algo[aria-expanded='true'] svg:not(.oe-algo-ic) { transform: rotate(180deg); }
-/* The algo menu (algo/menu.ts): a mark and a name per type, two columns, no
-   description - that is the row's title, and the ticket explains the chosen one. */
-.oe-pop--algo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px; max-width: 300px; min-width: 260px; }
-.oe-pop__opt.oe-pop__opt--algo { flex-direction: row; align-items: center; gap: 8px; padding: 6px 8px; }
+.oe-tab--algo .oe-algo-ic { flex: none; }
+/* A tab is marked by its stub, never by a box: no ring for a mouse focus, and
+   the keyboard's ring drawn INSIDE the tab - the strip scrolls sideways, so a
+   ring outside the tab was cut off into a stray partial box. */
+.oe-tab:focus:not(:focus-visible) { outline: none; }
+.oe-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; border-radius: var(--radius-sm); }
+/* The algo menu (algo/menu.ts): a mark and a name per type, two columns of
+   equal rows, no description - that is the row's title, and the ticket says
+   what the chosen one does. */
+.oe-pop--algo { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 36px; gap: 2px; max-width: 320px; min-width: 280px; }
+.oe-pop__opt.oe-pop__opt--algo { flex-direction: row; align-items: center; gap: 10px; height: 100%; padding: 0 10px; }
 .oe-pop__opt--algo .oe-algo-ic { flex: none; color: var(--muted); }
 .oe-pop__opt--algo:hover .oe-algo-ic,
 .oe-pop__opt--algo.is-on .oe-algo-ic { color: var(--text); }
-.oe-pop__opt--algo b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.oe-tab--algo .oe-algo-ic { flex: none; }
+.oe-pop__opt--algo b { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oe-pop__opt--algo.is-on b { color: var(--text); }
+.oe-pop__opt--algo:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 /* A stop loss against the estimated liquidation price (OrderEntry.tsx slTone): the
    field says it - red on or past liquidation, orange close to it. */
