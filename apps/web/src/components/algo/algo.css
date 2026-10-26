@@ -609,4 +609,3 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-pvw__table tfoot td { position: static; }
 .algo-pvw__table td small { display: inline-block; min-width: 3.6em; text-align: right; }
 
-.algo-st__break > path { fill: none; stroke: var(--muted); stroke-width: 1.2; }

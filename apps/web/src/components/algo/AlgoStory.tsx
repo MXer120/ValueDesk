@@ -1010,9 +1010,9 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
   const cap = base0 ? base0 * (1 + sgn * slip) : null;
   // The scale is the book's: the bid, the ask and the reference. A max slippage far past them is marked at the edge, not stretched to.
   const core = [...path.map(near), ...path.map(far), ...(fixedRef ? [fixedRef] : [])];
-  const span0 = Math.max(...core) - Math.min(...core);
-  const capOn = cap !== null && !maker && Math.abs(cap - mid0) < span0 * 2.5;
-  const sc = priceScale([...core, ...(capOn ? [cap!] : [])], capOn || maker || cap === null ? 0.12 : 0.2);
+  // The max slippage moves with what it is measured from (the ask, from the best price), drawn to scale.
+  const capPath = cap !== null && !maker ? path.map((x) => (from === 'touch' ? far(x) : fixedRef!) * (1 + sgn * slip)) : null;
+  const sc = priceScale([...core, ...(capPath ?? [])], 0.08);
   let filled = 0;
   const dots: ReactNode[] = [];
   if (!taker && t >= dipF) {
@@ -1026,6 +1026,7 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
   const xNow = fx(t);
   const refName = SLIP_NAMES[from] ?? 'Best price';
   const tags: Array<{ x: number; y: number; label: string; tone: string }> = [
+    ...(capPath ? [{ x: xNow, y: sc.y(sampleAt(capPath, t)), label: `Max slippage ${fmtP(sampleAt(capPath, t))}`, tone }] : []),
     { x: xNow, y: sc.y(far(sampleAt(path, t))), label: `${side === 'buy' ? 'Ask' : 'Bid'} ${fmtP(far(sampleAt(path, t)))}`, tone: 'muted' },
     { x: xNow, y: sc.y(near(sampleAt(path, t))), label: `${side === 'buy' ? 'Bid' : 'Ask'} ${fmtP(near(sampleAt(path, t)))}`, tone: 'now' },
   ];
@@ -1042,14 +1043,7 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
         </g>
       )}
       {fixedRef && <Rule y={sc.y(fixedRef)} label={`${refName} ${fmtP(fixedRef)}`} tone="warn" dashed />}
-      {cap !== null && !maker && capOn && <Rule y={sc.y(cap)} label={`Max slippage ${fmtP(cap)}`} tone={tone} dashed />}
-      {cap !== null && !maker && !capOn && (
-        // Far past the book: drawn at the edge, past a break in the price axis (≈), at its real price.
-        <g className="algo-st__break">
-          <Rule y={sgn > 0 ? PT + 2 : Y1 - 2} label={`Max slippage ${fmtP(cap)}`} tone={tone} dashed />
-          <path d={sgn > 0 ? `M${PL - 5},${PT + 11} l4,-3 l2,3 l4,-3 M${PL - 5},${PT + 15} l4,-3 l2,3 l4,-3` : `M${PL - 5},${Y1 - 11} l4,-3 l2,3 l4,-3 M${PL - 5},${Y1 - 15} l4,-3 l2,3 l4,-3`} />
-        </g>
-      )}
+      {capPath && <path className={`algo-st__edge is-${tone}`} d={pathD(capPath, sc.y, t)} />}
       {dots}
       <EndTags rules={tags} />
       <Head x={xNow} y={sc.y(sampleAt(path, t))} />
