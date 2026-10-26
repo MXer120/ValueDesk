@@ -23,7 +23,7 @@
  *
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
-import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
   ORACLE_VENUES,
@@ -662,6 +662,10 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           book={bid && ask ? { bid, ask } : null}
           refs={{ mid: bid && ask ? (bid + ask) / 2 : null, mark: markPx, index: indexPx, oracleMid, oracleFair }}
           bandDepth={bandDepth}
+          farBook={(() => {
+            const b = snap?.books?.[snap.books.length - 1] ?? null;
+            return b ? (p.side === 'buy' ? b.asks : b.bids).map(([px, sz]) => [Number(px), Number(sz)] as [number, number]) : null;
+          })()}
           tz={chartTz}
           profile={profile?.weights ?? null}
           dayVolume={dayVolume}
@@ -824,37 +828,17 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={base} />}
         </div>
   );
-  // The window's Order section: the ticket's Amount (with its slider) and the ticket's own fields, the same ones.
-  const pos = p.positionQty ?? null;
-  const orderNode = (
-    <section className="algo-group algo-ordersec" aria-label="Order">
-      {needsAmount && p.onQuantity && (
-        <>
-          <div className="stg__label">Amount</div>
-          <div className="algo-fields">
-            <Field label="Amount" value={p.quantity} onChange={p.onQuantity} suffix={base} />
-            {p.onSizePct && (
-              <div className="algo-amt">
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={p.sizePct ?? 0}
-                  onChange={(e) => p.onSizePct!(Number(e.target.value))}
-                  aria-label={kind === 'trailing' ? 'Share of the position' : 'Share of what is available'}
-                />
-                <span>{`${Math.round(p.sizePct ?? 0)}%`}</span>
-              </div>
-            )}
-            {kind === 'trailing' && (
-              <p className="oe-hint">{pos ? `Of your ${fmtQ(Math.abs(pos))} ${base} ${pos > 0 ? 'long' : 'short'} on ${p.symbol}.` : `No open position on ${p.symbol}: the slider has nothing to measure.`}</p>
-            )}
-          </div>
-        </>
+  // The window's last section: every choice at a glance - the same rows the confirmation shows.
+  const summaryNode = (
+    <section className="algo-group algo-summary" aria-label="Summary">
+      {check.spec && plan ? (
+        <div className="stg__card algo-sumcard">
+          <Review spec={check.spec} plan={plan} kind={kind} feeRates={feeRates(market, feeFraction)} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />
+        </div>
+      ) : (
+        <p className="oe-hint">{amountMissing ? 'Enter an amount on the ticket.' : allErrors[0] ?? 'Waiting for the market…'}</p>
       )}
-      <div className="stg__label">On the ticket</div>
-      {ticketFields}
+      {changes.length > 0 && <p className="stg__note">Changed from the defaults: {changes.join(', ')}.</p>}
     </section>
   );
 
@@ -897,11 +881,17 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         d={d}
         exitsHere={exitsHere}
         preview={previewNode}
-        order={orderNode}
+        summary={summaryNode}
+        hasOrder={needsAmount && !!p.onQuantity || ek === 'bracket' || ek === 'basket' || ek === 'conditional'}
         canReset={changes.length > 0}
         onReset={() => setD((x) => resetAdvanced(kind, x))}
         runsOn={<RunsOn place={place} onChange={setPlace} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
       >
+        <TicketSettings
+          kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} err={err}
+          quantity={p.quantity} onQuantity={p.onQuantity} sizePct={p.sizePct} onSizePct={p.onSizePct} positionQty={p.positionQty ?? null}
+          symbol={p.symbol} needsAmount={needsAmount} exits={plan?.exits ?? null}
+        />
         <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} oracleLive={oracle ? { used: oracle.used, stale: oracle.stale } : null} />
       </AdvancedWindow>
       {dialog}
@@ -930,14 +920,15 @@ function roundQty(x: number, step?: string): string {
    line, control). Each Group names the section it belongs to and renders only
    while that section is open. */
 
-type Sec = 'order' | 'runs' | 'preview' | 'slicing' | 'exec' | 'exits' | 'start';
+type Sec = 'order' | 'runs' | 'preview' | 'slicing' | 'exec' | 'exits' | 'start' | 'summary';
 
 const SecIcon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
   <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
 );
 
 const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
-  order: { label: 'Order', lede: 'The ticket\u2019s own fields, the same here: a change here is a change there.', icon: <><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M7 8h6M7 12h4" /></> },
+  summary: { label: 'Summary', lede: 'Every choice made, at a glance: what it does, where it runs, what it costs.', icon: <><path d="M5 5h10M5 10h10M5 15h6" /><path d="m13 14 1.5 1.5L17 13" /></> },
+  order: { label: 'Order', lede: 'What it trades: the amount and the order\u2019s own choices. The same as on the ticket: a change here is a change there.', icon: <><rect x="3.5" y="3.5" width="13" height="13" rx="2" /><path d="M7 8h6M7 12h4" /></> },
   runs: { label: 'Runs on', lede: 'Where the order is worked, and whether it sends real orders or only practises against the live market.', icon: <><rect x="3" y="4" width="14" height="5" rx="1.5" /><rect x="3" y="11" width="14" height="5" rx="1.5" /><path d="M6 6.5h.01M6 13.5h.01" /></> },
   preview: { label: 'Preview', lede: 'What the engine will do with these settings: its orders over time, or its prices, from the same plan it runs.', icon: <><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z" /><circle cx="10" cy="10" r="2.2" /></> },
   slicing: { label: 'Slicing', lede: 'How the amount is split into child orders: how many, how big, how often.', icon: <><path d="M3 15h14" /><rect x="4" y="10" width="2.5" height="5" rx="0.6" /><rect x="8.75" y="7" width="2.5" height="8" rx="0.6" /><rect x="13.5" y="4" width="2.5" height="11" rx="0.6" /></> },
@@ -947,14 +938,14 @@ const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
 };
 
 /** The sections a kind has: the ticket's own fields first, then Runs on. */
-function sectionsFor(kind: UiKind, exitsHere: boolean): Sec[] {
+function sectionsFor(kind: UiKind, exitsHere: boolean, hasOrder: boolean): Sec[] {
   const ek: string = engineKind(kind);
-  const out: Sec[] = ['order', 'runs', 'preview'];
+  const out: Sec[] = [...(hasOrder ? ['order' as const] : []), 'runs', 'preview'];
   if (['twap', 'vwap', 'basket', 'pov', 'iceberg', 'scale', 'dca', 'swarm'].includes(ek)) out.push('slicing');
   // A DCA's orders are resting limits: nothing to tune in how they meet the book.
   if (ek !== 'basket' && ek !== 'dca') out.push('exec');
   if (exitsHere && kind !== 'bracket') out.push('exits');
-  out.push('start');
+  out.push('start', 'summary');
   return out;
 }
 
@@ -963,13 +954,13 @@ const lastSec = new Map<UiKind, Sec>();
 
 const SecCtx = createContext<Sec | null>(null);
 
-function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, runsOn, preview, order, children }: {
-  open: boolean; onClose: () => void; kind: UiKind; d: Draft; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; preview: ReactNode; order: ReactNode; children: ReactNode;
+function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, runsOn, preview, summary, hasOrder, children }: {
+  open: boolean; onClose: () => void; kind: UiKind; d: Draft; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; preview: ReactNode; summary: ReactNode; hasOrder: boolean; children: ReactNode;
 }) {
-  const secs = sectionsFor(kind, exitsHere);
+  const secs = sectionsFor(kind, exitsHere, hasOrder);
   const [, bump] = useState(0);
-  const want = lastSec.get(kind) ?? 'order';
-  const sec: Sec = secs.includes(want) ? want : 'order';
+  const want = lastSec.get(kind) ?? secs[0]!;
+  const sec: Sec = secs.includes(want) ? want : secs[0]!;
   const pick = (v: Sec) => {
     lastSec.set(kind, v);
     bump((n) => n + 1);
@@ -998,7 +989,7 @@ function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, 
         <div className="stg__pane" key={sec}>
           <div className="stg__panehead"><SecIcon size={22}>{cur.icon}</SecIcon><h3>{cur.label}</h3></div>
           <p className="stg__lede">{cur.lede}</p>
-          {sec === 'order' ? order : sec === 'runs' ? runsOn : sec === 'preview' ? preview : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
+          {sec === 'summary' ? summary : sec === 'runs' ? runsOn : sec === 'preview' ? preview : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
           <div className="stg__actions algo-done">
             <button type="button" className="stg__btn is-go" onClick={onClose}>Done</button>
           </div>
@@ -1171,6 +1162,136 @@ function PostOnly({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
  * limit, the start, price bounds, the spread guard). Every value is the default
  * until changed.
  */
+/**
+ * The ticket's own fields in the settings window, each in the section it belongs to (the duration with
+ * the slicing, a max slippage with the execution, a start price with the start), in the window's own
+ * controls. The same draft as the ticket: a change here is a change there.
+ */
+function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantity, onQuantity, sizePct, onSizePct, positionQty, symbol, needsAmount, exits }: {
+  kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; roundTick: (x: number) => string;
+  err: (...keys: string[]) => string | undefined; quantity: string; onQuantity?: (v: string) => void; sizePct?: number; onSizePct?: (pct: number) => void;
+  positionQty: number | null; symbol: string; needsAmount: boolean; exits: { tp: number | null; sl: number | null } | null;
+}) {
+  const ek = engineKind(kind);
+  const durUnit = <ATime label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
+  const duration = <AField title="Duration" hint="How long it takes from its first slice to its last." value={d.dur} onChange={(v) => set({ dur: v })} unit={durUnit} err={err('durationMs')} />;
+  const pct = sizePct ?? 0;
+  return (
+    <>
+      {needsAmount && onQuantity && (
+        <Group label="Amount" sec="order">
+          <AField title="Amount" hint={kind === 'trailing' ? 'How much of the position it closes when it fires.' : 'The whole order, in the coin.'} value={quantity} onChange={onQuantity} unit={base} />
+          {onSizePct && (
+            <Row title={kind === 'trailing' ? 'Share of the position' : 'Share of what is available'} hint={kind === 'trailing' ? (positionQty ? `Of your ${fmtQ(Math.abs(positionQty))} ${base} ${positionQty > 0 ? 'long' : 'short'} on ${symbol}.` : `No open position on ${symbol}: nothing to measure.`) : 'As the order panel’s slider: of the margin available times the leverage.'}>
+              <div className="oe-slider algo-slider">
+                <div className="oe-slider__rail" style={{ ['--oe-p' as string]: pct / 100 } as CSSProperties}>
+                  <div className="oe-slider__fill" />
+                  {[0, 25, 50, 75, 100].map((n) => (
+                    <i key={n} className={`oe-slider__notch${pct >= n ? ' is-past' : ''}`} style={{ left: `${n}%` }} aria-hidden="true" />
+                  ))}
+                  <input className="oe-slider__input" type="range" min={0} max={100} step={1} value={pct} aria-label="Share" onChange={(e) => onSizePct(Number(e.currentTarget.value))} />
+                </div>
+                <span className="algo-slider__v">{Math.round(pct)}%</span>
+              </div>
+            </Row>
+          )}
+          {kind === 'twap' && d.twapClose && <AField title="Close" hint="The share of your position it closes, reduce-only." value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} unit="% of position" err={err('closeShare')} />}
+        </Group>
+      )}
+
+      {(ek === 'twap' || ek === 'vwap') && <Group label="Time" sec="slicing">{duration}{hasRandomize(kind) && <ASwitch title="Randomize" hint="Varies each slice’s size and time a little, so the order is harder to spot (how much: below)." checked={randomizeOn(kind, d)} onChange={(v) => set(setRandomize(kind, v))} on="On · harder to spot" off="Off · even slices" />}</Group>}
+
+      {ek === 'iceberg' && (
+        <>
+          <Group label="Price" sec="exec">
+            <AField title="Price" hint="Where the clips rest. Empty: at the best price, following it." value={d.icePeg ? '' : d.icePrice} placeholder="best price" onChange={(v) => set({ icePrice: v, icePeg: v.trim() === '' })} unit="USD" err={err('price')} />
+          </Group>
+          <Group label="Clips" sec="slicing">
+            <AField title="Visible" hint="The size shown on the book at a time." value={d.display} onChange={(v) => set({ display: v })} unit={base} err={err('displayQty')} />
+          </Group>
+        </>
+      )}
+
+      {ek === 'sweep' && (
+        <Group label="Max slippage" sec="exec">
+          <AField title="Max slippage" hint="How far from the reference price (below) it may fill; every round is an IOC limited there." value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} unit="% from reference" err={err('slippageBps')} />
+        </Group>
+      )}
+
+      {ek === 'chase' && (
+        <Group label="Chase" sec="exec">
+          <AField title="Max chase" hint="How far from where it started it may follow the price. Empty: no limit." value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} unit="%" err={err('maxChaseBps')} />
+        </Group>
+      )}
+
+      {ek === 'scale' && (
+        <Group label="Levels" sec="slicing">
+          <AField title="From" hint="The first order (nearest the market, usually)." value={d.from} onChange={(v) => set({ from: v })} unit="USD" err={err('from')} />
+          <AField title="To" hint="The last order." value={d.to} onChange={(v) => set({ to: v })} unit="USD" err={err('to')} />
+          <AField title="Orders" hint="How many orders between them." value={d.orders} int onChange={(v) => set({ orders: v })} err={err('orders')} />
+          <ASeg title="Size" hint="How the amount is spread over the orders." value={scaleSize(d)} onChange={(v) => set(setScaleSize(d, v))} options={SCALE_SIZES} />
+        </Group>
+      )}
+
+      {ek === 'dca' && (
+        <Group label="Orders" sec="slicing">
+          <AField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint="The first order’s size in USD; each later one is Size × times the one before." value={d.perOrder} onChange={(v) => set({ perOrder: v })} unit="USD" err={err('perOrderUsd', 'quantity')} />
+          <ASeg title="First" hint="The first order: at once, or resting at a price." value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once.'], ['price', 'Price', 'Rests at a price you set.']]} />
+          {d.dcaFirst === 'price' && <AField title="First at" hint="The first order’s price." value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} unit="USD" err={err('from')} />}
+          {d.dcaLevels === 'step' ? (
+            <>
+              <AField title="Step" hint={`How far ${side === 'buy' ? 'below' : 'above'} the one before each next order rests.`} value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} unit="%" err={err('to', 'prices')} />
+              <AField title={side === 'buy' ? 'Buys' : 'Sells'} hint="How many orders in all, the first included." value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} err={err('orders')} />
+            </>
+          ) : (
+            <AField title="Then at" hint="The later orders’ prices, separated by commas." value={d.dcaPrices} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} unit="USD" err={err('prices', 'orders')} />
+          )}
+          <AField title="Size ×" hint="Each next order is this many times the one before, in USD (1: all the same)." value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} unit="per order" err={err('skew', 'weights')} />
+        </Group>
+      )}
+
+      {ek === 'swarm' && (
+        <Group label="Clips" sec="slicing">
+          <AField title="Clips" hint="How many small orders it is cut into." value={d.clips} int onChange={(v) => set({ clips: v })} unit="orders" err={err('clips')} />
+          <ASwitch title="Randomize sizes" hint="Clips of uneven size, so they read less like one order." checked={randomizeOn(kind, d)} onChange={(v) => set(setRandomize(kind, v))} on="On · uneven" off="Off · even" />
+        </Group>
+      )}
+
+      {ek === 'trailing' && (
+        <>
+          <Group label="Trail" sec="exec">
+            <AField title="Trail" hint={side === 'sell' ? 'How far the price may fall from its high before it closes.' : 'How far the price may rise from its low before it closes.'} value={d.trail} onChange={(v) => set({ trail: v })} unit={<APick label="Trail" value={d.trailMode} options={[['pct', '%'], ['abs', 'USD']]} onChange={(v) => set({ trailMode: v })} />} err={err('trailPct', 'trailAbs')} />
+          </Group>
+          <Group label="Activation" sec="start">
+            <AField title="Start at" hint={`It starts trailing once the price reaches this (${side === 'sell' ? 'at or above' : 'at or below'}). Empty: now.`} value={d.activation} placeholder="now" onChange={(v) => set({ activation: v })} unit="USD" err={err('activationPrice')} />
+          </Group>
+        </>
+      )}
+
+      {ek === 'bracket' && (
+        <Group label="Entry and exits" sec="order">
+          <ASeg title="Entry" hint="How it gets in." value={d.entry} onChange={(v) => set({ entry: v })} options={[['market', 'Market', 'Takes at once, within your max slippage.'], ['limit', 'Limit', 'Rests at your price.']]} />
+          {d.entry === 'limit' && <AField title="Entry price" hint="Where it rests." value={d.entryPrice} onChange={(v) => set({ entryPrice: v })} unit="USD" err={err('price')} />}
+          <AField title="Take-profit" hint={`${side === 'buy' ? 'Above' : 'Below'} the entry, as a distance or a price.${exits?.tp ? ` Now ${fmtLevel(exits.tp)}.` : ''}`} value={d.tp} placeholder="none" onChange={(v) => set({ tp: v })} unit={<APick label="Take-profit" value={d.tpMode} options={[['pct', '%'], ['price', 'USD']]} onChange={(v) => set({ tpMode: v })} />} />
+          <AField title="Stop-loss" hint={`${side === 'buy' ? 'Below' : 'Above'} the entry, as a distance or a price.${exits?.sl ? ` Now ${fmtLevel(exits.sl)}.` : ''}`} value={d.sl} placeholder="none" onChange={(v) => set({ sl: v })} unit={<APick label="Stop-loss" value={d.slMode} options={[['pct', '%'], ['price', 'USD']]} onChange={(v) => set({ slMode: v })} />} err={err('exits')} />
+        </Group>
+      )}
+
+      {ek === 'basket' && (
+        <>
+          <Group label="Markets" sec="order"><div className="algo-inset"><BasketLegs d={d} set={set} /></div></Group>
+          <Group label="Each market" sec="slicing">
+            <ASeg title="Each market" hint="How each market is worked." value={d.basketStyle} onChange={(v) => set({ basketStyle: v })} options={[['swarm', 'Swarm', 'Small takers in waves, now.'], ['twap', 'TWAP', 'Slices over a time you choose.']]} />
+            {d.basketStyle === 'twap' && duration}
+          </Group>
+        </>
+      )}
+
+      {ek === 'conditional' && <Group label="When and then" sec="order"><div className="algo-inset"><ConditionalFields d={d} set={set} symbol={symbol} base={base} /></div></Group>}
+    </>
+  );
+}
+
 function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, errors, oracleLive }: {
   kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; roundTick: (x: number) => string;
   exitsHere: boolean; exits: { tp: number | null; sl: number | null } | null; errors: Record<string, string>;
@@ -1251,6 +1372,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
       {ek === 'pov' && (
         <>
           <Group label="Speed" sec="slicing">
+            <ASeg title="Speed" hint="A preset share of the market’s volume; or type your own below." value={povPreset(d.rate)} onChange={(v) => v !== 'custom' && set(setPovPreset(v))} options={[...POV_OPTS.filter(([v]) => v !== 'custom'), ...(povPreset(d.rate) === 'custom' ? [['custom', 'Custom', `${d.rate || '…'}% of volume`] as const] : [])]} />
             <AField
               title="Share of volume"
               hint={`Of what everyone else trades, while they trade it. Low is ${POV_PRESETS.low}%, Medium ${POV_PRESETS.medium}%, High ${POV_PRESETS.high}%.`}

@@ -19,7 +19,7 @@ import { DASH, fmtTime, fmtUsd } from '../../format';
 import { useSymbols } from '../../hooks';
 import { Modal } from '../Modal';
 import { AlgoIcon } from './AlgoIcon';
-import { fmtP, fmtQ } from './AlgoStory';
+import { fmtP, fmtQ, tickLabel } from './AlgoStory';
 import { marketOf } from './AlgoTicket';
 import { useHistory } from './liveData';
 import { fmtDuration, menuName, type UiKind } from './menu';
@@ -133,7 +133,7 @@ function LiveChart({ v, open }: { v: AlgoView; open: boolean }) {
         {ticks.map((t) => (
           <g key={t}>
             <line className="algo-st__grid" x1={PL} x2={X1} y1={y(t)} y2={y(t)} />
-            <text className="algo-st__tick" x={PL - 6} y={y(t) + 3} textAnchor="end">{fmtP(t)}</text>
+            <text className="algo-st__tick" x={PL - 6} y={y(t) + 3} textAnchor="end">{tickLabel(t, ticks)}</text>
           </g>
         ))}
         <line className="algo-st__axis" x1={PL} x2={PL} y1={PT} y2={Y1} />

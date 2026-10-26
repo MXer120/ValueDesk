@@ -76,8 +76,8 @@ test('Fill fast: the rounds follow the depth SoDEX\'s book holds within the max 
   const plan = planAlgo(spec, BTC, { now: NOW, price: 99_995, seed: 1 });
   const props: StoryProps = { plan, spec, side: 'buy', mid: 99_995, levels: [], base: 'BTC', sweepRef: { price: 100_000, name: 'Oracle mid' } };
   // 0.5 BTC against 0.2 BTC within the limit: three rounds; against 5 BTC: one.
-  assert.match(sceneFor(1, { ...props, bandDepth: 0.2 }, 'how')!.steps[0]!, /about 3 rounds/);
-  assert.match(sceneFor(1, { ...props, bandDepth: 5 }, 'how')!.steps[0]!, /one round fills it all/);
+  assert.match(sceneFor(1, { ...props, bandDepth: 0.2 }, 'how')!.steps[0]!, /about 3 IOCs/);
+  assert.match(sceneFor(1, { ...props, bandDepth: 5 }, 'how')!.steps[0]!, /one IOC fills it all/);
   assert.equal(sceneFor(1, { ...props, bandDepth: 0.2 }, 'how')!.done, 1);
 });
 

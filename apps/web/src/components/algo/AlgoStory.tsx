@@ -73,6 +73,8 @@ export interface StoryProps {
   refs?: { mid: number | null; mark: number | null; index: number | null; oracleMid: number | null; oracleFair: number | null } | null;
   /** Fill fast: what SoDEX's book holds within the max slippage, on average (base units). */
   bandDepth?: number | null;
+  /** SoDEX's book on the side a taker takes from (a buy: the asks), best first, when the window opened. */
+  farBook?: Array<[number, number]> | null;
   /** The chart's time zone. */
   tz?: 'local' | 'utc';
 }
@@ -145,6 +147,13 @@ function usePlayhead(key: string) {
       setRun((n) => n + 1);
     },
   };
+}
+
+/** A tick label with as many decimals as the tick step has (0.25 -> 2), so a label is the gridline's own price. */
+export function tickLabel(v: number, ticks: number[]): string {
+  const step = ticks.length > 1 ? Math.abs(ticks[1]! - ticks[0]!) : 0;
+  const dp = step > 0 ? (String(Number(step.toPrecision(6))).split('.')[1] ?? '').length : 2;
+  return v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
 function niceTicks(lo: number, hi: number, n = 4): number[] {
@@ -237,7 +246,7 @@ function priceGrid(y: (p: number) => number, ticks: number[]): ReactNode {
       {ticks.map((v) => (
         <g key={v}>
           <line className="algo-st__grid" x1={PL} x2={X1} y1={y(v)} y2={y(v)} />
-          <text className="algo-st__tick" x={PL - 6} y={y(v) + 3} textAnchor="end">{fmtP(v)}</text>
+          <text className="algo-st__tick" x={PL - 6} y={y(v) + 3} textAnchor="end">{tickLabel(v, ticks)}</text>
         </g>
       ))}
       <line className="algo-st__axis" x1={PL} x2={PL} y1={PT} y2={Y1} />
@@ -857,8 +866,40 @@ function EndTags({ rules }: { rules: Array<{ x: number; y: number; label: string
 /** At most this many rounds are drawn one by one; more are summed up in words. */
 const MAX_ROUNDS_DRAWN = 36;
 
+/**
+ * What a taker of `qty` would do to the book: its average fill and the last
+ * (worst) price it reaches, walking the levels best first, never past `cap`.
+ * `filled` is how much the levels hold up to the cap.
+ */
+export function walkBook(levels: ReadonlyArray<readonly [number, number]> | null | undefined, qty: number, side: 'buy' | 'sell', cap: number | null = null): { avg: number | null; worst: number | null; filled: number } {
+  if (!levels?.length || !(qty > 0)) return { avg: null, worst: null, filled: 0 };
+  let left = qty;
+  let cost = 0;
+  let worst: number | null = null;
+  for (const [px, sz] of levels) {
+    if (cap !== null && (side === 'buy' ? px > cap : px < cap)) break;
+    const take = Math.min(left, sz);
+    if (take <= 0) continue;
+    cost += take * px;
+    left -= take;
+    worst = px;
+    if (left <= 1e-12) break;
+  }
+  const filled = qty - Math.max(0, left);
+  return { avg: filled > 0 ? cost / filled : null, worst, filled };
+}
+
+/** A price line with the jump a taker makes: up to its worst level at `at`, then easing back as the book refills. */
+const withSpikes = (path: number[], spikes: Array<{ at: number; by: number }>): number[] =>
+  path.map((x, i) => {
+    const f = i / (path.length - 1);
+    let add = 0;
+    for (const s of spikes) if (f >= s.at) add += s.by * Math.exp(-(f - s.at) / 0.035);
+    return x + add;
+  });
+
 function sweepScene(t: number, p: StoryProps): Scene | null {
-  const { plan, spec, side, mid, base, sweepRef, bandDepth, book } = p;
+  const { plan, spec, side, mid, base, sweepRef, bandDepth, book, farBook } = p;
   if (spec?.kind !== 'sweep') return null;
   const ref0 = sweepRef?.price ?? mid;
   if (!ref0) return null;
@@ -867,60 +908,73 @@ function sweepScene(t: number, p: StoryProps): Scene | null {
   const total = plan.total ?? 0;
   const gap = ref0 * slip;
   const book1 = side === 'buy' ? 'ask' : 'bid';
-  // Each round can take what the book holds within the max slippage: its average over the last updates.
-  // The book is taken to refill to that average between rounds (500 ms or more apart).
+  const cap0 = ref0 * (1 + away * slip);
+  // Each round takes what the book holds within the max slippage: the first from the book as it is,
+  // a later one from what has refilled (taken as the book's average depth).
   const per = bandDepth && bandDepth > 0 ? bandDepth : null;
-  const need = per ? Math.max(1, Math.ceil(total / per - 1e-9)) : 2;
-  // A round waits only when SoDEX's best ask (a sell: bid) was past the limit when the window opened.
+  const need = per ? Math.max(1, Math.ceil(total / per - 1e-9)) : 1;
+  // One round in the middle finds the best ask past the limit and waits (an example: the price away,
+  // or the book thin after a fill); another at the start when SoDEX's ask is past it now.
   const real0 = book ? (side === 'buy' ? book.ask : book.bid) : null;
-  const pastNow = real0 !== null && real0 > 0 && (away > 0 ? real0 > ref0 + gap : real0 < ref0 - gap);
-  const waitAt = new Set(pastNow ? [0] : []);
-  const rounds = need + waitAt.size;
-  const drawn = Math.min(rounds, MAX_ROUNDS_DRAWN);
+  const pastNow = real0 !== null && real0 > 0 && (away > 0 ? real0 > cap0 : real0 < cap0);
+  // One IOC: the wait comes first (the ask away, then back within the limit). Several: between them.
+  const slots = need + 1 + (pastNow && need > 1 ? 1 : 0);
+  const waitAt = new Set<number>(need === 1 ? [0] : [...(pastNow ? [0] : []), pastNow ? 1 + Math.floor((slots - 1) / 2) : Math.floor(slots / 2)]);
+  const drawn = Math.min(slots, MAX_ROUNDS_DRAWN);
   const roundMs = spec.roundMs;
-  // The reference holds near its value when the window opened (the one the facts show); it only wiggles.
   const refPath = examplePath([[0, ref0], [1, ref0]], gap * 0.04);
   const capPath = refPath.map((r) => r * (1 + away * slip));
-  // The best ask: where SoDEX's book had it when the window opened on the rounds that fill (when that is
-  // within the limit), past the limit on the ones that wait.
   const realIn = real0 !== null && real0 > 0 && !pastNow ? real0 : null;
-  const keys: Array<[number, number]> = [];
+  // Where each fill would land: the book walked for that round's size (its average), and how far the
+  // ask jumps through it (its worst level) - from SoDEX's book when the window opened.
+  let left = total;
+  const rounds: Array<{ f: number; wait: boolean; q: number; avg: number | null; worst: number | null }> = [];
   for (let i = 0; i < drawn; i++) {
     const f = (i + 0.5) / drawn;
-    const r = sampleAt(refPath, f);
-    const inside = realIn !== null ? realIn + away * gap * 0.06 * Math.sin(i * 1.7) : r + away * gap * (0.35 + 0.25 * Math.sin(i * 1.7));
-    keys.push([f, waitAt.has(i) ? r + away * gap * 1.35 : inside]);
+    if (waitAt.has(i) || left <= 1e-12) {
+      rounds.push({ f, wait: true, q: 0, avg: null, worst: null });
+      continue;
+    }
+    const want = Math.min(left, per ?? left);
+    const w = walkBook(farBook, want, side, cap0);
+    const q = w.filled > 0 ? w.filled : want;
+    left -= q;
+    rounds.push({ f, wait: false, q, avg: w.avg, worst: w.worst });
   }
-  const touchPath = examplePath([[0, keys[0]![1]], ...keys, [1, keys[keys.length - 1]![1]]], gap * 0.04);
-  const sc = priceScale([...refPath, ...touchPath, ...capPath], 0.12);
+  const keys: Array<[number, number]> = [];
+  for (const r of rounds) {
+    const base0 = sampleAt(refPath, r.f);
+    const inside = realIn !== null ? realIn : base0 + away * gap * 0.35;
+    keys.push([r.f, r.wait ? base0 + away * gap * 1.35 : inside]);
+  }
+  const touchBase = examplePath([[0, keys[0]![1]], ...keys, [1, keys[keys.length - 1]![1]]], gap * 0.03);
+  const touchPath = withSpikes(touchBase, rounds.filter((r) => !r.wait && r.worst !== null).map((r) => ({ at: r.f, by: r.worst! - sampleAt(touchBase, r.f) })));
+  const sc = priceScale([...refPath, ...touchPath, ...capPath, ...rounds.flatMap((r) => (r.avg ? [r.avg] : []))], 0.12);
   const tone = dirTone(side);
   let filled = 0;
   let sent = 0;
   let waits = 0;
   const marks: ReactNode[] = [];
-  for (let i = 0; i < drawn; i++) {
-    const f = (i + 0.5) / drawn;
-    if (f > t || filled >= total - 1e-12) break;
-    const touch = sampleAt(touchPath, f);
-    const cap = sampleAt(capPath, f);
-    if (!waitAt.has(i)) {
-      const q = Math.min(total - filled, per ?? total / need);
-      filled += q;
-      sent++;
-      marks.push(
-        <g key={i} className={`algo-st__ioc is-${tone}`}>
-          <line x1={fx(f)} x2={fx(f)} y1={sc.y(touch)} y2={sc.y(cap)} />
-          <Dot x={fx(f)} y={sc.y(touch)} tone={tone} pulse={t - f < 0.04} />
-          {drawn <= 8 && <text x={fx(f) + 5} y={sc.y(cap) + (away > 0 ? -6 : 12)}>{fmtQ(q)}</text>}
-        </g>,
-      );
-    } else {
-      waits++;
-      marks.push(<circle key={i} className="algo-st__wait" cx={fx(f)} cy={sc.y(cap)} r={2.6}><title>{`The best ${book1} is past your max slippage: no order this round`}</title></circle>);
+  for (const r of rounds) {
+    if (r.f > t) break;
+    if (r.wait) {
+      if (filled < total - 1e-12) {
+        waits++;
+        marks.push(<circle key={r.f} className="algo-st__wait" cx={fx(r.f)} cy={sc.y(sampleAt(capPath, r.f))} r={2.6}><title>{`The best ${book1} is past your max slippage: no order this round`}</title></circle>);
+      }
+      continue;
     }
+    filled += r.q;
+    sent++;
+    const at = r.avg ?? sampleAt(touchBase, r.f);
+    marks.push(
+      <g key={r.f} className={`algo-st__ioc is-${tone}`}>
+        <Dot x={fx(r.f)} y={sc.y(at)} tone={tone} pulse={t - r.f < 0.04} />
+        {drawn <= 8 && <text x={fx(r.f) + 6} y={sc.y(at) + (away > 0 ? 12 : -6)}>{`${fmtQ(r.q)} @ ${fmtP(at)}`}</text>}
+      </g>,
+    );
   }
-  // With more rounds than are drawn, the rest fill as the drawn ones do.
-  if (t >= 1 && rounds > drawn) filled = total;
+  if (t >= 1 && slots > drawn) filled = total;
   const n = Math.max(1, Math.round(t * (refPath.length - 1)));
   let zone = '';
   for (let i = 0; i <= n; i++) zone += `${i ? 'L' : 'M'}${fx(i / (refPath.length - 1)).toFixed(1)},${sc.y(refPath[i]!).toFixed(1)}`;
@@ -950,35 +1004,35 @@ function sweepScene(t: number, p: StoryProps): Scene | null {
       <text className="algo-st__tick" x={X1} y={H - 8} textAnchor="end">+{fmtDuration(drawn * roundMs)}</text>
     </>
   );
-  const took = fmtDuration(rounds * roundMs);
+  const firstAvg = rounds.find((r) => !r.wait)?.avg ?? null;
   return {
     svg,
     legend: [
-      { swatch: 'line', text: `best ${book1} on SoDEX` },
+      { swatch: 'line', text: `best ${book1} on SoDEX, jumping through what a fill takes` },
       { swatch: 'dotline', text: name.toLowerCase() },
       { swatch: `dash is-${tone}`, text: `max slippage (${pct(slip, 2)} ${away > 0 ? 'above' : 'below'} it)` },
       { swatch: `area is-${tone}`, text: 'where it may fill' },
-      { swatch: `dot is-${tone}`, text: 'an IOC sent, what it fills' },
+      { swatch: `dot is-${tone}`, text: 'a fill at its estimated average price' },
       { swatch: 'ring', text: 'a round that waits' },
     ],
     steps: [
       per
-        ? `SoDEX’s book holds about ${fmtQ(per)} ${base} within your max slippage (its average over the last updates): ${need === 1 ? 'one round fills it all' : `about ${need} rounds for ${fmtQ(total)} ${base}`}`
-        : `Book depth not read yet: shown as ${need} rounds`,
-      `Every ${fmtDuration(roundMs)}: with the best ${book1} past your max slippage it waits; within it, one IOC for all that is left, limited at the max-slippage price`,
-      pastNow ? `Now SoDEX’s best ${book1} is past your max slippage: it waits until it is within it` : `${need === 1 ? 'One IOC' : `${need} IOCs`}, about ${took}${rounds > drawn ? ` (the first ${drawn} drawn)` : ''}`,
+        ? `SoDEX’s book holds about ${fmtQ(per)} ${base} within your max slippage: ${need === 1 ? `one IOC fills it all${firstAvg ? `, at about ${fmtP(firstAvg)} on average` : ''}` : `about ${need} IOCs for ${fmtQ(total)} ${base}`}`
+        : `Book depth not read yet: shown as one IOC`,
+      `Every ${fmtDuration(roundMs)}: with the best ${book1} past your max slippage it waits (as in the middle here); within it, one IOC for all that is left, limited at the max-slippage price`,
+      pastNow ? `Now SoDEX’s best ${book1} is past your max slippage: it waits until it is within it` : `Each fill walks the book: its average is where the dot is, the ${book1} jumps to the last level it takes and the book refills`,
     ],
-    step: sent === 0 ? 0 : filled < total - 1e-12 ? 1 : 2,
+    step: sent === 0 ? (waits ? 1 : 0) : filled < total - 1e-12 ? 1 : 2,
     status: `${sent} of ${need} IOC${need === 1 ? '' : 's'} · ${waits} waited · ${fmtQ(filled)} of ${fmtQ(total)} ${base}`,
     done: total ? filled / total : 0,
-    note: `${need > 1 ? 'A round after the first fills what the book has refilled; here it is taken to refill to its average. ' : ''}The price moves are an example.${per ? '' : ' Enter the amount on the ticket to read the book’s depth.'}`,
+    note: `Fill prices estimated from SoDEX’s book when this window opened${need > 1 ? '; a later round from the book refilled to its average' : ''}. The waits and the price moves are an example.${per ? '' : ' Enter the amount on the ticket to read the book.'}`,
   };
 }
 
 /* one slice of a time-sliced order, by its execution, on SoDEX's real book */
 
 function sliceScene(t: number, p: StoryProps): Scene | null {
-  const { plan, spec, side, mid, base, book, refs } = p;
+  const { plan, spec, side, mid, base, book, refs, farBook } = p;
   if (!mid || !spec || (spec.kind !== 'twap' && spec.kind !== 'vwap' && spec.kind !== 'pov')) return null;
   const kids = (plan.schedule?.length ? plan.schedule : plan.children).filter((c) => c.qty > 0);
   const qty = kids.length ? kids.reduce((a, c) => a + c.qty, 0) / kids.length : plan.total ?? 0;
@@ -1008,8 +1062,14 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
   const takeF = lateF ?? 1;
   const base0 = from === 'touch' ? far(sampleAt(path, takeF)) : fixedRef ?? null;
   const cap = base0 ? base0 * (1 + sgn * slip) : null;
-  // The scale is the book's: the bid, the ask and the reference. A max slippage far past them is marked at the edge, not stretched to.
-  const core = [...path.map(near), ...path.map(far), ...(fixedRef ? [fixedRef] : [])];
+  // What it takes walks SoDEX's book (as it was when the window opened): the dot at its average price,
+  // the ask jumping to the last level taken, then the book refilling.
+  const takeQ = taker ? qty : maker ? 0 : qty * (1 - restFill);
+  const far0 = far(mid0);
+  const w = lateF !== null && takeQ > 0 ? walkBook(farBook, takeQ, side, cap) : { avg: null, worst: null, filled: 0 };
+  const farPath = withSpikes(path.map(far), lateF !== null && w.worst !== null ? [{ at: lateF, by: w.worst - far0 }] : []);
+  const takeAt = lateF !== null ? far(sampleAt(path, lateF)) + (w.avg !== null ? w.avg - far0 : 0) : null;
+  const core = [...path.map(near), ...farPath, ...(fixedRef ? [fixedRef] : []), ...(takeAt ? [takeAt] : [])];
   // The max slippage moves with what it is measured from (the ask, from the best price), drawn to scale.
   const capPath = cap !== null && !maker ? path.map((x) => (from === 'touch' ? far(x) : fixedRef!) * (1 + sgn * slip)) : null;
   const sc = priceScale([...core, ...(capPath ?? [])], 0.08);
@@ -1021,19 +1081,19 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
   }
   if (lateF !== null && t >= lateF) {
     filled = qty;
-    dots.push(<Dot key="l" x={fx(lateF)} y={sc.y(far(sampleAt(path, lateF)))} tone={tone} pulse={t - lateF < 0.06} />);
+    dots.push(<Dot key="l" x={fx(lateF)} y={sc.y(takeAt!)} tone={tone} pulse={t - lateF < 0.06} />);
   }
   const xNow = fx(t);
   const refName = SLIP_NAMES[from] ?? 'Best price';
   const tags: Array<{ x: number; y: number; label: string; tone: string }> = [
     ...(capPath ? [{ x: xNow, y: sc.y(sampleAt(capPath, t)), label: `Max slippage ${fmtP(sampleAt(capPath, t))}`, tone }] : []),
-    { x: xNow, y: sc.y(far(sampleAt(path, t))), label: `${side === 'buy' ? 'Ask' : 'Bid'} ${fmtP(far(sampleAt(path, t)))}`, tone: 'muted' },
+    { x: xNow, y: sc.y(sampleAt(farPath, t)), label: `${side === 'buy' ? 'Ask' : 'Bid'} ${fmtP(sampleAt(farPath, t))}`, tone: 'muted' },
     { x: xNow, y: sc.y(near(sampleAt(path, t))), label: `${side === 'buy' ? 'Bid' : 'Ask'} ${fmtP(near(sampleAt(path, t)))}`, tone: 'now' },
   ];
   const svg = (
     <>
       {priceGrid(sc.y, sc.ticks)}
-      <path className="algo-st__path is-touch" d={pathD(path.map(far), sc.y, t)} />
+      <path className="algo-st__path is-touch" d={pathD(farPath, sc.y, t)} />
       <path className="algo-st__path is-ref" d={pathD(path.map(near), sc.y, t)} />
       {!taker && <path className={`algo-st__order is-${tone}`} d={pathD(path.map(near), sc.y, Math.min(t, lateF ?? 1))} />}
       {lateF !== null && !taker && (
@@ -1066,7 +1126,7 @@ function sliceScene(t: number, p: StoryProps): Scene | null {
       ...(!taker ? [{ swatch: `order is-${tone}`, text: 'your resting order' }] : []),
       ...(fixedRef ? [{ swatch: 'dash is-warn', text: `${refName.toLowerCase()}: slippage measured from it` }] : []),
       ...(!maker ? [{ swatch: `dash is-${tone}`, text: 'max slippage: the worst price taken' }] : []),
-      { swatch: `dot is-${tone}`, text: 'a fill' },
+      { swatch: `dot is-${tone}`, text: takeAt ? `a fill (taken: about ${fmtP(takeAt)} on average, from the book)` : 'a fill' },
     ],
     steps,
     step: taker ? (t < 0.03 ? 0 : 1) : t < dipF ? 0 : lateF !== null && t >= lateF ? 2 : 1,
