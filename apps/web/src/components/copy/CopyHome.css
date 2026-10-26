@@ -740,7 +740,7 @@
 }
 .cpy-whale {
   /* Its shape is the whale's above the surface (set by DotWhale), so the whale fills it at any width. */
-  position: relative; z-index: 0; align-self: end; max-height: 304px; color: #e9e9ea;
+  position: relative; z-index: 0; align-self: end; max-height: 344px; color: #e9e9ea;
   background: radial-gradient(55% 50% at 52% 42%, rgba(255, 255, 255, 0.06), transparent 70%);
 }
 /* Out of flow (its last size never holds the box open), taller than the box by the body
@@ -752,5 +752,5 @@
 }
 @media (max-width: 1100px) {
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
-  .cpy-whale { max-height: 300px; }
+  .cpy-whale { max-height: 340px; }
 }
