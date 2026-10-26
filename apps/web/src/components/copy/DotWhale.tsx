@@ -19,9 +19,9 @@
  * it - the head, both flippers, the front of the body (rows above WATERLINE) - the
  * whale is sharp and fills the hero's box; below it the rest of the body and the
  * flukes run on behind the toolbar and the cards, blurred and dimmer as if under
- * water. The sharp body stays whole down to the surface and gives way, over a
- * short band below it, to the blurred and dimmer one (a lighter blur bridging the
- * two), so the whale is blurred from just under the surface (owner, 2026-10-26).
+ * water. The sharp body stays whole down to the surface and turns blurred and
+ * dimmer right there, on the divider line, within a few pixels (owner,
+ * 2026-10-26), a lighter blur bridging the first stretch below.
  *
  * Little moves: a slow small dip, the dots giving where the pointer passes, the
  * stars twinkling. Still under reduced motion.
@@ -207,7 +207,9 @@ export function DotWhale() {
       }
       // Under water: blurred and dimmer, a little more so with depth, coming in over the band.
       const band = SURFACE_BAND * dpr;
-      const top = surface;
+      // The switch from sharp to blurred sits on the surface itself (the divider line), a few pixels wide.
+      const edge = 3 * dpr;
+      const top = surface - edge;
       lctx.globalCompositeOperation = 'source-over';
       lctx.clearRect(0, 0, low.width, low.height);
       lctx.filter = `blur(${(2 * dpr).toFixed(1)}px)`;
@@ -216,8 +218,8 @@ export function DotWhale() {
       lctx.globalCompositeOperation = 'destination-in';
       const at = (y: number) => Math.min(1, Math.max(0, y / low.height));
       const under = lctx.createLinearGradient(0, 0, 0, low.height);
-      under.addColorStop(at(surface), 'rgba(0,0,0,0)');
-      under.addColorStop(at(surface + band), 'rgba(0,0,0,0.85)');
+      under.addColorStop(at(surface - edge), 'rgba(0,0,0,0)');
+      under.addColorStop(at(surface + edge), 'rgba(0,0,0,0.85)');
       under.addColorStop(at(surface + band * 4), 'rgba(0,0,0,0.62)');
       under.addColorStop(1, 'rgba(0,0,0,0.34)');
       lctx.fillStyle = under;
@@ -230,9 +232,9 @@ export function DotWhale() {
       mctx.filter = 'none';
       mctx.globalCompositeOperation = 'destination-in';
       const near = mctx.createLinearGradient(0, 0, 0, mid.height);
-      near.addColorStop(at(surface), 'rgba(0,0,0,0)');
-      near.addColorStop(at(surface + band * 0.5), 'rgba(0,0,0,0.7)');
-      near.addColorStop(at(surface + band * 1.5), 'rgba(0,0,0,0)');
+      near.addColorStop(at(surface - edge), 'rgba(0,0,0,0)');
+      near.addColorStop(at(surface + edge), 'rgba(0,0,0,0.5)');
+      near.addColorStop(at(surface + band), 'rgba(0,0,0,0)');
       mctx.fillStyle = near;
       mctx.fillRect(0, 0, mid.width, mid.height);
       // Above it: sharp, giving way over the same band. (destination-in clears whatever it
@@ -241,7 +243,7 @@ export function DotWhale() {
       octx.globalCompositeOperation = 'destination-in';
       const over = octx.createLinearGradient(0, 0, 0, off.height);
       over.addColorStop(top / off.height, 'rgba(0,0,0,1)');
-      over.addColorStop(Math.min(1, (surface + band) / off.height), 'rgba(0,0,0,0)');
+      over.addColorStop(Math.min(1, (surface + edge) / off.height), 'rgba(0,0,0,0)');
       octx.fillStyle = over;
       octx.fillRect(0, 0, off.width, off.height);
       octx.globalCompositeOperation = 'source-over';
