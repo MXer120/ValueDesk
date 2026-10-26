@@ -34,7 +34,7 @@ import {
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from '../legal/embeds';
 import { LegalLink } from '../legal/LegalGate';
 import { LEGAL_LABELS, LEGAL_PAGES } from '../router';
-import { NEWS_SOURCES, useCreditHidden, useNewsSources } from './news/newsSources';
+import { NEWS_SOURCES, logoUrl, useCreditHidden, useNewsSources } from './news/newsSources';
 import './SettingsMenu.css';
 
 type Section = 'privacy' | 'layout' | 'security' | 'news' | 'players' | 'legal';
@@ -103,9 +103,10 @@ function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onCh
   );
 }
 
-function Row({ title, line, children, off }: { title: string; line?: ReactNode; children?: ReactNode; off?: boolean }) {
+function Row({ title, line, children, off, icon }: { title: string; line?: ReactNode; children?: ReactNode; off?: boolean; icon?: ReactNode }) {
   return (
     <div className={`stg__row${off ? ' is-off' : ''}`}>
+      {icon}
       <span className="stg__rowtext"><b>{title}</b>{line && <small>{line}</small>}</span>
       {children}
     </div>
@@ -302,11 +303,11 @@ function NewsSection() {
       <Head title="News" line="Where the News widget's stories come from. Switched off, a source's stories leave every list." />
       <div className="stg__card">
         {NEWS_SOURCES.map((s) => (
-          <Row key={s.id} title={s.name} line={s.line}>
+          <Row key={s.id} title={s.name} line={s.line} icon={<img className="stg__logo" src={logoUrl(s.site)} alt="" width={20} height={20} />}>
             <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} />
           </Row>
         ))}
-        <Row title="The Kobeissi Letter" line="Posts only on X, which needs X's paid API to read" off>
+        <Row title="The Kobeissi Letter" line="Posts only on X, which needs X's paid API to read" off icon={<img className="stg__logo" src={logoUrl('thekobeissiletter.com')} alt="" width={20} height={20} />}>
           <span className="stg__pill">Not available</span>
         </Row>
       </div>
