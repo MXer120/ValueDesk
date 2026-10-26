@@ -71,8 +71,10 @@ export type MarginMode = 'cross' | 'isolated';
  * to liquidation is already small, so the same raw gap that is noise at 3x
  * is most of the protection. What is left is `gap / |entry - liq|`. Under
  * this share of that cushion, a normal wick can reach the exchange first.
+ * 6% (owner, 2026-10-26: 20% flagged a BTC stop $250 off liquidation at 40x,
+ * where the whole cushion is ~$1,600): about $100 there, ~$1,500 at 3x.
  */
-const STOP_CUSHION_WARN = 0.2;
+export const STOP_CUSHION_WARN = 0.06;
 
 export interface LiquidationInput {
   entryPrice: number;
@@ -196,8 +198,9 @@ export interface StopCheck {
  *  - `beyond-liquidation`:  price reaches liquidation before the stop, so the
  *                           exchange closes the position first and the stop never
  *                           protects anything.
- *  - `at-liquidation`:      the stop and the estimate are the same price (within
- *                           a tick). The exchange can liquidate on the same print.
+ *  - `at-liquidation`:      the stop and the estimate are the same price. The
+ *                           exchange can liquidate on the same print. A stop even a
+ *                           tick on the safe side is not this (owner, 2026-10-26).
  *  - `near-liquidation`:    the stop is on the safe side, but less than
  *                           STOP_CUSHION_WARN of the entry-to-liquidation room
  *                           is left. That fraction scales with leverage; a raw
@@ -227,8 +230,8 @@ export function checkStopAgainstLiquidation(
     };
   }
 
-  const tick = num(input.sym?.tickSize);
-  const samePrice = Math.abs(stopPrice - liq.price) <= Math.max(tick > 0 ? tick : 0, entryPrice * 1e-8);
+  // The same price, not "within a tick": a long stop $1 over the estimate is on the safe side.
+  const samePrice = Math.abs(stopPrice - liq.price) <= entryPrice * 1e-9;
   const gap = Math.abs(stopPrice - liq.price);
   const room = Math.abs(entryPrice - liq.price);
   const gapPct = room > 0 ? gap / entryPrice : null;
