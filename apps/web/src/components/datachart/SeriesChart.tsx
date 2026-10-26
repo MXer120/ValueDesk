@@ -86,7 +86,7 @@ import {
   type Span,
 } from '../../chart/yScale';
 import { captureAxis, type AxisHold } from '../../chart/axisHandoff';
-import { BAR_SPACE_MAX, TWEEN_MS, ViewTween, applyView, paintNow, plotWidth, readView, sameView, type View, type YMotion } from '../../chart/viewTween';
+import { TWEEN_MS, ViewTween, applyView, paintNow, plotWidth, readView, sameView, type View, type YMotion } from '../../chart/viewTween';
 import { MORPH_MS, prefersReducedMotion } from '../../chart/morph';
 import { crosshairLabel, timeTicks, type TimeZoneMode } from '../../chart/timeAxis';
 import { logger } from '../../log';
@@ -224,7 +224,12 @@ function indexAt(m: Model, t: number): number {
 /** Narrowest bar pitch: thousands of daily points still fit a small card.
  *  klinecharts' own floor (1px) would leave most of "All" off screen. */
 const BAR_SPACE_FLOOR = 0.02;
-const clampSpace = (v: number) => Math.min(BAR_SPACE_MAX, Math.max(BAR_SPACE_FLOOR, v));
+/** Widest pitch. klinecharts' own limit (50px, viewTween's BAR_SPACE_MAX) is
+ *  a candle's: it kept 1Y of quarterly data at 14 bars on a 700px card, three
+ *  and a half years. A span shows what it says, so here a bar may take the
+ *  plot - four quarters across a card are four wide bars. */
+const BAR_SPACE_CEIL = 4000;
+const clampSpace = (v: number) => Math.min(BAR_SPACE_CEIL, Math.max(BAR_SPACE_FLOOR, v));
 
 /**
  * Every point on screen, half a bar in from each edge (klinecharts centres a
@@ -523,10 +528,99 @@ const formatOf = (list: readonly ChartSeries[]): ((v: number) => string) => list
 
 /** A coarse format can print two neighbouring ticks the same ("20%", "20%"):
  *  the second says nothing and goes. */
-const ticksFor: AxisCreateTicksCallback = (params) => {
+const denseTicks: AxisCreateTicksCallback = (params) => {
   const ticks = createDenseYTicks(params);
   return ticks.filter((t: AxisTick, i: number) => i === 0 || t.text !== ticks[i - 1]!.text);
 };
+
+/*
+ * THE LINEAR AXIS' LABELS. klinecharts lays its ticks on a ladder of 1, 2, 3,
+ * 4, 5, 6 or 8 per decade and then thins them on the way: walking up from
+ * the bottom, a tick within two label heights (24px) of the last one kept is
+ * dropped. On a small card that thinning starts from whichever tick cleared
+ * the bottom edge, not from zero - measured on the Employment cost index bars
+ * (0 to 1.3%, 136px of plot): the ladder 0, 0.2 ... 1.4 lost its 0 to the
+ * edge and came out 0.2, 0.6, 1.0, 1.4, with no 0.4 or 0.8, and denseYTicks
+ * (theme.ts) hands that set back as it is, since its own 1-1.5-2-2.5-5 ladder
+ * found nothing at least as dense. The trading chart keeps that path (it has
+ * the height for it); this chart lays its own: multiples of the smallest step
+ * on a 1-2-4-5 ladder that leaves a label's room between labels and that the
+ * caller's format prints without two neighbours reading the same, so the
+ * labels are always round multiples counted from zero.
+ */
+const TICK_STEPS = [1, 2, 4, 5];
+/** A label (12px) and a gap. */
+const TICK_MIN_PX = 28;
+
+function ladderTicks(params: Parameters<AxisCreateTicksCallback>[0], format: (v: number) => string): AxisTick[] | null {
+  const { range, bounding } = params;
+  const height = bounding.height;
+  const lo = range.realFrom;
+  const hi = range.realTo;
+  if (![lo, hi].every(Number.isFinite) || !(hi > lo) || !(height > 0)) return null;
+  const pxPerUnit = height / (hi - lo);
+  // A label is drawn centred on its tick: keep it whole inside the axis.
+  const edge = AXIS_FONT_SIZE / 2 + 1;
+  const from = lo + edge / pxPerUnit;
+  const to = hi - edge / pxPerUnit;
+  const e = Math.floor(Math.log10(TICK_MIN_PX / pxPerUnit));
+  for (const exp of [e - 1, e, e + 1, e + 2]) {
+    for (const s of TICK_STEPS) {
+      const step = s * 10 ** exp;
+      if (step * pxPerUnit < TICK_MIN_PX) continue;
+      const ticks: AxisTick[] = [];
+      for (let k = Math.ceil(from / step); k * step <= to && ticks.length < 64; k++) {
+        const v = Number((k * step).toFixed(12)) || 0;
+        ticks.push({ coord: Math.round(height - (v - lo) * pxPerUnit), value: v, text: format(v) });
+      }
+      if (ticks.length < 2) continue;
+      if (ticks.some((t, i) => i > 0 && t.text === ticks[i - 1]!.text)) continue;
+      return ticks;
+    }
+  }
+  return null;
+}
+
+/** The ticks for one axis: our ladder on a linear scale, the trading chart's
+ *  dense ticks on the log one (pixels are not linear in value there). */
+const ticksFor = (format: () => (v: number) => string, kind: ScaleKind): AxisCreateTicksCallback => (params) =>
+  (kind === 'linear' ? ladderTicks(params, format()) : null) ?? denseTicks(params);
+
+const YEAR_MS = 365 * DAY;
+/** The range buttons' spans: the history on screen up to the newest point. */
+const SPANS: Record<string, number | null> = {
+  '7d': 7 * DAY,
+  '30d': 30 * DAY,
+  '1m': 30 * DAY,
+  '90d': 91 * DAY,
+  '3m': 91 * DAY,
+  '1y': YEAR_MS,
+  '5y': 5 * YEAR_MS,
+  '10y': 10 * YEAR_MS,
+  max: null,
+  all: null,
+};
+
+/** A range key ("1y", "5y", "10y", "max", "all", "3m") as SeriesChart's `span`;
+ *  an unknown key is everything. */
+export const rangeSpan = (range: string): number | null => SPANS[range.toLowerCase()] ?? null;
+
+/**
+ * The view for a span: its right edge on the newest point (half a bar in, as
+ * klinecharts centres a bar), its left edge `span` before that. Null, or a
+ * span reaching past the first point, is every point on screen (fitView).
+ */
+function spanView(m: Model | null, width: number, span: number | null): View {
+  const n = m?.rows.length ?? 0;
+  if (!m || !n || span === null || !(span > 0)) return fitView(n, width);
+  const last = m.rows[n - 1]!.timestamp;
+  const l = indexAt(m, last - span) - 0.5;
+  if (!(l > -0.5)) return fitView(n, width);
+  return viewOf(l, n - 0.5, width, n) ?? fitView(n, width);
+}
+
+/** How far the magnet reaches, px from the pointer. */
+const MAGNET_PX = 32;
 
 const motionOk = () => !prefersReducedMotion() && !document.documentElement.classList.contains('is-potato');
 const viewMs = (): number | undefined => (prefersReducedMotion() ? 0 : undefined);
@@ -535,8 +629,19 @@ let uidSeq = 0;
 
 // --- the component ---------------------------------------------------------------
 
-export function SeriesChart({ series, height = 220, daily = true }: { series: ChartSeries[]; height?: number; daily?: boolean }) {
+/**
+ * `span`: how much history is on screen, in ms, up to the newest point (null
+ * or left out: all of it) - what a range button sets, the way a timeframe
+ * does on the trading chart. The caller loads the whole history once; the
+ * wheel and a drag then reach every point of it, and a new span is one eased
+ * move to it. A double click goes back to the span.
+ */
+export function SeriesChart({ series, height = 220, daily = true, span = null }: { series: ChartSeries[]; height?: number; daily?: boolean; span?: number | null }) {
   const host = useRef<HTMLDivElement>(null);
+  /** The span asked for now, and the one the view was last put on. */
+  const spanNow = useRef<number | null>(span);
+  spanNow.current = span;
+  const spanShown = useRef<number | null | undefined>(undefined);
   const chart = useRef<KChart | null>(null);
   const [ready, setReady] = useState(false);
   const uid = useRef('');
@@ -617,18 +722,20 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
     const lf = leftFit.current;
     if (!f || !lf) return;
     const kind = kindOf(mode.current);
+    const rightFormat = () => formatOf(model.current?.right ?? []);
+    const leftFormat = () => formatOf(model.current?.left ?? []);
     const def = priceAxis(c);
     if (def) {
-      const text = (v: number) => formatOf(model.current?.right ?? [])(v);
+      const text = (v: number) => rightFormat()(v);
       // displayValueToText is the axis template's label hook; klinecharts merges
       // it from an override like createTicks, though its types leave it out.
-      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: def.id, name: mode.current, createTicks: ticksFor, displayValueToText: text } as YAxisOverride);
+      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: def.id, name: mode.current, createTicks: ticksFor(rightFormat, kind), displayValueToText: text } as YAxisOverride);
       const axis = priceAxis(c);
       if (axis) c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: axis.id, createRange: f.wrap(templateRange(axis.createRange), kind) });
     }
     if (m?.left.length && leftAxis(c)) {
-      const text = (v: number) => formatOf(model.current?.left ?? [])(v);
-      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: ids.leftAxis, name: mode.current, position: 'left', createTicks: ticksFor, displayValueToText: text } as YAxisOverride);
+      const text = (v: number) => leftFormat()(v);
+      c.overrideYAxis({ paneId: CANDLE_PANE_ID, id: ids.leftAxis, name: mode.current, position: 'left', createTicks: ticksFor(leftFormat, kind), displayValueToText: text } as YAxisOverride);
       const axis = leftAxis(c);
       if (axis) {
         const base = LEFT_TEMPLATES.get(axis.createRange) ?? axis.createRange;
@@ -666,29 +773,72 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
     });
   }, [frame]);
 
-  /** Every point on screen, now (no move): a first load, a resize. */
+  /** The span's view, now (no move): a first load, a resize, a move's landing. */
   const fitNow = useCallback((c: KChart) => {
     const n = c.getDataList().length;
     const w = plotWidth(c);
     if (!n || !(w > 0)) return;
-    const v = fitView(n, w);
+    const v = spanView(model.current, w, spanNow.current);
     if (!sameView(readView(c), v)) paintNow(() => applyView(c, v));
   }, []);
 
-  /** The double-click reset: back to every point on screen and the axes
-   *  fitting them, in one eased move (Chart.tsx's resetView, with autoscale
-   *  always on - this chart has no A). */
+  /** The double-click reset: back to the span (every point on screen without
+   *  one) and the axes fitting it, in one eased move (Chart.tsx's resetView,
+   *  with autoscale always on - this chart has no A). */
   const lastReset = useRef(-Infinity);
   const resetView = useCallback(() => {
     const now = performance.now();
     if (now - lastReset.current < 600) return;
     lastReset.current = now;
-    const n = model.current?.rows.length ?? 0;
-    if (!chart.current || !n) return;
+    if (!chart.current || !model.current?.rows.length) return;
     userMoved.current = false;
     log.debug('series chart: view reset (double-click)');
-    tween.current?.start((_from, width) => fitView(n, width), { ms: viewMs(), fitY: true });
+    tween.current?.start((_from, width) => spanView(model.current, width, spanNow.current), { ms: viewMs(), fitY: true });
   }, []);
+
+  /**
+   * The magnet: the crosshair (both lines, the value tag, the legend) jumps to
+   * the nearest real point within MAGNET_PX of the pointer - its time and its
+   * value; on bars, the bar's value, the whole bar counting as near. Always on.
+   * Null when nothing is that close, and the crosshair follows the pointer.
+   */
+  const magnet = useCallback((c: KChart, px: number, py: number): { x: number; y: number; index: number } | null => {
+    const m = model.current;
+    const rows = c.getDataList() as Row[];
+    const n = rows.length;
+    if (!m || !n) return null;
+    const ends = c.convertFromPixel([{ x: px - MAGNET_PX }, { x: px + MAGNET_PX }], { paneId: CANDLE_PANE_ID }) as Array<Partial<Point>>;
+    const i0 = Math.max(0, ends[0]?.dataIndex ?? 0);
+    const i1 = Math.min(n - 1, ends[1]?.dataIndex ?? n - 1);
+    if (i1 < i0) return null;
+    const x0 = (c.convertToPixel({ dataIndex: i0 }, { paneId: CANDLE_PANE_ID }) as { x?: number }).x;
+    if (typeof x0 !== 'number') return null;
+    const bar = c.getBarSpace().bar;
+    let best: { d: number; x: number; y: number; index: number } | null = null;
+    const sides: Array<[ChartSeries[], YAxis | null]> = [[m.right, priceAxis(c)], [m.left, m.left.length ? leftAxis(c) : null]];
+    for (const [list, axis] of sides) {
+      if (!axis) continue;
+      for (const s of list) {
+        const zero = s.kind === 'bars' ? axis.convertToPixel(0) : 0;
+        for (let i = i0; i <= i1; i++) {
+          const v = rows[i]!.vals[s.key];
+          if (!isNum(v)) continue;
+          const x = x0 + (i - i0) * bar;
+          const y = axis.convertToPixel(v);
+          // Measured from the point's column, not its centre: anywhere over a
+          // bar (or a line's point) left or right is as near as its middle, so
+          // only the height counts there - on a wide bar the centre can be
+          // further off sideways than the whole reach. The bar itself, top to
+          // zero, is distance 0; above it or below a line's point, the gap.
+          const dx = Math.max(0, Math.abs(px - x) - bar / 2);
+          const inBar = s.kind === 'bars' && py >= Math.min(y, zero) && py <= Math.max(y, zero);
+          const d = Math.hypot(dx, inBar ? 0 : py - y);
+          if (d <= MAGNET_PX && (!best || d < best.d)) best = { d, x, y, index: i };
+        }
+      }
+    }
+    return best;
+  }, [leftAxis]);
 
   // --- the chart itself -------------------------------------------------------
   useEffect(() => {
@@ -717,7 +867,7 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
           // The labels are the caller's format, exactly as it prints them.
           thousandsSeparator: { sign: '' },
           decimalFold: { threshold: 20 },
-          layout: { barSpaceLimit: { min: BAR_SPACE_FLOOR, max: BAR_SPACE_MAX } },
+          layout: { barSpaceLimit: { min: BAR_SPACE_FLOOR, max: BAR_SPACE_CEIL } },
         });
         if (!c) {
           log.error('series chart: klinecharts failed to initialise (empty container)');
@@ -754,9 +904,26 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
         ch.setSymbol({ ticker: uid.current, pricePrecision: 6, volumePrecision: 0 });
         ch.setPeriod({ type: 'day', span: 1 });
         ch.subscribeAction('onCrosshairChange', (data?: unknown) => {
-          const cr = data as { x?: number; paneId?: string } | null | undefined;
+          const cr = data as { x?: number; y?: number; paneId?: string } | null | undefined;
           if (!cr || typeof cr.x !== 'number') {
             setHover(null);
+            return;
+          }
+          // klinecharts reports the pointer before it paints the crosshair; a
+          // crosshair set from here (executeAction, which reports nothing back)
+          // is the one it paints.
+          const snap = cr.paneId === CANDLE_PANE_ID && typeof cr.y === 'number' ? magnet(ch, cr.x, cr.y) : null;
+          if (snap) {
+            const set = () => ch.executeAction('onCrosshairChange', { x: snap.x, y: snap.y, paneId: CANDLE_PANE_ID });
+            set();
+            // And once more when this pointer event is done with, before the
+            // frame paints: whatever klinecharts does after reporting it, the
+            // snapped crosshair is the one on screen. The next move reports
+            // again, so this never outlives the pointer.
+            queueMicrotask(() => {
+              if (chart.current === ch) set();
+            });
+            setHover(snap.index);
             return;
           }
           const pts = ch.convertFromPixel([{ x: cr.x }], { paneId: cr.paneId ?? CANDLE_PANE_ID }) as Array<Partial<Point>>;
@@ -799,7 +966,7 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
       model.current = null;
       setReady(false);
     };
-  }, [ids, fitNow, readPlotLeft]);
+  }, [ids, fitNow, readPlotLeft, magnet]);
 
   // --- the data ---------------------------------------------------------------
   useEffect(() => {
@@ -841,37 +1008,53 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
       seen = [timeAt(prev, l), timeAt(prev, r)];
     }
 
+    // The user's own zoom or pan survives new data (a poll, another asset):
+    // the same time window stays on screen. Otherwise the view is the span's.
+    const keep = userMoved.current && !!prev && prev.rows.length > 0 && width > 0;
+    if (keep && !seen && prev) {
+      const [l, r] = edgesOf(readView(c), width, prev.rows.length);
+      seen = [timeAt(prev, l), timeAt(prev, r)];
+    }
+
     model.current = next;
     syncIndicators(c, next);
     applyAxes(c);
     c.resetData();
-    userMoved.current = false;
+    spanShown.current = spanNow.current;
     setHover(null);
     setDataGen((g) => g + 1);
     readPlotLeft();
     const n = next.rows.length;
 
+    // The time window that was on screen, mapped into the new bars; null when
+    // the new data does not reach it (another series altogether).
+    let mapped: View | null = null;
+    if (seen && n) {
+      const first = next.rows[0]!.timestamp;
+      const last = next.rows[n - 1]!.timestamp;
+      if (Math.min(seen[1], last) > Math.max(seen[0], first)) mapped = viewOf(indexAt(next, seen[0]), indexAt(next, seen[1]), width, n);
+    }
+    if (!keep || !mapped) userMoved.current = false;
+    /** Where this view lands: the user's window, or the span's. */
+    const destOf = (w: number): View => (userMoved.current && mapped ? mapped : spanView(next, w, spanNow.current));
+
     if (!animate) {
-      fitNow(c);
-      // Once klinecharts has measured the new labels (the axis may have widened).
-      frame(() => {
-        if (chart.current === c && !userMoved.current && !tw.running) fitNow(c);
-      });
+      if (userMoved.current && mapped) paintNow(() => applyView(c, mapped));
+      else {
+        fitNow(c);
+        // Once klinecharts has measured the new labels (the axis may have widened).
+        frame(() => {
+          if (chart.current === c && !userMoved.current && !tw.running) fitNow(c);
+        });
+      }
       return;
     }
 
-    // The camera starts on the time window that was on screen, mapped into the
-    // new bars, and eases out (or in) to all of them. A window the new data
-    // does not reach (another series altogether) starts on the fit.
-    const dest = fitView(n, width);
-    let start = dest;
-    if (seen) {
-      const first = next.rows[0]!.timestamp;
-      const last = next.rows[n - 1]!.timestamp;
-      if (Math.min(seen[1], last) > Math.max(seen[0], first)) {
-        start = viewOf(indexAt(next, seen[0]), indexAt(next, seen[1]), width, n) ?? dest;
-      }
-    }
+    // The camera starts on the time window that was on screen and eases to
+    // the span's view (a poll or another asset: the same window, so only the
+    // price scale moves). A window the new data does not reach starts there.
+    const dest = destOf(width);
+    const start = mapped ?? dest;
     applyView(c, start);
     const moves = !sameView(start, dest);
 
@@ -884,14 +1067,14 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
     }
     lf.prime(leftSpan);
     const ms = MORPH_MS;
-    tw.start((_from, w) => fitView(n, w), {
+    tw.start((_from, w) => destOf(w), {
       ms,
       fitY: true,
       onEnd: (completed) => {
         if (!completed) shot?.clear();
         if (hold.current === shot) hold.current = null;
-        // The axes may have changed width under the move: land on the fit of
-        // the plot as it is now.
+        // The axes may have changed width under the move: land on the span's
+        // view of the plot as it is now.
         if (completed && chart.current === c && !userMoved.current) fitNow(c);
       },
     });
@@ -909,9 +1092,29 @@ export function SeriesChart({ series, height = 220, daily = true }: { series: Ch
       lf.prime(null);
       reveal();
       if (hold.current === shot) hold.current = null;
-      fitNow(c);
+      if (!userMoved.current) fitNow(c);
     }
   }, [ready, series, syncIndicators, applyAxes, leftAxis, fitNow, readPlotLeft, frame]);
+
+  // --- the span -----------------------------------------------------------------
+  // A range button: one eased move to the new span, x and y together - the
+  // same move as the reset. New data with it is the data effect's (above),
+  // which also lands on the span.
+  useEffect(() => {
+    const c = chart.current;
+    const tw = tween.current;
+    if (!ready || !c || !tw || !model.current?.rows.length) return;
+    if (spanShown.current === span) return;
+    spanShown.current = span;
+    userMoved.current = false;
+    tw.start((_from, w) => spanView(model.current, w, spanNow.current), {
+      ms: motionOk() ? MORPH_MS : 0,
+      fitY: true,
+      onEnd: (completed) => {
+        if (completed && chart.current === c && !userMoved.current) fitNow(c);
+      },
+    });
+  }, [ready, span, fitNow]);
 
   // --- the price scale --------------------------------------------------------
   const logShown = useMemo(() => !series.some((s) => s.kind === 'bars'), [series]);

@@ -10,7 +10,7 @@ import { useAsync, useStored } from '../../hooks';
 import { EmptyState } from '../EmptyState';
 import { CoinIcon } from '../CoinIcon';
 import { PoweredBy } from '../news/PoweredBy';
-import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
+import { SeriesChart, rangeSpan, type ChartSeries } from '../datachart/SeriesChart';
 import { fmtUsd, macroApi } from './api';
 import './macro.css';
 
@@ -20,7 +20,9 @@ export function EtfFlows({ instance }: { instance?: string }) {
   const ns = instance ? `.${instance}` : '';
   const [asset, setAsset] = useStored<string>(`vs.etf.asset${ns}`, 'BTC');
   const [range, setRange] = useStored<string>(`vs.etf.range${ns}`, '3m');
-  const r = useAsync(() => macroApi.etf(asset, range), [asset, range], { pollMs: 30 * 60_000 });
+  // Every kept day, once per asset (the server reads SoSoValue the same way for
+  // any range and only cuts its answer): the range sets how much is on screen.
+  const r = useAsync(() => macroApi.etf(asset, 'all'), [asset], { pollMs: 30 * 60_000 });
   const d = r.data;
   const last = d?.days[d.days.length - 1];
   const series = useMemo<ChartSeries[]>(() => {
@@ -60,7 +62,7 @@ export function EtfFlows({ instance }: { instance?: string }) {
               <div><span>Net assets</span><b>{fmtUsd(last?.totalNetAssets, false)}</b></div>
               <div><span>Traded</span><b>{fmtUsd(last?.valueTraded, false)}</b></div>
             </div>
-            <SeriesChart series={series} height={190} />
+            <SeriesChart series={series} height={190} span={rangeSpan(range)} />
             {d.funds.length > 0 && (
               <table className="mc__table">
                 <thead><tr><th>Fund</th><th className="num">Net flow</th><th className="num">Net assets</th></tr></thead>

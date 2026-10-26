@@ -23,7 +23,7 @@ import { useAsync, useStored } from '../../hooks';
 import { Modal } from '../Modal';
 import { IndicatorModal } from '../macro/IndicatorView';
 import { fmtValue, macroApi } from '../macro/api';
-import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
+import { SeriesChart, rangeSpan, type ChartSeries } from '../datachart/SeriesChart';
 import { CalendarMark } from './newsSources';
 
 export type { ReleaseResult };
@@ -130,16 +130,19 @@ const RANGES = [['1y', '1Y'], ['5y', '5Y'], ['10y', '10Y'], ['max', 'All']] as c
  */
 function EventChart({ ind, period, onFull }: { ind: { id: string; name: string }; period: string | null; onFull: () => void }) {
   const [range, setRange] = useStored<string>('vs.event.range', '5y');
-  const r = useAsync(() => macroApi.indicator(ind.id, range), [ind.id, range], { pollMs: 10 * 60_000 });
+  // The whole history, once: the range only sets how much of it is on screen.
+  const r = useAsync(() => macroApi.indicator(ind.id, 'max'), [ind.id], { pollMs: 10 * 60_000 });
   const d = r.data;
   const bars = !!d && (d.unit === 'k' || /_mm$|_qq$/.test(d.id));
   const want = basePeriod(period);
   const series = useMemo<ChartSeries[]>(() => {
     if (!d) return [];
-    // The table runs newest first, the points oldest first: the same observations.
+    // The table runs newest first, the points oldest first: the same observations
+    // (the table only the newest of them), so row i is the i-th point from the end.
     const pts = [...d.points].sort((x, y) => x[0] - y[0]);
     const i = want ? d.table.findIndex((t) => t.period === want) : -1;
-    const at = i >= 0 && d.table.length === pts.length ? pts[pts.length - 1 - i] : undefined;
+    const p = i >= 0 ? pts[pts.length - 1 - i] : undefined;
+    const at = p && p[1] === d.table[i]!.value ? p : undefined;
     return [{
       key: d.id,
       kind: bars ? 'bars' : 'line',
@@ -168,7 +171,7 @@ function EventChart({ ind, period, onFull }: { ind: { id: string; name: string }
         <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading the history…</p>
       ) : (
         <>
-          <SeriesChart series={series} height={230} />
+          <SeriesChart series={series} height={230} span={rangeSpan(range)} />
           <p className="evc__foot">
             {want && d.latest && basePeriod(d.latest.period) !== want && !d.table.some((t) => t.period === want)
               ? `History through ${d.latest.period}; ${want} is added once ${d.source.name} publishes it. `

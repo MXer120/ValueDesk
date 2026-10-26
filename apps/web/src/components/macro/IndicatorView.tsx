@@ -11,7 +11,7 @@ import { useMemo } from 'react';
 import { useAsync, useStored } from '../../hooks';
 import { EmptyState } from '../EmptyState';
 import { Modal } from '../Modal';
-import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
+import { SeriesChart, rangeSpan, type ChartSeries } from '../datachart/SeriesChart';
 import { macroApi, fmtValue, type IndicatorInfo } from './api';
 import './macro.css';
 
@@ -26,7 +26,9 @@ function until(t: number): string {
 }
 
 export function IndicatorView({ id, range, setRange, compact = false }: { id: string; range: string; setRange: (r: string) => void; compact?: boolean }) {
-  const r = useAsync(() => macroApi.indicator(id, range), [id, range], { pollMs: 10 * 60_000 });
+  // The whole history, once: the range buttons only set how much of it is on
+  // screen, and the wheel or a drag reaches the rest.
+  const r = useAsync(() => macroApi.indicator(id, 'max'), [id], { pollMs: 10 * 60_000 });
   const d = r.data;
   // A change series (payrolls, m/m figures) reads as bars; a level or a 12-month rate as a line.
   const bars = !!d && (d.unit === 'k' || /_mm$|_qq$/.test(d.id));
@@ -60,7 +62,7 @@ export function IndicatorView({ id, range, setRange, compact = false }: { id: st
           ))}
         </div>
       </div>
-      <SeriesChart series={series} height={compact ? 160 : 240} />
+      <SeriesChart series={series} height={compact ? 160 : 240} span={rangeSpan(range)} />
       <table className="mc__table">
         <thead><tr><th>Period</th><th className="num">Actual</th><th className="num">Previous</th></tr></thead>
         <tbody>
