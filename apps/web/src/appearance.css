@@ -1,0 +1,31 @@
+/* The glass look's variables (appearance.ts sets them from Settings >
+   Appearance; these are the defaults until it runs), and the trading page in
+   glass: with `data-glass` on <html>, coloured light behind the page and every
+   panel a tinted, blurred pane over it - the Settings window's look. */
+:root {
+  --stg-tint: #262320; --stg-tint-a: 74%; --stg-shade: 45%; --stg-shade-a: 82%;
+  --stg-blur: 40px; --stg-sat: 1.5; --stg-glow: #ffecd6; --stg-glow-a: 5%;
+  --stg-lift: 5%; --stg-inner-glow: 9%;
+  --pn-a: 72%; --pn-blur: 28px;
+  --pg-glow: #8a5a32; --pg-glow-a: 45%; --pg-glow2: #2f4a6b; --pg-glow2-a: 30%;
+}
+
+html[data-glass] body {
+  background:
+    radial-gradient(55% 60% at 12% 8%, color-mix(in srgb, var(--pg-glow) var(--pg-glow-a), transparent), transparent 70%),
+    radial-gradient(50% 55% at 92% 95%, color-mix(in srgb, var(--pg-glow2) var(--pg-glow2-a), transparent), transparent 70%),
+    var(--bg);
+  background-attachment: fixed;
+}
+html[data-glass] .app,
+html[data-glass] .appcontent { background: transparent; }
+html[data-glass] .dash-panel {
+  /* Inside a panel its own fill is clear, so tab bars and tables do not stack a second tint. */
+  --bg-panel: transparent;
+  background:
+    radial-gradient(90% 60% at 20% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 70%),
+    color-mix(in srgb, var(--stg-tint) var(--pn-a), transparent);
+  -webkit-backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+  backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+  border-color: rgba(255, 255, 255, 0.07);
+}

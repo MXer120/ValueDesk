@@ -37,6 +37,7 @@ import { LEGAL_LABELS, LEGAL_PAGES } from '../router';
 import { NEWS_SOURCES, logoUrl, useCreditHidden, useNewsSources } from './news/newsSources';
 import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
+import { APPEARANCE_DEFAULT, setAppearance, useAppearance, type Appearance } from '../appearance';
 import './SettingsMenu.css';
 
 const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
@@ -45,6 +46,7 @@ const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) =
 
 type Section = SettingsSection;
 const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNode }> = [
+  { id: 'appearance', label: 'Appearance', hint: 'The glass look', icon: <><circle cx="10" cy="10" r="6.5" /><path d="M10 3.5a6.5 6.5 0 0 0 0 13Z" fill="currentColor" stroke="none" /></> },
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
   { id: 'security', label: 'Security', hint: 'Trading key, lock', icon: <><rect x="4.5" y="9" width="11" height="8" rx="2" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></> },
@@ -112,6 +114,7 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
           </nav>
           <div className="stg__pane" key={section}>
             <div className="stg__panehead"><Icon size={22}>{current.icon}</Icon><h3>{current.label}</h3></div>
+            {section === 'appearance' && <AppearanceSection />}
             {section === 'privacy' && <PrivacySection />}
             {section === 'layout' && <LayoutSection hasLayout={hasLayout} dashLocked={dashLocked} gear={gear} close={() => setOpen(false)} />}
             {section === 'security' && <SecuritySection />}
@@ -394,6 +397,74 @@ function LegalSection() {
             <span className="stg__linkrow"><b>{LEGAL_LABELS[p]}</b><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M4.5 2.5 8 6l-3.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
           </LegalLink>
         ))}
+      </div>
+    </>
+  );
+}
+
+/** A slider with its value. */
+function Slider({ title, k, min, max, step = 1, unit = '' }: { title: string; k: keyof Appearance; min: number; max: number; step?: number; unit?: string }) {
+  const a = useAppearance();
+  const v = a[k] as number;
+  return (
+    <Row title={title}>
+      <span className="stg__slider">
+        <input type="range" min={min} max={max} step={step} value={v} aria-label={title} onChange={(e) => setAppearance({ [k]: Number(e.target.value) } as Partial<Appearance>)} />
+        <output>{step < 1 ? v.toFixed(2) : v}{unit}</output>
+      </span>
+    </Row>
+  );
+}
+
+/** A colour well with its hex. */
+function Colour({ title, line, k }: { title: string; line?: string; k: keyof Appearance }) {
+  const a = useAppearance();
+  const v = a[k] as string;
+  return (
+    <Row title={title} line={line}>
+      <label className="stg__colour">
+        <input type="color" value={v} aria-label={title} onChange={(e) => setAppearance({ [k]: e.target.value } as Partial<Appearance>)} />
+        <code>{v}</code>
+      </label>
+    </Row>
+  );
+}
+
+function AppearanceSection() {
+  const a = useAppearance();
+  const [copied, setCopied] = useState(false);
+  const changed = JSON.stringify(a) !== JSON.stringify(APPEARANCE_DEFAULT);
+  return (
+    <>
+      <Head title="Appearance" line="The glass look of this window, and of the trading page if you switch it on there. Changes show at once and stay in this browser." />
+      <div className="stg__label"><span>This window</span></div>
+      <div className="stg__card stg__card--tight">
+        <Colour title="Tint" line="The colour over the blurred page" k="tint" />
+        <Slider title="Tint cover" k="tintAlpha" min={0} max={100} unit="%" />
+        <Slider title="Lower edge, darker by" k="shade" min={0} max={100} unit="%" />
+        <Slider title="Lower edge cover" k="shadeAlpha" min={0} max={100} unit="%" />
+        <Slider title="Blur" k="blur" min={0} max={120} unit="px" />
+        <Slider title="Colour boost" k="saturate" min={0.5} max={3} step={0.05} unit="×" />
+        <Colour title="Light" line="The glow across the top-left corner" k="glow" />
+        <Slider title="Light strength" k="glowAlpha" min={0} max={40} unit="%" />
+        <Slider title="Inner pane, lighter by" k="lift" min={0} max={30} unit="%" />
+        <Slider title="Inner pane light" k="innerGlow" min={0} max={40} unit="%" />
+      </div>
+      <div className="stg__label"><span>Trading page</span></div>
+      <div className="stg__card stg__card--tight">
+        <Row title="Glass panels" line="Every panel a tinted, blurred pane over coloured light, like this window">
+          <Toggle checked={a.trade} onChange={(v) => setAppearance({ trade: v })} label="Glass panels on the trading page" />
+        </Row>
+        <Slider title="Panel cover" k="panelAlpha" min={0} max={100} unit="%" />
+        <Slider title="Panel blur" k="panelBlur" min={0} max={120} unit="px" />
+        <Colour title="Light behind, top left" k="pageGlow" />
+        <Slider title="Its strength" k="pageGlowAlpha" min={0} max={100} unit="%" />
+        <Colour title="Light behind, bottom right" k="pageGlow2" />
+        <Slider title="Its strength" k="pageGlow2Alpha" min={0} max={100} unit="%" />
+      </div>
+      <div className="stg__actions stg__actions--start">
+        <button type="button" className="stg__btn" onClick={() => { void navigator.clipboard?.writeText(JSON.stringify(a, null, 2)).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500); }); }}>{copied ? 'Copied' : 'Copy values'}</button>
+        <button type="button" className="stg__btn" disabled={!changed} onClick={() => setAppearance(null)}>Reset to default</button>
       </div>
     </>
   );
