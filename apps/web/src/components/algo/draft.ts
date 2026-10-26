@@ -169,7 +169,7 @@ export const legs = (symbol: string, side: 'buy' | 'sell'): LegDraft[] => [
 ];
 
 export const DEFAULT: Draft = {
-  dur: '30', durUnit: 'm', slices: '30', slicesAuto: true, exec: 'taker', execVer: 3, slip: '30', slipFrom: 'touch', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
+  dur: '30', durUnit: 'm', slices: '30', slicesAuto: true, exec: 'taker', execVer: 4, slip: '10', slipFrom: 'touch', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
   finish: 'take', maxPart: '', lookback: 14, adaptive: true, rate: '10', maxChild: '', endIn: '', endUnit: 'h',
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
   offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
@@ -239,7 +239,9 @@ export function loadDraft(store: Store | null = local()): Draft {
       const ver = typeof saved.execVer === 'number' ? saved.execVer : 1;
       if (ver < 2 && saved.exec === 'hybrid') saved.exec = 'taker';
       if (ver < 3) saved.trailWhole = false;
-      saved.execVer = 3;
+      // 2026-10-27: 10 bp max slippage by default (it was 30): a draft still at the old default moves.
+      if (ver < 4 && saved.slip === '30') saved.slip = '10';
+      saved.execVer = 4;
       // A chase's max distance was kept in bp before the field took % (2026-10-26).
       const oldChase = saved.maxChase;
       delete saved.maxChase;

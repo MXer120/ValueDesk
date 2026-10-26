@@ -70,6 +70,7 @@ import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
 import { limitImpact, publishOrderImpact, type RawTake } from '../orderImpact';
 import { publishDraftOrders, type DraftLine } from '../draftOrders';
+import { fmtSlip, pctAsUnit, unitAsPct, useSlipUnit } from '../slipUnit';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
@@ -1146,9 +1147,11 @@ export function OrderEntry({
   /** True mid, or null when either side of the book is missing. */
   const midPrice = bestBid > 0 && bestAsk > 0 ? (bestBid + bestAsk) / 2 : null;
   /** Max slippage the user will accept, as a percent. 1 means 1%. */
-  const [maxSlip, setMaxSlip] = useState('1.00');
+  // 10 bp by default; shown in the app's slippage unit (bp or %, slipUnit.ts), kept in percent.
+  const [maxSlip, setMaxSlip] = useState('0.10');
+  const [slipU, setSlipU] = useSlipUnit();
   const [slipOpen, setSlipOpen] = useState(false);
-  const [slipDraft, setSlipDraft] = useState('1.00');
+  const [slipDraft, setSlipDraft] = useState('10');
   const slipRef = useRef<HTMLDivElement>(null);
   useDismiss(slipOpen, [slipRef], () => setSlipOpen(false));
   // Quote size with an empty price box is converted at the mid so the field
@@ -2185,6 +2188,7 @@ export function OrderEntry({
               bid={bestBid > 0 ? bestBid : null}
               ask={bestAsk > 0 ? bestAsk : null}
               depth={book}
+              sizeUnit={sizeUnit === 'quote' ? 'usd' : 'coin'}
               positionQty={positionQty}
               sizePct={shownPct}
               onSizePct={setSizePct}
@@ -2396,13 +2400,13 @@ export function OrderEntry({
                 type="button"
                 className="oe-sliplink"
                 aria-expanded={slipOpen}
-                onClick={() => { setSlipDraft(maxSlip); setSlipOpen((v) => !v); }}
+                onClick={() => { setSlipDraft(pctAsUnit(num(maxSlip), slipU)); setSlipOpen((v) => !v); }}
               >
                 <span className={slipTone(estSlip, Math.min(maxSlipN, slipCap), liveQty > 0)}>
                   Est: {estSlip === null ? DASH : `${estSlip.toFixed(liveQty > 0 ? 4 : 2)}%`}
                 </span>
                 <span className="oe-out__sep">/</span>
-                <span>Max {Math.min(maxSlipN > 0 ? maxSlipN : 1, slipCap).toFixed(2)}%</span>
+                <span>Max {fmtSlip(Math.min(maxSlipN > 0 ? maxSlipN : 0.1, slipCap), slipU)}</span>
               </button>
             </dd>
             {slipOpen && (
@@ -2410,7 +2414,7 @@ export function OrderEntry({
                 <div className="oe-slider">
                   <div
                     className="oe-slider__rail"
-                    style={{ ['--oe-p' as string]: slipCap > 0 ? Math.min(1, Math.max(0, num(slipDraft) / slipCap)) : 0 }}
+                    style={{ ['--oe-p' as string]: slipCap > 0 ? Math.min(1, Math.max(0, num(maxSlip) / slipCap)) : 0 }}
                   >
                     <div className="oe-slider__fill" />
                     <input
@@ -2419,12 +2423,12 @@ export function OrderEntry({
                       min={0}
                       max={slipCap}
                       step={0.01}
-                      value={Math.min(slipCap, Math.max(0, num(slipDraft)))}
-                      aria-label="Maximum slippage percent"
+                      value={Math.min(slipCap, Math.max(0, num(maxSlip)))}
+                      aria-label="Maximum slippage"
                       onChange={(e) => {
                         paintSliderFill(e.currentTarget);
                         const s = Math.min(slipCap, Math.max(0, Number(e.target.value))).toFixed(2);
-                        setSlipDraft(s);
+                        setSlipDraft(pctAsUnit(Number(s), slipU));
                         setMaxSlip(s);
                       }}
                     />
@@ -2434,23 +2438,34 @@ export function OrderEntry({
                       className="oe-input"
                       autoComplete="off"
                       inputMode="decimal"
-                      aria-label="Maximum slippage percent"
+                      aria-label={`Maximum slippage in ${slipU === 'bp' ? 'basis points' : 'percent'}`}
                       value={slipDraft}
                       onChange={(e) => {
-                        const s = clampSlipDraft(e.target.value, slipCap);
+                        const capU = slipU === 'bp' ? slipCap * 100 : slipCap;
+                        const s = clampSlipDraft(e.target.value, capU);
                         setSlipDraft(s);
-                        if (s !== '' && s !== '.') setMaxSlip(Number(s).toFixed(2));
+                        if (s !== '' && s !== '.') setMaxSlip(Math.min(slipCap, unitAsPct(s, slipU)).toFixed(4));
                       }}
                       onBlur={() => {
-                        let n = num(slipDraft);
+                        let n = unitAsPct(slipDraft, slipU);
                         if (!(n >= 0)) n = 0;
                         if (n > slipCap) n = slipCap;
-                        const s = n.toFixed(2);
-                        setSlipDraft(s);
-                        setMaxSlip(s);
+                        setSlipDraft(pctAsUnit(n, slipU));
+                        setMaxSlip(n.toFixed(4));
                       }}
                     />
-                    <span className="oe-suffix">%</span>
+                    <button
+                      type="button"
+                      className="oe-suffix oe-unitswitch"
+                      title="Show in basis points or percent"
+                      onClick={() => {
+                        const next = slipU === 'bp' ? 'pct' : 'bp';
+                        setSlipU(next);
+                        setSlipDraft(pctAsUnit(num(maxSlip), next));
+                      }}
+                    >
+                      {slipU === 'bp' ? 'bp' : '%'}
+                    </button>
                   </div>
                 </div>
               </div>

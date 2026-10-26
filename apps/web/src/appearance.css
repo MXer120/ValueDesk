@@ -155,3 +155,13 @@ html ::picker(select) { border: 1px solid rgba(255, 255, 255, 0.08); border-radi
 /* Menu rows: the Settings sections' soft, rounded rows. */
 html .menu-popup .menu-row { border-radius: 9px; }
 html .menu-popup .menu-sep { background: rgba(255, 255, 255, 0.07); }
+
+/* Pop-ups that open inside the order panel (margin mode, TIF, slippage): the panel is the backdrop's
+   root, so nothing behind it can blur through - the glass fill is made near-solid there, or the
+   ticket's text shows through it. The leverage pop-up floats outside the panel and keeps its blur. */
+html .oe .oe-pop:not(.oe-pop--float) {
+  background-color: color-mix(in srgb, var(--stg-tint, #1c1f21) 97%, #000);
+}
+/* ...and the row holding an open pop-up rises above the ticket's later rows, which stack on their own. */
+html .oe :is(.oe-anchor, .oe-compact):has(> .oe-pop) { position: relative; z-index: 60; }
+html .oe :has(> .oe-anchor > .oe-pop) { position: relative; z-index: 60; }

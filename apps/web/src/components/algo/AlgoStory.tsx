@@ -73,6 +73,8 @@ export interface StoryProps {
   refs?: { mid: number | null; mark: number | null; index: number | null; oracleMid: number | null; oracleFair: number | null } | null;
   /** Fill fast: what SoDEX's book holds within the max slippage, on average (base units). */
   bandDepth?: number | null;
+  /** The order panel's size unit: sizes in the schedule, ladder and volume pictures are drawn in it. */
+  sizeUnit?: 'coin' | 'usd';
   /** The market's tick size: price axes step in whole ticks and print its decimals. */
   tickSize?: number;
   /** SoDEX's book on the side a taker takes from (a buy: the asks), best first, when the window opened. */
@@ -527,6 +529,7 @@ function ladderScene(t: number, p: StoryProps): Scene | null {
   const head = sampleAt(path, t);
   let qtyDone = 0;
   let usdDone = 0;
+  let coinDone = 0;
   let nDone = 0;
   const bars: ReactNode[] = [];
   const dots: ReactNode[] = [];
@@ -536,8 +539,9 @@ function ladderScene(t: number, p: StoryProps): Scene | null {
     const on = at !== null && at <= t;
     if (on) {
       nDone++;
-      qtyDone += c.qty;
-      usdDone += c.qty * c.px;
+      qtyDone += c.qty; // in the drawn unit (coin or USD)
+      coinDone += base === 'USD' ? c.qty / c.px : c.qty;
+      usdDone += base === 'USD' ? c.qty : c.qty * c.px;
       dots.push(<Dot key={`d${i}`} x={fx(at!)} y={sc.y(c.px)} tone={dirTone(side)} pulse={t - at! < 0.06} />);
     }
     const len = Math.max(3, (c.qty / maxQ) * 70);
@@ -550,7 +554,7 @@ function ladderScene(t: number, p: StoryProps): Scene | null {
       </g>,
     );
   });
-  const avg = qtyDone ? usdDone / qtyDone : null;
+  const avg = coinDone ? usdDone / coinDone : null;
   const rules: Array<{ y: number; label: string; tone: string; dashed?: boolean; faded?: boolean }> = [{ y: sc.y(now), label: `Now ${fmtP(now)}`, tone: 'now', dashed: true }];
   if (avg) rules.push({ y: sc.y(avg), label: `Avg ${fmtP(avg)}`, tone: 'dir' });
   const allIn = nDone === lv.length;
@@ -1247,7 +1251,15 @@ export function viewsFor(p: StoryProps): View[] {
   return ['chart'];
 }
 
-export function sceneFor(t: number, p: StoryProps, view: View = viewsFor(p)[0]!): Scene | null {
+export function sceneFor(t: number, p0: StoryProps, view: View = viewsFor(p0)[0]!): Scene | null {
+  // Sizes in USD when the order panel is set to USD: each order's size at its own price (else the price now).
+  // Not for a slice or Fill fast's rounds: those walk the book, which is counted in the coin.
+  const usd = p0.sizeUnit === 'usd' && view !== 'slice' && view !== 'how' && p0.spec?.kind !== 'basket';
+  const px = (c: PlannedChild) => c.price ?? p0.mid ?? 0;
+  const conv = (cs: PlannedChild[]) => cs.map((c) => ({ ...c, qty: c.qty * px(c) }));
+  const p: StoryProps = usd
+    ? { ...p0, base: 'USD', plan: { ...p0.plan, children: conv(p0.plan.children), schedule: p0.plan.schedule ? conv(p0.plan.schedule) : p0.plan.schedule, total: p0.plan.notional ?? (p0.plan.total !== null && p0.mid ? p0.plan.total * p0.mid : null) }, dayVolume: p0.dayVolume && p0.mid ? { ...p0.dayVolume, v: p0.dayVolume.v.map((v) => v * p0.mid!) } : p0.dayVolume }
+    : p0;
   TICK.size = p.tickSize ?? 0;
   const { spec, plan } = p;
   // Real recent prices behind the price-level pictures; not behind one slice or Fill fast's rounds (their seconds vanish against 90 minutes).

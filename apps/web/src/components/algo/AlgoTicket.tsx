@@ -61,6 +61,7 @@ import { PlanPreview, type Level } from './AlgoPreview';
 import { fmtQ } from './AlgoStory';
 import { VenuePicker } from './VenuePicker';
 import { useHistory } from './liveData';
+import { pctAsUnit, unitAsPct, useSlipUnit, type SlipUnit } from '../../slipUnit';
 import { MarketSelect, MiniSelect } from './MarketSelect';
 import { coinOf, useOracle } from '../../algo/oracle';
 import {
@@ -301,6 +302,8 @@ interface Props extends TicketShared {
   last: number | null;
   /** SoDEX's book as the ticket holds it (Fill fast's preview averages its depth). */
   depth?: OrderBook | null;
+  /** The order panel's size unit: the previews draw sizes in it. */
+  sizeUnit?: 'coin' | 'usd';
   /** The open position on this market (signed, base units; null: not known). */
   positionQty?: number | null;
   /** The ticket's Amount slider and its setters, for the window's Order section. */
@@ -662,6 +665,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           book={bid && ask ? { bid, ask } : null}
           refs={{ mid: bid && ask ? (bid + ask) / 2 : null, mark: markPx, index: indexPx, oracleMid, oracleFair }}
           bandDepth={bandDepth}
+          sizeUnit={p.sizeUnit}
           tickSize={tick > 0 ? tick : undefined}
           farBook={(() => {
             const b = snap?.books?.[snap.books.length - 1] ?? null;
@@ -771,7 +775,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           )}
 
           {ek === 'sweep' && (
-            <Field label="Max slippage" value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} suffix="% from reference" title={`How far from the reference price (${SWEEP_REFERENCE_NAMES[d.sweepRef]}; Advanced) it may fill; every round is an IOC limit at that edge`} err={err('slippageBps')} />
+            <SlipField ticket title="Max slippage" stored="pct" value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} hint={`How far from the reference price (${SWEEP_REFERENCE_NAMES[d.sweepRef]}) it may fill; every round is an IOC limited there`} err={err('slippageBps')} />
           )}
 
           {ek === 'chase' && (
@@ -1038,6 +1042,37 @@ function Row({ title, hint, id, children }: { title: string; hint?: ReactNode; i
   );
 }
 
+/**
+ * A max slippage in the app's one unit, bp or % (slipUnit.ts), switched in its own box: the value is
+ * kept as the draft keeps it (`stored`), only what is shown converts. On the ticket in its boxes, in
+ * the settings window in its own.
+ */
+function SlipField({ title, hint, value, onChange, stored, err, ticket = false, after }: {
+  title: string; hint: string; value: string; onChange: (v: string) => void; stored: 'bp' | 'pct'; err?: string; ticket?: boolean; after?: string;
+}) {
+  const [u, setU] = useSlipUnit();
+  const [text, setText] = useState<string | null>(null);
+  const pct = stored === 'bp' ? Number(value) / 100 : Number(value);
+  const shown = text ?? (value.trim() === '' ? '' : pctAsUnit(pct, u));
+  const write = (t: string) => {
+    setText(t);
+    const p2 = unitAsPct(t, u);
+    if (t.trim() === '') onChange('');
+    else if (Number.isFinite(p2)) onChange(String(Number((stored === 'bp' ? p2 * 100 : p2).toFixed(6))));
+  };
+  const opts: ReadonlyArray<readonly [SlipUnit, string]> = [['bp', 'bp'], ['pct', '%']];
+  const pick = (v: SlipUnit) => {
+    setText(null);
+    setU(v);
+  };
+  const unit = ticket ? <ModeSelect label={title} value={u} options={opts} onChange={pick} /> : <APick label={title} value={u} options={opts} onChange={pick} />;
+  return ticket ? (
+    <Field label={title} value={shown} onChange={write} suffix={unit} title={hint} err={err} />
+  ) : (
+    <AField title={title} hint={after ? `${hint} ${after}` : hint} value={shown} onChange={write} unit={unit} err={err} />
+  );
+}
+
 function AField({ title, hint, value, onChange, unit, placeholder, int = false, signed = false, err }: {
   title: string; hint: ReactNode; value: string; onChange: (v: string) => void; unit?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; err?: string;
 }) {
@@ -1270,7 +1305,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
 
       {ek === 'sweep' && (
         <Group label="Max slippage" sec="exec">
-          <AField title="Max slippage" hint="How far from the reference price (below) it may fill; every round is an IOC limited there." value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} unit="% from reference" err={err('slippageBps')} />
+          <SlipField title="Max slippage" stored="pct" hint="How far from the reference price (below) it may fill; every round is an IOC limited there." value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} err={err('slippageBps')} />
         </Group>
       )}
 
@@ -1367,7 +1402,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
       err={err('slices')}
     />
   );
-  const slip = (hint: string) => <AField title="Max slippage" hint={hint} value={d.slip} onChange={(v) => set({ slip: v })} unit="bp" err={err('slippageBps')} />;
+  const slip = (hint: string) => <SlipField title="Max slippage" stored="bp" hint={hint} value={d.slip} onChange={(v) => set({ slip: v })} err={err('slippageBps')} />;
   const sizeVaries = (key: 'sizeJitter' | 'scaleJitter' | 'displayJitter', hint: string) => (
     <AField title="Size varies" hint={hint} value={d[key]} onChange={(v) => set({ [key]: v } as Partial<Draft>)} unit="± %" err={err('sizeJitter', 'displayJitter')} />
   );
@@ -1700,7 +1735,7 @@ function ExecGroup({ d, set, chaseOnly = false, jitter, cap, err }: {
           ]}
         />
       )}
-      {style !== 'maker' && <AField title="Max slippage" hint={`Worst price a taking child accepts, past the ${d.slipFrom === 'touch' ? 'best price' : SLIP_FROM_NAMES[d.slipFrom].toLowerCase()}.`} value={d.slip} onChange={(v) => set({ slip: v })} unit="bp" err={err('exec.slippageBps')} />}
+      {style !== 'maker' && <SlipField title="Max slippage" stored="bp" hint={`Worst price a taking child accepts, past the ${d.slipFrom === 'touch' ? 'best price' : SLIP_FROM_NAMES[d.slipFrom].toLowerCase()}.`} value={d.slip} onChange={(v) => set({ slip: v })} err={err('exec.slippageBps')} />}
       {style === 'hybrid' && <AField title="Rest for" hint="Share of each slice's time spent resting before what is left is taken." value={d.makerShare} onChange={(v) => set({ makerShare: v })} unit="% of slice" err={err('exec.makerShare')} />}
       {style !== 'taker' && <AField title="Re-price after" hint="A resting child moves once the best price is this far away." value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} unit="ticks" err={err('exec.chaseTicks')} />}
       {jitter !== 'none' && <AField title="Size varies" hint="Randomises each slice's size; the total stays the same." value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} unit="± %" err={err('sizeJitter')} />}

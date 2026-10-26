@@ -1476,3 +1476,4 @@ button.oe-select[aria-expanded='true'] {
 .oe--paper .oe-dir--tabs .oe-dir__btn.is-on.is-buy,
 .oe--paper .oe-dir--tabs .oe-dir__btn.is-on.is-sell { background: none; color: var(--oe-paper); box-shadow: inset 0 -2px 0 var(--oe-paper); }
 
+.oe-unitswitch { border: 0; background: none; cursor: pointer; font: inherit; color: var(--muted); padding: 0 8px; } .oe-unitswitch:hover { color: var(--text); }

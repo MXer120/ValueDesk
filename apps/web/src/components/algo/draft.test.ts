@@ -39,7 +39,7 @@ test('an untouched TWAP is 30 slices over 30 minutes, as before', () => {
   assert.equal(s.kind, 'twap');
   assert.equal(s.paper, false);
   assert.equal(s.exits, null);
-  assert.deepEqual(s.exec, { style: 'taker', slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 });
+  assert.deepEqual(s.exec, { style: 'taker', slippageBps: 10, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 });
   // Industry default: a TWAP's slices take; Chase TWAP is the one that rests first.
   assert.equal((draftToSpec('chasetwap', DEFAULT, shared, NOW).exec as { style: string }).style, 'hybrid');
   assert.equal(loadDraft(memStore({ [DRAFT_KEY]: JSON.stringify({ exec: 'hybrid' }) })).exec, 'taker');
