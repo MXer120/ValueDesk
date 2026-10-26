@@ -1437,6 +1437,8 @@ button.oe-select[aria-expanded='true'] {
 .oe-pop__opt--algo b { font-size: var(--fs-base); line-height: var(--lh-base); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .oe-pop__opt--algo.is-on b { color: var(--text); }
 .oe-pop__opt--algo:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.oe-pop__opt--algo b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oe-tab--algo .oe-algo-ic { flex: none; }
 
 /* A stop loss against the estimated liquidation price (OrderEntry.tsx slTone): the
    field says it - red on or past liquidation, orange close to it. */

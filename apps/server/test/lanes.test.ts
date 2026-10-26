@@ -71,6 +71,22 @@ test('concurrency keeps a share: running tasks count at their prefix\'s average 
   assert.ok(share > 0.3 && share < 0.55, `portfolio reads took ${Math.round(share * 100)}% of the spend`);
 });
 
+test('24 slots (the cohort lane): the share holds once the lane has run a while', async () => {
+  const ran: string[] = [];
+  const slow = () => new Promise((r) => setTimeout(r, 1 + Math.random() * 3));
+  const lane = new Lane({ name: 't', perMin: 1e9, concurrency: 24, shares: [{ prefix: 'cohpnl:', share: 0.4 }], sleep: turn });
+  for (let i = 0; i < 900; i++) lane.add({ key: `coh:${i}`, prio: 2_000, run: async () => { await slow(); ran.push('pos'); return 2; } });
+  for (let i = 0; i < 300; i++) lane.add({ key: `cohpnl:${i}`, prio: 1, run: async () => { await slow(); ran.push('pnl'); return 20; } });
+  lane.start();
+  for (let i = 0; i < 1_500 && ran.length < 600; i++) await new Promise((r) => setTimeout(r, 2));
+  lane.stop();
+  const later = ran.slice(100, 600);
+  const pnl = later.filter((x) => x === 'pnl').length;
+  const share = (pnl * 20) / (pnl * 20 + (later.length - pnl) * 2);
+  // Judged over 60 finished tasks it was 48-59%: under three batches of 24.
+  assert.ok(share > 0.3 && share < 0.5, `portfolio reads took ${Math.round(share * 100)}% of the spend`);
+});
+
 test('one at a time by default: each task is followed by its own rest', async () => {
   const order: string[] = [];
   const lane = new Lane({ name: 't', perMin: 30, sleep: (ms) => { order.push(`rest ${ms}`); return turn(); } });

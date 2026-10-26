@@ -24,7 +24,7 @@
  *   GET /api/vs/indicators   (the catalog of the calendar's indicators - valuescan/indicators.ts)
  *   GET /api/vs/indicator?id&range=1y|5y|10y|max   (one indicator's history from FRED, its table and next release)
  *   GET /api/vs/etf/flows?asset=BTC|ETH|SOL..&range=1m|3m|1y|all   (US spot ETF flows and funds, SoSoValue - valuescan/sosovalue/etf.ts; SOSOVALUE_API_KEY, else not_available)
- *   GET /api/vs/oracle?coin=BTC&venues=a,b   (the shared price oracle: Binance futures and spot, Bitget, Hyperliquid, OKX, Bybit - routes/oracle.ts)
+ *   GET /api/vs/oracle?coin=BTC&venues=a,b   (the shared price oracle over 19 venues - routes/oracle.ts)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
  *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)

@@ -328,8 +328,8 @@ Against this inventory, HOSTED_ROUTES should be:
   indicator's history from FRED's public CSV, read at most every 6 hours; valuescan/indicators.ts),
   and `/api/vs/etf/flows` (SoSoValue's US spot ETF flows and funds per asset, cached 30 minutes on the
   news key's budget, at most 5 calls a minute; `not_available` without `SOSOVALUE_API_KEY`;
-  valuescan/sosovalue/etf.ts), `/api/vs/oracle` (the shared price oracle for Fill fast: Binance futures
-  and spot, Bitget, Hyperliquid, OKX and Bybit public tickers, one read per venue and coin a second
+  valuescan/sosovalue/etf.ts), `/api/vs/oracle` (the shared price oracle for Fill fast: 19 venues' public tickers -
+  Binance, Bybit, OKX, Bitget, Gate, MEXC and KuCoin futures and spot, Hyperliquid, Coinbase, Kraken, HTX, Deribit - one read per venue and coin a second
   for all callers together; routes/oracle.ts, valuescan/oracle.ts)
   (index, drop their `provisional`); `/api/feed/account`;
   `/api/external/maintenance/status`, `/api/external/announcements(/:id)` (until

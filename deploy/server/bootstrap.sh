@@ -80,7 +80,7 @@ install_if_changed() {
 # A previous run's answers are the defaults, so a re-run needs no arguments.
 if [ -f "$ETC/bootstrap.env" ]; then
   while IFS='=' read -r k v; do
-    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE|KEEP_SSHD|ORIGIN_SECRET_FILE)
+    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE|KEEP_SSHD|ORIGIN_SECRET_FILE|EXECUTOR_UPSTREAM)
       [ -n "${!k:-}" ] || printf -v "$k" '%s' "$v" ;;
     esac
   done < "$ETC/bootstrap.env"
@@ -97,6 +97,8 @@ ACME_EMAIL="${ACME_EMAIL:-}"
 DATA_DEVICE="${DATA_DEVICE:-/dev/sdf}"
 KEEP_SSHD="${KEEP_SSHD:-0}"
 ORIGIN_SECRET_FILE="${ORIGIN_SECRET_FILE:-}"
+# Where Caddy sends /api/copy/*: the executor here, or https://<origin name> of a server of its own.
+EXECUTOR_UPSTREAM="${EXECUTOR_UPSTREAM:-127.0.0.1:8799}"
 
 # Everything below ends up in files and sed expressions: accept plain values only.
 domain_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
@@ -105,6 +107,8 @@ domain_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
 [ "$SITE_DOMAIN" != "$ORIGIN_DOMAIN" ] || die "the origin needs a name of its own, not the site's"
 [ -z "$OPS_BUCKET" ] || [[ "$OPS_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "OPS_BUCKET is not a bucket name: $OPS_BUCKET"
 [[ "$KEEP_SSHD" =~ ^[01]$ ]] || die "KEEP_SSHD is 0 or 1"
+[ "$EXECUTOR_UPSTREAM" = 127.0.0.1:8799 ] || [[ "$EXECUTOR_UPSTREAM" =~ ^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] \
+  || die "EXECUTOR_UPSTREAM is 127.0.0.1:8799 or https://<name>: $EXECUTOR_UPSTREAM"
 [ -z "$ORIGIN_SECRET_FILE" ] || [[ "$ORIGIN_SECRET_FILE" =~ ^/[A-Za-z0-9_./-]+$ ]] || die "ORIGIN_SECRET_FILE is not an absolute path"
 [[ "$CONFIG_PREFIX" =~ ^/[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$ ]] || die "CONFIG_PREFIX is not a parameter path: $CONFIG_PREFIX"
 [ -z "$ALERT_TOPIC_ARN" ] || [[ "$ALERT_TOPIC_ARN" =~ ^arn:[a-z-]+:sns:[a-z0-9-]+:[0-9]+:[A-Za-z0-9_-]+$ ]] || die "ALERT_TOPIC_ARN is not an SNS topic ARN"
@@ -169,7 +173,10 @@ id -nG valuescan-executor | tr ' ' '\n' | grep -qx valuescan || usermod -a -G va
 
 log "data volume at $DATA"
 mkdir -p "$DATA"
-if ! mountpoint -q "$DATA"; then
+# DATA_DEVICE=none: a server with one disk (Contabo, 2026-10-25) keeps the data on it.
+if [ "$DATA_DEVICE" = none ]; then
+  log "no separate data volume: $DATA is on the root disk"
+elif ! mountpoint -q "$DATA"; then
   root_source="$(findmnt -no SOURCE /)"
   root_disk="/dev/$(lsblk -no PKNAME "$root_source" | head -n 1)"
   if [ -e "$DATA_DEVICE" ]; then
@@ -314,7 +321,7 @@ install_if_changed "$work/executor.env" "$ETC/executor.env" 0640 root:valuescan-
 {
   printf 'SITE_DOMAIN=%s\nORIGIN_DOMAIN=%s\nOPS_BUCKET=%s\nCONFIG_PREFIX=%s\n' "$SITE_DOMAIN" "$ORIGIN_DOMAIN" "$OPS_BUCKET" "$CONFIG_PREFIX"
   printf 'ALERT_TOPIC_ARN=%s\nACME_EMAIL=%s\nDATA_DEVICE=%s\n' "$ALERT_TOPIC_ARN" "$ACME_EMAIL" "$DATA_DEVICE"
-  printf 'KEEP_SSHD=%s\nORIGIN_SECRET_FILE=%s\n' "$KEEP_SSHD" "$ORIGIN_SECRET_FILE"
+  printf 'KEEP_SSHD=%s\nORIGIN_SECRET_FILE=%s\nEXECUTOR_UPSTREAM=%s\n' "$KEEP_SSHD" "$ORIGIN_SECRET_FILE" "$EXECUTOR_UPSTREAM"
 } > "$work/bootstrap.env"
 install_if_changed "$work/bootstrap.env" "$ETC/bootstrap.env" 0640 root:root || true
 
@@ -384,7 +391,11 @@ rm -f "$work/api.secret.env" "$work/caddy.secret.env" "$work/executor.secret.env
 log "Caddyfile for $ORIGIN_DOMAIN"
 email_line="# (no ACME contact address was given)"
 [ -z "$ACME_EMAIL" ] || email_line="email $ACME_EMAIL"
-sed -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" -e "s|__ACME_EMAIL_LINE__|$email_line|" "$HERE/caddy/Caddyfile.template" > "$work/Caddyfile"
+# A remote executor is reached by its own name (its Caddy serves only that name).
+host_line="# the executor runs here"
+[ "$EXECUTOR_UPSTREAM" = 127.0.0.1:8799 ] || host_line="header_up Host {upstream_hostport}"
+sed -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" -e "s|__ACME_EMAIL_LINE__|$email_line|" \
+    -e "s|__EXECUTOR_UPSTREAM__|$EXECUTOR_UPSTREAM|" -e "s|__EXECUTOR_HOST_LINE__|$host_line|" "$HERE/caddy/Caddyfile.template" > "$work/Caddyfile"
 # Validated with stand-in secrets: the real ones reach Caddy only through systemd.
 stand_in="$(printf 'v%.0s' {1..40})"
 caddy_check() {

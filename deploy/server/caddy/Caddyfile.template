@@ -83,7 +83,11 @@ __ORIGIN_DOMAIN__ {
 		# /api/copy/v1/. Caddy's path matcher ignores case; the edge forwards paths
 		# exactly, and the executor answers 404 for a path it does not know.
 		handle /api/copy/* {
-			reverse_proxy 127.0.0.1:8799 {
+			# Where the executor runs: here (127.0.0.1:8799), or a server of its own
+			# (bootstrap.sh EXECUTOR_UPSTREAM=https://<its origin name>, whose Caddy checks
+			# the same origin secret, which this request carries on).
+			reverse_proxy __EXECUTOR_UPSTREAM__ {
+				__EXECUTOR_HOST_LINE__
 				# A restart (a release that changes the executor) leaves nothing listening
 				# for a few seconds: a request that cannot connect is held and tried again
 				# instead of answered 502. Only a failed connect is retried - a request the

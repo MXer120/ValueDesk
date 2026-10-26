@@ -66,6 +66,9 @@ export interface LaneOptions {
 
 const realSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
+/** The finished tasks `shares` are judged over: several batches of a lane's parallel slots. */
+const RECENT_TASKS = 200;
+
 /** A failure worth backing off from: the upstream is overloaded or slow, not the request wrong. */
 export function isTransient(err: unknown): boolean {
   const e = err as { status?: number; statusCode?: number; name?: string; message?: string } | null;
@@ -252,7 +255,7 @@ export class Lane {
 
   private note(key: string, cost: number): void {
     this.recent.push({ prefix: this.prefixOf(key), cost: Math.max(cost, 0.25) });
-    if (this.recent.length > 60) this.recent.shift();
+    if (this.recent.length > RECENT_TASKS) this.recent.shift();
   }
 
   private async loop(): Promise<void> {
