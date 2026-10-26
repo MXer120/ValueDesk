@@ -60,6 +60,7 @@ import { ADDRESS_KIND_LABEL, addressKinds, type AddressKind } from '../../tradin
 import { ApproveLabel, Avatar, FxSelect, Info, Label, ONE_CONFIRM, SodexMark, Spinner, WalletIcon, WalletMark, short, useStepLabel } from './ui';
 import { announceMoney } from './moneyNotice';
 import './funds.css';
+import { NoWallet } from '../EmptyState';
 
 interface Props {
   open: boolean;
@@ -394,7 +395,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       }
     >
       {!owner ? (
-        <p className="fx-note">Connect a wallet to withdraw.</p>
+        <NoWallet line="Connect a wallet to withdraw from your SoDEX account." compact />
       ) : (
         <AutoHeight>
           <FadeView viewKey={review ? 'review' : 'form'} className="fx-stack">

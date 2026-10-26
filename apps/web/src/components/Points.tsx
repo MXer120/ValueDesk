@@ -32,6 +32,7 @@ import { WalletError, type Eip1193Provider } from '../wallet';
 import type { PanelDefinition } from '../dashboard/types';
 import './Points.css';
 import { notifyError } from '../toast';
+import { NoWallet } from './EmptyState';
 /* The window the pool competes over. Weekly pool, so 7D is the honest default. */
 const POOL_DAYS = 7;
 
@@ -889,7 +890,7 @@ function StandingPanel({ c }: { c: PointsContext }) {
       }
     >
       {!c.address ? (
-        <p className="pf-note">Connect a wallet to see your standing.</p>
+        <NoWallet line="Connect a wallet to see your standing." compact />
       ) : !c.standing ? (
         <p className="pf-note">Not ranked in this window.</p>
       ) : (

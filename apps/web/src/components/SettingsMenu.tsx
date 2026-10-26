@@ -35,9 +35,15 @@ import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from '
 import { LegalLink } from '../legal/LegalGate';
 import { LEGAL_LABELS, LEGAL_PAGES } from '../router';
 import { NEWS_SOURCES, logoUrl, useCreditHidden, useNewsSources } from './news/newsSources';
+import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
+import { requestDisconnect } from './account/actions';
 import './SettingsMenu.css';
 
-type Section = 'privacy' | 'layout' | 'security' | 'news' | 'players' | 'legal';
+const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
+  <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+
+type Section = SettingsSection;
 const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNode }> = [
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
@@ -54,6 +60,19 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
   const [open, setOpen] = useState(false);
   const [section, setSection] = useState<Section>('privacy');
   const gear = useRef<HTMLButtonElement>(null);
+  const t = useSyncExternalStore(subscribeTrading, getTradingState, getTradingState);
+  const current = SECTIONS.find((s) => s.id === section)!;
+
+  // Opened at a section from elsewhere (settingsBus.ts: a panel's right-click menu).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const want = (e as CustomEvent<{ section?: Section }>).detail?.section;
+      if (want && SECTIONS.some((s) => s.id === want)) setSection(want);
+      setOpen(true);
+    };
+    window.addEventListener(SETTINGS_EVENT, onOpen);
+    return () => window.removeEventListener(SETTINGS_EVENT, onOpen);
+  }, []);
 
   return (
     <div className="privacy settings">
@@ -74,14 +93,25 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
       <Modal open={open} title="Settings" onClose={() => setOpen(false)} size="lg" className="stg">
         <div className="stg__body">
           <nav className="stg__nav" aria-label="Settings sections">
-            {SECTIONS.map((s) => (
-              <button key={s.id} type="button" className={`stg__tab${section === s.id ? ' is-on' : ''}`} aria-current={section === s.id ? 'page' : undefined} onClick={() => setSection(s.id)}>
-                <svg viewBox="0 0 20 20" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{s.icon}</svg>
-                <span><b>{s.label}</b><small>{s.hint}</small></span>
+            <div className="stg__brand"><PrefsIcon size={22} /><span>Settings</span></div>
+            <span className="stg__rule" aria-hidden="true" />
+            <div className="stg__tabs">
+              {SECTIONS.map((s) => (
+                <button key={s.id} type="button" className={`stg__tab${section === s.id ? ' is-on' : ''}`} aria-current={section === s.id ? 'page' : undefined} title={s.hint} onClick={() => setSection(s.id)}>
+                  <Icon size={17}>{s.icon}</Icon>
+                  <span>{s.label}</span>
+                </button>
+              ))}
+            </div>
+            {t.owner && (
+              <button type="button" className="stg__tab stg__out" onClick={() => { setOpen(false); requestDisconnect(); }}>
+                <Icon size={17}><path d="M8 4H5a1.5 1.5 0 0 0-1.5 1.5v9A1.5 1.5 0 0 0 5 16h3M12.5 13.5 16 10l-3.5-3.5M16 10H8" /></Icon>
+                <span>Disconnect wallet</span>
               </button>
-            ))}
+            )}
           </nav>
-          <div className="stg__pane">
+          <div className="stg__pane" key={section}>
+            <div className="stg__panehead"><Icon size={22}>{current.icon}</Icon><h3>{current.label}</h3></div>
             {section === 'privacy' && <PrivacySection />}
             {section === 'layout' && <LayoutSection hasLayout={hasLayout} dashLocked={dashLocked} gear={gear} close={() => setOpen(false)} />}
             {section === 'security' && <SecuritySection />}
@@ -95,10 +125,12 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
   );
 }
 
+/** A switch with its state beside it ("Enabled" / "Disabled"), the whole of it pressable. */
 function Toggle({ checked, onChange, disabled, label }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
   return (
     <button type="button" role="switch" aria-checked={checked} aria-label={label} disabled={disabled} className={`stg__switch${checked ? ' is-on' : ''}`} onClick={() => onChange(!checked)}>
-      <i />
+      <i className="stg__track"><i /></i>
+      <span aria-hidden="true">{checked ? 'Enabled' : 'Disabled'}</span>
     </button>
   );
 }
@@ -113,8 +145,9 @@ function Row({ title, line, children, off, icon }: { title: string; line?: React
   );
 }
 
-function Head({ title, line }: { title: string; line: string }) {
-  return <header className="stg__head"><h3>{title}</h3><p>{line}</p></header>;
+/** The section's line under its title (the title and icon head the pane). `title` names it for readers of the code. */
+function Head({ line }: { title: string; line: string }) {
+  return <p className="stg__lede">{line}</p>;
 }
 
 function PrivacySection() {
@@ -161,19 +194,30 @@ function LayoutSection({ hasLayout, dashLocked, gear, close }: { hasLayout: bool
         <Row title="Lock layout" line={hasLayout ? 'Panels cannot be moved or resized' : 'This page has no movable layout'} off={!hasLayout}>
           <Toggle checked={hasLayout && dashLocked} disabled={!hasLayout} onChange={() => window.dispatchEvent(new CustomEvent('dash:lock:toggle'))} label="Lock layout" />
         </Row>
-        <Row title="Edit layout" line="Show, hide and reset panels" off={!hasLayout}>
+        <Row title="Edit layout" line="Arrange, add and take out panels" off={!hasLayout}>
           <button
             type="button"
             className="stg__btn"
             disabled={!hasLayout}
             onClick={() => {
-              // Anchor the layout menu under the gear; Dashboard clamps it to the viewport.
-              const r = gear.current?.getBoundingClientRect();
               close();
-              window.dispatchEvent(new CustomEvent('dash:menu', { detail: { x: r?.left ?? 0, y: (r?.bottom ?? 0) + 4 } }));
+              window.dispatchEvent(new CustomEvent('dash:edit'));
             }}
           >
-            Edit…
+            Edit layout
+          </button>
+        </Row>
+        <Row title="Reset layout" line="Back to the page's own arrangement" off={!hasLayout}>
+          <button
+            type="button"
+            className="stg__btn"
+            disabled={!hasLayout}
+            onClick={() => {
+              close();
+              window.dispatchEvent(new CustomEvent('dash:reset'));
+            }}
+          >
+            Reset…
           </button>
         </Row>
       </div>

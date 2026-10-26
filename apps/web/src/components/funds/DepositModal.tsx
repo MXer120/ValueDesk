@@ -40,6 +40,7 @@ import { useDepositWatch, type DepositStage, type DepositWatch } from './deposit
 import { ApproveLabel, Arrow, Avatar, Chevron, CopyIcon, FxSelect, Info, Label, ONE_CONFIRM, QrIcon, Spinner, WalletMark, short, useStepLabel } from './ui';
 import { announceMoney } from './moneyNotice';
 import './funds.css';
+import { NoWallet } from '../EmptyState';
 
 interface Props {
   open: boolean;
@@ -181,7 +182,7 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
       onBack={view !== 'choose' && !accountReady ? () => setView('choose') : undefined}
     >
       {!owner ? (
-        <p className="fx-note">Connect a wallet to deposit.</p>
+        <NoWallet line="Connect a wallet to deposit to your SoDEX account." compact />
       ) : (
         <AutoHeight>
           <FadeView viewKey={accountReady ? 'ready' : view} className="fx-stack">

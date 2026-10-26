@@ -44,6 +44,7 @@ import { logger } from '../../log';
 import { Modal } from '../Modal';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import './account.css';
+import { NoWallet } from '../EmptyState';
 
 interface Props {
   open: boolean;
@@ -304,7 +305,7 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
       <section className="stack">
         <h4>All keys on this SoDEX account</h4>
         {!address ? (
-          <p className="muted small">Connect a wallet to see its keys.</p>
+          <NoWallet line="Connect a wallet to see its keys." compact />
         ) : !account && loadFailed ? (
           <LoadFailed what="API keys" onRetry={() => setAttempt((n) => n + 1)} />
         ) : !account ? (

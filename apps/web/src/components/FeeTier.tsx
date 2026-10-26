@@ -60,6 +60,7 @@ import { Private } from '../privacy';
 import { LoadFailed, logLoadFailure } from './LoadFailed';
 import { useBuilderFee, type BuilderFeeQuote } from './account/useBuilderFee';
 import { requestAdvanced } from './account/actions';
+import { NoWallet } from './EmptyState';
 
 interface Props {
   address: string | null;
@@ -156,7 +157,7 @@ function FeeTierInner({
     return (
       <div className="panel feetier">
         <div className="panelhead"><h2>Fees</h2></div>
-        <p className="muted small">Connect a wallet to see the fee tier this account is on.</p>
+        <NoWallet line="Connect a wallet to see the fee tier this account is on." compact />
       </div>
     );
   }

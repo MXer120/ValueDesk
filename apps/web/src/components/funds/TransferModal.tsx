@@ -52,6 +52,7 @@ import { openingWalletStep } from './openingStep';
 import { TransferStatus, type DockMode } from './TransferStatus';
 import { beginTransfer, dropTransfer, finishTransfer, noteTransferStep } from './transferLog';
 import './funds.css';
+import { NoWallet } from '../EmptyState';
 
 interface Props {
   open: boolean;
@@ -100,7 +101,7 @@ export function TransferModal({ open, onClose, address, provider, onEnable, pres
       dockOpen={mode !== 'collapsed'}
     >
       {!owner ? (
-        <p className="fx-note">Connect a wallet to move funds.</p>
+        <NoWallet line="Connect a wallet to move funds between your accounts." compact />
       ) : (
         <TransferPanel owner={owner} provider={provider} onEnable={onEnable} preset={preset} status={status} />
       )}

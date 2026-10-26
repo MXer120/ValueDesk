@@ -6,6 +6,7 @@
  */
 import type { ReactNode } from 'react';
 import type { EmptyIcon } from './emptyCopy';
+import { openConnectDialog } from './account/connect';
 import './EmptyState.css';
 
 const PATHS: Record<EmptyIcon, ReactNode> = {
@@ -20,6 +21,22 @@ const PATHS: Record<EmptyIcon, ReactNode> = {
   news: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 8h8M6 11h8M6 14h5" /></>,
   chart: <path d="M3.5 16.5h13M5.5 13V9M9 13V5.5M12.5 13v-5M16 13V7" />,
 };
+
+/**
+ * No wallet is connected: the empty state with Connect, for a dialog or panel
+ * that needs one ("Connect a wallet to withdraw.").
+ */
+export function NoWallet({ line, compact }: { line: string; compact?: boolean }) {
+  return (
+    <EmptyState
+      icon="wallet"
+      title="No wallet connected"
+      line={line}
+      compact={compact}
+      action={<button type="button" className="empty-state__cta" onClick={() => openConnectDialog()}>Connect wallet</button>}
+    />
+  );
+}
 
 export function EmptyState({ icon, title, line, action, compact }: {
   icon: EmptyIcon;

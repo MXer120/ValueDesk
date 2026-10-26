@@ -25,6 +25,7 @@ import { Guarded } from '../components/ErrorBoundary';
 import { EditMode, type PreviewGesture } from './EditMode';
 import { cellAt, clearColumnSpan, DRAG_COMMIT_PX, fillGaps, placementAt, slotBlocks, upsertPlacement } from './editPlace';
 import { LayoutMenu } from './LayoutMenu';
+import { panelSettings } from '../settingsBus';
 import { PanelChrome } from './Panel';
 import { breakpointFor, resolveLayout, samePlacements, toPlacements } from './resolve';
 import {
@@ -129,7 +130,7 @@ function useBox(): [RefObject<HTMLDivElement>, Box] {
   return [ref, box];
 }
 
-export function Dashboard<C>({ config, panels, context, className, onNotificationSettings }: DashboardProps<C>) {
+export function Dashboard<C>({ config, panels, context, className }: DashboardProps<C>) {
   const [scrollRef, box] = useBox();
   const [saved, setSaved] = useState<SavedDashboard>(() => {
     const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: false };
@@ -397,7 +398,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
    * listener here would fire FIRST and steal every one of those clicks
    * before the panel that actually owns them ever saw the event.
    */
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; panel?: string | null } | null>(null);
   /** The layout menu on screen - kept while it fades out. */
   const menuFx = useLatched(menuAt);
   useEffect(() => {
@@ -409,7 +410,9 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
       const r = el.getBoundingClientRect();
       if (e.clientX < r.left || e.clientX >= r.right || e.clientY < r.top || e.clientY >= r.bottom) return;
       e.preventDefault();
-      setMenuAt({ x: e.clientX, y: e.clientY });
+      // The panel under the pointer, for its own settings in the menu.
+      const panel = e.target instanceof Element ? e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null : null;
+      setMenuAt({ x: e.clientX, y: e.clientY, panel });
     };
     window.addEventListener('contextmenu', onMenu);
     return () => window.removeEventListener('contextmenu', onMenu);
@@ -441,6 +444,17 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
       return next;
     });
   }, [config]);
+  // Settings > Layout: straight into the edit canvas, or the reset's confirmation.
+  useEffect(() => {
+    const onEdit = () => enterEdit();
+    const onReset = () => setResetAsk(true);
+    window.addEventListener('dash:edit', onEdit);
+    window.addEventListener('dash:reset', onReset);
+    return () => {
+      window.removeEventListener('dash:edit', onEdit);
+      window.removeEventListener('dash:reset', onReset);
+    };
+  }, [enterEdit]);
 
   const onPreview = useCallback((gesture: PreviewGesture) => {
     if (gesture === 'hold-start') setHolding(true);
@@ -808,16 +822,10 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
           onExit={menuFx.onExit}
           locked={locked}
           onToggleLock={toggleLock}
-          panels={eligible.map((p) => ({
-            id: p.id,
-            name: typeof p.title === 'function' ? p.title(context) : p.title,
-          }))}
-          hidden={hiddenSet}
-          onTogglePanel={toggleHidden}
           onReset={() => setResetAsk(true)}
           hasSaved={hasSaved}
           onEditLayout={enterEdit}
-          onNotificationSettings={onNotificationSettings}
+          panelSettings={panelSettings(menuFx.value.panel)}
           onClose={() => setMenuAt(null)}
         />
       )}
