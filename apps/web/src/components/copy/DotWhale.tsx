@@ -30,8 +30,8 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 770;
-const WATERLINE = 354;
+const TH = 774;
+const WATERLINE = 356;
 const PAD = 44;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
@@ -96,9 +96,8 @@ function samp(f: Float32Array, x: number, y: number): number {
 /**
  * The stipple: dots dropped where the whale is, kept more often where it is light -
  * the dark skin (the raised flipper) still dotted, so it reads as skin, not a hole -
- * inside the whale's outline; and the outline itself drawn as a dotted contour, a
- * dot on every pixel of the edge, so the silhouette is one smooth line (owner,
- * 2026-10-26) whatever the skin there.
+ * and dense along the outline whatever the skin there, so the silhouette reads as a
+ * smooth line even where the whale is dark.
  */
 function stipple(t: Tone, count: number): Dot[] {
   const dots: Dot[] = [];
@@ -107,21 +106,12 @@ function stipple(t: Tone, count: number): Dot[] {
     tries++;
     const x = Math.random() * TW;
     const y = Math.random() * TH;
-    if (samp(t.a, x, y) < 0.55) continue;
-    const v = 0.16 + 0.84 * Math.pow(samp(t.l, x, y), 1.5);
-    if (Math.random() > v) continue;
+    const edge = samp(t.a, x, y);
+    if (edge < 0.04) continue;
+    let v = 0.16 + 0.84 * Math.pow(samp(t.l, x, y), 1.5);
+    if (edge < 0.92) v = Math.max(v, 0.62);
+    if (Math.random() > v * sm(0.1, 0.5, edge)) continue;
     dots.push({ x, y, r: 0.4 + Math.random() * 0.45 * (0.5 + v), a: 0.3 + 0.7 * v, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
-  }
-  // The outline: a dot on each pixel where the whale meets the dark, just inside the edge.
-  const at = (x: number, y: number) => t.a[y * TW + x]!;
-  for (let y = 1; y < TH - 1; y++) {
-    for (let x = 1; x < TW - 1; x++) {
-      if (at(x, y) < 0.5) continue;
-      if (at(x - 1, y) >= 0.5 && at(x + 1, y) >= 0.5 && at(x, y - 1) >= 0.5 && at(x, y + 1) >= 0.5) continue;
-      if (Math.random() > 0.85) continue;
-      const v = 0.55 + 0.45 * t.l[y * TW + x]!;
-      dots.push({ x: x + 0.5 + (Math.random() - 0.5) * 0.4, y: y + 0.5 + (Math.random() - 0.5) * 0.4, r: 0.45 + Math.random() * 0.2, a: 0.5 + 0.4 * v, ph: Math.random() * Math.PI * 2, sp: 0.6 + Math.random() * 1.4, dx: 0, dy: 0 });
-    }
   }
   return dots;
 }
