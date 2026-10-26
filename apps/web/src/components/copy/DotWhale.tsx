@@ -5,8 +5,10 @@
  *
  * The photo (owner, 2026-10-26: a full-body humpback cut out on white) is cut
  * out, its outline smoothed a little and its head smoothed right out (owner,
- * 2026-10-26: "doesn't need to be fully realistic there"), mirrored so it heads
- * left and tilted 22 degrees into a breach - no part of it bent or moved - and
+ * 2026-10-26: "doesn't need to be fully realistic there"), its raised flipper
+ * swung whole about its root to where the owner drew it (the gap it leaves filled
+ * from the body and background around it), mirrored so it heads left and tilted
+ * 22 degrees into a breach, and
  * kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
@@ -28,8 +30,8 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 831;
-const WATERLINE = 382;
+const TH = 774;
+const WATERLINE = 356;
 const PAD = 44;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
@@ -209,9 +211,9 @@ export function DotWhale() {
       lctx.globalCompositeOperation = 'destination-in';
       const at = (y: number) => Math.min(1, Math.max(0, y / low.height));
       const under = lctx.createLinearGradient(0, 0, 0, low.height);
-      under.addColorStop(at(surface + band), 'rgba(0,0,0,0)');
-      under.addColorStop(at(surface + band * 3), 'rgba(0,0,0,0.85)');
-      under.addColorStop(at(surface + band * 6), 'rgba(0,0,0,0.62)');
+      under.addColorStop(at(surface + band * 2), 'rgba(0,0,0,0)');
+      under.addColorStop(at(surface + band * 5), 'rgba(0,0,0,0.85)');
+      under.addColorStop(at(surface + band * 8), 'rgba(0,0,0,0.62)');
       under.addColorStop(1, 'rgba(0,0,0,0.34)');
       lctx.fillStyle = under;
       lctx.fillRect(0, 0, low.width, low.height);
@@ -225,7 +227,8 @@ export function DotWhale() {
       const near = mctx.createLinearGradient(0, 0, 0, mid.height);
       near.addColorStop(at(surface), 'rgba(0,0,0,0)');
       near.addColorStop(at(surface + band), 'rgba(0,0,0,1)');
-      near.addColorStop(at(surface + band * 3), 'rgba(0,0,0,0)');
+      near.addColorStop(at(surface + band * 2), 'rgba(0,0,0,1)');
+      near.addColorStop(at(surface + band * 5), 'rgba(0,0,0,0)');
       mctx.fillStyle = near;
       mctx.fillRect(0, 0, mid.width, mid.height);
       // Above it: sharp, giving way over the same band. (destination-in clears whatever it
