@@ -137,7 +137,7 @@ export function DotWhale() {
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let tone: Tone | null = null;
     let dots: Dot[] = [];
-    const stars = Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() < 0.15 ? 1.5 : 1, a: 0.35 + Math.random() * 0.5, ph: Math.random() * Math.PI * 2, sp: 0.3 + Math.random() * 0.8 }));
+    const stars = Array.from({ length: 170 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() < 0.15 ? 1.5 : 1, a: 0.35 + Math.random() * 0.5, ph: Math.random() * Math.PI * 2, sp: 0.3 + Math.random() * 0.8 }));
     const pointer = { x: -1e4, y: -1e4 };
     let scale = 1;
     let ox = 0;
@@ -171,7 +171,10 @@ export function DotWhale() {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       ctx.fillStyle = color;
       for (const s of stars) {
-        ctx.globalAlpha = s.a * (still ? 1 : 0.55 + 0.45 * Math.sin((t / 1000) * s.sp + s.ph));
+        // Thinning out toward the sides and the top, so the field has no edge (owner, 2026-10-26).
+        const fade = sm(0, 0.32, Math.min(s.x, 1 - s.x)) * sm(0, 0.35, s.y);
+        if (fade <= 0.01) continue;
+        ctx.globalAlpha = fade * s.a * (still ? 1 : 0.55 + 0.45 * Math.sin((t / 1000) * s.sp + s.ph));
         ctx.beginPath();
         // At least a screen pixel across, whatever the display's density, so they show on every screen.
         ctx.arc(Math.round(s.x * canvas.width), Math.round(s.y * surface), Math.max(0.75, s.s * 0.75) * dpr, 0, Math.PI * 2);
