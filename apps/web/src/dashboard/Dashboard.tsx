@@ -233,8 +233,24 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
     return Math.max(1, Math.max(fitTo, usable) / rows);
   }, [metrics, box.height]);
 
+  /* A shipped terminal still exactly its design, whose design is worked out from the
+     grid (TerminalSeed.fit - the News terminal's 16:9 stream): that worked-out design,
+     for this width and row height. Nothing is saved from it until its owner moves a panel. */
+  const fitted = useMemo(() => {
+    const seed = config.terminals?.find((t) => t.id === saved.activeSlot);
+    const fit = seed?.fit?.[bp];
+    const designed = seed?.layouts?.[bp];
+    if (!fit || !designed || box.width <= 0) return null;
+    const key = (l: readonly { i: string; x: number; y: number; w: number; h: number }[] | undefined) =>
+      JSON.stringify([...(l ?? [])].map((p) => [p.i, p.x, p.y, p.w, p.h]).sort());
+    if (key(savedForBp) !== key(designed)) return null;
+    const [mx, my] = metrics.margin;
+    const colW = (box.width - metrics.containerPadding[0] * 2 - mx * (metrics.cols - 1)) / metrics.cols;
+    return fit({ colW, rowH: rowHeight, margin: [mx, my] });
+  }, [config.terminals, saved.activeSlot, bp, savedForBp, box.width, metrics, rowHeight]);
+
   const layout = useMemo(
-    () => resolveLayout(visible, config.layouts[bp], savedForBp, metrics.cols, {
+    () => resolveLayout(visible, config.layouts[bp], fitted ?? savedForBp, metrics.cols, {
       rowHeight,
       margin: metrics.margin,
     }),
@@ -244,7 +260,7 @@ export function Dashboard<C>({ config, panels, context, className, onNotificatio
     // pixel minimum that no longer matches the grid once the real one is
     // measured - which is how the order book stayed below its own floor.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visibleKey, config, bp, savedForBp, metrics.cols, rowHeight, metrics.margin],
+    [visibleKey, config, bp, savedForBp, fitted, metrics.cols, rowHeight, metrics.margin],
   );
 
   const persist = useCallback(

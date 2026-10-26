@@ -55,7 +55,7 @@
  * shipped 308 and 464).
  * ---------------------------------------------------------------------------
  */
-import type { DashboardConfig, PanelPlacement } from './types';
+import type { DashboardConfig, GridGeometry, PanelPlacement } from './types';
 
 /* Small-screen behaviour that cannot be expressed as placements - disabling
    drag/resize below `md`, touch-sized controls, popups that would otherwise be
@@ -431,13 +431,37 @@ const XS = pair({ markets: 2, ticker: 4, band: 24, positions: 11, account: 9 });
  * the trade made without leaving it - added beside it and one click away in
  * the rail.
  *
- * News, lg: the channel and the news side by side on top, the chart the full
- * width of both under them, the ticket over the account on the right (the Trade
- * terminal's ticket and account in width and height). The channel's cell is
- * about 16:9 under its header, so the stream fills it: the cell before was
- * nearly twice as wide as its height, and the stream sat in ~300px of black on
- * each side. md: the channel and the news over the chart and the ticket.
+ * News, lg (owner, 2026-10-26): the chart the full width on top, the channel
+ * and the news side by side under it, the ticket over the account on the right
+ * (the Trade terminal's ticket and account in width and height). The channel's
+ * rows are worked out from the measured grid (TerminalSeed.fit): its cell is
+ * 16:9 under its header at this width, so the stream fills it with no bars on
+ * any side, and the chart takes the rows left. md: the chart beside the
+ * ticket, the channel and the news under them, fitted the same way.
  */
+/** The Live Feed's header over its player, and the card's 1px border on each side (LiveFeed.css). */
+const STREAM_CHROME_H = 46 + 2;
+const STREAM_CHROME_W = 2;
+/** The rows that make a stream cell `w` columns wide 16:9 under its header, kept between lo and hi. */
+function streamRows(g: GridGeometry, w: number, lo: number, hi: number): number {
+  const [mx, my] = g.margin;
+  const cellW = g.colW * w + mx * (w - 1);
+  const want = ((cellW - STREAM_CHROME_W) * 9) / 16 + STREAM_CHROME_H;
+  return Math.max(lo, Math.min(hi, Math.round((want + my) / (g.rowH + my))));
+}
+const NEWS_LG = (h: number): PanelPlacement[] => [
+  { i: 'chart', x: 0, y: 0, w: 38, h: 90 - h },
+  { i: 'livefeed', x: 0, y: 90 - h, w: 24, h },
+  { i: 'news', x: 24, y: 90 - h, w: 14, h },
+  { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
+  { i: 'account', x: 38, y: 60, w: 10, h: 30 },
+];
+const NEWS_MD = (h: number): PanelPlacement[] => [
+  { i: 'chart', x: 0, y: 0, w: 30, h: 17 },
+  { i: 'exec', x: 30, y: 0, w: 18, h: 17 },
+  { i: 'livefeed', x: 0, y: 17, w: 30, h },
+  { i: 'news', x: 30, y: 17, w: 18, h },
+];
 const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
   { id: 'trade', name: 'Trade', icon: 'trade' },
   {
@@ -446,23 +470,31 @@ const TRADE_TERMINALS: NonNullable<DashboardConfig['terminals']> = [
     icon: 'news',
     blank: true,
     shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
-    layouts: {
-      lg: [
-        { i: 'livefeed', x: 0, y: 0, w: 19, h: 42 },
-        { i: 'news', x: 19, y: 0, w: 19, h: 42 },
-        { i: 'chart', x: 0, y: 42, w: 38, h: 48 },
-        { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
-        { i: 'account', x: 38, y: 60, w: 10, h: 30 },
-      ],
-      md: [
-        { i: 'livefeed', x: 0, y: 0, w: 30, h: 16 },
-        { i: 'news', x: 30, y: 0, w: 18, h: 16 },
-        { i: 'chart', x: 0, y: 16, w: 30, h: 19 },
-        { i: 'exec', x: 30, y: 16, w: 18, h: 19 },
-      ],
+    layouts: { lg: NEWS_LG(48), md: NEWS_MD(16) },
+    fit: {
+      lg: (g) => NEWS_LG(streamRows(g, 24, 30, 60)),
+      md: (g) => NEWS_MD(streamRows(g, 30, 10, 30)),
     },
     // Earlier designs: an untouched News terminal in one of them moves to this one.
     was: [{
+      // The channel and the news side by side on top, the chart under them.
+      shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
+      layouts: {
+        lg: [
+          { i: 'livefeed', x: 0, y: 0, w: 19, h: 42 },
+          { i: 'news', x: 19, y: 0, w: 19, h: 42 },
+          { i: 'chart', x: 0, y: 42, w: 38, h: 48 },
+          { i: 'exec', x: 38, y: 0, w: 10, h: 60 },
+          { i: 'account', x: 38, y: 60, w: 10, h: 30 },
+        ],
+        md: [
+          { i: 'livefeed', x: 0, y: 0, w: 30, h: 16 },
+          { i: 'news', x: 30, y: 0, w: 18, h: 16 },
+          { i: 'chart', x: 0, y: 16, w: 30, h: 19 },
+          { i: 'exec', x: 30, y: 16, w: 18, h: 19 },
+        ],
+      },
+    }, {
       // The channel over the chart, the news a narrow column beside them (the stream letterboxed).
       shown: ['livefeed', 'news', 'chart', 'exec', 'account'],
       layouts: {
