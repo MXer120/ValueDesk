@@ -4,9 +4,10 @@
  * the dots denser where the photo is lighter - with faint round stars around it.
  *
  * The photo (owner, 2026-10-26: a full-body humpback cut out on white) is cut
- * out, its outline smoothed (points and knobs rounded off), its raised flipper
- * bent 50 degrees toward the body at a joint where it leaves it, so it lies low, mirrored so it heads
- * left and tilted 26 degrees into a breach (owner, 2026-10-26), and kept as a tone map
+ * out, its outline smoothed a little and its head smoothed right out (owner,
+ * 2026-10-26: "doesn't need to be fully realistic there"), mirrored so it heads
+ * left and tilted 22 degrees into a breach - no part of it bent or moved - and
+ * kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
  * the page's code (no second request), and read as soon as this module loads.
@@ -27,9 +28,9 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 654;
-const WATERLINE = 288;
-const PAD = 18;
+const TH = 831;
+const WATERLINE = 382;
+const PAD = 44;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
 const SURFACE_BAND = 26;
