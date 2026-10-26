@@ -2,10 +2,12 @@
  * The algo ticket's form as data: the draft, its defaults, how it is saved,
  * and how it becomes an engine spec. No React here, so it can be tested.
  *
- * WHAT IS ESSENTIAL. Each kind shows one to three inputs on the ticket (the
- * ones venues ask for: a duration for a TWAP, a range and a count for a scale,
- * a distance for a trailing stop...). Everything else is an advanced setting,
- * in the kind's Advanced pop-up, with the value it always had (ADVANCED_KEYS).
+ * WHAT IS ESSENTIAL. Each kind shows on the ticket what the major venues show
+ * in their own order forms (INLINE_KEYS: a running time and Randomize for a
+ * TWAP, a range, a count and a size curve for a scale, a distance for a
+ * trailing stop...). Everything else is an advanced setting, in the kind's
+ * Advanced pop-up, with the value it always had (ADVANCED_KEYS), under where
+ * the algo runs.
  */
 import type { BoundAction, ConditionType } from '@copy-engine';
 import { engineKind, type UiKind } from './menu';
@@ -66,7 +68,8 @@ export interface Draft {
   refill: string;
   offsetMode: 'ticks' | 'bps';
   offsetBps: string;
-  maxChase: string;
+  /** Chase: how far it may follow the price, in % as Bybit and OKX ask for it (the spec takes bp). */
+  maxChasePct: string;
   timeout: string;
   timeoutUnit: Unit;
   onEnd: 'take' | 'cancel' | 'rest';
@@ -148,7 +151,7 @@ export const DEFAULT: Draft = {
   dur: '30', durUnit: 'm', slices: '30', slicesAuto: true, exec: 'hybrid', slip: '30', makerShare: '60', offsetTicks: '0', chaseTicks: '2', sizeJitter: '15', timeJitter: '20', urgency: 0,
   finish: 'take', maxPart: '', lookback: 14, adaptive: true, rate: '10', maxChild: '', endIn: '', endUnit: 'h',
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
-  offsetMode: 'ticks', offsetBps: '10', maxChase: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
+  offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
   from: '', to: '', orders: '10', distribution: 'flat', skew: '1', spacing: 'linear', scaleJitter: '0',
   perOrder: '50', dcaOrders: '10', every: '1', everyUnit: 'h', outOfBand: 'skip', dip: '', dipMult: '2', budget: '',
   clips: '10', inFlight: 2, waveSec: '3', retries: '2',
@@ -181,6 +184,11 @@ export const n = (s: string): number => {
 export const opt = (s: string): number | null => (Number.isFinite(n(s)) && n(s) > 0 ? n(s) : null);
 export const frac = (s: string): number => (Number.isFinite(n(s)) ? n(s) / 100 : 0);
 
+/** A distance typed in % as basis points for the spec (0.15 % = 15 bp, without float dust); empty or 0: none. */
+export const pctToBps = (s: string): number | null => (opt(s) ? Math.round(n(s) * 100 * 1e6) / 1e6 : null);
+/** Basis points as the % the field shows (an old draft's 25 bp: '0.25'). */
+export const bpsToPct = (s: string): string => (opt(s) ? String(Math.round((n(s) / 100) * 1e8) / 1e8) : '');
+
 /** One slice a minute over the duration (30 min: 30, the old default), within what the engine takes. */
 export function autoSlices(dur: string, unit: Unit): string {
   const ms = n(dur) * UNIT_MS[unit];
@@ -200,8 +208,12 @@ export function loadDraft(store: Store | null = local()): Draft {
   try {
     const raw = store?.getItem(DRAFT_KEY);
     if (raw) {
-      const saved = JSON.parse(raw) as Partial<Draft> & { place?: unknown };
+      const saved = JSON.parse(raw) as Partial<Draft> & { place?: unknown; maxChase?: unknown };
       delete saved.place;
+      // A chase's max distance was kept in bp before the field took % (2026-10-26).
+      const oldChase = saved.maxChase;
+      delete saved.maxChase;
+      if (saved.maxChasePct === undefined && typeof oldChase === 'string') saved.maxChasePct = bpsToPct(oldChase);
       const d: Draft = { ...DEFAULT, ...saved, conds: [], legs: [] };
       if (saved.slicesAuto === undefined) d.slicesAuto = d.slices === autoSlices(d.dur, d.durUnit);
       return d;
@@ -322,7 +334,7 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     case 'iceberg':
       return { ...base, quantity: p.quantity, displayQty: d.display, displayJitter: frac(d.displayJitter), price: d.icePeg ? null : opt(d.icePrice), pegOffsetTicks: Math.trunc(n(d.offsetTicks) || 0), chaseTicks: exec.chaseTicks, postOnly: d.postOnly, refillMs: Math.round((n(d.refill) || 0) * 1000), refillJitter: 0.5 };
     case 'chase':
-      return { ...base, quantity: p.quantity, offsetTicks: Math.trunc(n(d.offsetTicks) || 0), offsetBps: d.offsetMode === 'bps' ? opt(d.offsetBps) : null, chaseTicks: exec.chaseTicks, maxChaseBps: opt(d.maxChase), timeoutMs: opt(d.timeout) ? n(d.timeout) * UNIT_MS[d.timeoutUnit] : null, onEnd: d.onEnd, minRepriceMs: 1_000 };
+      return { ...base, quantity: p.quantity, offsetTicks: Math.trunc(n(d.offsetTicks) || 0), offsetBps: d.offsetMode === 'bps' ? opt(d.offsetBps) : null, chaseTicks: exec.chaseTicks, maxChaseBps: pctToBps(d.maxChasePct), timeoutMs: opt(d.timeout) ? n(d.timeout) * UNIT_MS[d.timeoutUnit] : null, onEnd: d.onEnd, minRepriceMs: 1_000 };
     case 'scale':
       return { ...base, quantity: p.quantity, from: opt(d.from), to: opt(d.to), orders: Math.trunc(n(d.orders)), distribution: d.distribution, skew: n(d.skew) || 1, spacing: d.spacing, sizeJitter: frac(d.scaleJitter), postOnly: d.postOnly };
     case 'dca':
@@ -374,6 +386,34 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
 
 const EXEC_KEYS: ReadonlyArray<keyof Draft> = ['exec', 'slip', 'makerShare', 'chaseTicks', 'sizeJitter', 'timeJitter', 'maxPart', 'finish'];
 
+/**
+ * Per kind, what the ticket itself shows (beside the ticket's own Amount and
+ * Reduce only): the fields Hyperliquid, Binance, Bybit, OKX and Insilico put
+ * in their main order forms (benchmark of 2026-10-26). A TWAP is a running
+ * time and a Randomize switch (Hyperliquid, Bybit); a chase its max distance
+ * in % (Bybit, OKX, Insilico); a scale its range, count and size curve
+ * (Binance, Bybit); a swarm its lots and Irregular lots (Insilico); a basket
+ * its legs and how each is worked (Insilico).
+ *
+ * Draft keys, plus two switches drawn from several: 'randomize' (the jitter)
+ * and 'scaleSize' (distribution with skew).
+ */
+export const INLINE_KEYS: Record<UiKind, readonly string[]> = {
+  twap: ['dur', 'durUnit', 'randomize', 'twapCloseShare'],
+  chasetwap: ['dur', 'durUnit'],
+  vwap: ['dur', 'durUnit'],
+  pov: ['rate'],
+  iceberg: ['icePrice', 'display'],
+  chase: ['maxChasePct'],
+  scale: ['from', 'to', 'orders', 'scaleSize'],
+  dca: ['perOrder', 'every', 'everyUnit', 'dcaOrders'],
+  swarm: ['clips', 'randomize'],
+  trailing: ['trail', 'trailMode', 'activation'],
+  conditional: ['conds', 'then', 'thenPrice', 'closePct', 'thenMin'],
+  bracket: ['entry', 'entryPrice', 'tp', 'tpMode', 'sl', 'slMode'],
+  basket: ['legs', 'basketStyle', 'dur', 'durUnit'],
+};
+
 /** Per kind, the settings in its Advanced pop-up (the shared rules and the exits are counted apart). */
 export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   twap: ['slicesAuto', 'urgency', 'twapClose', 'minSlice', 'maxSlice', ...EXEC_KEYS],
@@ -382,14 +422,55 @@ export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   pov: ['maxChild', 'endIn', ...EXEC_KEYS],
   iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
   chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'timeout', 'onEnd'],
-  scale: ['distribution', 'skew', 'spacing', 'scaleJitter', 'postOnly'],
+  scale: ['skew', 'spacing', 'scaleJitter', 'postOnly'],
   dca: ['budget', 'dip', 'dipMult', 'exec'],
   swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
   trailing: ['trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
   conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],
   bracket: ['slip'],
-  basket: ['basketStyle', 'dur', 'slicesAuto', 'clips', 'waveSec', 'slip'],
+  basket: ['slicesAuto', 'clips', 'waveSec', 'slip'],
 };
+
+/* Randomize: the TWAP's and the swarm's switch on the ticket (Hyperliquid's
+   "Randomize", Insilico's "Irregular lots"). On is the jitter the Advanced
+   pop-up sets (by default ±15 % size, and ±20 % time for a TWAP); off is none. */
+
+/** The kinds whose Randomize switch is on the ticket. */
+export const hasRandomize = (kind: UiKind): boolean => kind === 'twap' || kind === 'swarm';
+
+export function randomizeOn(kind: UiKind, d: Pick<Draft, 'sizeJitter' | 'timeJitter'>): boolean {
+  return frac(d.sizeJitter) > 0 || (kind === 'twap' && frac(d.timeJitter) > 0);
+}
+
+/** The patch for the switch: off is no jitter at all, on is the default jitter back. */
+export function setRandomize(kind: UiKind, on: boolean): Partial<Draft> {
+  if (!on) return kind === 'twap' ? { sizeJitter: '0', timeJitter: '0' } : { sizeJitter: '0' };
+  return kind === 'twap' ? { sizeJitter: DEFAULT.sizeJitter, timeJitter: DEFAULT.timeJitter } : { sizeJitter: DEFAULT.sizeJitter };
+}
+
+/* Scale's size curve on the ticket, as Binance and Bybit name it: flat,
+   increasing (bigger toward To), decreasing, or a bell. Increasing and
+   decreasing are a linear curve with a skew (the last order over the first);
+   the Advanced pop-up tunes the curve and the skew. */
+
+export type ScaleSize = 'flat' | 'increasing' | 'decreasing' | 'bell';
+export const SCALE_SKEW = { increasing: '2', decreasing: '0.5' } as const;
+
+export function scaleSize(d: Pick<Draft, 'distribution' | 'skew'>): ScaleSize {
+  if (d.distribution === 'flat') return 'flat';
+  if (d.distribution === 'bell') return 'bell';
+  const s = n(d.skew) || 1;
+  return s > 1 ? 'increasing' : s < 1 ? 'decreasing' : 'flat';
+}
+
+export function setScaleSize(d: Pick<Draft, 'distribution' | 'skew'>, v: ScaleSize): Partial<Draft> {
+  if (v === 'flat') return { distribution: 'flat', skew: DEFAULT.skew };
+  if (v === 'bell') return { distribution: 'bell' };
+  const curve = d.distribution === 'exponential' ? 'exponential' : 'linear';
+  const s = n(d.skew) || 1;
+  const keep = v === 'increasing' ? s > 1 : s < 1;
+  return { distribution: curve, skew: keep ? d.skew : SCALE_SKEW[v] };
+}
 
 const ADV_LABEL: Partial<Record<keyof Draft, string>> = {
   slicesAuto: 'slices', urgency: 'urgency', twapClose: 'close position', minSlice: 'smallest slice', maxSlice: 'largest slice',
@@ -416,6 +497,18 @@ export const hasBounds = (kind: UiKind): boolean => hasLimit(kind) && kind !== '
 export function advancedChanges(kind: UiKind, d: Draft, exits: boolean): string[] {
   const out: string[] = [];
   for (const k of ADVANCED_KEYS[kind]) {
+    // Randomize off is the ticket's own switch, not an advanced change.
+    if ((k === 'sizeJitter' || k === 'timeJitter') && hasRandomize(kind) && !randomizeOn(kind, d)) continue;
+    // A scale's direction is on the ticket; the pop-up's curve and skew count only when tuned past it.
+    if (kind === 'scale' && k === 'skew') {
+      const sz = scaleSize(d);
+      if (sz === 'increasing' || sz === 'decreasing') {
+        if (d.distribution === 'exponential') out.push('size curve');
+        if (d.skew !== SCALE_SKEW[sz]) out.push('skew');
+      }
+      continue;
+    }
+    if (kind === 'basket' && (d.basketStyle === 'twap' ? k === 'clips' || k === 'waveSec' : k === 'slicesAuto')) continue;
     if (k === 'offsetBps' && d.offsetMode !== 'bps') continue;
     if (k === 'offsetTicks' && kind === 'chase' && d.offsetMode === 'bps') continue;
     if (k === 'dipMult' && !opt(d.dip)) continue;
@@ -433,10 +526,19 @@ export function advancedChanges(kind: UiKind, d: Draft, exits: boolean): string[
   return [...new Set(out)];
 }
 
-/** The draft with the kind's advanced settings (and the shared rules) back at their defaults. */
+/**
+ * The draft with the kind's advanced settings (and the shared rules) back at
+ * their defaults. What the ticket shows stays: Randomize off stays off, a
+ * scale's direction stays (at its plain skew).
+ */
 export function resetAdvanced(kind: UiKind, d: Draft): Draft {
   const x: Draft = { ...d, exitsOn: kind === 'bracket' ? d.exitsOn : false, limitPrice: '', startMode: 'now', upper: '', lower: '', maxSpread: '', upperThen: 'hold', lowerThen: 'hold' };
   for (const k of ADVANCED_KEYS[kind]) (x as unknown as Record<string, unknown>)[k] = DEFAULT[k];
+  if (hasRandomize(kind) && !randomizeOn(kind, d)) Object.assign(x, setRandomize(kind, false));
+  if (kind === 'scale') {
+    const sz = scaleSize(d);
+    if (sz === 'increasing' || sz === 'decreasing') Object.assign(x, { distribution: 'linear', skew: SCALE_SKEW[sz] });
+  }
   return x;
 }
 

@@ -1,7 +1,9 @@
 /**
- * The algo half of the order ticket: the one to three inputs an algo order
- * type essentially needs, where it runs, a preview drawn from the engine's own
- * plan, and the start. Everything else is in the kind's Advanced pop-up.
+ * The algo half of the order ticket: the inputs the major venues show for an
+ * algo order type in their own forms (INLINE_KEYS in draft.ts), a preview
+ * drawn from the engine's own plan, and the start. Everything else is in the
+ * kind's Advanced pop-up, where it runs first (never a control on the panel:
+ * the summary line names it, and a note says why when it cannot start there).
  *
  * WHAT THE TICKET SHARES. Direction, leverage, margin mode, the Amount field
  * (and its % slider) and Reduce only stay the ticket's own: an algo of 0.5 BTC
@@ -55,18 +57,24 @@ import {
   frac,
   hasBounds,
   hasLimit,
+  hasRandomize,
   legs,
   loadDraft,
   n,
   offersExits,
   opt,
+  randomizeOn,
   resetAdvanced,
   saveDraft,
+  scaleSize,
+  setRandomize,
+  setScaleSize,
   slicesOf,
   UNIT_NAME,
   type CondDraft,
   type Draft,
   type LegDraft,
+  type ScaleSize,
   type TicketShared,
   type Unit,
 } from './draft';
@@ -114,9 +122,19 @@ const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
   swarm: ['clips'],
   trailing: ['trailPct', 'trailAbs', 'activationPrice'],
   bracket: ['price', 'exits'],
-  basket: [],
+  basket: ['durationMs'],
   conditional: [],
 };
+
+/** Where it runs, in the few words the summary line gives it. */
+const PLACE_WORDS: Record<Place, string> = { hosted: 'on ValueDesk', browser: 'in this browser', self: 'on your copier' };
+
+const SCALE_SIZES: ReadonlyArray<readonly [ScaleSize, string, string]> = [
+  ['flat', 'Flat', 'Every order the same size'],
+  ['increasing', 'Increasing', 'Bigger toward To'],
+  ['decreasing', 'Decreasing', 'Bigger toward From'],
+  ['bell', 'Bell', 'Biggest in the middle'],
+];
 
 /* ------------------------------------------------------------ controls ----- */
 
@@ -411,6 +429,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           <>
             {kind === 'twap' && d.twapClose && <Field label="Close" value={d.twapCloseShare} onChange={(v) => set({ twapCloseShare: v })} suffix="% of position" err={err('closeShare')} />}
             <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={dur} err={err('durationMs')} />
+            {hasRandomize(kind) && (
+              <Switch label="Randomize" checked={randomizeOn(kind, d)} onChange={(v) => set(setRandomize(kind, v))} title="Vary each slice's size and time a little, so the order is harder to spot (how much: Advanced)" />
+            )}
           </>
         )}
 
@@ -422,7 +443,13 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
-        {ek === 'basket' && <BasketLegs d={d} set={set} />}
+        {ek === 'basket' && (
+          <>
+            <BasketLegs d={d} set={set} />
+            <Seg label="Each market" value={d.basketStyle} onChange={(v) => set({ basketStyle: v })} options={[['swarm', 'Swarm', 'Small takers in waves, now'], ['twap', 'TWAP', 'Slices over a time you choose']]} />
+            {d.basketStyle === 'twap' && <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={dur} err={err('durationMs')} />}
+          </>
+        )}
 
         {ek === 'pov' && <Field label="Share of volume" value={d.rate} onChange={(v) => set({ rate: v })} suffix="%" title="Of what everyone else trades, while they trade it" err={err('rate')} />}
 
@@ -450,7 +477,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         )}
 
         {ek === 'chase' && (
-          <Field label="Max chase" value={d.maxChase} placeholder="no limit" onChange={(v) => set({ maxChase: v })} suffix="bp" title="How far from where it started it may follow the price (100 bp = 1%)" err={err('maxChaseBps')} />
+          <Field label="Max chase" value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} suffix="%" title="How far from where it started it may follow the price" err={err('maxChaseBps')} />
         )}
 
         {ek === 'scale' && (
@@ -458,6 +485,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
             <Field label="From" value={d.from} onChange={(v) => set({ from: v })} suffix="USD" title="The first order (nearest the market, usually)" err={err('from')} />
             <Field label="To" value={d.to} onChange={(v) => set({ to: v })} suffix="USD" err={err('to')} />
             <Field label="Orders" value={d.orders} int onChange={(v) => set({ orders: v })} err={err('orders')} />
+            <Seg label="Size" value={scaleSize(d)} onChange={(v) => set(setScaleSize(d, v))} options={SCALE_SIZES} />
           </>
         )}
 
@@ -469,7 +497,12 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
-        {ek === 'swarm' && <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="orders" err={err('clips')} />}
+        {ek === 'swarm' && (
+          <>
+            <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="orders" err={err('clips')} />
+            <Switch label="Randomize sizes" checked={randomizeOn(kind, d)} onChange={(v) => set(setRandomize(kind, v))} title="Clips of uneven size, so they read less like one order (how much: Advanced)" />
+          </>
+        )}
 
         {ek === 'trailing' && (
           <>
@@ -488,16 +521,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={base} />}
       </div>
 
-      {/* Where it runs: always in view, kept across reloads and kinds. */}
-      <Seg label="Runs on" value={place} onChange={setPlace} options={PLACES} />
-      {!where.ready && where.why && (
-        <p className="oe-hint algo-warn algo-whereline">
-          {where.why}
-          {place !== 'browser' && where.why.includes('Set up') && (
-            <button type="button" className="algo-link" onClick={() => openTab('copy')}>Set up</button>
-          )}
-        </p>
-      )}
+      {/* Where it runs is chosen in the Advanced pop-up; when it cannot start there, the why, with the way out. */}
+      {!where.ready && where.why && <WhereNote why={where.why} place={place} onChange={() => setAdvOpen(true)} />}
 
       <div className="algo-morehead">
         <button
@@ -505,7 +530,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           className="algo-more"
           aria-haspopup="dialog"
           onClick={() => setAdvOpen(true)}
-          title={changes.length ? `Changed: ${changes.join(', ')}` : 'Every other setting, at its default'}
+          title={`Runs ${PLACE_WORDS[place]}. ${changes.length ? `Changed: ${changes.join(', ')}` : 'Every other setting at its default'}`}
         >
           <svg className="algo-more__icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
             <path d="M2 4h7M13 4h1M2 12h1M7 12h7M2 8h3M9 8h5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
@@ -527,6 +552,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         <p className="algo-what">
           {oneLine(kind, d, p.side, p.quantity, base)}
           {plan && planFacts(plan, kind) ? ` · ${planFacts(plan, kind)}` : ''}
+          {` · ${PLACE_WORDS[place]}`}
         </p>
         <CostLine plan={plan} rates={rates} paper={d.paper} feeNote={feeBp} scale={ek === 'scale'} onShuffle={hasJitter(kind, d) ? () => setSeed(newSeed()) : undefined} />
         {!amountMissing && restErrors[0] && <p className="oe-hint algo-err">{restErrors[0]}</p>}
@@ -550,6 +576,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         }
       >
         <div className="algo-rules">
+          <RunsOn place={place} onChange={setPlace} where={where} />
           <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} />
         </div>
       </Modal>
@@ -560,6 +587,42 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 });
 
 export default AlgoTicket;
+
+/** The Set up link, where the reason points at Copy → Set up (an executor's steps). */
+function SetupLink({ why, place }: { why: string; place: Place }) {
+  return place !== 'browser' && why.includes('Set up') ? (
+    <button type="button" className="algo-link" onClick={() => openTab('copy')}>Set up</button>
+  ) : null;
+}
+
+/** On the ticket, only while the chosen executor cannot start it: why, and the way to fix or change it. */
+function WhereNote({ why, place, onChange }: { why: string; place: Place; onChange: () => void }) {
+  return (
+    <p className="oe-hint algo-warn algo-whereline">
+      {why}
+      <SetupLink why={why} place={place} />
+      <button type="button" className="algo-link" aria-haspopup="dialog" onClick={onChange}>Run elsewhere</button>
+    </p>
+  );
+}
+
+/** The Advanced pop-up's first section: where it runs, kept across reloads and kinds (executor.ts). */
+function RunsOn({ place, onChange, where }: { place: Place; onChange: (v: Place) => void; where: { ready: boolean; why: string | null } }) {
+  const hint = PLACES.find(([v]) => v === place)?.[2];
+  return (
+    <section className="algo-runs" aria-label="Runs on">
+      <Seg label="Runs on" value={place} onChange={onChange} options={PLACES} />
+      {!where.ready && where.why ? (
+        <p className="oe-hint algo-warn algo-whereline">
+          {where.why}
+          <SetupLink why={where.why} place={place} />
+        </p>
+      ) : (
+        hint && <p className="oe-hint">{hint}</p>
+      )}
+    </section>
+  );
+}
 
 /** A size as the step allows (a hint, so a rough cut is fine). */
 function roundQty(x: number, step?: string): string {
@@ -581,7 +644,6 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 }) {
   const ek = engineKind(kind);
   const err = (...keys: string[]) => errFor(errors, ...keys);
-  const dur = <UnitSelect label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
   const slicesField = (
     <Field
       label="Slices"
@@ -626,7 +688,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'bracket' && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="A market entry takes at most this far past the touch" err={err('slippageBps')} />}
 
-      {ek === 'basket' && <BasketMore d={d} set={set} dur={dur} slices={slicesField} />}
+      {ek === 'basket' && <BasketMore d={d} set={set} slices={slicesField} />}
 
       {ek === 'pov' && (
         <>
@@ -681,8 +743,12 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
               </div>
             </div>
           )}
-          <Seg label="Size" value={d.distribution} onChange={(v) => set({ distribution: v })} options={[['flat', 'Flat'], ['linear', 'Linear'], ['exponential', 'Exp'], ['bell', 'Bell']]} />
-          <Field label="Skew" value={d.skew} onChange={(v) => set({ skew: v })} suffix="×" title="The last order's size over the first's" err={err('skew')} />
+          {(scaleSize(d) === 'increasing' || scaleSize(d) === 'decreasing') && (
+            <>
+              <Seg label="Size curve" value={d.distribution === 'exponential' ? 'exponential' : 'linear'} onChange={(v) => set({ distribution: v })} options={[['linear', 'Linear', 'Each order the same step bigger'], ['exponential', 'Exp', 'Each order the same factor bigger']]} />
+              <Field label="Skew" value={d.skew} onChange={(v) => set({ skew: v })} suffix="×" title="The last order's size over the first's (above 1: increasing, below: decreasing)" err={err('skew')} />
+            </>
+          )}
           <Seg label="Spacing" value={d.spacing} onChange={(v) => set({ spacing: v })} options={[['linear', 'Even'], ['geometric', '%', 'Even in percent'], ['front', 'Front', 'Denser near the first price'], ['back', 'Back', 'Denser near the last price']]} />
           <Field label="Size varies" value={d.scaleJitter} onChange={(v) => set({ scaleJitter: v })} suffix="± %" err={err('sizeJitter')} />
           <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
@@ -824,15 +890,12 @@ function BasketLegs({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) 
   );
 }
 
-function BasketMore({ d, set, dur, slices }: { d: Draft; set: (p: Partial<Draft>) => void; dur: ReactNode; slices: ReactNode }) {
+/** A basket's advanced settings: how each market is worked is on the ticket, its tuning here. */
+function BasketMore({ d, set, slices }: { d: Draft; set: (p: Partial<Draft>) => void; slices: ReactNode }) {
   return (
     <>
-      <Seg label="Each market" value={d.basketStyle} onChange={(v) => set({ basketStyle: v })} options={[['swarm', 'Swarm', 'Small takers in waves, now'], ['twap', 'TWAP', 'Slices over a time you choose']]} />
       {d.basketStyle === 'twap' ? (
-        <>
-          <Field label="Duration" value={d.dur} onChange={(v) => set({ dur: v })} suffix={dur} />
-          {slices}
-        </>
+        slices
       ) : (
         <>
           <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="per market" />
@@ -1095,7 +1158,7 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
       return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${q} ${d.entry === 'limit' ? `at ${x(d.entryPrice)}` : 'at market'}, with take-profit and stop-loss`;
     case 'basket': {
       const total = d.legs.reduce((a, l) => a + (Number(l.usd) || 0), 0);
-      return `Trades ${d.legs.length || '…'} markets at once${total > 0 ? `, ${fmtUsd(total, 0)} in all` : ''}`;
+      return `Trades ${d.legs.length || '…'} markets ${d.basketStyle === 'twap' ? `over ${over}` : 'at once'}${total > 0 ? `, ${fmtUsd(total, 0)} in all` : ''}`;
     }
   }
 }

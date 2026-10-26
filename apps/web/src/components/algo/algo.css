@@ -40,10 +40,14 @@
 .algo-sheet { --oe-ease: cubic-bezier(0.4, 0, 0.2, 1); --oe-hover: 0.15s; }
 .algo-sheet .algo-rules { padding-top: 0; }
 .algo-sheet .oe-switch { font-weight: 400; color: var(--muted); }
+/* Its first section, where the algo runs, set apart from the kind's settings. */
+.algo-runs { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-2); margin-bottom: var(--sp-1); border-bottom: 1px solid var(--line-soft); }
+.algo-runs .oe-hint { margin: 0; }
 
 /* The fields an order type needs, one a row, like the ticket's Price and Amount. */
 .algo-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 .algo-fields:empty { display: none; }
+.algo-fields > .oe-switch { font-weight: 400; color: var(--muted); }
 
 /* A field IS the ticket's .oe-inputrow (40px, label left, value right, unit
    right); only numbers are set in the tabular face. */
