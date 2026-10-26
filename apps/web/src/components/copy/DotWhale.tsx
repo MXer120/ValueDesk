@@ -137,7 +137,7 @@ export function DotWhale() {
     const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     let tone: Tone | null = null;
     let dots: Dot[] = [];
-    const stars = Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() < 0.15 ? 2 : 1, a: 0.15 + Math.random() * 0.6, ph: Math.random() * Math.PI * 2, sp: 0.3 + Math.random() * 0.8 }));
+    const stars = Array.from({ length: 120 }, () => ({ x: Math.random(), y: Math.random(), s: Math.random() < 0.15 ? 1.5 : 1, a: 0.35 + Math.random() * 0.5, ph: Math.random() * Math.PI * 2, sp: 0.3 + Math.random() * 0.8 }));
     const pointer = { x: -1e4, y: -1e4 };
     let scale = 1;
     let ox = 0;
@@ -173,7 +173,8 @@ export function DotWhale() {
       for (const s of stars) {
         ctx.globalAlpha = s.a * (still ? 1 : 0.55 + 0.45 * Math.sin((t / 1000) * s.sp + s.ph));
         ctx.beginPath();
-        ctx.arc(Math.round(s.x * canvas.width), Math.round(s.y * surface), s.s * 0.6 * dpr, 0, Math.PI * 2);
+        // At least a screen pixel across, whatever the display's density, so they show on every screen.
+        ctx.arc(Math.round(s.x * canvas.width), Math.round(s.y * surface), Math.max(0.75, s.s * 0.75) * dpr, 0, Math.PI * 2);
         ctx.fill();
       }
       octx.globalCompositeOperation = 'source-over';
