@@ -1,9 +1,10 @@
 /**
  * The algo half of the order ticket: the inputs the major venues show for an
- * algo order type in their own forms (INLINE_KEYS in draft.ts), a preview
- * drawn from the engine's own plan, and the start. Everything else is in the
- * kind's Advanced pop-up, where it runs first (never a control on the panel:
- * the summary line names it, and a note says why when it cannot start there).
+ * algo order type in their own forms (INLINE_KEYS in draft.ts), the cost
+ * line, and two buttons: Advanced (the kind's settings window, where it runs
+ * first - never a control on the panel; a notification says why when it
+ * cannot start there) and Preview (the same window, open on its Preview: the
+ * engine's own plan drawn, every child, the total and the fees).
  *
  * WHAT THE TICKET SHARES. Direction, leverage, margin mode, the Amount field
  * (and its % slider) and Reduce only stay the ticket's own: an algo of 0.5 BTC
@@ -25,7 +26,10 @@
 import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
-  SWEEP_SOURCE_NAMES,
+  ORACLE_VENUES,
+  ORACLE_VENUE_NAMES,
+  SWEEP_REFERENCE_NAMES,
+  sweepRefWords,
   checkAlgoSpec,
   makerPrice,
   newSeed,
@@ -44,12 +48,14 @@ import { api, type Symbol as MarketSymbol } from '../../api';
 import { algoOwner } from '../../algo/algoBus';
 import { executorReady, startOn } from '../../algo/executorAlgos';
 import { getLiveCopy, subscribeLiveCopy } from '../../copy/live';
-import { DASH, fmtQty, fmtTime, fmtUsd } from '../../format';
+import { DASH, fmtQty, fmtTime, fmtUsd, num, pick } from '../../format';
+import { useChannel } from '../../hooks';
 import { publishDraftOrders, type DraftLine } from '../../draftOrders';
 import { notify } from '../../toast';
 import { Modal, useConfirm } from '../Modal';
 import { decimalInput, integerInput } from '../numberInput';
-import { LadderPreview, LevelsPreview, TimelinePreview, type Level } from './AlgoPreview';
+import { PlanPreview, type Level } from './AlgoPreview';
+import { coinOf, useOracle } from '../../algo/oracle';
 import {
   advancedChanges,
   autoSlices,
@@ -126,7 +132,7 @@ const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
   iceberg: ['price', 'displayQty'],
   chase: ['maxChaseBps'],
   scale: ['from', 'to', 'orders'],
-  dca: ['perOrderUsd', 'intervalMs', 'orders', 'from', 'to', 'skew', 'quantity'],
+  dca: ['perOrderUsd', 'orders', 'from', 'to', 'skew', 'quantity', 'prices', 'weights'],
   swarm: ['clips'],
   trailing: ['trailPct', 'trailAbs', 'activationPrice'],
   bracket: ['price', 'exits'],
@@ -341,7 +347,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     return () => window.clearInterval(t);
   }, []);
 
-  const raw = useMemo(() => draftToSpec(kind, d, p, clock), [kind, d, p.symbol, p.side, p.quantity, p.reduceOnly, p.leverage, p.marginMode, kind === 'dca' && d.dcaMode === 'price' ? p.bid : null, kind === 'dca' && d.dcaMode === 'price' ? p.ask : null, clock]); // eslint-disable-line react-hooks/exhaustive-deps
+  const raw = useMemo(() => draftToSpec(kind, d, p, clock), [kind, d, p.symbol, p.side, p.quantity, p.reduceOnly, p.leverage, p.marginMode, kind === 'dca' ? p.bid : null, kind === 'dca' ? p.ask : null, clock]); // eslint-disable-line react-hooks/exhaustive-deps
   const check = useMemo(() => checkAlgoSpec(raw), [raw]);
   const profile: VolumeProfile | null = useMemo(() => {
     if (ek !== 'vwap' || !candles?.length || !check.spec || check.spec.kind !== 'vwap') return null;
@@ -352,9 +358,29 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     const recent = candles.slice(-25, -1);
     return recent.length ? recent.reduce((a, c) => a + c.v, 0) / recent.length : null;
   }, [candles]);
+  // Fill fast is priced from its reference: the shared oracle (our API), or SoDEX's own mark or index (its markPrice stream).
+  const [sodexRef, setSodexRef] = useState<{ symbol: string; mark: number | null; index: number | null } | null>(null);
+  const ownRef = ek === 'sweep' && (d.sweepRef === 'mark' || d.sweepRef === 'index');
+  useChannel('perps', ownRef ? { channel: 'markPrice', symbols: [p.symbol] } : null, (data) => {
+    const rows: unknown[] = Array.isArray(data) ? data : [data];
+    for (const r of rows) {
+      if (pick<string>(r, 's', 'symbol') !== p.symbol) continue;
+      const mk = num(pick(r, 'p', 'markPrice'));
+      const ix = num(pick(r, 'i', 'indexPrice'));
+      setSodexRef({ symbol: p.symbol, mark: mk > 0 ? mk : null, index: ix > 0 ? ix : null });
+    }
+  });
+  const own = sodexRef?.symbol === p.symbol ? sodexRef : null;
+  const oracle = useOracle(ek === 'sweep' ? coinOf(p.symbol) : null, d.sweepVenues, ek === 'sweep' && (d.sweepRef === 'oracleMid' || d.sweepRef === 'oracleFair'));
+  const sweepPx = ek !== 'sweep' ? null
+    : d.sweepRef === 'mark' ? own?.mark ?? null
+    : d.sweepRef === 'index' ? own?.index ?? null
+    : d.sweepRef === 'oracleFair' ? oracle?.fair ?? null
+    : oracle?.mid ?? null;
+  const planPx = ek === 'sweep' ? sweepPx ?? mid ?? null : mid ?? null;
   const plan: AlgoPlan | null = useMemo(
-    () => (check.spec && market ? planAlgo(check.spec, market, { now: clock, price: mid ?? null, seed, profile, hourVolume }) : null),
-    [check.spec, market, clock, mid, seed, profile, hourVolume],
+    () => (check.spec && market ? planAlgo(check.spec, market, { now: clock, price: planPx, seed, profile, hourVolume }) : null),
+    [check.spec, market, clock, planPx, seed, profile, hourVolume],
   );
 
   const needsAmount = usesAmount(kind, { trailWhole: d.trailWhole, thenClose: d.then === 'close', twapClose: d.twapClose });
@@ -465,12 +491,10 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   if (plan?.exits?.sl) levels.push({ label: 'Stop-loss', price: plan.exits.sl, tone: 'neg' });
 
   const rates = feeRates(market, feeFraction);
-  // What the engine will run: a price DCA is a scale ladder.
+  // The ValueDesk fee, said once: the builder fee in the browser, the copy fee on an executor.
+  const feeBp = place === 'browser' ? (p.builderFee > 0 ? `ValueDesk fee ${(p.builderFee * 10_000).toFixed(1)} bp` : null) : execFee ? `ValueDesk fee up to ${(execFee / 10).toFixed(1)} bp` : null;
+  // What the engine will run: a DCA is a scale ladder.
   const pk: AlgoKind = check.spec?.kind ?? ek;
-  const priceDca = kind === 'dca' && d.dcaMode === 'price';
-  const showTimeline = !!plan && (pk === 'twap' || pk === 'vwap' || pk === 'dca' || pk === 'swarm') && !(pk === 'twap' && d.twapClose);
-  const showLadder = !!plan && (pk === 'scale' || (pk === 'iceberg' && !d.icePeg && !!opt(d.icePrice)));
-  const showLevels = !showTimeline && !showLadder && levels.length > 1;
 
   const base = p.sym?.baseCoin ?? '';
 
@@ -481,7 +505,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const sp = check.spec;
   if (sp && sp.kind !== 'basket') {
     if (sp.kind === 'scale' && plan) {
-      const word = priceDca ? 'DCA' : 'Level';
+      const word = kind === 'dca' ? 'DCA' : 'Level';
       plan.children.forEach((c, i) => {
         if (c.price) draftLines.push({ price: c.price, label: `${word} ${i + 1}/${plan.children.length}${qtyText(c.qty)}`, kind: 'limit' });
       });
@@ -513,27 +537,45 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   }, [draftKey]);
   useEffect(() => () => publishDraftOrders(null), []);
 
-  // The plan drawn: in the settings window's Preview section, not on the panel.
+  // The plan drawn: in the settings window's Preview section (the Preview button opens it there).
+  if (sp?.kind === 'sweep' && sweepPx) levels.push({ label: 'Reference', price: sweepPx, tone: 'muted' });
+  if (sp?.kind === 'sweep' && plan?.children[0]?.price) levels.push({ label: 'Band edge', price: plan.children[0].price, tone: p.side === 'buy' ? 'pos' : 'neg' });
   const previewNode = (
     <section className="algo-group" aria-label="Preview">
       <div className="stg__label">What it will do</div>
       <div className="stg__card algo-pvcard">
-        {showTimeline && plan && <TimelinePreview plan={plan} side={p.side} />}
-        {showLadder && plan && <LadderPreview plan={plan} side={p.side} mid={mid ?? null} />}
-        {showLevels && <LevelsPreview levels={levels} mid={mid ?? null} />}
-        {!showTimeline && !showLadder && !showLevels && <p className="oe-hint">{plan ? 'Nothing to draw for this order yet.' : allErrors[0] ?? 'Waiting for the market…'}</p>}
-        <p className="algo-what">
-          {oneLine(kind, d, p.side, p.quantity, base)}
-          {plan && planFacts(plan, pk) ? ` · ${planFacts(plan, pk)}` : ''}
-        </p>
+        <PlanPreview
+          plan={amountMissing ? null : plan}
+          spec={check.spec}
+          side={p.side}
+          mid={mid ?? null}
+          levels={levels}
+          base={kind === 'basket' ? '' : base}
+          rates={rates}
+          feeNote={feeBp}
+          words={`${oneLine(kind, d, p.side, p.quantity, base)}${plan && planFacts(plan, pk) ? ` · ${planFacts(plan, pk)}` : ''} · ${PLACE_WORDS[place]}`}
+          why={amountMissing ? 'Enter an amount on the ticket.' : allErrors[0] ?? null}
+          sweepRef={
+            ek === 'sweep'
+              ? {
+                  price: sweepPx,
+                  name: SWEEP_REFERENCE_NAMES[d.sweepRef],
+                  used: d.sweepRef === 'mark' || d.sweepRef === 'index' ? ['SoDEX'] : (oracle?.used ?? []).map((v) => ORACLE_VENUE_NAMES[v]),
+                  stale: d.sweepRef === 'mark' || d.sweepRef === 'index' ? [] : (oracle?.stale ?? []).map((v) => ORACLE_VENUE_NAMES[v]),
+                }
+              : null
+          }
+        />
       </div>
     </section>
   );
+  const openPreview = () => {
+    lastSec.set(kind, 'preview');
+    setAdvOpen(true);
+  };
   const exitsHere = offersExits(kind, d, p.reduceOnly);
   const changes = advancedChanges(kind, d, exitsHere);
   const dur = <UnitSelect label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
-  // The ValueDesk fee, said once: the builder fee in the browser, the copy fee on an executor.
-  const feeBp = place === 'browser' ? (p.builderFee > 0 ? `ValueDesk fee ${(p.builderFee * 10_000).toFixed(1)} bp` : null) : execFee ? `ValueDesk fee up to ${(execFee / 10).toFixed(1)} bp` : null;
 
   return (
     <div className={`algo is-${p.side}`}>
@@ -602,7 +644,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         )}
 
         {ek === 'sweep' && (
-          <Field label="Max slippage" value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} suffix="% from oracle" title="How far from the Binance reference price (futures and spot) it may fill; every round is an IOC limit at that edge" err={err('slippageBps')} />
+          <Field label="Max slippage" value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} suffix="% from reference" title={`How far from the reference price (${SWEEP_REFERENCE_NAMES[d.sweepRef]}; Advanced) it may fill; every round is an IOC limit at that edge`} err={err('slippageBps')} />
         )}
 
         {ek === 'chase' && (
@@ -618,22 +660,21 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
-        {ek === 'dca' && priceDca && (
+        {ek === 'dca' && (
           <>
-            <Field label={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" title="The first order's size in USD (the later ones are sized at the first price)" err={err('perOrderUsd', 'quantity')} />
-            <Field label="Step" value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} suffix="%" title={`How far ${p.side === 'buy' ? 'below' : 'above'} the first price each next order rests`} err={err('to')} />
-            <Field label={p.side === 'buy' ? 'Buys' : 'Sells'} value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} title="How many orders in all, the first included" err={err('orders')} />
-            <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per step" title="Each next order is this many times the one before (1: all the same)" err={err('skew')} />
+            <Field label={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" title="The first order's size in USD; each later one is Size × times the one before" err={err('perOrderUsd', 'quantity')} />
+            {d.dcaLevels === 'step' ? (
+              <>
+                <Field label="Step" value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} suffix="%" title={`How far ${p.side === 'buy' ? 'below' : 'above'} the one before each next order rests (Advanced: a step scale, or prices you type)`} err={err('to', 'prices')} />
+                <Field label={p.side === 'buy' ? 'Buys' : 'Sells'} value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} title="How many orders in all, the first included" err={err('orders')} />
+              </>
+            ) : (
+              <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
+            )}
+            <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order is this many times the one before, in USD (1: all the same)" err={err('skew', 'weights')} />
             <Seg label="First" value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once'], ['price', 'Price', 'Rests at a price you set']]} />
             {d.dcaFirst === 'price' && <Field label="Price" value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} suffix="USD" err={err('from')} />}
             {d.dcaFirst === 'market' && err('from') && <p className="oe-hint algo-ferr">Waiting for the best price…</p>}
-          </>
-        )}
-        {ek === 'dca' && !priceDca && (
-          <>
-            <Field label="Each buy" value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" err={err('perOrderUsd')} />
-            <Field label="Every" value={d.every} onChange={(v) => set({ every: v })} suffix={<UnitSelect label="Every" value={d.everyUnit} units={['m', 'h', 'd']} onChange={(u) => set({ everyUnit: u })} />} err={err('intervalMs')} />
-            <Field label="Times" value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} err={err('orders')} />
           </>
         )}
 
@@ -678,15 +719,17 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           Advanced
           {changes.length > 0 && <span className="algo-badge" aria-label={`${changes.length} changed`}>{changes.length}</span>}
         </button>
+        <button type="button" className="algo-more" aria-haspopup="dialog" onClick={openPreview} title="What it will do: every order, its time and price, sizes, the total and the fees">
+          <svg className="algo-more__icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+            <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8Z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+            <circle cx="8" cy="8" r="1.9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+          </svg>
+          Preview
+        </button>
       </div>
 
-      {/* The plan in words and one line of cost; the drawing is in the settings window's Preview. */}
+      {/* One line of cost; what it will do is in the Preview. */}
       <div className="algo-preview">
-        <p className="algo-what">
-          {oneLine(kind, d, p.side, p.quantity, base)}
-          {plan && planFacts(plan, pk) ? ` · ${planFacts(plan, pk)}` : ''}
-          {` · ${PLACE_WORDS[place]}`}
-        </p>
         <CostLine plan={plan} rates={rates} paper={d.paper} feeNote={feeBp} scale={pk === 'scale'} onShuffle={hasJitter(kind, d) ? () => setSeed(newSeed()) : undefined} />
         {!amountMissing && restErrors[0] && <p className="oe-hint algo-err">{restErrors[0]}</p>}
         {!allErrors.length && plan?.warnings[0] && <p className="oe-hint algo-warn">{plan.warnings[0]}</p>}
@@ -747,12 +790,12 @@ const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
 };
 
 /** The sections a kind has, Runs on first. */
-function sectionsFor(kind: UiKind, exitsHere: boolean, d: Pick<Draft, 'dcaMode'>): Sec[] {
+function sectionsFor(kind: UiKind, exitsHere: boolean): Sec[] {
   const ek: string = engineKind(kind);
   const out: Sec[] = ['runs', 'preview'];
   if (['twap', 'vwap', 'basket', 'pov', 'iceberg', 'scale', 'dca', 'swarm'].includes(ek)) out.push('slicing');
-  // A price DCA's orders are resting limits: nothing to tune in how they meet the book.
-  if (ek !== 'basket' && !(ek === 'dca' && d.dcaMode === 'price')) out.push('exec');
+  // A DCA's orders are resting limits: nothing to tune in how they meet the book.
+  if (ek !== 'basket' && ek !== 'dca') out.push('exec');
   if (exitsHere && kind !== 'bracket') out.push('exits');
   out.push('start');
   return out;
@@ -766,7 +809,7 @@ const SecCtx = createContext<Sec | null>(null);
 function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, runsOn, preview, children }: {
   open: boolean; onClose: () => void; kind: UiKind; d: Draft; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; preview: ReactNode; children: ReactNode;
 }) {
-  const secs = sectionsFor(kind, exitsHere, d);
+  const secs = sectionsFor(kind, exitsHere);
   const [, bump] = useState(0);
   const want = lastSec.get(kind) ?? 'runs';
   const sec: Sec = secs.includes(want) ? want : 'runs';
@@ -1033,6 +1076,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
           ) : (
             <>
               <AField title="Clips" hint="How many small orders each market is split into." value={d.clips} int onChange={(v) => set({ clips: v })} unit="per market" err={err('clips')} />
+              <ASeg title="Per wave" hint="Clips of each market sent at the same time." value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} />
               <AField title="Between waves" hint="Pause between waves, so the book can refill." value={d.waveSec} onChange={(v) => set({ waveSec: v })} unit="s" err={err('waveMs')} />
             </>
           )}
@@ -1154,36 +1198,25 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
       )}
 
       {ek === 'dca' && (
-        <Group label="Price or time" sec="slicing">
-          <ASwitch
-            title={side === 'buy' ? 'Buy on a schedule instead' : 'Sell on a schedule instead'}
-            hint={d.dcaMode === 'price'
-              ? `Now: a first order, then a limit every ${d.dcaStep || '…'}% ${fromAvg} it, as DCA bots do. On: a fixed amount every interval instead, whatever the price.`
-              : 'On: a fixed amount every interval, whatever the price. Off: a first order, then a limit at each price step, as DCA bots do.'}
-            checked={d.dcaMode === 'time'}
-            onChange={(v) => set({ dcaMode: v ? 'time' : 'price' })}
-            on="On · every interval"
-            off="Off · at price steps"
+        <Group label="Ladder" sec="slicing">
+          <ASeg
+            title="Prices"
+            hint={`Where the orders after the first rest. Always at set prices: a DCA here never buys on a clock.`}
+            value={d.dcaLevels}
+            onChange={(v) => set({ dcaLevels: v })}
+            options={[['step', 'Step apart', `Every Step % ${fromAvg} the one before, as DCA bots space their safety orders.`], ['list', 'Prices I type', 'Exactly the prices you type on the ticket, in order.']]}
           />
-        </Group>
-      )}
-      {ek === 'dca' && d.dcaMode === 'time' && (
-        <>
-          <Group label={side === 'buy' ? 'Buys' : 'Sells'} sec="slicing">
-            <AField title="Budget" hint="Stops once this much has been spent in all. Empty: no cap." value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} unit="USD" err={err('maxTotalUsd')} />
-            <AField title="Dip" hint={`Trades more when the price is this far ${fromAvg} your average so far. Empty: off.`} value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} unit="%" err={err('dipPct')} />
-            {opt(d.dip) && <AField title="On a dip" hint="How many times the usual size it trades on a dip." value={d.dipMult} onChange={(v) => set({ dipMult: v })} unit="× more" err={err('dipMultiplier')} />}
-          </Group>
-          <Group label="Execution">
-            <ASeg
-              title="Each order"
-              hint="How each order meets the book."
-              value={d.exec === 'hybrid' ? 'hybrid' : d.exec}
-              onChange={(v) => set({ exec: v })}
-              options={[['taker', 'Taker', 'Takes at once.'], ['hybrid', 'Hybrid', 'Rests first, then takes.'], ['maker', 'Maker', 'Post-only: waits to be filled.']]}
+          {d.dcaLevels === 'step' && (
+            <AField
+              title="Step scale"
+              hint={`Each gap is this many times the one before (3Commas' safety order step scale): 1 keeps every step at ${d.dcaStep || '…'}%, 1.5 makes them 2%, 3%, 4.5%… so the ladder reaches further.`}
+              value={d.dcaStepScale}
+              onChange={(v) => set({ dcaStepScale: v })}
+              unit="×"
+              err={err('prices')}
             />
-          </Group>
-        </>
+          )}
+        </Group>
       )}
 
       {ek === 'swarm' && (
@@ -1218,19 +1251,54 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
             <AField title="Give up after" hint="Stops trying after this long; what filled stays filled. Empty: never." value={d.sweepGiveUp} placeholder="never" onChange={(v) => set({ sweepGiveUp: v })} unit="min" err={err('timeoutMs')} />
           </Group>
           <Group label="Reference price">
-            {(['binance', 'binanceSpot', 'sodex'] as const).map((k) => (
-              <Row key={k} title={SWEEP_SOURCE_NAMES[k] ?? k} hint={k === 'sodex' ? 'Used only while neither Binance price is fresh (5 s).' : 'The median of the fresh Binance prices is the reference. With no fresh price at all, it pauses.'} />
-            ))}
+            <ASeg
+              title="Price it is held to"
+              hint="Every round's limit is this price plus your max slippage (a sell: minus)."
+              value={d.sweepRef}
+              onChange={(v) => set({ sweepRef: v })}
+              options={[
+                ['oracleMid', 'Oracle mid', 'The median of the chosen venues\u2019 mids (best bid and ask), read once a second by our server.'],
+                ['oracleFair', 'Oracle fair', 'The median of the chosen venues\u2019 fair prices: each perpetual venue\u2019s own mark price, a spot venue\u2019s mid. A thin book\u2019s spread or one venue\u2019s wick cannot move it.'],
+                ['mark', 'SoDEX mark', 'SoDEX\u2019s own mark price.'],
+                ['index', 'SoDEX index', 'SoDEX\u2019s index price (its spot reference).'],
+              ]}
+            />
+            {(d.sweepRef === 'oracleMid' || d.sweepRef === 'oracleFair') && (
+              <Row title="Venues" hint="The oracle is made of these; a venue older than 5 s is left out. With none fresh it uses the SoDEX mark, and with that stale too it pauses. At least one.">
+                <div className="algo-ctl">
+                  <div className="algo-chips" role="group" aria-label="Oracle venues">
+                    {ORACLE_VENUES.map((v) => {
+                      const on = d.sweepVenues.includes(v);
+                      const only = on && d.sweepVenues.length === 1;
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          aria-pressed={on}
+                          disabled={only}
+                          title={only ? 'At least one venue' : undefined}
+                          className={`algo-chip${on ? ' is-on' : ''}`}
+                          onClick={() => set({ sweepVenues: on ? d.sweepVenues.filter((x) => x !== v) : ORACLE_VENUES.filter((x) => x === v || d.sweepVenues.includes(x)) })}
+                        >
+                          {ORACLE_VENUE_NAMES[v]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {err('venues') && <p className="oe-hint algo-ferr">{err('venues')}</p>}
+                </div>
+              </Row>
+            )}
           </Group>
         </>
       )}
 
-      {ek === 'conditional' && <ConditionalMore d={d} set={set} slip={slip} />}
+      {ek === 'conditional' && <ConditionalMore d={d} set={set} slip={slip} err={err} />}
 
       {exitsHere && kind !== 'bracket' && <AExits d={d} set={set} side={side} levels={exits} err={err('exits')} />}
 
       <Group label="Start and limits" sec="start">
-        {hasLimit(kind, d) && (
+        {hasLimit(kind) && (
           <AField title="Limit" hint={`Never ${side === 'buy' ? 'buys above' : 'sells below'} this price. Empty: none.`} value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} unit="USD" err={err('limitPrice')} />
         )}
         <ASeg
@@ -1242,7 +1310,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
         />
         {d.startMode === 'delay' && <AField title="Start in" hint="How long after you start it." value={d.startDelay} onChange={(v) => set({ startDelay: v })} unit="min" err={err('startAt')} />}
         {d.startMode === 'price' && <AField title="When the mark reaches" hint="Starts once the mark reaches this, from wherever it is now." value={d.startPrice} onChange={(v) => set({ startPrice: v })} unit="USD" err={err('triggerPrice')} />}
-        {hasBounds(kind, d) && (
+        {hasBounds(kind) && (
           <>
             <ABound title="Above" hint="What it does while the price is above this. Empty: nothing." value={d.upper} onValue={(v) => set({ upper: v })} then={d.upperThen} onThen={(v) => set({ upperThen: v })} err={err('upper')} />
             <ABound title="Below" hint="What it does while the price is below this. Empty: nothing." value={d.lower} onValue={(v) => set({ lower: v })} then={d.lowerThen} onThen={(v) => set({ lowerThen: v })} err={err('lower')} />
@@ -1441,18 +1509,18 @@ function ConditionalFields({ d, set, symbol, base }: { d: Draft; set: (p: Partia
 }
 
 /** A conditional order's advanced settings: when it fires, then how its action trades. */
-function ConditionalMore({ d, set, slip }: { d: Draft; set: (p: Partial<Draft>) => void; slip: (hint: string) => ReactNode }) {
+function ConditionalMore({ d, set, slip, err }: { d: Draft; set: (p: Partial<Draft>) => void; slip: (hint: string) => ReactNode; err: (...keys: string[]) => string | undefined }) {
   const then =
     d.then === 'market' || d.then === 'close' ? slip('Worst price the action accepts, past the best price.')
     : d.then === 'limit' ? <PostOnly d={d} set={set} />
-    : d.then === 'twap' ? <AField title="Slices" hint="How many child orders the TWAP it starts sends." value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} />
+    : d.then === 'twap' ? <AField title="Slices" hint="How many child orders the TWAP it starts sends." value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} err={err('then')} />
     : null;
   return (
     <>
       <Group label="Trigger">
         {d.conds.length > 1 && <ASeg title="When" hint="Whether every condition must hold, or one is enough." value={d.match} onChange={(v) => set({ match: v })} options={[['all', 'All hold'], ['any', 'Any holds']]} />}
-        <AField title="Hold for" hint="Acts only once the conditions have held this long, so a wick does not set it off." value={d.holdSec} onChange={(v) => set({ holdSec: v })} unit="s" />
-        <AField title="Expires in" hint="Cancels it if nothing fired by then. Empty: never." value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} unit={<ATime label="Expires in" value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} />
+        <AField title="Hold for" hint="Acts only once the conditions have held this long, so a wick does not set it off." value={d.holdSec} onChange={(v) => set({ holdSec: v })} unit="s" err={err('holdMs')} />
+        <AField title="Expires in" hint="Cancels it if nothing fired by then. Empty: never." value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} unit={<ATime label="Expires in" value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} err={err('expiresAt')} />
       </Group>
       {then && <Group label="Then">{then}</Group>}
     </>
@@ -1621,13 +1689,11 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
     case 'scale':
       return `${verb} ${q} in ${x(d.orders)} orders from ${x(d.from)} to ${x(d.to)}`;
     case 'dca': {
-      if (d.dcaMode === 'price') {
-        const first = d.dcaFirst === 'market' ? 'now' : `at ${x(d.dcaStart)}`;
-        const m = n(d.dcaMult) > 0 && n(d.dcaMult) !== 1 ? `, each ${x(d.dcaMult)}× the last` : '';
-        return `${verb} $${x(d.perOrder)} ${first}, then every ${x(d.dcaStep)}% ${side === 'buy' ? 'lower' : 'higher'}, ${x(d.dcaOrders)} orders in all${m}`;
-      }
-      const total = n(d.perOrder) * n(d.dcaOrders);
-      return `${verb} $${x(d.perOrder)} every ${x(d.every)} ${UNIT_NAME[d.everyUnit]}, ${x(d.dcaOrders)} times${Number.isFinite(total) && total > 0 ? ` (${fmtUsd(total, 0)})` : ''}`;
+      const first = d.dcaFirst === 'market' ? 'now' : `at ${x(d.dcaStart)}`;
+      const m = n(d.dcaMult) > 0 && n(d.dcaMult) !== 1 ? `, each ${x(d.dcaMult)}× the last` : '';
+      if (d.dcaLevels === 'list') return `${verb} $${x(d.perOrder)} ${first}, then at ${x(d.dcaPrices)}${m}`;
+      const sc = n(d.dcaStepScale) > 0 && n(d.dcaStepScale) !== 1 ? ` (each step ${x(d.dcaStepScale)}× the last)` : '';
+      return `${verb} $${x(d.perOrder)} ${first}, then every ${x(d.dcaStep)}% ${side === 'buy' ? 'lower' : 'higher'}${sc}, ${x(d.dcaOrders)} orders in all${m}`;
     }
     case 'swarm':
       return `${verb} ${q} in ${x(d.clips)} clips, ${d.inFlight} at a time`;
@@ -1640,7 +1706,7 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
       return side === 'sell' ? `Sells when the price falls ${t} from its high` : `Buys when the price rises ${t} from its low`;
     }
     case 'sweep':
-      return `${verb} ${q} as fast as the book allows, within ${x(d.sweepSlip)}% of the Binance price`;
+      return `${verb} ${q} as fast as the book allows, within ${x(d.sweepSlip)}% of the ${SWEEP_REFERENCE_NAMES[d.sweepRef].replace(/^Oracle/, 'oracle').replace(/^SoDEX/, 'SoDEX')}`;
     case 'bracket':
       return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${q} ${d.entry === 'limit' ? `at ${x(d.entryPrice)}` : 'at market'}, with take-profit and stop-loss`;
     case 'basket': {
@@ -1656,6 +1722,7 @@ function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: Algo
   ];
   if (plan.total !== null) rows.push(['Size', `${plan.total} ${spec.symbol.replace(/-USD$/, '')}${plan.notional ? ` (${fmtUsd(plan.notional, 2)})` : ''}`]);
   if (spec.kind === 'dca') rows.push(['Spend', `${spec.orders} × ${fmtUsd(spec.perOrderUsd, 2)}${spec.maxTotalUsd ? `, at most ${fmtUsd(spec.maxTotalUsd, 2)}` : ''}`]);
+  if (spec.kind === 'sweep') rows.push(['Reference', `${sweepRefWords(spec)}, at most ${(spec.slippageBps / 100).toFixed(2)}% from it`]);
   if (plan.children.length && spec.kind !== 'conditional' && spec.kind !== 'trailing' && spec.kind !== 'chase' && spec.kind !== 'basket') rows.push(['Children', String(plan.children.filter((c) => c.qty > 0).length)]);
   if (plan.endsAt) rows.push(['Until', `${fmtTime(plan.endsAt)} (${fmtDuration(plan.endsAt - plan.startsAt)})`]);
   if (spec.startAt) rows.push(['Starts', fmtTime(spec.startAt)]);

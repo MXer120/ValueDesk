@@ -132,6 +132,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // SoSoValue's US spot ETF flows (valuescan/sosovalue/etf.ts), on the news key's budget, cached
   // 30 minutes per asset; not_available without SOSOVALUE_API_KEY.
   { method: 'GET', url: '/api/vs/etf/flows', cls: 'read' },
+  // The shared price oracle (routes/oracle.ts): every caller shares one read per venue and coin a second.
+  { method: 'GET', url: '/api/vs/oracle', cls: 'read' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },

@@ -14,6 +14,7 @@ import {
   minChildQty,
   normalise,
   sliceTimes,
+  snapNearest,
   type VolumeProfile,
 } from './math.ts';
 import { ALGO_NAMES, algoQuantity } from './spec.ts';
@@ -27,6 +28,8 @@ export interface PlannedChild {
   /** Its price, for a ladder (null: priced at the touch when it is sent). */
   price: number | null;
   tag: string;
+  /** Its value in USD where that is fixed rather than size x price (a basket leg's share). */
+  usd?: number;
 }
 
 export interface AlgoPlan {
@@ -45,6 +48,14 @@ export interface AlgoPlan {
   avgPrice: number | null;
   /** Where its exits would sit (against the expected average fill). */
   exits: { tp: number | null; sl: number | null } | null;
+  /**
+   * The child orders over time where `children` is something else: a
+   * basket's slices or clips per market (children: one per market), POV's
+   * pace (children: none, it follows the volume). For drawing.
+   */
+  schedule?: PlannedChild[] | null;
+  /** The schedule is an estimate (POV at the last hour's volume), not what is fixed to go out. */
+  estimated?: boolean;
   warnings: string[];
   errors: string[];
 }
@@ -99,6 +110,20 @@ export function swarmClips(s: Pick<SwarmSpec, 'quantity' | 'clips' | 'sizeJitter
 
 /** A ladder's levels, first to last: price and size (whole steps). */
 export function scaleLadder(s: Extract<AlgoSpec, { kind: 'scale' }>, m: Pick<MarketInfo, 'tickSize' | 'stepSize'>, seed: number): Array<{ price: number; qty: number }> {
+  // Explicit levels (a DCA ladder): each on the tick, a level the tick merges into the one before dropped with its size.
+  if (s.prices?.length) {
+    const prices: number[] = [];
+    const ws: number[] = [];
+    s.prices.forEach((p, i) => {
+      const x = snapNearest(p, m.tickSize);
+      if (prices.includes(x)) return;
+      prices.push(x);
+      ws.push(s.weights?.[i] ?? 1);
+    });
+    const w = s.weights?.length === s.prices.length ? normalise(ws) : ladderWeights(prices.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
+    const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
+    return prices.map((price, i) => ({ price, qty: sizes[i] ?? 0 }));
+  }
   const prices = ladderPrices(s.from, s.to, s.orders, s.spacing, m.tickSize);
   const w = ladderWeights(prices.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
   const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
@@ -226,6 +251,22 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
         if (s.endAt !== null && out.endsAt > s.endAt) out.warnings.push(`At the last hour's pace it fills about ${Math.round((((s.endAt - start) / 3_600_000) * perHour * 100) / total)}% by the end time.`);
       }
       if (s.endAt !== null) out.endsAt = out.endsAt === null ? s.endAt : Math.min(out.endsAt, s.endAt);
+      // The pace drawn: what it would take in each 5 minutes at the last hour's volume (at most 400 steps).
+      if (ctx.hourVolume && ctx.hourVolume > 0 && total && out.endsAt !== null) {
+        const span = Math.max(1, out.endsAt - start);
+        const bucket = Math.max(300_000, Math.ceil(span / 400));
+        const per = (ctx.hourVolume * s.rate * bucket) / 3_600_000;
+        const cap = s.maxChildQty !== null ? Number(s.maxChildQty) : Infinity;
+        const sched: PlannedChild[] = [];
+        let left = total;
+        for (let t = start + bucket; left > 1e-12 && t <= out.endsAt + bucket - 1 && sched.length < 400; t += bucket) {
+          const q = Math.min(left, per);
+          sched.push({ at: Math.min(t, out.endsAt), qty: q, price: null, tag: `about ${q <= cap ? 'one' : Math.ceil(q / cap)} child${q <= cap ? '' : 'ren'}` });
+          left -= q;
+        }
+        out.schedule = sched;
+        out.estimated = true;
+      }
       if (s.maxChildQty !== null && px && Number(s.maxChildQty) * px < m.minNotional) out.errors.push(`The largest child is under SoDEX's ${usd(m.minNotional)} minimum.`);
       limitWarn();
       break;
@@ -311,6 +352,22 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
         out.endsAt = start + Math.max(0, Math.ceil(s.clips / Math.max(1, s.inFlight)) - 1) * s.waveMs;
         out.intervalMs = s.waveMs;
       }
+      // Each market's own algo, as the runtime starts it (stepBasket): a TWAP with its jitter, or a swarm in waves.
+      const sched: PlannedChild[] = [];
+      s.legs.forEach((l, i) => {
+        const p = ctx.prices?.(l.symbol) ?? (l.symbol === m.name ? px : null);
+        const q = p ? l.usd / p : 0;
+        const seed = (ctx.seed + i + 1) >>> 0;
+        if (s.style === 'twap') {
+          const { times, weights } = twapSchedule({ slices: s.slices, urgency: 0, sizeJitter: 0.15, timeJitter: 0.2, durationMs: s.durationMs }, start, seed);
+          times.forEach((at, k) => sched.push({ at, qty: q * (weights[k] ?? 0), price: null, usd: l.usd * (weights[k] ?? 0), tag: `${l.side} ${l.symbol} ${k + 1}/${times.length}` }));
+        } else {
+          const rand = makeRng(seed);
+          const w = normalise(new Array<number>(s.clips).fill(1).map((x) => x * (1 + (rand() * 2 - 1) * 0.2)));
+          w.forEach((x, k) => sched.push({ at: start + Math.floor(k / Math.max(1, s.inFlight)) * s.waveMs, qty: q * x, price: null, usd: l.usd * x, tag: `${l.side} ${l.symbol} ${k + 1}/${w.length}` }));
+        }
+      });
+      out.schedule = sched.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
       const small = s.legs.filter((l) => l.usd / each < m.minNotional);
       if (small.length) out.errors.push(`${small.map((l) => l.symbol).join(', ')}: each ${s.style === 'swarm' ? 'clip' : 'slice'} would be under SoDEX's ${usd(m.minNotional)} minimum. Use fewer ${s.style === 'swarm' ? 'clips' : 'slices'} or more per market.`);
       break;
@@ -324,7 +381,7 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       summarise();
       if (band && total! * band < m.minNotional) out.errors.push(`The order is about ${usd(total! * band)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
       if (!px) out.warnings.push('The band is set from the reference price when it starts.');
-      else out.warnings.push(`Priced from the Binance reference when it runs; here the band is drawn from the SoDEX price.`);
+      else out.warnings.push('Each round re-prices from its reference price when it runs; the band here is drawn from the reference as it is now.');
       break;
     }
     case 'bracket': {

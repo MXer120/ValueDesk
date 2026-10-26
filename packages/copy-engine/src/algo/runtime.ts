@@ -47,8 +47,8 @@ import {
   type Quote,
   type TrailState,
 } from './math.ts';
-import type { SourceQuote } from '../priceGuard.ts';
-import { SWEEP_MAX_AGE_MS, sweepReference, sweepStep } from './sweep.ts';
+import type { VenueQuote } from '../oracle.ts';
+import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
@@ -124,11 +124,13 @@ export interface AlgoHost {
   /** Order lookups (default: SoDEX REST). `history` reads are drip-limited; the runtime asks rarely. */
   lookup?(a: AlgoRecord, symbol: string, history: boolean): Promise<Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>>;
   /**
-   * A sweep's outside reference: quotes for the coin ('BTC') from Binance
-   * USD-M futures and Binance spot (priceGuard.ts fetchQuotes). Absent, or
-   * failing: a sweep falls back to SoDEX's own mark while that is fresh.
+   * A sweep's outside reference: every oracle venue's quote for the coin
+   * ('BTC') - oracle.ts, read through OracleFeed on an executor and through
+   * the API's GET /api/vs/oracle in a browser. The sweep combines the venues
+   * its spec chose. Absent, or failing: it falls back to SoDEX's own mark
+   * while that is fresh.
    */
-  oracle?(coin: string): Promise<SourceQuote[]>;
+  oracle?(coin: string): Promise<VenueQuote[]>;
   log: Logger;
   onChange?(id: string): void;
   /** false: no timers (tests drive `tick`). */
@@ -187,7 +189,7 @@ export class AlgoRuntime {
   private timers: unknown[] = [];
   private running = false;
   /** The sweep oracle's last quotes per coin, and the read in flight. */
-  private oracleQuotes = new Map<string, { quotes: SourceQuote[]; at: number; busy: boolean }>();
+  private oracleQuotes = new Map<string, { quotes: VenueQuote[]; at: number; busy: boolean }>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
@@ -620,7 +622,7 @@ export class AlgoRuntime {
   }
 
   /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
-  private oracleFor(coin: string, now: number): SourceQuote[] {
+  private oracleFor(coin: string, now: number): VenueQuote[] {
     let o = this.oracleQuotes.get(coin);
     if (!o) {
       o = { quotes: [], at: 0, busy: false };
@@ -650,7 +652,9 @@ export class AlgoRuntime {
     const s = a.spec as Extract<AlgoSpec, { kind: 'sweep' }>;
     const coin = s.symbol.replace(/-USD$/, '');
     const mark = this.market.mark(s.symbol);
-    const ref = sweepReference(this.oracleFor(coin, now), mark ? { price: mark.mark, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    // SoDEX's own prices only when the spec asks for them or as the fallback: the oracle is not read for a mark or index sweep.
+    const own = s.reference === 'mark' || s.reference === 'index';
+    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
     const act = sweepStep({
       side: s.side,
       total: Number(s.quantity),
@@ -680,7 +684,7 @@ export class AlgoRuntime {
         a.k.round = Number(a.k.round ?? 0) + 1;
         a.k.ref = ref?.price ?? null;
         this.dirty.add(a.id);
-        await this.send(a, m, [{ side: s.side, price: act.price, quantity: act.qty, tif: 'ioc', tag: `round ${a.k.round}${ref?.fallback ? ' (SoDEX mark)' : ''}` }]);
+        await this.send(a, m, [{ side: s.side, price: act.price, quantity: act.qty, tif: 'ioc', tag: `round ${a.k.round}${ref?.fallback ? ' (SoDEX mark, no fresh oracle)' : ''}` }]);
         return;
       }
     }

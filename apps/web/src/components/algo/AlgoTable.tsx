@@ -139,7 +139,7 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
             {s.kind === 'basket' ? (
               <>{ALGO_NAMES[s.kind]} · {s.legs.length} markets</>
             ) : (
-              <>{ALGO_NAMES[s.kind]} <span className="algo-card__dir">{sideWord}</span> {base}</>
+              <>{s.kind === 'scale' && s.label === 'DCA' ? 'DCA' : ALGO_NAMES[s.kind]} <span className="algo-card__dir">{sideWord}</span> {base}</>
             )}
             {s.paper ? ' · paper' : ''}
             {place !== 'browser' ? ` · ${PLACE_WORD[place]}` : ''}

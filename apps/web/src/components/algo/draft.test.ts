@@ -5,9 +5,9 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkAlgoSpec } from '@copy-engine';
+import { ORACLE_VENUES, checkAlgoSpec, planAlgo, type AlgoSpec, type MarketInfo } from '@copy-engine';
 import {
-  ADVANCED_KEYS, DCA_TIME_INLINE, DEFAULT, dcaLadder, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
+  ADVANCED_KEYS, DEFAULT, dcaLadder, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
   randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf,
   type Draft, type TicketShared,
 } from './draft';
@@ -108,7 +108,7 @@ test('Advanced counts only what differs from the defaults', () => {
   assert.deepEqual(advancedChanges('iceberg', { ...DEFAULT, exitsOn: true, startMode: 'delay', maxSpread: '5' }, true), ['take-profit / stop-loss', 'starts later', 'max spread']);
   assert.deepEqual(advancedChanges('scale', { ...DEFAULT, limitPrice: '100', upper: '5' }, true), []);
   // A setting that only applies with another is not counted without it.
-  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, dipMult: '3' }, false), []);
+  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, dcaLevels: 'list', dcaStepScale: '2' }, false), ['prices']);
 });
 
 test('Reset puts the advanced settings back and keeps the essentials', () => {
@@ -235,42 +235,85 @@ test('POV speed presets: Medium is the old default, so an untouched form sends w
   assert.equal(draftToSpec('pov', { ...DEFAULT, ...setPovPreset('high') }, shared, NOW).rate, 0.2);
 });
 
-/* ------------------------------------------- DCA by price (2026-10-26) ----- */
+/* ------------------------------------------- DCA at set prices (2026-10-26) ----- */
 
-test('an untouched DCA is price-based: a first buy at the ask, then a limit every 2% lower, as a scale ladder', () => {
+const BTC = { id: 1, name: 'BTC-USD', base: 'BTC', tickSize: '0.1', stepSize: '0.00001', minQuantity: '0.00001', maxQuantity: '1000', marketMaxQuantity: null, minNotional: 10, maxNotional: 5_000_000, maxLeverage: 50, buyLimitUpRatio: 0.05, sellLimitDownRatio: 0.05, takerFee: 0.0004, makerFee: 0.0002 } as unknown as MarketInfo;
+
+test('an untouched DCA buys at set prices: a first buy at the ask, then a limit every 2% lower, $50 each', () => {
   const s = draftToSpec('dca', DEFAULT, { ...shared, bid: 99_990, ask: 100_000 }, NOW);
   assert.equal(s.kind, 'scale');
+  assert.equal(s.label, 'DCA');
   assert.equal(s.from, 100_000);
-  assert.ok(Math.abs((s.to as number) - 100_000 * (1 - 0.02 * 9)) < 1e-6);
   assert.equal(s.orders, 10);
-  assert.equal(s.spacing, 'linear');
-  assert.equal(s.distribution, 'exponential');
-  assert.equal(s.skew, 1);
+  const prices = s.prices as number[];
+  assert.equal(prices.length, 10);
+  for (let i = 0; i < 10; i++) assert.ok(Math.abs(prices[i]! - 100_000 * (1 - 0.02 * i)) < 1e-6, `level ${i}`);
+  assert.ok(Math.abs((s.to as number) - 82_000) < 1e-6);
+  // $50 at every level: more of the coin further down.
+  (s.weights as number[]).forEach((w, i) => assert.ok(Math.abs(w * prices[i]! - 50) < 1e-9));
   assert.equal(s.postOnly, false);
-  // $50 a buy at the first price, 10 buys: 0.005 BTC.
-  assert.equal(s.quantity, '0.005');
+  assert.equal('intervalMs' in s, false, 'nothing about time');
   const c = checkAlgoSpec(s);
   assert.deepEqual(c.errors, {});
 });
 
-test('a price DCA sells upward, multiplies its size per step, and waits for a price', () => {
-  const l = dcaLadder({ ...DEFAULT, dcaOrders: '3', dcaMult: '2', perOrder: '100' }, { side: 'sell', bid: 50, ask: 51 });
-  assert.equal(l.from, 50);
-  assert.ok(Math.abs(l.to! - 52) < 1e-9);
-  assert.equal(l.skew, 4);
-  assert.equal(l.quantity, '14'); // 2 + 4 + 8
-  assert.equal(dcaLadder(DEFAULT, { side: 'buy', bid: null, ask: null }).from, null);
+test("the plan, the preview's table and the chart lines are the same prices", () => {
+  const s = checkAlgoSpec(draftToSpec('dca', { ...DEFAULT, dcaOrders: '4', dcaStep: '1', dcaMult: '2', perOrder: '100' }, { ...shared, bid: 99_990, ask: 100_000 }, NOW)).spec as Extract<AlgoSpec, { kind: 'scale' }>;
+  const plan = planAlgo(s, BTC, { now: NOW, price: 99_995, seed: 1 });
+  assert.deepEqual(plan.children.map((c) => c.price), [100_000, 99_000, 98_000, 97_000]);
+  // $100, $200, $400, $800 at those prices, in whole steps.
+  plan.children.forEach((c, i) => assert.ok(Math.abs(c.qty * c.price! - 100 * 2 ** i) < c.price! * 0.00001, `level ${i}: ${c.qty}`));
+  assert.ok(plan.avgPrice! < 98_000 && plan.avgPrice! > 97_000);
 });
 
-test('a DCA on a schedule still sends the time-based spec, and a DCA saved before is one', () => {
-  const s = draftToSpec('dca', { ...DEFAULT, dcaMode: 'time' }, shared, NOW);
-  assert.equal(s.kind, 'dca');
-  assert.equal(s.intervalMs, 3_600_000);
+test('a DCA sells upward, multiplies its USD per order, and waits for a price', () => {
+  const l = dcaLadder({ ...DEFAULT, dcaOrders: '3', dcaMult: '2', perOrder: '100' }, { side: 'sell', bid: 50, ask: 51 });
+  assert.deepEqual(l.prices!.map((x) => Math.round(x * 1e9) / 1e9), [50, 51, 52]);
+  assert.equal(l.skew, 4);
+  assert.ok(Math.abs(Number(l.quantity) - (2 + 200 / 51 + 400 / 52)) < 1e-9);
+  assert.equal(dcaLadder(DEFAULT, { side: 'buy', bid: null, ask: null }).prices, null);
+});
+
+test('a step scale widens each gap; typed prices are used as they are', () => {
+  const l = dcaLadder({ ...DEFAULT, dcaOrders: '4', dcaStep: '2', dcaStepScale: '1.5' }, { side: 'buy', bid: 99, ask: 100 });
+  // Deviations 2%, 2+3 = 5%, 5+4.5 = 9.5%.
+  assert.deepEqual(l.prices!.map((x) => Math.round(x * 1e6) / 1e6), [100, 98, 95, 90.5]);
+  const t = draftToSpec('dca', { ...DEFAULT, dcaLevels: 'list', dcaPrices: '95, 90 85', dcaFirst: 'price', dcaStart: '99' }, shared, NOW);
+  assert.deepEqual(t.prices, [99, 95, 90, 85]);
+  assert.equal(t.orders, 4);
+  assert.deepEqual(checkAlgoSpec(t).errors, {});
+});
+
+test('a DCA saved on a schedule loads as the price ladder; nothing makes a schedule any more', () => {
+  const st = memStore({ [DRAFT_KEY]: JSON.stringify({ perOrder: '20', dcaMode: 'time', every: '2', everyUnit: 'd', dip: '5', budget: '500', dcaStep: '7' }) });
+  const d = loadDraft(st) as Draft & Record<string, unknown>;
+  assert.equal(d.perOrder, '20');
+  assert.equal(d.dcaStep, DEFAULT.dcaStep);
+  for (const k of ['dcaMode', 'every', 'everyUnit', 'dip', 'budget']) assert.equal(k in d, false, k);
+  const s = draftToSpec('dca', d, { ...shared, bid: 1, ask: 2 }, NOW);
+  assert.equal(s.kind, 'scale');
+  // A price-based draft keeps its steps.
+  assert.equal(loadDraft(memStore({ [DRAFT_KEY]: JSON.stringify({ dcaMode: 'price', dcaStep: '3' }) })).dcaStep, '3');
+  assert.deepEqual(INLINE_KEYS.dca.includes('every'), false);
+});
+
+/* ------------------------------------------------------- Fill fast ----- */
+
+test('Fill fast: 0.1% from the oracle mid of every venue by default; the venues are kept, never none', () => {
+  const s = draftToSpec('sweep', DEFAULT, shared, NOW);
+  assert.equal(s.slippageBps, 10);
+  assert.equal(s.reference, 'oracleMid');
+  assert.deepEqual(s.venues, [...ORACLE_VENUES]);
   assert.deepEqual(checkAlgoSpec(s).errors, {});
-  const st = memStore({ [DRAFT_KEY]: JSON.stringify({ perOrder: '20' }) });
-  assert.equal(loadDraft(st).dcaMode, 'time');
-  assert.deepEqual(DCA_TIME_INLINE, ['perOrder', 'every', 'everyUnit', 'dcaOrders']);
-  // The schedule's own settings are not counted while it is price-based.
-  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, budget: '500' }, false), []);
-  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, dcaMode: 'time', budget: '500' }, false), ['on a schedule', 'budget']);
+  const two = draftToSpec('sweep', { ...DEFAULT, sweepRef: 'oracleFair', sweepVenues: ['bybit', 'okx'] }, shared, NOW);
+  assert.equal(checkAlgoSpec(two).spec!.kind, 'sweep');
+  assert.deepEqual(two.venues, ['bybit', 'okx']);
+  assert.deepEqual(advancedChanges('sweep', { ...DEFAULT, sweepVenues: ['bybit'] }, false), ['venues']);
+  assert.deepEqual(advancedChanges('sweep', { ...DEFAULT, sweepRef: 'mark', sweepVenues: ['bybit'] }, false), ['reference']);
+  const st = memStore();
+  saveDraft({ ...DEFAULT, sweepVenues: ['hyperliquid'] }, st);
+  assert.deepEqual(loadDraft(st).sweepVenues, ['hyperliquid']);
+  assert.deepEqual(loadDraft(memStore({ [DRAFT_KEY]: JSON.stringify({ sweepVenues: [] }) })).sweepVenues, [...ORACLE_VENUES]);
+  assert.deepEqual(loadDraft(memStore({ [DRAFT_KEY]: JSON.stringify({ sweepVenues: ['kraken', 'okx'] }) })).sweepVenues, ['okx']);
+  assert.ok(checkAlgoSpec({ ...s, venues: [] }).errors.venues);
 });

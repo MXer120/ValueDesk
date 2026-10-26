@@ -2,11 +2,14 @@
  * Sweep ("Fill fast"): fill the whole amount as fast as the book allows, but
  * never further than a set slippage from an outside reference price.
  *
- * THE REFERENCE is a rolling oracle mid, not SoDEX's own print: the median of
- * Binance USD-M futures (mark) and Binance spot (the book's mid) for the same
- * coin, each fresh within `maxAgeMs`. With neither fresh it falls back to
- * SoDEX's own mark, if that is fresh; with nothing fresh there is no
- * reference and the sweep pauses - it never prices an order off a stale one.
+ * THE REFERENCE is the spec's choice (sweepRefFor): the shared oracle's mid
+ * or fair price over the venues it picked (oracle.ts: Binance futures and
+ * spot, Bitget, Hyperliquid, OKX, Bybit; each fresh within `maxAgeMs`), or
+ * SoDEX's own mark or index. With no oracle venue fresh it falls back to
+ * SoDEX's mark, if that is fresh; with nothing fresh there is no reference
+ * and the sweep pauses - it never prices an order off a stale one.
+ * (sweepReference below is the reference specs from before 2026-10-26 were
+ * described by: the median of Binance futures and spot.)
  *
  * EACH ROUND is one IOC limit on SoDEX for everything still open, at the band
  * edge: buy at ref x (1 + slip) rounded DOWN to the tick, sell at ref x
@@ -20,6 +23,8 @@
  */
 import { canonicalDecimal, numberToPlainString, roundToStep } from '../../../sodex-core/src/index.ts';
 import type { SourceQuote } from '../priceGuard.ts';
+import { combineOracle, ORACLE_VENUE_NAMES, type VenueQuote } from '../oracle.ts';
+import type { SweepReferenceKind, SweepSpec } from './types.ts';
 
 /** The sources a sweep reads, in the order they are shown. SoDEX is the fallback only. */
 export const SWEEP_SOURCES = ['binance', 'binanceSpot'] as const;
@@ -51,6 +56,46 @@ export function sweepReference(quotes: readonly SourceQuote[], sodexMark: { pric
   if (fresh.length) return { price: median(fresh.map((q) => q.price)), sources: fresh.map((q) => q.source), fallback: false };
   if (sodexMark && sodexMark.price > 0 && now - sodexMark.at <= maxAgeMs) return { price: sodexMark.price, sources: ['sodex'], fallback: true };
   return null;
+}
+
+export const SWEEP_REFERENCE_NAMES: Readonly<Record<SweepReferenceKind, string>> = {
+  oracleMid: 'Oracle mid',
+  oracleFair: 'Oracle fair price',
+  mark: 'SoDEX mark',
+  index: 'SoDEX index',
+};
+
+/**
+ * The reference a sweep's spec asks for, now (oracle.ts): the oracle's mid or
+ * fair price over the spec's venues - SoDEX's mark while none of them is
+ * fresh - or SoDEX's own mark or index. null: nothing fresh, pause.
+ */
+export function sweepRefFor(
+  s: Pick<SweepSpec, 'reference' | 'venues'>,
+  quotes: readonly VenueQuote[],
+  sodex: { mark: number | null; index: number | null; at: number } | null,
+  now: number,
+  maxAgeMs = SWEEP_MAX_AGE_MS,
+): SweepReference | null {
+  const kind = s.reference ?? 'oracleMid';
+  const sodexFresh = sodex !== null && now - sodex.at <= maxAgeMs;
+  if (kind === 'mark' || kind === 'index') {
+    const p = sodexFresh ? (kind === 'mark' ? sodex!.mark : sodex!.index) : null;
+    return p && p > 0 ? { price: p, sources: [kind === 'mark' ? 'sodex' : 'sodexIndex'], fallback: false } : null;
+  }
+  const c = combineOracle(quotes, now, { venues: s.venues ?? null, maxAgeMs });
+  const p = kind === 'oracleFair' ? c.fair : c.mid;
+  if (p !== null && p > 0) return { price: p, sources: c.used, fallback: false };
+  if (sodexFresh && sodex!.mark && sodex!.mark > 0) return { price: sodex!.mark, sources: ['sodex'], fallback: true };
+  return null;
+}
+
+/** "Oracle mid of Binance futures, Bybit" in words. */
+export function sweepRefWords(s: Pick<SweepSpec, 'reference' | 'venues'>): string {
+  const kind = s.reference ?? 'oracleMid';
+  if (kind === 'mark' || kind === 'index') return SWEEP_REFERENCE_NAMES[kind];
+  const vs = s.venues?.length ? s.venues : null;
+  return `${SWEEP_REFERENCE_NAMES[kind]} (${vs ? vs.map((v) => ORACLE_VENUE_NAMES[v]).join(', ') : 'all venues'})`;
 }
 
 const plain = (x: number): string => canonicalDecimal(numberToPlainString(Number(x.toPrecision(12))));
@@ -103,7 +148,7 @@ export function sweepStep(s: SweepState): SweepAction {
   if (s.pending > 1e-12) return { type: 'wait', reason: null };
   if (left <= 0 || (s.ref && left < s.minQty(s.ref.price) && s.filled > 0)) return { type: 'done' };
   if (s.timeoutMs !== null && s.now - s.startedAt >= s.timeoutMs) return { type: 'expired', left };
-  if (!s.ref) return { type: 'wait', reason: 'Paused: no fresh reference price (Binance futures, Binance spot or the SoDEX mark).' };
+  if (!s.ref) return { type: 'wait', reason: 'Paused: no fresh reference price (none of the oracle venues, nor the SoDEX mark).' };
   if (s.lastRoundAt !== null && s.now - s.lastRoundAt < s.roundMs) return { type: 'wait', reason: null };
   const price = sweepBand(s.side, s.ref.price, s.slippageBps, s.tickSize);
   if (!(price > 0)) return { type: 'wait', reason: 'Paused: the band price is not valid.' };

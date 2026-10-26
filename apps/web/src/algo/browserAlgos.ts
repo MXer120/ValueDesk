@@ -41,6 +41,7 @@ import { feeNow } from '../trading/terms';
 import { getLiveCopy } from '../copy/live';
 import { localTerms } from '../copy/terms';
 import { logger } from '../log';
+import { readOracle } from './oracle';
 import { PAPER_OWNER, needsRunner, noteRunnerLoaded, setLiveAlgos } from './algoBus';
 import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
 
@@ -244,6 +245,8 @@ class BrowserAlgos {
       network: cfg.network,
       factory: (url) => new WebSocket(url) as unknown as WebSocketLike,
       sinkFor: () => browserSink,
+      // Fill fast's reference: the shared oracle, through our API (algo/oracle.ts).
+      oracle: async (coin) => (await readOracle(coin)).quotes,
       builderRate: (a) => (activeBuilder(cfg.builder) ? builderRateToFraction(feeNow('perps', a.owner)) : 0),
       // The copy region rules (policy.ts): the country declared in the copy terms and the one the executor saw, stricter wins.
       policyFor: (a) => regionPolicy(localTerms(a.owner)?.country ?? a.country ?? null, getLiveCopy().viewerCountry ?? a.observedCountry ?? null),

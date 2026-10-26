@@ -37,6 +37,7 @@
  * canonical decimal strings, as signed; working figures are numbers.
  */
 import type { ConsentRecord, CopyMode } from '../types.ts';
+import type { OracleVenue } from '../oracle.ts';
 
 export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep';
 
@@ -230,6 +231,14 @@ export interface ScaleSpec extends AlgoBase {
   spacing: 'linear' | 'geometric' | 'front' | 'back';
   sizeJitter: number;
   postOnly: boolean;
+  /**
+   * Explicit levels (a DCA ladder): each price, first to last, in place of
+   * from/to/orders/spacing (which still describe it: from = the first, to =
+   * the last, orders = how many). Absent or null: the even ladder.
+   */
+  prices?: number[] | null;
+  /** With `prices`: each level's relative size (base units). Absent: the size curve. */
+  weights?: number[] | null;
 }
 
 export interface DcaSpec extends AlgoBase {
@@ -371,13 +380,23 @@ export interface BracketSpec extends AlgoBase {
 
 /**
  * Fill fast (sweep.ts): each round one IOC limit for everything still open,
- * at the reference (the median of Binance futures and spot, SoDEX's mark as
- * the fallback) plus `slippageBps` for a buy, minus for a sell. Paused while
- * no reference is fresh.
+ * at the reference plus `slippageBps` for a buy, minus for a sell. Paused
+ * while no reference is fresh.
+ *
+ * The reference (oracle.ts): 'oracleMid' the median of the chosen venues'
+ * mids, 'oracleFair' the median of their fair prices (mark, else mid) - both
+ * fall back to SoDEX's mark while no venue is fresh; 'mark' / 'index' SoDEX's
+ * own mark or index price.
  */
+export type SweepReferenceKind = 'oracleMid' | 'oracleFair' | 'mark' | 'index';
+
 export interface SweepSpec extends AlgoBase {
   kind: 'sweep';
   quantity: string;
+  /** Absent (a spec from before 2026-10-26): 'oracleMid'. */
+  reference?: SweepReferenceKind;
+  /** The oracle's venues (oracle.ts ORACLE_VENUES). Absent or empty: all. */
+  venues?: OracleVenue[];
   /** How far from the reference it may fill, bps. */
   slippageBps: number;
   /** Wait between rounds, ms. */

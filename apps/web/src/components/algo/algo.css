@@ -318,3 +318,54 @@ select.algo-sf__pick option { background: #1c1b1a; }
   .algo-status.is-running::before { animation: none; }
   .algo-card__bar i { transition: none; }
 }
+
+/* The Preview section (AlgoPreview.tsx PlanPreview): words, a chart with axes, facts, every child. */
+.algo-pvw { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.algo-pvw__words { margin: 0; color: var(--text); font-size: 13.5px; line-height: 1.45; }
+.algo-pvw__chart { margin: 0; --algo-dir: var(--pos); }
+.algo-pvw__chart.is-sell { --algo-dir: var(--neg); }
+.algo-ch { display: block; width: 100%; height: auto; overflow: visible; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-ch__grid { stroke: var(--panel-line); stroke-width: 1; }
+.algo-ch__axis { stroke: color-mix(in srgb, var(--muted) 60%, transparent); stroke-width: 1; }
+.algo-ch__tick { fill: var(--muted); font-size: 10.5px; }
+.algo-ch__tick--cum { fill: var(--dim); }
+.algo-ch__label { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
+.algo-ch__bar { fill: color-mix(in srgb, var(--algo-dir) 60%, transparent); }
+.algo-ch__bar.is-buy { fill: color-mix(in srgb, var(--pos) 60%, transparent); }
+.algo-ch__bar.is-sell { fill: color-mix(in srgb, var(--neg) 60%, transparent); }
+.algo-ch__cum { fill: none; stroke: var(--text); stroke-opacity: 0.55; stroke-width: 1.5; stroke-linejoin: round; }
+.algo-ch__rule line { stroke: color-mix(in srgb, var(--muted) 70%, transparent); stroke-width: 1; stroke-dasharray: 4 3; }
+.algo-ch__rule text { fill: var(--muted); font-size: 10.5px; }
+.algo-ch__rule.is-now line { stroke: var(--text); stroke-opacity: 0.7; stroke-dasharray: none; }
+.algo-ch__rule.is-now text { fill: var(--text); }
+.algo-ch__rule.is-pos line { stroke: var(--pos); stroke-dasharray: none; }
+.algo-ch__rule.is-pos text { fill: var(--pos); }
+.algo-ch__rule.is-neg line { stroke: var(--neg); stroke-dasharray: none; }
+.algo-ch__rule.is-neg text { fill: var(--neg); }
+.algo-ch__rule.is-warn line { stroke: var(--warn); }
+.algo-ch__rule.is-warn text { fill: var(--warn); }
+.algo-ch__rule.is-dir line { stroke: var(--algo-dir); stroke-dasharray: none; }
+.algo-ch__rule.is-dir text { fill: var(--algo-dir); }
+.algo-ch__band rect { fill: color-mix(in srgb, var(--accent) 12%, transparent); }
+.algo-ch__band text { fill: var(--dim); font-size: 10px; font-family: var(--font-text); }
+.algo-pvw__facts { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px 14px; }
+.algo-pvw__facts div { min-width: 0; }
+.algo-pvw__facts dt { color: var(--dim); font-size: 11.5px; }
+.algo-pvw__facts dd { margin: 0; color: var(--text); font-size: 13px; font-family: var(--font-num); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.algo-pvw__tablewrap { max-height: 240px; overflow: auto; border-top: 1px solid var(--line-soft); }
+.algo-pvw__table { width: 100%; border-collapse: collapse; font-size: 12px; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-pvw__table th { position: sticky; top: 0; background: var(--panel, var(--bg)); color: var(--dim); font-weight: 500; text-align: right; padding: 4px 6px; white-space: nowrap; }
+.algo-pvw__table td { padding: 3px 6px; text-align: right; color: var(--text); white-space: nowrap; border-top: 1px solid var(--line-soft); }
+.algo-pvw__table th:nth-child(2), .algo-pvw__table td:nth-child(2) { text-align: left; color: var(--muted); }
+.algo-pvw__table tfoot td { color: var(--text); font-weight: 500; }
+
+/* Fill fast's venues: several of a few, at least one. */
+.algo-chips { display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; }
+.algo-chip {
+  height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line-soft); background: none;
+  color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; transition: background 140ms, color 140ms;
+}
+.algo-chip:hover { color: var(--text); }
+.algo-chip.is-on { background: rgba(255, 255, 255, 0.13); color: var(--text); border-color: transparent; }
+.algo-chip:disabled { cursor: default; }
+.algo-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }

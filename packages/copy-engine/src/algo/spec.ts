@@ -9,11 +9,14 @@
  */
 import { canonicalDecimal } from '../../../sodex-core/src/index.ts';
 import { DEFAULT_EXEC } from './math.ts';
+import { isOracleVenue } from '../oracle.ts';
 import {
   ALGO_KINDS,
   type AlgoBase,
   type AlgoKind,
   type AlgoSpec,
+  type ScaleSpec,
+  type SweepSpec,
   type BoundAction,
   type Condition,
   type ConditionalAction,
@@ -431,6 +434,28 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         sizeJitter: o.sizeJitter === undefined ? 0 : num(o, 'sizeJitter', 'Size randomisation', L.sizeJitter, e),
         postOnly: bool(o, 'postOnly'),
       };
+      // Explicit levels (a DCA ladder): positive, distinct, as many as the orders; sizes alongside, positive.
+      if (Array.isArray(o.prices)) {
+        const ps = (o.prices as unknown[]).map(Number);
+        if (ps.length < L.orders.min || ps.length > L.orders.max) e.prices = `Between ${L.orders.min} and ${L.orders.max} prices.`;
+        else if (ps.some((x) => !Number.isFinite(x) || x <= 0)) e.prices = 'Every price must be a positive number.';
+        else if (new Set(ps).size !== ps.length) e.prices = 'Each price only once.';
+        else {
+          const sc = spec as ScaleSpec;
+          sc.prices = ps;
+          sc.from = ps[0]!;
+          sc.to = ps[ps.length - 1]!;
+          sc.orders = ps.length;
+          delete e.from;
+          delete e.to;
+          delete e.orders;
+          if (Array.isArray(o.weights)) {
+            const ws = (o.weights as unknown[]).map(Number);
+            if (ws.length !== ps.length || ws.some((x) => !Number.isFinite(x) || x <= 0)) e.weights = 'One positive size per price.';
+            else sc.weights = ws;
+          }
+        }
+      }
       break;
     }
     case 'dca': {
@@ -548,6 +573,14 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         roundMs: o.roundMs === undefined ? 1_000 : int(o, 'roundMs', 'Between rounds', L.roundMs, e),
         timeoutMs: opt(o, 'timeoutMs', 'Give up after', L.timeoutMs, e),
       };
+      const sw = spec as SweepSpec;
+      if (o.reference !== undefined) sw.reference = oneOf(o, 'reference', 'Reference price', ['oracleMid', 'oracleFair', 'mark', 'index'] as const, 'oracleMid', e);
+      if (o.venues !== undefined) {
+        const vs = Array.isArray(o.venues) ? (o.venues as unknown[]) : null;
+        if (!vs || !vs.every(isOracleVenue)) e.venues = 'Unknown venue.';
+        else if (!vs.length && sw.reference !== 'mark' && sw.reference !== 'index') e.venues = 'Choose at least one venue.';
+        else sw.venues = [...new Set(vs)];
+      }
       break;
     }
     case 'bracket': {

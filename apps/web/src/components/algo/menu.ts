@@ -21,7 +21,7 @@ export const ALGO_MENU: readonly AlgoMenuItem[] = [
   { id: 'iceberg', name: 'Iceberg', detail: 'Shows one small clip at a time and refills it, at a price or pegged.' },
   { id: 'chase', name: 'Chase', detail: 'One post-only order that follows the best price until it fills.' },
   { id: 'scale', name: 'Scale', detail: 'A ladder of resting orders between two prices, sized and spaced by curves.' },
-  { id: 'dca', name: 'DCA', detail: 'A first buy, then a limit at every price step below it, bigger each step if you like (or a fixed amount on a schedule).' },
+  { id: 'dca', name: 'DCA', detail: 'Buys at set prices: a first buy, then a limit at every price step below it (or at prices you type), bigger each step if you like.' },
   { id: 'swarm', name: 'Swarm', detail: 'Many small takers in waves, so the book refills between them.' },
   { id: 'conditional', name: 'Conditional', detail: 'When price, a move, funding, OI, spread, volume or time say so: act.' },
   { id: 'trailing', name: 'Trailing stop', detail: 'A stop that follows the price at a distance and closes when it turns.' },
