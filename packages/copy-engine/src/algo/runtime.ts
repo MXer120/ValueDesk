@@ -47,7 +47,7 @@ import {
   type Quote,
   type TrailState,
 } from './math.ts';
-import type { VenueQuote } from '../oracle.ts';
+import type { OracleVenue, VenueQuote } from '../oracle.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
@@ -130,7 +130,7 @@ export interface AlgoHost {
    * its spec chose. Absent, or failing: it falls back to SoDEX's own mark
    * while that is fresh.
    */
-  oracle?(coin: string): Promise<VenueQuote[]>;
+  oracle?(coin: string, venues?: readonly OracleVenue[]): Promise<VenueQuote[]>;
   log: Logger;
   onChange?(id: string): void;
   /** false: no timers (tests drive `tick`). */
@@ -622,17 +622,19 @@ export class AlgoRuntime {
   }
 
   /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
-  private oracleFor(coin: string, now: number): VenueQuote[] {
-    let o = this.oracleQuotes.get(coin);
+  private oracleFor(coin: string, now: number, venues?: readonly OracleVenue[]): VenueQuote[] {
+    // Per coin and venue set: a browser's API gives several venues only as their combined price.
+    const key = `${coin}|${venues?.length ? [...venues].sort().join(',') : '*'}`;
+    let o = this.oracleQuotes.get(key);
     if (!o) {
       o = { quotes: [], at: 0, busy: false };
-      this.oracleQuotes.set(coin, o);
+      this.oracleQuotes.set(key, o);
     }
     if (this.host.oracle && !o.busy && now - o.at >= 1_000) {
       const slot = o;
       slot.busy = true;
       this.host
-        .oracle(coin)
+        .oracle(coin, venues?.length ? venues : undefined)
         .then((q) => {
           slot.quotes = q;
         })
@@ -654,7 +656,7 @@ export class AlgoRuntime {
     const mark = this.market.mark(s.symbol);
     // SoDEX's own prices only when the spec asks for them or as the fallback: the oracle is not read for a mark or index sweep.
     const own = s.reference === 'mark' || s.reference === 'index';
-    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now, s.venues), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
     const act = sweepStep({
       side: s.side,
       total: Number(s.quantity),

@@ -58,14 +58,19 @@ test('the route answers every caller from one read per venue and coin a second',
   assert.equal(a.mid, 100);
   assert.equal(a.fair, 100.2);
   assert.deepEqual(a.used, ['bybit', 'okx']);
-  assert.equal(a.quotes.length, 2);
-  assert.equal(a.quotes[0].stale, false);
+  // Several venues: the combined price only, no venue's own quote.
+  assert.equal(a.quotes, undefined);
+  assert.equal(a.errors, undefined);
+  assert.equal(typeof a.ageMs, 'number');
   // Ten more callers within the second: no new read.
   await Promise.all(Array.from({ length: 10 }, () => get('/api/vs/oracle?coin=btc&venues=okx,bybit')));
   assert.deepEqual(reads.sort(), ['bybit:BTC', 'okx:BTC']);
   // A second later: one more read each.
   t += 1_001;
-  await get('/api/vs/oracle?coin=BTC&venues=okx');
+  const one = await get('/api/vs/oracle?coin=BTC&venues=okx');
+  // One venue: its quote, as asked.
+  assert.equal(one.quotes.length, 1);
+  assert.equal(one.quotes[0].venue, 'okx');
   assert.equal(reads.filter((r) => r === 'okx:BTC').length, 2);
   const bad = await app.inject({ method: 'GET', url: '/api/vs/oracle?coin=BTC&venues=nope' });
   assert.equal(bad.statusCode, 400);
