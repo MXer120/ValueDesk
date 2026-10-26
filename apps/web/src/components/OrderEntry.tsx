@@ -1147,9 +1147,22 @@ export function OrderEntry({
   const touch = side === 'buy' ? bestAsk : bestBid;
   // What the book draws for a limit: the levels a marketable one takes, like a
   // market, and what would rest on its own side - by its TIF (orderImpact.ts limitImpact).
-  const { takes: takesNow, rest: resting } = marketExec
+  // Only an order that goes to the book now: a stop waits for its trigger and an
+  // algo trades over time, so neither is drawn.
+  const { takes: takesNow, rest: resting } = type !== 'limit'
     ? { takes: [] as RawTake[], rest: null }
     : limitImpact({ side, limit: limitPx, qty: liveQty, tif: effectiveTif, touch, walk: walked.takes });
+  /** What this limit's TIF does at this price, said on the ticket; post only through the touch is refused before signing. */
+  const crossesNow = type === 'limit' && limitPx !== null && touch > 0 && (side === 'buy' ? limitPx >= touch : limitPx <= touch);
+  const tifNote: { text: string; block?: boolean } | null = type !== 'limit' || limitPx === null || !(liveQty > 0)
+    ? null
+    : effectiveTif === 'gtx' && crossesNow
+      ? { text: `Post only: at this price it would take, so SoDEX would reject it. Set a price ${side === 'buy' ? 'below the best ask' : 'above the best bid'}.`, block: true }
+      : effectiveTif === 'ioc' && !crossesNow
+        ? { text: 'IOC: nothing fills at this price, so it would be cancelled at once.' }
+        : crossesNow
+          ? { text: effectiveTif === 'ioc' ? 'Fills now as a taker up to this price; the rest is cancelled.' : 'Fills now as a taker up to this price; the rest rests on the book.' }
+          : null;
   const estSlip = liveQty <= 0
     ? 0
     : !levels?.length
@@ -1162,7 +1175,7 @@ export function OrderEntry({
     ? num(sym.marketDeviationRatio) * 100
     : null;
   const slipCap = venueMaxPct !== null ? Math.min(SLIP_CAP_PCT, venueMaxPct) : SLIP_CAP_PCT;
-  const depthTakes = marketExec ? walked.takes : takesNow;
+  const depthTakes = type === 'market' ? walked.takes : takesNow;
   const takeKey = depthTakes.map((t) => `${t.price}:${t.taken}`).join(',');
   const restKey = resting ? `${resting.price}:${resting.qty}` : '';
   useEffect(() => {
@@ -1337,11 +1350,12 @@ export function OrderEntry({
   const liveBelow = minNotional !== null && liveNotional > 0 && liveNotional < num(minNotional);
   const liveAbove = maxNotional !== null && liveNotional > num(maxNotional);
   const canSend = !busy && unlocked && !accountMismatch && !liveBelow && !liveAbove
-    && liveQty > 0 && (marketExec || num(price) > 0) && !(type === 'stop' && !stopPrice);
+    && liveQty > 0 && (marketExec || num(price) > 0) && !(type === 'stop' && !stopPrice) && !tifNote?.block;
 
   async function place(side: 'buy' | 'sell') {
     if (!unlocked) return show('err', 'Enable trading first.');
     if (!marketExec && !(num(price) > 0)) return show('err', 'Enter a price.');
+    if (tifNote?.block) return show('err', tifNote.text);
     if (liveBelow) return show('err', `Below minimum ${fmt(minNotional)} ${coinLabel(sym?.quoteCoin)}.`);
     if (liveAbove) return show('err', `Above maximum ${fmt(maxNotional)} ${coinLabel(sym?.quoteCoin)}.`);
     if (accountMismatch) {
@@ -1954,6 +1968,9 @@ export function OrderEntry({
           )}
           {liveAbove && (
             <p className="oe-hint oe-hint--under oe-hint--bad">Above maximum {fmt(maxNotional)} {quoteLabel}</p>
+          )}
+          {tifNote && !liveBelow && !liveAbove && (
+            <p className={`oe-hint oe-hint--under${tifNote.block ? ' oe-hint--bad' : ''}`}>{tifNote.text}</p>
           )}
         </div>
 

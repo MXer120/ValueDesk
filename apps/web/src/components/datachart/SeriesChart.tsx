@@ -619,8 +619,8 @@ function spanView(m: Model | null, width: number, span: number | null): View {
   return viewOf(l, n - 0.5, width, n) ?? fitView(n, width);
 }
 
-/** How far the magnet reaches, px from the pointer. */
-const MAGNET_PX = 32;
+/** How far the magnet reaches, px from the pointer: only right by a point (owner: further off it reads as lag). */
+const MAGNET_PX = 14;
 
 const motionOk = () => !prefersReducedMotion() && !document.documentElement.classList.contains('is-potato');
 const viewMs = (): number | undefined => (prefersReducedMotion() ? 0 : undefined);
@@ -636,7 +636,16 @@ let uidSeq = 0;
  * wheel and a drag then reach every point of it, and a new span is one eased
  * move to it. A double click goes back to the span.
  */
-export function SeriesChart({ series, height = 220, daily = true, span = null }: { series: ChartSeries[]; height?: number; daily?: boolean; span?: number | null }) {
+export function SeriesChart({ series, height = 220, daily = true, span = null, magnet: magnetOn = false }: {
+  series: ChartSeries[];
+  height?: number;
+  daily?: boolean;
+  span?: number | null;
+  /** Snap the crosshair to a point right by the pointer: the calendar's event charts only (owner, 2026-10-26). */
+  magnet?: boolean;
+}) {
+  const magnetRef = useRef(magnetOn);
+  magnetRef.current = magnetOn;
   const host = useRef<HTMLDivElement>(null);
   /** The span asked for now, and the one the view was last put on. */
   const spanNow = useRef<number | null>(span);
@@ -799,7 +808,8 @@ export function SeriesChart({ series, height = 220, daily = true, span = null }:
   /**
    * The magnet: the crosshair (both lines, the value tag, the legend) jumps to
    * the nearest real point within MAGNET_PX of the pointer - its time and its
-   * value; on bars, the bar's value, the whole bar counting as near. Always on.
+   * value; on bars, the bar's value, the whole bar counting as near. Only where
+   * the caller asks for it (`magnet`).
    * Null when nothing is that close, and the crosshair follows the pointer.
    */
   const magnet = useCallback((c: KChart, px: number, py: number): { x: number; y: number; index: number } | null => {
@@ -912,7 +922,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null }:
           // klinecharts reports the pointer before it paints the crosshair; a
           // crosshair set from here (executeAction, which reports nothing back)
           // is the one it paints.
-          const snap = cr.paneId === CANDLE_PANE_ID && typeof cr.y === 'number' ? magnet(ch, cr.x, cr.y) : null;
+          const snap = magnetRef.current && cr.paneId === CANDLE_PANE_ID && typeof cr.y === 'number' ? magnet(ch, cr.x, cr.y) : null;
           if (snap) {
             const set = () => ch.executeAction('onCrosshairChange', { x: snap.x, y: snap.y, paneId: CANDLE_PANE_ID });
             set();

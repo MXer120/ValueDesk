@@ -171,7 +171,7 @@ function EventChart({ ind, period, onFull }: { ind: { id: string; name: string }
         <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading the history…</p>
       ) : (
         <>
-          <SeriesChart series={series} height={230} span={rangeSpan(range)} />
+          <SeriesChart series={series} height={230} span={rangeSpan(range)} magnet />
           <p className="evc__foot">
             {want && d.latest && basePeriod(d.latest.period) !== want && !d.table.some((t) => t.period === want)
               ? `History through ${d.latest.period}; ${want} is added once ${d.source.name} publishes it. `
