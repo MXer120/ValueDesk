@@ -33,3 +33,73 @@ html[data-glass] .dash-panel[data-panel="livefeed"]:has(.lf.is-empty) {
   backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
   border-color: rgba(255, 255, 255, 0.07);
 }
+
+/* --- every pop-up in the Settings window's language -------------------------
+   Menus, popovers, hover cards, dialogs and sheets (the floating list in
+   styles.css) take the Settings window's glass: its tint and blur (the
+   glass tokens, from Settings > Appearance), the light across the top-left
+   corner and the darker lower edge, a hairline edge with a lit top, a soft
+   deep shadow and rounder corners. The scrim behind a dialog only dims: its
+   own blur would make it the backdrop root, and the dialog's blur would see
+   nothing of the page. `html` in front outranks each surface's own fill. */
+html:root {
+  --glass-pop-bg: color-mix(in srgb, var(--stg-tint) var(--stg-tint-a), transparent);
+  --glass-pop-blur: blur(var(--stg-blur)) saturate(var(--stg-sat));
+  --glass-sheet-bg: color-mix(in srgb, var(--stg-tint) var(--stg-tint-a), transparent);
+  --glass-sheet-blur: blur(var(--stg-blur)) saturate(var(--stg-sat));
+}
+html .modal-scrim,
+html .cdlg-scrim { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(8, 9, 11, 0.3); }
+/* A fade held after it ends (`both`) keeps an opacity effect on the scrim, which
+   makes it the backdrop root just the same: the fade runs, then lets go. */
+html .cdlg-scrim { animation-fill-mode: backwards; }
+html .menu-popup,
+html .modal,
+html .cp,
+html .cdlg,
+html .oe-pop,
+html .acctf-pop,
+html .acct-hc,
+html .kc-rail-popup,
+html .mkt-spark-tip,
+html .mkt-bookpop,
+html .mkdepth-tip,
+html .sfoot-pop,
+html .navnotes__panel,
+html .coh-pick__pop,
+html .coh-lean__tip,
+html .pf-chart__tip,
+html .cp-menu,
+html .cp-fpop {
+  background-image:
+    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 55%),
+    linear-gradient(180deg, transparent 40%, color-mix(in srgb, color-mix(in srgb, var(--stg-tint), #000 var(--stg-shade)) calc(var(--stg-shade-a) * 0.5), transparent));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+html .menu-popup,
+html .oe-pop,
+html .acctf-pop,
+html .acct-hc,
+html .kc-rail-popup,
+html .sfoot-pop,
+html .navnotes__panel,
+html .coh-pick__pop,
+html .cp-menu,
+html .cp-fpop { border-radius: 14px; }
+html .modal, html .cp, html .cdlg { border-radius: 20px; }
+
+/* A dialog reads like the Settings pane: a title, not a bar; no rules between head, body and foot. */
+html .modal-head { padding: 18px 20px 4px 22px; border-bottom: 0; }
+html .modal-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+html .modal-close {
+  display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 9px; font-size: 18px;
+  transition: background 140ms, color 140ms;
+}
+html .modal-close:hover { background: rgba(255, 255, 255, 0.08); }
+html .modal-body { padding: 14px 22px 22px; }
+html .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); background: transparent; }
+
+/* Menu rows: the Settings sections' soft, rounded rows. */
+html .menu-popup .menu-row { border-radius: 9px; }
+html .menu-popup .menu-sep { background: rgba(255, 255, 255, 0.07); }
