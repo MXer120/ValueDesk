@@ -8,7 +8,9 @@
  * 2026-10-26: "doesn't need to be fully realistic there"), its raised flipper
  * swung whole about its root to where the owner drew it (the gap it leaves filled
  * from the body and background around it), mirrored so it heads left and tilted
- * 22 degrees into a breach, and
+ * 22 degrees into a breach; then, as the owner drew them, the head rounded into
+ * a smooth wedge, the far flipper's top edge smoothed, and the body's right side
+ * made one gradual curve. And
  * kept as a tone map
  * (whale-tone.png: grey = the photo's light, alpha = the whale), equalised over
  * the whale so its dark skin spreads over the whole range. The map is inlined in
@@ -30,8 +32,8 @@ import toneUrl from './whale-tone.png?inline';
 
 /** The tone map's size, and its row on the surface; the box adds a little room either side. */
 const TW = 478;
-const TH = 774;
-const WATERLINE = 356;
+const TH = 756;
+const WATERLINE = 348;
 const PAD = 44;
 const W = TW + PAD * 2;
 /** The band below the surface over which sharp turns to under water (CSS px). */
