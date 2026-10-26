@@ -44,12 +44,13 @@ export const ALGO_LIMITS = {
   pov: { rate: { min: 0.01, max: 0.5 } },
   iceberg: { refillMs: { min: 0, max: 10 * MIN } },
   chase: { offsetTicks: { min: -5, max: 10_000 }, offsetBps: { min: 0, max: 2_000 }, chaseTicks: { min: 1, max: 10_000 }, maxChaseBps: { min: 1, max: 5_000 }, timeoutMs: { min: 5_000, max: 7 * DAY }, minRepriceMs: { min: 250, max: MIN } },
-  scale: { orders: { min: 2, max: 100 }, skew: { min: 0.1, max: 10 }, sizeJitter: { min: 0, max: 0.3 } },
+  scale: { orders: { min: 2, max: 100 }, skew: { min: 0.001, max: 1000 }, sizeJitter: { min: 0, max: 0.3 } },
   dca: { perOrderUsd: { min: 10, max: 1_000_000 }, orders: { min: 2, max: 1000 }, intervalMs: { min: MIN, max: 30 * DAY }, dipPct: { min: 0.01, max: 0.9 }, dipMultiplier: { min: 1, max: 5 } },
   swarm: { clips: { min: 2, max: 200 }, inFlight: { min: 1, max: 20 }, waveMs: { min: 0, max: MIN }, sizeJitter: { min: 0, max: 0.9 }, retries: { min: 0, max: 5 } },
   conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5_000, max: HOUR } },
   trailing: { trailPct: { min: 0.001, max: 0.5 }, chaseMs: { min: 1_000, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 10_000_000 } },
+  sweep: { slippageBps: { min: 1, max: 1_000 }, roundMs: { min: 250, max: MIN }, timeoutMs: { min: 5_000, max: DAY } },
   exitPct: { min: 0.001, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 10_000 }, chaseTicks: { min: 1, max: 10_000 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -537,6 +538,18 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
       };
       break;
     }
+    case 'sweep': {
+      const L = ALGO_LIMITS.sweep;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, 'quantity', 'Size', e),
+        slippageBps: num(o, 'slippageBps', 'Max slippage', L.slippageBps, e),
+        roundMs: o.roundMs === undefined ? 1_000 : int(o, 'roundMs', 'Between rounds', L.roundMs, e),
+        timeoutMs: opt(o, 'timeoutMs', 'Give up after', L.timeoutMs, e),
+      };
+      break;
+    }
     case 'bracket': {
       const entry = oneOf(o, 'entry', 'Entry', ['market', 'limit'] as const, 'market', e);
       if (!b.exits) e.exits = 'A bracket needs a take-profit, a stop-loss, or both.';
@@ -613,4 +626,5 @@ export const ALGO_NAMES: Readonly<Record<AlgoKind, string>> = {
   trailing: 'Trailing stop',
   basket: 'Basket',
   bracket: 'Bracket',
+  sweep: 'Fill fast',
 };

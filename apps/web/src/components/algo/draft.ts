@@ -82,6 +82,17 @@ export interface Draft {
   scaleJitter: string;
   perOrder: string;
   dcaOrders: string;
+  /**
+   * DCA: 'price' is a trading bot's DCA (3Commas, Bybit, Pionex): a first buy,
+   * then a limit buy every `dcaStep` % below it (sells: above), `dcaMult`
+   * times the size of the one before. 'time' is the schedule it was before
+   * (a fixed amount every interval). Drafts saved before 2026-10-26 load as 'time'.
+   */
+  dcaMode: 'price' | 'time';
+  dcaStep: string;
+  dcaMult: string;
+  dcaFirst: 'market' | 'price';
+  dcaStart: string;
   every: string;
   everyUnit: Unit;
   outOfBand: 'skip' | 'wait';
@@ -133,6 +144,10 @@ export interface Draft {
   /** Basket. */
   legs: LegDraft[];
   basketStyle: 'swarm' | 'twap';
+  /** Fill fast: max slippage from the oracle (%), the wait between rounds (s), give up after (min; empty: never). */
+  sweepSlip: string;
+  sweepRound: string;
+  sweepGiveUp: string;
   /** Bracket. */
   entry: 'market' | 'limit';
   entryPrice: string;
@@ -153,7 +168,7 @@ export const DEFAULT: Draft = {
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
   offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
   from: '', to: '', orders: '10', distribution: 'flat', skew: '1', spacing: 'linear', scaleJitter: '0',
-  perOrder: '50', dcaOrders: '10', every: '1', everyUnit: 'h', outOfBand: 'skip', dip: '', dipMult: '2', budget: '',
+  perOrder: '50', dcaOrders: '10', dcaMode: 'price', dcaStep: '2', dcaMult: '1', dcaFirst: 'market', dcaStart: '', every: '1', everyUnit: 'h', outOfBand: 'skip', dip: '', dipMult: '2', budget: '',
   clips: '10', inFlight: 2, waveSec: '3', retries: '2',
   match: 'all', conds: [], holdSec: '0', expires: '', expiresUnit: 'd', then: 'market', thenPrice: '', closePct: '100', thenMin: '15', thenSlices: '15',
   trailMode: 'pct', trail: '1', activation: '', trailWhole: true, source: 'mark', exit: 'market', chaseSec: '15',
@@ -163,6 +178,7 @@ export const DEFAULT: Draft = {
   exitsOn: false, tpMode: 'pct', tp: '2', slMode: 'pct', sl: '1',
   legs: [], basketStyle: 'swarm',
   entry: 'market', entryPrice: '',
+  sweepSlip: '0.5', sweepRound: '1', sweepGiveUp: '',
 };
 
 /** The draft in storage. Where the algo runs is not in it any more (executor.ts keeps that). */
@@ -214,6 +230,8 @@ export function loadDraft(store: Store | null = local()): Draft {
       const oldChase = saved.maxChase;
       delete saved.maxChase;
       if (saved.maxChasePct === undefined && typeof oldChase === 'string') saved.maxChasePct = bpsToPct(oldChase);
+      // A DCA saved before it was price-based keeps its schedule.
+      if (saved.dcaMode === undefined) saved.dcaMode = 'time';
       const d: Draft = { ...DEFAULT, ...saved, conds: [], legs: [] };
       if (saved.slicesAuto === undefined) d.slicesAuto = d.slices === autoSlices(d.dur, d.durUnit);
       return d;
@@ -226,7 +244,7 @@ export function loadDraft(store: Store | null = local()): Draft {
 
 export function saveDraft(d: Draft, store: Store | null = local()): void {
   try {
-    const { conds: _c, from: _f, to: _t, icePrice: _i, limitPrice: _l, upper: _u, lower: _lo, startPrice: _s, thenPrice: _tp, activation: _a, legs: _lg, entryPrice: _ep, ...keep } = d;
+    const { conds: _c, from: _f, to: _t, icePrice: _i, limitPrice: _l, upper: _u, lower: _lo, startPrice: _s, thenPrice: _tp, activation: _a, legs: _lg, entryPrice: _ep, dcaStart: _ds, ...keep } = d;
     store?.setItem(DRAFT_KEY, JSON.stringify(keep));
   } catch {
     /* storage blocked */
@@ -242,6 +260,34 @@ export interface TicketShared {
   reduceOnly: boolean;
   leverage: number | null;
   marginMode: 'cross' | 'isolated';
+  /** The book's touch: a price DCA's first buy at market is priced at it. */
+  bid?: number | null;
+  ask?: number | null;
+}
+
+/**
+ * A price DCA as the scale ladder the engine works: level i at the first price
+ * moved i steps (buy: P0 x (1 - i x step), sell: up), even in price (linear
+ * spacing); level i is `mult`^i times the first in size (an exponential curve
+ * whose skew, the last over the first, is mult^(n-1)). Each buy is the amount
+ * in USD at the first price. A first buy at market is a GTC limit at the touch
+ * (ask for a buy, bid for a sell): it takes at once while the touch holds.
+ * null where the first price is not known yet.
+ */
+export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 'dcaMult' | 'dcaFirst' | 'dcaStart'>, p: Pick<TicketShared, 'side' | 'bid' | 'ask'>): { from: number | null; to: number | null; orders: number; skew: number; quantity: string } {
+  const orders = Math.trunc(n(d.dcaOrders));
+  const step = frac(d.dcaStep);
+  const mult = n(d.dcaMult) > 0 ? n(d.dcaMult) : 1;
+  const touch = p.side === 'buy' ? p.ask : p.bid;
+  const from = d.dcaFirst === 'price' ? opt(d.dcaStart) : touch && touch > 0 ? touch : null;
+  const sign = p.side === 'buy' ? -1 : 1;
+  const to = from !== null && orders >= 2 ? from * (1 + sign * step * (orders - 1)) : from;
+  const skew = orders >= 2 ? Math.pow(mult, orders - 1) : 1;
+  let sum = 0;
+  for (let i = 0; i < orders && i < 1000; i++) sum += Math.pow(mult, i);
+  const q = from && n(d.perOrder) > 0 ? (n(d.perOrder) / from) * sum : 0;
+  const quantity = q > 0 ? q.toFixed(12).replace(/0+$/, '').replace(/\.$/, '') : '0';
+  return { from, to: to !== null && to > 0 ? to : null, orders, skew, quantity };
 }
 
 /** Whether the ticket offers exits for this kind: anything that opens a position (a bracket always has them). */
@@ -311,6 +357,8 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
         maxParticipation: opt(d.maxPart) ? frac(d.maxPart) : null,
       };
     }
+    case 'sweep':
+      return { ...base, quantity: p.quantity, slippageBps: pctToBps(d.sweepSlip) ?? 0, roundMs: Math.round((n(d.sweepRound) || 1) * 1000), timeoutMs: opt(d.sweepGiveUp) ? Math.round(n(d.sweepGiveUp) * 60_000) : null };
     case 'bracket':
       return { ...base, quantity: p.quantity, entry: d.entry, price: d.entry === 'limit' ? opt(d.entryPrice) : null, slippageBps: n(d.slip) };
     case 'basket':
@@ -338,6 +386,10 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     case 'scale':
       return { ...base, quantity: p.quantity, from: opt(d.from), to: opt(d.to), orders: Math.trunc(n(d.orders)), distribution: d.distribution, skew: n(d.skew) || 1, spacing: d.spacing, sizeJitter: frac(d.scaleJitter), postOnly: d.postOnly };
     case 'dca':
+      if (d.dcaMode === 'price') {
+        const l = dcaLadder(d, p);
+        return { ...base, kind: 'scale', limitPrice: null, upper: null, lower: null, maxSpreadBps: null, quantity: l.quantity, from: l.from, to: l.to, orders: l.orders, distribution: 'exponential', skew: l.skew, spacing: 'linear', sizeJitter: 0, postOnly: false };
+      }
       return { ...base, perOrderUsd: n(d.perOrder), orders: Math.trunc(n(d.dcaOrders)), intervalMs: Math.round(n(d.every) * UNIT_MS[d.everyUnit]), outOfBand: d.outOfBand, dipPct: opt(d.dip) ? frac(d.dip) : null, dipMultiplier: n(d.dipMult) || 1, maxTotalUsd: opt(d.budget), exec: { ...exec, style: d.exec === 'hybrid' ? 'hybrid' : d.exec } };
     case 'swarm':
       return { ...base, quantity: p.quantity, clips: Math.trunc(n(d.clips)), inFlight: d.inFlight, waveMs: Math.round((n(d.waveSec) || 0) * 1000), sizeJitter: frac(d.sizeJitter), slippageBps: n(d.slip), retries: Math.trunc(n(d.retries) || 0) };
@@ -406,11 +458,12 @@ export const INLINE_KEYS: Record<UiKind, readonly string[]> = {
   iceberg: ['icePrice', 'display'],
   chase: ['maxChasePct'],
   scale: ['from', 'to', 'orders', 'scaleSize'],
-  dca: ['perOrder', 'every', 'everyUnit', 'dcaOrders'],
+  dca: ['perOrder', 'dcaStep', 'dcaOrders', 'dcaMult', 'dcaFirst', 'dcaStart'],
   swarm: ['clips', 'randomize'],
   trailing: ['trail', 'trailMode', 'activation'],
   conditional: ['conds', 'then', 'thenPrice', 'closePct', 'thenMin'],
   bracket: ['entry', 'entryPrice', 'tp', 'tpMode', 'sl', 'slMode'],
+  sweep: ['sweepSlip'],
   basket: ['legs', 'basketStyle', 'dur', 'durUnit'],
 };
 
@@ -423,13 +476,19 @@ export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
   chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'timeout', 'onEnd'],
   scale: ['skew', 'spacing', 'scaleJitter', 'postOnly'],
-  dca: ['budget', 'dip', 'dipMult', 'exec'],
+  dca: ['dcaMode', 'budget', 'dip', 'dipMult', 'exec'],
   swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
   trailing: ['trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
   conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],
   bracket: ['slip'],
+  sweep: ['sweepRound', 'sweepGiveUp'],
   basket: ['slicesAuto', 'clips', 'waveSec', 'slip'],
 };
+
+/** A DCA on a schedule (Buy on a schedule instead): the ticket shows these in place of the step and the multiplier. */
+export const DCA_TIME_INLINE: readonly string[] = ['perOrder', 'every', 'everyUnit', 'dcaOrders'];
+/** What only a DCA on a schedule has in its settings. */
+const DCA_TIME_ONLY: ReadonlyArray<keyof Draft> = ['budget', 'dip', 'dipMult', 'exec'];
 
 /* Randomize: the TWAP's and the swarm's switch on the ticket (Hyperliquid's
    "Randomize", Insilico's "Irregular lots"). On is the jitter the Advanced
@@ -496,16 +555,17 @@ const ADV_LABEL: Partial<Record<keyof Draft, string>> = {
   displayJitter: 'size varies', offsetTicks: 'offset', refill: 'refill', postOnly: 'post only',
   offsetMode: 'rest', offsetBps: 'behind', timeout: 'give up after', onEnd: 'then',
   distribution: 'size curve', skew: 'skew', spacing: 'spacing', scaleJitter: 'size varies',
-  budget: 'budget', dip: 'dip', dipMult: 'dip size',
+  dcaMode: 'on a schedule', budget: 'budget', dip: 'dip', dipMult: 'dip size',
   inFlight: 'per wave', waveSec: 'between waves', retries: 'retries',
   trailWhole: 'size', source: 'price', exit: 'exit', chaseSec: 'chase for',
   match: 'when', holdSec: 'hold for', expires: 'expires', thenSlices: 'slices',
-  basketStyle: 'each market', dur: 'duration', clips: 'clips',
+  basketStyle: 'each market', sweepRound: 'between rounds', sweepGiveUp: 'give up after', dur: 'duration', clips: 'clips',
 };
 
 /** Whether the shared rules apply to the kind (a price limit; bounds and the spread guard). */
-export const hasLimit = (kind: UiKind): boolean => kind !== 'scale' && kind !== 'trailing' && kind !== 'basket';
-export const hasBounds = (kind: UiKind): boolean => hasLimit(kind) && kind !== 'conditional' && kind !== 'bracket';
+/** A price DCA is a ladder of limits: its prices are its limits, as a scale's are. */
+export const hasLimit = (kind: UiKind, d?: Pick<Draft, 'dcaMode'>): boolean => kind !== 'scale' && kind !== 'trailing' && kind !== 'basket' && kind !== 'sweep' && !(kind === 'dca' && d?.dcaMode === 'price');
+export const hasBounds = (kind: UiKind, d?: Pick<Draft, 'dcaMode'>): boolean => hasLimit(kind, d) && kind !== 'conditional' && kind !== 'bracket';
 
 /**
  * What in the Advanced pop-up differs from the defaults, in a word each: the
@@ -529,13 +589,14 @@ export function advancedChanges(kind: UiKind, d: Draft, exits: boolean): string[
     if (k === 'offsetBps' && d.offsetMode !== 'bps') continue;
     if (k === 'offsetTicks' && kind === 'chase' && d.offsetMode === 'bps') continue;
     if (k === 'dipMult' && !opt(d.dip)) continue;
+    if (kind === 'dca' && d.dcaMode === 'price' && DCA_TIME_ONLY.includes(k)) continue;
     if (k === 'onEnd' && !opt(d.timeout)) continue;
     if (d[k] !== DEFAULT[k]) out.push(ADV_LABEL[k] ?? k);
   }
   if (exits && kind !== 'bracket' && d.exitsOn) out.push('take-profit / stop-loss');
-  if (hasLimit(kind) && opt(d.limitPrice)) out.push('limit');
+  if (hasLimit(kind, d) && opt(d.limitPrice)) out.push('limit');
   if (d.startMode !== 'now') out.push(d.startMode === 'delay' ? 'starts later' : 'starts at a price');
-  if (hasBounds(kind)) {
+  if (hasBounds(kind, d)) {
     if (opt(d.upper)) out.push('above');
     if (opt(d.lower)) out.push('below');
     if (opt(d.maxSpread)) out.push('max spread');

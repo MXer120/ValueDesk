@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkAlgoSpec } from '@copy-engine';
 import {
-  ADVANCED_KEYS, DEFAULT, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
+  ADVANCED_KEYS, DCA_TIME_INLINE, DEFAULT, dcaLadder, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
   randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf,
   type Draft, type TicketShared,
 } from './draft';
@@ -28,6 +28,7 @@ function untouched(kind: UiKind): Draft {
   if (kind === 'conditional') d.conds = [cond('BTC-USD', { value: '99000' })];
   if (kind === 'basket') d.legs = legs('BTC-USD', 'buy');
   if (kind === 'iceberg') d.display = '0.05';
+  if (kind === 'dca') Object.assign(d, { dcaFirst: 'price', dcaStart: '100000' });
   return d;
 }
 
@@ -232,4 +233,44 @@ test('POV speed presets: Medium is the old default, so an untouched form sends w
   assert.deepEqual(spec, draftToSpec('pov', { ...DEFAULT }, shared, NOW));
   assert.equal(spec.rate, 0.1);
   assert.equal(draftToSpec('pov', { ...DEFAULT, ...setPovPreset('high') }, shared, NOW).rate, 0.2);
+});
+
+/* ------------------------------------------- DCA by price (2026-10-26) ----- */
+
+test('an untouched DCA is price-based: a first buy at the ask, then a limit every 2% lower, as a scale ladder', () => {
+  const s = draftToSpec('dca', DEFAULT, { ...shared, bid: 99_990, ask: 100_000 }, NOW);
+  assert.equal(s.kind, 'scale');
+  assert.equal(s.from, 100_000);
+  assert.ok(Math.abs((s.to as number) - 100_000 * (1 - 0.02 * 9)) < 1e-6);
+  assert.equal(s.orders, 10);
+  assert.equal(s.spacing, 'linear');
+  assert.equal(s.distribution, 'exponential');
+  assert.equal(s.skew, 1);
+  assert.equal(s.postOnly, false);
+  // $50 a buy at the first price, 10 buys: 0.005 BTC.
+  assert.equal(s.quantity, '0.005');
+  const c = checkAlgoSpec(s);
+  assert.deepEqual(c.errors, {});
+});
+
+test('a price DCA sells upward, multiplies its size per step, and waits for a price', () => {
+  const l = dcaLadder({ ...DEFAULT, dcaOrders: '3', dcaMult: '2', perOrder: '100' }, { side: 'sell', bid: 50, ask: 51 });
+  assert.equal(l.from, 50);
+  assert.ok(Math.abs(l.to! - 52) < 1e-9);
+  assert.equal(l.skew, 4);
+  assert.equal(l.quantity, '14'); // 2 + 4 + 8
+  assert.equal(dcaLadder(DEFAULT, { side: 'buy', bid: null, ask: null }).from, null);
+});
+
+test('a DCA on a schedule still sends the time-based spec, and a DCA saved before is one', () => {
+  const s = draftToSpec('dca', { ...DEFAULT, dcaMode: 'time' }, shared, NOW);
+  assert.equal(s.kind, 'dca');
+  assert.equal(s.intervalMs, 3_600_000);
+  assert.deepEqual(checkAlgoSpec(s).errors, {});
+  const st = memStore({ [DRAFT_KEY]: JSON.stringify({ perOrder: '20' }) });
+  assert.equal(loadDraft(st).dcaMode, 'time');
+  assert.deepEqual(DCA_TIME_INLINE, ['perOrder', 'every', 'everyUnit', 'dcaOrders']);
+  // The schedule's own settings are not counted while it is price-based.
+  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, budget: '500' }, false), []);
+  assert.deepEqual(advancedChanges('dca', { ...DEFAULT, dcaMode: 'time', budget: '500' }, false), ['on a schedule', 'budget']);
 });

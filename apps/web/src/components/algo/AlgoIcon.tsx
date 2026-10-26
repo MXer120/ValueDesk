@@ -42,6 +42,8 @@ const PATHS: Record<UiKind, JSX.Element> = {
   // A stop that follows the price at a distance.
   trailing: <><path d="M2 9.5 5.5 6l3 2.5L14 3" /><path d="M2 13.5 5.5 10l3 2.5L14 7" strokeDasharray="0.01 2.75" /></>,
   // An entry with its take-profit and stop-loss around it.
+  // Fill fast: a bolt.
+  sweep: <path d="M9 1.5 3.5 9H8l-1 5.5L12.5 7H8Z" />,
   bracket: <path d="M5 2.5H3v11h2M11 2.5h2v11h-2M6.5 8h3" />,
   // Several markets in one order.
   basket: <path d="M2 6.5h12l-1.5 7h-9Z M5.5 6.5 7.5 2.5M10.5 6.5 8.5 2.5M6.5 9v2M9.5 9v2" />,

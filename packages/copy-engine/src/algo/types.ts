@@ -16,6 +16,7 @@
  *   trailing     a stop that follows the price at a distance and takes when it turns
  *   basket       one parent spread over several markets (each leg a swarm or a TWAP of its own)
  *   bracket      an entry (market or limit) with a take-profit and a stop-loss, one cancelling the other
+ *   sweep        fill fast: IOC limits for the rest, round after round, at a band around an outside reference (Binance)
  *
  * Every child order is an ordinary SoDEX order (IOC to take, GTX to rest,
  * GTC for a ladder) carrying the ValueDesk builder fee, so it shows in the
@@ -37,9 +38,9 @@
  */
 import type { ConsentRecord, CopyMode } from '../types.ts';
 
-export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket';
+export type AlgoKind = 'twap' | 'vwap' | 'pov' | 'iceberg' | 'chase' | 'scale' | 'dca' | 'swarm' | 'conditional' | 'trailing' | 'basket' | 'bracket' | 'sweep';
 
-export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket'];
+export const ALGO_KINDS: readonly AlgoKind[] = ['twap', 'vwap', 'pov', 'iceberg', 'chase', 'scale', 'dca', 'swarm', 'conditional', 'trailing', 'basket', 'bracket', 'sweep'];
 
 export type Side = 'buy' | 'sell';
 
@@ -223,7 +224,7 @@ export interface ScaleSpec extends AlgoBase {
   to: number;
   orders: number;
   distribution: ScaleDistribution;
-  /** linear / exponential: the last order's size over the first's (0.1..10). */
+  /** linear / exponential: the last order's size over the first's (0.001..1000; a DCA ladder's size multiplier per step is this to the power 1/(orders-1)). */
   skew: number;
   /** Price steps: even, even in percent, denser near the first price, or denser near the last. */
   spacing: 'linear' | 'geometric' | 'front' | 'back';
@@ -368,7 +369,25 @@ export interface BracketSpec extends AlgoBase {
   slippageBps: number;
 }
 
+/**
+ * Fill fast (sweep.ts): each round one IOC limit for everything still open,
+ * at the reference (the median of Binance futures and spot, SoDEX's mark as
+ * the fallback) plus `slippageBps` for a buy, minus for a sell. Paused while
+ * no reference is fresh.
+ */
+export interface SweepSpec extends AlgoBase {
+  kind: 'sweep';
+  quantity: string;
+  /** How far from the reference it may fill, bps. */
+  slippageBps: number;
+  /** Wait between rounds, ms. */
+  roundMs: number;
+  /** Give up after this long. null = never. */
+  timeoutMs: number | null;
+}
+
 export type AlgoSpec =
+  | SweepSpec
   | TwapSpec
   | VwapSpec
   | PovSpec

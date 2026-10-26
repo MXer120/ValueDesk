@@ -69,6 +69,7 @@ import { notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
 import { limitImpact, publishOrderImpact, type RawTake } from '../orderImpact';
+import { publishDraftOrders, type DraftLine } from '../draftOrders';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
@@ -1339,6 +1340,34 @@ export function OrderEntry({
   const useTp = useExits && num(tpPrice) > 0;
   const useSl = useExits && num(slPrice) > 0;
   const activeSl = num(useSl ? slPrice : type === 'stop' && stopKind === 'sl' ? stopPrice : '');
+
+  // The order's prices on the chart while it is only on the ticket
+  // (draftOrders.ts): a limit's price, a stop's trigger (and its limit), the
+  // exits. An algo publishes its own (AlgoTicket). Once placed, the same
+  // prices are not drawn again until they change.
+  const draftQty = liveQty > 0 ? ` · ${fmtQty(liveQty, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trimEnd() : '';
+  const draftLines: DraftLine[] = [];
+  if (!isAlgo) {
+    if (type === 'limit' && limitPx) draftLines.push({ price: limitPx, label: `Limit${draftQty}`, kind: 'limit' });
+    if (type === 'stop' && num(stopPrice) > 0) draftLines.push({ price: num(stopPrice), label: `Trigger${draftQty}`, kind: 'trigger' });
+    if (type === 'stop' && stopExec === 'limit' && num(price) > 0) draftLines.push({ price: num(price), label: `Limit${draftQty}`, kind: 'limit' });
+    if (engine === 'perps' && useTp) draftLines.push({ price: num(tpPrice), label: 'TP', kind: 'tp' });
+    if (engine === 'perps' && useSl) draftLines.push({ price: num(slPrice), label: 'SL', kind: 'sl' });
+  }
+  const draftKey = `${engine}|${symbol}|${side}|${draftLines.map((l) => `${l.kind}:${l.price}:${l.label}`).join(',')}`;
+  const placedDraft = useRef<string | null>(null);
+  useEffect(() => {
+    if (isAlgo) return;
+    if (!draftLines.length || placedDraft.current === draftKey) {
+      publishDraftOrders(null);
+      return;
+    }
+    placedDraft.current = null;
+    publishDraftOrders({ engine, symbol, side, lines: draftLines });
+    // draftKey is the published value; the array is new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey, isAlgo]);
+  useEffect(() => () => publishDraftOrders(null), []);
   const stopCheck =
     engine === 'perps' && activeSl > 0 && effectivePrice > 0
       ? checkStopAgainstLiquidation(activeSl, { ...riskBase, side })
@@ -1470,6 +1499,8 @@ export function OrderEntry({
         title: `${type === 'stop' ? 'Stop' : asMarket ? 'Market' : 'Limit'} ${sideWord.toLowerCase()} placed`,
         detail: `${quantity} ${base} @ ${asMarket ? 'market' : fmtPrice(price, sym?.tickSize)}${res.orderCount > 1 ? ` · +${res.orderCount - 1} exit order${res.orderCount > 2 ? 's' : ''}` : ''}`,
       });
+      placedDraft.current = draftKey;
+      publishDraftOrders(null);
       onPlaced();
     } catch (e) {
       fromError(e);
@@ -2124,6 +2155,7 @@ export function OrderEntry({
             <AlgoTicket
               ref={algoRef}
               kind={algoKind}
+              engine={engine}
               symbol={symbol}
               sym={sym}
               side={side}

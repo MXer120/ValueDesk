@@ -1954,3 +1954,46 @@ html.kc-drag * {
 .kc-newspop__fig b { color: var(--text); font-family: var(--font-num); font-size: var(--fs-sm, 13px); }
 .kc-newspop__fig i { color: var(--muted); font-family: var(--font-num); font-size: 10px; font-style: normal; }
 .kc-newspop__figs.is-out .kc-newspop__fig { background: color-mix(in srgb, var(--pos) 9%, transparent); }
+
+/* The ticket's unplaced order (DraftOrderLines.tsx): thin, dashed, muted, and
+   slowly fading in and out, so it never reads as a placed order line. */
+.kc-draft {
+  position: absolute;
+  z-index: 4;
+  height: 1px;
+  overflow: visible;
+  pointer-events: none;
+  --draft-ink: color-mix(in srgb, var(--pos) 55%, var(--muted, #888));
+}
+.kc-draft.is-sell { --draft-ink: color-mix(in srgb, var(--neg) 55%, var(--muted, #888)); }
+.kc-draft__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed var(--draft-ink);
+  opacity: 0.5;
+  animation: kc-draft-pulse 1.6s ease-in-out infinite;
+}
+.kc-draft__line.is-trigger { border-top-style: dotted; }
+.kc-draft__line.is-tp { border-top-color: color-mix(in srgb, var(--pos) 45%, var(--muted, #888)); }
+.kc-draft__line.is-sl { border-top-color: color-mix(in srgb, var(--neg) 45%, var(--muted, #888)); }
+.kc-draft__tag {
+  position: absolute;
+  left: 8px;
+  bottom: 1px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 10px;
+  line-height: 15px;
+  white-space: nowrap;
+  color: var(--draft-ink);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+}
+@keyframes kc-draft-pulse {
+  0%, 100% { opacity: 0.22; }
+  50% { opacity: 0.6; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kc-draft__line { animation: none; opacity: 0.4; }
+}

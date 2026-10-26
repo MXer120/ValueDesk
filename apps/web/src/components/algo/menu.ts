@@ -21,10 +21,11 @@ export const ALGO_MENU: readonly AlgoMenuItem[] = [
   { id: 'iceberg', name: 'Iceberg', detail: 'Shows one small clip at a time and refills it, at a price or pegged.' },
   { id: 'chase', name: 'Chase', detail: 'One post-only order that follows the best price until it fills.' },
   { id: 'scale', name: 'Scale', detail: 'A ladder of resting orders between two prices, sized and spaced by curves.' },
-  { id: 'dca', name: 'DCA', detail: 'A fixed amount every interval, with a price band and a dip boost.' },
+  { id: 'dca', name: 'DCA', detail: 'A first buy, then a limit at every price step below it, bigger each step if you like (or a fixed amount on a schedule).' },
   { id: 'swarm', name: 'Swarm', detail: 'Many small takers in waves, so the book refills between them.' },
   { id: 'conditional', name: 'Conditional', detail: 'When price, a move, funding, OI, spread, volume or time say so: act.' },
   { id: 'trailing', name: 'Trailing stop', detail: 'A stop that follows the price at a distance and closes when it turns.' },
+  { id: 'sweep', name: 'Fill fast', detail: 'Fills as fast as the book allows: IOC limits, round after round, never further than your slippage from the Binance price.' },
   { id: 'bracket', name: 'Bracket', detail: 'An entry with its take-profit and stop-loss on SoDEX: when one fills, the other is cancelled.' },
   { id: 'basket', name: 'Basket', detail: 'One order over several markets at once, long and short, in USD per market.' },
 ];

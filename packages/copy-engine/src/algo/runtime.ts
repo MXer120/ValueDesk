@@ -47,6 +47,8 @@ import {
   type Quote,
   type TrailState,
 } from './math.ts';
+import type { SourceQuote } from '../priceGuard.ts';
+import { SWEEP_MAX_AGE_MS, sweepReference, sweepStep } from './sweep.ts';
 import { exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
@@ -121,6 +123,12 @@ export interface AlgoHost {
   candles?(symbol: string, interval: string, startTime: number, endTime: number): Promise<Candle[]>;
   /** Order lookups (default: SoDEX REST). `history` reads are drip-limited; the runtime asks rarely. */
   lookup?(a: AlgoRecord, symbol: string, history: boolean): Promise<Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>>;
+  /**
+   * A sweep's outside reference: quotes for the coin ('BTC') from Binance
+   * USD-M futures and Binance spot (priceGuard.ts fetchQuotes). Absent, or
+   * failing: a sweep falls back to SoDEX's own mark while that is fresh.
+   */
+  oracle?(coin: string): Promise<SourceQuote[]>;
   log: Logger;
   onChange?(id: string): void;
   /** false: no timers (tests drive `tick`). */
@@ -178,6 +186,8 @@ export class AlgoRuntime {
   private paper = new Map<string, PaperOrder>();
   private timers: unknown[] = [];
   private running = false;
+  /** The sweep oracle's last quotes per coin, and the read in flight. */
+  private oracleQuotes = new Map<string, { quotes: SourceQuote[]; at: number; busy: boolean }>();
 
   constructor(private readonly host: AlgoHost) {
     if (host.market) this.market = host.market;
@@ -442,7 +452,7 @@ export class AlgoRuntime {
       nextAt = i < s.orders ? a.startedAt + i * s.intervalMs : null;
       endsAt = a.startedAt + (s.orders - 1) * s.intervalMs;
     } else if (s.kind === 'pov') endsAt = s.endAt;
-    else if (s.kind === 'chase' && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
+    else if ((s.kind === 'chase' || s.kind === 'sweep') && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
     else if (s.kind === 'swarm') nextAt = (a.k.waveAt as number | undefined) ?? null;
     else if (s.kind === 'conditional') endsAt = s.expiresAt;
     if (s.startAt && a.status === 'scheduled') nextAt = s.startAt;
@@ -604,6 +614,75 @@ export class AlgoRuntime {
         return this.stepBasket(a);
       case 'bracket':
         return this.stepBracket(a, m, q, mk);
+      case 'sweep':
+        return this.stepSweep(a, m, now);
+    }
+  }
+
+  /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
+  private oracleFor(coin: string, now: number): SourceQuote[] {
+    let o = this.oracleQuotes.get(coin);
+    if (!o) {
+      o = { quotes: [], at: 0, busy: false };
+      this.oracleQuotes.set(coin, o);
+    }
+    if (this.host.oracle && !o.busy && now - o.at >= 1_000) {
+      const slot = o;
+      slot.busy = true;
+      this.host
+        .oracle(coin)
+        .then((q) => {
+          slot.quotes = q;
+        })
+        .catch(() => {
+          /* missing: the quotes age out and the sweep falls back or pauses */
+        })
+        .finally(() => {
+          slot.busy = false;
+          slot.at = Date.now();
+        });
+    }
+    return o.quotes;
+  }
+
+  /** Fill fast (sweep.ts): an IOC at the band edge for the rest, each round re-priced from the reference. */
+  private async stepSweep(a: AlgoRecord, m: MarketInfo, now: number): Promise<void> {
+    const s = a.spec as Extract<AlgoSpec, { kind: 'sweep' }>;
+    const coin = s.symbol.replace(/-USD$/, '');
+    const mark = this.market.mark(s.symbol);
+    const ref = sweepReference(this.oracleFor(coin, now), mark ? { price: mark.mark, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    const act = sweepStep({
+      side: s.side,
+      total: Number(s.quantity),
+      filled: a.filled,
+      pending: this.pendingQty(a),
+      startedAt: a.startedAt ?? now,
+      now,
+      timeoutMs: s.timeoutMs,
+      roundMs: s.roundMs,
+      lastRoundAt: typeof a.k.roundAt === 'number' ? a.k.roundAt : null,
+      slippageBps: s.slippageBps,
+      tickSize: m.tickSize,
+      stepSize: m.stepSize,
+      minQty: (p) => minChildQty(m, p),
+      ref,
+    });
+    switch (act.type) {
+      case 'done':
+        return this.end(a, 'done', a.filled > 0 ? 'Filled.' : 'Nothing left to fill.');
+      case 'expired':
+        return this.end(a, 'expired', `Gave up: ${dec(act.left)} ${m.base} left unfilled inside the band.`);
+      case 'wait':
+        if (act.reason) await this.hold(a, act.reason);
+        return;
+      case 'send': {
+        a.k.roundAt = now;
+        a.k.round = Number(a.k.round ?? 0) + 1;
+        a.k.ref = ref?.price ?? null;
+        this.dirty.add(a.id);
+        await this.send(a, m, [{ side: s.side, price: act.price, quantity: act.qty, tif: 'ioc', tag: `round ${a.k.round}${ref?.fallback ? ' (SoDEX mark)' : ''}` }]);
+        return;
+      }
     }
   }
 

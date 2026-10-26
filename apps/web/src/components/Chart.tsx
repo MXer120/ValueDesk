@@ -107,6 +107,7 @@ import { drawingsKey, loadDrawings, parseDrawings, realZ, saveDrawings, setRealZ
 import { DrawingStyleBar } from '../chart/DrawingStyleBar';
 import { boxOf, marqueeHits, type Pt } from '../chart/marquee';
 import { SelectionMarks } from '../chart/SelectionMarks';
+import { DraftOrderLines } from '../chart/DraftOrderLines';
 import { DrawingSettings, type DrawingDraft } from '../chart/DrawingSettings';
 import {
   EXEC_OVERLAY,
@@ -4436,6 +4437,7 @@ function Chart({
         <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
+        <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
         {newsLayer.value && (
           <NewsMarkers
             chart={ready ? chart.current : null}

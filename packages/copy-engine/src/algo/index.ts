@@ -7,3 +7,4 @@ export * from './feed.ts';
 export * from './sink.ts';
 export * from './store.ts';
 export * from './runtime.ts';
+export * from './sweep.ts';

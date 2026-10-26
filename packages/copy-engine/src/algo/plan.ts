@@ -17,6 +17,7 @@ import {
   type VolumeProfile,
 } from './math.ts';
 import { ALGO_NAMES, algoQuantity } from './spec.ts';
+import { sweepBand } from './sweep.ts';
 import type { AlgoSpec, SwarmSpec, TwapSpec, VwapSpec } from './types.ts';
 
 export interface PlannedChild {
@@ -312,6 +313,18 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       }
       const small = s.legs.filter((l) => l.usd / each < m.minNotional);
       if (small.length) out.errors.push(`${small.map((l) => l.symbol).join(', ')}: each ${s.style === 'swarm' ? 'clip' : 'slice'} would be under SoDEX's ${usd(m.minNotional)} minimum. Use fewer ${s.style === 'swarm' ? 'clips' : 'slices'} or more per market.`);
+      break;
+    }
+    case 'sweep': {
+      // One IOC round for the whole amount at the band edge; later rounds for what is left, re-priced from the reference.
+      const band = px ? sweepBand(s.side, px, s.slippageBps, m.tickSize) : null;
+      out.children = [{ at: null, qty: total!, price: band, tag: 'round 1' }];
+      if (s.timeoutMs) out.endsAt = start + s.timeoutMs;
+      out.intervalMs = s.roundMs;
+      summarise();
+      if (band && total! * band < m.minNotional) out.errors.push(`The order is about ${usd(total! * band)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
+      if (!px) out.warnings.push('The band is set from the reference price when it starts.');
+      else out.warnings.push(`Priced from the Binance reference when it runs; here the band is drawn from the SoDEX price.`);
       break;
     }
     case 'bracket': {

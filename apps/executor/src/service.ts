@@ -40,6 +40,7 @@ import {
   parseSettings,
   randomId,
   regionPolicy,
+  fetchQuotes,
   verifyCopyRequest,
   type AcceptSiteTermsPayload,
   type AcceptTermsPayload,
@@ -149,6 +150,8 @@ export class ExecutorService {
       problem: (a) => this.algoProblem(a),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null),
+      // A sweep's reference price: Binance USD-M futures and Binance spot (sweep.ts).
+      oracle: (coin) => fetchQuotes(coin, { weights: { binance: 1, binanceSpot: 1 } }, { fetch: deps.fetch, timeoutMs: 2_000 }),
     });
   }
 

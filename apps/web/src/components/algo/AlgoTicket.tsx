@@ -25,11 +25,13 @@
 import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
+  SWEEP_SOURCE_NAMES,
   checkAlgoSpec,
   makerPrice,
   newSeed,
   planAlgo,
   volumeProfile,
+  type AlgoKind,
   type AlgoPlan,
   type AlgoSpec,
   type BoundAction,
@@ -42,8 +44,8 @@ import { api, type Symbol as MarketSymbol } from '../../api';
 import { algoOwner } from '../../algo/algoBus';
 import { executorReady, startOn } from '../../algo/executorAlgos';
 import { getLiveCopy, subscribeLiveCopy } from '../../copy/live';
-import { DASH, fmtTime, fmtUsd } from '../../format';
-import { openTab } from '../../router';
+import { DASH, fmtQty, fmtTime, fmtUsd } from '../../format';
+import { publishDraftOrders, type DraftLine } from '../../draftOrders';
 import { notify } from '../../toast';
 import { Modal, useConfirm } from '../Modal';
 import { decimalInput, integerInput } from '../numberInput';
@@ -124,10 +126,11 @@ const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
   iceberg: ['price', 'displayQty'],
   chase: ['maxChaseBps'],
   scale: ['from', 'to', 'orders'],
-  dca: ['perOrderUsd', 'intervalMs', 'orders'],
+  dca: ['perOrderUsd', 'intervalMs', 'orders', 'from', 'to', 'skew', 'quantity'],
   swarm: ['clips'],
   trailing: ['trailPct', 'trailAbs', 'activationPrice'],
   bracket: ['price', 'exits'],
+  sweep: ['slippageBps'],
   basket: ['durationMs'],
   conditional: [],
 };
@@ -261,6 +264,8 @@ export interface AlgoTicketHandle {
 
 interface Props extends TicketShared {
   kind: UiKind;
+  /** The ticket's engine: the chart draws the unplaced order only on its own market. */
+  engine?: string;
   /** The connected wallet: the runner follows it before the algo is added. */
   address: string | null;
   sym?: MarketSymbol;
@@ -336,7 +341,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     return () => window.clearInterval(t);
   }, []);
 
-  const raw = useMemo(() => draftToSpec(kind, d, p, clock), [kind, d, p.symbol, p.side, p.quantity, p.reduceOnly, p.leverage, p.marginMode, clock]); // eslint-disable-line react-hooks/exhaustive-deps
+  const raw = useMemo(() => draftToSpec(kind, d, p, clock), [kind, d, p.symbol, p.side, p.quantity, p.reduceOnly, p.leverage, p.marginMode, kind === 'dca' && d.dcaMode === 'price' ? p.bid : null, kind === 'dca' && d.dcaMode === 'price' ? p.ask : null, clock]); // eslint-disable-line react-hooks/exhaustive-deps
   const check = useMemo(() => checkAlgoSpec(raw), [raw]);
   const profile: VolumeProfile | null = useMemo(() => {
     if (ek !== 'vwap' || !candles?.length || !check.spec || check.spec.kind !== 'vwap') return null;
@@ -442,6 +447,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           await startOn(place, spec, seed);
         }
         notify('ok', `${menuName(kind)} started${spec.paper ? ' (paper)' : ''}${place === 'hosted' ? ' on the ValueDesk executor' : place === 'self' ? ' on your copier' : ''}. Follow it in the Algos tab.`);
+        placedDraft.current = draftKey;
+        publishDraftOrders(null);
         setSeed(newSeed());
       } catch (e) {
         notify('error', e instanceof Error ? e.message : String(e));
@@ -458,11 +465,70 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   if (plan?.exits?.sl) levels.push({ label: 'Stop-loss', price: plan.exits.sl, tone: 'neg' });
 
   const rates = feeRates(market, feeFraction);
-  const showTimeline = !!plan && (ek === 'twap' || ek === 'vwap' || ek === 'dca' || ek === 'swarm') && !(ek === 'twap' && d.twapClose);
-  const showLadder = !!plan && (ek === 'scale' || (ek === 'iceberg' && !d.icePeg && !!opt(d.icePrice)));
+  // What the engine will run: a price DCA is a scale ladder.
+  const pk: AlgoKind = check.spec?.kind ?? ek;
+  const priceDca = kind === 'dca' && d.dcaMode === 'price';
+  const showTimeline = !!plan && (pk === 'twap' || pk === 'vwap' || pk === 'dca' || pk === 'swarm') && !(pk === 'twap' && d.twapClose);
+  const showLadder = !!plan && (pk === 'scale' || (pk === 'iceberg' && !d.icePeg && !!opt(d.icePrice)));
   const showLevels = !showTimeline && !showLadder && levels.length > 1;
 
   const base = p.sym?.baseCoin ?? '';
+
+  // The unplaced order's prices on the chart (draftOrders.ts), from the spec and the engine's plan.
+  const qtyText = (q: number) => (q > 0 ? ` · ${fmtQty(q, p.sym?.stepSize)} ${base}`.trimEnd() : '');
+  const ticketQty = Number(p.quantity) > 0 ? Number(p.quantity) : 0;
+  const draftLines: DraftLine[] = [];
+  const sp = check.spec;
+  if (sp && sp.kind !== 'basket') {
+    if (sp.kind === 'scale' && plan) {
+      const word = priceDca ? 'DCA' : 'Level';
+      plan.children.forEach((c, i) => {
+        if (c.price) draftLines.push({ price: c.price, label: `${word} ${i + 1}/${plan.children.length}${qtyText(c.qty)}`, kind: 'limit' });
+      });
+    }
+    if (sp.kind === 'iceberg' && sp.price !== null) draftLines.push({ price: sp.price, label: `Iceberg${qtyText(ticketQty)}`, kind: 'limit' });
+    if (sp.kind === 'bracket' && sp.entry === 'limit' && sp.price !== null) draftLines.push({ price: sp.price, label: `Entry${qtyText(ticketQty)}`, kind: 'limit' });
+    if (sp.kind === 'conditional') {
+      if (sp.then.type === 'limit' && sp.then.price) draftLines.push({ price: sp.then.price, label: `Limit${qtyText(Number(sp.then.quantity))}`, kind: 'limit' });
+      for (const c of sp.conditions) if ((c.type === 'price' || c.type === 'cross') && c.symbol === sp.symbol && c.value) draftLines.push({ price: c.value, label: 'When', kind: 'trigger' });
+    }
+    if (sp.kind === 'sweep' && plan?.children[0]?.price) draftLines.push({ price: plan.children[0].price, label: `Fill-fast edge${qtyText(ticketQty)}`, kind: 'limit' });
+    if (sp.kind === 'trailing' && sp.activationPrice !== null) draftLines.push({ price: sp.activationPrice, label: 'Trails from', kind: 'trigger' });
+    if (sp.limitPrice !== null) draftLines.push({ price: sp.limitPrice, label: 'Limit', kind: 'limit' });
+    if (sp.triggerPrice !== null) draftLines.push({ price: sp.triggerPrice, label: 'Starts at', kind: 'trigger' });
+    if (plan?.exits?.tp) draftLines.push({ price: plan.exits.tp, label: 'TP', kind: 'tp' });
+    if (plan?.exits?.sl) draftLines.push({ price: plan.exits.sl, label: 'SL', kind: 'sl' });
+  }
+  const draftKey = `${p.symbol}|${p.side}|${draftLines.map((l) => `${l.kind}:${l.price}:${l.label}`).join(',')}`;
+  const placedDraft = useRef<string | null>(null);
+  useEffect(() => {
+    if (!draftLines.length || placedDraft.current === draftKey) {
+      publishDraftOrders(null);
+      return;
+    }
+    placedDraft.current = null;
+    publishDraftOrders({ engine: p.engine ?? 'perps', symbol: p.symbol, side: p.side, lines: draftLines });
+    // draftKey is the published value; the array is new every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey]);
+  useEffect(() => () => publishDraftOrders(null), []);
+
+  // The plan drawn: in the settings window's Preview section, not on the panel.
+  const previewNode = (
+    <section className="algo-group" aria-label="Preview">
+      <div className="stg__label">What it will do</div>
+      <div className="stg__card algo-pvcard">
+        {showTimeline && plan && <TimelinePreview plan={plan} side={p.side} />}
+        {showLadder && plan && <LadderPreview plan={plan} side={p.side} mid={mid ?? null} />}
+        {showLevels && <LevelsPreview levels={levels} mid={mid ?? null} />}
+        {!showTimeline && !showLadder && !showLevels && <p className="oe-hint">{plan ? 'Nothing to draw for this order yet.' : allErrors[0] ?? 'Waiting for the market…'}</p>}
+        <p className="algo-what">
+          {oneLine(kind, d, p.side, p.quantity, base)}
+          {plan && planFacts(plan, pk) ? ` · ${planFacts(plan, pk)}` : ''}
+        </p>
+      </div>
+    </section>
+  );
   const exitsHere = offersExits(kind, d, p.reduceOnly);
   const changes = advancedChanges(kind, d, exitsHere);
   const dur = <UnitSelect label="Duration" value={d.durUnit} units={['m', 'h', 'd']} onChange={(u) => set({ durUnit: u })} />;
@@ -535,6 +601,10 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
+        {ek === 'sweep' && (
+          <Field label="Max slippage" value={d.sweepSlip} onChange={(v) => set({ sweepSlip: v })} suffix="% from oracle" title="How far from the Binance reference price (futures and spot) it may fill; every round is an IOC limit at that edge" err={err('slippageBps')} />
+        )}
+
         {ek === 'chase' && (
           <Field label="Max chase" value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} suffix="%" title="How far from where it started it may follow the price" err={err('maxChaseBps')} />
         )}
@@ -548,7 +618,18 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
-        {ek === 'dca' && (
+        {ek === 'dca' && priceDca && (
+          <>
+            <Field label={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" title="The first order's size in USD (the later ones are sized at the first price)" err={err('perOrderUsd', 'quantity')} />
+            <Field label="Step" value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} suffix="%" title={`How far ${p.side === 'buy' ? 'below' : 'above'} the first price each next order rests`} err={err('to')} />
+            <Field label={p.side === 'buy' ? 'Buys' : 'Sells'} value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} title="How many orders in all, the first included" err={err('orders')} />
+            <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per step" title="Each next order is this many times the one before (1: all the same)" err={err('skew')} />
+            <Seg label="First" value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once'], ['price', 'Price', 'Rests at a price you set']]} />
+            {d.dcaFirst === 'price' && <Field label="Price" value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} suffix="USD" err={err('from')} />}
+            {d.dcaFirst === 'market' && err('from') && <p className="oe-hint algo-ferr">Waiting for the best price…</p>}
+          </>
+        )}
+        {ek === 'dca' && !priceDca && (
           <>
             <Field label="Each buy" value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" err={err('perOrderUsd')} />
             <Field label="Every" value={d.every} onChange={(v) => set({ every: v })} suffix={<UnitSelect label="Every" value={d.everyUnit} units={['m', 'h', 'd']} onChange={(u) => set({ everyUnit: u })} />} err={err('intervalMs')} />
@@ -599,17 +680,14 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         </button>
       </div>
 
-      {/* The preview: the plan, one line saying it, one line of cost. */}
+      {/* The plan in words and one line of cost; the drawing is in the settings window's Preview. */}
       <div className="algo-preview">
-        {showTimeline && plan && <TimelinePreview plan={plan} side={p.side} />}
-        {showLadder && plan && <LadderPreview plan={plan} side={p.side} mid={mid ?? null} />}
-        {showLevels && <LevelsPreview levels={levels} mid={mid ?? null} />}
         <p className="algo-what">
           {oneLine(kind, d, p.side, p.quantity, base)}
-          {plan && planFacts(plan, kind) ? ` · ${planFacts(plan, kind)}` : ''}
+          {plan && planFacts(plan, pk) ? ` · ${planFacts(plan, pk)}` : ''}
           {` · ${PLACE_WORDS[place]}`}
         </p>
-        <CostLine plan={plan} rates={rates} paper={d.paper} feeNote={feeBp} scale={ek === 'scale'} onShuffle={hasJitter(kind, d) ? () => setSeed(newSeed()) : undefined} />
+        <CostLine plan={plan} rates={rates} paper={d.paper} feeNote={feeBp} scale={pk === 'scale'} onShuffle={hasJitter(kind, d) ? () => setSeed(newSeed()) : undefined} />
         {!amountMissing && restErrors[0] && <p className="oe-hint algo-err">{restErrors[0]}</p>}
         {!allErrors.length && plan?.warnings[0] && <p className="oe-hint algo-warn">{plan.warnings[0]}</p>}
       </div>
@@ -618,10 +696,12 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         open={advOpen}
         onClose={() => setAdvOpen(false)}
         kind={kind}
+        d={d}
         exitsHere={exitsHere}
+        preview={previewNode}
         canReset={changes.length > 0}
         onReset={() => setD((x) => resetAdvanced(kind, x))}
-        runsOn={<RunsOn place={place} onChange={setPlace} where={where} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
+        runsOn={<RunsOn place={place} onChange={setPlace} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
       >
         <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} />
       </AdvancedWindow>
@@ -651,7 +731,7 @@ function roundQty(x: number, step?: string): string {
    line, control). Each Group names the section it belongs to and renders only
    while that section is open. */
 
-type Sec = 'runs' | 'slicing' | 'exec' | 'exits' | 'start';
+type Sec = 'runs' | 'preview' | 'slicing' | 'exec' | 'exits' | 'start';
 
 const SecIcon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
   <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
@@ -659,6 +739,7 @@ const SecIcon = ({ children, size = 18 }: { children: ReactNode; size?: number }
 
 const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
   runs: { label: 'Runs on', lede: 'Where the order is worked, and whether it sends real orders or only practises against the live market.', icon: <><rect x="3" y="4" width="14" height="5" rx="1.5" /><rect x="3" y="11" width="14" height="5" rx="1.5" /><path d="M6 6.5h.01M6 13.5h.01" /></> },
+  preview: { label: 'Preview', lede: 'What the engine will do with these settings: its orders over time, or its prices, from the same plan it runs.', icon: <><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z" /><circle cx="10" cy="10" r="2.2" /></> },
   slicing: { label: 'Slicing', lede: 'How the amount is split into child orders: how many, how big, how often.', icon: <><path d="M3 15h14" /><rect x="4" y="10" width="2.5" height="5" rx="0.6" /><rect x="8.75" y="7" width="2.5" height="8" rx="0.6" /><rect x="13.5" y="4" width="2.5" height="11" rx="0.6" /></> },
   exec: { label: 'Price & execution', lede: 'How each order meets the book: where it rests, how far it may slip, when it takes.', icon: <><path d="M3 14.5 7.5 10l3 3L17 6.5" /><path d="M13 6.5h4v4" /></> },
   exits: { label: 'Exits', lede: 'Take profit and stop loss, placed once the order has filled.', icon: <><path d="M4 3v14" /><path d="M4 4h10l-2 3 2 3H4" /></> },
@@ -666,11 +747,12 @@ const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
 };
 
 /** The sections a kind has, Runs on first. */
-function sectionsFor(kind: UiKind, exitsHere: boolean): Sec[] {
+function sectionsFor(kind: UiKind, exitsHere: boolean, d: Pick<Draft, 'dcaMode'>): Sec[] {
   const ek: string = engineKind(kind);
-  const out: Sec[] = ['runs'];
+  const out: Sec[] = ['runs', 'preview'];
   if (['twap', 'vwap', 'basket', 'pov', 'iceberg', 'scale', 'dca', 'swarm'].includes(ek)) out.push('slicing');
-  if (ek !== 'basket') out.push('exec');
+  // A price DCA's orders are resting limits: nothing to tune in how they meet the book.
+  if (ek !== 'basket' && !(ek === 'dca' && d.dcaMode === 'price')) out.push('exec');
   if (exitsHere && kind !== 'bracket') out.push('exits');
   out.push('start');
   return out;
@@ -681,10 +763,10 @@ const lastSec = new Map<UiKind, Sec>();
 
 const SecCtx = createContext<Sec | null>(null);
 
-function AdvancedWindow({ open, onClose, kind, exitsHere, canReset, onReset, runsOn, children }: {
-  open: boolean; onClose: () => void; kind: UiKind; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; children: ReactNode;
+function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, runsOn, preview, children }: {
+  open: boolean; onClose: () => void; kind: UiKind; d: Draft; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; preview: ReactNode; children: ReactNode;
 }) {
-  const secs = sectionsFor(kind, exitsHere);
+  const secs = sectionsFor(kind, exitsHere, d);
   const [, bump] = useState(0);
   const want = lastSec.get(kind) ?? 'runs';
   const sec: Sec = secs.includes(want) ? want : 'runs';
@@ -716,7 +798,7 @@ function AdvancedWindow({ open, onClose, kind, exitsHere, canReset, onReset, run
         <div className="stg__pane" key={sec}>
           <div className="stg__panehead"><SecIcon size={22}>{cur.icon}</SecIcon><h3>{cur.label}</h3></div>
           <p className="stg__lede">{cur.lede}</p>
-          {sec === 'runs' ? runsOn : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
+          {sec === 'runs' ? runsOn : sec === 'preview' ? preview : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
           <div className="stg__actions algo-done">
             <button type="button" className="stg__btn is-go" onClick={onClose}>Done</button>
           </div>
@@ -835,13 +917,6 @@ function ASwitch({ title, hint, checked, onChange, on = 'On', off = 'Off' }: { t
   );
 }
 
-/** The Set up link, where the reason points at Copy → Set up (an executor's steps). */
-function SetupLink({ why, place }: { why: string; place: Place }) {
-  return place !== 'browser' && why.includes('Set up') ? (
-    <button type="button" className="algo-link" onClick={() => openTab('copy')}>Set up</button>
-  ) : null;
-}
-
 const PLACE_CARDS: ReadonlyArray<readonly [Place, string, string]> = [
   ['hosted', 'ValueDesk', 'Runs 24/7 on our executor, even with your browser closed.'],
   ['browser', 'This browser', 'Signed here with your trading key. Keep a ValueDesk tab open.'],
@@ -849,8 +924,8 @@ const PLACE_CARDS: ReadonlyArray<readonly [Place, string, string]> = [
 ];
 
 /** The pop-up's first section: where it runs (kept across reloads and kinds, executor.ts), then the practice run. */
-function RunsOn({ place, onChange, where, paper, setPaper }: {
-  place: Place; onChange: (v: Place) => void; where: { ready: boolean; why: string | null }; paper: boolean; setPaper: (v: boolean) => void;
+function RunsOn({ place, onChange, paper, setPaper }: {
+  place: Place; onChange: (v: Place) => void; paper: boolean; setPaper: (v: boolean) => void;
 }) {
   return (
     <section className="algo-group" aria-label="Runs on">
@@ -863,11 +938,6 @@ function RunsOn({ place, onChange, where, paper, setPaper }: {
           </button>
         ))}
       </div>
-      {!where.ready && where.why && (
-        <p className="stg__msg algo-whymsg" role="status">
-          {where.why} <SetupLink why={where.why} place={place} />
-        </p>
-      )}
       <div className="stg__label">Practice</div>
       <div className="stg__card">
         <ASwitch
@@ -1084,6 +1154,20 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
       )}
 
       {ek === 'dca' && (
+        <Group label="Price or time" sec="slicing">
+          <ASwitch
+            title={side === 'buy' ? 'Buy on a schedule instead' : 'Sell on a schedule instead'}
+            hint={d.dcaMode === 'price'
+              ? `Now: a first order, then a limit every ${d.dcaStep || '…'}% ${fromAvg} it, as DCA bots do. On: a fixed amount every interval instead, whatever the price.`
+              : 'On: a fixed amount every interval, whatever the price. Off: a first order, then a limit at each price step, as DCA bots do.'}
+            checked={d.dcaMode === 'time'}
+            onChange={(v) => set({ dcaMode: v ? 'time' : 'price' })}
+            on="On · every interval"
+            off="Off · at price steps"
+          />
+        </Group>
+      )}
+      {ek === 'dca' && d.dcaMode === 'time' && (
         <>
           <Group label={side === 'buy' ? 'Buys' : 'Sells'} sec="slicing">
             <AField title="Budget" hint="Stops once this much has been spent in all. Empty: no cap." value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} unit="USD" err={err('maxTotalUsd')} />
@@ -1127,12 +1211,26 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
         </Group>
       )}
 
+      {ek === 'sweep' && (
+        <>
+          <Group label="Rounds">
+            <AField title="Between rounds" hint="The wait after a round that left something unfilled, before the next one re-prices from the reference." value={d.sweepRound} onChange={(v) => set({ sweepRound: v })} unit="s" err={err('roundMs')} />
+            <AField title="Give up after" hint="Stops trying after this long; what filled stays filled. Empty: never." value={d.sweepGiveUp} placeholder="never" onChange={(v) => set({ sweepGiveUp: v })} unit="min" err={err('timeoutMs')} />
+          </Group>
+          <Group label="Reference price">
+            {(['binance', 'binanceSpot', 'sodex'] as const).map((k) => (
+              <Row key={k} title={SWEEP_SOURCE_NAMES[k] ?? k} hint={k === 'sodex' ? 'Used only while neither Binance price is fresh (5 s).' : 'The median of the fresh Binance prices is the reference. With no fresh price at all, it pauses.'} />
+            ))}
+          </Group>
+        </>
+      )}
+
       {ek === 'conditional' && <ConditionalMore d={d} set={set} slip={slip} />}
 
       {exitsHere && kind !== 'bracket' && <AExits d={d} set={set} side={side} levels={exits} err={err('exits')} />}
 
       <Group label="Start and limits" sec="start">
-        {hasLimit(kind) && (
+        {hasLimit(kind, d) && (
           <AField title="Limit" hint={`Never ${side === 'buy' ? 'buys above' : 'sells below'} this price. Empty: none.`} value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} unit="USD" err={err('limitPrice')} />
         )}
         <ASeg
@@ -1144,7 +1242,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
         />
         {d.startMode === 'delay' && <AField title="Start in" hint="How long after you start it." value={d.startDelay} onChange={(v) => set({ startDelay: v })} unit="min" err={err('startAt')} />}
         {d.startMode === 'price' && <AField title="When the mark reaches" hint="Starts once the mark reaches this, from wherever it is now." value={d.startPrice} onChange={(v) => set({ startPrice: v })} unit="USD" err={err('triggerPrice')} />}
-        {hasBounds(kind) && (
+        {hasBounds(kind, d) && (
           <>
             <ABound title="Above" hint="What it does while the price is above this. Empty: nothing." value={d.upper} onValue={(v) => set({ upper: v })} then={d.upperThen} onThen={(v) => set({ upperThen: v })} err={err('upper')} />
             <ABound title="Below" hint="What it does while the price is below this. Empty: nothing." value={d.lower} onValue={(v) => set({ lower: v })} then={d.lowerThen} onThen={(v) => set({ lowerThen: v })} err={err('lower')} />
@@ -1413,8 +1511,7 @@ function feeRates(m: MarketInfo | null, builder: number): Rates {
 }
 
 /** What the plan adds to the summary line: slice sizes and pace, when it ends, the exits. */
-function planFacts(plan: AlgoPlan, kind: UiKind): string {
-  const ek = engineKind(kind);
+function planFacts(plan: AlgoPlan, ek: AlgoKind): string {
   const kids = plan.children.filter((c) => c.qty > 0).length;
   const took = plan.endsAt && plan.endsAt > plan.startsAt ? `about ${fmtDuration(plan.endsAt - plan.startsAt)}` : null;
   const parts: string[] = [];
@@ -1524,6 +1621,11 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
     case 'scale':
       return `${verb} ${q} in ${x(d.orders)} orders from ${x(d.from)} to ${x(d.to)}`;
     case 'dca': {
+      if (d.dcaMode === 'price') {
+        const first = d.dcaFirst === 'market' ? 'now' : `at ${x(d.dcaStart)}`;
+        const m = n(d.dcaMult) > 0 && n(d.dcaMult) !== 1 ? `, each ${x(d.dcaMult)}× the last` : '';
+        return `${verb} $${x(d.perOrder)} ${first}, then every ${x(d.dcaStep)}% ${side === 'buy' ? 'lower' : 'higher'}, ${x(d.dcaOrders)} orders in all${m}`;
+      }
       const total = n(d.perOrder) * n(d.dcaOrders);
       return `${verb} $${x(d.perOrder)} every ${x(d.every)} ${UNIT_NAME[d.everyUnit]}, ${x(d.dcaOrders)} times${Number.isFinite(total) && total > 0 ? ` (${fmtUsd(total, 0)})` : ''}`;
     }
@@ -1537,6 +1639,8 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
       const t = d.trailMode === 'pct' ? `${x(d.trail)}%` : `$${x(d.trail)}`;
       return side === 'sell' ? `Sells when the price falls ${t} from its high` : `Buys when the price rises ${t} from its low`;
     }
+    case 'sweep':
+      return `${verb} ${q} as fast as the book allows, within ${x(d.sweepSlip)}% of the Binance price`;
     case 'bracket':
       return `${side === 'buy' ? 'Goes long' : 'Goes short'} ${q} ${d.entry === 'limit' ? `at ${x(d.entryPrice)}` : 'at market'}, with take-profit and stop-loss`;
     case 'basket': {

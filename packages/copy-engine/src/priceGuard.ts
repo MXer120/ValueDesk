@@ -27,8 +27,9 @@
 import { abortController, timers, type FetchLike } from './io.ts';
 import { HyperliquidClient, type SodexClient } from './sodex.ts';
 
-export type PriceSourceId = 'sodex' | 'hyperliquid' | 'aster' | 'binance';
-export const PRICE_SOURCES: readonly PriceSourceId[] = ['sodex', 'hyperliquid', 'aster', 'binance'];
+/** binance: USD-M futures (mark); binanceSpot: spot (the book's mid). */
+export type PriceSourceId = 'sodex' | 'hyperliquid' | 'aster' | 'binance' | 'binanceSpot';
+export const PRICE_SOURCES: readonly PriceSourceId[] = ['sodex', 'hyperliquid', 'aster', 'binance', 'binanceSpot'];
 
 /** One venue's price for the coin, per one unit, and when the venue stamped it (ms). */
 export interface SourceQuote {
@@ -222,11 +223,13 @@ export function venueSymbol(source: PriceSourceId, coin: string, overrides = SYM
     case 'sodex': return { symbol: `${c}-USD`, unitsPerContract: 1 };
     case 'hyperliquid': return { symbol: c, unitsPerContract: 1 };
     case 'aster':
-    case 'binance': return { symbol: `${c}USDT`, unitsPerContract: 1 };
+    case 'binance':
+    case 'binanceSpot': return { symbol: `${c}USDT`, unitsPerContract: 1 };
   }
 }
 
 export const BINANCE_FUTURES = 'https://fapi.binance.com';
+export const BINANCE_SPOT = 'https://api.binance.com';
 /** Aster's futures API speaks Binance's: the same paths and fields. */
 export const ASTER_FUTURES = 'https://fapi.asterdex.com';
 
@@ -262,6 +265,16 @@ export async function binanceStyleMark(fetch: FetchLike, base: string, source: '
   const px = Number(r?.markPrice);
   if (!Number.isFinite(px) || !(px > 0)) return null;
   return { source, price: px / vs.unitsPerContract, at: typeof r.time === 'number' && r.time > 0 ? r.time : now };
+}
+
+/** Binance spot: the mid of the best bid and ask (bookTicker), per one coin. */
+export async function binanceSpotMid(fetch: FetchLike, coin: string, now: number, base = BINANCE_SPOT): Promise<SourceQuote | null> {
+  const vs = venueSymbol('binanceSpot', coin);
+  const r = await getJson<{ bidPrice?: string; askPrice?: string }>(fetch, `${base}/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(vs.symbol)}`);
+  const bid = Number(r?.bidPrice);
+  const ask = Number(r?.askPrice);
+  if (!(bid > 0) || !(ask > 0) || ask < bid) return null;
+  return { source: 'binanceSpot', price: (bid + ask) / 2 / vs.unitsPerContract, at: now };
 }
 
 /** Hyperliquid's mark for a coin (metaAndAssetCtxs: the universe and its contexts, index-aligned). */
@@ -302,6 +315,7 @@ export async function fetchQuotes(coin: string, cfg: Pick<ReferenceConfig, 'weig
   const read = (s: PriceSourceId): Promise<SourceQuote | null> => {
     switch (s) {
       case 'binance': return binanceStyleMark(deps.fetch, BINANCE_FUTURES, 'binance', coin, now());
+      case 'binanceSpot': return binanceSpotMid(deps.fetch, coin, now());
       case 'aster': return binanceStyleMark(deps.fetch, ASTER_FUTURES, 'aster', coin, now());
       case 'hyperliquid': return hyperliquidMark(hl, coin, now());
       case 'sodex': return deps.sodex ? sodexMark(deps.sodex, coin, now()) : Promise.resolve(null);
