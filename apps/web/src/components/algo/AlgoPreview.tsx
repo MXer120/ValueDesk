@@ -99,6 +99,8 @@ export function PlanPreview(p: PreviewProps) {
   if (plan.exits?.sl) facts.push(['Stop-loss', fmtP(plan.exits.sl)]);
   if (fee) facts.push(['Fees, estimated', `${fee}${p.feeNote ? `, incl. ${p.feeNote}` : ''}`]);
   let cum = 0;
+  // Sizes in the order panel's unit (a basket's rows are already in USD).
+  const usdSize = p.sizeUnit === 'usd' && spec?.kind !== 'basket';
   // The table's total is the sum of its rows (each at its own price), so the column adds up.
   const usdSum = rows.reduce((a, c) => a + (c.usd !== undefined ? c.usd : (c.price ?? p.mid ?? 0) * c.qty), 0);
   const sum = timed.reduce((a, c) => a + c.qty, 0);
@@ -125,7 +127,7 @@ export function PlanPreview(p: PreviewProps) {
                 <th>Order</th>
                 <th>When</th>
                 <th>Price</th>
-                <th>Size ({p.base || 'base'})</th>
+                <th>Size ({usdSize ? 'USD' : p.base || 'base'})</th>
                 <th>USD</th>
                 <th>Done</th>
               </tr>
@@ -140,7 +142,7 @@ export function PlanPreview(p: PreviewProps) {
                     <td>{c.tag}</td>
                     <td>{c.at === null ? (resting ? 'rests' : 'at once') : c.at <= Date.now() + 2_000 ? 'now' : `${fmtTime(c.at)} (${rel(c.at - plan.startsAt)})`}</td>
                     <td>{c.price !== null ? <>{fmtP(c.price)}{p.mid && pctFrom(c.price, p.mid) ? <small>{pctFrom(c.price, p.mid)}</small> : null}</> : spec?.kind === 'sweep' ? 'band edge' : 'best price then'}</td>
-                    <td className="is-size">{fmtQ(c.qty)}</td>
+                    <td className="is-size">{usdSize ? fmtUsd(c.qty * (c.price ?? p.mid ?? 0), 2) : fmtQ(c.qty)}</td>
                     <td>{c.usd !== undefined ? fmtUsd(c.usd, 2) : px ? fmtUsd(c.qty * px, 2) : '—'}</td>
                     <td>{sum > 0 ? <span className="algo-pvw__done"><i><b style={{ width: `${Math.round((cum / sum) * 100)}%` }} /></i>{Math.round((cum / sum) * 100)}%</span> : ''}</td>
                   </tr>
@@ -154,7 +156,7 @@ export function PlanPreview(p: PreviewProps) {
                   <td>Total</td>
                   <td />
                   <td>{plan.avgPrice ? `avg ${fmtP(plan.avgPrice)}` : ''}</td>
-                  <td>{fmtQ(sum)}</td>
+                  <td>{usdSize ? fmtUsd(usdSum, 2) : fmtQ(sum)}</td>
                   <td>{usdSum > 0 ? fmtUsd(usdSum, 2) : notional ? fmtUsd(notional, 2) : ''}</td>
                   <td />
                 </tr>

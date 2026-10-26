@@ -551,6 +551,7 @@ function ladderScene(t: number, p: StoryProps): Scene | null {
         <rect x={X1 - len} y={sc.y(c.px) - 3.5} width={len} height={7} rx={1.5}>
           <title>{`${c.tag}: ${fmtQ(c.qty)} ${base} at ${fmtP(c.px)}`}</title>
         </rect>
+        {lv.length <= 12 && <text className="algo-st__lvlq" x={X1 - len - 4} y={sc.y(c.px) + 3.5} textAnchor="end">{base === 'USD' ? `$${fmtQ(c.qty)}` : fmtQ(c.qty)}</text>}
       </g>,
     );
   });

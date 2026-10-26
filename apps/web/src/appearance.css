@@ -165,3 +165,76 @@ html .oe .oe-pop:not(.oe-pop--float) {
 /* ...and the row holding an open pop-up rises above the ticket's later rows, which stack on their own. */
 html .oe :is(.oe-anchor, .oe-compact):has(> .oe-pop) { position: relative; z-index: 60; }
 html .oe :has(> .oe-anchor > .oe-pop) { position: relative; z-index: 60; }
+
+/* ---------------------------------------------------------------------------
+   THE OTHER PAGES IN THE TRADE + SETTINGS LANGUAGE.
+   Explore (.vs-explore-page), Copy (.cpy), Leaderboard (.lbp), Portfolio (.pf)
+   and Scan (.scanv). Styling only: titles like the Settings pane's, section
+   labels as .stg__label, cards as the trade page's panels, tables with caps
+   heads over hairline rows, searches as .stg__find, segments as the ticket's.
+   The copy hero (.cpy-hero, .cpy-whale) is left exactly as it was.
+   --------------------------------------------------------------------------- */
+html .scan-find h1,
+html .lbp h1,
+html .vs-explore-page h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.01em; }
+
+/* Section labels: Settings' caps label. */
+html .cpy .cpy-h,
+html .cpy .cpy-replay__k,
+html .pf .pf-group__head > :first-child,
+html .vs-explore-page .ex-band__head h2,
+html .vs-explore-page .ex-band__head h3 {
+  color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+}
+
+/* Cards: the trade panel's fill, hairline and radius. */
+html .pf .pf-card,
+html .lbp .lbp-sheet,
+html .lbp .lbp-card,
+html .cpy .cpy-replay {
+  background: var(--bg-panel); border: 1px solid var(--panel-line); border-radius: var(--radius-sm);
+}
+html .cpy .cpy-card { border: 1px solid var(--panel-line); border-radius: var(--radius-sm); }
+
+/* Tables: 11px caps heads, hairline rows. */
+html :is(.vs-explore-page, .cpy, .lbp, .pf, .scanv) :is(.datatable, .lb-table) th {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--dim);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+html :is(.vs-explore-page, .cpy, .lbp, .pf, .scanv) :is(.datatable, .lb-table) td {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+html :is(.vs-explore-page, .cpy, .lbp, .pf, .scanv) :is(.datatable, .lb-table) tbody tr:last-child td { border-bottom-color: transparent; }
+
+/* Searches: Settings' find box (40px, radius 10, soft fill, no edge). */
+html .lbp .lbp-search {
+  height: 40px; padding: 0 14px; border: 0; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+html .lbp .lbp-search:focus-within { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
+html .lbp .lbp-search input { font-size: 14px; }
+html .cpy .cpy-search input {
+  height: 40px; padding: 0 14px 0 32px; border: 0; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); font-size: 14px;
+}
+html .cpy .cpy-search input:focus { background: rgba(255, 255, 255, 0.07); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
+html .scanv .scan-find__row { border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
+html .scanv .scan-find__row:focus-within { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); }
+
+/* Segmented controls: one well, the chosen segment lifted, radius as the ticket's. */
+html .lbp .lbp-seg,
+html .cpy .cpy-seg,
+html .pf .pf-seg {
+  padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-md); background: none;
+}
+html .lbp .lbp-seg > button,
+html .cpy .cpy-seg > button { border: 0; border-radius: calc(var(--radius-md) - 2px); }
+html .lbp .lbp-seg > button.is-on,
+html .cpy .cpy-seg > button.is-on { background: rgba(255, 255, 255, 0.1); color: var(--text); }
+
+/* Chips and number boxes: the ticket's input edge. */
+html .lbp button.lbp-chip,
+html .cpy .cpy-num { border-color: var(--line); border-radius: var(--radius-md); }
+
+/* Primary buttons: Settings' go button. */
+html .scanv button.scan-find__go { height: 32px; border-radius: 8px; font-weight: 500; }

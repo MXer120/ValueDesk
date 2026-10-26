@@ -619,3 +619,4 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: min(460px, 100%); }
 .algo-pair .algo-sf { width: 100%; }
 .algo-readout { font-family: var(--font-num); color: var(--text); }
+.algo-st__lvlq { fill: var(--muted); font-size: 10px; font-family: var(--font-num); }

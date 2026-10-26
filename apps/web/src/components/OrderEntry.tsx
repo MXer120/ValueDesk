@@ -1176,7 +1176,13 @@ export function OrderEntry({
   // market, and what would rest on its own side - by its TIF (orderImpact.ts limitImpact).
   // Only an order that goes to the book now: a stop waits for its trigger and an
   // algo trades over time, so neither is drawn.
-  const { takes: takesNow, rest: resting } = type !== 'limit'
+  // An algo shows its FIRST order (AlgoTicket's `impact`): a taker walks the book to its limit, a resting one rests at its price.
+  const algoFirst = isAlgo ? algoState.impact ?? null : null;
+  const { takes: takesNow, rest: resting } = algoFirst && algoFirst.qty > 0
+    ? algoFirst.rests && algoFirst.price !== null
+      ? { takes: [] as RawTake[], rest: { price: algoFirst.price, qty: algoFirst.qty } }
+      : { takes: walkBook(levels, algoFirst.qty, side, algoFirst.price).takes, rest: null }
+    : type !== 'limit'
     ? { takes: [] as RawTake[], rest: null }
     : limitImpact({ side, limit: limitPx, qty: liveQty, tif: effectiveTif, touch, walk: walked.takes });
   /** What this limit's TIF does at this price, said on the ticket; post only through the touch is refused before signing. */
@@ -1367,7 +1373,13 @@ export function OrderEntry({
   // (draftOrders.ts): a limit's price, a stop's trigger (and its limit), the
   // exits. An algo publishes its own (AlgoTicket). Once placed, the same
   // prices are not drawn again until they change.
-  const draftQty = liveQty > 0 ? ` · ${fmtQty(liveQty, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trimEnd() : '';
+  // The chart's unplaced order says its size in the ticket's unit: the coin, or USD at the order's own price.
+  const draftPx = limitPx ?? (num(stopPrice) > 0 ? num(stopPrice) : effectivePrice);
+  const draftQty = liveQty > 0
+    ? sizeUnit === 'quote' && draftPx > 0
+      ? ` · $${(liveQty * draftPx).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+      : ` · ${fmtQty(liveQty, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trimEnd()
+    : '';
   const draftLines: DraftLine[] = [];
   if (!isAlgo) {
     if (type === 'limit' && limitPx) draftLines.push({ price: limitPx, label: `Limit${draftQty}`, kind: 'limit' });
@@ -1700,17 +1712,23 @@ export function OrderEntry({
                       }}
                     />
                     <span className="oe-pop__x">x</span>
-                    <input
-                      className="oe-lev-range"
-                      type="range"
-                      min={1}
-                      max={maxLev ?? 100}
-                      step={1}
-                      value={levDraft}
-                      disabled={maxLev === null}
-                      aria-label="Leverage slider"
-                      onChange={(e) => setLevDraft(clampLev(Number(e.target.value)))}
-                    />
+                    {/* The order panel's own slider (its rail, fill and notches). */}
+                    <div className="oe-slider oe-levslider">
+                      <div className="oe-slider__rail" style={{ ['--oe-p' as string]: Math.min(1, Math.max(0, (levDraft - 1) / Math.max(1, (maxLev ?? 100) - 1))) }}>
+                        <div className="oe-slider__fill" />
+                        <input
+                          className="oe-slider__input"
+                          type="range"
+                          min={1}
+                          max={maxLev ?? 100}
+                          step={1}
+                          value={levDraft}
+                          disabled={maxLev === null}
+                          aria-label="Leverage slider"
+                          onChange={(e) => setLevDraft(clampLev(Number(e.target.value)))}
+                        />
+                      </div>
+                    </div>
                   </div>
                   <div className="oe-pop__presets">
                     {levPresets.map((n) => (
@@ -1727,7 +1745,6 @@ export function OrderEntry({
                   {maxLev === null && (
                     <p className="oe-pop__note">This symbol publishes no maximum leverage, so nothing here is clamped.</p>
                   )}
-                  {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
                   <button type="button" className="oe-confirm" onClick={commitLeverage} disabled={busy}>
                     Confirm {clampLev(levDraft)}x
                   </button>
@@ -1769,7 +1786,6 @@ export function OrderEntry({
                     </span>
                   </button>
                 ))}
-                {!unlocked && <p className="oe-pop__note">Read-only — the change stays local until you enable trading.</p>}
               </div>
             )}
           </div>
@@ -1990,6 +2006,20 @@ export function OrderEntry({
         {/* An algo sized some other way (DCA in USD per order, a trailing stop on
             the whole position) has no Amount: the field is not shown rather than
             shown and ignored. */}
+        {/* An algo sized another way (DCA in USD per order, a stop on the whole position) still has the
+            unit switch: it decides the unit its preview and its lines on the chart show sizes in. */}
+        {isAlgo && !algoState.needsAmount && (
+          <div className="oe-unitrow">
+            <span>Sizes shown in</span>
+            <div className="oe-unitrow__seg" role="radiogroup" aria-label="Sizes shown in">
+              {(['base', 'quote'] as const).map((u) => (
+                <button key={u} type="button" role="radio" aria-checked={sizeUnit === u} className={`oe-mini${sizeUnit === u ? ' is-on' : ''}`} onClick={() => switchUnit(u)}>
+                  {u === 'base' ? baseLabel || 'Coin' : quoteLabel || 'USD'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
         {(!isAlgo || algoState.needsAmount) && (
         <>
         <div className="oe-field">
@@ -2189,13 +2219,15 @@ export function OrderEntry({
               ask={bestAsk > 0 ? bestAsk : null}
               depth={book}
               sizeUnit={sizeUnit === 'quote' ? 'usd' : 'coin'}
+              onSizeUnit={(u) => switchUnit(u === 'usd' ? 'quote' : 'base')}
               positionQty={positionQty}
               sizePct={shownPct}
               onSizePct={setSizePct}
               onQuantity={(v) => {
+                // The settings' Amount is in the coin; the ticket keeps its own unit and shows it in that.
                 sizeBySlider.current = false;
-                setSizeUnit('base');
-                setSizeInput(v);
+                const px = effectivePrice > 0 ? effectivePrice : midPrice ?? 0;
+                setSizeInput(sizeUnit === 'quote' && px > 0 && v !== '' ? (Number(v) * px).toFixed(2) : v);
               }}
               last={num(lastPrice) > 0 ? num(lastPrice) : null}
               network={network}

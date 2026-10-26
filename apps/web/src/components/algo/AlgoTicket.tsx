@@ -268,6 +268,8 @@ export interface AlgoTicketState {
   walletFree: boolean;
   /** A practice run: nothing reaches SoDEX (the ticket turns blue). */
   paper?: boolean;
+  /** Its first order, for the order book: the size, its price (null: at market), and whether it rests or takes. */
+  impact?: { qty: number; price: number | null; rests: boolean } | null;
   /** The ticket's Long / Short applies (not to a basket: each market has its own side). */
   sided: boolean;
   /** The chosen executor cannot start it (unreachable, not set up, key missing): the button's short reason. Never for a missing wallet. */
@@ -304,6 +306,8 @@ interface Props extends TicketShared {
   depth?: OrderBook | null;
   /** The order panel's size unit: the previews draw sizes in it. */
   sizeUnit?: 'coin' | 'usd';
+  /** Switches the order panel's size unit (the fields sized in the coin show it). */
+  onSizeUnit?: (u: 'coin' | 'usd') => void;
   /** The open position on this market (signed, base units; null: not known). */
   positionQty?: number | null;
   /** The ticket's Amount slider and its setters, for the window's Order section. */
@@ -510,6 +514,14 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const feeFraction = place === 'browser' ? p.builderFee : (execFee ?? 0) / 100_000;
   const ready = !!market && !amountMissing && !!check.spec && !!plan && !plan.errors.length && where.ready;
   const label = `Start ${menuName(kind)}${d.paper ? ' (paper)' : ''}`;
+  // The first order it sends, as the order book should draw it: a resting kind (a ladder, an iceberg, a
+  // chase, or a slice that rests first) at its price; a taker walks the book to its slippage limit.
+  const firstChild = plan ? ((plan.schedule?.length ? plan.schedule : plan.children).find((c) => c.qty > 0) ?? null) : null;
+  const restsFirst = ek === 'scale' || ek === 'iceberg' || ek === 'chase' || (check.spec && 'exec' in check.spec && check.spec.exec.style !== 'taker');
+  const touchPx = p.side === 'buy' ? ask : bid;
+  const firstPrice = firstChild?.price ?? (restsFirst ? (p.side === 'buy' ? bid : ask) ?? null : touchPx ? touchPx * (1 + (p.side === 'buy' ? 1 : -1) * (Number(d.slip) || 10) / 10_000) : null);
+  const firstImpact = firstChild && !amountMissing ? { qty: firstChild.qty, price: firstPrice, rests: !!restsFirst && (firstChild.price === null || (p.side === 'buy' ? firstPrice! < (ask ?? Infinity) : firstPrice! > (bid ?? 0))) } : null;
+  const firstKey = firstImpact ? `${firstImpact.qty.toPrecision(6)}@${firstImpact.price ? firstImpact.price.toPrecision(8) : 'm'}:${firstImpact.rests}` : '';
   const why = !market ? 'Loading the market…' : amountMissing ? 'Enter an amount.' : allErrors[0] ?? where.why ?? null;
   const sided = kind !== 'basket';
   // With no wallet, executorReady stops at "Connect your wallet." before it
@@ -524,7 +536,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           : where;
   const block = blockedState(place, execOwn, !!p.address);
   const blocked = block?.short ?? null;
-  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked, paper: d.paper }), [ready, label, why, needsAmount, walletFree, sided, blocked, d.paper]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked, paper: d.paper, impact: firstImpact }), [ready, label, why, needsAmount, walletFree, sided, blocked, d.paper, firstKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The executor's trouble is a notification, not a line on the panel: raised
   // once when it begins or changes, after it has held a moment (the executor's
@@ -603,7 +615,12 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const base = p.sym?.baseCoin ?? '';
 
   // The unplaced order's prices on the chart (draftOrders.ts), from the spec and the engine's plan.
-  const qtyText = (q: number) => (q > 0 ? ` · ${fmtQty(q, p.sym?.stepSize)} ${base}`.trimEnd() : '');
+  // An unplaced order's size on the chart in the order panel's unit: the coin, or USD at its own price.
+  const qtyText = (q: number, px?: number | null) => {
+    if (!(q > 0)) return '';
+    const at = px ?? mid ?? 0;
+    return p.sizeUnit === 'usd' && at > 0 ? ` · $${(q * at).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : ` · ${fmtQty(q, p.sym?.stepSize)} ${base}`.trimEnd();
+  };
   const ticketQty = Number(p.quantity) > 0 ? Number(p.quantity) : 0;
   const draftLines: DraftLine[] = [];
   const sp = check.spec;
@@ -611,16 +628,16 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     if (sp.kind === 'scale' && plan) {
       const word = kind === 'dca' ? 'DCA' : 'Level';
       plan.children.forEach((c, i) => {
-        if (c.price) draftLines.push({ price: c.price, label: `${word} ${i + 1}/${plan.children.length}${qtyText(c.qty)}`, kind: 'limit' });
+        if (c.price) draftLines.push({ price: c.price, label: `${word} ${i + 1}/${plan.children.length}${qtyText(c.qty, c.price)}`, kind: 'limit' });
       });
     }
-    if (sp.kind === 'iceberg' && sp.price !== null) draftLines.push({ price: sp.price, label: `Iceberg${qtyText(ticketQty)}`, kind: 'limit' });
-    if (sp.kind === 'bracket' && sp.entry === 'limit' && sp.price !== null) draftLines.push({ price: sp.price, label: `Entry${qtyText(ticketQty)}`, kind: 'limit' });
+    if (sp.kind === 'iceberg' && sp.price !== null) draftLines.push({ price: sp.price, label: `Iceberg${qtyText(ticketQty, sp.price)}`, kind: 'limit' });
+    if (sp.kind === 'bracket' && sp.entry === 'limit' && sp.price !== null) draftLines.push({ price: sp.price, label: `Entry${qtyText(ticketQty, sp.price)}`, kind: 'limit' });
     if (sp.kind === 'conditional') {
-      if (sp.then.type === 'limit' && sp.then.price) draftLines.push({ price: sp.then.price, label: `Limit${qtyText(Number(sp.then.quantity))}`, kind: 'limit' });
+      if (sp.then.type === 'limit' && sp.then.price) draftLines.push({ price: sp.then.price, label: `Limit${qtyText(Number(sp.then.quantity), sp.then.price)}`, kind: 'limit' });
       for (const c of sp.conditions) if ((c.type === 'price' || c.type === 'cross') && c.symbol === sp.symbol && c.value) draftLines.push({ price: c.value, label: 'When', kind: 'trigger' });
     }
-    if (sp.kind === 'sweep' && plan?.children[0]?.price) draftLines.push({ price: plan.children[0].price, label: `Fill-fast edge${qtyText(ticketQty)}`, kind: 'limit' });
+    if (sp.kind === 'sweep' && plan?.children[0]?.price) draftLines.push({ price: plan.children[0].price, label: `Fill-fast edge${qtyText(ticketQty, plan.children[0].price)}`, kind: 'limit' });
     if (sp.kind === 'trailing' && sp.activationPrice !== null) draftLines.push({ price: sp.activationPrice, label: 'Trails from', kind: 'trigger' });
     if (sp.limitPrice !== null) draftLines.push({ price: sp.limitPrice, label: 'Limit', kind: 'limit' });
     if (sp.triggerPrice !== null) draftLines.push({ price: sp.triggerPrice, label: 'Starts at', kind: 'trigger' });
@@ -762,13 +779,13 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                 title="Empty: follows the best price"
                 err={err('price')}
               />
-              <Field
-                label="Visible"
+              <QtyField
+                ticket
+                title="Visible"
                 value={d.display}
                 placeholder={Number(p.quantity) > 0 ? `e.g. ${roundQty(Number(p.quantity) / 10, p.sym?.stepSize)}` : ''}
                 onChange={(v) => set({ display: v })}
-                suffix={base}
-                title="The size shown on the book at a time"
+                hint="The size shown on the book at a time"
                 err={err('displayQty')}
               />
             </>
@@ -779,7 +796,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           )}
 
           {ek === 'chase' && (
-            <Field label="Max chase" value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} suffix="%" title="How far from where it started it may follow the price" err={err('maxChaseBps')} />
+            <SlipField ticket title="Max chase" stored="pct" value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} hint="How far from where it started it may follow the price" err={err('maxChaseBps')} />
           )}
 
           {ek === 'scale' && (
@@ -848,6 +865,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   );
 
   return (
+    <SizeCtx.Provider value={{ unit: p.sizeUnit ?? 'coin', setUnit: p.onSizeUnit, px: mid ?? null, base, step: p.sym?.stepSize }}>
     <div className={`algo is-${p.side}`}>
       {/* WHAT THE ORDER TYPE ESSENTIALLY NEEDS, in the ticket's own boxes. */}
       {ticketFields}
@@ -903,6 +921,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       {dialog}
       {busy && <span className="algo-busy" aria-live="polite">Starting…</span>}
     </div>
+    </SizeCtx.Provider>
   );
 });
 
@@ -1047,8 +1066,8 @@ function Row({ title, hint, id, children }: { title: string; hint?: ReactNode; i
  * kept as the draft keeps it (`stored`), only what is shown converts. On the ticket in its boxes, in
  * the settings window in its own.
  */
-function SlipField({ title, hint, value, onChange, stored, err, ticket = false, after }: {
-  title: string; hint: string; value: string; onChange: (v: string) => void; stored: 'bp' | 'pct'; err?: string; ticket?: boolean; after?: string;
+function SlipField({ title, hint, value, onChange, stored, err, ticket = false, after, placeholder }: {
+  title: string; hint: string; value: string; onChange: (v: string) => void; stored: 'bp' | 'pct'; err?: string; ticket?: boolean; after?: string; placeholder?: string;
 }) {
   const [u, setU] = useSlipUnit();
   const [text, setText] = useState<string | null>(null);
@@ -1067,9 +1086,45 @@ function SlipField({ title, hint, value, onChange, stored, err, ticket = false, 
   };
   const unit = ticket ? <ModeSelect label={title} value={u} options={opts} onChange={pick} /> : <APick label={title} value={u} options={opts} onChange={pick} />;
   return ticket ? (
-    <Field label={title} value={shown} onChange={write} suffix={unit} title={hint} err={err} />
+    <Field label={title} value={shown} placeholder={placeholder} onChange={write} suffix={unit} title={hint} err={err} />
   ) : (
-    <AField title={title} hint={after ? `${hint} ${after}` : hint} value={shown} onChange={write} unit={unit} err={err} />
+    <AField title={title} hint={after ? `${hint} ${after}` : hint} value={shown} placeholder={placeholder} onChange={write} unit={unit} err={err} />
+  );
+}
+
+/** The order panel's size unit for the fields sized in the coin (AlgoTicket provides it). */
+const SizeCtx = createContext<{ unit: 'coin' | 'usd'; setUnit?: (u: 'coin' | 'usd') => void; px: number | null; base: string; step?: string }>({ unit: 'coin', px: null, base: '' });
+
+/**
+ * A size in the coin, shown in the order panel's unit (the coin, or USD at the price now) with that
+ * unit's switch in its box; it is kept in the coin as the draft keeps it.
+ */
+function QtyField({ title, hint, value, onChange, placeholder, err, ticket = false }: {
+  title: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; err?: string; ticket?: boolean;
+}) {
+  const { unit, setUnit, px, base, step } = useContext(SizeCtx);
+  const [text, setText] = useState<string | null>(null);
+  const usd = unit === 'usd' && !!px;
+  const shown = text ?? (value.trim() === '' ? '' : usd ? (Number(value) * px!).toFixed(2) : value);
+  const write = (t: string) => {
+    if (!usd) {
+      setText(null);
+      onChange(t);
+      return;
+    }
+    setText(t);
+    onChange(t.trim() === '' ? '' : toStep(Number(t) / px!, step));
+  };
+  const opts: ReadonlyArray<readonly ['coin' | 'usd', string]> = [['coin', base || 'Coin'], ['usd', 'USD']];
+  const pick = (u: 'coin' | 'usd') => {
+    setText(null);
+    setUnit?.(u);
+  };
+  const box = setUnit ? (ticket ? <ModeSelect label={title} value={unit} options={opts} onChange={pick} /> : <APick label={title} value={unit} options={opts} onChange={pick} />) : usd ? 'USD' : base;
+  return ticket ? (
+    <Field label={title} value={shown} placeholder={placeholder} onChange={write} suffix={box} title={hint} err={err} />
+  ) : (
+    <AField title={title} hint={hint} value={shown} placeholder={placeholder} onChange={write} unit={box} err={err} />
   );
 }
 
@@ -1298,7 +1353,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
             <AField title="Price" hint="Where the clips rest. Empty: at the best price, following it." value={d.icePeg ? '' : d.icePrice} placeholder="best price" onChange={(v) => set({ icePrice: v, icePeg: v.trim() === '' })} unit="USD" err={err('price')} />
           </Group>
           <Group label="Clips" sec="slicing">
-            <AField title="Visible" hint="The size shown on the book at a time." value={d.display} onChange={(v) => set({ display: v })} unit={base} err={err('displayQty')} />
+            <QtyField title="Visible" hint="The size shown on the book at a time." value={d.display} onChange={(v) => set({ display: v })} err={err('displayQty')} />
           </Group>
         </>
       )}
@@ -1311,7 +1366,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
 
       {ek === 'chase' && (
         <Group label="Chase" sec="exec">
-          <AField title="Max chase" hint="How far from where it started it may follow the price. Empty: no limit." value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} unit="%" err={err('maxChaseBps')} />
+          <SlipField title="Max chase" stored="pct" hint="How far from where it started it may follow the price. Empty: no limit." value={d.maxChasePct} placeholder="no limit" onChange={(v) => set({ maxChasePct: v })} err={err('maxChaseBps')} />
         </Group>
       )}
 
@@ -1434,8 +1489,8 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
             )}
             {ek === 'twap' && (
               <>
-                <AField title="Smallest slice" hint="No slice below this: what is due waits until it reaches it (except at the end). Empty: any." value={d.minSlice} placeholder="any" onChange={(v) => set({ minSlice: v })} unit={base} err={err('minSliceQty')} />
-                <AField title="Largest slice" hint="No slice above this. Empty: any." value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} unit={base} err={err('maxSliceQty')} />
+                <QtyField title="Smallest slice" hint="No slice below this: what is due waits until it reaches it (except at the end). Empty: any." value={d.minSlice} placeholder="any" onChange={(v) => set({ minSlice: v })} err={err('minSliceQty')} />
+                <QtyField title="Largest slice" hint="No slice above this. Empty: any." value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} err={err('maxSliceQty')} />
               </>
             )}
           </Group>
@@ -1472,7 +1527,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
               unit="%"
               err={err('rate')}
             />
-            <AField title="Largest child" hint="No single order bigger than this. Empty: any size." value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} unit={base} err={err('maxChildQty')} />
+            <QtyField title="Largest child" hint="No single order bigger than this. Empty: any size." value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} err={err('maxChildQty')} />
             <AField title="Stop after" hint="Ends the algo after this long, filled or not. Empty: runs until filled." value={d.endIn} placeholder="when filled" onChange={(v) => set({ endIn: v })} unit={<ATime label="Stop after" value={d.endUnit} units={['m', 'h', 'd']} onChange={(u) => set({ endUnit: u })} />} err={err('endAt')} />
           </Group>
           <ExecGroup d={d} set={set} jitter="none" cap={false} err={err} />
@@ -1670,7 +1725,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
           <>
             <ABound title="Above" hint="What it does while the price is above this. Empty: nothing." value={d.upper} onValue={(v) => set({ upper: v })} then={d.upperThen} onThen={(v) => set({ upperThen: v })} err={err('upper')} />
             <ABound title="Below" hint="What it does while the price is below this. Empty: nothing." value={d.lower} onValue={(v) => set({ lower: v })} then={d.lowerThen} onThen={(v) => set({ lowerThen: v })} err={err('lower')} />
-            <AField title="Max spread" hint="Takes nothing while the spread is wider than this. Empty: any." value={d.maxSpread} placeholder="any" onChange={(v) => set({ maxSpread: v })} unit="bp" err={err('maxSpreadBps')} />
+            <SlipField title="Max spread" stored="bp" hint="Takes nothing while the spread is wider than this. Empty: any." value={d.maxSpread} placeholder="any" onChange={(v) => set({ maxSpread: v })} err={err('maxSpreadBps')} />
           </>
         )}
       </Group>
