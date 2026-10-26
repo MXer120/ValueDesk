@@ -103,7 +103,7 @@
 .dash-layoutmenu-head .menu-group-label { margin-bottom: 2px; }
 .dash-layoutmenu-count { color: var(--dim); font-size: var(--fs-micro); font-family: var(--font-num); }
 .dash-layoutmenu-find { position: relative; display: flex; align-items: center; flex: none; margin: 2px 2px 4px; color: var(--dim); }
-.dash-layoutmenu-find svg { position: absolute; left: 9px; pointer-events: none; }
+.dash-layoutmenu-find svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .dash-layoutmenu-find input {
   width: 100%; height: 30px; padding: 0 10px 0 28px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px;
   background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs);
@@ -948,7 +948,7 @@
 .dash-edit-wcard.tabside__card:hover { border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.06); transform: translateY(-1px); }
 .dash-edit-wcard.tabside__card .dash-edit-card__screen { border-radius: 8px; }
 .tabside__find { position: relative; display: flex; align-items: center; margin: 0 0 10px; color: var(--dim); }
-.tabside__find svg { position: absolute; left: 11px; pointer-events: none; }
+.tabside__find svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .tabside__find input {
   width: 100%; height: 34px; padding: 0 12px 0 32px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
   background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs);

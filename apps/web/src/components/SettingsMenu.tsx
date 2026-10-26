@@ -34,7 +34,7 @@ import {
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, revokeEmbed, useEmbedConsent } from '../legal/embeds';
 import { LegalLink } from '../legal/LegalGate';
 import { LEGAL_LABELS, LEGAL_PAGES } from '../router';
-import { NEWS_SOURCES, OUTLETS, logoUrl, useCreditHidden, useNewsSources, useOutletsOff } from './news/newsSources';
+import { NEWS_SOURCES, OUTLETS, logoUrl, useNewsSources, useOutletsOff } from './news/newsSources';
 import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
 import { APPEARANCE_DEFAULT, setAppearance, useAppearance, type Appearance } from '../appearance';
@@ -351,23 +351,9 @@ function SecuritySection() {
 }
 
 function NewsSection() {
-  const [isOn, setOn] = useNewsSources();
-  const [creditHidden, setCreditHidden] = useCreditHidden();
   return (
     <>
       <Head title="News" line="Where the News widget's stories come from. Switched off, a source's stories leave every list." />
-      <div className="stg__card">
-        {NEWS_SOURCES.map((s) => (
-          <Row key={s.id} title={s.name} line={s.line} icon={<img className="stg__logo" src={logoUrl(s.site)} alt="" width={20} height={20} />}>
-            <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} words={SHOW} />
-          </Row>
-        ))}
-      </div>
-      <div className="stg__card">
-        <Row title="Powered by SoSoValue" line="The credit under the news">
-          <Toggle checked={!creditHidden} onChange={(v) => setCreditHidden(!v)} label="Show the SoSoValue credit" words={SHOW} />
-        </Row>
-      </div>
       <OutletList />
     </>
   );
@@ -376,26 +362,41 @@ function NewsSection() {
 /** Every outlet the news names (newsSources.ts OUTLETS), each switchable; a search narrows the list. */
 function OutletList() {
   const [off, setOutlet, showAll] = useOutletsOff();
+  const [isOn, setOn] = useNewsSources();
   const [q, setQ] = useState('');
   const term = q.trim().toLowerCase();
   const groups = OUTLETS
     .map((g) => ({ group: g.group, list: g.list.filter(([site, name]) => !term || name.toLowerCase().includes(term) || site.includes(term)) }))
     .filter((g) => g.list.length > 0);
+  const aggregators = NEWS_SOURCES.filter((s) => !term || s.name.toLowerCase().includes(term) || s.site.includes(term));
   return (
     <>
       <div className="stg__label">
-        <span>Outlets</span>
+        <span>Sources</span>
         {off.size > 0 && (
           <button type="button" className="stg__link" onClick={showAll}>
             Show all ({off.size} off)
           </button>
         )}
       </div>
-      <p className="stg__note stg__note--top">The newsrooms and accounts SoSoValue's stories come from. Switched off, an outlet's stories leave every list.</p>
+      <p className="stg__note stg__note--top">The feeds the widget reads, then the newsrooms and accounts that reach it through SoSoValue. Switched off, a source's stories leave every list.</p>
       <label className="stg__find">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find an outlet" aria-label="Find an outlet" spellCheck={false} autoComplete="off" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" spellCheck={false} autoComplete="off" />
       </label>
+      {/* The feeds the widget reads (SoSoValue, the White House, Watcher.Guru): the outlets below reach it through SoSoValue. */}
+      {aggregators.length > 0 && (
+        <div>
+          <div className="stg__label"><span>Aggregators</span></div>
+          <div className="stg__card stg__card--outlets">
+            {aggregators.map((s) => (
+              <Row key={s.id} title={s.name} line={s.line} icon={<img className="stg__logo" src={logoUrl(s.site)} alt="" width={20} height={20} />}>
+                <Toggle checked={isOn(s.id)} onChange={(v) => setOn(s.id, v)} label={s.name} words={SHOW} />
+              </Row>
+            ))}
+          </div>
+        </div>
+      )}
       {groups.map((g) => (
         <div key={g.group}>
           <div className="stg__label"><span>{g.group}</span></div>
@@ -408,7 +409,7 @@ function OutletList() {
           </div>
         </div>
       ))}
-      {groups.length === 0 && <p className="stg__note">No outlet matches “{q.trim()}”.</p>}
+      {groups.length === 0 && aggregators.length === 0 && <p className="stg__note">No outlet matches “{q.trim()}”.</p>}
     </>
   );
 }

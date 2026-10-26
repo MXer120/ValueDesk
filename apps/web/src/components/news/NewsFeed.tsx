@@ -35,7 +35,7 @@ import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { EconCalendar } from './EconCalendar';
 import { PoweredBy } from './PoweredBy';
-import { FEED_IDS, SourceMark, sourceSite, useCreditHidden, useNewsSources, useOutletsOff } from './newsSources';
+import { FEED_IDS, SourceMark, sourceSite, useNewsSources, useOutletsOff } from './newsSources';
 import { moveSince, useCoinSeries, type PriceSource } from './moves';
 import { focusProps } from '../../chart/newsFocus';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
@@ -114,7 +114,6 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
   const [isOn] = useNewsSources();
   const [outletsOff] = useOutletsOff();
   const offKey = [...outletsOff].sort().join(',');
-  const [creditHidden, setCreditHidden] = useCreditHidden();
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
   const storyMenu = (e: ReactMouseEvent, n: NewsItem) => {
     if (!canSave) return;
@@ -223,13 +222,10 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
           ))}
         </div>
       </header>
-      {/* The source's credit floats centred over the bottom of the feed (NewsFeed.css); its x dismisses it for good. */}
-      {!creditHidden && (
+      {/* SoSoValue's credit, where its lists are what shows (Hot and Featured): centred over the bottom of the feed, on glass (NewsFeed.css). */}
+      {(f === 'hot' || f === 'featured') && !search && (
         <div className="nw__credit">
-          <PoweredBy more={onCalendar} />
-          <button type="button" className="nw__credit-x" onClick={() => setCreditHidden(true)} aria-label="Hide this for good" title="Hide for good (Settings brings it back)">
-            <svg viewBox="0 0 16 16" width="10" height="10" aria-hidden="true"><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
-          </button>
+          <PoweredBy more={false} />
         </div>
       )}
       {onCalendar ? <EconCalendar instance={instance} /> : <>
