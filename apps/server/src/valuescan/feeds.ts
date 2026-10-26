@@ -153,6 +153,17 @@ const MAX_LOGOS = 400;
 const logos = new Map<string, { at: number; type: string; body: Buffer | null }>();
 const logoFlights = new Map<string, Promise<{ type: string; body: Buffer | null }>>();
 
+/** An image's type from its first bytes (PNG, ICO, GIF, JPEG, WebP, SVG); null when unknown. */
+export function imageType(b: Buffer): string | null {
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return 'image/png';
+  if (b.length >= 4 && b[0] === 0 && b[1] === 0 && b[2] === 1 && b[3] === 0) return 'image/x-icon';
+  if (b.length >= 3 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return 'image/gif';
+  if (b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return 'image/jpeg';
+  if (b.length >= 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+  if (/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(b.toString('utf8', 0, Math.min(b.length, 256)))) return 'image/svg+xml';
+  return null;
+}
+
 /** A hostname, lower-case, without `www.`; null when it is not one. */
 export function logoDomain(v: unknown): string | null {
   if (typeof v !== 'string') return null;
@@ -161,8 +172,9 @@ export function logoDomain(v: unknown): string | null {
 }
 
 /**
- * A site's icon (DuckDuckGo's icon service), kept a day per site; null when it
- * has none. Read here so the browser asks only this origin.
+ * A site's icon - DuckDuckGo's icon service, else Google's, else the site's own
+ * /favicon.ico - kept a day per site; null when none has one. Read here so the
+ * browser asks only this origin.
  */
 export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch): Promise<{ type: string; body: Buffer | null }> {
   const hit = logos.get(domain);
@@ -170,20 +182,27 @@ export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch):
   let flight = logoFlights.get(domain);
   if (!flight) {
     flight = (async () => {
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 8_000);
       let got: { type: string; body: Buffer | null } = { type: 'image/x-icon', body: null };
-      try {
-        const res = await fetchImpl(`https://icons.duckduckgo.com/ip3/${domain}.ico`, { signal: ctrl.signal });
-        const type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim();
-        if (res.ok && /^image\//.test(type)) {
+      // DuckDuckGo's icon service, then Google's (a 404 there is its "no icon" globe), then the site's own.
+      for (const url of [
+        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+        `https://${domain}/favicon.ico`,
+      ]) {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 6_000);
+        try {
+          const res = await fetchImpl(url, { signal: ctrl.signal, redirect: 'follow' });
+          if (!res.ok) continue;
           const buf = Buffer.from(await res.arrayBuffer());
-          if (buf.length > 0 && buf.length < 200_000) got = { type, body: buf };
+          // The type the bytes are, not the one the service says (some label .ico files PNG).
+          const type = imageType(buf);
+          if (type && buf.length > 0 && buf.length < 200_000) { got = { type, body: buf }; break; }
+        } catch {
+          // The next one, or no icon: the widget shows the source's initial.
+        } finally {
+          clearTimeout(timer);
         }
-      } catch {
-        // No icon: the widget shows the source's initial.
-      } finally {
-        clearTimeout(timer);
       }
       logos.set(domain, { at: Date.now(), ...got });
       if (logos.size > MAX_LOGOS) logos.delete(logos.keys().next().value!);

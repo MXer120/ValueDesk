@@ -34,24 +34,50 @@ export function useNewsSources(): [(id: NewsSourceId) => boolean, (id: NewsSourc
 /** "Powered by SoSoValue" under the news, until dismissed for good (its x, or Settings brings it back). */
 export const useCreditHidden = () => useSharedStored<boolean>('vs.news.creditHidden', false);
 
-/** Outlets whose stories reach SoSoValue without their own link (its page, or a post on X): their sites. */
+/**
+ * Outlets and accounts whose stories reach SoSoValue without their own link (its
+ * page, or a post on X): their sites, keyed by the name with everything but
+ * letters and digits dropped ("ForesightNews" and "Foresight News" alike). A
+ * key also matches the start of a longer name ("RocketX | Privacy Swaps").
+ */
 const KNOWN: Record<string, string> = {
-  bloomberg: 'bloomberg.com', cnbc: 'cnbc.com', reuters: 'reuters.com', 'yahoo finance': 'finance.yahoo.com', 'wall street journal': 'wsj.com',
-  'financial times': 'ft.com', panews: 'panewslab.com', coindesk: 'coindesk.com', cointelegraph: 'cointelegraph.com', 'the block': 'theblock.co',
-  decrypt: 'decrypt.co', 'wu blockchain': 'wublock123.com', sosovalue: 'sosovalue.com', 'techub news': 'techub.news', odaily: 'odaily.news',
-  blockbeats: 'theblockbeats.info', 'foresight news': 'foresightnews.pro', chaincatcher: 'chaincatcher.com', coinglass: 'coinglass.com',
-  lookonchain: 'lookonchain.com', 'whale alert': 'whale-alert.io', 'watcher.guru': 'watcher.guru', 'the white house': 'whitehouse.gov',
-  binance: 'binance.com', coinbase: 'coinbase.com', okx: 'okx.com', bybit: 'bybit.com', 'token terminal': 'tokenterminal.com',
-  arkham: 'arkm.com', glassnode: 'glassnode.com', 'santiment': 'santiment.net', 'the kobeissi letter': 'thekobeissiletter.com',
-  'kobeissi letter': 'thekobeissiletter.com', 'blockcast.it': 'blockcast.it', 'iost': 'iost.io', 'sonic': 'soniclabs.com',
+  bloomberg: 'bloomberg.com', cnbc: 'cnbc.com', reuters: 'reuters.com', yahoofinance: 'finance.yahoo.com', wallstreetjournal: 'wsj.com', wsj: 'wsj.com',
+  financialtimes: 'ft.com', marketwatch: 'marketwatch.com', forbes: 'forbes.com', fortune: 'fortune.com', thestreet: 'thestreet.com', 道琼斯: 'dowjones.com', dowjones: 'dowjones.com',
+  financialjuice: 'financialjuice.com', moomoonews: 'moomoo.com', moomoo: 'moomoo.com',
+  panews: 'panewslab.com', coindesk: 'coindesk.com', cointelegraph: 'cointelegraph.com', theblock: 'theblock.co', decrypt: 'decrypt.co', blockworks: 'blockworks.co',
+  dlnews: 'dlnews.com', thedefiant: 'thedefiant.io', bitcoinmagazine: 'bitcoinmagazine.com', cryptonews: 'crypto.news', cryptoslate: 'cryptoslate.com',
+  beincrypto: 'beincrypto.com', bitcoinist: 'bitcoinist.com', newsbtc: 'newsbtc.com', utoday: 'u.today', ambcrypto: 'ambcrypto.com', coingape: 'coingape.com',
+  thecryptotimes: 'thecryptotimes.com', altcoinist: 'altcoinist.com', watcherguru: 'watcher.guru', thewhitehouse: 'whitehouse.gov', whitehouse: 'whitehouse.gov',
+  ussecuritiesandexchangecommission: 'sec.gov', sec: 'sec.gov', thekobeissiletter: 'thekobeissiletter.com', kobeissiletter: 'thekobeissiletter.com',
+  wublockchain: 'wublock123.com', 吴说区块链: 'wublock123.com', 吴说深度: 'wublock123.com', odaily: 'odaily.news', odaily星球日报: 'odaily.news',
+  techflow: 'techflowpost.com', 深潮techflow: 'techflowpost.com', techflowselected: 'techflowpost.com', blockbeats: 'theblockbeats.info', 律动blockbeats: 'theblockbeats.info',
+  foresightnews: 'foresightnews.pro', chaincatcher: 'chaincatcher.com', chaincatcherresearch: 'chaincatcher.com', 金色财经: 'jinse.cn', jinse: 'jinse.cn',
+  metaera: 'metaera.hk', metaeraresearch: 'metaera.hk', techubnews: 'techub.news', blockcastit: 'blockcast.it', 區塊客blockcastit: 'blockcast.it',
+  sosovalue: 'sosovalue.com', coinglass: 'coinglass.com', lookonchain: 'lookonchain.com', whalealert: 'whale-alert.io', arkham: 'arkm.com', glassnode: 'glassnode.com',
+  santiment: 'santiment.net', cryptoquant: 'cryptoquant.com', kiyoungju: 'cryptoquant.com', messari: 'messari.io', nansen: 'nansen.ai', defillama: 'defillama.com',
+  coingecko: 'coingecko.com', coinmarketcap: 'coinmarketcap.com', tokenterminal: 'tokenterminal.com', polymarket: 'polymarket.com', kalshi: 'kalshi.com', velo: 'velo.xyz',
+  binance: 'binance.com', coinbase: 'coinbase.com', okx: 'okx.com', bybit: 'bybit.com', kraken: 'kraken.com', bitget: 'bitget.com', phemex: 'phemex.com',
+  upbit: 'upbit.com', upbitkorea: 'upbit.com', wazirx: 'wazirx.com', swissborg: 'swissborg.com', onekey: 'onekey.so', hyperliquid: 'hyperliquid.xyz',
+  tether: 'tether.to', circle: 'circle.com', blackrock: 'blackrock.com', fidelity: 'fidelity.com', ethereum: 'ethereum.org', solana: 'solana.com',
+  sonic: 'soniclabs.com', iost: 'iost.io', zetachain: 'zetachain.com', fhenix: 'fhenix.io', rocketx: 'rocketx.exchange', mantra: 'mantrachain.io', listadao: 'lista.org',
 };
+/** Sites whose icon this app carries itself (the icon service has none for them). */
+const OWN_ICON: Record<string, string> = { 'sosovalue.com': '/logos/brand/sosovalue.png' };
+
+const keyOf = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
 /** The site whose icon marks a story, or null (the initial instead). */
 export function sourceSite(n: Pick<NewsItem, 'href' | 'author' | 'post'> & { source?: string }): string | null {
   const own = NEWS_SOURCES.find((s) => s.id === n.source);
   if (own) return own.site;
-  const name = (n.author ?? '').toLowerCase().replace(/[^\p{L}\p{N}. ]+/gu, '').trim();
-  for (const [k, site] of Object.entries(KNOWN)) if (name === k || name.startsWith(`${k} `)) return site;
+  const raw = (n.author ?? '').trim().toLowerCase();
+  // A name that is itself a site ("crypto.news").
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(raw)) return raw.replace(/^www\./, '');
+  const key = keyOf(raw);
+  if (key) {
+    if (KNOWN[key]) return KNOWN[key];
+    for (const [k, site] of Object.entries(KNOWN)) if (k.length >= 4 && key.startsWith(k)) return site;
+  }
   try {
     const host = new URL(n.href).hostname.toLowerCase().replace(/^www\./, '');
     if (/(^|\.)(sosovalue\.com|twitter\.com|x\.com|t\.co)$/.test(host)) return null;
@@ -60,6 +86,9 @@ export function sourceSite(n: Pick<NewsItem, 'href' | 'author' | 'post'> & { sou
     return null;
   }
 }
+
+/** A site's icon: the app's own where it carries one, else the server's logo route. */
+export const logoUrl = (site: string) => OWN_ICON[site] ?? `/api/vs/logo?domain=${encodeURIComponent(site)}`;
 
 /** A story's source: its icon (or initial) and its name. */
 export function SourceMark({ n }: { n: Pick<NewsItem, 'href' | 'author' | 'post'> & { source?: string } }) {
@@ -70,7 +99,7 @@ export function SourceMark({ n }: { n: Pick<NewsItem, 'href' | 'author' | 'post'
   return (
     <span className="nw__src" title={name}>
       {site && broken !== site ? (
-        <img className="nw__logo" src={`/api/vs/logo?domain=${encodeURIComponent(site)}`} alt="" width={14} height={14} loading="lazy" onError={() => setBroken(site)} />
+        <img className="nw__logo" src={logoUrl(site)} alt="" width={14} height={14} loading="lazy" onError={() => setBroken(site)} />
       ) : (
         <span className="nw__logo is-letter" aria-hidden="true">{initial}</span>
       )}
