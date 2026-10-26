@@ -6,6 +6,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { fmt, fmtUsd } from '../format';
 import { Modal } from '../components/Modal';
+import { DlgRow, DlgSection, DlgSwitch } from '../components/dialogParts';
 import { CrossFade } from '../components/motion';
 import { Seg } from '../components/palette/ui';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
@@ -243,40 +244,43 @@ export function AccountSetup({ address }: { address: string | null }) {
       <CrossFade viewKey={String(step)}>
         <div className="fx-stack">
           {step === 0 && (
-            <>
-              <div className="fx-box vs-setup__box">
-                <div className="fx-kv">
-                  <div><span>Status</span><b>{!indexOn ? 'Paused' : progress.done ? 'Caught up' : 'Indexing'}</b></div>
-                  <div><span>Progress</span><b>{progressText}</b></div>
-                </div>
-              </div>
-              <div className="vs-setup__index">
-                <button
-                  type="button"
-                  className="fx-cta fx-cta--ghost"
-                  onClick={() => {
-                    if (!address) return;
-                    setIndexEnabled(!indexOn, address);
-                    setIndexOn(!indexOn);
-                  }}
-                >
-                  {indexOn ? 'Pause' : 'Resume'}
-                </button>
-                <Seg
-                  label="Index speed"
-                  value={speed}
-                  onChange={(id) => { setIndexSpeed(id); setSpeed(id); }}
-                  options={SPEED_ORDER.map((id) => ({ id, label: id === 'giga' ? 'Giga' : SPEEDS[id].label }))}
-                />
-                <button
-                  type="button"
-                  className="fx-link"
-                  onClick={() => { if (address) resetIndex(address); }}
-                >
-                  Clear index
-                </button>
-              </div>
-            </>
+            <div className="dlg">
+              <DlgSection label="Your trade history">
+                <DlgRow title="Status" line={progressText}>
+                  <b className="vs-setup__state">{!indexOn ? 'Paused' : progress.done ? 'Caught up' : 'Indexing'}</b>
+                </DlgRow>
+                <DlgRow title="Reading history" line="Reads your past fills and orders in the background, on this device.">
+                  <DlgSwitch
+                    label="Reading history"
+                    on={indexOn}
+                    onWord="Running"
+                    offWord="Paused"
+                    onChange={() => {
+                      if (!address) return;
+                      setIndexEnabled(!indexOn, address);
+                      setIndexOn(!indexOn);
+                    }}
+                  />
+                </DlgRow>
+                <DlgRow title="Speed" line="Faster finishes sooner and asks more of the connection.">
+                  <Seg
+                    label="Index speed"
+                    value={speed}
+                    onChange={(id) => { setIndexSpeed(id); setSpeed(id); }}
+                    options={SPEED_ORDER.map((id) => ({ id, label: id === 'giga' ? 'Giga' : SPEEDS[id].label }))}
+                  />
+                </DlgRow>
+                <DlgRow title="Clear index" line="Forgets what was read on this device and starts again.">
+                  <button
+                    type="button"
+                    className="dlg-btn is-danger"
+                    onClick={() => { if (address) resetIndex(address); }}
+                  >
+                    Clear index
+                  </button>
+                </DlgRow>
+              </DlgSection>
+            </div>
           )}
 
           {step === 1 && (
@@ -309,26 +313,23 @@ export function AccountSetup({ address }: { address: string | null }) {
           )}
 
           {step === 2 && (
-            <>
+            <div className="dlg">
               <p className="vs-setup__fig">{probe ? deviceLine(probe) : 'Checking…'}</p>
-              <button
-                type="button"
-                className={`fx-opt${potatoOn ? ' is-on' : ''}`}
-                aria-pressed={potatoOn}
-                onClick={() => {
-                  potatoTouched.current = true;
-                  const nextOn = !potatoOn;
-                  setPotatoOn(nextOn);
-                  writePotato(nextOn, true);
-                }}
-              >
-                <span className="fx-opt__icon"><span className="fx-srct__tick"><Tick /></span></span>
-                <span>
-                  <span className="fx-opt__t">Potato mode</span>
-                  <span className="fx-opt__d">Less motion, for a device that is working hard.</span>
-                </span>
-              </button>
-            </>
+              <DlgSection label="Performance">
+                <DlgRow title="Potato mode" line="Less motion, for a device that is working hard." off={!potatoOn}>
+                  <DlgSwitch
+                    label="Potato mode"
+                    on={potatoOn}
+                    onChange={() => {
+                      potatoTouched.current = true;
+                      const nextOn = !potatoOn;
+                      setPotatoOn(nextOn);
+                      writePotato(nextOn, true);
+                    }}
+                  />
+                </DlgRow>
+              </DlgSection>
+            </div>
           )}
 
           {step === 3 && (

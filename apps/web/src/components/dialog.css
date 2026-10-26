@@ -1,0 +1,168 @@
+/**
+ * THE SETTINGS LANGUAGE, FOR EVERY OTHER DIALOG (dialogParts.tsx).
+ *
+ * The Settings window (SettingsMenu.css, `.stg__*`) set the look: small
+ * uppercase section labels; each setting a row with a clear title, one plain
+ * line under it and its control; hairlines between rows; 40px soft rounded
+ * fields with their unit on the right; switches that say what they mean;
+ * choice cards; soft buttons with one primary. These are the same pieces,
+ * sized for a dialog rather than a full pane, under one `.dlg` wrapper so
+ * every rule outranks the older per-dialog and element rules.
+ *
+ * A row puts its control to the right of its words while there is room and
+ * under them when there is not (phones, narrow sheets).
+ */
+
+/* Sections. */
+.dlg { display: flex; flex-direction: column; min-width: 0; }
+.dlg .dlg-label {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 22px 0 2px;
+  color: var(--dim); font-size: var(--fs-micro, 11px); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+}
+.dlg > .dlg-label:first-child { margin-top: 4px; }
+.dlg .dlg-card { display: flex; flex-direction: column; min-width: 0; }
+
+/* A setting: words left, control right; hairlines between. */
+.dlg .dlg-row {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; column-gap: 16px; row-gap: 10px;
+  padding: 14px 0; border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.dlg .dlg-card > .dlg-row:first-child { border-top-color: transparent; padding-top: 8px; }
+.dlg .dlg-row.is-off .dlg-rowtext { opacity: 0.55; }
+.dlg .dlg-row.is-stack { flex-direction: column; align-items: stretch; }
+.dlg .dlg-rowtext { display: flex; flex: 1 1 170px; flex-direction: column; gap: 3px; min-width: 0; }
+.dlg .dlg-rowtext b { color: var(--text); font-size: 14px; font-weight: 550; }
+.dlg .dlg-rowtext small { color: var(--dim); font-size: 12px; line-height: 1.45; }
+.dlg .dlg-ctl { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dlg .dlg-row.is-stack .dlg-ctl { flex: 1 1 auto; }
+.dlg .dlg-row.is-full { padding: 10px 0; }
+.dlg .dlg-row.is-full > * { flex: 1 1 100%; }
+.dlg .dlg-note { margin: 12px 0 0; color: var(--dim); font-size: 12px; line-height: 1.55; }
+.dlg .dlg-note b { color: var(--muted); }
+.dlg .dlg-warn { margin: 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--warn, #f2b84b) 12%, transparent); color: var(--warn, #f2b84b); font-size: 12.5px; line-height: 1.45; }
+.dlg .dlg-err { margin: 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--neg) 12%, transparent); color: var(--neg); font-size: 12.5px; line-height: 1.45; }
+
+/* Fields: 40px, soft fill, unit on the right. Wrap the input in .dlg-field. */
+.dlg .dlg-field {
+  display: inline-flex; align-items: center; gap: 6px; width: 180px; max-width: 100%; height: 40px; padding: 0 12px;
+  border-radius: 10px; background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: box-shadow 140ms;
+}
+.dlg .dlg-field:focus-within { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.3); }
+.dlg .dlg-field.is-wide { width: 100%; }
+.dlg .dlg-field.is-time { width: 220px; }
+.dlg .dlg-field.is-bad { box-shadow: 0 0 0 1px color-mix(in srgb, var(--neg) 70%, transparent); }
+.dlg .dlg-field input,
+.dlg .dlg-field textarea {
+  flex: 1 1 auto; width: 0; min-width: 0; height: 100%; min-height: 0; padding: 0; border: 0; outline: none; background: none;
+  color: var(--text); font: inherit; font-size: 14px; box-shadow: none;
+}
+.dlg .dlg-field input[type='number'],
+.dlg .dlg-field input[inputmode='decimal'],
+.dlg .dlg-field input[type='datetime-local'] { font-family: var(--font-num); }
+.dlg .dlg-field input[type='datetime-local'] { color-scheme: dark; }
+.dlg .dlg-field.is-text { height: auto; padding: 10px 12px; }
+.dlg .dlg-field.is-text textarea { height: auto; min-height: 84px; resize: vertical; font-family: inherit; line-height: 1.45; }
+.dlg .dlg-field input::placeholder,
+.dlg .dlg-field textarea::placeholder { color: var(--dim); }
+.dlg .dlg-pre,
+.dlg .dlg-unit { flex: none; color: var(--dim); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.dlg .dlg-iconbtn {
+  display: grid; flex: none; place-items: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: 8px;
+  background: none; color: var(--muted); cursor: pointer; transition: background 140ms, color 140ms;
+}
+.dlg .dlg-iconbtn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); color: var(--text); }
+.dlg .dlg-iconbtn:disabled { opacity: 0.35; cursor: default; }
+.dlg .dlg-iconbtn.is-danger:hover:not(:disabled) { color: var(--neg); }
+
+.dlg .dlg-select {
+  width: 180px; max-width: 100%; height: 40px; min-height: 0; padding: 0 36px 0 12px; border: 0; border-radius: 10px; appearance: none; -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.07) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 16 16'%3E%3Cpath d='m4 6 4 4 4-4' fill='none' stroke='%23d8d8d8' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--text); font: inherit; font-size: 14px; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.dlg .dlg-select option { background: #1c1b1a; }
+
+/* The switch and the word for its state, pressable as one. */
+.dlg .dlg-switch {
+  display: inline-flex; align-items: center; gap: 10px; height: 26px; min-height: 0; padding: 0; border: 0; background: none;
+  color: var(--text); font: inherit; font-size: 13.5px; cursor: pointer;
+}
+.dlg .dlg-switch > span:last-child { min-width: 46px; text-align: left; color: var(--muted); }
+.dlg .dlg-switch.is-on > span:last-child { color: var(--text); }
+.dlg .dlg-track { position: relative; flex: none; width: 44px; height: 26px; border-radius: 999px; background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.3); transition: background 160ms; }
+.dlg .dlg-track > i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35); transition: transform 200ms var(--ease-spring, ease); }
+.dlg .dlg-switch.is-on .dlg-track { background: rgba(255, 255, 255, 0.28); }
+.dlg .dlg-switch.is-on .dlg-track > i { transform: translateX(18px); }
+.dlg .dlg-switch:disabled { cursor: default; opacity: 0.5; }
+.dlg .dlg-switch:focus-visible { outline: 2px solid var(--focus, #fff); outline-offset: 3px; border-radius: 999px; }
+
+/* Segmented control: a few exclusive options, words or glyphs. */
+.dlg .dlg-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.dlg .dlg-seg > button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 34px; height: 32px; min-height: 0; padding: 0 12px;
+  border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 140ms, color 140ms;
+}
+.dlg .dlg-seg > button:hover:not(:disabled) { color: var(--text); }
+.dlg .dlg-seg > button.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+.dlg .dlg-seg > button:disabled { opacity: 0.4; cursor: default; }
+.dlg .dlg-seg.is-tabs { display: flex; margin-bottom: 4px; }
+.dlg .dlg-seg.is-tabs > button { flex: 1 1 0; }
+
+/* Choice cards: a title and one line each, for exclusive options. */
+.dlg .dlg-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; width: 100%; }
+.dlg .dlg-choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-height: 0; padding: 12px 14px; text-align: left;
+  border: 1px solid rgba(255, 255, 255, 0.07); border-radius: 12px; background: rgba(255, 255, 255, 0.04);
+  color: var(--text); font: inherit; cursor: pointer; transition: background 140ms, border-color 140ms;
+}
+.dlg .dlg-choice:hover:not(:disabled) { background: rgba(255, 255, 255, 0.08); }
+.dlg .dlg-choice.is-on { border-color: rgba(255, 255, 255, 0.35); background: rgba(255, 255, 255, 0.1); }
+.dlg .dlg-choice:disabled { opacity: 0.45; cursor: default; }
+.dlg .dlg-choice b { font-size: 13.5px; font-weight: 550; }
+.dlg .dlg-choice small { color: var(--dim); font-size: 12px; line-height: 1.4; }
+
+/* Facts: a few read-only figures in one soft block. */
+.dlg .dlg-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 12px; padding: 14px 16px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); }
+.dlg .dlg-fact { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.dlg .dlg-fact > span { color: var(--dim); font-size: 12px; }
+.dlg .dlg-fact > b { overflow: hidden; color: var(--text); font-family: var(--font-num); font-size: 14px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Buttons: soft and rounded, one primary (.is-go). */
+.dlg-btn {
+  display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; height: 40px; min-height: 0; padding: 0 18px;
+  border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.07); color: var(--text); font: inherit; font-size: 14px; font-weight: 500; cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); transition: background 140ms;
+}
+.dlg-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.11); }
+.dlg-btn:disabled { opacity: 0.45; cursor: default; }
+.dlg-btn.is-go { background: var(--text); color: var(--bg); }
+.dlg-btn.is-go:hover:not(:disabled) { background: #fff; }
+.dlg-btn.is-danger { background: color-mix(in srgb, var(--neg) 14%, transparent); color: var(--neg); }
+.dlg-btn.is-small { height: 32px; padding: 0 12px; font-size: 13px; }
+.dlg-link { min-height: 0; padding: 0; border: 0; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+.dlg-link:hover:not(:disabled) { color: var(--text); }
+.dlg-link:disabled { opacity: 0.4; cursor: default; }
+
+/* The foot: a quiet link on the left, the actions on the right, primary last. */
+.dlg-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; width: 100%; }
+.dlg-foot .dlg-actions { display: flex; gap: 8px; margin-left: auto; }
+
+@media (max-width: 520px) {
+  .dlg .dlg-field, .dlg .dlg-select { width: 100%; }
+  .dlg .dlg-ctl { flex: 1 1 100%; }
+  .dlg-foot .dlg-actions { flex: 1 1 100%; }
+  .dlg-foot .dlg-actions > .dlg-btn { flex: 1 1 0; }
+}
+
+.dlg .dlg-fact > b.pos { color: var(--pos); }
+.dlg .dlg-fact > b.neg { color: var(--neg); }
+.dlg .dlg-facts + .dlg-label { margin-top: 20px; }
+html .modal.fx.vs-tpsl .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+
+/* The builder-fee sheet's figures (account/BuilderConsent.tsx). */
+.dlg.vs-fee__dlg .dlg-row { padding: 10px 0; }
+.dlg.vs-fee__dlg .dlg-rowtext b { font-weight: 500; color: var(--muted); }
+.dlg .vs-fee__v { color: var(--text); font-family: var(--font-num); font-size: 14px; font-weight: 550; }
+.dlg .kt-add__sel { width: 100%; }
+.dlg .vs-setup__state { color: var(--text); font-size: 14px; font-weight: 550; }

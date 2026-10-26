@@ -13,6 +13,7 @@
  */
 import { useCallback, useState, type ReactNode } from 'react';
 import { Modal } from '../Modal';
+import { DlgFoot, DlgRow, DlgSection } from '../dialogParts';
 import { fmtBuilderRate, type BuilderTerms } from '../../trading/builder';
 import type { BuilderChoice } from '../../trading/session';
 import '../funds/funds.css';
@@ -33,14 +34,14 @@ export function BuilderTermsView({ terms }: { terms: BuilderTerms }) {
         {enabling ? 'Approving this turns trading on. ' : ''}
         SoDEX charges this on each fill, on top of its own fee, and pays it to ValueDesk.
       </p>
-      <div className="fx-box vs-fee__box">
-        <div className="fx-kv">
-          <div><span>Futures</span><b>{rateLine(terms.perps)}</b></div>
-          <div><span>Spot sells</span><b>{rateLine(terms.spot)}</b></div>
-          <div><span>Spot buys</span><b>No fee</b></div>
-          <div><span>Maximum</span><b>{fmtBuilderRate(terms.maxFeeRate)}</b></div>
-          <div><span>Paid to</span><b>ValueDesk</b></div>
-        </div>
+      <div className="dlg vs-fee__dlg">
+        <DlgSection label="The fee">
+          <DlgRow title="Futures"><b className="vs-fee__v">{rateLine(terms.perps)}</b></DlgRow>
+          <DlgRow title="Spot sells"><b className="vs-fee__v">{rateLine(terms.spot)}</b></DlgRow>
+          <DlgRow title="Spot buys"><b className="vs-fee__v">No fee</b></DlgRow>
+          <DlgRow title="Maximum"><b className="vs-fee__v">{fmtBuilderRate(terms.maxFeeRate)}</b></DlgRow>
+          <DlgRow title="Paid to"><b className="vs-fee__v">ValueDesk</b></DlgRow>
+        </DlgSection>
       </div>
       {partial && (
         <p className="fx-note">
@@ -98,14 +99,17 @@ export function useBuilderConsent(): { ask: (terms: BuilderTerms) => Promise<Bui
       dismissOnBackdrop={false}
     >
       <BuilderTermsView terms={req.terms} />
-      <div className="vs-fee__actions">
-        <button type="button" className="fx-cta" onClick={() => settle('approve')}>Approve</button>
-        {!req.terms.required && req.terms.purpose !== 'approve' && (
-          <button type="button" className="fx-link" onClick={() => settle('decline')}>
-            {req.terms.alreadyApproved.length ? 'Keep the current approval' : 'Enable without the fee'}
-          </button>
-        )}
-      </div>
+      <DlgFoot
+        left={
+          !req.terms.required && req.terms.purpose !== 'approve' ? (
+            <button type="button" className="dlg-btn" onClick={() => settle('decline')}>
+              {req.terms.alreadyApproved.length ? 'Keep the current approval' : 'Enable without the fee'}
+            </button>
+          ) : undefined
+        }
+      >
+        <button type="button" className="dlg-btn is-go" onClick={() => settle('approve')}>Approve</button>
+      </DlgFoot>
     </Modal>
   ) : null;
 

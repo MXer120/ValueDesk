@@ -286,3 +286,8 @@ w3m-modal[data-shared-backdrop] {
 }
 @keyframes acct-menu-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .acct-menu__spin { animation: none; } }
+
+/* Advanced key options in the Settings language (components/dialog.css). */
+.acct-adv.dlg .acct-adv__v { overflow-wrap: anywhere; color: var(--muted); }
+.acct-adv.dlg .acct-adv__keys { margin-top: 4px; }
+.acct-adv.dlg .acct-adv__keys table { width: 100%; }

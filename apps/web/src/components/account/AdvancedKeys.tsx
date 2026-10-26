@@ -42,6 +42,7 @@ import {
 } from '../../trading/session';
 import { logger } from '../../log';
 import { Modal } from '../Modal';
+import { DlgRow, DlgSection } from '../dialogParts';
 import { LoadFailed, logLoadFailure } from '../LoadFailed';
 import './account.css';
 import { NoWallet } from '../EmptyState';
@@ -232,78 +233,76 @@ function AdvancedKeys({ address, provider, walletName, onSession, confirmBuilder
   };
 
   return (
-    <div className="stack acct-adv">
-      <section className="stack">
-        <h4>This browser</h4>
+    <div className="acct-adv dlg">
+      <DlgSection label="This browser">
         {mine ? (
-          <dl className="kv small">
-            <dt>Key</dt>
-            <dd className="mono">{mine.keyName}</dd>
-            <dt>Address</dt>
-            <dd className="mono">{mine.keyAddress}</dd>
-            <dt>Expires</dt>
-            <dd>{when(mine.expiresAt)}</dd>
-            <dt>Kept on this device</dt>
-            <dd>{mine.remembered ? 'yes, sealed, until it expires' : 'no, this tab only'}</dd>
-            <dt>Builder fee approved</dt>
-            <dd>{approved ? describeApproval(approval!) : 'none'}</dd>
-          </dl>
+          <>
+            <DlgRow title="Key" line={<span className="mono acct-adv__v">{mine.keyName}</span>} />
+            <DlgRow title="Address" line={<span className="mono acct-adv__v">{mine.keyAddress}</span>} />
+            <DlgRow title="Expires" line={when(mine.expiresAt)} />
+            <DlgRow title="Kept on this device" line={mine.remembered ? 'yes, sealed, until it expires' : 'no, this tab only'} />
+            <DlgRow title="Builder fee approved" line={approved ? describeApproval(approval!) : 'none'} />
+          </>
         ) : (
-          <p className="muted small">
+          <p className="dlg-note">
             {t.status === 'expired' ? t.reason : 'Trading is not enabled in this browser.'}
           </p>
         )}
         {/* With trading off there is no key row to carry it: the account's approval is stated on its own. */}
         {!mine && approved && (
-          <p className="small">Builder fee approved on this SoDEX account: {describeApproval(approval!)}.</p>
+          <p className="dlg-note">Builder fee approved on this SoDEX account: {describeApproval(approval!)}.</p>
         )}
-        {(mine || approved || canApprove) && (
-          <div className="row wrap">
-            {mine && (
-              <button className="danger" disabled={busy} onClick={() => void revoke()}>
-                Revoke on SoDEX and turn off
-              </button>
-            )}
-            {canApprove && (
-              <button
-                disabled={busy}
-                onClick={() => void approveBuilder()}
-                title="Shows what the fee is, then asks your wallet for one signature that sets your maximum builder fee for the ValueDesk builder account."
-              >
+      </DlgSection>
+      {(mine || approved || canApprove) && (
+        <DlgSection label="Actions">
+          {canApprove && (
+            <DlgRow
+              title="Approve builder fee"
+              line="Shows what the fee is, then asks your wallet for one signature that sets your maximum builder fee for the ValueDesk builder account."
+            >
+              <button type="button" className="dlg-btn is-go" disabled={busy} onClick={() => void approveBuilder()}>
                 Approve builder fee
               </button>
-            )}
-            {approved && (
-              <button
-                disabled={busy}
-                onClick={() => void revokeBuilder()}
-                title="Your wallet signs one message that sets your maximum builder fee for this builder account to 0. The approval belongs to your SoDEX account, not to this browser's key."
-              >
+            </DlgRow>
+          )}
+          {approved && (
+            <DlgRow
+              title="Revoke builder approval"
+              line="Your wallet signs one message that sets your maximum builder fee for this builder account to 0. The approval belongs to your SoDEX account, not to this browser's key."
+            >
+              <button type="button" className="dlg-btn" disabled={busy} onClick={() => void revokeBuilder()}>
                 Revoke builder approval
               </button>
-            )}
-          </div>
-        )}
-        {approved && (
-          <p className="muted small">
-            The builder fee is charged by SoDEX on each fill of an order placed here (not on spot buys), on top of its
-            own fee, up to the maximum above. Revoking it stops it for every order placed after that.
-          </p>
-        )}
-        {canApprove && (
-          <p className="muted small">
-            {approved
-              ? 'SoDEX does not list an approval that covers the ValueDesk builder fee on every market.'
-              : 'SoDEX lists no approval of the ValueDesk builder fee for this account.'}{' '}
-            {builder!.required
-              ? 'Trading through ValueDesk requires it: orders placed here are refused until it is approved.'
-              : 'Orders placed here carry no builder fee where it is not approved.'}
-          </p>
-        )}
-      </section>
+            </DlgRow>
+          )}
+          {mine && (
+            <DlgRow title="Turn trading off" line="Revokes this browser's key on SoDEX and removes it from this device.">
+              <button type="button" className="dlg-btn is-danger" disabled={busy} onClick={() => void revoke()}>
+                Revoke on SoDEX and turn off
+              </button>
+            </DlgRow>
+          )}
+        </DlgSection>
+      )}
+      {approved && (
+        <p className="dlg-note">
+          The builder fee is charged by SoDEX on each fill of an order placed here (not on spot buys), on top of its
+          own fee, up to the maximum above. Revoking it stops it for every order placed after that.
+        </p>
+      )}
+      {canApprove && (
+        <p className="dlg-note">
+          {approved
+            ? 'SoDEX does not list an approval that covers the ValueDesk builder fee on every market.'
+            : 'SoDEX lists no approval of the ValueDesk builder fee for this account.'}{' '}
+          {builder!.required
+            ? 'Trading through ValueDesk requires it: orders placed here are refused until it is approved.'
+            : 'Orders placed here carry no builder fee where it is not approved.'}
+        </p>
+      )}
 
-      <section className="stack">
-        <h4>All keys on this SoDEX account</h4>
+      <section className="stack acct-adv__keys">
+        <div className="dlg-label"><span>All keys on this SoDEX account</span></div>
         {!address ? (
           <NoWallet line="Connect a wallet to see its keys." compact />
         ) : !account && loadFailed ? (

@@ -179,3 +179,13 @@
 @media (max-width: 560px) {
   .fee-sched__card { grid-template-columns: 1fr; gap: var(--sp-3); }
 }
+
+/* Section heads as the Settings window labels them: small, uppercase, quiet. */
+.fx.fee-sched .fee-sched__block h3 {
+  margin: 18px 0 8px;
+  color: var(--dim);
+  font-size: var(--fs-micro, 11px);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}

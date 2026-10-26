@@ -1,8 +1,8 @@
 /**
- * An indicator's settings, TradingView's two tabs, drawn as one of the app's
- * sheets (the Deposit / Withdraw / Connect family: `.modal.fx`, a glass sheet
- * with a centred title, labelled 42px wells, the FxSelect picker, one
- * full-width primary action):
+ * An indicator's settings, TradingView's two tabs, in the Settings window's
+ * language (dialogParts.tsx: labelled sections, a row per input with its
+ * title, one line, a 40px field and its unit; switches that say Shown or
+ * Hidden; OK the one primary action):
  *
  *   Inputs  the calculation parameters, named (Length, Std dev, Fast length…)
  *           rather than "param 1", and the price the study reads (Close, Open,
@@ -18,7 +18,7 @@
  */
 import { Fragment, useState } from 'react';
 import { Modal } from '../components/Modal';
-import { FxSelect } from '../components/funds/ui';
+import { DlgFoot, DlgRow, DlgSection, DlgSeg, DlgSwitch } from '../components/dialogParts';
 import {
   BAR_DOWN,
   BAR_UP,
@@ -91,22 +91,31 @@ export function Palette({ value, label, onPick }: { value: string; label: string
 /** Line width as four line glyphs, the style bar's picker. */
 export function Widths({ value, label, onPick }: { value: number; label: string; onPick: (w: number) => void }) {
   return (
-    <span className="kc-set-seg" role="group" aria-label={`${label} width`}>
-      {[1, 2, 3, 4].map((w) => (
-        <button
-          key={w}
-          type="button"
-          className={value === w ? 'on' : ''}
-          aria-label={`${w} pixel line`}
-          aria-pressed={value === w}
-          title={`${w}px`}
-          onClick={() => onPick(w)}
-        >
-          {lineIcon(w)}
-        </button>
-      ))}
-    </span>
+    <DlgSeg
+      label={`${label} width`}
+      value={value}
+      onChange={onPick}
+      options={[1, 2, 3, 4].map((w) => ({ value: w, label: lineIcon(w), title: `${w}px`, aria: `${w} pixel line` }))}
+    />
   );
+}
+
+/** A calculation input's unit, and one plain line about it. */
+function paramMeta(label: string): { name: string; unit: string; line: string } {
+  if (/\(%\)/.test(label)) {
+    const name = label.replace(/\s*\(%\)/, '');
+    const line = /start/i.test(name)
+      ? 'Where the acceleration starts.'
+      : /step/i.test(name)
+        ? 'How much it speeds up each new extreme.'
+        : 'The fastest it can get.';
+    return { name, unit: '%', line };
+  }
+  if (/std/i.test(label)) return { name: 'Standard deviations', unit: 'SD', line: 'How far the bands sit from the middle line.' };
+  if (/smoothing/i.test(label)) return { name: label, unit: 'bars', line: 'Bars used to smooth the line.' };
+  if (/weight/i.test(label)) return { name: label, unit: '', line: 'How much the newest bar counts.' };
+  if (/^MA\b/.test(label)) return { name: label, unit: 'bars', line: 'Bars in the average drawn over the study.' };
+  return { name: label, unit: 'bars', line: 'Bars the study looks back over.' };
 }
 
 export function IndicatorSettings({ spec, defaults, lineTitles, hasBars, onChange, onClose }: IndicatorSettingsProps) {
@@ -129,31 +138,29 @@ export function IndicatorSettings({ spec, defaults, lineTitles, hasBars, onChang
   const decimalParam = (label: string) => /std|%/i.test(label);
   /** 'Length' -> 'length', but 'MA length' stays 'MA length'. */
   const inSentence = (label: string) => (/^[A-Z][a-z]/.test(label) ? label.charAt(0).toLowerCase() + label.slice(1) : label);
-  const number = (label: string, i: number, aside?: JSX.Element) => (
-    <div className="kc-set-field" key={i}>
-      <span className="fx-lbl">{label}</span>
-      <span className="kc-set-input">
-        <input
-          className="fx-input"
-          type="number"
-          inputMode="decimal"
-          aria-label={label}
-          min={decimalParam(label) ? 0.1 : 1}
-          max={1000}
-          step={decimalParam(label) ? 0.1 : 1}
-          value={params[i] ?? ''}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (!Number.isFinite(v) || v <= 0) return;
-            const next = [...params];
-            next[i] = decimalParam(label) ? v : Math.round(v);
-            setParams(next);
-          }}
-        />
-        {aside}
-      </span>
-    </div>
+  const numberInput = (label: string, i: number, unit: string) => (
+    <span className="dlg-field">
+      <input
+        type="number"
+        inputMode="decimal"
+        aria-label={label}
+        min={decimalParam(label) ? 0.1 : 1}
+        max={1000}
+        step={decimalParam(label) ? 0.1 : 1}
+        value={params[i] ?? ''}
+        onChange={(e) => {
+          const v = Number(e.target.value);
+          if (!Number.isFinite(v) || v <= 0) return;
+          const next = [...params];
+          next[i] = decimalParam(label) ? v : Math.round(v);
+          setParams(next);
+        }}
+      />
+      {unit && <span className="dlg-unit">{unit}</span>}
+    </span>
   );
+
+  const paramLabels = info?.params.length ? info.params : params.map((_, i) => `Input ${i + 1}`);
 
   return (
     <Modal
@@ -162,128 +169,151 @@ export function IndicatorSettings({ spec, defaults, lineTitles, hasBars, onChang
       onClose={() => onClose(false)}
       className="fx kc-set"
       footer={
-        <div className="kc-set-foot">
-          <button
-            type="button"
-            className="fx-link"
-            onClick={() =>
-              onChange({ name: spec.name, visible: spec.visible, height: spec.height, pane: spec.pane, calcParams: [...defaults] })
-            }
-          >
-            Reset to defaults
+        <DlgFoot
+          left={
+            <button
+              type="button"
+              className="dlg-link"
+              onClick={() =>
+                onChange({ name: spec.name, visible: spec.visible, height: spec.height, pane: spec.pane, calcParams: [...defaults] })
+              }
+            >
+              Reset to defaults
+            </button>
+          }
+        >
+          <button type="button" className="dlg-btn" onClick={() => onClose(false)}>
+            Cancel
           </button>
-          <div className="kc-set-actions">
-            <button type="button" className="fx-cta fx-cta--ghost" onClick={() => onClose(false)}>
-              Cancel
-            </button>
-            <button type="button" className="fx-cta" onClick={() => onClose(true)}>
-              OK
-            </button>
-          </div>
-        </div>
+          <button type="button" className="dlg-btn is-go" onClick={() => onClose(true)}>
+            OK
+          </button>
+        </DlgFoot>
       }
     >
-      <div className="kc-set-tabs" role="tablist" aria-label="Settings">
-        <button type="button" role="tab" aria-selected={tab === 'inputs'} className={tab === 'inputs' ? 'on' : ''} onClick={() => setTab('inputs')}>
-          Inputs
-        </button>
-        <button type="button" role="tab" aria-selected={tab === 'style'} className={tab === 'style' ? 'on' : ''} onClick={() => setTab('style')}>
-          Style
-        </button>
-      </div>
+      <div className="dlg">
+        <DlgSeg
+          tabs
+          label="Settings"
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'inputs', label: 'Inputs' },
+            { value: 'style', label: 'Style' },
+          ]}
+        />
 
-      {tab === 'inputs' && (
-        <div className="kc-set-body" role="tabpanel">
-          {info?.source && (
-            <div className="kc-set-field">
-              <span className="fx-lbl">Source</span>
-              <FxSelect
-                label="Source"
-                value={spec.source ?? 'close'}
-                options={SOURCES.map((s) => ({ value: s, label: SOURCE_LABEL[s] }))}
-                onChange={(v) => onChange({ ...spec, source: v as PriceSource })}
-                searchable={false}
-              />
-            </div>
-          )}
-          {info?.list ? (
-            <>
-              {params.map((_, i) =>
-                number(
-                  `${info.list!.label} ${i + 1}`,
-                  i,
+        {tab === 'inputs' && (
+          <div role="tabpanel">
+            {info?.source && (
+              <DlgSection label="Price">
+                <DlgRow title="Source" line="The price of each bar the study reads.">
+                  <select
+                    className="dlg-select"
+                    aria-label="Source"
+                    value={spec.source ?? 'close'}
+                    onChange={(e) => onChange({ ...spec, source: e.target.value as PriceSource })}
+                  >
+                    {SOURCES.map((s) => (
+                      <option key={s} value={s}>
+                        {SOURCE_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                </DlgRow>
+              </DlgSection>
+            )}
+            {info?.list ? (
+              <DlgSection label={`${info.list.label}s`} aside={<span>{params.length} of {info.list.max}</span>}>
+                {params.map((_, i) => {
+                  const label = `${info.list!.label} ${i + 1}`;
+                  return (
+                    <DlgRow key={i} title={label} line={i === 0 ? 'Bars each line averages over.' : undefined}>
+                      {numberInput(label, i, 'bars')}
+                      <button
+                        type="button"
+                        className="dlg-iconbtn is-danger"
+                        title="Remove"
+                        aria-label={`Remove ${inSentence(info.list!.label)} ${i + 1}`}
+                        disabled={params.length <= info.list!.min}
+                        onClick={() => setParams(params.filter((__, j) => j !== i))}
+                      >
+                        {MENU_ICONS.remove}
+                      </button>
+                    </DlgRow>
+                  );
+                })}
+                {params.length === 0 && <p className="dlg-note">No moving averages - just the bars.</p>}
+                <div className="dlg-row">
                   <button
                     type="button"
-                    className="kc-set-x"
-                    title="Remove"
-                    aria-label={`Remove ${inSentence(info.list!.label)} ${i + 1}`}
-                    disabled={params.length <= info.list!.min}
-                    onClick={() => setParams(params.filter((__, j) => j !== i))}
+                    className="dlg-btn is-small"
+                    disabled={params.length >= info.list.max}
+                    onClick={() => setParams([...params, params.length ? Math.min(1000, params[params.length - 1]! * 2) : 20])}
                   >
-                    {MENU_ICONS.remove}
-                  </button>,
-                ),
-              )}
-              {params.length === 0 && <p className="kc-set-note">No moving averages - just the bars.</p>}
-              <button
-                type="button"
-                className="fx-cta fx-cta--ghost kc-set-add"
-                disabled={params.length >= info.list.max}
-                onClick={() => setParams([...params, params.length ? Math.min(1000, params[params.length - 1]! * 2) : 20])}
-              >
-                + Add {inSentence(info.list.label)}
-              </button>
-            </>
-          ) : (info?.params.length ?? params.length) > 0 ? (
-            <div className="kc-set-grid">
-              {(info?.params.length ? info.params : params.map((_, i) => `Input ${i + 1}`)).map((label, i) => number(label, i))}
-            </div>
-          ) : (
-            !info?.source && <p className="kc-set-note">This study has no inputs.</p>
-          )}
-        </div>
-      )}
-
-      {tab === 'style' && (
-        <div className="kc-set-body" role="tabpanel">
-          {titles.map((title, i) => {
-            const o = spec.lines?.[i] ?? {};
-            const color = o.color ?? LINE_COLORS[i % LINE_COLORS.length]!;
-            return (
-              <Fragment key={`${title}-${i}`}>
-                <div className={`kc-set-line${o.hidden ? ' is-off' : ''}`}>
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    aria-label={`Show ${title}`}
-                    checked={!o.hidden}
-                    onChange={(e) => setLine(i, { hidden: !e.target.checked })}
-                  />
-                  <span className="kc-set-line__name">{title}</span>
-                  <Well value={color} label={title} open={pick === i} onToggle={() => toggle(i)} />
-                  <Widths value={o.size ?? 1} label={title} onPick={(w) => setLine(i, { size: w })} />
+                    + Add {inSentence(info.list.label)}
+                  </button>
                 </div>
-                {pick === i && <Palette value={color} label={title} onPick={(c) => setLine(i, { color: c })} />}
-              </Fragment>
-            );
-          })}
-          {hasBars && (
-            <>
-              <div className="kc-set-line">
-                <span className="kc-set-line__name">Up bars</span>
-                <Well value={spec.up ?? BAR_UP} label="Up bars" open={pick === 'up'} onToggle={() => toggle('up')} />
-              </div>
-              {pick === 'up' && <Palette value={spec.up ?? BAR_UP} label="Up bars" onPick={(c) => onChange({ ...spec, up: c })} />}
-              <div className="kc-set-line">
-                <span className="kc-set-line__name">Down bars</span>
-                <Well value={spec.down ?? BAR_DOWN} label="Down bars" open={pick === 'down'} onToggle={() => toggle('down')} />
-              </div>
-              {pick === 'down' && <Palette value={spec.down ?? BAR_DOWN} label="Down bars" onPick={(c) => onChange({ ...spec, down: c })} />}
-            </>
-          )}
-          {titles.length === 0 && !hasBars && <p className="kc-set-note">Nothing to style.</p>}
-        </div>
-      )}
+              </DlgSection>
+            ) : paramLabels.length > 0 ? (
+              <DlgSection label="Calculation">
+                {paramLabels.map((label, i) => {
+                  const m = paramMeta(label);
+                  return (
+                    <DlgRow key={i} title={m.name} line={m.line}>
+                      {numberInput(label, i, m.unit)}
+                    </DlgRow>
+                  );
+                })}
+              </DlgSection>
+            ) : (
+              !info?.source && <p className="dlg-note">This study has no inputs.</p>
+            )}
+          </div>
+        )}
+
+        {tab === 'style' && (
+          <div role="tabpanel">
+            {titles.length > 0 && (
+              <DlgSection label="Lines">
+                {titles.map((title, i) => {
+                  const o = spec.lines?.[i] ?? {};
+                  const color = o.color ?? LINE_COLORS[i % LINE_COLORS.length]!;
+                  return (
+                    <Fragment key={`${title}-${i}`}>
+                      <DlgRow title={title} line="Shown, colour and width." off={o.hidden}>
+                        <DlgSwitch
+                          label={`Show ${title}`}
+                          on={!o.hidden}
+                          onWord="Shown"
+                          offWord="Hidden"
+                          onChange={(on) => setLine(i, { hidden: !on })}
+                        />
+                        <Well value={color} label={title} open={pick === i} onToggle={() => toggle(i)} />
+                        <Widths value={o.size ?? 1} label={title} onPick={(w) => setLine(i, { size: w })} />
+                      </DlgRow>
+                      {pick === i && <Palette value={color} label={title} onPick={(c) => setLine(i, { color: c })} />}
+                    </Fragment>
+                  );
+                })}
+              </DlgSection>
+            )}
+            {hasBars && (
+              <DlgSection label="Bars">
+                <DlgRow title="Up bars" line="Bars that closed higher.">
+                  <Well value={spec.up ?? BAR_UP} label="Up bars" open={pick === 'up'} onToggle={() => toggle('up')} />
+                </DlgRow>
+                {pick === 'up' && <Palette value={spec.up ?? BAR_UP} label="Up bars" onPick={(c) => onChange({ ...spec, up: c })} />}
+                <DlgRow title="Down bars" line="Bars that closed lower.">
+                  <Well value={spec.down ?? BAR_DOWN} label="Down bars" open={pick === 'down'} onToggle={() => toggle('down')} />
+                </DlgRow>
+                {pick === 'down' && <Palette value={spec.down ?? BAR_DOWN} label="Down bars" onPick={(c) => onChange({ ...spec, down: c })} />}
+              </DlgSection>
+            )}
+            {titles.length === 0 && !hasBars && <p className="dlg-note">Nothing to style.</p>}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }

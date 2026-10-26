@@ -18,6 +18,7 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../Modal';
+import { DlgRow, DlgSection, DlgSwitch } from '../dialogParts';
 import { LoadFailed } from '../LoadFailed';
 import { DASH, fmt, fmtUsd, shortAddr } from '../../format';
 import { notify } from '../../toast';
@@ -189,7 +190,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
         <Replay c={c} />
       </aside>
 
-      <div className="cpy-mmain">
+      <div className="cpy-mmain dlg">
         <Group title="Size">
           <Rule
             title="Sizing"
@@ -197,7 +198,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
             note={example ? <>{example.text}{example.caveat && <span className="cpy-caveat"> {example.caveat}</span>}</> : undefined}
             wide
           >
-            <span className="cpy-seg" role="group" aria-label="Sizing">
+            <span className="dlg-seg" role="group" aria-label="Sizing">
               {SIZING_MODES.map((m) => (
                 <button key={m.v} type="button" title={m.hint} aria-pressed={c.setup.mode === m.v} className={c.setup.mode === m.v ? 'is-on' : undefined} onClick={() => c.patchSetup({ mode: m.v })}>
                   {SIZING_LABEL[m.v] ?? m.label}
@@ -223,37 +224,37 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
 
         <Group title="Behaviour">
           <Rule title="Only new positions" hint="Skips positions the trader already holds when the copy starts.">
-            <Switch checked={!c.setup.copyExisting} onChange={(v) => c.patchSetup({ copyExisting: !v })} label="Only copy newly opened positions" />
+            <Switch checked={!c.setup.copyExisting} onChange={(v) => c.patchSetup({ copyExisting: !v })} label="Only copy newly opened positions" on="Only new" off="Also existing" />
           </Rule>
           <Rule title="Paper copy" hint="Follows the trader live and keeps the books, but sends nothing to SoDEX. No fee, no key.">
-            <Switch checked={c.setup.paper} onChange={(v) => c.patchSetup({ paper: v })} label="Paper copy" />
+            <Switch checked={c.setup.paper} onChange={(v) => c.patchSetup({ paper: v })} label="Paper copy" on="Paper" off="Live" />
           </Rule>
         </Group>
 
         <details className="cpy-adv">
           <summary>Risk controls and markets</summary>
           <div className="cpy-rows">
-            <Rule title="Stop loss" hint="Closes a copied position when it has lost this share of its margin. Empty = off.">
+            <Rule title="Stop loss" hint="Closes a copied position when it has lost this share of its margin. Leave it empty to turn it off.">
               <Num id={`${uid}-sl`} value={c.setup.stopLoss} onChange={set('stopLoss')} unit="%" placeholder="off" error={e.stopLoss} label="Stop loss" />
             </Rule>
-            <Rule title="Take profit" hint="Closes a copied position at this gain on its margin. Empty = off.">
+            <Rule title="Take profit" hint="Closes a copied position at this gain on its margin. Leave it empty to turn it off.">
               <Num id={`${uid}-tp`} value={c.setup.takeProfit} onChange={set('takeProfit')} unit="%" placeholder="off" error={e.takeProfit} label="Take profit" />
             </Rule>
             <Rule title="Drawdown stop" hint="Closes everything and stops the copy when its equity falls this far from its peak.">
               <Num id={`${uid}-dd`} value={c.setup.drawdown} onChange={set('drawdown')} unit="%" placeholder="off" error={e.drawdown} label="Drawdown stop" />
             </Rule>
-            <Rule title="Only these coins" hint="Comma separated, e.g. BTC, ETH. Empty = every coin.">
+            <Rule title="Only these coins" hint="Comma separated, e.g. BTC, ETH. Leave it empty for every coin.">
               <Text id={`${uid}-allow`} value={c.setup.allow} onChange={set('allow')} placeholder="all coins" error={e.allow} label="Only copy" />
             </Rule>
             <Rule title="Never these coins" hint="Comma separated.">
               <Text id={`${uid}-deny`} value={c.setup.deny} onChange={set('deny')} placeholder="none" error={e.deny} label="Never copy" />
             </Rule>
             <Rule title="Isolated margin" hint="Each copied position has its own margin, so one cannot drain the others.">
-              <Switch checked={c.setup.marginMode === 'isolated'} onChange={(v) => c.patchSetup({ marginMode: v ? 'isolated' : 'cross' })} label="Isolated margin" />
+              <Switch checked={c.setup.marginMode === 'isolated'} onChange={(v) => c.patchSetup({ marginMode: v ? 'isolated' : 'cross' })} label="Isolated margin" on="Isolated" off="Cross" />
             </Rule>
             {c.runOn === 'browser' && (
               <Rule title="Ask before each trade" hint="Every copied order waits for your yes in this tab (60 seconds). Browser copies only.">
-                <Switch checked={c.setup.confirmEach} onChange={(v) => c.patchSetup({ confirmEach: v })} label="Ask before each trade" />
+                <Switch checked={c.setup.confirmEach} onChange={(v) => c.patchSetup({ confirmEach: v })} label="Ask before each trade" on="Asks first" off="Automatic" />
               </Rule>
             )}
           </div>
@@ -408,32 +409,23 @@ function RunStep({ c }: { c: CopyContext }) {
 
 /* ============================================================= parts ====== */
 
+/* The Settings language (dialogParts.tsx): a labelled section, a row per rule
+   with its explanation in view, fields with their unit, switches that say what
+   they mean. */
 function Group({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="cpy-mgroup">
-      <h3 className="cpy-h">{title}</h3>
-      <div className="cpy-rows">{children}</div>
-    </section>
-  );
+  return <DlgSection label={title}>{children}</DlgSection>;
 }
 
-/** One rule: its name (the explanation is the info mark's title), its control, and an optional line that stays in view. */
+/** One rule: its name, what it does in one line, its control, and an optional worked line. */
 function Rule({ title, hint, note, children, wide }: { title: string; hint?: string; note?: ReactNode; children: ReactNode; wide?: boolean }) {
   return (
-    <div className={`cpy-rule${wide ? ' cpy-rule--wide' : ''}`}>
-      <div className="cpy-rule__text">
-        <span className="cpy-rule__t">
-          {title}
-          {hint && (
-            <span className="cpy-rule__i" title={hint} aria-label={hint} role="img">
-              <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6.3" fill="none" stroke="currentColor" strokeWidth="1.3" /><path d="M8 7.1v4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /><circle cx="8" cy="4.9" r="0.9" fill="currentColor" /></svg>
-            </span>
-          )}
-        </span>
-        {note && <span className="cpy-rule__d">{note}</span>}
-      </div>
-      <div className="cpy-rule__ctl">{children}</div>
-    </div>
+    <DlgRow
+      title={title}
+      line={hint || note ? <>{hint}{note && <span className="cpy-rule__d">{note}</span>}</> : undefined}
+      stack={wide}
+    >
+      {children}
+    </DlgRow>
   );
 }
 
@@ -441,10 +433,13 @@ function Num({ id, value, onChange, unit, placeholder, error, label }: {
   id: string; value: string; onChange: (v: string) => void; unit: string; placeholder?: string; error?: string; label: string;
 }) {
   return (
-    <span className={`cpy-num${error ? ' is-bad' : ''}`} title={error}>
-      <input id={id} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
-      <span className="cpy-num__u">{unit}</span>
-    </span>
+    <>
+      <span className={`dlg-field cpy-dfield${error ? ' is-bad' : ''}`} title={error}>
+        <input id={id} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
+        <span className="dlg-unit">{unit}</span>
+      </span>
+      {error && <small className="cpy-ferr" role="alert">{error}</small>}
+    </>
   );
 }
 
@@ -452,16 +447,15 @@ function Text({ id, value, onChange, placeholder, error, label }: {
   id: string; value: string; onChange: (v: string) => void; placeholder?: string; error?: string; label: string;
 }) {
   return (
-    <span className={`cpy-num cpy-num--text${error ? ' is-bad' : ''}`} title={error}>
-      <input id={id} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
-    </span>
+    <>
+      <span className={`dlg-field cpy-dfield${error ? ' is-bad' : ''}`} title={error}>
+        <input id={id} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
+      </span>
+      {error && <small className="cpy-ferr" role="alert">{error}</small>}
+    </>
   );
 }
 
-function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <button type="button" role="switch" aria-checked={checked} aria-label={label} className={`cpy-switch${checked ? ' is-on' : ''}`} onClick={() => onChange(!checked)}>
-      <i />
-    </button>
-  );
+function Switch({ checked, onChange, label, on = 'On', off = 'Off' }: { checked: boolean; onChange: (v: boolean) => void; label: string; on?: string; off?: string }) {
+  return <DlgSwitch on={checked} onChange={onChange} label={label} onWord={on} offWord={off} />;
 }

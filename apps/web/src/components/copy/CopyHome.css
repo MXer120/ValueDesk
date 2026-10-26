@@ -754,3 +754,16 @@
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
   .cpy-whale { max-height: 340px; }
 }
+
+/* The copy dialog's rules in the Settings language (components/dialog.css):
+   each rule's explanation in view under its name, not behind an info mark. */
+.cpy-mmain.dlg { gap: 0; }
+.cpy-mmain.dlg > .dlg-label:first-child { margin-top: 0; }
+.cpy-mmain.dlg .cpy-rule__d { display: block; margin-top: 4px; color: var(--muted); }
+.cpy-mmain.dlg .cpy-dfield { width: 150px; }
+.cpy-mmain.dlg .cpy-ferr { flex-basis: 100%; color: var(--neg); font-size: 12px; line-height: 1.4; }
+.cpy-mmain.dlg .cpy-adv { margin-top: 20px; }
+.cpy-mmain.dlg .cpy-adv > .cpy-rows { padding: 0 14px 4px; }
+.cpy-mmain.dlg .cpy-adv > .cpy-rows > .dlg-row:first-child { border-top-color: transparent; padding-top: 4px; }
+.cpy-mmain.dlg .cpy-adv > .cpy-reset { margin: 0 14px 14px; }
+@media (max-width: 520px) { .cpy-mmain.dlg .cpy-dfield { width: 100%; } }

@@ -1,13 +1,14 @@
 /**
- * Take Profit & Stop Loss for one open position. One sheet, both exits: the
- * position, its entry and the mark, then a price and the gain or loss that
- * price makes. The swap on the gain field turns that figure from a percent of
- * the entry into USDC. Limit makes the exit a limit order at the trigger.
- * Configure size closes part of the position.
+ * Take Profit & Stop Loss for one open position, in the Settings language
+ * (dialogParts.tsx). The position, its entry and the mark; then each exit as
+ * a section: its trigger price and the gain or loss that price makes, in % of
+ * the entry or USD. Last, how it exits: at market or as a limit at the
+ * trigger, and for the whole position or part of it.
  */
 import { useState } from 'react';
 import { CoinIcon } from './CoinIcon';
 import { Modal } from './Modal';
+import { DlgFoot, DlgRow, DlgSection, DlgSeg } from './dialogParts';
 import {
   gainFromPrice,
   planExit,
@@ -56,21 +57,6 @@ function seed(existing: ExitExisting | undefined, entry: number, side: Side, leg
   const gain = price.trim() && Number.isFinite(n) ? gainFromPrice(entry, n, side, leg, qty, 'pct') : null;
   return { price, gain: gain === null ? '' : trim(gain, 2), unit: 'pct' };
 }
-
-const SwapIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
-    <path d="M2 4.5h8.2M8.2 2.6 10.6 4.5 8.2 6.4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-    <path d="M12 9.5H3.8M5.8 7.6 3.4 9.5 5.8 11.4" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-  </svg>
-);
-
-const InfoIcon = () => (
-  <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
-    <circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" strokeWidth="1.2" />
-    <path d="M7 6.4V10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
-    <circle cx="7" cy="4.3" r="0.7" fill="currentColor" />
-  </svg>
-);
 
 export function TpSlSheet({
   symbol, coin, side, entry, mark, fullQty, tick, tp, sl, busy, onClose, onConfirm,
@@ -152,55 +138,56 @@ export function TpSlSheet({
   const dirty = tpPlan.action !== 'keep' || slPlan.action !== 'keep';
   const can = legOk('tp') && legOk('sl') && sizeOk && dirty && !busy;
 
+  /** Which way the price has to move for this exit to fire. */
+  const direction = (leg: Leg) => ((leg === 'tp') === (side === 'long') ? 'rises' : 'falls');
   const field = (leg: Leg, title: string, gainWord: string) => {
     const row = legs[leg];
     const ok = legOk(leg);
+    const bad = row.price.trim() !== '' && !ok;
     return (
-      <section className="vs-tpsl__leg">
-        <h3>{title}</h3>
-        <div className="vs-tpsl__pair">
-          <div className="vs-tpsl__field">
-            <span>Price</span>
-            <span className="vs-tpsl__val">
-              <span className="vs-tpsl__usd">$</span>
-              <input
-                aria-label={`${title} price`}
-                value={row.price}
-                placeholder="0.00"
-                inputMode="decimal"
-                autoComplete="off"
-                disabled={busy}
-                onChange={(e) => setPrice(leg, e.target.value)}
-              />
-            </span>
-          </div>
-          <div className="vs-tpsl__field">
-            <span>{gainWord}</span>
-            <span className="vs-tpsl__val">
-              <input
-                aria-label={`${title} ${gainWord.toLowerCase()}`}
-                value={row.gain}
-                placeholder="0.00"
-                inputMode="decimal"
-                autoComplete="off"
-                disabled={busy}
-                onChange={(e) => setGain(leg, e.target.value)}
-              />
-              <span className="vs-tpsl__unit">{row.unit === 'pct' ? '%' : 'USD'}</span>
-              <button
-                type="button"
-                className="vs-tpsl__swap"
-                aria-label={row.unit === 'pct' ? `Show ${gainWord.toLowerCase()} in USD` : `Show ${gainWord.toLowerCase()} in percent`}
-                disabled={busy}
-                onClick={() => swap(leg)}
-              >
-                <SwapIcon />
-              </button>
-            </span>
-          </div>
-        </div>
-        {row.price.trim() !== '' && !ok && <p className="fx-note fx-note--warn">{triggerHint(side, leg, basis)}</p>}
-      </section>
+      <DlgSection label={title}>
+        <DlgRow title="Trigger price" line={`Fires when the ${basis} price ${direction(leg)} to it. Empty means no ${title.toLowerCase()}.`}>
+          <span className={`dlg-field${bad ? ' is-bad' : ''}`}>
+            <span className="dlg-pre">$</span>
+            <input
+              aria-label={`${title} price`}
+              value={row.price}
+              placeholder="0.00"
+              inputMode="decimal"
+              autoComplete="off"
+              disabled={busy}
+              onChange={(e) => setPrice(leg, e.target.value)}
+            />
+          </span>
+        </DlgRow>
+        <DlgRow title={gainWord} line={`What the ${title.toLowerCase()} makes at that price; type here to set the price from it.`}>
+          <span className="dlg-field">
+            <input
+              aria-label={`${title} ${gainWord.toLowerCase()}`}
+              value={row.gain}
+              placeholder="0.00"
+              inputMode="decimal"
+              autoComplete="off"
+              disabled={busy}
+              onChange={(e) => setGain(leg, e.target.value)}
+            />
+            <span className="dlg-unit">{row.unit === 'pct' ? '%' : 'USD'}</span>
+          </span>
+          <DlgSeg
+            label={`${gainWord} in`}
+            value={row.unit}
+            disabled={busy}
+            onChange={(u) => {
+              if (u !== row.unit) swap(leg);
+            }}
+            options={[
+              { value: 'pct' as GainUnit, label: '%', aria: `${gainWord} in percent of the entry` },
+              { value: 'usd' as GainUnit, label: 'USD', aria: `${gainWord} in USD` },
+            ]}
+          />
+        </DlgRow>
+        {bad && <p className="dlg-warn">{triggerHint(side, leg, basis)}</p>}
+      </DlgSection>
     );
   };
 
@@ -212,76 +199,84 @@ export function TpSlSheet({
       onClose={onClose}
       dismissOnBackdrop={!busy}
       footer={
-        <button type="button" className="fx-cta" disabled={!can} onClick={() => onConfirm({ tp: draft('tp'), sl: draft('sl') })}>
-          Confirm
-        </button>
+        <DlgFoot>
+          <button type="button" className="dlg-btn" disabled={busy} onClick={onClose}>
+            Cancel
+          </button>
+          <button type="button" className="dlg-btn is-go" disabled={!can} onClick={() => onConfirm({ tp: draft('tp'), sl: draft('sl') })}>
+            Confirm
+          </button>
+        </DlgFoot>
       }
     >
-      <div className="vs-tpsl__facts">
-        <div className="vs-tpsl__stat">
-          <span>Current Position</span>
-          <b className={side === 'long' ? 'pos' : 'neg'}>{fullQty} {coin}</b>
+      <div className="dlg">
+        <div className="dlg-facts">
+          <div className="dlg-fact">
+            <span>Position</span>
+            <b className={side === 'long' ? 'pos' : 'neg'}>{side === 'long' ? 'Long' : 'Short'} {fullQty} {coin}</b>
+          </div>
+          <div className="dlg-fact">
+            <span>Avg. entry price</span>
+            <b>{entry > 0 ? usd(entry, Math.max(dp, 2)) : '—'}</b>
+          </div>
+          <div className="dlg-fact">
+            <span>Mark price</span>
+            <b>{mark !== null && mark > 0 ? usd(mark, Math.max(dp, 2)) : '—'}</b>
+          </div>
         </div>
-        <div className="vs-tpsl__stat">
-          <span>Avg. Entry Price</span>
-          <b>{entry > 0 ? usd(entry, Math.max(dp, 2)) : '—'}</b>
-        </div>
-        <div className="vs-tpsl__stat">
-          <span>Mark Price</span>
-          <b>{mark !== null && mark > 0 ? usd(mark, Math.max(dp, 2)) : '—'}</b>
-        </div>
-      </div>
-      {field('tp', 'Take Profit', 'Gain')}
-      {field('sl', 'Stop Loss', 'Loss')}
-      <div className="vs-tpsl__opts">
-        <div className="vs-tpsl__opt">
-          <label className="fx-check">
-            <input type="checkbox" checked={limit} disabled={busy} onChange={(e) => setLimit(e.target.checked)} />
-            <span>Limit</span>
-          </label>
-          <button type="button" className="vs-tpsl__info" title="The exit rests as a limit order at the trigger price." aria-label="About limit exits">
-            <InfoIcon />
-          </button>
-        </div>
-        <div className="vs-tpsl__opt">
-          <label className="fx-check">
-            <input
-              type="checkbox"
-              checked={configure}
+        {field('tp', 'Take Profit', 'Gain')}
+        {field('sl', 'Stop Loss', 'Loss')}
+        <DlgSection label="How it exits">
+          <DlgRow title="Order type" line={limit ? 'The exit rests as a limit order at the trigger price.' : 'The exit closes at market as soon as it triggers.'}>
+            <DlgSeg
+              label="Order type"
+              value={limit ? 'limit' : 'market'}
               disabled={busy}
-              onChange={(e) => {
-                const on = e.target.checked;
+              onChange={(v) => setLimit(v === 'limit')}
+              options={[
+                { value: 'market', label: 'Market' },
+                { value: 'limit', label: 'Limit' },
+              ]}
+            />
+          </DlgRow>
+          <DlgRow title="Size" line={configure ? 'Choose how much of the position this exit closes.' : 'The exit closes the whole position.'}>
+            <DlgSeg
+              label="Exit size"
+              value={configure ? 'part' : 'all'}
+              disabled={busy}
+              onChange={(v) => {
+                const on = v === 'part';
+                if (on === configure) return;
                 setConfigure(on);
                 retarget(on ? Number(size) : full);
               }}
+              options={[
+                { value: 'all', label: 'Whole position' },
+                { value: 'part', label: 'Part' },
+              ]}
             />
-            <span>Configure size</span>
-          </label>
-          <button type="button" className="vs-tpsl__info" title="Choose how much of the position this exit closes." aria-label="About exit size">
-            <InfoIcon />
-          </button>
-        </div>
-        {configure && (
-          <label className="vs-tpsl__field">
-            <span>Size</span>
-            <span className="vs-tpsl__val">
-              <input
-                aria-label="Exit size"
-                value={size}
-                placeholder="0"
-                inputMode="decimal"
-                autoComplete="off"
-                disabled={busy}
-                onChange={(e) => {
-                  setSize(e.target.value);
-                  retarget(Number(e.target.value));
-                }}
-              />
-              <span className="vs-tpsl__unit">{coin}</span>
-            </span>
-          </label>
-        )}
-        {configure && !sizeOk && <p className="fx-note fx-note--warn">Size has to be within the position.</p>}
+          </DlgRow>
+          {configure && (
+            <DlgRow title="Size to close" line={`Up to ${fullQty} ${coin}.`}>
+              <span className={`dlg-field${sizeOk ? '' : ' is-bad'}`}>
+                <input
+                  aria-label="Exit size"
+                  value={size}
+                  placeholder="0"
+                  inputMode="decimal"
+                  autoComplete="off"
+                  disabled={busy}
+                  onChange={(e) => {
+                    setSize(e.target.value);
+                    retarget(Number(e.target.value));
+                  }}
+                />
+                <span className="dlg-unit">{coin}</span>
+              </span>
+            </DlgRow>
+          )}
+          {configure && !sizeOk && <p className="dlg-warn">Size has to be within the position.</p>}
+        </DlgSection>
       </div>
     </Modal>
   );

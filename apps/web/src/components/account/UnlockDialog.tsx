@@ -13,6 +13,7 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Modal } from '../Modal';
+import { DlgFoot } from '../dialogParts';
 import { useUnlockRequest, type UnlockRequest } from '../../trading/keyLock';
 import '../funds/funds.css';
 import './UnlockDialog.css';
@@ -71,43 +72,45 @@ export function UnlockDialog() {
       className="fx vs-confirm vd-unlock"
       dismissOnBackdrop={false}
     >
-      <form className="vd-unlock__body" onSubmit={submit}>
+      <form className="vd-unlock__body dlg" onSubmit={submit}>
         <p className="vd-unlock__reason">{shown.reason}</p>
         <p className="vd-unlock__who">
           {isPasskey ? 'Use the passkey' : 'Enter the password'} you set for the trading key of wallet <strong>{short(shown.owner)}</strong>.
         </p>
         {!isPasskey && (
-          <input
-            className="fx-input vd-unlock__input"
-            type="password"
-            autoComplete="current-password"
-            placeholder="Password"
-            aria-label="Password"
-            aria-invalid={!!error || undefined}
-            value={password}
-            disabled={busy}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          <span className={`dlg-field is-wide${error ? ' is-bad' : ''}`}>
+            <input
+              className="vd-unlock__input"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Password"
+              aria-label="Password"
+              aria-invalid={!!error || undefined}
+              value={password}
+              disabled={busy}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </span>
         )}
         {error && (
-          <p className="vd-unlock__err" role="alert">
+          <p className="dlg-err vd-unlock__err" role="alert">
             {error}
           </p>
         )}
-        <div className="fx-review__actions">
-          <button type="button" className="fx-cta fx-cta--ghost" onClick={() => req?.cancel()}>
+        <DlgFoot>
+          <button type="button" className="dlg-btn" onClick={() => req?.cancel()}>
             Cancel
           </button>
           {isPasskey ? (
-            <button type="button" className="fx-cta" disabled={busy || !req} onClick={() => req && void run(() => req.usePasskey())}>
+            <button type="button" className="dlg-btn is-go" disabled={busy || !req} onClick={() => req && void run(() => req.usePasskey())}>
               {busy ? 'Waiting for passkey…' : 'Use passkey'}
             </button>
           ) : (
-            <button type="submit" className="fx-cta" disabled={busy || !password || !req}>
+            <button type="submit" className="dlg-btn is-go" disabled={busy || !password || !req}>
               {busy ? 'Checking…' : shown.purpose === 'confirm' ? 'Confirm' : 'Unlock'}
             </button>
           )}
-        </div>
+        </DlgFoot>
       </form>
     </Modal>
   );

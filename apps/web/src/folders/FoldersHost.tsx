@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import type { FolderSummary } from '@sign/folders/types.js';
 import { Modal } from '../components/Modal';
+import { DlgFoot } from '../components/dialogParts';
 import { openConnectDialog } from '../components/account/connect';
 import { notify } from '../toast';
 import type { Eip1193Provider } from '../wallet';
@@ -121,10 +122,10 @@ function SaveSheet({ draft, onDone }: { draft: FolderDraft; onDone: (r: SavedTo 
   ) : !list ? (
     <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />Loading your folders…</p>
   ) : (
-    <div className="kf-save">
-      <label className="kf-save__label" htmlFor="kf-save-title">Name</label>
-      <input id="kf-save-title" className="fx-input" value={title} maxLength={limits?.titleChars ?? 120} onChange={(e) => setTitle(e.target.value)} />
-      <span className="kf-save__label" id="kf-save-where">Folder</span>
+    <div className="kf-save dlg">
+      <label className="dlg-label kf-save__label" htmlFor="kf-save-title">Name</label>
+      <span className="dlg-field is-wide"><input id="kf-save-title" value={title} maxLength={limits?.titleChars ?? 120} onChange={(e) => setTitle(e.target.value)} /></span>
+      <span className="dlg-label kf-save__label" id="kf-save-where">Folder</span>
       <div className="kf-save__folders" role="radiogroup" aria-labelledby="kf-save-where">
         {folders.map((f) => (
           <button
@@ -169,10 +170,10 @@ function SaveSheet({ draft, onDone }: { draft: FolderDraft; onDone: (r: SavedTo 
       onClose={() => onDone(null)}
       footer={
         s.token && list ? (
-          <div className="fx-review__actions">
-            <button type="button" className="fx-cta fx-cta--ghost" onClick={() => onDone(null)}>Cancel</button>
-            <button type="button" className="fx-cta" disabled={!chosen || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
-          </div>
+          <DlgFoot>
+            <button type="button" className="dlg-btn" onClick={() => onDone(null)}>Cancel</button>
+            <button type="button" className="dlg-btn is-go" disabled={!chosen || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
+          </DlgFoot>
         ) : undefined
       }
     >

@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEven
 import type { FolderLimits, FolderSummary, ItemSummary, TweetData } from '@sign/folders/types.js';
 import { findTweetUrl } from '@sign/folders/tweetUrl.js';
 import { Modal } from '../components/Modal';
+import { DlgFoot } from '../components/dialogParts';
 import { foldersApi } from '../folders/api';
 import { foldersState } from '../folders/state';
 import { ConflictBar, useEditorSave, type EditorProps } from './editing';
@@ -283,26 +284,26 @@ export function AddTweetDialog({ initialUrl, folders, limits, defaultFolder, onC
       title="Save a post from X"
       onClose={onClose}
       footer={
-        <div className="fx-review__actions">
-          <button type="button" className="fx-cta fx-cta--ghost" onClick={onClose}>Cancel</button>
-          <button type="button" className="fx-cta" disabled={!ref || !folderId || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save post'}</button>
-        </div>
+        <DlgFoot>
+          <button type="button" className="dlg-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="dlg-btn is-go" disabled={!ref || !folderId || busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save post'}</button>
+        </DlgFoot>
       }
     >
-      <div className="kt-add__body">
-        <label className="kf-save__label" htmlFor="kt-url">Link to the post</label>
-        <input id="kt-url" className="fx-input" value={url} autoFocus placeholder="https://x.com/…/status/…" onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} />
+      <div className="kt-add__body dlg">
+        <label className="dlg-label kf-save__label" htmlFor="kt-url">Link to the post</label>
+        <span className="dlg-field is-wide"><input id="kt-url" value={url} autoFocus placeholder="https://x.com/…/status/…" onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} /></span>
         {url && !ref && <p className="fx-note fx-note--warn">That is not a link to a post on x.com or twitter.com.</p>}
         {ref && !shown && <p className="fx-wait"><span className="fx-spin" aria-hidden="true" />Asking X for the post…</p>}
         {shown?.tweet && <PostCard t={shown.tweet} />}
         {shown?.error && <p className="fx-note">{shown.error}</p>}
-        <label className="kf-save__label" htmlFor="kt-folder">Folder</label>
-        <select id="kt-folder" className="fx-input" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
+        <label className="dlg-label kf-save__label" htmlFor="kt-folder">Folder</label>
+        <select id="kt-folder" className="dlg-select kt-add__sel" value={folderId} onChange={(e) => setFolderId(e.target.value)}>
           {folders.map((f) => <option key={f.id} value={f.id} disabled={full(f)}>{f.name}{full(f) ? ' (full)' : ''}</option>)}
         </select>
-        <span className="kf-save__label">Tags</span>
+        <span className="dlg-label kf-save__label">Tags</span>
         <Tags tags={tags} onChange={setTags} />
-        <label className="kf-save__label" htmlFor="kt-addnote">Your note</label>
+        <label className="dlg-label kf-save__label" htmlFor="kt-addnote">Your note</label>
         <textarea id="kt-addnote" className="kt__note" rows={3} value={note} maxLength={5000} placeholder="Optional" onChange={(e) => setNote(e.target.value)} />
       </div>
     </Modal>

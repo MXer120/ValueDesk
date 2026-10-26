@@ -1,5 +1,5 @@
 /**
- * A drawing's settings, TradingView's dialog as one of the app's sheets (the
+ * A drawing's settings, TradingView's dialog in the Settings language (the
  * indicator settings' `.modal.fx.kc-set`, IndicatorSettings.tsx):
  *
  *   Style        line colour, width and solid / dashed; shown and locked.
@@ -11,8 +11,9 @@
  * double click on the drawing. Changes apply to the chart as they are made;
  * Cancel puts back what was there when it opened, OK keeps it.
  */
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { Modal } from '../components/Modal';
+import { DlgFoot, DlgRow, DlgSection, DlgSeg, DlgSwitch } from '../components/dialogParts';
 import { Palette, Well, Widths } from './IndicatorSettings';
 import { lineIcon } from './chartIcons';
 import { inputTime, parseInputTime, type TimeZoneMode } from './timeAxis';
@@ -56,7 +57,7 @@ function PriceField({ value, precision, step, onValue }: { value: number; precis
   const [text, setText] = useState<string | null>(null);
   return (
     <input
-      className="fx-input"
+      aria-label="Price"
       type="number"
       inputMode="decimal"
       step={step}
@@ -79,7 +80,11 @@ export function DrawingSettings({ label, name, draft, tz, intervalMs, precision,
   const set = (patch: Partial<DrawingDraft>) => onChange({ ...draft, ...patch });
   const setPoint = (i: number, patch: Partial<{ timestamp: number; value: number }>) =>
     set({ points: draft.points.map((p, j) => (j === i ? { ...p, ...patch } : p)) });
-  const tabs: Array<[Tab, string]> = [['style', 'Style'], ...(hasText ? [['text', 'Text'] as [Tab, string]] : []), ['coords', 'Coordinates']];
+  const tabs: Array<{ value: Tab; label: string }> = [
+    { value: 'style', label: 'Style' },
+    ...(hasText ? [{ value: 'text' as Tab, label: 'Text' }] : []),
+    { value: 'coords', label: 'Coordinates' },
+  ];
   const step = 10 ** -Math.max(0, Math.min(10, precision));
   const showTime = !PRICE_ONLY.has(name);
   const showPrice = !TIME_ONLY.has(name);
@@ -91,106 +96,111 @@ export function DrawingSettings({ label, name, draft, tz, intervalMs, precision,
       onClose={() => onClose(false)}
       className="fx kc-set"
       footer={
-        <div className="kc-set-foot">
-          <div className="kc-set-actions">
-            <button type="button" className="fx-cta fx-cta--ghost" onClick={() => onClose(false)}>
-              Cancel
-            </button>
-            <button type="button" className="fx-cta" onClick={() => onClose(true)}>
-              OK
-            </button>
-          </div>
-        </div>
+        <DlgFoot>
+          <button type="button" className="dlg-btn" onClick={() => onClose(false)}>
+            Cancel
+          </button>
+          <button type="button" className="dlg-btn is-go" onClick={() => onClose(true)}>
+            OK
+          </button>
+        </DlgFoot>
       }
     >
-      <div className="kc-set-tabs" role="tablist" aria-label="Settings">
-        {tabs.map(([id, text]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>
-            {text}
-          </button>
-        ))}
-      </div>
+      <div className="dlg">
+        <DlgSeg tabs label="Settings" value={tab} onChange={setTab} options={tabs} />
 
-      {tab === 'style' && (
-        <div className="kc-set-body" role="tabpanel">
-          <div className="kc-set-line">
-            <span className="kc-set-line__name">Line</span>
-            <Well value={draft.color} label="Line" open={palette} onToggle={() => setPalette((p) => !p)} />
-            <Widths value={draft.size} label="Line" onPick={(size) => set({ size })} />
-            <span className="kc-set-seg" role="group" aria-label="Line style">
-              <button type="button" className={draft.dashed ? '' : 'on'} aria-label="Solid line" aria-pressed={!draft.dashed} title="Solid" onClick={() => set({ dashed: false })}>
-                {lineIcon(1.5)}
-              </button>
-              <button type="button" className={draft.dashed ? 'on' : ''} aria-label="Dashed line" aria-pressed={draft.dashed} title="Dashed" onClick={() => set({ dashed: true })}>
-                {lineIcon(1.5, true)}
-              </button>
-            </span>
+        {tab === 'style' && (
+          <div role="tabpanel">
+            <DlgSection label="Line">
+              <DlgRow title="Colour" line="The drawing's line and its fill.">
+                <Well value={draft.color} label="Line" open={palette} onToggle={() => setPalette((p) => !p)} />
+              </DlgRow>
+              {palette && <Palette value={draft.color} label="Line" onPick={(color) => set({ color })} />}
+              <DlgRow title="Width" line="How thick the line is drawn.">
+                <Widths value={draft.size} label="Line" onPick={(size) => set({ size })} />
+              </DlgRow>
+              <DlgRow title="Style" line="A solid or a dashed line.">
+                <DlgSeg
+                  label="Line style"
+                  value={draft.dashed ? 'dashed' : 'solid'}
+                  onChange={(v) => set({ dashed: v === 'dashed' })}
+                  options={[
+                    { value: 'solid', label: <>{lineIcon(1.5)} Solid</>, aria: 'Solid line' },
+                    { value: 'dashed', label: <>{lineIcon(1.5, true)} Dashed</>, aria: 'Dashed line' },
+                  ]}
+                />
+              </DlgRow>
+            </DlgSection>
+            <DlgSection label="On the chart">
+              <DlgRow title="Visibility" line="Hidden drawings stay saved and come back when shown." off={!draft.visible}>
+                <DlgSwitch label="Show on the chart" on={draft.visible} onWord="Shown" offWord="Hidden" onChange={(visible) => set({ visible })} />
+              </DlgRow>
+              <DlgRow title="Lock" line="A locked drawing cannot be moved or reshaped." off={!draft.lock}>
+                <DlgSwitch label="Locked" on={draft.lock} onWord="Locked" offWord="Movable" onChange={(lock) => set({ lock })} />
+              </DlgRow>
+            </DlgSection>
           </div>
-          {palette && <Palette value={draft.color} label="Line" onPick={(color) => set({ color })} />}
-          <div className={`kc-set-line${draft.visible ? '' : ' is-off'}`}>
-            <input type="checkbox" role="switch" aria-label="Show on the chart" checked={draft.visible} onChange={(e) => set({ visible: e.target.checked })} />
-            <span className="kc-set-line__name">Show on the chart</span>
-          </div>
-          <div className={`kc-set-line${draft.lock ? '' : ' is-off'}`}>
-            <input type="checkbox" role="switch" aria-label="Locked" checked={draft.lock} onChange={(e) => set({ lock: e.target.checked })} />
-            <span className="kc-set-line__name">Locked - cannot be moved</span>
-          </div>
-        </div>
-      )}
+        )}
 
-      {tab === 'text' && hasText && (
-        <div className="kc-set-body" role="tabpanel">
-          <label className="kc-set-field">
-            <span className="fx-lbl">Text</span>
-            <textarea
-              className="fx-input kc-set-text"
-              rows={4}
-              maxLength={200}
-              value={draft.text ?? ''}
-              // Delete and Backspace edit the words, never the drawing.
-              onKeyDown={(e) => e.stopPropagation()}
-              onChange={(e) => set({ text: e.target.value })}
-              autoFocus
-            />
-          </label>
-          {name === 'simpleTag' && <p className="kc-set-note">Left empty, the tag shows its price.</p>}
-        </div>
-      )}
+        {tab === 'text' && hasText && (
+          <div role="tabpanel">
+            <DlgSection label="Text">
+              <div className="dlg-row is-full">
+                <span className="dlg-field is-wide is-text">
+                  <textarea
+                    rows={4}
+                    maxLength={200}
+                    aria-label="Text"
+                    placeholder="What the drawing says"
+                    value={draft.text ?? ''}
+                    // Delete and Backspace edit the words, never the drawing.
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onChange={(e) => set({ text: e.target.value })}
+                    autoFocus
+                  />
+                </span>
+              </div>
+            </DlgSection>
+            <p className="dlg-note">
+              {(draft.text ?? '').length} of 200 characters.{name === 'simpleTag' ? ' Left empty, the tag shows its price.' : ''}
+            </p>
+          </div>
+        )}
 
-      {tab === 'coords' && (
-        <div className="kc-set-body kc-set-coords" role="tabpanel">
-          {draft.points.map((p, i) => (
-            <Fragment key={i}>
-              <span className="kc-set-coords__n">{draft.points.length > 1 ? `Point ${i + 1}` : 'Anchor'}</span>
-              <div className="kc-set-grid">
+        {tab === 'coords' && (
+          <div role="tabpanel" className="kc-set-coords">
+            {draft.points.map((p, i) => (
+              <DlgSection key={i} label={draft.points.length > 1 ? `Point ${i + 1}` : 'Anchor'}>
                 {showPrice && (
-                  <label className="kc-set-field">
-                    <span className="fx-lbl">Price</span>
-                    <PriceField value={p.value} precision={precision} step={step} onValue={(value) => setPoint(i, { value })} />
-                  </label>
+                  <DlgRow title="Price" line={i === 0 ? 'Where the point sits on the price scale.' : undefined}>
+                    <span className="dlg-field">
+                      <PriceField value={p.value} precision={precision} step={step} onValue={(value) => setPoint(i, { value })} />
+                    </span>
+                  </DlgRow>
                 )}
                 {showTime && (
-                  <label className="kc-set-field">
-                    <span className="fx-lbl">Bar time{tz === 'utc' ? ' (UTC)' : ''}</span>
-                    <input
-                      className="fx-input"
-                      type="datetime-local"
-                      step={60}
-                      value={inputTime(p.timestamp, tz)}
-                      onKeyDown={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        const ts = parseInputTime(e.target.value, tz, intervalMs);
-                        if (ts !== null) setPoint(i, { timestamp: ts });
-                      }}
-                    />
-                  </label>
+                  <DlgRow title="Bar time" line={i === 0 ? `Snaps to the bar it falls in${tz === 'utc' ? ', in UTC' : ', on your clock'}.` : undefined}>
+                    <span className="dlg-field is-time">
+                      <input
+                        type="datetime-local"
+                        aria-label={`Point ${i + 1} bar time`}
+                        step={60}
+                        value={inputTime(p.timestamp, tz)}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const ts = parseInputTime(e.target.value, tz, intervalMs);
+                          if (ts !== null) setPoint(i, { timestamp: ts });
+                        }}
+                      />
+                    </span>
+                  </DlgRow>
                 )}
-              </div>
-            </Fragment>
-          ))}
-          {draft.points.length === 0 && <p className="kc-set-note">This drawing has no anchors yet.</p>}
-        </div>
-      )}
+              </DlgSection>
+            ))}
+            {draft.points.length === 0 && <p className="dlg-note">This drawing has no anchors yet.</p>}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }

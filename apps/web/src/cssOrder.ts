@@ -75,6 +75,7 @@ import './components/macro/macro.css';
 import './components/fedlive/FedLive.css';
 import './components/account/UnlockDialog.css';
 import './components/SettingsMenu.css';
+import './components/dialog.css';
 import './appearance.css';
 
 /* Not listed, on purpose: styles.css (main.tsx imports it last, after App),
