@@ -9,7 +9,11 @@
  */
 import { useState } from 'react';
 import { useSharedStored } from '../../hooks';
-import type { NewsItem } from '../../vsApi';
+import type { CalendarSource, NewsItem } from '../../vsApi';
+import SHIPPED_JSON from '../../../public/logos/news.json';
+
+/** The icons shipped in public/logos/news: site -> file extension. */
+const SHIPPED: Record<string, string> = SHIPPED_JSON;
 
 export type NewsSourceId = 'sosovalue' | 'whitehouse' | 'watcherguru';
 export const NEWS_SOURCES: ReadonlyArray<{ id: NewsSourceId; name: string; line: string; site: string }> = [
@@ -53,7 +57,7 @@ const KNOWN: Record<string, string> = {
   techflow: 'techflowpost.com', 深潮techflow: 'techflowpost.com', techflowselected: 'techflowpost.com', blockbeats: 'theblockbeats.info', 律动blockbeats: 'theblockbeats.info',
   foresightnews: 'foresightnews.pro', chaincatcher: 'chaincatcher.com', chaincatcherresearch: 'chaincatcher.com', 金色财经: 'jinse.cn', jinse: 'jinse.cn',
   metaera: 'metaera.hk', metaeraresearch: 'metaera.hk', techubnews: 'techub.news', blockcastit: 'blockcast.it', 區塊客blockcastit: 'blockcast.it',
-  sosovalue: 'sosovalue.com', coinglass: 'coinglass.com', lookonchain: 'lookonchain.com', whalealert: 'whale-alert.io', arkham: 'arkm.com', glassnode: 'glassnode.com',
+  sosovalue: 'sosovalue.com', coinglass: 'coinglass.com', lookonchain: 'lookonchain.com', arkham: 'arkm.com', glassnode: 'glassnode.com',
   santiment: 'santiment.net', cryptoquant: 'cryptoquant.com', kiyoungju: 'cryptoquant.com', messari: 'messari.io', nansen: 'nansen.ai', defillama: 'defillama.com',
   coingecko: 'coingecko.com', coinmarketcap: 'coinmarketcap.com', tokenterminal: 'tokenterminal.com', polymarket: 'polymarket.com', kalshi: 'kalshi.com', velo: 'velo.xyz',
   binance: 'binance.com', coinbase: 'coinbase.com', okx: 'okx.com', bybit: 'bybit.com', kraken: 'kraken.com', bitget: 'bitget.com', phemex: 'phemex.com',
@@ -87,8 +91,21 @@ export function sourceSite(n: Pick<NewsItem, 'href' | 'author' | 'post'> & { sou
   }
 }
 
-/** A site's icon: the app's own where it carries one, else the server's logo route. */
-export const logoUrl = (site: string) => OWN_ICON[site] ?? `/api/vs/logo?domain=${encodeURIComponent(site)}`;
+/**
+ * A site's icon: the app's own where it carries one, then the copy shipped with
+ * the app (public/logos/news, the known outlets and the calendar's agencies -
+ * served by the CDN, no wait), else the server's logo route.
+ */
+export const logoUrl = (site: string) =>
+  OWN_ICON[site] ?? (SHIPPED[site] ? `/logos/news/${site}.${SHIPPED[site]}` : `/api/vs/logo?domain=${encodeURIComponent(site)}`);
+
+/** The calendar's publishers' sites, for their marks. */
+export const CALENDAR_SITE: Record<CalendarSource, string> = { fed: 'federalreserve.gov', bls: 'bls.gov', bea: 'bea.gov', sosovalue: 'sosovalue.com' };
+
+/** A calendar publisher's mark. */
+export const CalendarMark = ({ source }: { source: CalendarSource }) => (
+  <img className="nw__logo" src={logoUrl(CALENDAR_SITE[source])} alt="" width={14} height={14} />
+);
 
 /** A story's source: its icon (or initial) and its name. */
 export function SourceMark({ n }: { n: Pick<NewsItem, 'href' | 'author' | 'post'> & { source?: string } }) {

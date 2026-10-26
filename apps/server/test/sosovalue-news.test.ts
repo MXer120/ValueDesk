@@ -358,3 +358,9 @@ test('news history: the older pages are read once, every first page is merged in
   assert.deepEqual(again.items.map((n) => n.id), ['n0', 'p1a', 'p1b']);
   assert.deepEqual(asked, ['p1'], 'the hot list too is the copy of ten minutes');
 }));
+
+test('mapNewsList: Whale Alert is left out, whichever field names it', () => {
+  const row = (id: string, extra: Record<string, unknown>) => ({ id, title: `Story ${id}`, source_link: `https://example.com/${id}`, release_time: '1760000000000', ...extra });
+  const out = mapNewsList({ list: [row('1', { nick_name: 'Whale Alert' }), row('2', { author: 'WhaleAlert' }), row('3', { author: 'Coindesk' })] }, 10);
+  assert.deepEqual(out.map((n) => n.author), ['Coindesk']);
+});

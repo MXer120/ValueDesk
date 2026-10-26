@@ -116,6 +116,8 @@
   background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; font-size: var(--fs-xs);
 }
 .csel__search input:focus { outline: none; border-color: rgba(255, 255, 255, 0.18); }
+/* Only the list gives way when the menu is short: the search, "All coins" and "This market" keep their height. */
+.csel__pop > :not(.csel__list) { flex: none; }
 .csel__list { display: flex; flex-direction: column; gap: 1px; min-height: 0; overflow-y: auto; }
 .csel__hint { flex: none; max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); font-size: var(--fs-micro); font-weight: 400; }
 .csel__none { margin: 6px 8px; color: var(--dim); font-size: var(--fs-micro); }
@@ -165,7 +167,8 @@
 .nwc__short { justify-self: start; padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 0.02em; }
 .nwc__row--high .nwc__short { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
 .nwc__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.nwc__src { color: var(--dim); font-size: var(--fs-micro); white-space: nowrap; }
+.nwc__src { display: inline-flex; align-items: center; gap: 5px; color: var(--dim); font-size: var(--fs-micro); white-space: nowrap; }
+.evc__src { display: inline-flex; align-items: center; gap: 6px; }
 .nwc__row.is-next .nwc__src { color: var(--text); font-weight: 600; }
 .nwc__foot { margin-top: 10px; }
 

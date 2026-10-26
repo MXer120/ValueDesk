@@ -183,26 +183,34 @@ export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch):
   if (!flight) {
     flight = (async () => {
       let got: { type: string; body: Buffer | null } = { type: 'image/x-icon', body: null };
-      // DuckDuckGo's icon service, then Google's (a 404 there is its "no icon" globe), then the site's own.
-      for (const url of [
-        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-        `https://${domain}/favicon.ico`,
-      ]) {
+      // DuckDuckGo's icon service, then Google's (a 404 there is its "no icon" globe), then the
+      // site's own - all asked at once, the first in that order that has one kept, so a slow or
+      // missing one costs no more than the slowest answer.
+      const one = async (url: string): Promise<{ type: string; body: Buffer } | null> => {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 6_000);
+        const timer = setTimeout(() => ctrl.abort(), 4_000);
         try {
           const res = await fetchImpl(url, { signal: ctrl.signal, redirect: 'follow' });
-          if (!res.ok) continue;
+          if (!res.ok) return null;
           const buf = Buffer.from(await res.arrayBuffer());
           // The type the bytes are, not the one the service says (some label .ico files PNG).
           const type = imageType(buf);
-          if (type && buf.length > 0 && buf.length < 200_000) { got = { type, body: buf }; break; }
+          return type && buf.length > 0 && buf.length < 200_000 ? { type, body: buf } : null;
         } catch {
           // The next one, or no icon: the widget shows the source's initial.
+          return null;
         } finally {
           clearTimeout(timer);
         }
+      };
+      const tries = [
+        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+        `https://${domain}/favicon.ico`,
+      ].map(one);
+      for (const t of tries) {
+        const hit = await t;
+        if (hit) { got = hit; break; }
       }
       logos.set(domain, { at: Date.now(), ...got });
       if (logos.size > MAX_LOGOS) logos.delete(logos.keys().next().value!);

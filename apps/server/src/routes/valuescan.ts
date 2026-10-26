@@ -270,13 +270,13 @@ export async function valuescanRoutes(app: FastifyInstance) {
     }
   });
 
-  /** A news source's site icon (feeds.ts siteLogo), a day in the browser too; 404 when the site has none. */
+  /** A news source's site icon (feeds.ts siteLogo), a week in the browser; 404 when the site has none. */
   app.get('/api/vs/logo', async (req, reply) => {
     const domain = logoDomain((req.query as Record<string, unknown>).domain);
     if (!domain) return reply.code(400).send({ ok: false, error: 'domain is not a hostname' });
     const logo = await siteLogo(domain);
     if (!logo.body) return reply.code(404).header('cache-control', 'public, max-age=86400').send({ ok: false, error: 'no icon' });
-    return reply.header('content-type', logo.type).header('cache-control', 'public, max-age=86400').send(logo.body);
+    return reply.header('content-type', logo.type).header('cache-control', 'public, max-age=604800, stale-while-revalidate=2592000').send(logo.body);
   });
 
   /**

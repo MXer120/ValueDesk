@@ -24,6 +24,7 @@ import { Modal } from '../Modal';
 import { IndicatorModal } from '../macro/IndicatorView';
 import { fmtValue, macroApi } from '../macro/api';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
+import { CalendarMark } from './newsSources';
 
 export type { ReleaseResult };
 
@@ -282,7 +283,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
         </span>
         <span>{event.allDay ? new Date(event.time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' }) : when}</span>
         <span className="evc__dot" aria-hidden="true" />
-        <span>{sourceName ?? event.source.toUpperCase()}</span>
+        <span className="evc__src"><CalendarMark source={event.source} />{sourceName ?? event.source.toUpperCase()}</span>
         {result?.period && <><span className="evc__dot" aria-hidden="true" /><span>{result.period}</span></>}
       </div>
 

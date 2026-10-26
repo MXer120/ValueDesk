@@ -242,6 +242,9 @@ function matchedCoins(v: unknown): string[] {
   return out;
 }
 
+/** Accounts left out of the news (owner, 2026-10-26): Whale Alert's transfer bots. */
+const DROPPED_AUTHORS = /^whale ?alerts?$/i;
+
 const sameStory = (title: string) => title.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().slice(0, 120);
 
 /**
@@ -273,6 +276,7 @@ export function mapNewsList(body: unknown, limit: number, opts: { index?: CoinIn
     seen.add(dupe);
     const nick = typeof r.nick_name === 'string' ? r.nick_name.trim() : '';
     const authorName = typeof r.author === 'string' ? r.author.trim() : '';
+    if (DROPPED_AUTHORS.test(nick) || DROPPED_AUTHORS.test(authorName)) continue;
     let symbols = matchedCoins(r.matched_currencies);
     if (!symbols.length && opts.index) symbols = coinsIn(`${title} ${content}`, opts.index);
     const tags = Array.isArray(r.tags)

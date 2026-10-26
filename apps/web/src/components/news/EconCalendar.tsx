@@ -17,6 +17,7 @@ import { vsApi, type CalendarEvent } from '../../vsApi';
 import { EmptyState } from '../EmptyState';
 import { focusProps } from '../../chart/newsFocus';
 import { EventCard, fmtField, hasResults, useReleaseResults } from './releases';
+import { CalendarMark } from './newsSources';
 
 const DAY = 86_400_000;
 const IMPACT_LABEL: Record<CalendarEvent['importance'], string> = { high: 'High impact', medium: 'Medium impact', low: 'Low impact' };
@@ -120,7 +121,7 @@ export function EconCalendar({ instance }: { instance?: string }) {
                           const f = r?.state === 'released' ? r.fields.find((x) => x.value !== null) : undefined;
                           if (f) return <span className="nwc__val" title={`${f.label}${f.prior !== null ? `, previous ${fmtField(f, f.prior)}` : ''}`}>{fmtField(f, f.value)}</span>;
                           if (hasResults(e) && Math.abs(e.time - now) < 60_000 && r?.state !== 'released') return <span className="nwc__val is-wait">waiting…</span>;
-                          return <span className="nwc__src">{e === next ? until(e.time, now) : SHORT_SOURCE[e.source]}</span>;
+                          return <span className="nwc__src">{e === next ? until(e.time, now) : <><CalendarMark source={e.source} />{SHORT_SOURCE[e.source]}</>}</span>;
                         })()}
                       </button>
                     </li>
