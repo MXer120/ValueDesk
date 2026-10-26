@@ -89,7 +89,16 @@ html .kc-snapbar,
 html .devp__sheet,
 html .modal.fx,
 html .fx-list,
-html .fx-dock__panel {
+html .fx-dock__panel,
+html .kc-stylebar-palette,
+html .kd-swatch__menu,
+html .kd-bubble,
+html .kd-slash,
+html .kn-picker__panel,
+html .ks-swatch__menu {
+  background-color: var(--glass-pop-bg);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
   background-image:
     radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 55%),
     linear-gradient(180deg, transparent 40%, color-mix(in srgb, color-mix(in srgb, var(--stg-tint), #000 var(--stg-shade)) calc(var(--stg-shade-a) * 0.5), transparent));
@@ -111,22 +120,34 @@ html .navaddr__menu,
 html .privacy__menu,
 html .dash-edit-confirm,
 html .kc-newspop,
-html .kc-mark-tip { border-radius: 14px; }
-/* Deposit, withdraw and transfer keep their own shape and layout (the owner: "the
-   rest is already perfect there") - only the edge and the fill above are theirs. */
-html .modal.fx { border-radius: 14px; }
+html .kc-mark-tip,
+html .kd-swatch__menu,
+html .kd-bubble,
+html .kd-slash,
+html .kn-picker__panel,
+html .ks-swatch__menu { border-radius: 14px; }
+/* Deposit, withdraw and transfer (`fx-money`) keep their own shape and layout (the
+   owner: "the rest is already perfect there") - only the edge and the fill above
+   are theirs. Every other dialog, the ones on the funds sheets' `fx` look too,
+   takes the whole Settings language below. */
+html .modal.fx-money { border-radius: 14px; }
+html .modal.fx:not(.fx-money) { border-radius: 20px; }
 html .modal, html .cp, html .cdlg { border-radius: 20px; }
 
 /* A dialog reads like the Settings pane: a title, not a bar; no rules between head, body and foot. */
-html .modal:not(.fx):not(.stg) .modal-head { padding: 18px 20px 4px 22px; border-bottom: 0; }
-html .modal:not(.fx):not(.stg) .modal-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-html .modal:not(.fx):not(.stg) .modal-close {
+html .modal:not(.fx-money):not(.stg) .modal-head { padding: 18px 20px 4px 22px; border-bottom: 0; }
+html .modal:not(.fx-money):not(.stg) .modal-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+html .modal:not(.fx-money):not(.stg) .modal-close {
   display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 9px; font-size: 18px;
   transition: background 140ms, color 140ms;
 }
-html .modal:not(.fx):not(.stg) .modal-close:hover { background: rgba(255, 255, 255, 0.08); }
-html .modal:not(.fx):not(.stg) .modal-body { padding: 14px 22px 22px; }
-html .modal:not(.fx):not(.stg) .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); background: transparent; }
+html .modal:not(.fx-money):not(.stg) .modal-close:hover { background: rgba(255, 255, 255, 0.08); }
+html .modal:not(.fx-money):not(.stg) .modal-body { padding: 14px 22px 22px; }
+html .modal:not(.fx-money):not(.stg) .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); background: transparent; }
+
+/* The funds look centres its title between back and close: here it leads, as in Settings. */
+html .modal.fx:not(.fx-money) .modal-head { display: flex; align-items: center; gap: 8px; }
+html .modal.fx:not(.fx-money) .modal-head h2 { flex: 1; min-width: 0; text-align: left; }
 
 /* A native select's open list, where the browser lets it be styled. */
 html ::picker(select) { border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; }

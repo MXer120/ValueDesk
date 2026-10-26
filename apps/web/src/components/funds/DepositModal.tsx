@@ -178,7 +178,7 @@ export function DepositModal({ open, onClose, address, provider, onEnable }: Pro
       title={title}
       onClose={onClose}
       size="md"
-      className="fx"
+      className="fx fx-money"
       onBack={view !== 'choose' && !accountReady ? () => setView('choose') : undefined}
     >
       {!owner ? (

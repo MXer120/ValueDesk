@@ -373,7 +373,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       title="Withdraw"
       onClose={onClose}
       size="md"
-      className="fx"
+      className="fx fx-money"
       aside={
         bookOpen && owner ? (
           <AddressBook

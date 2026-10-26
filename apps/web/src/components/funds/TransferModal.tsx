@@ -96,7 +96,7 @@ export function TransferModal({ open, onClose, address, provider, onEnable, pres
       title="Transfer"
       onClose={onClose}
       size="md"
-      className="fx"
+      className="fx fx-money"
       dock={<TransferStatus mode={mode} liveId={liveId} onMode={setMode} owner={owner} />}
       dockOpen={mode !== 'collapsed'}
     >
