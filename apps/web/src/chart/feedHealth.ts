@@ -322,7 +322,10 @@ export type RecoverReason =
   /** The hub came back from a dropped connection. */
   | 'reconnect'
   /** The tab was hidden and is visible again. */
-  | 'visible';
+  | 'visible'
+  /** The stream moved on from a bar it never updated (the one the history load caught half-way):
+   *  its final open, high, low, close and volume are read so the bar is not left half-made. */
+  | 'settle';
 
 export interface StaleInput {
   now: number;

@@ -1203,6 +1203,8 @@ function Chart({
     const applyHistory = (s: Series, rows: KLineData[]) => {
       series.current = s;
       lastBar.current = rows[rows.length - 1] ?? null;
+      // Every bar on the chart now is the history's; the stream has written none of them.
+      streamTs.current = null;
       if (!hovering.current) setLegendBar(lastBar.current);
       setFeed({ key: s.key, phase: rows.length ? 'ready' : 'empty', failures: 0, nextRetryAt: null, error: null });
       let w = watchdog.current;
@@ -1296,6 +1298,15 @@ function Chart({
      * stream when it has gone quiet, refetch the right edge, and merge it in
      * without duplicating a bar (feedHealth.ts, planMerge).
      */
+    /** The ticks kept while the history loaded, for the series now on the chart, in order. */
+    const replayTicks = () => {
+      const key = series.current?.key;
+      if (!key || !pushBar.current || !pendingTicks.current.length) return;
+      const mine = pendingTicks.current.filter((x) => x.key === key);
+      pendingTicks.current = [];
+      for (const x of mine) onCandle.current(x.d);
+    };
+
     const recover = async (reason: RecoverReason): Promise<RecoverResult> => {
       const s = series.current;
       const c = chart.current;
@@ -1356,6 +1367,7 @@ function Chart({
       if (anchor !== undefined) c.scrollToTimestamp(anchor, 0);
       return 'caught-up';
     };
+    recoverRef.current = recover;
 
     /**
      * v10's single data seam. `getBars` is deliberately a pure function of its
@@ -1528,6 +1540,7 @@ function Chart({
           setGuard((g) => (g === key ? null : g));
         }
         callback(rows, { forward: rows.length > 0, backward: false });
+        replayTicks();
         // klinecharts sizes the price range to the visible bars BEFORE it
         // re-measures the price axis for the new labels, and a first load
         // widens that axis (from "10" to "84,000"): fewer bars fit, and the
@@ -1600,6 +1613,7 @@ function Chart({
       // owns that — we just park the callback the live tick will be fed into.
       subscribeBar: ({ callback }) => {
         pushBar.current = callback;
+        replayTicks();
       },
       unsubscribeBar: () => {
         pushBar.current = null;
@@ -1940,6 +1954,12 @@ function Chart({
   // gone quiet on a market that is still trading. The hub refcounts, so this
   // never opens a second upstream subscription beside another panel's.
   const onCandle = useRef<(d: any) => void>(() => undefined);
+  /** The feed repair (`recover` in the chart's effect), for the live path to ask for. */
+  const recoverRef = useRef<((reason: RecoverReason) => Promise<RecoverResult>) | null>(null);
+  /** Open time of the last bar the candle STREAM itself wrote (null: none since the history load). */
+  const streamTs = useRef<number | null>(null);
+  /** Ticks that arrived while the history was loading, kept for that series and replayed once it lands. */
+  const pendingTicks = useRef<Array<{ key: string; d: any }>>([]);
   useEffect(() => {
     if (!ready) return;
     return hub.subscribe(engine, { channel: 'candle', symbol, interval }, (d) => onCandle.current(d));
@@ -1951,7 +1971,14 @@ function Chart({
     // otherwise be drawn onto this one.
     if (d?.s && d.s !== symbol) return;
     if (d?.i && d.i !== interval) return;
-    if (series.current?.key !== feedKey(engine, seriesTicker, interval)) return;
+    const want = feedKey(engine, seriesTicker, interval);
+    // A tick for this series while its history is still loading (no store yet, or the old series'):
+    // kept and replayed once the history lands, never dropped - the bar the load caught half-way
+    // gets its later values, and no trade between the snapshot and the first push is lost.
+    if (series.current?.key !== want || !pushBar.current) {
+      if (d?.t) pendingTicks.current = [...pendingTicks.current.filter((x) => x.key === want).slice(-50), { key: want, d }];
+      return;
+    }
     // Two independent guards, both load-bearing:
     //
     // 1. `pushBar` is null from the moment klinecharts resets the store until
@@ -1966,6 +1993,9 @@ function Chart({
     if (!d?.t || !pushBar.current) return;
     const last = lastBar.current;
     if (last && d.t < last.timestamp) return;
+    // The stream starts a new bar while the one before it was only ever the history's snapshot of it
+    // (taken mid-bar): that bar's final values are read from the venue a moment later (recover 'settle').
+    const settle = last !== null && d.t > last.timestamp && streamTs.current !== last.timestamp;
 
     const bar: KLineData = {
       timestamp: d.t,
@@ -1981,7 +2011,9 @@ function Chart({
     if (!hovering.current) setLegendBar(bar);
     layer.current?.notePrice(bar.close);
     pushBar.current(bar);
+    streamTs.current = bar.timestamp;
     watchdog.current?.noteTick(bar.timestamp);
+    if (settle) window.setTimeout(() => void recoverRef.current?.('settle'), 1_500);
     // The first trade on a market that had no candles: there is a chart now.
     setFeed((f) => (f.phase === 'empty' && f.key === series.current?.key ? { ...f, phase: 'ready' } : f));
   };
