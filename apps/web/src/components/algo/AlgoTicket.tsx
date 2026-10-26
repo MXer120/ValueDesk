@@ -22,7 +22,7 @@
  *
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
-import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
   checkAlgoSpec,
@@ -84,6 +84,7 @@ import {
 } from './draft';
 import { blockedState, noticeFor, readExecutor, writeExecutor, type Place } from './executor';
 import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './menu';
+import { AlgoIcon } from './AlgoIcon';
 import '../SettingsMenu.css';
 import './algo.css';
 
@@ -376,7 +377,17 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const label = `Start ${menuName(kind)}${d.paper ? ' (paper)' : ''}`;
   const why = !market ? 'Loading the market…' : amountMissing ? 'Enter an amount.' : allErrors[0] ?? where.why ?? null;
   const sided = kind !== 'basket';
-  const block = blockedState(place, where, !!p.address);
+  // With no wallet, executorReady stops at "Connect your wallet." before it
+  // looks at the executor; the executor's own trouble still blocks the ticket.
+  const execOwn =
+    place === 'browser' || copy.owner || where.ready
+      ? where
+      : !copy[place].info
+        ? { ready: false, why: place === 'hosted' ? 'The ValueDesk executor is not reachable right now.' : 'Connect your self-hosted copier in Copy → Set up.' }
+        : !copy[place].info?.algos
+          ? { ready: false, why: `${place === 'hosted' ? 'The ValueDesk executor' : 'Your copier'} does not run algo orders yet (update it).` }
+          : where;
+  const block = blockedState(place, execOwn, !!p.address);
   const blocked = block?.short ?? null;
   useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked }), [ready, label, why, needsAmount, walletFree, sided, blocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -603,27 +614,17 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         {!allErrors.length && plan?.warnings[0] && <p className="oe-hint algo-warn">{plan.warnings[0]}</p>}
       </div>
 
-      <Modal
+      <AdvancedWindow
         open={advOpen}
         onClose={() => setAdvOpen(false)}
-        title={`${menuName(kind)}: advanced`}
-        className="fx vs-confirm algo-sheet"
-        footer={
-          <div className="fx-review__actions">
-            <button type="button" className="fx-cta fx-cta--ghost" disabled={!changes.length} onClick={() => setD((x) => resetAdvanced(kind, x))}>
-              Reset
-            </button>
-            <button type="button" className="fx-cta" onClick={() => setAdvOpen(false)}>
-              Done
-            </button>
-          </div>
-        }
+        kind={kind}
+        exitsHere={exitsHere}
+        canReset={changes.length > 0}
+        onReset={() => setD((x) => resetAdvanced(kind, x))}
+        runsOn={<RunsOn place={place} onChange={setPlace} where={where} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
       >
-        <div className="algo-adv">
-          <RunsOn place={place} onChange={setPlace} where={where} paper={d.paper} setPaper={(v) => set({ paper: v })} />
-          <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} />
-        </div>
-      </Modal>
+        <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} />
+      </AdvancedWindow>
       {dialog}
       {busy && <span className="algo-busy" aria-live="polite">Starting…</span>}
     </div>
@@ -643,14 +644,93 @@ function roundQty(x: number, step?: string): string {
 
 /* ------------------------------------------- the Advanced pop-up ----- */
 
-/* In the Settings window's language (SettingsMenu.css, whose stg__* classes it
-   reuses): small uppercase section labels, each setting a row - its title, one
-   plain line under it, its control - with hairlines between, Settings' soft
-   40px boxes with the unit on the right, switches that say what they mean. */
+/* The general Settings window, for this order (SettingsMenu.tsx/.css, whose
+   stg__* shell it is): the kind's name and its sections down the left, Reset
+   to defaults at their foot; the chosen section on the inner pane - its icon
+   and title, one line saying what it is, then labelled cards of rows (title,
+   line, control). Each Group names the section it belongs to and renders only
+   while that section is open. */
+
+type Sec = 'runs' | 'slicing' | 'exec' | 'exits' | 'start';
+
+const SecIcon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
+  <svg viewBox="0 0 20 20" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+
+const SECS: Record<Sec, { label: string; lede: string; icon: ReactNode }> = {
+  runs: { label: 'Runs on', lede: 'Where the order is worked, and whether it sends real orders or only practises against the live market.', icon: <><rect x="3" y="4" width="14" height="5" rx="1.5" /><rect x="3" y="11" width="14" height="5" rx="1.5" /><path d="M6 6.5h.01M6 13.5h.01" /></> },
+  slicing: { label: 'Slicing', lede: 'How the amount is split into child orders: how many, how big, how often.', icon: <><path d="M3 15h14" /><rect x="4" y="10" width="2.5" height="5" rx="0.6" /><rect x="8.75" y="7" width="2.5" height="8" rx="0.6" /><rect x="13.5" y="4" width="2.5" height="11" rx="0.6" /></> },
+  exec: { label: 'Price & execution', lede: 'How each order meets the book: where it rests, how far it may slip, when it takes.', icon: <><path d="M3 14.5 7.5 10l3 3L17 6.5" /><path d="M13 6.5h4v4" /></> },
+  exits: { label: 'Exits', lede: 'Take profit and stop loss, placed once the order has filled.', icon: <><path d="M4 3v14" /><path d="M4 4h10l-2 3 2 3H4" /></> },
+  start: { label: 'Start & limits', lede: 'When it begins, and the prices and spread it keeps to while it runs.', icon: <><circle cx="10" cy="10" r="7" /><path d="M10 6v4l2.5 2" /></> },
+};
+
+/** The sections a kind has, Runs on first. */
+function sectionsFor(kind: UiKind, exitsHere: boolean): Sec[] {
+  const ek: string = engineKind(kind);
+  const out: Sec[] = ['runs'];
+  if (['twap', 'vwap', 'basket', 'pov', 'iceberg', 'scale', 'dca', 'swarm'].includes(ek)) out.push('slicing');
+  if (ek !== 'basket') out.push('exec');
+  if (exitsHere && kind !== 'bracket') out.push('exits');
+  out.push('start');
+  return out;
+}
+
+/* The last open section per kind, for as long as the page lives (never stored). */
+const lastSec = new Map<UiKind, Sec>();
+
+const SecCtx = createContext<Sec | null>(null);
+
+function AdvancedWindow({ open, onClose, kind, exitsHere, canReset, onReset, runsOn, children }: {
+  open: boolean; onClose: () => void; kind: UiKind; exitsHere: boolean; canReset: boolean; onReset: () => void; runsOn: ReactNode; children: ReactNode;
+}) {
+  const secs = sectionsFor(kind, exitsHere);
+  const [, bump] = useState(0);
+  const want = lastSec.get(kind) ?? 'runs';
+  const sec: Sec = secs.includes(want) ? want : 'runs';
+  const pick = (v: Sec) => {
+    lastSec.set(kind, v);
+    bump((n) => n + 1);
+  };
+  const cur = SECS[sec];
+  const name = `${menuName(kind)} settings`;
+  return (
+    <Modal open={open} onClose={onClose} title={name} size="lg" className="stg algo-sheet">
+      <div className="stg__body">
+        <nav className="stg__nav" aria-label={`${name} sections`}>
+          <div className="stg__brand"><AlgoIcon kind={kind} size={22} /><span>{name}</span></div>
+          <span className="stg__rule" aria-hidden="true" />
+          <div className="stg__tabs">
+            {secs.map((id) => (
+              <button key={id} type="button" className={`stg__tab${sec === id ? ' is-on' : ''}`} aria-current={sec === id ? 'page' : undefined} onClick={() => pick(id)}>
+                <SecIcon size={17}>{SECS[id].icon}</SecIcon>
+                <span>{SECS[id].label}</span>
+              </button>
+            ))}
+          </div>
+          <button type="button" className="stg__tab stg__out" disabled={!canReset} onClick={onReset} title={canReset ? 'Every setting here back to its default' : 'Every setting is at its default'}>
+            <SecIcon size={17}><path d="M4 10a6 6 0 1 0 1.8-4.3" /><path d="M4 3.5v3h3" /></SecIcon>
+            <span>Reset to defaults</span>
+          </button>
+        </nav>
+        <div className="stg__pane" key={sec}>
+          <div className="stg__panehead"><SecIcon size={22}>{cur.icon}</SecIcon><h3>{cur.label}</h3></div>
+          <p className="stg__lede">{cur.lede}</p>
+          {sec === 'runs' ? runsOn : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
+          <div className="stg__actions algo-done">
+            <button type="button" className="stg__btn is-go" onClick={onClose}>Done</button>
+          </div>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 type Opt<T> = readonly [T, string, string?];
 
-function Group({ label, children }: { label: string; children: ReactNode }) {
+function Group({ label, sec = 'exec', children }: { label: string; sec?: Sec; children: ReactNode }) {
+  const open = useContext(SecCtx);
+  if (open !== null && open !== sec) return null;
   return (
     <section className="algo-group" aria-label={label}>
       <div className="stg__label">{label}</div>
@@ -748,10 +828,8 @@ function ASwitch({ title, hint, checked, onChange, on = 'On', off = 'Off' }: { t
   return (
     <Row title={title} hint={hint}>
       <button type="button" role="switch" aria-checked={checked} aria-label={title} className={`stg__switch${checked ? ' is-on' : ''}`} onClick={() => onChange(!checked)}>
-        <span className="stg__track">
-          <i />
-        </span>
-        {checked ? on : off}
+        <i className="stg__track"><i /></i>
+        <span aria-hidden="true">{checked ? on : off}</span>
       </button>
     </Row>
   );
@@ -776,7 +854,7 @@ function RunsOn({ place, onChange, where, paper, setPaper }: {
 }) {
   return (
     <section className="algo-group" aria-label="Runs on">
-      <div className="stg__label">Runs on</div>
+      <div className="stg__label">Executor</div>
       <div className="stg__choices is-three algo-places" role="radiogroup" aria-label="Runs on">
         {PLACE_CARDS.map(([v, t, line]) => (
           <button key={v} type="button" role="radio" aria-checked={place === v} className={`stg__choice${place === v ? ' is-on' : ''}`} onClick={() => onChange(v)}>
@@ -790,6 +868,7 @@ function RunsOn({ place, onChange, where, paper, setPaper }: {
           {where.why} <SetupLink why={where.why} place={place} />
         </p>
       )}
+      <div className="stg__label">Practice</div>
       <div className="stg__card">
         <ASwitch
           title="Practice run · no real orders"
@@ -843,7 +922,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
     <>
       {(ek === 'twap' || ek === 'vwap') && (
         <>
-          <Group label="Slicing">
+          <Group label="Slicing" sec="slicing">
             {slicesRow}
             {ek === 'vwap' && (
               <>
@@ -878,7 +957,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
       {ek === 'bracket' && <Group label="Entry">{slip('A market entry takes at most this far past the best price.')}</Group>}
 
       {ek === 'basket' && (
-        <Group label="Execution">
+        <Group label="Execution" sec="slicing">
           {d.basketStyle === 'twap' ? (
             slicesRow
           ) : (
@@ -893,7 +972,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'pov' && (
         <>
-          <Group label="Speed">
+          <Group label="Speed" sec="slicing">
             <AField
               title="Share of volume"
               hint={`Of what everyone else trades, while they trade it. Low is ${POV_PRESETS.low}%, Medium ${POV_PRESETS.medium}%, High ${POV_PRESETS.high}%.`}
@@ -911,7 +990,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'iceberg' && (
         <>
-          <Group label="Clips">
+          <Group label="Clips" sec="slicing">
             {sizeVaries('displayJitter', "Each visible clip's size moves up to this much either way.")}
             {d.icePeg && <AField title="Offset" hint="Ticks behind the best price; a negative number steps inside the spread." value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} unit="ticks" err={err('pegOffsetTicks')} />}
             <AField title="Refill after" hint="Wait between one clip filling and the next one appearing." value={d.refill} onChange={(v) => set({ refill: v })} unit="s" err={err('refillMs')} />
@@ -956,7 +1035,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'scale' && (
         <>
-          <Group label="Ladder">
+          <Group label="Ladder" sec="slicing">
             {mid && (
               <Row title="Range" hint="Sets From and To this far from the current price, in one tap.">
                 <div className="algo-ctl">
@@ -1006,7 +1085,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'dca' && (
         <>
-          <Group label={side === 'buy' ? 'Buys' : 'Sells'}>
+          <Group label={side === 'buy' ? 'Buys' : 'Sells'} sec="slicing">
             <AField title="Budget" hint="Stops once this much has been spent in all. Empty: no cap." value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} unit="USD" err={err('maxTotalUsd')} />
             <AField title="Dip" hint={`Trades more when the price is this far ${fromAvg} your average so far. Empty: off.`} value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} unit="%" err={err('dipPct')} />
             {opt(d.dip) && <AField title="On a dip" hint="How many times the usual size it trades on a dip." value={d.dipMult} onChange={(v) => set({ dipMult: v })} unit="× more" err={err('dipMultiplier')} />}
@@ -1025,7 +1104,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {ek === 'swarm' && (
         <>
-          <Group label="Waves">
+          <Group label="Waves" sec="slicing">
             <ASeg title="Per wave" hint="Clips sent at the same time." value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} />
             <AField title="Between waves" hint="Pause between waves, so the book can refill." value={d.waveSec} onChange={(v) => set({ waveSec: v })} unit="s" err={err('waveMs')} />
             <AField title="Retries" hint="What did not fill is sent again this many times." value={d.retries} int onChange={(v) => set({ retries: v })} err={err('retries')} />
@@ -1052,7 +1131,7 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 
       {exitsHere && kind !== 'bracket' && <AExits d={d} set={set} side={side} levels={exits} err={err('exits')} />}
 
-      <Group label="Start and limits">
+      <Group label="Start and limits" sec="start">
         {hasLimit(kind) && (
           <AField title="Limit" hint={`Never ${side === 'buy' ? 'buys above' : 'sells below'} this price. Empty: none.`} value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} unit="USD" err={err('limitPrice')} />
         )}
@@ -1136,7 +1215,7 @@ function AExits({ d, set, side, levels, err }: { d: Draft; set: (p: Partial<Draf
   );
   const at = (x: number | null | undefined) => (x ? ` Now ${fmtLevel(x)}.` : '');
   return (
-    <Group label="Exits">
+    <Group label="Exits" sec="exits">
       <ASwitch
         title="Take-profit / stop-loss"
         hint="SoDEX holds them as position stops, resized as the algo fills; when one fills, the other is cancelled."

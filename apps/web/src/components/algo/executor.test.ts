@@ -59,11 +59,12 @@ test('blocked storage never throws', () => {
   assert.doesNotThrow(() => writeExecutor('self', blocked));
 });
 
-test('blocked: only an executor that cannot start, never a missing wallet or the browser', async () => {
+test('blocked: an executor that cannot start, with or without a wallet; never connect-wallet or the browser', async () => {
   const { blockedState } = await import('./executor');
   const down = { ready: false, why: 'The ValueDesk executor is not reachable right now.' };
   assert.equal(blockedState('hosted', { ready: true, why: null }, true), null);
-  assert.equal(blockedState('hosted', down, false), null);
+  assert.equal(blockedState('hosted', down, false)?.short, 'ValueDesk executor unreachable');
+  assert.equal(blockedState('hosted', { ready: false, why: 'Connect your wallet.' }, false), null);
   assert.equal(blockedState('hosted', { ready: false, why: 'Connect your wallet.' }, true), null);
   assert.equal(blockedState('browser', { ready: false, why: 'Connect a wallet to run it live.' }, true), null);
   const b = blockedState('hosted', down, true);

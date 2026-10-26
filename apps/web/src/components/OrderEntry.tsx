@@ -937,9 +937,10 @@ export function OrderEntry({
   const opening = isAlgo || (engine === 'perps' ? !reduceOnly : side === 'buy');
   const legalBtn = useLegalTradeGate(unlocked ? connectedAddress : null, opening);
   const btnGate = paperAlgo ? null : gate ?? legalBtn;
-  /* The algo's executor cannot start it (never a missing wallet: that is the
-     gate's Connect wallet): the ticket turns orange and the button refuses. */
-  const algoBlocked = isAlgo && !btnGate && algoState.blocked !== null;
+  /* The algo's executor cannot start it: the ticket turns orange and the button
+     refuses with the executor's reason, even before a wallet is connected -
+     the executor is the fix, not Connect wallet. */
+  const algoBlocked = isAlgo && algoState.blocked !== null;
   /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
   const sizedByAmount = !isAlgo || algoState.needsAmount;
   const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
@@ -2252,16 +2253,16 @@ export function OrderEntry({
               (account/useTradeGate.ts) and pressing it does that. */}
           <button
             type="button"
-            className={`oe-side__btn is-${side}${btnGate?.busy ? ' is-wait' : ''}`}
-            onClick={btnGate ? btnGate.act : algoBlocked ? undefined : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
-            disabled={btnGate ? btnGate.busy : algoBlocked ? true : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            className={`oe-side__btn is-${side}${btnGate?.busy && !algoBlocked ? ' is-wait' : ''}`}
+            onClick={algoBlocked ? undefined : btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={algoBlocked ? true : btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
             aria-busy={btnGate?.busy || busy || undefined}
-            title={btnGate?.why ?? (algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : isAlgo ? algoState.why ?? undefined : undefined)}
+            title={algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
           >
-            {btnGate
-              ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)
-              : algoBlocked
-                ? algoState.blocked
+            {algoBlocked
+              ? algoState.blocked
+              : btnGate
+                ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)
                 : busy
                 ? 'Working…'
                 : isAlgo

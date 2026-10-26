@@ -23,11 +23,12 @@ export const PLACES: ReadonlyArray<readonly [Place, string, string]> = [
 /**
  * Whether the ticket is blocked because the chosen executor cannot start the
  * algo: a short reason for the button and the message for the notification.
- * A missing wallet is not this (the button becomes Connect wallet), nor is the
- * browser (it fails only for a wallet).
+ * Applies with or without a wallet: an unreachable or unset executor is the
+ * thing to fix, not the wallet. Only the generic "connect your wallet" reason
+ * is not this, nor is the browser (it fails only for a wallet).
  */
-export function blockedState(place: Place, where: { ready: boolean; why: string | null }, hasWallet: boolean): { short: string; message: string } | null {
-  if (where.ready || !where.why || place === 'browser' || !hasWallet) return null;
+export function blockedState(place: Place, where: { ready: boolean; why: string | null }, _hasWallet?: boolean): { short: string; message: string } | null {
+  if (where.ready || !where.why || place === 'browser') return null;
   const why = where.why;
   if (/connect your wallet/i.test(why)) return null;
   const name = place === 'hosted' ? 'ValueDesk executor' : 'Self-hosted copier';
