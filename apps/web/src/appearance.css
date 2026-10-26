@@ -70,7 +70,26 @@ html .coh-pick__pop,
 html .coh-lean__tip,
 html .pf-chart__tip,
 html .cp-menu,
-html .cp-fpop {
+html .cp-fpop,
+html .psel__pop,
+html .navaddr__menu,
+html .privacy__menu,
+html .symbolsearch,
+html .modal-aside__card,
+html .tabside,
+html .dash-edit-confirm,
+html .kq,
+html .copy-prompt,
+html .toast,
+html .kc-newspop,
+html .kc-mark-tip,
+html .kc-feed-card.boxed,
+html .kc-stylebar,
+html .kc-snapbar,
+html .devp__sheet,
+html .modal.fx,
+html .fx-list,
+html .fx-dock__panel {
   background-image:
     radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 55%),
     linear-gradient(180deg, transparent 40%, color-mix(in srgb, color-mix(in srgb, var(--stg-tint), #000 var(--stg-shade)) calc(var(--stg-shade-a) * 0.5), transparent));
@@ -86,19 +105,31 @@ html .sfoot-pop,
 html .navnotes__panel,
 html .coh-pick__pop,
 html .cp-menu,
-html .cp-fpop { border-radius: 14px; }
+html .cp-fpop,
+html .psel__pop,
+html .navaddr__menu,
+html .privacy__menu,
+html .dash-edit-confirm,
+html .kc-newspop,
+html .kc-mark-tip { border-radius: 14px; }
+/* Deposit, withdraw and transfer keep their own shape and layout (the owner: "the
+   rest is already perfect there") - only the edge and the fill above are theirs. */
+html .modal.fx { border-radius: 14px; }
 html .modal, html .cp, html .cdlg { border-radius: 20px; }
 
 /* A dialog reads like the Settings pane: a title, not a bar; no rules between head, body and foot. */
-html .modal-head { padding: 18px 20px 4px 22px; border-bottom: 0; }
-html .modal-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-html .modal-close {
+html .modal:not(.fx) .modal-head { padding: 18px 20px 4px 22px; border-bottom: 0; }
+html .modal:not(.fx) .modal-head h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+html .modal:not(.fx) .modal-close {
   display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border-radius: 9px; font-size: 18px;
   transition: background 140ms, color 140ms;
 }
-html .modal-close:hover { background: rgba(255, 255, 255, 0.08); }
-html .modal-body { padding: 14px 22px 22px; }
-html .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); background: transparent; }
+html .modal:not(.fx) .modal-close:hover { background: rgba(255, 255, 255, 0.08); }
+html .modal:not(.fx) .modal-body { padding: 14px 22px 22px; }
+html .modal:not(.fx) .modal-foot { padding: 14px 22px 18px; border-top: 1px solid rgba(255, 255, 255, 0.06); background: transparent; }
+
+/* A native select's open list, where the browser lets it be styled. */
+html ::picker(select) { border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; }
 
 /* Menu rows: the Settings sections' soft, rounded rows. */
 html .menu-popup .menu-row { border-radius: 9px; }
