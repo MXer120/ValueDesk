@@ -20,7 +20,39 @@ export const PLACES: ReadonlyArray<readonly [Place, string, string]> = [
   ['self', 'Self-hosted', 'On the copier you run yourself'],
 ];
 
-const isPlace = (v: unknown): v is Place => v === 'hosted' || v === 'browser' || v === 'self';
+/**
+ * Whether the ticket is blocked because the chosen executor cannot start the
+ * algo: a short reason for the button and the message for the notification.
+ * A missing wallet is not this (the button becomes Connect wallet), nor is the
+ * browser (it fails only for a wallet).
+ */
+export function blockedState(place: Place, where: { ready: boolean; why: string | null }, hasWallet: boolean): { short: string; message: string } | null {
+  if (where.ready || !where.why || place === 'browser' || !hasWallet) return null;
+  const why = where.why;
+  if (/connect your wallet/i.test(why)) return null;
+  const name = place === 'hosted' ? 'ValueDesk executor' : 'Self-hosted copier';
+  const short = /not reachable/i.test(why)
+    ? `${name} unreachable`
+    : /does not run algo/i.test(why)
+      ? `${name} needs an update`
+      : /connect your self-hosted/i.test(why)
+        ? `${name} not connected`
+        : /register the key/i.test(why)
+          ? `${name} key missing`
+          : `${name} not set up`;
+  const fix = /Copy → Set up/.test(why) ? 'Or open Advanced to run it elsewhere.' : 'Open Advanced to run it elsewhere.';
+  return { short, message: `${why} ${fix}` };
+}
+
+/**
+ * The notification to raise for a blocked state, once: when it begins or its
+ * message changes, never again while it stays the same; null when it clears.
+ */
+export function noticeFor(prev: string | null, cur: string | null): string | null {
+  return cur !== null && cur !== prev ? cur : null;
+}
+
+const isPlace =(v: unknown): v is Place => v === 'hosted' || v === 'browser' || v === 'self';
 
 type Store = Pick<Storage, 'getItem' | 'setItem'>;
 const local = (): Store | null => {

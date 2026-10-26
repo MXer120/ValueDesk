@@ -448,6 +448,23 @@ export function setRandomize(kind: UiKind, on: boolean): Partial<Draft> {
   return kind === 'twap' ? { sizeJitter: DEFAULT.sizeJitter, timeJitter: DEFAULT.timeJitter } : { sizeJitter: DEFAULT.sizeJitter };
 }
 
+/* POV's speed on the ticket, as Binance's Volume Participation offers it: a
+   preset in place of a bare %. Medium is the old default (10 %), so an
+   untouched form sends what it did; Low and High are the 5 % and 20 % desks
+   commonly use for a quiet and an aggressive participation. The exact % is in
+   the Advanced pop-up; one that matches no preset shows as Custom. */
+
+export type PovPreset = 'low' | 'medium' | 'high';
+export const POV_PRESETS: Readonly<Record<PovPreset, string>> = { low: '5', medium: '10', high: '20' };
+
+export function povPreset(rate: string): PovPreset | 'custom' {
+  const r = n(rate);
+  for (const k of Object.keys(POV_PRESETS) as PovPreset[]) if (r === Number(POV_PRESETS[k])) return k;
+  return 'custom';
+}
+
+export const setPovPreset = (p: PovPreset): Partial<Draft> => ({ rate: POV_PRESETS[p] });
+
 /* Scale's size curve on the ticket, as Binance and Bybit name it: flat,
    increasing (bigger toward To), decreasing, or a bell. Increasing and
    decreasing are a linear curve with a skew (the last order over the first);

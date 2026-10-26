@@ -763,7 +763,7 @@ export function OrderEntry({
   const algoBtnRef = useRef<HTMLButtonElement>(null);
   const algoPopRef = useRef<HTMLDivElement>(null);
   const algoRef = useRef<AlgoTicketHandle>(null);
-  const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true, walletFree: false, sided: true });
+  const [algoState, setAlgoState] = useState<AlgoTicketState>({ ready: false, label: 'Start', why: null, needsAmount: true, walletFree: false, sided: true, blocked: null });
   /**
    * The review's "don't show again" tick, held until the order is actually
    * confirmed. Persisting it on change instead would mean opening the review,
@@ -937,6 +937,9 @@ export function OrderEntry({
   const opening = isAlgo || (engine === 'perps' ? !reduceOnly : side === 'buy');
   const legalBtn = useLegalTradeGate(unlocked ? connectedAddress : null, opening);
   const btnGate = paperAlgo ? null : gate ?? legalBtn;
+  /* The algo's executor cannot start it (never a missing wallet: that is the
+     gate's Connect wallet): the ticket turns orange and the button refuses. */
+  const algoBlocked = isAlgo && !btnGate && algoState.blocked !== null;
   /* DCA (USD per order) and a stop on the whole position are not sized by Amount: the read-out has no order value for them. */
   const sizedByAmount = !isAlgo || algoState.needsAmount;
   const marketExec = type === 'market' || isAlgo || (type === 'stop' && stopExec === 'market');
@@ -1540,7 +1543,7 @@ export function OrderEntry({
 
   return (
     <section
-      className={`panel oe is-${side}`}
+      className={`panel oe is-${side}${algoBlocked ? ' oe--blocked' : ''}`}
       style={{
         ['--oe-wash' as string]: `${Math.round(7 + heat * 11)}%`,
         ['--oe-edge' as string]: `${Math.round(22 + heat * 28)}%`,
@@ -2250,14 +2253,16 @@ export function OrderEntry({
           <button
             type="button"
             className={`oe-side__btn is-${side}${btnGate?.busy ? ' is-wait' : ''}`}
-            onClick={btnGate ? btnGate.act : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
-            disabled={btnGate ? btnGate.busy : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
+            onClick={btnGate ? btnGate.act : algoBlocked ? undefined : isAlgo ? () => void algoRef.current?.start() : () => place(side)}
+            disabled={btnGate ? btnGate.busy : algoBlocked ? true : isAlgo ? !algoState.ready || (accountMismatch && !paperAlgo) : !canSend}
             aria-busy={btnGate?.busy || busy || undefined}
-            title={btnGate?.why ?? (isAlgo ? algoState.why ?? undefined : undefined)}
+            title={btnGate?.why ?? (algoBlocked ? `${algoState.blocked}. Open Advanced to run it elsewhere.` : isAlgo ? algoState.why ?? undefined : undefined)}
           >
             {btnGate
               ? (btnGate.approving ? <ApproveLabel /> : btnGate.label)
-              : busy
+              : algoBlocked
+                ? algoState.blocked
+                : busy
                 ? 'Working…'
                 : isAlgo
                   ? algoState.sided ? `${algoState.label} · ${side === 'buy' ? 'Long' : 'Short'}` : algoState.label

@@ -26,8 +26,8 @@
 .algo-ferr { margin: -4px 0 0; color: var(--neg); }
 .algo-bound .algo-ferr { grid-column: 1 / -1; margin-top: 0; }
 
-/* The executor isn't ready: one line, with the way to set it up. */
-.algo-whereline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--sp-2); }
+/* The executor can't start it: the ticket turns orange (OrderEntry.css .oe--blocked), the preview too. */
+.oe--blocked .algo { --algo-dir: var(--warn); }
 .algo-link {
   padding: 0; border: none; background: none; cursor: pointer;
   color: var(--text); font: inherit; text-decoration: underline; text-underline-offset: 2px;
@@ -35,14 +35,54 @@
 .algo-link:hover { color: var(--accent); }
 .algo-link:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 
-/* The Advanced pop-up: the ticket's own boxes, in the app's dialog (portalled,
-   so the ticket's hover timing is declared here too). */
+/* The Advanced pop-up, in the Settings window's language (SettingsMenu.css's
+   stg__* label, row, switch and choice cards; the boxes below are Settings'
+   soft 40px fields with the unit on the right). Portalled, so the ticket's
+   hover timing is declared here too. */
 .algo-sheet { --oe-ease: cubic-bezier(0.4, 0, 0.2, 1); --oe-hover: 0.15s; }
-.algo-sheet .algo-rules { padding-top: 0; }
-.algo-sheet .oe-switch { font-weight: 400; color: var(--muted); }
-/* Its first section, where the algo runs, set apart from the kind's settings. */
-.algo-runs { display: flex; flex-direction: column; gap: var(--sp-1); padding-bottom: var(--sp-2); margin-bottom: var(--sp-1); border-bottom: 1px solid var(--line-soft); }
-.algo-runs .oe-hint { margin: 0; }
+.algo-adv { display: flex; flex-direction: column; min-width: 0; }
+.algo-adv > .algo-group:first-child > .stg__label { margin-top: 4px; }
+.algo-group { min-width: 0; }
+.algo-group > .stg__label { margin: 26px 0 2px; }
+.algo-places { margin: 10px 0 4px; }
+.algo-places .stg__choice { min-width: 0; }
+.algo-whymsg { margin: 10px 0 0; background: color-mix(in srgb, var(--warn) 12%, transparent); color: var(--warn); }
+.algo-whymsg .algo-link { color: var(--warn); }
+.algo-group > .stg__card > .stg__row:first-child { border-top-color: transparent; padding-top: 12px; }
+/* A control and its error or note, kept together under the row's text. */
+.algo-sheet .stg__row > .algo-ctl.algo-ctl { justify-self: stretch; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; }
+.algo-sheet .stg__row { padding: 16px 0; }
+.algo-sf {
+  display: flex; align-items: center; gap: 8px; width: min(380px, 100%); height: 40px; padding: 0 14px; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); transition: box-shadow 140ms;
+}
+.algo-sf:focus-within { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28); }
+.algo-sf.is-bad { box-shadow: 0 0 0 1px var(--neg); }
+.algo-sf input {
+  flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; outline: none;
+  color: var(--text); font: inherit; font-size: 14px; font-family: var(--font-num); font-variant-numeric: tabular-nums;
+}
+.algo-sf input::placeholder { color: var(--dim); font-family: var(--font-text, inherit); }
+.algo-sf__unit { flex: none; color: var(--muted); font-size: 13px; white-space: nowrap; }
+select.algo-sf__pick { height: 30px; padding: 0 4px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; }
+select.algo-sf__pick:hover, select.algo-sf__pick:focus-visible { color: var(--text); outline: none; background: rgba(255, 255, 255, 0.06); }
+select.algo-sf__pick option { background: #1c1b1a; }
+.algo-sf + .algo-ferr, .algo-ctl > .algo-ferr { margin: 0; }
+/* One of a few: Settings' segmented pill. */
+.algo-sseg { display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.algo-sseg > button {
+  min-height: 0; height: 32px; padding: 0 14px; border: 0; border-radius: 8px; background: none;
+  color: var(--muted); font: inherit; font-size: 13.5px; font-weight: 500; white-space: nowrap; cursor: pointer; transition: background 140ms, color 140ms;
+}
+.algo-sseg > button:hover { color: var(--text); }
+.algo-sseg > button.is-on { background: rgba(255, 255, 255, 0.13); color: var(--text); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+.algo-sseg > button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.algo-sseg__note { color: var(--dim); font-size: 12px; line-height: 1.45; }
+.algo-sheet .algo-urgency { grid-template-columns: minmax(0, 1fr) auto; width: min(380px, 100%); }
+@media (max-width: 560px) {
+  .algo-places.stg__choices { grid-template-columns: minmax(0, 1fr); }
+  .algo-sseg > button { padding: 0 10px; }
+}
 
 /* The fields an order type needs, one a row, like the ticket's Price and Amount. */
 .algo-fields { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
@@ -73,7 +113,7 @@
 .algo-seg:not(:has(.algo-seg__k)) { justify-content: flex-start; }
 
 .algo-switch { gap: var(--sp-2); }
-.algo-rules > .oe-switch, .algo-exits > .oe-switch { font-weight: 400; color: var(--muted); }
+.algo-exits > .oe-switch { font-weight: 400; color: var(--muted); }
 
 .algo-urgency { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--sp-2); }
 .algo-urgency .algo-seg__k { font-size: var(--fs-base); }
@@ -134,7 +174,6 @@
   border-radius: 8px; background: color-mix(in srgb, var(--accent) 22%, transparent);
   color: var(--text); font-size: var(--fs-micro); font-family: var(--font-num);
 }
-.algo-rules { display: flex; flex-direction: column; gap: var(--sp-2); padding-top: var(--sp-1); }
 .algo-bound { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-2); }
 
 /* --- the preview ----------------------------------------------------------- */

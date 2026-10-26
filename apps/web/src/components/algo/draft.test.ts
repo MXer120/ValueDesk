@@ -219,3 +219,17 @@ test("a basket's style and duration are on the ticket, not advanced", () => {
   assert.deepEqual(advancedChanges('basket', { ...DEFAULT, basketStyle: 'twap', clips: '40' }, false), []);
   assert.deepEqual(advancedChanges('basket', { ...DEFAULT, clips: '40' }, false), ['clips']);
 });
+
+test('POV speed presets: Medium is the old default, so an untouched form sends what it did', async () => {
+  const { POV_PRESETS, povPreset, setPovPreset } = await import('./draft');
+  assert.deepEqual(POV_PRESETS, { low: '5', medium: '10', high: '20' });
+  assert.equal(povPreset(DEFAULT.rate), 'medium');
+  assert.equal(povPreset('5'), 'low');
+  assert.equal(povPreset('20.0'), 'high');
+  assert.equal(povPreset('12'), 'custom');
+  assert.equal(povPreset(''), 'custom');
+  const spec = draftToSpec('pov', { ...DEFAULT, ...setPovPreset('medium') }, shared, NOW);
+  assert.deepEqual(spec, draftToSpec('pov', { ...DEFAULT }, shared, NOW));
+  assert.equal(spec.rate, 0.1);
+  assert.equal(draftToSpec('pov', { ...DEFAULT, ...setPovPreset('high') }, shared, NOW).rate, 0.2);
+});

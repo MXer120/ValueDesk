@@ -22,7 +22,7 @@
  *
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
-import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { forwardRef, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
   checkAlgoSpec,
@@ -63,10 +63,13 @@ import {
   n,
   offersExits,
   opt,
+  POV_PRESETS,
+  povPreset,
   randomizeOn,
   resetAdvanced,
   saveDraft,
   scaleSize,
+  setPovPreset,
   setRandomize,
   setScaleSize,
   slicesOf,
@@ -74,12 +77,14 @@ import {
   type CondDraft,
   type Draft,
   type LegDraft,
+  type PovPreset,
   type ScaleSize,
   type TicketShared,
   type Unit,
 } from './draft';
-import { PLACES, readExecutor, writeExecutor, type Place } from './executor';
+import { blockedState, noticeFor, readExecutor, writeExecutor, type Place } from './executor';
 import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './menu';
+import '../SettingsMenu.css';
 import './algo.css';
 
 export { draftToSpec, offersExits, type TicketShared } from './draft';
@@ -128,6 +133,12 @@ const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
 
 /** Where it runs, in the few words the summary line gives it. */
 const PLACE_WORDS: Record<Place, string> = { hosted: 'on ValueDesk', browser: 'in this browser', self: 'on your copier' };
+
+const POV_OPTS: ReadonlyArray<readonly [PovPreset | 'custom', string, string]> = [
+  ['low', 'Low', `${POV_PRESETS.low}% of volume: slow and quiet`],
+  ['medium', 'Medium', `${POV_PRESETS.medium}% of volume`],
+  ['high', 'High', `${POV_PRESETS.high}% of volume: faster, more visible`],
+];
 
 const SCALE_SIZES: ReadonlyArray<readonly [ScaleSize, string, string]> = [
   ['flat', 'Flat', 'Every order the same size'],
@@ -239,6 +250,8 @@ export interface AlgoTicketState {
   walletFree: boolean;
   /** The ticket's Long / Short applies (not to a basket: each market has its own side). */
   sided: boolean;
+  /** The chosen executor cannot start it (unreachable, not set up, key missing): the button's short reason. Never for a missing wallet. */
+  blocked: string | null;
 }
 
 export interface AlgoTicketHandle {
@@ -355,7 +368,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const walletFree = place === 'browser' && d.paper;
   const where =
     place === 'browser'
-      ? !p.address && !d.paper ? { ready: false, why: 'Connect a wallet to run it live, or switch on Paper.' } : { ready: true, why: null }
+      ? !p.address && !d.paper ? { ready: false, why: 'Connect a wallet to run it live, or turn on Practice run in Advanced.' } : { ready: true, why: null }
       : executorReady(place, d.paper);
   const execFee = place === 'browser' ? null : copy[place].info?.builder?.ladder?.[0]?.fee ?? null;
   const feeFraction = place === 'browser' ? p.builderFee : (execFee ?? 0) / 100_000;
@@ -363,11 +376,35 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const label = `Start ${menuName(kind)}${d.paper ? ' (paper)' : ''}`;
   const why = !market ? 'Loading the market…' : amountMissing ? 'Enter an amount.' : allErrors[0] ?? where.why ?? null;
   const sided = kind !== 'basket';
-  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided }), [ready, label, why, needsAmount, walletFree, sided]); // eslint-disable-line react-hooks/exhaustive-deps
+  const block = blockedState(place, where, !!p.address);
+  const blocked = block?.short ?? null;
+  useEffect(() => p.onState({ ready, label, why, needsAmount, walletFree, sided, blocked }), [ready, label, why, needsAmount, walletFree, sided, blocked]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The executor's trouble is a notification, not a line on the panel: raised
+  // once when it begins or changes, after it has held a moment (the executor's
+  // status is still loading on the first renders).
+  const noticed = useRef<string | null>(null);
+  const blockMsg = block?.message ?? null;
+  useEffect(() => {
+    if (blockMsg === null) {
+      noticed.current = null;
+      return;
+    }
+    const t = window.setTimeout(() => {
+      const msg = noticeFor(noticed.current, blockMsg);
+      noticed.current = blockMsg;
+      if (msg) notify('warn', msg);
+    }, 1500);
+    return () => window.clearTimeout(t);
+  }, [blockMsg]);
 
   useImperativeHandle(ref, () => ({
     async start() {
       if (busy) return;
+      if (!where.ready) {
+        notify('warn', block?.message ?? where.why ?? 'It cannot start where it is set to run.');
+        return;
+      }
       const fresh = checkAlgoSpec(draftToSpec(kind, d, p, Date.now()));
       if (!fresh.spec || !plan || plan.errors.length) {
         notify('error', why ?? 'Check the algo settings.');
@@ -451,7 +488,18 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </>
         )}
 
-        {ek === 'pov' && <Field label="Share of volume" value={d.rate} onChange={(v) => set({ rate: v })} suffix="%" title="Of what everyone else trades, while they trade it" err={err('rate')} />}
+        {ek === 'pov' && (
+          <>
+            <Seg
+              label="Speed"
+              value={povPreset(d.rate)}
+              onChange={(v) => (v === 'custom' ? setAdvOpen(true) : set(setPovPreset(v)))}
+              options={[...POV_OPTS, ...(povPreset(d.rate) === 'custom' ? [['custom', 'Custom', `${d.rate || '…'}% of volume (set in Advanced)`] as const] : [])]}
+              title="How big a share of the market's volume it takes while it trades"
+            />
+            {err('rate') && <p className="oe-hint algo-ferr">{err('rate')}</p>}
+          </>
+        )}
 
         {ek === 'iceberg' && (
           <>
@@ -521,9 +569,6 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={base} />}
       </div>
 
-      {/* Where it runs is chosen in the Advanced pop-up; when it cannot start there, the why, with the way out. */}
-      {!where.ready && where.why && <WhereNote why={where.why} place={place} onChange={() => setAdvOpen(true)} />}
-
       <div className="algo-morehead">
         <button
           type="button"
@@ -541,7 +586,6 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           Advanced
           {changes.length > 0 && <span className="algo-badge" aria-label={`${changes.length} changed`}>{changes.length}</span>}
         </button>
-        <Switch label="Paper" checked={d.paper} onChange={(v) => set({ paper: v })} title="Run against the live market and send nothing" />
       </div>
 
       {/* The preview: the plan, one line saying it, one line of cost. */}
@@ -575,8 +619,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           </div>
         }
       >
-        <div className="algo-rules">
-          <RunsOn place={place} onChange={setPlace} where={where} />
+        <div className="algo-adv">
+          <RunsOn place={place} onChange={setPlace} where={where} paper={d.paper} setPaper={(v) => set({ paper: v })} />
           <Advanced kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} exitsHere={exitsHere} exits={plan?.exits ?? null} errors={fieldErrors} />
         </div>
       </Modal>
@@ -588,42 +632,6 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 
 export default AlgoTicket;
 
-/** The Set up link, where the reason points at Copy → Set up (an executor's steps). */
-function SetupLink({ why, place }: { why: string; place: Place }) {
-  return place !== 'browser' && why.includes('Set up') ? (
-    <button type="button" className="algo-link" onClick={() => openTab('copy')}>Set up</button>
-  ) : null;
-}
-
-/** On the ticket, only while the chosen executor cannot start it: why, and the way to fix or change it. */
-function WhereNote({ why, place, onChange }: { why: string; place: Place; onChange: () => void }) {
-  return (
-    <p className="oe-hint algo-warn algo-whereline">
-      {why}
-      <SetupLink why={why} place={place} />
-      <button type="button" className="algo-link" aria-haspopup="dialog" onClick={onChange}>Run elsewhere</button>
-    </p>
-  );
-}
-
-/** The Advanced pop-up's first section: where it runs, kept across reloads and kinds (executor.ts). */
-function RunsOn({ place, onChange, where }: { place: Place; onChange: (v: Place) => void; where: { ready: boolean; why: string | null } }) {
-  const hint = PLACES.find(([v]) => v === place)?.[2];
-  return (
-    <section className="algo-runs" aria-label="Runs on">
-      <Seg label="Runs on" value={place} onChange={onChange} options={PLACES} />
-      {!where.ready && where.why ? (
-        <p className="oe-hint algo-warn algo-whereline">
-          {where.why}
-          <SetupLink why={where.why} place={place} />
-        </p>
-      ) : (
-        hint && <p className="oe-hint">{hint}</p>
-      )}
-    </section>
-  );
-}
-
 /** A size as the step allows (a hint, so a rough cut is fine). */
 function roundQty(x: number, step?: string): string {
   const s = Number(step);
@@ -633,10 +641,180 @@ function roundQty(x: number, step?: string): string {
   return q.toFixed(dp);
 }
 
+/* ------------------------------------------- the Advanced pop-up ----- */
+
+/* In the Settings window's language (SettingsMenu.css, whose stg__* classes it
+   reuses): small uppercase section labels, each setting a row - its title, one
+   plain line under it, its control - with hairlines between, Settings' soft
+   40px boxes with the unit on the right, switches that say what they mean. */
+
+type Opt<T> = readonly [T, string, string?];
+
+function Group({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <section className="algo-group" aria-label={label}>
+      <div className="stg__label">{label}</div>
+      <div className="stg__card">{children}</div>
+    </section>
+  );
+}
+
+function Row({ title, hint, id, children }: { title: string; hint?: ReactNode; id?: string; children?: ReactNode }) {
+  return (
+    <div className="stg__row">
+      <div className="stg__rowtext">
+        {id ? (
+          <label htmlFor={id}>
+            <b>{title}</b>
+          </label>
+        ) : (
+          <b>{title}</b>
+        )}
+        {hint && <small>{hint}</small>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function AField({ title, hint, value, onChange, unit, placeholder, int = false, signed = false, err }: {
+  title: string; hint: ReactNode; value: string; onChange: (v: string) => void; unit?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; err?: string;
+}) {
+  const id = useId();
+  return (
+    <Row title={title} hint={hint} id={id}>
+      <div className="algo-ctl">
+        <div className={`algo-sf${err ? ' is-bad' : ''}`}>
+          <input
+            id={id}
+            autoComplete="off"
+            inputMode={int ? 'numeric' : 'decimal'}
+            value={value}
+            placeholder={placeholder ?? ''}
+            aria-invalid={err ? true : undefined}
+            aria-describedby={err ? `${id}-err` : undefined}
+            onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed }))}
+          />
+          {unit === undefined || unit === '' ? null : typeof unit === 'string' ? <span className="algo-sf__unit">{unit}</span> : unit}
+        </div>
+        {err && <p id={`${id}-err`} className="oe-hint algo-ferr">{err}</p>}
+      </div>
+    </Row>
+  );
+}
+
+/** A unit picked inside a pop-up field's box. */
+function APick<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<readonly [T, string]>; onChange: (v: T) => void }) {
+  return (
+    <select className="algo-sf__unit algo-sf__pick" aria-label={`${label} unit`} value={value} onChange={(e) => onChange(e.target.value as T)}>
+      {options.map(([v, t]) => (
+        <option key={v} value={v}>{t}</option>
+      ))}
+    </select>
+  );
+}
+
+const ATime = ({ label, value, units, onChange }: { label: string; value: Unit; units: readonly Unit[]; onChange: (u: Unit) => void }) => (
+  <APick label={label} value={value} options={units.map((u) => [u, UNIT_NAME[u]] as const)} onChange={onChange} />
+);
+
+/** One of a few, as a segmented control; the chosen option's line under it. */
+function SSeg<T extends string | number>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<Opt<T>>; onChange: (v: T) => void }) {
+  const note = options.find(([v]) => v === value)?.[2];
+  return (
+    <div className="algo-ctl">
+      <div className="algo-sseg" role="radiogroup" aria-label={label}>
+        {options.map(([v, text, hint]) => (
+          <button key={String(v)} type="button" role="radio" aria-checked={value === v} title={hint} className={value === v ? 'is-on' : undefined} onClick={() => onChange(v)}>
+            {text}
+          </button>
+        ))}
+      </div>
+      {note && <small className="algo-sseg__note">{note}</small>}
+    </div>
+  );
+}
+
+function ASeg<T extends string | number>({ title, hint, value, options, onChange }: { title: string; hint: ReactNode; value: T; options: ReadonlyArray<Opt<T>>; onChange: (v: T) => void }) {
+  return (
+    <Row title={title} hint={hint}>
+      <SSeg label={title} value={value} options={options} onChange={onChange} />
+    </Row>
+  );
+}
+
+/** A switch that says what it means in either position. */
+function ASwitch({ title, hint, checked, onChange, on = 'On', off = 'Off' }: { title: string; hint: ReactNode; checked: boolean; onChange: (v: boolean) => void; on?: string; off?: string }) {
+  return (
+    <Row title={title} hint={hint}>
+      <button type="button" role="switch" aria-checked={checked} aria-label={title} className={`stg__switch${checked ? ' is-on' : ''}`} onClick={() => onChange(!checked)}>
+        <span className="stg__track">
+          <i />
+        </span>
+        {checked ? on : off}
+      </button>
+    </Row>
+  );
+}
+
+/** The Set up link, where the reason points at Copy → Set up (an executor's steps). */
+function SetupLink({ why, place }: { why: string; place: Place }) {
+  return place !== 'browser' && why.includes('Set up') ? (
+    <button type="button" className="algo-link" onClick={() => openTab('copy')}>Set up</button>
+  ) : null;
+}
+
+const PLACE_CARDS: ReadonlyArray<readonly [Place, string, string]> = [
+  ['hosted', 'ValueDesk', 'Runs 24/7 on our executor, even with your browser closed.'],
+  ['browser', 'This browser', 'Signed here with your trading key. Keep a ValueDesk tab open.'],
+  ['self', 'Self-hosted', 'Runs on the copier you host yourself.'],
+];
+
+/** The pop-up's first section: where it runs (kept across reloads and kinds, executor.ts), then the practice run. */
+function RunsOn({ place, onChange, where, paper, setPaper }: {
+  place: Place; onChange: (v: Place) => void; where: { ready: boolean; why: string | null }; paper: boolean; setPaper: (v: boolean) => void;
+}) {
+  return (
+    <section className="algo-group" aria-label="Runs on">
+      <div className="stg__label">Runs on</div>
+      <div className="stg__choices is-three algo-places" role="radiogroup" aria-label="Runs on">
+        {PLACE_CARDS.map(([v, t, line]) => (
+          <button key={v} type="button" role="radio" aria-checked={place === v} className={`stg__choice${place === v ? ' is-on' : ''}`} onClick={() => onChange(v)}>
+            <b>{t}</b>
+            <small>{line}</small>
+          </button>
+        ))}
+      </div>
+      {!where.ready && where.why && (
+        <p className="stg__msg algo-whymsg" role="status">
+          {where.why} <SetupLink why={where.why} place={place} />
+        </p>
+      )}
+      <div className="stg__card">
+        <ASwitch
+          title="Practice run · no real orders"
+          hint="Works the plan against the live market and sends nothing, so you can watch what it would do."
+          checked={paper}
+          onChange={setPaper}
+          on="On · nothing is sent"
+          off="Off · real orders"
+        />
+      </div>
+    </section>
+  );
+}
+
+const POST_ONLY_HINT = 'Never takes: an order that would cross the book is refused instead of filling.';
+
+function PostOnly({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
+  return <ASwitch title="Post only" hint={POST_ONLY_HINT} checked={d.postOnly} onChange={(v) => set({ postOnly: v })} on="On · maker only" off="Off · may take" />;
+}
+
 /**
- * Everything in the kind's Advanced pop-up: what the kind can be tuned by,
- * its exits, then the shared rules (a price limit, when it starts, price
- * bounds, the spread guard). Every value is the default until changed.
+ * Everything in the kind's Advanced pop-up, in sections: what the kind is tuned
+ * by, how it trades, its exits, then when it starts and what limits it (a price
+ * limit, the start, price bounds, the spread guard). Every value is the default
+ * until changed.
  */
 function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, errors }: {
   kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; roundTick: (x: number) => string;
@@ -644,199 +822,336 @@ function Advanced({ kind, d, set, side, base, mid, roundTick, exitsHere, exits, 
 }) {
   const ek = engineKind(kind);
   const err = (...keys: string[]) => errFor(errors, ...keys);
-  const slicesField = (
-    <Field
-      label="Slices"
+  const auto = autoSlices(d.dur, d.durUnit);
+  const slicesRow = (
+    <AField
+      title="Slices"
+      hint={`How many child orders it sends. Empty: one a minute over the duration (${auto}).`}
       value={d.slicesAuto ? '' : d.slices}
-      placeholder={`auto · ${autoSlices(d.dur, d.durUnit)}`}
+      placeholder={`auto · ${auto}`}
       int
       onChange={(v) => set(v.trim() === '' ? { slicesAuto: true } : { slices: v, slicesAuto: false })}
-      title="How many child orders. Empty: one a minute over the duration"
       err={err('slices')}
     />
   );
+  const slip = (hint: string) => <AField title="Max slippage" hint={hint} value={d.slip} onChange={(v) => set({ slip: v })} unit="bp" err={err('slippageBps')} />;
+  const sizeVaries = (key: 'sizeJitter' | 'scaleJitter' | 'displayJitter', hint: string) => (
+    <AField title="Size varies" hint={hint} value={d[key]} onChange={(v) => set({ [key]: v } as Partial<Draft>)} unit="± %" err={err('sizeJitter', 'displayJitter')} />
+  );
+  const fromAvg = side === 'buy' ? 'below' : 'above';
   return (
     <>
       {(ek === 'twap' || ek === 'vwap') && (
         <>
-          {slicesField}
-          {ek === 'vwap' && (
-            <>
-              <Seg label="History" value={d.lookback} onChange={(v) => set({ lookback: v })} options={[[7, '7 d'], [14, '14 d'], [28, '28 d'], [41, '6 w']]} title="Days of volume the profile is the median of" />
-              <Switch label="Adaptive" checked={d.adaptive} onChange={(v) => set({ adaptive: v })} title="Faster while the market trades more than usual, slower while it trades less" />
-            </>
-          )}
-          {kind === 'twap' && (
-            <>
-              <div className="algo-urgency" title="Front-loaded puts more early; back-loaded more late">
-                <span className="algo-seg__k">Urgency</span>
-                <input type="range" min={-1} max={1} step={0.1} value={d.urgency} aria-label="Urgency" onChange={(e) => set({ urgency: Number(e.target.value) })} />
-                <span className="algo-urgency__v">{d.urgency === 0 ? 'Even' : d.urgency > 0 ? `Front ${Math.round(d.urgency * 100)}` : `Back ${Math.round(-d.urgency * 100)}`}</span>
-              </div>
-              <Switch label="Close position" checked={d.twapClose} onChange={(v) => set({ twapClose: v })} title="Works a share of your position on this market instead of an amount, reduce-only" />
-            </>
-          )}
-          {ek === 'twap' && (
-            <>
-              <Field label="Smallest slice" value={d.minSlice} placeholder="any" onChange={(v) => set({ minSlice: v })} suffix={base} title="No slice below this: what is due waits until it reaches it (except at the end)" err={err('minSliceQty')} />
-              <Field label="Largest slice" value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} suffix={base} err={err('maxSliceQty')} />
-            </>
-          )}
-          <ExecFields d={d} set={set} chaseOnly={kind === 'chasetwap'} />
+          <Group label="Slicing">
+            {slicesRow}
+            {ek === 'vwap' && (
+              <>
+                <ASeg title="History" hint="Days of volume the hour-by-hour profile is the median of." value={d.lookback} onChange={(v) => set({ lookback: v })} options={[[7, '7 days'], [14, '14 days'], [28, '28 days'], [41, '6 weeks']]} />
+                <ASwitch title="Adaptive" hint="Goes faster while the market trades more than usual, slower while it trades less." checked={d.adaptive} onChange={(v) => set({ adaptive: v })} on="On · follows today's volume" off="Off · the profile only" />
+              </>
+            )}
+            {kind === 'twap' && (
+              <>
+                <Row title="Urgency" hint="Front-loaded puts more of the amount early; back-loaded puts more late.">
+                  <div className="algo-ctl">
+                    <div className="algo-urgency">
+                      <input type="range" min={-1} max={1} step={0.1} value={d.urgency} aria-label="Urgency" onChange={(e) => set({ urgency: Number(e.target.value) })} />
+                      <span className="algo-urgency__v">{d.urgency === 0 ? 'Even' : d.urgency > 0 ? `Front ${Math.round(d.urgency * 100)}` : `Back ${Math.round(-d.urgency * 100)}`}</span>
+                    </div>
+                  </div>
+                </Row>
+                <ASwitch title="Close position" hint="Works a share of your position on this market instead of an amount, reduce-only." checked={d.twapClose} onChange={(v) => set({ twapClose: v })} on="On · closes a share" off="Off · trades the amount" />
+              </>
+            )}
+            {ek === 'twap' && (
+              <>
+                <AField title="Smallest slice" hint="No slice below this: what is due waits until it reaches it (except at the end). Empty: any." value={d.minSlice} placeholder="any" onChange={(v) => set({ minSlice: v })} unit={base} err={err('minSliceQty')} />
+                <AField title="Largest slice" hint="No slice above this. Empty: any." value={d.maxSlice} placeholder="any" onChange={(v) => set({ maxSlice: v })} unit={base} err={err('maxSliceQty')} />
+              </>
+            )}
+          </Group>
+          <ExecGroup d={d} set={set} chaseOnly={kind === 'chasetwap'} jitter={ek === 'vwap' ? 'size' : 'both'} cap err={err} />
         </>
       )}
 
-      {ek === 'bracket' && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="A market entry takes at most this far past the touch" err={err('slippageBps')} />}
+      {ek === 'bracket' && <Group label="Entry">{slip('A market entry takes at most this far past the best price.')}</Group>}
 
-      {ek === 'basket' && <BasketMore d={d} set={set} slices={slicesField} />}
+      {ek === 'basket' && (
+        <Group label="Execution">
+          {d.basketStyle === 'twap' ? (
+            slicesRow
+          ) : (
+            <>
+              <AField title="Clips" hint="How many small orders each market is split into." value={d.clips} int onChange={(v) => set({ clips: v })} unit="per market" err={err('clips')} />
+              <AField title="Between waves" hint="Pause between waves, so the book can refill." value={d.waveSec} onChange={(v) => set({ waveSec: v })} unit="s" err={err('waveMs')} />
+            </>
+          )}
+          {slip('Worst price each order accepts, past the best price.')}
+        </Group>
+      )}
 
       {ek === 'pov' && (
         <>
-          <Field label="Largest child" value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} suffix={base} err={err('maxChildQty')} />
-          <Field label="Stop after" value={d.endIn} placeholder="when filled" onChange={(v) => set({ endIn: v })} suffix={<UnitSelect label="Stop after" value={d.endUnit} units={['m', 'h', 'd']} onChange={(u) => set({ endUnit: u })} />} />
-          <ExecFields d={d} set={set} />
+          <Group label="Speed">
+            <AField
+              title="Share of volume"
+              hint={`Of what everyone else trades, while they trade it. Low is ${POV_PRESETS.low}%, Medium ${POV_PRESETS.medium}%, High ${POV_PRESETS.high}%.`}
+              value={d.rate}
+              onChange={(v) => set({ rate: v })}
+              unit="%"
+              err={err('rate')}
+            />
+            <AField title="Largest child" hint="No single order bigger than this. Empty: any size." value={d.maxChild} placeholder="any" onChange={(v) => set({ maxChild: v })} unit={base} err={err('maxChildQty')} />
+            <AField title="Stop after" hint="Ends the algo after this long, filled or not. Empty: runs until filled." value={d.endIn} placeholder="when filled" onChange={(v) => set({ endIn: v })} unit={<ATime label="Stop after" value={d.endUnit} units={['m', 'h', 'd']} onChange={(u) => set({ endUnit: u })} />} err={err('endAt')} />
+          </Group>
+          <ExecGroup d={d} set={set} jitter="none" cap={false} err={err} />
         </>
       )}
 
       {ek === 'iceberg' && (
         <>
-          <Field label="Size varies" value={d.displayJitter} onChange={(v) => set({ displayJitter: v })} suffix="± %" title="Each visible clip's size moves up to this much either way" />
-          {d.icePeg && <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="Ticks behind the best price" />}
-          <Field label="Refill after" value={d.refill} onChange={(v) => set({ refill: v })} suffix="s" title="Wait between clips" err={err('refillMs')} />
-          <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
+          <Group label="Clips">
+            {sizeVaries('displayJitter', "Each visible clip's size moves up to this much either way.")}
+            {d.icePeg && <AField title="Offset" hint="Ticks behind the best price; a negative number steps inside the spread." value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} unit="ticks" err={err('pegOffsetTicks')} />}
+            <AField title="Refill after" hint="Wait between one clip filling and the next one appearing." value={d.refill} onChange={(v) => set({ refill: v })} unit="s" err={err('refillMs')} />
+          </Group>
+          <Group label="Execution">
+            <PostOnly d={d} set={set} />
+          </Group>
         </>
       )}
 
       {ek === 'chase' && (
         <>
-          <Seg label="Rest" value={d.offsetMode} onChange={(v) => set({ offsetMode: v })} options={[['ticks', 'At the touch'], ['bps', 'Behind', 'Rest a set distance behind the best price']]} />
-          {d.offsetMode === 'ticks' ? (
-            <Field label="Offset" value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} suffix="ticks" title="0 joins the best price; -1 steps inside the spread" err={err('offsetTicks')} />
-          ) : (
-            <Field label="Behind" value={d.offsetBps} onChange={(v) => set({ offsetBps: v })} suffix="bp" err={err('offsetBps')} />
-          )}
-          <Field label="Re-price after" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" title="Move once the best price is this far away" err={err('chaseTicks')} />
-          <Field label="Give up after" value={d.timeout} placeholder="never" onChange={(v) => set({ timeout: v })} suffix={<UnitSelect label="Give up after" value={d.timeoutUnit} units={['s', 'm', 'h']} onChange={(u) => set({ timeoutUnit: u })} />} err={err('timeoutMs')} />
-          {opt(d.timeout) && <Seg label="Then" value={d.onEnd} onChange={(v) => set({ onEnd: v })} options={[['take', 'Take'], ['cancel', 'Cancel'], ['rest', 'Leave']]} />}
+          <Group label="Resting">
+            <ASeg
+              title="Rest"
+              hint="Where the order sits while it follows the price."
+              value={d.offsetMode}
+              onChange={(v) => set({ offsetMode: v })}
+              options={[['ticks', 'At the best price', 'Joins the best price, or a few ticks from it.'], ['bps', 'Behind it', 'Sits a set distance, in bp, behind the best price.']]}
+            />
+            {d.offsetMode === 'ticks' ? (
+              <AField title="Offset" hint="0 joins the best price; -1 steps one tick inside the spread." value={d.offsetTicks} int signed onChange={(v) => set({ offsetTicks: v })} unit="ticks" err={err('offsetTicks')} />
+            ) : (
+              <AField title="Behind" hint="How far behind the best price it rests." value={d.offsetBps} onChange={(v) => set({ offsetBps: v })} unit="bp" err={err('offsetBps')} />
+            )}
+            <AField title="Re-price after" hint="It moves once the best price is this far away." value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} unit="ticks" err={err('chaseTicks')} />
+          </Group>
+          <Group label="Giving up">
+            <AField title="Give up after" hint="Stops chasing after this long. Empty: never." value={d.timeout} placeholder="never" onChange={(v) => set({ timeout: v })} unit={<ATime label="Give up after" value={d.timeoutUnit} units={['s', 'm', 'h']} onChange={(u) => set({ timeoutUnit: u })} />} err={err('timeoutMs')} />
+            {opt(d.timeout) && (
+              <ASeg
+                title="Then"
+                hint="What happens to what is left when it gives up."
+                value={d.onEnd}
+                onChange={(v) => set({ onEnd: v })}
+                options={[['take', 'Take the rest', 'Takes what is left at once.'], ['cancel', 'Cancel', 'Cancels what is left.'], ['rest', 'Leave it', 'Leaves the order resting where it is.']]}
+              />
+            )}
+          </Group>
         </>
       )}
 
       {ek === 'scale' && (
         <>
-          {mid && (
-            <div className="algo-seg" aria-label="Range from the price">
-              <span className="algo-seg__k">Range</span>
-              <div className="algo-seg__opts">
-                {[0.5, 1, 2, 5, 10].map((x) => (
-                  <button
-                    key={x}
-                    type="button"
-                    className="oe-mini"
-                    onClick={() => {
-                      const s = side === 'buy' ? -1 : 1;
-                      set({ from: roundTick(mid * (1 + s * 0.001)), to: roundTick(mid * (1 + (s * x) / 100)) });
-                    }}
-                  >
-                    {x}%
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-          {(scaleSize(d) === 'increasing' || scaleSize(d) === 'decreasing') && (
-            <>
-              <Seg label="Size curve" value={d.distribution === 'exponential' ? 'exponential' : 'linear'} onChange={(v) => set({ distribution: v })} options={[['linear', 'Linear', 'Each order the same step bigger'], ['exponential', 'Exp', 'Each order the same factor bigger']]} />
-              <Field label="Skew" value={d.skew} onChange={(v) => set({ skew: v })} suffix="×" title="The last order's size over the first's (above 1: increasing, below: decreasing)" err={err('skew')} />
-            </>
-          )}
-          <Seg label="Spacing" value={d.spacing} onChange={(v) => set({ spacing: v })} options={[['linear', 'Even'], ['geometric', '%', 'Even in percent'], ['front', 'Front', 'Denser near the first price'], ['back', 'Back', 'Denser near the last price']]} />
-          <Field label="Size varies" value={d.scaleJitter} onChange={(v) => set({ scaleJitter: v })} suffix="± %" err={err('sizeJitter')} />
-          <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />
+          <Group label="Ladder">
+            {mid && (
+              <Row title="Range" hint="Sets From and To this far from the current price, in one tap.">
+                <div className="algo-ctl">
+                  <div className="algo-sseg" aria-label="Range from the price">
+                    {[0.5, 1, 2, 5, 10].map((x) => (
+                      <button
+                        key={x}
+                        type="button"
+                        onClick={() => {
+                          const s = side === 'buy' ? -1 : 1;
+                          set({ from: roundTick(mid * (1 + s * 0.001)), to: roundTick(mid * (1 + (s * x) / 100)) });
+                        }}
+                      >
+                        {x}%
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </Row>
+            )}
+            {(scaleSize(d) === 'increasing' || scaleSize(d) === 'decreasing') && (
+              <>
+                <ASeg
+                  title="Size curve"
+                  hint="How the order sizes grow along the ladder."
+                  value={d.distribution === 'exponential' ? 'exponential' : 'linear'}
+                  onChange={(v) => set({ distribution: v })}
+                  options={[['linear', 'Linear', 'Each order the same step bigger.'], ['exponential', 'Exponential', 'Each order the same factor bigger.']]}
+                />
+                <AField title="Skew" hint="The last order's size over the first's: above 1 increasing, below 1 decreasing." value={d.skew} onChange={(v) => set({ skew: v })} unit="×" err={err('skew')} />
+              </>
+            )}
+            <ASeg
+              title="Spacing"
+              hint="How the prices are spread between From and To."
+              value={d.spacing}
+              onChange={(v) => set({ spacing: v })}
+              options={[['linear', 'Even', 'The same price gap between orders.'], ['geometric', 'Even in %', 'The same percentage gap between orders.'], ['front', 'Front', 'Denser near From.'], ['back', 'Back', 'Denser near To.']]}
+            />
+            {sizeVaries('scaleJitter', "Randomises each order's size; the total stays the same.")}
+          </Group>
+          <Group label="Execution">
+            <PostOnly d={d} set={set} />
+          </Group>
         </>
       )}
 
       {ek === 'dca' && (
         <>
-          <Field label="Budget" value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} suffix="USD" err={err('maxTotalUsd')} />
-          <Field label="Dip" value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} suffix="%" title={`Buy more when the price is this far ${side === 'buy' ? 'below' : 'above'} your average so far`} err={err('dipPct')} />
-          {opt(d.dip) && <Field label="Then buy" value={d.dipMult} onChange={(v) => set({ dipMult: v })} suffix="× more" err={err('dipMultiplier')} />}
-          <Seg label="Execution" value={d.exec === 'hybrid' ? 'hybrid' : d.exec} onChange={(v) => set({ exec: v })} options={[['taker', 'Taker'], ['hybrid', 'Hybrid', 'Rest, then take'], ['maker', 'Maker']]} />
+          <Group label={side === 'buy' ? 'Buys' : 'Sells'}>
+            <AField title="Budget" hint="Stops once this much has been spent in all. Empty: no cap." value={d.budget} placeholder="no cap" onChange={(v) => set({ budget: v })} unit="USD" err={err('maxTotalUsd')} />
+            <AField title="Dip" hint={`Trades more when the price is this far ${fromAvg} your average so far. Empty: off.`} value={d.dip} placeholder="off" onChange={(v) => set({ dip: v })} unit="%" err={err('dipPct')} />
+            {opt(d.dip) && <AField title="On a dip" hint="How many times the usual size it trades on a dip." value={d.dipMult} onChange={(v) => set({ dipMult: v })} unit="× more" err={err('dipMultiplier')} />}
+          </Group>
+          <Group label="Execution">
+            <ASeg
+              title="Each order"
+              hint="How each order meets the book."
+              value={d.exec === 'hybrid' ? 'hybrid' : d.exec}
+              onChange={(v) => set({ exec: v })}
+              options={[['taker', 'Taker', 'Takes at once.'], ['hybrid', 'Hybrid', 'Rests first, then takes.'], ['maker', 'Maker', 'Post-only: waits to be filled.']]}
+            />
+          </Group>
         </>
       )}
 
       {ek === 'swarm' && (
         <>
-          <Seg label="Per wave" value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} title="Clips sent at once" />
-          <Field label="Between waves" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" title="Pause between waves, so the book can refill" err={err('waveMs')} />
-          <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" err={err('slippageBps')} />
-          <Field label="Retries" value={d.retries} int onChange={(v) => set({ retries: v })} title="What did not fill goes again this many times" err={err('retries')} />
-          <Field label="Size varies" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="± %" err={err('sizeJitter')} />
+          <Group label="Waves">
+            <ASeg title="Per wave" hint="Clips sent at the same time." value={d.inFlight} onChange={(v) => set({ inFlight: v })} options={[[1, '1'], [2, '2'], [5, '5'], [10, '10'], [20, '20']]} />
+            <AField title="Between waves" hint="Pause between waves, so the book can refill." value={d.waveSec} onChange={(v) => set({ waveSec: v })} unit="s" err={err('waveMs')} />
+            <AField title="Retries" hint="What did not fill is sent again this many times." value={d.retries} int onChange={(v) => set({ retries: v })} err={err('retries')} />
+            {sizeVaries('sizeJitter', 'Clips of uneven size, so they read less like one order.')}
+          </Group>
+          <Group label="Execution">{slip('Worst price each clip accepts, past the best price.')}</Group>
         </>
       )}
 
       {ek === 'trailing' && (
-        <>
-          <Seg label="Size" value={d.trailWhole ? 'pos' : 'amt'} onChange={(v) => set({ trailWhole: v === 'pos' })} options={[['pos', 'Position'], ['amt', 'Amount']]} />
-          <Seg label="Price" value={d.source} onChange={(v) => set({ source: v })} options={[['mark', 'Mark'], ['last', 'Last']]} />
-          <Seg label="Exit" value={d.exit} onChange={(v) => set({ exit: v })} options={[['market', 'Market'], ['chase', 'Chase', 'Rest at the best price first, then take']]} />
-          {d.exit === 'chase' ? <Field label="Chase for" value={d.chaseSec} onChange={(v) => set({ chaseSec: v })} suffix="s" err={err('chaseMs')} /> : <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" err={err('slippageBps')} />}
-        </>
+        <Group label="Stop">
+          <ASeg title="Size" hint="How much it closes when it is hit." value={d.trailWhole ? 'pos' : 'amt'} onChange={(v) => set({ trailWhole: v === 'pos' })} options={[['pos', 'Whole position', 'Everything you hold on this market.'], ['amt', 'The amount', "Only the ticket's Amount."]]} />
+          <ASeg title="Price" hint="The price it trails." value={d.source} onChange={(v) => set({ source: v })} options={[['mark', 'Mark', 'The mark price: harder to set off with a wick.'], ['last', 'Last', 'The last trade.']]} />
+          <ASeg title="Exit" hint="How it closes once hit." value={d.exit} onChange={(v) => set({ exit: v })} options={[['market', 'Market', 'Takes at once.'], ['chase', 'Chase', 'Rests at the best price first, then takes.']]} />
+          {d.exit === 'chase' ? (
+            <AField title="Chase for" hint="How long it rests before it takes what is left." value={d.chaseSec} onChange={(v) => set({ chaseSec: v })} unit="s" err={err('chaseMs')} />
+          ) : (
+            slip('Worst price the exit accepts, past the best price.')
+          )}
+        </Group>
       )}
 
-      {ek === 'conditional' && <ConditionalMore d={d} set={set} />}
+      {ek === 'conditional' && <ConditionalMore d={d} set={set} slip={slip} />}
 
-      {exitsHere && kind !== 'bracket' && <ExitFields d={d} set={set} side={side} always={false} levels={exits} err={err('exits')} />}
+      {exitsHere && kind !== 'bracket' && <AExits d={d} set={set} side={side} levels={exits} err={err('exits')} />}
 
-      {hasLimit(kind) && (
-        <Field label="Limit" value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} suffix="USD" title={`Never ${side === 'buy' ? 'buy above' : 'sell below'} this price`} err={err('limitPrice')} />
-      )}
-      <Seg label="Start" value={d.startMode} onChange={(v) => set({ startMode: v })} options={[['now', 'Now'], ['delay', 'Later'], ['price', 'At a price']]} />
-      {d.startMode === 'delay' && <Field label="Start in" value={d.startDelay} onChange={(v) => set({ startDelay: v })} suffix="min" err={err('startAt')} />}
-      {d.startMode === 'price' && <Field label="When mark" value={d.startPrice} onChange={(v) => set({ startPrice: v })} suffix="USD" title="Starts once the mark reaches this, from wherever it is now" err={err('triggerPrice')} />}
-      {hasBounds(kind) && (
-        <>
-          <div className="algo-bound">
-            <Field label="Above" value={d.upper} placeholder="none" onChange={(v) => set({ upper: v })} suffix="USD" err={err('upper')} />
-            <Seg value={d.upperThen} onChange={(v) => set({ upperThen: v })} options={BOUND_OPTS} />
-          </div>
-          <div className="algo-bound">
-            <Field label="Below" value={d.lower} placeholder="none" onChange={(v) => set({ lower: v })} suffix="USD" err={err('lower')} />
-            <Seg value={d.lowerThen} onChange={(v) => set({ lowerThen: v })} options={BOUND_OPTS} />
-          </div>
-          <Field label="Max spread" value={d.maxSpread} placeholder="any" onChange={(v) => set({ maxSpread: v })} suffix="bp" title="Take nothing while the spread is wider" err={err('maxSpreadBps')} />
-        </>
-      )}
+      <Group label="Start and limits">
+        {hasLimit(kind) && (
+          <AField title="Limit" hint={`Never ${side === 'buy' ? 'buys above' : 'sells below'} this price. Empty: none.`} value={d.limitPrice} placeholder="none" onChange={(v) => set({ limitPrice: v })} unit="USD" err={err('limitPrice')} />
+        )}
+        <ASeg
+          title="Start"
+          hint="When it begins."
+          value={d.startMode}
+          onChange={(v) => set({ startMode: v })}
+          options={[['now', 'Now', 'As soon as you start it.'], ['delay', 'Later', 'After a delay you set.'], ['price', 'At a price', 'Once the mark reaches a price.']]}
+        />
+        {d.startMode === 'delay' && <AField title="Start in" hint="How long after you start it." value={d.startDelay} onChange={(v) => set({ startDelay: v })} unit="min" err={err('startAt')} />}
+        {d.startMode === 'price' && <AField title="When the mark reaches" hint="Starts once the mark reaches this, from wherever it is now." value={d.startPrice} onChange={(v) => set({ startPrice: v })} unit="USD" err={err('triggerPrice')} />}
+        {hasBounds(kind) && (
+          <>
+            <ABound title="Above" hint="What it does while the price is above this. Empty: nothing." value={d.upper} onValue={(v) => set({ upper: v })} then={d.upperThen} onThen={(v) => set({ upperThen: v })} err={err('upper')} />
+            <ABound title="Below" hint="What it does while the price is below this. Empty: nothing." value={d.lower} onValue={(v) => set({ lower: v })} then={d.lowerThen} onThen={(v) => set({ lowerThen: v })} err={err('lower')} />
+            <AField title="Max spread" hint="Takes nothing while the spread is wider than this. Empty: any." value={d.maxSpread} placeholder="any" onChange={(v) => set({ maxSpread: v })} unit="bp" err={err('maxSpreadBps')} />
+          </>
+        )}
+      </Group>
     </>
   );
 }
 
-const BOUND_OPTS: ReadonlyArray<readonly [BoundAction, string, string?]> = [
-  ['hold', 'Hold', 'Pause while the price is past it'],
-  ['stop', 'Stop', 'End the algo'],
-  ['rush', 'Rush', 'Take everything that is left now'],
+const BOUND_OPTS: ReadonlyArray<Opt<BoundAction>> = [
+  ['hold', 'Hold', 'Pauses while the price is past it.'],
+  ['stop', 'Stop', 'Ends the algo.'],
+  ['rush', 'Rush', 'Takes everything that is left at once.'],
 ];
+
+/** A price bound: the price, then what it does past it. */
+function ABound({ title, hint, value, onValue, then, onThen, err }: {
+  title: string; hint: string; value: string; onValue: (v: string) => void; then: BoundAction; onThen: (v: BoundAction) => void; err?: string;
+}) {
+  const id = useId();
+  return (
+    <Row title={title} hint={hint} id={id}>
+      <div className="algo-ctl">
+        <div className={`algo-sf${err ? ' is-bad' : ''}`}>
+          <input id={id} autoComplete="off" inputMode="decimal" value={value} placeholder="none" aria-invalid={err ? true : undefined} onChange={(e) => onValue(decimalInput(e.target.value, {}))} />
+          <span className="algo-sf__unit">USD</span>
+        </div>
+        {err && <p className="oe-hint algo-ferr">{err}</p>}
+        {opt(value) !== null && <SSeg label={`${title}: then`} value={then} options={BOUND_OPTS} onChange={onThen} />}
+      </div>
+    </Row>
+  );
+}
 
 function hasJitter(kind: UiKind, d: Draft): boolean {
   const ek = engineKind(kind);
   return ((ek === 'twap' || ek === 'vwap' || ek === 'swarm') && (frac(d.sizeJitter) > 0 || frac(d.timeJitter) > 0)) || (ek === 'scale' && frac(d.scaleJitter) > 0);
 }
 
-function ExecFields({ d, set, chaseOnly = false }: { d: Draft; set: (p: Partial<Draft>) => void; chaseOnly?: boolean }) {
+/** How the slices meet the book (TWAP, VWAP, POV): only what the kind's spec uses. */
+function ExecGroup({ d, set, chaseOnly = false, jitter, cap, err }: {
+  d: Draft; set: (p: Partial<Draft>) => void; chaseOnly?: boolean; jitter: 'both' | 'size' | 'none'; cap: boolean; err: (...keys: string[]) => string | undefined;
+}) {
   const style = chaseOnly && d.exec === 'taker' ? 'hybrid' : d.exec;
-  const opts: ReadonlyArray<readonly ['taker' | 'maker' | 'hybrid', string, string?]> = chaseOnly
-    ? [['hybrid', 'Rest, then take', 'Each slice rests at the best price; what is behind after the resting share is taken'], ['maker', 'Maker only', 'Never takes: what does not fill rests on']]
-    : [['taker', 'Taker', 'Each slice takes at once (IOC)'], ['hybrid', 'Hybrid', 'Rests first, takes what falls behind'], ['maker', 'Maker', 'Post-only, re-priced as the book moves']];
+  const opts: ReadonlyArray<Opt<'taker' | 'maker' | 'hybrid'>> = chaseOnly
+    ? [['hybrid', 'Rest, then take', 'Each slice rests at the best price; what falls behind is taken.'], ['maker', 'Maker only', 'Never takes: what does not fill keeps resting.']]
+    : [['taker', 'Taker', 'Each slice takes at once.'], ['hybrid', 'Hybrid', 'Each slice rests first, then takes what falls behind.'], ['maker', 'Maker', 'Post-only, re-priced as the book moves.']];
   return (
-    <>
-      <Seg label="Each slice" value={style} onChange={(v) => set({ exec: v })} options={opts} />
-      {style !== 'maker' && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" title="Worst price per taker child, past the touch" />}
-      {style === 'hybrid' && <Field label="Rest for" value={d.makerShare} onChange={(v) => set({ makerShare: v })} suffix="% of slice" title="Share of each slice spent resting before the rest is taken" />}
-      {style !== 'taker' && <Field label="Re-price after" value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} suffix="ticks" />}
-      <Field label="Size varies" value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} suffix="± %" title="Randomise each slice's size (the total stays)" />
-      <Field label="Time varies" value={d.timeJitter} onChange={(v) => set({ timeJitter: v })} suffix="± %" title="Randomise each slice's time, as a share of the interval" />
-      <Field label="Max of volume" value={d.maxPart} placeholder="off" onChange={(v) => set({ maxPart: v })} suffix="%" title="A slice takes at most this share of the volume printed in the last interval" />
-      <Seg label="At the end" value={d.finish} onChange={(v) => set({ finish: v })} options={[['take', 'Take rest'], ['leave', 'Leave it']]} />
-    </>
+    <Group label="Price and execution">
+      <ASeg title="Each slice" hint="How each child order meets the book." value={style} onChange={(v) => set({ exec: v })} options={opts} />
+      {style !== 'maker' && <AField title="Max slippage" hint="Worst price a taking child accepts, past the best price." value={d.slip} onChange={(v) => set({ slip: v })} unit="bp" err={err('exec.slippageBps')} />}
+      {style === 'hybrid' && <AField title="Rest for" hint="Share of each slice's time spent resting before what is left is taken." value={d.makerShare} onChange={(v) => set({ makerShare: v })} unit="% of slice" err={err('exec.makerShare')} />}
+      {style !== 'taker' && <AField title="Re-price after" hint="A resting child moves once the best price is this far away." value={d.chaseTicks} int onChange={(v) => set({ chaseTicks: v })} unit="ticks" err={err('exec.chaseTicks')} />}
+      {jitter !== 'none' && <AField title="Size varies" hint="Randomises each slice's size; the total stays the same." value={d.sizeJitter} onChange={(v) => set({ sizeJitter: v })} unit="± %" err={err('sizeJitter')} />}
+      {jitter === 'both' && <AField title="Time varies" hint="Randomises each slice's time, as a share of the gap between slices." value={d.timeJitter} onChange={(v) => set({ timeJitter: v })} unit="± %" err={err('timeJitter')} />}
+      {cap && <AField title="Max of volume" hint="A slice takes at most this share of the volume printed since the last one. Empty: no cap." value={d.maxPart} placeholder="off" onChange={(v) => set({ maxPart: v })} unit="%" err={err('maxParticipation')} />}
+      <ASeg title="At the end" hint="What happens to anything not filled when the time is up." value={d.finish} onChange={(v) => set({ finish: v })} options={[['take', 'Take the rest', 'Takes what is left at once.'], ['leave', 'Leave it', 'Stops; what is left is not traded.']]} />
+    </Group>
+  );
+}
+
+/** The pop-up's exits: SoDEX position stops after the fills (see ExitFields). */
+function AExits({ d, set, side, levels, err }: { d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; levels: { tp: number | null; sl: number | null } | null; err?: string }) {
+  const unit = (label: string, mode: 'pct' | 'price', key: 'tpMode' | 'slMode') => (
+    <APick label={label} value={mode} options={[['pct', '%'], ['price', 'USD']]} onChange={(v) => set({ [key]: v } as Partial<Draft>)} />
+  );
+  const at = (x: number | null | undefined) => (x ? ` Now ${fmtLevel(x)}.` : '');
+  return (
+    <Group label="Exits">
+      <ASwitch
+        title="Take-profit / stop-loss"
+        hint="SoDEX holds them as position stops, resized as the algo fills; when one fills, the other is cancelled."
+        checked={d.exitsOn}
+        onChange={(v) => set({ exitsOn: v })}
+        on="On · exits after the fills"
+        off="Off · no exits"
+      />
+      {d.exitsOn && (
+        <>
+          <AField title="Take-profit" hint={`${side === 'buy' ? 'Above' : 'Below'} your average fill, as a distance or a price. Empty: none.${at(levels?.tp)}`} value={d.tp} placeholder="none" onChange={(v) => set({ tp: v })} unit={unit('Take-profit', d.tpMode, 'tpMode')} />
+          <AField title="Stop-loss" hint={`${side === 'buy' ? 'Below' : 'Above'} your average fill, as a distance or a price. Empty: none.${at(levels?.sl)}`} value={d.sl} placeholder="none" onChange={(v) => set({ sl: v })} unit={unit('Stop-loss', d.slMode, 'slMode')} err={err} />
+        </>
+      )}
+    </Group>
   );
 }
 
@@ -886,23 +1201,6 @@ function BasketLegs({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) 
           + Add a market
         </button>
       )}
-    </>
-  );
-}
-
-/** A basket's advanced settings: how each market is worked is on the ticket, its tuning here. */
-function BasketMore({ d, set, slices }: { d: Draft; set: (p: Partial<Draft>) => void; slices: ReactNode }) {
-  return (
-    <>
-      {d.basketStyle === 'twap' ? (
-        slices
-      ) : (
-        <>
-          <Field label="Clips" value={d.clips} int onChange={(v) => set({ clips: v })} suffix="per market" />
-          <Field label="Between waves" value={d.waveSec} onChange={(v) => set({ waveSec: v })} suffix="s" />
-        </>
-      )}
-      <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />
     </>
   );
 }
@@ -965,15 +1263,21 @@ function ConditionalFields({ d, set, symbol, base }: { d: Draft; set: (p: Partia
   );
 }
 
-function ConditionalMore({ d, set }: { d: Draft; set: (p: Partial<Draft>) => void }) {
+/** A conditional order's advanced settings: when it fires, then how its action trades. */
+function ConditionalMore({ d, set, slip }: { d: Draft; set: (p: Partial<Draft>) => void; slip: (hint: string) => ReactNode }) {
+  const then =
+    d.then === 'market' || d.then === 'close' ? slip('Worst price the action accepts, past the best price.')
+    : d.then === 'limit' ? <PostOnly d={d} set={set} />
+    : d.then === 'twap' ? <AField title="Slices" hint="How many child orders the TWAP it starts sends." value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} />
+    : null;
   return (
     <>
-      {d.conds.length > 1 && <Seg label="When" value={d.match} onChange={(v) => set({ match: v })} options={[['all', 'All hold'], ['any', 'Any holds']]} />}
-      <Field label="Hold for" value={d.holdSec} onChange={(v) => set({ holdSec: v })} suffix="s" title="It acts only once the conditions held this long (no firing on a wick)" />
-      <Field label="Expires in" value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} suffix={<UnitSelect label="Expires in" value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} />
-      {(d.then === 'market' || d.then === 'close') && <Field label="Max slippage" value={d.slip} onChange={(v) => set({ slip: v })} suffix="bp" />}
-      {d.then === 'limit' && <Switch label="Post only" checked={d.postOnly} onChange={(v) => set({ postOnly: v })} />}
-      {d.then === 'twap' && <Field label="Slices" value={d.thenSlices} int onChange={(v) => set({ thenSlices: v })} />}
+      <Group label="Trigger">
+        {d.conds.length > 1 && <ASeg title="When" hint="Whether every condition must hold, or one is enough." value={d.match} onChange={(v) => set({ match: v })} options={[['all', 'All hold'], ['any', 'Any holds']]} />}
+        <AField title="Hold for" hint="Acts only once the conditions have held this long, so a wick does not set it off." value={d.holdSec} onChange={(v) => set({ holdSec: v })} unit="s" />
+        <AField title="Expires in" hint="Cancels it if nothing fired by then. Empty: never." value={d.expires} placeholder="never" onChange={(v) => set({ expires: v })} unit={<ATime label="Expires in" value={d.expiresUnit} units={['m', 'h', 'd']} onChange={(u) => set({ expiresUnit: u })} />} />
+      </Group>
+      {then && <Group label="Then">{then}</Group>}
     </>
   );
 }

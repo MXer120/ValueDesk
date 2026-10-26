@@ -58,3 +58,28 @@ test('blocked storage never throws', () => {
   assert.equal(readExecutor(blocked), 'hosted');
   assert.doesNotThrow(() => writeExecutor('self', blocked));
 });
+
+test('blocked: only an executor that cannot start, never a missing wallet or the browser', async () => {
+  const { blockedState } = await import('./executor');
+  const down = { ready: false, why: 'The ValueDesk executor is not reachable right now.' };
+  assert.equal(blockedState('hosted', { ready: true, why: null }, true), null);
+  assert.equal(blockedState('hosted', down, false), null);
+  assert.equal(blockedState('hosted', { ready: false, why: 'Connect your wallet.' }, true), null);
+  assert.equal(blockedState('browser', { ready: false, why: 'Connect a wallet to run it live.' }, true), null);
+  const b = blockedState('hosted', down, true);
+  assert.equal(b?.short, 'ValueDesk executor unreachable');
+  assert.match(b!.message, /not reachable.*Open Advanced to run it elsewhere/);
+  const key = blockedState('self', { ready: false, why: 'Register the key of your copier in Copy → Set up ("Approve agent").' }, true);
+  assert.equal(key?.short, 'Self-hosted copier key missing');
+  assert.match(key!.message, /Or open Advanced/);
+  assert.equal(blockedState('hosted', { ready: false, why: 'Accept the terms of the ValueDesk executor in Copy → Set up.' }, true)?.short, 'ValueDesk executor not set up');
+});
+
+test('the blocked notice is raised once per state', async () => {
+  const { noticeFor } = await import('./executor');
+  assert.equal(noticeFor(null, 'A'), 'A');
+  assert.equal(noticeFor('A', 'A'), null);
+  assert.equal(noticeFor('A', 'B'), 'B');
+  assert.equal(noticeFor('A', null), null);
+  assert.equal(noticeFor(null, null), null);
+});
