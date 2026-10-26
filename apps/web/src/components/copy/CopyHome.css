@@ -742,8 +742,8 @@
    under water, and faded at its sides. */
 .cpy-whale canvas {
   position: absolute; left: 0; top: 0; display: block; pointer-events: none;
-  -webkit-mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
-  mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
+  mask-image: linear-gradient(to right, transparent, #000 4%, #000 96%, transparent);
 }
 @media (max-width: 1100px) {
   .cpy-hero:has(.cpy-whale) { grid-template-columns: minmax(0, 1fr); }
