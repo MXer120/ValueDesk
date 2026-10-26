@@ -203,3 +203,36 @@ a.fx-cta.evc__open { display: inline-flex; align-items: center; justify-content:
 .evc__hist { width: 32px; padding-left: 0; text-align: right; }
 .evc__chart { display: inline-grid; place-items: center; width: 26px; height: 26px; min-height: 0; padding: 0; border: 0; border-radius: 7px; background: rgba(255, 255, 255, 0.05); color: var(--muted); cursor: pointer; transition: background 140ms, color 140ms; }
 .evc__chart:hover { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+
+/* The event card, redesigned (owner, 2026-10-26): a tile per figure - the actual
+   large, the previous and the change under it - the picked figure's history
+   charted under them by default, the release marked on it. */
+.evc__dot { width: 3px; height: 3px; border-radius: 50%; background: var(--dim); }
+.evc__figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin: 0 0 14px; }
+.evc__fig {
+  display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 12px 14px; border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px; background: rgba(255, 255, 255, 0.03); color: var(--text); font: inherit; text-align: left;
+}
+button.evc__fig { cursor: pointer; transition: background 140ms, border-color 140ms; }
+button.evc__fig:hover { background: rgba(255, 255, 255, 0.06); border-color: rgba(255, 255, 255, 0.12); }
+.evc__fig.is-on { border-color: color-mix(in srgb, #ffb547 55%, transparent); background: color-mix(in srgb, #ffb547 7%, rgba(255, 255, 255, 0.03)); }
+.evc__figlabel { overflow: hidden; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.evc__figlabel small { color: var(--dim); font-weight: 500; }
+.evc__figval { font-family: var(--font-num); font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.1; }
+.evc__figval.is-up { color: var(--pos); }
+.evc__figval.is-down { color: var(--neg); }
+.evc__figval.is-empty { color: var(--dim); font-weight: 500; }
+.evc__figval.is-wait { color: var(--warn); animation: evc-pulse 1.2s ease-in-out infinite; }
+.evc__figprev { display: flex; align-items: baseline; gap: 6px; color: var(--dim); font-size: var(--fs-micro); }
+.evc__figprev b { color: var(--muted); font-family: var(--font-num); font-weight: 600; }
+.evc__figprev em { font-family: var(--font-num); font-style: normal; font-weight: 600; }
+.evc__figprev em.is-up { color: var(--pos); }
+.evc__figprev em.is-down { color: var(--neg); }
+.evc__graph { display: flex; flex-direction: column; gap: 8px; margin: 0 0 12px; padding: 12px 12px 8px; border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 12px; background: rgba(255, 255, 255, 0.02); }
+.evc__graphbar { display: flex; align-items: center; gap: 8px; }
+.evc__graphtitle { color: var(--text); font-size: var(--fs-xs); font-weight: 600; }
+.evc__graph .evc__foot { margin: 0; }
+.evc__graph .evc__foot a { color: var(--muted); }
+.evc__link { padding: 0; border: 0; background: none; color: var(--muted); font: inherit; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.evc__link:hover { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .evc__figval.is-wait { animation: none; } }
