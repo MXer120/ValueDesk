@@ -98,10 +98,11 @@ export function fmtUsd(v: number | null | undefined, sign = true): string {
   return `${v < 0 ? '−' : sign && v > 0 ? '+' : ''}$${s}`;
 }
 
-/** An indicator's value with its unit: "3.0%", "+177k", "7.1". */
+/** An indicator's value with its unit: "3.0%", "+177k" (a change), "684k" (a level), "7.1". */
 export function fmtValue(unit: string, v: number | null | undefined, digits = 1): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   if (unit === 'k') return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')}k`;
+  if (unit === 'K') return `${v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')}k`;
   const n = `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(digits)}`;
   return unit === '%' ? `${n}%` : unit === 'M' ? `${n}M` : n;
 }

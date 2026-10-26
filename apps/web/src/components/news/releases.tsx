@@ -209,6 +209,40 @@ function usePriors(fields: ReleaseResultField[], indOf: (key: string) => { id: s
   return r.data ?? {};
 }
 
+/**
+ * An event with no official card (SoSoValue's) whose figures are indicators the
+ * server has (CalendarEvent.indicators): a tile per indicator with its latest
+ * reading - the release before this one while it is still to come - the one
+ * before it and the change, a click charting it.
+ */
+function IndicatorFigures({ ids, pick, onPick }: { ids: string[]; pick: string | null; onPick: (id: string) => void }) {
+  const r = useAsync(() => Promise.all(ids.map((id) => macroApi.indicator(id, '1y').catch(() => null))), [ids.join(',')], { pollMs: 10 * 60_000 });
+  if (!r.data) return <p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading the figures…</p>;
+  const got = r.data.filter((d): d is NonNullable<typeof d> => !!d && !!d.latest);
+  if (!got.length) return <p className="evc__none">The figures did not load{r.error ? `: ${r.error}` : '.'}</p>;
+  return (
+    <div className="evc__figs">
+      {got.map((d) => {
+        const { value, prior, period } = d.latest!;
+        const delta = prior !== null ? value - prior : null;
+        const dp = d.unit === 'k' || d.unit === 'K' ? 0 : d.unit === 'M' ? 2 : 1;
+        return (
+          <button key={d.id} type="button" onClick={() => onPick(d.id)} aria-pressed={pick === d.id} title={`Show the ${d.name} history`} className={`evc__fig is-pick${pick === d.id ? ' is-on' : ''}`}>
+            <span className="evc__figlabel">{d.name}<small> · {period}</small></span>
+            <b className={`evc__figval${delta ? ` is-${delta > 0 ? 'up' : 'down'}` : ''}`}>{fmtValue(d.unit, value, dp)}</b>
+            <span className="evc__figprev">
+              Prev <b>{fmtValue(d.unit, prior, dp)}</b>
+              {delta !== null && Math.abs(delta) >= 10 ** -dp / 2 && (
+                <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(dp)}{d.unit === 'k' || d.unit === 'K' ? 'k' : d.unit === '%' ? ' pp' : d.unit}</em>
+              )}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function EventCard({ event, result, onClose, sourceName }: {
   event: CalendarEvent;
   result: ReleaseResult | undefined;
@@ -231,7 +265,10 @@ export function EventCard({ event, result, onClose, sourceName }: {
   const charted = fields.filter((f) => indicatorOf(f.key));
   const [pick, setPick] = useState<string | null>(null);
   const shown = charted.find((f) => f.key === pick) ?? charted[0] ?? null;
-  const shownInd = shown ? indicatorOf(shown.key) : null;
+  const own = fields.length === 0 ? (event.indicators ?? []) : [];
+  const [ownPick, setOwnPick] = useState<string | null>(null);
+  const ownShown = own.length ? catalog.data?.indicators.find((x) => x.id === (ownPick && own.includes(ownPick) ? ownPick : own[0])) ?? null : null;
+  const shownInd = shown ? indicatorOf(shown.key) : ownShown;
   const priors = usePriors(fields, indicatorOf, result?.period ?? null);
   const when = new Date(event.time).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const lag = released && result?.seenAt && result.releasedAt ? (result.seenAt - result.releasedAt) / 1000 : null;
@@ -276,11 +313,15 @@ export function EventCard({ event, result, onClose, sourceName }: {
             );
           })}
         </div>
+      ) : own.length ? (
+        <IndicatorFigures ids={own} pick={ownShown?.id ?? null} onPick={setOwnPick} />
       ) : (
-        <p className="evc__none">{event.detail ?? 'This calendar publishes the date only; there are no official figures to show here.'}</p>
+        <p className="evc__none">{event.detail ?? (/ISM|PMI/i.test(event.title)
+          ? 'This calendar publishes the date only, and this survey\'s history is not freely published, so there is no chart for it.'
+          : 'This calendar publishes the date only; there are no official figures to show here.')}</p>
       )}
 
-      {shown && shownInd && <EventChart key={shownInd.id} ind={shownInd} period={result?.period ?? null} onFull={() => setFull({ id: shownInd.id, title: shownInd.name })} />}
+      {shownInd && <EventChart key={shownInd.id} ind={shownInd} period={result?.period ?? null} onFull={() => setFull({ id: shownInd.id, title: shownInd.name })} />}
 
       {result?.headline && <p className="evc__headline">{result.headline}</p>}
       <p className="evc__foot">

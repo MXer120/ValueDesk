@@ -43,6 +43,11 @@ export interface CalendarEvent {
   href: string;
   /** The figures its result card shows (releases.ts RELEASE_FIELDS); official releases only. */
   fields?: ReleaseField[];
+  /**
+   * The indicators (indicators.ts) its figures are, for an event with no official
+   * card (SoSoValue's): the card shows their latest reading and history instead.
+   */
+  indicators?: string[];
 }
 
 const fieldsOf = (short: string): { fields?: ReleaseField[] } => (RELEASE_FIELDS[short] ? { fields: RELEASE_FIELDS[short]!.map((f) => ({ ...f })) } : {});
@@ -265,7 +270,52 @@ const SOSO_KINDS: Array<{ match: RegExp; short: string; importance: Importance }
   { match: /Jobless Claims/i, short: 'Claims', importance: 'low' },
   { match: /PMI/i, short: 'PMI', importance: 'low' },
   { match: /Home Sales|Housing Starts|Building Permits/i, short: 'Housing', importance: 'low' },
+  { match: /Michigan|Consumer Sentiment/i, short: 'Sentiment', importance: 'low' },
+  { match: /Industrial Production/i, short: 'IP', importance: 'low' },
+  { match: /Durable Goods/i, short: 'Durables', importance: 'low' },
 ];
+
+/**
+ * Which indicators a SoSoValue event's name is, most specific first: "Core PCE
+ * Price Index YoY" is core_pce_yy alone, "PCE" both PCE gauges. None for a
+ * release with no free history (ISM, S&P Global PMIs) or a name not matched.
+ */
+const SOSO_INDICATORS: Array<{ match: RegExp; ids: string[] }> = [
+  { match: /Core PCE.*(YoY|Y.Y|Year)/i, ids: ['core_pce_yy'] },
+  { match: /Core PCE.*(MoM|M.M|Month)/i, ids: ['core_pce_mm'] },
+  { match: /Core PCE/i, ids: ['core_pce_mm', 'core_pce_yy'] },
+  { match: /PCE.*(YoY|Y.Y|Year)/i, ids: ['pce_yy'] },
+  { match: /PCE.*(MoM|M.M|Month)/i, ids: ['pce_mm'] },
+  { match: /PCE/i, ids: ['pce_mm', 'pce_yy', 'core_pce_mm', 'core_pce_yy'] },
+  { match: /GDP/i, ids: ['gdp'] },
+  { match: /Core CPI.*(YoY|Y.Y|Year)/i, ids: ['core_cpi_yy'] },
+  { match: /Core CPI.*(MoM|M.M|Month)/i, ids: ['core_cpi_mm'] },
+  { match: /Core CPI/i, ids: ['core_cpi_mm', 'core_cpi_yy'] },
+  { match: /(CPI|Consumer Price).*(YoY|Y.Y|Year)/i, ids: ['cpi_yy'] },
+  { match: /(CPI|Consumer Price).*(MoM|M.M|Month)/i, ids: ['cpi_mm'] },
+  { match: /CPI|Consumer Price/i, ids: ['cpi_mm', 'cpi_yy', 'core_cpi_mm', 'core_cpi_yy'] },
+  { match: /Unemployment Rate/i, ids: ['unemployment'] },
+  { match: /Average Hourly Earnings|Hourly Earnings/i, ids: ['ahe_mm', 'ahe_yy'] },
+  { match: /Non-?Farm|Payroll/i, ids: ['payrolls', 'unemployment', 'ahe_mm'] },
+  { match: /(PPI|Producer Price).*(YoY|Y.Y|Year)/i, ids: ['ppi_yy'] },
+  { match: /(PPI|Producer Price).*(MoM|M.M|Month)/i, ids: ['ppi_mm'] },
+  { match: /PPI|Producer Price/i, ids: ['ppi_mm', 'ppi_yy'] },
+  { match: /JOLTS|Job Openings/i, ids: ['jolts'] },
+  { match: /FOMC|Fed Interest Rate|Rate Decision/i, ids: ['fed_upper'] },
+  { match: /Retail Sales.*(Ex|Excl).*Auto/i, ids: ['retail_ex_auto_mm'] },
+  { match: /Retail Sales/i, ids: ['retail_mm', 'retail_ex_auto_mm'] },
+  { match: /Continuing.*Claims/i, ids: ['continuing_claims'] },
+  { match: /Jobless Claims/i, ids: ['initial_claims', 'continuing_claims'] },
+  { match: /New Home Sales/i, ids: ['new_home_sales'] },
+  { match: /Existing Home Sales/i, ids: ['existing_home_sales'] },
+  { match: /Housing Starts/i, ids: ['housing_starts', 'building_permits'] },
+  { match: /Building Permits/i, ids: ['building_permits', 'housing_starts'] },
+  { match: /Michigan|Consumer Sentiment/i, ids: ['umich_sentiment'] },
+  { match: /Industrial Production/i, ids: ['ip_mm'] },
+  { match: /Durable Goods/i, ids: ['durables_mm'] },
+];
+
+export const sosoIndicators = (name: string): string[] => SOSO_INDICATORS.find((k) => k.match.test(name))?.ids ?? [];
 
 /** SoSoValue's /macro/events ({date, events: [name]}): one all-day event per name. */
 export function parseSosoEvents(body: unknown): CalendarEvent[] {
@@ -291,6 +341,7 @@ export function parseSosoEvents(body: unknown): CalendarEvent[] {
         country: 'US',
         source: 'sosovalue',
         href: 'https://sosovalue.com',
+        ...(sosoIndicators(name).length ? { indicators: sosoIndicators(name) } : {}),
       });
     }
   }

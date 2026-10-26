@@ -28,15 +28,16 @@
 import { calendar } from './calendar.js';
 import { onRelease } from './releases.js';
 
-export type IndicatorUnit = '%' | 'k' | 'M' | '';
-export type IndicatorFrequency = 'monthly' | 'quarterly' | 'daily';
+/** '%'; 'k' a change in thousands (+177k); 'K' a level in thousands (684k); 'M' millions; '' as is. */
+export type IndicatorUnit = '%' | 'k' | 'K' | 'M' | '';
+export type IndicatorFrequency = 'monthly' | 'quarterly' | 'weekly' | 'daily';
 /**
  * `level` as published; `mm`/`qq` percent change on the observation before;
  * `yy` on the observation a year before; `diff` the change on the observation
- * before; `thousandths` a count in thousands as millions; `steps` a daily level
- * kept where it changes.
+ * before; `thousandths` a count in thousands as millions (or units as thousands);
+ * `millionths` a count as millions; `steps` a daily level kept where it changes.
  */
-export type IndicatorTransform = 'level' | 'mm' | 'qq' | 'yy' | 'diff' | 'thousandths' | 'steps';
+export type IndicatorTransform = 'level' | 'mm' | 'qq' | 'yy' | 'diff' | 'thousandths' | 'millionths' | 'steps';
 
 export interface Indicator {
   id: string;
@@ -51,7 +52,7 @@ export interface Indicator {
   /** Its figure on the release card (releases.ts RELEASE_FIELDS key). */
   field: string;
   /** Who publishes the series FRED carries. */
-  agency: 'BLS' | 'BEA' | 'Federal Reserve';
+  agency: 'BLS' | 'BEA' | 'Federal Reserve' | 'Census' | 'DOL' | 'NAR' | 'University of Michigan';
   /** Decimals kept. */
   decimals: number;
 }
@@ -92,6 +93,18 @@ export const INDICATORS: Readonly<Record<string, Indicator>> = Object.fromEntrie
     ind('eci_yy', 'ECI y/y', '%', 'quarterly', 'ECIALLCIV', 'yy', 'ECI', 'eci_yy', 'BLS'),
     ind('fed_upper', 'Fed funds target, upper bound', '%', 'daily', 'DFEDTARU', 'steps', 'FOMC', 'range', 'Federal Reserve', 2),
     ind('fed_lower', 'Fed funds target, lower bound', '%', 'daily', 'DFEDTARL', 'steps', 'FOMC', 'range', 'Federal Reserve', 2),
+    // The releases SoSoValue's calendar names (calendar.ts sosoIndicators): no official card, a chart.
+    ind('new_home_sales', 'New home sales (annual rate)', 'K', 'monthly', 'HSN1F', 'level', 'Housing', 'new_home_sales', 'Census', 0),
+    ind('existing_home_sales', 'Existing home sales (annual rate)', 'M', 'monthly', 'EXHOSLUSM495S', 'millionths', 'Housing', 'existing_home_sales', 'NAR', 2),
+    ind('housing_starts', 'Housing starts (annual rate)', 'K', 'monthly', 'HOUST', 'level', 'Housing', 'housing_starts', 'Census', 0),
+    ind('building_permits', 'Building permits (annual rate)', 'K', 'monthly', 'PERMIT', 'level', 'Housing', 'building_permits', 'Census', 0),
+    ind('retail_mm', 'Retail sales m/m', '%', 'monthly', 'RSAFS', 'mm', 'Retail', 'retail_mm', 'Census'),
+    ind('retail_ex_auto_mm', 'Retail sales ex autos m/m', '%', 'monthly', 'RSFSXMV', 'mm', 'Retail', 'retail_ex_auto_mm', 'Census'),
+    ind('initial_claims', 'Initial jobless claims', 'K', 'weekly', 'ICSA', 'thousandths', 'Claims', 'initial_claims', 'DOL', 0),
+    ind('continuing_claims', 'Continuing jobless claims', 'K', 'weekly', 'CCSA', 'thousandths', 'Claims', 'continuing_claims', 'DOL', 0),
+    ind('umich_sentiment', 'Michigan consumer sentiment', '', 'monthly', 'UMCSENT', 'level', 'Sentiment', 'umich_sentiment', 'University of Michigan'),
+    ind('ip_mm', 'Industrial production m/m', '%', 'monthly', 'INDPRO', 'mm', 'IP', 'ip_mm', 'Federal Reserve'),
+    ind('durables_mm', 'Durable goods orders m/m', '%', 'monthly', 'DGORDER', 'mm', 'Durables', 'durables_mm', 'Census'),
   ].map((i) => [i.id, i]),
 );
 
@@ -145,6 +158,9 @@ export function transform(obs: readonly Observation[], i: Pick<Indicator, 'trans
     case 'thousandths':
       for (const [t, v] of obs) out.push([t, round(v / 1000, d)]);
       break;
+    case 'millionths':
+      for (const [t, v] of obs) out.push([t, round(v / 1_000_000, d)]);
+      break;
     case 'mm':
     case 'qq':
       for (let k = 1; k < obs.length; k++) out.push([obs[k]![0], round((obs[k]![1] / obs[k - 1]![1] - 1) * 100, d)]);
@@ -177,6 +193,7 @@ export function periodLabel(date: string, frequency: IndicatorFrequency): string
   const y = date.slice(0, 4);
   const m = Number(date.slice(5, 7));
   if (frequency === 'daily') return date;
+  if (frequency === 'weekly') return `Week of ${date}`;
   if (frequency === 'quarterly') return `Q${Math.floor((m - 1) / 3) + 1} ${y}`;
   return `${MONTH_NAMES[m - 1]} ${y}`;
 }

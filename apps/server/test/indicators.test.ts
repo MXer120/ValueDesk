@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { easternToUtc, type CalendarEvent } from '../src/valuescan/calendar.js';
+import { easternToUtc, sosoIndicators, type CalendarEvent } from '../src/valuescan/calendar.js';
 import { INDICATORS, indicator, indicatorList, indicatorReleased, indicatorView, parseFredCsv, periodLabel, resetIndicators, transform } from '../src/valuescan/indicators.js';
 import { RELEASE_FIELDS, decodePage, parseRelease } from '../src/valuescan/releases.js';
 
@@ -38,6 +38,8 @@ test('the transforms: changes on the period and the year before, one decimal, ha
   assert.equal(periodLabel('2026-09-01', 'monthly'), 'September 2026');
   assert.equal(periodLabel('2026-04-01', 'quarterly'), 'Q2 2026');
   assert.equal(periodLabel('2026-09-17', 'daily'), '2026-09-17');
+  assert.equal(periodLabel('2026-10-17', 'weekly'), 'Week of 2026-10-17');
+  assert.deepEqual(transform([['2026-01-01', 3_990_000]], { transform: 'millionths', decimals: 2 }), [['2026-01-01', 3.99]]);
 });
 
 test('the newest figures, as FRED had them on 25 October 2026', () => {
@@ -63,13 +65,27 @@ test('the newest figures, as FRED had them on 25 October 2026', () => {
     // The Fed's September hike, effective the day after the statement.
     fed_upper: ['2026-09-17', 4, 3.75],
     fed_lower: ['2026-09-17', 3.75, 3.5],
+    // SoSoValue's releases (saved 26 October 2026).
+    new_home_sales: ['August 2026', 684, 643],
+    existing_home_sales: ['September 2026', 3.99, 3.93],
+    housing_starts: ['September 2026', 1221, 1288],
+    building_permits: ['September 2026', 1400, 1403],
+    retail_mm: ['September 2026', 0.8, 1.3],
+    retail_ex_auto_mm: ['September 2026', 0.9, 1.4],
+    initial_claims: ['Week of 2026-10-17', 194, 200],
+    continuing_claims: ['Week of 2026-10-10', 1728, 1703],
+    umich_sentiment: ['September 2026', 48.1, 51.7],
+    ip_mm: ['September 2026', 0.7, 0.1],
+    durables_mm: ['August 2026', -0.1, 0.9],
   };
   assert.deepEqual(Object.keys(want).sort(), Object.keys(INDICATORS).sort());
   for (const [id, [period, value, prior]] of Object.entries(want)) assert.deepEqual(latest(id), { period, value, prior }, id);
 });
 
 test("each indicator is a figure of its kind's release card, and matches the agency's printed figure", () => {
-  for (const i of Object.values(INDICATORS)) assert.ok(RELEASE_FIELDS[i.kind]?.some((f) => f.key === i.field), `${i.id}: ${i.kind}/${i.field}`);
+  // A kind with an official card: a figure on it. One without (SoSoValue's): a figure some SoSoValue event names.
+  const named = new Set(['New Home Sales', 'Existing Home Sales', 'Housing Starts', 'Building Permits', 'Retail Sales', 'Initial Jobless Claims', 'Michigan Consumer Sentiment', 'Industrial Production MoM', 'Durable Goods Orders MoM'].flatMap(sosoIndicators));
+  for (const i of Object.values(INDICATORS)) assert.ok(RELEASE_FIELDS[i.kind] ? RELEASE_FIELDS[i.kind]!.some((f) => f.key === i.field) : named.has(i.id), `${i.id}: ${i.kind}/${i.field}`);
   const at830 = (y: number, mo: number, d: number) => easternToUtc(y, mo, d, 8, 30);
   const printed = {
     CPI: release('bls-cpi.html', 'CPI', at830(2026, 10, 14)),

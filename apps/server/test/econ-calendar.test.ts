@@ -13,6 +13,7 @@ import {
   parseFomc,
   parseIcs,
   parseSosoEvents,
+  sosoIndicators,
   pickReleases,
   resetCalendar,
 } from '../src/valuescan/calendar.js';
@@ -101,6 +102,12 @@ test('parseSosoEvents and mergeCalendar: SoSoValue fills in what the official ca
     { date: 'soon', events: ['Broken'] },
   ] });
   assert.deepEqual(soso.map((e) => [e.short, e.allDay, e.importance]), [['PCE', true, 'high'], ['GDP', true, 'high'], ['ISM', true, 'medium']]);
+  // Its figures are indicators the server charts; ISM's history is not free, so it has none.
+  assert.deepEqual(soso.map((e) => e.indicators), [['core_pce_mm'], ['gdp'], undefined]);
+  assert.deepEqual(sosoIndicators('Retail Sales Ex Autos (MoM)'), ['retail_ex_auto_mm']);
+  assert.deepEqual(sosoIndicators('Continuing Jobless Claims'), ['continuing_claims']);
+  assert.deepEqual(sosoIndicators('CPI (YoY)'), ['cpi_yy']);
+  assert.deepEqual(sosoIndicators('S&P Global Services PMI'), []);
   const bea = pickReleases(parseIcs(BEA_ICS), 'bea');
   const merged = mergeCalendar(bea, soso);
   assert.deepEqual(merged.map((e) => `${e.source}:${e.short}`), ['bea:GDP', 'bea:PCE', 'sosovalue:ISM'], 'the official GDP and PCE a day later stand for SoSoValue\'s');
