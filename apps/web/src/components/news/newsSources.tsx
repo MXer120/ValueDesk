@@ -65,6 +65,54 @@ const KNOWN: Record<string, string> = {
   tether: 'tether.to', circle: 'circle.com', blackrock: 'blackrock.com', fidelity: 'fidelity.com', ethereum: 'ethereum.org', solana: 'solana.com',
   sonic: 'soniclabs.com', iost: 'iost.io', zetachain: 'zetachain.com', fhenix: 'fhenix.io', rocketx: 'rocketx.exchange', mantra: 'mantrachain.io', listadao: 'lista.org',
 };
+/**
+ * Every outlet and account the news names (KNOWN's sites), by name, for
+ * Settings > News: each can be switched off, and its stories leave every list.
+ * Grouped as Settings shows them.
+ */
+export const OUTLETS: ReadonlyArray<{ group: string; list: ReadonlyArray<readonly [site: string, name: string]> }> = [
+  { group: 'Markets and finance', list: [
+    ['bloomberg.com', 'Bloomberg'], ['reuters.com', 'Reuters'], ['cnbc.com', 'CNBC'], ['finance.yahoo.com', 'Yahoo Finance'], ['wsj.com', 'The Wall Street Journal'],
+    ['ft.com', 'Financial Times'], ['marketwatch.com', 'MarketWatch'], ['forbes.com', 'Forbes'], ['fortune.com', 'Fortune'], ['thestreet.com', 'TheStreet'],
+    ['dowjones.com', 'Dow Jones'], ['financialjuice.com', 'FinancialJuice'], ['moomoo.com', 'Moomoo News'],
+    ['sec.gov', 'U.S. SEC'],
+  ] },
+  { group: 'Crypto news', list: [
+    ['coindesk.com', 'CoinDesk'], ['cointelegraph.com', 'Cointelegraph'], ['theblock.co', 'The Block'], ['decrypt.co', 'Decrypt'], ['blockworks.co', 'Blockworks'],
+    ['dlnews.com', 'DL News'], ['thedefiant.io', 'The Defiant'], ['bitcoinmagazine.com', 'Bitcoin Magazine'], ['crypto.news', 'crypto.news'], ['cryptoslate.com', 'CryptoSlate'],
+    ['beincrypto.com', 'BeInCrypto'], ['bitcoinist.com', 'Bitcoinist'], ['newsbtc.com', 'NewsBTC'], ['u.today', 'U.Today'], ['ambcrypto.com', 'AMBCrypto'],
+    ['coingape.com', 'CoinGape'], ['thecryptotimes.com', 'The Crypto Times'], ['altcoinist.com', 'Altcoinist'], ['panewslab.com', 'PANews'], ['wublock123.com', 'Wu Blockchain'],
+    ['odaily.news', 'Odaily'], ['techflowpost.com', 'TechFlow'], ['theblockbeats.info', 'BlockBeats'], ['foresightnews.pro', 'Foresight News'], ['chaincatcher.com', 'ChainCatcher'],
+    ['jinse.cn', 'Jinse Finance'], ['metaera.hk', 'MetaEra'], ['techub.news', 'Techub News'], ['blockcast.it', 'Blockcast.it'],
+  ] },
+  { group: 'Data and research', list: [
+    ['coinglass.com', 'CoinGlass'], ['lookonchain.com', 'Lookonchain'], ['arkm.com', 'Arkham'], ['glassnode.com', 'Glassnode'], ['santiment.net', 'Santiment'],
+    ['cryptoquant.com', 'CryptoQuant'], ['messari.io', 'Messari'], ['nansen.ai', 'Nansen'], ['defillama.com', 'DefiLlama'], ['coingecko.com', 'CoinGecko'],
+    ['coinmarketcap.com', 'CoinMarketCap'], ['tokenterminal.com', 'Token Terminal'], ['polymarket.com', 'Polymarket'], ['kalshi.com', 'Kalshi'], ['velo.xyz', 'Velo'],
+  ] },
+  { group: 'Exchanges and companies', list: [
+    ['binance.com', 'Binance'], ['coinbase.com', 'Coinbase'], ['okx.com', 'OKX'], ['bybit.com', 'Bybit'], ['kraken.com', 'Kraken'], ['bitget.com', 'Bitget'],
+    ['phemex.com', 'Phemex'], ['upbit.com', 'Upbit'], ['wazirx.com', 'WazirX'], ['swissborg.com', 'SwissBorg'], ['onekey.so', 'OneKey'], ['hyperliquid.xyz', 'Hyperliquid'],
+    ['tether.to', 'Tether'], ['circle.com', 'Circle'], ['blackrock.com', 'BlackRock'], ['fidelity.com', 'Fidelity'],
+  ] },
+  { group: 'Projects', list: [
+    ['ethereum.org', 'Ethereum'], ['solana.com', 'Solana'], ['soniclabs.com', 'Sonic'], ['iost.io', 'IOST'], ['zetachain.com', 'ZetaChain'], ['fhenix.io', 'Fhenix'],
+    ['rocketx.exchange', 'RocketX'], ['mantrachain.io', 'MANTRA'], ['lista.org', 'Lista DAO'],
+  ] },
+];
+
+/** The outlets switched off (their sites), the switch, and all back on; every one is on until switched off. */
+export function useOutletsOff(): [ReadonlySet<string>, (site: string, on: boolean) => void, () => void] {
+  const [state, setState] = useSharedStored<string[]>('vs.news.outletsOff', []);
+  const off = new Set(Array.isArray(state) ? state : []);
+  const set = (site: string, on: boolean) => {
+    const next = new Set(off);
+    if (on) next.delete(site); else next.add(site);
+    setState([...next]);
+  };
+  return [off, set, () => setState([])];
+}
+
 /** Sites whose icon this app carries itself (the icon service has none for them). */
 const OWN_ICON: Record<string, string> = { 'sosovalue.com': '/logos/brand/sosovalue.png' };
 

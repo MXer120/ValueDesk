@@ -10,8 +10,8 @@
  * link, the first lines of its text, and the coins its text names (coins.ts,
  * with SoSoValue's coin index once that is loaded).
  *
- * The Kobeissi Letter publishes only on X, whose timelines need X's paid API:
- * not read here.
+ * The Kobeissi Letter is not read: it publishes only on X (its site embeds the
+ * X timeline and has no feed of its own), and X's timelines need its paid API.
  */
 import type { NewsItem } from './types.js';
 import { coinsIn } from './sosovalue/coins.js';

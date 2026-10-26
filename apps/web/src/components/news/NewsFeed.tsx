@@ -35,7 +35,7 @@ import { FxSelect } from '../funds/ui';
 import { CURRENT, CoinSelect, type CoinChoice } from './CoinSelect';
 import { EconCalendar } from './EconCalendar';
 import { PoweredBy } from './PoweredBy';
-import { FEED_IDS, SourceMark, useCreditHidden, useNewsSources } from './newsSources';
+import { FEED_IDS, SourceMark, sourceSite, useCreditHidden, useNewsSources, useOutletsOff } from './newsSources';
 import { moveSince, useCoinSeries, type PriceSource } from './moves';
 import { focusProps } from '../../chart/newsFocus';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
@@ -112,6 +112,8 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
   const [pages, setPages] = useState(1);
   const canSave = useSyncExternalStore(onBridgeChange, foldersAvailable, foldersAvailable);
   const [isOn] = useNewsSources();
+  const [outletsOff] = useOutletsOff();
+  const offKey = [...outletsOff].sort().join(',');
   const [creditHidden, setCreditHidden] = useCreditHidden();
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; items: TabMenuItem[] } | null>(null);
   const storyMenu = (e: ReactMouseEvent, n: NewsItem) => {
@@ -176,16 +178,19 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
   }, [first.data, more.data]);
   const total = soso ? first.data?.total ?? null : 0;
   const canMore = soso && (total !== null ? sosoItems.length < total : (first.data?.items.length ?? 0) >= PAGE && pages * PAGE <= sosoItems.length);
-  // The other sources' stories, as far back as SoSoValue's pages reach (all of them once there is no more).
+  // The other sources' stories, as far back as SoSoValue's pages reach (all of them once there is no more);
+  // an outlet switched off in Settings > News leaves the list.
   const items = useMemo(() => {
+    const kept = (list: NewsItem[]) => (outletsOff.size ? list.filter((n) => { const site = sourceSite(n); return !site || !outletsOff.has(site); }) : list);
     const more = extrasOn ? extras.data?.items ?? [] : [];
-    if (!more.length) return sosoItems;
-    if (!soso) return more;
+    if (!more.length) return kept(sosoItems);
+    if (!soso) return kept(more);
     const reach = canMore && sosoItems.length ? Math.min(...sosoItems.map((n) => n.time || Infinity)) : 0;
     const ranked = f === 'hot' && !search;
-    const merged = [...sosoItems, ...more.filter((n) => n.time >= reach)];
+    const merged = kept([...sosoItems, ...more.filter((n) => n.time >= reach)]);
     return ranked ? merged : merged.sort((a, b) => b.time - a.time);
-  }, [sosoItems, extras.data, extrasOn, soso, canMore, f, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- offKey stands for outletsOff (a new Set each render)
+  }, [sosoItems, extras.data, extrasOn, soso, canMore, f, search, offKey]);
   const moves = useCoinSeries(items, prices);
   const now = Date.now();
   const notSetUp = soso && !!first.error && /not configured|not_available/i.test(first.error);
