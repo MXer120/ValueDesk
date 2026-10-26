@@ -68,7 +68,7 @@ import { Collapse } from './motion';
 import { notifyTrade } from '../toast';
 import { ApproveLabel } from './funds/ui';
 import { builderRateToFraction, mulDecimal, roundToStep } from '@sodex-core';
-import { publishOrderImpact, type RawTake } from '../orderImpact';
+import { limitImpact, publishOrderImpact, type RawTake } from '../orderImpact';
 
 /** A market order cannot ask for more than this. The field refuses anything higher. */
 const SLIP_CAP_PCT = 2.5;
@@ -1139,15 +1139,17 @@ export function OrderEntry({
   const levels = side === 'buy' ? book?.asks : book?.bids;
   const limitPx = marketExec ? null : (num(price) > 0 ? num(price) : null);
   // One walk, of the order actually being built. A resting limit stops at its
-  // own price, so the estimate is 0 when it does not cross. The book does not
-  // use this walk for a limit: a limit only thickens the level it would join.
+  // own price, so the estimate is 0 when it does not cross. The book draws this
+  // walk for a limit only when the limit crosses (see `crosses` below).
   const walked = liveQty > 0
     ? walkBook(levels, liveQty, side, marketExec ? null : limitPx)
     : { avg: null, takes: [] as RawTake[] };
-  const resting = !marketExec && limitPx !== null && liveQty > 0
-    ? { price: limitPx, qty: liveQty }
-    : null;
   const touch = side === 'buy' ? bestAsk : bestBid;
+  // What the book draws for a limit: the levels a marketable one takes, like a
+  // market, and what would rest on its own side - by its TIF (orderImpact.ts limitImpact).
+  const { takes: takesNow, rest: resting } = marketExec
+    ? { takes: [] as RawTake[], rest: null }
+    : limitImpact({ side, limit: limitPx, qty: liveQty, tif: effectiveTif, touch, walk: walked.takes });
   const estSlip = liveQty <= 0
     ? 0
     : !levels?.length
@@ -1160,7 +1162,7 @@ export function OrderEntry({
     ? num(sym.marketDeviationRatio) * 100
     : null;
   const slipCap = venueMaxPct !== null ? Math.min(SLIP_CAP_PCT, venueMaxPct) : SLIP_CAP_PCT;
-  const depthTakes = marketExec ? walked.takes : [];
+  const depthTakes = marketExec ? walked.takes : takesNow;
   const takeKey = depthTakes.map((t) => `${t.price}:${t.taken}`).join(',');
   const restKey = resting ? `${resting.price}:${resting.qty}` : '';
   useEffect(() => {

@@ -1864,22 +1864,19 @@ export function Book({
   const bidTaken = impactTakes && impact?.side === 'sell'
     ? takenShareByLevel(shownBids, impactTakes, bidIncrement, 'bid')
     : null;
-  // A limit does not walk. It joins one price: the resting side first (a buy
-  // sits on the bids), and the other side only when that price is a level
-  // already on screen there — a click on the far side — and nowhere else.
+  // What a limit leaves resting joins one price on its OWN side only - a buy on
+  // the bids, a sell on the asks. A limit through the far touch takes those
+  // levels first (`takes`, drawn as a market's) and never rests over there:
+  // OrderEntry publishes only the part that would really rest.
   const rest = impact && impact.symbol === symbol ? impact.rest : null;
   const restHit = (() => {
     if (!rest || !(rest.qty > 0)) return null;
-    const prefer: 'bid' | 'ask' = impact!.side === 'buy' ? 'bid' : 'ask';
-    const sides: Array<'bid' | 'ask'> = [prefer, prefer === 'bid' ? 'ask' : 'bid'];
-    for (const s of sides) {
-      const inc = s === 'ask' ? askIncrement : bidIncrement;
-      const ladder = s === 'ask' ? askLadder : shownBids;
-      if (!(inc > 0)) continue;
-      const bucket = bucketOf(rest.price, inc, s);
-      if (ladder.some((l) => l.price === bucket)) return { side: s, price: bucket, qty: rest.qty };
-    }
-    return null;
+    const s: 'bid' | 'ask' = impact!.side === 'buy' ? 'bid' : 'ask';
+    const inc = s === 'ask' ? askIncrement : bidIncrement;
+    const ladder = s === 'ask' ? askLadder : shownBids;
+    if (!(inc > 0)) return null;
+    const bucket = bucketOf(rest.price, inc, s);
+    return ladder.some((l) => l.price === bucket) ? { side: s, price: bucket, qty: rest.qty } : null;
   })();
   const impactLive = Boolean(
     (askTaken && askTaken.size > 0) || (bidTaken && bidTaken.size > 0) || restHit,
