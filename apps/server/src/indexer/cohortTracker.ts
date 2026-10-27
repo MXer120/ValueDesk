@@ -353,8 +353,10 @@ export const PNL_SHARE = 0.4;
  * a minute; 8 made ~46 (v0.2.16, 2026-10-24), still bound by the event loop's
  * stalls on the disk rather than by the 400 weight - a read waits out a stall
  * whatever else is in flight. The spend cap is the lane's either way.
+ * VALUESCAN_INDEX_HLC_CONCURRENCY sets it (up to 128): the archive's ~80k unread holders
+ * (2026-10-27) were read at ~22 a minute with 24 in flight against a loop 3-5 s late.
  */
-export const HLC_CONCURRENCY = 24;
+export const HLC_CONCURRENCY = envNum('VALUESCAN_INDEX_HLC_CONCURRENCY', 24, 1, 128);
 
 export class CohortTracker {
   /**
