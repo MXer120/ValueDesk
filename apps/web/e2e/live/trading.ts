@@ -12,6 +12,7 @@
  *                      action, so the payload hash is the whole check
  */
 import { ACTION, actionPayloadHash, bytesToHex, engineDomainName, revokeAPIKey } from '@sodex-core';
+import { SITE_TERMS_VERSION, _signedTermsForTests, signedTerms } from '../../src/legal/acceptance';
 import { activeBuilder } from '../../src/trading/builder';
 import { tradingConfig } from '../../src/trading/config';
 import { enableTrading, getTradingState, sodexAccountId, tradingKeyName } from '../../src/trading/session';
@@ -177,6 +178,14 @@ export async function registerKey(ctx: Ctx): Promise<number> {
   if (st.status !== 'enabled' || !st.accountId) throw new Error(`trading did not switch on (status ${st.status})`);
   if (fee) ctx.rec.note(`builder approval SoDEX lists for #${fee.id}: ${st.builder ? JSON.stringify(st.builder.engines) : 'none yet'}`);
   ctx.rec.note(`trading key "${st.keyName}" ${st.keyAddress} on ${(st.engines ?? []).join(' + ')}, account #${st.accountId}, expires ${new Date(st.expiresAt ?? 0).toISOString()}`);
+  // The legal gate (src/trading/legalGate.ts) refuses every opening order until the wallet has accepted the current
+  // site terms. The runner's wallet is the owner's own test wallet, run by the owner: its acceptance is recorded here
+  // for this run (the country of residence from LIVE_COUNTRY, default DE), as the app records it after the signature.
+  if (!signedTerms(ctx.owner)) {
+    const country = (process.env.LIVE_COUNTRY ?? 'DE').trim().toUpperCase();
+    _signedTermsForTests(ctx.owner, country);
+    ctx.rec.note(`site terms ${SITE_TERMS_VERSION} accepted for this run (residence ${country})`);
+  }
   return st.accountId;
 }
 
