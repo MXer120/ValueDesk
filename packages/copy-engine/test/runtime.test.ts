@@ -229,3 +229,36 @@ test('a live copy places no opening order its SoDEX free margin cannot carry, an
   assert.ok(log.some((e) => e.kind === 'skip' && e.reason === 'free-margin'));
   await rt.stop();
 });
+
+test('brake: a live copy sends nothing while the operator brake is on, logs why, and copies the next trade once it is lifted', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000 };
+  const sent: Intent[][] = [];
+  const sink: OrderSink = {
+    paper: false,
+    async place(_a, _m, intents): Promise<SendResult[]> {
+      sent.push(intents);
+      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: true, orderId: '1', error: null, outcomeUnknown: false }));
+    },
+    async setLeverage() {},
+    async placeStop(_a, _m, st) {
+      return { clOrdID: st.clOrdID, ok: true, orderId: null, error: null, outcomeUnknown: false };
+    },
+    async cancel() {},
+  };
+  const { rt, store } = runtime(w, () => sink);
+  let brake: string | null = 'Investigating.';
+  (rt as unknown as { host: { brake?: () => string | null } }).host.brake = () => brake;
+  await rt.start();
+  const s = await rt.add(sub({}, { id: 'br' }));
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(150);
+  sodexWs().push(print(40, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await wait(400);
+  assert.equal(sent.length, 0, 'nothing sent while braked');
+  const brakeLog = await store.activity({ subId: s.id });
+  assert.ok(brakeLog.some((e) => e.kind === 'error' && e.reason === 'brake' && /Investigating/.test(e.detail ?? '')), JSON.stringify(brakeLog.map((e) => [e.kind, e.reason, e.detail])));
+  brake = null;
+  sodexWs().push(print(41, 'BUY', '1', '80000', LEADER_ID, 1002));
+  await until(() => sent.length > 0);
+  await rt.stop();
+});

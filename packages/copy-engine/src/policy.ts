@@ -2,7 +2,8 @@
  * Who may copy, under which limits, and at which fee.
  *
  * REGIONS (owner's decision, 2026-10-23):
- *   - blocked: the United States and its territories, and the countries under
+ *   - blocked: the United States and its territories, the United Kingdom and
+ *     Canada (owner's decision, 2026-10-27), and the countries under
  *     comprehensive sanctions or on FATF's call-for-action list. Nobody there
  *     may start or keep a copy, in any mode;
  *   - EEA (the EU plus Iceland, Liechtenstein, Norway): copies are capped at
@@ -28,17 +29,34 @@
  * The copy-trading terms every follower accepts (by wallet signature) before copying.
  * Bump it with every change to the terms (apps/web/src/legal/copyTerms.ts): every
  * follower then accepts the new text before their next change. '.2': counter-trading.
- * 2026-10-27: algo orders on the executors, and keys the follower made themselves; '.2': keys live up to 180 days.
+ * 2026-10-27: algo orders on the executors, and keys the follower made themselves; '.2': keys live up to 180 days;
+ * '.3': the United Kingdom and Canada excluded, sanctioned wallets screened by the executor, the domain www.valuedesk.so.
  */
-export const COPY_TERMS_VERSION = '2026-10-27.2';
+export const COPY_TERMS_VERSION = '2026-10-27.3';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
 
+/**
+ * The United Kingdom and Canada (owner's decision, 2026-10-27): excluded as the US is - from copying
+ * here, close-only on the site (apps/web/src/legal/jurisdictions.mjs). The UK alone: not the Crown
+ * Dependencies (Jersey, Guernsey, the Isle of Man) or the British Overseas Territories (Gibraltar,
+ * Bermuda, ...), which have their own financial regulators and are outside the FCA's retail ban on
+ * crypto derivatives. Canada as a whole, not only Ontario: an IP address does not reliably tell the
+ * province, and the declaration asks for a country.
+ */
+export const UK_CA_REGIONS: readonly string[] = ['GB', 'CA'];
+
+/** Close-only on the site and excluded from copying: the US and its territories, the UK, Canada. */
+export const CLOSE_ONLY_REGIONS: readonly string[] = [...US_REGIONS, ...UK_CA_REGIONS];
+
 /** Comprehensive sanctions (OFAC/EU/UN) and FATF's call-for-action list. */
 export const SANCTIONED: readonly string[] = ['CU', 'IR', 'KP', 'SY', 'RU', 'BY', 'MM'];
 
-export const BLOCKED_COUNTRIES: readonly string[] = [...US_REGIONS, ...SANCTIONED];
+export const BLOCKED_COUNTRIES: readonly string[] = [...CLOSE_ONLY_REGIONS, ...SANCTIONED];
+
+/** Why a follower from a close-only place cannot copy, by place. */
+const CLOSE_ONLY_NAMES: Readonly<Record<string, string>> = { GB: 'the United Kingdom', CA: 'Canada' };
 
 /**
  * The EU's 27 plus Iceland, Liechtenstein and Norway, and the parts of the EU with their
@@ -75,12 +93,15 @@ export interface RegionPolicy {
 
 const ISO2 = /^[A-Z]{2}$/;
 
-/** 'de' / ' DE ' -> 'DE'; anything that is not two letters -> null. 'XX' / 'T1' (unknown, Tor) -> null. */
+/**
+ * 'de' / ' DE ' -> 'DE'; anything that is not two letters -> null. 'XX' / 'T1' (unknown, Tor) -> null.
+ * 'UK' (reserved in ISO 3166-1 for the United Kingdom, whose code is GB) -> 'GB', so it cannot slip past the UK's rule.
+ */
 export function normaliseCountry(c: string | null | undefined): string | null {
   if (typeof c !== 'string') return null;
   const t = c.trim().toUpperCase();
   if (!ISO2.test(t) || t === 'XX' || t === 'ZZ') return null;
-  return t;
+  return t === 'UK' ? 'GB' : t;
 }
 
 export const regionOf = (country: string | null): Region =>
@@ -106,13 +127,16 @@ export function regionPolicy(declared: string | null | undefined, observed?: str
   const country = RANK[ro] > RANK[rd] ? o : d;
   if (region === 'blocked') {
     const us = country !== null && US_REGIONS.includes(country);
+    const named = country !== null ? CLOSE_ONLY_NAMES[country] : undefined;
     return {
       region,
       allowed: false,
       maxLeverage: null,
       reason: us
         ? 'Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there.'
-        : 'Copy trading is not available in your country or from where you are connecting.',
+        : named
+          ? `Copy trading is not available to residents of ${named}, or to anyone connecting from there.`
+          : 'Copy trading is not available in your country or from where you are connecting.',
       country,
       mismatch,
     };

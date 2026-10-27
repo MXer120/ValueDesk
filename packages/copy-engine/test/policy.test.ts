@@ -10,6 +10,17 @@ test('the US, its territories and sanctioned countries are blocked, declared or 
   assert.match(seen.reason!, /United States/);
 });
 
+test('the United Kingdom and Canada are blocked like the US, declared or seen; not the Crown Dependencies or Overseas Territories', () => {
+  for (const c of ['GB', 'CA', 'gb', ' ca ', 'UK']) assert.equal(regionPolicy(c).allowed, false, c);
+  assert.equal(normaliseCountry('uk'), 'GB', 'UK is the reserved code of the United Kingdom');
+  assert.match(regionPolicy('GB').reason!, /United Kingdom/);
+  assert.match(regionPolicy('SG', 'CA').reason!, /Canada/);
+  assert.equal(regionPolicy('SG', 'GB').country, 'GB');
+  assert.equal(regionPolicy('DE', 'GB').allowed, false, 'the stricter of an EEA declaration and a UK connection');
+  assert.equal(regionPolicy('CA', 'DE').allowed, false);
+  for (const c of ['JE', 'GG', 'IM', 'GI', 'BM', 'KY', 'VG', 'AU', 'NZ', 'CH']) assert.equal(regionPolicy(c).allowed, true, c);
+});
+
 test('EEA residents copy at 2x at most; the stricter of declared and seen applies', () => {
   const de = regionPolicy('DE');
   assert.equal(de.allowed, true);
@@ -19,7 +30,7 @@ test('EEA residents copy at 2x at most; the stricter of declared and seen applie
   assert.equal(regionPolicy('FR', 'SG').maxLeverage, 2);
   assert.equal(regionPolicy('SG').maxLeverage, null);
   assert.equal(regionPolicy('CH').maxLeverage, null);
-  assert.equal(regionPolicy('GB').maxLeverage, null);
+  assert.equal(regionPolicy('CH').allowed, true);
 });
 
 test('no declared country, no copy; unknown observed codes are ignored', () => {

@@ -92,6 +92,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/news': { cacheControl: 'public, max-age=60, stale-while-revalidate=60' },
   // Release calendars change a few times a year; the process reads them twice a day.
   '/api/vs/calendar': { cacheControl: 'public, max-age=600, stale-while-revalidate=1800' },
+  // The status page (routes/status.ts): rebuilt at most every 30 s, the same for everyone.
+  '/api/vs/status': { cacheControl: 'public, max-age=30, stale-while-revalidate=30' },
 };
 
 export type Encoding = 'br' | 'gzip';

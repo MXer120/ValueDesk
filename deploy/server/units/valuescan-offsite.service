@@ -1,0 +1,69 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The off-server copies (deploy/server/bin/backup-offsite.sh run): this server's state,
+# encrypted with its own backup key, to the other server's vsbackup user. Which sets,
+# and where to: /etc/valuescan/offsite.env (deploy/contabo/server*/offsite.env). Without
+# that file this unit does nothing (ConditionPathExists).
+#
+# As root, but narrowly: it reads the state directory, /etc/valuescan and the journal,
+# takes each SQLite copy AS THE FILE'S OWNER (setpriv - so nothing in the executor's or
+# the API's directory ever becomes root's), and writes only its work directory and the
+# markers. It never reads the executor's kek, session.key or import.key (the script
+# refuses a set that holds one).
+#
+# By hand: sudo systemctl start valuescan-offsite.service
+#          sudo /opt/valuescan/bin/backup-offsite.sh push api-state      (one set, now)
+#          journalctl -u valuescan-offsite -n 50
+
+[Unit]
+Description=Valuescan off-server backup (encrypted, to the other server)
+After=network-online.target valuescan-backup.service
+Wants=network-online.target
+RequiresMountsFor=/var/lib/valuescan
+ConditionPathExists=/etc/valuescan/offsite.env
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/valuescan/ops.env
+EnvironmentFile=-/etc/valuescan/ops.local.env
+# A failed copy is sent to Telegram (at most every six hours per set).
+EnvironmentFile=-/etc/valuescan/alert.env
+Environment=HOME=/var/lib/valuescan/backup/offsite
+ExecStart=/opt/valuescan/bin/backup-offsite.sh run
+# The weekly index copy is ~4.6 GB at OFFSITE_RATE_MBPS (10 MB/s: about 8 minutes).
+TimeoutStartSec=3h
+SyslogIdentifier=valuescan-offsite
+
+# Out of the indexer's and the executor's way.
+Nice=15
+CPUWeight=10
+IOWeight=10
+IOReadBandwidthMax=/var/lib/valuescan 30M
+
+# --- hardening ---
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Root, with only what it needs: read every file (DAC_READ_SEARCH), write its markers into
+# the valuescan-owned state directory (DAC_OVERRIDE), become the file's
+# owner for a SQLite copy (SETUID/SETGID), hand the markers to valuescan (CHOWN, FOWNER).
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID CAP_CHOWN CAP_FOWNER
+AmbientCapabilities=
+UMask=0077
+# Its work directory and the markers; a WAL reader maps the -shm of the databases it
+# copies (state, folders, executor), so those directories are writable to it - the
+# copies themselves are taken read-only.
+ReadWritePaths=/var/lib/valuescan/backup -/var/lib/valuescan/state -/var/lib/valuescan/executor

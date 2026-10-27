@@ -175,16 +175,20 @@ export function namesCoin(n: Pick<NewsItem, 'title' | 'summary' | 'symbols'>, co
   return coinsIn(`${n.title} ${n.summary ?? ''}`, index, 8).includes(coin);
 }
 
-/** Tags out, a handful of entities back, whitespace collapsed. Titles are plain; bodies are HTML. */
+const NAMED: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/**
+ * Tags out, a handful of entities back - and numeric ones (WordPress feeds write
+ * &#8217; and &#039;) - each decoded once, whitespace collapsed. Titles are plain; bodies are HTML.
+ */
 export function stripHtml(s: string): string {
   return s
     .replace(/<[^>]*>/g, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/&nbsp;/gi, ' ')
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+      if (e[0] !== '#') return NAMED[e.toLowerCase()] ?? m;
+      const n = e[1] === 'x' || e[1] === 'X' ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : m;
+    })
     .replace(/\s+/g, ' ')
     .trim();
 }

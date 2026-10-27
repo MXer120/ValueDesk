@@ -346,7 +346,7 @@ interface PortfolioModel {
   refresh: () => void;
 }
 
-function deriveAccount(payload: any): AccountSummary | null {
+export function deriveAccount(payload: any): AccountSummary | null {
   const s = payload?.state;
   if (!s) return null;
   // wb x px, not wb: `px` is the coin's price in the account's quote unit (1 for
@@ -379,7 +379,7 @@ function deriveAccount(payload: any): AccountSummary | null {
   };
 }
 
-function derivePositions(
+export function derivePositions(
   rows: any[],
   statePayload: any,
   marks: Map<string, number>,
@@ -450,7 +450,7 @@ function derivePositions(
     .sort((a, b) => (b.notional ?? b.entryNotional) - (a.notional ?? a.entryNotional));
 }
 
-function deriveExposure(rows: PositionRow[], account: AccountSummary | null): Exposure | null {
+export function deriveExposure(rows: PositionRow[], account: AccountSummary | null): Exposure | null {
   if (rows.length === 0) return null;
   let long = 0;
   let short = 0;
@@ -491,7 +491,7 @@ function deriveExposure(rows: PositionRow[], account: AccountSummary | null): Ex
  * `excluded` rather than valued at zero, which would understate the total
  * silently.
  */
-function deriveOrders(rows: any[], marks: Map<string, number>): OpenOrdersSummary {
+export function deriveOrders(rows: any[], marks: Map<string, number>): OpenOrdersSummary {
   let notional = 0;
   let excluded = 0;
   for (const o of rows) {
@@ -510,7 +510,7 @@ function deriveOrders(rows: any[], marks: Map<string, number>): OpenOrdersSummar
   return { count: rows.length, notional, excluded };
 }
 
-function deriveChecks(account: AccountSummary | null, rows: PositionRow[]): Checks | null {
+export function deriveChecks(account: AccountSummary | null, rows: PositionRow[]): Checks | null {
   if (!account) return null;
   const av = account.accountValue;
   // Scaled to the account: an absolute epsilon would be far too tight on a
@@ -1003,7 +1003,7 @@ function useVenueSeries(address: string | null): VenueSeries {
  *
  * Signed negative, and 0 when the series never falls.
  */
-function maxDrawdown(values: number[]): number {
+export function maxDrawdown(values: number[]): number {
   let peak = -Infinity;
   let worst = 0;
   for (const v of values) {
@@ -1013,7 +1013,7 @@ function maxDrawdown(values: number[]): number {
   return worst;
 }
 
-function sliceCurve(
+export function sliceCurve(
   spine: ChartPoint[],
   period: Period,
   value: (p: ChartPoint) => number,
@@ -1142,7 +1142,7 @@ function SeriesMenu({ mode, onMode, airdrops, onAirdrops, airdropNote }: {
   );
 }
 
-function windowCurve(curve: Array<{ t: number; pnl: string }>, period: Period): CurveWindow {
+export function windowCurve(curve: Array<{ t: number; pnl: string }>, period: Period): CurveWindow {
   const days = PERIOD_DAYS[period];
   const since = days === null ? -Infinity : Date.now() - days * 86_400_000;
 
@@ -1181,7 +1181,7 @@ function windowCurve(curve: Array<{ t: number; pnl: string }>, period: Period): 
 }
 
 /** The one total from a per-coin bucket list, or null if it is not a single total. */
-function soleTotal(totals: CoinTotal[]): { amount: number; coin: string | null } | null {
+export function soleTotal(totals: CoinTotal[]): { amount: number; coin: string | null } | null {
   const nonZero = totals.filter((t) => num(t.amount) !== 0);
   if (nonZero.length === 0) return totals.length > 0 ? { amount: 0, coin: totals[0]!.coin } : null;
   // Two coins cannot be added: a spot buy is charged in the base coin and a sell
@@ -1298,10 +1298,11 @@ function CrossFadeCal({ points, mode }: { points: ChartPoint[]; mode: SeriesMode
 }
 
 /** "+$1.2K" / "-$38" - a calendar cell has room for three or four characters. */
-function fmtCompactSigned(v: number): string {
+export function fmtCompactSigned(v: number): string {
   const a = Math.abs(v);
   const sign = v > 0 ? '+' : v < 0 ? '\u2212' : '';
-  const body = a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(1)}K` : a >= 100 ? a.toFixed(0) : a.toFixed(2);
+  // Each step at the figure that would round up into the next ($999.6 is $1.0K, not $1000).
+  const body = a >= 999_950 ? `${(a / 1e6).toFixed(1)}M` : a >= 999.5 ? `${(a / 1e3).toFixed(1)}K` : a >= 99.995 ? a.toFixed(0) : a.toFixed(2);
   return `${sign}$${body}`;
 }
 
@@ -1741,7 +1742,7 @@ export function useOnChain(address: string | null): OnChain {
  * with no market cannot be valued, so it is counted separately and reported
  * rather than silently valued at zero.
  */
-function spotValue(
+export function spotValue(
   rows: Array<Record<string, unknown>>,
   prices: Map<string, number>,
 ): { usd: number | null; unpriced: number } {

@@ -23,10 +23,15 @@
  *               prompt. Closing, cancelling, reduce-only orders, transfers between
  *               the wallet's own accounts and withdrawals stay possible, so nobody
  *               is locked into a position. The United States and its territories,
- *               as for copy trading (owner's decision for copying, 2026-10-23).
- *               WHETHER THIS LEVEL APPLIES TO MANUAL TRADING, AND WHICH FURTHER
- *               COUNTRIES BELONG HERE (e.g. Canada / Ontario, the United Kingdom),
- *               IS THE OWNER'S DECISION: docs/legal/OWNER-DECISIONS.md.
+ *               as for copy trading (owner's decision for copying, 2026-10-23),
+ *               and the United Kingdom and Canada (owner's decision, 2026-10-27):
+ *               the UK alone, not the Crown Dependencies (JE, GG, IM) or the
+ *               British Overseas Territories, which have their own regulators and
+ *               are outside the FCA's retail ban; Canada as a whole, since an IP
+ *               address does not reliably tell the province
+ *               (packages/copy-engine/src/policy.ts CLOSE_ONLY_REGIONS - the same
+ *               list; jurisdictions.test.ts checks). Further changes are the
+ *               owner's decision: docs/legal/OWNER-DECISIONS.md.
  *
  * Changing a list changes the Terms of use (they name every entry): raise
  * SITE_TERMS_VERSION (legal/acceptance.ts) with it, so every wallet accepts the
@@ -76,7 +81,14 @@ export const CLOSE_ONLY_COUNTRIES = Object.freeze([
   Object.freeze({ code: 'AS', name: 'American Samoa' }),
   Object.freeze({ code: 'MP', name: 'Northern Mariana Islands' }),
   Object.freeze({ code: 'UM', name: 'US Minor Outlying Islands' }),
+  Object.freeze({ code: 'GB', name: 'United Kingdom' }),
+  Object.freeze({ code: 'CA', name: 'Canada' }),
 ]);
+
+/** The US and its territories: the close-only places named together in the reason. */
+const US_CODES = Object.freeze(['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM']);
+/** How a reason names the other close-only places. */
+const CLOSE_ONLY_PLACE = Object.freeze({ GB: 'the United Kingdom', CA: 'Canada' });
 
 /**
  * The legal pages (router.ts LEGAL_PAGES - docs.test.ts checks the two agree): the
@@ -89,12 +101,12 @@ const codes = (list) => list.map((c) => c.code);
 export const SANCTIONED_CODES = Object.freeze(codes(SANCTIONED_COUNTRIES));
 export const CLOSE_ONLY_CODES = Object.freeze(codes(CLOSE_ONLY_COUNTRIES));
 
-/** 'de' / ' DE ' -> 'DE'; not two letters, 'XX' (unknown), 'T1' (Tor) -> null. As policy.ts normaliseCountry. */
+/** 'de' / ' DE ' -> 'DE'; not two letters, 'XX' (unknown), 'T1' (Tor) -> null; 'UK' -> 'GB'. As policy.ts normaliseCountry. */
 export function normaliseCountry(c) {
   if (typeof c !== 'string') return null;
   const t = c.trim().toUpperCase();
   if (!/^[A-Z]{2}$/.test(t) || t === 'XX' || t === 'ZZ') return null;
-  return t;
+  return t === 'UK' ? 'GB' : t;
 }
 
 /** A region code as Vercel sends it: one to three letters or digits, else null. */
@@ -139,11 +151,12 @@ function blocked(country, place, source) {
 }
 
 function closeOnly(country, source) {
+  const where = US_CODES.includes(country) ? 'the United States or its territories' : CLOSE_ONLY_PLACE[country] ?? nameOf(country);
   return {
     level: 'close-only',
     country,
     place: nameOf(country),
-    reason: 'Trading through ValueDesk is not available to residents of the United States or its territories, or to anyone connecting from there. You can still close positions, cancel orders and withdraw.',
+    reason: `Trading through ValueDesk is not available to residents of ${where}, or to anyone connecting from there. You can still close positions, cancel orders and withdraw.`,
     source,
   };
 }

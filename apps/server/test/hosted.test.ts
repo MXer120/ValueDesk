@@ -260,6 +260,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/fed/live read',
       'GET /api/vs/fedwatch read',
       'GET /api/vs/fedwatch/history read',
+      'GET /api/vs/feedback/image read',
       'GET /api/vs/indicator read',
       'GET /api/vs/indicators read',
       'GET /api/vs/lbrow read',
@@ -274,6 +275,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/oracle read',
       'GET /api/vs/positioning read',
       'GET /api/vs/screener read',
+      'GET /api/vs/status read',
       'GET /api/vs/whales read',
       'GET /ws/liq read',
       'POST /api/folders/erase write',
@@ -289,6 +291,11 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/folders/upload/finish write',
       'POST /api/folders/upload/put write',
       'POST /api/folders/upload/start write',
+      'POST /api/vs/client-errors write',
+      'POST /api/vs/feedback write',
+      'POST /api/vs/feedback/poll write',
+      'POST /api/vs/feedback/thread write',
+      'POST /api/vs/feedback/upload write',
     ],
   );
   // Nothing is left marked provisional: the list is final.
@@ -305,8 +312,11 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
   ];
   for (const r of HOSTED_ROUTES) {
     for (const re of forbidden) assert.ok(!re.test(r.url), `${r.method} ${r.url} must not be public`);
-    // The index is read-only; the one thing a visitor changes is their own knowledge folders.
-    if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
+    // The index is read-only; the one thing a visitor changes is their own knowledge folders,
+    // and the one thing a visitor sends is feedback and error reports to the owner (routes/reports.ts).
+    if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
+    else if (r.url.startsWith('/api/vs/feedback') || r.url === '/api/vs/client-errors') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
+    else if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
     else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
   }
   // HEAD follows GET; nothing else is implied.

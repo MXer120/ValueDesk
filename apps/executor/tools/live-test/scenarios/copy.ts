@@ -45,6 +45,27 @@ async function copyStops(t: T) {
   return (await t.account.openOrders(t.main.name)).filter((o) => o.clOrdID?.startsWith('vds-') && o.stop);
 }
 
+/**
+ * How long each copied order took: from the leader's fill to the follower's
+ * copy of it, both by SoDEX's own timestamps (one clock). The copier sees the
+ * leader on the public trade stream and merges prints for 150 ms; the rest is
+ * the order's way to SoDEX. Each copy order is paired with the last leader
+ * fill before it.
+ */
+async function copyLatencies(t: T): Promise<number[]> {
+  const leader = (await t.leaderFills()).map((f) => f.time).sort((a, b) => a - b);
+  const mine = (await t.account.fills(t.main.name)).filter((f) => f.clOrdID?.startsWith('vdc-'));
+  // One order can print as several fills: its first fill counts.
+  const first = new Map<string, number>();
+  for (const f of mine) first.set(f.orderId, Math.min(first.get(f.orderId) ?? Infinity, f.time));
+  const out: number[] = [];
+  for (const at of first.values()) {
+    const before = leader.filter((x) => x <= at);
+    if (before.length) out.push(at - before[before.length - 1]!);
+  }
+  return out.sort((a, b) => a - b);
+}
+
 async function legs(t: T, id: string): Promise<string[]> {
   return (await t.exec.activity(id)).filter((e) => e.kind === 'order').reverse().map((e) => e.reason);
 }
@@ -77,6 +98,14 @@ export const COPY_SCENARIOS: Scenario[] = [
       await t.live('the activity log names the legs in order', async () => {
         const l = await legs(t, c.subscription.id);
         t.check(['open', 'increase', 'decrease', 'close'].every((x) => l.includes(x)), `legs: ${l.join(', ')}`);
+      });
+      await t.live('each leader fill is copied in under a second', async () => {
+        const ms = await copyLatencies(t);
+        t.note(`leader fill to copy fill: ${ms.map((x) => `${x} ms`).join(', ')}`);
+        t.check(ms.length >= 4, `${ms.length} copied orders timed`);
+        const median = ms[Math.floor(ms.length / 2)] ?? Infinity;
+        t.check(median < 1_000, `median ${median} ms (under 1 s)`);
+        t.check((ms[ms.length - 1] ?? Infinity) < 3_000, `slowest ${ms[ms.length - 1]} ms (under 3 s)`);
       });
     },
   }),
@@ -173,18 +202,20 @@ export const COPY_SCENARIOS: Scenario[] = [
     },
   }),
   copy('copy.tp-fires', 'The copy\'s take-profit or stop-loss fires on SoDEX', 'SoDEX fires the copy\'s stop by itself; the copy then leaves the market alone until the leader is flat', {
-    slow: true,
-    timeoutMs: 35 * MIN,
+    // The stop is SoDEX's own order and fires the moment the mark crosses it; what takes time is the market reaching it.
+    // At the highest leverage the region allows and the tightest stops (1% of the margin each way) that is a small move;
+    // under the EEA's 2x it is 0.5% either way, which can take a while: inconclusive, not failed, if the market sits still.
+    timeoutMs: 22 * MIN,
     cost: (U) => ({ takerUsd: 2 * U, makerUsd: 0, peakUsd: U, leaderTakerUsd: 4 * U, leaderPeakUsd: 2 * U }),
     async run(t) {
-      const lev = t.expectedLeverage(10);
+      const lev = t.expectedLeverage(50);
       const c = await t.subscribe({ sizingMode: 'fixedNotional', fixedNotionalUsd: t.U, maxLeverage: lev, stopLossPct: 0.01, takeProfitPct: 0.01 });
       t.note(`at ${lev}x a 1% move of the margin is ${(1 / lev).toFixed(2)}% of the price`);
       await ready(t, c.subscription.id);
       await t.leader({ buyUsd: t.U });
       await t.expectFollowerUsd(t.U, 'the follower opened');
       await t.live('a stop fires and the copy is flat while the leader is not', async () => {
-        await t.waitFor('the follower is flat (its stop fired)', async () => ((await t.account.position(t.main.name)) === 0 ? true : null), { timeoutMs: 30 * MIN, everyMs: 5_000, inconclusive: true });
+        await t.waitFor('the follower is flat (its stop fired)', async () => ((await t.account.position(t.main.name)) === 0 ? true : null), { timeoutMs: 20 * MIN, everyMs: 2_000, inconclusive: true });
         t.check((await t.leaderUsd()) > 0, 'the leader still holds');
         await t.leader({ buyUsd: t.U });
         await t.waitFor('the add is skipped after the stop', async () => ((await t.exec.activity(c.subscription.id)).some((e) => e.kind === 'skip' && (e.reason === 'after-take-profit' || e.reason === 'after-stop-loss')) ? true : null), { timeoutMs: 45_000 });

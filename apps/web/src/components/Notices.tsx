@@ -7,6 +7,7 @@ import { indexEnabled, subscribeIndex, IDLE_PROGRESS, type IndexProgress } from 
 import {
   markNoticesRead, notices, subscribeNotices, syncSystemNotices, unreadImportant,
 } from '../notices';
+import { openFeedback } from '../feedback/FeedbackButton';
 
 function setupDone(): boolean {
   try { return localStorage.getItem('vs.setup.done') != null; }
@@ -59,12 +60,20 @@ export function Notices({ address }: { address: string | null }) {
             ) : (
               <ul className="navnotes__list">
                 {list.map((n) => (
-                  <li key={n.id} className={`navnotes__row${n.important && !n.read ? ' is-new' : ''}`}>
+                  <li key={n.id} className={`navnotes__row${n.important && !n.read ? ' is-new' : ''}${n.kind === 'reply' ? ' is-link' : ''}`}>
                     <span className={`navnotes__mark is-${n.kind}`} aria-hidden="true">{markOf(n.kind)}</span>
-                    <span className="navnotes__copy">
-                      <span className="navnotes__k">{n.title}</span>
-                      <span className="navnotes__b">{n.body}</span>
-                    </span>
+                    {n.kind === 'reply' && n.ref ? (
+                      /* A reply to the visitor's feedback: the row opens that chat (feedback/FeedbackHost.tsx). */
+                      <button type="button" className="navnotes__copy navnotes__open" onClick={() => { setOpen(false); openFeedback({ thread: n.ref }); }}>
+                        <span className="navnotes__k">{n.title}</span>
+                        <span className="navnotes__b">{n.body}</span>
+                      </button>
+                    ) : (
+                      <span className="navnotes__copy">
+                        <span className="navnotes__k">{n.title}</span>
+                        <span className="navnotes__b">{n.body}</span>
+                      </span>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -81,6 +90,7 @@ function markOf(kind: string): string {
   if (kind === 'withdraw') return 'Out';
   if (kind === 'error') return '!';
   if (kind === 'system') return '•';
+  if (kind === 'reply') return '✉';
   return 'i';
 }
 

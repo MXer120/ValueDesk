@@ -10,15 +10,29 @@ deploy/server/
   units/                   systemd units and timers
   env/                     templates of /etc/valuescan/*.env (every variable, commented)
   caddy/Caddyfile.template TLS in front of the API and the copy executor (/api/copy/*)
-  journald/valuescan.conf  log retention
+  journald/valuescan.conf  the main journal: persistent, a year
+  journald/journald@pii.conf  the namespace "pii" (the API's and the executor's logs): 14 days
   bin/                     installed to /opt/valuescan/bin
     release.sh             install a release, switch to it, restart what changed in order, roll back
     backup.sh              one index backup to S3 or the data volume (run nightly by a timer);
                            --executor: the copy executor's database
     backup-index.mjs       the consistent copy itself (VACUUM INTO, read-only)
     restore.sh             put a backup (or a seed) in place
-    healthcheck.mjs        one health pass (run every minute by a timer)
+    healthcheck.mjs        one health pass (run every minute by a timer); alerts to Telegram
+    telegram.mjs           sends a Telegram message (the health check, the off-server copies, the uptime watcher)
+    telegram-setup.sh      writes /etc/valuescan/alert.env once: token, chat id, a test message
+    backup-offsite.sh      the off-server copies, encrypted, to the other server (every 15 min by a timer)
+    backup-receive.sh      the receiving end: the forced command of the vsbackup user
+    backup-crypt.mjs       their encryption (AES-256-GCM, zstd), Node only
+    backup-restore.sh      open, check, put back an off-server copy; the restore drill
+    offsite-setup.sh       the one-time setup of keys and the vsbackup user, both ends
+    builder-snapshot.sh    server 1: the builder ledger for server 2's ledger pull
+    executor-secrets.sh    the executor's kek, session.key and import.key as one offline block
 ```
+
+The two Contabo servers' own parts (drop-ins, the health check's role, what each
+sends and receives, ssh hardening) are `deploy/contabo` (its README has the inventory
+and the rebuild). Backups, restore and the drill: `docs/deploy/BACKUPS.md`.
 
 Target: Amazon Linux 2023, arm64 (x86_64 works too). Run it with
 `deploy/release/bootstrap-instance.sh` from your workstation - through SSM on the
@@ -32,7 +46,7 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 - there is no ops bucket (`OPS_BUCKET` empty): a release arrives over SSH
   (`release.sh <tag> --from=<file>`), backups stay on the data volume, and EBS
   snapshots of that volume carry them off the box;
-- the health check alerts nobody (no SNS without a role): it logs.
+- the health check alerts through Telegram (`alert.env`; there is no SNS without a role).
 
 ## What ends up where
 
@@ -68,7 +82,9 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 | `caddy.service` | Caddy as `caddy`, ports 80 and 443 | on failure | TLS for the origin name; passes on only requests that carry the origin secret; `/api/copy/*` to the executor, the rest to the API |
 | `valuescan-backup.timer` -> `.service` | `backup.sh`, 03:17 UTC, I/O-throttled | - | catches up after a stop; wants the next one |
 | `valuescan-executor-backup.service` | `backup.sh --executor` as `valuescan-executor`, after the index backup | - | the executor's database only, never `kek` or `session.key` |
-| `valuescan-health.timer` -> `.service` | `healthcheck.mjs`, every minute | - | alerts on a change of state |
+| `valuescan-health.timer` -> `.service` | `healthcheck.mjs`, every minute | - | alerts on a change of state (Telegram) |
+| `valuescan-offsite.timer` -> `.service` | `backup-offsite.sh run`, every 15 minutes, as root with a narrow capability set | - | does nothing without `/etc/valuescan/offsite.env` |
+| `valuescan-offsite-prune.timer` -> `.service` | `backup-receive.sh prune` as `vsbackup`, daily | - | does nothing without `/etc/vsbackup/receive.env` |
 
 `node --import tsx` runs the TypeScript sources directly in one process (the server
 has no build step; `tsx` is a devDependency of the server workspace, which is why a
@@ -137,11 +153,13 @@ Everything logs to the journal; there are no log files, so there is nothing for
 logrotate to rotate.
 
 ```
-journalctl -u valuescan-api -f
+journalctl --namespace=pii -u valuescan-api -f   # the API and the executor: namespace "pii" (below)
 journalctl -u valuescan-indexer -f               # one status line a minute
 journalctl -t valuescan-health -n 20 -o cat      # one JSON line per pass (-t: the check's own lines, without systemd's)
 journalctl -u valuescan-backup -n 50
-journalctl -u valuescan-executor -f
+journalctl --namespace=pii -u valuescan-executor -f
+journalctl -u valuescan-offsite -n 50            # the off-server copies
+journalctl --namespace='*' -u valuescan-api      # both namespaces (systemd's own start/stop lines are in the main one)
 journalctl -t valuescan-executor-backup -n 20
 journalctl -u caddy -f                           # certificate issuance and renewal
 ```
@@ -149,9 +167,18 @@ journalctl -u caddy -f                           # certificate issuance and rene
 From the workstation, without a shell on the instance:
 `deploy/release/remote.sh logs indexer 100` (and `api`, `executor`, `caddy`, `health`, `backup`, `executor-backup`).
 
-- Retention: `journald/valuescan.conf` keeps 14 days and at most 1 GB. The API's
-  request lines carry the client address (needed for abuse handling, personal data
-  under GDPR) and the path, never the query string.
+- Retention: the main journal is **persistent** and keeps **a year** (`journald/valuescan.conf`;
+  Contabo's image kept it in memory, lost at every reboot) - the indexer, the health check,
+  backups, Caddy, sshd, systemd. It is also copied to the other server once a day
+  (`backup-offsite.sh`, set `journal`). The API's request lines carry the client address
+  (needed for abuse handling, personal data under GDPR) and the path, never the query
+  string; the executor's operating log carries wallet addresses. Those two units log into
+  the namespace **pii** (`LogNamespace=pii`, `journald/journald@pii.conf`), which keeps
+  **14 days**, as the privacy policy promises, and is never copied anywhere. A year for
+  them as well needs the privacy policy changed first. What the executor DID is kept in
+  its audit table in executor.db, which the backups carry.
+- rsyslog is disabled on the Contabo servers (`deploy/contabo/apply-overlay.sh`): it only
+  duplicated the journal into /var/log/messages, IP addresses included, for weeks.
 - Caddy writes **no access log**, deliberately: it would record request headers,
   and every request carries the origin secret.
 - If a file log is ever added, give it a logrotate rule with `rotate 14`, `daily`,
@@ -172,10 +199,12 @@ From the workstation, without a shell on the instance:
   as one passphrase-encrypted block (also `import.key`, for keys followers bring); store
   it apart from the database backups and the passphrase apart from both, and
   `executor-secrets.sh import < block` puts them back on a new server. Without it, a lost
-  disk means every follower registers a new key before anything of theirs trades. The builder ledger and
-  signing key in `/var/lib/valuescan/state` are not backed up either (DEPLOY.md
-  section 16). Nothing else on the instance is state (code comes from a release,
-  configuration from this directory and SSM, certificates are re-issued).
+  disk means every follower registers a new key before anything of theirs trades. The builder ledger, the
+  signing key and the knowledge folders in `/var/lib/valuescan/state` had no backup at all
+  until 2026-10-27; now they, executor.db, the journal and (weekly) the index are copied
+  encrypted to the other server - `backup-offsite.sh`, `docs/deploy/BACKUPS.md`. Nothing
+  else on the instance is state (code comes from a release, configuration from this
+  directory and `deploy/contabo`, certificates are re-issued).
 - **How:** `backup-index.mjs` opens the database read-only and runs `VACUUM INTO`,
   one read transaction - a consistent copy while the indexer keeps writing. The
   copy is integrity-checked, compressed with zstd and streamed to
@@ -257,8 +286,22 @@ instance itself (numbers and booleans, no secret needed); it never opens the ind
 file, so its unit has no write access to the index directory. During a rotation it
 sends the first value of `VALUESCAN_ORIGIN_SECRET`.
 
-With `ALERT_TOPIC_ARN` set it publishes to the SNS topic after two failing passes in
-a row, on recovery, and every six hours while it stays unhealthy.
+| `peer:<name>` | the other server or the public site does not answer 2xx, or answers `ok:false` (the cross-watch: `HEALTH_PEERS_GATED` get the origin secret over https, `HEALTH_PEERS_PUBLIC` never) |
+
+**Roles.** `/etc/valuescan/health.env` (`deploy/contabo/server*/health.env`) picks the
+checks (`HEALTH_CHECKS`), the units (`HEALTH_UNITS`), the peers and the backup markers
+of each server: server 1 the API ones and server 2's executor as a peer; server 2 the
+executor ones and server 1's API and the site as peers. So a server that dies entirely
+is still reported - by the other one; both dead at once, by the GitHub watcher
+(`.github/workflows/uptime.yml`).
+
+**Alerts.** To Telegram (`ALERT_TELEGRAM_TOKEN`, `ALERT_TELEGRAM_CHAT_ID` in
+`/etc/valuescan/alert.env`, root 0600, written by `telegram-setup.sh`) and/or the SNS
+topic `ALERT_TOPIC_ARN` (AWS only): after two failing passes in a row, when another check
+fails on two passes while already alerted, every six hours while it stays unhealthy,
+and on recovery. A message names the server (`HEALTH_SERVER_NAME`) and each failing
+check with its note - never a secret. When it cannot be delivered, the next pass tries
+again.
 
 ## Updating what is pinned
 
@@ -278,6 +321,10 @@ node --disable-warning=ExperimentalWarning --test "deploy/server/bin/*.test.mjs"
 
 `backup-index.test.mjs` copies a database that another process is writing to and
 proves the copy consistent; `healthcheck.test.mjs` runs the check against a stand-in
-API. The shell scripts were exercised on Linux with every external command stubbed
+API and a stand-in Telegram (roles, the cross-watch, alert delivery and retry);
+`telegram.test.mjs` the sender (the token never in an error); `offsite.test.mjs` the
+off-server copies end to end on one machine (encrypt, send, receive, prune, open, the
+drill, and the refusal of a kek). Every suite of the repository at once:
+`node deploy/ci/run-tests.mjs` (CI, the Vercel build and server releases run it). The shell scripts were exercised on Linux with every external command stubbed
 (release, rollback, refusals, backup, restore, bootstrap in a private namespace,
 the data-volume decisions); those harnesses are not part of the repository.

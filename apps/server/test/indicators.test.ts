@@ -27,9 +27,10 @@ test("FRED's CSV: a row per period, '.' left out", () => {
 
 test('the transforms: changes on the period and the year before, one decimal, half away from zero', () => {
   const obs: Array<[string, number]> = [['2025-01-01', 100], ['2025-02-01', 100.05], ['2026-01-01', 103], ['2026-02-01', 102.9]];
-  assert.deepEqual(transform(obs, { transform: 'mm', decimals: 1 }), [['2025-02-01', 0.1], ['2026-01-01', 2.9], ['2026-02-01', -0.1]]);
+  // No change across the gap from February 2025 to January 2026 (macro-edges.test.ts).
+  assert.deepEqual(transform(obs, { transform: 'mm', decimals: 1 }), [['2025-02-01', 0.1], ['2026-02-01', -0.1]]);
   assert.deepEqual(transform(obs, { transform: 'yy', decimals: 1 }), [['2026-01-01', 3], ['2026-02-01', 2.8]]);
-  assert.deepEqual(transform(obs, { transform: 'diff', decimals: 0 }), [['2025-02-01', 0], ['2026-01-01', 3], ['2026-02-01', 0]]);
+  assert.deepEqual(transform(obs, { transform: 'diff', decimals: 0 }), [['2025-02-01', 0], ['2026-02-01', 0]]);
   assert.deepEqual(transform([['2026-01-01', 7079]], { transform: 'thousandths', decimals: 3 }), [['2026-01-01', 7.079]]);
   assert.deepEqual(
     transform([['2026-01-01', 4], ['2026-01-02', 4], ['2026-01-03', 4.25], ['2026-01-04', 4.25]], { transform: 'steps', decimals: 2 }),

@@ -360,6 +360,11 @@ class BrowserAlgos {
       builderRate: (a) => (activeBuilder(cfg.builder) ? builderRateToFraction(feeNow('perps', a.owner)) : 0),
       // The copy region rules (policy.ts): the country declared in the copy terms and the one the executor saw, stricter wins.
       policyFor: (a) => regionPolicy(localTerms(a.owner)?.country ?? a.country ?? null, getLiveCopy().viewerCountry ?? a.observedCountry ?? null),
+      // The operator's emergency brake (/api/health): live algos are held while it is on.
+      brake: () => {
+        const b = tradingConfig().brake;
+        return b?.algos || b?.trading ? `ValueDesk paused algo orders: ${b.reason}` : null;
+      },
       problem: async (a) => {
         const t = getTradingState();
         if (t.status !== 'enabled' || t.owner !== a.owner) return 'Held: enable trading in this browser - its children are signed with your trading key.';

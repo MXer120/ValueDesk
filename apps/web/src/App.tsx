@@ -4,7 +4,7 @@ import { PrivacyProvider } from './privacy';
 import { NavBar, scanHref } from './components/NavBar';
 import { SideBar } from './components/SideBar';
 import './components/shell.css';
-import { DEFAULT_TAB, OPEN_TAB_EVENT, TABS, landingTab, legalForPath, pathForTab, tabForPath, useRoute, type LegalPage, type Tab } from './router';
+import { DEFAULT_TAB, OPEN_TAB_EVENT, TABS, isStatusPath, landingTab, legalForPath, pathForTab, tabForPath, useRoute, type LegalPage, type Tab } from './router';
 import { api, type Engine } from './api';
 import { useAsync, useConnState, useMediaQuery, useSession, useStored, useSymbols } from './hooks';
 import { hub } from './ws';
@@ -13,6 +13,7 @@ import { StatusFooter } from './components/StatusFooter';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
+import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
 import { UnlockDialog } from './components/account/UnlockDialog';
@@ -25,6 +26,7 @@ import { configureFromHealth } from './trading/config';
 import { restoreTrading } from './trading/session';
 import { ToastProvider } from './toast';
 import { FillToasts } from './components/FillToasts';
+import { FeedbackHost } from './feedback/FeedbackHost';
 import { lazyPage, type LazyPage } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
@@ -74,6 +76,8 @@ const TickerBar = lazyPage('ticker', () => import('./components/Market').then((m
    only when a legal link is hovered, focused or followed - or when the app
    starts on a legal URL. Never part of the idle prefetch below. */
 const LegalDoc = lazyPage('legal', () => import('./legal/LegalView').then((m) => m.LegalView));
+/* The status page (status/): its own small chunk, loaded like the legal pages'. */
+const StatusDoc = lazyPage('status', () => import('./status/StatusPage').then((m) => m.StatusPage));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const PAGES: Record<Tab, LazyPage<any>> = {
@@ -94,10 +98,10 @@ const bootTabs = (): Tab[] => {
   const settled = off(landingTab(window.location.pathname));
   return first === settled ? [first] : [first, settled];
 };
-/** The code the first render needs: a legal page's, or the landing tab's (above). */
+/** The code the first render needs: a legal page's, the status page's, or the landing tab's (above). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const bootPages = (): LazyPage<any>[] =>
-  legalForPath(window.location.pathname) ? [LegalDoc] : bootTabs().map((t) => PAGES[t]);
+  legalForPath(window.location.pathname) ? [LegalDoc] : isStatusPath(window.location.pathname) ? [StatusDoc] : bootTabs().map((t) => PAGES[t]);
 /* The landing page's first index reads leave now, when this browser has started
    on this URL before: the page asks for them in an effect, after its code has
    arrived and rendered, and takes the answers that are already there (serverFetch.ts). */
@@ -139,7 +143,7 @@ function AppShell() {
   const [address, setAddress] = useStored<string | null>('ot.address', null);
   /* The page comes from the URL. `setTab` keeps its name because ~15 call
    * sites below pass it around as a callback; it pushes history now. */
-  const [tab, navigate, legal, navigateLegal] = useRoute();
+  const [tab, navigate, legal, navigateLegal, status, navigateStatus] = useRoute();
   /* Change page only once its code is in; the latest request wins. After the
      idle prefetch every page is in, and this is a plain synchronous navigate. */
   const navSeq = useRef(0);
@@ -184,6 +188,18 @@ function AppShell() {
     };
     LegalDoc.preload().then(go, go);
   }, [navigateLegal]);
+  /* The status page the same way. */
+  const openStatus = useCallback(() => {
+    const seq = ++navSeq.current;
+    if (StatusDoc.ready) {
+      navigateStatus();
+      return;
+    }
+    const go = () => {
+      if (seq === navSeq.current) navigateStatus();
+    };
+    StatusDoc.preload().then(go, go);
+  }, [navigateStatus]);
   /* A legal link anywhere in the app (legal/LegalGate.tsx LegalLink) opens its page in place. */
   useEffect(() => {
     const on = (e: Event) => {
@@ -197,10 +213,10 @@ function AppShell() {
   const knowledge = useKnowledge(address);
   /* /knowledge while it is off: the default page instead, in place (no history entry to come back to). */
   useEffect(() => {
-    if (tab !== 'knowledge' || knowledge || legal) return;
+    if (tab !== 'knowledge' || knowledge || legal || status) return;
     window.history.replaceState(null, '', pathForTab(DEFAULT_TAB));
     window.dispatchEvent(new PopStateEvent('popstate'));
-  }, [tab, knowledge, legal]);
+  }, [tab, knowledge, legal, status]);
   /* A page opened from outside the shell's props (router.ts openTab): the rail's quick drop, the save sheet. */
   useEffect(() => {
     const on = (e: Event) => {
@@ -210,8 +226,8 @@ function AppShell() {
     window.addEventListener(OPEN_TAB_EVENT, on);
     return () => window.removeEventListener(OPEN_TAB_EVENT, on);
   }, [setTab, knowledge]);
-  /* The tab whose page is on screen - none while a legal page is. */
-  const shown: Tab | null = legal ? null : tab;
+  /* The tab whose page is on screen - none while a legal page or the status page is. */
+  const shown: Tab | null = legal || status ? null : tab;
   usePagePrefetch();
   const openScanAddress = useCallback((addr: string, venue?: Venue) => {
     window.location.href = venue
@@ -488,6 +504,9 @@ function AppShell() {
       <Guarded name="Maintenance">
         <MaintenanceBanner />
       </Guarded>
+      <Guarded name="Brake">
+        <BrakeBanner health={health} />
+      </Guarded>
 
       <div className="app">
         {/* On the trade page the symbol/price header is a dashboard panel the
@@ -562,6 +581,10 @@ function AppShell() {
           <Guarded name="Legal"><LegalDoc page={legal} onOpen={openLegal} /></Guarded>
         )}
 
+        {status && !legal && (
+          <Guarded name="Status"><StatusDoc /></Guarded>
+        )}
+
         </div>
 
         {/* Account ACTIONS - enable trading, turn it off, advanced key options -
@@ -570,6 +593,10 @@ function AppShell() {
             every Connect button opens (AppKit only ever appears behind a row of
             it). All three are portals, closed until asked for. */}
         <FillToasts address={address} />
+        {/* Send feedback: the chat with the team, its right-click entry and the watch for replies (feedback/). */}
+        <Guarded name="Feedback">
+          <FeedbackHost />
+        </Guarded>
         <Guarded name="Account">
           <AccountController
             address={address}
@@ -593,9 +620,10 @@ function AppShell() {
         </Guarded>
         {/* The first-visit clickwrap (legal/acceptance.ts): until this browser accepts the
             current terms - with a connected wallet, ticked and signed in one step. Not over
-            a legal page, so what it links to can be read first. */}
+            a legal page, so what it links to can be read first, nor over the status page,
+            which anyone may read without accepting anything. */}
         <Guarded name="Terms">
-          <TermsGate hidden={!!legal} onOpen={openLegal} address={address} provider={provider} />
+          <TermsGate hidden={!!legal || status} onOpen={openLegal} address={address} provider={provider} />
         </Guarded>
         {/* The knowledge folders (folders/): the wallet's sign-in, and "Save to folder" from the chart and
             News - which offer it only while this is mounted, so only while Knowledge is on. */}
@@ -637,6 +665,8 @@ function AppShell() {
             onHelpOpen={setHelpOpen}
             legal={legal}
             onOpenLegal={openLegal}
+            status={status && !legal}
+            onOpenStatus={openStatus}
           />
         </Guarded>
       </div>
@@ -679,6 +709,7 @@ function usePagePrefetch(): void {
       const t = tabForPath(el.pathname);
       if (t && !PAGES[t].ready && (t !== 'knowledge' || knowledgeOnAtBoot())) PAGES[t].preload().catch(() => {});
       if (!t && legalForPath(el.pathname) && !LegalDoc.ready) LegalDoc.preload().catch(() => {});
+      if (!t && isStatusPath(el.pathname) && !StatusDoc.ready) StatusDoc.preload().catch(() => {});
     };
     document.addEventListener('pointerover', onIntent, { passive: true });
     document.addEventListener('focusin', onIntent);

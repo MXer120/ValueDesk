@@ -121,7 +121,7 @@ export const RELEASE_FIELDS: Readonly<Record<string, readonly ReleaseField[]>> =
 const KIND_BY_SLUG: Record<string, string> = Object.fromEntries(Object.keys(RELEASE_FIELDS).map((s) => [s.toLowerCase(), s]));
 const ID_RE = /^(fed|bls|bea):([a-z]+):(\d{4}-\d{2}-\d{2})$/;
 
-const UA = 'ValueDesk economic calendar (+https://valuedeskapp.vercel.app)';
+const UA = 'ValueDesk economic calendar (+https://www.valuedesk.so)';
 const BLS_PAGE: Record<string, string> = { CPI: 'cpi', NFP: 'empsit', PPI: 'ppi', JOLTS: 'jolts', ECI: 'eci' };
 const BEA_LIST = 'https://www.bea.gov/news/current-releases';
 const BEA_TITLE: Record<string, RegExp> = {

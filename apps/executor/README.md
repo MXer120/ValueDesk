@@ -28,22 +28,22 @@ Download the single-file copier and check it is the one ValueDesk published:
 
 ```bash
 # macOS / Linux
-curl -O https://valuedesk.so/copier/valuedesk-copier.mjs
-curl -O https://valuedesk.so/copier/valuedesk-copier.mjs.sha256
+curl -O https://www.valuedesk.so/copier/valuedesk-copier.mjs
+curl -O https://www.valuedesk.so/copier/valuedesk-copier.mjs.sha256
 shasum -a 256 -c valuedesk-copier.mjs.sha256      # Linux: sha256sum -c ...
 node valuedesk-copier.mjs
 ```
 
 ```powershell
 # Windows (PowerShell)
-curl.exe -O https://valuedesk.so/copier/valuedesk-copier.mjs
-curl.exe -O https://valuedesk.so/copier/valuedesk-copier.mjs.sha256
+curl.exe -O https://www.valuedesk.so/copier/valuedesk-copier.mjs
+curl.exe -O https://www.valuedesk.so/copier/valuedesk-copier.mjs.sha256
 (Get-FileHash valuedesk-copier.mjs -Algorithm SHA256).Hash.ToLower()   # compare with the .sha256 file
 node valuedesk-copier.mjs
 ```
 
 It prints its address (`http://127.0.0.1:8799`), a **pairing code** and the
-folder it keeps its data in. In ValueDesk (https://valuedesk.so) open **Copy**,
+folder it keeps its data in. In ValueDesk (https://www.valuedesk.so) open **Copy**,
 press **Set up copy trading**, choose **Self-hosted**, and enter the address and
 the code. The first wallet that signs in with the code is the only wallet this
 copier ever serves (or set `EXECUTOR_OWNER=0x...` to name it up front). Then, in

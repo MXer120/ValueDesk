@@ -9,10 +9,12 @@
  *
  * The fallback is the app's one generic load failure - "<name> couldn't load."
  * with Retry (LoadFailed.tsx). The crash itself goes to the console with its
- * component stack, never onto the page.
+ * component stack, never onto the page - and, scrubbed, to the owner as a client
+ * error report (errorReport.ts) under the boundary's name.
  */
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react';
 import { LoadFailed } from './LoadFailed';
+import { reportBoundaryError } from '../errorReport';
 
 interface Props {
   /** Shown in the fallback so the user knows which panel failed. */
@@ -35,6 +37,7 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error(`[${this.props.name}] panel crashed`, error, info.componentStack);
+    reportBoundaryError(this.props.name, error);
   }
 
   private retry = () => this.setState((s) => ({ error: null, mount: s.mount + 1 }));

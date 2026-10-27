@@ -14,12 +14,19 @@
  * it, and AccountController says why and disconnects it. The answer stays in
  * this module's memory (privacy.ts section 6); nothing is sent to ValueDesk.
  *
- * FAILING OPEN. A node that does not answer, or answers nonsense, leaves the
+ * THE LIST FIRST. The oracle's addresses are also a file in the repository
+ * (packages/copy-engine/src/sanctions.ts, refreshed by
+ * scripts/update-sanctions-list.mjs), which the executor and the API enforce on
+ * their side: an address on it is 'sanctioned' here at once, without asking
+ * the node, so that screen holds even when the node does not answer.
+ *
+ * FAILING OPEN (for an address not on the list). A node that does not answer, or answers nonsense, leaves the
  * address 'unknown', which restricts nothing: the screen is one control among
  * several (the edge, the declarations, the terms), and an outage of a public
  * node must not stop every user. It is asked again on the next connect.
  */
 import { useSyncExternalStore } from 'react';
+import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '@copy-engine';
 import { rpcCall } from '../trading/rpc';
 import { logger } from '../log';
 
@@ -50,13 +57,16 @@ export function readScreening(result: unknown): Screening {
 
 /** What is known about `address` now (no request). */
 export function screeningOf(address: string | null | undefined): Screening {
-  return address ? results.get(address.toLowerCase()) ?? 'unknown' : 'unknown';
+  if (!address) return 'unknown';
+  if (isSanctionedAddress(address)) return 'sanctioned';
+  return results.get(address.toLowerCase()) ?? 'unknown';
 }
 
 /** Ask the oracle about `address` (once per page load; again after 'unknown'). */
 export function screenWallet(address: string, call: typeof rpcCall = rpcCall): Promise<Screening> {
   const a = address.toLowerCase();
   if (!ADDRESS.test(a)) return Promise.resolve('unknown');
+  if (isSanctionedAddress(a)) return Promise.resolve('sanctioned');
   const known = results.get(a);
   if (known && known !== 'unknown') return Promise.resolve(known);
   const inflight = pending.get(a);
@@ -98,6 +108,5 @@ export function _resetScreeningForTests(): void {
   pending.clear();
 }
 
-/** The reason shown for a listed wallet. */
-export const SANCTIONED_WALLET_REASON =
-  'This wallet address is on a sanctions list, so ValueDesk cannot be used with it. If you believe this is a mistake, contact us at the address in the Impressum.';
+/** The reason shown for a listed wallet: the executor's and the API's own words (copy-engine sanctions.ts). */
+export { SANCTIONED_WALLET_REASON };

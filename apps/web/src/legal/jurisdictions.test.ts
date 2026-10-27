@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BLOCKED_COUNTRIES, US_REGIONS } from '@copy-engine';
+import { BLOCKED_COUNTRIES, CLOSE_ONLY_REGIONS } from '@copy-engine';
 import { LEGAL_PAGES } from '../router';
 import {
   CLOSE_ONLY_CODES,
@@ -25,7 +25,7 @@ test('the edge serves exactly the legal pages of the router where the site is bl
 
 test('copy trading is at least as strict as the site: every blocked or close-only country is excluded from copying', () => {
   for (const c of [...SANCTIONED_CODES, ...CLOSE_ONLY_CODES]) assert.ok(BLOCKED_COUNTRIES.includes(c), `${c} is restricted site-wide but allowed for copy trading`);
-  assert.deepEqual([...CLOSE_ONLY_CODES].sort(), [...US_REGIONS].sort(), 'close-only is the US and its territories, as for copying (owner, 2026-10-23)');
+  assert.deepEqual([...CLOSE_ONLY_CODES].sort(), [...CLOSE_ONLY_REGIONS].sort(), 'close-only is the US and its territories (owner, 2026-10-23), the UK and Canada (owner, 2026-10-27), as for copying');
 });
 
 test('the Terms of use and the restricted page name every restricted place', () => {
@@ -39,6 +39,19 @@ test('the Terms of use and the restricted page name every restricted place', () 
     assert.ok(href === '/favicon.svg' || LEGAL_PATHS.includes(href.slice(1)), `restricted.html links to ${href}, which the edge blocks there`);
   }
   assert.doesNotMatch(html, /<script/i, 'no script: the site CSP allows none inline');
+});
+
+test('siteAccess: the United Kingdom and Canada are close-only like the US, seen or declared; the Crown Dependencies and Overseas Territories are not', () => {
+  for (const c of ['GB', 'CA', 'gb', 'UK']) assert.equal(siteAccess({ country: c }).level, 'close-only', c);
+  assert.equal(siteAccess({ country: 'DE', declared: 'GB' }).level, 'close-only');
+  assert.equal(siteAccess({ country: 'DE', declared: 'GB' }).source, 'declared');
+  assert.equal(siteAccess({ country: 'CA', declared: 'DE' }).source, 'observed');
+  assert.match(siteAccess({ country: 'GB' }).reason!, /residents of the United Kingdom, or to anyone connecting from there. You can still close positions/);
+  assert.match(siteAccess({ declared: 'CA' }).reason!, /residents of Canada,/);
+  assert.match(siteAccess({ country: 'PR' }).reason!, /United States or its territories/);
+  assert.equal(siteAccess({ country: 'GB' }).place, 'United Kingdom');
+  assert.equal(siteAccess({ country: 'CA', declared: 'IR' }).level, 'blocked', 'blocked beats close-only');
+  for (const c of ['JE', 'GG', 'IM', 'GI', 'BM', 'KY', 'VG', 'IE', 'AU']) assert.equal(siteAccess({ country: c, declared: c }).level, 'open', c);
 });
 
 test('siteAccess: sanctioned places block, the US is close-only, the stricter of seen and declared wins', () => {
@@ -57,6 +70,7 @@ test('siteAccess: sanctioned places block, the US is close-only, the stricter of
   assert.equal(siteAccess({ country: 'T1' }).level, 'open');
   for (const a of [siteAccess({ country: 'CU' }), siteAccess({ country: 'US' })]) assert.ok(a.reason && a.reason.endsWith('.'));
   assert.equal(normaliseCountry(' de '), 'DE');
+  assert.equal(normaliseCountry('uk'), 'GB');
   assert.equal(normaliseCountry('DEU'), null);
   assert.equal(normaliseRegion('09'), '09');
   assert.equal(normaliseRegion('toolong'), null);

@@ -336,6 +336,16 @@ export const floorStep = (q: number, m: Pick<MarketInfo, 'stepSize'>): number =>
 };
 
 /** A default execution: hybrid, 30 bp cap, join the best price, re-price after 2 ticks, rest for 60% of each slice. */
+/**
+ * POV: what is due when everyone else has traded `others` since it began, at
+ * `rate` of the TOTAL volume (its own fills included): f = rate * (others + f).
+ * rate is at most 0.5 (ALGO_LIMITS), so this is at most `others`.
+ */
+export function povDue(rate: number, others: number): number {
+  if (!(rate > 0) || !(others > 0)) return 0;
+  return (others * rate) / (1 - Math.min(rate, 0.99));
+}
+
 export const DEFAULT_EXEC: ExecSpec = { style: 'hybrid', slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
 
 /* ------------------------------------------------------------- trailing ----- */

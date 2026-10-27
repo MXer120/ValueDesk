@@ -429,6 +429,8 @@ Code (section 14):
       passes its legal check.
 - [ ] The full local smoke test has passed once
       (`deploy/smoke/README.md`, "Run it").
+- [ ] `docs/GO-LIVE.md` is ticked through: Send feedback, client error reports, the
+      status page.
 
 The deployment:
 

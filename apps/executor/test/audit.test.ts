@@ -386,9 +386,10 @@ test('BUG: main.ts handles no unhandled rejection or uncaught exception (one str
   assert.ok(src.includes('unhandledRejection'), 'no process.on("unhandledRejection")');
 });
 
-test('BUG: the README downloads the copier from the old vercel.app address, not https://valuedesk.so', () => {
+test('BUG: the README downloads the copier from the old vercel.app address, not https://www.valuedesk.so', () => {
   const readme = readFileSync(join(APP, 'README.md'), 'utf8');
   const urls = [...readme.matchAll(/https:\/\/[^\s)]+\/copier\/[^\s)]+/g)].map((m) => m[0]);
   assert.ok(urls.length > 0);
-  for (const u of urls) assert.ok(u.startsWith('https://valuedesk.so/'), u);
+  // www: valuedesk.so answers 308 to www.valuedesk.so, and a download without following redirects would save that answer, not the copier.
+  for (const u of urls) assert.ok(u.startsWith('https://www.valuedesk.so/'), u);
 });

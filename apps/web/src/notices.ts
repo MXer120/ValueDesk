@@ -1,10 +1,11 @@
 /**
  * Notifications kept on this browser. The navbar bell reads them.
  * The unread mark is only for deposit, withdrawal, error, and system items
- * such as an unfinished account setup. Ordinary transfers stay in the list
- * without lighting the mark.
+ * such as an unfinished account setup - and for the ValueDesk team's reply to
+ * the visitor's feedback (feedback/FeedbackHost.tsx). Ordinary transfers stay in
+ * the list without lighting the mark.
  */
-export type NoticeKind = 'deposit' | 'withdraw' | 'error' | 'system' | 'info';
+export type NoticeKind = 'deposit' | 'withdraw' | 'error' | 'system' | 'info' | 'reply';
 
 export interface Notice {
   id: string;
@@ -14,6 +15,8 @@ export interface Notice {
   body: string;
   important: boolean;
   read: boolean;
+  /** For a `reply`: the feedback thread it belongs to (feedback/threads.ts) - the row opens that chat. */
+  ref?: string;
 }
 
 const KEY = 'vs.notices.v1';

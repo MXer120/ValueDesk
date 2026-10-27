@@ -156,7 +156,7 @@ for _ in $(seq 1 30); do
   if curl -fsS --max-time 3 "$API_URL/api/health" 2>/dev/null | grep -q '"ok":true'; then ok=1; break; fi
   sleep 2
 done
-[ "$ok" = 1 ] && log "the API answers /api/health" || log "WARNING: the API does not answer yet - check: journalctl -u valuescan-api -n 50"
+[ "$ok" = 1 ] && log "the API answers /api/health" || log "WARNING: the API does not answer yet - check: journalctl --namespace=pii -u valuescan-api -n 50"
 
 log "restored."
 kept

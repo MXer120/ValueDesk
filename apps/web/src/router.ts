@@ -109,6 +109,20 @@ export function legalForPath(pathname: string): LegalPage | null {
 }
 
 /**
+ * The status page (status/StatusPage.tsx): whether the site, the data and the
+ * copy executor are up. Like a legal page it is shown instead of the tab's page,
+ * has no nav link and no shortcut, and needs no wallet; the status bar links it.
+ * Its own path, not one of LEGAL_PAGES: the legal pages are what the edge serves
+ * even where the site is blocked (legal/jurisdictions.mjs), and this is not one.
+ */
+export const STATUS_PATH = '/status';
+
+/** Whether a pathname is the status page. Tolerant like `tabForPath`. */
+export function isStatusPath(pathname: string): boolean {
+  return pathname.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() === 'status';
+}
+
+/**
  * The page a pathname ends up on once `useRoute` has normalised it: its own
  * tab, or where a removed page moved to, or the default. App.tsx uses it to
  * fetch that page's code before the first render.
@@ -141,11 +155,13 @@ export function tabForPath(pathname: string): Tab | null {
  * with the default page: pushing would put a URL that renders nothing into the
  * history stack, and going "back" to it would be a dead end.
  */
-export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void] {
+export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: LegalPage) => void, boolean, () => void] {
   const [tab, setTab] = useState<Tab>(() => tabForPath(window.location.pathname) ?? DEFAULT_TAB);
   /* A legal page is shown INSTEAD of the tab's page; `tab` keeps the default
      there, so everything keyed on it (the nav, the shortcuts) is unchanged. */
   const [legal, setLegal] = useState<LegalPage | null>(() => legalForPath(window.location.pathname));
+  /* The status page, the same way. */
+  const [status, setStatus] = useState<boolean>(() => isStatusPath(window.location.pathname));
 
   useEffect(() => {
     /*
@@ -158,12 +174,13 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
      */
     const normalise = () => {
       const path = window.location.pathname;
-      if (tabForPath(path) === null && legalForPath(path) === null) {
+      if (tabForPath(path) === null && legalForPath(path) === null && !isStatusPath(path)) {
         const seg = path.replace(/\/+$/, '').split('/').filter(Boolean)[0]?.toLowerCase() ?? '';
         window.history.replaceState(null, '', pathForTab(MOVED[seg] ?? DEFAULT_TAB));
       }
       setTab(tabForPath(window.location.pathname) ?? DEFAULT_TAB);
       setLegal(legalForPath(window.location.pathname));
+      setStatus(isStatusPath(window.location.pathname));
     };
     normalise();
     window.addEventListener('popstate', normalise);
@@ -178,6 +195,7 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
     }
     setTab(next);
     setLegal(null);
+    setStatus(false);
   }, []);
 
   const openLegal = useCallback((page: LegalPage) => {
@@ -185,7 +203,14 @@ export function useRoute(): [Tab, (tab: Tab) => void, LegalPage | null, (page: L
       window.history.pushState(null, '', pathForLegal(page));
     }
     setLegal(page);
+    setStatus(false);
   }, []);
 
-  return [tab, navigate, legal, openLegal];
+  const openStatus = useCallback(() => {
+    if (!isStatusPath(window.location.pathname)) window.history.pushState(null, '', STATUS_PATH);
+    setLegal(null);
+    setStatus(true);
+  }, []);
+
+  return [tab, navigate, legal, openLegal, status, openStatus];
 }

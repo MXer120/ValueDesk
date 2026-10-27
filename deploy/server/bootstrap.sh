@@ -36,7 +36,8 @@
 #   4. Node and Caddy at the pinned versions (versions.env), checksums verified
 #   5. /opt/valuescan (bin scripts), /etc/valuescan (env files; the origin secret
 #      from SSM Parameter Store), /etc/caddy/Caddyfile
-#   6. systemd units and timers, journald retention (14 days)
+#   6. systemd units and timers; journald: persistent, a year for the main journal,
+#      14 days for the namespace "pii" (the API's and the executor's logs)
 #   7. starts Caddy and the timers; starts the API, the indexer and the copy
 #      executor if a release with them is installed (the first such release does
 #      that otherwise)
@@ -417,11 +418,20 @@ for f in "$HERE"/units/*.service "$HERE"/units/*.timer; do
   fi
 done
 if install_if_changed "$HERE/journald/valuescan.conf" /etc/systemd/journald.conf.d/valuescan.conf 0644; then
+  # Storage=persistent: journald moves what it holds in /run to /var/log/journal.
   systemctl restart systemd-journald
+  journalctl --flush 2>/dev/null || true
+fi
+# The namespace "pii" (LogNamespace=pii in the API's and the executor's units): 14 days.
+if install_if_changed "$HERE/journald/journald@pii.conf" /etc/systemd/journald@pii.conf 0644; then
+  if systemctl is-active -q systemd-journald@pii.service; then systemctl restart systemd-journald@pii.service; fi
 fi
 [ "$units_changed" = 0 ] || systemctl daemon-reload
 # valuescan-executor-backup.service has no [Install]: valuescan-backup.service wants it.
 systemctl enable -q caddy.service valuescan-indexer.service valuescan-api.service valuescan-executor.service valuescan-backup.timer valuescan-health.timer
+# The off-server copies: each does nothing until its configuration exists
+# (/etc/valuescan/offsite.env, /etc/vsbackup/receive.env - deploy/contabo/apply-overlay.sh).
+systemctl enable -q valuescan-offsite.timer valuescan-offsite-prune.timer
 
 # --- 7. start what may be started ----------------------------------------------------------------------------
 
@@ -433,7 +443,7 @@ if systemctl is-active -q caddy.service && restart_wanted caddy; then
 else
   systemctl start caddy.service || warn "Caddy did not start: journalctl -u caddy -n 50"
 fi
-systemctl start valuescan-backup.timer valuescan-health.timer
+systemctl start valuescan-backup.timer valuescan-health.timer valuescan-offsite.timer valuescan-offsite-prune.timer
 
 pending=()
 if [ -e "$VS_HOME/current/apps/server/src/index.ts" ]; then
@@ -442,7 +452,7 @@ if [ -e "$VS_HOME/current/apps/server/src/index.ts" ]; then
   if systemctl is-active -q valuescan-api.service; then
     if restart_wanted valuescan-api; then log "restarting the API (its configuration changed)"; systemctl restart valuescan-api.service; fi
   else
-    systemctl start valuescan-api.service || warn "the API did not start: journalctl -u valuescan-api -n 50"
+    systemctl start valuescan-api.service || warn "the API did not start: journalctl --namespace=pii -u valuescan-api -n 50"
   fi
   if systemctl is-active -q valuescan-indexer.service; then
     restart_wanted valuescan-indexer && pending+=(valuescan-indexer)
@@ -458,7 +468,7 @@ if [ -e "$VS_HOME/current/apps/executor/src/main.ts" ]; then
   if systemctl is-active -q valuescan-executor.service; then
     if restart_wanted valuescan-executor; then log "restarting the copy executor (its configuration changed)"; systemctl restart valuescan-executor.service; fi
   else
-    systemctl start valuescan-executor.service || warn "the copy executor did not start: journalctl -u valuescan-executor -n 50"
+    systemctl start valuescan-executor.service || warn "the copy executor did not start: journalctl --namespace=pii -u valuescan-executor -n 50"
   fi
 else
   log "the installed release has no copy executor (apps/executor): it starts with the first release that has one"

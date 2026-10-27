@@ -585,6 +585,42 @@ test('knowledge folders: POST and the wallet token under /api/folders only, a fi
   }
 });
 
+test('feedback and error reports: POST and the thread token pass, a screenshot up to 2 MiB, nothing else grows, never cached', async () => {
+  const seen = [];
+  const origin = await listen((req, res) => {
+    let size = 0;
+    req.on('data', (c) => { size += c.length; });
+    req.on('end', () => {
+      seen.push({ method: req.method, url: req.url, headers: req.headers, size });
+      res.writeHead(200, { 'content-type': 'image/png', 'content-disposition': 'inline', 'cache-control': 'public, max-age=30' });
+      res.end('png');
+    });
+  });
+  try {
+    await withProxy({ VALUESCAN_ORIGIN_URL: `http://127.0.0.1:${origin.port}`, VALUESCAN_ORIGIN_SECRET: SECRET }, async (port) => {
+      const msg = await request(port, '/api/vs/feedback', { method: 'POST', body: '{"text":"hi"}', headers: { 'content-type': 'application/json', authorization: 'Bearer thread' } });
+      assert.equal(msg.status, 200);
+      assert.equal(msg.headers['cache-control'], 'no-store');
+      assert.equal(seen.at(-1).headers.authorization, 'Bearer thread');
+      const shot = Buffer.alloc(2 * 1024 * 1024, 1);
+      assert.equal((await request(port, '/api/vs/feedback/upload', { method: 'POST', body: shot, headers: { 'content-type': 'application/json' } })).status, 200);
+      assert.equal(seen.at(-1).size, shot.length, 'a 2 MiB screenshot reaches the origin whole');
+      const img = await request(port, '/api/vs/feedback/image?id=x', { headers: { authorization: 'Bearer thread' } });
+      assert.equal(img.headers['content-type'], 'image/png');
+      assert.equal(img.headers['content-disposition'], 'inline');
+      assert.equal(img.headers['cache-control'], 'no-store', 'a visitor\'s screenshot is never kept');
+      const before = seen.length;
+      assert.equal((await request(port, '/api/vs/feedback/upload', { method: 'POST', body: Buffer.alloc(proxy.bodyLimitFor('/api/vs/feedback/upload') + 1) })).status, 413);
+      assert.equal((await request(port, '/api/vs/client-errors', { method: 'POST', body: 'x'.repeat(16 * 1024 + 1), headers: { 'content-type': 'text/plain' } })).status, 413);
+      assert.equal(seen.length, before, 'neither reached the origin');
+      assert.equal(proxy.isReportsPath('/api/vs/feedbackx'), false);
+      assert.equal((await request(port, '/api/vs/leaderboard', { method: 'POST', body: '{}' })).status, 405, 'other index paths stay GET only');
+    });
+  } finally {
+    await origin.close();
+  }
+});
+
 test('writes, a missing secret, the function\'s own path and a stopped instance never reach (or hang on) the origin', async () => {
   let hits = 0;
   const origin = await listen((_req, res) => { hits++; res.writeHead(200); res.end('{}'); });

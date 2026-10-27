@@ -185,7 +185,11 @@ export interface VwapSpec extends AlgoBase {
 export interface PovSpec extends AlgoBase {
   kind: 'pov';
   quantity: string;
-  /** Target share of the market's volume (0.01..0.5): what this algo fills / what everyone else trades. */
+  /**
+   * Target share of the market's TOTAL volume (0.01..0.5), its own fills included:
+   * what this algo fills / everything the market prints while it runs. 0.1 = one
+   * print in ten is its own. Measured live, print by print, from the start.
+   */
   rate: number;
   /** Largest single child, base units. null = no cap. */
   maxChildQty: string | null;

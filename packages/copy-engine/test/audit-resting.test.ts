@@ -49,6 +49,7 @@ const settle = async (n = 6) => {
 };
 
 class FakeMarket implements AlgoMarket {
+  readonly up = true;
   quotes = new Map<string, Quote>();
   marks = new Map<string, MarkInfo>();
   printCbs: Array<(p: Print) => void> = [];

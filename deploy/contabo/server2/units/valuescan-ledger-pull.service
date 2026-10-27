@@ -1,0 +1,8 @@
+[Unit]
+Description=Copy the builder ledger from server 1 (the copy executor reads its fee tiers from it)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "ssh -i /root/.ssh/ledger_pull -o BatchMode=yes -o ConnectTimeout=20 almalinux@161.97.154.121 > /var/lib/valuescan/state/builder.db.new && test -s /var/lib/valuescan/state/builder.db.new && chown valuescan:valuescan /var/lib/valuescan/state/builder.db.new && chmod 0640 /var/lib/valuescan/state/builder.db.new && mv -f /var/lib/valuescan/state/builder.db.new /var/lib/valuescan/state/builder.db"

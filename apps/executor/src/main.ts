@@ -37,9 +37,9 @@ function selfBanner(o: { url: string; dataDir: string; owner: string | null; cod
     `  ValueDesk copier is running on ${o.url}`,
     '',
     ...(o.owner
-      ? [`  It serves the wallet ${o.owner}.`, '  In ValueDesk (https://valuedesk.so): Copy -> Set up -> Self-hosted, and enter the address above.']
+      ? [`  It serves the wallet ${o.owner}.`, '  In ValueDesk (https://www.valuedesk.so): Copy -> Set up -> Self-hosted, and enter the address above.']
       : [
-          '  To connect it: in ValueDesk (https://valuedesk.so) open Copy -> Set up -> Self-hosted,',
+          '  To connect it: in ValueDesk (https://www.valuedesk.so) open Copy -> Set up -> Self-hosted,',
           '  enter the address above and this pairing code:',
           '',
           `      ${o.code}`,
@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     if (stopping) return;
     stopping = true;
     log.info('executor stopping', { why });
+    db?.audit('process', null, null, { event: 'stop', why, pid: process.pid });
     server.close();
     await svc?.stop().catch((e) => log.error('stop failed', { error: String(e) }));
     db?.close();
@@ -114,6 +115,7 @@ async function main(): Promise<void> {
     const shownHost = cfg.host === '0.0.0.0' || cfg.host === '::' ? '127.0.0.1' : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
   }
+  db.audit('process', null, null, { event: 'start', pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, brake: svc.brake.current() });
   await svc.start();
   log.info('executor up', { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? 'default route', liveAlgos: cfg.liveAlgos });
 
@@ -126,6 +128,16 @@ async function main(): Promise<void> {
     }
   }, 6 * 60 * 60_000);
   prune.unref();
+
+  // The audit log's head, into the service log (journald, kept a year and backed up apart from the
+  // database) every hour: a row cut from the end of the chain would otherwise leave no trace.
+  const anchor = () => {
+    const head = db?.auditRows({ limit: 1 })[0];
+    if (head) log.info('audit head', { seq: head.seq, at: head.at, hash: head.hash });
+  };
+  anchor();
+  const anchoring = setInterval(anchor, 60 * 60_000);
+  anchoring.unref();
 }
 
 main().catch((e) => {

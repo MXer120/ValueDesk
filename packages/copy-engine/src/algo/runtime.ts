@@ -39,6 +39,7 @@ import {
   minChildQty,
   newSeed,
   nextSlice,
+  povDue,
   profileCandles,
   spreadBps,
   takerPrice,
@@ -109,6 +110,13 @@ export interface AlgoHost {
   builderRate?(a: AlgoRecord): number;
   /** Why a live algo cannot trade right now (key, region, approval), or null. It waits while there is one. */
   problem?(a: AlgoRecord): Promise<string | null>;
+  /**
+   * The operator's emergency brake: while it returns a reason, a live algo is
+   * held - nothing new is sent (asked on every step and before every send, so it
+   * bites at once). Its exits (take-profit, stop-loss) are still placed and kept:
+   * they only ever reduce a position. Released, it goes on by itself.
+   */
+  brake?(a: AlgoRecord): string | null;
   /** The owner's signed position on `symbol` (default: read from SoDEX). */
   position?(a: AlgoRecord, symbol: string): Promise<number | null>;
   /** The owner's positions: signed size and entry per market (default: read from SoDEX). Position conditions read these. */
@@ -677,6 +685,11 @@ export class AlgoRuntime {
       return;
     }
     if (!s.paper) {
+      const brake = this.host.brake?.(a) ?? null;
+      if (brake) {
+        await this.hold(a, `Held: ${brake}`);
+        return;
+      }
       const problem = await this.problemOf(a, now);
       // A cancel or a pause may have landed while it was being checked.
       if (this.stopped(a)) return;
@@ -1141,8 +1154,10 @@ export class AlgoRuntime {
       if (this.live(a).length) return this.pullResting(a);
       return this.end(a, 'expired', `End time reached; ${dec(total - a.filled)} ${m.base} left unfilled, as you chose.`);
     }
-    // What everyone else traded since it began, times the rate.
-    const due = Math.min(total, s.rate * a.marketQty);
+    // Its share of ALL the market traded since it began, its own fills included (the usual POV and FIX's
+    // OrderPercentOfTotalVolume): filled = rate x (others + filled), so filled = others x rate / (1 - rate).
+    // What others traded is counted print by print from the live trade stream (onPrint), never a forecast.
+    const due = Math.min(total, povDue(s.rate, a.marketQty));
     const h = this.dueHistory(a, now, due);
     const late = s.exec.style === 'taker' ? due : s.exec.style === 'hybrid' ? this.dueAgo(h, now - LATE_MS) : 0;
     const finishing = ended || a.k.rush === true;
@@ -1870,6 +1885,11 @@ export class AlgoRuntime {
     const sink = s.paper ? null : this.host.sinkFor(a);
     if (!s.paper && !sink) {
       await this.hold(a, 'The trading key for this algo is not available here.');
+      return [];
+    }
+    const brake = s.paper ? null : this.host.brake?.(a) ?? null;
+    if (brake) {
+      await this.hold(a, `Held: ${brake}`);
       return [];
     }
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));

@@ -2542,7 +2542,7 @@ var require_websocket = __commonJS({
     var http = __require("http");
     var net = __require("net");
     var tls = __require("tls");
-    var { randomBytes: randomBytes4, createHash } = __require("crypto");
+    var { randomBytes: randomBytes4, createHash: createHash2 } = __require("crypto");
     var { Duplex, Readable } = __require("stream");
     var { URL: URL2 } = __require("url");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -3210,7 +3210,7 @@ var require_websocket = __commonJS({
           abortHandshake(websocket, socket, "Invalid Upgrade header");
           return;
         }
-        const digest = createHash("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key2 + GUID).digest("base64");
         if (res.headers["sec-websocket-accept"] !== digest) {
           abortHandshake(websocket, socket, "Invalid Sec-WebSocket-Accept header");
           return;
@@ -3579,7 +3579,7 @@ var require_websocket_server = __commonJS({
     var EventEmitter = __require("events");
     var http = __require("http");
     var { Duplex } = __require("stream");
-    var { createHash } = __require("crypto");
+    var { createHash: createHash2 } = __require("crypto");
     var extension2 = require_extension();
     var PerMessageDeflate2 = require_permessage_deflate();
     var subprotocol2 = require_subprotocol();
@@ -3886,7 +3886,7 @@ var require_websocket_server = __commonJS({
           );
         }
         if (this._state > RUNNING) return abortHandshake(socket, 503);
-        const digest = createHash("sha1").update(key2 + GUID).digest("base64");
+        const digest = createHash2("sha1").update(key2 + GUID).digest("base64");
         const headers = [
           "HTTP/1.1 101 Switching Protocols",
           "Upgrade: websocket",
@@ -4020,11 +4020,13 @@ function loadConfig(env = process.env) {
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error("EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)");
   const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;
+  const dataDir = resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === "hosted" ? "/var/lib/valuescan/executor" : dataDirFor(process.cwd(), env)));
+  const brake = env.EXECUTOR_BRAKE_FILE?.trim();
   return {
     kind,
     host: env.HOST?.trim() || "127.0.0.1",
     port,
-    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === "hosted" ? "/var/lib/valuescan/executor" : dataDirFor(process.cwd(), env))),
+    dataDir,
     network,
     builderId,
     owner: owner ? owner.toLowerCase() : null,
@@ -4043,7 +4045,8 @@ function loadConfig(env = process.env) {
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
-    liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1"
+    liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1",
+    brakeFile: brake === "none" ? null : brake ? resolve(brake) : kind === "hosted" ? "/var/lib/valuescan/brake.json" : join(dataDir, "brake.json")
   };
 }
 
@@ -4114,6 +4117,7 @@ function egress(localAddress) {
 }
 
 // src/db.ts
+import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 function sqlite() {
@@ -4164,7 +4168,28 @@ CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json
 CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
 CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
+CREATE TABLE IF NOT EXISTS audit (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  owner TEXT,
+  ref TEXT,
+  data TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_owner ON audit (owner, at);
+CREATE INDEX IF NOT EXISTS audit_ref ON audit (ref);
+CREATE INDEX IF NOT EXISTS audit_at ON audit (at);
 `;
+var AUDIT_GENESIS = "0".repeat(64);
+function auditHash(prev, r) {
+  return createHash("sha256").update(`${prev}
+${r.at}
+${r.kind}
+${r.owner ?? ""}
+${r.ref ?? ""}
+${r.data}`).digest("hex");
+}
 var held = /* @__PURE__ */ new Set();
 function takeLock(path) {
   if (held.has(path)) throw new Error(`This data folder is already in use by this executor (${dirname(path)}).`);
@@ -4220,6 +4245,60 @@ var ExecutorDb = class {
     this.db.close();
     if (this.lockPath) releaseLock(this.lockPath);
     this.lockPath = null;
+  }
+  /* ----------------------------------------------------------- audit ----- */
+  auditLast = null;
+  /**
+   * Append to the audit log. Never throws: the record of an action must not
+   * stop the action (a full disk is reported by the health check).
+   */
+  audit(kind, owner, ref, data, at = Date.now()) {
+    try {
+      if (this.auditLast === null) this.auditLast = String(this.q("SELECT hash FROM audit ORDER BY seq DESC LIMIT 1").get()?.hash ?? AUDIT_GENESIS);
+      const row = { at, kind, owner: owner ? owner.toLowerCase() : null, ref, data: JSON.stringify(data ?? null) };
+      const hash = auditHash(this.auditLast, row);
+      this.q("INSERT INTO audit (at, kind, owner, ref, data, hash) VALUES (?, ?, ?, ?, ?, ?)").run(row.at, row.kind, row.owner, row.ref, row.data, hash);
+      this.auditLast = hash;
+    } catch {
+      this.auditLast = null;
+    }
+  }
+  /** Audit rows, newest first, by wallet, by ref, or all; `before` is a seq. */
+  auditRows(q = {}) {
+    const where = [];
+    const args = [];
+    if (q.owner) where.push("owner = ?"), args.push(q.owner.toLowerCase());
+    if (q.ref) where.push("ref = ?"), args.push(q.ref);
+    if (q.kind) where.push("kind = ?"), args.push(q.kind);
+    if (q.from !== void 0) where.push("at >= ?"), args.push(q.from);
+    if (q.to !== void 0) where.push("at < ?"), args.push(q.to);
+    if (q.before !== void 0) where.push("seq < ?"), args.push(q.before);
+    const limit = Math.max(1, Math.min(1e5, q.limit ?? 500));
+    const sql = `SELECT seq, at, kind, owner, ref, data, hash FROM audit${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY seq DESC LIMIT ${limit}`;
+    return this.db.prepare(sql).all(...args).map((r) => ({
+      seq: Number(r.seq),
+      at: Number(r.at),
+      kind: String(r.kind),
+      owner: r.owner === null ? null : String(r.owner),
+      ref: r.ref === null ? null : String(r.ref),
+      data: String(r.data),
+      hash: String(r.hash)
+    }));
+  }
+  /** Walk the whole chain: the first row whose hash does not follow, or null when every row does. */
+  verifyAudit() {
+    let prev = AUDIT_GENESIS;
+    let rows2 = 0;
+    let last = 0;
+    for (const r of this.db.prepare("SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq").iterate()) {
+      rows2++;
+      const seq = Number(r.seq);
+      const want = auditHash(prev, { at: Number(r.at), kind: String(r.kind), owner: r.owner === null ? null : String(r.owner), ref: r.ref === null ? null : String(r.ref), data: String(r.data) });
+      if (want !== String(r.hash) || last && seq !== last + 1) return { rows: rows2, brokenAt: seq };
+      prev = String(r.hash);
+      last = seq;
+    }
+    return { rows: rows2, brokenAt: null };
   }
   /** Throws when the database does not answer (the health check). */
   ping() {
@@ -7928,10 +8007,13 @@ function randomId(prefix = "") {
 }
 
 // ../../packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-10-27.2";
+var COPY_TERMS_VERSION = "2026-10-27.3";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
+var UK_CA_REGIONS = ["GB", "CA"];
+var CLOSE_ONLY_REGIONS = [...US_REGIONS, ...UK_CA_REGIONS];
 var SANCTIONED = ["CU", "IR", "KP", "SY", "RU", "BY", "MM"];
-var BLOCKED_COUNTRIES = [...US_REGIONS, ...SANCTIONED];
+var BLOCKED_COUNTRIES = [...CLOSE_ONLY_REGIONS, ...SANCTIONED];
+var CLOSE_ONLY_NAMES = { GB: "the United Kingdom", CA: "Canada" };
 var EEA_COUNTRIES = [
   "AT",
   "BE",
@@ -7978,7 +8060,7 @@ function normaliseCountry(c) {
   if (typeof c !== "string") return null;
   const t = c.trim().toUpperCase();
   if (!ISO2.test(t) || t === "XX" || t === "ZZ") return null;
-  return t;
+  return t === "UK" ? "GB" : t;
 }
 var regionOf = (country) => country === null ? "other" : BLOCKED_COUNTRIES.includes(country) ? "blocked" : EEA_COUNTRIES.includes(country) ? "eea" : "other";
 var RANK = { blocked: 2, eea: 1, other: 0 };
@@ -7995,11 +8077,12 @@ function regionPolicy(declared, observed) {
   const country = RANK[ro] > RANK[rd] ? o : d;
   if (region === "blocked") {
     const us = country !== null && US_REGIONS.includes(country);
+    const named = country !== null ? CLOSE_ONLY_NAMES[country] : void 0;
     return {
       region,
       allowed: false,
       maxLeverage: null,
-      reason: us ? "Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there." : "Copy trading is not available in your country or from where you are connecting.",
+      reason: us ? "Copy trading is not available to residents of the United States or its territories, or to anyone connecting from there." : named ? `Copy trading is not available to residents of ${named}, or to anyone connecting from there.` : "Copy trading is not available in your country or from where you are connecting.",
       country,
       mismatch
     };
@@ -8037,6 +8120,124 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   for (const step of ladder) if (volumeUsd >= step.fromUsd) fee = step.fee;
   return fee;
 }
+
+// ../../packages/copy-engine/src/sanctionsList.ts
+var SANCTIONED_ADDRESSES = [
+  "0x002471b8a185f9980708d0eaec5b289714f56f8d",
+  "0x0330070fd38ec3bb94f58fa55d40368271e9e54a",
+  "0x04dba1194ee10112fe6c3207c0687def0e78bacf",
+  "0x08723392ed15743cc38513c4925f5e6be5c17243",
+  "0x08b2efdcdb8822efe5ad0eae55517cf5dc544251",
+  "0x0931ca4d13bb4ba75d9b7132ab690265d749a5e7",
+  "0x098b716b8aaf21512996dc57eb0615e2383e2f96",
+  "0x0ee5067b06776a89ccc7dc8ee369984ad7db5e06",
+  "0x12de548f79a50d2bd05481c8515c1ef5183666a9",
+  "0x1482cdf06702ca71eb8908ae699f0b36a2b16f2f",
+  "0x175d44451403edf28469df03a9280c1197adb92c",
+  "0x1967d8af5bd86a497fb3dd7899a020e47560daaf",
+  "0x1999ef52700c34de7ec2b68a28aafb37db0c5ade",
+  "0x19aa5fe80d33a56d56c78e82ea5e50e5d80b4dff",
+  "0x19f8f2b0915daa12a3f5c9cf01df9e24d53794f7",
+  "0x1da5821544e25c636c1417ba96ade4cf6d2f9b5a",
+  "0x21b8d56bda776bbe68655a16895afd96f5534fed",
+  "0x2f389ce8bd8ff92de3402ffce4691d17fc4f6535",
+  "0x3051ca7cb7f6c599fa2f27385ad75010cf0f2bbf",
+  "0x308ed4b7b49797e1a98d3818bff6fe5385410370",
+  "0x35fb6f6db4fb05e6a4ce86f2c93691425626d4b1",
+  "0x38735f03b30fbc022ddd06abed01f0ca823c6a94",
+  "0x39d908dac893cbcb53cc86e0ecc369aa4def1a29",
+  "0x3ad9db589d201a710ed237c829c7860ba86510fc",
+  "0x3cbded43efdaf0fc77b9c55f6fc9988fcc9b757d",
+  "0x3cffd56b47b7b41c56258d9c7731abadc360e073",
+  "0x3e37627deaa754090fbfbb8bd226c1ce66d255e9",
+  "0x433830bf9f152c4bfd444afc684450fd9f33494f",
+  "0x43fa21d92141ba9db43052492e0deee5aa5f0a93",
+  "0x48549a34ae37b12f6a30566245176994e17c6b4a",
+  "0x4f47bc496083c727c5fbe3ce9cdf2b0f6496270c",
+  "0x502371699497d08d5339c870851898d6d72521dd",
+  "0x530a64c0ce595026a4a556b703644228179e2d57",
+  "0x532b77b33a040587e9fd1800088225f99b8b0e8a",
+  "0x53b6936513e738f44fb50d2b9476730c0ab3bfc1",
+  "0x5512d943ed1f7c8a43f3435c85f7ab68b30121b0",
+  "0x5a14e72060c11313e38738009254a90968f58f51",
+  "0x5a7a51bfb49f190e5a6060a5bc6052ac14a3b59f",
+  "0x5d4163faf150d2ba76f5d15b18ce841169acdac1",
+  "0x5f48c2a71b2cc96e3f0ccae4e39318ff0dc375b2",
+  "0x67d40ee1a85bf4a4bb7ffae16de985e8427b6b45",
+  "0x6bad91120e2171950a7d9a70c15e816cf48ce0de",
+  "0x6be0ae71e6c41f2f9d0d1a3b8d0f75e6f6a0b46e",
+  "0x6f1ca141a28907f78ebaa64fb83a9088b02a8352",
+  "0x72a5843cc08275c8171e582972aa4fda8c397b2a",
+  "0x747afb5c7a7fc34b547cd0fdebf9b91759c5a52b",
+  "0x76ea76ca4eb727f18956ab93445a94c5280412b9",
+  "0x797d7ae72ebddcdea2a346c1834e04d1f8df102b",
+  "0x7db418b5d567a4e0e8c59ad71be1fce48f3e6107",
+  "0x7f19720a857f834887fc9a7bc0a0fbe7fc7f8102",
+  "0x7f367cc41522ce07553e823bf3be79a889debe1b",
+  "0x7ff9cfad3877f21d41da833e2f775db0569ee3d9",
+  "0x818faabd112fe24cc5d8b56a2b8dd0e1f370f330",
+  "0x83e5bc4ffa856bb84bb88581f5dd62a433a25e0d",
+  "0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c",
+  "0x901bb9583b24d97e995513c6778dc6888ab6870e",
+  "0x905b63fff465b9ffbf41dea908ceb12478ec7601",
+  "0x931546d9e66836abf687d2bc64b30407bac8c568",
+  "0x95584c303fcd48af5c6b9873015f2ad0ca84eae3",
+  "0x961c5be54a2ffc17cf4cb021d863c42dacd47fc1",
+  "0x96ad914cba965130b19610f9cf0ac405c2b6661c",
+  "0x97b1043abd9e6fc31681635166d430a458d14f9c",
+  "0x983a81ca6fb1e441266d2fbcb7d8e530ac2e05a2",
+  "0x9be599d7867f5e1a2d7ec6db9710df2b98a15573",
+  "0x9c2bc757b66f24d60f016b6237f8cdd414a879fa",
+  "0x9f4cda013e354b8fc285bf4b9a60460cee7f7ea9",
+  "0xa0e1c89ef1a489c9c7de96311ed5ce5d32c20e4b",
+  "0xa108dfde99962808a7ed5c92439ec330717170ac",
+  "0xa7e5d5a720f06526557c513402f2e6b5fa20b008",
+  "0xb637f84b66876ebf609c2a4208905f9ddac9d075",
+  "0xb6f5ec1a0a9cd1526536d3f0426c429529471f40",
+  "0xc2a3829f459b3edd87791c74cd45402ba0a20be3",
+  "0xc455f7fd3e0e12afd51fba5c106909934d8a0e4a",
+  "0xc5873e3ed3ba425acd18dcc6b4af99a02897363e",
+  "0xcb74874f1e06fcf80a306e06e5379a44b488ba2d",
+  "0xd04e33461fea8302c5e1e13895b60cee8aefda7f",
+  "0xd0975b32cea532eadddfc9c60481976e39db3472",
+  "0xd5ed34b52ac4ab84d8fa8a231a3218bbf01ed510",
+  "0xd882cfc20f52f2599d84b8e8d58c7fb62cfe344b",
+  "0xdb2720ebad55399117ddb4c4a4afd9a4ccada8fe",
+  "0xdc450aa52d6b3918d3f6f89a13f3f2f28871479e",
+  "0xdcbeffbecce100cce9e4b153c4e15cb885643193",
+  "0xe1d865c3d669dcc8c57c8d023140cb204e672ee4",
+  "0xe3d35f68383732649669aa990832e017340dbca5",
+  "0xe7aa314c77f4233c18c6cc84384a9247c0cf367b",
+  "0xe950dc316b836e4eefb8308bf32bf7c72a1358ff",
+  "0xed6e0a7e4ac94d976eebfb82ccf777a3c6bad921",
+  "0xefe301d259f525ca1ba74a7977b80d5b060b3cca",
+  "0xf3701f445b6bdafedbca97d1e477357839e4120d",
+  "0xf7b31119c2682c88d88d455dbb9d5932c65cf1be",
+  "0xfac583c0cf07ea434052c49115a4682172ab6b4f",
+  "0xfb3eff152ea55d1bfa04dbdd509a80fd7b72cdeb",
+  "0xfda1ec4a6178d4916b001a065422d31ebe5f62ff",
+  "0xfec8a60023265364d066a1212fde3930f6ae8da7"
+];
+
+// ../../packages/copy-engine/src/sanctions.ts
+function screenPolicy(policy, ...addresses) {
+  const hit = sanctionedOf(addresses);
+  if (hit === null) return policy;
+  return { ...policy, region: "blocked", allowed: false, maxLeverage: null, reason: hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON };
+}
+var LISTED = new Set(SANCTIONED_ADDRESSES.map((a) => a.toLowerCase()));
+var EXTRA = /* @__PURE__ */ new Set();
+function isSanctionedAddress(address) {
+  if (typeof address !== "string") return false;
+  const a = address.trim().toLowerCase();
+  return /^0x[0-9a-f]{40}$/.test(a) && (LISTED.has(a) || EXTRA.has(a));
+}
+function sanctionedOf(addresses) {
+  const i = addresses.findIndex((a) => isSanctionedAddress(a));
+  return i < 0 ? null : i;
+}
+var SANCTIONED_WALLET_REASON = "This wallet address is on a sanctions list, so ValueDesk cannot be used with it. If you believe this is a mistake, contact us at the address in the Impressum.";
+var SANCTIONED_LEADER_REASON = "This trader's wallet address is on a sanctions list, so it cannot be copied through ValueDesk.";
 
 // ../../packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
@@ -9895,6 +10096,12 @@ var CopyRuntime = class {
       if (s.status === "active") await this.setStatus(s.id, "blocked", "The copy key is not available here.");
       return [];
     }
+    const brake = sink.paper ? null : this.host.brake?.(s) ?? null;
+    if (brake) {
+      await this.activity(s, { kind: "error", reason: "brake", symbol: market.name, detail: `Not copied: ${brake}`, leader });
+      this.dirty.add(s.id);
+      return [];
+    }
     const builder = await this.host.builderFor(s).catch(() => null);
     let send = intents;
     if (!sink.paper && intents.some((i) => !i.reduceOnly) && !await this.ensureLeverage(s, market, sink)) {
@@ -10673,7 +10880,8 @@ function verifyCopyRequest(r, o) {
   if (signer !== owner) return { ok: false, error: "the signature is not from this wallet" };
   return { ok: true, digest, payload };
 }
-var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import"];
+var ALGO_UPDATE_FIELDS = ["quantity", "limitPrice", "maxSpreadBps", "label"];
+var EXECUTOR_FEATURES = ["counter", "site-terms", "key-import", "algo-update"];
 
 // ../../packages/copy-engine/src/oracle.ts
 var ORACLE_VENUES = [
@@ -11169,6 +11377,10 @@ var floorStep = (q, m) => {
   const step = Number(m.stepSize);
   return Math.floor(q / step + 1e-9) * step;
 };
+function povDue(rate, others) {
+  if (!(rate > 0) || !(others > 0)) return 0;
+  return others * rate / (1 - Math.min(rate, 0.99));
+}
 var DEFAULT_EXEC = { style: "hybrid", slippageBps: 30, offsetTicks: 0, chaseTicks: 2, makerShare: 0.6 };
 function trail(s, side, price2, o) {
   let { armed, extreme } = s;
@@ -12699,6 +12911,11 @@ var AlgoRuntime = class {
       return;
     }
     if (!s.paper) {
+      const brake = this.host.brake?.(a) ?? null;
+      if (brake) {
+        await this.hold(a, `Held: ${brake}`);
+        return;
+      }
       const problem = await this.problemOf(a, now);
       if (this.stopped(a)) return;
       if (problem) {
@@ -13108,7 +13325,7 @@ var AlgoRuntime = class {
       if (this.live(a).length) return this.pullResting(a);
       return this.end(a, "expired", `End time reached; ${dec3(total - a.filled)} ${m.base} left unfilled, as you chose.`);
     }
-    const due = Math.min(total, s.rate * a.marketQty);
+    const due = Math.min(total, povDue(s.rate, a.marketQty));
     const h = this.dueHistory(a, now, due);
     const late = s.exec.style === "taker" ? due : s.exec.style === "hybrid" ? this.dueAgo(h, now - LATE_MS) : 0;
     const finishing = ended || a.k.rush === true;
@@ -13778,6 +13995,11 @@ var AlgoRuntime = class {
     const sink = s.paper ? null : this.host.sinkFor(a);
     if (!s.paper && !sink) {
       await this.hold(a, "The trading key for this algo is not available here.");
+      return [];
+    }
+    const brake = s.paper ? null : this.host.brake?.(a) ?? null;
+    if (brake) {
+      await this.hold(a, `Held: ${brake}`);
       return [];
     }
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
@@ -14490,6 +14712,179 @@ var COPY_ENGINE_VERSION = "1.1.0";
 // src/service.ts
 import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
 import { existsSync as existsSync3 } from "node:fs";
+
+// src/audited.ts
+var said = (e) => e instanceof Error ? e.message : String(e);
+var intentRow = (i) => ({ clOrdID: i.clOrdID, side: i.side, quantity: i.quantity, limitPrice: i.limitPrice, reduceOnly: i.reduceOnly, leg: i.leg, notionalUsd: i.notionalUsd, clampedBy: i.clampedBy });
+var resultRow = (r) => ({ clOrdID: r.clOrdID, ok: r.ok, orderId: r.orderId, error: r.error, outcomeUnknown: r.outcomeUnknown });
+var builderRow = (b) => b ? { id: b.id, fee: b.fee } : null;
+function auditedOrderSink(inner, db, owner, subId) {
+  return {
+    paper: inner.paper,
+    async place(accountId, market, intents, builder, reference) {
+      db.audit("order", owner, subId, { via: "copy", step: "send", accountId, symbol: market.name, reference, builder: builderRow(builder), orders: intents.map(intentRow) });
+      try {
+        const out = await inner.place(accountId, market, intents, builder, reference);
+        db.audit("order", owner, subId, { via: "copy", step: "answer", symbol: market.name, results: out.map(resultRow) });
+        return out;
+      } catch (e) {
+        db.audit("order", owner, subId, { via: "copy", step: "error", symbol: market.name, error: said(e) });
+        throw e;
+      }
+    },
+    async setLeverage(accountId, market, leverage, margin) {
+      try {
+        await inner.setLeverage(accountId, market, leverage, margin);
+        db.audit("leverage", owner, subId, { via: "copy", accountId, symbol: market.name, leverage, margin, ok: true });
+      } catch (e) {
+        db.audit("leverage", owner, subId, { via: "copy", accountId, symbol: market.name, leverage, margin, ok: false, error: said(e) });
+        throw e;
+      }
+    },
+    async placeStop(accountId, market, stop, builder) {
+      db.audit("stop", owner, subId, { via: "copy", step: "send", accountId, symbol: market.name, builder: builderRow(builder), stop });
+      try {
+        const r = await inner.placeStop(accountId, market, stop, builder);
+        db.audit("stop", owner, subId, { via: "copy", step: "answer", symbol: market.name, result: resultRow(r) });
+        return r;
+      } catch (e) {
+        db.audit("stop", owner, subId, { via: "copy", step: "error", symbol: market.name, clOrdID: stop.clOrdID, error: said(e) });
+        throw e;
+      }
+    },
+    async cancel(accountId, market, clOrdID) {
+      try {
+        await inner.cancel(accountId, market, clOrdID);
+        db.audit("cancel", owner, subId, { via: "copy", accountId, symbol: market.name, clOrdIDs: [clOrdID], ok: true });
+      } catch (e) {
+        db.audit("cancel", owner, subId, { via: "copy", accountId, symbol: market.name, clOrdIDs: [clOrdID], ok: false, error: said(e) });
+        throw e;
+      }
+    }
+  };
+}
+function auditedAlgoSink(inner, db) {
+  return {
+    paper: inner.paper,
+    async place(a, market, orders) {
+      db.audit("order", a.owner, a.id, { via: "algo", kind: a.spec.kind, step: "send", accountId: a.accountId, symbol: market.name, orders });
+      try {
+        const out = await inner.place(a, market, orders);
+        db.audit("order", a.owner, a.id, { via: "algo", step: "answer", symbol: market.name, results: out.map(resultRow) });
+        return out;
+      } catch (e) {
+        db.audit("order", a.owner, a.id, { via: "algo", step: "error", symbol: market.name, error: said(e) });
+        throw e;
+      }
+    },
+    async placeStops(a, market, stops) {
+      db.audit("stop", a.owner, a.id, { via: "algo", step: "send", accountId: a.accountId, symbol: market.name, stops });
+      try {
+        const out = await inner.placeStops(a, market, stops);
+        db.audit("stop", a.owner, a.id, { via: "algo", step: "answer", symbol: market.name, results: out.map(resultRow) });
+        return out;
+      } catch (e) {
+        db.audit("stop", a.owner, a.id, { via: "algo", step: "error", symbol: market.name, error: said(e) });
+        throw e;
+      }
+    },
+    async cancel(a, market, clOrdIDs) {
+      try {
+        await inner.cancel(a, market, clOrdIDs);
+        db.audit("cancel", a.owner, a.id, { via: "algo", accountId: a.accountId, symbol: market.name, clOrdIDs, ok: true });
+      } catch (e) {
+        db.audit("cancel", a.owner, a.id, { via: "algo", accountId: a.accountId, symbol: market.name, clOrdIDs, ok: false, error: said(e) });
+        throw e;
+      }
+    },
+    async setLeverage(a, market, leverage, margin) {
+      try {
+        await inner.setLeverage(a, market, leverage, margin);
+        db.audit("leverage", a.owner, a.id, { via: "algo", accountId: a.accountId, symbol: market.name, leverage, margin, ok: true });
+      } catch (e) {
+        db.audit("leverage", a.owner, a.id, { via: "algo", accountId: a.accountId, symbol: market.name, leverage, margin, ok: false, error: said(e) });
+        throw e;
+      }
+    }
+  };
+}
+
+// src/brake.ts
+import { readFileSync as readFileSync3, statSync } from "node:fs";
+var READ_EVERY_MS = 1e3;
+var DEFAULT_REASON = "ValueDesk has paused trading on this executor for now.";
+function parseBrake(text) {
+  let raw;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read)`, since: null };
+  }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file is not an object)`, since: null };
+  const r = raw;
+  const copies = r.copies !== false;
+  const algos = r.algos !== false;
+  if (!copies && !algos) return null;
+  const reason = typeof r.reason === "string" && r.reason.trim() ? r.reason.trim().slice(0, 300) : DEFAULT_REASON;
+  const since = typeof r.since === "number" && Number.isFinite(r.since) ? r.since : null;
+  return { copies, algos, reason, since };
+}
+var Brake = class {
+  /**
+   * @param file the brake file; null: there is none (a self-hosted copier without one configured).
+   * @param onChange told when the state changes (for the audit log and the service log).
+   */
+  constructor(file, onChange) {
+    this.file = file;
+    this.onChange = onChange;
+    this.read(Date.now(), true);
+  }
+  file;
+  onChange;
+  state = null;
+  mtime = -1;
+  checkedAt = 0;
+  /** The brake now (null: off). Cheap: re-reads at most once a second. */
+  current(now = Date.now()) {
+    if (now - this.checkedAt >= READ_EVERY_MS) this.read(now, false);
+    return this.state;
+  }
+  /** Why a live copy may not trade now, or null. */
+  copies(now = Date.now()) {
+    const b = this.current(now);
+    return b?.copies ? b.reason : null;
+  }
+  /** Why a live algo may not trade now, or null. */
+  algos(now = Date.now()) {
+    const b = this.current(now);
+    return b?.algos ? b.reason : null;
+  }
+  read(now, first) {
+    this.checkedAt = now;
+    if (!this.file) return;
+    let next;
+    try {
+      const st = statSync(this.file, { throwIfNoEntry: false });
+      if (!st) {
+        if (this.mtime === -1 && !first && this.state === null) return;
+        this.mtime = -1;
+        next = null;
+      } else {
+        if (st.mtimeMs === this.mtime) return;
+        this.mtime = st.mtimeMs;
+        next = parseBrake(readFileSync3(this.file, "utf8"));
+      }
+    } catch (e) {
+      this.mtime = -2;
+      next = { copies: true, algos: true, reason: `${DEFAULT_REASON} (the brake file cannot be read: ${e.code ?? "error"})`, since: null };
+    }
+    const before = this.state;
+    this.state = next;
+    if (JSON.stringify(before) !== JSON.stringify(next)) this.onChange?.(next, before);
+  }
+};
+
+// src/service.ts
 var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 var PAIR_MAX_TRIES = 10;
 var PAIR_LOCK_MS = 15 * 6e4;
@@ -14513,6 +14908,28 @@ function specsOf(spec, raw, parentPaper) {
   if (then?.type === "algo" && then.algo) out.push(...specsOf(then.algo, rawThen.algo, paper));
   return out;
 }
+function algoPatch(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new ApiError(400, "patch", "update needs a patch: what to change.");
+  const r = raw;
+  const other = Object.keys(r).filter((k) => !ALGO_UPDATE_FIELDS.includes(k));
+  if (other.length) throw new ApiError(400, "patch", `Only ${ALGO_UPDATE_FIELDS.join(", ")} of a running algo can be changed (not ${other.join(", ")}).`);
+  if (!Object.keys(r).length) throw new ApiError(400, "patch", "The patch changes nothing.");
+  const out = {};
+  if (r.quantity !== void 0) {
+    if (typeof r.quantity !== "string" || !/^\d+(\.\d+)?$/.test(r.quantity) || !(Number(r.quantity) > 0)) throw new ApiError(400, "patch", "The size must be a positive decimal string.");
+    out.quantity = r.quantity;
+  }
+  for (const k of ["limitPrice", "maxSpreadBps"]) {
+    if (r[k] === void 0) continue;
+    if (r[k] !== null && !(typeof r[k] === "number" && Number.isFinite(r[k]) && r[k] > 0)) throw new ApiError(400, "patch", `${k} must be a positive number or null.`);
+    out[k] = r[k];
+  }
+  if (r.label !== void 0) {
+    if (r.label !== null && (typeof r.label !== "string" || r.label.length > 60)) throw new ApiError(400, "patch", "The label must be text of at most 60 characters, or null.");
+    out.label = r.label;
+  }
+  return out;
+}
 var ApiError = class extends Error {
   constructor(status, code, message) {
     super(message);
@@ -14534,6 +14951,11 @@ var ExecutorService = class {
     this.executorId = cfg.executorId ?? (cfg.kind === "hosted" ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === "hosted" ? "vd-copy-tokyo" : "vd-copy-self";
     this.pairingCode = cfg.kind === "self" && !this.owner() ? pairingCode() : null;
+    this.brake = new Brake(cfg.brakeFile, (now, before) => {
+      db.audit("brake", null, null, { now, before });
+      if (now) deps.log.warn("executor: the emergency brake is ON", { copies: now.copies, algos: now.algos, reason: now.reason });
+      else if (before) deps.log.warn("executor: the emergency brake is off", {});
+    });
     this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
@@ -14547,8 +14969,9 @@ var ExecutorService = class {
       sinkFor: (s) => this.sinkFor(s),
       builderFor: async (s) => cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null,
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
-      policyFor: (s) => this.policyNow(s.owner, s.country, s.observedCountry),
-      keyProblem: (s) => this.keyProblem(s.owner)
+      policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
+      keyProblem: (s) => this.keyProblem(s.owner),
+      brake: () => this.brakeText("copies")
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.algos = new AlgoRuntime({
@@ -14560,6 +14983,7 @@ var ExecutorService = class {
       sinkFor: (a) => this.algoSink(a),
       builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
       problem: (a) => this.algoProblem(a),
+      brake: () => this.brakeText("algos"),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => this.algoPolicy(a),
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
@@ -14592,6 +15016,8 @@ var ExecutorService = class {
   pairingCode;
   pairMisses = 0;
   pairLockedUntil = 0;
+  /** The operator's emergency brake (brake.ts): read from cfg.brakeFile. */
+  brake;
   async start() {
     await this.runtime.start();
     await this.algos.start();
@@ -14630,8 +15056,30 @@ var ExecutorService = class {
       keyName: this.keyName,
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, "<owner>") },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
-      features: [...EXECUTOR_FEATURES]
+      features: [...EXECUTOR_FEATURES],
+      brake: this.brakeView()
     };
+  }
+  /* ------------------------------------------------------------ audit ----- */
+  /** One answered request, for the audit log (server.ts): route, status, where from, the signed action and wallet. */
+  audit(r) {
+    this.db.audit("request", r.request?.owner ?? null, r.path, r);
+  }
+  /* ------------------------------------------------------------ brake ----- */
+  /** What the site shows while the brake is on (null: off). */
+  brakeView() {
+    const b = this.brake.current();
+    return b ? { copies: b.copies, algos: b.algos, reason: b.reason, since: b.since } : null;
+  }
+  /** The sentence a held copy or algo shows, or null while that switch is off. */
+  brakeText(what) {
+    const r = what === "copies" ? this.brake.copies() : this.brake.algos();
+    return r === null ? null : `ValueDesk paused all ${what === "copies" ? "copy trading" : "algo orders"} on this executor: ${r}`;
+  }
+  /** New live trading (a copy, an algo, a resume, a bigger size) is refused while the brake is on; stopping never is. */
+  needNoBrake(what) {
+    const t = this.brakeText(what);
+    if (t) throw new ApiError(503, "brake", `${t} Nothing new starts until it is lifted; what you stop, pause or cancel still goes through.`);
   }
   /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
   health() {
@@ -14641,12 +15089,12 @@ var ExecutorService = class {
     } catch {
       db = false;
     }
-    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false } };
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current() };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
     const sodex = v?.feeds.sodex ?? true;
-    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex } };
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex }, brake: this.brake.current() };
   }
   /**
    * One instruction of a wallet at a time. A subscribe or an algo start checks the
@@ -14738,6 +15186,7 @@ var ExecutorService = class {
     for (const k of ["adult", "notUsPerson", "ownDecision", "risksUnderstood"]) {
       if (p[k] !== true) throw new ApiError(400, "statements", "Every statement must be confirmed to copy trades.");
     }
+    this.screen(owner);
     const policy = regionPolicy(country, ctx.viewerCountry);
     this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
     if (!policy.allowed) throw new ApiError(451, "region", policy.reason ?? "Copy trading is not available in your region.");
@@ -14772,7 +15221,7 @@ var ExecutorService = class {
     return {
       owner,
       terms: current,
-      policy: regionPolicy(current?.country ?? null, ctx.viewerCountry),
+      policy: screenPolicy(regionPolicy(current?.country ?? null, ctx.viewerCountry), owner),
       key: this.keyInfo(owner),
       copies: this.runtime.list(owner).map((s) => this.runtime.view(s.id)).filter((v) => v !== null).sort((a, b) => b.subscription.createdAt - a.subscription.createdAt)
     };
@@ -14910,10 +15359,20 @@ var ExecutorService = class {
   sinkFor(s) {
     if (s.settings.paper) return this.paper;
     if (!this.db.key(s.owner, "active")) return null;
-    return new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]);
+    return auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
   }
   /* ----------------------------------------------------------- copies ----- */
+  /**
+   * A follower or leader on the sanctions list (copy-engine sanctions.ts, a list in the repository:
+   * nothing is fetched) is refused on every request that lets a wallet trade or be copied; what
+   * already runs is held through policyFor. Stopping, pausing, cancelling and deleting the key stay open.
+   */
+  screen(...addresses) {
+    const hit = sanctionedOf(addresses);
+    if (hit !== null) throw new ApiError(451, "sanctioned", hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON);
+  }
   needTerms(owner, ctx) {
+    this.screen(owner);
     const t = this.db.terms(owner);
     if (!t || t.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(412, "terms", "Accept the copy trading terms first.");
     const policy = regionPolicy(t.country, ctx.viewerCountry);
@@ -14933,6 +15392,7 @@ var ExecutorService = class {
     } catch (e) {
       throw new ApiError(400, "settings", e instanceof SettingsError ? e.message : String(e));
     }
+    this.screen(owner, settings.leader.address);
     const running = this.runtime.list(owner).filter((s) => s.status !== "stopped");
     if (running.length >= this.cfg.maxCopiesPerOwner) throw new ApiError(429, "limit", `At most ${this.cfg.maxCopiesPerOwner} copies run at once. Stop one first.`);
     if (running.some((s) => s.settings.leader.address === settings.leader.address && s.settings.leader.venue === settings.leader.venue && s.settings.paper === settings.paper)) {
@@ -14940,6 +15400,7 @@ var ExecutorService = class {
     }
     let accountId = 0;
     if (!settings.paper) {
+      this.needNoBrake("copies");
       await this.verifyKey(owner);
       const k = this.db.key(owner, "active");
       if (!k || !k.registered) throw new ApiError(412, "key", 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
@@ -14994,10 +15455,13 @@ var ExecutorService = class {
         } catch (e) {
           throw new ApiError(400, "settings", e instanceof SettingsError ? e.message : String(e));
         }
+        this.screen(owner, settings.leader.address);
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
       } else if (action2 === "pause") touched = [await this.runtime.pause(s.id).catch(fail)];
       else if (action2 === "resume") {
+        if (!s.settings.paper) this.needNoBrake("copies");
         this.needTerms(owner, ctx);
+        this.screen(owner, s.settings.leader.address);
         touched = [await this.runtime.resume(s.id).catch(fail)];
       } else touched = [await this.runtime.stopCopy(s.id, { close: payload.close === true }).catch(fail)];
     }
@@ -15012,12 +15476,15 @@ var ExecutorService = class {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   algoSink(a) {
     if (!this.db.key(a.owner, "active")) return null;
-    return new KeyAlgoSink(
-      this.sodex,
-      () => this.signer(a.owner),
-      this.nonces,
-      SODEX_CHAIN_ID[this.cfg.network],
-      async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null
+    return auditedAlgoSink(
+      new KeyAlgoSink(
+        this.sodex,
+        () => this.signer(a.owner),
+        this.nonces,
+        SODEX_CHAIN_ID[this.cfg.network],
+        async (x) => this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null
+      ),
+      this.db
     );
   }
   /**
@@ -15042,7 +15509,7 @@ var ExecutorService = class {
    * so a wallet that declares a blocked country has its live algos held at once.
    */
   algoPolicy(a) {
-    return this.policyNow(a.owner, a.country ?? null, a.observedCountry ?? null);
+    return screenPolicy(this.policyNow(a.owner, a.country ?? null, a.observedCountry ?? null), a.owner);
   }
   /**
    * The region rule for a running copy or algo: the stricter of the country it
@@ -15083,6 +15550,7 @@ var ExecutorService = class {
     if (!this.cfg.liveAlgos && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
     let accountId = 0;
     if (!spec.paper) {
+      this.needNoBrake("algos");
       await this.verifyKey(owner);
       const k = this.db.key(owner, "active");
       if (!k || !k.registered) throw new ApiError(412, "key", `Register this executor's key on SoDEX first (copy setup, "Approve agent").`);
@@ -15116,10 +15584,15 @@ var ExecutorService = class {
       if (!a || a.owner !== owner) throw new ApiError(404, "algo", "No such algo order.");
       if (op === "pause") touched = [await this.algos.pause(a.id).catch(fail)];
       else if (op === "resume") {
+        if (!a.spec.paper) this.needNoBrake("algos");
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === "cancel") touched = [await this.algos.cancel(a.id).catch(fail)];
-      else throw new ApiError(400, "op", "op must be pause, resume, cancel or cancel-all.");
+      else if (op === "update") {
+        if (!a.spec.paper) this.needNoBrake("algos");
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
+      } else throw new ApiError(400, "op", "op must be pause, resume, cancel, cancel-all or update.");
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v) => v !== null) };
   }
@@ -15258,6 +15731,23 @@ async function readJson(req) {
     throw new ApiError(400, "json", "The body is not JSON.");
   }
 }
+function signedOf(r) {
+  if (!r || typeof r !== "object") return null;
+  const x = r;
+  let digest = null;
+  try {
+    digest = copyRequestDigest(x);
+  } catch {
+    digest = null;
+  }
+  return { action: typeof x.action === "string" ? x.action.slice(0, 40) : null, owner: typeof x.owner === "string" ? x.owner.toLowerCase().slice(0, 42) : null, digest };
+}
+function ipPrefix(ip) {
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.\d+$/.exec(ip);
+  if (v4) return `${v4[1]}.${v4[2]}.${v4[3]}.0/24`;
+  if (ip.includes(":")) return `${ip.split(":").slice(0, 3).join(":")}::/48`;
+  return "unknown";
+}
 function createExecutorServer(svc, cfg, log) {
   const reads = new Limiter(240);
   const writes = new Limiter(40);
@@ -15309,6 +15799,7 @@ function createExecutorServer(svc, cfg, log) {
   };
   return createServer(async (req, res) => {
     const t0 = Date.now();
+    let signed = null;
     const url = new URL(req.url ?? "/", "http://executor");
     const path = url.pathname;
     try {
@@ -15345,6 +15836,7 @@ function createExecutorServer(svc, cfg, log) {
       }
       if (!isWrite) throw new ApiError(404, "path", "not found");
       const body = await readJson(req);
+      signed = signedOf(body.request);
       if (route === "/session") return send(res, 200, svc.session(body.request, ctx));
       if (route === "/terms") return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === "/site-terms") return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
@@ -15363,6 +15855,12 @@ function createExecutorServer(svc, cfg, log) {
       send(res, err.status, { ok: false, code: err.code, error: err.message });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug("request", { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
+      if (req.method === "POST" || res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404) {
+        try {
+          svc.audit({ method: req.method ?? "", path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers["x-viewer-country"] ?? "")) : null, request: signed });
+        } catch {
+        }
+      }
     }
   });
 }
@@ -15383,8 +15881,8 @@ function selfBanner(o) {
     "",
     `  ValueDesk copier is running on ${o.url}`,
     "",
-    ...o.owner ? [`  It serves the wallet ${o.owner}.`, "  In ValueDesk (https://valuedesk.so): Copy -> Set up -> Self-hosted, and enter the address above."] : [
-      "  To connect it: in ValueDesk (https://valuedesk.so) open Copy -> Set up -> Self-hosted,",
+    ...o.owner ? [`  It serves the wallet ${o.owner}.`, "  In ValueDesk (https://www.valuedesk.so): Copy -> Set up -> Self-hosted, and enter the address above."] : [
+      "  To connect it: in ValueDesk (https://www.valuedesk.so) open Copy -> Set up -> Self-hosted,",
       "  enter the address above and this pairing code:",
       "",
       `      ${o.code}`,
@@ -15411,6 +15909,7 @@ async function main() {
     if (stopping) return;
     stopping = true;
     log.info("executor stopping", { why });
+    db?.audit("process", null, null, { event: "stop", why, pid: process.pid });
     server.close();
     await svc?.stop().catch((e) => log.error("stop failed", { error: String(e) }));
     db?.close();
@@ -15454,6 +15953,7 @@ async function main() {
     const shownHost = cfg.host === "0.0.0.0" || cfg.host === "::" ? "127.0.0.1" : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
   }
+  db.audit("process", null, null, { event: "start", pid: process.pid, kind: cfg.kind, id: svc.executorId, network: cfg.network, liveAlgos: cfg.liveAlgos, brake: svc.brake.current() });
   await svc.start();
   log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos });
   const prune = setInterval(() => {
@@ -15465,6 +15965,13 @@ async function main() {
     }
   }, 6 * 60 * 6e4);
   prune.unref();
+  const anchor = () => {
+    const head = db?.auditRows({ limit: 1 })[0];
+    if (head) log.info("audit head", { seq: head.seq, at: head.at, hash: head.hash });
+  };
+  anchor();
+  const anchoring = setInterval(anchor, 60 * 6e4);
+  anchoring.unref();
 }
 main().catch((e) => {
   const what = process.env.EXECUTOR_KIND?.trim() === "hosted" ? "The executor" : "The copier";

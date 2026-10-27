@@ -62,7 +62,7 @@ export const SOURCE_NAME: Record<CalendarSource, string> = {
 const FED_URL = 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm';
 const BLS_URL = 'https://www.bls.gov/schedule/news_release/bls.ics';
 const BEA_URL = 'https://www.bea.gov/news/schedule/ics/online-calendar-subscription.ics';
-const UA = 'ValueDesk economic calendar (+https://valuedeskapp.vercel.app)';
+const UA = 'ValueDesk economic calendar (+https://www.valuedesk.so)';
 const REFRESH_MS = 12 * 60 * 60_000;
 /** A source that failed is not asked again for this long. */
 const RETRY_MS = 20 * 60_000;

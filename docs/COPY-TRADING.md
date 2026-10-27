@@ -130,7 +130,16 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
 - Copy fee: the copy ladder on **every** copied order in every mode -
   2.5 bp under $100k of 14-day volume, 2 bp from $100k, 1.5 bp from $500k,
   1.2 bp from $2M, 1 bp from $10M. Followers approve a 0.025% ceiling on SoDEX.
-- Blocked: US + territories (US PR VI GU AS MP UM), CU IR KP SY RU BY MM.
+- Blocked: US + territories (US PR VI GU AS MP UM), CU IR KP SY RU BY MM; from
+  2026-10-27 (terms 2026-10-27.3) also the United Kingdom (GB; `UK` is read as GB;
+  not JE GG IM or the Overseas Territories) and Canada (CA) - the site is
+  close-only there as in the US.
+- Sanctioned wallets (2026-10-27): the executor refuses a follower or a leader on
+  the sanctions list (`packages/copy-engine/src/sanctions.ts`, a list in the repo
+  from the Chainalysis oracle, refreshed with `node scripts/update-sanctions-list.mjs`)
+  at accept-terms, key create/import, subscribe, update, resume and algo start/resume,
+  and holds what already runs; stopping, cancelling and deleting the key stay open.
+  The API signs no builder fee terms for a listed wallet.
   EEA residents (EU + IS LI NO, and the EU's own-code territories RE GP MQ GF YT
   MF AX): copies capped at 2x. The stricter of the
   declared country and the IP country (hosted, Vercel `x-vercel-ip-country`) applies.

@@ -5,3 +5,12 @@
 
 # Local outputs of the smoke test and the release scripts (builds, reports, tarballs).
 .out/
+
+# The per-server settings of deploy/contabo are committed on purpose: nothing in them is
+# secret (deploy/contabo/README.md). Named one by one, so that no other *.env slips in.
+!contabo/server1/health.env
+!contabo/server1/offsite.env
+!contabo/server1/backup-receive.env
+!contabo/server2/health.env
+!contabo/server2/offsite.env
+!contabo/server2/backup-receive.env

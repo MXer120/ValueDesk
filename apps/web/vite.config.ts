@@ -138,9 +138,21 @@ logger.error = (msg, options) => {
 /** The local API's port: 8797, or another checkout's (VALUETRADE_DEV_API_PORT) when two run side by side. */
 const DEV_API_PORT = /^\d{2,5}$/.test(process.env.VALUETRADE_DEV_API_PORT ?? '') ? process.env.VALUETRADE_DEV_API_PORT : '8797';
 
+/**
+ * The build's name in client error reports and feedback (src/buildInfo.ts): the
+ * commit Vercel builds (deploy/vercel/build.sh), else the minute of the build.
+ * Public, like everything else in the bundle.
+ */
+const buildId = (): string => {
+  const sha = process.env.VERCEL_GIT_COMMIT_SHA?.trim();
+  if (sha && /^[0-9a-f]{7,40}$/i.test(sha)) return sha.slice(0, 12);
+  return `local-${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}`;
+};
+
 export default defineConfig({
   customLogger: logger,
   plugins: [react(), trackAppOrigin(), preloadPalette(), thirdPartyLicences()],
+  define: { __VS_BUILD__: JSON.stringify(buildId()) },
   /*
    * The EIP-712 signing layer is SHARED with the backend, not copied.
    *

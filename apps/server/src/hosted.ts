@@ -19,6 +19,8 @@
  *     read API has no such boundary. The index is GET only. The one thing a
  *     visitor changes is their own knowledge folders (routes/folders.ts): POST
  *     routes that need the site's own Origin, exactly, and the wallet's token.
+ *     The other POSTs are what a visitor sends the owner - feedback and client
+ *     error reports (routes/reports.ts): the same Origin rule, limits of their own.
  *   - PER-CLIENT RATE LIMITS keyed by the address Fastify derives through
  *     `trustProxy`, which believes X-Forwarded-For ONLY from the configured
  *     proxy hops (VALUESCAN_TRUST_PROXY). IPv6 clients are grouped by /64.
@@ -54,7 +56,8 @@ import { isSiteOrigin, normaliseOrigin } from './origin.js';
  *            party from this server's address - capped per client and overall.
  * `write`    a change to a wallet's own knowledge folders: counted per client
  *            here, per wallet in the route (routes/folders.ts), and only ever
- *            with the site's Origin.
+ *            with the site's Origin. Also a visitor's feedback and client error
+ *            reports (routes/reports.ts), which the route limits far tighter still.
  */
 export type RateClass = 'read' | 'upstream' | 'auth' | 'write';
 
@@ -140,6 +143,18 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },
+  // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
+  { method: 'GET', url: '/api/vs/status', cls: 'read' },
+  // What a visitor sends the owner (routes/reports.ts): the feedback form and client error reports.
+  // POSTs, so the site's exact Origin; `write` here, and much tighter limits of their own in the route.
+  // Feedback is a chat (ops/feedbackThreads.ts): a screenshot's upload, the thread, the poll for the owner's
+  // replies, and a screenshot back - each behind the thread's token (Authorization), never in the URL.
+  { method: 'POST', url: '/api/vs/feedback', cls: 'write' },
+  { method: 'POST', url: '/api/vs/feedback/upload', cls: 'write' },
+  { method: 'POST', url: '/api/vs/feedback/thread', cls: 'write' },
+  { method: 'POST', url: '/api/vs/feedback/poll', cls: 'write' },
+  { method: 'GET', url: '/api/vs/feedback/image', cls: 'read' },
+  { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.

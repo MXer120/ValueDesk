@@ -401,7 +401,7 @@ export function TermsGate({ hidden, onOpen, address, provider }: {
 
 /**
  * The navbar's red pill wherever the edge puts the visitor in a restricted
- * place (jurisdictions.mjs): close-only from the US, and what a connected
+ * place (jurisdictions.mjs): close-only from the US, the UK and Canada, and what a connected
  * wallet declared. A sanctioned place never gets this far (SiteGate). It opens
  * the Terms of use, where section 3 says what applies.
  */

@@ -29,9 +29,14 @@
 # indexer costs its Lighter stream 3.5-8 minutes; restarting the API costs seconds.
 # --executor-only: when the release changes the copy executor only.
 #
+# THE TEST GATE (deploy/release/test-gate.sh): nothing is released unless CI passed for
+# the tag's commit (with GITHUB_TOKEN set), or every suite passes here on exactly the tag.
+# Emergencies only: VS_SKIP_TESTS=1 VS_SKIP_TESTS_REASON="..." - logged here and on the server.
+#
 # Roll back: deploy/release/rollback.sh server
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+. "$(dirname "${BASH_SOURCE[0]}")/test-gate.sh"
 
 TAG=""
 API_ONLY=""
@@ -39,7 +44,7 @@ for arg in "$@"; do
   case "$arg" in
     --all|--api-only|--executor-only) [ -z "$API_ONLY" ] || die "--all, --api-only and --executor-only exclude each other"; API_ONLY=" $arg" ;;
     --print) PRINT_ONLY=1 ;;
-    -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) die "unknown option $arg" ;;
     *) [ -z "$TAG" ] || die "one tag at a time"; TAG="$arg" ;;
   esac
@@ -47,6 +52,8 @@ done
 [ -n "$TAG" ] || die "usage: deploy/release/release-server.sh <tag> [--all|--api-only|--executor-only] [--print]"
 require_tag "$TAG"
 load_params
+TEST_GATE_SKIPPED=0
+[ "${PRINT_ONLY:-0}" = 1 ] || test_gate "$TAG"
 
 mkdir -p "$OUT_DIR"
 tarball="$OUT_DIR/valuescan-server-$TAG.tar.gz"
@@ -86,5 +93,10 @@ else
   run aws s3 cp "$tarball" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz" --only-show-errors
   run aws s3 cp "$tarball.sha256" "s3://$OPS/releases/server/valuescan-server-$TAG.tar.gz.sha256" --only-show-errors
   ssm_run "$INSTANCE" "valuescan release $TAG" "/opt/valuescan/bin/release.sh $TAG$API_ONLY"
+fi
+if [ "$TEST_GATE_SKIPPED" = 1 ]; then
+  # Into the server's journal (kept a year): a release without the gate is always findable.
+  why="$(printf %s "${VS_SKIP_TESTS_REASON:-none given}" | tr -cd "A-Za-z0-9 .,:_-" | cut -c1-200)"
+  remote_run "record the skipped test gate" "logger -t valuescan-release 'release $TAG WITHOUT the test gate (VS_SKIP_TESTS=1), reason: $why'"
 fi
 note "released $TAG"

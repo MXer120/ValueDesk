@@ -1,0 +1,66 @@
+# Every type check and every offline test of the repository, on every push and pull
+# request: deploy/ci/run-tests.mjs (it finds the suites itself - a new test file is run
+# without touching this file). The same script gates Vercel's production build
+# (deploy/vercel/build.sh) and server releases (deploy/release/release-server.sh, which
+# also accepts a green run of this workflow for the tag's commit).
+#
+# Node: the version the servers run (deploy/server/versions.env), so a test that passes
+# here passes on the box. Nothing here needs a secret or the network beyond npm.
+#
+# WHEN: pushes to main, every pull request, and tags (release-server.sh asks for the
+# tag's commit); by hand for any branch (Actions -> CI -> Run workflow). Not on every
+# push to every branch: a private repository pays GitHub by the minute (one run is
+# about 5 minutes: npm ci plus the suites) and the free minutes are shared with the
+# uptime watcher. A change to documentation only runs nothing.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths-ignore: ['**/*.md', 'docs/**', 'research_notes/**', 'reports/**']
+  pull_request:
+    paths-ignore: ['**/*.md', 'docs/**', 'research_notes/**', 'reports/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node version of the servers
+        id: node
+        run: echo "version=$(sed -n 's/^NODE_VERSION=//p' deploy/server/versions.env | tr -d '\r')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ steps.node.outputs.version }}
+          cache: npm
+
+      - name: Install
+        # The speech model's native runtime is not needed for any test (vercel.json does the same).
+        run: npm ci --no-audit --no-fund
+        env:
+          ONNXRUNTIME_NODE_INSTALL: skip
+
+      - name: Type checks and tests
+        run: node deploy/ci/run-tests.mjs --jobs=2 --json=deploy/.out/ci-summary.json
+
+      - name: Keep the logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: |
+            deploy/.out/ci/
+            deploy/.out/ci-summary.json
+          retention-days: 14

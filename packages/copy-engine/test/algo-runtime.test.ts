@@ -289,16 +289,17 @@ test('a write without an answer is never sent again; SoDEX is asked what became 
   assert.ok(Math.abs(x.filled - 0.002) < 1e-12);
 });
 
-test('POV: a share of what others trade - its own prints do not count', async () => {
+test('POV: a share of the total volume, its own fills included - its own prints are not counted twice', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'pov', quantity: '0.01', rate: 0.1, exec: { style: 'taker' } });
+  const a = await add(r, { kind: 'pov', quantity: '0.01', rate: 0.2, exec: { style: 'taker' } });
   await step(r, a.id);
   assert.equal(r.sink.all.length, 0);
-  r.market.print({ price: 60_000, qty: 0.05 });
+  r.market.print({ price: 60_000, qty: 0.02 });
   r.market.print({ price: 60_000, qty: 1, buyer: ACCOUNT });
   const x = await step(r, a.id, 1_000);
-  assert.equal(x.marketQty, 0.05);
+  assert.equal(x.marketQty, 0.02);
   assert.equal(r.sink.all.length, 1);
+  // 20% of the total: f = 0.2 x (0.02 + f), so f = 0.005 (a quarter of what the others traded).
   assert.equal(r.sink.all[0]!.quantity, '0.005');
 });
 
@@ -697,4 +698,19 @@ test('stopping waits for a step that is placing an order, and records what it se
   assert.equal(r.sink.all.length, 1);
   const saved = (await r.store.algos()).find((x) => x.id === a.id)!;
   assert.equal(saved.children.length, 1, 'the order that went out is in the books');
+});
+
+test('brake: a live algo is held at once while the operator brake is on (nothing new is sent) and goes on by itself when it is lifted', async () => {
+  const r = await rig();
+  let brake: string | null = null;
+  (r.rt as unknown as { host: { brake?: () => string | null } }).host.brake = () => brake;
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 240_000, slices: 4, exec: { style: 'taker', slippageBps: 30 } });
+  brake = 'Investigating.';
+  const held = await step(r, a.id, 1_000);
+  assert.equal(r.sink.all.length, 0, 'nothing sent while braked');
+  assert.ok(held.status === 'scheduled' || held.status === 'waiting', held.status);
+  assert.match(held.statusReason ?? '', /Investigating/);
+  brake = null;
+  await step(r, a.id, 1_000);
+  assert.equal(r.sink.all.length, 1, 'sent once the brake is lifted');
 });

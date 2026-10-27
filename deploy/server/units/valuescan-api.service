@@ -24,6 +24,10 @@ EnvironmentFile=/etc/valuescan/api.env
 # Only VALUESCAN_ORIGIN_SECRET, written by bootstrap.sh from SSM Parameter Store.
 EnvironmentFile=/etc/valuescan/api.secret.env
 EnvironmentFile=-/etc/valuescan/api.local.env
+# ALERT_TELEGRAM_TOKEN and ALERT_TELEGRAM_CHAT_ID (root 0600, telegram-setup.sh): the API
+# forwards visitors' feedback and new client errors to the owner (apps/server/src/ops/telegram.ts),
+# through the same bot as the health check's alerts.
+EnvironmentFile=-/etc/valuescan/alert.env
 # The heap is set, not derived: inside MemoryMax=900M Node chose 368 MB on its own, and the API died
 # of it five times on 2026-10-03 (heap out of memory, then a 5-minute core dump with the API down).
 # Measured (local index, 2026-10-04): the cohort load keeps ~270 MB and peaks ~440 MB while it is
@@ -46,6 +50,10 @@ MemoryMax=1500M
 # No core dump: writing one took 5 minutes, all of them without an API. A crash restarts in 3 s.
 LimitCORE=0
 SyslogIdentifier=valuescan-api
+# Its request lines carry client IP addresses: they go to the journal namespace "pii",
+# which keeps 14 days as the privacy policy promises (journald/journald@pii.conf).
+# The main journal keeps a year. Read them: journalctl --namespace=pii -u valuescan-api
+LogNamespace=pii
 
 # --- hardening ---
 NoNewPrivileges=yes

@@ -19,6 +19,7 @@ import { FEED_LOADING, FeedOverlay } from '../FeedOverlay';
 import { TV_ENABLED } from './flag';
 import { loadTradingView, peekTradingView } from './loader';
 import { logger } from '../../log';
+import { reportBoundaryError } from '../../errorReport';
 
 const log = logger('chart.tv');
 
@@ -48,6 +49,7 @@ class TvBoundary extends Component<{ onError: (reason: string) => void; children
     return { failed: true };
   }
   componentDidCatch(error: Error): void {
+    reportBoundaryError('TradingView chart', error);
     this.props.onError(`TradingView chart crashed: ${error.message}`);
   }
   render(): ReactNode {

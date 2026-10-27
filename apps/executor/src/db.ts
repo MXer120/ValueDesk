@@ -5,7 +5,17 @@
  *
  * The consent log is append-only: nothing here updates or deletes a row of
  * it, so what a follower signed stays exactly as they signed it.
+ *
+ * THE AUDIT LOG (table `audit`) is the executor's own record of everything it
+ * did, kept for good (no pruning): every request it answered (route, wallet,
+ * result), every order, stop, cancel and leverage change it sent to SoDEX with
+ * SoDEX's answer, the emergency brake switched on and off, and each start and
+ * stop of the process. Append-only and hash-chained: each row's `hash` is
+ * SHA-256 over the previous row's hash and this row, so a row changed or taken
+ * out afterwards breaks the chain from there on (`verifyAudit`, tools/audit.ts).
+ * Nothing secret is written: no key, no signature, no session token.
  */
+import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync as SqliteDb, StatementSync } from 'node:sqlite';
@@ -65,7 +75,40 @@ CREATE TABLE IF NOT EXISTS algos (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json
 CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
 CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
+CREATE TABLE IF NOT EXISTS audit (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  owner TEXT,
+  ref TEXT,
+  data TEXT NOT NULL,
+  hash TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS audit_owner ON audit (owner, at);
+CREATE INDEX IF NOT EXISTS audit_ref ON audit (ref);
+CREATE INDEX IF NOT EXISTS audit_at ON audit (at);
 `;
+
+/** One row of the audit log. */
+export interface AuditRow {
+  seq: number;
+  at: number;
+  /** e.g. 'request', 'order', 'stop', 'cancel', 'leverage', 'brake', 'process'. */
+  kind: string;
+  /** The wallet it concerns, lower-case, or null. */
+  owner: string | null;
+  /** What it is about: a copy id, an algo id, a client order id, a route. */
+  ref: string | null;
+  /** The details, JSON. */
+  data: string;
+  hash: string;
+}
+
+const AUDIT_GENESIS = '0'.repeat(64);
+
+function auditHash(prev: string, r: { at: number; kind: string; owner: string | null; ref: string | null; data: string }): string {
+  return createHash('sha256').update(`${prev}\n${r.at}\n${r.kind}\n${r.owner ?? ''}\n${r.ref ?? ''}\n${r.data}`).digest('hex');
+}
 
 export interface KeyRow {
   owner: string;
@@ -161,6 +204,66 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     this.db.close();
     if (this.lockPath) releaseLock(this.lockPath);
     this.lockPath = null;
+  }
+
+  /* ----------------------------------------------------------- audit ----- */
+
+  private auditLast: string | null = null;
+
+  /**
+   * Append to the audit log. Never throws: the record of an action must not
+   * stop the action (a full disk is reported by the health check).
+   */
+  audit(kind: string, owner: string | null, ref: string | null, data: unknown, at = Date.now()): void {
+    try {
+      if (this.auditLast === null) this.auditLast = String((this.q('SELECT hash FROM audit ORDER BY seq DESC LIMIT 1').get() as Row | undefined)?.hash ?? AUDIT_GENESIS);
+      const row = { at, kind, owner: owner ? owner.toLowerCase() : null, ref, data: JSON.stringify(data ?? null) };
+      const hash = auditHash(this.auditLast, row);
+      this.q('INSERT INTO audit (at, kind, owner, ref, data, hash) VALUES (?, ?, ?, ?, ?, ?)').run(row.at, row.kind, row.owner, row.ref, row.data, hash);
+      this.auditLast = hash;
+    } catch {
+      this.auditLast = null; // read again from the table next time
+    }
+  }
+
+  /** Audit rows, newest first, by wallet, by ref, or all; `before` is a seq. */
+  auditRows(q: { owner?: string; ref?: string; kind?: string; from?: number; to?: number; before?: number; limit?: number } = {}): AuditRow[] {
+    const where: string[] = [];
+    const args: Array<string | number> = [];
+    if (q.owner) (where.push('owner = ?'), args.push(q.owner.toLowerCase()));
+    if (q.ref) (where.push('ref = ?'), args.push(q.ref));
+    if (q.kind) (where.push('kind = ?'), args.push(q.kind));
+    if (q.from !== undefined) (where.push('at >= ?'), args.push(q.from));
+    if (q.to !== undefined) (where.push('at < ?'), args.push(q.to));
+    if (q.before !== undefined) (where.push('seq < ?'), args.push(q.before));
+    const limit = Math.max(1, Math.min(100_000, q.limit ?? 500));
+    const sql = `SELECT seq, at, kind, owner, ref, data, hash FROM audit${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY seq DESC LIMIT ${limit}`;
+    return (this.db.prepare(sql).all(...args) as Row[]).map((r) => ({
+      seq: Number(r.seq),
+      at: Number(r.at),
+      kind: String(r.kind),
+      owner: r.owner === null ? null : String(r.owner),
+      ref: r.ref === null ? null : String(r.ref),
+      data: String(r.data),
+      hash: String(r.hash),
+    }));
+  }
+
+  /** Walk the whole chain: the first row whose hash does not follow, or null when every row does. */
+  verifyAudit(): { rows: number; brokenAt: number | null } {
+    let prev = AUDIT_GENESIS;
+    let rows = 0;
+    let last = 0;
+    for (const r of this.db.prepare('SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq').iterate() as Iterable<Row>) {
+      rows++;
+      const seq = Number(r.seq);
+      // A deleted row leaves a gap in seq (AUTOINCREMENT never reuses one), and its successor's hash no longer follows.
+      const want = auditHash(prev, { at: Number(r.at), kind: String(r.kind), owner: r.owner === null ? null : String(r.owner), ref: r.ref === null ? null : String(r.ref), data: String(r.data) });
+      if (want !== String(r.hash) || (last && seq !== last + 1)) return { rows, brokenAt: seq };
+      prev = String(r.hash);
+      last = seq;
+    }
+    return { rows, brokenAt: null };
   }
 
   /** Throws when the database does not answer (the health check). */

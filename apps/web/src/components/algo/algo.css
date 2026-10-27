@@ -313,6 +313,11 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-card__facts { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 2px var(--sp-3); font-size: var(--fs-xs); align-content: start; }
 .algo-card__facts dt { color: var(--muted); }
 .algo-card__facts dd { margin: 0; text-align: right; color: var(--text); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.algo-size { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 4px; }
+.algo-size label { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--muted); }
+.algo-size input { width: 120px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; font-family: var(--font-num); }
+.algo-size input[aria-invalid='true'] { border-color: var(--warn); }
+.algo-size__hint { font-size: var(--fs-xs); color: var(--muted); }
 .algo-card__reason { grid-column: 1 / -1; margin: 0; font-size: var(--fs-xs); color: var(--warn); }
 .algo-log { margin: 0; padding: 0; list-style: none; max-height: 180px; overflow: auto; font-size: var(--fs-micro); }
 .algo-log li { display: grid; grid-template-columns: 54px 1fr; gap: var(--sp-2); padding: 2px 0; border-bottom: 1px solid var(--line-soft); color: var(--muted); }

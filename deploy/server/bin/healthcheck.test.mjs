@@ -2,7 +2,8 @@
 //
 // The health check against a stand-in API on loopback and a stand-in index file
 // (only its size is read).
-// No alert topic is ever set here, so nothing is published anywhere.
+// No alert topic is ever set here, so nothing is published anywhere. Telegram is a
+// stand-in on loopback too (ALERT_TELEGRAM_API), with a token made up for each run.
 //
 // The stand-in's port is assigned by the operating system; TEST_PORT_RANGE=8891-8899
 // keeps it inside a range (then run the test files one at a time: --test-concurrency=1).
@@ -33,9 +34,16 @@ const PORTS = RANGE ? Array.from({ length: Number(RANGE[2]) - Number(RANGE[1]) +
  * server.ts): `o.executor` is what that answers (a status and a body).
  */
 async function api(o = {}) {
+  // Every request: its path and the origin secret it carried (the peer tests read this).
+  const seen = [];
   const handler = (req, res) => {
     const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
     const path = req.url.split('?')[0];
+    seen.push({ path, secret: req.headers['x-origin-verify'] ?? null });
+    if (path === '/site') {
+      res.writeHead(o.siteStatus ?? 200, { 'content-type': 'text/html' });
+      return res.end('<!doctype html><title>site</title>');
+    }
     if (path === '/api/health') return send(200, { ok: true, network: 'mainnet', chainId: 286623, mainnetWritesAllowed: true });
     if (path === '/api/copy/v1/health') {
       const e = o.executor ?? { status: 200, body: { ok: true, copies: 3, active: 2, feeds: { sodex: true } } };
@@ -53,7 +61,7 @@ async function api(o = {}) {
       s.once('error', () => ok(false));
       s.listen(port, '127.0.0.1', () => ok(true));
     });
-    if (bound) return { url: `http://127.0.0.1:${s.address().port}`, close: () => new Promise((r) => { s.closeAllConnections?.(); s.close(r); }) };
+    if (bound) return { url: `http://127.0.0.1:${s.address().port}`, seen, close: () => new Promise((r) => { s.closeAllConnections?.(); s.close(r); }) };
   }
   throw new Error(`no free port in TEST_PORT_RANGE=${process.env.TEST_PORT_RANGE}`);
 }
@@ -92,7 +100,14 @@ function fixture(o = {}) {
 function run(env) {
   return new Promise((done) => {
     const child = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', SCRIPT], {
-      env: { ...process.env, ALERT_TOPIC_ARN: '', ORIGIN_DOMAIN: '', ...env }, stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env, ALERT_TOPIC_ARN: '', ORIGIN_DOMAIN: '', ALERT_TELEGRAM_TOKEN: '', ALERT_TELEGRAM_CHAT_ID: '', ALERT_TELEGRAM_API: '',
+        // Never this machine's systemd (a CI runner has one): the units check is then a warning.
+        HEALTH_SYSTEMCTL: '/nonexistent/systemctl',
+        HEALTH_CHECKS: '', HEALTH_UNITS: '', HEALTH_PEERS_GATED: '', HEALTH_PEERS_PUBLIC: '', HEALTH_BACKUP_MARKERS: '', HEALTH_SERVER_NAME: '', HEALTH_REALERT_H: '',
+        ...env,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     let out = '';
     let err = '';
@@ -150,7 +165,7 @@ test('an indexer that stopped publishing, a stale board, an old backup and a wro
     [{}, { health: indexerHealth({ buildAgeMs: 30 * 60_000 }) }, 'indexer', /last build \d+ s ago/],
     [{}, { boardAgeMs: 30 * 60_000 }, 'index', /the board is \d+ s old/],
     [{}, { secrets: [OTHER_SECRET] }, 'index', /refused the origin secret/],
-    [{ backupAgeH: 50 }, {}, 'backup', /the last backup is 50 h old/],
+    [{ backupAgeH: 50 }, {}, 'backup', /last-backup: the last one is 50 h old/],
   ];
   for (const [fx, ax, name, note] of cases) {
     const f = fixture(fx);
@@ -272,6 +287,198 @@ test('alerts fire on the second failing pass and again on recovery, never on a s
   } finally {
     await good.close();
     await bad.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+// --- Telegram, roles, cross-watch -----------------------------------------------------------------
+
+/** A stand-in for api.telegram.org: records each sendMessage; `fail` answers 500 instead. */
+async function telegram(o = {}) {
+  const token = `${100000 + Math.floor(Math.random() * 899999)}:${randomBytes(27).toString('base64url')}`;
+  const sent = [];
+  const handler = (req, res) => {
+    let body = '';
+    req.on('data', (d) => { body += d; });
+    req.on('end', () => {
+      const ok = req.url === `/bot${token}/sendMessage` && !o.fail;
+      if (ok) sent.push(JSON.parse(body));
+      res.writeHead(ok ? 200 : 500, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(ok ? { ok: true, result: { message_id: sent.length } } : { ok: false, description: 'stand-in refused' }));
+    });
+  };
+  for (const port of PORTS) {
+    const s = http.createServer(handler);
+    const bound = await new Promise((ok) => {
+      s.once('error', () => ok(false));
+      s.listen(port, '127.0.0.1', () => ok(true));
+    });
+    if (bound) {
+      return {
+        token,
+        sent,
+        setFail: (v) => { o.fail = v; },
+        env: { ALERT_TELEGRAM_TOKEN: token, ALERT_TELEGRAM_CHAT_ID: '123456789', ALERT_TELEGRAM_API: `http://127.0.0.1:${s.address().port}` },
+        close: () => new Promise((r) => { s.closeAllConnections?.(); s.close(r); }),
+      };
+    }
+  }
+  throw new Error(`no free port in TEST_PORT_RANGE=${process.env.TEST_PORT_RANGE}`);
+}
+
+test('Telegram: an alert on the second failing pass names the server and the check, a recovery follows, the token and the secret are never printed', async () => {
+  const f = fixture();
+  const good = await api();
+  const bad = await api({ notHosted: true });
+  const tg = await telegram();
+  try {
+    const e = (a) => env(f, a, { ...tg.env, HEALTH_SERVER_NAME: 'server 1 (France, API)' });
+    const r0 = await run(e(good));
+    const r1 = await run(e(bad));
+    assert.equal(tg.sent.length, 0, 'one failing pass is not an alert');
+    const r2 = await run(e(bad));
+    assert.equal(tg.sent.length, 1, 'the second is');
+    assert.equal(tg.sent[0].chat_id, '123456789');
+    assert.match(tg.sent[0].text, /^ValueDesk ALERT - server 1 \(France, API\)\nfailing: lockdown\n- lockdown: a non-hosted route/);
+    await run(e(bad));
+    assert.equal(tg.sent.length, 1, 'no repeat on every pass');
+    const r4 = await run(e(good));
+    assert.equal(tg.sent.length, 2);
+    assert.match(tg.sent[1].text, /^ValueDesk RECOVERED - server 1 \(France, API\)\nevery check passes again \(was failing: lockdown; for \d+ min\)$/);
+    for (const r of [r0, r1, r2, r4]) {
+      const all = `${r.err}${JSON.stringify(r.report)}`;
+      assert.ok(!all.includes(tg.token) && !all.includes(SECRET), 'neither the bot token nor the origin secret is ever printed');
+    }
+    for (const m of tg.sent) assert.ok(!m.text.includes(SECRET) && !m.text.includes(tg.token), 'nor sent');
+  } finally {
+    await good.close();
+    await bad.close();
+    await tg.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('Telegram: an alert that could not be delivered is tried again on the next pass', async () => {
+  const f = fixture();
+  const bad = await api({ notHosted: true });
+  const tg = await telegram({ fail: true });
+  try {
+    const e = env(f, bad, tg.env);
+    await run(e);
+    const r = await run(e);
+    assert.equal(tg.sent.length, 0);
+    assert.match(r.err, /Telegram alert not sent: Telegram answered 500: stand-in refused/);
+    assert.ok(!r.err.includes(tg.token), 'the token is scrubbed from the error');
+    tg.setFail(false);
+    await run(e);
+    assert.equal(tg.sent.length, 1, 'delivered on the next pass');
+    assert.match(tg.sent[0].text, /ValueDesk ALERT/);
+  } finally {
+    await bad.close();
+    await tg.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('Telegram: a check that newly fails while already alerted is news (after two passes), and a reminder comes after HEALTH_REALERT_H', async () => {
+  const f = fixture();
+  const bad = await api({ notHosted: true });
+  const worse = await api({ notHosted: true, boardAgeMs: 30 * 60_000 });
+  const tg = await telegram();
+  try {
+    await run(env(f, bad, tg.env));
+    await run(env(f, bad, tg.env));
+    assert.equal(tg.sent.length, 1);
+    await run(env(f, worse, tg.env));
+    assert.equal(tg.sent.length, 1, 'a new failure on one pass only is not news yet');
+    await run(env(f, worse, tg.env));
+    assert.equal(tg.sent.length, 2);
+    assert.match(tg.sent[1].text, /now also failing: index\n/);
+    await run(env(f, worse, { ...tg.env, HEALTH_REALERT_H: '0.000001' }));
+    assert.equal(tg.sent.length, 3);
+    assert.match(tg.sent[2].text, /^ValueDesk STILL FAILING \(\d+ min\)/);
+  } finally {
+    await bad.close();
+    await worse.close();
+    await tg.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('roles: the copy executor server checks only its own things - no API, no index - and is healthy without them', async () => {
+  const f = fixture();
+  rmSync(f.db);
+  const exec = await api();
+  const apiDown = await api();
+  const deadUrl = apiDown.url;
+  await apiDown.close();
+  try {
+    const r = await run(env(f, exec, {
+      API_URL: deadUrl,
+      HEALTH_CHECKS: 'executor,disk,backup,tls,units',
+      HEALTH_UNITS: 'valuescan-executor.service,caddy.service',
+    }));
+    assert.equal(r.status, 0, JSON.stringify(r.report));
+    assert.deepEqual(Object.keys(r.report.checks).sort(), ['backup', 'disk', 'executor', 'tls', 'units']);
+    assert.equal(r.report.checks.executor.note, '3 copies, 2 active');
+  } finally {
+    await exec.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('cross-watch: a gated peer gets the origin secret, a public one never does; a dead peer fails its own check', async () => {
+  const f = fixture();
+  const local = await api();
+  const peer = await api();
+  const site = await api();
+  const gone = await api();
+  const goneUrl = gone.url;
+  await gone.close();
+  try {
+    const r = await run(env(f, local, {
+      HEALTH_PEERS_GATED: `executor@server2=${peer.url}/api/copy/v1/health,api@server1=${peer.url}/api/health`,
+      HEALTH_PEERS_PUBLIC: `site=${site.url}/site,site-api=${site.url}/api/health`,
+    }));
+    assert.equal(r.status, 0, JSON.stringify(r.report));
+    assert.equal(r.report.checks['peer:executor@server2'].ok, true);
+    assert.match(r.report.checks['peer:site'].note, /\/site 200, \d+ bytes/);
+    assert.ok(peer.seen.length >= 2 && peer.seen.every((s) => s.secret === SECRET), 'the gated peer got the secret');
+    assert.ok(site.seen.length >= 2 && site.seen.every((s) => s.secret === null), 'the public one never');
+
+    const down = await run(env(f, local, { HEALTH_PEERS_GATED: `executor@server2=${goneUrl}/api/copy/v1/health`, HEALTH_PEERS_PUBLIC: `site=${site.url}/nope` }));
+    assert.equal(down.status, 1);
+    assert.deepEqual(down.report.failed.sort(), ['peer:executor@server2', 'peer:site']);
+    assert.match(down.report.checks['peer:executor@server2'].note, /does not answer/);
+    assert.match(down.report.checks['peer:site'].note, /\/nope answered 4\d\d$/);
+
+    const clear = await run(env(f, local, { HEALTH_PEERS_GATED: 'other=http://192.0.2.10/api/health' }));
+    assert.ok(clear.report.failed.includes('peer:other'));
+    assert.match(clear.report.checks['peer:other'].note, /must be https/);
+  } finally {
+    await local.close();
+    await peer.close();
+    await site.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test('backup markers: each listed marker must be recent; one not there yet only warns', async () => {
+  const f = fixture();
+  const a = await api();
+  try {
+    const offsite = join(f.dir, 'state', 'offsite-api-state.json');
+    writeFileSync(offsite, '{}');
+    const old = (Date.now() - 40 * 3_600_000) / 1000;
+    utimesSync(offsite, old, old);
+    const r = await run(env(f, a, { HEALTH_BACKUP_MARKERS: `${join(f.dir, 'state', 'last-backup.json')},${offsite}` }));
+    assert.ok(r.report.failed.includes('backup'));
+    assert.match(r.report.checks.backup.note, /offsite-api-state: the last one is 40 h old/);
+    const r2 = await run(env(f, a, { HEALTH_BACKUP_MARKERS: `${join(f.dir, 'state', 'last-backup.json')},${join(f.dir, 'state', 'offsite-none.json')}` }));
+    assert.ok(!r2.report.failed.includes('backup'));
+    assert.ok(r2.report.warned.includes('backup'));
+  } finally {
+    await a.close();
     rmSync(f.dir, { recursive: true, force: true });
   }
 });

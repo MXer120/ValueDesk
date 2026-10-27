@@ -119,8 +119,8 @@ test('looking around first: nothing accepted, the popup stays closed for this ve
 });
 
 test('a restricted country of residence cannot sign; others can', () => {
-  for (const c of ['IR', 'KP', 'RU', 'US', 'PR', 'gu']) assert.ok(countryProblem(c), c);
-  for (const c of ['DE', 'SG', 'UA', 'JP', 'GB', 'CA']) assert.equal(countryProblem(c), null, c);
+  for (const c of ['IR', 'KP', 'RU', 'US', 'PR', 'gu', 'GB', 'CA', 'uk']) assert.ok(countryProblem(c), c);
+  for (const c of ['DE', 'SG', 'UA', 'JP', 'JE', 'GG', 'IM', 'GI']) assert.equal(countryProblem(c), null, c);
 });
 
 test('the first-visit acceptance: every statement, the current version only', () => {

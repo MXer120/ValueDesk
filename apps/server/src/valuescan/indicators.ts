@@ -108,7 +108,7 @@ export const INDICATORS: Readonly<Record<string, Indicator>> = Object.fromEntrie
   ].map((i) => [i.id, i]),
 );
 
-const UA = 'ValueDesk economic calendar (+https://valuedeskapp.vercel.app)';
+const UA = 'ValueDesk economic calendar (+https://www.valuedesk.so)';
 const FRED_CSV = 'https://fred.stlouisfed.org/graph/fredgraph.csv?id=';
 const CACHE_MS = 6 * 60 * 60_000;
 /** After a release of its kind: how often a series is read again, and for how long at most. */
@@ -146,6 +146,9 @@ const round = (v: number, d: number) => {
 };
 
 const yearBefore = (date: string) => `${Number(date.slice(0, 4)) - 1}${date.slice(4)}`;
+/** Calendar months from one observation's date to another's. */
+const monthsBetween = (a: string, b: string) => (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7));
+const daysBetween = (a: string, b: string) => (Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000;
 
 /** The indicator's values from its series' observations, oldest first. */
 export function transform(obs: readonly Observation[], i: Pick<Indicator, 'transform' | 'decimals'>): Observation[] {
@@ -161,13 +164,27 @@ export function transform(obs: readonly Observation[], i: Pick<Indicator, 'trans
     case 'millionths':
       for (const [t, v] of obs) out.push([t, round(v / 1_000_000, d)]);
       break;
+    // A change is on the period just before: a period never published (October 2025's
+    // CPI) leaves the next one without a change rather than a two-period one.
     case 'mm':
-    case 'qq':
-      for (let k = 1; k < obs.length; k++) out.push([obs[k]![0], round((obs[k]![1] / obs[k - 1]![1] - 1) * 100, d)]);
+    case 'qq': {
+      const step = i.transform === 'mm' ? 1 : 3;
+      for (let k = 1; k < obs.length; k++) {
+        if (monthsBetween(obs[k - 1]![0], obs[k]![0]) !== step) continue;
+        out.push([obs[k]![0], round((obs[k]![1] / obs[k - 1]![1] - 1) * 100, d)]);
+      }
       break;
-    case 'diff':
-      for (let k = 1; k < obs.length; k++) out.push([obs[k]![0], round(obs[k]![1] - obs[k - 1]![1], d)]);
+    }
+    case 'diff': {
+      // The series' own step is its shortest gap (a month of 28 days, a week).
+      let gap = Infinity;
+      for (let k = 1; k < obs.length; k++) gap = Math.min(gap, daysBetween(obs[k - 1]![0], obs[k]![0]));
+      for (let k = 1; k < obs.length; k++) {
+        if (daysBetween(obs[k - 1]![0], obs[k]![0]) > gap * 1.5) continue;
+        out.push([obs[k]![0], round(obs[k]![1] - obs[k - 1]![1], d)]);
+      }
       break;
+    }
     case 'yy': {
       const by = new Map(obs.map(([t, v]) => [t, v]));
       for (const [t, v] of obs) {

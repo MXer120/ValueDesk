@@ -35,7 +35,7 @@ import { fredSeries } from './indicators.js';
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
 const SERIES = 'KXFEDDECISION';
 const POLYMARKET_SEARCH = 'https://gamma-api.polymarket.com/public-search?q=fed%20decision&events_status=active&limit_per_type=20';
-const UA = 'ValueDesk economic calendar (+https://valuedeskapp.vercel.app)';
+const UA = 'ValueDesk economic calendar (+https://www.valuedesk.so)';
 const MEETINGS_MS = 60_000;
 const HISTORY_MS = 10 * 60_000;
 const TIMEOUT_MS = 10_000;
@@ -99,7 +99,8 @@ const dollars = (v: unknown): number | null => {
  */
 export function marketProb(bid: number | null, ask: number | null, last: number | null): number | null {
   const book = bid !== null && ask !== null && ask > 0 && ask >= bid;
-  if (book && ask! - bid! <= MAX_SPREAD) return (bid! + ask!) / 2;
+  // Cents in floating point: 0.40 - 0.30 is 0.10000000000000003, still a 10 c book.
+  if (book && ask! - bid! <= MAX_SPREAD + 1e-9) return (bid! + ask!) / 2;
   if (last !== null && last > 0) return book ? Math.min(ask!, Math.max(bid!, last)) : last;
   if (book) return (bid! + ask!) / 2;
   return null;

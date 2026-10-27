@@ -11,6 +11,7 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react';
 import { logger } from '../log';
 import { stoppedWorking } from '../components/LoadFailed';
+import { reportBoundaryError } from '../errorReport';
 
 const log = logger('chart');
 
@@ -36,6 +37,7 @@ export class ChartBoundary extends Component<Props, State> {
       error,
       componentStack: info.componentStack?.split('\n').slice(0, 10).join('\n'),
     });
+    reportBoundaryError('Chart', error);
   }
 
   private retry = () => {

@@ -29,6 +29,7 @@ import './components/EmptyState.css';
 import './components/livefeed/LiveFeed.css';
 import './components/news/NewsFeed.css';
 import './components/StatusFooter.css';
+import './feedback/feedback.css';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import './dashboard/dashboard.css';
@@ -65,6 +66,7 @@ import './components/copy/CopyHome.css';
 import './components/algo/algo.css';
 import './copy/copy.css';
 import './legal/gate.css';
+import './status/status.css';
 import './components/shell.css';
 // The macro widgets, the liquidation map, the Fed's broadcast, the data charts,
 // the key lock, Settings, and last the glass look (appearance.css), whose

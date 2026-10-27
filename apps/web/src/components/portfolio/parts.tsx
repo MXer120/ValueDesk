@@ -8,7 +8,7 @@
  */
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
-import { DASH, fmtUsd, signClass } from '../../format';
+import { DASH, MINUS, fmtUsd, signClass } from '../../format';
 import '../Portfolio.css';
 
 export interface CurveWindow {
@@ -43,7 +43,7 @@ export function fmtCompactUsd(v: number | null | undefined): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
   const abs = Math.abs(v);
   if (abs < 10_000) return fmtUsd(v, 2);
-  const sign = v < 0 ? '-' : '';
+  const sign = v < 0 ? MINUS : '';
   return `${sign}$${abs.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 2 })}`;
 }
 

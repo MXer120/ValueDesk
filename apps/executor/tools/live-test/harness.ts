@@ -409,6 +409,12 @@ export class T {
     this.note(`leader ${what}: position ${before} -> ${after.p}`);
   }
 
+  /** The leader's own fills since the scenario began (SoDEX's record, its timestamps). */
+  async leaderFills(symbol = this.main.name): Promise<FillInfo[]> {
+    if (!this.env.leader) return [];
+    return this.env.reads.fills(this.env.leaderAddress, symbol, this.startedAt);
+  }
+
   async leaderUsd(symbol = this.main.name): Promise<number> {
     if (!this.env.leader) return 0;
     const [p, q] = await Promise.all([this.env.leader.position(symbol), this.quote(symbol)]);

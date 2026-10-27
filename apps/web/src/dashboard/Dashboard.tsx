@@ -39,6 +39,8 @@ import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
 import { faceFor } from './widgetCatalog';
 import type { DashboardConfig, PanelDefinition } from './types';
+import { describeElement, type ElementInfo } from '../feedback/element';
+import { openFeedback } from '../feedback/FeedbackButton';
 
 /**
  * Floor for the derived grid. Without one, a short window (or a browser chrome
@@ -398,7 +400,7 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
    * listener here would fire FIRST and steal every one of those clicks
    * before the panel that actually owns them ever saw the event.
    */
-  const [menuAt, setMenuAt] = useState<{ x: number; y: number; panel?: string | null } | null>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number; panel?: string | null; element?: ElementInfo } | null>(null);
   /** The layout menu on screen - kept while it fades out. */
   const menuFx = useLatched(menuAt);
   useEffect(() => {
@@ -412,7 +414,9 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
       e.preventDefault();
       // The panel under the pointer, for its own settings in the menu.
       const panel = e.target instanceof Element ? e.target.closest('[data-panel]')?.getAttribute('data-panel') ?? null : null;
-      setMenuAt({ x: e.clientX, y: e.clientY, panel });
+      // ...and what was right-clicked, for "Send feedback about this" (feedback/element.ts).
+      const element = e.target instanceof Element ? describeElement(e.target, window.location.pathname) : undefined;
+      setMenuAt({ x: e.clientX, y: e.clientY, panel, element });
     };
     window.addEventListener('contextmenu', onMenu);
     return () => window.removeEventListener('contextmenu', onMenu);
@@ -826,6 +830,7 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
           hasSaved={hasSaved}
           onEditLayout={enterEdit}
           panelSettings={panelSettings(menuFx.value.panel)}
+          onFeedback={() => openFeedback({ element: menuFx.value?.element })}
           onClose={() => setMenuAt(null)}
         />
       )}

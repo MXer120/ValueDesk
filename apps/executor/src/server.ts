@@ -30,7 +30,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
-import { normaliseCountry, type Logger } from '../../../packages/copy-engine/src/index.ts';
+import { copyRequestDigest, normaliseCountry, type Logger } from '../../../packages/copy-engine/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
 import { ApiError, type ExecutorService, type RequestContext } from './service.ts';
 
@@ -72,6 +72,27 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   } catch {
     throw new ApiError(400, 'json', 'The body is not JSON.');
   }
+}
+
+/** What the audit log keeps of a signed request: the action, the wallet, the digest it was signed over. */
+function signedOf(r: unknown): { action: string | null; owner: string | null; digest: string | null } | null {
+  if (!r || typeof r !== 'object') return null;
+  const x = r as Record<string, unknown>;
+  let digest: string | null = null;
+  try {
+    digest = copyRequestDigest(x as unknown as Parameters<typeof copyRequestDigest>[0]);
+  } catch {
+    digest = null;
+  }
+  return { action: typeof x.action === 'string' ? x.action.slice(0, 40) : null, owner: typeof x.owner === 'string' ? x.owner.toLowerCase().slice(0, 42) : null, digest };
+}
+
+/** An address cut to its network (IPv4 /24, IPv6 /48): enough to tell where a request came from, not who. */
+export function ipPrefix(ip: string): string {
+  const v4 = /^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.\d+$/.exec(ip);
+  if (v4) return `${v4[1]}.${v4[2]}.${v4[3]}.0/24`;
+  if (ip.includes(':')) return `${ip.split(':').slice(0, 3).join(':')}::/48`;
+  return 'unknown';
 }
 
 export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, log: Logger): Server {
@@ -134,6 +155,8 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
 
   return createServer(async (req, res) => {
     const t0 = Date.now();
+    // The signed request's action, wallet and digest, for the audit log (never its signature).
+    let signed: { action: string | null; owner: string | null; digest: string | null } | null = null;
     const url = new URL(req.url ?? '/', 'http://executor');
     const path = url.pathname;
     try {
@@ -172,6 +195,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (!isWrite) throw new ApiError(404, 'path', 'not found');
 
       const body = (await readJson(req)) as { request?: unknown };
+      signed = signedOf(body.request);
       if (route === '/session') return send(res, 200, svc.session(body.request, ctx));
       if (route === '/terms') return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === '/site-terms') return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
@@ -190,6 +214,15 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       send(res, err.status, { ok: false, code: err.code, error: err.message });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug('request', { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
+      // Every write, and every read that was refused, into the audit log: who asked for what, from where, and the answer.
+      // (Never throws: while the executor starts, the service is not there yet - nothing to record then.)
+      if (req.method === 'POST' || (res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404)) {
+        try {
+          svc.audit({ method: req.method ?? '', path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers['x-viewer-country'] ?? '')) : null, request: signed });
+        } catch {
+          /* starting */
+        }
+      }
     }
   });
 }

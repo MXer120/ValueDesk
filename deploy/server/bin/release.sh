@@ -227,8 +227,8 @@ restart_indexer_and_api() {
   fi
   log "restarting the API"
   "$SYSTEMCTL" restart valuescan-api.service
-  wait_active valuescan-api.service 30 || die "the API did not become active - journalctl -u valuescan-api -n 80"
-  wait_health 60 || die "the API does not answer /api/health - journalctl -u valuescan-api -n 80 ; roll back with: release.sh --rollback"
+  wait_active valuescan-api.service 30 || die "the API did not become active - journalctl --namespace=pii -u valuescan-api -n 80"
+  wait_health 60 || die "the API does not answer /api/health - journalctl --namespace=pii -u valuescan-api -n 80 ; roll back with: release.sh --rollback"
   log "the API answers /api/health"
 }
 
@@ -244,8 +244,8 @@ restart_executor() {
   fi
   log "restarting the copy executor (its feeds reconnect in seconds; the next position read settles what it missed)"
   "$SYSTEMCTL" restart valuescan-executor.service
-  wait_active valuescan-executor.service 30 || die "the executor did not become active - journalctl -u valuescan-executor -n 80"
-  wait_ok "$EXECUTOR_URL/api/copy/v1/health" 60 || die "the executor does not answer /api/copy/v1/health - journalctl -u valuescan-executor -n 80 ; roll back with: release.sh --rollback"
+  wait_active valuescan-executor.service 30 || die "the executor did not become active - journalctl --namespace=pii -u valuescan-executor -n 80"
+  wait_ok "$EXECUTOR_URL/api/copy/v1/health" 60 || die "the executor does not answer /api/copy/v1/health - journalctl --namespace=pii -u valuescan-executor -n 80 ; roll back with: release.sh --rollback"
   log "the executor answers /api/copy/v1/health"
 }
 

@@ -10,6 +10,7 @@
  *   News        the News widget's sources, each on or off, and its SoSoValue credit
  *   Players     the consents for the Live Feed's and Fed live's players
  *   Legal       the legal pages
+ *   Help & FAQ  answers to the common questions, and Send feedback (feedback/HelpSection.tsx)
  *
  * The gear carries a dot while anything is hidden: a half-on privacy mode that
  * looks off is how you screenshot your balance believing it was covered.
@@ -38,6 +39,7 @@ import { NEWS_SOURCES, OUTLETS, logoUrl, useNewsSources, useOutletsOff } from '.
 import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
 import { APPEARANCE_DEFAULT, setAppearance, useAppearance, type Appearance } from '../appearance';
+import { HelpSection } from '../feedback/HelpSection';
 import './SettingsMenu.css';
 
 const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
@@ -53,6 +55,7 @@ const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNod
   { id: 'news', label: 'News', hint: 'Sources', icon: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 7.5h5M6 10h8M6 12.5h8" /></> },
   { id: 'players', label: 'Players & cookies', hint: 'Video consents', icon: <><rect x="2.5" y="4.5" width="15" height="11" rx="2" /><path d="m8.5 8 4 2-4 2Z" /></> },
   { id: 'legal', label: 'Legal', hint: 'Terms, privacy, licences', icon: <><path d="M6 3h6l3 3v11H6Z" /><path d="M12 3v3h3M8.5 10h4M8.5 13h4" /></> },
+  { id: 'help', label: 'Help & FAQ', hint: 'Questions, send feedback', icon: <><circle cx="10" cy="10" r="7" /><path d="M7.9 7.8a2.2 2.2 0 1 1 3 2.1c-.6.3-.9.7-.9 1.3v.4" /><path d="M10 14.2h.01" /></> },
 ];
 
 const AUTO_LOCK: Array<[number, string]> = [[5, '5 min'], [15, '15 min'], [30, '30 min'], [60, '1 hour'], [240, '4 hours'], [0, 'Tab closes']];
@@ -121,6 +124,7 @@ export function SettingsMenu({ hasLayout, dashLocked }: { hasLayout: boolean; da
             {section === 'news' && <NewsSection />}
             {section === 'players' && <PlayersSection />}
             {section === 'legal' && <LegalSection />}
+            {section === 'help' && <HelpSection close={() => setOpen(false)} />}
           </div>
         </div>
       </Modal>

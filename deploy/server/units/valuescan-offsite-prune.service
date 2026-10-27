@@ -1,0 +1,27 @@
+# Installed to /etc/systemd/system by deploy/server/bootstrap.sh.
+#
+# The RECEIVING side of the off-server copies: once a day, remove the copies the other
+# server sent that are older than their set's retention (backup-receive.sh prune; the
+# newest copy of a set is always kept, except for the strict sets - the knowledge
+# folders, seven days). Does nothing on a server that receives nothing.
+
+[Unit]
+Description=Valuescan off-server backup: prune what the other server sent
+ConditionPathExists=/etc/vsbackup/receive.env
+
+[Service]
+Type=oneshot
+User=vsbackup
+Group=vsbackup
+ExecStart=/opt/valuescan/bin/backup-receive.sh prune
+SyslogIdentifier=valuescan-backup-receive
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+CapabilityBoundingSet=
+UMask=0077
+ReadWritePaths=/var/lib/vsbackup

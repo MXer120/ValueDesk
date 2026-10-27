@@ -45,14 +45,14 @@ export const useCreditHidden = () => useSharedStored<boolean>('vs.news.creditHid
  * key also matches the start of a longer name ("RocketX | Privacy Swaps").
  */
 const KNOWN: Record<string, string> = {
-  bloomberg: 'bloomberg.com', cnbc: 'cnbc.com', reuters: 'reuters.com', yahoofinance: 'finance.yahoo.com', wallstreetjournal: 'wsj.com', wsj: 'wsj.com',
+  bloomberg: 'bloomberg.com', cnbc: 'cnbc.com', reuters: 'reuters.com', yahoofinance: 'finance.yahoo.com', wallstreetjournal: 'wsj.com', thewallstreetjournal: 'wsj.com', wsj: 'wsj.com',
   financialtimes: 'ft.com', marketwatch: 'marketwatch.com', forbes: 'forbes.com', fortune: 'fortune.com', thestreet: 'thestreet.com', 道琼斯: 'dowjones.com', dowjones: 'dowjones.com',
   financialjuice: 'financialjuice.com', moomoonews: 'moomoo.com', moomoo: 'moomoo.com',
   panews: 'panewslab.com', coindesk: 'coindesk.com', cointelegraph: 'cointelegraph.com', theblock: 'theblock.co', decrypt: 'decrypt.co', blockworks: 'blockworks.co',
   dlnews: 'dlnews.com', thedefiant: 'thedefiant.io', bitcoinmagazine: 'bitcoinmagazine.com', cryptonews: 'crypto.news', cryptoslate: 'cryptoslate.com',
   beincrypto: 'beincrypto.com', bitcoinist: 'bitcoinist.com', newsbtc: 'newsbtc.com', utoday: 'u.today', ambcrypto: 'ambcrypto.com', coingape: 'coingape.com',
   thecryptotimes: 'thecryptotimes.com', altcoinist: 'altcoinist.com', watcherguru: 'watcher.guru', thewhitehouse: 'whitehouse.gov', whitehouse: 'whitehouse.gov',
-  ussecuritiesandexchangecommission: 'sec.gov', sec: 'sec.gov', thekobeissiletter: 'thekobeissiletter.com', kobeissiletter: 'thekobeissiletter.com',
+  ussecuritiesandexchangecommission: 'sec.gov', ussec: 'sec.gov', sec: 'sec.gov', thekobeissiletter: 'thekobeissiletter.com', kobeissiletter: 'thekobeissiletter.com',
   wublockchain: 'wublock123.com', 吴说区块链: 'wublock123.com', 吴说深度: 'wublock123.com', odaily: 'odaily.news', odaily星球日报: 'odaily.news',
   techflow: 'techflowpost.com', 深潮techflow: 'techflowpost.com', techflowselected: 'techflowpost.com', blockbeats: 'theblockbeats.info', 律动blockbeats: 'theblockbeats.info',
   foresightnews: 'foresightnews.pro', chaincatcher: 'chaincatcher.com', chaincatcherresearch: 'chaincatcher.com', 金色财经: 'jinse.cn', jinse: 'jinse.cn',

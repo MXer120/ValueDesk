@@ -13,7 +13,9 @@
  *                               backend's own switch is off
  *
  * WHAT THE SERVER MAY DECIDE. Its /api/health picks mainnet or testnet, and
- * may only ever switch trading OFF (`mainnetWritesAllowed: false`). Chain ids,
+ * may only ever switch trading OFF (`mainnetWritesAllowed: false`, which
+ * VITE_ALLOW_MAINNET_TRADING overrides, and the operator's emergency brake
+ * `brake`, which nothing in a build overrides: apps/server/src/ops/brake.ts). Chain ids,
  * gateway origins and signing domains are pinned in this bundle (@sodex-core,
  * sodex/chainParams.ts): an impersonated or compromised API cannot point a
  * signature or a deposit anywhere else, nor switch mainnet trading on.
@@ -93,6 +95,13 @@ export interface TradingConfig {
   keyTtlMs: number;
   /** An emergency build: every write is refused. */
   disabled: boolean;
+  /**
+   * The operator's emergency brake, from /api/health (null: off). `trading`
+   * refuses every order from this browser; `copies` and `algos` hold the
+   * browser copier and browser algos. It reaches open tabs within the 30 s
+   * health poll, and no build setting overrides it.
+   */
+  brake: { trading: boolean; copies: boolean; algos: boolean; reason: string } | null;
 }
 
 // `import.meta.env` is Vite's; under the node test runner it is absent.
@@ -214,7 +223,22 @@ let current: TradingConfig = {
   keyTtlMs: (int(env.VITE_TRADING_KEY_TTL_H, 1, 168) ?? 168) * 3_600_000,
   // An emergency build - or one that names a builder it cannot charge (G1).
   disabled: env.VITE_TRADING_DISABLED === '1' || builderBroken(),
+  brake: null,
 };
+
+/** The brake as /api/health reports it: anything but an object with a switch on is off. */
+export function brakeOf(b: unknown): TradingConfig['brake'] {
+  if (!b || typeof b !== 'object') return null;
+  const r = b as Record<string, unknown>;
+  const out = { trading: r.trading === true, copies: r.copies === true, algos: r.algos === true, reason: typeof r.reason === 'string' && r.reason.trim() ? r.reason.trim().slice(0, 300) : 'ValueDesk has paused trading for now.' };
+  return out.trading || out.copies || out.algos ? out : null;
+}
+
+/** What a refused order says: the brake's reason when the operator paused trading, else the deployment's switch. */
+export function writesOffMessage(cfg: TradingConfig = current): string {
+  if (cfg.brake?.trading) return `ValueDesk paused trading: ${cfg.brake.reason}`;
+  return `Trading on ${cfg.network} is switched off for this deployment.`;
+}
 
 // A builder that was meant to be on and is not must be visible to whoever runs the build.
 {
@@ -238,21 +262,24 @@ export const configuredFromBackend = (): boolean => fromBackend;
  * Apply what /api/health reports. A pinned network wins; a backend on another
  * network is then a misconfiguration and trading stays off.
  */
-export function configureFromHealth(h: { network?: string; restBase?: string; mainnetWritesAllowed?: boolean } | null): void {
+export function configureFromHealth(h: { network?: string; restBase?: string; mainnetWritesAllowed?: boolean; brake?: unknown } | null): void {
   if (!h) return;
   const reported: Network | null = h.network === 'testnet' ? 'testnet' : h.network === 'mainnet' ? 'mainnet' : null;
   if (!reported) return;
   const pin = pinned();
   const network = pin ?? reported;
   const mismatch = pin !== null && pin !== reported;
+  const brake = brakeOf(h.brake);
   current = {
     ...current,
     network,
     chainId: SODEX_CHAIN_ID[network],
     gateway: (env.VITE_SODEX_GATEWAY?.trim() || GATEWAY_ORIGIN[network]).replace(/\/+$/, ''),
     // The server may only ever switch trading OFF, never on (security audit K-03).
+    // The brake beats every build setting: it is how the operator stops trading without a rebuild.
     writesAllowed:
-      !mismatch && (network === 'testnet' || h.mainnetWritesAllowed !== false || env.VITE_ALLOW_MAINNET_TRADING === '1'),
+      !mismatch && !brake?.trading && (network === 'testnet' || h.mainnetWritesAllowed !== false || env.VITE_ALLOW_MAINNET_TRADING === '1'),
+    brake,
   };
   fromBackend = true;
 }

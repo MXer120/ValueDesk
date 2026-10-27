@@ -14,6 +14,7 @@ import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 
 import { HOST, PORT, NET, NETWORK, BOOTSTRAP, ALLOW_ENV_KEY, ALLOW_MAINNET_WRITES, KEYSTORE_PATH, ENV_FILE, ENV_FILE_LOADED, enginePath, SERVER_SIGNING, ALLOWED_ORIGINS, HOSTED, HOSTED_CONFIG, SITE_ORIGINS } from './config.js';
+import { siteBrakeReader } from './ops/brake.js';
 import { HOSTED_RESPONSE_HEADERS, HOSTED_ROUTES, ON_INSTANCE_ROUTES, fastifyTrustProxy, installHostedGate, installServerSigningGate } from './hosted.js';
 import { sodex, SodexApiError, NotUnlockedError } from './sodex/rest.js';
 import { upstreams } from './sodex/ws.js';
@@ -33,6 +34,9 @@ import { pointsAuthRoutes } from './routes/pointsAuth.js';
 import { valuescanRoutes } from './routes/valuescan.js';
 import { builderRoutes } from './routes/builder.js';
 import { foldersRoutes } from './routes/folders.js';
+import { reportRoutes } from './routes/reports.js';
+import { statusRoutes } from './routes/status.js';
+import { proberEnabled } from './ops/status.js';
 import { hexToBytes, privateKeyToAddress } from './signing/eip712.js';
 import { canMoveFunds } from './signing/actions.js';
 import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
@@ -145,11 +149,14 @@ app.setErrorHandler((err, _req, reply) => {
   return reply.code(status).send({ error: e.message, source: 'server' });
 });
 
+// The operator's emergency brake (ops/brake.ts): hosted, /var/lib/valuescan/brake.json unless VALUEDESK_BRAKE_FILE says otherwise.
+const siteBrake = siteBrakeReader(process.env.VALUEDESK_BRAKE_FILE?.trim() || (HOSTED ? '/var/lib/valuescan/brake.json' : null));
+
 app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
   // No upstream URLs, budgets, hub or stream stats - the latter name every
   // wallet whose account stream is open.
-  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES }
+  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake() }
   : {
   ok: true,
   network: NETWORK,
@@ -157,6 +164,7 @@ app.get('/api/health', async () => (HOSTED
   restBase: NET.restBase,
   wsBase: NET.wsBase,
   mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES,
+  brake: siteBrake(),
   chain: { chainId: CHAIN.chainId, name: CHAIN.name, explorerUrl: CHAIN.explorerUrl },
   serverSigning: SERVER_SIGNING,
   weightSpent: sodex.weightSpent(),
@@ -207,6 +215,10 @@ await app.register(builderRoutes);
 // Knowledge folders: each wallet's own research (notes, tables, chart snapshots, news,
 // files), behind a signed sign-in - see routes/folders.ts.
 await app.register(foldersRoutes);
+// What visitors send the owner - the feedback form and client error reports (routes/reports.ts) -
+// and the public status page's data (routes/status.ts).
+await app.register(reportRoutes);
+await app.register(statusRoutes);
 
 // --- browser websocket -------------------------------------------------------
 
@@ -471,6 +483,23 @@ setTimeout(() => {
 if (process.env.VALUESCAN_RELEASES !== '0') {
   const { startReleaseWatcher } = await import('./valuescan/releases.js');
   startReleaseWatcher({ log: app.log });
+}
+
+// The status page's prober (ops/status.ts): every minute, the site, this API the way a visitor
+// reaches it, the copy executor and the indexer. On a hosted server unless VALUESCAN_STATUS_PROBE=0.
+if (proberEnabled(process.env, HOSTED)) {
+  const [{ startStatusProber }, { indexerStatus }] = await Promise.all([import('./ops/status.js'), import('./indexer/read.js')]);
+  startStatusProber({ indexerStatus, log: app.log });
+}
+
+// The owner's answers to feedback, read from Telegram by long polling (ops/telegramReplies.ts):
+// a hosted server with ALERT_TELEGRAM_* set, unless VALUESCAN_FEEDBACK_REPLIES=0.
+{
+  const { repliesEnabled, startReplyPoller } = await import('./ops/telegramReplies.js');
+  if (repliesEnabled(process.env, HOSTED)) {
+    const { FeedbackStore } = await import('./ops/feedbackThreads.js');
+    startReplyPoller(new FeedbackStore(), { log: app.log });
+  }
 }
 
 // The leaderboard indexer (src/indexer): top and worst hundreds by PnL for

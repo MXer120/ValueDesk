@@ -49,7 +49,8 @@ export function parseRss(xml: string, src: FeedSource): NewsItem[] {
   for (const m of xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)) {
     const body = m[1]!;
     const title = stripHtml(tag(body, 'title') ?? '');
-    const link = (tag(body, 'link') ?? '').trim();
+    // An XML link writes its & as &amp;.
+    const link = stripHtml(tag(body, 'link') ?? '');
     const time = Date.parse(tag(body, 'pubDate') ?? '');
     if (!title || !/^https:\/\//i.test(link) || !Number.isFinite(time)) continue;
     const text = stripHtml(tag(body, 'description') ?? tag(body, 'content:encoded') ?? '')

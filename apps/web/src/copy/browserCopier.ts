@@ -310,6 +310,11 @@ class BrowserCopier {
         if (r && !r.ok) return 'The copy key is no longer registered on SoDEX (revoked, replaced or expired). Approve a new one in copy setup.';
         return null;
       },
+      // The operator's emergency brake (/api/health): nothing is sent while it is on.
+      brake: () => {
+        const b = tradingConfig().brake;
+        return b?.copies || b?.trading ? `ValueDesk paused copy trading: ${b.reason}` : null;
+      },
       confirm: (s, intents, event) => this.askConfirm(s, intents, event),
       onChange: () => this.schedulePublish(),
     });

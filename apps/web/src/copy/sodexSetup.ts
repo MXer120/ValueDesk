@@ -25,7 +25,7 @@ import {
 import { COPY_FEE_MAX } from '@copy-engine';
 import { api } from '../api';
 import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from '../trading/builderApproval';
-import { tradingConfig } from '../trading/config';
+import { tradingConfig, writesOffMessage } from '../trading/config';
 import { OutcomeUnknownError, readGateway, sendSigned } from '../trading/gateway';
 import { nonces, sodexAccountId } from '../trading/session';
 import { addOrSwitchChain, getChainId, signTypedData, type Eip1193Provider } from '../wallet';
@@ -98,7 +98,7 @@ export async function copyKeyRegistered(owner: string, name: string, address: st
 export async function registerCopyKey(o: { owner: string; provider: Eip1193Provider; address: string; name: string; days: number }): Promise<{ expiresAt: number; accountId: number }> {
   const cfg = tradingConfig();
   if (cfg.disabled) throw new Error('Trading is switched off in this build of ValueDesk.');
-  if (!cfg.writesAllowed) throw new Error(`Trading on ${cfg.network} is switched off for this deployment.`);
+  if (!cfg.writesAllowed) throw new Error(writesOffMessage(cfg));
   const owner = o.owner.toLowerCase();
   const accountId = await sodexAccountId(owner);
   if (!accountId) throw new Error('This wallet has no SoDEX account yet. Deposit first; the first deposit opens it.');

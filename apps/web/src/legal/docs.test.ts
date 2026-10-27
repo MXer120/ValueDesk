@@ -169,7 +169,7 @@ test('the copy terms disclose the fee ladder, the EEA cap and the excluded count
 
   const NAMES: Record<string, string> = {
     US: 'United States', PR: 'Puerto Rico', VI: 'US Virgin Islands', GU: 'Guam', AS: 'American Samoa',
-    MP: 'Northern Mariana Islands', UM: 'US Minor Outlying Islands',
+    MP: 'Northern Mariana Islands', UM: 'US Minor Outlying Islands', GB: 'United Kingdom', CA: 'Canada',
     CU: 'Cuba', IR: 'Iran', KP: 'North Korea', SY: 'Syria', RU: 'Russia', BY: 'Belarus', MM: 'Myanmar',
   };
   const statement = COPY_STATEMENTS.find((s) => s.id === 'notUsPerson')!.label;

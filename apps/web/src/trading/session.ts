@@ -96,7 +96,7 @@ import {
   type BuilderTerms,
 } from './builder';
 import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from './builderApproval';
-import { tradingConfig } from './config';
+import { tradingConfig, writesOffMessage } from './config';
 import { followTerms } from './terms';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
 import { KeyLockedError, openVault, type KeyVault, type StoredKey } from './vault';
@@ -656,7 +656,7 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
   const owner = o.owner.toLowerCase();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
   if (!cfg.writesAllowed) {
-    throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+    throw new TradingError(writesOffMessage(cfg), 'writes-off');
   }
   // With a lock the new key is sealed under it: unlock BEFORE anything is signed.
   if (lockKind(owner) !== 'none' && !(await requestUnlock(owner, 'Unlock to enable trading'))) {
@@ -988,7 +988,7 @@ export async function approveBuilderFee(o: {
 }): Promise<ApproveBuilderResult> {
   const cfg = tradingConfig();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
-  if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  if (!cfg.writesAllowed) throw new TradingError(writesOffMessage(cfg), 'writes-off');
   const b = activeBuilder(cfg.builder);
   if (!b) throw new TradingError('This build of ValueDesk charges no builder fee: there is nothing to approve.', 'not-enabled');
   const owner = o.owner.toLowerCase();
@@ -1084,7 +1084,7 @@ export interface RevokeBuilderResult {
 export async function revokeBuilderApproval(o: { owner: string; provider: Eip1193Provider; builderId?: number }): Promise<RevokeBuilderResult> {
   const cfg = tradingConfig();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
-  if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  if (!cfg.writesAllowed) throw new TradingError(writesOffMessage(cfg), 'writes-off');
   const owner = o.owner.toLowerCase();
   const mine = signer && signer.meta.owner === owner ? signer : null;
   const builderId = o.builderId ?? cfg.builder?.id ?? mine?.meta.builder?.id;
@@ -1210,7 +1210,7 @@ export async function checkKeyAfterRejection(): Promise<void> {
 export function requireSigner(owner?: string | null, engine?: Engine): { key: SigningKeyRef; meta: StoredKey } {
   const cfg = tradingConfig();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
-  if (!cfg.writesAllowed) throw new TradingError(`Trading on ${cfg.network} is switched off for this deployment.`, 'writes-off');
+  if (!cfg.writesAllowed) throw new TradingError(writesOffMessage(cfg), 'writes-off');
   if (!signer && state.locked && state.owner) {
     // Not a silent failure: the unlock dialog opens, and the caller says why nothing was sent.
     void requestUnlock(state.owner, 'Unlock trading');

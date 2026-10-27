@@ -284,6 +284,11 @@ export class ExecutorClient {
     return (await this.post<{ algos: AlgoView[] }>('/algos/action', 'algo-action', id ? { op, id } : { op })).algos;
   }
 
+  /** Change a running algo (its size...): 'algo-action' op 'update'. */
+  async algoUpdate(id: string, patch: Record<string, unknown>): Promise<AlgoView[]> {
+    return (await this.post<{ algos: AlgoView[] }>('/algos/action', 'algo-action', { op: 'update', id, patch })).algos;
+  }
+
   async algos(): Promise<AlgoView[]> {
     return (await this.call<{ algos: AlgoView[] }>('GET', '/algos', undefined, true)).algos;
   }

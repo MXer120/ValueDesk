@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// One health pass over the Valuescan instance. Prints one JSON line, exits 0 when
+// One health pass over a ValueDesk server. Prints one JSON line, exits 0 when
 // everything is healthy and 1 when something is not.
 //
 //   /opt/node/current/bin/node --disable-warning=ExperimentalWarning /opt/valuescan/bin/healthcheck.mjs
 //
 // Run by valuescan-health.timer every minute; run it by hand for the same answer
-// (as the valuescan user, or with the variables of /etc/valuescan/ops.env set).
+// (as the valuescan user, or with the variables of /etc/valuescan/ops.env and
+// health.env set).
 //
 // WHAT IT CHECKS
 //   api        GET /api/health answers {ok:true}
@@ -22,18 +23,36 @@
 //              indexer runs.
 //   disk       the data volume has room (the nightly backup needs the size of
 //              the database free)
-//   backup     the last successful backup is not older than 36 hours
+//   backup     every backup marker (HEALTH_BACKUP_MARKERS, default the nightly
+//              index backup's last-backup.json) is younger than 36 hours. The
+//              off-server copies write theirs (backup-offsite.sh: offsite-<set>.json).
 //   tls        Caddy's certificate for the origin name is not about to expire
 //   executor   the copy executor (EXECUTOR_URL, http://127.0.0.1:8799) answers
 //              /api/copy/v1/health with ok - a public route, no secret needed.
 //              Its SoDEX feed being down is a warning. Skipped (a warning) when
 //              EXECUTOR_URL is empty.
-//   units      systemd reports the services active (best effort): indexer, API,
-//              Caddy, and the executor when EXECUTOR_URL is set
+//   units      systemd reports the services active (best effort): HEALTH_UNITS, or
+//              indexer, API, Caddy, and the executor when EXECUTOR_URL is set
+//   peer:<n>   CROSS-WATCH: the other server (or the public site) answers. Each
+//              entry of HEALTH_PEERS_GATED / HEALTH_PEERS_PUBLIC is name=url; a GET
+//              must answer 2xx, and a JSON answer must not say ok:false. GATED peers
+//              are origins behind a Caddy gate: they get the origin secret (only over
+//              https, or http on loopback). PUBLIC ones (the site through Vercel) never
+//              get it. So a server that is dead entirely is still reported - by the
+//              other one.
 //
-// ALERTS. With ALERT_TOPIC_ARN set it publishes to that SNS topic when the state
-// changes (after two failing passes in a row, and again on recovery), and every
-// six hours while it stays unhealthy. Nothing secret is ever in a message.
+// ROLES. HEALTH_CHECKS (comma-separated) picks the checks; unset = every one of the
+// list above but the peers, as before. Server 1 (API + indexer) and server 2 (the
+// copy executor only) each have their list in /etc/valuescan/health.env
+// (deploy/contabo/server*/health.env).
+//
+// ALERTS on a change of state: after two failing passes in a row, again when a check
+// that was not failing before has failed twice too, on recovery, and every six hours
+// while it stays unhealthy. To Telegram (ALERT_TELEGRAM_TOKEN + ALERT_TELEGRAM_CHAT_ID,
+// /etc/valuescan/alert.env, deploy/server/bin/telegram.mjs) and/or the SNS topic
+// ALERT_TOPIC_ARN (AWS only). A message names the server (HEALTH_SERVER_NAME) and the
+// failing checks with their notes; nothing secret is ever in one. When no channel
+// takes the message it is tried again on the next pass.
 //
 // It never opens the index: the file is only stat()ed for its size. So the unit
 // needs no write access to the index directory (a WAL reader would: its -shm).
@@ -45,30 +64,53 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
-import { dirname, join } from 'node:path';
+import { hostname } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import tls from 'node:tls';
+import { sendTelegram } from './telegram.mjs';
 
 const env = (k, d = '') => (process.env[k] ?? '').trim() || d;
 const num = (k, d) => {
   const n = Number(env(k));
   return Number.isFinite(n) && n > 0 ? n : d;
 };
+const list = (k) => env(k).split(',').map((s) => s.trim()).filter(Boolean);
 
 const API_URL = env('API_URL', 'http://127.0.0.1:8797').replace(/\/+$/, '');
-// Empty, or not set: the executor is not checked (ops.env sets it).
+// Empty, or not set: the executor is not checked (ops.env sets it; health.env may empty it).
 const EXECUTOR_URL = env('EXECUTOR_URL').replace(/\/+$/, '');
 const INDEX_DB = env('VALUESCAN_INDEX_DB', '/var/lib/valuescan/index/valuescan-index.db');
 // The first entry of a rotation list ("current,next"): one value per header.
 const SECRET = env('VALUESCAN_ORIGIN_SECRET').split(',')[0].trim();
 const STATE_DIR = env('HEALTH_STATE_DIR', '/var/lib/valuescan/state');
 const TOPIC = env('ALERT_TOPIC_ARN');
+const TG_TOKEN = env('ALERT_TELEGRAM_TOKEN');
+const TG_CHAT = env('ALERT_TELEGRAM_CHAT_ID');
+const TG_API = env('ALERT_TELEGRAM_API');
 const ORIGIN_DOMAIN = env('ORIGIN_DOMAIN');
+const SERVER_NAME = env('HEALTH_SERVER_NAME', ORIGIN_DOMAIN || hostname());
 const INDEXER_STALE_S = num('HEALTH_INDEXER_STALE_S', 180);
 const BOARD_STALE_S = num('HEALTH_BOARD_STALE_S', 900);
 const DISK_PCT = num('HEALTH_DISK_PCT', 80);
 const BACKUP_MAX_AGE_H = num('HEALTH_BACKUP_MAX_AGE_H', 36);
 const CERT_MIN_DAYS = num('HEALTH_CERT_MIN_DAYS', 14);
-const REALERT_MS = 6 * 3600_000;
+const REALERT_MS = num('HEALTH_REALERT_H', 6) * 3600_000;
+
+const ALL_CHECKS = ['api', 'lockdown', 'index', 'indexer', 'disk', 'backup', 'executor', 'tls', 'units'];
+const CHECKS = list('HEALTH_CHECKS').length ? list('HEALTH_CHECKS') : ALL_CHECKS;
+for (const c of CHECKS) if (!ALL_CHECKS.includes(c)) console.error(`healthcheck: HEALTH_CHECKS names an unknown check "${c}" (known: ${ALL_CHECKS.join(', ')})`);
+const MARKERS = list('HEALTH_BACKUP_MARKERS').length ? list('HEALTH_BACKUP_MARKERS') : [join(STATE_DIR, 'last-backup.json')];
+
+/** "name=url,name=url" -> [{name, url}]; a bad entry is reported as a failing check of its own. */
+function peers(k, gated) {
+  return list(k).map((entry) => {
+    const i = entry.indexOf('=');
+    const name = i > 0 ? entry.slice(0, i).trim() : '';
+    const url = i > 0 ? entry.slice(i + 1).trim() : '';
+    return { name: /^[A-Za-z0-9@._-]{1,40}$/.test(name) ? name : `bad-entry-in-${k}`, url, gated };
+  });
+}
+const PEERS = [...peers('HEALTH_PEERS_GATED', true), ...peers('HEALTH_PEERS_PUBLIC', false)];
 
 const now = Date.now();
 const age = (t) => Math.round((now - t) / 1000);
@@ -76,6 +118,7 @@ const age = (t) => Math.round((now - t) / 1000);
 /** A check returns {ok, note} or throws; `warn` results never fail the pass. */
 const results = {};
 async function check(name, fn) {
+  if (!CHECKS.includes(name)) return;
   try {
     results[name] = await fn();
   } catch (e) {
@@ -96,7 +139,7 @@ function getJson(path, headers = {}, base = API_URL) {
         try {
           body = JSON.parse(text);
         } catch { /* not JSON */ }
-        resolve({ status: res.statusCode, body });
+        resolve({ status: res.statusCode, body, bytes: text.length, type: String(res.headers['content-type'] ?? '') });
       });
     });
     req.on('timeout', () => req.destroy(new Error('timeout after 8 s')));
@@ -175,10 +218,24 @@ await check('disk', async () => {
 });
 
 await check('backup', async () => {
-  const marker = join(STATE_DIR, 'last-backup.json');
-  if (!existsSync(marker)) return { ok: true, warn: true, note: 'no backup has completed yet' };
-  const hours = Math.round((now - statSync(marker).mtimeMs) / 360_000) / 10;
-  return hours > BACKUP_MAX_AGE_H ? { ok: false, note: `the last backup is ${hours} h old` } : { ok: true, note: `last backup ${hours} h ago` };
+  const notes = [];
+  let ok = true;
+  let missing = 0;
+  for (const marker of MARKERS) {
+    const label = basename(marker).replace(/\.json$/, '');
+    if (!existsSync(marker)) {
+      missing++;
+      notes.push(`${label}: none completed yet`);
+      continue;
+    }
+    const hours = Math.round((now - statSync(marker).mtimeMs) / 360_000) / 10;
+    if (hours > BACKUP_MAX_AGE_H) {
+      ok = false;
+      notes.push(`${label}: the last one is ${hours} h old`);
+    } else notes.push(`${label}: ${hours} h ago`);
+  }
+  // A marker that does not exist yet (a new server, before its first night) is a warning.
+  return { ok, warn: ok && missing > 0, note: notes.join('; ') };
 });
 
 await check('executor', async () => {
@@ -188,7 +245,7 @@ await check('executor', async () => {
     // A public route of the executor (apps/executor/src/server.ts): no origin secret.
     r = await getJson('/api/copy/v1/health', {}, EXECUTOR_URL);
   } catch (e) {
-    return { ok: false, note: `the executor does not answer (${String(e?.message ?? e).slice(0, 80)}): journalctl -u valuescan-executor` };
+    return { ok: false, note: `the executor does not answer (${String(e?.message ?? e).slice(0, 80)}): journalctl --namespace=pii -u valuescan-executor` };
   }
   if (r.status !== 200 || r.body?.ok !== true) return { ok: false, note: `/api/copy/v1/health answered ${r.status}` };
   const b = r.body;
@@ -217,48 +274,133 @@ await check('tls', async () => {
 });
 
 await check('units', async () => {
-  const names = ['valuescan-indexer.service', 'valuescan-api.service', 'caddy.service'];
-  if (EXECUTOR_URL) names.push('valuescan-executor.service');
-  const out = spawnSync('systemctl', ['is-active', ...names], { encoding: 'utf8', timeout: 5000 });
+  let names = list('HEALTH_UNITS');
+  if (!names.length) {
+    names = ['valuescan-indexer.service', 'valuescan-api.service', 'caddy.service'];
+    if (EXECUTOR_URL) names.push('valuescan-executor.service');
+  }
+  const out = spawnSync(env('HEALTH_SYSTEMCTL', 'systemctl'), ['is-active', ...names], { encoding: 'utf8', timeout: 5000 });
   if (out.error || !out.stdout) return { ok: true, warn: true, note: 'systemd could not be asked' };
   const states = out.stdout.trim().split('\n');
   const bad = names.map((n, i) => [n, states[i] ?? 'unknown']).filter(([, s]) => s !== 'active').map(([n, s]) => `${n}=${s}`);
-  return bad.length ? { ok: false, note: bad.join(', ') } : { ok: true, note: 'all active' };
+  return bad.length ? { ok: false, note: bad.join(', ') } : { ok: true, note: `all active (${names.length})` };
 });
+
+// The cross-watch: all peers at once (each has its own 8 s limit).
+await Promise.all(PEERS.map(async (p) => {
+  const name = `peer:${p.name}`;
+  try {
+    let u;
+    try {
+      u = new URL(p.url);
+    } catch {
+      results[name] = { ok: false, note: 'not a URL (health.env)' };
+      return;
+    }
+    const loopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost';
+    if (p.gated && u.protocol !== 'https:' && !loopback) {
+      results[name] = { ok: false, note: 'a gated peer must be https:// - the origin secret never travels in clear text' };
+      return;
+    }
+    const headers = p.gated && SECRET ? { 'x-origin-verify': SECRET } : {};
+    const r = await getJson(u.pathname + u.search, headers, `${u.protocol}//${u.host}`);
+    if (r.status < 200 || r.status > 299) results[name] = { ok: false, note: `${u.host}${u.pathname} answered ${r.status}` };
+    else if (r.body && r.body.ok === false) results[name] = { ok: false, note: `${u.host}${u.pathname} answered ok:false` };
+    else results[name] = { ok: true, note: `${u.host}${u.pathname} ${r.status}${r.body ? '' : `, ${r.bytes} bytes`}` };
+  } catch (e) {
+    results[name] = { ok: false, note: `${p.name} does not answer (${String(e?.code ?? e?.message ?? e).slice(0, 80)})` };
+  }
+}));
 
 const failed = Object.entries(results).filter(([, r]) => !r.ok).map(([k]) => k);
 const warned = Object.entries(results).filter(([, r]) => r.ok && r.warn).map(([k]) => k);
 const healthy = failed.length === 0;
-console.log(JSON.stringify({ ok: healthy, failed, warned, checks: results }));
+console.log(JSON.stringify({ ok: healthy, server: SERVER_NAME, failed, warned, checks: results }));
 
 // --- alerts on a change of state ---------------------------------------------------------
+
+/**
+ * What to say, from the previous state and this pass (pure; the tests drive it pass by pass):
+ * returns { kind: null | 'alert' | 'more' | 'reminder' | 'recovered', next }.
+ * `next` is the state to keep IF the message reached somebody (or no channel is set);
+ * when it could not be delivered, only streak/prevFailed advance and it is tried again.
+ */
+function decide(prev, { healthy, failed, now }) {
+  const p = { alerted: false, streak: 0, lastAlertAt: 0, alertedFailed: [], prevFailed: [], since: 0, ...prev };
+  const streak = healthy ? 0 : p.streak + 1;
+  const since = healthy ? 0 : (p.streak > 0 && p.since ? p.since : now);
+  const base = { streak, since, prevFailed: failed, at: now };
+  if (healthy) {
+    if (p.alerted) return { kind: 'recovered', was: p.alertedFailed, sinceAt: p.since, next: { ...base, alerted: false, lastAlertAt: p.lastAlertAt, alertedFailed: [] } };
+    return { kind: null, next: { ...base, alerted: false, lastAlertAt: p.lastAlertAt, alertedFailed: [] } };
+  }
+  if (streak < 2) return { kind: null, next: { ...base, alerted: p.alerted, lastAlertAt: p.lastAlertAt, alertedFailed: p.alertedFailed } };
+  if (!p.alerted) return { kind: 'alert', next: { ...base, alerted: true, lastAlertAt: now, alertedFailed: failed } };
+  // Already alerted: a check that newly failed on two passes in a row is news.
+  const fresh = failed.filter((f) => p.prevFailed.includes(f) && !p.alertedFailed.includes(f));
+  if (fresh.length) return { kind: 'more', fresh, next: { ...base, alerted: true, lastAlertAt: now, alertedFailed: [...new Set([...p.alertedFailed, ...failed])] } };
+  if (now - p.lastAlertAt > REALERT_MS) return { kind: 'reminder', next: { ...base, alerted: true, lastAlertAt: now, alertedFailed: [...new Set([...p.alertedFailed, ...failed])] } };
+  return { kind: null, next: { ...base, alerted: true, lastAlertAt: p.lastAlertAt, alertedFailed: p.alertedFailed } };
+}
+
+const mins = (ms) => (ms < 3600_000 ? `${Math.max(1, Math.round(ms / 60_000))} min` : `${Math.round(ms / 360_000) / 10} h`);
+
+function message(d) {
+  const failLines = failed.map((k) => `- ${k}: ${results[k]?.note ?? ''}`);
+  switch (d.kind) {
+    case 'alert':
+      return `ValueDesk ALERT - ${SERVER_NAME}\nfailing: ${failed.join(', ')}\n${failLines.join('\n')}`;
+    case 'more':
+      return `ValueDesk ALERT - ${SERVER_NAME}\nnow also failing: ${d.fresh.join(', ')}\n${failLines.join('\n')}`;
+    case 'reminder':
+      return `ValueDesk STILL FAILING (${mins(now - d.next.since)}) - ${SERVER_NAME}\nfailing: ${failed.join(', ')}\n${failLines.join('\n')}`;
+    case 'recovered': {
+      const parts = [];
+      if (d.was?.length) parts.push(`was failing: ${d.was.join(', ')}`);
+      if (d.sinceAt) parts.push(`for ${mins(now - d.sinceAt)}`);
+      return `ValueDesk RECOVERED - ${SERVER_NAME}\nevery check passes again${parts.length ? ` (${parts.join('; ')})` : ''}`;
+    }
+    default:
+      return '';
+  }
+}
+
 try {
   mkdirSync(STATE_DIR, { recursive: true });
   const file = join(STATE_DIR, 'health-state.json');
-  let prev = { alerted: false, streak: 0, lastAlertAt: 0 };
+  let prev = {};
   try {
-    prev = { ...prev, ...JSON.parse(readFileSync(file, 'utf8')) };
+    prev = JSON.parse(readFileSync(file, 'utf8'));
   } catch { /* first pass */ }
-  const streak = healthy ? 0 : prev.streak + 1;
-  let alerted = prev.alerted;
-  let lastAlertAt = prev.lastAlertAt;
-  let subject = null;
-  if (!healthy && streak >= 2 && (!prev.alerted || now - prev.lastAlertAt > REALERT_MS)) {
-    subject = `Valuescan UNHEALTHY: ${failed.join(', ')}`;
-    alerted = true;
-    lastAlertAt = now;
-  } else if (healthy && prev.alerted) {
-    subject = 'Valuescan recovered';
-    alerted = false;
+  const d = decide(prev, { healthy, failed, now });
+  let next = d.next;
+  if (d.kind) {
+    const text = message(d);
+    const channels = [];
+    let delivered = 0;
+    if (TG_TOKEN || TG_CHAT) {
+      channels.push('telegram');
+      const r = await sendTelegram({ token: TG_TOKEN, chatId: TG_CHAT, text, api: TG_API || undefined });
+      if (r.ok) delivered++;
+      else console.error(`healthcheck: Telegram alert not sent: ${r.error}`);
+    }
+    if (TOPIC) {
+      channels.push('sns');
+      const subject = text.split('\n')[0].slice(0, 99);
+      const sent = spawnSync('aws', ['sns', 'publish', '--topic-arn', TOPIC, '--subject', subject, '--message', text], { encoding: 'utf8', timeout: 20_000 });
+      if (sent.status === 0) delivered++;
+      else console.error(`healthcheck: SNS alert not sent: ${(sent.stderr || sent.error?.message || '').trim().slice(0, 200)}`);
+    }
+    if (!channels.length) {
+      console.error(`healthcheck: ${d.kind} (no alert channel is set: ALERT_TELEGRAM_TOKEN / ALERT_TELEGRAM_CHAT_ID in /etc/valuescan/alert.env)`);
+    } else if (!delivered) {
+      // Nobody heard it: keep the old alert state so the next pass tries again.
+      next = { ...prev, streak: d.next.streak, since: d.next.since, prevFailed: d.next.prevFailed, at: now, undelivered: d.kind };
+    } else {
+      console.error(`healthcheck: ${d.kind} sent (${channels.join(', ')})`);
+    }
   }
-  writeFileSync(file, JSON.stringify({ alerted, streak, lastAlertAt, at: now }));
-  if (subject && TOPIC) {
-    const lines = Object.entries(results).map(([k, r]) => `${r.ok ? (r.warn ? 'warn' : 'ok  ') : 'FAIL'}  ${k}: ${r.note ?? ''}`);
-    const sent = spawnSync('aws', ['sns', 'publish', '--topic-arn', TOPIC, '--subject', subject.slice(0, 99), '--message', lines.join('\n')], {
-      encoding: 'utf8', timeout: 20_000,
-    });
-    if (sent.status !== 0) console.error(`healthcheck: alert not sent: ${(sent.stderr || sent.error?.message || '').trim().slice(0, 200)}`);
-  }
+  writeFileSync(file, JSON.stringify(next));
 } catch (e) {
   console.error(`healthcheck: could not record state: ${e?.message ?? e}`);
 }

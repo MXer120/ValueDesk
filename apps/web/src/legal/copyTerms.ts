@@ -49,7 +49,7 @@ export const COPY_TERMS: LegalDoc = {
   lang: 'en',
   updated: '[[OWNER: date, e.g. 1 November 2026]]',
   intro: [
-    { p: `Version ${COPY_TERMS_VERSION}. These terms apply when you copy trades with ValueDesk at [[OWNER: the site's domain]], provided by the operator named in the [Impressum](/impressum) ("we"). They add to the [Terms of use](/terms); for copy trading, these terms prevail where the two differ. You accept them by signing them with your wallet before your first copy.` },
+    { p: `Version ${COPY_TERMS_VERSION}. These terms apply when you copy trades with ValueDesk at www.valuedesk.so (and any other address it is offered at), provided by the operator named in the [Impressum](/impressum) ("we"). They add to the [Terms of use](/terms); for copy trading, these terms prevail where the two differ. You accept them by signing them with your wallet before your first copy.` },
     { p: '**Copy trading can lose you money fast: your whole allocation and, with leverage, more than that. Read the risk disclosure in section 7 before you copy.**' },
   ],
   sections: [
@@ -146,7 +146,8 @@ export const COPY_TERMS: LegalDoc = {
           ul: [
             'you are at least 18 years old and able to enter into binding contracts;',
             'you are not a US person, and you neither live in nor connect from the United States or its territories (Puerto Rico, the US Virgin Islands, Guam, American Samoa, the Northern Mariana Islands and the US Minor Outlying Islands). "US person" means [[OWNER: the definition of US person, e.g. a natural person resident in the United States or its territories, or an entity organised or located there - and whether US citizens living elsewhere are excluded too]];',
-            'you neither live in nor connect from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and you are not subject to sanctions;',
+            'you neither live in nor connect from the United Kingdom (England, Scotland, Wales and Northern Ireland; not the Channel Islands, the Isle of Man or the British Overseas Territories) or Canada;',
+            'you neither live in nor connect from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and you are not subject to sanctions. Your wallet and the trader you copy must not be on a sanctions list: the executor checks both addresses against the public sanctions data it holds (the crypto addresses on OFAC\'s Specially Designated Nationals list, as mirrored by the Chainalysis sanctions oracle), refuses to start or change a copy for a listed wallet and holds copies that are running;',
             'copy trading, perpetual futures and the use of a copy service are lawful for you where you live and where you are.',
           ],
         },
@@ -333,7 +334,7 @@ export type CopyStatementId = 'adult' | 'notUsPerson' | 'ownDecision' | 'risksUn
 /** The four checkboxes before the follower signs the terms, in the order shown. */
 export const COPY_STATEMENTS: Array<{ id: CopyStatementId; label: string }> = [
   { id: 'adult', label: 'I am at least 18 years old and able to enter into binding contracts.' },
-  { id: 'notUsPerson', label: 'I am not a US person, I do not live in or connect from the United States or its territories, or from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and the country of residence I declared is true.' },
+  { id: 'notUsPerson', label: 'I am not a US person, I do not live in or connect from the United States or its territories, the United Kingdom or Canada, or from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and the country of residence I declared is true.' },
   { id: 'ownDecision', label: 'I chose the trader and every copy rule myself. Nobody, including ValueDesk, recommended them to me.' },
   { id: 'risksUnderstood', label: 'I have read the copy trading terms and risk disclosure, and I understand that I can lose my whole allocation, and with leverage more than that.' },
 ];

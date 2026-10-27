@@ -276,10 +276,27 @@ export interface AlgoStartPayload {
 }
 
 export interface AlgoActionPayload {
-  op: 'pause' | 'resume' | 'cancel' | 'cancel-all';
+  op: 'pause' | 'resume' | 'cancel' | 'cancel-all' | 'update';
   /** Every op but 'cancel-all'. */
   id?: string;
+  /**
+   * 'update' only (feature 'algo-update'): what to change on the running algo -
+   * its size (`quantity`, more than has filled), limit price, spread guard or
+   * label. Nothing else of what was signed at the start can change.
+   */
+  patch?: AlgoUpdatePatch;
 }
+
+/** What 'update' may change on a running algo (AlgoRuntime.update). */
+export interface AlgoUpdatePatch {
+  quantity?: string;
+  limitPrice?: number | null;
+  maxSpreadBps?: number | null;
+  label?: string | null;
+}
+
+/** The fields of an AlgoUpdatePatch, for checking a signed one. */
+export const ALGO_UPDATE_FIELDS: ReadonlyArray<keyof AlgoUpdatePatch> = ['quantity', 'limitPrice', 'maxSpreadBps', 'label'];
 
 /* -------------------------------------------------------------- responses ----- */
 
@@ -316,13 +333,18 @@ export interface ExecutorInfo {
    * fields are ignored) and copy the trader instead, so the site never sends one to it.
    */
   features?: string[];
+  /**
+   * The operator's emergency brake, while it is on: live copies send nothing and
+   * live algos are held; nothing new live starts. null or absent: off.
+   */
+  brake?: { copies: boolean; algos: boolean; reason: string; since: number | null } | null;
 }
 
 /**
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import', 'algo-update'] as const;
 
 export interface SessionGrant {
   token: string;

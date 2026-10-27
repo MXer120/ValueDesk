@@ -42,7 +42,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionInfo } from '../api';
 import { Modal } from './Modal';
 import { useAddressMask } from '../privacy';
-import { LEGAL_LABELS, LEGAL_PAGES, pathForLegal, type LegalPage } from '../router';
+import { LEGAL_LABELS, LEGAL_PAGES, STATUS_PATH, pathForLegal, type LegalPage } from '../router';
+import { FeedbackButton } from '../feedback/FeedbackButton';
 import './StatusFooter.css';
 
 /**
@@ -99,11 +100,16 @@ export interface StatusFooterProps {
   legal?: LegalPage | null;
   /** Show a legal page in place. Without it the links load the page like any link. */
   onOpenLegal?: (page: LegalPage) => void;
+  /** The status page is on screen (its link reads as current). */
+  status?: boolean;
+  /** Show the status page in place. Without it the link loads the page like any link. */
+  onOpenStatus?: () => void;
 }
 
 export function StatusFooter({
   connLabel, connOk, session, address, health,
   onGoToWallet, onGoToStats, onSessionChanged, helpOpen, onHelpOpen, legal = null, onOpenLegal,
+  status = false, onOpenStatus,
 }: StatusFooterProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -281,6 +287,24 @@ export function StatusFooter({
           only, and the destination was the wallet page in both cases, so this
           is one button fewer for the same reach. */}
       <div className="sfoot-group sfoot-right">
+        {/* Send feedback: on every page, never behind a menu (feedback/FeedbackButton.tsx). The
+            shell test fails without it - the site does not go live without it (docs/GO-LIVE.md). */}
+        <FeedbackButton />
+        {/* The status page (status/StatusPage.tsx): whether the site, the data and the copy
+            executor are up, and their last 90 days. A page of its own, like the legal ones. */}
+        <a
+          href={STATUS_PATH}
+          className="sfoot-link sfoot-link--status"
+          aria-current={status ? 'page' : undefined}
+          onClick={(e) => {
+            if (!onOpenStatus || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+            e.preventDefault();
+            setMenuOpen(false);
+            onOpenStatus();
+          }}
+        >
+          Status
+        </a>
         {/* The Impressum, privacy policy and terms: required to be reachable
             from every page, and this bar is the one strip every page has.
             Words in the bar's own muted type, left of the rule that opens the

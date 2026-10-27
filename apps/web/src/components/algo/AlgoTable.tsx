@@ -4,17 +4,18 @@
  * A card says how far it is (filled of the target, a bar), how well it went
  * (average fill against the arrival price and against the market's own VWAP
  * over the same window, positive meaning better for you), what it is doing
- * now, and offers Pause / Resume / Cancel. Opened, it shows the facts and its
- * log - every child sent, every fill, every hold and why.
+ * now, and offers Pause / Resume / Cancel, and Size to change how much it
+ * trades while it runs. Opened, it shows the facts and its log - every child
+ * sent, every fill, every hold and why.
  *
  * Cancel all is the kill switch: every running algo is cancelled and its
  * resting children pulled from SoDEX; what filled stays filled.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { ALGO_NAMES, FINAL_STATUSES, type AlgoEvent, type AlgoSpec, type AlgoView } from '@copy-engine';
 import { DASH, fmtTime, fmtUsd } from '../../format';
 import { notify } from '../../toast';
-import { actOn, eventsOn, listOn, type ExecutorMode } from '../../algo/executorAlgos';
+import { actOn, canUpdateOn, eventsOn, listOn, updateOn, type ExecutorMode } from '../../algo/executorAlgos';
 import { useAlgos } from '../../algo/useAlgos';
 import { fmtDuration, menuName, type UiKind } from './menu';
 import { AlgoIcon } from './AlgoIcon';
@@ -91,6 +92,66 @@ async function act(place: Place, what: 'pause' | 'resume' | 'cancel' | 'cancelAl
   }
 }
 
+/**
+ * Whether the size of this algo can be changed while it runs (AlgoRuntime.update):
+ * kinds sized in base units, not a trailing stop or a close sized from the position.
+ */
+export function resizable(v: AlgoView): boolean {
+  const s = v.algo.spec;
+  if (FINAL_STATUSES.has(v.algo.status) || !('quantity' in s) || s.kind === 'trailing') return false;
+  return !(s.kind === 'twap' && s.closeShare !== null);
+}
+
+/** Change a running algo's size: in this browser at once; on an executor, one wallet signature. */
+async function resize(place: Place, id: string, quantity: string): Promise<boolean> {
+  try {
+    if (place !== 'browser') await updateOn(place, id, { quantity });
+    else {
+      const { browserAlgos } = await import('../../algo/browserAlgos');
+      await browserAlgos.update(id, { quantity });
+    }
+    notify('ok', 'Size changed.');
+    return true;
+  } catch (e) {
+    notify('error', e instanceof Error ? e.message : String(e));
+    return false;
+  }
+}
+
+/**
+ * The size form: the new total, more than what has filled. Lowered, resting
+ * children past it are pulled; raised, a schedule spreads the rest over what is
+ * still to come.
+ */
+function SizeForm({ v, place, onDone }: { v: AlgoView; place: Place; onDone: () => void }) {
+  const a = v.algo;
+  const base = a.spec.symbol.replace(/-USD$/, '');
+  const [text, setText] = useState(v.target !== null ? String(v.target) : '');
+  const [busy, setBusy] = useState(false);
+  const n = Number(text);
+  const why = !text.trim() || !Number.isFinite(n) || n <= 0 ? 'Enter a size.' : n <= a.filled ? `More than the ${fmtQ(a.filled)} ${base} that filled.` : v.target !== null && Math.abs(n - v.target) < 1e-12 ? 'That is the size now.' : null;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (why || busy) return;
+    setBusy(true);
+    const ok = await resize(place, a.id, text.trim());
+    setBusy(false);
+    if (ok) onDone();
+  };
+  return (
+    <form className="algo-size" onSubmit={(e) => void submit(e)} onClick={(e) => e.stopPropagation()}>
+      <label>
+        <span>New size</span>
+        <input type="text" inputMode="decimal" autoFocus value={text} onChange={(e) => setText(e.target.value.replace(',', '.'))} aria-invalid={!!why} />
+        <span className="acct-unit">{base}</span>
+      </label>
+      <button type="submit" className="acct-act" disabled={!!why || busy} title={why ?? undefined}>{busy ? 'Saving…' : 'Save'}</button>
+      <button type="button" className="acct-act" onClick={onDone}>Close</button>
+      <span className="algo-size__hint">{why ?? `${fmtQ(a.filled)} ${base} filled so far.`}</span>
+    </form>
+  );
+}
+
 function Log({ id, live, place }: { id: string; live: boolean; place: Place }) {
   const [events, setEvents] = useState<AlgoEvent[] | null>(null);
   useEffect(() => {
@@ -127,6 +188,8 @@ function Log({ id, live, place }: { id: string; live: boolean; place: Place }) {
 function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () => void }) {
   const [open, setOpen] = useState(false);
   const [win, setWin] = useState(false);
+  const [sizing, setSizing] = useState(false);
+  const canSize = resizable(v) && (place === 'browser' || canUpdateOn(place));
   const doAct = (what: 'pause' | 'resume' | 'cancel') => void act(place, what, v.algo.id).then(() => onActed?.());
   const a = v.algo;
   const s = a.spec;
@@ -275,6 +338,11 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           <button type="button" className="acct-act" onClick={() => setWin(true)} title="Its own window: the live chart, every order and the log">Open</button>
           {live && a.status !== 'paused' && <button type="button" className="acct-act" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">Pause</button>}
           {a.status === 'paused' && <button type="button" className="acct-act" onClick={() => doAct('resume')}>Resume</button>}
+          {canSize && (
+            <button type="button" className="acct-act" onClick={() => { setSizing(true); setOpen(true); }} title="Change how much it trades in total">
+              Size
+            </button>
+          )}
           {(live || exitsLive) && (
             <button type="button" className="acct-act acct-act--danger" onClick={() => doAct('cancel')} title={live ? 'Cancel: resting children are cancelled; what filled stays filled' : 'Cancel its take-profit and stop-loss; the position stays as it is'}>
               {live ? 'Cancel' : 'Cancel exits'}
@@ -303,6 +371,7 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
         <tr className="algo-tr__more">
           <td colSpan={9}>
             <div className="algo-card__body">
+              {sizing && canSize && <SizeForm v={v} place={place} onDone={() => { setSizing(false); onActed?.(); }} />}
               {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
               {facts}
               <Log id={a.id} live={live} place={place} />

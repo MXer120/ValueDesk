@@ -482,6 +482,8 @@
    something anyone reads as "Impressum". The bar's own 12px in --muted,
    brightening to --text like every control here; the page on screen stays
    --text. No box and no underline: chrome, not content. */
+/* The status page's link: a word like the legal ones, between the feedback entry and them. */
+.sfoot-right .sfoot-link--status { flex: none; margin-right: var(--sp-3); }
 .sfoot-legal {
   display: flex;
   align-items: center;
@@ -554,6 +556,7 @@
   .sfoot-legal .sfoot-link--privacy,
   .sfoot-legal .sfoot-link--terms,
   .sfoot-legal .sfoot-link--copy-terms { display: none; }
+  .sfoot-right .sfoot-link--status { display: none; }
 }
 
 /* --- geometry --------------------------------------------------------------

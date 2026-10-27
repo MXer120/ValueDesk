@@ -13,6 +13,7 @@
  */
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react';
 import { stoppedWorking } from '../LoadFailed';
+import { reportBoundaryError } from '../../errorReport';
 
 const AUTO_RETRY_DELAY_MS = 250;
 const AUTO_RETRY_WINDOW_MS = 10_000;
@@ -41,6 +42,7 @@ export class PaletteBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error('[search palette] crashed', error, info.componentStack);
+    reportBoundaryError('Search palette', error);
     const now = Date.now();
     if (now - this.lastAutoRetry > AUTO_RETRY_WINDOW_MS) {
       this.lastAutoRetry = now;

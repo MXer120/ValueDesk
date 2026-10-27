@@ -100,8 +100,17 @@ const GEO_PATH = '/api/edge/geo';
 const isCopyPath = (path) => String(path ?? '').startsWith(COPY_PREFIX);
 /** The knowledge folders' paths (apps/server/src/routes/folders.ts): /api/folders and below. */
 const isFoldersPath = (path) => { const p = String(path ?? ''); return p === '/api/folders' || p.startsWith('/api/folders/'); };
+/**
+ * Feedback (a visitor's own conversation, its screenshots) and client error reports
+ * (apps/server/src/routes/reports.ts): POST passes, the thread token passes, nothing is cached.
+ */
+const isReportsPath = (path) => { const p = String(path ?? ''); return p === '/api/vs/feedback' || p.startsWith('/api/vs/feedback/') || p === '/api/vs/client-errors'; };
+/** A screenshot, one per request (apps/server src/ops/imageCheck.ts: 2 MiB, and the request around it). */
+const FEEDBACK_UPLOAD_LIMIT = 2 * 1024 * 1024 + 16 * 1024 + 1024;
+/** A feedback message, a thread read, an error report. */
+const REPORTS_BODY_LIMIT = 16 * 1024;
 /** One wallet's or one follower's: a token passes, a POST passes, nothing is cached. */
-const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path);
+const isPrivatePath = (path) => isCopyPath(path) || isFoldersPath(path) || isReportsPath(path);
 /** A folder item (a sheet or a board at most; apps/server routes/folders.ts CREATE_BODY_LIMIT). */
 const FOLDERS_BODY_LIMIT = 1792 * 1024;
 /** A file uploaded to a folder (apps/server folders/limits.ts FILE_BYTES_CEILING, and a little room). */
@@ -109,6 +118,8 @@ const FOLDERS_UPLOAD_LIMIT = Math.floor(4.25 * 1024 * 1024) + 1024;
 /** How large a POST's body may be on this path. */
 function bodyLimitFor(path) {
   if (path === '/api/folders/upload/put') return FOLDERS_UPLOAD_LIMIT;
+  if (path === '/api/vs/feedback/upload') return FEEDBACK_UPLOAD_LIMIT;
+  if (isReportsPath(path)) return REPORTS_BODY_LIMIT;
   if (isFoldersPath(path)) return FOLDERS_BODY_LIMIT;
   return BODY_LIMIT;
 }
@@ -373,3 +384,4 @@ module.exports.oddPath = oddPath;
 module.exports.BODY_LIMIT = BODY_LIMIT;
 module.exports.bodyLimitFor = bodyLimitFor;
 module.exports.isFoldersPath = isFoldersPath;
+module.exports.isReportsPath = isReportsPath;

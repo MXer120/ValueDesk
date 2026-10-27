@@ -17,6 +17,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { MENU_ICONS } from './tabExtras';
+import { FeedbackIcon } from '../feedback/FeedbackButton';
 
 function useDismiss(ref: React.RefObject<HTMLElement>, close: () => void): void {
   const closeRef = useRef(close);
@@ -51,7 +52,7 @@ interface Action {
 }
 
 export function LayoutMenu({
-  at, locked, onToggleLock, onReset, hasSaved, onEditLayout, panelSettings, onClose, closing = false, onExit,
+  at, locked, onToggleLock, onReset, hasSaved, onEditLayout, panelSettings, onFeedback, onClose, closing = false, onExit,
 }: {
   /** Fading out (motion.css); `onExit` is its onAnimationEnd. */
   closing?: boolean;
@@ -65,6 +66,8 @@ export function LayoutMenu({
   onEditLayout?: () => void;
   /** The right-clicked panel's settings ("News settings"); absent when it has none. */
   panelSettings?: { label: string; run: () => void };
+  /** "Send feedback about this": the feedback chat with the right-clicked element attached (feedback/). */
+  onFeedback?: () => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -96,6 +99,7 @@ export function LayoutMenu({
     },
     { key: 'reset', label: 'Reset layout…', icon: MENU_ICONS.reset, disabled: !hasSaved && !locked, run: onReset },
     ...(panelSettings ? [{ key: 'panel', label: panelSettings.label, icon: MENU_ICONS.settings, sep: true, run: () => { panelSettings.run(); onClose(); } }] : []),
+    ...(onFeedback ? [{ key: 'feedback', label: 'Send feedback about this', icon: <FeedbackIcon />, sep: !panelSettings, run: () => { onClose(); onFeedback(); } }] : []),
   ];
   const count = actions.length;
   const at0 = Math.min(idx, count - 1);

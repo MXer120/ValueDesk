@@ -23,7 +23,7 @@
  * its country of residence - in the terms popup (requireTerms), before its key
  * is registered; a wallet on a
  * sanctions list, or a sanctioned place, gets nothing; a close-only place
- * (the US) may enable trading to close positions. A refused opening order asks
+ * (the US, the UK, Canada) may enable trading to close positions. A refused opening order asks
  * for the signature here too (SIGN_TERMS_EVENT).
  *
  * WITH A BUILDER FEE CONFIGURED (trading/config.ts; off by default) there is one

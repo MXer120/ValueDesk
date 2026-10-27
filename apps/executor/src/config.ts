@@ -19,6 +19,8 @@
  *                            valuedesk-<network>-tokyo, the one every registered key names; set
  *                            another for staging so a signed request cannot be replayed between them)
  *   EXECUTOR_LIVE_ALGOS      1 = real (non-paper) algo orders may start; default off (practice only)
+ *   EXECUTOR_BRAKE_FILE      the operator's emergency brake (brake.ts; default: hosted
+ *                            /var/lib/valuescan/brake.json, self <data dir>/brake.json; 'none' = no brake)
  *   EXECUTOR_TRUST_EDGE      hosted: 1 = read the viewer's address and country from the edge's headers
  *   EXECUTOR_OPEN            hosted: 0 closes it to new followers (running copies continue)
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default and at most 180)
@@ -64,6 +66,8 @@ export interface ExecutorConfig {
   executorId: string | null;
   /** Real (non-paper) algo orders may start. Off unless EXECUTOR_LIVE_ALGOS=1. */
   liveAlgos: boolean;
+  /** The emergency brake's file (brake.ts); null: none. */
+  brakeFile: string | null;
 }
 
 /**
@@ -121,11 +125,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error('EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)');
   const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;
+  const dataDir = resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === 'hosted' ? '/var/lib/valuescan/executor' : dataDirFor(process.cwd(), env)));
+  const brake = env.EXECUTOR_BRAKE_FILE?.trim();
   return {
     kind,
     host: env.HOST?.trim() || '127.0.0.1',
     port,
-    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === 'hosted' ? '/var/lib/valuescan/executor' : dataDirFor(process.cwd(), env))),
+    dataDir,
     network,
     builderId,
     owner: owner ? owner.toLowerCase() : null,
@@ -145,5 +151,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',
+    brakeFile: brake === 'none' ? null : brake ? resolve(brake) : kind === 'hosted' ? '/var/lib/valuescan/brake.json' : join(dataDir, 'brake.json'),
   };
 }

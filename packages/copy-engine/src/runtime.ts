@@ -98,6 +98,14 @@ export interface RuntimeHost {
   policyFor(sub: Subscription): RegionPolicy;
   /** For a live subscription: why its key cannot trade (missing, replaced, expired), or null. */
   keyProblem?(sub: Subscription): Promise<string | null>;
+  /**
+   * The operator's emergency brake: while it returns a reason, a live copy sends
+   * no order at all (it is asked before every batch, so it bites at once). Stops
+   * already resting on SoDEX stay, and so does everything the follower does by
+   * hand (stop, close, pause). Released, the copy goes on from the next trade of
+   * its leader; what the leader did meanwhile is not copied after the fact.
+   */
+  brake?(sub: Subscription): string | null;
   /** Approval mode 'confirm': ask the follower; resolve false to decline. */
   confirm?(sub: Subscription, intents: Intent[], event: LeaderEvent): Promise<boolean>;
   /** Something about this subscription changed (state, activity, status). */
@@ -531,6 +539,12 @@ export class CopyRuntime {
     const sink = this.host.sinkFor(s);
     if (!sink) {
       if (s.status === 'active') await this.setStatus(s.id, 'blocked', 'The copy key is not available here.');
+      return [];
+    }
+    const brake = sink.paper ? null : this.host.brake?.(s) ?? null;
+    if (brake) {
+      await this.activity(s, { kind: 'error', reason: 'brake', symbol: market.name, detail: `Not copied: ${brake}`, leader });
+      this.dirty.add(s.id);
       return [];
     }
     const builder = await this.host.builderFor(s).catch(() => null);

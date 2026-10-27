@@ -52,10 +52,11 @@ test('vwap: the profile weights the slices; without one the preview is even and 
 });
 
 test('pov: the pace at the last hour\'s volume, and a warning when the end time comes first', () => {
-  const s = S({ kind: 'pov', quantity: '1', rate: 0.1, exec: { style: 'taker' } });
+  // 20% of the total volume while others trade 5 an hour: 5 x 0.2 / 0.8 = 1.25 an hour.
+  const s = S({ kind: 'pov', quantity: '2.5', rate: 0.2, exec: { style: 'taker' } });
   const p = planAlgo(s, BTC, ctx({ hourVolume: 5 }));
   assert.equal(p.endsAt, NOW + 2 * 3_600_000);
-  const q = planAlgo(S({ kind: 'pov', quantity: '1', rate: 0.1, endAt: NOW + 3_600_000, exec: { style: 'taker' } }), BTC, ctx({ hourVolume: 5 }));
+  const q = planAlgo(S({ kind: 'pov', quantity: '2.5', rate: 0.2, endAt: NOW + 3_600_000, exec: { style: 'taker' } }), BTC, ctx({ hourVolume: 5 }));
   assert.ok(q.warnings.some((w) => /about 50% by the end time/.test(w)));
   assert.equal(q.endsAt, NOW + 3_600_000);
 });

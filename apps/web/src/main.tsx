@@ -20,6 +20,7 @@ import '@fontsource/asap/500.css';
 import '@fontsource/space-grotesk/600.css';
 import { App } from './App';
 import { installGlobalLogging } from './log';
+import { installErrorReporting } from './errorReport';
 import { installChunkErrorReload } from './lazyPage';
 import { SiteGate } from './legal/LegalGate';
 import { loadViewerGeo } from './legal/geo';
@@ -28,6 +29,8 @@ import './styles.css';
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.
 installGlobalLogging();
+// Crashes in this browser reach the owner, scrubbed and counted (errorReport.ts); a production build only.
+installErrorReporting();
 // A release replaced the file names while this tab was open: load the current build once (lazyPage.ts).
 installChunkErrorReload();
 // Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.

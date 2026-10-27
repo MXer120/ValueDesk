@@ -10,6 +10,8 @@ const TERMS: Array<[RegExp, Tone]> = [
   [/\b(?:raise|raised|increase|increased) the target range\b/gi, 'hawk'],
   [/\b(?:lower|lowered|reduce|reduced|cut) the target range\b/gi, 'dove'],
   [/\b(?:maintain|maintained|keep|kept|leave|left) the target range\b/gi, 'neutral'],
+  // Before the hawkish "tightening" below, which would otherwise take its last word.
+  [/\bquantitative tightening\b/gi, 'neutral'],
   [/\brate cuts?\b|\bcut(?:ting)? (?:interest )?rates?\b|\blower(?:ing)? (?:interest )?rates\b|\beasing\b|\bless restrictive\b|\bcooling\b|\bsoftening\b|\bdisinflation\b/gi, 'dove'],
   [/\brate hikes?\b|\braise (?:interest )?rates\b|\bhik(?:e|ing)\b|\btightening\b|\bmore restrictive\b|\binflation (?:remains |is )?(?:elevated|too high|sticky|persistent)\b|\bupside risks?\b/gi, 'hawk'],
   [/\bpause\b|\bhold(?:ing)? (?:rates )?steady\b|\bdata[- ]dependent\b|\bmeeting by meeting\b|\bbalance sheet\b|\bquantitative tightening\b|\bQT\b|\btariffs?\b|\blabor market\b|\bunemployment\b|\brecession\b|\bfederal funds rate\b|\btarget range\b|\bdissent(?:ed|s)?\b|\bneutral rate\b|\bbasis points?\b/gi, 'neutral'],

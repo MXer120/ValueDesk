@@ -94,15 +94,20 @@ export const macroApi = {
 export function fmtUsd(v: number | null | undefined, sign = true): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
   const a = Math.abs(v);
-  const s = a >= 1e9 ? `${(a / 1e9).toFixed(2)}B` : a >= 1e6 ? `${(a / 1e6).toFixed(1)}M` : a >= 1e3 ? `${(a / 1e3).toFixed(1)}K` : a.toFixed(0);
-  return `${v < 0 ? '−' : sign && v > 0 ? '+' : ''}$${s}`;
+  // Each step up at the figure that would round to 1000 of the step below ($999.6 is $1.0K, not $1000).
+  const s = a >= 999_950_000 ? `${(a / 1e9).toFixed(2)}B` : a >= 999_950 ? `${(a / 1e6).toFixed(1)}M` : a >= 999.5 ? `${(a / 1e3).toFixed(1)}K` : a.toFixed(0);
+  // A flow that rounds to $0 has no sign.
+  return `${s === '0' ? '' : v < 0 ? '−' : sign && v > 0 ? '+' : ''}$${s}`;
 }
 
 /** An indicator's value with its unit: "3.0%", "+177k" (a change), "684k" (a level), "7.1". */
 export function fmtValue(unit: string, v: number | null | undefined, digits = 1): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return '—';
-  if (unit === 'k') return `${v > 0 ? '+' : v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')}k`;
-  if (unit === 'K') return `${v < 0 ? '−' : ''}${Math.abs(Math.round(v)).toLocaleString('en-US')}k`;
-  const n = `${v < 0 ? '−' : ''}${Math.abs(v).toFixed(digits)}`;
+  // The sign is the shown figure's: -0.3k is "0k", -0.04% is "0.0%", never "−0".
+  const r = Math.round(v);
+  if (unit === 'k') return `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r).toLocaleString('en-US')}k`;
+  if (unit === 'K') return `${r < 0 ? '−' : ''}${Math.abs(r).toLocaleString('en-US')}k`;
+  const body = Math.abs(v).toFixed(digits);
+  const n = `${v < 0 && Number(body) !== 0 ? '−' : ''}${body}`;
   return unit === '%' ? `${n}%` : unit === 'M' ? `${n}M` : n;
 }

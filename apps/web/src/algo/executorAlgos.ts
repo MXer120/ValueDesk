@@ -6,10 +6,11 @@
  * builder-fee approval, the key the trader registered for that executor, and a
  * signed-in session (copy/live.ts keeps all of it). An algo adds nothing to
  * set up; it adds two signed instructions, 'algo-start' (the spec, as the
- * wallet shows it) and 'algo-action' (pause / resume / cancel / cancel all).
+ * wallet shows it) and 'algo-action' (pause / resume / cancel / cancel all,
+ * and a size change where the executor offers 'algo-update').
  */
 import { requirePaperAlgo } from './liveAlgos';
-import type { AlgoEvent, AlgoView } from '@copy-engine';
+import type { AlgoEvent, AlgoUpdatePatch, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
 import { getLiveCopy, readiness, type CopyModeId } from '../copy/live';
@@ -96,6 +97,23 @@ export async function actOn(mode: ExecutorMode, op: 'pause' | 'resume' | 'cancel
   const info = getLiveCopy()[mode].info;
   if (!client || !info) throw new Error('That executor is not connected.');
   const request = await signCopy(provider, owner, info.executorId, 'algo-action', id ? { op, id } : { op });
+  return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
+}
+
+/** Whether that executor can change a running algo (its info names 'algo-update'). */
+export function canUpdateOn(mode: ExecutorMode): boolean {
+  return !!getLiveCopy()[mode].info?.features?.includes('algo-update');
+}
+
+/** Change a running algo on an executor (its size, limit price...): one wallet signature. */
+export async function updateOn(mode: ExecutorMode, id: string, patch: AlgoUpdatePatch): Promise<AlgoView[]> {
+  const { owner, provider } = needWallet();
+  const client = clientFor(mode);
+  const info = getLiveCopy()[mode].info;
+  if (!client || !info) throw new Error('That executor is not connected.');
+  if (!canUpdateOn(mode)) throw new Error(`${mode === 'hosted' ? 'The ValueDesk executor' : 'Your copier'} cannot change a running algo yet (update it).`);
+  await requireTermsOrThrow({ owner, reason: 'change this algo order' });
+  const request = await signCopy(provider, owner, info.executorId, 'algo-action', { op: 'update', id, patch });
   return (await call<{ algos: AlgoView[] }>(client, 'POST', '/algos/action', { body: { request } })).algos;
 }
 

@@ -3,7 +3,7 @@
  * dashboard's right-click menu offers the clicked panel's own settings this way,
  * without the dashboard knowing what Settings holds.
  */
-export type SettingsSection = 'appearance' | 'privacy' | 'layout' | 'security' | 'news' | 'players' | 'legal';
+export type SettingsSection = 'appearance' | 'privacy' | 'layout' | 'security' | 'news' | 'players' | 'legal' | 'help';
 
 export const SETTINGS_EVENT = 'vs:settings';
 

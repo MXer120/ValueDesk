@@ -17,7 +17,7 @@ export const ALGO_MENU: readonly AlgoMenuItem[] = [
   { id: 'twap', name: 'TWAP', detail: 'Even slices over a time you choose, with an urgency curve, jitter and price bounds.' },
   { id: 'chasetwap', name: 'Chase TWAP', detail: 'A TWAP whose slices rest at the best price and only take what falls behind.' },
   { id: 'vwap', name: 'VWAP', detail: "Follows the market's own volume by time of day, and adapts as it runs." },
-  { id: 'pov', name: 'POV', detail: 'A fixed share of what everyone else trades, while they trade it.' },
+  { id: 'pov', name: 'POV', detail: 'A fixed share of the market’s live volume: faster when it is busy, slower when it is quiet. It rests at the best price and crosses the spread only to catch up.' },
   { id: 'iceberg', name: 'Iceberg', detail: 'Shows one small clip at a time and refills it, at a price or pegged.' },
   { id: 'chase', name: 'Chase', detail: 'One post-only order that follows the best price until it fills.' },
   { id: 'scale', name: 'Scale', detail: 'A ladder of resting orders between two prices, sized and spaced by curves.' },

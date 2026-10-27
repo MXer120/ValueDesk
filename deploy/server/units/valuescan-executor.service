@@ -65,6 +65,11 @@ MemoryMax=600M
 # NEVER a core dump: one would hold the unsealed trading keys this process has in memory.
 LimitCORE=0
 SyslogIdentifier=valuescan-executor
+# Its operating log carries wallet addresses: the journal namespace "pii", 14 days, as
+# the privacy policy promises (journald/journald@pii.conf). What it DID is kept in its
+# audit table in executor.db, which the backups carry.
+# Read it: journalctl --namespace=pii -u valuescan-executor
+LogNamespace=pii
 
 # --- hardening (as valuescan-api.service) ---
 NoNewPrivileges=yes

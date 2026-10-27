@@ -70,6 +70,8 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 | Deep link by SoDEX account id (App.tsx) | `/api/feed/account` | (b) | resolved from the index's leaderboard map, on-chain only as a fallback |
 | Server status and network | `/api/health` | (c) | about Valuescan itself |
 | Builder fee terms | `/api/vs/builder/terms` | (c) | the fee a wallet owes must be signed by a key the browser cannot hold (docs/BUILDER-TIERS.md) |
+| Status page (`/status`) | `/api/vs/status` | (c) | the server probes the site, its own API, the executor and the indexer every minute and keeps 90 days (ops/status.ts); the same answer for everyone |
+| Send feedback (a chat with the owner, screenshots), client error reports | `POST /api/vs/feedback`, `/feedback/upload`, `/feedback/thread`, `/feedback/poll`, `GET /api/vs/feedback/image`, `POST /api/vs/client-errors` | (c) | what a visitor sends the owner and the owner's replies: kept on the server, forwarded by Telegram, replies read back by long polling (routes/reports.ts, docs/GO-LIVE.md) |
 | Maintenance banner and page | `/api/external/maintenance/status`, `/api/external/announcements(/:id)` | (c) | global, not per-user. alpha-biz answers any origin, so this can go direct later; kept to keep the change focused |
 | SoPoints sign-in | `/api/points/auth/*` | (c) | sodex.com's points API allows only its own origin (CORS), so a browser cannot call it; the page is not mounted (router: points -> trade) |
 | Account switcher of the LOCAL server-signing mode | `/api/session/*` | (c) | custodial local mode only; off in hosted mode |
@@ -362,6 +364,20 @@ Against this inventory, HOSTED_ROUTES should be:
   needs an IAM role and the bucket in the CSP.) The only POSTs of the index API; the
   Vercel function lets POST, Content-Type and Authorization through under
   `/api/folders` as under `/api/copy/`, and never caches either.
+- **Add**: `GET /api/vs/status` (cls `read`): the public status page's report - each
+  service's last probe and its 90 days, built from `status.db` at most every 30 s and
+  cacheable at the edge as long (`perf.ts`); no input (routes/status.ts, ops/status.ts).
+- **Add**: the feedback chat and the error reports (routes/reports.ts): `POST /api/vs/feedback`
+  (a message, 16 KB), `POST /api/vs/feedback/upload` (one screenshot as raw bytes, 2 MiB; PNG,
+  JPEG or WebP judged by its bytes, ops/imageCheck.ts), `POST /api/vs/feedback/thread` and
+  `POST /api/vs/feedback/poll` (the thread, and the owner's reply counts for up to 10 threads),
+  all cls `write`; `GET /api/vs/feedback/image?id=` (cls `read`), and `POST /api/vs/client-errors`
+  (cls `write`, 8 KB, `application/json` or `text/plain` for sendBeacon). The thread token is
+  `Authorization: Bearer` (poll: in the body), never in a URL. POSTs need the site's exact Origin;
+  each route has far tighter limits of its own. The Vercel function must let these through: POST
+  and `Content-Type` and `Authorization` under `/api/vs/feedback` (body up to 2,113,536 bytes on
+  `/upload`, 16 KB elsewhere) and POST + `Content-Type` on `/api/vs/client-errors` (8 KB), never
+  cached; an image answer is up to 2 MiB (docs/GO-LIVE.md).
 - **Remove** (the web no longer calls them): `/api/vs/price`, `/api/vs/trader`,
   `/api/vs/fills`, `/api/vs/account`, `/api/external/leaderboard`,
   `/api/external/leaderboard/rank`, `/api/external/resolve-account`,

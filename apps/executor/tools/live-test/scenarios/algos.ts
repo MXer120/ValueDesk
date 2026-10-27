@@ -12,7 +12,7 @@
  * cleanup, which leaves the follower flat.
  */
 import type { AlgoView } from '../../../../../packages/copy-engine/src/index.ts';
-import { Unavailable, Inconclusive, type T } from '../harness.ts';
+import { Inconclusive, type T } from '../harness.ts';
 import type { Scenario } from '../scenario.ts';
 
 const SOURCE = 'apps/executor/tools/live-test/scenarios/algos.ts';
@@ -221,11 +221,49 @@ export const ALGO_SCENARIOS: Scenario[] = [
       await positionIs(t, v.algo.filled, 'after the restart');
     },
   }),
-  algo('twap.size-change', 'twap', 'TWAP size changed while running', 'a size change on SoDEX pulls resting children past the new size', {
-    timeoutMs: MIN,
-    cost: () => ({ takerUsd: 0, makerUsd: 0, peakUsd: 0 }),
-    async run() {
-      throw new Unavailable('the executor has no algo update: algo-action takes pause, resume, cancel and cancel-all only (AlgoActionPayload); AlgoRuntime.update is reached from the browser runner alone');
+  algo('twap.size-change', 'twap', 'TWAP size lowered and raised while running', 'lowered under what rests, the resting child is pulled and sent again at the new size; raised mid-schedule, the rest is spread over the slices to come and it ends filled at the new size', {
+    timeoutMs: 6 * MIN,
+    cost: (U) => ({ takerUsd: 3 * U, makerUsd: 0, peakUsd: 3 * U }),
+    async run(t) {
+      // 1. Lowered: one post-only child rests far under the market (a limit 3% below), 3U; lowered to 2U it is pulled and sent again as 2U.
+      const q = await t.quote();
+      const limit = t.tick(q.bid * 0.97, t.main.name, 'down');
+      const r0 = await t.start({ kind: 'twap', quantity: await t.qty(3 * t.U), durationMs: 10 * MIN, slices: 1, limitPrice: limit, exec: { style: 'maker' }, finish: 'leave' });
+      const id = r0.algo.id;
+      const first = await t.waitFor('one child rests on SoDEX', async () => {
+        const o = await t.algoOrders(id);
+        return o.length === 1 ? o[0]! : null;
+      }, { timeoutMs: 60_000 });
+      await t.live('lowered, the resting child is pulled and sent again at the new size', async () => {
+        const lower = await t.qty(2 * t.U);
+        await t.exec.algoUpdate(id, { quantity: lower });
+        const again = await t.waitFor('a new child of the lower size rests', async () => {
+          const o = await t.algoOrders(id);
+          return o.length === 1 && o[0]!.orderId !== first.orderId ? o[0]! : null;
+        }, { timeoutMs: 60_000 });
+        t.check(near(again.qty, Number(lower), stepOf(t) / 2), `the child rests for ${again.qty} (${lower} asked)`);
+        t.check(again.price <= limit, `still at or under the limit ${limit} (${again.price})`);
+        const v = await t.exec.algo(id);
+        t.check(v.target !== null && near(v.target, Number(lower), stepOf(t) / 2), `the executor's target is ${lower}`);
+        // Raised under what filled is refused: nothing filled here, so a size of 0 is the one to try.
+        const refused = await t.exec.algoUpdate(id, { quantity: '0' }).then(() => false, () => true);
+        t.check(refused, 'a size of 0 is refused');
+      });
+      await t.exec.algoAct('cancel', id);
+      await t.waitEnded(id, 20_000);
+      await nothingResting(t, id);
+
+      // 2. Raised: a taker TWAP of 2U in 2 slices, raised to 3U after its first fill, ends done with 3U.
+      const v0 = await t.start({ kind: 'twap', quantity: await t.qty(2 * t.U), durationMs: 2 * MIN, slices: 2, exec: { style: 'taker', slippageBps: 20 } });
+      await t.waitAlgo(v0.algo.id, 'the first slice filled', (v) => v.algo.filled > 0, { timeoutMs: 2 * MIN });
+      const more = await t.qty(3 * t.U);
+      await t.exec.algoUpdate(v0.algo.id, { quantity: more });
+      const v = await t.waitAlgo(v0.algo.id, 'the TWAP is done', done, { timeoutMs: 3 * MIN });
+      await t.live('raised, it fills the new size', async () => {
+        t.check(near(v.algo.filled, Number(more), stepOf(t) / 2), `filled ${v.algo.filled} = the new size ${more}`);
+        await filledAsBooked(t, v);
+      });
+      await positionIs(t, v.algo.filled, 'after the raise');
     },
   }),
 

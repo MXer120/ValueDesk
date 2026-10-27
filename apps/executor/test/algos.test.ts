@@ -230,3 +230,34 @@ test('end to end, in paper: a signed TWAP with exits runs on the executor agains
     }
   }
 });
+
+test('algos: a signed update changes a running algo\'s size (and only what may change); another wallet cannot', async () => {
+  const { svc, cleanup } = make();
+  const a = new Wallet();
+  const b = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  svc.acceptTerms(a.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  svc.acceptTerms(b.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  assert.ok(svc.info(ctx).features?.includes('algo-update'));
+  const x = await svc.algoStart(a.sign(svc.executorId, 'algo-start', { spec: TWAP, seed: 1 }), ctx);
+  const up = (w: Wallet, patch: unknown) => svc.algoAct(w.sign(svc.executorId, 'algo-action', { op: 'update', id: x.algo.id, patch }), ctx);
+  const v = await up(a, { quantity: '0.02' });
+  assert.equal(v.algos[0]!.algo.spec.kind === 'twap' && v.algos[0]!.algo.spec.quantity, '0.02');
+  assert.equal(await code(up(b, { quantity: '0.03' })), '404:algo');
+  // Only the fields a running algo may change, each of its own type.
+  assert.equal(await code(up(a, { side: 'sell' })), '400:patch');
+  assert.equal(await code(up(a, { paper: false })), '400:patch');
+  assert.equal(await code(up(a, { quantity: 0.03 })), '400:patch');
+  assert.equal(await code(up(a, { quantity: '-1' })), '400:patch');
+  assert.equal(await code(up(a, {})), '400:patch');
+  assert.equal(await code(up(a, null)), '400:patch');
+  assert.equal(await code(up(a, { limitPrice: 'x' })), '400:patch');
+  const lim = await up(a, { limitPrice: 120_000 });
+  assert.equal(lim.algos[0]!.algo.spec.limitPrice, 120_000);
+  // The signed instruction is kept as the wallet's record.
+  assert.ok(svc.consents(a.address).some((c) => c.action === 'algo-action' && /"op":"update"/.test(c.payload)));
+  // An ended algo cannot change.
+  await svc.algoAct(a.sign(svc.executorId, 'algo-action', { op: 'cancel', id: x.algo.id }), ctx);
+  assert.equal(await code(up(a, { quantity: '0.05' })), '409:state');
+  await cleanup();
+});

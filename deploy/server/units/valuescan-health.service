@@ -3,8 +3,9 @@
 # One pass of deploy/server/bin/healthcheck.mjs: /api/health, the hosted
 # lock-down, an index read through the gate, the indexer's own status
 # (/api/vs/index/health), the copy executor (/api/copy/v1/health on 127.0.0.1:8799),
-# disk space, the last backup, the certificate. It logs one line; on a change of
-# state it publishes to the alert topic, if one is set.
+# disk space, the last backup, the certificate, and the other server (the
+# cross-watch, health.env). It logs one line; on a change of state it sends a
+# Telegram message (alert.env) and/or publishes to the SNS topic, if one is set.
 
 [Unit]
 Description=Valuescan health check
@@ -17,9 +18,16 @@ User=valuescan
 Group=valuescan
 EnvironmentFile=/etc/valuescan/ops.env
 EnvironmentFile=-/etc/valuescan/ops.local.env
+# This server's role: which checks, which units, which peers it watches, its name in
+# a message (deploy/contabo/server*/health.env). Read after ops.env: it wins.
+EnvironmentFile=-/etc/valuescan/health.env
 # The board read needs the origin secret, like every request but /api/health and
-# the on-instance health route (the check sends the first value of the list).
+# the on-instance health route (the check sends the first value of the list); the
+# cross-watch sends it to the other origin (never to the public site).
 EnvironmentFile=-/etc/valuescan/api.secret.env
+# ALERT_TELEGRAM_TOKEN and ALERT_TELEGRAM_CHAT_ID. Root-only (0600): systemd reads it
+# before it drops to the valuescan user (telegram-setup.sh writes it).
+EnvironmentFile=-/etc/valuescan/alert.env
 Environment=HOME=/var/lib/valuescan/state
 ExecStart=/opt/node/current/bin/node --disable-warning=ExperimentalWarning /opt/valuescan/bin/healthcheck.mjs
 # A failed check is a result, not a broken unit: the script decides what to alert.

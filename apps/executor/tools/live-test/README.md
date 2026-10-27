@@ -61,7 +61,7 @@ Options:
 |---|---|
 | `--only <list>` | comma-separated scenario ids (`twap.exits`), prefixes (`scale.*`), kinds (`twap`) or sections (`algo`, `copy`); the bootstrap (`setup.terms`, `setup.key`, `setup.builder`) always runs |
 | `--force` | run even what already passed on this code |
-| `--slow` | include the slow scenarios (`vwap.full` 15 min, `copy.tp-fires` up to 30 min) |
+| `--slow` | include the slow scenarios (`vwap.full` 15 min) |
 | `--dry` | paper: every spec goes out with `paper: true` to an executor whose real orders are off; checks read the executor's paper book |
 | `--budget` | print the budget and stop |
 | `--adopt` | at start, close positions / cancel orders on the test markets that this runner never recorded sending (otherwise it refuses to touch them) |
@@ -91,7 +91,7 @@ What one run does:
 
 ## The scenarios
 
-52 by default, 54 with `--slow`. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12): every child
+53 by default, 54 with `--slow`. Sizes are in U = SoDEX's $10 minimum order value plus 20% ($12): every child
 order is just big enough. Each scenario says what it confirms on the exchange (`title` and `confirms` in
 `scenarios/*.ts`).
 
@@ -101,7 +101,8 @@ order is just big enough. Each scenario says what it confirms on the exchange (`
   pause/resume, time-sliced reduce-only close of a position, exits (SoDEX stops placed after the first fill,
   resized to the full fill, pulled by a cancel), minimum order size (just over SoDEX's minimum; below it: failed,
   nothing sent), limit price respected, executor killed mid-schedule (no child twice, no overfill), size change
-  (reported **skipped**: the executor has no algo update op - only the browser runner can change a running algo).
+  (lowered under a resting child: pulled and sent again at the new size; raised after the first fill: ends filled at
+  the new size).
 - **VWAP** (1, +1 slow), **POV** (1), **Iceberg** (2: pegged post-only clips one at a time; resting clip survives a
   restart, same order, tracked), **Chase** (2), **Scale** (4: ladder at the planned prices; the ticket's DCA ladder
   paused and resumed; a partial fill; restart with resting levels), **DCA** (2), **Swarm** (1), **Conditional**
@@ -111,12 +112,14 @@ order is just big enough. Each scenario says what it confirms on the exchange (`
   fast** (2), **leverage** (1: SoDEX shows the leverage and isolated margin the algo set, capped for your region),
   **reduce-only** (1: a reduce-only order larger than the position ends flat, never short), **kill switch** (1:
   a ladder, an iceberg and a bracket with exits working; one cancel-all leaves no order and no stop on SoDEX).
-- **Copy trading** (11, +1 slow), the leader traded by the runner: fixed amount (open, add, reduce, close;
+- **Copy trading** (12), the leader traded by the runner: fixed amount (open, add, reduce, close;
   reduce-only reductions; builder fee), fixed ratio with a flip, proportional to the leader's real equity, the
   copy's leverage cap (clamp, then skip, SoDEX at 1x), stop-loss/take-profit as SoDEX stops (placed, resized,
   cancelled), paused while the leader closes then resumed, stop-and-close, executor killed while the leader adds
   (catch-up, no order twice), counter-trade, a reduction below SoDEX's minimum (reduce-only is exempt), the copy's
-  amount changed between two trades. Slow: the copy's stop fires on SoDEX.
+  amount changed between two trades, the copy's stop firing on SoDEX (at the region's highest leverage and the
+  tightest stops; inconclusive, not failed, when the market does not move far enough in 20 minutes). The fixed-amount
+  scenario also times every copy: leader fill to copy fill by SoDEX's own timestamps, median under 1 s.
 
 ## Resume, and reading the results
 

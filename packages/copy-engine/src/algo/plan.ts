@@ -13,6 +13,7 @@ import {
   makeRng,
   minChildQty,
   normalise,
+  povDue,
   sliceTimes,
   snapNearest,
   type VolumeProfile,
@@ -245,7 +246,8 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
     }
     case 'pov': {
       if (ctx.hourVolume && ctx.hourVolume > 0 && total) {
-        const perHour = ctx.hourVolume * s.rate;
+        // Its share of the total: at the last hour's volume of everyone else, it trades others x rate / (1 - rate) an hour.
+        const perHour = povDue(s.rate, ctx.hourVolume);
         const hours = total / perHour;
         out.endsAt = start + Math.round(hours * 3_600_000);
         if (s.endAt !== null && out.endsAt > s.endAt) out.warnings.push(`At the last hour's pace it fills about ${Math.round((((s.endAt - start) / 3_600_000) * perHour * 100) / total)}% by the end time.`);
@@ -255,7 +257,7 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       if (ctx.hourVolume && ctx.hourVolume > 0 && total && out.endsAt !== null) {
         const span = Math.max(1, out.endsAt - start);
         const bucket = Math.max(300_000, Math.ceil(span / 400));
-        const per = (ctx.hourVolume * s.rate * bucket) / 3_600_000;
+        const per = (povDue(s.rate, ctx.hourVolume) * bucket) / 3_600_000;
         const cap = s.maxChildQty !== null ? Number(s.maxChildQty) : Infinity;
         const sched: PlannedChild[] = [];
         let left = total;

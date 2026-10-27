@@ -19,6 +19,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   AlgoRuntime,
   AlgoSpecError,
+  ALGO_UPDATE_FIELDS,
   COPY_ENGINE_VERSION,
   COPY_FEE_LADDER,
   COPY_FEE_WINDOW_DAYS,
@@ -41,6 +42,10 @@ import {
   parseSettings,
   randomId,
   regionPolicy,
+  sanctionedOf,
+  screenPolicy,
+  SANCTIONED_LEADER_REASON,
+  SANCTIONED_WALLET_REASON,
   OracleFeed,
   verifyCopyRequest,
   type AcceptSiteTermsPayload,
@@ -49,6 +54,7 @@ import {
   type AlgoEvent,
   type AlgoRecord,
   type AlgoSink,
+  type AlgoUpdatePatch,
   type AlgoView,
   type CopyAction,
   type CopyView,
@@ -69,6 +75,8 @@ import {
 import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
+import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
+import { Brake, type BrakeState } from './brake.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
@@ -107,6 +115,34 @@ function specsOf(spec: { kind: string; paper?: boolean; then?: unknown }, raw: u
   const then = spec.kind === 'conditional' ? (spec.then as { type?: string; algo?: { kind: string } } | undefined) : undefined;
   const rawThen = r.then && typeof r.then === 'object' ? (r.then as Record<string, unknown>) : {};
   if (then?.type === 'algo' && then.algo) out.push(...specsOf(then.algo, rawThen.algo, paper));
+  return out;
+}
+
+/**
+ * A signed 'update' patch, checked field by field: only what AlgoRuntime.update
+ * may change, each of its own type (null clears an optional one). The runtime
+ * then judges the values against the running algo.
+ */
+function algoPatch(raw: unknown): AlgoUpdatePatch {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new ApiError(400, 'patch', 'update needs a patch: what to change.');
+  const r = raw as Record<string, unknown>;
+  const other = Object.keys(r).filter((k) => !(ALGO_UPDATE_FIELDS as readonly string[]).includes(k));
+  if (other.length) throw new ApiError(400, 'patch', `Only ${ALGO_UPDATE_FIELDS.join(', ')} of a running algo can be changed (not ${other.join(', ')}).`);
+  if (!Object.keys(r).length) throw new ApiError(400, 'patch', 'The patch changes nothing.');
+  const out: AlgoUpdatePatch = {};
+  if (r.quantity !== undefined) {
+    if (typeof r.quantity !== 'string' || !/^\d+(\.\d+)?$/.test(r.quantity) || !(Number(r.quantity) > 0)) throw new ApiError(400, 'patch', 'The size must be a positive decimal string.');
+    out.quantity = r.quantity;
+  }
+  for (const k of ['limitPrice', 'maxSpreadBps'] as const) {
+    if (r[k] === undefined) continue;
+    if (r[k] !== null && !(typeof r[k] === 'number' && Number.isFinite(r[k]) && (r[k] as number) > 0)) throw new ApiError(400, 'patch', `${k} must be a positive number or null.`);
+    out[k] = r[k] as number | null;
+  }
+  if (r.label !== undefined) {
+    if (r.label !== null && (typeof r.label !== 'string' || r.label.length > 60)) throw new ApiError(400, 'patch', 'The label must be text of at most 60 characters, or null.');
+    out.label = r.label as string | null;
+  }
   return out;
 }
 
@@ -160,6 +196,8 @@ export class ExecutorService {
   readonly pairingCode: string | null;
   private pairMisses = 0;
   private pairLockedUntil = 0;
+  /** The operator's emergency brake (brake.ts): read from cfg.brakeFile. */
+  readonly brake: Brake;
 
   constructor(
     readonly cfg: ExecutorConfig,
@@ -171,6 +209,11 @@ export class ExecutorService {
     this.executorId = cfg.executorId ?? (cfg.kind === 'hosted' ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === 'hosted' ? 'vd-copy-tokyo' : 'vd-copy-self';
     this.pairingCode = cfg.kind === 'self' && !this.owner() ? pairingCode() : null;
+    this.brake = new Brake(cfg.brakeFile, (now, before) => {
+      db.audit('brake', null, null, { now, before });
+      if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
+      else if (before) deps.log.warn('executor: the emergency brake is off', {});
+    });
     this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
@@ -184,8 +227,9 @@ export class ExecutorService {
       sinkFor: (s) => this.sinkFor(s),
       builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null),
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
-      policyFor: (s) => this.policyNow(s.owner, s.country, s.observedCountry),
+      policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
       keyProblem: (s) => this.keyProblem(s.owner),
+      brake: () => this.brakeText('copies'),
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.algos = new AlgoRuntime({
@@ -197,6 +241,7 @@ export class ExecutorService {
       sinkFor: (a) => this.algoSink(a),
       builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
       problem: (a) => this.algoProblem(a),
+      brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => this.algoPolicy(a),
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
@@ -249,23 +294,51 @@ export class ExecutorService {
       keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, '<owner>') },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       features: [...EXECUTOR_FEATURES],
+      brake: this.brakeView(),
     };
   }
 
+  /* ------------------------------------------------------------ audit ----- */
+
+  /** One answered request, for the audit log (server.ts): route, status, where from, the signed action and wallet. */
+  audit(r: { method: string; path: string; status: number; ms: number; client: string; country: string | null; request: { action: string | null; owner: string | null; digest: string | null } | null }): void {
+    this.db.audit('request', r.request?.owner ?? null, r.path, r);
+  }
+
+  /* ------------------------------------------------------------ brake ----- */
+
+  /** What the site shows while the brake is on (null: off). */
+  private brakeView(): ExecutorInfo['brake'] {
+    const b = this.brake.current();
+    return b ? { copies: b.copies, algos: b.algos, reason: b.reason, since: b.since } : null;
+  }
+
+  /** The sentence a held copy or algo shows, or null while that switch is off. */
+  private brakeText(what: 'copies' | 'algos'): string | null {
+    const r = what === 'copies' ? this.brake.copies() : this.brake.algos();
+    return r === null ? null : `ValueDesk paused all ${what === 'copies' ? 'copy trading' : 'algo orders'} on this executor: ${r}`;
+  }
+
+  /** New live trading (a copy, an algo, a resume, a bigger size) is refused while the brake is on; stopping never is. */
+  private needNoBrake(what: 'copies' | 'algos'): void {
+    const t = this.brakeText(what);
+    if (t) throw new ApiError(503, 'brake', `${t} Nothing new starts until it is lifted; what you stop, pause or cancel still goes through.`);
+  }
+
   /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
-  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean } } {
+  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean }; brake?: BrakeState | null } {
     let db = true;
     try {
       this.db.ping();
     } catch {
       db = false;
     }
-    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false } };
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current() };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
     const sodex = v?.feeds.sodex ?? true;
-    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex } };
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex }, brake: this.brake.current() };
   }
 
   /**
@@ -365,6 +438,7 @@ export class ExecutorService {
     for (const k of ['adult', 'notUsPerson', 'ownDecision', 'risksUnderstood'] as const) {
       if (p[k] !== true) throw new ApiError(400, 'statements', 'Every statement must be confirmed to copy trades.');
     }
+    this.screen(owner);
     const policy = regionPolicy(country, ctx.viewerCountry);
     this.db.setTerms(owner, { termsVersion: p.termsVersion, termsHash: p.termsHash, country, observedCountry: normaliseCountry(ctx.viewerCountry), acceptedAt: Date.now() });
     if (!policy.allowed) throw new ApiError(451, 'region', policy.reason ?? 'Copy trading is not available in your region.');
@@ -401,7 +475,7 @@ export class ExecutorService {
     return {
       owner,
       terms: current,
-      policy: regionPolicy(current?.country ?? null, ctx.viewerCountry),
+      policy: screenPolicy(regionPolicy(current?.country ?? null, ctx.viewerCountry), owner),
       key: this.keyInfo(owner),
       copies: this.runtime
         .list(owner)
@@ -553,12 +627,23 @@ export class ExecutorService {
   private sinkFor(s: Subscription): OrderSink | null {
     if (s.settings.paper) return this.paper;
     if (!this.db.key(s.owner, 'active')) return null;
-    return new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]);
+    return auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
   }
 
   /* ----------------------------------------------------------- copies ----- */
 
+  /**
+   * A follower or leader on the sanctions list (copy-engine sanctions.ts, a list in the repository:
+   * nothing is fetched) is refused on every request that lets a wallet trade or be copied; what
+   * already runs is held through policyFor. Stopping, pausing, cancelling and deleting the key stay open.
+   */
+  private screen(...addresses: Array<string | null | undefined>): void {
+    const hit = sanctionedOf(addresses);
+    if (hit !== null) throw new ApiError(451, 'sanctioned', hit === 0 ? SANCTIONED_WALLET_REASON : SANCTIONED_LEADER_REASON);
+  }
+
   private needTerms(owner: string, ctx: RequestContext): void {
+    this.screen(owner);
     const t = this.db.terms(owner);
     if (!t || t.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(412, 'terms', 'Accept the copy trading terms first.');
     const policy = regionPolicy(t.country, ctx.viewerCountry);
@@ -580,6 +665,7 @@ export class ExecutorService {
     } catch (e) {
       throw new ApiError(400, 'settings', e instanceof SettingsError ? e.message : String(e));
     }
+    this.screen(owner, settings.leader.address);
     const running = this.runtime.list(owner).filter((s) => s.status !== 'stopped');
     if (running.length >= this.cfg.maxCopiesPerOwner) throw new ApiError(429, 'limit', `At most ${this.cfg.maxCopiesPerOwner} copies run at once. Stop one first.`);
     if (running.some((s) => s.settings.leader.address === settings.leader.address && s.settings.leader.venue === settings.leader.venue && s.settings.paper === settings.paper)) {
@@ -587,6 +673,7 @@ export class ExecutorService {
     }
     let accountId = 0;
     if (!settings.paper) {
+      this.needNoBrake('copies');
       await this.verifyKey(owner);
       const k = this.db.key(owner, 'active');
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register the copy key on SoDEX first (copy setup, "Approve agent").');
@@ -643,10 +730,13 @@ export class ExecutorService {
         } catch (e) {
           throw new ApiError(400, 'settings', e instanceof SettingsError ? e.message : String(e));
         }
+        this.screen(owner, settings.leader.address);
         touched = [await this.runtime.update(s.id, { settings, consent }).catch(fail)];
       } else if (action === 'pause') touched = [await this.runtime.pause(s.id).catch(fail)];
       else if (action === 'resume') {
+        if (!s.settings.paper) this.needNoBrake('copies');
         this.needTerms(owner, ctx);
+        this.screen(owner, s.settings.leader.address);
         touched = [await this.runtime.resume(s.id).catch(fail)];
       } else touched = [await this.runtime.stopCopy(s.id, { close: payload.close === true }).catch(fail)];
     }
@@ -664,8 +754,11 @@ export class ExecutorService {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   private algoSink(a: AlgoRecord): AlgoSink | null {
     if (!this.db.key(a.owner, 'active')) return null;
-    return new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
-      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null,
+    return auditedAlgoSink(
+      new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
+        this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null,
+      ),
+      this.db,
     );
   }
 
@@ -692,7 +785,7 @@ export class ExecutorService {
    * so a wallet that declares a blocked country has its live algos held at once.
    */
   private algoPolicy(a: AlgoRecord): RegionPolicy {
-    return this.policyNow(a.owner, a.country ?? null, a.observedCountry ?? null);
+    return screenPolicy(this.policyNow(a.owner, a.country ?? null, a.observedCountry ?? null), a.owner);
   }
 
   /**
@@ -739,6 +832,7 @@ export class ExecutorService {
     if (!this.cfg.liveAlgos && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
+      this.needNoBrake('algos');
       await this.verifyKey(owner);
       const k = this.db.key(owner, 'active');
       if (!k || !k.registered) throw new ApiError(412, 'key', 'Register this executor\'s key on SoDEX first (copy setup, "Approve agent").');
@@ -774,10 +868,16 @@ export class ExecutorService {
       if (!a || a.owner !== owner) throw new ApiError(404, 'algo', 'No such algo order.');
       if (op === 'pause') touched = [await this.algos.pause(a.id).catch(fail)];
       else if (op === 'resume') {
+        if (!a.spec.paper) this.needNoBrake('algos');
         this.needTerms(owner, ctx);
         touched = [await this.algos.resume(a.id).catch(fail)];
       } else if (op === 'cancel') touched = [await this.algos.cancel(a.id).catch(fail)];
-      else throw new ApiError(400, 'op', 'op must be pause, resume, cancel or cancel-all.');
+      else if (op === 'update') {
+        // A bigger size is more trading: the terms in force are needed, as for a resume.
+        if (!a.spec.paper) this.needNoBrake('algos');
+        this.needTerms(owner, ctx);
+        touched = [await this.algos.update(a.id, algoPatch(payload.patch)).catch(fail)];
+      } else throw new ApiError(400, 'op', 'op must be pause, resume, cancel, cancel-all or update.');
     }
     return { algos: touched.map((a) => this.algos.view(a.id)).filter((v): v is AlgoView => v !== null) };
   }

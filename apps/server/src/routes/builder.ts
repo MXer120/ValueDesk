@@ -18,6 +18,7 @@ import type { FastifyInstance } from 'fastify';
 import { clientKey } from '../hosted.js';
 import { builderService, type BuilderService } from '../builder/service.js';
 import { ADDRESS_RE, NONCE_RE } from '../builder/terms.js';
+import { SANCTIONED_WALLET_REASON, isSanctionedAddress } from '../builder/sanctions.js';
 
 export interface BuilderRouteOptions {
   /** A service to answer from instead of the running server's (tests). */
@@ -50,6 +51,9 @@ export async function builderRoutes(app: FastifyInstance, opts: BuilderRouteOpti
     if (typeof q.address !== 'string' || !ADDRESS_RE.test(q.address)) return bad('a valid 0x wallet address is required');
     if (typeof q.nonce !== 'string' || !NONCE_RE.test(q.nonce)) return bad('nonce must be 16 to 64 characters of A-Z a-z 0-9 _ -');
     if (q.hint !== undefined && q.hint !== '1') return bad('hint, when given, must be 1');
+    // A wallet on the sanctions list gets no signed terms (and starts no verification): the app then
+    // charges its default fee, and its own screen signs nothing for that wallet (builder/sanctions.ts).
+    if (isSanctionedAddress(q.address)) return reply.code(451).send({ ok: false, code: 'sanctioned', error: SANCTIONED_WALLET_REASON });
     try {
       return service.terms({ address: q.address.toLowerCase(), nonce: q.nonce, hint: q.hint === '1', client: clientKey(req.ip) });
     } catch (e) {
