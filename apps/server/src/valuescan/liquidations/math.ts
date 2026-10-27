@@ -22,7 +22,8 @@
  * the spot collateral out), plus `iso` per isolated position. From then on the
  * prints move it (applyFill: a trade of d at px takes d·px from the cash), and
  * the prices now move every position's liquidation price as the venue's would.
- * What the model cannot see - funding, fees, a deposit - waits for the next read;
+ * Funding it applies every hour (fundingCash, from the venue's published rates); what
+ * it cannot see - fees, a deposit or withdrawal - waits for the next read;
  * the tracker measures that drift at every re-read (driftOf).
  */
 
@@ -291,6 +292,27 @@ export function fillCash(book: FillBook, symbol: string, d: number, px: number):
     cur.iso = cur.iso === null && !lev ? null : m - n * px;
     if (has) book.cash! -= m;
   }
+}
+
+/**
+ * One hour's funding on a book. Hyperliquid settles every hour: a position of size s pays
+ * s · oracle price · rate (longs pay a positive rate). Cross positions pay from the cash,
+ * an isolated one from its own margin; the account value moves by the same amount. A
+ * market without a rate pays nothing. Returns what the book paid in all (negative: received).
+ */
+export function fundingCash(book: FillBook & { equity?: number | null }, rateOf: (symbol: string) => { rate: number; px: number } | null): number {
+  let paid = 0;
+  for (const [symbol, p] of book.pos) {
+    const f = rateOf(symbol);
+    if (!f || !Number.isFinite(f.rate) || !(f.px > 0)) continue;
+    const pay = p.szi * f.px * f.rate;
+    if (!Number.isFinite(pay) || pay === 0) continue;
+    paid += pay;
+    if (p.iso !== undefined) { if (p.iso !== null) p.iso -= pay; }
+    else if (book.cash !== undefined && book.cash !== null) book.cash -= pay;
+  }
+  if (paid && book.equity !== undefined && book.equity !== null) book.equity -= paid;
+  return paid;
 }
 
 // --- drift and accuracy ----------------------------------------------------------------
