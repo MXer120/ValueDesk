@@ -5,7 +5,7 @@
  * the pulse strip, the sentence over it, the rail's lists, the sectors and the
  * table's filters. No React, no fetch.
  */
-import { sectorOf, SECTORS, type Sector } from '@sign/valuescan/cohorts/model.js';
+import { sectorOf, SECTORS, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import type { Venue } from '../../../vsApi';
 import { marketKey } from '../model';
 

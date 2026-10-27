@@ -55,7 +55,7 @@ function answer(pattern, url) {
     case '/api/vs/leaderboard':
       return {
         ok: true, venue: url.searchParams.get('venue') ?? 'all', window: url.searchParams.get('window') ?? '30d', sort: 'pnl',
-        rows: [], total: 0, updatedAt: now, source: 'ValueScan index is starting. The board fills as traders are read.',
+        rows: [], total: 0, updatedAt: now, source: 'ValueDesk index is starting. The board fills as traders are read.',
         index: { complete: false, pending: 0, updatedAt: 0 },
       };
     case '/api/vs/lbrow':

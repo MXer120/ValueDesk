@@ -9,7 +9,7 @@
 //   node deploy/smoke/smoke.mjs --snapshot           build, hosted API on a snapshot of the index, walk
 //   node deploy/smoke/smoke.mjs --dist=<dir> ...     use an existing build
 //   node deploy/smoke/smoke.mjs --api=none --offline nothing leaves this machine: headers, CSP, worker, routes
-//   node deploy/smoke/smoke.mjs --site=https://valuescan.example [--origin=origin.valuescan.example]
+//   node deploy/smoke/smoke.mjs --site=https://valuedesk.example [--origin=origin.valuedesk.example]
 //                                                    AFTER A DEPLOY: walk the real site (no build, no local server),
 //                                                    compare the headers the edge sends with edge.yaml, ask the gate
 //                                                    through the edge, and check that the origin is closed to you
@@ -24,7 +24,7 @@
 // --no-index    spawn the server with no index file at all (every index route says "not available")
 // --server-egress=deny|allow   deny (default): the spawned server cannot reach any
 //               exchange (net-guard.mjs) and spends none of this machine's budgets.
-//               allow: the real thing - only on a machine that runs no other Valuescan server.
+//               allow: the real thing - only on a machine that runs no other ValueDesk server.
 // --offline     the browser cannot resolve any host but loopback (no exchange traffic at all)
 // --site=URL    walk a deployed site instead of a local build. The browser talks to the real
 //               exchanges, as a visitor's does; --api, --dist and the index options do not apply.
@@ -89,7 +89,7 @@ const OUT = resolve(String(flags.out ?? join(REPO, 'deploy', '.out', 'smoke')));
 const SETTLE_MS = Number(flags.settle ?? 7000);
 const OFFLINE = flags.offline === true;
 // --site: a DEPLOYED site is walked as it is - nothing is built or started here but the browser.
-if (flags.site === true) refuse('--site needs the origin of the deployed site: --site=https://valuescan.example');
+if (flags.site === true) refuse('--site needs the origin of the deployed site: --site=https://valuedesk.example');
 const REMOTE = typeof flags.site === 'string';
 if (REMOTE && !/^https?:\/\/[^/?#\s]+\/?$/.test(flags.site)) refuse('--site must be an origin: https://host[:port], no path');
 if (REMOTE) {
@@ -290,7 +290,7 @@ async function startApi(report) {
   const guardLog = join(OUT, 'server-egress-refused.txt');
   if (existsSync(guardLog)) rmSync(guardLog);
   const env = { ...process.env };
-  // Nothing of the developer's environment or of %LOCALAPPDATA%\Valuescan is used.
+  // Nothing of the developer's environment or of %LOCALAPPDATA%\ValueDesk is used.
   for (const k of Object.keys(env)) if (/^(VALUESCAN_|VALUETRADE_|SODEX_|VALUECHAIN_)/.test(k)) delete env[k];
   Object.assign(env, {
     VALUESCAN_HOSTED: '1',

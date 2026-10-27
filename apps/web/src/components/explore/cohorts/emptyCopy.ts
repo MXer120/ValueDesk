@@ -10,7 +10,7 @@
  *
  * Pure: the cohort's own range text (COHORT_BY_ID) and the venue names in.
  */
-import type { CohortDef, CohortId } from '@sign/valuescan/cohorts/model.js';
+import type { CohortDef, CohortId } from '@sign/valuedesk/cohorts/model.js';
 
 /** "SoDEX", "SoDEX or Arcus", "SoDEX, Lighter or Arcus". */
 export function venueList(names: readonly string[]): string {

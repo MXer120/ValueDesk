@@ -20,7 +20,7 @@ import {
   mapLimit,
   type InfoBody,
   type InfoLike,
-} from '../src/valuescan/hyperliquid/info.js';
+} from '../src/valuedesk/hyperliquid/info.js';
 import {
   HlLeaderboardStore,
   LbSnapshot,
@@ -29,7 +29,7 @@ import {
   parseLeaderboard,
   parseLeaderboardStream,
   queryLeaderboard,
-} from '../src/valuescan/hyperliquid/leaderboard.js';
+} from '../src/valuedesk/hyperliquid/leaderboard.js';
 import {
   aggregatePositioning,
   aggregateTakerPrints,
@@ -50,10 +50,10 @@ import {
   takerOf,
   topCoins,
   twr,
-} from '../src/valuescan/hyperliquid/mappers.js';
-import { HlPositioning } from '../src/valuescan/hyperliquid/positioning.js';
-import { hlFills, hlTrader } from '../src/valuescan/hyperliquid/trader.js';
-import { HlTradeFeed, SeenIds, TradeRing, WHALE_KEEP_USD } from '../src/valuescan/hyperliquid/whales.js';
+} from '../src/valuedesk/hyperliquid/mappers.js';
+import { HlPositioning } from '../src/valuedesk/hyperliquid/positioning.js';
+import { hlFills, hlTrader } from '../src/valuedesk/hyperliquid/trader.js';
+import { HlTradeFeed, SeenIds, TradeRing, WHALE_KEEP_USD } from '../src/valuedesk/hyperliquid/whales.js';
 import type {
   HlClearinghouseState,
   HlFillRaw,
@@ -62,8 +62,8 @@ import type {
   HlMetaAndAssetCtxs,
   HlPortfolio,
   HlWsTrade,
-} from '../src/valuescan/hyperliquid/raw.js';
-import type { EquityPoint, LeaderboardQuery } from '../src/valuescan/types.js';
+} from '../src/valuedesk/hyperliquid/raw.js';
+import type { EquityPoint, LeaderboardQuery } from '../src/valuedesk/types.js';
 
 // --- fixtures --------------------------------------------------------------------
 
@@ -170,7 +170,7 @@ test('queryLeaderboard: ROI ranking puts dust accounts last but keeps them', () 
 
 test('queryLeaderboard: q matches an address prefix (with or without 0x), never a name; rank stays global', () => {
   const snap = new LbSnapshot(parseLeaderboard(LB), 0, null, 0);
-  // No username is shown or searched (valuescan/labels.ts).
+  // No username is shown or searched (valuedesk/labels.ts).
   assert.equal(queryLeaderboard(snap, null, Q({ q: 'lorac' })).total, 0);
   for (const q of ['0x8C625', '8c625']) {
     const page = queryLeaderboard(snap, null, Q({ q }));

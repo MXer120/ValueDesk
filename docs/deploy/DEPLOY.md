@@ -1,4 +1,4 @@
-# Deploying Valuescan to AWS
+# Deploying ValueDesk to AWS
 
 The runbook: what to fill in, what to run, in which order, and what to look at
 afterwards. The reference for each part sits next to its code:
@@ -518,7 +518,7 @@ The switches:
 What a visitor's browser sends, what the server keeps, and to whom - the privacy
 policy (`/privacy`, `apps/web/src/legal/`) has to say it:
 
-- **To Valuescan's edge, then the instance.** In this design: CloudFront and its
+- **To ValueDesk's edge, then the instance.** In this design: CloudFront and its
   firewall. In the test environment (`EC2-VERCEL.md`): **Vercel** - its CDN, in
   whichever of its regions is nearest the visitor, and the `/api` function in its
   Tokyo region (hnd1; Frankfurt, fra1, until 2026-10-23) - in place of CloudFront; the
@@ -563,7 +563,7 @@ policy (`/privacy`, `apps/web/src/legal/`) has to say it:
   `api.web3modal.org`, `verify.walletconnect.org` (Reown's telemetry is blocked in
   the code). To the public RPC endpoints of ValueChain, Arbitrum, Base, Ethereum,
   BNB Chain and Polygon for balances.
-- In the browser's own storage, never sent to Valuescan: settings, saved address
+- In the browser's own storage, never sent to ValueDesk: settings, saved address
   names, the WalletConnect session, the trading key
   (`apps/web/src/trading/vault.ts`), the trading history of up to six wallets
   looked at (IndexedDB), per-address statistics, the watchlist, recent searches,
@@ -593,7 +593,7 @@ index data through the hosted server, the server's own exchange reads, and Scan 
 Hyperliquid, trade.xyz, Lighter and Arcus with the browser online. The page list
 has grown since by the three legal pages (18 pages; `/favicon.ico` is among the
 header samples). The run that covers all of it, on a machine that runs no other
-Valuescan server (or with the development server stopped):
+ValueDesk server (or with the development server stopped):
 
 ```
 node deploy/smoke/smoke.mjs --snapshot --server-egress=allow

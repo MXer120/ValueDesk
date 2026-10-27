@@ -3,7 +3,7 @@
  * shared by the server (sodex/chain.ts) and the browser (which adds the chain
  * to the user's wallet and reads balances from its RPC itself).
  */
-import { envOf } from '../valuescan/env.js';
+import { envOf } from '../valuedesk/env.js';
 
 export type ChainNetwork = 'mainnet' | 'testnet';
 

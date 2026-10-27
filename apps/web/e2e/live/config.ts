@@ -36,7 +36,7 @@ export interface ExtraWithdrawal {
 }
 
 /**
- * The Valuescan builder fee for this run - what VITE_BUILDER_* are for a build
+ * The ValueDesk builder fee for this run - what VITE_BUILDER_* are for a build
  * (docs/BUILDER-CODES.md, docs/BUILDER-TIERS.md).
  */
 export interface RunBuilder {

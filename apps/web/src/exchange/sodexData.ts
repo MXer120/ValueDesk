@@ -3,8 +3,8 @@
  * (alpha-biz.sodex.dev), read straight from the user's browser.
  *
  * The data host's paths, caches and answer rule are the server's
- * (valuescan/sodex/dataCore.ts); so is its politeness - one limiter, 4 in
- * flight and >= 80 ms apart (valuescan/sodex/util.ts Limiter). A rate limit
+ * (valuedesk/sodex/dataCore.ts); so is its politeness - one limiter, 4 in
+ * flight and >= 80 ms apart (valuedesk/sodex/util.ts Limiter). A rate limit
  * (or an unreadable failure, which is what Cloudflare's 1015 looks like from a
  * browser) opens a cooldown shared by every tab instead of being retried.
  */
@@ -17,8 +17,8 @@ import {
   dataHostReads,
   parseDataBody,
   type Priority,
-} from '@sign/valuescan/sodex/dataCore.js';
-import { Limiter, noteRateLimited } from '@sign/valuescan/sodex/util.js';
+} from '@sign/valuedesk/sodex/dataCore.js';
+import { Limiter, noteRateLimited } from '@sign/valuedesk/sodex/util.js';
 import { priceKlinesReader, type PriceKlineQuery } from '@sign/sodex/priceKlinesCore.js';
 import { RateLimitedError, UnreachableError, isAbort, isRateLimitError } from './errors';
 import { BIZ_ORIGIN, dataOrigin } from './hosts';

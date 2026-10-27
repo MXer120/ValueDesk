@@ -1,7 +1,7 @@
 /**
  * Per-IP budgets shared by every tab of this browser.
  *
- * An exchange limits requests per IP, and every tab of Valuescan a user has
+ * An exchange limits requests per IP, and every tab of ValueDesk a user has
  * open sends from the same IP. So a budget kept inside one tab would let two
  * tabs spend twice the allowance. The ledger lives in localStorage (one entry
  * per budget) and every read-modify-write runs under a Web Lock of the same

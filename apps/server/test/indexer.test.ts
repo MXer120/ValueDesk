@@ -308,7 +308,7 @@ test('boards: a top board holds only gains, a worst board only losses', () => {
 });
 
 test('Arcus closedPnl is stored gross: an opening fill is 0, a close adds its fee back', async () => {
-  const { grossPnl } = await import('../src/valuescan/extra/arcus.js');
+  const { grossPnl } = await import('../src/valuedesk/extra/arcus.js');
   assert.equal(grossPnl(-14.88, 14.88, 'OPEN_SHORT'), 0);
   assert.ok(Math.abs(grossPnl(0.07, 0.003, 'CLOSE_SHORT')! - 0.073) < 1e-12);
   assert.equal(grossPnl(null, 1, 'CLOSE_LONG'), null);

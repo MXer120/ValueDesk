@@ -221,7 +221,7 @@ the boards, the trade page's index reads all waited.
     `payloads.mjs --web=src`, which greps `apps/web/src` including the palette):
     - Explore rows carry what Explore shows: venue, address, account value,
       PnL 30d/7d/all, ROI 30d, volume 7d, nulls left out
-      (`valuescan/explore.ts` `wireRow`). Gone: `spark`, the other windows,
+      (`valuedesk/explore.ts` `wireRow`). Gone: `spark`, the other windows,
       `maxDrawdown`, `lastActive`, `accountId`, `winRate`, `trades`, `sharpe`,
       `tags`, `label`.
     - `label: null` leaves every index answer (`perf.ts` `omitNullLabels`, on
@@ -234,7 +234,7 @@ the boards, the trade page's index reads all waited.
     HTTP 200 `{ok:false}` is `no-store` with no ETag (it was cacheable for
     10 s: a cache would have gone on serving "unavailable").
 12. **The cohort load, out of the request path** (`indexer/read.ts`,
-    `indexer/store.ts`, `valuescan/cohorts/model.ts`): the wallets are read in
+    `indexer/store.ts`, `valuedesk/cohorts/model.ts`): the wallets are read in
     pages of 2,000 in key order and netted in 8 ms slices between other work;
     the next load is built behind the current one, 15 s before it expires,
     while the cohort pages are being asked for (5 min). Requests are answered

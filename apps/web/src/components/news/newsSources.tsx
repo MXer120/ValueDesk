@@ -1,6 +1,6 @@
 /**
  * The News widget's sources (owner, 2026-10-26): SoSoValue's feed, and beside it
- * the White House and Watcher.Guru (server valuescan/feeds.ts), each switched on
+ * the White House and Watcher.Guru (server valuedesk/feeds.ts), each switched on
  * or off in Settings - live in every open widget, kept in this browser.
  *
  * A story's source mark: its outlet's site icon (server /api/vs/logo, so the page

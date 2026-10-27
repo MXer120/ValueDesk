@@ -320,7 +320,7 @@ test('an open order the app did not place stops the step - it is the owner\'s, n
   const r = await run(CONFIG, { only: ['deposit-external', 'enable-trading', 'orders-perps'], setup: (w) => leftover(w, 'web-123') });
   const step = r.report.steps.find((s: { id: string }) => s.id === 'orders-perps');
   assert.notEqual(step?.status, 'ok');
-  assert.ok(r.lines.some((l) => /that Valuescan did not place \(web-123\)/.test(l)), r.lines.slice(-30).join('\n'));
+  assert.ok(r.lines.some((l) => /that ValueDesk did not place \(web-123\)/.test(l)), r.lines.slice(-30).join('\n'));
   assert.equal(r.w.orders.find((o) => o.clOrdID === 'web-123')!.status, 'NEW');
 });
 

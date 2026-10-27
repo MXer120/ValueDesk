@@ -8,14 +8,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   easternToUtc, mergeCalendar, parseCalendarQuery, parseFomc, parseIcs, parseSosoEvents, pickReleases, sosoIndicators, type CalendarEvent,
-} from '../src/valuescan/calendar.js';
+} from '../src/valuedesk/calendar.js';
 import {
   kalshiOutcome, marketProb, matchPolymarket, normalise, parseFedHistoryRange, parseKalshiEvents, parsePolymarket, polymarketKey, targetAfter, withTargets,
-} from '../src/valuescan/fedwatch.js';
-import { INDICATORS, indicatorView, parseFredCsv, parseIndicatorRange, periodLabel, transform } from '../src/valuescan/indicators.js';
+} from '../src/valuedesk/fedwatch.js';
+import { INDICATORS, indicatorView, parseFredCsv, parseIndicatorRange, periodLabel, transform } from '../src/valuedesk/indicators.js';
 import {
   decodePage, easternDay, firstSentence, htmlText, parseBrightcoveVideo, parseFedLivePage, parseMasterPlaylist, resultUrl,
-} from '../src/valuescan/releases.js';
+} from '../src/valuedesk/releases.js';
 
 const iso = (t: number) => new Date(t).toISOString();
 

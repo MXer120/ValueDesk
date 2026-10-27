@@ -9,12 +9,12 @@
  * Either way it owns the only writing connection to the index file and
  * publishes its status to the file's `meta` table every 30 s.
  */
-import type { BoardWindow, Venue } from '../valuescan/types.js';
+import type { BoardWindow, Venue } from '../valuedesk/types.js';
 import { isMainThread, parentPort } from 'node:worker_threads';
-import { noteRateLimited, cooldownLeftMs } from '../valuescan/sodex/util.js';
-import { envOf } from '../valuescan/env.js';
-import { hlInfo } from '../valuescan/hyperliquid/client.js';
-import { hlWeightPerMin, type HlInfoClient } from '../valuescan/hyperliquid/info.js';
+import { noteRateLimited, cooldownLeftMs } from '../valuedesk/sodex/util.js';
+import { envOf } from '../valuedesk/env.js';
+import { hlInfo } from '../valuedesk/hyperliquid/client.js';
+import { hlWeightPerMin, type HlInfoClient } from '../valuedesk/hyperliquid/info.js';
 import { Indexer } from './engine.js';
 import { IndexStore, defaultDbPath } from './store.js';
 

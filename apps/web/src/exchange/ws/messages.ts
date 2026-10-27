@@ -3,7 +3,7 @@
  *
  * The host (a SharedWorker, or the elected leader tab, or the tab itself)
  * holds the actual SoDEX connections. A tab sends it subscribe / unsubscribe;
- * the host answers with pushes in exactly the shape the old Valuescan hub sent
+ * the host answers with pushes in exactly the shape the old ValueDesk hub sent
  * over /ws, so ws.ts's fan-out is unchanged:
  *   {type:"push",   engine, channel, pushType:"snapshot"|"update", data, user?}
  *   {type:"status", engine, status}

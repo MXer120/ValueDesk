@@ -7,8 +7,8 @@
 //
 // WHY. A hosted API process is not a pure reader of the index file: Explore, the
 // whale tape, positioning, the screener and the podium curves read the venues
-// from the API process itself (apps/server/src/valuescan/*). On a machine that
-// already runs a Valuescan server, a second one would double that traffic from
+// from the API process itself (apps/server/src/valuedesk/*). On a machine that
+// already runs a ValueDesk server, a second one would double that traffic from
 // the same address - SoDEX's positioning crawl alone is about 1,000 of the
 // address's 1,200 weight a minute.
 //

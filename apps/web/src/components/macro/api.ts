@@ -1,5 +1,5 @@
 /**
- * The macro widgets' reads (server valuescan/fedwatch.ts, indicators.ts,
+ * The macro widgets' reads (server valuedesk/fedwatch.ts, indicators.ts,
  * sosovalue/etf.ts): the FOMC's rate odds from Kalshi (Polymarket beside it),
  * an indicator's history from FRED, and the US spot ETFs' flows from SoSoValue.
  */

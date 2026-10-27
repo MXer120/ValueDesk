@@ -1,5 +1,5 @@
 /**
- * SoDEX provider mappers (src/valuescan/sodex/mappers.ts, util.ts, resolver.ts).
+ * SoDEX provider mappers (src/valuedesk/sodex/mappers.ts, util.ts, resolver.ts).
  *
  * DELIBERATELY OFFLINE, like the rest of this suite: the SoDEX budget is shared
  * with the running app. Fixtures are verbatim (trimmed) mainnet responses
@@ -39,9 +39,9 @@ import {
   type PortfolioChart,
   type StatePosition,
   type WsPrint,
-} from '../src/valuescan/sodex/mappers.js';
-import { Limiter, TtlCache, isRateLimit, within } from '../src/valuescan/sodex/util.js';
-import { parseBulk } from '../src/valuescan/sodex/resolver.js';
+} from '../src/valuedesk/sodex/mappers.js';
+import { Limiter, TtlCache, isRateLimit, within } from '../src/valuedesk/sodex/util.js';
+import { parseBulk } from '../src/valuedesk/sodex/resolver.js';
 
 // --- fixtures ----------------------------------------------------------------
 
@@ -160,7 +160,7 @@ test('matchesQuery: address prefix with or without 0x and account id; never a na
   assert.ok(matchesQuery(r, '220959'));
   assert.ok(!matchesQuery(r, '22095'));
   assert.ok(!matchesQuery(r, '0xabc'));
-  assert.ok(!matchesQuery({ ...r, label: 'Big Fish' }, 'fish'), 'no username is searched (valuescan/labels.ts)');
+  assert.ok(!matchesQuery({ ...r, label: 'Big Fish' }, 'fish'), 'no username is searched (valuedesk/labels.ts)');
   // Digits may also be the start of an address.
   const digits = { ...r, address: '0x1234567890abcdef1234567890abcdef12345678' };
   assert.ok(matchesQuery(digits, '1234'));

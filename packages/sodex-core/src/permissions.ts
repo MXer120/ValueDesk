@@ -27,7 +27,7 @@
  * "trade-only session key". Per the docs, mask 3 is the opposite: TRADE and
  * CANCEL disabled, WITHDRAW and TRANSFER enabled. Nothing here ports that.
  *
- * Consequence for Valuescan: the browser trading key is an ORDINARY key (no
+ * Consequence for ValueDesk: the browser trading key is an ORDINARY key (no
  * `permissions`, optionally registered with a builder). Per SoDEX docs -
  * unverified by us - such a key can trade AND move funds between the owner's
  * own spot engine, perps engine and the owner's own EVM wallet. See
@@ -131,7 +131,7 @@ export interface KeyScope {
 }
 
 /**
- * The wording the UI must show for an ORDINARY key (the Valuescan browser key).
+ * The wording the UI must show for an ORDINARY key (the ValueDesk browser key).
  * Keep "per SoDEX docs, unverified" - it is both.
  */
 export const ORDINARY_KEY_SCOPE =

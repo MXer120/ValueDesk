@@ -277,7 +277,7 @@ export async function runStageC(ctx: Ctx, deps: CDeps = realCDeps(ctx)): Promise
   if (args.noTiers) {
     items.push({ id: 'tiers', title: 'fee tiers set up', status: 'SKIPPED', detail: 'switched off with --no-tiers' });
   } else {
-    say('FEE TIERS. The fee can follow how much a wallet has traded through Valuescan. For the test the server gets two tiers: 2 bp on perps to start with, and 1.5 bp once more than 10 USDC of volume is verified - so the run can prove that the fee changes, and that it cannot be gamed.');
+    say('FEE TIERS. The fee can follow how much a wallet has traded through ValueDesk. For the test the server gets two tiers: 2 bp on perps to start with, and 1.5 bp once more than 10 USDC of volume is verified - so the run can prove that the fee changes, and that it cannot be gamed.');
     say('Setting this up writes two files into the server\'s data folder on this computer (the tier list and a signing key for it), if they are not there yet. The running server picks them up by itself; nothing is restarted.');
     if (await confirm(ctx.ask, 'Set up the test fee tiers now?', true)) tiers = await setupTiers(ctx, deps, builderId, address, items);
     else items.push({ id: 'tiers', title: 'fee tiers set up', status: 'SKIPPED', detail: 'not set up - you answered no' });
@@ -341,7 +341,7 @@ export async function runStageC(ctx: Ctx, deps: CDeps = realCDeps(ctx)): Promise
   out.line();
   const withTermsKey = lines.some((l) => l.startsWith('VITE_BUILDER_TERMS_KEYS='));
   say(`The live run does not need them: it takes the builder from the run config. The first three switch the fee on; MAX_FEE is the ceiling a user approves${withTermsKey ? '; TERMS_KEYS lets the app check the server\'s signed fee (without it the app ignores a lower fee and charges the default)' : '. (No TERMS_KEYS line: the fee tiers were not set up in this run, so the app always charges the fee above.)'}`);
-  say('The guide can add the lines that are missing. It never changes a line that is already there. Saving that file makes the web dev server reload by itself, and every open Valuescan tab reloads with it.');
+  say('The guide can add the lines that are missing. It never changes a line that is already there. Saving that file makes the web dev server reload by itself, and every open ValueDesk tab reloads with it.');
   // The default is NO, so `--yes` (which only ever takes defaults) never writes that file.
   if (await confirm(ctx.ask, 'Add the missing lines to .env.local now?', false)) {
     const text = deps.env.read() ?? '';

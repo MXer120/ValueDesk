@@ -5,8 +5,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { CHANNELS, embedUrl, parseStream, readChoice, streamOf } from './model';
 
-test('the server looks up exactly these channels (apps/server/src/valuescan/youtube/live.ts LIVE_CHANNELS)', () => {
-  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../server/src/valuescan/youtube/live.ts'), 'utf8');
+test('the server looks up exactly these channels (apps/server/src/valuedesk/youtube/live.ts LIVE_CHANNELS)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../../../server/src/valuedesk/youtube/live.ts'), 'utf8');
   const list = /export const LIVE_CHANNELS[^=]*= new Set\(\[([\s\S]*?)\]\)/.exec(src)?.[1] ?? '';
   const server = [...list.matchAll(/'(UC[A-Za-z0-9_-]{22})'/g)].map((m) => m[1]).sort();
   assert.deepEqual(server, CHANNELS.map((c) => c.youtube).sort());

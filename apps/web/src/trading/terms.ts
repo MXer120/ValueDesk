@@ -3,7 +3,7 @@
  * (docs/BUILDER-TIERS.md sections 2, 3 and 7).
  *
  * THE RULE. The fee an order carries is the build's default fee
- * (VITE_BUILDER_FEE_*, config.ts) unless Valuescan's own server has signed, for
+ * (VITE_BUILDER_FEE_*, config.ts) unless ValueDesk's own server has signed, for
  * THIS wallet, THIS request and a short time, that it is lower. `feeNow` is
  * that number and nothing else feeds it: no storage key, no URL parameter, no
  * debug hook, no unsigned field of the answer. Whatever goes wrong - the
@@ -28,7 +28,7 @@
  * builder, and a browser whose WebCrypto has no Ed25519 never ask for terms:
  * every order carries the default fee.
  *
- * The request goes to Valuescan's own API (the origin the app is served from),
+ * The request goes to ValueDesk's own API (the origin the app is served from),
  * never to SoDEX. The live runner uses this same module from Node
  * (`configureTerms` with its own endpoint and fetch).
  */

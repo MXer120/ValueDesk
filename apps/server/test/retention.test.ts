@@ -15,10 +15,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { IndexStore, MIN_ROW_T, RETAIN_DAYS_DEFAULT, RETAIN_DAYS_MIN, retainDays, settledDays, type CloseRow, type FillRow } from '../src/indexer/store.js';
 import { INDEX_WINDOWS, windowStart } from '../src/indexer/windows.js';
-import { winRateOf } from '../src/valuescan/winRate.js';
+import { winRateOf } from '../src/valuedesk/winRate.js';
 import { Lane } from '../src/indexer/lanes.js';
 import { fixFillTimes } from '../src/indexer/ext/arcus.js';
-import type { Venue } from '../src/valuescan/types.js';
+import type { Venue } from '../src/valuedesk/types.js';
 
 const DAY = 86_400_000;
 /** "Now" for every test: mid-day and mid-year, so rolling windows start inside a day and `ytd` starts 165 days back. */

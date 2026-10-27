@@ -16,7 +16,7 @@ import {
   sosoIndicators,
   pickReleases,
   resetCalendar,
-} from '../src/valuescan/calendar.js';
+} from '../src/valuedesk/calendar.js';
 
 const meeting = (month: string, date: string) =>
   `<div class="row fomc-meeting"><div class="fomc-meeting__month col-xs-5"><strong>${month}</strong></div>

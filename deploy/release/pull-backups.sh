@@ -10,6 +10,7 @@
 #   deploy/release/pull-backups.sh --fetch-keys        ONCE: copy both servers' backup keys to <dest>/keys (0600;
 #                                                      never printed). Without them nothing here can be opened.
 #   ... --dest=<dir>                                   default: ~/ValueDesk-backups
+#   ... --no-pull                                      with --fetch-keys: the keys only, no copies (rotate.sh backup-key)
 #
 # THE BANDWIDTH CAP of this laptop (20 Mbit/s down): every copy comes with `scp -l 16000`
 # (16 Mbit/s). api-state, executor and a day of journal are a few MB. The index (~4.6 GB,
@@ -36,7 +37,7 @@ SSH_KEY="${SSH_KEY_FILE:-$HOME/.ssh/valuescan-contabo}"
 SSH_USER="${SSH_USER:-almalinux}"
 DEST="${PULL_DEST:-$HOME/ValueDesk-backups}"
 SETS="api-state,executor"
-ALL_NEW=0 VERIFY=0 FETCH_KEYS=0 BIG_OK=0
+ALL_NEW=0 VERIFY=0 FETCH_KEYS=0 BIG_OK=0 NO_PULL=0
 
 die() { echo "pull-backups: $*" >&2; exit 1; }
 say() { echo "pull-backups: $*" >&2; }
@@ -48,8 +49,9 @@ for a in "$@"; do
     --verify) VERIFY=1 ;;
     --fetch-keys) FETCH_KEYS=1 ;;
     --big-ok) BIG_OK=1 ;;
+    --no-pull) NO_PULL=1 ;;
     --dest=*) DEST="${a#--dest=}" ;;
-    -h|--help) sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument $a (--help)" ;;
   esac
 done
@@ -81,6 +83,7 @@ if [ "$FETCH_KEYS" = 1 ]; then
   done
 fi
 
+[ "$NO_PULL" = 1 ] && { say "done: keys only (--no-pull)"; exit 0; }
 IFS=',' read -r -a want <<< "$SETS"
 for s in "${want[@]}"; do
   case "$s" in

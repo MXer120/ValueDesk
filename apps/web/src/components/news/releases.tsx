@@ -1,5 +1,5 @@
 /**
- * Official results of the calendar's releases (server valuescan/releases.ts):
+ * Official results of the calendar's releases (server valuedesk/releases.ts):
  * the FOMC's decision, CPI, the jobs report, PPI, GDP, PCE, JOLTS and the ECI,
  * read from the Fed's, BLS's and BEA's own pages the second they go up.
  *
@@ -16,7 +16,7 @@
  *                      first sentence and its official page.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReleaseResult, ReleaseResultField } from '@sign/valuescan/releases.js';
+import type { ReleaseResult, ReleaseResultField } from '@sign/valuedesk/releases.js';
 import type { CalendarEvent } from '../../vsApi';
 import { notify } from '../../toast';
 import { useAsync, useStored } from '../../hooks';

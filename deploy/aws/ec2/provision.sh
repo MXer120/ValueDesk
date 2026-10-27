@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The EC2 test environment of Valuescan - ONE instance, defined once, here.
+# The EC2 test environment of ValueDesk - ONE instance, defined once, here.
 #
 #   deploy/aws/ec2/provision.sh up [--print]   create what is missing; --print: show the plan, change nothing
 #   deploy/aws/ec2/provision.sh status         what exists (found by tag), the instance state, the origin name

@@ -26,7 +26,7 @@
  * the highest fee and the approval ceiling are fixed in the bundle the user
  * loads. The server can do one thing only: LOWER a wallet's fee below the two
  * fees here, with a statement signed by a key pinned here (trading/terms.ts).
- *   VITE_BUILDER_ID             Valuescan's SoDEX builder account id; unset =
+ *   VITE_BUILDER_ID             ValueDesk's SoDEX builder account id; unset =
  *                               no builder fee is approved or charged
  *   VITE_BUILDER_FEE_PERPS      the DEFAULT (highest) fee per perps order,
  *                               tenths of a bp (0..200)
@@ -35,7 +35,7 @@
  *                               sells only)
  *   VITE_BUILDER_MAX_FEE        the ceiling the user approves, tenths of a bp
  *                               (0..2000); default: the higher of the two fees
- *   VITE_BUILDER_REQUIRED       unset or '1' - trading through Valuescan
+ *   VITE_BUILDER_REQUIRED       unset or '1' - trading through ValueDesk
  *                               REQUIRES the approval: an order goes out with
  *                               the builder or not at all. '0' - the fee is
  *                               optional and a user who declines trades without
@@ -62,7 +62,7 @@ import {
 import { logger } from '../log';
 
 export interface BuilderConfig {
-  /** Valuescan's SoDEX builder account id. */
+  /** ValueDesk's SoDEX builder account id. */
   id: number;
   /** Charged per order, tenths of a basis point. 0 = nothing is attached on that engine. */
   fee: { perps: number; spot: number };
@@ -70,7 +70,7 @@ export interface BuilderConfig {
   maxFeeRate: number;
   /**
    * true (the default for a build that names a builder): trading through
-   * Valuescan requires the approval - an order goes out with the builder or
+   * ValueDesk requires the approval - an order goes out with the builder or
    * not at all. false (VITE_BUILDER_REQUIRED=0, test builds): optional - a
    * user who declines trades without a builder fee.
    */

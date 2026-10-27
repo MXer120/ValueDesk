@@ -69,7 +69,7 @@ export interface TraderDeps {
   info: InfoLike;
   /**
    * The server passes its HlLeaderboardStore. The browser passes a source that
-   * reads just this address's row from the Valuescan index, since the file
+   * reads just this address's row from the ValueDesk index, since the file
    * behind the store is 39 MB.
    */
   leaderboard: {

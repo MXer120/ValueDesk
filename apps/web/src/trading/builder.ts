@@ -1,5 +1,5 @@
 /**
- * The Valuescan builder fee, as numbers and decisions - pure, no network, no
+ * The ValueDesk builder fee, as numbers and decisions - pure, no network, no
  * wallet (builderApproval.ts talks to SoDEX; session.ts runs the flow).
  *
  * A "builder" is a SoDEX trading account that receives a fee on the fills of
@@ -35,7 +35,7 @@ import type { BuilderConfig } from './config';
 const ENGINES: readonly Engine[] = ['spot', 'perps'];
 
 /**
- * What this browser knows SoDEX has approved for the Valuescan builder, kept
+ * What this browser knows SoDEX has approved for the ValueDesk builder, kept
  * with the trading key (vault.ts). The approval belongs to the ACCOUNT, not the
  * key: it survives key rotation, and it is re-read whenever a key is restored.
  */
@@ -141,7 +141,7 @@ export interface BuilderTerms {
   spot: number;
   /** The ceiling the wallet is asked to approve, tenths of a bp. */
   maxFeeRate: number;
-  /** Trading through Valuescan requires the approval. */
+  /** Trading through ValueDesk requires the approval. */
   required: boolean;
   /** Engines on which SoDEX already lists a covering approval (a partial one). */
   alreadyApproved: Engine[];

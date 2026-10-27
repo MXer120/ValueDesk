@@ -2,7 +2,7 @@
  * The News widget's Calendar (NewsFeed.tsx): what is scheduled to move markets
  * - the FOMC's decisions, CPI, the jobs report, GDP, PCE, PPI, JOLTS - from the
  * Federal Reserve, BLS and BEA themselves, with SoSoValue's macro calendar for
- * the rest (server valuescan/calendar.ts).
+ * the rest (server valuedesk/calendar.ts).
  *
  * By day in the viewer's time, from three days back to six weeks ahead; the
  * next release says how long until it. Each opens its card (releases.tsx): the

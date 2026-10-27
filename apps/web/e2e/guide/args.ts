@@ -56,12 +56,12 @@ export const ALL_STAGES: readonly StageId[] = ['A', 'B', 'C', 'D'];
 
 export const DEFAULT_BACKEND = 'http://127.0.0.1:5180';
 /** Not a real site: any origin that is not localhost shows whether a host lets a deployed site call it. */
-export const DEFAULT_SITE_ORIGIN = 'https://valuescan.example';
+export const DEFAULT_SITE_ORIGIN = 'https://valuedesk.example';
 
 /** Ports that belong to another project on this machine: the guide never talks to them. */
 export const FORBIDDEN_PORTS: readonly number[] = [5173, 8787];
 
-export const USAGE = `Valuescan guided test run
+export const USAGE = `ValueDesk guided test run
 
   RUN-LIVE-TESTS.cmd                 the full guided run: stages A, B, C, D and the summary
   RUN-LIVE-TESTS.cmd --stages A,B    only these stages
@@ -278,7 +278,7 @@ export function parseArgs(argv: readonly string[]): ParseResult {
       case '--site-origin': {
         const v = value();
         const o = v === null ? null : normaliseOrigin(v);
-        if (!o) return fail('--site-origin needs an origin like https://valuescan.example');
+        if (!o) return fail('--site-origin needs an origin like https://valuedesk.example');
         a.siteOrigin = o;
         break;
       }

@@ -1,4 +1,4 @@
-# Valuescan copy trading contract. Local build and test only: NOTHING is deployed or broadcast from this project
+# ValueDesk copy trading contract. Local build and test only: NOTHING is deployed or broadcast from this project
 # without the owner's explicit go. Do not add rpc_endpoints with keys, and never pass --broadcast.
 
 [profile.default]

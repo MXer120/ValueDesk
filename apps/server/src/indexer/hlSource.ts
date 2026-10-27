@@ -13,11 +13,11 @@
  * capped, so its trade count reads as "at least".
  */
 import { mark } from './busy.js';
-import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
-import { hlInfo } from '../valuescan/hyperliquid/index.js';
-import { equitySeries, portfolioWindow } from '../valuescan/hyperliquid/mappers.js';
-import type { HlFillRaw, HlPortfolio } from '../valuescan/hyperliquid/raw.js';
-import type { Window } from '../valuescan/types.js';
+import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
+import { hlInfo } from '../valuedesk/hyperliquid/index.js';
+import { equitySeries, portfolioWindow } from '../valuedesk/hyperliquid/mappers.js';
+import type { HlFillRaw, HlPortfolio } from '../valuedesk/hyperliquid/raw.js';
+import type { Window } from '../valuedesk/types.js';
 import type { Candidate } from './boards.js';
 import type { FillRow, IndexStore } from './store.js';
 import type { Side } from './windows.js';

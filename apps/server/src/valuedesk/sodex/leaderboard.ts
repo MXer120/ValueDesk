@@ -1,6 +1,6 @@
 /**
  * SoDEX's official leaderboard (mainnet-data.sodex.dev, ~134k ranked wallets,
- * hourly snapshot) as Valuescan TraderRows.
+ * hourly snapshot) as ValueDesk TraderRows.
  *
  * What the venue ranks by: PnL and volume, per window (24H / 7D / 30D /
  * ALL_TIME). Those two sorts are served page for page from upstream.

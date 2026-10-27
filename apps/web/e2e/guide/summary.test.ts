@@ -59,7 +59,7 @@ test('stages A and B only: one line says the live run was not part of it; every 
   assert.match(screen, /3\. WHAT TO DO NEXT\n {3}1\. Not part of this run: stage C, D\./);
   assert.ok(!/WHERE EVERY COIN IS/.test(screen), 'no funds section for a run that could not move any');
   assert.ok(/^[\x20-\x7E\n]*$/.test(`${screen}\n${s.markdown}`), 'ASCII only');
-  assert.match(s.markdown, /^# Valuescan guided test run - PASS\n/);
+  assert.match(s.markdown, /^# ValueDesk guided test run - PASS\n/);
   assert.match(s.markdown, /\| SKIPPED \| contracts-forge \| 1\.2 s \| - \| forge is not installed \|/);
   assert.equal(s.json.result, 'PASS');
   assert.equal((s.json.stages as unknown[]).length, 2);

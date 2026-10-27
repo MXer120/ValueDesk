@@ -163,20 +163,20 @@ test('audit SEC-03: a NonceUsed for the same nonce is NOT proof that OUR stop la
   assert.throws(() => randomNonce(() => new Uint8Array(31)), RelayError);
 });
 
-test('relayer spam policy: only keys Valuescan issued for this follower and account are relayed', () => {
+test('relayer spam policy: only keys ValueDesk issued for this follower and account are relayed', () => {
   const issued = new Map([[validTerms().delegatedKey.toLowerCase(), { follower: F.toLowerCase(), account: 224_678n }]]);
-  const isValuescanKey = (key: string, follower: string, account: bigint | undefined) => {
+  const isValuedeskKey = (key: string, follower: string, account: bigint | undefined) => {
     const i = issued.get(key.toLowerCase());
     return !!i && i.follower === follower.toLowerCase() && (account === undefined || i.account === account);
   };
   const sub = actions[0]!;
-  assert.deepEqual(buildRelayTransaction(signed(sub), { contract: PROXY, now: NOW, isValuescanKey }).problems, []);
+  assert.deepEqual(buildRelayTransaction(signed(sub), { contract: PROXY, now: NOW, isValuedeskKey }).problems, []);
   const foreign = { ...sub, sodexAccountId: 1n } as CopyTradingAction;
-  assert.match(buildRelayTransaction(signed(foreign), { contract: PROXY, now: NOW, isValuescanKey }).problems[0]!, /not issued by Valuescan/);
+  assert.match(buildRelayTransaction(signed(foreign), { contract: PROXY, now: NOW, isValuedeskKey }).problems[0]!, /not issued by ValueDesk/);
   const upd = actions[1]!;
-  assert.deepEqual(buildRelayTransaction(signed(upd), { contract: PROXY, now: NOW, isValuescanKey, subscriptionAccount: 224_678n }).problems, []);
-  assert.match(buildRelayTransaction(signed(upd), { contract: PROXY, now: NOW, isValuescanKey, subscriptionAccount: 9n }).problems[0]!, /not issued/);
-  assert.deepEqual(buildRelayTransaction(signed(actions[4]!), { contract: PROXY, now: NOW, isValuescanKey: () => false }).problems, [], 'stops are always relayed');
+  assert.deepEqual(buildRelayTransaction(signed(upd), { contract: PROXY, now: NOW, isValuedeskKey, subscriptionAccount: 224_678n }).problems, []);
+  assert.match(buildRelayTransaction(signed(upd), { contract: PROXY, now: NOW, isValuedeskKey, subscriptionAccount: 9n }).problems[0]!, /not issued/);
+  assert.deepEqual(buildRelayTransaction(signed(actions[4]!), { contract: PROXY, now: NOW, isValuedeskKey: () => false }).problems, [], 'stops are always relayed');
 });
 
 test('classifyRevert maps every contract error a relayer can meet', () => {

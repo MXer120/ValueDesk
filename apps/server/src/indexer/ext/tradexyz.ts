@@ -26,10 +26,10 @@
  * for the longer windows. A held range the stream keeps moving up (to_t) does
  * not count as fresher: `rest_at` does.
  */
-import type { BoardWindow } from '../../valuescan/types.js';
+import type { BoardWindow } from '../../valuedesk/types.js';
 import { spanCovers } from '../boards.js';
 import { hlSyncFills } from '../hlSource.js';
-import { hlInfo } from '../../valuescan/hyperliquid/index.js';
+import { hlInfo } from '../../valuedesk/hyperliquid/index.js';
 import { Lane } from '../lanes.js';
 import { dayOf, hourOf, INDEX_WINDOWS, windowStart } from '../windows.js';
 import type { ExtContext, ExtVenue } from './types.js';

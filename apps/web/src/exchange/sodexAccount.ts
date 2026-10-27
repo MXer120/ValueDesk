@@ -1,10 +1,10 @@
 /**
  * SoDEX account reads, straight from the gateway - in exactly the shapes the
- * Valuescan server's /api/acct/* routes answered.
+ * ValueDesk server's /api/acct/* routes answered.
  *
  * All public and unauthenticated upstream (any wallet's state is readable by
  * anyone), so nothing about the connected wallet or a scanned one passes
- * through Valuescan any more, and each user spends their own IP's budget.
+ * through ValueDesk any more, and each user spends their own IP's budget.
  *
  * History pages keep the server's two protections: a few seconds of sharing
  * between panels (sodexGateway.ts HISTORY_TTL_MS), and - when SoDEX refuses or

@@ -49,7 +49,7 @@ export function parseHostedRoutes(source: string): RouteDef[] {
   return out;
 }
 
-/** The venues with a leaderboard (apps/server/src/valuescan/types.ts VENUES), from its text; else the five of 2026-10-02. */
+/** The venues with a leaderboard (apps/server/src/valuedesk/types.ts VENUES), from its text; else the five of 2026-10-02. */
 export function parseVenues(typesSource: string | null): string[] {
   const m = typesSource ? /export const VENUES[^=]*=\s*\[([^\]]*)\]/.exec(typesSource) : null;
   const list = m ? [...m[1]!.matchAll(/'([a-z0-9]+)'/g)].map((x) => x[1]!) : [];

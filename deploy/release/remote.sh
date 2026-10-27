@@ -133,4 +133,4 @@ esac
 [ "$WHAT" = restore ] || [ "$YES" = 0 ] || die "--yes belongs to restore"
 
 load_params
-remote_run "valuescan $WHAT" "$command"
+remote_run "valuedesk $WHAT" "$command"

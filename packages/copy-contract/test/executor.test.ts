@@ -73,7 +73,7 @@ test('engineInScope and symbolAllowed', () => {
   assert.equal(symbolAllowed(sub(SymbolMode.DENY, ['BTC-USD']), 'ETH-USD'), true);
 });
 
-/** The key store: KEY is the one key Valuescan issued (for FOLLOWER, account 1). */
+/** The key store: KEY is the one key ValueDesk issued (for FOLLOWER, account 1). */
 const issued = new Map<string, KeyIssuance>([[KEY.toLowerCase(), { delegatedKey: KEY, follower: FOLLOWER, sodexAccountId: 1n }]]);
 const issuanceOf = (key: Address): KeyIssuance | undefined => issued.get(key.toLowerCase());
 
@@ -86,7 +86,7 @@ test('gateSignal: every skip reason, and reduce-only while paused', () => {
     return d.go ? 'go' : d.skipReason;
   };
   assert.equal(skip({}, 9n), SkipReason.NOT_COPYABLE);
-  assert.equal(skip({ leaderOrderSigner: KEY }), SkipReason.COPY_OF_COPY, 'a fill from a Valuescan delegated key is a copy');
+  assert.equal(skip({ leaderOrderSigner: KEY }), SkipReason.COPY_OF_COPY, 'a fill from a ValueDesk delegated key is a copy');
   assert.equal(skip({ nowMs: NOW * 1000 + 2_001 }), SkipReason.STALE_SIGNAL);
   assert.equal(skip({ sodexSymbol: null as never }), SkipReason.UNMAPPED_SYMBOL);
   assert.equal(skip({ engine: 'spot' as never }), SkipReason.OUT_OF_SCOPE);
@@ -104,17 +104,17 @@ test('gateSignal: naming a leader\'s own signer as a delegated key does not sile
   const idx = indexWith(validTerms({ symbols: ['BTC-USD'], delegatedKey: LEADER }));
   assert.equal(idx.isDelegatedKey(LEADER), true, 'the planted flag is in the index');
   const base = { sodexSymbol: 'BTC-USD', engine: 'perps' as const, signalTimeMs: NOW * 1000, nowMs: NOW * 1000 + 100 };
-  // The leader's fills - opens AND closes - are still copied: Valuescan never issued that key.
+  // The leader's fills - opens AND closes - are still copied: ValueDesk never issued that key.
   for (const increases of [true, false]) {
     const d = gateSignal(idx, 1n, { ...base, increases, leaderOrderSigner: LEADER }, issuanceOf);
     assert.equal(d.go, true, `increases=${increases}`);
   }
-  // A fill signed by a key Valuescan did issue is still recognised as a copy.
+  // A fill signed by a key ValueDesk did issue is still recognised as a copy.
   const d = gateSignal(idx, 1n, { ...base, increases: true, leaderOrderSigner: KEY }, issuanceOf);
   assert.equal(d.go ? 'go' : d.skipReason, SkipReason.COPY_OF_COPY);
 });
 
-test('isServiceable: only keys Valuescan issued for exactly this follower and account (spam costs nothing)', () => {
+test('isServiceable: only keys ValueDesk issued for exactly this follower and account (spam costs nothing)', () => {
   const issuance = new Map<string, KeyIssuance>([[KEY.toLowerCase(), { delegatedKey: KEY, follower: FOLLOWER, sodexAccountId: 1n }]]);
   const lookup = (k: Address) => issuance.get(k.toLowerCase());
   const rec = { delegatedKey: KEY, follower: FOLLOWER, sodexAccountId: 1n };

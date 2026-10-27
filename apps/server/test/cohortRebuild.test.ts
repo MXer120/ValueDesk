@@ -15,9 +15,9 @@ import {
 } from '../src/indexer/cohortRebuild.js';
 import { IndexStore } from '../src/indexer/store.js';
 import { hlFundingRows } from '../src/indexer/cohortSource.js';
-import { hlInfo } from '../src/valuescan/hyperliquid/index.js';
+import { hlInfo } from '../src/valuedesk/hyperliquid/index.js';
 import { allScopes } from '../src/indexer/cohortTracker.js';
-import { scopeKey } from '../src/valuescan/cohorts/model.js';
+import { scopeKey } from '../src/valuedesk/cohorts/model.js';
 
 const H = HOUR_MS;
 const Q = 15 * 60_000;

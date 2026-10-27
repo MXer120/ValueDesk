@@ -41,7 +41,7 @@ import {
   ttlFor,
   weightFor,
 } from '@sign/sodex/restCore.js';
-import { noteRateLimited } from '@sign/valuescan/sodex/util.js';
+import { noteRateLimited } from '@sign/valuedesk/sodex/util.js';
 import { RateLimitedError, UnreachableError, isAbort, isRateLimitError } from './errors';
 import { RequestGate } from './gate';
 import { gatewayOrigin } from './hosts';

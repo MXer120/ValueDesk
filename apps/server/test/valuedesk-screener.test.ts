@@ -26,11 +26,11 @@ import {
   toScreenerRow,
   type Enrichment,
   type ScreenerRow,
-} from '../src/valuescan/screener/model.js';
-import { Enricher, isRateLimited } from '../src/valuescan/screener/enrich.js';
-import { POOL_STALE_MAX_MS, POOL_TTL_MS, PoolCache, harvestPool, type VenuePool } from '../src/valuescan/screener/pool.js';
-import { mapAssetCtxs } from '../src/valuescan/screener/assets.js';
-import { assemble, enrichTargets } from '../src/valuescan/screener.js';
+} from '../src/valuedesk/screener/model.js';
+import { Enricher, isRateLimited } from '../src/valuedesk/screener/enrich.js';
+import { POOL_STALE_MAX_MS, POOL_TTL_MS, PoolCache, harvestPool, type VenuePool } from '../src/valuedesk/screener/pool.js';
+import { mapAssetCtxs } from '../src/valuedesk/screener/assets.js';
+import { assemble, enrichTargets } from '../src/valuedesk/screener.js';
 import {
   NotAvailable,
   type LeaderboardQuery,
@@ -38,7 +38,7 @@ import {
   type TraderRow,
   type Venue,
   type VenueProvider,
-} from '../src/valuescan/types.js';
+} from '../src/valuedesk/types.js';
 
 const NOW = Date.UTC(2026, 8, 25, 12, 0, 0);
 const H = 3_600_000;
@@ -275,7 +275,7 @@ test('matchesText: address prefix with or without 0x and account id; never a nam
   assert.equal(matchesText(r, '0xabcd'), true);
   assert.equal(matchesText(r, 'abcd'), true);
   assert.equal(matchesText(r, 'bcd'), false);
-  assert.equal(matchesText(r, 'fish'), false, 'no username is searched (valuescan/labels.ts)');
+  assert.equal(matchesText(r, 'fish'), false, 'no username is searched (valuedesk/labels.ts)');
   assert.equal(matchesText(r, '1225'), true);
   assert.equal(matchesText(r, '122'), false);
   assert.equal(matchesText(r, ''), true);

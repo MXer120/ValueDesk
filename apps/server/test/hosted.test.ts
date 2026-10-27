@@ -44,7 +44,7 @@ import {
   type HostedRoute,
 } from '../src/hosted.js';
 
-const SITE = 'https://app.valuescan.example';
+const SITE = 'https://app.valuedesk.example';
 const SRC = fileURLToPath(new URL('../src/', import.meta.url));
 /**
  * No state-changing route is listed today (the SoPoints relay is unused). The
@@ -174,8 +174,8 @@ test('trust proxy: never "everyone"; a hop count or the proxy addresses', () => 
 });
 
 test('site origins: normalised to exact origins, anything else refused', () => {
-  assert.deepEqual(siteOriginsFrom(['https://App.Valuescan.Example', 'https://x.example:8443/']), ['https://app.valuescan.example', 'https://x.example:8443']);
-  for (const bad of ['app.valuescan.example', 'https://app.example/path', 'javascript:alert(1)', 'https://u:p@app.example', 'https://app.example/?a=1']) {
+  assert.deepEqual(siteOriginsFrom(['https://App.ValueDesk.Example', 'https://x.example:8443/']), ['https://app.valuedesk.example', 'https://x.example:8443']);
+  for (const bad of ['app.valuedesk.example', 'https://app.example/path', 'javascript:alert(1)', 'https://u:p@app.example', 'https://app.example/?a=1']) {
     assert.throws(() => siteOriginsFrom([bad]), /origin/, bad);
   }
 });
@@ -227,7 +227,7 @@ test('the on-instance list is the indexer health and nothing else, and is not pu
     assert.ok(hostedRoute(r.method, r.url, ON_INSTANCE_ROUTES));
   }
   // The route hands out the projection, never the indexer's status itself.
-  const src = readFileSync(join(SRC, 'routes', 'valuescan.ts'), 'utf8');
+  const src = readFileSync(join(SRC, 'routes', 'valuedesk.ts'), 'utf8');
   const handlers = [...src.matchAll(/app\.get\(\s*'\/api\/vs\/index\/health'\s*,([^\n]*)/g)].map((m) => m[1]!.trim());
   assert.deepEqual(handlers, ['async () => ({ ok: true, status: indexerHealth(indexerStatus()) }));']);
 });
@@ -402,7 +402,7 @@ async function hostedApp(o: { limits?: Partial<HostedLimits>; trustProxy?: Hoste
   for (const r of routes) {
     app.route({ method: r.method, url: r.url, handler: async (req) => ({ ok: true, route: req.routeOptions.url, ip: req.ip }) });
   }
-  // As routes/valuescan.ts registers it: the projection of the indexer's status.
+  // As routes/valuedesk.ts registers it: the projection of the indexer's status.
   app.get('/api/vs/index/health', async () => ({ ok: true, status: indexerHealth(INDEXER_STATUS) }));
   // Registered anyway: the LIST decides, not what happens to be registered.
   app.get('/api/acct/:engine/state', async () => ({ leaked: true }));
@@ -618,7 +618,7 @@ test('on-instance: a loopback peer, a loopback Host, and nothing a proxy adds', 
     assert.equal(isLoopbackAddress(a), false, String(a));
   }
   for (const h of ['127.0.0.1', '127.0.0.1:8797', 'localhost', 'LOCALHOST:8797', '[::1]', '[::1]:8797']) assert.equal(isLoopbackHost(h), true, h);
-  for (const h of [undefined, '', 'origin.valuescan.example', 'origin.valuescan.example:443', '127.0.0.1.evil.example', 'localhost.evil.example', 'localhost.', '10.0.0.5:8797', '[::2]', '127.0.0.1:8797/x', 'a b', ['127.0.0.1']]) {
+  for (const h of [undefined, '', 'origin.valuedesk.example', 'origin.valuedesk.example:443', '127.0.0.1.evil.example', 'localhost.evil.example', 'localhost.', '10.0.0.5:8797', '[::2]', '127.0.0.1:8797/x', 'a b', ['127.0.0.1']]) {
     assert.equal(isLoopbackHost(h), false, JSON.stringify(h));
   }
 
@@ -640,7 +640,7 @@ test('on-instance: a loopback peer, a loopback Host, and nothing a proxy adds', 
   // An empty marker is still a marker.
   assert.equal(isOnInstanceRequest('127.0.0.1', { ...local, 'x-forwarded-for': '' }), false);
   // The public name, or no Host at all.
-  assert.equal(isOnInstanceRequest('127.0.0.1', { host: 'origin.valuescan.example' }), false);
+  assert.equal(isOnInstanceRequest('127.0.0.1', { host: 'origin.valuedesk.example' }), false);
   assert.equal(isOnInstanceRequest('127.0.0.1', {}), false);
 });
 
@@ -660,14 +660,14 @@ test('index health: answered to a caller on the instance, a 404 for everyone els
 
   // What Caddy forwards from CloudFront: the same loopback peer, but marked and under the public name.
   const proxied: Record<string, string> = {
-    host: 'origin.valuescan.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', 'x-forwarded-proto': 'https',
-    'x-forwarded-host': 'origin.valuescan.example', via: '2.0 abc.cloudfront.net (CloudFront)', 'x-amz-cf-id': 'abc',
+    host: 'origin.valuedesk.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', 'x-forwarded-proto': 'https',
+    'x-forwarded-host': 'origin.valuedesk.example', via: '2.0 abc.cloudfront.net (CloudFront)', 'x-amz-cf-id': 'abc',
   };
   const notLocal: Array<Record<string, string>> = [
     proxied,
     { host: '127.0.0.1:8797', 'x-forwarded-for': '203.0.113.7' }, // one marker is enough, whatever the Host claims
     { host: '127.0.0.1:8797', via: '1.1 Caddy' },
-    { host: 'origin.valuescan.example' }, // no marker, but not a loopback name
+    { host: 'origin.valuedesk.example' }, // no marker, but not a loopback name
   ];
   for (const headers of notLocal) {
     const r = await get({ headers });
@@ -691,7 +691,7 @@ test('index health: needs no origin secret on the instance, and the secret does 
   const secret = 's'.repeat(48);
   const app = await hostedApp({ trustProxy: 2, originSecrets: [secret] });
   const local = { host: '127.0.0.1:8797' };
-  const proxied = { host: 'origin.valuescan.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', via: '2.0 abc.cloudfront.net (CloudFront)' };
+  const proxied = { host: 'origin.valuedesk.example', 'x-forwarded-for': '203.0.113.7, 130.176.1.1', via: '2.0 abc.cloudfront.net (CloudFront)' };
   const get = (url: string, headers: Record<string, string>) => app.inject({ method: 'GET', url, headers });
 
   // A monitor on the box is not handed the credential that gets past the edge.

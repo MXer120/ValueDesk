@@ -22,7 +22,7 @@
  * account. See sodex-core/registration.ts.
  *
  * From then on every order is signed here by that key, with no wallet prompt,
- * and sent straight to SoDEX (actions.ts). No Valuescan server ever holds a key
+ * and sent straight to SoDEX (actions.ts). No ValueDesk server ever holds a key
  * that can trade, sees an order, or can place one.
  *
  * THE BUILDER FEE (only when the build configures one - config.ts; otherwise

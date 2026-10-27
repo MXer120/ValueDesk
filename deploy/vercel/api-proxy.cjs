@@ -1,6 +1,6 @@
 'use strict';
 // The Vercel Function behind /api/* (Node.js, region hnd1, Tokyo - next to the
-// instance in ap-northeast-1): the edge in front of the Valuescan instance, as
+// instance in ap-northeast-1): the edge in front of the ValueDesk instance, as
 // CloudFront is in deploy/aws/edge.yaml.
 //
 //   browser -> Vercel (/api/... routed here by deploy/vercel/package.mjs)

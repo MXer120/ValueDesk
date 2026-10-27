@@ -7,7 +7,7 @@
 export const WALLET = '0xb9e8111c4f967faaa969c8c11bc3954c2cb9172a';
 
 /** The console of a plan run, as the runner prints it (a clock in front of every line). */
-export const PLAN_CONSOLE: readonly string[] = `20:23:01  Valuescan live E2E runner - PLAN (read-only: nothing is signed or sent)
+export const PLAN_CONSOLE: readonly string[] = `20:23:01  ValueDesk live E2E runner - PLAN (read-only: nothing is signed or sent)
 20:23:01  config            defaults
 20:23:01  wallet            ${WALLET} (a throwaway key generated for this plan)
 20:23:01  backend           http://127.0.0.1:5180

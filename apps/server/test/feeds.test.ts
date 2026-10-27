@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FEED_SOURCES, feedNews, logoDomain, parseFeedQuery, parseRss, resetFeeds } from '../src/valuescan/feeds.js';
+import { FEED_SOURCES, feedNews, logoDomain, parseFeedQuery, parseRss, resetFeeds } from '../src/valuedesk/feeds.js';
 
 const WH = FEED_SOURCES.find((s) => s.id === 'whitehouse')!;
 const now = new Date();
@@ -55,7 +55,7 @@ test('logoDomain: hostnames only, www dropped', () => {
 });
 
 test('imageType: the type the bytes are', async () => {
-  const { imageType } = await import('../src/valuescan/feeds.js');
+  const { imageType } = await import('../src/valuedesk/feeds.js');
   assert.equal(imageType(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), 'image/png');
   assert.equal(imageType(Buffer.from([0, 0, 1, 0, 1, 0, 32, 32])), 'image/x-icon');
   assert.equal(imageType(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), 'image/svg+xml');
@@ -63,7 +63,7 @@ test('imageType: the type the bytes are', async () => {
 });
 
 test('siteLogo: only the icon services are asked - never the site (SSRF) - and an SVG is never served', async () => {
-  const { siteLogo } = await import('../src/valuescan/feeds.js');
+  const { siteLogo } = await import('../src/valuedesk/feeds.js');
   const asked: string[] = [];
   const svg = (async (url: string | URL | Request) => {
     asked.push(String(url));

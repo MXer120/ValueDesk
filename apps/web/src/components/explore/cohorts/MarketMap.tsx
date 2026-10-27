@@ -6,7 +6,7 @@
  * header names it with its size and lean. Zoom and pan like the cohort map
  * (mapZoom.ts); a header opens the sector, a tile the asset.
  */
-import { LEAN_LABEL, SECTORS, leanOf, longShare, type MapSector, type Sector } from '@sign/valuescan/cohorts/model.js';
+import { LEAN_LABEL, SECTORS, leanOf, longShare, type MapSector, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import { fmtUsdShort } from '../model';
 import { useMapZoom } from './mapZoom';
 import { MarketTile, ZoomControls, squarify, visible } from './Treemap';

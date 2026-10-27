@@ -1,4 +1,4 @@
-# TradingView Advanced Charts in Valuescan
+# TradingView Advanced Charts in ValueDesk
 
 The chart panel runs on **klinecharts** (Apache-2.0, bundled) by default. The
 code in `src/chart/tv/` can swap in **TradingView Advanced Charts** instead,

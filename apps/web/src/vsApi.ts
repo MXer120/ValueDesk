@@ -1,13 +1,13 @@
 /**
  * The multi-venue trader API.
  *
- * Two halves. The Valuescan INDEX - leaderboards, cohorts, the screener,
+ * Two halves. The ValueDesk INDEX - leaderboards, cohorts, the screener,
  * Explore, whales and positioning - is ours and comes from /api/vs/* (see
- * apps/server/src/routes/valuescan.ts). One TRADER on one venue - profile,
+ * apps/server/src/routes/valuedesk.ts). One TRADER on one venue - profile,
  * fills, open orders, history, funding, balances - and a coin's price are read
  * straight from that venue in this browser (exchange/venues.ts), with the
  * server's own provider code: each user's own IP and budget, and no address
- * anyone looks at passes through Valuescan.
+ * anyone looks at passes through ValueDesk.
  *
  * Types come from the server through the `@sign` alias, so both sides share one
  * definition. Every endpoint answers HTTP 200 with {ok:false, code, error} when
@@ -29,12 +29,12 @@ import type {
   VsOrder,
   WhaleTrade,
   Window,
-} from '@sign/valuescan/types.js';
+} from '@sign/valuedesk/types.js';
 import { VenueError, venues } from './exchange/venues';
 import { serverGetJson } from './serverFetch';
-import type { CalendarEvent, CalendarSource } from '@sign/valuescan/calendar.js';
+import type { CalendarEvent, CalendarSource } from '@sign/valuedesk/calendar.js';
 import type { LiqHeatmap, LiqHistory, LiqWallets } from '@sign/indexer/liqRead.js';
-import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuescan/cohorts/model.js';
+import type { CohortDetailResponse, CohortFilter, CohortFocusResponse, CohortId, CohortMapResponse, CohortRange, CohortWalletsResponse, CohortsResponse, WalletSort } from '@sign/valuedesk/cohorts/model.js';
 
 export type { CalendarEvent, CalendarSource };
 export type {
@@ -56,7 +56,7 @@ export type {
   VsPosition,
   WhaleTrade,
   Window,
-} from '@sign/valuescan/types.js';
+} from '@sign/valuedesk/types.js';
 
 export const VS_VENUES: readonly Venue[] = ['sodex', 'hyperliquid'];
 /** Venues Scan can open an address on (a profile and fills each). */
@@ -156,13 +156,13 @@ export const vsApi = {
     signal?: AbortSignal,
   ) => unwrap<{ items: NewsItem[]; page: number; total: number | null; source: string }>(`/api/vs/news${qs(o)}`, signal),
 
-  /** News from the sources beside SoSoValue (server valuescan/feeds.ts): `ids` comma-separated, newest first. */
+  /** News from the sources beside SoSoValue (server valuedesk/feeds.ts): `ids` comma-separated, newest first. */
   newsSources: (o: { ids: string; coin?: string; q?: string; limit?: number }, signal?: AbortSignal) =>
     unwrap<{ items: NewsItem[] }>(`/api/vs/news/sources${qs(o)}`, signal),
 
   /**
    * The economic calendar: the FOMC's meetings, BLS and BEA releases and
-   * SoSoValue's macro events (server valuescan/calendar.ts), a week back to
+   * SoSoValue's macro events (server valuedesk/calendar.ts), a week back to
    * two months ahead unless asked otherwise.
    */
   calendar: (o: { from?: number; to?: number } = {}, signal?: AbortSignal) =>

@@ -111,30 +111,30 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // Aggregated server-side from the venues' trade streams - no one user's traffic.
   { method: 'GET', url: '/api/vs/whales', cls: 'read' },
   { method: 'GET', url: '/api/vs/positioning', cls: 'read' },
-  // SoSoValue news. The process caches the page (valuescan/sosovalue/news.ts);
+  // SoSoValue news. The process caches the page (valuedesk/sosovalue/news.ts);
   // without SOSOVALUE_API_KEY the route answers not_available.
   { method: 'GET', url: '/api/vs/news', cls: 'read' },
-  // Other news sources' RSS feeds (valuescan/feeds.ts), each read at most every 5 minutes: cached
+  // Other news sources' RSS feeds (valuedesk/feeds.ts), each read at most every 5 minutes: cached
   // reads, whoever asks.
   { method: 'GET', url: '/api/vs/news/sources', cls: 'read' },
   // A site's icon, kept a day per site - but the site is the caller's choice, and each new one is
   // two requests to the icon services from this server's address: upstream.
   { method: 'GET', url: '/api/vs/logo', cls: 'upstream' },
   // The economic calendar: the Fed's, BLS's and BEA's public calendars and
-  // SoSoValue's, each read at most twice a day (valuescan/calendar.ts).
+  // SoSoValue's, each read at most twice a day (valuedesk/calendar.ts).
   { method: 'GET', url: '/api/vs/calendar', cls: 'read' },
   // Official results of its releases, read by one watcher in this process at the release second,
-  // and the Fed's current broadcast (both valuescan/releases.ts): cached reads, whoever asks.
+  // and the Fed's current broadcast (both valuedesk/releases.ts): cached reads, whoever asks.
   { method: 'GET', url: '/api/vs/calendar/results', cls: 'read' },
   { method: 'GET', url: '/api/vs/fed/live', cls: 'read' },
   // What the markets expect of the FOMC (Kalshi, Polymarket), one meeting's history, and the
-  // indicators' history from FRED (valuescan/fedwatch.ts, indicators.ts): public data, cached on the
+  // indicators' history from FRED (valuedesk/fedwatch.ts, indicators.ts): public data, cached on the
   // process; a meeting or an indicator not in their lists is answered without a fetch.
   { method: 'GET', url: '/api/vs/fedwatch', cls: 'read' },
   { method: 'GET', url: '/api/vs/fedwatch/history', cls: 'read' },
   { method: 'GET', url: '/api/vs/indicators', cls: 'read' },
   { method: 'GET', url: '/api/vs/indicator', cls: 'read' },
-  // SoSoValue's US spot ETF flows (valuescan/sosovalue/etf.ts), on the news key's budget, cached
+  // SoSoValue's US spot ETF flows (valuedesk/sosovalue/etf.ts), on the news key's budget, cached
   // 30 minutes per asset; not_available without SOSOVALUE_API_KEY.
   { method: 'GET', url: '/api/vs/etf/flows', cls: 'read' },
   // The shared price oracle (routes/oracle.ts): every caller shares one read per venue and coin a second -
@@ -142,7 +142,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // from this server's address: upstream (a ticket's poll, every 2 s, is 30 a minute).
   { method: 'GET', url: '/api/vs/oracle', cls: 'upstream' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
-  // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
+  // page per channel (valuedesk/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },
   // One Hyperliquid leaderboard row from the index (the Scan profile's rank):
   // a lookup in the file already in memory, never a per-address upstream call.

@@ -37,8 +37,8 @@
 import {
   Aggregator, COHORTS, longShare, netWallet, sampleHash, scopeKey, sectorTotals,
   type Position, type WalletVenue,
-} from '../valuescan/cohorts/model.js';
-import { VENUES, type Venue } from '../valuescan/types.js';
+} from '../valuedesk/cohorts/model.js';
+import { VENUES, type Venue } from '../valuedesk/types.js';
 import { DAY_MS } from './windows.js';
 
 export const HOUR_MS = 3_600_000;

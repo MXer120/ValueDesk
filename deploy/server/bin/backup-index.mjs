@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// A consistent copy of the Valuescan index database, taken while the indexer runs.
+// A consistent copy of the ValueDesk index database, taken while the indexer runs.
 //
 //   node --disable-warning=ExperimentalWarning backup-index.mjs <source.db> <copy.db>
 //   node --disable-warning=ExperimentalWarning backup-index.mjs --check <file.db>

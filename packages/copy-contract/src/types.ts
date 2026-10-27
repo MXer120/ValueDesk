@@ -78,7 +78,7 @@ export function enumName<E extends Record<string, number>>(e: E, value: number):
  * `IValuescanCopyTrading.Terms` and COPY-TRADING.md §4.2; `termsProblems` checks them in the contract's order.
  */
 export interface Terms {
-  /** EVM address of the SoDEX API key the follower authorised for Valuescan's executor. Not the follower. */
+  /** EVM address of the SoDEX API key the follower authorised for ValueDesk's executor. Not the follower. */
   delegatedKey: Address;
   /** SoDEX key name: `^[0-9a-zA-Z_-]{1,36}$`, not "default". */
   keyName: string;

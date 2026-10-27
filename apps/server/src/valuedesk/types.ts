@@ -1,10 +1,10 @@
 /**
- * The Valuescan multi-venue contract.
+ * The ValueDesk multi-venue contract.
  *
  * One shape for "a trader" regardless of where they trade, so the Explore,
  * Leaderboard, Scan and Copy pages never branch on venue. Each venue implements
- * `VenueProvider` in its own folder (valuescan/sodex, valuescan/hyperliquid);
- * routes/valuescan.ts dispatches to them and merges for `venue=all`.
+ * `VenueProvider` in its own folder (valuedesk/sodex, valuedesk/hyperliquid);
+ * routes/valuedesk.ts dispatches to them and merges for `venue=all`.
  *
  * The web app imports these types through the `@sign` alias (vite.config.ts
  * maps it to apps/server/src), so the browser and the server cannot drift.
@@ -56,7 +56,7 @@ export interface TraderRow {
   volume: Partial<Record<BoardWindow, number | null>>;
   /**
    * Fraction 0..1: winning closes / closes with a non-zero result (see
-   * valuescan/winRate.ts for what one close is). Null below WIN_RATE_MIN_CLOSES
+   * valuedesk/winRate.ts for what one close is). Null below WIN_RATE_MIN_CLOSES
    * held closes unless the figure covers the whole window.
    */
   winRate?: number | null;

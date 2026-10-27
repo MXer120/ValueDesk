@@ -560,7 +560,7 @@ Not addressed here, because they belong to the key/contract gap filler: the perm
 7. **Builder 223169 identity.** Ask SafePal or SoDEX. It is the only incumbent builder and a partnership or competitive signal.
 8. **Whether the SoDEX weight counter is shared across `mainnet-gw` and `clobscan`.** Log `x-ratelimit-remaining` on the gateway while clobscan runs alone.
 
-## Recommendations for Valuescan
+## Recommendations for ValueDesk
 
 1. **SoDEX discovery pipeline:**
    - Bulk-resolve all 230,775 ids once (462 calls), then keep resolving new ids (~200/day) as they appear in `bi`/`si`.

@@ -4,7 +4,7 @@
  * The connections themselves are NOT this tab's: one socket host per browser
  * (a SharedWorker, else an elected leader tab - exchange/ws/link.ts) holds them
  * for every tab, straight to the SoDEX gateway from the user's own IP. Nothing
- * goes through a Valuescan server. The gateway allows 10 connections per IP;
+ * goes through a ValueDesk server. The gateway allows 10 connections per IP;
  * shared, all tabs together use at most 2 market + 6 wallet connections.
  *
  * This client keeps the old hub's interface exactly - `hub.subscribe`,

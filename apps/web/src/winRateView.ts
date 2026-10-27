@@ -2,7 +2,7 @@
  * How a win rate reads on screen: the leaderboard, the cohort wallets table
  * and Scan all go through here, so "≈" and its tooltip mean one thing.
  *
- * The figure and its definition are the server's (apps/server/src/valuescan/
+ * The figure and its definition are the server's (apps/server/src/valuedesk/
  * winRate.ts): exact when every close in the window is held, otherwise an
  * estimate from the closes held, published only from WIN_RATE_MIN_CLOSES up.
  * An estimate gets a muted "≈" and says what it is built from. A row from a
@@ -10,7 +10,7 @@
  *
  * Pure (no React, no DOM) so it runs under `npx tsx --test`.
  */
-import { WIN_RATE_MIN_CLOSES } from '@sign/valuescan/winRate.js';
+import { WIN_RATE_MIN_CLOSES } from '@sign/valuedesk/winRate.js';
 import { formatNumber } from './intlCache';
 
 export interface WinRateFields {

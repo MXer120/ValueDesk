@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import Fastify from 'fastify';
 
-import { valuescanRoutes } from '../src/routes/valuescan.js';
+import { valuedeskRoutes } from '../src/routes/valuedesk.js';
 
 const A1 = '0x85ecf584f25db6f146718b86d493e33c5af72052';
 const A2 = '0x8c625ff57d8a4374784c7eff585dfdc42ccec974';
@@ -56,7 +56,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
 
 async function app() {
   const a = Fastify();
-  await a.register(valuescanRoutes);
+  await a.register(valuedeskRoutes);
   await a.ready();
   return a;
 }
@@ -75,7 +75,7 @@ test('lbrow: a listed address gets its row - rank by 30d PnL, HL figures - and n
     assert.equal(body.row.pnl['30d'], 500);
     assert.equal(body.row.accountValue, 1000);
     assert.equal(body.row.rankChange, null, 'no previous file yet');
-    assert.equal(body.row.label, null, 'display names are never shown (valuescan/labels.ts)');
+    assert.equal(body.row.label, null, 'display names are never shown (valuedesk/labels.ts)');
     assert.ok(r.body.length < 600, `a small answer (${r.body.length} bytes)`);
     // Mixed-case input is the same address.
     const upper = await a.inject({ method: 'GET', url: `/api/vs/lbrow?venue=HyperLiquid&address=${A2.toUpperCase().replace('0X', '0x')}` });

@@ -1,4 +1,4 @@
-# Valuescan
+# ValueDesk
 #
 # /api/  the index API: JSON for the app, nothing for a search result.
 # /scan  pages about one wallet address each (/scan?address=0x...): kept out of

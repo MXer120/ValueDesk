@@ -9,7 +9,7 @@
 /** The part of fetch the oracle uses (global fetch satisfies it). */
 export type FetchLike = (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: unknown }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
-// ---- shared with apps/server/src/valuescan/oracle.ts below this line ----
+// ---- shared with apps/server/src/valuedesk/oracle.ts below this line ----
 
 export type OracleVenue =
   | 'binanceFutures' | 'binanceSpot' | 'bybit' | 'bybitSpot' | 'okx' | 'okxSpot' | 'bitget' | 'bitgetSpot' | 'hyperliquid'

@@ -6,7 +6,7 @@
  *
  * One venue shows that venue; several are NETTED - a wallet on more than one
  * of them is one wallet, its PnL and perp equity summed into one cohort and
- * its positions added up (apps/server/src/valuescan/cohorts/model.ts). A
+ * its positions added up (apps/server/src/valuedesk/cohorts/model.ts). A
  * sector or an asset narrows every figure on the page to the positions in it.
  *
  * BUILT FROM THE PAGES AROUND IT. The bar, segments and brand chips are the
@@ -19,7 +19,7 @@ import {
   BIAS_LABEL, COHORT_BY_ID, LEAN_LABEL, PNL_COHORTS, SECTORS, SIZE_COHORTS, biasOf, isBullish, isCohortId, isSector, leanOf, longShare,
   type CohortCard, type CohortDef, type CohortDetailResponse, type CohortFilter, type CohortId, type CohortRange,
   type CohortWalletRow, type CohortWalletsResponse, type CohortsResponse, type Lean, type Sector, type WalletSort,
-} from '@sign/valuescan/cohorts/model.js';
+} from '@sign/valuedesk/cohorts/model.js';
 import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
 import { useStored, useSymbols } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';

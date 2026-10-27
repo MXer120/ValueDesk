@@ -1,4 +1,4 @@
-# Builder codes: the Valuescan fee on SoDEX orders
+# Builder codes: the ValueDesk fee on SoDEX orders
 
 Status: 2026-10-02. **Off until a builder is named** (`VITE_BUILDER_ID`); **once one is named, the
 approval is required**: an order placed here goes out with the builder at the fee the wallet owes,
@@ -54,12 +54,12 @@ section 6).
 
 ---
 
-## 2. What Valuescan does
+## 2. What ValueDesk does
 
-Valuescan is non-custodial: orders are signed in the browser by a trading key and sent straight to
+ValueDesk is non-custodial: orders are signed in the browser by a trading key and sent straight to
 SoDEX. The builder fee adds nothing to that picture - no server sees an order, an approval or a fee.
 Who is paid, the highest fee and the approval ceiling are fixed in the bundle the user loads
-(build-time settings, section 3). The Valuescan API can do exactly one thing: **lower** one wallet's
+(build-time settings, section 3). The ValueDesk API can do exactly one thing: **lower** one wallet's
 fee below the bundle's, with a statement signed by a key the bundle pins (section 2.7). It cannot
 raise a fee, name another builder, or switch the fee off.
 
@@ -100,7 +100,7 @@ without it - and exists for test builds only. The two differ in what a missing a
 
 | | Required (the default: `VITE_BUILDER_REQUIRED` unset or `1`) | Optional (`VITE_BUILDER_REQUIRED=0`, test builds) |
 |---|---|---|
-| User declines in the dialog | Trading stays off: "Trading through Valuescan requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account." No key is registered | Trading is enabled **without** the fee |
+| User declines in the dialog | Trading stays off: "Trading through ValueDesk requires approving its builder fee, so trading stays off. Nothing was changed on your SoDEX account." No key is registered | Trading is enabled **without** the fee |
 | User closes the dialog (Cancel, Escape) | The same message as declining | Nothing happens; trading stays as it was |
 | Wallet rejects the approval signature | Trading stays off, same message | Trading is enabled without the fee; the reason is logged |
 | SoDEX refuses the approval | Trading stays off; the message carries SoDEX's reason | Trading is enabled without the fee; SoDEX's reason is logged |
@@ -173,15 +173,15 @@ shows the row *Builder fee approved: none*, as it did.
 
 **Builder ON.**
 
-- *Enable trading* (first time for this account): a small dialog, **"Valuescan builder fee"**, before
+- *Enable trading* (first time for this account): a small dialog, **"ValueDesk builder fee"**, before
   any wallet prompt. It states, with the build's own numbers:
   - Perps orders: x % of each fill, buys and sells
   - Spot sells: y % of each fill
   - Spot buys: no builder fee
   - Maximum you approve: z % of a fill
-  - Paid to: Valuescan, SoDEX builder account #id
+  - Paid to: ValueDesk, SoDEX builder account #id
   - that SoDEX charges it on each fill on top of its own trading fee, maker and taker alike; that
-    Valuescan cannot charge more than the maximum without a new signature; that it can be revoked at
+    ValueDesk cannot charge more than the maximum without a new signature; that it can be revoked at
     any time (and where); and whether it is optional or required.
 
   Buttons: **Cancel**, **Enable without the fee** (optional builds only) and **Approve and enable
@@ -189,19 +189,19 @@ shows the row *Builder fee approved: none*, as it did.
   the key options instead - section 2.5 - trading is not being enabled, so the same dialog has two
   buttons, **Cancel** and **Approve the fee**, and its last sentence says what not approving means
   there.) Then two toasts announce the two wallet prompts ("Approve the builder fee in <wallet> - the
-  first of two signatures."), and the result: "Trading enabled. Orders placed here carry the Valuescan
-  builder fee you approved." or "Trading enabled, without the Valuescan builder fee."
+  first of two signatures."), and the result: "Trading enabled. Orders placed here carry the ValueDesk
+  builder fee you approved." or "Trading enabled, without the ValueDesk builder fee."
 - *Enable trading* (account already approved): one wallet prompt, as without a builder.
-- *Order ticket*: under the venue's **Fees** line a line of its own, **Valuescan fee** `builder`,
+- *Order ticket*: under the venue's **Fees** line a line of its own, **ValueDesk fee** `builder`,
   `+0.0500%` (or "none on spot buys"), with a tooltip saying who is paid. The order review adds **Est.
-  Valuescan fee** with the amount for this order. Both exist only while the order will really carry
+  ValueDesk fee** with the amount for this order. Both exist only while the order will really carry
   the fee (or, in a required build, always - every order that leaves will carry it). Like the Fees
   label above it, the label is pressable: it opens the key options. The rate shown is the fee the
   order will carry. When the wallet is on a lower volume tier the default is shown struck through
   beside it (`+0.0200%` ~~struck~~ `+0.0150%`, the ticket's own look for a discounted venue rate), and
-  when the terms name a next tier one small line under it says so: "Valuescan fee 0.0150% once
-  $10.00 is traded through Valuescan ($4.20 so far)."
-- *Fee tier panel*: a **Valuescan fee** figure next to the venue's taker and maker rates, one sentence
+  when the terms name a next tier one small line under it says so: "ValueDesk fee 0.0150% once
+  $10.00 is traded through ValueDesk ($4.20 so far)."
+- *Fee tier panel*: a **ValueDesk fee** figure next to the venue's taker and maker rates, one sentence
   explaining it, and a "See or revoke your approval" link to the key options ("Approve it, or see what
   is approved" while a required build's fee is not approved yet). Never mixed into the venue's rates.
   A lower tier and the next tier are said in the same sentence.
@@ -214,7 +214,7 @@ shows the row *Builder fee approved: none*, as it did.
 
 ### 2.4 Revoking
 
-Order ticket -> press **Valuescan fee** -> **Revoke builder approval** (in the key options that open):
+Order ticket -> press **ValueDesk fee** -> **Revoke builder approval** (in the key options that open):
 one wallet signature for the same message with `maxFeeRate: 0`. The app reads first (nothing to revoke
 -> nothing to sign), sends, then reads both engines until the builder is gone from both lists, and
 stops attaching the fee. In a required build revoking also turns trading off on this device, since the
@@ -234,7 +234,7 @@ key options offer it as **Approve builder fee** whenever SoDEX's own answer says
 approval does not cover what the build charges. It is for:
 
 - a **required** build and a browser that still holds a trading key from before the build had a
-  builder: its orders are refused ("... press "Valuescan fee" in the order ticket and approve it
+  builder: its orders are refused ("... press "ValueDesk fee" in the order ticket and approve it
   there"), the ticket's fee line opens the key options, one signature later the orders go out;
 - an approval on one engine only, or below a fee that was raised since;
 - an account that enabled trading without the fee and wants it after all.
@@ -260,7 +260,7 @@ lines above do. Two consequences worth knowing:
 
 ### 2.7 The fee a wallet owes, and the signed terms
 
-The fee an order carries is the build's default unless Valuescan's server has **signed** a lower one
+The fee an order carries is the build's default unless ValueDesk's server has **signed** a lower one
 for that wallet (`trading/terms.ts`; the contract is BUILDER-TIERS.md section 3):
 
 - The app asks its own API (`GET /api/vs/builder/terms?address=...&nonce=...`, never SoDEX) when
@@ -390,7 +390,7 @@ The same settings for the live end-to-end runner are the `builder` block of
   outside: the one active builder on SoDEX, whose users sell on spot, held 432.88 vUSDC in Spot on
   2026-09-25 and 630.73 on 2026-10-02, while its Perps balance stayed at exactly 100.)
 - The fees are ordinary balance. To take them out, use the builder wallet like any account - in
-  Valuescan itself or on sodex.com: **Transfer** Perps -> Spot, then **Withdraw** from Spot to the
+  ValueDesk itself or on sodex.com: **Transfer** Perps -> Spot, then **Withdraw** from Spot to the
   wallet on ValueChain or to another chain.
 - Never withdraw below 100 vUSDC in either engine (section 4).
 
@@ -437,9 +437,9 @@ so all-time totals cannot split the two.)
 
 1. *The builder account's balance.* With a dedicated, non-trading builder account, growth of its Perps
    and Spot balances is fee income. Simple; no per-fill detail.
-2. *Users' fills.* Sum `builderFee` over the fills of the accounts that trade through Valuescan (their
-   fills are public reads). Exact per fill, but Valuescan does not collect who trades through it - by
-   design no order passes a Valuescan server.
+2. *Users' fills.* Sum `builderFee` over the fills of the accounts that trade through ValueDesk (their
+   fills are public reads). Exact per fill, but ValueDesk does not collect who trades through it - by
+   design no order passes a ValueDesk server.
 
 ---
 
@@ -497,20 +497,20 @@ the `trades` reads - SoDEX rate-limits its history routes.
 | 0 | `node apps/web/tools/check-builder.mjs <builder wallet>` | `ELIGIBLE`; note the builder id and both balances |
 | 1 | In `apps/web/.env.local`: `VITE_BUILDER_ID=<id>`, `VITE_BUILDER_FEE_PERPS=10`, `VITE_BUILDER_FEE_SPOT=10`, `VITE_BUILDER_MAX_FEE=10`, `VITE_BUILDER_REQUIRED=0`. Restart the dev server. Open the app with `?debug=trade` | No `TRADING IS OFF` / `the builder fee is OFF` error in the console (the warning that this build makes the fee optional is expected) |
 | 2 | `curl -s https://mainnet-gw.sodex.dev/api/v1/user/<test wallet>/builders` | `"data":{"spot":[],"perps":[]}` (or lists without your builder) |
-| 3 | Connect the test wallet, press **Enable trading** | The "Valuescan builder fee" dialog with 0.01 % perps, 0.01 % spot sells, maximum 0.01 %, your builder id |
-| 4 | Press **Approve and enable trading** | Wallet prompt 1 is typed data `ApproveBuilderFeeAction`: `chainID` 286623, `accountID` = the test account, `builderID` = yours, `maxFeeRate` 10; domain `universal`. Then wallet prompt 2: the key registration. Toast: "Trading enabled. Orders placed here carry the Valuescan builder fee you approved." |
+| 3 | Connect the test wallet, press **Enable trading** | The "ValueDesk builder fee" dialog with 0.01 % perps, 0.01 % spot sells, maximum 0.01 %, your builder id |
+| 4 | Press **Approve and enable trading** | Wallet prompt 1 is typed data `ApproveBuilderFeeAction`: `chainID` 286623, `accountID` = the test account, `builderID` = yours, `maxFeeRate` 10; domain `universal`. Then wallet prompt 2: the key registration. Toast: "Trading enabled. Orders placed here carry the ValueDesk builder fee you approved." |
 | 5 | Repeat the `curl` of step 2 | Your builder in **both** lists: `{"userID":…,"builderID":<id>,"feeRate":10}` |
-| 6 | Order ticket, perps: look at the fee lines, then place the smallest market order SoDEX accepts | A line "Valuescan fee builder +0.0100%"; the review shows "Est. Valuescan fee". The order fills |
+| 6 | Order ticket, perps: look at the fee lines, then place the smallest market order SoDEX accepts | A line "ValueDesk fee builder +0.0100%"; the review shows "Est. ValueDesk fee". The order fills |
 | 7 | `curl -s "https://mainnet-gw.sodex.dev/api/v1/perps/accounts/<test wallet>/trades?limit=5"` | The fill has `builderFee` = price x quantity x 0.0001, and `fee` = SoDEX's fee + `builderFee` |
 | 8 | Close the position from the positions table and read the trades again | The closing fill carries `builderFee` too (perps: both sides) |
 | 9 | Place a perps limit order away from the market; `curl -s https://mainnet-gw.sodex.dev/api/v1/perps/accounts/<test wallet>/orders`. Then drag it on the chart to a price that fills, and read the trades | The resting order shows the builder (`builder` with your id and rate). After the edit, note whether the fill has `builderFee` - either answer is a finding, not a failure (section 2.2). Close the position again |
 | 10 | Spot: buy a little of a coin, then sell it. Read `…/spot/accounts/<test wallet>/trades?limit=5` | The BUY has no `builderFee`; the SELL has it. The ticket said "none on spot buys" for the buy |
 | 11 | `node apps/web/tools/check-builder.mjs <builder wallet>` | Perps balance up by the sum of the perps `builderFee`s, Spot balance up by the sell's |
 | 12 | Reload the page | Trading is still on, the fee line is still there (the approval was re-read). No wallet prompt |
-| 13 | Order ticket: press **Valuescan fee** -> **Revoke builder approval** | One wallet prompt: the same message with `maxFeeRate` 0. "Builder approval revoked. Orders placed here no longer carry the Valuescan fee." |
-| 14 | The `curl` of step 2 again; then place one more small order and read its fill | Both lists without your builder; the fill has no `builderFee`, the ticket no Valuescan line |
-| 15 | Address menu -> **Sign out**, connect again, press **Enable trading**: first answer **Cancel**, then press it again and answer **Enable without the fee** | Cancel: nothing changes, no wallet prompt. Then: trading on without the fee, one wallet prompt, no Valuescan line in the ticket |
-| 16 | The build as it ships, and approving later: remove `VITE_BUILDER_REQUIRED=0`, restart, reload (the key of step 15 is still in the browser). Try a small order. Then press **Valuescan fee** in the ticket -> **Approve builder fee** -> **Approve the fee** | The ticket shows the Valuescan line; the order is refused with "... press "Valuescan fee" in the order ticket and approve it there". The dialog has two buttons (Cancel, Approve the fee) and does not mention enabling. After the one signature (`ApproveBuilderFeeAction`, no key registration) the same order goes out and its fill has `builderFee` |
+| 13 | Order ticket: press **ValueDesk fee** -> **Revoke builder approval** | One wallet prompt: the same message with `maxFeeRate` 0. "Builder approval revoked. Orders placed here no longer carry the ValueDesk fee." |
+| 14 | The `curl` of step 2 again; then place one more small order and read its fill | Both lists without your builder; the fill has no `builderFee`, the ticket no ValueDesk line |
+| 15 | Address menu -> **Sign out**, connect again, press **Enable trading**: first answer **Cancel**, then press it again and answer **Enable without the fee** | Cancel: nothing changes, no wallet prompt. Then: trading on without the fee, one wallet prompt, no ValueDesk line in the ticket |
+| 16 | The build as it ships, and approving later: remove `VITE_BUILDER_REQUIRED=0`, restart, reload (the key of step 15 is still in the browser). Try a small order. Then press **ValueDesk fee** in the ticket -> **Approve builder fee** -> **Approve the fee** | The ticket shows the ValueDesk line; the order is refused with "... press "ValueDesk fee" in the order ticket and approve it there". The dialog has two buttons (Cancel, Approve the fee) and does not mention enabling. After the one signature (`ApproveBuilderFeeAction`, no key registration) the same order goes out and its fill has `builderFee` |
 | 17 | Same build: **Sign out**, connect again, **Enable trading**, press **Cancel** in the dialog | The dialog has no "Enable without the fee". Trading stays off with the "requires approving its builder fee" message; no wallet prompt at all. Revoke again (step 13) when you are done: in this build revoking also turns trading off |
 
 Afterwards `__vs.dump()` in the console gives the whole log for the record.

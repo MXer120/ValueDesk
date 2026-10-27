@@ -1,6 +1,6 @@
 # 06 — Monetization and competitive landscape
 
-Research for **Valuescan** (cross-venue trader analytics + non-custodial copy trading on SoDEX / ValueChain, then Hyperliquid).
+Research for **ValueDesk** (cross-venue trader analytics + non-custodial copy trading on SoDEX / ValueChain, then Hyperliquid).
 Date: 2026-09-25. Research was read-only: public docs, public GET/POST info queries, `eth_call`. No signed requests, no accounts, no deployments, no cloud resources.
 
 Confidence labels: **verified** = observed live or in code today; **documented** = official docs; **reported** = third-party article/dashboard; **inferred** = my reasoning from the above; **assumption** = not checked.
@@ -9,7 +9,7 @@ Confidence labels: **verified** = observed live or in code today; **documented**
 
 ## TL;DR
 
-1. **Builder codes are the business model, and SoDEX's builder ecosystem is nearly empty.** SoDEX lets a builder charge up to **0.2% on perps** and **2% on spot** (sell side only), credited **in real time** to the builder's account with no claim step. I checked the public `GET /api/v1/user/{addr}/builders` endpoint for the **top 500 SoDEX traders by 30D volume**: only **4 (0.8%)** have approved any builder, and all 4 approved the same unidentified builder (account `223169`) at the **0.2% perps cap**. That builder holds about 433 vUSDC. **No serious SoDEX builder or copy-trading product exists yet.** Valuescan can be the first.
+1. **Builder codes are the business model, and SoDEX's builder ecosystem is nearly empty.** SoDEX lets a builder charge up to **0.2% on perps** and **2% on spot** (sell side only), credited **in real time** to the builder's account with no claim step. I checked the public `GET /api/v1/user/{addr}/builders` endpoint for the **top 500 SoDEX traders by 30D volume**: only **4 (0.8%)** have approved any builder, and all 4 approved the same unidentified builder (account `223169`) at the **0.2% perps cap**. That builder holds about 433 vUSDC. **No serious SoDEX builder or copy-trading product exists yet.** ValueDesk can be the first.
 2. **SoDEX is small next to Hyperliquid.** SoDEX perps averaged **about $140M/day** over the last 30 days (spiky: $44M to $601M). Spot was about $1.5M/day. Hyperliquid's main dex did **$7.16B** in 24h. SoDEX gives us a first-mover position. Hyperliquid is where the volume is.
 3. **What Hyperliquid builders earn (the ceiling).** Phantom has earned **$26.3M** in builder rewards to date (verified live with the HL info API). It charges 5 bps and currently earns about $1.2M per 30 days. Across **116 HL interfaces**, builder fees total about **$8.5M per 30 days**. Copy-trading builders earn far less: Hyperdash about $208k/30d, pvp.trade about $14k/30d (down from $8M lifetime), HyperX about $10k/30d, Katoshi about $0. Most HL builder revenue goes to wallets and distribution (Phantom, MetaMask, Trust, Based). **Distribution matters more than features.**
 4. **Market rate for copy trading is 5 bps.** Hyperdash charges 0.05% on all copy fills. Copin charges 0.05% on opening fills only. Nansen charges 1–8 bps by loyalty tier. Phantom charges 5 bps, Based 2.5 bps, Axiom and Insilico 1 bp, MetaMask 10 bps.
@@ -81,7 +81,7 @@ Source: <https://hyperliquid.gitbook.io/hyperliquid-docs/trading/builder-codes>
 | Approved cap per user | `{"type":"maxBuilderFee","user":…,"builder":…}` |
 | Per-builder fill data | `https://stats-data.hyperliquid.xyz/Mainnet/builder_fills/{builder_lowercase}/{YYYYMMDD}.csv.lz4`. **Public HTTP, not requester-pays.** Verified with a HEAD request: Phantom's 2026-09-24 file is 1,165,814 bytes, `Last-Modified 2026-09-25 01:58 UTC`. |
 
-The `builder_fills` feed matters strategically: **any HL builder's daily routed volume and users can be measured exactly, for free.** That includes Hyperdash, Copin and every copy competitor. It is a ready competitive-intelligence source and a candidate "builder leaderboard" feature for Valuescan.
+The `builder_fills` feed matters strategically: **any HL builder's daily routed volume and users can be measured exactly, for free.** That includes Hyperdash, Copin and every copy competitor. It is a ready competitive-intelligence source and a candidate "builder leaderboard" feature for ValueDesk.
 
 ### 1.3 Base exchange fees (what followers already pay)
 
@@ -114,7 +114,7 @@ Revenue = routed notional × builder fee. For perps, "routed notional" counts **
 
 **Adjustments:**
 - **Opens-only charging** (recommended below) roughly halves the effective rate. 5 bp on opens is about 2.5 bp on all fills.
-- **Leader share:** 30% of builder fees from followed-leader flow. Net to Valuescan is 70%.
+- **Leader share:** 30% of builder fees from followed-leader flow. Net to ValueDesk is 70%.
 - **SoDEX spot:** about $1.5M/day for the whole venue, and builder fees only hit sells. Ignore it for revenue planning.
 - **Referral stacking adds about 0.4–0.45 bp of volume** (10% of a 4–4.5 bp taker fee) on users who registered through our code. SoDEX: 10% fee rebate. HL: 10% of fees for the referee's first $1B.
 
@@ -141,7 +141,7 @@ Revenue = routed notional × builder fee. For perps, "routed notional" counts **
 **Reading the benchmarks (inferred):**
 - **Builder revenue follows distribution, not features.** Wallets with millions of users capture most of it.
 - **Copy-trading builders are small.** Hyperdash, the best-known HL analytics site, earns about $7k/day across everything. Implied routed volume is about $14–46M/day, depending on the 1.5 bp / 5 bp mix.
-- **Realistic Valuescan year-1 range:** $5–50k/month gross, unless a distribution partner (a wallet, or SoSoValue itself) routes users to us.
+- **Realistic ValueDesk year-1 range:** $5–50k/month gross, unless a distribution partner (a wallet, or SoSoValue itself) routes users to us.
 - **SoDEX signal to check:** SoDEX's own perps fee income (~$285k/30d) against ~$4.35B volume implies an average of only ~0.65 bp per unit of reported volume. Likely causes: a large share of volume from zero-fee tier-4+ makers or MM/incentive flow, or the dashboard double-counting. Either way, **headline SoDEX volume overstates the organic, fee-paying taker flow a copy product can capture.** Plan on the organic subset.
 
 **Published Hyperliquid builder snapshots (reported, CoinGecko / HyperTracker, 2026-05-25):**
@@ -192,7 +192,7 @@ Also reported: "$40M+ total builder revenue, 187 active builders, ~⅓ of HL flo
 | Hyperbot | Membership + `$BOT` token | Tiers not published on the landing page. HL and Aster. |
 | HyperCopy (hypercopy.xyz / .online) | Open-source, free | "No fees" |
 
-**Price anchor for a Valuescan Pro tier: $15–25/mo.** Above free, well below Nansen Pro. The data API should sit at **$99–999/mo**, under HyperTracker, and sell the one thing nobody else has: **SoDEX + HL cross-venue data**.
+**Price anchor for a ValueDesk Pro tier: $15–25/mo.** Above free, well below Nansen Pro. The data API should sit at **$99–999/mo**, under HyperTracker, and sell the one thing nobody else has: **SoDEX + HL cross-venue data**.
 
 ### 2.3 Referral programmes (stack on top of builder fees)
 
@@ -265,7 +265,7 @@ This also blunts the known exploit where a leader opens in a thin market, follow
 | 17 | **SodexTracker** (sodextracker.com, GitHub EliasD87) | SoDEX | Positions, leaderboard, watchlists, reverse search, paper trading, journal | No | Free (2 GitHub stars) | Hobby project |
 | 18 | **CEX copy trading** (Binance, Bybit, OKX, Bitget) — reference | CEX | Rich lead-trader stats, verified by exchange | Native. Leader profit share 8–30%. Binance also pays leaders 10% of fees. | Profit share + trading fees | Custodial, KYC, opaque. Leaders **opt in and get paid**: the UX bar for "trader profiles". |
 
-**The gap Valuescan can own (inferred):**
+**The gap ValueDesk can own (inferred):**
 1. **First SoDEX-native copy trading.** Zero competitors execute copies on SoDEX, and the builder-approval scan shows no incumbent flow.
 2. **Cross-venue trader identity and copy.** Track and copy the same strategy across SoDEX and HL. Only Copin is multi-venue, and it lacks SoDEX.
 3. **Leaders get paid, with on-chain proof.** No DEX copy product pays leaders. A claimable, auditable payout (Merkle root on ValueChain) is new.
@@ -289,7 +289,7 @@ This also blunts the known exploit where a leader opens in a thin market, follow
 | Spot | **0** | Tiny volume, and sells only |
 | Analytics (Explore, Leaderboard, Scan) | **Free** | Every competitor is free. Paywalling analytics would starve the copy funnel. |
 | Leaders | **30% of builder fees** from their followers. Profit-gated. Paid weekly in vUSDC after they claim the address. | Binance norm is 10% of fees + up to 30% of profit. Our share of fees is generous because it is our only lever, and it recruits SoDEX's top traders. |
-| SoDEX referral / Squad | Valuescan referral code on the sodex.com registration step | +10% of referees' fees, +25% of their SoPoints, Squad boost. **Owner action:** needs $1,000 SoDEX volume to unlock the code. Early-Bird deadline 2026-09-29 12:00 UTC. |
+| SoDEX referral / Squad | ValueDesk referral code on the sodex.com registration step | +10% of referees' fees, +25% of their SoPoints, Squad boost. **Owner action:** needs $1,000 SoDEX volume to unlock the code. Early-Bird deadline 2026-09-29 12:00 UTC. |
 | Revenue expectation | $1–5M/day copied on SoDEX (0.7–3.5% share) → **$7.5k–37.5k/mo gross** at 2.5 bp effective, **$5.3k–26k net** after the 30% leader share | Enough to cover infra. The goal is share, not profit. |
 
 **Do not charge at launch:** analytics subscriptions, performance fees, manual-trade builder fees, spot fees, closes/exits, deposits, withdrawals, leader listing. **No token or points promises** (securities and farming risk). **No fund-moving keys, ever.**
@@ -384,10 +384,10 @@ This also blunts the known exploit where a leader opens in a thin market, follow
 
 ---
 
-## 7. Recommendations for Valuescan
+## 7. Recommendations for ValueDesk
 
 1. **Build builder-code support into the onboarding flow from day one.** After deposit, the user signs `addPermissionedAPIKey(mask=3)` and then `approveBuilderFee(builderID=<ours>, maxFeeRate=50)`. Show "max 0.05%, only on opening trades, revoke any time", with a one-click revoke (`maxFeeRate: 0`).
-2. **Create the Valuescan builder account** on SoDEX: 100 vUSDC spot + 100 vUSDC perps, about $200 locked. Create the HL builder account the same way (100 USDC perps). Use a **hardware-wallet EOA** and sweep revenue regularly. **Owner action: it involves real funds.**
+2. **Create the ValueDesk builder account** on SoDEX: 100 vUSDC spot + 100 vUSDC perps, about $200 locked. Create the HL builder account the same way (100 USDC perps). Use a **hardware-wallet EOA** and sweep revenue regularly. **Owner action: it involves real funds.**
 3. **Owner decision now:** create the SoDEX referral code and Squad before **2026-09-29 12:00 UTC** for the +20% Early-Bird boost. This needs $1,000 of SoDEX volume on the owner's account. Put the referral link on the "register on sodex.com" onboarding step.
 4. **Instrument revenue from fills, not balances.** Persist `builderFee`/`bf` per fill with a leader attribution. This one table drives leader payouts, the Pro auto-grant and the public revenue dashboard.
 5. **Ship the leader programme with the launch.** 30% of builder fees, profit-gated, claim-by-signature. Publish a weekly CSV. Move to a Merkle distributor on ValueChain once the owner approves a deployment.

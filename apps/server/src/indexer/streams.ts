@@ -23,10 +23,10 @@
  */
 import WebSocket from 'ws';
 import { NET } from '../config.js';
-import type { Venue } from '../valuescan/types.js';
-import { hlInfo } from '../valuescan/hyperliquid/index.js';
-import type { HlWsTrade } from '../valuescan/hyperliquid/raw.js';
-import { HL_WS_URL } from '../valuescan/hyperliquid/whales.js';
+import type { Venue } from '../valuedesk/types.js';
+import { hlInfo } from '../valuedesk/hyperliquid/index.js';
+import type { HlWsTrade } from '../valuedesk/hyperliquid/raw.js';
+import { HL_WS_URL } from '../valuedesk/hyperliquid/whales.js';
 
 /** One print. `buyer` / `seller` are HL addresses or SoDEX account ids as strings. */
 export interface Print {

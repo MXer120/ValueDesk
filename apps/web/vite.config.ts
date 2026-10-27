@@ -57,7 +57,7 @@ const recordPort = (addr: string | AddressInfo | null | undefined): void => {
   if (addr && typeof addr === 'object') appPorts.add(addr.port);
 };
 const trackAppOrigin = (): Plugin => ({
-  name: 'valuescan:app-origin',
+  name: 'valuedesk:app-origin',
   configureServer(server) {
     appPorts.add(server.config.server.port ?? 5180);
     server.httpServer?.on('listening', () => recordPort(server.httpServer?.address()));
@@ -82,7 +82,7 @@ const mayCarryToken = (headers: IncomingHttpHeaders): boolean => fromAppOrigin(h
 const preloadPalette = (): Plugin => {
   let base = '/';
   return {
-    name: 'valuescan:preload-palette',
+    name: 'valuedesk:preload-palette',
     apply: 'build',
     configResolved(cfg) {
       base = cfg.base;

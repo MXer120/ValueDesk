@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy the Valuescan CloudFormation stacks. Run it yourself, from any shell with
+# Deploy the ValueDesk CloudFormation stacks. Run it yourself, from any shell with
 # bash and AWS CLI v2 (Git Bash on Windows works). See deploy/aws/README.md.
 #
 #   deploy/aws/deploy.sh validate              validate-template for all three (read-only)

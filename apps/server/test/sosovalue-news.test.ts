@@ -6,9 +6,9 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import * as mod from '../src/valuescan/sosovalue/news.js';
-import { latestNews, mapNewsList, resetNewsCache } from '../src/valuescan/sosovalue/news.js';
-import { coinIndex, coinsIn, stockName } from '../src/valuescan/sosovalue/coins.js';
+import * as mod from '../src/valuedesk/sosovalue/news.js';
+import { latestNews, mapNewsList, resetNewsCache } from '../src/valuedesk/sosovalue/news.js';
+import { coinIndex, coinsIn, stockName } from '../src/valuedesk/sosovalue/coins.js';
 
 const CURRENCIES = [
   { currency_id: '1', symbol: 'btc', name: 'Bitcoin' },

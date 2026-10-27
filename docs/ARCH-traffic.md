@@ -1,13 +1,13 @@
-# Valuescan traffic: who talks to whom
+# ValueDesk traffic: who talks to whom
 
 Status: 2026-09-30. Owner of this inventory: the browser-direct rework.
 
 **The rule.** Every user's exchange and chain traffic leaves from that user's own
-browser and IP, straight to the exchange. The Valuescan server serves the site and
+browser and IP, straight to the exchange. The ValueDesk server serves the site and
 its **index** (leaderboards, cohorts, screener, explore, the whales tape and
 positioning) and nothing that is one user's exchange traffic. Nothing about a
 connected wallet, a scanned wallet, an order, a fill, a deposit address or a
-balance passes through Valuescan any more, and each user spends their own per-IP
+balance passes through ValueDesk any more, and each user spends their own per-IP
 budget at each venue.
 
 Dev and production run the same code path: the browser goes to the exchanges
@@ -18,7 +18,7 @@ directly in both. The Vite proxy only carries the index API (`/api/*`) in dev.
 ## 1. Inventory
 
 Class: **(a)** per-user exchange/chain traffic - now browser-direct;
-**(b)** index-backed - stays on the Valuescan server; **(c)** other.
+**(b)** index-backed - stays on the ValueDesk server; **(c)** other.
 
 ### 1.1 SoDEX market data - (a)
 
@@ -56,19 +56,19 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 
 | Call (web) | Before | Now | Why |
 |---|---|---|---|
-| `vsApi.trader/fills/openOrders/orderHistory/funding/balances` for SoDEX, Hyperliquid, trade.xyz, Lighter, Arcus (Scan pages, profiles, copy simulator, palette address lookups) | `/api/vs/trader`, `/api/vs/fills`, `/api/vs/account` | exchange/venues.ts: the server's provider code (`valuescan/sodex/traderCore.ts`, `hyperliquid/trader.ts`, `extra/providers.ts`) bound to browser clients | per-trader reads |
+| `vsApi.trader/fills/openOrders/orderHistory/funding/balances` for SoDEX, Hyperliquid, trade.xyz, Lighter, Arcus (Scan pages, profiles, copy simulator, palette address lookups) | `/api/vs/trader`, `/api/vs/fills`, `/api/vs/account` | exchange/venues.ts: the server's provider code (`valuedesk/sodex/traderCore.ts`, `hyperliquid/trader.ts`, `extra/providers.ts`) bound to browser clients | per-trader reads |
 | Hyperliquid leaderboard row of one address (rank, aggregated PnL) | inside `/api/vs/trader` | **(b)** `/api/vs/lbrow` (to be added, see 5), meanwhile `/api/vs/leaderboard?q=` without the rank | that row lives in the server's 39 MB index |
 | Cohort asset price chart (`vsApi.price`) | `/api/vs/price` | Hyperliquid `candleSnapshot` direct (`hyperliquid/price.ts`) | public market data |
 | Palette search (`usePaletteData`) | `/api/vs/screener` | unchanged | **(b)** index |
 
-### 1.5 Stays on the Valuescan server
+### 1.5 Stays on the ValueDesk server
 
 | Call (web) | Path | Class | Why it stays |
 |---|---|---|---|
 | Leaderboards, Explore, cohorts (+ detail, map, focus, wallets), liquidation heatmap (+ wallets, history; live over `/ws/liq`, browser to instance), screener | `/api/vs/leaderboard`, `/explore`, `/cohorts*`, `/liquidations*`, `/ws/liq`, `/screener` | (b) | the index is the server's job |
 | Whales tape, positioning | `/api/vs/whales`, `/api/vs/positioning` | (b) | aggregated server-side from venue trade streams; not one user's traffic |
 | Deep link by SoDEX account id (App.tsx) | `/api/feed/account` | (b) | resolved from the index's leaderboard map, on-chain only as a fallback |
-| Server status and network | `/api/health` | (c) | about Valuescan itself |
+| Server status and network | `/api/health` | (c) | about ValueDesk itself |
 | Builder fee terms | `/api/vs/builder/terms` | (c) | the fee a wallet owes must be signed by a key the browser cannot hold (docs/BUILDER-TIERS.md) |
 | Status page (`/status`) | `/api/vs/status` | (c) | the server probes the site, its own API, the executor and the indexer every minute and keeps 90 days (ops/status.ts); the same answer for everyone |
 | Send feedback (a chat with the owner, screenshots), client error reports | `POST /api/vs/feedback`, `/feedback/upload`, `/feedback/thread`, `/feedback/poll`, `/feedback/session`, `GET /api/vs/feedback/image`, `POST /api/vs/client-errors` | (c) | what a visitor sends the owner and the owner's replies: kept on the server, forwarded by Telegram, replies read back by long polling (routes/reports.ts, docs/GO-LIVE.md) |
@@ -316,29 +316,29 @@ Against this inventory, HOSTED_ROUTES should be:
 - **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`,
   `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`),
   `/api/vs/news/sources` (the White House's and Watcher.Guru's RSS feeds, each read at most every
-  5 minutes; valuescan/feeds.ts), `/api/vs/logo` (a news source's site icon from DuckDuckGo's icon
+  5 minutes; valuedesk/feeds.ts), `/api/vs/logo` (a news source's site icon from DuckDuckGo's icon
   service, kept a day per site, so the page asks only this origin),
   `/api/vs/calendar` (the economic calendar: federalreserve.gov, bls.gov, bea.gov and SoSoValue,
   each read at most twice a day), `/api/vs/calendar/results` (its releases' official figures,
   read by one watcher in the API process from the publishers' pages at the release second),
-  `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuescan/releases.ts),
+  `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuedesk/releases.ts),
   `/api/vs/fedwatch` (the coming FOMC meetings' decision probabilities from Kalshi's public market
-  data, Polymarket's beside; read at most once a minute; valuescan/fedwatch.ts),
+  data, Polymarket's beside; read at most once a minute; valuedesk/fedwatch.ts),
   `/api/vs/fedwatch/history` (one listed meeting's probabilities over 7/30/90 days from Kalshi's
   candlesticks, cached 10 minutes per meeting and range),
   `/api/vs/indicators` (the indicator catalog, no fetch), `/api/vs/indicator` (one catalog
-  indicator's history from FRED's public CSV, read at most every 6 hours; valuescan/indicators.ts),
+  indicator's history from FRED's public CSV, read at most every 6 hours; valuedesk/indicators.ts),
   and `/api/vs/etf/flows` (SoSoValue's US spot ETF flows and funds per asset, cached 30 minutes on the
   news key's budget, at most 5 calls a minute; `not_available` without `SOSOVALUE_API_KEY`;
-  valuescan/sosovalue/etf.ts), `/api/vs/oracle` (the shared price oracle for Fill fast: 19 venues' public tickers -
+  valuedesk/sosovalue/etf.ts), `/api/vs/oracle` (the shared price oracle for Fill fast: 19 venues' public tickers -
   Binance, Bybit, OKX, Bitget, Gate, MEXC and KuCoin futures and spot, Hyperliquid, Coinbase, Kraken, HTX, Deribit - one read per venue and coin a second
-  for all callers together; routes/oracle.ts, valuescan/oracle.ts)
+  for all callers together; routes/oracle.ts, valuedesk/oracle.ts)
   (index, drop their `provisional`); `/api/feed/account`;
   `/api/external/maintenance/status`, `/api/external/announcements(/:id)` (until
   they go direct).
 - **Add**: `GET /api/vs/lbrow?venue=hyperliquid&address=` (cls `upstreamWhen: address`
   or `read`): one Hyperliquid leaderboard row from the index,
-  `valuescan/hyperliquid/index.ts` `hlLeaderboardRow(address)` - the only index read
+  `valuedesk/hyperliquid/index.ts` `hlLeaderboardRow(address)` - the only index read
   the Scan profile needs. Until it exists the web falls back to
   `/api/vs/leaderboard?q=` and leaves the rank out.
 - **Add**: `GET /api/vs/builder/terms?address=&nonce=[&hint=1]` (cls `read`,
@@ -397,4 +397,4 @@ Server code that now has a shared, pure core the routes can call instead of thei
 copies: `routes/stats.ts` -> `statsCore.ts` (`headlineReader`, `allTimeStatsBody`);
 `hub.ts` -> `sodex/wsProtocol.ts` (`pushFor`, `accountPushFor`); `routes/mirror.ts` ->
 `sodex/depositOptions.ts` (`buildDepositOptions`, `newDepositAddressRequester`);
-`/api/vs/price` -> `valuescan/hyperliquid/price.ts` (`hlPriceSeries`).
+`/api/vs/price` -> `valuedesk/hyperliquid/price.ts` (`hlPriceSeries`).

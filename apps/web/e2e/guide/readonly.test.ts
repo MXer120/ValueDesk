@@ -103,7 +103,7 @@ test('sockets: only SoDEX\'s two market streams, only public market subscription
 // --- judging ----------------------------------------------------------------------------------
 
 test('CORS: "*" or the calling origin; a missing header or another origin blocks a browser', () => {
-  const o = 'https://valuescan.example';
+  const o = 'https://valuedesk.example';
   assert.deepEqual(judgeCors('*', o), { ok: true, how: 'any origin' });
   assert.deepEqual(judgeCors(o, o), { ok: true, how: 'echoes the calling origin' });
   assert.equal(judgeCors(null, o).ok, false);
@@ -119,7 +119,7 @@ test('CORS: "*" or the calling origin; a missing header or another origin blocks
 test('the page\'s own policy: connect-src is read from the CSP meta tag - not from a comment that mentions it', () => {
   const html = `<!doctype html><html><head>
     <!--
-      connect-src 'self'      the Valuescan index API; https://not-a-real-entry.example is only prose here
+      connect-src 'self'      the ValueDesk index API; https://not-a-real-entry.example is only prose here
     -->
     <meta
       http-equiv="Content-Security-Policy"

@@ -5,7 +5,7 @@
  * else; the size cohorts take a separate cool-to-warm run so the two groups
  * never read as one scale. CSS values: used in style props only.
  */
-import type { CohortId } from '@sign/valuescan/cohorts/model.js';
+import type { CohortId } from '@sign/valuedesk/cohorts/model.js';
 
 export const COHORT_COLOR: Record<CohortId, string> = {
   'extremely-profitable': 'var(--pos)',

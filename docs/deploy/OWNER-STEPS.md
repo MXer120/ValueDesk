@@ -45,7 +45,7 @@ warn or refuse until the site's address is on that project's list:
 You create it yourself; nobody else ever signs with your wallet.
 
 1. Pick the wallet that should receive the fees - best a **dedicated** one that does
-   not trade. On sodex.com (or in Valuescan): **activate its SoDEX account** (a first
+   not trade. On sodex.com (or in ValueDesk): **activate its SoDEX account** (a first
    deposit opens it) and hold **at least 100 vUSDC in Spot and at least 100 vUSDC in
    Perps** (deposit, then Transfer between the two), with a margin: below 100 in
    either, approvals fail. There is no separate registration.

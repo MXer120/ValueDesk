@@ -1,7 +1,7 @@
 /**
  * The app's data client. Exchange data - markets and accounts - is read
- * STRAIGHT from SoDEX in this browser (exchange/*); only Valuescan's own
- * index and status come from the Valuescan server.
+ * STRAIGHT from SoDEX in this browser (exchange/*); only ValueDesk's own
+ * index and status come from the ValueDesk server.
  */
 import { SodexApiError } from '@sodex-core';
 import { CHAINS } from '@sign/sodex/chainParams.js';
@@ -491,7 +491,7 @@ export interface PlaceOrderInput {
 /**
  * Exchange reads go STRAIGHT from this browser to SoDEX (exchange/*): the
  * user's own IP and budget, and nothing about their account passes through a
- * Valuescan server. Errors keep the shape the server used to answer with
+ * ValueDesk server. Errors keep the shape the server used to answer with
  * (ApiError: message, status, hint, code, source), so every panel's error text
  * is unchanged.
  */
@@ -545,7 +545,7 @@ let healthRead: Promise<any> | null = null;
 
 export const api = {
   /**
-   * The Valuescan server itself: its network and status (not exchange data).
+   * The ValueDesk server itself: its network and status (not exchange data).
    * One request at a time: callers that overlap - the shell's poll and the
    * portfolio chart both ask as a page loads - share it.
    */
@@ -582,7 +582,7 @@ export const api = {
   feeRate: (e: Engine, address: string) => direct('fee-rate', () => account.feeRate(e, address)),
 
   // keys: read-only. Trading keys are created, kept and used in the browser
-  // (trading/session.ts) - no Valuescan server holds or sees one.
+  // (trading/session.ts) - no ValueDesk server holds or sees one.
   walletAccount: (address: string) => direct('wallet account', () => walletAccount(address)),
 
   // trading: signed in this browser and sent straight to SoDEX (trading/actions.ts).

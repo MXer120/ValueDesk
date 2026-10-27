@@ -6,10 +6,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Venue } from '../src/valuescan/types.js';
-import { LiqLive, type LiveAccount } from '../src/valuescan/liquidations/live.js';
-import { LevelsBuilder, eachLevel } from '../src/valuescan/liquidations/levels.js';
-import { flatTiers } from '../src/valuescan/liquidations/math.js';
+import type { Venue } from '../src/valuedesk/types.js';
+import { LiqLive, type LiveAccount } from '../src/valuedesk/liquidations/live.js';
+import { LevelsBuilder, eachLevel } from '../src/valuedesk/liquidations/levels.js';
+import { flatTiers } from '../src/valuedesk/liquidations/math.js';
 import { LiqFeedServer, LiqFeedState } from '../src/indexer/liqFeed.js';
 
 const T = flatTiers(0.0125);

@@ -131,7 +131,7 @@ export async function runE2E(o: RunOptions): Promise<number> {
   const startedAtMs = Date.parse(startedAt);
   const rec = new Recorder(o.log);
   const L = (s = '') => rec.line(s);
-  L(`Valuescan live E2E runner - ${o.mode === 'plan' ? 'PLAN (read-only: nothing is signed or sent)' : 'LIVE (moves real funds on SoDEX mainnet)'}`);
+  L(`ValueDesk live E2E runner - ${o.mode === 'plan' ? 'PLAN (read-only: nothing is signed or sent)' : 'LIVE (moves real funds on SoDEX mainnet)'}`);
   if (o.test?.pace) setPace(o.test.pace);
 
   const loaded = loadConfig(o.configPath);

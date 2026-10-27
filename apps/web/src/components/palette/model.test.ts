@@ -9,7 +9,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { PRESETS, type ScreenerRow } from '@sign/valuescan/screener/model.js';
+import { PRESETS, type ScreenerRow } from '@sign/valuedesk/screener/model.js';
 import {
   DEFAULT_LIST_FILTERS,
   DEFAULT_SCREENER_FILTERS,

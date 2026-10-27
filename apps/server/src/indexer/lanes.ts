@@ -28,7 +28,7 @@
  * they continue, reset by the next success. Hammering a host that answers 503
  * only makes it answer 503 for longer.
  */
-import { isRateLimit } from '../valuescan/sodex/util.js';
+import { isRateLimit } from '../valuedesk/sodex/util.js';
 import { mark } from './busy.js';
 
 export interface LaneTask {

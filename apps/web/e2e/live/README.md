@@ -1,4 +1,4 @@
-# Live E2E runner - Valuescan money flows on SoDEX mainnet
+# Live E2E runner - ValueDesk money flows on SoDEX mainnet
 
 `run.ts` drives the web app's **own** trading and funds code (`src/trading/*`: `sendUsdcDeposit`,
 `enableTrading`, `transferFunds`, `placeOrder`, `changeOrder`, `cancelOrder`, `cancelAll`, `setLeverage`,
@@ -203,7 +203,7 @@ perps, spot sells only, nothing without a builder). The report's `feeTable` has 
 ## The builder fee and its tiers
 
 With `"builder": null` (the default) no builder is approved, read or attached, and every builder check
-is `skipped`. To test the Valuescan builder fee (docs/BUILDER-CODES.md, docs/BUILDER-TIERS.md):
+is `skipped`. To test the ValueDesk builder fee (docs/BUILDER-CODES.md, docs/BUILDER-TIERS.md):
 
 ```json
 "builder": { "id": 12345, "address": "0x...", "feePerps": 20, "feeSpot": 20, "maxFee": 20, "required": true, "revokeAtEnd": true,

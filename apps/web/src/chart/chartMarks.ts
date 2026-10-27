@@ -11,7 +11,7 @@
  *               a DOM layer: a marker shows what it is - a coin's logo, an X
  *               post, macro, research... - and a count only where several
  *               stories share it). The same story twice is shown once.
- *   Calendar    the economic calendar's releases (server valuescan/calendar.ts:
+ *   Calendar    the economic calendar's releases (server valuedesk/calendar.ts:
  *               the FOMC, CPI, jobs, GDP, PCE...) on the bar they are due,
  *               the coming ones in the space right of the last bar.
  *

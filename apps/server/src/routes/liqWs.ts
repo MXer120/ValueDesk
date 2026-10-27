@@ -24,11 +24,11 @@
  */
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
-import { VENUES, type Venue } from '../valuescan/types.js';
+import { VENUES, type Venue } from '../valuedesk/types.js';
 import { clientKey } from '../hosted.js';
 import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
-import { marketsNow } from '../valuescan/liquidations/rules.js';
+import { marketsNow } from '../valuedesk/liquidations/rules.js';
 
 export const LIQ_WS_PATH = '/ws/liq';
 const MAX_CONNECTIONS = Number(process.env.VALUESCAN_LIQ_WS_MAX) || 5_000;

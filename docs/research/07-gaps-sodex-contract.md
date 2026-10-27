@@ -34,7 +34,7 @@ Confidence labels: **verified** = observed live or in code today; **documented**
 2. The contract path has limits:
    - Keys added on-chain carry **no permission mask and never expire**. They are ordinary full-permission keys.
    - No on-chain **builder-fee approval** exists (none is known). `ApproveBuilderFee` needs an ECDSA master
-     signature, and SoDEX supports no ERC-1271. So an account owned by a contract probably **cannot pay Valuescan a
+     signature, and SoDEX supports no ERC-1271. So an account owned by a contract probably **cannot pay ValueDesk a
      builder fee**. A vault would charge its fees on ValueChain instead.
    - For a contract owner the leaked-key blast radius is smaller than for an EOA. EVM withdrawals are paid only to
      the owner, here the contract (verified in `releaseFund`), and INTERNAL transfers are documented as unsupported.
@@ -207,7 +207,7 @@ the CustodyWallet (`CustodyWallet.withdraw(token)`, `onlyOwner`).
 - **No builder-fee approval is known.** Approval is `ApproveBuilderFeeAction`, a universal-domain EIP-712
   signature by the master key. The published interface has no on-chain equivalent, and ERC-1271 is not supported
   (report 01 §4).
-  - Unless SoDEX adds one, **orders from contract-owned accounts cannot carry Valuescan's builder code**. Orders
+  - Unless SoDEX adds one, **orders from contract-owned accounts cannot carry ValueDesk's builder code**. Orders
     with an unapproved builder are rejected (documented).
   - Monetisation for vault-style products must therefore be on-chain: management or performance fees in the vault
     contract. 14 ClobGateway selectors remain unresolved. An on-chain builder approval is not among the ones that
@@ -224,7 +224,7 @@ the CustodyWallet (`CustodyWallet.withdraw(token)`, `onlyOwner`).
 - **EIP-7702:** 0 of 230,773 owners are delegated today. A 7702-delegated EOA stays an EOA to the gateway, so it can
   still sign REST master actions, including `ApproveBuilderFee` and `addPermissionedAPIKey(14)`. Its delegated code
   can also call `addAPIKey`/`revokeAPIKey` on-chain with `msg.sender = EOA`.
-  - That gives a hybrid: the follower's delegated code can let a Valuescan "guardian" contract revoke the executor
+  - That gives a hybrid: the follower's delegated code can let a ValueDesk "guardian" contract revoke the executor
     key on-chain when policy is violated, while the follower keeps the builder approval.
   - This works in principle, but it has not been exercised by anyone on ValueChain yet.
 
@@ -536,7 +536,7 @@ adversarial trading, e.g. filling an attacker's resting orders at off-market pri
   `positions/history` (`isTakenOver`) and REST `trades` (`clOrdID` prefix `liquidation:`). The first takeover then
   settles whether it is published.
 
-### What this means for Valuescan
+### What this means for ValueDesk
 
 - **The firehose is a valid single source** for indexing every trader, and for copy triggers on fills. `accountTrade`
   is not meaningfully faster: median 5 ms. Both carry the same block-time (`T`) stamp.
@@ -651,7 +651,7 @@ stacking belong to other gap reports.
 
 ---
 
-## Recommendations for Valuescan
+## Recommendations for ValueDesk
 
 1. **Re-open the architecture decision.** The copy contract no longer has to be only a registry. Two
    SoDEX-native patterns are proven in production today:
@@ -661,7 +661,7 @@ stacking belong to other gap reports.
      - `revokeAPIKey` is the enforced kill switch.
      - Withdrawals land in the contract.
    - **(b) Per-follower CopyAccount contract.** A minimal contract owned by the follower registers its own SoDEX
-     account (1.1 SOSO deposit). It adds the Valuescan executor key on-chain and lets the follower (and optionally a
+     account (1.1 SOSO deposit). It adds the ValueDesk executor key on-chain and lets the follower (and optionally a
      policy/guardian contract) revoke it at any time. SoDEX withdrawals return to the contract, and only the
      follower can pull funds out.
      - Trade-off: no builder fee, unless SoDEX adds on-chain builder approval.

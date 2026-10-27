@@ -3,7 +3,7 @@
  * all-time PnL; octopus, whale, shark, fish, minnow for account size. Drawn on
  * a 24px grid at the app's 1.6 stroke, in currentColor.
  */
-import type { CohortId } from '@sign/valuescan/cohorts/model.js';
+import type { CohortId } from '@sign/valuedesk/cohorts/model.js';
 
 const PATHS: Record<CohortId, string[]> = {
   'extremely-profitable': [

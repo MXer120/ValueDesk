@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================================
-rem  Valuescan - the guided test run before launch.
+rem  ValueDesk - the guided test run before launch.
 rem
 rem  Double-click this file, or run it in a terminal:
 rem      RUN-LIVE-TESTS.cmd              the full guided run (stages A, B, C, D)
@@ -14,7 +14,7 @@ rem  This file only starts the guide (apps\web\e2e\guide\guide.ts). It never
 rem  takes a private key: the guide asks for it itself, with a hidden prompt.
 rem ============================================================================
 setlocal
-title Valuescan - guided test run
+title ValueDesk - guided test run
 
 rem A key variable left in this window is not passed on (looked at by name only).
 if defined VS_E2E_KEY echo  Note: VS_E2E_KEY is set in this window. The guide does not use it and it is
@@ -40,7 +40,7 @@ goto done
 :nofolder
 echo.
 echo  The guide was not found: apps\web\e2e\guide\guide.ts is missing next to this
-echo  file. Run RUN-LIVE-TESTS.cmd from the Valuescan repository folder.
+echo  file. Run RUN-LIVE-TESTS.cmd from the ValueDesk repository folder.
 set "VS_GUIDE_EXIT=2"
 goto done
 

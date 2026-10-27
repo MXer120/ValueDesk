@@ -26,7 +26,7 @@ import { IndexStore, type TraderWin } from '../src/indexer/store.js';
 import { RETRY_MS, closeReader, reader } from '../src/indexer/reader.js';
 import { _cohortLoad, attachStats, boardPage, cohortsRead, indexerStatus, netPage, winRatesFor } from '../src/indexer/read.js';
 import { boardHoldings } from '../src/indexer/held.js';
-import type { TraderRow, Venue } from '../src/valuescan/types.js';
+import type { TraderRow, Venue } from '../src/valuedesk/types.js';
 
 const dirs: string[] = [];
 function tmp(): string {

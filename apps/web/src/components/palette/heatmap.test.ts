@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { CohortMarket } from '@sign/valuescan/cohorts/model.js';
+import type { CohortMarket } from '@sign/valuedesk/cohorts/model.js';
 import {
   COHORTS_PATH,
   MARKET_MAP_PATH,

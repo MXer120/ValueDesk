@@ -14,7 +14,7 @@ import { useMemo, useState, type CSSProperties } from 'react';
 import {
   COHORT_BY_ID, PNL_COHORTS, SECTORS, SIZE_COHORTS, leanOf, longShare, sectorOf,
   type CohortFilter, type CohortFocusResponse, type CohortId, type CohortMapResponse, type CohortRange, type Sector,
-} from '@sign/valuescan/cohorts/model.js';
+} from '@sign/valuedesk/cohorts/model.js';
 import { vsApi, type Venue } from '../../../vsApi';
 import { useStored } from '../../../hooks';
 import { DASH, marketName } from '../../../format';

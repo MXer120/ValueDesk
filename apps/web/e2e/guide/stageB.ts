@@ -297,7 +297,7 @@ export async function runStageB(ctx: Ctx): Promise<StageResult> {
       routes = [];
     }
     try {
-      venues = parseVenues(readFileSync(join(ctx.paths.repo, 'apps', 'server', 'src', 'valuescan', 'types.ts'), 'utf8'));
+      venues = parseVenues(readFileSync(join(ctx.paths.repo, 'apps', 'server', 'src', 'valuedesk', 'types.ts'), 'utf8'));
     } catch {
       venues = parseVenues(null);
     }

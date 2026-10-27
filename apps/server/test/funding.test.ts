@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fundingCash } from '../src/valuescan/liquidations/math.js';
+import { fundingCash } from '../src/valuedesk/liquidations/math.js';
 
 test('an hour of funding: cross pays from the cash, isolated from its margin, the equity moves by the total', () => {
   const book = {

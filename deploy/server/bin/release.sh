@@ -108,7 +108,7 @@ install_release() {
 
   tar -xzf "$inc/release.tar.gz" -C "$inc/tree" --strip-components=1 --no-same-owner
   [ -f "$inc/tree/package-lock.json" ] && [ -f "$inc/tree/apps/server/src/index.ts" ] \
-    || die "$key is not a Valuescan server release"
+    || die "$key is not a ValueDesk server release"
   # The server loads <release>/.env if it exists; a release must never bring one.
   [ ! -e "$inc/tree/.env" ] || die "the release contains a .env file - refusing it"
 

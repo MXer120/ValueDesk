@@ -1,4 +1,4 @@
-# 01 — SoDEX + ValueChain capabilities for Valuescan (copy trading)
+# 01 — SoDEX + ValueChain capabilities for ValueDesk (copy trading)
 
 Research date: 2026-09-25 (all "verified" facts observed live that day from a machine in Germany, read-only).
 Scope: what SoDEX / ValueChain can and cannot do for (1) tracking and analysing trader addresses and (2) copy-trading
@@ -30,7 +30,7 @@ Confidence labels: **verified** = observed live or in code, **documented** = off
    *disables*), and a permissioned key **must disable TRADE or CANCEL** ("enabling both TRADE and CANCEL is not
    supported"). So a **"trade+cancel only, cannot withdraw" key cannot be created** today, and Opentrade's
    `mask 3` "safe session key" actually disables trade+cancel and leaves withdraw+transfer enabled. **Flag this to the
-   Opentrade codebase owner before anyone uses it on mainnet.** For Valuescan it means an executor key is an ordinary
+   Opentrade codebase owner before anyone uses it on mainnet.** For ValueDesk it means an executor key is an ordinary
    (all-permission) key; its blast radius is "can trade and can move funds between the owner's own spot/perps/EVM
    wallet", not "can send funds to a third party" (withdrawals land on the owner's EVM address).
 4. **Trader discovery is fully open.** Every trade print on the gateway WebSocket carries buyer/seller account ids
@@ -264,7 +264,7 @@ directly (omit `X-API-Key`).
 | Symbol / notional restrictions | **none exist** | documented (no such fields) |
 | Can a third party hold a user's key? | Yes — any holder of the key's private key can sign for that account. Only an ordinary (all-permission) key can trade. | documented + inferred |
 
-**Consequences for Valuescan:**
+**Consequences for ValueDesk:**
 - The executor will hold ordinary keys ⇒ it can trade, cancel, set leverage, move funds spot↔perps↔owner's EVM
   wallet. It **cannot** send funds to a different owner: EVM withdrawals credit the owner's own EVM address, and
   external withdrawals need the owner's ECDSA `WithdrawToken` permit; internal transfers are "not supported yet".
@@ -443,7 +443,7 @@ Public API and Schema pages (all documented).
 9. **Revocation path** — docs say `DELETE /{engine}/accounts/api-keys`; Opentrade uses `POST …/revoke`; test on
    testnet.
 
-## Recommendations for Valuescan
+## Recommendations for ValueDesk
 
 1. **Architecture of the "copy contract":** make it a *policy + registry + fee* contract on ValueChain (leader
    registry, follower subscriptions with risk params, optional fee escrow/splits for leaders), not an execution

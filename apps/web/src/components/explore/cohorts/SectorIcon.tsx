@@ -2,7 +2,7 @@
  * One line icon per sector (cohorts model.ts SECTORS), drawn like CohortIcon:
  * a 24-unit box, a 1.6 stroke in the current colour.
  */
-import type { Sector } from '@sign/valuescan/cohorts/model.js';
+import type { Sector } from '@sign/valuedesk/cohorts/model.js';
 
 const PATHS: Record<Sector, string> = {
   // A crown: the largest coins.

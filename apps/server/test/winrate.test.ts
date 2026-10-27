@@ -1,7 +1,7 @@
 /**
  * Run: npx tsx --test test/winrate.test.ts   (from apps/server)
  *
- * The shared win rate (valuescan/winRate.ts), the index's coverage freshness
+ * The shared win rate (valuedesk/winRate.ts), the index's coverage freshness
  * across stream restarts, the cohorts' sampling rule, SoDEX analytics that
  * cannot be used, and the label rule.
  */
@@ -9,16 +9,16 @@ process.env.VALUESCAN_INDEX_STREAMS = '0';
 process.env.VALUESCAN_INDEX_COHORTS = '0';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { WIN_RATE_MIN_CLOSES, closeRuns, winRateOf } from '../src/valuescan/winRate.js';
+import { WIN_RATE_MIN_CLOSES, closeRuns, winRateOf } from '../src/valuedesk/winRate.js';
 import { CLOSES_DEF, IndexStore, type FillRow } from '../src/indexer/store.js';
 import { spanCovers } from '../src/indexer/boards.js';
 import { Lane, isTransient } from '../src/indexer/lanes.js';
 import { LighterStream, lighterPrint, type Print } from '../src/indexer/streams.js';
-import { aggregate, netWallet, sampleRule, sampledVenue, sampleHash, type WalletVenue } from '../src/valuescan/cohorts/model.js';
-import { chartSuspect, rebaseWindow, closedStats, type PortfolioChart } from '../src/valuescan/sodex/mappers.js';
-import { labelMatches, shownLabel } from '../src/valuescan/labels.js';
-import { matchesText, toScreenerRow } from '../src/valuescan/screener/model.js';
-import type { TraderRow } from '../src/valuescan/types.js';
+import { aggregate, netWallet, sampleRule, sampledVenue, sampleHash, type WalletVenue } from '../src/valuedesk/cohorts/model.js';
+import { chartSuspect, rebaseWindow, closedStats, type PortfolioChart } from '../src/valuedesk/sodex/mappers.js';
+import { labelMatches, shownLabel } from '../src/valuedesk/labels.js';
+import { matchesText, toScreenerRow } from '../src/valuedesk/screener/model.js';
+import type { TraderRow } from '../src/valuedesk/types.js';
 
 const DAY = 86_400_000;
 const T0 = 20_000 * DAY;
@@ -342,8 +342,8 @@ test('Lighter stream: prints name both sub-accounts; up only once every market i
 // --- labels at the API edge ------------------------------------------------------------------------
 
 test('labels: no name leaves the server, and no search matches one (screener, both providers)', async () => {
-  const { matchesQuery: hlMatches } = await import('../src/valuescan/hyperliquid/leaderboard.js');
-  const { matchesQuery: sodexMatches } = await import('../src/valuescan/sodex/mappers.js');
+  const { matchesQuery: hlMatches } = await import('../src/valuedesk/hyperliquid/leaderboard.js');
+  const { matchesQuery: sodexMatches } = await import('../src/valuedesk/sodex/mappers.js');
   const row: TraderRow = { venue: 'hyperliquid', address: '0xabc0000000000000000000000000000000000001', label: 'Loracle', accountValue: null, pnl: {}, roi: {}, volume: {} };
   assert.equal(shownLabel(row.address, 'Loracle'), null);
   assert.equal(toScreenerRow(row, undefined, [], 0).label, null);

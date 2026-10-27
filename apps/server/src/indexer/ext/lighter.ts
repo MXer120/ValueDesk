@@ -19,10 +19,10 @@
  * Budget: Lighter allows 60 requests / minute per IP; the worker takes
  * VALUESCAN_INDEX_LIGHTER (default 30); the API thread keeps 20 with a burst of 8.
  */
-import type { BoardWindow, Window } from '../../valuescan/types.js';
-import { WINDOWS } from '../../valuescan/types.js';
-import { Pacer } from '../../valuescan/extra/http.js';
-import { LIGHTER_PAGE, LIGHTER_WS, lighterAccounts, lighterActiveMarkets, lighterLeaderboard, lighterMarkets, lighterTrades, type LighterTrade } from '../../valuescan/extra/lighter.js';
+import type { BoardWindow, Window } from '../../valuedesk/types.js';
+import { WINDOWS } from '../../valuedesk/types.js';
+import { Pacer } from '../../valuedesk/extra/http.js';
+import { LIGHTER_PAGE, LIGHTER_WS, lighterAccounts, lighterActiveMarkets, lighterLeaderboard, lighterMarkets, lighterTrades, type LighterTrade } from '../../valuedesk/extra/lighter.js';
 import { Lane } from '../lanes.js';
 import { LighterStream } from '../streams.js';
 import type { FillRow, IndexStore } from '../store.js';

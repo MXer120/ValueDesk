@@ -3,7 +3,7 @@
  *
  * The indexer is a worker thread of the API in dev and its own service on the
  * instance (worker.ts); either way it owns the books and prices them
- * (valuescan/liquidations/live.ts). Writing every change to the index file and
+ * (valuedesk/liquidations/live.ts). Writing every change to the index file and
  * reading it back would put a write a second on a disk that is already the
  * bottleneck, so the changes travel here instead: newline-delimited JSON on
  * 127.0.0.1:VALUESCAN_LIQ_FEED_PORT (8796), one frame per coin and second.
@@ -12,13 +12,13 @@
  *                    {t:"tick", at, ready}     after every flush; ready = every book priced into it once
  *
  * The API keeps every coin whole in memory from these (LiqFeedState) and streams
- * them on to the browsers (routes/valuescan.ts /ws/liq). A new connection gets
+ * them on to the browsers (routes/valuedesk.ts /ws/liq). A new connection gets
  * every coin whole first. Loopback only: nothing else can connect.
  */
 import net from 'node:net';
 import { EventEmitter } from 'node:events';
-import type { Venue } from '../valuescan/types.js';
-import type { LiveDelta } from '../valuescan/liquidations/live.js';
+import type { Venue } from '../valuedesk/types.js';
+import type { LiveDelta } from '../valuedesk/liquidations/live.js';
 
 export const LIQ_FEED_PORT = Number(process.env.VALUESCAN_LIQ_FEED_PORT) || 8796;
 const HOST = '127.0.0.1';

@@ -4,7 +4,7 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LIVE_CHANNELS, liveVideo, resetLiveCache } from '../src/valuescan/youtube/live.js';
+import { LIVE_CHANNELS, liveVideo, resetLiveCache } from '../src/valuedesk/youtube/live.js';
 
 const BLOOMBERG = 'UCIALMKvObZNtJ6AmdCLP7Lg';
 const KEY = 'test-key';

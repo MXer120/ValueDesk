@@ -136,7 +136,7 @@ export function buildSummary(i: SummaryInput): BuiltSummary {
   // --- the screen and the Markdown file -------------------------------------------------------
   const screen: string[] = [];
   const md: string[] = [];
-  md.push(`# Valuescan guided test run - ${verdict}`, '', `Started ${i.startedAt}, finished ${i.finishedAt}.`, `Stages: ${i.mode.stages.join(', ')}${i.mode.planOnly ? ' (stage D: plan only)' : ''}${i.mode.throwawayKey ? ' (throwaway key)' : ''}.`);
+  md.push(`# ValueDesk guided test run - ${verdict}`, '', `Started ${i.startedAt}, finished ${i.finishedAt}.`, `Stages: ${i.mode.stages.join(', ')}${i.mode.planOnly ? ' (stage D: plan only)' : ''}${i.mode.throwawayKey ? ' (throwaway key)' : ''}.`);
   if (i.wallet) md.push(`Test wallet: \`${i.wallet}\`${i.profile ? `, profile \`${i.profile}\`` : ''}.`);
   if (i.stopped) md.push('', `**The run was stopped early: ${i.stopped}.**`);
   md.push('');

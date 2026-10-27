@@ -4,7 +4,7 @@
  * Pure: no I/O, no clock of its own (callers pass `now`), so the board
  * builder and the tests agree on exactly where a window starts.
  */
-import type { BoardWindow, Venue } from '../valuescan/types.js';
+import type { BoardWindow, Venue } from '../valuedesk/types.js';
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 

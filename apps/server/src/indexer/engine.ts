@@ -21,13 +21,13 @@
  *
  * Nothing here signs, trades or moves funds; every request is a public read.
  */
-import { hlInfo, hlLeaderboard } from '../valuescan/hyperliquid/index.js';
-import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
+import { hlInfo, hlLeaderboard } from '../valuedesk/hyperliquid/index.js';
+import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
 import { sodex } from '../sodex/rest.js';
-import { gatewayWeightSpent } from '../valuescan/sodex/gateway.js';
-import { knownAddress, resolveIds, seedAddress } from '../valuescan/sodex/resolver.js';
-import { cooldownLeftMs } from '../valuescan/sodex/util.js';
-import { VENUES, WINDOWS, type BoardWindow, type Venue, type Window } from '../valuescan/types.js';
+import { gatewayWeightSpent } from '../valuedesk/sodex/gateway.js';
+import { knownAddress, resolveIds, seedAddress } from '../valuedesk/sodex/resolver.js';
+import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
+import { VENUES, WINDOWS, type BoardWindow, type Venue, type Window } from '../valuedesk/types.js';
 import { pickBoard, spanCovers, tradeCheck, type Candidate, type TradeCheck } from './boards.js';
 import { hlCandidates, hlChartWindows, hlQuickCheck, hlSyncFills } from './hlSource.js';
 import { Lane } from './lanes.js';
@@ -37,10 +37,10 @@ import { TradexyzVenue } from './ext/tradexyz.js';
 import type { ExtVenue } from './ext/types.js';
 import { CohortTracker } from './cohortTracker.js';
 import { mark, startedBefore } from './busy.js';
-import { hlCoinName } from '../valuescan/extra/account.js';
+import { hlCoinName } from '../valuedesk/extra/account.js';
 import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses, syncLists, syncTrades } from './sodexSource.js';
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
-import { winRateOf } from '../valuescan/winRate.js';
+import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, type Print } from './streams.js';
 import {
   BOARD_SIZE,
@@ -1345,7 +1345,7 @@ export class Indexer {
         // Qualified by closed positions or the stream while the held fills show fewer: at least MIN_TRADES.
         trades: filter === 'active' ? Math.max(MIN_TRADES, n ?? 0) : n,
         tradesCapped: capped || !t.exact || (filter === 'active' && (n ?? 0) < MIN_TRADES),
-        // valuescan/winRate.ts: exact over the window, or an estimate from enough held closes.
+        // valuedesk/winRate.ts: exact over the window, or an estimate from enough held closes.
         winRate: wr.winRate,
         winExact: wr.winRateExact,
         winCloses: wr.winRateCloses,

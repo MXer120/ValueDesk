@@ -1,6 +1,6 @@
-# 04 — Opentrade reuse map for the Valuescan backend
+# 04 — Opentrade reuse map for the ValueDesk backend
 
-Research date: 2026-09-25. Scope: every file under `Opentrade/server/src`, plus the backend-relevant files in `Opentrade/web/src`. The question is what Valuescan can reuse for four targets:
+Research date: 2026-09-25. Scope: every file under `Opentrade/server/src`, plus the backend-relevant files in `Opentrade/web/src`. The question is what ValueDesk can reuse for four targets:
 
 - **(a) Indexer**: tracks thousands of SoDEX accounts across many tenants.
 - **(b) Public read API**: serves Explore, Leaderboard, Scan and Stats.
@@ -107,7 +107,7 @@ Legend: ✅ reuse as-is · 🔧 port (keep logic, adapt the wiring) · ♻️ re
 | `deposit.ts` (256) | Chain info, asset list, `prepare` (unsigned approve+deposit calldata, on-chain symbol/decimals re-check, `eth_call` dry run), tx status | Calldata byte-matched to mainnet | — | 🔧 | — | 🔧 |
 | `mirror.ts` (228) | Cross-chain deposit options: `alpha-biz /biz/config/symbol` whitelist ∩ `POST /biz/mirror/create_deposit_addresses` ∩ on-chain `getDepositWallet` re-derivation | Verified by the author; the docs now also list `POST /api/v1/user/{addr}/deposit-address(es)` (weight 200) | — | 🔧 | — | 🔧 |
 | `onboarding.ts` (145) | Four gates: wallet / registered (`getUserId`) / key / funded | Verified | — | 🔧 | — | 🔧 |
-| `pointsAuth.ts` (120) | Proxies `sodex.com/auth/v2/{nonce,verify}` **with `Origin: https://sodex.com` set server-side** to get past SoDEX's CORS allowlist | Verified by the author | — | ❌ (DEPLOYMENT.md:175-191: hosting this means handling users' SoDEX JWTs and impersonating their origin) | — | ♻️ only if SoDEX allowlists Valuescan's origin |
+| `pointsAuth.ts` (120) | Proxies `sodex.com/auth/v2/{nonce,verify}` **with `Origin: https://sodex.com` set server-side** to get past SoDEX's CORS allowlist | Verified by the author | — | ❌ (DEPLOYMENT.md:175-191: hosting this means handling users' SoDEX JWTs and impersonating their origin) | — | ♻️ only if SoDEX allowlists ValueDesk's origin |
 | `external.ts` (516) | `/api/external/leaderboard` (enum-validated: windows `24H/7D/30D/ALL_TIME`, `sort_by pnl/volume`, `page_size ∈ {10,20,50}`), `/leaderboard/rank`, `/resolve-account`, `/maintenance/status` (NORMAL vs anything else, plus any recent 503 from any SoDEX host), `/announcements` (+detail with `htmlToText`, dropping the always-zero `startTime`/`endTime`) | Enums verified today (`page_size=100` → 400) | 🔧 leaderboard crawl source | ✅ port nearly as-is | — | — |
 | `stats.ts` (266) | `/api/stats/all-time`: kicks `ensureSync` for 3 scopes, answers at once from cache + progress; merges the venue "headline" from `mainnet-data /perps/pnl/overview` + `/daily_stats` (perps-only, UTC-midnight snapshot); `spotRealizedPnl: null` with reason | Headline shapes verified today; `/spot/pnl/overview` 404 verified | 🔧 | 🔧 **the provenance-labelled response design is worth keeping** | — | — |
 | `scan.ts` (483) | Legacy backend for the old static Scan page: `/api/scan{,/trades,/funding,/prices,/feerates,/windows,/live,/feeschedule,/track*}`, `/api/feed/account`; depends on third-party `communityscan-sodex.com/api/public/wallet/{addr}`; `leaderboardMap()` (top 500, 10 min TTL); in-memory tracker (max 6 wallets) | **Web no longer calls `/api/scan/*`**. Only `/api/feed/account` is used (`App.tsx:47`); several field bugs (§7) | 🔧 salvage `leaderboardMap` (fix the param) and the resolver order LB → on-chain | ❌ mostly; ❌ CommunityScan dependency | — | — |
@@ -133,7 +133,7 @@ What "Katana" is: Katana is a DeFi chain whose perp DEX, **Katana Perps**, was b
 | `points.ts` (919) | `alpha-biz /biz/sopoints/{week/info,summary,week/list}` (summary/list need a bearer token), `/biz/referral/public/referralCode`; `mainnet-data /api/v1/leaderboard{,/rank}` (+`90D` window on rank), `/api/v1/dashboard/{volume,open-interest,tvl,users}` | Partly verified | 🔧 venue KPIs (volume/OI/TVL/users) | 🔧 | ✅ |
 | `scanChain.ts` (193) | Blockscout `main-scan.valuechain.xyz/api/v2/addresses/{a}/token-balances` (bare array), `/addresses/{a}`, `/addresses/{a}/counters`; prices from spot `*_vUSDC` tickers (`lastPx`) | Explorer `exchange_rate` always null (author) | — | 🔧 | ✅ |
 | `accountFeeds.ts` (211) | Refcounted shared polling per `(resource, engine, address)` key, 1.5 s eviction grace, debounced WS-triggered refresh `bumpAccountResource` | Author measured the dedup | — | — | ✅ |
-| `components/Leaderboard.tsx` (282) | `/api/external/leaderboard` + `/rank` (backend proxy of `mainnet-data`) | Shows `snapshot_ts`; page sizes 10/20/50 | — | 🔧 Valuescan should serve its **own** ranking (copy metrics), with SoDEX's as the "venue" view | 🔧 UI |
+| `components/Leaderboard.tsx` (282) | `/api/external/leaderboard` + `/rank` (backend proxy of `mainnet-data`) | Shows `snapshot_ts`; page sizes 10/20/50 | — | 🔧 ValueDesk should serve its **own** ranking (copy metrics), with SoDEX's as the "venue" view | 🔧 UI |
 | `components/Stats.tsx` (574) | `/api/stats/all-time` (walk + venue headline) | Provenance per number; per-coin fees | — | 🔧 | 🔧 UI |
 | `ws.ts` | Browser hub client (refcount, reconnect, re-arm) | Talks to `/ws` hub | — | — | 🔧 repoint to `wss://mainnet-gw.sodex.dev/ws/{engine}` for own-account channels |
 
@@ -194,14 +194,14 @@ In total that is 349,069 rows in a **231 MB** file, about **660 B/row on disk**,
 - **"Venue headline":** `GET mainnet-data.sodex.dev/api/v1/perps/pnl/overview?account_id=` returns `{account_id, ts_ms, cumulative_pnl, cumulative_quote_volume, unrealized_pnl, first_trade_ts_ms}`. `ts_ms` is a UTC-midnight snapshot; I verified `1790294400000` = 2026-09-25T00:00Z. The curve comes from `…/perps/pnl/daily_stats?account_id=` → `{items:[{ts_ms, pnl}]}`, which is cumulative (220 points for account 52599).
 - The route needs `aid` first. It gets it from gateway `state.aid`, a weight-5 call; `aid = 0` means there is no account.
 
-For Valuescan, the headline endpoints plus `wallet/portfolio/chart` (§2.6) give **free precomputed perps PnL/ROI per account**. That is useful for ranking before our own reconstruction exists. Its limits: perps only, and a daily cadence for `pnl/*`.
+For ValueDesk, the headline endpoints plus `wallet/portfolio/chart` (§2.6) give **free precomputed perps PnL/ROI per account**. That is useful for ranking before our own reconstruction exists. Its limits: perps only, and a daily cadence for `pnl/*`.
 
 ### 3.3 `routes/scan.ts` and `routes/external.ts`
 
 - `external.ts` is clean and small. Port it nearly unchanged for (b). Its enum validation (`page_size ∈ {10,20,50}`, windows) was verified again today.
 - `scan.ts` is a port of another dashboard's `adapters.py`. Its only live consumer is `/api/feed/account`, the id→address lookup used by the trade tape. Its resolver order is right: the leaderboard map (authoritative for listed accounts) first, then the on-chain resolver.
 - Everything else in `scan.ts` is superseded by the in-app Scan (`web/public/scan/index.html` is now just a redirect). It also has the field bugs in §7.
-- It depends on a **third-party** host, `https://www.communityscan-sodex.com/api/public/wallet/{addr}`, which Valuescan should not rely on.
+- It depends on a **third-party** host, `https://www.communityscan-sodex.com/api/public/wallet/{addr}`, which ValueDesk should not rely on.
 
 ### 3.4 `sodex/ws.ts` + `hub.ts`: fan-out, the channel matrix, and what breaks at scale
 
@@ -296,7 +296,7 @@ Other on-chain pieces:
 - **Vectors.** `server/test/vectors.json` holds 19 vectors, generated by `server/tools/genvectors.go` from a checkout of `sodex-tech/sodex-go-sdk-public` (test key `0x4c08…2318`, testnet 138565). The command is `go run ./tools/genvectors > vectors.json`.
 - **Covered actions:** perps limit, market reduce-only, stop-loss, tiny price, multi-order, cancel, modify, leverage, margin, transfer→spot, schedule-cancel armed/cleared, spot batch new, spot market-by-funds, spot batch cancel, spot→perps transfer, replace, revoke key, and user-signed add-permissioned-key.
 - `vectors.test.ts` asserts the canonical JSON, payload hash, body and 66-byte signature for each.
-- **Missing for Valuescan:** `builder` on perps orders (per order and as a batch default) and on spot batches, `AddAPIKeyWithBuilder`, `ApproveBuilderFeeAction`, `AddAPIKey` (the new documented registration), and the new endpoint `POST /api/v1/user/{addr}/api-keys`. The Go SDK or the Python SDK must be checked for these struct field orders before writing vectors. The docs state that `builder` is the **last** field in its structure, with `id` before `fee`, and that `builder` and `permissions` are **mutually exclusive** in one registration request (builder-codes.md:93,122).
+- **Missing for ValueDesk:** `builder` on perps orders (per order and as a batch default) and on spot batches, `AddAPIKeyWithBuilder`, `ApproveBuilderFeeAction`, `AddAPIKey` (the new documented registration), and the new endpoint `POST /api/v1/user/{addr}/api-keys`. The Go SDK or the Python SDK must be checked for these struct field orders before writing vectors. The docs state that `builder` is the **last** field in its structure, with `id` before `fee`, and that `builder` and `permissions` are **mutually exclusive** in one registration request (builder-codes.md:93,122).
 
 ### 3.8 `elevation.ts`: the safety pattern
 
@@ -305,7 +305,7 @@ The resting key is `TRADE|CANCEL` (3). Every fund movement mints a second key wh
 - it is single-use and bound to an exact `ElevationIntent`;
 - it is revoked after use, on mismatch, on expiry, and on shutdown.
 
-For Valuescan the **executor must hold mask-3 keys only**. The elevation pattern belongs in the browser for the user's own transfers and withdrawals.
+For ValueDesk the **executor must hold mask-3 keys only**. The elevation pattern belongs in the browser for the user's own transfers and withdrawals.
 
 ---
 
@@ -419,7 +419,7 @@ WS limits per IP (docs): 10 connections, 30 new/min, **1000 subscriptions, 10 un
 
 - **How to run:** from the repo root, `npm test`, which runs `tsx --test test/*.test.ts` in `server/`. Or `cd server && npx tsx --test test/*.test.ts`. Typecheck with `npm run typecheck`.
 - **Offline and safe:** they use `https://test.invalid`, a monkey-patched `globalThis.fetch`, and `os.tmpdir()` scratch dirs. No live network, no writes to the repo (`git status` clean after the run).
-- **Test coverage relevant to Valuescan:**
+- **Test coverage relevant to ValueDesk:**
   - vectors (signing parity with Go);
   - regressions from the adversarial review (funds zero-check, maxNotional with a minNotional "0" sentinel, stopPrice tick snapping, TP/SL with funds-denominated entries);
   - `isTransientFailure`, `weightFor`;
@@ -512,7 +512,7 @@ WS limits per IP (docs): 10 connections, 30 new/min, **1000 subscriptions, 10 un
 3. **What does `x-ratelimit-limit: 6000` count** (requests or weight), and does the documented 1200 weight/min also apply at origin? *Verify:* from an otherwise idle IP, issue known-weight calls and diff `x-ratelimit-remaining`.
 4. **The data host (`mainnet-data`) has no documented rate limit.** It is needed for the 2,693-page leaderboard crawl. *Verify:* crawl slowly and watch for 429 or Cloudflare challenges; or ask SoDEX.
 5. **Does the `trade` firehose include liquidation, ADL or takeover fills,** and does it ever drop prints (sequence gaps in `t`)? *Verify:* run the firehose alongside REST `/accounts/{a}/trades` for a set of accounts over a day and reconcile.
-6. **WS `Origin` policy** for browser connections from a Valuescan domain. Not testable from Node (it sends no Origin). *Verify:* one browser tab on a staging origin.
+6. **WS `Origin` policy** for browser connections from a ValueDesk domain. Not testable from Node (it sends no Origin). *Verify:* one browser tab on a staging origin.
 7. **Where SoDEX's origin servers are.** The edge→origin leg is ≈ 280+ ms from FRA. This matters for where to place the executor. *Verify:* compare TTFB from a few regions (without launching test instances; see the AWS hard rule) or ask SoDEX.
 8. **Is the old `/{engine}/accounts/api-keys` + `UserSignedAddPermissionedAPIKeyAction` path still accepted,** or is it deprecated in favour of `/user/{addr}/api-keys`? *Verify:* a testnet signature-layer probe, as NOTES.md did (a rejection at the auth layer is enough).
 9. **Pagination and time filters of `positions/history`** (`startTime`/`endTime` semantics, maximum depth). *Verify:* a read-only walk on a busy account.
@@ -520,7 +520,7 @@ WS limits per IP (docs): 10 connections, 30 new/min, **1000 subscriptions, 10 un
 
 ---
 
-## 10. Recommendations for Valuescan
+## 10. Recommendations for ValueDesk
 
 1. **Create `packages/sodex-core` (isomorphic, ESM, no Node APIs)** by lifting these unchanged:
    - `signing/eip712.ts`, `signing/actions.ts`, `signing/userSigned.ts`;
@@ -541,7 +541,7 @@ WS limits per IP (docs): 10 connections, 30 new/min, **1000 subscriptions, 10 un
    - `positions/history` gives per-trade PnL and win-rate.
 3. **Port `history.ts` logic, not its storage.** Keep the inclusive `endTime`, whole-row hash dedupe (switch to `(engine, account, tradeID, orderID, time, price, qty)` or keep a hash), per-page checkpoints and the "failed page ≠ end" rule. Replace SQLite with columnar storage and the Maps with a durable queue. Write pager unit tests first; none exist.
 4. **Make the rate budget a shared, per-egress-IP token service** (e.g. Redis), with the corrected weight table. Treat the documented 1200/min as the ceiling until question 3 is answered, and back off on `x-ratelimit-remaining`.
-5. **Public read API (b):** port `external.ts` (leaderboard/rank/maintenance/announcements) and the provenance-labelled response design from `stats.ts`. Serve Valuescan's own rankings from indexed data, and keep SoDEX's `pnl/overview`, `daily_stats` and `wallet/portfolio/chart` as a labelled "venue" view. Do **not** port `scan.ts` (CommunityScan dependency, field bugs) or `pointsAuth.ts` (Origin spoofing).
+5. **Public read API (b):** port `external.ts` (leaderboard/rank/maintenance/announcements) and the provenance-labelled response design from `stats.ts`. Serve ValueDesk's own rankings from indexed data, and keep SoDEX's `pnl/overview`, `daily_stats` and `wallet/portfolio/chart` as a labelled "venue" view. Do **not** port `scan.ts` (CommunityScan dependency, field bugs) or `pointsAuth.ts` (Origin spoofing).
 6. **Copy executor (c):**
    - reuse `SodexClient`'s signed path with one mask-3 key per follower (own nonce tracker);
    - reuse `normaliseOrder` before every signature, and `trade.ts`'s perps order assembly (reduce-only exits, spot-trigger refusal);

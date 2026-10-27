@@ -31,7 +31,7 @@ import {
   type RefObject,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { COHORT_BY_ID } from '@sign/valuescan/cohorts/model.js';
+import { COHORT_BY_ID } from '@sign/valuedesk/cohorts/model.js';
 import { VENUE_LABEL, type TraderRow, type Venue } from '../../vsApi';
 import { VENUE_BRAND } from '../venueBrand';
 import { VenueLogo } from '../VenueLogo';

@@ -31,7 +31,7 @@ import { externalRoutes } from './routes/external.js';
 import { statsRoutes } from './routes/stats.js';
 import { scanRoutes } from './routes/scan.js';
 import { pointsAuthRoutes } from './routes/pointsAuth.js';
-import { valuescanRoutes } from './routes/valuescan.js';
+import { valuedeskRoutes } from './routes/valuedesk.js';
 import { builderRoutes } from './routes/builder.js';
 import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
@@ -210,9 +210,9 @@ await app.register(scanRoutes);
 // not mounted either. Bring it back only with SoDEX's written OK or an official API - and
 // without the forged headers.
 void pointsAuthRoutes;
-// Valuescan: multi-venue traders (SoDEX + Hyperliquid) for Explore,
-// Leaderboard, Scan and Copy. Read-only - see routes/valuescan.ts.
-await app.register(valuescanRoutes);
+// ValueDesk: multi-venue traders (SoDEX + Hyperliquid) for Explore,
+// Leaderboard, Scan and Copy. Read-only - see routes/valuedesk.ts.
+await app.register(valuedeskRoutes);
 // Builder fee tiers: the signed terms of the fee a wallet owes - see routes/builder.ts.
 await app.register(builderRoutes);
 // Knowledge folders: each wallet's own research (notes, tables, chart snapshots, news,
@@ -475,16 +475,16 @@ await app.listen({ host: HOST, port: PORT });
 // (indexer/read.ts warmCohorts), so a restart does not leave the first visitor -
 // and, the read being synchronous, the whole API with them - waiting for it.
 setTimeout(() => {
-  void Promise.all([import('./indexer/read.js'), import('./valuescan/types.js')])
+  void Promise.all([import('./indexer/read.js'), import('./valuedesk/types.js')])
     .then(([r, t]) => r.warmCohorts(t.VENUES))
     .catch((e) => app.log.warn({ err: e }, 'cohorts warm-up failed'));
 }, 3_000).unref();
 
-// Official economic results at the release second (valuescan/releases.ts): one
+// Official economic results at the release second (valuedesk/releases.ts): one
 // watcher in this process, hosted or not; idle but for a minute's look at the
 // calendar outside the minutes around a release. VALUESCAN_RELEASES=0 turns it off.
 if (process.env.VALUESCAN_RELEASES !== '0') {
-  const { startReleaseWatcher } = await import('./valuescan/releases.js');
+  const { startReleaseWatcher } = await import('./valuedesk/releases.js');
   startReleaseWatcher({ log: app.log });
 }
 

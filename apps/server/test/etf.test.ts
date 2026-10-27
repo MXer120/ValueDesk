@@ -8,8 +8,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { NotAvailable } from '../src/valuescan/types.js';
-import { resetNewsCache } from '../src/valuescan/sosovalue/news.js';
+import { NotAvailable } from '../src/valuedesk/types.js';
+import { resetNewsCache } from '../src/valuedesk/sosovalue/news.js';
 import {
   buildFunds,
   daysIn,
@@ -23,7 +23,7 @@ import {
   resetEtf,
   sosoData,
   type EtfDay,
-} from '../src/valuescan/sosovalue/etf.js';
+} from '../src/valuedesk/sosovalue/etf.js';
 
 const json = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/etf/${name}`, import.meta.url), 'utf8'));
 

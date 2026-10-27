@@ -11,7 +11,7 @@
  * the subject changes (same sampling as LeanChart).
  */
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { COHORT_BY_ID, longShare, type CohortId, type CohortPoint } from '@sign/valuescan/cohorts/model.js';
+import { COHORT_BY_ID, longShare, type CohortId, type CohortPoint } from '@sign/valuedesk/cohorts/model.js';
 import { CohortIcon } from './CohortIcon';
 import { COHORT_COLOR } from './cohortStyle';
 import { morphPath } from './LeanChart';

@@ -14,7 +14,7 @@
  * fresh trading key is generated here, the wallet signs one EIP-712 message
  * registering it on the user's SoDEX account (exactly what sodex.com does for
  * its own web key), and the key is kept on this device, sealed, until it
- * expires. The wallet's own private key is never read, and no Valuescan server
+ * expires. The wallet's own private key is never read, and no ValueDesk server
  * ever holds a key that can trade. A wallet with no SoDEX account yet gets the
  * Deposit sheet (funds/DepositModal.tsx) instead - its first deposit opens the account.
  *

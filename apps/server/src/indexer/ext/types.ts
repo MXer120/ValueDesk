@@ -3,7 +3,7 @@
  * `pnl_snap`, its trades in `fills` + `coverage`, its public trade stream (if
  * any) in the activity tables. The adapter only knows how to fill those.
  */
-import type { BoardWindow, Venue } from '../../valuescan/types.js';
+import type { BoardWindow, Venue } from '../../valuedesk/types.js';
 import type { Lane } from '../lanes.js';
 import type { Print } from '../streams.js';
 import type { IndexStore } from '../store.js';

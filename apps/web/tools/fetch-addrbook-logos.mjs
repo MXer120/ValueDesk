@@ -26,9 +26,9 @@ import { shrinkPng } from './png-shrink.mjs';
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = join(WEB, 'tools', 'addrbook-catalog.json');
 const OUT = join(WEB, 'public', 'addrbook');
-const STAGE = join(tmpdir(), 'valuescan-addrbook-staging');
+const STAGE = join(tmpdir(), 'valuedesk-addrbook-staging');
 const DATA = join(WEB, 'src', 'components', 'funds', 'addrbook', 'catalogData.ts');
-const UA = { 'User-Agent': 'Mozilla/5.0 (valuescan logo sync)' };
+const UA = { 'User-Agent': 'Mozilla/5.0 (valuedesk logo sync)' };
 const MAX_BYTES = 400_000;
 
 const TYPES = { 'image/png': '.png', 'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/webp': '.webp', 'image/svg+xml': '.svg', 'image/x-icon': '.ico', 'image/vnd.microsoft.icon': '.ico', 'image/gif': '.gif' };

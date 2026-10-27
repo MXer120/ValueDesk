@@ -64,7 +64,7 @@ current. Code: `apps/server/src/indexer/`.
 - A Hyperliquid master with no fills of its own is counted through its sub-accounts (the leaderboard adds them into its row).
 - Trade checks on Lighter and Arcus read a full page: the two newest rows can be fills of one execution.
 
-## Win rate (one definition: `apps/server/src/valuescan/winRate.ts`)
+## Win rate (one definition: `apps/server/src/valuedesk/winRate.ts`)
 
 - **One close** is a run of consecutive position-reducing fills in one market and one direction.
   - The run ends at the next fill in that market that adds to a position (realises nothing), at one that reduces the other way, or at the UTC day boundary.
@@ -140,7 +140,7 @@ current. Code: `apps/server/src/indexer/`.
 
 ## Names
 
-No username is shown. Every API row has `label: null`, and no search matches a name (`apps/server/src/valuescan/labels.ts`). The stored column is kept.
+No username is shown. Every API row has `label: null`, and no search matches a name (`apps/server/src/valuedesk/labels.ts`). The stored column is kept.
 
 ## Logos
 

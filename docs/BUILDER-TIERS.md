@@ -11,7 +11,7 @@ Fees are in tenths of a basis point, as SoDEX signs them: `20` = 2 bp = 0.02 % o
 
 **Guaranteed in the app we ship (unmodified):**
 
-- Every order placed through Valuescan carries our builder at the fee that wallet owes. There is no way to
+- Every order placed through ValueDesk carries our builder at the fee that wallet owes. There is no way to
   trade through the app without it: declining the approval, revoking it on SoDEX or lowering it leaves trading
   off until it is approved again.
 - Nothing a user can change locally removes or lowers the fee: not browser storage, not the address bar, not

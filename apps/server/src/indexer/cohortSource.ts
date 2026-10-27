@@ -18,18 +18,18 @@
  * Symbols are kept exactly as the venue's trade stream names them, so a print
  * can be applied to the position it moves.
  */
-import type { Venue } from '../valuescan/types.js';
-import { hlInfo } from '../valuescan/hyperliquid/index.js';
-import type { HlClearinghouseState, HlPortfolio } from '../valuescan/hyperliquid/raw.js';
-import { portfolioWindow } from '../valuescan/hyperliquid/mappers.js';
+import type { Venue } from '../valuedesk/types.js';
+import { hlInfo } from '../valuedesk/hyperliquid/index.js';
+import type { HlClearinghouseState, HlPortfolio } from '../valuedesk/hyperliquid/raw.js';
+import { portfolioWindow } from '../valuedesk/hyperliquid/mappers.js';
 import type { CohortPnlRow } from './store.js';
 import type { FundingRow } from './cohortRebuild.js';
-import { perpsState } from '../valuescan/sodex/gateway.js';
-import { arcusAccount } from '../valuescan/extra/arcus.js';
-import { LIGHTER_API } from '../valuescan/extra/lighter.js';
-import { num, type Pacer } from '../valuescan/extra/http.js';
-import type { Position } from '../valuescan/cohorts/model.js';
-import type { ReadPos } from '../valuescan/liquidations/math.js';
+import { perpsState } from '../valuedesk/sodex/gateway.js';
+import { arcusAccount } from '../valuedesk/extra/arcus.js';
+import { LIGHTER_API } from '../valuedesk/extra/lighter.js';
+import { num, type Pacer } from '../valuedesk/extra/http.js';
+import type { Position } from '../valuedesk/cohorts/model.js';
+import type { ReadPos } from '../valuedesk/liquidations/math.js';
 
 /** The cross cash an account value implies: its value with every cross position at 0. */
 const cashOf = (value: number | null, ps: readonly ReadPos[]): number | null => {
@@ -58,7 +58,7 @@ export interface PositionRead {
   /** What the read spent beyond READ_COST (the spot state). */
   extraCost?: number;
   /**
-   * What the liquidation math needs (valuescan/liquidations/math.ts calibrate):
+   * What the liquidation math needs (valuedesk/liquidations/math.ts calibrate):
    * each position's mark, the venue's liquidation price where it gives one, its
    * margin mode, and the cross cash the account value implies (`cash0`).
    */

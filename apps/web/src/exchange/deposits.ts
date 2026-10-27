@@ -8,7 +8,7 @@
  * issuer names the same one. The sources are all public and answer any origin -
  * sodex.com's own API (config, issuer) and two `view` functions on ValueChain
  * (the mirror and deposit-wallet registries) - so no wallet's deposit addresses
- * pass through Valuescan, and the reads cost the user's own IP.
+ * pass through ValueDesk, and the reads cost the user's own IP.
  *
  * The on-chain reads are batched: a deposit sheet asks about ~25 chain/coin
  * pairs at once, and they go to the ValueChain RPC as a handful of JSON-RPC

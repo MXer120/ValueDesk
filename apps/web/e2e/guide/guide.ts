@@ -132,7 +132,7 @@ async function main(argv: string[]): Promise<number> {
     shared: newShared(),
   };
 
-  out.banner('VALUESCAN - GUIDED TEST RUN', startedAt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC');
+  out.banner('VALUEDESK - GUIDED TEST RUN', startedAt.toISOString().slice(0, 16).replace('T', ' ') + ' UTC');
   out.say(`This guide tests everything that can be tested before launch, step by step, and ends with one summary. It tells you what to do whenever it needs you. Stages in this run: ${args.stages.map((s) => `${s} (${STAGE_TITLES[s].toLowerCase()})`).join(', ')}.`);
   if (args.yes) out.say('--yes: questions that do not involve money are answered with their default. A key and a real-funds confirmation are always asked.');
   if (args.planOnly) out.say('--plan-only: stage D stops after the read-only plan. Nothing is signed or sent in this run.');

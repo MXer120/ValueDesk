@@ -290,12 +290,12 @@ export interface RelayContext {
   /** `paused()`: subscribe, update and resume revert while paused; stops never do. */
   paused?: boolean;
   /**
-   * Relayer policy against spam paid by Valuescan (audit: leader spam): whether `delegatedKey` is a key Valuescan's
+   * Relayer policy against spam paid by ValueDesk (audit: leader spam): whether `delegatedKey` is a key ValueDesk's
    * key service issued for exactly this follower and SoDEX account. Checked for Subscribe and UpdateSubscription
    * (pass `subscriptionAccount` for updates). A refused follower can still call the contract directly and pay its own
    * gas: this is relay policy, not a protocol rule.
    */
-  isValuescanKey?: (delegatedKey: Address, follower: Address, sodexAccountId: bigint | undefined) => boolean;
+  isValuedeskKey?: (delegatedKey: Address, follower: Address, sodexAccountId: bigint | undefined) => boolean;
   /** For UpdateSubscription: the subscription's `sodexAccountId` (immutable; from the index or `getSubscription`). */
   subscriptionAccount?: bigint;
 }
@@ -345,10 +345,10 @@ export function buildRelayTransaction(signed: SignedAction, ctx: RelayContext): 
     problems.push(`signed for version ${a.expectedVersion}; the subscription is at ${ctx.currentVersion} (re-sign)`);
   }
   if (ctx.paused && !worksWhilePaused(a.type)) problems.push('the contract is paused for new activity (stops still work)');
-  if (ctx.isValuescanKey && (a.type === 'Subscribe' || a.type === 'UpdateSubscription')) {
+  if (ctx.isValuedeskKey && (a.type === 'Subscribe' || a.type === 'UpdateSubscription')) {
     const account = a.type === 'Subscribe' ? a.sodexAccountId : ctx.subscriptionAccount;
-    if (!ctx.isValuescanKey(a.terms.delegatedKey, signer, account)) {
-      problems.push('the delegated key was not issued by Valuescan for this follower and account (not relayed; call directly)');
+    if (!ctx.isValuedeskKey(a.terms.delegatedKey, signer, account)) {
+      problems.push('the delegated key was not issued by ValueDesk for this follower and account (not relayed; call directly)');
     }
   }
 

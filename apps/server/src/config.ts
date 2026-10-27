@@ -117,7 +117,7 @@ export const ALLOW_MAINNET_WRITES = env('VALUETRADE_ALLOW_MAINNET', '1') !== '0'
 /**
  * SERVER-SIDE SIGNING - Opentrade's model, where this process mints, holds and
  * uses a user's trading key - is OFF unless turned on for a local, single-user
- * setup. Valuescan trades from the browser: the trading key is created, kept
+ * setup. ValueDesk trades from the browser: the trading key is created, kept
  * and used there (apps/web/src/trading) and orders go straight to SoDEX, so a
  * hosted server holds nothing that can trade or move funds, and sees no order.
  * While this is off, every custodial route answers 410 (hosted.ts,
@@ -128,7 +128,7 @@ export const SERVER_SIGNING = !HOSTED && env('VALUETRADE_SERVER_SIGNING', '0') =
 
 /**
  * Browser origins, besides loopback, allowed to call the write routes -
- * a hosted deployment's own site, e.g. `https://app.valuescan.example`.
+ * a hosted deployment's own site, e.g. `https://app.valuedesk.example`.
  * Comma-separated, exact origins. VALUESCAN_ALLOWED_ORIGINS, or the older
  * VALUETRADE_ALLOWED_ORIGINS.
  */

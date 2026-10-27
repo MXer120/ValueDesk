@@ -220,7 +220,7 @@ export interface Position {
   symbol: string;
   szi: number;
   entry: number | null;
-  /** Liquidation extras (valuescan/liquidations/math.ts LiqPos): absent on a cross position. */
+  /** Liquidation extras (valuedesk/liquidations/math.ts LiqPos): absent on a cross position. */
   iso?: number | null;
   lev?: number | null;
   fix?: number | null;
@@ -661,7 +661,7 @@ export interface CohortWalletRow {
   pnl: number | null;
   /** PnL over the page's range (`CohortWalletsResponse.range`); null = not known for that range. */
   pnlRange: number | null;
-  /** Win rate over the range (valuescan/winRate.ts), from the index; null below the threshold or not indexed. */
+  /** Win rate over the range (valuedesk/winRate.ts), from the index; null below the threshold or not indexed. */
   winRate: number | null;
   winRateExact: boolean;
   winRateCloses: number | null;

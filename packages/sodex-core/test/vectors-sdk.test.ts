@@ -1,5 +1,5 @@
 /**
- * Valuescan additions, pinned against bytes produced by the OFFICIAL Go SDK
+ * ValueDesk additions, pinned against bytes produced by the OFFICIAL Go SDK
  * (tools/genvectors/main.go run inside a checkout of sodex-go-sdk-public; the
  * commit is in test/vectors-sdk.commit).
  *

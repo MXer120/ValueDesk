@@ -2,8 +2,8 @@
  * /api/vs/*: the multi-venue trader API behind Explore, Leaderboard, Scan and Copy.
  *
  * This file only validates, dispatches and merges. Every venue-specific fetch,
- * cache and rate budget lives in its provider (valuescan/sodex,
- * valuescan/hyperliquid). Failures come back as HTTP 200 {ok:false,...}, the
+ * cache and rate budget lives in its provider (valuedesk/sodex,
+ * valuedesk/hyperliquid). Failures come back as HTTP 200 {ok:false,...}, the
  * same convention routes/scan.ts uses, so one venue being down renders as a
  * per-section message rather than a blanked page.
  *
@@ -14,19 +14,19 @@
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts&history   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; history=1 the chart's: the feed as far back as kept, up to 300, hot ones ranked; SOSOVALUE_API_KEY, else not_available)
- *   GET /api/vs/news/sources?ids=whitehouse,watcherguru&coin&q&limit   (news from other sources' RSS feeds, newest first - valuescan/feeds.ts)
+ *   GET /api/vs/news/sources?ids=whitehouse,watcherguru&coin&q&limit   (news from other sources' RSS feeds, newest first - valuedesk/feeds.ts)
  *   GET /api/vs/logo?domain   (a news source's site icon, read and cached here so the page asks only this origin)
- *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuescan/calendar.ts)
- *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuescan/releases.ts)
+ *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuedesk/calendar.ts)
+ *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuedesk/releases.ts)
  *   GET /api/vs/fed/live   (the Federal Reserve's current broadcast: its Brightcove HLS stream)
- *   GET /api/vs/fedwatch   (the coming FOMC meetings' decision probabilities: Kalshi, Polymarket beside - valuescan/fedwatch.ts)
+ *   GET /api/vs/fedwatch   (the coming FOMC meetings' decision probabilities: Kalshi, Polymarket beside - valuedesk/fedwatch.ts)
  *   GET /api/vs/fedwatch/history?meeting=YYYY-MM-DD&range=7d|30d|90d   (one meeting's probabilities over time, Kalshi's candlesticks)
- *   GET /api/vs/indicators   (the catalog of the calendar's indicators - valuescan/indicators.ts)
+ *   GET /api/vs/indicators   (the catalog of the calendar's indicators - valuedesk/indicators.ts)
  *   GET /api/vs/indicator?id&range=1y|5y|10y|max   (one indicator's history from FRED, its table and next release)
- *   GET /api/vs/etf/flows?asset=BTC|ETH|SOL..&range=1m|3m|1y|all   (US spot ETF flows and funds, SoSoValue - valuescan/sosovalue/etf.ts; SOSOVALUE_API_KEY, else not_available)
+ *   GET /api/vs/etf/flows?asset=BTC|ETH|SOL..&range=1m|3m|1y|all   (US spot ETF flows and funds, SoSoValue - valuedesk/sosovalue/etf.ts; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/oracle?coin=BTC&venues=a,b   (the shared price oracle over 19 venues - routes/oracle.ts)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
- *   GET /api/vs/screener?...   (query owned by valuescan/screener.ts)
+ *   GET /api/vs/screener?...   (query owned by valuedesk/screener.ts)
  *   GET /api/vs/lbrow?venue=hyperliquid&address   (one leaderboard row from the index)
  *   GET /api/vs/index/status   (the indexer's full diagnostics; never on a hosted server)
  *   GET /api/vs/index/health   (its health in numbers, for monitoring on the instance)
@@ -43,30 +43,30 @@ import {
   type Venue,
   type VenueProvider,
   type Window,
-} from '../valuescan/types.js';
-import { sodexProvider } from '../valuescan/sodex/index.js';
-import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuescan/hyperliquid/index.js';
-import { hlPriceSeries } from '../valuescan/hyperliquid/price.js';
-import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuescan/extra/providers.js';
-import { applyCachedCurves, attachPodiumCurves } from '../valuescan/curves.js';
+} from '../valuedesk/types.js';
+import { sodexProvider } from '../valuedesk/sodex/index.js';
+import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hyperliquid/index.js';
+import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
+import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
+import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
-import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuescan/cohorts/model.js';
+import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { isLiqRange, liqHeatmap, liqHistory, liqWallets } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
-import { BOARD_WINDOWS, type BoardWindow } from '../valuescan/types.js';
-import { buildExplore } from '../valuescan/explore.js';
-import { buildScreener } from '../valuescan/screener.js';
-import { scrubDeep, scrubLabels, shownLabel } from '../valuescan/labels.js';
-import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuescan/cohorts/model.js';
+import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
+import { buildExplore } from '../valuedesk/explore.js';
+import { buildScreener } from '../valuedesk/screener.js';
+import { scrubDeep, scrubLabels, shownLabel } from '../valuedesk/labels.js';
+import { COHORT_RANGES, WALLET_SORTS, type CohortRange as WalletRange } from '../valuedesk/cohorts/model.js';
 import { indexerHealth } from '../hosted.js';
-import { news, newsKey, parseNewsQuery } from '../valuescan/sosovalue/news.js';
-import { feedNews, logoDomain, parseFeedQuery, siteLogo } from '../valuescan/feeds.js';
-import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuescan/calendar.js';
-import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuescan/youtube/live.js';
-import { fedLive, releaseResults } from '../valuescan/releases.js';
-import { fedWatch, fedWatchHistory, parseFedHistoryRange } from '../valuescan/fedwatch.js';
-import { INDICATORS, indicator, indicatorList, parseIndicatorRange } from '../valuescan/indicators.js';
-import { etfFlows, parseEtfAsset, parseEtfRange } from '../valuescan/sosovalue/etf.js';
+import { news, newsKey, parseNewsQuery } from '../valuedesk/sosovalue/news.js';
+import { feedNews, logoDomain, parseFeedQuery, siteLogo } from '../valuedesk/feeds.js';
+import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuedesk/calendar.js';
+import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuedesk/youtube/live.js';
+import { fedLive, releaseResults } from '../valuedesk/releases.js';
+import { fedWatch, fedWatchHistory, parseFedHistoryRange } from '../valuedesk/fedwatch.js';
+import { INDICATORS, indicator, indicatorList, parseIndicatorRange } from '../valuedesk/indicators.js';
+import { etfFlows, parseEtfAsset, parseEtfRange } from '../valuedesk/sosovalue/etf.js';
 import { oracleRoutes } from './oracle.js';
 
 const PROVIDERS: Record<Venue, VenueProvider> = {
@@ -139,7 +139,7 @@ function sortValue(r: TraderRow, sort: LeaderboardSort, window: Window): number 
   return typeof v === 'number' && Number.isFinite(v) ? v : Number.NEGATIVE_INFINITY;
 }
 
-export async function valuescanRoutes(app: FastifyInstance) {
+export async function valuedeskRoutes(app: FastifyInstance) {
   oracleRoutes(app);
   app.get('/api/vs/leaderboard', async (req, reply) => {
     try {
@@ -188,7 +188,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
             rows: [],
             total: 0,
             updatedAt: Date.now(),
-            source: 'ValueScan index is starting. The board fills as traders are read.',
+            source: 'ValueDesk index is starting. The board fills as traders are read.',
             index: { complete: false, pending: 0, updatedAt: 0 },
           };
         }
@@ -262,7 +262,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
 
   /**
    * News from sources beside SoSoValue (the White House, Watcher.Guru), read from
-   * their RSS feeds and cached - valuescan/feeds.ts. The widget merges them in.
+   * their RSS feeds and cached - valuedesk/feeds.ts. The widget merges them in.
    */
   app.get('/api/vs/news/sources', async (req, reply) => {
     try {
@@ -285,7 +285,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   /**
    * The economic calendar (the chart's news layer, the News widget's Calendar):
    * the FOMC's meetings, BLS and BEA releases and SoSoValue's macro events,
-   * each source read at most twice a day - valuescan/calendar.ts. A source
+   * each source read at most twice a day - valuedesk/calendar.ts. A source
    * that does not answer is left out and said so in `sources`.
    */
   app.get('/api/vs/calendar', async (req, reply) => {
@@ -301,7 +301,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   /**
    * The official results of calendar events (`ids`, comma-separated, the first
    * 50 kept): what the release watcher read from the publisher's page at the
-   * release second, and the prior release's figures (valuescan/releases.ts).
+   * release second, and the prior release's figures (valuedesk/releases.ts).
    * An id the watcher has nothing on yet is 'scheduled', with the prior values
    * when known. An edge may keep it a second while a release is near, else 30 s.
    */
@@ -317,7 +317,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   /**
    * The Federal Reserve's current broadcast (FOMC press conferences, testimony):
    * the video its live-broadcast page embeds, as an HLS stream from Brightcove's
-   * playback API, read at most every 15 s (valuescan/releases.ts fedLive). The
+   * playback API, read at most every 15 s (valuedesk/releases.ts fedLive). The
    * stream URLs carry expiring tokens, so an edge keeps the answer 10 s at most.
    */
   app.get('/api/vs/fed/live', async (_req, reply) => {
@@ -331,7 +331,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * What the markets expect of the FOMC (valuescan/fedwatch.ts): the next
+   * What the markets expect of the FOMC (valuedesk/fedwatch.ts): the next
    * meetings, nearest first, each decision's probability from Kalshi's order
    * books, Polymarket's beside where its meeting matches, and the target range
    * each would leave. Read at most once a minute, whoever asks.
@@ -362,7 +362,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
     }
   });
 
-  /** The indicators the calendar's releases publish, each with its kind and release-card field (valuescan/indicators.ts). */
+  /** The indicators the calendar's releases publish, each with its kind and release-card field (valuedesk/indicators.ts). */
   app.get('/api/vs/indicators', async () => ({ ok: true, indicators: indicatorList() }));
 
   /**
@@ -384,7 +384,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   });
 
   /**
-   * US spot ETF flows for an asset from SoSoValue (valuescan/sosovalue/etf.ts):
+   * US spot ETF flows for an asset from SoSoValue (valuedesk/sosovalue/etf.ts):
    * the daily totals over `range` (SoSoValue gives a month; older days are the
    * ones this server kept) and the funds by size. Without the key: not_available.
    */
@@ -403,7 +403,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
   /**
    * The video one of the Live Feed's YouTube channels has on air, or null - asked of
    * the YouTube Data API with this server's key, cached per channel
-   * (valuescan/youtube/live.ts). No key, or not one of the widget's channels: not_available.
+   * (valuedesk/youtube/live.ts). No key, or not one of the widget's channels: not_available.
    */
   app.get('/api/vs/live', async (req, reply) => {
     try {
@@ -514,7 +514,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
    * A coin's price over `range` (1d / 7d / 30d) for the cohort asset page:
    * Hyperliquid candles (its default dex, then its "k" 1000x unit, then the
    * trade.xyz dex). Cached a minute per coin and range. The series itself is
-   * valuescan/hyperliquid/price.ts, the same code the browser now runs with its
+   * valuedesk/hyperliquid/price.ts, the same code the browser now runs with its
    * own client; a bad coin name or no history answers not_available.
    */
   app.get('/api/vs/price', async (req, reply) => {
@@ -607,7 +607,7 @@ export async function valuescanRoutes(app: FastifyInstance) {
 
   app.get('/api/vs/explore', async (_req, reply) => {
     try {
-      // No usernames anywhere (valuescan/labels.ts); the provider caches its rows, so a copy is scrubbed.
+      // No usernames anywhere (valuedesk/labels.ts); the provider caches its rows, so a copy is scrubbed.
       return { ok: true, ...scrubDeep(structuredClone(await buildExplore(CORE_VENUES.map((v) => PROVIDERS[v])))) };
     } catch (e) {
       return fail(reply, e);

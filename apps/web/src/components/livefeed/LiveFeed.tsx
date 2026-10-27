@@ -92,7 +92,7 @@ export function LiveFeed({ instance }: {
   const channelName = choice && 'channel' in choice ? CHANNELS.find((c) => c.id === choice.channel)?.name ?? 'This channel' : 'This channel';
   /*
    * The next FOMC press conference (the economic calendar, server
-   * valuescan/calendar.ts): 30 minutes after the 2:00 pm ET statement, on the
+   * valuedesk/calendar.ts): 30 minutes after the 2:00 pm ET statement, on the
    * Fed's own channel: an off-air Fed channel says when it is next on (no strip over
    * the player - owner, 2026-10-25).
    */

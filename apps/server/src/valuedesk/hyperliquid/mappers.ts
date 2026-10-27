@@ -1,7 +1,7 @@
 /**
- * Pure mappers from raw Hyperliquid payloads to the Valuescan contract
+ * Pure mappers from raw Hyperliquid payloads to the ValueDesk contract
  * (../types.ts). No I/O, no clocks: everything here is unit-tested against
- * small fixtures in test/valuescan-hyperliquid.test.ts.
+ * small fixtures in test/valuedesk-hyperliquid.test.ts.
  */
 import { closeRuns, winRateOf } from '../winRate.js';
 import type {
@@ -129,7 +129,7 @@ export function mapFill(f: HlFillRaw): VsFill {
 export interface FillStats {
   /** Distinct orders that closed or reduced exposure. */
   trades: number;
-  /** Win rate by the shared definition (valuescan/winRate.ts); null below its threshold. */
+  /** Win rate by the shared definition (valuedesk/winRate.ts); null below its threshold. */
   winRate: number | null;
   /** The sample is the account's whole history (fewer fills than one page). */
   winRateExact: boolean;
@@ -153,7 +153,7 @@ const CLOSING_DIR = /^close|>|liquidat/i;
  * "Liquidated ...") is grouped by oid. Counting per order rather than per
  * fill stops one market order that sweeps ten makers from counting as ten.
  *
- * The WIN RATE is the shared one (valuescan/winRate.ts): a close is a run of
+ * The WIN RATE is the shared one (valuedesk/winRate.ts): a close is a run of
  * reducing fills in one market, so a position closed in 135 TWAP slices is
  * one close, not 135 losses. A win is a positive gross closedPnl (before
  * fees). A sample shorter than a full page is the whole history (exact);

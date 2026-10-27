@@ -97,10 +97,10 @@ test('the whole live flow: plan, wait for funds, complete plan, YES, the address
 
     // What the owner was told, in order.
     const screen = k.screen();
-    for (const want of ['BRAND-NEW wallet', `This key controls the wallet  ${ADDRESS}`, 'SEND THIS TO THE TEST WALLET', `1. Send 25.00 USDC on Arbitrum One to ${ADDRESS}`, 'The wallet holds what the run needs', 'close every other Valuescan tab and every sodex.com tab', 'This moves REAL money', 'The live run finished']) {
+    for (const want of ['BRAND-NEW wallet', `This key controls the wallet  ${ADDRESS}`, 'SEND THIS TO THE TEST WALLET', `1. Send 25.00 USDC on Arbitrum One to ${ADDRESS}`, 'The wallet holds what the run needs', 'close every other ValueDesk tab and every sodex.com tab', 'This moves REAL money', 'The live run finished']) {
       assert.ok(screen.includes(want), want);
     }
-    assert.ok(screen.indexOf('SEND THIS TO THE TEST WALLET') < screen.indexOf('close every other Valuescan tab'));
+    assert.ok(screen.indexOf('SEND THIS TO THE TEST WALLET') < screen.indexOf('close every other ValueDesk tab'));
 
     // The rows: the plan, then every step of the run with its cost and transactions.
     assert.deepEqual(r.items.map((i) => `${i.title}:${i.status}`), ['read-only plan:PASS', 'preflight:PASS', 'deposit-external:PASS', 'enable-trading:PASS', 'orders:PASS', 'withdraw-external:PASS', 'extra-withdrawals:PASS', 'cleanup:SKIPPED']);

@@ -18,8 +18,8 @@ import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, coho
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
-} from '../src/valuescan/cohorts/model.js';
-import { VENUES, type Venue } from '../src/valuescan/types.js';
+} from '../src/valuedesk/cohorts/model.js';
+import { VENUES, type Venue } from '../src/valuedesk/types.js';
 
 const dir = mkdtempSync(join(tmpdir(), 'vs-cohorts-'));
 const DB = join(dir, 'index.db');

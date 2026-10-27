@@ -208,7 +208,7 @@ test('orderBuilder at the fee OWED: lower than the default when told so, never a
   assert.deepEqual(orderBuilder(B, approved({ perps: 30 }), 'perps', 30), { id: B.id, fee: 30 });
   assert.equal(orderBuilder(B, approved({ perps: 30 }), 'perps'), undefined);
   assert.equal(orderBuilder(B, approved({ perps: 29 }), 'perps', 30), undefined);
-  // A fee of 0 still names the builder (the order stays Valuescan's) - where SoDEX lists the builder at all.
+  // A fee of 0 still names the builder (the order stays ValueDesk's) - where SoDEX lists the builder at all.
   assert.deepEqual(orderBuilder(B, both, 'perps', 0), { id: B.id, fee: 0 });
   assert.equal(orderBuilder(B, approved({ spot: 100 }), 'perps', 0), undefined);
   assert.equal(orderBuilder(B, null, 'perps', 0), undefined);

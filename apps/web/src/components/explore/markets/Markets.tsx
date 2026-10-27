@@ -12,7 +12,7 @@
  * the page is visible.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
-import { SECTORS, type Sector } from '@sign/valuescan/cohorts/model.js';
+import { SECTORS, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import { api } from '../../../api';
 import { DASH } from '../../../format';
 import { useAsync, useSharedPoll, useStored, useSymbols, useTickers } from '../../../hooks';

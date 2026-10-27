@@ -65,9 +65,9 @@ import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { deviceKeyPath } from '../deviceKey.js';
-import { VENUES, type BoardWindow, type Venue } from '../valuescan/types.js';
+import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
 import type { BoardFilter, Side } from './windows.js';
-import { closeRuns, type CloseFill } from '../valuescan/winRate.js';
+import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -368,7 +368,7 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
   // stablecoins), and when a read last looked at the spot state (cohortSource.ts).
   ['cohort_book', 'collateral', 'REAL'],
   ['cohort_book', 'spot_at', 'INTEGER'],
-  // The account's cross cash for its liquidation prices (valuescan/liquidations/math.ts).
+  // The account's cross cash for its liquidation prices (valuedesk/liquidations/math.ts).
   ['cohort_book', 'cash', 'REAL'],
   // What a day row must carry once its raw rows are gone (retention): how many
   // fills it had, their realised PnL net of fees, the first one's time, the
@@ -389,7 +389,7 @@ const ADDED_COLUMNS: ReadonlyArray<[string, string, string]> = [
 const SCHEMA_TABLES: readonly string[] = [...SCHEMA.matchAll(/CREATE TABLE IF NOT EXISTS (\w+)/g)].map((m) => m[1]!);
 
 /**
- * The close definition the day aggregates were built with (valuescan/winRate.ts).
+ * The close definition the day aggregates were built with (valuedesk/winRate.ts).
  *   1 (none recorded)  one close per order id
  *   2                  runs of reducing fills
  *   3                  as 2, and a REST fill with no realised PnL (Lighter sends
@@ -1354,7 +1354,7 @@ export class IndexStore {
 
   /**
    * Closes and wins per UTC day in [fromT, toT), by the shared definition
-   * (valuescan/winRate.ts closeRuns): runs of reducing fills per market,
+   * (valuedesk/winRate.ts closeRuns): runs of reducing fills per market,
    * split at day boundaries so a day's figure never depends on another day.
    * Only fills with a known realised PnL (REST rows) take part.
    */
@@ -1656,7 +1656,7 @@ export class IndexStore {
     ).all(venue, address, fromT) as Array<{ symbol: string }>).map((r) => r.symbol);
     const closes =
       venue !== 'sodex'
-        ? // Runs of reducing fills (valuescan/winRate.ts), per UTC day like the aggregates.
+        ? // Runs of reducing fills (valuedesk/winRate.ts), per UTC day like the aggregates.
           this.closesByDay(venue, address, fromT, Number.MAX_SAFE_INTEGER).reduce((a, r) => ({ n: a.n + r.n, w: (a.w ?? 0) + r.w }), { n: 0, w: 0 as number | null })
         : (this.q(
             `SELECT COUNT(*) AS n, SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS w FROM closes WHERE venue = ? AND address = ? AND t >= ?`,

@@ -1,4 +1,4 @@
-# 05 — Cheap data infrastructure for Valuescan (indexing, analytics, users, hosting)
+# 05 — Cheap data infrastructure for ValueDesk (indexing, analytics, users, hosting)
 
 Research date: 2026-09-25 (Friday). This covers SoDEX (ValueChain) and Hyperliquid (HL), with room for more venues later.
 Method: only public read endpoints were used. That means public WebSocket trade feeds (sampled for 4 and 6 minutes), REST info queries, `eth_call` on ValueChain, and 2026 pricing pages.
@@ -11,7 +11,7 @@ Confidence labels: **verified** = I observed it live or read it in the code; **d
 
 ## TL;DR
 
-1. **The data is not huge unless you choose to make it huge.** Store trades, fills, equity snapshots and positions. Do not store order books or node logs. On that basis, Valuescan's warm analytics store grows by about 12 GB per month for SoDEX plus HL combined, which is about 150 GB in year 1 after columnar compression. That fits on one €21 ARM VPS disk. The expensive path is HL order and book data (the HL node writes about 100 GB of logs per day). You only need it at the Scale tier, if ever.
+1. **The data is not huge unless you choose to make it huge.** Store trades, fills, equity snapshots and positions. Do not store order books or node logs. On that basis, ValueDesk's warm analytics store grows by about 12 GB per month for SoDEX plus HL combined, which is about 150 GB in year 1 after columnar compression. That fits on one €21 ARM VPS disk. The expensive path is HL order and book data (the HL node writes about 100 GB of logs per day). You only need it at the Scale tier, if ever.
 2. **Measured volumes:**
    - **HL:** about 5.0 M trades per day (about 10 M fills, 2 per trade). I measured 4.8–4.9 M per day on main perps plus HIP-3; a third-party figure for the 30 days to 2026-09-22 is 5.01 M. That is about 272 B of JSON per trade, and **36 B per trade in Parquet/ZSTD** (21 B without the tx hash).
    - **SoDEX:** about 0.8–1.3 M trades per day. That is about 120 B of JSON per trade and **11 B per trade compressed**. About 85 % of SoDEX prints involve one market-maker account (id 1002).
@@ -235,7 +235,7 @@ Recommendation: **a self-hosted hub on the core box**. Opentrade's `server/src/h
 - **Verified today (preflight only):** `OPTIONS https://mainnet-gw.sodex.dev/api/v1/perps/trade/orders` with a foreign `Origin` returns `204`, `access-control-allow-origin: *`, `access-control-allow-headers: …X-Api-Key,X-Api-Sign,X-Api-Nonce,X-Api-Chain` and `access-control-allow-methods: GET,POST,PUT,PATCH,DELETE,OPTIONS`. Public GETs also carry `ACAO: *`. The HL `/info` endpoint returns `access-control-allow-origin: *` as well.
 - **Not verified:** whether a real signed POST response carries ACAO. That needs a signed request and therefore the owner's go.
 - If it holds, the browser posts directly (lowest latency, no custody of traffic). Keep a **stateless relay** in reserve: a Cloudflare Worker at $0.30/M, or a route on the Tokyo executor box. Note the risk: the SoDEX weight limit is per IP, and relayed traffic from shared egress would pool users into one bucket.
-- `sodex.com/auth/v2/*` (SoPoints) is still origin-allowlisted per Opentrade NOTES.md, so Valuescan would need to be allowlisted by SoDEX.
+- `sodex.com/auth/v2/*` (SoPoints) is still origin-allowlisted per Opentrade NOTES.md, so ValueDesk would need to be allowlisted by SoDEX.
 
 ### 3.5 User management (SIWE; no emails)
 
@@ -410,7 +410,7 @@ Limits: no HA. A box failure loses the live ingest gap, so HL history is refille
 
 ---
 
-## 8. Recommendations for Valuescan
+## 8. Recommendations for ValueDesk
 
 1. **Ingest from public trade streams, not per-user subscriptions.** SoDEX `trade` with `symbols:[all]` (2 connections) and HL `trades` per coin (2–3 connections) attribute every trade to a trader at almost zero cost. Resolve SoDEX ids to addresses once, through Multicall3 on ValueChain.
 2. **Borrow the venues' own PnL series.** Use HL `portfolio` and the leaderboard, and SoDEX `pnl/daily_stats` and `overview`. Compute only what they do not give (drawdown, Sharpe, win rate, hold time, asset mix) from your own data. For HL win rate, pull `userFillsByTime` hourly for T1 traders only.

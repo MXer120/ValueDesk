@@ -6,8 +6,8 @@
  * migrate it. A missing file, one the writer has not migrated yet, or a
  * board not built yet reads as `null`, and the route says "indexing".
  */
-import type { BoardWindow, TraderRow, Venue } from '../valuescan/types.js';
-import { VENUES } from '../valuescan/types.js';
+import type { BoardWindow, TraderRow, Venue } from '../valuedesk/types.js';
+import { VENUES } from '../valuedesk/types.js';
 import { mergeBoards } from './boards.js';
 import { closeReader, reader } from './reader.js';
 import type { CohortBookRow, CohortMemberRow, NetRow } from './store.js';
@@ -19,11 +19,11 @@ import {
   type CohortFocusResponse, type CohortMapResponse, type MapSector,
   type CohortDetailResponse, type CohortFilter, type CohortId, type CohortPoint, type CohortRange, type CohortWalletRow,
   type CohortWalletsResponse, type CohortsResponse, type NettedWallet, type Sector, type VenueCoverage, type WalletSort, type WalletVenue,
-} from '../valuescan/cohorts/model.js';
+} from '../valuedesk/cohorts/model.js';
 import { TAIL_RATE } from './cohortTracker.js';
-import { labelMatches, shownLabel } from '../valuescan/labels.js';
-import { winRateOf } from '../valuescan/winRate.js';
-import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuescan/cohorts/model.js';
+import { labelMatches, shownLabel } from '../valuedesk/labels.js';
+import { winRateOf } from '../valuedesk/winRate.js';
+import { sampledVenue, COHORT_RANGES, type CohortWalletRow as WalletRow } from '../valuedesk/cohorts/model.js';
 
 export interface IndexState {
   /** Every board behind this page is final (no unchecked wallet outranks a pick). */
@@ -100,7 +100,7 @@ export function boardPage(
     rows: rows.slice(o.offset, o.offset + o.limit).map((r, i) => toRow(r, window, o.offset + i + 1)),
     total: rows.length,
     updatedAt: Math.max(...boards.map((b) => b.meta.sourceAt || b.meta.updatedAt)),
-    source: `ValueScan index. ${which} ${what} over ${WINDOW_WORD[window]} among ${who} in that window.`,
+    source: `ValueDesk index. ${which} ${what} over ${WINDOW_WORD[window]} among ${who} in that window.`,
     index: {
       complete: boards.every((b) => b.meta.complete) && boards.length === venues.length,
       pending: boards.reduce((n, b) => n + b.meta.pending, 0),
@@ -182,7 +182,7 @@ export function netPage(
     rows: shown.slice(o.offset, o.offset + o.limit).map((r, i) => netToRow(r, window, o.offset + i + 1)),
     total: shown.length,
     updatedAt: Math.max(0, ...metas.map((m) => m.sourceAt || m.updatedAt)),
-    source: `ValueScan index. ${which} PnL over ${WINDOW_WORD[window]}, netted per address across ${venues.map((v) => VENUE_WORD[v]).join(' + ')}${who}.`,
+    source: `ValueDesk index. ${which} PnL over ${WINDOW_WORD[window]}, netted per address across ${venues.map((v) => VENUE_WORD[v]).join(' + ')}${who}.`,
     index: {
       complete: pending === 0 && metas.length === venues.length && metas.every((m) => m.complete),
       pending,
@@ -222,7 +222,7 @@ export function attachStats(rows: TraderRow[], window: BoardWindow): void {
 
 /**
  * The index's win rate for these addresses on one venue and window, by the
- * shared definition (valuescan/winRate.ts). Missing = not indexed.
+ * shared definition (valuedesk/winRate.ts). Missing = not indexed.
  */
 export function winRatesFor(venue: Venue, window: BoardWindow, addresses: readonly string[]): Map<string, { winRate: number | null; winRateExact: boolean; winRateCloses: number | null; winRateFrom: number | null; trades: number | null; tradesExact: boolean }> {
   const out = new Map<string, { winRate: number | null; winRateExact: boolean; winRateCloses: number | null; winRateFrom: number | null; trades: number | null; tradesExact: boolean }>();

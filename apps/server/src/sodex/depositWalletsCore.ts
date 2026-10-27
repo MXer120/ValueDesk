@@ -13,7 +13,7 @@
  * decoding are pinned by test/depositWallets.test.ts against a live answer.
  */
 import { keccak256, utf8, bytesToHex } from '../signing/eip712.js';
-import { envOf } from '../valuescan/env.js';
+import { envOf } from '../valuedesk/env.js';
 import { hexToUtf8, utf8ByteLength, utf8ToHex } from './hexText.js';
 import type { EthCall } from './mirrorCore.js';
 

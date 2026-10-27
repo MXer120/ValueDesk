@@ -1,6 +1,6 @@
 /**
  * SoDEX public market data, read straight from the gateway - in exactly the
- * shapes the Valuescan server's /api/md/* routes answered, so every panel reads
+ * shapes the ValueDesk server's /api/md/* routes answered, so every panel reads
  * the same fields it always did.
  */
 import { unwrapList } from '@sign/sodex/restCore.js';

@@ -821,7 +821,7 @@ export async function moneyRun(ctx: Ctx, deps: DDeps, o: MoneyRunOptions): Promi
     say('Near the end the run shows them one at a time: exactly which coin, on which network, how much (never below SoDEX\'s deposit minimum - your wallet\'s network fee comes on top) and to which address (the one the app and SoDEX\'s on-chain registry both name). Send it from your wallet and the run goes on by itself once SoDEX credits it. To skip one: type s and Enter while it waits ("skip all" skips the rest) - it is then reported as skipped (owner). Skipping never stops the run.');
   }
   out.line();
-  out.line('   BEFORE YOU START: close every other Valuescan tab and every sodex.com tab.');
+  out.line('   BEFORE YOU START: close every other ValueDesk tab and every sodex.com tab.');
   say('SoDEX allows about four history reads a minute per internet address. The run and the server\'s fee check need them; another open tab can use them up, SoDEX then blocks this address for a minute, and the run fails.');
   if (!args.go) await pressEnter(ctx.ask, 'Press Enter when the other tabs are closed.');
   const tiersOn = hasTermsKeys(cfg.config);

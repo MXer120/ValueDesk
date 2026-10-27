@@ -5,7 +5,7 @@
  * This is what GET /api/mirror/deposit-options answered (routes/mirror.ts),
  * moved into a module both sides can run: the browser now builds it itself,
  * from sodex.com's API and ValueChain's public views, so no wallet's deposit
- * addresses pass through Valuescan.
+ * addresses pass through ValueDesk.
  *
  * SoDEX runs a custodial mirror (custodian: Cobo) that issues a dedicated
  * deposit address per wallet per chain. It works for wallets with no SoDEX

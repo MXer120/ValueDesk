@@ -51,7 +51,7 @@ export const SkipReason = {
   NOT_COPYABLE: 1,
   /** PAUSED or expired: the part that would open or increase was dropped. */
   REDUCE_ONLY: 2,
-  /** Cycle protection: the leader fill came from an order signed by a key Valuescan executes for. */
+  /** Cycle protection: the leader fill came from an order signed by a key ValueDesk executes for. */
   COPY_OF_COPY: 3,
   /** The signal was older than the published staleness limit. */
   STALE_SIGNAL: 4,

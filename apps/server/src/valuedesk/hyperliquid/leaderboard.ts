@@ -304,7 +304,7 @@ export function matchesQuery(address: string, label: string | null, q: string): 
   if (!needle) return true;
   if (address.startsWith(needle)) return true;
   if (/^[0-9a-f]+$/.test(needle) && address.startsWith(`0x${needle}`)) return true;
-  // A hidden name (source off, or the address opted out) never matches (valuescan/labels.ts).
+  // A hidden name (source off, or the address opted out) never matches (valuedesk/labels.ts).
   return labelMatches(address, label, needle);
 }
 

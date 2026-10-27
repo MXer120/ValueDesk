@@ -13,7 +13,7 @@
  * tile grows: the logo alone, then the name, then the uPnL, then the lean. A
  * click (not a drag) opens that coin.
  */
-import { LEAN_LABEL, leanOf, longShare, type CohortMarket, type Lean } from '@sign/valuescan/cohorts/model.js';
+import { LEAN_LABEL, leanOf, longShare, type CohortMarket, type Lean } from '@sign/valuedesk/cohorts/model.js';
 import { marketName } from '../../../format';
 import { CoinIcon } from '../../CoinIcon';
 import { fmtUsdShort } from '../model';

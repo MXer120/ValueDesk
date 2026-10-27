@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Set up the Valuescan instance. IDEMPOTENT: run it again after changing a unit,
+# Set up the ValueDesk instance. IDEMPOTENT: run it again after changing a unit,
 # an env template, a pinned version or the origin secret - it converges and only
 # touches what differs.
 #
@@ -7,7 +7,7 @@
 # normally by deploy/release/bootstrap-instance.sh - through SSM Run Command on the
 # CloudFormation instance, over SSH on the EC2 test instance:
 #
-#   SITE_DOMAIN=valuescan.example ORIGIN_DOMAIN=origin.valuescan.example \
+#   SITE_DOMAIN=valuedesk.example ORIGIN_DOMAIN=origin.valuedesk.example \
 #   OPS_BUCKET=<ops bucket> CONFIG_PREFIX=/valuescan/prod \
 #   [ALERT_TOPIC_ARN=arn:...] [ACME_EMAIL=you@example.com] \
 #     bash /opt/valuescan/bootstrap/bootstrap.sh
@@ -87,8 +87,8 @@ if [ -f "$ETC/bootstrap.env" ]; then
   done < "$ETC/bootstrap.env"
 fi
 
-: "${SITE_DOMAIN:?SITE_DOMAIN is required (the site, e.g. valuescan.example)}"
-: "${ORIGIN_DOMAIN:?ORIGIN_DOMAIN is required (this instance, e.g. origin.valuescan.example)}"
+: "${SITE_DOMAIN:?SITE_DOMAIN is required (the site, e.g. valuedesk.example)}"
+: "${ORIGIN_DOMAIN:?ORIGIN_DOMAIN is required (this instance, e.g. origin.valuedesk.example)}"
 # Empty on an instance without an instance role: releases arrive over SSH and
 # backups stay on the data volume (env/ops.env.example).
 OPS_BUCKET="${OPS_BUCKET:-}"

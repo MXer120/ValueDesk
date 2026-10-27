@@ -213,7 +213,7 @@ export function exchangeActionDigest(
  * handled. Key order is preserved from insertion order - callers MUST build
  * objects in Go struct field order.
  *
- * Valuescan addition: Go (>= 1.22) also writes `\b` and `\f` as short escapes
+ * ValueDesk addition: Go (>= 1.22) also writes `\b` and `\f` as short escapes
  * and always escapes U+2028 / U+2029. Pinned against Go 1.26's encoding/json by
  * the `goJSONStrings` fixture in test/vectors-sdk.json. The gateway's Go
  * version is unknown, but every string the gateway accepts in a signed payload

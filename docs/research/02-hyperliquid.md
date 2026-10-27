@@ -1,6 +1,6 @@
 # 02 — Hyperliquid: data access and copy-execution primitives
 
-*Research for Valuescan, dated 2026-09-25. This is research, not a design. Nothing was deployed, signed, approved or registered.*
+*Research for ValueDesk, dated 2026-09-25. This is research, not a design. Nothing was deployed, signed, approved or registered.*
 
 **What I did.** All checks were public and unauthenticated:
 - `POST https://api.hyperliquid.xyz/info` queries: about 60 requests in total, spaced ≥250 ms apart.
@@ -63,7 +63,7 @@ The HL docs cited below were fetched as raw markdown by appending `.md` to the g
    - Setting `agentName` to `"<name> valid_until <ms>"` sets an expiry of **at most 180 days**. `extraAgents` exposes `validUntil`; I verified this.
    - Agents can trade but **cannot withdraw**. `agentSendAsset` only moves funds between the user's own dexes.
    - Nonces keep the **100 highest per signer**, and must fall within **(T−2 days, T+1 day)**.
-   - **Pitfall:** approving a new *unnamed* agent de-registers the user's existing unnamed agent, which is usually the HL web UI's key. Valuescan must use a **named** agent.
+   - **Pitfall:** approving a new *unnamed* agent de-registers the user's existing unnamed agent, which is usually the HL web UI's key. ValueDesk must use a **named** agent.
 8. **Builder codes (monetization).**
    - The main wallet (not an agent) signs `approveBuilderFee`. Each order then carries `builder: {b, f}`, with `f` in tenths of a basis point.
    - Caps are **0.1% perps (f≤100) and 1% spot (f≤1000)**. SoDEX allows 0.2% and 2%.
@@ -150,7 +150,7 @@ Sources: `info-endpoint.md` (limits at lines 9, 138, 223, 559), `rate-limits-and
 - A batch of *n* orders counts as 1 request against the IP limit and *n* against the address limit.
 - Under congestion, an address is limited to **2× its previous-day maker share** of block space.
 - `expiresAfter`-stale actions cost 5× (`exchange-endpoint.md` line 17).
-- **Buying capacity:** `reserveRequestWeight` costs **0.0005 USDC per request**, charged to the perps balance. An optional `destination` lets one pay for **another user**, so Valuescan could top up followers.
+- **Buying capacity:** `reserveRequestWeight` costs **0.0005 USDC per request**, charged to the perps balance. An optional `destination` lets one pay for **another user**, so ValueDesk could top up followers.
 
 ### 1.3 WebSocket
 
@@ -296,7 +296,7 @@ The interpretation is **inferred**: the cap is about 15 users, enforced per IP *
 | `--serve-eth-rpc` | HyperEVM RPC |
 
 - `--serve-info` supports `clearinghouseState, spotClearinghouseState, openOrders, frontendOpenOrders, subAccounts, userRole, extraAgents, userRateLimit, userFees, maxBuilderFee, vaultSummaries, userVaultEquities, leadingVaults, webData2, …`. It serves **no historical series and no WS**.
-- The local info server has **no rate limit**: Valuescan could poll `clearinghouseState` for thousands of leaders.
+- The local info server has **no rate limit**: ValueDesk could poll `clearinghouseState` for thousands of leaders.
 - `fileSnapshot` → `l4Snapshots` dumps the full order book with users.
 
 **Fastest inputs:**
@@ -364,7 +364,7 @@ The interpretation is **inferred**: the cap is about 15 users, enforced per IP *
 - `scheduleCancel` is a dead-man switch.
 - `expiresAfter` sets an action expiry (5× rate cost if it triggers).
 
-**Valuescan implication (inferred):**
+**ValueDesk implication (inferred):**
 - One freshly generated **named** agent per follower, e.g. `valuescan valid_until 1805000000000`.
 - Rotate before 180 days.
 - Never use the unnamed slot, because that would log the user out of app.hyperliquid.xyz.
@@ -423,7 +423,7 @@ The interpretation is **inferred**: the cap is about 15 users, enforced per IP *
 - HL now calls these "legacy" and says HyperEVM vaults via CoreWriter are "a strict improvement".
 - Scale is small: about $108M TVL outside HLP, across 3,100 open vaults.
 
-**Use for Valuescan:** "copy a leader" can be implemented as "deposit into the leader's own HL vault". It is O(1) in orders, but it only works for leaders who open a vault and accept the 10% economics.
+**Use for ValueDesk:** "copy a leader" can be implemented as "deposit into the leader's own HL vault". It is O(1) in orders, but it only works for leaders who open a vault and accept the 10% economics.
 
 ### 3.5 HyperEVM + CoreWriter + read precompiles
 
@@ -485,7 +485,7 @@ Constraints:
 - It only works for leaders whose trades are slow relative to a few seconds. Swing and position traders are fine; scalpers and HFT/market makers are not.
 
 **Option B: hybrid (contract custody + off-chain agent).**
-- The contract calls CoreWriter action 9 to register a named API wallet held by the Valuescan executor.
+- The contract calls CoreWriter action 9 to register a named API wallet held by the ValueDesk executor.
 - The executor trades the vault's Core account at API latency (§4) and can attach builder codes, since the contract can self-approve via action 12.
 - The contract still enforces deposits, withdrawals, fee accounting and an on-chain kill switch that re-registers or rotates the agent.
 - Trust: the agent cannot withdraw but **can trade badly**, including self-dealing against a colluding account. Bound it with TEE attestation, an on-chain allowed-asset list checked ex-post, and max drawdown triggers. This matches the SoDEX hybrid in report 03.
@@ -506,7 +506,7 @@ Constraints:
 - Top-ups: `reserveRequestWeight` at $0.0005 per request, and it can target another user.
 - Open orders: 1,000–5,000.
 
-**Per Valuescan egress IP.**
+**Per ValueDesk egress IP.**
 - REST: 1,200 weight/min, and each follower order costs 1 (batching is per account).
 - WS: 2,000 messages/min and 100 in-flight posts.
 - **So about 20 orders/s sustained per IP, or 100 in flight** (inferred).
@@ -634,7 +634,7 @@ Constraints:
 
 ---
 
-## Recommendations for Valuescan (Hyperliquid side)
+## Recommendations for ValueDesk (Hyperliquid side)
 
 1. **Discovery and analytics pipeline (cheap, no node at first):**
    - (a) Hourly pull of the leaderboard (46.9k notable accounts), re-served gzipped from our CDN.
@@ -664,7 +664,7 @@ Constraints:
    - Use the public `builder_fills` of competitors as market intelligence.
 6. **Trustless track (v2, research only until the owner gives a go):**
    - A HyperEVM ERC-4626 "leader vault" that mirrors via precompiles and CoreWriter, is permissionlessly syncable, and has a contract performance fee. It suits swing leaders given the multi-second CoreWriter delay.
-   - Or a hybrid in which the contract registers a Valuescan agent via action 9 for API-latency execution with builder fees.
+   - Or a hybrid in which the contract registers a ValueDesk agent via action 9 for API-latency execution with builder fees.
    - Validate delays and failure modes on **testnet only after explicit approval**, then audit.
 7. **Own node: not in v1.**
    - It costs about $1k/month plus ops, grows about 100 GB/day and needs Tokyo hosting.

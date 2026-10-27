@@ -1,7 +1,7 @@
 /**
  * Advanced key options, in a small modal of its own - never part of Connect.
  * It opens on the `wallet:advanced` event (account/actions.ts requestAdvanced).
- * In a build with a builder fee, the order ticket's "Valuescan fee" line and
+ * In a build with a builder fee, the order ticket's "ValueDesk fee" line and
  * the fee panel fire it, so the approval can always be seen and revoked.
  *
  * Trading keys live in the browser now (trading/session.ts), so what is left
@@ -19,7 +19,7 @@
  *     when enabling trading (for whoever enabled without it, or holds a key
  *     from before the build had a builder).
  *
- * There is no import and no server keystore: no Valuescan server holds a key,
+ * There is no import and no server keystore: no ValueDesk server holds a key,
  * and pasting a private key into a web page is not something to encourage.
  */
 import { useEffect, useState } from 'react';

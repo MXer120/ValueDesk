@@ -1,4 +1,4 @@
-# Valuescan design guide
+# ValueDesk design guide
 
 The reference surfaces are the **trade page**, the **wallet pop-up** (`components/account/account.css`,
 `.navaddr__menu.acct-menu`), the **deposit / transfer / withdraw sheets** (`components/funds/funds.css`) and the

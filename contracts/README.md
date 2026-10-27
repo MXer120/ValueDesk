@@ -1,11 +1,11 @@
-# Valuescan copy trading contract (Foundry)
+# ValueDesk copy trading contract (Foundry)
 
-The on-chain copy trading record for Valuescan. It records:
+The on-chain copy trading record for ValueDesk. It records:
 
 - who copies which leader address, and under which rules;
 - through which delegated SoDEX API key;
 - at which maximum builder fee;
-- the execution commitments of Valuescan's executors.
+- the execution commitments of ValueDesk's executors.
 
 **It never holds or moves funds.** SoDEX handles all funds, margin and settlement.
 

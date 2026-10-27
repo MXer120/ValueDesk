@@ -18,7 +18,7 @@
  * is not data.
  */
 import { useId, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { BIAS_LABEL, biasOf } from '@sign/valuescan/cohorts/model.js';
+import { BIAS_LABEL, biasOf } from '@sign/valuedesk/cohorts/model.js';
 
 export interface LeanBand {
   from: number;

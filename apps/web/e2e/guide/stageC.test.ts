@@ -79,7 +79,7 @@ test('skip: the builder tests are off, nothing is checked or written', async () 
     assert.equal(k.ctx.shared.builder, null);
     assert.deepEqual(f.checked, []);
     assert.deepEqual(f.d.saved, []);
-    assert.match(k.screen(), /A BUILDER ACCOUNT is the SoDEX account that receives the Valuescan fee/);
+    assert.match(k.screen(), /A BUILDER ACCOUNT is the SoDEX account that receives the ValueDesk fee/);
     assert.match(k.screen(), /PARKED, not spent/);
     assert.match(k.screen(), /Nothing here creates, funds or moves money on a builder account/);
     assert.ok(!/Create one/.test(k.screen()), 'no way to create a builder account is offered');

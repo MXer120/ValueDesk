@@ -1,4 +1,4 @@
-# Valuescan copy trading contract: specification v1 (upgradeable)
+# ValueDesk copy trading contract: specification v1 (upgradeable)
 
 | | |
 |---|---|
@@ -19,7 +19,7 @@ The owner's decisions of 2026-09-25 ("No why. No limits, no possibility to opt o
 contract not be upgradable?") replace the previous draft:
 
 1. **No leader opt-out.** Leaders have no role in the contract. Any address can be copied.
-2. **No permissionless operators.** Valuescan runs the executor. An owner-managed set of executor addresses publishes
+2. **No permissionless operators.** ValueDesk runs the executor. An owner-managed set of executor addresses publishes
    the execution commitments. Each subscription still records the follower's delegated SoDEX API key (address and
    name).
 3. **No limits.** There is no cap on subscriptions per follower, no cap on the lifetime (expiry 0 = never), and no
@@ -41,7 +41,7 @@ control against spam subscriptions is normative (§8.3).
 
 ## 1. The product model this contract serves
 
-In the owner's words: an on-chain copy trading platform based on SoDEX's builder codes and SDK. Valuescan tracks and
+In the owner's words: an on-chain copy trading platform based on SoDEX's builder codes and SDK. ValueDesk tracks and
 analyses on-chain addresses with high win rates and high PnL. Users decide themselves whether to switch on copy
 trading for an address. The trades are executed on SoDEX. "We don't move funds. SoDEX handles ALL of that already. We
 JUST need the copy trading contract."
@@ -50,10 +50,10 @@ So:
 
 - **Funds, margin, deposits, withdrawals and settlement are 100 % SoDEX's job.** Every follower trades from their own
   SoDEX account.
-- **Execution is off-chain**, with SoDEX's SDK. Valuescan's executor watches the leader and places mirrored orders on
+- **Execution is off-chain**, with SoDEX's SDK. ValueDesk's executor watches the leader and places mirrored orders on
   the follower's SoDEX account. The orders are signed by a delegated SoDEX API key the follower authorised, and they
-  carry Valuescan's **builder code**. SoDEX credits builder fees to Valuescan in real time. Builder fees are
-  Valuescan's revenue.
+  carry ValueDesk's **builder code**. SoDEX credits builder fees to ValueDesk in real time. Builder fees are
+  ValueDesk's revenue.
 - **The contract is the public, auditable record** of copy trading. It records:
   - who copies which leader address (on SoDEX or Hyperliquid; always executed on SoDEX);
   - under which sizing and risk rules;
@@ -61,7 +61,7 @@ So:
   - at which maximum builder fee the follower consented to;
   - when copying started, paused or stopped.
 
-  Valuescan's executors also publish commitments to what they executed.
+  ValueDesk's executors also publish commitments to what they executed.
 
 ## 2. What the contract does and never does
 
@@ -69,7 +69,7 @@ So:
 |---|---|
 | Records subscriptions (follower → leader address on a venue), their terms and status | Hold, receive, escrow, move or account for funds |
 | Records the delegated SoDEX key (address and name) per subscription | Call SoDEX, or add or revoke SoDEX keys (the gateway requires `msg.sender` = account owner) |
-| Records the follower's builder-fee consent and Valuescan's current builder terms | Settle, split or distribute fees |
+| Records the follower's builder-fee consent and ValueDesk's current builder terms | Settle, split or distribute fees |
 | Lets anyone submit a follower's signed action (gasless for the follower) | Verify trades or enforce sizing and risk on SoDEX |
 | Keeps an owner-managed set of executor addresses and their execution commitments | Have a `receive` or `fallback` function, a payable function of its own, token calls, or a balance-dependent path |
 | Emits events from which the whole state can be rebuilt | Let the owner, an executor or a relayer change a follower's subscription |
@@ -87,8 +87,8 @@ The external calls the contract makes are these:
 |---|---|---|---|
 | **Follower** | The master wallet that owns the SoDEX account being traded (EOA, EIP-7702 account or ERC-1271 smart wallet) | Create, update, pause, resume and stop its own subscriptions, directly or by EIP-712 signature; trigger its kill switch; invalidate its nonces | Change anyone else's subscription |
 | **Leader** | Any address on a venue (SoDEX, Hyperliquid, others the owner adds) | Nothing: leaders have no role and need no opt-in | Opt out, or influence subscriptions to it |
-| **Executor** | One of Valuescan's executor addresses, authorised by the owner | Publish execution commitments | Change any subscription |
-| **Relayer** | Anyone who submits a `...WithSig` call and pays the gas (Valuescan runs one) | Choose whether and when (before the deadline) to submit a signed action | Change anything the signer signed; act without a valid signature |
+| **Executor** | One of ValueDesk's executor addresses, authorised by the owner | Publish execution commitments | Change any subscription |
+| **Relayer** | Anyone who submits a `...WithSig` call and pays the gas (ValueDesk runs one) | Choose whether and when (before the deadline) to submit a signed action | Change anything the signer signed; act without a valid signature |
 | **Owner** | `Ownable2Step` owner. Recommended: a TimelockController (48 h) whose proposer and executor is a multisig (§10.2) | Set builder terms within SoDEX's caps; enable or disable venues for new subscriptions; authorise executors; pause new activity; **upgrade the implementation** | Outside an upgrade: touch subscriptions, stop epochs, commitments or nonces; make any follower pay a builder fee above its consent; renounce ownership |
 | **SoDEX** | The exchange | Custody, margin, matching, settlement, API-key and builder-fee enforcement | (Not controlled by this contract) |
 
@@ -215,7 +215,7 @@ Why:
 - Order and duplicates are the follower's choice; the commitment covers the list exactly as signed.
 
 The filter applies to the **SoDEX symbol the executor would trade**. For a Hyperliquid leader, the executor first maps
-the HL coin to a SoDEX symbol (off-chain table published by Valuescan); if there is none, the trade is skipped.
+the HL coin to a SoDEX symbol (off-chain table published by ValueDesk); if there is none, the trade is skipped.
 
 ### 4.5 Sizing (normative for executors)
 
@@ -349,7 +349,7 @@ guard costs O(1): one mapping slot per key, read and written only for that key. 
 ## 6. Signatures (gasless follower actions)
 
 Many SoDEX users hold no SOSO. Every follower action therefore also exists as `...WithSig`, which anyone can submit.
-Valuescan's relayer pays the gas.
+ValueDesk's relayer pays the gas.
 
 ### 6.1 Domain
 
@@ -497,7 +497,7 @@ deliberate domain bump in an upgrade (§10.4).
 - It sends at once or rejects; it never holds a signature for later. Messages that start or raise risk (Subscribe,
   UpdateSubscription, ResumeSubscription) carry short deadlines (15 minutes in the SDK).
 - It SHOULD rate-limit per signer and per IP, but that does not stop spam: signers are free. It MUST relay a
-  `Subscribe` or `UpdateSubscription` only if `delegatedKey` is a key Valuescan's key service issued for exactly this
+  `Subscribe` or `UpdateSubscription` only if `delegatedKey` is a key ValueDesk's key service issued for exactly this
   follower and SoDEX account, and SHOULD also check that the follower owns the account (ClobGateway
   `getAccountsByAddress`, read-only) and cap the calldata size. This is relay policy, not a protocol rule: a refused
   follower can still call the contract directly and pay the gas.
@@ -539,7 +539,7 @@ The contract has no `hash*` views. Clients compute digests with any EIP-712 libr
 
 ### 7.1 An owner-managed executor set
 
-Valuescan runs the executor. The owner authorises Valuescan's executor addresses with
+ValueDesk runs the executor. The owner authorises ValueDesk's executor addresses with
 `setExecutor(executor, authorised)`, and `initialize` can authorise the first ones atomically. Executors can do
 exactly one thing on-chain: publish execution commitments. They have **no power over subscriptions**.
 
@@ -548,7 +548,7 @@ exactly one thing on-chain: publish execution commitments. They have **no power 
   is small, owner-managed and fully evented, and an enumerable set would cost bytecode the implementation needs to
   keep for upgrades (§11).
 - De-authorising keeps the record, `lastEpoch` and every published commitment.
-- Which executor serves which subscription is Valuescan's internal routing and is not recorded. The follower authorises
+- Which executor serves which subscription is ValueDesk's internal routing and is not recorded. The follower authorises
   a **key**, and the subscription records that key.
 
 ### 7.2 Commitments and leaf format
@@ -608,7 +608,7 @@ the commitments is a violation.
 `BuilderTerms{builderId, perpsFee, spotFee, updatedAt}`, set by the owner with `setBuilderTerms` (and by
 `initialize`):
 
-- `builderId` is Valuescan's SoDEX account id (on SoDEX, builder id = account id). It must be non-zero.
+- `builderId` is ValueDesk's SoDEX account id (on SoDEX, builder id = account id). It must be non-zero.
 - `perpsFee ≤ 200` and `spotFee ≤ 2000`, in tenths of a bp. These are SoDEX's hard caps, hard-coded as constants.
 
 For each subscription and engine:
@@ -644,7 +644,7 @@ honour, and the commitments make it auditable.
 
 Also on the SoDEX side (documented):
 
-- at most 10 active builder approvals per user; one approval covers all of a follower's Valuescan subscriptions;
+- at most 10 active builder approvals per user; one approval covers all of a follower's ValueDesk subscriptions;
 - the builder account must keep at least 100 vUSDC in both spot and perps;
 - builder fees are additive to exchange fees and are charged on maker fills too (verified on spot, report 08 G6);
 - fee revenue is reconciled from `fee − baseRate × notional`, or from the builder account's balance changes. REST
@@ -672,11 +672,11 @@ Also on the SoDEX side (documented):
 1. `sodexAccountId` is owned by `follower`: ClobGateway `getAccountsByAddress(follower)` (`0x380e78af`, read-only)
    contains it.
 2. A key named `keyName` with public key `delegatedKey` exists on every engine in `marketScope`, is not expired, and
-   Valuescan holds its private key. Read with `GET /api/v1/user/{follower}/api-keys` or
+   ValueDesk holds its private key. Read with `GET /api/v1/user/{follower}/api-keys` or
    `/api/v1/{engine}/accounts/{id}/api-keys`.
 3. The follower's builder approval for `builderId` (`GET /api/v1/user/{follower}/builders`) is ≥ the fee it will
    attach. If it is lower, attach at most the approval. If there is none and the effective fee is > 0, do not trade.
-4. If any check fails: do not trade, and report the reason through Valuescan's API. Re-check with exponential
+4. If any check fails: do not trade, and report the reason through ValueDesk's API. Re-check with exponential
    backoff (for example 1 minute, doubling up to 1 day) under a global re-check budget, and at once when the
    follower's own `SubscriptionUpdated` or `SubscriptionResumed` arrives; never on a fixed timer for every failing
    subscription.
@@ -688,7 +688,7 @@ contract stays limit-free, and the executor keeps the spam out of the copy path:
 
 - A subscription enters the per-leader fan-out only after its preflight passed. The result is cached per (follower,
   `sodexAccountId`, `delegatedKey`, `keyName`).
-- The executor serves only delegated keys that Valuescan's key service issued for exactly that follower and account.
+- The executor serves only delegated keys that ValueDesk's key service issued for exactly that follower and account.
 - UIs and analytics count only admitted followers: on-chain follower counts per leader can be faked.
 - The unpaginated `subscriptionsOfLeader(v, leader, 0, type(uint256).max)` can exceed an RPC's `eth_call` gas cap for
   a spammed leader (about 2,600 gas per id); always read in pages.
@@ -699,7 +699,7 @@ contract stays limit-free, and the executor keeps the spam out of the copy path:
 1. Map the symbol (Hyperliquid → SoDEX; skip if unmapped). Apply `marketScope` and the symbol filter. The executor
    checks the filter against the list from the latest `Subscribed` / `SubscriptionUpdated` event, whose hash MUST
    equal `symbolsHash`.
-2. **Cycle protection:** skip leader fills from orders signed by a delegated key that Valuescan executes for (a copy is
+2. **Cycle protection:** skip leader fills from orders signed by a delegated key that ValueDesk executes for (a copy is
    not a leader decision). This breaks A-copies-B-copies-A loops.
 3. Size and clip per §4.5. In PAUSED keep only reductions. Skip signals older than the published staleness limit (for
    example 2 s).
@@ -732,8 +732,8 @@ contract stays limit-free, and the executor keeps the spam out of the copy path:
 **Flows around the contract**
 
 - **Onboarding (what the follower signs)**
-  1. **Choose.** In Valuescan the follower picks a leader address and the terms.
-  2. **Get a key.** Valuescan generates a fresh delegated key for (follower, account) in its key store (TEE or HSM
+  1. **Choose.** In ValueDesk the follower picks a leader address and the terms.
+  2. **Get a key.** ValueDesk generates a fresh delegated key for (follower, account) in its key store (TEE or HSM
      recommended) and returns only the address and a name such as `vs-3f9a1c07`. One key per (follower, account) is
      RECOMMENDED and is reused across that follower's subscriptions.
   3. **On SoDEX** (off-chain, gasless, master-wallet EIP-712 signatures), one of three paths:
@@ -749,7 +749,7 @@ contract stays limit-free, and the executor keeps the spam out of the copy path:
      - *Path C (contract-owned accounts, for example a Safe):* the owning contract calls ClobGateway
        `addAPIKey(engine, name, publicKey)` (`0x8b53c6b9`, engine 0 spot, 1 perps) itself. Such keys have no mask
        and no expiry. No builder approval path is known for contract accounts (no ERC-1271 on SoDEX), so builder fees
-       are impossible today: the consents must be 0, and Valuescan decides whether to serve the account.
+       are impossible today: the consents must be 0, and ValueDesk decides whether to serve the account.
 
      The gateway is `0x0101010101010101010101010101010101010101`.
   4. **On ValueChain.** The follower signs `Subscribe` (§6) and the UI posts it to the relayer, which calls
@@ -769,9 +769,9 @@ contract stays limit-free, and the executor keeps the spam out of the copy path:
        testnet); **or**
      - on-chain (needs SOSO): ClobGateway `revokeAPIKey(0, name)` and `revokeAPIKey(1, name)` (`0x54ed5933`), sent by
        the account owner. Effective after at least one block plus engine ingest.
-  4. Optionally revoke the builder approval (`ApproveBuilderFee{maxFeeRate: 0}`) if no Valuescan subscription remains.
+  4. Optionally revoke the builder approval (`ApproveBuilderFee{maxFeeRate: 0}`) if no ValueDesk subscription remains.
      This frees one of the 10 approval slots.
-- **Emergency stop:** step 3 first (a hard stop that SoDEX enforces, independent of Valuescan and of any upgrade), then
+- **Emergency stop:** step 3 first (a hard stop that SoDEX enforces, independent of ValueDesk and of any upgrade), then
   `UnsubscribeAll`. An EIP-7702-delegated follower MAY batch `unsubscribeAll` with both on-chain `revokeAPIKey` calls in
   one transaction.
 - **Upgrade window** (§10.5): when an upgrade is scheduled on the timelock, the UI shows it together with the new
@@ -989,7 +989,7 @@ The guard has two parts. Both fail on any incompatible change:
    `test/audit/dos/ComplexityGuards.t.sol` (every call's cost must stay independent of list sizes), and an external
    review.
 3. Deploy the new implementation. Its constructor locks it. Verify its source on the ValueChain explorer.
-4. The multisig schedules `upgradeToAndCall(newImpl, reinitData)` on the timelock. Valuescan announces it, and the UI
+4. The multisig schedules `upgradeToAndCall(newImpl, reinitData)` on the timelock. ValueDesk announces it, and the UI
    shows it with a link to the verified source and a diff.
 5. After 48 h, the multisig executes it. `Upgraded(newImpl)` is emitted. Indexers and executors continue from the
    events.
@@ -1115,7 +1115,7 @@ Security notes:
 - **Upgrade risk.** See §10.6. The storage guard, the timelock and the tests reduce the risk of accidents; followers'
   SoDEX key revoke bounds malice.
 - **Owner key risk.** A compromised multisig can schedule a malicious upgrade, which becomes public 48 h before it can
-  execute. Followers MUST be alerted by Valuescan's monitoring of **every** `CallScheduled` on the timelock,
+  execute. Followers MUST be alerted by ValueDesk's monitoring of **every** `CallScheduled` on the timelock,
   including calls on the timelock itself (§10.2, audit SEC-02).
 - **Privacy.** Everything is public: who copies whom, allocation caps, stop levels and fee consents. Aggregate copy
   demand per leader can be computed, and stop-loss levels could be hunted. This is inherent to an on-chain record; UIs
@@ -1138,7 +1138,7 @@ test EVM (`test/script/DeployWiring.t.sol`). Before any deployment:
 2. Owner decisions on the open questions (§16), at least Q1–Q4.
 3. The multisig (signers, threshold) exists on ValueChain, and the timelock parameters are confirmed (48 h, the
    multisig as the only proposer and executor, no admin).
-4. `builderId` = Valuescan's SoDEX account id. That account holds ≥ 100 vUSDC on both engines.
+4. `builderId` = ValueDesk's SoDEX account id. That account holds ≥ 100 vUSDC on both engines.
 5. The executor addresses, generated in the key store.
 6. Deploy order: timelock → implementation → proxy with `initialize(timelock, builderId, perpsFee, spotFee,
    executors)` in its constructor. Verify all three sources on the explorer.
@@ -1209,8 +1209,8 @@ Results:
    would require the executor to aggregate several subscriptions into one position, with ambiguous stop, PnL and
    `closePositions` semantics.
 2. **Self-copy on SoDEX.** `leader == follower` is rejected on SoDEX only, to prevent a feedback loop. It is allowed
-   from Hyperliquid. Confirm. Relatedly: the executor skips leader fills produced by Valuescan's own copy orders
-   (cycle protection, §8.3), so copying an address that is itself a Valuescan follower copies only its own decisions.
+   from Hyperliquid. Confirm. Relatedly: the executor skips leader fills produced by ValueDesk's own copy orders
+   (cycle protection, §8.3), so copying an address that is itself a ValueDesk follower copies only its own decisions.
    Is that the wanted behaviour?
 3. **Instant actions.** With the timelock as owner, pause, executor removal and fee changes also wait 48 h. Acceptable
    (the recommendation, since stops never depend on the owner)? The alternative is a separate guardian role that can
@@ -1279,7 +1279,7 @@ deadline, by nonce invalidation or by the kill switch; that is the ordinary life
 **Spec-conformance self-check** against the owner's decisions of 2026-09-25:
 
 - No leader opt-out and no leader role: no such function, event, state or executor rule in the contract or the SDK.
-- Valuescan-only executors: an owner-managed executor set (`setExecutor`); no permissionless operator registry and no
+- ValueDesk-only executors: an owner-managed executor set (`setExecutor`); no permissionless operator registry and no
   per-subscription operator.
 - No limits: the only bounds are SoDEX's builder-fee caps (200 / 2000) and key-name rule, plus validity checks
   (bps ≤ 10,000). Every loop runs over the caller's own input.

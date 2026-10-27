@@ -2,7 +2,7 @@
  * Trader screener: the pure half. Strategy classification, activity buckets,
  * the query parser, filters, presets and the sort. Nothing here does I/O, so
  * every rule the palette's Screener shows is pinned by a unit test
- * (test/valuescan-screener.test.ts), and the web app can import these types
+ * (test/valuedesk-screener.test.ts), and the web app can import these types
  * through the `@sign` alias without pulling in a provider.
  *
  * `null` MEANS UNKNOWN, NEVER ZERO. The venues' leaderboards carry PnL, ROI,
@@ -70,7 +70,7 @@ export interface Enrichment {
   at: number;
   /** The venue answered "no such trader". Everything else is null then. */
   missing: boolean;
-  /** From the profile's sample (valuescan/winRate.ts): exact only when the sample is the whole history. */
+  /** From the profile's sample (valuedesk/winRate.ts): exact only when the sample is the whole history. */
   winRate: number | null;
   winRateExact?: boolean;
   winRateCloses?: number | null;

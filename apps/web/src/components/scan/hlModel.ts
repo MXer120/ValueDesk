@@ -29,7 +29,7 @@ export function analyticsSuspectNote(flag: TraderProfile['analyticsSuspect'] | u
 }
 
 /**
- * The server's first check (valuescan/sodex/mappers.ts `chartSuspect`), run on
+ * The server's first check (valuedesk/sodex/mappers.ts `chartSuspect`), run on
  * the SoDEX chart the page already holds: every point with a balance has account
  * value == PnL, i.e. SoDEX's analytics never recorded a deposit. The server's
  * profile can take a while for a big account; until it answers, this keeps the

@@ -2,15 +2,15 @@
  * Where each exchange lives, for the network this app runs on.
  *
  * The network is the trading config's (trading/config.ts): pinned by the
- * build, else what the Valuescan server reports. Every host here answers the
+ * build, else what the ValueDesk server reports. Every host here answers the
  * browser directly (CORS verified 2026-09-30) and every one of them is listed
  * in index.html's connect-src - nothing else is.
  */
 import { GATEWAY_WS_ORIGIN, type Network } from '@sodex-core';
 import { tradingConfig } from '../trading/config';
-import { HL_INFO_URL } from '@sign/valuescan/hyperliquid/info.js';
-import { LIGHTER_API } from '@sign/valuescan/extra/lighter.js';
-import { ARCUS_API } from '@sign/valuescan/extra/arcus.js';
+import { HL_INFO_URL } from '@sign/valuedesk/hyperliquid/info.js';
+import { LIGHTER_API } from '@sign/valuedesk/extra/lighter.js';
+import { ARCUS_API } from '@sign/valuedesk/extra/arcus.js';
 
 export const network = (): Network => tradingConfig().network;
 

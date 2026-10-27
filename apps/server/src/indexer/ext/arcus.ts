@@ -16,8 +16,8 @@
  * Budget: Arcus allows 1,500 weight / minute per IP; the worker takes
  * VALUESCAN_INDEX_ARCUS (default 600).
  */
-import type { BoardWindow } from '../../valuescan/types.js';
-import { Pacer } from '../../valuescan/extra/http.js';
+import type { BoardWindow } from '../../valuedesk/types.js';
+import { Pacer } from '../../valuedesk/extra/http.js';
 import {
   ARCUS_WS,
   arcusFills,
@@ -26,7 +26,7 @@ import {
   arcusPortfolio,
   type ArcusFill,
   type ArcusLbWindow,
-} from '../../valuescan/extra/arcus.js';
+} from '../../valuedesk/extra/arcus.js';
 import { Lane } from '../lanes.js';
 import { MIN_ROW_T, type FillRow } from '../store.js';
 import { ArcusStream } from '../streams.js';

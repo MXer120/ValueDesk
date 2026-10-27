@@ -50,15 +50,15 @@
  * history (cohortRebuild.ts, planRebuild), in a lane the boards lend 200 weight
  * a minute to while it reads.
  */
-import { VENUES, type Venue } from '../valuescan/types.js';
-import type { LbSnapshot } from '../valuescan/hyperliquid/leaderboard.js';
-import type { Pacer } from '../valuescan/extra/http.js';
+import { VENUES, type Venue } from '../valuedesk/types.js';
+import type { LbSnapshot } from '../valuedesk/hyperliquid/leaderboard.js';
+import type { Pacer } from '../valuedesk/extra/http.js';
 import {
   Aggregator, COHORTS, MARGIN_SIBLING, TAIL_EQUITY, coinOf, netWallet, perpEquity, sampleRule, sampledVenue, scopeKey, sectorTotals,
   type CohortRange, type Position, type WalletVenue,
-} from '../valuescan/cohorts/model.js';
+} from '../valuedesk/cohorts/model.js';
 import { Lane } from './lanes.js';
-import { WeightBudget } from '../valuescan/hyperliquid/info.js';
+import { WeightBudget } from '../valuedesk/hyperliquid/info.js';
 import { mark } from './busy.js';
 import type { Print } from './streams.js';
 import type { IndexStore } from './store.js';
@@ -73,11 +73,11 @@ import {
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
-import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
-import { hlInfo } from '../valuescan/hyperliquid/index.js';
-import { marketsNow, setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
-import { liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
-import { LiqLive } from '../valuescan/liquidations/live.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
+import { hlInfo } from '../valuedesk/hyperliquid/index.js';
+import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
+import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
+import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
@@ -400,7 +400,7 @@ export class CohortTracker {
   /** coin -> its reference price and the venue rank it came from (LIQ_PRICE_ORDER: Hyperliquid's first). */
   private coinPx = new Map<string, { px: number; rank: number }>();
   /**
-   * The live liquidation levels (valuescan/liquidations/live.ts): every account
+   * The live liquidation levels (valuedesk/liquidations/live.ts): every account
    * priced into its coins' buckets, re-priced when a print or a read moves its
    * book or another of its prices moves; flushed to the API every second (liqFeed.ts).
    */

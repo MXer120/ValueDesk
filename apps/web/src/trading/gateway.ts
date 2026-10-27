@@ -5,7 +5,7 @@
  * allow-origin: *` with the four X-API-* signing headers allowed - and a
  * cross-origin signed POST was confirmed from a real browser with a readable
  * response (see the note in git history of web/src/signing.ts). So orders
- * leave from the user's own browser and IP: no Valuescan server sees them,
+ * leave from the user's own browser and IP: no ValueDesk server sees them,
  * signs them, or can stall them, and SoDEX's per-IP budget is per user.
  *
  * NEVER RETRY A SIGNED WRITE. A request that got no answer (network drop,

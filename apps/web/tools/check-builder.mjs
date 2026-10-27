@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Is this wallet's SoDEX account ready to be Valuescan's BUILDER - and what are
+ * Is this wallet's SoDEX account ready to be ValueDesk's BUILDER - and what are
  * the VITE_BUILDER_* lines for it?
  *
  *   node apps/web/tools/check-builder.mjs <walletAddress> [--testnet]

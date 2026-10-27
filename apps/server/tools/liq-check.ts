@@ -12,13 +12,13 @@
  * change. Arcus publishes no liquidation price, so its rows say so.
  * Prints one JSON object.
  */
-import { VENUES, type Venue } from '../src/valuescan/types.js';
-import { hlInfo } from '../src/valuescan/hyperliquid/index.js';
+import { VENUES, type Venue } from '../src/valuedesk/types.js';
+import { hlInfo } from '../src/valuedesk/hyperliquid/index.js';
 import { arcusPositions, hlPositions, lighterPositions, sodexPositions, type PositionRead } from '../src/indexer/cohortSource.js';
-import { LIGHTER_API, lighterPacer } from '../src/valuescan/extra/lighter.js';
-import { ARCUS_API, arcusPacer } from '../src/valuescan/extra/arcus.js';
-import { accountLiqs, addDrift, calibrate, emptyDrift } from '../src/valuescan/liquidations/math.js';
-import { venueMarkets } from '../src/valuescan/liquidations/rules.js';
+import { LIGHTER_API, lighterPacer } from '../src/valuedesk/extra/lighter.js';
+import { ARCUS_API, arcusPacer } from '../src/valuedesk/extra/arcus.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift } from '../src/valuedesk/liquidations/math.js';
+import { venueMarkets } from '../src/valuedesk/liquidations/rules.js';
 
 const arg = (k: string, d: string) => {
   const i = process.argv.indexOf(`--${k}`);

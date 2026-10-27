@@ -34,14 +34,14 @@ import { cleanSvg } from './logo-clean.mjs';
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(WEB, 'public', 'logos');
 // Staged outside the repo: a synced folder (OneDrive) or the dev server's watcher can lock a directory mid-swap.
-const STAGE = join(tmpdir(), 'valuescan-logos-staging');
+const STAGE = join(tmpdir(), 'valuedesk-logos-staging');
 const MANIFEST = join(WEB, 'src', 'logoManifest.ts');
 
 const SODEX = 'https://sodex.com';
 const GATEWAY = 'https://mainnet-gw.sodex.dev/api/v1';
 const COINS_LOGO = 'https://alpha-biz.sodex.dev/biz/config/coins/logo';
 const TV = 'https://s3-symbol-logo.tradingview.com';
-const UA = { 'User-Agent': 'Mozilla/5.0 (valuescan logo sync)' };
+const UA = { 'User-Agent': 'Mozilla/5.0 (valuedesk logo sync)' };
 
 /** Listed on SoDEX, no icon on sodex.com. Keys are canonical (see canonical()). */
 const SUPPLEMENT = {

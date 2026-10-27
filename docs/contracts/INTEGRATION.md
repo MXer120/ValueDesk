@@ -1,4 +1,4 @@
-# Valuescan copy trading: integration guide
+# ValueDesk copy trading: integration guide
 
 | | |
 |---|---|
@@ -12,7 +12,7 @@
 ## 0. Rules that hold everywhere
 
 - **The contract never moves funds.** SoDEX holds every balance. Every follower trades from their own SoDEX account,
-  through a delegated SoDEX API key that the follower authorised. Orders carry Valuescan's builder code.
+  through a delegated SoDEX API key that the follower authorised. Orders carry ValueDesk's builder code.
 - **Always address the proxy.** It is the contract, and the EIP-712 `verifyingContract`, forever. Chain id 286623
   (ValueChain), gas token SOSO.
 - **The packages never send anything.** They build typed data, calldata, log filters and requests. Your code does the
@@ -27,7 +27,7 @@
 
 | Component | Runs | Holds | Does |
 |---|---|---|---|
-| Follower UI | Browser | Nothing secret | Collects terms. The wallet signs: SoDEX key registration and builder approval (sodex-core), and Valuescan's EIP-712 actions (copy-contract). Posts signed actions to the relayer, or calls directly |
+| Follower UI | Browser | Nothing secret | Collects terms. The wallet signs: SoDEX key registration and builder approval (sodex-core), and ValueDesk's EIP-712 actions (copy-contract). Posts signed actions to the relayer, or calls directly |
 | Key service | TEE or HSM | Delegated private keys | Generates one delegated key per (follower, SoDEX account); returns only its address and name; records the issuance |
 | Relayer | Server | A hot EOA with SOSO only | Validates and submits `...WithSig` calls; pays gas. Has no role on the contract |
 | Executor | Tokyo | Signing access to the delegated keys; an executor EOA with SOSO | Indexes events, gates each leader fill, trades on SoDEX with the builder code, publishes execution commitments |
@@ -65,7 +65,7 @@ In the snippets below, every function that is not imported from one of the two p
 
 ## 3. Start copying
 
-The follower is on the Valuescan site with a wallet connected, has picked a leader address (on SoDEX or Hyperliquid)
+The follower is on the ValueDesk site with a wallet connected, has picked a leader address (on SoDEX or Hyperliquid)
 and the terms. Do the SoDEX part (3.4 and 3.5) **before** the subscription (3.6 and 3.7), so the key and the approval
 exist when the executor first sees the subscription. If the subscription lands first, the executor waits in
 preflight and does not trade.
@@ -229,13 +229,13 @@ never blocks anyone.
 ### 3.8 Offer an emergency stop
 
 Offer to pre-sign `UnsubscribeAll` with a random nonce and a one-year deadline (`EMERGENCY_STOP_DEADLINE_SECONDS`).
-The follower keeps it, or hands it to Valuescan's watchdog; anyone can submit it, even while the contract is paused.
+The follower keeps it, or hands it to ValueDesk's watchdog; anyone can submit it, even while the contract is paused.
 It stops whatever is live when it lands. It is cancelled only by its deadline, by `invalidateNonces`, or by a
 deliberate domain bump (spec §10.4).
 
 ### 3.9 What the executor does next
 
-It sees `Subscribed`, checks that the key is one Valuescan issued (section 7.4), runs the preflight (section 7.5),
+It sees `Subscribed`, checks that the key is one ValueDesk issued (section 7.4), runs the preflight (section 7.5),
 waits 2 confirmations, and starts copying. With `copyExisting`, it also opens the leader's already open positions.
 
 ## 4. Change terms, pause, resume
@@ -280,10 +280,10 @@ Run these in order. Step 1 is the public record and the executor's instruction; 
    - On-chain (needs SOSO): the account owner sends `sodexGatewayCalls.revokeAPIKey('spot', name)` and
      `sodexGatewayCalls.revokeAPIKey('perps', name)` to `SODEX_CLOB_GATEWAY`. It takes effect after at least one
      block plus engine ingest. Whether it also removes keys registered through REST is not verified yet.
-5. **Optionally clear the builder approval** if no Valuescan subscription remains:
+5. **Optionally clear the builder approval** if no ValueDesk subscription remains:
    `prepareBuilderFeeApproval({ ..., maxFeeRate: 0 })`. This frees one of the follower's 10 approval slots.
 
-**Emergency:** revoke the key first (step 4, a hard stop that SoDEX enforces, independent of Valuescan and of any
+**Emergency:** revoke the key first (step 4, a hard stop that SoDEX enforces, independent of ValueDesk and of any
 upgrade), then the kill switch. An EIP-7702-delegated follower may batch `unsubscribeAll` with both on-chain
 `revokeAPIKey` calls in one transaction.
 
@@ -308,14 +308,14 @@ follower can always go elsewhere. Its duties:
      subscriptionFollower,    // id-based actions: getSubscription(id).follower
      subscriptionAccount,     // update: getSubscription(id).sodexAccountId
      paused,
-     isValuescanKey: (key, follower, account) => keyService.issuedFor(key, follower, account),
+     isValuedeskKey: (key, follower, account) => keyService.issuedFor(key, follower, account),
    });
    if (tx.problems.length) return reject(422, tx.problems);
    ```
 
-   `isValuescanKey` is the spam defence: relay a Subscribe or an update only if its delegated key is one Valuescan
+   `isValuedeskKey` is the spam defence: relay a Subscribe or an update only if its delegated key is one ValueDesk
    issued for exactly that follower and account. Anyone can record a subscription to any leader with any key, and
-   without this check Valuescan's relayer would pay for it. Stops are always relayed.
+   without this check ValueDesk's relayer would pay for it. Stops are always relayed.
 4. **Normalise the signature.** Wallets produce `v` 0/1, high-`s` or 64-byte signatures, and OpenZeppelin's ECDSA
    rejects all three. `buildRelayTransaction` rewrites them to 65 bytes, `v` 27/28, low `s` (`tx.path === 'ecdsa'`).
    For anything else (`'erc1271?'`, a smart wallet) it passes the bytes through.
@@ -391,13 +391,13 @@ confirmed view.
 **Stop SLA: 10 s** from the timestamp of the block that contains the stop (`stopDeadline(blockTimestamp)`); the target
 is 2 blocks. After it, the executor places no opening or increasing order for that subscription.
 
-### 7.4 Serve only what Valuescan issued
+### 7.4 Serve only what ValueDesk issued
 
 ```ts
 const serviceable = (r: Subscription) => isServiceable(r, (key) => keyStore.issuance(key));
 ```
 
-Skip every subscription whose delegated key Valuescan did not issue for exactly that follower and account: no
+Skip every subscription whose delegated key ValueDesk did not issue for exactly that follower and account: no
 preflight, no fan-out, no reconciliation. Anyone can record any number of subscriptions to any leader, with fake keys
 and fake accounts, and the contract cannot tell them apart. This filter makes that cost nothing.
 
@@ -417,7 +417,7 @@ if (!pre.ok) { report(id, pre.problems); recheckAfter(PREFLIGHT_RECHECK_SECONDS)
 ```
 
 It checks that the follower owns the account, that the key is registered under `keyName` with public key
-`delegatedKey` on every engine in scope and has not expired, that Valuescan holds the private key, and the builder
+`delegatedKey` on every engine in scope and has not expired, that ValueDesk holds the private key, and the builder
 approval. `pre.feeCeiling` is min(effective fee, approval) per engine. `pre.notes` flags an ordinary (full-permission)
 key where a mask-14 key was expected.
 
@@ -447,7 +447,7 @@ for (const sub of index.subscriptionsForLeader(venue, leader)) {
 
 - `gateSignal` checks, in order: the subscription is live, cycle protection, staleness (2 s), the SoDEX symbol
   mapping, `marketScope`, the symbol filter, and reduce-only for PAUSED or expired subscriptions.
-  - Cycle protection: `index.isDelegatedKey(leaderOrderSigner)`. A fill from an order signed by a key Valuescan
+  - Cycle protection: `index.isDelegatedKey(leaderOrderSigner)`. A fill from an order signed by a key ValueDesk
     executes for is a copy, not a leader decision; skipping it breaks A-copies-B-copies-A loops.
 - Copy orders are IOC with limit = reference ± `slippageBps` (`OrderType.LIMIT`, `TimeInForce.IOC` in sodex-core).
   The reference is the leader's fill price for mirrors, and the mark price for `copyExisting` openings and risk
@@ -667,8 +667,8 @@ change except an append, and `StorageLayout.t.sol` pins every ordinal (section 8
 
 **Leader spam (medium), fixed in the executor and relayer rules.** Nothing on-chain links a follower to its SoDEX
 account and there are no limits, so spam subscriptions are cheap. The executor admits a subscription to the leader
-fan-out only after preflight and serves only keys Valuescan issued (sections 7.4 and 7.5); stops travel on their own
-topic-filtered path; the relayer relays only Valuescan-issued keys for the follower's own account (section 6). Spec
+fan-out only after preflight and serves only keys ValueDesk issued (sections 7.4 and 7.5); stops travel on their own
+topic-filtered path; the relayer relays only ValueDesk-issued keys for the follower's own account (section 6). Spec
 §6.7 and §8.3 make this normative.
 
 **SEC-02 and SEC-03 (low), closed off-chain; the on-chain variants are open owner decisions.** Monitor every

@@ -121,7 +121,7 @@ export interface ReviewOrder {
   /** Address the backend's unlocked key signs as - the account this actually hits. */
   signingAddress?: string | null;
   /**
-   * Valuescan's builder fee on this order, when it will carry one (absent
+   * ValueDesk's builder fee on this order, when it will carry one (absent
    * otherwise - and always absent without a configured builder). SoDEX charges
    * it per fill on top of its own fee, so it is a row of its own.
    */
@@ -289,7 +289,7 @@ export function ReviewPosition({ order, onSuppressChange }: Props) {
         </div>
         {builderFee && (
           <div>
-            {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to Valuescan. */}
+            {/* Charged by SoDEX on each fill, maker or taker, on top of the fee above; paid to ValueDesk. */}
             <span>Est. ValueDesk fee</span>
             {!builderFee.charged ? (
               <b className="muted">none on spot buys</b>

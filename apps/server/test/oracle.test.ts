@@ -1,16 +1,16 @@
 /**
  * GET /api/vs/oracle (routes/oracle.ts): the query, the answer, and the cache
  * shared by every caller - against a fake venue reader, no network. And the
- * API's copy of the oracle (valuescan/oracle.ts) is the engine's, line for line.
+ * API's copy of the oracle (valuedesk/oracle.ts) is the engine's, line for line.
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import Fastify from 'fastify';
-import { ORACLE_VENUES, OracleFeed, combineOracle, type FetchLike, type VenueQuote } from '../src/valuescan/oracle.js';
+import { ORACLE_VENUES, OracleFeed, combineOracle, type FetchLike, type VenueQuote } from '../src/valuedesk/oracle.js';
 import { coinsOfSymbols, listedCoins, oracleRoutes, parseOracleQuery } from '../src/routes/oracle.js';
 
-const MARKER = '// ---- shared with apps/server/src/valuescan/oracle.ts below this line ----\n';
+const MARKER = '// ---- shared with apps/server/src/valuedesk/oracle.ts below this line ----\n';
 const below = (url: URL) => {
   const s = readFileSync(url, 'utf8').replace(/\r\n/g, '\n');
   const i = s.indexOf(MARKER);
@@ -19,7 +19,7 @@ const below = (url: URL) => {
 };
 
 test("the API's oracle is the engine's, below the marker", () => {
-  assert.equal(below(new URL('../src/valuescan/oracle.ts', import.meta.url)), below(new URL('../../../packages/copy-engine/src/oracle.ts', import.meta.url)));
+  assert.equal(below(new URL('../src/valuedesk/oracle.ts', import.meta.url)), below(new URL('../../../packages/copy-engine/src/oracle.ts', import.meta.url)));
 });
 
 test('the query: a coin, and known venues (all when none)', () => {

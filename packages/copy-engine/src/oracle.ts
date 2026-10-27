@@ -48,12 +48,12 @@
  * Prices are per ONE unit of the coin (a 1000x contract is scaled on the way in).
  *
  * TWO COPIES. The API keeps a copy of everything below the marker in
- * apps/server/src/valuescan/oracle.ts (its release does not ship or restart
+ * apps/server/src/valuedesk/oracle.ts (its release does not ship or restart
  * on this package); a server test fails when the two differ.
  */
 import type { FetchLike } from './io.ts';
 
-// ---- shared with apps/server/src/valuescan/oracle.ts below this line ----
+// ---- shared with apps/server/src/valuedesk/oracle.ts below this line ----
 
 export type OracleVenue =
   | 'binanceFutures' | 'binanceSpot' | 'bybit' | 'bybitSpot' | 'okx' | 'okxSpot' | 'bitget' | 'bitgetSpot' | 'hyperliquid'

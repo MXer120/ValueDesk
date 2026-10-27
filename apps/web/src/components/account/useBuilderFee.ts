@@ -1,5 +1,5 @@
 /**
- * The Valuescan builder fee an order placed NOW would carry, for the fee lines
+ * The ValueDesk builder fee an order placed NOW would carry, for the fee lines
  * in the ticket, the order review and the fee panel.
  *
  * It is the same decision the signed order makes (trading/builder.ts

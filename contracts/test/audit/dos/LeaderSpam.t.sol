@@ -10,7 +10,7 @@ import {CopyTradingEIP712 as E} from "../../utils/CopyTradingEIP712.sol";
 /// @notice AUDIT (DoS lens): griefing a leader's followers with spam subscriptions, and what it costs on ValueChain.
 ///
 ///         On-chain, spam is harmless: no call iterates over a stored list (see ComplexityGuards.t.sol), so nobody
-///         else's transaction gets more expensive. The cost lands OFF-chain, on Valuescan's executor, relayer and
+///         else's transaction gets more expensive. The cost lands OFF-chain, on ValueDesk's executor, relayer and
 ///         indexer, which the spec (section 8.3) makes consume every subscription of a leader:
 ///         - "Per leader event. For each subscription of that (venue, leader) in the model that is copyable ... or
 ///           PAUSED" -> the fan-out per leader fill is O(all subscriptions of that leader), spam included;
@@ -20,7 +20,7 @@ import {CopyTradingEIP712 as E} from "../../utils/CopyTradingEIP712.sol";
 ///         - the hourly reconciliation reads every subscription through views.
 ///         The contract gives the executor no on-chain way to tell spam from a real follower: anyone can copy any
 ///         address, from any number of free addresses, into any number of arbitrary (fake) `sodexAccountId`s, and a
-///         key-only attacker can have Valuescan's own relayer pay the gas.
+///         key-only attacker can have ValueDesk's own relayer pay the gas.
 ///
 ///         Numbers use the README's ValueChain probe: eth_gasPrice 2,000,000 wei (0.002 gwei), block gas limit 30M.
 ///         Sustained rates use the EIP-1559 gas TARGET (15M, geth's default elasticity 2): above it the base fee rises
@@ -56,7 +56,7 @@ contract LeaderSpamTest is CopyTradingBase {
         t.maxPositionNotional = type(uint64).max;
         t.maxLeverage = 1;
         t.slippageBps = C.MAX_BPS;
-        t.maxBuilderFeePerps = 0; // no builder fee consent: nothing for Valuescan to earn, only work
+        t.maxBuilderFeePerps = 0; // no builder fee consent: nothing for ValueDesk to earn, only work
         t.maxBuilderFeeSpot = 0;
         t.expiry = 0; // never expires: the executor keeps re-checking it forever
     }
@@ -97,9 +97,9 @@ contract LeaderSpamTest is CopyTradingBase {
         assertGe(TARGET_GAS / perTx, 40);
     }
 
-    /// The attacker needs no SOSO at all: signatures are free, Valuescan's relayer pays, and nothing on-chain lets the
+    /// The attacker needs no SOSO at all: signatures are free, ValueDesk's relayer pays, and nothing on-chain lets the
     /// relayer tell spam from a real follower. Fresh addresses are free too, so per-address relayer limits do not help.
-    function test_keyOnlyAttacker_hasValuescansRelayerPayForTheSpam() public {
+    function test_keyOnlyAttacker_hasValueDesksRelayerPayForTheSpam() public {
         uint256 n = 50;
         for (uint256 i = 1; i <= n; ++i) {
             (address sybil, uint256 key) = makeAddrAndKey(string.concat("sybil", vm.toString(i)));
@@ -111,7 +111,7 @@ contract LeaderSpamTest is CopyTradingBase {
                 E.subscribeHash(sybil, C.VENUE_HYPERLIQUID, leader, account, t, 0, 0, 0, T0 + 1 hours)
             );
             (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
-            vm.prank(relayer); // Valuescan's relayer submits and pays
+            vm.prank(relayer); // ValueDesk's relayer submits and pays
             c.subscribeWithSig(
                 sybil,
                 C.VENUE_HYPERLIQUID,

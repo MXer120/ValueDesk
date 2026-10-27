@@ -1,5 +1,5 @@
 /**
- * Valuescan LIVE end-to-end runner for the app's money flows on SoDEX mainnet.
+ * ValueDesk LIVE end-to-end runner for the app's money flows on SoDEX mainnet.
  *
  *   npx tsx e2e/live/run.ts [plan|live] --config e2e/live/config.json
  *                           [--profile core|evm-tour|all-chains|builder-rerun] [--confirm <walletAddress>]

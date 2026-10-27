@@ -73,8 +73,8 @@ test('the dev ports of the other project (5173, 8787) can never be the backend',
 });
 
 test('origins: scheme and host only', () => {
-  assert.equal(normaliseOrigin('https://valuescan.example/'), 'https://valuescan.example');
-  assert.equal(normaliseOrigin('https://valuescan.example/path'), null);
+  assert.equal(normaliseOrigin('https://valuedesk.example/'), 'https://valuedesk.example');
+  assert.equal(normaliseOrigin('https://valuedesk.example/path'), null);
   assert.equal(normaliseOrigin('ftp://x'), null);
 });
 

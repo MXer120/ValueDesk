@@ -35,7 +35,7 @@ import { logoCandidates, resolveKey } from '../src/logoKey.ts';
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(WEB, 'public', 'logos', 'venues');
 const MANIFEST = join(WEB, 'src', 'logoManifestVenues.ts');
-const UA = { 'User-Agent': 'Mozilla/5.0 (valuescan logo sync)' };
+const UA = { 'User-Agent': 'Mozilla/5.0 (valuedesk logo sync)' };
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_COINS = 'https://app.hyperliquid.xyz/coins';
 const TV = 'https://s3-symbol-logo.tradingview.com/crypto';

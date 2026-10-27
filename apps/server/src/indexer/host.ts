@@ -4,9 +4,9 @@
  * Relays the SoDEX rate-limit cooldown both ways: each thread has its own
  * gateway client, and a 1015 on one IP must quiet both.
  */
-import type { BoardWindow, Venue } from '../valuescan/types.js';
+import type { BoardWindow, Venue } from '../valuedesk/types.js';
 import { Worker } from 'node:worker_threads';
-import { cooldownLeftMs, noteRateLimited } from '../valuescan/sodex/util.js';
+import { cooldownLeftMs, noteRateLimited } from '../valuedesk/sodex/util.js';
 
 let worker: Worker | null = null;
 let attempt = 0;

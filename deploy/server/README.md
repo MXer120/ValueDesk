@@ -90,7 +90,7 @@ role (`docs/deploy/EC2-VERCEL.md`). On that instance:
 has no build step; `tsx` is a devDependency of the server workspace, which is why a
 release installs with `npm ci --workspace apps/server` and not with `--omit=dev`).
 
-Hardening, the same on the three Valuescan services: `NoNewPrivileges`,
+Hardening, the same on the three ValueDesk services: `NoNewPrivileges`,
 `ProtectSystem=strict` with `ReadWritePaths` limited to the index and state
 directories (the executor: its own directory and the state directory), `ProtectHome`, `PrivateTmp`, `PrivateDevices`, the `Protect*` kernel
 switches, `RestrictAddressFamilies`, `RestrictNamespaces`, an empty capability set,

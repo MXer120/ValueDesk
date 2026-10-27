@@ -3,10 +3,10 @@
 // signer in packages/sodex-core/src is asserted against this output by
 // test/vectors.test.ts and test/vectors-sdk.test.ts.
 //
-// Ported from Opentrade/server/tools/genvectors.go and EXTENDED for Valuescan:
+// Ported from Opentrade/server/tools/genvectors.go and EXTENDED for ValueDesk:
 // the first 19 vectors are generated exactly as Opentrade generated them (so the
 // test suite can prove today's SDK still reproduces Opentrade's pinned bytes);
-// everything after the "Valuescan additions" marker is new.
+// everything after the "ValueDesk additions" marker is new.
 //
 // This is the whole correctness argument for the signer: rather than trusting a
 // hand-port of the EIP-712 + Go-JSON rules, we make the reference implementation
@@ -393,7 +393,7 @@ func main() {
 	})
 
 	// =======================================================================
-	// Valuescan additions (not in Opentrade).
+	// ValueDesk additions (not in Opentrade).
 	// =======================================================================
 
 	builder := &ctypes.BuilderParams{BuilderID: 456, FeeRate: 50}

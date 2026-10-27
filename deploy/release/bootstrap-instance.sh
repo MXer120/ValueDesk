@@ -92,7 +92,7 @@ if [ "$VS_TARGET" = ec2 ]; then
   fi
 
   # Values are plain names (validated by bootstrap.sh); no secret travels in this command.
-  ssh_run "valuescan bootstrap" "SITE_DOMAIN='$DOMAIN_NAME' ORIGIN_DOMAIN='$ORIGIN_DOMAIN_NAME' ORIGIN_ALIASES='${ORIGIN_ALIASES:-}' OPS_BUCKET='' KEEP_SSHD=1 ORIGIN_SECRET_FILE='$REMOTE_SECRET' ALERT_TOPIC_ARN='' ACME_EMAIL='${ACME_EMAIL:-}' AWS_REGION='$REGION' bash /opt/valuescan/bootstrap/bootstrap.sh"
+  ssh_run "valuedesk bootstrap" "SITE_DOMAIN='$DOMAIN_NAME' ORIGIN_DOMAIN='$ORIGIN_DOMAIN_NAME' ORIGIN_ALIASES='${ORIGIN_ALIASES:-}' OPS_BUCKET='' KEEP_SSHD=1 ORIGIN_SECRET_FILE='$REMOTE_SECRET' ALERT_TOPIC_ARN='' ACME_EMAIL='${ACME_EMAIL:-}' AWS_REGION='$REGION' bash /opt/valuescan/bootstrap/bootstrap.sh"
   note "bootstrap finished"
   exit 0
 fi
@@ -118,5 +118,5 @@ rm -rf /opt/valuescan/bootstrap
 mkdir -p /opt/valuescan/bootstrap
 aws s3 sync 's3://$OPS/bootstrap/' /opt/valuescan/bootstrap/ --only-show-errors
 SITE_DOMAIN='$DOMAIN_NAME' ORIGIN_DOMAIN='$ORIGIN_DOMAIN_NAME' OPS_BUCKET='$OPS' CONFIG_PREFIX='$CONFIG_PREFIX' ALERT_TOPIC_ARN='$TOPIC' ACME_EMAIL='${ACME_EMAIL:-}' AWS_REGION='$REGION' bash /opt/valuescan/bootstrap/bootstrap.sh"
-ssm_run "$INSTANCE" "valuescan bootstrap" "$command"
+ssm_run "$INSTANCE" "valuedesk bootstrap" "$command"
 note "bootstrap finished"

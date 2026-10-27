@@ -14,7 +14,7 @@
  * wallets lean to. A tile opens that asset's cohort page.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { longShare, type CohortMapResponse, type CohortMarket } from '@sign/valuescan/cohorts/model.js';
+import { longShare, type CohortMapResponse, type CohortMarket } from '@sign/valuedesk/cohorts/model.js';
 import { SCAN_VENUES, vsApi } from '../../vsApi';
 import { MarketTile, squarify, tone, type Tile } from '../explore/cohorts/Treemap';
 import { fmtUsdShort } from '../explore/model';

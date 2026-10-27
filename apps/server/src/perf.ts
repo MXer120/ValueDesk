@@ -37,11 +37,11 @@
  * Each carries a weak ETag (weak: the same JSON is sent in three encodings), so
  * a revalidation that finds nothing new costs a 304 and no body.
  * A FAILURE IS NEVER CACHED, whatever its status: the index routes answer a
- * venue that is down as HTTP 200 {ok:false,...} (routes/valuescan.ts `fail`),
+ * venue that is down as HTTP 200 {ok:false,...} (routes/valuedesk.ts `fail`),
  * and that answer keeps `no-store` like any other error - or a cache would go
  * on serving "unavailable" after the venue is back.
  *
- * TRIMS, INDEX ROUTES ONLY. No username is shown anywhere (valuescan/labels.ts),
+ * TRIMS, INDEX ROUTES ONLY. No username is shown anywhere (valuedesk/labels.ts),
  * so every trader row leaves its route with `label: null`, and no client reads
  * it. That member is dropped here, on the way out and before the ETag, rather
  * than in each of the dozen places a row is built: the routes keep answering
@@ -287,6 +287,6 @@ async function perf(app: FastifyInstance, opts: PerfOptions): Promise<void> {
 
 // Not encapsulated: the hook must see every route, like fastify-plugin would arrange.
 (perf as unknown as Record<symbol, boolean>)[Symbol.for('skip-override')] = true;
-(perf as unknown as Record<symbol, string>)[Symbol.for('fastify.display-name')] = 'valuescan-perf';
+(perf as unknown as Record<symbol, string>)[Symbol.for('fastify.display-name')] = 'valuedesk-perf';
 
 export const perfPlugin = perf;

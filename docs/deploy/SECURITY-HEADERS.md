@@ -90,7 +90,7 @@ frame-ancestors 'none';
 upgrade-insecure-requests
 ```
 
-- **`__API_ORIGIN__`:** the hosted API's origin, e.g. `https://api.valuescan.example`. Omit it
+- **`__API_ORIGIN__`:** the hosted API's origin, e.g. `https://api.valuedesk.example`. Omit it
   if `/api/*` is served from the site's own origin, because `'self'` covers it then.
 - **Keep the header equal to `index.html`.** When that policy changes, change this header in
   the same deploy. **Never reintroduce a `ws:`/`wss:`/`https:` wildcard.**
@@ -309,7 +309,7 @@ Replace `<CSP>` and `<CSP with the /scan hash>` with the one-line policies from 
 the SharedWorker (1.2.1, option A). The `@worker` lines are option B; drop them to keep A.
 
 ```caddyfile
-valuescan.example {
+valuedesk.example {
 	root * /srv/valuescan/dist
 	encode zstd gzip
 
@@ -360,7 +360,7 @@ valuescan.example {
 | Variable | Default | Meaning |
 |---|---|---|
 | `VALUESCAN_HOSTED` | unset | `1` = hosted mode. |
-| `VALUESCAN_ALLOWED_ORIGINS` (legacy name: `VALUETRADE_ALLOWED_ORIGINS`) | none | The site's origins, comma-separated, exact (`https://valuescan.example`). CORS answers only these. They would also be the only `Origin` a state-changing route accepts, but none is listed today. Not needed when the site and API share an origin. A malformed entry stops the boot. |
+| `VALUESCAN_ALLOWED_ORIGINS` (legacy name: `VALUETRADE_ALLOWED_ORIGINS`) | none | The site's origins, comma-separated, exact (`https://valuedesk.example`). CORS answers only these. They would also be the only `Origin` a state-changing route accepts, but none is listed today. Not needed when the site and API share an origin. A malformed entry stops the boot. |
 | `VALUESCAN_TRUST_PROXY` | unset (the socket address is the client) | Who may set `X-Forwarded-For`. Either a hop count 1–9, or IPs/CIDRs plus `loopback` / `linklocal` / `uniquelocal`. `true` / `*` is refused. See 2.3. |
 | `VALUESCAN_ORIGIN_SECRET` | unset | One secret, or `<current>,<next>` while it is rotated (§2.6). Each value is at least 32 characters of visible ASCII; a comma only ever separates. When set, every request except `/api/health` must carry `X-Origin-Verify` with exactly one of the values (and see §2.7 for the one route answered on the instance). Set it as a CloudFront origin custom header, so that nobody can bypass CloudFront and WAF by calling the instance directly. An empty entry, a short value or more than 4 values stops the boot. |
 | `VALUESCAN_RATE_READ_PER_MIN` | 600 | Per client: every allowed request. |
@@ -428,7 +428,7 @@ HOST=127.0.0.1
 ```
 
 ```caddyfile
-api.valuescan.example {
+api.valuedesk.example {
 	reverse_proxy 127.0.0.1:8797
 	header -Server
 }
@@ -481,7 +481,7 @@ CloudFront appended.
 		trusted_proxies static 0.0.0.0/0 ::/0
 	}
 }
-origin.valuescan.example {
+origin.valuedesk.example {
 	tls {
 		issuer acme {
 			disable_tlsalpn_challenge

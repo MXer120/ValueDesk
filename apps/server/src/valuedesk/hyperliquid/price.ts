@@ -3,7 +3,7 @@
  * (its default dex, then its "k" 1000x unit, then the trade.xyz dex), with the
  * /info client injected.
  *
- * The same series /api/vs/price answered (routes/valuescan.ts); the browser now
+ * The same series /api/vs/price answered (routes/valuedesk.ts); the browser now
  * reads it with its own client, from the user's own IP.
  */
 import { NotAvailable } from '../types.js';

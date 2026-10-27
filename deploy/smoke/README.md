@@ -77,7 +77,7 @@ origin, every API route, every socket and every console line per page.
 the CSP refuses is refused before any lookup, so the policy checks still hold; what
 cannot be seen offline is anything the app only asks for after an answer arrived.
 
-## Two things to know before running it next to a live Valuescan
+## Two things to know before running it next to a live ValueDesk
 
 **1. The API's reader is read-only (since 2026-10-02).**
 `apps/server/src/indexer/reader.ts` opens the index with `{ readOnly: true }` and
@@ -98,7 +98,7 @@ curves still read the venues from the API process, and a second server on a mach
 that already runs one spends that from the same address. `--server-egress=deny`
 (the default) refuses every outbound connection of the spawned server; it then
 answers what the index file holds and reports the rest as unavailable. Use
-`--server-egress=allow` where no other Valuescan server shares the address: with the
+`--server-egress=allow` where no other ValueDesk server shares the address: with the
 local dev server stopped, or on a staging instance.
 
 The browser's own traffic is modest - each page is opened once - but it is real,
@@ -127,14 +127,14 @@ no wallet, nothing is ever signed.
 The build goes to `deploy/.out/smoke/dist`, not to `apps/web/dist` (`--out=<dir>`
 puts the build, the report and the screenshots elsewhere - useful when the
 repository lives in a synced folder). The spawned server gets its own state
-directory and a random origin secret; nothing under `%LOCALAPPDATA%\Valuescan` (or
+directory and a random origin secret; nothing under `%LOCALAPPDATA%\ValueDesk` (or
 `~/.local/share/valuescan`) is read or written, except the live index by
 `--snapshot`, read-only.
 
 ## After a deploy
 
 ```
-node deploy/smoke/smoke.mjs --site=https://valuescan.example --origin=origin.valuescan.example
+node deploy/smoke/smoke.mjs --site=https://valuedesk.example --origin=origin.valuedesk.example
 # the EC2 + Vercel test environment (docs/deploy/EC2-VERCEL.md):
 node deploy/smoke/smoke.mjs --site=https://valuedeskapp.vercel.app --origin=<elastic-ip-with-dashes>.sslip.io --edge=vercel
 ```
@@ -196,5 +196,5 @@ On the development machine (Chrome 154, Node 24), next to its running indexer:
 reads, and Scan on Hyperliquid, trade.xyz, Lighter and Arcus with the browser
 online - at the time the reader still opened the index read-write and the API's
 exchange reads were not bounded. Both are fixed (above); the run that covers them
-is `--snapshot --server-egress=allow` on a machine without another Valuescan
+is `--snapshot --server-egress=allow` on a machine without another ValueDesk
 server. `docs/deploy/DEPLOY.md` section 13 has the details, section 14 the findings.

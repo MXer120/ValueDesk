@@ -2,7 +2,7 @@
 # Put a Contabo server's own configuration in place - what deploy/server/bootstrap.sh
 # does not do because it differs between the two servers, or because it hardens the
 # Contabo image. IDEMPOTENT: it changes only what differs and says what it changed.
-# It never restarts a Valuescan service.
+# It never restarts a ValueDesk service.
 #
 #   sudo bash /opt/valuescan/overlay/apply-overlay.sh server1 [--dry-run] [--keep-rsyslog]
 #   sudo bash /opt/valuescan/overlay/apply-overlay.sh server2 [--dry-run] [--keep-rsyslog]

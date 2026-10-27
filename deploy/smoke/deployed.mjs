@@ -21,7 +21,7 @@ function get(url, timeoutMs) {
     const u = new URL(url);
     const req = (u.protocol === 'https:' ? https : http).request(
       u,
-      { method: 'GET', agent: false, headers: { accept: '*/*', 'user-agent': 'valuescan-smoke' } },
+      { method: 'GET', agent: false, headers: { accept: '*/*', 'user-agent': 'valuedesk-smoke' } },
       (res) => {
         res.resume();
         const headers = {};

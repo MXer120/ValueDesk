@@ -5,7 +5,7 @@
  * same engine (historySync.ts: the two-phase, resumable backward walk) and the
  * same totals (historyStats.ts) - but the pages are read straight from SoDEX
  * with this user's own per-IP budget, and what was walked is kept in this
- * browser (historyDb.ts), not on the Valuescan server.
+ * browser (historyDb.ts), not on the ValueDesk server.
  *
  * The walk is the lowest-priority traffic there is, as it was on the server:
  *  - one walk page per WALK_GAP_MS, over every tab and every wallet;

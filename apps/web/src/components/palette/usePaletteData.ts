@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, type Engine, type Symbol, type Ticker } from '../../api';
 import { vsApi, type BoardWindow, type Positioning, type TraderRow, type Venue } from '../../vsApi';
-import type { ScreenerResponse } from '@sign/valuescan/screener/model.js';
+import type { ScreenerResponse } from '@sign/valuedesk/screener/model.js';
 import { positioningIndex, withPositioning, toSearch, type AssetRow, type ScreenerRow } from './model';
 import { num } from '../../format';
 import { logLoadFailure } from '../LoadFailed';

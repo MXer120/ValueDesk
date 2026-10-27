@@ -3,7 +3,7 @@ pragma solidity 0.8.36;
 
 import {IValuescanCopyTrading, CopyTradingConstants as C} from "../../src/interfaces/IValuescanCopyTrading.sol";
 
-/// @notice Reference EIP-712 encoder for the Valuescan copy trading messages, written from the spec
+/// @notice Reference EIP-712 encoder for the ValueDesk copy trading messages, written from the spec
 ///         (docs/contracts/COPY-TRADING.md §6), independently of the implementation. Tests sign with it, so every
 ///         accepted signature proves the contract hashes exactly what the spec says. `EIP712Spec.t.sol` checks this
 ///         encoder against Foundry's own EIP-712 implementation (`vm.eip712HashTypedData`).

@@ -679,7 +679,7 @@ export async function clearLeftovers(ctx: Ctx, m: Market, step: string): Promise
   if (!open.length && !pos) return;
   const foreign = open.filter((o) => !APP_ORDER_ID.test(o.clOrdID ?? ''));
   if (foreign.length) {
-    throw new SafetyStop(`the account has ${foreign.length} open order(s) on ${m.engine} ${m.sym.name} that Valuescan did not place (${foreign.map((o) => o.clOrdID ?? `#${o.orderID}`).join(', ')}) - this step needs that market to itself (cancel them first)`);
+    throw new SafetyStop(`the account has ${foreign.length} open order(s) on ${m.engine} ${m.sym.name} that ValueDesk did not place (${foreign.map((o) => o.clOrdID ?? `#${o.orderID}`).join(', ')}) - this step needs that market to itself (cancel them first)`);
   }
   ctx.rec.note(`${step}: an earlier run left ${open.length} open order(s)${pos ? ` and a position of ${pos.size}` : ''} on ${m.engine} ${m.sym.name} - cleared through the app before the step starts`);
   await putInOrder(ctx, m, `${step} (what an earlier run left)`);

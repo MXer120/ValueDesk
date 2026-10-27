@@ -1,6 +1,6 @@
 # deploy/
 
-Everything needed to put Valuescan online and keep it running. Two environments
+Everything needed to put ValueDesk online and keep it running. Two environments
 share the instance's setup:
 
 - **the test environment now being set up**: one EC2 instance made by a script, the

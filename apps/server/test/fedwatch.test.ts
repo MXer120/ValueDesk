@@ -8,8 +8,8 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { easternToUtc, type CalendarEvent } from '../src/valuescan/calendar.js';
-import { decodePage, latestTargetRange, onRelease, resetReleases, startReleaseWatcher } from '../src/valuescan/releases.js';
+import { easternToUtc, type CalendarEvent } from '../src/valuedesk/calendar.js';
+import { decodePage, latestTargetRange, onRelease, resetReleases, startReleaseWatcher } from '../src/valuedesk/releases.js';
 import {
   fedWatch,
   fedWatchHistory,
@@ -24,8 +24,8 @@ import {
   resetFedWatch,
   targetAfter,
   withTargets,
-} from '../src/valuescan/fedwatch.js';
-import { resetIndicators } from '../src/valuescan/indicators.js';
+} from '../src/valuedesk/fedwatch.js';
+import { resetIndicators } from '../src/valuedesk/indicators.js';
 
 const json = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/fedwatch/${name}`, import.meta.url), 'utf8'));
 const csv = (name: string) => readFileSync(new URL(`./fixtures/indicators/${name}.csv`, import.meta.url), 'utf8');

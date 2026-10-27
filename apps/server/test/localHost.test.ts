@@ -209,7 +209,7 @@ test('local gate: a refusal is logged once per interval, with a bounded copy of 
 // --- hosted mode is left alone ------------------------------------------------------------------
 
 test('hosted: the local gate does nothing, the public Host reaches the hosted gate as before', async () => {
-  const SITE = 'https://app.valuescan.example';
+  const SITE = 'https://app.valuedesk.example';
   const cfg: HostedConfig = { enabled: true, trustProxy: false, originSecrets: [], limits: DEFAULT_LIMITS };
   const app = Fastify();
   installLocalHostGate(app, true);
@@ -218,7 +218,7 @@ test('hosted: the local gate does nothing, the public Host reaches the hosted ga
   installHostedGate(app, { cfg, site: [SITE] });
   await app.ready();
   try {
-    for (const host of ['api.valuescan.example', 'origin.valuescan.example:443', 'evil.example:8797', 'localhost:8797']) {
+    for (const host of ['api.valuedesk.example', 'origin.valuedesk.example:443', 'evil.example:8797', 'localhost:8797']) {
       const listed = await app.inject({ method: 'GET', url: '/api/vs/leaderboard?window=7d', headers: { host } });
       assert.equal(listed.statusCode, 200, host);
       // The hosted gate's own answers, not the local gate's.

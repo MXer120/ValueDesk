@@ -8,9 +8,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   accountLiqs, addDrift, calibrate, emptyDrift, fillCash, flatTiers, mmOf, niceStep, solveLiq, tiersOf, type FillBook, type ReadPos,
-} from '../src/valuescan/liquidations/math.js';
-import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuescan/liquidations/levels.js';
-import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuescan/liquidations/rules.js';
+} from '../src/valuedesk/liquidations/math.js';
+import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuedesk/liquidations/levels.js';
+import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuedesk/liquidations/rules.js';
 import { applyFill, liqBacklogPrio, type Book } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
 

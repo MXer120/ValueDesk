@@ -16,8 +16,8 @@ import type {
   ScreenerRow,
   ScreenerSort,
   Strategy,
-} from '@sign/valuescan/screener/model.js';
-import { sizeCohort, type CohortId, type CohortMarket, type MapSector } from '@sign/valuescan/cohorts/model.js';
+} from '@sign/valuedesk/screener/model.js';
+import { sizeCohort, type CohortId, type CohortMarket, type MapSector } from '@sign/valuedesk/cohorts/model.js';
 import type { Positioning, TraderRow, Venue, Window } from '../../vsApi';
 import { DASH, MINUS } from '../../format';
 import { formatNumber } from '../../intlCache';
@@ -212,7 +212,7 @@ export interface VenueToggles {
 export const venueParam = (v: VenueToggles): Venue | 'all' =>
   v.sodex && v.hyperliquid ? 'all' : v.sodex ? 'sodex' : 'hyperliquid';
 
-/** SoDEX rows first (the venue Valuescan trades on), each group keeping its order. */
+/** SoDEX rows first (the venue ValueDesk trades on), each group keeping its order. */
 export function sodexFirst<T extends { venue: Venue }>(rows: readonly T[]): T[] {
   return [...rows.filter((r) => r.venue === 'sodex'), ...rows.filter((r) => r.venue !== 'sodex')];
 }

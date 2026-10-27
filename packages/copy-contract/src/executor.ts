@@ -87,7 +87,7 @@ export function symbolAllowed(sub: { record: Pick<Subscription, 'symbolMode'>; s
   return false;
 }
 
-/** A delegated key Valuescan's key service generated, and for whom (one key per follower and SoDEX account). */
+/** A delegated key ValueDesk's key service generated, and for whom (one key per follower and SoDEX account). */
 export interface KeyIssuance {
   delegatedKey: Address;
   follower: Address;
@@ -95,7 +95,7 @@ export interface KeyIssuance {
 }
 
 /**
- * Whether Valuescan serves this subscription at all: its delegated key was issued by Valuescan's key service for
+ * Whether ValueDesk serves this subscription at all: its delegated key was issued by ValueDesk's key service for
  * exactly this follower and SoDEX account. Anyone can record a subscription to any leader with any key and any
  * account (the contract cannot tell), so the executor filters on this BEFORE preflight, fan-out and reconciliation;
  * everything else costs it nothing (audit: leader spam). `issuanceOf` looks the key up in the key store.
@@ -134,7 +134,7 @@ export type SignalDecision =
  * contract accepts any `delegatedKey` in anyone's subscription, so "some subscription names this key" is a flag
  * anyone can plant on any address: one cheap subscription naming a leader's own order signer used to make every
  * fill of that leader a "copy of a copy" for every follower - closes included, leaving followers in positions the
- * leader had left (security audit 2026-09-30, C-1). Only a key Valuescan's key service issued signs copy orders.
+ * leader had left (security audit 2026-09-30, C-1). Only a key ValueDesk's key service issued signs copy orders.
  */
 export function gateSignal(
   index: CopyTradingIndex,
@@ -147,7 +147,7 @@ export function gateSignal(
   if (m.mode === 'wind-down') return { go: false, skipReason: SkipReason.NOT_COPYABLE, detail: 'subscription is STOPPED' };
   const signerIssuance = i.leaderOrderSigner ? issuanceOf(i.leaderOrderSigner) : undefined;
   if (i.leaderOrderSigner && signerIssuance && sameAddress(signerIssuance.delegatedKey, i.leaderOrderSigner)) {
-    return { go: false, skipReason: SkipReason.COPY_OF_COPY, detail: 'the leader fill came from a Valuescan copy order' };
+    return { go: false, skipReason: SkipReason.COPY_OF_COPY, detail: 'the leader fill came from a ValueDesk copy order' };
   }
   if (i.nowMs - i.signalTimeMs > (i.maxAgeMs ?? SIGNAL_STALENESS_MS)) {
     return { go: false, skipReason: SkipReason.STALE_SIGNAL, detail: `signal older than ${i.maxAgeMs ?? SIGNAL_STALENESS_MS} ms` };
@@ -177,7 +177,7 @@ export interface BuilderForOrderInput {
    */
   approvedMaxFeeRate: number | null;
   /**
-   * Valuescan policy: charge the builder fee on reduce-only orders too. Default false ("opens only", report 08): the
+   * ValueDesk policy: charge the builder fee on reduce-only orders too. Default false ("opens only", report 08): the
    * executor MAY attach less than the effective fee, never more.
    */
   feeOnReduceOnly?: boolean;
@@ -235,7 +235,7 @@ export interface PreflightInput {
   followerAccounts: readonly bigint[];
   /** The keys SoDEX lists for the account, per engine the subscription's scope needs. */
   apiKeys: { perps?: readonly SodexApiKeyInfo[]; spot?: readonly SodexApiKeyInfo[] };
-  /** Whether Valuescan's key store holds the private key of `subscription.delegatedKey`. */
+  /** Whether ValueDesk's key store holds the private key of `subscription.delegatedKey`. */
   keyStoreHasKey: boolean;
   /** The follower's SoDEX approval for the builder id (GET /api/v1/user/{follower}/builders), or null. */
   builderApproval: { builderId: bigint; maxFeeRate: number } | null;
@@ -271,7 +271,7 @@ export function evaluatePreflight(i: PreflightInput): PreflightResult {
       notes.push(`the ${e} key ${r.keyName} is an ordinary (full-permission) key, not a mask-14 trade-only key`);
     } else if (key.permissions !== 14) notes.push(`the ${e} key ${r.keyName} has permission mask ${key.permissions}, not 14`);
   }
-  if (!i.keyStoreHasKey) problems.push(`Valuescan's key store does not hold ${r.delegatedKey}`);
+  if (!i.keyStoreHasKey) problems.push(`ValueDesk's key store does not hold ${r.delegatedKey}`);
   const approval = i.builderApproval && i.builderApproval.builderId === i.effective.builderId ? i.builderApproval.maxFeeRate : 0;
   const feeCeiling = { perps: Math.min(i.effective.perpsFee, approval), spot: Math.min(i.effective.spotFee, approval) };
   const wantsFee = engines.some((e) => (e === 'perps' ? i.effective.perpsFee : i.effective.spotFee) > 0);

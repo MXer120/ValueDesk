@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   BIAS_LABEL, LEAN_LABEL, biasOf, isBullish, longShare, type Lean,
-} from '@sign/valuescan/cohorts/model.js';
+} from '@sign/valuedesk/cohorts/model.js';
 import { VENUE_LABEL, type Venue } from '../../../vsApi';
 import { DASH } from '../../../format';
 import { VenueLogo } from '../../VenueLogo';

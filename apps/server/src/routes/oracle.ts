@@ -1,7 +1,7 @@
 /**
  * GET /api/vs/oracle?coin=BTC&venues=binanceFutures,bybit
  *
- * The shared price oracle (valuescan/oracle.ts): each venue's bid, ask, mid
+ * The shared price oracle (valuedesk/oracle.ts): each venue's bid, ask, mid
  * and mark for the coin with its age, the stale ones flagged, and the combined
  * oracle mid and fair price. `venues` is optional (all when absent).
  *
@@ -12,8 +12,8 @@
  * contacts the venues.
  */
 import type { FastifyInstance } from 'fastify';
-import { gwGet } from '../valuescan/sodex/gateway.js';
-import { ORACLE_VENUES, OracleFeed, isOracleVenue, type FetchLike, type OracleSnapshot, type OracleVenue } from '../valuescan/oracle.js';
+import { gwGet } from '../valuedesk/sodex/gateway.js';
+import { ORACLE_VENUES, OracleFeed, isOracleVenue, type FetchLike, type OracleSnapshot, type OracleVenue } from '../valuedesk/oracle.js';
 
 const bad = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 });
 

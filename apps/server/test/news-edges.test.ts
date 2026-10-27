@@ -6,12 +6,12 @@
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { FEED_SOURCES, feedNews, imageType, logoDomain, parseFeedQuery, parseRss, resetFeeds } from '../src/valuescan/feeds.js';
-import { isMacroStory, mapNewsList, namesCoin, notablePost, parseNewsQuery, stripHtml } from '../src/valuescan/sosovalue/news.js';
-import { coinIndex, coinsIn, stockName } from '../src/valuescan/sosovalue/coins.js';
+import { FEED_SOURCES, feedNews, imageType, logoDomain, parseFeedQuery, parseRss, resetFeeds } from '../src/valuedesk/feeds.js';
+import { isMacroStory, mapNewsList, namesCoin, notablePost, parseNewsQuery, stripHtml } from '../src/valuedesk/sosovalue/news.js';
+import { coinIndex, coinsIn, stockName } from '../src/valuedesk/sosovalue/coins.js';
 import {
   buildFunds, daysIn, mergeDays, parseEtfAsset, parseEtfList, parseEtfRange, parseEtfSnapshot, parseEtfSummary, sosoData, type EtfDay,
-} from '../src/valuescan/sosovalue/etf.js';
+} from '../src/valuedesk/sosovalue/etf.js';
 
 const WG = FEED_SOURCES.find((s) => s.id === 'watcherguru')!;
 const WH = FEED_SOURCES.find((s) => s.id === 'whitehouse')!;

@@ -3,7 +3,7 @@
  * tabs) and its Hyperliquid market list (Assets tab).
  *
  *   GET /api/vs/screener
- *     venue            all | sodex | hyperliquid       (routes/valuescan.ts picks the providers)
+ *     venue            all | sodex | hyperliquid       (routes/valuedesk.ts picks the providers)
  *     view             traders (default) | assets       assets = Hyperliquid markets, see screener/assets.ts
  *     preset           all | consistent | high-winrate | whales | low-drawdown | rising | most-active
  *     q                address prefix (with or without 0x), label substring, or a SoDEX account id
@@ -208,7 +208,7 @@ export async function buildScreener(
   }
 
   const now = Date.now();
-  // The index's win rate over the query's window (valuescan/winRate.ts) outranks
+  // The index's win rate over the query's window (valuedesk/winRate.ts) outranks
   // a profile's recent sample; rows keep their pool figures otherwise.
   const withIndex = live.map((pool) => {
     const stats = winRatesFor(pool.venue, q.window, pool.rows.map((r) => r.address));

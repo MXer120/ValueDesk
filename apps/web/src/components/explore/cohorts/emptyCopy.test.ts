@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COHORT_BY_ID } from '@sign/valuescan/cohorts/model.js';
+import { COHORT_BY_ID } from '@sign/valuedesk/cohorts/model.js';
 import { emptyCohortText, emptyCohortsLine, venueList } from './emptyCopy';
 
 test('venueList: one, two, several', () => {

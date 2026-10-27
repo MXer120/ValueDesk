@@ -2,27 +2,27 @@
  * One trader on one venue - profile, fills, and Scan's account band (open
  * orders, order history, funding, balances) - read from the user's own browser.
  *
- * This is the Valuescan server's /api/vs/trader, /fills and /account, minus the
+ * This is the ValueDesk server's /api/vs/trader, /fills and /account, minus the
  * server: the SAME provider code runs here (imported through `@sign`), bound to
  * browser clients that spend each user's own IP budget at each venue:
  *
- *   sodex        valuescan/sodex/traderCore.ts over the gateway + data host
- *   hyperliquid  valuescan/hyperliquid/trader.ts over this runtime's /info client
- *   tradexyz / lighter / arcus  valuescan/extra/providers.ts (their own pacers)
+ *   sodex        valuedesk/sodex/traderCore.ts over the gateway + data host
+ *   hyperliquid  valuedesk/hyperliquid/trader.ts over this runtime's /info client
+ *   tradexyz / lighter / arcus  valuedesk/extra/providers.ts (their own pacers)
  *
- * Only one input still comes from Valuescan: a Hyperliquid address's row on
+ * Only one input still comes from ValueDesk: a Hyperliquid address's row on
  * Hyperliquid's leaderboard (rank and aggregated PnL). That row lives in the
  * server's index - the file behind it is 39 MB - so it is one small index read.
  */
-import { NotAvailable, type TraderProfile, type TraderRow, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder } from '@sign/valuescan/types.js';
-import { shownLabel } from '@sign/valuescan/labels.js';
-import { buildSodexProfile, fillLimit, sodexFills, type SodexTraderIo } from '@sign/valuescan/sodex/traderCore.js';
-import { gatewayReads } from '@sign/valuescan/sodex/gatewayCore.js';
-import { coolingDown } from '@sign/valuescan/sodex/util.js';
-import { hlFills, hlTrader, type LbRowSource } from '@sign/valuescan/hyperliquid/trader.js';
-import { hlInfo } from '@sign/valuescan/hyperliquid/client.js';
-import { hlPriceSeries, type PriceRange, type PriceSeries } from '@sign/valuescan/hyperliquid/price.js';
-import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '@sign/valuescan/extra/providers.js';
+import { NotAvailable, type TraderProfile, type TraderRow, type Venue, type VsBalance, type VsFill, type VsFunding, type VsOrder } from '@sign/valuedesk/types.js';
+import { shownLabel } from '@sign/valuedesk/labels.js';
+import { buildSodexProfile, fillLimit, sodexFills, type SodexTraderIo } from '@sign/valuedesk/sodex/traderCore.js';
+import { gatewayReads } from '@sign/valuedesk/sodex/gatewayCore.js';
+import { coolingDown } from '@sign/valuedesk/sodex/util.js';
+import { hlFills, hlTrader, type LbRowSource } from '@sign/valuedesk/hyperliquid/trader.js';
+import { hlInfo } from '@sign/valuedesk/hyperliquid/client.js';
+import { hlPriceSeries, type PriceRange, type PriceSeries } from '@sign/valuedesk/hyperliquid/price.js';
+import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '@sign/valuedesk/extra/providers.js';
 import { dataReads } from './sodexData';
 import { gwGet } from './sodexGateway';
 import { RequestGate } from './gate';
@@ -79,7 +79,7 @@ const FILLS_TTL = 20_000;
 // --- Hyperliquid: the leaderboard row comes from the index -------------------------------
 
 /**
- * One address's Hyperliquid leaderboard row from the Valuescan index, or null
+ * One address's Hyperliquid leaderboard row from the ValueDesk index, or null
  * (not listed, or the index cannot say).
  *
  * `/api/vs/lbrow` answers exactly what the server's profile used: the row
@@ -171,7 +171,7 @@ export const venues = {
     return guarded(async () => {
       const address = addressOf(addressIn);
       const profile = await answers.run(`trader:${venue}:${address}`, PROFILE_TTL, () => traderOf(venue, address));
-      // A copy (the provider caches the profile object); no names anywhere (valuescan/labels.ts).
+      // A copy (the provider caches the profile object); no names anywhere (valuedesk/labels.ts).
       return profile ? { ...profile, summary: { ...profile.summary, label: shownLabel(profile.summary.address, profile.summary.label) } } : profile;
     });
   },
@@ -219,7 +219,7 @@ export const venues = {
 
   /**
    * A coin's price over a range for the cohort asset page (Hyperliquid candles),
-   * what the server's /api/vs/price answered - valuescan/hyperliquid/price.ts,
+   * what the server's /api/vs/price answered - valuedesk/hyperliquid/price.ts,
    * read with this runtime's /info client.
    */
   price(coin: string, range: PriceRange): Promise<PriceSeries & { ok: true }> {

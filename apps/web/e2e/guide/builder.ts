@@ -15,7 +15,7 @@ export const FEE_CAPS = { perps: 200, spot: 2000, max: 2000 } as const;
 export const FEE_DEFAULTS = { perps: 50, spot: 100 } as const;
 
 export const BUILDER_EXPLANATION: readonly string[] = [
-  'A BUILDER ACCOUNT is the SoDEX account that receives the Valuescan fee.',
+  'A BUILDER ACCOUNT is the SoDEX account that receives the ValueDesk fee.',
   '',
   '  - It is an ordinary, activated SoDEX account - nothing to register.',
   `  - It must hold at least ${BUILDER_MIN_USDC} vUSDC in Spot AND at least ${BUILDER_MIN_USDC} vUSDC in Perps.`,

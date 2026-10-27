@@ -25,20 +25,20 @@ import { closeReader } from '../src/indexer/reader.js';
 import { boardHoldings, type Holdings } from '../src/indexer/held.js';
 import { INDEXER_ENV } from '../src/indexer/engine.js';
 import { claimHlShare } from '../src/indexer/worker.js';
-import { apiOnly } from '../src/valuescan/env.js';
-import { NotAvailable, type VsPosition } from '../src/valuescan/types.js';
+import { apiOnly } from '../src/valuedesk/env.js';
+import { NotAvailable, type VsPosition } from '../src/valuedesk/types.js';
 import {
   HL_LIMIT_PER_MIN, HL_WEIGHT_API_ONLY, HL_WEIGHT_DEFAULT, HlInfoClient, hlWeightPerMin, type InfoBody, type InfoLike,
-} from '../src/valuescan/hyperliquid/info.js';
-import { HlPositioning, INDEX_TTL_MS as HL_INDEX_TTL_MS, type IndexSource } from '../src/valuescan/hyperliquid/positioning.js';
-import { HlTradeFeed } from '../src/valuescan/hyperliquid/whales.js';
-import { LbSnapshot, parseLeaderboard } from '../src/valuescan/hyperliquid/leaderboard.js';
-import type { HlLeaderboardRaw } from '../src/valuescan/hyperliquid/raw.js';
-import { INDEX_TTL_MS, indexPositioning, positioning, resetIndexPositioning } from '../src/valuescan/sodex/positioning.js';
-import { START_RETRY_MS, resetWhaleFeed, seedFromIndex, whales } from '../src/valuescan/sodex/whales.js';
+} from '../src/valuedesk/hyperliquid/info.js';
+import { HlPositioning, INDEX_TTL_MS as HL_INDEX_TTL_MS, type IndexSource } from '../src/valuedesk/hyperliquid/positioning.js';
+import { HlTradeFeed } from '../src/valuedesk/hyperliquid/whales.js';
+import { LbSnapshot, parseLeaderboard } from '../src/valuedesk/hyperliquid/leaderboard.js';
+import type { HlLeaderboardRaw } from '../src/valuedesk/hyperliquid/raw.js';
+import { INDEX_TTL_MS, indexPositioning, positioning, resetIndexPositioning } from '../src/valuedesk/sodex/positioning.js';
+import { START_RETRY_MS, resetWhaleFeed, seedFromIndex, whales } from '../src/valuedesk/sodex/whales.js';
 import {
   BULK_FAIL_GAP_MS, BULK_MIN_GAP_MS, bulkWaitMs, knownAddress, prefetchIds, resetResolver, resolveIds, resolverStats,
-} from '../src/valuescan/sodex/resolver.js';
+} from '../src/valuedesk/sodex/resolver.js';
 
 const dirs: string[] = [];
 function tmp(): string {

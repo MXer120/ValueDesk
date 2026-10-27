@@ -1,5 +1,5 @@
 // `vite preview` config for measurements: serves ONE built dist on a port of its own
-// and forwards /api (and /ws) to a running Valuescan API. Nothing is built with it.
+// and forwards /api (and /ws) to a running ValueDesk API. Nothing is built with it.
 //
 //   DIST=<abs dist dir> PORT=4180 [API=http://127.0.0.1:5180] [ACCESS_LOG=<file>] \
 //     npx vite preview --config tools/perf/preview.config.mjs

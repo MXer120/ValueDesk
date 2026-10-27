@@ -24,10 +24,10 @@
  */
 import { enginePath } from '../config.js';
 import { unwrapList, weightFor } from '../sodex/rest.js';
-import { lbPage, lbRank, LB_PAGE_SIZE, portfolioChart } from '../valuescan/sodex/data.js';
-import { gwGet, tradesPage } from '../valuescan/sodex/gateway.js';
-import { chartSuspect, chartToEquity, LB_WINDOW, summariseChart, type ClosedPosition, type LbItem, type RawTrade } from '../valuescan/sodex/mappers.js';
-import type { Window } from '../valuescan/types.js';
+import { lbPage, lbRank, LB_PAGE_SIZE, portfolioChart } from '../valuedesk/sodex/data.js';
+import { gwGet, tradesPage } from '../valuedesk/sodex/gateway.js';
+import { chartSuspect, chartToEquity, LB_WINDOW, summariseChart, type ClosedPosition, type LbItem, type RawTrade } from '../valuedesk/sodex/mappers.js';
+import type { Window } from '../valuedesk/types.js';
 import { pnlSince, type SyncResult } from './hlSource.js';
 import type { CloseRow, FillRow, HistoryKind, IndexStore } from './store.js';
 

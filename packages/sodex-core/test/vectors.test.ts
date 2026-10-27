@@ -7,7 +7,7 @@
  * with bytes the reference implementation produced - canonical JSON, payload
  * hash, and final 66-byte wire signature.
  *
- * Regenerate (Valuescan): from packages/sodex-core, `bash tools/genvectors.sh`
+ * Regenerate (ValueDesk): from packages/sodex-core, `bash tools/genvectors.sh`
  * writes test/vectors-sdk.json; test/vectors.json stays Opentrade's verbatim
  * copy, and vectors-sdk.test.ts proves the SDK still reproduces it.
  */

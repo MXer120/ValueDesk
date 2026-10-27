@@ -63,7 +63,7 @@ secret, and no secret may be given a `VITE_` name.**
 | Variable | For launch | Meaning |
 |---|---|---|
 | `VITE_WALLETCONNECT_PROJECT_ID` | **required** | Reown / WalletConnect project id. Without it wallets cannot connect by WalletConnect. Add the production domain to the project's allowed domains. |
-| `VITE_BUILDER_ID` | owner's decision | Valuescan's SoDEX builder account id. Empty: no builder fee is approved or charged. |
+| `VITE_BUILDER_ID` | owner's decision | ValueDesk's SoDEX builder account id. Empty: no builder fee is approved or charged. |
 | `VITE_BUILDER_FEE_PERPS` | with the id | Fee per perps order, tenths of a basis point (0..200). |
 | `VITE_BUILDER_FEE_SPOT` | with the id | Fee per spot order, tenths of a basis point (0..2000). |
 | `VITE_BUILDER_MAX_FEE` | optional | The ceiling a user approves (0..2000). Empty: the higher of the two fees. Below a fee: the builder is switched off. |

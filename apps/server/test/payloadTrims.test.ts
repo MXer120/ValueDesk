@@ -2,9 +2,9 @@
  * What the index sends: only what a client reads.
  *
  *   - Explore segment rows: the trader, the account value and the windows of
- *     the six tables (valuescan/explore.ts wireRow). The segments themselves -
+ *     the six tables (valuedesk/explore.ts wireRow). The segments themselves -
  *     who is in them, in which order - are cut from the full rows as before.
- *   - Screener rows: without `enrichedAt` (valuescan/screener.ts wireRow).
+ *   - Screener rows: without `enrichedAt` (valuedesk/screener.ts wireRow).
  *
  * (`label: null` is dropped for every index route in perf.ts: test/perf.test.ts.)
  */
@@ -19,10 +19,10 @@ import {
   assemble,
   buildSegments,
   wireRow,
-} from '../src/valuescan/explore.js';
-import { wireRow as screenerWireRow } from '../src/valuescan/screener.js';
-import { toScreenerRow } from '../src/valuescan/screener/model.js';
-import type { LeaderboardPage, TraderRow, Venue } from '../src/valuescan/types.js';
+} from '../src/valuedesk/explore.js';
+import { wireRow as screenerWireRow } from '../src/valuedesk/screener.js';
+import { toScreenerRow } from '../src/valuedesk/screener/model.js';
+import type { LeaderboardPage, TraderRow, Venue } from '../src/valuedesk/types.js';
 
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
 const addr = (n: number) => `0x${String(n).padStart(40, '0')}`;

@@ -18,8 +18,8 @@
  */
 import { NET, NETWORK } from '../config.js';
 import { sodex } from '../sodex/rest.js';
-import { gatewayWeightSpent, gwGet } from '../valuescan/sodex/gateway.js';
-import { cooldownLeftMs } from '../valuescan/sodex/util.js';
+import { gatewayWeightSpent, gwGet } from '../valuedesk/sodex/gateway.js';
+import { cooldownLeftMs } from '../valuedesk/sodex/util.js';
 import { TiersSource, defaultFee, type Fee, type LogLike, type TiersConfig } from './config.js';
 import { EXPLORER_BASE } from './explorer.js';
 import { builderDbPath, termsKeyPath, tiersPath } from './paths.js';

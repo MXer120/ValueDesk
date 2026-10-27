@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { portfolioPnl } from '../src/indexer/cohortSource.js';
 import { PNL_SHARE, pnlPrio, pnlTtl } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
-import type { HlPortfolio } from '../src/valuescan/hyperliquid/raw.js';
+import type { HlPortfolio } from '../src/valuedesk/hyperliquid/raw.js';
 
 const DAY = 86_400_000;
 

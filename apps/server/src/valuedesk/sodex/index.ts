@@ -1,5 +1,5 @@
 /**
- * SoDEX venue provider for Valuescan. Contract: ../types.ts VenueProvider.
+ * SoDEX venue provider for ValueDesk. Contract: ../types.ts VenueProvider.
  *
  *   leaderboard  SoDEX's official leaderboard (mainnet-data), 60 s cache;
  *                ROI / account value from each account's portfolio chart  -> leaderboard.ts

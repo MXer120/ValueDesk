@@ -1,4 +1,4 @@
-# Testing Valuescan before launch
+# Testing ValueDesk before launch
 
 Status: 2026-10-02. One file runs everything that can be tested automatically and walks you through the
 rest:
@@ -110,7 +110,7 @@ subscribing after a restart); it does not fail the stage.
 
 ### Stage C - builder account and fee tiers
 
-A builder account is the SoDEX account that receives the Valuescan fee: any activated account that holds at
+A builder account is the SoDEX account that receives the ValueDesk fee: any activated account that holds at
 least 100 vUSDC in Spot **and** 100 vUSDC in Perps. The money is parked, not spent. Its account ID is the
 builder ID. It is **your own, existing account**: the guide and the live run only read it - nothing here
 creates, funds or moves money on a builder account. Two choices:
@@ -179,7 +179,7 @@ real wallet on SoDEX mainnet. Its safety model is unchanged; the guide adds your
 5. **Funding.** The plan says how much of what, on which chain, to which address. The guide re-runs the
    read-only plan every 20 seconds and goes on by itself when the funds are there (type `q` to stop waiting).
 6. **The run.** One complete plan, the steps with their estimated cost and the spend cap, a reminder to close
-   every other Valuescan and sodex.com tab (the run and the server's fee check need SoDEX's history reads;
+   every other ValueDesk and sodex.com tab (the run and the server's fee check need SoDEX's history reads;
    another tab can use them up and get this address blocked for a minute), then two confirmations: the word
    YES, and the wallet address typed out. Only then is `acknowledgeRealFunds` written into the config - for
    this run; it is switched off again when the run ends. The runner's output is shown live.

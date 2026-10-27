@@ -1,8 +1,8 @@
 /**
- * Pure mappers from SoDEX wire shapes to the Valuescan contract (../types.ts).
+ * Pure mappers from SoDEX wire shapes to the ValueDesk contract (../types.ts).
  *
  * Nothing in this file does I/O, so every rule here is unit-tested against
- * verbatim live fixtures (test/valuescan-sodex.test.ts). The shapes below were
+ * verbatim live fixtures (test/valuedesk-sodex.test.ts). The shapes below were
  * observed on mainnet on 2026-09-25; the research notes are in
  * docs/research/01-sodex-valuechain.md and 04-opentrade-reuse-map.md.
  *
@@ -487,7 +487,7 @@ export function spotValue(
 export interface ClosedStats {
   /** Closed positions in the sample. */
   count: number;
-  /** By the shared definition (valuescan/winRate.ts): one closed position = one close. Null below its threshold. */
+  /** By the shared definition (valuedesk/winRate.ts): one closed position = one close. Null below its threshold. */
   winRate: number | null;
   /** The sample is every closed position (fewer than `limit`). */
   winRateExact: boolean;

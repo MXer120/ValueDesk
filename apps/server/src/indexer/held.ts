@@ -17,7 +17,7 @@
  * Kept apart from read.ts on purpose: the venue providers import this, and the
  * indexer imports the providers.
  */
-import type { Venue, VsPosition } from '../valuescan/types.js';
+import type { Venue, VsPosition } from '../valuedesk/types.js';
 import { reader } from './reader.js';
 
 export interface Holdings {

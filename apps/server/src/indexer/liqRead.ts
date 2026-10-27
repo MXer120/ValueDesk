@@ -13,13 +13,13 @@
  * much of it has a known liquidation price, and how the math has matched the
  * venue's figures at reads and re-reads (the tracker's DriftStats).
  */
-import type { Venue } from '../valuescan/types.js';
-import type { WalletVenue } from '../valuescan/cohorts/model.js';
-import { emptyDrift, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
-import { coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuescan/liquidations/levels.js';
+import type { Venue } from '../valuedesk/types.js';
+import type { WalletVenue } from '../valuedesk/cohorts/model.js';
+import { emptyDrift, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
+import { coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
-import { venueMarkets, type VenueMarkets } from '../valuescan/liquidations/rules.js';
-import { shownLabel } from '../valuescan/labels.js';
+import { venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
+import { shownLabel } from '../valuedesk/labels.js';
 import { cohortBooksNow } from './read.js';
 import { reader } from './reader.js';
 import { liqFeed } from './liqFeed.js';

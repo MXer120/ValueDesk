@@ -7,9 +7,9 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { easternToUtc, sosoIndicators, type CalendarEvent } from '../src/valuescan/calendar.js';
-import { INDICATORS, indicator, indicatorList, indicatorReleased, indicatorView, parseFredCsv, periodLabel, resetIndicators, transform } from '../src/valuescan/indicators.js';
-import { RELEASE_FIELDS, decodePage, parseRelease } from '../src/valuescan/releases.js';
+import { easternToUtc, sosoIndicators, type CalendarEvent } from '../src/valuedesk/calendar.js';
+import { INDICATORS, indicator, indicatorList, indicatorReleased, indicatorView, parseFredCsv, periodLabel, resetIndicators, transform } from '../src/valuedesk/indicators.js';
+import { RELEASE_FIELDS, decodePage, parseRelease } from '../src/valuedesk/releases.js';
 
 const csv = (series: string) => readFileSync(new URL(`./fixtures/indicators/${series}.csv`, import.meta.url), 'utf8');
 const latest = (id: string) => indicatorView(parseFredCsv(csv(INDICATORS[id]!.series)), INDICATORS[id]!, 'max').latest;

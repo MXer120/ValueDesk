@@ -18,7 +18,7 @@
  *
  * Ported from the rejected web draft (archive/web-draft/src/pages/copy/sim).
  * The follower algorithm is unchanged. What changed (ENGINE_VERSION 2):
- *  - the types are the Valuescan contract's (fills arrive through adapt.ts),
+ *  - the types are the ValueDesk contract's (fills arrive through adapt.ts),
  *    and the demo flag is gone because this app has no demo data;
  *  - new option `builderFeeOnReduce` (the planned pricing charges opens only);
  *  - the leader curve scales each PnL step by the leader's equity AT THAT TIME,

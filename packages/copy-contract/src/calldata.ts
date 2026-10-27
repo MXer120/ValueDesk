@@ -66,7 +66,7 @@ export const calls = {
   unsubscribeAll: (closePositions: boolean) => enc('unsubscribeAll', [closePositions]),
   invalidateNonces: (word: bigint, mask: bigint) => enc('invalidateNonces', [word, mask]),
 
-  // ---- follower, signed (anyone submits; Valuescan's relayer pays the gas) ----
+  // ---- follower, signed (anyone submits; ValueDesk's relayer pays the gas) ----
   subscribeWithSig: (
     follower: Address,
     venue: number,

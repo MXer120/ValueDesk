@@ -15,7 +15,7 @@
  *     `@walletconnect/universal-provider`, and used the modal for its UI only.
  *     That was WalletConnect-ONLY by design: AppKit lists extension wallets
  *     through a chain ADAPTER, and there was none. Extensions were connected
- *     from Valuescan's own wallet sheet instead.
+ *     from ValueDesk's own wallet sheet instead.
  *  2. Owner request: one modal, and it must offer extension wallets too. So
  *     AppKit now owns the connection, with an adapter.
  *
@@ -327,7 +327,7 @@ const isExtensionType = (type: string | undefined): boolean =>
  * an upgrade can re-check them one by one.
  */
 function defineAdapter(Base: EthersAdapterClass) {
-  return class ValuescanEthersAdapter extends Base {
+  return class ValuedeskEthersAdapter extends Base {
     /**
      * DO NOT DRAG AN EXTENSION ONTO VALUECHAIN AT CONNECT TIME.
      *

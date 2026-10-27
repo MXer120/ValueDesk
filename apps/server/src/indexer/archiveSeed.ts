@@ -10,7 +10,7 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
-import type { Venue } from '../valuescan/types.js';
+import type { Venue } from '../valuedesk/types.js';
 
 export const ARCHIVE_DIR = process.env.VALUESCAN_HL_ARCHIVE_DIR || '/var/lib/valuescan/archive';
 

@@ -100,7 +100,7 @@ function FeeTierInner({
   /** Bumped by Retry. */
   const [attempt, setAttempt] = useState(0);
   /*
-   * Valuescan's builder fee on orders placed here - null unless a builder is
+   * ValueDesk's builder fee on orders placed here - null unless a builder is
    * configured and applies on this engine. It is NOT one of the venue's rates:
    * SoDEX charges it on top of them, so it is shown as its own figure. 'sell',
    * because spot charges it on sells only and the sentence below says so.

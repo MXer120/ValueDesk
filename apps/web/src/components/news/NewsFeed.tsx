@@ -16,7 +16,7 @@
  * refreshes every two minutes; more pages load on demand.
  *
  * Sources (owner, 2026-10-26): SoSoValue's feed, and the White House and
- * Watcher.Guru (server valuescan/feeds.ts) merged into Latest and a search by
+ * Watcher.Guru (server valuedesk/feeds.ts) merged into Latest and a search by
  * time - each switched on or off in Settings. Their stories have no type, so a
  * type filter shows SoSoValue's alone. The "Powered by SoSoValue" pill can be
  * dismissed for good (its x on hover; Settings brings it back).

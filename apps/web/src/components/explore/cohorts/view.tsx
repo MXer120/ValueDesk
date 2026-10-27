@@ -6,7 +6,7 @@
  * the rail (that is navigation).
  */
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
-import { PNL_COHORTS, SIZE_COHORTS, isCohortId, type CohortDef, type CohortId } from '@sign/valuescan/cohorts/model.js';
+import { PNL_COHORTS, SIZE_COHORTS, isCohortId, type CohortDef, type CohortId } from '@sign/valuedesk/cohorts/model.js';
 import { useStored } from '../../../hooks';
 import { ViewPop } from '../../ViewPop';
 import { Section } from '../../accountTables/FilterBar';

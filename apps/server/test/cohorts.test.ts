@@ -7,11 +7,11 @@ import {
   aggregate, biasOf, coinOf, holdsPosition, leanOf, longShare, netWallet, perpEquity, pnlCohort, sampledVenue, scopeKey, sectorOf, sizeCohort,
   sumCohorts, walletRow,
   type Position, type WalletVenue,
-} from '../src/valuescan/cohorts/model.js';
+} from '../src/valuedesk/cohorts/model.js';
 import { allScopes, applyFill, needsSpot, pollTtl, reconcileTtl, staleEquity, type Book } from '../src/indexer/cohortTracker.js';
 import { spotCollateral } from '../src/indexer/cohortSource.js';
 import { Lane } from '../src/indexer/lanes.js';
-import type { Venue } from '../src/valuescan/types.js';
+import type { Venue } from '../src/valuedesk/types.js';
 
 const w = (o: Partial<WalletVenue>): WalletVenue => ({ pnl: null, equity: null, label: null, positions: null, at: 0, weight: 1, ...o });
 const pos = (symbol: string, szi: number, entry: number | null = null): Position => ({ symbol, szi, entry });

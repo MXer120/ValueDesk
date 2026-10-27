@@ -110,7 +110,7 @@ export function renderLicences(pkgs, product = "ValueDesk's web app") {
 /** The plugin. `fileName` is where the text lands in the build. */
 export function thirdPartyLicences({ fileName = 'third-party-licenses.txt' } = {}) {
   return {
-    name: 'valuescan:third-party-licences',
+    name: 'valuedesk:third-party-licences',
     apply: 'build',
     generateBundle() {
       const dirs = new Map();

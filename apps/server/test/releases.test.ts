@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { easternToUtc, type CalendarEvent } from '../src/valuescan/calendar.js';
+import { easternToUtc, type CalendarEvent } from '../src/valuedesk/calendar.js';
 import {
   RELEASE_FIELDS,
   decodePage,
@@ -23,7 +23,7 @@ import {
   resetReleases,
   resultUrl,
   startReleaseWatcher,
-} from '../src/valuescan/releases.js';
+} from '../src/valuedesk/releases.js';
 
 const page = (name: string) => decodePage(readFileSync(new URL(`./fixtures/releases/${name}`, import.meta.url)));
 const values = (r: ReturnType<typeof parseRelease>) => Object.fromEntries(Object.entries(r!.values).map(([k, v]) => [k, v.value]));

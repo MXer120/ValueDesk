@@ -29,7 +29,7 @@
  *     consent log ('accept-site-terms') with the edge's country;
  *   - wallet screening (section 6): legal/screening.ts, an eth_call to the
  *     Chainalysis sanctions oracle through ethereum-rpc.publicnode.com;
- *   - News: the server asks SoSoValue (valuescan/sosovalue), the browser never
+ *   - News: the server asks SoSoValue (valuedesk/sosovalue), the browser never
  *     does; the Live Feed's players need the visitor's consent (legal/embeds.ts);
  *   - copy trading, as of 2026-10-23 (section 11): the hosted executor's
  *     database (apps/executor/src/db.ts - copies, their state and activity,

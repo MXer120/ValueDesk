@@ -1,5 +1,5 @@
 /**
- * GETs to Valuescan's own server - the index API (/api/vs/*): one request per
+ * GETs to ValueDesk's own server - the index API (/api/vs/*): one request per
  * URL at a time, polls that ask the server, and a page's first reads on their
  * way before the page is.
  *
