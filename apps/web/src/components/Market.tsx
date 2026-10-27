@@ -1876,7 +1876,12 @@ export function Book({
     const ladder = s === 'ask' ? askLadder : shownBids;
     if (!(inc > 0)) return null;
     const bucket = bucketOf(rest.price, inc, s);
-    return ladder.some((l) => l.price === bucket) ? { side: s, price: bucket, qty: rest.qty } : null;
+    if (ladder.some((l) => l.price === bucket)) return { side: s, price: bucket, qty: rest.qty };
+    // Inside the spread (a price between the best bid and ask, e.g. a resting order at the mid): it
+    // would become the new best on its side, so it is drawn on that side's best row.
+    const best = ladder[0]; // both ladders start at the touch (asks ascending, bids descending)
+    const inside = best && (s === 'bid' ? rest.price > best.price : rest.price < best.price);
+    return inside ? { side: s, price: best!.price, qty: rest.qty } : null;
   })();
   const impactLive = Boolean(
     (askTaken && askTaken.size > 0) || (bidTaken && bidTaken.size > 0) || restHit,

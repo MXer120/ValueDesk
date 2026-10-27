@@ -187,14 +187,21 @@ html .vs-explore-page .ex-band__head h3 {
   color: var(--dim); font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
 }
 
-/* Cards: the trade panel's fill, hairline and radius. */
-html .pf .pf-card,
-html .lbp .lbp-sheet,
-html .lbp .lbp-card,
-html .cpy .cpy-replay {
-  background: var(--bg-panel); border: 1px solid var(--panel-line); border-radius: var(--radius-sm);
+/* Cards: the trade page's panels themselves - the same tinted, blurred glass over the page's light,
+   the same hairline and corner (the `.dash-panel` rule at the top), so every page reads as the Trade
+   page does. Only the outer cards: a card inside one (a sector inside Explore's section, a chart inside
+   a Portfolio card) stays a quiet inset, never a second pane of glass. */
+html[data-glass] :is(.cpy-card, .cpy-replay, .lbp-card, .lbp-sheet, .mk-sec, .mk-feat, .mk-rail, .pf-card) {
+  --bg-panel: transparent;
+  background:
+    radial-gradient(90% 60% at 20% 0%, color-mix(in srgb, var(--stg-glow) var(--stg-glow-a), transparent), transparent 70%),
+    color-mix(in srgb, var(--stg-tint) var(--pn-a), transparent);
+  -webkit-backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+  backdrop-filter: blur(var(--pn-blur)) saturate(var(--stg-sat));
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius-card, 12px);
 }
-html .cpy .cpy-card { border: 1px solid var(--panel-line); border-radius: var(--radius-sm); }
+html[data-glass] :is(.mk-sector, .pf-chart) { background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 10px; }
 
 /* Tables: 11px caps heads, hairline rows. */
 html :is(.vs-explore-page, .cpy, .lbp, .pf, .scanv) :is(.datatable, .lb-table) th {

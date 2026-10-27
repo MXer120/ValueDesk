@@ -1095,7 +1095,8 @@ export function OrderEntry({
   // this is free. Both sides are shown because this panel has no side until a
   // button is pressed.
   const [book, setBook] = useState<OrderBook | null>(null);
-  const needsDepth = marketExec && num(quantity) > 0;
+  // An algo is drawn on the book by its first order, sized by its own fields (a DCA has no Amount).
+  const needsDepth = marketExec && (num(quantity) > 0 || type === 'algo');
   /*
    * A LIMIT ticket wants top-of-book too, for the MID button beside the price.
    * That is one refcounted `l2Book` topic - and on the trade page the book panel
@@ -2006,20 +2007,6 @@ export function OrderEntry({
         {/* An algo sized some other way (DCA in USD per order, a trailing stop on
             the whole position) has no Amount: the field is not shown rather than
             shown and ignored. */}
-        {/* An algo sized another way (DCA in USD per order, a stop on the whole position) still has the
-            unit switch: it decides the unit its preview and its lines on the chart show sizes in. */}
-        {isAlgo && !algoState.needsAmount && (
-          <div className="oe-unitrow">
-            <span>Sizes shown in</span>
-            <div className="oe-unitrow__seg" role="radiogroup" aria-label="Sizes shown in">
-              {(['base', 'quote'] as const).map((u) => (
-                <button key={u} type="button" role="radio" aria-checked={sizeUnit === u} className={`oe-mini${sizeUnit === u ? ' is-on' : ''}`} onClick={() => switchUnit(u)}>
-                  {u === 'base' ? baseLabel || 'Coin' : quoteLabel || 'USD'}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
         {(!isAlgo || algoState.needsAmount) && (
         <>
         <div className="oe-field">
@@ -2048,18 +2035,17 @@ export function OrderEntry({
             {/* TWO units, so a toggle rather than a select: a dropdown that
                 always holds exactly two options is two clicks to do what one
                 does, and it cannot show which one you are about to get. */}
-            <span className="oe-unitlabel">
-              {(sizeUnit === 'base' ? baseLabel : quoteLabel) || 'Unit'}
-            </span>
+            {/* The unit and its arrows are one button: a click on either switches coin and USD. */}
             <button
               type="button"
-              className="oe-swap"
+              className="oe-unitswap"
               disabled={!sym}
               aria-label={`Size in ${sizeUnit === 'base' ? quoteLabel : baseLabel}`}
               title={`Switch to ${sizeUnit === 'base' ? quoteLabel : baseLabel}`}
               onClick={() => switchUnit(sizeUnit === 'base' ? 'quote' : 'base')}
             >
-              <SwapIcon />
+              <span className="oe-unitlabel">{(sizeUnit === 'base' ? baseLabel : quoteLabel) || 'Unit'}</span>
+              <span className="oe-swap" aria-hidden="true"><SwapIcon /></span>
             </button>
           </div>
           {liveBelow && (

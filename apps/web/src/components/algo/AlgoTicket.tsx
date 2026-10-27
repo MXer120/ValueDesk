@@ -44,6 +44,7 @@ import {
   type Candle,
   type ConditionType,
   type MarketInfo,
+  type PlannedChild,
   type OracleVenue,
   type VolumeProfile,
 } from '@copy-engine';
@@ -222,7 +223,23 @@ function Seg<T extends string | number>({ label, value, options, onChange, title
 }
 
 /** A unit inside a field's box, picked like the Amount field's unit. */
+/**
+ * Two units (bp / %, coin / USD, % / USD): one button, the unit and its arrows both clickable, a click
+ * switches to the other - not a list that always holds exactly two. Three or more stay a list.
+ */
+function UnitToggle<T extends string>({ label, value, options, onChange, className }: { label: string; value: T; options: ReadonlyArray<readonly [T, string]>; onChange: (v: T) => void; className: string }) {
+  const i = Math.max(0, options.findIndex(([v]) => v === value));
+  const next = options[(i + 1) % options.length]!;
+  return (
+    <button type="button" className={`${className} algo-unitswap`} aria-label={`${label} in ${next[1]}`} title={`Switch to ${next[1]}`} onClick={() => onChange(next[0])}>
+      <span>{options[i]![1]}</span>
+      <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6h8.5L10 3.5M12 10H3.5L6 12.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+    </button>
+  );
+}
+
 function ModeSelect<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<readonly [T, string]>; onChange: (v: T) => void }) {
+  if (options.length === 2) return <UnitToggle label={label} value={value} options={options} onChange={onChange} className="oe-unit" />;
   return (
     <select className="oe-unit algo-unitsel" aria-label={`${label} unit`} value={value} onChange={(e) => onChange(e.target.value as T)}>
       {options.map(([v, t]) => (
@@ -357,6 +374,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       }
       if (kind === 'conditional' && !x.conds.length) patch.conds = [cond(p.symbol, { value: roundTick(p.side === 'buy' ? mid * 0.99 : mid * 1.01), op: p.side === 'buy' ? 'below' : 'above' })];
       if (kind === 'basket' && !x.legs.length) patch.legs = legs(p.symbol, p.side);
+      if (kind === 'dca' && (!x.dcaStart || x.dcaFirst !== 'price')) Object.assign(patch, { dcaFirst: 'price', dcaStart: x.dcaStart || roundTick(mid) });
       if (kind === 'bracket' && !x.entryPrice) patch.entryPrice = roundTick(p.side === 'buy' ? mid * 0.998 : mid * 1.002);
       return Object.keys(patch).length ? { ...x, ...patch } : x;
     });
@@ -516,11 +534,21 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const label = `Start ${menuName(kind)}${d.paper ? ' (paper)' : ''}`;
   // The first order it sends, as the order book should draw it: a resting kind (a ladder, an iceberg, a
   // chase, or a slice that rests first) at its price; a taker walks the book to its slippage limit.
-  const firstChild = plan ? ((plan.schedule?.length ? plan.schedule : plan.children).find((c) => c.qty > 0) ?? null) : null;
+  const planned = plan ? ((plan.schedule?.length ? plan.schedule : plan.children).find((c) => c.qty > 0) ?? null) : null;
+  // A trailing stop and a conditional place nothing now: what they would send when they fire stands in -
+  // a stop closes at market; a conditional's action at market, or its limit at its price.
+  const sp0 = check.spec;
+  const fires: PlannedChild | null =
+    planned ? null
+    : sp0?.kind === 'trailing' && Number(sp0.quantity ?? p.quantity) > 0 ? { at: null, qty: Number(sp0.quantity ?? p.quantity), price: null, tag: 'stop' }
+    : sp0?.kind === 'conditional' && sp0.then.type === 'limit' ? { at: null, qty: Number(sp0.then.quantity), price: sp0.then.price, tag: 'then' }
+    : sp0?.kind === 'conditional' && sp0.then.type === 'market' && Number(sp0.then.quantity) > 0 ? { at: null, qty: Number(sp0.then.quantity), price: null, tag: 'then' }
+    : null;
+  const firstChild = planned ?? fires;
   const restsFirst = ek === 'scale' || ek === 'iceberg' || ek === 'chase' || (check.spec && 'exec' in check.spec && check.spec.exec.style !== 'taker');
   const touchPx = p.side === 'buy' ? ask : bid;
   const firstPrice = firstChild?.price ?? (restsFirst ? (p.side === 'buy' ? bid : ask) ?? null : touchPx ? touchPx * (1 + (p.side === 'buy' ? 1 : -1) * (Number(d.slip) || 10) / 10_000) : null);
-  const firstImpact = firstChild && !amountMissing ? { qty: firstChild.qty, price: firstPrice, rests: !!restsFirst && (firstChild.price === null || (p.side === 'buy' ? firstPrice! < (ask ?? Infinity) : firstPrice! > (bid ?? 0))) } : null;
+  const firstImpact = firstChild && !amountMissing ? { qty: firstChild.qty, price: firstPrice, rests: firstChild.price !== null ? (p.side === 'buy' ? firstChild.price < (ask ?? Infinity) : firstChild.price > (bid ?? 0)) : !!restsFirst } : null;
   const firstKey = firstImpact ? `${firstImpact.qty.toPrecision(6)}@${firstImpact.price ? firstImpact.price.toPrecision(8) : 'm'}:${firstImpact.rests}` : '';
   const why = !market ? 'Loading the market…' : amountMissing ? 'Enter an amount.' : allErrors[0] ?? where.why ?? null;
   const sided = kind !== 'basket';
@@ -810,7 +838,20 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 
           {ek === 'dca' && (
             <>
-              <Field label={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} suffix="USD" title="The first order's size in USD; each later one is Size × times the one before" err={err('perOrderUsd', 'quantity')} />
+              <UsdField ticket title={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} hint="The first order's size; each later one is Size × times the one before" err={err('perOrderUsd', 'quantity')} />
+              <Field
+                label="First at"
+                value={d.dcaStart}
+                onChange={(v) => set({ dcaStart: v, dcaFirst: 'price' })}
+                suffix={
+                  <>
+                    <span className="oe-suffix">USD</span>
+                    <button type="button" className="oe-chip" disabled={!mid} title={mid ? 'Use the mid price' : 'No two-sided book to take a mid from'} onClick={() => mid && set({ dcaStart: roundTick(mid), dcaFirst: 'price' })}>MID</button>
+                  </>
+                }
+                title="The first order's price; the later ones step from it"
+                err={err('from')}
+              />
               {d.dcaLevels === 'step' ? (
                 <>
                   <Field label="Step" value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} suffix="%" title={`How far ${p.side === 'buy' ? 'below' : 'above'} the one before each next order rests (Advanced: a step scale, or prices you type)`} err={err('to', 'prices')} />
@@ -820,9 +861,6 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                 <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
               )}
               <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order is this many times the one before, in USD (1: all the same)" err={err('skew', 'weights')} />
-              <Seg label="First" value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once'], ['price', 'Price', 'Rests at a price you set']]} />
-              {d.dcaFirst === 'price' && <Field label="Price" value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} suffix="USD" err={err('from')} />}
-              {d.dcaFirst === 'market' && err('from') && <p className="oe-hint algo-ferr">Waiting for the best price…</p>}
             </>
           )}
 
@@ -1099,6 +1137,35 @@ const SizeCtx = createContext<{ unit: 'coin' | 'usd'; setUnit?: (u: 'coin' | 'us
  * A size in the coin, shown in the order panel's unit (the coin, or USD at the price now) with that
  * unit's switch in its box; it is kept in the coin as the draft keeps it.
  */
+/** A USD amount (a DCA's each buy) shown in the order panel's unit: USD, or the coin at the price now. */
+function UsdField({ title, hint, value, onChange, err, ticket = false }: { title: string; hint: string; value: string; onChange: (v: string) => void; err?: string; ticket?: boolean }) {
+  const { unit, setUnit, px, base, step } = useContext(SizeCtx);
+  const [text, setText] = useState<string | null>(null);
+  const coin = unit === 'coin' && !!px;
+  const shown = text ?? (value.trim() === '' ? '' : coin ? toStep(Number(value) / px!, step) : value);
+  const write = (t: string) => {
+    if (!coin) {
+      setText(null);
+      onChange(t);
+      return;
+    }
+    setText(t);
+    onChange(t.trim() === '' ? '' : (Number(t) * px!).toFixed(2));
+  };
+  const opts: ReadonlyArray<readonly ['usd' | 'coin', string]> = [['usd', 'USD'], ['coin', base || 'Coin']];
+  const pick = (u: 'coin' | 'usd') => {
+    setText(null);
+    setUnit?.(u);
+  };
+  const shownUnit = coin ? 'coin' : 'usd';
+  const box = setUnit ? (ticket ? <ModeSelect label={title} value={shownUnit} options={opts} onChange={pick} /> : <APick label={title} value={shownUnit} options={opts} onChange={pick} />) : 'USD';
+  return ticket ? (
+    <Field label={title} value={shown} onChange={write} suffix={box} title={hint} err={err} />
+  ) : (
+    <AField title={title} hint={hint} value={shown} onChange={write} unit={box} err={err} />
+  );
+}
+
 function QtyField({ title, hint, value, onChange, placeholder, err, ticket = false }: {
   title: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; err?: string; ticket?: boolean;
 }) {
@@ -1156,6 +1223,7 @@ function AField({ title, hint, value, onChange, unit, placeholder, int = false, 
 
 /** A unit picked inside a pop-up field's box. */
 function APick<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: ReadonlyArray<readonly [T, string]>; onChange: (v: T) => void }) {
+  if (options.length === 2) return <UnitToggle label={label} value={value} options={options} onChange={onChange} className="algo-sf__unit" />;
   return (
     <select className="algo-sf__unit algo-sf__pick" aria-label={`${label} unit`} value={value} onChange={(e) => onChange(e.target.value as T)}>
       {options.map(([v, t]) => (
@@ -1381,9 +1449,15 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
 
       {ek === 'dca' && (
         <Group label="Orders" sec="order">
-          <AField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint="The first order’s size in USD; each later one is Size × times the one before." value={d.perOrder} onChange={(v) => set({ perOrder: v })} unit="USD" err={err('perOrderUsd', 'quantity')} />
-          <ASeg title="First" hint="The first order: at once, or resting at a price." value={d.dcaFirst} onChange={(v) => set({ dcaFirst: v, dcaStart: v === 'price' && !d.dcaStart && mid ? roundTick(mid) : d.dcaStart })} options={[['market', 'Market', 'At the best price now: takes at once.'], ['price', 'Price', 'Rests at a price you set.']]} />
-          {d.dcaFirst === 'price' && <AField title="First at" hint="The first order’s price." value={d.dcaStart} onChange={(v) => set({ dcaStart: v })} unit="USD" err={err('from')} />}
+          <UsdField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint="The first order’s size; each later one is Size × times the one before." value={d.perOrder} onChange={(v) => set({ perOrder: v })} err={err('perOrderUsd', 'quantity')} />
+          <AField
+            title="First at"
+            hint="The first order’s price; the later ones step from it."
+            value={d.dcaStart}
+            onChange={(v) => set({ dcaStart: v, dcaFirst: 'price' })}
+            unit={<span className="algo-sf__unit algo-sf__units">USD<button type="button" className="oe-chip" disabled={!mid} onClick={() => mid && set({ dcaStart: roundTick(mid), dcaFirst: 'price' })}>MID</button></span>}
+            err={err('from')}
+          />
           {d.dcaLevels === 'step' ? (
             <>
               <AField title="Step" hint={`How far ${side === 'buy' ? 'below' : 'above'} the one before each next order rests.`} value={d.dcaStep} onChange={(v) => set({ dcaStep: v })} unit="%" err={err('to', 'prices')} />

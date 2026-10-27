@@ -1513,3 +1513,8 @@ button.oe-select[aria-expanded='true'] {
 .oe-pop.oe-slippop .oe-pctbox { border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.07); }
 .oe-levslider { --oe-tint: var(--pos); }
 .oe-unitrow { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--fs-base); } .oe-unitrow__seg { display: flex; gap: 4px; }
+/* The size field's unit and its arrows: one button, a click on either switches. */
+.oe-unitswap { flex: none; display: inline-flex; align-items: center; gap: 2px; padding: 0; border: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
+.oe-unitswap:disabled { cursor: default; }
+.oe-unitswap:hover:not(:disabled) .oe-swap, .oe-unitswap:hover:not(:disabled) .oe-unitlabel { color: var(--text); }
+.oe-unitswap .oe-unitlabel { color: var(--text); }

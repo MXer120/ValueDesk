@@ -620,3 +620,7 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-pair .algo-sf { width: 100%; }
 .algo-readout { font-family: var(--font-num); color: var(--text); }
 .algo-st__lvlq { fill: var(--muted); font-size: 10px; font-family: var(--font-num); }
+.algo-unitswap { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; font: inherit; cursor: pointer; padding: 0 10px; color: var(--muted); }
+.algo-unitswap:hover { color: var(--text); }
+.algo-unitswap svg { opacity: 0.8; }
+.algo-sf__units { display: inline-flex; align-items: center; gap: 8px; padding-right: 6px; }
