@@ -171,7 +171,8 @@ drill() {   # set, key option
   local set="$1" keyopt="${2:-}" file scratch key
   file="$(latest "$set")"
   scratch="$(mktemp -d /var/tmp/vs-drill.XXXXXX)"
-  trap 'rm -rf "$scratch"' EXIT
+  # Expanded now: the local is gone by the time the EXIT trap runs (set -u would stop on it).
+  trap "rm -rf $(printf %q "$scratch")" EXIT
   case "$keyopt" in
     --key=*) key="${keyopt#--key=}" ;;
     --key-stdin|'') key="$scratch/key"; cat > "$key"; chmod 600 "$key" ;;
