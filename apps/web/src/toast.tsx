@@ -289,17 +289,30 @@ function ToastCard({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
     window.setTimeout(() => onDismiss(t.id), 170);
   }, [onDismiss, t.id]);
   const ttl = TTL[t.severity];
+  /* Held while the pointer is on it (it opens to its full words then): the time left is kept
+     and runs on when the pointer leaves, as its timer bar does (shell.css pauses the bar). */
+  const [held, setHeld] = useState(false);
+  const left = useRef(ttl);
   useEffect(() => {
-    if (!ttl) return;
-    const timer = window.setTimeout(close, ttl);
-    return () => window.clearTimeout(timer);
-  }, [t.id, ttl, close]);
+    left.current = ttl;
+  }, [t.id, ttl]);
+  useEffect(() => {
+    if (!ttl || held) return;
+    const from = Date.now();
+    const timer = window.setTimeout(close, left.current);
+    return () => {
+      window.clearTimeout(timer);
+      left.current = Math.max(0, left.current - (Date.now() - from));
+    };
+  }, [t.id, ttl, close, held]);
 
   return (
     <div
       className={`toast toast--${t.severity}${t.kind ? ` toast--${t.kind}` : ''}${leaving ? ' is-leaving' : ''}`}
       /* An error interrupts; everything else waits its turn. */
       role={t.severity === 'error' ? 'alert' : 'status'}
+      onMouseEnter={() => setHeld(true)}
+      onMouseLeave={() => setHeld(false)}
     >
       <span className="toast__ic" aria-hidden="true">
         {t.coin ? <CoinIcon coin={t.coin} size={30} /> : <span className="toast__glyph"><Glyph t={t} /></span>}

@@ -265,6 +265,12 @@
 .toasts.is-docked .toast__retry { height: 22px; border-radius: 7px; }
 .toasts.is-docked .toast__x { width: 20px; height: 20px; }
 .toasts.is-docked .toast__timer { height: 1.5px; }
+/* A pill too short for its words opens on hover: wider first, then wrapped downward over the
+   page (the lane keeps its 38px, so nothing around it moves up or down). */
+.toasts.is-docked .toasts__live { height: 38px; align-items: flex-start; }
+.toasts.is-docked .toast:not(.ix-note):hover { height: auto; min-height: 38px; max-width: min(520px, 70vw); padding-block: 7px; z-index: 6; position: relative; }
+.toasts.is-docked .toast:not(.ix-note):hover :is(.toast__title, .toast__detail, .toast__msg) { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+.toasts.is-docked .toast:hover .toast__timer { animation-play-state: paused; }
 /* The kinds: failures red, warnings amber, fills and good news green, a placed order
    blue, a cancel grey, plain news white. */
 .toasts.is-docked .toast--placed { --tone: #5b8def; }
