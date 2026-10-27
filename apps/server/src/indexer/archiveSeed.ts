@@ -8,9 +8,8 @@
  * largest first); the read itself is what the books, the cohorts and the liquidation map use.
  * Coins `xyz:NAME` are trade.xyz's dex (that venue); other HIP-3 dexes are not venues here.
  */
-import { createReadStream, statSync } from 'node:fs';
-import { createInterface } from 'node:readline';
-import { createGunzip } from 'node:zlib';
+import { readFileSync, statSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import type { Venue } from '../valuescan/types.js';
 
 export const ARCHIVE_DIR = process.env.VALUESCAN_HL_ARCHIVE_DIR || '/var/lib/valuescan/archive';
@@ -29,20 +28,33 @@ export function seedLine(line: string): { venue: Venue; address: string; notiona
   return { venue: dex ? 'tradexyz' : 'hyperliquid', address: address.toLowerCase(), notional: n };
 }
 
-/** The archive's holders; an empty map when there is no archive. Yields to the loop as it reads. */
+/**
+ * The archive's holders; an empty map when there is no archive. One blocking read and inflate
+ * (~14 MB, well under a second), then parsed in slices that hand the loop back: inside the
+ * indexer a streamed read never finished (2026-10-27), its zlib and fs work queued behind the
+ * thread pool the indexer keeps busy.
+ */
 export async function loadSeeds(dir = ARCHIVE_DIR): Promise<{ seeds: Seeds; at: number | null }> {
   const seeds: Seeds = new Map();
   const file = `${dir}/hl-positions.tsv.gz`;
-  let at: number | null = null;
-  try { at = statSync(file).mtimeMs; } catch { return { seeds, at }; }
-  const rl = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
-  let first = true;
-  for await (const line of rl) {
-    if (first) { first = false; continue; }
+  let at: number;
+  try { at = statSync(file).mtimeMs; } catch { return { seeds, at: null }; }
+  const text = gunzipSync(readFileSync(file)).toString('utf8');
+  let i = text.indexOf('\n') + 1;
+  let t0 = Date.now();
+  while (i > 0 && i < text.length) {
+    const j = text.indexOf('\n', i);
+    const line = text.slice(i, j < 0 ? text.length : j);
+    i = j < 0 ? text.length : j + 1;
     const s = seedLine(line);
-    if (!s) continue;
-    const m = seeds.get(s.venue) ?? seeds.set(s.venue, new Map()).get(s.venue)!;
-    m.set(s.address, (m.get(s.address) ?? 0) + s.notional);
+    if (s) {
+      const m = seeds.get(s.venue) ?? seeds.set(s.venue, new Map()).get(s.venue)!;
+      m.set(s.address, (m.get(s.address) ?? 0) + s.notional);
+    }
+    if (Date.now() - t0 > 20) {
+      await new Promise<void>((r) => setImmediate(r));
+      t0 = Date.now();
+    }
   }
   return { seeds, at };
 }
