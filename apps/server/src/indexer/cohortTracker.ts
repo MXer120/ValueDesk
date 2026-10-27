@@ -11,7 +11,8 @@
  *
  *   - after any stream outage, every account of $100K+ on that venue is read
  *     again (anything it did during the gap is unknown);
- *   - otherwise every book is re-read after 6 h ($1M+), 24 h ($100K+) or 7 days,
+ *   - otherwise every book is re-read after 6 h ($1M+), 24 h ($100K+) or 7 days
+ *     (Hyperliquid and trade.xyz, paid their funding hourly: 24 h, 3 days, 7 days),
  *     which bounds drift from anything a print cannot show (funding does not
  *     change size; transfers do not touch positions).
  * Lighter's stream names sub-accounts, so a Lighter book follows prints once
@@ -72,7 +73,8 @@ import {
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
-import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuescan/liquidations/math.js';
+import { hlInfo } from '../valuescan/hyperliquid/index.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuescan/liquidations/rules.js';
 import { liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
 import { LiqLive } from '../valuescan/liquidations/live.js';
@@ -139,10 +141,15 @@ const SHORT_OUTAGE_MS = 2 * 60_000;
  * A streamed book: re-read to reconcile after this long. Every SoDEX book daily:
  * they are few (~11k, 20 reads a minute is the lane) and its stream misses prints
  * (2026-10-25: 2 of 8 random holders off after a day or more, one flipped side).
+ * Hyperliquid and trade.xyz books are paid their funding every hour (fundingTick), so
+ * only fees and money moved in or out drift them: 24 h ($1M+) and 3 days ($100K+) since
+ * 2026-10-27, from 6 h and 24 h, which freed the reads for the archive's new holders.
  */
 export function reconcileTtl(equity: number, venue?: Venue): number {
-  if (equity >= 1_000_000) return 6 * 60 * 60_000;
-  if (equity >= 100_000 || venue === 'sodex') return 24 * 60 * 60_000;
+  const funded = venue === 'hyperliquid' || venue === 'tradexyz';
+  if (equity >= 1_000_000) return (funded ? 24 : 6) * 60 * 60_000;
+  if (equity >= 100_000) return funded ? 3 * DAY_MS : 24 * 60 * 60_000;
+  if (venue === 'sodex') return 24 * 60 * 60_000;
   return 7 * DAY_MS;
 }
 
@@ -476,6 +483,9 @@ export class CohortTracker {
   /** Holders the Hyperliquid fills archive found (archiveSeed.ts): read once each, the largest first. */
   private seeds: Seeds = new Map();
   private seedsAt: number | null = null;
+  /** The hour's funding rates, taken in its last minutes and applied when it ends (fundingTick). */
+  private fundingNext: { end: number; rates: Map<Venue, Map<string, { rate: number; px: number }>> } | null = null;
+  private fundingLast: { end: number; books: number; paid: number; error?: string } | null = null;
   private planMs = 0;
   private recordMs = 0;
   lastError: string | null = null;
@@ -528,6 +538,7 @@ export class CohortTracker {
     every(FLUSH_MS, () => this.flush(), 'coh:flush');
     every(60_000, () => this.record(), 'coh:record');
     every(60_000, () => this.recordLiq(), 'coh:liq');
+    every(30_000, () => this.fundingTick(), 'coh:funding');
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
     for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) this.live.touch(v, a);
     this.feed.start();
@@ -591,6 +602,7 @@ export class CohortTracker {
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
       staleBefore: this.staleBefore,
+      funding: this.fundingLast,
       seeds: { at: this.seedsAt, ...Object.fromEntries([...this.seeds].map(([v, m]) => {
         const books = this.books.get(v);
         let unread = 0;
@@ -1107,7 +1119,8 @@ export class CohortTracker {
           if (venue === 'hyperliquid') totals.set(address, m?.equity ?? null);
         };
         if (!book) {
-          push(1_000 + size + (traded ? 300 : 0));
+          // Never read: one the stream saw trade, or one the archive found holding, before any re-read.
+          push(1_000 + size + (traded || this.seeds.get(venue)?.has(address) ? 300 : 0));
           return;
         }
         const age = now - book.at;
@@ -1179,6 +1192,62 @@ export class CohortTracker {
         });
       }
     }
+  }
+
+  /**
+   * Hyperliquid's and trade.xyz's hourly funding, applied to every book: the rates are taken
+   * in the hour's last two minutes (the hour's own rate by then) and paid when it ends, by the
+   * books read before that (a read after it already holds the payment). Without this a book's
+   * cash and equity drifted by the funding until its next re-read.
+   */
+  private async fundingTick(): Promise<void> {
+    const now = this.d.now();
+    const end = Math.ceil(now / HOUR_MS) * HOUR_MS;
+    if (!this.fundingNext && end - now <= 2 * 60_000) {
+      const rates = new Map<Venue, Map<string, { rate: number; px: number }>>();
+      try {
+        for (const [venue, dex] of [['hyperliquid', null], ['tradexyz', 'xyz']] as const) {
+          const raw = await hlInfo.post<[{ universe?: Array<{ name?: string }> }, Array<{ funding?: string; oraclePx?: string; markPx?: string }>] | null>(
+            dex ? { type: 'metaAndAssetCtxs', dex } : { type: 'metaAndAssetCtxs' }, { ttlMs: 30_000 });
+          if (!Array.isArray(raw)) throw new Error(`no market list for ${venue}`);
+          const m = new Map<string, { rate: number; px: number }>();
+          (raw[0]?.universe ?? []).forEach((u, i) => {
+            const c = raw[1]?.[i];
+            const rate = Number(c?.funding);
+            const px = Number(c?.oraclePx ?? c?.markPx);
+            if (u.name && Number.isFinite(rate) && px > 0) m.set(u.name, { rate, px });
+          });
+          rates.set(venue, m);
+        }
+        this.fundingNext = { end, rates };
+      } catch (e) {
+        this.fundingLast = { end, books: 0, paid: 0, error: String(e) };
+      }
+      return;
+    }
+    const f = this.fundingNext;
+    if (!f || now < f.end) return;
+    this.fundingNext = null;
+    let n = 0;
+    let paid = 0;
+    let t0 = Date.now();
+    for (const [venue, rates] of f.rates) {
+      for (const [address, book] of this.books.get(venue) ?? []) {
+        if (!book.pos.size || book.at >= f.end) continue;
+        const p = fundingCash(book, (sym) => rates.get(sym) ?? null);
+        if (!p) continue;
+        paid += p;
+        n++;
+        this.live.touch(venue, address);
+        this.dirtyBooks.add(`${venue}|${address}`);
+        if (Date.now() - t0 > SLICE_MS) {
+          await new Promise<void>((r) => setImmediate(r));
+          mark('coh:funding');
+          t0 = Date.now();
+        }
+      }
+    }
+    this.fundingLast = { end: f.end, books: n, paid };
   }
 
   private flush(): void {
