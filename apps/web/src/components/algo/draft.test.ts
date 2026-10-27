@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ORACLE_VENUES, checkAlgoSpec, planAlgo, type AlgoSpec, type MarketInfo } from '@copy-engine';
 import {
-  ADVANCED_KEYS, DEFAULT, dcaLadder, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
+  ADVANCED_KEYS, DEFAULT, cleanCurve, curveAt, dcaLadder, type CurvePoint, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
   randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf,
   type Draft, type TicketShared,
 } from './draft';
@@ -284,9 +284,15 @@ test('a DCA is linear by default: every order the same, in the unit it was typed
   assert.equal(usd.skew, 1);
   const coin = dcaLadder({ ...DEFAULT, dcaOrders: '3', perOrder: '0.5', dcaUnit: 'coin' }, { side: 'buy', bid: 99, ask: 100 });
   assert.deepEqual(coin.sizes, [0.5, 0.5, 0.5]);
-  const w = dcaLadder({ ...DEFAULT, dcaOrders: '4', perOrder: '1', dcaUnit: 'coin', dcaSizing: 'weighted', dcaAdd: '50' }, { side: 'buy', bid: 99, ask: 100 });
-  assert.deepEqual(w.sizes, [1, 1.5, 2, 2.5]);
+  const w = dcaLadder({ ...DEFAULT, dcaOrders: '4', perOrder: '1', dcaUnit: 'coin', dcaSizing: 'weighted', dcaCurve: [[0, 1], [1, 2.5]] }, { side: 'buy', bid: 99, ask: 100 });
+  assert.deepEqual(w.sizes.map((q) => Math.round(q * 1e9) / 1e9), [1, 1.5, 2, 2.5]);
   assert.equal(w.skew, 2.5);
+  // A point in the middle: the curve passes through every point and never past the highest.
+  const c: CurvePoint[] = [[0, 1], [0.5, 4], [1, 2]];
+  assert.equal(curveAt(c, 0.5), 4);
+  for (let x = 0; x <= 1; x += 0.01) assert.ok(curveAt(c, x) <= 4 + 1e-9 && curveAt(c, x) >= 1 - 1e-9);
+  assert.deepEqual(cleanCurve([[0.2, 9], [0.7, 0], [0.5, 1]]), [[0, 5], [0.5, 1], [1, 0.1]]);
+  assert.deepEqual(cleanCurve('x'), DEFAULT.dcaCurve);
   const g = dcaLadder({ ...DEFAULT, dcaOrders: '3', perOrder: '1', dcaUnit: 'coin', dcaSizing: 'geometric', dcaMult: '2' }, { side: 'buy', bid: 99, ask: 100 });
   assert.deepEqual(g.sizes, [1, 2, 4]);
 });

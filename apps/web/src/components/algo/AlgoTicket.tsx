@@ -62,6 +62,7 @@ import { PlanPreview, type Level } from './AlgoPreview';
 import { fmtQ } from './AlgoStory';
 import { VenuePicker } from './VenuePicker';
 import { useHistory } from './liveData';
+import { DcaCurve } from './DcaCurve';
 import { pctAsUnit, unitAsPct, useSlipUnit, type SlipUnit } from '../../slipUnit';
 import { MarketSelect, MiniSelect } from './MarketSelect';
 import { coinOf, useOracle } from '../../algo/oracle';
@@ -862,7 +863,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                 <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
               )}
               {/* Every order the same unless the settings window chose to grow them. */}
-              {d.dcaSizing === 'weighted' && <Field label="Size step" value={d.dcaAdd} onChange={(v) => set({ dcaAdd: v })} suffix="% of first" title="Each next order this much of the first bigger (Settings: sizing)" err={err('skew', 'weights')} />}
+              {d.dcaSizing === 'weighted' && <p className="oe-hint">Sizes follow your curve ({curveSpan(d.dcaCurve)}): shape it in Advanced.</p>}
               {d.dcaSizing === 'geometric' && <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order this many times the one before (Settings: sizing)" err={err('skew', 'weights')} />}
             </>
           )}
@@ -1140,14 +1141,20 @@ const SizeCtx = createContext<{ unit: 'coin' | 'usd'; setUnit?: (u: 'coin' | 'us
  * A size in the coin, shown in the order panel's unit (the coin, or USD at the price now) with that
  * unit's switch in its box; it is kept in the coin as the draft keeps it.
  */
+/** "1× to 2.5×": a weighted curve's smallest and largest size. */
+const curveSpan = (c: Draft['dcaCurve']): string => {
+  const ys = c.map((q) => q[1]);
+  return `${Number(Math.min(...ys).toFixed(2))}× to ${Number(Math.max(...ys).toFixed(2))}×`;
+};
+
 const DCA_EACH_HINT: Record<DcaSizing, string> = {
   linear: 'Every order exactly this size',
-  weighted: 'The first order’s size; each next one a set step bigger',
+  weighted: 'The size at 1× on the curve; each order is its point on the curve times this',
   geometric: 'The first order’s size; each next one Size × times the one before',
 };
 const DCA_SIZINGS: ReadonlyArray<Opt<DcaSizing>> = [
   ['linear', 'Linear', 'Every order the same size: the plain DCA.'],
-  ['weighted', 'Weighted', 'Each next order a set step bigger (1, 1.5, 2 …): more where the price is better.'],
+  ['weighted', 'Weighted', 'Each order’s size off a curve you draw: drag its points, add more.'],
   ['geometric', 'Geometric', 'Each next order a multiple of the one before (1, 1.5, 2.25 …): the martingale DCA bots use.'],
 ];
 
@@ -1481,7 +1488,19 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
             <AField title="Then at" hint="The later orders’ prices, separated by commas." value={d.dcaPrices} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} unit="USD" err={err('prices', 'orders')} />
           )}
           <ASeg title="Sizing" hint="How the orders’ sizes go, one after another." value={d.dcaSizing} onChange={(v) => set({ dcaSizing: v })} options={DCA_SIZINGS} />
-          {d.dcaSizing === 'weighted' && <AField title="Size step" hint="Each next order this much of the first bigger: 50 % gives 1, 1.5, 2, 2.5 …" value={d.dcaAdd} onChange={(v) => set({ dcaAdd: v })} unit="% of first" err={err('skew', 'weights')} />}
+          {d.dcaSizing === 'weighted' && (
+            <div className="algo-curvewrap">
+              <DcaCurve
+                points={d.dcaCurve}
+                orders={d.dcaLevels === 'list' ? d.dcaPrices.split(/[\s,;]+/).filter(Boolean).length + 1 : Number(d.dcaOrders)}
+                each={Number(d.perOrder) || 0}
+                unit={d.dcaUnit === 'coin' ? base : 'USD'}
+                side={side}
+                onChange={(v) => set({ dcaCurve: v })}
+              />
+              {err('skew', 'weights') && <p className="oe-hint algo-ferr">{err('skew', 'weights')}</p>}
+            </div>
+          )}
           {d.dcaSizing === 'geometric' && <AField title="Size ×" hint="Each next order this many times the one before: 1.5 gives 1, 1.5, 2.25, 3.4 …" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} unit="per order" err={err('skew', 'weights')} />}
         </Group>
       )}
@@ -2203,7 +2222,7 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
       return `${verb} ${q} in ${x(d.orders)} orders from ${x(d.from)} to ${x(d.to)}`;
     case 'dca': {
       const first = d.dcaFirst === 'market' ? 'now' : `at ${x(d.dcaStart)}`;
-      const m = d.dcaSizing === 'geometric' ? `, each ${x(d.dcaMult)}× the last` : d.dcaSizing === 'weighted' ? `, each ${x(d.dcaAdd)}% of the first bigger` : ', all the same size';
+      const m = d.dcaSizing === 'geometric' ? `, each ${x(d.dcaMult)}× the last` : d.dcaSizing === 'weighted' ? `, sized by your curve (${curveSpan(d.dcaCurve)})` : ', all the same size';
       const each = d.dcaUnit === 'coin' ? `${x(d.perOrder)} ${base}` : `$${x(d.perOrder)}`;
       if (d.dcaLevels === 'list') return `${verb} ${each} ${first}, then at ${x(d.dcaPrices)}${m}`;
       const sc = n(d.dcaStepScale) > 0 && n(d.dcaStepScale) !== 1 ? ` (each step ${x(d.dcaStepScale)}× the last)` : '';

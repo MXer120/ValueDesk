@@ -38,6 +38,52 @@ export interface LegDraft {
   usd: string;
 }
 
+/** A weighted DCA's curve point: [where along the ladder 0..1, size × Each buy]. */
+export type CurvePoint = [number, number];
+/** The curve's size range (× Each buy): never nothing, never past this. */
+export const CURVE_MIN = 0.1;
+export const CURVE_MAX = 5;
+
+/** Points sorted, kept in range, the ends pinned at 0 and 1; anything unreadable gives the default line. */
+export function cleanCurve(v: unknown): CurvePoint[] {
+  const pts = Array.isArray(v)
+    ? v.filter((q): q is CurvePoint => Array.isArray(q) && q.length === 2 && q.every((z) => typeof z === 'number' && Number.isFinite(z)))
+        .map(([x, y]) => [Math.min(1, Math.max(0, x)), Math.min(CURVE_MAX, Math.max(CURVE_MIN, y))] as CurvePoint)
+        .sort((a, b) => a[0] - b[0])
+    : [];
+  if (pts.length < 2) return [[0, 1], [1, 2.5]];
+  pts[0]![0] = 0;
+  pts[pts.length - 1]![0] = 1;
+  return pts.filter((q, i) => i === 0 || i === pts.length - 1 || (q[0] > pts[i - 1]![0] && q[0] < 1));
+}
+
+/**
+ * The curve's size at x (0..1): a monotone cubic through the points (Fritsch-Carlson), so it
+ * bends smoothly but never swings past a point the user set (no bump above the highest).
+ */
+export function curveAt(pts: readonly CurvePoint[], x: number): number {
+  const p = pts.length >= 2 ? pts : ([[0, 1], [1, 1]] as CurvePoint[]);
+  const n = p.length;
+  if (x <= p[0]![0]) return p[0]![1];
+  if (x >= p[n - 1]![0]) return p[n - 1]![1];
+  const h: number[] = [];
+  const m: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    h.push(Math.max(1e-9, p[i + 1]![0] - p[i]![0]));
+    m.push((p[i + 1]![1] - p[i]![1]) / h[i]!);
+  }
+  const t: number[] = [m[0]!];
+  for (let i = 1; i < n - 1; i++) t.push(m[i - 1]! * m[i]! <= 0 ? 0 : (3 * (h[i - 1]! + h[i]!)) / ((2 * h[i]! + h[i - 1]!) / m[i - 1]! + (h[i]! + 2 * h[i - 1]!) / m[i]!));
+  t.push(m[n - 2]!);
+  let k = 0;
+  while (k < n - 2 && x > p[k + 1]![0]) k++;
+  const u = (x - p[k]![0]) / h[k]!;
+  const u2 = u * u;
+  const u3 = u2 * u;
+  const y = (2 * u3 - 3 * u2 + 1) * p[k]![1] + (u3 - 2 * u2 + u) * h[k]! * t[k]! + (-2 * u3 + 3 * u2) * p[k + 1]![1] + (u3 - u2) * h[k]! * t[k + 1]!;
+  return Math.min(CURVE_MAX, Math.max(CURVE_MIN, y));
+}
+
 /** How a DCA's orders grow (Draft.dcaSizing). */
 export type DcaSizing = 'linear' | 'weighted' | 'geometric';
 
@@ -96,14 +142,15 @@ export interface Draft {
    * ('step', each gap `dcaStepScale` times the one before) or at prices typed
    * in ('list'). Each order is `perOrder` (in `dcaUnit`, USD or the coin), sized by `dcaSizing`:
    * 'linear' (the default, the plain DCA: every order exactly the same), 'weighted' (each next one
-   * `dcaAdd` % of the first bigger: 1, 1.5, 2, ...) or 'geometric' (each next one `dcaMult` times the
+   * as `dcaCurve` draws it: the size at each level read off a curve the user drags) or 'geometric' (each next one `dcaMult` times the
    * one before: 1, 1.5, 2.25, ...).
    * (DCA on a schedule is gone from the ticket, 2026-10-26: a saved one loads as this ladder.)
    */
   dcaStep: string;
   dcaMult: string;
   dcaSizing: DcaSizing;
-  dcaAdd: string;
+  /** Weighted: the curve's points, [where along the ladder 0..1, × Each buy]; the ends are at 0 and 1. */
+  dcaCurve: CurvePoint[];
   /** The unit `perOrder` was typed in: every linear order is that same amount of it. */
   dcaUnit: 'usd' | 'coin';
   dcaFirst: 'market' | 'price';
@@ -184,7 +231,7 @@ export const DEFAULT: Draft = {
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
   offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
   from: '', to: '', orders: '10', distribution: 'flat', skew: '1', spacing: 'linear', scaleJitter: '0',
-  perOrder: '50', dcaOrders: '10', dcaStep: '2', dcaMult: '1.5', dcaSizing: 'linear', dcaAdd: '50', dcaUnit: 'usd', dcaFirst: 'market', dcaStart: '', dcaLevels: 'step', dcaPrices: '', dcaStepScale: '1',
+  perOrder: '50', dcaOrders: '10', dcaStep: '2', dcaMult: '1.5', dcaSizing: 'linear', dcaCurve: [[0, 1], [1, 2.5]], dcaUnit: 'usd', dcaFirst: 'market', dcaStart: '', dcaLevels: 'step', dcaPrices: '', dcaStepScale: '1',
   clips: '10', inFlight: 2, waveSec: '3', retries: '2',
   match: 'all', conds: [], holdSec: '0', expires: '', expiresUnit: 'd', then: 'market', thenPrice: '', closePct: '100', thenMin: '15', thenSlices: '15',
   trailMode: 'pct', trail: '1', activation: '', trailWhole: false, source: 'mark', exit: 'market', chaseSec: '15',
@@ -264,6 +311,13 @@ export function loadDraft(store: Store | null = local()): Draft {
         if (Number(saved.dcaMult) > 0 && Number(saved.dcaMult) !== 1) saved.dcaSizing = 'geometric';
         else delete saved.dcaMult;
       }
+      // The weighted step (a straight line, 2026-10-27) became the curve's two ends.
+      if (typeof old.dcaAdd === 'string' && saved.dcaCurve === undefined) {
+        const steps = Math.max(1, Math.trunc(Number(saved.dcaOrders ?? DEFAULT.dcaOrders)) - 1);
+        saved.dcaCurve = [[0, 1], [1, Math.min(CURVE_MAX, 1 + (steps * Number(old.dcaAdd)) / 100 || 1)]];
+      }
+      delete old.dcaAdd;
+      if (saved.dcaCurve !== undefined) saved.dcaCurve = cleanCurve(saved.dcaCurve);
       if (saved.dcaSizing !== undefined && !(['linear', 'weighted', 'geometric'] as const).includes(saved.dcaSizing)) delete saved.dcaSizing;
       for (const k of ['dcaMode', 'every', 'everyUnit', 'outOfBand', 'dip', 'dipMult', 'budget']) delete old[k];
       // Fill fast's venues: known ones only, never none.
@@ -343,10 +397,10 @@ export interface DcaLadder {
  * more of the coin for the same dollars, as the bots size theirs); in the coin it is that. A first buy at market is a GTC limit
  * at the touch: it takes at once while the touch holds.
  */
-export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 'dcaMult' | 'dcaSizing' | 'dcaAdd' | 'dcaUnit' | 'dcaFirst' | 'dcaStart' | 'dcaLevels' | 'dcaPrices' | 'dcaStepScale'>, p: Pick<TicketShared, 'side' | 'bid' | 'ask'>): DcaLadder {
+export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 'dcaMult' | 'dcaSizing' | 'dcaCurve' | 'dcaUnit' | 'dcaFirst' | 'dcaStart' | 'dcaLevels' | 'dcaPrices' | 'dcaStepScale'>, p: Pick<TicketShared, 'side' | 'bid' | 'ask'>): DcaLadder {
   const mult = n(d.dcaMult) > 0 ? n(d.dcaMult) : 1;
-  const add = n(d.dcaAdd) > 0 ? n(d.dcaAdd) / 100 : 0;
-  const factor = (i: number): number => (d.dcaSizing === 'geometric' ? Math.pow(mult, i) : d.dcaSizing === 'weighted' ? 1 + i * add : 1);
+  let count = 1;
+  const factor = (i: number): number => (d.dcaSizing === 'geometric' ? Math.pow(mult, i) : d.dcaSizing === 'weighted' ? curveAt(d.dcaCurve, count > 1 ? i / (count - 1) : 0) : 1);
   const touch = p.side === 'buy' ? p.ask : p.bid;
   const first = d.dcaFirst === 'price' ? opt(d.dcaStart) : touch && touch > 0 ? touch : null;
   const sign = p.side === 'buy' ? -1 : 1;
@@ -371,6 +425,7 @@ export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 
       }
     }
   }
+  count = prices ? prices.length : 1;
   const each = n(d.perOrder) > 0 ? n(d.perOrder) : 0;
   const coin = d.dcaUnit === 'coin';
   const sizes = prices ? prices.map((px, i) => (px > 0 ? (coin ? each * factor(i) : (each * factor(i)) / px) : 0)) : [];
@@ -577,7 +632,7 @@ export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
   chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'timeout', 'onEnd'],
   scale: ['skew', 'spacing', 'scaleJitter', 'postOnly'],
-  dca: ['dcaSizing', 'dcaAdd', 'dcaMult', 'dcaLevels', 'dcaStepScale'],
+  dca: ['dcaSizing', 'dcaCurve', 'dcaMult', 'dcaLevels', 'dcaStepScale'],
   swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
   trailing: ['trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
   conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],
@@ -651,7 +706,7 @@ const ADV_LABEL: Partial<Record<keyof Draft, string>> = {
   displayJitter: 'size varies', offsetTicks: 'offset', refill: 'refill', postOnly: 'post only',
   offsetMode: 'rest', offsetBps: 'behind', timeout: 'give up after', onEnd: 'then',
   distribution: 'size curve', skew: 'skew', spacing: 'spacing', scaleJitter: 'size varies',
-  dcaLevels: 'prices', dcaStepScale: 'step scale', dcaSizing: 'sizing', dcaAdd: 'size step', dcaMult: 'size ×', sweepRef: 'reference', sweepVenues: 'venues',
+  dcaLevels: 'prices', dcaStepScale: 'step scale', dcaSizing: 'sizing', dcaCurve: 'size curve', dcaMult: 'size ×', sweepRef: 'reference', sweepVenues: 'venues',
   inFlight: 'per wave', waveSec: 'between waves', retries: 'retries',
   trailWhole: 'size', source: 'price', exit: 'exit', chaseSec: 'chase for',
   match: 'when', holdSec: 'hold for', expires: 'expires', thenSlices: 'slices',
@@ -685,12 +740,16 @@ export function advancedChanges(kind: UiKind, d: Draft, exits: boolean): string[
     if (k === 'offsetBps' && d.offsetMode !== 'bps') continue;
     if (k === 'offsetTicks' && kind === 'chase' && d.offsetMode === 'bps') continue;
     if (kind === 'dca' && k === 'dcaStepScale' && d.dcaLevels === 'list') continue;
-    if (kind === 'dca' && ((k === 'dcaAdd' && d.dcaSizing !== 'weighted') || (k === 'dcaMult' && d.dcaSizing !== 'geometric'))) continue;
+    if (kind === 'dca' && ((k === 'dcaCurve' && d.dcaSizing !== 'weighted') || (k === 'dcaMult' && d.dcaSizing !== 'geometric'))) continue;
     if (k === 'sweepVenues') {
       if (d.sweepRef !== 'mark' && d.sweepRef !== 'index' && d.sweepVenues.length !== ORACLE_VENUES.length) out.push('venues');
       continue;
     }
     if (k === 'onEnd' && !opt(d.timeout)) continue;
+    if (k === 'dcaCurve') {
+      if (JSON.stringify(d.dcaCurve) !== JSON.stringify(DEFAULT.dcaCurve)) out.push(ADV_LABEL[k]!);
+      continue;
+    }
     if (d[k] !== DEFAULT[k]) out.push(ADV_LABEL[k] ?? k);
   }
   if (exits && kind !== 'bracket' && d.exitsOn) out.push('take-profit / stop-loss');

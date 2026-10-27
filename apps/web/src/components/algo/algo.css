@@ -627,3 +627,22 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .oe .oe-unit.algo-unitswap:hover { color: var(--text); }
 .algo-unitswap svg { opacity: 0.8; }
 .algo-sf__units { display: inline-flex; align-items: center; gap: 8px; padding-right: 6px; }
+
+/* A weighted DCA's size curve (DcaCurve.tsx): the bars are the orders, the line the user's curve. */
+.algo-curvewrap { padding: 6px 0 10px; }
+.algo-curve { --tint: var(--pos); display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); }
+.algo-curve.is-sell { --tint: var(--neg); }
+.algo-curve svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; }
+.algo-curve__grid { stroke: rgba(255, 255, 255, 0.06); }
+.algo-curve__one { stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 3 3; }
+.algo-curve__axis { fill: var(--muted); font-size: 9px; }
+.algo-curve__size { fill: var(--text); font-size: 8.5px; font-variant-numeric: tabular-nums; }
+.algo-curve__bar { fill: color-mix(in srgb, var(--tint) 30%, transparent); }
+.algo-curve__line { fill: none; stroke: var(--tint); stroke-width: 1.8; stroke-linejoin: round; }
+.algo-curve__pt { fill: #111; stroke: var(--tint); stroke-width: 2; transition: r 120ms var(--ease-out, ease-out); }
+.algo-curve__pt.is-end { fill: var(--tint); }
+.algo-curve__foot { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--fs-xs, 11px); }
+.algo-curve__presets { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); align-self: flex-start; }
+.algo-curve__presets button { padding: 4px 10px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs, 11px); cursor: pointer; }
+.algo-curve__presets button:hover { color: var(--text); }
+.algo-curve__presets button.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
