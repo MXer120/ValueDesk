@@ -1119,7 +1119,8 @@ export class CohortTracker {
           if (venue === 'hyperliquid') totals.set(address, m?.equity ?? null);
         };
         if (!book) {
-          push(1_000 + size + (traded ? 300 : 0));
+          // Never read: one the stream saw trade, or one the archive found holding, before any re-read.
+          push(1_000 + size + (traded || this.seeds.get(venue)?.has(address) ? 300 : 0));
           return;
         }
         const age = now - book.at;
