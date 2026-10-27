@@ -42,7 +42,7 @@ function sign(executor: string, action: CopyAction, payload: unknown) {
 
 async function main(): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'vd-paper-run-'));
-  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', SODEX_NETWORK: 'mainnet', EXECUTOR_ALLOWED_ORIGINS: 'http://localhost' });
+  const cfg = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', SODEX_NETWORK: 'mainnet', EXECUTOR_ALLOWED_ORIGINS: 'http://localhost' });
   const db = new ExecutorDb(join(dir, 'executor.db'));
   const out = egress(null);
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: out.fetch, factory: out.factory, log: quiet });

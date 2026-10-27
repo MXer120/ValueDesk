@@ -1,16 +1,24 @@
 /**
  * The executor's settings, from the environment.
  *
- *   EXECUTOR_KIND            self (default) | hosted
+ *   EXECUTOR_KIND            self (default) | hosted; anything else is refused
  *   HOST / PORT              where it listens (default 127.0.0.1:8799)
- *   EXECUTOR_DATA_DIR        its database, the key-encryption key, the session secret
- *                            (default ./copier-data for self, /var/lib/valuescan/executor for hosted)
+ *   EXECUTOR_DATA_DIR        its database, the key-encryption key, the session secret (default:
+ *                            hosted /var/lib/valuescan/executor; self ./copier-data where one
+ *                            already is, else the user's own app-data folder - see dataDirFor)
  *   SODEX_NETWORK            mainnet (default) | testnet
  *   EXECUTOR_BUILDER_ID      the builder copied orders carry (default ValueDesk's, 221909; 0 = none)
  *   EXECUTOR_OWNER           self: the one wallet it serves (otherwise paired with a code at first use)
  *   EXECUTOR_ALLOWED_ORIGINS comma-separated web origins allowed to call it (CORS)
  *   EXECUTOR_LOCATION        shown to followers, e.g. "ap-northeast-1 (Tokyo)"
- *   EXECUTOR_ORIGIN_SECRET   hosted: the edge's X-Origin-Verify value (requests without it are refused)
+ *   EXECUTOR_ORIGIN_SECRET   hosted: the edge's X-Origin-Verify value (requests without it are refused);
+ *                            a hosted executor will not start without it, unless EXECUTOR_EDGE=none
+ *   EXECUTOR_EDGE            none = no edge in front (a local development run or a test): hosted
+ *                            without the origin secret, and never with EXECUTOR_TRUST_EDGE
+ *   EXECUTOR_ID              the executor id requests are signed for (default: hosted
+ *                            valuedesk-<network>-tokyo, the one every registered key names; set
+ *                            another for staging so a signed request cannot be replayed between them)
+ *   EXECUTOR_LIVE_ALGOS      1 = real (non-paper) algo orders may start; default off (practice only)
  *   EXECUTOR_TRUST_EDGE      hosted: 1 = read the viewer's address and country from the edge's headers
  *   EXECUTOR_OPEN            hosted: 0 closes it to new followers (running copies continue)
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default 90)
@@ -21,6 +29,8 @@
  *                            IP (an address of its own, so another process's rate limit cannot stop copies)
  *   LOG_LEVEL                debug | info (default) | warn | error
  */
+import { existsSync } from 'node:fs';
+import { homedir, platform } from 'node:os';
 import { join, resolve } from 'node:path';
 
 export type ExecutorKind = 'hosted' | 'self';
@@ -44,13 +54,45 @@ export interface ExecutorConfig {
   builderDb: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
+  /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
+  executorId: string | null;
+  /** Real (non-paper) algo orders may start. Off unless EXECUTOR_LIVE_ALGOS=1. */
+  liveAlgos: boolean;
 }
 
-const DEFAULT_ORIGINS = ['https://valuedeskapp.vercel.app', 'https://valuexplorer.vercel.app', 'http://localhost:5180', 'http://127.0.0.1:5180'];
+/**
+ * A self-hosted copier's data folder when none is set: `./copier-data` if the
+ * folder it is started from already has one (every copier before 2026-10-27
+ * kept it there - its keys and pairing live in it), else the user's own
+ * app-data folder, so starting it from another folder never makes a second,
+ * empty copier, and the key-encryption key does not land in a synced folder.
+ */
+export function dataDirFor(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
+  const here = join(cwd, 'copier-data');
+  if (existsSync(here)) return here;
+  const base =
+    platform() === 'win32' ? env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local')
+    : platform() === 'darwin' ? join(homedir(), 'Library', 'Application Support')
+    : env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+  return join(base, 'ValueDesk', 'copier');
+}
+
+const DEFAULT_ORIGINS = ['https://valuedesk.so', 'https://www.valuedesk.so', 'https://valuedeskapp.vercel.app', 'https://valuexplorer.vercel.app', 'http://localhost:5180', 'http://127.0.0.1:5180'];
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig {
-  const kind: ExecutorKind = env.EXECUTOR_KIND === 'hosted' ? 'hosted' : 'self';
+  const rawKind = (env.EXECUTOR_KIND ?? 'self').trim();
+  if (rawKind !== 'hosted' && rawKind !== 'self') throw new Error(`EXECUTOR_KIND must be hosted or self (got "${env.EXECUTOR_KIND}")`);
+  const kind: ExecutorKind = rawKind;
+  const originSecrets = [env.EXECUTOR_ORIGIN_SECRET, env.EXECUTOR_ORIGIN_SECRET_2].map((s) => s?.trim() ?? '').filter(Boolean);
+  const noEdge = env.EXECUTOR_EDGE?.trim() === 'none';
+  const trustEdge = env.EXECUTOR_TRUST_EDGE === '1';
+  // Behind the edge, the origin secret is what keeps anyone else from reaching it - and from
+  // forging the edge's viewer address and country (the region rules, the rate limit).
+  if (kind === 'hosted' && !originSecrets.length && !noEdge) throw new Error('A hosted executor needs EXECUTOR_ORIGIN_SECRET (the edge\'s X-Origin-Verify value); EXECUTOR_EDGE=none runs it without an edge, locally');
+  if (trustEdge && !originSecrets.length) throw new Error('EXECUTOR_TRUST_EDGE=1 needs EXECUTOR_ORIGIN_SECRET: without it anyone could forge the viewer\'s address and country');
+  const executorId = env.EXECUTOR_ID?.trim() || null;
+  if (executorId && !/^[A-Za-z0-9_.-]{3,64}$/.test(executorId)) throw new Error('EXECUTOR_ID must be 3 to 64 letters, digits, dots, dashes or underscores');
   const port = Number(env.PORT ?? 8799);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`PORT must be a port number (got ${env.PORT})`);
   const owner = env.EXECUTOR_OWNER?.trim() || null;
@@ -64,14 +106,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     kind,
     host: env.HOST?.trim() || '127.0.0.1',
     port,
-    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === 'hosted' ? '/var/lib/valuescan/executor' : join(process.cwd(), 'copier-data'))),
+    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === 'hosted' ? '/var/lib/valuescan/executor' : dataDirFor(process.cwd(), env))),
     network,
     builderId,
     owner: owner ? owner.toLowerCase() : null,
     allowedOrigins: (env.EXECUTOR_ALLOWED_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean) ?? DEFAULT_ORIGINS),
     location: env.EXECUTOR_LOCATION?.trim() || (kind === 'hosted' ? 'ap-northeast-1 (Tokyo)' : 'your own machine'),
-    originSecrets: [env.EXECUTOR_ORIGIN_SECRET, env.EXECUTOR_ORIGIN_SECRET_2].map((s) => s?.trim() ?? '').filter(Boolean),
-    trustEdge: env.EXECUTOR_TRUST_EDGE === '1',
+    originSecrets,
+    trustEdge,
     open: env.EXECUTOR_OPEN !== '0',
     // 90 days is what the copy terms promise and what the web app registers at most.
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
@@ -80,5 +122,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
+    executorId,
+    liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',
   };
 }

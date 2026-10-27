@@ -243,7 +243,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
               {live.self.info && (
                 <div className="cs-row">
                   {!live.self.info.owner && (
-                    <input className="fx-input" value={pairing} onChange={(e) => setPairing(e.target.value.toUpperCase())} placeholder="Pairing code" spellCheck={false} aria-label="Pairing code" maxLength={8} />
+                    <input className="fx-input" value={pairing} onChange={(e) => setPairing(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} placeholder="Pairing code" spellCheck={false} aria-label="Pairing code" maxLength={10} autoComplete="off" />
                   )}
                   <ActBtn
                     label={live.self.info.owner ? 'Sign in' : 'Pair'}

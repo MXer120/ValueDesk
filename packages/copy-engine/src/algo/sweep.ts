@@ -137,6 +137,10 @@ export interface SweepState {
   ref: SweepReference | null;
   /** SoDEX's best ask (a buy) or bid (a sell) now, fresh; null when not known. */
   touch?: number | null;
+  /** The algo's limit price: no round is priced past it (a buy above, a sell below). */
+  limitPrice?: number | null;
+  /** SoDEX's largest order at a price, base units (its max quantity and max order value). */
+  maxQty?: (price: number) => number;
 }
 
 export type SweepAction =
@@ -156,10 +160,15 @@ export function sweepStep(s: SweepState): SweepAction {
   if (s.timeoutMs !== null && s.now - s.startedAt >= s.timeoutMs) return { type: 'expired', left };
   if (!s.ref) return { type: 'wait', reason: 'Paused: no fresh reference price (none of the oracle venues, nor the SoDEX mark).' };
   if (s.lastRoundAt !== null && s.now - s.lastRoundAt < s.roundMs) return { type: 'wait', reason: null };
-  const price = sweepBand(s.side, s.ref.price, s.slippageBps, s.tickSize);
+  let price = sweepBand(s.side, s.ref.price, s.slippageBps, s.tickSize);
+  // Never past the trader's limit price: the band is cut there (on the tick, inside it).
+  if (s.limitPrice != null && s.limitPrice > 0) price = s.side === 'buy' ? Math.min(price, toGrid(s.limitPrice, s.tickSize, 'down')) : Math.max(price, toGrid(s.limitPrice, s.tickSize, 'up'));
   if (!(price > 0)) return { type: 'wait', reason: 'Paused: the band price is not valid.' };
   // The book is outside the band: an IOC now could fill nothing, so none is sent until it comes back.
   if (s.touch != null && s.touch > 0 && (s.side === 'buy' ? s.touch > price : s.touch < price)) return { type: 'wait', reason: null };
   if (left < s.minQty(price)) return s.filled > 0 ? { type: 'done' } : { type: 'expired', left };
-  return { type: 'send', price, qty: left };
+  // One round is at most SoDEX's largest order; the next round takes what is left.
+  const most = s.maxQty ? s.maxQty(price) : Infinity;
+  const qty = Number.isFinite(most) ? Math.min(left, floorTo(most, s.stepSize)) : left;
+  return { type: 'send', price, qty };
 }

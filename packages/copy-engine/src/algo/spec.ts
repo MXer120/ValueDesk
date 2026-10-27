@@ -8,7 +8,7 @@
  * a wallet signs and an executor stores.
  */
 import { canonicalDecimal } from '../../../sodex-core/src/index.ts';
-import { DEFAULT_EXEC } from './math.ts';
+import { DEFAULT_EXEC, withinLimit } from './math.ts';
 import { isOracleVenue } from '../oracle.ts';
 import {
   ALGO_KINDS,
@@ -202,6 +202,8 @@ function exits(o: Obj, side: Side, e: Errors): Exits | null {
   if (x.tpPrice !== null && x.slPrice !== null && (side === 'buy' ? x.tpPrice <= x.slPrice : x.tpPrice >= x.slPrice)) {
     e['exits.tpPrice'] = side === 'buy' ? 'A long\'s take-profit must be above its stop-loss.' : 'A short\'s take-profit must be below its stop-loss.';
   }
+  // A short's take-profit 100% or more under its entry would be at or below 0: it would have none at all.
+  if (side === 'sell' && x.tpPct !== null && x.tpPct >= 1) e['exits.tpPct'] = 'A short\'s take-profit distance must be under 100%.';
   return x.tpPrice === null && x.slPrice === null && x.tpPct === null && x.slPct === null ? null : x;
 }
 
@@ -401,6 +403,8 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         refillMs: o.refillMs === undefined ? 0 : int(o, 'refillMs', 'Refill delay', ALGO_LIMITS.iceberg.refillMs, e),
         refillJitter: o.refillJitter === undefined ? 0 : num(o, 'refillJitter', 'Refill randomisation', { min: 0, max: 1 }, e),
       };
+      // A fixed price past the limit price would send every clip past it.
+      if (spec.price !== null && Number.isFinite(spec.price) && !withinLimit(b.side, spec.price, b.limitPrice)) e.price = `The price is past your limit price of ${b.limitPrice}.`;
       break;
     }
     case 'chase': {
@@ -458,6 +462,12 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
             else sc.weights = ws;
           }
         }
+      }
+      {
+        // Every level rests at its own price: one past the limit price would buy above it (sell below it).
+        const sc = spec as ScaleSpec;
+        const levels = sc.prices?.length ? sc.prices : [sc.from, sc.to];
+        if (levels.every(Number.isFinite) && levels.some((p) => !withinLimit(b.side, p, b.limitPrice))) e.limitPrice = `Some levels of the ladder are past your limit price of ${b.limitPrice}.`;
       }
       break;
     }
@@ -530,6 +540,8 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         slippageBps: o.slippageBps === undefined ? 50 : num(o, 'slippageBps', 'Max slippage', ALGO_LIMITS.exec.slippageBps, e),
       };
       if (spec.quantity === null) spec.reduceOnly = true;
+      // A trailing stop closes a position (or buys the turn): exits on it would never be placed.
+      if (b.exits) e.exits = 'A trailing stop places no exits: set them on the order that opens the position.';
       break;
     }
     case 'basket': {

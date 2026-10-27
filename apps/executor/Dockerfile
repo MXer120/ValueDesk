@@ -11,6 +11,8 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 COPY packages ./packages
 COPY apps/executor ./apps/executor
+# the licence check the bundle runs (tools/bundle.mjs imports it)
+COPY apps/web/tools ./apps/web/tools
 RUN npm install --no-audit --no-fund --ignore-scripts esbuild@0.25.0 @noble/curves@1.7.0 @noble/hashes@1.6.1 \
  && node apps/executor/tools/bundle.mjs --out=/out
 

@@ -13,6 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const base = platform() === 'win32' ? process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local') : process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
 const env = {
   EXECUTOR_KIND: 'hosted',
+  EXECUTOR_EDGE: 'none',
   EXECUTOR_DATA_DIR: join(base, platform() === 'win32' ? 'Valuescan' : 'valuescan', 'executor-dev'),
   EXECUTOR_LOCATION: 'this computer (dev)',
   PORT: '8799',

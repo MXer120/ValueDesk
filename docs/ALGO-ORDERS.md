@@ -25,7 +25,7 @@ Every kind also has: side, reduce-only, leverage / margin mode (the ticket's), a
 is ever sent past it), an **upper and a lower bound** on the mark with a reaction each (**hold**: pause
 and pull resting children while past it; **stop**: end where it stands; **rush**: take everything left
 now), a **start time** or a **start price** (it starts once the mark reaches it), a **max spread** guard
-(no taker child while the spread is wider) and **paper** (runs against the live book and tape, sends
+(no new child, taker or resting, while the spread is wider) and **paper** (runs against the live book and tape, sends
 nothing; fills are simulated: takers at the touch, resting orders when the tape trades through them). A
 paper algo in this browser needs **no wallet**: started with none connected, it runs in the browser's
 paper book (owner `paper`, `algoBus.ts`) and a live one is refused there.
@@ -35,24 +35,29 @@ distance (%) from the average fill or a price. They are **SoDEX's own position s
 STOP market order triggered on the mark, the same order as a position's TP/SL from the ticket, with the
 builder), placed after the first fill and **resized and re-priced as the algo fills** (every 5 s at most, and
 once more when it ends). When one fills, the engine cancels the other (**OCO**); exits outlive the algo, so
-the runner keeps watching them after it is done (`needsRunner`). In paper they are watched against the
-mark. Not on reduce-only orders, a close, a trailing stop or a basket.
+the runner keeps watching them after it is done (`needsRunner`), and resizes them for a fill that lands
+after the end. A placement with no answer is asked of SoDEX (open orders, then history) like a child; a
+refused exit is tried again after 30 s, doubling, and given up after 5 refusals with an error in the log.
+An exit cancelled on SoDEX by the trader is not placed again. **Cancel** on an algo that has ended pulls
+what it still has on SoDEX (its exits, a child left resting on purpose) and keeps its final status; **Cancel
+all** includes such algos. In paper they are watched against the mark. Not on reduce-only orders, a close,
+a trailing stop (refused there) or a basket; a short's take-profit distance must be under 100%.
 
 | Kind | Settings |
 |---|---|
-| TWAP | duration (1 min - 30 d), slices (one every ≥ 5 s), **urgency curve** (−1 back-loaded … +1 front-loaded, ~20× first/last), size jitter, time jitter, **smallest and largest slice** (what is due waits until it reaches the smallest, except at the end), execution per slice (**taker** IOC with a slippage cap / **maker** post-only re-priced after N ticks / **hybrid**: rests for a share of each slice, then takes what is behind), max participation (a slice takes at most X% of the last interval's volume), at the end take the rest or leave it; **close position**: a time-sliced close of X% of the position when it starts, reduce-only, on the side that reduces it |
+| TWAP | duration (1 min - 30 d), slices (one every ≥ 5 s), **urgency curve** (−1 back-loaded … +1 front-loaded, ~20× first/last), size jitter, time jitter, **smallest and largest slice** (what is due waits until it reaches the smallest, except at the end), execution per slice (**taker** IOC with a slippage cap / **maker** post-only re-priced after N ticks / **hybrid**: rests for a share of each slice, then takes what is behind), max participation (what it fills per interval is at most X% of that interval's volume: its own fills in the interval count against it), at the end take the rest or leave it; **close position**: a time-sliced close of X% of the position when it starts, reduce-only, on the side that reduces it |
 | Chase TWAP | a TWAP preset: hybrid or maker slices only |
 | VWAP | as TWAP; the weights are the **median volume of the same UTC slot** over 1-56 days (weekdays matched with weekdays and weekends with weekends from 14 days), floored at a tenth of the mean slot; **adaptive**: blends in the volume the market actually trades (faster when it is busier than usual, between half and twice the schedule) |
 | POV | rate (1-50%) of what **everyone else** trades since it began (its own prints are left out), largest child, stop after, execution, at the end |
-| Iceberg | visible size ± jitter, **pegged** to the best price (offset, re-price distance) or at a fixed price, post-only, refill delay ± jitter |
-| Chase | rest at the touch (offset in ticks; −1 steps inside the spread) or **stalk** N bp behind it, re-price after N ticks (at most once a second), **max chase** from where it started, give up after T, then **take / cancel / leave resting** |
-| Scale | from / to, orders (2-100), **size curve** flat / linear / exponential / bell with a skew, **price spacing** even / even in % / denser near the first / denser near the last, size jitter, post-only; one signed batch per 50 levels; quick ranges ±0.5…10% from the price |
-| DCA | USD per order, orders, every, **outside the limit: skip or wait** (and catch up), **dip boost** (× more when the price is X% better than the average so far), total budget, execution |
-| Swarm | clips (2-200), clips per wave (1-20, the aggression), pause between waves, irregular clips, a **slippage cap**, **retries** for what did not fill |
-| Conditional | up to 5 conditions, all / any, **hold time** (no firing on a wick), expiry. Conditions: price ≥ / ≤ (mark, last, mid, index), **crosses** (must be seen on the other side first), **moves** ±X% within a window, **funding** rate, **open interest** change within a window, **spread**, **volume** traded within a window, **ratio** of two markets, **your position** on any market (long / short / flat, size ≥ / ≤, unrealised PnL ≥ / ≤), **time**. Then: market, limit, **close X% of the position**, start a **TWAP** or a **Chase** (with their exits: an OCO bracket after the trigger) |
+| Iceberg | visible size ± jitter, **pegged** to the best price (offset, re-price distance) or at a fixed price (not past the limit), post-only (a fixed post-only price at or through the book waits), refill delay ± jitter; a clip re-priced shows again with what it had left when SoDEX confirmed the cancel; a **rush** bound pulls the clip and takes the rest |
+| Chase | rest at the touch (offset in ticks; −1 steps inside the spread) or **stalk** N bp behind it, re-price after N ticks (at most once a second), **max chase** from where it started, give up after T; when the price moves past the max chase **or** the time is up: **take / cancel / leave resting**. An order that is the best price on its side is not re-priced off its own price (no walking up over itself) |
+| Scale | from / to, orders (2-100), **size curve** flat / linear / exponential / bell with a skew, **price spacing** even / even in % / denser near the first / denser near the last, size jitter, post-only; one signed batch per 50 levels; quick ranges ±0.5…10% from the price. Every level must reach SoDEX's minimum and be on the right side of the limit price, or the ladder is refused. A batch held (region cap, no key) waits; **pause** pulls the levels and **resume** puts each back for what it has not filled |
+| DCA | USD per order, orders, every, **outside the limit: skip or wait** (and catch up), **dip boost** (× more when the price is X% better than the average so far), total budget, execution (a maker DCA only rests: it never takes, its last order included) |
+| Swarm | clips (2-200), clips per wave (1-20, the aggression), pause between waves, irregular clips, a **slippage cap**, **retries** for what did not fill; clips under SoDEX's minimum are merged into the next one |
+| Conditional | up to 5 conditions, all / any, **hold time** (no firing on a wick), expiry. Conditions: price ≥ / ≤ (mark, last, mid, index), **crosses** (must be seen on the other side first), **moves** ±X% within a window, **funding** rate, **open interest** change within a window, **spread**, **volume** traded within a window, **ratio** of two markets, **your position** on any market (long / short / flat, size ≥ / ≤, unrealised PnL ≥ / ≤), **time**. Then: market, limit, **close X% of the position**, start a **TWAP** or a **Chase** (with their exits: an OCO bracket after the trigger; a paper conditional starts a paper algo, under the same region rules). A limit SoDEX refuses ends it failed; a kept limit's fills are still followed (and its exits placed), also after a restart |
 | Trailing stop | trail in % or USD, **activation price**, size: the whole position at the time it fires or an amount, mark or last, exit **market** (slippage cap) or **chase** (rests first, takes after N s) |
 | Bracket | an entry at **market** (slippage cap) or as a resting **limit**, with its take-profit and stop-loss (at least one) as SoDEX position stops; one fills, the other is cancelled |
-| Basket | 2-10 markets at once, each **long or short** with its own USD amount, each worked as its own **swarm** (clips, waves, slippage cap) or **TWAP** (duration, slices); started, paused, resumed and cancelled together; the Algos tab shows the legs inside the basket |
+| Basket | 2-10 markets at once, each **long or short** with its own USD amount, each worked as its own **swarm** (clips, waves, slippage cap) or **TWAP** (duration, slices); started, paused, resumed and cancelled together (every leg is checked before any starts; a leg that cannot start fails the basket and stops the legs already started; a bound that stops the basket stops its legs); the Algos tab shows the legs inside the basket |
 
 ## How a child order is sent
 
@@ -65,6 +70,18 @@ mark. Not on reduce-only orders, a close, a trailing stop or a basket.
   without an answer is **never re-sent**: the child is `unknown` until SoDEX's open orders (or, sparingly,
   the drip-limited order history) say what became of it; until then it counts as filled. After a restart
   every live child is `unknown` first.
+- **Written ahead**: a child (with the algo state that goes with it, such as a ladder's progress or a
+  conditional having fired) is in the store before the order leaves, its answer as soon as it is back, and
+  every fill and settled order at once. A crash in between never sends it a second time.
+- A pause or a cancel that lands while a step is in flight wins: nothing more is sent, an ended algo stays
+  ended, and an order whose answer comes back after the cancel is cancelled again. A cancel also pulls
+  children still on their way or `unknown` (by client id: harmless if they do not exist).
+- No child is over SoDEX's max quantity or max order value (a larger amount goes out over several
+  children); none is under its minimum at the child's own price (a sell's limit is under the bid); a
+  largest slice / child under SoDEX's minimum is raised to it. Fill fast never prices a round past the
+  limit price. An algo too small for SoDEX ever to send anything ends **failed**, not done.
+- A size change (`update`) never leaves more working than the new size: resting children past it are
+  pulled (the last placed first); a schedule spreads the change over what is still to come.
 - An algo **begins only with a quote in hand**: its arrival price is the mid at that moment.
 - 25 refusals in a row fail the algo, with the last reason in its log.
 - **Region rules** (`policy.ts` `regionPolicy`, as for copies): a live algo of a trader in a blocked region

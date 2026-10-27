@@ -64,7 +64,7 @@ const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onope
 
 function make(env: Record<string, string>, fake: FakeSodex = { keys: {} }) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-exec-'));
-  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, ...env });
+  const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
   const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(fake), factory: noWs, log: silent });
   return { cfg, db, svc, dir, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
@@ -98,7 +98,8 @@ test('self-hosted: only the wallet that paired with the printed code is served',
   const { svc, cleanup } = make({ EXECUTOR_KIND: 'self' });
   const a = new Wallet();
   const b = new Wallet();
-  assert.ok(svc.pairingCode && /^[A-Z0-9]{8}$/.test(svc.pairingCode));
+  // 10 characters, no look-alikes (0/O, 1/I/L): about 50 bits.
+  assert.ok(svc.pairingCode && /^[A-HJKMNP-Z2-9]{10}$/.test(svc.pairingCode));
   assert.equal(await code(() => svc.session(a.sign(svc.executorId, 'session', {}), { viewerCountry: null })), '403:unpaired');
   assert.equal(await code(() => svc.session(a.sign(svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: 'WRONG123' })), '403:unpaired');
   const g = svc.session(a.sign(svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: svc.pairingCode!.toLowerCase() });
@@ -271,4 +272,18 @@ test('HTTP: info, the private-network preflight, the origin gate, and a signed s
   assert.equal(me.policy.allowed, false); // no terms accepted yet: no declared country
   server.close();
   await cleanup();
+});
+
+test('self-hosted: pairing locks after 10 wrong codes, and a code typed with spaces or dashes still pairs', async () => {
+  const { svc, cleanup } = make({ EXECUTOR_KIND: 'self' });
+  const a = new Wallet();
+  for (let i = 0; i < 10; i++) assert.equal(await code(() => svc.session(a.sign(svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: `WRONG${i}ABCD` })), '403:unpaired');
+  // Locked now, even with the right code.
+  assert.equal(await code(() => svc.session(a.sign(svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: svc.pairingCode })), '429:pairing-locked');
+  await cleanup();
+  const fresh = make({ EXECUTOR_KIND: 'self' });
+  const c = fresh.svc.pairingCode!;
+  const spaced = `${c.slice(0, 5)} - ${c.slice(5)}`.toLowerCase();
+  assert.ok(fresh.svc.session(a.sign(fresh.svc.executorId, 'session', {}), { viewerCountry: null, pairingCode: spaced }).token);
+  await fresh.cleanup();
 });

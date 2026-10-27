@@ -364,6 +364,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const mid = bid && ask ? (bid + ask) / 2 : snap?.last ?? p.last;
   const market = useMemo(() => (p.sym ? marketOf(p.sym) : null), [p.sym]);
   const tick = Number(p.sym?.tickSize ?? '0');
+  // A DCA's first price while it is "at market": the book's own side when post-only (it rests there,
+  // never refused), else the far side (it takes). Shown live in the field; typing or MID fixes it.
+  const dcaTouch = d.postOnly ? (p.side === 'buy' ? bid : ask) : (p.side === 'buy' ? ask : bid);
   const roundTick = (x: number) => {
     const t = tick > 0 ? tick : 0.01;
     return String(Math.round(x / t) * t).replace(/(\.\d*?)0{6,}\d*$/, '$1');
@@ -380,8 +383,6 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       }
       if (kind === 'conditional' && !x.conds.length) patch.conds = [cond(p.symbol, { value: roundTick(p.side === 'buy' ? mid * 0.99 : mid * 1.01), op: p.side === 'buy' ? 'below' : 'above' })];
       if (kind === 'basket' && !x.legs.length) patch.legs = legs(p.symbol, p.side);
-      // A DCA's first order rests at the best price on its own side (a post-only order there is never refused).
-      if (kind === 'dca' && (!x.dcaStart || x.dcaFirst !== 'price')) Object.assign(patch, { dcaFirst: 'price', dcaStart: x.dcaStart || roundTick((p.side === 'buy' ? bid : ask) ?? mid) });
       if (kind === 'bracket' && !x.entryPrice) patch.entryPrice = roundTick(p.side === 'buy' ? mid * 0.998 : mid * 1.002);
       return Object.keys(patch).length ? { ...x, ...patch } : x;
     });
@@ -858,7 +859,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               <EachField ticket title={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} valueUnit={d.dcaUnit} onChange={(v, u) => set({ perOrder: v, dcaUnit: u })} hint={DCA_EACH_HINT[d.dcaSizing]} err={err('perOrderUsd', 'quantity')} />
               <Field
                 label="First at"
-                value={d.dcaStart}
+                value={d.dcaFirst === 'price' ? d.dcaStart : dcaTouch ? roundTick(dcaTouch) : ''}
                 onChange={(v) => set({ dcaStart: v, dcaFirst: 'price' })}
                 suffix={
                   <>
@@ -911,6 +912,19 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const verbWord = p.side === 'buy' ? 'buy' : 'sell';
   const sizeWords = plan?.total ? `${fmtQty(plan.total, p.sym?.stepSize)} ${base}` : '';
   const kidUsd = (c: PlannedChild) => c.usd ?? c.qty * (c.price ?? mid ?? 0);
+  const ordersNote = !plan ? ''
+    : plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}`
+    : pk === 'sweep' ? 'fill-or-cancel rounds'
+    : pk === 'scale' || (pk === 'iceberg' && kids.some((c) => c.price !== null)) ? 'resting at their prices'
+    : kids.every((c) => c.at === null) ? 'at once'
+    : 'as it goes';
+  // A basket's orders are on several markets: each row names its own, and sizes carry their coin.
+  const multi = pk === 'basket';
+  // A basket slice's tag is "<side> <SYMBOL> <k>/<n>" (planAlgo).
+  const legOf = (c: PlannedChild) => {
+    const market = c.tag.split(' ')[1] ?? '';
+    return { market, coin: market.replace(/-USD$/, '') };
+  };
   // What it pays: each order's way into the book, from the spec (fees.ts), at this market's rates.
   const split = check.spec && plan ? feeSplit(check.spec, plan, { bid, ask, px: mid }) : null;
   const fee = split && split.maker + split.taker + split.either > 0 ? feeRange(split, rates) : null;
@@ -947,7 +961,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
             {plan.total !== null && (
               <div><dt>Size</dt><dd>{sizeWords}</dd>{plan.notional ? <small>{fmtUsd(plan.notional, 2)}</small> : null}</div>
             )}
-            {kids.length > 0 && <div><dt>Orders</dt><dd>{kids.length}</dd><small>{plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}` : kids.some((c) => c.price !== null) ? 'resting at their prices' : 'as it goes'}</small></div>}
+            {kids.length > 0 && <div><dt>Orders</dt><dd>{kids.length}</dd><small>{ordersNote}</small></div>}
             {plan.avgPrice && <div><dt>Avg if all fill</dt><dd>{fmtLevel(plan.avgPrice)}</dd><small>USD</small></div>}
             {fee && (
               <div><dt>Fees</dt><dd>{fee.lo === fee.hi ? fmtUsd(fee.lo, 2) : `${fmtUsd(fee.lo, 2)}–${fmtUsd(fee.hi, 2)}`}</dd><small>{feeWords(split!)}</small></div>
@@ -971,15 +985,15 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               <div className="algo-sum__kids">
                 <table className="algo-sumkids">
                   <thead>
-                    <tr><th>#</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
+                    <tr><th>#</th><th>When</th><th>{multi ? 'Market' : 'Price'}</th><th>{multi ? 'Size' : `Size (${base})`}</th><th>USD</th></tr>
                   </thead>
                   <tbody>
                     {kids.map((c, i) => (
                       <tr key={i}>
                         <td>{i + 1}</td>
                         <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
-                        <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
-                        <td className="is-size">{fmtQty(c.qty, p.sym?.stepSize)}</td>
+                        <td>{multi ? legOf(c).market : c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
+                        <td className="is-size">{multi ? `${fmtQ(c.qty)} ${legOf(c).coin}` : fmtQty(c.qty, p.sym?.stepSize)}</td>
                         <td>{c.usd !== undefined || c.price !== null || mid ? fmtUsd(kidUsd(c), 2) : DASH}</td>
                       </tr>
                     ))}
@@ -989,7 +1003,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                       <tr>
                         <td colSpan={2}>Total</td>
                         <td>{plan.avgPrice ? `avg ${fmtLevel(plan.avgPrice)}` : ''}</td>
-                        <td>{fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
+                        <td>{multi ? '' : fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
                         <td>{fmtUsd(kids.reduce((a, c) => a + kidUsd(c), 0), 2)}</td>
                       </tr>
                     </tfoot>
@@ -1070,7 +1084,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         runsOn={<RunsOn place={place} onChange={setPlace} paper={d.paper} setPaper={(v) => set({ paper: v })} />}
       >
         <TicketSettings
-          kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} roundTick={roundTick} err={err}
+          kind={kind} d={d} set={set} side={p.side} base={base} mid={mid ?? null} dcaFirstLive={dcaTouch ? roundTick(dcaTouch) : null} roundTick={roundTick} err={err}
           quantity={p.quantity} onQuantity={p.onQuantity} sizePct={p.sizePct} onSizePct={p.onSizePct} positionQty={p.positionQty ?? null}
           symbol={p.symbol} needsAmount={needsAmount} exits={plan?.exits ?? null}
           total={plan?.total ?? null} notional={plan?.notional ?? null} stepSize={p.sym?.stepSize}
@@ -1484,8 +1498,8 @@ const toStep = (x: number, step: string | undefined): string => {
   return (Math.floor(x / st + 1e-9) * st).toFixed(dp);
 };
 
-function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantity, onQuantity, sizePct, onSizePct, positionQty, symbol, needsAmount, exits, total, notional, stepSize }: {
-  kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; roundTick: (x: number) => string;
+function TicketSettings({ kind, d, set, side, base, mid, dcaFirstLive, roundTick, err, quantity, onQuantity, sizePct, onSizePct, positionQty, symbol, needsAmount, exits, total, notional, stepSize }: {
+  kind: UiKind; d: Draft; set: (p: Partial<Draft>) => void; side: 'buy' | 'sell'; base: string; mid: number | null; dcaFirstLive?: string | null; roundTick: (x: number) => string;
   err: (...keys: string[]) => string | undefined; quantity: string; onQuantity?: (v: string) => void; sizePct?: number; onSizePct?: (pct: number) => void;
   positionQty: number | null; symbol: string; needsAmount: boolean; exits: { tp: number | null; sl: number | null } | null;
   total: number | null; notional: number | null; stepSize?: string;
@@ -1593,7 +1607,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
           <AField
             title="First at"
             hint="The first order’s price; the later ones step from it."
-            value={d.dcaStart}
+            value={d.dcaFirst === 'price' ? d.dcaStart : dcaFirstLive ?? ''}
             onChange={(v) => set({ dcaStart: v, dcaFirst: 'price' })}
             unit={<span className="algo-sf__unit algo-sf__units">USD<button type="button" className="oe-chip" disabled={!mid} onClick={() => mid && set({ dcaStart: roundTick(mid), dcaFirst: 'price' })}>MID</button></span>}
             err={err('from')}

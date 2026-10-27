@@ -174,7 +174,8 @@ export function verifyCopyRequest(r: unknown, o: { executor: string; now?: numbe
   if (typeof q.signature !== 'string' || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: 'signature must be 65 bytes of hex' };
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
-  if (deadline < now) return { ok: false, error: 'this request has expired; sign it again' };
+  // Expired: either it waited too long, or the signer's clock is behind - then signing again gives the same answer.
+  if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
   if (deadline - nonce > MAX_WINDOW_MS(action)) return { ok: false, error: 'this request is valid for longer than allowed' };
   const skew = o.maxAgeMs ?? 15 * 60_000;
   if (nonce - now > skew || (!isStatement(action) && now - nonce > skew)) return { ok: false, error: 'the request time is too far from now; check your clock' };

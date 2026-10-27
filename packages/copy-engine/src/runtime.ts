@@ -839,9 +839,16 @@ export class CopyRuntime {
       this.host.log.warn('copy: readiness check failed', { sub: s.id, error: String(e) });
       return;
     }
-    if (problem && s.status !== 'blocked') await this.setStatus(s.id, 'blocked', problem);
-    else if (problem && s.statusReason !== problem) await this.setStatus(s.id, 'blocked', problem);
-    else if (!problem && s.status === 'blocked') await this.setStatus(s.id, 'active', null);
+    // The copy may have been stopped, paused or removed while SoDEX answered: then there is nothing to set.
+    // (This runs unawaited - `void checkReady` - so a throw here would be an unhandled rejection.)
+    const cur = this.subs.get(s.id);
+    if (!cur || cur.status === 'stopped' || cur.status === 'paused' || cur.status === 'halted') return;
+    try {
+      if (problem && (cur.status !== 'blocked' || cur.statusReason !== problem)) await this.setStatus(cur.id, 'blocked', problem);
+      else if (!problem && cur.status === 'blocked') await this.setStatus(cur.id, 'active', null);
+    } catch (e) {
+      this.host.log.warn('copy: readiness status not set', { sub: cur.id, error: String(e) });
+    }
   }
 
   /* ------------------------------------------------------------- leaders ----- */

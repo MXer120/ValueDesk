@@ -6,9 +6,25 @@
  * The consent log is append-only: nothing here updates or deletes a row of
  * it, so what a follower signed stays exactly as they signed it.
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import type { DatabaseSync as SqliteDb, StatementSync } from 'node:sqlite';
+
+/**
+ * node:sqlite, read when it is first needed rather than imported: on a Node.js
+ * without it (before 22.13) an import fails before any of this code runs, with
+ * a stack trace instead of a sentence.
+ */
+export function sqlite(): typeof import('node:sqlite') {
+  let m: typeof import('node:sqlite') | undefined;
+  try {
+    m = (process as { getBuiltinModule?: (id: string) => unknown }).getBuiltinModule?.('node:sqlite') as typeof import('node:sqlite') | undefined;
+  } catch {
+    m = undefined;
+  }
+  if (!m?.DatabaseSync) throw new Error(`The ValueDesk copier needs Node.js 22.13 or newer (this is ${process.version}). Get it from https://nodejs.org, then start it again.`);
+  return m;
+}
 import type { ActivityEntry, AlgoEvent, AlgoRecord, AlgoStore, CopyStore, SubState, Subscription, TermsRecord } from '../../../packages/copy-engine/src/index.ts';
 
 const SCHEMA = `
@@ -77,13 +93,64 @@ export interface ConsentRow {
 
 type Row = Record<string, unknown>;
 
+/** Data folders held by this process: a second open of one in the same process is refused too. */
+const held = new Set<string>();
+
+/**
+ * One executor per data folder. Two on the same folder would each run every
+ * copy and algo - every order twice. The lock is a file with the holder's pid,
+ * made exclusively; one left by a process that is gone (a crash, a power cut)
+ * is taken over.
+ */
+function takeLock(path: string): string {
+  if (held.has(path)) throw new Error(`This data folder is already in use by this executor (${dirname(path)}).`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, String(process.pid), { flag: 'wx' });
+      held.add(path);
+      return path;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      const pid = Number(readFileSync(path, 'utf8').trim());
+      if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid && alive(pid)) {
+        throw new Error(`Another executor (process ${pid}) is already running on ${dirname(path)}. Stop it first: two would place every order twice.`);
+      }
+      rmSync(path, { force: true }); // left by a process that is gone
+    }
+  }
+  throw new Error(`Could not lock ${dirname(path)}.`);
+}
+
+function releaseLock(path: string): void {
+  held.delete(path);
+  try {
+    if (readFileSync(path, 'utf8').trim() === String(process.pid)) rmSync(path, { force: true });
+  } catch {
+    /* already gone */
+  }
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 export class ExecutorDb implements CopyStore, AlgoStore {
-  readonly db: DatabaseSync;
+  readonly db: SqliteDb;
   private stmts = new Map<string, StatementSync>();
 
+  private lockPath: string | null = null;
+
   constructor(readonly path: string) {
-    if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
+    if (path !== ':memory:') {
+      mkdirSync(dirname(path), { recursive: true });
+      this.lockPath = takeLock(`${path}.lock`);
+    }
+    this.db = new (sqlite().DatabaseSync)(path);
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec('PRAGMA busy_timeout = 5000');
@@ -92,6 +159,13 @@ export class ExecutorDb implements CopyStore, AlgoStore {
 
   close(): void {
     this.db.close();
+    if (this.lockPath) releaseLock(this.lockPath);
+    this.lockPath = null;
+  }
+
+  /** Throws when the database does not answer (the health check). */
+  ping(): void {
+    this.db.prepare('SELECT 1').get();
   }
 
   private q(sql: string): StatementSync {

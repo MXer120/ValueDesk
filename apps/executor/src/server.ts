@@ -115,6 +115,18 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     res.end(text);
   };
 
+  /** A log page's `limit` (1-1000, default 200) and `before` (a time); anything else is a 400. */
+  const page = (url: URL): { limit: number; before?: number } => {
+    const l = url.searchParams.get('limit');
+    const b = url.searchParams.get('before');
+    const limit = l === null ? 200 : Number(l);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1000) throw new ApiError(400, 'limit', 'limit must be a whole number from 1 to 1000.');
+    if (b === null) return { limit };
+    const before = Number(b);
+    if (!Number.isSafeInteger(before) || before < 0) throw new ApiError(400, 'before', 'before must be a time in milliseconds.');
+    return { limit, before };
+  };
+
   const bearer = (req: IncomingMessage): string | null => {
     const h = req.headers.authorization;
     return typeof h === 'string' && h.startsWith('Bearer ') ? h.slice(7) : null;
@@ -150,15 +162,12 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === 'GET' && algoEv) {
         const owner = svc.authenticate(bearer(req));
-        const before = url.searchParams.get('before');
-        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1]!, { limit: Number(url.searchParams.get('limit') ?? 200), before: before ? Number(before) : undefined }) });
+        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1]!, page(url)) });
       }
       const act = /^\/copies\/([A-Za-z0-9_-]{1,40})\/activity$/.exec(route);
       if (req.method === 'GET' && act) {
         const owner = svc.authenticate(bearer(req));
-        const limit = Number(url.searchParams.get('limit') ?? 200);
-        const before = url.searchParams.get('before');
-        return send(res, 200, { entries: await svc.activity(owner, act[1]!, { limit, before: before ? Number(before) : undefined }) });
+        return send(res, 200, { entries: await svc.activity(owner, act[1]!, page(url)) });
       }
       if (!isWrite) throw new ApiError(404, 'path', 'not found');
 

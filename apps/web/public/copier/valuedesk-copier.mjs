@@ -42,9 +42,9 @@ var __toESM = (mod2, isNodeMode, target) => (target = mod2 != null ? __create(__
   mod2
 ));
 
-// node_modules/ws/lib/constants.js
+// ../../node_modules/ws/lib/constants.js
 var require_constants = __commonJS({
-  "node_modules/ws/lib/constants.js"(exports, module) {
+  "../../node_modules/ws/lib/constants.js"(exports, module) {
     "use strict";
     var BINARY_TYPES = ["nodebuffer", "arraybuffer", "fragments"];
     var hasBlob = typeof Blob !== "undefined";
@@ -65,9 +65,9 @@ var require_constants = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/node-gyp-build.js
+// ../../node_modules/node-gyp-build/node-gyp-build.js
 var require_node_gyp_build = __commonJS({
-  "node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
+  "../../node_modules/node-gyp-build/node-gyp-build.js"(exports, module) {
     var fs = __require("fs");
     var path = __require("path");
     var os = __require("os");
@@ -77,8 +77,8 @@ var require_node_gyp_build = __commonJS({
     var abi = process.versions.modules;
     var runtime = isElectron() ? "electron" : isNwjs() ? "node-webkit" : "node";
     var arch = process.env.npm_config_arch || os.arch();
-    var platform = process.env.npm_config_platform || os.platform();
-    var libc = process.env.LIBC || (isAlpine(platform) ? "musl" : "glibc");
+    var platform2 = process.env.npm_config_platform || os.platform();
+    var libc = process.env.LIBC || (isAlpine(platform2) ? "musl" : "glibc");
     var armv = process.env.ARM_VERSION || (arch === "arm64" ? "8" : vars.arm_version) || "";
     var uv = (process.versions.uv || "").split(".")[0];
     module.exports = load;
@@ -103,7 +103,7 @@ var require_node_gyp_build = __commonJS({
       var nearby = resolve2(path.dirname(process.execPath));
       if (nearby) return nearby;
       var target = [
-        "platform=" + platform,
+        "platform=" + platform2,
         "arch=" + arch,
         "runtime=" + runtime,
         "abi=" + abi,
@@ -118,7 +118,7 @@ var require_node_gyp_build = __commonJS({
       throw new Error("No native build was found for " + target + "\n    loaded from: " + dir + "\n");
       function resolve2(dir2) {
         var tuples = readdirSync(path.join(dir2, "prebuilds")).map(parseTuple);
-        var tuple = tuples.filter(matchTuple(platform, arch)).sort(compareTuples)[0];
+        var tuple = tuples.filter(matchTuple(platform2, arch)).sort(compareTuples)[0];
         if (!tuple) return;
         var prebuilds = path.join(dir2, "prebuilds", tuple.name);
         var parsed = readdirSync(prebuilds).map(parseTags);
@@ -144,17 +144,17 @@ var require_node_gyp_build = __commonJS({
     function parseTuple(name) {
       var arr = name.split("-");
       if (arr.length !== 2) return;
-      var platform2 = arr[0];
+      var platform3 = arr[0];
       var architectures = arr[1].split("+");
-      if (!platform2) return;
+      if (!platform3) return;
       if (!architectures.length) return;
       if (!architectures.every(Boolean)) return;
-      return { name, platform: platform2, architectures };
+      return { name, platform: platform3, architectures };
     }
-    function matchTuple(platform2, arch2) {
+    function matchTuple(platform3, arch2) {
       return function(tuple) {
         if (tuple == null) return false;
-        if (tuple.platform !== platform2) return false;
+        if (tuple.platform !== platform3) return false;
         return tuple.architectures.includes(arch2);
       };
     }
@@ -222,8 +222,8 @@ var require_node_gyp_build = __commonJS({
       if (process.env.ELECTRON_RUN_AS_NODE) return true;
       return typeof window !== "undefined" && window.process && window.process.type === "renderer";
     }
-    function isAlpine(platform2) {
-      return platform2 === "linux" && fs.existsSync("/etc/alpine-release");
+    function isAlpine(platform3) {
+      return platform3 === "linux" && fs.existsSync("/etc/alpine-release");
     }
     load.parseTags = parseTags;
     load.matchTags = matchTags;
@@ -234,9 +234,9 @@ var require_node_gyp_build = __commonJS({
   }
 });
 
-// node_modules/node-gyp-build/index.js
+// ../../node_modules/node-gyp-build/index.js
 var require_node_gyp_build2 = __commonJS({
-  "node_modules/node-gyp-build/index.js"(exports, module) {
+  "../../node_modules/node-gyp-build/index.js"(exports, module) {
     var runtimeRequire = typeof __webpack_require__ === "function" ? __non_webpack_require__ : __require;
     if (typeof runtimeRequire.addon === "function") {
       module.exports = runtimeRequire.addon.bind(runtimeRequire);
@@ -246,9 +246,9 @@ var require_node_gyp_build2 = __commonJS({
   }
 });
 
-// node_modules/bufferutil/fallback.js
+// ../../node_modules/bufferutil/fallback.js
 var require_fallback = __commonJS({
-  "node_modules/bufferutil/fallback.js"(exports, module) {
+  "../../node_modules/bufferutil/fallback.js"(exports, module) {
     "use strict";
     var mask = (source, mask2, output, offset, length) => {
       for (var i = 0; i < length; i++) {
@@ -265,9 +265,9 @@ var require_fallback = __commonJS({
   }
 });
 
-// node_modules/bufferutil/index.js
+// ../../node_modules/bufferutil/index.js
 var require_bufferutil = __commonJS({
-  "node_modules/bufferutil/index.js"(exports, module) {
+  "../../node_modules/bufferutil/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -277,9 +277,9 @@ var require_bufferutil = __commonJS({
   }
 });
 
-// node_modules/ws/lib/buffer-util.js
+// ../../node_modules/ws/lib/buffer-util.js
 var require_buffer_util = __commonJS({
-  "node_modules/ws/lib/buffer-util.js"(exports, module) {
+  "../../node_modules/ws/lib/buffer-util.js"(exports, module) {
     "use strict";
     var { EMPTY_BUFFER } = require_constants();
     var FastBuffer = Buffer[Symbol.species];
@@ -352,9 +352,9 @@ var require_buffer_util = __commonJS({
   }
 });
 
-// node_modules/ws/lib/limiter.js
+// ../../node_modules/ws/lib/limiter.js
 var require_limiter = __commonJS({
-  "node_modules/ws/lib/limiter.js"(exports, module) {
+  "../../node_modules/ws/lib/limiter.js"(exports, module) {
     "use strict";
     var kDone = /* @__PURE__ */ Symbol("kDone");
     var kRun = /* @__PURE__ */ Symbol("kRun");
@@ -402,9 +402,9 @@ var require_limiter = __commonJS({
   }
 });
 
-// node_modules/ws/lib/permessage-deflate.js
+// ../../node_modules/ws/lib/permessage-deflate.js
 var require_permessage_deflate = __commonJS({
-  "node_modules/ws/lib/permessage-deflate.js"(exports, module) {
+  "../../node_modules/ws/lib/permessage-deflate.js"(exports, module) {
     "use strict";
     var zlib = __require("zlib");
     var bufferUtil = require_buffer_util();
@@ -595,26 +595,26 @@ var require_permessage_deflate = __commonJS({
             value = value[0];
             if (key2 === "client_max_window_bits") {
               if (value !== true) {
-                const num3 = +value;
-                if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
+                const num4 = +value;
+                if (!Number.isInteger(num4) || num4 < 8 || num4 > 15) {
                   throw new TypeError(
                     `Invalid value for parameter "${key2}": ${value}`
                   );
                 }
-                value = num3;
+                value = num4;
               } else if (!this._isServer) {
                 throw new TypeError(
                   `Invalid value for parameter "${key2}": ${value}`
                 );
               }
             } else if (key2 === "server_max_window_bits") {
-              const num3 = +value;
-              if (!Number.isInteger(num3) || num3 < 8 || num3 > 15) {
+              const num4 = +value;
+              if (!Number.isInteger(num4) || num4 < 8 || num4 > 15) {
                 throw new TypeError(
                   `Invalid value for parameter "${key2}": ${value}`
                 );
               }
-              value = num3;
+              value = num4;
             } else if (key2 === "client_no_context_takeover" || key2 === "server_no_context_takeover") {
               if (value !== true) {
                 throw new TypeError(
@@ -785,9 +785,9 @@ var require_permessage_deflate = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/fallback.js
+// ../../node_modules/utf-8-validate/fallback.js
 var require_fallback2 = __commonJS({
-  "node_modules/utf-8-validate/fallback.js"(exports, module) {
+  "../../node_modules/utf-8-validate/fallback.js"(exports, module) {
     "use strict";
     function isValidUTF8(buf) {
       const len = buf.length;
@@ -822,9 +822,9 @@ var require_fallback2 = __commonJS({
   }
 });
 
-// node_modules/utf-8-validate/index.js
+// ../../node_modules/utf-8-validate/index.js
 var require_utf_8_validate = __commonJS({
-  "node_modules/utf-8-validate/index.js"(exports, module) {
+  "../../node_modules/utf-8-validate/index.js"(exports, module) {
     "use strict";
     try {
       module.exports = require_node_gyp_build2()(__dirname);
@@ -834,9 +834,9 @@ var require_utf_8_validate = __commonJS({
   }
 });
 
-// node_modules/ws/lib/validation.js
+// ../../node_modules/ws/lib/validation.js
 var require_validation = __commonJS({
-  "node_modules/ws/lib/validation.js"(exports, module) {
+  "../../node_modules/ws/lib/validation.js"(exports, module) {
     "use strict";
     var { isUtf8 } = __require("buffer");
     var { hasBlob } = require_constants();
@@ -1035,9 +1035,9 @@ var require_validation = __commonJS({
   }
 });
 
-// node_modules/ws/lib/receiver.js
+// ../../node_modules/ws/lib/receiver.js
 var require_receiver = __commonJS({
-  "node_modules/ws/lib/receiver.js"(exports, module) {
+  "../../node_modules/ws/lib/receiver.js"(exports, module) {
     "use strict";
     var { Writable } = __require("stream");
     var PerMessageDeflate2 = require_permessage_deflate();
@@ -1377,8 +1377,8 @@ var require_receiver = __commonJS({
           return;
         }
         const buf = this.consume(8);
-        const num3 = buf.readUInt32BE(0);
-        if (num3 > Math.pow(2, 53 - 32) - 1) {
+        const num4 = buf.readUInt32BE(0);
+        if (num4 > Math.pow(2, 53 - 32) - 1) {
           const error = this.createError(
             RangeError,
             "Unsupported WebSocket frame: payload length > 2^53 - 1",
@@ -1389,7 +1389,7 @@ var require_receiver = __commonJS({
           cb(error);
           return;
         }
-        this._payloadLength = num3 * Math.pow(2, 32) + buf.readUInt32BE(4);
+        this._payloadLength = num4 * Math.pow(2, 32) + buf.readUInt32BE(4);
         this.haveLength(cb);
       }
       /**
@@ -1658,9 +1658,9 @@ var require_receiver = __commonJS({
   }
 });
 
-// node_modules/ws/lib/sender.js
+// ../../node_modules/ws/lib/sender.js
 var require_sender = __commonJS({
-  "node_modules/ws/lib/sender.js"(exports, module) {
+  "../../node_modules/ws/lib/sender.js"(exports, module) {
     "use strict";
     var { Duplex } = __require("stream");
     var { randomFillSync } = __require("crypto");
@@ -2151,9 +2151,9 @@ var require_sender = __commonJS({
   }
 });
 
-// node_modules/ws/lib/event-target.js
+// ../../node_modules/ws/lib/event-target.js
 var require_event_target = __commonJS({
-  "node_modules/ws/lib/event-target.js"(exports, module) {
+  "../../node_modules/ws/lib/event-target.js"(exports, module) {
     "use strict";
     var { kForOnEventAttribute, kListener } = require_constants();
     var kCode = /* @__PURE__ */ Symbol("kCode");
@@ -2380,9 +2380,9 @@ var require_event_target = __commonJS({
   }
 });
 
-// node_modules/ws/lib/extension.js
+// ../../node_modules/ws/lib/extension.js
 var require_extension = __commonJS({
-  "node_modules/ws/lib/extension.js"(exports, module) {
+  "../../node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function push(dest, name, elem) {
@@ -2533,9 +2533,9 @@ var require_extension = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket.js
+// ../../node_modules/ws/lib/websocket.js
 var require_websocket = __commonJS({
-  "node_modules/ws/lib/websocket.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var https = __require("https");
@@ -3429,9 +3429,9 @@ var require_websocket = __commonJS({
   }
 });
 
-// node_modules/ws/lib/stream.js
+// ../../node_modules/ws/lib/stream.js
 var require_stream = __commonJS({
-  "node_modules/ws/lib/stream.js"(exports, module) {
+  "../../node_modules/ws/lib/stream.js"(exports, module) {
     "use strict";
     var WebSocket2 = require_websocket();
     var { Duplex } = __require("stream");
@@ -3527,9 +3527,9 @@ var require_stream = __commonJS({
   }
 });
 
-// node_modules/ws/lib/subprotocol.js
+// ../../node_modules/ws/lib/subprotocol.js
 var require_subprotocol = __commonJS({
-  "node_modules/ws/lib/subprotocol.js"(exports, module) {
+  "../../node_modules/ws/lib/subprotocol.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
     function parse(header) {
@@ -3572,9 +3572,9 @@ var require_subprotocol = __commonJS({
   }
 });
 
-// node_modules/ws/lib/websocket-server.js
+// ../../node_modules/ws/lib/websocket-server.js
 var require_websocket_server = __commonJS({
-  "node_modules/ws/lib/websocket-server.js"(exports, module) {
+  "../../node_modules/ws/lib/websocket-server.js"(exports, module) {
     "use strict";
     var EventEmitter = __require("events");
     var http = __require("http");
@@ -3973,15 +3973,32 @@ var require_websocket_server = __commonJS({
   }
 });
 
-// apps/executor/src/main.ts
+// src/main.ts
 import { join as join3 } from "node:path";
 
-// apps/executor/src/config.ts
+// src/config.ts
+import { existsSync } from "node:fs";
+import { homedir, platform } from "node:os";
 import { join, resolve } from "node:path";
-var DEFAULT_ORIGINS = ["https://valuedeskapp.vercel.app", "https://valuexplorer.vercel.app", "http://localhost:5180", "http://127.0.0.1:5180"];
+function dataDirFor(cwd = process.cwd(), env = process.env) {
+  const here = join(cwd, "copier-data");
+  if (existsSync(here)) return here;
+  const base2 = platform() === "win32" ? env.LOCALAPPDATA || join(homedir(), "AppData", "Local") : platform() === "darwin" ? join(homedir(), "Library", "Application Support") : env.XDG_DATA_HOME || join(homedir(), ".local", "share");
+  return join(base2, "ValueDesk", "copier");
+}
+var DEFAULT_ORIGINS = ["https://valuedesk.so", "https://www.valuedesk.so", "https://valuedeskapp.vercel.app", "https://valuexplorer.vercel.app", "http://localhost:5180", "http://127.0.0.1:5180"];
 var ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 function loadConfig(env = process.env) {
-  const kind = env.EXECUTOR_KIND === "hosted" ? "hosted" : "self";
+  const rawKind = (env.EXECUTOR_KIND ?? "self").trim();
+  if (rawKind !== "hosted" && rawKind !== "self") throw new Error(`EXECUTOR_KIND must be hosted or self (got "${env.EXECUTOR_KIND}")`);
+  const kind = rawKind;
+  const originSecrets = [env.EXECUTOR_ORIGIN_SECRET, env.EXECUTOR_ORIGIN_SECRET_2].map((s) => s?.trim() ?? "").filter(Boolean);
+  const noEdge = env.EXECUTOR_EDGE?.trim() === "none";
+  const trustEdge = env.EXECUTOR_TRUST_EDGE === "1";
+  if (kind === "hosted" && !originSecrets.length && !noEdge) throw new Error("A hosted executor needs EXECUTOR_ORIGIN_SECRET (the edge's X-Origin-Verify value); EXECUTOR_EDGE=none runs it without an edge, locally");
+  if (trustEdge && !originSecrets.length) throw new Error("EXECUTOR_TRUST_EDGE=1 needs EXECUTOR_ORIGIN_SECRET: without it anyone could forge the viewer's address and country");
+  const executorId = env.EXECUTOR_ID?.trim() || null;
+  if (executorId && !/^[A-Za-z0-9_.-]{3,64}$/.test(executorId)) throw new Error("EXECUTOR_ID must be 3 to 64 letters, digits, dots, dashes or underscores");
   const port = Number(env.PORT ?? 8799);
   if (!Number.isInteger(port) || port <= 0 || port > 65535) throw new Error(`PORT must be a port number (got ${env.PORT})`);
   const owner = env.EXECUTOR_OWNER?.trim() || null;
@@ -3995,14 +4012,14 @@ function loadConfig(env = process.env) {
     kind,
     host: env.HOST?.trim() || "127.0.0.1",
     port,
-    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === "hosted" ? "/var/lib/valuescan/executor" : join(process.cwd(), "copier-data"))),
+    dataDir: resolve(env.EXECUTOR_DATA_DIR?.trim() || (kind === "hosted" ? "/var/lib/valuescan/executor" : dataDirFor(process.cwd(), env))),
     network,
     builderId,
     owner: owner ? owner.toLowerCase() : null,
     allowedOrigins: env.EXECUTOR_ALLOWED_ORIGINS?.split(",").map((s) => s.trim()).filter(Boolean) ?? DEFAULT_ORIGINS,
     location: env.EXECUTOR_LOCATION?.trim() || (kind === "hosted" ? "ap-northeast-1 (Tokyo)" : "your own machine"),
-    originSecrets: [env.EXECUTOR_ORIGIN_SECRET, env.EXECUTOR_ORIGIN_SECRET_2].map((s) => s?.trim() ?? "").filter(Boolean),
-    trustEdge: env.EXECUTOR_TRUST_EDGE === "1",
+    originSecrets,
+    trustEdge,
     open: env.EXECUTOR_OPEN !== "0",
     // 90 days is what the copy terms promise and what the web app registers at most.
     keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
@@ -4010,15 +4027,17 @@ function loadConfig(env = process.env) {
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
-    logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info"
+    logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
+    executorId,
+    liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1"
   };
 }
 
-// apps/executor/src/net.ts
+// src/net.ts
 import { Agent, request as httpsRequest } from "node:https";
 import { isIPv6 } from "node:net";
 
-// node_modules/ws/wrapper.mjs
+// ../../node_modules/ws/wrapper.mjs
 var import_stream = __toESM(require_stream(), 1);
 var import_extension = __toESM(require_extension(), 1);
 var import_permessage_deflate = __toESM(require_permessage_deflate(), 1);
@@ -4029,7 +4048,7 @@ var import_websocket = __toESM(require_websocket(), 1);
 var import_websocket_server = __toESM(require_websocket_server(), 1);
 var wrapper_default = import_websocket.default;
 
-// apps/executor/src/net.ts
+// src/net.ts
 function egress(localAddress) {
   if (!localAddress) {
     return {
@@ -4080,10 +4099,19 @@ function egress(localAddress) {
   return { fetch: bound2, factory, localAddress };
 }
 
-// apps/executor/src/db.ts
-import { mkdirSync } from "node:fs";
+// src/db.ts
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+function sqlite() {
+  let m;
+  try {
+    m = process.getBuiltinModule?.("node:sqlite");
+  } catch {
+    m = void 0;
+  }
+  if (!m?.DatabaseSync) throw new Error(`The ValueDesk copier needs Node.js 22.13 or newer (this is ${process.version}). Get it from https://nodejs.org, then start it again.`);
+  return m;
+}
 var SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS subs (id TEXT PRIMARY KEY, owner TEXT NOT NULL, json TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID;
@@ -4123,11 +4151,48 @@ CREATE INDEX IF NOT EXISTS algos_owner ON algos (owner);
 CREATE TABLE IF NOT EXISTS algo_events (id TEXT PRIMARY KEY, algo_id TEXT NOT NULL, owner TEXT NOT NULL, at INTEGER NOT NULL, json TEXT NOT NULL) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS algo_events_algo ON algo_events (algo_id, at);
 `;
+var held = /* @__PURE__ */ new Set();
+function takeLock(path) {
+  if (held.has(path)) throw new Error(`This data folder is already in use by this executor (${dirname(path)}).`);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      writeFileSync(path, String(process.pid), { flag: "wx" });
+      held.add(path);
+      return path;
+    } catch (e) {
+      if (e.code !== "EEXIST") throw e;
+      const pid = Number(readFileSync(path, "utf8").trim());
+      if (Number.isSafeInteger(pid) && pid > 0 && pid !== process.pid && alive(pid)) {
+        throw new Error(`Another executor (process ${pid}) is already running on ${dirname(path)}. Stop it first: two would place every order twice.`);
+      }
+      rmSync(path, { force: true });
+    }
+  }
+  throw new Error(`Could not lock ${dirname(path)}.`);
+}
+function releaseLock(path) {
+  held.delete(path);
+  try {
+    if (readFileSync(path, "utf8").trim() === String(process.pid)) rmSync(path, { force: true });
+  } catch {
+  }
+}
+function alive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
 var ExecutorDb = class {
   constructor(path) {
     this.path = path;
-    if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-    this.db = new DatabaseSync(path);
+    if (path !== ":memory:") {
+      mkdirSync(dirname(path), { recursive: true });
+      this.lockPath = takeLock(`${path}.lock`);
+    }
+    this.db = new (sqlite()).DatabaseSync(path);
     this.db.exec("PRAGMA journal_mode = WAL");
     this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
@@ -4136,8 +4201,15 @@ var ExecutorDb = class {
   path;
   db;
   stmts = /* @__PURE__ */ new Map();
+  lockPath = null;
   close() {
     this.db.close();
+    if (this.lockPath) releaseLock(this.lockPath);
+    this.lockPath = null;
+  }
+  /** Throws when the database does not answer (the health check). */
+  ping() {
+    this.db.prepare("SELECT 1").get();
   }
   q(sql) {
     let s = this.stmts.get(sql);
@@ -4302,12 +4374,12 @@ function keyOf(r) {
   };
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync as mkdirSync2, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
-// packages/sodex-core/src/network.ts
+// ../../packages/sodex-core/src/network.ts
 var ENGINES = ["spot", "perps"];
 var SODEX_CHAIN_ID = {
   mainnet: 286623,
@@ -4326,7 +4398,7 @@ var enginePath = (engine) => `/api/v1/${engine}`;
 var DomainName = { spot: "spot", perps: "futures", universal: "universal" };
 var engineDomainName = (engine) => engine === "spot" ? DomainName.spot : DomainName.perps;
 
-// node_modules/@noble/hashes/esm/_u64.js
+// ../../node_modules/@noble/hashes/esm/_u64.js
 var U32_MASK64 = /* @__PURE__ */ BigInt(2 ** 32 - 1);
 var _32n = /* @__PURE__ */ BigInt(32);
 function fromBig(n, le = false) {
@@ -4349,7 +4421,7 @@ var rotlSL = (h, l, s) => l << s | h >>> 32 - s;
 var rotlBH = (h, l, s) => l << s - 32 | h >>> 64 - s;
 var rotlBL = (h, l, s) => h << s - 32 | l >>> 64 - s;
 
-// node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/hashes/esm/utils.js
 function isBytes(a) {
   return a instanceof Uint8Array || ArrayBuffer.isView(a) && a.constructor.name === "Uint8Array";
 }
@@ -4417,7 +4489,7 @@ function createHasher(hashCons) {
   return hashC;
 }
 
-// node_modules/@noble/hashes/esm/sha3.js
+// ../../node_modules/@noble/hashes/esm/sha3.js
 var _0n = BigInt(0);
 var _1n = BigInt(1);
 var _2n = BigInt(2);
@@ -4598,7 +4670,7 @@ var Keccak = class _Keccak extends Hash {
 var gen = (suffix, blockLen, outputLen) => createHasher(() => new Keccak(blockLen, suffix, outputLen));
 var keccak_256 = /* @__PURE__ */ (() => gen(1, 136, 256 / 8))();
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_assert.js
 function anumber2(n) {
   if (!Number.isSafeInteger(n) || n < 0)
     throw new Error("positive integer expected, got " + n);
@@ -4632,11 +4704,11 @@ function aoutput2(out, instance) {
   }
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/cryptoNode.js
 import * as nc from "node:crypto";
 var crypto = nc && typeof nc === "object" && "webcrypto" in nc ? nc.webcrypto : nc && typeof nc === "object" && "randomBytes" in nc ? nc : void 0;
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/utils.js
 var createView = (arr) => new DataView(arr.buffer, arr.byteOffset, arr.byteLength);
 var rotr = (word2, shift) => word2 << 32 - shift | word2 >>> shift;
 function utf8ToBytes2(str2) {
@@ -4689,7 +4761,7 @@ function randomBytes(bytesLength = 32) {
   throw new Error("crypto.getRandomValues must be defined");
 }
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/_md.js
 function setBigUint64(view, byteOffset, value, isLE2) {
   if (typeof view.setBigUint64 === "function")
     return view.setBigUint64(byteOffset, value, isLE2);
@@ -4791,7 +4863,7 @@ var HashMD = class extends Hash2 {
   }
 };
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/sha256.js
 var SHA256_K = /* @__PURE__ */ new Uint32Array([
   1116352408,
   1899447441,
@@ -4941,7 +5013,7 @@ var SHA256 = class extends HashMD {
 };
 var sha256 = /* @__PURE__ */ wrapConstructor(() => new SHA256());
 
-// node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
+// ../../node_modules/@noble/curves/node_modules/@noble/hashes/esm/hmac.js
 var HMAC = class extends Hash2 {
   constructor(hash, _key) {
     super();
@@ -5006,7 +5078,7 @@ var HMAC = class extends Hash2 {
 var hmac = (hash, key2, message) => new HMAC(hash, key2).update(message).digest();
 hmac.create = (hash, key2) => new HMAC(hash, key2);
 
-// node_modules/@noble/curves/esm/abstract/utils.js
+// ../../node_modules/@noble/curves/esm/abstract/utils.js
 var utils_exports = {};
 __export(utils_exports, {
   aInRange: () => aInRange,
@@ -5059,8 +5131,8 @@ function bytesToHex(bytes) {
   }
   return hex;
 }
-function numberToHexUnpadded(num3) {
-  const hex = num3.toString(16);
+function numberToHexUnpadded(num4) {
+  const hex = num4.toString(16);
   return hex.length & 1 ? "0" + hex : hex;
 }
 function hexToNumber(hex) {
@@ -5274,7 +5346,7 @@ function memoized(fn) {
   };
 }
 
-// node_modules/@noble/curves/esm/abstract/modular.js
+// ../../node_modules/@noble/curves/esm/abstract/modular.js
 var _0n3 = BigInt(0);
 var _1n3 = BigInt(1);
 var _2n3 = /* @__PURE__ */ BigInt(2);
@@ -5288,7 +5360,7 @@ function mod(a, b) {
   const result = a % b;
   return result >= _0n3 ? result : b + result;
 }
-function pow(num3, power, modulo) {
+function pow(num4, power, modulo) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (modulo <= _0n3)
@@ -5298,8 +5370,8 @@ function pow(num3, power, modulo) {
   let res = _1n3;
   while (power > _0n3) {
     if (power & _1n3)
-      res = res * num3 % modulo;
-    num3 = num3 * num3 % modulo;
+      res = res * num4 % modulo;
+    num4 = num4 * num4 % modulo;
     power >>= _1n3;
   }
   return res;
@@ -5355,7 +5427,7 @@ function tonelliShanks(P) {
     if (Fp.pow(n, legendreC) === Fp.neg(Fp.ONE))
       throw new Error("Cannot find square root");
     let r = S;
-    let g = Fp.pow(Fp.mul(Fp.ONE, Z), Q);
+    let g2 = Fp.pow(Fp.mul(Fp.ONE, Z), Q);
     let x = Fp.pow(n, Q1div2);
     let b = Fp.pow(n, Q);
     while (!Fp.eql(b, Fp.ONE)) {
@@ -5367,10 +5439,10 @@ function tonelliShanks(P) {
           break;
         t2 = Fp.sqr(t2);
       }
-      const ge = Fp.pow(g, _1n3 << BigInt(r - m - 1));
-      g = Fp.sqr(ge);
+      const ge = Fp.pow(g2, _1n3 << BigInt(r - m - 1));
+      g2 = Fp.sqr(ge);
       x = Fp.mul(x, ge);
-      b = Fp.mul(b, g);
+      b = Fp.mul(b, g2);
       r = m;
     }
     return x;
@@ -5435,15 +5507,15 @@ function validateField(field) {
   }, initial);
   return validateObject(field, opts);
 }
-function FpPow(f, num3, power) {
+function FpPow(f, num4, power) {
   if (power < _0n3)
     throw new Error("invalid exponent, negatives unsupported");
   if (power === _0n3)
     return f.ONE;
   if (power === _1n3)
-    return num3;
+    return num4;
   let p = f.ONE;
-  let d = num3;
+  let d = num4;
   while (power > _0n3) {
     if (power & _1n3)
       p = f.mul(p, d);
@@ -5454,18 +5526,18 @@ function FpPow(f, num3, power) {
 }
 function FpInvertBatch(f, nums) {
   const tmp = new Array(nums.length);
-  const lastMultiplied = nums.reduce((acc, num3, i) => {
-    if (f.is0(num3))
+  const lastMultiplied = nums.reduce((acc, num4, i) => {
+    if (f.is0(num4))
       return acc;
     tmp[i] = acc;
-    return f.mul(acc, num3);
+    return f.mul(acc, num4);
   }, f.ONE);
   const inverted = f.inv(lastMultiplied);
-  nums.reduceRight((acc, num3, i) => {
-    if (f.is0(num3))
+  nums.reduceRight((acc, num4, i) => {
+    if (f.is0(num4))
       return acc;
     tmp[i] = f.mul(acc, tmp[i]);
-    return f.mul(acc, num3);
+    return f.mul(acc, num4);
   }, inverted);
   return tmp;
 }
@@ -5489,28 +5561,28 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     MASK: bitMask(BITS),
     ZERO: _0n3,
     ONE: _1n3,
-    create: (num3) => mod(num3, ORDER),
-    isValid: (num3) => {
-      if (typeof num3 !== "bigint")
-        throw new Error("invalid field element: expected bigint, got " + typeof num3);
-      return _0n3 <= num3 && num3 < ORDER;
+    create: (num4) => mod(num4, ORDER),
+    isValid: (num4) => {
+      if (typeof num4 !== "bigint")
+        throw new Error("invalid field element: expected bigint, got " + typeof num4);
+      return _0n3 <= num4 && num4 < ORDER;
     },
-    is0: (num3) => num3 === _0n3,
-    isOdd: (num3) => (num3 & _1n3) === _1n3,
-    neg: (num3) => mod(-num3, ORDER),
+    is0: (num4) => num4 === _0n3,
+    isOdd: (num4) => (num4 & _1n3) === _1n3,
+    neg: (num4) => mod(-num4, ORDER),
     eql: (lhs, rhs) => lhs === rhs,
-    sqr: (num3) => mod(num3 * num3, ORDER),
+    sqr: (num4) => mod(num4 * num4, ORDER),
     add: (lhs, rhs) => mod(lhs + rhs, ORDER),
     sub: (lhs, rhs) => mod(lhs - rhs, ORDER),
     mul: (lhs, rhs) => mod(lhs * rhs, ORDER),
-    pow: (num3, power) => FpPow(f, num3, power),
+    pow: (num4, power) => FpPow(f, num4, power),
     div: (lhs, rhs) => mod(lhs * invert(rhs, ORDER), ORDER),
     // Same as above, but doesn't normalize
-    sqrN: (num3) => num3 * num3,
+    sqrN: (num4) => num4 * num4,
     addN: (lhs, rhs) => lhs + rhs,
     subN: (lhs, rhs) => lhs - rhs,
     mulN: (lhs, rhs) => lhs * rhs,
-    inv: (num3) => invert(num3, ORDER),
+    inv: (num4) => invert(num4, ORDER),
     sqrt: redef.sqrt || ((n) => {
       if (!sqrtP)
         sqrtP = FpSqrt(ORDER);
@@ -5520,7 +5592,7 @@ function Field(ORDER, bitLen2, isLE2 = false, redef = {}) {
     // TODO: do we really need constant cmov?
     // We don't have const-time bigints anyway, so probably will be not very useful
     cmov: (a, b, c) => c ? b : a,
-    toBytes: (num3) => isLE2 ? numberToBytesLE(num3, BYTES) : numberToBytesBE(num3, BYTES),
+    toBytes: (num4) => isLE2 ? numberToBytesLE(num4, BYTES) : numberToBytesBE(num4, BYTES),
     fromBytes: (bytes) => {
       if (bytes.length !== BYTES)
         throw new Error("Field.fromBytes: expected " + BYTES + " bytes, got " + bytes.length);
@@ -5545,12 +5617,12 @@ function mapHashToField(key2, fieldOrder, isLE2 = false) {
   const minLen = getMinHashLength(fieldOrder);
   if (len < 16 || len < minLen || len > 1024)
     throw new Error("expected " + minLen + "-1024 bytes of input, got " + len);
-  const num3 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
-  const reduced = mod(num3, fieldOrder - _1n3) + _1n3;
+  const num4 = isLE2 ? bytesToNumberLE(key2) : bytesToNumberBE(key2);
+  const reduced = mod(num4, fieldOrder - _1n3) + _1n3;
   return isLE2 ? numberToBytesLE(reduced, fieldLen) : numberToBytesBE(reduced, fieldLen);
 }
 
-// node_modules/@noble/curves/esm/abstract/curve.js
+// ../../node_modules/@noble/curves/esm/abstract/curve.js
 var _0n4 = BigInt(0);
 var _1n4 = BigInt(1);
 function constTimeNegate(condition2, item) {
@@ -5777,7 +5849,7 @@ function validateBasic(curve) {
   });
 }
 
-// node_modules/@noble/curves/esm/abstract/weierstrass.js
+// ../../node_modules/@noble/curves/esm/abstract/weierstrass.js
 function validateSigVerOpts(opts) {
   if (opts.lowS !== void 0)
     abool("lowS", opts.lowS);
@@ -5875,11 +5947,11 @@ var DER = {
   // - add zero byte if exists
   // - if next byte doesn't have a flag, leading zero is not allowed (minimal encoding)
   _int: {
-    encode(num3) {
+    encode(num4) {
       const { Err: E } = DER;
-      if (num3 < _0n5)
+      if (num4 < _0n5)
         throw new E("integer: negative integers are not allowed");
-      let hex = numberToHexUnpadded(num3);
+      let hex = numberToHexUnpadded(num4);
       if (Number.parseInt(hex[0], 16) & 8)
         hex = "00" + hex;
       if (hex.length & 1)
@@ -5943,8 +6015,8 @@ function weierstrassPoints(opts) {
   }
   if (!Fp.eql(Fp.sqr(CURVE.Gy), weierstrassEquation(CURVE.Gx)))
     throw new Error("bad generator point: equation left != right");
-  function isWithinCurveOrder(num3) {
-    return inRange(num3, _1n5, CURVE.n);
+  function isWithinCurveOrder(num4) {
+    return inRange(num4, _1n5, CURVE.n);
   }
   function normPrivateKeyToScalar(key2) {
     const { allowedPrivateKeyLengths: lengths, nByteLength, wrapPrivateKey, n: N } = CURVE;
@@ -5955,16 +6027,16 @@ function weierstrassPoints(opts) {
         throw new Error("invalid private key");
       key2 = key2.padStart(nByteLength * 2, "0");
     }
-    let num3;
+    let num4;
     try {
-      num3 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
+      num4 = typeof key2 === "bigint" ? key2 : bytesToNumberBE(ensureBytes("private key", key2, nByteLength));
     } catch (error) {
       throw new Error("invalid private key, expected hex or " + nByteLength + " bytes, got " + typeof key2);
     }
     if (wrapPrivateKey)
-      num3 = mod(num3, N);
-    aInRange("private key", num3, _1n5, N);
-    return num3;
+      num4 = mod(num4, N);
+    aInRange("private key", num4, _1n5, N);
+    return num4;
   }
   function assertPrjPoint(other) {
     if (!(other instanceof Point2))
@@ -6386,7 +6458,7 @@ function weierstrass(curveDef) {
       }
     }
   });
-  const numToNByteStr = (num3) => bytesToHex(numberToBytesBE(num3, CURVE.nByteLength));
+  const numToNByteStr = (num4) => bytesToHex(numberToBytesBE(num4, CURVE.nByteLength));
   function isBiggerThanHalfOrder(number) {
     const HALF = CURVE_ORDER >> _1n5;
     return number > HALF;
@@ -6520,17 +6592,17 @@ function weierstrass(curveDef) {
   const bits2int = CURVE.bits2int || function(bytes) {
     if (bytes.length > 8192)
       throw new Error("input is too large");
-    const num3 = bytesToNumberBE(bytes);
+    const num4 = bytesToNumberBE(bytes);
     const delta = bytes.length * 8 - CURVE.nBitLength;
-    return delta > 0 ? num3 >> BigInt(delta) : num3;
+    return delta > 0 ? num4 >> BigInt(delta) : num4;
   };
   const bits2int_modN = CURVE.bits2int_modN || function(bytes) {
     return modN(bits2int(bytes));
   };
   const ORDER_MASK = bitMask(CURVE.nBitLength);
-  function int2octets(num3) {
-    aInRange("num < 2^" + CURVE.nBitLength, num3, _0n5, ORDER_MASK);
-    return numberToBytesBE(num3, CURVE.nByteLength);
+  function int2octets(num4) {
+    aInRange("num < 2^" + CURVE.nBitLength, num4, _0n5, ORDER_MASK);
+    return numberToBytesBE(num4, CURVE.nByteLength);
   }
   function prepSig(msgHash, privateKey, opts = defaultSigOpts) {
     if (["recovered", "canonical"].some((k) => k in opts))
@@ -6646,7 +6718,7 @@ function weierstrass(curveDef) {
   };
 }
 
-// node_modules/@noble/curves/esm/_shortw_utils.js
+// ../../node_modules/@noble/curves/esm/_shortw_utils.js
 function getHash(hash) {
   return {
     hash,
@@ -6659,7 +6731,7 @@ function createCurve(curveDef, defHash) {
   return { ...create(defHash), create };
 }
 
-// node_modules/@noble/curves/esm/secp256k1.js
+// ../../node_modules/@noble/curves/esm/secp256k1.js
 var secp256k1P = BigInt("0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f");
 var secp256k1N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 var _1n6 = BigInt(1);
@@ -6733,7 +6805,7 @@ var secp256k1 = createCurve({
 var _0n6 = BigInt(0);
 var Point = secp256k1.ProjectivePoint;
 
-// packages/sodex-core/src/eip712.ts
+// ../../packages/sodex-core/src/eip712.ts
 var SignatureType = {
   /** Exchange actions (orders, cancels, transfers, revokeAPIKey) - engine-specific domain. */
   EIP712: 1,
@@ -6984,7 +7056,7 @@ function recoverAddress(digest, rsv) {
 }
 var privateKeyToAddress = (privateKey) => bytesToHex2(keccak_256(secp256k1.getPublicKey(privateKey, false).slice(1)).slice(12));
 
-// packages/sodex-core/src/decimal.ts
+// ../../packages/sodex-core/src/decimal.ts
 var DECIMAL_RE = /^[+-]?(\d+(\.\d*)?|\.\d+)([eE][+-]?\d+)?$/;
 var DecimalError = class extends Error {
 };
@@ -7073,7 +7145,7 @@ function unscaleFromInt(n, scale) {
   return canonicalDecimal((neg ? "-" : "") + out);
 }
 
-// packages/sodex-core/src/actions.ts
+// ../../packages/sodex-core/src/actions.ts
 var OrderSide = { BUY: 1, SELL: 2 };
 var OrderType = { LIMIT: 1, MARKET: 2 };
 var TimeInForce = { GTC: 1, FOK: 2, IOC: 3, GTX: 4 };
@@ -7264,7 +7336,7 @@ var perpsActions = {
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
 };
 
-// packages/sodex-core/src/keys.ts
+// ../../packages/sodex-core/src/keys.ts
 function defaultRandom(length) {
   const c = globalThis.crypto;
   if (!c?.getRandomValues) throw new Error("no CSPRNG available (globalThis.crypto.getRandomValues)");
@@ -7291,7 +7363,7 @@ var MAX_TRADING_KEY_TTL_MS = 7 * DAY_MS;
 var MIN_TRADING_KEY_TTL_MS = 5 * 6e4;
 var isKeyExpired = (expiresAt, now = Date.now()) => !!expiresAt && expiresAt <= now;
 
-// packages/sodex-core/src/nonce.ts
+// ../../packages/sodex-core/src/nonce.ts
 var NONCE_WINDOW = { pastMs: 2 * DAY_MS, futureMs: DAY_MS };
 var DEFAULT_NONCE_WINDOW_MARGIN_MS = 6e4;
 var NonceWindowError = class extends RangeError {
@@ -7503,7 +7575,7 @@ var Manager = class {
 };
 var createMemoryNonceManager = (opts = {}) => new Manager({ ...opts, storage: null, channel: null, locks: null }, false);
 
-// packages/sodex-core/src/request.ts
+// ../../packages/sodex-core/src/request.ts
 var HEADER = {
   key: "X-API-Key",
   sign: "X-API-Sign",
@@ -7570,7 +7642,7 @@ async function signAndBuildWithNonceManager(action2, key2, opts) {
   return signAndBuild(action2, ref, { ...opts, nonce });
 }
 
-// packages/sodex-core/src/builders.ts
+// ../../packages/sodex-core/src/builders.ts
 var asRate = (v) => {
   const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
   return Number.isSafeInteger(n) && n > 0 ? n : null;
@@ -7593,7 +7665,7 @@ function approvedBuilderRates(data, builderID) {
   return out;
 }
 
-// packages/sodex-core/src/envelope.ts
+// ../../packages/sodex-core/src/envelope.ts
 var SodexApiError = class extends Error {
   constructor(code, message, httpStatus, path, body) {
     super(message);
@@ -7682,18 +7754,18 @@ function weightFor(path, limit = 0) {
   return 5;
 }
 
-// apps/executor/src/secrets.ts
+// src/secrets.ts
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
-  if (!existsSync(path)) {
-    writeFileSync(path, randomBytes2(32), { mode: 384, flag: "wx" });
+  if (!existsSync2(path)) {
+    writeFileSync2(path, randomBytes2(32), { mode: 384, flag: "wx" });
   }
   try {
     chmodSync(path, 384);
   } catch {
   }
-  const b = readFileSync(path);
+  const b = readFileSync2(path);
   if (b.length !== 32) throw new Error(`${path} must hold exactly 32 bytes`);
   return b;
 }
@@ -7760,11 +7832,11 @@ var Secrets = class {
 };
 var aad = (network, owner, address) => Buffer.from(`vd-copy-key:v1:${network}:${owner.toLowerCase()}:${address.toLowerCase()}`);
 
-// apps/executor/src/server.ts
+// src/server.ts
 import { createServer } from "node:http";
-import { timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
 
-// packages/copy-engine/src/io.ts
+// ../../packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
 var host = globalThis;
 function unref(h) {
@@ -7799,7 +7871,7 @@ function randomId(prefix = "") {
   return prefix + s.slice(0, 16);
 }
 
-// packages/copy-engine/src/policy.ts
+// ../../packages/copy-engine/src/policy.ts
 var COPY_TERMS_VERSION = "2026-10-23.2";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var SANCTIONED = ["CU", "IR", "KP", "SY", "RU", "BY", "MM"];
@@ -7903,7 +7975,7 @@ function copyFeeFor(volumeUsd, ladder = COPY_FEE_LADDER) {
   return fee;
 }
 
-// packages/copy-engine/src/settings.ts
+// ../../packages/copy-engine/src/settings.ts
 var ADDRESS2 = /^0x[0-9a-f]{40}$/;
 var COIN = /^[A-Z0-9]{1,20}$/;
 var DEFAULT_SETTINGS = {
@@ -8042,7 +8114,7 @@ var SettingsError = class extends Error {
   name = "SettingsError";
 };
 
-// packages/copy-engine/src/markets.ts
+// ../../packages/copy-engine/src/markets.ts
 var num = (v, fallback = NaN) => {
   const n = typeof v === "string" ? Number(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : fallback;
@@ -8164,7 +8236,7 @@ var snapPrice = (p, m) => {
   return s === "0" ? m.tickSize : s;
 };
 
-// packages/copy-engine/src/planner.ts
+// ../../packages/copy-engine/src/planner.ts
 var FLAT_EPS = 1e-9;
 var isFlat = (x) => !Number.isFinite(x) || Math.abs(x) < FLAT_EPS;
 var sign = (x) => isFlat(x) ? 0 : x > 0 ? 1 : -1;
@@ -8183,12 +8255,12 @@ function copyEquity(settings, state, markOf) {
   return Math.max(0, settings.allocationUsd + state.realizedPnl - state.fees + unrealized(state, markOf));
 }
 function grossNotional(state, markOf, except) {
-  let g = 0;
+  let g2 = 0;
   for (const [sym, p] of Object.entries(state.owned)) {
     if (sym === except) continue;
-    g += Math.abs(p.size) * (markOf(sym) ?? p.entry);
+    g2 += Math.abs(p.size) * (markOf(sym) ?? p.entry);
   }
-  return g;
+  return g2;
 }
 var noPlan = (leaderAfter, skip, extra = {}) => ({
   intents: [],
@@ -8465,7 +8537,7 @@ function applyFill(state, symbol2, side, qty2, price2, fee, at) {
   else state.owned[symbol2] = { size: next, entry: price2, openedAt: at };
 }
 
-// packages/copy-engine/src/sodex.ts
+// ../../packages/copy-engine/src/sodex.ts
 var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
@@ -8683,7 +8755,7 @@ var HyperliquidClient = class {
   }
 };
 
-// packages/copy-engine/src/socket.ts
+// ../../packages/copy-engine/src/socket.ts
 var LiveSocket = class {
   constructor(o) {
     this.o = o;
@@ -8810,7 +8882,7 @@ var LiveSocket = class {
   }
 };
 
-// packages/copy-engine/src/feeds.ts
+// ../../packages/copy-engine/src/feeds.ts
 var COALESCE_MS = 150;
 var key = (l) => `${l.venue}:${l.address.toLowerCase()}`;
 var LeaderBook = class {
@@ -9145,18 +9217,18 @@ var HyperliquidFeed = class {
         if (coin.startsWith("@") || coin.includes("/")) continue;
         const signed = f.side === "B" ? sz : -sz;
         const k = `${coin}|${String(f.oid ?? time2)}`;
-        const g = byOrder.get(k);
-        if (!g) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time: time2, id });
+        const g2 = byOrder.get(k);
+        if (!g2) byOrder.set(k, { coin, before: start, after: start + signed, notional: sz * px, qty: sz, time: time2, id });
         else {
-          g.after += signed;
-          g.notional += sz * px;
-          g.qty += sz;
-          g.time = Math.max(g.time, time2);
+          g2.after += signed;
+          g2.notional += sz * px;
+          g2.qty += sz;
+          g2.time = Math.max(g2.time, time2);
         }
       }
-      for (const g of byOrder.values()) {
-        const after = Math.abs(g.after) < 1e-12 ? 0 : g.after;
-        const e = this.o.book.applyTotal(l, g.coin, null, after, g.notional / g.qty, g.time, g.id);
+      for (const g2 of byOrder.values()) {
+        const after = Math.abs(g2.after) < 1e-12 ? 0 : g2.after;
+        const e = this.o.book.applyTotal(l, g2.coin, null, after, g2.notional / g2.qty, g2.time, g2.id);
         if (e) this.o.sink.leader(e);
       }
       return;
@@ -9183,7 +9255,7 @@ var HyperliquidFeed = class {
   }
 };
 
-// packages/copy-engine/src/orders.ts
+// ../../packages/copy-engine/src/orders.ts
 function intentsAction(accountId, market, intents, builder) {
   return perpsActions.newOrder(
     accountId,
@@ -9305,7 +9377,7 @@ var PaperSink = class {
   }
 };
 
-// packages/copy-engine/src/runtime.ts
+// ../../packages/copy-engine/src/runtime.ts
 var RECONCILE_MS = 6e4;
 var FOLLOWER_REFRESH_MS = 3e4;
 var GUARD_MS = 2e3;
@@ -9686,8 +9758,8 @@ var CopyRuntime = class {
     const st = this.stateOf(s);
     let q = qty2;
     if (reduceOnly) {
-      const held = Math.abs(st.owned[symbol2]?.size ?? 0);
-      q = Math.min(q, held);
+      const held2 = Math.abs(st.owned[symbol2]?.size ?? 0);
+      q = Math.min(q, held2);
       if (!(q > 0)) return;
     }
     applyFill(st, symbol2, side, q, price2, fee, Date.now());
@@ -9759,17 +9831,17 @@ var CopyRuntime = class {
     const inFlight = (subId, sym) => this.pending.some((x) => x.subId === subId && x.symbol === sym && x.until > now && x.remaining > 1e-12);
     for (const s of subs) {
       const st = this.stateOf(s);
-      for (const [k, g] of this.recentGrow) {
+      for (const [k, g2] of this.recentGrow) {
         if (!k.startsWith(`${s.id}|`)) continue;
         const sym = k.slice(s.id.length + 1);
-        if (now - g.at > 10 * 6e4) {
+        if (now - g2.at > 10 * 6e4) {
           this.recentGrow.delete(k);
           continue;
         }
         const actual = snap.positions[sym];
-        if (st.owned[sym] || !actual || inFlight(s.id, sym) || Math.sign(actual.size) !== (g.side === "buy" ? 1 : -1)) continue;
+        if (st.owned[sym] || !actual || inFlight(s.id, sym) || Math.sign(actual.size) !== (g2.side === "buy" ? 1 : -1)) continue;
         if (this.list(s.owner).some((o) => o.id !== s.id && this.states.get(o.id)?.owned[sym])) continue;
-        st.owned[sym] = { size: actual.size, entry: actual.entry, openedAt: g.at };
+        st.owned[sym] = { size: actual.size, entry: actual.entry, openedAt: g2.at };
         this.recentGrow.delete(k);
         this.scheduleStops(s, sym);
         this.dirty.add(s.id);
@@ -9839,7 +9911,7 @@ var CopyRuntime = class {
         st.peakEquity = Math.max(st.peakEquity, copyEquity(s.settings, st, (m) => this.markets.mark(m)));
         continue;
       }
-      const g = planGuards({
+      const g2 = planGuards({
         sub: s,
         state: st,
         markets: (m) => this.markets.get(m),
@@ -9847,13 +9919,13 @@ var CopyRuntime = class {
         policy: this.host.policyFor(s),
         now: Date.now()
       });
-      if (g.peak !== st.peakEquity) {
-        st.peakEquity = g.peak;
+      if (g2.peak !== st.peakEquity) {
+        st.peakEquity = g2.peak;
         this.dirty.add(s.id);
       }
-      if (!g.intents.length && !g.halt) continue;
+      if (!g2.intents.length && !g2.halt) continue;
       const now = Date.now();
-      const intents = g.intents.filter((i) => !this.pending.some((p) => p.subId === s.id && p.symbol === i.symbol && p.reduceOnly && p.until > now));
+      const intents = g2.intents.filter((i) => !this.pending.some((p) => p.subId === s.id && p.symbol === i.symbol && p.reduceOnly && p.until > now));
       const byMarket = /* @__PURE__ */ new Map();
       for (const i of intents) byMarket.set(i.symbol, [...byMarket.get(i.symbol) ?? [], i]);
       this.enqueue(s.owner, async () => {
@@ -9861,8 +9933,8 @@ var CopyRuntime = class {
           const m = this.markets.get(sym);
           if (m) await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0].limitPrice), null);
         }
-        for (const [sym, why] of Object.entries(g.closed)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
-        if (g.halt) await this.setStatus(s.id, "halted", `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
+        for (const [sym, why] of Object.entries(g2.closed)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
+        if (g2.halt) await this.setStatus(s.id, "halted", `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
       });
     }
   }
@@ -9972,9 +10044,14 @@ var CopyRuntime = class {
       this.host.log.warn("copy: readiness check failed", { sub: s.id, error: String(e) });
       return;
     }
-    if (problem && s.status !== "blocked") await this.setStatus(s.id, "blocked", problem);
-    else if (problem && s.statusReason !== problem) await this.setStatus(s.id, "blocked", problem);
-    else if (!problem && s.status === "blocked") await this.setStatus(s.id, "active", null);
+    const cur = this.subs.get(s.id);
+    if (!cur || cur.status === "stopped" || cur.status === "paused" || cur.status === "halted") return;
+    try {
+      if (problem && (cur.status !== "blocked" || cur.statusReason !== problem)) await this.setStatus(cur.id, "blocked", problem);
+      else if (!problem && cur.status === "blocked") await this.setStatus(cur.id, "active", null);
+    } catch (e) {
+      this.host.log.warn("copy: readiness status not set", { sub: cur.id, error: String(e) });
+    }
   }
   /* ------------------------------------------------------------- leaders ----- */
   followedLeaders() {
@@ -10130,7 +10207,7 @@ var CopyRuntime = class {
   }
 };
 
-// packages/copy-engine/src/api.ts
+// ../../packages/copy-engine/src/api.ts
 var COPY_DOMAIN = { name: "ValueDesk Copy", version: "1" };
 var COPY_TERMS_EXECUTOR = "valuedesk-copy-terms";
 var SITE_TERMS_EXECUTOR = "valuedesk-site-terms";
@@ -10195,7 +10272,7 @@ function verifyCopyRequest(r, o) {
   if (typeof q.signature !== "string" || !/^0x[0-9a-fA-F]{130}$/.test(q.signature)) return { ok: false, error: "signature must be 65 bytes of hex" };
   const nonce = Number(q.nonce);
   const deadline = Number(q.deadline);
-  if (deadline < now) return { ok: false, error: "this request has expired; sign it again" };
+  if (deadline < now) return { ok: false, error: "this request has expired; sign it again (if it keeps happening, check your computer's clock: it may be behind)" };
   if (deadline - nonce > MAX_WINDOW_MS(action2)) return { ok: false, error: "this request is valid for longer than allowed" };
   const skew = o.maxAgeMs ?? 15 * 6e4;
   if (nonce - now > skew || !isStatement(action2) && now - nonce > skew) return { ok: false, error: "the request time is too far from now; check your clock" };
@@ -10219,11 +10296,296 @@ function verifyCopyRequest(r, o) {
 }
 var EXECUTOR_FEATURES = ["counter", "site-terms"];
 
-// packages/copy-engine/src/algo/types.ts
-var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket"];
+// ../../packages/copy-engine/src/oracle.ts
+var ORACLE_VENUES = [
+  "binanceFutures",
+  "binanceSpot",
+  "bybit",
+  "bybitSpot",
+  "okx",
+  "okxSpot",
+  "bitget",
+  "bitgetSpot",
+  "hyperliquid",
+  "coinbase",
+  "kraken",
+  "gateFutures",
+  "gateSpot",
+  "mexcFutures",
+  "mexcSpot",
+  "kucoinFutures",
+  "kucoinSpot",
+  "htx",
+  "deribit"
+];
+var isOracleVenue = (v) => typeof v === "string" && ORACLE_VENUES.includes(v);
+var ORACLE_MAX_AGE_MS = 5e3;
+var ORACLE_CACHE_MS = 1e3;
+var VENUE_TIMEOUT_MS = 2e3;
+var median = (xs) => {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+function combineOracle(quotes, now, opts = {}) {
+  const want = opts.venues?.length ? opts.venues : ORACLE_VENUES;
+  const maxAge = opts.maxAgeMs ?? ORACLE_MAX_AGE_MS;
+  const used = [];
+  const stale = [];
+  const mids = [];
+  const fairs = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const q of quotes) {
+    if (!want.includes(q.venue) || seen.has(q.venue)) continue;
+    if (!(q.mid > 0) || !Number.isFinite(q.mid)) continue;
+    seen.add(q.venue);
+    if (now - q.at > maxAge || q.at > now + 1e3) {
+      stale.push(q.venue);
+      continue;
+    }
+    used.push(q.venue);
+    mids.push(q.mid);
+    fairs.push(q.mark !== null && q.mark > 0 && Number.isFinite(q.mark) ? q.mark : q.mid);
+  }
+  return { mid: median(mids), fair: median(fairs), used, stale, missing: want.filter((v) => !seen.has(v)) };
+}
+var g = globalThis;
+async function getJson(fetch2, url, init = {}) {
+  const ctl = g.AbortController ? new g.AbortController() : { signal: void 0, abort() {
+  } };
+  const timer = g.setTimeout(() => ctl.abort(), VENUE_TIMEOUT_MS);
+  try {
+    const res = await fetch2(url, { method: init.method ?? "GET", ...init.body ? { body: init.body, headers: { "content-type": "application/json" } } : {}, signal: ctl.signal });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${url} answered HTTP ${res.status}`);
+    return JSON.parse(text);
+  } finally {
+    g.clearTimeout(timer);
+  }
+}
+var SCALED = {
+  binanceFutures: { PEPE: ["1000PEPEUSDT", 1e3], SHIB: ["1000SHIBUSDT", 1e3], BONK: ["1000BONKUSDT", 1e3], FLOKI: ["1000FLOKIUSDT", 1e3] },
+  bybit: { PEPE: ["1000PEPEUSDT", 1e3], BONK: ["1000BONKUSDT", 1e3], FLOKI: ["1000FLOKIUSDT", 1e3] },
+  hyperliquid: { PEPE: ["kPEPE", 1e3], SHIB: ["kSHIB", 1e3], BONK: ["kBONK", 1e3], FLOKI: ["kFLOKI", 1e3] }
+};
+function oracleSymbol(venue, coin) {
+  const c = coin.toUpperCase();
+  const o = SCALED[venue]?.[c];
+  if (o) return { symbol: o[0], units: o[1] };
+  switch (venue) {
+    case "hyperliquid":
+      return { symbol: c, units: 1 };
+    case "okx":
+      return { symbol: `${c}-USDT-SWAP`, units: 1 };
+    case "okxSpot":
+      return { symbol: `${c}-USDT`, units: 1 };
+    case "coinbase":
+      return { symbol: `${c}-USD`, units: 1 };
+    case "kraken":
+      return { symbol: `${c}USD`, units: 1 };
+    case "gateFutures":
+    case "gateSpot":
+    case "mexcFutures":
+      return { symbol: `${c}_USDT`, units: 1 };
+    case "kucoinFutures":
+      return { symbol: `${c === "BTC" ? "XBT" : c}USDTM`, units: 1 };
+    case "kucoinSpot":
+      return { symbol: `${c}-USDT`, units: 1 };
+    case "htx":
+      return { symbol: `${c.toLowerCase()}usdt`, units: 1 };
+    case "deribit":
+      return { symbol: c === "BTC" || c === "ETH" ? `${c}-PERPETUAL` : `${c}_USDC-PERPETUAL`, units: 1 };
+    default:
+      return { symbol: `${c}USDT`, units: 1 };
+  }
+}
+var num2 = (x) => typeof x === "string" || typeof x === "number" ? Number(x) : NaN;
+var stamp = (x, now) => {
+  const t = num2(x);
+  return Number.isFinite(t) && t > 1e12 ? Math.min(t, now) : now;
+};
+function quote(venue, bid, ask, mark, at, units = 1) {
+  if (!(bid > 0) || !(ask > 0) || ask < bid) return null;
+  return { venue, bid: bid / units, ask: ask / units, mid: (bid + ask) / 2 / units, mark: mark !== null && mark > 0 ? mark / units : null, at };
+}
+async function readVenue(fetch2, venue, coin, now = Date.now) {
+  const vs = oracleSymbol(venue, coin);
+  const s = encodeURIComponent(vs.symbol);
+  switch (venue) {
+    case "binanceFutures": {
+      const [b, p] = await Promise.all([
+        getJson(fetch2, `https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${s}`),
+        getJson(fetch2, `https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${s}`).catch(() => null)
+      ]);
+      return quote(venue, num2(b?.bidPrice), num2(b?.askPrice), p ? num2(p.markPrice) : null, stamp(b?.time, now()), vs.units);
+    }
+    case "binanceSpot": {
+      const b = await getJson(fetch2, `https://api.binance.com/api/v3/ticker/bookTicker?symbol=${s}`);
+      return quote(venue, num2(b?.bidPrice), num2(b?.askPrice), null, now(), vs.units);
+    }
+    case "bitget": {
+      const r = await getJson(fetch2, `https://api.bitget.com/api/v2/mix/market/ticker?symbol=${s}&productType=USDT-FUTURES`);
+      const d = r?.data?.[0];
+      return d ? quote(venue, num2(d.bidPr), num2(d.askPr), num2(d.markPrice), stamp(d.ts, now())) : null;
+    }
+    case "hyperliquid": {
+      const r = await getJson(fetch2, "https://api.hyperliquid.xyz/info", { method: "POST", body: JSON.stringify({ type: "l2Book", coin: vs.symbol }) });
+      const bid = num2(r?.levels?.[0]?.[0]?.px);
+      const ask = num2(r?.levels?.[1]?.[0]?.px);
+      return quote(venue, bid, ask, null, stamp(r?.time, now()), vs.units);
+    }
+    case "okx": {
+      const [t, m] = await Promise.all([
+        getJson(fetch2, `https://www.okx.com/api/v5/market/ticker?instId=${s}`),
+        getJson(fetch2, `https://www.okx.com/api/v5/public/mark-price?instType=SWAP&instId=${s}`).catch(() => null)
+      ]);
+      const d = t?.data?.[0];
+      return d ? quote(venue, num2(d.bidPx), num2(d.askPx), m?.data?.[0] ? num2(m.data[0].markPx) : null, stamp(d.ts, now())) : null;
+    }
+    case "bybit": {
+      const r = await getJson(fetch2, `https://api.bybit.com/v5/market/tickers?category=linear&symbol=${s}`);
+      const d = r?.result?.list?.[0];
+      return d ? quote(venue, num2(d.bid1Price), num2(d.ask1Price), num2(d.markPrice), stamp(r?.time, now()), vs.units) : null;
+    }
+    case "bybitSpot": {
+      const r = await getJson(fetch2, `https://api.bybit.com/v5/market/tickers?category=spot&symbol=${s}`);
+      const d = r?.result?.list?.[0];
+      return d ? quote(venue, num2(d.bid1Price), num2(d.ask1Price), null, stamp(r?.time, now())) : null;
+    }
+    case "okxSpot": {
+      const r = await getJson(fetch2, `https://www.okx.com/api/v5/market/ticker?instId=${s}`);
+      const d = r?.data?.[0];
+      return d ? quote(venue, num2(d.bidPx), num2(d.askPx), null, stamp(d.ts, now())) : null;
+    }
+    case "bitgetSpot": {
+      const r = await getJson(fetch2, `https://api.bitget.com/api/v2/spot/market/tickers?symbol=${s}`);
+      const d = r?.data?.[0];
+      return d ? quote(venue, num2(d.bidPr), num2(d.askPr), null, stamp(d.ts, now())) : null;
+    }
+    case "coinbase": {
+      const r = await getJson(fetch2, `https://api.exchange.coinbase.com/products/${s}/ticker`);
+      return quote(venue, num2(r?.bid), num2(r?.ask), null, stamp(r?.time ? Date.parse(r.time) : null, now()));
+    }
+    case "kraken": {
+      const r = await getJson(fetch2, `https://api.kraken.com/0/public/Ticker?pair=${s}`);
+      const d = r?.result ? Object.values(r.result)[0] : void 0;
+      return d ? quote(venue, num2(d.b?.[0]), num2(d.a?.[0]), null, now()) : null;
+    }
+    case "gateFutures": {
+      const r = await getJson(fetch2, `https://api.gateio.ws/api/v4/futures/usdt/tickers?contract=${s}`);
+      const d = Array.isArray(r) ? r[0] : void 0;
+      return d ? quote(venue, num2(d.highest_bid), num2(d.lowest_ask), num2(d.mark_price), now()) : null;
+    }
+    case "gateSpot": {
+      const r = await getJson(fetch2, `https://api.gateio.ws/api/v4/spot/tickers?currency_pair=${s}`);
+      const d = Array.isArray(r) ? r[0] : void 0;
+      return d ? quote(venue, num2(d.highest_bid), num2(d.lowest_ask), null, now()) : null;
+    }
+    case "mexcFutures": {
+      const r = await getJson(fetch2, `https://contract.mexc.com/api/v1/contract/ticker?symbol=${s}`);
+      const d = r?.data;
+      return d ? quote(venue, num2(d.bid1), num2(d.ask1), num2(d.fairPrice), stamp(d.timestamp, now())) : null;
+    }
+    case "mexcSpot": {
+      const r = await getJson(fetch2, `https://api.mexc.com/api/v3/ticker/bookTicker?symbol=${s}`);
+      return quote(venue, num2(r?.bidPrice), num2(r?.askPrice), null, now());
+    }
+    case "kucoinFutures": {
+      const r = await getJson(fetch2, `https://api-futures.kucoin.com/api/v1/ticker?symbol=${s}`);
+      const d = r?.data;
+      return d ? quote(venue, num2(d.bestBidPrice), num2(d.bestAskPrice), null, now()) : null;
+    }
+    case "kucoinSpot": {
+      const r = await getJson(fetch2, `https://api.kucoin.com/api/v1/market/orderbook/level1?symbol=${s}`);
+      const d = r?.data;
+      return d ? quote(venue, num2(d.bestBid), num2(d.bestAsk), null, stamp(d.time, now())) : null;
+    }
+    case "htx": {
+      const r = await getJson(fetch2, `https://api.huobi.pro/market/detail/merged?symbol=${s}`);
+      const d = r?.tick;
+      return d ? quote(venue, num2(d.bid?.[0]), num2(d.ask?.[0]), null, stamp(r?.ts, now())) : null;
+    }
+    case "deribit": {
+      const r = await getJson(fetch2, `https://www.deribit.com/api/v2/public/ticker?instrument_name=${s}`);
+      const d = r?.result;
+      return d ? quote(venue, num2(d.best_bid_price), num2(d.best_ask_price), num2(d.mark_price), stamp(d.timestamp, now())) : null;
+    }
+  }
+}
+var OracleFeed = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  deps;
+  slots = /* @__PURE__ */ new Map();
+  now() {
+    return (this.deps.now ?? Date.now)();
+  }
+  /** The venue's quote, from the cache when it is under `cacheMs` old. */
+  venue(venue, coin) {
+    const key2 = `${venue}:${coin.toUpperCase()}`;
+    let s = this.slots.get(key2);
+    if (!s) {
+      s = { quote: null, at: 0, inflight: null, error: null };
+      this.slots.set(key2, s);
+      if (this.slots.size > 2e3) this.slots.delete(this.slots.keys().next().value);
+    }
+    if (s.inflight) return s.inflight;
+    if (s.at && this.now() - s.at < (this.deps.cacheMs ?? ORACLE_CACHE_MS)) return Promise.resolve(s.quote);
+    const slot = s;
+    const read = this.deps.read ?? readVenue;
+    slot.inflight = read(this.deps.fetch, venue, coin, () => this.now()).then((q) => {
+      slot.quote = q;
+      slot.error = q ? null : "not listed";
+      return q;
+    }).catch((e) => {
+      slot.error = e instanceof Error ? e.message : String(e);
+      return slot.quote;
+    }).finally(() => {
+      slot.at = this.now();
+      slot.inflight = null;
+    });
+    return slot.inflight;
+  }
+  /** Every asked venue's quote for the coin. */
+  async quotes(coin, venues = ORACLE_VENUES) {
+    const got = await Promise.all(venues.map((v) => this.venue(v, coin)));
+    return got.filter((q) => q !== null);
+  }
+  /** Quotes, ages, errors and the combined prices. */
+  async snapshot(coin, venues = ORACLE_VENUES, maxAgeMs = ORACLE_MAX_AGE_MS) {
+    const qs = await this.quotes(coin, venues);
+    const now = this.now();
+    const errors = {};
+    for (const v of venues) {
+      const e = this.slots.get(`${v}:${coin.toUpperCase()}`)?.error;
+      if (e) errors[v] = e;
+    }
+    return {
+      coin: coin.toUpperCase(),
+      at: now,
+      ...combineOracle(qs, now, { venues, maxAgeMs }),
+      quotes: qs.map((q) => ({ ...q, ageMs: Math.max(0, now - q.at), stale: now - q.at > maxAgeMs })),
+      errors
+    };
+  }
+};
+
+// ../../packages/copy-engine/src/algo/types.ts
+var ALGO_KINDS = ["twap", "vwap", "pov", "iceberg", "chase", "scale", "dca", "swarm", "conditional", "trailing", "basket", "bracket", "sweep"];
+var SLIP_FROM = ["touch", "mid", "mark", "index", "oracleMid", "oracleFair"];
+var SLIP_FROM_NAMES = {
+  touch: "Best price",
+  mid: "SoDEX mid",
+  mark: "SoDEX mark",
+  index: "SoDEX index",
+  oracleMid: "Oracle mid",
+  oracleFair: "Oracle fair price"
+};
 var FINAL_STATUSES = /* @__PURE__ */ new Set(["done", "cancelled", "expired", "failed"]);
 
-// packages/copy-engine/src/algo/math.ts
+// ../../packages/copy-engine/src/algo/math.ts
 var DAY_MS2 = 864e5;
 function makeRng(seed) {
   let a = seed >>> 0;
@@ -10288,7 +10650,7 @@ var isWeekend = (t) => {
   const d = new Date(t).getUTCDay();
   return d === 0 || d === 6;
 };
-function median(xs) {
+function median2(xs) {
   if (!xs.length) return 0;
   const s = [...xs].sort((a, b) => a - b);
   const m = s.length >> 1;
@@ -10326,7 +10688,7 @@ function volumeProfile(candles, candleMs, start, durationMs, slices, lookbackDay
       all.push(v);
       if (!matchDays || isWeekend(a - d * DAY_MS2) === isWeekend(a)) same.push(v);
     }
-    expected.push(median(same.length >= 3 ? same : all));
+    expected.push(median2(same.length >= 3 ? same : all));
   }
   const mean = expected.reduce((x, y) => x + y, 0) / Math.max(1, expected.length);
   const floored = expected.map((v) => Math.max(v, mean / 10));
@@ -10400,9 +10762,9 @@ function makerPrice(side, q, offsetTicks, offsetBps, m, limit) {
   if (limit !== null) p = Math.max(p, limit);
   return snapUp(p, m.tickSize);
 }
-function takerPrice(side, q, slippageBps, m, mark, limit) {
+function takerPrice(side, q, slippageBps, m, mark, limit, from = null) {
   const touch = side === "buy" ? q.ask : q.bid;
-  let p = Number(limitPrice(side, touch, slippageBps, m, mark));
+  let p = Number(limitPrice(side, from !== null && from > 0 ? from : touch, slippageBps, m, mark));
   if (limit !== null) {
     if (side === "buy" && limit < touch) return null;
     if (side === "sell" && limit > touch) return null;
@@ -10410,11 +10772,19 @@ function takerPrice(side, q, slippageBps, m, mark, limit) {
   }
   return p;
 }
+var withinLimit = (side, price2, limit) => limit === null || (side === "buy" ? price2 <= limit : price2 >= limit);
 function minChildQty(m, price2) {
   const step = Number(m.stepSize);
   const minQ = Math.max(step, Number(m.minQuantity) || 0);
   const byValue = price2 > 0 ? Math.ceil(m.minNotional / price2 / step - 1e-9) * step : minQ;
   return Math.max(minQ, byValue);
+}
+function maxOrderQty(m, price2) {
+  const step = Number(m.stepSize);
+  const byQty = Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) : Infinity;
+  const byValue = m.maxNotional && price2 > 0 ? m.maxNotional / price2 : Infinity;
+  const most = Math.min(byQty, byValue);
+  return Number.isFinite(most) ? Math.floor(most / step + 1e-9) * step : Infinity;
 }
 var floorStep = (q, m) => {
   const step = Number(m.stepSize);
@@ -10436,7 +10806,7 @@ function trail(s, side, price2, o) {
   return { state: { armed, extreme }, stop, fired };
 }
 
-// packages/copy-engine/src/algo/spec.ts
+// ../../packages/copy-engine/src/algo/spec.ts
 var AlgoSpecError = class extends Error {
   constructor(message, errors) {
     super(message);
@@ -10454,12 +10824,13 @@ var ALGO_LIMITS = {
   pov: { rate: { min: 0.01, max: 0.5 } },
   iceberg: { refillMs: { min: 0, max: 10 * MIN } },
   chase: { offsetTicks: { min: -5, max: 1e4 }, offsetBps: { min: 0, max: 2e3 }, chaseTicks: { min: 1, max: 1e4 }, maxChaseBps: { min: 1, max: 5e3 }, timeoutMs: { min: 5e3, max: 7 * DAY }, minRepriceMs: { min: 250, max: MIN } },
-  scale: { orders: { min: 2, max: 100 }, skew: { min: 0.1, max: 10 }, sizeJitter: { min: 0, max: 0.3 } },
+  scale: { orders: { min: 2, max: 100 }, skew: { min: 1e-3, max: 1e3 }, sizeJitter: { min: 0, max: 0.3 } },
   dca: { perOrderUsd: { min: 10, max: 1e6 }, orders: { min: 2, max: 1e3 }, intervalMs: { min: MIN, max: 30 * DAY }, dipPct: { min: 0.01, max: 0.9 }, dipMultiplier: { min: 1, max: 5 } },
   swarm: { clips: { min: 2, max: 200 }, inFlight: { min: 1, max: 20 }, waveMs: { min: 0, max: MIN }, sizeJitter: { min: 0, max: 0.9 }, retries: { min: 0, max: 5 } },
   conditional: { conditions: { min: 1, max: 5 }, holdMs: { min: 0, max: HOUR }, windowMs: { min: 5e3, max: HOUR } },
   trailing: { trailPct: { min: 1e-3, max: 0.5 }, chaseMs: { min: 1e3, max: 10 * MIN } },
   basket: { legs: { min: 2, max: 10 }, legUsd: { min: 10, max: 1e7 } },
+  sweep: { slippageBps: { min: 1, max: 1e3 }, roundMs: { min: 500, max: MIN }, timeoutMs: { min: 5e3, max: DAY } },
   exitPct: { min: 1e-3, max: 10 },
   exec: { slippageBps: { min: 1, max: 500 }, offsetTicks: { min: -5, max: 1e4 }, chaseTicks: { min: 1, max: 1e4 }, makerShare: { min: 0.1, max: 0.95 } },
   jitter: { min: 0, max: 0.5 },
@@ -10468,7 +10839,7 @@ var ALGO_LIMITS = {
   label: 40
 };
 var isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
-function num2(o, key2, label, lim, e, path = key2) {
+function num3(o, key2, label, lim, e, path = key2) {
   const raw = o[key2];
   const n = typeof raw === "string" && raw.trim() !== "" ? Number(raw) : raw;
   if (typeof n !== "number" || !Number.isFinite(n)) {
@@ -10479,14 +10850,14 @@ function num2(o, key2, label, lim, e, path = key2) {
   return n;
 }
 function int(o, key2, label, lim, e, path = key2) {
-  const n = num2(o, key2, label, lim, e, path);
+  const n = num3(o, key2, label, lim, e, path);
   if (Number.isFinite(n) && !Number.isInteger(n)) e[path] = `${label} must be a whole number.`;
   return n;
 }
 function opt(o, key2, label, lim, e, path = key2) {
   const v = o[key2];
   if (v === null || v === void 0 || v === "") return null;
-  return num2(o, key2, label, lim, e, path);
+  return num3(o, key2, label, lim, e, path);
 }
 function price(o, key2, label, e, path = key2) {
   const raw = o[key2];
@@ -10559,10 +10930,12 @@ function exec(v, e, path) {
   const L = ALGO_LIMITS.exec;
   return {
     style: oneOf(o, "style", "Execution", ["taker", "maker", "hybrid"], DEFAULT_EXEC.style, e, `${path}.style`),
-    slippageBps: o.slippageBps === void 0 ? DEFAULT_EXEC.slippageBps : num2(o, "slippageBps", "Max slippage", L.slippageBps, e, `${path}.slippageBps`),
+    slippageBps: o.slippageBps === void 0 ? DEFAULT_EXEC.slippageBps : num3(o, "slippageBps", "Max slippage", L.slippageBps, e, `${path}.slippageBps`),
     offsetTicks: o.offsetTicks === void 0 ? DEFAULT_EXEC.offsetTicks : int(o, "offsetTicks", "Offset", L.offsetTicks, e, `${path}.offsetTicks`),
     chaseTicks: o.chaseTicks === void 0 ? DEFAULT_EXEC.chaseTicks : int(o, "chaseTicks", "Re-price distance", L.chaseTicks, e, `${path}.chaseTicks`),
-    makerShare: o.makerShare === void 0 ? DEFAULT_EXEC.makerShare : num2(o, "makerShare", "Resting share", L.makerShare, e, `${path}.makerShare`)
+    makerShare: o.makerShare === void 0 ? DEFAULT_EXEC.makerShare : num3(o, "makerShare", "Resting share", L.makerShare, e, `${path}.makerShare`),
+    // Only when given: a spec without it measures from the touch, as before.
+    ...o.slipFrom === void 0 ? {} : { slipFrom: oneOf(o, "slipFrom", "Slippage from", SLIP_FROM, "touch", e, `${path}.slipFrom`) }
   };
 }
 function exits(o, side, e) {
@@ -10583,6 +10956,7 @@ function exits(o, side, e) {
   if (x.tpPrice !== null && x.slPrice !== null && (side === "buy" ? x.tpPrice <= x.slPrice : x.tpPrice >= x.slPrice)) {
     e["exits.tpPrice"] = side === "buy" ? "A long's take-profit must be above its stop-loss." : "A short's take-profit must be below its stop-loss.";
   }
+  if (side === "sell" && x.tpPct !== null && x.tpPct >= 1) e["exits.tpPct"] = "A short's take-profit distance must be under 100%.";
   return x.tpPrice === null && x.slPrice === null && x.tpPct === null && x.slPct === null ? null : x;
 }
 function base(o, kind, e) {
@@ -10622,7 +10996,7 @@ function condition(v, e, path) {
   const src = () => oneOf(v, "source", "Price source", SOURCES, "mark", e, `${path}.source`);
   const op = () => oneOf(v, "op", "Comparison", ["above", "below"], "above", e, `${path}.op`);
   const dir3 = () => oneOf(v, "dir", "Direction", ["up", "down", "either"], "either", e, `${path}.dir`);
-  const pct = () => num2(v, "pct", "Move", { min: 1e-4, max: 10 }, e, `${path}.pct`);
+  const pct = () => num3(v, "pct", "Move", { min: 1e-4, max: 10 }, e, `${path}.pct`);
   const win = () => int(v, "windowMs", "Window", L.windowMs, e, `${path}.windowMs`);
   switch (type) {
     case "price":
@@ -10632,21 +11006,21 @@ function condition(v, e, path) {
     case "move":
       return { type, symbol: sym(), source: src(), dir: dir3(), pct: pct(), windowMs: win() };
     case "funding":
-      return { type, symbol: sym(), op: op(), value: num2(v, "value", "Funding rate", { min: -1, max: 1 }, e, `${path}.value`) };
+      return { type, symbol: sym(), op: op(), value: num3(v, "value", "Funding rate", { min: -1, max: 1 }, e, `${path}.value`) };
     case "oi":
       return { type, symbol: sym(), dir: dir3(), pct: pct(), windowMs: win() };
     case "spread":
-      return { type, symbol: sym(), op: op(), bps: num2(v, "bps", "Spread", { min: 0, max: 1e4 }, e, `${path}.bps`) };
+      return { type, symbol: sym(), op: op(), bps: num3(v, "bps", "Spread", { min: 0, max: 1e4 }, e, `${path}.bps`) };
     case "volume":
-      return { type, symbol: sym(), windowMs: win(), aboveUsd: num2(v, "aboveUsd", "Volume", { min: 1, max: 1e12 }, e, `${path}.aboveUsd`) };
+      return { type, symbol: sym(), windowMs: win(), aboveUsd: num3(v, "aboveUsd", "Volume", { min: 1, max: 1e12 }, e, `${path}.aboveUsd`) };
     case "ratio": {
       const other = symbol(v, "other", e, `${path}.other`);
-      return { type, symbol: sym(), other, op: op(), value: num2(v, "value", "Ratio", { min: 1e-12, max: 1e12 }, e, `${path}.value`) };
+      return { type, symbol: sym(), other, op: op(), value: num3(v, "value", "Ratio", { min: 1e-12, max: 1e12 }, e, `${path}.value`) };
     }
     case "position": {
       const pop = oneOf(v, "op", "Position", ["long", "short", "flat", "sizeAbove", "sizeBelow", "pnlAbove", "pnlBelow"], "long", e, `${path}.op`);
       const needs = pop === "sizeAbove" || pop === "sizeBelow" || pop === "pnlAbove" || pop === "pnlBelow";
-      const value = needs ? num2(v, "value", pop.startsWith("pnl") ? "PnL" : "Size", pop.startsWith("pnl") ? { min: -1e12, max: 1e12 } : { min: 0, max: 1e12 }, e, `${path}.value`) : 0;
+      const value = needs ? num3(v, "value", pop.startsWith("pnl") ? "PnL" : "Size", pop.startsWith("pnl") ? { min: -1e12, max: 1e12 } : { min: 0, max: 1e12 }, e, `${path}.value`) : 0;
       return { type, symbol: sym(), op: pop, value };
     }
     case "time": {
@@ -10661,9 +11035,9 @@ function condition(v, e, path) {
 function action(v, e, depth) {
   const o = isObj(v) ? v : {};
   const t = o.type;
-  if (t === "market") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "market") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), slippageBps: num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
   if (t === "limit") return { type: t, quantity: qty(o, "quantity", "Size", e, "then.quantity"), price: price(o, "price", "Price", e, "then.price"), postOnly: bool(o, "postOnly") };
-  if (t === "close") return { type: t, share: num2(o, "share", "Share of the position", { min: 0.01, max: 1 }, e, "then.share"), slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
+  if (t === "close") return { type: t, share: num3(o, "share", "Share of the position", { min: 0.01, max: 1 }, e, "then.share"), slippageBps: num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e, "then.slippageBps") };
   if (t === "algo") {
     if (depth > 0) {
       e.then = "A conditional cannot start another conditional.";
@@ -10684,7 +11058,7 @@ function checkAlgoSpec(input, depth = 0) {
   if (!ALGO_KINDS.includes(kind)) return { spec: null, errors: { kind: "Unknown order type." } };
   const o = input;
   const b = base(o, kind, e);
-  const jit = (key2, label) => o[key2] === void 0 ? 0 : num2(o, key2, label, ALGO_LIMITS.jitter, e);
+  const jit = (key2, label) => o[key2] === void 0 ? 0 : num3(o, key2, label, ALGO_LIMITS.jitter, e);
   const finish = () => oneOf(o, "finish", "At the end", ["take", "leave"], "take", e);
   let spec;
   switch (kind) {
@@ -10709,7 +11083,7 @@ function checkAlgoSpec(input, depth = 0) {
         maxSliceQty,
         durationMs,
         slices,
-        urgency: o.urgency === void 0 ? 0 : num2(o, "urgency", "Urgency", { min: -1, max: 1 }, e),
+        urgency: o.urgency === void 0 ? 0 : num3(o, "urgency", "Urgency", { min: -1, max: 1 }, e),
         sizeJitter: jit("sizeJitter", "Size randomisation"),
         timeJitter: jit("timeJitter", "Time randomisation"),
         exec: exec(o.exec, e, "exec"),
@@ -10743,7 +11117,7 @@ function checkAlgoSpec(input, depth = 0) {
         ...b,
         kind,
         quantity: qty(o, "quantity", "Size", e),
-        rate: num2(o, "rate", "Participation", ALGO_LIMITS.pov.rate, e),
+        rate: num3(o, "rate", "Participation", ALGO_LIMITS.pov.rate, e),
         maxChildQty: optQty(o, "maxChildQty", "Largest child", e),
         endAt: time(o, "endAt", "End time", e),
         exec: exec(o.exec, e, "exec"),
@@ -10765,8 +11139,9 @@ function checkAlgoSpec(input, depth = 0) {
         chaseTicks: o.chaseTicks === void 0 ? 2 : int(o, "chaseTicks", "Re-price distance", ALGO_LIMITS.chase.chaseTicks, e),
         postOnly: bool(o, "postOnly", true),
         refillMs: o.refillMs === void 0 ? 0 : int(o, "refillMs", "Refill delay", ALGO_LIMITS.iceberg.refillMs, e),
-        refillJitter: o.refillJitter === void 0 ? 0 : num2(o, "refillJitter", "Refill randomisation", { min: 0, max: 1 }, e)
+        refillJitter: o.refillJitter === void 0 ? 0 : num3(o, "refillJitter", "Refill randomisation", { min: 0, max: 1 }, e)
       };
+      if (spec.price !== null && Number.isFinite(spec.price) && !withinLimit(b.side, spec.price, b.limitPrice)) e.price = `The price is past your limit price of ${b.limitPrice}.`;
       break;
     }
     case "chase": {
@@ -10798,16 +11173,42 @@ function checkAlgoSpec(input, depth = 0) {
         to,
         orders: int(o, "orders", "Orders", L.orders, e),
         distribution: oneOf(o, "distribution", "Size curve", ["flat", "linear", "exponential", "bell"], "flat", e),
-        skew: o.skew === void 0 ? 1 : num2(o, "skew", "Size skew", L.skew, e),
+        skew: o.skew === void 0 ? 1 : num3(o, "skew", "Size skew", L.skew, e),
         spacing: oneOf(o, "spacing", "Price spacing", ["linear", "geometric", "front", "back"], "linear", e),
-        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Size randomisation", L.sizeJitter, e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num3(o, "sizeJitter", "Size randomisation", L.sizeJitter, e),
         postOnly: bool(o, "postOnly")
       };
+      if (Array.isArray(o.prices)) {
+        const ps = o.prices.map(Number);
+        if (ps.length < L.orders.min || ps.length > L.orders.max) e.prices = `Between ${L.orders.min} and ${L.orders.max} prices.`;
+        else if (ps.some((x) => !Number.isFinite(x) || x <= 0)) e.prices = "Every price must be a positive number.";
+        else if (new Set(ps).size !== ps.length) e.prices = "Each price only once.";
+        else {
+          const sc = spec;
+          sc.prices = ps;
+          sc.from = ps[0];
+          sc.to = ps[ps.length - 1];
+          sc.orders = ps.length;
+          delete e.from;
+          delete e.to;
+          delete e.orders;
+          if (Array.isArray(o.weights)) {
+            const ws = o.weights.map(Number);
+            if (ws.length !== ps.length || ws.some((x) => !Number.isFinite(x) || x <= 0)) e.weights = "One positive size per price.";
+            else sc.weights = ws;
+          }
+        }
+      }
+      {
+        const sc = spec;
+        const levels = sc.prices?.length ? sc.prices : [sc.from, sc.to];
+        if (levels.every(Number.isFinite) && levels.some((p) => !withinLimit(b.side, p, b.limitPrice))) e.limitPrice = `Some levels of the ladder are past your limit price of ${b.limitPrice}.`;
+      }
       break;
     }
     case "dca": {
       const L = ALGO_LIMITS.dca;
-      const perOrderUsd = num2(o, "perOrderUsd", "Amount per order", L.perOrderUsd, e);
+      const perOrderUsd = num3(o, "perOrderUsd", "Amount per order", L.perOrderUsd, e);
       const maxTotalUsd = opt(o, "maxTotalUsd", "Total budget", { min: 10, max: 1e9 }, e);
       if (maxTotalUsd !== null && maxTotalUsd < perOrderUsd) e.maxTotalUsd = "The budget must cover at least one order.";
       spec = {
@@ -10818,7 +11219,7 @@ function checkAlgoSpec(input, depth = 0) {
         intervalMs: int(o, "intervalMs", "Every", L.intervalMs, e),
         outOfBand: oneOf(o, "outOfBand", "Outside the limit", ["skip", "wait"], "skip", e),
         dipPct: opt(o, "dipPct", "Dip", L.dipPct, e),
-        dipMultiplier: o.dipMultiplier === void 0 ? 1 : num2(o, "dipMultiplier", "Dip multiplier", L.dipMultiplier, e),
+        dipMultiplier: o.dipMultiplier === void 0 ? 1 : num3(o, "dipMultiplier", "Dip multiplier", L.dipMultiplier, e),
         maxTotalUsd,
         exec: exec(o.exec ?? { style: "taker" }, e, "exec")
       };
@@ -10833,8 +11234,8 @@ function checkAlgoSpec(input, depth = 0) {
         clips: int(o, "clips", "Clips", L.clips, e),
         inFlight: int(o, "inFlight", "Clips per wave", L.inFlight, e),
         waveMs: int(o, "waveMs", "Between waves", L.waveMs, e),
-        sizeJitter: o.sizeJitter === void 0 ? 0 : num2(o, "sizeJitter", "Irregular clips", L.sizeJitter, e),
-        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e),
+        sizeJitter: o.sizeJitter === void 0 ? 0 : num3(o, "sizeJitter", "Irregular clips", L.sizeJitter, e),
+        slippageBps: num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e),
         retries: o.retries === void 0 ? 2 : int(o, "retries", "Retries", L.retries, e)
       };
       break;
@@ -10871,9 +11272,10 @@ function checkAlgoSpec(input, depth = 0) {
         source: oneOf(o, "source", "Price", ["mark", "last"], "mark", e),
         exit: oneOf(o, "exit", "Exit", ["market", "chase"], "market", e),
         chaseMs: o.chaseMs === void 0 ? 15e3 : int(o, "chaseMs", "Chase for", L.chaseMs, e),
-        slippageBps: o.slippageBps === void 0 ? 50 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+        slippageBps: o.slippageBps === void 0 ? 50 : num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
       };
       if (spec.quantity === null) spec.reduceOnly = true;
+      if (b.exits) e.exits = "A trailing stop places no exits: set them on the order that opens the position.";
       break;
     }
     case "basket": {
@@ -10885,7 +11287,7 @@ function checkAlgoSpec(input, depth = 0) {
         return {
           symbol: symbol(v, "symbol", e, `legs.${i}.symbol`),
           side: oneOf(v, "side", "Side", ["buy", "sell"], "buy", e, `legs.${i}.side`),
-          usd: num2(v, "usd", "Amount", L.legUsd, e, `legs.${i}.usd`)
+          usd: num3(v, "usd", "Amount", L.legUsd, e, `legs.${i}.usd`)
         };
       });
       if (new Set(legs.map((l) => l.symbol)).size !== legs.length) e.legs = "Each market once in a basket.";
@@ -10906,8 +11308,28 @@ function checkAlgoSpec(input, depth = 0) {
         clips: style === "swarm" ? int(o, "clips", "Clips", ALGO_LIMITS.swarm.clips, e) : 0,
         inFlight: style === "swarm" ? int(o, "inFlight", "Clips per wave", ALGO_LIMITS.swarm.inFlight, e) : 0,
         waveMs: style === "swarm" ? int(o, "waveMs", "Between waves", ALGO_LIMITS.swarm.waveMs, e) : 0,
-        slippageBps: num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+        slippageBps: num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
       };
+      break;
+    }
+    case "sweep": {
+      const L = ALGO_LIMITS.sweep;
+      spec = {
+        ...b,
+        kind,
+        quantity: qty(o, "quantity", "Size", e),
+        slippageBps: num3(o, "slippageBps", "Max slippage", L.slippageBps, e),
+        roundMs: o.roundMs === void 0 ? 500 : int(o, "roundMs", "Between rounds", L.roundMs, e),
+        timeoutMs: opt(o, "timeoutMs", "Give up after", L.timeoutMs, e)
+      };
+      const sw = spec;
+      if (o.reference !== void 0) sw.reference = oneOf(o, "reference", "Reference price", ["oracleMid", "oracleFair", "mark", "index"], "oracleMid", e);
+      if (o.venues !== void 0) {
+        const vs = Array.isArray(o.venues) ? o.venues : null;
+        if (!vs || !vs.every(isOracleVenue)) e.venues = "Unknown venue.";
+        else if (!vs.length && sw.reference !== "mark" && sw.reference !== "index") e.venues = "Choose at least one venue.";
+        else sw.venues = [...new Set(vs)];
+      }
       break;
     }
     case "bracket": {
@@ -10919,7 +11341,7 @@ function checkAlgoSpec(input, depth = 0) {
         quantity: qty(o, "quantity", "Size", e),
         entry,
         price: entry === "limit" ? price(o, "price", "Entry price", e) : null,
-        slippageBps: o.slippageBps === void 0 ? 30 : num2(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
+        slippageBps: o.slippageBps === void 0 ? 30 : num3(o, "slippageBps", "Max slippage", ALGO_LIMITS.exec.slippageBps, e)
       };
       break;
     }
@@ -10975,10 +11397,54 @@ var ALGO_NAMES = {
   conditional: "Conditional",
   trailing: "Trailing stop",
   basket: "Basket",
-  bracket: "Bracket"
+  bracket: "Bracket",
+  sweep: "Fill fast"
 };
 
-// packages/copy-engine/src/algo/plan.ts
+// ../../packages/copy-engine/src/algo/sweep.ts
+var SWEEP_MAX_AGE_MS = 5e3;
+function sweepRefFor(s, quotes, sodex, now, maxAgeMs = SWEEP_MAX_AGE_MS) {
+  const kind = s.reference ?? "oracleMid";
+  const sodexFresh = sodex !== null && now - sodex.at <= maxAgeMs;
+  if (kind === "mark" || kind === "index") {
+    const p2 = sodexFresh ? kind === "mark" ? sodex.mark : sodex.index : null;
+    return p2 && p2 > 0 ? { price: p2, sources: [kind === "mark" ? "sodex" : "sodexIndex"], fallback: false } : null;
+  }
+  const c = combineOracle(quotes, now, { venues: s.venues ?? null, maxAgeMs });
+  const p = kind === "oracleFair" ? c.fair : c.mid;
+  if (p !== null && p > 0) return { price: p, sources: c.used, fallback: false };
+  if (sodexFresh && sodex.mark && sodex.mark > 0) return { price: sodex.mark, sources: ["sodex"], fallback: true };
+  return null;
+}
+var plain = (x) => canonicalDecimal(numberToPlainString(Number(x.toPrecision(12))));
+function toGrid(x, step, dir) {
+  const lo = Number(roundToStep(plain(Math.max(0, x)), step, "floor"));
+  if (dir === "down" || Math.abs(lo - x) <= Number(step) * 1e-9) return lo;
+  return Number(plain(lo + Number(step)));
+}
+function sweepBand(side, ref, slippageBps, tickSize) {
+  const raw = side === "buy" ? ref * (1 + slippageBps / 1e4) : ref * (1 - slippageBps / 1e4);
+  return toGrid(raw, tickSize, side === "buy" ? "down" : "up");
+}
+var floorTo = (x, step) => toGrid(x, step, "down");
+function sweepStep(s) {
+  const left = floorTo(s.total - s.filled, s.stepSize);
+  if (s.pending > 1e-12) return { type: "wait", reason: null };
+  if (left <= 0 || s.ref && left < s.minQty(s.ref.price) && s.filled > 0) return { type: "done" };
+  if (s.timeoutMs !== null && s.now - s.startedAt >= s.timeoutMs) return { type: "expired", left };
+  if (!s.ref) return { type: "wait", reason: "Paused: no fresh reference price (none of the oracle venues, nor the SoDEX mark)." };
+  if (s.lastRoundAt !== null && s.now - s.lastRoundAt < s.roundMs) return { type: "wait", reason: null };
+  let price2 = sweepBand(s.side, s.ref.price, s.slippageBps, s.tickSize);
+  if (s.limitPrice != null && s.limitPrice > 0) price2 = s.side === "buy" ? Math.min(price2, toGrid(s.limitPrice, s.tickSize, "down")) : Math.max(price2, toGrid(s.limitPrice, s.tickSize, "up"));
+  if (!(price2 > 0)) return { type: "wait", reason: "Paused: the band price is not valid." };
+  if (s.touch != null && s.touch > 0 && (s.side === "buy" ? s.touch > price2 : s.touch < price2)) return { type: "wait", reason: null };
+  if (left < s.minQty(price2)) return s.filled > 0 ? { type: "done" } : { type: "expired", left };
+  const most = s.maxQty ? s.maxQty(price2) : Infinity;
+  const qty2 = Number.isFinite(most) ? Math.min(left, floorTo(most, s.stepSize)) : left;
+  return { type: "send", price: price2, qty: qty2 };
+}
+
+// ../../packages/copy-engine/src/algo/plan.ts
 function exitLevels(side, x, avg) {
   const sign2 = side === "buy" ? 1 : -1;
   return {
@@ -11005,13 +11471,26 @@ function swarmClips(s, m, seed) {
   return allocateSteps(Number(s.quantity), w, Number(m.stepSize)).filter((q) => q > 0);
 }
 function scaleLadder(s, m, seed) {
+  if (s.prices?.length) {
+    const prices2 = [];
+    const ws = [];
+    s.prices.forEach((p, i) => {
+      const x = snapNearest(p, m.tickSize);
+      if (prices2.includes(x)) return;
+      prices2.push(x);
+      ws.push(s.weights?.[i] ?? 1);
+    });
+    const w2 = s.weights?.length === s.prices.length ? normalise(ws) : ladderWeights(prices2.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
+    const sizes2 = allocateSteps(Number(s.quantity), w2, Number(m.stepSize));
+    return prices2.map((price2, i) => ({ price: price2, qty: sizes2[i] ?? 0 }));
+  }
   const prices = ladderPrices(s.from, s.to, s.orders, s.spacing, m.tickSize);
   const w = ladderWeights(prices.length, s.distribution, s.skew, s.sizeJitter, makeRng(seed));
   const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
   return prices.map((price2, i) => ({ price: price2, qty: sizes[i] ?? 0 }));
 }
 
-// packages/copy-engine/src/algo/feed.ts
+// ../../packages/copy-engine/src/algo/feed.ts
 var QUOTE_MAX_AGE_MS = 15e3;
 var HISTORY_MS = 60 * 6e4;
 var toNum = (v) => {
@@ -11256,7 +11735,7 @@ var AlgoFeed = class {
   }
 };
 
-// packages/copy-engine/src/algo/sink.ts
+// ../../packages/copy-engine/src/algo/sink.ts
 var TIF = { ioc: TimeInForce.IOC, gtx: TimeInForce.GTX, gtc: TimeInForce.GTC };
 function stopsAction(accountId, market, stops, builder) {
   return perpsActions.newOrder(
@@ -11368,7 +11847,7 @@ var KeyAlgoSink = class {
   }
 };
 
-// packages/copy-engine/src/algo/runtime.ts
+// ../../packages/copy-engine/src/algo/runtime.ts
 var ALGO_TICK_MS = 500;
 var FLUSH_MS = 2e3;
 var MARKETS_REFRESH_MS2 = 10 * 6e4;
@@ -11386,6 +11865,12 @@ var ACCOUNT_MS = 1e4;
 var EXITS_RESIZE_MS = 5e3;
 var LIVE = /* @__PURE__ */ new Set(["sending", "open", "unknown"]);
 var FINAL_ORDER = /^(FILLED|CANCELED|CANCELLED|REJECTED|EXPIRED|REPLACED)$/;
+var levelOf = (c) => {
+  const x = /^level (\d+)\//.exec(c.tag);
+  return x ? Number(x[1]) - 1 : -1;
+};
+var EXITS_RETRY_MS = 3e4;
+var EXITS_MAX_REFUSALS = 5;
 var dec3 = (n) => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 var AlgoRuntime = class {
   constructor(host2) {
@@ -11417,9 +11902,13 @@ var AlgoRuntime = class {
   accounts = /* @__PURE__ */ new Map();
   /** Algos whose exits are being placed or resized right now. */
   exitsBusy = /* @__PURE__ */ new Set();
+  /** Algos whose final exits were asked for while a placement was out: placed again once it is back. */
+  exitsAgain = /* @__PURE__ */ new Set();
   paper = /* @__PURE__ */ new Map();
   timers = [];
   running = false;
+  /** The sweep oracle's last quotes per coin, and the read in flight. */
+  oracleQuotes = /* @__PURE__ */ new Map();
   /* ------------------------------------------------------------ lifecycle ----- */
   async start() {
     if (this.running) return;
@@ -11431,7 +11920,10 @@ var AlgoRuntime = class {
         this.byClOrd.set(x.clOrdID, a.id);
         if (x.state === "sending") x.state = "unknown";
       }
-      if (FINAL_STATUSES.has(a.status)) continue;
+      if (FINAL_STATUSES.has(a.status)) {
+        for (const c of this.keptLive(a)) this.byClOrd.set(c.clOrdID, a.id);
+        continue;
+      }
       for (const c of a.children) {
         this.byClOrd.set(c.clOrdID, a.id);
         if (LIVE.has(c.state) && !a.spec.paper) c.state = "unknown";
@@ -11477,7 +11969,7 @@ var AlgoRuntime = class {
     const symbols = /* @__PURE__ */ new Set();
     const owners = /* @__PURE__ */ new Set();
     for (const a of this.algos.values()) {
-      const exits2 = this.liveExits(a).length > 0;
+      const exits2 = this.liveExits(a).length > 0 || this.keptLive(a).length > 0;
       if (FINAL_STATUSES.has(a.status) && !exits2) continue;
       for (const s of algoSymbols(a.spec)) symbols.add(s);
       if (!a.spec.paper) owners.add(a.owner);
@@ -11487,6 +11979,15 @@ var AlgoRuntime = class {
   /** Exits still on SoDEX (or on the paper book), not yet settled. */
   liveExits(a) {
     return (a.exitOrders ?? []).filter((x) => LIVE.has(x.state));
+  }
+  /** Children an ended algo left on SoDEX on purpose (`end`'s keep), still live. */
+  keptLive(a) {
+    const kept = a.k.kept ?? [];
+    return kept.length ? a.children.filter((c) => kept.includes(c.clOrdID) && LIVE.has(c.state)) : [];
+  }
+  /** Paused or ended: nothing new may be sent for it. */
+  stopped(a) {
+    return FINAL_STATUSES.has(a.status) || a.status === "paused";
   }
   /* ------------------------------------------------------------- the API ----- */
   get(id) {
@@ -11537,6 +12038,10 @@ var AlgoRuntime = class {
       observedCountry: n.observedCountry ?? null,
       k: {}
     };
+    if (spec.kind === "scale") {
+      const small = scaleLadder(spec, m, a.seed).filter((l) => l.qty < minChildQty(m, l.price));
+      if (small.length) throw new Error(`${small.length} level${small.length === 1 ? "" : "s"} of this ladder would be under SoDEX's $${m.minNotional} minimum order. Use fewer orders, a larger size, or less skew.`);
+    }
     if (spec.triggerPrice !== null) {
       const mk = this.market.mark(spec.symbol)?.mark ?? null;
       if (mk !== null) a.k.triggerFrom = mk;
@@ -11574,10 +12079,35 @@ var AlgoRuntime = class {
    */
   async cancel(id) {
     const a = this.need(id);
-    if (FINAL_STATUSES.has(a.status)) return a;
+    if (FINAL_STATUSES.has(a.status)) {
+      await this.pullLeftovers(a);
+      return a;
+    }
     for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id);
     await this.end(a, "cancelled", "Cancelled by you.");
     return a;
+  }
+  /** Whether an ended algo still has something on SoDEX (or the paper book): live exits, or a child it left resting. */
+  hasLeftovers(a) {
+    return this.liveExits(a).some((x) => !x.cancelling) || this.keptLive(a).some((c) => !c.cancelling);
+  }
+  /** Cancel an ended algo's live exits and kept children; its exits are not placed again. Its final status stays. */
+  async pullLeftovers(a) {
+    if (!this.hasLeftovers(a)) return;
+    a.k.exitsDone = true;
+    a.k.kept = [];
+    const m = this.markets.get(a.spec.symbol);
+    const exits2 = this.liveExits(a);
+    const kept = a.children.filter((c) => LIVE.has(c.state) && c.tif !== "ioc");
+    if (m) {
+      await this.cancelExits(a, m, exits2);
+      await this.cancelChildren(a, m, kept);
+    }
+    if (a.spec.paper) for (const x of exits2) x.state = "done";
+    await this.save(a);
+    await this.event(a, "cancel", "Exits and orders left on SoDEX cancelled by you.");
+    this.syncWatch();
+    this.host.onChange?.(a.id);
   }
   /** A basket's legs (the algos it started). */
   legsOf(a) {
@@ -11586,7 +12116,7 @@ var AlgoRuntime = class {
   /** The kill switch: every algo of `owner` is cancelled. */
   async cancelAll(owner) {
     const out = [];
-    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status)) out.push(await this.cancel(a.id));
+    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status) || this.hasLeftovers(a)) out.push(await this.cancel(a.id));
     return out;
   }
   /**
@@ -11598,15 +12128,49 @@ var AlgoRuntime = class {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error("This algo has ended.");
     const next = { ...a.spec, ...patch };
+    const before = this.targetOf(a);
     if (patch.quantity !== void 0) {
       if (!("quantity" in a.spec) || a.spec.kind === "trailing") throw new Error("The size of this kind of algo cannot be changed.");
-      if (Number(patch.quantity) <= a.filled) throw new Error("The new size must be more than what has filled.");
+      if (a.spec.kind === "twap" && a.spec.closeShare !== null) throw new Error("A close is sized from the position: its size cannot be changed.");
+      const want = Number(patch.quantity);
+      if (want <= a.filled) throw new Error("The new size must be more than what has filled.");
+      const taking = this.live(a).filter((c) => c.tif === "ioc" || c.cancelling).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+      if (a.filled + taking >= want - 1e-12) throw new Error(`An order is filling right now: the new size must be more than ${dec3(a.filled + taking)}.`);
     }
     const spec = parseAlgoSpec(next);
     a.spec = spec;
+    const after = this.targetOf(a);
+    if (patch.quantity !== void 0 && before !== null && after !== null && a.startedAt !== null && (spec.kind === "twap" || spec.kind === "vwap")) {
+      const steps = a.k.resize ?? [];
+      steps.push([Math.min(1, Number(a.k.share ?? 0)), after - before]);
+      a.k.resize = steps;
+    }
+    if (patch.quantity !== void 0 && after !== null) {
+      let over = a.filled + this.pendingQty(a) - after;
+      const pull = [];
+      for (const c of [...this.live(a)].reverse()) {
+        if (over <= 1e-12) break;
+        if (c.tif === "ioc" || c.cancelling) continue;
+        pull.push(c);
+        over -= Math.max(0, c.quantity - c.filled);
+      }
+      const m = this.markets.get(spec.symbol);
+      if (pull.length && m) await this.cancelChildren(a, m, pull);
+    }
     await this.save(a);
     await this.event(a, "info", "Changed by you.");
     return a;
+  }
+  /** What a schedule should have filled by `share` of it, with the size changes spread over the rest of it. */
+  scheduleDue(a, total, share) {
+    const steps = a.k.resize ?? [];
+    let base2 = total;
+    let due = 0;
+    for (const [from, delta] of steps) {
+      base2 -= delta;
+      due += delta * (from >= 1 - 1e-9 ? 1 : Math.min(1, Math.max(0, (share - from) / (1 - from))));
+    }
+    return base2 * share + due;
   }
   async events(id, q = {}) {
     return this.host.store.algoEvents({ algoId: id, limit: q.limit ?? 200, before: q.before });
@@ -11648,7 +12212,7 @@ var AlgoRuntime = class {
       nextAt = i < s.orders ? a.startedAt + i * s.intervalMs : null;
       endsAt = a.startedAt + (s.orders - 1) * s.intervalMs;
     } else if (s.kind === "pov") endsAt = s.endAt;
-    else if (s.kind === "chase" && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
+    else if ((s.kind === "chase" || s.kind === "sweep") && a.startedAt !== null && s.timeoutMs) endsAt = a.startedAt + s.timeoutMs;
     else if (s.kind === "swarm") nextAt = a.k.waveAt ?? null;
     else if (s.kind === "conditional") endsAt = s.expiresAt;
     if (s.startAt && a.status === "scheduled") nextAt = s.startAt;
@@ -11684,6 +12248,10 @@ var AlgoRuntime = class {
   tick(now = Date.now()) {
     this.checkPaperExits();
     for (const a of this.algos.values()) {
+      if (FINAL_STATUSES.has(a.status) && this.exitsDue(a, now)) {
+        const m = this.markets.get(a.spec.symbol);
+        if (m) void this.syncExits(a, m, true).catch((e) => this.host.log.error("algo: exits failed", { algo: a.id, error: String(e) }));
+      }
       if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
       this.busy.add(a.id);
       void this.step(a, now).catch(async (e) => {
@@ -11720,6 +12288,7 @@ var AlgoRuntime = class {
     }
     if (!s.paper) {
       const problem = await this.problemOf(a, now);
+      if (this.stopped(a)) return;
       if (problem) {
         await this.hold(a, problem);
         return;
@@ -11742,7 +12311,7 @@ var AlgoRuntime = class {
     if (a.status === "scheduled") {
       if (!await this.ready(a, now)) return;
       await this.begin(a, m, now);
-      if (FINAL_STATUSES.has(a.status)) return;
+      if (this.stopped(a)) return;
     }
     const mk = this.market.mark(s.symbol)?.mark ?? mid(q);
     const b = s.upper && mk >= s.upper.price ? { ...s.upper, which: "upper" } : s.lower && mk <= s.lower.price ? { ...s.lower, which: "lower" } : null;
@@ -11793,6 +12362,91 @@ var AlgoRuntime = class {
         return this.stepBasket(a);
       case "bracket":
         return this.stepBracket(a, m, q, mk);
+      case "sweep":
+        return this.stepSweep(a, m, now);
+    }
+  }
+  /** What a taker leg's slippage is measured from: null for the touch, a price, or undefined when that price is not fresh. */
+  slipBase(symbol2, exec2, q) {
+    const from = exec2.slipFrom ?? "touch";
+    if (from === "touch") return null;
+    if (from === "mid") return mid(q);
+    const now = Date.now();
+    if (from === "mark" || from === "index") {
+      const mk = this.market.mark(symbol2);
+      const p2 = mk && now - mk.at <= SWEEP_MAX_AGE_MS ? from === "mark" ? mk.mark : mk.index : null;
+      return p2 && p2 > 0 ? p2 : void 0;
+    }
+    const c = combineOracle(this.oracleFor(symbol2.replace(/-USD$/, ""), now), now, { maxAgeMs: SWEEP_MAX_AGE_MS });
+    const p = from === "oracleFair" ? c.fair : c.mid;
+    return p !== null && p > 0 ? p : void 0;
+  }
+  /** The oracle's quotes for a coin, read again in the background at most once a second (a step never waits on it). */
+  oracleFor(coin, now, venues) {
+    const key2 = `${coin}|${venues?.length ? [...venues].sort().join(",") : "*"}`;
+    let o = this.oracleQuotes.get(key2);
+    if (!o) {
+      o = { quotes: [], at: 0, busy: false };
+      this.oracleQuotes.set(key2, o);
+    }
+    if (this.host.oracle && !o.busy && now - o.at >= 1e3) {
+      const slot = o;
+      slot.busy = true;
+      this.host.oracle(coin, venues?.length ? venues : void 0).then((q) => {
+        slot.quotes = q;
+      }).catch(() => {
+      }).finally(() => {
+        slot.busy = false;
+        slot.at = Date.now();
+      });
+    }
+    return o.quotes;
+  }
+  /** Fill fast (sweep.ts): an IOC at the band edge for the rest, each round re-priced from the reference. */
+  async stepSweep(a, m, now) {
+    const s = a.spec;
+    const coin = s.symbol.replace(/-USD$/, "");
+    const mark = this.market.mark(s.symbol);
+    const own = s.reference === "mark" || s.reference === "index";
+    const book = this.market.quote(s.symbol);
+    const ref = sweepRefFor(s, own ? [] : this.oracleFor(coin, now, s.venues), mark ? { mark: mark.mark, index: mark.index, at: mark.at } : null, now, SWEEP_MAX_AGE_MS);
+    const act2 = sweepStep({
+      side: s.side,
+      total: Number(s.quantity),
+      filled: a.filled,
+      pending: this.pendingQty(a),
+      startedAt: a.startedAt ?? now,
+      now,
+      timeoutMs: s.timeoutMs,
+      roundMs: s.roundMs,
+      lastRoundAt: typeof a.k.roundAt === "number" ? a.k.roundAt : null,
+      slippageBps: s.slippageBps,
+      tickSize: m.tickSize,
+      stepSize: m.stepSize,
+      minQty: (p) => minChildQty(m, p),
+      ref,
+      touch: book ? s.side === "buy" ? book.ask : book.bid : null,
+      limitPrice: s.limitPrice,
+      maxQty: (p) => maxOrderQty(m, p)
+    });
+    switch (act2.type) {
+      case "done":
+        return this.end(a, "done", a.filled > 0 ? "Filled." : "Nothing left to fill.");
+      case "expired":
+        if (a.filled <= 0 && act2.left < minChildQty(m, ref?.price ?? 0)) return this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
+        return this.end(a, "expired", `Gave up: ${dec3(act2.left)} ${m.base} left unfilled inside the band.`);
+      case "wait":
+        if (act2.reason) await this.hold(a, act2.reason);
+        return;
+      case "send": {
+        const round = Number(a.k.round ?? 0) + 1;
+        await this.send(a, m, [{ side: s.side, price: act2.price, quantity: act2.qty, tif: "ioc", tag: `round ${round}${ref?.fallback ? " (SoDEX mark, no fresh oracle)" : ""}` }], () => {
+          a.k.roundAt = now;
+          a.k.round = round;
+          a.k.ref = ref?.price ?? null;
+        });
+        return;
+      }
     }
   }
   /** Whether a scheduled algo may begin: its start time and its start price. */
@@ -11822,6 +12476,7 @@ var AlgoRuntime = class {
     if (s.kind === "twap") {
       if (s.closeShare !== null) {
         const pos = await this.positionOf(a, s.symbol);
+        if (FINAL_STATUSES.has(a.status)) return;
         const size = pos === null ? 0 : floorStep(Math.abs(pos) * s.closeShare, m);
         if (!pos || size < Number(m.stepSize)) {
           a.startedAt = null;
@@ -11853,6 +12508,12 @@ var AlgoRuntime = class {
       a.k.retriesLeft = s.retries;
       a.k.waveAt = now;
     }
+    if (FINAL_STATUSES.has(a.status)) return;
+    if (a.status === "paused") {
+      a.k.pausedFrom = "running";
+      await this.save(a);
+      return;
+    }
     await this.setStatus(a, "running", null);
     await this.event(a, "status", a.arrival ? `Started. Arrival price ${a.arrival}.` : "Started.");
   }
@@ -11880,13 +12541,18 @@ var AlgoRuntime = class {
     const ref = side === "buy" ? q.ask : q.bid;
     const finishing = o.late >= o.total;
     const minQ = Math.max(minChildQty(m, ref), o.minChild && !finishing ? o.minChild : 0);
-    const cap = o.maxChild !== void 0 && o.maxChild !== null ? o.maxChild : Infinity;
+    const capOf = (min) => o.maxChild !== void 0 && o.maxChild !== null ? Math.max(floorStep(o.maxChild, m), min) : Infinity;
+    const part = o.part !== void 0 && o.part !== null ? floorStep(Math.max(0, o.part), m) : Infinity;
     const room = Math.max(0, o.total - a.filled);
     const need = Math.min(room, o.due - a.filled);
     const lateNeed = Math.min(need, o.late - a.filled);
     const resting = live.find((c) => c.tif !== "ioc") ?? null;
     const taking = live.find((c) => c.tif === "ioc") ?? null;
     if (taking) return;
+    if (resting && a.filled + this.pendingQty(a) > o.total + 1e-12) {
+      await this.cancelChildren(a, m, [resting]);
+      return;
+    }
     if (lateNeed >= minQ - 1e-12 || lateNeed > 0 && need >= room - 1e-12 && room > 0 && o.late >= o.total) {
       if (resting) {
         await this.cancelChildren(a, m, [resting]);
@@ -11897,14 +12563,27 @@ var AlgoRuntime = class {
         return;
       }
       if (Date.now() - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) return;
+      const from = this.slipBase(s.symbol, o.exec, q);
+      const price3 = from === void 0 ? null : takerPrice(side, q, o.exec.slippageBps, m, mk, limit, from);
+      const minAt = Math.max(minQ, minChildQty(m, price3 !== null ? Math.min(ref, price3) : ref));
+      const most = Math.min(capOf(minAt), part, price3 !== null ? maxOrderQty(m, price3) : Infinity);
       let qty2 = floorStep(lateNeed, m);
-      if (need - qty2 < minQ) qty2 = floorStep(need, m);
-      qty2 = Math.min(qty2, floorStep(cap, m));
-      if (qty2 < minQ) {
-        if (room < minQ && o.late >= o.total && !o.more) await this.end(a, "done", a.filled > 0 ? `Filled; ${dec3(room)} ${m.base} under SoDEX's minimum order was left.` : "Under SoDEX's minimum order size: nothing could be sent.");
+      if (need - qty2 < minAt) qty2 = floorStep(need, m);
+      if (qty2 < minAt && room >= minAt && lateNeed >= minQ - 1e-12) {
+        qty2 = room - minAt < minAt ? floorStep(room, m) : minAt;
+      }
+      qty2 = Math.min(qty2, most);
+      if (qty2 < minAt) {
+        if (room < minAt && o.late >= o.total && !o.more) {
+          if (a.filled > 0) await this.end(a, "done", `Filled; ${dec3(room)} ${m.base} under SoDEX's minimum order was left.`);
+          else await this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
+        }
         return;
       }
-      const price3 = takerPrice(side, q, o.exec.slippageBps, m, mk, limit);
+      if (from === void 0) {
+        await this.hold(a, `Held: no fresh ${SLIP_FROM_NAMES[o.exec.slipFrom ?? "touch"].toLowerCase()} to measure your max slippage from.`);
+        return;
+      }
       if (price3 === null) {
         await this.hold(a, `Held: the price is past your limit of ${limit}.`);
         return;
@@ -11913,21 +12592,33 @@ var AlgoRuntime = class {
       return;
     }
     if (o.exec.style === "taker") return;
-    const want = floorStep(Math.min(need, cap), m);
     const price2 = makerPrice(side, q, o.exec.offsetTicks, null, m, limit);
+    const want = floorStep(Math.min(need, capOf(minQ), part, maxOrderQty(m, price2)), m);
     if (resting) {
       const tick = Number(m.tickSize);
       const left = resting.quantity - resting.filled;
       const off = Math.abs(resting.price - price2) / tick;
       const since = Date.now() - resting.placedAt;
-      const reprice = off >= o.exec.chaseTicks - 1e-9 && since >= (o.minRepriceMs ?? 1500);
+      const reprice = !this.atOwnTouch(side, resting.price, q) && off >= o.exec.chaseTicks - 1e-9 && since >= (o.minRepriceMs ?? 1500);
       const grow = want - left >= minQ;
       const shrink = left - want > 1e-12 && want < minQ;
       if (reprice || grow || shrink) await this.cancelChildren(a, m, [resting]);
       return;
     }
     if (want < minChildQty(m, price2)) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+      await this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+      return;
+    }
     await this.send(a, m, [{ side, price: price2, quantity: want, tif: "gtx", tag: o.tag, reduceOnly }]);
+  }
+  /**
+   * Whether a resting order is the best price on its own side (a buy at or
+   * above the best bid): SoDEX's book then shows the order itself, and pricing
+   * off that touch would chase its own price.
+   */
+  atOwnTouch(side, price2, q) {
+    return side === "buy" ? price2 >= q.bid : price2 <= q.ask;
   }
   /* ----------------------------------------------------------- the kinds ----- */
   async stepSchedule(a, m, q, mk, now) {
@@ -11956,16 +12647,25 @@ var AlgoRuntime = class {
       return this.end(a, this.isDone(a, m) ? "done" : "expired", `Time is up; ${dec3(Math.max(0, total - a.filled))} ${m.base} left unfilled, as you chose.`);
     }
     const i = Math.max(0, nextSlice(times, now) < 0 ? times.length - 1 : nextSlice(times, now) - 1);
-    const vol = s.maxParticipation !== null ? this.market.volume(s.symbol, Math.max(interval, 5e3)).qty : null;
-    let maxChild = vol !== null && !finishing ? Math.max(0, vol * s.maxParticipation) : Infinity;
-    if (s.kind === "twap" && s.maxSliceQty !== null) maxChild = Math.min(maxChild, Number(s.maxSliceQty));
+    if (a.k.share !== share) {
+      a.k.share = share;
+      this.dirty.add(a.id);
+    }
+    let part = null;
+    if (s.maxParticipation !== null && !finishing) {
+      const win = Math.max(interval, 5e3);
+      const vol = this.market.volume(s.symbol, win).qty;
+      const mine = (a.k.recent ?? []).filter((x) => x[0] > now - win).reduce((x, y) => x + y[1], 0);
+      part = Math.max(0, vol * s.maxParticipation - mine);
+    }
     await this.work(a, m, q, mk, {
-      due: finishing ? total : total * share,
-      late: finishing ? total : total * lateShare,
+      due: finishing ? total : this.scheduleDue(a, total, share),
+      late: finishing ? total : this.scheduleDue(a, total, lateShare),
       total,
       exec: s.exec,
       tag: finishing ? "finish" : `slice ${i + 1}/${times.length}`,
-      maxChild: Number.isFinite(maxChild) ? maxChild : null,
+      maxChild: s.kind === "twap" && s.maxSliceQty !== null ? Number(s.maxSliceQty) : null,
+      part,
       minChild: s.kind === "twap" && s.minSliceQty !== null ? Number(s.minSliceQty) : null,
       ...closeSide ? { side: closeSide, reduceOnly: true } : {}
     });
@@ -12043,7 +12743,7 @@ var AlgoRuntime = class {
     const left = target - a.filled - this.pendingQty(a);
     if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
     const h = this.dueHistory(a, now, target);
-    const late = s.exec.style === "taker" ? target : s.exec.style === "hybrid" ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : over ? target : 0;
+    const late = s.exec.style === "taker" ? target : s.exec.style === "hybrid" ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : 0;
     await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
   }
   async stepIceberg(a, m, q, now) {
@@ -12051,56 +12751,71 @@ var AlgoRuntime = class {
     const total = Number(s.quantity);
     const live = this.live(a);
     if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    if (a.k.rush) {
+      const c = live.find((x) => x.tif !== "ioc" && x.state === "open" && !x.cancelling);
+      if (c) return this.cancelChildren(a, m, [c]);
+      return this.work(a, m, q, this.market.mark(s.symbol)?.mark ?? mid(q), { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "rush" });
+    }
     const pegged = s.price === null;
     const tif = s.postOnly ? "gtx" : "gtc";
     const desired = pegged ? makerPrice(s.side, q, s.pegOffsetTicks, null, m, s.limitPrice) : s.price;
     if (live.length) {
       const c = live[0];
       if (c.state !== "open" || c.cancelling) return;
-      if (pegged && Math.abs(c.price - desired) / Number(m.tickSize) >= s.chaseTicks - 1e-9 && now - c.placedAt >= 1e3) {
-        a.k.clipLeft = Math.max(0, c.quantity - c.filled);
+      if (pegged && !this.atOwnTouch(s.side, c.price, q) && Math.abs(c.price - desired) / Number(m.tickSize) >= s.chaseTicks - 1e-9 && now - c.placedAt >= 1e3) {
+        a.k.reprice = c.clOrdID;
         await this.cancelChildren(a, m, [c]);
       }
       return;
     }
-    if (a.k.rush) {
-      return this.work(a, m, q, this.market.mark(s.symbol)?.mark ?? mid(q), { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "rush" });
-    }
     if (typeof a.k.refillAt === "number" && now < a.k.refillAt) return;
+    if (!pegged && s.postOnly && (s.side === "buy" ? desired >= q.ask : desired <= q.bid)) return this.hold(a, `Waiting: your price of ${desired} is at or through the book, where a post-only clip would be refused.`);
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     const room = total - a.filled;
     const minQ = minChildQty(m, desired);
     const refill = typeof a.k.clipLeft === "number" && a.k.clipLeft > 0;
     let qty2 = refill ? a.k.clipLeft : floorStep(jitter(Number(s.displayQty), s.displayJitter, makeRng(a.seed + a.childCount)), m);
     qty2 = Math.max(qty2, minQ);
     if (room - qty2 < minQ) qty2 = room;
-    qty2 = floorStep(Math.min(qty2, room), m);
-    if (qty2 < minQ) return this.end(a, "done", a.filled > 0 ? "Filled (the rest is under SoDEX's minimum order)." : "Under SoDEX's minimum order size.");
-    delete a.k.clipLeft;
-    if (!refill) a.k.clip = Number(a.k.clip ?? 0) + 1;
-    await this.send(a, m, [{ side: s.side, price: desired, quantity: qty2, tif, tag: `clip ${a.k.clip}` }]);
+    qty2 = floorStep(Math.min(qty2, room, maxOrderQty(m, desired)), m);
+    if (qty2 < minQ) return a.filled > 0 ? this.end(a, "done", "Filled (the rest is under SoDEX's minimum order).") : this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
+    const clip = Number(a.k.clip ?? 0) + (refill ? 0 : 1);
+    await this.send(a, m, [{ side: s.side, price: desired, quantity: qty2, tif, tag: `clip ${clip}` }], () => {
+      delete a.k.clipLeft;
+      a.k.clip = clip;
+    });
   }
   async stepChase(a, m, q, mk, now) {
     const s = a.spec;
     const total = Number(s.quantity);
     const live = this.live(a);
     if (!live.length && this.isDone(a, m)) return this.end(a, "done", "Filled.");
+    const startRef = typeof a.k.startRef === "number" ? a.k.startRef : s.side === "buy" ? q.bid : q.ask;
+    let cap = s.limitPrice;
+    let chaseCap = null;
+    if (s.maxChaseBps !== null) {
+      chaseCap = s.side === "buy" ? startRef * (1 + s.maxChaseBps / 1e4) : startRef * (1 - s.maxChaseBps / 1e4);
+      cap = cap === null ? chaseCap : s.side === "buy" ? Math.min(cap, chaseCap) : Math.max(cap, chaseCap);
+    }
+    const mine = live.find((c) => c.tif !== "ioc");
+    const free = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, s.limitPrice);
+    const capped = chaseCap !== null && !(mine && this.atOwnTouch(s.side, mine.price, q)) && (s.side === "buy" ? free > chaseCap : free < chaseCap);
     const timedOut = s.timeoutMs !== null && now - a.startedAt >= s.timeoutMs;
-    if (timedOut || a.k.rush || a.k.ending) {
+    if (timedOut || capped || a.k.rush || a.k.ending) {
       const how = a.k.rush ? "take" : s.onEnd;
-      a.k.ending = true;
+      if (!a.k.ending) {
+        a.k.ending = true;
+        a.k.endWhy = a.k.rush ? "rush" : timedOut ? "time" : "cap";
+        this.dirty.add(a.id);
+      }
+      const why = a.k.endWhy === "cap" ? `The price moved past your max chase of ${s.maxChaseBps} bp` : "Time is up";
       if (how === "take") return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: 50, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "take the rest" });
       if (how === "rest") {
         const c = live.find((x) => x.tif !== "ioc");
         if (c) c.tag = "left resting";
-        return this.end(a, "expired", c ? `Time is up: left resting at ${c.price} on SoDEX, as you chose.` : "Time is up.", { keep: c ? [c.clOrdID] : [] });
+        return this.end(a, "expired", c ? `${why}: left resting at ${c.price} on SoDEX, as you chose.` : `${why}.`, { keep: c ? [c.clOrdID] : [] });
       }
-      return this.end(a, "expired", `Time is up; ${dec3(total - a.filled)} ${m.base} left unfilled.`);
-    }
-    const startRef = typeof a.k.startRef === "number" ? a.k.startRef : s.side === "buy" ? q.bid : q.ask;
-    let cap = s.limitPrice;
-    if (s.maxChaseBps !== null) {
-      const c = s.side === "buy" ? startRef * (1 + s.maxChaseBps / 1e4) : startRef * (1 - s.maxChaseBps / 1e4);
-      cap = cap === null ? c : s.side === "buy" ? Math.min(cap, c) : Math.max(cap, c);
+      return this.end(a, "expired", `${why}; ${dec3(total - a.filled)} ${m.base} left unfilled.`);
     }
     const price2 = makerPrice(s.side, q, s.offsetTicks, s.offsetBps, m, cap);
     const room = total - a.filled;
@@ -12108,29 +12823,60 @@ var AlgoRuntime = class {
       const c = live[0];
       if (c.state !== "open" || c.cancelling) return;
       const off = Math.abs(c.price - price2) / Number(m.tickSize);
-      if (off >= s.chaseTicks - 1e-9 && now - c.placedAt >= s.minRepriceMs) await this.cancelChildren(a, m, [c]);
+      if (!this.atOwnTouch(s.side, c.price, q) && off >= s.chaseTicks - 1e-9 && now - c.placedAt >= s.minRepriceMs) await this.cancelChildren(a, m, [c]);
       return;
     }
-    const qty2 = floorStep(room, m);
-    if (qty2 < minChildQty(m, price2)) return this.end(a, "done", a.filled > 0 ? "Filled." : "Under SoDEX's minimum order size.");
+    const qty2 = floorStep(Math.min(room, maxOrderQty(m, price2)), m);
+    if (qty2 < minChildQty(m, price2)) return a.filled > 0 ? this.end(a, "done", "Filled.") : this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) return this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
     await this.send(a, m, [{ side: s.side, price: price2, quantity: qty2, tif: "gtx", tag: "chase" }]);
   }
+  /**
+   * A ladder: every level rests at its price. `k.queue` holds the levels
+   * still to go out - all of them at first (in signed batches of 50), the ones
+   * a pause pulled after it, each sent again for what it has not filled once
+   * SoDEX no longer has it. A batch held (the region's cap, no key) waits for
+   * the next step; it is never counted as gone out.
+   */
   async stepScale(a, m, _q, _now) {
     const s = a.spec;
-    if (!a.k.placed) {
-      const ladder = scaleLadder(s, m, a.seed).filter((l) => l.qty >= minChildQty(m, l.price));
-      if (!ladder.length) return this.end(a, "failed", "No level of this ladder reaches SoDEX's minimum order.");
-      a.k.placed = true;
-      a.k.levels = ladder.length;
-      const tif = s.postOnly ? "gtx" : "gtc";
-      for (let i = 0; i < ladder.length; i += 50) {
-        const chunk = ladder.slice(i, i + 50);
-        await this.send(a, m, chunk.map((l, j) => ({ side: s.side, price: l.price, quantity: l.qty, tif, tag: `level ${i + j + 1}/${ladder.length}` })));
+    const total = Number(s.quantity);
+    const ladder = scaleLadder(s, m, a.seed).filter((l) => l.qty >= minChildQty(m, l.price));
+    if (!ladder.length) return this.end(a, "failed", "No level of this ladder reaches SoDEX's minimum order.");
+    a.k.levels = ladder.length;
+    if (!Array.isArray(a.k.queue)) a.k.queue = a.k.placed ? [] : ladder.map((_, i) => i);
+    const tif = s.postOnly ? "gtx" : "gtc";
+    while (a.k.queue.length) {
+      if (this.stopped(a)) return;
+      const queue = a.k.queue;
+      const working = new Set(this.live(a).map(levelOf));
+      if (queue.some((i) => working.has(i))) return;
+      const batch2 = queue.slice(0, 50);
+      const rest = queue.slice(batch2.length);
+      const fills = a.k.lvl ?? [];
+      let budget = total - a.filled - this.pendingQty(a);
+      const list = [];
+      for (const i of batch2) {
+        const l = ladder[i];
+        if (!l) continue;
+        const qty2 = floorStep(Math.min(l.qty - (fills[i] ?? 0), budget), m);
+        if (qty2 < minChildQty(m, l.price)) continue;
+        list.push({ side: s.side, price: l.price, quantity: qty2, tif, tag: `level ${i + 1}/${ladder.length}` });
+        budget -= qty2;
       }
-      return;
+      const commit = () => {
+        a.k.queue = rest;
+        if (!rest.length) a.k.placed = true;
+      };
+      if (!list.length) {
+        commit();
+        this.dirty.add(a.id);
+        continue;
+      }
+      const sent = await this.send(a, m, list, commit);
+      if (!sent.length) return;
     }
     if (this.live(a).length) return;
-    const total = Number(s.quantity);
     if (this.isDone(a, m)) return this.end(a, "done", "Every level filled.");
     return this.end(a, "expired", `${dec3(total - a.filled)} ${m.base} of the ladder did not fill (cancelled or refused).`);
   }
@@ -12148,42 +12894,60 @@ var AlgoRuntime = class {
     let next = Number(a.k.next ?? 0);
     let pool = total - a.filled;
     const minQ = minChildQty(m, price2);
+    const most = maxOrderQty(m, price2);
     const wave = [];
+    let retriesLeft = Number(a.k.retriesLeft ?? 0);
     if (next < clips.length) {
+      let carry = 0;
       while (wave.length < s.inFlight && next < clips.length && pool >= minQ) {
-        let qty2 = Math.min(clips[next], pool);
-        if (pool - qty2 < minQ) qty2 = pool;
-        qty2 = floorStep(qty2, m);
+        carry += clips[next];
         next++;
-        if (qty2 < minQ) continue;
+        if (carry < minQ - 1e-12 && next < clips.length) continue;
+        let qty2 = Math.min(carry, pool);
+        if (pool - qty2 < minQ) qty2 = pool;
+        qty2 = floorStep(Math.min(qty2, most), m);
+        carry = 0;
+        if (qty2 < minQ) {
+          if (wave.length) {
+            const add = floorStep(Math.min(qty2, most - wave[wave.length - 1]), m);
+            wave[wave.length - 1] += add;
+            pool -= add;
+          }
+          break;
+        }
         wave.push(qty2);
         pool -= qty2;
       }
-      a.k.next = next;
     } else {
-      const left = Number(a.k.retriesLeft ?? 0);
-      if (left <= 0 || pool < minQ) return this.end(a, "expired", `${dec3(pool)} ${m.base} did not fill after ${s.retries} retr${s.retries === 1 ? "y" : "ies"}.`);
-      a.k.retriesLeft = left - 1;
+      if (retriesLeft <= 0 || pool < minQ) return this.end(a, "expired", `${dec3(pool)} ${m.base} did not fill after ${s.retries} retr${s.retries === 1 ? "y" : "ies"}.`);
+      retriesLeft--;
       const avg = total / Math.max(1, clips.length);
-      const n = Math.max(1, Math.min(s.inFlight, Math.round(pool / avg)));
-      for (let i = 0; i < n && pool >= minQ; i++) {
-        let qty2 = i === n - 1 ? pool : floorStep(pool / (n - i), m);
+      const n2 = Math.max(1, Math.min(s.inFlight, Math.round(pool / avg)));
+      for (let i = 0; i < n2 && pool >= minQ; i++) {
+        let qty2 = i === n2 - 1 ? pool : floorStep(pool / (n2 - i), m);
         if (pool - qty2 < minQ) qty2 = pool;
-        qty2 = floorStep(qty2, m);
+        qty2 = floorStep(Math.min(qty2, most), m);
         if (qty2 < minQ) break;
         wave.push(qty2);
         pool -= qty2;
       }
-      await this.event(a, "info", `Retrying ${dec3(total - a.filled)} ${m.base} that did not fill.`);
+      if (wave.length) await this.event(a, "info", `Retrying ${dec3(total - a.filled)} ${m.base} that did not fill.`);
     }
-    if (!wave.length) return;
-    a.k.waveAt = now + s.waveMs;
-    a.k.wave = Number(a.k.wave ?? 0) + 1;
-    await this.send(a, m, wave.map((qty2) => ({ side: s.side, price: price2, quantity: qty2, tif: "ioc", tag: `wave ${a.k.wave}` })));
+    if (!wave.length) {
+      if (pool < minQ) return a.filled > 0 ? this.end(a, "done", `Filled; ${dec3(pool)} ${m.base} under SoDEX's minimum order was left.`) : this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
+      return;
+    }
+    const n = Number(a.k.wave ?? 0) + 1;
+    await this.send(a, m, wave.map((qty2) => ({ side: s.side, price: price2, quantity: qty2, tif: "ioc", tag: `wave ${n}` })), () => {
+      a.k.next = next;
+      a.k.retriesLeft = retriesLeft;
+      a.k.waveAt = now + s.waveMs;
+      a.k.wave = n;
+    });
   }
   async stepConditional(a, m, q, mk, now) {
     const s = a.spec;
-    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    if (a.k.fired) return this.act(a, m, q, mk);
     if (s.expiresAt !== null && now >= s.expiresAt) return this.end(a, "expired", "Its time ran out before the conditions held.");
     const ok = s.conditions.map((c, i) => this.conditionHolds(a, c, i, now));
     a.k.ok = ok;
@@ -12196,27 +12960,55 @@ var AlgoRuntime = class {
     if (typeof a.k.holdSince !== "number") a.k.holdSince = now;
     if (now - a.k.holdSince < s.holdMs) return;
     a.k.fired = now;
-    const t = s.then;
+    await this.save(a);
     await this.event(a, "info", `Conditions held${s.holdMs ? ` for ${Math.round(s.holdMs / 1e3)} s` : ""}: acting.`);
-    if (t.type === "market") a.k.takeQty = Number(t.quantity);
-    else if (t.type === "close") {
-      const pos = await this.positionOf(a, s.symbol);
-      if (!pos) return this.end(a, "expired", `There was no position on ${s.symbol} to close.`);
-      a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
-      a.k.closeSide = pos > 0 ? "sell" : "buy";
-    } else if (t.type === "limit") {
-      await this.send(a, m, [{ side: s.side, price: t.price, quantity: Number(t.quantity), tif: t.postOnly ? "gtx" : "gtc", tag: "trigger", reduceOnly: s.reduceOnly }]);
-      return this.end(a, "done", `Placed a limit ${s.side} of ${t.quantity} at ${t.price}; it rests on SoDEX.`, { keep: a.children.filter((c) => LIVE.has(c.state)).map((c) => c.clOrdID) });
-    } else {
-      try {
-        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec: t.algo, parentId: a.id, consent: a.consent });
-        return this.end(a, "done", `Started a ${ALGO_NAMES[child.spec.kind]} on ${child.spec.symbol}.`);
-      } catch (e) {
-        return this.end(a, "failed", `Could not start the ${ALGO_NAMES[t.algo.kind]}: ${e instanceof Error ? e.message : String(e)}`);
-      }
+    return this.act(a, m, q, mk);
+  }
+  /**
+   * What a fired conditional does. Every branch may run again after a
+   * restart: whatever it sent was in the store before it left (send), so it
+   * picks up from there instead of acting twice.
+   */
+  async act(a, m, q, mk) {
+    const s = a.spec;
+    const t = s.then;
+    if (t.type === "market") {
+      if (typeof a.k.takeQty !== "number") a.k.takeQty = Number(t.quantity);
+      return this.afterFire(a, m, q, mk);
     }
-    this.dirty.add(a.id);
-    return this.afterFire(a, m, q, mk);
+    if (t.type === "close") {
+      if (typeof a.k.takeQty !== "number") {
+        const pos = await this.positionOf(a, s.symbol);
+        if (this.stopped(a)) return;
+        if (!pos) return this.end(a, "expired", `There was no position on ${s.symbol} to close.`);
+        a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
+        a.k.closeSide = pos > 0 ? "sell" : "buy";
+        this.dirty.add(a.id);
+      }
+      return this.afterFire(a, m, q, mk);
+    }
+    if (t.type === "limit") {
+      if (!a.children.length) {
+        const sent = await this.send(a, m, [{ side: s.side, price: t.price, quantity: Number(t.quantity), tif: t.postOnly ? "gtx" : "gtc", tag: "trigger", reduceOnly: s.reduceOnly }]);
+        if (!sent.length) return;
+      }
+      const c = a.children[a.children.length - 1];
+      if (LIVE.has(c.state)) return this.end(a, "done", `Placed a limit ${s.side} of ${t.quantity} at ${t.price}; it rests on SoDEX.`, { keep: [c.clOrdID] });
+      if (c.filled > 0) return this.end(a, "done", `The limit ${s.side} at ${t.price} filled ${dec3(c.filled)}.`);
+      return this.end(a, "failed", `SoDEX refused the limit ${s.side} of ${t.quantity} at ${t.price}; the reason is in the log.`);
+    }
+    const started = [...this.algos.values()].find((x) => x.parentId === a.id);
+    if (started) return this.end(a, "done", `Started a ${ALGO_NAMES[started.spec.kind]} on ${started.spec.symbol}.`);
+    try {
+      const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec: { ...t.algo, paper: s.paper || t.algo.paper }, parentId: a.id, consent: a.consent, country: a.country, observedCountry: a.observedCountry });
+      if (FINAL_STATUSES.has(a.status)) {
+        await this.cancel(child.id);
+        return;
+      }
+      return this.end(a, "done", `Started a ${ALGO_NAMES[child.spec.kind]} on ${child.spec.symbol}${child.spec.paper ? " (paper)" : ""}.`);
+    } catch (e) {
+      return this.end(a, "failed", `Could not start the ${ALGO_NAMES[t.algo.kind]}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   /** A fired conditional or trailing stop: take `k.takeQty` (a chase first, for a trailing stop that asks for one). */
   async afterFire(a, m, q, mk) {
@@ -12254,6 +13046,7 @@ var AlgoRuntime = class {
     if (s.quantity !== null) a.k.takeQty = Number(s.quantity);
     else {
       const pos = await this.positionOf(a, s.symbol);
+      if (this.stopped(a)) return;
       const right = pos !== null && (s.side === "sell" ? pos > 0 : pos < 0);
       if (!right) return this.end(a, "expired", `Fired at ${price2}, but there was no ${s.side === "sell" ? "long" : "short"} position on ${s.symbol} to close.`);
       a.k.takeQty = floorStep(Math.abs(pos), m);
@@ -12272,26 +13065,41 @@ var AlgoRuntime = class {
       const specs = [];
       for (const l of s.legs) {
         const lm = this.markets.get(l.symbol);
+        if (!lm) return this.end(a, "failed", `${l.symbol} is not listed on SoDEX perps; no leg was started.`);
+        if (lm.status !== "TRADING") return this.end(a, "failed", `SoDEX is not trading ${lm.name} right now; no leg was started.`);
         const lq = this.market.quote(l.symbol);
         const px = this.market.mark(l.symbol)?.mark ?? (lq ? mid(lq) : null);
-        if (!lm || !px) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
+        if (!px) return this.hold(a, `Waiting for a price of ${l.symbol}.`);
         const qty2 = floorStep(l.usd / px, lm);
         if (qty2 < minChildQty(lm, px)) return this.end(a, "failed", `${l.symbol}: $${l.usd} is under SoDEX's minimum order.`);
         const common = { symbol: l.symbol, side: l.side, reduceOnly: s.reduceOnly, leverage: s.leverage, marginMode: s.marginMode, paper: s.paper, maxSpreadBps: s.maxSpreadBps, label: `${s.label ?? "Basket"}: ${l.symbol}` };
-        specs.push(
-          s.style === "swarm" ? { ...common, kind: "swarm", quantity: dec3(qty2), clips: s.clips, inFlight: s.inFlight, waveMs: s.waveMs, sizeJitter: 0.2, slippageBps: s.slippageBps, retries: 2 } : { ...common, kind: "twap", quantity: dec3(qty2), durationMs: s.durationMs, slices: s.slices, sizeJitter: 0.15, timeJitter: 0.2, exec: { style: "taker", slippageBps: s.slippageBps }, finish: "take" }
-        );
+        const spec = s.style === "swarm" ? { ...common, kind: "swarm", quantity: dec3(qty2), clips: s.clips, inFlight: s.inFlight, waveMs: s.waveMs, sizeJitter: 0.2, slippageBps: s.slippageBps, retries: 2 } : { ...common, kind: "twap", quantity: dec3(qty2), durationMs: s.durationMs, slices: s.slices, sizeJitter: 0.15, timeJitter: 0.2, exec: { style: "taker", slippageBps: s.slippageBps }, finish: "take" };
+        try {
+          parseAlgoSpec(spec);
+        } catch (e) {
+          return this.end(a, "failed", `${l.symbol}: ${e instanceof Error ? e.message : String(e)}; no leg was started.`);
+        }
+        specs.push(spec);
       }
-      const ids = [];
+      a.k.legs = [];
+      await this.save(a);
       for (const [i, spec] of specs.entries()) {
-        const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec, parentId: a.id, consent: a.consent, seed: a.seed + i + 1 >>> 0, country: a.country, observedCountry: a.observedCountry });
-        ids.push(child.id);
+        if (this.stopped(a)) break;
+        try {
+          const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec, parentId: a.id, consent: a.consent, seed: a.seed + i + 1 >>> 0, country: a.country, observedCountry: a.observedCountry });
+          a.k.legs.push(child.id);
+          await this.save(a);
+        } catch (e) {
+          return this.end(a, "failed", `${String(spec.symbol)} could not start (${e instanceof Error ? e.message : String(e)}); the legs already started are stopped.`);
+        }
       }
-      a.k.legs = ids;
-      this.dirty.add(a.id);
-      await this.event(a, "info", `Started ${ids.length} legs: ${s.legs.map((l) => `${l.side} $${l.usd} ${l.symbol}`).join(", ")}.`);
+      if (FINAL_STATUSES.has(a.status)) return;
+      a.k.legsStarted = true;
+      await this.save(a);
+      await this.event(a, "info", `Started ${specs.length} legs: ${s.legs.map((l) => `${l.side} $${l.usd} ${l.symbol}`).join(", ")}.`);
       return;
     }
+    if (!a.k.legsStarted && a.k.legs.length < s.legs.length) return this.end(a, "failed", "The basket stopped while its legs were starting; the legs already started are stopped.");
     const legs = this.legsOf(a);
     if (legs.length && legs.every((c) => FINAL_STATUSES.has(c.status))) {
       const short = legs.filter((c) => c.status !== "done");
@@ -12307,8 +13115,9 @@ var AlgoRuntime = class {
       return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: "taker", slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: "entry" });
     }
     if (!a.k.placed) {
-      a.k.placed = true;
-      await this.send(a, m, [{ side: s.side, price: s.price, quantity: total, tif: "gtc", tag: "entry" }]);
+      await this.send(a, m, [{ side: s.side, price: s.price, quantity: total, tif: "gtc", tag: "entry" }], () => {
+        a.k.placed = true;
+      });
       return;
     }
     if (this.live(a).length) return;
@@ -12480,13 +13289,22 @@ var AlgoRuntime = class {
       return null;
     }
   }
-  /** Sign and send children (one batch on one market) and book them as live. */
-  async send(a, m, list) {
+  /**
+   * Sign and send children (one batch on one market) and book them as live.
+   * Write-ahead: the children (and `commit`, the algo's own state that goes
+   * with them) are in the store before the request leaves, and their answer is
+   * written as soon as it is back - a crash in between leaves them `unknown`
+   * (asked of SoDEX), never forgotten and sent again. Nothing goes out for an
+   * algo that was paused or ended meanwhile. Returns the children sent ([] when
+   * held or stopped: nothing went out, and `commit` did not run).
+   */
+  async send(a, m, list, commit) {
     const s = a.spec;
+    if (this.stopped(a)) return [];
     const sink = s.paper ? null : this.host.sinkFor(a);
     if (!s.paper && !sink) {
       await this.hold(a, "The trading key for this algo is not available here.");
-      return;
+      return [];
     }
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
     const ceiling = !s.paper ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
@@ -12504,10 +13322,13 @@ var AlgoRuntime = class {
         const fit = one && room !== null && room > 0 ? floorStep(room / one.price, m) : 0;
         if (!one || fit < minChildQty(m, one.price)) {
           await this.hold(a, room === null ? "Held: your account could not be read for the leverage cap of your region." : `Held: the ${ceiling}x leverage cap for your region is reached.`);
-          return;
+          return [];
         }
         list = [{ ...one, quantity: fit }];
       }
+    }
+    if (this.stopped(a)) return [];
+    if (opening && ceiling !== null) {
       const row = this.accounts.get(a.owner);
       if (row) row.gross += list.reduce((x, c) => x + (c.reduceOnly ?? s.reduceOnly ? 0 : c.quantity * c.price), 0);
     }
@@ -12524,9 +13345,18 @@ var AlgoRuntime = class {
       a.children.push(c);
       this.byClOrd.set(clOrdID, a.id);
     }
+    commit?.();
     this.trimChildren(a);
-    this.dirty.add(a.id);
+    await this.save(a);
     for (const c of children) await this.event(a, "order", `${c.tif === "ioc" ? "Take" : "Rest"} ${c.side} ${c.quantity} @ ${c.price} (${c.tag}).`, c);
+    if (this.stopped(a)) {
+      for (const c of children) {
+        c.state = "done";
+        c.cancelling = false;
+      }
+      await this.save(a);
+      return [];
+    }
     let results;
     if (s.paper) results = this.paperPlace(a, m, children);
     else results = await sink.place(a, m, reqs);
@@ -12538,17 +13368,27 @@ var AlgoRuntime = class {
         if (c.state === "sending") c.state = "open";
         a.k.consecRejects = 0;
       } else if (r.outcomeUnknown) {
-        c.state = "unknown";
+        if (c.state === "sending") c.state = "unknown";
         await this.event(a, "error", `No answer from SoDEX for ${c.tag}; checking what happened (never re-sent).`, c);
       } else {
         c.state = "done";
+        c.cancelling = false;
         a.rejects++;
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
       }
     }
+    if (!s.paper && this.stopped(a)) {
+      const kept = a.k.kept ?? [];
+      const late = children.filter((c) => c.tif !== "ioc" && c.state !== "done" && !kept.includes(c.clOrdID));
+      const again = children.filter((c) => c.tif !== "ioc" && !kept.includes(c.clOrdID) && results.some((r) => r.clOrdID === c.clOrdID && (r.ok || r.outcomeUnknown)));
+      for (const c of late) c.cancelling = true;
+      if (again.length) await sink.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`));
+    }
+    await this.save(a);
     if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
     this.host.onChange?.(a.id);
+    return children;
   }
   async cancelChildren(a, m, list) {
     const open = list.filter((c) => LIVE.has(c.state) && !c.cancelling);
@@ -12575,8 +13415,14 @@ var AlgoRuntime = class {
   async pullResting(a, keep = []) {
     const m = this.markets.get(a.spec.symbol);
     if (!m) return;
-    const resting = this.live(a).filter((c) => !keep.includes(c.clOrdID) && c.state === "open" && !c.cancelling);
-    if (resting.length) await this.cancelChildren(a, m, resting);
+    const resting = this.live(a).filter((c) => !keep.includes(c.clOrdID) && (c.state === "open" || c.tif !== "ioc") && !c.cancelling);
+    if (!resting.length) return;
+    if (a.spec.kind === "scale" && !FINAL_STATUSES.has(a.status)) {
+      const queue = new Set(a.k.queue ?? []);
+      for (const c of resting) if (levelOf(c) >= 0) queue.add(levelOf(c));
+      a.k.queue = [...queue].sort((x, y) => x - y);
+    }
+    await this.cancelChildren(a, m, resting);
   }
   trimChildren(a) {
     const done = a.children.filter((c) => !LIVE.has(c.state));
@@ -12596,6 +13442,7 @@ var AlgoRuntime = class {
       return;
     }
     const before = a.filled;
+    const was = c.state;
     this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
     if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
       const m = this.markets.get(a.spec.symbol);
@@ -12604,7 +13451,6 @@ var AlgoRuntime = class {
     if (u.orderId) c.orderId = u.orderId;
     c.updatedAt = Date.now();
     if (FINAL_ORDER.test(u.status)) {
-      const was = c.state;
       c.state = "done";
       c.cancelling = false;
       if (c.tif === "ioc" && c.filled <= 1e-12) a.k.missAt = Date.now();
@@ -12619,7 +13465,8 @@ var AlgoRuntime = class {
       const m = this.markets.get(a.spec.symbol);
       if (m) void this.cancelChildren(a, m, [c]);
     }
-    this.dirty.add(a.id);
+    if (a.filled > before || c.state !== was) void this.save(a);
+    else this.dirty.add(a.id);
     this.host.onChange?.(a.id);
   }
   applyFill(a, c, cumQty, cumValue, maker) {
@@ -12630,6 +13477,18 @@ var AlgoRuntime = class {
     c.value = cumValue > 0 ? cumValue : c.value + dv;
     a.filled += dq;
     a.filledValue += dv;
+    if (a.spec.kind === "scale" && levelOf(c) >= 0) {
+      const lvl = a.k.lvl ?? [];
+      lvl[levelOf(c)] = (lvl[levelOf(c)] ?? 0) + dq;
+      a.k.lvl = lvl.map((x) => x ?? 0);
+    }
+    const sp = a.spec;
+    if ((sp.kind === "twap" || sp.kind === "vwap") && sp.maxParticipation !== null) {
+      const win = Math.max(sp.durationMs / sp.slices, 5e3);
+      const recent = (a.k.recent ?? []).filter((x) => x[0] > Date.now() - win);
+      recent.push([Date.now(), dq]);
+      a.k.recent = recent.slice(-1e3);
+    }
     const isMaker = maker ?? c.tif !== "ioc";
     if (isMaker) a.makerQty += dq;
     const m = this.markets.get(a.spec.symbol);
@@ -12643,23 +13502,34 @@ var AlgoRuntime = class {
    * Keep the exits in line with what the entry filled: a take-profit and/or a
    * stop-loss, SoDEX position stops sized to the filled amount at the levels
    * the spec names (a price, or a distance from the average fill). Resized at
-   * most every EXITS_RESIZE_MS while the entry fills (cancel, then place), at
-   * once when it ends (`final`). Nothing once one of them has filled.
+   * most every EXITS_RESIZE_MS while the entry fills (cancel, then place, once
+   * SoDEX has answered for the old pair), at once when it ends (`final`: what
+   * is still live is cancelled and the final pair placed without waiting).
+   * Written to the store before the stops leave and after their answer. A
+   * refusal is tried again after EXITS_RETRY_MS (doubling), and given up after
+   * EXITS_MAX_REFUSALS with an error in the log. Nothing once one of them has
+   * filled, or once the trader cancelled them.
    */
   async syncExits(a, m, final) {
     const s = a.spec;
-    if (!s.exits || !opensPosition(s) || a.k.exitsDone || this.exitsBusy.has(a.id)) return;
+    if (!s.exits || !opensPosition(s) || a.k.exitsDone || a.k.exitsGaveUp) return;
+    if (this.exitsBusy.has(a.id)) {
+      if (final) this.exitsAgain.add(a.id);
+      return;
+    }
+    const now = Date.now();
+    if (now < Number(a.k.exitsRetryAt ?? 0)) return;
     this.exitsBusy.add(a.id);
     try {
       a.exitOrders ??= [];
       const live = this.liveExits(a);
-      if (live.some((x) => x.state !== "open" || x.cancelling)) return;
+      if (!final && live.some((x) => x.state !== "open" || x.cancelling)) return;
       const size = floorStep(a.filled, m);
       if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return;
       const covered = Number(a.k.exitsSize ?? 0);
-      if (live.length && Math.abs(size - covered) < Number(m.stepSize) / 2) return;
-      const now = Date.now();
-      if (!final && live.length && now - Number(a.k.exitsAt ?? 0) < EXITS_RESIZE_MS) return;
+      const standing = live.filter((x) => !x.cancelling);
+      if (standing.length && Math.abs(size - covered) < Number(m.stepSize) / 2) return;
+      if (!final && standing.length && now - Number(a.k.exitsAt ?? 0) < EXITS_RESIZE_MS) return;
       if (live.length) {
         await this.cancelExits(a, m, live);
         if (!final) return;
@@ -12681,28 +13551,58 @@ var AlgoRuntime = class {
       a.exitOrders.push(...xs);
       a.k.exitsSize = size;
       a.k.exitsAt = now;
-      this.dirty.add(a.id);
+      await this.save(a);
       await this.event(a, "order", `Exits for ${dec3(size)} ${m.base}: ${xs.map((x) => `${x.tag} at ${x.price}`).join(", ")} (${s.paper ? "paper: watched against the mark" : "SoDEX holds them"}; when one fills the other is cancelled).`);
       const sink = s.paper ? null : this.host.sinkFor(a);
       const results = s.paper ? stops.map((st) => ({ clOrdID: st.clOrdID, ok: true, orderId: `paper-${st.clOrdID}`, error: null, outcomeUnknown: false })) : sink ? await sink.placeStops(a, m, stops) : stops.map((st) => ({ clOrdID: st.clOrdID, ok: false, orderId: null, error: "the trading key is not available here", outcomeUnknown: false }));
+      let refused = false;
       for (const x of xs) {
         const r = results.find((y) => y.clOrdID === x.clOrdID);
         x.updatedAt = Date.now();
         if (r?.orderId) x.orderId = r.orderId;
-        if (r?.ok) x.state = "open";
-        else if (r?.outcomeUnknown) x.state = "unknown";
-        else {
+        if (r?.ok) {
+          if (x.state === "sending") x.state = "open";
+        } else if (r?.outcomeUnknown) {
+          if (x.state === "sending") x.state = "unknown";
+        } else {
           x.state = "done";
+          refused = true;
           await this.event(a, "error", `SoDEX refused the ${x.tag}: ${r?.error ?? "no answer"}`);
         }
       }
+      if (refused) {
+        const n = Number(a.k.exitsRefused ?? 0) + 1;
+        a.k.exitsRefused = n;
+        a.k.exitsSize = 0;
+        if (n >= EXITS_MAX_REFUSALS) {
+          a.k.exitsGaveUp = true;
+          await this.event(a, "error", `SoDEX refused the exits ${n} times; they are no longer tried. What filled has no take-profit / stop-loss from this algo: set one in your open orders.`);
+        } else a.k.exitsRetryAt = now + EXITS_RETRY_MS * 2 ** (n - 1);
+      } else {
+        delete a.k.exitsRefused;
+        delete a.k.exitsRetryAt;
+      }
       const done = a.exitOrders.filter((x) => !LIVE.has(x.state));
       if (done.length > 12) a.exitOrders = a.exitOrders.filter((x) => LIVE.has(x.state) || done.slice(-12).includes(x));
+      await this.save(a);
       this.syncWatch();
       this.host.onChange?.(a.id);
     } finally {
       this.exitsBusy.delete(a.id);
+      if (this.exitsAgain.delete(a.id)) void this.syncExits(a, m, true);
     }
+  }
+  /** Whether an ended algo's exits are behind what it filled (none standing, or a size they do not cover) and may be placed now. */
+  exitsDue(a, now) {
+    const s = a.spec;
+    if (!s.exits || !opensPosition(s) || a.k.exitsDone || a.k.exitsGaveUp || a.filled <= 0 || this.exitsBusy.has(a.id)) return false;
+    if (now < Number(a.k.exitsRetryAt ?? 0)) return false;
+    const m = this.markets.get(s.symbol);
+    if (!m) return false;
+    const size = floorStep(a.filled, m);
+    if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return false;
+    const standing = this.liveExits(a).filter((x) => !x.cancelling);
+    return !standing.length || Math.abs(size - Number(a.k.exitsSize ?? 0)) >= Number(m.stepSize) / 2;
   }
   async cancelExits(a, m, list) {
     const open = list.filter((x) => LIVE.has(x.state) && !x.cancelling);
@@ -12737,6 +13637,19 @@ var AlgoRuntime = class {
     if (u.orderId) x.orderId = u.orderId;
     x.updatedAt = Date.now();
     if (FINAL_ORDER.test(u.status)) {
+      if (!x.cancelling && x.filled <= 1e-12 && x.state !== "done" && !a.k.exitsDone) {
+        if (/^CANCEL/.test(u.status)) {
+          a.k.exitsDone = true;
+          void this.event(a, "info", `The ${x.tag} was cancelled on SoDEX; its exits are not placed again.`);
+        } else {
+          const n = Number(a.k.exitsRefused ?? 0) + 1;
+          a.k.exitsRefused = n;
+          a.k.exitsSize = 0;
+          a.k.exitsRetryAt = Date.now() + EXITS_RETRY_MS * 2 ** (n - 1);
+          if (n >= EXITS_MAX_REFUSALS) a.k.exitsGaveUp = true;
+          void this.event(a, "error", `SoDEX ${u.status.toLowerCase()} the ${x.tag}${u.reason ? `: ${u.reason}` : ""}.`);
+        }
+      }
       x.state = "done";
       x.cancelling = false;
     } else if (x.state === "sending" || x.state === "unknown") x.state = "open";
@@ -12767,7 +13680,14 @@ var AlgoRuntime = class {
     }
   }
   onChildDone(a, c) {
-    if (a.spec.kind === "iceberg" && c.filled >= c.quantity - 1e-12) {
+    if (a.spec.kind !== "iceberg") return;
+    if (a.k.reprice === c.clOrdID) {
+      delete a.k.reprice;
+      const left = c.quantity - c.filled;
+      if (left > 1e-12) a.k.clipLeft = left;
+      else delete a.k.clipLeft;
+    }
+    if (c.filled >= c.quantity - 1e-12) {
       const s = a.spec;
       a.k.refillAt = Date.now() + Math.max(0, jitter(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
     }
@@ -12792,10 +13712,27 @@ var AlgoRuntime = class {
     if (a.spec.paper || this.lookupBusy) return;
     for (const c of a.children) if (c.state === "sending" && now - c.placedAt > SENDING_MAX_MS) c.state = "unknown";
     const stale = a.children.filter((c) => c.state === "unknown" || c.state === "open" && (c.tif === "ioc" && now - c.updatedAt > STALE_IOC_MS || c.cancelling && now - c.updatedAt > STALE_IOC_MS));
-    if (!stale.length) return;
+    for (const x of a.exitOrders ?? []) if (x.state === "sending" && now - x.placedAt > SENDING_MAX_MS) x.state = "unknown";
+    const staleExits = (a.exitOrders ?? []).filter((x) => x.state === "unknown" || x.state === "open" && x.cancelling && now - x.updatedAt > STALE_IOC_MS);
+    if (!stale.length && !staleExits.length) return;
     this.lookupBusy = true;
     try {
       const open = await this.lookupOrders(a, m.name, false);
+      const missingExits = [];
+      for (const x of staleExits) {
+        const row = open.find((r) => r.clOrdID === x.clOrdID);
+        if (!row) {
+          missingExits.push(x);
+          continue;
+        }
+        x.state = "open";
+        x.orderId = row.orderId || x.orderId;
+        x.updatedAt = now;
+        if (x.cancelling) {
+          x.cancelling = false;
+          await this.cancelExits(a, m, [x]);
+        }
+      }
       const missing = [];
       for (const c of stale) {
         const row = open.find((r) => r.clOrdID === c.clOrdID);
@@ -12810,9 +13747,19 @@ var AlgoRuntime = class {
           }
         } else missing.push(c);
       }
-      if (missing.length && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
+      if ((missing.length || missingExits.length) && now - this.lastHistoryAt >= HISTORY_EVERY_MS) {
         this.lastHistoryAt = now;
         const hist = await this.lookupOrders(a, m.name, true);
+        for (const x of missingExits) {
+          const row = hist.find((r) => r.clOrdID === x.clOrdID);
+          if (row && row.executedQty > 1e-12) {
+            this.onExitUpdate(a, x, { clOrdID: x.clOrdID, orderId: row.orderId, symbol: m.name, status: "FILLED", filledQty: row.executedQty, filledValue: row.executedValue, maker: false, reason: null, at: now });
+          } else if (row || now - x.placedAt > 12e4) {
+            x.state = "done";
+            x.cancelling = false;
+            if (Number(a.k.exitsSize ?? 0) > 0 && !this.liveExits(a).some((y) => !y.cancelling)) a.k.exitsSize = 0;
+          }
+        }
         for (const c of missing) {
           const row = hist.find((r) => r.clOrdID === c.clOrdID);
           if (row) this.applyFill(a, c, row.executedQty, row.executedValue, null);
@@ -12953,6 +13900,7 @@ var AlgoRuntime = class {
   /* -------------------------------------------------------------- status ----- */
   async setStatus(a, status, reason) {
     if (a.status === status && a.statusReason === reason) return;
+    if (FINAL_STATUSES.has(a.status)) return;
     const changed = a.status !== status;
     a.status = status;
     a.statusReason = reason;
@@ -12964,6 +13912,7 @@ var AlgoRuntime = class {
   }
   async hold(a, reason) {
     this.heldNow.add(a.id);
+    if (this.stopped(a)) return;
     if (a.status === "scheduled") {
       if (a.statusReason !== reason) {
         a.statusReason = reason;
@@ -12991,6 +13940,7 @@ var AlgoRuntime = class {
   }
   async end(a, status, reason, o = {}) {
     if (FINAL_STATUSES.has(a.status)) return;
+    for (const leg of this.legsOf(a)) if (!FINAL_STATUSES.has(leg.status)) await this.end(leg, status === "failed" ? "cancelled" : "expired", `Stopped with its basket: ${reason}`);
     await this.pullResting(a, o.keep ?? []);
     if (o.keep?.length) a.k.kept = o.keep;
     for (const id of o.keep ?? []) this.paper.delete(id);
@@ -13044,12 +13994,32 @@ var AlgoRuntime = class {
   }
 };
 
-// packages/copy-engine/src/index.ts
+// ../../packages/copy-engine/src/index.ts
 var COPY_ENGINE_VERSION = "1.1.0";
 
-// apps/executor/src/service.ts
-import { existsSync as existsSync2 } from "node:fs";
-import { DatabaseSync as DatabaseSync2 } from "node:sqlite";
+// src/service.ts
+import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
+import { existsSync as existsSync3 } from "node:fs";
+var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+var PAIR_MAX_TRIES = 10;
+var PAIR_LOCK_MS = 15 * 6e4;
+function pairingCode() {
+  let out = "";
+  for (let i = 0; i < 10; i++) out += PAIR_ALPHABET[randomInt(PAIR_ALPHABET.length)];
+  return out;
+}
+function sameCode(a, b) {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual2(x, y);
+}
+var KEY_TTL_SLACK_MS = 864e5;
+function specsOf(spec) {
+  const out = [spec];
+  const then = spec.kind === "conditional" ? spec.then : void 0;
+  if (then?.type === "algo" && then.algo) out.push(...specsOf(then.algo));
+  return out;
+}
 var ApiError = class extends Error {
   constructor(status, code, message) {
     super(message);
@@ -13067,9 +14037,9 @@ var ExecutorService = class {
     this.db = db;
     this.secrets = secrets;
     this.deps = deps;
-    this.executorId = cfg.kind === "hosted" ? `valuedesk-${cfg.network}-tokyo` : this.selfId();
+    this.executorId = cfg.executorId ?? (cfg.kind === "hosted" ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === "hosted" ? "vd-copy-tokyo" : "vd-copy-self";
-    this.pairingCode = cfg.kind === "self" && !this.owner() ? randomId().slice(0, 8).toUpperCase() : null;
+    this.pairingCode = cfg.kind === "self" && !this.owner() ? pairingCode() : null;
     this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
@@ -13085,6 +14055,7 @@ var ExecutorService = class {
       policyFor: (s) => regionPolicy(s.country, s.observedCountry),
       keyProblem: (s) => this.keyProblem(s.owner)
     });
+    const oracleFeed = new OracleFeed({ fetch: deps.fetch });
     this.algos = new AlgoRuntime({
       store: db,
       sodex: this.sodex,
@@ -13095,7 +14066,10 @@ var ExecutorService = class {
       builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
       problem: (a) => this.algoProblem(a),
       // The copy region rules, from the country declared with the terms and the one the request came from.
-      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null)
+      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null),
+      // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
+      // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
+      oracle: (coin) => oracleFeed.quotes(coin)
     });
   }
   cfg;
@@ -13120,6 +14094,8 @@ var ExecutorService = class {
   builderDb = null;
   /** Self-hosted, not yet paired: the code printed at start. */
   pairingCode;
+  pairMisses = 0;
+  pairLockedUntil = 0;
   async start() {
     await this.runtime.start();
     await this.algos.start();
@@ -13160,11 +14136,36 @@ var ExecutorService = class {
       features: [...EXECUTOR_FEATURES]
     };
   }
+  /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
   health() {
+    let db = true;
+    try {
+      this.db.ping();
+    } catch {
+      db = false;
+    }
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false } };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
-    return { ok: true, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex: v?.feeds.sodex ?? true } };
+    const sodex = v?.feeds.sodex ?? true;
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex } };
+  }
+  /**
+   * One instruction of a wallet at a time. A subscribe or an algo start checks the
+   * wallet's limits and duplicates, then waits on SoDEX (the key, the account)
+   * before it adds: two sent together (a double click) would both pass the checks.
+   */
+  queues = /* @__PURE__ */ new Map();
+  serial(owner, fn) {
+    const prev = this.queues.get(owner) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => void 0);
+    this.queues.set(owner, tail);
+    void tail.then(() => {
+      if (this.queues.get(owner) === tail) this.queues.delete(owner);
+    });
+    return run;
   }
   /* --------------------------------------------------------- requests ----- */
   /** Verify, check the action and the wallet, record. Returns the owner and the payload. */
@@ -13181,8 +14182,16 @@ var ExecutorService = class {
     if (this.cfg.kind === "self") {
       const paired = this.owner();
       if (!paired) {
-        const code = ctx.pairingCode?.trim().toUpperCase();
-        if (r.action !== "session" || !code || code !== this.pairingCode) {
+        const code = ctx.pairingCode?.replace(/[\s-]/g, "").toUpperCase();
+        if (Date.now() < this.pairLockedUntil) throw new ApiError(429, "pairing-locked", "Too many wrong pairing codes. Wait 15 minutes, or restart the copier for a new code.");
+        if (r.action !== "session" || !code || !this.pairingCode || !sameCode(code, this.pairingCode)) {
+          if (r.action === "session" && code) {
+            if (++this.pairMisses >= PAIR_MAX_TRIES) {
+              this.pairMisses = 0;
+              this.pairLockedUntil = Date.now() + PAIR_LOCK_MS;
+              this.deps.log.warn("pairing locked after wrong codes", { tries: PAIR_MAX_TRIES });
+            }
+          }
           throw new ApiError(403, "unpaired", "This executor is not paired with a wallet yet. Enter the pairing code it printed when it started.");
         }
         this.db.setMeta("owner", owner);
@@ -13292,7 +14301,10 @@ var ExecutorService = class {
     const pending = this.db.key(owner, "pending");
     if (pending) {
       const r = await this.sodex.keyRegistered(owner, pending.name, pending.address);
-      if (r.ok) {
+      const latest = Date.now() + this.cfg.keyTtlDaysMax * 864e5 + KEY_TTL_SLACK_MS;
+      if (r.ok && (!r.expiresAt || r.expiresAt > latest)) {
+        this.deps.log.warn("copy key refused: registered for longer than allowed", { owner, key: pending.address, expiresAt: r.expiresAt });
+      } else if (r.ok) {
         this.db.markKey(owner, "pending", true, r.expiresAt, Date.now());
         this.db.promoteKey(owner);
         this.signers.delete(owner);
@@ -13309,11 +14321,13 @@ var ExecutorService = class {
   /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
   async deleteKey(req, ctx) {
     const { owner, payload } = this.accept(req, "delete-key", ctx);
-    await this.algos.cancelAll(owner);
-    await this.runtime.stopAll(owner, { close: payload.close === true });
-    this.db.deleteKeys(owner);
-    this.signers.delete(owner);
-    return this.me(owner, ctx);
+    return this.serial(owner, async () => {
+      await this.algos.cancelAll(owner);
+      await this.runtime.stopAll(owner, { close: payload.close === true });
+      this.db.deleteKeys(owner);
+      this.signers.delete(owner);
+      return this.me(owner, ctx);
+    });
   }
   async keyProblem(owner) {
     const k = this.db.key(owner, "active");
@@ -13358,7 +14372,10 @@ var ExecutorService = class {
     if (!policy.allowed) throw new ApiError(451, "region", policy.reason ?? "Copy trading is not available in your region.");
   }
   async subscribe(req, ctx) {
-    const { owner, payload, consent } = this.accept(req, "subscribe", ctx);
+    const accepted = this.accept(req, "subscribe", ctx);
+    return this.serial(accepted.owner, () => this.subscribeAccepted(accepted, ctx));
+  }
+  async subscribeAccepted({ owner, payload, consent }, ctx) {
     if (this.cfg.kind === "hosted" && !this.cfg.open) throw new ApiError(503, "closed", "The ValueDesk executor takes no new copies right now. Running copies continue.");
     this.needTerms(owner, ctx);
     if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, "terms-version", "Reload the page: the copy terms changed.");
@@ -13404,8 +14421,10 @@ var ExecutorService = class {
     return this.runtime.view(sub.id);
   }
   async act(req, ctx) {
-    const { owner, payload, consent } = this.accept(req, ["update", "pause", "resume", "stop", "stop-all"], ctx);
-    const action2 = req.action;
+    const accepted = this.accept(req, ["update", "pause", "resume", "stop", "stop-all"], ctx);
+    return this.serial(accepted.owner, () => this.actAccepted(accepted, req.action, ctx));
+  }
+  async actAccepted({ owner, payload, consent }, action2, ctx) {
     const mine = (id) => {
       const s = typeof id === "string" ? this.runtime.get(id) : null;
       if (!s || s.owner !== owner) throw new ApiError(404, "copy", "No such copy.");
@@ -13471,7 +14490,10 @@ var ExecutorService = class {
   }
   /** Start an algo order for the wallet that signed it. */
   async algoStart(req, ctx) {
-    const { owner, payload, consent } = this.accept(req, "algo-start", ctx);
+    const accepted = this.accept(req, "algo-start", ctx);
+    return this.serial(accepted.owner, () => this.algoStartAccepted(accepted, ctx));
+  }
+  async algoStartAccepted({ owner, payload, consent }, ctx) {
     if (this.cfg.kind === "hosted" && !this.cfg.open) throw new ApiError(503, "closed", "The ValueDesk executor takes no new orders right now. Running ones continue.");
     this.needTerms(owner, ctx);
     let spec;
@@ -13484,6 +14506,7 @@ var ExecutorService = class {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 4294967295) throw new ApiError(400, "seed", "seed must be a 32-bit whole number.");
     const live = this.algos.list(owner).filter((a2) => !FINAL_STATUSES.has(a2.status));
     if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, "limit", `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    if (!this.cfg.liveAlgos && specsOf(spec).some((x) => x.paper !== true)) throw new ApiError(403, "paper-only", "Real algo orders are off for now. Turn on Practice run to try one against the live market.");
     let accountId = 0;
     if (!spec.paper) {
       await this.verifyKey(owner);
@@ -13504,7 +14527,10 @@ var ExecutorService = class {
   }
   /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
   async algoAct(req, ctx) {
-    const { owner, payload } = this.accept(req, "algo-action", ctx);
+    const accepted = this.accept(req, "algo-action", ctx);
+    return this.serial(accepted.owner, () => this.algoActAccepted(accepted, ctx));
+  }
+  async algoActAccepted({ owner, payload }, ctx) {
     const op = payload.op;
     const fail = (e) => {
       throw e instanceof ApiError ? e : new ApiError(409, "state", e instanceof Error ? e.message : String(e));
@@ -13544,8 +14570,8 @@ var ExecutorService = class {
     let usd = null;
     try {
       if (!this.builderDb) {
-        if (!existsSync2(this.cfg.builderDb)) return null;
-        this.builderDb = new DatabaseSync2(this.cfg.builderDb, { readOnly: true });
+        if (!existsSync3(this.cfg.builderDb)) return null;
+        this.builderDb = new (sqlite()).DatabaseSync(this.cfg.builderDb, { readOnly: true });
         this.builderDb.exec("PRAGMA busy_timeout = 2000");
       }
       const fromDay = Math.floor(Date.now() / 864e5) - (COPY_FEE_WINDOW_DAYS - 1);
@@ -13559,7 +14585,7 @@ var ExecutorService = class {
   }
 };
 
-// apps/executor/src/server.ts
+// src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
 var Limiter = class {
@@ -13583,7 +14609,7 @@ var Limiter = class {
 function safeEqual(a, b) {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
-  return x.length === y.length && timingSafeEqual2(x, y);
+  return x.length === y.length && timingSafeEqual3(x, y);
 }
 async function readJson(req) {
   const chunks = [];
@@ -13635,6 +14661,16 @@ function createExecutorServer(svc, cfg, log) {
     });
     res.end(text);
   };
+  const page = (url) => {
+    const l = url.searchParams.get("limit");
+    const b = url.searchParams.get("before");
+    const limit = l === null ? 200 : Number(l);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 1e3) throw new ApiError(400, "limit", "limit must be a whole number from 1 to 1000.");
+    if (b === null) return { limit };
+    const before = Number(b);
+    if (!Number.isSafeInteger(before) || before < 0) throw new ApiError(400, "before", "before must be a time in milliseconds.");
+    return { limit, before };
+  };
   const bearer = (req) => {
     const h = req.headers.authorization;
     return typeof h === "string" && h.startsWith("Bearer ") ? h.slice(7) : null;
@@ -13668,15 +14704,12 @@ function createExecutorServer(svc, cfg, log) {
       const algoEv = /^\/algos\/([A-Za-z0-9_-]{1,40})\/events$/.exec(route);
       if (req.method === "GET" && algoEv) {
         const owner = svc.authenticate(bearer(req));
-        const before = url.searchParams.get("before");
-        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1], { limit: Number(url.searchParams.get("limit") ?? 200), before: before ? Number(before) : void 0 }) });
+        return send(res, 200, { events: await svc.algoEvents(owner, algoEv[1], page(url)) });
       }
       const act2 = /^\/copies\/([A-Za-z0-9_-]{1,40})\/activity$/.exec(route);
       if (req.method === "GET" && act2) {
         const owner = svc.authenticate(bearer(req));
-        const limit = Number(url.searchParams.get("limit") ?? 200);
-        const before = url.searchParams.get("before");
-        return send(res, 200, { entries: await svc.activity(owner, act2[1], { limit, before: before ? Number(before) : void 0 }) });
+        return send(res, 200, { entries: await svc.activity(owner, act2[1], page(url)) });
       }
       if (!isWrite) throw new ApiError(404, "path", "not found");
       const body = await readJson(req);
@@ -13701,7 +14734,7 @@ function createExecutorServer(svc, cfg, log) {
   });
 }
 
-// apps/executor/src/main.ts
+// src/main.ts
 var LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 function logger(level) {
   const at = LEVELS[level];
@@ -13712,62 +14745,99 @@ function logger(level) {
   };
   return { debug: out("debug"), info: out("info"), warn: out("warn"), error: out("error") };
 }
+function selfBanner(o) {
+  const lines = [
+    "",
+    `  ValueDesk copier is running on ${o.url}`,
+    "",
+    ...o.owner ? [`  It serves the wallet ${o.owner}.`, "  In ValueDesk (https://valuedesk.so): Copy -> Set up -> Self-hosted, and enter the address above."] : [
+      "  To connect it: in ValueDesk (https://valuedesk.so) open Copy -> Set up -> Self-hosted,",
+      "  enter the address above and this pairing code:",
+      "",
+      `      ${o.code}`,
+      "",
+      "  The first wallet that signs in with the code is the only one this copier will ever serve."
+    ],
+    "",
+    `  Its data (keep this folder private, and back it up): ${o.dataDir}`,
+    "  Keep this window open while you copy. Ctrl+C stops it; open positions and their stop orders stay on SoDEX.",
+    ""
+  ];
+  return lines.join("\n") + "\n";
+}
 async function main() {
   const cfg = loadConfig();
   const log = logger(cfg.logLevel);
   if (typeof globalThis.WebSocket !== "function") {
-    throw new Error("This Node.js has no WebSocket; use Node 22 or newer.");
+    throw new Error(`This Node.js (${process.version}) has no WebSocket; the copier needs Node.js 22.13 or newer.`);
   }
-  const db = new ExecutorDb(join3(cfg.dataDir, "executor.db"));
-  const secrets = new Secrets(cfg.dataDir);
-  const out = egress(cfg.localAddress);
-  const svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log });
-  await svc.start();
-  const server = createExecutorServer(svc, cfg, log);
+  let svc = null;
+  let db = null;
+  let stopping = false;
+  const shutdown = async (why, code = 0) => {
+    if (stopping) return;
+    stopping = true;
+    log.info("executor stopping", { why });
+    server.close();
+    await svc?.stop().catch((e) => log.error("stop failed", { error: String(e) }));
+    db?.close();
+    process.exit(code);
+  };
+  process.on("unhandledRejection", (e) => {
+    log.error("unhandled rejection", { error: e instanceof Error ? e.stack ?? e.message : String(e) });
+    void shutdown("unhandled rejection", 1);
+  });
+  process.on("uncaughtException", (e) => {
+    log.error("uncaught exception", { error: e.stack ?? e.message });
+    void shutdown("uncaught exception", 1);
+  });
+  process.on("SIGTERM", () => void shutdown("SIGTERM"));
+  process.on("SIGINT", () => void shutdown("SIGINT"));
+  const server = createExecutorServer(
+    new Proxy({}, {
+      get: (_t, prop) => {
+        if (!svc) throw new ApiError(503, "starting", "The executor is starting; try again in a moment.");
+        const v = svc[prop];
+        return typeof v === "function" ? v.bind(svc) : v;
+      }
+    }),
+    cfg,
+    log
+  );
+  server.requestTimeout = 3e4;
+  server.headersTimeout = 15e3;
   await new Promise((resolve2, reject) => {
-    server.once("error", reject);
+    server.once(
+      "error",
+      (e) => reject(e.code === "EADDRINUSE" ? new Error(`Port ${cfg.port} on ${cfg.host} is already in use - is another copier (or another program) running? Set PORT to use another one.`) : e)
+    );
     server.listen(cfg.port, cfg.host, () => resolve2());
   });
-  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route" });
+  db = new ExecutorDb(join3(cfg.dataDir, "executor.db"));
+  const secrets = new Secrets(cfg.dataDir);
+  const out = egress(cfg.localAddress);
+  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log });
   if (cfg.kind === "self") {
-    const owner = svc.owner();
-    const lines = owner ? [`ValueDesk copier for ${owner} is running on http://${cfg.host}:${cfg.port}.`, "In ValueDesk: Copy -> Set up -> Self-hosted, and enter that address."] : [
-      `ValueDesk copier is running on http://${cfg.host}:${cfg.port}.`,
-      "In ValueDesk: Copy -> Set up -> Self-hosted, enter that address and this pairing code:",
-      "",
-      `    ${svc.pairingCode}`,
-      "",
-      "The first wallet that signs in with the code is the only one this copier will ever serve."
-    ];
-    process.stdout.write(`
-${lines.join("\n")}
-
-`);
+    const shownHost = cfg.host === "0.0.0.0" || cfg.host === "::" ? "127.0.0.1" : cfg.host;
+    process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
   }
+  await svc.start();
+  log.info("executor up", { kind: cfg.kind, id: svc.executorId, network: cfg.network, listen: `${cfg.host}:${cfg.port}`, data: cfg.dataDir, egress: out.localAddress ?? "default route", liveAlgos: cfg.liveAlgos });
   const prune = setInterval(() => {
     try {
-      const n = db.pruneActivity(Number(process.env.EXECUTOR_ACTIVITY_DAYS ?? 365));
+      const n = db?.pruneActivity(Number(process.env.EXECUTOR_ACTIVITY_DAYS ?? 365)) ?? 0;
       if (n) log.info("activity pruned", { rows: n });
     } catch (e) {
       log.warn("activity prune failed", { error: String(e) });
     }
   }, 6 * 60 * 6e4);
   prune.unref();
-  let stopping = false;
-  const shutdown = async (signal) => {
-    if (stopping) return;
-    stopping = true;
-    log.info("executor stopping", { signal });
-    server.close();
-    await svc.stop().catch((e) => log.error("stop failed", { error: String(e) }));
-    db.close();
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void shutdown("SIGTERM"));
-  process.on("SIGINT", () => void shutdown("SIGINT"));
 }
 main().catch((e) => {
-  process.stderr.write(`executor failed to start: ${e instanceof Error ? e.message : String(e)}
+  const what = process.env.EXECUTOR_KIND?.trim() === "hosted" ? "The executor" : "The copier";
+  process.stderr.write(`
+${what} could not start: ${e instanceof Error ? e.message : String(e)}
+
 `);
   process.exit(1);
 });

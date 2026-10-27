@@ -317,6 +317,18 @@ export function minChildQty(m: MarketInfo, price: number): number {
   return Math.max(minQ, byValue);
 }
 
+/**
+ * The largest child SoDEX accepts at `price`: its maximum quantity and its
+ * maximum order value, floored to the step. Infinity where it sets neither.
+ */
+export function maxOrderQty(m: MarketInfo, price: number): number {
+  const step = Number(m.stepSize);
+  const byQty = Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) : Infinity;
+  const byValue = m.maxNotional && price > 0 ? m.maxNotional / price : Infinity;
+  const most = Math.min(byQty, byValue);
+  return Number.isFinite(most) ? Math.floor(most / step + 1e-9) * step : Infinity;
+}
+
 /** Floor to the step, as a number. */
 export const floorStep = (q: number, m: Pick<MarketInfo, 'stepSize'>): number => {
   const step = Number(m.stepSize);

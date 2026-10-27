@@ -13,8 +13,9 @@
  *     live copy a registered key; the copy fee needs the follower's approval on
  *     SoDEX, which the runtime checks (a copy without it is `blocked`).
  */
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   AlgoRuntime,
   AlgoSpecError,
@@ -66,11 +67,38 @@ import {
 } from '../../../packages/copy-engine/src/index.ts';
 import { SODEX_CHAIN_ID, createMemoryNonceManager, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
-import type { ExecutorDb, KeyRow } from './db.ts';
+import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import type { Secrets } from './secrets.ts';
 
-/** Real algo orders are switched off for now: only practice runs start here. */
-const LIVE_ALGOS = false;
+/** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
+const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+/** Wrong pairing codes before pairing locks for PAIR_LOCK_MS (the code is printed once; guessing is the only other way in). */
+const PAIR_MAX_TRIES = 10;
+const PAIR_LOCK_MS = 15 * 60_000;
+
+/** 10 characters from PAIR_ALPHABET: about 50 bits. */
+function pairingCode(): string {
+  let out = '';
+  for (let i = 0; i < 10; i++) out += PAIR_ALPHABET[randomInt(PAIR_ALPHABET.length)];
+  return out;
+}
+
+function sameCode(a: string, b: string): boolean {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+}
+
+/** A key may be registered on SoDEX for at most this much past the longest lifetime allowed (clock and rounding slack). */
+const KEY_TTL_SLACK_MS = 86_400_000;
+
+/** Every algo spec inside `spec` (a conditional's `then: algo`), itself first. */
+function specsOf(spec: { kind: string; then?: unknown }): Array<{ paper?: boolean }> {
+  const out: Array<{ paper?: boolean }> = [spec as { paper?: boolean }];
+  const then = spec.kind === 'conditional' ? (spec.then as { type?: string; algo?: { kind: string } } | undefined) : undefined;
+  if (then?.type === 'algo' && then.algo) out.push(...specsOf(then.algo));
+  return out;
+}
 
 export class ApiError extends Error {
   constructor(
@@ -117,6 +145,8 @@ export class ExecutorService {
   private builderDb: DatabaseSync | null = null;
   /** Self-hosted, not yet paired: the code printed at start. */
   readonly pairingCode: string | null;
+  private pairMisses = 0;
+  private pairLockedUntil = 0;
 
   constructor(
     readonly cfg: ExecutorConfig,
@@ -124,9 +154,10 @@ export class ExecutorService {
     private readonly secrets: Secrets,
     private readonly deps: ServiceDeps,
   ) {
-    this.executorId = cfg.kind === 'hosted' ? `valuedesk-${cfg.network}-tokyo` : this.selfId();
+    // The hosted id is what every registered key and signed request names: it never changes (staging sets EXECUTOR_ID).
+    this.executorId = cfg.executorId ?? (cfg.kind === 'hosted' ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === 'hosted' ? 'vd-copy-tokyo' : 'vd-copy-self';
-    this.pairingCode = cfg.kind === 'self' && !this.owner() ? randomId().slice(0, 8).toUpperCase() : null;
+    this.pairingCode = cfg.kind === 'self' && !this.owner() ? pairingCode() : null;
     this.sodex = new SodexClient({ network: cfg.network, fetch: deps.fetch });
     this.hyperliquid = new HyperliquidClient(deps.fetch);
     this.runtime = new CopyRuntime({
@@ -206,11 +237,37 @@ export class ExecutorService {
     };
   }
 
-  health(): { ok: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean } } {
+  /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
+  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean } } {
+    let db = true;
+    try {
+      this.db.ping();
+    } catch {
+      db = false;
+    }
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false } };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
-    return { ok: true, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex: v?.feeds.sodex ?? true } };
+    const sodex = v?.feeds.sodex ?? true;
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex } };
+  }
+
+  /**
+   * One instruction of a wallet at a time. A subscribe or an algo start checks the
+   * wallet's limits and duplicates, then waits on SoDEX (the key, the account)
+   * before it adds: two sent together (a double click) would both pass the checks.
+   */
+  private readonly queues = new Map<string, Promise<unknown>>();
+  private serial<T>(owner: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.queues.get(owner) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.queues.set(owner, tail);
+    void tail.then(() => {
+      if (this.queues.get(owner) === tail) this.queues.delete(owner);
+    });
+    return run;
   }
 
   /* --------------------------------------------------------- requests ----- */
@@ -230,8 +287,16 @@ export class ExecutorService {
     if (this.cfg.kind === 'self') {
       const paired = this.owner();
       if (!paired) {
-        const code = ctx.pairingCode?.trim().toUpperCase();
-        if (r.action !== 'session' || !code || code !== this.pairingCode) {
+        const code = ctx.pairingCode?.replace(/[\s-]/g, '').toUpperCase();
+        if (Date.now() < this.pairLockedUntil) throw new ApiError(429, 'pairing-locked', 'Too many wrong pairing codes. Wait 15 minutes, or restart the copier for a new code.');
+        if (r.action !== 'session' || !code || !this.pairingCode || !sameCode(code, this.pairingCode)) {
+          if (r.action === 'session' && code) {
+            if (++this.pairMisses >= PAIR_MAX_TRIES) {
+              this.pairMisses = 0;
+              this.pairLockedUntil = Date.now() + PAIR_LOCK_MS;
+              this.deps.log.warn('pairing locked after wrong codes', { tries: PAIR_MAX_TRIES });
+            }
+          }
           throw new ApiError(403, 'unpaired', 'This executor is not paired with a wallet yet. Enter the pairing code it printed when it started.');
         }
         this.db.setMeta('owner', owner);
@@ -354,7 +419,11 @@ export class ExecutorService {
     const pending = this.db.key(owner, 'pending');
     if (pending) {
       const r = await this.sodex.keyRegistered(owner, pending.name, pending.address);
-      if (r.ok) {
+      const latest = Date.now() + this.cfg.keyTtlDaysMax * 86_400_000 + KEY_TTL_SLACK_MS;
+      if (r.ok && (!r.expiresAt || r.expiresAt > latest)) {
+        // The terms promise a key lives at most keyTtlDaysMax days: one registered for longer is not used.
+        this.deps.log.warn('copy key refused: registered for longer than allowed', { owner, key: pending.address, expiresAt: r.expiresAt });
+      } else if (r.ok) {
         this.db.markKey(owner, 'pending', true, r.expiresAt, Date.now());
         this.db.promoteKey(owner);
         this.signers.delete(owner);
@@ -372,11 +441,13 @@ export class ExecutorService {
   /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
   async deleteKey(req: unknown, ctx: RequestContext): Promise<MeResponse> {
     const { owner, payload } = this.accept(req, 'delete-key', ctx);
-    await this.algos.cancelAll(owner);
-    await this.runtime.stopAll(owner, { close: payload.close === true });
-    this.db.deleteKeys(owner);
-    this.signers.delete(owner);
-    return this.me(owner, ctx);
+    return this.serial(owner, async () => {
+      await this.algos.cancelAll(owner);
+      await this.runtime.stopAll(owner, { close: payload.close === true });
+      this.db.deleteKeys(owner);
+      this.signers.delete(owner);
+      return this.me(owner, ctx);
+    });
   }
 
   private async keyProblem(owner: string): Promise<string | null> {
@@ -427,7 +498,11 @@ export class ExecutorService {
   }
 
   async subscribe(req: unknown, ctx: RequestContext): Promise<CopyView> {
-    const { owner, payload, consent } = this.accept(req, 'subscribe', ctx);
+    const accepted = this.accept(req, 'subscribe', ctx);
+    return this.serial(accepted.owner, () => this.subscribeAccepted(accepted, ctx));
+  }
+
+  private async subscribeAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<CopyView> {
     if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new copies right now. Running copies continue.');
     this.needTerms(owner, ctx);
     if (payload.termsVersion !== COPY_TERMS_VERSION) throw new ApiError(400, 'terms-version', 'Reload the page: the copy terms changed.');
@@ -474,8 +549,11 @@ export class ExecutorService {
   }
 
   async act(req: unknown, ctx: RequestContext): Promise<{ copies: CopyView[] }> {
-    const { owner, payload, consent } = this.accept(req, ['update', 'pause', 'resume', 'stop', 'stop-all'], ctx);
-    const action = (req as SignedCopyRequest).action;
+    const accepted = this.accept(req, ['update', 'pause', 'resume', 'stop', 'stop-all'], ctx);
+    return this.serial(accepted.owner, () => this.actAccepted(accepted, (req as SignedCopyRequest).action, ctx));
+  }
+
+  private async actAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, action: CopyAction, ctx: RequestContext): Promise<{ copies: CopyView[] }> {
     const mine = (id: unknown): Subscription => {
       const s = typeof id === 'string' ? this.runtime.get(id) : null;
       if (!s || s.owner !== owner) throw new ApiError(404, 'copy', 'No such copy.');
@@ -542,7 +620,11 @@ export class ExecutorService {
 
   /** Start an algo order for the wallet that signed it. */
   async algoStart(req: unknown, ctx: RequestContext): Promise<AlgoView> {
-    const { owner, payload, consent } = this.accept(req, 'algo-start', ctx);
+    const accepted = this.accept(req, 'algo-start', ctx);
+    return this.serial(accepted.owner, () => this.algoStartAccepted(accepted, ctx));
+  }
+
+  private async algoStartAccepted({ owner, payload, consent }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<AlgoView> {
     if (this.cfg.kind === 'hosted' && !this.cfg.open) throw new ApiError(503, 'closed', 'The ValueDesk executor takes no new orders right now. Running ones continue.');
     this.needTerms(owner, ctx);
     let spec;
@@ -555,7 +637,9 @@ export class ExecutorService {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
     const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
     if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, 'limit', `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
-    if (!spec.paper && !LIVE_ALGOS) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
+    // Real orders are off unless this executor is set to take them (EXECUTOR_LIVE_ALGOS=1) - for the
+    // algo itself and for one a conditional would start.
+    if (!this.cfg.liveAlgos && specsOf(spec).some((x) => x.paper !== true)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
       await this.verifyKey(owner);
@@ -577,7 +661,11 @@ export class ExecutorService {
 
   /** Pause, resume or cancel one of the wallet's algos, or cancel all of them (the kill switch). */
   async algoAct(req: unknown, ctx: RequestContext): Promise<{ algos: AlgoView[] }> {
-    const { owner, payload } = this.accept(req, 'algo-action', ctx);
+    const accepted = this.accept(req, 'algo-action', ctx);
+    return this.serial(accepted.owner, () => this.algoActAccepted(accepted, ctx));
+  }
+
+  private async algoActAccepted({ owner, payload }: ReturnType<ExecutorService['accept']>, ctx: RequestContext): Promise<{ algos: AlgoView[] }> {
     const op = payload.op;
     const fail = (e: unknown): never => {
       throw e instanceof ApiError ? e : new ApiError(409, 'state', e instanceof Error ? e.message : String(e));
@@ -626,7 +714,7 @@ export class ExecutorService {
     try {
       if (!this.builderDb) {
         if (!existsSync(this.cfg.builderDb)) return null;
-        this.builderDb = new DatabaseSync(this.cfg.builderDb, { readOnly: true });
+        this.builderDb = new (sqlite().DatabaseSync)(this.cfg.builderDb, { readOnly: true });
         this.builderDb.exec('PRAGMA busy_timeout = 2000');
       }
       const fromDay = Math.floor(Date.now() / 86_400_000) - (COPY_FEE_WINDOW_DAYS - 1);

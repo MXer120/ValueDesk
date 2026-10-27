@@ -221,6 +221,8 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           )}
     </>
   );
+  // Filled, but its take-profit / stop-loss still guard the position.
+  const exitsLive = !live && !!v.exits?.some((x) => x.live);
   const next = live && v.nextAt ? (v.nextAt > now ? `next in ${fmtDuration(v.nextAt - now)}` : 'next now') : null;
   const ends = v.endsAt ? (live && v.endsAt > now ? `ends in ${fmtDuration(v.endsAt - now)}` : live ? null : `ended ${fmtTime(v.endsAt)}`) : null;
   return (
@@ -245,7 +247,11 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           )}
         </td>
         <td>
-          <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
+          {exitsLive ? (
+            <span className="algo-status is-running" title="The entry is done; its take-profit and stop-loss still watch the position">Exits live</span>
+          ) : (
+            <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
+          )}
           {place !== 'browser' && <span className="acct-sub"> · {PLACE_WORD[place]}</span>}
         </td>
         <td className="num">
@@ -269,7 +275,11 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           <button type="button" className="acct-act" onClick={() => setWin(true)} title="Its own window: the live chart, every order and the log">Open</button>
           {live && a.status !== 'paused' && <button type="button" className="acct-act" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">Pause</button>}
           {a.status === 'paused' && <button type="button" className="acct-act" onClick={() => doAct('resume')}>Resume</button>}
-          {live && <button type="button" className="acct-act acct-act--danger" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled; what filled stays filled">Cancel</button>}
+          {(live || exitsLive) && (
+            <button type="button" className="acct-act acct-act--danger" onClick={() => doAct('cancel')} title={live ? 'Cancel: resting children are cancelled; what filled stays filled' : 'Cancel its take-profit and stop-loss; the position stays as it is'}>
+              {live ? 'Cancel' : 'Cancel exits'}
+            </button>
+          )}
           {win && (
             <RunningWindow
               v={v}
@@ -319,9 +329,11 @@ export default function AlgoTable({ address }: { address: string | null }) {
   const baskets = new Set(all.filter((r) => r.v.algo.spec.kind === 'basket').map((r) => r.v.algo.id));
   const rows = all.filter((r) => !(r.v.algo.parentId && baskets.has(r.v.algo.parentId))).sort((a, b) => b.v.algo.createdAt - a.v.algo.createdAt);
   const isLive = (r: { v: AlgoView }) => !FINAL_STATUSES.has(r.v.algo.status);
+  // Ended, but its take-profit / stop-loss still guard the position: the kill switch takes those too.
+  const guards = (r: { v: AlgoView }) => !isLive(r) && !!r.v.exits?.some((x) => x.live);
   const live = rows.filter(isLive);
   const ended = rows.filter((r) => !isLive(r)).slice(0, 50);
-  const livePlaces = [...new Set(live.map((r) => r.place))];
+  const livePlaces = [...new Set([...live, ...rows.filter(guards)].map((r) => r.place))];
   const cancelAll = async () => {
     for (const p of livePlaces) await act(p, 'cancelAll');
     remote.reload();
@@ -353,7 +365,7 @@ export default function AlgoTable({ address }: { address: string | null }) {
           ))}
         </div>
         <span className="algos__where">{where}</span>
-        {live.length > 0 && (
+        {livePlaces.length > 0 && (
           <button type="button" className="algo-btn is-danger" onClick={() => void cancelAll()} title="Cancel every running algo, wherever it runs, and pull its resting children (an executor asks for one wallet signature)">
             Cancel all
           </button>
