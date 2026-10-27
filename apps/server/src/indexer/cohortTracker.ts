@@ -78,6 +78,7 @@ import { liqCoin, snapOfNow } from '../valuescan/liquidations/levels.js';
 import { LiqLive } from '../valuescan/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
+import { loadSeeds, type Seeds } from './archiveSeed.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -470,6 +471,9 @@ export class CohortTracker {
   private liqMs = 0;
   /** When this tracker started (books read before it without liquidation data are read once more). */
   private startedAt = 0;
+  /** Holders the Hyperliquid fills archive found (archiveSeed.ts): read once each, the largest first. */
+  private seeds: Seeds = new Map();
+  private seedsAt: number | null = null;
   private planMs = 0;
   private recordMs = 0;
   lastError: string | null = null;
@@ -509,6 +513,7 @@ export class CohortTracker {
       const saved = JSON.parse(s.getMeta(LIQ_ACC_META) ?? '{}') as Record<string, { cur: DriftStats; prev: DriftStats | null }>;
       for (const v of VENUES) if (saved[v]?.cur) this.liqAcc.set(v, saved[v]!);
     } catch { /* starts afresh */ }
+    void loadSeeds().then((r) => { this.seeds = r.seeds; this.seedsAt = r.at; }).catch((e) => (this.lastError = `archive seeds: ${String(e)}`));
     this.hlc.start();
     this.hlh.start();
     this.scoh.start();
@@ -584,6 +589,12 @@ export class CohortTracker {
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
       staleBefore: this.staleBefore,
+      seeds: { at: this.seedsAt, ...Object.fromEntries([...this.seeds].map(([v, m]) => {
+        const books = this.books.get(v);
+        let unread = 0;
+        for (const k of m.keys()) if (!books?.has(k)) unread++;
+        return [v, { wallets: m.size, unread }];
+      })) },
       rebuild: this.rebuild
         ? {
           span: this.rebuild.span, phase: this.rebuild.phase, planned: this.rebuild.plan.size, read: this.rebuild.read.size,
@@ -1085,7 +1096,8 @@ export class CohortTracker {
         const eq = m?.equity ?? (venue === 'tradexyz' ? hlMembers.get(address)?.equity ?? 0 : 0);
         const book = books.get(address);
         const traded = this.wanted.has(`${venue}|${address}`);
-        const size = Math.round(Math.log10(Math.max(1, eq)) * 100);
+        // A wallet never read and never valued: the archive's notional orders it among the others.
+        const size = Math.round(Math.log10(Math.max(1, eq || (book ? 0 : this.seeds.get(venue)?.get(address) ?? 0))) * 100);
         // A tail wallet outside the sample is never read, traded or not (it would count twice).
         if (!sampleRule(TAIL_RATE[venue], address, eq).counts) return;
         const push = (prio: number) => {
@@ -1126,6 +1138,16 @@ export class CohortTracker {
         if (!k.startsWith(`${venue}|`)) continue;
         const address = k.slice(venue.length + 1);
         if (!members.has(address)) consider(address, undefined);
+      }
+      // The archive's holders not read yet (once read, their book makes them members).
+      for (const address of this.seeds.get(venue)?.keys() ?? []) {
+        if (members.has(address) || books.has(address) || this.wanted.has(`${venue}|${address}`)) continue;
+        consider(address, undefined);
+        if (Date.now() - t0 > SLICE_MS) {
+          await new Promise<void>((r) => setImmediate(r));
+          mark('coh:plan');
+          t0 = Date.now();
+        }
       }
       this.liqDue.set(venue, liqDue);
       due.sort((a, b) => b[1] - a[1]);
