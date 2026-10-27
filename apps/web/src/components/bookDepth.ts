@@ -212,40 +212,23 @@ function roundDecimal(int: string, frac: string, dp: number): { int: string; fra
   return { int: s.slice(0, s.length - dp), frac: s.slice(s.length - dp) };
 }
 
-/** The compact steps, largest first: 1,234,567 -> 1.23M. */
-const NOTIONAL_STEPS: ReadonlyArray<readonly [number, string]> = [[9, 'B'], [6, 'M'], [3, 'K'], [0, '']];
-
 /**
  * THE BOOK'S NOTIONAL CELL - the quote-unit (USDC) Size and Sum columns, and
- * the popup's Sum USDC: two places of K / M / B, `922.47K`, `2.11M`. A 395px
- * book has room for about seven characters a column, and depth is compared by
- * magnitude, not by nine significant digits.
+ * the popup's Sum USDC: whole dollars with thousands separators, `171,242,255`,
+ * never K / M / B (the owner wants the full figure, to $1).
  *
- * HALF-UP ON THE DECIMAL DIGITS, never on a binary float: `(1005 / 1e3)
- * .toFixed(2)` is "1.00" because 1.005 is 1.00499999... in binary, which is a
- * floor, not a rounding. A number is taken at its shortest round-trip digits
- * and a string (the popup's exact sums) exactly as written. A rounding that
- * carries to 1000 moves up a step - 999,999 is `1.00M`, not `1000.00K`.
+ * HALF-UP ON THE DECIMAL DIGITS, never on a binary float: a number is taken at
+ * its shortest round-trip digits and a string (the popup's exact sums) exactly
+ * as written, so 2.5 is `3` and 1,004.5 is `1,005`.
  */
 export function fmtNotional(v: number | string): string {
   const s = typeof v === 'number' ? (Number.isFinite(v) ? plainDecimal(v) : '') : v.trim();
   const m = /^(-?)(\d*)(?:\.(\d*))?$/.exec(s);
   if (!m || !(m[2] || m[3])) return DASH;
-  const int = (m[2] ?? '').replace(/^0+/, '');
-  const frac = m[3] ?? '';
-  let k = NOTIONAL_STEPS.findIndex(([e]) => int.length > e);
-  if (k < 0) k = NOTIONAL_STEPS.length - 1;
-  for (;;) {
-    const [e, suffix] = NOTIONAL_STEPS[k]!;
-    const whole = int.padStart(e, '0');
-    const r = roundDecimal(whole.slice(0, whole.length - e), whole.slice(whole.length - e) + frac, 2);
-    if (r.int.length > 3 && k > 0) {
-      k--; // 999.995K rounds to 1000.00K: one step up instead
-      continue;
-    }
-    const sign = m[1] && (r.int !== '0' || /[1-9]/.test(r.frac)) ? '-' : '';
-    return `${sign}${r.int}.${r.frac}${suffix}`;
-  }
+  const r = roundDecimal(m[2] ?? '', m[3] ?? '', 0);
+  const int = r.int.replace(/^0+(?=\d)/, '');
+  const sign = m[1] && int !== '0' ? '-' : '';
+  return `${sign}${int.replace(/\B(?=(\d{3})+$)/g, ',')}`;
 }
 
 /**

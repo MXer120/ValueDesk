@@ -73,7 +73,7 @@ Found on the way, and dealt with by `apply-overlay.sh` / bootstrap.sh:
 - **rsyslog copied the journal into `/var/log/messages`**, rotated weekly, four kept: the
   API's request lines with IP addresses for up to five weeks, the privacy policy says 14
   days. Disabled; the persistent journal has everything, and the API's and executor's
-  lines are in their own 14-day namespace now (`journald@pii.conf`).
+  lines are in their own 90-day namespace now (`journald@pii.conf`).
 - `rpcbind` listened on port 111 (blocked by firewalld; nothing uses NFS): disabled.
 - **The health check had the wrong role on both servers**: server 1 checked an executor
   that is held there, server 2 an API and index it does not have. Both failed every
@@ -189,7 +189,7 @@ refuses CRLF), Node on PATH, and the two `ec2.contabo*.env` copied into
    ssh $K $S1 'sudo /opt/valuescan/bin/backup-restore.sh drill executor --key-stdin' < ~/ValueDesk-backups/keys/server2.backup.key
    ```
 7. Later, at a quiet moment: reboot server 2 (kernel), delete the leftovers listed above,
-   `sudo find /var/log -maxdepth 1 -name 'messages*' -mtime +14 -delete` on both after 14 days.
+   `sudo find /var/log -maxdepth 1 -name 'messages*' -mtime +90 -delete` on both after 90 days.
 
 ## Owner steps
 

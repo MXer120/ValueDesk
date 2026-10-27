@@ -7,7 +7,7 @@
  *     instance in Tokyo (deploy/server) - the CloudFront + WAF design of
  *     deploy/aws is not what serves the site; the API logs the path without the
  *     query and the client address (apps/server/src/index.ts, hosted
- *     serializer), journald keeps 14 days (deploy/server/journald/valuescan.conf);
+ *     serializer), journald keeps 90 days (deploy/server/journald/journald@pii.conf);
  *   - the index API (apps/server/src/hosted.ts HOSTED_ROUTES) - some requests
  *     carry a wallet address or search text in the query (leaderboard `q`,
  *     `lbrow?address=`, `builder/terms?address=`, `feed/account?id=`);
@@ -85,7 +85,7 @@ export const PRIVACY: LegalDoc = {
             'by Vercel, to deliver the site and to protect it against attacks. [[OWNER: what Vercel logs for this project and for how long - its request logs and its firewall - as shown in the project\'s settings]];',
             'by Vercel, to tell which country and region your IP address belongs to (section 3);',
             'by ValueDesk\'s function at Vercel, which passes your IP address to ValueDesk\'s server - so that the server can limit the number of requests per visitor - and logs errors with the path and the reason only, never the address;',
-            'by ValueDesk\'s server, for requests to its data service. Its log records the IP address and the path requested, without the query string, and is deleted automatically after 14 days.',
+            'by ValueDesk\'s server, for requests to its data service. Its log records the IP address and the path requested, without the query string, and is deleted automatically after 90 days.',
           ],
         },
         { p: 'Legal basis: Art. 6(1)(f) GDPR - our legitimate interest in delivering the site and keeping it secure and available. Vercel\'s edge can serve you from outside the EU, and Vercel is a US company; ValueDesk\'s data server is in the EU (France), and Japan, where the function and the copy executor\'s server are, has an adequacy decision of the European Commission (Implementing Decision (EU) 2019/419). [[OWNER: confirm the safeguards for the US - Vercel\'s participation in the EU-U.S. Data Privacy Framework and the EU Standard Contractual Clauses in its data processing addendum]]' },
@@ -218,8 +218,8 @@ export const PRIVACY: LegalDoc = {
           ul: [
             'copy rules and the state of a copy: while the copy exists, and [[OWNER: how long after a copy is stopped]];',
             'the activity log: [[OWNER: retention period - the executor deletes entries older than 365 days by default (EXECUTOR_ACTIVITY_DAYS)]];',
-            'the executor\'s operating log, kept to run and secure the service (Art. 6(1)(f) GDPR): events such as a pairing, a copy key created or a copy or algo order started, with your wallet address and the leader copied, and the path of a request that failed - not your IP address; deleted automatically after 14 days;',
-            'the executor\'s audit record, kept to prove what the service did with your account and to establish, exercise or defend legal claims (Art. 6(1)(f) GDPR): every request it answered (the action, your wallet address, the network your request came from - the first three parts of an IPv4 address or the first three groups of an IPv6 address, never the full address - and the result), every order, stop, cancel and leverage change it sent to SoDEX for your account with SoDEX\'s answer, and when trading was paused for everyone. It cannot be changed afterwards (each entry is chained to the one before it) and contains no key, signature or session token. Kept [[OWNER: retention period, e.g. until the end of the N-th year after your last copy or algo order ended (limitation periods, §§ 195, 199 BGB) - the executor never deletes it on its own]];',
+            'the executor\'s operating log, kept to run and secure the service (Art. 6(1)(f) GDPR): events such as a pairing, a copy key created or a copy or algo order started, with your wallet address and the leader copied, and the path of a request that failed - not your IP address; deleted automatically after 90 days;',
+            'the executor\'s audit record, kept to prove what the service did with your account and to establish, exercise or defend legal claims (Art. 6(1)(f) GDPR): every request it answered (the action, your wallet address, the network your request came from - the first three parts of an IPv4 address or the first three groups of an IPv6 address, never the full address - and the result), every order, stop, cancel and leverage change it sent to SoDEX for your account with SoDEX\'s answer, and when trading was paused for everyone. It cannot be changed afterwards (each entry is chained to the one before it) and contains no key, signature or session token. Kept permanently: it is the only proof of what was done with your account and your money, and the executor never deletes it;',
             'the signed requests and the accepted terms: [[OWNER: retention period, e.g. until the end of the N-th year after your last copy ended (limitation periods) - the executor never deletes them on its own]];',
             'the encrypted key: until you delete it with a signed request [[OWNER: and whether an expired or revoked key is deleted automatically, and when]].',
           ],

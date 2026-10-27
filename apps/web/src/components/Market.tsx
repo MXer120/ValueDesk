@@ -87,8 +87,8 @@ const log = logger('book');
  * across twenty rows - they compare magnitudes. Two decimals keeps `922.47K`
  * and `2.11M` distinguishable, which is the resolution the eye actually uses.
  * The unit lives in the column head, so no currency glyph is repeated per cell.
- * The order book's own cells (and its hover popup) print through `fmtNotional`
- * in bookDepth.ts: the same scale, rounded half-up on the decimal digits.
+ * The order book's own cells (and its hover popup) do NOT: they print the full
+ * figure to the dollar through `fmtNotional` in bookDepth.ts (owner's call).
  */
 function fmtCompact(v: number): string {
   if (!Number.isFinite(v)) return DASH;

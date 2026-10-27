@@ -325,7 +325,7 @@ test("REPRO (live BTC-USD capture): the popup Price is the hovered row's price, 
   // (`v.toFixed(precisionOf(tickSize))`): the same number, without separators.
   assert.equal(f.text.price.replace(/,/g, ''), (83841).toFixed(precisionOf(BTC.tickSize)));
   assert.equal(f.text.sumBase, '1.15399');
-  assert.equal(f.text.sumQuote, '96.75K');
+  assert.equal(f.text.sumQuote, '96,751');
 });
 
 test('REPRO (live BTC-USD capture): the 2nd bid shows its own price', () => {
@@ -333,7 +333,7 @@ test('REPRO (live BTC-USD capture): the 2nd bid shows its own price', () => {
   const f = depthFiguresAt(bids, 83828, BTC)!;
   assert.equal(f.text.price, '83,828');
   assert.equal(f.text.sumBase, '3.26815');
-  assert.equal(f.text.sumQuote, '273.96K');
+  assert.equal(f.text.sumQuote, '273,964');
 });
 
 test("Price prints exactly like the row's Price cell: tick places, separators, trailing zeros, bucket labels", () => {
@@ -351,43 +351,44 @@ test("Price prints exactly like the row's Price cell: tick places, separators, t
 });
 
 test('Sum USDC is the EXACT sum of the printed rows, rounded half-up by the book\'s notional cell', () => {
-  // 333 x 1 + 336 x 2 = 1,005 exactly -> 1.01K. A float `(1005 / 1e3).toFixed(2)` floors it to 1.00K.
+  // 333 x 1 + 336 x 2 = 1,005 exactly -> 1,005, to the dollar.
   const asks = withCumulative(aggregate([['333', '1'], ['336', '2']], 1, 'ask'));
   const f = depthFiguresAt(asks, 336, { tickSize: '1', stepSize: '1' })!;
-  assert.equal(f.text.sumQuote, '1.01K');
+  assert.equal(f.text.sumQuote, '1,005');
   assert.equal((1005 / 1e3).toFixed(2), '1.00');
   // 83,840 x 0.01338 + 83,841 x 0.09380 = 8,986.065 exactly (the float is 8986.064999999999).
   const b = withCumulative(aggregate([['83840', '0.01338'], ['83841', '0.09380']], 1, 'ask'));
   const g = depthFiguresAt(b, 83841, BTC)!;
   assert.equal(byHand(b, 1, BTC).sumQuote, '8986.06500');
   assert.equal(g.text.sumQuote, fmtNotional('8986.06500'));
-  assert.equal(g.text.sumQuote, '8.99K');
+  assert.equal(g.text.sumQuote, '8,986');
 });
 
-test('fmtNotional: the book\'s K/M/B cell, half-up on decimal digits', () => {
-  assert.equal(fmtNotional(0), '0.00');
-  assert.equal(fmtNotional(12.345), '12.35');
-  assert.equal(fmtNotional(2.675), '2.68'); // 2.675 is 2.67499... in binary; toFixed says 2.67
-  assert.equal(fmtNotional(999.994), '999.99');
-  assert.equal(fmtNotional(999.995), '1.00K');
-  assert.equal(fmtNotional(1005), '1.01K');
-  assert.equal(fmtNotional(922_470), '922.47K');
-  assert.equal(fmtNotional(999_995), '1.00M'); // not 1000.00K
-  assert.equal(fmtNotional(2_110_000), '2.11M');
-  assert.equal(fmtNotional(123_456_789_012), '123.46B');
-  assert.equal(fmtNotional('96750.99877'), '96.75K');
+test('fmtNotional: the book\'s whole-dollar cell, grouped, half-up on decimal digits', () => {
+  assert.equal(fmtNotional(0), '0');
+  assert.equal(fmtNotional(0.4), '0');
+  assert.equal(fmtNotional(2.5), '3');
+  assert.equal(fmtNotional(12.345), '12');
+  assert.equal(fmtNotional(999.5), '1,000');
+  assert.equal(fmtNotional(1004.5), '1,005'); // the decimal digits decide, not a binary float
+  assert.equal(fmtNotional(922_470), '922,470');
+  assert.equal(fmtNotional(2_110_000), '2,110,000');
+  assert.equal(fmtNotional(171_242_254.6), '171,242,255');
+  assert.equal(fmtNotional(123_456_789_012), '123,456,789,012');
+  assert.equal(fmtNotional('96750.99877'), '96,751');
+  assert.equal(fmtNotional('-1234.4'), '-1,234');
+  assert.equal(fmtNotional('-0.2'), '0');
+  assert.equal(fmtNotional(1e21), '1,000,000,000,000,000,000,000');
   assert.equal(fmtNotional(Number.NaN), '—');
-  // Away from a rounding tie it prints exactly what the old float formatter did.
-  const legacy = (v: number) =>
-    v >= 1e9 ? `${(v / 1e9).toFixed(2)}B` : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(2)}K` : v.toFixed(2);
+  // Away from a .5 tie it prints what Intl does at no decimals.
+  const intl = (v: number) => v.toLocaleString('en-US', { maximumFractionDigits: 0 });
   let x = 12345;
   let checked = 0;
   for (let i = 0; i < 20000; i++) {
     x = (x * 1103515245 + 12345) % 2147483648;
     const v = (x / 2147483648) * 10 ** ((i % 11) + (x % 7) / 7);
-    const scaled = v >= 1e9 ? v / 1e9 : v >= 1e6 ? v / 1e6 : v >= 1e3 ? v / 1e3 : v;
-    if (Math.abs(scaled * 100 - Math.floor(scaled * 100) - 0.5) < 1e-6 || scaled >= 999.99) continue;
-    assert.equal(fmtNotional(v), legacy(v), `v=${v}`);
+    if (Math.abs(v - Math.floor(v) - 0.5) < 1e-6) continue;
+    assert.equal(fmtNotional(v), intl(v), `v=${v}`);
     checked++;
   }
   assert.ok(checked > 19000, `checked ${checked}`);

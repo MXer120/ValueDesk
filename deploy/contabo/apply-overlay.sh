@@ -24,7 +24,7 @@
 #   7. disables rpcbind (NFS's port mapper, listening on 111 for nothing)
 #   8. disables rsyslog: the journal is persistent now (bootstrap.sh) and rsyslog only
 #      copied it into /var/log/messages - API request lines with IP addresses for up to
-#      five weeks, past the 14 days the privacy policy promises. --keep-rsyslog: leave it.
+#      five weeks; the pii namespace stays out of it (90 days in the privacy policy). --keep-rsyslog: leave it.
 #
 # NOT HERE: secrets (alert.env: telegram-setup.sh; the backup and ssh keys:
 # deploy/server/bin/offsite-setup.sh; the origin secret: bootstrap-instance.sh), and the
@@ -147,7 +147,7 @@ if [ "$KEEP_RSYSLOG" = 0 ] && systemctl is-enabled -q rsyslog.service 2>/dev/nul
   [ -d /var/log/journal ] || die "the journal is not persistent yet (/var/log/journal missing): run bootstrap.sh first, then this"
   log "disable rsyslog (the persistent journal has everything; /var/log/messages kept API lines with IP addresses for weeks)"
   do_ systemctl disable --now rsyslog.service
-  log "  the old files stay: delete them once they are 14 days old -  sudo find /var/log -maxdepth 1 -name 'messages*' -mtime +14 -delete"
+  log "  the old files stay: delete them once they are 90 days old -  sudo find /var/log -maxdepth 1 -name 'messages*' -mtime +90 -delete"
   changed=1
 fi
 

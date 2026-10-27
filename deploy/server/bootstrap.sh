@@ -37,7 +37,7 @@
 #   5. /opt/valuescan (bin scripts), /etc/valuescan (env files; the origin secret
 #      from SSM Parameter Store), /etc/caddy/Caddyfile
 #   6. systemd units and timers; journald: persistent, a year for the main journal,
-#      14 days for the namespace "pii" (the API's and the executor's logs)
+#      90 days for the namespace "pii" (the API's and the executor's logs)
 #   7. starts Caddy and the timers; starts the API, the indexer and the copy
 #      executor if a release with them is installed (the first such release does
 #      that otherwise)
@@ -422,7 +422,7 @@ if install_if_changed "$HERE/journald/valuescan.conf" /etc/systemd/journald.conf
   systemctl restart systemd-journald
   journalctl --flush 2>/dev/null || true
 fi
-# The namespace "pii" (LogNamespace=pii in the API's and the executor's units): 14 days.
+# The namespace "pii" (LogNamespace=pii in the API's and the executor's units): 90 days.
 if install_if_changed "$HERE/journald/journald@pii.conf" /etc/systemd/journald@pii.conf 0644; then
   if systemctl is-active -q systemd-journald@pii.service; then systemctl restart systemd-journald@pii.service; fi
 fi
