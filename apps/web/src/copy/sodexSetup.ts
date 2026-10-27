@@ -8,7 +8,7 @@
  *     copy key cannot trade spot or move spot funds;
  *   - the key may be one this browser never holds: an executor generated it
  *     and sent only its ADDRESS; the wallet registers that address;
- *   - its lifetime is the follower's choice up to 90 days (7 for a browser key).
+ *   - its lifetime is the follower's choice up to 180 days (7 for a browser key).
  *
  * The key name is fixed per mode (vd-copy-browser / -tokyo / -self): SoDEX
  * REPLACES a key registered under an existing name, so re-approving never
@@ -34,7 +34,7 @@ import { logger } from '../log';
 const log = logger('copy');
 
 export const COPY_ENGINES: readonly Engine[] = ['perps'];
-export const MAX_COPY_KEY_DAYS = 90;
+export const MAX_COPY_KEY_DAYS = 180;
 export const MAX_BROWSER_KEY_DAYS = 7;
 
 /** The perps builder-fee ceiling SoDEX lists for the configured builder (null: none or no builder). */

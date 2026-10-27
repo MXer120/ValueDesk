@@ -21,7 +21,7 @@
  *   EXECUTOR_LIVE_ALGOS      1 = real (non-paper) algo orders may start; default off (practice only)
  *   EXECUTOR_TRUST_EDGE      hosted: 1 = read the viewer's address and country from the edge's headers
  *   EXECUTOR_OPEN            hosted: 0 closes it to new followers (running copies continue)
- *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default 90)
+ *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default and at most 180)
  *   EXECUTOR_MAX_COPIES      copies per wallet (default 10)
  *   EXECUTOR_MAX_ALGOS       live algo orders (TWAP, VWAP, ...) per wallet (default 20)
  *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from, when
@@ -119,7 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
   const network = env.SODEX_NETWORK === 'testnet' ? 'testnet' : 'mainnet';
   const builderId = Number(env.EXECUTOR_BUILDER_ID ?? 221909);
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error('EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)');
-  const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 90);
+  const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;
   return {
     kind,
@@ -134,8 +134,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     originSecrets,
     trustEdge,
     open: env.EXECUTOR_OPEN !== '0',
-    // 90 days is what the copy terms promise and what the web app registers at most.
-    keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
+    // 180 days is what the copy terms promise and what the web app registers at most.
+    keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,

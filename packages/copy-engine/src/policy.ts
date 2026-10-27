@@ -28,9 +28,9 @@
  * The copy-trading terms every follower accepts (by wallet signature) before copying.
  * Bump it with every change to the terms (apps/web/src/legal/copyTerms.ts): every
  * follower then accepts the new text before their next change. '.2': counter-trading.
- * 2026-10-27: algo orders on the executors, and keys the follower made themselves.
+ * 2026-10-27: algo orders on the executors, and keys the follower made themselves; '.2': keys live up to 180 days.
  */
-export const COPY_TERMS_VERSION = '2026-10-27';
+export const COPY_TERMS_VERSION = '2026-10-27.2';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];

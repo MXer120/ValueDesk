@@ -8,7 +8,7 @@
  * this app needs:
  *
  *   This browser       connect, terms, copy fee, copy key (7 days, in this browser)
- *   ValueDesk executor connect, sign in, terms, copy fee, copy key (up to 90 days, held in Tokyo)
+ *   ValueDesk executor connect, sign in, terms, copy fee, copy key (up to 180 days, held in Tokyo)
  *   Self-hosted        connect, your copier (address + pairing code), terms, copy fee, copy key
  *
  * Every action is one of the follower's own signatures; nothing is signed on
@@ -179,7 +179,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
 
   const ladder = COPY_FEE_LADDER.map((s) => `${feePercent(s.fee)}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${s.fromUsd / 1e6}M` : `${s.fromUsd / 1e3}k`)}` : ''}`).join(', ');
-  const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90];
+  const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
   const keyHolder = mode === 'browser' ? 'only this browser' : mode === 'hosted' ? 'the ValueDesk executor in Tokyo' : 'your copier';
 
   return (
@@ -401,7 +401,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
                       }}
                     >
                       <p className="fx-note">
-                        Make a perps API key on sodex.com with this wallet, valid for at most {side?.info?.keyTtlDaysMax ?? 90} days, then enter its name and its private key here.
+                        Make a perps API key on sodex.com with this wallet, valid for at most {side?.info?.keyTtlDaysMax ?? 180} days, then enter its name and its private key here.
                         The key is encrypted in this browser so that only {mode === 'hosted' ? 'the ValueDesk executor' : 'your copier'} can read it.
                       </p>
                       <input className="fx-input" value={own.name} onChange={(e) => setOwn((o) => ({ ...o, name: e.target.value }))} placeholder="Key name, as SoDEX shows it" aria-label="Key name" spellCheck={false} autoComplete="off" maxLength={64} />

@@ -4018,7 +4018,7 @@ function loadConfig(env = process.env) {
   const network = env.SODEX_NETWORK === "testnet" ? "testnet" : "mainnet";
   const builderId = Number(env.EXECUTOR_BUILDER_ID ?? 221909);
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error("EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)");
-  const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 90);
+  const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;
   return {
     kind,
@@ -4033,8 +4033,8 @@ function loadConfig(env = process.env) {
     originSecrets,
     trustEdge,
     open: env.EXECUTOR_OPEN !== "0",
-    // 90 days is what the copy terms promise and what the web app registers at most.
-    keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 90) : 90,
+    // 180 days is what the copy terms promise and what the web app registers at most.
+    keyTtlDaysMax: Number.isFinite(ttl) && ttl >= 1 ? Math.min(Math.floor(ttl), 180) : 180,
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
@@ -7928,7 +7928,7 @@ function randomId(prefix = "") {
 }
 
 // ../../packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-10-27";
+var COPY_TERMS_VERSION = "2026-10-27.2";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var SANCTIONED = ["CU", "IR", "KP", "SY", "RU", "BY", "MM"];
 var BLOCKED_COUNTRIES = [...US_REGIONS, ...SANCTIONED];

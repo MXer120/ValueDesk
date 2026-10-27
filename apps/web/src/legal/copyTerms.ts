@@ -28,7 +28,7 @@
  *   - signed instructions (EIP-712) and the append-only consent log:
  *     packages/copy-engine/src/api.ts, apps/executor/src/db.ts;
  *   - the hosted key: generated and sealed (AES-256-GCM) on the executor,
- *     lifetime chosen by the follower up to 90 days (apps/executor/src/
+ *     lifetime chosen by the follower up to 180 days (apps/executor/src/
  *     config.ts, secrets.ts); the browser key: at most seven days, in the
  *     browser only; an ordinary SoDEX key - the only kind that can trade - can
  *     also move funds between the owner's own accounts and wallet
@@ -76,12 +76,12 @@ export const COPY_TERMS: LegalDoc = {
         {
           ul: [
             '**Browser.** The copier runs in your open browser tab. Your browser generates a dedicated SoDEX API key and keeps it encrypted in this browser only; your wallet registers it on SoDEX with one signature, for at most seven days. Copying stops when the tab is closed, and nothing is copied while the computer sleeps or the connection is down. Stop-loss and take-profit orders the copier has already placed on SoDEX stay there. In this mode you can choose to approve each copied trade before it is sent.',
-            '**Hosted (the ValueDesk executor).** ValueDesk\'s server in Tokyo, Japan (hosted by Contabo) generates a SoDEX API key for you and stores it encrypted on that server. You register the key on SoDEX with your wallet, for the number of days you choose (at most 90), and you can revoke it at any time. From then on the executor places your copies around the clock, according to your rules, **without asking you before each trade**.',
+            '**Hosted (the ValueDesk executor).** ValueDesk\'s server in Tokyo, Japan (hosted by Contabo) generates a SoDEX API key for you and stores it encrypted on that server. You register the key on SoDEX with your wallet, for the number of days you choose (at most 180), and you can revoke it at any time. From then on the executor places your copies around the clock, according to your rules, **without asking you before each trade**.',
             '**Self-hosted.** You run the open-source ValueDesk executor (MIT licence) on your own computer or server. The key is generated and stored there; ValueDesk receives no key and no orders. Running, updating and securing it is up to you, and copying stops whenever it is not running.',
           ],
         },
         { p: '**What the key can do.** SoDEX offers no API key that can trade but cannot move funds. According to SoDEX\'s documentation, the key used for copying - in every mode - can place and cancel orders and change leverage and margin, and it can also move funds between your own SoDEX spot account, your perps account and your own wallet. According to SoDEX, it cannot send funds to anyone else. Whoever holds the key can trade your account (section 7).' },
-        { p: '**A key you made yourself.** With the hosted or a self-hosted executor you can instead make the API key yourself on sodex.com and give it to the executor. Its private key is encrypted in your browser so that only that executor can read it. The executor uses it only when SoDEX lists it on your own account under the name you give, valid for at most 90 days. Everything in these terms about the copy key applies to such a key too; keeping any other copy of it safe is up to you.' },
+        { p: '**A key you made yourself.** With the hosted or a self-hosted executor you can instead make the API key yourself on sodex.com and give it to the executor. Its private key is encrypted in your browser so that only that executor can read it. The executor uses it only when SoDEX lists it on your own account under the name you give, valid for at most 180 days. Everything in these terms about the copy key applies to such a key too; keeping any other copy of it safe is up to you.' },
         { p: 'We update the copier we provide - the hosted executor and the browser copier - from time to time, and an update can change how your rules are carried out. [[OWNER: how followers learn of updates, e.g. the version shown in the app and published release notes]] With a self-hosted executor you decide which version you run.' },
       ],
     },
@@ -340,7 +340,7 @@ export const COPY_STATEMENTS: Array<{ id: CopyStatementId; label: string }> = [
 
 /** Shown before the hosted executor creates the follower's key. */
 export const HOSTED_KEY_NOTICE: string =
-  'ValueDesk\'s executor will now create a SoDEX API key for you, and you register it on SoDEX with your wallet for the number of days you choose (at most 90). '
+  'ValueDesk\'s executor will now create a SoDEX API key for you, and you register it on SoDEX with your wallet for the number of days you choose (at most 180). '
   + 'The key is stored encrypted on ValueDesk\'s server in Tokyo, Japan (hosted by Contabo). '
   + 'While it is valid, the executor uses it to place your copies around the clock, according to your copy rules and without asking you before each trade. '
   + 'SoDEX has no key that can trade but cannot move funds: according to SoDEX, this key can also move funds between your own SoDEX spot account, perps account and your own wallet, though not to anyone else. '
