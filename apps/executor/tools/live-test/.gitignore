@@ -1,0 +1,4 @@
+# Results, the executor's data folders and logs of live-test runs: per machine, never committed.
+.state/
+# The keys. (.env.* is ignored by the repository's .gitignore too.)
+.env.live

@@ -1,0 +1,55 @@
+/**
+ * What a scenario is: its setup, actions and checks (`run`), what it costs on
+ * SoDEX (for --budget), what it depends on (for the resume hash), and how a
+ * dry run treats it. The cleanup after it is the runner's, the same for every
+ * scenario (cleanup.ts): it always runs, also when the scenario failed.
+ */
+import type { DepGroup } from './hash.ts';
+import type { T } from './harness.ts';
+
+/**
+ * What one scenario costs, in USD at the follower (and the leader), with
+ * every child order worth `U` (SoDEX's minimum plus headroom). Notional
+ * TRADED counts both the open and the close (the cleanup's close included);
+ * PEAK is the largest exposure at once - open positions plus resting orders
+ * that could fill - which sets the margin it needs.
+ */
+export interface Cost {
+  takerUsd: number;
+  makerUsd: number;
+  peakUsd: number;
+  /** Leverage the peak is held at (default: the scenario's market default, see budget.ts). */
+  leverage?: number;
+  leaderTakerUsd?: number;
+  leaderPeakUsd?: number;
+  /** Signed requests sent to SoDEX by the master wallet (registrations, approvals): free, counted for the record. */
+  walletSignatures?: number;
+}
+
+export type Section = 'setup' | 'algo' | 'copy';
+
+export interface Scenario {
+  id: string;
+  section: Section;
+  /** The algo kind, 'copy', 'kill', 'key'...: what --only matches besides the id. */
+  kind: string;
+  title: string;
+  /** What only a real exchange shows, that this scenario confirms. */
+  confirms: string;
+  deps: DepGroup[];
+  /** The file it is written in (repository-relative), hashed with it. */
+  source: string;
+  /** Bump to re-run it on unchanged code. */
+  rev?: number;
+  /** The bootstrap: runs every time, never skipped. */
+  always?: boolean;
+  /** Long (tens of minutes): runs only with --slow. */
+  slow?: boolean;
+  /** Needs the leader wallet. */
+  leader?: boolean;
+  /** How a dry run exercises it: on paper with its checks / its spec accepted and stopped / a copy's lifecycle without leader trades. */
+  dry: 'full' | 'spec' | 'lifecycle';
+  timeoutMs: number;
+  cost(U: number): Cost;
+  run(t: T): Promise<void>;
+}
