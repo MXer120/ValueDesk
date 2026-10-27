@@ -124,13 +124,18 @@ export class LiqLive {
     return this.dirty.size;
   }
 
-  /** Price up to `max` changed accounts; returns how many are left. */
-  work(max = 5_000): number {
+  /**
+   * Price up to `max` changed accounts, and for no longer than `budgetMs`; returns how many are
+   * left (oldest first next time). The budget keeps the indexer's one thread for the rest: with
+   * ~300k books (2026-10-27) the 5,000 a second took over a third of it and starved the reads.
+   */
+  work(max = 5_000, budgetMs = Number.POSITIVE_INFINITY): number {
     let n = 0;
+    const until = Date.now() + budgetMs;
     for (const key of this.dirty) {
       this.dirty.delete(key);
       this.reprice(key);
-      if (++n >= max) break;
+      if (++n >= max || ((n & 63) === 0 && Date.now() >= until)) break;
     }
     return this.dirty.size;
   }

@@ -107,6 +107,8 @@ const LIQ_BOOST_PNL_SHARE = 0.1;
 /** The live engine's beat, and how many changed accounts one beat prices at most (a start primes ~90k books in ~20 beats). */
 const LIVE_TICK_MS = 1_000;
 const LIVE_SLICE = 5_000;
+/** ...and at most this long a beat (live.ts work): what is left waits for the next beat. */
+const LIVE_BUDGET_MS = 150;
 export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
 /** Kept 30 days; past 3 days only the hourly ones. */
@@ -1364,7 +1366,7 @@ export class CohortTracker {
     if (!this.sodexCoins.size) return;
     // Every coin whole once a minute: the deltas leave out moves under 1% (live.ts SEND_MOVE: 1%), this puts the API's copy back to exact.
     if (t0 - this.liveWholeAt >= 60_000) { this.liveWholeAt = t0; this.live.resendAll(); }
-    const left = this.live.work(LIVE_SLICE);
+    const left = this.live.work(LIVE_SLICE, LIVE_BUDGET_MS);
     if (!left && !this.liveReady) this.liveReady = true;
     const deltas = this.live.flush();
     this.feed.send(deltas, { at: this.d.now(), ready: this.liveReady });
