@@ -59,6 +59,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
 const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
 
 const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'liqmap', 'sizecalc', 'feetier', 'venue'];
+const CHART_SEED = ['liqmap'];
 const CHART_WIDGETS = ['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding', 'liqmap'];
 
 const accountCtx = (c: TradeContext) => ({
@@ -120,7 +121,8 @@ export function TradeAccountBand({ c }: { c: TradeContext }) {
 
 /** The chart card: the coin row (with the tabs at its end), then the chart or the tab's widget. */
 export function ChartCard({ c }: { c: TradeContext }) {
-  const extra = useExtraTabs('chart');
+  // The liquidation heatmap is the chart's second tab unless closed (2026-10-27).
+  const extra = useExtraTabs('chart', 8, CHART_SEED);
   const [active, setActive] = useStored<string>('vs.tabs.chart.active', 'main');
   const [side, setSide] = useState(false);
   const [menu, setMenu] = useState<{ at: { x: number; y: number }; id: string } | null>(null);

@@ -93,6 +93,7 @@ import {
   slicesOf,
   UNIT_NAME,
   type CondDraft,
+  dcaLadder,
   type DcaSizing,
   type Draft,
   type LegDraft,
@@ -1496,6 +1497,8 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
                 each={Number(d.perOrder) || 0}
                 unit={d.dcaUnit === 'coin' ? base : 'USD'}
                 side={side}
+                prices={mid ? dcaLadder(d, { side, bid: mid, ask: mid }).prices : null}
+                coin={d.dcaUnit === 'coin'}
                 onChange={(v) => set({ dcaCurve: v })}
               />
               {err('skew', 'weights') && <p className="oe-hint algo-ferr">{err('skew', 'weights')}</p>}

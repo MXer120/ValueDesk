@@ -642,7 +642,15 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-curve__pt { fill: #111; stroke: var(--tint); stroke-width: 2; transition: r 120ms var(--ease-out, ease-out); }
 .algo-curve__pt.is-end { fill: var(--tint); }
 .algo-curve__foot { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--fs-xs, 11px); }
-.algo-curve__presets { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); align-self: flex-start; }
-.algo-curve__presets button { padding: 4px 10px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs, 11px); cursor: pointer; }
-.algo-curve__presets button:hover { color: var(--text); }
-.algo-curve__presets button.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.algo-curve__tools { display: flex; flex-wrap: wrap; gap: 6px; }
+.algo-curve__seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
+.algo-curve__seg button { padding: 4px 10px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs, 11px); cursor: pointer; }
+.algo-curve__seg button:hover:not(:disabled) { color: var(--text); }
+.algo-curve__seg button.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
+.algo-curve__seg button:disabled { opacity: 0.4; cursor: default; }
+.algo-curve__fit { display: flex; align-items: center; gap: 8px; }
+.algo-curve__fit label { flex: none; color: var(--muted); font-size: var(--fs-xs, 11px); }
+.algo-curve__fit .algo-sf { flex: 1 1 auto; min-width: 0; }
+.algo-curve__go { flex: none; height: 32px; padding: 0 12px; border: 0; border-radius: 9px; background: #f7f7f7; color: #111; font: inherit; font-size: var(--fs-xs, 11px); font-weight: 600; cursor: pointer; }
+.algo-curve__go:disabled { opacity: 0.35; cursor: default; }
+.algo-curve__note { margin: 0; color: var(--muted); font-size: var(--fs-xs, 11px); }

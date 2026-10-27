@@ -61,7 +61,7 @@ export function cleanCurve(v: unknown): CurvePoint[] {
  * The curve's size at x (0..1): a monotone cubic through the points (Fritsch-Carlson), so it
  * bends smoothly but never swings past a point the user set (no bump above the highest).
  */
-export function curveAt(pts: readonly CurvePoint[], x: number): number {
+export function curveAt(pts: readonly CurvePoint[], x: number, raw = false): number {
   const p = pts.length >= 2 ? pts : ([[0, 1], [1, 1]] as CurvePoint[]);
   const n = p.length;
   if (x <= p[0]![0]) return p[0]![1];
@@ -81,7 +81,7 @@ export function curveAt(pts: readonly CurvePoint[], x: number): number {
   const u2 = u * u;
   const u3 = u2 * u;
   const y = (2 * u3 - 3 * u2 + 1) * p[k]![1] + (u3 - 2 * u2 + u) * h[k]! * t[k]! + (-2 * u3 + 3 * u2) * p[k + 1]![1] + (u3 - u2) * h[k]! * t[k + 1]!;
-  return Math.min(CURVE_MAX, Math.max(CURVE_MIN, y));
+  return raw ? y : Math.min(CURVE_MAX, Math.max(CURVE_MIN, y));
 }
 
 /** How a DCA's orders grow (Draft.dcaSizing). */

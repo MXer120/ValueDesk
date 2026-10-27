@@ -35,7 +35,7 @@ const SKETCH: Record<string, string> = { trades: 'tape', news: 'news', livefeed:
 export { assetOf, baseOf, copyOf, extraKey, isExtraKey, nextCopy } from './tabIds';
 import { nextCopy } from './tabIds';
 
-export function useExtraTabs(panel: string, max = 8): {
+export function useExtraTabs(panel: string, max = 8, seed: readonly string[] = []): {
   ids: string[];
   /** Adds the next copy of `id`; returns the id it added (or null when the panel is full). */
   add: (id: string) => string | null;
@@ -43,6 +43,15 @@ export function useExtraTabs(panel: string, max = 8): {
 } {
   const [stored, setStored] = useStored<string[]>(`vs.tabs.${panel}`, []);
   const ids = Array.isArray(stored) ? stored.filter((x) => typeof x === 'string').slice(0, max) : [];
+  // Tabs the panel comes with (`seed`), put in front once per browser: once closed they stay closed.
+  const [seeded, setSeeded] = useStored<string[]>(`vs.tabs.${panel}.seeded`, []);
+  const fresh = seed.filter((id) => !(Array.isArray(seeded) && seeded.includes(id)));
+  useEffect(() => {
+    if (!fresh.length) return;
+    setStored([...fresh.filter((id) => !ids.includes(id)), ...ids].slice(0, max));
+    setSeeded([...(Array.isArray(seeded) ? seeded : []), ...fresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fresh.join()]);
   return {
     ids,
     add: (id) => {
