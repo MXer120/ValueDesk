@@ -26,7 +26,7 @@
  * any module report one without threading a callback through every caller.
  */
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type ReactNode,
 } from 'react';
 import { createPortal } from 'react-dom';
@@ -292,6 +292,17 @@ function ToastCard({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
   /* Held while the pointer is on it (it opens to its full words then): the time left is kept
      and runs on when the pointer leaves, as its timer bar does (shell.css pauses the bar). */
   const [held, setHeld] = useState(false);
+  /* Does its text fit the pill (shell.css)? 'clip': it opens to the set width on hover;
+     'long': even that is not enough, so it wraps to more lines as well. */
+  const box = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<'fits' | 'clip' | 'long'>('fits');
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const over = Math.max(0, ...[...el.querySelectorAll<HTMLElement>('.toast__title, .toast__detail, .toast__msg')].map((c) => c.scrollWidth - c.clientWidth));
+    const open = Math.min(420, window.innerWidth * 0.7);
+    setFit(over <= 1 ? 'fits' : el.offsetWidth + over > open ? 'long' : 'clip');
+  }, [t.title, t.message]);
   const left = useRef(ttl);
   useEffect(() => {
     left.current = ttl;
@@ -308,7 +319,8 @@ function ToastCard({ t, onDismiss }: { t: Toast; onDismiss: (id: number) => void
 
   return (
     <div
-      className={`toast toast--${t.severity}${t.kind ? ` toast--${t.kind}` : ''}${leaving ? ' is-leaving' : ''}`}
+      className={`toast toast--${t.severity}${t.kind ? ` toast--${t.kind}` : ''}${leaving ? ' is-leaving' : ''}${fit === 'fits' ? '' : fit === 'long' ? ' is-clipped is-long' : ' is-clipped'}`}
+      ref={box}
       /* An error interrupts; everything else waits its turn. */
       role={t.severity === 'error' ? 'alert' : 'status'}
       onMouseEnter={() => setHeld(true)}
