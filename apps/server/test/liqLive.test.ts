@@ -129,3 +129,13 @@ test('the feed: whole coins to a new reader, then changes; the API side holds th
     server.stop();
   }
 });
+
+test('a beat stops at its time budget and the rest waits, oldest first, to the same result', () => {
+  const { books, live, full } = world();
+  for (let i = 0; i < 300; i++) books.set(`hyperliquid|0x${i}`, { cash: 50_000 + i * 100, priced: true, positions: [{ symbol: 'BTC', szi: i % 2 ? 1 : -1 }] });
+  for (const k of books.keys()) live.touch('hyperliquid', k.slice('hyperliquid|'.length));
+  assert.equal(live.work(5_000, 0), 300 - 64, 'a spent budget ends the beat at its next check');
+  while (live.work(5_000, 0) > 0) { /* the next beats */ }
+  live.flush();
+  assert.deepEqual(strip(live.rows()), strip(full()));
+});
