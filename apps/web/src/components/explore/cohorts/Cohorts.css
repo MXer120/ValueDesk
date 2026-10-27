@@ -429,7 +429,10 @@ button.coh-pick__opt:hover .coh-pick__ic, button.coh-pick__opt.is-on .coh-pick__
 .coh-d__range { margin-left: auto; }
 .coh-d__range > button { height: 24px; font-size: var(--fs-micro); }
 .coh-d__plot { position: relative; padding: 10px 10px 6px 12px; }
-.coh-d__tree { position: relative; min-height: 420px; padding: 4px; }
+.coh-d__tree { position: relative; min-height: 420px; padding: 0; border: 0; background: none; }
+/* The cohort heatmap stands on its own: no card around it, its own corners rounded like the panels beside it. */
+.coh-d__tree .coh-tree-wrap { inset: 0; }
+.coh-d__tree .coh-tree { border-radius: 12px; }
 .coh-d__tables { padding: 0 12px 8px; }
 .coh-d__tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--panel-line); margin: 0 -12px 4px; padding: 0 12px; }
 .coh-d__tabs > button {
