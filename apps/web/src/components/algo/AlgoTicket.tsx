@@ -92,6 +92,7 @@ import {
   slicesOf,
   UNIT_NAME,
   type CondDraft,
+  type DcaSizing,
   type Draft,
   type LegDraft,
   type PovPreset,
@@ -838,7 +839,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 
           {ek === 'dca' && (
             <>
-              <UsdField ticket title={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} onChange={(v) => set({ perOrder: v })} hint="The first order's size; each later one is Size × times the one before" err={err('perOrderUsd', 'quantity')} />
+              <EachField ticket title={p.side === 'buy' ? 'Each buy' : 'Each sell'} value={d.perOrder} valueUnit={d.dcaUnit} onChange={(v, u) => set({ perOrder: v, dcaUnit: u })} hint={DCA_EACH_HINT[d.dcaSizing]} err={err('perOrderUsd', 'quantity')} />
               <Field
                 label="First at"
                 value={d.dcaStart}
@@ -860,7 +861,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               ) : (
                 <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
               )}
-              <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order is this many times the one before, in USD (1: all the same)" err={err('skew', 'weights')} />
+              {/* Every order the same unless the settings window chose to grow them. */}
+              {d.dcaSizing === 'weighted' && <Field label="Size step" value={d.dcaAdd} onChange={(v) => set({ dcaAdd: v })} suffix="% of first" title="Each next order this much of the first bigger (Settings: sizing)" err={err('skew', 'weights')} />}
+              {d.dcaSizing === 'geometric' && <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order this many times the one before (Settings: sizing)" err={err('skew', 'weights')} />}
             </>
           )}
 
@@ -1137,28 +1140,39 @@ const SizeCtx = createContext<{ unit: 'coin' | 'usd'; setUnit?: (u: 'coin' | 'us
  * A size in the coin, shown in the order panel's unit (the coin, or USD at the price now) with that
  * unit's switch in its box; it is kept in the coin as the draft keeps it.
  */
-/** A USD amount (a DCA's each buy) shown in the order panel's unit: USD, or the coin at the price now. */
-function UsdField({ title, hint, value, onChange, err, ticket = false }: { title: string; hint: string; value: string; onChange: (v: string) => void; err?: string; ticket?: boolean }) {
+const DCA_EACH_HINT: Record<DcaSizing, string> = {
+  linear: 'Every order exactly this size',
+  weighted: 'The first order’s size; each next one a set step bigger',
+  geometric: 'The first order’s size; each next one Size × times the one before',
+};
+const DCA_SIZINGS: ReadonlyArray<Opt<DcaSizing>> = [
+  ['linear', 'Linear', 'Every order the same size: the plain DCA.'],
+  ['weighted', 'Weighted', 'Each next order a set step bigger (1, 1.5, 2 …): more where the price is better.'],
+  ['geometric', 'Geometric', 'Each next order a multiple of the one before (1, 1.5, 2.25 …): the martingale DCA bots use.'],
+];
+
+/**
+ * A DCA's each order, in the order panel's unit (USD or the coin). It is kept in the unit it is
+ * shown in (`valueUnit`), so a linear DCA is exactly that amount every time; switching the unit
+ * converts it at the price now.
+ */
+function EachField({ title, hint, value, valueUnit, onChange, err, ticket = false }: {
+  title: string; hint: string; value: string; valueUnit: 'usd' | 'coin'; onChange: (v: string, u: 'usd' | 'coin') => void; err?: string; ticket?: boolean;
+}) {
   const { unit, setUnit, px, base, step } = useContext(SizeCtx);
-  const [text, setText] = useState<string | null>(null);
-  const coin = unit === 'coin' && !!px;
-  const shown = text ?? (value.trim() === '' ? '' : coin ? toStep(Number(value) / px!, step) : value);
-  const write = (t: string) => {
-    if (!coin) {
-      setText(null);
-      onChange(t);
-      return;
-    }
-    setText(t);
-    onChange(t.trim() === '' ? '' : (Number(t) * px!).toFixed(2));
-  };
+  const want: 'usd' | 'coin' = unit === 'coin' && px ? 'coin' : 'usd';
+  const conv = (v: string, from: 'usd' | 'coin', to: 'usd' | 'coin'): string =>
+    v.trim() === '' || from === to || !px ? v : to === 'coin' ? toStep(Number(v) / px, step) : (Number(v) * px).toFixed(2);
+  // The panel's unit moved (here or on the order panel): the amount follows it, converted once.
+  useEffect(() => {
+    if (valueUnit !== want && px) onChange(conv(value, valueUnit, want), want);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [want]);
+  const shown = conv(value, valueUnit, want);
+  const write = (t: string) => onChange(t, want);
   const opts: ReadonlyArray<readonly ['usd' | 'coin', string]> = [['usd', 'USD'], ['coin', base || 'Coin']];
-  const pick = (u: 'coin' | 'usd') => {
-    setText(null);
-    setUnit?.(u);
-  };
-  const shownUnit = coin ? 'coin' : 'usd';
-  const box = setUnit ? (ticket ? <ModeSelect label={title} value={shownUnit} options={opts} onChange={pick} /> : <APick label={title} value={shownUnit} options={opts} onChange={pick} />) : 'USD';
+  const pick = (u: 'coin' | 'usd') => setUnit?.(u);
+  const box = setUnit ? (ticket ? <ModeSelect label={title} value={want} options={opts} onChange={pick} /> : <APick label={title} value={want} options={opts} onChange={pick} />) : 'USD';
   return ticket ? (
     <Field label={title} value={shown} onChange={write} suffix={box} title={hint} err={err} />
   ) : (
@@ -1449,7 +1463,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
 
       {ek === 'dca' && (
         <Group label="Orders" sec="order">
-          <UsdField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint="The first order’s size; each later one is Size × times the one before." value={d.perOrder} onChange={(v) => set({ perOrder: v })} err={err('perOrderUsd', 'quantity')} />
+          <EachField title={side === 'buy' ? 'Each buy' : 'Each sell'} hint={`${DCA_EACH_HINT[d.dcaSizing]}.`} value={d.perOrder} valueUnit={d.dcaUnit} onChange={(v, u) => set({ perOrder: v, dcaUnit: u })} err={err('perOrderUsd', 'quantity')} />
           <AField
             title="First at"
             hint="The first order’s price; the later ones step from it."
@@ -1466,7 +1480,9 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
           ) : (
             <AField title="Then at" hint="The later orders’ prices, separated by commas." value={d.dcaPrices} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} unit="USD" err={err('prices', 'orders')} />
           )}
-          <AField title="Size ×" hint="Each next order is this many times the one before, in USD (1: all the same)." value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} unit="per order" err={err('skew', 'weights')} />
+          <ASeg title="Sizing" hint="How the orders’ sizes go, one after another." value={d.dcaSizing} onChange={(v) => set({ dcaSizing: v })} options={DCA_SIZINGS} />
+          {d.dcaSizing === 'weighted' && <AField title="Size step" hint="Each next order this much of the first bigger: 50 % gives 1, 1.5, 2, 2.5 …" value={d.dcaAdd} onChange={(v) => set({ dcaAdd: v })} unit="% of first" err={err('skew', 'weights')} />}
+          {d.dcaSizing === 'geometric' && <AField title="Size ×" hint="Each next order this many times the one before: 1.5 gives 1, 1.5, 2.25, 3.4 …" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} unit="per order" err={err('skew', 'weights')} />}
         </Group>
       )}
 
@@ -2187,10 +2203,11 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
       return `${verb} ${q} in ${x(d.orders)} orders from ${x(d.from)} to ${x(d.to)}`;
     case 'dca': {
       const first = d.dcaFirst === 'market' ? 'now' : `at ${x(d.dcaStart)}`;
-      const m = n(d.dcaMult) > 0 && n(d.dcaMult) !== 1 ? `, each ${x(d.dcaMult)}× the last` : '';
-      if (d.dcaLevels === 'list') return `${verb} $${x(d.perOrder)} ${first}, then at ${x(d.dcaPrices)}${m}`;
+      const m = d.dcaSizing === 'geometric' ? `, each ${x(d.dcaMult)}× the last` : d.dcaSizing === 'weighted' ? `, each ${x(d.dcaAdd)}% of the first bigger` : ', all the same size';
+      const each = d.dcaUnit === 'coin' ? `${x(d.perOrder)} ${base}` : `$${x(d.perOrder)}`;
+      if (d.dcaLevels === 'list') return `${verb} ${each} ${first}, then at ${x(d.dcaPrices)}${m}`;
       const sc = n(d.dcaStepScale) > 0 && n(d.dcaStepScale) !== 1 ? ` (each step ${x(d.dcaStepScale)}× the last)` : '';
-      return `${verb} $${x(d.perOrder)} ${first}, then every ${x(d.dcaStep)}% ${side === 'buy' ? 'lower' : 'higher'}${sc}, ${x(d.dcaOrders)} orders in all${m}`;
+      return `${verb} ${each} ${first}, then every ${x(d.dcaStep)}% ${side === 'buy' ? 'lower' : 'higher'}${sc}, ${x(d.dcaOrders)} orders in all${m}`;
     }
     case 'swarm':
       return `${verb} ${q} in ${x(d.clips)} clips, ${d.inFlight} at a time`;

@@ -38,6 +38,9 @@ export interface LegDraft {
   usd: string;
 }
 
+/** How a DCA's orders grow (Draft.dcaSizing). */
+export type DcaSizing = 'linear' | 'weighted' | 'geometric';
+
 export interface Draft {
   dur: string;
   durUnit: Unit;
@@ -91,11 +94,18 @@ export interface Draft {
    * set prices, never on a clock. A first buy (at market, or at a price), then
    * a limit buy at each price below it (sells: above) - `dcaStep` % apart
    * ('step', each gap `dcaStepScale` times the one before) or at prices typed
-   * in ('list'). Each order is `perOrder` USD, `dcaMult` times the one before.
+   * in ('list'). Each order is `perOrder` (in `dcaUnit`, USD or the coin), sized by `dcaSizing`:
+   * 'linear' (the default, the plain DCA: every order exactly the same), 'weighted' (each next one
+   * `dcaAdd` % of the first bigger: 1, 1.5, 2, ...) or 'geometric' (each next one `dcaMult` times the
+   * one before: 1, 1.5, 2.25, ...).
    * (DCA on a schedule is gone from the ticket, 2026-10-26: a saved one loads as this ladder.)
    */
   dcaStep: string;
   dcaMult: string;
+  dcaSizing: DcaSizing;
+  dcaAdd: string;
+  /** The unit `perOrder` was typed in: every linear order is that same amount of it. */
+  dcaUnit: 'usd' | 'coin';
   dcaFirst: 'market' | 'price';
   dcaStart: string;
   dcaLevels: 'step' | 'list';
@@ -174,7 +184,7 @@ export const DEFAULT: Draft = {
   display: '', displayJitter: '20', icePeg: true, icePrice: '', postOnly: true, refill: '0',
   offsetMode: 'ticks', offsetBps: '10', maxChasePct: '', timeout: '', timeoutUnit: 'm', onEnd: 'take',
   from: '', to: '', orders: '10', distribution: 'flat', skew: '1', spacing: 'linear', scaleJitter: '0',
-  perOrder: '50', dcaOrders: '10', dcaStep: '2', dcaMult: '1', dcaFirst: 'market', dcaStart: '', dcaLevels: 'step', dcaPrices: '', dcaStepScale: '1',
+  perOrder: '50', dcaOrders: '10', dcaStep: '2', dcaMult: '1.5', dcaSizing: 'linear', dcaAdd: '50', dcaUnit: 'usd', dcaFirst: 'market', dcaStart: '', dcaLevels: 'step', dcaPrices: '', dcaStepScale: '1',
   clips: '10', inFlight: 2, waveSec: '3', retries: '2',
   match: 'all', conds: [], holdSec: '0', expires: '', expiresUnit: 'd', then: 'market', thenPrice: '', closePct: '100', thenMin: '15', thenSlices: '15',
   trailMode: 'pct', trail: '1', activation: '', trailWhole: false, source: 'mark', exit: 'market', chaseSec: '15',
@@ -249,6 +259,12 @@ export function loadDraft(store: Store | null = local()): Draft {
       // DCA on a schedule is gone: a draft saved with it (or before DCA had price steps) loads as the price ladder, at its defaults.
       const old = saved as Record<string, unknown>;
       if (old.dcaMode !== 'price') for (const k of ['dcaStep', 'dcaMult', 'dcaFirst', 'dcaLevels', 'dcaStepScale'] as const) delete saved[k];
+      if (saved.dcaSizing === undefined && typeof saved.dcaMult === 'string') {
+        // Before 2026-10-27 the multiplier was always there (1: all the same).
+        if (Number(saved.dcaMult) > 0 && Number(saved.dcaMult) !== 1) saved.dcaSizing = 'geometric';
+        else delete saved.dcaMult;
+      }
+      if (saved.dcaSizing !== undefined && !(['linear', 'weighted', 'geometric'] as const).includes(saved.dcaSizing)) delete saved.dcaSizing;
       for (const k of ['dcaMode', 'every', 'everyUnit', 'outOfBand', 'dip', 'dipMult', 'budget']) delete old[k];
       // Fill fast's venues: known ones only, never none.
       if (saved.sweepVenues !== undefined) {
@@ -322,13 +338,15 @@ export interface DcaLadder {
  *          s the step scale (1: even steps of `step` %);
  *   list:  the prices typed, in order.
  *
- * Level i is `perOrder` x mult^i USD, so its size is that over its price: a
- * buy further down buys more of the coin for the same dollars, as the bots
- * size theirs (in the quote currency). A first buy at market is a GTC limit
+ * Level i is `perOrder` x f_i in its unit: f_i = 1 (linear), 1 + i x add (weighted) or
+ * mult^i (geometric). In USD its size is that over its price (a buy further down buys
+ * more of the coin for the same dollars, as the bots size theirs); in the coin it is that. A first buy at market is a GTC limit
  * at the touch: it takes at once while the touch holds.
  */
-export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 'dcaMult' | 'dcaFirst' | 'dcaStart' | 'dcaLevels' | 'dcaPrices' | 'dcaStepScale'>, p: Pick<TicketShared, 'side' | 'bid' | 'ask'>): DcaLadder {
+export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 'dcaMult' | 'dcaSizing' | 'dcaAdd' | 'dcaUnit' | 'dcaFirst' | 'dcaStart' | 'dcaLevels' | 'dcaPrices' | 'dcaStepScale'>, p: Pick<TicketShared, 'side' | 'bid' | 'ask'>): DcaLadder {
   const mult = n(d.dcaMult) > 0 ? n(d.dcaMult) : 1;
+  const add = n(d.dcaAdd) > 0 ? n(d.dcaAdd) / 100 : 0;
+  const factor = (i: number): number => (d.dcaSizing === 'geometric' ? Math.pow(mult, i) : d.dcaSizing === 'weighted' ? 1 + i * add : 1);
   const touch = p.side === 'buy' ? p.ask : p.bid;
   const first = d.dcaFirst === 'price' ? opt(d.dcaStart) : touch && touch > 0 ? touch : null;
   const sign = p.side === 'buy' ? -1 : 1;
@@ -353,11 +371,12 @@ export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 
       }
     }
   }
-  const usd = n(d.perOrder) > 0 ? n(d.perOrder) : 0;
-  const sizes = prices ? prices.map((px, i) => (px > 0 ? (usd * Math.pow(mult, i)) / px : 0)) : [];
+  const each = n(d.perOrder) > 0 ? n(d.perOrder) : 0;
+  const coin = d.dcaUnit === 'coin';
+  const sizes = prices ? prices.map((px, i) => (px > 0 ? (coin ? each * factor(i) : (each * factor(i)) / px) : 0)) : [];
   const q = sizes.reduce((x, y) => x + y, 0);
   const quantity = q > 0 ? q.toFixed(12).replace(/0+$/, '').replace(/\.$/, '') : '0';
-  return { prices, sizes, orders: Number.isFinite(orders) ? orders : 0, skew: orders >= 2 ? Math.pow(mult, orders - 1) : 1, quantity };
+  return { prices, sizes, orders: Number.isFinite(orders) ? orders : 0, skew: orders >= 2 ? factor(orders - 1) : 1, quantity };
 }
 
 /** Whether the ticket offers exits for this kind: anything that opens a position (a bracket always has them). */
@@ -539,7 +558,7 @@ export const INLINE_KEYS: Record<UiKind, readonly string[]> = {
   iceberg: ['icePrice', 'display'],
   chase: ['maxChasePct'],
   scale: ['from', 'to', 'orders', 'scaleSize'],
-  dca: ['perOrder', 'dcaStep', 'dcaOrders', 'dcaMult', 'dcaFirst', 'dcaStart', 'dcaPrices'],
+  dca: ['perOrder', 'dcaUnit', 'dcaStep', 'dcaOrders', 'dcaFirst', 'dcaStart', 'dcaPrices'],
   swarm: ['clips', 'randomize'],
   trailing: ['trail', 'trailMode', 'activation'],
   conditional: ['conds', 'then', 'thenPrice', 'closePct', 'thenMin'],
@@ -558,7 +577,7 @@ export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
   chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'timeout', 'onEnd'],
   scale: ['skew', 'spacing', 'scaleJitter', 'postOnly'],
-  dca: ['dcaLevels', 'dcaStepScale'],
+  dca: ['dcaSizing', 'dcaAdd', 'dcaMult', 'dcaLevels', 'dcaStepScale'],
   swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
   trailing: ['trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
   conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],
@@ -632,7 +651,7 @@ const ADV_LABEL: Partial<Record<keyof Draft, string>> = {
   displayJitter: 'size varies', offsetTicks: 'offset', refill: 'refill', postOnly: 'post only',
   offsetMode: 'rest', offsetBps: 'behind', timeout: 'give up after', onEnd: 'then',
   distribution: 'size curve', skew: 'skew', spacing: 'spacing', scaleJitter: 'size varies',
-  dcaLevels: 'prices', dcaStepScale: 'step scale', sweepRef: 'reference', sweepVenues: 'venues',
+  dcaLevels: 'prices', dcaStepScale: 'step scale', dcaSizing: 'sizing', dcaAdd: 'size step', dcaMult: 'size ×', sweepRef: 'reference', sweepVenues: 'venues',
   inFlight: 'per wave', waveSec: 'between waves', retries: 'retries',
   trailWhole: 'size', source: 'price', exit: 'exit', chaseSec: 'chase for',
   match: 'when', holdSec: 'hold for', expires: 'expires', thenSlices: 'slices',
@@ -666,6 +685,7 @@ export function advancedChanges(kind: UiKind, d: Draft, exits: boolean): string[
     if (k === 'offsetBps' && d.offsetMode !== 'bps') continue;
     if (k === 'offsetTicks' && kind === 'chase' && d.offsetMode === 'bps') continue;
     if (kind === 'dca' && k === 'dcaStepScale' && d.dcaLevels === 'list') continue;
+    if (kind === 'dca' && ((k === 'dcaAdd' && d.dcaSizing !== 'weighted') || (k === 'dcaMult' && d.dcaSizing !== 'geometric'))) continue;
     if (k === 'sweepVenues') {
       if (d.sweepRef !== 'mark' && d.sweepRef !== 'index' && d.sweepVenues.length !== ORACLE_VENUES.length) out.push('venues');
       continue;

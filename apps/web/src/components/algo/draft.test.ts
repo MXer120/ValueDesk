@@ -262,7 +262,7 @@ test('an untouched DCA buys at set prices: a first buy at the ask, then a limit 
 });
 
 test("the plan, the preview's table and the chart lines are the same prices", () => {
-  const s = checkAlgoSpec(draftToSpec('dca', { ...DEFAULT, dcaOrders: '4', dcaStep: '1', dcaMult: '2', perOrder: '100' }, { ...shared, bid: 99_990, ask: 100_000 }, NOW)).spec as Extract<AlgoSpec, { kind: 'scale' }>;
+  const s = checkAlgoSpec(draftToSpec('dca', { ...DEFAULT, dcaOrders: '4', dcaStep: '1', dcaSizing: 'geometric', dcaMult: '2', perOrder: '100' }, { ...shared, bid: 99_990, ask: 100_000 }, NOW)).spec as Extract<AlgoSpec, { kind: 'scale' }>;
   const plan = planAlgo(s, BTC, { now: NOW, price: 99_995, seed: 1 });
   assert.deepEqual(plan.children.map((c) => c.price), [100_000, 99_000, 98_000, 97_000]);
   // $100, $200, $400, $800 at those prices, in whole steps.
@@ -271,11 +271,24 @@ test("the plan, the preview's table and the chart lines are the same prices", ()
 });
 
 test('a DCA sells upward, multiplies its USD per order, and waits for a price', () => {
-  const l = dcaLadder({ ...DEFAULT, dcaOrders: '3', dcaMult: '2', perOrder: '100' }, { side: 'sell', bid: 50, ask: 51 });
+  const l = dcaLadder({ ...DEFAULT, dcaOrders: '3', dcaSizing: 'geometric', dcaMult: '2', perOrder: '100' }, { side: 'sell', bid: 50, ask: 51 });
   assert.deepEqual(l.prices!.map((x) => Math.round(x * 1e9) / 1e9), [50, 51, 52]);
   assert.equal(l.skew, 4);
   assert.ok(Math.abs(Number(l.quantity) - (2 + 200 / 51 + 400 / 52)) < 1e-9);
   assert.equal(dcaLadder(DEFAULT, { side: 'buy', bid: null, ask: null }).prices, null);
+});
+
+test('a DCA is linear by default: every order the same, in the unit it was typed in', () => {
+  const usd = dcaLadder({ ...DEFAULT, dcaOrders: '3', perOrder: '100' }, { side: 'buy', bid: 99, ask: 100 });
+  usd.sizes.forEach((q, i) => assert.ok(Math.abs(q * usd.prices![i]! - 100) < 1e-9));
+  assert.equal(usd.skew, 1);
+  const coin = dcaLadder({ ...DEFAULT, dcaOrders: '3', perOrder: '0.5', dcaUnit: 'coin' }, { side: 'buy', bid: 99, ask: 100 });
+  assert.deepEqual(coin.sizes, [0.5, 0.5, 0.5]);
+  const w = dcaLadder({ ...DEFAULT, dcaOrders: '4', perOrder: '1', dcaUnit: 'coin', dcaSizing: 'weighted', dcaAdd: '50' }, { side: 'buy', bid: 99, ask: 100 });
+  assert.deepEqual(w.sizes, [1, 1.5, 2, 2.5]);
+  assert.equal(w.skew, 2.5);
+  const g = dcaLadder({ ...DEFAULT, dcaOrders: '3', perOrder: '1', dcaUnit: 'coin', dcaSizing: 'geometric', dcaMult: '2' }, { side: 'buy', bid: 99, ask: 100 });
+  assert.deepEqual(g.sizes, [1, 2, 4]);
 });
 
 test('a step scale widens each gap; typed prices are used as they are', () => {
