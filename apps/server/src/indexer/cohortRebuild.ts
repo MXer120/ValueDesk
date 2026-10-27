@@ -91,9 +91,18 @@ export const OUTAGE_GAP_MS = HOUR_MS;
  * missed that outage's prints, whatever its size (2026-10-25: a quarter of
  * Hyperliquid's gross and half of trade.xyz's were books read before the
  * 2026-10-16 outage, holding positions closed since).
+ *
+ * `upSince`: when this run of the indexer started. Only the gap across that start is an
+ * outage then: one that opened while it ran was a slow recording pass - the streams ran
+ * on and the books followed every print (2026-10-27: 70k more books made one pass take
+ * 100 minutes, and each gap it left had every book re-read as stale) - and one before it
+ * was the last run's to settle.
  */
-export function resumedAfterOutage(recorded: readonly number[]): number {
-  for (let i = recorded.length - 1; i > 0; i--) if (recorded[i]! - recorded[i - 1]! >= OUTAGE_GAP_MS) return recorded[i]!;
+export function resumedAfterOutage(recorded: readonly number[], upSince?: number): number {
+  for (let i = recorded.length - 1; i > 0; i--) {
+    if (recorded[i]! - recorded[i - 1]! < OUTAGE_GAP_MS) continue;
+    if (upSince === undefined || (recorded[i - 1]! < upSince && recorded[i]! >= upSince)) return recorded[i]!;
+  }
   return 0;
 }
 

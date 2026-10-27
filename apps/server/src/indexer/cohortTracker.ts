@@ -69,7 +69,7 @@ import {
 } from './cohortSource.js';
 import {
   HOUR_MS, REBUILD_WINDOW_MS, REBUILT_VENUES, checkEdges, histOf, missingSpans, needsEquityHistory, peakNotional, priceAt,
-  readRange, rebuildHour, rebuildSample, resumedAfterOutage, sizeProxy, venueOfSymbol,
+  OUTAGE_GAP_MS, readRange, rebuildHour, rebuildSample, resumedAfterOutage, sizeProxy, venueOfSymbol,
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
@@ -122,6 +122,8 @@ const STREAMED: ReadonlySet<Venue> = new Set(['hyperliquid', 'tradexyz', 'sodex'
 const RANGE_MAX_AGE: Record<CohortRange, number> = { '1d': 6 * 60 * 60_000, '7d': 24 * 60 * 60_000, '30d': 48 * 60 * 60_000 };
 /** Hand the loop back after this much synchronous work in a long pass. */
 const SLICE_MS = 30;
+/** The recording pass's slices: longer, as every hand-back waits out whatever else holds the loop. */
+const RECORD_SLICE_MS = 150;
 
 /** Share of wallets under TAIL_EQUITY that are read (the rest are counted, not read). */
 export const TAIL_RATE: Record<Venue, number> = { hyperliquid: 1, tradexyz: 1, sodex: 1, arcus: 1, lighter: 0.1 };
@@ -483,6 +485,8 @@ export class CohortTracker {
   /** Holders the Hyperliquid fills archive found (archiveSeed.ts): read once each, the largest first. */
   private seeds: Seeds = new Map();
   private seedsAt: number | null = null;
+  /** How long Hyperliquid's stream was down across this start (its `stream_up`); Infinity = never up before. */
+  private downAtStart = Number.POSITIVE_INFINITY;
   /** The hour's funding rates, taken in its last minutes and applied when it ends (fundingTick). */
   private fundingNext: { end: number; rates: Map<Venue, Map<string, { rate: number; px: number }>> } | null = null;
   private fundingLast: { end: number; books: number; paid: number; error?: string } | null = null;
@@ -513,6 +517,7 @@ export class CohortTracker {
         this.gapAt.set(v, now);
         // How long the stream was down across this restart (the engine keeps `stream_up`).
         const lastUp = Number(s.getMeta(`stream_up:${v}`)) || 0;
+        if (v === 'hyperliquid') this.downAtStart = lastUp > 0 ? now - lastUp : Number.POSITIVE_INFINITY;
         this.gapFloor.set(v, gapRereadFloor(lastUp > 0 ? now - lastUp : Number.POSITIVE_INFINITY));
       }
     }
@@ -1065,7 +1070,10 @@ export class CohortTracker {
 
   private async planVenues(): Promise<void> {
     const now = this.d.now();
-    this.staleBefore = resumedAfterOutage(this.d.store.cohortSeriesRecorded(scopeKey(VENUES), COHORTS[0]!.id, now - REBUILD_WINDOW_MS));
+    // A restart with the streams back within the hour missed minutes of prints, which the
+    // large books' gap re-reads cover; only a longer one leaves every book unknown.
+    this.staleBefore = this.downAtStart < OUTAGE_GAP_MS ? 0
+      : resumedAfterOutage(this.d.store.cohortSeriesRecorded(scopeKey(VENUES), COHORTS[0]!.id, now - REBUILD_WINDOW_MS), this.startedAt);
     const hlMembers = await this.membersOf('hyperliquid');
     const breath = async () => {
       await new Promise<void>((r) => setImmediate(r));
@@ -1437,27 +1445,47 @@ export class CohortTracker {
       const series: Array<{ scope: string; cohort: string; t: number; long: number; short: number }> = [];
       const mix: Array<{ scope: string; cohort: string; t: number; data: string }> = [];
       const doMix = mixT > this.lastMixT;
-      for (const scope of allScopes()) {
-        const key = scopeKey(scope);
-        // Netted and summed in batches, handing the loop back between them: one
-        // scope is ~120k wallets, which in one go held it for about two seconds.
-        const agg = new Aggregator();
-        const addresses = new Set<string>();
-        for (const v of scope) for (const a of per.get(v)!.keys()) addresses.add(a);
-        let t0 = Date.now();
-        for (const address of addresses) {
-          const mine = new Map<Venue, WalletVenue>();
-          for (const v of scope) {
-            const w = per.get(v)!.get(address);
-            if (w) mine.set(v, w);
+      // One pass over the wallets for every scope at once. A wallet is netted once per set of
+      // venues it is on that a scope selects (most are on one venue: once in all), and that
+      // result is added to each such scope. Scope by scope it was netted up to 31 times, and
+      // with ~300k wallets (2026-10-27) a pass took 100 minutes on a busy loop.
+      const scopes = allScopes();
+      const maskOf = (vs: readonly Venue[]) => vs.reduce((m, v) => m | (1 << VENUES.indexOf(v)), 0);
+      const scopeMasks = scopes.map(maskOf);
+      const aggs = scopes.map(() => new Aggregator());
+      const addresses = new Set<string>();
+      for (const m of per.values()) for (const a of m.keys()) addresses.add(a);
+      let t1 = Date.now();
+      for (const address of addresses) {
+        let held = 0;
+        // Listed on a venue counts it in that venue's scopes (as a member), its figures only where it has them.
+        const wv: Array<WalletVenue | undefined> = VENUES.map((v, i) => {
+          const m = per.get(v)!;
+          if (m.has(address)) held |= 1 << i;
+          return m.get(address);
+        });
+        const netted = new Map<number, ReturnType<typeof netWallet>>();
+        for (let i = 0; i < scopes.length; i++) {
+          const u = held & scopeMasks[i]!;
+          if (!u) continue;
+          let n = netted.get(u);
+          if (!n) {
+            const mine = new Map<Venue, WalletVenue>();
+            VENUES.forEach((v, j) => { const w = wv[j]; if (u & (1 << j) && w) mine.set(v, w); });
+            n = netWallet(address, mine, priceOf);
+            netted.set(u, n);
           }
-          agg.add(netWallet(address, mine, priceOf));
-          if (Date.now() - t0 > SLICE_MS) {
-            await new Promise<void>((r) => setImmediate(r));
-            mark('coh:record');
-            t0 = Date.now();
-          }
+          aggs[i]!.add(n);
         }
+        if (Date.now() - t1 > RECORD_SLICE_MS) {
+          await new Promise<void>((r) => setImmediate(r));
+          mark('coh:record');
+          t1 = Date.now();
+        }
+      }
+      for (let i = 0; i < scopes.length; i++) {
+        const key = scopeKey(scopes[i]!);
+        const agg = aggs[i]!;
         for (const st of agg.result()) {
           series.push({ scope: key, cohort: st.id, t: seriesT, long: st.long, short: st.short });
           if (doMix) {
