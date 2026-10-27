@@ -46,6 +46,9 @@ test('the last outage: when the recording resumed after a gap of an hour or more
   assert.equal(resumedAfterOutage(rec), T0 + 7 * 24 * H);
   assert.equal(resumedAfterOutage(every15(T0, T0 + 30 * H)), 0, 'no gap');
   assert.equal(resumedAfterOutage([T0, T0 + 45 * 60_000]), 0, 'a missed point or two is not an outage');
+  assert.equal(resumedAfterOutage([T0, T0 + 3 * H, T0 + 9 * H], T0 + H), T0 + 3 * H, 'the gap across the start is the outage');
+  assert.equal(resumedAfterOutage([...every15(T0, T0 + 3 * H), T0 + 7 * H], T0 + H), 0, 'a gap opened while the indexer ran is a slow pass');
+  assert.equal(resumedAfterOutage([...every15(T0, T0 + 2 * H), T0 + 5 * H, ...every15(T0 + 5.25 * H, T0 + 8 * H)], T0 + 7 * H), 0, 'one before this run was the last run to settle');
 });
 
 test('funding rows as hourly runs: a size held hour after hour is one run; a closed hour ends it', () => {
