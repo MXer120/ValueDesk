@@ -563,9 +563,15 @@ function ladderScene(t: number, p: StoryProps): Scene | null {
   if (exits?.sl) rules.push({ y: sc.y(exits.sl), label: `SL ${fmtP(exits.sl)}`, tone: 'neg', dashed: true, faded: !allIn });
   const top = lv.reduce((a, c) => (sgn * (c.px - a.px) > 0 ? c : a), lv[0]!);
   const near = lv.reduce((a, c) => (sgn * (c.px - a.px) < 0 ? c : a), lv[0]!);
+  // The axis is the orders' own prices (each one exactly, in the market's decimals); where
+  // two would print over each other, the nearer to now wins and the next one waits for room.
+  const lvTicks: number[] = [];
+  for (const c of [...lv].sort((x, y) => Math.abs(x.px - now) - Math.abs(y.px - now))) {
+    if (lvTicks.every((v) => Math.abs(sc.y(v) - sc.y(c.px)) >= 11)) lvTicks.push(c.px);
+  }
   const svg = (
     <>
-      {priceGrid(sc.y, sc.ticks)}
+      {priceGrid(sc.y, lvTicks.sort((x, y) => y - x))}
       {bars}
       <path className="algo-st__path is-ghost" d={pathD(path, sc.y)} />
       <path className="algo-st__path" d={pathD(path, sc.y, t)} />

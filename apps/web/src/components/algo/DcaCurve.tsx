@@ -4,11 +4,15 @@
  * one there, double-click (or right-click) a middle point to take it away. The ends stay at the
  * first and the last order; sizes run from CURVE_MIN to CURVE_MAX times Each buy.
  *
- * Under it: the axis by order or by price, Smooth (dcaCurveMath.smoothCurve), an average fill
- * price to fit the curve to (fitAvg: the same shape and spend, tilted), and Revert, which undoes
- * the last Smooth, fit or preset.
+ * Top right, as the Trade and Portfolio panels have them: View (the axis by order or by price),
+ * a shape to start from, Smooth (dcaCurveMath.smoothCurve) and Revert (undoes the last Smooth,
+ * fit or shape). Under it: an average fill price to fit the curve to (fitAvg: the same shape and
+ * spend, tilted).
  */
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
+import { ViewPop } from '../ViewPop';
+import { Section, Seg } from '../accountTables/FilterBar';
+import { MiniSelect } from './MarketSelect';
 import { CURVE_MAX, CURVE_MIN, cleanCurve, curveAt, type CurvePoint } from './draft';
 import { avgReach, fitAvg, ladderAvg, smoothCurve } from './dcaCurveMath';
 import { decimalInput } from '../numberInput';
@@ -35,6 +39,20 @@ const fmtPx = (p: number): string =>
 /** The axis' short form, so ten prices fit under ten bars: 80.1k, 1.25k, 3.42. */
 const axisPx = (p: number): string => (p >= 1000 ? `${Number((p / 1000).toPrecision(p >= 100_000 ? 4 : 3))}k` : Number(p.toPrecision(3)).toString());
 
+const SHAPES: Array<[string, string, CurvePoint[]]> = [
+  ['rising', 'Rising', [[0, 1], [1, 2.5]]],
+  ['steep', 'Steep end', [[0, 1], [0.6, 1.4], [1, 4]]],
+  ['even', 'Even', [[0, 1], [1, 1]]],
+  ['falling', 'Falling', [[0, 2.5], [1, 1]]],
+];
+
+const Icon = ({ d }: { d: string }) => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d={d} fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+);
+const SlidersGlyph = () => (
+  <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 4.5h12M2 11.5h12" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity="0.55" /><circle cx="10.5" cy="4.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /><circle cx="5.5" cy="11.5" r="1.8" fill="var(--bg-panel)" stroke="currentColor" strokeWidth="1.3" /></svg>
+);
+
 export function DcaCurve({ points, orders, each, unit, side, prices, coin, onChange }: {
   points: CurvePoint[];
   /** How many orders the ladder has (a bar each). */
@@ -50,6 +68,8 @@ export function DcaCurve({ points, orders, each, unit, side, prices, coin, onCha
   onChange: (p: CurvePoint[]) => void;
 }) {
   const [axis, setAxis] = useState<'order' | 'price'>('order');
+  const [viewOpen, setViewOpen] = useState(false);
+  const viewBtn = useRef<HTMLButtonElement>(null);
   // What Revert goes back to: the curve before the last Smooth, fit or preset.
   const [undo, setUndo] = useState<CurvePoint[] | null>(null);
   const [target, setTarget] = useState('');
@@ -141,6 +161,54 @@ export function DcaCurve({ points, orders, each, unit, side, prices, coin, onCha
   const total = levels.reduce((a, x) => a + each * curveAt(points, x), 0);
   return (
     <div className={`algo-curve is-${side}`}>
+      <div className="algo-curve__head">
+        <span className="algo-curve__title">Size per order</span>
+        <div className="algo-curve__tools">
+          <button
+            ref={viewBtn}
+            type="button"
+            className={`acctf-view${viewOpen ? ' is-open' : ''}${axis !== 'order' ? ' is-active' : ''}`}
+            aria-haspopup="dialog"
+            aria-expanded={viewOpen}
+            onClick={() => setViewOpen((v) => !v)}
+          >
+            <SlidersGlyph />
+            <span>View</span>
+          </button>
+          <ViewPop open={viewOpen} anchor={viewBtn} onClose={() => setViewOpen(false)} onReset={() => setAxis('order')} resetDisabled={axis === 'order'}>
+            <Section label="Under the bars">
+              <Seg value={axis === 'price' && !px ? 'order' : axis} onChange={(v) => setAxis(v === 'price' && !px ? 'order' : v)} options={[['order', 'Order number'], ['price', px ? 'Price' : 'Price (set a first price)']]} />
+            </Section>
+          </ViewPop>
+          <MiniSelect
+            label="Start from a shape"
+            value={SHAPES.find(([, , p]) => JSON.stringify(p) === JSON.stringify(points))?.[0] ?? 'custom'}
+            options={[...SHAPES.map(([v, t]) => [v, t] as const), ['custom', 'Custom']]}
+            onChange={(v) => {
+              const sh = SHAPES.find(([k]) => k === v);
+              if (sh) replace(sh[2]);
+            }}
+          />
+          <button type="button" className="algo-curve__icon" aria-label="Smooth" title="Smooth: bends onto orders, clean sizes, near-level parts made flat" onClick={() => replace(smoothCurve(points, n))}>
+            <Icon d="M2 12.5 4.5 9 6 10.5 8.5 6 10 7.5 14 3.5M2 13.5c4 0 8-3 12-8" />
+          </button>
+          <button
+            type="button"
+            className="algo-curve__icon"
+            aria-label="Revert"
+            title={undo ? 'Revert: back to the curve before the last Smooth, fit or shape' : 'Nothing to revert'}
+            disabled={!undo}
+            onClick={() => {
+              if (!undo) return;
+              setUndo(null);
+              setMiss(null);
+              emit(undo);
+            }}
+          >
+            <Icon d="M3.5 6.5h6.5a3.5 3.5 0 0 1 0 7H7M6 3.5l-3 3 3 3" />
+          </button>
+        </div>
+      </div>
       <svg
         ref={svg}
         viewBox={`0 0 ${W} ${H}`}
@@ -203,47 +271,6 @@ export function DcaCurve({ points, orders, each, unit, side, prices, coin, onCha
           {n} orders · {fmt(total)} {unit}
           {avg !== null && <> · avg {fmtPx(avg)}</>}
         </span>
-      </div>
-      <div className="algo-curve__tools">
-        <div className="algo-curve__seg" role="radiogroup" aria-label="Axis">
-          {(
-            [
-              ['order', 'Order'],
-              ['price', 'Price'],
-            ] as const
-          ).map(([v, t]) => (
-            <button key={v} type="button" role="radio" aria-checked={axis === v} className={axis === v ? 'is-on' : undefined} disabled={v === 'price' && !px} title={v === 'price' && !px ? 'Set the first price to see the prices' : undefined} onClick={() => setAxis(v)}>
-              {t}
-            </button>
-          ))}
-        </div>
-        <div className="algo-curve__seg">
-          {(
-            [
-              ['Rising', [[0, 1], [1, 2.5]]],
-              ['Steep end', [[0, 1], [0.6, 1.4], [1, 4]]],
-              ['Even', [[0, 1], [1, 1]]],
-              ['Falling', [[0, 2.5], [1, 1]]],
-            ] as Array<[string, CurvePoint[]]>
-          ).map(([name, pts]) => (
-            <button key={name} type="button" className={JSON.stringify(pts) === JSON.stringify(points) ? 'is-on' : undefined} onClick={() => replace(pts)}>
-              {name}
-            </button>
-          ))}
-        </div>
-        <div className="algo-curve__seg">
-          <button type="button" title="Bends onto orders, clean sizes, near-level parts made flat" onClick={() => replace(smoothCurve(points, n))}>
-            Smooth
-          </button>
-          <button type="button" disabled={!undo} title="Back to the curve before the last Smooth, fit or preset" onClick={() => {
-            if (!undo) return;
-            setUndo(null);
-            setMiss(null);
-            emit(undo);
-          }}>
-            Revert
-          </button>
-        </div>
       </div>
       <div className="algo-curve__fit">
         <label htmlFor="algo-curve-avg">Avg fill if all fill</label>

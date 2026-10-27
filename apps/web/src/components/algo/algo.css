@@ -632,7 +632,7 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-curvewrap { padding: 6px 0 10px; }
 .algo-curve { --tint: var(--pos); display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); }
 .algo-curve.is-sell { --tint: var(--neg); }
-.algo-curve svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; }
+.algo-curve > svg { width: 100%; height: auto; display: block; touch-action: none; user-select: none; }
 .algo-curve__grid { stroke: rgba(255, 255, 255, 0.06); }
 .algo-curve__one { stroke: rgba(255, 255, 255, 0.18); stroke-dasharray: 3 3; }
 .algo-curve__axis { fill: var(--muted); font-size: 9px; }
@@ -642,15 +642,50 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-curve__pt { fill: #111; stroke: var(--tint); stroke-width: 2; transition: r 120ms var(--ease-out, ease-out); }
 .algo-curve__pt.is-end { fill: var(--tint); }
 .algo-curve__foot { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: var(--fs-xs, 11px); }
-.algo-curve__tools { display: flex; flex-wrap: wrap; gap: 6px; }
-.algo-curve__seg { display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 3px; border-radius: 10px; background: rgba(255, 255, 255, 0.06); }
-.algo-curve__seg button { padding: 4px 10px; border: 0; border-radius: 7px; background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs, 11px); cursor: pointer; }
-.algo-curve__seg button:hover:not(:disabled) { color: var(--text); }
-.algo-curve__seg button.is-on { background: rgba(255, 255, 255, 0.12); color: var(--text); }
-.algo-curve__seg button:disabled { opacity: 0.4; cursor: default; }
+.algo-curve__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.algo-curve__title { color: var(--text); font-size: var(--fs-sm, 12px); font-weight: 600; }
+.algo-curve__tools { display: flex; align-items: center; gap: 6px; }
+.algo-curve__icon { display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--panel-line); border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.algo-curve__icon:hover:not(:disabled) { color: var(--text); border-color: var(--line); }
+.algo-curve__icon:disabled { opacity: 0.35; cursor: default; }
 .algo-curve__fit { display: flex; align-items: center; gap: 8px; }
 .algo-curve__fit label { flex: none; color: var(--muted); font-size: var(--fs-xs, 11px); }
 .algo-curve__fit .algo-sf { flex: 1 1 auto; min-width: 0; }
 .algo-curve__go { flex: none; height: 32px; padding: 0 12px; border: 0; border-radius: 9px; background: #f7f7f7; color: #111; font: inherit; font-size: var(--fs-xs, 11px); font-weight: 600; cursor: pointer; }
 .algo-curve__go:disabled { opacity: 0.35; cursor: default; }
 .algo-curve__note { margin: 0; color: var(--muted); font-size: var(--fs-xs, 11px); }
+
+/* The Summary (AlgoTicket summaryNode): what it does, the numbers, every order, then the slide. */
+.algo-summary { display: flex; flex-direction: column; gap: 12px; }
+.algo-sum__lead { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 14px; background: rgba(255, 255, 255, 0.05); }
+.algo-sum__lead p { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.algo-sum__lead strong { color: var(--text); font-size: var(--fs-md, 14px); font-weight: 600; line-height: 1.35; }
+.algo-sum__lead span { color: var(--muted); font-size: var(--fs-sm, 12px); }
+.algo-sum__tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.algo-sum__tiles > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 12px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--panel-line); }
+.algo-sum__tiles span { color: var(--muted); font-size: var(--fs-xs, 11px); }
+.algo-sum__tiles b { color: var(--text); font-size: var(--fs-md, 14px); font-weight: 600; font-variant-numeric: tabular-nums; }
+.algo-sum__tiles small { color: var(--muted); font-size: var(--fs-xs, 11px); font-variant-numeric: tabular-nums; }
+.algo-sumkids { max-height: 280px; overflow: auto; padding: 0; }
+.algo-sumkids table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm, 12px); font-variant-numeric: tabular-nums; }
+.algo-sumkids th { position: sticky; top: 0; padding: 8px 12px; background: var(--glass-pop-bg, #1a1a1c); color: var(--muted); font-weight: 500; text-align: right; }
+.algo-sumkids td { padding: 6px 12px; border-top: 1px solid var(--panel-line); color: var(--text); text-align: right; }
+.algo-sumkids :is(th, td):first-child, .algo-sumkids :is(th, td):nth-child(2) { text-align: left; }
+.algo-sumkids td:nth-child(2) { color: var(--muted); }
+.algo-sumkids tfoot td { font-weight: 600; border-top: 1px solid var(--line); }
+.algo-sum__go { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 14px; background: rgba(255, 255, 255, 0.04); }
+.algo-sum__go.is-real { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn, #f5a524) 35%, transparent); }
+.algo-sum__go > p { margin: 0; color: var(--text); font-size: var(--fs-sm, 12px); line-height: 1.45; }
+
+/* Slide to confirm (SlideConfirm.tsx): drag the knob to the end and let go. */
+.algo-slide { --tint: var(--pos); position: relative; height: 56px; border-radius: 16px; background: rgba(255, 255, 255, 0.07); overflow: hidden; user-select: none; touch-action: none; }
+.algo-slide.is-sell { --tint: var(--neg); }
+.algo-slide.is-paper { --tint: #5b8def; }
+.algo-slide__fill { position: absolute; inset: 0 auto 0 0; width: calc(4px + var(--knob) + var(--p) * (100% - var(--knob) - 8px)); background: color-mix(in srgb, var(--tint) 32%, transparent); border-radius: 16px; transition: width 260ms var(--ease-out, ease-out); }
+.algo-slide__label { position: absolute; inset: 0; display: grid; place-items: center; padding-left: calc(var(--knob) + 8px); color: var(--text); font-size: var(--fs-base, 13px); font-weight: 600; opacity: calc(1 - var(--p) * 0.8); pointer-events: none; }
+.algo-slide__knob { position: absolute; top: 4px; left: calc(4px + var(--p) * (100% - var(--knob) - 8px)); width: var(--knob); height: 48px; display: grid; place-items: center; border-radius: 12px; background: var(--tint); color: #0b0b0c; cursor: grab; transition: left 260ms var(--ease-out, ease-out); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); }
+.algo-slide.is-drag .algo-slide__knob, .algo-slide.is-drag .algo-slide__fill { transition: none; }
+.algo-slide.is-drag .algo-slide__knob { cursor: grabbing; }
+.algo-slide__knob:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.algo-slide.is-off { opacity: 0.45; }
+.algo-slide.is-off .algo-slide__knob { cursor: not-allowed; }

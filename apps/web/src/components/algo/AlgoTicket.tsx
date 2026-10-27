@@ -105,6 +105,7 @@ import {
 import { blockedState, noticeFor, readExecutor, writeExecutor, type Place } from './executor';
 import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './menu';
 import { AlgoIcon } from './AlgoIcon';
+import { SlideConfirm } from './SlideConfirm';
 import '../SettingsMenu.css';
 import './algo.css';
 
@@ -587,6 +588,40 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     return () => window.clearTimeout(t);
   }, [blockMsg]);
 
+  // The slide on the Summary let go at its end: checked once more, then started where it runs.
+  const launch = async () => {
+    if (busy) return;
+    if (!where.ready) {
+      notify('warn', block?.message ?? where.why ?? 'It cannot start where it is set to run.');
+      return;
+    }
+    const fresh = checkAlgoSpec(draftToSpec(kind, d, p, Date.now()));
+    if (!fresh.spec || !plan || plan.errors.length) {
+      notify('error', why ?? 'Check the algo settings.');
+      return;
+    }
+    const spec = fresh.spec;
+    setBusy(true);
+    try {
+      if (place === 'browser') {
+        const { browserAlgos } = await import('../../algo/browserAlgos');
+        await browserAlgos.follow(algoOwner(p.address));
+        await browserAlgos.start(spec, seed);
+      } else {
+        await startOn(place, spec, seed);
+      }
+      notify('ok', `${menuName(kind)} started${spec.paper ? ' (paper)' : ''}${place === 'hosted' ? ' on the ValueDesk executor' : place === 'self' ? ' on your copier' : ''}. Follow it in the Algos tab.`);
+      placedDraft.current = draftKey;
+      publishDraftOrders(null);
+      setSeed(newSeed());
+      setAdvOpen(false);
+    } catch (e) {
+      notify('error', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     async start() {
       if (busy) return;
@@ -599,35 +634,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         notify('error', why ?? 'Check the algo settings.');
         return;
       }
-      const spec = fresh.spec;
-      const real = p.network === 'mainnet' && !spec.paper;
-      const ok = await confirm({
-        title: `${spec.paper ? 'Paper ' : ''}${spec.kind === 'basket' ? `${menuName(kind)} of ${spec.legs.length} markets` : `${menuName(kind)} ${p.side === 'buy' ? 'buy' : 'sell'} on ${p.symbol}`}${real ? ' — real funds' : ''}`,
-        size: 'md',
-        danger: real,
-        confirmLabel: label,
-        cancelLabel: 'Back to ticket',
-        body: <Review spec={spec} plan={plan} kind={kind} feeRates={feeRates(market, feeFraction)} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />,
-      });
-      if (!ok) return;
-      setBusy(true);
-      try {
-        if (place === 'browser') {
-          const { browserAlgos } = await import('../../algo/browserAlgos');
-          await browserAlgos.follow(algoOwner(p.address));
-          await browserAlgos.start(spec, seed);
-        } else {
-          await startOn(place, spec, seed);
-        }
-        notify('ok', `${menuName(kind)} started${spec.paper ? ' (paper)' : ''}${place === 'hosted' ? ' on the ValueDesk executor' : place === 'self' ? ' on your copier' : ''}. Follow it in the Algos tab.`);
-        placedDraft.current = draftKey;
-        publishDraftOrders(null);
-        setSeed(newSeed());
-      } catch (e) {
-        notify('error', e instanceof Error ? e.message : String(e));
-      } finally {
-        setBusy(false);
-      }
+      // Placing goes through the Summary: every order at a glance, then the slide to confirm.
+      lastSec.set(kind, 'summary');
+      setAdvOpen(true);
     },
   }));
 
@@ -863,8 +872,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               ) : (
                 <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
               )}
-              {/* Every order the same unless the settings window chose to grow them. */}
-              {d.dcaSizing === 'weighted' && <p className="oe-hint">Sizes follow your curve ({curveSpan(d.dcaCurve)}): shape it in Advanced.</p>}
+              {/* Every order the same unless the settings window chose to grow them (Weighted: its curve is there only). */}
               {d.dcaSizing === 'geometric' && <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order this many times the one before (Settings: sizing)" err={err('skew', 'weights')} />}
             </>
           )}
@@ -893,17 +901,86 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           {ek === 'conditional' && <ConditionalFields d={d} set={set} symbol={p.symbol} base={base} />}
         </div>
   );
-  // The window's last section: every choice at a glance - the same rows the confirmation shows.
+  // The window's last section: what it will do, every order it sends, and the slide that places it.
+  const real = p.network === 'mainnet' && !d.paper;
+  const kids = plan ? (plan.schedule?.length ? plan.schedule : plan.children).filter((c) => c.qty > 0) : [];
+  const verbWord = p.side === 'buy' ? 'buy' : 'sell';
+  const sizeWords = plan?.total ? `${fmtQty(plan.total, p.sym?.stepSize)} ${base}` : '';
   const summaryNode = (
     <section className="algo-group algo-summary" aria-label="Summary">
       {check.spec && plan ? (
-        <div className="stg__card algo-sumcard">
-          <Review spec={check.spec} plan={plan} kind={kind} feeRates={feeRates(market, feeFraction)} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />
-        </div>
+        <>
+          <div className="algo-sum__lead">
+            <AlgoIcon kind={kind} size={22} />
+            <p>
+              <strong>{oneLine(kind, d, p.side, p.quantity, base)}</strong>
+              {planFacts(plan, pk) && <span>{planFacts(plan, pk)}</span>}
+            </p>
+          </div>
+          <div className="algo-sum__tiles">
+            {plan.total !== null && (
+              <div><span>Size</span><b>{sizeWords}</b>{plan.notional ? <small>{fmtUsd(plan.notional, 2)}</small> : null}</div>
+            )}
+            {kids.length > 0 && <div><span>Orders</span><b>{kids.length}</b><small>{plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}` : kids.some((c) => c.price !== null) ? 'resting at their prices' : 'as it goes'}</small></div>}
+            {plan.avgPrice && <div><span>Avg if all fill</span><b>{fmtLevel(plan.avgPrice)}</b><small>USD</small></div>}
+            {plan.notional ? <div><span>Fees</span><b>{fmtUsd(plan.notional * rates.maker, 2)}–{fmtUsd(plan.notional * rates.taker, 2)}</b><small>resting – taking</small></div> : null}
+          </div>
+          <div className="stg__card algo-sumcard">
+            <Review spec={check.spec} plan={plan} kind={kind} feeRates={rates} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />
+          </div>
+          {kids.length > 0 && (
+            <div className="stg__card algo-sumkids">
+              <table>
+                <thead>
+                  <tr><th>Order</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
+                </thead>
+                <tbody>
+                  {kids.map((c, i) => {
+                    const px = c.price ?? mid ?? null;
+                    return (
+                      <tr key={i}>
+                        <td>{i + 1}</td>
+                        <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
+                        <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
+                        <td>{fmtQty(c.qty, p.sym?.stepSize)}</td>
+                        <td>{c.usd !== undefined ? fmtUsd(c.usd, 2) : px ? fmtUsd(c.qty * px, 2) : DASH}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {kids.length > 1 && (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={2}>Total</td>
+                      <td>{plan.avgPrice ? `avg ${fmtLevel(plan.avgPrice)}` : ''}</td>
+                      <td>{fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
+                      <td>{fmtUsd(kids.reduce((a, c) => a + (c.usd ?? c.qty * (c.price ?? mid ?? 0)), 0), 2)}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
+          {changes.length > 0 && <p className="stg__note">Changed from the defaults: {changes.join(', ')}.</p>}
+          <div className={`algo-sum__go${real ? ' is-real' : ''}`}>
+            <p>
+              {d.paper
+                ? 'Practice run: let go at the end and it starts against the live market. Nothing is sent, nothing is bought.'
+                : `Let go at the end and it starts${real ? ' with real funds' : ''}: ${kids.length > 1 ? `all ${kids.length} orders above are` : 'the order above is'} placed as planned and ${kids.length > 1 ? verbWord : `${verbWord}s`} ${sizeWords || 'the amount'} for you as the market reaches ${kids.length > 1 ? 'them' : 'it'}. What has not filled can be cancelled any time in the Algos tab.`}
+            </p>
+            <SlideConfirm
+              label={d.paper ? `Slide to start the practice ${verbWord}` : `Slide to ${verbWord} ${sizeWords}`.trim()}
+              tone={d.paper ? 'paper' : p.side}
+              disabled={!ready}
+              busy={busy}
+              onConfirm={() => void launch()}
+            />
+            {!ready && (why || where.why) && <p className="oe-hint algo-ferr">{why ?? where.why}</p>}
+          </div>
+        </>
       ) : (
         <p className="oe-hint">{amountMissing ? 'Enter an amount on the ticket.' : allErrors[0] ?? 'Waiting for the market…'}</p>
       )}
-      {changes.length > 0 && <p className="stg__note">Changed from the defaults: {changes.join(', ')}.</p>}
     </section>
   );
 
