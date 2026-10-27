@@ -1,5 +1,5 @@
 /**
- * The Algos tab: every algo order this browser runs (or ran), one card each.
+ * The Algos tab: every algo order this browser runs (or ran), one row each, as the account tables.
  *
  * A card says how far it is (filled of the target, a bar), how well it went
  * (average fill against the arrival price and against the market's own VWAP
@@ -19,6 +19,8 @@ import { useAlgos } from '../../algo/useAlgos';
 import { fmtDuration, menuName, type UiKind } from './menu';
 import { AlgoIcon } from './AlgoIcon';
 import { RunningWindow } from './RunningWindow';
+import { CoinIcon } from '../CoinIcon';
+import { SidePill } from '../accountTables/cells';
 import './algo.css';
 
 type Place = 'browser' | ExecutorMode;
@@ -219,134 +221,138 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           )}
     </>
   );
+  const next = live && v.nextAt ? (v.nextAt > now ? `next in ${fmtDuration(v.nextAt - now)}` : 'next now') : null;
+  const ends = v.endsAt ? (live && v.endsAt > now ? `ends in ${fmtDuration(v.endsAt - now)}` : live ? null : `ended ${fmtTime(v.endsAt)}`) : null;
   return (
-    <article className={`algo-card is-${s.side}${s.paper ? ' is-paper' : ''}`}>
-      <button type="button" className="algo-card__head" aria-expanded={open} onClick={() => setOpen((x) => !x)}>
-        <span className="algo-card__mark" aria-hidden="true"><AlgoIcon kind={uiKindOf(s)} size={16} /></span>
-        <span className="algo-card__name">
-          <b>
-            {s.kind === 'basket' ? (
-              <>{ALGO_NAMES[s.kind]} · {s.legs.length} markets</>
-            ) : (
-              <>{menuName(uiKindOf(s))} <span className="algo-card__dir">{sideWord}</span> {base}</>
-            )}
-            {place !== 'browser' ? ` · ${PLACE_WORD[place]}` : ''}
-          </b>
-          <span className="algo-card__tags">
-            {s.paper && <span className="algo-practice" title="A practice run: worked against the live market, nothing is sent to SoDEX">Practice · no real orders</span>}
-            <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
+    <>
+      <tr className={`algo-tr is-${s.side}${s.paper ? ' is-paper' : ''}${open ? ' is-open' : ''}`} onClick={() => setOpen((x) => !x)} aria-expanded={open}>
+        <td>
+          <span className="algo-tr__name">
+            <span className="algo-tr__mark" aria-hidden="true"><AlgoIcon kind={uiKindOf(s)} size={14} /></span>
+            <span>{s.kind === 'basket' ? ALGO_NAMES[s.kind] : menuName(uiKindOf(s))}</span>
+            {s.paper && <span className="acct-pill algo-pill--paper" title="A practice run: worked against the live market, nothing is sent to SoDEX">Practice</span>}
           </span>
-        </span>
-        <span className="algo-card__prog">
-          <span className="algo-card__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <i style={{ width: `${pct}%` }} />
+        </td>
+        <td>
+          {s.kind === 'basket' ? (
+            <span className="acct-mkt">{s.legs.length} markets</span>
+          ) : (
+            <span className="acct-mkt">
+              <CoinIcon coin={base} size={16} />
+              <span className="acct-mkt__n">{base}</span>
+              <SidePill dir={s.side === 'buy' ? 'long' : 'short'} />
+            </span>
+          )}
+        </td>
+        <td>
+          <span className={`algo-status is-${a.status}`}>{STATUS_WORD[a.status] ?? a.status}</span>
+          {place !== 'browser' && <span className="acct-sub"> · {PLACE_WORD[place]}</span>}
+        </td>
+        <td className="num">
+          <span className="algo-tr__fill">
+            <span className="algo-tr__bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${pct}%` }} /></span>
+            <span>
+              {basket ? (
+                <>{fmtUsd(basket.done, 0)}<span className="acct-unit"> / {fmtUsd(basket.total, 0)}</span></>
+              ) : (
+                <>{fmtQ(a.filled)}<span className="acct-unit">{target !== null ? ` / ${fmtQ(target)}` : ''} {base}</span></>
+              )}
+            </span>
+            <b>{pct}%</b>
           </span>
-          <span className="algo-card__nums">
-            {basket ? (
-              <span>
-                <b>{fmtUsd(basket.done, 0)}</b> / {fmtUsd(basket.total, 0)}
-              </span>
-            ) : (
-              <span>
-                <b>{fmtQ(a.filled)}</b>
-                {target !== null ? ` / ${fmtQ(target)}` : ''} {base}
-              </span>
-            )}
-            <span>{pct}%</span>
-          </span>
-        </span>
-        <span className="algo-card__q">
-          <b>{v.avgPrice !== null ? fmtPx(v.avgPrice) : DASH}</b>
-          <span className={arr.cls} title="Average fill against the mid when it started; positive is better for you">vs arrival {arr.text}</span>
-        </span>
-        <span className="algo-card__acts" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="algo-btn" onClick={() => setWin(true)} title="Open it in its own window: the live chart, every order and the log">
-            Open
-          </button>
-          {live && a.status !== 'paused' && (
-            <button type="button" className="algo-btn" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">
-              Pause
-            </button>
+        </td>
+        <td className="num">{v.avgPrice !== null ? fmtPx(v.avgPrice) : DASH}</td>
+        <td className={`num ${arr.cls}`} title="Average fill against the mid when it started; positive is better for you">{arr.text}</td>
+        <td className="acct-word algo-tr__now" title={v.working ?? undefined}>{(live ? v.working ?? next ?? ends : ends) ?? DASH}</td>
+        <td className="num acct-time">{a.startedAt ? fmtTime(a.startedAt) : s.startAt ? `at ${fmtTime(s.startAt)}` : DASH}</td>
+        <td className="acct-actions" onClick={(e) => e.stopPropagation()}>
+          <button type="button" className="acct-act" onClick={() => setWin(true)} title="Its own window: the live chart, every order and the log">Open</button>
+          {live && a.status !== 'paused' && <button type="button" className="acct-act" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">Pause</button>}
+          {a.status === 'paused' && <button type="button" className="acct-act" onClick={() => doAct('resume')}>Resume</button>}
+          {live && <button type="button" className="acct-act acct-act--danger" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled; what filled stays filled">Cancel</button>}
+          {win && (
+            <RunningWindow
+              v={v}
+              kind={uiKindOf(s)}
+              open={win}
+              onClose={() => setWin(false)}
+              facts={facts}
+              log={<Log id={a.id} live={live} place={place} />}
+              actions={
+                <>
+                  {live && a.status !== 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('pause')}>Pause</button>}
+                  {a.status === 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('resume')}>Resume</button>}
+                  {live && <button type="button" className="algo-chip" onClick={() => doAct('cancel')}>Cancel</button>}
+                </>
+              }
+            />
           )}
-          {a.status === 'paused' && (
-            <button type="button" className="algo-btn" onClick={() => doAct('resume')}>
-              Resume
-            </button>
-          )}
-          {live && (
-            <button type="button" className="algo-btn is-danger" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled on SoDEX; what filled stays filled">
-              Cancel
-            </button>
-          )}
-        </span>
-      </button>
+        </td>
+      </tr>
       {open && (
-        <div className="algo-card__body">
-          {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
-          {facts}
-          <Log id={a.id} live={live} place={place} />
-        </div>
+        <tr className="algo-tr__more">
+          <td colSpan={9}>
+            <div className="algo-card__body">
+              {a.statusReason && <p className="algo-card__reason">{a.statusReason}</p>}
+              {facts}
+              <Log id={a.id} live={live} place={place} />
+            </div>
+          </td>
+        </tr>
       )}
-      {win && (
-        <RunningWindow
-          v={v}
-          kind={uiKindOf(s)}
-          open={win}
-          onClose={() => setWin(false)}
-          facts={facts}
-          log={<Log id={a.id} live={live} place={place} />}
-          actions={
-            <>
-              {live && a.status !== 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('pause')}>Pause</button>}
-              {a.status === 'paused' && <button type="button" className="algo-chip" onClick={() => doAct('resume')}>Resume</button>}
-              {live && <button type="button" className="algo-chip" onClick={() => doAct('cancel')}>Cancel</button>}
-            </>
-          }
-        />
-      )}
-    </article>
+    </>
   );
 }
+
+type Show = 'all' | 'running' | 'ended';
 
 export default function AlgoTable({ address }: { address: string | null }) {
   const { role, views: here } = useAlgos(address);
   const remote = useExecutorAlgos(address);
+  const [show, setShow] = useState<Show>('all');
   const all: Array<{ v: AlgoView; place: Place }> = [
     ...here.map((v) => ({ v, place: 'browser' as const })),
     ...remote.hosted.map((v) => ({ v, place: 'hosted' as const })),
     ...remote.self.map((v) => ({ v, place: 'self' as const })),
   ];
-  // A basket's legs are shown inside the basket's card, not as cards of their own.
+  // A basket's legs are shown inside the basket's row, not as rows of their own.
   const baskets = new Set(all.filter((r) => r.v.algo.spec.kind === 'basket').map((r) => r.v.algo.id));
   const rows = all.filter((r) => !(r.v.algo.parentId && baskets.has(r.v.algo.parentId))).sort((a, b) => b.v.algo.createdAt - a.v.algo.createdAt);
   const isLive = (r: { v: AlgoView }) => !FINAL_STATUSES.has(r.v.algo.status);
   const live = rows.filter(isLive);
-  const ended = rows.filter((r) => !isLive(r)).slice(0, 30);
+  const ended = rows.filter((r) => !isLive(r)).slice(0, 50);
   const livePlaces = [...new Set(live.map((r) => r.place))];
   const cancelAll = async () => {
     for (const p of livePlaces) await act(p, 'cancelAll');
     remote.reload();
   };
-  const views = rows;
-  if (!address && !views.length) {
+  if (!address && !rows.length) {
     return (
       <div className="algos__empty">
         <b>No wallet connected</b>
-        <span>Connect a wallet to run TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing, bracket and basket orders - or switch on Paper in the ticket to try one without a wallet.</span>
+        <span>Connect a wallet to run TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, trailing, bracket and basket orders - or switch on Practice run in the ticket to try one without a wallet.</span>
       </div>
     );
   }
+  const shown = show === 'running' ? live : show === 'ended' ? ended : [...live, ...ended];
+  const where =
+    livePlaces.length > 1
+      ? livePlaces.map((p) => `${live.filter((r) => r.place === p).length} ${PLACE_WORD[p]}`).join(', ')
+      : livePlaces[0] === 'browser'
+        ? role === 'standby' ? 'Running in another tab of this browser' : role === 'runner' ? 'Running in this tab' : ''
+        : livePlaces[0] ? `Running on ${PLACE_WORD[livePlaces[0]]}` : '';
+  const SHOWS: ReadonlyArray<readonly [Show, string, number]> = [['all', 'All', live.length + ended.length], ['running', 'Running', live.length], ['ended', 'Ended', ended.length]];
   return (
     <div className="algos">
       <div className="algos__bar">
-        <span>
-          <b>{live.length}</b> running
-          {livePlaces.length > 1
-            ? ` (${livePlaces.map((p) => `${live.filter((r) => r.place === p).length} ${PLACE_WORD[p]}`).join(', ')})`
-            : livePlaces[0] === 'browser'
-              ? role === 'standby' ? ' in another tab of this browser' : role === 'runner' ? ' in this tab' : ''
-              : livePlaces[0] ? ` on ${PLACE_WORD[livePlaces[0]]}` : ''}
-        </span>
+        <div className="algos__show" role="tablist" aria-label="Show">
+          {SHOWS.map(([k, label, count]) => (
+            <button key={k} type="button" role="tab" aria-selected={show === k} className={show === k ? 'is-on' : ''} onClick={() => setShow(k)}>
+              {label} <span>{count}</span>
+            </button>
+          ))}
+        </div>
+        <span className="algos__where">{where}</span>
         {live.length > 0 && (
           <button type="button" className="algo-btn is-danger" onClick={() => void cancelAll()} title="Cancel every running algo, wherever it runs, and pull its resting children (an executor asks for one wallet signature)">
             Cancel all
@@ -354,18 +360,33 @@ export default function AlgoTable({ address }: { address: string | null }) {
         )}
       </div>
       <div className="algos__list">
-        {!views.length && (
+        {!shown.length ? (
           <div className="algos__empty">
-            <b>No algo orders yet</b>
+            <b>{rows.length ? (show === 'running' ? 'Nothing running' : 'Nothing ended yet') : 'No algo orders yet'}</b>
             <span>Pick Algo in the order ticket: TWAP, VWAP, POV, iceberg, chase, scale, DCA, swarm, conditional, a trailing stop, a bracket or a basket.</span>
           </div>
+        ) : (
+          <table className="acct-table acct-t algo-t">
+            <thead>
+              <tr>
+                <th>Algo</th>
+                <th>Market</th>
+                <th>Status</th>
+                <th className="num">Filled</th>
+                <th className="num">Avg price</th>
+                <th className="num" title="Average fill against the mid when it started; positive is better for you">vs arrival</th>
+                <th>Now</th>
+                <th className="num">Started</th>
+                <th className="acct-actions" aria-label="Actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((r) => (
+                <Card key={`${r.place}:${r.v.algo.id}`} v={r.v} place={r.place} onActed={r.place === 'browser' ? undefined : remote.reload} />
+              ))}
+            </tbody>
+          </table>
         )}
-        {live.map((r) => (
-          <Card key={`${r.place}:${r.v.algo.id}`} v={r.v} place={r.place} onActed={r.place === 'browser' ? undefined : remote.reload} />
-        ))}
-        {ended.map((r) => (
-          <Card key={`${r.place}:${r.v.algo.id}`} v={r.v} place={r.place} />
-        ))}
       </div>
     </div>
   );

@@ -243,26 +243,26 @@ test('POV speed presets: Medium is the old default, so an untouched form sends w
 
 const BTC = { id: 1, name: 'BTC-USD', base: 'BTC', tickSize: '0.1', stepSize: '0.00001', minQuantity: '0.00001', maxQuantity: '1000', marketMaxQuantity: null, minNotional: 10, maxNotional: 5_000_000, maxLeverage: 50, buyLimitUpRatio: 0.05, sellLimitDownRatio: 0.05, takerFee: 0.0004, makerFee: 0.0002 } as unknown as MarketInfo;
 
-test('an untouched DCA buys at set prices: a first buy at the ask, then a limit every 2% lower, $50 each', () => {
+test('an untouched DCA buys at set prices: a first post-only buy at the bid, then one every 2% lower, $50 each', () => {
   const s = draftToSpec('dca', DEFAULT, { ...shared, bid: 99_990, ask: 100_000 }, NOW);
   assert.equal(s.kind, 'scale');
   assert.equal(s.label, 'DCA');
-  assert.equal(s.from, 100_000);
+  assert.equal(s.from, 99_990);
   assert.equal(s.orders, 10);
   const prices = s.prices as number[];
   assert.equal(prices.length, 10);
-  for (let i = 0; i < 10; i++) assert.ok(Math.abs(prices[i]! - 100_000 * (1 - 0.02 * i)) < 1e-6, `level ${i}`);
-  assert.ok(Math.abs((s.to as number) - 82_000) < 1e-6);
+  for (let i = 0; i < 10; i++) assert.ok(Math.abs(prices[i]! - 99_990 * (1 - 0.02 * i)) < 1e-6, `level ${i}`);
+  assert.ok(Math.abs((s.to as number) - 99_990 * 0.82) < 1e-6);
   // $50 at every level: more of the coin further down.
   (s.weights as number[]).forEach((w, i) => assert.ok(Math.abs(w * prices[i]! - 50) < 1e-9));
-  assert.equal(s.postOnly, false);
+  assert.equal(s.postOnly, true); // a DCA rests by default: post-only, maker
   assert.equal('intervalMs' in s, false, 'nothing about time');
   const c = checkAlgoSpec(s);
   assert.deepEqual(c.errors, {});
 });
 
 test("the plan, the preview's table and the chart lines are the same prices", () => {
-  const s = checkAlgoSpec(draftToSpec('dca', { ...DEFAULT, dcaOrders: '4', dcaStep: '1', dcaSizing: 'geometric', dcaMult: '2', perOrder: '100' }, { ...shared, bid: 99_990, ask: 100_000 }, NOW)).spec as Extract<AlgoSpec, { kind: 'scale' }>;
+  const s = checkAlgoSpec(draftToSpec('dca', { ...DEFAULT, postOnly: false, dcaOrders: '4', dcaStep: '1', dcaSizing: 'geometric', dcaMult: '2', perOrder: '100' }, { ...shared, bid: 99_990, ask: 100_000 }, NOW)).spec as Extract<AlgoSpec, { kind: 'scale' }>;
   const plan = planAlgo(s, BTC, { now: NOW, price: 99_995, seed: 1 });
   assert.deepEqual(plan.children.map((c) => c.price), [100_000, 99_000, 98_000, 97_000]);
   // $100, $200, $400, $800 at those prices, in whole steps.

@@ -106,6 +106,7 @@ import {
 import { blockedState, noticeFor, readExecutor, writeExecutor, type Place } from './executor';
 import { engineKind, fmtDuration, menuName, usesAmount, type UiKind } from './menu';
 import { AlgoIcon } from './AlgoIcon';
+import { feeRange, feeSplit, feeWords } from './fees';
 import { SlideConfirm } from './SlideConfirm';
 import '../SettingsMenu.css';
 import './algo.css';
@@ -379,7 +380,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
       }
       if (kind === 'conditional' && !x.conds.length) patch.conds = [cond(p.symbol, { value: roundTick(p.side === 'buy' ? mid * 0.99 : mid * 1.01), op: p.side === 'buy' ? 'below' : 'above' })];
       if (kind === 'basket' && !x.legs.length) patch.legs = legs(p.symbol, p.side);
-      if (kind === 'dca' && (!x.dcaStart || x.dcaFirst !== 'price')) Object.assign(patch, { dcaFirst: 'price', dcaStart: x.dcaStart || roundTick(mid) });
+      // A DCA's first order rests at the best price on its own side (a post-only order there is never refused).
+      if (kind === 'dca' && (!x.dcaStart || x.dcaFirst !== 'price')) Object.assign(patch, { dcaFirst: 'price', dcaStart: x.dcaStart || roundTick((p.side === 'buy' ? bid : ask) ?? mid) });
       if (kind === 'bracket' && !x.entryPrice) patch.entryPrice = roundTick(p.side === 'buy' ? mid * 0.998 : mid * 1.002);
       return Object.keys(patch).length ? { ...x, ...patch } : x;
     });
@@ -909,8 +911,28 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const verbWord = p.side === 'buy' ? 'buy' : 'sell';
   const sizeWords = plan?.total ? `${fmtQty(plan.total, p.sym?.stepSize)} ${base}` : '';
   const kidUsd = (c: PlannedChild) => c.usd ?? c.qty * (c.price ?? mid ?? 0);
+  // What it pays: each order's way into the book, from the spec (fees.ts), at this market's rates.
+  const split = check.spec && plan ? feeSplit(check.spec, plan, { bid, ask, px: mid }) : null;
+  const fee = split && split.maker + split.taker + split.either > 0 ? feeRange(split, rates) : null;
+  // How its orders meet the book, where the kind lets the trader choose.
+  const style: { value: string; options: ReadonlyArray<Opt<string>>; onChange: (v: string) => void } | null =
+    ek === 'twap' || ek === 'vwap' || ek === 'pov'
+      ? {
+          value: kind === 'chasetwap' && d.exec === 'taker' ? 'hybrid' : d.exec,
+          options: kind === 'chasetwap'
+            ? [['hybrid', 'Rest, then take', 'Each slice rests at the best price; what falls behind is taken.'], ['maker', 'Maker only', 'Post-only: never takes, what does not fill keeps resting.']]
+            : [['taker', 'Taker', 'Each slice takes at once, within your slippage.'], ['hybrid', 'Hybrid', 'Each slice rests first, then takes what falls behind.'], ['maker', 'Maker', 'Post-only, re-priced as the book moves: never takes.']],
+          onChange: (v) => set({ exec: v as Draft['exec'] }),
+        }
+      : kind === 'scale' || kind === 'dca' || kind === 'iceberg' || (kind === 'conditional' && d.then === 'limit')
+        ? {
+            value: d.postOnly ? 'post' : 'take',
+            options: [['post', 'Post only · maker', 'Every order rests in the book at the maker rate; one at or through the market is refused, never filled as a taker.'], ['take', 'Limit · may take', 'An order at or through the market fills at once at the taker rate; the rest wait in the book.']],
+            onChange: (v) => set({ postOnly: v === 'post' }),
+          }
+        : null;
   const summaryNode = (
-    <section className={`algo-group algo-summary is-${d.paper ? 'paper' : p.side}`} aria-label="Summary">
+    <section className={`algo-group algo-summary is-${p.side}`} aria-label="Summary">
       {check.spec && plan ? (
         <>
           <header className="algo-sum__lead">
@@ -927,8 +949,18 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
             )}
             {kids.length > 0 && <div><dt>Orders</dt><dd>{kids.length}</dd><small>{plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}` : kids.some((c) => c.price !== null) ? 'resting at their prices' : 'as it goes'}</small></div>}
             {plan.avgPrice && <div><dt>Avg if all fill</dt><dd>{fmtLevel(plan.avgPrice)}</dd><small>USD</small></div>}
-            {plan.notional ? <div><dt>Fees</dt><dd>{fmtUsd(plan.notional * rates.maker, 2)}–{fmtUsd(plan.notional * rates.taker, 2)}</dd><small>resting – taking</small></div> : null}
+            {fee && (
+              <div><dt>Fees</dt><dd>{fee.lo === fee.hi ? fmtUsd(fee.lo, 2) : `${fmtUsd(fee.lo, 2)}–${fmtUsd(fee.hi, 2)}`}</dd><small>{feeWords(split!)}</small></div>
+            )}
           </dl>
+          {style && (
+            <div className="algo-sum__block">
+              <h4>Orders go in as</h4>
+              <div className="algo-sum__style">
+                <SSeg label="Orders go in as" value={style.value} options={style.options} onChange={style.onChange} />
+              </div>
+            </div>
+          )}
           <div className="algo-sum__block">
             <h4>Details</h4>
             <Review spec={check.spec} plan={plan} kind={kind} feeRates={rates} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />
@@ -936,39 +968,41 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
           {kids.length > 0 && (
             <div className="algo-sum__block">
               <h4>{kids.length > 1 ? `Every order · ${kids.length}` : 'The order'}</h4>
-              <table className="algo-sumkids">
-                <thead>
-                  <tr><th>#</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
-                </thead>
-                <tbody>
-                  {kids.map((c, i) => (
-                    <tr key={i}>
-                      <td>{i + 1}</td>
-                      <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
-                      <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
-                      <td className="is-size">{fmtQty(c.qty, p.sym?.stepSize)}</td>
-                      <td>{c.usd !== undefined || c.price !== null || mid ? fmtUsd(kidUsd(c), 2) : DASH}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                {kids.length > 1 && (
-                  <tfoot>
-                    <tr>
-                      <td colSpan={2}>Total</td>
-                      <td>{plan.avgPrice ? `avg ${fmtLevel(plan.avgPrice)}` : ''}</td>
-                      <td>{fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
-                      <td>{fmtUsd(kids.reduce((a, c) => a + kidUsd(c), 0), 2)}</td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
+              <div className="algo-sum__kids">
+                <table className="algo-sumkids">
+                  <thead>
+                    <tr><th>#</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
+                  </thead>
+                  <tbody>
+                    {kids.map((c, i) => (
+                      <tr key={i}>
+                        <td>{i + 1}</td>
+                        <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
+                        <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
+                        <td className="is-size">{fmtQty(c.qty, p.sym?.stepSize)}</td>
+                        <td>{c.usd !== undefined || c.price !== null || mid ? fmtUsd(kidUsd(c), 2) : DASH}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  {kids.length > 1 && (
+                    <tfoot>
+                      <tr>
+                        <td colSpan={2}>Total</td>
+                        <td>{plan.avgPrice ? `avg ${fmtLevel(plan.avgPrice)}` : ''}</td>
+                        <td>{fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
+                        <td>{fmtUsd(kids.reduce((a, c) => a + kidUsd(c), 0), 2)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
             </div>
           )}
           {changes.length > 0 && <p className="algo-sum__changes">Changed from the defaults: {changes.join(', ')}.</p>}
           <div className="algo-sum__go">
             <SlideConfirm
               label={d.paper ? `Slide to start the practice ${verbWord}` : `Slide to ${verbWord} ${sizeWords}`.trim()}
-              tone={d.paper ? 'paper' : p.side}
+              tone={p.side}
               disabled={!ready}
               busy={busy}
               onConfirm={() => void launch()}
@@ -1140,9 +1174,11 @@ function AdvancedWindow({ open, onClose, kind, d, exitsHere, canReset, onReset, 
           <div className="stg__panehead"><SecIcon size={22}>{cur.icon}</SecIcon><h3>{cur.label}</h3></div>
           <p className="stg__lede">{cur.lede}</p>
           {sec === 'summary' ? summary : sec === 'runs' ? runsOn : sec === 'preview' ? preview : <SecCtx.Provider value={sec}>{children}</SecCtx.Provider>}
-          <div className="stg__actions algo-done">
-            <button type="button" className="stg__btn is-go" onClick={onClose}>Done</button>
-          </div>
+          {sec !== 'summary' && (
+            <div className="stg__actions algo-done">
+              <button type="button" className="stg__btn is-go" onClick={onClose}>Done</button>
+            </div>
+          )}
         </div>
       </div>
     </Modal>
@@ -1587,6 +1623,7 @@ function TicketSettings({ kind, d, set, side, base, mid, roundTick, err, quantit
             </div>
           )}
           {d.dcaSizing === 'geometric' && <AField title="Size ×" hint="Each next order this many times the one before: 1.5 gives 1, 1.5, 2.25, 3.4 …" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} unit="per order" err={err('skew', 'weights')} />}
+          <PostOnly d={d} set={set} />
         </Group>
       )}
 

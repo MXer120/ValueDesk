@@ -769,6 +769,30 @@ export function subscribeWallet(cb: () => void): () => void {
   return () => subscribers.delete(cb);
 }
 
+/** The last wallet name and logo per address, kept in this browser (see syncFromKit). */
+const LOGO_KEY = 'vs.wallet.logo';
+function rememberedLogo(address: string): { name: string; icon: string } | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOGO_KEY) ?? '{}') as Record<string, { name: string; icon: string }>;
+    return all[address.toLowerCase()] ?? null;
+  } catch {
+    return null;
+  }
+}
+function rememberLogo(address: string, name: string, icon: string): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(LOGO_KEY) ?? '{}') as Record<string, { name: string; icon: string }>;
+    const key = address.toLowerCase();
+    const prev = all[key];
+    const next = { name: name || prev?.name || '', icon: icon || (name === prev?.name ? prev?.icon ?? '' : '') };
+    if (prev && prev.name === next.name && prev.icon === next.icon) return;
+    all[key] = next;
+    localStorage.setItem(LOGO_KEY, JSON.stringify(all));
+  } catch {
+    /* storage off or full: the logo just is not kept */
+  }
+}
+
 function setSnap(next: WalletSnapshot): void {
   const same = (Object.keys(next) as (keyof WalletSnapshot)[]).every((k) => next[k] === snap[k]);
   if (same) return;
@@ -870,13 +894,19 @@ async function syncFromKit(k: AppKit): Promise<void> {
   // A phone paired over WalletConnect names itself in the session even when
   // AppKit's own record of the pick is empty (a QR scanned from any wallet).
   const peer = kind === 'walletconnect' ? universal?.session?.peer?.metadata : undefined;
+  const named = info?.name || peer?.name?.trim() || '';
+  const icon = typeof info?.icon === 'string' && info.icon ? info.icon : peer?.icons?.find((u) => u.startsWith('data:image/')) ?? ''; // other hosts are outside img-src
+  if (named || icon) rememberLogo(address, named, icon);
+  // AppKit reports the account before the wallet's info on a reload, and drops the info for a
+  // moment on some updates: the logo this address last showed stands in, so it never blanks.
+  const kept = snap.address === address && snap.status === 'connected' ? { name: snap.walletName, icon: snap.walletIcon } : rememberedLogo(address);
   setSnap({
     status: 'connected',
     provider,
     address,
     chainId,
-    walletName: info?.name || peer?.name?.trim() || (kind === 'walletconnect' ? 'WalletConnect' : 'Browser wallet'),
-    walletIcon: typeof info?.icon === 'string' && info.icon ? info.icon : peer?.icons?.find((u) => u.startsWith('data:image/')) ?? '', // other hosts are outside img-src
+    walletName: named || kept?.name || (kind === 'walletconnect' ? 'WalletConnect' : 'Browser wallet'),
+    walletIcon: icon || (!named || named === kept?.name ? kept?.icon ?? '' : ''),
     kind,
   });
   if (!wasConnected && connectRequested) {

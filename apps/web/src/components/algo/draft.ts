@@ -542,9 +542,10 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     case 'dca': {
       // Buys at set prices: the ladder as a scale with its levels spelled out (from/to/orders/skew
       // describe the same ladder for an executor that predates explicit levels).
-      const l = dcaLadder(d, p);
+      // Post-only from the market: the first order joins its own side of the book (a buy the bid), where it rests.
+      const l = dcaLadder(d, d.postOnly ? { side: p.side, bid: p.side === 'sell' ? p.ask : p.bid, ask: p.side === 'buy' ? p.bid : p.ask } : p);
       const ladder = l.prices ? { prices: l.prices, weights: l.sizes } : {};
-      return { ...base, kind: 'scale', label: 'DCA', limitPrice: null, upper: null, lower: null, maxSpreadBps: null, quantity: l.quantity, from: l.prices?.[0] ?? null, to: l.prices?.[l.prices.length - 1] ?? null, orders: l.orders, distribution: 'exponential', skew: l.skew, spacing: 'linear', sizeJitter: 0, postOnly: false, ...ladder };
+      return { ...base, kind: 'scale', label: 'DCA', limitPrice: null, upper: null, lower: null, maxSpreadBps: null, quantity: l.quantity, from: l.prices?.[0] ?? null, to: l.prices?.[l.prices.length - 1] ?? null, orders: l.orders, distribution: 'exponential', skew: l.skew, spacing: 'linear', sizeJitter: 0, postOnly: d.postOnly, ...ladder };
     }
     case 'swarm':
       return { ...base, quantity: p.quantity, clips: Math.trunc(n(d.clips)), inFlight: d.inFlight, waveMs: Math.round((n(d.waveSec) || 0) * 1000), sizeJitter: frac(d.sizeJitter), slippageBps: n(d.slip), retries: Math.trunc(n(d.retries) || 0) };
@@ -632,7 +633,7 @@ export const ADVANCED_KEYS: Record<UiKind, ReadonlyArray<keyof Draft>> = {
   iceberg: ['displayJitter', 'offsetTicks', 'refill', 'postOnly'],
   chase: ['offsetMode', 'offsetTicks', 'offsetBps', 'chaseTicks', 'timeout', 'onEnd'],
   scale: ['skew', 'spacing', 'scaleJitter', 'postOnly'],
-  dca: ['dcaSizing', 'dcaCurve', 'dcaMult', 'dcaLevels', 'dcaStepScale'],
+  dca: ['dcaSizing', 'dcaCurve', 'dcaMult', 'dcaLevels', 'dcaStepScale', 'postOnly'],
   swarm: ['inFlight', 'waveSec', 'slip', 'retries', 'sizeJitter'],
   trailing: ['trailWhole', 'source', 'exit', 'slip', 'chaseSec'],
   conditional: ['match', 'holdSec', 'expires', 'slip', 'postOnly', 'thenSlices'],

@@ -256,41 +256,38 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algos__empty b { display: block; font-size: var(--fs-base); font-weight: 500; color: var(--text); margin-bottom: var(--sp-1); }
 .algos__empty span { font-size: var(--fs-xs); color: var(--muted); }
 
-.algo-card { border-bottom: 1px solid var(--panel-line); }
-.algo-card__head {
-  display: grid; grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 1.6fr) minmax(0, 1fr) auto;
-  align-items: center; gap: var(--sp-3);
-  width: 100%; padding: var(--sp-2) var(--sp-3);
-  border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+/* The Algos tab's rows (AlgoTable): the account tables' own table (.acct-table.acct-t), one row an algo. */
+.algo-t { --algo-dir: var(--pos); --acct-inset: 12px; }
+.algo-tr { cursor: pointer; }
+.algo-tr.is-sell { --algo-dir: var(--neg); }
+.algo-tr.is-open td { background: rgba(255, 255, 255, 0.025); }
+.algo-tr__name { display: inline-flex; align-items: center; gap: 8px; font-weight: 500; }
+.algo-tr__mark {
+  width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: var(--algo-dir);
+  background: color-mix(in srgb, var(--algo-dir) 13%, transparent);
 }
-.algo-card__head:hover { background: var(--bg-hover); }
-.algo-card__head:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.algo-card__mark {
-  width: 26px; height: 26px; border-radius: 50%;
-  display: grid; place-items: center;
-  font-size: var(--fs-micro); font-weight: 500; letter-spacing: 0.02em; color: var(--text);
-  background: color-mix(in srgb, var(--algo-dir, var(--pos)) 16%, var(--bg-panel));
-  border: 1px solid color-mix(in srgb, var(--algo-dir, var(--pos)) 40%, transparent);
+.algo-tr__fill { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; width: 100%; }
+.algo-tr__fill > b { min-width: 4ch; text-align: right; font-weight: 500; }
+.algo-tr__bar { position: relative; flex: 1 1 auto; min-width: 56px; max-width: 160px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.algo-tr__bar i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--algo-dir); transition: width var(--dur-med) var(--ease-out); }
+.algo-t th.acct-actions, .algo-t td.acct-actions { text-align: right; width: 1%; }
+.algo-tr__more > td { height: auto !important; padding: 10px var(--acct-inset, 12px) 14px !important; background: rgba(255, 255, 255, 0.025); white-space: normal !important; cursor: default; }
+.algo-tr__more .algo-card__body { padding: 0; }
+.algo-tr__now { max-width: 200px; overflow: hidden; text-overflow: ellipsis; color: var(--muted) !important; }
+.algo-pill--paper { background: color-mix(in srgb, var(--algo-paper) 16%, transparent); color: var(--algo-paper); }
+/* narrower panels: the times give way first, then the comparisons */
+@container panel (max-width: 1100px) { .algo-t :is(th, td):nth-child(8) { display: none; } .algo-tr__bar { min-width: 40px; max-width: 64px; } }
+@container panel (max-width: 960px) { .algo-t :is(th, td):nth-child(7), .algo-t :is(th, td):nth-child(6) { display: none; } }
+.algos__show { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(255, 255, 255, 0.04); }
+.algos__show button {
+  height: 24px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer;
 }
-.algo-card.is-sell { --algo-dir: var(--neg); }
-.algo-card.is-buy { --algo-dir: var(--pos); }
-.algo-card__name { display: flex; flex-direction: column; min-width: 0; }
-.algo-card__name b { font-size: var(--fs-xs); font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.algo-card__name span { font-size: var(--fs-micro); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.algo-card__dir { color: var(--algo-dir); }
-.algo-card__prog { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.algo-card__bar { position: relative; flex: 1 1 auto; min-width: 48px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
-.algo-card__bar i {
-  position: absolute; inset: 0 auto 0 0; border-radius: 3px;
-  background: var(--algo-dir);
-  transition: width var(--dur-med) var(--ease-out);
-}
-.algo-card__nums { flex: none; display: flex; align-items: baseline; gap: 8px; white-space: nowrap; font-size: var(--fs-micro); color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
-.algo-card__nums b { color: var(--text); font-weight: 500; }
-.algo-card__nums > span:last-child { min-width: 3ch; text-align: right; color: var(--text); }
-.algo-card__q { display: flex; flex-direction: column; min-width: 0; font-size: var(--fs-micro); color: var(--muted); font-family: var(--font-num); font-variant-numeric: tabular-nums; }
-.algo-card__q b { font-size: var(--fs-xs); font-weight: 500; }
-.algo-card__acts { display: flex; gap: 6px; }
+.algos__show button span { color: var(--dim, var(--muted)); font-family: var(--font-num); margin-left: 2px; }
+.algos__show button:hover { color: var(--text); }
+.algos__show button.is-on { background: rgba(255, 255, 255, 0.09); color: var(--text); }
+.algos__show button.is-on span { color: var(--muted); }
+.algos__where { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* the Algos tab's buttons: hairline, as the View control (Account.css .acctf-view) */
 .algo-btn {
   display: inline-flex; align-items: center; justify-content: center; height: 26px; padding: 0 10px;
@@ -327,14 +324,13 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-neg { color: var(--neg); }
 
 @container panel (max-width: 560px) {
-  .algo-card__head { grid-template-columns: auto minmax(0, 1fr) auto; }
-  .algo-card__q, .algo-card__prog { grid-column: 2 / -1; }
+  .algo-t :is(th, td):nth-child(6), .algo-t :is(th, td):nth-child(7), .algo-t :is(th, td):nth-child(8) { display: none; }
   .algo-card__body { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .algo-status.is-running::before { animation: none; }
-  .algo-card__bar i { transition: none; }
+  .algo-tr__bar i { transition: none; }
 }
 
 /* The Preview section (AlgoPreview.tsx PlanPreview): words, a chart with axes, facts, every child. */
@@ -484,9 +480,8 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-chip:disabled { cursor: default; }
 .algo-chip:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 
-/* A practice run, unmistakable in the Algos tab: a blue badge and a blue edge on its card. */
-.algo-card.is-paper { --algo-dir: var(--algo-paper); box-shadow: inset 3px 0 0 var(--algo-paper); background: color-mix(in srgb, var(--algo-paper) 5%, transparent); }
-.algo-card.is-paper .algo-card__mark { border-style: dashed; }
+/* A practice run, unmistakable in the Algos tab: a blue badge and a blue edge on its row. */
+.algo-tr.is-paper > td:first-child { box-shadow: inset 2px 0 0 var(--algo-paper), inset 0 -1px 0 color-mix(in srgb, var(--text) 8%, transparent); }
 .algo-card__tags { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .algo-practice {
   flex: none; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 650; letter-spacing: 0.03em; text-transform: uppercase;
@@ -671,7 +666,6 @@ select.algo-sf__pick option { background: #1c1b1a; }
 /* The Summary (AlgoTicket summaryNode): what it does, the numbers, every order, then the slide. */
 .algo-summary { --sum-tint: var(--pos); display: flex; flex-direction: column; gap: 18px; }
 .algo-summary.is-sell { --sum-tint: var(--neg); }
-.algo-summary.is-paper { --sum-tint: var(--algo-paper); }
 .algo-sum__lead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px; }
 .algo-sum__mark {
   width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--sum-tint);
@@ -705,12 +699,13 @@ select.algo-sf__pick option { background: #1c1b1a; }
 .algo-sumkids tfoot td { padding-top: 8px; font-weight: 600; border-top: 1px solid var(--line); background: none; }
 .algo-sumkids tfoot td:first-child { color: var(--text); }
 .algo-sum__changes { margin: 0; color: var(--muted); font-size: var(--fs-xs, 12px); }
-/* the slide stays in view at the bottom of the pane while the orders scroll */
-.algo-sum__go {
-  position: sticky; bottom: -28px; z-index: 2; display: flex; flex-direction: column; gap: 8px;
-  margin: 0 -36px -28px; padding: 14px 36px 22px;
-  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--bg, #0b0b0c) 92%, #1b1b1f) 14px);
-}
+.algo-sum__style { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.algo-sum__style .algo-ctl { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.algo-sum__style .algo-sseg__note { color: var(--muted); font-size: var(--fs-xs, 12px); line-height: 1.4; }
+/* a long ladder scrolls in its own box, so the slide below stays near */
+.algo-sum__kids { max-height: 292px; overflow: auto; scrollbar-width: thin; }
+.algo-sum__kids thead th { position: sticky; top: 0; z-index: 1; background: color-mix(in srgb, var(--bg, #0b0b0c) 70%, #26262b); }
+.algo-sum__go { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 .algo-sum__why { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0; color: var(--muted); font-size: var(--fs-xs, 12px); }
 .algo-sum__why .acctf-view { flex: none; color: var(--algo-paper); border-color: color-mix(in srgb, var(--algo-paper) 45%, transparent); cursor: pointer; }
 .algo-sum__why .acctf-view:hover { color: var(--text); border-color: var(--algo-paper); }
