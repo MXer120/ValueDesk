@@ -139,10 +139,11 @@ export class SodexClient {
     return parseMarkets(await this.get<unknown>('/api/v1/perps/markets/symbols'));
   }
 
-  async markPrices(): Promise<Array<{ symbol: string; price: number }>> {
-    const rows = await this.get<Array<{ symbol?: string; markPrice?: string }>>('/api/v1/perps/markets/mark-prices');
+  /** Every market's mark, and its open interest in the coin (`openInterest`, null when absent). */
+  async markPrices(): Promise<Array<{ symbol: string; price: number; oi?: number | null }>> {
+    const rows = await this.get<Array<{ symbol?: string; markPrice?: string; openInterest?: string }>>('/api/v1/perps/markets/mark-prices');
     return (rows ?? [])
-      .map((r) => ({ symbol: String(r.symbol ?? ''), price: Number(r.markPrice) }))
+      .map((r) => ({ symbol: String(r.symbol ?? ''), price: Number(r.markPrice), oi: Number.isFinite(Number(r.openInterest)) && r.openInterest !== undefined ? Number(r.openInterest) : null }))
       .filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
   }
 

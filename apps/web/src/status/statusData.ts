@@ -10,10 +10,14 @@
  * page came from it.
  */
 import {
-  STATUS_SERVICES, dayTone, minutesExpected, type DayTone, type DayTuple, type ServiceState, type StatusReport,
+  IMPACT_TEXT, STAGE_TEXT, STATUS_SERVICES, dayToneWith, fmtUtc, fmtWindow, minutesExpected, noticeLive, noticePhase,
+  noticeSpan, noticesOnDay, parseNotice,
+  type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Impact, type Notice, type NoticePhase, type ServiceId,
+  type ServiceState, type StatusReport,
 } from '@sign/ops/statusModel.js';
 
-export type { DayTone, DayTuple, ServiceState, StatusReport };
+export type { DayTone, DayToneShown, DayTuple, HealthNotice, Notice, NoticePhase, ServiceState, StatusReport };
+export { IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticeLive, noticePhase };
 
 const TIMEOUT_MS = 8_000;
 
@@ -53,7 +57,11 @@ export async function checkExecutor(f: typeof fetch = fetch, now = Date.now): Pr
 /** What the page shows next. Never throws. */
 export async function loadStatus(f: typeof fetch = fetch, now = Date.now): Promise<StatusView> {
   const r = await getJson(f, '/api/vs/status');
-  if (r && r.status === 200 && isReport(r.body)) return { kind: 'report', report: r.body };
+  if (r && r.status === 200 && isReport(r.body)) {
+    // Checked one by one: a notice that is not one is left out, the rest still shows.
+    const notices = (Array.isArray(r.body.notices) ? r.body.notices : []).map(parseNotice).filter((n): n is Notice => n !== null);
+    return { kind: 'report', report: { ...r.body, notices } };
+  }
   return { kind: 'unreachable', at: now(), executor: await checkExecutor(f, now) };
 }
 
@@ -92,25 +100,121 @@ export const SERVICE_LINE: Record<(typeof STATUS_SERVICES)[number]['id'], string
 
 const fmtMinutes = (m: number): string => (m < 60 ? `${m} min` : m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${m % 60} min`);
 
-/** One day bar's tone and its tooltip: the date, the uptime, the minutes down and without data. */
-export function dayBar(d: DayTuple, now: number): { tone: DayTone; title: string } {
-  const [day, up, deg, down] = d;
-  const tone = dayTone(d);
-  const date = new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-  const probed = up + deg + down;
-  if (!probed) return { tone, title: `${date} · no data` };
-  const pct = ((up + deg) / probed) * 100;
-  const parts = [`${date}`, `${pct >= 99.995 ? '100' : pct.toFixed(2)}% up`];
-  if (down) parts.push(`${fmtMinutes(down)} down`);
-  if (deg) parts.push(`${fmtMinutes(deg)} degraded`);
-  const missing = Math.max(0, minutesExpected(day, now) - probed);
-  if (missing >= 5) parts.push(`${fmtMinutes(missing)} no data`);
-  return { tone, title: parts.join(' · ') };
-}
 
 /** "99.982%", "100%" or "-" for no data. */
 export function fmtUptime(pct: number | null): string {
   if (pct === null) return '–';
   if (pct >= 99.9995) return '100%';
   return `${pct.toFixed(pct >= 99 ? 3 : 2)}%`;
+}
+
+// --- incidents and maintenance on the page -------------------------------------------------
+
+/** What a service's pill says: the probe's verdict, made worse by an open incident, or maintenance. */
+export type ShownState = ServiceState | 'partial' | 'maintenance';
+
+const STATE_RANK: Record<ShownState, number> = { unknown: 0, up: 1, maintenance: 2, degraded: 3, partial: 4, down: 5 };
+const IMPACT_STATE: Record<Impact, ShownState> = { minor: 'degraded', major: 'partial', critical: 'down' };
+
+/**
+ * A service's state with the owner's notices: an open incident on it is at least its
+ * impact (minor degraded, major partial outage, critical down); maintenance in
+ * progress shows as maintenance unless an incident is open on it too.
+ */
+export function shownState(probe: ServiceState, service: ServiceId, notices: readonly Notice[], now: number): ShownState {
+  let state: ShownState = probe;
+  let incident = false;
+  let maintenance = false;
+  for (const n of notices) {
+    if (!n.components.includes(service) || !noticeLive(n, now)) continue;
+    if (n.kind === 'maintenance') maintenance = true;
+    else if (n.impact) {
+      incident = true;
+      const s = IMPACT_STATE[n.impact];
+      if (STATE_RANK[s] > STATE_RANK[state]) state = s;
+    }
+  }
+  return maintenance && !incident ? 'maintenance' : state;
+}
+
+export const SHOWN_TEXT: Record<ShownState, string> = { ...STATE_TEXT, partial: 'Partial outage', maintenance: 'Maintenance' };
+
+export type OverallShown = Overall | 'maintenance';
+
+/** The headline over the shown states. */
+export function overallShown(states: readonly ShownState[]): OverallShown {
+  if (states.includes('down') || states.includes('partial')) return 'outage';
+  if (states.includes('degraded')) return 'degraded';
+  if (states.includes('maintenance')) return 'maintenance';
+  return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
+}
+
+export const OVERALL_SHOWN_TEXT: Record<OverallShown, string> = { ...OVERALL_TEXT, maintenance: 'Maintenance in progress' };
+
+const SERVICE_NAME = new Map<string, string>(STATUS_SERVICES.map((s) => [s.id, s.name]));
+export const componentNames = (n: Notice): string => n.components.map((c) => SERVICE_NAME.get(c) ?? c).join(', ');
+
+/** "Major incident", "Maintenance". */
+export const noticeKindText = (n: Notice): string => (n.kind === 'incident' ? `${IMPACT_TEXT[n.impact ?? 'minor']} incident` : 'Maintenance');
+
+/** When it was (or is): "27 Oct 14:02 – 15:10 UTC", "since 27 Oct 14:02 UTC", a maintenance's window. */
+export function noticeTimes(n: Notice, now: number): string {
+  if (n.kind === 'maintenance') return fmtWindow(n.startsAt, n.closedAt !== null && n.closedAt < n.endsAt! ? Math.max(n.closedAt, n.startsAt + 60_000) : n.endsAt!);
+  if (n.closedAt === null) return `since ${fmtUtc(n.startsAt)}`;
+  const [from, to] = noticeSpan(n, now);
+  return fmtWindow(from, to);
+}
+
+export interface DayDetail {
+  day: string;
+  tone: DayToneShown;
+  /** "27 Oct 2026". */
+  date: string;
+  /** "99.86% up", or null for no data. */
+  uptime: string | null;
+  /** "2 min down", "15 min degraded", "3 h no data". */
+  facts: string[];
+  /** That day's incidents and maintenance on this service. */
+  notices: Array<{ id: number; label: string; title: string; times: string }>;
+}
+
+/** Everything one day bar's tooltip says. */
+export function dayDetail(d: DayTuple, service: ServiceId, notices: readonly Notice[], now: number): DayDetail {
+  const [day, up, deg, down] = d;
+  const onDay = noticesOnDay(notices, service, day, now);
+  const probed = up + deg + down;
+  const pct = probed ? ((up + deg) / probed) * 100 : null;
+  const facts: string[] = [];
+  if (down) facts.push(`${fmtMinutes(down)} down`);
+  if (deg) facts.push(`${fmtMinutes(deg)} degraded`);
+  const missing = Math.max(0, minutesExpected(day, now) - probed);
+  if (probed && missing >= 5) facts.push(`${fmtMinutes(missing)} no data`);
+  return {
+    day,
+    tone: dayToneWith(d, onDay),
+    date: new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }),
+    uptime: pct === null ? null : `${pct >= 99.995 ? '100' : pct.toFixed(2)}% up`,
+    facts,
+    notices: onDay.map((n) => ({ id: n.id, label: noticeKindText(n), title: n.title, times: noticeTimes(n, now) })),
+  };
+}
+
+/** The open incidents and maintenance /api/health carries (the app's banner); [] for anything else. */
+export function healthNoticesOf(health: unknown): HealthNotice[] {
+  const list = (health as { notices?: unknown } | null | undefined)?.notices;
+  if (!Array.isArray(list)) return [];
+  const phases: readonly string[] = ['active', 'upcoming', 'in_progress'];
+  return list.filter((n): n is HealthNotice => {
+    const v = n as HealthNotice | null;
+    return !!v && typeof v.id === 'number' && (v.kind === 'incident' || v.kind === 'maintenance') && typeof v.title === 'string'
+      && v.title.length > 0 && phases.includes(v.phase) && typeof v.startsAt === 'number';
+  }).slice(0, 3);
+}
+
+/** The app banner's line for one notice. */
+export function healthNoticeText(n: HealthNotice): string {
+  const title = n.title.length > 120 ? `${n.title.slice(0, 119)}…` : n.title;
+  if (n.kind === 'incident') return `${n.impact === 'critical' ? 'Outage' : 'Incident'}: ${title}`;
+  if (n.phase === 'in_progress') return `Maintenance in progress: ${title}${typeof n.endsAt === 'number' ? `, until ${fmtUtc(n.endsAt, { date: false })}` : ''}`;
+  return `Scheduled maintenance: ${title}, ${typeof n.endsAt === 'number' ? fmtWindow(n.startsAt, n.endsAt) : fmtUtc(n.startsAt)}`;
 }

@@ -12,21 +12,38 @@
  * trading screen is pure noise, and noise is what stops people reading the
  * banner on the day it finally says something.
  */
-import { useAsync } from '../hooks';
+import { useSharedPoll } from '../hooks';
 import type { MaintenanceStatus } from './Maintenance';
 import { bannerMessage } from './maintenanceVerdict';
 
+const STATUS_PATH = '/api/external/maintenance/status';
+
 async function getStatus(): Promise<MaintenanceStatus> {
-  const res = await fetch('/api/external/maintenance/status');
-  const body = await res.json().catch(() => null);
+  const res = await fetch(STATUS_PATH);
+  const text = await res.text();
+  let body: any = null;
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    throw new Error(`Malformed response from ${STATUS_PATH}`);
+  }
   if (!res.ok) throw new Error(body?.error ?? `HTTP ${res.status}`);
   return body as MaintenanceStatus;
 }
 
+/**
+ * The exchange's maintenance status, every 45 s: ONE poll shared by the shell's
+ * banner and the full panel (Maintenance.tsx) when both are mounted - each
+ * used to run its own timer for the same answer (every request is an /api
+ * function call). Paused while the tab is hidden (sharedPoll.ts).
+ */
+export function useMaintenanceStatus() {
+  return useSharedPoll<MaintenanceStatus>('ext:maintenance:status', getStatus, { pollMs: 45_000 });
+}
+
 export function MaintenanceBanner({ onOpenStatus }: { onOpenStatus?: () => void }) {
-  // Same 45s cadence as the full panel, and the backend caches for 15s, so
-  // having both mounted does not double the upstream load.
-  const { data } = useAsync<MaintenanceStatus>(getStatus, [], { pollMs: 45_000 });
+  // The backend caches for 15s, so N open tabs cost far fewer than N upstream requests.
+  const { data } = useMaintenanceStatus();
 
   // Never assert health. If the poll itself failed we know nothing, and
   // claiming "operating normally" on no evidence would be worse than silence.

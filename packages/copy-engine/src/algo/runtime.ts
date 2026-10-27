@@ -51,7 +51,8 @@ import {
 } from './math.ts';
 import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
-import { exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
+import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
+import { checkLimits, limitRefusal, type LimitRefusal } from './limits.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
@@ -84,6 +85,10 @@ const SENDING_MAX_MS = 20_000;
 const HISTORY_EVERY_MS = 20_000;
 const DONE_KEPT = 60;
 const MAX_CONSEC_REJECTS = 25;
+/** A refusal by SoDEX's open-interest cap, position limit or open-order cap holds the algo this long (doubling, at most 15 min)... */
+const LIMIT_RETRY_MS = 60_000;
+/** ...and stops it at the this-many-th with no fill in between: no retry storm against a limit. */
+const LIMIT_MAX_HITS = 4;
 const PROBLEM_RECHECK_MS = 60_000;
 /** POV and DCA hybrids: due quantity older than this is taken. */
 const LATE_MS = 30_000;
@@ -384,6 +389,7 @@ export class AlgoRuntime {
     // One resting limit (a bracket's limit entry, a conditional's limit) is one order: it must be one SoDEX takes.
     const oneLimit = spec.kind === 'bracket' && spec.entry === 'limit' && spec.price !== null ? { qty: Number(spec.quantity), price: spec.price } : spec.kind === 'conditional' && spec.then.type === 'limit' ? { qty: Number(spec.then.quantity), price: spec.then.price } : null;
     if (oneLimit && oneLimit.qty > maxOrderQty(m, oneLimit.price) + 1e-12) throw new Error(`This order is over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString('en-US')})` : ''}. Use a smaller size, or a TWAP to split it.`);
+    await this.startLimits(a);
     if (spec.triggerPrice !== null) {
       const mk = this.market.mark(spec.symbol)?.mark ?? null;
       if (mk !== null) a.k.triggerFrom = mk;
@@ -395,6 +401,48 @@ export class AlgoRuntime {
     await this.event(a, 'status', `${what} placed${spec.paper ? ' (paper: nothing is sent)' : ''}.`);
     this.host.onChange?.(a.id);
     return a;
+  }
+
+  /**
+   * SoDEX's limits at the start (limits.ts), checked here - the authority, on
+   * the executor as in a browser: a position over its limit at the leverage,
+   * or a resting price outside its limit band, refuses the start. The
+   * open-interest cap only warns on the ticket (it moves); the runtime holds
+   * at it (fitLimits). Without a price or a position nothing is refused here.
+   */
+  private async startLimits(a: AlgoRecord): Promise<void> {
+    const s = a.spec;
+    if (s.reduceOnly) return;
+    const legs: Array<{ symbol: string; side: Side; qty: number | null; usd: number | null }> =
+      s.kind === 'basket' ? s.legs.map((l) => ({ symbol: l.symbol, side: l.side, qty: null, usd: l.usd }))
+      : !opensPosition(s) ? []
+      : [{ symbol: s.symbol, side: s.side, qty: algoQuantity(s), usd: s.kind === 'dca' ? (s.maxTotalUsd ?? s.perOrderUsd * s.orders) : null }];
+    for (const l of legs) {
+      const m = this.markets.get(l.symbol);
+      const ref = m ? await this.refOf(l.symbol) : null;
+      if (!m || !ref) continue;
+      const priced = s.kind === 'scale' ? scaleLadder(s, m, a.seed) : (s.kind === 'bracket' && s.entry === 'limit') || s.kind === 'iceberg' ? (s.price !== null ? [{ price: s.price }] : []) : [];
+      const off = bandRefused(l.side, priced, m, ref.mark);
+      if (off) throw new Error(`${off} order${off === 1 ? ' is' : 's are'} priced too far from the price: SoDEX refuses a limit ${l.side} more than ${Math.round((l.side === 'buy' ? m.buyLimitUpRatio : m.sellLimitDownRatio) * 100)}% ${l.side === 'buy' ? 'over' : 'under'} the mark.`);
+      const qty = l.qty ?? (l.usd !== null ? l.usd / ref.mark : null);
+      if (!qty) continue;
+      const pos = s.paper ? 0 : await this.positionOf(a, l.symbol);
+      const lim = checkLimits(m, { side: l.side, quantity: qty, price: ref.mark, position: pos, leverage: s.leverage ?? m.initLeverage ?? null, oi: ref.oi });
+      if (lim.errors.length) throw new Error(s.kind === 'basket' ? `${l.symbol}: ${lim.errors[0]}` : lim.errors[0]);
+    }
+  }
+
+  /** A market's mark and open interest: the feed's, else read once from SoDEX (a market not watched yet). null: not known. */
+  private async refOf(symbol: string): Promise<{ mark: number; oi: number | null } | null> {
+    const mk = this.market.mark(symbol);
+    if (mk) return { mark: mk.mark, oi: mk.oi };
+    try {
+      const rows = await this.host.sodex.markPrices();
+      const r = rows.find((x) => x.symbol.toUpperCase() === symbol.toUpperCase());
+      return r ? { mark: r.price, oi: r.oi ?? null } : null;
+    } catch {
+      return null;
+    }
   }
 
   async pause(id: string): Promise<AlgoRecord> {
@@ -703,6 +751,11 @@ export class AlgoRuntime {
         await this.hold(a, `Held: ${policy.reason ?? 'not available in your region.'}`);
         return;
       }
+    }
+    // SoDEX refused it at one of its limits (onLimit): nothing goes out until the wait is over.
+    if (typeof a.k.limitUntil === 'number' && now < a.k.limitUntil) {
+      await this.hold(a, String(a.k.limitReason ?? 'Held: a SoDEX limit is reached.'));
+      return;
     }
     if (m.status !== 'TRADING') {
       await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
@@ -1915,6 +1968,11 @@ export class AlgoRuntime {
         list = [{ ...one, quantity: fit }];
       }
     }
+    if (opening) {
+      const fit = await this.fitLimits(a, m, list, leverage);
+      if (!fit) return [];
+      list = fit;
+    }
     if (this.stopped(a)) return [];
     if (opening && ceiling !== null) {
       // Counted at once, so the next child before the next read does not overshoot.
@@ -1952,6 +2010,7 @@ export class AlgoRuntime {
     let results: ChildResult[];
     if (s.paper) results = this.paperPlace(a, m, children);
     else results = await sink!.place(a, m, reqs);
+    let limit: LimitRefusal | null = null;
     for (const c of children) {
       const r = results.find((x) => x.clOrdID === c.clOrdID) ?? { clOrdID: c.clOrdID, ok: false, orderId: null, error: 'no answer for this order', outcomeUnknown: true };
       c.updatedAt = Date.now();
@@ -1968,6 +2027,7 @@ export class AlgoRuntime {
         a.rejects++;
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         await this.event(a, 'error', `SoDEX refused ${c.tag}: ${r.error}`, c);
+        limit ??= limitRefusal(r.error, m.name);
       }
     }
     // Paused or ended while it was on its way: a cancel sent then may have reached SoDEX before the order did, so what rests is cancelled again now.
@@ -1979,9 +2039,66 @@ export class AlgoRuntime {
       if (again.length) await sink!.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => this.event(a, 'error', `Cancel failed: ${e instanceof Error ? e.message : String(e)}`));
     }
     await this.save(a);
+    if (limit) await this.onLimit(a, limit);
     if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, 'failed', `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
     this.host.onChange?.(a.id);
     return children;
+  }
+
+  /**
+   * Opening children inside SoDEX's position limit at the leverage and the
+   * market's open-interest cap (limits.ts), with what the algo has working:
+   * one child is cut down to fit, a batch waits whole. null: held, nothing
+   * goes out to be refused. The position is the last one read (live), or the
+   * paper fills' (paper); the open interest the feed's.
+   */
+  private async fitLimits(a: AlgoRecord, m: MarketInfo, list: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string; reduceOnly?: boolean }>, leverage: number | null): Promise<typeof list | null> {
+    const s = a.spec;
+    const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+    if (!open.length || (!m.marginTiers?.length && !m.openInterestCap && !m.openInterestCapUSD)) return list;
+    const side = open[0]!.side;
+    const sum = open.reduce((x, c) => x + c.quantity, 0);
+    const working = this.live(a).filter((c) => !c.reduceOnly && c.side === side).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+    const price = open.reduce((x, c) => x + c.quantity * c.price, 0) / sum;
+    let pos: number | null = null;
+    if (s.paper) pos = typeof a.k.paperPos === 'number' ? a.k.paperPos : 0;
+    else {
+      // Read again when older than POSITIONS_MS (the trader may have traded by hand); a read in flight: the last one.
+      const hit = this.positionsOf.get(a.owner);
+      const book = hit && (hit.loading || Date.now() - hit.at <= POSITIONS_MS) ? hit.data : await this.loadPositions(a);
+      pos = book ? (book[m.name]?.size ?? 0) : null;
+    }
+    const lev = leverage ?? m.initLeverage ?? null;
+    const lim = checkLimits(m, { side, quantity: sum + working, price, position: pos, leverage: lev, oi: this.market.mark(m.name)?.oi ?? null });
+    const most = Math.min(lim.maxByPosition, lim.maxByOi) - working;
+    if (sum <= most + 1e-12) return list;
+    const one = list.length === 1 ? list[0]! : null;
+    const cut = one ? floorStep(Math.max(0, most), m) : 0;
+    if (one && cut >= minChildQty(m, one.price)) return [{ ...one, quantity: cut }];
+    await this.hold(a, lim.maxByOi < lim.maxByPosition
+      ? `Held: open interest on ${m.name} is at SoDEX's cap. It goes on when there is room.`
+      : `Held: your ${m.name} position is at SoDEX's limit${lev !== null ? ` for ${lev}x` : ''}. It goes on when there is room (a smaller position, or lower leverage).`);
+    return null;
+  }
+
+  /**
+   * SoDEX refused a child at one of its limits (limits.ts limitRefusal): the
+   * algo waits a minute (doubling), and stops at the LIMIT_MAX_HITS-th refusal
+   * with no fill in between - never a refusal every tick.
+   */
+  private async onLimit(a: AlgoRecord, lim: LimitRefusal): Promise<void> {
+    if (FINAL_STATUSES.has(a.status)) return;
+    const n = Number(a.k.limitHits ?? 0) + 1;
+    a.k.limitHits = n;
+    if (n >= LIMIT_MAX_HITS) {
+      await this.end(a, 'failed', `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
+      return;
+    }
+    const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 60_000);
+    a.k.limitUntil = Date.now() + wait;
+    a.k.limitReason = `Held: ${lim.text} Trying again in ${Math.round(wait / 60_000)} min.`;
+    this.dirty.add(a.id);
+    await this.hold(a, a.k.limitReason as string);
   }
 
   private async cancelChildren(a: AlgoRecord, m: MarketInfo, list: ChildOrder[]): Promise<void> {
@@ -2046,6 +2163,8 @@ export class AlgoRuntime {
     const before = a.filled;
     const was = c.state;
     this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    // Something filled: SoDEX's limits let it through, so a refusal before counts no more.
+    if (a.filled > before && a.k.limitHits) delete a.k.limitHits;
     // A fill that lands after the algo ended still gets its exits resized.
     if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
       const m = this.markets.get(a.spec.symbol);
@@ -2061,6 +2180,8 @@ export class AlgoRuntime {
         a.rejects++;
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         void this.event(a, 'error', `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ''}.`, c);
+        const lim = limitRefusal(u.reason, a.spec.symbol);
+        if (lim) void this.onLimit(a, lim);
       }
       this.onChildDone(a, c);
     } else if (c.state === 'sending' || c.state === 'unknown') c.state = 'open';

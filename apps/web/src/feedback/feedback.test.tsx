@@ -74,21 +74,21 @@ test('VITE_FEEDBACK_URL (the Discord button): https only, anything else means "c
   }
 });
 
-test('a message: the token in the header only, the page info and wallet only when chosen', async () => {
+test('a message: the key in the header only; its kind, areas and the connected wallet in the body', async () => {
   const { sendMessage } = await import('./feedback');
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const ok = (async (url: string, init: RequestInit) => {
     calls.push({ url, init });
     return new Response('{"ok":true,"thread":4}', { status: 200 });
   }) as unknown as typeof fetch;
-  const r = await sendMessage(TOKEN, { category: 'bug', message: '  It froze  ', images: [], context: null, wallet: null, website: '' }, ok);
+  const r = await sendMessage(TOKEN, { category: 'bug', message: '  It froze  ', areas: [], images: [], context: null, wallet: null, website: '' }, ok);
   assert.deepEqual(r, { ok: true, thread: 4 });
   assert.equal(calls[0]!.url, '/api/vs/feedback', 'never a token in the URL');
   assert.equal((calls[0]!.init.headers as Record<string, string>).Authorization, `Bearer ${TOKEN}`);
   assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), { category: 'bug', message: 'It froze' });
-  await sendMessage(TOKEN, { category: 'idea', message: 'More', images: ['a'.repeat(24)], context: null, wallet: WALLET, website: '' }, ok);
+  await sendMessage(TOKEN, { category: 'idea', areas: ['charts'], message: 'More', images: ['a'.repeat(24)], context: null, wallet: WALLET, website: '' }, ok);
   const sent = JSON.parse(String(calls[1]!.init.body));
-  assert.deepEqual([sent.images, sent.wallet], [['a'.repeat(24)], WALLET]);
+  assert.deepEqual([sent.areas, sent.images, sent.wallet], [['charts'], ['a'.repeat(24)], WALLET]);
   assert.ok(!('contact' in sent), 'there is no contact field any more');
 });
 
@@ -96,13 +96,13 @@ test('a private key or a seed phrase is never sent: a red sentence instead', asy
   const { sendMessage, secretIn } = await import('./feedback');
   let called = false;
   const f = (async () => { called = true; return new Response('{}'); }) as unknown as typeof fetch;
-  const r = await sendMessage(TOKEN, { category: 'bug', message: `my key ${'ab'.repeat(32)}`, images: [], context: null, wallet: null, website: '' }, f);
+  const r = await sendMessage(TOKEN, { category: 'bug', message: `my key ${'ab'.repeat(32)}`, areas: [], images: [], context: null, wallet: null, website: '' }, f);
   assert.ok(!r.ok && r.secret && /private key/.test(r.error));
   assert.equal(called, false, 'nothing left the browser');
   assert.equal(secretIn('abandon ability able about above absent absorb abstract absurd abuse access accident')?.kind, 'seed-phrase');
   assert.equal(secretIn(`my wallet ${WALLET} shows 0 balance`), null);
   const server = (async () => new Response('{"ok":false,"code":"secret","error":"This message seems to contain a seed phrase."}', { status: 400 })) as unknown as typeof fetch;
-  const s = await sendMessage(TOKEN, { category: 'bug', message: 'hello', images: [], context: null, wallet: null, website: '' }, server);
+  const s = await sendMessage(TOKEN, { category: 'bug', message: 'hello', areas: [], images: [], context: null, wallet: null, website: '' }, server);
   assert.ok(!s.ok && s.secret);
 });
 
@@ -128,9 +128,9 @@ test('threads: random 43-character tokens, kept newest first, replies announced 
     polled.push({ url, body: JSON.parse(String(init.body)) });
     return new Response('{"ok":true,"threads":[{"owner":1,"lastOwnerAt":5},null]}', { status: 200 });
   }) as unknown as typeof fetch;
-  assert.deepEqual(await t.pollThreads([a, b], f), [{ owner: 1, lastOwnerAt: 5 }, null]);
+  assert.deepEqual(await t.pollThreads([a, b], null, f), { threads: [{ owner: 1, lastOwnerAt: 5 }, null], wallet: null });
   assert.deepEqual(polled, [{ url: '/api/vs/feedback/poll', body: { tokens: [a, b] } }]);
-  assert.deepEqual(await t.pollThreads([], f), [], 'no thread, no request');
+  assert.deepEqual(await t.pollThreads([], null, f), { threads: [], wallet: null }, 'no thread, no request');
   assert.equal(polled.length, 1);
 });
 
@@ -163,14 +163,15 @@ test('the page info: everything useful, nothing identifying, and the form lists 
     pathname: `/scan/${WALLET}`,
     userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15',
     innerWidth: 1440, innerHeight: 900, devicePixelRatio: 2, language: 'de-DE', timeZone: 'Europe/Berlin',
-    sockets: 'hub open · perps open', walletConnected: true, modes: ['hosted', 'hosted'], errors: ['0123456789abcdef'],
+    sockets: 'hub open · perps open', walletConnected: true, online: true, pageAgeS: 42.4, modes: ['hosted', 'hosted'], errors: ['0123456789abcdef'],
   }, null);
   assert.deepEqual({ ...ctx, build: 'x' }, {
     route: '/scan/:address', build: 'x', browser: 'safari 18', os: 'macos', viewport: '1440x900', dpr: 2, lang: 'de-DE', timeZone: 'Europe/Berlin',
-    sockets: 'hub open · perps open', walletConnected: true, modes: ['hosted'], errors: ['0123456789abcdef'], element: null,
+    sockets: 'hub open · perps open', walletConnected: true, online: true, pageAgeS: 42, modes: ['hosted'], errors: ['0123456789abcdef'], element: null,
   });
   const rows = Object.fromEntries(contextRows(ctx));
-  assert.equal(rows.Wallet, 'connected (address not included)');
+  assert.equal(rows.Wallet, 'connected');
+  assert.deepEqual([rows.Online, rows['Page open for']], ['yes', '42 s']);
   assert.ok(!JSON.stringify(ctx).includes(WALLET.slice(2)));
   assert.equal(osFamily('Mozilla/5.0 (Linux; Android 14)'), 'android');
 });
@@ -216,4 +217,119 @@ test('Settings: a Help & FAQ section with Send feedback, and answers that match 
   assert.ok(['US', 'GB', 'CA'].every((c) => (CLOSE_ONLY_CODES as readonly string[]).includes(c)));
   assert.match(text, /United States, the United Kingdom and Canada it is close-only/);
   assert.match(text, /2x leverage/);
+});
+
+test("Area: several at once, in the list's order, from the server's own list; the button says when one is needed", async () => {
+  const { AreaPicker, toggleArea } = await import('./AreaPicker');
+  const { FEEDBACK_AREAS } = await import('@sign/ops/feedbackAreas.js');
+  assert.deepEqual(toggleArea(['funds'], 'algo'), ['algo', 'funds']);
+  assert.deepEqual(toggleArea(['algo', 'funds'], 'algo'), ['funds']);
+  const labels = FEEDBACK_AREAS.map((a) => a.label);
+  for (const want of ['Layout & UI', 'Algo orders', 'Deposits & withdrawals', 'Wallet connection', 'Other']) assert.ok(labels.includes(want), want);
+  const html = renderToMarkup(createElement(AreaPicker, { value: [], onChange: () => {}, required: true, onLayer: () => {} }));
+  assert.match(html, /aria-haspopup="listbox"/);
+  assert.match(html, /Choose at least one/);
+  const chosen = renderToMarkup(createElement(AreaPicker, { value: ['charts', 'copy'], onChange: () => {}, required: true, onLayer: () => {} }));
+  assert.match(chosen, /Charts, Copy trading/);
+  assert.match(chosen, /aria-label="Remove Copy trading"/);
+});
+
+test('Send: the form only asks; the warning and the slide are a second window, and only the slide sends', async () => {
+  const src = readFileSync(new URL('./FeedbackDialog.tsx', import.meta.url), 'utf8');
+  const form = src.slice(src.indexOf('<form'), src.indexOf('</form>'));
+  assert.ok(!form.includes('fb-warn'), 'the warning is no longer in the form');
+  assert.match(form, /onSubmit=\{[^}]*askToSend\(\)/);
+  assert.ok(!/onSubmit=[\s\S]{0,80}send\(\)/.test(form.replace('askToSend', '')), 'submit never sends by itself');
+  const confirm = src.slice(src.indexOf('export function SendConfirm'));
+  assert.match(confirm, /<b>Never<\/b> send a <b>private key<\/b>, a <b>seed phrase<\/b>, <b>passwords<\/b> or <b>API keys<\/b>/);
+  assert.match(confirm, /<SlideConfirm label=\{CONFIRM_LABEL\} tone="sell" onConfirm=\{onConfirm\}/);
+  assert.match(src, /<SendConfirm open=\{open && confirming\}[\s\S]{0,80}onConfirm=\{\(\) => void send\(\)\}/);
+  const { CONFIRM_LABEL } = await import('./FeedbackDialog');
+  assert.equal(CONFIRM_LABEL, 'Slide to confirm: I included no private keys, seed phrases or passwords');
+  const { SlideConfirm } = await import('../components/algo/SlideConfirm');
+  const slide = renderToMarkup(createElement(SlideConfirm, { label: CONFIRM_LABEL, tone: 'sell', onConfirm: () => {} }));
+  assert.match(slide, /role="slider"/);
+  assert.ok(slide.includes(CONFIRM_LABEL));
+  assert.ok(!src.includes('New conversation'), 'one ongoing chat: no "new conversation"');
+});
+
+test('a chat kept on a wallet: the token gets "wallet", an expired sign-in "session" - the form asks for the signature', async () => {
+  const { loadThread } = await import('./threads');
+  const { sendMessage } = await import('./feedback');
+  const answer = (status: number, body: unknown) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+  assert.deepEqual(await loadThread(TOKEN, answer(401, { ok: false, code: 'wallet' })), { status: 'wallet' });
+  assert.deepEqual(await loadThread(TOKEN, answer(401, { ok: false, code: 'session' })), { status: 'session' });
+  assert.deepEqual(await loadThread(TOKEN, answer(404, { ok: false })), { status: 'none' });
+  assert.deepEqual(await loadThread(TOKEN, answer(200, { ok: true, thread: { wallet: WALLET }, messages: [] })), { status: 'ok', messages: [], wallet: WALLET });
+  const r = await sendMessage(TOKEN, { category: 'other', areas: [], message: 'hi', images: [], context: null, wallet: null, website: '' }, answer(401, { ok: false, code: 'wallet', error: 'x' }));
+  assert.ok(!r.ok && r.auth === 'wallet');
+});
+
+test("wallet sign-in: the wallet signs the feedback statement (the server's check passes), the browser's chat goes along to attach", async () => {
+  const { secp256k1 } = await import('@noble/curves/secp256k1');
+  const { privateKeyToAddress, bytesToHex } = await import('@sign/signing/eip712.js');
+  const { checkFeedbackSignIn, feedbackSignInDigest } = await import('@sign/ops/feedbackAuth.js');
+  const { signInFeedback, heldSession, keepSession } = await import('./session');
+  const key = new Uint8Array(32).fill(7);
+  const owner = privateKeyToAddress(key).toLowerCase();
+  const provider = {
+    request: async ({ method, params }: { method: string; params?: unknown[] }) => {
+      if (method === 'eth_chainId') return '0x1';
+      assert.equal(method, 'eth_signTypedData_v4');
+      const td = JSON.parse(String(params![1])) as { primaryType: string; domain: { name: string; chainId: number }; message: { owner: string; statement: string; nonce: string; issuedAt: string; expiresAt: string } };
+      assert.equal(td.primaryType, 'FeedbackSignIn');
+      assert.equal(td.domain.name, 'ValueDesk Feedback');
+      const sig = secp256k1.sign(feedbackSignInDigest({ ...td.message, chainId: td.domain.chainId }), key, { lowS: true, prehash: false });
+      const rsv = new Uint8Array(65);
+      // @noble/curves 1.x here (toCompactRawBytes), 2.x on the server (toBytes).
+      const s = sig as unknown as { toCompactRawBytes?: () => Uint8Array; toBytes?: (f: string) => Uint8Array; recovery: number };
+      rsv.set(s.toCompactRawBytes ? s.toCompactRawBytes() : s.toBytes!('compact'), 0);
+      rsv[64] = 27 + s.recovery;
+      return bytesToHex(rsv);
+    },
+  };
+  const bodies: Array<{ signIn: unknown; attach?: string }> = [];
+  const f = (async (_url: string, init: RequestInit) => {
+    const b = JSON.parse(String(init.body)) as { signIn: unknown; attach?: string };
+    bodies.push(b);
+    const v = checkFeedbackSignIn(b.signIn);
+    return new Response(JSON.stringify(v.ok ? { ok: true, owner, token: `${owner}.${Date.now() + 86_400_000}.0.${'x'.repeat(43)}`, expiresAt: Date.now() + 86_400_000, attached: 'adopted' } : { ok: false, error: v.error }), { status: v.ok ? 200 : 401 });
+  }) as unknown as typeof fetch;
+  const r = await signInFeedback(provider, owner, TOKEN, f);
+  assert.ok(r.ok, r.ok ? '' : r.error);
+  assert.equal(r.attached, 'adopted');
+  assert.equal(bodies[0]!.attach, TOKEN);
+  assert.equal(heldSession(owner)?.token, r.session.token);
+  // A session about to run out is not used.
+  keepSession(owner, r.session.token, Date.now() + 30_000);
+  assert.equal(heldSession(owner), null);
+});
+
+test('the bell: a token the wallet absorbed is asked through the wallet; its replies are announced once, as "wallet"', async () => {
+  const t = await import('./threads');
+  const { keepSession, heldSession } = await import('./session');
+  const { findNewReplies } = await import('./FeedbackHost');
+  const owner = '0x' + '12'.repeat(20);
+  g.localStorage!.clear();
+  const absorbed = t.newToken();
+  const other = t.newToken();
+  t.rememberThread(absorbed, 'mine', 1);
+  t.markAttached(absorbed, owner);
+  t.rememberThread(other, 'other', 2);
+  const session = `${owner}.${Date.now() + 86_400_000}.0.${'y'.repeat(43)}`;
+  keepSession(owner, session, Date.now() + 86_400_000);
+  const seen: Array<{ tokens: string[]; auth: string | undefined }> = [];
+  const f = (async (_url: string, init: RequestInit) => {
+    seen.push({ tokens: (JSON.parse(String(init.body)) as { tokens: string[] }).tokens, auth: (init.headers as Record<string, string>).Authorization });
+    return new Response(JSON.stringify({ ok: true, threads: [{ owner: 0, lastOwnerAt: null }], wallet: { owner: 2, lastOwnerAt: 9 } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const found = await findNewReplies(owner, f);
+  assert.deepEqual(seen, [{ tokens: [other], auth: `Bearer ${session}` }]);
+  assert.deepEqual(found!.map((x) => [x.ref, x.fresh]), [['wallet', 2]]);
+  found![0]!.mark();
+  assert.equal(heldSession(owner)!.notifiedOwner, 2);
+  assert.deepEqual(await findNewReplies(owner, f), [], 'announced once');
+  // Without the wallet's session, the absorbed token still counts its replies.
+  const plain = await findNewReplies(null, (async () => new Response(JSON.stringify({ ok: true, threads: [{ owner: 1, lastOwnerAt: 1 }, null] }), { status: 200 })) as unknown as typeof fetch);
+  assert.deepEqual(plain!.map((x) => x.ref), [other]);
 });

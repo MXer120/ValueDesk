@@ -307,6 +307,16 @@ export interface MarketInfo {
   minNotional: number;
   maxNotional: number | null;
   maxLeverage: number;
+  /** The leverage SoDEX sets on a market the trader never set one on (`initLeverage`). */
+  initLeverage?: number;
+  /**
+   * SoDEX's risk tiers (`marginTiers`): a position may be worth at most
+   * `maxNotionalValue` USD at up to `maxLeverage`. Rising notional, falling leverage.
+   */
+  marginTiers?: Array<{ maxNotionalValue: number; maxLeverage: number }>;
+  /** The market's open-interest cap: in the coin (`openInterestCap`) and in USD (`openInterestCapUSD`). null: none listed. */
+  openInterestCap?: number | null;
+  openInterestCapUSD?: number | null;
   /** A limit buy may be at most mark x (1 + this); a limit sell at least mark x (1 - sellLimitDownRatio). */
   buyLimitUpRatio: number;
   sellLimitDownRatio: number;

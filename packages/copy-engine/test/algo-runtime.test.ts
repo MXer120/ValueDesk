@@ -17,6 +17,7 @@ import {
   type RegionPolicy,
   type SodexClient,
   type StopRequest,
+  type MarketInfo,
 } from '../src/index.ts';
 import { BTC, ETH, FOLLOWER } from './helpers.ts';
 
@@ -105,6 +106,8 @@ class FakeSink implements AlgoSink {
   leverage: number[] = [];
   resting = new Map<string, ChildRequest & { filled: number }>();
   mode: 'ok' | 'unknown' | 'reject' = 'ok';
+  /** What a refusal says (mode 'reject'). */
+  rejectWith = 'nope';
   autoFill = true;
   constructor(private readonly m: FakeMarket) {}
   get all(): ChildRequest[] {
@@ -112,7 +115,7 @@ class FakeSink implements AlgoSink {
   }
   async place(_a: AlgoRecord, mk: { name: string }, orders: ChildRequest[]): Promise<ChildResult[]> {
     this.placed.push(orders);
-    if (this.mode !== 'ok') return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: this.mode === 'reject' ? 'nope' : 'timeout', outcomeUnknown: this.mode === 'unknown' }));
+    if (this.mode !== 'ok') return orders.map((o) => ({ clOrdID: o.clOrdID, ok: false, orderId: null, error: this.mode === 'reject' ? this.rejectWith : 'timeout', outcomeUnknown: this.mode === 'unknown' }));
     for (const o of orders) {
       const q = this.m.quote(mk.name)!;
       const touch = o.side === 'buy' ? q.ask : q.bid;
@@ -173,14 +176,14 @@ interface Rig {
   lookupRows: Array<{ clOrdID: string; orderId: string; status: string; executedQty: number; executedValue: number }>;
 }
 
-async function rig(): Promise<Rig> {
+async function rig(markets: MarketInfo[] = [BTC, ETH]): Promise<Rig> {
   const market = new FakeMarket();
   const sink = new FakeSink(market);
   const store = new MemoryAlgoStore();
   const position = { size: 0, entry: 0 };
   const lookups: Rig['lookups'] = [];
   const r: Rig = { rt: null as unknown as AlgoRuntime, market, sink, store, lookups, position, policy: { value: null }, account: { equity: 1_000, gross: 0 }, lookupRows: [] };
-  const sodex = { markets: async () => [BTC, ETH], follower: async () => ({ positions: { 'BTC-USD': { size: position.size, entry: position.entry } } }), get: async () => [] } as unknown as SodexClient;
+  const sodex = { markets: async () => markets, follower: async () => ({ positions: { 'BTC-USD': { size: position.size, entry: position.entry } } }), get: async () => [] } as unknown as SodexClient;
   r.rt = new AlgoRuntime({
     store,
     sodex,
@@ -713,4 +716,87 @@ test('brake: a live algo is held at once while the operator brake is on (nothing
   brake = null;
   await step(r, a.id, 1_000);
   assert.equal(r.sink.all.length, 1, 'sent once the brake is lifted');
+});
+
+/* ------------------------------------------------- SoDEX's limits (limits.ts) ----- */
+
+/** BTC-USD with SoDEX's risk tiers and an open-interest cap 0.0015 BTC over what the feed shows open (1000). */
+const CAPPED: MarketInfo = { ...BTC, initLeverage: 20, marginTiers: [{ maxNotionalValue: 4_000_000, maxLeverage: 40 }, { maxNotionalValue: 100_000_000, maxLeverage: 25 }], openInterestCap: 1000.0015, openInterestCapUSD: null };
+
+test('limits: a start over SoDEX\'s position limit at the leverage is refused (with the position already held); lower leverage passes', async () => {
+  const r = await rig([CAPPED, ETH]);
+  r.position.size = 60;
+  r.position.entry = 60_000;
+  await assert.rejects(add(r, { kind: 'twap', quantity: '10', durationMs: 600_000, slices: 5, leverage: 40, exec: { style: 'taker' } }), /over SoDEX's limit of \$4,000,000 at 40x\. Use a smaller size or lower leverage/);
+  const ok = await add(r, { kind: 'twap', quantity: '10', durationMs: 600_000, slices: 5, leverage: 25, exec: { style: 'taker' } });
+  assert.equal(ok.status, 'scheduled');
+  // Reduce-only never grows the position: not checked.
+  await add(r, { kind: 'twap', quantity: '50', durationMs: 600_000, slices: 5, leverage: 40, reduceOnly: true, side: 'sell', exec: { style: 'taker' } });
+});
+
+test('limits: a child over the open interest still allowed is cut to fit; with no room it holds, sending nothing', async () => {
+  const r = await rig([CAPPED, ETH]);
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 120_000, slices: 2, exec: { style: 'taker', slippageBps: 30 } });
+  let x = await step(r, a.id);
+  assert.equal(r.sink.all.length, 1);
+  const cut = Number(r.sink.all[0]!.quantity);
+  assert.ok(cut >= 0.00149 && cut <= 0.0015, `cut to the room under the cap: ${cut}`);
+  r.market.marks.set('BTC-USD', { ...r.market.marks.get('BTC-USD')!, oi: 1000.0015 });
+  x = await step(r, a.id, 60_000);
+  assert.equal(r.sink.all.length, 1, 'nothing sent at the cap');
+  assert.equal(x.status, 'waiting');
+  assert.match(x.statusReason!, /open interest on BTC-USD is at SoDEX's cap/);
+  r.market.marks.set('BTC-USD', { ...r.market.marks.get('BTC-USD')!, oi: 900 });
+  x = await step(r, a.id, 1_000);
+  assert.equal(x.status, 'running');
+  assert.equal(r.sink.all.length, 2, 'goes on when there is room');
+});
+
+test('limits: a child that would take the position over its limit is cut (the trader traded meanwhile); at the limit it holds', async () => {
+  const r = await rig([{ ...CAPPED, openInterestCap: null }, ETH]);
+  r.position.size = 65;
+  const a = await add(r, { kind: 'twap', quantity: '1', durationMs: 120_000, slices: 2, leverage: 40, exec: { style: 'taker', slippageBps: 30 } });
+  await step(r, a.id);
+  assert.equal(r.sink.all[0]!.quantity, '0.5', 'fits whole');
+  // Bought by hand meanwhile: read again (positions are read again after 5 s, in the background).
+  r.position.size = 66.2;
+  await step(r, a.id, 6_000);
+  await step(r, a.id, 54_000);
+  // $4M at the child's price (60,190) is about 66.456 BTC: about 0.256 more fits.
+  const q = Number(r.sink.all[1]!.quantity);
+  assert.ok(q > 0.25 && q < 0.26 && (66.2 + q) * 60_190 <= 4_000_000 + 1, String(q));
+  r.position.size = 66.5;
+  await step(r, a.id, 6_000);
+  const x = await step(r, a.id, 60_000);
+  assert.equal(r.sink.all.length, 2);
+  assert.equal(x.status, 'waiting');
+  assert.match(x.statusReason!, /your BTC-USD position is at SoDEX's limit for 40x/);
+});
+
+test('limits: SoDEX refusing at its open-interest cap holds the algo (a minute, doubling) and stops it at the fourth - no retry storm', async () => {
+  const r = await rig();
+  r.sink.mode = 'reject';
+  r.sink.rejectWith = 'order rejected: open interest cap exceeded';
+  const a = await add(r, { kind: 'twap', quantity: '0.004', durationMs: 3_600_000, slices: 4, exec: { style: 'taker', slippageBps: 30 } });
+  let x = await step(r, a.id);
+  assert.equal(r.sink.all.length, 1);
+  assert.equal(x.status, 'waiting');
+  assert.match(x.statusReason!, /open-interest cap on BTC-USD is reached\. Trying again in 1 min/);
+  for (let i = 0; i < 10; i++) x = await step(r, a.id, 5_000);
+  assert.equal(r.sink.all.length, 1, 'nothing re-sent during the wait');
+  x = await step(r, a.id, 15_000);
+  assert.equal(r.sink.all.length, 2);
+  assert.match(x.statusReason!, /Trying again in 2 min/);
+  x = await step(r, a.id, 121_000);
+  assert.equal(r.sink.all.length, 3);
+  x = await step(r, a.id, 241_000);
+  assert.equal(r.sink.all.length, 4);
+  assert.equal(x.status, 'failed');
+  assert.match(x.statusReason!, /Stopped: SoDEX's open-interest cap on BTC-USD is reached\. SoDEX refused it 4 times/);
+  // An ordinary refusal is not a limit: it is not held.
+  const r2 = await rig();
+  r2.sink.mode = 'reject';
+  const b = await add(r2, { kind: 'twap', quantity: '0.004', durationMs: 3_600_000, slices: 4, exec: { style: 'taker', slippageBps: 30 } });
+  const y = await step(r2, b.id);
+  assert.notEqual(y.status, 'waiting');
 });

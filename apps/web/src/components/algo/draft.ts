@@ -9,8 +9,51 @@
  * Advanced pop-up, with the value it always had (ADVANCED_KEYS), under where
  * the algo runs.
  */
-import { ORACLE_VENUES, SLIP_FROM, type SlipFrom, type BoundAction, type ConditionType, type OracleVenue, type SweepReferenceKind } from '@copy-engine';
+import { ORACLE_VENUES, SLIP_FROM, type AlgoPlan, type MarketInfo, type SlipFrom, type BoundAction, type ConditionType, type OracleVenue, type SweepReferenceKind } from '@copy-engine';
+import type { Symbol as MarketSymbol } from '../../api';
 import { engineKind, type UiKind } from './menu';
+
+/**
+ * A Symbol from the app's market list, as the engine's MarketInfo: its order
+ * sizes, its limit band, and SoDEX's position tiers and open-interest cap
+ * (marginTiers, openInterestCap / openInterestCapUSD), so the plan warns
+ * about them before the start. A ratio or cap SoDEX did not send: the
+ * engine's default band, no cap.
+ */
+export function marketOf(sym: MarketSymbol): MarketInfo {
+  const pos = (v: string | number | undefined): number | null => (Number(v) > 0 ? Number(v) : null);
+  const tiers = (sym.marginTiers ?? [])
+    .map((t) => ({ maxNotionalValue: Number(t.maxNotionalValue), maxLeverage: Number(t.maxLeverage) }))
+    .filter((t) => t.maxNotionalValue > 0 && t.maxLeverage > 0)
+    .sort((x, y) => x.maxNotionalValue - y.maxNotionalValue);
+  return {
+    id: sym.id,
+    name: sym.name,
+    base: sym.baseCoin,
+    tickSize: sym.tickSize,
+    stepSize: sym.stepSize,
+    minQuantity: sym.minQuantity || sym.stepSize,
+    maxQuantity: sym.maxQuantity ?? '0',
+    marketMaxQuantity: sym.marketMaxQuantity ?? null,
+    minNotional: Number(sym.minNotional) > 0 ? Number(sym.minNotional) : 10,
+    maxNotional: pos(sym.maxNotional),
+    maxLeverage: sym.maxLeverage ?? 1,
+    ...(sym.initLeverage && sym.initLeverage > 0 ? { initLeverage: sym.initLeverage } : {}),
+    ...(tiers.length ? { marginTiers: tiers } : {}),
+    openInterestCap: pos(sym.openInterestCap),
+    openInterestCapUSD: pos(sym.openInterestCapUSD),
+    buyLimitUpRatio: pos(sym.buyLimitUpRatio) ?? 0.05,
+    sellLimitDownRatio: pos(sym.sellLimitDownRatio) ?? 0.05,
+    takerFee: Number(sym.takerFee) || 0.0004,
+    ...(Number.isFinite(Number(sym.makerFee)) && sym.makerFee !== '' ? { makerFee: Number(sym.makerFee) } : {}),
+    status: 'TRADING',
+  };
+}
+
+/** The plan's warnings that are red, not amber: the order would hit SoDEX's open-interest cap (planAlgo puts it first). */
+export function redWarnings(plan: Pick<AlgoPlan, 'oi' | 'warnings'> | null): ReadonlySet<string> {
+  return new Set(plan?.oi?.level === 'over' && plan.warnings[0] ? [plan.warnings[0]] : []);
+}
 
 export type Unit = 's' | 'm' | 'h' | 'd';
 export const UNIT_MS: Record<Unit, number> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };

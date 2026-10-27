@@ -269,13 +269,14 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'GET /api/vs/liquidations/history read',
       'GET /api/vs/liquidations/wallets read',
       'GET /api/vs/live upstream',
-      'GET /api/vs/logo read',
+      'GET /api/vs/logo upstream',
       'GET /api/vs/news read',
       'GET /api/vs/news/sources read',
-      'GET /api/vs/oracle read',
+      'GET /api/vs/oracle upstream',
       'GET /api/vs/positioning read',
       'GET /api/vs/screener read',
       'GET /api/vs/status read',
+      'GET /api/vs/status/feed read',
       'GET /api/vs/whales read',
       'GET /ws/liq read',
       'POST /api/folders/erase write',
@@ -294,6 +295,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/client-errors write',
       'POST /api/vs/feedback write',
       'POST /api/vs/feedback/poll write',
+      'POST /api/vs/feedback/session auth',
       'POST /api/vs/feedback/thread write',
       'POST /api/vs/feedback/upload write',
     ],
@@ -315,6 +317,7 @@ test('the allow-list holds no custodial, per-user, diagnostic or websocket route
     // The index is read-only; the one thing a visitor changes is their own knowledge folders,
     // and the one thing a visitor sends is feedback and error reports to the owner (routes/reports.ts).
     if (r.url === '/api/vs/feedback/image') assert.ok(r.method === 'GET' && r.cls === 'read', r.url);
+    else if (r.url === '/api/vs/feedback/session') assert.ok(r.method === 'POST' && r.cls === 'auth', r.url);
     else if (r.url.startsWith('/api/vs/feedback') || r.url === '/api/vs/client-errors') assert.ok(r.method === 'POST' && r.cls === 'write', r.url);
     else if (!r.url.startsWith('/api/folders/')) assert.equal(r.method, 'GET', `${r.method} ${r.url}: hosted mode is read-only`);
     else if (r.method === 'POST') assert.ok(r.cls === 'write' || (r.cls === 'auth' && r.url === '/api/folders/session'), r.url);
@@ -333,7 +336,7 @@ test('rate classes: search and per-id lookups cost more, an auth route is capped
   assert.deepEqual(limitsFor(hostedRoute('GET', '/api/feed/account')!, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c', 'upstream|c']);
   // One leaderboard row is a lookup in memory, whatever the address.
   assert.deepEqual(limitsFor(hostedRoute('GET', '/api/vs/lbrow')!, { address: '0x' + '1'.repeat(40) }, DEFAULT_LIMITS, 'c').map((l) => l.key), ['read|c']);
-  assert.deepEqual(limitsFor(AUTH_ROUTE, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['auth|c', 'auth|*']);
+  assert.deepEqual(limitsFor(AUTH_ROUTE, {}, DEFAULT_LIMITS, 'c').map((l) => l.key), ['auth|c', 'auth|*|/api/points/auth/nonce']);
   assert.equal(hostedRoute('POST', '/api/points/auth/nonce'), null, 'the unused SoPoints relay is not public');
 });
 

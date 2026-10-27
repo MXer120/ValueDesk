@@ -20,20 +20,30 @@ Status: 2026-10-27. An item is ticked only when it holds on the production site.
 - [x] Also from Settings - Help & FAQ (`feedback/HelpSection.tsx`, with the FAQ) and from
       a right-click anywhere ("Send feedback about this", `feedback/FeedbackMenu.tsx`; the
       dashboard's own menu has it too), which attaches the clicked element.
-- [x] A chat: each conversation is a random token in this browser (`feedback/threads.ts`;
-      the server keeps its hash, `ops/feedbackThreads.ts`, `feedback.db`). Messages and up
+- [x] One ongoing chat per visitor, never closed (owner, 2026-10-27: "a permanent chat").
+      Without a wallet it is a random token in this browser (`feedback/threads.ts`; the
+      server keeps its hash). A connected wallet can keep the chat on itself with one free
+      signature (`feedback/session.ts`, `ops/feedbackAuth.ts`, a 30-day session); the
+      browser's chat joins the wallet's, and from then on only that wallet's signature
+      opens it. Every message carries the connected wallet's address, marked "proven" in
+      Telegram only when signed in. Kind (Bug, Idea, Other) and Areas (a multi-select with
+      search, `feedback/AreaPicker.tsx`, `ops/feedbackAreas.ts`; required for a bug). Send
+      opens a second window with the red warning and a slide to confirm. Limits per
+      address and per chat. Stored in `feedback.db` and `feedback-images/` in the data
+      directory, both in the off-server backup (`backup-offsite.sh`, set api-state). Messages and up
       to three screenshots (re-encoded in the browser, checked by their bytes on the server,
       `ops/imageCheck.ts`) go to the owner by Telegram, one reply chain per thread. The
       owner **replies in Telegram to the bot's message**; the API reads replies by long
       polling (`ops/telegramReplies.ts`), and the visitor gets them in the bell and as a
       toast (`feedback/FeedbackHost.tsx`, every minute while the tab is visible).
 - [x] Page and browser info on by default ("Recommended"), every line shown before
-      sending; the wallet address only with its own tick. A private key or a seed phrase
+      sending. A private key or a seed phrase
       in the text is refused, in the browser and on the server (`ops/secrets.ts`).
 - [ ] **The Vercel function** (`deploy/vercel/api-proxy.cjs`) must let through: `POST`
       with `Content-Type` and `Authorization` for `/api/vs/feedback`,
       `/api/vs/feedback/upload` (body up to 2,113,536 bytes), `/api/vs/feedback/thread`,
-      `/api/vs/feedback/poll` (16 KB each), `GET` with `Authorization` for
+      `/api/vs/feedback/poll`, `/api/vs/feedback/session` (16 KB each; already covered by
+      the proxy's `/api/vs/feedback/` prefix), `GET` with `Authorization` for
       `/api/vs/feedback/image` (answer up to 2 MiB, image/*), and `POST` with
       `Content-Type` for `/api/vs/client-errors` (8 KB); never cached. Check: send a message
       with a screenshot from the live site, reply in Telegram, see the reply in the bell.

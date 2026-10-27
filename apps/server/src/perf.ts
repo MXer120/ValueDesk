@@ -94,6 +94,10 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   '/api/vs/calendar': { cacheControl: 'public, max-age=600, stale-while-revalidate=1800' },
   // The status page (routes/status.ts): rebuilt at most every 30 s, the same for everyone.
   '/api/vs/status': { cacheControl: 'public, max-age=30, stale-while-revalidate=30' },
+  // SoDEX's maintenance flag (routes/external.ts): the same for everyone, already held 15 s by the
+  // process, and polled every 45 s by every open tab's banner. The edge may share one answer for
+  // ten seconds, so a crowd of tabs costs one /api function call per ten seconds, not one per tab.
+  '/api/external/maintenance/status': { cacheControl: 'public, max-age=10' },
 };
 
 export type Encoding = 'br' | 'gzip';

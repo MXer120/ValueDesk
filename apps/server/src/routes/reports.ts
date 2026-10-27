@@ -2,21 +2,25 @@
  * What visitors send the owner: feedback - a chat with the owner, screenshots
  * included - and client error reports.
  *
- *   POST /api/vs/feedback          a message: {category?, message, context?, wallet?, images?}   ops/feedback.ts
+ *   POST /api/vs/feedback          a message: {category?, areas?, message, context?, wallet?, images?}   ops/feedback.ts
  *   POST /api/vs/feedback/upload   one screenshot, the raw bytes (PNG, JPEG, WebP; 2 MB)     ops/imageCheck.ts
- *   POST /api/vs/feedback/thread   the thread's messages, oldest first
- *   POST /api/vs/feedback/poll     {tokens: [...]}: per thread, the owner's replies so far
- *   GET  /api/vs/feedback/image?id=   one screenshot of the thread, back to its token
+ *   POST /api/vs/feedback/thread   the chat's messages, oldest first
+ *   POST /api/vs/feedback/poll     {tokens: [...]} (+ a wallet session): the owner's replies so far
+ *   POST /api/vs/feedback/session  {signIn, attach?}: a wallet's session token; `attach`
+ *                                  (a thread token) keeps that browser's chat on the wallet
+ *   GET  /api/vs/feedback/image?id=   one screenshot of the chat, back to its key
  *   POST /api/vs/client-errors     {build, route, browser, errors: [...]}                     ops/clientErrors.ts
  *
- * THE THREAD TOKEN (ops/feedbackThreads.ts) travels as `Authorization: Bearer`
- * on every feedback route but poll, which takes the browser's tokens in its body
- * - never in a URL, so never in a log or a Referer. A new token starts a thread.
+ * THE KEY (ops/feedbackThreads.ts) travels as `Authorization: Bearer` - never in
+ * a URL, so never in a log or a Referer: a browser's thread token (a new one
+ * starts a chat) or a wallet's session token (ops/feedbackAuth.ts). Poll takes
+ * the thread tokens in its body. A token whose chat is kept on a wallet gets 401
+ * `wallet` everywhere but poll: only that wallet's signature opens it.
  *
  * Like the knowledge folders' (hosted.ts), the POSTs need the site's exact Origin
  * and are counted as `write` by the gate; on top of that each has much tighter
- * limits of its own here, per client and for everyone together, and a small body
- * (a screenshot's 2 MB being the largest).
+ * limits of its own here, per client and for everyone together - messages and
+ * screenshots also per chat - and a small body (a screenshot's 2 MB the largest).
  *
  * Everything is stored before anything else happens, then forwarded to the owner
  * by Telegram (ops/telegram.ts) when it is configured, without waiting for it: a
@@ -33,17 +37,25 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { sendTelegramMessage, sendTelegramPhoto } from '../ops/telegram.js';
 import { FEEDBACK_BODY_LIMIT, feedbackText, parseFeedback } from '../ops/feedback.js';
-import { FeedbackStore, FullError, TOKEN_RE, bearer } from '../ops/feedbackThreads.js';
+import { FeedbackStore, FullError, LockedError, TOKEN_RE, bearer, feedbackDbPath, tokenHash, type Who } from '../ops/feedbackThreads.js';
+import { FeedbackSessions, checkFeedbackSignIn, sessionBearer } from '../ops/feedbackAuth.js';
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, checkImage } from '../ops/imageCheck.js';
 import { BATCH_BODY_LIMIT, ClientErrorStore, alertText, parseBatch } from '../ops/clientErrors.js';
 
 const MINUTE = 60_000;
 
-type LimitKind = 'feedback' | 'upload' | 'read' | 'errors';
+type LimitKind = 'feedback' | 'upload' | 'read' | 'errors' | 'auth';
 
 export interface ReportLimits {
   feedback: Limit;
   feedbackGlobal: Limit;
+  /** Messages into one chat, whichever address they come from. */
+  feedbackThread: Limit;
+  /** Screenshots into one chat. */
+  uploadThread: Limit;
+  /** Wallet sign-ins. */
+  auth: Limit;
+  authGlobal: Limit;
   upload: Limit;
   uploadGlobal: Limit;
   read: Limit;
@@ -55,6 +67,10 @@ export interface ReportLimits {
 export const REPORT_LIMITS: ReportLimits = {
   feedback: { max: 10, windowMs: 10 * MINUTE },
   feedbackGlobal: { max: 200, windowMs: 60 * MINUTE },
+  feedbackThread: { max: 30, windowMs: 60 * MINUTE },
+  uploadThread: { max: 18, windowMs: 60 * MINUTE },
+  auth: { max: 10, windowMs: 10 * MINUTE },
+  authGlobal: { max: 300, windowMs: 60 * MINUTE },
   upload: { max: 9, windowMs: 10 * MINUTE },
   uploadGlobal: { max: 150, windowMs: 60 * MINUTE },
   read: { max: 60, windowMs: MINUTE },
@@ -77,6 +93,8 @@ export const TELEGRAM_CHANNEL: OwnerChannel = {
 export interface ReportRouteOptions {
   /** The feedback store (tests); default one opened on first use. */
   feedbackStore?: FeedbackStore;
+  /** The wallet sessions (tests); default the key beside feedback.db. */
+  sessions?: FeedbackSessions;
   /** The error store (tests); default one opened on first use. */
   errorStore?: ClientErrorStore;
   limiter?: KeyedLimiter;
@@ -110,6 +128,8 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
   const errorStore = (): ClientErrorStore => (errors ??= new ClientErrorStore());
   let threads = opts.feedbackStore ?? null;
   const feedbackStore = (): FeedbackStore => (threads ??= new FeedbackStore());
+  let sessionsOpen = opts.sessions ?? null;
+  const sessions = (): FeedbackSessions => (sessionsOpen ??= FeedbackSessions.beside(feedbackDbPath()));
 
   // A screenshot is the raw bytes; the type it claims is not believed (ops/imageCheck.ts).
   app.addContentTypeParser(['application/octet-stream', 'image/png', 'image/jpeg', 'image/webp'], { parseAs: 'buffer', bodyLimit: MAX_IMAGE_BYTES }, (_req, body, done) => done(null, body));
@@ -124,28 +144,49 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     reply.header('Retry-After', String(wait));
     return reply.code(429).send({ ok: false, error: `too many requests - wait ${wait}s` });
   };
-  /** The thread token, or a 401 sent. */
-  const tokenOf = (req: FastifyRequest, reply: FastifyReply): string | null => {
-    const t = bearer(req.headers.authorization);
-    if (!t) void reply.code(401).send({ ok: false, error: 'a thread token is required (Authorization: Bearer)' });
-    return t;
+  /** A chat's own limit (a token's or a wallet's); the seconds to wait, or null. */
+  const limitedChat = (kind: 'feedbackThread' | 'uploadThread', who: Who): number | null =>
+    limiter.take(`${kind}|${'token' in who ? tokenHash(who.token) : who.wallet}`, limits[kind], now());
+  /** A wallet session from the header, or null (none, forged, expired). */
+  const walletOf = (req: FastifyRequest): string | null => {
+    const s = sessionBearer(req.headers.authorization);
+    return s ? sessions().read(s, now()) : null;
   };
+  /** The key - a thread token or a proven wallet - or a 401 sent. */
+  const whoOf = (req: FastifyRequest, reply: FastifyReply): Who | null => {
+    const t = bearer(req.headers.authorization);
+    if (t) return { token: t };
+    const wallet = walletOf(req);
+    if (wallet) return { wallet };
+    void reply.code(401).send(
+      sessionBearer(req.headers.authorization)
+        ? { ok: false, code: 'session', error: 'your wallet sign-in has expired - sign again' }
+        : { ok: false, error: 'a thread token or a wallet session is required (Authorization: Bearer)' },
+    );
+    return null;
+  };
+  const locked = (reply: FastifyReply) => reply.code(401).send({ ok: false, code: 'wallet', error: 'this chat is kept on a wallet - sign in with that wallet to open it' });
 
   app.post('/api/vs/feedback', { bodyLimit: FEEDBACK_BODY_LIMIT }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited('feedback', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const token = tokenOf(req, reply);
-    if (!token) return reply;
+    const who = whoOf(req, reply);
+    if (!who) return reply;
     const parsed = parseFeedback(jsonBody(req.body));
     if (parsed.ok === 'spam') return { ok: true };
     if (!parsed.ok) return reply.code(400).send({ ok: false, error: parsed.error, ...(parsed.code ? { code: parsed.code } : {}) });
-    const f = parsed.feedback;
+    const chatWait = limitedChat('feedbackThread', who);
+    if (chatWait !== null) return tooMany(reply, chatWait);
+    // A signed-in wallet is the wallet; otherwise the address the browser says is connected, marked as not proven.
+    const verified = 'wallet' in who;
+    const f = 'wallet' in who ? { ...parsed.feedback, wallet: who.wallet } : parsed.feedback;
     const store = feedbackStore();
     let saved;
     try {
-      saved = store.addUserMessage(token, { category: f.category, text: f.message, context: f.context, wallet: f.wallet, images: f.images }, now());
+      saved = store.addUserMessage(who, { category: f.category, areas: f.areas, text: f.message, context: f.context, wallet: f.wallet, verified, images: f.images }, now());
     } catch (e) {
+      if (e instanceof LockedError) return locked(reply);
       if (e instanceof FullError) {
         req.log.error('feedback: the store is at its cap - move feedback.db away to take messages again');
         return reply.code(503).send({ ok: false, error: 'feedback cannot be taken right now' });
@@ -156,7 +197,7 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     // Never awaited: the message is stored, Telegram is a courtesy.
     const forward = (async () => {
       let replyTo = isNew ? null : store.lastTgOf(threadId);
-      const id = await owner.message(feedbackText(f, { id: threadId, isNew, images: images.length }), replyTo).catch(() => null);
+      const id = await owner.message(feedbackText(f, { id: threadId, isNew, images: images.length, verified }), replyTo).catch(() => null);
       if (id) {
         store.mapTg(id, threadId, messageId);
         replyTo = id;
@@ -177,13 +218,16 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     reply.header('Cache-Control', 'no-store');
     const wait = limited('upload', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const token = tokenOf(req, reply);
-    if (!token) return reply;
+    const who = whoOf(req, reply);
+    if (!who) return reply;
+    if ('token' in who && feedbackStore().thread(who) === 'locked') return locked(reply);
     if (!Buffer.isBuffer(req.body)) return reply.code(415).send({ ok: false, error: 'send the image as its raw bytes' });
     const check = checkImage(req.body);
     if (!check.ok) return reply.code(400).send({ ok: false, error: check.error });
+    const chatWait = limitedChat('uploadThread', who);
+    if (chatWait !== null) return tooMany(reply, chatWait);
     try {
-      const img = feedbackStore().addImage(token, check, req.body, now());
+      const img = feedbackStore().addImage(who, check, req.body, now());
       return { ok: true, id: img.id, width: img.width, height: img.height };
     } catch (e) {
       if (e instanceof FullError) return reply.code(409).send({ ok: false, error: e.message });
@@ -195,12 +239,13 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     reply.header('Cache-Control', 'no-store');
     const wait = limited('read', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const token = tokenOf(req, reply);
-    if (!token) return reply;
+    const who = whoOf(req, reply);
+    if (!who) return reply;
     const store = feedbackStore();
-    const t = store.thread(token);
+    const t = store.thread(who);
+    if (t === 'locked') return locked(reply);
     if (!t) return reply.code(404).send({ ok: false, error: 'no such thread' });
-    return { ok: true, thread: { id: t.id, category: t.category, createdAt: t.createdAt }, messages: store.messages(t.id) };
+    return { ok: true, thread: { id: t.id, category: t.category, createdAt: t.createdAt, wallet: t.wallet }, messages: store.messages(t.id) };
   });
 
   app.post('/api/vs/feedback/poll', { bodyLimit: 4096 }, async (req, reply) => {
@@ -213,16 +258,49 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
       return reply.code(400).send({ ok: false, error: `tokens must be at most ${MAX_POLL_TOKENS} thread tokens` });
     }
     const store = feedbackStore();
-    return { ok: true, threads: (tokens as string[]).map((t) => store.summary(t)) };
+    const wallet = walletOf(req);
+    return {
+      ok: true,
+      threads: (tokens as string[]).map((token) => store.summary({ token })),
+      ...(wallet ? { wallet: store.summary({ wallet }) } : {}),
+    };
+  });
+
+  app.post('/api/vs/feedback/session', { bodyLimit: 4096 }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const wait = limited('auth', clientKey(req.ip));
+    if (wait !== null) return tooMany(reply, wait);
+    const b = jsonBody(req.body) as { signIn?: unknown; attach?: unknown } | undefined;
+    const v = checkFeedbackSignIn(b?.signIn, now());
+    if (!v.ok) return reply.code(401).send({ ok: false, code: 'signature', error: v.error });
+    const attach = b?.attach;
+    if (attach !== undefined && (typeof attach !== 'string' || !TOKEN_RE.test(attach))) return reply.code(400).send({ ok: false, error: 'attach must be a thread token' });
+    const store = feedbackStore();
+    if (!store.useNonce(v.nonce, v.expiresAt, now())) return reply.code(409).send({ ok: false, code: 'replay', error: 'this sign-in was already used - sign again' });
+    const s = sessions().issue(v.owner, now());
+    const a = typeof attach === 'string' ? store.attach(attach, v.owner, now()) : { result: 'none' as const, threadId: null, from: null };
+    if ((a.result === 'merged' || a.result === 'adopted') && a.threadId !== null) {
+      const threadId = a.threadId;
+      const text = a.result === 'merged'
+        ? `Thread #${a.from} was signed in with wallet ${v.owner} and moved into thread #${threadId}, that wallet's chat.`
+        : `Thread #${threadId} is now kept on wallet ${v.owner} (signed in - proven).`;
+      // Into the chat's chain, like every forward; never awaited.
+      const forward = (async () => {
+        const id = await owner.message(text, store.lastTgOf(threadId)).catch(() => null);
+        if (id) store.mapTg(id, threadId);
+      })();
+      opts.onForward?.(forward);
+    }
+    return { ok: true, owner: v.owner, token: s.token, expiresAt: s.expiresAt, attached: a.result };
   });
 
   app.get('/api/vs/feedback/image', async (req, reply) => {
     const wait = limited('read', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const token = tokenOf(req, reply);
-    if (!token) return reply;
+    const who = whoOf(req, reply);
+    if (!who) return reply;
     const id = (req.query as Record<string, unknown> | undefined)?.id;
-    const img = typeof id === 'string' ? feedbackStore().image(token, id) : null;
+    const img = typeof id === 'string' ? feedbackStore().image(who, id) : null;
     if (!img) return reply.code(404).send({ ok: false, error: 'not found' });
     // Only ever an image, shown inline, of the kind its bytes were checked to be - never sniffed, never run.
     return reply

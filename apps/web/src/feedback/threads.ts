@@ -4,12 +4,15 @@
  *
  * A thread is a random token made here (32 bytes from crypto.getRandomValues),
  * kept in localStorage with how many of the owner's replies were already seen.
- * The token is the only key to the thread: it goes to the server in the
- * Authorization header (poll: in the body), never in a URL, and the server keeps
- * only its hash. Clearing this browser's storage loses the thread for good.
+ * The token is the key to the chat: it goes to the server in the Authorization
+ * header (poll: in the body), never in a URL, and the server keeps only its
+ * hash. Clearing this browser's storage loses a chat that is not kept on a
+ * wallet (session.ts); once it is (`wallet` set here), only the wallet's
+ * sign-in opens it, and the token is left to count replies for the bell.
  *
  * At most MAX_THREADS are kept (the server's poll takes as many); the newest is
- * "the" conversation the form opens on.
+ * "the" conversation the form opens on. The chat never ends: there is no "new
+ * conversation".
  */
 
 export const STORAGE_KEY = 'vs.feedback.threads.v1';
@@ -27,6 +30,8 @@ export interface ThreadRef {
   notifiedOwner: number;
   /** The first words of the first message, for the list. */
   preview: string;
+  /** The wallet the chat is kept on now (session.ts), once this browser attached it. */
+  wallet?: string;
 }
 
 export interface ChatMessage {
@@ -35,6 +40,8 @@ export interface ChatMessage {
   text: string;
   at: number;
   images: string[];
+  category?: string | null;
+  areas?: string[];
 }
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -54,7 +61,14 @@ export function threads(): ThreadRef[] {
     if (!Array.isArray(list)) return [];
     return list
       .filter((t): t is ThreadRef => !!t && typeof t.token === 'string' && TOKEN_RE.test(t.token) && typeof t.startedAt === 'number')
-      .map((t) => ({ ...t, seenOwner: Number(t.seenOwner) || 0, notifiedOwner: Number(t.notifiedOwner) || 0, preview: typeof t.preview === 'string' ? t.preview : '' }))
+      .map((t): ThreadRef => ({
+        token: t.token,
+        startedAt: t.startedAt,
+        seenOwner: Number(t.seenOwner) || 0,
+        notifiedOwner: Number(t.notifiedOwner) || 0,
+        preview: typeof t.preview === 'string' ? t.preview : '',
+        ...(typeof t.wallet === 'string' && /^0x[0-9a-f]{40}$/.test(t.wallet) ? { wallet: t.wallet } : {}),
+      }))
       .slice(0, MAX_THREADS);
   } catch {
     return [];
@@ -93,6 +107,11 @@ export function markNotified(token: string, owner: number): void {
   save(threads().map((t) => (t.token === token ? { ...t, notifiedOwner: Math.max(t.notifiedOwner, owner) } : t)));
 }
 
+/** The chat this token opened is kept on `wallet` now (the server attached it at the sign-in). */
+export function markAttached(token: string, wallet: string): void {
+  save(threads().map((t) => (t.token === token ? { ...t, wallet: wallet.toLowerCase() } : t)));
+}
+
 /** Replies the poll found that were not announced yet: [token, owner count]. */
 export function unannounced(list: readonly ThreadRef[], counts: ReadonlyArray<{ owner: number } | null>): Array<{ token: string; owner: number; fresh: number }> {
   const out: Array<{ token: string; owner: number; fresh: number }> = [];
@@ -115,22 +134,44 @@ async function postJson(url: string, body: unknown, headers: Record<string, stri
   return { status: res.status, json: (await res.json().catch(() => null)) as Record<string, unknown> | null };
 }
 
-/** The thread's messages, oldest first; null when the server has no such thread (or cannot be reached). */
-export async function loadThread(token: string, f: typeof fetch = fetch): Promise<ChatMessage[] | null> {
+/**
+ * The chat a key opens (a thread token or a wallet session), oldest message
+ * first. `none`: the server has no chat for it yet; `wallet`: it is kept on a
+ * wallet - only that wallet's sign-in opens it; `session`: the wallet's sign-in
+ * expired; null: the server cannot be reached.
+ */
+export type ThreadLoad =
+  | { status: 'ok'; messages: ChatMessage[]; wallet: string | null }
+  | { status: 'none' | 'wallet' | 'session' };
+
+export async function loadThread(key: string, f: typeof fetch = fetch): Promise<ThreadLoad | null> {
   try {
-    const r = await postJson('/api/vs/feedback/thread', {}, authed(token), f);
-    return r.status === 200 && Array.isArray(r.json?.messages) ? (r.json!.messages as ChatMessage[]) : null;
+    const r = await postJson('/api/vs/feedback/thread', {}, authed(key), f);
+    if (r.status === 200 && Array.isArray(r.json?.messages)) {
+      const w = (r.json!.thread as { wallet?: unknown } | undefined)?.wallet;
+      return { status: 'ok', messages: r.json!.messages as ChatMessage[], wallet: typeof w === 'string' ? w : null };
+    }
+    if (r.status === 404) return { status: 'none' };
+    if (r.status === 401 && r.json?.code === 'wallet') return { status: 'wallet' };
+    if (r.status === 401 && r.json?.code === 'session') return { status: 'session' };
+    return null;
   } catch {
     return null;
   }
 }
 
-/** For each kept thread, how many owner replies it has (null: unknown to the server). */
-export async function pollThreads(tokens: readonly string[], f: typeof fetch = fetch): Promise<Array<{ owner: number; lastOwnerAt: number | null } | null> | null> {
-  if (!tokens.length) return [];
+export type ReplyCount = { owner: number; lastOwnerAt: number | null } | null;
+
+/**
+ * For each kept thread, how many owner replies it has (null: unknown to the
+ * server); with a wallet session, the wallet's chat too. Null when it failed.
+ */
+export async function pollThreads(tokens: readonly string[], session: string | null = null, f: typeof fetch = fetch): Promise<{ threads: ReplyCount[]; wallet: ReplyCount } | null> {
+  if (!tokens.length && !session) return { threads: [], wallet: null };
   try {
-    const r = await postJson('/api/vs/feedback/poll', { tokens }, {}, f);
-    return r.status === 200 && Array.isArray(r.json?.threads) ? (r.json!.threads as Array<{ owner: number; lastOwnerAt: number | null } | null>) : null;
+    const r = await postJson('/api/vs/feedback/poll', { tokens }, session ? authed(session) : {}, f);
+    if (r.status !== 200 || !Array.isArray(r.json?.threads)) return null;
+    return { threads: r.json!.threads as ReplyCount[], wallet: (r.json!.wallet as ReplyCount | undefined) ?? null };
   } catch {
     return null;
   }

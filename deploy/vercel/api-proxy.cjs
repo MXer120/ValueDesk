@@ -42,7 +42,8 @@
 //     function's answer when told so in s-maxage or a CDN-Cache-Control header, and
 //     the API sends neither, so this function translates, the way CloudFront's API
 //     cache policy (edge.yaml ApiCachePolicy) reads the same header: a 200 that is
-//     `public, max-age=N` may be kept at the edge N seconds (at most 60), with the
+//     `public, max-age=N` may be kept at the edge N seconds (at most 60; a day for a site icon,
+//     minutes for the calendar and the heatmap history: EDGE_MAX_TTL_BY_PATH), with the
 //     API's stale-while-revalidate (at most 60), through Vercel-CDN-Cache-Control,
 //     which Vercel never passes on. The browser keeps the API's own Cache-Control.
 //     /api/copy/* and /api/folders* are NEVER cached: their answers belong to one
@@ -92,6 +93,18 @@ const CONNECT_TIMEOUT_MS = 5000;
 const CONNECT_ATTEMPTS = 2;
 const READ_TIMEOUT_MS = 30000;
 const EDGE_MAX_TTL_S = 60;
+/**
+ * Paths whose answers change far more slowly than a minute, with the longest the edge
+ * may keep them (the origin's own max-age still decides below that). Every edge miss
+ * is a function invocation and a request to the origin: a news source's icon (a week
+ * in the browser, a day on the origin) would otherwise be asked again every minute
+ * per edge region, for every source on the page.
+ */
+const EDGE_MAX_TTL_BY_PATH = new Map([
+  ['/api/vs/logo', 86400],
+  ['/api/vs/calendar', 600],
+  ['/api/vs/liquidations/history', 300],
+]);
 /** The function's own path: never forwarded (it is only ever reached through the /api rewrite). */
 const SELF = '/api/__vs_proxy';
 /** Answered here: where the viewer is, as Vercel's edge sees it. */
@@ -178,10 +191,11 @@ function geoBlocked(block, country, region) {
 
 /**
  * The edge cache rule for an origin answer: Vercel-CDN-Cache-Control or null.
- * Mirrors edge.yaml ApiCachePolicy: honour the origin's public max-age, at most 60 s.
- * Never for the copy executor's paths.
+ * Mirrors edge.yaml ApiCachePolicy: honour the origin's public max-age, at most 60 s
+ * (longer only for the paths of EDGE_MAX_TTL_BY_PATH). Never for the copy executor's paths.
  */
 function edgeCacheControl(method, status, cacheControl, path) {
+  const cap = EDGE_MAX_TTL_BY_PATH.get(String(path ?? '')) ?? EDGE_MAX_TTL_S;
   if (isPrivatePath(path)) return null;
   if (method !== 'GET' && method !== 'HEAD') return null;
   if (status !== 200) return null;
@@ -190,9 +204,9 @@ function edgeCacheControl(method, status, cacheControl, path) {
   if (/(^|,)\s*(no-store|no-cache|private)\s*(,|=|$)/.test(cc)) return null;
   const maxAge = /(?:^|,)\s*max-age\s*=\s*(\d+)/.exec(cc);
   if (!maxAge || Number(maxAge[1]) <= 0) return null;
-  const parts = [`max-age=${Math.min(Number(maxAge[1]), EDGE_MAX_TTL_S)}`];
+  const parts = [`max-age=${Math.min(Number(maxAge[1]), cap)}`];
   const swr = /(?:^|,)\s*stale-while-revalidate\s*=\s*(\d+)/.exec(cc);
-  if (swr && Number(swr[1]) > 0) parts.push(`stale-while-revalidate=${Math.min(Number(swr[1]), EDGE_MAX_TTL_S)}`);
+  if (swr && Number(swr[1]) > 0) parts.push(`stale-while-revalidate=${Math.min(Number(swr[1]), cap)}`);
   return parts.join(', ');
 }
 

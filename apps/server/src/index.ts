@@ -36,7 +36,7 @@ import { builderRoutes } from './routes/builder.js';
 import { foldersRoutes } from './routes/folders.js';
 import { reportRoutes } from './routes/reports.js';
 import { statusRoutes } from './routes/status.js';
-import { proberEnabled } from './ops/status.js';
+import { proberEnabled, siteNoticeReader } from './ops/status.js';
 import { hexToBytes, privateKeyToAddress } from './signing/eip712.js';
 import { canMoveFunds } from './signing/actions.js';
 import { OrderValidationError, SymbolNotFoundError } from './sodex/symbols.js';
@@ -151,12 +151,14 @@ app.setErrorHandler((err, _req, reply) => {
 
 // The operator's emergency brake (ops/brake.ts): hosted, /var/lib/valuescan/brake.json unless VALUEDESK_BRAKE_FILE says otherwise.
 const siteBrake = siteBrakeReader(process.env.VALUEDESK_BRAKE_FILE?.trim() || (HOSTED ? '/var/lib/valuescan/brake.json' : null));
+// The status page's open incidents and maintenance (ops/statusNotices.ts) for the app's banner: one read per 30 s.
+const siteNotices = siteNoticeReader(HOSTED);
 
 app.get('/api/health', async () => (HOSTED
   // Hosted: only what the web reads (trading/config.ts configureFromHealth).
   // No upstream URLs, budgets, hub or stream stats - the latter name every
   // wallet whose account stream is open.
-  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake() }
+  ? { ok: true, network: NETWORK, chainId: NET.chainId, mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES, brake: siteBrake(), notices: siteNotices() }
   : {
   ok: true,
   network: NETWORK,
@@ -165,6 +167,7 @@ app.get('/api/health', async () => (HOSTED
   wsBase: NET.wsBase,
   mainnetWritesAllowed: NETWORK === 'testnet' || ALLOW_MAINNET_WRITES,
   brake: siteBrake(),
+  notices: siteNotices(),
   chain: { chainId: CHAIN.chainId, name: CHAIN.name, explorerUrl: CHAIN.explorerUrl },
   serverSigning: SERVER_SIGNING,
   weightSpent: sodex.weightSpent(),
@@ -498,7 +501,9 @@ if (proberEnabled(process.env, HOSTED)) {
   const { repliesEnabled, startReplyPoller } = await import('./ops/telegramReplies.js');
   if (repliesEnabled(process.env, HOSTED)) {
     const { FeedbackStore } = await import('./ops/feedbackThreads.js');
-    startReplyPoller(new FeedbackStore(), { log: app.log });
+    // ...and the status page's commands from the same chat (ops/statusTelegram.ts).
+    const [{ statusTelegramHandler }, { StatusStore }] = await Promise.all([import('./ops/statusTelegram.js'), import('./ops/status.js')]);
+    startReplyPoller(new FeedbackStore(), { log: app.log, onCommand: statusTelegramHandler({ open: () => new StatusStore(), log: app.log }) });
   }
 }
 

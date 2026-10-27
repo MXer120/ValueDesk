@@ -26,6 +26,7 @@ import { tradingConfig } from '../trading/config';
 import { sodexAccountId } from '../trading/session';
 import type { Eip1193Provider } from '../wallet';
 import { logger } from '../log';
+import { pollEvery } from '../exchange/visibility';
 import { BROWSER_KEY_NAME, browserCopier, type BrowserKey, type CopierRole, type PendingConfirm } from './browserCopier';
 import { DEFAULT_SELF_URL, ExecutorClient, ExecutorError, hostedExecutor, selfBase, selfUrlProblem, signCopy } from './executor';
 import { MAX_BROWSER_KEY_DAYS, approveCopyFee, copyFeeApproval, copyKeyRegistered, registerCopyKey, revokeCopyKey } from './sodexSetup';
@@ -88,7 +89,8 @@ let state: LiveCopy = {
 let provider: Eip1193Provider | null = null;
 let selfClient: ExecutorClient | null = null;
 const listeners = new Set<() => void>();
-let poll: ReturnType<typeof setInterval> | null = null;
+/** Stops the executor-view refresh (exchange/visibility.ts pollEvery: paused while the tab is hidden). */
+let poll: (() => void) | null = null;
 
 const set = (patch: Partial<LiveCopy>) => {
   state = { ...state, ...patch };
@@ -535,15 +537,17 @@ export function useLiveCopy(owner: string | null, p: Eip1193Provider | null): Li
   }, []);
   useEffect(() => {
     if (poll) return;
-    poll = setInterval(() => {
+    // Views only (the executors run on their own): nothing is read while the tab is
+    // hidden, and a refresh that fell due meanwhile runs the moment it is shown.
+    poll = pollEvery(15_000, () => {
       if (!state.owner) return;
       const th = hostedExecutor.token(state.owner);
       if (th) void loadMe('hosted', th);
       const ts = selfClient?.token(state.owner);
       if (ts) void loadMe('self', ts);
-    }, 15_000);
+    });
     return () => {
-      if (poll) clearInterval(poll);
+      poll?.();
       poll = null;
     };
   }, []);

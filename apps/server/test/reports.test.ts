@@ -178,8 +178,8 @@ test('client errors: a client is limited per minute', async () => {
 test('hosted: both need the site Origin; a GET is a 404', async () => {
   const { app } = await appFor({ hosted: true });
   const auth = { authorization: `Bearer ${'T'.repeat(43)}` };
-  assert.equal((await post(app, '/api/vs/feedback', { category: 'bug', message: 'hello there' }, auth)).statusCode, 200);
-  assert.equal((await post(app, '/api/vs/feedback', { category: 'bug', message: 'hello there' }, { ...auth, origin: 'https://evil.example' })).statusCode, 403);
+  assert.equal((await post(app, '/api/vs/feedback', { category: 'bug', areas: ['charts'], message: 'hello there' }, auth)).statusCode, 200);
+  assert.equal((await post(app, '/api/vs/feedback', { category: 'bug', areas: ['charts'], message: 'hello there' }, { ...auth, origin: 'https://evil.example' })).statusCode, 403);
   assert.equal((await post(app, '/api/vs/feedback/poll', { tokens: [] }, { origin: 'https://evil.example' })).statusCode, 403);
   assert.equal((await post(app, '/api/vs/client-errors', batch(), { origin: 'https://evil.example' })).statusCode, 403);
   assert.equal((await app.inject({ method: 'GET', url: '/api/vs/feedback' })).statusCode, 404);

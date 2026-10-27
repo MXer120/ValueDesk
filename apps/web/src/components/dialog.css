@@ -35,6 +35,8 @@
 .dlg .dlg-rowtext small { color: var(--dim); font-size: 12px; line-height: 1.45; }
 .dlg .dlg-ctl { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .dlg .dlg-row.is-stack .dlg-ctl { flex: 1 1 auto; }
+/* Stacked, the text keeps its own height: the 170px basis above is a width in a row, but a height in a column. */
+.dlg .dlg-row.is-stack .dlg-rowtext { flex: 0 0 auto; }
 .dlg .dlg-row.is-full { padding: 10px 0; }
 .dlg .dlg-row.is-full > * { flex: 1 1 100%; }
 .dlg .dlg-note { margin: 12px 0 0; color: var(--dim); font-size: 12px; line-height: 1.55; }

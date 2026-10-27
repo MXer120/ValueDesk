@@ -444,6 +444,16 @@ test('the copy executor: a body over 64 KB is refused at the edge, and a path th
   assert.equal(proxy.viewerCountry({}), null);
 });
 
+test('the edge keeps a slow path longer: a site icon a day, the calendar 10 min, the heatmap history 5 min - never longer than the origin says', () => {
+  const e = proxy.edgeCacheControl;
+  assert.equal(e('GET', 200, 'public, max-age=604800, stale-while-revalidate=2592000', '/api/vs/logo'), 'max-age=86400, stale-while-revalidate=86400');
+  assert.equal(e('GET', 200, 'public, max-age=600, stale-while-revalidate=1800', '/api/vs/calendar'), 'max-age=600, stale-while-revalidate=600');
+  assert.equal(e('GET', 200, 'public, max-age=300, stale-while-revalidate=300', '/api/vs/liquidations/history'), 'max-age=300, stale-while-revalidate=300');
+  assert.equal(e('GET', 200, 'public, max-age=30', '/api/vs/logo'), 'max-age=30', 'the origin still decides below the cap');
+  assert.equal(e('GET', 404, 'public, max-age=86400', '/api/vs/logo'), null, 'a missing icon is not kept at the edge');
+  assert.equal(e('GET', 200, 'public, max-age=600', '/api/vs/calendar/results'), 'max-age=60', 'exact paths only');
+});
+
 test('the edge cache follows the API: public max-age only, at most 60 s, never an error or a live answer', () => {
   const e = proxy.edgeCacheControl;
   assert.equal(e('GET', 200, 'public, max-age=10, stale-while-revalidate=20'), 'max-age=10, stale-while-revalidate=20');

@@ -1,28 +1,43 @@
 /**
- * Feedback as conversations (routes/reports.ts): every thread is a chat between
- * one browser and the owner, who answers from Telegram (ops/telegramReplies.ts).
+ * Feedback as conversations (routes/reports.ts): one ongoing chat per visitor
+ * with the owner, who answers from Telegram (ops/telegramReplies.ts). A chat
+ * never expires; both sides keep writing into it.
  *
- * WHO MAY READ A THREAD. The browser makes a random token per thread (32 bytes,
- * apps/web/src/feedback/threads.ts) and sends it as `Authorization: Bearer` -
- * never in a URL. Here only its SHA-256 is kept: a copy of this database opens
- * no thread. Whoever holds the token reads and writes that thread, nobody else.
+ * WHO MAY READ A CHAT - one of two keys, never both for the same chat:
+ *   a thread token   a browser's own random token (32 bytes,
+ *                    apps/web/src/feedback/threads.ts), sent as
+ *                    `Authorization: Bearer` - never in a URL. Only its SHA-256
+ *                    is kept here: a copy of this database opens no chat.
+ *                    Anyone may start a chat this way, with or without a wallet.
+ *   a wallet         proven by a signature once, then a session token
+ *                    (ops/feedbackAuth.ts). A wallet has at most one chat.
+ * A browser that started a chat by token and later proves a wallet ATTACHES it
+ * (attach): the chat becomes the wallet's - or, when the wallet has a chat
+ * already, its messages move into that one. From then on the token alone opens
+ * nothing (`locked`); it still tells the browser's bell how many replies there
+ * are (summary), and nothing else.
  *
  * Kept in `feedback.db` in the server's data directory (SQLite, WAL); screenshots
  * as files in `feedback-images/` beside it, named by a random id, outside any
- * web root, served back only to the thread's token (routes/reports.ts). Nothing
- * here is ever edited: messages and images are only added (and an image that was
- * uploaded but never sent is removed after an hour). Bounded: MAX_MESSAGES
- * messages and MAX_IMAGE_BYTES_TOTAL of images; past either, a new message is
- * refused until the owner moves the files.
+ * web root, served back only to the chat's key (routes/reports.ts). Both are in
+ * the off-server backup (deploy/server/bin/backup-offsite.sh, set api-state).
+ * Messages and images are only ever added (an image uploaded but never sent is
+ * removed after an hour; an attach moves messages between chats). Bounded:
+ * MAX_MESSAGES messages and MAX_IMAGE_BYTES_TOTAL of images; past either, a new
+ * message is refused until the owner moves the files.
  *
  * Tables:
- *   threads   id, token hash, category, the wallet the visitor chose to add (or null),
- *             when it started and last moved
- *   messages  one row per message: who (user / owner), its text, the page info
- *             sent with it (JSON), when, and the Telegram message it became
- *   images    one row per screenshot: its thread's token hash, the message it
- *             belongs to (null until sent), kind, size, dimensions, file name
+ *   threads   id, token hash (`w:<wallet>` for a chat a wallet started), first
+ *             category, the wallet it is kept on (owner_wallet, proven) or null,
+ *             the chat it moved into (merged_into) or null, when it started and
+ *             last moved. (`wallet` is from before 2026-10-28: an unproven address.)
+ *   messages  one row per message: who (user / owner), its text, kind and areas,
+ *             the wallet it was sent with and whether that was proven, the page
+ *             info (JSON), when, and the Telegram message it became
+ *   images    one row per screenshot: its uploader's key, the message it belongs
+ *             to (null until sent), kind, size, dimensions
  *   tg        Telegram message id -> thread: what an owner's reply is matched by
+ *   nonces    wallet sign-ins already used, until they expire
  *   meta      the getUpdates offset (ops/telegramReplies.ts)
  */
 import { DatabaseSync } from 'node:sqlite';
@@ -50,11 +65,18 @@ export function bearer(header: unknown): string | null {
 
 export const feedbackDbPath = (): string => process.env.VALUESCAN_FEEDBACK_DB?.trim() || join(dataDir(), 'feedback.db');
 
+/** Who is asking: a browser by its thread token, or a proven wallet (lower case). */
+export type Who = { token: string } | { wallet: string };
+
+/** The key a chat or a pending screenshot is filed under. */
+const keyOf = (who: Who): string => ('token' in who ? tokenHash(who.token) : `w:${who.wallet.toLowerCase()}`);
+
 export type Sender = 'user' | 'owner';
 
 export interface ThreadRow {
   id: number;
   category: string;
+  /** The wallet the chat is kept on (proven), or null. */
   wallet: string | null;
   createdAt: number;
   lastAt: number;
@@ -66,6 +88,8 @@ export interface MessageRow {
   text: string;
   at: number;
   images: string[];
+  category: string | null;
+  areas: string[];
 }
 
 export interface ImageRow {
@@ -77,6 +101,8 @@ export interface ImageRow {
 }
 
 export class FullError extends Error {}
+/** A thread token whose chat is kept on a wallet: only the wallet's proof opens it. */
+export class LockedError extends Error {}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS threads (
@@ -109,8 +135,19 @@ CREATE TABLE IF NOT EXISTS images (
 ) WITHOUT ROWID;
 CREATE INDEX IF NOT EXISTS images_pending ON images (token_hash, message_id);
 CREATE TABLE IF NOT EXISTS tg (tg_id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
 `;
+
+/** Columns added after the first release (2026-10-28); added in place to an older file. */
+const ADDED: Record<string, Array<[string, string]>> = {
+  threads: [['owner_wallet', 'TEXT'], ['merged_into', 'INTEGER']],
+  messages: [['category', 'TEXT'], ['areas', 'TEXT'], ['wallet', 'TEXT'], ['verified', 'INTEGER']],
+};
+
+interface ThreadDb { id: number; category: string; owner_wallet: string | null; merged_into: number | null; created_at: number; last_at: number }
+
+const rowOf = (r: ThreadDb): ThreadRow => ({ id: Number(r.id), category: r.category, wallet: r.owner_wallet, createdAt: Number(r.created_at), lastAt: Number(r.last_at) });
 
 export class FeedbackStore {
   private readonly db: DatabaseSync;
@@ -125,57 +162,131 @@ export class FeedbackStore {
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec(SCHEMA);
+    for (const [table, cols] of Object.entries(ADDED)) {
+      const have = new Set((this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name));
+      for (const [name, type] of cols) if (!have.has(name)) this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
+    }
+    this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS threads_owner_wallet ON threads (owner_wallet) WHERE owner_wallet IS NOT NULL');
   }
 
-  thread(token: string): ThreadRow | null {
-    const r = this.db.prepare('SELECT id, category, wallet, created_at, last_at FROM threads WHERE token_hash = ?').get(tokenHash(token)) as
-      | { id: number; category: string; wallet: string | null; created_at: number; last_at: number }
-      | undefined;
-    return r ? { id: Number(r.id), category: r.category, wallet: r.wallet, createdAt: Number(r.created_at), lastAt: Number(r.last_at) } : null;
+  private byId(id: number): ThreadDb | undefined {
+    return this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE id = ?').get(id) as ThreadDb | undefined;
+  }
+
+  /** The chat a key names, after any move (attach), and whether this key may open it. */
+  private find(who: Who): { row: ThreadDb; locked: boolean } | null {
+    if ('wallet' in who) {
+      const r = this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE owner_wallet = ?').get(who.wallet.toLowerCase()) as ThreadDb | undefined;
+      return r ? { row: r, locked: false } : null;
+    }
+    let r = this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE token_hash = ?').get(tokenHash(who.token)) as ThreadDb | undefined;
+    for (let hops = 0; r && r.merged_into !== null && hops < 4; hops++) r = this.byId(Number(r.merged_into));
+    if (!r) return null;
+    return { row: r, locked: r.owner_wallet !== null };
+  }
+
+  /** The chat this key may open; 'locked' for a token whose chat is kept on a wallet; null for none. */
+  thread(who: Who): ThreadRow | 'locked' | null {
+    const f = this.find(who);
+    if (!f) return null;
+    return f.locked ? 'locked' : rowOf(f.row);
   }
 
   /**
-   * A visitor's message: into its thread, the thread made if the token is new,
-   * with the screenshots this token uploaded and named. Returns the thread and
-   * message ids and the images attached.
+   * A visitor's message: into its chat, the chat made if the key has none, with
+   * the screenshots this key uploaded and named. Throws LockedError for a token
+   * whose chat is kept on a wallet.
    */
   addUserMessage(
-    token: string,
-    m: { category: string; text: string; context: unknown; wallet: string | null; images: readonly string[] },
+    who: Who,
+    m: { category: string; areas?: readonly string[]; text: string; context: unknown; wallet: string | null; verified?: boolean; images: readonly string[] },
     now = Date.now(),
   ): { threadId: number; messageId: number; isNew: boolean; images: ImageRow[] } {
     const count = (this.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n;
     if (count >= MAX_MESSAGES) throw new FullError('the feedback store is full');
-    const hash = tokenHash(token);
+    const key = keyOf(who);
     this.db.exec('BEGIN');
     try {
-      let t = this.db.prepare('SELECT id FROM threads WHERE token_hash = ?').get(hash) as { id: number } | undefined;
-      const isNew = !t;
-      if (!t) {
-        const r = this.db.prepare('INSERT INTO threads (token_hash, category, wallet, created_at, last_at) VALUES (?, ?, ?, ?, ?)').run(hash, m.category, m.wallet, now, now);
-        t = { id: Number(r.lastInsertRowid) };
+      const found = this.find(who);
+      if (found?.locked) throw new LockedError('this chat is kept on a wallet');
+      const isNew = !found;
+      let threadId: number;
+      if (!found) {
+        const r = this.db
+          .prepare('INSERT INTO threads (token_hash, category, wallet, owner_wallet, created_at, last_at) VALUES (?, ?, NULL, ?, ?, ?)')
+          .run(key, m.category, 'wallet' in who ? who.wallet.toLowerCase() : null, now, now);
+        threadId = Number(r.lastInsertRowid);
       } else {
-        this.db.prepare('UPDATE threads SET last_at = ?, wallet = COALESCE(?, wallet) WHERE id = ?').run(now, m.wallet, t.id);
+        threadId = Number(found.row.id);
+        this.db.prepare('UPDATE threads SET last_at = ? WHERE id = ?').run(now, threadId);
       }
       const msg = this.db
-        .prepare('INSERT INTO messages (thread_id, sender, text, context, at) VALUES (?, ?, ?, ?, ?)')
-        .run(t.id, 'user', m.text, m.context === null || m.context === undefined ? null : JSON.stringify(m.context), now);
+        .prepare('INSERT INTO messages (thread_id, sender, text, context, at, category, areas, wallet, verified) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+        .run(
+          threadId, 'user', m.text, m.context === null || m.context === undefined ? null : JSON.stringify(m.context), now,
+          m.category, m.areas?.length ? JSON.stringify(m.areas) : null, m.wallet, m.verified ? 1 : 0,
+        );
       const messageId = Number(msg.lastInsertRowid);
       const attached: ImageRow[] = [];
       const pick = this.db.prepare('SELECT id, kind, bytes, width, height FROM images WHERE id = ? AND token_hash = ? AND message_id IS NULL');
       const bind = this.db.prepare('UPDATE images SET message_id = ? WHERE id = ?');
       for (const id of m.images.slice(0, MAX_IMAGES_PER_MESSAGE)) {
-        const r = pick.get(id, hash) as { id: string; kind: ImageKind; bytes: number; width: number; height: number } | undefined;
+        const r = pick.get(id, key) as { id: string; kind: ImageKind; bytes: number; width: number; height: number } | undefined;
         if (!r) continue;
         bind.run(messageId, id);
         attached.push({ id: r.id, kind: r.kind, bytes: Number(r.bytes), width: Number(r.width), height: Number(r.height) });
       }
       this.db.exec('COMMIT');
-      return { threadId: Number(t.id), messageId, isNew, images: attached };
+      return { threadId, messageId, isNew, images: attached };
     } catch (e) {
       this.db.exec('ROLLBACK');
       throw e;
     }
+  }
+
+  /**
+   * Keep a browser's chat on a wallet it just proved. `adopted`: the chat is now
+   * the wallet's; `merged`: the wallet had a chat, the messages moved into it;
+   * `same`: it was already; `none`: the token has no chat; `other`: the chat is
+   * kept on another wallet (nothing changes).
+   */
+  attach(token: string, wallet: string, now = Date.now()): { result: 'adopted' | 'merged' | 'same' | 'none' | 'other'; threadId: number | null; from: number | null } {
+    const w = wallet.toLowerCase();
+    this.db.exec('BEGIN');
+    try {
+      const own = this.find({ wallet: w });
+      const t = this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE token_hash = ?').get(tokenHash(token)) as ThreadDb | undefined;
+      let out: { result: 'adopted' | 'merged' | 'same' | 'none' | 'other'; threadId: number | null; from: number | null };
+      if (!t) out = { result: 'none', threadId: own ? Number(own.row.id) : null, from: null };
+      else {
+        const target = this.find({ token })!.row;
+        if (target.owner_wallet === w) out = { result: 'same', threadId: Number(target.id), from: null };
+        else if (target.owner_wallet !== null) out = { result: 'other', threadId: null, from: null };
+        else if (!own) {
+          this.db.prepare('UPDATE threads SET owner_wallet = ?, last_at = ? WHERE id = ?').run(w, now, target.id);
+          out = { result: 'adopted', threadId: Number(target.id), from: null };
+        } else {
+          const to = Number(own.row.id);
+          const from = Number(target.id);
+          this.db.prepare('UPDATE messages SET thread_id = ? WHERE thread_id = ?').run(to, from);
+          this.db.prepare('UPDATE tg SET thread_id = ? WHERE thread_id = ?').run(to, from);
+          this.db.prepare('UPDATE threads SET merged_into = ? WHERE id = ? OR merged_into = ?').run(to, from, from);
+          this.db.prepare('UPDATE threads SET last_at = MAX(last_at, ?) WHERE id = ?').run(Number(target.last_at), to);
+          out = { result: 'merged', threadId: to, from };
+        }
+      }
+      this.db.exec('COMMIT');
+      return out;
+    } catch (e) {
+      this.db.exec('ROLLBACK');
+      throw e;
+    }
+  }
+
+  /** A wallet sign-in's nonce, accepted once (until it expires). False: a replay. */
+  useNonce(nonce: string, expiresAt: number, now = Date.now()): boolean {
+    this.db.prepare('DELETE FROM nonces WHERE expires_at < ?').run(now);
+    return this.db.prepare('INSERT OR IGNORE INTO nonces (nonce, expires_at) VALUES (?, ?)').run(nonce, expiresAt).changes === 1;
   }
 
   /** The owner's reply, matched by the Telegram message it answers. Null when that message is no thread's. */
@@ -207,7 +318,9 @@ export class FeedbackStore {
 
   /** A thread's messages, oldest first, each with its screenshots' ids. */
   messages(threadId: number, limit = 500): MessageRow[] {
-    const rows = this.db.prepare('SELECT id, sender, text, at FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?').all(threadId, limit) as Array<{ id: number; sender: Sender; text: string; at: number }>;
+    const rows = this.db.prepare('SELECT id, sender, text, at, category, areas FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?').all(threadId, limit) as Array<{
+      id: number; sender: Sender; text: string; at: number; category: string | null; areas: string | null;
+    }>;
     const imgs = this.db.prepare('SELECT id FROM images WHERE message_id = ? ORDER BY at, id');
     return rows.reverse().map((r) => ({
       id: Number(r.id),
@@ -215,42 +328,48 @@ export class FeedbackStore {
       text: r.text,
       at: Number(r.at),
       images: (imgs.all(r.id) as Array<{ id: string }>).map((x) => x.id),
+      category: r.category ?? null,
+      areas: parseAreas(r.areas),
     }));
   }
 
-  /** For the browser's poll: how many owner replies a thread has, and the newest one's time. */
-  summary(token: string): { owner: number; lastOwnerAt: number | null } | null {
-    const t = this.thread(token);
-    if (!t) return null;
-    const r = this.db.prepare("SELECT COUNT(*) AS n, MAX(at) AS last FROM messages WHERE thread_id = ? AND sender = 'owner'").get(t.id) as { n: number; last: number | null };
+  /**
+   * For the browser's bell: how many owner replies a chat has, and the newest
+   * one's time. A token keeps telling this after its chat moved onto a wallet -
+   * counts only, never a word of the chat.
+   */
+  summary(who: Who): { owner: number; lastOwnerAt: number | null } | null {
+    const f = this.find(who);
+    if (!f) return null;
+    const r = this.db.prepare("SELECT COUNT(*) AS n, MAX(at) AS last FROM messages WHERE thread_id = ? AND sender = 'owner'").get(f.row.id) as { n: number; last: number | null };
     return { owner: Number(r.n), lastOwnerAt: r.last === null ? null : Number(r.last) };
   }
 
-  /** Keep one checked screenshot for a token, pending until a message names it. */
-  addImage(token: string, img: { kind: ImageKind; width: number; height: number }, bytes: Uint8Array, now = Date.now()): ImageRow {
+  /** Keep one checked screenshot for a key, pending until a message names it. */
+  addImage(who: Who, img: { kind: ImageKind; width: number; height: number }, bytes: Uint8Array, now = Date.now()): ImageRow {
     this.sweep(now);
-    const hash = tokenHash(token);
-    const pending = (this.db.prepare('SELECT COUNT(*) AS n FROM images WHERE token_hash = ? AND message_id IS NULL').get(hash) as { n: number }).n;
+    const key = keyOf(who);
+    const pending = (this.db.prepare('SELECT COUNT(*) AS n FROM images WHERE token_hash = ? AND message_id IS NULL').get(key) as { n: number }).n;
     if (pending >= MAX_IMAGES_PER_MESSAGE) throw new FullError(`at most ${MAX_IMAGES_PER_MESSAGE} screenshots per message`);
     const total = (this.db.prepare('SELECT COALESCE(SUM(bytes), 0) AS n FROM images').get() as { n: number }).n;
     if (total + bytes.length > MAX_IMAGE_BYTES_TOTAL) throw new FullError('the screenshot store is full');
     const id = randomBytes(12).toString('hex');
     writeFileSync(join(this.imageDir, id), bytes, { mode: 0o600, flag: 'wx' });
-    this.db.prepare('INSERT INTO images (id, token_hash, message_id, kind, bytes, width, height, at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)').run(id, hash, img.kind, bytes.length, img.width, img.height, now);
+    this.db.prepare('INSERT INTO images (id, token_hash, message_id, kind, bytes, width, height, at) VALUES (?, ?, NULL, ?, ?, ?, ?, ?)').run(id, key, img.kind, bytes.length, img.width, img.height, now);
     return { id, kind: img.kind, bytes: bytes.length, width: img.width, height: img.height };
   }
 
-  /** A screenshot of this token's thread - sent, or pending for it - with its bytes; null for anyone else. */
-  image(token: string, id: string): { row: ImageRow; bytes: Buffer } | null {
+  /** A screenshot of this key's chat - sent in it, or pending for this key - with its bytes; null for anyone else. */
+  image(who: Who, id: string): { row: ImageRow; bytes: Buffer } | null {
     if (!/^[0-9a-f]{24}$/.test(id)) return null;
-    const hash = tokenHash(token);
+    const f = this.find(who);
+    const threadId = f && !f.locked ? Number(f.row.id) : -1;
     const r = this.db
       .prepare(
-        `SELECT i.id, i.kind, i.bytes, i.width, i.height FROM images i
-         LEFT JOIN messages m ON m.id = i.message_id LEFT JOIN threads t ON t.id = m.thread_id
-         WHERE i.id = ? AND (t.token_hash = ? OR (i.message_id IS NULL AND i.token_hash = ?))`,
+        `SELECT i.id, i.kind, i.bytes, i.width, i.height FROM images i LEFT JOIN messages m ON m.id = i.message_id
+         WHERE i.id = ? AND (m.thread_id = ? OR (i.message_id IS NULL AND i.token_hash = ?))`,
       )
-      .get(id, hash, hash) as { id: string; kind: ImageKind; bytes: number; width: number; height: number } | undefined;
+      .get(id, threadId, keyOf(who)) as { id: string; kind: ImageKind; bytes: number; width: number; height: number } | undefined;
     if (!r) return null;
     try {
       return { row: { id: r.id, kind: r.kind, bytes: Number(r.bytes), width: Number(r.width), height: Number(r.height) }, bytes: readFileSync(join(this.imageDir, r.id)) };
@@ -289,5 +408,15 @@ export class FeedbackStore {
 
   close(): void {
     this.db.close();
+  }
+}
+
+function parseAreas(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const v: unknown = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  } catch {
+    return [];
   }
 }

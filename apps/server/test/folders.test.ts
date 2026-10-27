@@ -913,5 +913,5 @@ test('hosted: the folders routes are listed, POSTs as writes or the sign-in, a p
     else assert.equal(r.cls, r.url === '/api/folders/session' ? 'auth' : 'write', r.url);
   }
   assert.deepEqual(limitsFor(hostedRoute('POST', '/api/folders/item/create')!, {}, HOSTED_LIMITS, 'c').map((l) => l.key), ['read|c', 'write|c']);
-  assert.deepEqual(limitsFor(hostedRoute('POST', '/api/folders/session')!, {}, HOSTED_LIMITS, 'c').map((l) => l.key), ['auth|c', 'auth|*']);
+  assert.deepEqual(limitsFor(hostedRoute('POST', '/api/folders/session')!, {}, HOSTED_LIMITS, 'c').map((l) => l.key), ['auth|c', 'auth|*|/api/folders/session']);
 });

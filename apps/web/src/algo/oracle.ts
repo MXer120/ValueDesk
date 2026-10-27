@@ -14,6 +14,7 @@
  */
 import { useEffect, useState } from 'react';
 import { ORACLE_VENUES, combineOracle, type OracleCombined, type OracleVenue, type VenueQuote } from '@copy-engine';
+import { pollEvery } from '../exchange/visibility';
 
 export interface OracleRead {
   quotes: VenueQuote[];
@@ -60,7 +61,7 @@ export async function readOracle(coin: string, venues: readonly OracleVenue[] = 
 /** The coin of a SoDEX symbol ('BTC-USD' -> 'BTC'). */
 export const coinOf = (symbol: string): string => symbol.replace(/-USD$/i, '').toUpperCase();
 
-/** The oracle for a coin over the chosen venues, read every 2 s while `on` (the Fill fast ticket's live band). */
+/** The oracle for a coin over the chosen venues, read every 2 s while `on` and the tab is shown (the Fill fast ticket's live band). */
 export function useOracle(coin: string | null, venues: readonly OracleVenue[], on: boolean): (OracleCombined & { quotes: VenueQuote[] }) | null {
   const [read, setRead] = useState<OracleRead | null>(null);
   const [now, setNow] = useState(() => Date.now());
@@ -79,10 +80,11 @@ export function useOracle(coin: string | null, venues: readonly OracleVenue[], o
         })
         .finally(() => !gone && setNow(Date.now()));
     void pull();
-    const t = window.setInterval(pull, 2_000);
+    // Paused while the tab is hidden (each read is an /api call), caught up when it is shown.
+    const stop = pollEvery(2_000, pull);
     return () => {
       gone = true;
-      window.clearInterval(t);
+      stop();
     };
     // venueKey stands for `venues`, a new array each render.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -30,6 +30,7 @@
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
+import { isIP } from 'node:net';
 import { copyRequestDigest, normaliseCountry, type Logger } from '../../../packages/copy-engine/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
 import { ApiError, type ExecutorService, type RequestContext } from './service.ts';
@@ -37,18 +38,73 @@ import { ApiError, type ExecutorService, type RequestContext } from './service.t
 const BODY_LIMIT = 64 * 1024;
 const PREFIX = '/api/copy/v1';
 
-/** A fixed-window limiter per key. */
-class Limiter {
+/**
+ * The rate-limit key of a client address: IPv4 as is (an IPv4-mapped IPv6 address
+ * counts as its IPv4), IPv6 by its /64 - one subscriber is normally handed a whole
+ * /64 and could otherwise take a fresh budget from every address in it (the API
+ * does the same: apps/server/src/hosted.ts clientKey).
+ */
+export function rateKey(ip: string): string {
+  let a = ip.trim().toLowerCase();
+  if (a.startsWith('::ffff:') && isIP(a.slice(7)) === 4) a = a.slice(7);
+  if (isIP(a) !== 6) return a || 'unknown';
+  const zone = a.indexOf('%');
+  if (zone >= 0) a = a.slice(0, zone);
+  const gap = a.indexOf('::');
+  const width = (p: string[]) => p.reduce((n, g) => n + (g.includes('.') ? 2 : 1), 0);
+  let groups: string[];
+  if (gap >= 0) {
+    const head = a.slice(0, gap) ? a.slice(0, gap).split(':') : [];
+    const tail = a.slice(gap + 2) ? a.slice(gap + 2).split(':') : [];
+    groups = [...head, ...Array<string>(Math.max(0, 8 - width(head) - width(tail))).fill('0'), ...tail];
+  } else groups = a.split(':');
+  return `${groups.slice(0, 4).map((g) => (g.includes('.') ? '0' : (Number.parseInt(g, 16) || 0).toString(16))).join(':')}::/64`;
+}
+
+/** What the limiter says: allowed; the first refusal of a key's window; a later one. */
+export type Verdict = 'ok' | 'first-refusal' | 'refused';
+
+/**
+ * A fixed-window limiter per key, with bounded memory and bounded work. The keys
+ * are chosen by whoever sends requests, so a flood of new ones must neither grow
+ * the map without end nor make each request walk it: expired windows are swept at
+ * most every few seconds, and at the cap the oldest window goes (that client just
+ * starts a fresh one - failing open for one, never closed for everyone).
+ */
+export class Limiter {
   private hits = new Map<string, { n: number; reset: number }>();
-  constructor(private readonly perMinute: number) {}
-  allow(key: string, now = Date.now()): boolean {
+  private lastSweep = 0;
+  constructor(
+    private readonly perMinute: number,
+    private readonly maxKeys = 50_000,
+  ) {}
+  check(key: string, now = Date.now()): Verdict {
     let h = this.hits.get(key);
     if (!h || now >= h.reset) {
+      if (!h && this.hits.size >= this.maxKeys) {
+        if (now - this.lastSweep >= 5_000) {
+          this.lastSweep = now;
+          for (const [k, v] of this.hits) if (now >= v.reset) this.hits.delete(k);
+        }
+        if (this.hits.size >= this.maxKeys) {
+          const oldest = this.hits.keys().next().value;
+          if (oldest !== undefined) this.hits.delete(oldest);
+        }
+      }
       h = { n: 0, reset: now + 60_000 };
+      // Re-inserted, so the map's order stays "oldest window first".
+      this.hits.delete(key);
       this.hits.set(key, h);
-      if (this.hits.size > 50_000) for (const [k, v] of this.hits) if (now >= v.reset) this.hits.delete(k);
     }
-    return ++h.n <= this.perMinute;
+    h.n++;
+    if (h.n <= this.perMinute) return 'ok';
+    return h.n === this.perMinute + 1 ? 'first-refusal' : 'refused';
+  }
+  allow(key: string, now = Date.now()): boolean {
+    return this.check(key, now) === 'ok';
+  }
+  get size(): number {
+    return this.hits.size;
   }
 }
 
@@ -157,9 +213,20 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     const t0 = Date.now();
     // The signed request's action, wallet and digest, for the audit log (never its signature).
     let signed: { action: string | null; owner: string | null; digest: string | null } | null = null;
-    const url = new URL(req.url ?? '/', 'http://executor');
-    const path = url.pathname;
+    // A request target new URL cannot read ("//[x]/..." is one) must be a 400, never a throw out of
+    // this handler: an unhandled rejection stops the executor (main.ts), every wallet's copies with it.
+    let url: URL | null;
     try {
+      url = new URL(req.url ?? '/', 'http://executor');
+    } catch {
+      url = null;
+    }
+    const path = url ? url.pathname.slice(0, 512) : '(unreadable)';
+    // A refusal by the rate limiter is recorded once per client and window, not once per request: a
+    // flood of refused requests must not fill the audit log (and the disk) one row at a time.
+    let quiet = false;
+    try {
+      if (!url) throw new ApiError(400, 'path', 'bad request');
       cors(req, res);
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -171,9 +238,13 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
         if (!cfg.originSecrets.some((s) => safeEqual(s, v))) throw new ApiError(403, 'origin', 'forbidden');
       }
       if (!path.startsWith(PREFIX)) throw new ApiError(404, 'path', 'not found');
-      const client = clientOf(req);
+      const client = rateKey(clientOf(req));
       const isWrite = req.method === 'POST';
-      if (!(isWrite ? writes : reads).allow(client)) throw new ApiError(429, 'rate', 'Too many requests; try again in a minute.');
+      const verdict = (isWrite ? writes : reads).check(client);
+      if (verdict !== 'ok') {
+        quiet = verdict === 'refused';
+        throw new ApiError(429, 'rate', 'Too many requests; try again in a minute.');
+      }
       const ctx = contextOf(req);
       const route = path.slice(PREFIX.length);
 
@@ -216,7 +287,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (path !== `${PREFIX}/health`) log.debug('request', { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
       // Every write, and every read that was refused, into the audit log: who asked for what, from where, and the answer.
       // (Never throws: while the executor starts, the service is not there yet - nothing to record then.)
-      if (req.method === 'POST' || (res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404)) {
+      if (!quiet && (req.method === 'POST' || (res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404))) {
         try {
           svc.audit({ method: req.method ?? '', path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers['x-viewer-country'] ?? '')) : null, request: signed });
         } catch {

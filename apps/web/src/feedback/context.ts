@@ -6,9 +6,11 @@
  *
  * Useful and not sensitive: the page's path without its variable parts, the
  * build, browser and OS families, window size and pixel ratio, language and time
- * zone, the app's connection state, whether a wallet is connected (its address
- * only through the form's own, separate tick), the copy modes in use, the last
- * client error fingerprints (errorReport.ts) and the right-clicked element.
+ * zone, the app's connection state, whether the browser is online, how long the
+ * page has been open, whether a wallet is connected (its address goes with every
+ * message anyway, apart from this info - FeedbackDialog.tsx), the copy modes in
+ * use, the last client error fingerprints (errorReport.ts) and the right-clicked
+ * element.
  */
 import { browserFamily, scrubRoute } from '@sign/ops/scrub.js';
 import { BUILD_ID } from '../buildInfo';
@@ -25,6 +27,9 @@ export interface FeedbackContext {
   timeZone: string | null;
   sockets: string | null;
   walletConnected: boolean;
+  online: boolean | null;
+  /** Seconds since the page loaded. */
+  pageAgeS: number | null;
   modes: string[];
   errors: string[];
   element: ElementInfo | null;
@@ -51,6 +56,8 @@ export interface ContextSources {
   timeZone: string | null;
   sockets: string | null;
   walletConnected: boolean;
+  online: boolean | null;
+  pageAgeS: number | null;
   modes: string[];
   errors: string[];
 }
@@ -69,6 +76,8 @@ export function buildContext(s: ContextSources, element: ElementInfo | null): Fe
     timeZone: s.timeZone,
     sockets: s.sockets,
     walletConnected: s.walletConnected,
+    online: s.online,
+    pageAgeS: s.pageAgeS !== null && Number.isFinite(s.pageAgeS) && s.pageAgeS >= 0 ? Math.round(s.pageAgeS) : null,
     modes: [...new Set(s.modes)],
     errors: s.errors.slice(0, 5),
     element,
@@ -116,6 +125,8 @@ export async function gatherSources(): Promise<ContextSources> {
     timeZone,
     sockets,
     walletConnected: connectedWallet() !== null,
+    online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+    pageAgeS: typeof performance !== 'undefined' ? performance.now() / 1000 : null,
     modes,
     errors,
   };
@@ -130,7 +141,9 @@ export function contextRows(c: FeedbackContext): Array<[string, string]> {
     ['Window', `${c.viewport ?? '?'}${c.dpr ? ` at ${c.dpr}x` : ''}`],
     ['Language, time zone', `${c.lang ?? '?'} · ${c.timeZone ?? '?'}`],
     ['Connection', c.sockets ?? 'unknown'],
-    ['Wallet', c.walletConnected ? 'connected (address not included)' : 'not connected'],
+    ['Wallet', c.walletConnected ? 'connected' : 'not connected'],
+    ['Online', c.online === null ? 'unknown' : c.online ? 'yes' : 'no'],
+    ['Page open for', c.pageAgeS === null ? 'unknown' : c.pageAgeS < 120 ? `${c.pageAgeS} s` : `${Math.round(c.pageAgeS / 60)} min`],
     ['Copy modes in use', c.modes.length ? c.modes.join(', ') : 'none'],
     ['Recent errors', c.errors.length ? c.errors.join(', ') : 'none'],
   ];

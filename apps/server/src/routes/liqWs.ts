@@ -25,6 +25,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
 import { VENUES, type Venue } from '../valuescan/types.js';
+import { clientKey } from '../hosted.js';
 import { liqFeed, type CoinChange } from '../indexer/liqFeed.js';
 import { heatOf, liqHeatmap, liveSrc } from '../indexer/liqRead.js';
 import { marketsNow } from '../valuescan/liquidations/rules.js';
@@ -188,7 +189,9 @@ function join(ws: WebSocket, coin: string, venues: Venue[], k: number): void {
 export function liqWsRoute(app: FastifyInstance, originOk: (origin: string | undefined) => boolean): void {
   wire();
   app.get('/ws/liq', { websocket: true }, (socket: WebSocket, req) => {
-    const who = req.ip || 'unknown';
+    // The address as the rate limits key it (hosted.ts clientKey): an IPv6 client by its /64, or one
+    // subscriber could open a dozen sockets from every address of its block.
+    const who = clientKey(req.ip);
     if (!originOk(req.headers.origin)) { socket.close(1008, 'origin not allowed'); return; }
     if (connections >= MAX_CONNECTIONS) { socket.close(1013, 'busy - try again shortly'); return; }
     if ((perAddress.get(who) ?? 0) >= MAX_PER_ADDRESS) { socket.close(1008, 'too many connections from this address'); return; }

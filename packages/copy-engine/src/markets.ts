@@ -23,6 +23,16 @@ const num = (v: unknown, fallback = NaN): number => {
 };
 const str = (v: unknown, fallback: string): string => (typeof v === 'string' && v.trim() !== '' ? v.trim() : fallback);
 
+/** `marginTiers` rows with a positive notional and leverage, by rising notional ({} when there are none). */
+export function tiersOf(v: unknown): { marginTiers?: Array<{ maxNotionalValue: number; maxLeverage: number }> } {
+  if (!Array.isArray(v)) return {};
+  const tiers = (v as Array<Record<string, unknown>>)
+    .map((t) => ({ maxNotionalValue: num(t?.maxNotionalValue), maxLeverage: num(t?.maxLeverage) }))
+    .filter((t) => t.maxNotionalValue > 0 && t.maxLeverage > 0)
+    .sort((a, b) => a.maxNotionalValue - b.maxNotionalValue);
+  return tiers.length ? { marginTiers: tiers } : {};
+}
+
 /** `GET /api/v1/perps/markets/symbols` rows -> rules. Rows that cannot be traded safely are dropped. */
 export function parseMarkets(rows: unknown): MarketInfo[] {
   if (!Array.isArray(rows)) return [];
@@ -45,6 +55,10 @@ export function parseMarkets(rows: unknown): MarketInfo[] {
       minNotional: num(r.minNotional, 10),
       maxNotional: num(r.maxNotional) > 0 ? num(r.maxNotional) : null,
       maxLeverage: Math.max(1, Math.floor(num(r.maxLeverage, 1))),
+      ...(num(r.initLeverage) > 0 ? { initLeverage: Math.floor(num(r.initLeverage)) } : {}),
+      ...tiersOf(r.marginTiers),
+      openInterestCap: num(r.openInterestCap) > 0 ? num(r.openInterestCap) : null,
+      openInterestCapUSD: num(r.openInterestCapUSD) > 0 ? num(r.openInterestCapUSD) : null,
       buyLimitUpRatio: num(r.buyLimitUpRatio, 0.05),
       sellLimitDownRatio: num(r.sellLimitDownRatio, 0.05),
       takerFee: num(r.takerFee, 0.0004),

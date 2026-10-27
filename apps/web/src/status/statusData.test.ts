@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isStatusPath, legalForPath, tabForPath } from '../router';
-import { checkExecutor, dayBar, fmtUptime, loadStatus, overallOf } from './statusData';
+import { checkExecutor, dayDetail, fmtUptime, loadStatus, overallOf } from './statusData';
 
 const T0 = Date.UTC(2026, 9, 27, 12, 0, 0);
 
@@ -59,11 +59,15 @@ test('the headline and the bars', () => {
   assert.equal(overallOf(['up', 'degraded']), 'degraded');
   assert.equal(overallOf(['degraded', 'down']), 'outage');
   assert.equal(overallOf(['unknown']), 'unknown');
-  assert.deepEqual(dayBar(['2026-10-26', 0, 0, 0], T0), { tone: 'nodata', title: '26 Oct 2026 · no data' });
-  assert.deepEqual(dayBar(['2026-10-26', 1440, 0, 0], T0), { tone: 'up', title: '26 Oct 2026 · 100% up' });
-  assert.equal(dayBar(['2026-10-26', 1380, 0, 60], T0).title, '26 Oct 2026 · 95.83% up · 1 h down');
+  const line = (d: [string, number, number, number]) => {
+    const x = dayDetail(d, 'website', [], T0);
+    return { tone: x.tone, title: [x.date, x.uptime ?? 'no data', ...x.facts].join(' · ') };
+  };
+  assert.deepEqual(line(['2026-10-26', 0, 0, 0]), { tone: 'nodata', title: '26 Oct 2026 · no data' });
+  assert.deepEqual(line(['2026-10-26', 1440, 0, 0]), { tone: 'up', title: '26 Oct 2026 · 100% up' });
+  assert.equal(line(['2026-10-26', 1380, 0, 60]).title, '26 Oct 2026 · 95.83% up · 1 h down');
   // Today: 720 minutes have passed; 600 probed leaves 2 h without data.
-  assert.equal(dayBar(['2026-10-27', 590, 10, 0], T0).title, '27 Oct 2026 · 100% up · 10 min degraded · 2 h no data');
+  assert.equal(line(['2026-10-27', 590, 10, 0]).title, '27 Oct 2026 · 100% up · 10 min degraded · 2 h no data');
   assert.equal(fmtUptime(null), '–');
   assert.equal(fmtUptime(99.98123), '99.981%');
   assert.equal(fmtUptime(100), '100%');

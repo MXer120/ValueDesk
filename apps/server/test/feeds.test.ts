@@ -61,3 +61,23 @@ test('imageType: the type the bytes are', async () => {
   assert.equal(imageType(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), 'image/svg+xml');
   assert.equal(imageType(Buffer.from('hello')), null);
 });
+
+test('siteLogo: only the icon services are asked - never the site (SSRF) - and an SVG is never served', async () => {
+  const { siteLogo } = await import('../src/valuescan/feeds.js');
+  const asked: string[] = [];
+  const svg = (async (url: string | URL | Request) => {
+    asked.push(String(url));
+    return new Response('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', { status: 200 });
+  }) as typeof fetch;
+  const got = await siteLogo('127-0-0-1.sslip.io', svg);
+  assert.equal(got.body, null, 'an SVG is not a logo');
+  assert.ok(asked.length > 0);
+  for (const u of asked) {
+    const host = new URL(u).hostname;
+    assert.ok(host === 'icons.duckduckgo.com' || host === 'www.google.com', `asked ${u}`);
+  }
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const ok = await siteLogo('logo-test.example', (async () => new Response(png, { status: 200 })) as typeof fetch);
+  assert.equal(ok.type, 'image/png');
+  assert.ok(ok.body?.equals(png));
+});

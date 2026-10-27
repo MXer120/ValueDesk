@@ -13,6 +13,7 @@ import { StatusFooter } from './components/StatusFooter';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
+import { SiteNoticeBanner } from './status/SiteNoticeBanner';
 import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -502,6 +503,8 @@ function AppShell() {
           the same call to action on screen twice. The order entry panel carries
           that state now ("Read-only - unlock a signing key"). */}
       <Guarded name="Maintenance">
+        {/* Our own incidents and maintenance (status/), from /api/health: no request of its own. */}
+        <SiteNoticeBanner health={health} />
         <MaintenanceBanner />
       </Guarded>
       <Guarded name="Brake">
@@ -595,7 +598,7 @@ function AppShell() {
         <FillToasts address={address} />
         {/* Send feedback: the chat with the team, its right-click entry and the watch for replies (feedback/). */}
         <Guarded name="Feedback">
-          <FeedbackHost />
+          <FeedbackHost address={address} provider={provider} />
         </Guarded>
         <Guarded name="Account">
           <AccountController

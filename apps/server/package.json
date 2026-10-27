@@ -15,7 +15,7 @@
     "@fastify/websocket": "^11.0.1",
     "@noble/curves": "^1.7.0",
     "@noble/hashes": "^1.6.1",
-    "fastify": "^5.1.0",
+    "fastify": "^5.12.7",
     "ws": "^8.18.0"
   },
   "devDependencies": {

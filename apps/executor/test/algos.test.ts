@@ -28,12 +28,12 @@ class Wallet {
 
 const BTC_ROW = { id: 1, name: 'BTC-USD', baseCoin: 'BTC', tickSize: '1', stepSize: '0.00001', minQuantity: '0.00001', maxQuantity: '1000', minNotional: '10', maxNotional: '5000000', maxLeverage: 50, buyLimitUpRatio: '0.05', sellLimitDownRatio: '0.05', takerFee: '0.0004', makerFee: '0.0001', status: 'TRADING' };
 
-function fakeFetch(): FetchLike {
+function fakeFetch(rows: unknown[] = [BTC_ROW], marks: unknown[] = []): FetchLike {
   const ok = (data: unknown) => ({ status: 200, ok: true, text: async () => JSON.stringify({ code: 0, timestamp: Date.now(), data }) });
   return async (url) => {
     const path = url.replace(/^https?:\/\/[^/]+/, '');
-    if (path.endsWith('/markets/symbols')) return ok([BTC_ROW]);
-    if (path.endsWith('/markets/mark-prices')) return ok([]);
+    if (path.endsWith('/markets/symbols')) return ok(rows);
+    if (path.endsWith('/markets/mark-prices')) return ok(marks);
     if (/\/api\/v1\/perps\/accounts\/0x[0-9a-f]{40}\/api-keys$/.test(path)) return ok([]);
     if (/\/api\/v1\/user\/0x[0-9a-f]{40}\/subaccounts$/.test(path)) return ok({ primaryAccountID: 42 });
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
@@ -43,11 +43,11 @@ function fakeFetch(): FetchLike {
 const silent = { debug() {}, info() {}, warn() {}, error() {} };
 const noWs = (): WebSocketLike => ({ readyState: 0, send() {}, close() {}, onopen: null, onmessage: null, onclose: null, onerror: null });
 
-function make(env: Record<string, string> = {}) {
+function make(env: Record<string, string> = {}, market: { rows?: unknown[]; marks?: unknown[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'vd-algo-'));
   const cfg: ExecutorConfig = loadConfig({ EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_EDGE: 'none', ...env });
   const db = new ExecutorDb(':memory:');
-  const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(), factory: noWs, log: silent });
+  const svc = new ExecutorService(cfg, db, new Secrets(dir), { fetch: fakeFetch(market.rows, market.marks), factory: noWs, log: silent });
   return { cfg, db, svc, cleanup: async () => { await svc.stop(); db.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
@@ -259,5 +259,23 @@ test('algos: a signed update changes a running algo\'s size (and only what may c
   // An ended algo cannot change.
   await svc.algoAct(a.sign(svc.executorId, 'algo-action', { op: 'cancel', id: x.algo.id }), ctx);
   assert.equal(await code(up(a, { quantity: '0.05' })), '409:state');
+  await cleanup();
+});
+
+test('algos: SoDEX\'s limits are checked at the start, on the server - the position limit at the leverage and the limit band refuse it', async () => {
+  // BTC-USD's tiers as SoDEX lists them, and its mark and open interest from the REST mark prices (the feed is not up).
+  const row = { ...BTC_ROW, initLeverage: 20, openInterestCap: '2000000', openInterestCapUSD: '200000000', marginTiers: [{ maxNotionalValue: '4000000', maintenanceMarginRate: '0.0125', maxLeverage: 40, maintenanceDeduction: '0' }, { maxNotionalValue: '100000000', maintenanceMarginRate: '0.02', maxLeverage: 25, maintenanceDeduction: '30000' }] };
+  const { svc, cleanup } = make({}, { rows: [row], marks: [{ symbol: 'BTC-USD', markPrice: '60000', indexPrice: '60000', openInterest: '3000', fundingRate: '0' }] });
+  const w = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const start = (spec: Record<string, unknown>, seed: number) => svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, ...spec }, seed }), ctx);
+  // 70 BTC at 40x is $4.2M, over the $4M tier.
+  await assert.rejects(start({ quantity: '70', leverage: 40 }, 1), (e: unknown) => e instanceof ApiError && e.status === 400 && /over SoDEX's limit of \$4,000,000 at 40x/.test(e.message));
+  // At 25x the tier is $100M: it starts.
+  const ok = await start({ quantity: '70', leverage: 25 }, 2);
+  assert.equal(ok.algo.status, 'scheduled');
+  // A limit entry 10% over the mark: SoDEX refuses a limit buy past 5%.
+  await assert.rejects(start({ kind: 'bracket', entry: 'limit', price: 66_000, quantity: '0.01', exits: { tpPct: 0.02, slPct: 0.01 }, durationMs: undefined, slices: undefined, exec: undefined }, 3), (e: unknown) => e instanceof ApiError && e.status === 400 && /priced too far from the price: SoDEX refuses a limit buy more than 5% over the mark/.test(e.message));
   await cleanup();
 });

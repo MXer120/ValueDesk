@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { ORACLE_VENUES, checkAlgoSpec, planAlgo, type AlgoSpec, type MarketInfo } from '@copy-engine';
 import {
   ADVANCED_KEYS, DEFAULT, cleanCurve, curveAt, dcaLadder, type CurvePoint, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
-  randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf,
+  randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf, marketOf, redWarnings,
   type Draft, type TicketShared,
 } from './draft';
 import { ALGO_MENU, type UiKind } from './menu';
@@ -341,4 +341,58 @@ test('Fill fast: 0.1% from the oracle mid of every venue by default; the venues 
   // All six of the old venues meant "all": all of today's.
   assert.deepEqual(loadDraft(memStore({ [DRAFT_KEY]: JSON.stringify({ sweepVenues: ['binanceFutures', 'binanceSpot', 'bitget', 'hyperliquid', 'okx', 'bybit'] }) })).sweepVenues, [...ORACLE_VENUES]);
   assert.ok(checkAlgoSpec({ ...s, venues: [] }).errors.venues);
+});
+
+/* ------------------------------------------------ SoDEX's limits ----- */
+
+/** BTC-USD as the app's market list holds it (SoDEX's own fields, 2026-10-27). */
+const BTC_SYM = {
+  id: 1, name: 'BTC-USD', displayName: 'BTC-USD', baseCoin: 'BTC', quoteCoin: 'vUSDC', quoteCoinID: 0, pricePrecision: 0, tickSize: '1', quantityPrecision: 5, stepSize: '0.00001',
+  minQuantity: '0.00001', maxQuantity: '1000', marketMinQuantity: '0.00001', marketMaxQuantity: '1000', minNotional: '10', maxNotional: '4000000', makerFee: '0.00012', takerFee: '0.0004', status: 'TRADING',
+  buyLimitUpRatio: '0.05', sellLimitDownRatio: '0.04', maxLeverage: 40, initLeverage: 20, openInterestCap: '2000000', openInterestCapUSD: '200000000',
+  marginTiers: [
+    { maxNotionalValue: '100000000', maintenanceMarginRate: '0.02', maxLeverage: 25, maintenanceDeduction: '30000' },
+    { maxNotionalValue: '4000000', maintenanceMarginRate: '0.0125', maxLeverage: 40, maintenanceDeduction: '0' },
+  ],
+} as const;
+
+test("the ticket's market carries SoDEX's order sizes, limit band, position tiers and open-interest cap", () => {
+  const m = marketOf(BTC_SYM as never);
+  assert.equal(m.maxNotional, 4_000_000);
+  assert.equal(m.sellLimitDownRatio, 0.04, "the market's own band, not a fixed 5%");
+  assert.equal(m.initLeverage, 20);
+  assert.deepEqual(m.marginTiers, [{ maxNotionalValue: 4_000_000, maxLeverage: 40 }, { maxNotionalValue: 100_000_000, maxLeverage: 25 }]);
+  assert.equal(m.openInterestCapUSD, 200_000_000);
+  const bare = marketOf({ ...BTC_SYM, marginTiers: undefined, openInterestCap: undefined, openInterestCapUSD: undefined, buyLimitUpRatio: undefined, maxNotional: '0' } as never);
+  assert.equal(bare.marginTiers, undefined);
+  assert.equal(bare.openInterestCap, null);
+  assert.equal(bare.maxNotional, null, '"0" is no maximum');
+  assert.equal(bare.buyLimitUpRatio, 0.05);
+});
+
+test("the ticket's plan: the position limit at the ticket's leverage, the open-interest cap in red or amber, and slices merged under the minimum", () => {
+  const m = marketOf(BTC_SYM as never);
+  const ctx = { now: NOW, price: 60_000, seed: 1 };
+  // 0.5 BTC on top of a 66.5 BTC long at 40x: over $4M.
+  const big = draftToSpec('twap', DEFAULT, { ...shared, quantity: '0.5', leverage: 40 }, NOW);
+  const p = planAlgo(checkAlgoSpec(big).spec!, m, { ...ctx, positionSize: 66.5 });
+  assert.match(p.errors[0]!, /over SoDEX's limit of \$4,000,000 at 40x/);
+  assert.deepEqual(planAlgo(checkAlgoSpec(big).spec!, m, { ...ctx, positionSize: 0 }).errors, []);
+  // $200M cap at 60,000 is 3,333.33 BTC: 10 BTC left.
+  const oi = 200_000_000 / 60_000 - 10;
+  const chase = (q: string) => planAlgo(checkAlgoSpec(draftToSpec('chase', DEFAULT, { ...shared, quantity: q }, NOW)).spec!, m, { ...ctx, oi });
+  const over = chase('12');
+  assert.equal(over.oi!.level, 'over');
+  assert.deepEqual([...redWarnings(over)], [over.warnings[0]]);
+  assert.match(over.warnings[0]!, /would hit SoDEX's open-interest cap on BTC-USD/);
+  const near = chase('9');
+  assert.equal(near.oi!.level, 'near');
+  assert.equal(redWarnings(near).size, 0, 'amber, not red');
+  assert.match(near.warnings[0]!, /90% of the open interest still allowed/);
+  assert.equal(chase('2').oi, null);
+  // $60 in 20 slices: merged into orders of at least $10, not refused.
+  const small = planAlgo(checkAlgoSpec(draftToSpec('twap', { ...DEFAULT, slices: '20', slicesAuto: false }, { ...shared, quantity: '0.001' }, NOW)).spec!, m, ctx);
+  assert.deepEqual(small.errors, []);
+  assert.ok(small.children.length <= 6 && small.children.every((c) => c.qty * 60_000 >= 10 - 1e-9), small.children.map((c) => c.qty).join(','));
+  assert.ok(small.warnings.some((w) => /go out together/.test(w)), small.warnings.join(' | '));
 });

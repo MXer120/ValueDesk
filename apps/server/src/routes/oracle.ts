@@ -12,6 +12,7 @@
  * contacts the venues.
  */
 import type { FastifyInstance } from 'fastify';
+import { gwGet } from '../valuescan/sodex/gateway.js';
 import { ORACLE_VENUES, OracleFeed, isOracleVenue, type FetchLike, type OracleSnapshot, type OracleVenue } from '../valuescan/oracle.js';
 
 const bad = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 });
@@ -44,7 +45,56 @@ export function publicSnapshot(snap: OracleSnapshot, venues: readonly OracleVenu
 
 const nodeFetch: FetchLike = (url, init) => fetch(url, init as RequestInit);
 
-export function oracleRoutes(app: FastifyInstance, feed: OracleFeed = new OracleFeed({ fetch: nodeFetch })) {
+/** The coins in one of SoDEX's symbol lists: perps by name ('BTC-USD'), spot by display name ('BTC/USDC'). */
+export function coinsOfSymbols(list: unknown): string[] {
+  const rows = (Array.isArray(list) ? list : Array.isArray((list as { data?: unknown })?.data) ? (list as { data: unknown[] }).data : []) as Array<{ name?: unknown; displayName?: unknown }>;
+  const out: string[] = [];
+  for (const r of rows) {
+    const s = typeof r.displayName === 'string' && r.displayName.includes('/') ? r.displayName.split('/')[0] : typeof r.name === 'string' ? r.name : '';
+    const coin = (s ?? '').trim().toUpperCase().replace(/-USD$/, '');
+    if (/^[A-Z0-9]{1,20}$/.test(coin)) out.push(coin);
+  }
+  return out;
+}
+
+/**
+ * The coins the oracle answers for: SoDEX's own, re-read every 10 minutes. A coin
+ * SoDEX does not list is a 404 - before, any made-up coin made the server ask up
+ * to 19 venues about it, from its own address (security pass 2026-10-27). While
+ * SoDEX's lists cannot be read (`null`), every well-formed coin is answered, as
+ * before: Fill fast keeps working through a SoDEX outage.
+ */
+export function listedCoins(read: () => Promise<unknown[]>, now: () => number = Date.now, ttlMs = 600_000): () => Promise<ReadonlySet<string> | null> {
+  let set: ReadonlySet<string> | null = null;
+  let at = -Infinity;
+  let pending: Promise<void> | null = null;
+  const refresh = () =>
+    (pending ??= read()
+      .then((lists) => {
+        const coins = lists.flatMap(coinsOfSymbols);
+        if (coins.length) set = new Set(coins);
+      })
+      .catch(() => {
+        /* keep the last list (or none) */
+      })
+      .finally(() => {
+        at = now();
+        pending = null;
+      }));
+  return async () => {
+    if (now() - at >= ttlMs) await refresh();
+    return set;
+  };
+}
+
+const sodexLists = () =>
+  Promise.all([gwGet<unknown>('/api/v1/perps/markets/symbols'), gwGet<unknown>('/api/v1/spot/markets/symbols')]);
+
+export function oracleRoutes(
+  app: FastifyInstance,
+  feed: OracleFeed = new OracleFeed({ fetch: nodeFetch }),
+  listed: () => Promise<ReadonlySet<string> | null> = listedCoins(sodexLists),
+) {
   app.get('/api/vs/oracle', async (req, reply) => {
     let parsed: { coin: string; venues: OracleVenue[] };
     try {
@@ -52,6 +102,8 @@ export function oracleRoutes(app: FastifyInstance, feed: OracleFeed = new Oracle
     } catch (e) {
       return reply.code(400).send({ ok: false, error: (e as Error).message });
     }
+    const coins = await listed();
+    if (coins && !coins.has(parsed.coin)) return reply.code(404).send({ ok: false, error: `SoDEX does not list ${parsed.coin}` });
     try {
       const snap = await feed.snapshot(parsed.coin, parsed.venues);
       reply.header('Cache-Control', 'no-store');

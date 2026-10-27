@@ -15,6 +15,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useAsync } from '../hooks';
+import { useMaintenanceStatus } from './MaintenanceBanner';
 import { fmtDateTime, fmtTime } from '../format';
 import './Maintenance.css';
 import { LoadFailed, logLoadFailure, useLoadFailedToast } from './LoadFailed';
@@ -88,13 +89,10 @@ export function Maintenance({
   const [label, setLabel] = useState<string>('');
   const [openId, setOpenId] = useState<number | null>(null);
 
-  // 45s sits inside the requested 30-60s band. The backend additionally caches
-  // for 15s, so N open tabs cost far fewer than N upstream requests.
-  const { data: status, error: statusError, refresh: refreshStatus } = useAsync<MaintenanceStatus>(
-    () => getJson<MaintenanceStatus>('/api/external/maintenance/status'),
-    [],
-    { pollMs: 45_000 },
-  );
+  // 45s sits inside the requested 30-60s band, one poll shared with the shell's
+  // banner (MaintenanceBanner.tsx). The backend additionally caches for 15s, so
+  // N open tabs cost far fewer than N upstream requests.
+  const { data: status, error: statusError, refresh: refreshStatus } = useMaintenanceStatus();
 
   // Either our backend or SoDEX's status service failed to answer: the page
   // says only "Exchange status couldn't load.", the reason goes to the console.

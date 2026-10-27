@@ -32,11 +32,15 @@ interface TgMessage {
   text?: string;
   caption?: string;
   reply_to_message?: { message_id?: number };
+  from?: { id?: number }; // [status hook] for ops/statusTelegram.ts
 }
 interface TgUpdate {
   update_id?: number;
   message?: TgMessage;
 }
+
+// [status hook] The status page's commands (/incident, /update, ... - ops/statusTelegram.ts): true when handled.
+export type StatusCommandHook = (m: { text: string; messageId: number; fromId?: number }) => Promise<boolean>;
 
 export interface ReplyLog {
   info(o: object, msg: string): void;
@@ -44,7 +48,7 @@ export interface ReplyLog {
 }
 
 /** One getUpdates round: what was stored. Exported for tests. */
-export async function pollReplies(store: FeedbackStore, o: TelegramOptions & { timeoutS?: number; now?: () => number } = {}): Promise<{ ok: boolean; stored: number }> {
+export async function pollReplies(store: FeedbackStore, o: TelegramOptions & { timeoutS?: number; now?: () => number; onCommand?: StatusCommandHook } = {}): Promise<{ ok: boolean; stored: number }> {
   const chatId = String(o.chatId ?? process.env.ALERT_TELEGRAM_CHAT_ID?.trim() ?? '');
   const offset = Number(store.getMeta(OFFSET_KEY) ?? 0) || 0;
   const timeoutS = o.timeoutS ?? POLL_S;
@@ -63,6 +67,9 @@ export async function pollReplies(store: FeedbackStore, o: TelegramOptions & { t
     if (!m || String(m.chat?.id ?? '') !== chatId) continue;
     const replyTo = m.reply_to_message?.message_id;
     const text = (typeof m.text === 'string' ? m.text : typeof m.caption === 'string' ? m.caption : '').trim();
+    // [status hook] A command (not a reply) from this chat - checked above - goes to the status page's handler.
+    if (o.onCommand && typeof replyTo !== 'number' && typeof m.message_id === 'number' && text.startsWith('/')
+      && (await o.onCommand({ text, messageId: m.message_id, fromId: m.from?.id }).catch(() => true))) continue;
     if (typeof replyTo !== 'number' || typeof m.message_id !== 'number' || !text) continue;
     if (store.addOwnerReply(replyTo, text.slice(0, MAX_REPLY_CHARS), m.message_id, (o.now ?? Date.now)())) stored += 1;
   }
@@ -75,7 +82,7 @@ export interface ReplyPoller {
 }
 
 /** Poll for as long as the process runs. */
-export function startReplyPoller(store: FeedbackStore, o: TelegramOptions & { log?: ReplyLog } = {}): ReplyPoller {
+export function startReplyPoller(store: FeedbackStore, o: TelegramOptions & { log?: ReplyLog; onCommand?: StatusCommandHook } = {}): ReplyPoller {
   let stopped = false;
   let wait = 5_000;
   let timer: ReturnType<typeof setTimeout> | null = null;

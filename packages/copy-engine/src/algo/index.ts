@@ -8,3 +8,4 @@ export * from './sink.ts';
 export * from './store.ts';
 export * from './runtime.ts';
 export * from './sweep.ts';
+export * from './limits.ts';

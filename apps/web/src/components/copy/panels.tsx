@@ -22,6 +22,7 @@ import { SKIP_REASONS, type ActivityEntry, type CopyView } from '@copy-engine';
 import { MODE_LABEL } from '../../copy/CopySetupSheet';
 import { commandCopy, copyActivity, copyRows, stopAllCopies, type CopyRow } from '../../copy/live';
 import { notify, notifyError } from '../../toast';
+import { pollEvery } from '../../exchange/visibility';
 import { useConfirm } from '../Modal';
 import { DASH, fmt, fmtUsd, shortAddr, signClass } from '../../format';
 import { VENUE_LABEL } from '../../vsApi';
@@ -287,8 +288,9 @@ function CopyActivity({ row, rows, onPick }: { row: CopyRow | null; rows: CopyRo
         (e: unknown) => { if (!dead) setError(e instanceof Error ? e.message : String(e)); },
       );
     void load();
-    const t = window.setInterval(load, 10_000);
-    return () => { dead = true; window.clearInterval(t); };
+    // Paused while the tab is hidden; a refresh that fell due runs the moment it is shown.
+    const stop = pollEvery(10_000, () => void load());
+    return () => { dead = true; stop(); };
   }, [id, mode]);
 
   if (!row) {

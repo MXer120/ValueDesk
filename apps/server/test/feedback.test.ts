@@ -11,9 +11,19 @@ import { crc32, deflateSync } from 'node:zlib';
 import { join } from 'node:path';
 import Fastify from 'fastify';
 
+import { randomBytes } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
+import { mkdirSync } from 'node:fs';
+import { secp256k1 } from '@noble/curves/secp256k1';
+
 import { KeyedLimiter } from '../src/rateLimit.js';
 import { REPORT_LIMITS, reportRoutes, type OwnerChannel, type ReportRouteOptions } from '../src/routes/reports.js';
 import { FeedbackStore, bearer, tokenHash } from '../src/ops/feedbackThreads.js';
+import { FeedbackSessions, checkFeedbackSignIn, feedbackSignInDigest } from '../src/ops/feedbackAuth.js';
+import { FEEDBACK_SIGN_IN_STATEMENT, type FeedbackSignIn } from '../src/ops/feedbackSignIn.js';
+import { searchAreas } from '../src/ops/feedbackAreas.js';
+import { SIGN_IN_STATEMENT } from '../src/folders/types.js';
+import { bytesToHex, privateKeyToAddress } from '../src/signing/eip712.js';
 import { parseFeedback } from '../src/ops/feedback.js';
 import { findSecret } from '../src/ops/secrets.js';
 import { checkImage } from '../src/ops/imageCheck.js';
@@ -135,6 +145,7 @@ async function appFor(o: Partial<ReportRouteOptions> = {}) {
   const app = Fastify();
   await app.register(reportRoutes, {
     feedbackStore: store,
+    sessions: o.sessions ?? new FeedbackSessions(join(dir, 'feedback-auth')),
     limiter: o.limiter ?? new KeyedLimiter(),
     limits: o.limits,
     owner: o.owner ?? owner,
@@ -158,7 +169,7 @@ test('threads: the token is the key - none or a malformed one is a 401, another 
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' })).statusCode, 401);
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' }, { authorization: 'Bearer short' })).statusCode, 401);
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' }, { authorization: TOKEN_A })).statusCode, 401, 'Bearer, exactly');
-  const r = await post(app, '/api/vs/feedback', { category: 'bug', message: 'The chart froze' }, auth(TOKEN_A));
+  const r = await post(app, '/api/vs/feedback', { category: 'bug', areas: ['charts'], message: 'The chart froze' }, auth(TOKEN_A));
   assert.equal(r.statusCode, 200);
   assert.equal(r.headers['cache-control'], 'no-store');
   const mine = await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A));
@@ -182,20 +193,21 @@ test('threads: only the token\'s hash is stored', async () => {
 test('forward: one Telegram chain per thread, follow-ups and screenshots as replies to it', async () => {
   const { app, sent, settled } = await appFor();
   const ctx = { route: '/trade', build: 'commit-abc', browser: 'chrome 130', walletConnected: false, element: { path: 'div.panel > button', role: 'button', label: 'Buy', panel: 'Order entry' } };
-  await post(app, '/api/vs/feedback', { category: 'bug', message: 'Buy does nothing', context: ctx, wallet: WALLET }, auth(TOKEN_A));
+  await post(app, '/api/vs/feedback', { category: 'bug', areas: ['wallet', 'orders'], message: 'Buy does nothing', context: ctx, wallet: WALLET }, auth(TOKEN_A));
   await settled();
   assert.equal(sent.length, 1);
   assert.equal(sent[0]!.replyTo, null);
-  assert.match(sent[0]!.text, /^ValueDesk feedback \(bug\) · thread #1/);
+  assert.match(sent[0]!.text, /^ValueDesk feedback \(bug · Placing orders, Wallet connection\) · thread #1/, 'the areas in the list\'s order');
   assert.match(sent[0]!.text, /Element \[Order entry\] div\.panel > button "Buy" \(button\)/);
-  assert.match(sent[0]!.text, new RegExp(`Wallet ${WALLET}`));
+  assert.match(sent[0]!.text, new RegExp(`Wallet ${WALLET} \\(connected, not proven\\)`));
   assert.match(sent[0]!.text, /Reply to this message/);
   const a = (await upload(app, png())).json() as { id: string };
   const b = (await upload(app, jpeg())).json() as { id: string };
   await post(app, '/api/vs/feedback', { message: 'Here is how it looks', images: [a.id, b.id] }, auth(TOKEN_A));
   await settled();
   assert.deepEqual(sent.slice(1).map((s) => [s.kind, s.replyTo]), [['message', 101], ['photo', 102], ['photo', 102]]);
-  assert.match(sent[1]!.text, /^Thread #1 · the visitor wrote/);
+  assert.match(sent[1]!.text, /^Thread #1 · the visitor wrote \(other\)/);
+  assert.match(sent[1]!.text, /Wallet: none connected/, 'every message names its wallet, or that there is none');
   // Another browser, another chain.
   await post(app, '/api/vs/feedback', { message: 'Hello' }, auth(TOKEN_B));
   await settled();
@@ -278,10 +290,10 @@ test('screenshots: checked bytes, three per message, back only to the token, wit
 
 test('screenshots never sent are removed after an hour', async () => {
   const { store } = await appFor();
-  const img = store.addImage(TOKEN_A, { kind: 'png', width: 4, height: 3 }, png(), 1_000);
-  assert.ok(store.image(TOKEN_A, img.id));
+  const img = store.addImage({ token: TOKEN_A }, { kind: 'png', width: 4, height: 3 }, png(), 1_000);
+  assert.ok(store.image({ token: TOKEN_A }, img.id));
   assert.equal(store.sweep(1_000 + 61 * 60_000), 1);
-  assert.equal(store.image(TOKEN_A, img.id), null);
+  assert.equal(store.image({ token: TOKEN_A }, img.id), null);
 });
 
 test('messages: a secret is refused in red words, a bot is answered and dropped, limits per client', async () => {
@@ -306,4 +318,195 @@ test('Telegram failing never changes the answer', async () => {
   const down: OwnerChannel = { message: () => Promise.reject(new Error('down')), photo: () => new Promise(() => {}) };
   const { app } = await appFor({ owner: down });
   assert.equal((await post(app, '/api/vs/feedback', { message: 'still kept' }, auth(TOKEN_A))).statusCode, 200);
+});
+
+// --- areas ---------------------------------------------------------------------------------------
+
+test("areas: a bug needs one, only the list's ids pass, kept in the list's order; search finds by other words", () => {
+  const bug = parseFeedback({ category: 'bug', message: 'x' });
+  assert.ok(bug.ok === false && (bug as { code?: string }).code === 'areas');
+  assert.equal(parseFeedback({ category: 'bug', areas: ['nonsense'], message: 'x' }).ok, false);
+  assert.equal(parseFeedback({ category: 'idea', areas: 'charts', message: 'x' }).ok, false);
+  const ok = parseFeedback({ category: 'bug', areas: ['funds', 'algo', 'funds'], message: 'x' });
+  assert.ok(ok.ok === true);
+  assert.deepEqual(ok.feedback.areas, ['algo', 'funds']);
+  const idea = parseFeedback({ category: 'idea', message: 'x' });
+  assert.ok(idea.ok === true && idea.feedback.areas.length === 0, 'an idea may name none');
+  assert.deepEqual(searchAreas('twap').map((a) => a.id), ['algo']);
+  assert.deepEqual(searchAreas('withdraw').map((a) => a.id), ['funds']);
+  assert.equal(searchAreas('').length, searchAreas(' ').length);
+});
+
+test('the page info carries online and how long the page is open; areas come back with the message', async () => {
+  const r = parseFeedback({ message: 'x', context: { route: '/', online: false, pageAgeS: 125.4 } });
+  assert.ok(r.ok === true);
+  assert.deepEqual([r.feedback.context!.online, r.feedback.context!.pageAgeS], [false, 125]);
+  const { app } = await appFor();
+  await post(app, '/api/vs/feedback', { category: 'bug', areas: ['copy'], message: 'Copy stopped' }, auth(TOKEN_A));
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A))).json() as { messages: Array<{ category: string; areas: string[] }> };
+  assert.deepEqual([t.messages[0]!.category, t.messages[0]!.areas], ['bug', ['copy']]);
+});
+
+// --- the wallet: one chat, opened only with its signature ------------------------------------
+
+function newWallet() {
+  const key = randomBytes(32);
+  return { key, address: privateKeyToAddress(key).toLowerCase() };
+}
+
+/** A feedback sign-in as a wallet makes it: the typed data's digest, signed (r, s, v = 27/28). */
+function signIn(w: { key: Uint8Array; address: string }, o: Partial<FeedbackSignIn> = {}, now = Date.now()): FeedbackSignIn {
+  const base = {
+    owner: w.address,
+    statement: FEEDBACK_SIGN_IN_STATEMENT,
+    nonce: randomBytes(16).toString('hex'),
+    issuedAt: String(now),
+    expiresAt: String(now + 5 * 60_000),
+    chainId: 1,
+    ...o,
+  };
+  const sig = secp256k1.sign(feedbackSignInDigest(base), w.key, { lowS: true, prehash: false });
+  const rsv = new Uint8Array(65);
+  rsv.set(sig.toBytes('compact'), 0);
+  rsv[64] = 27 + sig.recovery;
+  return { ...base, signature: bytesToHex(rsv) };
+}
+
+test("sign-in: the wallet's own signature, once; a folders signature, another signer or a replay is refused", async () => {
+  const { app } = await appFor();
+  const w = newWallet();
+  const s = signIn(w);
+  const r = await post(app, '/api/vs/feedback/session', { signIn: s });
+  assert.equal(r.statusCode, 200);
+  const j = r.json() as { owner: string; token: string; expiresAt: number; attached: string };
+  assert.equal(j.owner, w.address);
+  assert.equal(j.attached, 'none');
+  assert.equal(r.headers['cache-control'], 'no-store');
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: s })).statusCode, 409, 'a replay');
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(w, { statement: SIGN_IN_STATEMENT }) })).statusCode, 401, "the folders' statement");
+  const forged = { ...signIn(newWallet()), owner: w.address };
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: forged })).statusCode, 401, 'signed by another key');
+  assert.equal(checkFeedbackSignIn(signIn(w, {}, Date.now() - 20 * 60_000)).ok, false, 'expired');
+  // A forged token, or one under another key, opens nothing.
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(j.token.slice(0, -2) + 'xx'))).statusCode, 401);
+  const otherKey = new FeedbackSessions(join(DIR, `other-key-${caseNo++}`)).issue(w.address);
+  const bad = await post(app, '/api/vs/feedback/thread', {}, auth(otherKey.token));
+  assert.equal(bad.statusCode, 401);
+  assert.equal((bad.json() as { code: string }).code, 'session');
+});
+
+test('wallet chat: a signed-in wallet writes and reads its one chat; Telegram says it is proven', async () => {
+  const { app, sent, settled } = await appFor();
+  const w = newWallet();
+  const { token } = (await post(app, '/api/vs/feedback/session', { signIn: signIn(w) })).json() as { token: string };
+  // The address in the body is ignored: the signed-in wallet is the wallet.
+  assert.equal((await post(app, '/api/vs/feedback', { message: 'Hi from my wallet', wallet: WALLET }, auth(token))).statusCode, 200);
+  await settled();
+  assert.match(sent[0]!.text, new RegExp(`Wallet ${w.address} \\(signed in - proven\\)`));
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(token))).json() as { thread: { wallet: string }; messages: Array<{ text: string }> };
+  assert.equal(t.thread.wallet, w.address);
+  assert.deepEqual(t.messages.map((m) => m.text), ['Hi from my wallet']);
+  // Another wallet has its own (no) chat.
+  const { token: theirs } = (await post(app, '/api/vs/feedback/session', { signIn: signIn(newWallet()) })).json() as { token: string };
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(theirs))).statusCode, 404);
+  // Screenshots under the wallet.
+  const up = (await upload(app, png(), token)).json() as { id: string };
+  await post(app, '/api/vs/feedback', { message: 'with a picture', images: [up.id] }, auth(token));
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${up.id}`, headers: auth(token) })).statusCode, 200);
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${up.id}`, headers: auth(theirs) })).statusCode, 404);
+});
+
+test("attach: a browser's chat moves onto the wallet; then the token alone opens nothing but its reply count", async () => {
+  const { app, store, sent, settled } = await appFor();
+  const w = newWallet();
+  await post(app, '/api/vs/feedback', { message: 'before I connected' }, auth(TOKEN_A));
+  const shot = (await upload(app, png(), TOKEN_A)).json() as { id: string };
+  await post(app, '/api/vs/feedback', { message: 'a picture', images: [shot.id] }, auth(TOKEN_A));
+  await settled();
+  store.addOwnerReply(sent[0]!.id, 'We are on it', 999);
+  const a = (await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_A })).json() as { token: string; attached: string };
+  assert.equal(a.attached, 'adopted');
+  await settled();
+  assert.match(sent.at(-1)!.text, /is now kept on wallet/);
+  // The token: locked everywhere...
+  for (const r of [
+    await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A)),
+    await post(app, '/api/vs/feedback', { message: 'sneaky' }, auth(TOKEN_A)),
+    await upload(app, png(), TOKEN_A),
+  ]) {
+    assert.equal(r.statusCode, 401);
+    assert.equal((r.json() as { code: string }).code, 'wallet');
+  }
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${shot.id}`, headers: auth(TOKEN_A) })).statusCode, 404);
+  // ...but the bell still learns there is a reply, and the wallet session sees it too.
+  const poll = (await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A] }, auth(a.token))).json() as { threads: Array<{ owner: number }>; wallet: { owner: number } };
+  assert.deepEqual([poll.threads[0]!.owner, poll.wallet.owner], [1, 1]);
+  assert.ok(!('wallet' in ((await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A] })).json() as object)), 'no session, no wallet summary');
+  // The wallet reads all of it, screenshots included.
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(a.token))).json() as { messages: Array<{ from: string; text: string }> };
+  assert.deepEqual(t.messages.map((m) => m.text), ['before I connected', 'a picture', 'We are on it']);
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${shot.id}`, headers: auth(a.token) })).statusCode, 200);
+  // Another wallet cannot take it.
+  const b = (await post(app, '/api/vs/feedback/session', { signIn: signIn(newWallet()), attach: TOKEN_A })).json() as { attached: string };
+  assert.equal(b.attached, 'other');
+  assert.equal(((await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_A })).json() as { attached: string }).attached, 'same');
+});
+
+test("attach: a second browser's chat merges into the wallet's - one conversation; the owner's old chain still lands there", async () => {
+  const { app, store, sent, settled } = await appFor();
+  const w = newWallet();
+  await post(app, '/api/vs/feedback', { message: 'laptop' }, auth(TOKEN_A));
+  await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_A });
+  await post(app, '/api/vs/feedback', { message: 'phone' }, auth(TOKEN_B));
+  await settled();
+  const phoneTg = sent.find((s) => s.text.includes('phone'))!.id;
+  const m = (await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_B })).json() as { token: string; attached: string };
+  assert.equal(m.attached, 'merged');
+  await settled();
+  assert.match(sent.at(-1)!.text, /Thread #2 was signed in with wallet .* moved into thread #1/);
+  assert.notEqual(sent.at(-1)!.replyTo, null, "into the wallet chat's chain");
+  // The owner answers the phone's old message: it lands in the one chat.
+  store.addOwnerReply(phoneTg, 'Got both', 1234);
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(m.token))).json() as { thread: { id: number }; messages: Array<{ text: string }> };
+  assert.equal(t.thread.id, 1);
+  assert.deepEqual(t.messages.map((x) => x.text), ['laptop', 'phone', 'Got both']);
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_B))).statusCode, 401, "the phone's token is locked too");
+  assert.equal(((await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_B] })).json() as { threads: Array<{ owner: number }> }).threads[0]!.owner, 1);
+});
+
+test('limits: per chat as well as per address; the sign-in has its own', async () => {
+  let t = 1_800_000_000_000;
+  const limits = { ...REPORT_LIMITS, feedback: { max: 1000, windowMs: 60_000 }, feedbackThread: { max: 3, windowMs: 60 * 60_000 }, auth: { max: 2, windowMs: 60_000 } };
+  const { app } = await appFor({ limits, now: () => t });
+  for (let i = 0; i < 3; i++) assert.equal((await post(app, '/api/vs/feedback', { message: `m${i}` }, auth(TOKEN_A))).statusCode, 200);
+  assert.equal((await post(app, '/api/vs/feedback', { message: 'too many in this chat' }, auth(TOKEN_A))).statusCode, 429);
+  assert.equal((await post(app, '/api/vs/feedback', { message: 'another chat is fine' }, auth(TOKEN_B))).statusCode, 200);
+  t += 60 * 60_000;
+  assert.equal((await post(app, '/api/vs/feedback', { message: 'an hour later' }, auth(TOKEN_A))).statusCode, 200);
+  const w = newWallet();
+  await post(app, '/api/vs/feedback/session', { signIn: signIn(w, {}, t) });
+  await post(app, '/api/vs/feedback/session', { signIn: signIn(w, {}, t) });
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(w, {}, t) })).statusCode, 429);
+});
+
+test('storage: a feedback.db from before wallets is brought up to date in place, and survives a reopen', () => {
+  const dir = join(DIR, `migrate-${caseNo++}`);
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'feedback.db');
+  const old = new DatabaseSync(path);
+  old.exec(`CREATE TABLE threads (id INTEGER PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, category TEXT NOT NULL, wallet TEXT, created_at INTEGER NOT NULL, last_at INTEGER NOT NULL);
+    CREATE TABLE messages (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, sender TEXT NOT NULL, text TEXT NOT NULL, context TEXT, at INTEGER NOT NULL, tg_id INTEGER);`);
+  old.prepare('INSERT INTO threads (token_hash, category, wallet, created_at, last_at) VALUES (?, ?, NULL, 1, 1)').run(tokenHash(TOKEN_A), 'bug');
+  old.prepare("INSERT INTO messages (thread_id, sender, text, at) VALUES (1, 'user', 'old message', 1)").run();
+  old.close();
+  const s = new FeedbackStore(path);
+  const t = s.thread({ token: TOKEN_A });
+  assert.ok(t && t !== 'locked');
+  assert.deepEqual(s.messages(t.id).map((m) => [m.text, m.category, m.areas]), [['old message', null, []]]);
+  s.addUserMessage({ token: TOKEN_A }, { category: 'idea', text: 'new one', context: null, wallet: null, images: [] });
+  s.close();
+  const again = new FeedbackStore(path);
+  assert.equal(again.messages(1).length, 2);
+  assert.equal(again.attach(TOKEN_A, WALLET).result, 'adopted');
+  again.close();
 });

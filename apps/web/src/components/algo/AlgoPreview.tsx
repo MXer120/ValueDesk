@@ -7,6 +7,7 @@
 import type { AlgoPlan, AlgoSpec, PlannedChild } from '@copy-engine';
 import { fmtTime, fmtUsd } from '../../format';
 import { fmtDuration } from './menu';
+import { redWarnings } from './draft';
 import { AlgoStory, fmtP, fmtQ, type Level } from './AlgoStory';
 
 export type { Level } from './AlgoStory';
@@ -66,6 +67,7 @@ export function PlanPreview(p: PreviewProps) {
   // Orders that wait on the book at their price (a ladder, an iceberg's clips); an IOC or a market order goes at once.
   const resting = spec?.kind === 'scale' || spec?.kind === 'iceberg' || spec?.kind === 'chase';
   const rows = rowsOf(plan);
+  const red = redWarnings(plan);
   const timed = rows.filter((c) => c.qty > 0);
   const notional = plan.notional;
   const taker = notional ? notional * p.rates.taker : null;
@@ -170,7 +172,7 @@ export function PlanPreview(p: PreviewProps) {
         <p key={e} className="oe-hint algo-err">{e}</p>
       ))}
       {plan.warnings.map((w) => (
-        <p key={w} className="oe-hint algo-warn">{w}</p>
+        <p key={w} className={`oe-hint ${red.has(w) ? 'algo-err' : 'algo-warn'}`}>{w}</p>
       ))}
     </div>
   );

@@ -173,9 +173,24 @@ export function logoDomain(v: unknown): string | null {
 }
 
 /**
- * A site's icon - DuckDuckGo's icon service, else Google's, else the site's own
- * /favicon.ico - kept a day per site; null when none has one. Read here so the
- * browser asks only this origin.
+ * Where a site's icon is asked for: DuckDuckGo's icon service, then Google's. Never
+ * the site itself: the domain is whatever a visitor puts in the query, and a fetch of
+ * https://<domain>/ (with its redirects followed) would let anyone make this server
+ * call any host - 127-0-0-1.sslip.io is this server's own loopback, a redirect can
+ * point at a private address. The two services fetch the site's icon themselves.
+ */
+export const logoSources = (domain: string): string[] => [
+  `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+  `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
+];
+
+/** The image types a logo may be served as: raster only. An SVG can carry script, and it would be served from the site's own origin. */
+const LOGO_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/x-icon', 'image/gif', 'image/jpeg', 'image/webp']);
+
+/**
+ * A site's icon - DuckDuckGo's icon service, else Google's (logoSources) - kept a
+ * day per site; null when none has one. Read here so the browser asks only this
+ * origin. Raster images only (LOGO_TYPES).
  */
 export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch): Promise<{ type: string; body: Buffer | null }> {
   const hit = logos.get(domain);
@@ -184,9 +199,9 @@ export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch):
   if (!flight) {
     flight = (async () => {
       let got: { type: string; body: Buffer | null } = { type: 'image/x-icon', body: null };
-      // DuckDuckGo's icon service, then Google's (a 404 there is its "no icon" globe), then the
-      // site's own - all asked at once, the first in that order that has one kept, so a slow or
-      // missing one costs no more than the slowest answer.
+      // DuckDuckGo's icon service, then Google's (a 404 there is its "no icon" globe) - both
+      // asked at once, the first in that order that has one kept, so a slow or missing one
+      // costs no more than the slowest answer.
       const one = async (url: string): Promise<{ type: string; body: Buffer } | null> => {
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 4_000);
@@ -196,7 +211,7 @@ export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch):
           const buf = Buffer.from(await res.arrayBuffer());
           // The type the bytes are, not the one the service says (some label .ico files PNG).
           const type = imageType(buf);
-          return type && buf.length > 0 && buf.length < 200_000 ? { type, body: buf } : null;
+          return type && LOGO_TYPES.has(type) && buf.length > 0 && buf.length < 200_000 ? { type, body: buf } : null;
         } catch {
           // The next one, or no icon: the widget shows the source's initial.
           return null;
@@ -204,11 +219,7 @@ export async function siteLogo(domain: string, fetchImpl: typeof fetch = fetch):
           clearTimeout(timer);
         }
       };
-      const tries = [
-        `https://icons.duckduckgo.com/ip3/${domain}.ico`,
-        `https://www.google.com/s2/favicons?domain=${domain}&sz=64`,
-        `https://${domain}/favicon.ico`,
-      ].map(one);
+      const tries = logoSources(domain).map(one);
       for (const t of tries) {
         const hit = await t;
         if (hit) { got = hit; break; }

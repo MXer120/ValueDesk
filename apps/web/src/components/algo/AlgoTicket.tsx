@@ -79,8 +79,10 @@ import {
   hasRandomize,
   legs,
   loadDraft,
+  marketOf,
   n,
   offersExits,
+  redWarnings,
   opt,
   POV_PRESETS,
   povPreset,
@@ -111,32 +113,10 @@ import { SlideConfirm } from './SlideConfirm';
 import '../SettingsMenu.css';
 import './algo.css';
 
-export { draftToSpec, offersExits, type TicketShared } from './draft';
+export { draftToSpec, marketOf, offersExits, type TicketShared } from './draft';
 
 /** A price level as the preview shows it (SoDEX snaps it to the tick when it is placed). */
 const fmtLevel = (x: number): string => x.toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) >= 1000 ? 1 : Math.abs(x) >= 1 ? 4 : 6 });
-
-/** A Symbol from the app's market list, as the engine's MarketInfo. */
-export function marketOf(sym: MarketSymbol): MarketInfo {
-  return {
-    id: sym.id,
-    name: sym.name,
-    base: sym.baseCoin,
-    tickSize: sym.tickSize,
-    stepSize: sym.stepSize,
-    minQuantity: sym.minQuantity || sym.stepSize,
-    maxQuantity: sym.maxQuantity ?? '0',
-    marketMaxQuantity: sym.marketMaxQuantity ?? null,
-    minNotional: Number(sym.minNotional) > 0 ? Number(sym.minNotional) : 10,
-    maxNotional: Number(sym.maxNotional) > 0 ? Number(sym.maxNotional) : null,
-    maxLeverage: sym.maxLeverage ?? 1,
-    buyLimitUpRatio: 0.05,
-    sellLimitDownRatio: 0.05,
-    takerFee: Number(sym.takerFee) || 0.0004,
-    ...(Number.isFinite(Number(sym.makerFee)) && sym.makerFee !== '' ? { makerFee: Number(sym.makerFee) } : {}),
-    status: 'TRADING',
-  };
-}
 
 /** The spec fields whose errors a kind shows under its own inline fields (the rest go under the preview). */
 const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
@@ -439,6 +419,19 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
     }
   });
   const own = sodexRef?.symbol === p.symbol ? sodexRef : null;
+  // The market's open interest (SoDEX's markPrice stream), for its cap: kept only when it moves by 0.1%, so the ticket does not redraw on every update.
+  const [oiNow, setOiNow] = useState<{ symbol: string; oi: number } | null>(null);
+  const capped = !!(p.sym?.openInterestCap || p.sym?.openInterestCapUSD);
+  useChannel('perps', capped ? { channel: 'markPrice', symbols: [p.symbol] } : null, (data) => {
+    const rows: unknown[] = Array.isArray(data) ? data : [data];
+    for (const r of rows) {
+      if (pick<string>(r, 's', 'symbol') !== p.symbol) continue;
+      const v = num(pick(r, 'oi', 'openInterest'));
+      if (!(v >= 0)) continue;
+      setOiNow((x) => (x && x.symbol === p.symbol && Math.abs(x.oi - v) <= x.oi * 0.001 ? x : { symbol: p.symbol, oi: v }));
+    }
+  });
+  const oi = oiNow?.symbol === p.symbol ? oiNow.oi : null;
   // Fill fast's oracle over its venues; a slice's slippage measured from the oracle uses every venue (as the engine does).
   const sweepOracle = ek === 'sweep' && (d.sweepRef === 'oracleMid' || d.sweepRef === 'oracleFair');
   const slipOracle = ek !== 'sweep' && advOpen && (d.slipFrom === 'oracleMid' || d.slipFrom === 'oracleFair');
@@ -479,8 +472,8 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   // The Preview's live pictures: recent prices behind it, and Fill fast's book against its reference.
   const history = useHistory(p.symbol, advOpen && ek !== 'sweep' && ek !== 'basket');
   const plan: AlgoPlan | null = useMemo(
-    () => (check.spec && market ? planAlgo(check.spec, market, { now: clock, price: planPx, seed, profile, hourVolume }) : null),
-    [check.spec, market, clock, planPx, seed, profile, hourVolume],
+    () => (check.spec && market ? planAlgo(check.spec, market, { now: clock, price: planPx, seed, profile, hourVolume, positionSize: p.positionQty ?? null, oi }) : null),
+    [check.spec, market, clock, planPx, seed, profile, hourVolume, p.positionQty, oi],
   );
   // VWAP's picture: the usual volume in each of the 24 hours from a little before it starts - for each, the
   // median of the same hour on past days of the same kind (weekdays with weekdays, weekends with weekends),
@@ -764,14 +757,16 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const said = useRef(new Set<string>());
   // Nothing to say before the amount is in: the empty field speaks for itself.
   const tell = amountMissing ? null : restErrors[0] || (!allErrors.length && plan?.warnings[0]) || null;
+  // An order that would hit SoDEX's open-interest cap is said in red, not amber.
+  const tellRed = !!tell && (restErrors[0] === tell || redWarnings(plan).has(tell));
   useEffect(() => {
     if (!tell || said.current.has(tell)) return;
     const t = window.setTimeout(() => {
       said.current.add(tell);
-      notify('warn', tell);
+      notify(tellRed ? 'error' : 'warn', tell);
     }, 1_500);
     return () => window.clearTimeout(t);
-  }, [tell]);
+  }, [tell, tellRed]);
 
   const ticketFields = (
         <div className="algo-fields">
@@ -2427,7 +2422,7 @@ function Review({ spec, plan, kind, place, location }: { spec: AlgoSpec; plan: A
         ))}
       </dl>
       {plan.warnings.map((w) => (
-        <p key={w} className="oe-hint algo-warn">{w}</p>
+        <p key={w} className={`oe-hint ${redWarnings(plan).has(w) ? 'algo-err' : 'algo-warn'}`}>{w}</p>
       ))}
     </div>
   );

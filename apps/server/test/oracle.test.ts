@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import Fastify from 'fastify';
 import { ORACLE_VENUES, OracleFeed, combineOracle, type FetchLike, type VenueQuote } from '../src/valuescan/oracle.js';
-import { oracleRoutes, parseOracleQuery } from '../src/routes/oracle.js';
+import { coinsOfSymbols, listedCoins, oracleRoutes, parseOracleQuery } from '../src/routes/oracle.js';
 
 const MARKER = '// ---- shared with apps/server/src/valuescan/oracle.ts below this line ----\n';
 const below = (url: URL) => {
@@ -51,7 +51,7 @@ test('the route answers every caller from one read per venue and coin a second',
     },
   });
   const app = Fastify();
-  oracleRoutes(app, feed);
+  oracleRoutes(app, feed, async () => null);
   const get = async (url: string) => (await app.inject({ method: 'GET', url })).json();
   const a = await get('/api/vs/oracle?coin=BTC&venues=bybit,okx');
   assert.equal(a.ok, true);
@@ -74,5 +74,45 @@ test('the route answers every caller from one read per venue and coin a second',
   assert.equal(reads.filter((r) => r === 'okx:BTC').length, 2);
   const bad = await app.inject({ method: 'GET', url: '/api/vs/oracle?coin=BTC&venues=nope' });
   assert.equal(bad.statusCode, 400);
+  await app.close();
+});
+
+test("only SoDEX's coins: a made-up coin is a 404 and never reaches a venue; the list is re-read every 10 minutes, and while SoDEX cannot be read every coin is answered", async () => {
+  assert.deepEqual(coinsOfSymbols({ data: [{ name: 'BTC-USD' }, { name: 'vMEMEssi_vUSDC', displayName: 'MEMEssi/USDC' }, { name: 'x y' }] }), ['BTC', 'MEMESSI']);
+  let t = 0;
+  let calls = 0;
+  let fail = false;
+  const listed = listedCoins(async () => {
+    calls++;
+    if (fail) throw new Error('down');
+    return [{ data: [{ name: 'BTC-USD' }, { name: 'ETH-USD' }] }];
+  }, () => t);
+  assert.deepEqual([...((await listed()) ?? [])], ['BTC', 'ETH']);
+  await listed();
+  assert.equal(calls, 1, 'one read within 10 minutes');
+  t += 600_000;
+  fail = true;
+  assert.ok((await listed())?.has('BTC'), 'a failed re-read keeps the last list');
+  assert.equal(calls, 2);
+  const none = listedCoins(async () => {
+    throw new Error('down');
+  });
+  assert.equal(await none(), null, 'no list yet: unknown, not empty');
+
+  const reads: string[] = [];
+  const feed = new OracleFeed({
+    fetch: (async () => ({ ok: true, status: 200, text: async () => '{}' })) as FetchLike,
+    read: async (_f, venue, coin) => {
+      reads.push(`${venue}:${coin}`);
+      return { venue, bid: 99, ask: 101, mid: 100, mark: null, at: Date.now() };
+    },
+  });
+  const app = Fastify();
+  oracleRoutes(app, feed, async () => new Set(['BTC']));
+  const made = await app.inject({ method: 'GET', url: '/api/vs/oracle?coin=NOTACOIN&venues=okx' });
+  assert.equal(made.statusCode, 404);
+  assert.deepEqual(reads, []);
+  const btc = await app.inject({ method: 'GET', url: '/api/vs/oracle?coin=BTC&venues=okx' });
+  assert.equal(btc.json().ok, true);
   await app.close();
 });

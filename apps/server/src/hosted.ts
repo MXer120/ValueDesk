@@ -114,10 +114,12 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // SoSoValue news. The process caches the page (valuescan/sosovalue/news.ts);
   // without SOSOVALUE_API_KEY the route answers not_available.
   { method: 'GET', url: '/api/vs/news', cls: 'read' },
-  // Other news sources' RSS feeds (valuescan/feeds.ts), each read at most every 5 minutes, and
-  // their sites' icons, kept a day: cached reads, whoever asks.
+  // Other news sources' RSS feeds (valuescan/feeds.ts), each read at most every 5 minutes: cached
+  // reads, whoever asks.
   { method: 'GET', url: '/api/vs/news/sources', cls: 'read' },
-  { method: 'GET', url: '/api/vs/logo', cls: 'read' },
+  // A site's icon, kept a day per site - but the site is the caller's choice, and each new one is
+  // two requests to the icon services from this server's address: upstream.
+  { method: 'GET', url: '/api/vs/logo', cls: 'upstream' },
   // The economic calendar: the Fed's, BLS's and BEA's public calendars and
   // SoSoValue's, each read at most twice a day (valuescan/calendar.ts).
   { method: 'GET', url: '/api/vs/calendar', cls: 'read' },
@@ -135,8 +137,10 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // SoSoValue's US spot ETF flows (valuescan/sosovalue/etf.ts), on the news key's budget, cached
   // 30 minutes per asset; not_available without SOSOVALUE_API_KEY.
   { method: 'GET', url: '/api/vs/etf/flows', cls: 'read' },
-  // The shared price oracle (routes/oracle.ts): every caller shares one read per venue and coin a second.
-  { method: 'GET', url: '/api/vs/oracle', cls: 'read' },
+  // The shared price oracle (routes/oracle.ts): every caller shares one read per venue and coin a second -
+  // but the coin is the caller's choice, and each coin not read this second is up to 19 venue requests
+  // from this server's address: upstream (a ticket's poll, every 2 s, is 30 a minute).
+  { method: 'GET', url: '/api/vs/oracle', cls: 'upstream' },
   // The Live Feed's stream lookup: one cached read of a YouTube channel's /live
   // page per channel (valuescan/youtube/live.ts); upstream, since a new channel is a fetch.
   { method: 'GET', url: '/api/vs/live', cls: 'upstream' },
@@ -145,6 +149,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/lbrow', cls: 'read' },
   // The public status page (routes/status.ts, ops/status.ts): one report for everyone, rebuilt at most every 30 s.
   { method: 'GET', url: '/api/vs/status', cls: 'read' },
+  { method: 'GET', url: '/api/vs/status/feed', cls: 'read' },
   // What a visitor sends the owner (routes/reports.ts): the feedback form and client error reports.
   // POSTs, so the site's exact Origin; `write` here, and much tighter limits of their own in the route.
   // Feedback is a chat (ops/feedbackThreads.ts): a screenshot's upload, the thread, the poll for the owner's
@@ -154,6 +159,8 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/feedback/thread', cls: 'write' },
   { method: 'POST', url: '/api/vs/feedback/poll', cls: 'write' },
   { method: 'GET', url: '/api/vs/feedback/image', cls: 'read' },
+  // A wallet's signature for its feedback chat (ops/feedbackAuth.ts), like the folders' sign-in.
+  { method: 'POST', url: '/api/vs/feedback/session', cls: 'auth' },
   { method: 'POST', url: '/api/vs/client-errors', cls: 'write' },
   // The builder fee a wallet owes, signed (routes/builder.ts, docs/BUILDER-TIERS.md §3). Asking is a
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
@@ -511,7 +518,9 @@ export function limitsFor(
   if (route.cls === 'auth') {
     return [
       { key: `auth|${who}`, limit: limits.auth },
-      { key: 'auth|*', limit: limits.authGlobal },
+      // Each sign-in its own global budget: a flood of bad signatures on the feedback
+      // sign-in cannot lock the owner out of the folders one (security pass 2026-10-27).
+      { key: `auth|*|${route.url}`, limit: limits.authGlobal },
     ];
   }
   if (route.cls === 'write') {

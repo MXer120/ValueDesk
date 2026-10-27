@@ -201,6 +201,10 @@ test('boards may be reused for ten seconds, and for twenty more while a cache fe
   for (const route of ['/api/vs/whales', '/api/vs/positioning']) assert.equal(CACHE_POLICIES[route]!.cacheControl, 'public, no-cache', route);
 });
 
+test('the maintenance flag may be shared for ten seconds, without a stale copy after that', () => {
+  assert.equal(CACHE_POLICIES['/api/external/maintenance/status']!.cacheControl, 'public, max-age=10');
+});
+
 test('a failure answered as 200 {ok:false} on an index route is not cacheable and gets no ETag', async () => {
   const app = Fastify();
   await app.register(perfPlugin);
