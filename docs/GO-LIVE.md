@@ -52,7 +52,7 @@ Status: 2026-10-27. An item is ticked only when it holds on the production site.
       server 1. The bot must have no webhook set (getUpdates is refused while one is), and
       no other process may poll the same bot (local dev polls only with
       `VALUESCAN_FEEDBACK_REPLIES=1`).
-- [ ] **The Discord link.** When the server exists: set `VITE_FEEDBACK_URL` to the
+- [x] **The Discord link** (https://discord.gg/TVJKHY9vhK, 2026-10-28): `VITE_FEEDBACK_URL` set to the
       invite (https) in `deploy/vercel/production.settings`, and add the name to
       `VITE_VARS` in `deploy/release/build-web.sh` and to `deploy/release/web.env.example`
       (the build refuses a `VITE_*` name it does not control). Until then the form's
