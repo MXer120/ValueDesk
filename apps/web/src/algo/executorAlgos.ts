@@ -8,6 +8,7 @@
  * set up; it adds two signed instructions, 'algo-start' (the spec, as the
  * wallet shows it) and 'algo-action' (pause / resume / cancel / cancel all).
  */
+import { requirePaperAlgo } from './liveAlgos';
 import type { AlgoEvent, AlgoView } from '@copy-engine';
 import { ExecutorClient, ExecutorError, hostedExecutor, selfBase, signCopy } from '../copy/executor';
 import { requireTermsOrThrow } from '../legal/acceptance';
@@ -78,6 +79,7 @@ async function call<T>(client: ExecutorClient, method: 'GET' | 'POST', path: str
 
 /** Start an algo on an executor: one wallet signature over the spec. */
 export async function startOn(mode: ExecutorMode, spec: unknown, seed: number): Promise<AlgoView> {
+  requirePaperAlgo(spec);
   const { owner, provider } = needWallet();
   const client = clientFor(mode);
   const info = getLiveCopy()[mode].info;

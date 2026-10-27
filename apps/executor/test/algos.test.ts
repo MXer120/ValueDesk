@@ -72,8 +72,8 @@ test('algos: a signed start runs the spec it names, kept as the wallet signed it
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, slices: 0 }, seed: 7 }), ctx)), '400:spec');
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: TWAP, seed: -1 }), ctx)), '400:seed');
   assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, symbol: 'NOPE-USD' }, seed: 7 }), ctx)), '400:algo');
-  // A live one needs this executor's key registered on SoDEX.
-  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, paper: false }, seed: 7 }), ctx)), '412:key');
+  // A live one is refused while real algo orders are off.
+  assert.equal(await code(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, paper: false }, seed: 7 }), ctx)), '403:paper-only');
   const v = await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: TWAP, seed: 7 }), ctx);
   assert.equal(v.algo.owner, w.address);
   assert.equal(v.algo.seed, 7);

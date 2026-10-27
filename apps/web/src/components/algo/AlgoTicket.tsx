@@ -23,6 +23,7 @@
  *
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
+import { LIVE_ALGOS, LIVE_ALGOS_OFF } from '../../algo/liveAlgos';
 import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import {
   ALGO_NAMES,
@@ -529,9 +530,11 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const copy = useSyncExternalStore(subscribeLiveCopy, getLiveCopy, getLiveCopy);
   const walletFree = place === 'browser' && d.paper;
   const where =
-    place === 'browser'
+    !d.paper && !LIVE_ALGOS
+      ? { ready: false, why: LIVE_ALGOS_OFF }
+      : place === 'browser'
       ? !p.address && !d.paper ? { ready: false, why: 'Connect a wallet to run it live, or turn on Practice run in Advanced.' } : { ready: true, why: null }
-      : executorReady(place, d.paper);
+        : executorReady(place, d.paper);
   const execFee = place === 'browser' ? null : copy[place].info?.builder?.ladder?.[0]?.fee ?? null;
   const feeFraction = place === 'browser' ? p.builderFee : (execFee ?? 0) / 100_000;
   const ready = !!market && !amountMissing && !!check.spec && !!plan && !plan.errors.length && where.ready;
@@ -902,51 +905,51 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
         </div>
   );
   // The window's last section: what it will do, every order it sends, and the slide that places it.
-  const real = p.network === 'mainnet' && !d.paper;
   const kids = plan ? (plan.schedule?.length ? plan.schedule : plan.children).filter((c) => c.qty > 0) : [];
   const verbWord = p.side === 'buy' ? 'buy' : 'sell';
   const sizeWords = plan?.total ? `${fmtQty(plan.total, p.sym?.stepSize)} ${base}` : '';
+  const kidUsd = (c: PlannedChild) => c.usd ?? c.qty * (c.price ?? mid ?? 0);
   const summaryNode = (
-    <section className="algo-group algo-summary" aria-label="Summary">
+    <section className={`algo-group algo-summary is-${d.paper ? 'paper' : p.side}`} aria-label="Summary">
       {check.spec && plan ? (
         <>
-          <div className="algo-sum__lead">
-            <AlgoIcon kind={kind} size={22} />
-            <p>
+          <header className="algo-sum__lead">
+            <span className="algo-sum__mark" aria-hidden="true"><AlgoIcon kind={kind} size={18} /></span>
+            <div>
               <strong>{oneLine(kind, d, p.side, p.quantity, base)}</strong>
               {planFacts(plan, pk) && <span>{planFacts(plan, pk)}</span>}
-            </p>
-          </div>
-          <div className="algo-sum__tiles">
+            </div>
+            {d.paper && <span className="algo-practice">Practice</span>}
+          </header>
+          <dl className="algo-sum__stats">
             {plan.total !== null && (
-              <div><span>Size</span><b>{sizeWords}</b>{plan.notional ? <small>{fmtUsd(plan.notional, 2)}</small> : null}</div>
+              <div><dt>Size</dt><dd>{sizeWords}</dd>{plan.notional ? <small>{fmtUsd(plan.notional, 2)}</small> : null}</div>
             )}
-            {kids.length > 0 && <div><span>Orders</span><b>{kids.length}</b><small>{plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}` : kids.some((c) => c.price !== null) ? 'resting at their prices' : 'as it goes'}</small></div>}
-            {plan.avgPrice && <div><span>Avg if all fill</span><b>{fmtLevel(plan.avgPrice)}</b><small>USD</small></div>}
-            {plan.notional ? <div><span>Fees</span><b>{fmtUsd(plan.notional * rates.maker, 2)}–{fmtUsd(plan.notional * rates.taker, 2)}</b><small>resting – taking</small></div> : null}
-          </div>
-          <div className="stg__card algo-sumcard">
+            {kids.length > 0 && <div><dt>Orders</dt><dd>{kids.length}</dd><small>{plan.endsAt ? `over ${fmtDuration(plan.endsAt - plan.startsAt)}` : kids.some((c) => c.price !== null) ? 'resting at their prices' : 'as it goes'}</small></div>}
+            {plan.avgPrice && <div><dt>Avg if all fill</dt><dd>{fmtLevel(plan.avgPrice)}</dd><small>USD</small></div>}
+            {plan.notional ? <div><dt>Fees</dt><dd>{fmtUsd(plan.notional * rates.maker, 2)}–{fmtUsd(plan.notional * rates.taker, 2)}</dd><small>resting – taking</small></div> : null}
+          </dl>
+          <div className="algo-sum__block">
+            <h4>Details</h4>
             <Review spec={check.spec} plan={plan} kind={kind} feeRates={rates} place={place} location={place === 'browser' ? null : copy[place].info?.location ?? null} />
           </div>
           {kids.length > 0 && (
-            <div className="stg__card algo-sumkids">
-              <table>
+            <div className="algo-sum__block">
+              <h4>{kids.length > 1 ? `Every order · ${kids.length}` : 'The order'}</h4>
+              <table className="algo-sumkids">
                 <thead>
-                  <tr><th>Order</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
+                  <tr><th>#</th><th>When</th><th>Price</th><th>Size ({base})</th><th>USD</th></tr>
                 </thead>
                 <tbody>
-                  {kids.map((c, i) => {
-                    const px = c.price ?? mid ?? null;
-                    return (
-                      <tr key={i}>
-                        <td>{i + 1}</td>
-                        <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
-                        <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
-                        <td>{fmtQty(c.qty, p.sym?.stepSize)}</td>
-                        <td>{c.usd !== undefined ? fmtUsd(c.usd, 2) : px ? fmtUsd(c.qty * px, 2) : DASH}</td>
-                      </tr>
-                    );
-                  })}
+                  {kids.map((c, i) => (
+                    <tr key={i}>
+                      <td>{i + 1}</td>
+                      <td>{c.at ? fmtTime(c.at) : c.price !== null ? 'when reached' : 'at once'}</td>
+                      <td>{c.price !== null ? fmtLevel(c.price) : 'best price'}</td>
+                      <td className="is-size">{fmtQty(c.qty, p.sym?.stepSize)}</td>
+                      <td>{c.usd !== undefined || c.price !== null || mid ? fmtUsd(kidUsd(c), 2) : DASH}</td>
+                    </tr>
+                  ))}
                 </tbody>
                 {kids.length > 1 && (
                   <tfoot>
@@ -954,20 +957,15 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                       <td colSpan={2}>Total</td>
                       <td>{plan.avgPrice ? `avg ${fmtLevel(plan.avgPrice)}` : ''}</td>
                       <td>{fmtQty(kids.reduce((a, c) => a + c.qty, 0), p.sym?.stepSize)}</td>
-                      <td>{fmtUsd(kids.reduce((a, c) => a + (c.usd ?? c.qty * (c.price ?? mid ?? 0)), 0), 2)}</td>
+                      <td>{fmtUsd(kids.reduce((a, c) => a + kidUsd(c), 0), 2)}</td>
                     </tr>
                   </tfoot>
                 )}
               </table>
             </div>
           )}
-          {changes.length > 0 && <p className="stg__note">Changed from the defaults: {changes.join(', ')}.</p>}
-          <div className={`algo-sum__go${real ? ' is-real' : ''}`}>
-            <p>
-              {d.paper
-                ? 'Practice run: let go at the end and it starts against the live market. Nothing is sent, nothing is bought.'
-                : `Let go at the end and it starts${real ? ' with real funds' : ''}: ${kids.length > 1 ? `all ${kids.length} orders above are` : 'the order above is'} placed as planned and ${kids.length > 1 ? verbWord : `${verbWord}s`} ${sizeWords || 'the amount'} for you as the market reaches ${kids.length > 1 ? 'them' : 'it'}. What has not filled can be cancelled any time in the Algos tab.`}
-            </p>
+          {changes.length > 0 && <p className="algo-sum__changes">Changed from the defaults: {changes.join(', ')}.</p>}
+          <div className="algo-sum__go">
             <SlideConfirm
               label={d.paper ? `Slide to start the practice ${verbWord}` : `Slide to ${verbWord} ${sizeWords}`.trim()}
               tone={d.paper ? 'paper' : p.side}
@@ -975,7 +973,14 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
               busy={busy}
               onConfirm={() => void launch()}
             />
-            {!ready && (why || where.why) && <p className="oe-hint algo-ferr">{why ?? where.why}</p>}
+            {!ready && (why || where.why) && (
+              <p className="algo-sum__why">
+                {why ?? where.why}
+                {!d.paper && !LIVE_ALGOS && (
+                  <button type="button" className="acctf-view" onClick={() => set({ paper: true })}>Turn on Practice run</button>
+                )}
+              </p>
+            )}
           </div>
         </>
       ) : (
@@ -2329,14 +2334,13 @@ function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string,
   }
 }
 
-function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: AlgoSpec; plan: AlgoPlan; kind: UiKind; feeRates: Rates; place: Place; location: string | null }) {
+// Size, orders and fees stand in the Summary's numbers above it.
+function Review({ spec, plan, kind, place, location }: { spec: AlgoSpec; plan: AlgoPlan; kind: UiKind; feeRates: Rates; place: Place; location: string | null }) {
   const rows: Array<[string, string]> = [
     ['Order', spec.kind === 'basket' ? `${menuName(kind)} of ${spec.legs.length} markets, ${fmtUsd(plan.notional ?? 0, 2)} in all` : `${menuName(kind)} ${spec.side === 'buy' ? 'buy / long' : 'sell / short'} on ${spec.symbol}`],
   ];
-  if (plan.total !== null) rows.push(['Size', `${plan.total} ${spec.symbol.replace(/-USD$/, '')}${plan.notional ? ` (${fmtUsd(plan.notional, 2)})` : ''}`]);
   if (spec.kind === 'dca') rows.push(['Spend', `${spec.orders} × ${fmtUsd(spec.perOrderUsd, 2)}${spec.maxTotalUsd ? `, at most ${fmtUsd(spec.maxTotalUsd, 2)}` : ''}`]);
   if (spec.kind === 'sweep') rows.push(['Reference', `${sweepRefWords(spec)}, at most ${(spec.slippageBps / 100).toFixed(2)}% from it`]);
-  if (plan.children.length && spec.kind !== 'conditional' && spec.kind !== 'trailing' && spec.kind !== 'chase' && spec.kind !== 'basket') rows.push(['Children', String(plan.children.filter((c) => c.qty > 0).length)]);
   if (plan.endsAt) rows.push(['Until', `${fmtTime(plan.endsAt)} (${fmtDuration(plan.endsAt - plan.startsAt)})`]);
   if (spec.startAt) rows.push(['Starts', fmtTime(spec.startAt)]);
   if (spec.triggerPrice) rows.push(['Starts when the mark reaches', String(spec.triggerPrice)]);
@@ -2351,7 +2355,6 @@ function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: Algo
     rows.push(['Exits', `take-profit ${f(plan.exits.tp)}, stop-loss ${f(plan.exits.sl)} - SoDEX position stops on the mark, resized as it fills; one fills, the other is cancelled`]);
   }
   if (spec.reduceOnly) rows.push(['Reduce only', 'yes']);
-  if (plan.notional) rows.push(['Fees', `${fmtUsd(plan.notional * r.maker, 2)} (all resting) to ${fmtUsd(plan.notional * r.taker, 2)} (all taking)`]);
   rows.push([
     'Runs',
     place === 'hosted'
@@ -2375,7 +2378,6 @@ function Review({ spec, plan, kind, feeRates: r, place, location }: { spec: Algo
       {plan.warnings.map((w) => (
         <p key={w} className="oe-hint algo-warn">{w}</p>
       ))}
-      <p className="oe-hint">You can pause or cancel it any time in the Algos tab; what has filled stays filled. {ALGO_NAMES[spec.kind]} child orders also show in your open orders and can be cancelled there.</p>
     </div>
   );
 }

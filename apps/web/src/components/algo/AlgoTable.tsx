@@ -260,21 +260,21 @@ function Card({ v, place, onActed }: { v: AlgoView; place: Place; onActed?: () =
           <span className={arr.cls} title="Average fill against the mid when it started; positive is better for you">vs arrival {arr.text}</span>
         </span>
         <span className="algo-card__acts" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="oe-mini" onClick={() => setWin(true)} title="Open it in its own window: the live chart, every order and the log">
+          <button type="button" className="algo-btn" onClick={() => setWin(true)} title="Open it in its own window: the live chart, every order and the log">
             Open
           </button>
           {live && a.status !== 'paused' && (
-            <button type="button" className="oe-mini" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">
+            <button type="button" className="algo-btn" onClick={() => doAct('pause')} title="Pause: its resting children are pulled; nothing new is sent">
               Pause
             </button>
           )}
           {a.status === 'paused' && (
-            <button type="button" className="oe-mini" onClick={() => doAct('resume')}>
+            <button type="button" className="algo-btn" onClick={() => doAct('resume')}>
               Resume
             </button>
           )}
           {live && (
-            <button type="button" className="oe-mini" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled on SoDEX; what filled stays filled">
+            <button type="button" className="algo-btn is-danger" onClick={() => doAct('cancel')} title="Cancel: resting children are cancelled on SoDEX; what filled stays filled">
               Cancel
             </button>
           )}
@@ -348,7 +348,7 @@ export default function AlgoTable({ address }: { address: string | null }) {
               : livePlaces[0] ? ` on ${PLACE_WORD[livePlaces[0]]}` : ''}
         </span>
         {live.length > 0 && (
-          <button type="button" className="oe-mini" onClick={() => void cancelAll()} title="Cancel every running algo, wherever it runs, and pull its resting children (an executor asks for one wallet signature)">
+          <button type="button" className="algo-btn is-danger" onClick={() => void cancelAll()} title="Cancel every running algo, wherever it runs, and pull its resting children (an executor asks for one wallet signature)">
             Cancel all
           </button>
         )}

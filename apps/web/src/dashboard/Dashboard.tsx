@@ -133,7 +133,7 @@ function useBox(): [RefObject<HTMLDivElement>, Box] {
 export function Dashboard<C>({ config, panels, context, className }: DashboardProps<C>) {
   const [scrollRef, box] = useBox();
   const [saved, setSaved] = useState<SavedDashboard>(() => {
-    const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: false };
+    const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: true };
     // The shipped terminals (Trade, News) join a record once; written below.
     return config.terminals ? seedTerminals(base, config.terminals) : base;
   });

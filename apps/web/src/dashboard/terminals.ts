@@ -48,7 +48,7 @@ export function registerTerminals(h: Handler): () => void {
 }
 
 function stored(config: DashboardConfig): SavedDashboard {
-  const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: false };
+  const base = loadDashboard(config) ?? { v: config.version, layouts: {}, locked: true };
   return seedTerminals(base, config.terminals ?? []);
 }
 

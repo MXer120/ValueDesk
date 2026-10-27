@@ -69,6 +69,9 @@ import type { ExecutorConfig } from './config.ts';
 import type { ExecutorDb, KeyRow } from './db.ts';
 import type { Secrets } from './secrets.ts';
 
+/** Real algo orders are switched off for now: only practice runs start here. */
+const LIVE_ALGOS = false;
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -552,6 +555,7 @@ export class ExecutorService {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
     const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
     if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, 'limit', `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    if (!spec.paper && !LIVE_ALGOS) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
       await this.verifyKey(owner);

@@ -17,6 +17,7 @@
  * For algos that must keep going while the browser is closed: the ValueDesk
  * executor or a self-hosted one.
  */
+import { requirePaperAlgo } from './liveAlgos';
 import {
   AlgoRuntime,
   FINAL_STATUSES,
@@ -326,6 +327,7 @@ class BrowserAlgos {
     let id: string | undefined;
     switch (cmd.op) {
       case 'add': {
+        requirePaperAlgo(cmd.spec);
         const s = requireSignerOrPaper(cmd.spec, this.owner!);
         const a = await rt.add({
           owner: this.owner!,

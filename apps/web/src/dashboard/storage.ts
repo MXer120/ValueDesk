@@ -39,8 +39,11 @@ export interface SavedDashboard {
    *  This is the ACTIVE slot, mirrored so a reader that does not know about
    *  `slots` still opens the arrangement the user last had on screen. */
   layouts: Partial<Record<BreakpointName, PanelPlacement[]>>;
-  /** Drag/resize disabled - so a mis-click on a header cannot move a panel. */
+  /** Drag/resize disabled - so a mis-click on a header cannot move a panel. Locked by default. */
   locked?: boolean;
+  /** Set on every save since panels became locked by default: an older record's `locked`
+   *  was the old unlocked default, so it opens locked once. */
+  lockV?: number;
   /** Panel ids the user has removed from the grid via the layout menu - not
    *  breakpoint-scoped like `layouts`, because a panel a person chose to hide
    *  is a statement about wanting that panel gone, not about one screen size. */
@@ -111,6 +114,8 @@ const readSlots = (raw: unknown): LayoutSlot[] | null => {
   return slots.length ? slots : null;
 };
 
+const LOCK_V = 1;
+
 /** Reads saved state, or null if there is none / it is unusable / it is stale. */
 export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
   let raw: string | null = null;
@@ -140,7 +145,7 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
     const parsedSlots = readSlots(rec.slots);
     const seeded = idList(rec.seeded);
     if (!parsedSlots) {
-      return { v: config.version, layouts, locked: rec.locked === true, hidden, shown, ...(seeded.length ? { seeded } : {}) };
+      return { v: config.version, layouts, locked: rec.lockV === LOCK_V ? rec.locked === true : true, hidden, shown, ...(seeded.length ? { seeded } : {}) };
     }
     // The top-level fields are the active canvas. Copy them onto that slot so
     // a write that updated the mirror and not the slot (or the other way
@@ -154,7 +159,7 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
     return {
       v: config.version,
       layouts,
-      locked: rec.locked === true,
+      locked: rec.lockV === LOCK_V ? rec.locked === true : true,
       hidden,
       shown,
       slots,
@@ -298,7 +303,7 @@ export function terminalsOf(state: SavedDashboard): TerminalView[] {
 
 export function saveDashboard(config: DashboardConfig, state: SavedDashboard): void {
   try {
-    localStorage.setItem(keyFor(config.id), JSON.stringify({ ...state, v: config.version }));
+    localStorage.setItem(keyFor(config.id), JSON.stringify({ ...state, v: config.version, lockV: LOCK_V }));
   } catch {
     /* quota or private mode; the layout still works for this session */
   }
