@@ -28,6 +28,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { pollEvery } from './exchange/visibility';
+import { liveKeyOf, ordersFromPush, positionsFromPush, stateFromPush } from './exchange/liveAccount';
+import { hub } from './ws';
 
 interface FeedState<T> {
   data: T | null;
@@ -48,6 +50,50 @@ interface Feed<T> extends FeedState<T> {
   inflight?: Promise<void>;
   debounceTimer?: number;
   evictTimer?: number;
+  /** Ends the wallet's `accountState` subscription (state, orders and positions feeds). */
+  live?: () => void;
+  /** When a push last filled this feed, and when REST last answered. */
+  liveAt?: number;
+  restAt?: number;
+}
+
+/**
+ * LIVE FROM THE STREAM. The state, open-orders and positions feeds take every
+ * `accountState` push (about one a second) as their answer - see
+ * exchange/liveAccount.ts. While pushes arrive, REST is read only once a
+ * minute (what only REST knows: a position's funding total) and when a push
+ * cannot stand in for it; it goes back to its own interval when they stop.
+ */
+const LIVE_FRESH_MS = 5_000;
+const LIVE_REST_MS = 60_000;
+
+const liveFresh = (feed: { liveAt?: number }): boolean => feed.liveAt !== undefined && Date.now() - feed.liveAt < LIVE_FRESH_MS;
+
+function startLive<T>(key: string, feed: Feed<T>): void {
+  const lk = liveKeyOf(key);
+  if (!lk || feed.live) return;
+  feed.live = hub.subscribe(lk.engine, { channel: 'accountState', user: lk.user }, (d: unknown) => {
+    if (!d || typeof d !== 'object' || Array.isArray(d)) return;
+    const f = feeds.get(key) as Feed<T> | undefined;
+    if (!f || f.subs.size === 0) return;
+    const row = d as Record<string, unknown>;
+    const next =
+      lk.kind === 'state' ? stateFromPush(lk.engine, lk.user, row)
+      : lk.kind === 'orders' ? ordersFromPush(lk.engine, row)
+      : positionsFromPush(row, f.data as { positions?: Record<string, unknown>[] } | null);
+    // Not something the push can answer: a position new to REST is read from it at once; a
+    // list of 100+ orders stays on its REST interval (the feed is then not live).
+    if (next === null) {
+      if (lk.kind === 'pos') pump<T>(key, true);
+      return;
+    }
+    f.liveAt = Date.now();
+    f.data = next as T;
+    f.error = null;
+    f.loading = false;
+    lastData.set(key, next);
+    notify(f);
+  });
 }
 
 /**
@@ -81,15 +127,18 @@ function notify<T>(feed: Feed<T>): void {
   for (const s of feed.subs) s(snapshot);
 }
 
-function pump<T>(key: string): void {
+function pump<T>(key: string, force = false): void {
   const feed = feeds.get(key) as Feed<T> | undefined;
   // Already in flight: the caller that triggered this will see the same
   // answer everyone else does when it lands, rather than paying for a second
   // request that can only resolve microseconds apart from the first.
   if (!feed || feed.inflight) return;
+  // The stream is answering: REST only now and then (see LIVE_REST_MS).
+  if (!force && liveFresh(feed) && feed.restAt !== undefined && Date.now() - feed.restAt < LIVE_REST_MS) return;
   const run = feed.fetchers && feed.fetchers.size > 0 ? feed.fetchers.values().next().value! : feed.fetcher;
   feed.inflight = run()
     .then((data) => {
+      feed.restAt = Date.now();
       feed.data = data;
       feed.error = null;
       lastData.set(key, data);
@@ -177,8 +226,9 @@ export function useAccountResource<T>(
     // First subscriber owns the timer; the rest ride along - identical
     // contract to useTickers in Market.tsx.
     if (!feed.timer) {
-      pump<T>(key);
+      pump<T>(key, true);
       feed.timer = pollEvery(pollMs, () => pump<T>(key));
+      startLive(key, feed);
     }
 
     return () => {
@@ -198,6 +248,9 @@ export function useAccountResource<T>(
           clearTimeout(f.debounceTimer);
           f.debounceTimer = undefined;
         }
+        f.live?.();
+        f.live = undefined;
+        f.liveAt = undefined;
         // The key already embeds the address (`state:perps:0xABC...`), so a
         // switched wallet is a DIFFERENT key and a fresh, empty feed - an
         // orphaned entry sitting here briefly can never be shown as if it
@@ -216,7 +269,7 @@ export function useAccountResource<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, pollMs]);
 
-  return { ...state, refresh: () => key && pump(key) };
+  return { ...state, refresh: () => key && pump(key, true) };
 }
 
 /**
@@ -238,6 +291,8 @@ export function bumpAccountResource(key: string | null, debounceMs = 400): void 
   // and nobody reading it. Caught by this module's own dedup test: the
   // "bump after unmount" case fetched anyway until this line existed.
   if (!feed || feed.subs.size === 0) return;
+  // The stream answers within a second anyway: no REST read for an event while it does.
+  if (liveFresh(feed)) return;
   if (feed.debounceTimer) clearTimeout(feed.debounceTimer);
   feed.debounceTimer = window.setTimeout(() => {
     feed.debounceTimer = undefined;
