@@ -86,6 +86,14 @@ export class SocketHub {
     this.allowBase = o.allowBase ?? isAllowedGatewayWs;
     this.host = o.host ?? 'local';
     this.now = o.now ?? (() => Date.now());
+    // The network came back: every connection that is down tries again now (worker and page alike).
+    const g = globalThis as { addEventListener?: (t: string, f: () => void) => void };
+    g.addEventListener?.('online', () => this.wake());
+  }
+
+  /** Every connection: one that is down reconnects now, an open one is pinged (sodexSocket.ts wake). */
+  wake(): void {
+    for (const p of [...this.market.values(), ...this.accounts.values()]) p.sock.wake();
   }
 
   // --- clients -------------------------------------------------------------------------

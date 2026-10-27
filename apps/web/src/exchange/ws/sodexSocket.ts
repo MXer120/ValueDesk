@@ -3,7 +3,13 @@
  * socket host. The browser twin of the server's Upstream (sodex/ws.ts):
  *
  *  - keepalive {"op":"ping"} every KEEPALIVE_MS (the gateway drops a silent
- *    connection after 60 s);
+ *    connection after 60 s), as SoDEX's docs ask;
+ *  - a watchdog: nothing heard for SILENT_MS (not even the pong) means the
+ *    connection is dead without having said so (a laptop asleep, a network
+ *    switched, a proxy that dropped it) - it is closed and made again; one still
+ *    not open after CONNECT_TIMEOUT_MS is too;
+ *  - `wake()`: the network is back (or the page woke) - a connection that is
+ *    down is retried now instead of at the end of its backoff;
  *  - reconnect with exponential backoff and jitter (250 ms -> 8 s), and every
  *    subscription re-sent once the socket is open again;
  *  - refcounted subscriptions keyed by the shared protocol's `subKey`, sent
@@ -33,6 +39,13 @@ export type SocketFactory = (url: string) => SocketLike;
 const OPEN = 1;
 const CONNECTING = 0;
 
+/** No message at all for this long (a pong is due every KEEPALIVE_MS): the connection is dead. */
+export const SILENT_MS = KEEPALIVE_MS + 15_000;
+/** A connection still not open after this is given up and made again. */
+export const CONNECT_TIMEOUT_MS = 10_000;
+/** How often the keepalive and the watchdog look. */
+const TICK_MS = 5_000;
+
 interface Sub {
   params: SubParams;
   refs: number;
@@ -50,6 +63,8 @@ export class SodexSocket {
   private ws: SocketLike | null = null;
   private subs = new Map<string, Sub>();
   private pingTimer: ReturnType<typeof setInterval> | undefined;
+  private connectTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastPingAt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private attempt = 0;
   private closed = false;
@@ -87,8 +102,13 @@ export class SodexSocket {
       return;
     }
     this.ws = ws;
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = undefined;
+      if (this.ws === ws && ws.readyState !== OPEN) this.drop(ws);
+    }, CONNECT_TIMEOUT_MS);
 
     ws.onopen = () => {
+      this.clearConnectTimer();
       this.attempt = 0;
       this.setStatus('open');
       this.lastMessageAt = Date.now();
@@ -157,9 +177,21 @@ export class SodexSocket {
 
   private startPing(): void {
     this.stopPing();
+    this.lastPingAt = Date.now();
     this.pingTimer = setInterval(() => {
-      if (this.ws?.readyState === OPEN) this.send({ op: 'ping' });
-    }, KEEPALIVE_MS);
+      const ws = this.ws;
+      if (!ws || ws.readyState !== OPEN) return;
+      const now = Date.now();
+      // Silent past the pong that was due: dead, though the browser has not noticed.
+      if (now - this.lastMessageAt > SILENT_MS) {
+        this.drop(ws);
+        return;
+      }
+      if (now - this.lastPingAt >= KEEPALIVE_MS) {
+        this.lastPingAt = now;
+        this.send({ op: 'ping' });
+      }
+    }, TICK_MS);
   }
 
   private stopPing(): void {
@@ -167,8 +199,43 @@ export class SodexSocket {
     this.pingTimer = undefined;
   }
 
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== undefined) clearTimeout(this.connectTimer);
+    this.connectTimer = undefined;
+  }
+
+  /** Close a connection that is dead or stuck, and make a new one. */
+  private drop(ws: SocketLike): void {
+    if (this.ws !== ws) return;
+    try {
+      ws.close(4000, 'silent');
+    } catch {
+      /* already gone */
+    }
+    this.scheduleReconnect();
+  }
+
+  /**
+   * The network is back, or the page woke up: a connection that is down is
+   * made again now, from a fresh backoff. An open one is checked by a ping.
+   */
+  wake(): void {
+    if (this.closed || this.subs.size === 0) return;
+    if (this.ws?.readyState === OPEN) {
+      this.lastPingAt = Date.now();
+      this.send({ op: 'ping' });
+      return;
+    }
+    if (this.ws) return; // still connecting: its own timeout decides
+    if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.attempt = 0;
+    this.connect();
+  }
+
   private scheduleReconnect(): void {
     this.stopPing();
+    this.clearConnectTimer();
     const ws = this.ws;
     this.ws = null;
     if (ws) {
@@ -219,6 +286,7 @@ export class SodexSocket {
   close(): void {
     this.closed = true;
     this.stopPing();
+    this.clearConnectTimer();
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
     if (this.noAccountTimer !== undefined) clearTimeout(this.noAccountTimer);
     this.noAccountTimer = undefined;

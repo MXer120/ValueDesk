@@ -35,7 +35,10 @@ class FakeSocket implements SocketLike {
     FakeSocket.all.push(this);
   }
   send(d: string) {
-    this.sent.push(JSON.parse(d));
+    const m = JSON.parse(d);
+    this.sent.push(m);
+    // The gateway answers every ping (the watchdog in sodexSocket.ts relies on it).
+    if (m.op === 'ping') this.push({ op: 'pong' });
   }
   close() {
     this.readyState = 3;
@@ -192,6 +195,7 @@ test(`wallet connections are capped at ${ACCOUNT_CONN_CAP} (with 2 market connec
   a.sub({ channel: 'ticker', symbols: ['vBTC_vUSDC'] }, 'spot');
   const wallets = Array.from({ length: ACCOUNT_CONN_CAP + 1 }, (_, i) => `0x${String(i + 1).padStart(40, 'a')}`);
   for (const w of wallets) a.sub({ channel: 'accountUpdate', user: w });
+  for (const s of FakeSocket.all) s.open();
   assert.equal(live().length, 2 + ACCOUNT_CONN_CAP);
   assert.equal(a.errors().filter((e) => /account stream unavailable/.test(e.message)).length, 1, 'the one beyond the cap polls instead');
   assert.ok(hub.connectionCount().total <= 10);
@@ -199,6 +203,7 @@ test(`wallet connections are capped at ${ACCOUNT_CONN_CAP} (with 2 market connec
   // A wallet nobody watches any more closes after a while, and a newcomer may take its place meanwhile.
   a.unsub({ channel: 'accountUpdate', user: wallets[0]! });
   a.sub({ channel: 'accountUpdate', user: '0x' + 'f'.repeat(40) });
+  for (const s of FakeSocket.all) if (!s.closed && s.readyState === 0) s.open();
   assert.equal(live().length, 2 + ACCOUNT_CONN_CAP, 'the idle one made room');
   a.unsub({ channel: 'accountUpdate', user: wallets[1]! });
   mock.timers.tick(ACCOUNT_IDLE_CLOSE_MS + 1);
