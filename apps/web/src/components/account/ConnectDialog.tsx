@@ -105,7 +105,6 @@ export function ConnectDialog() {
   const [note, setNote] = useState('');
   const [discovered, setDiscovered] = useState<readonly WalletInfo[]>([]);
   const titleId = useId();
-  const soonId = useId();
 
   const sheetRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Stage>(NO_SESSION);
@@ -386,20 +385,6 @@ export function ConnectDialog() {
             </button>
           </div>
 
-          {/* Shown, not offered: email log-in is not built yet. */}
-          <button
-            type="button"
-            className="cdlg-row cdlg-row--soon"
-            aria-disabled="true"
-            aria-describedby={soonId}
-            onClick={(e) => e.preventDefault()}
-          >
-            <span className="cdlg-row__body">
-              <MailGlyph />
-              <span className="cdlg-row__label">Log in with Email</span>
-            </span>
-            <span id={soonId} className="cdlg-soon">Coming soon</span>
-          </button>
 
           <div className="cdlg-or" aria-hidden="true">or</div>
 
@@ -470,16 +455,6 @@ function WalletIcon({ sources, label }: { sources: string[]; label: string }) {
     />
   );
 }
-
-const MailGlyph = () => (
-  <svg className="cdlg-icon cdlg-icon--glyph" viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
-    <rect x="2.75" y="5.25" width="18.5" height="13.5" rx="1.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
-    <path
-      d="M3.5 6.5l8.5 6.25 8.5-6.25"
-      fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-    />
-  </svg>
-);
 
 const CloseGlyph = () => (
   <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">

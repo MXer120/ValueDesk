@@ -18,7 +18,7 @@ import { AccountController } from './components/account/AccountController';
 import { UnlockDialog } from './components/account/UnlockDialog';
 import { AccountSetup } from './setup/AccountSetup';
 import { IndexPrompt } from './components/IndexPrompt';
-import { DevPanel } from './components/dev/DevPanel';
+import { DevPanel, devPanelShown } from './components/dev/DevPanel';
 import { goToWallet } from './components/account/actions';
 import { useWalletBridge } from './components/account/useWallet';
 import { configureFromHealth } from './trading/config';
@@ -586,7 +586,7 @@ function AppShell() {
           <AccountSetup address={address} />
         </Guarded>
         <Guarded name="Dev panel">
-          <DevPanel address={address} engine={engine} />
+          {devPanelShown(address) && <DevPanel address={address} engine={engine} />}
         </Guarded>
         <Guarded name="Indexing">
           <IndexPrompt address={address} />

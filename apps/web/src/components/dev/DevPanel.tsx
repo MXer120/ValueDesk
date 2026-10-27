@@ -1,7 +1,12 @@
 /**
- * A glass dock for opening the one-shot screens. It stays on every build,
- * including production, and stays above sheets so it can be used while one
- * is open. Drag the title to move it. Ctrl+Shift+D folds it to a chip.
+ * A glass dock for opening the one-shot screens. It stays above sheets so it
+ * can be used while one is open. Drag the title to move it. Ctrl+Shift+D
+ * folds it to a chip.
+ *
+ * Who sees it (devPanelShown): a dev build, the owner's wallet, or a browser
+ * where `localStorage['vs.dev'] = '1'` was set by hand. A visitor of the
+ * public site never does - its switches (trading on and off, keys, the
+ * indexer) are tools, not part of the product.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -96,6 +101,16 @@ function previewTerms(): BuilderTerms {
     alreadyApproved: [],
     purpose: 'enable',
   };
+}
+
+/** Whether the dock is shown at all: dev builds, the owner's wallet, or a browser opted in by hand. */
+export function devPanelShown(address: string | null): boolean {
+  if (import.meta.env.DEV || isKnowledgeOwner(address)) return true;
+  try {
+    return localStorage.getItem('vs.dev') === '1';
+  } catch {
+    return false;
+  }
 }
 
 export function DevPanel({ address, engine }: { address: string | null; engine: Engine }) {
