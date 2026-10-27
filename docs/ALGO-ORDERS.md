@@ -6,7 +6,7 @@ them, one engine.
 
 | | This browser | ValueDesk 24/7 (hosted executor) | Self-hosted |
 |---|---|---|---|
-| Runs | in an open ValueDesk tab (Web Lock `vd-algo-run:<wallet>`, one tab per browser) | the executor in Tokyo, 24/7 | the trader's own copier |
+| Runs | in an open ValueDesk tab (Web Lock `vd-algo-run:<wallet>`, one tab per browser; without Web Locks an election over the BroadcastChannel; with neither, none runs and the Algos tab says why) | the executor in Tokyo, 24/7 | the trader's own copier |
 | Signs with | the trading key this browser holds, through `trading/actions.ts` `signAndSend` (the fee guard) | the key the trader registered for that executor (copy setup) | the copier's key |
 | Builder fee per child | the trading fee owed now (1.5 bp default, lower by terms) | the copy fee ladder (2.5 bp → 1 bp) | the copy fee ladder |
 | Instructions | clicks in the tab | EIP-712 `algo-start` (the spec, as the wallet shows it) and `algo-action`, kept append-only | the same |
@@ -39,8 +39,12 @@ the runner keeps watching them after it is done (`needsRunner`), and resizes the
 after the end. A placement with no answer is asked of SoDEX (open orders, then history) like a child; a
 refused exit is tried again after 30 s, doubling, and given up after 5 refusals with an error in the log.
 An exit cancelled on SoDEX by the trader is not placed again. **Cancel** on an algo that has ended pulls
-what it still has on SoDEX (its exits, a child left resting on purpose) and keeps its final status; **Cancel
-all** includes such algos. In paper they are watched against the mark. Not on reduce-only orders, a close,
+what it still has on SoDEX (its exits, a child left resting on purpose) and keeps its final status; a plain
+cancel of a running algo keeps its exits (they protect what filled). **Cancel all** (the kill switch) leaves
+nothing: it cancels every running algo **and pulls its exits** in the same press, and pulls what ended algos
+still have on SoDEX. Forgetting the executor's key (delete-key) runs the kill switch first, while the key
+can still sign the cancels; an exit cancel that cannot be sent (no key here) is not counted as sent - it
+stays live and is tried again. In paper they are watched against the mark. Not on reduce-only orders, a close,
 a trailing stop (refused there) or a basket; a short's take-profit distance must be under 100%.
 
 | Kind | Settings |
@@ -80,15 +84,36 @@ a trailing stop (refused there) or a basket; a short's take-profit distance must
   children); none is under its minimum at the child's own price (a sell's limit is under the bid); a
   largest slice / child under SoDEX's minimum is raised to it. Fill fast never prices a round past the
   limit price. An algo too small for SoDEX ever to send anything ends **failed**, not done.
-- A size change (`update`) never leaves more working than the new size: resting children past it are
+- A change of a running algo (`update`) touches only its **limit price, bounds, spread guard, label and
+  size**; anything else (paper, side, market, kind, reduce-only...) is refused - that was signed and checked
+  when it started. In the browser the live gate (`requirePaperAlgo`) checks the changed spec too.
+- A size change never leaves more working than the new size: resting children past it are
   pulled (the last placed first); a schedule spreads the change over what is still to come.
+- **One limit order over SoDEX's largest order is refused at start**: a scale level, a bracket's limit
+  entry or a conditional's limit over the max quantity or max order value (a TWAP splits a large amount);
+  a bracket's limit entry and a conditional's limit price past the limit price are refused too.
+- **A position read that fails is not "no position"**: a trailing stop that fires, a conditional close and
+  a TWAP close hold and read again on the next step; only a position SoDEX confirms as 0 (or on the wrong
+  side) ends them. A trailing stop paused while it reads at its fire reads again on resume and still sells.
+- **Pause and cancel cover what an algo is starting**: a basket cancelled while a leg is being added ends
+  that leg too; paused then, the legs started are paused and the ones not yet started start on resume (it
+  never runs on some of its markets only). A conditional paused while it starts its algo pauses that algo;
+  resuming (or cancelling) the conditional resumes (or cancels) it. A bracket's limit entry pulled by a
+  pause (or a hold) goes back on the book on resume, for what it has not filled.
+- A live algo whose first readiness check (the key, the fee approval) fails to read is **held** with a
+  reason and checked again within seconds - it never trades unchecked.
 - An algo **begins only with a quote in hand**: its arrival price is the mid at that moment.
 - 25 refusals in a row fail the algo, with the last reason in its log.
 - **Region rules** (`policy.ts` `regionPolicy`, as for copies): a live algo of a trader in a blocked region
   (US, sanctioned) is **held**; in the EEA the leverage it sets is capped at **2x** and no child may take
   the account's gross exposure past 2x its equity (a child is shrunk to the room left, or held). The
   country is the stricter of the one declared in the signed copy terms and the one the executor sees the
-  request come from (the browser uses the same two). Paper algos are not held.
+  request come from (the browser uses the same two). On the executor the country the wallet declares
+  **now** counts too: terms signed again with a blocked country hold its running live algos at once
+  (the stricter of then and now wins). Paper algos are not held.
+- **Limits per wallet** (`EXECUTOR_MAX_ALGOS`): a basket counts as itself and one algo per market. A paper
+  conditional's inner algo signed without a paper flag runs as paper (as the conditional does) and is
+  accepted while real algos are off; one signed `paper: false` is refused.
 
 ## SoDEX's native orders
 
@@ -114,7 +139,10 @@ working their schedule / ladder when the run ended, as planned.
   drawn from the engine's own plan with the same seed** (the slices that will go out, the ladder, or the
   levels it acts at), with the per-child value, interval, end time, average if a ladder fills, fee range
   (all resting … all taking), and every reason SoDEX would refuse part of it (minimum order value, step,
-  maximum notional) with the fix in words. A review before start; real funds are marked.
+  maximum notional) with the fix in words. A review before start; real funds are marked. The ticket is one
+  form for every kind, but a kind is sent only what its own ticket shows: a limit price, bounds or a spread
+  guard typed on another kind (or a TWAP's urgency, an offset typed on a chase) stay behind. A DCA ladder's
+  sizes are sent explicitly, so its geometric growth is not bound by the scale's skew range.
 - The Algos tab (next to Open Orders): per algo the progress, average fill **vs arrival** and **vs the
   market's VWAP over the same window** (bp, positive = better for the trader), resting share (maker fill
   %), fees, children and refusals, the working order, next child / end, conditions holding or waiting, and

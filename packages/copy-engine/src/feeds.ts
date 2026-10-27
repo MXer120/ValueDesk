@@ -20,6 +20,11 @@
  * so a missed print costs one reconcile interval, never a wrong position.
  * Prints of one leader on one market within COALESCE_MS are merged into one
  * change at their VWAP, so an order that prints as forty fills is copied once.
+ *
+ * A reconcile's REST answer is as old as the moment the read started: a market
+ * whose stream printed since (or shortly before, still merging) is left to the
+ * stream, so a slow answer neither undoes a newer fill nor counts a fill the
+ * stream is about to apply a second time. The next reconcile checks it again.
  */
 import { GATEWAY_WS_ORIGIN, type Network } from '../../sodex-core/src/index.ts';
 import { timers, type Logger, type WebSocketFactory } from './io.ts';
@@ -60,6 +65,10 @@ export class LeaderBook {
   private pos = new Map<string, Map<string, number>>();
   private eq = new Map<string, { value: number; at: number }>();
   private seededAt = new Map<string, number>();
+  /** `${leader}|${symbol}` -> when a stream print last arrived there (local clock). */
+  private printedAt = new Map<string, number>();
+  /** `${leader}|${symbol}` with prints still being merged (not applied yet). */
+  private merging = new Set<string>();
 
   seeded(l: LeaderRef): boolean {
     return this.seededAt.has(key(l));
@@ -87,6 +96,23 @@ export class LeaderBook {
     this.seededAt.delete(key(l));
   }
 
+  /** A stream print of the leader on `symbol` arrived; `merging`: it is held to be merged, not applied yet. */
+  notePrint(l: LeaderRef, symbol: string, merging: boolean, at = Date.now()): void {
+    const k = `${key(l)}|${symbol}`;
+    this.printedAt.set(k, at);
+    if (merging) this.merging.add(k);
+  }
+
+  /** The prints held for the leader on `symbol` were merged (and applied, unless they netted to nothing). */
+  merged(l: LeaderRef, symbol: string): void {
+    this.merging.delete(`${key(l)}|${symbol}`);
+  }
+
+  /** Whether prints of the leader on `symbol` are still being merged: the book is about to change there. */
+  isMerging(l: LeaderRef, symbol: string): boolean {
+    return this.merging.has(`${key(l)}|${symbol}`);
+  }
+
   /** A position change by `delta` from the stream. Null while the leader is not seeded. */
   applyDelta(l: LeaderRef, symbol: string, delta: number, price: number, time: number, id: string): LeaderEvent | null {
     if (!this.seeded(l) || !Number.isFinite(delta) || delta === 0) return null;
@@ -101,7 +127,8 @@ export class LeaderBook {
 
   /** A position change to `after` (a source that knows the total). */
   applyTotal(l: LeaderRef, symbol: string, before: number | null, after: number, price: number, time: number, id: string): LeaderEvent | null {
-    if (!this.seeded(l)) return null;
+    if (!this.seeded(l) || !Number.isFinite(after)) return null;
+    this.notePrint(l, symbol, false);
     const m = this.map(l);
     const b = before ?? m.get(symbol) ?? 0;
     if (after === 0) m.delete(symbol);
@@ -113,9 +140,19 @@ export class LeaderBook {
   /**
    * The REST truth. The first call seeds the leader (no events: whatever is
    * open now is "pre-existing"); later calls emit a 'reconcile' event per
-   * market that differs.
+   * market that differs. With `readStart` (when the REST read began), a market
+   * a stream print reached since then, or whose prints are still being merged,
+   * is left as the stream has it.
    */
-  resync(l: LeaderRef, positions: Record<string, number>, equity: number | null, marks: Record<string, number>, now: number, priceOf: (symbol: string) => number | null): LeaderEvent[] {
+  resync(
+    l: LeaderRef,
+    positions: Record<string, number>,
+    equity: number | null,
+    marks: Record<string, number>,
+    now: number,
+    priceOf: (symbol: string) => number | null,
+    readStart?: number,
+  ): LeaderEvent[] {
     const k = key(l);
     if (equity !== null) this.eq.set(k, { value: equity, at: now });
     if (!this.seededAt.has(k)) {
@@ -127,8 +164,13 @@ export class LeaderBook {
     const out: LeaderEvent[] = [];
     const symbols = new Set([...m.keys(), ...Object.keys(positions)]);
     for (const s of symbols) {
+      if (readStart !== undefined) {
+        const printed = this.printedAt.get(`${k}|${s}`);
+        if ((printed !== undefined && printed >= readStart) || this.merging.has(`${k}|${s}`)) continue;
+      }
       const before = m.get(s) ?? 0;
       const after = positions[s] ?? 0;
+      if (!Number.isFinite(after)) continue;
       const tol = 1e-9 * Math.max(1, Math.abs(before), Math.abs(after));
       if (Math.abs(before - after) <= tol) continue;
       if (after === 0) m.delete(s);
@@ -159,9 +201,10 @@ class Coalescer {
       p = { l, symbol, delta: 0, notional: 0, qty: 0, time, ids: [], timer: null };
       this.pending.set(k, p);
       const entry = p;
+      // Flushed even when the prints net to nothing, so the book knows the merge is over.
       p.timer = timers.after(COALESCE_MS, () => {
         this.pending.delete(k);
-        if (entry.delta !== 0) this.flush(entry.l, entry.symbol, entry.delta, entry.notional / entry.qty, entry.time, entry.ids[0]!);
+        this.flush(entry.l, entry.symbol, entry.delta, entry.qty > 0 ? entry.notional / entry.qty : 0, entry.time, entry.ids[0]!);
       });
     }
     p.delta += delta;
@@ -219,7 +262,8 @@ export class SodexFeed {
 
   constructor(private readonly o: SodexFeedOptions) {
     this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+      this.o.book.merged(l, symbol);
+      const e = delta !== 0 ? this.o.book.applyDelta(l, symbol, delta, vwap, time, id) : null;
       if (e) this.o.sink.leader(e);
     });
     const origin = o.wsOrigin ?? GATEWAY_WS_ORIGIN[o.network];
@@ -302,7 +346,10 @@ export class SodexFeed {
         const l = this.leadersById.get(acct);
         if (l) {
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.s, side === 'buy' ? qty : -qty, price, time, id);
+          if (seed !== null && time >= seed) {
+            this.o.book.notePrint(l, t.s, true);
+            this.coalesce.add(l, t.s, side === 'buy' ? qty : -qty, price, time, id);
+          }
         }
         if (this.followers.has(acct)) {
           this.o.sink.follower?.({
@@ -349,7 +396,8 @@ export class HyperliquidFeed {
 
   constructor(private readonly o: HyperliquidFeedOptions) {
     this.coalesce = new Coalescer((l, symbol, delta, vwap, time, id) => {
-      const e = this.o.book.applyDelta(l, symbol, delta, vwap, time, id);
+      this.o.book.merged(l, symbol);
+      const e = delta !== 0 ? this.o.book.applyDelta(l, symbol, delta, vwap, time, id) : null;
       if (e) this.o.sink.leader(e);
     });
     this.socket = new LiveSocket({
@@ -474,7 +522,10 @@ export class HyperliquidFeed {
           const l = addr ? this.leaders.get(addr) : undefined;
           if (!l) continue;
           const seed = this.o.book.seedTime(l);
-          if (seed !== null && time >= seed) this.coalesce.add(l, t.coin, signed, px, time, id);
+          if (seed !== null && time >= seed) {
+            this.o.book.notePrint(l, t.coin, true);
+            this.coalesce.add(l, t.coin, signed, px, time, id);
+          }
         }
       }
     }

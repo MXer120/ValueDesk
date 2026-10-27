@@ -11,6 +11,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { api, type Engine, type Kline } from '../../api';
+import { pollEvery } from '../../exchange/visibility';
 
 /** Where a coin's price is read: the engine and its market's name (BTC -> BTC-USD), or undefined. */
 export interface PriceSource {
@@ -75,10 +76,11 @@ export function useCoinSeries(items: ReadonlyArray<{ symbols: string[] }>, src: 
       });
     };
     load();
-    const timer = window.setInterval(load, KEEP_MS);
+    // Two candle reads per coin: none while the tab is hidden, caught up when it is shown.
+    const stop = pollEvery(KEEP_MS, load);
     return () => {
       off = true;
-      window.clearInterval(timer);
+      stop();
     };
     // `key` stands for the coins and the engine.
     // eslint-disable-next-line react-hooks/exhaustive-deps

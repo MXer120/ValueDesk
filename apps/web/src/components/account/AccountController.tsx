@@ -32,7 +32,7 @@
  * yes adds ONE wallet signature before the key's. Without a configured builder
  * none of that code runs and the flow is exactly the one above.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, type SessionInfo } from '../../api';
 import { useConfirm } from '../Modal';
 import { notify, notifyError } from '../../toast';
@@ -46,18 +46,39 @@ import {
 } from '../../trading/session';
 import { WalletConnectError } from '../../walletconnect';
 import { WALLET_EVENTS, getAccountPending, setAccountPending, type TransferPreset } from './actions';
-import { AdvancedKeysModal } from './AdvancedKeys';
 import { useBuilderConsent } from './BuilderConsent';
 import { BuilderTermsFollower } from './BuilderTermsFollower';
 import { ConnectDialog } from './ConnectDialog';
-import { DepositModal } from '../funds/DepositModal';
-import { WithdrawModal } from '../funds/WithdrawModal';
-import { TransferModal } from '../funds/TransferModal';
 import { openConnectDialog } from './connect';
 import { useWalletSnapshot } from './useWallet';
 import { recordPendingSiteTerms, requireTerms } from '../../legal/acceptance';
 import { SANCTIONED_WALLET_REASON, screenWallet } from '../../legal/screening';
 import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
+import { lazyPage } from '../../lazyPage';
+import { startLater } from '../../startLater';
+
+/*
+ * THE MONEY SHEETS ARRIVE JUST AFTER THE FIRST PAINT.
+ *
+ * Deposit, Withdraw, Transfer and the advanced key options are closed on every
+ * load, and their code was about a seventh of the entry script. It is fetched
+ * in idle time a moment after the page has painted, and at once when a sheet is
+ * asked for before that. A sheet is mounted only once its code is in (or once
+ * it is opened): closed it renders nothing, so mounting it later shows nothing
+ * different, and an open one plays the same entrance either way. lazyPage.ts
+ * keeps a loaded sheet rendering synchronously, without a Suspense frame.
+ */
+const DepositModal = lazyPage('deposit', () => import('../funds/DepositModal').then((m) => m.DepositModal));
+const WithdrawModal = lazyPage('withdraw', () => import('../funds/WithdrawModal').then((m) => m.WithdrawModal));
+const TransferModal = lazyPage('transfer', () => import('../funds/TransferModal').then((m) => m.TransferModal));
+const AdvancedKeysModal = lazyPage('advanced keys', () => import('./AdvancedKeys').then((m) => m.AdvancedKeysModal));
+const fetchSheets = startLater(
+  () => {
+    for (const sheet of [DepositModal, WithdrawModal, TransferModal, AdvancedKeysModal]) sheet.preload().catch(() => {});
+  },
+  1_500,
+  2_000,
+);
 
 interface Props {
   address: string | null;
@@ -92,6 +113,7 @@ export function AccountController({ address, provider, session, onSession }: Pro
   const [withdrawCoin, setWithdrawCoin] = useState<string | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferPreset, setTransferPreset] = useState<TransferPreset | null>(null);
+  useEffect(() => fetchSheets.arm(), []);
 
   /**
    * The whole enablement flow: one click, one wallet signature, all in this
@@ -309,42 +331,58 @@ export function AccountController({ address, provider, session, onSession }: Pro
       {builderConsent.dialog}
       {/* Renders nothing: after a fill it has the fee terms re-checked (only in a build whose fee has volume tiers). */}
       <BuilderTermsFollower address={address} />
-      <AdvancedKeysModal
-        open={advancedOpen}
-        onClose={() => setAdvancedOpen(false)}
-        address={address}
-        provider={provider}
-        walletName={wallet.walletName}
-        session={session}
-        onSession={onSession}
-        confirmBuilderFee={askBuilderFee}
-      />
+      {(AdvancedKeysModal.ready || advancedOpen) && (
+        <Suspense fallback={null}>
+          <AdvancedKeysModal
+            open={advancedOpen}
+            onClose={() => setAdvancedOpen(false)}
+            address={address}
+            provider={provider}
+            walletName={wallet.walletName}
+            session={session}
+            onSession={onSession}
+            confirmBuilderFee={askBuilderFee}
+          />
+        </Suspense>
+      )}
       <ConnectDialog />
-      <DepositModal
-        open={depositOpen}
-        onClose={() => setDepositOpen(false)}
-        address={address}
-        provider={provider}
-        walletName={wallet.walletName}
-        onEnable={enableTrading}
-      />
-      <WithdrawModal
-        open={withdrawOpen}
-        onClose={() => setWithdrawOpen(false)}
-        address={address}
-        provider={provider}
-        onEnable={enableTrading}
-        initialFrom={withdrawFrom}
-        initialCoin={withdrawCoin}
-      />
-      <TransferModal
-        open={transferOpen}
-        onClose={() => setTransferOpen(false)}
-        address={address}
-        provider={provider}
-        onEnable={enableTrading}
-        preset={transferPreset}
-      />
+      {(DepositModal.ready || depositOpen) && (
+        <Suspense fallback={null}>
+          <DepositModal
+            open={depositOpen}
+            onClose={() => setDepositOpen(false)}
+            address={address}
+            provider={provider}
+            walletName={wallet.walletName}
+            onEnable={enableTrading}
+          />
+        </Suspense>
+      )}
+      {(WithdrawModal.ready || withdrawOpen) && (
+        <Suspense fallback={null}>
+          <WithdrawModal
+            open={withdrawOpen}
+            onClose={() => setWithdrawOpen(false)}
+            address={address}
+            provider={provider}
+            onEnable={enableTrading}
+            initialFrom={withdrawFrom}
+            initialCoin={withdrawCoin}
+          />
+        </Suspense>
+      )}
+      {(TransferModal.ready || transferOpen) && (
+        <Suspense fallback={null}>
+          <TransferModal
+            open={transferOpen}
+            onClose={() => setTransferOpen(false)}
+            address={address}
+            provider={provider}
+            onEnable={enableTrading}
+            preset={transferPreset}
+          />
+        </Suspense>
+      )}
     </>
   );
 }

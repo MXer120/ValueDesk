@@ -224,6 +224,7 @@ import { useLoadFailedToast } from './LoadFailed';
 import { notify } from '../toast';
 import { logger, recentLogs } from '../log';
 import { plotViolation, readPlot, type Violation } from '../chart/invariant';
+import { pollEvery } from '../exchange/visibility';
 
 /** error = the user sees something broken; warn = degraded or recovering;
  *  info = lifecycle; debug = high-volume detail (`?debug=chart`). */
@@ -2040,7 +2041,8 @@ function Chart({
   }, [lastPrice, src]);
 
   // Mark / index have no candle stream: the right edge is re-read every 10 s
-  // and pushed through the same realtime path a streamed candle takes.
+  // and pushed through the same realtime path a streamed candle takes. Not
+  // while the tab is hidden: it is read the moment the tab is shown again.
   useEffect(() => {
     if (!ready || src === 'latest') return;
     const key = feedKey(engine, seriesTicker, interval);
@@ -2062,10 +2064,10 @@ function Chart({
         /* the next poll tries again; the watchdog repairs gaps */
       }
     };
-    const id = window.setInterval(() => void poll(), 10_000);
+    const stop = pollEvery(10_000, () => void poll());
     return () => {
       off = true;
-      window.clearInterval(id);
+      stop();
     };
   }, [ready, src, engine, seriesTicker, interval]);
   useEffect(() => {

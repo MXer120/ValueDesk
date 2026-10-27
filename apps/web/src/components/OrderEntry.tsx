@@ -46,6 +46,7 @@
 import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
+import { sharedBook } from '../exchange/bookShare';
 import { useAccountResource } from '../accountFeeds';
 import { useAsync, useChannel, useStatus, useStored } from '../hooks';
 import { ALGO_MENU, menuName, type UiKind } from './algo/menu';
@@ -1106,8 +1107,12 @@ export function OrderEntry({
    */
   const wantsTop = !marketExec;
   const subscribeBook = needsDepth || wantsTop;
+  // The first copy: the book panel's, when its feed runs (bookShare.ts) - no read of our own.
   const bookSeed = useAsync(
-    () => api.orderbook(engine, symbol, 100),
+    () => {
+      const held = sharedBook(engine, symbol, 100);
+      return held ? Promise.resolve({ engine, symbol, book: held }) : api.orderbook(engine, symbol, 100);
+    },
     [engine, symbol],
     { enabled: subscribeBook },
   );
@@ -1116,7 +1121,10 @@ export function OrderEntry({
   // changes rather than waiting for the next push to replace it.
   useEffect(() => setBook(null), [engine, symbol]);
   useEffect(() => { if (bookSeed.data?.book) setBook(bookSeed.data.book); }, [bookSeed.data]);
-  useChannel(engine, subscribeBook ? { channel: 'l2Book', symbol, level: 100 } : null, (d) => {
+  // No `level`: the gateway ignores it (Market.tsx useOrderBook), and asking for
+  // one made this a second upstream subscription to the same book, its pushes
+  // all arriving twice. Without it this is the book panel's own subscription.
+  useChannel(engine, subscribeBook ? { channel: 'l2Book', symbol } : null, (d) => {
     if (d?.b || d?.a) setBook({ bids: d.b ?? [], asks: d.a ?? [], updateID: d.u, blockTime: d.E });
   });
 

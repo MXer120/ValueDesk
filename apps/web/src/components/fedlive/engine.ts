@@ -14,7 +14,7 @@
  * picture gets there. A recording (no broadcast on air) is replayed the same way
  * with the picture held `REPLAY_LEAD_S` behind the ear.
  */
-import Hls from 'hls.js';
+import type HlsPlayer from 'hls.js';
 import ortWasm from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.wasm?url';
 import ortMjs from 'onnxruntime-web/ort-wasm-simd-threaded.jsep.mjs?url';
 import type { SttIn, SttOut } from './stt.worker';
@@ -51,6 +51,24 @@ export interface EngineState {
   lead: number | null;
 }
 
+/*
+ * hls.js (about 500 kB minified, a third of the Trade page's code) is fetched
+ * when a broadcast is started, not with the page: most visits never press
+ * play, and start() is already in its loading phase while the player arrives.
+ */
+type HlsClass = typeof HlsPlayer;
+let hlsLib: Promise<HlsClass> | null = null;
+const loadHls = (): Promise<HlsClass> => {
+  hlsLib ??= import('hls.js').then(
+    (m) => m.default,
+    (e: unknown) => {
+      hlsLib = null; // a failed fetch is tried again on the next start
+      throw e;
+    },
+  );
+  return hlsLib;
+};
+
 export const MODEL = 'onnx-community/moonshine-tiny-ONNX';
 const RATE = 16_000;
 /** A recording: the picture this far behind the ear. */
@@ -61,8 +79,8 @@ const SILENT_BLOCKS = 2;
 
 export class FedEngine {
   private ear: HTMLAudioElement | null = null;
-  private earHls: Hls | null = null;
-  private picHls: Hls | null = null;
+  private earHls: HlsPlayer | null = null;
+  private picHls: HlsPlayer | null = null;
   private ctx: AudioContext | null = null;
   private worker: Worker | null = null;
   private chunk: Float32Array[] = [];
@@ -89,14 +107,21 @@ export class FedEngine {
   async start(src: FedSource, mode: TextMode): Promise<void> {
     this.stop();
     this.set({ phase: 'loading', error: null, download: null });
+    let Hls: HlsClass;
+    try {
+      Hls = await loadHls();
+    } catch (e) {
+      this.set({ phase: 'error', error: e instanceof Error ? e.message : String(e) });
+      return;
+    }
     if (!Hls.isSupported()) {
       this.set({ phase: 'error', error: 'This browser cannot play the stream (no Media Source Extensions).' });
       return;
     }
     try {
       if (mode === 'model') await this.loadModel();
-      this.startPicture(src);
-      await this.startEar(src, mode);
+      this.startPicture(Hls, src);
+      await this.startEar(Hls, src, mode);
       this.set({ phase: 'running' });
     } catch (e) {
       this.set({ phase: 'error', error: e instanceof Error ? e.message : String(e) });
@@ -154,7 +179,7 @@ export class FedEngine {
     });
   }
 
-  private startPicture(src: FedSource) {
+  private startPicture(Hls: HlsClass, src: FedSource) {
     const hls = new Hls({ liveSyncDurationCount: 3, enableWebVTT: false, capLevelToPlayerSize: true });
     this.picHls = hls;
     hls.loadSource(src.hls);
@@ -169,7 +194,7 @@ export class FedEngine {
     }
   }
 
-  private async startEar(src: FedSource, mode: TextMode) {
+  private async startEar(Hls: HlsClass, src: FedSource, mode: TextMode) {
     const ear = new Audio();
     ear.crossOrigin = 'anonymous';
     this.ear = ear;
@@ -184,7 +209,7 @@ export class FedEngine {
     hls.attachMedia(ear);
 
     // Only the captions are wanted from it then: the ear stays silent.
-    if (mode === 'captions') { ear.muted = true; this.readCaptions(ear, hls); }
+    if (mode === 'captions') { ear.muted = true; this.readCaptions(Hls, ear, hls); }
     else await this.tap(ear);
 
     await new Promise<void>((resolve) => hls.once(Hls.Events.MANIFEST_PARSED, () => resolve()));
@@ -249,7 +274,7 @@ export class FedEngine {
   }
 
   /** The Fed's captions, as the ear's player loads them. */
-  private readCaptions(ear: HTMLAudioElement, hls: Hls) {
+  private readCaptions(Hls: HlsClass, ear: HTMLAudioElement, hls: HlsPlayer) {
     const watch = () => {
       for (let i = 0; i < ear.textTracks.length; i++) {
         const t = ear.textTracks[i]!;

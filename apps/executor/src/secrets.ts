@@ -8,11 +8,18 @@
  * key cannot be moved onto another follower. A database copy without the kek
  * file holds nothing usable.
  *
+ * KEY IMPORT. A follower may bring a SoDEX API key they made themselves (on
+ * sodex.com) instead of registering one this executor made. Its private key
+ * must not cross anything in between in the clear - the site's own proxy sees
+ * every request body - so the browser encrypts it to this executor: ECDH on
+ * P-256 with a one-time key of its own, HKDF-SHA256 bound to this executor and
+ * the wallet, AES-256-GCM. The executor's half lives in `import.key` (0600).
+ *
  * SESSIONS. A follower reads their own copies with a token the executor
  * issues after one signed 'session' request: HMAC-SHA256 over the wallet and
  * the expiry, under a second secret file (`session.key`).
  */
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes, timingSafeEqual, type KeyObject } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { generateTradingKey, privateKeyToAddress, signingKeyFrom, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
@@ -33,13 +40,70 @@ function secretFile(dir: string, name: string): Buffer {
   return b;
 }
 
+/** The key-import key pair (P-256), made on first start. */
+function importKeyFile(dir: string): KeyObject {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, 'import.key');
+  if (!existsSync(path)) {
+    const { privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    writeFileSync(path, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600, flag: 'wx' });
+  }
+  try {
+    chmodSync(path, 0o600);
+  } catch {
+    /* not on every file system (Windows) */
+  }
+  return createPrivateKey(readFileSync(path));
+}
+
+/** What the browser sends: its one-time public key (SPKI, base64url), the IV and the ciphertext with its tag (base64url). */
+export interface ImportEnvelope {
+  epk: string;
+  iv: string;
+  ct: string;
+}
+
+export const KEY_IMPORT_ALG = 'ECDH-P256+HKDF-SHA256+A256GCM';
+
+/** The HKDF info both sides use: this executor and this wallet, so an envelope cannot be replayed to another. */
+export const importInfo = (executorId: string, owner: string): string => `vd-key-import:v1:${executorId}:${owner.toLowerCase()}`;
+
 export class Secrets {
   private readonly kek: Buffer;
   private readonly sessionKey: Buffer;
+  private readonly importKey: KeyObject;
 
   constructor(dir: string) {
     this.kek = secretFile(dir, 'kek');
     this.sessionKey = secretFile(dir, 'session.key');
+    this.importKey = importKeyFile(dir);
+  }
+
+  /** The public half a browser encrypts an imported key to (SPKI DER, base64url). */
+  importPublicKey(): string {
+    return createPublicKey(this.importKey).export({ type: 'spki', format: 'der' }).toString('base64url');
+  }
+
+  /**
+   * The private key inside an import envelope (32 bytes), or a throw: a wrong
+   * executor or wallet, a tampered envelope, or not a key.
+   */
+  openImport(executorId: string, owner: string, e: ImportEnvelope): Uint8Array {
+    const epk = createPublicKey({ key: Buffer.from(e.epk, 'base64url'), format: 'der', type: 'spki' });
+    const shared = diffieHellman({ privateKey: this.importKey, publicKey: epk });
+    const key = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), importInfo(executorId, owner), 32));
+    const raw = Buffer.from(e.ct, 'base64url');
+    if (raw.length < 17) throw new Error('key import: the envelope is too short');
+    const d = createDecipheriv('aes-256-gcm', key, Buffer.from(e.iv, 'base64url'));
+    d.setAuthTag(raw.subarray(raw.length - 16));
+    const pk = new Uint8Array(Buffer.concat([d.update(raw.subarray(0, raw.length - 16)), d.final()]));
+    shared.fill(0);
+    key.fill(0);
+    if (pk.length !== 32) {
+      pk.fill(0);
+      throw new Error('key import: not a 32-byte private key');
+    }
+    return pk;
   }
 
   /* ---------------------------------------------------------- keys ----- */

@@ -10,7 +10,7 @@
  * screen's), and the body fades across a switch.
  */
 import { useCallback, useState, type ReactNode } from 'react';
-import { Chart } from '../components/Chart';
+import { LiveChart, LiveSizeCalc } from './livePrice';
 import { TickerBar, Trades } from '../components/Market';
 import { AccountTabs } from '../components/AccountTabs';
 import { FeeTier } from '../components/FeeTier';
@@ -26,7 +26,6 @@ import { FundingScanner } from '../components/explore/FundingScanner';
 import { coinLabel } from '../format';
 import { useStored } from '../hooks';
 import type { PanelTab } from './Panel';
-import { SizeCalc } from './sourceWidgets';
 import {
   AddTabButton, MENU_ICONS, TAB_WIDGETS, TabMenu, TabSidebar, assetOf, baseOf, copyOf, extraKey, isExtraKey, menuAt, useExtraTabs,
   type TabMenuItem,
@@ -48,7 +47,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
     case 'etfflows': return { content: <EtfFlows instance={instance} />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
     case 'liqmap': return { content: <LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} />, scroll: 'hidden' };
-    case 'sizecalc': return { content: <SizeCalc price={c.lastPrice || c.price} />, scroll: 'auto' };
+    case 'sizecalc': return { content: <LiveSizeCalc price={c.price} />, scroll: 'auto' };
     case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
     case 'venue': return { content: <Stats address={c.address} showTitle={false} />, scroll: 'auto' };
     default: return { content: null, scroll: 'auto' };
@@ -208,7 +207,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
       />
       <div key={on} className={`chart-card__body mo-switch${widget ? ' is-widget' : ''}`}>
         {widget ? widget.content : (
-          <Chart
+          <LiveChart
             key={symbol}
             engine={c.engine}
             symbol={symbol}
@@ -219,7 +218,7 @@ export function ChartCard({ c }: { c: TradeContext }) {
             refreshToken={c.refreshToken}
             onChanged={c.onChanged}
             onPrice={asset ? () => {} : c.onPrice}
-            lastPrice={asset ? '' : c.lastPrice}
+            noPrice={!!asset}
           />
         )}
       </div>

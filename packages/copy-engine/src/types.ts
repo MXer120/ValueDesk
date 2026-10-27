@@ -89,8 +89,11 @@ export interface CopySettings {
  * paused   by the follower: nothing new is copied, positions stay;
  * stopped  by the follower (final): nothing is copied any more;
  * halted   by a rule (the drawdown stop): nothing new is copied until the follower resumes it;
- * blocked  by a precondition (no builder approval, region, key missing or expired): nothing is
- *          copied, and the copy resumes by itself once the precondition holds again.
+ * blocked  by a precondition (no builder approval, region, key missing or expired, "ask me
+ *          each time" where the copier cannot ask): nothing new is copied, and the copy
+ *          resumes by itself once the precondition holds again.
+ * A halted or blocked copy still follows the leader's reductions and closes (reduce-only) and
+ * keeps its stop-loss / take-profit, so it never holds a position the leader has left.
  */
 export type SubscriptionStatus = 'active' | 'paused' | 'stopped' | 'halted' | 'blocked';
 
@@ -161,6 +164,13 @@ export interface SubState {
   realizedPnl: number;
   /** Trading + builder fees paid on copied orders, USD (estimated at the order price). */
   fees: number;
+  /**
+   * Leader-venue symbol -> the copy's size per unit of the leader's position (absolute),
+   * set when the copy is sized against the leader (open, increase, flip) and kept through
+   * decreases, so a scale-out or an add too small to trade is caught up by the next one.
+   * Absent in states saved before it existed: it is then taken from the copy's size.
+   */
+  ratios?: Record<string, number>;
   /** Highest copy equity seen (for the drawdown stop). */
   peakEquity: number;
   /** Event ids already handled, newest last (bounded). */
@@ -243,6 +253,9 @@ export const SKIP_REASONS = {
   'lot-size': 'Below the smallest order size on this market',
   'no-price': 'No price for this market yet',
   'halted': 'This copy is halted',
+  'blocked': 'This copy is blocked; it only reduces positions until that is solved',
+  'free-margin': 'Not enough free margin in your SoDEX account',
+  'bad-leader-size': "The trader's position could not be read (not a number), so nothing was changed",
   'paused': 'This copy is paused',
   'duplicate': 'Already handled',
   'declined': 'You declined this trade',
@@ -311,6 +324,8 @@ export interface FollowerSnapshot {
   equity: number;
   /** Margin available for new positions, USD. */
   available: number;
+  /** Whether SoDEX's answer carried `available` (false: it is unknown, not 0, and nothing is gated on it). */
+  marginKnown?: boolean;
   /** SoDEX symbol -> signed size (every position, copied or not). */
   positions: Record<string, { size: number; entry: number; leverage: number; marginMode: MarginChoice }>;
   at: number;

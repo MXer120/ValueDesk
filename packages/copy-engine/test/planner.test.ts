@@ -216,3 +216,41 @@ test('the books: entry averages on adds, realised PnL on reductions, flips reope
   assert.equal(st.owned['BTC-USD']!.entry, 80_000);
   assert.ok(Math.abs(st.fees - 1.58) < 1e-9);
 });
+
+/* ------------------------------------------------- the follower's free margin ----- */
+
+const account = (available: number, marginKnown = true) => ({ accountId: 42, equity: available, available, marginKnown, positions: {}, at: 0 });
+
+test('free margin: an open the SoDEX account cannot carry is skipped, one it can is placed', () => {
+  // 1 BTC of a 100k leader on a 1,000 copy: 0.01 BTC = 800 USD at 5x = 160 margin + 0.32 taker fee.
+  const short = planLeaderEvent(ctx({ follower: account(160), event: ev('BTC-USD', 0, 1, 80_000) }));
+  assert.equal(short.intents.length, 0);
+  assert.equal(short.skip, 'free-margin');
+  const enough = planLeaderEvent(ctx({ follower: account(161), event: ev('BTC-USD', 0, 1, 80_000) }));
+  assert.equal(enough.intents[0]!.quantity, '0.01');
+  // An increase is gated the same way.
+  const st = state({ owned: { 'BTC-USD': { size: 0.01, entry: 80_000, openedAt: 1 } } });
+  assert.equal(planLeaderEvent(ctx({ state: st, follower: account(50), event: ev('BTC-USD', 1, 2, 80_000) })).skip, 'free-margin');
+});
+
+test('free margin: the region leverage sets the margin an order needs (EEA 2x)', () => {
+  // 800 USD at 2x = 400 margin: 300 free is not enough, 401 is.
+  assert.equal(planLeaderEvent(ctx({ policy: { maxLeverage: 2 }, follower: account(300), event: ev('BTC-USD', 0, 1, 80_000) })).skip, 'free-margin');
+  assert.equal(planLeaderEvent(ctx({ policy: { maxLeverage: 2 }, follower: account(401), event: ev('BTC-USD', 0, 1, 80_000) })).intents.length, 1);
+});
+
+test('free margin: reductions are never gated; a flip counts the margin its close gives back', () => {
+  const st = state({ owned: { 'BTC-USD': { size: 0.01, entry: 80_000, openedAt: 1 } } });
+  const close = planLeaderEvent(ctx({ state: st, follower: account(0), event: ev('BTC-USD', 1, 0, 80_000) }));
+  assert.equal(close.intents[0]!.leg, 'close');
+  const dec = planLeaderEvent(ctx({ state: state({ owned: { 'BTC-USD': { size: 0.01, entry: 80_000, openedAt: 1 } } }), follower: account(0), event: ev('BTC-USD', 1, 0.5, 80_000) }));
+  assert.equal(dec.intents[0]!.leg, 'decrease');
+  // No free margin, but closing 0.01 BTC (800 at 5x) frees 160: the 0.005 BTC short (80 + fee) fits.
+  const flip = planLeaderEvent(ctx({ state: state({ owned: { 'BTC-USD': { size: 0.01, entry: 80_000, openedAt: 1 } } }), follower: account(0), event: ev('BTC-USD', 1, -0.5, 80_000) }));
+  assert.deepEqual(flip.intents.map((i) => i.leg), ['flip-close', 'flip-open']);
+});
+
+test('free margin: a margin SoDEX did not report gates nothing; paper copies (no account) are not gated', () => {
+  assert.equal(planLeaderEvent(ctx({ follower: account(0, false), event: ev('BTC-USD', 0, 1, 80_000) })).intents.length, 1);
+  assert.equal(planLeaderEvent(ctx({ follower: null, event: ev('BTC-USD', 0, 1, 80_000) })).intents.length, 1);
+});

@@ -8,6 +8,7 @@
  * the instruction. Reads use a session token from one signed 'session'
  * request, kept in this tab's sessionStorage until it expires.
  */
+import type { KeyImportEnvelope } from './keyImport';
 import {
   buildCopyRequest,
   copyRequestTypedData,
@@ -157,6 +158,8 @@ export class ExecutorClient {
 
   me = (token: string) => this.call<MeResponse>('GET', '/me', { token });
   verifyKey = (token: string) => this.call<{ key: KeyInfo | null }>('POST', '/keys/verify', { token, body: {} });
+  /** A key the follower made on SoDEX themselves, its private key sealed to this executor (keyImport.ts). */
+  importKey = (token: string, name: string, envelope: KeyImportEnvelope) => this.call<{ key: KeyInfo }>('POST', '/keys/import', { token, body: { name, envelope } });
   activity = (token: string, id: string, limit = 300) => this.call<{ entries: ActivityEntry[] }>('GET', `/copies/${encodeURIComponent(id)}/activity?limit=${limit}`, { token });
   consents = (token: string) => this.call<{ consents: Array<{ action: string; payload: string; at: number; digest: string }> }>('GET', '/consents', { token });
 

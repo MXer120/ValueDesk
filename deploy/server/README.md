@@ -167,7 +167,12 @@ From the workstation, without a shell on the instance:
   `/var/lib/valuescan/backup/executor/archive`, the newest `EXECUTOR_BACKUP_KEEP` (7)).
   **Never `kek` or `session.key`**: the followers' keys in the database are sealed with
   the kek, so a backup holds nothing a trade could be signed with; those two files
-  exist only on the data volume and in its EBS snapshots. The builder ledger and
+  exist only on the data volume (and, on AWS, in its EBS snapshots - Contabo has none).
+  **Keep them offline instead:** `sudo bash bin/executor-secrets.sh export` prints them
+  as one passphrase-encrypted block (also `import.key`, for keys followers bring); store
+  it apart from the database backups and the passphrase apart from both, and
+  `executor-secrets.sh import < block` puts them back on a new server. Without it, a lost
+  disk means every follower registers a new key before anything of theirs trades. The builder ledger and
   signing key in `/var/lib/valuescan/state` are not backed up either (DEPLOY.md
   section 16). Nothing else on the instance is state (code comes from a release,
   configuration from this directory and SSM, certificates are re-issued).

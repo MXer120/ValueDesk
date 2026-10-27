@@ -164,7 +164,7 @@ test('the copy terms disclose the fee ladder, the EEA cap and the excluded count
   assert.ok(text(COPY_RISK_SUMMARY).includes(`up to ${feePercent(COPY_FEE_MAX)}`), 'the setup sheet names the highest fee');
 
   assert.ok(doc.includes(`at most ${EEA_MAX_LEVERAGE}x leverage`), 'the EEA cap');
-  assert.equal(EEA_COUNTRIES.length, 30, 'the EEA is the 27 EU member states, Iceland, Liechtenstein and Norway');
+  assert.equal(EEA_COUNTRIES.length, 37, 'the EEA: the 27 EU member states, Iceland, Liechtenstein and Norway, and the 7 EU territories with a country code of their own');
   assert.ok(doc.includes('the 27 EU member states, Iceland, Liechtenstein and Norway'));
 
   const NAMES: Record<string, string> = {

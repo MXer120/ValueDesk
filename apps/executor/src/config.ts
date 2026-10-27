@@ -24,7 +24,10 @@
  *   EXECUTOR_KEY_TTL_DAYS    the longest key lifetime a follower may register (default 90)
  *   EXECUTOR_MAX_COPIES      copies per wallet (default 10)
  *   EXECUTOR_MAX_ALGOS       live algo orders (TWAP, VWAP, ...) per wallet (default 20)
- *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from
+ *   EXECUTOR_BUILDER_DB      hosted: the builder ledger (read-only) the copy fee tier is read from, when
+ *                            it is on this server
+ *   EXECUTOR_BUILDER_URL     hosted: or the API server's GET /api/vs/builder/volume, when the ledger is on
+ *                            another server (with EXECUTOR_BUILDER_TOKEN = its VALUESCAN_INTERNAL_TOKEN)
  *   EXECUTOR_LOCAL_ADDRESS   send every request and socket to SoDEX / Hyperliquid from this local
  *                            IP (an address of its own, so another process's rate limit cannot stop copies)
  *   LOG_LEVEL                debug | info (default) | warn | error
@@ -52,6 +55,9 @@ export interface ExecutorConfig {
   maxCopiesPerOwner: number;
   maxAlgosPerOwner: number;
   builderDb: string | null;
+  /** The API's builder volume route and its internal token (the ledger on another server). */
+  builderUrl: string | null;
+  builderToken: string | null;
   localAddress: string | null;
   logLevel: 'debug' | 'info' | 'warn' | 'error';
   /** The executor id requests are signed for; null = the default (hosted: by network; self: its own, kept in its data). */
@@ -79,6 +85,19 @@ export function dataDirFor(cwd: string = process.cwd(), env: NodeJS.ProcessEnv =
 
 const DEFAULT_ORIGINS = ['https://valuedesk.so', 'https://www.valuedesk.so', 'https://valuedeskapp.vercel.app', 'https://valuexplorer.vercel.app', 'http://localhost:5180', 'http://127.0.0.1:5180'];
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+function builderUrl(raw: string | undefined): string | null {
+  const v = raw?.trim();
+  if (!v) return null;
+  let u: URL;
+  try {
+    u = new URL(v);
+  } catch {
+    throw new Error('EXECUTOR_BUILDER_URL must be a URL (the API server\'s /api/vs/builder/volume)');
+  }
+  if (u.protocol !== 'https:' && u.hostname !== '127.0.0.1' && u.hostname !== 'localhost') throw new Error('EXECUTOR_BUILDER_URL must be https (or a loopback address)');
+  return u.toString();
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig {
   const rawKind = (env.EXECUTOR_KIND ?? 'self').trim();
@@ -120,6 +139,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     maxCopiesPerOwner: Math.max(1, Math.min(50, Number(env.EXECUTOR_MAX_COPIES ?? 10) || 10)),
     maxAlgosPerOwner: Math.max(1, Math.min(100, Number(env.EXECUTOR_MAX_ALGOS ?? 20) || 20)),
     builderDb: env.EXECUTOR_BUILDER_DB?.trim() || null,
+    builderUrl: builderUrl(env.EXECUTOR_BUILDER_URL),
+    builderToken: env.EXECUTOR_BUILDER_TOKEN?.trim() || null,
     localAddress: env.EXECUTOR_LOCAL_ADDRESS?.trim() || null,
     logLevel: level === 'debug' || level === 'warn' || level === 'error' ? level : 'info',
     executorId,

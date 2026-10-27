@@ -71,9 +71,25 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
 - Every leader position change (stream print, coalesced 150 ms per market, or a
   1-minute REST reconcile) is planned per follower: target by notional
   (proportional / fixed ratio / fixed amount), increases never shrink, decreases
-  follow the leader's fraction, flips close then reopen.
+  follow the leader's fraction, flips close then reopen. A decrease or increase
+  while the copy is on the other side (a missed flip) is a flip too.
+- The leader's fraction is kept as the copy's size per leader unit (fixed amount:
+  its adds too), so scale-outs and adds too small to trade one by one (below one
+  lot or $10) add up and are caught up by the next step, never lost.
+- Orders sent but not yet booked count as held: a second leader fill before the
+  first copy order is booked is not copied twice, and the gross leverage cap
+  (the EEA 2x cap with it) counts orders in flight on every market.
+- A reconcile's REST answer is as old as the moment its read started: a market
+  the stream printed on since, or is still merging, is left to the stream.
 - Caps in order: max position, gross leverage (the lowest of the follower's cap,
-  the **EEA 2x cap**, the market's), market order limits, step, minimum notional.
+  the **EEA 2x cap**, the market's), market order limits, step, minimum notional,
+  then the follower's **free margin** on SoDEX: an opening order it does not cover
+  (at the copy's leverage, plus the taker fee) is skipped ("not enough free
+  margin in your SoDEX account") instead of sent to be refused. Reductions are
+  never gated; a flip counts the margin its close frees.
+- The copy's leverage is set on SoDEX before an opening order and remembered only
+  once SoDEX took it (tried twice); until then only reductions go out.
+- A leader size that is not a number is ignored, never read as flat.
 - Orders are IOC limits at the SoDEX mark +/- the slippage cap, inside SoDEX's
   band; every follower of an event gets the same reference price, in random order.
 - Positions open when copying starts are left alone until the leader is flat
@@ -82,7 +98,27 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
   (reduce-only, mark trigger) so they hold while no copier runs; drawdown stop
   halts the copy.
 - A live copy is `blocked` (and resumes by itself) without a registered key, a
-  builder approval of at least 0.025%, or an allowed region.
+  builder approval of at least 0.025%, or an allowed region. The region is checked
+  first, without SoDEX, and again on every leader change, so a failed SoDEX read
+  never leaves a blocked region copying.
+- "Ask me each time" needs a copier that can ask (the browser): on the hosted or a
+  self-hosted executor a new copy with it starts `blocked` with that reason, and
+  changing a running copy to it is refused.
+- A `blocked` or `halted` copy places nothing new but still follows the leader's
+  reductions and closes (reduce-only), and its stop-loss / take-profit / drawdown
+  guards keep running.
+- Catch-up: after a restart, what the leader changed while no copier ran is
+  planned like a missed print (a position opened meanwhile counts as pre-existing);
+  on every reconcile and on resume, what a copy holds where its leader is flat or
+  on the other side (a close that filled only in part, a close missed while
+  paused, a remainder on a market a stop-loss detached) is closed reduce-only.
+  A guard close detaches its market only once SoDEX took it.
+- Lowering (or raising) the allocation moves the drawdown stop's peak by the same
+  amount, so it never reads as a loss.
+- Stop and close says "positions closed" only for positions known to be flat (paper
+  books, or the follower's account re-read); the SoDEX stop-loss of one that may
+  still be open is kept, and the status names it. Stop and keep leaves the kept
+  positions' SoDEX stops in place.
 - Signed writes are never retried; the account is re-read after orders and every
   30 s, and the copy's books follow what SoDEX says. Fills come from the public
   stream by the follower's account id.
@@ -95,7 +131,8 @@ limit are unchanged; the leader's own books (positions, the leader curve) stay r
   2.5 bp under $100k of 14-day volume, 2 bp from $100k, 1.5 bp from $500k,
   1.2 bp from $2M, 1 bp from $10M. Followers approve a 0.025% ceiling on SoDEX.
 - Blocked: US + territories (US PR VI GU AS MP UM), CU IR KP SY RU BY MM.
-  EEA residents (EU + IS LI NO): copies capped at 2x. The stricter of the
+  EEA residents (EU + IS LI NO, and the EU's own-code territories RE GP MQ GF YT
+  MF AX): copies capped at 2x. The stricter of the
   declared country and the IP country (hosted, Vercel `x-vercel-ip-country`) applies.
 
 ## Legal safeguards built in

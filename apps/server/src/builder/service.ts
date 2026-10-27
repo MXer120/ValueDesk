@@ -200,6 +200,18 @@ export class BuilderService {
   }
 
   /**
+   * A wallet's counted volume for `builder` over the last `days` UTC days, in USD
+   * (both engines), or null while the ledger is not open. What the copy
+   * executor's fee ladder reads (routes/builder.ts, /api/vs/builder/volume).
+   */
+  volumeUsd(builder: number, address: string, days: number): number | null {
+    const store = this.store;
+    if (!store) return null;
+    const w = store.windowMicro(builder, address, dayOf(this.now()) - (days - 1));
+    return (w.perps + w.spot) / 1e6;
+  }
+
+  /**
    * The default fee over time, on record before any order is judged against
    * it. One comparison in memory; a write only when the first tier changed.
    */

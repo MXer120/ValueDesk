@@ -28,8 +28,9 @@
  * The copy-trading terms every follower accepts (by wallet signature) before copying.
  * Bump it with every change to the terms (apps/web/src/legal/copyTerms.ts): every
  * follower then accepts the new text before their next change. '.2': counter-trading.
+ * 2026-10-27: algo orders on the executors, and keys the follower made themselves.
  */
-export const COPY_TERMS_VERSION = '2026-10-23.2';
+export const COPY_TERMS_VERSION = '2026-10-27';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];
@@ -39,10 +40,16 @@ export const SANCTIONED: readonly string[] = ['CU', 'IR', 'KP', 'SY', 'RU', 'BY'
 
 export const BLOCKED_COUNTRIES: readonly string[] = [...US_REGIONS, ...SANCTIONED];
 
-/** The EU's 27 plus Iceland, Liechtenstein and Norway. */
+/**
+ * The EU's 27 plus Iceland, Liechtenstein and Norway, and the parts of the EU with their
+ * own ISO country code: the outermost regions Reunion, Guadeloupe, Martinique, French
+ * Guiana, Mayotte and Saint-Martin, and Aland (Finland). They are EU territory, so the
+ * EU's retail rules (and the 2x cap) apply there too.
+ */
 export const EEA_COUNTRIES: readonly string[] = [
   'AT', 'BE', 'BG', 'HR', 'CY', 'CZ', 'DK', 'EE', 'FI', 'FR', 'DE', 'GR', 'HU', 'IE', 'IT',
   'LV', 'LT', 'LU', 'MT', 'NL', 'PL', 'PT', 'RO', 'SK', 'SI', 'ES', 'SE', 'IS', 'LI', 'NO',
+  'RE', 'GP', 'MQ', 'GF', 'YT', 'MF', 'AX',
 ];
 
 /** ESMA's retail leverage limit for crypto CFDs: 50% initial margin. */

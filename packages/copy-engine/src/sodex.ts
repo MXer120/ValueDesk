@@ -230,6 +230,7 @@ export function followerFromState(st: RawPerpsState | null, now = Date.now()): F
     accountId: typeof st?.aid === 'number' ? st.aid : 0,
     equity: Number.isFinite(equity) ? equity : 0,
     available: Number.isFinite(available) ? available : 0,
+    marginKnown: Number.isFinite(available),
     positions,
     at: now,
   };

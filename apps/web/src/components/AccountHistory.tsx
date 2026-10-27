@@ -53,6 +53,7 @@ import {
 import { StatusIcon } from './accountTables/StatusIcon';
 import type { BandMeta } from './accountTables/FilterBar';
 import type { StatusKind, StatusTone } from './accountTables/orderStatus';
+import { pollEvery } from '../exchange/visibility';
 
 const dashed = (s: string): string => (s === '-' ? DASH : s);
 /*
@@ -1203,8 +1204,8 @@ function useLedger(address: string | null, refreshToken: number) {
   const pending = view.rows.some((r) => r.state === 'pending');
   useEffect(() => {
     if (!pending) return;
-    const id = window.setInterval(() => first(false), PENDING_POLL_MS);
-    return () => window.clearInterval(id);
+    // Not while the tab is hidden; at once when it is shown again.
+    return pollEvery(PENDING_POLL_MS, () => first(false));
   }, [pending, first]);
 
   return { ...live, rows: view.rows, hasMore: view.more, more, retry: () => first(false) };

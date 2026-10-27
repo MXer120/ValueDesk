@@ -18,6 +18,7 @@ import { num } from '../../format';
 import { logLoadFailure } from '../LoadFailed';
 import { visibleTimeout } from '../../exchange/visibility';
 import { serverGetJson } from '../../serverFetch';
+import { useTickers } from '../../hooks';
 
 interface CacheEntry<T> {
   at: number;
@@ -331,8 +332,9 @@ function useJson<T>(key: string, load: (signal: AbortSignal) => Promise<T>, enab
 export function useMarkets(enabled: boolean): MarketsState {
   const spotSymbols = useJson<{ symbols: Symbol[] }>('md:spot:symbols', () => api.symbols('spot'), enabled, 300_000);
   const perpsSymbols = useJson<{ symbols: Symbol[] }>('md:perps:symbols', () => api.symbols('perps'), enabled, 300_000);
-  const spotTickers = useJson<{ tickers: Ticker[] }>('md:spot:tickers', () => api.tickers('spot'), enabled, 15_000);
-  const perpsTickers = useJson<{ tickers: Ticker[] }>('md:perps:tickers', () => api.tickers('perps'), enabled, 15_000);
+  // The page's shared snapshots (hooks.ts useTickers): the trade page already reads them.
+  const spotTickers = useTickers('spot', { enabled, pollMs: 15_000 });
+  const perpsTickers = useTickers('perps', { enabled, pollMs: 15_000 });
   const positioning = useJson<Positioning[]>(
     'vs:positioning:all',
     (signal) => vsApi.positioning({ venue: 'all' }, signal),

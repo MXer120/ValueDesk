@@ -28,6 +28,7 @@ import {
   acceptTerms,
   approveFee,
   approveKey,
+  importKey,
   connectSelf,
   readiness,
   revokeKey,
@@ -86,9 +87,9 @@ function Step({ done, current, title, desc, action, children, n }: {
   );
 }
 
-function ActBtn({ label, onClick, primary, disabled, busy }: { label: string; onClick: () => void; primary: boolean; disabled?: boolean; busy?: boolean }) {
+function ActBtn({ label, onClick, primary, disabled, busy, submit = false }: { label: string; onClick: () => void; primary: boolean; disabled?: boolean; busy?: boolean; submit?: boolean }) {
   return (
-    <button type="button" className={`cs-btn${primary ? ' cs-btn--primary' : ''}`} onClick={onClick} disabled={disabled || busy}>
+    <button type={submit ? 'submit' : 'button'} className={`cs-btn${primary ? ' cs-btn--primary' : ''}`} onClick={onClick} disabled={disabled || busy}>
       {busy ? <span className="fx-spin" aria-hidden="true" /> : null}
       {label}
     </button>
@@ -143,6 +144,8 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   const [selfUrl, setSelfUrl] = useState(live.self.url || DEFAULT_SELF_URL);
   const [pairing, setPairing] = useState('');
   const [days, setDays] = useState<number>(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
+  // A key the follower made on SoDEX themselves (hosted and self-hosted): its name and private key.
+  const [own, setOwn] = useState<{ open: boolean; name: string; key: string }>({ open: false, name: '', key: '' });
 
   useEffect(() => {
     setDays(mode === 'browser' ? MAX_BROWSER_KEY_DAYS : 30);
@@ -380,6 +383,33 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
               </div>
               {mode === 'browser' && (
                 <p className="fx-note">At most {MAX_BROWSER_KEY_DAYS} days in a browser. When it runs out, copying stops until you approve a new one.</p>
+              )}
+              {mode !== 'browser' && (
+                <div className="cs-own">
+                  <button type="button" className="fx-link" aria-expanded={own.open} onClick={() => setOwn((o) => ({ ...o, open: !o.open }))}>
+                    {own.open ? 'Let the executor make the key instead' : 'I made an API key on SoDEX myself'}
+                  </button>
+                  {own.open && (
+                    <form
+                      className="cs-own__form"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        void run('key', async () => {
+                          await importKey(mode, own.name, own.key);
+                          setOwn({ open: false, name: '', key: '' });
+                        }, 'Your SoDEX key is set up for copying.');
+                      }}
+                    >
+                      <p className="fx-note">
+                        Make a perps API key on sodex.com with this wallet, valid for at most {side?.info?.keyTtlDaysMax ?? 90} days, then enter its name and its private key here.
+                        The key is encrypted in this browser so that only {mode === 'hosted' ? 'the ValueDesk executor' : 'your copier'} can read it.
+                      </p>
+                      <input className="fx-input" value={own.name} onChange={(e) => setOwn((o) => ({ ...o, name: e.target.value }))} placeholder="Key name, as SoDEX shows it" aria-label="Key name" spellCheck={false} autoComplete="off" maxLength={64} />
+                      <input className="fx-input" type="password" value={own.key} onChange={(e) => setOwn((o) => ({ ...o, key: e.target.value }))} placeholder="Private key (0x...)" aria-label="Private key" spellCheck={false} autoComplete="off" />
+                      <ActBtn label="Use this key" primary disabled={!owner || !r.connected || !r.terms || !own.name.trim() || !own.key.trim()} busy={working === 'key'} onClick={() => {}} submit />
+                    </form>
+                  )}
+                </div>
               )}
             </div>
           )}

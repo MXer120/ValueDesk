@@ -305,6 +305,12 @@ export interface ExecutorInfo {
   /** It also runs algo orders (TWAP, VWAP, ...) with the same key; absent on an older executor. */
   algos?: { maxPerOwner: number };
   /**
+   * A SoDEX API key the follower made themselves can be brought here: its private key
+   * encrypted to `publicKey` (ECDH P-256, HKDF-SHA256 with `info` - '<owner>' replaced by
+   * the wallet - then AES-256-GCM). Absent on an older executor.
+   */
+  keyImport?: { alg: string; publicKey: string; info: string };
+  /**
    * What this executor understands beyond the first release (EXECUTOR_FEATURES). An
    * executor without 'counter' would IGNORE a counter-trade's direction (unknown rule
    * fields are ignored) and copy the trader instead, so the site never sends one to it.
@@ -316,7 +322,7 @@ export interface ExecutorInfo {
  * 'counter': the rules may carry direction 'counter' (planner.ts).
  * 'site-terms': it records 'accept-site-terms' (POST /site-terms); the site sends no record to one without it.
  */
-export const EXECUTOR_FEATURES = ['counter', 'site-terms'] as const;
+export const EXECUTOR_FEATURES = ['counter', 'site-terms', 'key-import'] as const;
 
 export interface SessionGrant {
   token: string;

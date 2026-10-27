@@ -165,6 +165,9 @@ const levelOf = (c: Pick<ChildOrder, 'tag'>): number => {
 const EXITS_RETRY_MS = 30_000;
 const EXITS_MAX_REFUSALS = 5;
 
+/** What update() may change on a running algo. */
+const UPDATABLE: ReadonlySet<string> = new Set(['limitPrice', 'upper', 'lower', 'maxSpreadBps', 'label', 'quantity']);
+
 const dec = (n: number): string => canonicalDecimal(numberToPlainString(Number(n.toPrecision(12))));
 
 interface PaperOrder {
@@ -186,7 +189,7 @@ export class AlgoRuntime {
   private busy = new Set<string>();
   private dirty = new Set<string>();
   private leverageSet = new Set<string>();
-  private problems = new Map<string, { at: number; problem: string | null }>();
+  private problems = new Map<string, { at: number; problem: string | null; unchecked?: boolean }>();
   private lastHistoryAt = 0;
   private lookupBusy = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
@@ -366,7 +369,13 @@ export class AlgoRuntime {
       // Every level must be an order SoDEX takes: one under its minimum would be dropped, and the ladder would not be what was signed.
       const small = scaleLadder(spec, m, a.seed).filter((l) => l.qty < minChildQty(m, l.price));
       if (small.length) throw new Error(`${small.length} level${small.length === 1 ? '' : 's'} of this ladder would be under SoDEX's $${m.minNotional} minimum order. Use fewer orders, a larger size, or less skew.`);
+      // Nor over its largest order: SoDEX would refuse that level, and the ladder would not be what was signed.
+      const big = scaleLadder(spec, m, a.seed).filter((l) => l.qty > maxOrderQty(m, l.price) + 1e-12);
+      if (big.length) throw new Error(`${big.length} level${big.length === 1 ? '' : 's'} of this ladder would be over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString('en-US')})` : ''}. Use more orders or a smaller size.`);
     }
+    // One resting limit (a bracket's limit entry, a conditional's limit) is one order: it must be one SoDEX takes.
+    const oneLimit = spec.kind === 'bracket' && spec.entry === 'limit' && spec.price !== null ? { qty: Number(spec.quantity), price: spec.price } : spec.kind === 'conditional' && spec.then.type === 'limit' ? { qty: Number(spec.then.quantity), price: spec.then.price } : null;
+    if (oneLimit && oneLimit.qty > maxOrderQty(m, oneLimit.price) + 1e-12) throw new Error(`This order is over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString('en-US')})` : ''}. Use a smaller size, or a TWAP to split it.`);
     if (spec.triggerPrice !== null) {
       const mk = this.market.mark(spec.symbol)?.mark ?? null;
       if (mk !== null) a.k.triggerFrom = mk;
@@ -387,7 +396,7 @@ export class AlgoRuntime {
     a.k.pausedFrom = a.status;
     await this.setStatus(a, 'paused', 'Paused by you.');
     await this.pullResting(a);
-    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
+    for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.pause(c.id);
     return a;
   }
 
@@ -397,23 +406,28 @@ export class AlgoRuntime {
     const back = a.k.pausedFrom === 'scheduled' ? 'scheduled' : 'running';
     delete a.k.pausedFrom;
     await this.setStatus(a, back, null);
-    for (const c of this.legsOf(a)) if (c.status === 'paused') await this.resume(c.id);
+    for (const c of this.linkedOf(a)) if (c.status === 'paused') await this.resume(c.id);
     return a;
   }
 
   /**
    * Cancel an algo: its resting children are cancelled on SoDEX; what filled
    * stays filled, and its exits stay on SoDEX to protect that (the log says so).
+   * `pullAll` (the kill switch) pulls its exits and anything it left resting too.
    */
-  async cancel(id: string): Promise<AlgoRecord> {
+  async cancel(id: string, o: { pullAll?: boolean } = {}): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) {
       // An ended algo keeps only what protects or finishes what it filled (its exits, a child left resting): cancelling it pulls those.
       await this.pullLeftovers(a);
       return a;
     }
-    for (const c of this.legsOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id);
+    for (const c of this.linkedOf(a)) if (!FINAL_STATUSES.has(c.status)) await this.cancel(c.id, o);
     await this.end(a, 'cancelled', 'Cancelled by you.');
+    if (o.pullAll) {
+      for (const c of this.linkedOf(a)) if (this.hasLeftovers(c)) await this.pullLeftovers(c);
+      await this.pullLeftovers(a);
+    }
     return a;
   }
 
@@ -447,11 +461,27 @@ export class AlgoRuntime {
     return ((a.k.legs as string[] | undefined) ?? []).map((id) => this.algos.get(id)).filter((x): x is AlgoRecord => !!x);
   }
 
-  /** The kill switch: every algo of `owner` is cancelled. */
+  /**
+   * The algos that follow this one's pause, resume and cancel: a basket's
+   * legs, and the algo a conditional started while it was paused (until the
+   * conditional ends, it waits with it).
+   */
+  private linkedOf(a: AlgoRecord): AlgoRecord[] {
+    const out = this.legsOf(a);
+    const child = typeof a.k.child === 'string' ? this.algos.get(a.k.child) : undefined;
+    if (child) out.push(child);
+    return out;
+  }
+
+  /**
+   * The kill switch: every algo of `owner` is cancelled, and with it
+   * everything it has on SoDEX - its resting orders, the exits of a running
+   * algo as of one that had ended, a child left resting. One press leaves
+   * nothing behind (a plain cancel keeps the exits that protect what filled).
+   */
   async cancelAll(owner: string): Promise<AlgoRecord[]> {
     const out: AlgoRecord[] = [];
-    // Ended algos too, where they still have exits or a resting child on SoDEX: the kill switch leaves nothing behind.
-    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status) || this.hasLeftovers(a)) out.push(await this.cancel(a.id));
+    for (const a of this.list(owner)) if (!FINAL_STATUSES.has(a.status) || this.hasLeftovers(a)) out.push(await this.cancel(a.id, { pullAll: true }));
     return out;
   }
 
@@ -463,6 +493,9 @@ export class AlgoRuntime {
   async update(id: string, patch: Partial<Pick<AlgoSpec, 'limitPrice' | 'upper' | 'lower' | 'maxSpreadBps' | 'label'>> & { quantity?: string }): Promise<AlgoRecord> {
     const a = this.need(id);
     if (FINAL_STATUSES.has(a.status)) throw new Error('This algo has ended.');
+    // Only these: what the algo is (its kind, market, side, practice or live, reduce-only...) was signed and checked when it started.
+    const other = Object.keys(patch).filter((k) => !UPDATABLE.has(k) && (patch as Record<string, unknown>)[k] !== undefined);
+    if (other.length) throw new Error(`Only the limit price, bounds, spread guard, label and size of a running algo can be changed (not ${other.join(', ')}).`);
     const next = { ...a.spec, ...patch } as Record<string, unknown>;
     const before = this.targetOf(a);
     if (patch.quantity !== undefined) {
@@ -670,8 +703,8 @@ export class AlgoRuntime {
     // It begins only with a price in hand: the arrival price and a chase's reference are taken here.
     if (a.status === 'scheduled') {
       if (!(await this.ready(a, now))) return;
-      await this.begin(a, m, now);
-      if (this.stopped(a)) return;
+      const began = await this.begin(a, m, now);
+      if (!began || this.stopped(a)) return;
     }
     const mk = this.market.mark(s.symbol)?.mark ?? mid(q);
     // The trader's bounds, on the mark.
@@ -842,8 +875,8 @@ export class AlgoRuntime {
     return true;
   }
 
-  /** Start working: the arrival price, the schedule, the profile. */
-  private async begin(a: AlgoRecord, m: MarketInfo, now: number): Promise<void> {
+  /** Start working: the arrival price, the schedule, the profile. false: it did not start (yet). */
+  private async begin(a: AlgoRecord, m: MarketInfo, now: number): Promise<boolean> {
     const s = a.spec;
     const q = this.market.quote(s.symbol);
     a.startedAt = now;
@@ -853,12 +886,18 @@ export class AlgoRuntime {
         // A time-sliced close: its size and side are the position's, now.
         const pos = await this.positionOf(a, s.symbol);
         // Cancelled while the position was read: it stays cancelled.
-        if (FINAL_STATUSES.has(a.status)) return;
-        const size = pos === null ? 0 : floorStep(Math.abs(pos) * s.closeShare, m);
+        if (FINAL_STATUSES.has(a.status)) return false;
+        if (pos === null) {
+          // A read that failed is not "no position": it stays scheduled and reads again on the next step.
+          a.startedAt = null;
+          await this.hold(a, `Waiting: your position on ${m.name} could not be read; trying again.`);
+          return false;
+        }
+        const size = floorStep(Math.abs(pos) * s.closeShare, m);
         if (!pos || size < Number(m.stepSize)) {
           a.startedAt = null;
-          await this.end(a, 'expired', pos === null ? `Your position on ${m.name} could not be read; nothing was closed.` : `There is no position on ${m.name} to close.`);
-          return;
+          await this.end(a, 'expired', `There is no position on ${m.name} to close.`);
+          return false;
         }
         a.k.total = size;
         a.k.closeSide = pos > 0 ? 'sell' : 'buy';
@@ -885,15 +924,16 @@ export class AlgoRuntime {
       a.k.retriesLeft = s.retries;
       a.k.waveAt = now;
     }
-    if (FINAL_STATUSES.has(a.status)) return;
+    if (FINAL_STATUSES.has(a.status)) return false;
     if (a.status === 'paused') {
       // Paused while it was starting: it is set up, and resumes as running.
       a.k.pausedFrom = 'running';
       await this.save(a);
-      return;
+      return true;
     }
     await this.setStatus(a, 'running', null);
     await this.event(a, 'status', a.arrival ? `Started. Arrival price ${a.arrival}.` : 'Started.');
+    return true;
   }
 
   /* ---------------------------------------------------------- the worker ----- */
@@ -1414,6 +1454,8 @@ export class AlgoRuntime {
       if (typeof a.k.takeQty !== 'number') {
         const pos = await this.positionOf(a, s.symbol);
         if (this.stopped(a)) return;
+        // A read that failed is not "no position": it holds and reads again on the next step; only a confirmed 0 ends it.
+        if (pos === null) return this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
         if (!pos) return this.end(a, 'expired', `There was no position on ${s.symbol} to close.`);
         a.k.takeQty = floorStep(Math.abs(pos) * t.share, m);
         a.k.closeSide = pos > 0 ? 'sell' : 'buy';
@@ -1434,12 +1476,22 @@ export class AlgoRuntime {
     }
     // Started already (before a restart): it is not started twice.
     const started = [...this.algos.values()].find((x) => x.parentId === a.id);
-    if (started) return this.end(a, 'done', `Started a ${ALGO_NAMES[started.spec.kind]} on ${started.spec.symbol}.`);
+    if (started) {
+      delete a.k.child;
+      return this.end(a, 'done', `Started a ${ALGO_NAMES[started.spec.kind]} on ${started.spec.symbol}.`);
+    }
     try {
       // It runs as its parent does: a practice run starts a practice run, under the same region rules.
       const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec: { ...t.algo, paper: s.paper || t.algo.paper }, parentId: a.id, consent: a.consent, country: a.country, observedCountry: a.observedCountry });
       if (FINAL_STATUSES.has(a.status)) {
         await this.cancel(child.id);
+        return;
+      }
+      if (a.status === 'paused') {
+        // Paused while it was starting the algo: the algo waits with it, and both go on (or are cancelled) together.
+        a.k.child = child.id;
+        await this.save(a);
+        await this.pause(child.id);
         return;
       }
       return this.end(a, 'done', `Started a ${ALGO_NAMES[child.spec.kind]} on ${child.spec.symbol}${child.spec.paper ? ' (paper)' : ''}.`);
@@ -1472,7 +1524,11 @@ export class AlgoRuntime {
 
   private async stepTrailing(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'trailing' }>;
-    if (a.k.fired) return this.afterFire(a, m, q, mk);
+    if (a.k.fired) {
+      // Fired, but its size is not known yet (the position read failed, or a pause landed during it): read again.
+      if (typeof a.k.takeQty !== 'number' && !(await this.trailingSize(a, m))) return;
+      return this.afterFire(a, m, q, mk);
+    }
     const price = s.source === 'last' ? (this.market.last(s.symbol)?.price ?? mk) : mk;
     const st = (a.k.trail as TrailState | undefined) ?? { armed: false, extreme: null };
     const r = trail(st, s.side, price, s);
@@ -1483,16 +1539,39 @@ export class AlgoRuntime {
     if (!wasArmed && r.state.armed && s.activationPrice !== null) await this.event(a, 'info', `Activated at ${price}; trailing from here.`);
     if (!r.fired) return;
     a.k.fired = now;
-    if (s.quantity !== null) a.k.takeQty = Number(s.quantity);
-    else {
-      const pos = await this.positionOf(a, s.symbol);
-      if (this.stopped(a)) return;
-      const right = pos !== null && (s.side === 'sell' ? pos > 0 : pos < 0);
-      if (!right) return this.end(a, 'expired', `Fired at ${price}, but there was no ${s.side === 'sell' ? 'long' : 'short'} position on ${s.symbol} to close.`);
-      a.k.takeQty = floorStep(Math.abs(pos!), m);
-    }
+    // Written before it reads or sends: a stop that fired stays fired (after a pause, a failed read, a restart).
+    await this.save(a);
     await this.event(a, 'info', `Fired: ${s.source} ${price} reached the stop at ${r.stop?.toFixed(6).replace(/\.?0+$/, '')}.`);
+    if (!(await this.trailingSize(a, m))) return;
     return this.afterFire(a, m, q, mk);
+  }
+
+  /**
+   * A fired trailing stop's size: its own, or the whole position it closes.
+   * false: not known yet - the read failed (it holds and reads again on the
+   * next step), it was paused or cancelled meanwhile, or there is no such
+   * position (a confirmed 0: it ends).
+   */
+  private async trailingSize(a: AlgoRecord, m: MarketInfo): Promise<boolean> {
+    const s = a.spec as Extract<AlgoSpec, { kind: 'trailing' }>;
+    if (s.quantity !== null) {
+      a.k.takeQty = Number(s.quantity);
+      return true;
+    }
+    const pos = await this.positionOf(a, s.symbol);
+    if (this.stopped(a)) return false;
+    if (pos === null) {
+      await this.hold(a, `Fired; your position on ${s.symbol} could not be read - trying again.`);
+      return false;
+    }
+    const right = s.side === 'sell' ? pos > 0 : pos < 0;
+    if (!right) {
+      await this.end(a, 'expired', `Fired, but there was no ${s.side === 'sell' ? 'long' : 'short'} position on ${s.symbol} to close.`);
+      return false;
+    }
+    a.k.takeQty = floorStep(Math.abs(pos), m);
+    this.dirty.add(a.id);
+    return true;
   }
 
   /**
@@ -1502,7 +1581,9 @@ export class AlgoRuntime {
    */
   private async stepBasket(a: AlgoRecord): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'basket' }>;
-    if (!a.k.legs) {
+    // Paused while its legs were starting: the legs not yet started start once it runs again.
+    const resuming = a.k.legsPaused === true && Array.isArray(a.k.legs);
+    if (!a.k.legs || resuming) {
       const specs: Array<Record<string, unknown>> = [];
       for (const l of s.legs) {
         const lm = this.markets.get(l.symbol);
@@ -1527,19 +1608,41 @@ export class AlgoRuntime {
         specs.push(spec);
       }
       // Each leg is written down as it starts: after a crash half-way, the legs that started are known (and stopped).
-      a.k.legs = [];
-      await this.save(a);
+      if (!a.k.legs) {
+        a.k.legs = [];
+        await this.save(a);
+      }
+      const ids = a.k.legs as string[];
+      if (resuming) {
+        // A leg written to the store but not yet to the basket's list (the pause landed in between) is adopted, not started twice.
+        for (const x of this.list(a.owner).reverse()) if (x.parentId === a.id && !ids.includes(x.id)) ids.push(x.id);
+        delete a.k.legsPaused;
+      }
+      // Legs start in order: the first ids.length of them are running already.
       for (const [i, spec] of specs.entries()) {
+        if (i < ids.length) continue;
         if (this.stopped(a)) break;
         try {
           const child = await this.add({ owner: a.owner, accountId: a.accountId, mode: a.mode, spec, parentId: a.id, consent: a.consent, seed: (a.seed + i + 1) >>> 0, country: a.country, observedCountry: a.observedCountry });
-          (a.k.legs as string[]).push(child.id);
+          ids.push(child.id);
           await this.save(a);
+          // Cancelled or paused while this leg was being added (after the basket passed it on to its legs): the leg follows at once, it never trades on its own.
+          if (FINAL_STATUSES.has(a.status)) {
+            await this.end(child, 'cancelled', `Stopped with its basket: ${a.statusReason ?? 'it ended'}`);
+            return;
+          }
+          if (a.status === 'paused') await this.pause(child.id);
         } catch (e) {
           return this.end(a, 'failed', `${String(spec.symbol)} could not start (${e instanceof Error ? e.message : String(e)}); the legs already started are stopped.`);
         }
       }
       if (FINAL_STATUSES.has(a.status)) return;
+      if (ids.length < specs.length) {
+        // Paused half-way: the rest start on the next step after it is resumed (not "stopped while its legs were starting").
+        a.k.legsPaused = true;
+        await this.save(a);
+        return;
+      }
       a.k.legsStarted = true;
       await this.save(a);
       await this.event(a, 'info', `Started ${specs.length} legs: ${s.legs.map((l) => `${l.side} $${l.usd} ${l.symbol}`).join(', ')}.`);
@@ -1563,8 +1666,12 @@ export class AlgoRuntime {
       return this.work(a, m, q, mk, { due: total, late: total, total, exec: { style: 'taker', slippageBps: s.slippageBps, offsetTicks: 0, chaseTicks: 1, makerShare: 0.5 }, tag: 'entry' });
     }
     if (!a.k.placed) {
+      // An entry pulled by a pause is placed again only once SoDEX confirmed it gone (its last fills counted).
+      if (this.live(a).length) return;
+      const qty = floorStep(total - a.filled, m);
+      if (qty < minChildQty(m, s.price!)) return this.end(a, a.filled > 0 ? 'done' : 'failed', a.filled > 0 ? `Entered ${dec(a.filled)}; the rest is under SoDEX's minimum order.` : 'Under SoDEX\'s minimum order size: nothing could be sent.');
       // Counted as placed only once it went out: an entry held (no key, the region's cap) waits for the next step.
-      await this.send(a, m, [{ side: s.side, price: s.price!, quantity: total, tif: 'gtc', tag: 'entry' }], () => {
+      await this.send(a, m, [{ side: s.side, price: s.price!, quantity: qty, tif: 'gtc', tag: 'entry' }], () => {
         a.k.placed = true;
       });
       return;
@@ -1892,6 +1999,8 @@ export class AlgoRuntime {
       for (const c of resting) if (levelOf(c) >= 0) queue.add(levelOf(c));
       a.k.queue = [...queue].sort((x, y) => x - y);
     }
+    // A bracket's limit entry pulled by a pause or a hold goes back on the book when it carries on, for what it has not filled.
+    if (a.spec.kind === 'bracket' && a.spec.entry === 'limit' && !FINAL_STATUSES.has(a.status) && resting.some((c) => c.tag === 'entry')) a.k.placed = false;
     await this.cancelChildren(a, m, resting);
   }
 
@@ -2108,9 +2217,22 @@ export class AlgoRuntime {
       return;
     }
     const sink = this.host.sinkFor(a);
-    if (!sink) return;
+    if (!sink) {
+      // No key here (now): nothing was sent, so they are not "being cancelled" - they are tried again when one is back (pullLeftovers, the kill switch).
+      for (const x of open) x.cancelling = false;
+      await this.event(a, 'error', `The ${open.map((x) => x.tag).join(' and ')} could not be cancelled: the trading key is not available here. Cancel ${open.length === 1 ? 'it' : 'them'} in your open orders.`);
+      return;
+    }
     try {
       await sink.cancel(a, m, open.map((x) => x.clOrdID));
+      // Pulled for good (the trader's cancel, the kill switch, one cancels the other) and SoDEX took the cancel: they are over.
+      // A fill that raced the cancel still comes as an order update and is booked (onExitUpdate reads the fill, not the state).
+      if (FINAL_STATUSES.has(a.status) && a.k.exitsDone) {
+        for (const x of open) {
+          x.state = 'done';
+          x.cancelling = false;
+        }
+      }
     } catch (e) {
       for (const x of open) x.cancelling = false;
       await this.event(a, 'error', `The exits could not be cancelled: ${e instanceof Error ? e.message : String(e)}`);
@@ -2338,7 +2460,13 @@ export class AlgoRuntime {
       problem = await this.host.problem(a);
     } catch (e) {
       this.host.log.warn('algo: readiness check failed', { algo: a.id, error: String(e) });
-      problem = hit?.problem ?? null;
+      // The last answer stands; with none yet, it is not "no problem": a live algo never trades unchecked. Checked again soon.
+      if (!hit || hit.unchecked) {
+        const why = 'Held: whether this algo may trade (key, fee approval) could not be checked with SoDEX; trying again.';
+        this.problems.set(a.id, { at: now - PROBLEM_RECHECK_MS + 5_000, problem: why, unchecked: true });
+        return why;
+      }
+      problem = hit.problem;
     }
     this.problems.set(a.id, { at: now, problem });
     return problem;

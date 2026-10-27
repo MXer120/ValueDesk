@@ -344,6 +344,11 @@ Against this inventory, HOSTED_ROUTES should be:
   (`docs/BUILDER-TIERS.md` §3). The one per-wallet route: it names the wallet the
   app trades with, and a hint makes the server read that wallet's fills from SoDEX
   itself, from its own address, on a budget of its own (§6 there).
+- **Add**: `GET /api/vs/builder/volume?address=&builder=&days=` (cls `read`): one
+  wallet's counted builder volume, for the hosted copy executor on the other server (its
+  copy fee step). Internal: without the `X-Internal-Token` (`VALUESCAN_INTERNAL_TOKEN`)
+  it is a 404 even past the gate, since the site's proxy adds the origin secret to every
+  request.
 - **Add**: the knowledge folders (`routes/folders.ts`), one wallet's own research:
   `POST /api/folders/session` (cls `auth`: a signed `FoldersSignIn`, free typed data,
   for a 7-day token), `GET /api/folders`, `/api/folders/item`, `/api/folders/file/url`

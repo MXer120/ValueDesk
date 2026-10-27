@@ -11,6 +11,7 @@
  * code the copier printed; hosted: sign in), and approve the copy key - a key
  * registered on the follower's own SoDEX account for that mode only.
  */
+import { parsePrivateKey, sealForImport } from './keyImport';
 import { useEffect, useSyncExternalStore } from 'react';
 import {
   COPY_TERMS_VERSION,
@@ -310,6 +311,33 @@ export async function approveKey(mode: CopyModeId, days: number): Promise<void> 
       if (r?.key?.registered) break;
     }
     await loadMe(mode, token);
+  }
+}
+
+/**
+ * Use a SoDEX API key the follower made themselves (sodex.com -> API keys) on an
+ * executor, instead of one the executor makes. The private key is sealed to the
+ * executor here, in the browser (keyImport.ts), and sent with the session: only
+ * the executor can open it. It must be listed on this wallet's SoDEX account
+ * under `name`, valid for at most the executor's longest key lifetime.
+ */
+export async function importKey(mode: 'hosted' | 'self', name: string, privateKeyText: string): Promise<void> {
+  const { owner, provider: p } = needWallet();
+  await requireTermsOrThrow({ owner, reason: 'set up the copy key' });
+  const client = mode === 'hosted' ? hostedExecutor : selfClient;
+  const info = state[mode].info;
+  if (!client || !info) throw new Error('Connect to the executor first.');
+  if (!info.keyImport) throw new Error(mode === 'self' ? 'This copier is too old to take a key of your own: download the current one and start it again.' : 'The ValueDesk executor does not take keys of your own yet.');
+  const pk = parsePrivateKey(privateKeyText);
+  if (!pk) throw new Error("Paste the API key's private key: 64 hexadecimal characters, as sodex.com showed it when you made the key.");
+  try {
+    if (mode === 'self') await sendTermsTo(client, owner);
+    const token = await busyWith('wallet', () => client.session(p, owner, info.executorId));
+    const envelope = await sealForImport(info.keyImport.publicKey, info.keyImport.info.replace('<owner>', owner), pk);
+    await client.importKey(token, name.trim(), envelope);
+    await loadMe(mode, token);
+  } finally {
+    pk.fill(0);
   }
 }
 

@@ -79,6 +79,10 @@
 .cs-check { display: flex; align-items: flex-start; gap: 8px; font-size: var(--fs-xs); line-height: 1.4; }
 .cs-check input { margin-top: 2px; flex: none; }
 .cs-days { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* a key the follower made on SoDEX themselves */
+.cs-own { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.cs-own__form { display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.cs-own__form .cs-btn { align-self: flex-start; }
 .cs-form code { font-family: var(--font-num); font-size: 0.95em; }
 .cs-actions { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
 

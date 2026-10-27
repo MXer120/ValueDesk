@@ -459,7 +459,11 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
           if (Array.isArray(o.weights)) {
             const ws = (o.weights as unknown[]).map(Number);
             if (ws.length !== ps.length || ws.some((x) => !Number.isFinite(x) || x <= 0)) e.weights = 'One positive size per price.';
-            else sc.weights = ws;
+            else {
+              sc.weights = ws;
+              // The sizes are spelled out: the skew only describes them (for an executor that predates explicit levels), so its range does not apply.
+              if (e.skew && Number.isFinite(sc.skew) && sc.skew > 0) delete e.skew;
+            }
           }
         }
       }
@@ -519,6 +523,8 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         expiresAt: time(o, 'expiresAt', 'Expiry', e),
         then: action(o.then, e, depth),
       };
+      // A limit order it places rests at its price: one past the limit price would buy above it (sell below it).
+      if (spec.then.type === 'limit' && Number.isFinite(spec.then.price) && !withinLimit(b.side, spec.then.price, b.limitPrice)) e['then.price'] = `The price is past your limit price of ${b.limitPrice}.`;
       if (b.exits && (spec.then.type === 'close' || spec.then.type === 'algo')) e.exits = spec.then.type === 'close' ? 'A close opens nothing to protect: no exits on it.' : 'Set the exits on the algo it starts.';
       break;
     }
@@ -609,6 +615,8 @@ export function checkAlgoSpec(input: unknown, depth = 0): AlgoSpecCheck {
         price: entry === 'limit' ? price(o, 'price', 'Entry price', e) : null,
         slippageBps: o.slippageBps === undefined ? 30 : num(o, 'slippageBps', 'Max slippage', ALGO_LIMITS.exec.slippageBps, e),
       };
+      // A limit entry rests at its price: one past the limit price would buy above it (sell below it).
+      if (spec.price !== null && Number.isFinite(spec.price) && !withinLimit(b.side, spec.price, b.limitPrice)) e.price = `The entry price is past your limit price of ${b.limitPrice}.`;
       break;
     }
   }

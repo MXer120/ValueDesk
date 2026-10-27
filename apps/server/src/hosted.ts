@@ -144,6 +144,9 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   // read of this server's own ledger and one signature. A hint is what later costs SoDEX reads from
   // this server's address, so a request that carries one counts as `upstream` too.
   { method: 'GET', url: '/api/vs/builder/terms', cls: 'read', upstreamWhen: ['hint'] },
+  // One wallet's counted builder volume, for the copy executor on the other server (routes/builder.ts).
+  // Internal: without its own token it is a 404 even past the gate.
+  { method: 'GET', url: '/api/vs/builder/volume', cls: 'read' },
   // Deep links by SoDEX account id: the index's leaderboard map, on-chain as a fallback.
   { method: 'GET', url: '/api/feed/account', cls: 'upstream' },
   // Global, not per-user (until the web reads alpha-biz directly).

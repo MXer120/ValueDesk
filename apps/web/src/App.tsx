@@ -31,6 +31,7 @@ import type { Venue } from './vsApi';
 import { OPEN_LEGAL_EVENT, TermsGate } from './legal/LegalGate';
 import { knowledgeOnAtBoot, useKnowledge } from './folders/access';
 import { registerChartOpener } from './folders/bridge';
+import { setLastPrice } from './lastPrice';
 
 const DEFAULT_SYMBOL: Record<Engine, string> = { perps: 'BTC-USD', spot: 'vBTC_vUSDC' };
 
@@ -244,7 +245,7 @@ function AppShell() {
       .catch(() => { window.location.href = scanHref(); });
   }, []);
   const [price, setPrice] = useState('');
-  const [lastPrice, setLastPrice] = useState('');
+  /* The last price lives in lastPrice.ts, not here: see there. */
   /* The live wallet's EIP-1193 provider, for everything that signs or sends:
      enable trading, Money, Deposit, Points, Copy. Null = read-only. */
   const [provider, setProvider] = useState<Eip1193Provider | null>(null);
@@ -412,7 +413,6 @@ function AppShell() {
       byName,
       refreshToken,
       price,
-      lastPrice,
       favorites,
       positionCount: posCount,
       orderCount: orderCount,
@@ -429,7 +429,7 @@ function AppShell() {
     }),
     [
       engine, symbol, sym, health?.network, session?.unlocked, session?.session?.address,
-      address, byName, refreshToken, price, lastPrice, favorites, posCount, orderCount,
+      address, byName, refreshToken, price, favorites, posCount, orderCount,
       bump, toggleFavorite, openSearch, setTab, openScanAccountId, setSymbol,
     ],
   );

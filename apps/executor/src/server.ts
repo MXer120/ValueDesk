@@ -180,6 +180,7 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (route === '/keys/delete') return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === '/copies') return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === '/copies/action') return send(res, 200, await svc.act(body.request, ctx));
+      if (route === '/keys/import') return send(res, 200, { key: await svc.importKey(svc.authenticate(bearer(req)), body as { name?: unknown; envelope?: unknown }, ctx) });
       if (route === '/algos') return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === '/algos/action') return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, 'path', 'not found');

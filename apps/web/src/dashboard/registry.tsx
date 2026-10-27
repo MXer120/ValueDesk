@@ -22,9 +22,8 @@
  * region's accessible name and the name an error boundary reports under.
  */
 import type { Engine, Symbol as MarketSymbol } from '../api';
-import { Chart } from '../components/Chart';
+import { LiveChart, LiveOrderEntry, LiveSizeCalc } from './livePrice';
 import { Book, MarketStrip, TickerBar, Trades } from '../components/Market';
-import { OrderEntry } from '../components/OrderEntry';
 import { AccountPanel } from '../components/Account';
 import { MobileCarousel } from './MobileCarousel';
 import { PanelTabs } from './Panel';
@@ -33,7 +32,7 @@ import { FeeTier } from '../components/FeeTier';
 import { Stats } from '../components/Stats';
 import type { BreakpointName, PanelDefinition } from './types';
 import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
-import { SizeCalc, SourceWidget } from './sourceWidgets';
+import { SourceWidget } from './sourceWidgets';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
 import { FedLive } from '../components/fedlive/FedLive';
 import { FedWatch } from '../components/macro/FedWatch';
@@ -77,7 +76,8 @@ export interface TradeContext {
   byName: Map<string, MarketSymbol>;
   refreshToken: number;
   price: string;
-  lastPrice: string;
+  /* The last price is not here: it changes on every ticker push, so the panels
+     that read it subscribe to lastPrice.ts themselves (livePrice.tsx). */
   favorites: string[];
   positionCount: number;
   orderCount: number;
@@ -281,7 +281,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
               label: 'Chart',
               scroll: 'hidden',
               content: (
-                <Chart
+                <LiveChart
                   engine={c.engine}
                   symbol={c.symbol}
                   sym={c.sym}
@@ -290,7 +290,6 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
                   refreshToken={c.refreshToken}
                   onChanged={c.onChanged}
                   onPrice={c.onPrice}
-                  lastPrice={c.lastPrice}
                 />
               ),
             },
@@ -300,7 +299,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
               label: 'Trade',
               scroll: 'auto',
               content: (
-                <OrderEntry
+                <LiveOrderEntry
                   engine={c.engine}
                   symbol={c.symbol}
                   sym={c.sym}
@@ -311,7 +310,6 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
                   signingAddress={c.signingAddress}
                   price={c.price}
                   onPrice={c.onPrice}
-                  lastPrice={c.lastPrice}
                   onPlaced={c.onChanged}
                 />
               ),
@@ -335,7 +333,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
     // row in the ticket wrap.
     when: (_c, bp) => !isNarrow(bp),
     render: (c) => (
-      <OrderEntry
+      <LiveOrderEntry
         engine={c.engine}
         symbol={c.symbol}
         sym={c.sym}
@@ -346,7 +344,6 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         signingAddress={c.signingAddress}
         price={c.price}
         onPrice={c.onPrice}
-        lastPrice={c.lastPrice}
         onPlaced={c.onChanged}
       />
     ),
@@ -451,7 +448,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
       scroll: own ? 'hidden' : 'auto',
       when: quick ? (_c, bp) => !isNarrow(bp) : undefined,
       render: (c) => {
-        if (id === 'sizecalc') return <SizeCalc price={c.lastPrice || c.price} />;
+        if (id === 'sizecalc') return <LiveSizeCalc price={c.price} />;
         if (id === 'livefeed') return <LiveFeed />;
         if (id === 'fedlive') return <FedLive />;
         if (id === 'fedwatch') return <FedWatch />;
@@ -461,7 +458,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         if (id === 'news') return <NewsFeed {...newsProps(c)} />;
         if (quick) {
           return (
-            <OrderEntry
+            <LiveOrderEntry
               engine={c.engine}
               symbol={c.symbol}
               sym={c.sym}
@@ -472,7 +469,6 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
               signingAddress={c.signingAddress}
               price={c.price}
               onPrice={c.onPrice}
-              lastPrice={c.lastPrice}
               onPlaced={c.onChanged}
             />
           );

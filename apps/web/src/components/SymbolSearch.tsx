@@ -5,8 +5,8 @@
  * selected. Favorites persist to localStorage, same pattern as useStored.
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { api, type Engine, type Symbol, type Ticker } from '../api';
-import { useAsync, useStored } from '../hooks';
+import type { Engine, Symbol, Ticker } from '../api';
+import { useStored, useSymbolList, useTickers } from '../hooks';
 import { aliasFor, resolveTarget } from '../dashboard/ScanDashboard';
 import { fmtPct, fmtPrice, fmtUsd, num, signClass } from '../format';
 import { usePrivacy } from '../privacy';
@@ -133,10 +133,12 @@ export function SymbolSearch({
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Only fetched while the modal is actually open — no idle REST weight cost.
-  const spotSymbols = useAsync(() => api.symbols('spot'), [], { enabled: open });
-  const perpsSymbols = useAsync(() => api.symbols('perps'), [], { enabled: open });
-  const spotTickers = useAsync(() => api.tickers('spot'), [], { enabled: open, pollMs: 15_000 });
-  const perpsTickers = useAsync(() => api.tickers('perps'), [], { enabled: open, pollMs: 15_000 });
+  // The shell's own market lists (hooks.ts useSymbolList), shared, not read again per opening.
+  const spotSymbols = useSymbolList('spot', open);
+  const perpsSymbols = useSymbolList('perps', open);
+  // The page's shared snapshots (hooks.ts useTickers), read every 15 s while open.
+  const spotTickers = useTickers('spot', { enabled: open, pollMs: 15_000 });
+  const perpsTickers = useTickers('perps', { enabled: open, pollMs: 15_000 });
 
   useEffect(() => {
     if (open) {

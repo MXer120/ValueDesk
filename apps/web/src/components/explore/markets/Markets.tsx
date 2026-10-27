@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } 
 import { SECTORS, type Sector } from '@sign/valuescan/cohorts/model.js';
 import { api } from '../../../api';
 import { DASH } from '../../../format';
-import { useAsync, useStored, useSymbols } from '../../../hooks';
+import { useAsync, useSharedPoll, useStored, useSymbols, useTickers } from '../../../hooks';
 import { VENUE_LABEL, vsApi, type Venue } from '../../../vsApi';
 import { CoinIcon } from '../../CoinIcon';
 import { VenueLogo } from '../../VenueLogo';
@@ -60,8 +60,9 @@ export function Markets({ enabled, onOpenSymbol, onOpenScanner }: {
   onOpenSymbol: (symbol: string) => void;
   onOpenScanner: () => void;
 }) {
-  const hl = useAsync(() => vsApi.assets(), [], { pollMs: POLL_MS, enabled });
-  const tickers = useAsync(() => api.tickers('perps'), [], { pollMs: POLL_MS, enabled });
+  // Shared with the funding scanner below (and the trade page's tickers): one read each.
+  const hl = useSharedPoll('vs:screener:assets', () => vsApi.assets(), { pollMs: POLL_MS, enabled });
+  const tickers = useTickers('perps', { pollMs: POLL_MS, enabled });
   const { symbols } = useSymbols('perps');
   const map = useAsync(() => vsApi.cohortMap(MAP_VENUES, null), [], { pollMs: 5 * 60_000, enabled });
 

@@ -6,10 +6,19 @@
  * child carries the ValueDesk builder fee at exactly the rate a manual order
  * would, and nothing about an algo reaches a ValueDesk server.
  *
- * ONE TAB RUNS. Every tab asks for the Web Lock `vd-algo-run:<wallet>`; the
- * tab that holds it runs the algos, the others wait in line (and take over
- * when that tab closes). The running tab publishes its views to IndexedDB;
- * the others read them and send commands over a BroadcastChannel.
+ * ONE TAB RUNS. Every tab of a wallet with live algos asks for the Web Lock
+ * `vd-algo-run:<wallet>` - a tab that opened before there were any, as soon
+ * as another tab starts one; the tab that holds it runs the algos, the others
+ * wait in line (and take over when that tab closes). The running tab
+ * publishes its views to IndexedDB; the others read them and send commands
+ * (pause, cancel, the kill switch...) over a BroadcastChannel.
+ *
+ * WITHOUT WEB LOCKS (Safari before 15.4) the tabs elect the runner over the
+ * BroadcastChannel instead: a tab asks whether one runs, and claims the run
+ * only when none answers (two claims at once: the lower number wins); the
+ * others ask again every few seconds and take over when the runner is gone.
+ * With neither, no tab runs algos ('unsupported'): every tab would send every
+ * child, so none does, and the Algos tab says why.
  *
  * WHILE NO TAB IS OPEN NOTHING IS WORKED. A child resting on SoDEX stays
  * there (it is an ordinary order, in your open orders); when a tab opens
@@ -49,7 +58,15 @@ import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
 const log = logger('algo');
 const CHANNEL = 'vd-algo';
 
-export type AlgoRole = 'off' | 'starting' | 'runner' | 'standby';
+/** 'unsupported': this browser has neither Web Locks nor BroadcastChannel - one runner per wallet cannot be made sure of, so none runs. */
+export type AlgoRole = 'off' | 'starting' | 'runner' | 'standby' | 'unsupported';
+
+/** Why a tab of a browser without Web Locks or BroadcastChannel runs no algo. */
+export const ALGOS_UNSUPPORTED = 'This browser cannot run algo orders in a tab safely (it lacks Web Locks): two tabs would both send every order. Update it, or run them on the ValueDesk executor.';
+
+/** Without Web Locks: how long a tab waits for a runner to answer, and how often a standby tab asks again. */
+const ELECT_WAIT_MS = 400;
+const ELECT_EVERY_MS = 3_000;
 
 type Command =
   | { op: 'add'; spec: unknown; seed?: number }
@@ -62,9 +79,17 @@ type Command =
 type Msg =
   | { t: 'cmd'; rid: string; owner: string; cmd: Command }
   | { t: 'res'; rid: string; ok: boolean; error?: string; id?: string }
-  | { t: 'changed'; owner: string };
+  | { t: 'changed'; owner: string }
+  // Without Web Locks: is a runner there; the runner's answer; a tab claiming the run (the lower nonce wins); the runner leaving.
+  | { t: 'who'; owner: string }
+  | { t: 'here'; owner: string }
+  | { t: 'claim'; owner: string; nonce: number }
+  | { t: 'bye'; owner: string };
 
-type Locks = { request: (name: string, options: { signal?: AbortSignal }, cb: () => Promise<void>) => Promise<void> };
+type Locks = {
+  request: (name: string, options: { signal?: AbortSignal }, cb: () => Promise<void>) => Promise<void>;
+  query?: () => Promise<{ held?: Array<{ name?: string }> }>;
+};
 const lockManager = (): Locks | null => (navigator as unknown as { locks?: Locks }).locks ?? null;
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -110,6 +135,12 @@ class BrowserAlgos {
   private poll: ReturnType<typeof setInterval> | null = null;
   private publishTimer: ReturnType<typeof setTimeout> | null = null;
   private snapshot = { role: this.role, views: this.views };
+  /** This tab holds the run lock (or, without Web Locks, won the election). */
+  private lockHeld = false;
+  /** Without Web Locks: when a runner last answered, and the claims heard while this tab claimed. */
+  private runnerSeenAt = 0;
+  private claims: number[] | null = null;
+  private electWake: (() => void) | null = null;
 
   constructor() {
     if (this.channel) this.channel.onmessage = (e) => void this.onMessage(e.data as Msg);
@@ -155,6 +186,11 @@ class BrowserAlgos {
     this.acquire(next, gen);
   }
 
+  /** Whether a tab can be sure it is the only one running this wallet's algos. */
+  private canElect(): boolean {
+    return lockManager() !== null || this.channel !== null;
+  }
+
   /**
    * Run this wallet's algos in this tab once the lock is ours. The release is
    * armed HERE, not once the runner is up: a wallet change while the runner is
@@ -164,6 +200,13 @@ class BrowserAlgos {
    */
   private acquire(owner: string, gen: number): void {
     const locks = lockManager();
+    if (!locks && !this.channel) {
+      // Nothing to elect one runner with: none runs (every tab would send every child), and the tab says so.
+      this.role = 'unsupported';
+      this.startPolling();
+      this.emit();
+      return;
+    }
     this.role = 'starting';
     this.emit();
     let hold!: () => void;
@@ -175,14 +218,23 @@ class BrowserAlgos {
     };
     const run = async () => {
       if (gen !== this.generation) return;
-      this.stopPolling();
-      await this.startRuntime(owner);
-      // A shutdown that came while it started has already released `held`.
-      await held;
-      await this.stopRuntime();
+      this.lockHeld = true;
+      try {
+        this.stopPolling();
+        await this.startRuntime(owner);
+        // A shutdown that came while it started has already released `held`.
+        await held;
+        await this.stopRuntime();
+      } finally {
+        this.lockHeld = false;
+      }
     };
     if (!locks) {
-      void run();
+      // No Web Locks: elected over the BroadcastChannel (only one tab claims a run no tab answers for).
+      this.role = 'standby';
+      this.startPolling();
+      this.emit();
+      void this.elect(owner, gen, run);
       return;
     }
     this.role = 'standby';
@@ -194,12 +246,69 @@ class BrowserAlgos {
   }
 
   private async shutdown(): Promise<void> {
+    // Without Web Locks: the tabs waiting on this runner take over at once.
+    if (this.runtime && this.owner && !lockManager()) this.channel?.postMessage({ t: 'bye', owner: this.owner } satisfies Msg);
     this.generation++;
+    this.electWake?.();
     this.stopPolling();
     const r = this.release;
     this.release = null;
     if (r) r();
     else await this.stopRuntime();
+  }
+
+  /**
+   * Without Web Locks: until this tab runs (or follows another wallet), ask
+   * whether a runner is there; when none answers, claim the run - and run it
+   * unless another tab answered or claimed with a lower number meanwhile.
+   */
+  private async elect(owner: string, gen: number, run: () => Promise<void>): Promise<void> {
+    const sleep = (ms: number) =>
+      new Promise<void>((r) => {
+        const t = setTimeout(() => {
+          this.electWake = null;
+          r();
+        }, ms);
+        this.electWake = () => {
+          clearTimeout(t);
+          this.electWake = null;
+          r();
+        };
+      });
+    while (gen === this.generation && !this.runtime) {
+      const asked = Date.now();
+      this.channel!.postMessage({ t: 'who', owner } satisfies Msg);
+      await sleep(ELECT_WAIT_MS);
+      if (gen !== this.generation) return;
+      if (this.runnerSeenAt < asked) {
+        const nonce = Math.random();
+        this.claims = [];
+        this.channel!.postMessage({ t: 'claim', owner, nonce } satisfies Msg);
+        await sleep(ELECT_WAIT_MS);
+        const rivals = this.claims;
+        this.claims = null;
+        if (gen !== this.generation) return;
+        if (this.runnerSeenAt < asked && !rivals.some((x) => x < nonce)) {
+          await run();
+          return;
+        }
+      }
+      await sleep(ELECT_EVERY_MS);
+    }
+  }
+
+  /** Whether another tab runs this wallet's algos now (a command goes to it instead of waiting to run here). */
+  private async heldElsewhere(owner: string): Promise<boolean> {
+    if (this.lockHeld) return false;
+    const locks = lockManager();
+    if (!locks) return Date.now() - this.runnerSeenAt < ELECT_EVERY_MS * 2;
+    if (!locks.query) return false;
+    try {
+      const q = await locks.query();
+      return (q.held ?? []).some((l) => l.name === `vd-algo-run:${owner}`) && !this.lockHeld;
+    } catch {
+      return false;
+    }
   }
 
   private startPolling(): void {
@@ -301,13 +410,19 @@ class BrowserAlgos {
   private async command(cmd: Command): Promise<string | undefined> {
     if (!this.owner) throw new Error('Connect your wallet first.');
     if (this.runtime) return this.apply(cmd);
+    if (this.role === 'off' && !this.canElect()) this.role = 'unsupported';
+    if (this.role === 'unsupported') throw new Error(ALGOS_UNSUPPORTED);
     if (this.role === 'off') {
-      // The first algo of this wallet in this browser: this tab takes the lock and starts the runner.
-      // (No other tab can hold it: one that ran algos for this wallet would have put this tab in standby.)
-      if (cmd.op !== 'add') throw new Error('No algo runs in this browser.');
-      this.acquire(this.owner, this.generation);
+      // This tab follows the wallet but is in no line for its algos (it opened before there were any): it gets in
+      // line now. With no other runner it runs them itself; with one (another tab started an algo since), the
+      // command goes to that tab - an 'off' tab's pause, cancel and kill switch work as a standby tab's do.
+      const owner = this.owner;
+      this.acquire(owner, this.generation);
       const t0 = Date.now();
-      while (!this.runtime && Date.now() - t0 < 8_000) await new Promise((r) => setTimeout(r, 50));
+      while (!this.runtime && Date.now() - t0 < 8_000) {
+        if (await this.heldElsewhere(owner)) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       if (this.runtime) return this.apply(cmd);
     }
     if (!this.channel) throw new Error('Algos run in another tab of this browser. Use that tab.');
@@ -353,9 +468,15 @@ class BrowserAlgos {
       case 'cancel-all':
         await rt.cancelAll(this.owner!);
         break;
-      case 'update':
+      case 'update': {
+        // The live gate covers a change as it covers a start: a practice run is never turned into a live one here
+        // (the runtime also refuses any field but the limit, bounds, spread guard, label and size).
+        const a = rt.get(cmd.id);
+        if (!a) throw new Error('No such algo.');
+        requirePaperAlgo({ ...a.spec, ...cmd.patch });
         await rt.update(cmd.id, cmd.patch);
         break;
+      }
     }
     await this.publish();
     return id;
@@ -365,6 +486,26 @@ class BrowserAlgos {
     if (!m || typeof m !== 'object') return;
     if (m.t === 'changed' && m.owner === this.owner && !this.runtime) {
       await this.refreshViews();
+      // Another tab started this wallet's first algo while this one was 'off': this tab gets in line for the run,
+      // so it takes over when that tab closes (the algo is never left with no tab working it).
+      if (this.role === 'off' && m.owner === this.owner && this.views.some((v) => needsRunner(v.algo))) this.acquire(m.owner, this.generation);
+      return;
+    }
+    if (m.t === 'who' || m.t === 'claim') {
+      // The runner answers for its wallet: the asking tab stays in standby.
+      if (this.runtime && m.owner === this.owner) this.channel?.postMessage({ t: 'here', owner: m.owner } satisfies Msg);
+      else if (m.t === 'claim' && m.owner === this.owner && this.claims) this.claims.push(m.nonce);
+      return;
+    }
+    if (m.t === 'here') {
+      if (m.owner === this.owner) this.runnerSeenAt = Date.now();
+      return;
+    }
+    if (m.t === 'bye') {
+      if (m.owner === this.owner) {
+        this.runnerSeenAt = 0;
+        this.electWake?.();
+      }
       return;
     }
     if (m.t === 'res') {

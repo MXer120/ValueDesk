@@ -50,6 +50,8 @@ interface World {
   followerPositions: Array<{ s: string; sz: string; ep: string; l: number; m: string }>;
   builderRate: number | null;
   mark: number;
+  /** The follower's free margin on SoDEX (`am`), USD. */
+  available?: string;
 }
 
 function fakeFetch(w: World): FetchLike {
@@ -62,7 +64,7 @@ function fakeFetch(w: World): FetchLike {
     if (path === '/api/v1/perps/markets/mark-prices') return ok([{ symbol: 'BTC-USD', markPrice: String(w.mark) }]);
     if (path === `/api/v1/user/${LEADER}/subaccounts`) return ok({ primaryAccountID: LEADER_ID });
     if (path === `/api/v1/perps/accounts/${LEADER}/state`) return ok({ aid: LEADER_ID, av: '100000', P: w.leaderPositions });
-    if (path === `/api/v1/perps/accounts/${FOLLOWER}/state`) return ok({ aid: FOLLOWER_ID, av: '5000', am: '5000', P: w.followerPositions });
+    if (path === `/api/v1/perps/accounts/${FOLLOWER}/state`) return ok({ aid: FOLLOWER_ID, av: '5000', am: w.available ?? '5000', P: w.followerPositions });
     if (path === `/api/v1/user/${FOLLOWER}/builders`) return ok({ perps: w.builderRate === null ? [] : [{ userID: FOLLOWER_ID, builderID: 9, feeRate: w.builderRate }], spot: [] });
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };
@@ -197,5 +199,33 @@ test('the region rule blocks a US follower, and the kill switch stops every copy
   assert.equal(stopped.length, 3);
   assert.ok(rt.list(FOLLOWER).every((x) => x.status === 'stopped'));
   await assert.rejects(rt.resume('a'), /cannot be restarted/);
+  await rt.stop();
+});
+
+test('a live copy places no opening order its SoDEX free margin cannot carry, and says why', async () => {
+  const w: World = { leaderPositions: [], followerPositions: [], builderRate: 25, mark: 80_000, available: '50' };
+  const sent: Intent[][] = [];
+  const sink: OrderSink = {
+    paper: false,
+    async place(_a, _m, intents): Promise<SendResult[]> {
+      sent.push(intents);
+      return intents.map((i) => ({ clOrdID: i.clOrdID, ok: true, orderId: '1', error: null, outcomeUnknown: false }));
+    },
+    async setLeverage() {},
+    async placeStop(_a, _m, st) {
+      return { clOrdID: st.clOrdID, ok: true, orderId: null, error: null, outcomeUnknown: false };
+    },
+    async cancel() {},
+  };
+  const { rt, store } = runtime(w, () => sink);
+  await rt.start();
+  const s = await rt.add(sub({}, { id: 'fm' }));
+  await until(() => sodexWs()?.readyState === 1);
+  await wait(150); // the follower's account is read
+  sodexWs().push(print(30, 'BUY', '1', '80000', LEADER_ID, 1002)); // a 0.01 BTC copy needs 160 of margin at 5x
+  await wait(400);
+  assert.equal(sent.length, 0);
+  const log = await store.activity({ subId: s.id });
+  assert.ok(log.some((e) => e.kind === 'skip' && e.reason === 'free-margin'));
   await rt.stop();
 });

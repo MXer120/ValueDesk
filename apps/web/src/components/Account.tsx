@@ -41,7 +41,7 @@ import { bumpAccountResource, useAccountResource } from '../accountFeeds';
 import { collateralSplit, crossAccountLeverage, crossMarginRatio } from '../accountData';
 import { useAccountTotals } from './account/useAccountTotals';
 import { PanelHeading } from '../dashboard/Panel';
-import { useAsync, useChannel, useStatus } from '../hooks';
+import { useAsync, useChannel, useStatus, useTickers } from '../hooks';
 import { notifyTrade } from '../toast';
 import { coinLabel, fmt, fmtBalance, fmtDateTime, fmtPrice, fmtQty, fmtUsd, num, pick } from '../format';
 import { Private } from '../privacy';
@@ -405,10 +405,9 @@ function useMarkPrices(symbols: string[]): (symbol: string) => number | null {
   const list = key ? key.split(',') : [];
   const [live, setLive] = useState<Record<string, number>>({});
 
-  const { data } = useAsync(() => api.tickers('perps'), [key], {
-    enabled: list.length > 0,
-    pollMs: 20_000,
-  });
+  // The page's shared perps snapshot (hooks.ts useTickers): the header and the
+  // market strip read the same one, so this seed costs no request of its own.
+  const { data } = useTickers('perps', { enabled: list.length > 0, pollMs: 20_000 });
 
   useChannel('perps', list.length ? { channel: 'markPrice', symbols: list } : null, (d) => {
     const rows: any[] = Array.isArray(d) ? d : [d];

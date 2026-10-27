@@ -351,7 +351,7 @@ export default function AlgoTable({ address }: { address: string | null }) {
     livePlaces.length > 1
       ? livePlaces.map((p) => `${live.filter((r) => r.place === p).length} ${PLACE_WORD[p]}`).join(', ')
       : livePlaces[0] === 'browser'
-        ? role === 'standby' ? 'Running in another tab of this browser' : role === 'runner' ? 'Running in this tab' : ''
+        ? role === 'standby' ? 'Running in another tab of this browser' : role === 'runner' ? 'Running in this tab' : role === 'unsupported' ? 'Not running: this browser lacks Web Locks, so tabs cannot share one runner - update it or use an executor' : ''
         : livePlaces[0] ? `Running on ${PLACE_WORD[livePlaces[0]]}` : '';
   const SHOWS: ReadonlyArray<readonly [Show, string, number]> = [['all', 'All', live.length + ended.length], ['running', 'Running', live.length], ['ended', 'Ended', ended.length]];
   return (

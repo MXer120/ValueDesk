@@ -63,6 +63,7 @@ export const COPY_TERMS: LegalDoc = {
             'A leader is any public address. Leaders have not agreed to be copied, are not affiliated with ValueDesk, are not paid by ValueDesk or by you, and cannot stop being copied. They do not know you and owe you nothing. ValueDesk does not select, vet or monitor them.',
             'ValueDesk never holds your funds. They stay in your wallet and in your own SoDEX account. Copies are placed with a SoDEX API key that you register yourself with your wallet (section 2).',
             'ValueDesk charges a builder fee on every copied order (section 6).',
+            '**Algo orders.** The executor you copy with, and its key, also carry out the algo orders you start there yourself (TWAP, VWAP, POV, DCA, iceberg, chase, scale, conditional, trailing stop, bracket, basket and Fill fast). These terms apply to them as they do to copies; what is different for them is in section 3.',
           ],
         },
         { p: '[[OWNER: licence status of the copy trading service, in particular of the hosted executor - or the licensed partner that provides it and its supervisory authority - or delete this paragraph]]' },
@@ -75,11 +76,12 @@ export const COPY_TERMS: LegalDoc = {
         {
           ul: [
             '**Browser.** The copier runs in your open browser tab. Your browser generates a dedicated SoDEX API key and keeps it encrypted in this browser only; your wallet registers it on SoDEX with one signature, for at most seven days. Copying stops when the tab is closed, and nothing is copied while the computer sleeps or the connection is down. Stop-loss and take-profit orders the copier has already placed on SoDEX stay there. In this mode you can choose to approve each copied trade before it is sent.',
-            '**Hosted (the ValueDesk executor).** ValueDesk\'s server in Tokyo (AWS, region ap-northeast-1) generates a SoDEX API key for you and stores it encrypted on that server. You register the key on SoDEX with your wallet, for the number of days you choose (at most 90), and you can revoke it at any time. From then on the executor places your copies around the clock, according to your rules, **without asking you before each trade**.',
+            '**Hosted (the ValueDesk executor).** ValueDesk\'s server in Tokyo, Japan (hosted by Contabo) generates a SoDEX API key for you and stores it encrypted on that server. You register the key on SoDEX with your wallet, for the number of days you choose (at most 90), and you can revoke it at any time. From then on the executor places your copies around the clock, according to your rules, **without asking you before each trade**.',
             '**Self-hosted.** You run the open-source ValueDesk executor (MIT licence) on your own computer or server. The key is generated and stored there; ValueDesk receives no key and no orders. Running, updating and securing it is up to you, and copying stops whenever it is not running.',
           ],
         },
         { p: '**What the key can do.** SoDEX offers no API key that can trade but cannot move funds. According to SoDEX\'s documentation, the key used for copying - in every mode - can place and cancel orders and change leverage and margin, and it can also move funds between your own SoDEX spot account, your perps account and your own wallet. According to SoDEX, it cannot send funds to anyone else. Whoever holds the key can trade your account (section 7).' },
+        { p: '**A key you made yourself.** With the hosted or a self-hosted executor you can instead make the API key yourself on sodex.com and give it to the executor. Its private key is encrypted in your browser so that only that executor can read it. The executor uses it only when SoDEX lists it on your own account under the name you give, valid for at most 90 days. Everything in these terms about the copy key applies to such a key too; keeping any other copy of it safe is up to you.' },
         { p: 'We update the copier we provide - the hosted executor and the browser copier - from time to time, and an update can change how your rules are carried out. [[OWNER: how followers learn of updates, e.g. the version shown in the app and published release notes]] With a self-hosted executor you decide which version you run.' },
       ],
     },
@@ -108,6 +110,15 @@ export const COPY_TERMS: LegalDoc = {
             'The drawdown stop closes all positions of a copy and halts it when the copy\'s equity has fallen by the share you set below its peak. It works only while the copier runs.',
             'The copier leaves positions you opened yourself alone. It does not copy into a market where you hold your own position, or where another of your copies holds one.',
             'With approval of each trade (browser mode), a trade you do not confirm in time is skipped, never sent.',
+          ],
+        },
+        { p: '**Algo orders.** An algo order is not a copy: it is an order you set up and start yourself, and the executor works it for you as you set it.' },
+        {
+          ul: [
+            'You set every part of it: the market, side and size, its kind and settings (for example duration and slices, price levels, conditions, a trailing distance), its limits, and any take-profit and stop-loss. The order panel shows what it will do, every order it will send and its fees before you start it, and you start it with a signed instruction.',
+            'Unlike copies, an algo order can rest orders on SoDEX\'s order book (limit and post-only orders) and send market orders within the slippage you set. Resting orders can fill at any time while they are there, including after you stopped watching.',
+            'You can pause, change or cancel it at any time. A cancel pulls its resting orders; what has filled stays filled, and positions stay open. Its take-profit and stop-loss are stop orders on SoDEX and stay there until they trigger or you cancel them, also after the algo order itself has ended.',
+            'A practice run works against the live market but sends nothing to SoDEX and costs no fee. Real algo orders are available only where ValueDesk has switched them on for the executor you use.',
           ],
         },
       ],
@@ -140,7 +151,7 @@ export const COPY_TERMS: LegalDoc = {
           ],
         },
         { p: '**Which country counts.** You declare your country of residence when you accept these terms. With the hosted executor, the country of the IP address your requests come from is checked as well; where the two differ, the stricter rule applies and the difference is recorded. Declare your country truthfully, accept the terms again with your new country if you move, and do not hide where you are - for example with a VPN - to get around these rules. Neither check proves where you are; your declaration is your responsibility.' },
-        { p: '**In the EEA: at most 2x leverage.** If the country that counts is in the European Economic Area (the 27 EU member states, Iceland, Liechtenstein and Norway), every copy is limited to 2x leverage: no copied position is set above 2x, and the copy\'s total exposure (the value of its open positions) cannot exceed twice its equity. This reflects the leverage limit ESMA set for retail clients on leveraged crypto products. Copies of a leader who uses more leverage are then smaller than your sizing rule would make them, or skipped, and your results differ more from the leader\'s. The limit is not an assessment that 2x leverage is suitable for you.' },
+        { p: '**In the EEA: at most 2x leverage.** If the country that counts is in the European Economic Area (the 27 EU member states, Iceland, Liechtenstein and Norway, including EU territories with a country code of their own: Réunion, Guadeloupe, Martinique, French Guiana, Mayotte, Saint-Martin and Åland), every copy is limited to 2x leverage: no copied position is set above 2x, and the copy\'s total exposure (the value of its open positions) cannot exceed twice its equity. This reflects the leverage limit ESMA set for retail clients on leveraged crypto products. Copies of a leader who uses more leverage are then smaller than your sizing rule would make them, or skipped, and your results differ more from the leader\'s. The limit is not an assessment that 2x leverage is suitable for you.' },
         { p: 'If the country that counts is excluded, you cannot start or keep a copy: nothing more is copied, and copied positions stay open in your SoDEX account for you to manage. We may refuse or end copy trading for you where we have reason to believe these conditions are not met.' },
       ],
     },
@@ -163,6 +174,7 @@ export const COPY_TERMS: LegalDoc = {
             'You can revoke the approval on SoDEX at any time. No copy is placed without it: your copies are blocked until you approve again, and then resume by themselves.',
             'SoDEX\'s own trading fees and funding apply on top. Fees already charged are not refunded. Paper copies carry no fee.',
             'Because the fee is charged on every copied order, ValueDesk earns more when the leader you copy trades more often and when your copies are larger. ValueDesk\'s leaderboards and statistics do not rank traders by what copying them would earn ValueDesk.',
+            'The same fee, at the same rate, applies to every order an algo order sends on the hosted or a self-hosted executor: its slices, levels and other orders, and its take-profit and stop-loss orders.',
             'The fee applies in every mode. In browser mode your copies pay the rate for the volume ValueDesk\'s fee ledger last reported for your wallet; a self-hosted executor cannot read that ledger and therefore charges the rate for volumes under $100,000. The builder a self-hosted executor attaches is one of its settings.',
           ],
         },
@@ -190,7 +202,8 @@ export const COPY_TERMS: LegalDoc = {
             '**The exchange.** SoDEX is a third-party exchange. Its insolvency, a hack, an outage, a halted market or a change of its rules can cause you losses that nobody makes good. Leader data from Hyperliquid can be wrong or unavailable.',
             '**Fees.** The builder fee is charged on every copied order, including reductions, closes and stop orders, on top of SoDEX\'s fees and funding. A leader who trades often causes many copied orders, and the fees can outweigh small gains.',
             '**Counter-trading.** A counter-trade takes the side opposite the leader on every position. It gains when the leader\'s positions lose and loses when they gain, by roughly as much, plus fees and funding on both legs of every change. A leader with a good record is therefore a risk to a counter-trade, not a safeguard, and a losing past record does not mean the leader will keep losing. A position that is a hedge for the leader (see "The leader" above) is an unhedged position for you. Your loss is not limited by the leader\'s: a leader can win many times in a row, and your caps and stops apply as for any copy.',
-            '**Paper copies** are simulations. Real copies can fill differently, later or not at all, and they carry fees.',
+            '**Algo orders.** An algo order carries out exactly the settings you gave it, mistakes included, around the clock and without asking you before each order. Its resting orders can fill in a sudden move; a schedule can buy or sell into a falling or rising market; a conditional or trailing stop can fire on a brief spike. Its plan and fee estimate are estimates at the moment you start it, not a promise of prices or fills.',
+            '**Paper copies** and practice runs are simulations. Real copies and orders can fill differently, later or not at all, and they carry fees.',
             '**Legal and tax risk.** Copy trading and perpetual futures may be restricted or forbidden where you live. The law on copy trading is changing, and the service may have to be limited or ended at short notice (section 14). Gains may be taxable.',
           ],
         },
@@ -328,7 +341,7 @@ export const COPY_STATEMENTS: Array<{ id: CopyStatementId; label: string }> = [
 /** Shown before the hosted executor creates the follower's key. */
 export const HOSTED_KEY_NOTICE: string =
   'ValueDesk\'s executor will now create a SoDEX API key for you, and you register it on SoDEX with your wallet for the number of days you choose (at most 90). '
-  + 'The key is stored encrypted on ValueDesk\'s server in Tokyo (AWS, ap-northeast-1). '
+  + 'The key is stored encrypted on ValueDesk\'s server in Tokyo, Japan (hosted by Contabo). '
   + 'While it is valid, the executor uses it to place your copies around the clock, according to your copy rules and without asking you before each trade. '
   + 'SoDEX has no key that can trade but cannot move funds: according to SoDEX, this key can also move funds between your own SoDEX spot account, perps account and your own wallet, though not to anyone else. '
   + 'You can stop your copies in the app at any time. To cut the executor off completely, revoke the key on SoDEX with your wallet; once SoDEX has processed that, no order can be placed with it.';

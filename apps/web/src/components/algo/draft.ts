@@ -304,8 +304,10 @@ export function loadDraft(store: Store | null = local()): Draft {
       delete saved.maxChase;
       if (saved.maxChasePct === undefined && typeof oldChase === 'string') saved.maxChasePct = bpsToPct(oldChase);
       // DCA on a schedule is gone: a draft saved with it (or before DCA had price steps) loads as the price ladder, at its defaults.
+      // Only a draft from before then: one saved since has no dcaMode, and its ladder settings are the trader's (version 3 is 2026-10-27).
       const old = saved as Record<string, unknown>;
-      if (old.dcaMode !== 'price') for (const k of ['dcaStep', 'dcaMult', 'dcaFirst', 'dcaLevels', 'dcaStepScale'] as const) delete saved[k];
+      const scheduleDca = old.dcaMode !== undefined ? old.dcaMode !== 'price' : ver < 3;
+      if (scheduleDca) for (const k of ['dcaStep', 'dcaMult', 'dcaFirst', 'dcaLevels', 'dcaStepScale'] as const) delete saved[k];
       if (saved.dcaSizing === undefined && typeof saved.dcaMult === 'string') {
         // Before 2026-10-27 the multiplier was always there (1: all the same).
         if (Number(saved.dcaMult) > 0 && Number(saved.dcaMult) !== 1) saved.dcaSizing = 'geometric';
@@ -324,8 +326,9 @@ export function loadDraft(store: Store | null = local()): Draft {
       if (saved.sweepVenues !== undefined) {
         const vs = Array.isArray(saved.sweepVenues) ? saved.sweepVenues.filter((v) => (ORACLE_VENUES as readonly string[]).includes(v)) : [];
         const uniq = [...new Set(vs)];
-        // All six of the venues there were before 2026-10-26 meant "all": all of today's.
-        const allOld = uniq.length === 6 && ['binanceFutures', 'binanceSpot', 'bitget', 'hyperliquid', 'okx', 'bybit'].every((v) => uniq.includes(v as OracleVenue));
+        // All six of the venues there were before 2026-10-26 meant "all": all of today's. Only in a draft from before
+        // then (version 3 is 2026-10-27): since, six venues are a choice of six.
+        const allOld = ver < 3 && uniq.length === 6 && ['binanceFutures', 'binanceSpot', 'bitget', 'hyperliquid', 'okx', 'bybit'].every((v) => uniq.includes(v as OracleVenue));
         saved.sweepVenues = uniq.length && !allOld ? uniq : [...ORACLE_VENUES];
       }
       const d: Draft = { ...DEFAULT, ...saved, conds: [], legs: [] };
@@ -460,12 +463,14 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     symbol: p.symbol,
     side: p.side,
     reduceOnly: p.reduceOnly,
-    limitPrice: opt(d.limitPrice),
-    upper: opt(d.upper) ? { price: opt(d.upper), then: d.upperThen } : null,
-    lower: opt(d.lower) ? { price: opt(d.lower), then: d.lowerThen } : null,
+    // The draft is one form for every kind: a limit, bounds or a spread guard typed on another kind stay in it.
+    // They go only with a kind whose ticket shows them (a trailing stop held by a TWAP's bound would never sell).
+    limitPrice: hasLimit(kind) ? opt(d.limitPrice) : null,
+    upper: hasBounds(kind) && opt(d.upper) ? { price: opt(d.upper), then: d.upperThen } : null,
+    lower: hasBounds(kind) && opt(d.lower) ? { price: opt(d.lower), then: d.lowerThen } : null,
     triggerPrice: d.startMode === 'price' ? opt(d.startPrice) : null,
     startAt: d.startMode === 'delay' && opt(d.startDelay) ? now + n(d.startDelay) * 60_000 : null,
-    maxSpreadBps: opt(d.maxSpread),
+    maxSpreadBps: hasBounds(kind) ? opt(d.maxSpread) : null,
     leverage: p.reduceOnly ? null : p.leverage,
     marginMode: p.reduceOnly ? null : p.marginMode,
     paper: d.paper,
@@ -477,7 +482,8 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
     slippageBps: n(d.slip),
     // Only when it is not the touch: a spec from the default reads as every earlier one did.
     ...(d.slipFrom && d.slipFrom !== 'touch' ? { slipFrom: d.slipFrom } : {}),
-    offsetTicks: Math.trunc(n(d.offsetTicks) || 0),
+    // A slice rests at the touch: no kind that works slices shows an offset (that is the chase's and the iceberg's, sent apart).
+    offsetTicks: 0,
     chaseTicks: Math.max(1, Math.trunc(n(d.chaseTicks) || 1)),
     makerShare: frac(d.makerShare),
   };
@@ -495,7 +501,8 @@ export function draftToSpec(kind: UiKind, d: Draft, p: TicketShared, now: number
         maxSliceQty: opt(d.maxSlice) ? d.maxSlice : null,
         durationMs: Math.round(dur),
         slices,
-        urgency: d.urgency,
+        // Chase TWAP's ticket has no urgency: a TWAP's stays the TWAP's.
+        urgency: kind === 'chasetwap' ? 0 : d.urgency,
         sizeJitter: frac(d.sizeJitter),
         timeJitter: frac(d.timeJitter),
         exec,

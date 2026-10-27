@@ -4,6 +4,7 @@ import { hub, type ConnState, type SubParams } from './ws';
 import { getTradingState, sessionInfoOf, subscribeTrading } from './trading/session';
 import { pollEvery } from './exchange/visibility';
 import { revalidating } from './serverFetch';
+import { peekShared, refreshShared, subscribeShared, type SharedState } from './sharedPoll';
 
 /**
  * A promise-backed value with loading/error state and manual refresh.
@@ -61,6 +62,32 @@ export function useAsync<T>(
   return { data, error, loading, refresh: useCallback(() => setTick((t) => t + 1), []) };
 }
 
+/**
+ * useAsync for a resource several panels poll: ONE read per `key` on one timer
+ * at the shortest interval any reader wants (sharedPoll.ts). Same shape as
+ * useAsync. `key` must name exactly what `fn` reads.
+ */
+export function useSharedPoll<T>(
+  key: string,
+  fn: () => Promise<T>,
+  opts: { enabled?: boolean; pollMs?: number } = {},
+): { data: T | null; error: string | null; loading: boolean; refresh: () => void } {
+  const { enabled = true, pollMs = 0 } = opts;
+  const [state, setState] = useState<SharedState<T>>(() => ({ data: peekShared<T>(key), error: null, loading: false }));
+  const fnRef = useRef(fn);
+  fnRef.current = fn;
+  useEffect(() => {
+    if (!enabled) return;
+    return subscribeShared<T>(key, () => fnRef.current(), pollMs, setState);
+  }, [key, enabled, pollMs]);
+  return { ...state, refresh: useCallback(() => refreshShared(key), [key]) };
+}
+
+/** The engine's /tickers snapshot, one shared poll per engine (see useSharedPoll). */
+export function useTickers(engine: Engine, opts: { enabled?: boolean; pollMs: number }) {
+  return useSharedPoll(`md:tickers:${engine}`, () => api.tickers(engine), opts);
+}
+
 /** Subscribe to a hub channel for the lifetime of the component. */
 export function useChannel(
   engine: Engine,
@@ -91,11 +118,17 @@ export function useConnState(): { state: ConnState; upstream: Partial<Record<Eng
   return { state, upstream: hub.upstream };
 }
 
+/** The engine's market list, one shared poll a minute per engine (useSharedPoll). */
+export function useSymbolList(engine: Engine, enabled = true) {
+  return useSharedPoll(`md:symbols:${engine}`, () => api.symbols(engine), { enabled, pollMs: 60_000 });
+}
+
 /** Symbol list plus a lookup by name. */
 export function useSymbols(engine: Engine) {
   // Trading rules (tick, fees, leverage, bands) are SoDEX's, and they move.
-  // A minute is the same cadence the server caches them for.
-  const { data, error } = useAsync(() => api.symbols(engine), [engine], { pollMs: 60_000 });
+  // A minute is the same cadence the server caches them for. One poll per
+  // engine however many panels read it (the shell, the portfolio, the boards).
+  const { data, error } = useSymbolList(engine);
   const symbols = data?.symbols ?? [];
   const byName = new Map<string, Symbol>(symbols.map((s) => [s.name, s]));
   return { symbols, byName, error };

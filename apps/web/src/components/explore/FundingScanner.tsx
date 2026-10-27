@@ -5,9 +5,9 @@
  * rate, the clock, the book, the size of each market, and which leg to long.
  */
 import { useEffect, useMemo, useState } from 'react';
-import { api, type Ticker } from '../../api';
+import type { Ticker } from '../../api';
 import { DASH, fmtCountdown, fmtPct, signClass } from '../../format';
-import { useAsync, useStored, useSymbols } from '../../hooks';
+import { useSharedPoll, useStored, useSymbols, useTickers } from '../../hooks';
 import { vsApi, VENUE_LABEL } from '../../vsApi';
 import { CoinIcon } from '../CoinIcon';
 import { LoadFailed } from '../LoadFailed';
@@ -51,8 +51,9 @@ export function FundingScanner({
   onOpenSymbol: (symbol: string) => void;
   onOpenScanner?: () => void;
 }) {
-  const tickers = useAsync(() => api.tickers('perps'), [], { pollMs: POLL_MS, enabled });
-  const hl = useAsync(() => vsApi.assets(), [], { pollMs: POLL_MS, enabled });
+  // Shared with the markets board above it (and the trade page's tickers): one read each.
+  const tickers = useTickers('perps', { pollMs: POLL_MS, enabled });
+  const hl = useSharedPoll('vs:screener:assets', () => vsApi.assets(), { pollMs: POLL_MS, enabled });
   const { symbols, error: symbolError } = useSymbols('perps');
   const now = useNow();
   const [sort, setSort] = useStored<ArbSort>('vs.funding.sort', 'apr');

@@ -177,6 +177,7 @@ import { Chevron, ConnectedWalletLogo, CopyIcon, SodexMark } from './funds/ui';
 import { marginUsage } from '../accountData';
 import { readGateway } from '../trading/gateway';
 import { walletRank } from '../exchange/sodexData';
+import { pollEvery } from '../exchange/visibility';
 import { logLoadFailure } from './LoadFailed';
 import { Modal } from './Modal';
 import { Collapse } from './motion';
@@ -2697,8 +2698,9 @@ function useFundHoldings(address: string | null): FundHolding[] | null {
       }
     };
     void read();
-    const id = window.setInterval(() => void read(), 60_000);
-    return () => { off = true; window.clearInterval(id); };
+    // Once a minute while the tab is shown; at once when it is shown again.
+    const stop = pollEvery(60_000, () => void read());
+    return () => { off = true; stop(); };
   }, [address]);
   return rows;
 }

@@ -25,14 +25,33 @@
  *      position, so it closes on SoDEX even while no copier is running.
  *   6. READINESS. A live subscription needs a registered, unexpired copy key
  *      and a builder-fee approval that covers the copy fee; without them it
- *      is `blocked` (and resumes by itself once they are there).
+ *      is `blocked` (and resumes by itself once they are there). The region
+ *      and "ask me each time" (which needs a host that can ask) are checked
+ *      without SoDEX, on every change. A blocked or halted copy still follows
+ *      the leader's closes and keeps its guards (reduce-only).
+ *   7. CATCH-UP. After a restart, what the leader did while no copier ran is
+ *      planned like a missed print; on every reconcile (and on resume), what a
+ *      copy still holds where its leader is flat or on the other side - a close
+ *      that filled only in part, a close missed while paused - is closed.
  */
 import { bytesToHex, keccak256, utf8, type BuilderParams, type Network } from '../../sodex-core/src/index.ts';
 import { LeaderBook, SodexFeed, HyperliquidFeed, type FollowerFill } from './feeds.ts';
-import { randomId, timers, type Logger, type WebSocketFactory } from './io.ts';
+import { randomId, sleep, timers, type Logger, type WebSocketFactory } from './io.ts';
 import { MarketBook, floorQuantity, limitPrice, snapPrice } from './markets.ts';
 import type { OrderSink, SendResult } from './orders.ts';
-import { applyFill, clientOrderId, copyEquity, freshState, grossNotional, guardTrigger, noteSeen, planGuards, planLeaderEvent, unrealized } from './planner.ts';
+import {
+  applyFill,
+  clientOrderId,
+  copyEquity,
+  directionSign,
+  freshState,
+  grossNotional,
+  guardTrigger,
+  noteSeen,
+  planGuards,
+  planLeaderEvent,
+  unrealized,
+} from './planner.ts';
 import { effectiveLeverage, type RegionPolicy } from './policy.ts';
 import type { HyperliquidClient, SodexClient } from './sodex.ts';
 import type { CopyStore } from './store.ts';
@@ -57,6 +76,9 @@ export const READY_CHECK_MS = 10 * 60_000;
 export const MARKETS_REFRESH_MS = 10 * 60_000;
 /** How long a sent order may still be matched to fills on the stream. */
 const PENDING_MS = 30_000;
+/** Why a copy with approval 'confirm' cannot run on a host that has no one to ask. */
+export const CONFIRM_UNAVAILABLE =
+  '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 /** Skips not worth a line in the activity log. */
 const QUIET_SKIPS: ReadonlySet<SkipReason> = new Set(['duplicate', 'at-target', 'no-follower-position', 'spot-not-copied']);
 
@@ -169,9 +191,12 @@ export class CopyRuntime {
     if (this.running) return;
     this.running = true;
     await this.loadMarkets();
+    const restored: string[] = [];
     for (const s of await this.host.store.subscriptions()) {
       this.subs.set(s.id, s);
-      this.states.set(s.id, (await this.host.store.state(s.id)) ?? freshState(s.id, s.settings.allocationUsd));
+      const saved = await this.host.store.state(s.id);
+      this.states.set(s.id, saved ?? freshState(s.id, s.settings.allocationUsd));
+      if (saved) restored.push(s.id);
     }
     this.sodexFeed = new SodexFeed({
       network: this.host.network,
@@ -192,6 +217,8 @@ export class CopyRuntime {
     });
     this.sodexFeed.start();
     await this.syncFeeds();
+    for (const s of [...this.subs.values()]) await this.applyLocalRules(s.id);
+    for (const id of restored) this.catchUp(id);
     for (const s of this.subs.values()) if (this.live(s)) void this.checkReady(s);
     this.timers.push(
       timers.every(RECONCILE_MS, () => void this.reconcileAll()),
@@ -251,6 +278,7 @@ export class CopyRuntime {
     }
     await this.host.store.saveState(st);
     await this.activity(s, { kind: 'status', reason: s.status, detail: s.settings.paper ? 'Paper copy started.' : 'Copying started.' });
+    await this.applyLocalRules(s.id);
     if (this.live(s)) await this.checkReady(s);
     if (s.settings.copyExisting) {
       for (const [sym, size] of Object.entries(positions)) {
@@ -270,11 +298,24 @@ export class CopyRuntime {
     if (patch.settings && (patch.settings.direction ?? 'copy') !== (s.settings.direction ?? 'copy')) {
       throw new Error('A copy cannot switch between copying and counter-trading; start a new copy instead.');
     }
+    // Nobody can be asked here: refused, so a copy never trades "ask me each time" without asking.
+    if (patch.settings?.approval === 'confirm' && !this.host.confirm) throw new Error(CONFIRM_UNAVAILABLE);
+    if (patch.settings && patch.settings.allocationUsd !== s.settings.allocationUsd) {
+      // The drawdown stop measures from the peak equity: it moves with the allocation, or a
+      // lower allocation would read as a loss (and close everything).
+      const st = this.stateOf(s);
+      st.peakEquity = Math.max(0, st.peakEquity + patch.settings.allocationUsd - s.settings.allocationUsd);
+      this.dirty.add(id);
+    }
     const next: Subscription = { ...s, ...patch, updatedAt: Date.now() };
     this.subs.set(id, next);
     await this.host.store.saveSubscription(next);
     await this.activity(next, { kind: 'status', reason: 'updated', detail: 'Copy rules changed.' });
-    return next;
+    // A new region or approval mode may block the copy, or lift what blocked it.
+    await this.applyLocalRules(id);
+    const cur = this.need(id);
+    if (this.live(cur) && cur.status === 'blocked') await this.checkReady(cur);
+    return this.need(id);
   }
 
   async setStatus(id: string, status: SubscriptionStatus, reason: string | null): Promise<Subscription> {
@@ -286,10 +327,9 @@ export class CopyRuntime {
     await this.host.store.saveSubscription(next);
     await this.activity(next, { kind: 'status', reason: status, detail: reason });
     if (status === 'active') void this.refreshFollower(next.owner);
-    if (status === 'stopped') {
-      this.cancelAllStops(next);
-      await this.syncFeeds();
-    }
+    // A stopped copy's SoDEX stops are not touched here: stopCopy cancels those of the
+    // positions it closed, and the positions it keeps keep theirs.
+    if (status === 'stopped') await this.syncFeeds();
     this.host.onChange?.(id);
     return next;
   }
@@ -307,15 +347,32 @@ export class CopyRuntime {
       }
     }
     const next = await this.setStatus(id, 'active', null);
-    if (this.live(next)) await this.checkReady(next);
+    await this.applyLocalRules(id);
+    if (this.live(next)) await this.checkReady(this.need(id));
+    // What the leader closed while the copy was paused (or halted) is closed now.
+    this.enqueue(next.owner, () => this.closeStrays(id));
     return this.need(id);
   }
 
-  /** Stop a copy for good. With `close`, its positions are closed at the market (reduce-only). */
+  /**
+   * Stop a copy for good. With `close`, its positions are closed at the market (reduce-only);
+   * it says "positions closed" only for positions known to be flat, and the SoDEX stop-loss of
+   * a position that may still be open is kept. Without `close`, the positions and their SoDEX
+   * stops stay as they are (the copier no longer manages them).
+   */
   async stopCopy(id: string, o: { close: boolean }): Promise<Subscription> {
     const s = this.need(id);
-    if (o.close) await this.closeAll(s, 'stop-all');
-    return this.setStatus(id, 'stopped', o.close ? 'Stopped by you; positions closed.' : 'Stopped by you; positions kept.');
+    if (!o.close) return this.setStatus(id, 'stopped', 'Stopped by you; positions kept.');
+    const open = await this.closeAll(s, 'stop-all');
+    const keep = new Set(open);
+    this.cancelStopsWhere(s, (sym) => !keep.has(sym));
+    return this.setStatus(
+      id,
+      'stopped',
+      open.length
+        ? `Stopped by you; not confirmed closed: ${open.join(', ')}. ${open.length > 1 ? 'They' : 'It'} may still be open on SoDEX, with any stop-loss the copier placed there; check your SoDEX account.`
+        : 'Stopped by you; positions closed.',
+    );
   }
 
   /** The kill switch: every copy of `owner` stops. */
@@ -397,8 +454,14 @@ export class CopyRuntime {
   }
 
   private async process(subId: string, e: LeaderEvent, market: MarketInfo | null, mark: number | null): Promise<void> {
-    const s = this.subs.get(subId);
+    let s = this.subs.get(subId);
     if (!s || s.status === 'stopped') return;
+    // The region and the approval mode are checked on every change, not only by the readiness
+    // check (which reads SoDEX, and does nothing when that read fails).
+    if (s.status === 'active' && this.localProblem(s)) {
+      await this.applyLocalRules(s.id);
+      s = this.need(subId);
+    }
     const st = this.stateOf(s);
     const markOf = (sym: string) => (market && sym === market.name && mark !== null ? mark : this.markets.mark(sym));
     const plan = planLeaderEvent({
@@ -409,7 +472,9 @@ export class CopyRuntime {
       markOf,
       policy: this.host.policyFor(s),
       heldBy: market ? this.heldBy(s, market.name) : 'nobody',
-      follower: this.followers.get(s.owner) ?? null,
+      // A paper copy is not gated on the follower's real account.
+      follower: this.live(s) ? (this.followers.get(s.owner) ?? null) : null,
+      inFlight: this.inFlightOf(s.id),
     });
     st.leaderPos[e.symbol] = plan.leaderAfter;
     if (plan.leaderAfter === 0) delete st.leaderPos[e.symbol];
@@ -465,14 +530,31 @@ export class CopyRuntime {
     const st = this.stateOf(s);
     const sink = this.host.sinkFor(s);
     if (!sink) {
-      await this.setStatus(s.id, 'blocked', 'The copy key is not available here.');
+      if (s.status === 'active') await this.setStatus(s.id, 'blocked', 'The copy key is not available here.');
       return [];
     }
     const builder = await this.host.builderFor(s).catch(() => null);
-    if (!sink.paper && intents.some((i) => !i.reduceOnly)) await this.ensureLeverage(s, market, sink);
-    const results = await sink.place(s.accountId, market, intents, builder, reference);
-    for (let i = 0; i < intents.length; i++) {
-      const it = intents[i]!;
+    let send = intents;
+    if (!sink.paper && intents.some((i) => !i.reduceOnly) && !(await this.ensureLeverage(s, market, sink))) {
+      // Never open at whatever leverage the account happens to have (the EEA 2x cap, the
+      // follower's own cap): only what reduces goes out until SoDEX takes the leverage.
+      send = intents.filter((i) => i.reduceOnly);
+      const lev = effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), market.maxLeverage);
+      await this.activity(s, {
+        kind: 'error',
+        reason: 'leverage-not-set',
+        symbol: market.name,
+        detail: `SoDEX did not take the copy's leverage (${lev}x) on ${market.name}; nothing is opened or added there until it does.`,
+        leader,
+      });
+      if (!send.length) {
+        this.dirty.add(s.id);
+        return [];
+      }
+    }
+    const results = await sink.place(s.accountId, market, send, builder, reference);
+    for (let i = 0; i < send.length; i++) {
+      const it = send[i]!;
       const r = results[i] ?? { clOrdID: it.clOrdID, ok: false, orderId: null, error: 'no result', outcomeUnknown: false };
       st.orders += r.ok ? 1 : 0;
       await this.activity(s, {
@@ -537,6 +619,14 @@ export class CopyRuntime {
       if (!(q > 0)) return;
     }
     applyFill(st, symbol, side, q, price, fee, Date.now());
+    const left = st.owned[symbol];
+    const m = this.markets.get(symbol);
+    if (reduceOnly && left && m && floorQuantity(left.size, m) === '0') {
+      // Less than one lot left: no SoDEX position is that small, so it is booking dust (of a
+      // fill that was not a whole number of steps); it is closed in the books at this price.
+      st.realizedPnl += left.size * (price - left.entry);
+      delete st.owned[symbol];
+    }
     if (st.owned[symbol]) this.recentGrow.delete(`${s.id}|${symbol}`);
     this.dirty.add(s.id);
     if (!s.settings.paper) this.scheduleStops(s, symbol);
@@ -670,29 +760,39 @@ export class CopyRuntime {
     return Object.keys(st.leaderPos).filter((l) => this.markets.sodexMarketFor(s.settings.leader.venue, l)?.name === sodexSymbol);
   }
 
-  private async ensureLeverage(s: Subscription, market: MarketInfo, sink: OrderSink): Promise<void> {
+  /**
+   * Set the copy's leverage and margin mode on the market before an order that opens or adds.
+   * Remembered only once SoDEX took it; a failure is tried once more at once, and then again
+   * before the next such order. False: not set (the caller sends nothing that opens).
+   */
+  private async ensureLeverage(s: Subscription, market: MarketInfo, sink: OrderSink): Promise<boolean> {
     const policy = this.host.policyFor(s);
     const leverage = effectiveLeverage(s.settings.maxLeverage, policy, market.maxLeverage);
     const k = `${s.owner}|${market.name}`;
     const want = { leverage, margin: s.settings.marginMode };
     const had = this.leverageSet.get(k);
-    if (had && had.leverage === want.leverage && had.margin === want.margin) return;
+    if (had && had.leverage === want.leverage && had.margin === want.margin) return true;
     // SoDEX refuses a margin-mode change while a position is open; the leverage then stays as it is.
-    if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return;
-    try {
-      await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
-      this.leverageSet.set(k, want);
-    } catch (e) {
-      this.host.log.warn('copy: leverage not set', { owner: s.owner, symbol: market.name, leverage, error: String(e) });
-      this.leverageSet.set(k, want);
+    if (this.followers.get(s.owner)?.positions[market.name] && !this.stateOf(s).owned[market.name]) return true;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        await sink.setLeverage(s.accountId, market, leverage, s.settings.marginMode);
+        this.leverageSet.set(k, want);
+        return true;
+      } catch (e) {
+        this.host.log.warn('copy: leverage not set', { owner: s.owner, symbol: market.name, leverage, attempt, error: String(e) });
+      }
     }
+    this.leverageSet.delete(k);
+    return false;
   }
 
   /* --------------------------------------------------------------- guards ----- */
 
   private async runGuards(): Promise<void> {
     for (const s of this.list()) {
-      if (s.status !== 'active' && s.status !== 'paused') continue;
+      // A halted or blocked copy is guarded too: its stop-loss, take-profit and drawdown closes are reduce-only.
+      if (s.status === 'stopped') continue;
       const st = this.stateOf(s);
       if (!Object.keys(st.owned).length) {
         st.peakEquity = Math.max(st.peakEquity, copyEquity(s.settings, st, (m) => this.markets.mark(m)));
@@ -719,32 +819,164 @@ export class CopyRuntime {
       this.enqueue(s.owner, async () => {
         for (const [sym, list] of byMarket) {
           const m = this.markets.get(sym);
-          if (m) await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0]!.limitPrice), null);
+          if (!m) continue;
+          const results = await this.execute(s, m, list, this.markets.mark(sym) ?? Number(list[0]!.limitPrice), null);
+          // Detached only once SoDEX took the close: a refused one is tried again at the next pass, and
+          // whatever an accepted one leaves open is closed with the leader (planner.ts).
+          const why = g.closed[sym];
+          if (why && results.some((r) => r.ok || r.outcomeUnknown)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
         }
-        for (const [sym, why] of Object.entries(g.closed)) for (const lsym of this.leaderSymbolsFor(s, sym)) st.detached[lsym] = why;
         if (g.halt) await this.setStatus(s.id, 'halted', `Your drawdown stop (${Math.round((s.settings.drawdownStopPct ?? 0) * 100)}%) closed this copy.`);
       });
     }
   }
 
-  private async closeAll(s: Subscription, leg: 'stop-all'): Promise<void> {
+  /**
+   * Close every position of the copy at the market (reduce-only). Resolves with the markets
+   * not known to be flat afterwards: refused, unpriced, or (live) still on SoDEX when re-read.
+   */
+  private async closeAll(s: Subscription, leg: 'stop-all'): Promise<string[]> {
     const st = this.stateOf(s);
     const tag = `${leg}:${Date.now()}`;
-    await new Promise<void>((resolve) => {
+    return new Promise<string[]>((resolve) => {
       this.enqueue(s.owner, async () => {
-        for (const [sym, p] of Object.entries(st.owned)) {
-          const m = this.markets.get(sym);
-          const mark = this.markets.mark(sym);
-          if (!m || mark === null) continue;
-          const q = floorQuantity(p.size, m);
-          if (q === '0') continue;
-          const side = p.size > 0 ? 'sell' : 'buy';
-          const clOrdID = clientOrderId(s.id, `${tag}:${sym}`, leg);
-          await this.execute(s, m, [{ symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, Math.max(100, s.settings.slippageBps), m, mark), reduceOnly: true, leg, notionalUsd: Number(q) * mark, clampedBy: null, clOrdID }], mark, null);
+        const open: string[] = [];
+        const sent: string[] = [];
+        try {
+          for (const [sym, p] of Object.entries(st.owned)) {
+            const m = this.markets.get(sym);
+            const mark = this.markets.mark(sym);
+            if (!m || mark === null) {
+              open.push(sym);
+              continue;
+            }
+            const q = floorQuantity(p.size, m);
+            if (q === '0') continue;
+            const side = p.size > 0 ? 'sell' : 'buy';
+            const clOrdID = clientOrderId(s.id, `${tag}:${sym}`, leg);
+            const [r] = await this.execute(s, m, [{ symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, Math.max(100, s.settings.slippageBps), m, mark), reduceOnly: true, leg, notionalUsd: Number(q) * mark, clampedBy: null, clOrdID }], mark, null);
+            if (r?.paperFill) {
+              if (st.owned[sym]) open.push(sym);
+            } else if (r && (r.ok || r.outcomeUnknown)) sent.push(sym);
+            else open.push(sym);
+          }
+          if (sent.length) open.push(...(await this.stillOpenOnSodex(s, sent)));
+          resolve(open);
+        } catch (e) {
+          resolve([...new Set([...open, ...sent, ...Object.keys(st.owned)])]);
+          throw e;
         }
-        resolve();
       });
     });
+  }
+
+  /** Of `symbols`, those the follower's SoDEX account still holds (re-read up to three times; unread counts as held). */
+  private async stillOpenOnSodex(s: Subscription, symbols: string[]): Promise<string[]> {
+    let open = symbols;
+    let read = false;
+    for (let attempt = 0; attempt < 3 && open.length; attempt++) {
+      if (attempt) await sleep(500);
+      try {
+        const snap = await this.host.sodex.follower(s.owner);
+        this.followers.set(s.owner, snap);
+        open = open.filter((sym) => !!snap.positions[sym]);
+        read = true;
+      } catch (e) {
+        this.host.log.warn('copy: follower read failed', { owner: s.owner, error: String(e) });
+      }
+    }
+    return read ? open : symbols;
+  }
+
+  /**
+   * Close what a copy holds where its leader is flat or on the other side (reduce-only): a
+   * close that filled only in part, a close missed while the copy was paused or while no
+   * copier ran. Not for a paused copy (its positions stay as they are), nor for a market with
+   * one of its orders in flight or a leader print still being merged (the stream is about to
+   * say more). A synchronous fill (paper) that leaves some open is tried again at once; a live
+   * close is booked from the stream, and what it leaves is tried at the next reconcile.
+   */
+  private async closeStrays(subId: string): Promise<void> {
+    const s = this.subs.get(subId);
+    if (!s || s.status === 'stopped' || s.status === 'paused') return;
+    const l = s.settings.leader;
+    if (!this.leaders.seeded(l)) return;
+    const st = this.stateOf(s);
+    const dir = directionSign(s.settings);
+    const now = Date.now();
+    const want = new Map<string, number>();
+    const leaderSymbols = new Map<string, string[]>();
+    const book = this.leaders.positions(l);
+    for (const lsym of new Set([...Object.keys(book), ...Object.keys(st.leaderPos)])) {
+      const m = this.markets.sodexMarketFor(l.venue, lsym);
+      if (!m) continue;
+      leaderSymbols.set(m.name, [...(leaderSymbols.get(m.name) ?? []), lsym]);
+      if (book[lsym]) want.set(m.name, dir * Math.sign(book[lsym]!));
+    }
+    const inFlight = this.inFlightOf(s.id);
+    for (const sym of Object.keys(st.owned)) {
+      const p0 = st.owned[sym];
+      if (!p0 || Math.abs(p0.size) < 1e-12) continue;
+      const expected = want.get(sym) ?? 0;
+      if (expected !== 0 && expected === Math.sign(p0.size)) continue;
+      if (inFlight[sym]) continue;
+      const lsyms = leaderSymbols.get(sym) ?? (l.venue === 'sodex' ? [sym] : []);
+      if (lsyms.some((x) => this.leaders.isMerging(l, x))) continue;
+      const m = this.markets.get(sym);
+      const mark = this.markets.mark(sym);
+      if (!m || mark === null) continue;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const p = st.owned[sym];
+        if (!p) break;
+        const q = floorQuantity(p.size, m);
+        if (q === '0') break;
+        const side = p.size > 0 ? 'sell' : 'buy';
+        const clOrdID = clientOrderId(s.id, `sweep:${sym}:${now}:${attempt}`, 'reconcile');
+        const intent: Intent = { symbol: sym, side, quantity: q, limitPrice: limitPrice(side, mark, s.settings.slippageBps, m, mark), reduceOnly: true, leg: 'reconcile', notionalUsd: Number(q) * mark, clampedBy: null, clOrdID };
+        const [r] = await this.execute(s, m, [intent], mark, null);
+        if (!r?.paperFill || !(r.paperFill.qty > 0)) break;
+      }
+    }
+  }
+
+  /**
+   * After a restart: what the leader did while no copier ran. Every market where the saved
+   * leader position differs from the leader's position now is planned as a 'reconcile' event,
+   * as a missed print is while running - except a position opened meanwhile, which is
+   * pre-existing (joined only with "copy existing"), as when a copy starts.
+   */
+  private catchUp(subId: string): void {
+    const s = this.subs.get(subId);
+    if (!s || s.status === 'stopped') return;
+    const l = s.settings.leader;
+    if (!this.leaders.seeded(l)) return;
+    const st = this.stateOf(s);
+    const now = Date.now();
+    const current = this.leaders.positions(l);
+    for (const sym of new Set([...Object.keys(st.leaderPos), ...Object.keys(current)])) {
+      const before = st.leaderPos[sym] ?? 0;
+      const after = current[sym] ?? 0;
+      if (Math.abs(before - after) <= 1e-9 * Math.max(1, Math.abs(before), Math.abs(after))) continue;
+      if (before === 0 && !s.settings.copyExisting) {
+        st.leaderPos[sym] = after;
+        st.detached[sym] = 'pre-existing';
+        this.dirty.add(s.id);
+        continue;
+      }
+      const price = this.priceFor(l.venue, sym) ?? 0;
+      this.dispatch(s, { leader: l, symbol: sym, before, after, price, time: now, id: `restart:${sym}:${now}`, source: 'reconcile' });
+    }
+  }
+
+  /** SoDEX symbol -> signed size of this copy's orders sent but not booked yet. */
+  private inFlightOf(subId: string): Record<string, number> {
+    const now = Date.now();
+    const out: Record<string, number> = {};
+    for (const p of this.pending) {
+      if (p.subId !== subId || p.until <= now || !(p.remaining > 1e-12)) continue;
+      out[p.symbol] = (out[p.symbol] ?? 0) + (p.side === 'buy' ? p.remaining : -p.remaining);
+    }
+    return out;
   }
 
   /* -------------------------------------------------- SoDEX position stops ----- */
@@ -800,8 +1032,10 @@ export class CopyRuntime {
     this.enqueue(s.owner, () => this.refreshStops(s.id, symbol));
   }
 
-  private cancelAllStops(s: Subscription): void {
+  /** Cancel the SoDEX stops the copier placed on the markets `which` picks. */
+  private cancelStopsWhere(s: Subscription, which: (symbol: string) => boolean): void {
     for (const sym of Object.keys(this.stateOf(s).stops)) {
+      if (!which(sym)) continue;
       this.enqueue(s.owner, async () => {
         const st = this.stateOf(s);
         const cur = st.stops[sym];
@@ -821,23 +1055,25 @@ export class CopyRuntime {
   async checkReady(s0: Subscription): Promise<void> {
     const s = this.subs.get(s0.id);
     if (!s || s.settings.paper || s.status === 'stopped' || s.status === 'paused' || s.status === 'halted') return;
-    let problem: string | null = null;
-    try {
-      problem = (await this.host.keyProblem?.(s)) ?? null;
-      if (!problem) {
-        const builder = await this.host.builderFor(s);
-        if (builder) {
-          const approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
-          if (approved === null || approved < builder.fee) {
-            problem = `Your SoDEX account does not approve the ValueDesk copy fee (${builder.fee / 10} bp). Approve it in copy setup.`;
+    // The region (and the approval mode) first, without SoDEX: a failed read must never leave a
+    // follower from a blocked region active.
+    let problem: string | null = this.localProblem(s);
+    if (!problem) {
+      try {
+        problem = (await this.host.keyProblem?.(s)) ?? null;
+        if (!problem) {
+          const builder = await this.host.builderFor(s);
+          if (builder) {
+            const approved = await this.host.sodex.builderApproval(s.owner, Number(builder.id));
+            if (approved === null || approved < builder.fee) {
+              problem = `Your SoDEX account does not approve the ValueDesk copy fee (${builder.fee / 10} bp). Approve it in copy setup.`;
+            }
           }
         }
+      } catch (e) {
+        this.host.log.warn('copy: readiness check failed', { sub: s.id, error: String(e) });
+        return;
       }
-      const policy = this.host.policyFor(s);
-      if (!problem && !policy.allowed) problem = policy.reason ?? 'Copy trading is not available in your region.';
-    } catch (e) {
-      this.host.log.warn('copy: readiness check failed', { sub: s.id, error: String(e) });
-      return;
     }
     // The copy may have been stopped, paused or removed while SoDEX answered: then there is nothing to set.
     // (This runs unawaited - `void checkReady` - so a throw here would be an unhandled rejection.)
@@ -849,6 +1085,27 @@ export class CopyRuntime {
     } catch (e) {
       this.host.log.warn('copy: readiness status not set', { sub: cur.id, error: String(e) });
     }
+  }
+
+  /** Why this copier may not trade a copy, known without asking SoDEX: the region, or "ask me each time" with nobody to ask. */
+  private localProblem(s: Subscription): string | null {
+    const policy = this.host.policyFor(s);
+    if (!policy.allowed) return policy.reason ?? 'Copy trading is not available in your region.';
+    if (s.settings.approval === 'confirm' && !this.host.confirm) return CONFIRM_UNAVAILABLE;
+    return null;
+  }
+
+  /**
+   * Block a copy for a local problem. A paper copy blocked by one resumes once it is gone
+   * (a live one through checkReady, which also checks its key and fee approval).
+   */
+  private async applyLocalRules(id: string): Promise<void> {
+    const s = this.subs.get(id);
+    if (!s || s.status === 'stopped' || s.status === 'paused' || s.status === 'halted') return;
+    const problem = this.localProblem(s);
+    if (problem) {
+      if (s.status !== 'blocked' || s.statusReason !== problem) await this.setStatus(id, 'blocked', problem);
+    } else if (s.status === 'blocked' && !this.live(s)) await this.setStatus(id, 'active', null);
   }
 
   /* ------------------------------------------------------------- leaders ----- */
@@ -928,8 +1185,10 @@ export class CopyRuntime {
     try {
       for (const l of this.followedLeaders()) {
         try {
+          // The answer is as old as the read's start: markets the stream changed since are left to it.
+          const readStart = Date.now();
           const r = await this.readLeader(l);
-          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym));
+          const events = this.leaders.resync(l, r.positions, r.equity, r.marks, Date.now(), (sym) => this.priceFor(l.venue, sym), readStart);
           const eq = this.leaders.equity(l);
           for (const s of this.list()) {
             if (lk(s.settings.leader) !== lk(l)) continue;
@@ -942,6 +1201,8 @@ export class CopyRuntime {
             this.dirty.add(s.id);
           }
           for (const e of events) this.onLeaderEvent(e);
+          // Then what a copy still holds where the leader is flat or on the other side.
+          for (const s of this.list()) if (lk(s.settings.leader) === lk(l) && s.status !== 'stopped') this.enqueue(s.owner, () => this.closeStrays(s.id));
         } catch (e) {
           this.host.log.warn('copy: reconcile read failed', { leader: lk(l), error: String(e) });
         }

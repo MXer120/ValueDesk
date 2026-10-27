@@ -22,9 +22,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLatched } from './motion';
 import { createPortal, flushSync } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol, type Ticker } from '../api';
-import { useAsync, useChannel, useSharedStored, useStored } from '../hooks';
+import { useAsync, useChannel, useSharedStored, useStored, useTickers as useSharedTickers } from '../hooks';
 import { hub } from '../ws';
 import { pollEvery } from '../exchange/visibility';
+import { shareBook } from '../exchange/bookShare';
 import { DASH, coinLabel, fmt, fmtCountdown, fmtPct, fmtPrice, fmtQty, num, pick, precisionOf, signClass } from '../format';
 import {
   AccountCell,
@@ -339,74 +340,19 @@ function fmtSigned(v: unknown, dp: number): string {
  * ONE poll of `/tickers` per engine, shared by every consumer on the page.
  *
  * The symbol header, the market strip and the order book's mid-price anchor
- * all want the same REST snapshot. Three `useAsync(() => api.tickers(engine))`
- * calls would be three independent 30s timers against one endpoint, and this
- * app runs on a weight-limited gateway (the footer prints the weight used).
- * So the poll lives at module scope and is refcounted by subscriber: the
- * second and third consumer cost nothing, and a newcomer gets the cached
- * snapshot on its first paint instead of a blank frame.
- *
- * The cache is deliberately NOT dropped when the last subscriber leaves. It is
- * a few KB of public market data, and keeping it means tab-switching back to a
- * panel repaints instantly rather than flashing empty for a round trip.
+ * all want the same REST snapshot - and so do the positions table's mark seed,
+ * the market search and the explore boards. They all read hooks.ts
+ * `useTickers`: one refcounted, visibility-aware timer per engine at the
+ * shortest interval any of them asks for (sharedPoll.ts), so the second
+ * consumer costs nothing and a newcomer paints the cached snapshot at once.
+ * The snapshot is kept after the last consumer leaves (a few KB of public
+ * market data): switching back to a panel repaints instantly.
  */
 const TICKERS_POLL_MS = 30_000;
 
-interface TickerFeed {
-  rows: Ticker[] | null;
-  subs: Set<(rows: Ticker[] | null) => void>;
-  /** Stops the (visibility-aware) poll. */
-  timer?: () => void;
-}
-const tickerFeeds = new Map<Engine, TickerFeed>();
-
-function pumpTickers(engine: Engine): void {
-  api
-    .tickers(engine)
-    .then((r) => {
-      const feed = tickerFeeds.get(engine);
-      if (!feed) return;
-      feed.rows = r.tickers;
-      for (const s of feed.subs) s(r.tickers);
-    })
-    .catch(() => {
-      // Transient; the next interval retries. A stale snapshot beats blanking
-      // every price on the page because one poll lost a race.
-    });
-}
-
 /** Subscribe to the shared `/tickers` snapshot for this engine. */
 function useTickers(engine: Engine): Ticker[] | null {
-  const [rows, setRows] = useState<Ticker[] | null>(() => tickerFeeds.get(engine)?.rows ?? null);
-
-  useEffect(() => {
-    let feed = tickerFeeds.get(engine);
-    if (!feed) {
-      feed = { rows: null, subs: new Set() };
-      tickerFeeds.set(engine, feed);
-    }
-    const sub = (next: Ticker[] | null) => setRows(next);
-    feed.subs.add(sub);
-    setRows(feed.rows);
-
-    // First subscriber owns the timer; the rest ride along.
-    if (!feed.timer) {
-      pumpTickers(engine);
-      feed.timer = pollEvery(TICKERS_POLL_MS, () => pumpTickers(engine));
-    }
-
-    return () => {
-      const f = tickerFeeds.get(engine);
-      if (!f) return;
-      f.subs.delete(sub);
-      if (f.subs.size === 0 && f.timer) {
-        f.timer();
-        f.timer = undefined;
-      }
-    };
-  }, [engine]);
-
-  return rows;
+  return useSharedTickers(engine, { pollMs: TICKERS_POLL_MS }).data?.tickers ?? null;
 }
 
 /**
@@ -1309,7 +1255,9 @@ const BOOK_WS_STALE_MS = 5_000;
 const bookFeeds = new Map<string, BookFeed>();
 const bookFeedKey = (engine: Engine, symbol: string): string => `${engine}:${symbol}`;
 
-function publishBook(feed: BookFeed): void {
+function publishBook(feed: BookFeed, engine: Engine, symbol: string): void {
+  // The ticket's depth takes this copy instead of a REST read of its own (bookShare.ts).
+  shareBook(engine, symbol, feed.book);
   for (const s of feed.subs) s(feed.book);
 }
 
@@ -1320,7 +1268,7 @@ function pumpBookRest(key: string, engine: Engine, symbol: string): void {
       const feed = bookFeeds.get(key);
       if (!feed) return;
       feed.book = r.book;
-      publishBook(feed);
+      publishBook(feed, engine, symbol);
     })
     .catch((e) => {
       // Transient; the next poll retries - same discipline as useTickers.
@@ -1386,7 +1334,7 @@ export function useOrderBook(engine: Engine, symbol: string): OrderBook | null {
           updateID: d.u,
           blockTime: d.E,
         };
-        publishBook(f);
+        publishBook(f, engine, symbol);
       });
       // STALE: pushes stopped while subscribed (logged once per episode).
       feed.staleTimer = window.setInterval(() => {
@@ -1419,6 +1367,7 @@ export function useOrderBook(engine: Engine, symbol: string): OrderBook | null {
         f.unsubscribeWs?.();
         f.unsubscribeState?.();
         bookFeeds.delete(key);
+        shareBook(engine, symbol, null);
         log.info('book feed closed', { engine, symbol });
       }
     };

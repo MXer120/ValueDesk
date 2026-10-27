@@ -59,16 +59,17 @@ import {
   type Logger,
   type MeResponse,
   type OrderSink,
+  type RegionPolicy,
   type SessionGrant,
   type SignedCopyRequest,
   type SiteTermsRecord,
   type Subscription,
   type WebSocketFactory,
 } from '../../../packages/copy-engine/src/index.ts';
-import { SODEX_CHAIN_ID, createMemoryNonceManager, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
+import { SODEX_CHAIN_ID, createMemoryNonceManager, privateKeyToAddress, type SigningKeyRef } from '../../../packages/sodex-core/src/index.ts';
 import type { ExecutorConfig } from './config.ts';
 import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
-import type { Secrets } from './secrets.ts';
+import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -92,11 +93,20 @@ function sameCode(a: string, b: string): boolean {
 /** A key may be registered on SoDEX for at most this much past the longest lifetime allowed (clock and rounding slack). */
 const KEY_TTL_SLACK_MS = 86_400_000;
 
-/** Every algo spec inside `spec` (a conditional's `then: algo`), itself first. */
-function specsOf(spec: { kind: string; then?: unknown }): Array<{ paper?: boolean }> {
-  const out: Array<{ paper?: boolean }> = [spec as { paper?: boolean }];
+/**
+ * Every algo spec inside `spec` (a conditional's `then: algo`), itself first,
+ * each with whether it is a practice run. `raw` is the spec as signed: an inner
+ * algo signed with no paper flag runs as its conditional does (the runtime
+ * starts it with the parent's paper), so it inherits it; one signed with any
+ * flag of its own is judged by that flag.
+ */
+function specsOf(spec: { kind: string; paper?: boolean; then?: unknown }, raw: unknown, parentPaper?: boolean): Array<{ paper: boolean }> {
+  const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+  const paper = parentPaper !== undefined && r.paper === undefined ? parentPaper : spec.paper === true;
+  const out = [{ paper }];
   const then = spec.kind === 'conditional' ? (spec.then as { type?: string; algo?: { kind: string } } | undefined) : undefined;
-  if (then?.type === 'algo' && then.algo) out.push(...specsOf(then.algo));
+  const rawThen = r.then && typeof r.then === 'object' ? (r.then as Record<string, unknown>) : {};
+  if (then?.type === 'algo' && then.algo) out.push(...specsOf(then.algo, rawThen.algo, paper));
   return out;
 }
 
@@ -124,6 +134,8 @@ export interface ServiceDeps {
 }
 
 const SESSION_TTL_MS = 12 * 60 * 60_000;
+/** How long a follower's volume (the copy fee step) is used before it is read again. */
+const VOLUME_TTL_MS = 10 * 60_000;
 const KEY_RECHECK_MS = 10 * 60_000;
 
 export class ExecutorService {
@@ -142,6 +154,7 @@ export class ExecutorService {
   private readonly paper = new PaperSink();
   private readonly signers = new Map<string, SigningKeyRef>();
   private readonly volumes = new Map<string, { usd: number | null; at: number }>();
+  private readonly volumeReads = new Map<string, Promise<number | null>>();
   private builderDb: DatabaseSync | null = null;
   /** Self-hosted, not yet paired: the code printed at start. */
   readonly pairingCode: string | null;
@@ -169,8 +182,9 @@ export class ExecutorService {
       hlMode: cfg.kind === 'hosted' ? 'firehose' : 'user',
       log: deps.log,
       sinkFor: (s) => this.sinkFor(s),
-      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(this.volumeOf(s.owner)) } : null),
-      policyFor: (s) => regionPolicy(s.country, s.observedCountry),
+      builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null),
+      // The stricter of the country declared when the copy started and the one in the wallet's current terms.
+      policyFor: (s) => this.policyNow(s.owner, s.country, s.observedCountry),
       keyProblem: (s) => this.keyProblem(s.owner),
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
@@ -184,7 +198,7 @@ export class ExecutorService {
       builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
       problem: (a) => this.algoProblem(a),
       // The copy region rules, from the country declared with the terms and the one the request came from.
-      policyFor: (a) => regionPolicy(a.country ?? null, a.observedCountry ?? null),
+      policyFor: (a) => this.algoPolicy(a),
       // A sweep's reference price: the shared oracle (oracle.ts) - Binance futures and spot, Bitget,
       // Hyperliquid, OKX and Bybit, each read at most once a second per coin for every algo here.
       oracle: (coin) => oracleFeed.quotes(coin),
@@ -232,6 +246,7 @@ export class ExecutorService {
       viewerCountry: ctx.viewerCountry,
       keyTtlDaysMax: this.cfg.keyTtlDaysMax,
       keyName: this.keyName,
+      keyImport: { alg: KEY_IMPORT_ALG, publicKey: this.secrets.importPublicKey(), info: importInfo(this.executorId, '<owner>') },
       algos: { maxPerOwner: this.cfg.maxAlgosPerOwner },
       features: [...EXECUTOR_FEATURES],
     };
@@ -327,6 +342,8 @@ export class ExecutorService {
 
   session(req: unknown, ctx: RequestContext): SessionGrant {
     const { owner } = this.accept(req, 'session', ctx);
+    // Its fee step is known before the first order needs it.
+    void this.freshVolume(owner);
     return this.secrets.issueSession(owner, SESSION_TTL_MS);
   }
 
@@ -401,6 +418,52 @@ export class ExecutorService {
     return k ? { address: k.address, name: k.name, expiresAt: k.expiresAt, registered: k.registered, createdAt: k.createdAt } : null;
   }
 
+  /**
+   * A key the follower made on SoDEX themselves (sodex.com, API keys), brought
+   * here instead of registering one this executor made. Its private key arrives
+   * encrypted to this executor (secrets.ts, KEY IMPORT). It is used only when
+   * SoDEX lists it on the follower's own account under the name given, for at
+   * most keyTtlDaysMax days; then it becomes the active key, as a registered
+   * key of ours does, and the one before it is forgotten.
+   */
+  async importKey(owner: string, body: { name?: unknown; envelope?: unknown }, ctx: RequestContext): Promise<KeyInfo> {
+    return this.serial(owner, async () => {
+      this.needTerms(owner, ctx);
+      const name = typeof body.name === 'string' ? body.name.trim() : '';
+      if (!/^[A-Za-z0-9 _.-]{1,64}$/.test(name)) throw new ApiError(400, 'name', 'Enter the key\'s name exactly as SoDEX shows it.');
+      const e = body.envelope as Partial<ImportEnvelope> | null;
+      if (!e || typeof e.epk !== 'string' || typeof e.iv !== 'string' || typeof e.ct !== 'string' || e.ct.length > 512 || e.epk.length > 256) throw new ApiError(400, 'envelope', 'The key did not arrive in the expected form. Reload the page and try again.');
+      let pk: Uint8Array;
+      try {
+        pk = this.secrets.openImport(this.executorId, owner, e as ImportEnvelope);
+      } catch {
+        throw new ApiError(400, 'envelope', 'The key could not be read. Reload the page and paste it again.');
+      }
+      try {
+        let address: string;
+        try {
+          address = privateKeyToAddress(pk).toLowerCase();
+        } catch {
+          throw new ApiError(400, 'key', 'That is not a SoDEX API private key.');
+        }
+        const r = await this.sodex.keyRegistered(owner, name, address);
+        if (!r.ok) throw new ApiError(412, 'not-registered', r.expiresAt ? 'That key has expired on SoDEX. Make a new one.' : 'SoDEX does not list this key on your account under that name. Check the name and that you made it with this wallet.');
+        const latest = Date.now() + this.cfg.keyTtlDaysMax * 86_400_000 + KEY_TTL_SLACK_MS;
+        if (!r.expiresAt || r.expiresAt > latest) throw new ApiError(412, 'key-ttl', `That key is valid for longer than ${this.cfg.keyTtlDaysMax} days. Make one that expires within ${this.cfg.keyTtlDaysMax} days.`);
+        const sealed = this.secrets.seal(this.cfg.network, owner, address, pk);
+        const now = Date.now();
+        this.db.putKey({ owner, slot: 'pending', address, name, sealed, createdAt: now, expiresAt: r.expiresAt, registered: true, checkedAt: now });
+        this.db.promoteKey(owner);
+        this.signers.delete(owner);
+        for (const s of this.runtime.list(owner)) void this.runtime.checkReady(s);
+        this.deps.log.info('copy key imported', { owner, key: address });
+        return this.keyInfo(owner)!;
+      } finally {
+        pk.fill(0);
+      }
+    });
+  }
+
   /** A new key for the follower to register on SoDEX (the previous one keeps trading until the new one is registered). */
   createKey(req: unknown, ctx: RequestContext): { address: string; name: string; maxDays: number; days: number } {
     const { owner, payload } = this.accept(req, 'create-key', ctx);
@@ -438,7 +501,12 @@ export class ExecutorService {
     return this.keyInfo(owner);
   }
 
-  /** Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet. */
+  /**
+   * Stop every copy and algo and forget the keys. The follower revokes the key on SoDEX with their wallet.
+   * Everything is pulled while the key is still here to sign the cancels: the algos' resting orders, the
+   * exits of running and ended algos, children left resting (the kill switch). Once the key is gone
+   * nothing here could cancel them - not even the other exit when one fills.
+   */
   async deleteKey(req: unknown, ctx: RequestContext): Promise<MeResponse> {
     const { owner, payload } = this.accept(req, 'delete-key', ctx);
     return this.serial(owner, async () => {
@@ -597,7 +665,7 @@ export class ExecutorService {
   private algoSink(a: AlgoRecord): AlgoSink | null {
     if (!this.db.key(a.owner, 'active')) return null;
     return new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
-      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(this.volumeOf(x.owner)) } : null,
+      this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null,
     );
   }
 
@@ -611,11 +679,36 @@ export class ExecutorService {
     const key = await this.keyProblem(a.owner);
     if (key) return key;
     if (this.cfg.builderId > 0) {
-      const fee = copyFeeFor(this.volumeOf(a.owner));
+      const fee = copyFeeFor(await this.freshVolume(a.owner));
       const approved = await this.sodex.builderApproval(a.owner, this.cfg.builderId);
       if (approved === null || approved < fee) return `Your SoDEX account does not approve the ValueDesk fee (${fee / 10} bp) these orders carry. Approve it in copy setup.`;
     }
     return null;
+  }
+
+  /**
+   * The region rules for a running algo: the country it started under, and the
+   * one the wallet declares now (terms signed again later) - the stricter wins,
+   * so a wallet that declares a blocked country has its live algos held at once.
+   */
+  private algoPolicy(a: AlgoRecord): RegionPolicy {
+    return this.policyNow(a.owner, a.country ?? null, a.observedCountry ?? null);
+  }
+
+  /**
+   * The region rule for a running copy or algo: the stricter of the country it
+   * started with and the one in the wallet's current terms, so re-declaring a
+   * blocked (or EEA) country holds it at once.
+   */
+  private policyNow(owner: string, country: string | null, observed: string | null): RegionPolicy {
+    const atStart = regionPolicy(country, observed);
+    const t = this.db.terms(owner);
+    if (!t) return atStart;
+    const now = regionPolicy(t.country, observed);
+    if (!atStart.allowed) return atStart;
+    if (!now.allowed) return now;
+    if (now.maxLeverage !== null && (atStart.maxLeverage === null || now.maxLeverage < atStart.maxLeverage)) return now;
+    return atStart;
   }
 
   /** Start an algo order for the wallet that signed it. */
@@ -636,10 +729,14 @@ export class ExecutorService {
     const seed = Number(payload.seed);
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffffffff) throw new ApiError(400, 'seed', 'seed must be a 32-bit whole number.');
     const live = this.algos.list(owner).filter((a) => !FINAL_STATUSES.has(a.status));
-    if (live.length >= this.cfg.maxAlgosPerOwner) throw new ApiError(429, 'limit', `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    // A basket runs as itself and one algo per market (its legs, which count as they will run); a conditional's algo takes its place when it fires.
+    const adds = 1 + (spec.kind === 'basket' ? spec.legs.length : 0);
+    if (live.length + adds > this.cfg.maxAlgosPerOwner) {
+      throw new ApiError(429, 'limit', adds > 1 ? `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here, and this basket runs ${adds} (itself and one per market). ${live.length ? 'Cancel one first, or use fewer markets.' : 'Use fewer markets.'}` : `At most ${this.cfg.maxAlgosPerOwner} algo orders run at once here. Cancel one first.`);
+    }
     // Real orders are off unless this executor is set to take them (EXECUTOR_LIVE_ALGOS=1) - for the
     // algo itself and for one a conditional would start.
-    if (!this.cfg.liveAlgos && specsOf(spec).some((x) => x.paper !== true)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
+    if (!this.cfg.liveAlgos && specsOf(spec, payload.spec).some((x) => !x.paper)) throw new ApiError(403, 'paper-only', 'Real algo orders are off for now. Turn on Practice run to try one against the live market.');
     let accountId = 0;
     if (!spec.paper) {
       await this.verifyKey(owner);
@@ -705,11 +802,72 @@ export class ExecutorService {
 
   /* ------------------------------------------------------------ volume ----- */
 
-  /** The follower's verified 14-day volume, USD, from the builder ledger on this server (null: not known). */
+  /**
+   * The follower's verified 14-day volume as known now (null: not known), for a
+   * caller that cannot wait: the last answer, and a fresh read is started when
+   * it is older than VOLUME_TTL_MS. Everything that sets a fee awaits freshVolume.
+   */
   private volumeOf(owner: string): number | null {
+    if (!this.cfg.builderId) return null;
+    if (this.cfg.builderUrl) {
+      const hit = this.volumes.get(owner);
+      if (!hit || Date.now() - hit.at >= VOLUME_TTL_MS) void this.freshVolume(owner);
+      return hit?.usd ?? null;
+    }
+    return this.volumeFromDb(owner);
+  }
+
+  /** The follower's volume, read again when the last answer is older than VOLUME_TTL_MS. */
+  private async freshVolume(owner: string): Promise<number | null> {
+    if (!this.cfg.builderId) return null;
+    if (!this.cfg.builderUrl) return this.volumeFromDb(owner);
+    const hit = this.volumes.get(owner);
+    if (hit && Date.now() - hit.at < VOLUME_TTL_MS) return hit.usd;
+    const pending = this.volumeReads.get(owner);
+    if (pending) return pending;
+    const read = this.volumeFromApi(owner).finally(() => this.volumeReads.delete(owner));
+    this.volumeReads.set(owner, read);
+    return read;
+  }
+
+  /**
+   * The volume from the API server's ledger (GET /api/vs/builder/volume, the
+   * internal token and the edge's origin secret). A failed read keeps the last
+   * answer for another VOLUME_TTL_MS rather than dropping the follower to the
+   * first (dearest) step.
+   */
+  private async volumeFromApi(owner: string): Promise<number | null> {
+    const last = this.volumes.get(owner);
+    try {
+      const u = new URL(this.cfg.builderUrl!);
+      u.searchParams.set('address', owner);
+      u.searchParams.set('builder', String(this.cfg.builderId));
+      u.searchParams.set('days', String(COPY_FEE_WINDOW_DAYS));
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (this.cfg.builderToken) headers['X-Internal-Token'] = this.cfg.builderToken;
+      if (this.cfg.originSecrets[0]) headers['X-Origin-Verify'] = this.cfg.originSecrets[0];
+      const res = await this.deps.fetch(u.toString(), { headers, signal: AbortSignal.timeout(5_000) });
+      let body: { ok?: boolean; usd?: unknown } | null = null;
+      try {
+        body = JSON.parse(await res.text()) as { ok?: boolean; usd?: unknown };
+      } catch {
+        body = null;
+      }
+      if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
+      this.volumes.set(owner, { usd: body.usd, at: Date.now() });
+      return body.usd;
+    } catch (e) {
+      this.deps.log.warn('copy fee: the builder volume could not be read', { owner, error: String(e) });
+      this.volumes.set(owner, { usd: last?.usd ?? null, at: Date.now() });
+      return last?.usd ?? null;
+    }
+  }
+
+  /** The follower's verified 14-day volume, USD, from the builder ledger on this server (null: not known). */
+  private volumeFromDb(owner: string): number | null {
     if (!this.cfg.builderDb || !this.cfg.builderId) return null;
     const hit = this.volumes.get(owner);
-    if (hit && Date.now() - hit.at < 10 * 60_000) return hit.usd;
+    if (hit && Date.now() - hit.at < VOLUME_TTL_MS) return hit.usd;
     let usd: number | null = null;
     try {
       if (!this.builderDb) {
