@@ -18,7 +18,7 @@ VALUESCAN_ORIGIN=161-97-154-121.sslip.io
 # socket); Caddy passes this one path without the origin secret (deploy/server/caddy/Caddyfile.template).
 VITE_LIQ_WS_URL=wss://161-97-154-121.sslip.io/ws/liq
 
-VITE_WALLETCONNECT_PROJECT_ID=3a5409a71d931809f4c0838b7a7d56fd
+VITE_WALLETCONNECT_PROJECT_ID=ea518a95b8c4040554a878d2a9ed1b39
 
 # ValueDesk's SoDEX builder account; 1.5 bp per order, 2.5 bp ceiling (the copy
 # fee ladder's top tier, packages/copy-engine/src/policy.ts COPY_FEE_MAX).
