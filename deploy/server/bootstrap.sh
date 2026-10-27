@@ -81,7 +81,7 @@ install_if_changed() {
 # A previous run's answers are the defaults, so a re-run needs no arguments.
 if [ -f "$ETC/bootstrap.env" ]; then
   while IFS='=' read -r k v; do
-    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE|KEEP_SSHD|ORIGIN_SECRET_FILE|EXECUTOR_UPSTREAM)
+    case "$k" in SITE_DOMAIN|ORIGIN_DOMAIN|ORIGIN_ALIASES|OPS_BUCKET|CONFIG_PREFIX|ALERT_TOPIC_ARN|ACME_EMAIL|DATA_DEVICE|KEEP_SSHD|ORIGIN_SECRET_FILE|EXECUTOR_UPSTREAM)
       [ -n "${!k:-}" ] || printf -v "$k" '%s' "$v" ;;
     esac
   done < "$ETC/bootstrap.env"
@@ -106,6 +106,15 @@ domain_re='^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$'
 [[ "$SITE_DOMAIN" =~ $domain_re ]] || die "SITE_DOMAIN is not a DNS name: $SITE_DOMAIN"
 [[ "$ORIGIN_DOMAIN" =~ $domain_re ]] || die "ORIGIN_DOMAIN is not a DNS name: $ORIGIN_DOMAIN"
 [ "$SITE_DOMAIN" != "$ORIGIN_DOMAIN" ] || die "the origin needs a name of its own, not the site's"
+# More names Caddy serves (and gets certificates for) beside ORIGIN_DOMAIN, space
+# separated: the old sslip.io name while the site moves to api.<site domain>.
+ORIGIN_ALIASES="${ORIGIN_ALIASES:-}"
+origin_addresses="$ORIGIN_DOMAIN"
+for alias in $ORIGIN_ALIASES; do
+  [[ "$alias" =~ $domain_re ]] || die "ORIGIN_ALIASES holds a name that is not a DNS name: $alias"
+  [ "$alias" != "$SITE_DOMAIN" ] || die "ORIGIN_ALIASES may not name the site itself"
+  origin_addresses+=", $alias"
+done
 [ -z "$OPS_BUCKET" ] || [[ "$OPS_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "OPS_BUCKET is not a bucket name: $OPS_BUCKET"
 [[ "$KEEP_SSHD" =~ ^[01]$ ]] || die "KEEP_SSHD is 0 or 1"
 [ "$EXECUTOR_UPSTREAM" = 127.0.0.1:8799 ] || [[ "$EXECUTOR_UPSTREAM" =~ ^https://([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$ ]] \
@@ -321,6 +330,7 @@ install_if_changed "$work/executor.env" "$ETC/executor.env" 0640 root:valuescan-
 # What this run was given, for the next one (no secret in it).
 {
   printf 'SITE_DOMAIN=%s\nORIGIN_DOMAIN=%s\nOPS_BUCKET=%s\nCONFIG_PREFIX=%s\n' "$SITE_DOMAIN" "$ORIGIN_DOMAIN" "$OPS_BUCKET" "$CONFIG_PREFIX"
+  printf 'ORIGIN_ALIASES=%s\n' "$ORIGIN_ALIASES"
   printf 'ALERT_TOPIC_ARN=%s\nACME_EMAIL=%s\nDATA_DEVICE=%s\n' "$ALERT_TOPIC_ARN" "$ACME_EMAIL" "$DATA_DEVICE"
   printf 'KEEP_SSHD=%s\nORIGIN_SECRET_FILE=%s\nEXECUTOR_UPSTREAM=%s\n' "$KEEP_SSHD" "$ORIGIN_SECRET_FILE" "$EXECUTOR_UPSTREAM"
 } > "$work/bootstrap.env"
@@ -389,13 +399,13 @@ install_if_changed "$work/caddy.secret.env" "$ETC/caddy.secret.env" 0600 root:ro
 install_if_changed "$work/executor.secret.env" "$ETC/executor.secret.env" 0600 root:root && NEEDS_RESTART+=(valuescan-executor)
 rm -f "$work/api.secret.env" "$work/caddy.secret.env" "$work/executor.secret.env"
 
-log "Caddyfile for $ORIGIN_DOMAIN"
+log "Caddyfile for $origin_addresses"
 email_line="# (no ACME contact address was given)"
 [ -z "$ACME_EMAIL" ] || email_line="email $ACME_EMAIL"
 # A remote executor is reached by its own name (its Caddy serves only that name).
 host_line="# the executor runs here"
 [ "$EXECUTOR_UPSTREAM" = 127.0.0.1:8799 ] || host_line="header_up Host {upstream_hostport}"
-sed -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" -e "s|__ACME_EMAIL_LINE__|$email_line|" \
+sed -e "s|__ORIGIN_SITE_ADDRESSES__|$origin_addresses|" -e "s|__ORIGIN_DOMAIN__|$ORIGIN_DOMAIN|g" -e "s|__ACME_EMAIL_LINE__|$email_line|" \
     -e "s|__EXECUTOR_UPSTREAM__|$EXECUTOR_UPSTREAM|" -e "s|__EXECUTOR_HOST_LINE__|$host_line|" "$HERE/caddy/Caddyfile.template" > "$work/Caddyfile"
 # Validated with stand-in secrets: the real ones reach Caddy only through systemd.
 stand_in="$(printf 'v%.0s' {1..40})"

@@ -92,7 +92,7 @@ if [ "$VS_TARGET" = ec2 ]; then
   fi
 
   # Values are plain names (validated by bootstrap.sh); no secret travels in this command.
-  ssh_run "valuescan bootstrap" "SITE_DOMAIN='$DOMAIN_NAME' ORIGIN_DOMAIN='$ORIGIN_DOMAIN_NAME' OPS_BUCKET='' KEEP_SSHD=1 ORIGIN_SECRET_FILE='$REMOTE_SECRET' ALERT_TOPIC_ARN='' ACME_EMAIL='${ACME_EMAIL:-}' AWS_REGION='$REGION' bash /opt/valuescan/bootstrap/bootstrap.sh"
+  ssh_run "valuescan bootstrap" "SITE_DOMAIN='$DOMAIN_NAME' ORIGIN_DOMAIN='$ORIGIN_DOMAIN_NAME' ORIGIN_ALIASES='${ORIGIN_ALIASES:-}' OPS_BUCKET='' KEEP_SSHD=1 ORIGIN_SECRET_FILE='$REMOTE_SECRET' ALERT_TOPIC_ARN='' ACME_EMAIL='${ACME_EMAIL:-}' AWS_REGION='$REGION' bash /opt/valuescan/bootstrap/bootstrap.sh"
   note "bootstrap finished"
   exit 0
 fi

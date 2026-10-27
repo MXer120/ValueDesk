@@ -112,7 +112,7 @@ for host in "$SERVER2" "$SERVER1"; do
   say "$label: staging ${#files[@]} file(s)"
   list="$(printf '%s ' "${files[@]}")"
   case "$list" in *[!A-Za-z0-9._/\ -]*) die "unexpected characters in the file list" ;; esac
-  on "$host" "set -e; sudo rm -rf ~/backup-pull; install -d -m 0700 ~/backup-pull; cd /var/lib/vsbackup; for f in $list; do sudo cp \"\$f\" \"\$f.sha256\" ~/backup-pull/; done; sudo chown -R \$(id -u):\$(id -g) ~/backup-pull"
+  on "$host" "set -e; sudo rm -rf ~/backup-pull; install -d -m 0700 ~/backup-pull; for f in $list; do sudo cp \"/var/lib/vsbackup/\$f\" \"/var/lib/vsbackup/\$f.sha256\" ~/backup-pull/; done; sudo chown -R \$(id -u):\$(id -g) ~/backup-pull"
   mkdir -p "$DEST/held-on-$label/tmp"
   # 16000 Kbit/s: under the laptop's 20 Mbit/s cap.
   scp -l 16000 -p -i "$SSH_KEY" -o IdentitiesOnly=yes -o BatchMode=yes -o LogLevel=ERROR "$SSH_USER@$host:backup-pull/*" "$DEST/held-on-$label/tmp/"

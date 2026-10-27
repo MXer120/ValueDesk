@@ -224,7 +224,7 @@ test('packaging writes the Build Output API layout and keeps the project link', 
     const fn = join(output, 'functions', 'api', '__vs_proxy.func');
     const vc = JSON.parse(readFileSync(join(fn, '.vc-config.json'), 'utf8'));
     assert.deepEqual(vc, functionConfig('https://1-2-3-4.sslip.io'));
-    assert.deepEqual(vc.regions, ['hnd1'], 'Tokyo, next to the instance in ap-northeast-1');
+    assert.deepEqual(vc.regions, ['fra1'], 'Frankfurt, next to server 1 in France');
     assert.equal(readFileSync(join(fn, 'index.js'), 'utf8'), readFileSync(new URL('./api-proxy.cjs', import.meta.url), 'utf8'));
     assert.match(readFileSync(join(out, '.vercel', 'project.json'), 'utf8'), /prj_test/, 'the project link survives');
     // No secret is ever part of the deployment's files.

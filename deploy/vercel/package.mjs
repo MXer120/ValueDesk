@@ -12,7 +12,7 @@
 //
 // WHAT GOES IN
 //   static/                      the build as it is (apps/web/dist)
-//   functions/api/__vs_proxy.func/   deploy/vercel/api-proxy.cjs, Node.js, region hnd1 (Tokyo),
+//   functions/api/__vs_proxy.func/   deploy/vercel/api-proxy.cjs, Node.js, region fra1 (Frankfurt),
 //                                VALUESCAN_ORIGIN_URL fixed here; the secret is a Vercel
 //                                environment variable (production only), never in here
 //   config.json                  the routes:
@@ -40,8 +40,12 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 /** The function's path; package.mjs routes /api/* to it. */
 export const FUNCTION_PATH = '/api/__vs_proxy';
-/** Tokyo: next to the instance in ap-northeast-1 (it was fra1 next to eu-central-1 until 2026-10-23). */
-export const FUNCTION_REGION = 'hnd1';
+/**
+ * Frankfurt: next to server 1 in France (Contabo, since 2026-10-25). It was hnd1 (Tokyo) from
+ * 2026-10-23, next to the AWS instance in ap-northeast-1 - after the move every /api call went
+ * Europe -> Tokyo -> France and back, 1.1-1.45 s each.
+ */
+export const FUNCTION_REGION = 'fra1';
 export const NODE_RUNTIME = 'nodejs22.x';
 
 /**

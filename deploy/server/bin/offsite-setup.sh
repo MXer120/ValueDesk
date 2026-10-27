@@ -111,9 +111,13 @@ case "$cmd" in
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
     printf 'offsite test %s\n' "$(date -u +%FT%TZ)" | "$NODE" "$HERE/backup-crypt.mjs" encrypt "$DIR/backup.key" > "$tmp/t.enc"
-    name="api-state-$(date -u +%Y%m%dT%H%M%SZ).test.enc"
-    ssh_ "put api-state $name $(stat -c %s "$tmp/t.enc") $(sha256sum "$tmp/t.enc" | cut -c1-64)" < "$tmp/t.enc"
-    ssh_ "list api-state"
+    # The first set this server sends: the receiver takes only its own sets
+    # (server 1 takes executor and journal from server 2, never api-state).
+    set_="${OFFSITE_SETS%% *}"
+    [ -n "$set_" ] || die "OFFSITE_SETS is empty in /etc/valuescan/offsite.env"
+    name="$set_-$(date -u +%Y%m%dT%H%M%SZ).test.enc"
+    ssh_ "put $set_ $name $(stat -c %s "$tmp/t.enc") $(sha256sum "$tmp/t.enc" | cut -c1-64)" < "$tmp/t.enc"
+    ssh_ "list $set_"
     ssh_ "df"
     say "the test copy $name stays there until it is pruned (14 days); it holds one line of text"
     ;;

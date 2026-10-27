@@ -33,7 +33,7 @@
 	}
 }
 
-__ORIGIN_DOMAIN__ {
+__ORIGIN_SITE_ADDRESSES__ {
 	# Port 443 may be closed to everyone but the edge, so Let's Encrypt cannot
 	# validate over TLS-ALPN. It validates over HTTP-01 on port 80, which the
 	# security group opens for exactly that (and for the redirect to https).

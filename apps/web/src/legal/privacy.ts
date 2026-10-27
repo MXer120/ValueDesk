@@ -4,7 +4,7 @@
  * Built from what the app and the deployment actually do, checked against the
  * code on 2026-10-03 and again on 2026-10-24:
  *   - delivery: Vercel's edge and /api function (deploy/vercel) in front of one
- *     instance in Tokyo (deploy/server) - the CloudFront + WAF design of
+ *     server in France (deploy/server) - the CloudFront + WAF design of
  *     deploy/aws is not what serves the site; the API logs the path without the
  *     query and the client address (apps/server/src/index.ts, hosted
  *     serializer), journald keeps 90 days (deploy/server/journald/journald@pii.conf);
@@ -21,7 +21,7 @@
  *     localStorage / sessionStorage / IndexedDB as listed below;
  *   - the index holds public trading data of wallets (docs/INDEXER.md);
  *   - since 2026-10-23 the site is delivered by Vercel (deploy/vercel: the edge,
- *     the /api function in hnd1), not CloudFront; the function logs errors with
+ *     the /api function in fra1 since 2026-10-27, hnd1 before), not CloudFront; the function logs errors with
  *     the path and reason only (api-proxy.cjs) and answers /api/edge/geo itself,
  *     storing nothing; sanctioned places get 451 at the edge (section 3);
  *   - accepting the terms (section 5): legal/acceptance.ts - the first-visit
@@ -40,7 +40,7 @@
  *     older than EXECUTOR_ACTIVITY_DAYS (default 365) deleted (main.ts); the
  *     copy fee tier read from the builder ledger (service.ts volumeOf). The
  *     browser copier keeps its data in IndexedDB (packages/copy-engine/src/
- *     store.ts). Hosting: Vercel (site and /api, Tokyo hnd1) and Contabo (data server in France, executor in Tokyo; was AWS
+ *     store.ts). Hosting: Vercel (site and /api, Frankfurt fra1) and Contabo (data server in France, executor in Tokyo; was AWS
  *     ap-northeast-1 until 2026-10-25).
  *   - knowledge folders, as of 2026-10-24 (section 12): apps/server/src/folders and
  *     routes/folders.ts - per wallet: folder names, items (docs, sheets, boards,
@@ -78,7 +78,7 @@ export const PRIVACY: LegalDoc = {
     {
       title: '2. Visiting the website',
       blocks: [
-        { p: 'ValueDesk is delivered by Vercel Inc. (440 N Barranca Ave #4133, Covina, CA 91723, USA): its edge network serves the site from locations close to you, and a Vercel function in Tokyo (region hnd1) forwards requests for ValueDesk\'s own data service to ValueDesk\'s server at Contabo GmbH (Aschauer Straße 32a, 81549 Munich, Germany) in France. The live liquidation map connects from your browser straight to that server (161-97-154-121.sslip.io) over a WebSocket, which receives your IP address the same way. Vercel and Contabo process this data on our behalf under their data processing agreements (Art. 28 GDPR). [[OWNER: confirm that Vercel\'s Data Processing Addendum applies to the Vercel team, and that the data processing agreement with Contabo GmbH is in place for both servers]]' },
+        { p: 'ValueDesk is delivered by Vercel Inc. (440 N Barranca Ave #4133, Covina, CA 91723, USA): its edge network serves the site from locations close to you, and a Vercel function in Frankfurt, Germany (region fra1) forwards requests for ValueDesk\'s own data service to ValueDesk\'s server at Contabo GmbH (Aschauer Straße 32a, 81549 Munich, Germany) in France. The live liquidation map connects from your browser straight to that server (161-97-154-121.sslip.io) over a WebSocket, which receives your IP address the same way. Vercel and Contabo process this data on our behalf under their data processing agreements (Art. 28 GDPR). [[OWNER: confirm that Vercel\'s Data Processing Addendum applies to the Vercel team, and that the data processing agreement with Contabo GmbH is in place for both servers]]' },
         { p: 'When you open the site, your browser sends your IP address, the address of the page or file requested, and the usual technical information of an HTTP request (for example the browser type and language). This is processed:' },
         {
           ul: [
@@ -209,10 +209,10 @@ export const PRIVACY: LegalDoc = {
             'your account\'s positions and balance, which it reads from SoDEX, and the volume ValueDesk\'s fee ledger counts for your wallet (section 7), to set your copy fee.',
           ],
         },
-        { p: 'Your requests reach the executor through Vercel\'s edge and the site\'s /api function, which runs in Tokyo (Vercel region hnd1). Vercel passes on your IP address and the country it derives from it. The executor uses the IP address only in memory, to limit the number of requests per client, and does not store it; it stores the country with your accepted terms and with each signed request. [[OWNER: whether Vercel\'s logs or the web server in front of the executor (Caddy) record the IP address of these requests, and for how long - say so here, or confirm that they do not]]' },
+        { p: 'Your requests reach the executor through Vercel\'s edge and the site\'s /api function, which runs in Frankfurt, Germany (Vercel region fra1). Vercel passes on your IP address and the country it derives from it. The executor uses the IP address only in memory, to limit the number of requests per client, and does not store it; it stores the country with your accepted terms and with each signed request. [[OWNER: whether Vercel\'s logs or the web server in front of the executor (Caddy) record the IP address of these requests, and for how long - say so here, or confirm that they do not]]' },
         { p: 'Purposes and legal bases: carrying out the copies you instruct - the key, the orders, the stop orders and the copy fee (Art. 6(1)(b) GDPR); applying the regional rules of the Copy trading terms and keeping evidence of what you instructed and what was done, to answer your questions and to establish or defend legal claims (Art. 6(1)(f) GDPR - our legitimate interest in a reliable record and in offering copy trading only where we do); and protecting the executor against misuse (Art. 6(1)(f) GDPR). [[OWNER: legal bases to be confirmed by counsel - in particular whether Art. 6(1)(c) GDPR applies to the records and the country check, e.g. under licensing, record-keeping or sanctions rules]] Without your signature, your country and your SoDEX account number, hosted copy trading cannot be offered to you.' },
         { p: 'Recipients: Vercel Inc. (the edge and the /api function) and Contabo GmbH (the executor\'s server in Tokyo, Japan) process this data on our behalf (Art. 28 GDPR). [[OWNER: confirm that Vercel\'s Data Processing Addendum applies, and the data processing agreement with Contabo GmbH for this server]] SoDEX receives the orders the executor places in your account; the executor reads public data about the leader from SoDEX or Hyperliquid. SoDEX records copied orders like any other order, and the name of the key you register on SoDEX is publicly visible.' },
-        { p: 'Transfer to a third country: the executor\'s server and the /api function are in Japan. The European Commission has decided that Japan ensures an adequate level of protection for personal data (Art. 45 GDPR, Implementing Decision (EU) 2019/419). Vercel is a US company: [[OWNER: confirm the safeguards for any access from the US, e.g. its participation in the EU-U.S. Data Privacy Framework and the EU Standard Contractual Clauses in its data processing addendum]].' },
+        { p: 'Transfer to a third country: the executor\'s server is in Japan (the /api function is in Germany). The European Commission has decided that Japan ensures an adequate level of protection for personal data (Art. 45 GDPR, Implementing Decision (EU) 2019/419). Vercel is a US company: [[OWNER: confirm the safeguards for any access from the US, e.g. its participation in the EU-U.S. Data Privacy Framework and the EU Standard Contractual Clauses in its data processing addendum]].' },
         { p: 'Retention:' },
         {
           ul: [
@@ -242,7 +242,7 @@ export const PRIVACY: LegalDoc = {
         },
         { p: 'What you put into your folders is yours: ValueDesk does not look at it, analyse it, use it for anything else or share it, except where that is needed to keep the service running and secure or where the law requires it. Please do not upload other people\'s personal data unless you are allowed to. To protect the service against misuse, the server counts, in its memory only, how many changes and uploads each wallet and each IP address make and how many wallets sign in from one address, and refuses what goes beyond the limits.' },
         { p: 'Posts from X: when you save a post by its link, ValueDesk\'s server - not your browser - asks X\'s public embed service (publish.x.com, operated by X Corp.) for the post\'s text, author and date. That request carries only the post\'s link and comes from the server\'s own address, so X does not learn your IP address or your wallet; the answer is kept in the server\'s memory for up to an hour, so that the same post saved twice is asked for once. Nothing from X is loaded into the page: a saved post is shown as plain text.' },
-        { p: 'Purposes and legal bases: keeping the folders you asked for (Art. 6(1)(b) GDPR); protecting the service against misuse (Art. 6(1)(f) GDPR). Your requests reach the server through Vercel\'s edge and the /api function in Tokyo, which pass on your IP address for the limits; the server logs the path of each request, without its query and without the content (section 2). Recipients and transfers: Contabo GmbH (the data server of ValueDesk, in France) and Vercel Inc. (the edge and the /api function), as in section 2. process this data on our behalf; for Japan the European Commission has decided that it ensures an adequate level of protection.' },
+        { p: 'Purposes and legal bases: keeping the folders you asked for (Art. 6(1)(b) GDPR); protecting the service against misuse (Art. 6(1)(f) GDPR). Your requests reach the server through Vercel\'s edge and the /api function in Frankfurt, which pass on your IP address for the limits; the server logs the path of each request, without its query and without the content (section 2). Recipients and transfers: Contabo GmbH (the data server of ValueDesk, in France) and Vercel Inc. (the edge and the /api function), as in section 2. process this data on our behalf; for Japan the European Commission has decided that it ensures an adequate level of protection.' },
         { p: 'Retention: everything stays until you delete it. You can delete an item or a folder at any time, or everything at once with "Delete everything" in the folders\' menu, which also signs out every browser that was signed in to your folders. The server deletes what it holds at once; its nightly copy of the folders\' database (text, not files), kept to recover from faults, still holds deleted text for up to seven days. A file you started to upload but that never arrived in full is deleted within two hours; an image you removed from a doc or a board is deleted a day later (so that undoing the removal still finds it), and the images in a doc or a board are deleted with it. A wallet that has not signed in to its folders for 365 days is deleted with everything in it. [[OWNER: whether snapshots of the server\'s disk are taken (they would contain uploaded files), and how long they are kept]]' },
       ],
     },

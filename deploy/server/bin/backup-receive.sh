@@ -73,6 +73,9 @@ read -r verb a1 a2 a3 a4 extra <<< "$CMD" || true
 [ -z "${extra:-}" ] || die "too many arguments"
 [ -n "$RECEIVE_SETS" ] || die "RECEIVE_SETS is empty in $CONF: this server receives nothing"
 mkdir -p "$RECEIVE_DIR"
+# Run from a folder this user may enter: `sudo -u vsbackup ... list` from another
+# user's home made find fail ("Failed to restore initial working directory").
+cd "$RECEIVE_DIR"
 
 case "${verb:-}" in
   put)
