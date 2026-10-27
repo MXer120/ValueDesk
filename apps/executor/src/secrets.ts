@@ -120,25 +120,12 @@ export class Secrets {
   }
 
   seal(network: string, owner: string, address: string, privateKey: Uint8Array): string {
-    const iv = randomBytes(12);
-    const c = createCipheriv('aes-256-gcm', this.kek, iv);
-    c.setAAD(aad(network, owner, address));
-    const ct = Buffer.concat([c.update(privateKey), c.final()]);
-    return ['v1', iv.toString('base64url'), ct.toString('base64url'), c.getAuthTag().toString('base64url')].join('.');
+    return sealWith(this.kek, network, owner, address, privateKey);
   }
 
   /** The signing key for a sealed record. Throws when it does not open, or opens to another address. */
   open(network: string, owner: string, address: string, sealed: string, registration: { name: string; expiresAt: number | null }): SigningKeyRef {
-    const [v, iv, ct, tag] = sealed.split('.');
-    if (v !== 'v1' || !iv || !ct || !tag) throw new Error('sealed key: unknown format');
-    const d = createDecipheriv('aes-256-gcm', this.kek, Buffer.from(iv, 'base64url'));
-    d.setAAD(aad(network, owner, address));
-    d.setAuthTag(Buffer.from(tag, 'base64url'));
-    const pk = new Uint8Array(Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]));
-    if (privateKeyToAddress(pk).toLowerCase() !== address.toLowerCase()) {
-      pk.fill(0);
-      throw new Error('sealed key: opens to another address');
-    }
+    const pk = openWith(this.kek, network, owner, address, sealed);
     return signingKeyFrom({ privateKey: pk, address }, { name: registration.name, expiresAt: registration.expiresAt ?? 0 });
   }
 
@@ -170,3 +157,36 @@ export class Secrets {
 
 const aad = (network: string, owner: string, address: string): Buffer =>
   Buffer.from(`vd-copy-key:v1:${network}:${owner.toLowerCase()}:${address.toLowerCase()}`);
+
+/**
+ * Seal a follower's private key under a kek (the `v1` record the keys table holds).
+ * The class above and the kek rotation (tools/rotate-kek.ts) share it, so there is
+ * one definition of the format.
+ */
+export function sealWith(kek: Buffer, network: string, owner: string, address: string, privateKey: Uint8Array): string {
+  if (kek.length !== 32) throw new Error('a kek is 32 bytes');
+  const iv = randomBytes(12);
+  const c = createCipheriv('aes-256-gcm', kek, iv);
+  c.setAAD(aad(network, owner, address));
+  const ct = Buffer.concat([c.update(privateKey), c.final()]);
+  return ['v1', iv.toString('base64url'), ct.toString('base64url'), c.getAuthTag().toString('base64url')].join('.');
+}
+
+/**
+ * The raw private key in a sealed record (the caller wipes it). Throws when it does not
+ * open under this kek, or opens to another address.
+ */
+export function openWith(kek: Buffer, network: string, owner: string, address: string, sealed: string): Uint8Array {
+  if (kek.length !== 32) throw new Error('a kek is 32 bytes');
+  const [v, iv, ct, tag] = sealed.split('.');
+  if (v !== 'v1' || !iv || !ct || !tag) throw new Error('sealed key: unknown format');
+  const d = createDecipheriv('aes-256-gcm', kek, Buffer.from(iv, 'base64url'));
+  d.setAAD(aad(network, owner, address));
+  d.setAuthTag(Buffer.from(tag, 'base64url'));
+  const pk = new Uint8Array(Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]));
+  if (privateKeyToAddress(pk).toLowerCase() !== address.toLowerCase()) {
+    pk.fill(0);
+    throw new Error('sealed key: opens to another address');
+  }
+  return pk;
+}
