@@ -14,6 +14,10 @@ import './editMode.css';
 
 export interface EditThumb {
   id: string;
+  /** What the rail calls it. */
+  name: string;
+  /** Taken off the icon rail. */
+  off: boolean;
   active: boolean;
   blocks: ThumbBlock[];
 }
@@ -123,11 +127,19 @@ export interface EditPreset {
 }
 
 export function EditMode({
-  thumbs, presets = [], cols, widgets, quiet, sticky, overDelete, ghost,
-  onSwitch, onAddSlot, onDeleteSlot, onApplyPreset, onDone, onFill, onPreview, onWidgetPointerDown,
+  thumbs, presets = [], history = [], rail: railIn, onRail, cols, widgets, quiet, sticky, overDelete, ghost,
+  onSwitch, onAddSlot, onDeleteSlot, onSetOff, onRestore, onApplyPreset, onDone, onFill, onPreview, onWidgetPointerDown,
 }: {
   thumbs: EditThumb[];
   presets?: EditPreset[];
+  /** Earlier layouts, newest first: restored as a terminal of their own. */
+  history?: EditPreset[];
+  /** The right rail's tab, when the caller holds it (the icon rail opens Layouts). */
+  rail?: 'widgets' | 'layouts';
+  onRail?: (rail: 'widgets' | 'layouts') => void;
+  /** Take a layout off the icon rail, or put it back. */
+  onSetOff?: (id: string, off: boolean) => void;
+  onRestore?: (entryId: string) => void;
   cols: number;
   widgets: EditWidget[];
   /** Side windows nearly hidden (hold-preview or latched preview). */
@@ -183,7 +195,11 @@ export function EditMode({
   const [confirmId, setConfirmId] = useState<string | null>(null);
   // A layout card's right-click menu: open it, or delete it (which still asks first).
   const [slotMenu, setSlotMenu] = useState<{ at: { x: number; y: number }; id: string } | null>(null);
-  const [rail, setRail] = useState<'widgets' | 'layouts'>('widgets');
+  const [railOwn, setRailOwn] = useState<'widgets' | 'layouts'>('widgets');
+  const rail = railIn ?? railOwn;
+  const setRail = (r: 'widgets' | 'layouts') => { setRailOwn(r); onRail?.(r); };
+  const menuThumb = slotMenu ? thumbs.find((t) => t.id === slotMenu.id) : undefined;
+  const onRailCount = thumbs.filter((t) => !t.off).length;
   const faceOrder = new Map(WIDGET_FACES.map((face, index) => [face.id, index]));
   const widgetGroups = WIDGET_GROUPS
     .map((group) => ({
@@ -199,14 +215,14 @@ export function EditMode({
       <div className={`dash-edit-dock${side}`}>
       <aside className="dash-edit-slots" aria-label="Layouts" onContextMenu={(e) => e.preventDefault()}>
         <div className="dash-edit-slots__list">
-          {thumbs.map((thumb, i) => (
-            <div key={thumb.id} className="dash-edit-slot">
+          {thumbs.map((thumb) => (
+            <div key={thumb.id} className={`dash-edit-slot${thumb.off ? ' is-off' : ''}`}>
               <Card
                 cols={cols}
                 blocks={thumb.blocks}
                 active={thumb.active}
-                title={`Layout ${i + 1}`}
-                blurb="Right-click for options."
+                title={thumb.name}
+                blurb={thumb.off ? 'Hidden from the sidebar. Right-click for options.' : 'Right-click for options.'}
                 onClick={() => onSwitch(thumb.id)}
                 onContextMenu={(e) => setSlotMenu({ at: menuAt(e), id: thumb.id })}
               />
@@ -229,6 +245,9 @@ export function EditMode({
             onClose={() => setSlotMenu(null)}
             items={[
               { label: 'Open layout', icon: MENU_ICONS.open, onClick: () => onSwitch(slotMenu.id) },
+              ...(onSetOff && menuThumb ? [menuThumb.off
+                ? { label: 'Show in sidebar', icon: MENU_ICONS.show, onClick: () => onSetOff(slotMenu.id, false) }
+                : { label: 'Hide from sidebar', icon: MENU_ICONS.hide, disabled: onRailCount <= 1, onClick: () => onSetOff(slotMenu.id, true) }] : []),
               { label: 'Delete layout…', icon: MENU_ICONS.remove, danger: true, disabled: !onDeleteSlot, onClick: () => setConfirmId(slotMenu.id) },
             ]}
           />
@@ -288,20 +307,46 @@ export function EditMode({
         </div>
         {rail === 'layouts' ? (
           <div className="dash-edit-palette__list">
-            <div className="dash-edit-palette__grid">
-              {presets.map((preset) => (
-                <Card
-                  key={preset.id}
-                  cols={cols}
-                  blocks={preset.blocks}
-                  active={preset.active}
-                  title={preset.title}
-                  blurb={preset.blurb}
-                  onClick={() => onApplyPreset?.(preset.id)}
-                />
-              ))}
-            </div>
-            {presets.length === 0 && <p className="dash-edit-palette__empty">No presets for this page.</p>}
+            {/* First: the rail's "All previous layouts" lands here, and a restore is what it came for. */}
+            {onRestore && (
+              <section className="dash-edit-palette__group">
+                <p>Previous layouts</p>
+                {history.length > 0 ? (
+                  <div className="dash-edit-palette__grid">
+                    {history.map((h) => (
+                      <Card
+                        key={h.id}
+                        cols={cols}
+                        blocks={h.blocks}
+                        active={false}
+                        title={`Restore ${h.title}`}
+                        blurb={h.blurb}
+                        onClick={() => onRestore(h.id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="dash-edit-palette__empty">Layouts you delete, reset, replace or edit are kept here, to restore.</p>
+                )}
+              </section>
+            )}
+            <section className="dash-edit-palette__group">
+              <p>Presets</p>
+              <div className="dash-edit-palette__grid">
+                {presets.map((preset) => (
+                  <Card
+                    key={preset.id}
+                    cols={cols}
+                    blocks={preset.blocks}
+                    active={preset.active}
+                    title={preset.title}
+                    blurb={preset.blurb}
+                    onClick={() => onApplyPreset?.(preset.id)}
+                  />
+                ))}
+              </div>
+              {presets.length === 0 && <p className="dash-edit-palette__empty">No presets for this page.</p>}
+            </section>
           </div>
         ) : (
         <div className="dash-edit-palette__list">

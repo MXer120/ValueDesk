@@ -81,6 +81,8 @@ export interface TabMenuItem {
   icon?: ReactNode;
   /** Closes or deletes something: red, and set off from the items above it by a line. */
   danger?: boolean;
+  /** A line above it: a group of its own. */
+  sep?: boolean;
 }
 
 const menuIcon = (d: ReactNode) => (
@@ -150,8 +152,8 @@ export function TabMenu({ at, items, onClose }: { at: { x: number; y: number }; 
   return createPortal(
     <div ref={ref} className="menu-popup tabmenu" role="menu" style={{ left: place.x, top: place.y }} onContextMenu={(e) => e.preventDefault()}>
       {items.map((it, i) => (
-        <Fragment key={it.label}>
-          {it.danger && i > 0 && !items[i - 1]!.danger && <span className="tabmenu__sep" role="separator" />}
+        <Fragment key={`${i}:${it.label}`}>
+          {((it.danger && i > 0 && !items[i - 1]!.danger) || (it.sep && i > 0)) && <span className="tabmenu__sep" role="separator" />}
           <button
             type="button"
             role="menuitem"

@@ -13,7 +13,7 @@
  * Every button carries its name as a tooltip and an accessible name; the
  * notifications and settings menus open to the right of the rail (shell.css).
  */
-import { Suspense, lazy, useEffect, useState, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useState, type MouseEvent, type ReactNode } from 'react';
 import { BrandMark } from './BrandMark';
 import { SettingsMenu } from './SettingsMenu';
 import { AddressMenu } from './NavBar';
@@ -26,7 +26,9 @@ import { useAddressMask } from '../privacy';
 import { warmWalletModal } from '../walletconnect';
 import type { Tab } from '../router';
 import { TRADE_DASHBOARD } from '../dashboard/layout';
-import { activateTerminal, addTerminal, useTerminals } from '../dashboard/terminals';
+import { activateTerminal, addTerminal, openLayouts, removeTerminal, restoreTerminal, setTerminalOff, useTerminals } from '../dashboard/terminals';
+import { historyLabel } from '../dashboard/storage';
+import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../dashboard/tabExtras';
 import { useMoneyNotice } from './funds/moneyNotice';
 import { FOLDER_ICON } from '../folders/icons';
 
@@ -54,6 +56,29 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
     if (!onTrade) onNavigate('trade');
     addTerminal(TRADE_DASHBOARD);
   };
+  // A terminal's right-click menu (`id`), or the + button's (null): hide, delete, and what can come back.
+  const [menu, setMenu] = useState<{ at: { x: number; y: number }; id: string | null } | null>(null);
+  const onMenu = (id: string | null) => (e: MouseEvent) => setMenu({ at: menuAt(e), id });
+  const menuItems = (id: string | null): TabMenuItem[] => {
+    const t = id ? terminals.list.find((x) => x.id === id) : undefined;
+    const back: TabMenuItem[] = [
+      ...terminals.hidden.slice(0, 5).map((h) => ({ label: `Show ${h.name}`, icon: MENU_ICONS.show, onClick: () => setTerminalOff(TRADE_DASHBOARD, h.id, false) })),
+      ...terminals.history.slice(0, 5).map((h) => ({
+        label: `Restore ${h.name} (${historyLabel(h.why, h.at).toLowerCase()})`,
+        icon: MENU_ICONS.reset,
+        onClick: () => { restoreTerminal(TRADE_DASHBOARD, h.id); if (!onTrade) onNavigate('trade'); },
+      })),
+      { label: 'All previous layouts…', icon: MENU_ICONS.edit, onClick: () => { openLayouts(); if (!onTrade) onNavigate('trade'); } },
+    ];
+    back[0] = { ...back[0]!, sep: true };
+    if (!t) return [{ label: 'New terminal', icon: MENU_ICONS.add, onClick: add }, ...back];
+    return [
+      { label: 'Open', icon: MENU_ICONS.open, onClick: () => open(t.id) },
+      { label: 'Hide from sidebar', icon: MENU_ICONS.hide, disabled: terminals.list.length <= 1, onClick: () => setTerminalOff(TRADE_DASHBOARD, t.id, true) },
+      ...back,
+      { label: `Delete ${t.name}`, icon: MENU_ICONS.remove, danger: true, onClick: () => removeTerminal(TRADE_DASHBOARD, t.id) },
+    ];
+  };
   return (
     <aside className="side" aria-label="Tools">
       <a className="side__brand" href="/" aria-label="ValueDesk" title="ValueDesk">
@@ -70,6 +95,7 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
                     key={t.id}
                     label={`${t.name} terminal${on ? ' (open)' : ''}`}
                     onClick={() => open(t.id)}
+                    onContextMenu={onMenu(t.id)}
                     raised={on && onTrade}
                     current={on && !onTrade}
                     pressed={on}
@@ -78,9 +104,10 @@ export function SideBar({ address, hasLayout, dashLocked, onOpenSearch, tab, onN
                   </SideButton>
                 );
               })}
-              <button type="button" className="side__add" aria-label="New terminal" title="New terminal" onClick={add}>
+              <button type="button" className="side__add" aria-label="New terminal" title="New terminal (right-click: hidden and previous layouts)" onClick={add} onContextMenu={onMenu(null)}>
                 <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3.5v9M3.5 8h9" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
               </button>
+              {menu && <TabMenu at={menu.at} items={menuItems(menu.id)} onClose={() => setMenu(null)} />}
             </div>
             <span className="side__sep" aria-hidden="true" />
           </>
@@ -209,9 +236,10 @@ const TERMINAL_ICON: Record<string, ReactNode> = {
   grid: <><rect x="3.5" y="3.5" width="5.5" height="5.5" rx="1.3" /><rect x="11" y="3.5" width="5.5" height="5.5" rx="1.3" /><rect x="3.5" y="11" width="5.5" height="5.5" rx="1.3" /><rect x="11" y="11" width="5.5" height="5.5" rx="1.3" /></>,
 };
 
-function SideButton({ label, onClick, raised, current, pressed, children }: {
+function SideButton({ label, onClick, onContextMenu, raised, current, pressed, children }: {
   label: string;
   onClick: () => void;
+  onContextMenu?: (e: MouseEvent) => void;
   raised?: boolean;
   /** The terminal that opens on Trade, while another page is on screen. */
   current?: boolean;
@@ -226,6 +254,7 @@ function SideButton({ label, onClick, raised, current, pressed, children }: {
       aria-pressed={pressed}
       title={label}
       onClick={() => onClick()}
+      onContextMenu={onContextMenu}
     >
       <svg viewBox="0 0 20 20" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         {children}

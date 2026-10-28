@@ -29,11 +29,11 @@ import { panelSettings } from '../settingsBus';
 import { PanelChrome } from './Panel';
 import { breakpointFor, resolveLayout, samePlacements, toPlacements } from './resolve';
 import {
-  activateSlot, addEmptySlot, clearDashboard, ensureEditSlots, loadDashboard, mirrorIntoActiveSlot, removeSlot,
-  resetSlot, saveDashboard, seedTerminals, type ResetMode, type SavedDashboard,
+  activateSlot, addEmptySlot, clearDashboard, ensureEditSlots, loadDashboard, mirrorIntoActiveSlot, remember, rememberEdits, removeSlot,
+  historyLabel, resetSlot, restoreFromHistory, saveDashboard, seedTerminals, setSlotOff, slotName, type LayoutSlot, type ResetMode, type SavedDashboard,
 } from './storage';
 import { ResetDialog } from './ResetDialog';
-import { publishTerminals, registerTerminals, snapshotOf } from './terminals';
+import { publishTerminals, registerTerminals, snapshotOf, takeLayoutsAsk } from './terminals';
 import { SeamLayer } from './SeamLayer';
 import type { SeamBox } from './seams';
 import { TRADE_PRESETS } from './presets';
@@ -437,12 +437,17 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
   const previewing = holding || sticky;
   const arrange = editing && !previewing;
 
+  /* Edit mode's right rail (Widgets / Layouts), and every slot as it was when edit mode opened:
+     what Done changed goes into the layout history (storage.ts rememberEdits). */
+  const [editRail, setEditRail] = useState<'widgets' | 'layouts'>('widgets');
+  const editBefore = useRef<LayoutSlot[] | null>(null);
   const enterEdit = useCallback(() => {
     setHolding(false);
     setSticky(false);
     setEditing(true);
     setSaved((prev) => {
       const next = ensureEditSlots(prev);
+      if (!editBefore.current) editBefore.current = mirrorIntoActiveSlot(next).slots ?? [];
       if (next === prev) return prev;
       saveDashboard(config, next);
       return next;
@@ -470,10 +475,31 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
     setEditing(false);
     setSticky(false);
     setHolding(false);
-  }, []);
+    setEditRail('widgets');
+    const before = editBefore.current;
+    editBefore.current = null;
+    if (before) {
+      setSaved((prev) => {
+        const next = rememberEdits(prev, before);
+        if (next.history === prev.history) return prev;
+        saveDashboard(config, next);
+        return next;
+      });
+    }
+  }, [config]);
+
+  /** A change to the saved record, persisted when it is one. */
+  const change = useCallback((f: (prev: SavedDashboard) => SavedDashboard) => {
+    setSaved((prev) => {
+      const next = f(prev);
+      if (next === prev) return prev;
+      saveDashboard(config, next);
+      return next;
+    });
+  }, [config]);
 
   /* The icon rail's terminals (terminals.ts): this dashboard says which canvases
-     it has and which is on screen, and switches or adds one when asked. */
+     it has and which is on screen, and switches, adds, hides, deletes or restores one when asked. */
   useEffect(() => {
     if (config.terminals) publishTerminals(snapshotOf(saved));
   }, [config.terminals, saved]);
@@ -496,8 +522,22 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
         });
         setEditing(true);
       },
+      setOff: (id, off) => change((prev) => setSlotOff(prev, id, off)),
+      remove: (id) => change((prev) => removeSlot(prev, id)),
+      restore: (entryId) => change((prev) => restoreFromHistory(prev, entryId)),
+      openLayouts: () => {
+        enterEdit();
+        setEditRail('layouts');
+      },
     });
-  }, [config]);
+  }, [config, change, enterEdit]);
+  // Asked for from another page (the rail's "All previous layouts"): open on arriving here.
+  useEffect(() => {
+    if (config.terminals && takeLayoutsAsk()) {
+      enterEdit();
+      setEditRail('layouts');
+    }
+  }, [config.terminals, enterEdit]);
 
   useLayoutEffect(() => {
     const shell = scrollRef.current?.closest('.shell');
@@ -837,8 +877,21 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
 
       {editing && saved.slots && saved.slots.length > 0 && (
         <EditMode
+          rail={editRail}
+          onRail={setEditRail}
+          history={(saved.history ?? []).map((h) => ({
+            id: h.id,
+            title: h.slot.name ?? 'Layout',
+            blurb: historyLabel(h.why, h.at),
+            active: false,
+            blocks: slotBlocks(eligible, config.layouts[bp], h.slot, bp, metrics.cols, rowHeight, metrics.margin),
+          }))}
+          onRestore={(entryId) => change((prev) => restoreFromHistory(prev, entryId))}
+          onSetOff={(id, off) => change((prev) => setSlotOff(prev, id, off))}
           thumbs={(saved.slots ?? []).map((slot) => ({
             id: slot.id,
+            name: slotName(saved, slot),
+            off: slot.off === true,
             active: slot.id === saved.activeSlot,
             blocks: slot.id === saved.activeSlot
               ? layout.map(({ i, x, y, w, h }) => ({ i, x, y, w, h }))
@@ -888,7 +941,9 @@ export function Dashboard<C>({ config, panels, context, className }: DashboardPr
           onApplyPreset={(id) => {
             const preset = TRADE_PRESETS.find((p) => p.id === id);
             if (!preset) return;
-            setSaved((prev) => {
+            setSaved((before) => {
+              // The layout it replaces stays restorable (edit mode's Layouts tab).
+              const prev = remember(before, before.activeSlot, 'preset');
               const layouts = preset.layouts;
               const placed = new Set((layouts.lg ?? []).map((item) => item.i));
               const shown = panels.filter((p) => p.defaultHidden && placed.has(p.id)).map((p) => p.id);

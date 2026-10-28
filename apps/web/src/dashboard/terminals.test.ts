@@ -93,3 +93,57 @@ test('reset: Trade goes back to the designed default', async () => {
   assert.deepEqual(all.hidden, []);
   assert.equal(all.slots!.find((x) => x.id === 'trade')!.blank, undefined);
 });
+
+test('history: a deleted terminal can be restored, under its name, on screen; it then leaves the history', async () => {
+  const { restoreFromHistory } = await import('./storage');
+  const s = activateSlot(seedTerminals(fresh, seeds), 'news');
+  const gone = removeSlot(s, 'news', 1_000);
+  assert.deepEqual(terminalsOf(gone).map((t) => t.id), ['trade']);
+  assert.equal(gone.activeSlot, 'trade', 'the one on screen hands over');
+  assert.equal(gone.history?.length, 1);
+  assert.deepEqual({ why: gone.history![0]!.why, name: gone.history![0]!.slot.name, at: gone.history![0]!.at }, { why: 'deleted', name: 'News', at: 1_000 });
+  const back = restoreFromHistory(gone, gone.history![0]!.id);
+  assert.deepEqual(terminalsOf(back).map((t) => t.name), ['Trade', 'News']);
+  assert.equal(back.activeSlot, 'news');
+  assert.deepEqual(back.layouts, s.slots!.find((x) => x.id === 'news')!.layouts);
+  assert.equal(back.history?.length, 0);
+});
+
+test('history: a reset and a preset keep the layout they replace; the same layout is not kept twice; 20 at most', async () => {
+  const { remember, resetSlot, HISTORY_MAX } = await import('./storage');
+  const s = activateSlot(seedTerminals(fresh, seeds), 'trade');
+  const reset = resetSlot(s, seeds, 'all', 5);
+  assert.equal(reset.history?.[0]?.why, 'reset');
+  assert.deepEqual(reset.history?.[0]?.slot.layouts, fresh.layouts, 'the user’s own layout is kept');
+  assert.equal(remember(remember(s, 'trade', 'preset', 6), 'trade', 'preset', 7).history?.length, 1, 'unchanged: once');
+  let many = s;
+  for (let i = 0; i < 30; i++) many = remember({ ...many, layouts: { lg: [{ i: 'chart', x: i, y: 0, w: 10, h: 10 }] } }, 'trade', 'edited', 100 + i);
+  assert.equal(many.history?.length, HISTORY_MAX);
+  assert.equal(many.history?.[0]?.at, 129, 'newest first');
+});
+
+test('history: what edit mode changed is kept as it was when edit mode opened', async () => {
+  const { mirrorIntoActiveSlot, rememberEdits } = await import('./storage');
+  const s = activateSlot(seedTerminals(fresh, seeds), 'trade');
+  const before = mirrorIntoActiveSlot(s).slots!;
+  const edited = { ...s, layouts: { lg: [{ i: 'chart', x: 3, y: 3, w: 9, h: 9 }] } };
+  const done = rememberEdits(edited, before, 50);
+  assert.equal(done.history?.length, 1);
+  assert.deepEqual({ why: done.history![0]!.why, id: done.history![0]!.slot.id }, { why: 'edited', id: 'trade' });
+  assert.deepEqual(done.history![0]!.slot.layouts, fresh.layouts);
+  assert.equal(rememberEdits(s, before, 51).history, s.history, 'nothing changed: nothing kept');
+});
+
+test('hide from sidebar: off the rail, kept; the one on screen hands over; the last one stays', async () => {
+  const { setSlotOff, hiddenTerminalsOf } = await import('./storage');
+  const s = activateSlot(seedTerminals(fresh, seeds), 'news');
+  const off = setSlotOff(s, 'news', true);
+  assert.deepEqual(terminalsOf(off).map((t) => t.id), ['trade']);
+  assert.deepEqual(hiddenTerminalsOf(off).map((t) => t.id), ['news']);
+  assert.equal(off.activeSlot, 'trade');
+  assert.equal(setSlotOff(off, 'trade', true), off, 'the last on the rail cannot be hidden');
+  assert.deepEqual(terminalsOf(setSlotOff(off, 'news', false)).map((t) => t.id), ['trade', 'news']);
+  // Deleting the only visible one brings a hidden one back on the rail.
+  const onlyHidden = removeSlot(off, 'trade', 9);
+  assert.deepEqual(terminalsOf(onlyHidden).map((t) => t.id), ['news']);
+});

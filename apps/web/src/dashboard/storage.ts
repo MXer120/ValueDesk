@@ -30,6 +30,34 @@ export interface LayoutSlot {
   layouts: Partial<Record<BreakpointName, PanelPlacement[]>>;
   hidden?: string[];
   shown?: string[];
+  /** Taken off the icon rail (right-click > Hide from sidebar), kept and still in edit mode. */
+  off?: boolean;
+}
+
+/** Why a layout went into the history. */
+export type HistoryWhy = 'deleted' | 'reset' | 'preset' | 'edited';
+
+/**
+ * A layout as it was before it was deleted, reset, replaced by a preset or changed in edit
+ * mode: restored as a terminal of its own (right-click on the rail, or edit mode's Layouts tab).
+ */
+export interface HistoryEntry {
+  id: string;
+  at: number;
+  why: HistoryWhy;
+  slot: LayoutSlot;
+}
+
+/** Kept at most, newest first. */
+export const HISTORY_MAX = 20;
+
+const WHY_TEXT: Record<HistoryWhy, string> = { deleted: 'Deleted', reset: 'Before a reset', preset: 'Before a preset', edited: 'Before an edit' };
+
+/** "Deleted 3 h ago": why and when a layout went into the history. */
+export function historyLabel(why: HistoryWhy, at: number, now = Date.now()): string {
+  const m = Math.max(0, Math.round((now - at) / 60_000));
+  const ago = m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 48 * 60 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+  return `${WHY_TEXT[why]}, ${ago}`;
 }
 
 export interface SavedDashboard {
@@ -60,6 +88,8 @@ export interface SavedDashboard {
   activeSlot?: string;
   /** Terminal seeds already added once (DashboardConfig.terminals), so a deleted one stays deleted. */
   seeded?: string[];
+  /** Earlier layouts, newest first (HISTORY_MAX). */
+  history?: HistoryEntry[];
 }
 
 const keyFor = (id: string): string => `${KEY_PREFIX}${id}`;
@@ -91,27 +121,54 @@ const readLayouts = (raw: unknown): SavedDashboard['layouts'] => {
   return layouts;
 };
 
+const readSlot = (item: unknown): LayoutSlot | null => {
+  if (typeof item !== 'object' || item === null) return null;
+  const rec = item as Record<string, unknown>;
+  const id = rec['id'];
+  if (typeof id !== 'string' || id === '') return null;
+  return {
+    id,
+    ...(typeof rec['name'] === 'string' && rec['name'].trim() ? { name: rec['name'].trim().slice(0, 40) } : {}),
+    ...(typeof rec['icon'] === 'string' && rec['icon'] ? { icon: rec['icon'] } : {}),
+    ...(rec['blank'] === true ? { blank: true } : {}),
+    ...(rec['off'] === true ? { off: true } : {}),
+    layouts: readLayouts(rec['layouts']),
+    hidden: idList(rec['hidden']),
+    shown: idList(rec['shown']),
+  };
+};
+
 const readSlots = (raw: unknown): LayoutSlot[] | null => {
   if (!Array.isArray(raw)) return null;
   const seen = new Set<string>();
   const slots: LayoutSlot[] = [];
   for (const item of raw) {
-    if (typeof item !== 'object' || item === null) continue;
-    const rec = item as Record<string, unknown>;
-    const id = rec['id'];
-    if (typeof id !== 'string' || id === '' || seen.has(id)) continue;
-    seen.add(id);
-    slots.push({
-      id,
-      ...(typeof rec['name'] === 'string' && rec['name'].trim() ? { name: rec['name'].trim().slice(0, 40) } : {}),
-      ...(typeof rec['icon'] === 'string' && rec['icon'] ? { icon: rec['icon'] } : {}),
-      ...(rec['blank'] === true ? { blank: true } : {}),
-      layouts: readLayouts(rec['layouts']),
-      hidden: idList(rec['hidden']),
-      shown: idList(rec['shown']),
-    });
+    const slot = readSlot(item);
+    if (!slot || seen.has(slot.id)) continue;
+    seen.add(slot.id);
+    slots.push(slot);
   }
   return slots.length ? slots : null;
+};
+
+const WHYS: readonly HistoryWhy[] = ['deleted', 'reset', 'preset', 'edited'];
+
+const readHistory = (raw: unknown): HistoryEntry[] => {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: HistoryEntry[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const rec = item as Record<string, unknown>;
+    const slot = readSlot(rec['slot']);
+    const id = rec['id'];
+    const at = rec['at'];
+    if (!slot || typeof id !== 'string' || !id || seen.has(id) || !Number.isFinite(at)) continue;
+    seen.add(id);
+    out.push({ id, at: at as number, why: WHYS.includes(rec['why'] as HistoryWhy) ? rec['why'] as HistoryWhy : 'edited', slot });
+    if (out.length >= HISTORY_MAX) break;
+  }
+  return out;
 };
 
 const LOCK_V = 1;
@@ -144,8 +201,10 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
     const shown = idList(rec.shown);
     const parsedSlots = readSlots(rec.slots);
     const seeded = idList(rec.seeded);
+    const history = readHistory(rec.history);
+    const extra = { ...(seeded.length ? { seeded } : {}), ...(history.length ? { history } : {}) };
     if (!parsedSlots) {
-      return { v: config.version, layouts, locked: rec.lockV === LOCK_V ? rec.locked === true : true, hidden, shown, ...(seeded.length ? { seeded } : {}) };
+      return { v: config.version, layouts, locked: rec.lockV === LOCK_V ? rec.locked === true : true, hidden, shown, ...extra };
     }
     // The top-level fields are the active canvas. Copy them onto that slot so
     // a write that updated the mirror and not the slot (or the other way
@@ -164,7 +223,7 @@ export function loadDashboard(config: DashboardConfig): SavedDashboard | null {
       shown,
       slots,
       ...(activeSlot ? { activeSlot } : {}),
-      ...(seeded.length ? { seeded } : {}),
+      ...extra,
     };
   } catch {
     return null;
@@ -261,9 +320,9 @@ export type ResetMode = 'sizes' | 'all';
  * (News to the News layout), any other to the designed default. `sizes` keeps
  * which panels it shows; `all` takes those back too. Unlocks the grid.
  */
-export function resetSlot(stateIn: SavedDashboard, seeds: readonly TerminalSeed[], mode: ResetMode): SavedDashboard {
+export function resetSlot(stateIn: SavedDashboard, seeds: readonly TerminalSeed[], mode: ResetMode, now = Date.now()): SavedDashboard {
   // The canvas on screen is the top-level copy; its slot is brought up to it first.
-  const state = mirrorIntoActiveSlot(stateIn);
+  const state = remember(mirrorIntoActiveSlot(stateIn), stateIn.activeSlot, 'reset', now);
   const seed = seeds.find((t) => t.id === state.activeSlot);
   const layouts = seed?.layouts ?? {};
   if (!state.slots?.length) {
@@ -296,9 +355,94 @@ export interface TerminalView {
   icon: string | null;
 }
 
-/** The canvases as the rail lists them: unnamed ones are "Layout N". */
+/** A slot's name as the rail and edit mode show it: unnamed ones are "Layout N" (N its place). */
+export const slotName = (state: SavedDashboard, s: LayoutSlot): string => s.name ?? `Layout ${(state.slots ?? []).findIndex((x) => x.id === s.id) + 1}`;
+
+/** The canvases as the rail lists them: the hidden ones are not on it. */
 export function terminalsOf(state: SavedDashboard): TerminalView[] {
-  return (state.slots ?? []).map((s, i) => ({ id: s.id, name: s.name ?? `Layout ${i + 1}`, icon: s.icon ?? null }));
+  return (state.slots ?? []).filter((s) => !s.off).map((s) => ({ id: s.id, name: slotName(state, s), icon: s.icon ?? null }));
+}
+
+/** The canvases taken off the rail. */
+export function hiddenTerminalsOf(state: SavedDashboard): TerminalView[] {
+  return (state.slots ?? []).filter((s) => s.off).map((s) => ({ id: s.id, name: slotName(state, s), icon: s.icon ?? null }));
+}
+
+/** A slot as data that compares (what it shows and where): unchanged layouts are not remembered twice. */
+const slotKey = (s: LayoutSlot) => JSON.stringify([s.blank === true, s.layouts, [...(s.hidden ?? [])].sort(), [...(s.shown ?? [])].sort()]);
+
+/**
+ * Slot `id` as it is now, put first in the history (`why` it left). A layout the same as the
+ * newest entry of that slot is not added again; past HISTORY_MAX the oldest goes.
+ */
+export function remember(state: SavedDashboard, id: string | undefined, why: HistoryWhy, now = Date.now()): SavedDashboard {
+  const mirrored = mirrorIntoActiveSlot(state);
+  const slot = mirrored.slots?.find((s) => s.id === id);
+  if (!slot) return state;
+  const snap: LayoutSlot = { ...slot, name: slotName(mirrored, slot) };
+  delete snap.off;
+  const history = mirrored.history ?? [];
+  const last = history.find((h) => h.slot.id === slot.id);
+  if (last && slotKey(last.slot) === slotKey(snap)) {
+    return why === 'deleted' && last.why !== 'deleted' ? { ...mirrored, history: history.map((h) => (h === last ? { ...h, at: now, why } : h)) } : mirrored;
+  }
+  const entry: HistoryEntry = { id: `h${now.toString(36)}-${slot.id}`, at: now, why, slot: snap };
+  return { ...mirrored, history: [entry, ...history.filter((h) => h.id !== entry.id)].slice(0, HISTORY_MAX) };
+}
+
+/**
+ * Every slot that edit mode changed since `before` (the slots when it opened), its earlier
+ * layout in the history. Slots added or deleted in edit mode are not "changed".
+ */
+export function rememberEdits(state: SavedDashboard, before: readonly LayoutSlot[], now = Date.now()): SavedDashboard {
+  const mirrored = mirrorIntoActiveSlot(state);
+  let next = mirrored;
+  for (const old of before) {
+    const cur = mirrored.slots?.find((s) => s.id === old.id);
+    if (!cur || slotKey(cur) === slotKey(old)) continue;
+    // Its earlier layout, under the slot's id and name: remember() snapshots the slot as it is.
+    const was = { ...next, slots: next.slots?.map((s) => (s.id === old.id ? { ...old, name: cur.name ?? old.name } : s)), activeSlot: undefined };
+    const withOld = remember(was, old.id, 'edited', now);
+    next = { ...next, history: withOld.history };
+  }
+  return next;
+}
+
+/** Take a canvas off the rail, or put it back. The last one on the rail stays; one on screen hands over. */
+export function setSlotOff(state: SavedDashboard, id: string, off: boolean): SavedDashboard {
+  const slots = state.slots ?? [];
+  if (!slots.some((s) => s.id === id)) return state;
+  if (off && slots.filter((s) => !s.off && s.id !== id).length === 0) return state;
+  const next = mirrorIntoActiveSlot({
+    ...state,
+    slots: slots.map((s) => {
+      if (s.id !== id) return s;
+      const t = { ...s };
+      if (off) t.off = true;
+      else delete t.off;
+      return t;
+    }),
+  });
+  if (!off || state.activeSlot !== id) return next;
+  return activateSlot(next, (next.slots ?? []).find((s) => !s.off)!.id);
+}
+
+/** A remembered layout back as a terminal of its own (on the rail and on screen); it leaves the history. */
+export function restoreFromHistory(state: SavedDashboard, entryId: string): SavedDashboard {
+  const entry = state.history?.find((h) => h.id === entryId);
+  if (!entry) return state;
+  const base = mirrorIntoActiveSlot(state);
+  const slots = base.slots ?? [];
+  const id = slots.some((s) => s.id === entry.slot.id) ? freshSlotId(slots) : entry.slot.id;
+  const slot: LayoutSlot = { ...entry.slot, id };
+  delete slot.off;
+  const history = (base.history ?? []).filter((h) => h.id !== entryId);
+  if (!slots.length) {
+    // A record without slots (only the designed layout): it gets the slot that was on screen, and this one.
+    const primary: LayoutSlot = { id: 'primary', layouts: base.layouts, hidden: base.hidden ?? [], shown: base.shown ?? [] };
+    return activateSlot({ ...base, slots: [primary, { ...slot, id: id === 'primary' ? 'restored' : id }], activeSlot: 'primary', history }, id === 'primary' ? 'restored' : id);
+  }
+  return activateSlot({ ...base, slots: [...slots, slot], history }, id);
 }
 
 export function saveDashboard(config: DashboardConfig, state: SavedDashboard): void {
@@ -404,15 +548,26 @@ export function activateSlot(state: SavedDashboard, id: string): SavedDashboard 
   };
 }
 
-/** Drop one canvas. The last one resets the page to the designed layout. */
-export function removeSlot(state: SavedDashboard, id: string): SavedDashboard {
+/**
+ * Drop one canvas; it goes into the history, restorable. The last one resets the page to the
+ * designed layout. One on screen hands over to the first canvas still on the rail.
+ */
+export function removeSlot(stateIn: SavedDashboard, id: string, now = Date.now()): SavedDashboard {
+  const state = remember(stateIn, id, 'deleted', now);
   const slots = (state.slots ?? []).filter((s) => s.id !== id);
   if (slots.length === 0) {
     return { ...state, slots: undefined, activeSlot: undefined, layouts: {}, hidden: [], shown: [] };
   }
-  const next = { ...state, slots };
+  // The rail must keep one: if only hidden canvases are left, the first comes back on.
+  const visible: LayoutSlot[] = slots.some((s) => !s.off) ? slots : slots.map((s, i) => {
+    if (i > 0) return s;
+    const on = { ...s };
+    delete on.off;
+    return on;
+  });
+  const next = { ...state, slots: visible };
   if (state.activeSlot !== id) return next;
-  return activateSlot(next, slots[0]!.id);
+  return activateSlot(next, visible.find((s) => !s.off)!.id);
 }
 
 /** Append a blank canvas and switch to it. Persisted on the same record. */
