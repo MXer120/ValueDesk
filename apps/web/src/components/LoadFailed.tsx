@@ -4,9 +4,13 @@
  * timeout, a backend's advice): that goes to the console, where
  * `logLoadFailure` puts it, not in front of a trader.
  */
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { logger } from '../log';
 import { useErrorToast } from '../toast';
+import { EmptyState } from './EmptyState';
+import { FEEDBACK_LABEL, FeedbackIcon, openFeedback } from '../feedback/FeedbackButton';
+import { describeElement } from '../feedback/element';
+import { MENU_ICONS, TabMenu, menuAt } from '../dashboard/tabExtras';
 
 const log = logger('load');
 
@@ -34,6 +38,12 @@ export function useLoadFailedToast(error: unknown, what: string, retry?: () => v
   useErrorToast(error ? couldntLoad(what) : null, what, retry);
 }
 
+/**
+ * Drawn as the app's empty state (EmptyState.tsx, as "No wallet connected"): a warning icon,
+ * "<What> couldn't load.", one line, then Retry and Send feedback - the feedback chat opens with
+ * this spot on the page attached, so a report says where it broke. A right-click on it offers
+ * the same two.
+ */
 export function LoadFailed({ what, onRetry, className, crashed = false }: {
   what: string;
   onRetry?: () => void;
@@ -41,14 +51,35 @@ export function LoadFailed({ what, onRetry, className, crashed = false }: {
   /** A render crash, not a failed read: "<What> stopped working." */
   crashed?: boolean;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const report = () => openFeedback(ref.current ? { element: describeElement(ref.current, window.location.pathname) } : {});
   return (
-    <p className={`load-failed${className ? ` ${className}` : ''}`} role="status">
-      {crashed ? stoppedWorking(what) : couldntLoad(what)}
-      {onRetry && (
-        <button type="button" className="load-failed__retry" onClick={onRetry}>
-          Retry
-        </button>
+    <div ref={ref} className={`load-failed${className ? ` ${className}` : ''}`} onContextMenu={(e) => setMenu(menuAt(e))}>
+      <EmptyState
+        icon="alert"
+        compact
+        title={crashed ? stoppedWorking(what) : couldntLoad(what)}
+        line={crashed
+          ? 'This part of the page ran into a problem. Retry starts it again; the rest of the page is fine.'
+          : 'This is usually gone on a retry. If it keeps happening, tell us: where it happened comes with your message.'}
+        action={(
+          <span className="load-failed__acts">
+            {onRetry && <button type="button" className="empty-state__cta" onClick={onRetry}>Retry</button>}
+            <button type="button" className="load-failed__fb" onClick={report}><FeedbackIcon />{FEEDBACK_LABEL}</button>
+          </span>
+        )}
+      />
+      {menu && (
+        <TabMenu
+          at={menu}
+          onClose={() => setMenu(null)}
+          items={[
+            ...(onRetry ? [{ label: 'Retry', icon: MENU_ICONS.reset, onClick: onRetry }] : []),
+            { label: 'Send feedback about this', icon: <FeedbackIcon />, onClick: report },
+          ]}
+        />
       )}
-    </p>
+    </div>
   );
 }

@@ -20,6 +20,7 @@ const PATHS: Record<EmptyIcon, ReactNode> = {
   search: <><circle cx="9" cy="9" r="5" /><path d="m13 13 3.5 3.5" /></>,
   news: <><rect x="3" y="4" width="14" height="12" rx="2" /><path d="M6 8h8M6 11h8M6 14h5" /></>,
   chart: <path d="M3.5 16.5h13M5.5 13V9M9 13V5.5M12.5 13v-5M16 13V7" />,
+  alert: <><path d="M10 3.2 17.2 16H2.8z" /><path d="M10 8.2v3.6M10 14.1h.01" /></>,
 };
 
 /**

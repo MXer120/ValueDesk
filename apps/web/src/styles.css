@@ -2937,13 +2937,17 @@ input[inputmode="decimal"], input[inputmode="numeric"],
 }
 
 /* One generic line for every failed read (components/LoadFailed.tsx). */
-/* "<What> couldn't load." (LoadFailed.tsx) - the address menu's state line
-   (`.acct-menu__state`): a 7px status dot, here --neg, then the sentence in
-   --muted at 12px; Retry is the funds sheets' chip (`.fx-chip`). */
-.load-failed { display: flex; align-items: center; gap: var(--sp-2); margin: 0; padding: 10px 0; color: var(--muted); font-size: var(--fs-xs); line-height: var(--lh-xs); }
-.load-failed::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--neg); }
-.load-failed__retry { height: 24px; margin-left: var(--sp-1); padding: 0 var(--sp-2); border: 1px solid var(--panel-line); border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-weight: 500; line-height: 22px; cursor: pointer; }
-.load-failed__retry:hover:not(:disabled) { border-color: var(--line); background: transparent; color: var(--text); }
+/* A failed read or a crashed part (LoadFailed.tsx): the empty state, with Retry and Send feedback. */
+.load-failed { color: var(--muted); }
+.load-failed .empty-state__ic { color: color-mix(in srgb, var(--neg) 70%, var(--dim)); }
+.load-failed__acts { display: inline-flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.load-failed__fb {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px;
+  border: 1px solid var(--panel-line); border-radius: 8px; background: transparent;
+  color: var(--muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer;
+}
+.load-failed__fb:hover { border-color: var(--line); color: var(--text); }
+.load-failed__fb svg { width: 14px; height: 14px; }
 
 /* ---------------------------------------------------------------------------
    TOASTS, redrawn (toast.tsx ToastCard): the pop-up glass, a 32px lead - the

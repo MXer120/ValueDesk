@@ -627,12 +627,19 @@ button.coh-tree__tile.is-small { padding: 4px 6px; justify-content: center; }
 
 /* --- motion ------------------------------------------------------------------------------- */
 
-/* A read for a new cohort, window or filter: the old figures stay, dimmed, until the new land. */
-.coh-d > *:not(.coh-d__head), .coh-over, .coh-tablewrap { transition: opacity 180ms var(--ease-out); }
-/* Only a read that takes a while dims (the delay): a quick one swaps in place, no blink. */
-.coh-d.is-stale > *:not(.coh-d__head), .coh-over.is-stale, .coh-tablewrap.is-stale {
-  opacity: 0.6;
-  transition: opacity 240ms var(--ease-out) 350ms;
+/* A read for a new cohort, window or filter: the figures on screen stay as they are (not dimmed:
+   owner, 2026-10-28) and a thin bar runs along the top until the new ones land. Only a read that
+   takes a while shows it (the delay): a quick one swaps in place, no blink. */
+@keyframes coh-load { from { background-position: -100% 0; } to { background-position: 200% 0; } }
+.coh-d.is-stale, .coh-over.is-stale, .coh-tablewrap.is-stale, .coh-mp.is-stale, .coh-d__plot.is-stale {
+  background-image: linear-gradient(90deg, transparent, color-mix(in srgb, var(--pos) 75%, transparent), transparent);
+  background-size: 40% 2px;
+  background-repeat: no-repeat;
+  background-position: -100% 0;
+  animation: coh-load 1.2s linear 350ms infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .coh-d.is-stale, .coh-over.is-stale, .coh-tablewrap.is-stale, .coh-mp.is-stale, .coh-d__plot.is-stale { animation: none; background-size: 100% 2px; background-position: 0 0; }
 }
 
 /* The line morphs between windows and cohorts (same number of samples each time). */
@@ -666,7 +673,7 @@ button.coh-tree__tile {
 
 .coh-mp { display: flex; flex-direction: column; gap: 8px; }
 .coh-mp, .coh-mp > * { transition: opacity 180ms var(--ease-out); }
-.coh-mp.is-stale > *:not(.coh-d__head) { opacity: 0.6; transition: opacity 240ms var(--ease-out) 350ms; }
+
 .coh-mp__who { margin-left: auto; }
 .coh-mp__who select {
   height: 30px;
@@ -946,7 +953,7 @@ button.coh-map__head {
 .coh-focus__main > .coh-d__chart { min-height: 0; }
 .coh-d__ph .coh-d__src + .lbp-seg { margin-left: 8px; }
 .coh-d__plot { position: relative; }
-.coh-d__plot.is-stale > .coh-price { opacity: 0.6; transition: opacity var(--dur-med) var(--ease-out) 350ms; }
+
 .coh-price { cursor: crosshair; }
 .coh-price__candles,
 .coh-price__lineg { opacity: 0; transition: opacity var(--dur-med) var(--ease-out); }

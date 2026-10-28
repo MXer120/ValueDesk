@@ -5,7 +5,7 @@
  * turns the ones we know into the two-line form and picks the icon, and keeps
  * any other sentence as a title on its own.
  */
-export type EmptyIcon = 'positions' | 'orders' | 'history' | 'wallet' | 'coins' | 'funding' | 'transfers' | 'search' | 'news' | 'chart';
+export type EmptyIcon = 'positions' | 'orders' | 'history' | 'wallet' | 'coins' | 'funding' | 'transfers' | 'search' | 'news' | 'chart' | 'alert';
 
 export interface EmptyCopy {
   icon: EmptyIcon;
