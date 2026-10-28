@@ -407,6 +407,8 @@ export const PNL_SHARE = 0.4;
 /** While more perp PnL reads than PNL_BACKLOG wait (the switch to perp PnL, 2026-10-28), they get this share. */
 export const PNL_BACKLOG_SHARE = 0.7;
 const PNL_BACKLOG = 1_000;
+/** How often the due list is scanned again (it is handed out a minute at a time in between). */
+const PNL_SCAN_MS = 5 * 60_000;
 /** Meta keys: when perp PnL reads began, and the accounts' PnL flows since their reads (saved every PNL_FLOW_SAVE_MS). */
 const PERP_SINCE_META = 'cohort_pnl_perp_since';
 const PNL_FLOW_META = 'cohort_pnl_flow';
@@ -558,6 +560,10 @@ export class CohortTracker {
   private pnlFlow = new Map<string, { flow: number; u0: number }>();
   /** Perp PnL reads still due (planPnl): their share of the lane rises while many wait. */
   private pnlDue = 0;
+  /** The due list (scanPnlDue), the next entry to hand out, and when it was scanned. */
+  private pnlDueList: Array<[string, number]> | null = null;
+  private pnlDueNext = 0;
+  private pnlDueAt = 0;
   /** The change log's last logged state per position (aid|coin|venue), and the address ids (logLevels). */
   private levelState: Map<string, { side: number; liq: number; usd: number }> | null = null;
   private levelAddr: Map<string, number> | null = null;
@@ -1029,12 +1035,8 @@ export class CohortTracker {
     }
   }
 
-  private planPnl(members: Map<string, Member>, now: number): void {
-    this.importPnlDrops();
-    const lane = this.hlc;
-    const queued = lane.countPrefix('cohpnl:');
-    if (queued >= PNL_QUEUE_CAP) return;
-    const done = this.pnls();
+  /** Every Hyperliquid / trade.xyz holder whose perp PnL read is due, largest first (planPnl). */
+  private scanPnlDue(members: Map<string, Member>, done: Map<string, CohortPnlRow & { at: number }>, now: number): Array<[string, number]> {
     const due: Array<[string, number]> = [];
     // After an outage the flows miss what traded meanwhile: the large accounts are read again.
     const outage = this.downAtStart >= OUTAGE_GAP_MS;
@@ -1057,10 +1059,33 @@ export class CohortTracker {
         due.push([address, pnlPrio(eq)]);
       }
     }
-    this.pnlDue = due.length;
+    return due.sort((a, b) => b[1] - a[1]);
+  }
+
+  private planPnl(members: Map<string, Member>, now: number): void {
+    this.importPnlDrops();
+    const lane = this.hlc;
+    const queued = lane.countPrefix('cohpnl:');
+    if (queued >= PNL_QUEUE_CAP) return;
+    const done = this.pnls();
+    // The holders due, largest first: scanned every PNL_SCAN_MS (a pass over ~300k books, 9% of
+    // the thread when it ran every minute - 2026-10-28), handed out from the list in between.
+    if (!this.pnlDueList || now - this.pnlDueAt >= PNL_SCAN_MS || this.pnlDueList.length - this.pnlDueNext < PNL_QUEUE_CAP) {
+      this.pnlDueList = this.scanPnlDue(members, done, now);
+      this.pnlDueNext = 0;
+      this.pnlDueAt = now;
+    }
+    this.pnlDue = this.pnlDueList.length - this.pnlDueNext;
     this.pnlShare();
-    due.sort((a, b) => b[1] - a[1]);
-    for (const [address, prio] of due.slice(0, PNL_QUEUE_CAP - queued)) {
+    const take: Array<[string, number]> = [];
+    while (take.length < PNL_QUEUE_CAP - queued && this.pnlDueNext < this.pnlDueList.length) {
+      const x = this.pnlDueList[this.pnlDueNext++]!;
+      const read = done.get(x[0]);
+      // Read meanwhile (the backfill's drops, a read here): not again.
+      if (read && read.at >= this.perpSince && read.at >= this.pnlDueAt) continue;
+      if (!lane.has(`cohpnl:${x[0]}`)) take.push(x);
+    }
+    for (const [address, prio] of take) {
       lane.add({
         key: `cohpnl:${address}`,
         prio,
@@ -1105,7 +1130,9 @@ export class CohortTracker {
   /** Changed members to the table the API thread reads, a slice at a time. */
   private async saveMembers(venue: Venue, members: Map<string, Member>): Promise<void> {
     const changed: import('./store.js').CohortMemberRow[] = [];
-    const r = (v: number | null | undefined) => (v == null ? '' : Math.round(v));
+    // Three significant digits: a PnL kept current by its flow moves with every mark, and was
+    // rewritten every minute for every such holder (2026-10-28); a cohort boundary is a round number.
+    const r = (v: number | null | undefined) => (v == null ? '' : Math.abs(v) < 100 ? Math.round(v) : Number(v.toPrecision(3)));
     for (const [address, m] of members) {
       const sig = `${r(m.pnl)}|${r(m.equity)}|${m.label ?? ''}|${r(m.pnlRange?.['1d'])}|${r(m.pnlRange?.['7d'])}|${r(m.pnlRange?.['30d'])}`;
       const k = `${venue}|${address}`;
