@@ -7,7 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  accountLiqs, addDrift, calibrate, emptyDrift, fillCash, flatTiers, mmOf, niceStep, solveLiq, tiersOf, type FillBook, type ReadPos,
+  accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, flatTiers, mmOf, niceStep, solveLiq, tiersOf, type FillBook, type ReadPos,
 } from '../src/valuedesk/liquidations/math.js';
 import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuedesk/liquidations/levels.js';
 import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuedesk/liquidations/rules.js';
@@ -280,4 +280,19 @@ test('a snapshot keeps no level the price had crossed: no long above it, no shor
   const snap = snapOfNow(row);
   const cells = (snap.v.hyperliquid ?? []).map(([i, l, s]) => [i * snap.st, l, s]);
   assert.deepEqual(cells, [[900, 30, 0], [1100, 0, 40]]);
+});
+
+test('a fill fee comes out of the cross cash, or out of an isolated position margin, and the account value', () => {
+  const book: FillBook & { equity: number } = { cash: 10_000, equity: 10_000, pos: new Map([['BTC', { szi: 1, entry: 80_000 }], ['ETH', { szi: 2, entry: 3_000, iso: 600, lev: 10 }]]) };
+  feeCash(book, 'BTC', 36);
+  assert.equal(book.cash, 9_964);
+  feeCash(book, 'ETH', 2.7);
+  assert.equal(book.pos.get('ETH')!.iso, 597.3, 'isolated: from its own margin');
+  assert.equal(book.cash, 9_964, 'not from the cross cash');
+  assert.equal(book.equity, 10_000 - 36 - 2.7);
+  feeCash(book, 'SOL', 1); // a new position opens cross
+  assert.equal(book.cash, 9_963);
+  const unknown: FillBook = { cash: null, pos: new Map() };
+  feeCash(unknown, 'BTC', 5);
+  assert.equal(unknown.cash, null, 'an unknown cash stays unknown');
 });

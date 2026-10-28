@@ -258,7 +258,8 @@ test('SoDEX trade and close rows: side, per-symbol trade id, dollar fees only', 
 
 test('stream prints: HL users are [buyer, seller]; SoDEX bi / si are account ids', () => {
   const hl = hlPrint({ coin: 'BTC', side: 'A', px: '100', sz: '2', time: 5, hash: '0x', tid: 77, users: ['0xAA', '0xBB'] });
-  assert.deepEqual(hl, { venue: 'hyperliquid', id: '77', t: 5, symbol: 'BTC', px: 100, sz: 2, buyer: '0xaa', seller: '0xbb' });
+  assert.deepEqual(hl, { venue: 'hyperliquid', id: '77', t: 5, symbol: 'BTC', px: 100, sz: 2, buyer: '0xaa', seller: '0xbb', taker: 'seller' });
+  assert.equal(hlPrint({ coin: 'BTC', side: 'B', px: '100', sz: '2', time: 5, hash: '0x', tid: 78, users: ['0xAA', '0xBB'] })!.taker, 'buyer', 'B: the buyer took liquidity');
   const sx = sodexPrint({ T: 9, t: 3, s: 'BTC-USD', p: '10', q: '1', bi: 1002, si: 23342 });
   assert.deepEqual(sx, { venue: 'sodex', id: 'BTC-USD:3', t: 9, symbol: 'BTC-USD', px: 10, sz: 1, buyer: '1002', seller: '23342' });
   assert.equal(sodexPrint({ T: 9, t: 3, s: 'BTC-USD', p: '10', q: '1' }), null);

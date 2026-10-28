@@ -39,6 +39,8 @@ export interface Print {
   sz: number;
   buyer: string;
   seller: string;
+  /** Which party took liquidity, where the venue says (Hyperliquid's `side`): it pays the taker fee, the other the maker's. */
+  taker?: 'buyer' | 'seller';
 }
 
 const PING_MS = 30_000;
@@ -254,6 +256,7 @@ export function hlPrint(t: HlWsTrade): Print | null {
     sz,
     buyer: String(t.users[0]).toLowerCase(),
     seller: String(t.users[1]).toLowerCase(),
+    ...(t.side === 'B' ? { taker: 'buyer' as const } : t.side === 'A' ? { taker: 'seller' as const } : {}),
   };
 }
 

@@ -73,7 +73,7 @@ import {
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
-import { accountLiqs, addDrift, calibrate, emptyDrift, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
 import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
@@ -117,6 +117,10 @@ const LIVE_BUDGET_MS = 150;
 const LIVE_BUDGET_MAX_MS = 300;
 /** A member set at least this share of the table it replaces: smaller is a partial read, and nothing is removed. */
 const MEMBERS_KEPT_MIN = 0.8;
+/** An account's mode read (userAbstraction): its weight, its place in the cohort lane, and how many are kept. */
+const MODE_READ_COST = 20;
+const MODE_PRIO = 960;
+const HL_MODE_MAX = 300_000;
 /** A beat's budget for `pending` changed accounts: the base, doubled from 10k waiting on. */
 const liveBudget = (pending: number): number => (pending > 10_000 ? LIVE_BUDGET_MAX_MS : LIVE_BUDGET_MS);
 export const LIQ_NOW_MS = 2 * 60_000;
@@ -300,6 +304,19 @@ export function applyFill(book: Book, symbol: string, d: number, px: number): vo
   book.pos.set(symbol, { ...cur, szi: n, entry });
 }
 
+/**
+ * The fee a fill pays (share of its notional) where the venue says who took liquidity: the base
+ * tier's, measured 2026-10-28 on Hyperliquid's own fills (taker 4.32-4.5 bp, maker 1.2-1.5 bp;
+ * trade.xyz's growth-mode markets ~0.3-0.9 bp taker, makers ~0). A lower tier or a builder fee
+ * on top is not seen: re-reads correct those. Spot: only the seller pays in USDC (a buyer pays
+ * in the coin it receives).
+ */
+export const FILL_FEE: Partial<Record<Venue, { taker: number; maker: number }>> = {
+  hyperliquid: { taker: 4.5e-4, maker: 1.5e-4 },
+  tradexyz: { taker: 0.45e-4, maker: 0 },
+};
+export const SPOT_SELL_FEE = { taker: 7e-4, maker: 4e-4 };
+
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
 function bookable(venue: Venue, symbol: string): boolean {
   if (symbol.includes('/') || symbol.startsWith('@')) return false;
@@ -443,8 +460,25 @@ export class CohortTracker {
    * coins only. A wallet's positions in other coins still count toward its margin.
    */
   private sodexCoins = new Set<string>();
+  /** Hyperliquid spot pairs quoted in USDC (spotMeta), whose prints move a unified account's cash. */
+  private spotUsdc = new Set<string>();
+  /** Per account: is its perps margin its spot USDC (unified, portfolio margin) or not (classic). */
+  private hlMode = new Map<string, 'unified' | 'classic'>();
+  /** Spot cash an account traded while its mode was being asked. */
+  private spotPending = new Map<string, number>();
 
   /** SoDEX's list, as its markets read gives it; books holding a coin new to it are priced in. */
+  /** The spot pairs quoted in USDC, by the names the trades stream uses (`@107`, `PURR/USDC`). */
+  private async loadSpotPairs(): Promise<void> {
+    const meta = await hlInfo.post<{ universe?: Array<{ name?: string; tokens?: number[] }>; tokens?: Array<{ name?: string; index?: number }> } | null>(
+      { type: 'spotMeta' }, { ttlMs: 6 * 60 * 60_000 },
+    );
+    const usdc = meta?.tokens?.find((t) => t.name === 'USDC')?.index;
+    if (usdc === undefined) return;
+    const next = new Set((meta?.universe ?? []).flatMap((u) => (u.name && u.tokens?.[1] === usdc ? [u.name] : [])));
+    if (next.size) this.spotUsdc = next;
+  }
+
   private refreshSodexCoins(): void {
     const tiers = marketsNow('sodex')?.tiers;
     if (!tiers?.size) return;
@@ -571,6 +605,8 @@ export class CohortTracker {
     every(60_000, () => this.record(), 'coh:record');
     every(60_000, () => this.recordLiq(), 'coh:liq');
     every(30_000, () => this.fundingTick(), 'coh:funding');
+    every(6 * 60 * 60_000, () => this.loadSpotPairs(), 'coh:spot');
+    void this.loadSpotPairs().catch((e) => (this.lastError = `spot pairs: ${String(e)}`));
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
     for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) this.live.touch(v, a);
     this.feed.start();
@@ -595,7 +631,9 @@ export class CohortTracker {
 
   /** Every print: a price, and each party's book moved (or queued for its first read). */
   onPrint(p: Print, addressOf: (acct: string) => string | null): void {
+    if (p.venue === 'hyperliquid' && (p.symbol.startsWith('@') || p.symbol.includes('/'))) { this.onSpotPrint(p); return; }
     if (!bookable(p.venue, p.symbol)) return;
+    const fees = p.taker ? FILL_FEE[p.venue] : undefined;
     const mk = `${p.venue}|${p.symbol}`;
     this.marks.set(mk, p.px);
     this.noteCoinPx(mk, p.px);
@@ -612,12 +650,67 @@ export class CohortTracker {
         if (!this.wanted.has(k)) this.wanted.set(k, this.d.now());
         continue;
       }
+      if (fees) feeCash(book, p.symbol, p.sz * p.px * ((d > 0) === (p.taker === 'buyer') ? fees.taker : fees.maker));
       applyFill(book, p.symbol, d, p.px);
       this.live.touch(p.venue, address);
       this.dirtyBooks.add(`${p.venue}|${address}`);
       this.applied++;
     }
     if (this.wanted.size > 100_000) this.wanted.clear();
+  }
+
+  /**
+   * A Hyperliquid spot print. In a unified (or portfolio-margin) account the perps' margin IS the
+   * spot USDC, so a spot trade quoted in USDC moves the cross cash: the buyer pays size x price,
+   * the seller receives it less its fee. In a classic account it does not. Skipped until
+   * 2026-10-28, it was most of the drift between reads: of 17 sampled books more than 0.1% off,
+   * 12 had no perp fill and no transfer since their read. Which mode an account is in is asked
+   * once, only for an account that trades spot; what it traded meanwhile waits for the answer.
+   */
+  private onSpotPrint(p: Print): void {
+    if (!this.spotUsdc.has(p.symbol)) return;
+    const books = this.books.get('hyperliquid');
+    if (!books) return;
+    const ntl = p.sz * p.px;
+    for (const [address, buys] of [[p.buyer, true], [p.seller, false]] as const) {
+      const book = books.get(address);
+      if (!book || book.cash == null) continue;
+      const fee = buys || !p.taker ? 0 : ntl * ((p.taker === 'seller') ? SPOT_SELL_FEE.taker : SPOT_SELL_FEE.maker);
+      const delta = buys ? -ntl : ntl - fee;
+      const mode = this.hlMode.get(address);
+      if (mode === 'classic') continue;
+      if (mode === 'unified') { this.spotCash(address, book, delta); continue; }
+      this.spotPending.set(address, (this.spotPending.get(address) ?? 0) + delta);
+      this.askMode(address);
+    }
+  }
+
+  private spotCash(address: string, book: Book, delta: number): void {
+    if (book.cash == null || !delta) return;
+    book.cash += delta;
+    if (book.equity != null) book.equity += delta;
+    this.live.touch('hyperliquid', address);
+    this.dirtyBooks.add(`hyperliquid|${address}`);
+  }
+
+  /** Asks Hyperliquid whether the account's perps margin is its spot USDC (once; kept for the process). */
+  private askMode(address: string): void {
+    const key = `cohmode:${address}`;
+    if (this.hlc.has(key) || this.hlMode.size > HL_MODE_MAX) return;
+    this.hlc.add({
+      key,
+      prio: MODE_PRIO,
+      run: async () => {
+        const r = await hlInfo.post<string | null>({ type: 'userAbstraction', user: address }, { ttlMs: 0 });
+        const mode = r === 'unifiedAccount' || r === 'portfolioMargin' ? 'unified' : 'classic';
+        this.hlMode.set(address, mode);
+        const pending = this.spotPending.get(address) ?? 0;
+        this.spotPending.delete(address);
+        const book = this.books.get('hyperliquid')?.get(address);
+        if (mode === 'unified' && book) this.spotCash(address, book, pending);
+        return MODE_READ_COST;
+      },
+    });
   }
 
   status(): Record<string, unknown> {
@@ -1237,6 +1330,8 @@ export class CohortTracker {
             };
             await this.liquidationSide(venue, r, books.get(address), book);
             books.set(address, book);
+            // The read holds every spot trade before it: what waited for the account's mode is in it.
+            if (venue === 'hyperliquid') this.spotPending.delete(address);
             this.live.touch(venue, address);
             this.dirtyBooks.add(`${venue}|${address}`);
             this.wanted.delete(`${venue}|${address}`);

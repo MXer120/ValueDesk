@@ -295,6 +295,20 @@ export function fillCash(book: FillBook, symbol: string, d: number, px: number):
 }
 
 /**
+ * A trade's fee (USD) on a book, before the size moves (fillCash, applyFill): an isolated
+ * position pays it from its own margin, a cross one from the cash; the account value moves
+ * by the same. A fill paid fees nowhere until 2026-10-28: a Hyperliquid round trip at the
+ * base taker rate is 0.09% of the notional, a liquidation price's whole 0.1% tolerance.
+ */
+export function feeCash(book: FillBook & { equity?: number | null }, symbol: string, fee: number): void {
+  if (!(fee > 0)) return;
+  const cur = book.pos.get(symbol);
+  if (cur && cur.iso !== undefined) { if (cur.iso !== null) cur.iso -= fee; }
+  else if (book.cash !== undefined && book.cash !== null) book.cash -= fee;
+  if (book.equity !== undefined && book.equity !== null) book.equity -= fee;
+}
+
+/**
  * One hour's funding on a book. Hyperliquid settles every hour: a position of size s pays
  * s · oracle price · rate (longs pay a positive rate). Cross positions pay from the cash,
  * an isolated one from its own margin; the account value moves by the same amount. A
