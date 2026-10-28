@@ -130,18 +130,6 @@ export interface LiqSnap {
   v: Partial<Record<Venue, Array<[number, number, number]>>>;
 }
 
-/**
- * One step's positions by wallet, for the history's wallet filter: the coin's price, the
- * snapshot bucket width (as LiqSnap), and per position [venue, address, +1 long / -1 short,
- * bucket index, USD at the liquidation price]. Only positions worth WALLET_HIST_MIN_USD, and
- * any of a wallet someone looked up (indexer/liqWatch.ts) - the rest would be most of the rows.
- */
-export interface LiqWalletSnap {
-  p: number;
-  st: number;
-  w: Array<[Venue, string, 1 | -1, number, number]>;
-}
-export const WALLET_HIST_MIN_USD = 100_000;
 
 
 // --- every coin, every minute (liq_now) ----------------------------------------------------

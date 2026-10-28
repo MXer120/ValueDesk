@@ -757,7 +757,7 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side }: { coin: st
   }, [kc, data]);
   const note = r.error && !r.data ? `History unavailable: ${r.error}`
     : !r.data ? 'Reading the snapshots…'
-      : !points.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} yet: a wallet's levels are kept from the hour it holds $${fmtUsdShort(WALLET_HIST_MIN).replace('$', '')}+ or is looked up here.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
+      : !points.length ? (wallets.length ? `No snapshots of ${coin} for ${wallets.length === 1 ? 'this wallet' : 'these wallets'} in this range: every position's level is kept from 28 Oct 2026, 15-minutely for 3 days and hourly to 30.` : `No snapshots of ${coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.`)
         : null;
   return (
     <div className="lqm-hist2">
@@ -774,8 +774,6 @@ function HistoryView({ coin, venues, engine, symbol, wallets, side }: { coin: st
   );
 }
 const EMPTY_POINTS: HeatPoint[] = [];
-/** A wallet's levels are kept in the history once a position reaches this (server WALLET_HIST_MIN_USD). */
-const WALLET_HIST_MIN = 50_000;
 
 // --- details ------------------------------------------------------------------------------
 

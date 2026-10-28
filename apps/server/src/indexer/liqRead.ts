@@ -13,10 +13,10 @@
  * much of it has a known liquidation price, and how the math has matched the
  * venue's figures at reads and re-reads (the tracker's DriftStats).
  */
-import type { Venue } from '../valuedesk/types.js';
+import { VENUES, type Venue } from '../valuedesk/types.js';
 import type { WalletVenue } from '../valuedesk/cohorts/model.js';
 import { emptyDrift, niceStep, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
-import { NOW_HI, NOW_LO, NOW_STEP, coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap, type LiqWalletSnap } from '../valuedesk/liquidations/levels.js';
+import { NOW_HI, NOW_LO, NOW_STEP, coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
@@ -424,26 +424,41 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
   if (!s) return null;
   const points: LiqHistory['points'] = [];
   let coins: string[] = [];
-  // Some wallets only: their positions as each step kept them (liq_hist_w), summed into the
-  // snapshot's buckets. Kept from a wallet's first $100k+ position or first look-up on.
+  // Some wallets only: their positions rebuilt from the change log (liq_log) at each step the
+  // history kept (liq_hist: the time, the price, the bucket width), summed into that step's
+  // buckets - every position, whatever its size, from the step it was first logged.
   if (wallets.length) {
-    const only = new Set(wallets);
-    const vs = new Set(venues);
+    const vs = new Set(venues.map((v) => VENUES.indexOf(v)));
     try {
-      for (const r of s.liqHistW(coin, Date.now() - RANGE_MS[range])) {
-        let snap: LiqWalletSnap;
-        try { snap = JSON.parse(inflateRawSync(r.data).toString('utf8')) as LiqWalletSnap; } catch { continue; }
+      const from = Date.now() - RANGE_MS[range];
+      const ids = [...s.liqAddrIds(wallets).values()];
+      const log = ids.length ? s.liqLog(ids, coin, from) : [];
+      const state = new Map<string, { side: number; liq: number; usd: number }>();
+      let k = 0;
+      for (const r of s.liqHist(coin, from)) {
+        while (k < log.length && log[k]!.t <= r.t) {
+          const e = log[k++]!;
+          const key = `${e.aid}|${e.venue}`;
+          if (e.usd > 0) state.set(key, { side: e.side, liq: e.liq, usd: e.usd });
+          else state.delete(key);
+        }
+        if (!state.size) continue;
+        let snap: LiqSnap;
+        try { snap = JSON.parse(r.data) as LiqSnap; } catch { continue; }
         const sum = new Map<number, [number, number]>();
-        for (const [v, a, side, i, usd] of snap.w) {
-          if (!vs.has(v) || !only.has(a)) continue;
+        for (const [key, x] of state) {
+          if (!vs.has(Number(key.slice(key.indexOf('|') + 1)))) continue;
+          // A level the price had crossed is past, as in the snapshot's own buckets.
+          if (x.side > 0 ? x.liq >= snap.p : x.liq <= snap.p) continue;
+          const i = Math.floor(x.liq / snap.st);
           const b = sum.get(i) ?? [0, 0];
-          if (side > 0) b[0] += usd; else b[1] += usd;
+          if (x.side > 0) b[0] += x.usd; else b[1] += x.usd;
           sum.set(i, b);
         }
         if (sum.size) points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum].sort((x, y) => x[0] - y[0]).map(([i, [l, sh]]) => [i, l, sh]) });
       }
       coins = s.liqHistCoins();
-    } catch { /* the table arrives with the indexer's first start */ }
+    } catch { /* the tables arrive with the indexer's first start */ }
     return { coin, venues: [...venues], points, coins };
   }
   try {

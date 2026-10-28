@@ -319,11 +319,19 @@ CREATE TABLE IF NOT EXISTS cohort_series (
 CREATE TABLE IF NOT EXISTS cohort_hist (
   span INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (span, kind, key)) WITHOUT ROWID;
--- Per wallet, the positions of the history's snapshots worth WALLET_HIST_MIN_USD or held by a wallet
--- looked up (cohortTracker.ts recordLiq): deflated JSON (levels.ts LiqWalletSnap) per coin and step.
-CREATE TABLE IF NOT EXISTS liq_hist_w (
-  coin TEXT NOT NULL, t INTEGER NOT NULL, data BLOB NOT NULL,
-  PRIMARY KEY (coin, t)) WITHOUT ROWID;
+-- Every position's liquidation level as a change log (cohortTracker.ts logLevels), for the
+-- history's wallet filter: a row when a position opens, flips, closes (usd 0) or its level or size
+-- moves past LIQ_LOG_MOVE / USD_LOG_MOVE, at the history's 15-minute steps. Addresses by id.
+CREATE TABLE IF NOT EXISTS liq_addr (id INTEGER PRIMARY KEY, address TEXT NOT NULL UNIQUE);
+CREATE TABLE IF NOT EXISTS liq_log (
+  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL, t INTEGER NOT NULL,
+  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL,
+  PRIMARY KEY (aid, coin, venue, t)) WITHOUT ROWID;
+-- The last logged state of every open position: what the next step compares with, across a restart.
+CREATE TABLE IF NOT EXISTS liq_cur (
+  aid INTEGER NOT NULL, coin TEXT NOT NULL, venue INTEGER NOT NULL,
+  side INTEGER NOT NULL, liq REAL NOT NULL, usd INTEGER NOT NULL, t INTEGER NOT NULL,
+  PRIMARY KEY (aid, coin, venue)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS liq_hist (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
@@ -2765,21 +2773,98 @@ export class IndexStore {
   pruneLiqHist(beforeT: number, thinBeforeT: number, hourMs: number): void {
     this.q('DELETE FROM liq_hist WHERE t < ?').run(beforeT);
     this.q('DELETE FROM liq_hist WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
-    this.q('DELETE FROM liq_hist_w WHERE t < ?').run(beforeT);
-    this.q('DELETE FROM liq_hist_w WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
   }
 
-  /** One step's per-wallet positions, per coin (deflated LiqWalletSnap JSON). */
-  putLiqHistW(t: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
+  // --- the level change log (liq_addr, liq_log, liq_cur) ------------------------------------
+
+  /** Every address the log knows, by id (the tracker holds them; a new one gets its id in putLiqLog). */
+  liqAddrs(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const r of this.q('SELECT id, address FROM liq_addr').all() as Array<{ id: number; address: string }>) out.set(r.address, r.id);
+    return out;
+  }
+
+  /** Ids of `addresses` the log knows (a reader: none are made). */
+  liqAddrIds(addresses: readonly string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    const q = this.q('SELECT id FROM liq_addr WHERE address = ?');
+    for (const a of addresses) {
+      const r = q.get(a) as { id?: number } | undefined;
+      if (r?.id !== undefined) out.set(a, r.id);
+    }
+    return out;
+  }
+
+  /** Every open position's last logged state. */
+  liqCur(): Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }> {
+    return this.q('SELECT aid, coin, venue, side, liq, usd, t FROM liq_cur').all() as Array<{ aid: number; coin: string; venue: number; side: number; liq: number; usd: number; t: number }>;
+  }
+
+  /**
+   * One step of the change log: new addresses get ids, a changed or new position a row (and its
+   * current state), a closed one a row with usd 0 (and leaves the current state). One transaction.
+   * Returns the ids given to `newAddrs`.
+   */
+  putLiqLog(
+    t: number,
+    newAddrs: readonly string[],
+    changed: ReadonlyArray<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }>,
+    closed: ReadonlyArray<{ aid: number; coin: string; venue: number }>,
+  ): Map<string, number> {
+    const ids = new Map<string, number>();
     this.tx(() => {
-      const ins = this.q('INSERT OR REPLACE INTO liq_hist_w (coin, t, data) VALUES (?, ?, ?)');
-      for (const [coin, data] of rows) ins.run(coin, t, data);
+      const addr = this.q('INSERT INTO liq_addr (address) VALUES (?) ON CONFLICT (address) DO UPDATE SET address = excluded.address RETURNING id');
+      for (const a of newAddrs) {
+        const r = addr.get(a) as { id: number };
+        ids.set(a, r.id);
+      }
+      const log = this.q('INSERT OR REPLACE INTO liq_log (aid, coin, venue, t, side, liq, usd) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      const cur = this.q('INSERT OR REPLACE INTO liq_cur (aid, coin, venue, side, liq, usd, t) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const c of changed) {
+        const aid = typeof c.aid === 'number' ? c.aid : ids.get(c.aid)!;
+        log.run(aid, c.coin, c.venue, t, c.side, c.liq, c.usd);
+        cur.run(aid, c.coin, c.venue, c.side, c.liq, c.usd, t);
+      }
+      const del = this.q('DELETE FROM liq_cur WHERE aid = ? AND coin = ? AND venue = ?');
+      for (const c of closed) {
+        log.run(c.aid, c.coin, c.venue, t, 0, 0, 0);
+        del.run(c.aid, c.coin, c.venue);
+      }
     });
+    return ids;
   }
 
-  liqHistW(coin: string, fromT: number): Array<{ t: number; data: Uint8Array }> {
-    return this.q('SELECT t, data FROM liq_hist_w WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: Uint8Array }>;
+  /**
+   * The log of some addresses for a coin from `fromT` on, oldest first - with, for each of their
+   * positions, the last row before `fromT` (its state when the range begins).
+   */
+  liqLog(aids: readonly number[], coin: string, fromT: number): Array<{ aid: number; venue: number; t: number; side: number; liq: number; usd: number }> {
+    type Row = { aid: number; venue: number; t: number; side: number; liq: number; usd: number };
+    const out: Row[] = [];
+    const before = this.q('SELECT aid, venue, t, side, liq, usd FROM liq_log WHERE aid = ? AND coin = ? AND venue = ? AND t < ? ORDER BY t DESC LIMIT 1');
+    const venues = this.q('SELECT DISTINCT venue FROM liq_log WHERE aid = ? AND coin = ?');
+    const after = this.q('SELECT aid, venue, t, side, liq, usd FROM liq_log WHERE aid = ? AND coin = ? AND t >= ? ORDER BY t');
+    for (const aid of aids) {
+      for (const v of venues.all(aid, coin) as Array<{ venue: number }>) {
+        const r = before.get(aid, coin, v.venue, fromT) as Row | undefined;
+        if (r && r.usd > 0) out.push(r);
+      }
+      out.push(...(after.all(aid, coin, fromT) as Row[]));
+    }
+    return out.sort((a, b) => a.t - b.t);
   }
+
+  /**
+   * Rows older than `beforeT` that a later row (still older than it) replaces: what the state at
+   * `beforeT` needs stays - each position's last row before it - and closes older than it go.
+   */
+  pruneLiqLog(beforeT: number): void {
+    this.q(`DELETE FROM liq_log WHERE t < ?1 AND EXISTS (
+      SELECT 1 FROM liq_log b WHERE b.aid = liq_log.aid AND b.coin = liq_log.coin AND b.venue = liq_log.venue AND b.t > liq_log.t AND b.t < ?1)`).run(beforeT);
+    this.q('DELETE FROM liq_log WHERE t < ? AND usd = 0').run(beforeT);
+  }
+
+
 
   /**
    * PnL read for a cohort wallet the venue's own list does not rank (Hyperliquid:

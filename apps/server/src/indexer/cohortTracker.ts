@@ -77,8 +77,7 @@ import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundin
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
-import { HIST_STEP, WALLET_HIST_MIN_USD, liqCoin, snapOfNow, type LiqWalletSnap } from '../valuedesk/liquidations/levels.js';
-import { watchedWallets } from './liqWatch.js';
+import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
@@ -410,6 +409,10 @@ const PNL_BACKLOG = 1_000;
 const PERP_SINCE_META = 'cohort_pnl_perp_since';
 const PNL_FLOW_META = 'cohort_pnl_flow';
 const PNL_FLOW_SAVE_MS = 5 * 60_000;
+/** A position's level is logged again once it moved this much (relative), or its USD this much: the history draws 0.25% cells. */
+const LIQ_LOG_MOVE = 0.0005;
+const USD_LOG_MOVE = 0.002;
+const NO_WALLETS: ReadonlySet<string> = new Set();
 /**
  * Cohort reads in flight at once (lanes.ts CONCURRENCY). One at a time made ~20
  * a minute; 8 made ~46 (v0.2.16, 2026-10-24), still bound by the event loop's
@@ -553,6 +556,12 @@ export class CohortTracker {
   private pnlFlow = new Map<string, { flow: number; u0: number }>();
   /** Perp PnL reads still due (planPnl): their share of the lane rises while many wait. */
   private pnlDue = 0;
+  /** The change log's last logged state per position (aid|coin|venue), and the address ids (logLevels). */
+  private levelState: Map<string, { side: number; liq: number; usd: number }> | null = null;
+  private levelAddr: Map<string, number> | null = null;
+  private levelPrunedAt = 0;
+  /** Rows the last step wrote. */
+  private levelRows = 0;
   private span = new Map<Venue, number | null>();
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
@@ -861,6 +870,7 @@ export class CohortTracker {
       liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size },
+      levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
       staleBefore: this.staleBefore,
@@ -1683,6 +1693,67 @@ export class CohortTracker {
     this.liveMs = Date.now() - t0;
   }
 
+  /**
+   * Every position's liquidation level into the change log (store liq_log): a row only when a
+   * position opens, flips, closes, or its level moves past LIQ_LOG_MOVE or its size past
+   * USD_LOG_MOVE since its last row - the history draws 0.25% cells, the level is the live
+   * engine's 0.02% bucket, so nothing it shows is lost. Compared with the last logged state
+   * (liq_cur, read once at the first step): a restart neither repeats every position nor misses
+   * what closed while it was down. Pruned daily to LIQ_KEEP_MS (a row superseded before then).
+   */
+  private logLevels(t: number, coins: ReadonlySet<string>): void {
+    const s = this.d.store;
+    if (!this.levelState) {
+      this.levelAddr = s.liqAddrs();
+      this.levelState = new Map();
+      for (const r of s.liqCur()) this.levelState.set(`${r.aid}|${r.coin}|${r.venue}`, { side: r.side, liq: r.liq, usd: r.usd });
+    }
+    const state = this.levelState;
+    const addr = this.levelAddr!;
+    const byCoin = this.live.positionsByCoin(0, NO_WALLETS);
+    // One state per address, coin and venue: two symbols of one coin on one venue keep the larger.
+    const now = new Map<string, { aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }>();
+    const fresh = new Set<string>();
+    for (const coin of coins) {
+      for (const x of byCoin.get(coin) ?? []) {
+        const vi = VENUES.indexOf(x.venue);
+        let id: number | string | undefined = addr.get(x.address);
+        if (id === undefined) { fresh.add(x.address); id = x.address; }
+        const key = `${id}|${coin}|${vi}`;
+        const usd = Math.round(x.usd);
+        const prev = now.get(key);
+        if (prev && prev.usd >= usd) continue;
+        now.set(key, { aid: id, coin, venue: vi, side: x.long ? 1 : -1, liq: +x.liq.toPrecision(8), usd });
+      }
+    }
+    const changed: Array<{ aid: number | string; coin: string; venue: number; side: number; liq: number; usd: number }> = [];
+    for (const [key, x] of now) {
+      const was = state.get(key);
+      if (was && was.side === x.side && Math.abs(x.liq - was.liq) <= LIQ_LOG_MOVE * was.liq && Math.abs(x.usd - was.usd) <= USD_LOG_MOVE * Math.max(1, was.usd)) continue;
+      changed.push(x);
+    }
+    const closed: Array<{ aid: number; coin: string; venue: number }> = [];
+    for (const key of state.keys()) {
+      if (now.has(key)) continue;
+      const [aid, coin, venue] = key.split('|');
+      if (!coins.has(coin!)) continue;
+      closed.push({ aid: Number(aid), coin: coin!, venue: Number(venue) });
+    }
+    if (!changed.length && !closed.length) return;
+    const ids = s.putLiqLog(t, [...fresh], changed, closed);
+    for (const [a, id] of ids) addr.set(a, id);
+    for (const x of changed) {
+      const aid = typeof x.aid === 'number' ? x.aid : ids.get(x.aid)!;
+      state.set(`${aid}|${x.coin}|${x.venue}`, { side: x.side, liq: x.liq, usd: x.usd });
+    }
+    for (const c of closed) state.delete(`${c.aid}|${c.coin}|${c.venue}`);
+    if (t - this.levelPrunedAt >= DAY_MS) {
+      s.pruneLiqLog(t - LIQ_KEEP_MS);
+      this.levelPrunedAt = t;
+    }
+    this.levelRows = changed.length + closed.length;
+  }
+
   private async recordLiq(): Promise<void> {
     const now = this.d.now();
     if (this.liqRecording || !this.members.size || now - this.lastNowAt < LIQ_NOW_MS - 5_000) return;
@@ -1704,24 +1775,8 @@ export class CohortTracker {
           if (row) hist.push([coin, JSON.stringify(snapOfNow(row))]);
         }
         if (hist.length) s.putLiqHist(t, hist);
-        // The same step by wallet, for the history's wallet filter: the large positions, and
-        // every one of a wallet someone looked up (liqWatch.ts), at the snapshot's bucket width.
-        const byCoin = this.live.positionsByCoin(WALLET_HIST_MIN_USD, watchedWallets(now));
-        const histW: Array<[string, Uint8Array]> = [];
-        for (const coin of keep) {
-          const row = rows.get(coin);
-          const list = byCoin.get(coin);
-          if (!row || !list?.length) continue;
-          const st = niceStep(row.p * HIST_STEP);
-          const w: LiqWalletSnap['w'] = [];
-          for (const x of list) {
-            // A level the price has crossed is past (as in the buckets).
-            if (x.long ? x.liq >= row.p : x.liq <= row.p) continue;
-            w.push([x.venue, x.address, x.long ? 1 : -1, Math.floor(x.liq / st), Math.round(x.usd)]);
-          }
-          if (w.length) histW.push([coin, deflateRawSync(JSON.stringify({ p: row.p, st, w } satisfies LiqWalletSnap))]);
-        }
-        if (histW.length) s.putLiqHistW(t, histW);
+        // Every position's level at the same step, as a change log (the history's wallet filter).
+        this.logLevels(t, keep);
         s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
         this.lastLiqT = t;
       }

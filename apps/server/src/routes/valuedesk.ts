@@ -52,7 +52,6 @@ import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { isLiqRange, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
-import { noteWatched } from '../indexer/liqWatch.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -468,7 +467,6 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
-      if (ws.length) noteWatched(ws);
       const body = ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -501,7 +499,6 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const ws = walletsOf(q);
       if (!ws.length) throw bad('wallets= is required: up to 10 0x addresses, comma separated');
-      noteWatched(ws);
       const body = await walletLiqs(ws, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, wallets: ws, positions: body };
@@ -517,7 +514,6 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
       const ws = walletsOf(q);
-      if (ws.length) noteWatched(ws);
       const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
