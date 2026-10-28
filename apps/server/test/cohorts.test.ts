@@ -8,7 +8,7 @@ import {
   sumCohorts, walletRow,
   type Position, type WalletVenue,
 } from '../src/valuedesk/cohorts/model.js';
-import { allScopes, applyFill, needsSpot, pollTtl, reconcileTtl, staleEquity, type Book } from '../src/indexer/cohortTracker.js';
+import { PLAN_FULL_MS, PLAN_LOW, allScopes, applyFill, fullPassDue, needsSpot, pollTtl, reconcileTtl, staleEquity, type Book } from '../src/indexer/cohortTracker.js';
 import { spotCollateral } from '../src/indexer/cohortSource.js';
 import { Lane } from '../src/indexer/lanes.js';
 import type { Venue } from '../src/valuedesk/types.js';
@@ -203,4 +203,16 @@ test('lane shares: a steady flood of urgent work cannot starve a reserved prefix
   lane.stop();
   const walks = ran.slice(0, 20).filter((r) => r === 'walk').length;
   assert.ok(walks >= 7 && walks <= 10, `walk got ${walks} of 20`);
+});
+
+test('the plan: each venue gets its full pass every 5 minutes, sooner after an outage or when its queue runs low with more due', () => {
+  const t = 1_800_000_000_000;
+  const at = (o: Partial<Parameters<typeof fullPassDue>[0]>) => fullPassDue({ lastAt: t, now: t + 60_000, queued: 400, dueLeft: 50, outage: false, ...o });
+  assert.equal(at({ lastAt: undefined }), true, 'the first plan after a start');
+  assert.equal(at({}), false, 'a minute later, with a full queue: no pass');
+  assert.equal(at({ now: t + PLAN_FULL_MS - 1 }), false);
+  assert.equal(at({ now: t + PLAN_FULL_MS }), true, 'five minutes on');
+  assert.equal(at({ outage: true }), true, 'a stream outage: its large books are unknown again');
+  assert.equal(at({ queued: PLAN_LOW - 1 }), true, 'the queue ran low while more was due');
+  assert.equal(at({ queued: PLAN_LOW - 1, dueLeft: 0 }), false, 'low, but everything due was queued: it waits for the five minutes');
 });

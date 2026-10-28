@@ -98,6 +98,22 @@ export const MIX_STEP_MS = 60 * 60_000;
 const SERIES_KEEP_MS = 35 * DAY_MS;
 /** Queued reads per venue at a time: the plan tops the queue up every minute. */
 const QUEUE_CAP = 400;
+/**
+ * A venue's full pass (its members worked out and saved, every book and archive holder
+ * considered) at most this often (planVenues) - sooner when its queue has run below
+ * PLAN_LOW while the last pass found more due, or a stream outage made its large books
+ * unknown. Every minute it held 20-32% of the indexer's one thread, and the boards were
+ * built in what was left: the first after a restart took 1,100 s (2026-10-28).
+ */
+export const PLAN_FULL_MS = 5 * 60_000;
+export const PLAN_LOW = 100;
+
+/** Whether a venue gets its full pass this minute (planVenues). */
+export function fullPassDue(o: { lastAt: number | undefined; now: number; queued: number; dueLeft: number; outage: boolean }): boolean {
+  if (o.outage || o.lastAt === undefined || o.now - o.lastAt >= PLAN_FULL_MS) return true;
+  // Its queue ran low and the last pass had more than fitted: the reads would wait for nothing.
+  return o.queued < PLAN_LOW && o.dueLeft > 0;
+}
 /** An archive holder's notional from which its first read ranks with a trader's (USD). */
 const SEED_BONUS_MIN = 1_000;
 /** Coins kept per cohort in the hourly mix. */
@@ -574,6 +590,9 @@ export class CohortTracker {
   /** Perp PnL rows taken from the backfill's drops (importPnlDrops). */
   private pnlImported = 0;
   private span = new Map<Venue, number | null>();
+  /** Per venue, its last full pass (planVenues) and how many of the reads it found due did not fit the queue. */
+  private plannedAt = new Map<Venue, number>();
+  private dueLeft = new Map<Venue, number>();
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
   private gapFloor = new Map<Venue, number>();
@@ -1457,12 +1476,36 @@ export class CohortTracker {
     // large books' gap re-reads cover; only a longer one leaves every book unknown.
     this.staleBefore = this.downAtStart < OUTAGE_GAP_MS ? 0
       : resumedAfterOutage(this.d.store.cohortSeriesRecorded(scopeKey(VENUES), COHORTS[0]!.id, now - REBUILD_WINDOW_MS), this.startedAt);
-    const hlMembers = await this.membersOf('hyperliquid');
+    // Which venues get their full pass this minute (PLAN_FULL_MS); the stream spans are looked at every minute.
+    const full = new Set<Venue>();
+    const sinceOf = new Map<Venue, number | null>();
+    for (const venue of VENUES) {
+      // A new continuous stream span means an outage: large books are unknown again.
+      const since = this.d.streamSince(venue);
+      sinceOf.set(venue, since);
+      const outage = STREAMED.has(venue) && since !== null && this.span.has(venue) && this.span.get(venue) !== since;
+      if (outage) {
+        // The activity span broke: an outage longer than the tolerance.
+        this.gapAt.set(venue, now);
+        this.gapFloor.set(venue, 100_000);
+      }
+      this.span.set(venue, since);
+      const queued = this.laneOf(venue).countPrefix(`coh:${venue}:`);
+      if (fullPassDue({ lastAt: this.plannedAt.get(venue), now, queued, dueLeft: this.dueLeft.get(venue) ?? 0, outage })) full.add(venue);
+    }
+    // trade.xyz's pass takes Hyperliquid's members as they were at its last pass in between.
+    const hlMembers = full.has('hyperliquid') || !this.members.has('hyperliquid') ? await this.membersOf('hyperliquid') : this.members.get('hyperliquid')!;
     const breath = async () => {
       await new Promise<void>((r) => setImmediate(r));
       mark('coh:plan');
     };
     for (const venue of VENUES) {
+      if (!full.has(venue)) {
+        // Between passes the PnL reads still get their minute's share (planPnl hands them out from its list).
+        if (venue === 'hyperliquid') this.planPnl(hlMembers, now);
+        continue;
+      }
+      this.plannedAt.set(venue, now);
       await breath();
       const members = venue === 'hyperliquid' ? hlMembers : await this.membersOf(venue);
       if (venue === 'tradexyz') this.accountPnl(members, hlMembers);
@@ -1473,19 +1516,15 @@ export class CohortTracker {
         this.planPnl(members, now);
         await breath();
       }
-      // A new continuous stream span means an outage: large books are unknown again.
-      const since = this.d.streamSince(venue);
-      if (STREAMED.has(venue) && since !== null && this.span.has(venue) && this.span.get(venue) !== since) {
-        // The activity span broke: an outage longer than the tolerance.
-        this.gapAt.set(venue, now);
-        this.gapFloor.set(venue, 100_000);
-      }
-      this.span.set(venue, since);
+      const since = sinceOf.get(venue) ?? null;
       const streamed = STREAMED.has(venue) && since !== null && (this.d.socketUp?.(venue) ?? true);
 
       const lane = this.laneOf(venue);
       const queued = lane.countPrefix(`coh:${venue}:`);
-      if (queued >= QUEUE_CAP) continue;
+      if (queued >= QUEUE_CAP) {
+        this.dueLeft.set(venue, 0);
+        continue;
+      }
       const books = this.books.get(venue)!;
       const gap = this.gapAt.get(venue) ?? 0;
       const floor = this.gapFloor.get(venue) ?? 100_000;
@@ -1569,6 +1608,7 @@ export class CohortTracker {
       }
       this.liqDue.set(venue, liqDue);
       due.sort((a, b) => b[1] - a[1]);
+      this.dueLeft.set(venue, Math.max(0, due.length - (QUEUE_CAP - queued)));
       for (const [address, prio] of due.slice(0, QUEUE_CAP - queued)) {
         lane.add({
           key: `coh:${venue}:${address}`,
