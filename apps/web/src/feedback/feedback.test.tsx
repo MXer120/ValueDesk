@@ -345,3 +345,28 @@ test("the bell: replies only through the wallet's session, announced once; witho
   const host = readFileSync(new URL('./FeedbackHost.tsx', import.meta.url), 'utf8');
   assert.ok(!/pollThreads|unannounced/.test(host), 'no token counts any more');
 });
+
+test('the dot: one bit per browser token for the connected wallet, no signature, no count', async () => {
+  const t = await import('./threads');
+  const { findUnread } = await import('./FeedbackHost');
+  const owner = '0x' + '34'.repeat(20);
+  g.localStorage!.clear();
+  const mine = t.newToken();
+  t.rememberThread(mine, 'sent unsigned', owner, 1);
+  t.rememberThread(t.newToken(), 'another wallet', '0x' + '56'.repeat(20), 2);
+  const asked: string[] = [];
+  let answer = true;
+  const f = (async (url: string, init: RequestInit) => {
+    asked.push(`${url} ${(init.headers as Record<string, string>).Authorization}`);
+    return new Response(JSON.stringify({ ok: true, unread: answer }), { status: 200 });
+  }) as unknown as typeof fetch;
+  assert.equal(await findUnread(owner, f), true);
+  assert.deepEqual(asked, [`/api/vs/feedback/unread Bearer ${mine}`], "only this wallet's token, in the header");
+  answer = false;
+  assert.equal(await findUnread(owner, f), false);
+  assert.equal(await findUnread(null, f), false, 'no no-wallet token: nothing asked');
+  assert.equal(asked.length, 2);
+  t.setUnread(true);
+  assert.equal(t.hasUnread(), true);
+  t.setUnread(false);
+});

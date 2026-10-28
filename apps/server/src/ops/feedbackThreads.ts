@@ -142,6 +142,8 @@ CREATE INDEX IF NOT EXISTS images_pending ON images (token_hash, message_id);
 CREATE TABLE IF NOT EXISTS tg (tg_id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS pings (token_hash TEXT PRIMARY KEY, chat TEXT NOT NULL, seen_at INTEGER NOT NULL) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS pings_chat ON pings (chat);
 `;
 
 /** Columns added after the first release (2026-10-28); added in place to an older file. */
@@ -281,6 +283,8 @@ export class FeedbackStore {
           out = { result: 'merged', threadId: to, from };
         }
       }
+      // The browsers watching the token's own chat now watch the wallet's (unread()).
+      if (t && out.result !== 'other' && out.result !== 'none') this.db.prepare('UPDATE pings SET chat = ? WHERE chat = ?').run(`w:${w}`, tokenHash(token));
       this.db.exec('COMMIT');
       return out;
     } catch (e) {
@@ -338,6 +342,39 @@ export class FeedbackStore {
       areas: parseAreas(r.areas),
       proven: r.sender === 'owner' || Number(r.verified) === 1,
     }));
+  }
+
+  /**
+   * THE UNREAD DOT (owner, 2026-10-28: "a dot to signal new notifications without
+   * needing to sign"). A browser token that sent into a chat - or that a wallet's
+   * sign-in named (`watch`) - is remembered with that chat and when it last saw
+   * it. `unread(token)` answers ONE bit: has the team written in that chat since?
+   * No count, no time, no text. Reading the chat with the wallet's signature marks
+   * every such token seen. Someone who sent into a wallet's chat with only its
+   * address learns that bit too - their own message is in that chat, the reply may
+   * well be theirs - and nothing else.
+   */
+  notePing(token: string, chat: Who, now = Date.now(), o: { seen?: boolean } = {}): void {
+    const c = keyOf(chat);
+    if (o.seen) this.db.prepare('INSERT INTO pings (token_hash, chat, seen_at) VALUES (?, ?, ?) ON CONFLICT (token_hash) DO UPDATE SET chat = excluded.chat, seen_at = excluded.seen_at').run(tokenHash(token), c, now);
+    else this.db.prepare('INSERT INTO pings (token_hash, chat, seen_at) VALUES (?, ?, ?) ON CONFLICT (token_hash) DO UPDATE SET chat = excluded.chat').run(tokenHash(token), c, now);
+  }
+
+  /** The wallet read its chat with its signature: every browser watching it has seen it. */
+  markSeen(wallet: string, now = Date.now()): void {
+    this.db.prepare('UPDATE pings SET seen_at = ? WHERE chat = ?').run(now, keyOf({ wallet }));
+  }
+
+  /** Whether the team wrote in the chat this token watches since it last saw it; false for a token that watches none. */
+  unread(token: string): boolean {
+    const p = this.db.prepare('SELECT chat, seen_at FROM pings WHERE token_hash = ?').get(tokenHash(token)) as { chat: string; seen_at: number } | undefined;
+    if (!p) return false;
+    let r = (p.chat.startsWith('w:')
+      ? this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE owner_wallet = ?').get(p.chat.slice(2))
+      : this.db.prepare('SELECT id, category, owner_wallet, merged_into, created_at, last_at FROM threads WHERE token_hash = ?').get(p.chat)) as ThreadDb | undefined;
+    for (let hops = 0; r && r.merged_into !== null && hops < 4; hops++) r = this.byId(Number(r.merged_into));
+    if (!r) return false;
+    return !!this.db.prepare("SELECT 1 FROM messages WHERE thread_id = ? AND sender = 'owner' AND at > ? LIMIT 1").get(r.id, Number(p.seen_at));
   }
 
   /** For the signed-in wallet's bell: how many owner replies its chat has, and the newest one's time. Only ever a wallet's. */

@@ -71,7 +71,7 @@ Class: **(a)** per-user exchange/chain traffic - now browser-direct;
 | Server status and network | `/api/health` | (c) | about ValueDesk itself |
 | Builder fee terms | `/api/vs/builder/terms` | (c) | the fee a wallet owes must be signed by a key the browser cannot hold (docs/BUILDER-TIERS.md) |
 | Status page (`/status`) | `/api/vs/status` | (c) | the server probes the site, its own API, the executor and the indexer every minute and keeps 90 days (ops/status.ts); the same answer for everyone |
-| Send feedback (a chat with the owner, screenshots), client error reports | `POST /api/vs/feedback`, `/feedback/upload`, `/feedback/thread`, `/feedback/poll`, `/feedback/session`, `GET /api/vs/feedback/image`, `POST /api/vs/client-errors` | (c) | what a visitor sends the owner and the owner's replies: kept on the server, forwarded by Telegram, replies read back by long polling (routes/reports.ts, docs/GO-LIVE.md) |
+| Send feedback (a chat with the owner, screenshots), client error reports | `POST /api/vs/feedback`, `/feedback/upload`, `/feedback/thread`, `/feedback/poll`, `/feedback/unread`, `/feedback/session`, `GET /api/vs/feedback/image`, `POST /api/vs/client-errors` | (c) | what a visitor sends the owner and the owner's replies: kept on the server, forwarded by Telegram, replies read back by long polling (routes/reports.ts, docs/GO-LIVE.md) |
 | Maintenance banner and page | `/api/external/maintenance/status`, `/api/external/announcements(/:id)` | (c) | global, not per-user. alpha-biz answers any origin, so this can go direct later; kept to keep the change focused |
 | SoPoints sign-in | `/api/points/auth/*` | (c) | sodex.com's points API allows only its own origin (CORS), so a browser cannot call it; the page is not mounted (router: points -> trade) |
 | Account switcher of the LOCAL server-signing mode | `/api/session/*` | (c) | custodial local mode only; off in hosted mode |
@@ -377,7 +377,8 @@ Against this inventory, HOSTED_ROUTES should be:
   (a message, 16 KB), `POST /api/vs/feedback/upload` (one screenshot as raw bytes, 2 MiB; PNG,
   JPEG or WebP judged by its bytes, ops/imageCheck.ts), `POST /api/vs/feedback/thread` and
   `POST /api/vs/feedback/poll` (the thread, and the owner's reply counts for up to 10 threads),
-  all cls `write`; `POST /api/vs/feedback/session` (cls `auth`, 4 KB: a wallet's free signature
+  `POST /api/vs/feedback/unread` (1 KB, a browser token: one bit, a new reply since it last saw
+  its chat - the unread dot without a signature), all cls `write`; `POST /api/vs/feedback/session` (cls `auth`, 4 KB: a wallet's free signature
   for its chat, ops/feedbackAuth.ts, like `/api/folders/session`);
   `GET /api/vs/feedback/image?id=` (cls `read`), and `POST /api/vs/client-errors`
   (cls `write`, 8 KB, `application/json` or `text/plain` for sendBeacon). The thread token is

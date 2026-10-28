@@ -158,6 +158,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'POST', url: '/api/vs/feedback/upload', cls: 'write' },
   { method: 'POST', url: '/api/vs/feedback/thread', cls: 'write' },
   { method: 'POST', url: '/api/vs/feedback/poll', cls: 'write' },
+  { method: 'POST', url: '/api/vs/feedback/unread', cls: 'write' },
   { method: 'GET', url: '/api/vs/feedback/image', cls: 'read' },
   // A wallet's signature for its feedback chat (ops/feedbackAuth.ts), like the folders' sign-in.
   { method: 'POST', url: '/api/vs/feedback/session', cls: 'auth' },

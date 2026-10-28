@@ -33,7 +33,7 @@ import { FEEDBACK_MAX, FEEDBACK_URL, messageLength, secretIn, sendMessage, type 
 import { buildContext, connectedWallet, contextRows, gatherSources, type ContextSources } from './context';
 import { elementSummary, type ElementInfo } from './element';
 import { ACCEPT, MAX_IMAGES, acceptable, reencode } from './images';
-import { REPLY_EVENT, imageUrl, loadThread, markAttached, rememberThread, threads, tokenFor, uploadImage, type ChatMessage } from './threads';
+import { REPLY_EVENT, imageUrl, loadThread, markAttached, rememberThread, setUnread, threads, tokenFor, uploadImage, type ChatMessage } from './threads';
 import { forgetSession, heldSession, markSessionSeen, signInFeedback, type WalletSession } from './session';
 import { AreaPicker } from './AreaPicker';
 import { pushNotice } from '../notices';
@@ -139,6 +139,8 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     setView('chat');
     const n = ownerCount(msgs);
     markSessionSeen(session.owner, n);
+    // Read with the signature: the server marked this wallet's browsers seen, the dot goes.
+    setUnread(false);
   }, [session, wallet]);
 
   useEffect(() => {
@@ -257,12 +259,15 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     setSigning(true);
     setError(null);
     const own = threads().find((t) => !t.wallet)?.token ?? null;
-    const r = await signInFeedback(provider, wallet, own);
+    // This browser's token for the wallet watches the chat: the unread dot later, with no signature.
+    const watch = tokenFor(wallet);
+    const r = await signInFeedback(provider, wallet, own, fetch, { watch });
     setSigning(false);
     if (!r.ok) {
       setError(r.error);
       return;
     }
+    rememberThread(watch, '', wallet);
     if (own && (r.attached === 'adopted' || r.attached === 'merged' || r.attached === 'same')) markAttached(own, wallet);
     if (r.attached === 'merged' || r.attached === 'adopted') setNote('What you sent from this browser before is now in your wallet\'s chat.');
     setView('loading');

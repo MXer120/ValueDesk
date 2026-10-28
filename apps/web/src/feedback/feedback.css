@@ -29,6 +29,13 @@
 .fb-entry:hover { background: rgba(255, 255, 255, 0.13); color: var(--text); }
 .fb-entry:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .fb-entry__glyph { flex: none; color: var(--muted); }
+.fb-entry__ic { position: relative; display: inline-flex; flex: none; }
+/* A reply waits (threads.ts pollUnread): the accent dot on the bubble's corner. */
+.fb-entry__dot {
+  position: absolute; top: -2px; right: -3px; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--accent, #00b481); box-shadow: 0 0 0 2px var(--bg, #0b0b0b);
+}
+.fb-entry.has-unread .fb-entry__glyph { color: var(--text); }
 .fb-entry:hover .fb-entry__glyph { color: var(--text); }
 .sfoot-right .fb-entry { margin-right: var(--sp-3, 12px); }
 

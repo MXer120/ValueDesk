@@ -6,8 +6,11 @@
  *   POST /api/vs/feedback/upload   one screenshot, the raw bytes (PNG, JPEG, WebP; 2 MB)     ops/imageCheck.ts
  *   POST /api/vs/feedback/thread   the chat's messages, oldest first
  *   POST /api/vs/feedback/poll     a wallet session: how many replies its chat has (nothing without one)
- *   POST /api/vs/feedback/session  {signIn, attach?}: a wallet's session token; `attach`
- *                                  (a thread token) keeps that browser's chat on the wallet
+ *   POST /api/vs/feedback/unread   a browser token: {unread} - one bit, a new reply since it last
+ *                                  saw the chat it sent into or watches (the dot; no count, no text)
+ *   POST /api/vs/feedback/session  {signIn, attach?, watch?}: a wallet's session token; `attach`
+ *                                  (a thread token) keeps that browser's chat on the wallet;
+ *                                  `watch` (this browser's token) gets the wallet's unread dot
  *   GET  /api/vs/feedback/image?id=   one screenshot of the chat, back to its key
  *   POST /api/vs/client-errors     {build, route, browser, errors: [...]}                     ops/clientErrors.ts
  *
@@ -195,6 +198,8 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     let saved;
     try {
       saved = store.addUserMessage(into, { category: f.category, areas: f.areas, text: f.message, context: f.context, wallet: f.wallet, verified, images: f.images }, now(), writer);
+      // The browser that sent gets the chat's unread dot (ops/feedbackThreads.ts unread).
+      if ('token' in writer) store.notePing(writer.token, into, now());
     } catch (e) {
       if (e instanceof FullError) {
         req.log.error('feedback: the store is at its cap - move feedback.db away to take messages again');
@@ -253,6 +258,7 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     const store = feedbackStore();
     const t = store.thread({ wallet });
     if (!t || t === 'locked') return reply.code(404).send({ ok: false, error: 'no such thread' });
+    store.markSeen(wallet, now());
     return { ok: true, thread: { id: t.id, category: t.category, createdAt: t.createdAt, wallet: t.wallet }, messages: store.messages(t.id) };
   });
 
@@ -266,19 +272,32 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     return { ok: true, wallet: feedbackStore().summary({ wallet }) };
   });
 
+  app.post('/api/vs/feedback/unread', { bodyLimit: 1024 }, async (req, reply) => {
+    reply.header('Cache-Control', 'no-store');
+    const wait = limited('read', clientKey(req.ip));
+    if (wait !== null) return tooMany(reply, wait);
+    // A browser token only: one bit about the chat it sent into or watches, nothing more.
+    const t = bearer(req.headers.authorization);
+    if (!t) return reply.code(401).send({ ok: false, error: 'a browser token is required (Authorization: Bearer)' });
+    return { ok: true, unread: feedbackStore().unread(t) };
+  });
+
   app.post('/api/vs/feedback/session', { bodyLimit: 4096 }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited('auth', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const b = jsonBody(req.body) as { signIn?: unknown; attach?: unknown } | undefined;
+    const b = jsonBody(req.body) as { signIn?: unknown; attach?: unknown; watch?: unknown } | undefined;
     const v = checkFeedbackSignIn(b?.signIn, now());
     if (!v.ok) return reply.code(401).send({ ok: false, code: 'signature', error: v.error });
     const attach = b?.attach;
     if (attach !== undefined && (typeof attach !== 'string' || !TOKEN_RE.test(attach))) return reply.code(400).send({ ok: false, error: 'attach must be a thread token' });
+    const watch = b?.watch;
+    if (watch !== undefined && (typeof watch !== 'string' || !TOKEN_RE.test(watch))) return reply.code(400).send({ ok: false, error: 'watch must be a browser token' });
     const store = feedbackStore();
     if (!store.useNonce(v.nonce, v.expiresAt, now())) return reply.code(409).send({ ok: false, code: 'replay', error: 'this sign-in was already used - sign again' });
     const s = sessions().issue(v.owner, now());
     const a = typeof attach === 'string' ? store.attach(attach, v.owner, now()) : { result: 'none' as const, threadId: null, from: null };
+    if (typeof watch === 'string') store.notePing(watch, { wallet: v.owner }, now(), { seen: true });
     if ((a.result === 'merged' || a.result === 'adopted') && a.threadId !== null) {
       const threadId = a.threadId;
       const text = a.result === 'merged'

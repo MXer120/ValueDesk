@@ -9,7 +9,10 @@
  * seen and announced. The token reads NOTHING: it is what an unsigned message is
  * sent with (Authorization header, never a URL; the server keeps only its hash),
  * and - the one without a wallet - what joins the wallet's chat at the first
- * sign-in (attach). It never tells anything about a chat, not even a count.
+ * sign-in (attach). It never tells anything about a chat, not even a count -
+ * only one bit: whether the team wrote since this browser last saw the chat it
+ * sent into or watches (pollUnread, the dot on "Send feedback"; owner,
+ * 2026-10-28: "a dot to signal new notifications without needing to sign").
  *
  * At most MAX_THREADS are kept (the server's poll takes as many).
  */
@@ -165,6 +168,30 @@ export async function pollWallet(session: string, f: typeof fetch = fetch): Prom
   } catch {
     return null;
   }
+}
+
+/** Whether the team wrote in the chat this browser token sent into (or watches) since it last saw it; null when it failed. */
+export async function pollUnread(token: string, f: typeof fetch = fetch): Promise<boolean | null> {
+  try {
+    const r = await postJson('/api/vs/feedback/unread', {}, authed(token), f);
+    return r.status === 200 && r.json?.ok === true ? r.json.unread === true : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The dot on "Send feedback": a reply is waiting (FeedbackHost sets it, the button shows it). */
+export const UNREAD_EVENT = 'vs:feedback-unread';
+let unreadNow = false;
+export const hasUnread = (): boolean => unreadNow;
+export function setUnread(on: boolean): void {
+  if (on === unreadNow) return;
+  unreadNow = on;
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(UNREAD_EVENT));
+}
+export function onUnread(cb: () => void): () => void {
+  window.addEventListener(UNREAD_EVENT, cb);
+  return () => window.removeEventListener(UNREAD_EVENT, cb);
 }
 
 /** Upload one screenshot (already re-encoded, images.ts): its id, or a sentence why not. */

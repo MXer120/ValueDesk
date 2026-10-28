@@ -481,6 +481,49 @@ test("migration: a browser's own chat (no wallet, or from before) moves onto the
   assert.equal(((await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_A })).json() as { attached: string }).attached, 'same');
 });
 
+test('the unread dot: a browser token learns one bit - a new reply since it last saw the chat - and the signed read clears it', async () => {
+  let clock = Date.now();
+  const { app, store, sent, settled } = await appFor({ now: () => clock });
+  const w = newWallet();
+  const unread = async (token: string) => (await post(app, '/api/vs/feedback/unread', {}, auth(token))).json() as { ok: boolean; unread: boolean };
+  assert.equal((await post(app, '/api/vs/feedback/unread', {})).statusCode, 401, 'a token is needed');
+  assert.deepEqual(await unread(TOKEN_A), { ok: true, unread: false }, 'a token that sent nothing watches nothing');
+  // Sent unsigned with the wallet's address: the dot comes with the team's reply, and only one bit of it.
+  await post(app, '/api/vs/feedback', { message: 'is this a bug?', wallet: w.address }, auth(TOKEN_A));
+  await settled();
+  assert.equal((await unread(TOKEN_A)).unread, false);
+  store.addOwnerReply(sent[0]!.id, 'Yes, fixed tomorrow', 4242, (clock += 1000));
+  const r = (await post(app, '/api/vs/feedback/unread', {}, auth(TOKEN_A))).json() as Record<string, unknown>;
+  assert.deepEqual(Object.keys(r).sort(), ['ok', 'unread'], 'no count, no time, no text');
+  assert.equal(r.unread, true);
+  assert.equal((await unread(TOKEN_B)).unread, false, 'another browser sees nothing');
+  // The wallet signs in, naming this browser's token to watch, and reads: the dot is gone.
+  clock += 1000;
+  const s = (await post(app, '/api/vs/feedback/session', { signIn: signIn(w), watch: TOKEN_A })).json() as { token: string };
+  await post(app, '/api/vs/feedback/thread', {}, auth(s.token));
+  assert.equal((await unread(TOKEN_A)).unread, false);
+  // A browser that only signed in (watch) gets the dot for the next reply, without signing again.
+  await post(app, '/api/vs/feedback/session', { signIn: signIn(w), watch: TOKEN_B });
+  store.addOwnerReply(sent[0]!.id, 'Done', 4243, (clock += 1000));
+  assert.equal((await unread(TOKEN_B)).unread, true);
+  assert.equal((await unread(TOKEN_A)).unread, true);
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(w), watch: 'nope' })).statusCode, 400);
+});
+
+test("the unread dot follows a no-wallet chat into the wallet's at the sign-in", async () => {
+  let clock = Date.now();
+  const { app, store, sent, settled } = await appFor({ now: () => clock });
+  const w = newWallet();
+  await post(app, '/api/vs/feedback', { message: 'no wallet yet' }, auth(TOKEN_A));
+  await settled();
+  store.addOwnerReply(sent[0]!.id, 'Connect a wallet to read this', 5151, (clock += 1000));
+  assert.equal(((await post(app, '/api/vs/feedback/unread', {}, auth(TOKEN_A))).json() as { unread: boolean }).unread, true);
+  const s = (await post(app, '/api/vs/feedback/session', { signIn: signIn(w), attach: TOKEN_A })).json() as { token: string; attached: string };
+  assert.equal(s.attached, 'adopted');
+  await post(app, '/api/vs/feedback/thread', {}, auth(s.token));
+  assert.equal(((await post(app, '/api/vs/feedback/unread', {}, auth(TOKEN_A))).json() as { unread: boolean }).unread, false);
+});
+
 test("attach: a second browser's chat merges into the wallet's - one conversation; the owner's old chain still lands there", async () => {
   const { app, store, sent, settled } = await appFor();
   const w = newWallet();

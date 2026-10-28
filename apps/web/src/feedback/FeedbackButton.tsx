@@ -8,7 +8,9 @@
  * Settings' Help & FAQ, the status page, a right-click (FeedbackMenu.tsx) and a
  * reply in the bell - all through `openFeedback()`.
  */
+import { useSyncExternalStore } from 'react';
 import type { ElementInfo } from './element';
+import { hasUnread, onUnread } from './threads';
 import './feedback.css';
 
 export const OPEN_FEEDBACK_EVENT = 'vs:open-feedback';
@@ -27,10 +29,16 @@ export function openFeedback(o: OpenFeedback = {}): void {
 
 export const FEEDBACK_LABEL = 'Send feedback';
 
+/** A dot while the team's reply waits - known without a signature (threads.ts pollUnread). */
 export function FeedbackButton() {
+  const unread = useSyncExternalStore(onUnread, hasUnread, () => false);
+  const title = unread ? `${FEEDBACK_LABEL} - a new reply is waiting` : FEEDBACK_LABEL;
   return (
-    <button type="button" className="fb-entry" title={FEEDBACK_LABEL} aria-haspopup="dialog" data-feedback-entry="" onClick={() => openFeedback()}>
-      <FeedbackIcon />
+    <button type="button" className={`fb-entry${unread ? ' has-unread' : ''}`} title={title} aria-label={title} aria-haspopup="dialog" data-feedback-entry="" onClick={() => openFeedback()}>
+      <span className="fb-entry__ic">
+        <FeedbackIcon />
+        {unread && <span className="fb-entry__dot" aria-hidden="true" />}
+      </span>
       <span className="fb-entry__word">{FEEDBACK_LABEL}</span>
     </button>
   );

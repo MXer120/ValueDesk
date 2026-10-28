@@ -297,6 +297,7 @@ test('the allow-list is exactly docs/ARCH-traffic.md section 5', () => {
       'POST /api/vs/feedback/poll write',
       'POST /api/vs/feedback/session auth',
       'POST /api/vs/feedback/thread write',
+      'POST /api/vs/feedback/unread write',
       'POST /api/vs/feedback/upload write',
     ],
   );

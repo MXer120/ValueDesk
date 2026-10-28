@@ -95,9 +95,11 @@ export type SignInResult =
 
 /**
  * One signature from the connected wallet for a session; `attach` (this
- * browser's thread token) keeps that chat on the wallet. Never throws.
+ * browser's thread token) keeps that chat on the wallet; `watch` (this
+ * browser's token for the wallet) gets the chat's unread dot from then on,
+ * without signing again (threads.ts pollUnread). Never throws.
  */
-export async function signInFeedback(provider: Eip1193Provider, owner: string, attach: string | null, f: typeof fetch = fetch): Promise<SignInResult> {
+export async function signInFeedback(provider: Eip1193Provider, owner: string, attach: string | null, f: typeof fetch = fetch, o: { watch?: string } = {}): Promise<SignInResult> {
   let signIn;
   try {
     const chainId = await getChainId(provider);
@@ -119,7 +121,7 @@ export async function signInFeedback(provider: Eip1193Provider, owner: string, a
     const res = await f('/api/vs/feedback/session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ signIn, ...(attach ? { attach } : {}) }),
+      body: JSON.stringify({ signIn, ...(attach ? { attach } : {}), ...(o.watch ? { watch: o.watch } : {}) }),
       credentials: 'omit',
     });
     const j = (await res.json().catch(() => null)) as { ok?: boolean; token?: string; expiresAt?: number; attached?: string; error?: string } | null;

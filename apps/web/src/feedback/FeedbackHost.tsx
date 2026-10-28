@@ -14,6 +14,13 @@
  * "sign in to see replies" row the dialog leaves after an unsigned send
  * (FeedbackDialog.tsx).
  *
+ * THE DOT, WITHOUT A SIGNATURE. The same check asks, with this browser's own
+ * token for the connected wallet (or, with none connected, for its no-wallet
+ * chat), the one bit the server tells a token: a reply since it last saw the
+ * chat (threads.ts pollUnread). A yes puts a dot on "Send feedback" and, once,
+ * a bell row "sign in to read it"; reading the chat with the signature clears
+ * both.
+ *
  * The dialog's code (and the seed-phrase word list it checks against) loads on
  * the first open, not with the app.
  */
@@ -25,7 +32,7 @@ import { OPEN_FEEDBACK_EVENT, type OpenFeedback } from './FeedbackButton';
 import { FeedbackMenu } from './FeedbackMenu';
 import { connectedWallet } from './context';
 import { heldSession, markSessionSeen } from './session';
-import { REPLY_EVENT, pollWallet } from './threads';
+import { REPLY_EVENT, pollUnread, pollWallet, setUnread, threads } from './threads';
 
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then((m) => ({ default: m.FeedbackDialog })));
 
@@ -44,6 +51,33 @@ export async function findNewReplies(wallet: string | null, f: typeof fetch = fe
     if (count > known) out.push({ ref: 'wallet', owner: count, fresh: count - known, mark: () => markSessionSeen(session.owner, count, { notifiedOnly: true }) });
   }
   return out;
+}
+
+const DOT_NOTICE = 'feedback:unread';
+const DOT_NOTIFIED_KEY = 'vs.feedback.dotNotified';
+const store = (): Storage | null => {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * The dot: whether a reply waits for `wallet` (null: no wallet connected),
+ * asked with this browser's tokens only - no signature. Null when it failed.
+ * Exported for tests.
+ */
+export async function findUnread(wallet: string | null, f: typeof fetch = fetch): Promise<boolean | null> {
+  const w = wallet?.toLowerCase() ?? null;
+  const mine = threads().filter((t) => (w ? t.wallet === w : !t.wallet));
+  let failed = false;
+  for (const t of mine) {
+    const r = await pollUnread(t.token, f);
+    if (r === true) return true;
+    if (r === null) failed = true;
+  }
+  return failed ? null : false;
 }
 
 export function FeedbackHost({ address = null, provider = null }: { address?: string | null; provider?: Eip1193Provider | null } = {}) {
@@ -66,7 +100,29 @@ export function FeedbackHost({ address = null, provider = null }: { address?: st
 
   const check = useCallback(async () => {
     if (document.visibilityState !== 'visible') return;
-    const found = await findNewReplies((addressRef.current ?? connectedWallet())?.toLowerCase() ?? null);
+    const wallet = (addressRef.current ?? connectedWallet())?.toLowerCase() ?? null;
+    const dot = await findUnread(wallet);
+    if (dot !== null) {
+      setUnread(dot);
+      const told = store()?.getItem(DOT_NOTIFIED_KEY) === '1';
+      if (dot && !told && !heldSession(wallet) && !openRef.current) {
+        pushNotice({
+          id: DOT_NOTICE,
+          kind: 'reply',
+          title: 'The ValueDesk team replied',
+          body: wallet ? 'A new reply to your feedback - open Send feedback and sign in with your wallet to read it.' : 'A new reply to your feedback - connect your wallet and sign in in Send feedback to read it.',
+          important: true,
+          ref: 'wallet',
+        });
+      }
+      try {
+        if (dot) store()?.setItem(DOT_NOTIFIED_KEY, '1');
+        else store()?.removeItem(DOT_NOTIFIED_KEY);
+      } catch {
+        /* private mode: the bell row may come once more */
+      }
+    }
+    const found = await findNewReplies(wallet);
     if (!found) return;
     for (const r of found) {
       r.mark();
