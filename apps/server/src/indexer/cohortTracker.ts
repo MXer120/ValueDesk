@@ -113,6 +113,10 @@ const LIVE_TICK_MS = 1_000;
 const LIVE_SLICE = 5_000;
 /** ...and at most this long a beat (live.ts work): what is left waits for the next beat. */
 const LIVE_BUDGET_MS = 150;
+/** With a backlog, up to this long: 30k books waited ~2 minutes at 150 ms (2026-10-28). */
+const LIVE_BUDGET_MAX_MS = 300;
+/** A beat's budget for `pending` changed accounts: the base, doubled from 10k waiting on. */
+const liveBudget = (pending: number): number => (pending > 10_000 ? LIVE_BUDGET_MAX_MS : LIVE_BUDGET_MS);
 export const LIQ_NOW_MS = 2 * 60_000;
 export const LIQ_STEP_MS = 15 * 60_000;
 /** Kept 30 days; past 3 days only the hourly ones. */
@@ -462,6 +466,8 @@ export class CohortTracker {
   private feed = new LiqFeedServer(() => this.live.resendAll());
   /** Every book priced into the engine once since the start. */
   private liveReady = false;
+  /** The engine's `processed` count at which the books touched at the start are all in (liveTick). */
+  private liveBarrier: number | null = null;
   private liveMs = 0;
   private liveWholeAt = 0;
   /** What the boards lane lends the rebuild now. */
@@ -619,7 +625,7 @@ export class CohortTracker {
       planMs: this.planMs,
       recordMs: this.recordMs,
       liqMs: this.liqMs,
-      liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError } },
+      liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
@@ -1389,8 +1395,13 @@ export class CohortTracker {
     if (!this.sodexCoins.size) return;
     // Every coin whole once a minute: the deltas leave out moves under 1% (live.ts SEND_MOVE: 1%), this puts the API's copy back to exact.
     if (t0 - this.liveWholeAt >= 60_000) { this.liveWholeAt = t0; this.live.resendAll(); }
-    const left = this.live.work(LIVE_SLICE, LIVE_BUDGET_MS);
-    if (!left && !this.liveReady) this.liveReady = true;
+    // Ready once the books waiting at the first beat (every book: start() touches them all) are
+    // priced. Waiting for nothing to be left never came on a busy day: prints touch books faster
+    // than a beat's budget prices them, and from 2026-10-27 23:16 UTC no liq_now row was written
+    // for 16 hours (the heatmap answered from that one).
+    if (this.liveBarrier === null) this.liveBarrier = this.live.processed + this.live.pending;
+    const left = this.live.work(LIVE_SLICE, liveBudget(this.live.pending));
+    if (!this.liveReady && (!left || this.live.processed >= this.liveBarrier)) this.liveReady = true;
     const deltas = this.live.flush();
     this.feed.send(deltas, { at: this.d.now(), ready: this.liveReady });
     this.liveMs = Date.now() - t0;

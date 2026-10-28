@@ -92,6 +92,7 @@ export class LiqLive {
   /** venue|symbol -> the price the accounts holding it were last re-priced at. */
   private pricedAt = new Map<string, number>();
   private epoch = 0;
+  private done = 0;
 
   constructor(private readonly o: {
     /** The account now (undefined = gone). */
@@ -125,6 +126,15 @@ export class LiqLive {
   }
 
   /**
+   * Accounts priced since the engine began. `work` takes the changed accounts oldest first and
+   * a touch of one already waiting does not move it, so the `pending` waiting at one moment are
+   * exactly the next `pending` priced: a caller knows when all of them are in from this count.
+   */
+  get processed(): number {
+    return this.done;
+  }
+
+  /**
    * Price up to `max` changed accounts, and for no longer than `budgetMs`; returns how many are
    * left (oldest first next time). The budget keeps the indexer's one thread for the rest: with
    * ~300k books (2026-10-27) the 5,000 a second took over a third of it and starved the reads.
@@ -135,6 +145,7 @@ export class LiqLive {
     for (const key of this.dirty) {
       this.dirty.delete(key);
       this.reprice(key);
+      this.done++;
       if (++n >= max || ((n & 63) === 0 && Date.now() >= until)) break;
     }
     return this.dirty.size;

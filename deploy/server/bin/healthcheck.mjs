@@ -16,7 +16,8 @@
 //              200, ok, and rebuilt recently
 //   indexer    /api/vs/index/health - the indexer's own status, which it
 //              publishes every 30 s - is fresh, its last build is recent, its
-//              streams are up. That route answers a caller on this instance only
+//              streams are up, and the liquidation heatmap's levels were written
+//              within HEALTH_LIQ_STALE_S (900). That route answers a caller on this instance only
 //              and needs no secret (apps/server/src/hosted.ts ON_INSTANCE_ROUTES).
 //              While the API does not answer it cannot be judged: a warning, the
 //              `api` check already fails the pass and `units` says whether the
@@ -91,6 +92,7 @@ const ORIGIN_DOMAIN = env('ORIGIN_DOMAIN');
 const SERVER_NAME = env('HEALTH_SERVER_NAME', ORIGIN_DOMAIN || hostname());
 const INDEXER_STALE_S = num('HEALTH_INDEXER_STALE_S', 180);
 const BOARD_STALE_S = num('HEALTH_BOARD_STALE_S', 900);
+const LIQ_STALE_S = num('HEALTH_LIQ_STALE_S', 900);
 const DISK_PCT = num('HEALTH_DISK_PCT', 80);
 const BACKUP_MAX_AGE_H = num('HEALTH_BACKUP_MAX_AGE_H', 36);
 const CERT_MIN_DAYS = num('HEALTH_CERT_MIN_DAYS', 14);
@@ -192,6 +194,17 @@ await check('indexer', async () => {
     + (down.length ? `, streams down: ${down.join(',')}` : '')
     + (s.errorSinceStart ? ', an error was logged since it started (journalctl -u valuescan-indexer)' : '');
   if (build !== null && build > BOARD_STALE_S) return { ok: false, note };
+  // The liquidation heatmap: its levels are written every 2 minutes once the engine has priced
+  // every book. Not written for LIQ_STALE_S (counted from the start when not yet since it) is
+  // a heatmap answering from old levels - as for 16 hours from 2026-10-27 23:16 UTC, unalerted.
+  const liq = s.liq;
+  if (liq) {
+    const liqAge = age(liq.nowAt ?? liq.since ?? s.at);
+    const liqNote = `${note}, heatmap levels ${liq.nowAt ? `${liqAge} s old` : `not written since the start ${liqAge} s ago`}`
+      + `${liq.ready ? '' : ', engine not ready'}, ${liq.pending ?? '?'} accounts waiting`;
+    if (liqAge > LIQ_STALE_S) return { ok: false, note: liqNote };
+    return { ok: true, warn: down.length > 0, note: liqNote };
+  }
   // A stream that is down right after a restart is normal (Lighter needs minutes): a warning.
   return { ok: true, warn: down.length > 0, note };
 });

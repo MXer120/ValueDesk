@@ -77,6 +77,7 @@ function indexerHealth(o = {}) {
     lastBuildAt: now - (o.buildAgeMs ?? 30_000),
     lastBuildMs: 900,
     errorSinceStart: false,
+    liq: o.liq === null ? null : { ready: o.liqReady ?? true, pending: 40, nowAt: o.liqAgeMs === undefined ? now - 60_000 : o.liqAgeMs === null ? null : now - o.liqAgeMs, since: now - (o.liqSinceMs ?? 3_600_000) },
   };
 }
 
@@ -163,6 +164,8 @@ test('an indexer that stopped publishing, a stale board, an old backup and a wro
     [{}, { health: indexerHealth({ statusAgeMs: 10 * 60_000 }) }, 'indexer', /status is \d+ s old/],
     [{}, { health: null }, 'indexer', /has not published a status/],
     [{}, { health: indexerHealth({ buildAgeMs: 30 * 60_000 }) }, 'indexer', /last build \d+ s ago/],
+    [{}, { health: indexerHealth({ liqAgeMs: 16 * 3_600_000, liqReady: false }) }, 'indexer', /heatmap levels \d+ s old, engine not ready/],
+    [{}, { health: indexerHealth({ liqAgeMs: null, liqSinceMs: 20 * 60_000 }) }, 'indexer', /heatmap levels not written since the start \d+ s ago/],
     [{}, { boardAgeMs: 30 * 60_000 }, 'index', /the board is \d+ s old/],
     [{}, { secrets: [OTHER_SECRET] }, 'index', /refused the origin secret/],
     [{ backupAgeH: 50 }, {}, 'backup', /last-backup: the last one is 50 h old/],

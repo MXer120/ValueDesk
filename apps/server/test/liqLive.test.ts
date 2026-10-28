@@ -139,3 +139,22 @@ test('a beat stops at its time budget and the rest waits, oldest first, to the s
   live.flush();
   assert.deepEqual(strip(live.rows()), strip(full()));
 });
+
+test('the accounts waiting at one moment are the next ones priced, however busy the prints keep it', () => {
+  const { books, live } = world();
+  const add = (i: number) => books.set(`hyperliquid|0x${i}`, { cash: 50_000, priced: true, positions: [{ symbol: 'BTC', szi: 1 }] });
+  for (let i = 0; i < 100; i++) { add(i); live.touch('hyperliquid', `0x${i}`); }
+  // The indexer's readiness barrier (cohortTracker.ts liveTick): what waits now, counted from now.
+  const barrier = live.processed + live.pending;
+  let beats = 0;
+  while (live.processed < barrier) {
+    live.work(30);
+    // Every beat, prints touch new books and books already waiting: the queue never runs dry...
+    for (let j = 0; j < 40; j++) { const i = 100 + beats * 40 + j; add(i); live.touch('hyperliquid', `0x${i}`); }
+    live.touch('hyperliquid', '0x99');
+    beats++;
+  }
+  assert.ok(live.pending > 0, 'still busy');
+  // ...yet the 100 books waiting at the start are priced after 100 / 30 beats, not never.
+  assert.equal(beats, 4);
+});

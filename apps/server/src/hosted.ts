@@ -655,6 +655,12 @@ export interface IndexerHealth {
    * so this stays true). The text stays in its own log.
    */
   errorSinceStart: boolean;
+  /**
+   * The liquidation heatmap's engine: whether every book is priced into it, how many changed
+   * accounts wait, when it last wrote the levels the API falls back on (null: not since its
+   * start), and when it started. Null: the indexer runs no cohorts.
+   */
+  liq: { ready: boolean; pending: number | null; nowAt: number | null; since: number | null } | null;
 }
 
 /** A venue or lane name. Never an address (0x...), a path or anything long. */
@@ -709,7 +715,15 @@ export function indexerHealth(status: unknown): IndexerHealth | null {
     lastBuildAt: stamp(status.lastBuildAt),
     lastBuildMs: amount(status.lastBuildMs),
     errorSinceStart: Boolean(status.lastError),
+    liq: liqHealth(status.cohorts),
   };
+}
+
+function liqHealth(cohorts: unknown): IndexerHealth['liq'] {
+  const liq = isRecord(cohorts) && isRecord(cohorts.liq) ? cohorts.liq : null;
+  if (!liq) return null;
+  const live = isRecord(liq.live) ? liq.live : {};
+  return { ready: live.ready === true, pending: amount(live.pending), nowAt: stamp(liq.nowAt), since: stamp(liq.since) };
 }
 
 // --- response headers --------------------------------------------------------------------

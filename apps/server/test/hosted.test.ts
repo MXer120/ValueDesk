@@ -384,7 +384,10 @@ const INDEXER_STATUS = {
   lastError: 'flush: database is locked (/var/lib/valuescan/index/valuescan-index.db)',
   loopLagMs: { lastMinute: 12.6, sinceStart: 340, spikes: [{ late: 340, at: 1, by: `rebuild after ${WALLET}` }] },
   hlBudget: 870,
-  cohorts: { lastError: `cohort flush: ${WALLET}` },
+  cohorts: {
+    lastError: `cohort flush: ${WALLET}`,
+    liq: { boost: false, live: { ready: true, pending: 12, ms: 40, error: `liq feed: ${WALLET}` }, nowAt: 1_790_000_000_900, since: 1_789_999_000_000 },
+  },
   at: 1_790_000_001_000,
   pid: 4242,
 };
@@ -655,7 +658,7 @@ test('index health: answered to a caller on the instance, a 404 for everyone els
   const local = await get();
   assert.equal(local.statusCode, 200);
   assert.equal(local.json().ok, true);
-  assert.deepEqual(Object.keys(local.json().status).sort(), ['at', 'errorSinceStart', 'lanes', 'lastBuildAt', 'lastBuildMs', 'loopLagMs', 'streams']);
+  assert.deepEqual(Object.keys(local.json().status).sort(), ['at', 'errorSinceStart', 'lanes', 'lastBuildAt', 'lastBuildMs', 'liq', 'loopLagMs', 'streams']);
   assert.equal((await get({ method: 'HEAD' })).statusCode, 200);
   assert.equal((await get({ headers: { host: 'localhost:8797' } })).statusCode, 200);
 
@@ -742,6 +745,7 @@ test('index health: numbers and booleans picked by name - no address, error text
     lastBuildAt: 1_790_000_000_500,
     lastBuildMs: 432,
     errorSinceStart: true,
+    liq: { ready: true, pending: 12, nowAt: 1_790_000_000_900, since: 1_789_999_000_000 },
   });
   const sent = JSON.stringify(h);
   for (const secret of ['0x', WALLET, '4242', 'pid', 'valuescan-index', '/var/lib', '429', '1015', 'locked', 'hang up', 'rebuild', 'spent', 'hlBudget', '870', 'tracked', '5000']) {
@@ -752,7 +756,7 @@ test('index health: numbers and booleans picked by name - no address, error text
   const early = indexerHealth({ streams: { sodex: 5, lighter: null }, lanes: {}, lastBuildAt: 0, lastBuildMs: 0, lastError: null, at: 7 });
   assert.deepEqual(early, {
     at: 7, streams: { sodex: true, lighter: false }, loopLagMs: { lastMinute: null, sinceStart: null }, lanes: {},
-    lastBuildAt: null, lastBuildMs: 0, errorSinceStart: false,
+    lastBuildAt: null, lastBuildMs: 0, errorSinceStart: false, liq: null,
   });
 
   // No status to read.
@@ -784,6 +788,7 @@ test('index health: whatever the status holds, only a name, a number or a boolea
     lastBuildAt: WALLET,
     lastBuildMs: { ms: 1 },
     lastError: { message: WALLET },
+    cohorts: { liq: { live: { ready: 'yes', pending: WALLET }, nowAt: WALLET, since: -5 } },
   };
   const h = indexerHealth(hostile)!;
   assert.deepEqual(h, {
@@ -798,6 +803,7 @@ test('index health: whatever the status holds, only a name, a number or a boolea
     lastBuildAt: null,
     lastBuildMs: null,
     errorSinceStart: true,
+    liq: { ready: false, pending: null, nowAt: null, since: null },
   });
   for (const { path, value } of leaves(h)) {
     assert.ok(value === null || typeof value === 'number' || typeof value === 'boolean', `${path} is ${typeof value}`);
