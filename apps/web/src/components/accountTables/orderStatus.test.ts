@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { filledFraction, formatPct, normaliseStatus, orderStatusInfo, statusTitle } from './orderStatus';
+import { setNumStyle } from '../../numStyle';
+
+// Written in the 1,234.56 format; the default's own case is at the end.
+setNumStyle('comma-dot');
 
 const kind = (o: Parameters<typeof orderStatusInfo>[0]) => orderStatusInfo(o).kind;
 
@@ -79,4 +83,15 @@ test('the tooltip states the status and the filled amount', () => {
   assert.equal(formatPct(0.0012), '0.12%');
   assert.equal(formatPct(0.055), '5.5%');
   assert.equal(formatPct(1), '100%');
+});
+
+test('percentages in the default 1.234,56 format', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(formatPct(0.0012), '0,12%');
+    assert.equal(formatPct(0.055), '5,5%');
+    assert.equal(formatPct(0.37), '37%');
+  } finally {
+    setNumStyle('comma-dot');
+  }
 });

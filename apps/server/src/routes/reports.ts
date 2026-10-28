@@ -5,17 +5,19 @@
  *   POST /api/vs/feedback          a message: {category?, areas?, message, context?, wallet?, images?}   ops/feedback.ts
  *   POST /api/vs/feedback/upload   one screenshot, the raw bytes (PNG, JPEG, WebP; 2 MB)     ops/imageCheck.ts
  *   POST /api/vs/feedback/thread   the chat's messages, oldest first
- *   POST /api/vs/feedback/poll     {tokens: [...]} (+ a wallet session): the owner's replies so far
+ *   POST /api/vs/feedback/poll     a wallet session: how many replies its chat has (nothing without one)
  *   POST /api/vs/feedback/session  {signIn, attach?}: a wallet's session token; `attach`
  *                                  (a thread token) keeps that browser's chat on the wallet
  *   GET  /api/vs/feedback/image?id=   one screenshot of the chat, back to its key
  *   POST /api/vs/client-errors     {build, route, browser, errors: [...]}                     ops/clientErrors.ts
  *
- * THE KEY (ops/feedbackThreads.ts) travels as `Authorization: Bearer` - never in
- * a URL, so never in a log or a Referer: a browser's thread token (a new one
- * starts a chat) or a wallet's session token (ops/feedbackAuth.ts). Poll takes
- * the thread tokens in its body. A token whose chat is kept on a wallet gets 401
- * `wallet` everywhere but poll: only that wallet's signature opens it.
+ * WHO MAY DO WHAT (ops/feedbackThreads.ts). One chat per wallet. SENDING needs no
+ * signature: a browser sends with its own token (`Authorization: Bearer`, never in
+ * a URL), and the message goes into the chat of the wallet address it carries -
+ * marked "not proven" unless the sender holds that wallet's session
+ * (ops/feedbackAuth.ts). READING - /thread and /image - takes the wallet's session
+ * and nothing else: a browser token gets 401 `wallet`. So does poll, the bell's
+ * reply count: without the signature nothing about a chat is told, not even that.
  *
  * Like the knowledge folders' (hosted.ts), the POSTs need the site's exact Origin
  * and are counted as `write` by the gate; on top of that each has much tighter
@@ -37,7 +39,7 @@ import { clientKey } from '../hosted.js';
 import { KeyedLimiter, type Limit } from '../rateLimit.js';
 import { sendTelegramMessage, sendTelegramPhoto } from '../ops/telegram.js';
 import { FEEDBACK_BODY_LIMIT, feedbackText, parseFeedback } from '../ops/feedback.js';
-import { FeedbackStore, FullError, LockedError, TOKEN_RE, bearer, feedbackDbPath, tokenHash, type Who } from '../ops/feedbackThreads.js';
+import { FeedbackStore, FullError, TOKEN_RE, bearer, feedbackDbPath, tokenHash, type Who } from '../ops/feedbackThreads.js';
 import { FeedbackSessions, checkFeedbackSignIn, sessionBearer } from '../ops/feedbackAuth.js';
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, checkImage } from '../ops/imageCheck.js';
 import { BATCH_BODY_LIMIT, ClientErrorStore, alertText, parseBatch } from '../ops/clientErrors.js';
@@ -106,8 +108,6 @@ export interface ReportRouteOptions {
   now?: () => number;
 }
 
-/** Tokens a poll may carry at once: a browser keeps its last threads. */
-export const MAX_POLL_TOKENS = 10;
 
 /** JSON in a string (text/plain) or already parsed (application/json). */
 function jsonBody(body: unknown): unknown {
@@ -152,41 +152,50 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     const s = sessionBearer(req.headers.authorization);
     return s ? sessions().read(s, now()) : null;
   };
-  /** The key - a thread token or a proven wallet - or a 401 sent. */
-  const whoOf = (req: FastifyRequest, reply: FastifyReply): Who | null => {
-    const t = bearer(req.headers.authorization);
-    if (t) return { token: t };
+  const expired = (reply: FastifyReply) => reply.code(401).send({ ok: false, code: 'session', error: 'your wallet sign-in has expired - sign again' });
+  /** Who may WRITE: a proven wallet, or a browser by its token - or a 401 sent. */
+  const writerOf = (req: FastifyRequest, reply: FastifyReply): Who | null => {
     const wallet = walletOf(req);
     if (wallet) return { wallet };
-    void reply.code(401).send(
-      sessionBearer(req.headers.authorization)
-        ? { ok: false, code: 'session', error: 'your wallet sign-in has expired - sign again' }
-        : { ok: false, error: 'a thread token or a wallet session is required (Authorization: Bearer)' },
-    );
+    const t = bearer(req.headers.authorization);
+    if (t) return { token: t };
+    void (sessionBearer(req.headers.authorization)
+      ? expired(reply)
+      : reply.code(401).send({ ok: false, error: 'a browser token or a wallet session is required (Authorization: Bearer)' }));
     return null;
   };
-  const locked = (reply: FastifyReply) => reply.code(401).send({ ok: false, code: 'wallet', error: 'this chat is kept on a wallet - sign in with that wallet to open it' });
+  /** Who may READ a chat: only a proven wallet, its own - or a 401 sent. A browser token reads nothing. */
+  const readerOf = (req: FastifyRequest, reply: FastifyReply): string | null => {
+    const wallet = walletOf(req);
+    if (wallet) return wallet;
+    void (sessionBearer(req.headers.authorization)
+      ? expired(reply)
+      : reply.code(401).send({ ok: false, code: 'wallet', error: 'sign in with your wallet to read your chat' }));
+    return null;
+  };
 
   app.post('/api/vs/feedback', { bodyLimit: FEEDBACK_BODY_LIMIT }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited('feedback', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const who = whoOf(req, reply);
-    if (!who) return reply;
+    const writer = writerOf(req, reply);
+    if (!writer) return reply;
     const parsed = parseFeedback(jsonBody(req.body));
     if (parsed.ok === 'spam') return { ok: true };
     if (!parsed.ok) return reply.code(400).send({ ok: false, error: parsed.error, ...(parsed.code ? { code: parsed.code } : {}) });
-    const chatWait = limitedChat('feedbackThread', who);
+    // Counted per sender (a wallet's session, or a browser), so typing someone's address cannot use up their limit.
+    const chatWait = limitedChat('feedbackThread', writer);
     if (chatWait !== null) return tooMany(reply, chatWait);
-    // A signed-in wallet is the wallet; otherwise the address the browser says is connected, marked as not proven.
-    const verified = 'wallet' in who;
-    const f = 'wallet' in who ? { ...parsed.feedback, wallet: who.wallet } : parsed.feedback;
+    // Which chat: a signed-in wallet's own (proven); else the address the browser says is connected (claimed,
+    // marked so); else, with no wallet at all, the browser's own chat - nobody reads it until it signs in.
+    const verified = 'wallet' in writer;
+    const f = 'wallet' in writer ? { ...parsed.feedback, wallet: writer.wallet } : parsed.feedback;
+    const into: Who = f.wallet ? { wallet: f.wallet } : writer;
     const store = feedbackStore();
     let saved;
     try {
-      saved = store.addUserMessage(who, { category: f.category, areas: f.areas, text: f.message, context: f.context, wallet: f.wallet, verified, images: f.images }, now());
+      saved = store.addUserMessage(into, { category: f.category, areas: f.areas, text: f.message, context: f.context, wallet: f.wallet, verified, images: f.images }, now(), writer);
     } catch (e) {
-      if (e instanceof LockedError) return locked(reply);
       if (e instanceof FullError) {
         req.log.error('feedback: the store is at its cap - move feedback.db away to take messages again');
         return reply.code(503).send({ ok: false, error: 'feedback cannot be taken right now' });
@@ -211,16 +220,16 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
       if (!id) req.log.info({ thread: threadId }, 'feedback stored (not forwarded: Telegram is not configured or did not answer)');
     })();
     opts.onForward?.(forward);
-    return { ok: true, thread: threadId, message: messageId, images: images.map((i) => i.id) };
+    // `readable`: whether this sender can read the chat now (a wallet's session) - else it must sign in.
+    return { ok: true, message: messageId, images: images.map((i) => i.id), readable: verified };
   });
 
   app.post('/api/vs/feedback/upload', { bodyLimit: MAX_IMAGE_BYTES }, async (req, reply) => {
     reply.header('Cache-Control', 'no-store');
     const wait = limited('upload', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const who = whoOf(req, reply);
+    const who = writerOf(req, reply);
     if (!who) return reply;
-    if ('token' in who && feedbackStore().thread(who) === 'locked') return locked(reply);
     if (!Buffer.isBuffer(req.body)) return reply.code(415).send({ ok: false, error: 'send the image as its raw bytes' });
     const check = checkImage(req.body);
     if (!check.ok) return reply.code(400).send({ ok: false, error: check.error });
@@ -239,12 +248,11 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     reply.header('Cache-Control', 'no-store');
     const wait = limited('read', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const who = whoOf(req, reply);
-    if (!who) return reply;
+    const wallet = readerOf(req, reply);
+    if (!wallet) return reply;
     const store = feedbackStore();
-    const t = store.thread(who);
-    if (t === 'locked') return locked(reply);
-    if (!t) return reply.code(404).send({ ok: false, error: 'no such thread' });
+    const t = store.thread({ wallet });
+    if (!t || t === 'locked') return reply.code(404).send({ ok: false, error: 'no such thread' });
     return { ok: true, thread: { id: t.id, category: t.category, createdAt: t.createdAt, wallet: t.wallet }, messages: store.messages(t.id) };
   });
 
@@ -252,18 +260,10 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
     reply.header('Cache-Control', 'no-store');
     const wait = limited('read', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const b = jsonBody(req.body) as { tokens?: unknown } | undefined;
-    const tokens = b && Array.isArray(b.tokens) ? b.tokens : null;
-    if (!tokens || tokens.length > MAX_POLL_TOKENS || !tokens.every((t) => typeof t === 'string' && TOKEN_RE.test(t))) {
-      return reply.code(400).send({ ok: false, error: `tokens must be at most ${MAX_POLL_TOKENS} thread tokens` });
-    }
-    const store = feedbackStore();
-    const wallet = walletOf(req);
-    return {
-      ok: true,
-      threads: (tokens as string[]).map((token) => store.summary({ token })),
-      ...(wallet ? { wallet: store.summary({ wallet }) } : {}),
-    };
+    // Only the signed-in wallet learns anything about its chat - not even a count without it.
+    const wallet = readerOf(req, reply);
+    if (!wallet) return reply;
+    return { ok: true, wallet: feedbackStore().summary({ wallet }) };
   });
 
   app.post('/api/vs/feedback/session', { bodyLimit: 4096 }, async (req, reply) => {
@@ -297,10 +297,10 @@ export async function reportRoutes(app: FastifyInstance, opts: ReportRouteOption
   app.get('/api/vs/feedback/image', async (req, reply) => {
     const wait = limited('read', clientKey(req.ip));
     if (wait !== null) return tooMany(reply, wait);
-    const who = whoOf(req, reply);
-    if (!who) return reply;
+    const wallet = readerOf(req, reply);
+    if (!wallet) return reply;
     const id = (req.query as Record<string, unknown> | undefined)?.id;
-    const img = typeof id === 'string' ? feedbackStore().image(who, id) : null;
+    const img = typeof id === 'string' ? feedbackStore().image({ wallet }, id) : null;
     if (!img) return reply.code(404).send({ ok: false, error: 'not found' });
     // Only ever an image, shown inline, of the kind its bytes were checked to be - never sniffed, never run.
     return reply

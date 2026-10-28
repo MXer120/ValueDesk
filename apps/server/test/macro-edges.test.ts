@@ -1,7 +1,7 @@
 /**
  * Edge cases of the macro parsers: New York time around the clock changes, the
  * ICS and FOMC calendar pages, merging, the route windows, Kalshi/Polymarket
- * outcomes, FRED transforms with a missing period, and the release-page text.
+ * outcomes, the indicator sources and transforms with a missing period, and the release-page text.
  *   npx tsx --test test/macro-edges.test.ts
  */
 import assert from 'node:assert/strict';
@@ -12,7 +12,7 @@ import {
 import {
   kalshiOutcome, marketProb, matchPolymarket, normalise, parseFedHistoryRange, parseKalshiEvents, parsePolymarket, polymarketKey, targetAfter, withTargets,
 } from '../src/valuedesk/fedwatch.js';
-import { INDICATORS, indicatorView, parseFredCsv, parseIndicatorRange, periodLabel, transform } from '../src/valuedesk/indicators.js';
+import { INDICATORS, indicatorView, parseCensus, parseClaims, parseDdp, parseFedTargets, parseIndicatorRange, periodLabel, transform } from '../src/valuedesk/indicators.js';
 import {
   decodePage, easternDay, firstSentence, htmlText, parseBrightcoveVideo, parseFedLivePage, parseMasterPlaylist, resultUrl,
 } from '../src/valuedesk/releases.js';
@@ -328,19 +328,35 @@ test('parsePolymarket and matchPolymarket: open events only, prices as JSON text
   assert.equal(parseFedHistoryRange(undefined), '30d');
 });
 
-// --- FRED ----------------------------------------------------------------------------------
+// --- the indicator sources ------------------------------------------------------------------
 
-test('parseFredCsv: either header, CRLF, missing values and junk rows left out', () => {
-  assert.deepEqual(parseFredCsv('DATE,UNRATE\r\n2025-09-01,4.4\r\n2025-10-01,.\r\n2025-11-01,\r\n2025-12-01,4.4\r\nnot,a row\r\n2026-01-01,abc\r\n'), [
-    ['2025-09-01', 4.4],
-    ['2025-12-01', 4.4],
-  ]);
-  assert.deepEqual(parseFredCsv('observation_date,X\n'), []);
-  assert.throws(() => parseFredCsv(''), /not a FRED series/);
+test('parseCensus: CRLF, quoted labels, NSA / other-geo / error rows and junk values left out, rows sorted', () => {
+  const csv = [
+    'CATEGORIES', 'cat_idx,cat_code,cat_desc,cat_indent', '1,ASOLD,"Annual Rate, Sold",0', '', '',
+    'DATA TYPES', 'dt_idx,dt_code,dt_desc,dt_unit', '1,TOTAL,"All Houses",K', '', '',
+    'GEO LEVELS', 'geo_idx,geo_code,geo_desc', '1,US,"United States"', '2,NO,"Northeast"', '', '',
+    'TIME PERIODS', 'per_idx,per_name', '1,Jan-2026', '2,Feb-2026', '3,Mar-2026', '', '',
+    'DATA', 'per_idx,cat_idx,dt_idx,et_idx,geo_idx,is_adj,val',
+    '2,1,1,0,1,1,650', '1,1,1,0,1,1,640', '1,1,1,0,1,0,600', '1,1,1,0,2,1,90', '1,1,1,1,1,1,9.9', '3,1,1,0,1,1,(S)',
+  ].join('\r\n');
+  assert.deepEqual([...parseCensus(csv)], [['ASOLD/TOTAL', [['2026-01-01', 640], ['2026-02-01', 650]]]]);
+});
+
+test('parseClaims, parseDdp, parseFedTargets: commas, blanks, other columns, single targets before 2008', () => {
+  const xml = '<r539cyNational><week><weekEnded>10/03/2026</weekEnded><InitialClaims><NSA>1</NSA><SA>201,000</SA></InitialClaims><ContinuedClaims><SA>&#160;</SA></ContinuedClaims></week></r539cyNational>';
+  assert.deepEqual([...parseClaims(xml)], [['claims/initial', [['2026-10-03', 201000]]], ['claims/continued', []]]);
+  const ddp = '"Series Description","a","b"\n"Time Period","X.S","IP.B50001.S"\n2026-08,1,103.2664\n2026-09,,103.9506\nnot,a,row';
+  assert.deepEqual(parseDdp(ddp).get('IP.B50001.S'), [['2026-08-01', 103.2664], ['2026-09-01', 103.9506]]);
+  assert.deepEqual(parseDdp(ddp).get('X.S'), [['2026-08-01', 1]]);
+  const page = '<h4>2008</h4><table><tr><td>December 16</td><td>0</td><td>75-100</td><td>0-0.25</td></tr><tr><td>October 29</td><td>0</td><td>50</td><td>1.00</td></tr></table>'
+    + '<h4>2007</h4><table><tr><td>September 18</td><td>0</td><td>50</td><td>4.75</td></tr></table>';
+  assert.deepEqual([...parseFedTargets(page, '2008-12-20')], [['target/lower', [['2008-12-16', 0], ['2008-12-20', 0]]], ['target/upper', [['2008-12-16', 0.25], ['2008-12-20', 0.25]]]]);
+  // Read on the day of a change: no second point that day.
+  assert.deepEqual(parseFedTargets(page, '2008-12-16').get('target/upper'), [['2008-12-16', 0.25]]);
 });
 
 test('transform: a change is only between neighbouring periods - a period never published (October 2025) is not bridged', () => {
-  // FRED's CPIAUCSL as read: no October 2025 (the shutdown), so there is no November m/m either.
+  // BLS's CUSR0000SA0 as read: no October 2025 (the shutdown), so there is no November m/m either.
   const cpi: Array<[string, number]> = [['2025-08-01', 323.291], ['2025-09-01', 324.245], ['2025-11-01', 325.063], ['2025-12-01', 326.031]];
   assert.deepEqual(transform(cpi, { transform: 'mm', decimals: 1 }), [['2025-09-01', 0.3], ['2025-12-01', 0.3]]);
   // A quarter missing in a quarterly series: no change across it.

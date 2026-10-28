@@ -24,6 +24,7 @@
  * One playhead (0..1) drives every scene; with reduced motion it rests at the
  * end. SVG on a fixed viewBox, in the chart tokens (algo.css .algo-st).
  */
+import { fmtFixed, fmtNum } from '../../numStyle';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AlgoPlan, AlgoSpec, PlannedChild } from '@copy-engine';
 import { fmtTime } from '../../format';
@@ -38,16 +39,16 @@ export interface Level {
 export function fmtP(p: number): string {
   const a = Math.abs(p);
   const dp = a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 4 : a >= 0.01 ? 5 : 8;
-  return p.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: dp });
+  return fmtNum(p, { minimumFractionDigits: 0, maximumFractionDigits: dp });
 }
 
 export const fmtQ = (q: number): string => {
   if (!(q > 0)) return '0';
   const dp = q >= 1000 ? 0 : q >= 1 ? 4 : q >= 0.01 ? 5 : 8;
-  return q.toLocaleString('en-US', { maximumFractionDigits: dp });
+  return fmtNum(q, { maximumFractionDigits: dp });
 };
 
-const pct = (x: number, d = 0) => `${(x * 100).toFixed(d)}%`;
+const pct = (x: number, d = 0) => `${fmtFixed(x * 100, d)}%`;
 
 export interface StoryProps {
   plan: AlgoPlan;
@@ -158,7 +159,7 @@ export function tickLabel(v: number, ticks: number[]): string {
   // The market's tick decides the decimals (its prices have no more); a step finer than a tick is never made.
   const step = TICK.size > 0 ? TICK.size : ticks.length > 1 ? Math.abs(ticks[1]! - ticks[0]!) : 0;
   const dp = step > 0 ? (String(Number(step.toPrecision(6))).split('.')[1] ?? '').length : 2;
-  return v.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  return fmtNum(v, { minimumFractionDigits: dp, maximumFractionDigits: dp });
 }
 
 /** The market's tick size (set by sceneFor): price ticks are whole multiples of it. */

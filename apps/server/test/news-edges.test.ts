@@ -13,9 +13,8 @@ import {
   buildFunds, daysIn, mergeDays, parseEtfAsset, parseEtfList, parseEtfRange, parseEtfSnapshot, parseEtfSummary, sosoData, type EtfDay,
 } from '../src/valuedesk/sosovalue/etf.js';
 
-const WG = FEED_SOURCES.find((s) => s.id === 'watcherguru')!;
 const WH = FEED_SOURCES.find((s) => s.id === 'whitehouse')!;
-const rss = (items: string) => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>feed</title><link>https://watcher.guru</link>${items}</channel></rss>`;
+const rss = (items: string) => `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>feed</title><link>https://www.whitehouse.gov</link>${items}</channel></rss>`;
 
 // --- text ----------------------------------------------------------------------------------
 
@@ -36,34 +35,34 @@ test('stripHtml: tags out, named and numeric entities back (as WordPress writes 
 test('parseRss: WordPress titles and links decoded, CDATA, the "appeared first" line and the [...] tail, content:encoded', () => {
   const when = 'Mon, 26 Oct 2026 14:05:00 +0000';
   const xml = rss(
-    `<item><title>Trump&#8217;s Crypto Order: What&#039;s In It</title><link>https://watcher.guru/news/a?utm=rss&amp;id=7</link><pubDate>${when}</pubDate>`
-      + '<description><![CDATA[<p>The order&#8230; covers <a href="#">stablecoins</a> [&#8230;]</p><p>The post Trump&#8217;s Crypto Order appeared first on Watcher Guru.</p>]]></description></item>'
-      + `<item><title><![CDATA[Same as text]]></title><link><![CDATA[https://watcher.guru/news/b]]></link><pubDate>${when}</pubDate><description>Same as text</description></item>`
-      + `<item><title>Only content</title><link>https://watcher.guru/news/c</link><pubDate>${when}</pubDate><content:encoded><![CDATA[<p>Full body</p>]]></content:encoded></item>`
-      + `<item><title>Plain http</title><link>http://watcher.guru/news/d</link><pubDate>${when}</pubDate></item>`
-      + `<item><title>Bad date</title><link>https://watcher.guru/news/e</link><pubDate>someday</pubDate></item>`
-      + `<item><title></title><link>https://watcher.guru/news/f</link><pubDate>${when}</pubDate></item>`
-      + `<item><title>${'x'.repeat(400)}</title><link>https://watcher.guru/news/g</link><pubDate>${when}</pubDate><description>${'y '.repeat(200)}</description></item>`,
+    `<item><title>Trump&#8217;s Crypto Order: What&#039;s In It</title><link>https://www.whitehouse.gov/news/a?utm=rss&amp;id=7</link><pubDate>${when}</pubDate>`
+      + '<description><![CDATA[<p>The order&#8230; covers <a href="#">stablecoins</a> [&#8230;]</p><p>The post Trump&#8217;s Crypto Order appeared first on The White House.</p>]]></description></item>'
+      + `<item><title><![CDATA[Same as text]]></title><link><![CDATA[https://www.whitehouse.gov/news/b]]></link><pubDate>${when}</pubDate><description>Same as text</description></item>`
+      + `<item><title>Only content</title><link>https://www.whitehouse.gov/news/c</link><pubDate>${when}</pubDate><content:encoded><![CDATA[<p>Full body</p>]]></content:encoded></item>`
+      + `<item><title>Plain http</title><link>http://www.whitehouse.gov/news/d</link><pubDate>${when}</pubDate></item>`
+      + `<item><title>Bad date</title><link>https://www.whitehouse.gov/news/e</link><pubDate>someday</pubDate></item>`
+      + `<item><title></title><link>https://www.whitehouse.gov/news/f</link><pubDate>${when}</pubDate></item>`
+      + `<item><title>${'x'.repeat(400)}</title><link>https://www.whitehouse.gov/news/g</link><pubDate>${when}</pubDate><description>${'y '.repeat(200)}</description></item>`,
   );
-  const out = parseRss(xml, WG);
+  const out = parseRss(xml, WH);
   assert.deepEqual(out.map((n) => n.href), [
-    'https://watcher.guru/news/a?utm=rss&id=7',
-    'https://watcher.guru/news/b',
-    'https://watcher.guru/news/c',
-    'https://watcher.guru/news/g',
+    'https://www.whitehouse.gov/news/a?utm=rss&id=7',
+    'https://www.whitehouse.gov/news/b',
+    'https://www.whitehouse.gov/news/c',
+    'https://www.whitehouse.gov/news/g',
   ]);
   assert.equal(out[0]!.title, 'Trump’s Crypto Order: What\'s In It');
   assert.equal(out[0]!.summary, 'The order… covers stablecoins…');
-  assert.equal(out[0]!.id, 'watcherguru:https://watcher.guru/news/a?utm=rss&id=7');
+  assert.equal(out[0]!.id, 'whitehouse:https://www.whitehouse.gov/news/a?utm=rss&id=7');
   assert.equal(out[0]!.time, Date.parse('2026-10-26T14:05:00Z'));
-  assert.equal(out[0]!.author, 'Watcher.Guru');
+  assert.equal(out[0]!.author, 'The White House');
   assert.equal(out[0]!.category, null);
   // A description that only repeats the title is no summary.
   assert.equal(out[1]!.summary, null);
   assert.equal(out[2]!.summary, 'Full body');
   assert.equal(out[3]!.title.length, 320);
   assert.equal(out[3]!.summary!.length, 240);
-  assert.deepEqual(parseRss('<html>blocked</html>', WG), []);
+  assert.deepEqual(parseRss('<html>blocked</html>', WH), []);
 });
 
 test('feedNews: older than eight days left out, one copy of a link across a source\'s feeds, coins and limit applied', async () => {
@@ -75,17 +74,21 @@ test('feedNews: older than eight days left out, one copy of a link across a sour
     if (url.includes('whitehouse.gov/news')) {
       return new Response(rss(item('Order on trade', 'https://www.whitehouse.gov/x/', 2 * 3_600_000) + item('Old remarks', 'https://www.whitehouse.gov/old/', 9 * 86_400_000)));
     }
-    return new Response(rss(Array.from({ length: 50 }, (_, k) => item(`Story ${k}`, `https://watcher.guru/news/${k}`, k * 60_000)).join('')));
+    return new Response('nope', { status: 500 });
   }) as typeof fetch;
   try {
-    const all = await feedNews(parseFeedQuery({ ids: 'whitehouse,watcherguru', limit: '100' }), fake);
-    assert.equal(all.filter((n) => n.source === 'whitehouse').length, 1);
-    // At most 40 a source, newest first.
-    assert.equal(all.filter((n) => n.source === 'watcherguru').length, 40);
-    assert.ok(all.every((n, k) => k === 0 || all[k - 1]!.time >= n.time));
-    assert.equal((await feedNews(parseFeedQuery({ ids: 'watcherguru', limit: '3' }), fake)).length, 3);
+    const all = await feedNews(parseFeedQuery({ ids: 'whitehouse', limit: '100' }), fake);
+    // The link both feeds carry once; the nine-day-old story left out.
+    assert.deepEqual(all.map((n) => n.href), ['https://www.whitehouse.gov/x/']);
+    // At most 40 a source (across its feeds), newest first.
+    resetFeeds();
+    const many = (async (url: string) => new Response(rss(Array.from({ length: 50 }, (_, k) => item(`Story ${k}`, `https://www.whitehouse.gov/${url.includes('presidential') ? 'p' : 'n'}/${k}`, k * 60_000)).join('')))) as typeof fetch;
+    const capped = await feedNews(parseFeedQuery({ ids: 'whitehouse', limit: '100' }), many);
+    assert.equal(capped.length, 40);
+    assert.ok(capped.every((n, k) => k === 0 || capped[k - 1]!.time >= n.time));
+    assert.equal((await feedNews(parseFeedQuery({ ids: 'whitehouse', limit: '3' }), many)).length, 3);
     // No coin index loaded: no story names a coin, so a coin filter leaves none.
-    assert.deepEqual(await feedNews(parseFeedQuery({ ids: 'watcherguru', coin: 'BTC' }), fake), []);
+    assert.deepEqual(await feedNews(parseFeedQuery({ ids: 'whitehouse', coin: 'BTC' }), many), []);
     assert.deepEqual(await feedNews(parseFeedQuery({ ids: '' }), fake), []);
   } finally {
     resetFeeds();
@@ -96,8 +99,8 @@ test('parseFeedQuery: a limit that is not a whole number, at least one, the sear
   assert.equal(parseFeedQuery({ limit: '2.5' }).limit, 60);
   assert.equal(parseFeedQuery({ limit: '0' }).limit, 1);
   assert.equal(parseFeedQuery({ limit: 7 }).limit, 60);
-  const q = parseFeedQuery({ ids: 'watcherguru,watcherguru', coin: 'btc,$eth,toolongcoinname123,sol,xrp,doge,ada,link', q: `  fed   ${'r'.repeat(100)}  ` });
-  assert.deepEqual(q.ids, ['watcherguru']);
+  const q = parseFeedQuery({ ids: 'whitehouse,whitehouse', coin: 'btc,$eth,toolongcoinname123,sol,xrp,doge,ada,link', q: `  fed   ${'r'.repeat(100)}  ` });
+  assert.deepEqual(q.ids, ['whitehouse']);
   assert.deepEqual(q.coins, ['BTC', 'SOL', 'XRP', 'DOGE', 'ADA']);
   assert.equal(q.q!.length, 80);
   assert.ok(q.q!.startsWith('fed r'));

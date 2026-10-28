@@ -8,18 +8,17 @@ import type { MarketInfo } from '../types.ts';
 import {
   allocateSteps,
   curveWeights,
-  maxOrderQty,
   ladderPrices,
   ladderWeights,
   makeRng,
-  minChildQty,
   normalise,
   povDue,
   sliceTimes,
   snapNearest,
   type VolumeProfile,
 } from './math.ts';
-import { checkLimits, type LimitCheck } from './limits.ts';
+import { checkLimits, limitLeverage, type LimitCheck } from './limits.ts';
+import { checkSizes } from './sizes.ts';
 import { ALGO_NAMES, algoQuantity, opensPosition } from './spec.ts';
 import { sweepBand } from './sweep.ts';
 import type { AlgoSpec, SwarmSpec, TwapSpec, VwapSpec } from './types.ts';
@@ -63,6 +62,12 @@ export interface AlgoPlan {
   oi?: LimitCheck['oi'];
   warnings: string[];
   errors: string[];
+  /**
+   * Child sizes the algo decides as it runs (POV's pace, a schedule catching
+   * up, an iceberg's last clip), said before the start: information, not a
+   * warning (sizes.ts). Nothing is ever merged or split up front.
+   */
+  notes?: string[];
 }
 
 export interface AlgoPlanContext {
@@ -80,6 +85,8 @@ export interface AlgoPlanContext {
   prices?: (symbol: string) => number | null;
   /** The market's open interest now, in the coin (SoDEX's `openInterest`), for its cap. */
   oi?: number | null;
+  /** Other markets' rules (a basket's legs, a conditional's algo), where known. */
+  market?: (symbol: string) => MarketInfo | null | undefined;
 }
 
 /** Where an entry's exits would sit for an average fill of `avg` (prices win over distances). */
@@ -140,40 +147,6 @@ export function scaleLadder(s: Extract<AlgoSpec, { kind: 'scale' }>, m: Pick<Mar
 const usd = (n: number): string => (n >= 1000 ? `$${Math.round(n).toLocaleString('en-US')}` : `$${n.toFixed(2)}`);
 
 /**
- * Children as SoDEX takes them: one under its smallest order waits and goes
- * out with the next (fewer, bigger children; what is still under it at the
- * end goes with the last), one over its largest is split into equal orders
- * at the same time. The runtime does the same as it works (work, stepSwarm).
- */
-export function fitOrders(children: readonly PlannedChild[], min: number, max: number, step: number): { children: PlannedChild[]; merged: number; split: number } {
-  const out: PlannedChild[] = [];
-  const ceilStep = (q: number) => Math.ceil(q / step - 1e-9) * step;
-  const before = children.filter((c) => c.qty > 0).length;
-  let due = 0;
-  let split = 0;
-  for (const c of children) {
-    if (!(c.qty > 0)) continue;
-    due += c.qty;
-    if (due < min - 1e-12) continue;
-    const n = Number.isFinite(max) && max > 0 ? Math.max(1, Math.ceil(due / max - 1e-9)) : 1;
-    // Each piece rounded up to the step (never over the largest, which is on the step); the last takes the rest.
-    const piece = n > 1 ? ceilStep(due / n) : due;
-    for (let k = 0; k < n; k++) out.push({ ...c, qty: k === n - 1 ? due - piece * (n - 1) : piece, tag: n > 1 ? `${c.tag} (${k + 1}/${n})` : c.tag });
-    split += n - 1;
-    due = 0;
-  }
-  if (due > 1e-12) {
-    const last = out[out.length - 1];
-    if (last) out[out.length - 1] = { ...last, qty: last.qty + due };
-    else {
-      const c = [...children].reverse().find((x) => x.qty > 0);
-      if (c) out.push({ ...c, qty: due });
-    }
-  }
-  return { children: out, merged: before - (out.length - split), split };
-}
-
-/**
  * Slices as they go out under a smallest and a largest slice: what is due
  * waits until it reaches the smallest, and no child is above the largest (the
  * excess stays due and goes with a later slice, or at the end). Whole steps.
@@ -214,7 +187,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
     warnings: [],
     errors: [],
   };
-  const minQty = (p: number) => minChildQty(m, p);
   const step = Number(m.stepSize);
   const summarise = () => {
     const qs = out.children.map((c) => c.qty).filter((q) => q > 0);
@@ -226,21 +198,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.minChildUsd = Math.min(...vals);
       out.maxChildUsd = Math.max(...vals);
     }
-  };
-  // Slices or clips as SoDEX takes them (fitOrders): merged under its smallest order, split over its largest.
-  const fitSchedule = (unit: string) => {
-    if (!px || !total) return;
-    const before = out.children.filter((c) => c.qty > 0).length;
-    const fit = fitOrders(out.children, minQty(px), maxOrderQty(m, px), step);
-    out.children = fit.children;
-    const Unit = `${unit[0]!.toUpperCase()}${unit.slice(1)}s`;
-    if (fit.merged > 0) out.warnings.push(`${Unit} under SoDEX's ${usd(m.minNotional)} minimum go out together: ${fit.children.length - fit.split} orders instead of ${before}.`);
-    if (fit.split > 0) out.warnings.push(`${Unit} over SoDEX's largest order${m.maxNotional ? ` (${usd(m.maxNotional)})` : ''} are split: ${fit.split} more order${fit.split === 1 ? '' : 's'}.`);
-  };
-  // Merged as it goes, a schedule only fails when the whole order is under SoDEX's smallest one.
-  const checkSchedule = () => {
-    if (!px || total === null) return;
-    if (total < minQty(px) - 1e-12) out.errors.push(`The whole order is about ${usd(total * px)}, under SoDEX's minimum of ${usd(m.minNotional)} per order. Use a larger size.`);
   };
   const limitWarn = () => {
     if (!px || s.limitPrice === null) return;
@@ -269,9 +226,7 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       }
       out.endsAt = start + s.durationMs;
       out.intervalMs = s.durationMs / s.slices;
-      fitSchedule('slice');
       summarise();
-      checkSchedule();
       limitWarn();
       if (s.minSliceQty !== null && total && out.children.filter((c) => c.qty > 0).length < times.length) out.warnings.push(`Slices under ${s.minSliceQty} ${m.base} wait and go out together.`);
       if (s.exec.style !== 'taker' && s.finish === 'leave') out.warnings.push('Resting slices that have not filled when the time is up are left unfilled.');
@@ -283,9 +238,7 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.children = times.map((at, i) => ({ at, qty: sizes[i] ?? 0, price: null, tag: `slice ${i + 1}/${times.length}` }));
       out.endsAt = start + s.durationMs;
       out.intervalMs = s.durationMs / s.slices;
-      fitSchedule('slice');
       summarise();
-      checkSchedule();
       limitWarn();
       if (!ctx.profile) out.warnings.push('The volume profile is read when it starts; until then the preview is even.');
       else if (ctx.profile.days < Math.min(7, s.lookbackDays)) out.warnings.push(`Only ${ctx.profile.days} day${ctx.profile.days === 1 ? '' : 's'} of history: the profile is rough.`);
@@ -316,7 +269,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
         out.schedule = sched;
         out.estimated = true;
       }
-      if (s.maxChildQty !== null && px && Number(s.maxChildQty) * px < m.minNotional) out.errors.push(`The largest child is under SoDEX's ${usd(m.minNotional)} minimum.`);
       limitWarn();
       break;
     }
@@ -325,7 +277,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       const n = total && clip > 0 ? Math.ceil(total / clip - 1e-9) : 0;
       out.children = Array.from({ length: Math.min(n, 400) }, (_, i) => ({ at: null, qty: Math.min(clip, total! - i * clip), price: s.price, tag: `clip ${i + 1}` }));
       summarise();
-      if (px && clip * px < m.minNotional) out.errors.push(`Each visible clip is about ${usd(clip * px)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
       if (total && clip / total > 0.25) out.warnings.push('The visible size is over a quarter of the order: it hides little.');
       if (px && s.price !== null && Math.abs(s.price - px) / px > 0.05) out.warnings.push(`The price is ${((Math.abs(s.price - px) / px) * 100).toFixed(1)}% from the market.`);
       if (s.price !== null && !s.postOnly && px && (s.side === 'buy' ? s.price >= px : s.price <= px)) out.warnings.push('At this price the clips take at once (not post-only).');
@@ -335,7 +286,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.children = [{ at: null, qty: total!, price: null, tag: 'chase' }];
       if (s.timeoutMs) out.endsAt = start + s.timeoutMs;
       summarise();
-      if (px && total! * px < m.minNotional) out.errors.push(`The order is about ${usd(total! * px)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
       break;
     }
     case 'scale': {
@@ -346,9 +296,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.avgPrice = q > 0 ? filledValue / q : null;
       out.notional = filledValue || out.notional;
       summarise();
-      if (ladder.length < s.orders) out.warnings.push(`The tick of ${m.tickSize} fits only ${ladder.length} distinct prices in this range.`);
-      const small = ladder.filter((l) => l.qty < minQty(l.price));
-      if (small.length) out.errors.push(`${small.length} level${small.length === 1 ? '' : 's'} would be under SoDEX's ${usd(m.minNotional)} minimum. Use fewer orders, a larger size, or less skew.`);
       if (px) {
         const crossing = ladder.filter((l) => (s.side === 'buy' ? l.price >= px : l.price <= px)).length;
         if (crossing) out.warnings.push(s.postOnly ? `${crossing} level${crossing === 1 ? '' : 's'} at or through the market would be refused as post-only.` : `${crossing} level${crossing === 1 ? '' : 's'} at or through the market fill at once.`);
@@ -361,7 +308,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.intervalMs = s.intervalMs;
       out.notional = s.maxTotalUsd ?? s.perOrderUsd * s.orders;
       summarise();
-      if (s.perOrderUsd < m.minNotional) out.errors.push(`Each order must be at least SoDEX's ${usd(m.minNotional)} minimum.`);
       limitWarn();
       if (s.dipPct !== null && s.dipMultiplier > 1 && s.maxTotalUsd === null) out.warnings.push(`Dip boosts can spend up to ${usd(s.perOrderUsd * s.orders * s.dipMultiplier)} in all: set a total budget to cap it.`);
       break;
@@ -371,25 +317,20 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       out.children = clips.map((qty, i) => ({ at: start + Math.floor(i / s.inFlight) * s.waveMs, qty, price: null, tag: `clip ${i + 1}/${clips.length}` }));
       out.endsAt = start + Math.max(0, Math.ceil(clips.length / s.inFlight) - 1) * s.waveMs;
       out.intervalMs = s.waveMs;
-      fitSchedule('clip');
       summarise();
-      checkSchedule();
       limitWarn();
       break;
     }
     case 'conditional': {
       if (s.expiresAt !== null) out.endsAt = s.expiresAt;
       if (s.then.type === 'algo') out.warnings.push(`When it fires it starts a ${ALGO_NAMES[s.then.algo.kind]} on ${s.then.algo.symbol}.`);
-      if (s.then.type === 'market' && px && Number(s.then.quantity) * px < m.minNotional) out.errors.push(`The order is under SoDEX's ${usd(m.minNotional)} minimum.`);
       break;
     }
     case 'trailing': {
       if (s.quantity === null) out.warnings.push('It closes the whole position on this market when it fires.');
-      else if (px && Number(s.quantity) * px < m.minNotional) out.errors.push(`The order is under SoDEX's ${usd(m.minNotional)} minimum.`);
       break;
     }
     case 'basket': {
-      const each = s.style === 'swarm' ? Math.max(1, s.clips) : Math.max(1, s.slices);
       out.children = s.legs.map((l) => {
         const p = ctx.prices?.(l.symbol) ?? (l.symbol === m.name ? px : null);
         return { at: start, qty: p ? l.usd / p : 0, price: p, tag: `${l.side === 'buy' ? 'buy' : 'sell'} ${l.symbol}` };
@@ -418,8 +359,6 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
         }
       });
       out.schedule = sched.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
-      const small = s.legs.filter((l) => l.usd / each < m.minNotional);
-      if (small.length) out.errors.push(`${small.map((l) => l.symbol).join(', ')}: each ${s.style === 'swarm' ? 'clip' : 'slice'} would be under SoDEX's ${usd(m.minNotional)} minimum. Use fewer ${s.style === 'swarm' ? 'clips' : 'slices'} or more per market.`);
       break;
     }
     case 'sweep': {
@@ -429,14 +368,11 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
       if (s.timeoutMs) out.endsAt = start + s.timeoutMs;
       out.intervalMs = s.roundMs;
       summarise();
-      if (band && total! * band < m.minNotional) out.errors.push(`The order is about ${usd(total! * band)}, under SoDEX's ${usd(m.minNotional)} minimum.`);
       break;
     }
     case 'bracket': {
-      const entryPx = s.entry === 'limit' ? s.price : px;
       out.children = [{ at: null, qty: total!, price: s.entry === 'limit' ? s.price : null, tag: 'entry' }];
       summarise();
-      if (entryPx && total! * entryPx < m.minNotional) out.errors.push(`The entry is under SoDEX's ${usd(m.minNotional)} minimum.`);
       if (s.entry === 'limit' && px && s.price !== null && (s.side === 'buy' ? s.price >= px : s.price <= px)) out.warnings.push('The entry price is at or through the market: it fills at once.');
       break;
     }
@@ -450,6 +386,10 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
     if (s.exits.tpPrice !== null && (long ? s.exits.tpPrice <= px : s.exits.tpPrice >= px)) out.errors.push(`The take-profit ${s.exits.tpPrice} is on the wrong side of the price now: it would fire at once.`);
     if (s.exits.slPrice !== null && (long ? s.exits.slPrice >= px : s.exits.slPrice <= px)) out.errors.push(`The stop-loss ${s.exits.slPrice} is on the wrong side of the price now: it would fire at once.`);
   }
+  // Every child an order SoDEX takes: under its smallest or over its largest is an error with the fix (sizes.ts).
+  const sizes = checkSizes(s, m, { price: px, seed: ctx.seed, now: ctx.now, positionSize: pos, profile: ctx.profile ?? null, market: ctx.market, prices: ctx.prices });
+  out.errors.push(...sizes.errors);
+  out.notes = sizes.notes;
   if (px) {
     // A resting price SoDEX refuses: a buy more than buyLimitUpRatio over the price, a sell more than sellLimitDownRatio under it.
     const off = bandRefused(s.side, out.children, m, px);
@@ -457,7 +397,8 @@ export function planAlgo(s: AlgoSpec, m: MarketInfo, ctx: AlgoPlanContext): Algo
     // SoDEX's position limit at its leverage and the market's open-interest cap, for what it opens. First: they matter most.
     const qty = out.total ?? (out.notional !== null ? out.notional / px : null);
     if (opensPosition(s) && qty) {
-      const lim = checkLimits(m, { side: s.side, quantity: qty, price: out.avgPrice ?? px, position: ctx.positionSize ?? null, leverage: s.leverage ?? m.initLeverage ?? null, oi: ctx.oi ?? null });
+      // A practice run trades a paper book that starts empty (the runtime counts it so): the real position is not its.
+      const lim = checkLimits(m, { side: s.side, quantity: qty, price: out.avgPrice ?? px, position: s.paper ? 0 : (ctx.positionSize ?? null), leverage: limitLeverage(m, s.leverage, null), oi: ctx.oi ?? null });
       out.errors.unshift(...lim.errors);
       out.warnings.unshift(...lim.warnings);
       out.oi = lim.oi;

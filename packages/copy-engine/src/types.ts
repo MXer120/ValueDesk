@@ -337,6 +337,7 @@ export interface FollowerSnapshot {
   /** Whether SoDEX's answer carried `available` (false: it is unknown, not 0, and nothing is gated on it). */
   marginKnown?: boolean;
   /** SoDEX symbol -> signed size (every position, copied or not). */
-  positions: Record<string, { size: number; entry: number; leverage: number; marginMode: MarginChoice }>;
+  /** leverage is 1 where SoDEX did not send one; leverageReported says whether it did (a limit check must not trust the 1). */
+  positions: Record<string, { size: number; entry: number; leverage: number; leverageReported?: boolean; marginMode: MarginChoice }>;
   at: number;
 }

@@ -6,6 +6,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AxisRange, Bounding } from 'klinecharts';
 import { compactNumber, createVolumeTicks, volumeStep } from './volumeAxis';
+import { setNumStyle } from '../numStyle';
+
+setNumStyle('comma-dot');
 
 const range = (to: number): AxisRange => ({
   from: 0,
@@ -48,4 +51,15 @@ test('ticks never crowd closer than the minimum pitch', () => {
   const ticks = createVolumeTicks({ range: range(123), bounding: box(200), defaultTicks: [] });
   for (let i = 1; i < ticks.length; i++) assert.ok(Math.abs(ticks[i]!.coord - ticks[i - 1]!.coord) >= 31);
   assert.equal(volumeStep(0, 100), 0);
+});
+
+test('volume tick labels follow the number format (default 1.234,5)', () => {
+  setNumStyle('dot-comma');
+  try {
+    const tall = createVolumeTicks({ range: range(1.95), bounding: box(200), defaultTicks: [] });
+    assert.deepEqual(tall.map((t) => t.text), ['0,5', '1', '1,5']);
+    assert.equal(compactNumber(2500), '2.5K'); // machine text: the formatter the library groups
+  } finally {
+    setNumStyle('comma-dot');
+  }
 });

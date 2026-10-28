@@ -5,6 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { winRateView } from './winRateView';
+import { setNumStyle } from './numStyle';
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 const fmtDate = (ms: number) => `D${ms}`;
 

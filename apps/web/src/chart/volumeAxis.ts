@@ -15,6 +15,7 @@
  * 750, 2.5K, 1.2M. Zero itself is not labelled - the bars stand on it.
  */
 import type { AxisCreateTicksCallback, AxisTick } from 'klinecharts';
+import { localize } from '../numStyle';
 
 /** Round steps inside a decade. */
 const LADDER = [1, 2, 2.5, 5];
@@ -79,7 +80,7 @@ export const createVolumeTicks: AxisCreateTicksCallback = ({ range, bounding, de
     const v = Number((k * step).toFixed(places));
     const coord = Math.round((1 - (v - realFrom) / realRange) * height);
     if (coord < EDGE || coord >= height) continue;
-    ticks.push({ coord, value: v, text: compactNumber(v, places) });
+    ticks.push({ coord, value: v, text: localize(compactNumber(v, places)) });
   }
   return ticks;
 };

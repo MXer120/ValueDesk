@@ -22,7 +22,8 @@ import { notify } from '../toast';
 import { tradingConfig } from '../trading/config';
 import { WalletError } from '../wallet';
 import { COPY_RISK_SUMMARY, COPY_STATEMENTS, HOSTED_KEY_NOTICE } from '../legal/copyTerms';
-import { countries, countryName } from './countries';
+import { countryName } from './countries';
+import { LOCATION_UNKNOWN, useViewerGeo } from '../legal/geo';
 import { DEFAULT_SELF_URL } from './executor';
 import {
   acceptTerms,
@@ -40,6 +41,7 @@ import { MAX_BROWSER_KEY_DAYS } from './sodexSetup';
 import { ModeCards } from './ModeCards';
 import '../components/funds/funds.css';
 import './copy.css';
+import { fmtPlain, localize } from '../numStyle';
 
 export const MODE_LABEL: Record<CopyModeId, string> = {
   browser: 'This browser',
@@ -139,7 +141,9 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   const [error, setError] = useState<string | null>(null);
   const [working, setWorking] = useState<string | null>(null);
   const [termsOpen, setTermsOpen] = useState(false);
-  const [country, setCountry] = useState(live.terms?.country ?? '');
+  // The country the edge saw (or the executor, which reads the same header) - never picked by the follower (owner, 2026-10-28).
+  const geo = useViewerGeo();
+  const country = geo.country ?? live.viewerCountry ?? '';
   const [ticks, setTicks] = useState<Record<string, boolean>>({});
   const [selfUrl, setSelfUrl] = useState(live.self.url || DEFAULT_SELF_URL);
   const [pairing, setPairing] = useState('');
@@ -178,7 +182,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
   const current = steps.find((s) => !s.done)?.id ?? null;
   const n =(id: string) => steps.findIndex((s) => s.id === id) + 1;
 
-  const ladder = COPY_FEE_LADDER.map((s) => `${feePercent(s.fee)}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${s.fromUsd / 1e6}M` : `${s.fromUsd / 1e3}k`)}` : ''}`).join(', ');
+  const ladder = COPY_FEE_LADDER.map((s) => `${localize(feePercent(s.fee))}${s.fromUsd ? ` from $${(s.fromUsd / 1e6 >= 1 ? `${fmtPlain(s.fromUsd / 1e6)}M` : `${fmtPlain(s.fromUsd / 1e3)}k`)}` : ''}`).join(', ');
   const keyDays = mode === 'browser' ? [1, 3, 7] : [7, 30, 90, 180];
   const keyHolder = mode === 'browser' ? 'only this browser' : mode === 'hosted' ? 'the ValueDesk executor in Tokyo' : 'your copier';
 
@@ -273,7 +277,7 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
         title="Accept the copy trading terms"
         desc={
           live.terms
-            ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · resident in ${countryName(live.terms.country)}.`
+            ? `Accepted ${new Date(live.terms.acceptedAt).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })} · from ${countryName(live.terms.country)}.`
             : 'The risks, the fee, and what you confirm. One signature.'
         }
         action={!r.terms && !termsOpen && <ActBtn label="Review" primary={current === 'terms'} disabled={!owner} onClick={() => setTermsOpen(true)} />}
@@ -288,16 +292,10 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
             <p className="fx-note">
               Read the full <a className="fx-link" href="/copy-terms" target="_blank" rel="noopener">copy trading terms and risk disclosure</a>.
             </p>
-            <label className="fx-lbl" htmlFor="cs-country">Country of residence</label>
-            <select id="cs-country" className="fx-sel cs-select" value={country} onChange={(e) => setCountry(e.target.value)}>
-              <option value="">Choose…</option>
-              {countries().map((c) => (
-                <option key={c.code} value={c.code} disabled={c.blocked}>
-                  {c.name}
-                  {c.blocked ? ' - not available' : ''}
-                </option>
-              ))}
-            </select>
+            <p className="fx-note">
+              Your location: <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
+            </p>
+            {!country && <p className="fx-note fx-note--err">{LOCATION_UNKNOWN}</p>}
             {country && regionPolicy(country, live.viewerCountry).maxLeverage === EEA_MAX_LEVERAGE && (
               <p className="fx-note fx-note--warn">In the EU and EEA, copies are limited to {EEA_MAX_LEVERAGE}x leverage.</p>
             )}
@@ -334,8 +332,8 @@ export function CopySetupSteps({ mode, live, paper }: { mode: CopyModeId; live: 
             !tradingConfig().builder
               ? 'This build of ValueDesk charges no copy fee: nothing to approve.'
               : r.fee
-              ? `Approved on SoDEX up to ${feePercent(Math.max(live.fee.perps ?? COPY_FEE_MAX, COPY_FEE_MAX))}.`
-              : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${feePercent(COPY_FEE_MAX)} and can revoke it.`
+              ? `Approved on SoDEX up to ${localize(feePercent(Math.max(live.fee.perps ?? COPY_FEE_MAX, COPY_FEE_MAX)))}.`
+              : `Copied orders pay ${ladder} of their value (by your 14-day volume). SoDEX charges it; you approve up to ${localize(feePercent(COPY_FEE_MAX))} and can revoke it.`
           }
           action={!r.fee && <ActBtn label="Approve" primary={current === 'fee'} disabled={!owner} busy={working === 'fee'} onClick={() => void run('fee', approveFee, 'Copy fee approved on SoDEX.')} />}
         />

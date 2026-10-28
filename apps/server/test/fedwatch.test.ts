@@ -28,7 +28,7 @@ import {
 import { resetIndicators } from '../src/valuedesk/indicators.js';
 
 const json = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/fedwatch/${name}`, import.meta.url), 'utf8'));
-const csv = (name: string) => readFileSync(new URL(`./fixtures/indicators/${name}.csv`, import.meta.url), 'utf8');
+const fixture = (name: string) => readFileSync(new URL(`./fixtures/indicators/${name}`, import.meta.url), 'utf8');
 const probs = (m: { outcomes: Array<{ prob: number }> }) => m.outcomes.map((o) => o.prob);
 
 test('a market: the midpoint of a book up to 10 c wide, else the last trade held inside the book', () => {
@@ -122,7 +122,7 @@ test("Kalshi's candlesticks: one series per outcome, the gaps carried, normalise
   assert.deepEqual(daily.map((s) => s.points.at(-1)![1]), [0.0048, 0.0145, 0.2271, 0.7101, 0.0435]);
 });
 
-test('the route: Kalshi read once a minute, the range from FRED, a history only for a listed meeting', async () => {
+test("the route: Kalshi read once a minute, the range from the Board's open market page (no statement read), a history only for a listed meeting", async () => {
   resetFedWatch();
   resetIndicators();
   const asked: string[] = [];
@@ -136,8 +136,7 @@ test('the route: Kalshi read once a minute, the range from FRED, a history only 
       assert.match(u, /period_interval=60$/);
       return new Response(JSON.stringify(json('kalshi-26dec-60.json')));
     }
-    const id = /id=(\w+)/.exec(u)?.[1];
-    if (id) return new Response(csv(id));
+    if (u.endsWith('/monetarypolicy/openmarket.htm')) return new Response(fixture('fed-openmarket.htm'));
     return new Response('', { status: 404 });
   };
   // The meetings are filtered to those still ahead: run the clock as of the save.

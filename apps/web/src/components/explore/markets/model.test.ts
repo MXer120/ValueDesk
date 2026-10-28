@@ -4,6 +4,23 @@ import {
   buildMarkets, filterMarkets, fundingApr, headline, heldLong, pulseOf, railRows, sectorStats, sortMarkets,
   type HlAsset, type MarketRow,
 } from './model';
+import { setNumStyle } from '../../../numStyle';
+import { fmtRoi as roi, fmtUsdExact as usdExact, fmtUsdShort as usdShort } from '../model';
+
+test('explore figures in the default number format (1.234,56)', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(usdShort(1_234_567), '$1,23M');
+    assert.equal(usdShort(5_000), '$5.000');
+    assert.equal(usdExact(1234.5), '$1.234,50');
+    assert.equal(roi(0.123), '+12,3%');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 const hl: HlAsset[] = [
   { symbol: 'BTC', dex: '', price: 80_000, changePct: 1, volume24h: 2e9, openInterestUsd: 3e9, funding: 0.0000125, maxLeverage: 40 },

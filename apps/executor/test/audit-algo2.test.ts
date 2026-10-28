@@ -37,6 +37,12 @@ interface Fake {
   builders: 'ok' | 'error';
   /** Every write (signed POST) the executor sent to SoDEX. */
   writes: string[];
+  /** The wallet's positions as SoDEX reports them (the account state's P). */
+  positions?: Array<{ s: string; sz: string; ep: string }>;
+  /** Markets SoDEX lists (default: BTC, ETH, SOL without tiers). */
+  rows?: unknown[];
+  /** SoDEX does not answer the account state (the positions). */
+  stateFails?: boolean;
 }
 
 function fakeFetch(f: Fake): FetchLike {
@@ -48,12 +54,13 @@ function fakeFetch(f: Fake): FetchLike {
       f.writes.push(String((init as { body?: unknown }).body ?? ''));
       return ok([]);
     }
-    if (path.endsWith('/markets/symbols')) return ok([ROW(1, 'BTC-USD', 'BTC'), ROW(2, 'ETH-USD', 'ETH'), ROW(3, 'SOL-USD', 'SOL')]);
+    if (path.endsWith('/markets/symbols')) return ok(f.rows ?? [ROW(1, 'BTC-USD', 'BTC'), ROW(2, 'ETH-USD', 'ETH'), ROW(3, 'SOL-USD', 'SOL')]);
     if (path.endsWith('/markets/mark-prices')) return ok([]);
     let m = /\/api\/v1\/perps\/accounts\/(0x[0-9a-f]{40})\/api-keys$/.exec(path);
     if (m) return ok(f.keys[m[1]!] ?? []);
     if (/\/api\/v1\/user\/0x[0-9a-f]{40}\/subaccounts$/.test(path)) return ok({ primaryAccountID: 42 });
-    if (/\/perps\/accounts\/0x[0-9a-f]{40}\/state$/.test(path)) return ok({ aid: 42, av: '100000', P: [] });
+    if (/\/perps\/accounts\/0x[0-9a-f]{40}\/state$/.test(path) && f.stateFails) return { status: 500, ok: false, text: async () => '{"code":500,"message":"down"}' };
+    if (/\/perps\/accounts\/0x[0-9a-f]{40}\/state$/.test(path)) return ok({ aid: 42, av: '100000', P: f.positions ?? [] });
     m = /\/user\/0x[0-9a-f]{40}\/builders$/.exec(path);
     if (m) {
       if (f.builders === 'error') return { status: 403, ok: false, text: async () => '{"code":403,"message":"forbidden"}' };
@@ -118,8 +125,8 @@ function book(svc: ExecutorService, symbol: string, bid: number, ask: number) {
 }
 
 /** A live-capable executor and a wallet with terms and a registered key. */
-async function liveSetup(env: Record<string, string> = {}, file = ':memory:') {
-  const fake: Fake = { keys: {}, builders: 'ok', writes: [] };
+async function liveSetup(env: Record<string, string> = {}, file = ':memory:', more: Partial<Fake> = {}) {
+  const fake: Fake = { keys: {}, builders: 'ok', writes: [], ...more };
   const h = make({ EXECUTOR_LIVE_ALGOS: '1', ...env }, fake, file);
   const w = new Wallet();
   h.svc.acceptTerms(w.sign(h.svc.executorId, 'accept-terms', TERMS), ctx);
@@ -415,5 +422,34 @@ test('BUG cancel-all: the kill switch pulls a running algo\'s exits too, as it d
   await svc.algoAct(w.sign(svc.executorId, 'algo-action', { op: 'cancel-all' }), ctx);
   await settle();
   assert.equal(live().length, 0, `${live().length} exits left on SoDEX after the kill switch`);
+  await cleanup();
+});
+
+test('live: the position SoDEX reports counts at the start - on its side; a start that would take it over the limit at the leverage is refused', async () => {
+  const tiered = { ...ROW(1, 'BTC-USD', 'BTC'), initLeverage: 20, marginTiers: [{ maxNotionalValue: '4000000', maxLeverage: 40 }, { maxNotionalValue: '100000000', maxLeverage: 25 }] };
+  const { svc, w, fake, cleanup } = await liveSetup({}, ':memory:', { rows: [tiered], positions: [{ s: 'BTC-USD', sz: '60', ep: '60000' }] });
+  book(svc, 'BTC-USD', 60_000, 60_010);
+  const start = (spec: Record<string, unknown>, seed: number) => svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, paper: false, ...spec }, seed }), ctx);
+  // Long 60 ($3.6M): buying 10 more at 40x is about $4.2M, over the $4M tier.
+  await assert.rejects(start({ quantity: '10', leverage: 40 }, 1), (e: unknown) => e instanceof ApiError && e.status === 400 && /over SoDEX's limit of \$4M at 40x\. You hold about \$3\.6M long now\. At most about \$\d{3},\d{3} \(6\.6\d BTC\) can be bought under it/.test(e.message));
+  // Selling 10 only reduces it: no limit to hit.
+  assert.equal((await start({ side: 'sell', quantity: '10', leverage: 40 }, 2)).algo.status, 'scheduled');
+  // Short 60: selling more is what grows it.
+  fake.positions = [{ s: 'BTC-USD', sz: '-60', ep: '60000' }];
+  await new Promise((r) => setTimeout(r, 5_100)); // the positions read is kept 5 s
+  await assert.rejects(start({ side: 'sell', quantity: '10', leverage: 40 }, 3), /You hold about \$3\.6M short now\. At most about \$\d{3},\d{3} \(6\.6\d BTC\) can be sold under it/);
+  assert.equal((await start({ quantity: '10', leverage: 40 }, 4)).algo.status, 'scheduled', 'a buy against the short closes first');
+  assert.equal(fake.writes.length, 0, 'nothing was sent for the refused starts');
+  await cleanup();
+});
+
+test('live: when SoDEX does not report the position, the start is refused with the reason - the position is never assumed to be none', async () => {
+  const tiered = { ...ROW(1, 'BTC-USD', 'BTC'), initLeverage: 20, marginTiers: [{ maxNotionalValue: '4000000', maxLeverage: 40 }, { maxNotionalValue: '100000000', maxLeverage: 25 }] };
+  const { svc, w, fake, cleanup } = await liveSetup({}, ':memory:', { rows: [tiered], stateFails: true });
+  book(svc, 'BTC-USD', 60_000, 60_010);
+  await assert.rejects(svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, paper: false, leverage: 40 }, seed: 1 }), ctx), (e: unknown) => e instanceof ApiError && e.status === 400 && e.message === 'SoDEX did not report your position on BTC-USD, so the position limit cannot be checked. Try again in a moment.');
+  assert.equal(svc.algoList(w.address).length, 0);
+  fake.stateFails = false;
+  assert.equal((await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, paper: false, leverage: 40 }, seed: 2 }), ctx)).algo.status, 'scheduled');
   await cleanup();
 });

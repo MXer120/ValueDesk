@@ -46,6 +46,7 @@
  * `reconcile()`. A computed number must never overwrite a reported one.
  */
 
+import { fmtFixed, fmtNum, fmtPlain } from './numStyle';
 /** Length of the rolling volume window the tiers are measured over. Published as 14D. */
 export const VOLUME_WINDOW_DAYS = 14;
 
@@ -386,18 +387,18 @@ export function reconcile(
  */
 export function fmtRate(rate: number | null | undefined, dp = 3): string {
   if (rate === null || rate === undefined || !Number.isFinite(rate)) return '-';
-  return `${(rate * 100).toFixed(dp)}%`;
+  return `${fmtFixed(rate * 100, dp)}%`;
 }
 
 /** Compact volume threshold for the ladder, e.g. 5_000_000 -> "$5M". */
 export function fmtThreshold(usd: number): string {
   if (!Number.isFinite(usd)) return '-';
-  if (usd >= 1_000_000_000) return `$${usd / 1_000_000_000}B`;
-  if (usd >= 1_000_000) return `$${usd / 1_000_000}M`;
-  return `$${usd.toLocaleString('en-US')}`;
+  if (usd >= 1_000_000_000) return `$${fmtPlain(usd / 1_000_000_000)}B`;
+  if (usd >= 1_000_000) return `$${fmtPlain(usd / 1_000_000)}M`;
+  return `$${fmtNum(usd)}`;
 }
 
-const usdComma = (n: number): string => `$${Math.round(n).toLocaleString('en-US')}`;
+const usdComma = (n: number): string => `$${fmtNum(Math.round(n))}`;
 
 /**
  * Volume band as the venue ticket prints it, full dollars.
@@ -415,7 +416,7 @@ export function feeVolumeLabel(index: number): string {
 
 /** SOSO amounts, which span 30 to 1,500,000 and read better grouped. */
 export const fmtSoso = (n: number): string =>
-  Number.isFinite(n) ? n.toLocaleString('en-US') : '-';
+  Number.isFinite(n) ? fmtNum(n) : '-';
 
 /** Venue rate plus the ValueDesk builder fraction. Both are fractions of notional. */
 export function withBuilder(venueRate: number, builderFraction: number): number {

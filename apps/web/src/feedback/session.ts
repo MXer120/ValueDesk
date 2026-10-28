@@ -2,9 +2,9 @@
  * The feedback chat kept on a wallet (apps/server ops/feedbackAuth.ts). The
  * connected wallet signs a FeedbackSignIn once - free typed data with a fixed
  * statement, never a transaction - and the server hands back a session token
- * for 30 days. With it the wallet's one chat opens in any browser; a chat this
- * browser started by token is attached to the wallet at the same time
- * (`attach`), and from then on only the wallet's sign-in opens it.
+ * for 30 days. Only with it does the wallet's one chat open - in any browser;
+ * sending needs none. What this browser sent with no wallet connected (or kept
+ * by token before 2026-10-28) joins the wallet's chat at the same time (`attach`).
  *
  * Kept in localStorage under the wallet's address with the replies already seen
  * and announced (the bell, FeedbackHost.tsx), like a thread (threads.ts).

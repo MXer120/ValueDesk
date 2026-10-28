@@ -15,14 +15,16 @@
  *                       Reown's usage reports) offered beside it as a
  *                       choice of their own. Never over a legal page.
  *   <RegionPill>        NavBar: the red pill in a restricted (close-only) place.
+ *   <RegionBanner>      App.tsx, above the shell: one slim full-width line on every
+ *                       page while ValueDesk is close-only for the visitor (or the
+ *                       country is unknown); not dismissible (notices.ts).
  *   <EmbedSwitches>     the Cookies page: withdraw consent for a video platform.
  *   <ReownSwitch>       the Cookies page: allow or withdraw Reown's usage reports.
  *   openLegalPage()     any component: show a legal page in place (App listens).
  */
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Modal } from '../components/Modal';
-import { FxSelect } from '../components/funds/ui';
-import { countries, countryName } from '../copy/countries';
+import { countryName } from '../copy/countries';
 import { LEGAL_LABELS, LEGAL_PAGES, legalForPath, pathForLegal, type LegalPage } from '../router';
 import type { Eip1193Provider } from '../wallet';
 import { WalletError } from '../wallet';
@@ -43,7 +45,8 @@ import {
 } from './acceptance';
 import { EMBED_PLATFORMS, EMBED_PROVIDERS, allEmbedsAllowed, allowAllEmbeds, revokeEmbed, useEmbedConsent } from './embeds';
 import { allowReownReports, reownReportsAllowed, revokeReownReports, useReownReportsAllowedAt } from './reownConsent';
-import { useViewerAccess, useViewerGeo } from './geo';
+import { LOCATION_UNKNOWN, useGeoSettled, useViewerAccess, useViewerGeo } from './geo';
+import { regionBannerText } from './notices';
 import { siteAccess } from './jurisdictions.mjs';
 import { screeningOf, useScreening } from './screening';
 import './gate.css';
@@ -152,9 +155,10 @@ interface TermsFormProps {
 
 /**
  * The four statements under ONE "I confirm that" and, with a wallet, ONE free
- * signature (acceptance.ts). The country of residence is the one the edge saw
- * (geo.ts), shown with the wallet; it is asked only where the edge could not
- * tell, and can be changed (a traveller).
+ * signature (acceptance.ts). The country is the one the edge saw (geo.ts),
+ * shown with the wallet, read-only: the visitor cannot pick or type one (owner,
+ * 2026-10-28). Where the edge could not tell, the wallet cannot sign - browsing,
+ * closing, cancelling and withdrawing still work (geo.ts LOCATION_UNKNOWN).
  *
  * THE OPTIONAL EXTRAS, LAWFULLY. Consent to the Live Feed's YouTube / Twitch /
  * Kick / Vimeo players and to Reown's usage reports when a wallet connects
@@ -177,14 +181,10 @@ interface TermsFormProps {
 function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
   const geo = useViewerGeo();
   const [confirmed, setConfirmed] = useState(false);
-  const [picked, setPicked] = useState<string | null>(null);
-  const [changing, setChanging] = useState(false);
   const [busy, setBusy] = useState<'necessary' | 'all' | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const detected = geo.country && !countryProblem(geo.country) ? geo.country : null;
-  const country = picked ?? detected ?? '';
-  const problem = country ? countryProblem(country) : null;
-  const choosing = !!signer && (changing || !detected);
+  const country = geo.country ?? '';
+  const problem = country ? countryProblem(country) : signer ? LOCATION_UNKNOWN : null;
   const ready = confirmed && !busy && (!signer || (!!country && !problem));
 
   const accept = async (all: boolean) => {
@@ -232,28 +232,8 @@ function TermsForm({ signer, offerOptional, onOpen, onDone }: TermsFormProps) {
             <b>{shortAddress(signer.owner)}</b>
           </div>
           <div className="lg-kv">
-            <span>Resident of</span>
-            {choosing ? (
-              <FxSelect
-                label="Country of residence"
-                value={country}
-                onChange={(v) => setPicked(v || null)}
-                options={[
-                  ...(country ? [] : [{ value: '', label: 'Choose…' }]),
-                  ...countries().map((c) => ({ value: c.code, label: c.name, disabled: !!countryProblem(c.code), hint: countryProblem(c.code) ? 'not available' : undefined })),
-                ]}
-                searchable
-                searchPlaceholder="Search countries"
-                triggerClassName="fx-sel lg-pick"
-                listMinWidth={240}
-                listAlign="end"
-              />
-            ) : (
-              <b>
-                {countryName(country)}{' '}
-                <button type="button" className="lg-inline" onClick={() => setChanging(true)}>Change</button>
-              </b>
-            )}
+            <span>Your location</span>
+            <b>{country ? `${countryName(country)}, from your connection` : 'unknown'}</b>
           </div>
           {problem && <p className="lg-err">{problem}</p>}
         </div>
@@ -428,6 +408,57 @@ export function RegionPill({ address }: { address: string | null }) {
   );
 }
 
+
+/**
+ * The strip at the very top of the app, full width, one slim line, on every
+ * page and not dismissible, while ValueDesk is close-only for this visitor -
+ * by the country the edge saw or the one the wallet signed for - or while the
+ * country is unknown (geo.ts: nothing opens then). It reserves its own height
+ * (--region-h, gate.css) so the shell below is never covered.
+ */
+export function RegionBanner({ address }: { address: string | null }) {
+  useAcceptanceRevision();
+  const seen = useViewerAccess();
+  const geo = useViewerGeo();
+  const settled = useGeoSettled();
+  const declared = signedTerms(address)?.country ?? null;
+  const access = declared && seen.level === 'open' ? siteAccess({ declared }) : seen;
+  const text = regionBannerText(access, !!geo.country || !settled);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = ref.current;
+    if (!el) {
+      root.style.removeProperty('--region-h');
+      return;
+    }
+    const measure = () => root.style.setProperty('--region-h', `${el.offsetHeight}px`);
+    measure();
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      root.style.removeProperty('--region-h');
+    };
+  }, [text]);
+  if (!text) return null;
+  return (
+    <div ref={ref} className="lg-region-banner" role="status">
+      <span className="lg-region__dot" aria-hidden="true" />
+      <span className="lg-region-banner__text">{text}</span>
+      <a
+        href={pathForLegal('terms')}
+        onClick={(e) => {
+          if (!isPlainClick(e)) return;
+          e.preventDefault();
+          openLegalPage('terms');
+        }}
+      >
+        Why
+      </a>
+    </div>
+  );
+}
 
 /* ------------------------------------------------- the Cookies page's switches ----- */
 

@@ -4,6 +4,7 @@
  * is what goes out: the moving picture (AlgoStory), the facts (size, value,
  * children, start and end, average price, fees) and a table of every child.
  */
+import { fmtFixed } from '../../numStyle';
 import type { AlgoPlan, AlgoSpec, PlannedChild } from '@copy-engine';
 import { fmtTime, fmtUsd } from '../../format';
 import { fmtDuration } from './menu';
@@ -50,7 +51,7 @@ const pctFrom = (p: number, ref: number | null): string => {
   if (!ref) return '';
   const d = (p / ref - 1) * 100;
   if (Math.abs(d) < 0.005) return '';
-  return `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(Math.abs(d) < 1 ? 2 : 1)}%`;
+  return `${d > 0 ? '+' : '−'}${fmtFixed(Math.abs(d), Math.abs(d) < 1 ? 2 : 1)}%`;
 };
 
 /** Offset from the start in short words: "+4m 30s". */
@@ -173,6 +174,10 @@ export function PlanPreview(p: PreviewProps) {
       ))}
       {plan.warnings.map((w) => (
         <p key={w} className={`oe-hint ${red.has(w) ? 'algo-err' : 'algo-warn'}`}>{w}</p>
+      ))}
+      {/* Child sizes the algo decides as it runs (POV's pace, a schedule catching up): said, not hidden (sizes.ts). */}
+      {(plan.notes ?? []).map((n) => (
+        <p key={n} className="oe-hint algo-note">{n}</p>
       ))}
     </div>
   );

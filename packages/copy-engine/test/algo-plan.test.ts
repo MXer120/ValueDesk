@@ -113,7 +113,7 @@ test('basket: one leg per market, its value, and legs too small per clip', () =>
   assert.equal(p.notional, 900);
   assert.equal(p.errors.length, 0);
   const tiny = S({ kind: 'basket', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 40 }, { symbol: 'ETH-USD', side: 'buy', usd: 600 }], style: 'swarm', clips: 5, inFlight: 1, waveMs: 0, slippageBps: 20 });
-  assert.ok(planAlgo(tiny, BTC, ctx()).errors.some((e) => /BTC-USD: each clip/.test(e)));
+  assert.ok(planAlgo(tiny, BTC, ctx()).errors.some((e) => /^BTC-USD: (Each of the 5|All 5|\d+ of the 5) clips would be (about \$\d+(\.\d\d)?, )?under SoDEX's \$10 minimum/.test(e)), planAlgo(tiny, BTC, ctx()).errors.join(' | '));
   assert.ok(checkAlgoSpec({ kind: 'basket', symbol: 'BTC-USD', side: 'buy', legs: [{ symbol: 'BTC-USD', side: 'buy', usd: 50 }, { symbol: 'BTC-USD', side: 'sell', usd: 50 }], style: 'swarm', clips: 2, inFlight: 1, waveMs: 0, slippageBps: 10 }).errors.legs);
 });
 

@@ -8,9 +8,11 @@
  */
 import { COPY_FEE_MAX, type CopySettings, type LeaderVenue } from '@copy-engine';
 import { FEE_TIERS } from '../../fees';
-import { DASH, MINUS, fmt, fmtUsd } from '../../format';
+import { DASH, MINUS, fmtUsd } from '../../format';
+import { formatNumber } from '../../intlCache';
 import type { TraderProfile, Venue, VsPosition, Window } from '../../vsApi';
 import type { CopyConfig, CopySizingMode } from './sim/types';
+import { fmtFixed, localize } from '../../numStyle';
 
 /* --------------------------------------------------------------- fees ----- */
 
@@ -41,15 +43,15 @@ export const COPY_BUILDER_TENTHS_BPS = COPY_FEE_MAX;
 export const MIN_ORDER_USD = 10;
 
 /** 0.0004 -> "0.040%". Three places, because fee rates differ in the third. */
-export const fmtRate = (rate: number): string => `${(rate * 100).toFixed(3)}%`;
+export const fmtRate = (rate: number): string => `${fmtFixed(rate * 100, 3)}%`;
 
 /** Fraction -> signed percent with a true minus sign: 0.1234 -> "+12.34%". */
 export function fmtSignedPct(frac: number | null | undefined, dp = 2): string {
   if (frac === null || frac === undefined || !Number.isFinite(frac)) return DASH;
   const v = frac * 100;
-  const body = Math.abs(v).toFixed(dp);
-  if (Number(body) === 0) return `${(0).toFixed(dp)}%`;
-  return `${v > 0 ? '+' : MINUS}${body}%`;
+  const en = Math.abs(v).toFixed(dp);
+  if (Number(en) === 0) return `${fmtFixed(0, dp)}%`;
+  return `${v > 0 ? '+' : MINUS}${localize(en)}%`;
 }
 
 /** USD with an explicit + on gains; fmtUsd already signs losses with a minus sign. */
@@ -63,7 +65,9 @@ export function fmtSize(v: number): string {
   const a = Math.abs(v);
   if (!Number.isFinite(a)) return DASH;
   const dp = a >= 1000 ? 0 : a >= 1 ? 3 : a >= 0.01 ? 4 : 6;
-  return fmt(Number(a.toFixed(dp)), dp).replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  // Trimmed in en-US (where "." is the decimal mark), then put in the chosen format.
+  const en = formatNumber(Number(a.toFixed(dp)), 'en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  return localize(en.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, ''));
 }
 
 /* ----------------------------------------------------------- windows ----- */

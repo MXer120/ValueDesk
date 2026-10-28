@@ -3,6 +3,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { setNumStyle } from '../../numStyle';
 import {
   bpsMinSpan,
   decadeOf,
@@ -11,6 +12,8 @@ import {
   referenceMagnitude,
   stableBpsDecimals,
 } from './bpsPrecision';
+
+setNumStyle('comma-dot');
 
 /** One tick of spread, in bps of the mid - the smallest non-zero spread a market can quote. */
 const tickBps = (tick: number, mid: number) => (tick / mid) * 10_000;
@@ -167,4 +170,13 @@ test('the chart never zooms finer than the readout can print', () => {
   assert.equal(bpsMinSpan(3), 0.01);
   assert.equal(bpsMinSpan(1), 1);
   assert.ok(Math.abs(bpsMinSpan(4) - 0.001) < 1e-15);
+});
+
+test('the readout follows the number format (default 1.234,5)', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(fmtBps(0.1192, decimalsForMagnitude(0.1192)!), '0,119 bps');
+  } finally {
+    setNumStyle('comma-dot');
+  }
 });

@@ -25,6 +25,7 @@ import { PlatformSelect } from '../../PlatformSelect';
 import { PriceChart, toCandles, type Candle, type PriceKind } from '../cohorts/PriceChart';
 import { FundingScanner } from '../FundingScanner';
 import { fmtPx, fmtUsdExact, fmtUsdShort } from '../model';
+import { fmtFixed, fmtNum } from '../../../numStyle';
 import { Heatmap } from './Heatmap';
 import {
   MARKET_KINDS, MARKET_VENUES, RAIL_LISTS, buildMarkets, filterMarkets, fundingApr, headline, heldLong, pulseOf, railRows, sectorStats, sortMarkets,
@@ -51,9 +52,9 @@ const SODEX_BARS: Record<Range, { interval: string; limit: number }> = {
 const DEFAULT_WATCH = ['BTC', 'ETH', 'HYPE', 'SOL'];
 const SECTOR_LABEL = Object.fromEntries(SECTORS.map((s) => [s.id, s.label])) as Record<Sector, string>;
 
-const pct = (v: number | null, dp = 2) => (v === null ? DASH : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(dp)}%`);
+const pct = (v: number | null, dp = 2) => (v === null ? DASH : `${v >= 0 ? '+' : '−'}${fmtFixed(Math.abs(v), dp)}%`);
 const tone = (v: number | null) => (v === null || v === 0 ? '' : v > 0 ? 'pos' : 'neg');
-const fundPct = (hourly: number | null) => (hourly === null ? DASH : `${hourly >= 0 ? '+' : '−'}${Math.abs(hourly * 100).toFixed(4)}%`);
+const fundPct = (hourly: number | null) => (hourly === null ? DASH : `${hourly >= 0 ? '+' : '−'}${fmtFixed(Math.abs(hourly * 100), 4)}%`);
 
 export function Markets({ enabled, onOpenSymbol, onOpenScanner }: {
   enabled: boolean;
@@ -150,7 +151,7 @@ function Pulse({ rows }: { rows: readonly MarketRow[] }) {
       <dl className="mk-pulse__stats">
         <Stat k="24h volume" v={fmtUsdShort(p.volume)} title={fmtUsdExact(p.volume)} />
         <Stat k="Open interest" v={fmtUsdShort(p.oi)} title={fmtUsdExact(p.oi)} />
-        <Stat k="Markets" v={p.markets.toLocaleString('en-US')} />
+        <Stat k="Markets" v={fmtNum(p.markets)} />
         <Stat k="Avg move" v={pct(p.avgChange)} tone={tone(p.avgChange)} title="24h change, weighted by volume" />
         <Stat k="Avg funding" v={fundPct(p.avgFunding)} sub="per hour" tone={tone(p.avgFunding)} title={`APR ${pct(fundingApr(p.avgFunding), 1)}, weighted by volume`} />
         <div className="mk-pulse__breadth">
@@ -255,7 +256,7 @@ function Featured({ row, watched, onWatch, onOpenSymbol }: {
             <dd>
               <span className={lean >= 0.5 ? 'pos' : 'neg'}>{Math.round(lean * 100)}% long</span>
               <span className="mk-lean" aria-hidden="true"><i style={{ width: `${lean * 100}%` }} /></span>
-              <small>{fmtUsdShort((row.long ?? 0) + (row.short ?? 0))} held{row.holders ? ` · ${row.holders.toLocaleString('en-US')} wallets` : ''}</small>
+              <small>{fmtUsdShort((row.long ?? 0) + (row.short ?? 0))} held{row.holders ? ` · ${fmtNum(row.holders)} wallets` : ''}</small>
             </dd>
           )}
         </div>
@@ -484,7 +485,7 @@ function MarketTable({ anchor, rows, sector, onSector, active, watch, onWatch, o
       <header className="mk-sec__head">
         <div>
           <h2 className="mk-h">All markets</h2>
-          <p className="mk-sub">{list.length.toLocaleString('en-US')} of {rows.length.toLocaleString('en-US')} · SoDEX, Hyperliquid and trade.xyz</p>
+          <p className="mk-sub">{fmtNum(list.length)} of {fmtNum(rows.length)} · SoDEX, Hyperliquid and trade.xyz</p>
         </div>
       </header>
       <div className="mk-toolbar">

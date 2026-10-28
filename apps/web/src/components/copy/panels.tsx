@@ -32,6 +32,7 @@ import { CoinLabel } from '../CoinIcon';
 import { skipReasonLabel, type SimTrade } from './sim';
 import { fmtSignedPct, fmtSignedUsd, fmtSize } from './setup';
 import type { CopyContext } from './useCopy';
+import { fmtPlain } from '../../numStyle';
 
 /* ------------------------------------------------------------ helpers ----- */
 
@@ -223,7 +224,7 @@ function MyCopies({ c, rows, onActivity }: { c: CopyContext; rows: CopyRow[]; on
                 </td>
                 <td className="copy-mode">{MODE_LABEL[r.mode]}{s.settings.paper ? ' · paper' : ''}</td>
                 <td className="num">{fmtUsd(s.settings.allocationUsd, 0)}</td>
-                <td>{sizingOf(v)} · {s.settings.maxLeverage}x</td>
+                <td>{sizingOf(v)} · {fmtPlain(s.settings.maxLeverage)}x</td>
                 <td className="num">{fmtUsd(v.equity, 2)}</td>
                 <td className={`num ${signClass(v.pnl)}`}>{fmtSignedUsd(v.pnl)} <span className="muted">{fmtSignedPct(v.pnlPct)}</span></td>
                 <td className="num">{v.positions.length ? `${v.positions.length} · ${fmtUsd(v.grossNotional, 0)}` : DASH}</td>

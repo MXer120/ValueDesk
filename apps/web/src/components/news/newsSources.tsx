@@ -1,7 +1,9 @@
 /**
  * The News widget's sources (owner, 2026-10-26): SoSoValue's feed, and beside it
- * the White House and Watcher.Guru (server valuedesk/feeds.ts), each switched on
- * or off in Settings - live in every open widget, kept in this browser.
+ * the White House (server valuedesk/feeds.ts), each switched on or off in
+ * Settings - live in every open widget, kept in this browser. Watcher.Guru was
+ * dropped (2026-10-28: its terms allow personal, non-commercial use only); a
+ * SoSoValue story that names it as its source is still marked and listed below.
  *
  * A story's source mark: its outlet's site icon (server /api/vs/logo, so the page
  * asks only its own origin) - the story's own site, or the outlet's known site
@@ -15,14 +17,13 @@ import SHIPPED_JSON from '../../../public/logos/news.json';
 /** The icons shipped in public/logos/news: site -> file extension. */
 const SHIPPED: Record<string, string> = SHIPPED_JSON;
 
-export type NewsSourceId = 'sosovalue' | 'whitehouse' | 'watcherguru';
+export type NewsSourceId = 'sosovalue' | 'whitehouse';
 export const NEWS_SOURCES: ReadonlyArray<{ id: NewsSourceId; name: string; line: string; site: string }> = [
   { id: 'sosovalue', name: 'SoSoValue', line: 'Crypto news, research, announcements and posts on X', site: 'sosovalue.com' },
   { id: 'whitehouse', name: 'The White House', line: 'Its news and presidential actions', site: 'whitehouse.gov' },
-  { id: 'watcherguru', name: 'Watcher.Guru', line: 'Breaking market and crypto news', site: 'watcher.guru' },
 ];
 /** The sources beside SoSoValue, read by /api/vs/news/sources. */
-export const FEED_IDS: readonly NewsSourceId[] = ['whitehouse', 'watcherguru'];
+export const FEED_IDS: readonly NewsSourceId[] = ['whitehouse'];
 
 const SOURCES_KEY = 'vs.news.sources';
 const NO_OFF: Partial<Record<NewsSourceId, boolean>> = {};
@@ -83,7 +84,7 @@ export const OUTLETS: ReadonlyArray<{ group: string; list: ReadonlyArray<readonl
     ['beincrypto.com', 'BeInCrypto'], ['bitcoinist.com', 'Bitcoinist'], ['newsbtc.com', 'NewsBTC'], ['u.today', 'U.Today'], ['ambcrypto.com', 'AMBCrypto'],
     ['coingape.com', 'CoinGape'], ['thecryptotimes.com', 'The Crypto Times'], ['altcoinist.com', 'Altcoinist'], ['panewslab.com', 'PANews'], ['wublock123.com', 'Wu Blockchain'],
     ['odaily.news', 'Odaily'], ['techflowpost.com', 'TechFlow'], ['theblockbeats.info', 'BlockBeats'], ['foresightnews.pro', 'Foresight News'], ['chaincatcher.com', 'ChainCatcher'],
-    ['jinse.cn', 'Jinse Finance'], ['metaera.hk', 'MetaEra'], ['techub.news', 'Techub News'], ['blockcast.it', 'Blockcast.it'],
+    ['jinse.cn', 'Jinse Finance'], ['metaera.hk', 'MetaEra'], ['techub.news', 'Techub News'], ['blockcast.it', 'Blockcast.it'], ['watcher.guru', 'Watcher.Guru'],
   ] },
   { group: 'Data and research', list: [
     ['coinglass.com', 'CoinGlass'], ['lookonchain.com', 'Lookonchain'], ['arkm.com', 'Arkham'], ['glassnode.com', 'Glassnode'], ['santiment.net', 'Santiment'],

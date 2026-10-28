@@ -23,6 +23,7 @@ import { fmtPx, fmtUsdShort } from '../explore/model';
 import { usePolled } from '../explore/cohorts/parts';
 import { useLiveHeat } from './liveHeat';
 import { shortAddr } from '../../format';
+import { fmtFixed, fmtNum } from '../../numStyle';
 import './LiqHeatmap.css';
 
 type View = 'live' | 'chart' | 'history';
@@ -73,9 +74,9 @@ function fromApi(a: HeatApi): Heat {
 /** One bucket's figure in the unit shown: [long, short]. */
 const valOf = (b: Bucket, unit: Unit): [number, number] => (unit === 'usd' ? [b[1], b[2]] : [b[3], b[4]]);
 
-const fmtSize = (v: number) => (Math.abs(v) >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : Math.abs(v) >= 1e4 ? `${(v / 1e3).toFixed(1)}K` : v.toLocaleString('en-US', { maximumSignificantDigits: 5 }));
+const fmtSize = (v: number) => (Math.abs(v) >= 1e6 ? `${fmtFixed(v / 1e6, 2)}M` : Math.abs(v) >= 1e4 ? `${fmtFixed(v / 1e3, 1)}K` : fmtNum(v, { maximumSignificantDigits: 5 }));
 const fmtVal = (v: number, unit: Unit, coin: string) => (unit === 'usd' ? fmtUsdShort(v) : `${fmtSize(v)} ${coin}`);
-const pct = (v: number | null, signed = true) => (v === null || !Number.isFinite(v) ? '–' : `${signed && v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`);
+const pct = (v: number | null, signed = true) => (v === null || !Number.isFinite(v) ? '–' : `${signed && v > 0 ? '+' : ''}${fmtFixed(v * 100, 1)}%`);
 
 /** The element's size, kept current. */
 function useSize<T extends HTMLElement>(): [(el: T | null) => void, { w: number; h: number }] {
@@ -858,7 +859,7 @@ function Details({ coin, venues, pick, price, onClose }: { coin: string; venues:
             </span>
             <span className="lqm-det-usd">{fmtUsdShort(w.usd)}</span>
             <span className="lqm-det-sz">{fmtSize(Math.abs(w.szi))} {coin} @ {fmtPx(w.liq)}</span>
-            <span className="lqm-det-dist">{w.dist === null ? '' : `${(Math.abs(w.dist) * 100).toFixed(1)}% away`}</span>
+            <span className="lqm-det-dist">{w.dist === null ? '' : `${fmtFixed(Math.abs(w.dist) * 100, 1)}% away`}</span>
           </li>
         ))}
       </ol>
@@ -884,10 +885,10 @@ function Coverage({ h, coin }: { h: Heat; coin: string }) {
           `${VENUE_LABEL[v]} ${coin}: the books hold ${fmtSize(c.long)} long and ${fmtSize(c.short)} short in ${c.positions} positions`,
           c.past > 0 ? `${fmtSize(c.past)} ${coin} more is past its liquidation price (being liquidated, or a book not caught up yet): not in the bars` : '',
           c.oi !== null ? `against open interest of ${fmtSize(c.oi)} ${coin}${c.oiUsd ? ` (${fmtUsdShort(c.oiUsd)})` : ''}` : 'open interest unavailable',
-          known !== null ? `${(known * 100).toFixed(1)}% of that size has a known liquidation price` : '',
+          known !== null ? `${fmtFixed(known * 100, 1)}% of that size has a known liquidation price` : '',
           c.computed ? `${VENUE_LABEL[v]} publishes no liquidation price: computed from its maintenance margin rules` : '',
           matched !== null ? `At reads ${acc!.window === 'today' ? 'today' : 'yesterday'}: ${acc!.matched} of ${acc!.checked} venue figures reproduced to 0.01%` : '',
-          tracked !== null ? `At re-reads: ${(tracked * 100).toFixed(1)}% of ${acc!.n} figures within 1% of the venue's new one (${acc!.moved} positions had changed size)` : '',
+          tracked !== null ? `At re-reads: ${fmtFixed(tracked * 100, 1)}% of ${acc!.n} figures within 1% of the venue's new one (${acc!.moved} positions had changed size)` : '',
           c.noRules ? 'The market list could not be read: no levels' : '',
         ].filter(Boolean).join('\n');
         return (
@@ -895,7 +896,7 @@ function Coverage({ h, coin }: { h: Heat; coin: string }) {
             <VenueLogo venue={v} size={12} />
             <span>{share === null ? 'OI –' : `${share > 1.05 ? '>100' : Math.round(share * 100)}% of OI`}</span>
             {known !== null && known < 0.995 && <span className="lqm-cov-dim">{Math.round(known * 100)}% priced</span>}
-            <span className="lqm-cov-dim">{c.computed ? 'computed' : matched !== null ? `${(matched * 100).toFixed(matched >= 0.9995 ? 0 : 1)}% exact` : 'checking'}</span>
+            <span className="lqm-cov-dim">{c.computed ? 'computed' : matched !== null ? `${fmtFixed(matched * 100, matched >= 0.9995 ? 0 : 1)}% exact` : 'checking'}</span>
           </span>
         );
       })}

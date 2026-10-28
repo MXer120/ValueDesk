@@ -29,4 +29,5 @@ export const CLOSE_ONLY_CODES: readonly string[];
 export function normaliseCountry(c: unknown): string | null;
 export function normaliseRegion(r: unknown): string | null;
 export function siteAccess(o?: { country?: string | null; region?: string | null; declared?: string | null }): SiteAccess;
+export function closeOnlyPlaceName(country: string | null | undefined): string | null;
 export function edgeBlockList(): { countries: string[]; regions: Array<{ country: string; region: string }> };

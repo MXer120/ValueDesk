@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type StatsResponse, type StatsSyncProgress, type StatsTradeStats } from '../api';
 import { num, signClass } from '../format';
-import { formatNumber } from '../intlCache';
+import { fmtNum } from '../numStyle';
 import './Stats.css';
 
 // Local aliases so the rest of this file (written before these moved to
@@ -64,13 +64,13 @@ function fmtAmount(v: string | null | undefined): string {
   const abs = Math.abs(n);
   if (abs === 0) return '0';
   const max = abs >= 1000 ? 2 : abs >= 1 ? 4 : 8;
-  return formatNumber(n, 'en-US', {
+  return fmtNum(n, {
     minimumFractionDigits: abs >= 1 ? 2 : 0,
     maximumFractionDigits: max,
   });
 }
 
-const fmtCount = (n: number): string => formatNumber(n, 'en-US');
+const fmtCount = (n: number): string => fmtNum(n);
 
 /*
  * Dates are pinned to en-US for the same reason format.ts pins numbers: on a

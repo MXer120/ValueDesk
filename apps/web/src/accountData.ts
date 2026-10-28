@@ -36,6 +36,7 @@
  *
  * Everything below `// --- readers` is pure and covered by accountData.test.ts.
  */
+import { localize } from './numStyle';
 import { tradingConfig } from './trading/config';
 import { account } from './exchange/sodexAccount';
 import type { HistoryPriority } from './exchange/historyQueue';
@@ -514,7 +515,7 @@ export function formatCollateralRatio(raw: unknown, coin?: string): string | nul
   const text = Math.abs(pct - Math.round(pct)) < 1e-9
     ? String(Math.round(pct))
     : pct.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
-  return `${text}%`;
+  return `${localize(text)}%`;
 }
 
 export interface CollateralSplit {

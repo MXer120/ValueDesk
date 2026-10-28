@@ -13,6 +13,7 @@ import { leaderboardPage, walletRank } from '../exchange/sodexData';
 import { fmtDateTime, fmtUsd, shortAddr, signClass } from '../format';
 import './Leaderboard.css';
 import { LoadFailed, couldntLoad, logLoadFailure, useLoadFailedToast } from './LoadFailed';
+import { fmtNum } from '../numStyle';
 
 /**
  * The four windows the API accepts. Sent verbatim - `window_type` is an enum
@@ -202,7 +203,7 @@ export function Leaderboard({
             <>
               <span className="muted">{subjectLabel} rank</span>{' '}
               <strong>#{mine.item.rank}</strong>{' '}
-              <span className="muted">of {data ? data.total.toLocaleString('en-US') : '—'}</span>{' '}
+              <span className="muted">of {data ? fmtNum(data.total) : '—'}</span>{' '}
               <span className="muted">· volume</span> {fmtUsd(mine.item.volume_usd, 0)}{' '}
               <span className="muted">· PnL</span>{' '}
               <span className={signClass(mine.item.pnl_usd)}>{fmtUsd(mine.item.pnl_usd)}</span>
@@ -269,8 +270,8 @@ export function Leaderboard({
           Prev
         </button>
         <span className="muted small">
-          Page {page.toLocaleString('en-US')} of {lastPage.toLocaleString('en-US')}
-          {data ? ` · ${data.total.toLocaleString('en-US')} ranked accounts` : ''}
+          Page {fmtNum(page)} of {fmtNum(lastPage)}
+          {data ? ` · ${fmtNum(data.total)} ranked accounts` : ''}
         </span>
         <button
           // Two independent stops: the computed last page, and a short page,

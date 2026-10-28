@@ -221,6 +221,8 @@ export interface ChartingLibraryWidgetOptions {
   auto_save_delay?: number;
   load_last_chart?: boolean;
   favorites?: { intervals?: ResolutionString[]; chartTypes?: string[] };
+  /** The decimal mark and the thousands separator the library prints numbers with. */
+  numeric_formatting?: { decimal_sign: string; grouping_separator?: string };
 }
 
 export interface ShapePoint {

@@ -2,12 +2,16 @@
  * Coin and chain icons, served from our own origin.
  *
  * The files live in public/logos/ and are written by tools/fetch-logos.mjs
- * (sodex.com's icon set plus the listings it has no icon for); the app never
- * asks SoDEX or anyone else for an image at runtime. Anything without an icon
+ * (sodex.com's icon set), tools/fetch-site-logos.mjs (the owners' own icons from
+ * their own sites, and CC0 icons, for what SoDEX's set lacks) and
+ * tools/fetch-venue-logos.mjs (Hyperliquid's set); the app never asks SoDEX or
+ * anyone else for an image at runtime. No TradingView, CoinGecko or DefiLlama
+ * image is used (licence review 2026-10-28). Anything without an icon
  * gets a letter avatar from the component, so a brand-new listing still renders.
  */
 import { BRAND_LOGOS, CHAIN_LOGOS, COIN_LOGOS } from './logoManifest';
 import { VENUE_BRAND_LOGOS, VENUE_COIN_LOGOS } from './logoManifestVenues';
+import { SITE_COIN_LOGOS } from './logoManifestSites';
 import { resolveKey } from './logoKey';
 
 const BASE = (() => {
@@ -19,8 +23,8 @@ const url = (rel: string | undefined): string | null => (rel ? `${BASE}logos/${r
 
 /** The icon for any SoDEX spelling of a coin or market: vBTC, BTC-USD, vBTC_vUSDC, BTC/USDC, vsMAG7.ssi... */
 export function coinLogo(name: string | null | undefined): string | null {
-  // SoDEX's set first (sodex.com's own icons), then the other venues' (Hyperliquid, Lighter, Arcus).
-  return url(resolveKey(name, COIN_LOGOS) ?? resolveKey(name, VENUE_COIN_LOGOS));
+  // SoDEX's set first (sodex.com's own icons), then the owners' own (fetch-site-logos.mjs), then the other venues' (Hyperliquid's set).
+  return url(resolveKey(name, COIN_LOGOS) ?? resolveKey(name, SITE_COIN_LOGOS) ?? resolveKey(name, VENUE_COIN_LOGOS));
 }
 
 /**

@@ -1,8 +1,8 @@
 /**
  * One economic indicator in full (core PCE y/y, CPI m/m, payrolls...): its
  * latest figure beside the previous one, when it was last read and when the
- * next release is, its history as a chart and as a table. From FRED (the
- * St. Louis Fed's copy of BLS's and BEA's series), refreshed after each release.
+ * next release is, its history as a chart and as a table. From the agency that
+ * publishes it (BLS, BEA, Census, DOL, the Fed), refreshed after each release.
  *
  *   IndicatorView     the body - in the Indicator widget (any indicator, picked
  *                     there) and in IndicatorModal (from a calendar event's card).

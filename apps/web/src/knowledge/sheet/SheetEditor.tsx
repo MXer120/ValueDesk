@@ -30,6 +30,7 @@ import { parseGrid, toCsv, toTsv } from './grid';
 import * as M from './model';
 import type { Pos, Range, Sel } from './model';
 import './sheet.css';
+import { fmtNum } from '../../numStyle';
 
 const HEAD_W = 46;
 const HEAD_H = 24;
@@ -310,7 +311,7 @@ export default function SheetEditor({ item, data: initial, limitBytes, onStatus 
       if (next === prev) return false;
       const n = M.countCells(next);
       if (n > SHEET_MAX.cells && n > M.countCells(prev)) {
-        notify('warn', `A sheet holds at most ${SHEET_MAX.cells.toLocaleString('en-US')} cells; that change would go past it.`);
+        notify('warn', `A sheet holds at most ${fmtNum(SHEET_MAX.cells)} cells; that change would go past it.`);
         return false;
       }
       if (keepHistory) {
@@ -1471,7 +1472,7 @@ export default function SheetEditor({ item, data: initial, limitBytes, onStatus 
                   <button type="button" className="ks-more__btn" onClick={() => grow(tab.id, nrows + GROW_ROWS, 0)}>
                     Add {Math.min(GROW_ROWS, MAX_ROWS - nrows)} rows
                   </button>
-                  <span className="ks-more__hint">{nrows.toLocaleString('en-US')} of {MAX_ROWS.toLocaleString('en-US')} rows</span>
+                  <span className="ks-more__hint">{fmtNum(nrows)} of {fmtNum(MAX_ROWS)} rows</span>
                 </div>
               </div>
             )}

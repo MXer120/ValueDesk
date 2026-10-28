@@ -16,7 +16,7 @@
  * Nothing secret is written: no key, no signature, no session token.
  */
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync as SqliteDb, StatementSync } from 'node:sqlite';
 
@@ -164,6 +164,22 @@ function takeLock(path: string): string {
   throw new Error(`Could not lock ${dirname(path)}.`);
 }
 
+/**
+ * The database and its -wal / -shm files, 0600: they hold the sealed keys (useless
+ * without the kek, which is 0600 already), every follower's instructions and
+ * activity. A copier started under a umask of 022 would otherwise leave them
+ * readable to every account on the machine. (Not on every file system: Windows.)
+ */
+export function privateFiles(path: string): void {
+  for (const p of [path, `${path}-wal`, `${path}-shm`, `${path}.lock`]) {
+    try {
+      if (existsSync(p) && (statSync(p).mode & 0o077) !== 0) chmodSync(p, 0o600);
+    } catch {
+      /* not on every file system */
+    }
+  }
+}
+
 function releaseLock(path: string): void {
   held.delete(path);
   try {
@@ -198,6 +214,7 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec('PRAGMA busy_timeout = 5000');
     this.db.exec(SCHEMA);
+    if (path !== ':memory:') privateFiles(path);
   }
 
   close(): void {
@@ -249,21 +266,26 @@ export class ExecutorDb implements CopyStore, AlgoStore {
     }));
   }
 
-  /** Walk the whole chain: the first row whose hash does not follow, or null when every row does. */
-  verifyAudit(): { rows: number; brokenAt: number | null } {
-    let prev = AUDIT_GENESIS;
+  /**
+   * Walk the chain: the first row whose hash does not follow, or null when every row does.
+   * `from` (a head this process verified before) walks only the rows after it - the hourly
+   * check; `head` is where the walk ended, for the next one.
+   */
+  verifyAudit(from?: { seq: number; hash: string }): { rows: number; brokenAt: number | null; head: { seq: number; hash: string } | null } {
+    let prev = from?.hash ?? AUDIT_GENESIS;
     let rows = 0;
-    let last = 0;
-    for (const r of this.db.prepare('SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq').iterate() as Iterable<Row>) {
+    let last = from?.seq ?? 0;
+    const it = (from ? this.db.prepare('SELECT seq, at, kind, owner, ref, data, hash FROM audit WHERE seq > ? ORDER BY seq').iterate(from.seq) : this.db.prepare('SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq').iterate()) as Iterable<Row>;
+    for (const r of it) {
       rows++;
       const seq = Number(r.seq);
       // A deleted row leaves a gap in seq (AUTOINCREMENT never reuses one), and its successor's hash no longer follows.
       const want = auditHash(prev, { at: Number(r.at), kind: String(r.kind), owner: r.owner === null ? null : String(r.owner), ref: r.ref === null ? null : String(r.ref), data: String(r.data) });
-      if (want !== String(r.hash) || (last && seq !== last + 1)) return { rows, brokenAt: seq };
+      if (want !== String(r.hash) || (last && seq !== last + 1)) return { rows, brokenAt: seq, head: null };
       prev = String(r.hash);
       last = seq;
     }
-    return { rows, brokenAt: null };
+    return { rows, brokenAt: null, head: last ? { seq: last, hash: prev } : (from ?? null) };
   }
 
   /** Throws when the database does not answer (the health check). */

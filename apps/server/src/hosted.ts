@@ -128,7 +128,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/calendar/results', cls: 'read' },
   { method: 'GET', url: '/api/vs/fed/live', cls: 'read' },
   // What the markets expect of the FOMC (Kalshi, Polymarket), one meeting's history, and the
-  // indicators' history from FRED (valuedesk/fedwatch.ts, indicators.ts): public data, cached on the
+  // indicators' history from BLS, BEA, Census, DOL and the Fed (valuedesk/fedwatch.ts, indicators.ts): public data, cached on the
   // process; a meeting or an indicator not in their lists is answered without a fetch.
   { method: 'GET', url: '/api/vs/fedwatch', cls: 'read' },
   { method: 'GET', url: '/api/vs/fedwatch/history', cls: 'read' },

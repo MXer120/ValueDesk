@@ -13,6 +13,7 @@
  *   Orders   every child it sent, its price, size, fill and state
  *   Log      every event, as the card's log
  */
+import { fmtFixed } from '../../numStyle';
 import { useMemo, useState, type ReactNode } from 'react';
 import { FINAL_STATUSES, planAlgo, type AlgoView, type PlannedChild } from '@copy-engine';
 import { DASH, fmtTime, fmtUsd } from '../../format';
@@ -168,7 +169,7 @@ function LiveChart({ v, open }: { v: AlgoView; open: boolean }) {
           return (
             <g key={`w${r.label}${r.price}`} className="algo-st__need">
               <path d={`M${xn},${y(last)} C${(xn + xe) / 2},${y(last)} ${(xn + xe) / 2},${y(r.price)} ${xe},${y(r.price)}`} />
-              <text x={xe - 4} y={y(r.price) + (r.price > last ? -6 : 13)} textAnchor="end">{`needs ${pctMove > 0 ? '+' : '−'}${Math.abs(pctMove).toFixed(Math.abs(pctMove) < 1 ? 2 : 1)}%`}</text>
+              <text x={xe - 4} y={y(r.price) + (r.price > last ? -6 : 13)} textAnchor="end">{`needs ${pctMove > 0 ? '+' : '−'}${fmtFixed(Math.abs(pctMove), Math.abs(pctMove) < 1 ? 2 : 1)}%`}</text>
             </g>
           );
         })}

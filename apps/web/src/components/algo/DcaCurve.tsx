@@ -9,6 +9,7 @@
  * fit or shape). Under it: an average fill price to fit the curve to (fitAvg: the same shape and
  * spend, tilted).
  */
+import { localize, toInputText } from '../../numStyle';
 import { useRef, useState, type PointerEvent as RPointerEvent } from 'react';
 import { ViewPop } from '../ViewPop';
 import { Section, Seg } from '../accountTables/FilterBar';
@@ -33,11 +34,13 @@ const fromY = (py: number) => Math.min(CURVE_MAX, Math.max(CURVE_MIN, ((T + ih -
 const round = (v: number, dp: number) => Number(v.toFixed(dp));
 
 /** A price as the axis shows it: whole above 1,000, cents to 1, significant digits below. */
-const fmtPx = (p: number): string =>
+const pxText = (p: number): string =>
   p >= 1000 ? Math.round(p).toLocaleString('en-US') : p >= 1 ? p.toFixed(2) : String(Number(p.toPrecision(4)));
+/** `pxText` in the number format (numStyle.ts). */
+const fmtPx = (p: number): string => localize(pxText(p));
 
 /** The axis' short form, so ten prices fit under ten bars: 80.1k, 1.25k, 3.42. */
-const axisPx = (p: number): string => (p >= 1000 ? `${Number((p / 1000).toPrecision(p >= 100_000 ? 4 : 3))}k` : Number(p.toPrecision(3)).toString());
+const axisPx = (p: number): string => localize(p >= 1000 ? `${Number((p / 1000).toPrecision(p >= 100_000 ? 4 : 3))}k` : Number(p.toPrecision(3)).toString());
 
 const SHAPES: Array<[string, string, CurvePoint[]]> = [
   ['rising', 'Rising', [[0, 1], [1, 2.5]]],
@@ -155,7 +158,7 @@ export function DcaCurve({ points, orders, each, unit, side, prices, coin, onCha
     return d;
   })();
   const bw = Math.max(2, Math.min(18, (iw / n) * 0.55));
-  const fmt = (v: number) => (v >= 100 ? v.toFixed(0) : v >= 1 ? String(round(v, 2)) : String(Number(v.toPrecision(2))));
+  const fmt = (v: number) => localize(v >= 100 ? v.toFixed(0) : v >= 1 ? String(round(v, 2)) : String(Number(v.toPrecision(2))));
   const levels = Array.from({ length: n }, (_, i) => (n > 1 ? i / (n - 1) : 0));
   const labelEvery = n <= 10 ? 1 : Math.ceil(n / 10);
   const total = levels.reduce((a, x) => a + each * curveAt(points, x), 0);
@@ -279,11 +282,11 @@ export function DcaCurve({ points, orders, each, unit, side, prices, coin, onCha
             id="algo-curve-avg"
             autoComplete="off"
             inputMode="decimal"
-            value={target}
-            placeholder={avg !== null ? fmtPx(avg).replace(/,/g, '') : 'set a first price'}
+            value={toInputText(target)}
+            placeholder={avg !== null ? toInputText(pxText(avg).replace(/,/g, '')) : 'set a first price'}
             disabled={!px}
             onChange={(e) => {
-              setTarget(decimalInput(e.target.value));
+              setTarget(decimalInput(e.target.value, { prev: target }));
               setMiss(null);
             }}
             onKeyDown={(e) => {

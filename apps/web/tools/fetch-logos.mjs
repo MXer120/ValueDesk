@@ -13,14 +13,20 @@
  *   1. sodex.com's own icon set - the symbol -> icon map in its trade bundle
  *      (read from the live bundle, so it stays current) plus the files it
  *      points at under sodex.com/assets/img/{tokens,chains}/.
- *   2. SUPPLEMENT below - listed assets sodex.com itself has no icon for
- *      (newer stocks/ETFs/pre-IPO perps, a few memecoins). Each one was
- *      checked by hand against the issuer / listing it names.
+ *   2. SUPPLEMENT below - listed assets sodex.com itself has no icon for that
+ *      share another listing's icon.
  *   3. SoDEX's coins/logo config - most of its S3 links are dead (404); the
  *      ones that still answer are kept.
  *
- * The run fails without touching the manifest if any listed asset or chain
- * ends up without an image, so a partial download can never ship.
+ * Everything else SoDEX lists (newer stocks / ETFs / pre-IPO perps, a few
+ * memecoins) takes its owner's own icon from fetch-site-logos.mjs (COIN_SITES)
+ * or the app's letter avatar. Licence review 2026-10-28: TradingView's symbol
+ * logos and CoinGecko's images are no longer taken (their terms do not cover a
+ * commercial site), nor the recoloured Unitree tile (shown unaltered now, from
+ * unitree.com, by fetch-site-logos.mjs).
+ *
+ * The run fails without touching the manifest if any listed chain ends up
+ * without an image; listed assets without one are reported (letter avatar).
  */
 import { mkdirSync, writeFileSync, readdirSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -40,39 +46,11 @@ const MANIFEST = join(WEB, 'src', 'logoManifest.ts');
 const SODEX = 'https://sodex.com';
 const GATEWAY = 'https://mainnet-gw.sodex.dev/api/v1';
 const COINS_LOGO = 'https://alpha-biz.sodex.dev/biz/config/coins/logo';
-const TV = 'https://s3-symbol-logo.tradingview.com';
 const UA = { 'User-Agent': 'Mozilla/5.0 (valuedesk logo sync)' };
 
-/** Listed on SoDEX, no icon on sodex.com. Keys are canonical (see canonical()). */
+/** Listed on SoDEX, no icon on sodex.com, sharing another listing's. Keys are canonical (see canonical()). */
 const SUPPLEMENT = {
-  // US ETFs - issuer marks, same TradingView set sodex.com's stock icons come from.
-  QQQ: { tv: 'invesco' }, // Invesco QQQ Trust (NASDAQ:QQQ)
-  VOO: { tv: 'vanguard' }, // Vanguard S&P 500 ETF
-  VGT: { tv: 'vanguard' }, // Vanguard Information Technology ETF
-  VYM: { tv: 'vanguard' }, // Vanguard High Dividend Yield ETF
-  SMH: { tv: 'vaneck' }, // VanEck Semiconductor ETF
-  SCHD: { tv: 'schwab' }, // Schwab US Dividend Equity ETF
-  BOXX: { tv: 'alpha-architect' }, // Alpha Architect 1-3 Month Box ETF (CBOE:BOXX)
-  DRAM: { tv: 'roundhmetave-aeoa' }, // Roundhill Memory ETF (CBOE:DRAM)
-  // Stocks
   STRC: { sameAs: 'MSTR' }, // Strategy Inc. Stretch preferred (NASDAQ:STRC) - Strategy's mark
-  SMCI: { tv: 'super-micro-computer' }, // Super Micro Computer
-  MRNA: { tv: 'moderna' }, // Moderna
-  NBIS: { tv: 'nebius-group-nv' }, // Nebius Group
-  LITE: { tv: 'lumentum-hldgs' }, // Lumentum Holdings
-  KIOXIA: { tv: 'kioxia' }, // Kioxia Holdings (TSE:285A)
-  MINIMAX: { tv: 'minimax' }, // MiniMax Group (HKEX:100)
-  ZHIPU: { tv: 'knowledge-atlas-technology-joint-stock-company-limited-class-h' }, // Z.AI / Zhipu (HKEX:2513)
-  UNITREE: { unitree: true }, // Unitree Robotics (pre-IPO) - the company's own mark
-  // Crypto
-  MORPHO: { tv: 'crypto/XTVCMORPHO' },
-  BREV: { tv: 'crypto/XTVCBREV' }, // Brevis
-  BASED: { tv: 'crypto/XTVCBASED2' },
-  BIANRENSHENG: { tv: 'crypto/XTVCBIANRENSHENG' }, // 币安人生
-  GRAM: { tv: 'crypto/XTVCGRAM' }, // Gram (previously Toncoin)
-  CASHCAT: { coingecko: 'cash-cat' },
-  PONS: { coingecko: 'pons' },
-  NIULAI: { coingecko: 'niu-lai' }, // 牛来
 };
 
 /** SoDEX's own mark (the 20px "XS" one, dark-theme), for "SoDEX Spot" and the like. */
@@ -235,25 +213,6 @@ async function listedAssets() {
   return { assets: [...assets].filter(Boolean), chains: [...chains] };
 }
 
-async function coingeckoImage(id) {
-  const j = await get(`https://api.coingecko.com/api/v3/coins/${id}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false&sparkline=false`, { json: true });
-  const url = j?.image?.large;
-  if (!url) throw new Error(`coingecko ${id}: no image`);
-  return url.replace(/\?.*$/, '');
-}
-
-/** Unitree publishes a dark "U" on transparent; frame it like the other stock tiles so it reads on dark UI. */
-async function unitreeTile() {
-  const svg = await (await get('https://www.unitree.com/unitree-favicon.svg')).text();
-  const paths = [...svg.matchAll(/\sd="([^"]+)"/g)].map((m) => m[1]);
-  if (!paths.length) throw new Error('unitree favicon: no path');
-  const rel = 'coins/UNITREE.svg';
-  const tile = `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 100 100"><rect width="100" height="100" fill="#1D1D1F"/><g fill="#FFFFFF" transform="translate(16 16) scale(.68)">${paths.map((d) => `<path d="${d}"/>`).join('')}</g></svg>\n`;
-  mkdirSync(dirname(join(STAGE, rel)), { recursive: true });
-  writeFileSync(join(STAGE, rel), cleanedSvg(Buffer.from(tile, 'utf8'), rel));
-  return rel;
-}
-
 // ---------------------------------------------------------------------------
 
 rmSync(STAGE, { recursive: true, force: true });
@@ -319,13 +278,6 @@ for (const [key, how] of Object.entries(SUPPLEMENT)) {
     if (how.sameAs) {
       if (!coins[how.sameAs]) throw new Error(`${key}: ${how.sameAs} has no icon to share`);
       coins[key] = coins[how.sameAs];
-    } else if (how.tv) {
-      coins[key] = await save(`${TV}/${how.tv}.svg`, `coins/${fileSafe(key)}`);
-    } else if (how.coingecko) {
-      coins[key] = await save(await coingeckoImage(how.coingecko), `coins/${fileSafe(key)}`);
-      await new Promise((r) => setTimeout(r, 2500)); // CoinGecko's public rate limit
-    } else if (how.unitree) {
-      coins[key] = await unitreeTile();
     }
   } catch (e) {
     problems.push(e.message);
@@ -354,18 +306,23 @@ for (const [chain, coin] of Object.entries(CHAIN_AS_COIN)) if (!chains[chain] &&
 
 // Every listed asset and chain must resolve, with the same rules the app uses.
 const { resolveKey } = await import('../src/logoKey.ts');
-const unresolvedAssets = listed.assets.filter((a) => !resolveKey(a, coins));
+const { SITE_COIN_LOGOS } = await import('../src/logoManifestSites.ts');
+const unresolvedAssets = listed.assets.filter((a) => !resolveKey(a, coins) && !resolveKey(a, SITE_COIN_LOGOS));
 const unresolvedChains = listed.chains.filter((c) => !chains[canonical(c)]);
 if (problems.length) console.log('problems:\n  ' + problems.join('\n  '));
-if (unresolvedAssets.length || unresolvedChains.length) {
-  console.error(`missing icons - assets: ${unresolvedAssets.join(', ') || '-'}; chains: ${unresolvedChains.join(', ') || '-'}`);
-  console.error('Add them to SUPPLEMENT / CHAIN_AS_COIN. Nothing was changed.');
+// An asset without a licensed icon is drawn as a letter avatar; add its owner's site to COIN_SITES in fetch-site-logos.mjs.
+if (unresolvedAssets.length) console.log(`letter avatars (no licensed icon): ${unresolvedAssets.join(', ')}`);
+if (unresolvedChains.length) {
+  console.error(`missing chain icons: ${unresolvedChains.join(', ')}`);
+  console.error('Add them to CHAIN_AS_COIN. Nothing was changed.');
   rmSync(STAGE, { recursive: true, force: true });
   process.exit(1);
 }
 
-// Replace the set in whole, so a re-run never leaves stale or half-written files behind.
-rmSync(OUT, { recursive: true, force: true });
+// Replace this tool's folders in whole, so a re-run never leaves stale or half-written files
+// behind; the other tools' folders (venues/, sites/, news/, news.json and brand/'s SoSoValue mark)
+// are left alone (brand/sodex.* is overwritten).
+for (const dir of ['coins', 'tokens', 'chains']) rmSync(join(OUT, dir), { recursive: true, force: true });
 cpSync(STAGE, OUT, { recursive: true });
 rmSync(STAGE, { recursive: true, force: true });
 
@@ -379,4 +336,4 @@ writeFileSync(
     `export const BRAND_LOGOS: Record<string, string> = ${JSON.stringify(sorted(brand), null, 1)};\n`,
 );
 const files = readdirSync(OUT, { recursive: true }).filter((f) => /\.[a-z]+$/.test(f)).length;
-console.log(`ok: ${Object.keys(coins).length} coin keys, ${Object.keys(chains).length} chains, ${files} files; all ${listed.assets.length} listed assets and ${listed.chains.length} chains covered`);
+console.log(`ok: ${Object.keys(coins).length} coin keys, ${Object.keys(chains).length} chains, ${files} files; ${listed.assets.length - unresolvedAssets.length} of ${listed.assets.length} listed assets and all ${listed.chains.length} chains covered`);

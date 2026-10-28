@@ -32,6 +32,10 @@
  *                            another server (with EXECUTOR_BUILDER_TOKEN = its VALUESCAN_INTERNAL_TOKEN)
  *   EXECUTOR_LOCAL_ADDRESS   send every request and socket to SoDEX / Hyperliquid from this local
  *                            IP (an address of its own, so another process's rate limit cannot stop copies)
+ *   EXECUTOR_ALLOWED_HOSTS   self: host names (comma-separated) besides loopback and IP literals that
+ *                            requests may name in their Host header (DNS-rebinding guard)
+ *   ALERT_TELEGRAM_TOKEN     the operator's alerts (alerts.ts): a bot token and the chat it writes to,
+ *   ALERT_TELEGRAM_CHAT_ID   from /etc/valuescan/alert.env (the unit's EnvironmentFile); unset: no alerts
  *   LOG_LEVEL                debug | info (default) | warn | error
  */
 import { existsSync } from 'node:fs';
@@ -68,6 +72,11 @@ export interface ExecutorConfig {
   liveAlgos: boolean;
   /** The emergency brake's file (brake.ts); null: none. */
   brakeFile: string | null;
+  /** Self-hosted: Host header names allowed besides loopback names and IP literals. */
+  allowedHosts: string[];
+  /** The operator's Telegram alerts (alerts.ts); either null: off. Never logged. */
+  alertTelegramToken: string | null;
+  alertTelegramChatId: string | null;
 }
 
 /**
@@ -152,5 +161,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ExecutorConfig
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === '1',
     brakeFile: brake === 'none' ? null : brake ? resolve(brake) : kind === 'hosted' ? '/var/lib/valuescan/brake.json' : join(dataDir, 'brake.json'),
+    allowedHosts: env.EXECUTOR_ALLOWED_HOSTS?.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [],
+    alertTelegramToken: env.ALERT_TELEGRAM_TOKEN?.trim() || null,
+    alertTelegramChatId: env.ALERT_TELEGRAM_CHAT_ID?.trim() || null,
   };
 }

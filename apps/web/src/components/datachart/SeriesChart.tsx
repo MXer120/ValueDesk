@@ -90,6 +90,8 @@ import { TWEEN_MS, ViewTween, applyView, paintNow, plotWidth, readView, sameView
 import { MORPH_MS, prefersReducedMotion } from '../../chart/morph';
 import { crosshairLabel, timeTicks, type TimeZoneMode } from '../../chart/timeAxis';
 import { logger } from '../../log';
+import { fmtPlain, localize } from '../../numStyle';
+import { followNumStyle } from '../../chart/klineNumbers';
 import './SeriesChart.css';
 
 const log = logger('chart');
@@ -522,7 +524,7 @@ function drawSeries({ ctx, chart, xAxis, yAxis, bounding }: IndicatorDrawParams<
 
 /** A plain number when the caller gave no format: grouped thousands folded to
  *  K/M/B as the trading chart's volume axis prints them, four figures below. */
-const plainFormat = (v: number): string => (Math.abs(v) >= 1e3 ? formatBigNumber(v) : String(Number(v.toPrecision(4))));
+const plainFormat = (v: number): string => (Math.abs(v) >= 1e3 ? localize(formatBigNumber(v)) : fmtPlain(Number(v.toPrecision(4))));
 
 const formatOf = (list: readonly ChartSeries[]): ((v: number) => string) => list.find((s) => s.format)?.format ?? plainFormat;
 
@@ -856,6 +858,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
     let kc: typeof import('klinecharts') | null = null;
     let c: KChart | null = null;
     let ro: ResizeObserver | null = null;
+    let unNumStyle: (() => void) | null = null;
     const pending = frames.current;
     DRAWS.set(ids.right, () => model.current?.right ?? []);
     DRAWS.set(ids.left, () => model.current?.left ?? []);
@@ -886,6 +889,9 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
         const ch = c;
         ch.setStyles(SERIES_STYLES);
         ch.resize();
+        // The labels are the callers' formats, which read the number format at
+        // call time: a change only needs the axis rebuilt and repainted.
+        unNumStyle = followNumStyle(ch, () => '');
         const measure = (text: string) => lib.utils.calcTextWidth(text, AXIS_FONT_SIZE, AXIS_FONT_WEIGHT, NUM_FAMILY);
         ch.overrideXAxis({
           name: X_AXIS_NAME,
@@ -961,6 +967,7 @@ export function SeriesChart({ series, height = 220, daily = true, span = null, m
     return () => {
       disposed = true;
       ro?.disconnect();
+      unNumStyle?.();
       tween.current?.cancel();
       hold.current?.clear();
       hold.current = null;

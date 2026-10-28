@@ -11,6 +11,8 @@
  * Cancel all is the kill switch: every running algo is cancelled and its
  * resting children pulled from SoDEX; what filled stays filled.
  */
+import { fmtFixed, fmtNum, localize, toInputText } from '../../numStyle';
+import { decimalInput } from '../numberInput';
 import { useEffect, useState, type FormEvent } from 'react';
 import { ALGO_NAMES, FINAL_STATUSES, type AlgoEvent, type AlgoSpec, type AlgoView } from '@copy-engine';
 import { DASH, fmtTime, fmtUsd } from '../../format';
@@ -66,16 +68,16 @@ const STATUS_WORD: Record<string, string> = {
 function fmtPx(p: number | null): string {
   if (p === null || !Number.isFinite(p)) return DASH;
   const a = Math.abs(p);
-  return p.toLocaleString('en-US', { maximumFractionDigits: a >= 1000 ? 1 : a >= 1 ? 4 : 6 });
+  return fmtNum(p, { maximumFractionDigits: a >= 1000 ? 1 : a >= 1 ? 4 : 6 });
 }
 
 function fmtBps(b: number | null): { text: string; cls: string } {
   if (b === null || !Number.isFinite(b)) return { text: DASH, cls: '' };
-  const t = `${b > 0 ? '+' : b < 0 ? '−' : ''}${Math.abs(b).toFixed(1)} bp`;
+  const t = `${b > 0 ? '+' : b < 0 ? '−' : ''}${fmtFixed(Math.abs(b), 1)} bp`;
   return { text: t, cls: b > 0.05 ? 'algo-pos' : b < -0.05 ? 'algo-neg' : '' };
 }
 
-const fmtQ = (q: number): string => (q === 0 ? '0' : Math.abs(q) >= 1 ? q.toLocaleString('en-US', { maximumFractionDigits: 4 }) : q.toPrecision(4).replace(/\.?0+$/, ''));
+const fmtQ = (q: number): string => (q === 0 ? '0' : Math.abs(q) >= 1 ? fmtNum(q, { maximumFractionDigits: 4 }) : localize(q.toPrecision(4).replace(/\.?0+$/, '')));
 
 /** An instruction, wherever the algo runs: in this browser at once; on an executor, one wallet signature. */
 async function act(place: Place, what: 'pause' | 'resume' | 'cancel' | 'cancelAll', id?: string): Promise<void> {
@@ -142,7 +144,7 @@ function SizeForm({ v, place, onDone }: { v: AlgoView; place: Place; onDone: () 
     <form className="algo-size" onSubmit={(e) => void submit(e)} onClick={(e) => e.stopPropagation()}>
       <label>
         <span>New size</span>
-        <input type="text" inputMode="decimal" autoFocus value={text} onChange={(e) => setText(e.target.value.replace(',', '.'))} aria-invalid={!!why} />
+        <input type="text" inputMode="decimal" autoFocus value={toInputText(text)} onChange={(e) => setText(decimalInput(e.target.value, { prev: text }))} aria-invalid={!!why} />
         <span className="acct-unit">{base}</span>
       </label>
       <button type="submit" className="acct-act" disabled={!!why || busy} title={why ?? undefined}>{busy ? 'Saving…' : 'Save'}</button>

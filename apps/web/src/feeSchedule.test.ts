@@ -15,6 +15,10 @@ import {
   stakingMark,
   withBuilder,
 } from './fees';
+import { setNumStyle } from './numStyle';
+
+// These cases are written in the 1,234.56 format; the app's default (1.234,56) has its own tests in numStyle.test.ts.
+setNumStyle('comma-dot');
 
 test('a missing maker rebate stays missing, and tier 0 is kept', () => {
   const rate = readVenueFee({

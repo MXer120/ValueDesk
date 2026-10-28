@@ -34,6 +34,8 @@
  *
  * HISTORY is read in AccountHistory.tsx; `History` below only picks the view.
  */
+import { fmtFixed, fmtNum, toInputText } from '../numStyle';
+import { decimalInput } from './numberInput';
 import { requestDeposit, requestTransfer, requestWithdraw, requestWithdrawFrom } from './account/actions';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type Engine, type Symbol } from '../api';
@@ -158,9 +160,9 @@ function BalancesInner({
         <Kv label="Margin balance" value={split?.marginBalance == null ? EM : usd(split.marginBalance)} />
         <Kv sub label="USDC margin" value={split?.usdc == null ? EM : usd(split.usdc)} />
         <Kv sub label="Multi-asset margin" value={split?.multi == null ? EM : usd(split.multi)} />
-        <Kv label="Cross margin ratio" value={ratio == null ? EM : `${(ratio * 100).toFixed(2)}%`} />
+        <Kv label="Cross margin ratio" value={ratio == null ? EM : `${fmtFixed(ratio * 100, 2)}%`} />
         <Kv label="Maintenance margin" value={usd(pick(state, 'mm'))} />
-        <Kv label="Cross account leverage" value={leverage == null ? EM : `${leverage.toFixed(2)}x`} />
+        <Kv label="Cross account leverage" value={leverage == null ? EM : `${fmtFixed(leverage, 2)}x`} />
       </div>
     ) : book === 'evm' ? (
       <HoldingList
@@ -865,8 +867,8 @@ function PositionsInner({
           <label>
             <span>Amount</span>
             <input
-              value={posEdit.draft}
-              onChange={(e) => setPosEdit({ ...posEdit, draft: e.target.value })}
+              value={toInputText(posEdit.draft)}
+              onChange={(e) => setPosEdit({ ...posEdit, draft: decimalInput(e.target.value, { prev: posEdit.draft }) })}
               inputMode="decimal"
               autoFocus
             />
@@ -1096,7 +1098,7 @@ function OpenOrdersInner({
           <LoadMore
             onMore={() => setOrderCap((n) => n + ORDER_PAGE)}
             loading={false}
-            note={`${(shownOrders.length - orderCap).toLocaleString('en-US')} more below`}
+            note={`${fmtNum(shownOrders.length - orderCap)} more below`}
           />
         )}
         </>
@@ -1148,8 +1150,8 @@ function ModifyOrder({
   return (
     <div className="acct-modify">
       <span className="acct-modify__t">Modify {sym?.displayName ?? symbol}</span>
-      <label><span>Price</span><input value={priceInput} onChange={(e) => setPriceInput(e.target.value)} inputMode="decimal" /></label>
-      <label><span>Size</span><input value={quantity} onChange={(e) => setQuantity(e.target.value)} inputMode="decimal" /></label>
+      <label><span>Price</span><input value={toInputText(priceInput)} onChange={(e) => setPriceInput(decimalInput(e.target.value, { prev: priceInput }))} inputMode="decimal" /></label>
+      <label><span>Size</span><input value={toInputText(quantity)} onChange={(e) => setQuantity(decimalInput(e.target.value, { prev: quantity }))} inputMode="decimal" /></label>
       <button type="button" className="acct-act acct-act--solid" onClick={submit} disabled={busy}>Save</button>
       <button type="button" className="acct-act" onClick={onClose}>Cancel</button>
       {msg && <p className={`status ${msg.kind}`}>{msg.text}</p>}

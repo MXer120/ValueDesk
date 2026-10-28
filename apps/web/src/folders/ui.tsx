@@ -2,10 +2,11 @@
  * Small pieces the folders view, the item pane and the editors share.
  */
 import { useRef, useState } from 'react';
+import { fmtFixed } from '../numStyle';
 
 /** Bytes as the folders show them: KB below a megabyte, MB above. */
 export const mb = (n: number): string =>
-  n >= 1048576 ? `${(n / 1048576).toFixed(n >= 10 * 1048576 ? 0 : 1)} MB` : n <= 0 ? '0 KB' : `${Math.max(1, Math.round(n / 1024))} KB`;
+  n >= 1048576 ? `${fmtFixed(n / 1048576, n >= 10 * 1048576 ? 0 : 1)} MB` : n <= 0 ? '0 KB' : `${Math.max(1, Math.round(n / 1024))} KB`;
 
 /** Hand a blob to the browser as a download (never opened in this page). */
 export function saveBlob(blob: Blob, name: string): void {

@@ -278,7 +278,8 @@ const SOSO_KINDS: Array<{ match: RegExp; short: string; importance: Importance }
 /**
  * Which indicators a SoSoValue event's name is, most specific first: "Core PCE
  * Price Index YoY" is core_pce_yy alone, "PCE" both PCE gauges. None for a
- * release with no free history (ISM, S&P Global PMIs) or a name not matched.
+ * release with no free history (ISM, S&P Global PMIs), none licensed for
+ * display here (Michigan sentiment, NAR's existing home sales) or a name not matched.
  */
 const SOSO_INDICATORS: Array<{ match: RegExp; ids: string[] }> = [
   { match: /Core PCE.*(YoY|Y.Y|Year)/i, ids: ['core_pce_yy'] },
@@ -307,10 +308,8 @@ const SOSO_INDICATORS: Array<{ match: RegExp; ids: string[] }> = [
   { match: /Continuing.*Claims/i, ids: ['continuing_claims'] },
   { match: /Jobless Claims/i, ids: ['initial_claims', 'continuing_claims'] },
   { match: /New Home Sales/i, ids: ['new_home_sales'] },
-  { match: /Existing Home Sales/i, ids: ['existing_home_sales'] },
   { match: /Housing Starts/i, ids: ['housing_starts', 'building_permits'] },
   { match: /Building Permits/i, ids: ['building_permits', 'housing_starts'] },
-  { match: /Michigan|Consumer Sentiment/i, ids: ['umich_sentiment'] },
   { match: /Industrial Production/i, ids: ['ip_mm'] },
   { match: /Durable Goods/i, ids: ['durables_mm'] },
 ];

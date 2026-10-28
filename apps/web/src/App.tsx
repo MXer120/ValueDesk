@@ -31,7 +31,7 @@ import { FeedbackHost } from './feedback/FeedbackHost';
 import { lazyPage, type LazyPage } from './lazyPage';
 import { primeFirstReads } from './serverFetch';
 import type { Venue } from './vsApi';
-import { OPEN_LEGAL_EVENT, TermsGate } from './legal/LegalGate';
+import { OPEN_LEGAL_EVENT, RegionBanner, TermsGate } from './legal/LegalGate';
 import { knowledgeOnAtBoot, useKnowledge } from './folders/access';
 import { registerChartOpener } from './folders/bridge';
 import { setLastPrice } from './lastPrice';
@@ -465,6 +465,10 @@ function AppShell() {
        chip reads it, and so does every page below. */}
     <ToastProvider>
     <PrivacyProvider>
+    {/* Close-only (or an unknown country): one slim line above everything, on every page (legal/LegalGate.tsx). */}
+    <Guarded name="Region">
+      <RegionBanner address={address} />
+    </Guarded>
     <div className={`shell${rail ? ' shell--rail' : ''}`}>
       {rail && (
         <SideBar address={address} hasLayout={hasLayout} dashLocked={dashLocked} onOpenSearch={() => openSearch()} tab={shown} onNavigate={setTab} knowledge={knowledge} />

@@ -3,10 +3,12 @@
  * All is the default: a widget shows SoDEX and Hyperliquid together until
  * the trader picks one venue. The choice is remembered on this browser.
  */
+import { decimalInput } from '../components/numberInput';
 import { useState } from 'react';
 import { positionSize } from './widgetCatalog';
 import { Sketch } from './sketches';
 import './sourceWidgets.css';
+import { fmtNum, toInputText } from '../numStyle';
 
 export type VenueSource = 'all' | 'sodex' | 'hl';
 
@@ -73,19 +75,19 @@ export function SizeCalc({ price }: { price: string }) {
     <section className="wg wg-calc">
       <header className="wg__bar"><strong>Position size</strong></header>
       <label className="wg-field">Equity, USD
-        <input value={equity} inputMode="decimal" onChange={(e) => setEquity(e.target.value)} />
+        <input value={toInputText(equity)} inputMode="decimal" onChange={(e) => setEquity(decimalInput(e.target.value, { prev: equity }))} />
       </label>
       <label className="wg-field">Risk %
-        <input value={risk} inputMode="decimal" onChange={(e) => setRisk(e.target.value)} />
+        <input value={toInputText(risk)} inputMode="decimal" onChange={(e) => setRisk(decimalInput(e.target.value, { prev: risk }))} />
       </label>
       <label className="wg-field">Stop distance %
-        <input value={stop} inputMode="decimal" onChange={(e) => setStop(e.target.value)} />
+        <input value={toInputText(stop)} inputMode="decimal" onChange={(e) => setStop(decimalInput(e.target.value, { prev: stop }))} />
       </label>
       <p className="wg-out">
         {qty == null ? 'Enter equity, risk, and a stop.' : (
           <>
-            <span>{qty.toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
-            <span>{notional == null ? '' : `$${notional.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}</span>
+            <span>{fmtNum(qty, { maximumFractionDigits: 4 })}</span>
+            <span>{notional == null ? '' : `$${fmtNum(notional, { maximumFractionDigits: 0 })}`}</span>
           </>
         )}
       </p>

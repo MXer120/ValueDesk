@@ -49,7 +49,8 @@ export function cleanLabel(raw: string | null | undefined, max = 80): string | n
   if (!raw) return null;
   let s = raw.replace(/\s+/g, ' ').trim();
   // Amounts and balances: any figure with a decimal part or of three digits and more.
-  s = s.replace(/[-+]?[$€£]?\d[\d,.' ]*\d|\b\d{3,}\b/g, '#');
+  // Any of the number formats' group marks (",", ".", "'", "’", space, no-break space).
+  s = s.replace(/[-+]?[$€£]?\d[\d,.'’  ]*\d|\b\d{3,}\b/g, '#');
   s = scrubText(s, max);
   return s || null;
 }

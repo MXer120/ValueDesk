@@ -28,6 +28,7 @@ import { useSharedStored } from '../../hooks';
 import { SortTh, sortRows, useTableSort } from '../accountTables/sort';
 import type { HlState } from './HlCards';
 import { useVsRead, type VsRead } from './useVs';
+import { fmtFixed, fmtPlain } from '../../numStyle';
 
 const POLL_MS = 30_000;
 
@@ -93,7 +94,7 @@ function PositionsTable({ rows }: { rows: VsPosition[] }) {
               <td>
                 <MarketCell symbol={p.symbol} sym={undefined} engine="perps" full={p.symbol.includes(':')}>
                   <SidePill dir={p.side} prefix={p.marginMode === 'isolated' ? 'Isolated' : p.marginMode === 'cross' ? 'Cross' : undefined} />
-                  {p.leverage ? <span className="acct-lev">{p.leverage}x</span> : null}
+                  {p.leverage ? <span className="acct-lev">{fmtPlain(p.leverage)}x</span> : null}
                 </MarketCell>
               </td>
               <td className="num"><Unit value={sz(p.size)} unit={baseOf(p.symbol)} /></td>
@@ -241,7 +242,7 @@ function FundingTable({ rows }: { rows: VsFunding[] }) {
               </MarketCell>
             </td>
             <td className={`num ${tone(f.amount)}`}>{signedUsd(f.amount)}</td>
-            <td className="num acct-dim">{f.rate == null ? DASH : `${(f.rate * 100).toFixed(4)}%`}</td>
+            <td className="num acct-dim">{f.rate == null ? DASH : `${fmtFixed(f.rate * 100, 4)}%`}</td>
             <td className="num"><Unit value={f.size == null ? DASH : sz(Math.abs(f.size))} unit={baseOf(f.symbol)} /></td>
             <td className="num acct-time">{when(f.time)}</td>
           </tr>

@@ -11,16 +11,13 @@
  * public/logos by swapping in a staged copy, and must not have to know about
  * these. Anything SoDEX's set already has is skipped here.
  *
- * Coin sources, first real image wins per coin:
- *   1. Hyperliquid's own icon set, app.hyperliquid.xyz/coins/<NAME>.svg - it
- *      covers its perps, its spot tokens and the HIP-3 `xyz:` stocks. An
- *      unknown name there answers an HTML page, which is rejected (only
- *      image/* is kept).
- *   2. TradingView's crypto marks, s3-symbol-logo.tradingview.com/crypto/XTVC<SYM>.svg.
- *   3. For stocks and ETFs: TradingView's symbol search, exact ticker on a US
- *      exchange (NASDAQ, NYSE, AMEX, CBOE), and the issuer logo it names -
- *      the same set fetch-logos.mjs takes SoDEX's stock icons from.
- * Coins neither has keep the app's letter avatar.
+ * Coin source: Hyperliquid's own icon set, app.hyperliquid.xyz/coins/<NAME>.svg -
+ * it covers its perps, its spot tokens and the HIP-3 `xyz:` stocks. An unknown
+ * name there answers an HTML page, which is rejected (only image/* is kept).
+ * Coins it does not have take their owner's own icon (fetch-site-logos.mjs
+ * COIN_SITES) or keep the app's letter avatar. Licence review 2026-10-28:
+ * TradingView's crypto marks and its symbol search (issuer logos) are no longer
+ * used - its terms bar commercial use without an agreement.
  *
  * Brand marks: each venue's own apple-touch-icon, read from its app's HTML.
  */
@@ -30,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { recompressPng, shrinkPng } from './png-shrink.mjs';
 import { cleanSvg } from './logo-clean.mjs';
 import { COIN_LOGOS } from '../src/logoManifest.ts';
+import { SITE_COIN_LOGOS } from '../src/logoManifestSites.ts';
 import { logoCandidates, resolveKey } from '../src/logoKey.ts';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -38,7 +36,6 @@ const MANIFEST = join(WEB, 'src', 'logoManifestVenues.ts');
 const UA = { 'User-Agent': 'Mozilla/5.0 (valuedesk logo sync)' };
 const HL_INFO = 'https://api.hyperliquid.xyz/info';
 const HL_COINS = 'https://app.hyperliquid.xyz/coins';
-const TV = 'https://s3-symbol-logo.tradingview.com/crypto';
 
 const BRANDS = {
   HYPERLIQUID: 'https://app.hyperliquid.xyz',
@@ -50,25 +47,6 @@ const BRANDS = {
 const EXT = { 'image/svg+xml': '.svg', 'image/png': '.png', 'image/webp': '.webp', 'image/jpeg': '.jpg' };
 const MAX_BYTES = 300_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const US = new Set(['NASDAQ', 'NYSE', 'AMEX', 'CBOE', 'NYSE ARCA', 'BATS']);
-
-/** The issuer logo of a US stock or ETF ticker, via TradingView's symbol search. */
-async function stockLogo(ticker) {
-  if (!/^[A-Z]{1,5}$/.test(ticker)) return null;
-  for (const type of ['stocks', 'funds']) {
-    try {
-      const url = `https://symbol-search.tradingview.com/symbol_search/v3/?text=${ticker}&search_type=${type}`;
-      const res = await fetch(url, { headers: { ...UA, Origin: 'https://www.tradingview.com' }, signal: AbortSignal.timeout(20_000) });
-      if (!res.ok) continue;
-      const j = await res.json();
-      const hit = (j.symbols ?? []).find((s) => s.symbol === ticker && US.has(String(s.exchange).toUpperCase()) && (s.logoid || s.logo?.logoid));
-      const id = hit?.logoid ?? hit?.logo?.logoid;
-      if (id) return `https://s3-symbol-logo.tradingview.com/${id}.svg`;
-    } catch { /* next */ }
-    await sleep(150);
-  }
-  return null;
-}
 
 async function json(url, body) {
   const res = await fetch(url, body
@@ -136,7 +114,7 @@ async function main() {
   const coins = await venueCoins();
   const want = new Map();
   for (const c of coins) {
-    if (resolveKey(c.name, COIN_LOGOS)) continue; // SoDEX's set already has it
+    if (resolveKey(c.name, COIN_LOGOS) || resolveKey(c.name, SITE_COIN_LOGOS)) continue; // SoDEX's set or the owners' own already has it
     const key = logoCandidates(c.name).find((k) => !k.includes(':') && !k.includes('/') && !k.includes('-')) ?? logoCandidates(c.name)[0];
     if (!key || want.has(key)) continue;
     want.set(key, c);
@@ -151,26 +129,14 @@ async function main() {
       ...(c.hl ? [`${HL_COINS}/${encodeURIComponent(c.hl).replace(/%3A/g, ':')}.svg`] : []),
       `${HL_COINS}/${key}.svg`,
       `${HL_COINS}/xyz:${key}.svg`,
-      `${TV}/XTVC${key}.svg`,
     ];
-    let found = false;
     for (const url of tries) {
       const img = await image(url);
       if (!img) continue;
       const rel = `coins/${key.replace(/[^A-Z0-9_.]/gi, '_')}${img.ext}`;
       write(rel, img, key);
       manifest[key] = `venues/${rel}`;
-      found = true;
       break;
-    }
-    if (!found) {
-      const url = await stockLogo(key);
-      const img = url ? await image(url) : null;
-      if (img) {
-        const rel = `coins/${key.replace(/[^A-Z0-9_.]/gi, '_')}${img.ext}`;
-        write(rel, img, key);
-        manifest[key] = `venues/${rel}`;
-      }
     }
     if (++i % 50 === 0) console.log(`  ${i}/${want.size}`);
     await sleep(60);

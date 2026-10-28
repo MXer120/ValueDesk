@@ -97,11 +97,19 @@ export interface TradingConfig {
   disabled: boolean;
   /**
    * The operator's emergency brake, from /api/health (null: off). `trading`
-   * refuses every order from this browser; `copies` and `algos` hold the
+   * refuses every order that opens or increases a position from this browser -
+   * cancels, reduce-only orders and exits, transfers and withdrawals still go
+   * (`closesAllowed`, actions.ts signAndSend); `copies` and `algos` hold the
    * browser copier and browser algos. It reaches open tabs within the 30 s
    * health poll, and no build setting overrides it.
    */
   brake: { trading: boolean; copies: boolean; algos: boolean; reason: string } | null;
+  /**
+   * Writes the deployment allows with the brake left out: true while only the
+   * brake stops trading. A user must always be able to cut risk and take their
+   * money out - the brake never traps a position (legal review 2026-10-28, D2).
+   */
+  closesAllowed: boolean;
 }
 
 // `import.meta.env` is Vite's; under the node test runner it is absent.
@@ -224,6 +232,7 @@ let current: TradingConfig = {
   // An emergency build - or one that names a builder it cannot charge (G1).
   disabled: env.VITE_TRADING_DISABLED === '1' || builderBroken(),
   brake: null,
+  closesAllowed: true,
 };
 
 /** The brake as /api/health reports it: anything but an object with a switch on is off. */
@@ -232,6 +241,11 @@ export function brakeOf(b: unknown): TradingConfig['brake'] {
   const r = b as Record<string, unknown>;
   const out = { trading: r.trading === true, copies: r.copies === true, algos: r.algos === true, reason: typeof r.reason === 'string' && r.reason.trim() ? r.reason.trim().slice(0, 300) : 'ValueDesk has paused trading for now.' };
   return out.trading || out.copies || out.algos ? out : null;
+}
+
+/** Only the brake stops writes: risk-reducing actions (cancel, close, reduce-only, withdraw) may still be signed. */
+export function onlyBrakeStops(cfg: TradingConfig = current): boolean {
+  return !cfg.writesAllowed && cfg.brake?.trading === true && cfg.closesAllowed;
 }
 
 /** What a refused order says: the brake's reason when the operator paused trading, else the deployment's switch. */
@@ -270,6 +284,7 @@ export function configureFromHealth(h: { network?: string; restBase?: string; ma
   const network = pin ?? reported;
   const mismatch = pin !== null && pin !== reported;
   const brake = brakeOf(h.brake);
+  const unbraked = !mismatch && (network === 'testnet' || h.mainnetWritesAllowed !== false || env.VITE_ALLOW_MAINNET_TRADING === '1');
   current = {
     ...current,
     network,
@@ -277,8 +292,8 @@ export function configureFromHealth(h: { network?: string; restBase?: string; ma
     gateway: (env.VITE_SODEX_GATEWAY?.trim() || GATEWAY_ORIGIN[network]).replace(/\/+$/, ''),
     // The server may only ever switch trading OFF, never on (security audit K-03).
     // The brake beats every build setting: it is how the operator stops trading without a rebuild.
-    writesAllowed:
-      !mismatch && !brake?.trading && (network === 'testnet' || h.mainnetWritesAllowed !== false || env.VITE_ALLOW_MAINNET_TRADING === '1'),
+    writesAllowed: unbraked && !brake?.trading,
+    closesAllowed: unbraked,
     brake,
   };
   fromBackend = true;

@@ -2,17 +2,16 @@
  * This browser's feedback conversations (apps/server routes/reports.ts,
  * ops/feedbackThreads.ts).
  *
- * A thread is a random token made here (32 bytes from crypto.getRandomValues),
- * kept in localStorage with how many of the owner's replies were already seen.
- * The token is the key to the chat: it goes to the server in the Authorization
- * header (poll: in the body), never in a URL, and the server keeps only its
- * hash. Clearing this browser's storage loses a chat that is not kept on a
- * wallet (session.ts); once it is (`wallet` set here), only the wallet's
- * sign-in opens it, and the token is left to count replies for the bell.
+ * The chat is always a wallet's, and only the wallet's signature reads it
+ * (session.ts). What this browser keeps is a random token per wallet it sent
+ * for (32 bytes from crypto.getRandomValues; `wallet` unset: sent with no wallet
+ * connected), in localStorage, with how many of the owner's replies were already
+ * seen and announced. The token reads NOTHING: it is what an unsigned message is
+ * sent with (Authorization header, never a URL; the server keeps only its hash),
+ * and - the one without a wallet - what joins the wallet's chat at the first
+ * sign-in (attach). It never tells anything about a chat, not even a count.
  *
- * At most MAX_THREADS are kept (the server's poll takes as many); the newest is
- * "the" conversation the form opens on. The chat never ends: there is no "new
- * conversation".
+ * At most MAX_THREADS are kept (the server's poll takes as many).
  */
 
 export const STORAGE_KEY = 'vs.feedback.threads.v1';
@@ -30,7 +29,7 @@ export interface ThreadRef {
   notifiedOwner: number;
   /** The first words of the first message, for the list. */
   preview: string;
-  /** The wallet the chat is kept on now (session.ts), once this browser attached it. */
+  /** The wallet whose chat this token sent into (or, after a sign-in, joined); unset: no wallet. */
   wallet?: string;
 }
 
@@ -42,6 +41,8 @@ export interface ChatMessage {
   images: string[];
   category?: string | null;
   areas?: string[];
+  /** False: sent with this wallet's address but without its signature. */
+  proven?: boolean;
 }
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
@@ -92,34 +93,23 @@ export function newToken(random: (b: Uint8Array) => Uint8Array = (b) => crypto.g
   return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
-/** Remember a thread (newest first) once its first message went out. */
-export function rememberThread(token: string, preview: string, now = Date.now()): void {
+/** The token this browser sends with for `wallet` (null: no wallet connected) - the one it has, or a new one. */
+export function tokenFor(wallet: string | null): string {
+  const w = wallet?.toLowerCase();
+  return threads().find((t) => (w ? t.wallet === w : !t.wallet))?.token ?? newToken();
+}
+
+/** Remember a token (newest first) once a message went out with it, for `wallet` (null: none). */
+export function rememberThread(token: string, preview: string, wallet: string | null = null, now = Date.now()): void {
   const rest = threads().filter((t) => t.token !== token);
   const prev = threads().find((t) => t.token === token);
-  save([prev ?? { token, startedAt: now, seenOwner: 0, notifiedOwner: 0, preview: preview.slice(0, 80) }, ...rest]);
-}
-
-export function markSeen(token: string, owner: number): void {
-  save(threads().map((t) => (t.token === token ? { ...t, seenOwner: Math.max(t.seenOwner, owner), notifiedOwner: Math.max(t.notifiedOwner, owner) } : t)));
-}
-
-export function markNotified(token: string, owner: number): void {
-  save(threads().map((t) => (t.token === token ? { ...t, notifiedOwner: Math.max(t.notifiedOwner, owner) } : t)));
+  const w = wallet?.toLowerCase();
+  save([prev ?? { token, startedAt: now, seenOwner: 0, notifiedOwner: 0, preview: preview.slice(0, 80), ...(w ? { wallet: w } : {}) }, ...rest]);
 }
 
 /** The chat this token opened is kept on `wallet` now (the server attached it at the sign-in). */
 export function markAttached(token: string, wallet: string): void {
   save(threads().map((t) => (t.token === token ? { ...t, wallet: wallet.toLowerCase() } : t)));
-}
-
-/** Replies the poll found that were not announced yet: [token, owner count]. */
-export function unannounced(list: readonly ThreadRef[], counts: ReadonlyArray<{ owner: number } | null>): Array<{ token: string; owner: number; fresh: number }> {
-  const out: Array<{ token: string; owner: number; fresh: number }> = [];
-  list.forEach((t, i) => {
-    const c = counts[i];
-    if (c && c.owner > t.notifiedOwner && c.owner > t.seenOwner) out.push({ token: t.token, owner: c.owner, fresh: c.owner - Math.max(t.notifiedOwner, t.seenOwner) });
-  });
-  return out;
 }
 
 const authed = (token: string): Record<string, string> => ({ Authorization: `Bearer ${token}` });
@@ -163,15 +153,15 @@ export async function loadThread(key: string, f: typeof fetch = fetch): Promise<
 export type ReplyCount = { owner: number; lastOwnerAt: number | null } | null;
 
 /**
- * For each kept thread, how many owner replies it has (null: unknown to the
- * server); with a wallet session, the wallet's chat too. Null when it failed.
+ * How many owner replies the signed-in wallet's chat has (null: no chat yet), or
+ * null when it failed. Only with the wallet's session: without it the server
+ * tells nothing about a chat, not even a count.
  */
-export async function pollThreads(tokens: readonly string[], session: string | null = null, f: typeof fetch = fetch): Promise<{ threads: ReplyCount[]; wallet: ReplyCount } | null> {
-  if (!tokens.length && !session) return { threads: [], wallet: null };
+export async function pollWallet(session: string, f: typeof fetch = fetch): Promise<{ wallet: ReplyCount } | null> {
   try {
-    const r = await postJson('/api/vs/feedback/poll', { tokens }, session ? authed(session) : {}, f);
-    if (r.status !== 200 || !Array.isArray(r.json?.threads)) return null;
-    return { threads: r.json!.threads as ReplyCount[], wallet: (r.json!.wallet as ReplyCount | undefined) ?? null };
+    const r = await postJson('/api/vs/feedback/poll', {}, authed(session), f);
+    if (r.status !== 200 || r.json?.ok !== true) return null;
+    return { wallet: (r.json.wallet as ReplyCount | undefined) ?? null };
   } catch {
     return null;
   }

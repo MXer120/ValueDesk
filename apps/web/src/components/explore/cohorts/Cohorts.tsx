@@ -24,6 +24,7 @@ import { SCAN_VENUES, vsApi, type Venue } from '../../../vsApi';
 import { useStored, useSymbols } from '../../../hooks';
 import { DASH, marketName, shortAddr } from '../../../format';
 import { winRateView } from '../../../winRateView';
+import { fmtFixed } from '../../../numStyle';
 import { emptyCohortsLine } from './emptyCopy';
 import { CoinIcon } from '../../CoinIcon';
 import { LoadFailed } from '../../LoadFailed';
@@ -298,7 +299,7 @@ function WalletsTable({ venues, id, filter, range, onScan }: { venues: readonly 
                   </td>
                   <td className="num">{fmtUsdShort(w.equity)}</td>
                   <td className="num">{w.value === null ? <span className="coh-dim" title="Positions not read yet">{DASH}</span> : fmtUsdShort(w.value)}</td>
-                  <td className="num">{w.leverage === null ? DASH : `${w.leverage.toFixed(2)}×`}</td>
+                  <td className="num">{w.leverage === null ? DASH : `${fmtFixed(w.leverage, 2)}×`}</td>
                   <td className={`num ${(w.upnl ?? 0) > 0 ? 'pos' : (w.upnl ?? 0) < 0 ? 'neg' : ''}`}>{w.upnl === null ? DASH : fmtUsdShort(w.upnl, true)}</td>
                   <td className={`num ${(pr ?? 0) > 0 ? 'pos' : (pr ?? 0) < 0 ? 'neg' : ''}`}>{pr === null ? <span className="coh-dim">{DASH}</span> : fmtUsdShort(pr, true)}</td>
                   <td className={`num ${wr.tone === 'muted' ? '' : wr.tone}`} title={wr.title}>

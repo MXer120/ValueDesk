@@ -14,30 +14,91 @@
  *     once it has not.
  */
 import { useState, type InputHTMLAttributes } from 'react';
+import { parseNumInput, toInputText } from '../numStyle';
 
 /**
- * What a decimal box keeps of a keystroke or a paste: digits and ONE decimal
- * point (and a leading minus when `signed`).
+ * What a decimal box keeps of a keystroke or a paste: the MACHINE string ("."
+ * decimal, no grouping - what state holds and what is sent), digits and ONE
+ * decimal point (and a leading minus when `signed`). The box SHOWS it through
+ * `toInputText` (numStyle.ts): the chosen decimal mark, never grouping, so the
+ * text being edited is never itself ambiguous.
  *
- * Commas: with no point in the box, a single comma IS the decimal point ("0,5")
- * and several are thousands separators ("1,234,567"). With a point present every
- * comma goes - a pasted "83,941.5" is 83941.5, and a comma typed after "1.5" is
- * dropped rather than turning the point into a thousands separator (which would
- * silently make it 15). A second point is dropped the same way.
+ * TYPING (one keystroke at a time, the box showing canonical text):
+ *   - one mark, "." or ",": it is the decimal point, whichever the format.
+ *     A de-DE keypad types ",", a plain one "."; both mean the same, and the
+ *     box at once shows it as the format's own mark, so what it took is visible.
+ *   - a mark typed after a decimal point is dropped ("1,5" + "." stays 1.5);
+ *     a second point anywhere keeps the first one ("1..5" is 1.5). A mark is
+ *     never promoted to a thousands separator by a keystroke - that would
+ *     silently make 1.234 into 1234.
+ *   - several of one kind in valid groups of three ("1,234,567") and a full
+ *     grouped figure ("83,941.5", "83.941,5") are read as grouped: that text
+ *     only arrives by a paste.
+ * A PASTE (or `pasted: true`) is read strictly by `parseNumInput`: "1.234,5"
+ * and "1,234.5" are both 1234.5, and an AMBIGUOUS figure - "1.000" in the
+ * 1.234,56 format, "1,000" in 1,234.56 - is refused (the box keeps `prev`, or
+ * empties) with a hint saying what to type, never read as a guess.
  */
-export function decimalInput(raw: string, opts: { signed?: boolean } = {}): string {
-  let s = raw.trim();
-  const neg = opts.signed === true && s.startsWith('-');
-  if (!s.includes('.')) {
-    const commas = s.split(',').length - 1;
-    s = commas === 1 ? s.replace(',', '.') : s.replace(/,/g, '');
-  } else {
-    s = s.replace(/,/g, '');
+export function decimalInput(raw: string, opts: { signed?: boolean; prev?: string; pasted?: boolean } = {}): string {
+  const isPaste = opts.pasted ?? takePaste(raw);
+  let s = raw.replace(/[\s   '’]/g, '');
+  const neg = opts.signed === true && /^[\-−]/.test(s);
+  s = s.replace(/[^\d.,]/g, '');
+  const sign = neg ? '-' : '';
+  if (isPaste && /\d/.test(s)) {
+    const p = parseNumInput(s);
+    if (p.ok) return sign + p.value;
+    hint(p.error);
+    return opts.prev ?? '';
   }
-  s = s.replace(/[^\d.]/g, '');
-  const dot = s.indexOf('.');
-  if (dot >= 0) s = s.slice(0, dot + 1) + s.slice(dot + 1).replace(/\./g, '');
-  return (neg ? '-' : '') + s;
+  return sign + typed(s);
+}
+
+/** The keystroke rules above, on text of digits and marks only. */
+function typed(s: string): string {
+  const dots = s.split('.').length - 1;
+  const commas = s.split(',').length - 1;
+  if (dots + commas === 0) return s;
+  if (dots + commas === 1) return s.replace(',', '.');
+  const last = s[s.length - 1]!;
+  // A stray mark typed at the end of a figure that already has one: dropped.
+  if ((last === '.' || last === ',') && /[.,]/.test(s.slice(0, -1))) return typed(s.slice(0, -1));
+  // A whole grouped figure (only a paste writes one): read as grouped.
+  if (/^\d/.test(s)) {
+    const p = parseNumInput(s);
+    if (p.ok) return p.value;
+  }
+  // Otherwise the first mark is the point; every later mark goes.
+  const at = s.search(/[.,]/);
+  return `${s.slice(0, at)}.${s.slice(at + 1).replace(/[.,]/g, '')}`;
+}
+
+/**
+ * Whether the text being read came from a paste: the capture listener notes the
+ * field pasted (or dropped) into, and the read counts as a paste only when it is
+ * THAT field's own current text, within a second. So a sanitizer run on a
+ * computed machine value (tickInput on a toFixed price at submit) is never read
+ * by the paste rule, however soon after a paste it runs.
+ */
+let pasted: { el: HTMLInputElement; at: number } | null = null;
+if (typeof document !== 'undefined') {
+  const mark = (e: Event) => {
+    pasted = e.target instanceof HTMLInputElement ? { el: e.target, at: Date.now() } : null;
+  };
+  document.addEventListener('paste', mark, true);
+  document.addEventListener('drop', mark, true);
+}
+function takePaste(raw: string): boolean {
+  const p = pasted;
+  if (!p || Date.now() - p.at > 1000 || p.el.value !== raw) return false;
+  pasted = null;
+  return true;
+}
+
+/** The refusal, as a toast (loaded on demand: tests and the parser stay free of the UI). */
+function hint(message: string): void {
+  if (typeof window === 'undefined') return;
+  void import('../toast').then((m) => m.notify('warn', message)).catch(() => {});
 }
 
 /** Whole numbers only (a percentage, a multiplier), at most `maxDigits` long. */
@@ -95,8 +156,8 @@ const completable = (intPart: string, frac: string, scale: number, step: string)
  * into a multiple of the tick is replaced by the nearest tick, so the field
  * never sits on a price the venue would have to correct.
  */
-export function tickInput(raw: string, tick: string | undefined): string {
-  const cleaned = decimalInput(raw);
+export function tickInput(raw: string, tick: string | undefined, prev?: string): string {
+  const cleaned = decimalInput(raw, { prev });
   if (!tick) return cleaned;
   const step = trimZeros(tick);
   if (!/^\d+(\.\d+)?$/.test(step) || step === '0') return cleaned;
@@ -142,7 +203,8 @@ export function DraftInput({ value, onDraft, sanitize, onFocus, onBlur, ...rest 
       // A figure, not a form field: no browser history dropdown under it.
       autoComplete="off"
       {...rest}
-      value={draft ?? value}
+      // Machine text in state; the format's decimal mark on screen (numStyle.ts).
+      value={toInputText(draft ?? value)}
       onFocus={(e) => {
         setDraft(value);
         onFocus?.(e);

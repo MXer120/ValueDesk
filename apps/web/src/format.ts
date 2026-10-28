@@ -8,23 +8,31 @@
  */
 
 import { formatNumber } from './intlCache';
+import { localize } from './numStyle';
 
 /** Decimal places implied by a tick/step size like "0.0001". */
 export const precisionOf = (step: string | undefined): number =>
   step ? (step.split('.')[1] ?? '').replace(/0+$/, '').length || (step.includes('.') ? 0 : 0) : 2;
 
 /**
- * Fixed to en-US, NOT the browser locale.
+ * The separators follow the app's number format (numStyle.ts, Settings >
+ * Appearance), NOT the browser locale.
  *
- * On a de-DE browser `toLocaleString()` renders 79290 as "79.290" and 0.12648 as
- * "0,12648" - a price that reads as seventy-nine-point-two-nine to anyone used
- * to a dot decimal separator. Market data is unambiguous or it is dangerous, so
- * the separators are pinned regardless of system locale.
+ * The figure is built in en-US and its two separators swapped for the chosen
+ * ones, so a de-DE browser with the 1,234.56 setting still reads 79,290 - and
+ * the default 1.234,56 reads 79.290 on every browser. Market data is
+ * unambiguous or it is dangerous: one setting, applied everywhere, never the
+ * system locale's guess.
  */
 export function fmt(value: string | number | undefined | null, dp?: number): string {
   if (value === undefined || value === null || value === '') return DASH;
   const n = typeof value === 'number' ? value : Number.parseFloat(value);
   if (!Number.isFinite(n)) return String(value);
+  return localize(fmtEn(n, dp));
+}
+
+/** `fmt`'s figure in en-US (the machine-side half; `localize` makes it the user's). */
+function fmtEn(n: number, dp?: number): string {
   return formatNumber(n, 'en-US', {
     minimumFractionDigits: dp ?? 0,
     maximumFractionDigits: dp ?? 8,
@@ -56,7 +64,7 @@ export function fmtUsd(v: string | number | undefined | null, dp?: number): stri
   if (!Number.isFinite(n)) return DASH;
   const digits = usdDigits(n, dp);
   const sign = n < 0 ? MINUS : '';
-  return `${sign}$${formatNumber(Math.abs(n), 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+  return `${sign}$${localize(formatNumber(Math.abs(n), 'en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits }))}`;
 }
 
 /**
@@ -88,9 +96,9 @@ export function fmtQuote(
   if (!Number.isFinite(n)) return DASH;
   const digits = usdDigits(n, dp);
   const sign = n < 0 ? MINUS : '';
-  const body = formatNumber(Math.abs(n), 'en-US', {
+  const body = localize(formatNumber(Math.abs(n), 'en-US', {
     minimumFractionDigits: digits, maximumFractionDigits: digits,
-  });
+  }));
   return isDollarQuote(quoteCoin)
     ? `${sign}$${body}`
     : `${sign}${body} ${coinLabel(quoteCoin) || ''}`.trim();
@@ -100,7 +108,7 @@ export function fmtPct(v: number | string | undefined | null, dp = 2): string {
   if (v === undefined || v === null || v === '') return DASH;
   const n = typeof v === 'number' ? v : Number.parseFloat(v);
   if (!Number.isFinite(n)) return DASH;
-  return `${n >= 0 ? '+' : ''}${n.toFixed(dp)}%`;
+  return `${n >= 0 ? '+' : ''}${localize(n.toFixed(dp))}%`;
 }
 
 export const fmtTime = (ms: number | undefined): string =>
@@ -226,6 +234,8 @@ export const coinLabel = (coin: string | undefined | null): string => {
 export function fmtBalance(v: string | number | undefined | null, coin: string | undefined): string {
   const stable = /^v?(USDC|USDT|USD\w*|DAI)$/i.test(coin ?? '');
   const n = typeof v === 'number' ? v : Number.parseFloat(String(v ?? ''));
-  const s = fmt(v, stable ? usdDigits(Number.isFinite(n) ? n : 0) : 6);
-  return stable || !/\.\d/.test(s) ? s : s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '');
+  if (v === undefined || v === null || v === '') return DASH;
+  if (!Number.isFinite(n)) return String(v);
+  const s = fmtEn(n, stable ? usdDigits(n) : 6);
+  return localize(stable || !/\.\d/.test(s) ? s : s.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, ''));
 }

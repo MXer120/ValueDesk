@@ -53,7 +53,7 @@ import { Section, Seg } from '../accountTables/FilterBar';
 import '../Account.css';
 import '../Leaderboard.css';
 import './LeaderboardPage.css';
-import { formatNumber } from '../../intlCache';
+import { fmtNum } from '../../numStyle';
 
 function VenueMark({ venue, size = 16 }: { venue: Venue; size?: number }) {
   return <VenueLogo venue={venue} size={size} />;
@@ -141,7 +141,7 @@ function metric(r: TraderRow, sort: SortKey, window: BoardWindow): number {
 
 function fmtTrades(r: TraderRow): string {
   if (r.trades == null) return '—';
-  const n = formatNumber(r.trades, 'en-US');
+  const n = fmtNum(r.trades);
   return r.tradesCapped ? `${n}+` : n;
 }
 
@@ -473,7 +473,7 @@ export function LeaderboardPage({ address, onScan }: LeaderboardPageProps) {
       {top?.index && !top.index.complete && (
         <p className="lbp-note">
           Still indexing: {top.index.pending > 0
-            ? `${top.index.pending.toLocaleString('en-US')} traders ranked here are waiting for a trade check, so the order can still change.`
+            ? `${fmtNum(top.index.pending)} traders ranked here are waiting for a trade check, so the order can still change.`
             : 'the ranking source is loading.'}
         </p>
       )}

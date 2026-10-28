@@ -113,8 +113,17 @@ test('venueList and isMissing', () => {
 });
 
 import { amountInput, fmtAmountInput, parseAmount, winRateTint } from './model';
+import { setNumStyle } from '../../numStyle';
+
+test('amount fields in the 1.234,56 format: a comma is the decimal mark', () => {
+  setNumStyle('dot-comma');
+  assert.equal(amountInput('1,5m'), '1.5m');
+  assert.equal(amountInput('1.5m'), '1.5m', 'a dot typed as the decimal mark works too');
+  assert.equal(amountInput('$250k'), '250k');
+});
 
 test('amount fields: typed shorthand in, compact text out', () => {
+  setNumStyle('comma-dot');
   assert.equal(amountInput('$1,500k'), '1500k');
   assert.equal(amountInput('2.5mm'), '2.5m');
   assert.equal(amountInput('abc'), '');

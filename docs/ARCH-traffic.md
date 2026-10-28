@@ -315,19 +315,20 @@ Against this inventory, HOSTED_ROUTES should be:
 
 - **Keep**: `/api/health`; the index routes; `/api/vs/whales`, `/api/vs/positioning`,
   `/api/vs/news` (SoSoValue, cached on the process; `not_available` without `SOSOVALUE_API_KEY`),
-  `/api/vs/news/sources` (the White House's and Watcher.Guru's RSS feeds, each read at most every
-  5 minutes; valuedesk/feeds.ts), `/api/vs/logo` (a news source's site icon from DuckDuckGo's icon
-  service, kept a day per site, so the page asks only this origin),
+  `/api/vs/news/sources` (the White House's RSS feeds - Watcher.Guru dropped 2026-10-28 - each read at most every
+  5 minutes; valuedesk/feeds.ts), `/api/vs/logo` (a news source's site icon from the site itself - its
+  apple-touch-icon or favicon, public hosts only (SSRF guard) - kept a day per site, so the page asks only this origin),
   `/api/vs/calendar` (the economic calendar: federalreserve.gov, bls.gov, bea.gov and SoSoValue,
   each read at most twice a day), `/api/vs/calendar/results` (its releases' official figures,
   read by one watcher in the API process from the publishers' pages at the release second),
   `/api/vs/fed/live` (the Fed's current Brightcove broadcast; valuedesk/releases.ts),
   `/api/vs/fedwatch` (the coming FOMC meetings' decision probabilities from Kalshi's public market
-  data, Polymarket's beside; read at most once a minute; valuedesk/fedwatch.ts),
+  data, Polymarket's beside; read at most once a minute; valuedesk/fedwatch.ts; OFF unless FOMC_ODDS=on -
+  licence review 2026-10-28),
   `/api/vs/fedwatch/history` (one listed meeting's probabilities over 7/30/90 days from Kalshi's
   candlesticks, cached 10 minutes per meeting and range),
   `/api/vs/indicators` (the indicator catalog, no fetch), `/api/vs/indicator` (one catalog
-  indicator's history from FRED's public CSV, read at most every 6 hours; valuedesk/indicators.ts),
+  indicator's history from BLS, BEA, Census, DOL and the Fed Board, read at most every 6 hours; valuedesk/indicators.ts),
   and `/api/vs/etf/flows` (SoSoValue's US spot ETF flows and funds per asset, cached 30 minutes on the
   news key's budget, at most 5 calls a minute; `not_available` without `SOSOVALUE_API_KEY`;
   valuedesk/sosovalue/etf.ts), `/api/vs/oracle` (the shared price oracle for Fill fast: 19 venues' public tickers -

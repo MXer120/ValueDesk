@@ -22,6 +22,7 @@
  * USDC / 1 SOSO activation fee); the sheet then carries on in place: account
  * ready -> Enable trading (one signature) -> move the deposit to Perps.
  */
+import { fmtDecimalString } from '../../numStyle';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
 import { AutoHeight, Collapse, FadeView } from '../motion';
@@ -590,7 +591,7 @@ function DepositProgress({ w }: { w: DepositWatch }) {
   return (
     <div className={`fx-dprog${w.stage === 'failed' ? ' is-failed' : w.stage === 'review' ? ' is-review' : ''}`} role="status" aria-live="polite">
       <div className="fx-dprog__what">
-        {w.row.amount ? `${w.row.amount} ${w.row.coin}` : w.row.coin}
+        {w.row.amount ? `${fmtDecimalString(w.row.amount)} ${w.row.coin}` : w.row.coin}
         {w.row.chain ? <small> via {chainLabel(w.row.chain)}</small> : null}
       </div>
       {off ? (

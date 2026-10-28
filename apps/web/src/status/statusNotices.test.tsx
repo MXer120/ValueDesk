@@ -7,6 +7,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { installViteStubs, staticMarkup } from '../components/macro/testEnv';
+import { setNumStyle } from '../numStyle';
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 installViteStubs();
 const { createElement } = await import('react');

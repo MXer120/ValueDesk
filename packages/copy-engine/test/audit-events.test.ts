@@ -340,13 +340,15 @@ test('BUG basket: a bound that stops the basket stops its legs too', async () =>
   for (const c of legs) assert.ok(['cancelled', 'expired', 'done'].includes(r.rt.get(c.id)!.status), `leg ${c.spec.symbol} is still ${r.rt.get(c.id)!.status} after the basket stopped`);
 });
 
-test('BUG swarm: clips under SoDEX\'s minimum are merged, not dropped (retries 0 must still fill the size)', async () => {
+test('BUG swarm: clips under SoDEX\'s minimum are refused at the start with the fix - never merged, never dropped', async () => {
   const r = await rig();
   // $240 in 200 clips: $1.20 each, under the $10 minimum order.
-  const a = await add(r, { kind: 'swarm', quantity: '0.004', clips: 200, inFlight: 20, waveMs: 0, slippageBps: 20, retries: 0 });
+  await assert.rejects(add(r, { kind: 'swarm', quantity: '0.004', clips: 200, inFlight: 20, waveMs: 0, slippageBps: 20, retries: 0 }), /Each of the 200 clips would be about \$1\.2\d, under SoDEX's \$10 minimum\. Use at most \d+ clips, or raise the size to \$[\d,]+\./);
+  assert.equal(r.sink.all.length, 0);
+  // At most what it names: it starts and fills the size.
+  const a = await add(r, { kind: 'swarm', quantity: '0.004', clips: 20, inFlight: 20, waveMs: 0, slippageBps: 20, retries: 0 });
   let x = await step(r, a.id);
   for (let i = 0; i < 20 && x.status !== 'done' && x.status !== 'expired'; i++) x = await step(r, a.id, 500);
-  assert.ok(r.sink.all.length > 0, `nothing was ever sent; it ended ${x.status}: ${x.statusReason}`);
   assert.ok(near(x.filled, 0.004));
 });
 

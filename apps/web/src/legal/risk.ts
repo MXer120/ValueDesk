@@ -4,7 +4,7 @@
  * (legal/acceptance.ts: SITE_TERMS_VERSION covers terms.ts and this text), so
  * any change here raises SITE_TERMS_VERSION and pins the new fingerprint.
  *
- * It says more than the risk notice in the Terms of use (section 9 there) and
+ * It says more than the risk notice in the Terms of use (section 11 there) and
  * covers every product of the app: perpetual futures and spot on SoDEX, the
  * builder fee, algo orders (packages/copy-engine/src/algo, docs/ALGO-ORDERS.md),
  * copy trading (in short - the full text is copyTerms.ts section 7), the data
@@ -98,6 +98,7 @@ export const RISK: LegalDoc = {
             'SoDEX can be hacked, become insolvent, suffer outages, pause trading, deposits or withdrawals, change its fees and rules, or close. Losses from any of these may never be made good.',
             'SoDEX\'s data - prices, balances, positions, order status - can be delayed, incomplete or wrong, and ValueDesk shows it as it receives it.',
             'An order is placed, changed or cancelled only once SoDEX has accepted it. A confirmation in ValueDesk that is not followed by SoDEX\'s acceptance means nothing was done.',
+            'SoDEX limits how many requests it accepts (rate limits) and can reject or delay orders, change its interface or go into maintenance. Orders, cancellations, copies and algo orders can then fail or arrive late - also when you most need them, in a fast market.',
           ],
         },
       ],
@@ -123,6 +124,7 @@ export const RISK: LegalDoc = {
             '**The trading key.** When you enable trading, your browser keeps a trading key that SoDEX accepts for orders, for at most seven days. Anyone who controls your device while it is valid can trade with it. Turn trading off, or sign out, on a device others use.',
             '**Phishing and fake sites.** Criminals copy trading sites and send fake messages, apps and support contacts. Check the address of the site before you connect a wallet or sign anything. ValueDesk will never ask for your recovery phrase or private key, and never contacts you first to ask you to sign something.',
             '**Read what you sign.** Your wallet shows every message and transaction before it is signed. A signature you did not understand can cost you your funds.',
+            '**ValueDesk can be attacked too.** Like any online service, ValueDesk\'s servers, its hosting providers, its domain and the software components it uses can be broken into. An attacker could then change what the site shows or asks you to sign, or obtain the keys stored on the hosted executor and trade with them until they expire or are revoked. What your wallet shows you is what you sign - check it, whatever the page says.',
           ],
         },
       ],
@@ -157,6 +159,7 @@ export const RISK: LegalDoc = {
             '**Public data can be wrong.** Leaderboards, rankings, cohorts, win rates, profit and loss, wallet scans and the screener are computed by ValueDesk from data that SoDEX, Hyperliquid (including trade.xyz), Lighter and Arcus publish. It can be incomplete, delayed, attributed to the wrong wallet or wrong, and our calculations can contain errors.',
             '**Rankings show winners.** A ranking shows the traders who did well in a period; the many who lost are easy to overlook. A good record can be luck, leverage, a short period or a strategy that stops working. Past performance is not a reliable indicator of future results.',
             '**News.** The News widget shows articles and posts from SoSoValue and the outlets it collects, as they are received. ValueDesk does not write, check, select for accuracy or endorse them. News can be false, outdated, incomplete or written to move prices; the coins shown with a story can be assigned automatically and wrongly.',
+            '**Calendar, figures and odds.** The economic calendar, release figures, rate-decision odds from prediction markets and futures, ETF flows, automatic transcripts of live events and estimates such as the liquidation heatmap come from third parties or are estimated from their data. They can be late, mistranscribed or wrong, and markets can move before or against them.',
             '**Live streams.** The Live Feed plays third-party channels in their own players. What is said there is the broadcaster\'s, not ValueDesk\'s, and it is not advice.',
             '**Never trade on a headline, a ranking or a stream alone.** None of it is a recommendation, and none of it was prepared with your situation in mind.',
           ],
@@ -168,9 +171,11 @@ export const RISK: LegalDoc = {
       blocks: [
         {
           ul: [
-            '**Errors and outages.** ValueDesk is software under active development. It can contain errors - an order of the wrong size, a wrong figure, a missed update - and it can be unavailable, slow or show stale data. Figures marked "est." are estimates.',
+            '**Errors and outages.** ValueDesk is software under active development; copy trading, algo orders and the hosted executor are new. It can contain errors - an order of the wrong size or direction, an order sent twice, a stop not placed or not resized, an order sent after you paused, a wrong figure, a missed update - and it can be unavailable, slow or show stale data. Figures marked "est." are estimates.',
             '**Your connection and device** can drop, lag or fail, also in the middle of placing or closing an order.',
+            '**The emergency brake.** If we suspect an attack or an error, we may pause trading through ValueDesk, copies and algo orders at once and without notice. While trading is paused you cannot open or increase positions through ValueDesk; you can still close positions, cancel orders and withdraw, your positions stay open and stop orders already on SoDEX stay. Know how to manage your positions on SoDEX directly.',
             '**Changes.** We change, pause or end features, sometimes at short notice. Your funds stay in your own wallet and SoDEX account in every case, and you can always manage them on SoDEX directly.',
+            '**Data in your browser** - settings, the trading key, browser copies and algos - is lost when the browser\'s data is cleared. ValueDesk keeps no backup of it.',
           ],
         },
       ],
@@ -196,7 +201,7 @@ export const RISK: LegalDoc = {
             'ValueDesk gives no investment, financial, legal or tax advice and makes no recommendation, and it does not check whether trading, a product, a leverage or a strategy is suitable or appropriate for you.',
             'ValueDesk owes you no fiduciary duty: it does not manage your money and does not act in your interest when you decide.',
             'ValueDesk does not hold your funds, is not your counterparty, and cannot reverse, cancel or recover a transaction once it has been sent.',
-            'ValueDesk offers no negative balance protection, no insurance and no compensation for losses.',
+            'ValueDesk offers no negative balance protection, no insurance and no compensation scheme for trading losses. What we are liable for is set out in the [Terms of use](/terms), section 16.',
           ],
         },
         { p: 'If you do not understand a product or a risk described here, do not trade it. Get independent advice where you need it.' },

@@ -17,7 +17,7 @@ import { FeeTier } from '../components/FeeTier';
 import { Stats } from '../components/Stats';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
 import { FedLive } from '../components/fedlive/FedLive';
-import { FedWatch } from '../components/macro/FedWatch';
+import { FOMC_ODDS_ON, FedWatch } from '../components/macro/FedWatch';
 import { IndicatorWidget } from '../components/macro/IndicatorView';
 import { EtfFlows } from '../components/macro/EtfFlows';
 import { NewsFeed } from '../components/news/NewsFeed';
@@ -57,9 +57,11 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
 /** A tab's name: the widget's, with its copy number. */
 const widgetName = (id: string) => `${TAB_WIDGETS[baseOf(id)] ?? baseOf(id)}${copyOf(id) ? ` ${copyOf(id)}` : ''}`;
 
-const BAND_WIDGETS = ['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'liqmap', 'sizecalc', 'feetier', 'venue'];
+// The FOMC odds are off until the markets license them (FedWatch.tsx): not offered as a tab.
+const offered = (ids: string[]) => ids.filter((id) => id !== 'fedwatch' || FOMC_ODDS_ON);
+const BAND_WIDGETS = offered(['trades', 'news', 'livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'funding', 'liqmap', 'sizecalc', 'feetier', 'venue']);
 const CHART_SEED = ['liqmap'];
-const CHART_WIDGETS = ['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding', 'liqmap'];
+const CHART_WIDGETS = offered(['livefeed', 'fedlive', 'fedwatch', 'indicator', 'etfflows', 'news', 'trades', 'funding', 'liqmap']);
 
 const accountCtx = (c: TradeContext) => ({
   engine: c.engine,

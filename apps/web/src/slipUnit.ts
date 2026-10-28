@@ -3,6 +3,7 @@
  * (kept in localStorage `vs.slipUnit`). A field keeps its own value as it always did; switching the
  * unit converts what is shown (10 bp <-> 0.10%), never the value.
  */
+import { fmtFixed, localize } from './numStyle';
 import { useSyncExternalStore } from 'react';
 
 export type SlipUnit = 'bp' | 'pct';
@@ -51,4 +52,4 @@ export const unitAsPct = (text: string, u: SlipUnit): number => {
   return Number.isFinite(v) ? (u === 'bp' ? v / 100 : v) : Number.NaN;
 };
 /** "10 bp" / "0.10%". */
-export const fmtSlip = (pct: number, u: SlipUnit): string => (u === 'bp' ? `${trim(pct * 100, 1)} bp` : `${pct.toFixed(2)}%`);
+export const fmtSlip = (pct: number, u: SlipUnit): string => (u === 'bp' ? `${localize(trim(pct * 100, 1))} bp` : `${fmtFixed(pct, 2)}%`);

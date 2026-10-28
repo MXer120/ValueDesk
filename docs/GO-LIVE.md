@@ -21,12 +21,17 @@ Status: 2026-10-27. An item is ticked only when it holds on the production site.
       a right-click anywhere ("Send feedback about this", `feedback/FeedbackMenu.tsx`; the
       dashboard's own menu has it too), which attaches the clicked element.
 - [x] One ongoing chat per visitor, never closed (owner, 2026-10-27: "a permanent chat").
-      Without a wallet it is a random token in this browser (`feedback/threads.ts`; the
-      server keeps its hash). A connected wallet can keep the chat on itself with one free
-      signature (`feedback/session.ts`, `ops/feedbackAuth.ts`, a 30-day session); the
-      browser's chat joins the wallet's, and from then on only that wallet's signature
-      opens it. Every message carries the connected wallet's address, marked "proven" in
-      Telegram only when signed in. Kind (Bug, Idea, Other) and Areas (a multi-select with
+      The chat is always the connected wallet's (owner, 2026-10-28). Sending needs no
+      signature; every message carries the connected wallet's address, marked "proven" in
+      Telegram (and in the chat) only when sent signed in. Reading the chat, its
+      screenshots and replies needs the wallet's free signature (`feedback/session.ts`,
+      `ops/feedbackAuth.ts`, a 30-day session) - nothing else opens it, and without it
+      nothing about the chat is told, not even a reply count: the bell then only shows a
+      fixed "sign in to see replies" row left at send time. Without a wallet a message
+      still goes, and the form says replies need a wallet. A browser token
+      (`feedback/threads.ts`, hash only on the server) reads and counts nothing; at the
+      first sign-in it moves what that browser sent without a wallet (and chats from
+      before) into the wallet's chat. Kind (Bug, Idea, Other) and Areas (a multi-select with
       search, `feedback/AreaPicker.tsx`, `ops/feedbackAreas.ts`; required for a bug). Send
       opens a second window with the red warning and a slide to confirm. Limits per
       address and per chat. Stored in `feedback.db` and `feedback-images/` in the data

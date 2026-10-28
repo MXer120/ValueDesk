@@ -23,7 +23,7 @@ import { activeBuilder } from '../../trading/builder';
 import { tradingConfig } from '../../trading/config';
 import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
 import { useAcceptanceRevision } from '../../legal/acceptance';
-import { useViewerAccess } from '../../legal/geo';
+import { LOCATION_UNKNOWN, useViewerAccess, useViewerGeo } from '../../legal/geo';
 import { openLegalPage } from '../../legal/LegalGate';
 import { useScreening } from '../../legal/screening';
 
@@ -92,6 +92,7 @@ export function useTradeGate(address: string | null | undefined, unlocked: boole
  */
 export function useLegalTradeGate(address: string | null | undefined, opening: boolean): TradeGate | null {
   useViewerAccess();
+  useViewerGeo();
   useAcceptanceRevision();
   useScreening(address);
   if (!address) return null;
@@ -101,6 +102,9 @@ export function useLegalTradeGate(address: string | null | undefined, opening: b
   if (!opening) return null;
   if (st.access.level === 'close-only') {
     return { label: 'Close-only here', why: `${st.access.reason ?? ''} Tick Reduce only to close a position.`, act: terms, busy: false, approving: false };
+  }
+  if (st.located === false) {
+    return { label: 'Close-only here', why: `${LOCATION_UNKNOWN} Tick Reduce only to close a position.`, act: terms, busy: false, approving: false };
   }
   if (!st.signed) {
     return {

@@ -30,5 +30,28 @@ export default function AlgoRunner({ address, provider }: { address: string | nu
       gone = true;
     };
   }, [address]);
+  // Algos on an executor run while no tab does: their limit notices (a hold or a cut at SoDEX's position limit or
+  // open-interest cap) reach the bell from the executor's list, read while the page is visible (limitNotices.ts).
+  useEffect(() => {
+    if (!address) return;
+    let gone = false;
+    const check = async () => {
+      if (gone || document.visibilityState !== 'visible') return;
+      const [{ listOn }, { noteLimitNotices }] = await Promise.all([import('./executorAlgos'), import('./limitNotices')]);
+      for (const mode of ['hosted', 'self'] as const) {
+        const views = await listOn(mode).catch(() => []);
+        if (!gone) noteLimitNotices(views, mode === 'hosted' ? 'on the ValueDesk executor' : 'on your copier');
+      }
+    };
+    void check();
+    const t = window.setInterval(() => void check(), EXECUTOR_NOTICE_MS);
+    return () => {
+      gone = true;
+      window.clearInterval(t);
+    };
+  }, [address]);
   return null;
 }
+
+/** How often the executors' algo lists are read for limit notices (only an executor the wallet is signed in to answers). */
+const EXECUTOR_NOTICE_MS = 30_000;

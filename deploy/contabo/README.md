@@ -51,7 +51,7 @@ it is in git now:
 | the ledger snapshot it runs | s1 `/opt/valuescan/bin/builder-snapshot.sh`, forced command of a key in `~almalinux/.ssh/authorized_keys` (`from="13.140.77.201"`, no pty/forwarding) | `deploy/server/bin/builder-snapshot.sh` (same bytes) |
 | the executor's switch | s2 `/etc/valuescan/executor-here` (empty file) | created by `apply-overlay.sh server2` |
 | firewalld (installed by hand 2026-10-25; public zone: ssh, http, https) | both | `common/firewalld/public.xml`; `apply-overlay.sh` keeps exactly these |
-| hand-made env files | s1 `api.local.env` (SOSOVALUE_API_KEY, YOUTUBE_API_KEY, VALUESCAN_ALLOWED_ORIGINS), `indexer.local.env` (VALUESCAN_INDEX_HLC_CONCURRENCY, _HL_WEIGHT, _HL_COHORT - temporary), `executor.local.env` (EXECUTOR_LOCAL_ADDRESS - an AWS leftover); s2 `executor.local.env` (EXECUTOR_LOCATION) | `server*/env/*.example` (names) |
+| hand-made env files | s1 `api.local.env` (SOSOVALUE_API_KEY, YOUTUBE_API_KEY, BLS_API_KEY, BEA_API_KEY, VALUESCAN_ALLOWED_ORIGINS), `indexer.local.env` (VALUESCAN_INDEX_HLC_CONCURRENCY, _HL_WEIGHT, _HL_COHORT - temporary), `executor.local.env` (EXECUTOR_LOCAL_ADDRESS - an AWS leftover); s2 `executor.local.env` (EXECUTOR_LOCATION) | `server*/env/*.example` (names) |
 | bootstrap's answers | both `/etc/valuescan/bootstrap.env` | `server*/bootstrap.env.example` |
 
 Found on the way, and dealt with by `apply-overlay.sh` / bootstrap.sh:

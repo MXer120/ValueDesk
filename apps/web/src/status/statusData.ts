@@ -15,6 +15,7 @@ import {
   type DayTone, type DayToneShown, type DayTuple, type HealthNotice, type Impact, type Notice, type NoticePhase, type ServiceId,
   type ServiceState, type StatusReport,
 } from '@sign/ops/statusModel.js';
+import { fmtFixed } from '../numStyle';
 
 export type { DayTone, DayToneShown, DayTuple, HealthNotice, Notice, NoticePhase, ServiceState, StatusReport };
 export { IMPACT_TEXT, STAGE_TEXT, fmtUtc, fmtWindow, noticeLive, noticePhase };
@@ -105,7 +106,7 @@ const fmtMinutes = (m: number): string => (m < 60 ? `${m} min` : m % 60 === 0 ? 
 export function fmtUptime(pct: number | null): string {
   if (pct === null) return '–';
   if (pct >= 99.9995) return '100%';
-  return `${pct.toFixed(pct >= 99 ? 3 : 2)}%`;
+  return `${fmtFixed(pct, pct >= 99 ? 3 : 2)}%`;
 }
 
 // --- incidents and maintenance on the page -------------------------------------------------
@@ -193,7 +194,7 @@ export function dayDetail(d: DayTuple, service: ServiceId, notices: readonly Not
     day,
     tone: dayToneWith(d, onDay),
     date: new Date(`${day}T12:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }),
-    uptime: pct === null ? null : `${pct >= 99.995 ? '100' : pct.toFixed(2)}% up`,
+    uptime: pct === null ? null : `${pct >= 99.995 ? '100' : fmtFixed(pct, 2)}% up`,
     facts,
     notices: onDay.map((n) => ({ id: n.id, label: noticeKindText(n), title: n.title, times: noticeTimes(n, now) })),
   };

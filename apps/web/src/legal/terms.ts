@@ -35,10 +35,32 @@
  *     copy fee ladder;
  *   - the regional rules: the edge (deploy/vercel/package.mjs) and the app
  *     (legal/geo.ts, trading/legalGate.ts), by Vercel's country header and the
- *     declared country of residence; close-only keeps closing, cancelling and
+ *     country the wallet signed for (the one the edge saw - never picked by the
+ *     visitor, owner 2026-10-28; unknown: nothing opens); close-only keeps closing, cancelling and
  *     withdrawing possible;
  *   - News from SoSoValue through ValueDesk's server (/api/vs/news); the Live
- *     Feed's players load only after consent (legal/embeds.ts).
+ *     Feed's players load only after consent (legal/embeds.ts);
+ *   - (2026-10-28) the operator's emergency brake (deploy/release/brake.sh,
+ *     apps/executor/src/brake.ts, trading/config.ts): it stops orders from the
+ *     site, copy orders and live algos (held, not cancelled); stops resting on
+ *     SoDEX stay; on the site, while `trading` is braked, nothing that opens or
+ *     increases a position is signed - cancels, reduce-only orders, closes,
+ *     transfers and withdrawals still are (trading/actions.ts signAndSend,
+ *     config.ts closesAllowed); the incident runbook (docs/INCIDENT-RUNBOOK.md): a
+ *     compromised server means followers' sealed keys are treated as exposed and
+ *     followers revoke them on SoDEX.
+ *
+ * LIABILITY (section 16, 2026-10-28). Built so that each sentence survives
+ * §§ 307-309 BGB on its own and in the reading least favourable to us (the
+ * test in an action by a consumer association): the unlimited cases name
+ * everything § 309 Nr. 7 and § 444 BGB and the ProdHaftG keep; the cardinal
+ * obligations are described, not just named (BGH VIII ZR 121/04: the bare
+ * word is intransparent); the "not responsible for" paragraph describes what
+ * is not our performance at all and says expressly that it does not cut the
+ * liability above - so that it cannot be read as excluding cardinal duties.
+ * A money cap and a shorter limitation period are for merchants only: against
+ * a consumer a cap below the typical damage is void (§ 307 BGB), and a
+ * shortened limitation is a limitation of liability under § 309 Nr. 7 BGB.
  */
 import type { LegalDoc } from './model';
 
@@ -65,7 +87,7 @@ export const TERMS: LegalDoc = {
         {
           ul: [
             '**Before you use a function that needs them** - enabling trading, an order that opens or increases a position, a deposit, copy trading or an algo order - ValueDesk shows these terms in a window. It also shows it on your first visit, where you may close it and only look around. With one tick you confirm the statements shown there: that you accept these terms and the risk disclosure and that you meet the conditions in section 3. Nothing that needs these terms happens before you accept them. Your browser keeps the version you accepted and when.',
-            '**With your wallet.** If a wallet is connected, it signs the same terms in the same step - their version and a fingerprint (hash) of their text, your country of residence and the statements, word for word. A wallet that connects later is asked to sign them, and no wallet opens a position through ValueDesk before it has signed. The signature is free: it is a message, not a transaction, and moves no funds. It is our record of who accepted which version; we keep it as set out in the [Privacy policy](/privacy).',
+            '**With your wallet.** If a wallet is connected, it signs the same terms in the same step - their version and a fingerprint (hash) of their text, the country your connection comes from and the statements, word for word. A wallet that connects later is asked to sign them, and no wallet opens a position through ValueDesk before it has signed. The signature is free: it is a message, not a transaction, and moves no funds. It is our record of who accepted which version; we keep it as set out in the [Privacy policy](/privacy).',
             '**New versions.** We may change these terms for the future, for example when features, fees or the law change. Every version has its own number, shown when you accept it. A new version applies to you only once you accept it: the site asks you to on your next visit, and new positions can be opened through ValueDesk only once your wallet has signed it. Until then you can still close positions, cancel orders and withdraw. If you do not accept a new version, stop using ValueDesk.',
             'These terms are in English. A translation, where we offer one, is for convenience; the English version prevails, unless mandatory law where you live says otherwise.',
           ],
@@ -86,7 +108,8 @@ export const TERMS: LegalDoc = {
             'using ValueDesk, perpetual futures, algo orders and copy trading is lawful for you where you live and where you are.',
           ],
         },
-        { p: '**Do not hide where you are.** Do not use a VPN, a proxy or any other means to get around these restrictions, and declare your country of residence truthfully. We apply the restrictions by the country your connection comes from, as our hosting provider reports it, and by the country you declare; where they differ, the stricter applies. Neither check proves where you are, and meeting the conditions above remains your responsibility.' },
+        { p: '**Your country is taken from your connection.** We apply these restrictions by the country your connection comes from, as our hosting provider reports it; you cannot choose or change it. Your wallet signs the terms for that country, and with the statements you confirm that you do not live in a place where ValueDesk is restricted either. If you later connect from a stricter place, the stricter rule applies. If the country cannot be determined, you cannot open or increase positions through ValueDesk until it can; closing positions, cancelling orders and withdrawing stay possible.' },
+        { p: '**Do not hide where you are.** Do not use a VPN, a proxy or any other means to get around these restrictions or to make your connection appear to come from another country. A VPN can hide where you are, so the country we see does not prove where you are or where you live: meeting the conditions above remains your responsibility. [[OWNER: counsel to confirm that the detected country plus the residence statement is sufficient, or whether a declared country of residence must be asked for in addition]]' },
         { p: 'We may screen wallet addresses against public sanctions data, and refuse or end your use of ValueDesk, or limit it to closing positions, where we have reason to believe that a condition above is not met or where the law or an authority requires it. A restriction does not affect your funds: they stay in your wallet and your SoDEX account, which you can always manage on SoDEX directly.' },
       ],
     },
@@ -106,7 +129,8 @@ export const TERMS: LegalDoc = {
     {
       title: '5. The exchange and other services',
       blocks: [
-        { p: 'Your account, your orders and their execution, margin, liquidations, funding, fees, deposits and withdrawals are governed by the terms of SoDEX, which you accept with SoDEX, not with us. Moving funds can also involve the ValueChain network and other blockchains, and connecting your wallet can involve Reown / WalletConnect. Market and trader data comes from the venues named in section 1. We do not control these services, their availability, their prices or the correctness of what they publish, and we are not responsible for them.' },
+        { p: 'Your account, your orders and their execution, margin, liquidations, funding, fees, deposits and withdrawals are governed by the terms of SoDEX, which you accept with SoDEX, not with us. Moving funds can also involve the ValueChain network and other blockchains, and connecting your wallet can involve Reown / WalletConnect. Market and trader data comes from the venues named in section 1. We do not control these services, their availability, their prices or the correctness of what they publish, and we are not responsible for them. They do not act on our behalf: you use SoDEX, your wallet and the networks under your own agreements with them, and we do not owe you their performance.' },
+        { p: 'SoDEX and the other services can limit how many requests they accept (rate limits), reject or delay orders, change their interfaces, or be under maintenance, attacked or down. ValueDesk then cannot place, change or cancel orders, and algo orders and copies can be delayed, skipped or stopped. Oracle and mark prices, liquidations, auto-deleveraging and the settlement of markets are decided by SoDEX under its rules.' },
         { p: 'ValueDesk shows SoDEX\'s answers as it receives them. An order is only placed, changed or cancelled once SoDEX has accepted it. Changing a resting order can be carried out as a cancellation followed by a new order (so that the new order carries the builder fee, section 6); the app says so when it happens, and the new order can fill at a different time or not at all.' },
       ],
     },
@@ -170,6 +194,7 @@ export const TERMS: LegalDoc = {
           ul: [
             '**Our data.** We compute leaderboards, statistics, scans and the screener from what the venues in section 1 publish. We take care, but we do not guarantee that they are complete, current or correct; they can be delayed, attributed to the wrong wallet or wrong, and they can change when the venues correct their data.',
             '**News.** The News widget shows articles and posts from SoSoValue and the outlets it collects, as received, with the source named. We do not write, edit, check or endorse them, and we do not adopt them as our own. The coins shown with a story can be assigned automatically and wrongly.',
+            '**Market data, calendar and odds.** The economic calendar, release figures, rate-decision odds where shown, ETF flows, automatic transcripts of live events, the liquidation heatmap and similar figures come from third parties or are estimated by us from their data. They can be late, incomplete, mistranscribed or wrong, and an estimate is not a measurement. Check what matters to you at the source.',
             '**Live streams and videos.** The Live Feed plays channels and links you choose in the platform\'s own player (YouTube, Twitch, Kick, Vimeo), once you allow that platform. What is broadcast is the broadcaster\'s responsibility, and the platform\'s own terms and privacy policy apply to its player. ValueDesk uses YouTube API Services to find a channel\'s live stream; by watching YouTube content in ValueDesk you agree to be bound by the [YouTube Terms of Service](https://www.youtube.com/t/terms).',
             '**Links** to other sites are offered for convenience. We are not responsible for their content.',
             'If you come across unlawful content through ValueDesk, tell us at the address in the [Impressum](/impressum): we will remove or block access to it once we know of it, where it is in our control.',
@@ -189,10 +214,13 @@ export const TERMS: LegalDoc = {
       blocks: [
         {
           ul: [
-            '**Security.** Keep your wallet, its recovery phrase and your device safe, check the address of the site before you connect or sign, and read what your wallet asks you to sign. We treat a request signed by your wallet, or sent with a key your wallet authorised, as yours.',
+            '**Security.** Keep your wallet, its recovery phrase and your device safe, check the address of the site before you connect or sign, and read what your wallet asks you to sign: what your wallet shows is what you sign, whatever a web page says. We treat a request signed by your wallet, or sent with a key your wallet authorised, as yours. Losses from a wallet, device, browser extension or key that someone else gained control of - for example through phishing, a fake site or malware - are not caused by us, unless we are at fault for them.',
+            '**If something looks wrong.** If you notice an order, a fill, a copy or an algo you did not expect, or suspect that your wallet or a key is compromised: stop your algos and copies, revoke the key on SoDEX, and tell us at once at the address in the [Impressum](/impressum). Errors can then be stopped before they cause more damage.',
+            '**Limit what is at stake.** Keep in your SoDEX account only what you are prepared to have traded by the keys you registered, and choose short key lifetimes. Know how to manage your positions on SoDEX directly, for the times ValueDesk is unavailable or paused (section 15).',
+            '**Your records.** Keep the records you may need. What ValueDesk keeps in your browser - settings, layouts, the trading key, browser copies and algos - is lost when the browser\'s data is cleared; we keep no backup of it.',
             '**Monitoring.** Watch your positions, orders, algos and copies, and keep enough margin in your SoDEX account.',
             '**The law and taxes.** Comply with the law that applies to you, including tax law: declaring and paying taxes on your trades is up to you.',
-            '**True statements.** What you declare - your age, your country of residence, that you are not subject to sanctions - must be true, and you must tell us by accepting the terms again if it changes.',
+            '**True statements.** What you confirm - your age, that you do not live in a restricted place, that you are not subject to sanctions - must be true. If it stops being true, stop opening positions through ValueDesk.',
           ],
         },
       ],
@@ -220,16 +248,29 @@ export const TERMS: LegalDoc = {
       ],
     },
     {
-      title: '15. Availability, beta features and changes',
+      title: '15. Availability, security incidents, new features and changes',
       blocks: [
-        { p: 'ValueDesk is provided as it is, free of charge apart from the fees in sections 6 and 8. We aim to keep it available and correct, but we do not promise that it is always available, complete, current or free of errors. Features marked as beta, new or experimental are especially likely to change or to contain errors. We may change, pause or end features - including turning trading, algo orders or copy trading through ValueDesk off - for everyone, for a region or for a wallet, at any time and, where a legal, security or technical reason requires it, without notice; for copy trading, section 14 of the [Copy trading terms](/copy-terms) applies. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
+        { p: 'ValueDesk is provided as it is, free of charge apart from the fees in sections 6 and 8. We aim to keep it available and correct, but we do not promise that it is always available, complete, current or free of errors, and we promise no minimum availability or response time. Features marked as beta, new or experimental are especially likely to change or to contain errors. Copy trading, algo orders and the hosted executor are new and under active development. We may change, pause or end features - including turning trading, algo orders or copy trading through ValueDesk off - for everyone, for a region or for a wallet, at any time and, where a legal, security or technical reason requires it, without notice; for copy trading, section 14 of the [Copy trading terms](/copy-terms) applies. Your funds stay on SoDEX in every case, and you can always manage them on SoDEX directly.' },
+        { p: '**Security.** We protect ValueDesk with measures appropriate to the risk - among them keys stored only encrypted, instructions that are valid only when signed by your wallet, an append-only record of what the executor does, monitoring and an emergency brake. No system is completely secure. Despite these measures, an attacker could break into our servers, our hosting providers, our domain or a software component we use, alter what the site shows or asks you to sign, or obtain keys stored on the hosted executor. Read what your wallet shows before you sign (section 12).' },
+        {
+          ul: [
+            '**The emergency brake.** If we suspect an attack, an error that sends wrong orders, or a fault at SoDEX, we may at once and without notice pause trading through ValueDesk, copies and algo orders - for everyone, a region or a wallet - for as long as it takes to investigate and fix it. While trading is paused, no order that opens or increases a position can be placed through ValueDesk; closing positions, cancelling orders and withdrawing stay possible; algo orders are held, not cancelled; stop orders already on SoDEX stay there. You can manage your positions on SoDEX directly at any time. Pausing for these reasons, and lifting the pause once it is safe, is not a breach of these terms.',
+            '**What else we may do.** Stop the hosted executor, delete keys stored on it, refuse requests, and require you to register a new key or accept the terms again.',
+            '**Telling you.** We tell the users affected in the app and on this site, without undue delay, what happened as far as we know it and what they should do - for example revoke a key on SoDEX - and we notify the data protection authority and you where the law requires it (Art. 33 and 34 GDPR). We cannot revoke a key on SoDEX for you: only your wallet can.',
+          ],
+        },
       ],
     },
     {
       title: '16. Liability',
       blocks: [
-        { p: 'We are liable without limitation for damage caused intentionally or by gross negligence, for injury to life, body or health, under the German Product Liability Act, and where we have given a guarantee. For slight negligence we are liable only for the breach of an obligation that is essential to the proper performance of these terms and on which you may regularly rely, and then only for the damage typical and foreseeable when the obligation was breached. Otherwise our liability is excluded.' },
-        { p: 'Unless one of the cases in the first sentence applies, we are in particular not liable for trading losses, for decisions you base on data, news, streams or estimates shown here, for the trades of a trader you copy, for orders placed with a key or wallet you did not keep safe, or for the acts and failures of SoDEX, the other venues, SoSoValue, the video platforms, blockchains, wallet providers and hosting providers. These limits also apply to the personal liability of our employees, representatives and agents.' },
+        { p: 'We are liable without limitation for damage we cause intentionally or by gross negligence, for injury to life, body or health, for a defect we fraudulently concealed, where we have given a guarantee, under the German Product Liability Act, and wherever else the law does not allow liability to be limited.' },
+        { p: 'For slight negligence we are liable only if we breach an essential obligation - an obligation whose fulfilment makes the proper performance of these terms possible in the first place and on whose fulfilment you may regularly rely, for example that orders placed through ValueDesk are the orders you set and signed. Our liability is then limited to the damage that is typical for this kind of agreement and that was foreseeable when you accepted these terms. Otherwise our liability for slight negligence is excluded.' },
+        { p: 'Providers we engage to run ValueDesk - for example our hosting providers (Vercel, Contabo) and the messaging service we use (Telegram) - act on our behalf: for their faults we are liable as for our own, within the rules above. An attack on us or on them makes us liable only where we are at fault, for example because we did not take the security measures that could reasonably be expected.' },
+        { p: 'We are not responsible for what is not our performance and not in our control: the movements of the markets and the results of trades you decide on; the trades of a trader you copy; decisions you base on data, news, odds, streams or estimates of third parties; the acts and failures of SoDEX, the other venues, SoSoValue and the other data sources, the video platforms, blockchains and wallet providers, which do not act on our behalf (section 5); and the use of your wallet, device or a key by someone who gained control of it, unless we are at fault for that. This paragraph does not limit our liability under the first three paragraphs for our own breaches, including errors of our software.' },
+        { p: 'Where you contributed to a damage - for example by not acting on an incident notice of ours, by not reporting an error you noticed, or by not keeping your wallet or keys safe (section 12) - your claim is reduced accordingly (§ 254 of the German Civil Code). Where data is lost, our liability is limited to what restoring it would have cost if you had kept the copies that can reasonably be expected of you.' },
+        { p: 'If you are not a consumer, the following also applies, except in the cases of the first paragraph: our liability for slight negligence is limited to [[OWNER: an amount per incident, e.g. EUR 10,000 - to be set with counsel so that it covers the damage typical for this agreement; a lower cap is void]] per incident; we are not liable for slight negligence for lost profit and indirect damage; and claims for damages against us become time-barred one year after the statutory limitation period begins.' },
+        { p: 'These limits also apply to the personal liability of our employees, representatives and agents.' },
       ],
     },
     {
@@ -277,7 +318,7 @@ export const TERMS: LegalDoc = {
             'If a provision of these terms is invalid, the rest remain in force; the statutory rules take the invalid provision\'s place.',
             'If we do not enforce a right at once, we have not waived it.',
             'Individual agreements with you prevail over these terms. Apart from them, these terms, the risk disclosure and, for copy trading, the copy trading terms are the whole agreement about ValueDesk.',
-            'We are not responsible for failures caused by events beyond our reasonable control, such as an outage of an exchange, a blockchain or a hosting provider, an attack, or an order of an authority.',
+            'We are not responsible for failures caused by events beyond our reasonable control that we could not have prevented with reasonable care - such as natural disasters, war, terrorism, pandemics, strikes, power and network failures, an outage of or attack on an exchange, a blockchain, a hosting or internet provider, or an order of an authority. For as long as such an event lasts, we are released from the obligations it prevents us from fulfilling.',
           ],
         },
         { p: 'Questions: see the [Impressum](/impressum).' },

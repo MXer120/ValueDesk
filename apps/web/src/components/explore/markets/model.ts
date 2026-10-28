@@ -8,6 +8,7 @@
 import { sectorOf, SECTORS, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import type { Venue } from '../../../vsApi';
 import { marketKey } from '../model';
+import { fmtFixed, fmtNum } from '../../../numStyle';
 
 /** One market across the venues that list it. */
 export interface MarketRow {
@@ -228,7 +229,7 @@ export function pulseOf(rows: readonly MarketRow[]): Pulse {
   return { markets: rows.length, volume, oi, up, down, avgChange: w > 0 ? wc / w : null, avgFunding: wfw > 0 ? wf / wfw : null };
 }
 
-const pct = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(Math.abs(v) >= 10 ? 1 : 2)}%`;
+const pct = (v: number) => `${v >= 0 ? '+' : '−'}${fmtFixed(Math.abs(v), Math.abs(v) >= 10 ? 1 : 2)}%`;
 
 /**
  * One sentence on the day, written from the figures: where the board leans,
@@ -240,7 +241,7 @@ export function headline(rows: readonly MarketRow[], liquid = 10_000_000): strin
   if (!p.markets || p.up + p.down === 0) return null;
   const share = p.up / (p.up + p.down);
   const tone = share >= 0.62 ? 'Risk-on' : share <= 0.38 ? 'Risk-off' : 'Mixed';
-  const parts = [`${tone}: ${Math.round(share * 100)}% of ${p.markets.toLocaleString('en-US')} markets are up over 24h`];
+  const parts = [`${tone}: ${Math.round(share * 100)}% of ${fmtNum(p.markets)} markets are up over 24h`];
   const lead = rows.find((r) => r.changePct !== null);
   if (lead) parts.push(`${lead.name} ${pct(lead.changePct!)}`);
   const mover = rows

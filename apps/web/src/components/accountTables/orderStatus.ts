@@ -21,6 +21,7 @@
  * the engine dropped - the alert triangle, because nothing happened.
  */
 
+import { fmtFixed, fmtPlain } from '../../numStyle';
 export type StatusKind =
   | 'filled'
   | 'open'
@@ -142,7 +143,7 @@ export function statusTitle(info: OrderStatusInfo, executed: string | null, orig
 export function formatPct(f: number): string {
   const p = f * 100;
   if (p === 0 || p === 100) return `${p}%`;
-  if (p < 1) return `${p.toFixed(2)}%`;
-  if (p < 10) return `${Number(p.toFixed(1))}%`;
+  if (p < 1) return `${fmtFixed(p, 2)}%`;
+  if (p < 10) return `${fmtPlain(Number(p.toFixed(1)))}%`;
   return `${Math.round(p)}%`;
 }

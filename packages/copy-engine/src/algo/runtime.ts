@@ -52,7 +52,8 @@ import {
 import { combineOracle, type OracleVenue, type VenueQuote } from '../oracle.ts';
 import { SWEEP_MAX_AGE_MS, sweepRefFor, sweepStep } from './sweep.ts';
 import { bandRefused, exitLevels, scaleLadder, swarmClips, twapSchedule, vwapSchedule } from './plan.ts';
-import { checkLimits, limitRefusal, type LimitRefusal } from './limits.ts';
+import { checkLimits, limitLeverage, oiHeadroom, oiRoomWords, positionCapUsd, limitRefusal, type AlgoLimitNotice, type LimitRefusal } from './limits.ts';
+import { checkSizes, coins, maxWords, minWords, money } from './sizes.ts';
 import type { AlgoSink, ChildRequest, ChildResult, StopRequest } from './sink.ts';
 import { ALGO_NAMES, algoQuantity, algoSymbols, opensPosition, parseAlgoSpec } from './spec.ts';
 import type { AlgoStore } from './store.ts';
@@ -89,11 +90,28 @@ const MAX_CONSEC_REJECTS = 25;
 const LIMIT_RETRY_MS = 60_000;
 /** ...and stops it at the this-many-th with no fill in between: no retry storm against a limit. */
 const LIMIT_MAX_HITS = 4;
+/** A limit hold keeps its words (and a limit notice is not repeated) for this long. */
+const LIMIT_WORDS_MS = 10 * 60_000;
 const PROBLEM_RECHECK_MS = 60_000;
+/** pollOrders: at most one REST read of open orders this often for the whole runtime (60 a minute, a fraction of the per-IP budget)... */
+const ORDER_POLL_SPACING_MS = 1_000;
+/** ...each algo at most this often... */
+const ORDER_POLL_MIN_MS = 3_000;
+/** ...and the socket's places are given out again (by what each wallet has on the book) this often. */
+const ORDER_WATCH_EVERY_MS = 30_000;
 /** POV and DCA hybrids: due quantity older than this is taken. */
 const LATE_MS = 30_000;
 /** After a taker child that filled nothing, the next one waits this long. */
 const TAKER_RETRY_MS = 1_000;
+
+/** One DCA installment (k.inst): its number, its own size and due time, what its settled children filled (each counted once). */
+interface DcaInstallment {
+  n: number;
+  qty: number;
+  at: number;
+  filled: number;
+  counted: string[];
+}
 /** Positions are read again after this (position conditions). */
 const POSITIONS_MS = 5_000;
 /** The account (equity, gross exposure) is read again after this (the region's leverage ceiling). */
@@ -125,7 +143,7 @@ export interface AlgoHost {
   /** The owner's signed position on `symbol` (default: read from SoDEX). */
   position?(a: AlgoRecord, symbol: string): Promise<number | null>;
   /** The owner's positions: signed size and entry per market (default: read from SoDEX). Position conditions read these. */
-  positions?(a: AlgoRecord): Promise<Record<string, { size: number; entry: number }>>;
+  positions?(a: AlgoRecord): Promise<Record<string, { size: number; entry: number; leverage?: number }>>;
   /**
    * The region rules for a live algo (policy.ts regionPolicy): a blocked
    * region holds it; a leverage ceiling (EEA 2x) caps the leverage it sets and
@@ -205,11 +223,18 @@ export class AlgoRuntime {
   private problems = new Map<string, { at: number; problem: string | null; unchecked?: boolean }>();
   private lastHistoryAt = 0;
   private lookupBusy = false;
+  /** pollOrders' state: a read in flight, when the last one left, when each algo was read, the algos to read whatever the socket follows (it was down). */
+  private polling = false;
+  private lastPollAt = 0;
+  private watchedAt = 0;
+  private polledAt = new Map<string, number>();
+  private resync = new Set<string>();
+  private socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   private heldNow = new Set<string>();
   private eventSeq = 0;
   /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling). */
-  private positionsOf = new Map<string, { at: number; data: Record<string, { size: number; entry: number }>; loading: boolean }>();
+  private positionsOf = new Map<string, { at: number; data: Record<string, { size: number; entry: number; leverage?: number }>; loading: boolean }>();
   private accounts = new Map<string, { at: number; equity: number; gross: number }>();
   /** Algos whose exits are being placed or resized right now. */
   private exitsBusy = new Set<string>();
@@ -229,6 +254,11 @@ export class AlgoRuntime {
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
+    // Back after a drop: an order update sent meanwhile was lost, so every algo with an order on SoDEX is read once by REST (pollOrders).
+    this.market.onState((up) => {
+      if (up && this.socketWasUp) for (const a of this.algos.values()) if (!a.spec.paper && [...this.live(a), ...this.liveExits(a)].length) this.resync.add(a.id);
+      if (up) this.socketWasUp = true;
+    });
   }
 
   /* ------------------------------------------------------------ lifecycle ----- */
@@ -300,14 +330,83 @@ export class AlgoRuntime {
   /** Subscribe the markets and wallets the live algos need. */
   private syncWatch(): void {
     const symbols = new Set<string>();
-    const owners = new Set<string>();
+    // How much each wallet has on SoDEX's book: the socket's few places (feed.ts ACCOUNT_USERS_PER_IP) go to the most first.
+    const weight = new Map<string, number>();
     for (const a of this.algos.values()) {
       const exits = this.liveExits(a).length > 0 || this.keptLive(a).length > 0;
       if (FINAL_STATUSES.has(a.status) && !exits) continue;
       for (const s of algoSymbols(a.spec)) symbols.add(s);
-      if (!a.spec.paper) owners.add(a.owner);
+      if (a.spec.paper) continue;
+      const live = this.live(a);
+      const resting = live.filter((c) => c.tif !== 'ioc').length + this.liveExits(a).length;
+      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100);
     }
-    this.market.watch([...symbols], [...owners]);
+    const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
+    this.market.watch([...symbols], owners);
+  }
+
+  /**
+   * Orders of wallets the socket does not follow (SoDEX lets one IP follow 10;
+   * feed.ts), read by REST instead - and every wallet's after the socket was
+   * down: at most one read every ORDER_POLL_SPACING_MS for the whole runtime,
+   * through the client's shared per-IP budget, the algo with resting orders
+   * that was read longest ago first, each at most every ORDER_POLL_MIN_MS.
+   * What SoDEX lists is booked as its order update would have been (by client
+   * order id); a child no longer listed is asked of the order history
+   * (settleStale), so no fill is lost.
+   */
+  async pollOrders(now = Date.now()): Promise<void> {
+    if (this.polling || now - this.lastPollAt < ORDER_POLL_SPACING_MS) return;
+    if (now - this.watchedAt >= ORDER_WATCH_EVERY_MS) {
+      this.watchedAt = now;
+      this.syncWatch();
+    }
+    const follows = this.market.followsOrders?.bind(this.market);
+    const due = [...this.algos.values()].filter((a) => {
+      if (a.spec.paper || this.busy.has(a.id)) return false;
+      const open = [...this.live(a), ...this.liveExits(a)].filter((c) => c.state === 'open');
+      if (!open.length) return false;
+      if (!this.resync.has(a.id) && (!follows || follows(a.owner))) return false;
+      return now - (this.polledAt.get(a.id) ?? 0) >= ORDER_POLL_MIN_MS;
+    });
+    if (!due.length) return;
+    // An open-orders read weighs 5 (sodex-core weightFor): 60 a minute is a quarter of the per-IP budget. When the budget is
+    // already half spent (copies, orders, closes), the poll waits - except a read after the socket dropped.
+    const budget = (this.host.sodex as { budget?: { used(now?: number): number; perMinute: number } }).budget;
+    if (budget && budget.used(now) > budget.perMinute * 0.5 && !due.some((a) => this.resync.has(a.id))) return;
+    const resting = (a: AlgoRecord) => this.live(a).some((c) => c.tif !== 'ioc') || this.liveExits(a).length > 0;
+    due.sort((x, y) => Number(this.resync.has(y.id)) - Number(this.resync.has(x.id)) || Number(resting(y)) - Number(resting(x)) || (this.polledAt.get(x.id) ?? 0) - (this.polledAt.get(y.id) ?? 0));
+    const a = due[0]!;
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    this.polling = true;
+    this.lastPollAt = now;
+    this.polledAt.set(a.id, now);
+    try {
+      const rows = await this.lookupOrders(a, m.name, false);
+      this.resync.delete(a.id);
+      const gone: ChildOrder[] = [];
+      for (const c of [...this.live(a), ...this.liveExits(a)].filter((x) => x.state === 'open')) {
+        const row = rows.find((r) => r.clOrdID === c.clOrdID);
+        if (row) this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: row.orderId || null, symbol: m.name, status: (row.status || 'NEW').toUpperCase(), filledQty: row.executedQty, filledValue: row.executedValue, maker: null, reason: null, at: now });
+        else gone.push(c);
+      }
+      // Gone from the open orders: filled, cancelled or expired. A running algo asks the history on its next step (settleStale);
+      // an ended one steps no more, so its kept order or exit is asked here.
+      if (gone.length && !FINAL_STATUSES.has(a.status)) for (const c of gone) c.state = 'unknown';
+      else if (gone.length) {
+        const hist = await this.lookupOrders(a, m.name, true);
+        for (const c of gone) {
+          const row = hist.find((r) => r.clOrdID === c.clOrdID);
+          if (row) this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: row.orderId || null, symbol: m.name, status: FINAL_ORDER.test((row.status || '').toUpperCase()) ? row.status.toUpperCase() : 'FILLED', filledQty: row.executedQty, filledValue: row.executedValue, maker: null, reason: null, at: now });
+        }
+      }
+      this.dirty.add(a.id);
+    } catch (e) {
+      this.host.log.warn('algo: order poll failed', { algo: a.id, error: String(e) });
+    } finally {
+      this.polling = false;
+    }
   }
 
   /** Exits still on SoDEX (or on the paper book), not yet settled. */
@@ -378,17 +477,8 @@ export class AlgoRuntime {
       observedCountry: n.observedCountry ?? null,
       k: {},
     };
-    if (spec.kind === 'scale') {
-      // Every level must be an order SoDEX takes: one under its minimum would be dropped, and the ladder would not be what was signed.
-      const small = scaleLadder(spec, m, a.seed).filter((l) => l.qty < minChildQty(m, l.price));
-      if (small.length) throw new Error(`${small.length} level${small.length === 1 ? '' : 's'} of this ladder would be under SoDEX's $${m.minNotional} minimum order. Use fewer orders, a larger size, or less skew.`);
-      // Nor over its largest order: SoDEX would refuse that level, and the ladder would not be what was signed.
-      const big = scaleLadder(spec, m, a.seed).filter((l) => l.qty > maxOrderQty(m, l.price) + 1e-12);
-      if (big.length) throw new Error(`${big.length} level${big.length === 1 ? '' : 's'} of this ladder would be over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString('en-US')})` : ''}. Use more orders or a smaller size.`);
-    }
-    // One resting limit (a bracket's limit entry, a conditional's limit) is one order: it must be one SoDEX takes.
-    const oneLimit = spec.kind === 'bracket' && spec.entry === 'limit' && spec.price !== null ? { qty: Number(spec.quantity), price: spec.price } : spec.kind === 'conditional' && spec.then.type === 'limit' ? { qty: Number(spec.then.quantity), price: spec.then.price } : null;
-    if (oneLimit && oneLimit.qty > maxOrderQty(m, oneLimit.price) + 1e-12) throw new Error(`This order is over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString('en-US')})` : ''}. Use a smaller size, or a TWAP to split it.`);
+    // Every child an order SoDEX takes, as the ticket said (sizes.ts): under its smallest or over its largest is refused, never merged or split.
+    await this.startSizes(a);
     await this.startLimits(a);
     if (spec.triggerPrice !== null) {
       const mk = this.market.mark(spec.symbol)?.mark ?? null;
@@ -427,9 +517,30 @@ export class AlgoRuntime {
       const qty = l.qty ?? (l.usd !== null ? l.usd / ref.mark : null);
       if (!qty) continue;
       const pos = s.paper ? 0 : await this.positionOf(a, l.symbol);
-      const lim = checkLimits(m, { side: l.side, quantity: qty, price: ref.mark, position: pos, leverage: s.leverage ?? m.initLeverage ?? null, oi: ref.oi });
+      // A position SoDEX did not report is not "none": the limit cannot be checked, so the start is refused (owner, 2026-10-28).
+      if (pos === null && m.marginTiers?.length) throw new Error(`SoDEX did not report your position on ${l.symbol}, so the position limit cannot be checked. Try again in a moment.`);
+      // The leverage it trades at: its own, else the open position's (as SoDEX reports it), else SoDEX's default for the market.
+      const lev = limitLeverage(m, s.leverage, s.paper ? null : this.positionLeverage(a, l.symbol));
+      const lim = checkLimits(m, { side: l.side, quantity: qty, price: ref.mark, position: pos, leverage: lev, oi: ref.oi });
       if (lim.errors.length) throw new Error(s.kind === 'basket' ? `${l.symbol}: ${lim.errors[0]}` : lim.errors[0]);
     }
+  }
+
+  /**
+   * The plan's children against SoDEX's smallest and largest order (sizes.ts),
+   * at the mark now: the same check and the same words as the ticket's. A
+   * VWAP's profile is read for it (the slices it will have); a time-sliced
+   * close is checked when it begins (its size is the position's then).
+   */
+  private async startSizes(a: AlgoRecord): Promise<void> {
+    const s = a.spec;
+    const m = this.markets.get(s.symbol)!;
+    const refs = new Map<string, number | null>();
+    for (const sym of algoSymbols(s)) refs.set(sym, (await this.refOf(sym))?.mark ?? null);
+    const start = Math.max(Date.now(), s.startAt ?? 0);
+    const profile = s.kind === 'vwap' ? await this.profileFor(s.symbol, start, s.durationMs, s.slices, s.lookbackDays).catch(() => null) : null;
+    const check = checkSizes(s, m, { price: refs.get(s.symbol) ?? null, seed: a.seed, now: start, profile, market: (x) => this.markets.get(x) ?? null, prices: (x) => refs.get(x) ?? null });
+    if (check.errors.length) throw new Error(check.errors.join(' '));
   }
 
   /** A market's mark and open interest: the feed's, else read once from SoDEX (a market not watched yet). null: not known. */
@@ -704,6 +815,8 @@ export class AlgoRuntime {
         })
         .finally(() => this.busy.delete(a.id));
     }
+    // Wallets beyond the socket's places, and all of them after a drop: their orders by REST.
+    void this.pollOrders(now).catch((e) => this.host.log.warn('algo: order poll failed', { error: String(e) }));
   }
 
   /** Run one step of one algo and wait for it (tests). */
@@ -965,6 +1078,12 @@ export class AlgoRuntime {
           await this.end(a, 'expired', `There is no position on ${m.name} to close.`);
           return false;
         }
+        // Its slices as SoDEX takes them, now that the size is known: refused in words, never merged or split.
+        const sized = checkSizes(s, m, { price: a.arrival, seed: a.seed, now, positionSize: pos });
+        if (sized.errors.length) {
+          await this.end(a, 'failed', `Not started: ${sized.errors[0]}`);
+          return false;
+        }
         a.k.total = size;
         a.k.closeSide = pos > 0 ? 'sell' : 'buy';
         await this.event(a, 'info', `Closing ${Math.round(s.closeShare * 100)}% of your ${pos > 0 ? 'long' : 'short'}: ${dec(size)} ${m.base}.`);
@@ -1075,9 +1194,12 @@ export class AlgoRuntime {
       if (qty < minAt && room >= minAt && lateNeed >= minQ - 1e-12) {
         // Due, but under SoDEX's minimum at this price: a little ahead of the plan rather than not at all (all of it when the rest would be under the minimum too).
         qty = room - minAt < minAt ? floorStep(room, m) : minAt;
+        await this.noteOnce(a, 'min', `What was due was under ${minWords(m, price ?? ref)} at this price, so it went out with what is due next.`);
       }
+      if (qty > most + 1e-12 && price !== null && most >= maxOrderQty(m, price) - 1e-12) await this.noteOnce(a, 'max', `What is due is over ${maxWords(m, price)}: it goes out in several orders, one after the other.`);
       qty = Math.min(qty, most);
       if (qty < minAt) {
+        if (qty > 0 && room >= minAt) await this.noteOnce(a, 'wait', `What is due waits until it reaches ${minWords(m, price ?? ref)}.`);
         // Less than SoDEX takes in one order: what is left at the very end is dust. If nothing ever filled, nothing could be sent: that is no fill.
         if (room < minAt && o.late >= o.total && !o.more) {
           if (a.filled > 0) await this.end(a, 'done', `Filled; ${dec(room)} ${m.base} under SoDEX's minimum order was left.`);
@@ -1097,6 +1219,8 @@ export class AlgoRuntime {
       return;
     }
 
+    // Due, but less than SoDEX takes in one order (POV's pace, a participation cap): it waits and grows - said once.
+    if (o.exec.style === 'taker' && lateNeed > 1e-12 && room >= minQ && !o.more) await this.noteOnce(a, 'wait', `What is due waits until it reaches ${minWords(m, ref)}.`);
     if (o.exec.style === 'taker') return;
     const price = makerPrice(side, q, o.exec.offsetTicks, null, m, limit);
     const want = floorStep(Math.min(need, capOf(minQ), part, maxOrderQty(m, price)), m);
@@ -1224,6 +1348,15 @@ export class AlgoRuntime {
     });
   }
 
+  /**
+   * A DCA: each installment is an order of its own - its own size (its USD at
+   * the price when it came due), its own time, its own child on SoDEX - and is
+   * never merged into another (owner, 2026-10-28). A maker installment that has
+   * not filled keeps resting by itself while the next one is placed beside it;
+   * installments that come due together (after a wait) go out together, each
+   * as its own order. SoDEX refusing one more resting order (its open-order or
+   * margin limits) holds the algo with the reason (onLimit), never merges.
+   */
   private async stepDca(a: AlgoRecord, m: MarketInfo, q: Quote, mk: number, now: number): Promise<void> {
     const s = a.spec as Extract<AlgoSpec, { kind: 'dca' }>;
     const start = a.startedAt!;
@@ -1232,7 +1365,11 @@ export class AlgoRuntime {
     let spent = Number(a.k.spentUsd ?? 0);
     let target = Number(a.k.targetQty ?? 0);
     const budget = s.maxTotalUsd ?? Infinity;
-    // Every installment whose time has come, in order.
+    // An algo from before installments were kept apart: what it had due is one installment.
+    if (!Array.isArray(a.k.inst)) a.k.inst = done > 0 ? [{ n: done, qty: target, at: start, filled: Math.max(0, a.filled - this.live(a).reduce((x, c) => x + c.filled, 0)), counted: [] }] : [];
+    const insts = a.k.inst as DcaInstallment[];
+    const tagOf = (n: number) => `order ${n}/${s.orders}`;
+    // Every installment whose time has come, in order: each with its own size.
     while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
       const px = s.side === 'buy' ? q.ask : q.bid;
       const outside = s.limitPrice !== null && (s.side === 'buy' ? mk > s.limitPrice : mk < s.limitPrice);
@@ -1252,9 +1389,13 @@ export class AlgoRuntime {
         await this.event(a, 'info', `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px / avg - 1) * 100).toFixed(1)}% from your average).`);
       }
       usd = Math.min(usd, budget - spent);
-      target += usd / px;
-      spent += usd;
+      // Its USD at the price, on the step - raised by less than a step where the rounding alone would put it under SoDEX's minimum.
+      const raw = floorStep(usd / px, m);
+      const qty = raw < minChildQty(m, px) && usd >= m.minNotional - 1e-9 ? minChildQty(m, px) : raw;
       done++;
+      spent += usd;
+      target += qty;
+      insts.push({ n: done, qty, at: start + (done + skipped - 1) * s.intervalMs, filled: 0, counted: [] });
     }
     a.k.done = done;
     a.k.skipped = skipped;
@@ -1262,12 +1403,60 @@ export class AlgoRuntime {
     a.k.targetQty = target;
     this.dirty.add(a.id);
     const over = done + skipped >= s.orders || spent >= budget - 1e-9;
-    const left = target - a.filled - this.pendingQty(a);
-    if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, 'done', `${done} order${done === 1 ? '' : 's'} filled${skipped ? `, ${skipped} skipped` : ''}.`);
-    const h = this.dueHistory(a, now, target);
-    // A maker DCA only ever rests (it follows the touch until it fills): it never takes, its last installment included.
-    const late = s.exec.style === 'taker' ? target : s.exec.style === 'hybrid' ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : 0;
-    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
+    const liveOf = (n: number) => this.live(a).filter((c) => c.tag === tagOf(n));
+    // What an installment still has to fill: under SoDEX's smallest order it is over (dust that one order cannot carry).
+    const leftOf = (i: DcaInstallment) => i.qty - i.filled - liveOf(i.n).reduce((x, c) => x + c.filled, 0);
+    const open = insts.filter((i) => leftOf(i) >= minChildQty(m, mk) - 1e-12 || liveOf(i.n).length);
+    if (over && !open.length && !this.live(a).length) return this.end(a, 'done', `${done} order${done === 1 ? '' : 's'} filled${skipped ? `, ${skipped} skipped` : ''}.`);
+    const list: Array<{ side: Side; price: number; quantity: number; tif: ChildTif; tag: string }> = [];
+    const lateAfter = Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs);
+    for (const i of open) {
+      const kids = liveOf(i.n);
+      const late = a.k.rush === true || s.exec.style === 'taker' || (s.exec.style === 'hybrid' && now - i.at >= lateAfter);
+      if (kids.length) {
+        const c = kids[0]!;
+        if (c.state !== 'open' || c.cancelling || c.tif === 'ioc') continue;
+        // Its own resting order: re-priced when the touch moved away, pulled to take when it is overdue (hybrid) or rushed.
+        const price = makerPrice(s.side, q, s.exec.offsetTicks, null, m, s.limitPrice);
+        const off = Math.abs(c.price - price) / Number(m.tickSize);
+        if (late || (!this.atOwnTouch(s.side, c.price, q) && off >= s.exec.chaseTicks - 1e-9 && now - c.placedAt >= 1_500)) await this.cancelChildren(a, m, [c]);
+        continue;
+      }
+      const left = floorStep(leftOf(i), m);
+      if (late) {
+        if (now - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) continue;
+        const from = this.slipBase(s.symbol, s.exec, q);
+        if (from === undefined) {
+          await this.hold(a, `Held: no fresh ${SLIP_FROM_NAMES[s.exec.slipFrom ?? 'touch'].toLowerCase()} to measure your max slippage from.`);
+          return;
+        }
+        const price = takerPrice(s.side, q, s.exec.slippageBps, m, mk, s.limitPrice, from);
+        if (price === null) {
+          await this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
+          return;
+        }
+        list.push({ side: s.side, price, quantity: Math.min(left, maxOrderQty(m, price)), tif: 'ioc', tag: tagOf(i.n) });
+      } else {
+        const price = makerPrice(s.side, q, s.exec.offsetTicks, null, m, s.limitPrice);
+        list.push({ side: s.side, price, quantity: Math.min(left, maxOrderQty(m, price)), tif: 'gtx', tag: tagOf(i.n) });
+      }
+    }
+    if (!list.length) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+      await this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+      return;
+    }
+    await this.send(a, m, list.filter((x) => x.quantity >= minChildQty(m, x.price) - 1e-12));
+  }
+
+  /** A DCA child settled: what it filled is its installment's (counted once, however many final updates SoDEX sends). */
+  private dcaChildDone(a: AlgoRecord, c: ChildOrder): void {
+    const i = ((a.k.inst as DcaInstallment[] | undefined) ?? []).find((x) => c.tag === `order ${x.n}/${(a.spec as Extract<AlgoSpec, { kind: 'dca' }>).orders}`);
+    if (!i || i.counted.includes(c.clOrdID)) return;
+    i.counted.push(c.clOrdID);
+    if (i.counted.length > 50) i.counted.splice(0, i.counted.length - 50);
+    i.filled += c.filled;
+    this.dirty.add(a.id);
   }
 
   private async stepIceberg(a: AlgoRecord, m: MarketInfo, q: Quote, now: number): Promise<void> {
@@ -1439,7 +1628,10 @@ export class AlgoRuntime {
       while (wave.length < s.inFlight && next < clips.length && pool >= minQ) {
         carry += clips[next]!;
         next++;
-        if (carry < minQ - 1e-12 && next < clips.length) continue;
+        if (carry < minQ - 1e-12 && next < clips.length) {
+          await this.noteOnce(a, 'min', `Clip ${next} is under ${minWords(m, price)} at this price, so it goes out with the next one.`);
+          continue;
+        }
         let qty = Math.min(carry, pool);
         if (pool - qty < minQ) qty = pool;
         qty = floorStep(Math.min(qty, most), m);
@@ -1839,15 +2031,15 @@ export class AlgoRuntime {
     return hit && hit.at > 0 ? hit.data : null;
   }
 
-  private async loadPositions(a: AlgoRecord): Promise<Record<string, { size: number; entry: number }> | null> {
+  private async loadPositions(a: AlgoRecord): Promise<Record<string, { size: number; entry: number; leverage?: number }> | null> {
     const prev = this.positionsOf.get(a.owner);
     this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: true });
     try {
-      let data: Record<string, { size: number; entry: number }>;
+      let data: Record<string, { size: number; entry: number; leverage?: number }>;
       if (this.host.positions) data = await this.host.positions(a);
       else {
         const snap = await this.host.sodex.follower(a.owner);
-        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry }]));
+        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry, ...(p.leverageReported ? { leverage: p.leverage } : {}) }]));
       }
       this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
       return data;
@@ -2068,17 +2260,70 @@ export class AlgoRuntime {
       const book = hit && (hit.loading || Date.now() - hit.at <= POSITIONS_MS) ? hit.data : await this.loadPositions(a);
       pos = book ? (book[m.name]?.size ?? 0) : null;
     }
-    const lev = leverage ?? m.initLeverage ?? null;
-    const lim = checkLimits(m, { side, quantity: sum + working, price, position: pos, leverage: lev, oi: this.market.mark(m.name)?.oi ?? null });
+    const lev = limitLeverage(m, leverage, s.paper ? null : this.positionLeverage(a, m.name));
+    const oiNow = this.market.mark(m.name)?.oi ?? null;
+    const lim = checkLimits(m, { side, quantity: sum + working, price, position: pos, leverage: lev, oi: oiNow });
     const most = Math.min(lim.maxByPosition, lim.maxByOi) - working;
-    if (sum <= most + 1e-12) return list;
+    if (sum <= most + 1e-12) {
+      if (a.k.limitHold) {
+        delete a.k.limitHold;
+        this.dirty.add(a.id);
+      }
+      return list;
+    }
+    const kind: 'oi' | 'position' = lim.maxByOi < lim.maxByPosition ? 'oi' : 'position';
+    // How much can still be added, in USD and in the coin: the open interest market-wide, or this position at its leverage.
+    const head = oiHeadroom(m, oiNow, price);
+    const cap = positionCapUsd(m, lev);
+    const roomQty = Math.max(0, lim.maxByPosition - working);
+    const can = roomQty < Number(m.stepSize) ? 'nothing more can be added' : `about ${money(roomQty * price)} (${coins(roomQty)} ${m.base}) can still be added`;
+    const posWords = cap === null ? '' : `Your ${m.name} position is about ${money(Math.abs(pos ?? 0) * price)}${pos ? ` ${pos > 0 ? 'long' : 'short'}` : ''} and SoDEX's limit${lev !== null ? ` at ${lev}x` : ''} is ${money(cap)}: ${can}.`;
+    const room = kind === 'oi' && head ? oiRoomWords(m, head, price) : posWords;
     const one = list.length === 1 ? list[0]! : null;
     const cut = one ? floorStep(Math.max(0, most), m) : 0;
-    if (one && cut >= minChildQty(m, one.price)) return [{ ...one, quantity: cut }];
-    await this.hold(a, lim.maxByOi < lim.maxByPosition
-      ? `Held: open interest on ${m.name} is at SoDEX's cap. It goes on when there is room.`
-      : `Held: your ${m.name} position is at SoDEX's limit${lev !== null ? ` for ${lev}x` : ''}. It goes on when there is room (a smaller position, or lower leverage).`);
+    if (one && cut >= minChildQty(m, one.price)) {
+      const which = kind === 'oi' ? `SoDEX's open-interest cap on ${m.name}` : `SoDEX's position limit on ${m.name}`;
+      const text = `${one.tag[0]!.toUpperCase()}${one.tag.slice(1)} was cut from ${dec(one.quantity)} to ${dec(cut)} ${m.base} (about ${money(cut * one.price)}) to stay under ${which}. ${room}`;
+      delete a.k.limitHold;
+      this.dirty.add(a.id);
+      await this.event(a, 'info', text);
+      await this.limitNotice(a, m, kind, 'cut', text);
+      return [{ ...one, quantity: cut }];
+    }
+    const left = kind === 'oi' ? (head?.room ?? 0) : roomQty;
+    const none = left < Number(m.stepSize);
+    const small = one ? ` That is under ${minWords(m, one.price)}.` : ` That is too little for the next ${list.length} orders, which go out together.`;
+    const fresh = kind === 'oi'
+      ? `Held: ${room || `open interest on ${m.name} is at SoDEX's cap.`}${none ? '' : small} Nothing goes out until there is ${none ? '' : 'more '}room.`
+      : `Held: ${room || `your ${m.name} position is at SoDEX's limit.`}${none ? '' : small} It goes on when there is room (a smaller position, or lower leverage).`;
+    // The same words while it stays held for the same reason (a hold logs a line only when its words change): read again every 10 min.
+    const was = a.k.limitHold as { kind: string; reason: string; at: number } | undefined;
+    const now = Date.now();
+    const reason = was && was.kind === kind && now - was.at < LIMIT_WORDS_MS ? was.reason : fresh;
+    if (reason === fresh) {
+      a.k.limitHold = { kind, reason, at: now };
+      this.dirty.add(a.id);
+      if (!was || was.kind !== kind) await this.limitNotice(a, m, kind, 'held', reason.replace(/^Held: /, ''));
+    }
+    await this.hold(a, reason);
     return null;
+  }
+
+  /**
+   * Tell the trader that one of SoDEX's limits held the algo or cut a child
+   * (limits.ts AlgoLimitNotice): on the algo itself, so whichever browser shows
+   * it - the one running it, or one reading an executor's algos - puts it in
+   * the bell once. The same kind of notice at most once every 10 minutes.
+   */
+  private async limitNotice(a: AlgoRecord, m: MarketInfo, kind: AlgoLimitNotice['kind'], what: AlgoLimitNotice['what'], text: string): Promise<void> {
+    const now = Date.now();
+    const prev = a.k.limitNotice as AlgoLimitNotice | undefined;
+    if (prev && prev.kind === kind && prev.what === what && now - prev.at < LIMIT_WORDS_MS) return;
+    const name = a.spec.label ?? ALGO_NAMES[a.spec.kind];
+    const title = what === 'cut' ? `${name} on ${m.name}: an order was cut` : `${name} on ${m.name} is held`;
+    a.k.limitNotice = { id: randomId('n'), at: now, kind, what, title, text } satisfies AlgoLimitNotice;
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
   }
 
   /**
@@ -2096,8 +2341,14 @@ export class AlgoRuntime {
     }
     const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 60_000);
     a.k.limitUntil = Date.now() + wait;
-    a.k.limitReason = `Held: ${lim.text} Trying again in ${Math.round(wait / 60_000)} min.`;
+    // What can still be added, where it is known (the open interest market-wide).
+    const m = this.markets.get(a.spec.symbol);
+    const mk = this.market.mark(a.spec.symbol);
+    const head = m && mk && lim.kind === 'oi' ? oiHeadroom(m, mk.oi, mk.mark) : null;
+    const room = head && m && mk ? ` ${oiRoomWords(m, head, mk.mark)}` : '';
+    a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 60_000)} min.`;
     this.dirty.add(a.id);
+    if (m) await this.limitNotice(a, m, lim.kind, 'held', `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 60_000)} min.`);
     await this.hold(a, a.k.limitReason as string);
   }
 
@@ -2439,6 +2690,7 @@ export class AlgoRuntime {
   }
 
   private onChildDone(a: AlgoRecord, c: ChildOrder): void {
+    if (a.spec.kind === 'dca') return this.dcaChildDone(a, c);
     if (a.spec.kind !== 'iceberg') return;
     if (a.k.reprice === c.clOrdID) {
       // A clip cancelled to be re-priced shows again with what it had left once SoDEX confirmed the cancel (a fill may have landed meanwhile).
@@ -2558,6 +2810,12 @@ export class AlgoRuntime {
    * The owner's signed position on `symbol`, read now. A paper algo uses what
    * its own paper fills built, and otherwise the real position (only read).
    */
+  /** The leverage of the owner's open position on `symbol`, as SoDEX last reported it (null: no open position, or none reported). */
+  private positionLeverage(a: AlgoRecord, symbol: string): number | null {
+    const p = this.positionsOf.get(a.owner)?.data[symbol];
+    return p && p.size !== 0 && typeof p.leverage === 'number' && p.leverage > 0 ? p.leverage : null;
+  }
+
   private async positionOf(a: AlgoRecord, symbol: string): Promise<number | null> {
     const paperPos = a.k.paperPos;
     if (a.spec.paper && typeof paperPos === 'number' && paperPos !== 0) return paperPos;
@@ -2696,6 +2954,15 @@ export class AlgoRuntime {
     if (changed && status !== 'running') await this.event(a, 'status', reason ?? status);
     else if (reason && changed) await this.event(a, 'status', reason);
     this.host.onChange?.(a.id);
+  }
+
+  /** A line in the algo's activity, once per algo: a child size it had to decide as it runs (sizes.ts head). */
+  private async noteOnce(a: AlgoRecord, key: string, text: string): Promise<void> {
+    const noted = (a.k.noted as Record<string, true> | undefined) ?? {};
+    if (noted[key]) return;
+    a.k.noted = { ...noted, [key]: true };
+    this.dirty.add(a.id);
+    await this.event(a, 'info', text);
   }
 
   private async hold(a: AlgoRecord, reason: string): Promise<void> {

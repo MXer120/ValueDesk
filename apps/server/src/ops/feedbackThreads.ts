@@ -3,19 +3,22 @@
  * with the owner, who answers from Telegram (ops/telegramReplies.ts). A chat
  * never expires; both sides keep writing into it.
  *
- * WHO MAY READ A CHAT - one of two keys, never both for the same chat:
- *   a thread token   a browser's own random token (32 bytes,
- *                    apps/web/src/feedback/threads.ts), sent as
- *                    `Authorization: Bearer` - never in a URL. Only its SHA-256
- *                    is kept here: a copy of this database opens no chat.
- *                    Anyone may start a chat this way, with or without a wallet.
- *   a wallet         proven by a signature once, then a session token
- *                    (ops/feedbackAuth.ts). A wallet has at most one chat.
- * A browser that started a chat by token and later proves a wallet ATTACHES it
- * (attach): the chat becomes the wallet's - or, when the wallet has a chat
- * already, its messages move into that one. From then on the token alone opens
- * nothing (`locked`); it still tells the browser's bell how many replies there
- * are (summary), and nothing else.
+ * ONE CHAT PER WALLET (owner, 2026-10-28: "this needs to be always ... no
+ * signing for sending the report. Only viewing the chat"). A message that comes
+ * with a wallet address goes into that wallet's chat - proven when the sender
+ * holds the wallet's session (ops/feedbackAuth.ts), otherwise only claimed,
+ * and stored as such. READING a chat - its messages, its screenshots - takes
+ * the wallet's session and nothing else (routes/reports.ts); typing someone's
+ * address opens nothing.
+ *
+ * THE BROWSER'S TOKEN (32 random bytes, apps/web/src/feedback/threads.ts, sent
+ * as `Authorization: Bearer`, never in a URL; only its SHA-256 is kept) opens no
+ * chat and tells nothing about one - not even a reply count (owner, 2026-10-28).
+ * It is what an unsigned message is sent with, and the handle of a message sent
+ * with no wallet connected: kept in a chat of its own under the token
+ * (unreadable by anyone), and moved into the wallet's chat when that browser
+ * first signs in with a wallet (attach). Chats from before 2026-10-28, kept by
+ * token, are moved the same way.
  *
  * Kept in `feedback.db` in the server's data directory (SQLite, WAL); screenshots
  * as files in `feedback-images/` beside it, named by a random id, outside any
@@ -90,6 +93,8 @@ export interface MessageRow {
   images: string[];
   category: string | null;
   areas: string[];
+  /** A visitor's message sent with the wallet's session (false: only the address was given). Always true for the owner. */
+  proven: boolean;
 }
 
 export interface ImageRow {
@@ -193,28 +198,29 @@ export class FeedbackStore {
   }
 
   /**
-   * A visitor's message: into its chat, the chat made if the key has none, with
-   * the screenshots this key uploaded and named. Throws LockedError for a token
-   * whose chat is kept on a wallet.
+   * A visitor's message: into the chat `who` names (a wallet's - proven or only
+   * claimed, see `verified` - or a token's own), the chat made if there is none,
+   * with the screenshots `uploader` (default `who`) uploaded and named. Writing
+   * opens nothing: reading is the route's to allow.
    */
   addUserMessage(
     who: Who,
     m: { category: string; areas?: readonly string[]; text: string; context: unknown; wallet: string | null; verified?: boolean; images: readonly string[] },
     now = Date.now(),
+    uploader: Who = who,
   ): { threadId: number; messageId: number; isNew: boolean; images: ImageRow[] } {
     const count = (this.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n;
     if (count >= MAX_MESSAGES) throw new FullError('the feedback store is full');
-    const key = keyOf(who);
+    const key = keyOf(uploader);
     this.db.exec('BEGIN');
     try {
       const found = this.find(who);
-      if (found?.locked) throw new LockedError('this chat is kept on a wallet');
       const isNew = !found;
       let threadId: number;
       if (!found) {
         const r = this.db
           .prepare('INSERT INTO threads (token_hash, category, wallet, owner_wallet, created_at, last_at) VALUES (?, ?, NULL, ?, ?, ?)')
-          .run(key, m.category, 'wallet' in who ? who.wallet.toLowerCase() : null, now, now);
+          .run(keyOf(who), m.category, 'wallet' in who ? who.wallet.toLowerCase() : null, now, now);
         threadId = Number(r.lastInsertRowid);
       } else {
         threadId = Number(found.row.id);
@@ -318,8 +324,8 @@ export class FeedbackStore {
 
   /** A thread's messages, oldest first, each with its screenshots' ids. */
   messages(threadId: number, limit = 500): MessageRow[] {
-    const rows = this.db.prepare('SELECT id, sender, text, at, category, areas FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?').all(threadId, limit) as Array<{
-      id: number; sender: Sender; text: string; at: number; category: string | null; areas: string | null;
+    const rows = this.db.prepare('SELECT id, sender, text, at, category, areas, verified FROM messages WHERE thread_id = ? ORDER BY id DESC LIMIT ?').all(threadId, limit) as Array<{
+      id: number; sender: Sender; text: string; at: number; category: string | null; areas: string | null; verified: number | null;
     }>;
     const imgs = this.db.prepare('SELECT id FROM images WHERE message_id = ? ORDER BY at, id');
     return rows.reverse().map((r) => ({
@@ -330,15 +336,12 @@ export class FeedbackStore {
       images: (imgs.all(r.id) as Array<{ id: string }>).map((x) => x.id),
       category: r.category ?? null,
       areas: parseAreas(r.areas),
+      proven: r.sender === 'owner' || Number(r.verified) === 1,
     }));
   }
 
-  /**
-   * For the browser's bell: how many owner replies a chat has, and the newest
-   * one's time. A token keeps telling this after its chat moved onto a wallet -
-   * counts only, never a word of the chat.
-   */
-  summary(who: Who): { owner: number; lastOwnerAt: number | null } | null {
+  /** For the signed-in wallet's bell: how many owner replies its chat has, and the newest one's time. Only ever a wallet's. */
+  summary(who: { wallet: string }): { owner: number; lastOwnerAt: number | null } | null {
     const f = this.find(who);
     if (!f) return null;
     const r = this.db.prepare("SELECT COUNT(*) AS n, MAX(at) AS last FROM messages WHERE thread_id = ? AND sender = 'owner'").get(f.row.id) as { n: number; last: number | null };

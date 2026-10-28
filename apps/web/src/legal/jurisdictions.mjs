@@ -161,6 +161,14 @@ function closeOnly(country, source) {
   };
 }
 
+/** A close-only place as a sentence names it: 'the United States', 'the United Kingdom', 'Canada'. */
+export function closeOnlyPlaceName(country) {
+  const c = normaliseCountry(country);
+  if (!c) return null;
+  if (US_CODES.includes(c)) return c === 'US' ? 'the United States' : `${nameOf(c)} (a US territory)`;
+  return CLOSE_ONLY_PLACE[c] ?? nameOf(c);
+}
+
 /** For the edge: the routes' `has` lists. */
 export function edgeBlockList() {
   return {

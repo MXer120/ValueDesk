@@ -17,6 +17,7 @@ import { ExecutorDb } from './db.ts';
 import { Secrets } from './secrets.ts';
 import { createExecutorServer } from './server.ts';
 import { ApiError, ExecutorService } from './service.ts';
+import { Alerts, ReachWatch, lastRunCrashed, telegramSender } from './alerts.ts';
 
 const LEVELS = { debug: 10, info: 20, warn: 30, error: 40 } as const;
 
@@ -57,6 +58,13 @@ function selfBanner(o: { url: string; dataDir: string; owner: string | null; cod
 async function main(): Promise<void> {
   const cfg = loadConfig();
   const log = logger(cfg.logLevel);
+  // A copier on someone's own machine: nothing it writes (its database, the WAL, the lock) is for other accounts there.
+  if (cfg.kind === 'self') process.umask(0o077);
+  const alerts = new Alerts({
+    sender: telegramSender({ token: cfg.alertTelegramToken, chatId: cfg.alertTelegramChatId }),
+    label: `${process.env.EXECUTOR_ID?.trim() || (cfg.kind === 'hosted' ? 'hosted executor' : 'self-hosted copier')} (${cfg.network})`,
+    log,
+  });
   if (typeof (globalThis as { WebSocket?: unknown }).WebSocket !== 'function') {
     throw new Error(`This Node.js (${process.version}) has no WebSocket; the copier needs Node.js 22.13 or newer.`);
   }
@@ -69,19 +77,27 @@ async function main(): Promise<void> {
     stopping = true;
     log.info('executor stopping', { why });
     db?.audit('process', null, null, { event: 'stop', why, pid: process.pid });
+    alerts.stop();
     server.close();
     await svc?.stop().catch((e) => log.error('stop failed', { error: String(e) }));
     db?.close();
+    await alerts.drain(2_000);
     process.exit(code);
   };
   // One unexpected error must not leave a half-working executor running every wallet's copies.
+  // The operator hears of it (the message carries the error's first line, not its stack); the send gets a moment before exit.
+  const fatal = (why: string, e: unknown) => {
+    const first = (e instanceof Error ? e.message : String(e)).split(/\r?\n/)[0] ?? '';
+    alerts.raise('fatal', '', `${why}: ${first.slice(0, 200)}. systemd starts it again.`);
+    void shutdown(why, 1);
+  };
   process.on('unhandledRejection', (e) => {
     log.error('unhandled rejection', { error: e instanceof Error ? e.stack ?? e.message : String(e) });
-    void shutdown('unhandled rejection', 1);
+    fatal('unhandled rejection', e);
   });
   process.on('uncaughtException', (e) => {
     log.error('uncaught exception', { error: e.stack ?? e.message });
-    void shutdown('uncaught exception', 1);
+    fatal('uncaught exception', e);
   });
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
@@ -110,7 +126,32 @@ async function main(): Promise<void> {
   db = new ExecutorDb(join(cfg.dataDir, 'executor.db'));
   const secrets = new Secrets(cfg.dataDir);
   const out = egress(cfg.localAddress);
-  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log });
+  alerts.start();
+  const crashed = lastRunCrashed(db);
+  if (crashed) {
+    log.warn('executor: the last run crashed', { what: crashed });
+    alerts.raise('crash-restart', '', `Started again: ${crashed}.`);
+  }
+  // The whole audit chain, once at start (then hourly, only the rows added since).
+  let auditHead: { seq: number; hash: string } | null = null;
+  const verifyAudit = () => {
+    try {
+      const t0 = Date.now();
+      const v = db!.verifyAudit(auditHead ?? undefined);
+      if (v.brokenAt !== null) {
+        log.error('executor: the audit chain is broken', { at: v.brokenAt });
+        alerts.raise('audit-broken', '', `The audit log's hash chain breaks at row ${v.brokenAt}: a row was changed or removed. Run tools/audit.ts verify on the server.`);
+        auditHead = null;
+      } else {
+        auditHead = v.head;
+        log.info('audit verified', { rows: v.rows, ms: Date.now() - t0 });
+      }
+    } catch (e) {
+      log.warn('audit verify failed', { error: String(e) });
+    }
+  };
+  verifyAudit();
+  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts });
   if (cfg.kind === 'self') {
     const shownHost = cfg.host === '0.0.0.0' || cfg.host === '::' ? '127.0.0.1' : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
@@ -136,8 +177,20 @@ async function main(): Promise<void> {
     if (head) log.info('audit head', { seq: head.seq, at: head.at, hash: head.hash });
   };
   anchor();
-  const anchoring = setInterval(anchor, 60 * 60_000);
+  const anchoring = setInterval(() => {
+    anchor();
+    // Rows the chain did not have an hour ago: a break shows within the hour, not at the next restart.
+    if (auditHead) verifyAudit();
+  }, 60 * 60_000);
   anchoring.unref();
+
+  // SoDEX unreachable for 3 minutes (and back): from the REST answers every copy and algo reads.
+  const reach = new ReachWatch(alerts);
+  const watching = setInterval(() => {
+    if (svc) reach.check(svc.sodex.reach);
+    alerts.flush();
+  }, 30_000);
+  watching.unref();
 }
 
 main().catch((e) => {

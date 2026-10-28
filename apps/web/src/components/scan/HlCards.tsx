@@ -37,6 +37,7 @@ import { winRateView } from '../../winRateView';
 import '../Account.css';
 import { CoinLabel } from '../CoinIcon';
 import { LoadFailed, couldntLoad } from '../LoadFailed';
+import { fmtFixed } from '../../numStyle';
 
 /* ---------------------------------------------------------------------------
  * STATE - one object every Hyperliquid card reads, built once per page.
@@ -136,7 +137,7 @@ function ChartBlocked({ hl, text }: { hl: HlState; text: string }) {
 }
 
 const pct = (v: number | null | undefined, dp = 2): string =>
-  v === null || v === undefined || !Number.isFinite(v) ? DASH : `${v > 0 ? '+' : ''}${(v * 100).toFixed(dp)}%`;
+  v === null || v === undefined || !Number.isFinite(v) ? DASH : `${v > 0 ? '+' : ''}${fmtFixed(v * 100, dp)}%`;
 
 const num = (v: number | null | undefined): v is number => typeof v === 'number' && Number.isFinite(v);
 

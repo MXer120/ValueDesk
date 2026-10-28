@@ -5,6 +5,8 @@
  * the entry or USD. Last, how it exits: at market or as a limit at the
  * trigger, and for the whole position or part of it.
  */
+import { fmtDecimalString, toInputText } from '../numStyle';
+import { decimalInput } from './numberInput';
 import { useState } from 'react';
 import { CoinIcon } from './CoinIcon';
 import { Modal } from './Modal';
@@ -39,12 +41,8 @@ const trim = (n: number, dp: number): string => {
   return s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
 };
 
-/** $86,231.50 — the figures in the position block. */
-const usd = (n: number, dp: number): string => {
-  const [whole, frac] = trim(n, dp).split('.');
-  const grouped = (whole ?? '0').replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return frac ? `$${grouped}.${frac}` : `$${grouped}`;
-};
+/** $86,231.50 (86.231,50 in the default format, numStyle.ts) — the figures in the position block. */
+const usd = (n: number, dp: number): string => `$${fmtDecimalString(trim(n, dp))}`;
 
 const decimalsOf = (tick?: string): number => {
   if (!tick || !tick.includes('.')) return tick ? 0 : 2;
@@ -151,12 +149,12 @@ export function TpSlSheet({
             <span className="dlg-pre">$</span>
             <input
               aria-label={`${title} price`}
-              value={row.price}
-              placeholder="0.00"
+              value={toInputText(row.price)}
+              placeholder={toInputText('0.00')}
               inputMode="decimal"
               autoComplete="off"
               disabled={busy}
-              onChange={(e) => setPrice(leg, e.target.value)}
+              onChange={(e) => setPrice(leg, decimalInput(e.target.value, { prev: row.price }))}
             />
           </span>
         </DlgRow>
@@ -164,12 +162,12 @@ export function TpSlSheet({
           <span className="dlg-field">
             <input
               aria-label={`${title} ${gainWord.toLowerCase()}`}
-              value={row.gain}
-              placeholder="0.00"
+              value={toInputText(row.gain)}
+              placeholder={toInputText('0.00')}
               inputMode="decimal"
               autoComplete="off"
               disabled={busy}
-              onChange={(e) => setGain(leg, e.target.value)}
+              onChange={(e) => setGain(leg, decimalInput(e.target.value, { signed: true, prev: row.gain }))}
             />
             <span className="dlg-unit">{row.unit === 'pct' ? '%' : 'USD'}</span>
           </span>
@@ -213,7 +211,7 @@ export function TpSlSheet({
         <div className="dlg-facts">
           <div className="dlg-fact">
             <span>Position</span>
-            <b className={side === 'long' ? 'pos' : 'neg'}>{side === 'long' ? 'Long' : 'Short'} {fullQty} {coin}</b>
+            <b className={side === 'long' ? 'pos' : 'neg'}>{side === 'long' ? 'Long' : 'Short'} {fmtDecimalString(fullQty)} {coin}</b>
           </div>
           <div className="dlg-fact">
             <span>Avg. entry price</span>
@@ -257,18 +255,19 @@ export function TpSlSheet({
             />
           </DlgRow>
           {configure && (
-            <DlgRow title="Size to close" line={`Up to ${fullQty} ${coin}.`}>
+            <DlgRow title="Size to close" line={`Up to ${fmtDecimalString(fullQty)} ${coin}.`}>
               <span className={`dlg-field${sizeOk ? '' : ' is-bad'}`}>
                 <input
                   aria-label="Exit size"
-                  value={size}
+                  value={toInputText(size)}
                   placeholder="0"
                   inputMode="decimal"
                   autoComplete="off"
                   disabled={busy}
                   onChange={(e) => {
-                    setSize(e.target.value);
-                    retarget(Number(e.target.value));
+                    const v = decimalInput(e.target.value, { prev: size });
+                    setSize(v);
+                    retarget(Number(v));
                   }}
                 />
                 <span className="dlg-unit">{coin}</span>

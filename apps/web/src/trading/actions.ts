@@ -40,7 +40,7 @@ import {
 } from '@sodex-core';
 import { api } from '../api';
 import { activeBuilder, orderBuilder, type BuilderApproval } from './builder';
-import { tradingConfig } from './config';
+import { tradingConfig, writesOffMessage } from './config';
 import { guardAction, mustRecreate } from './feeGuard';
 import { guardLegal, isOpening } from './legalGate';
 import { requireTerms } from '../legal/acceptance';
@@ -157,6 +157,9 @@ function noteBuilderRejection(e: unknown): void {
  */
 async function signAndSend<T = unknown>(action: SignableAction, what: string): Promise<T> {
   const s = requireSigner(undefined, action.engine);
+  // The operator's brake: nothing that opens or increases a position is signed;
+  // cancels, reduce-only orders and exits, transfers and withdrawals still are.
+  if (!tradingConfig().writesAllowed && isOpening(action)) throw new TradingError(writesOffMessage(), 'writes-off');
   // An order that opens or increases a position waits for the terms (the popup, as a gate);
   // closing, cancelling and withdrawing never do.
   if (isOpening(action) && !(await requireTerms({ owner: s.meta.owner, reason: 'place this order' }))) {

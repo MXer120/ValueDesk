@@ -7,8 +7,9 @@
  *
  * EVERY FOLLOWER SIGNS THESE TERMS. The signed 'accept-terms' request
  * (packages/copy-engine/src/api.ts, AcceptTermsPayload) carries
- * COPY_TERMS_VERSION, a keccak256 of the text the follower saw, the declared
- * country and the four statements of COPY_STATEMENTS below, and the executor
+ * COPY_TERMS_VERSION, a keccak256 of the text the follower saw, the country
+ * (the one the edge saw - shown read-only, never picked: owner, 2026-10-28)
+ * and the four statements of COPY_STATEMENTS below, and the executor
  * starts no copy under another version (apps/executor/src/service.ts). So any
  * change to the text below raises COPY_TERMS_VERSION in
  * packages/copy-engine/src/policy.ts, and every follower signs again.
@@ -34,7 +35,14 @@
  *     also move funds between the owner's own accounts and wallet
  *     (packages/sodex-core/README.md, "Security notes");
  *   - a self-hosted executor reads no fee ledger, so it charges the ladder's
- *     default (apps/executor/src/service.ts volumeOf).
+ *     default (apps/executor/src/service.ts volumeOf);
+ *   - (2026-10-28) the emergency brake (apps/executor/src/brake.ts): copies
+ *     send nothing, live algos are held (not cancelled), algo exits are still
+ *     placed, followers can still pause, stop, stop and close, cancel and delete
+ *     the key; the hosted keys are sealed with a key-encryption key held on the
+ *     same server, so a compromised server means the keys are treated as
+ *     exposed (docs/INCIDENT-RUNBOOK.md); only the follower's wallet can revoke
+ *     a key on SoDEX. Section 12 follows terms.ts section 16 (see its comment).
  *
  * COPY_RISK_SUMMARY, COPY_STATEMENTS and HOSTED_KEY_NOTICE are shown in the
  * app itself, outside the legal pages, so they may hold no placeholder
@@ -81,6 +89,7 @@ export const COPY_TERMS: LegalDoc = {
           ],
         },
         { p: '**What the key can do.** SoDEX offers no API key that can trade but cannot move funds. According to SoDEX\'s documentation, the key used for copying - in every mode - can place and cancel orders and change leverage and margin, and it can also move funds between your own SoDEX spot account, your perps account and your own wallet. According to SoDEX, it cannot send funds to anyone else. Whoever holds the key can trade your account (section 7).' },
+        { p: '**If the hosted executor is attacked.** The hosted keys are stored encrypted, and the executor acts only on instructions your wallet signed. But the key that decrypts them is on the same server, so someone who takes control of that server could use the keys stored there until they expire or are revoked. If we suspect that, we stop the executor and the copies and algo orders on it (section 10), tell the followers affected in the app and on our site without undue delay, and ask them to revoke their key on SoDEX - which only your wallet can do. Choose a short key lifetime and keep in your perps account only what you are prepared to have traded by the copier: that limits what a stolen key can do.' },
         { p: '**A key you made yourself.** With the hosted or a self-hosted executor you can instead make the API key yourself on sodex.com and give it to the executor. Its private key is encrypted in your browser so that only that executor can read it. The executor uses it only when SoDEX lists it on your own account under the name you give, valid for at most 180 days. Everything in these terms about the copy key applies to such a key too; keeping any other copy of it safe is up to you.' },
         { p: 'We update the copier we provide - the hosted executor and the browser copier - from time to time, and an update can change how your rules are carried out. [[OWNER: how followers learn of updates, e.g. the version shown in the app and published release notes]] With a self-hosted executor you decide which version you run.' },
       ],
@@ -131,7 +140,7 @@ export const COPY_TERMS: LegalDoc = {
           ul: [
             'A signed instruction is valid only for the executor it names and only for a short time, and it cannot be used twice.',
             'We treat an instruction signed by your wallet as yours. Anyone who controls your wallet can give instructions in your name - protect it.',
-            'When you accept these terms, you sign their version, a fingerprint (hash) of their text, the country you live in and the four statements shown before you sign. This is the record of what you agreed to (section 11).',
+            'When you accept these terms, you sign their version, a fingerprint (hash) of their text, the country your connection comes from and the four statements shown before you sign. This is the record of what you agreed to (section 11).',
             'ValueDesk acts only on signed instructions. We take no instructions by e-mail, chat or in any other way, and we will never ask for your wallet\'s recovery phrase or for a copy key.',
             'The executor carries out an instruction once it has received and checked it. An order sent before that can still fill.',
           ],
@@ -151,7 +160,7 @@ export const COPY_TERMS: LegalDoc = {
             'copy trading, perpetual futures and the use of a copy service are lawful for you where you live and where you are.',
           ],
         },
-        { p: '**Which country counts.** You declare your country of residence when you accept these terms. With the hosted executor, the country of the IP address your requests come from is checked as well; where the two differ, the stricter rule applies and the difference is recorded. Declare your country truthfully, accept the terms again with your new country if you move, and do not hide where you are - for example with a VPN - to get around these rules. Neither check proves where you are; your declaration is your responsibility.' },
+        { p: '**Which country counts.** The country is taken from your connection, as our hosting provider reports it; you cannot choose it. You sign these terms for that country, and with the statements you confirm that you do not live in an excluded place either. With the hosted executor, the country your requests come from is checked again when you start, change or resume a copy; where it differs from the one you signed for, the stricter rule applies and the difference is recorded. If the country cannot be determined, you cannot accept these terms or start a copy. Do not hide where you are - for example with a VPN or a proxy - to get around these rules: the country we see does not prove where you are or where you live, and meeting the conditions above is your responsibility.' },
         { p: '**In the EEA: at most 2x leverage.** If the country that counts is in the European Economic Area (the 27 EU member states, Iceland, Liechtenstein and Norway, including EU territories with a country code of their own: Réunion, Guadeloupe, Martinique, French Guiana, Mayotte, Saint-Martin and Åland), every copy is limited to 2x leverage: no copied position is set above 2x, and the copy\'s total exposure (the value of its open positions) cannot exceed twice its equity. This reflects the leverage limit ESMA set for retail clients on leveraged crypto products. Copies of a leader who uses more leverage are then smaller than your sizing rule would make them, or skipped, and your results differ more from the leader\'s. The limit is not an assessment that 2x leverage is suitable for you.' },
         { p: 'If the country that counts is excluded, you cannot start or keep a copy: nothing more is copied, and copied positions stay open in your SoDEX account for you to manage. We may refuse or end copy trading for you where we have reason to believe these conditions are not met.' },
       ],
@@ -159,7 +168,7 @@ export const COPY_TERMS: LegalDoc = {
     {
       title: '6. Fees',
       blocks: [
-        { p: 'ValueDesk charges a builder fee on every copied order: openings, additions, reductions and closes, and the stop-loss and take-profit orders the copier places. The rate follows your verified trading volume through ValueDesk over the last 14 days, as ValueDesk\'s fee ledger counts it (the same count as for the fee tiers in section 4 of the [Terms of use](/terms)):' },
+        { p: 'ValueDesk charges a builder fee on every copied order: openings, additions, reductions and closes, and the stop-loss and take-profit orders the copier places. The rate follows your verified trading volume through ValueDesk over the last 14 days, as ValueDesk\'s fee ledger counts it (the same count as for the fee tiers in section 6 of the [Terms of use](/terms)):' },
         {
           ul: [
             'under $100,000: 0.025% (2.5 basis points) of the order\'s value;',
@@ -179,7 +188,7 @@ export const COPY_TERMS: LegalDoc = {
             'The fee applies in every mode. In browser mode your copies pay the rate for the volume ValueDesk\'s fee ledger last reported for your wallet; a self-hosted executor cannot read that ledger and therefore charges the rate for volumes under $100,000. The builder a self-hosted executor attaches is one of its settings.',
           ],
         },
-        { p: 'Orders you place by hand keep the builder fee in section 4 of the [Terms of use](/terms).' },
+        { p: 'Orders you place by hand keep the builder fee in section 6 of the [Terms of use](/terms).' },
       ],
     },
     {
@@ -199,7 +208,9 @@ export const COPY_TERMS: LegalDoc = {
             '**Automatic execution.** With the hosted or a self-hosted executor, copies are placed around the clock - at night and while you are away - without asking you before each trade. A rule is carried out as you set it, mistakes included.',
             '**Stops are not guarantees.** Stop-loss and take-profit orders are triggered by SoDEX\'s mark price and fill as market orders, possibly far from the trigger in a fast market. The drawdown stop works only while the copier runs and relies on the copier\'s own estimate of the copy\'s equity.',
             '**The key.** Whoever obtains your copy key can trade your account until it expires or is revoked - for example at bad prices in thin markets - and, according to SoDEX, move funds between your own SoDEX accounts and your wallet. In browser mode the key is on your device; in hosted mode it is stored encrypted on ValueDesk\'s server, which can be attacked like any server; with a self-hosted executor it is on your machine.',
-            '**Software errors.** The copier and the executor are software and can contain errors - for example an order of the wrong size or direction, or a copy that is not placed. We test them but cannot rule errors out. An update can change how your rules are carried out.',
+            '**Software errors.** Copy trading, algo orders and the executor are new software under active development and can contain errors - for example an order of the wrong size or direction, an order sent twice, a copy that is not placed, a stop that is not placed or not resized, or an order sent after you paused or stopped. We test them but cannot rule errors out. An update can change how your rules are carried out.',
+            '**Rate limits and the exchange\'s interface.** SoDEX limits how many requests it accepts and can reject or delay orders or change its interface. Copies, algo orders, stops and closing orders can then fail or arrive late, also in a fast market.',
+            '**The emergency brake.** If we suspect an attack, an error or a fault at SoDEX, we may pause all copies and algo orders at once and without notice (section 10). Nothing new is copied while it lasts, and positions stay open.',
             '**The exchange.** SoDEX is a third-party exchange. Its insolvency, a hack, an outage, a halted market or a change of its rules can cause you losses that nobody makes good. Leader data from Hyperliquid can be wrong or unavailable.',
             '**Fees.** The builder fee is charged on every copied order, including reductions, closes and stop orders, on top of SoDEX\'s fees and funding. A leader who trades often causes many copied orders, and the fees can outweigh small gains.',
             '**Counter-trading.** A counter-trade takes the side opposite the leader on every position. It gains when the leader\'s positions lose and loses when they gain, by roughly as much, plus fees and funding on both legs of every change. A leader with a good record is therefore a risk to a counter-trade, not a safeguard, and a losing past record does not mean the leader will keep losing. A position that is a hedge for the leader (see "The leader" above) is an unhedged position for you. Your loss is not limited by the leader\'s: a leader can win many times in a row, and your caps and stops apply as for any copy.',
@@ -220,7 +231,7 @@ export const COPY_TERMS: LegalDoc = {
             '**No vetting of leaders.** ValueDesk does not select, verify, vet, monitor or limit the traders you can copy, and knows nothing about them beyond their public trading data.',
             '**No custody.** ValueDesk does not hold, pool or invest your funds and is not the counterparty of your trades, which are executed on SoDEX. Your funds stay in your own SoDEX account, and according to SoDEX a copy key cannot send them to anyone but you.',
             '**No guarantee.** ValueDesk does not guarantee any result, that a trade is copied, at what price or how fast, or that the copier, the executor or SoDEX is available.',
-            '**No protection against losses.** ValueDesk offers no negative balance protection, no insurance and no compensation for losses. Whether a loss can exceed your account balance is governed by SoDEX\'s terms.',
+            '**No protection against losses.** ValueDesk offers no negative balance protection, no insurance and no compensation scheme for trading losses; what we are liable for is set out in section 12. Whether a loss can exceed your account balance is governed by SoDEX\'s terms.',
             '**No decisions for you.** ValueDesk does not choose leaders or rules for you and does not change your rules; only you can, by a signed instruction. The copier carries out your rules within the limits in sections 3 and 5.',
           ],
         },
@@ -235,6 +246,8 @@ export const COPY_TERMS: LegalDoc = {
             '**Taxes.** Gains from copied trades may be taxable. Declaring and paying taxes is up to you; ValueDesk issues no tax statements.',
             '**Security.** Protect your wallet, its recovery phrase and your device. In browser mode the copy key is on your device, with a self-hosted executor on your machine - securing them is up to you. If you suspect that a key or your wallet is compromised, stop all copies and revoke the key on SoDEX at once.',
             '**Monitoring.** Check your copies, their activity log and your SoDEX account regularly - in hosted mode especially, because copies run while you are away. Keep enough margin in your account: when margin runs short, copies are skipped and positions can be liquidated.',
+            '**Report errors at once.** If a copy or an algo order does something you did not expect, pause or stop it, check your SoDEX account and tell us at once at the address in the [Impressum](/impressum). If we tell you of an incident, follow what we ask you to do, such as revoking your key.',
+            '**Limit what is at stake.** Keep in your SoDEX perps account only what you are prepared to have traded by the copier, choose a key lifetime no longer than you need, and know how to manage your positions on SoDEX directly.',
             '**Read what you sign** (section 4), and choose rules you understand. Paper mode lets you see how a rule behaves without sending orders.',
             '**Hands off copied markets.** Do not trade by hand in a market a copy holds: the copier works from what it finds on SoDEX, and the result can differ from the leader\'s and from what you intended.',
             '**No misuse.** Do not copy addresses you control to create volume or to reach a lower fee, do not use copy trading for wash trades or market manipulation, and do not attack the executor or try to get around its limits or the regional rules.',
@@ -255,6 +268,7 @@ export const COPY_TERMS: LegalDoc = {
             'In browser mode, closing the tab stops copying. A hosted key can also be deleted from ValueDesk\'s server by a signed instruction; revoke it on SoDEX as well.',
             'A copy that is blocked - for a missing or expired key, a missing builder approval or the regional rule - resumes by itself once the condition is met again. To end a copy for good, stop it.',
             'A pause or stop takes effect when the executor has processed it; an order sent before then can still fill.',
+            '**The emergency brake.** If we suspect an attack, an error that sends wrong orders, or a fault at SoDEX, we may at once and without notice pause copies and algo orders on the executor we run - for everyone, a region or a wallet - and stop the executor. While the brake is on, no copied order is sent, algo orders are held (not cancelled), and no new copy or algo order can be started or resumed; stop orders already on SoDEX stay, and you can still pause, stop, stop and close, cancel and delete your key. Copies go on from the leader\'s next trade once we lift it, so trades the leader made in between may not be copied, or be caught up later at other prices. Using the brake for these reasons is not a breach of these terms.',
           ],
         },
       ],
@@ -264,8 +278,8 @@ export const COPY_TERMS: LegalDoc = {
       blocks: [
         {
           ul: [
-            '**Hosted.** The ValueDesk executor keeps every instruction you signed, exactly as you signed it (nothing in that log is changed or deleted); the terms you accepted, with their version and fingerprint, the country you declared, the country of your IP address and the time; your copy rules and the state of each copy; and an activity log of the orders sent, fills, skipped trades with their reasons, status changes and errors. You can read your own signed instructions and activity log through the executor after signing in with your wallet.',
-            '**Your acceptance of these terms, in every mode.** The message you signed to accept them - their version and fingerprint, the country you declared, the four statements and your wallet address - is sent to the ValueDesk executor and kept there with the country of your IP address and the time, as ValueDesk\'s record of who accepted which terms. With a self-hosted executor the same signed message is kept there too.',
+            '**Hosted.** The ValueDesk executor keeps every instruction you signed, exactly as you signed it (nothing in that log is changed or deleted); the terms you accepted, with their version and fingerprint, the country you signed them for, the country of your IP address and the time; your copy rules and the state of each copy; and an activity log of the orders sent, fills, skipped trades with their reasons, status changes and errors. You can read your own signed instructions and activity log through the executor after signing in with your wallet.',
+            '**Your acceptance of these terms, in every mode.** The message you signed to accept them - their version and fingerprint, the country you signed them for, the four statements and your wallet address - is sent to the ValueDesk executor and kept there with the country of your IP address and the time, as ValueDesk\'s record of who accepted which terms. With a self-hosted executor the same signed message is kept there too.',
             '**Browser and self-hosted.** Everything else - your copy rules, your other instructions and the activity of your copies - stays in your browser or on your executor; ValueDesk does not receive it. Keep it if you may need it.',
             'SoDEX records every order and fill in your account; its records show what was executed and at which price.',
             'How long records are kept, and your rights over them: [Privacy policy](/privacy), section 8.',
@@ -276,8 +290,11 @@ export const COPY_TERMS: LegalDoc = {
     {
       title: '12. Liability',
       blocks: [
-        { p: 'We are liable without limitation for damage caused intentionally or by gross negligence, for injury to life, body or health, under the German Product Liability Act, and where we have given a guarantee. For slight negligence we are liable only for the breach of an obligation that is essential to the proper performance of these terms and on which you may regularly rely, and then only for the damage typical and foreseeable when the obligation was breached. Otherwise our liability is excluded.' },
-        { p: 'Unless one of the cases in the first two sentences applies, we are in particular not liable for losses that result from the trades of the leader you chose or from the rules you set, from market movements, from the acts and failures of SoDEX, Hyperliquid, blockchains, wallet providers and hosting providers, or from a wallet, key or device you did not keep safe. These limits also apply to the personal liability of our employees, representatives and agents.' },
+        { p: 'We are liable without limitation for damage we cause intentionally or by gross negligence, for injury to life, body or health, for a defect we fraudulently concealed, where we have given a guarantee, under the German Product Liability Act, and wherever else the law does not allow liability to be limited.' },
+        { p: 'For slight negligence we are liable only if we breach an essential obligation - an obligation whose fulfilment makes the proper performance of these terms possible in the first place and on whose fulfilment you may regularly rely, in particular that the copier and the executor place only the orders that your signed rules and instructions call for. Our liability is then limited to the damage that is typical for this kind of agreement and that was foreseeable when you accepted these terms. Otherwise our liability for slight negligence is excluded.' },
+        { p: 'Providers we engage to run the copier - for example our hosting providers (Contabo, Vercel) and the messaging service we use (Telegram) - act on our behalf: for their faults we are liable as for our own, within the rules above. An attack on us or on them makes us liable only where we are at fault, for example because we did not take the security measures that could reasonably be expected.' },
+        { p: 'We are not responsible for what is not our performance and not in our control: the trades of the leader you chose and the results of the rules you set, as long as the copier carried them out; market movements; the acts and failures of SoDEX, Hyperliquid, blockchains and wallet providers, which do not act on our behalf; a self-hosted executor you run, as far as its operation, updates and security are concerned; and the use of your wallet, device or a key by someone who gained control of it, unless we are at fault for that. This paragraph does not limit our liability under the first three paragraphs for our own breaches, including errors of the copier and the executor.' },
+        { p: 'Where you contributed to a damage - for example by not acting on an incident notice of ours, by not reporting an error you noticed, or by not keeping your wallet or keys safe (section 9) - your claim is reduced accordingly (§ 254 of the German Civil Code). The rules for merchants in section 16 of the [Terms of use](/terms) apply to copy trading too. These limits also apply to the personal liability of our employees, representatives and agents.' },
       ],
     },
     {
@@ -334,7 +351,7 @@ export type CopyStatementId = 'adult' | 'notUsPerson' | 'ownDecision' | 'risksUn
 /** The four checkboxes before the follower signs the terms, in the order shown. */
 export const COPY_STATEMENTS: Array<{ id: CopyStatementId; label: string }> = [
   { id: 'adult', label: 'I am at least 18 years old and able to enter into binding contracts.' },
-  { id: 'notUsPerson', label: 'I am not a US person, I do not live in or connect from the United States or its territories, the United Kingdom or Canada, or from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and the country of residence I declared is true.' },
+  { id: 'notUsPerson', label: 'I am not a US person, I do not live in or connect from the United States or its territories, the United Kingdom or Canada, or from Cuba, Iran, North Korea, Syria, Russia, Belarus or Myanmar, and I do not hide where I am (for example with a VPN).' },
   { id: 'ownDecision', label: 'I chose the trader and every copy rule myself. Nobody, including ValueDesk, recommended them to me.' },
   { id: 'risksUnderstood', label: 'I have read the copy trading terms and risk disclosure, and I understand that I can lose my whole allocation, and with leverage more than that.' },
 ];
@@ -345,4 +362,5 @@ export const HOSTED_KEY_NOTICE: string =
   + 'The key is stored encrypted on ValueDesk\'s server in Tokyo, Japan (hosted by Contabo). '
   + 'While it is valid, the executor uses it to place your copies around the clock, according to your copy rules and without asking you before each trade. '
   + 'SoDEX has no key that can trade but cannot move funds: according to SoDEX, this key can also move funds between your own SoDEX spot account, perps account and your own wallet, though not to anyone else. '
+  + 'Like any server, it can be attacked: someone who took control of it could use the key until it expires or you revoke it, so choose a short lifetime and keep in your perps account only what you are prepared to have traded. '
   + 'You can stop your copies in the app at any time. To cut the executor off completely, revoke the key on SoDEX with your wallet; once SoDEX has processed that, no order can be placed with it.';

@@ -96,7 +96,7 @@ import {
   type BuilderTerms,
 } from './builder';
 import { pollBuilderRates, readBuilderRates, submitBuilderApproval } from './builderApproval';
-import { tradingConfig, writesOffMessage } from './config';
+import { onlyBrakeStops, tradingConfig, writesOffMessage } from './config';
 import { followTerms } from './terms';
 import { OutcomeUnknownError, readGateway, sendSigned } from './gateway';
 import { KeyLockedError, openVault, type KeyVault, type StoredKey } from './vault';
@@ -655,7 +655,8 @@ export async function enableTrading(o: EnableOptions): Promise<TradingState> {
   const cfg = tradingConfig();
   const owner = o.owner.toLowerCase();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
-  if (!cfg.writesAllowed) {
+  // Under the brake a key can still be enabled: without one nobody could close a position.
+  if (!cfg.writesAllowed && !onlyBrakeStops(cfg)) {
     throw new TradingError(writesOffMessage(cfg), 'writes-off');
   }
   // With a lock the new key is sealed under it: unlock BEFORE anything is signed.
@@ -1210,7 +1211,8 @@ export async function checkKeyAfterRejection(): Promise<void> {
 export function requireSigner(owner?: string | null, engine?: Engine): { key: SigningKeyRef; meta: StoredKey } {
   const cfg = tradingConfig();
   if (cfg.disabled) throw new TradingError('Trading is switched off in this build of ValueDesk.', 'disabled');
-  if (!cfg.writesAllowed) throw new TradingError(writesOffMessage(cfg), 'writes-off');
+  // Under the brake alone the signer is still handed out: signAndSend refuses whatever would open.
+  if (!cfg.writesAllowed && !onlyBrakeStops(cfg)) throw new TradingError(writesOffMessage(cfg), 'writes-off');
   if (!signer && state.locked && state.owner) {
     // Not a silent failure: the unlock dialog opens, and the caller says why nothing was sent.
     void requestUnlock(state.owner, 'Unlock trading');

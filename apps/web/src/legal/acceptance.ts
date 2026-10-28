@@ -10,8 +10,9 @@
  *
  * ONE STEP, WITH THE WALLET (LegalGate.tsx TermsGate):
  *   - a visitor with a connected wallet ticks "I confirm" over the four
- *     statements and signs ONE message with that wallet, for the country of
- *     residence the edge saw (geo.ts; shown, and changeable) - free: an
+ *     statements and signs ONE message with that wallet, for the country the
+ *     edge saw (geo.ts; shown read-only - never picked or typed in, owner
+ *     2026-10-28; unknown: no signature, nothing opens) - free: an
  *     EIP-712 signature, not a transaction, no gas, no funds move. The signed
  *     request is a CopyRequest 'accept-site-terms' (packages/copy-engine/src/
  *     api.ts) whose payload carries the version, the fingerprint, the country,
@@ -51,9 +52,9 @@ import { normaliseCountry, siteAccess } from './jurisdictions.mjs';
 const log = logger('legal');
 
 /** The terms' version: a date, with a counter when they change twice on one day (2026-10-24.2). */
-export const SITE_TERMS_VERSION = '2026-10-27';
+export const SITE_TERMS_VERSION = '2026-10-28';
 /** keccak256(canonicalJSON({ terms: TERMS, risk: RISK })) of SITE_TERMS_VERSION; acceptance.test.ts recomputes it. */
-export const SITE_TERMS_HASH = '0xc8b6a8f878117ef33a648802c890dcb0ad8fa1a6ab65398902777afef82911e8';
+export const SITE_TERMS_HASH = '0x94cefbda448b0789ec1c96f2dad020b6d54eafb64727f0956c6a8a7e4595c57e';
 
 /* ------------------------------------------------------------- statements ----- */
 
@@ -67,7 +68,7 @@ export type StatementId = 'agree' | 'eligible' | 'risks' | 'ownDecisions';
  */
 export const STATEMENTS: ReadonlyArray<{ id: StatementId; label: string }> = [
   { id: 'agree', label: 'I agree to the [Terms of use](/terms) and the [Risk disclosure](/risk), and have read the [Privacy policy](/privacy).' },
-  { id: 'eligible', label: 'I am 18 or older, not subject to sanctions, and will not use ValueDesk where it is not allowed or hide where I am (e.g. a VPN).' },
+  { id: 'eligible', label: 'I am 18 or older, not sanctioned, not living or using ValueDesk where it is not allowed, and not hiding where I am (e.g. a VPN).' },
   { id: 'risks', label: 'I understand that trading perpetual futures can lose me all the money I put in.' },
   { id: 'ownDecisions', label: 'My trades are my own decisions: ValueDesk gives no advice and never holds my funds.' },
 ];
@@ -79,7 +80,8 @@ const plain = (s: string): string => s.replace(/\[([^\]]+)\]\(\/[a-z-]+\)/g, '$1
 export function signedText(country: string): string {
   return [
     `ValueDesk - Terms of use and Risk disclosure, version ${SITE_TERMS_VERSION} (fingerprint ${SITE_TERMS_HASH}).`,
-    `Country of residence: ${country}.`,
+    // The country the edge saw - true when the visitor travels too; where they live is in the `eligible` statement.
+    `Country seen from my connection: ${country}.`,
     ...STATEMENTS.map((s) => plain(s.label)),
     'This signature is free: it is not a transaction and moves no funds.',
   ].join(' ');
@@ -189,7 +191,7 @@ export function useAcceptanceRevision(): number {
 /** The payload a wallet signs for `country` (every statement true, and its text). */
 export function siteTermsPayload(country: string): AcceptSiteTermsPayload {
   const c = normaliseCountry(country);
-  if (!c) throw new Error('Choose your country of residence.');
+  if (!c) throw new Error('ValueDesk could not tell from your connection which country you are in.');
   return {
     termsVersion: SITE_TERMS_VERSION,
     termsHash: SITE_TERMS_HASH,

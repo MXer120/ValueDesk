@@ -141,6 +141,8 @@
 .stg__choice:disabled { opacity: 0.45; cursor: default; }
 .stg__choice b { font-size: 14px; font-weight: 550; }
 .stg__choice small { color: var(--dim); font-size: 12px; line-height: 1.4; }
+/* Number format: each choice shows its own figure, in the numerals' face. */
+.stg__choice b.stg__numsample { font-family: var(--font-num); font-size: 15px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* What each hiding mode looks like, on a made-up figure. */
 .stg__sample { display: inline-block; margin-bottom: 4px; padding: 2px 4px; border-radius: 4px; color: var(--text); font-family: var(--font-num); font-size: 13px; font-weight: 600; }
 .stg__sample.is-stars { -webkit-text-security: disc; letter-spacing: 1px; }

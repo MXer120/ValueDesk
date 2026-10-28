@@ -17,6 +17,7 @@ import { LEAN_LABEL, leanOf, longShare, type CohortMarket, type Lean } from '@si
 import { marketName } from '../../../format';
 import { CoinIcon } from '../../CoinIcon';
 import { fmtUsdShort } from '../model';
+import { fmtNum } from '../../../numStyle';
 import { useMapZoom } from './mapZoom';
 
 export interface Rect { x: number; y: number; w: number; h: number }
@@ -174,7 +175,7 @@ export function Treemap({
         {!tiles.length && <p className="coh-tree__empty">No open positions in this view.</p>}
       </div>
       {tiles.length > 0 && <ZoomControls zoom={zoom} />}
-      {tiles.length > 0 && !zoom.zoomed && <span className="coh-tree__hint">{tiles.length.toLocaleString('en-US')} assets · scroll to zoom</span>}
+      {tiles.length > 0 && !zoom.zoomed && <span className="coh-tree__hint">{fmtNum(tiles.length)} assets · scroll to zoom</span>}
     </div>
   );
 }

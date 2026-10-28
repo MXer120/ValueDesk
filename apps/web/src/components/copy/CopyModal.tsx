@@ -15,6 +15,7 @@
  * nothing here starts anything until "Start copying", and that needs every step
  * of the mode done by the follower's own signatures.
  */
+import { decimalInput } from '../numberInput';
 import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { COPY_FEE_MAX, EEA_MAX_LEVERAGE, feePercent, regionPolicy } from '@copy-engine';
 import { Modal } from '../Modal';
@@ -34,6 +35,7 @@ import {
   SIZING_MODES, TAKER_RATE, fmtRate, fmtSignedPct, fmtSignedUsd, workedExample, type SetupField, type SetupState,
 } from './setup';
 import { FILL_LIMIT, type CopyContext } from './useCopy';
+import { fmtFixed, localize, toInputText } from '../../numStyle';
 
 const isRejection = (e: unknown): boolean => e instanceof WalletError && /reject|denied|cancel/i.test(e.message);
 
@@ -217,7 +219,7 @@ function RulesStep({ c, row, errs }: { c: CopyContext; row: TraderRow | null; er
           <Rule title="Max position" hint="The largest a single copied position may get, in dollars.">
             <Num id={`${uid}-maxpos`} value={c.setup.maxPosition} onChange={set('maxPosition')} unit="USDC" error={e.maxPosition} label="Max position" />
           </Rule>
-          <Rule title="Max entry deviation" hint={`How far from the trader's price a copy may fill. ${c.setup.slippageBps || '0'} bps = ${(Number(c.setup.slippageBps || 0) / 100).toFixed(2)}%.`}>
+          <Rule title="Max entry deviation" hint={`How far from the trader's price a copy may fill. ${c.setup.slippageBps || '0'} bps = ${fmtFixed(Number(c.setup.slippageBps || 0) / 100, 2)}%.`}>
             <Num id={`${uid}-slip`} value={c.setup.slippageBps} onChange={set('slippageBps')} unit="bps" error={e.slippageBps} label="Slippage cap" />
           </Rule>
         </Group>
@@ -353,7 +355,7 @@ function RunStep({ c }: { c: CopyContext }) {
           </p>
         )}
         <dl className="cpy-fees">
-          <div><dt>Copy fee</dt><dd>{c.setup.paper ? 'none (paper)' : `up to ${feePercent(COPY_FEE_MAX)} per copied order`}</dd></div>
+          <div><dt>Copy fee</dt><dd>{c.setup.paper ? 'none (paper)' : `up to ${localize(feePercent(COPY_FEE_MAX))} per copied order`}</dd></div>
           <div><dt>SoDEX taker fee</dt><dd>{fmtRate(taker)}</dd></div>
           <div><dt>Round trip, est.</dt><dd>{fmtRate(taker * 2 + fee * 2)} + slippage</dd></div>
         </dl>
@@ -365,10 +367,10 @@ function RunStep({ c }: { c: CopyContext }) {
           <span className={`cpy-alloc__box${c.parsed.errors.allocation ? ' is-bad' : ''}`}>
             <input
               id={`${uid}-alloc`}
-              value={c.setup.allocation}
-              onChange={(e) => c.patchSetup({ allocation: e.target.value })}
+              value={toInputText(c.setup.allocation)}
+              onChange={(e) => c.patchSetup({ allocation: decimalInput(e.target.value, { prev: c.setup.allocation }) })}
               inputMode="decimal"
-              placeholder="1,000"
+              placeholder="1000"
               spellCheck={false}
             />
             <span className="cpy-alloc__u">USDC</span>
@@ -435,7 +437,7 @@ function Num({ id, value, onChange, unit, placeholder, error, label }: {
   return (
     <>
       <span className={`dlg-field cpy-dfield${error ? ' is-bad' : ''}`} title={error}>
-        <input id={id} value={value} onChange={(e) => onChange(e.target.value)} inputMode="decimal" placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
+        <input id={id} value={toInputText(value)} onChange={(e) => onChange(decimalInput(e.target.value, { prev: value }))} inputMode="decimal" placeholder={placeholder} spellCheck={false} aria-label={label} aria-invalid={error ? true : undefined} />
         <span className="dlg-unit">{unit}</span>
       </span>
       {error && <small className="cpy-ferr" role="alert">{error}</small>}

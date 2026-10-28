@@ -49,6 +49,24 @@ import {
   writeList,
   type AssetRow,
 } from './model';
+import { setNumStyle } from '../../numStyle';
+import { fmtChangePct as chgPct, fmtFracPct as fracPct, fmtPriceAuto as priceAuto, fmtUsdCompact as usdCompact } from './model';
+
+test('the default number format (1.234,56): only the separators change', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(usdCompact(1_200_000), '$1,2M');
+    assert.equal(usdCompact(860_000), '$860k');
+    assert.equal(fracPct(0.0816), '+8,16%');
+    assert.equal(chgPct(1.52), '+1,52%');
+    assert.equal(priceAuto(84_298.7), '84.298,7');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

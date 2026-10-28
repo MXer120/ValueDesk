@@ -509,13 +509,10 @@ test('BUG: after a crash (no clean stop) the runner sends the first slice again 
   assert.ok(sentQty(r) <= 0.004 + 1e-12, `sent ${sentQty(r)} for a size of 0.004`);
 });
 
-test('BUG: a largest slice under SoDEX\'s minimum order stalls the TWAP forever, past its end', async () => {
+test('BUG: a largest slice under SoDEX\'s minimum order is refused at the start (it used to stall the TWAP forever)', async () => {
   const r = await rig();
   // 0.0001 BTC is about $6, under the $10 minimum.
-  const a = await add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, maxSliceQty: '0.0001', exec: { style: 'taker' } });
-  let x = await step(r, a.id);
-  for (let i = 0; i < 10; i++) x = await step(r, a.id, 30_000);
-  assert.ok(r.sink.all.length > 0 || x.status !== 'running', `status ${x.status}, ${r.sink.all.length} children, 3 min after a 2 min TWAP`);
+  await assert.rejects(add(r, { kind: 'twap', quantity: '0.002', durationMs: 120_000, slices: 2, maxSliceQty: '0.0001', exec: { style: 'taker' } }), /Your largest slice \(0\.0001 BTC, about \$6\) is under SoDEX's \$10 minimum\. Raise it to at least 0\.00017 BTC\./);
 });
 
 test('BUG: max participation caps each child but not the slice: one interval takes many times its share', async () => {
@@ -560,13 +557,10 @@ test('BUG (if SoDEX values an order at its limit): a sell child sized to the min
   assert.ok(Number(o.quantity) * Number(o.price) >= BTC.minNotional, `${o.quantity} @ ${o.price} = $${(Number(o.quantity) * Number(o.price)).toFixed(3)}`);
 });
 
-test('BUG: a TWAP too small for SoDEX ends "done" though nothing was ever sent', async () => {
+test('BUG: a TWAP too small for SoDEX is refused at the start (it used to end "done" with nothing sent)', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'twap', quantity: '0.0001', durationMs: 60_000, slices: 1, exec: { style: 'taker' } });
-  const x = await step(r, a.id);
+  await assert.rejects(add(r, { kind: 'twap', quantity: '0.0001', durationMs: 60_000, slices: 1, exec: { style: 'taker' } }), /The whole order is about \$6, under SoDEX's \$10 minimum\. Raise the size to at least \$10\.\d\d\./);
   assert.equal(r.sink.all.length, 0);
-  assert.equal(x.filled, 0);
-  assert.notEqual(x.status, 'done', `"done" means filled; it ended with: ${x.statusReason}`);
 });
 
 test('BUG: the spread guard does not hold a maker (resting) child', async () => {
@@ -695,14 +689,9 @@ test('POV: never more than the size, however much the market trades', async () =
   assert.ok(near(sentQty(r), 0.002));
 });
 
-test('BUG: a POV largest child under SoDEX\'s minimum never sends anything, even after its end time with "take"', async () => {
+test('BUG: a POV largest child under SoDEX\'s minimum is refused at the start (it used to never send anything)', async () => {
   const r = await rig();
-  const a = await add(r, { kind: 'pov', quantity: '0.001', rate: 0.5, maxChildQty: '0.0001', endAt: clock + 10_000, finish: 'take', exec: { style: 'taker' } });
-  await step(r, a.id);
-  r.market.print({ price: 60_000, qty: 0.01 });
-  let x = await step(r, a.id, 500);
-  for (let i = 0; i < 10; i++) x = await step(r, a.id, 5_000);
-  assert.ok(r.sink.all.length > 0 || x.status !== 'running', `status ${x.status}, ${r.sink.all.length} children, 40 s past its end`);
+  await assert.rejects(add(r, { kind: 'pov', quantity: '0.001', rate: 0.5, maxChildQty: '0.0001', endAt: clock + 10_000, finish: 'take', exec: { style: 'taker' } }), /Your largest child \(0\.0001 BTC, about \$6\) is under SoDEX's \$10 minimum\. Raise it to at least 0\.00017 BTC\./);
 });
 
 /* ==================================================================== DCA ===== */

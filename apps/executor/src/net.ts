@@ -44,7 +44,9 @@ export function egress(localAddress: string | null): Egress {
         res.on('end', () => {
           const status = res.statusCode ?? 0;
           const body = Buffer.concat(chunks).toString('utf8');
-          resolve({ status, ok: status >= 200 && status < 300, text: async () => body });
+          const h = res.headers;
+          const headers = { get: (name: string): string | null => { const v = h[name.toLowerCase()]; return v === undefined ? null : Array.isArray(v) ? v.join(', ') : String(v); } };
+          resolve({ status, ok: status >= 200 && status < 300, text: async () => body, headers });
         });
         res.on('error', reject);
       });

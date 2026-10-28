@@ -12,6 +12,8 @@ export interface ResponseLike {
   status: number;
   ok: boolean;
   text(): Promise<string>;
+  /** Response headers, where the host has them (Retry-After, x-ratelimit-*). */
+  headers?: { get(name: string): string | null };
 }
 
 export interface RequestInitLike {

@@ -2,6 +2,7 @@
  * The transfer just sent, hung under the sheet. No history. An up arrow on a
  * finished result collapses it once; after that the arrow and the panel are gone.
  */
+import { fmtDecimalString } from '../../numStyle';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { FundsAccount } from '../../trading/funds';
 import { Arrow, Chevron, SodexMark, WalletMark } from './ui';
@@ -94,7 +95,7 @@ function Move({
         <End account={to} />
       </span>
       <span className="fx-move__side">
-        <b>{amount} {coin}</b>
+        <b>{fmtDecimalString(amount)} {coin}</b>
         <span className={`fx-xfer__st is-${status}`}><Mark kind={status} />{statusWord(status)}</span>
       </span>
     </div>

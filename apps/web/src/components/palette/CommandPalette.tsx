@@ -165,6 +165,7 @@ import {
 import { VenueChooser } from '../scan/VenueChooser';
 import { PlatformSelect } from '../PlatformSelect';
 import './CommandPalette.css';
+import { fmtNum } from '../../numStyle';
 
 export interface CommandPaletteProps {
   /** Controlled opening (optional): App opens it through `openPalette` instead, see below. */
@@ -1306,10 +1307,10 @@ function PaletteDialog(
         <div className="cp-scroll cp-list cp-cq" data-paged="">
           {traderRows.length > 0 && (
             <div className="cp-listhead">
-              <span className="cp-listhead__n cp-num">{total > traderRows.length ? `${traderRows.length.toLocaleString('en-US')}+` : traderRows.length.toLocaleString('en-US')} traders</span>
+              <span className="cp-listhead__n cp-num">{total > traderRows.length ? `${fmtNum(traderRows.length)}+` : fmtNum(traderRows.length)} traders</span>
               <span className="cp-listhead__d">
                 sorted by 30D PnL
-                {traders.meta ? ` · ${traders.meta.enrichedCount.toLocaleString('en-US')} of ${traders.meta.poolSize.toLocaleString('en-US')} read in detail` : ''}
+                {traders.meta ? ` · ${fmtNum(traders.meta.enrichedCount)} of ${fmtNum(traders.meta.poolSize)} read in detail` : ''}
               </span>
             </div>
           )}
@@ -1552,7 +1553,7 @@ function PaletteDialog(
               <div className="cp-row-ctl cp-filters">
                 <Seg size="sm" label="Market type" value={state.assetCat} onChange={(c) => patch({ assetCat: c })} options={ASSET_CATS} />
                 <span className="cp-row-ctl__end">
-                  <span className="cp-count"><span className="cp-count__n cp-num">{assetRows.length.toLocaleString('en-US')} markets</span></span>
+                  <span className="cp-count"><span className="cp-count__n cp-num">{fmtNum(assetRows.length)} markets</span></span>
                   <Seg
                     size="sm"
                     label="Sort by"
@@ -1609,7 +1610,7 @@ function countLabel(s: ScreenerState, extra = 0): string {
   if (!s.meta) return extra ? `${extra} traders` : s.loading ? 'Loading traders…' : '—';
   const n = s.meta.total + extra;
   const shown = s.rows.length + extra;
-  return `${n > shown ? `${shown.toLocaleString('en-US')}+` : n.toLocaleString('en-US')} trader${n === 1 ? '' : 's'}`;
+  return `${n > shown ? `${fmtNum(shown)}+` : fmtNum(n)} trader${n === 1 ? '' : 's'}`;
 }
 
 function emptyTraders(text: string, f: ListFilters): string {

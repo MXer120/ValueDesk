@@ -54,6 +54,7 @@ import { RELEASE_EVENT, fmtField, useReleaseResults, type ReleaseResult } from '
 import type { CalendarEvent } from '../vsApi';
 import { useLatched } from '../components/motion';
 import type { TimeZoneMode } from './timeAxis';
+import { fmtNum } from '../numStyle';
 
 const PANE = 'candle_pane';
 /** A marker is 24px; closer than this they are one. */
@@ -117,7 +118,7 @@ function leadRelease(list: readonly NewsStory[], now: number): NewsStory {
 /** An all-day release's date ("Wed 28 Oct"): its time is midday UTC of that date, read in UTC. */
 const releaseDay = (t: number) => new Date(t).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 
-const compact = new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 });
+const compact = { format: (n: number) => fmtNum(n, { notation: 'compact', maximumFractionDigits: 1 }) };
 /** Why a story counts as hot, in a few words: its place on the hot list, or a post's reach. */
 function hotNote(s: NewsStory): string | null {
   if (!storyHeat(s)) return null;

@@ -64,6 +64,7 @@ import {
   type KeyInfo,
   type Logger,
   type MeResponse,
+  type QueueStats,
   type OrderSink,
   type RegionPolicy,
   type SessionGrant,
@@ -78,6 +79,8 @@ import { sqlite, type ExecutorDb, type KeyRow } from './db.ts';
 import { auditedAlgoSink, auditedOrderSink } from './audited.ts';
 import { Brake, type BrakeState } from './brake.ts';
 import { KEY_IMPORT_ALG, importInfo, type ImportEnvelope, type Secrets } from './secrets.ts';
+import { ErrorGuard, guardedAlgoSink, guardedOrderSink, type GuardTarget } from './guard.ts';
+import { shortWallet, type Alerts } from './alerts.ts';
 
 /** The pairing code's letters: no 0/O, 1/I/L, so it reads back from a terminal without doubt. */
 const PAIR_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -167,7 +170,18 @@ export interface ServiceDeps {
   fetch: FetchLike;
   factory: WebSocketFactory;
   log: Logger;
+  /** The operator's alerts (alerts.ts); none: nothing is sent. */
+  alerts?: Alerts;
 }
+
+/**
+ * How long an opened follower key stays in memory after its last use. Signing
+ * opens it from its sealed record (AES-GCM, microseconds); an idle wallet's key
+ * is wiped from memory (zeroed) instead of sitting there for the process's life.
+ */
+const SIGNER_IDLE_MS = 2 * 60_000;
+/** At most this many followers' volumes are remembered (the rest is read again). */
+const VOLUMES_MAX = 20_000;
 
 const SESSION_TTL_MS = 12 * 60 * 60_000;
 /** How long a follower's volume (the copy fee step) is used before it is read again. */
@@ -188,7 +202,10 @@ export class ExecutorService {
   private readonly hyperliquid: HyperliquidClient;
   private readonly nonces = createMemoryNonceManager();
   private readonly paper = new PaperSink();
-  private readonly signers = new Map<string, SigningKeyRef>();
+  private readonly signers = new Map<string, { ref: SigningKeyRef; usedAt: number }>();
+  private signerSweep: ReturnType<typeof setInterval> | null = null;
+  /** What SoDEX refused, and the copies and algos held for it (guard.ts). */
+  readonly guard: ErrorGuard;
   private readonly volumes = new Map<string, { usd: number | null; at: number }>();
   private readonly volumeReads = new Map<string, Promise<number | null>>();
   private builderDb: DatabaseSync | null = null;
@@ -209,8 +226,20 @@ export class ExecutorService {
     this.executorId = cfg.executorId ?? (cfg.kind === 'hosted' ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === 'hosted' ? 'vd-copy-tokyo' : 'vd-copy-self';
     this.pairingCode = cfg.kind === 'self' && !this.owner() ? pairingCode() : null;
+    this.guard = new ErrorGuard({
+      alert: (kind, o) => deps.alerts?.raise(kind, o.ref, o.text),
+      held: (t, reason, until, wallet) => this.onHeld(t, reason, until, wallet),
+      keyRefused: (owner) => {
+        this.forgetSigner(owner);
+        // Checked against SoDEX again on the next readiness check (keyProblem reads it when checkedAt is old).
+        const k = db.key(owner, 'active');
+        if (k) db.markKey(owner, 'active', k.registered, k.expiresAt, 0);
+      },
+    });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
       db.audit('brake', null, null, { now, before });
+      if (now) deps.alerts?.raise('brake-on', '', `Copies ${now.copies ? 'held' : 'running'}, algos ${now.algos ? 'held' : 'running'}. Reason: ${now.reason}`);
+      else if (before) deps.alerts?.raise('brake-off', '', 'The emergency brake is off; trading goes on.');
       if (now) deps.log.warn('executor: the emergency brake is ON', { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn('executor: the emergency brake is off', {});
     });
@@ -228,7 +257,7 @@ export class ExecutorService {
       builderFor: async (s) => (cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null),
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
-      keyProblem: (s) => this.keyProblem(s.owner),
+      keyProblem: async (s) => this.guard.holdOf({ kind: 'copy', id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
       brake: () => this.brakeText('copies'),
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
@@ -240,7 +269,7 @@ export class ExecutorService {
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
       builderRate: (a) => (cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 100_000 : 0),
-      problem: (a) => this.algoProblem(a),
+      problem: async (a) => this.guard.holdOf({ kind: 'algo', id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText('algos'),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => this.algoPolicy(a),
@@ -251,11 +280,28 @@ export class ExecutorService {
   }
 
   async start(): Promise<void> {
+    this.signerSweep ??= setInterval(() => this.sweepSigners(), 30_000);
+    this.signerSweep.unref?.();
+    // The per-IP rate limit, to the operator: SoDEX's 429 / Cloudflare 1015 opens a cooldown for every wallet here.
+    this.sodex.budget.onEvent = (e) => {
+      if (e.kind === 'rate-limited') {
+        this.deps.log.warn('executor: SoDEX rate limited this IP', { ms: e.ms, path: e.path, retryAfterMs: e.retryAfterMs });
+        this.deps.alerts?.raise('rate-limited', '', `SoDEX answered 429 on ${e.path}; nothing opens for ${Math.round(e.ms / 1000)} s${e.retryAfterMs !== null ? ` (Retry-After ${Math.round(e.retryAfterMs / 1000)} s)` : ''}. Closes and stops still go out, spaced.`);
+      } else this.deps.alerts?.raise('rate-cleared', '', 'SoDEX answers again without 429.');
+    };
+    // Closes and stops waiting in the send queue (copy-engine sodex.ts SendQueue) longer than 10 s.
+    this.sodex.queue.onEvent = (e) => {
+      this.deps.log.warn('executor: the SoDEX send queue is slow', { waiting: e.waiting, oldestMs: e.oldestMs, byClass: e.byClass });
+      this.deps.alerts?.raise('queue-slow', '', `${e.waiting} signed write(s) waiting, the oldest for ${Math.round(e.oldestMs / 1000)} s (cancels ${e.byClass.cancel}, stops/closes ${e.byClass.protect}, leverage ${e.byClass.leverage}). New openings are refused until it drains; cooldown ${Math.round(this.sodex.budget.cooldownLeft() / 1000)} s.`);
+    };
     await this.runtime.start();
     await this.algos.start();
   }
 
   async stop(): Promise<void> {
+    if (this.signerSweep) clearInterval(this.signerSweep);
+    this.signerSweep = null;
+    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
     await this.runtime.stop();
     this.builderDb?.close();
@@ -326,19 +372,20 @@ export class ExecutorService {
   }
 
   /** What release.sh and the health check read: ok only while the database answers and the SoDEX feed is up. */
-  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean }; brake?: BrakeState | null } {
+  health(): { ok: boolean; db: boolean; copies: number; active: number; algos: number; feeds: { sodex: boolean }; brake?: BrakeState | null; queue?: QueueStats } {
     let db = true;
     try {
       this.db.ping();
     } catch {
       db = false;
     }
-    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current() };
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
     const sodex = v?.feeds.sodex ?? true;
-    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex }, brake: this.brake.current() };
+    // The send queue: how many signed writes wait, the oldest's age, the cooldown left (sodex.ts SendQueue).
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === 'active').length, algos, feeds: { sodex }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
   }
 
   /**
@@ -528,7 +575,7 @@ export class ExecutorService {
         const now = Date.now();
         this.db.putKey({ owner, slot: 'pending', address, name, sealed, createdAt: now, expiresAt: r.expiresAt, registered: true, checkedAt: now });
         this.db.promoteKey(owner);
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         for (const s of this.runtime.list(owner)) void this.runtime.checkReady(s);
         this.deps.log.info('copy key imported', { owner, key: address });
         return this.keyInfo(owner)!;
@@ -563,7 +610,7 @@ export class ExecutorService {
       } else if (r.ok) {
         this.db.markKey(owner, 'pending', true, r.expiresAt, Date.now());
         this.db.promoteKey(owner);
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         for (const s of this.runtime.list(owner)) void this.runtime.checkReady(s);
       }
     }
@@ -587,7 +634,7 @@ export class ExecutorService {
       await this.algos.cancelAll(owner);
       await this.runtime.stopAll(owner, { close: payload.close === true });
       this.db.deleteKeys(owner);
-      this.signers.delete(owner);
+      this.forgetSigner(owner);
       return this.me(owner, ctx);
     });
   }
@@ -600,7 +647,7 @@ export class ExecutorService {
       const r = await this.sodex.keyRegistered(owner, k.name, k.address);
       this.db.markKey(owner, 'active', r.ok, r.expiresAt, now);
       if (!r.ok) {
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         return r.expiresAt && r.expiresAt <= now ? 'The copy key expired. Approve a new one in copy setup.' : 'The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.';
       }
       return null;
@@ -610,24 +657,63 @@ export class ExecutorService {
   }
 
   private signer(owner: string): SigningKeyRef | null {
+    const now = Date.now();
     const hit = this.signers.get(owner);
-    if (hit) return hit;
+    if (hit) {
+      hit.usedAt = now;
+      return hit.ref;
+    }
     const k: KeyRow | null = this.db.key(owner, 'active');
     if (!k || !k.registered) return null;
     try {
       const ref = this.secrets.open(this.cfg.network, owner, k.address, k.sealed, { name: k.name, expiresAt: k.expiresAt });
-      this.signers.set(owner, ref);
+      this.signers.set(owner, { ref, usedAt: now });
       return ref;
     } catch (e) {
+      // The error is the decipher's ("Unsupported state or unable to authenticate data"): no key material in it.
       this.deps.log.error('copy key could not be opened', { owner, error: String(e) });
+      this.deps.alerts?.raise('key-decrypt', `owner:${owner}`, `The sealed key of wallet ${shortWallet(owner)} did not open (${String(e).slice(0, 120)}). Its copies and algos cannot trade. A wrong or rotated kek? (docs/deploy/SECRETS.md)`);
       return null;
     }
+  }
+
+  /**
+   * Forget an opened key and wipe its bytes (zeroed): at once when the executor
+   * stops, else a few seconds later - an order being signed with it right now
+   * (it was handed out a moment ago) still signs with the real key.
+   */
+  private forgetSigner(owner: string, now = false): void {
+    const hit = this.signers.get(owner);
+    this.signers.delete(owner);
+    if (!hit) return;
+    if (now) hit.ref.privateKey.fill(0);
+    else setTimeout(() => hit.ref.privateKey.fill(0), 5_000).unref?.();
+  }
+
+  /** Keys idle for SIGNER_IDLE_MS are wiped; a key in use was handed out moments ago and is never one of them. */
+  private sweepSigners(now = Date.now()): void {
+    for (const [owner, h] of this.signers) if (now - h.usedAt >= SIGNER_IDLE_MS) this.forgetSigner(owner);
+  }
+
+  /** The guard held a copy or an algo: its status says so now, and it is checked again when the hold ends. */
+  private onHeld(t: GuardTarget, reason: string, until: number, wallet: boolean): void {
+    this.deps.log.warn('executor: held after SoDEX refusals', { kind: t.kind, id: t.id, owner: t.owner, until, reason });
+    this.db.audit('hold', t.owner, t.id, { kind: t.kind, wallet, until, reason });
+    // A wallet-wide hold (the key) holds every copy of the wallet; a copy's own hold only that copy.
+    // (A held algo needs nothing here: it asks `problem` before each step.)
+    const recheck = () => {
+      for (const s of this.runtime.list(t.owner)) if (wallet || (t.kind === 'copy' && s.id === t.id)) void this.runtime.checkReady(s);
+    };
+    recheck();
+    const timer = setTimeout(recheck, Math.max(1_000, until - Date.now() + 1_000));
+    timer.unref?.();
   }
 
   private sinkFor(s: Subscription): OrderSink | null {
     if (s.settings.paper) return this.paper;
     if (!this.db.key(s.owner, 'active')) return null;
-    return auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
+    const sink = auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
+    return guardedOrderSink(sink, this.guard, { kind: 'copy', id: s.id, owner: s.owner });
   }
 
   /* ----------------------------------------------------------- copies ----- */
@@ -754,12 +840,13 @@ export class ExecutorService {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   private algoSink(a: AlgoRecord): AlgoSink | null {
     if (!this.db.key(a.owner, 'active')) return null;
-    return auditedAlgoSink(
+    const sink = auditedAlgoSink(
       new KeyAlgoSink(this.sodex, () => this.signer(a.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network], async (x) =>
         this.cfg.builderId > 0 ? { id: this.cfg.builderId, fee: copyFeeFor(await this.freshVolume(x.owner)) } : null,
       ),
       this.db,
     );
+    return guardedAlgoSink(sink, this.guard, this.sodex.budget);
   }
 
   /**
@@ -954,11 +1041,11 @@ export class ExecutorService {
         body = null;
       }
       if (!res.ok || !body?.ok || typeof body.usd !== 'number' || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
-      this.volumes.set(owner, { usd: body.usd, at: Date.now() });
+      this.rememberVolume(owner, body.usd);
       return body.usd;
     } catch (e) {
       this.deps.log.warn('copy fee: the builder volume could not be read', { owner, error: String(e) });
-      this.volumes.set(owner, { usd: last?.usd ?? null, at: Date.now() });
+      this.rememberVolume(owner, last?.usd ?? null);
       return last?.usd ?? null;
     }
   }
@@ -981,7 +1068,17 @@ export class ExecutorService {
     } catch (e) {
       this.deps.log.warn('copy fee: the builder ledger could not be read', { error: String(e) });
     }
-    this.volumes.set(owner, { usd, at: Date.now() });
+    this.rememberVolume(owner, usd);
     return usd;
+  }
+
+  /** Bounded: anyone can sign in with a fresh wallet, so the map of volumes must not grow without end. */
+  private rememberVolume(owner: string, usd: number | null): void {
+    this.volumes.delete(owner);
+    if (this.volumes.size >= VOLUMES_MAX) {
+      const oldest = this.volumes.keys().next().value;
+      if (oldest !== undefined) this.volumes.delete(oldest);
+    }
+    this.volumes.set(owner, { usd, at: Date.now() });
   }
 }

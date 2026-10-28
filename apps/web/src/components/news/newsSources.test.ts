@@ -14,7 +14,7 @@ const site = (author: string | null, href = SOSO_PAGE, source?: string) => sourc
 
 test('a story from one of the feeds is marked by that feed, whatever its author or link', () => {
   assert.equal(site('Anyone', 'https://example.com/a', 'whitehouse'), 'whitehouse.gov');
-  assert.equal(site(null, 'not a url', 'watcherguru'), 'watcher.guru');
+  assert.equal(site('Watcher.Guru', SOSO_PAGE, 'watcherguru'), 'watcher.guru', 'a dropped feed id falls through to the author');
   assert.equal(site('Reuters', SOSO_PAGE, 'sosovalue'), 'sosovalue.com');
   assert.equal(site('Reuters', SOSO_PAGE, 'somethingelse'), 'reuters.com', 'an unknown source id falls through to the author');
 });
@@ -70,7 +70,9 @@ test('Settings lists each outlet once, and never the feeds that have their own s
 test('a site\'s icon: the app\'s own, then the shipped copy, else the logo route (encoded)', () => {
   assert.equal(logoUrl('sosovalue.com'), '/logos/brand/sosovalue.png');
   assert.equal(logoUrl('bloomberg.com'), '/logos/news/bloomberg.com.png');
-  assert.equal(logoUrl('coindesk.com'), '/logos/news/coindesk.com.jpg');
+  assert.equal(logoUrl('coindesk.com'), '/logos/news/coindesk.com.svg');
+  // Official seals and marks that need permission are neutral letter badges (licence review 2026-10-28).
+  for (const s of ['federalreserve.gov', 'sec.gov', 'dol.gov', 'kalshi.com']) assert.equal(logoUrl(s), `/logos/news/${s}.svg`, s);
   assert.equal(logoUrl('nowhere.example'), '/api/vs/logo?domain=nowhere.example');
   assert.equal(logoUrl('a b&c'), '/api/vs/logo?domain=a%20b%26c');
 });

@@ -9,6 +9,7 @@
  * Screener types come from the server through the `@sign` alias (types only:
  * nothing of the server is bundled).
  */
+import { decimalInput } from '../numberInput';
 import type {
   ActiveSpan,
   HlAsset,
@@ -20,7 +21,7 @@ import type {
 import { sizeCohort, type CohortId, type CohortMarket, type MapSector } from '@sign/valuedesk/cohorts/model.js';
 import type { Positioning, TraderRow, Venue, Window } from '../../vsApi';
 import { DASH, MINUS } from '../../format';
-import { formatNumber } from '../../intlCache';
+import { fmtFixed, fmtNum, getNumSeps, localize } from '../../numStyle';
 
 export type { ActiveSpan, HlAsset, PresetId, ScreenerRow, ScreenerSort, Strategy };
 
@@ -70,7 +71,7 @@ export function fmtUsdSigned(v: number | null | undefined): string {
 }
 
 function trim(n: number, dp: number): string {
-  return n.toFixed(dp).replace(/\.0+$/, '');
+  return localize(n.toFixed(dp).replace(/\.0+$/, ''));
 }
 
 /** Fraction -> signed percent: 0.0816 -> +8.16%. Very large ROIs lose their decimals. */
@@ -78,7 +79,7 @@ export function fmtFracPct(v: number | null | undefined, dp = 2): string {
   if (!isNum(v)) return DASH;
   const p = v * 100;
   const d = Math.abs(p) >= 1000 ? 0 : Math.abs(p) >= 100 ? 1 : dp;
-  const body = formatNumber(Math.abs(p), 'en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+  const body = fmtNum(Math.abs(p), { minimumFractionDigits: d, maximumFractionDigits: d });
   return `${p > 0 ? '+' : p < 0 ? MINUS : ''}${body}%`;
 }
 
@@ -90,7 +91,7 @@ export function fmtWinRate(v: number | null | undefined): string {
 /** Percent number (already x100) -> "+1.52%". */
 export function fmtChangePct(v: number | null | undefined): string {
   if (!isNum(v)) return DASH;
-  return `${v > 0 ? '+' : v < 0 ? MINUS : ''}${Math.abs(v).toFixed(2)}%`;
+  return `${v > 0 ? '+' : v < 0 ? MINUS : ''}${fmtFixed(Math.abs(v), 2)}%`;
 }
 
 /** A price with sensible precision for its size. */
@@ -98,7 +99,7 @@ export function fmtPriceAuto(v: number | null | undefined): string {
   if (!isNum(v)) return DASH;
   const a = Math.abs(v);
   const dp = a >= 1000 ? 1 : a >= 100 ? 2 : a >= 1 ? 3 : a >= 0.01 ? 5 : 7;
-  return formatNumber(v, 'en-US', { minimumFractionDigits: a >= 1000 ? 0 : Math.min(dp, 2), maximumFractionDigits: dp });
+  return fmtNum(v, { minimumFractionDigits: a >= 1000 ? 0 : Math.min(dp, 2), maximumFractionDigits: dp });
 }
 
 export const signOf = (v: number | null | undefined): 'pos' | 'neg' | '' =>
@@ -755,7 +756,14 @@ export const isMissing = (text: string): boolean => text === DASH || text === 'â
 
 /** Keeps what an amount field accepts: digits, one dot, one k / m / b suffix. */
 export function amountInput(raw: string): string {
-  const s = raw.toLowerCase().replace(/[$,\s]/g, '');
+  // The number format decides the comma (numStyle.ts): a thousands mark to drop
+  // in 1,234.56 ("$1,500k" is 1500k); the decimal mark in 1.234,56, read as
+  // every number box reads it (numberInput.tsx: "1,5m" is 1.5m) - the field
+  // shows "1,5m" at rest there, so it must read its own text back.
+  const low = raw.toLowerCase().replace(/[$\s]/g, '');
+  const at = low.search(/[kmb]/);
+  const num = (t: string) => (getNumSeps().decimal === ',' ? decimalInput(t) : t.replace(/,/g, ''));
+  const s = at < 0 ? num(low) : num(low.slice(0, at)) + low.slice(at);
   const m = /^(\d*)(\.?\d*)([kmb]?)/.exec(s);
   if (!m) return '';
   const [, int = '', frac = '', unit = ''] = m;

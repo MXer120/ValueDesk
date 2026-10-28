@@ -40,6 +40,7 @@ import { SETTINGS_EVENT, type SettingsSection } from '../settingsBus';
 import { requestDisconnect } from './account/actions';
 import { APPEARANCE_DEFAULT, setAppearance, useAppearance, type Appearance } from '../appearance';
 import { HelpSection } from '../feedback/HelpSection';
+import { NUM_STYLES, NUM_STYLE_LIST, fmtFixed, fmtNum, setNumStyle, useNumStyle } from '../numStyle';
 import './SettingsMenu.css';
 
 const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) => (
@@ -48,7 +49,7 @@ const Icon = ({ children, size = 18 }: { children: ReactNode; size?: number }) =
 
 type Section = SettingsSection;
 const SECTIONS: Array<{ id: Section; label: string; hint: string; icon: ReactNode }> = [
-  { id: 'appearance', label: 'Appearance', hint: 'The glass look', icon: <><circle cx="10" cy="10" r="6.5" /><path d="M10 3.5a6.5 6.5 0 0 0 0 13Z" fill="currentColor" stroke="none" /></> },
+  { id: 'appearance', label: 'Appearance', hint: 'Number format, glass look', icon: <><circle cx="10" cy="10" r="6.5" /><path d="M10 3.5a6.5 6.5 0 0 0 0 13Z" fill="currentColor" stroke="none" /></> },
   { id: 'privacy', label: 'Privacy', hint: 'Hide your figures', icon: <path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5ZM10 12.2a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" /> },
   { id: 'layout', label: 'Layout', hint: 'Panels on the trade page', icon: <><rect x="3" y="3.5" width="14" height="13" rx="2" /><path d="M9 3.5v13M9 9.5h8" /></> },
   { id: 'security', label: 'Security', hint: 'Trading key, lock', icon: <><rect x="4.5" y="9" width="11" height="8" rx="2" /><path d="M7 9V6.5a3 3 0 0 1 6 0V9" /></> },
@@ -190,7 +191,7 @@ function PrivacySection() {
       <div className="stg__choices">
         {PRIVACY_MODES.map((m) => (
           <button key={m} type="button" className={`stg__choice${mode === m ? ' is-on' : ''}`} aria-pressed={mode === m} onClick={() => setMode(m)}>
-            <span className={`stg__sample is-${m}`} aria-hidden="true">$12,480.55</span>
+            <span className={`stg__sample is-${m}`} aria-hidden="true">${fmtNum(12480.55, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
             <b>{MODE_LABELS[m]}</b>
             <small>{MODE_HINTS[m]}</small>
           </button>
@@ -388,7 +389,7 @@ function OutletList() {
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" spellCheck={false} autoComplete="off" />
       </label>
-      {/* The feeds the widget reads (SoSoValue, the White House, Watcher.Guru): the outlets below reach it through SoSoValue. */}
+      {/* The feeds the widget reads (SoSoValue, the White House): the outlets below reach it through SoSoValue. */}
       {aggregators.length > 0 && (
         <div>
           <div className="stg__label"><span>Aggregators</span></div>
@@ -453,6 +454,37 @@ function LegalSection() {
   );
 }
 
+/**
+ * Number format (numStyle.ts): which marks group thousands and which marks
+ * decimals, everywhere a figure is shown and in every number box. Default
+ * 1.234,56 (owner, 2026-10-28). What is sent - orders, exports, copies - is
+ * always the plain machine number.
+ */
+function NumberFormatChoice() {
+  const style = useNumStyle();
+  return (
+    <>
+      <div className="stg__label"><span>Number format</span></div>
+      <div className="stg__choices">
+        {NUM_STYLE_LIST.map((k) => (
+          <button key={k} type="button" className={`stg__choice${style === k ? ' is-on' : ''}`} aria-pressed={style === k} onClick={() => setNumStyle(k)}>
+            <b className="stg__numsample">{NUM_STYLES[k].sample}</b>
+            <small>{NUM_HINTS[k]}</small>
+          </button>
+        ))}
+      </div>
+      <p className="stg__note">In number boxes, type decimals with “{NUM_STYLES[style].decimal}” (a “{NUM_STYLES[style].decimal === ',' ? '.' : ','}” works too). A figure that could be read two ways when pasted - {NUM_STYLES[style].decimal === ',' ? '1.000' : '1,000'} - is refused with a hint, never guessed. Orders, exports and copied values always use the plain 1234.56.</p>
+    </>
+  );
+}
+
+const NUM_HINTS: Record<keyof typeof NUM_STYLES, string> = {
+  'dot-comma': 'Dot groups, comma decimals (default)',
+  'comma-dot': 'Comma groups, dot decimals',
+  'space-comma': 'Space groups, comma decimals',
+  'apos-dot': 'Apostrophe groups, dot decimals',
+};
+
 /** A slider with its value. */
 function Slider({ title, k, min, max, step = 1, unit = '' }: { title: string; k: keyof Appearance; min: number; max: number; step?: number; unit?: string }) {
   const a = useAppearance();
@@ -461,7 +493,7 @@ function Slider({ title, k, min, max, step = 1, unit = '' }: { title: string; k:
     <Row title={title}>
       <span className="stg__slider">
         <input type="range" min={min} max={max} step={step} value={v} aria-label={title} onChange={(e) => setAppearance({ [k]: Number(e.target.value) } as Partial<Appearance>)} />
-        <output>{step < 1 ? v.toFixed(2) : v}{unit}</output>
+        <output>{step < 1 ? fmtFixed(v, 2) : v}{unit}</output>
       </span>
     </Row>
   );
@@ -487,7 +519,8 @@ function AppearanceSection() {
   const changed = JSON.stringify(a) !== JSON.stringify(APPEARANCE_DEFAULT);
   return (
     <>
-      <Head title="Appearance" line="The glass look of this window, and of the trading page if you switch it on there. Changes show at once and stay in this browser." />
+      <Head title="Appearance" line="How numbers are written, and the glass look of this window and of the trading page if you switch it on there. Changes show at once and stay in this browser." />
+      <NumberFormatChoice />
       <div className="stg__label"><span>This window</span></div>
       <div className="stg__card stg__card--tight">
         <Colour title="Tint" line="The colour over the blurred page" k="tint" />

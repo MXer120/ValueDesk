@@ -96,9 +96,13 @@ export class Secrets {
     if (raw.length < 17) throw new Error('key import: the envelope is too short');
     const d = createDecipheriv('aes-256-gcm', key, Buffer.from(e.iv, 'base64url'));
     d.setAuthTag(raw.subarray(raw.length - 16));
-    const pk = new Uint8Array(Buffer.concat([d.update(raw.subarray(0, raw.length - 16)), d.final()]));
-    shared.fill(0);
-    key.fill(0);
+    let pk: Uint8Array;
+    try {
+      pk = plainOf(d.update(raw.subarray(0, raw.length - 16)), () => d.final());
+    } finally {
+      shared.fill(0);
+      key.fill(0);
+    }
     if (pk.length !== 32) {
       pk.fill(0);
       throw new Error('key import: not a 32-byte private key');
@@ -155,6 +159,27 @@ export class Secrets {
   }
 }
 
+/**
+ * A decipher's output as one fresh array, every intermediate buffer zeroed:
+ * Buffer.concat would leave the plain key in a pooled slab nobody wipes. A
+ * failed authentication (`final` throws) wipes what `update` gave as well.
+ */
+function plainOf(head: Buffer, final: () => Buffer): Uint8Array {
+  let tail: Buffer;
+  try {
+    tail = final();
+  } catch (e) {
+    head.fill(0);
+    throw e;
+  }
+  const out = new Uint8Array(head.length + tail.length);
+  out.set(head, 0);
+  out.set(tail, head.length);
+  head.fill(0);
+  tail.fill(0);
+  return out;
+}
+
 const aad = (network: string, owner: string, address: string): Buffer =>
   Buffer.from(`vd-copy-key:v1:${network}:${owner.toLowerCase()}:${address.toLowerCase()}`);
 
@@ -183,7 +208,7 @@ export function openWith(kek: Buffer, network: string, owner: string, address: s
   const d = createDecipheriv('aes-256-gcm', kek, Buffer.from(iv, 'base64url'));
   d.setAAD(aad(network, owner, address));
   d.setAuthTag(Buffer.from(tag, 'base64url'));
-  const pk = new Uint8Array(Buffer.concat([d.update(Buffer.from(ct, 'base64url')), d.final()]));
+  const pk = plainOf(d.update(Buffer.from(ct, 'base64url')), () => d.final());
   if (privateKeyToAddress(pk).toLowerCase() !== address.toLowerCase()) {
     pk.fill(0);
     throw new Error('sealed key: opens to another address');

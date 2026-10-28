@@ -27,6 +27,7 @@ import { api, type Engine } from '../../api';
 import { bumpAccountResource, useAccountResource } from '../../accountFeeds';
 import { useChannel } from '../../hooks';
 import { fmtPrice, fmtQty } from '../../format';
+import { useNumStyle } from '../../numStyle';
 import type { ChartProps } from '../../components/Chart';
 import { orderLines, positionLines } from '../orderOverlays';
 import { intervalLabel } from '../intervals';
@@ -267,6 +268,11 @@ export function TvChart({
   // manager (held by useMemo) has to keep working after it.
   useEffect(() => () => lines.clear(), [lines]);
 
+  // The library takes the number format only at creation (numeric_formatting
+  // in options.ts), so a change in Settings rebuilds the widget - the same path
+  // a `searchable` change takes; the layout comes back from save/load.
+  const numStyle = useNumStyle();
+
   // --- create the widget once ------------------------------------------------
   useEffect(() => {
     let disposed = false;
@@ -418,7 +424,7 @@ export function TvChart({
       feed.dispose();
       feedRef.current = null;
     };
-  }, [chartApi, searchable, lines]);
+  }, [chartApi, searchable, lines, numStyle]);
 
   // The last traded price tells the watchdog whether the market is trading.
   useEffect(() => {

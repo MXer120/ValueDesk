@@ -12,6 +12,10 @@ import {
   mapAccountFlow, mapFundTransfer, marginUsage, rowMarginUsd,
   mergeRows, nextCursor, timeline, toMs, txUrl, type LedgerRow, type TokenBook,
 } from './accountData';
+import { setNumStyle } from './numStyle';
+
+// These cases are written in the 1,234.56 format; the app's default (1.234,56) has its own tests in numStyle.test.ts.
+setNumStyle('comma-dot');
 
 const ME = '0xe290506a7472136df8f49fe1e35d2079a61dcb67';
 

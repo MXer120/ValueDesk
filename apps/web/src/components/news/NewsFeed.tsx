@@ -15,8 +15,8 @@
  * out (moves.ts): a coin this terminal trades opens its chart. Page one
  * refreshes every two minutes; more pages load on demand.
  *
- * Sources (owner, 2026-10-26): SoSoValue's feed, and the White House and
- * Watcher.Guru (server valuedesk/feeds.ts) merged into Latest and a search by
+ * Sources (owner, 2026-10-26): SoSoValue's feed, and the White House
+ * (server valuedesk/feeds.ts; Watcher.Guru dropped 2026-10-28) merged into Latest and a search by
  * time - each switched on or off in Settings. Their stories have no type, so a
  * type filter shows SoSoValue's alone. The "Powered by SoSoValue" pill can be
  * dismissed for good (its x on hover; Settings brings it back).
@@ -41,6 +41,7 @@ import { focusProps } from '../../chart/newsFocus';
 import { foldersAvailable, onBridgeChange, saveToFolder } from '../../folders/bridge';
 import { DRAG_NEWS } from '../../folders/drag';
 import { MENU_ICONS, TabMenu, menuAt, type TabMenuItem } from '../../dashboard/tabExtras';
+import { fmtFixed } from '../../numStyle';
 import './NewsFeed.css';
 
 type Feed = 'latest' | 'hot' | 'featured' | 'calendar';
@@ -303,7 +304,7 @@ export function NewsFeed({ coin, instance, markets, onCoin, prices }: {
                     <span className="nw__coins">
                       {n.symbols.map((s) => {
                         const mv = moveSince(moves.get(s), n.time);
-                        const pct = mv == null ? null : <span className={`nw__move ${mv > 0 ? 'is-up' : mv < 0 ? 'is-down' : ''}`} title={`${s} since this story came out`}>{`${mv > 0 ? '+' : ''}${mv.toFixed(Math.abs(mv) < 10 ? 2 : 1)}%`}</span>;
+                        const pct = mv == null ? null : <span className={`nw__move ${mv > 0 ? 'is-up' : mv < 0 ? 'is-down' : ''}`} title={`${s} since this story came out`}>{`${mv > 0 ? '+' : ''}${fmtFixed(mv, Math.abs(mv) < 10 ? 2 : 1)}%`}</span>;
                         return tradeable.has(s) && onCoin ? (
                           <button key={s} type="button" className="nw__coin is-link" onClick={() => onCoin(s)} title={`Open the ${s} chart`}>
                             <CoinIcon coin={s} size={13} />{s}{pct}

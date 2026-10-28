@@ -108,6 +108,23 @@ export class Limiter {
   }
 }
 
+/**
+ * Self-hosted: whether a request's Host header may reach the copier. A web page
+ * on any site can make its own name resolve to 127.0.0.1 (DNS rebinding) and
+ * then talk to a copier on loopback as if it were the same site; the Host
+ * header still carries that name. Loopback names, IP literals and the names in
+ * EXECUTOR_ALLOWED_HOSTS pass; every other name is refused.
+ */
+export function hostAllowed(host: string | undefined, allowed: readonly string[]): boolean {
+  if (!host) return true; // no Host at all: not a browser
+  let name = host.trim().toLowerCase();
+  if (name.startsWith('[')) return /^\[[0-9a-f:.]+\](:\d+)?$/.test(name);
+  name = name.replace(/:\d+$/, '').replace(/\.$/, '');
+  if (isIP(name)) return true;
+  if (name === 'localhost' || name.endsWith('.localhost')) return true;
+  return allowed.includes(name);
+}
+
 function safeEqual(a: string, b: string): boolean {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -154,6 +171,14 @@ export function ipPrefix(ip: string): string {
 export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, log: Logger): Server {
   const reads = new Limiter(240);
   const writes = new Limiter(40);
+  // Calls that read SoDEX for one wallet (is its key registered?): every follower's reads share this
+  // server's one per-IP budget at SoDEX, so a signed-in wallet may not spend it - per wallet, and in all.
+  const keyChecksPerWallet = new Limiter(12);
+  const keyChecksAll = new Limiter(60, 1);
+  const keyCheck = (owner: string): string => {
+    if (!keyChecksPerWallet.allow(owner) || !keyChecksAll.allow('all')) throw new ApiError(429, 'rate', 'Too many key checks; try again in a minute.');
+    return owner;
+  };
 
   const clientOf = (req: IncomingMessage): string => {
     if (cfg.trustEdge) {
@@ -227,6 +252,9 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
     let quiet = false;
     try {
       if (!url) throw new ApiError(400, 'path', 'bad request');
+      if (cfg.kind === 'self' && !hostAllowed(req.headers.host, cfg.allowedHosts ?? [])) {
+        throw new ApiError(421, 'host', 'This copier answers only on its own address (127.0.0.1 or localhost). To reach it under another name, set EXECUTOR_ALLOWED_HOSTS.');
+      }
       cors(req, res);
       if (req.method === 'OPTIONS') {
         res.writeHead(204);
@@ -271,11 +299,11 @@ export function createExecutorServer(svc: ExecutorService, cfg: ExecutorConfig, 
       if (route === '/terms') return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === '/site-terms') return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === '/keys') return send(res, 200, svc.createKey(body.request, ctx));
-      if (route === '/keys/verify') return send(res, 200, { key: await svc.verifyKey(svc.authenticate(bearer(req))) });
+      if (route === '/keys/verify') return send(res, 200, { key: await svc.verifyKey(keyCheck(svc.authenticate(bearer(req)))) });
       if (route === '/keys/delete') return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === '/copies') return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === '/copies/action') return send(res, 200, await svc.act(body.request, ctx));
-      if (route === '/keys/import') return send(res, 200, { key: await svc.importKey(svc.authenticate(bearer(req)), body as { name?: unknown; envelope?: unknown }, ctx) });
+      if (route === '/keys/import') return send(res, 200, { key: await svc.importKey(keyCheck(svc.authenticate(bearer(req))), body as { name?: unknown; envelope?: unknown }, ctx) });
       if (route === '/algos') return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === '/algos/action') return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, 'path', 'not found');

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { ORACLE_VENUES, checkAlgoSpec, planAlgo, type AlgoSpec, type MarketInfo } from '@copy-engine';
 import {
   ADVANCED_KEYS, DEFAULT, cleanCurve, curveAt, dcaLadder, type CurvePoint, DRAFT_KEY, INLINE_KEYS, SCALE_SKEW, advancedChanges, autoSlices, bpsToPct, cond, draftToSpec, errFor, hasRandomize, legs, loadDraft, pctToBps,
-  randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf, marketOf, redWarnings,
+  randomizeOn, resetAdvanced, saveDraft, scaleSize, setRandomize, setScaleSize, slicesOf, marketOf, redWarnings, parsePriceList, priceListInput,
   type Draft, type TicketShared,
 } from './draft';
 import { ALGO_MENU, type UiKind } from './menu';
@@ -301,7 +301,7 @@ test('a step scale widens each gap; typed prices are used as they are', () => {
   const l = dcaLadder({ ...DEFAULT, dcaOrders: '4', dcaStep: '2', dcaStepScale: '1.5' }, { side: 'buy', bid: 99, ask: 100 });
   // Deviations 2%, 2+3 = 5%, 5+4.5 = 9.5%.
   assert.deepEqual(l.prices!.map((x) => Math.round(x * 1e6) / 1e6), [100, 98, 95, 90.5]);
-  const t = draftToSpec('dca', { ...DEFAULT, dcaLevels: 'list', dcaPrices: '95, 90 85', dcaFirst: 'price', dcaStart: '99' }, shared, NOW);
+  const t = draftToSpec('dca', { ...DEFAULT, dcaLevels: 'list', dcaPrices: '95; 90; 85', dcaFirst: 'price', dcaStart: '99' }, shared, NOW);
   assert.deepEqual(t.prices, [99, 95, 90, 85]);
   assert.equal(t.orders, 4);
   assert.deepEqual(checkAlgoSpec(t).errors, {});
@@ -370,13 +370,13 @@ test("the ticket's market carries SoDEX's order sizes, limit band, position tier
   assert.equal(bare.buyLimitUpRatio, 0.05);
 });
 
-test("the ticket's plan: the position limit at the ticket's leverage, the open-interest cap in red or amber, and slices merged under the minimum", () => {
+test("the ticket's plan: the position limit at the ticket's leverage (with the position held), the open-interest cap in red or amber with the room left, and slices under the minimum refused", () => {
   const m = marketOf(BTC_SYM as never);
   const ctx = { now: NOW, price: 60_000, seed: 1 };
   // 0.5 BTC on top of a 66.5 BTC long at 40x: over $4M.
   const big = draftToSpec('twap', DEFAULT, { ...shared, quantity: '0.5', leverage: 40 }, NOW);
   const p = planAlgo(checkAlgoSpec(big).spec!, m, { ...ctx, positionSize: 66.5 });
-  assert.match(p.errors[0]!, /over SoDEX's limit of \$4,000,000 at 40x/);
+  assert.match(p.errors[0]!, /^Your BTC-USD position would be about \$4\.02M, over SoDEX's limit of \$4M at 40x\. You hold about \$3\.99M long now\. At most about \$10,000 \(0\.167 BTC\) can be bought under it\. Use a smaller size or lower leverage\.$/);
   assert.deepEqual(planAlgo(checkAlgoSpec(big).spec!, m, { ...ctx, positionSize: 0 }).errors, []);
   // $200M cap at 60,000 is 3,333.33 BTC: 10 BTC left.
   const oi = 200_000_000 / 60_000 - 10;
@@ -384,15 +384,40 @@ test("the ticket's plan: the position limit at the ticket's leverage, the open-i
   const over = chase('12');
   assert.equal(over.oi!.level, 'over');
   assert.deepEqual([...redWarnings(over)], [over.warnings[0]]);
-  assert.match(over.warnings[0]!, /would hit SoDEX's open-interest cap on BTC-USD/);
+  assert.match(over.warnings[0]!, /would hit SoDEX's open-interest cap on BTC-USD: it adds about \$720,000, and only about \$600,000 \(10 BTC\) can still be added market-wide/);
   const near = chase('9');
   assert.equal(near.oi!.level, 'near');
   assert.equal(redWarnings(near).size, 0, 'amber, not red');
-  assert.match(near.warnings[0]!, /90% of the open interest still allowed/);
+  assert.equal(near.warnings[0], "Open interest on BTC-USD is at 99% of SoDEX's cap: about $600,000 (10 BTC) can still be added market-wide. This order would use 90% of that.");
   assert.equal(chase('2').oi, null);
-  // $60 in 20 slices: merged into orders of at least $10, not refused.
+  // $60 in 20 slices: an error that says why and what fixes it - never merged into fewer orders.
   const small = planAlgo(checkAlgoSpec(draftToSpec('twap', { ...DEFAULT, slices: '20', slicesAuto: false }, { ...shared, quantity: '0.001' }, NOW)).spec!, m, ctx);
-  assert.deepEqual(small.errors, []);
-  assert.ok(small.children.length <= 6 && small.children.every((c) => c.qty * 60_000 >= 10 - 1e-9), small.children.map((c) => c.qty).join(','));
-  assert.ok(small.warnings.some((w) => /go out together/.test(w)), small.warnings.join(' | '));
+  assert.match(small.errors[0]!, /^All 20 slices would be under SoDEX's \$10 minimum \(the smallest about \$2\.40\)\. Use at most 4 slices, or raise the size to \$255\.$/);
+  assert.equal(small.children.length, 20);
+});
+
+test('the DCA "Then at" list: ";" between prices in every number format, each price read as a number box reads it, unclear items refused', () => {
+  // German style (the default, 1.234,56): "," is the decimal mark.
+  assert.deepEqual(parsePriceList('95,5; 90; 1.234,5', 'dot-comma'), { prices: [95.5, 90, 1234.5], error: null });
+  // English style (1,234.56) and the others: the same list with their own marks.
+  assert.deepEqual(parsePriceList('95.5; 90; 1,234.5', 'comma-dot'), { prices: [95.5, 90, 1234.5], error: null });
+  assert.deepEqual(parsePriceList('95,5; 1 234,5', 'space-comma'), { prices: [95.5, 1234.5], error: null });
+  assert.deepEqual(parsePriceList('95.5; 1’234.5', 'apos-dot'), { prices: [95.5, 1234.5], error: null });
+  // New lines separate too; spaces around ";" do not matter.
+  assert.deepEqual(parsePriceList(' 95 ;\n90 ', 'dot-comma').prices, [95, 90]);
+  // Two prices run together are refused with the fix, never read as one number.
+  assert.equal(parsePriceList('100, 99', 'dot-comma').error, 'Price 1 (“100, 99”): put “;” between prices.');
+  assert.equal(parsePriceList('100,99', 'comma-dot').error, 'Price 1 (“100,99”): put “;” between prices, and write one price without “,”.');
+  assert.match(parsePriceList('95 90', 'dot-comma').error!, /put “;” between prices/);
+  assert.match(parsePriceList('95 90', 'space-comma').error!, /put “;” between prices/, 'a space groups only threes');
+  // Ambiguous for the format: refused with its hint, not guessed.
+  assert.match(parsePriceList('95; 1.000', 'dot-comma').error!, /^Price 2 \(“1\.000”\): Ambiguous/);
+  assert.equal(parsePriceList('95; 1.000.000', 'dot-comma').prices[1], 1_000_000);
+  assert.equal(parsePriceList('95; 1.000', 'comma-dot').prices[1], 1, 'in 1,234.56 "1.000" is one');
+  assert.match(parsePriceList('95; 0', 'dot-comma').error!, /Price 2 \(“0”\): a price above 0/);
+  assert.deepEqual(parsePriceList('95; x', 'dot-comma').prices, []);
+  // The box keeps what a list needs; a refused list makes no ladder (nothing starts).
+  assert.equal(priceListInput('95,5;\n90 abc'), '95,5;; 90 ');
+  const bad = draftToSpec('dca', { ...DEFAULT, dcaLevels: 'list', dcaPrices: '95, 90', dcaFirst: 'price', dcaStart: '99' }, shared, NOW);
+  assert.ok(Object.keys(checkAlgoSpec(bad).errors).length > 0);
 });

@@ -31,6 +31,7 @@
  * There is no fallback estimate, because estimating a fee bill from volume alone
  * requires inventing a maker/taker split.
  */
+import { fmtFixed } from '../numStyle';
 import { useEffect, useState } from 'react';
 import {
   FEE_DOC_RETRIEVED,
@@ -530,7 +531,7 @@ function Rebate({ venue }: { venue: VenueFeeRate }) {
       )}
       <p className="muted small feetier-note">
         Thresholds are published as a {VOLUME_WINDOW_DAYS}-day maker volume share of{' '}
-        {MAKER_REBATE_TIERS.map((t) => `${(t.minShare * 100).toFixed(2)}%`).join(' / ')} for tiers{' '}
+        {MAKER_REBATE_TIERS.map((t) => `${fmtFixed(t.minShare * 100, 2)}%`).join(' / ')} for tiers{' '}
         {MAKER_REBATE_TIERS.map((t) => t.tier).join('/')}. The documentation does not say what that
         share is measured against, so your share is not computed here — only the tier the venue
         itself reports.

@@ -37,6 +37,8 @@
  * is exactly 1 tick = 0.1 bps) from toggling as the mid drifts across it.
  */
 
+import { fmtFixed } from '../../numStyle';
+
 export const BPS_MIN_DECIMALS = 1;
 export const BPS_MAX_DECIMALS = 4;
 /** Significant figures the smallest recent reading is printed to. */
@@ -104,7 +106,7 @@ export function stableBpsDecimals(ref: number | null, prev: number | null): numb
 
 /** "0.119 bps" - the mid row's readout and the spread chart's tooltip. */
 export function fmtBps(v: number, decimals: number): string {
-  return `${v.toFixed(clampDp(decimals))} bps`;
+  return `${fmtFixed(v, clampDp(decimals))} bps`;
 }
 
 /**

@@ -22,6 +22,7 @@ import type {
   YAxisTemplate,
 } from 'klinecharts';
 import { compactNumber } from './volumeAxis';
+import { getNumSeps, localize } from '../numStyle';
 
 /** Values copied from :root in web/src/styles.css. */
 export const T = {
@@ -698,7 +699,18 @@ const formatTick = (v: number, f: TickFormat): string => {
   const grouped = f.group ? whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : whole;
   // `-0` is a real outcome of toFixed on a small negative and is never a price.
   const sign = v < 0 && Number(fixed) !== 0 ? '-' : '';
-  return `${sign}${grouped}${frac}${f.suffix}`;
+  // In the app's number format, as the library's own labels are
+  // (chart/klineNumbers.ts) - the suffix is not a number and stays as is.
+  return `${localize(`${sign}${grouped}${frac}`)}${f.suffix}`;
+};
+
+/** A label in the app's number format read back as en-US ("1.234,5" -> "1,234.5"). */
+const delocalize = (s: string): string => {
+  const { group, decimal } = getNumSeps();
+  if (group === ',' && decimal === '.') return s;
+  let out = '';
+  for (const ch of s) out += ch === group ? ',' : ch === decimal ? '.' : ch;
+  return out;
 };
 
 /**
@@ -708,8 +720,9 @@ const formatTick = (v: number, f: TickFormat): string => {
  * quietly rewritten in the ticks we add.
  */
 const readTickFormat = (ticks: AxisTick[], values: number[]): TickFormat | null => {
-  const sample = ticks[0]?.text;
-  if (sample === undefined) return null;
+  const shown = ticks[0]?.text;
+  if (shown === undefined) return null;
+  const sample = delocalize(shown);
   const head = /^-?[\d,]+(\.\d+)?/.exec(sample);
   if (head === null) return null;
   const [number, fraction] = head;

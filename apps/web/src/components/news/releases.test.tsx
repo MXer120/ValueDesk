@@ -7,6 +7,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { INLINE_MODAL, installViteStubs, staticMarkup } from '../macro/testEnv';
+import { setNumStyle } from '../../numStyle';
+
+setNumStyle('comma-dot');
 
 installViteStubs({ stubs: { '/components/Modal.tsx': INLINE_MODAL } });
 const { createElement } = await import('react');

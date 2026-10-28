@@ -106,32 +106,22 @@ test('a private key or a seed phrase is never sent: a red sentence instead', asy
   assert.ok(!s.ok && s.secret);
 });
 
-test('threads: random 43-character tokens, kept newest first, replies announced once', async () => {
+test("threads: random 43-character tokens, kept newest first; the bell asks only with the wallet's session", async () => {
   const t = await import('./threads');
   const a = t.newToken();
   const b = t.newToken();
   assert.match(a, /^[A-Za-z0-9_-]{43}$/);
   assert.notEqual(a, b);
-  t.rememberThread(a, 'first', 1);
-  t.rememberThread(b, 'second', 2);
+  t.rememberThread(a, 'first', null, 1);
+  t.rememberThread(b, 'second', null, 2);
   assert.deepEqual(t.threads().map((x) => x.token), [b, a]);
-  let list = t.threads();
-  assert.deepEqual(t.unannounced(list, [{ owner: 0 }, { owner: 2 }]).map((x) => [x.token, x.fresh]), [[a, 2]]);
-  t.markNotified(a, 2);
-  list = t.threads();
-  assert.deepEqual(t.unannounced(list, [{ owner: 0 }, { owner: 2 }]), [], 'announced once');
-  assert.deepEqual(t.unannounced(list, [{ owner: 0 }, { owner: 3 }]).map((x) => x.fresh), [1]);
-  t.markSeen(b, 5);
-  assert.deepEqual(t.unannounced(t.threads(), [{ owner: 5 }, null]), [], 'seen in the open chat: nothing to announce');
-  const polled: Array<{ url: string; body: unknown }> = [];
-  const f = (async (url: string, init: RequestInit) => {
-    polled.push({ url, body: JSON.parse(String(init.body)) });
-    return new Response('{"ok":true,"threads":[{"owner":1,"lastOwnerAt":5},null]}', { status: 200 });
+  const polled: Array<{ body: unknown; auth: string | undefined }> = [];
+  const f = (async (_url: string, init: RequestInit) => {
+    polled.push({ body: JSON.parse(String(init.body)), auth: (init.headers as Record<string, string>).Authorization });
+    return new Response('{"ok":true,"wallet":{"owner":1,"lastOwnerAt":5}}', { status: 200 });
   }) as unknown as typeof fetch;
-  assert.deepEqual(await t.pollThreads([a, b], null, f), { threads: [{ owner: 1, lastOwnerAt: 5 }, null], wallet: null });
-  assert.deepEqual(polled, [{ url: '/api/vs/feedback/poll', body: { tokens: [a, b] } }]);
-  assert.deepEqual(await t.pollThreads([], null, f), { threads: [], wallet: null }, 'no thread, no request');
-  assert.equal(polled.length, 1);
+  assert.deepEqual(await t.pollWallet('S'.repeat(20), f), { wallet: { owner: 1, lastOwnerAt: 5 } });
+  assert.deepEqual(polled, [{ body: {}, auth: `Bearer ${'S'.repeat(20)}` }], 'no browser token goes along');
 });
 
 /** A fake element tree for describeElement. */
@@ -253,7 +243,7 @@ test('Send: the form only asks; the warning and the slide are a second window, a
   assert.ok(!src.includes('New conversation'), 'one ongoing chat: no "new conversation"');
 });
 
-test('a chat kept on a wallet: the token gets "wallet", an expired sign-in "session" - the form asks for the signature', async () => {
+test('reading: a browser token gets "wallet", an expired sign-in "session" - the form asks for the signature', async () => {
   const { loadThread } = await import('./threads');
   const { sendMessage } = await import('./feedback');
   const answer = (status: number, body: unknown) => (async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
@@ -261,8 +251,30 @@ test('a chat kept on a wallet: the token gets "wallet", an expired sign-in "sess
   assert.deepEqual(await loadThread(TOKEN, answer(401, { ok: false, code: 'session' })), { status: 'session' });
   assert.deepEqual(await loadThread(TOKEN, answer(404, { ok: false })), { status: 'none' });
   assert.deepEqual(await loadThread(TOKEN, answer(200, { ok: true, thread: { wallet: WALLET }, messages: [] })), { status: 'ok', messages: [], wallet: WALLET });
-  const r = await sendMessage(TOKEN, { category: 'other', areas: [], message: 'hi', images: [], context: null, wallet: null, website: '' }, answer(401, { ok: false, code: 'wallet', error: 'x' }));
-  assert.ok(!r.ok && r.auth === 'wallet');
+  const r = await sendMessage(TOKEN, { category: 'other', areas: [], message: 'hi', images: [], context: null, wallet: null, website: '' }, answer(401, { ok: false, code: 'session', error: 'x' }));
+  assert.ok(!r.ok && r.auth === 'session');
+});
+
+test('the chat is always the wallet\'s: no opt-in, sending unsigned with the address, reading only signed in; one token per wallet', async () => {
+  const src = readFileSync(new URL('./FeedbackDialog.tsx', import.meta.url), 'utf8');
+  assert.ok(!src.includes('Keep chat on wallet'), 'no opt-in button any more');
+  assert.match(src, /const key = session\?\.token \?\? tokenFor\(wallet\)/, 'sends with the session if there is one, else the browser token - no signature asked');
+  assert.match(src, /sendMessage\(key, \{ category, areas, message: text, images: ids, context, wallet, website \}\)/, 'always with the connected wallet');
+  assert.match(src, /loadThread\(session\.token\)/, 'the chat is read with the session only');
+  assert.match(src, /our reply can only be read with a wallet connected/);
+  const privacy = readFileSync(new URL('../legal/privacy.ts', import.meta.url), 'utf8');
+  assert.ok(!privacy.includes('Keep chat on wallet'));
+  assert.match(privacy, /Sending needs no signature; reading the conversation and the team\\'s replies does/);
+  const t = await import('./threads');
+  g.localStorage!.clear();
+  const anon = t.tokenFor(null);
+  t.rememberThread(anon, 'no wallet', null, 1);
+  assert.equal(t.tokenFor(null), anon, 'the same token next time');
+  const mine = t.tokenFor(WALLET);
+  assert.notEqual(mine, anon, 'a wallet gets its own');
+  t.rememberThread(mine, 'with wallet', WALLET, 2);
+  assert.equal(t.tokenFor(WALLET.toUpperCase().replace('0X', '0x')), mine);
+  assert.equal(t.threads().find((x) => x.token === mine)?.wallet, WALLET);
 });
 
 test("wallet sign-in: the wallet signs the feedback statement (the server's check passes), the browser's chat goes along to attach", async () => {
@@ -305,31 +317,31 @@ test("wallet sign-in: the wallet signs the feedback statement (the server's chec
   assert.equal(heldSession(owner), null);
 });
 
-test('the bell: a token the wallet absorbed is asked through the wallet; its replies are announced once, as "wallet"', async () => {
+test("the bell: replies only through the wallet's session, announced once; without it nothing is asked - only a generic row", async () => {
   const t = await import('./threads');
   const { keepSession, heldSession } = await import('./session');
   const { findNewReplies } = await import('./FeedbackHost');
   const owner = '0x' + '12'.repeat(20);
   g.localStorage!.clear();
-  const absorbed = t.newToken();
-  const other = t.newToken();
-  t.rememberThread(absorbed, 'mine', 1);
-  t.markAttached(absorbed, owner);
-  t.rememberThread(other, 'other', 2);
+  t.rememberThread(t.newToken(), 'sent unsigned', owner, 1);
+  let asked = 0;
+  const f = (async (_url: string, init: RequestInit) => {
+    asked++;
+    assert.deepEqual(JSON.parse(String(init.body)), {}, 'no browser token goes along');
+    return new Response(JSON.stringify({ ok: true, wallet: { owner: 2, lastOwnerAt: 9 } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  assert.deepEqual(await findNewReplies(owner, f), [], 'not signed in: nothing asked, nothing known');
+  assert.equal(asked, 0);
   const session = `${owner}.${Date.now() + 86_400_000}.0.${'y'.repeat(43)}`;
   keepSession(owner, session, Date.now() + 86_400_000);
-  const seen: Array<{ tokens: string[]; auth: string | undefined }> = [];
-  const f = (async (_url: string, init: RequestInit) => {
-    seen.push({ tokens: (JSON.parse(String(init.body)) as { tokens: string[] }).tokens, auth: (init.headers as Record<string, string>).Authorization });
-    return new Response(JSON.stringify({ ok: true, threads: [{ owner: 0, lastOwnerAt: null }], wallet: { owner: 2, lastOwnerAt: 9 } }), { status: 200 });
-  }) as unknown as typeof fetch;
   const found = await findNewReplies(owner, f);
-  assert.deepEqual(seen, [{ tokens: [other], auth: `Bearer ${session}` }]);
   assert.deepEqual(found!.map((x) => [x.ref, x.fresh]), [['wallet', 2]]);
   found![0]!.mark();
   assert.equal(heldSession(owner)!.notifiedOwner, 2);
   assert.deepEqual(await findNewReplies(owner, f), [], 'announced once');
-  // Without the wallet's session, the absorbed token still counts its replies.
-  const plain = await findNewReplies(null, (async () => new Response(JSON.stringify({ ok: true, threads: [{ owner: 1, lastOwnerAt: 1 }, null] }), { status: 200 })) as unknown as typeof fetch);
-  assert.deepEqual(plain!.map((x) => x.ref), [other]);
+  // The unsigned sender's row: fixed words, pushed at send time - never from the chat.
+  const src = readFileSync(new URL('./FeedbackDialog.tsx', import.meta.url), 'utf8');
+  assert.ok(src.includes("pushNotice({ id: SIGN_IN_NOTICE, kind: 'info', title: 'Feedback sent'"));
+  const host = readFileSync(new URL('./FeedbackHost.tsx', import.meta.url), 'utf8');
+  assert.ok(!/pollThreads|unannounced/.test(host), 'no token counts any more');
 });

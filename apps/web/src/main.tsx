@@ -25,6 +25,7 @@ import { installChunkErrorReload } from './lazyPage';
 import { SiteGate } from './legal/LegalGate';
 import { loadViewerGeo } from './legal/geo';
 import './styles.css';
+import { useNumStyle } from './numStyle';
 
 // Before the first render, so an error thrown while mounting is logged too.
 // See log.ts for levels, ?debug=<ns>, and the __vs console handle.
@@ -36,11 +37,23 @@ installChunkErrorReload();
 // Where this visitor is, as the edge sees it (legal/geo.ts): one small request, answered by the /api function.
 void loadViewerGeo();
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    {/* In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx). */}
+/**
+ * The root re-renders when the number format changes (Settings > Appearance):
+ * it builds its elements afresh, so the whole tree renders again with the new
+ * separators - at once, without a reload, and keeping every page's state.
+ */
+function Root() {
+  useNumStyle();
+  return (
+    // In a sanctioned place the app is not mounted at all: only the legal pages (legal/LegalGate.tsx).
     <SiteGate>
       <App />
     </SiteGate>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <Root />
   </StrictMode>,
 );

@@ -16,6 +16,8 @@
  * (its signed terms, legal/acceptance.ts):
  *   blocked                 nothing is signed at all (the app is not shown there either) -
  *                           also for a wallet on a sanctions list (legal/screening.ts);
+ *   country unknown         (the edge could not tell, in a browser) nothing opening -
+ *                           the visitor cannot name a country instead (legal/geo.ts);
  *   close-only              nothing opening; everything else is;
  *   terms not signed        (no signature of the current version for this wallet)
  *                           nothing opening, so a wallet that enabled trading before a
@@ -28,7 +30,7 @@
 import type { SignableAction } from '@sodex-core';
 import { OrderSide } from '@sodex-core';
 import { signedTerms } from '../legal/acceptance';
-import { viewerGeo } from '../legal/geo';
+import { LOCATION_UNKNOWN, viewerGeo } from '../legal/geo';
 import { SANCTIONED_WALLET_REASON, screeningOf } from '../legal/screening';
 import { siteAccess, type SiteAccess } from '../legal/jurisdictions.mjs';
 import { TradingError } from './session';
@@ -64,6 +66,8 @@ export interface LegalState {
   access: SiteAccess;
   /** The wallet has signed the current terms in this browser. */
   signed: boolean;
+  /** The edge told the visitor's country (false: unknown - nothing opens). Absent: known. */
+  located?: boolean;
 }
 
 /** A wallet on a sanctions list (legal/screening.ts): blocked, whatever the place. */
@@ -76,7 +80,8 @@ export function legalStateFor(owner: string | null | undefined): LegalState {
   const access = screeningOf(owner) === 'sanctioned'
     ? SANCTIONED_WALLET
     : siteAccess({ country: g.country, region: g.region, declared: t?.country ?? null });
-  return { access, signed: !!t };
+  // Outside a browser (the unit tests, the Node live runner) there is no edge to ask.
+  return { access, signed: !!t, located: !!g.country || typeof window === 'undefined' };
 }
 
 /** null when `action` may be signed in `state`; otherwise why not, for the user. */
@@ -84,6 +89,7 @@ export function legalRefusal(action: SignableAction, state: LegalState): string 
   if (state.access.level === 'blocked') return state.access.reason;
   if (!isOpening(action)) return null;
   if (state.access.level === 'close-only') return state.access.reason;
+  if (state.located === false) return LOCATION_UNKNOWN;
   if (!state.signed) return 'Accept the current Terms of use with your wallet before you open or increase a position. Closing, cancelling and withdrawing work without it.';
   return null;
 }
@@ -98,7 +104,7 @@ export function guardLegal(action: SignableAction, owner: string): void {
   const why = legalRefusal(action, state);
   if (!why) return;
   log.warn('legal gate: an action was NOT signed', { type: action.type, engine: action.engine, level: state.access.level, signed: state.signed });
-  if (state.access.level === 'open' && !state.signed && typeof window !== 'undefined') {
+  if (state.access.level === 'open' && state.located !== false && !state.signed && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(SIGN_TERMS_EVENT));
   }
   throw new TradingError(why, 'legal');

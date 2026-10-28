@@ -16,6 +16,7 @@
 import { useMemo, useRef, useState, type PointerEvent } from 'react';
 import { DASH } from '../../../format';
 import { fmtPx } from '../model';
+import { fmtFixed } from '../../../numStyle';
 
 export type Candle = readonly [t: number, o: number, h: number, l: number, c: number];
 export type PriceKind = 'candles' | 'line';
@@ -24,7 +25,7 @@ const W = 600;
 const when = (t: number) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 const day = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const clock = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-const signed = (v: number) => `${v >= 0 ? '+' : '−'}${Math.abs(v * 100).toFixed(2)}%`;
+const signed = (v: number) => `${v >= 0 ? '+' : '−'}${fmtFixed(Math.abs(v * 100), 2)}%`;
 
 /** Candles from the answer; an older server sends closes only - each opens at the previous close. */
 export function toCandles(candles: ReadonlyArray<Candle> | undefined, points: ReadonlyArray<readonly [number, number]>): Candle[] {

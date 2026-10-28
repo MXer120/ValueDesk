@@ -15,7 +15,7 @@ import { EmptyState } from '../EmptyState';
 import { emptyCopy } from '../emptyCopy';
 import { openConnectDialog } from '../account/connect';
 import { formatPct, orderStatusInfo, statusTitle, type StatusInput } from './orderStatus';
-import { formatNumber } from '../../intlCache';
+import { fmtFixed, fmtNum } from '../../numStyle';
 import { AUTO_LOAD_START, onEndSeen, type AutoLoadState } from './autoLoad';
 
 export type PillTone = 'pos' | 'neg' | 'accent' | 'warn' | 'muted';
@@ -178,14 +178,14 @@ export function signedUsd(v: number | null | undefined, plus = true): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
   const a = Math.abs(v);
   const s = v < 0 ? MINUS : v > 0 && plus ? '+' : '';
-  return `${s}$${formatNumber(a, 'en-US', { minimumFractionDigits: usdPlaces(a), maximumFractionDigits: usdPlaces(a) })}`;
+  return `${s}$${fmtNum(a, { minimumFractionDigits: usdPlaces(a), maximumFractionDigits: usdPlaces(a) })}`;
 }
 
 /** "+23.75%" / "−23.75%". */
 export function signedPct(v: number | null | undefined, dp = 2): string {
   if (v === null || v === undefined || !Number.isFinite(v)) return DASH;
   const s = v < 0 ? MINUS : v > 0 ? '+' : '';
-  return `${s}${Math.abs(v * 100).toFixed(dp)}%`;
+  return `${s}${fmtFixed(Math.abs(v * 100), dp)}%`;
 }
 
 /** A plain amount, to its own precision (up to 8 places). */

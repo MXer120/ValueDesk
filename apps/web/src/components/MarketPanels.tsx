@@ -9,6 +9,7 @@
  * feed or renders an em-dash. The quote coin is shown as USDC — SoDEX's
  * ledger name is vUSDC, and that spelling never reaches a label.
  */
+import { fmtFixed } from '../numStyle';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { type Engine, type Symbol } from '../api';
@@ -23,16 +24,16 @@ import './MarketPanels.css';
 function fmtCompact(v: number): string {
   if (!Number.isFinite(v)) return DASH;
   const a = Math.abs(v);
-  if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return v.toFixed(2);
+  if (a >= 1e9) return `${fmtFixed(v / 1e9, 2)}B`;
+  if (a >= 1e6) return `${fmtFixed(v / 1e6, 2)}M`;
+  if (a >= 1e3) return `${fmtFixed(v / 1e3, 2)}K`;
+  return fmtFixed(v, 2);
 }
 
 /** A rate stored as a decimal fraction ("0.0125") to a percentage ("1.25%"). */
 const pctOf = (v: string | undefined, dp = 2): string => {
   const n = v === undefined ? NaN : num(v) * 100;
-  return Number.isFinite(n) ? `${n.toFixed(dp)}%` : DASH;
+  return Number.isFinite(n) ? `${fmtFixed(n, dp)}%` : DASH;
 };
 
 /**

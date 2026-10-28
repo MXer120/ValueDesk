@@ -21,6 +21,7 @@
  * deposit: it only moves funds between the account's own Spot, Perps and EVM,
  * so a wallet SoDEX has never seen gets a pointer to Deposit instead.
  */
+import { fmtDecimalString, toInputText } from '../../numStyle';
 import { useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { Modal } from '../Modal';
 import { getTradingState, subscribeTrading } from '../../trading/session';
@@ -231,6 +232,8 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
     const [w, f] = s.split('.');
     return f && f.length > 6 ? `${w}.${f.slice(0, 6)}` : s;
   };
+  /** `show` as the screen writes it: grouped, in the number format (numStyle.ts). */
+  const showText = (u: bigint) => fmtDecimalString(show(u));
 
   const needsKey = transferNeedsKey(from, to);
   const needsWallet = transferNeedsWallet(from);
@@ -248,7 +251,7 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
       return;
     }
     // The user lock (trading/keyLock.ts) asks again before money moves; cancel = nothing happens.
-    if (!(await confirmMoneyMove(owner, `Transfer ${show(amtUnits)} ${coin.coin}`))) return;
+    if (!(await confirmMoneyMove(owner, `Transfer ${showText(amtUnits)} ${coin.coin}`))) return;
     const opening = from === 'evm' ? openingWalletStep(coin.valuechain.native) : null;
     const id = beginTransfer({
       coin: coin.coin,
@@ -298,7 +301,7 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
     const [w, f = ''] = formatUnits(u, dp).split('.');
     const keep = /^(USDC|USDT)$/i.test(coin?.coin ?? '') ? 2 : 4;
     const frac = f.slice(0, keep).replace(/0+$/, '');
-    return `${Number(w).toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
+    return fmtDecimalString(frac ? `${w ?? 0}.${frac}` : (w ?? '0'));
   };
   const accountOptions = ACCOUNTS.map((a) => ({
     value: a,
@@ -373,10 +376,10 @@ function TransferForm({ owner, provider, onEnable, preset, status }: {
           <div className="fx-box">
             <div className="fx-box__head">
               <span>Amount</span>
-              <span className="fx-max">Available: {bal && coin ? `${show(max)} ${coinLabel}` : <Spinner />}</span>
+              <span className="fx-max">Available: {bal && coin ? `${showText(max)} ${coinLabel}` : <Spinner />}</span>
             </div>
             <div className="fx-amount">
-              <input value={amount} onChange={(e) => setAmount(decimalInput(e.target.value))} inputMode="decimal" placeholder="0.00" aria-label="Amount" />
+              <input value={toInputText(amount)} onChange={(e) => setAmount(decimalInput(e.target.value, { prev: amount }))} inputMode="decimal" placeholder="0.00" aria-label="Amount" />
               <span className="fx-amount__unit">{coinLabel}</span>
               <button type="button" className="fx-chip" disabled={!bal} onClick={() => setAmount(max > 0n ? formatUnits(max, dp) : '')}>Max</button>
             </div>

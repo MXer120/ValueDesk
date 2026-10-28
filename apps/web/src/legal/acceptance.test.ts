@@ -54,7 +54,7 @@ test('the wallet signs the statements word for word, without link syntax, with t
   const text = siteTermsPayload('SG').text;
   assert.equal(text, signedText('SG'));
   assert.ok(text.includes(`version ${SITE_TERMS_VERSION}`) && text.includes(SITE_TERMS_HASH));
-  assert.ok(text.includes('Country of residence: SG.'));
+  assert.ok(text.includes('Country seen from my connection: SG.'));
   assert.ok(text.includes('I agree to the Terms of use and the Risk disclosure, and have read the Privacy policy.'));
   assert.ok(STATEMENTS.every((s) => s.label.length <= 130), 'each statement stays one short line in the gate');
   assert.doesNotMatch(text, /\]\(/, 'no markdown links');

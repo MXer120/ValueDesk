@@ -101,6 +101,8 @@ a new key and pair again). By default:
 | `EXECUTOR_KEY_TTL_DAYS` | `180` | the longest key lifetime you may register (at most 180) |
 | `EXECUTOR_LIVE_ALGOS` | off | `1` lets real (non-practice) algo orders start; practice runs always can |
 | `EXECUTOR_ALLOWED_ORIGINS` | ValueDesk's site and `localhost:5180` | which web pages may call it |
+| `EXECUTOR_ALLOWED_HOSTS` | none | host names (besides `localhost` and IP addresses) the copier answers under; any other name gets 421 (a guard against DNS rebinding) |
+| `ALERT_TELEGRAM_TOKEN`, `ALERT_TELEGRAM_CHAT_ID` | off | a Telegram bot and chat for error alerts (refused orders, rate limits, a key that does not open, a crash) |
 | `LOG_LEVEL` | `info` | `debug` shows every request |
 
 ## What it does, exactly

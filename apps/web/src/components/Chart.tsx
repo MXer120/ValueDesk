@@ -81,6 +81,7 @@ import {
   type TimeZoneMode,
 } from '../chart/timeAxis';
 import { createVolumeTicks } from '../chart/volumeAxis';
+import { decimalFoldOption, followNumStyle, thousandsSeparatorOption } from '../chart/klineNumbers';
 import {
   DEFAULT_INDICATORS,
   INDICATOR_INFO,
@@ -1194,6 +1195,7 @@ function Chart({
   useEffect(() => {
     let disposed = false;
     let ro: ResizeObserver | undefined;
+    let unNumStyle: (() => void) | undefined;
     let initRetryTimer = 0;
 
     /**
@@ -1671,6 +1673,10 @@ function Chart({
 
       const c = kc.init(holder.current, {
         styles: chartStyles,
+        // The app's number format (Settings): klinecharts has no decimal-sign
+        // option, so its grouping step localizes (chart/klineNumbers.ts).
+        thousandsSeparator: thousandsSeparatorOption(),
+        decimalFold: decimalFoldOption(),
         // v9's `customApi` is `formatter` in v10.
         formatter: {
           formatBigNumber,
@@ -1698,6 +1704,7 @@ function Chart({
       // sizes itself to the stale numbers (observed: a 14px-tall candle pane).
       // One synchronous resize here re-reads the real box before first paint.
       c.resize();
+      unNumStyle = followNumStyle(c);
 
       // A pan or an axis drag follows the pointer anywhere until it is
       // released, not just while it is over the pane it began on.
@@ -1812,6 +1819,7 @@ function Chart({
       frameHeld.current = false;
       badgeCss.current = null;
       ro?.disconnect();
+      unNumStyle?.();
       const c = chart.current;
       if (c) {
         c.unsubscribeAction('onCrosshairChange');

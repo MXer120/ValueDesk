@@ -24,6 +24,7 @@
  * Trade a Futures / Spot switch, a divider, then the pages; the wallet at the
  * end. Below 761px there is no rail and the bar carries them again.
  */
+import { fmtDecimalString } from '../numStyle';
 import type { Engine } from '../api';
 import { BrandMark } from './BrandMark';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -510,7 +511,7 @@ export function AddressMenu({ address, onClose, closing = false, onExited }: {
 const fmtAmount = (amount: string): string => {
   const [w, f = ''] = amount.split('.');
   const frac = f.slice(0, Number(w) >= 1000 ? 2 : 6).replace(/0+$/, '');
-  return `${Number(w).toLocaleString('en-US')}${frac ? `.${frac}` : ''}`;
+  return fmtDecimalString(frac ? `${w ?? 0}.${frac}` : (w ?? '0'));
 };
 
 const glyph = (d: string, size = 16) => () => (

@@ -18,6 +18,7 @@ import type { Chart as KChart, KLineData } from 'klinecharts';
 import { CANDLE_PANE_ID } from './theme';
 import { BAR_DOWN, BAR_UP, legendName, stylesFor, type IndicatorSpec } from './indicators';
 import { compactNumber } from './volumeAxis';
+import { fmtNum, localize } from '../numStyle';
 import { MENU_ICONS } from '../dashboard/tabExtras';
 
 export interface LegendIndicator {
@@ -51,7 +52,7 @@ export interface IndicatorLegendProps {
 }
 
 const grouped = (v: number, decimals: number): string =>
-  v.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  fmtNum(v, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 
 /** Index of the bar at `ts` in an ascending list, or -1. */
 function indexAt(list: KLineData[], ts: number): number {
@@ -101,8 +102,8 @@ function readValues(chart: KChart, ind: LegendIndicator, index: number, volumeDe
       color = rising ? up : down;
     }
     const text =
-      f.key === 'volume' ? compactNumber(v, volumeDecimals)
-      : live.shouldFormatBigNumber && Math.abs(v) >= 1e3 ? compactNumber(v)
+      f.key === 'volume' ? localize(compactNumber(v, volumeDecimals))
+      : live.shouldFormatBigNumber && Math.abs(v) >= 1e3 ? localize(compactNumber(v))
       : grouped(v, live.precision);
     out.push({ key: f.key, text, color: opaque(color) });
   }

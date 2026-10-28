@@ -10,6 +10,7 @@ import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Private, useMask, usePrivacy, type PrivacyKey } from '../../privacy';
 import { DASH, MINUS, fmtUsd, signClass } from '../../format';
 import '../Portfolio.css';
+import { fmtFixed, fmtNum } from '../../numStyle';
 
 export interface CurveWindow {
   /** Cumulative PnL points inside the period, oldest first. */
@@ -44,7 +45,7 @@ export function fmtCompactUsd(v: number | null | undefined): string {
   const abs = Math.abs(v);
   if (abs < 10_000) return fmtUsd(v, 2);
   const sign = v < 0 ? MINUS : '';
-  return `${sign}$${abs.toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 2 })}`;
+  return `${sign}$${fmtNum(abs, { notation: 'compact', maximumFractionDigits: 2 })}`;
 }
 
 export const fmtDay = (ms: number | null | undefined): string =>
@@ -434,7 +435,7 @@ function EquityCurveInner({ win, unit = 'usd', tone = 'pnl', compactAxis = false
   const runs = splitAtZero(pts, x, y);
   const last = ys[ys.length - 1]!;
 
-  const fmtV = (v: number) => (unit === 'pct' ? `${(v * 100).toFixed(1)}%` : fmtUsd(v));
+  const fmtV = (v: number) => (unit === 'pct' ? `${fmtFixed(v * 100, 1)}%` : fmtUsd(v));
 
   /*
    * Y ticks at ROUNDED values, not just the extremes.

@@ -105,10 +105,14 @@ test('audit log: append-only, hash-chained - a changed or removed row breaks the
   db.audit('request', '0xAB', '/copies', { status: 200 });
   db.audit('order', '0xab', 'sub1', { step: 'send' });
   db.audit('order', '0xab', 'sub1', { step: 'answer' });
-  assert.deepEqual(db.verifyAudit(), { rows: 3, brokenAt: null });
+  const v = db.verifyAudit();
+  assert.deepEqual({ rows: v.rows, brokenAt: v.brokenAt }, { rows: 3, brokenAt: null });
+  // The hourly check walks only what came after a verified head.
+  db.audit('order', '0xab', 'sub1', { step: 'later' });
+  assert.deepEqual({ ...db.verifyAudit(v.head!), head: null }, { rows: 1, brokenAt: null, head: null });
   const rows = db.auditRows({ owner: '0xab' });
-  assert.equal(rows.length, 3);
-  assert.equal(rows[0]!.seq, 3, 'newest first');
+  assert.equal(rows.length, 4);
+  assert.equal(rows[0]!.seq, 4, 'newest first');
   db.db.prepare(`UPDATE audit SET data = '{"step":"forged"}' WHERE seq = 2`).run();
   assert.equal(db.verifyAudit().brokenAt, 2);
   db.close();

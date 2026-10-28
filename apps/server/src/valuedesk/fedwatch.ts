@@ -22,15 +22,27 @@
  * otherwise they are left as they are.
  *
  * The resulting target range of an outcome is counted from the current range
- * (the newest FOMC statement releases.ts read, else FRED's DFEDTARL/DFEDTARU)
- * for the next meeting, and for a later one from the range the most likely
- * outcome of each meeting before it leaves.
+ * (the newest FOMC statement releases.ts read, else the Fed Board's open
+ * market operations page) for the next meeting, and for a later one from the
+ * range the most likely outcome of each meeting before it leaves.
  *
  * The meetings are read at most every 60 s, a history every 10 minutes. The
  * parsers are pure and covered by test/fedwatch.test.ts on saved responses.
+ *
+ * OFF BY DEFAULT (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md
+ * rows 2-3): Kalshi's Developer Agreement s. 3.1 bars sharing its API data with
+ * third parties without written authorisation, and Polymarket's Terms of Use
+ * (11 Aug 2026) give only a personal licence, bar distributing its Features and
+ * bar "financial technology companies" from its Data without a written
+ * agreement. The routes answer `not_available` and nothing is read from either
+ * until the owner has written permission and sets FOMC_ODDS=on on the server.
  */
 import { easternDay, latestTargetRange } from './releases.js';
-import { fredSeries } from './indicators.js';
+import { fedTargetRange } from './indicators.js';
+
+/** Whether the FOMC odds may be read and served (FOMC_ODDS=on, only with the markets' written OK). */
+export const fomcOddsEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => env.FOMC_ODDS === 'on';
+export const FOMC_ODDS_OFF = 'FOMC rate odds are switched off: the prediction markets have not licensed their prices for display on ValueDesk.';
 
 const KALSHI = 'https://api.elections.kalshi.com/trade-api/v2';
 const SERIES = 'KXFEDDECISION';
@@ -334,15 +346,12 @@ export function resetFedWatch(): void {
   historyFlights.clear();
 }
 
-/** The current target range: the newest statement read, else FRED's bounds. */
+/** The current target range: the newest statement read, else the Board's open market operations page. */
 async function currentRange(fetchImpl: typeof fetch): Promise<TargetRange | null> {
   const fromStatement = latestTargetRange();
   if (fromStatement) return fromStatement;
   try {
-    const [lo, up] = await Promise.all([fredSeries('DFEDTARL', fetchImpl), fredSeries('DFEDTARU', fetchImpl)]);
-    const lower = lo.obs.at(-1)?.[1];
-    const upper = up.obs.at(-1)?.[1];
-    return lower !== undefined && upper !== undefined ? { lower, upper } : null;
+    return await fedTargetRange(fetchImpl);
   } catch {
     return null;
   }

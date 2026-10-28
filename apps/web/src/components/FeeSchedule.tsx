@@ -9,6 +9,7 @@
  * terms' tier index; the copy row is that same counted volume on the copy
  * ladder, which no order is charged yet.
  */
+import { fmtFixed, localize } from '../numStyle';
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { builderRateToFraction } from '@sodex-core';
 import {
@@ -49,7 +50,7 @@ const badge = (e: FeeEngine): string => (e === 'perps' ? 'Perps' : 'Spot');
 /** Header pair, trailing zeros dropped the way the venue ticket prints them. */
 function fmtHead(rate: number): string {
   const s = (rate * 100).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
-  return `${s}%`;
+  return `${localize(s)}%`;
 }
 
 interface Props {
@@ -284,7 +285,7 @@ function Sodex({
                       {you && <Here />}
                       {also && <span className="fee-sched__also">{badge(other)}</span>}
                     </td>
-                    <td className="num">&gt; {(row.minShare * 100).toFixed(2)}%</td>
+                    <td className="num">&gt; {fmtFixed(row.minShare * 100, 2)}%</td>
                     <td className="num">{fmtRate(row.rebate)}</td>
                   </tr>
                 );

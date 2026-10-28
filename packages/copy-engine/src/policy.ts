@@ -31,8 +31,10 @@
  * follower then accepts the new text before their next change. '.2': counter-trading.
  * 2026-10-27: algo orders on the executors, and keys the follower made themselves; '.2': keys live up to 180 days;
  * '.3': the United Kingdom and Canada excluded, sanctioned wallets screened by the executor, the domain www.valuedesk.so.
+ * 2026-10-28: security incidents and the emergency brake, a hacked executor, rate limits, software errors named,
+ * the follower's duties to report errors and limit what is at stake, the liability clause rewritten (BGB §§ 307-309).
  */
-export const COPY_TERMS_VERSION = '2026-10-27.3';
+export const COPY_TERMS_VERSION = '2026-10-28';
 
 /** US and its territories (US persons). */
 export const US_REGIONS: readonly string[] = ['US', 'PR', 'VI', 'GU', 'AS', 'MP', 'UM'];

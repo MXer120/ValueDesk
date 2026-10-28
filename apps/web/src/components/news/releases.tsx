@@ -25,6 +25,7 @@ import { IndicatorModal } from '../macro/IndicatorView';
 import { fmtValue, macroApi } from '../macro/api';
 import { SeriesChart, rangeSpan, type ChartSeries } from '../datachart/SeriesChart';
 import { CalendarMark } from './newsSources';
+import { fmtFixed, fmtPlain, localize } from '../../numStyle';
 
 export type { ReleaseResult };
 
@@ -88,11 +89,13 @@ export function useReleaseResults(events: readonly CalendarEvent[]): Record<stri
 export function fmtField(f: Pick<ReleaseResultField, 'unit'>, v: string | null): string {
   if (v === null || v === '') return '—';
   const n = Number(v);
-  if (!Number.isFinite(n)) return f.unit === '%' && /\d/.test(v) && !v.endsWith('%') ? `${v}%` : v;
-  if (f.unit === 'k') return `${n > 0 ? '+' : ''}${n.toLocaleString('en-US')}k`;
-  if (f.unit === 'bp') return `${n > 0 ? '+' : ''}${n} bp`;
-  if (f.unit === '%') return `${v}%`;
-  return v;
+  // A range ("3.75–4.00") is figures too; anything with a word in it is text.
+  const shown = /^[\s\d.,+\-−–%]*$/.test(v) ? localize(v) : v;
+  if (!Number.isFinite(n)) return f.unit === '%' && /\d/.test(v) && !v.endsWith('%') ? `${shown}%` : shown;
+  if (f.unit === 'k') return localize(`${n > 0 ? '+' : ''}${n.toLocaleString('en-US')}k`);
+  if (f.unit === 'bp') return `${n > 0 ? '+' : ''}${fmtPlain(n)} bp`;
+  if (f.unit === '%') return `${shown}%`;
+  return shown;
 }
 
 /** The first two figures in a line: "CPI m/m 0.3% · CPI y/y 2.9%". */
@@ -126,7 +129,7 @@ const RANGES = [['1y', '1Y'], ['5y', '5Y'], ['10y', '10Y'], ['max', 'All']] as c
  * One figure's history in the card, shown by default: the chart (bars for a
  * change, a line for a level or a rate), the release's own period marked on it
  * when the history has it, a range switch, and a line saying how far the history
- * reaches when it is behind the release (FRED publishes after the agency).
+ * reaches when it is behind the release (the agency's data service can lag its release page).
  */
 function EventChart({ ind, period, onFull }: { ind: { id: string; name: string }; period: string | null; onFull: () => void }) {
   const [range, setRange] = useStored<string>('vs.event.range', '5y');
@@ -201,7 +204,7 @@ function usePriors(fields: ReleaseResultField[], indOf: (key: string) => { id: s
         const [key, id] = pair.split(':') as [string, string];
         const d = await macroApi.indicator(id, '1y');
         // In the history: its row carries the one before. Not in it yet (still to come,
-        // or FRED not caught up): the previous figure is the latest one out.
+        // or the agency's data not caught up): the previous figure is the latest one out.
         const row = want ? d.table.find((t) => t.period === want) : undefined;
         out[key] = row ? row.prior : d.latest?.value ?? null;
       }));
@@ -237,7 +240,7 @@ function IndicatorFigures({ ids, pick, onPick }: { ids: string[]; pick: string |
             <span className="evc__figprev">
               Prev <b>{fmtValue(d.unit, prior, dp)}</b>
               {delta !== null && Math.abs(delta) >= 10 ** -dp / 2 && (
-                <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(dp)}{d.unit === 'k' || d.unit === 'K' ? 'k' : d.unit === '%' ? ' pp' : d.unit}</em>
+                <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{fmtFixed(Math.abs(delta), dp)}{d.unit === 'k' || d.unit === 'K' ? 'k' : d.unit === '%' ? ' pp' : d.unit}</em>
               )}
             </span>
           </button>
@@ -310,7 +313,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
                 <span className="evc__figprev">
                   Prev <b>{fmtField(f, prior)}</b>
                   {delta !== null && delta !== 0 && (
-                    <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{Math.abs(delta).toFixed(f.unit === 'k' ? 0 : 1)}{f.unit === 'k' ? 'k' : f.unit === '%' ? ' pp' : ''}</em>
+                    <em className={delta > 0 ? 'is-up' : 'is-down'}>{delta > 0 ? '+' : '−'}{fmtFixed(Math.abs(delta), f.unit === 'k' ? 0 : 1)}{f.unit === 'k' ? 'k' : f.unit === '%' ? ' pp' : ''}</em>
                   )}
                 </span>
               </Tag>
@@ -331,7 +334,7 @@ export function EventCard({ event, result, onClose, sourceName }: {
       <p className="evc__foot">
         {result?.priorPeriod ? `Previous: ${result.priorPeriod}. ` : ''}
         Consensus forecasts are not published by the official sources.
-        {lag !== null && lag >= 0 ? ` Read from ${host} ${lag.toFixed(1)}s after the scheduled time.` : ''}
+        {lag !== null && lag >= 0 ? ` Read from ${host} ${fmtFixed(lag, 1)}s after the scheduled time.` : ''}
       </p>
       {full && <IndicatorModal id={full.id} title={full.title} onClose={() => setFull(null)} />}
       <div className="evc__actions">

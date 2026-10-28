@@ -33,6 +33,7 @@ import type { PanelDefinition } from '../dashboard/types';
 import './Points.css';
 import { notifyError } from '../toast';
 import { NoWallet } from './EmptyState';
+import { fmtFixed, fmtPlain } from '../numStyle';
 /* The window the pool competes over. Weekly pool, so 7D is the honest default. */
 const POOL_DAYS = 7;
 
@@ -831,7 +832,7 @@ function DifficultyPanel({ c }: { c: PointsContext }) {
               <g key={`rt${r}`}>
                 <line x1={PAD.l} x2={w - PAD.r} y1={yRatio(r)} y2={yRatio(r)}
                   className={r === 1 ? 'pts-parity' : 'pts-grid'} />
-                <text x={PAD.l - 6} y={yRatio(r) + 3} className="pts-ylabel">{`${r}×`}</text>
+                <text x={PAD.l - 6} y={yRatio(r) + 3} className="pts-ylabel">{`${fmtPlain(r)}×`}</text>
               </g>
             ))}
             {runs(ratioVal, yRatio).map((run, i) => (
@@ -915,7 +916,7 @@ function StandingPanel({ c }: { c: PointsContext }) {
               value={s ? maskFunds(fmt(s.estimatedPoints, 2)) : DASH}
               cls={s ? undefined : 'pf-dim'}
               tag={s ? 'derived' : undefined}
-              tagHint={s ? `${s.sharePct.toFixed(6)}% of the pool, by volume share alone.` : undefined}
+              tagHint={s ? `${fmtFixed(s.sharePct, 6)}% of the pool, by volume share alone.` : undefined}
             />
             <Row
               label="PnL per point"

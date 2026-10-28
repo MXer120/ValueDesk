@@ -54,6 +54,7 @@ import { logger } from '../log';
 import { readOracle } from './oracle';
 import { PAPER_OWNER, needsRunner, noteRunnerLoaded, setLiveAlgos } from './algoBus';
 import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
+import { noteLimitNotices } from './limitNotices';
 
 const log = logger('algo');
 const CHANNEL = 'vd-algo';
@@ -158,6 +159,8 @@ class BrowserAlgos {
   private emit(): void {
     this.snapshot = { role: this.role, views: this.views };
     setLiveAlgos(this.views.filter((v) => !FINAL_STATUSES.has(v.algo.status)).length);
+    // A hold or a cut by SoDEX's position limit or open-interest cap: in the bell, once (limitNotices.ts).
+    noteLimitNotices(this.views, 'in this browser');
     for (const fn of this.listeners) fn();
   }
 

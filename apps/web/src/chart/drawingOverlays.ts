@@ -37,6 +37,7 @@ import type {
 } from 'klinecharts';
 import { readMeasure } from './measureOverlay';
 import { FAMILY, NUM_FAMILY, T } from './theme';
+import { fmtFixed, fmtPlain } from '../numStyle';
 
 // --- palette -------------------------------------------------------------------
 
@@ -274,11 +275,11 @@ function fmtPrice(chart: KChart, v: number, precision: number): string {
 
 const fmtPct = (v: number): string => {
   if (!isNum(v)) return NONE;
-  const body = `${Math.abs(v).toFixed(2)}%`;
+  const body = `${fmtFixed(Math.abs(v), 2)}%`;
   return v > 0 ? `+${body}` : v < 0 ? `${MINUS}${body}` : body;
 };
 
-const fmtRatio = (v: number): string => (isNum(v) ? v.toFixed(3) : NONE);
+const fmtRatio = (v: number): string => (isNum(v) ? fmtFixed(v, 3) : NONE);
 
 // --- figure helpers --------------------------------------------------------------
 
@@ -471,7 +472,7 @@ const infoLine: OverlayTemplate = {
     const deg = pixelAngle(a, b);
     return [
       line([a, b]),
-      ...readout([`${r.delta} (${r.pct})`, `${r.bars}, ${r.span}`, `${deg.toFixed(1)}°`], b.x + 8, b.y + 8, bounding, {
+      ...readout([`${r.delta} (${r.pct})`, `${r.bars}, ${r.span}`, `${fmtFixed(deg, 1)}°`], b.x + 8, b.y + 8, bounding, {
         align: 'left',
         place: 'below',
         bg: T.elevated,
@@ -515,7 +516,7 @@ const trendAngle: OverlayTemplate = {
         attrs: { x: a.x, y: a.y, r, startAngle: Math.min(ref, ang), endAngle: Math.max(ref, ang) },
         styles: { style: 'solid', size: paint.size, color: paint.color },
       },
-      label(a.x + dir * (r + 6), rising ? a.y - 3 : a.y + 3, `${deg.toFixed(1)}°`, {
+      label(a.x + dir * (r + 6), rising ? a.y - 3 : a.y + 3, `${fmtFixed(deg, 1)}°`, {
         align: dir > 0 ? 'left' : 'right',
         baseline: rising ? 'bottom' : 'top',
       }),
@@ -633,7 +634,7 @@ const fibFan: OverlayTemplate = {
     for (const f of FIB_FAN_LEVELS) {
       const through = { x: b.x, y: a.y + f * (b.y - a.y) };
       rays.push([a, rayToEdge(a, through, bounding.width, bounding.height)]);
-      figs.push(label(b.x + (b.x > a.x ? 4 : -4), through.y, String(f), {
+      figs.push(label(b.x + (b.x > a.x ? 4 : -4), through.y, fmtPlain(f), {
         align: b.x > a.x ? 'left' : 'right',
         baseline: 'middle',
       }));
@@ -672,8 +673,8 @@ const gannBox: OverlayTemplate = {
       lines([...verticals, ...horizontals], { ...dashed(), dashedValue: [2, 3] }, true),
     ];
     for (const l of GANN_BOX_LEVELS) {
-      figs.push(label(a.x + l * (b.x - a.x), top - 3, String(l), { align: 'center', baseline: 'bottom' }));
-      figs.push(label(left - 4, a.y + l * (b.y - a.y), String(l), { align: 'right', baseline: 'middle' }));
+      figs.push(label(a.x + l * (b.x - a.x), top - 3, fmtPlain(l), { align: 'center', baseline: 'bottom' }));
+      figs.push(label(left - 4, a.y + l * (b.y - a.y), fmtPlain(l), { align: 'right', baseline: 'middle' }));
     }
     return figs;
   },
@@ -885,7 +886,7 @@ function positionTemplate(name: string, side: PositionSide): OverlayTemplate {
           bg: T.neg,
           fg: T.bg,
         }),
-        ...readout([`R:R ${isNum(r.rr) ? r.rr.toFixed(2) : NONE}`], mid, e.y - 9, bounding, {
+        ...readout([`R:R ${isNum(r.rr) ? fmtFixed(r.rr, 2) : NONE}`], mid, e.y - 9, bounding, {
           align: 'center',
           place: 'below',
           bg: T.elevated,

@@ -4046,7 +4046,10 @@ function loadConfig(env = process.env) {
     logLevel: level === "debug" || level === "warn" || level === "error" ? level : "info",
     executorId,
     liveAlgos: env.EXECUTOR_LIVE_ALGOS === "1",
-    brakeFile: brake === "none" ? null : brake ? resolve(brake) : kind === "hosted" ? "/var/lib/valuescan/brake.json" : join(dataDir, "brake.json")
+    brakeFile: brake === "none" ? null : brake ? resolve(brake) : kind === "hosted" ? "/var/lib/valuescan/brake.json" : join(dataDir, "brake.json"),
+    allowedHosts: env.EXECUTOR_ALLOWED_HOSTS?.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean) ?? [],
+    alertTelegramToken: env.ALERT_TELEGRAM_TOKEN?.trim() || null,
+    alertTelegramChatId: env.ALERT_TELEGRAM_CHAT_ID?.trim() || null
   };
 }
 
@@ -4088,7 +4091,12 @@ function egress(localAddress) {
       res.on("end", () => {
         const status = res.statusCode ?? 0;
         const body = Buffer.concat(chunks).toString("utf8");
-        resolve2({ status, ok: status >= 200 && status < 300, text: async () => body });
+        const h = res.headers;
+        const headers = { get: (name) => {
+          const v = h[name.toLowerCase()];
+          return v === void 0 ? null : Array.isArray(v) ? v.join(", ") : String(v);
+        } };
+        resolve2({ status, ok: status >= 200 && status < 300, text: async () => body, headers });
       });
       res.on("error", reject);
     });
@@ -4118,7 +4126,7 @@ function egress(localAddress) {
 
 // src/db.ts
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync as existsSync2, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 function sqlite() {
   let m;
@@ -4209,6 +4217,14 @@ function takeLock(path) {
   }
   throw new Error(`Could not lock ${dirname(path)}.`);
 }
+function privateFiles(path) {
+  for (const p of [path, `${path}-wal`, `${path}-shm`, `${path}.lock`]) {
+    try {
+      if (existsSync2(p) && (statSync(p).mode & 63) !== 0) chmodSync(p, 384);
+    } catch {
+    }
+  }
+}
 function releaseLock(path) {
   held.delete(path);
   try {
@@ -4236,6 +4252,7 @@ var ExecutorDb = class {
     this.db.exec("PRAGMA synchronous = NORMAL");
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.db.exec(SCHEMA);
+    if (path !== ":memory:") privateFiles(path);
   }
   path;
   db;
@@ -4285,20 +4302,25 @@ var ExecutorDb = class {
       hash: String(r.hash)
     }));
   }
-  /** Walk the whole chain: the first row whose hash does not follow, or null when every row does. */
-  verifyAudit() {
-    let prev = AUDIT_GENESIS;
+  /**
+   * Walk the chain: the first row whose hash does not follow, or null when every row does.
+   * `from` (a head this process verified before) walks only the rows after it - the hourly
+   * check; `head` is where the walk ended, for the next one.
+   */
+  verifyAudit(from) {
+    let prev = from?.hash ?? AUDIT_GENESIS;
     let rows2 = 0;
-    let last = 0;
-    for (const r of this.db.prepare("SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq").iterate()) {
+    let last = from?.seq ?? 0;
+    const it = from ? this.db.prepare("SELECT seq, at, kind, owner, ref, data, hash FROM audit WHERE seq > ? ORDER BY seq").iterate(from.seq) : this.db.prepare("SELECT seq, at, kind, owner, ref, data, hash FROM audit ORDER BY seq").iterate();
+    for (const r of it) {
       rows2++;
       const seq = Number(r.seq);
       const want = auditHash(prev, { at: Number(r.at), kind: String(r.kind), owner: r.owner === null ? null : String(r.owner), ref: r.ref === null ? null : String(r.ref), data: String(r.data) });
-      if (want !== String(r.hash) || last && seq !== last + 1) return { rows: rows2, brokenAt: seq };
+      if (want !== String(r.hash) || last && seq !== last + 1) return { rows: rows2, brokenAt: seq, head: null };
       prev = String(r.hash);
       last = seq;
     }
-    return { rows: rows2, brokenAt: null };
+    return { rows: rows2, brokenAt: null, head: last ? { seq: last, hash: prev } : from ?? null };
   }
   /** Throws when the database does not answer (the health check). */
   ping() {
@@ -4469,7 +4491,7 @@ function keyOf(r) {
 
 // src/secrets.ts
 import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes as randomBytes2, timingSafeEqual } from "node:crypto";
-import { chmodSync, existsSync as existsSync2, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { chmodSync as chmodSync2, existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
 // ../../packages/sodex-core/src/network.ts
@@ -7851,11 +7873,11 @@ function weightFor(path, limit = 0) {
 function secretFile(dir, name) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, name);
-  if (!existsSync2(path)) {
+  if (!existsSync3(path)) {
     writeFileSync2(path, randomBytes2(32), { mode: 384, flag: "wx" });
   }
   try {
-    chmodSync(path, 384);
+    chmodSync2(path, 384);
   } catch {
   }
   const b = readFileSync2(path);
@@ -7865,12 +7887,12 @@ function secretFile(dir, name) {
 function importKeyFile(dir) {
   mkdirSync2(dir, { recursive: true, mode: 448 });
   const path = join2(dir, "import.key");
-  if (!existsSync2(path)) {
+  if (!existsSync3(path)) {
     const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
     writeFileSync2(path, privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 384, flag: "wx" });
   }
   try {
-    chmodSync(path, 384);
+    chmodSync2(path, 384);
   } catch {
   }
   return createPrivateKey(readFileSync2(path));
@@ -7902,9 +7924,13 @@ var Secrets = class {
     if (raw.length < 17) throw new Error("key import: the envelope is too short");
     const d = createDecipheriv("aes-256-gcm", key2, Buffer.from(e.iv, "base64url"));
     d.setAuthTag(raw.subarray(raw.length - 16));
-    const pk = new Uint8Array(Buffer.concat([d.update(raw.subarray(0, raw.length - 16)), d.final()]));
-    shared.fill(0);
-    key2.fill(0);
+    let pk;
+    try {
+      pk = plainOf(d.update(raw.subarray(0, raw.length - 16)), () => d.final());
+    } finally {
+      shared.fill(0);
+      key2.fill(0);
+    }
     if (pk.length !== 32) {
       pk.fill(0);
       throw new Error("key import: not a 32-byte private key");
@@ -7923,24 +7949,11 @@ var Secrets = class {
     }
   }
   seal(network, owner, address, privateKey) {
-    const iv = randomBytes2(12);
-    const c = createCipheriv("aes-256-gcm", this.kek, iv);
-    c.setAAD(aad(network, owner, address));
-    const ct = Buffer.concat([c.update(privateKey), c.final()]);
-    return ["v1", iv.toString("base64url"), ct.toString("base64url"), c.getAuthTag().toString("base64url")].join(".");
+    return sealWith(this.kek, network, owner, address, privateKey);
   }
   /** The signing key for a sealed record. Throws when it does not open, or opens to another address. */
   open(network, owner, address, sealed, registration) {
-    const [v, iv, ct, tag] = sealed.split(".");
-    if (v !== "v1" || !iv || !ct || !tag) throw new Error("sealed key: unknown format");
-    const d = createDecipheriv("aes-256-gcm", this.kek, Buffer.from(iv, "base64url"));
-    d.setAAD(aad(network, owner, address));
-    d.setAuthTag(Buffer.from(tag, "base64url"));
-    const pk = new Uint8Array(Buffer.concat([d.update(Buffer.from(ct, "base64url")), d.final()]));
-    if (privateKeyToAddress(pk).toLowerCase() !== address.toLowerCase()) {
-      pk.fill(0);
-      throw new Error("sealed key: opens to another address");
-    }
+    const pk = openWith(this.kek, network, owner, address, sealed);
     return signingKeyFrom({ privateKey: pk, address }, { name: registration.name, expiresAt: registration.expiresAt ?? 0 });
   }
   /* ------------------------------------------------------ sessions ----- */
@@ -7965,11 +7978,49 @@ var Secrets = class {
     return createHmac("sha256", this.sessionKey).update(body).digest("base64url");
   }
 };
+function plainOf(head, final) {
+  let tail;
+  try {
+    tail = final();
+  } catch (e) {
+    head.fill(0);
+    throw e;
+  }
+  const out = new Uint8Array(head.length + tail.length);
+  out.set(head, 0);
+  out.set(tail, head.length);
+  head.fill(0);
+  tail.fill(0);
+  return out;
+}
 var aad = (network, owner, address) => Buffer.from(`vd-copy-key:v1:${network}:${owner.toLowerCase()}:${address.toLowerCase()}`);
+function sealWith(kek, network, owner, address, privateKey) {
+  if (kek.length !== 32) throw new Error("a kek is 32 bytes");
+  const iv = randomBytes2(12);
+  const c = createCipheriv("aes-256-gcm", kek, iv);
+  c.setAAD(aad(network, owner, address));
+  const ct = Buffer.concat([c.update(privateKey), c.final()]);
+  return ["v1", iv.toString("base64url"), ct.toString("base64url"), c.getAuthTag().toString("base64url")].join(".");
+}
+function openWith(kek, network, owner, address, sealed) {
+  if (kek.length !== 32) throw new Error("a kek is 32 bytes");
+  const [v, iv, ct, tag] = sealed.split(".");
+  if (v !== "v1" || !iv || !ct || !tag) throw new Error("sealed key: unknown format");
+  const d = createDecipheriv("aes-256-gcm", kek, Buffer.from(iv, "base64url"));
+  d.setAAD(aad(network, owner, address));
+  d.setAuthTag(Buffer.from(tag, "base64url"));
+  const pk = plainOf(d.update(Buffer.from(ct, "base64url")), () => d.final());
+  if (privateKeyToAddress(pk).toLowerCase() !== address.toLowerCase()) {
+    pk.fill(0);
+    throw new Error("sealed key: opens to another address");
+  }
+  return pk;
+}
 
 // src/server.ts
 import { createServer } from "node:http";
 import { timingSafeEqual as timingSafeEqual3 } from "node:crypto";
+import { isIP } from "node:net";
 
 // ../../packages/copy-engine/src/io.ts
 var WS_OPEN = 1;
@@ -8007,7 +8058,7 @@ function randomId(prefix = "") {
 }
 
 // ../../packages/copy-engine/src/policy.ts
-var COPY_TERMS_VERSION = "2026-10-27.3";
+var COPY_TERMS_VERSION = "2026-10-28";
 var US_REGIONS = ["US", "PR", "VI", "GU", "AS", "MP", "UM"];
 var UK_CA_REGIONS = ["GB", "CA"];
 var CLOSE_ONLY_REGIONS = [...US_REGIONS, ...UK_CA_REGIONS];
@@ -8384,6 +8435,11 @@ var num = (v, fallback = NaN) => {
   return Number.isFinite(n) ? n : fallback;
 };
 var str = (v, fallback) => typeof v === "string" && v.trim() !== "" ? v.trim() : fallback;
+function tiersOf(v) {
+  if (!Array.isArray(v)) return {};
+  const tiers = v.map((t) => ({ maxNotionalValue: num(t?.maxNotionalValue), maxLeverage: num(t?.maxLeverage) })).filter((t) => t.maxNotionalValue > 0 && t.maxLeverage > 0).sort((a, b) => a.maxNotionalValue - b.maxNotionalValue);
+  return tiers.length ? { marginTiers: tiers } : {};
+}
 function parseMarkets(rows2) {
   if (!Array.isArray(rows2)) return [];
   const out = [];
@@ -8405,6 +8461,10 @@ function parseMarkets(rows2) {
       minNotional: num(r.minNotional, 10),
       maxNotional: num(r.maxNotional) > 0 ? num(r.maxNotional) : null,
       maxLeverage: Math.max(1, Math.floor(num(r.maxLeverage, 1))),
+      ...num(r.initLeverage) > 0 ? { initLeverage: Math.floor(num(r.initLeverage)) } : {},
+      ...tiersOf(r.marginTiers),
+      openInterestCap: num(r.openInterestCap) > 0 ? num(r.openInterestCap) : null,
+      openInterestCapUSD: num(r.openInterestCapUSD) > 0 ? num(r.openInterestCapUSD) : null,
       buyLimitUpRatio: num(r.buyLimitUpRatio, 0.05),
       sellLimitDownRatio: num(r.sellLimitDownRatio, 0.05),
       takerFee: num(r.takerFee, 4e-4),
@@ -8875,40 +8935,372 @@ var OutcomeUnknownError = class extends Error {
   name = "OutcomeUnknownError";
   outcomeUnknown = true;
 };
+var LocalRefusal = class extends SodexApiError {
+  constructor(message, path = "", reason = "rate") {
+    super(reason === "not-allowed" ? 403 : 429, `Not sent: ${message}`, reason === "not-allowed" ? 403 : 429, path);
+    this.reason = reason;
+  }
+  reason;
+  name = "LocalRefusal";
+  local = true;
+};
+var COOL_BASE_MS = 15e3;
+var COOL_MAX_MS = 5 * 6e4;
+var COOL_WAIT_MAX_MS = 2e4;
+var PROTECT_SPACING_MS = 1e3;
+var jitter = (ms, rnd = Math.random) => Math.round(ms * (0.8 + 0.4 * rnd()));
 var WeightBudget = class {
-  constructor(perMinute = 1200, readShare = 0.8) {
+  constructor(perMinute = 1200, readShare = 0.75, openShare = 0.92) {
     this.perMinute = perMinute;
     this.readShare = readShare;
+    this.openShare = openShare;
   }
   perMinute;
   readShare;
+  openShare;
   spent = [];
+  coolUntil = 0;
+  coolMs = 0;
+  lastProtectAt = 0;
+  /** Told when a cooldown opens or ends. */
+  onEvent = null;
   used(now = Date.now()) {
     while (this.spent.length && now - this.spent[0].at >= 6e4) this.spent.shift();
     return this.spent.reduce((a, b) => a + b.w, 0);
   }
-  /** Book `w` now (writes never wait). */
+  /** Book `w` now. */
   charge(w, now = Date.now()) {
     this.spent.push({ at: now, w });
   }
-  /** Wait until a read of weight `w` fits under the read share, then book it. */
+  /** ms until SoDEX's rate limit has cooled down (0: not limited). */
+  cooldownLeft(now = Date.now()) {
+    return Math.max(0, this.coolUntil - now);
+  }
+  /**
+   * SoDEX answered 429 to a request sent at `sentAt`: open (or lengthen) the
+   * cooldown. Retry-After wins when it is longer. Requests that were already on
+   * their way when the cooldown opened all get the same 429; they do not double
+   * it again - only one sent after it (into the ban) does.
+   */
+  penalise(path, retryAfterMs2, now = Date.now(), rnd = Math.random, sentAt = now) {
+    if (this.coolUntil > now && sentAt <= this.penalisedAt) {
+      if (retryAfterMs2 !== null && now + retryAfterMs2 > this.coolUntil) this.coolUntil = now + Math.min(retryAfterMs2, 10 * 6e4);
+      return this.coolUntil - now;
+    }
+    this.coolMs = Math.min(COOL_MAX_MS, this.coolMs ? this.coolMs * 2 : COOL_BASE_MS);
+    const ms = Math.min(10 * 6e4, Math.max(jitter(this.coolMs, rnd), retryAfterMs2 ?? 0));
+    const was = this.coolUntil > now;
+    this.penalisedAt = now;
+    this.coolUntil = Math.max(this.coolUntil, now + ms);
+    if (!was) this.onEvent?.({ kind: "rate-limited", ms, path, retryAfterMs: retryAfterMs2 });
+    return ms;
+  }
+  penalisedAt = 0;
+  /** When the last 429 came (0: never). */
+  get lastPenaltyAt() {
+    return this.penalisedAt;
+  }
+  /**
+   * An answer that was not a 429 to a request sent at `sentAt`: the limit is
+   * lifted - unless the request left before the last 429 (a slow answer to an
+   * old request says nothing about the ban) and the cooldown still runs.
+   */
+  cleared(sentAt = Date.now(), now = Date.now()) {
+    if (!this.coolMs && !this.coolUntil) return;
+    if (this.coolUntil > now && sentAt <= this.penalisedAt) return;
+    const was = this.coolMs > 0;
+    this.coolMs = 0;
+    this.coolUntil = 0;
+    if (was) this.onEvent?.({ kind: "rate-cleared" });
+  }
+  /** Wait until a read of weight `w` fits under the read share and no cooldown runs, then book it. */
   async take(w) {
     for (let i = 0; i < 120; i++) {
       const now = Date.now();
+      const cool = this.cooldownLeft(now);
+      if (cool > COOL_WAIT_MAX_MS) throw new LocalRefusal(`SoDEX's rate limit is cooling down (${Math.ceil(cool / 1e3)} s left)`);
+      if (cool > 0) {
+        await sleep(jitter(cool));
+        continue;
+      }
       if (this.used(now) + w <= this.perMinute * this.readShare) {
         this.charge(w, now);
         return;
       }
       const oldest = this.spent[0];
-      await sleep(oldest ? Math.max(50, 6e4 - (now - oldest.at) + 5) : 250);
+      await sleep(jitter(oldest ? Math.max(50, 6e4 - (now - oldest.at) + 5) : 250));
     }
-    throw new SodexApiError(429, "local read budget exhausted", 429, "");
+    throw new LocalRefusal("the read budget is exhausted");
+  }
+  /**
+   * Admit a signed write of weight `w` now, or say why not. Protective writes
+   * are never refused; they are only spaced while a cooldown runs.
+   */
+  async admitWrite(w, priority, path = "") {
+    let now = Date.now();
+    if (priority === "open") {
+      const cool = this.cooldownLeft(now);
+      if (cool > 0) throw new LocalRefusal(`SoDEX's rate limit is cooling down (${Math.ceil(cool / 1e3)} s left); opening orders wait for it`, path);
+      if (this.used(now) + w > this.perMinute * this.openShare) throw new LocalRefusal("the per-IP request budget is nearly spent; closes and stops go first", path);
+    } else if (this.cooldownLeft(now) > 0) {
+      const wait = this.lastProtectAt + PROTECT_SPACING_MS - now;
+      if (wait > 0) {
+        this.lastProtectAt += PROTECT_SPACING_MS;
+        await sleep(Math.min(wait, 10 * PROTECT_SPACING_MS));
+        now = Date.now();
+      } else this.lastProtectAt = now;
+    }
+    this.charge(w, now);
   }
 };
+var AccountRate = class {
+  constructor(perSecond = 20, perMinute = 600, share = 0.9) {
+    this.perSecond = perSecond;
+    this.perMinute = perMinute;
+    this.share = share;
+  }
+  perSecond;
+  perMinute;
+  share;
+  hits = /* @__PURE__ */ new Map();
+  window(id, now) {
+    let h = this.hits.get(id);
+    if (!h) this.hits.set(id, h = []);
+    while (h.length && now - h[0].at >= 6e4) h.shift();
+    return h;
+  }
+  counts(id, now = Date.now()) {
+    const h = this.window(id, now);
+    let second = 0;
+    let minute = 0;
+    for (const x of h) {
+      minute += x.n;
+      if (now - x.at < 1e3) second += x.n;
+    }
+    return { second, minute };
+  }
+  async admit(id, n, priority, path = "") {
+    if (!(id > 0) || !(n > 0)) return;
+    let now = Date.now();
+    let c = this.counts(id, now);
+    if (priority === "open") {
+      if (c.second + n > this.perSecond * this.share) throw new LocalRefusal(`account ${id} is at SoDEX's order rate (${this.perSecond} a second)`, path, "account-rate");
+      if (c.minute + n > this.perMinute * this.share) throw new LocalRefusal(`account ${id} is at SoDEX's order rate (${this.perMinute} a minute)`, path, "account-rate");
+    } else if (c.second + n > this.perSecond) {
+      await sleep(1e3);
+      now = Date.now();
+      c = this.counts(id, now);
+    }
+    this.book(id, n, now);
+  }
+  /** ms until `n` more orders of account `id` fit under `share` of both windows (0: now). */
+  waitMs(id, n, share = 1, now = Date.now()) {
+    if (!(id > 0) || !(n > 0)) return 0;
+    const h = this.window(id, now);
+    const c = this.counts(id, now);
+    let wait = 0;
+    if (c.second + n > this.perSecond * share) {
+      const inSecond = h.filter((x) => now - x.at < 1e3);
+      wait = Math.max(wait, inSecond.length ? 1e3 - (now - inSecond[0].at) + 1 : 1);
+    }
+    if (c.minute + n > this.perMinute * share) wait = Math.max(wait, h.length ? 6e4 - (now - h[0].at) + 1 : 1);
+    return wait;
+  }
+  /** Count `n` orders of account `id` sent now. */
+  book(id, n, now = Date.now()) {
+    if (!(id > 0) || !(n > 0)) return;
+    this.window(id, now).push({ at: now, n });
+    if (this.hits.size > 5e3) {
+      for (const [k, v] of this.hits) if (!v.length || now - v[v.length - 1].at >= 6e4) this.hits.delete(k);
+    }
+  }
+};
+var IpRateLimitedError = class extends SodexApiError {
+  name = "IpRateLimitedError";
+  constructor(path) {
+    super(429, "SoDEX rate limit (HTTP 429) - not executed; backing off", 429, path);
+  }
+};
+var SEND_CLASSES = ["cancel", "protect", "leverage", "open"];
+function sendClass(method, path, priority) {
+  if (method === "DELETE") return "cancel";
+  if (/\/leverage$/.test(path)) return "leverage";
+  return priority === "protect" ? "protect" : "open";
+}
+var QUEUE_SLOW_MS = 1e4;
+var QUEUE_CAP = 1e3;
+var PROBE_MS = 2e3;
+var PUMP_MAX_WAIT_MS = 1e3;
+var SendQueue = class {
+  constructor(budget, rate) {
+    this.budget = budget;
+    this.rate = rate;
+  }
+  budget;
+  rate;
+  items = [];
+  busy = /* @__PURE__ */ new Set();
+  seq = 0;
+  timer = null;
+  lastProbeAt = 0;
+  probing = false;
+  lastSlowAt = 0;
+  sentN = 0;
+  resentN = 0;
+  onEvent = null;
+  stats(now = Date.now()) {
+    const byClass = { cancel: 0, protect: 0, leverage: 0, open: 0 };
+    let oldest = now;
+    for (const it of this.items) {
+      byClass[it.cls]++;
+      oldest = Math.min(oldest, it.at);
+    }
+    return { waiting: this.items.length, byClass, oldestMs: this.items.length ? now - oldest : 0, inFlight: this.busy.size, cooldownMs: this.budget.cooldownLeft(now), sent: this.sentN, resent: this.resentN };
+  }
+  /** Send `run` (one signed write) under the queue's rules. */
+  submit(cls, accountId, orders, run, path = "") {
+    const weight = 1 + Math.floor(orders / 40);
+    const now = Date.now();
+    if (cls === "open") {
+      const why = this.items.length ? "closes and stops go first" : this.budget.cooldownLeft(now) > 0 ? `it is cooling down (${Math.ceil(this.budget.cooldownLeft(now) / 1e3)} s left); closes and stops go first` : this.budget.used(now) + weight > this.budget.perMinute * this.budget.openShare ? "the per-IP budget is nearly spent; closes and stops go first" : null;
+      if (why) return Promise.reject(new LocalRefusal(`SoDEX's rate limit is reached; ${why}`, path));
+      if (this.rate.waitMs(accountId, orders, this.rate.share, now) > 0) {
+        return Promise.reject(new LocalRefusal(`account ${accountId} is at SoDEX's order rate; closes and stops go first`, path, "account-rate"));
+      }
+      this.budget.charge(weight, now);
+      this.rate.book(accountId, orders, now);
+      this.sentN++;
+      return run();
+    }
+    if (cls === "leverage" && this.items.length >= QUEUE_CAP) return Promise.reject(new LocalRefusal(`the send queue is full (${this.items.length} waiting); closes and stops go first`, path));
+    return new Promise((resolve2, reject) => {
+      this.items.push({ seq: ++this.seq, cls, accountId, orders, weight, at: now, run, resolve: resolve2, reject });
+      this.pump();
+    });
+  }
+  /** The next item that may leave: per account only its oldest, and only when that account has nothing in flight; then class, then age. */
+  candidates() {
+    const heads = /* @__PURE__ */ new Map();
+    for (const it of this.items) if (!heads.has(it.accountId)) heads.set(it.accountId, it);
+    return [...heads.values()].filter((it) => !this.busy.has(it.accountId)).sort((a, b) => SEND_CLASSES.indexOf(a.cls) - SEND_CLASSES.indexOf(b.cls) || a.seq - b.seq);
+  }
+  schedule(ms) {
+    timers.cancel(this.timer);
+    this.timer = timers.after(Math.max(1, Math.min(ms, PUMP_MAX_WAIT_MS)), () => {
+      this.timer = null;
+      this.pump();
+    });
+  }
+  pump() {
+    timers.cancel(this.timer);
+    this.timer = null;
+    let wait = Infinity;
+    for (; ; ) {
+      const now = Date.now();
+      const next = this.candidates();
+      if (!next.length) break;
+      const cool = this.budget.cooldownLeft(now);
+      if (cool > 0) {
+        const since = now - Math.max(this.lastProbeAt, this.budget.lastPenaltyAt);
+        if (this.probing || since < PROBE_MS) {
+          wait = Math.min(wait, this.probing ? PUMP_MAX_WAIT_MS : PROBE_MS - since);
+          break;
+        }
+        this.lastProbeAt = now;
+        this.probing = true;
+        this.dispatch(next[0], now, true);
+        break;
+      }
+      const room = this.budget.perMinute - this.budget.used(now);
+      let sent = false;
+      for (const it of next) {
+        if (it.weight > room) {
+          wait = Math.min(wait, 250);
+          break;
+        }
+        const w = this.rate.waitMs(it.accountId, it.orders, 1, now);
+        if (w > 0) {
+          wait = Math.min(wait, w);
+          continue;
+        }
+        this.dispatch(it, now, false);
+        sent = true;
+        break;
+      }
+      if (!sent) break;
+    }
+    this.watch();
+    if (this.items.length) this.schedule(Number.isFinite(wait) ? wait : PUMP_MAX_WAIT_MS);
+  }
+  dispatch(it, now, probe) {
+    this.items.splice(this.items.indexOf(it), 1);
+    this.busy.add(it.accountId);
+    this.budget.charge(it.weight, now);
+    this.rate.book(it.accountId, it.orders, now);
+    this.sentN++;
+    void it.run().then(
+      (v) => it.resolve(v),
+      (e) => {
+        if (e instanceof IpRateLimitedError) {
+          this.resentN++;
+          this.items.push(it);
+          this.items.sort((a, b) => a.seq - b.seq);
+        } else it.reject(e);
+      }
+    ).finally(() => {
+      this.busy.delete(it.accountId);
+      if (probe) this.probing = false;
+      this.pump();
+    });
+  }
+  watch(now = Date.now()) {
+    if (!this.items.length || now - this.lastSlowAt < 6e4) return;
+    const s = this.stats(now);
+    if (s.oldestMs >= QUEUE_SLOW_MS || s.waiting >= QUEUE_CAP) {
+      this.lastSlowAt = now;
+      this.onEvent?.({ kind: "queue-slow", waiting: s.waiting, oldestMs: s.oldestMs, byClass: s.byClass });
+    }
+  }
+};
+var ALLOWED_WRITES = [
+  { method: "POST", path: "/api/v1/perps/trade/orders" },
+  { method: "DELETE", path: "/api/v1/perps/trade/orders" },
+  { method: "POST", path: "/api/v1/perps/trade/leverage" }
+];
+function writeShape(method, path, body) {
+  let p = {};
+  try {
+    p = body ? JSON.parse(body) : {};
+  } catch {
+    p = {};
+  }
+  const accountId = Number(p.accountID) || 0;
+  if (method === "DELETE") return { accountId, orders: Array.isArray(p.cancels) ? p.cancels.length : 1, priority: "protect" };
+  if (Array.isArray(p.orders)) {
+    const all = p.orders;
+    return { accountId, orders: all.length, priority: all.length > 0 && all.every((o) => o && o.reduceOnly === true) ? "protect" : "open" };
+  }
+  return { accountId, orders: 1, priority: "open" };
+}
+function retryAfterMs(v, now = Date.now()) {
+  if (!v) return null;
+  const s = Number(v.trim());
+  if (Number.isFinite(s) && s >= 0) return Math.min(s * 1e3, 36e5);
+  const t = Date.parse(v);
+  return Number.isFinite(t) ? Math.max(0, Math.min(t - now, 36e5)) : null;
+}
+function isIpRateLimited(status, text) {
+  return status === 429 || /error code:\s*1015/i.test(text);
+}
 var SodexClient = class {
   network;
   gateway;
   budget;
+  accountRate;
+  /** Every signed write leaves through it (SendQueue). */
+  queue;
+  /** How SoDEX's REST has answered lately (reachability, for the health check and alerts). */
+  reach = { lastOkAt: 0, lastFailAt: 0, failingSince: 0, lastError: null };
   fetch;
   readTimeoutMs;
   writeTimeoutMs;
@@ -8917,44 +9309,101 @@ var SodexClient = class {
     this.gateway = (o.gateway ?? GATEWAY_ORIGIN[o.network]).replace(/\/+$/, "");
     this.fetch = o.fetch;
     this.budget = o.budget ?? new WeightBudget();
+    this.accountRate = o.accountRate ?? new AccountRate();
+    this.queue = new SendQueue(this.budget, this.accountRate);
     this.readTimeoutMs = o.readTimeoutMs ?? 1e4;
     this.writeTimeoutMs = o.writeTimeoutMs ?? 15e3;
   }
-  /** An unsigned GET, budgeted and retried on transient failures. */
+  /** An answer arrived (any HTTP status below 500): SoDEX is reachable. */
+  reached() {
+    this.reach.lastOkAt = Date.now();
+    this.reach.failingSince = 0;
+  }
+  unreached(e) {
+    const now = Date.now();
+    this.reach.lastFailAt = now;
+    this.reach.lastError = String(e instanceof Error ? e.message : e).slice(0, 200);
+    if (!this.reach.failingSince) this.reach.failingSince = now;
+  }
+  /**
+   * One HTTP answer, read: a 429 opens the cooldown (and is never retried by
+   * the caller); anything else below 500 proves SoDEX is there and lifts it.
+   */
+  observe(res, text, path, sentAt) {
+    if (isIpRateLimited(res.status, text)) {
+      this.reached();
+      this.budget.penalise(path, retryAfterMs(res.headers?.get("retry-after")), Date.now(), Math.random, sentAt);
+      return;
+    }
+    if (res.status >= 500) {
+      this.unreached(`HTTP ${res.status}`);
+      return;
+    }
+    this.reached();
+    this.budget.cleared(sentAt);
+  }
+  /** An unsigned GET, budgeted and retried on transient failures (never on a 429: that waits out the cooldown). */
   async get(path, weight = weightFor(path), attempts = 3) {
     let last;
     for (let i = 1; i <= attempts; i++) {
       await this.budget.take(weight);
       const ctl = abortController();
       const timer = timers.after(this.readTimeoutMs, () => ctl.abort());
+      const sentAt = Date.now();
       try {
-        const res = await this.fetch(this.gateway + path, { method: "GET", headers: { Accept: "application/json" }, signal: ctl.signal });
+        let res;
+        try {
+          res = await this.fetch(this.gateway + path, { method: "GET", headers: { Accept: "application/json" }, signal: ctl.signal });
+        } catch (e) {
+          this.unreached(e);
+          throw e;
+        }
         const text = await res.text();
+        this.observe(res, text, path, sentAt);
+        if (isIpRateLimited(res.status, text)) throw new SodexApiError(429, "SoDEX rate limit (HTTP 429) - backing off", 429, path);
         return parseEnvelope(res.status, text, path);
       } catch (e) {
         last = e;
-        if (i >= attempts || !isTransientFailure(e)) throw e;
-        await sleep(300 * 2 ** (i - 1));
+        const limited = e instanceof SodexApiError && (e.httpStatus === 429 || e.code === 429);
+        if (i >= attempts || limited || !isTransientFailure(e)) throw e;
+        await sleep(jitter(300 * 2 ** (i - 1)));
       } finally {
         timers.cancel(timer);
       }
     }
     throw last;
   }
-  /** Send one signed request, once. */
+  /**
+   * Send one signed request through the queue (SendQueue): only ALLOWED_WRITES
+   * leave; cancels, stops, closes and leverage wait their turn (and are sent
+   * again after a 429, which was not executed); an opening order leaves at once
+   * or is refused (LocalRefusal: nothing was sent). Any other answer is never
+   * sent twice.
+   */
   async send(req) {
-    this.budget.charge(1);
+    if (!ALLOWED_WRITES.some((w) => w.method === req.method && w.path === req.gatewayPath)) {
+      throw new LocalRefusal(`${req.method} ${req.gatewayPath} is not an action this copier sends`, req.gatewayPath, "not-allowed");
+    }
+    const shape = writeShape(req.method, req.gatewayPath, req.body);
+    return this.queue.submit(sendClass(req.method, req.gatewayPath, shape.priority), shape.accountId, shape.orders, () => this.transmit(req), req.gatewayPath);
+  }
+  /** One signed write on the wire (the queue decides when). */
+  async transmit(req) {
     const ctl = abortController();
     const timer = timers.after(this.writeTimeoutMs, () => ctl.abort());
+    const sentAt = Date.now();
     let res;
     try {
       res = await this.fetch(this.gateway + req.gatewayPath, { method: req.method, headers: req.headers, body: req.body, signal: ctl.signal });
     } catch (e) {
+      this.unreached(e);
       throw new OutcomeUnknownError(`SoDEX did not answer (${String(e).slice(0, 120)}); the request may still have executed.`);
     } finally {
       timers.cancel(timer);
     }
     const text = await res.text().catch(() => "");
+    this.observe(res, text, req.gatewayPath, sentAt);
+    if (isIpRateLimited(res.status, text)) throw new IpRateLimitedError(req.gatewayPath);
     const unreadable = res.status < 400 && text.trim() !== "" && !/^[\[{]/.test(text.trim());
     if (res.status >= 500 || unreadable) {
       throw new OutcomeUnknownError(`SoDEX answered HTTP ${res.status} after receiving the request; it may still have executed.`);
@@ -8964,9 +9413,10 @@ var SodexClient = class {
   async markets() {
     return parseMarkets(await this.get("/api/v1/perps/markets/symbols"));
   }
+  /** Every market's mark, and its open interest in the coin (`openInterest`, null when absent). */
   async markPrices() {
     const rows2 = await this.get("/api/v1/perps/markets/mark-prices");
-    return (rows2 ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice) })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
+    return (rows2 ?? []).map((r) => ({ symbol: String(r.symbol ?? ""), price: Number(r.markPrice), oi: Number.isFinite(Number(r.openInterest)) && r.openInterest !== void 0 ? Number(r.openInterest) : null })).filter((r) => r.symbol && Number.isFinite(r.price) && r.price > 0);
   }
   /** The primary account id (0 when SoDEX has never seen a deposit from the wallet). */
   async accountId(address) {
@@ -9027,6 +9477,7 @@ function followerFromState(st, now = Date.now()) {
       size,
       entry: Number(p.ep) || 0,
       leverage: typeof p.l === "number" ? p.l : 1,
+      leverageReported: typeof p.l === "number" && p.l > 0,
       marginMode: p.m === "ISOLATED" ? "isolated" : "cross"
     };
   }
@@ -11185,7 +11636,7 @@ function makeRng(seed) {
   };
 }
 var newSeed = () => Math.floor(Math.random() * 4294967295) >>> 0;
-var jitter = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
+var jitter2 = (v, share, rand) => share > 0 ? v * (1 + (rand() * 2 - 1) * share) : v;
 function normalise(w) {
   const pos = w.map((x) => Number.isFinite(x) && x > 0 ? x : 0);
   const sum = pos.reduce((a, b) => a + b, 0);
@@ -11197,7 +11648,7 @@ function curveWeights(n, urgency, sizeJitter, rand) {
   const w = [];
   for (let i = 0; i < n; i++) {
     const x = n <= 1 ? 0 : i / (n - 1);
-    w.push(jitter(Math.exp(-k * x), sizeJitter, rand));
+    w.push(jitter2(Math.exp(-k * x), sizeJitter, rand));
   }
   return normalise(w);
 }
@@ -11298,7 +11749,7 @@ function ladderWeights(n, distribution, skew, sizeJitter, rand) {
     if (distribution === "linear") v = 1 + (skew - 1) * x;
     else if (distribution === "exponential") v = Math.pow(skew, x);
     else if (distribution === "bell") v = Math.exp(-0.5 * Math.pow((x - 0.5) / 0.22, 2));
-    w.push(jitter(Math.max(v, 1e-6), sizeJitter, rand));
+    w.push(jitter2(Math.max(v, 1e-6), sizeJitter, rand));
   }
   return normalise(w);
 }
@@ -11997,6 +12448,385 @@ var ALGO_NAMES = {
   sweep: "Fill fast"
 };
 
+// ../../packages/copy-engine/src/algo/sizes.ts
+function money(n) {
+  const a = Math.abs(n);
+  const sign2 = n < 0 ? "-" : "";
+  const short = (x, unit) => `${sign2}$${(x < 10 ? Math.round(x * 100) / 100 : Math.round(x * 10) / 10).toString()}${unit}`;
+  if (a >= 1e9) return short(a / 1e9, "B");
+  if (a >= 1e6) return short(a / 1e6, "M");
+  if (a >= 100) return `${sign2}$${Math.round(a).toLocaleString("en-US")}`;
+  if (Math.abs(a - Math.round(a)) < 5e-3) return `${sign2}$${Math.round(a)}`;
+  return `${sign2}$${a.toFixed(2)}`;
+}
+function moneyUp(n) {
+  if (n >= 1e9) return money(Math.ceil(n / (n < 1e10 ? 1e7 : 1e8)) * (n < 1e10 ? 1e7 : 1e8));
+  if (n >= 1e6) return money(Math.ceil(n / (n < 1e7 ? 1e4 : 1e5)) * (n < 1e7 ? 1e4 : 1e5));
+  if (n >= 100) return money(Math.ceil(n - 1e-9));
+  return money(Math.ceil(n * 100 - 1e-9) / 100);
+}
+function moneyDown(n) {
+  if (n >= 1e9) return money(Math.floor(n / (n < 1e10 ? 1e7 : 1e8)) * (n < 1e10 ? 1e7 : 1e8));
+  if (n >= 1e6) return money(Math.floor(n / (n < 1e7 ? 1e4 : 1e5)) * (n < 1e7 ? 1e4 : 1e5));
+  if (n >= 100) return money(Math.floor(n + 1e-9));
+  return money(Math.floor(n * 100 + 1e-9) / 100);
+}
+function coins2(q) {
+  const a = Math.abs(q);
+  if (a >= 100) return Math.round(q).toLocaleString("en-US");
+  if (a >= 1) return Number(q.toFixed(2)).toString();
+  if (a === 0) return "0";
+  return Number(q.toPrecision(3)).toString();
+}
+var qtyText = (q) => Number(q.toPrecision(12)).toString();
+function minWords(m, price2) {
+  const minQ = Number(m.minQuantity) || 0;
+  if (minQ * price2 > m.minNotional + 1e-9) return `SoDEX's smallest order of ${qtyText(minQ)} ${m.base} (about ${money(minQ * price2)})`;
+  return `SoDEX's ${money(m.minNotional)} minimum`;
+}
+function maxWords(m, price2) {
+  const byQty = Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) : Infinity;
+  if (m.maxNotional && byQty * price2 >= m.maxNotional - 1e-9) return `SoDEX's ${money(m.maxNotional)} per order on ${m.name}`;
+  return `SoDEX's largest order of ${qtyText(byQty)} ${m.base} (about ${money(byQty * price2)}) on ${m.name}`;
+}
+var plural = (n, one, many = `${one}s`) => n === 1 ? one : many;
+function scheduleCheck(o) {
+  const { unit, count, m } = o;
+  const kids = o.sizes(count).filter((c) => c.qty > 0);
+  if (!kids.length) return [];
+  const under = (c) => c.qty < minChildQty(m, c.price) - 1e-12;
+  const over = (c) => c.qty > maxOrderQty(m, c.price) + 1e-12;
+  const fits = (k, test) => !o.sizes(k).filter((c) => c.qty > 0).some(test);
+  const out = [];
+  const usdOf = (c) => c.qty * c.price;
+  const vals = kids.map(usdOf);
+  const even = Math.max(...vals) - Math.min(...vals) <= Number(m.stepSize) * Math.max(...kids.map((c) => c.price)) * 1.01 + 0.01;
+  const avgUsd = vals.reduce((x, y) => x + y, 0) / vals.length;
+  const small = kids.filter(under);
+  if (small.length) {
+    const smallest = small.reduce((a, b) => usdOf(a) <= usdOf(b) ? a : b);
+    const avgPx = kids.reduce((x, c) => x + usdOf(c), 0) / kids.reduce((x, c) => x + c.qty, 0);
+    const what = even && small.length === kids.length ? `Each of the ${kids.length} ${plural(kids.length, unit)} would be about ${money(avgUsd)}, under ${minWords(m, smallest.price)}.` : `${small.length === kids.length ? `All ${kids.length}` : `${small.length} of the ${kids.length}`} ${plural(kids.length, unit)} would be under ${minWords(m, smallest.price)} (the smallest about ${money(usdOf(smallest))}).`;
+    const needUsd = even ? kids.length * minChildQty(m, avgPx) * avgPx : o.total * minChildQty(m, smallest.price) / smallest.qty * avgPx;
+    let most = null;
+    if (!o.fixedCount) {
+      const est = Math.floor(count * (smallest.qty / minChildQty(m, smallest.price)));
+      for (let k = Math.min(count - 1, est + 2); k >= o.counts.min && k >= est - 40; k--) {
+        if (fits(k, under)) {
+          most = k;
+          break;
+        }
+      }
+    }
+    const fix = most !== null ? `Use at most ${most} ${plural(most, unit)}, or raise the size to ${moneyUp(needUsd)}.` : o.fixedCount ? `Raise the size to ${moneyUp(needUsd)}, or use fewer ${unit}s.` : `Raise the size to ${moneyUp(needUsd)}.`;
+    out.push(`${what} ${fix}`);
+  }
+  const big = kids.filter(over);
+  if (big.length) {
+    const largest = big.reduce((a, b) => usdOf(a) >= usdOf(b) ? a : b);
+    const what = even && big.length === kids.length ? `Each ${unit} would be about ${money(avgUsd)}, over ${maxWords(m, largest.price)}.` : `${big.length === kids.length ? `All ${kids.length}` : `${big.length} of the ${kids.length}`} ${plural(kids.length, unit)} would be over ${maxWords(m, largest.price)} (the largest about ${money(usdOf(largest))}).`;
+    let least = null;
+    if (!o.fixedCount) {
+      const est = Math.ceil(count * (largest.qty / maxOrderQty(m, largest.price)));
+      for (let k = Math.max(count + 1, est - 2); k <= o.counts.max && k <= est + 40; k++) {
+        if (fits(k, over)) {
+          least = k;
+          break;
+        }
+      }
+    }
+    const fix = least !== null ? `Use at least ${least} ${plural(least, unit)}.` : o.fixedCount ? `Use a smaller size, or more ${unit}s.` : `Use a smaller size${count < o.counts.max ? ` (more than ${o.counts.max} ${unit}s would be needed)` : ""}.`;
+    out.push(`${what} ${fix}`);
+  }
+  return out;
+}
+function oneOrder(qty2, price2, m, what = "The order") {
+  if (!(qty2 > 0) || !(price2 > 0)) return [];
+  const minQ = minChildQty(m, price2);
+  const maxQ = maxOrderQty(m, price2);
+  if (qty2 < minQ - 1e-12) return [`${what} would be about ${money(qty2 * price2)}, under ${minWords(m, price2)}. Raise the size to at least ${qtyText(minQ)} ${m.base} (about ${moneyUp(minQ * price2)}).`];
+  if (qty2 > maxQ + 1e-12) return [`${what} would be about ${money(qty2 * price2)}, over ${maxWords(m, price2)}. Use at most ${qtyText(maxQ)} ${m.base}, or a TWAP or Swarm to spread it over several orders.`];
+  return [];
+}
+function checkSizes(s, m, ctx) {
+  const out = { errors: [], notes: [] };
+  const px = ctx.price !== null && ctx.price > 0 ? ctx.price : null;
+  const step = Number(m.stepSize);
+  const start = Math.max(ctx.now ?? 0, s.startAt ?? ctx.now ?? 0);
+  const minUsdWords = px ? minWords(m, px) : `SoDEX's ${money(m.minNotional)} minimum`;
+  switch (s.kind) {
+    case "twap": {
+      const pos = ctx.positionSize ?? null;
+      const total = s.closeShare !== null ? pos ? floorStep(Math.abs(pos) * s.closeShare, m) : null : Number(s.quantity);
+      if (!px || !total) break;
+      const minSlice = s.minSliceQty !== null ? Number(s.minSliceQty) : 0;
+      const maxSlice = s.maxSliceQty !== null ? Number(s.maxSliceQty) : Infinity;
+      if (s.maxSliceQty !== null && maxSlice > maxOrderQty(m, px) + 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px)}) is over ${maxWords(m, px)}. Lower it to ${qtyText(maxOrderQty(m, px))} ${m.base} or less.`);
+      const most = Math.floor(s.durationMs / ALGO_LIMITS.twap.minIntervalMs);
+      const sizes = (k) => {
+        const { weights } = twapSchedule({ ...s, slices: k }, start, ctx.seed);
+        const raw = allocateSteps(total, weights, step);
+        if (!minSlice && !Number.isFinite(maxSlice)) return raw.map((qty2) => ({ qty: qty2, price: px }));
+        const kept = sliceBounds(raw, minSlice, maxSlice, step);
+        const carry = raw.reduce((a, b) => a + b, 0) - kept.reduce((a, b) => a + b, 0);
+        return [...kept, ...carry > step * 1.5 ? [carry] : []].map((qty2) => ({ qty: qty2, price: px }));
+      };
+      if (s.maxSliceQty !== null && maxSlice < minChildQty(m, px) - 1e-12) out.errors.push(`Your largest slice (${s.maxSliceQty} ${m.base}, about ${money(maxSlice * px)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minChildQty(m, px))} ${m.base}.`);
+      else if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      else out.errors.push(...scheduleCheck({ unit: "slice", count: s.slices, counts: { min: 1, max: Math.min(ALGO_LIMITS.twap.slices.max, most) }, sizes, total, m }));
+      scheduleNotes(s, out);
+      break;
+    }
+    case "vwap": {
+      const total = Number(s.quantity);
+      if (!px || !total) break;
+      const most = Math.floor(s.durationMs / ALGO_LIMITS.vwap.minIntervalMs);
+      const sizes = (k) => {
+        const { weights } = vwapSchedule({ ...s, slices: k }, start, ctx.seed, k === s.slices ? ctx.profile ?? null : null);
+        return allocateSteps(total, weights, step).map((qty2) => ({ qty: qty2, price: px }));
+      };
+      if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      else out.errors.push(...scheduleCheck({ unit: "slice", count: s.slices, counts: { min: ALGO_LIMITS.vwap.slices.min, max: Math.min(ALGO_LIMITS.vwap.slices.max, most) }, sizes, total, m }));
+      scheduleNotes(s, out);
+      break;
+    }
+    case "swarm": {
+      const total = Number(s.quantity);
+      if (!px || !total) break;
+      const sizes = (k) => swarmClips({ ...s, clips: k }, m, ctx.seed).map((qty2) => ({ qty: qty2, price: px }));
+      if (total < minChildQty(m, px) - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minChildQty(m, px) * px)}.`);
+      else out.errors.push(...scheduleCheck({ unit: "clip", count: s.clips, counts: ALGO_LIMITS.swarm.clips, sizes, total, m }));
+      break;
+    }
+    case "pov": {
+      const total = Number(s.quantity);
+      if (!px || !total) break;
+      const minQ = minChildQty(m, px);
+      const maxQ = maxOrderQty(m, px);
+      if (total < minQ - 1e-12) out.errors.push(`The whole order is about ${money(total * px)}, under ${minUsdWords}. Raise the size to at least ${moneyUp(minQ * px)}.`);
+      const cap = s.maxChildQty !== null ? Number(s.maxChildQty) : null;
+      if (cap !== null && cap < minQ - 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px)}) is under ${minUsdWords}. Raise it to at least ${qtyText(minQ)} ${m.base}.`);
+      if (cap !== null && cap > maxQ + 1e-12) out.errors.push(`Your largest child (${s.maxChildQty} ${m.base}, about ${money(cap * px)}) is over ${maxWords(m, px)}. Lower it to ${qtyText(maxQ)} ${m.base} or less.`);
+      const largest = cap !== null ? `your largest child (${s.maxChildQty} ${m.base})` : Number.isFinite(maxQ) ? maxWords(m, px) : null;
+      out.notes.push(`POV sizes each order from the market's volume as it runs: what is due waits until it reaches ${minUsdWords}${largest ? `, and no order is over ${largest}` : ""}.`);
+      break;
+    }
+    case "iceberg": {
+      const total = Number(s.quantity);
+      const price2 = s.price ?? px;
+      if (!price2 || !total) break;
+      const minQ = minChildQty(m, price2);
+      const maxQ = maxOrderQty(m, price2);
+      const show = Number(s.displayQty);
+      const j = s.displayJitter;
+      const lo = floorStep(show * (1 - j), m);
+      const hi = floorStep(show * (1 + j), m);
+      const moves = j > 0 ? ` (with clips changing up to ${Math.round(j * 100)}% either way)` : "";
+      if (total < minQ - 1e-12) out.errors.push(`The whole order is about ${money(total * price2)}, under ${minWords(m, price2)}. Raise the size to at least ${moneyUp(minQ * price2)}.`);
+      else if (lo < minQ - 1e-12 && show < total) out.errors.push(`The smallest visible clip${moves} would be about ${money(lo * price2)}, under ${minWords(m, price2)}. Show at least ${qtyText(Math.ceil(minQ / (1 - j) / step - 1e-9) * step)} ${m.base}${j > 0 ? ", or let the clips change less" : ""}.`);
+      if (Math.min(hi, total) > maxQ + 1e-12) out.errors.push(`The largest visible clip${moves} would be about ${money(Math.min(hi, total) * price2)}, over ${maxWords(m, price2)}. Show at most ${qtyText(floorStep(maxQ / (1 + j), m))} ${m.base}${j > 0 ? ", or let the clips change less" : ""}.`);
+      if (show < total) out.notes.push(`When what is left after a clip is under ${minWords(m, price2)}, it goes out with that clip.`);
+      break;
+    }
+    case "chase":
+    case "sweep": {
+      if (px) out.errors.push(...oneOrder(Number(s.quantity), px, m));
+      break;
+    }
+    case "bracket": {
+      const price2 = s.entry === "limit" ? s.price : px;
+      if (price2) out.errors.push(...oneOrder(Number(s.quantity), price2, m, "The entry"));
+      break;
+    }
+    case "trailing": {
+      if (s.quantity !== null && px) out.errors.push(...oneOrder(Number(s.quantity), px, m));
+      else if (s.quantity === null && px) closeNote(ctx.positionSize ?? null, 1, m, px, out);
+      break;
+    }
+    case "conditional": {
+      const t = s.then;
+      if (t.type === "market" && px) out.errors.push(...oneOrder(Number(t.quantity), px, m));
+      else if (t.type === "limit") out.errors.push(...oneOrder(Number(t.quantity), t.price, m));
+      else if (t.type === "close" && px) closeNote(ctx.positionSize ?? null, t.share, m, px, out);
+      else if (t.type === "algo") {
+        const sym = t.algo.symbol;
+        const am = sym === m.name ? m : ctx.market?.(sym) ?? null;
+        const ap = sym === m.name ? px : ctx.prices?.(sym) ?? null;
+        if (am) {
+          const inner = checkSizes(t.algo, am, { ...ctx, price: ap, positionSize: sym === m.name ? ctx.positionSize : null });
+          out.errors.push(...inner.errors.map((e) => `When it fires: ${e}`));
+          out.notes.push(...inner.notes);
+        }
+      }
+      break;
+    }
+    case "scale": {
+      const ladder = scaleLadder(s, m, ctx.seed);
+      const total = Number(s.quantity);
+      if (s.prices?.length) {
+        const seen = /* @__PURE__ */ new Map();
+        for (const [i, p] of s.prices.entries()) {
+          const x = snapNearest(p, m.tickSize);
+          const first = seen.get(x);
+          if (first !== void 0) {
+            out.errors.push(`Orders ${first + 1} and ${i + 1} both land on ${x} (SoDEX's price step on ${m.name} is ${m.tickSize}). Move them apart, or use fewer orders.`);
+            break;
+          }
+          seen.set(x, i);
+        }
+      } else if (ladder.length < s.orders) {
+        out.errors.push(`Only ${ladder.length} different prices fit between ${s.from} and ${s.to} at SoDEX's price step of ${m.tickSize}. Use at most ${ladder.length} orders, or a wider range.`);
+      }
+      if (out.errors.length || !total) break;
+      const sizes = (k) => (k === s.orders ? ladder : s.prices?.length ? [] : scaleLadder({ ...s, orders: k }, m, ctx.seed)).map((l) => ({ qty: l.qty, price: l.price }));
+      const counts = { min: ALGO_LIMITS.scale.orders.min, max: s.prices?.length ? s.orders : Math.min(ALGO_LIMITS.scale.orders.max, maxLevels(s, m)) };
+      out.errors.push(...scheduleCheck({ unit: "order", count: s.orders, counts, sizes, total, m, fixedCount: !!s.prices?.length }));
+      break;
+    }
+    case "dca": {
+      const per = s.perOrderUsd;
+      const minQty = Number(m.minQuantity) || 0;
+      const minUsd = Math.max(m.minNotional, px ? minQty * px : 0);
+      if (per < minUsd - 1e-9) out.errors.push(`Each order would be ${money(per)}, under ${px ? minWords(m, px) : `SoDEX's ${money(m.minNotional)} minimum`}. Raise it to at least ${moneyUp(minUsd)}.`);
+      const boost = s.dipPct !== null ? s.dipMultiplier : 1;
+      const maxUsd = Math.min(m.maxNotional ?? Infinity, px && Number(m.maxQuantity) > 0 ? Number(m.maxQuantity) * px : Infinity);
+      const words = px ? maxWords(m, px) : `SoDEX's ${money(m.maxNotional ?? Infinity)} per order on ${m.name}`;
+      if (per > maxUsd + 1e-6) out.errors.push(`Each order would be ${money(per)}, over ${words}. Use at most ${moneyDown(maxUsd)} per order.`);
+      else if (per * boost > maxUsd + 1e-6) out.errors.push(`With the dip boost (${boost}x), an order would be ${money(per * boost)}, over ${words}. Use at most ${moneyDown(maxUsd / boost)} per order, or a smaller boost.`);
+      if (s.maxTotalUsd !== null && s.maxTotalUsd < per * s.orders * boost - 1e-6) {
+        if (s.dipPct === null) {
+          const full = Math.floor(s.maxTotalUsd / per + 1e-9);
+          const rest = s.maxTotalUsd - full * per;
+          if (rest > 1e-6 && rest < minUsd - 1e-9) out.errors.push(`Your budget of ${money(s.maxTotalUsd)} leaves a last order of ${money(rest)}, under SoDEX's ${money(m.minNotional)} minimum. Use a budget of ${money(full * per)} or ${money((full + 1) * per)}.`);
+        } else out.notes.push(`With the dip boost, the last order is what is left of your budget; if that is under SoDEX's ${money(m.minNotional)} minimum, it is not sent.`);
+      }
+      break;
+    }
+    case "basket": {
+      const each = s.style === "swarm" ? Math.max(1, s.clips) : Math.max(1, s.slices);
+      const unit = s.style === "swarm" ? "clip" : "slice";
+      s.legs.forEach((l, i) => {
+        const lm = l.symbol === m.name ? m : ctx.market?.(l.symbol) ?? null;
+        const lp = l.symbol === m.name ? px : ctx.prices?.(l.symbol) ?? null;
+        if (lm && lp) {
+          const qty2 = floorStep(l.usd / lp, lm);
+          const seed = ctx.seed + i + 1 >>> 0;
+          if (qty2 < minChildQty(lm, lp) - 1e-12) {
+            out.errors.push(`${l.symbol}: ${money(l.usd)} is under ${minWords(lm, lp)}. Raise it to at least ${moneyUp(minChildQty(lm, lp) * lp)}.`);
+            return;
+          }
+          const sizes = s.style === "swarm" ? (k) => swarmClips({ quantity: qtyText(qty2), clips: k, sizeJitter: 0.2 }, lm, seed).map((q) => ({ qty: q, price: lp })) : (k) => allocateSteps(qty2, twapSchedule({ slices: k, urgency: 0, sizeJitter: 0.15, timeJitter: 0.2, durationMs: s.durationMs }, start, seed).weights, Number(lm.stepSize)).map((q) => ({ qty: q, price: lp }));
+          const counts = s.style === "swarm" ? ALGO_LIMITS.swarm.clips : { min: 1, max: Math.min(ALGO_LIMITS.twap.slices.max, Math.floor(s.durationMs / ALGO_LIMITS.twap.minIntervalMs)) };
+          out.errors.push(...scheduleCheck({ unit, count: each, counts, sizes, total: qty2, m: lm }).map((e) => `${l.symbol}: ${e}`));
+          return;
+        }
+        const lmm = lm ?? m;
+        const j = s.style === "swarm" ? 0.2 : 0.15;
+        const one = l.usd / each;
+        if (one * (1 - j) < lmm.minNotional - 1e-9) {
+          const most = Math.max(1, Math.floor(l.usd * (1 - j) / lmm.minNotional));
+          out.errors.push(`${l.symbol}: each ${unit} would be about ${money(one)}, and the smallest under SoDEX's ${money(lmm.minNotional)} minimum. Use at most ${most} ${plural(most, unit)}, or raise it to ${moneyUp(lmm.minNotional * each / (1 - j))}.`);
+        } else if (lmm.maxNotional && one * (1 + j) > lmm.maxNotional + 1e-6) {
+          out.errors.push(`${l.symbol}: each ${unit} would be about ${money(one)}, and the largest over SoDEX's ${money(lmm.maxNotional)} per order on ${l.symbol}. Use at least ${Math.ceil(l.usd * (1 + j) / lmm.maxNotional)} ${unit}s.`);
+        }
+      });
+      break;
+    }
+  }
+  return out;
+}
+function maxLevels(s, m) {
+  const n = Math.min(ALGO_LIMITS.scale.orders.max, Math.floor(Math.abs(s.to - s.from) / Number(m.tickSize)) + 1);
+  return ladderPrices(s.from, s.to, n, s.spacing, m.tickSize).length;
+}
+function scheduleNotes(s, out) {
+  if (s.exec.style !== "taker") out.notes.push("A slice that has not filled when the next one is due rests together with it as one order.");
+  if (s.maxParticipation !== null) out.notes.push(`With max participation, what the market's volume does not allow yet waits and goes out with a later slice.`);
+}
+function closeNote(pos, share, m, px, out) {
+  if (!pos) return;
+  const take = floorStep(Math.abs(pos) * share, m);
+  const maxQ = maxOrderQty(m, px);
+  if (take > maxQ + 1e-12) out.notes.push(`Closing about ${money(take * px)} is over ${maxWords(m, px)}: it closes in ${Math.ceil(take / maxQ - 1e-9)} orders, one after the other.`);
+}
+
+// ../../packages/copy-engine/src/algo/limits.ts
+var OI_NEAR_SHARE = 0.8;
+function positionCapUsd(m, leverage) {
+  const tiers = m.marginTiers;
+  if (!tiers?.length) return null;
+  if (leverage === null || !(leverage > 0)) return Math.max(...tiers.map((t) => t.maxNotionalValue));
+  const fit = tiers.filter((t) => t.maxLeverage >= leverage - 1e-9);
+  return fit.length ? Math.max(...fit.map((t) => t.maxNotionalValue)) : Math.min(...tiers.map((t) => t.maxNotionalValue));
+}
+function limitLeverage(m, own, position) {
+  if (own && own > 0) return own;
+  if (position && position > 0) return position;
+  if (m.initLeverage && m.initLeverage > 0) return m.initLeverage;
+  return m.marginTiers?.length ? Math.max(...m.marginTiers.map((t) => t.maxLeverage)) : null;
+}
+function oiHeadroom(m, oi, price2) {
+  if (oi === null || oi === void 0 || !Number.isFinite(oi) || oi < 0) return null;
+  const byQty = m.openInterestCap && m.openInterestCap > 0 ? m.openInterestCap : Infinity;
+  const byUsd = m.openInterestCapUSD && m.openInterestCapUSD > 0 && price2 && price2 > 0 ? m.openInterestCapUSD / price2 : Infinity;
+  const cap = Math.min(byQty, byUsd);
+  if (!Number.isFinite(cap)) return null;
+  return { cap, open: oi, room: Math.max(0, cap - oi) };
+}
+function checkLimits(m, x) {
+  const out = { errors: [], warnings: [], oi: null, maxByPosition: Infinity, maxByOi: Infinity };
+  if (!(x.quantity > 0) || !(x.price > 0)) return out;
+  const pos = x.position ?? 0;
+  const after = pos + (x.side === "buy" ? x.quantity : -x.quantity);
+  const grows = Math.max(0, Math.abs(after) - Math.abs(pos));
+  const closes = (x.side === "buy" ? pos < 0 : pos > 0) ? Math.abs(pos) : 0;
+  const cap = positionCapUsd(m, x.leverage);
+  if (cap !== null) {
+    const capQty = cap / x.price;
+    out.maxByPosition = closes > 0 ? closes + capQty : Math.max(0, capQty - Math.abs(pos));
+    if (grows > 0 && Math.abs(after) * x.price > cap + 1e-6) {
+      const most = positionCapUsd(m, null) ?? cap;
+      const lev = x.leverage !== null ? ` at ${x.leverage}x` : "";
+      const room = Math.max(0, out.maxByPosition);
+      const held2 = pos !== 0 && closes === 0 ? ` You hold about ${money(Math.abs(pos) * x.price)} ${pos > 0 ? "long" : "short"} now.` : "";
+      const left = room > 0 ? ` At most about ${money(room * x.price)} (${coins2(room)} ${m.base}) can be ${x.side === "buy" ? "bought" : "sold"} under it.` : " Nothing more can be added under it.";
+      out.errors.push(`Your ${m.name} position would be about ${money(Math.abs(after) * x.price)}, over SoDEX's limit of ${money(cap)}${lev}.${held2}${left} ${most > cap + 1e-6 ? "Use a smaller size or lower leverage." : "Use a smaller size."}`);
+    }
+  }
+  const head = oiHeadroom(m, x.oi, x.price);
+  if (head) out.maxByOi = closes + head.room;
+  if (head && grows > 0) {
+    const roomUsd = head.room * x.price;
+    const share = head.room > 0 ? grows / head.room : Infinity;
+    const used = head.cap > 0 ? head.open / head.cap : 1;
+    const oi = { share, roomUsd, roomQty: head.room, used };
+    if (head.room <= 0) {
+      out.oi = { level: "over", ...oi, roomUsd: 0, roomQty: 0 };
+      out.warnings.push(`Open interest on ${m.name} is at SoDEX's cap: nothing can be added market-wide until it drops, and SoDEX refuses orders that open more.`);
+    } else if (share >= 1 - 1e-9) {
+      out.oi = { level: "over", ...oi };
+      out.warnings.push(`This order would hit SoDEX's open-interest cap on ${m.name}: it adds about ${money(grows * x.price)}, and only about ${money(roomUsd)} (${coins2(head.room)} ${m.base}) can still be added market-wide. SoDEX refuses what goes over the cap.`);
+    } else if (share >= OI_NEAR_SHARE) {
+      out.oi = { level: "near", ...oi };
+      out.warnings.push(`${oiRoomWords(m, head, x.price)} This order would use ${Math.round(share * 100)}% of that.`);
+    }
+  }
+  return out;
+}
+function limitRefusal(error, symbol2) {
+  const e = String(error ?? "");
+  if (!e) return null;
+  if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)/i.test(e)) return { kind: "oi", text: `SoDEX's open-interest cap on ${symbol2} is reached.` };
+  if (/position[^.]*\b(limit|exceed|too (large|big)|max)|max(imum)?[\s_-]?position|risk[\s_-]?limit/i.test(e) && !/not found|no position/i.test(e)) return { kind: "position", text: `SoDEX's position limit on ${symbol2} is reached.` };
+  if (/(too many|max(imum)?( number of)?|limit (of|on)) (open |active |pending )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return { kind: "orders", text: "SoDEX's limit on open orders is reached." };
+  return null;
+}
+function oiRoomWords(m, head, price2) {
+  const used = head.cap > 0 ? Math.min(100, Math.floor(head.open / head.cap * 100)) : 100;
+  if (head.room <= 0) return `Open interest on ${m.name} is at SoDEX's cap: nothing can be added market-wide until it drops.`;
+  return `Open interest on ${m.name} is at ${used}% of SoDEX's cap: about ${money(head.room * price2)} (${coins2(head.room)} ${m.base}) can still be added market-wide.`;
+}
+
 // ../../packages/copy-engine/src/algo/sweep.ts
 var SWEEP_MAX_AGE_MS = 5e3;
 function sweepRefFor(s, quotes, sodex, now, maxAgeMs = SWEEP_MAX_AGE_MS) {
@@ -12085,6 +12915,21 @@ function scaleLadder(s, m, seed) {
   const sizes = allocateSteps(Number(s.quantity), w, Number(m.stepSize));
   return prices.map((price2, i) => ({ price: price2, qty: sizes[i] ?? 0 }));
 }
+function sliceBounds(sizes, min, max, step) {
+  const out = [];
+  let due = 0;
+  for (const q of sizes) {
+    due += q;
+    let send = due >= min - 1e-12 ? Math.min(due, max) : 0;
+    send = Math.floor(send / step + 1e-9) * step;
+    out.push(send);
+    due -= send;
+  }
+  return out;
+}
+function bandRefused(side, children, m, ref) {
+  return children.filter((c) => c.price !== null && (side === "buy" ? c.price > ref * (1 + m.buyLimitUpRatio) + 1e-9 : c.price < ref * (1 - m.sellLimitDownRatio) - 1e-9)).length;
+}
 
 // ../../packages/copy-engine/src/algo/feed.ts
 var QUOTE_MAX_AGE_MS = 15e3;
@@ -12094,6 +12939,7 @@ var toNum = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 var rows = (d) => Array.isArray(d) ? d : d && typeof d === "object" ? [d] : [];
+var ACCOUNT_USERS_PER_IP = 10;
 var AlgoFeed = class {
   constructor(o) {
     this.o = o;
@@ -12114,6 +12960,7 @@ var AlgoFeed = class {
   o;
   socket;
   symbols = /* @__PURE__ */ new Set();
+  /** The wallets the socket follows: at most maxAccountUsers, most important first. */
   owners = /* @__PURE__ */ new Set();
   subscribed = { symbols: /* @__PURE__ */ new Set(), owners: /* @__PURE__ */ new Set(), marks: false };
   quotes = /* @__PURE__ */ new Map();
@@ -12141,11 +12988,17 @@ var AlgoFeed = class {
   }
   watch(symbols, owners) {
     const s = new Set(symbols.map((x) => x.toUpperCase()));
-    const w = new Set(owners.map((x) => x.toLowerCase()));
-    const grew = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x));
+    const want = [...new Set(owners.map((x) => x.toLowerCase()))];
+    const cap = Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP);
+    const w = new Set(want.filter((x) => this.owners.has(x)).slice(0, cap));
+    for (const x of want) if (w.size < cap) w.add(x);
+    const changed = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x)) || [...this.subscribed.owners].some((x) => !w.has(x));
     this.symbols = s;
     this.owners = w;
-    if (grew) this.socket.resubscribe();
+    if (changed) this.socket.resubscribe();
+  }
+  followsOrders(owner) {
+    return this.socket.up && this.subscribed.owners.has(owner.toLowerCase());
   }
   subscribeAll(send, fresh) {
     if (fresh) {
@@ -12162,6 +13015,11 @@ var AlgoFeed = class {
       send({ op: "subscribe", id: id++, params: { channel: "bookTicker", symbols: chunk } });
       send({ op: "subscribe", id: id++, params: { channel: "trade", symbols: chunk } });
       for (const s of chunk) this.subscribed.symbols.add(s);
+    }
+    for (const w of [...this.subscribed.owners]) {
+      if (this.owners.has(w)) continue;
+      send({ op: "unsubscribe", id: id++, params: { channel: "accountOrderUpdate", user: w } });
+      this.subscribed.owners.delete(w);
     }
     for (const w of this.owners) {
       if (this.subscribed.owners.has(w)) continue;
@@ -12453,7 +13311,13 @@ var SENDING_MAX_MS = 2e4;
 var HISTORY_EVERY_MS = 2e4;
 var DONE_KEPT = 60;
 var MAX_CONSEC_REJECTS = 25;
+var LIMIT_RETRY_MS = 6e4;
+var LIMIT_MAX_HITS = 4;
+var LIMIT_WORDS_MS = 10 * 6e4;
 var PROBLEM_RECHECK_MS = 6e4;
+var ORDER_POLL_SPACING_MS = 1e3;
+var ORDER_POLL_MIN_MS = 3e3;
+var ORDER_WATCH_EVERY_MS = 3e4;
 var LATE_MS = 3e4;
 var TAKER_RETRY_MS = 1e3;
 var POSITIONS_MS = 5e3;
@@ -12479,6 +13343,12 @@ var AlgoRuntime = class {
     }
     this.market.onOrder((u) => this.onOrderUpdate(u));
     this.market.onPrint((p) => this.onPrint(p));
+    this.market.onState((up) => {
+      if (up && this.socketWasUp) {
+        for (const a of this.algos.values()) if (!a.spec.paper && [...this.live(a), ...this.liveExits(a)].length) this.resync.add(a.id);
+      }
+      if (up) this.socketWasUp = true;
+    });
   }
   host;
   markets = new MarketBook();
@@ -12491,6 +13361,13 @@ var AlgoRuntime = class {
   problems = /* @__PURE__ */ new Map();
   lastHistoryAt = 0;
   lookupBusy = false;
+  /** pollOrders' state: a read in flight, when the last one left, when each algo was read, the algos to read whatever the socket follows (it was down). */
+  polling = false;
+  lastPollAt = 0;
+  watchedAt = 0;
+  polledAt = /* @__PURE__ */ new Map();
+  resync = /* @__PURE__ */ new Set();
+  socketWasUp = false;
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   heldNow = /* @__PURE__ */ new Set();
   eventSeq = 0;
@@ -12564,14 +13441,77 @@ var AlgoRuntime = class {
   /** Subscribe the markets and wallets the live algos need. */
   syncWatch() {
     const symbols = /* @__PURE__ */ new Set();
-    const owners = /* @__PURE__ */ new Set();
+    const weight = /* @__PURE__ */ new Map();
     for (const a of this.algos.values()) {
       const exits2 = this.liveExits(a).length > 0 || this.keptLive(a).length > 0;
       if (FINAL_STATUSES.has(a.status) && !exits2) continue;
       for (const s of algoSymbols(a.spec)) symbols.add(s);
-      if (!a.spec.paper) owners.add(a.owner);
+      if (a.spec.paper) continue;
+      const live = this.live(a);
+      const resting = live.filter((c) => c.tif !== "ioc").length + this.liveExits(a).length;
+      weight.set(a.owner, (weight.get(a.owner) ?? 0) + 1 + live.length * 10 + resting * 100);
     }
-    this.market.watch([...symbols], [...owners]);
+    const owners = [...weight.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).map(([o]) => o);
+    this.market.watch([...symbols], owners);
+  }
+  /**
+   * Orders of wallets the socket does not follow (SoDEX lets one IP follow 10;
+   * feed.ts), read by REST instead - and every wallet's after the socket was
+   * down: at most one read every ORDER_POLL_SPACING_MS for the whole runtime,
+   * through the client's shared per-IP budget, the algo with resting orders
+   * that was read longest ago first, each at most every ORDER_POLL_MIN_MS.
+   * What SoDEX lists is booked as its order update would have been (by client
+   * order id); a child no longer listed is asked of the order history
+   * (settleStale), so no fill is lost.
+   */
+  async pollOrders(now = Date.now()) {
+    if (this.polling || now - this.lastPollAt < ORDER_POLL_SPACING_MS) return;
+    if (now - this.watchedAt >= ORDER_WATCH_EVERY_MS) {
+      this.watchedAt = now;
+      this.syncWatch();
+    }
+    const follows = this.market.followsOrders?.bind(this.market);
+    const due = [...this.algos.values()].filter((a2) => {
+      if (a2.spec.paper || this.busy.has(a2.id)) return false;
+      const open = [...this.live(a2), ...this.liveExits(a2)].filter((c) => c.state === "open");
+      if (!open.length) return false;
+      if (!this.resync.has(a2.id) && (!follows || follows(a2.owner))) return false;
+      return now - (this.polledAt.get(a2.id) ?? 0) >= ORDER_POLL_MIN_MS;
+    });
+    if (!due.length) return;
+    const budget = this.host.sodex.budget;
+    if (budget && budget.used(now) > budget.perMinute * 0.5 && !due.some((a2) => this.resync.has(a2.id))) return;
+    const resting = (a2) => this.live(a2).some((c) => c.tif !== "ioc") || this.liveExits(a2).length > 0;
+    due.sort((x, y) => Number(this.resync.has(y.id)) - Number(this.resync.has(x.id)) || Number(resting(y)) - Number(resting(x)) || (this.polledAt.get(x.id) ?? 0) - (this.polledAt.get(y.id) ?? 0));
+    const a = due[0];
+    const m = this.markets.get(a.spec.symbol);
+    if (!m) return;
+    this.polling = true;
+    this.lastPollAt = now;
+    this.polledAt.set(a.id, now);
+    try {
+      const rows2 = await this.lookupOrders(a, m.name, false);
+      this.resync.delete(a.id);
+      const gone = [];
+      for (const c of [...this.live(a), ...this.liveExits(a)].filter((x) => x.state === "open")) {
+        const row = rows2.find((r) => r.clOrdID === c.clOrdID);
+        if (row) this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: row.orderId || null, symbol: m.name, status: (row.status || "NEW").toUpperCase(), filledQty: row.executedQty, filledValue: row.executedValue, maker: null, reason: null, at: now });
+        else gone.push(c);
+      }
+      if (gone.length && !FINAL_STATUSES.has(a.status)) for (const c of gone) c.state = "unknown";
+      else if (gone.length) {
+        const hist = await this.lookupOrders(a, m.name, true);
+        for (const c of gone) {
+          const row = hist.find((r) => r.clOrdID === c.clOrdID);
+          if (row) this.onOrderUpdate({ clOrdID: c.clOrdID, orderId: row.orderId || null, symbol: m.name, status: FINAL_ORDER.test((row.status || "").toUpperCase()) ? row.status.toUpperCase() : "FILLED", filledQty: row.executedQty, filledValue: row.executedValue, maker: null, reason: null, at: now });
+        }
+      }
+      this.dirty.add(a.id);
+    } catch (e) {
+      this.host.log.warn("algo: order poll failed", { algo: a.id, error: String(e) });
+    } finally {
+      this.polling = false;
+    }
   }
   /** Exits still on SoDEX (or on the paper book), not yet settled. */
   liveExits(a) {
@@ -12635,14 +13575,8 @@ var AlgoRuntime = class {
       observedCountry: n.observedCountry ?? null,
       k: {}
     };
-    if (spec.kind === "scale") {
-      const small = scaleLadder(spec, m, a.seed).filter((l) => l.qty < minChildQty(m, l.price));
-      if (small.length) throw new Error(`${small.length} level${small.length === 1 ? "" : "s"} of this ladder would be under SoDEX's $${m.minNotional} minimum order. Use fewer orders, a larger size, or less skew.`);
-      const big = scaleLadder(spec, m, a.seed).filter((l) => l.qty > maxOrderQty(m, l.price) + 1e-12);
-      if (big.length) throw new Error(`${big.length} level${big.length === 1 ? "" : "s"} of this ladder would be over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString("en-US")})` : ""}. Use more orders or a smaller size.`);
-    }
-    const oneLimit = spec.kind === "bracket" && spec.entry === "limit" && spec.price !== null ? { qty: Number(spec.quantity), price: spec.price } : spec.kind === "conditional" && spec.then.type === "limit" ? { qty: Number(spec.then.quantity), price: spec.then.price } : null;
-    if (oneLimit && oneLimit.qty > maxOrderQty(m, oneLimit.price) + 1e-12) throw new Error(`This order is over SoDEX's largest order on ${m.name}${m.maxNotional ? ` ($${m.maxNotional.toLocaleString("en-US")})` : ""}. Use a smaller size, or a TWAP to split it.`);
+    await this.startSizes(a);
+    await this.startLimits(a);
     if (spec.triggerPrice !== null) {
       const mk = this.market.mark(spec.symbol)?.mark ?? null;
       if (mk !== null) a.k.triggerFrom = mk;
@@ -12654,6 +13588,61 @@ var AlgoRuntime = class {
     await this.event(a, "status", `${what} placed${spec.paper ? " (paper: nothing is sent)" : ""}.`);
     this.host.onChange?.(a.id);
     return a;
+  }
+  /**
+   * SoDEX's limits at the start (limits.ts), checked here - the authority, on
+   * the executor as in a browser: a position over its limit at the leverage,
+   * or a resting price outside its limit band, refuses the start. The
+   * open-interest cap only warns on the ticket (it moves); the runtime holds
+   * at it (fitLimits). Without a price or a position nothing is refused here.
+   */
+  async startLimits(a) {
+    const s = a.spec;
+    if (s.reduceOnly) return;
+    const legs = s.kind === "basket" ? s.legs.map((l) => ({ symbol: l.symbol, side: l.side, qty: null, usd: l.usd })) : !opensPosition(s) ? [] : [{ symbol: s.symbol, side: s.side, qty: algoQuantity(s), usd: s.kind === "dca" ? s.maxTotalUsd ?? s.perOrderUsd * s.orders : null }];
+    for (const l of legs) {
+      const m = this.markets.get(l.symbol);
+      const ref = m ? await this.refOf(l.symbol) : null;
+      if (!m || !ref) continue;
+      const priced = s.kind === "scale" ? scaleLadder(s, m, a.seed) : s.kind === "bracket" && s.entry === "limit" || s.kind === "iceberg" ? s.price !== null ? [{ price: s.price }] : [] : [];
+      const off = bandRefused(l.side, priced, m, ref.mark);
+      if (off) throw new Error(`${off} order${off === 1 ? " is" : "s are"} priced too far from the price: SoDEX refuses a limit ${l.side} more than ${Math.round((l.side === "buy" ? m.buyLimitUpRatio : m.sellLimitDownRatio) * 100)}% ${l.side === "buy" ? "over" : "under"} the mark.`);
+      const qty2 = l.qty ?? (l.usd !== null ? l.usd / ref.mark : null);
+      if (!qty2) continue;
+      const pos = s.paper ? 0 : await this.positionOf(a, l.symbol);
+      if (pos === null && m.marginTiers?.length) throw new Error(`SoDEX did not report your position on ${l.symbol}, so the position limit cannot be checked. Try again in a moment.`);
+      const lev = limitLeverage(m, s.leverage, s.paper ? null : this.positionLeverage(a, l.symbol));
+      const lim = checkLimits(m, { side: l.side, quantity: qty2, price: ref.mark, position: pos, leverage: lev, oi: ref.oi });
+      if (lim.errors.length) throw new Error(s.kind === "basket" ? `${l.symbol}: ${lim.errors[0]}` : lim.errors[0]);
+    }
+  }
+  /**
+   * The plan's children against SoDEX's smallest and largest order (sizes.ts),
+   * at the mark now: the same check and the same words as the ticket's. A
+   * VWAP's profile is read for it (the slices it will have); a time-sliced
+   * close is checked when it begins (its size is the position's then).
+   */
+  async startSizes(a) {
+    const s = a.spec;
+    const m = this.markets.get(s.symbol);
+    const refs = /* @__PURE__ */ new Map();
+    for (const sym of algoSymbols(s)) refs.set(sym, (await this.refOf(sym))?.mark ?? null);
+    const start = Math.max(Date.now(), s.startAt ?? 0);
+    const profile = s.kind === "vwap" ? await this.profileFor(s.symbol, start, s.durationMs, s.slices, s.lookbackDays).catch(() => null) : null;
+    const check = checkSizes(s, m, { price: refs.get(s.symbol) ?? null, seed: a.seed, now: start, profile, market: (x) => this.markets.get(x) ?? null, prices: (x) => refs.get(x) ?? null });
+    if (check.errors.length) throw new Error(check.errors.join(" "));
+  }
+  /** A market's mark and open interest: the feed's, else read once from SoDEX (a market not watched yet). null: not known. */
+  async refOf(symbol2) {
+    const mk = this.market.mark(symbol2);
+    if (mk) return { mark: mk.mark, oi: mk.oi };
+    try {
+      const rows2 = await this.host.sodex.markPrices();
+      const r = rows2.find((x) => x.symbol.toUpperCase() === symbol2.toUpperCase());
+      return r ? { mark: r.price, oi: r.oi ?? null } : null;
+    } catch {
+      return null;
+    }
   }
   async pause(id) {
     const a = this.need(id);
@@ -12884,6 +13873,7 @@ var AlgoRuntime = class {
         });
       }).finally(() => this.busy.delete(a.id));
     }
+    void this.pollOrders(now).catch((e) => this.host.log.warn("algo: order poll failed", { error: String(e) }));
   }
   /** Run one step of one algo and wait for it (tests). */
   async stepNow(id, now = Date.now()) {
@@ -12927,6 +13917,10 @@ var AlgoRuntime = class {
         await this.hold(a, `Held: ${policy.reason ?? "not available in your region."}`);
         return;
       }
+    }
+    if (typeof a.k.limitUntil === "number" && now < a.k.limitUntil) {
+      await this.hold(a, String(a.k.limitReason ?? "Held: a SoDEX limit is reached."));
+      return;
     }
     if (m.status !== "TRADING") {
       await this.hold(a, `SoDEX is not trading ${m.name} right now.`);
@@ -13117,6 +14111,11 @@ var AlgoRuntime = class {
           await this.end(a, "expired", `There is no position on ${m.name} to close.`);
           return false;
         }
+        const sized = checkSizes(s, m, { price: a.arrival, seed: a.seed, now, positionSize: pos });
+        if (sized.errors.length) {
+          await this.end(a, "failed", `Not started: ${sized.errors[0]}`);
+          return false;
+        }
         a.k.total = size;
         a.k.closeSide = pos > 0 ? "sell" : "buy";
         await this.event(a, "info", `Closing ${Math.round(s.closeShare * 100)}% of your ${pos > 0 ? "long" : "short"}: ${dec3(size)} ${m.base}.`);
@@ -13206,9 +14205,12 @@ var AlgoRuntime = class {
       if (need - qty2 < minAt) qty2 = floorStep(need, m);
       if (qty2 < minAt && room >= minAt && lateNeed >= minQ - 1e-12) {
         qty2 = room - minAt < minAt ? floorStep(room, m) : minAt;
+        await this.noteOnce(a, "min", `What was due was under ${minWords(m, price3 ?? ref)} at this price, so it went out with what is due next.`);
       }
+      if (qty2 > most + 1e-12 && price3 !== null && most >= maxOrderQty(m, price3) - 1e-12) await this.noteOnce(a, "max", `What is due is over ${maxWords(m, price3)}: it goes out in several orders, one after the other.`);
       qty2 = Math.min(qty2, most);
       if (qty2 < minAt) {
+        if (qty2 > 0 && room >= minAt) await this.noteOnce(a, "wait", `What is due waits until it reaches ${minWords(m, price3 ?? ref)}.`);
         if (room < minAt && o.late >= o.total && !o.more) {
           if (a.filled > 0) await this.end(a, "done", `Filled; ${dec3(room)} ${m.base} under SoDEX's minimum order was left.`);
           else await this.end(a, "failed", "Under SoDEX's minimum order size: nothing could be sent.");
@@ -13226,6 +14228,7 @@ var AlgoRuntime = class {
       await this.send(a, m, [{ side, price: price3, quantity: qty2, tif: "ioc", tag: o.tag, reduceOnly }]);
       return;
     }
+    if (o.exec.style === "taker" && lateNeed > 1e-12 && room >= minQ && !o.more) await this.noteOnce(a, "wait", `What is due waits until it reaches ${minWords(m, ref)}.`);
     if (o.exec.style === "taker") return;
     const price2 = makerPrice(side, q, o.exec.offsetTicks, null, m, limit);
     const want = floorStep(Math.min(need, capOf(minQ), part, maxOrderQty(m, price2)), m);
@@ -13338,6 +14341,15 @@ var AlgoRuntime = class {
       maxChild: s.maxChildQty !== null ? Number(s.maxChildQty) : null
     });
   }
+  /**
+   * A DCA: each installment is an order of its own - its own size (its USD at
+   * the price when it came due), its own time, its own child on SoDEX - and is
+   * never merged into another (owner, 2026-10-28). A maker installment that has
+   * not filled keeps resting by itself while the next one is placed beside it;
+   * installments that come due together (after a wait) go out together, each
+   * as its own order. SoDEX refusing one more resting order (its open-order or
+   * margin limits) holds the algo with the reason (onLimit), never merges.
+   */
   async stepDca(a, m, q, mk, now) {
     const s = a.spec;
     const start = a.startedAt;
@@ -13346,6 +14358,9 @@ var AlgoRuntime = class {
     let spent = Number(a.k.spentUsd ?? 0);
     let target = Number(a.k.targetQty ?? 0);
     const budget = s.maxTotalUsd ?? Infinity;
+    if (!Array.isArray(a.k.inst)) a.k.inst = done > 0 ? [{ n: done, qty: target, at: start, filled: Math.max(0, a.filled - this.live(a).reduce((x, c) => x + c.filled, 0)), counted: [] }] : [];
+    const insts = a.k.inst;
+    const tagOf = (n) => `order ${n}/${s.orders}`;
     while (done + skipped < s.orders && start + (done + skipped) * s.intervalMs <= now && spent < budget - 1e-9) {
       const px = s.side === "buy" ? q.ask : q.bid;
       const outside = s.limitPrice !== null && (s.side === "buy" ? mk > s.limitPrice : mk < s.limitPrice);
@@ -13365,9 +14380,12 @@ var AlgoRuntime = class {
         await this.event(a, "info", `Dip boost: ${s.dipMultiplier}x this order (the price is ${(Math.abs(px / avg - 1) * 100).toFixed(1)}% from your average).`);
       }
       usd = Math.min(usd, budget - spent);
-      target += usd / px;
-      spent += usd;
+      const raw = floorStep(usd / px, m);
+      const qty2 = raw < minChildQty(m, px) && usd >= m.minNotional - 1e-9 ? minChildQty(m, px) : raw;
       done++;
+      spent += usd;
+      target += qty2;
+      insts.push({ n: done, qty: qty2, at: start + (done + skipped - 1) * s.intervalMs, filled: 0, counted: [] });
     }
     a.k.done = done;
     a.k.skipped = skipped;
@@ -13375,11 +14393,57 @@ var AlgoRuntime = class {
     a.k.targetQty = target;
     this.dirty.add(a.id);
     const over = done + skipped >= s.orders || spent >= budget - 1e-9;
-    const left = target - a.filled - this.pendingQty(a);
-    if (over && left < minChildQty(m, mk) && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
-    const h = this.dueHistory(a, now, target);
-    const late = s.exec.style === "taker" ? target : s.exec.style === "hybrid" ? this.dueAgo(h, now - Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs)) : 0;
-    await this.work(a, m, q, mk, { due: target, late: a.k.rush ? target : late, total: target, exec: s.exec, tag: `order ${done}/${s.orders}`, more: !over });
+    const liveOf = (n) => this.live(a).filter((c) => c.tag === tagOf(n));
+    const leftOf = (i) => i.qty - i.filled - liveOf(i.n).reduce((x, c) => x + c.filled, 0);
+    const open = insts.filter((i) => leftOf(i) >= minChildQty(m, mk) - 1e-12 || liveOf(i.n).length);
+    if (over && !open.length && !this.live(a).length) return this.end(a, "done", `${done} order${done === 1 ? "" : "s"} filled${skipped ? `, ${skipped} skipped` : ""}.`);
+    const list = [];
+    const lateAfter = Math.min(LATE_MS * 4, s.exec.makerShare * s.intervalMs);
+    for (const i of open) {
+      const kids = liveOf(i.n);
+      const late = a.k.rush === true || s.exec.style === "taker" || s.exec.style === "hybrid" && now - i.at >= lateAfter;
+      if (kids.length) {
+        const c = kids[0];
+        if (c.state !== "open" || c.cancelling || c.tif === "ioc") continue;
+        const price2 = makerPrice(s.side, q, s.exec.offsetTicks, null, m, s.limitPrice);
+        const off = Math.abs(c.price - price2) / Number(m.tickSize);
+        if (late || !this.atOwnTouch(s.side, c.price, q) && off >= s.exec.chaseTicks - 1e-9 && now - c.placedAt >= 1500) await this.cancelChildren(a, m, [c]);
+        continue;
+      }
+      const left = floorStep(leftOf(i), m);
+      if (late) {
+        if (now - Number(a.k.missAt ?? 0) < TAKER_RETRY_MS) continue;
+        const from = this.slipBase(s.symbol, s.exec, q);
+        if (from === void 0) {
+          await this.hold(a, `Held: no fresh ${SLIP_FROM_NAMES[s.exec.slipFrom ?? "touch"].toLowerCase()} to measure your max slippage from.`);
+          return;
+        }
+        const price2 = takerPrice(s.side, q, s.exec.slippageBps, m, mk, s.limitPrice, from);
+        if (price2 === null) {
+          await this.hold(a, `Held: the price is past your limit of ${s.limitPrice}.`);
+          return;
+        }
+        list.push({ side: s.side, price: price2, quantity: Math.min(left, maxOrderQty(m, price2)), tif: "ioc", tag: tagOf(i.n) });
+      } else {
+        const price2 = makerPrice(s.side, q, s.exec.offsetTicks, null, m, s.limitPrice);
+        list.push({ side: s.side, price: price2, quantity: Math.min(left, maxOrderQty(m, price2)), tif: "gtx", tag: tagOf(i.n) });
+      }
+    }
+    if (!list.length) return;
+    if (s.maxSpreadBps !== null && spreadBps(q) > s.maxSpreadBps) {
+      await this.hold(a, `Held: the spread (${spreadBps(q).toFixed(1)} bp) is wider than your ${s.maxSpreadBps} bp.`);
+      return;
+    }
+    await this.send(a, m, list.filter((x) => x.quantity >= minChildQty(m, x.price) - 1e-12));
+  }
+  /** A DCA child settled: what it filled is its installment's (counted once, however many final updates SoDEX sends). */
+  dcaChildDone(a, c) {
+    const i = (a.k.inst ?? []).find((x) => c.tag === `order ${x.n}/${a.spec.orders}`);
+    if (!i || i.counted.includes(c.clOrdID)) return;
+    i.counted.push(c.clOrdID);
+    if (i.counted.length > 50) i.counted.splice(0, i.counted.length - 50);
+    i.filled += c.filled;
+    this.dirty.add(a.id);
   }
   async stepIceberg(a, m, q, now) {
     const s = a.spec;
@@ -13409,7 +14473,7 @@ var AlgoRuntime = class {
     const room = total - a.filled;
     const minQ = minChildQty(m, desired);
     const refill = typeof a.k.clipLeft === "number" && a.k.clipLeft > 0;
-    let qty2 = refill ? a.k.clipLeft : floorStep(jitter(Number(s.displayQty), s.displayJitter, makeRng(a.seed + a.childCount)), m);
+    let qty2 = refill ? a.k.clipLeft : floorStep(jitter2(Number(s.displayQty), s.displayJitter, makeRng(a.seed + a.childCount)), m);
     qty2 = Math.max(qty2, minQ);
     if (room - qty2 < minQ) qty2 = room;
     qty2 = floorStep(Math.min(qty2, room, maxOrderQty(m, desired)), m);
@@ -13537,7 +14601,10 @@ var AlgoRuntime = class {
       while (wave.length < s.inFlight && next < clips.length && pool >= minQ) {
         carry += clips[next];
         next++;
-        if (carry < minQ - 1e-12 && next < clips.length) continue;
+        if (carry < minQ - 1e-12 && next < clips.length) {
+          await this.noteOnce(a, "min", `Clip ${next} is under ${minWords(m, price2)} at this price, so it goes out with the next one.`);
+          continue;
+        }
         let qty2 = Math.min(carry, pool);
         if (pool - qty2 < minQ) qty2 = pool;
         qty2 = floorStep(Math.min(qty2, most), m);
@@ -13909,7 +14976,7 @@ var AlgoRuntime = class {
       if (this.host.positions) data = await this.host.positions(a);
       else {
         const snap = await this.host.sodex.follower(a.owner);
-        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry }]));
+        data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry, ...p.leverageReported ? { leverage: p.leverage } : {} }]));
       }
       this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
       return data;
@@ -14023,6 +15090,11 @@ var AlgoRuntime = class {
         list = [{ ...one, quantity: fit }];
       }
     }
+    if (opening) {
+      const fit = await this.fitLimits(a, m, list, leverage);
+      if (!fit) return [];
+      list = fit;
+    }
     if (this.stopped(a)) return [];
     if (opening && ceiling !== null) {
       const row = this.accounts.get(a.owner);
@@ -14056,6 +15128,7 @@ var AlgoRuntime = class {
     let results;
     if (s.paper) results = this.paperPlace(a, m, children);
     else results = await sink.place(a, m, reqs);
+    let limit = null;
     for (const c of children) {
       const r = results.find((x) => x.clOrdID === c.clOrdID) ?? { clOrdID: c.clOrdID, ok: false, orderId: null, error: "no answer for this order", outcomeUnknown: true };
       c.updatedAt = Date.now();
@@ -14072,6 +15145,7 @@ var AlgoRuntime = class {
         a.rejects++;
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         await this.event(a, "error", `SoDEX refused ${c.tag}: ${r.error}`, c);
+        limit ??= limitRefusal(r.error, m.name);
       }
     }
     if (!s.paper && this.stopped(a)) {
@@ -14082,9 +15156,116 @@ var AlgoRuntime = class {
       if (again.length) await sink.cancel(a, m, again.map((c) => c.clOrdID)).catch((e) => this.event(a, "error", `Cancel failed: ${e instanceof Error ? e.message : String(e)}`));
     }
     await this.save(a);
+    if (limit) await this.onLimit(a, limit);
     if (Number(a.k.consecRejects ?? 0) >= MAX_CONSEC_REJECTS) await this.end(a, "failed", `SoDEX refused ${MAX_CONSEC_REJECTS} orders in a row; stopped. The last reason is in the log.`);
     this.host.onChange?.(a.id);
     return children;
+  }
+  /**
+   * Opening children inside SoDEX's position limit at the leverage and the
+   * market's open-interest cap (limits.ts), with what the algo has working:
+   * one child is cut down to fit, a batch waits whole. null: held, nothing
+   * goes out to be refused. The position is the last one read (live), or the
+   * paper fills' (paper); the open interest the feed's.
+   */
+  async fitLimits(a, m, list, leverage) {
+    const s = a.spec;
+    const open = list.filter((c) => !(c.reduceOnly ?? s.reduceOnly));
+    if (!open.length || !m.marginTiers?.length && !m.openInterestCap && !m.openInterestCapUSD) return list;
+    const side = open[0].side;
+    const sum = open.reduce((x, c) => x + c.quantity, 0);
+    const working = this.live(a).filter((c) => !c.reduceOnly && c.side === side).reduce((x, c) => x + Math.max(0, c.quantity - c.filled), 0);
+    const price2 = open.reduce((x, c) => x + c.quantity * c.price, 0) / sum;
+    let pos = null;
+    if (s.paper) pos = typeof a.k.paperPos === "number" ? a.k.paperPos : 0;
+    else {
+      const hit = this.positionsOf.get(a.owner);
+      const book = hit && (hit.loading || Date.now() - hit.at <= POSITIONS_MS) ? hit.data : await this.loadPositions(a);
+      pos = book ? book[m.name]?.size ?? 0 : null;
+    }
+    const lev = limitLeverage(m, leverage, s.paper ? null : this.positionLeverage(a, m.name));
+    const oiNow = this.market.mark(m.name)?.oi ?? null;
+    const lim = checkLimits(m, { side, quantity: sum + working, price: price2, position: pos, leverage: lev, oi: oiNow });
+    const most = Math.min(lim.maxByPosition, lim.maxByOi) - working;
+    if (sum <= most + 1e-12) {
+      if (a.k.limitHold) {
+        delete a.k.limitHold;
+        this.dirty.add(a.id);
+      }
+      return list;
+    }
+    const kind = lim.maxByOi < lim.maxByPosition ? "oi" : "position";
+    const head = oiHeadroom(m, oiNow, price2);
+    const cap = positionCapUsd(m, lev);
+    const roomQty = Math.max(0, lim.maxByPosition - working);
+    const can = roomQty < Number(m.stepSize) ? "nothing more can be added" : `about ${money(roomQty * price2)} (${coins2(roomQty)} ${m.base}) can still be added`;
+    const posWords = cap === null ? "" : `Your ${m.name} position is about ${money(Math.abs(pos ?? 0) * price2)}${pos ? ` ${pos > 0 ? "long" : "short"}` : ""} and SoDEX's limit${lev !== null ? ` at ${lev}x` : ""} is ${money(cap)}: ${can}.`;
+    const room = kind === "oi" && head ? oiRoomWords(m, head, price2) : posWords;
+    const one = list.length === 1 ? list[0] : null;
+    const cut = one ? floorStep(Math.max(0, most), m) : 0;
+    if (one && cut >= minChildQty(m, one.price)) {
+      const which = kind === "oi" ? `SoDEX's open-interest cap on ${m.name}` : `SoDEX's position limit on ${m.name}`;
+      const text = `${one.tag[0].toUpperCase()}${one.tag.slice(1)} was cut from ${dec3(one.quantity)} to ${dec3(cut)} ${m.base} (about ${money(cut * one.price)}) to stay under ${which}. ${room}`;
+      delete a.k.limitHold;
+      this.dirty.add(a.id);
+      await this.event(a, "info", text);
+      await this.limitNotice(a, m, kind, "cut", text);
+      return [{ ...one, quantity: cut }];
+    }
+    const left = kind === "oi" ? head?.room ?? 0 : roomQty;
+    const none = left < Number(m.stepSize);
+    const small = one ? ` That is under ${minWords(m, one.price)}.` : ` That is too little for the next ${list.length} orders, which go out together.`;
+    const fresh = kind === "oi" ? `Held: ${room || `open interest on ${m.name} is at SoDEX's cap.`}${none ? "" : small} Nothing goes out until there is ${none ? "" : "more "}room.` : `Held: ${room || `your ${m.name} position is at SoDEX's limit.`}${none ? "" : small} It goes on when there is room (a smaller position, or lower leverage).`;
+    const was = a.k.limitHold;
+    const now = Date.now();
+    const reason = was && was.kind === kind && now - was.at < LIMIT_WORDS_MS ? was.reason : fresh;
+    if (reason === fresh) {
+      a.k.limitHold = { kind, reason, at: now };
+      this.dirty.add(a.id);
+      if (!was || was.kind !== kind) await this.limitNotice(a, m, kind, "held", reason.replace(/^Held: /, ""));
+    }
+    await this.hold(a, reason);
+    return null;
+  }
+  /**
+   * Tell the trader that one of SoDEX's limits held the algo or cut a child
+   * (limits.ts AlgoLimitNotice): on the algo itself, so whichever browser shows
+   * it - the one running it, or one reading an executor's algos - puts it in
+   * the bell once. The same kind of notice at most once every 10 minutes.
+   */
+  async limitNotice(a, m, kind, what, text) {
+    const now = Date.now();
+    const prev = a.k.limitNotice;
+    if (prev && prev.kind === kind && prev.what === what && now - prev.at < LIMIT_WORDS_MS) return;
+    const name = a.spec.label ?? ALGO_NAMES[a.spec.kind];
+    const title = what === "cut" ? `${name} on ${m.name}: an order was cut` : `${name} on ${m.name} is held`;
+    a.k.limitNotice = { id: randomId("n"), at: now, kind, what, title, text };
+    this.dirty.add(a.id);
+    this.host.onChange?.(a.id);
+  }
+  /**
+   * SoDEX refused a child at one of its limits (limits.ts limitRefusal): the
+   * algo waits a minute (doubling), and stops at the LIMIT_MAX_HITS-th refusal
+   * with no fill in between - never a refusal every tick.
+   */
+  async onLimit(a, lim) {
+    if (FINAL_STATUSES.has(a.status)) return;
+    const n = Number(a.k.limitHits ?? 0) + 1;
+    a.k.limitHits = n;
+    if (n >= LIMIT_MAX_HITS) {
+      await this.end(a, "failed", `Stopped: ${lim.text} SoDEX refused it ${n} times with nothing filled in between.`);
+      return;
+    }
+    const wait = Math.min(LIMIT_RETRY_MS * 2 ** (n - 1), 15 * 6e4);
+    a.k.limitUntil = Date.now() + wait;
+    const m = this.markets.get(a.spec.symbol);
+    const mk = this.market.mark(a.spec.symbol);
+    const head = m && mk && lim.kind === "oi" ? oiHeadroom(m, mk.oi, mk.mark) : null;
+    const room = head && m && mk ? ` ${oiRoomWords(m, head, mk.mark)}` : "";
+    a.k.limitReason = `Held: ${lim.text}${room} Trying again in ${Math.round(wait / 6e4)} min.`;
+    this.dirty.add(a.id);
+    if (m) await this.limitNotice(a, m, lim.kind, "held", `SoDEX refused an order: ${lim.text}${room} It tries again in ${Math.round(wait / 6e4)} min.`);
+    await this.hold(a, a.k.limitReason);
   }
   async cancelChildren(a, m, list) {
     const open = list.filter((c) => LIVE.has(c.state) && !c.cancelling);
@@ -14141,6 +15322,7 @@ var AlgoRuntime = class {
     const before = a.filled;
     const was = c.state;
     this.applyFill(a, c, u.filledQty, u.filledValue, u.maker);
+    if (a.filled > before && a.k.limitHits) delete a.k.limitHits;
     if (a.filled > before && FINAL_STATUSES.has(a.status) && a.spec.exits) {
       const m = this.markets.get(a.spec.symbol);
       if (m) void this.syncExits(a, m, true);
@@ -14155,6 +15337,8 @@ var AlgoRuntime = class {
         a.rejects++;
         a.k.consecRejects = Number(a.k.consecRejects ?? 0) + 1;
         void this.event(a, "error", `SoDEX rejected ${c.tag}${u.reason ? `: ${u.reason}` : ""}.`, c);
+        const lim = limitRefusal(u.reason, a.spec.symbol);
+        if (lim) void this.onLimit(a, lim);
       }
       this.onChildDone(a, c);
     } else if (c.state === "sending" || c.state === "unknown") c.state = "open";
@@ -14387,6 +15571,7 @@ var AlgoRuntime = class {
     }
   }
   onChildDone(a, c) {
+    if (a.spec.kind === "dca") return this.dcaChildDone(a, c);
     if (a.spec.kind !== "iceberg") return;
     if (a.k.reprice === c.clOrdID) {
       delete a.k.reprice;
@@ -14396,7 +15581,7 @@ var AlgoRuntime = class {
     }
     if (c.filled >= c.quantity - 1e-12) {
       const s = a.spec;
-      a.k.refillAt = Date.now() + Math.max(0, jitter(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
+      a.k.refillAt = Date.now() + Math.max(0, jitter2(s.refillMs, s.refillJitter, makeRng(a.seed ^ a.childCount)));
     }
   }
   onPrint(p) {
@@ -14496,6 +15681,11 @@ var AlgoRuntime = class {
    * The owner's signed position on `symbol`, read now. A paper algo uses what
    * its own paper fills built, and otherwise the real position (only read).
    */
+  /** The leverage of the owner's open position on `symbol`, as SoDEX last reported it (null: no open position, or none reported). */
+  positionLeverage(a, symbol2) {
+    const p = this.positionsOf.get(a.owner)?.data[symbol2];
+    return p && p.size !== 0 && typeof p.leverage === "number" && p.leverage > 0 ? p.leverage : null;
+  }
   async positionOf(a, symbol2) {
     const paperPos = a.k.paperPos;
     if (a.spec.paper && typeof paperPos === "number" && paperPos !== 0) return paperPos;
@@ -14622,6 +15812,14 @@ var AlgoRuntime = class {
     else if (reason && changed) await this.event(a, "status", reason);
     this.host.onChange?.(a.id);
   }
+  /** A line in the algo's activity, once per algo: a child size it had to decide as it runs (sizes.ts head). */
+  async noteOnce(a, key2, text) {
+    const noted = a.k.noted ?? {};
+    if (noted[key2]) return;
+    a.k.noted = { ...noted, [key2]: true };
+    this.dirty.add(a.id);
+    await this.event(a, "info", text);
+  }
   async hold(a, reason) {
     this.heldNow.add(a.id);
     if (this.stopped(a)) return;
@@ -14711,7 +15909,7 @@ var COPY_ENGINE_VERSION = "1.1.0";
 
 // src/service.ts
 import { randomInt, timingSafeEqual as timingSafeEqual2 } from "node:crypto";
-import { existsSync as existsSync3 } from "node:fs";
+import { existsSync as existsSync4 } from "node:fs";
 
 // src/audited.ts
 var said = (e) => e instanceof Error ? e.message : String(e);
@@ -14810,7 +16008,7 @@ function auditedAlgoSink(inner, db) {
 }
 
 // src/brake.ts
-import { readFileSync as readFileSync3, statSync } from "node:fs";
+import { readFileSync as readFileSync3, statSync as statSync2 } from "node:fs";
 var READ_EVERY_MS = 1e3;
 var DEFAULT_REASON = "ValueDesk has paused trading on this executor for now.";
 function parseBrake(text) {
@@ -14864,7 +16062,7 @@ var Brake = class {
     if (!this.file) return;
     let next;
     try {
-      const st = statSync(this.file, { throwIfNoEntry: false });
+      const st = statSync2(this.file, { throwIfNoEntry: false });
       if (!st) {
         if (this.mtime === -1 && !first && this.state === null) return;
         this.mtime = -1;
@@ -14883,6 +16081,391 @@ var Brake = class {
     if (JSON.stringify(before) !== JSON.stringify(next)) this.onChange?.(next, before);
   }
 };
+
+// src/guard.ts
+function classifyRejection(error) {
+  const e = String(error ?? "");
+  if (/^Not sent:/i.test(e)) return /order rate/i.test(e) ? "account-rate" : "local";
+  if (/HTTP 429|error code:?\s*1015/i.test(e)) return "ip-rate";
+  if (/api[\s_-]?key[^.]*(not found|invalid|expired|revoked|unknown)|key not found|unknown api key|no (copy|trading) key|signature (rejected|invalid|mismatch|verification)|invalid signature|unauthori[sz]ed|trading key has expired/i.test(e)) return "key";
+  if (/insufficient|not enough (margin|balance|collateral|funds)|margin (is )?(insufficient|not enough)|available (balance|margin)/i.test(e)) return "margin";
+  if (/open[\s_-]?interest|\boi\b[^.]*\b(cap|limit|exceed)|max(imum)?[\s_-]?position|position[^.]*\b(limit|exceed|too (large|big))|risk[\s_-]?limit|too many (open )?orders|open[\s_-]?orders?[^.]*\b(limit|exceed|max)/i.test(e)) return "limit";
+  if (/rate[\s_-]?limit|too many requests|quota|request limit/i.test(e)) return "account-rate";
+  if (/notional|tick[\s_-]?size|step[\s_-]?size|precision|price[^.]*(band|range|deviat|too (high|low)|limit)|quantity[^.]*(too small|invalid|min)|min(imum)? (qty|quantity|size)|reduce[\s_-]?only|would (increase|not reduce)|no position/i.test(e)) return "size";
+  return "unknown";
+}
+var STRIKE_WINDOW_MS = 10 * 6e4;
+var MAX_HOLD_MS = 2 * 60 * 6e4;
+var ESCALATE_WINDOW_MS = 24 * 60 * 6e4;
+var COPY_POLICY = {
+  key: { strikes: 1, holdMs: 5 * 6e4, words: "SoDEX refused the copy key" },
+  margin: { strikes: 1, holdMs: 10 * 6e4, words: "SoDEX refused an order for lack of margin" },
+  limit: { strikes: 1, holdMs: 15 * 6e4, words: "SoDEX refused an order at one of its limits (position, open interest or open orders)" },
+  "account-rate": { strikes: 1, holdMs: 2 * 6e4, words: "SoDEX refused an order at this account's order rate" },
+  size: { strikes: 3, holdMs: 10 * 6e4, words: "SoDEX refused several orders of this size or price" },
+  unknown: { strikes: 5, holdMs: 15 * 6e4, words: "SoDEX refused several orders" },
+  "ip-rate": { strikes: 0, holdMs: 0, words: "" },
+  local: { strikes: 0, holdMs: 0, words: "" }
+};
+var ALGO_POLICY = {
+  key: COPY_POLICY.key,
+  unknown: { strikes: 5, holdMs: 15 * 6e4, words: "SoDEX refused several orders" }
+};
+var minutes = (ms) => `${Math.max(1, Math.round(ms / 6e4))} min`;
+var refusalText = (e) => String(e ?? "").replace(/0x[0-9a-fA-F]{64,}/g, "0x\u2026").replace(/\s+/g, " ").trim().slice(0, 200);
+var ErrorGuard = class {
+  constructor(host2) {
+    this.host = host2;
+  }
+  host;
+  /** `copy:<id>`, `algo:<id>` or `owner:<wallet>` -> the hold. */
+  holds = /* @__PURE__ */ new Map();
+  /** When each target was last held (for the doubling), and how many times within a day. */
+  history = /* @__PURE__ */ new Map();
+  strikes = /* @__PURE__ */ new Map();
+  now() {
+    return this.host.now?.() ?? Date.now();
+  }
+  /** Why this copy or algo may not trade now (a hold of its own or of its wallet), or null. */
+  holdOf(t) {
+    const now = this.now();
+    for (const k of [`${t.kind}:${t.id}`, `owner:${t.owner}`]) {
+      const h = this.holds.get(k);
+      if (!h) continue;
+      if (h.until <= now) {
+        this.holds.delete(k);
+        continue;
+      }
+      return h.reason;
+    }
+    return null;
+  }
+  /** Every hold running now (for the health view and tests). */
+  active() {
+    const now = this.now();
+    return [...this.holds].filter(([, h]) => h.until > now).map(([key2, h]) => ({ key: key2, ...h }));
+  }
+  /** Read the answers of one send. */
+  record(t, results) {
+    if (results.some((r) => r.ok)) this.clearStrikes(t);
+    for (const r of results) {
+      if (r.ok || r.outcomeUnknown || !r.error) continue;
+      this.refused(t, r.error);
+    }
+  }
+  /** A call that threw (leverage, cancel): read its error the same way. */
+  recordError(t, e) {
+    if (e && typeof e === "object" && e.outcomeUnknown) return;
+    this.refused(t, e instanceof Error ? e.message : String(e));
+  }
+  clearStrikes(t) {
+    for (const k of this.strikes.keys()) if (k.startsWith(`${t.kind}:${t.id}|`)) this.strikes.delete(k);
+  }
+  refused(t, error) {
+    const cls = classifyRejection(error);
+    const text = refusalText(error);
+    const ref = `${t.kind}:${t.id}`;
+    if (cls === "unknown") this.host.alert("order-rejected", { owner: t.owner, ref, text: `${t.kind === "copy" ? "Copy" : "Algo"} ${t.id}: SoDEX refused an order for a reason the executor does not know: ${text}` });
+    if (cls === "key") {
+      this.host.keyRefused(t.owner);
+      this.host.alert("key-refused", { owner: t.owner, ref: `owner:${t.owner}`, text: `SoDEX refused the key of a wallet (${t.kind} ${t.id}): ${text}` });
+    }
+    const policy = t.kind === "copy" ? COPY_POLICY[cls] : ALGO_POLICY[cls];
+    if (!policy || !policy.strikes) return;
+    const now = this.now();
+    const sk = `${ref}|${cls}`;
+    const list = (this.strikes.get(sk) ?? []).filter((at) => now - at < STRIKE_WINDOW_MS);
+    list.push(now);
+    this.strikes.set(sk, list);
+    if (list.length < policy.strikes) return;
+    this.strikes.delete(sk);
+    const holdKey = cls === "key" ? `owner:${t.owner}` : ref;
+    if ((this.holds.get(holdKey)?.until ?? 0) > now) return;
+    const past = this.history.get(holdKey);
+    const n = past && now - past.at < ESCALATE_WINDOW_MS ? past.n + 1 : 1;
+    this.history.set(holdKey, { at: now, n });
+    if (this.history.size > 2e4) {
+      for (const [k, v] of this.history) if (now - v.at >= ESCALATE_WINDOW_MS) this.history.delete(k);
+    }
+    const ms = Math.min(MAX_HOLD_MS, policy.holdMs * 2 ** (n - 1));
+    const until = now + ms;
+    const reason = `Held for ${minutes(ms)}: ${policy.words}${text ? ` ("${text.slice(0, 120)}")` : ""}. It goes on by itself; closes and stops still go out.`;
+    this.holds.set(holdKey, { until, reason });
+    this.host.held(t, reason, until, holdKey.startsWith("owner:"));
+    if (cls === "unknown" || cls === "key") this.host.alert("sub-held", { owner: t.owner, ref: holdKey, text: `${t.kind === "copy" ? "Copy" : "Algo"} ${t.id} held for ${minutes(ms)} after repeated refusals (${cls}): ${text}` });
+  }
+};
+function guardedOrderSink(inner, guard, t) {
+  return {
+    paper: inner.paper,
+    async place(accountId, market, intents, builder, reference) {
+      const out = await inner.place(accountId, market, intents, builder, reference);
+      guard.record(t, out);
+      return out;
+    },
+    async setLeverage(accountId, market, leverage, margin) {
+      try {
+        await inner.setLeverage(accountId, market, leverage, margin);
+      } catch (e) {
+        guard.recordError(t, e);
+        throw e;
+      }
+    },
+    async placeStop(accountId, market, stop, builder) {
+      const r = await inner.placeStop(accountId, market, stop, builder);
+      guard.record(t, [r]);
+      return r;
+    },
+    async cancel(accountId, market, clOrdID) {
+      try {
+        await inner.cancel(accountId, market, clOrdID);
+      } catch (e) {
+        guard.recordError(t, e);
+        throw e;
+      }
+    }
+  };
+}
+var LOCAL_RETRY_BUDGET_MS = 3e4;
+var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms).unref?.());
+function guardedAlgoSink(inner, guard, budget, retryBudgetMs = LOCAL_RETRY_BUDGET_MS) {
+  const target = (a) => ({ kind: "algo", id: a.id, owner: a.owner });
+  const local = (rs) => rs.length > 0 && rs.every((r) => !r.ok && !r.outcomeUnknown && classifyRejection(r.error) === "local");
+  async function withRetry(go) {
+    const t0 = Date.now();
+    let out = await go();
+    while (local(out) && Date.now() - t0 < retryBudgetMs) {
+      const wait = Math.min(retryBudgetMs - (Date.now() - t0), Math.max(500, (budget?.cooldownLeft() ?? 0) + 250 + Math.random() * 750));
+      if (wait <= 0) break;
+      await sleep2(wait);
+      out = await go();
+    }
+    return out;
+  }
+  return {
+    paper: inner.paper,
+    async place(a, market, orders) {
+      const out = await withRetry(() => inner.place(a, market, orders));
+      guard.record(target(a), out);
+      return out;
+    },
+    async placeStops(a, market, stops) {
+      const out = await withRetry(() => inner.placeStops(a, market, stops));
+      guard.record(target(a), out);
+      return out;
+    },
+    async cancel(a, market, clOrdIDs) {
+      try {
+        await inner.cancel(a, market, clOrdIDs);
+      } catch (e) {
+        guard.recordError(target(a), e);
+        throw e;
+      }
+    },
+    async setLeverage(a, market, leverage, margin) {
+      try {
+        await inner.setLeverage(a, market, leverage, margin);
+      } catch (e) {
+        guard.recordError(target(a), e);
+        throw e;
+      }
+    }
+  };
+}
+
+// src/alerts.ts
+var DEDUPE_MS = 10 * 6e4;
+var PER_HOUR = 30;
+var HOUR_MS2 = 60 * 6e4;
+var TIMEOUT_MS = 5e3;
+var MAX_CHARS = 3500;
+var TOKEN_RE = /^\d{1,20}:[A-Za-z0-9_-]{20,80}$/;
+var CHAT_RE = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
+var LABEL = {
+  "order-rejected": "Order refused",
+  "key-decrypt": "KEY DID NOT OPEN",
+  "key-refused": "Key refused by SoDEX",
+  "sodex-down": "SoDEX UNREACHABLE",
+  "sodex-up": "SoDEX reachable again",
+  "rate-limited": "RATE LIMITED by SoDEX",
+  "rate-cleared": "Rate limit lifted",
+  "brake-on": "BRAKE ON",
+  "brake-off": "Brake off",
+  "sub-held": "Held after errors",
+  "crash-restart": "STARTED AFTER A CRASH",
+  fatal: "EXECUTOR STOPPING ON AN ERROR",
+  "audit-broken": "AUDIT CHAIN BROKEN",
+  "queue-slow": "CLOSES AND STOPS WAITING"
+};
+var shortWallet = (a) => /^0x[0-9a-fA-F]{40}$/.test(a) ? `${a.slice(0, 6)}\u2026${a.slice(-4)}` : a;
+function scrub(text) {
+  let t = text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+  t = t.replace(/0x[0-9a-fA-F]{41,}/g, "0x[cut]");
+  t = t.replace(/\b0x[0-9a-fA-F]{40}\b/g, (m) => shortWallet(m));
+  t = t.replace(/\b\d{6,20}:[A-Za-z0-9_-]{30,}\b/g, "[cut]");
+  t = t.replace(/\b[A-Za-z0-9_-]{43}\b/g, (m) => /[0-9]/.test(m) && /[A-Za-z]/.test(m) ? "[cut]" : m);
+  return t.length > MAX_CHARS ? `${t.slice(0, MAX_CHARS - 1)}\u2026` : t;
+}
+function telegramSender(env, fetchFn = fetch) {
+  const token = env.token?.trim() ?? "";
+  const chatId = env.chatId?.trim() ?? "";
+  if (!TOKEN_RE.test(token) || !CHAT_RE.test(chatId)) return null;
+  return async (text) => {
+    try {
+      const res = await fetchFn(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Plain text (no parse_mode): nothing in a message can become markup or a link preview.
+        body: JSON.stringify({ chat_id: chatId, text, disable_web_page_preview: true }),
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      });
+      const json = await res.json().catch(() => null);
+      return res.ok && json?.ok === true;
+    } catch {
+      return false;
+    }
+  };
+}
+var Alerts = class {
+  constructor(o) {
+    this.o = o;
+  }
+  o;
+  windows = /* @__PURE__ */ new Map();
+  sentAt = [];
+  muted = null;
+  timer = null;
+  inflight = /* @__PURE__ */ new Set();
+  /** Everything sent (tests, and the last few for the health view). */
+  sent = [];
+  get enabled() {
+    return this.o.sender !== null;
+  }
+  now() {
+    return this.o.now?.() ?? Date.now();
+  }
+  /** Start the follow-up timer (counts of repeats, the end of a mute). */
+  start() {
+    if (!this.enabled || this.timer) return;
+    this.timer = setInterval(() => this.flush(), 3e4);
+    this.timer.unref?.();
+  }
+  stop() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+  /**
+   * Raise an alert. `subject` is what it is about (a copy, an algo, a wallet;
+   * '' for the executor as a whole): the same kind and subject within the
+   * dedupe window is one message and a count.
+   */
+  raise(kind, subject, text) {
+    if (!this.enabled) return;
+    try {
+      const now = this.now();
+      const key2 = `${kind}|${subject}`;
+      const w = this.windows.get(key2);
+      if (w && now - w.firstAt < (this.o.dedupeMs ?? DEDUPE_MS)) {
+        w.more++;
+        w.lastText = text;
+        return;
+      }
+      if (w) this.followUp(key2, w);
+      this.windows.set(key2, { firstAt: now, more: 0, lastText: text, kind });
+      if (this.windows.size > 5e3) this.flush();
+      this.emit(`${LABEL[kind]} - ${this.o.label}
+${text}`);
+    } catch {
+    }
+  }
+  /** Send what waits: counts of repeats whose window ended, and the end of a mute. */
+  flush() {
+    const now = this.now();
+    for (const [key2, w] of this.windows) {
+      if (now - w.firstAt < (this.o.dedupeMs ?? DEDUPE_MS)) continue;
+      this.followUp(key2, w);
+      this.windows.delete(key2);
+    }
+    this.capWindow(now);
+  }
+  /** Wait for the sends on their way (a stopping process sends its last alert). */
+  async drain(ms = 3e3) {
+    await Promise.race([Promise.allSettled([...this.inflight]), new Promise((r) => setTimeout(r, ms).unref?.())]);
+  }
+  followUp(_key, w) {
+    if (w.more > 0) this.emit(`${LABEL[w.kind]} - ${this.o.label}
+x ${w.more} more in the last ${Math.round((this.o.dedupeMs ?? DEDUPE_MS) / 6e4)} min. Last:
+${w.lastText}`);
+    w.more = 0;
+  }
+  capWindow(now) {
+    while (this.sentAt.length && now - this.sentAt[0] >= HOUR_MS2) this.sentAt.shift();
+    if (this.muted && this.sentAt.length < (this.o.perHour ?? PER_HOUR)) {
+      const dropped = this.muted.dropped;
+      this.muted = null;
+      if (dropped) this.send(`Alerts on again - ${this.o.label}
+${dropped} alert(s) were not sent while muted; the executor's log has them.`, now);
+    }
+  }
+  emit(text) {
+    const now = this.now();
+    this.capWindow(now);
+    if (this.muted) {
+      this.muted.dropped++;
+      return;
+    }
+    if (this.sentAt.length >= (this.o.perHour ?? PER_HOUR)) {
+      this.muted = { since: now, dropped: 1 };
+      this.send(`Alerts muted - ${this.o.label}
+More than ${this.o.perHour ?? PER_HOUR} alerts in an hour; the next are dropped until the hour is over (the executor's log keeps them).`, now);
+      return;
+    }
+    this.send(text, now);
+  }
+  send(text, now) {
+    const clean2 = scrub(text);
+    this.sentAt.push(now);
+    this.sent.push(clean2);
+    if (this.sent.length > 50) this.sent.shift();
+    const p = this.o.sender(clean2).then((ok) => {
+      if (!ok) this.o.log?.warn("alert: Telegram did not take the message", {});
+    }).catch(() => void 0).finally(() => this.inflight.delete(p));
+    this.inflight.add(p);
+  }
+};
+var ReachWatch = class {
+  constructor(alerts, afterMs = 3 * 6e4) {
+    this.alerts = alerts;
+    this.afterMs = afterMs;
+  }
+  alerts;
+  afterMs;
+  down = false;
+  check(reach, now = Date.now()) {
+    if (reach.failingSince && now - reach.failingSince >= this.afterMs) {
+      if (!this.down) {
+        this.down = true;
+        this.alerts.raise("sodex-down", "", `No answer from SoDEX's REST for ${Math.round((now - reach.failingSince) / 6e4)} min (last error: ${reach.lastError ?? "none"}). Copies and algos cannot trade.`);
+      }
+    } else if (this.down && !reach.failingSince) {
+      this.down = false;
+      this.alerts.raise("sodex-up", "", "SoDEX answers again.");
+    }
+  }
+};
+function lastRunCrashed(db) {
+  const last = db.auditRows({ kind: "process", limit: 1 })[0];
+  if (!last) return null;
+  let d = {};
+  try {
+    d = JSON.parse(last.data);
+  } catch {
+    return null;
+  }
+  if (d.event === "start") return `the run started ${new Date(last.at).toISOString()} ended without stopping (killed, out of memory, or the machine went down)`;
+  if (d.event === "stop" && (d.why === "unhandled rejection" || d.why === "uncaught exception")) return `the last run stopped on an ${d.why} at ${new Date(last.at).toISOString()}`;
+  return null;
+}
 
 // src/service.ts
 var PAIR_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -14939,6 +16522,8 @@ var ApiError = class extends Error {
   status;
   code;
 };
+var SIGNER_IDLE_MS = 2 * 6e4;
+var VOLUMES_MAX = 2e4;
 var SESSION_TTL_MS = 12 * 60 * 6e4;
 var VOLUME_TTL_MS = 10 * 6e4;
 var KEY_RECHECK_MS = 10 * 6e4;
@@ -14951,8 +16536,19 @@ var ExecutorService = class {
     this.executorId = cfg.executorId ?? (cfg.kind === "hosted" ? `valuedesk-${cfg.network}-tokyo` : this.selfId());
     this.keyName = cfg.kind === "hosted" ? "vd-copy-tokyo" : "vd-copy-self";
     this.pairingCode = cfg.kind === "self" && !this.owner() ? pairingCode() : null;
+    this.guard = new ErrorGuard({
+      alert: (kind, o) => deps.alerts?.raise(kind, o.ref, o.text),
+      held: (t, reason, until, wallet) => this.onHeld(t, reason, until, wallet),
+      keyRefused: (owner) => {
+        this.forgetSigner(owner);
+        const k = db.key(owner, "active");
+        if (k) db.markKey(owner, "active", k.registered, k.expiresAt, 0);
+      }
+    });
     this.brake = new Brake(cfg.brakeFile, (now, before) => {
       db.audit("brake", null, null, { now, before });
+      if (now) deps.alerts?.raise("brake-on", "", `Copies ${now.copies ? "held" : "running"}, algos ${now.algos ? "held" : "running"}. Reason: ${now.reason}`);
+      else if (before) deps.alerts?.raise("brake-off", "", "The emergency brake is off; trading goes on.");
       if (now) deps.log.warn("executor: the emergency brake is ON", { copies: now.copies, algos: now.algos, reason: now.reason });
       else if (before) deps.log.warn("executor: the emergency brake is off", {});
     });
@@ -14970,7 +16566,7 @@ var ExecutorService = class {
       builderFor: async (s) => cfg.builderId > 0 ? { id: cfg.builderId, fee: copyFeeFor(await this.freshVolume(s.owner)) } : null,
       // The stricter of the country declared when the copy started and the one in the wallet's current terms.
       policyFor: (s) => screenPolicy(this.policyNow(s.owner, s.country, s.observedCountry), s.owner, s.settings.leader.address),
-      keyProblem: (s) => this.keyProblem(s.owner),
+      keyProblem: async (s) => this.guard.holdOf({ kind: "copy", id: s.id, owner: s.owner }) ?? this.keyProblem(s.owner),
       brake: () => this.brakeText("copies")
     });
     const oracleFeed = new OracleFeed({ fetch: deps.fetch });
@@ -14982,7 +16578,7 @@ var ExecutorService = class {
       log: deps.log,
       sinkFor: (a) => this.algoSink(a),
       builderRate: (a) => cfg.builderId > 0 ? copyFeeFor(this.volumeOf(a.owner)) / 1e5 : 0,
-      problem: (a) => this.algoProblem(a),
+      problem: async (a) => this.guard.holdOf({ kind: "algo", id: a.id, owner: a.owner }) ?? this.algoProblem(a),
       brake: () => this.brakeText("algos"),
       // The copy region rules, from the country declared with the terms and the one the request came from.
       policyFor: (a) => this.algoPolicy(a),
@@ -15009,6 +16605,9 @@ var ExecutorService = class {
   nonces = createMemoryNonceManager();
   paper = new PaperSink();
   signers = /* @__PURE__ */ new Map();
+  signerSweep = null;
+  /** What SoDEX refused, and the copies and algos held for it (guard.ts). */
+  guard;
   volumes = /* @__PURE__ */ new Map();
   volumeReads = /* @__PURE__ */ new Map();
   builderDb = null;
@@ -15019,10 +16618,25 @@ var ExecutorService = class {
   /** The operator's emergency brake (brake.ts): read from cfg.brakeFile. */
   brake;
   async start() {
+    this.signerSweep ??= setInterval(() => this.sweepSigners(), 3e4);
+    this.signerSweep.unref?.();
+    this.sodex.budget.onEvent = (e) => {
+      if (e.kind === "rate-limited") {
+        this.deps.log.warn("executor: SoDEX rate limited this IP", { ms: e.ms, path: e.path, retryAfterMs: e.retryAfterMs });
+        this.deps.alerts?.raise("rate-limited", "", `SoDEX answered 429 on ${e.path}; nothing opens for ${Math.round(e.ms / 1e3)} s${e.retryAfterMs !== null ? ` (Retry-After ${Math.round(e.retryAfterMs / 1e3)} s)` : ""}. Closes and stops still go out, spaced.`);
+      } else this.deps.alerts?.raise("rate-cleared", "", "SoDEX answers again without 429.");
+    };
+    this.sodex.queue.onEvent = (e) => {
+      this.deps.log.warn("executor: the SoDEX send queue is slow", { waiting: e.waiting, oldestMs: e.oldestMs, byClass: e.byClass });
+      this.deps.alerts?.raise("queue-slow", "", `${e.waiting} signed write(s) waiting, the oldest for ${Math.round(e.oldestMs / 1e3)} s (cancels ${e.byClass.cancel}, stops/closes ${e.byClass.protect}, leverage ${e.byClass.leverage}). New openings are refused until it drains; cooldown ${Math.round(this.sodex.budget.cooldownLeft() / 1e3)} s.`);
+    };
     await this.runtime.start();
     await this.algos.start();
   }
   async stop() {
+    if (this.signerSweep) clearInterval(this.signerSweep);
+    this.signerSweep = null;
+    for (const owner of [...this.signers.keys()]) this.forgetSigner(owner, true);
     await this.algos.stop();
     await this.runtime.stop();
     this.builderDb?.close();
@@ -15089,12 +16703,12 @@ var ExecutorService = class {
     } catch {
       db = false;
     }
-    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current() };
+    if (!db) return { ok: false, db, copies: 0, active: 0, algos: 0, feeds: { sodex: false }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
     const all = this.runtime.list();
     const v = all[0] ? this.runtime.view(all[0].id) : null;
     const algos = this.algos.list().filter((a) => !FINAL_STATUSES.has(a.status)).length;
     const sodex = v?.feeds.sodex ?? true;
-    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex }, brake: this.brake.current() };
+    return { ok: sodex, db, copies: all.length, active: all.filter((s) => s.status === "active").length, algos, feeds: { sodex }, brake: this.brake.current(), queue: this.sodex.queue.stats() };
   }
   /**
    * One instruction of a wallet at a time. A subscribe or an algo start checks the
@@ -15267,7 +16881,7 @@ var ExecutorService = class {
         const now = Date.now();
         this.db.putKey({ owner, slot: "pending", address, name, sealed, createdAt: now, expiresAt: r.expiresAt, registered: true, checkedAt: now });
         this.db.promoteKey(owner);
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         for (const s of this.runtime.list(owner)) void this.runtime.checkReady(s);
         this.deps.log.info("copy key imported", { owner, key: address });
         return this.keyInfo(owner);
@@ -15299,7 +16913,7 @@ var ExecutorService = class {
       } else if (r.ok) {
         this.db.markKey(owner, "pending", true, r.expiresAt, Date.now());
         this.db.promoteKey(owner);
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         for (const s of this.runtime.list(owner)) void this.runtime.checkReady(s);
       }
     }
@@ -15322,7 +16936,7 @@ var ExecutorService = class {
       await this.algos.cancelAll(owner);
       await this.runtime.stopAll(owner, { close: payload.close === true });
       this.db.deleteKeys(owner);
-      this.signers.delete(owner);
+      this.forgetSigner(owner);
       return this.me(owner, ctx);
     });
   }
@@ -15334,7 +16948,7 @@ var ExecutorService = class {
       const r = await this.sodex.keyRegistered(owner, k.name, k.address);
       this.db.markKey(owner, "active", r.ok, r.expiresAt, now);
       if (!r.ok) {
-        this.signers.delete(owner);
+        this.forgetSigner(owner);
         return r.expiresAt && r.expiresAt <= now ? "The copy key expired. Approve a new one in copy setup." : "The copy key is no longer registered on SoDEX (revoked or replaced). Approve a new one in copy setup.";
       }
       return null;
@@ -15343,23 +16957,56 @@ var ExecutorService = class {
     return null;
   }
   signer(owner) {
+    const now = Date.now();
     const hit = this.signers.get(owner);
-    if (hit) return hit;
+    if (hit) {
+      hit.usedAt = now;
+      return hit.ref;
+    }
     const k = this.db.key(owner, "active");
     if (!k || !k.registered) return null;
     try {
       const ref = this.secrets.open(this.cfg.network, owner, k.address, k.sealed, { name: k.name, expiresAt: k.expiresAt });
-      this.signers.set(owner, ref);
+      this.signers.set(owner, { ref, usedAt: now });
       return ref;
     } catch (e) {
       this.deps.log.error("copy key could not be opened", { owner, error: String(e) });
+      this.deps.alerts?.raise("key-decrypt", `owner:${owner}`, `The sealed key of wallet ${shortWallet(owner)} did not open (${String(e).slice(0, 120)}). Its copies and algos cannot trade. A wrong or rotated kek? (docs/deploy/SECRETS.md)`);
       return null;
     }
+  }
+  /**
+   * Forget an opened key and wipe its bytes (zeroed): at once when the executor
+   * stops, else a few seconds later - an order being signed with it right now
+   * (it was handed out a moment ago) still signs with the real key.
+   */
+  forgetSigner(owner, now = false) {
+    const hit = this.signers.get(owner);
+    this.signers.delete(owner);
+    if (!hit) return;
+    if (now) hit.ref.privateKey.fill(0);
+    else setTimeout(() => hit.ref.privateKey.fill(0), 5e3).unref?.();
+  }
+  /** Keys idle for SIGNER_IDLE_MS are wiped; a key in use was handed out moments ago and is never one of them. */
+  sweepSigners(now = Date.now()) {
+    for (const [owner, h] of this.signers) if (now - h.usedAt >= SIGNER_IDLE_MS) this.forgetSigner(owner);
+  }
+  /** The guard held a copy or an algo: its status says so now, and it is checked again when the hold ends. */
+  onHeld(t, reason, until, wallet) {
+    this.deps.log.warn("executor: held after SoDEX refusals", { kind: t.kind, id: t.id, owner: t.owner, until, reason });
+    this.db.audit("hold", t.owner, t.id, { kind: t.kind, wallet, until, reason });
+    const recheck = () => {
+      for (const s of this.runtime.list(t.owner)) if (wallet || t.kind === "copy" && s.id === t.id) void this.runtime.checkReady(s);
+    };
+    recheck();
+    const timer = setTimeout(recheck, Math.max(1e3, until - Date.now() + 1e3));
+    timer.unref?.();
   }
   sinkFor(s) {
     if (s.settings.paper) return this.paper;
     if (!this.db.key(s.owner, "active")) return null;
-    return auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
+    const sink = auditedOrderSink(new KeySink(this.sodex, () => this.signer(s.owner), this.nonces, SODEX_CHAIN_ID[this.cfg.network]), this.db, s.owner, s.id);
+    return guardedOrderSink(sink, this.guard, { kind: "copy", id: s.id, owner: s.owner });
   }
   /* ----------------------------------------------------------- copies ----- */
   /**
@@ -15476,7 +17123,7 @@ var ExecutorService = class {
   /** The sink of an algo: the key this wallet registered for this executor, the copy fee ladder as the builder. */
   algoSink(a) {
     if (!this.db.key(a.owner, "active")) return null;
-    return auditedAlgoSink(
+    const sink = auditedAlgoSink(
       new KeyAlgoSink(
         this.sodex,
         () => this.signer(a.owner),
@@ -15486,6 +17133,7 @@ var ExecutorService = class {
       ),
       this.db
     );
+    return guardedAlgoSink(sink, this.guard, this.sodex.budget);
   }
   /**
    * Why a live algo cannot trade now (it waits, and goes on by itself once
@@ -15659,11 +17307,11 @@ var ExecutorService = class {
         body = null;
       }
       if (!res.ok || !body?.ok || typeof body.usd !== "number" || !Number.isFinite(body.usd)) throw new Error(`HTTP ${res.status}`);
-      this.volumes.set(owner, { usd: body.usd, at: Date.now() });
+      this.rememberVolume(owner, body.usd);
       return body.usd;
     } catch (e) {
       this.deps.log.warn("copy fee: the builder volume could not be read", { owner, error: String(e) });
-      this.volumes.set(owner, { usd: last?.usd ?? null, at: Date.now() });
+      this.rememberVolume(owner, last?.usd ?? null);
       return last?.usd ?? null;
     }
   }
@@ -15675,7 +17323,7 @@ var ExecutorService = class {
     let usd = null;
     try {
       if (!this.builderDb) {
-        if (!existsSync3(this.cfg.builderDb)) return null;
+        if (!existsSync4(this.cfg.builderDb)) return null;
         this.builderDb = new (sqlite()).DatabaseSync(this.cfg.builderDb, { readOnly: true });
         this.builderDb.exec("PRAGMA busy_timeout = 2000");
       }
@@ -15685,32 +17333,85 @@ var ExecutorService = class {
     } catch (e) {
       this.deps.log.warn("copy fee: the builder ledger could not be read", { error: String(e) });
     }
-    this.volumes.set(owner, { usd, at: Date.now() });
+    this.rememberVolume(owner, usd);
     return usd;
+  }
+  /** Bounded: anyone can sign in with a fresh wallet, so the map of volumes must not grow without end. */
+  rememberVolume(owner, usd) {
+    this.volumes.delete(owner);
+    if (this.volumes.size >= VOLUMES_MAX) {
+      const oldest = this.volumes.keys().next().value;
+      if (oldest !== void 0) this.volumes.delete(oldest);
+    }
+    this.volumes.set(owner, { usd, at: Date.now() });
   }
 };
 
 // src/server.ts
 var BODY_LIMIT = 64 * 1024;
 var PREFIX = "/api/copy/v1";
+function rateKey(ip) {
+  let a = ip.trim().toLowerCase();
+  if (a.startsWith("::ffff:") && isIP(a.slice(7)) === 4) a = a.slice(7);
+  if (isIP(a) !== 6) return a || "unknown";
+  const zone = a.indexOf("%");
+  if (zone >= 0) a = a.slice(0, zone);
+  const gap = a.indexOf("::");
+  const width = (p) => p.reduce((n, g2) => n + (g2.includes(".") ? 2 : 1), 0);
+  let groups;
+  if (gap >= 0) {
+    const head = a.slice(0, gap) ? a.slice(0, gap).split(":") : [];
+    const tail = a.slice(gap + 2) ? a.slice(gap + 2).split(":") : [];
+    groups = [...head, ...Array(Math.max(0, 8 - width(head) - width(tail))).fill("0"), ...tail];
+  } else groups = a.split(":");
+  return `${groups.slice(0, 4).map((g2) => g2.includes(".") ? "0" : (Number.parseInt(g2, 16) || 0).toString(16)).join(":")}::/64`;
+}
 var Limiter = class {
-  constructor(perMinute) {
+  constructor(perMinute, maxKeys = 5e4) {
     this.perMinute = perMinute;
+    this.maxKeys = maxKeys;
   }
   perMinute;
+  maxKeys;
   hits = /* @__PURE__ */ new Map();
-  allow(key2, now = Date.now()) {
+  lastSweep = 0;
+  check(key2, now = Date.now()) {
     let h = this.hits.get(key2);
     if (!h || now >= h.reset) {
-      h = { n: 0, reset: now + 6e4 };
-      this.hits.set(key2, h);
-      if (this.hits.size > 5e4) {
-        for (const [k, v] of this.hits) if (now >= v.reset) this.hits.delete(k);
+      if (!h && this.hits.size >= this.maxKeys) {
+        if (now - this.lastSweep >= 5e3) {
+          this.lastSweep = now;
+          for (const [k, v] of this.hits) if (now >= v.reset) this.hits.delete(k);
+        }
+        if (this.hits.size >= this.maxKeys) {
+          const oldest = this.hits.keys().next().value;
+          if (oldest !== void 0) this.hits.delete(oldest);
+        }
       }
+      h = { n: 0, reset: now + 6e4 };
+      this.hits.delete(key2);
+      this.hits.set(key2, h);
     }
-    return ++h.n <= this.perMinute;
+    h.n++;
+    if (h.n <= this.perMinute) return "ok";
+    return h.n === this.perMinute + 1 ? "first-refusal" : "refused";
+  }
+  allow(key2, now = Date.now()) {
+    return this.check(key2, now) === "ok";
+  }
+  get size() {
+    return this.hits.size;
   }
 };
+function hostAllowed(host2, allowed) {
+  if (!host2) return true;
+  let name = host2.trim().toLowerCase();
+  if (name.startsWith("[")) return /^\[[0-9a-f:.]+\](:\d+)?$/.test(name);
+  name = name.replace(/:\d+$/, "").replace(/\.$/, "");
+  if (isIP(name)) return true;
+  if (name === "localhost" || name.endsWith(".localhost")) return true;
+  return allowed.includes(name);
+}
 function safeEqual(a, b) {
   const x = Buffer.from(a);
   const y = Buffer.from(b);
@@ -15751,6 +17452,12 @@ function ipPrefix(ip) {
 function createExecutorServer(svc, cfg, log) {
   const reads = new Limiter(240);
   const writes = new Limiter(40);
+  const keyChecksPerWallet = new Limiter(12);
+  const keyChecksAll = new Limiter(60, 1);
+  const keyCheck = (owner) => {
+    if (!keyChecksPerWallet.allow(owner) || !keyChecksAll.allow("all")) throw new ApiError(429, "rate", "Too many key checks; try again in a minute.");
+    return owner;
+  };
   const clientOf = (req) => {
     if (cfg.trustEdge) {
       const xff = String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim();
@@ -15800,9 +17507,19 @@ function createExecutorServer(svc, cfg, log) {
   return createServer(async (req, res) => {
     const t0 = Date.now();
     let signed = null;
-    const url = new URL(req.url ?? "/", "http://executor");
-    const path = url.pathname;
+    let url;
     try {
+      url = new URL(req.url ?? "/", "http://executor");
+    } catch {
+      url = null;
+    }
+    const path = url ? url.pathname.slice(0, 512) : "(unreadable)";
+    let quiet = false;
+    try {
+      if (!url) throw new ApiError(400, "path", "bad request");
+      if (cfg.kind === "self" && !hostAllowed(req.headers.host, cfg.allowedHosts ?? [])) {
+        throw new ApiError(421, "host", "This copier answers only on its own address (127.0.0.1 or localhost). To reach it under another name, set EXECUTOR_ALLOWED_HOSTS.");
+      }
       cors(req, res);
       if (req.method === "OPTIONS") {
         res.writeHead(204);
@@ -15814,9 +17531,13 @@ function createExecutorServer(svc, cfg, log) {
         if (!cfg.originSecrets.some((s) => safeEqual(s, v))) throw new ApiError(403, "origin", "forbidden");
       }
       if (!path.startsWith(PREFIX)) throw new ApiError(404, "path", "not found");
-      const client = clientOf(req);
+      const client = rateKey(clientOf(req));
       const isWrite = req.method === "POST";
-      if (!(isWrite ? writes : reads).allow(client)) throw new ApiError(429, "rate", "Too many requests; try again in a minute.");
+      const verdict = (isWrite ? writes : reads).check(client);
+      if (verdict !== "ok") {
+        quiet = verdict === "refused";
+        throw new ApiError(429, "rate", "Too many requests; try again in a minute.");
+      }
       const ctx = contextOf(req);
       const route = path.slice(PREFIX.length);
       if (req.method === "GET" && route === "/info") return send(res, 200, svc.info(ctx));
@@ -15841,11 +17562,11 @@ function createExecutorServer(svc, cfg, log) {
       if (route === "/terms") return send(res, 200, svc.acceptTerms(body.request, ctx));
       if (route === "/site-terms") return send(res, 200, svc.acceptSiteTerms(body.request, ctx));
       if (route === "/keys") return send(res, 200, svc.createKey(body.request, ctx));
-      if (route === "/keys/verify") return send(res, 200, { key: await svc.verifyKey(svc.authenticate(bearer(req))) });
+      if (route === "/keys/verify") return send(res, 200, { key: await svc.verifyKey(keyCheck(svc.authenticate(bearer(req)))) });
       if (route === "/keys/delete") return send(res, 200, await svc.deleteKey(body.request, ctx));
       if (route === "/copies") return send(res, 200, await svc.subscribe(body.request, ctx));
       if (route === "/copies/action") return send(res, 200, await svc.act(body.request, ctx));
-      if (route === "/keys/import") return send(res, 200, { key: await svc.importKey(svc.authenticate(bearer(req)), body, ctx) });
+      if (route === "/keys/import") return send(res, 200, { key: await svc.importKey(keyCheck(svc.authenticate(bearer(req))), body, ctx) });
       if (route === "/algos") return send(res, 200, await svc.algoStart(body.request, ctx));
       if (route === "/algos/action") return send(res, 200, await svc.algoAct(body.request, ctx));
       throw new ApiError(404, "path", "not found");
@@ -15855,7 +17576,7 @@ function createExecutorServer(svc, cfg, log) {
       send(res, err.status, { ok: false, code: err.code, error: err.message });
     } finally {
       if (path !== `${PREFIX}/health`) log.debug("request", { method: req.method, path, ms: Date.now() - t0, status: res.statusCode });
-      if (req.method === "POST" || res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404) {
+      if (!quiet && (req.method === "POST" || res.statusCode >= 400 && res.statusCode !== 401 && res.statusCode !== 404)) {
         try {
           svc.audit({ method: req.method ?? "", path, status: res.statusCode, ms: Date.now() - t0, client: ipPrefix(clientOf(req)), country: cfg.trustEdge ? normaliseCountry(String(req.headers["x-viewer-country"] ?? "")) : null, request: signed });
         } catch {
@@ -15899,6 +17620,12 @@ function selfBanner(o) {
 async function main() {
   const cfg = loadConfig();
   const log = logger(cfg.logLevel);
+  if (cfg.kind === "self") process.umask(63);
+  const alerts = new Alerts({
+    sender: telegramSender({ token: cfg.alertTelegramToken, chatId: cfg.alertTelegramChatId }),
+    label: `${process.env.EXECUTOR_ID?.trim() || (cfg.kind === "hosted" ? "hosted executor" : "self-hosted copier")} (${cfg.network})`,
+    log
+  });
   if (typeof globalThis.WebSocket !== "function") {
     throw new Error(`This Node.js (${process.version}) has no WebSocket; the copier needs Node.js 22.13 or newer.`);
   }
@@ -15910,18 +17637,25 @@ async function main() {
     stopping = true;
     log.info("executor stopping", { why });
     db?.audit("process", null, null, { event: "stop", why, pid: process.pid });
+    alerts.stop();
     server.close();
     await svc?.stop().catch((e) => log.error("stop failed", { error: String(e) }));
     db?.close();
+    await alerts.drain(2e3);
     process.exit(code);
+  };
+  const fatal = (why, e) => {
+    const first = (e instanceof Error ? e.message : String(e)).split(/\r?\n/)[0] ?? "";
+    alerts.raise("fatal", "", `${why}: ${first.slice(0, 200)}. systemd starts it again.`);
+    void shutdown(why, 1);
   };
   process.on("unhandledRejection", (e) => {
     log.error("unhandled rejection", { error: e instanceof Error ? e.stack ?? e.message : String(e) });
-    void shutdown("unhandled rejection", 1);
+    fatal("unhandled rejection", e);
   });
   process.on("uncaughtException", (e) => {
     log.error("uncaught exception", { error: e.stack ?? e.message });
-    void shutdown("uncaught exception", 1);
+    fatal("uncaught exception", e);
   });
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
   process.on("SIGINT", () => void shutdown("SIGINT"));
@@ -15948,7 +17682,31 @@ async function main() {
   db = new ExecutorDb(join3(cfg.dataDir, "executor.db"));
   const secrets = new Secrets(cfg.dataDir);
   const out = egress(cfg.localAddress);
-  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log });
+  alerts.start();
+  const crashed = lastRunCrashed(db);
+  if (crashed) {
+    log.warn("executor: the last run crashed", { what: crashed });
+    alerts.raise("crash-restart", "", `Started again: ${crashed}.`);
+  }
+  let auditHead = null;
+  const verifyAudit = () => {
+    try {
+      const t0 = Date.now();
+      const v = db.verifyAudit(auditHead ?? void 0);
+      if (v.brokenAt !== null) {
+        log.error("executor: the audit chain is broken", { at: v.brokenAt });
+        alerts.raise("audit-broken", "", `The audit log's hash chain breaks at row ${v.brokenAt}: a row was changed or removed. Run tools/audit.ts verify on the server.`);
+        auditHead = null;
+      } else {
+        auditHead = v.head;
+        log.info("audit verified", { rows: v.rows, ms: Date.now() - t0 });
+      }
+    } catch (e) {
+      log.warn("audit verify failed", { error: String(e) });
+    }
+  };
+  verifyAudit();
+  svc = new ExecutorService(cfg, db, secrets, { fetch: out.fetch, factory: out.factory, log, alerts });
   if (cfg.kind === "self") {
     const shownHost = cfg.host === "0.0.0.0" || cfg.host === "::" ? "127.0.0.1" : cfg.host;
     process.stdout.write(selfBanner({ url: `http://${shownHost}:${cfg.port}`, dataDir: cfg.dataDir, owner: svc.owner(), code: svc.pairingCode }));
@@ -15970,8 +17728,17 @@ async function main() {
     if (head) log.info("audit head", { seq: head.seq, at: head.at, hash: head.hash });
   };
   anchor();
-  const anchoring = setInterval(anchor, 60 * 6e4);
+  const anchoring = setInterval(() => {
+    anchor();
+    if (auditHead) verifyAudit();
+  }, 60 * 6e4);
   anchoring.unref();
+  const reach = new ReachWatch(alerts);
+  const watching = setInterval(() => {
+    if (svc) reach.check(svc.sodex.reach);
+    alerts.flush();
+  }, 3e4);
+  watching.unref();
 }
 main().catch((e) => {
   const what = process.env.EXECUTOR_KIND?.trim() === "hosted" ? "The executor" : "The copier";

@@ -19,6 +19,7 @@
  */
 import { useId, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { BIAS_LABEL, biasOf } from '@sign/valuedesk/cohorts/model.js';
+import { fmtFixed } from '../../../numStyle';
 
 export interface LeanBand {
   from: number;
@@ -71,7 +72,7 @@ export function bandsOf(series: ReadonlyArray<{ t: number; rebuilt?: boolean }>)
 }
 
 const W = 600;
-const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+const pct = (v: number) => `${fmtFixed(v * 100, 1)}%`;
 const day = (t: number) => new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const clock = (t: number) => new Date(t).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 const when = (t: number) => new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });

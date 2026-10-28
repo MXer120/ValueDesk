@@ -20,7 +20,7 @@
  *
  * THE TERMS COME FIRST (legal/acceptance.ts, trading/legalGate.ts): a wallet that
  * has not signed the current Terms of use and Risk disclosure signs them - with
- * its country of residence - in the terms popup (requireTerms), before its key
+ * the country its connection comes from - in the terms popup (requireTerms), before its key
  * is registered; a wallet on a
  * sanctions list, or a sanctioned place, gets nothing; a close-only place
  * (the US, the UK, Canada) may enable trading to close positions. A refused opening order asks
@@ -53,6 +53,7 @@ import { openConnectDialog } from './connect';
 import { useWalletSnapshot } from './useWallet';
 import { recordPendingSiteTerms, requireTerms } from '../../legal/acceptance';
 import { SANCTIONED_WALLET_REASON, screenWallet } from '../../legal/screening';
+import { LOCATION_UNKNOWN } from '../../legal/geo';
 import { SIGN_TERMS_EVENT, legalStateFor } from '../../trading/legalGate';
 import { lazyPage } from '../../lazyPage';
 import { startLater } from '../../startLater';
@@ -147,9 +148,11 @@ export function AccountController({ address, provider, session, onSession }: Pro
       return false;
     }
     if (legalNow.access.level === 'close-only') notify('warn', legalNow.access.reason ?? 'Only closing is possible from here.');
+    // The country could not be told (legal/geo.ts): enabled to close only, like a close-only place - no wallet signs the terms without a country.
+    else if (legalNow.located === false) notify('warn', LOCATION_UNKNOWN);
     // The terms popup as a gate (legal/LegalGate.tsx): accepted - and signed by this wallet where it may trade.
     // Close-only: trading is enabled only to close, which never waits for the terms.
-    if (legalNow.access.level === 'open' && !(await requireTerms({ owner: addr, reason: 'enable trading' }))) return false;
+    if (legalNow.access.level === 'open' && legalNow.located !== false && !(await requireTerms({ owner: addr, reason: 'enable trading' }))) return false;
     setAccountPending('enable');
     try {
       const where = walletName || 'your wallet';

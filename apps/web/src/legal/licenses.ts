@@ -7,11 +7,14 @@
  *     (tools/licenses.mjs), so this page never lists packages by hand;
  *   - Reown's licence (AppKit, WalletConnect) asks for its notice in "the about
  *     section of the website": section 1, word for word;
- *   - the fonts' SIL Open Font License, the copier's MIT licence;
- *   - where data, news and streams come from, and the trademark notice.
+ *   - the fonts' SIL Open Font License, the copier's MIT licence, the speech
+ *     model's MIT licence (served next to the model);
+ *   - where data, news and streams come from, the notices BLS and BEA ask for,
+ *     and the trademark notice with where the icons come from.
  *
- * The audit behind it: docs/legal/TECH-AUDIT.md. Not hashed into the terms'
- * fingerprint: changing it asks nobody to accept anything again.
+ * The audits behind it: docs/legal/TECH-AUDIT.md, docs/legal/THIRD-PARTY-REVIEW.md
+ * (2026-10-28). Not hashed into the terms' fingerprint: changing it asks nobody
+ * to accept anything again.
  */
 import type { LegalDoc } from './model';
 
@@ -33,6 +36,7 @@ export const LICENSES: LegalDoc = {
             '**Reown AppKit and WalletConnect** (wallet connection), under the Reown Community License and the WalletConnect Community License. Portions © 2025 Reown, Inc. All Rights Reserved. The licences\' full text is in the file above.',
             '**Fonts:** Asap, IBM Plex Sans and Space Grotesk, under the SIL Open Font License 1.1, served from this site.',
             '**Charts:** KLineChart, under the Apache License 2.0.',
+            '**Speech recognition** (the Fed live transcript, run in your browser): the Moonshine tiny model, © 2025 Useful Sensors, Inc. (dba Moonshine AI), under the [MIT licence](https://github.com/moonshine-ai/moonshine/blob/main/LICENSE); served from this site, with the licence text beside the model files (/models/onnx-community/moonshine-tiny-ONNX/LICENSE).',
             '**Everything else** - React, ethers, viem, the noble cryptography libraries and the rest - under the MIT, Apache 2.0, BSD or ISC licences; see the file.',
           ],
         },
@@ -45,18 +49,22 @@ export const LICENSES: LegalDoc = {
         {
           ul: [
             '**Market and account data:** SoDEX (the exchange ValueDesk trades on), and for trader data Hyperliquid, Lighter and Arcus, read from their public interfaces.',
-            '**News:** SoSoValue, through its API; each story names and links its source.',
+            '**Reference prices** for the order tools: one combined price worked out by ValueDesk from the public order books of the exchanges you choose (Binance, Bybit, OKX, Bitget, Coinbase, Kraken, Gate, MEXC, KuCoin, HTX, Deribit, Hyperliquid). No exchange\'s own quotes are passed on.',
+            '**News:** SoSoValue, through its API, and the White House (its news and presidential actions); each story names and links its source.',
+            '**Economic calendar and figures:** the Federal Reserve Board, the U.S. Bureau of Labor Statistics (BLS), the Bureau of Economic Analysis (BEA), the Census Bureau and the Department of Labor, from their own websites and interfaces; each figure names its agency. BLS.gov cannot vouch for the data or analyses derived from these data after the data have been retrieved from BLS.gov. This product uses the Bureau of Economic Analysis (BEA) Data API but is not endorsed or certified by BEA.',
+            '**ETF flows:** SoSoValue.',
+            '**Fed live:** the Federal Reserve Board\'s own broadcast (source: Federal Reserve Board), loaded from its video host only with your consent ([Cookies](/cookies)).',
             '**Live streams:** the platforms\' own players (YouTube, Twitch, Kick, Vimeo), loaded only with your consent ([Cookies](/cookies), section 3).',
           ],
         },
-        { p: 'This content belongs to its providers and is shown as received ([Terms of use](/terms)).' },
+        { p: 'This content belongs to its providers and is shown as received ([Terms of use](/terms)). Works of the U.S. government are in the public domain; their agencies do not endorse ValueDesk.' },
       ],
     },
     {
       title: '3. Trademarks and logos',
       blocks: [
         { p: 'Names, logos and other marks of cryptoassets, exchanges, networks, wallets, companies and platforms belong to their owners. ValueDesk uses them only to identify the asset, venue or service. This does not mean that the owner endorses, sponsors or is connected with ValueDesk, and it is not a recommendation. Rights holders who object can reach us through the contact details in the [Impressum](/impressum); we will remove the mark promptly.' },
-        { p: 'The coin, token, network and venue icons are served from this site. They come from SoDEX and SoSoValue, Hyperliquid, TradingView, CoinGecko, DefiLlama, Google\'s favicon service and the projects\' and companies\' own websites; wallet icons are shown by Reown\'s wallet list. Where an icon is missing, ValueDesk draws a letter instead.' },
+        { p: 'The coin, token, network, venue and news-source icons are served from this site, unaltered. They come from SoDEX and SoSoValue (with their permission), from Hyperliquid\'s icon set, and from the companies\', fund issuers\', projects\' and platforms\' own websites (the icon each publishes for its site); a few are from the spothq cryptocurrency-icons set (CC0 1.0, public domain dedication). Wallet icons are shown by Reown\'s wallet list. Where there is no such icon, ValueDesk draws a letter instead - as it does for the Federal Reserve, the SEC and the Department of Labor, whose logos and seals are not used.' },
       ],
     },
   ],

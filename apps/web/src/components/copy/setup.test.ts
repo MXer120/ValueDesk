@@ -9,6 +9,26 @@ import {
   DEFAULT_SETUP, COPY_BUILDER_TENTHS_BPS, TAKER_RATE, fmtRate, fmtSignedPct, fmtSize, largestPosition,
   normaliseSetup, parseCoins, parseSetup, readTarget, toCopySettings, windowStart, workedExample, type SetupState,
 } from './setup';
+import { setNumStyle } from '../../numStyle';
+import { fmtRate as rate, fmtSignedPct as signedPct, fmtSize as size } from './setup';
+
+test('formatting in the default number format (1.234,56): trimmed sizes keep their decimal comma', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(rate(0.0004), '0,040%');
+    assert.equal(signedPct(0.1234), '+12,34%');
+    assert.equal(signedPct(0), '0,00%');
+    assert.equal(size(18_420), '18.420');
+    assert.equal(size(2.5), '2,5');
+    assert.equal(size(0.0213), '0,0213');
+    assert.equal(size(1234.4), '1.234');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 const setup = (o: Partial<SetupState> = {}): SetupState => ({ ...DEFAULT_SETUP, ...o });
 

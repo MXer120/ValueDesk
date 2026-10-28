@@ -35,7 +35,7 @@ import { EXTRA_WIDGET_IDS, faceFor } from './widgetCatalog';
 import { SourceWidget } from './sourceWidgets';
 import { LiveFeed } from '../components/livefeed/LiveFeed';
 import { FedLive } from '../components/fedlive/FedLive';
-import { FedWatch } from '../components/macro/FedWatch';
+import { FOMC_ODDS_ON, FedWatch } from '../components/macro/FedWatch';
 import { IndicatorWidget } from '../components/macro/IndicatorView';
 import { EtfFlows } from '../components/macro/EtfFlows';
 import { NewsFeed } from '../components/news/NewsFeed';
@@ -446,7 +446,8 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
       minH: quick ? 12 : 8,
       pad: !quick && !own,
       scroll: own ? 'hidden' : 'auto',
-      when: quick ? (_c, bp) => !isNarrow(bp) : undefined,
+      // The FOMC odds are off until the markets license them (FedWatch.tsx).
+      when: quick ? (_c, bp) => !isNarrow(bp) : id === 'fedwatch' ? () => FOMC_ODDS_ON : undefined,
       render: (c) => {
         if (id === 'sizecalc') return <LiveSizeCalc price={c.price} />;
         if (id === 'livefeed') return <LiveFeed />;

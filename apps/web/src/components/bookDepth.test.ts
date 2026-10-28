@@ -28,6 +28,10 @@ import {
   type RenderedLevel,
 } from './bookDepth';
 import { groupingSteps } from './bookGroup';
+import { setNumStyle } from '../numStyle';
+
+// These figures are written in the 1,234.56 format; the default (1.234,56) has its own test at the end.
+setNumStyle('comma-dot');
 
 const close = (a: number, b: number, eps = 1e-9) =>
   assert.ok(Math.abs(a - b) <= eps * Math.max(1, Math.abs(b)), `${a} !~ ${b}`);
@@ -469,3 +473,15 @@ for (const mk of MARKETS) {
     });
   }
 }
+
+test('the default 1.234,56 format: the same exact digits, its own marks', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(fmtNotional(171242255.4), '171.242.255');
+    assert.equal(fmtNotional('1004.5'), '1.005', 'half-up on the decimal digits, as in 1,234.56');
+    assert.equal(fmtNotional(2.5), '3');
+    assert.equal(fmtPrice('83840.5', '0.1'), '83.840,5');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});

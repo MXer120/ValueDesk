@@ -11,9 +11,10 @@ import { CoinIcon } from '../../CoinIcon';
 import { squarify } from '../cohorts/Treemap';
 import { fmtPx, fmtUsdShort } from '../model';
 import { heatTone, type MarketRow } from './model';
+import { fmtFixed } from '../../../numStyle';
 
 const GAP = 2;
-const pct = (v: number | null) => (v === null ? DASH : `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}%`);
+const pct = (v: number | null) => (v === null ? DASH : `${v >= 0 ? '+' : '−'}${fmtFixed(Math.abs(v), 2)}%`);
 
 function useBoxSize<T extends HTMLElement>(): [RefObject<T>, { w: number; h: number }] {
   const ref = useRef<T>(null);

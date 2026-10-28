@@ -13,7 +13,7 @@ export function BrakeBanner({ health }: { health: { brake?: unknown } | null | u
     <div className="banner warn" role="alert">
       <div className="banner-inner">
         <span className="banner-text">
-          {what} on ValueDesk: {b.reason} <span className="muted">Your open positions and the stops resting on SoDEX are not touched.</span>
+          {what} on ValueDesk: {b.reason} <span className="muted">Your open positions and the stops resting on SoDEX are not touched{b.trading ? ', and you can still close positions, cancel orders and withdraw' : ''}.</span>
         </span>
       </div>
     </div>

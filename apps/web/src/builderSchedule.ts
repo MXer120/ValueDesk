@@ -13,6 +13,7 @@
  * COPY_LADDER is the copy-trading schedule from the same doc. Nothing charges
  * it: there is no copy executor, and it stays a displayed table.
  */
+import { fmtNum } from './numStyle';
 export interface BuilderTier {
   minVolumeUsd: number;
   perps: number;
@@ -42,7 +43,7 @@ export const COPY_LADDER: readonly CopyTier[] = [
   { minVolumeUsd: 10_000_000, fee: 10 },
 ];
 
-const usdComma = (n: number): string => `$${Math.round(n).toLocaleString('en-US')}`;
+const usdComma = (n: number): string => `$${fmtNum(Math.round(n))}`;
 
 /** Band label. The first row is everything under the next milestone. */
 export function builderVolumeLabel(index: number): string {

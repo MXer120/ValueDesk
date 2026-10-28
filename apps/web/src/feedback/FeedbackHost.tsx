@@ -5,13 +5,14 @@
  * replies.
  *
  * THE REPLIES. While the tab is visible, every POLL_MS and whenever it comes back
- * into view, this browser asks the server how many replies its chats have
- * (threads.ts pollThreads - one small request for all of them, none at all
- * without a chat): by each thread token it keeps, and - with the connected
- * wallet's session (session.ts) - the wallet's chat, in place of the tokens it
- * absorbed. A reply not announced yet becomes a row in the bell (notices.ts,
- * kind `reply`; the row opens the chat) and a toast - once per reply. With the
- * chat open on that conversation the dialog shows it instead.
+ * into view, a browser signed in with the connected wallet (session.ts) asks how
+ * many replies the wallet's chat has (threads.ts pollWallet). A reply not
+ * announced yet becomes a row in the bell (notices.ts, kind `reply`; the row
+ * opens the chat) and a toast - once per reply. With the chat open the dialog
+ * shows it instead. Without the signature nothing is asked: the server tells
+ * nothing about a chat, not even a count; the bell only carries the generic
+ * "sign in to see replies" row the dialog leaves after an unsigned send
+ * (FeedbackDialog.tsx).
  *
  * The dialog's code (and the seed-phrase word list it checks against) loads on
  * the first open, not with the app.
@@ -24,22 +25,20 @@ import { OPEN_FEEDBACK_EVENT, type OpenFeedback } from './FeedbackButton';
 import { FeedbackMenu } from './FeedbackMenu';
 import { connectedWallet } from './context';
 import { heldSession, markSessionSeen } from './session';
-import { REPLY_EVENT, markNotified, pollThreads, threads, unannounced } from './threads';
+import { REPLY_EVENT, pollWallet } from './threads';
 
 const FeedbackDialog = lazy(() => import('./FeedbackDialog').then((m) => ({ default: m.FeedbackDialog })));
 
 export const POLL_MS = 60_000;
 
-/** What one poll found to announce: per chat (a thread token, or 'wallet'), the replies not announced yet. Exported for tests. */
+/** What one poll found to announce: the signed-in wallet's replies not announced yet (none without a session). Exported for tests. */
 export async function findNewReplies(wallet: string | null, f: typeof fetch = fetch): Promise<Array<{ ref: string; owner: number; fresh: number; mark: () => void }> | null> {
   const session = heldSession(wallet);
-  // A token whose chat this wallet absorbed is asked through the wallet; any other token as itself.
-  const list = threads().filter((t) => !(session && t.wallet === session.owner));
-  if (!list.length && !session) return [];
-  const r = await pollThreads(list.map((t) => t.token), session?.token ?? null, f);
+  if (!session) return [];
+  const r = await pollWallet(session.token, f);
   if (!r) return null;
-  const out = unannounced(list, r.threads).map((x) => ({ ref: x.token, owner: x.owner, fresh: x.fresh, mark: () => markNotified(x.token, x.owner) }));
-  if (session && r.wallet) {
+  const out: Array<{ ref: string; owner: number; fresh: number; mark: () => void }> = [];
+  if (r.wallet) {
     const known = Math.max(session.notifiedOwner, session.seenOwner);
     const count = r.wallet.owner;
     if (count > known) out.push({ ref: 'wallet', owner: count, fresh: count - known, mark: () => markSessionSeen(session.owner, count, { notifiedOnly: true }) });

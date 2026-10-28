@@ -43,6 +43,7 @@
  * and states its own chrome in OrderEntry.css. Those five rules in styles.css
  * now match nothing and can be deleted by whoever owns that file.
  */
+import { fmtFixed, fmtNum, toInputText } from '../numStyle';
 import { Suspense, lazy, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { api, type Engine, type OrderBook, type Symbol } from '../api';
@@ -1386,7 +1387,7 @@ export function OrderEntry({
   const draftPx = limitPx ?? (num(stopPrice) > 0 ? num(stopPrice) : effectivePrice);
   const draftQty = liveQty > 0
     ? sizeUnit === 'quote' && draftPx > 0
-      ? ` · $${(liveQty * draftPx).toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+      ? ` · $${fmtNum(liveQty * draftPx, { maximumFractionDigits: 2 })}`
       : ` · ${fmtQty(liveQty, sym?.stepSize)} ${coinLabel(sym?.baseCoin) || ''}`.trimEnd()
     : '';
   const draftLines: DraftLine[] = [];
@@ -1946,10 +1947,10 @@ export function OrderEntry({
                 id={`${uid}-price`}
                 autoComplete="off"
                 className="oe-input"
-                value={price}
-                onChange={(e) => onPrice(tickInput(e.target.value, sym?.tickSize))}
+                value={toInputText(price)}
+                onChange={(e) => onPrice(tickInput(e.target.value, sym?.tickSize, price))}
                 inputMode="decimal"
-                placeholder="0.00"
+                placeholder={toInputText('0.00')}
               />
               {quoteLabel && <span className="oe-suffix">{quoteLabel}</span>}
               {/* Fills the field with the real mid, and says so: it is disabled
@@ -1978,10 +1979,10 @@ export function OrderEntry({
                   id={`${uid}-stop`}
                   autoComplete="off"
                   className="oe-input"
-                  value={stopPrice}
-                  onChange={(e) => setStopPrice(tickInput(e.target.value, sym?.tickSize))}
+                  value={toInputText(stopPrice)}
+                  onChange={(e) => setStopPrice(tickInput(e.target.value, sym?.tickSize, stopPrice))}
                   inputMode="decimal"
-                  placeholder="0.00"
+                  placeholder={toInputText('0.00')}
                 />
                 {quoteLabel && <span className="oe-suffix">{quoteLabel}</span>}
               </div>
@@ -2032,13 +2033,13 @@ export function OrderEntry({
               id={`${uid}-size`}
               autoComplete="off"
               className="oe-input"
-              value={sizeInput}
+              value={toInputText(sizeInput)}
               onChange={(e) => {
                 sizeBySlider.current = false;
-                setSizeInput(decimalInput(e.target.value));
+                setSizeInput(decimalInput(e.target.value, { prev: sizeInput }));
               }}
               inputMode="decimal"
-              placeholder="0.00" 
+              placeholder={toInputText('0.00')}
             />
             {/* TWO units, so a toggle rather than a select: a dropdown that
                 always holds exactly two options is two clicks to do what one
@@ -2271,8 +2272,8 @@ export function OrderEntry({
                     id={`${uid}-tp`}
                     autoComplete="off"
                     className="oe-input"
-                    value={tpPrice}
-                    onChange={(e) => setTpPrice(tickInput(e.target.value, sym?.tickSize))}
+                    value={toInputText(tpPrice)}
+                    onChange={(e) => setTpPrice(tickInput(e.target.value, sym?.tickSize, tpPrice))}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2297,8 +2298,8 @@ export function OrderEntry({
                     id={`${uid}-sl`}
                     autoComplete="off"
                     className="oe-input"
-                    value={slPrice}
-                    onChange={(e) => setSlPrice(tickInput(e.target.value, sym?.tickSize))}
+                    value={toInputText(slPrice)}
+                    onChange={(e) => setSlPrice(tickInput(e.target.value, sym?.tickSize, slPrice))}
                     inputMode="decimal"
                     placeholder="0"
                   />
@@ -2429,7 +2430,7 @@ export function OrderEntry({
                 onClick={() => { setSlipDraft(pctAsUnit(num(maxSlip), slipU)); setSlipOpen((v) => !v); }}
               >
                 <span className={slipTone(estSlip, Math.min(maxSlipN, slipCap), liveQty > 0)}>
-                  Est: {estSlip === null ? DASH : `${estSlip.toFixed(liveQty > 0 ? 4 : 2)}%`}
+                  Est: {estSlip === null ? DASH : `${fmtFixed(estSlip, liveQty > 0 ? 4 : 2)}%`}
                 </span>
                 <span className="oe-out__sep">/</span>
                 <span>Max {fmtSlip(Math.min(maxSlipN > 0 ? maxSlipN : 0.1, slipCap), slipU)}</span>
@@ -2465,7 +2466,7 @@ export function OrderEntry({
                       autoComplete="off"
                       inputMode="decimal"
                       aria-label={`Maximum slippage in ${slipU === 'bp' ? 'basis points' : 'percent'}`}
-                      value={slipDraft}
+                      value={toInputText(slipDraft)}
                       onChange={(e) => {
                         const capU = slipU === 'bp' ? slipCap * 100 : slipCap;
                         const s = clampSlipDraft(e.target.value, capU);

@@ -10,6 +10,7 @@ import { VENUE_LABEL, type Venue } from '../../../vsApi';
 import { DASH } from '../../../format';
 import { VenueLogo } from '../../VenueLogo';
 import { fmtUsdShort } from '../model';
+import { fmtFixed } from '../../../numStyle';
 import { pollEvery } from '../../../exchange/visibility';
 import { revalidating } from '../../../serverFetch';
 
@@ -93,7 +94,7 @@ export function Split({ long, short }: { long: number; short: number }) {
   const share = longShare(long, short);
   return (
     <div className="coh-split">
-      <div className="pf-split" role="img" aria-label={share === null ? 'No open positions' : `${(share * 100).toFixed(1)}% of open exposure is long`}>
+      <div className="pf-split" role="img" aria-label={share === null ? 'No open positions' : `${fmtFixed(share * 100, 1)}% of open exposure is long`}>
         <span className="pf-split__fill" style={{ transform: `scaleX(${share ?? 0.5})` }} />
       </div>
       <div className="coh-split__figs">

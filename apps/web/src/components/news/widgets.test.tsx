@@ -11,7 +11,7 @@ import { installViteStubs, staticMarkup } from '../macro/testEnv';
 installViteStubs({
   stored: {
     // Every news source switched off in Settings (shared by every copy of the widget).
-    'vs.news.sources': { sosovalue: false, whitehouse: false, watcherguru: false },
+    'vs.news.sources': { sosovalue: false, whitehouse: false },
     'vs.news.feed.cal': 'calendar',
     'vs.news.feed.hot': 'hot',
     'vs.news.feed.bad': 'no-such-feed',
@@ -74,8 +74,8 @@ test('Calendar: key releases by default; a copy that chose All keeps it', () => 
   assert.deepEqual(radios(render(createElement(EconCalendar, { instance: 'all' })), 'Which releases'), ['Key releases:false', 'All:true']);
 });
 
-test('Rate odds: loading until the odds arrive; cuts green, hold grey, hikes red, deeper moves stronger', () => {
-  assert.match(render(createElement(FedWatch, {})), /role="status"[^>]*>.*Loading…/);
+test('Rate odds: off until the markets license their prices; cuts green, hold grey, hikes red, deeper moves stronger', () => {
+  assert.match(render(createElement(FedWatch, {})), /FOMC rate odds are off/);
   assert.equal(outcomeColor(0), '#9aa0a6');
   assert.equal(outcomeColor(-25), '#00b481');
   assert.equal(outcomeColor(-50), '#0a8f68');

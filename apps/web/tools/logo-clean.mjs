@@ -23,7 +23,7 @@
  *
  * MINIFY, LOSSLESSLY. Only bytes that cannot change the rendering go:
  *   - CR before LF (an XML parser normalises line ends itself);
- *   - the XML declaration, comments, the DOCTYPE, <metadata>, and editor
+ *   - the XML declaration, comments (not one carrying rights information), the DOCTYPE, <metadata>, and editor
  *     namespaces (inkscape:, sodipodi:, sketch:);
  *   - whitespace between tags, when the file has no text content;
  *   - redundant separators and zeros in path data and point lists ("0.50" ->
@@ -175,7 +175,9 @@ export function minifySvg(input) {
   let svg = input;
   svg = svg.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'); // XML reads CRLF as LF anyway (XML 1.0 s2.11)
   svg = svg.replace(/<\?(?!xml-stylesheet)[\s\S]*?\?>/g, ''); // XML declaration, processing instructions
-  svg = svg.replace(/<!--[\s\S]*?-->/g, '');
+  // Comments go, except rights information (a copyright, licence or "by <author>" note): removing
+  // that may touch § 95c UrhG, and the licence review (2026-10-28) asks to keep it.
+  svg = svg.replace(/<!--[\s\S]*?-->/g, (c) => (/©|\(c\)|copyright|licen[cs]e|trademark|all rights|\bby\s+\S/i.test(c) ? c : ''));
   // A DOCTYPE with an internal subset may declare entities the document uses (&ns_svg;): kept.
   svg = svg.replace(/<!DOCTYPE[^[>]*>/gi, '');
   svg = svg.replace(/<metadata\b[\s\S]*?<\/metadata\s*>/gi, '').replace(/<metadata\b[^>]*\/>/gi, '');

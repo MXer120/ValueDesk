@@ -18,6 +18,7 @@
  * indistinguishable from a minus sign in a column of signed numbers, so
  * everything user-visible goes through `` below.
  */
+import { fmtFixed, fmtNum } from '../numStyle';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useLatched } from './motion';
 import { createPortal, flushSync } from 'react-dom';
@@ -93,10 +94,10 @@ const log = logger('book');
 function fmtCompact(v: number): string {
   if (!Number.isFinite(v)) return DASH;
   const a = Math.abs(v);
-  if (a >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (a >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return v.toFixed(2);
+  if (a >= 1e9) return `${fmtFixed(v / 1e9, 2)}B`;
+  if (a >= 1e6) return `${fmtFixed(v / 1e6, 2)}M`;
+  if (a >= 1e3) return `${fmtFixed(v / 1e3, 2)}K`;
+  return fmtFixed(v, 2);
 }
 
 // --- drawn glyphs ------------------------------------------------------------
@@ -331,7 +332,7 @@ function fmtSigned(v: unknown, dp: number): string {
   if (v === undefined || v === null || v === '') return DASH;
   const n = typeof v === 'number' ? v : Number.parseFloat(String(v));
   if (!Number.isFinite(n)) return DASH;
-  return `${n >= 0 ? '+' : ''}${n.toLocaleString('en-US', { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
+  return `${n >= 0 ? '+' : ''}${fmtNum(n, { minimumFractionDigits: dp, maximumFractionDigits: dp })}`;
 }
 
 // --- shared /tickers snapshot ------------------------------------------------
@@ -770,7 +771,7 @@ export function TickerBar({
            not say). Unsigned when positive, like the reference. */
         const rate = funding !== undefined && funding !== null && funding !== '' ? num(funding) : NaN;
         const per8h = rate * ((8 * 3600) / (sym?.fundingInterval && sym.fundingInterval > 0 ? sym.fundingInterval : 3600));
-        const pct4 = (v: number) => `${v < 0 ? '-' : ''}${Math.abs(v * 100).toFixed(4)}%`;
+        const pct4 = (v: number) => `${v < 0 ? '-' : ''}${fmtFixed(Math.abs(v * 100), 4)}%`;
         return (
           <Stat
             key={id}
@@ -1887,7 +1888,7 @@ export function Book({
   /** Percent to three places, unsigned - a spread has no direction to report. */
   const spreadPctStr = spread === null || midN <= 0
     ? DASH
-    : `${((spread / midN) * 100).toFixed(3)}%`;
+    : `${fmtFixed((spread / midN) * 100, 3)}%`;
   // BASIS POINTS, NOT PERCENT: the mid row's standing figure. bps is the raw
   // L1 spread's own conventional unit (a tenth of what the header shows in
   // the tooltip), and using it here means the recorded history and the live
@@ -2774,7 +2775,7 @@ export function Book({
               the percentages move, so only the percentages are coloured. */}
           <span className="mkt-ratio-l">
             <span className="mkt-ratio-k">B</span>
-            <span className="mkt-ratio-v bid">{haveRatio ? `${bidPct.toFixed(2)}%` : DASH}</span>
+            <span className="mkt-ratio-v bid">{haveRatio ? `${fmtFixed(bidPct, 2)}%` : DASH}</span>
           </span>
           {bsRecording ? (
             // Not a fixed [0, 100] axis: real bid share moves in a narrow band
@@ -2792,7 +2793,7 @@ export function Book({
                 { color: 'var(--neg)', label: 'Sell', map: sellShare },
               ]}
               band={BS_BAND}
-              valueLabel={(v) => `${v.toFixed(2)}%`}
+              valueLabel={(v) => `${fmtFixed(v, 2)}%`}
               empty="Recording the buy/sell share…"
             />
           ) : (
@@ -2807,7 +2808,7 @@ export function Book({
             </span>
           )}
           <span className="mkt-ratio-l">
-            <span className="mkt-ratio-v ask">{haveRatio ? `${(100 - bidPct).toFixed(2)}%` : DASH}</span>
+            <span className="mkt-ratio-v ask">{haveRatio ? `${fmtFixed(100 - bidPct, 2)}%` : DASH}</span>
             <span className="mkt-ratio-k">S</span>
           </span>
         </button>

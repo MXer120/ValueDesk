@@ -186,6 +186,7 @@ import './Portfolio.css';
 import {
   Card, EquityCurve, Group, Row, Stat, fmtCompactUsd, fmtDay, type CurveWindow,
 } from './portfolio/parts';
+import { fmtFixed } from '../numStyle';
 
 /* The design system and the curve live in ./portfolio/parts (so that using a
    Card does not load this page); they are still exported from here. */
@@ -1201,7 +1202,7 @@ export const fmtSigned = (v: number | null | undefined, dp = 2): string => {
 };
 
 export const fmtRatioPct = (v: number | null | undefined, dp = 2): string =>
-  v === null || v === undefined || !Number.isFinite(v) ? DASH : `${(v * 100).toFixed(dp)}%`;
+  v === null || v === undefined || !Number.isFinite(v) ? DASH : `${fmtFixed(v * 100, dp)}%`;
 
 /**
  * A walked total WITH its coin, always.
@@ -1302,7 +1303,7 @@ export function fmtCompactSigned(v: number): string {
   const a = Math.abs(v);
   const sign = v > 0 ? '+' : v < 0 ? '\u2212' : '';
   // Each step at the figure that would round up into the next ($999.6 is $1.0K, not $1000).
-  const body = a >= 999_950 ? `${(a / 1e6).toFixed(1)}M` : a >= 999.5 ? `${(a / 1e3).toFixed(1)}K` : a >= 99.995 ? a.toFixed(0) : a.toFixed(2);
+  const body = a >= 999_950 ? `${fmtFixed(a / 1e6, 1)}M` : a >= 999.5 ? `${fmtFixed(a / 1e3, 1)}K` : a >= 99.995 ? fmtFixed(a, 0) : fmtFixed(a, 2);
   return `${sign}$${body}`;
 }
 
@@ -1342,7 +1343,7 @@ export function PeriodSeg({ period, onPeriod, label }: {
 export function Meter({ value, tone, label }: { value: number; tone: string; label?: string }) {
   const v = Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
   return (
-    <div className="pf-meter" role="img" aria-label={label ?? `${(v * 100).toFixed(1)}%`}>
+    <div className="pf-meter" role="img" aria-label={label ?? `${fmtFixed(v * 100, 1)}%`}>
       <span className={`pf-meter__fill pf-meter__fill--${tone}`} style={{ transform: `scaleX(${v})` }} />
     </div>
   );

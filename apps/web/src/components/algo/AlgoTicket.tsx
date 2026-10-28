@@ -23,6 +23,7 @@
  *
  * The draft and its spec live in draft.ts; where it runs, in executor.ts.
  */
+import { fmtFixed, fmtNum, fmtPlain, toInputText } from '../../numStyle';
 import { LIVE_ALGOS, LIVE_ALGOS_OFF } from '../../algo/liveAlgos';
 import { createContext, forwardRef, useContext, useEffect, useId, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import {
@@ -80,6 +81,10 @@ import {
   legs,
   loadDraft,
   marketOf,
+  parsePriceList,
+  parsePrices,
+  priceListInput,
+  PRICE_LIST_SEP,
   n,
   offersExits,
   redWarnings,
@@ -116,7 +121,7 @@ import './algo.css';
 export { draftToSpec, marketOf, offersExits, type TicketShared } from './draft';
 
 /** A price level as the preview shows it (SoDEX snaps it to the tick when it is placed). */
-const fmtLevel = (x: number): string => x.toLocaleString('en-US', { maximumFractionDigits: Math.abs(x) >= 1000 ? 1 : Math.abs(x) >= 1 ? 4 : 6 });
+const fmtLevel = (x: number): string => fmtNum(x, { maximumFractionDigits: Math.abs(x) >= 1000 ? 1 : Math.abs(x) >= 1 ? 4 : 6 });
 
 /** The spec fields whose errors a kind shows under its own inline fields (the rest go under the preview). */
 const INLINE_ERRORS: Record<UiKind, readonly string[]> = {
@@ -165,8 +170,10 @@ const wholeInput = (raw: string, signed: boolean): string => {
  * the left, the value right-aligned, the unit on the right (a word, or a unit
  * picker drawn like the Amount field's). An error shows under it, in words.
  */
-function Field({ label, value, onChange, suffix, placeholder, int = false, signed = false, title, err }: {
+function Field({ label, value, onChange, suffix, placeholder, int = false, signed = false, list = false, title, err }: {
   label: string; value: string; onChange: (v: string) => void; suffix?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; title?: string; err?: string;
+  /** A list of numbers (the DCA's "Then at"): kept as typed, read by parsePriceList - not one number's filter. */
+  list?: boolean;
 }) {
   const id = useId();
   return (
@@ -177,12 +184,12 @@ function Field({ label, value, onChange, suffix, placeholder, int = false, signe
           id={id}
           className="oe-input"
           autoComplete="off"
-          inputMode={int ? 'numeric' : 'decimal'}
-          value={value}
+          inputMode={int ? 'numeric' : list ? 'text' : 'decimal'}
+          value={int || list ? value : toInputText(value)}
           placeholder={placeholder ?? ''}
           aria-invalid={err ? true : undefined}
           aria-describedby={err ? `${id}-err` : undefined}
-          onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed }))}
+          onChange={(e) => onChange(list ? priceListInput(e.target.value) : int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed, prev: value }))}
         />
         {suffix === undefined || suffix === '' ? null : typeof suffix === 'string' ? <span className="oe-suffix">{suffix}</span> : suffix}
       </div>
@@ -513,7 +520,9 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const needsAmount = usesAmount(kind, { trailWhole: d.trailWhole, thenClose: d.then === 'close', twapClose: d.twapClose });
   const amountMissing = needsAmount && !(Number(p.quantity) > 0);
   // Field errors are shown at once; the ticket's own Amount speaks for itself when it is empty.
-  const fieldErrors: Record<string, string> = check.errors;
+  // A typed DCA list with an item that cannot be read (or may be two prices run together): said under the box, and nothing starts.
+  const listError = kind === 'dca' && d.dcaLevels === 'list' ? parsePriceList(d.dcaPrices).error : null;
+  const fieldErrors: Record<string, string> = listError ? { ...check.errors, prices: listError } : check.errors;
   const inline = INLINE_ERRORS[kind];
   const err = (...keys: string[]) => errFor(fieldErrors, ...keys);
   const restErrors = [
@@ -647,7 +656,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
 
   const rates = feeRates(market, feeFraction);
   // The ValueDesk fee, said once: the builder fee in the browser, the copy fee on an executor.
-  const feeBp = place === 'browser' ? (p.builderFee > 0 ? `ValueDesk fee ${(p.builderFee * 10_000).toFixed(1)} bp` : null) : execFee ? `ValueDesk fee up to ${(execFee / 10).toFixed(1)} bp` : null;
+  const feeBp = place === 'browser' ? (p.builderFee > 0 ? `ValueDesk fee ${fmtFixed(p.builderFee * 10_000, 1)} bp` : null) : execFee ? `ValueDesk fee up to ${fmtFixed(execFee / 10, 1)} bp` : null;
   // What the engine will run: a DCA is a scale ladder.
   const pk: AlgoKind = check.spec?.kind ?? ek;
 
@@ -658,7 +667,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
   const qtyText = (q: number, px?: number | null) => {
     if (!(q > 0)) return '';
     const at = px ?? mid ?? 0;
-    return p.sizeUnit === 'usd' && at > 0 ? ` · $${(q * at).toLocaleString('en-US', { maximumFractionDigits: 2 })}` : ` · ${fmtQty(q, p.sym?.stepSize)} ${base}`.trimEnd();
+    return p.sizeUnit === 'usd' && at > 0 ? ` · $${fmtNum(q * at, { maximumFractionDigits: 2 })}` : ` · ${fmtQty(q, p.sym?.stepSize)} ${base}`.trimEnd();
   };
   const ticketQty = Number(p.quantity) > 0 ? Number(p.quantity) : 0;
   const draftLines: DraftLine[] = [];
@@ -871,7 +880,7 @@ const AlgoTicket = forwardRef<AlgoTicketHandle, Props>(function AlgoTicket(p, re
                   <Field label={p.side === 'buy' ? 'Buys' : 'Sells'} value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} title="How many orders in all, the first included" err={err('orders')} />
                 </>
               ) : (
-                <Field label="Then at" value={d.dcaPrices} placeholder={mid ? `e.g. ${roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03))}, ${roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06))}` : 'prices'} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} suffix="USD" title="The later orders' prices, separated by commas" err={err('prices', 'orders')} />
+                <Field label="Then at" list value={d.dcaPrices} placeholder={mid ? `e.g. ${toInputText(roundTick(mid * (p.side === 'buy' ? 0.97 : 1.03)))}${PRICE_LIST_SEP} ${toInputText(roundTick(mid * (p.side === 'buy' ? 0.94 : 1.06)))}` : `prices, separated by ${PRICE_LIST_SEP}`} onChange={(v) => set({ dcaPrices: v })} suffix="USD" title={`The later orders' prices, separated by “${PRICE_LIST_SEP}”`} err={err('prices', 'orders')} />
               )}
               {/* Every order the same unless the settings window chose to grow them (Weighted: its curve is there only). */}
               {d.dcaSizing === 'geometric' && <Field label="Size ×" value={d.dcaMult} onChange={(v) => set({ dcaMult: v })} suffix="per order" title="Each next order this many times the one before (Settings: sizing)" err={err('skew', 'weights')} />}
@@ -1272,7 +1281,7 @@ const SizeCtx = createContext<{ unit: 'coin' | 'usd'; setUnit?: (u: 'coin' | 'us
 /** "1× to 2.5×": a weighted curve's smallest and largest size. */
 const curveSpan = (c: Draft['dcaCurve']): string => {
   const ys = c.map((q) => q[1]);
-  return `${Number(Math.min(...ys).toFixed(2))}× to ${Number(Math.max(...ys).toFixed(2))}×`;
+  return `${fmtPlain(Number(Math.min(...ys).toFixed(2)))}× to ${fmtPlain(Number(Math.max(...ys).toFixed(2)))}×`;
 };
 
 const DCA_EACH_HINT: Record<DcaSizing, string> = {
@@ -1344,8 +1353,8 @@ function QtyField({ title, hint, value, onChange, placeholder, err, ticket = fal
   );
 }
 
-function AField({ title, hint, value, onChange, unit, placeholder, int = false, signed = false, err }: {
-  title: string; hint: ReactNode; value: string; onChange: (v: string) => void; unit?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; err?: string;
+function AField({ title, hint, value, onChange, unit, placeholder, int = false, signed = false, list = false, err }: {
+  title: string; hint: ReactNode; value: string; onChange: (v: string) => void; unit?: ReactNode; placeholder?: string; int?: boolean; signed?: boolean; list?: boolean; err?: string;
 }) {
   const id = useId();
   return (
@@ -1355,12 +1364,12 @@ function AField({ title, hint, value, onChange, unit, placeholder, int = false, 
           <input
             id={id}
             autoComplete="off"
-            inputMode={int ? 'numeric' : 'decimal'}
-            value={value}
+            inputMode={int ? 'numeric' : list ? 'text' : 'decimal'}
+            value={int || list ? value : toInputText(value)}
             placeholder={placeholder ?? ''}
             aria-invalid={err ? true : undefined}
             aria-describedby={err ? `${id}-err` : undefined}
-            onChange={(e) => onChange(int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed }))}
+            onChange={(e) => onChange(list ? priceListInput(e.target.value) : int ? wholeInput(e.target.value, signed) : decimalInput(e.target.value, { signed, prev: value }))}
           />
           {unit === undefined || unit === '' ? null : typeof unit === 'string' ? <span className="algo-sf__unit">{unit}</span> : unit}
         </div>
@@ -1513,7 +1522,7 @@ function TicketSettings({ kind, d, set, side, base, mid, dcaFirstLive, roundTick
             <Row title="Amount" hint={kind === 'trailing' ? 'How much of the position it closes when it fires: in the coin or in USD.' : 'The whole order: in the coin or in USD at the price now.'}>
               <div className="algo-pair">
                 <div className="algo-sf">
-                  <input autoComplete="off" inputMode="decimal" aria-label={`Amount in ${base}`} value={quantity} placeholder="0" onChange={(e) => onQuantity(decimalInput(e.target.value))} />
+                  <input autoComplete="off" inputMode="decimal" aria-label={`Amount in ${base}`} value={toInputText(quantity)} placeholder="0" onChange={(e) => onQuantity(decimalInput(e.target.value, { prev: quantity }))} />
                   <span className="algo-sf__unit">{base}</span>
                 </div>
                 <div className="algo-sf">
@@ -1521,7 +1530,7 @@ function TicketSettings({ kind, d, set, side, base, mid, dcaFirstLive, roundTick
                     autoComplete="off"
                     inputMode="decimal"
                     aria-label="Amount in USD"
-                    value={usdDraft ?? (Number(quantity) > 0 && mid ? (Number(quantity) * mid).toFixed(2) : '')}
+                    value={toInputText(usdDraft ?? (Number(quantity) > 0 && mid ? (Number(quantity) * mid).toFixed(2) : ''))}
                     placeholder="0"
                     onFocus={() => setUsdDraft(Number(quantity) > 0 && mid ? (Number(quantity) * mid).toFixed(2) : '')}
                     onBlur={() => setUsdDraft(null)}
@@ -1613,14 +1622,14 @@ function TicketSettings({ kind, d, set, side, base, mid, dcaFirstLive, roundTick
               <AField title={side === 'buy' ? 'Buys' : 'Sells'} hint="How many orders in all, the first included." value={d.dcaOrders} int onChange={(v) => set({ dcaOrders: v })} err={err('orders')} />
             </>
           ) : (
-            <AField title="Then at" hint="The later orders’ prices, separated by commas." value={d.dcaPrices} onChange={(v) => set({ dcaPrices: v.replace(/[^0-9.,;\s]/g, '') })} unit="USD" err={err('prices', 'orders')} />
+            <AField title="Then at" list hint={`The later orders’ prices, separated by “${PRICE_LIST_SEP}”.`} value={d.dcaPrices} onChange={(v) => set({ dcaPrices: v })} unit="USD" err={err('prices', 'orders')} />
           )}
           <ASeg title="Sizing" hint="How the orders’ sizes go, one after another." value={d.dcaSizing} onChange={(v) => set({ dcaSizing: v })} options={DCA_SIZINGS} />
           {d.dcaSizing === 'weighted' && (
             <div className="algo-curvewrap">
               <DcaCurve
                 points={d.dcaCurve}
-                orders={d.dcaLevels === 'list' ? d.dcaPrices.split(/[\s,;]+/).filter(Boolean).length + 1 : Number(d.dcaOrders)}
+                orders={d.dcaLevels === 'list' ? parsePrices(d.dcaPrices).length + 1 : Number(d.dcaOrders)}
                 each={Number(d.perOrder) || 0}
                 unit={d.dcaUnit === 'coin' ? base : 'USD'}
                 side={side}
@@ -1988,7 +1997,7 @@ function ABound({ title, hint, value, onValue, then, onThen, err }: {
     <Row title={title} hint={hint} id={id}>
       <div className="algo-ctl">
         <div className={`algo-sf${err ? ' is-bad' : ''}`}>
-          <input id={id} autoComplete="off" inputMode="decimal" value={value} placeholder="none" aria-invalid={err ? true : undefined} onChange={(e) => onValue(decimalInput(e.target.value, {}))} />
+          <input id={id} autoComplete="off" inputMode="decimal" value={toInputText(value)} placeholder="none" aria-invalid={err ? true : undefined} onChange={(e) => onValue(decimalInput(e.target.value, { prev: value }))} />
           <span className="algo-sf__unit">USD</span>
         </div>
         {err && <p className="oe-hint algo-ferr">{err}</p>}
@@ -2333,7 +2342,7 @@ function addLevels(out: Level[], s: AlgoSpec, ctx: { bid: number | null; ask: nu
 function oneLine(kind: UiKind, d: Draft, side: 'buy' | 'sell', quantity: string, base: string): string {
   const verb = side === 'buy' ? 'Buys' : 'Sells';
   const q = Number(quantity) > 0 ? `${quantity} ${base}`.trim() : 'the amount';
-  const x = (s: string) => (s.trim() === '' ? '…' : s);
+  const x = (s: string) => (s.trim() === '' ? '…' : toInputText(s));
   const over = `${x(d.dur)} ${UNIT_NAME[d.durUnit]}`;
   switch (kind) {
     case 'twap':
@@ -2386,7 +2395,7 @@ function Review({ spec, plan, kind, place, location }: { spec: AlgoSpec; plan: A
     ['Order', spec.kind === 'basket' ? `${menuName(kind)} of ${spec.legs.length} markets, ${fmtUsd(plan.notional ?? 0, 2)} in all` : `${menuName(kind)} ${spec.side === 'buy' ? 'buy / long' : 'sell / short'} on ${spec.symbol}`],
   ];
   if (spec.kind === 'dca') rows.push(['Spend', `${spec.orders} × ${fmtUsd(spec.perOrderUsd, 2)}${spec.maxTotalUsd ? `, at most ${fmtUsd(spec.maxTotalUsd, 2)}` : ''}`]);
-  if (spec.kind === 'sweep') rows.push(['Reference', `${sweepRefWords(spec)}, at most ${(spec.slippageBps / 100).toFixed(2)}% from it`]);
+  if (spec.kind === 'sweep') rows.push(['Reference', `${sweepRefWords(spec)}, at most ${fmtFixed(spec.slippageBps / 100, 2)}% from it`]);
   if (plan.endsAt) rows.push(['Until', `${fmtTime(plan.endsAt)} (${fmtDuration(plan.endsAt - plan.startsAt)})`]);
   if (spec.startAt) rows.push(['Starts', fmtTime(spec.startAt)]);
   if (spec.triggerPrice) rows.push(['Starts when the mark reaches', String(spec.triggerPrice)]);
@@ -2423,6 +2432,9 @@ function Review({ spec, plan, kind, place, location }: { spec: AlgoSpec; plan: A
       </dl>
       {plan.warnings.map((w) => (
         <p key={w} className={`oe-hint ${redWarnings(plan).has(w) ? 'algo-err' : 'algo-warn'}`}>{w}</p>
+      ))}
+      {(plan.notes ?? []).map((n) => (
+        <p key={n} className="oe-hint algo-note">{n}</p>
       ))}
     </div>
   );

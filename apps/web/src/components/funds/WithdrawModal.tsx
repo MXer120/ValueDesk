@@ -24,6 +24,7 @@
  * shows the warning under the amount and needs one tick ("It is a wallet, not
  * a deposit address") before the button lights.
  */
+import { fmtDecimalString, toInputText } from '../../numStyle';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Modal } from '../Modal';
 import { getTradingState, subscribeTrading } from '../../trading/session';
@@ -242,9 +243,9 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
       if (amtUnits <= 0n) problem = 'Enter an amount.';
       else if (min && amtUnits < unitsDown(min, dp)) problem = `The minimum on ${(route as ChainRoute).label} is ${min} ${coin?.coin}.`;
       else if (bal && amtUnits > max && max > 0n && !sourceProblem) problem = `More than ${source === 'spot' ? 'SoDEX Spot' : 'your EVM wallet'} holds.`;
-      else if (external && quote && amtUnits <= quote.fee) problem = `The amount must be more than the ${formatUnits(quote.fee, dp)} ${coin?.coin} fee.`;
+      else if (external && quote && amtUnits <= quote.fee) problem = `The amount must be more than the ${fmtDecimalString(formatUnits(quote.fee, dp))} ${coin?.coin} fee.`;
       else if (external && quote && amtUnits > quote.available) {
-        problem = `SoDEX can pay out ${formatUnits(quote.available, dp)} ${coin?.coin} on ${(route as ChainRoute).label} right now.`;
+        problem = `SoDEX can pay out ${fmtDecimalString(formatUnits(quote.available, dp))} ${coin?.coin} on ${(route as ChainRoute).label} right now.`;
       }
     } catch (e) {
       problem = (e as Error).message;
@@ -299,7 +300,9 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
     const [w, f] = s.split('.');
     return f && f.length > 6 ? `${w}.${f.slice(0, 6)}` : s;
   };
-  const feeText = (fee: string | null) => `${fee ?? '0'} ${coin?.coin ?? ''}`.trim();
+  /** `show` as the screen writes it: grouped, in the number format (numStyle.ts). */
+  const showText = (u: bigint) => fmtDecimalString(show(u));
+  const feeText = (fee: string | null) => `${fmtDecimalString(fee ?? '0')} ${coin?.coin ?? ''}`.trim();
 
   const cta = needsKey && !enabled ? 'Enable Trading' : 'Withdraw';
   const ctaText = cta === 'Withdraw' ? `Withdraw to ${external ? (route as ChainRoute).label : 'ValueChain'}` : cta;
@@ -319,7 +322,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
     }
     // The user lock (trading/keyLock.ts) asks again before money leaves; cancel = nothing happens.
     setError(null);
-    if (!(await confirmMoneyMove(owner, `Withdraw ${amount} ${coin.coin}`))) return;
+    if (!(await confirmMoneyMove(owner, `Withdraw ${fmtDecimalString(amount)} ${coin.coin}`))) return;
     setBusy(true);
     setError(null);
     setResult(null);
@@ -338,16 +341,16 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
         onStep: setStep,
       });
       if ('withdrawId' in r) {
-        setResult({ text: `Withdrawal of ${amount} ${coin.coin} to ${(route as ChainRoute).label} submitted.`, track: { txHash: r.txHash, withdrawId: r.withdrawId } });
+        setResult({ text: `Withdrawal of ${fmtDecimalString(amount)} ${coin.coin} to ${(route as ChainRoute).label} submitted.`, track: { txHash: r.txHash, withdrawId: r.withdrawId } });
       } else if ('txHash' in r) {
-        setResult({ text: `Sent ${amount} ${coin.coin} to ${saved?.name ?? short(dest)} on ValueChain.` });
+        setResult({ text: `Sent ${fmtDecimalString(amount)} ${coin.coin} to ${saved?.name ?? short(dest)} on ValueChain.` });
       } else {
-        setResult({ text: `Withdrew ${amount} ${coin.coin} to your ValueChain wallet.` });
+        setResult({ text: `Withdrew ${fmtDecimalString(amount)} ${coin.coin} to your ValueChain wallet.` });
       }
       // On the wallet button (moneyNotice.ts): a chain withdrawal is submitted here, the rest is done.
       announceMoney('withdrawId' in r
-        ? { kind: 'withdraw', status: 'sent', text: `Withdrawal of ${amount} ${coin.coin} submitted` }
-        : { kind: 'withdraw', status: 'done', text: `Withdrawal of ${amount} ${coin.coin} completed` });
+        ? { kind: 'withdraw', status: 'sent', text: `Withdrawal of ${fmtDecimalString(amount)} ${coin.coin} submitted` }
+        : { kind: 'withdraw', status: 'done', text: `Withdrawal of ${fmtDecimalString(amount)} ${coin.coin} completed` });
       markUsed(dest);
       setAmount('');
       setReview(false);
@@ -401,7 +404,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
           <FadeView viewKey={review ? 'review' : 'form'} className="fx-stack">
           {review ? (
             <WithdrawReview
-              amount={show(amtUnits)}
+              amount={showText(amtUnits)}
               unit={coinLabel}
               from={source === 'spot' ? 'SoDEX Spot' : 'Your EVM wallet'}
               chainKey={external ? (route as ChainRoute).key : VALUECHAIN}
@@ -409,8 +412,8 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
               address={dest}
               contact={saved?.name ?? ownLabel ?? null}
               memo={memoRoute ? (noMemo ? '' : memo.trim()) : null}
-              fee={show(feeUnits)}
-              receive={show(receiveUnits)}
+              fee={showText(feeUnits)}
+              receive={showText(receiveUnits)}
               arrivalNote={arrival.verdict === 'confirm' ? arrival.brief : null}
               busy={busy}
               busyText={busyLabel(step)}
@@ -467,7 +470,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
               {min && <span className="fx-min">Min {min} {coinLabel}</span>}
             </div>
             <div className="fx-amount">
-              <input value={amount} onChange={(e) => setAmount(decimalInput(e.target.value))} inputMode="decimal" placeholder="0.00" aria-label="Amount" />
+              <input value={toInputText(amount)} onChange={(e) => setAmount(decimalInput(e.target.value, { prev: amount }))} inputMode="decimal" placeholder="0.00" aria-label="Amount" />
               <span className="fx-amount__unit">{coinLabel}</span>
               <button type="button" className="fx-chip" disabled={!bal} onClick={() => setAmount(max > 0n ? formatUnits(max, dp) : '')}>Max</button>
             </div>
@@ -486,7 +489,7 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
                   {s === 'spot' ? <SodexMark size={26} /> : <WalletMark size={26} />}
                   <span className="fx-srct__t">
                     <b>{s === 'spot' ? 'SoDEX Spot' : 'EVM'}</b>
-                    <small>{bal ? `${show(s === 'spot' ? b.spot : b.evm)} ${coinLabel}` : <Spinner />}</small>
+                    <small>{bal ? `${showText(s === 'spot' ? b.spot : b.evm)} ${coinLabel}` : <Spinner />}</small>
                   </span>
                   <span className="fx-srct__tick" aria-hidden="true"><TickIcon /></span>
                 </button>
@@ -563,8 +566,8 @@ export function WithdrawModal({ open, onClose, address, provider, onEnable, init
           )}
 
           <div className="fx-kv">
-            <div><span>Fee</span><b>{loading || !feeKnown ? <Spinner /> : `${show(feeUnits)} ${coinLabel}`}</b></div>
-            <div><span>You receive</span><b>{loading || !feeKnown ? <Spinner /> : `${show(receiveUnits)} ${coinLabel}`}</b></div>
+            <div><span>Fee</span><b>{loading || !feeKnown ? <Spinner /> : `${showText(feeUnits)} ${coinLabel}`}</b></div>
+            <div><span>You receive</span><b>{loading || !feeKnown ? <Spinner /> : `${showText(receiveUnits)} ${coinLabel}`}</b></div>
           </div>
 
           {problem && <p className="fx-note fx-note--err">{problem}</p>}

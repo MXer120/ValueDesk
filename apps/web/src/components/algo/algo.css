@@ -234,6 +234,8 @@ select.algo-sf__pick option { background: #1c1b1a; }
 
 .algo-err { color: var(--neg); margin: 0; }
 .algo-warn { color: var(--warn); margin: 0; }
+/* What the algo sizes as it runs (plan.notes): information, in the hint's own colour. */
+.algo-note { color: var(--muted); margin: 0; }
 .algo-busy { font-size: var(--fs-xs); color: var(--muted); }
 
 .algo-review dl { margin: 0 0 var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-1); }

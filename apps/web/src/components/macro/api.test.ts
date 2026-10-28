@@ -5,6 +5,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fmtUsd, fmtValue, macroApi } from './api';
+import { setNumStyle } from '../../numStyle';
+
+setNumStyle('comma-dot');
+
+test('fmtUsd / fmtValue in the default number format (1.234,5)', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(fmtUsd(-310_500_000), '−$310,5M');
+    assert.equal(fmtValue('k', 1234.6), '+1.235k');
+    assert.equal(fmtValue('%', 2.95, 2), '2,95%');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});
 
 test('fmtUsd: a flow in B, M, K or dollars, signed, the minus sign not a hyphen', () => {
   assert.equal(fmtUsd(1_240_000_000), '+$1.24B');

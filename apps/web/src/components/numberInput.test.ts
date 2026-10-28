@@ -57,3 +57,39 @@ test('converted sizes lose the padding toFixed adds, never significant digits', 
   assert.equal(trimZeros('0.00000'), '0');
   assert.equal(trimZeros('10.50'), '10.5');
 });
+
+import { setNumStyle } from '../numStyle';
+
+test('typing: either mark is the decimal point, in any number format', () => {
+  for (const style of ['dot-comma', 'comma-dot'] as const) {
+    setNumStyle(style);
+    assert.equal(decimalInput('1,5'), '1.5', style);
+    assert.equal(decimalInput('1.5'), '1.5', style);
+    assert.equal(decimalInput('1,000'), '1.000', `${style}: a keystroke never makes a thousands mark`);
+    assert.equal(decimalInput('1,5.'), '1.5', `${style}: a mark typed after the point is dropped`);
+    assert.equal(decimalInput('1,234.'), '1.234', `${style}: 1.234 + "." stays 1.234, never 1234`);
+  }
+  setNumStyle('dot-comma');
+});
+
+test('paste: read strictly; an ambiguous figure is refused and the field keeps its value', () => {
+  setNumStyle('dot-comma');
+  assert.equal(decimalInput('1.234,56', { pasted: true }), '1234.56');
+  assert.equal(decimalInput('1,234.56', { pasted: true }), '1234.56');
+  assert.equal(decimalInput('0,5', { pasted: true }), '0.5');
+  assert.equal(decimalInput('0.5', { pasted: true }), '0.5');
+  assert.equal(decimalInput('1.000', { pasted: true, prev: '2' }), '2', '1.000 could be one or a thousand');
+  assert.equal(decimalInput('1.000', { pasted: true }), '', 'no previous value: the field empties');
+  assert.equal(decimalInput('$ 1.234.567 ', { pasted: true }), '1234567');
+  setNumStyle('comma-dot');
+  assert.equal(decimalInput('1,000', { pasted: true, prev: '' }), '');
+  assert.equal(decimalInput('1,000.5', { pasted: true }), '1000.5');
+  assert.equal(decimalInput('1.000', { pasted: true }), '1.000');
+  setNumStyle('dot-comma');
+});
+
+test('a price box reads the comma the same way', () => {
+  setNumStyle('dot-comma');
+  assert.equal(tickInput('83900,5', '0.5'), '83900.5');
+  assert.equal(tickInput('1,2', '0.25'), '1.2');
+});

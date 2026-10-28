@@ -61,3 +61,9 @@ test('close-only (seen in, or declared from, the US) and terms not signed: nothi
 test('a sanctioned place: nothing at all is signed', () => {
   for (const a of [...OPENING, ...NOT_OPENING]) assert.match(legalRefusal(a, BLOCKED)!, /not available in Iran/);
 });
+
+test('the country could not be told: nothing opening; closing, cancelling and withdrawing still work', () => {
+  const UNKNOWN: LegalState = { access: siteAccess(), signed: true, located: false };
+  for (const a of OPENING) assert.match(legalRefusal(a, UNKNOWN)!, /could not tell from your connection/);
+  for (const a of NOT_OPENING) assert.equal(legalRefusal(a, UNKNOWN), null, `${a.type} must stay possible`);
+});

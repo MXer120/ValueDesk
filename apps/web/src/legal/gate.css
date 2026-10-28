@@ -276,6 +276,32 @@
   background: currentColor;
 }
 
+/* The restricted-region strip (RegionBanner): the very top of the app, full width, one
+   slim line, not dismissible. The shell below gives up exactly its height (--region-h,
+   measured by the component), so nothing is covered and nothing scrolls. */
+.lg-region-banner {
+  position: relative;
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 3px 16px;
+  background: color-mix(in srgb, var(--neg) 16%, var(--bg));
+  border-bottom: 1px solid color-mix(in srgb, var(--neg) 45%, transparent);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.3;
+  text-align: center;
+}
+.lg-region-banner .lg-region__dot { flex: none; color: var(--neg); }
+.lg-region-banner a { color: var(--neg); white-space: nowrap; }
+html .shell {
+  height: calc(100vh - var(--region-h, 0px));
+  height: calc(100dvh - var(--region-h, 0px));
+}
+
 /* A sanctioned place (SiteGate): the legal pages and a notice, nothing else. */
 .lg-blocked {
   min-height: 100vh;

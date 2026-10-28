@@ -68,9 +68,11 @@ test('the route answers every caller from one read per venue and coin a second',
   // A second later: one more read each.
   t += 1_001;
   const one = await get('/api/vs/oracle?coin=BTC&venues=okx');
-  // One venue: its quote, as asked.
-  assert.equal(one.quotes.length, 1);
-  assert.equal(one.quotes[0].venue, 'okx');
+  // One venue: still only the derived price - no venue's own bid, ask or mark leaves the server.
+  assert.equal(one.quotes, undefined);
+  assert.equal(one.errors, undefined);
+  assert.equal(one.mid, 100);
+  assert.deepEqual(one.used, ['okx']);
   assert.equal(reads.filter((r) => r === 'okx:BTC').length, 2);
   const bad = await app.inject({ method: 'GET', url: '/api/vs/oracle?coin=BTC&venues=nope' });
   assert.equal(bad.statusCode, 400);

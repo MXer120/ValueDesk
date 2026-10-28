@@ -10,6 +10,8 @@
  *   accountOrderUpdate  the trader's own order updates, by wallet (SoDEX serves any
  *                       wallet's without auth): every child's cumulative fill, by
  *                       client order id - the books follow these, not guesses.
+ *                       At most ACCOUNT_USERS_PER_IP wallets (SoDEX's limit per IP);
+ *                       the runtime reads the others' orders by REST (pollOrders).
  *
  * Prices are sampled once a second into an hour of history per market, so a
  * condition can ask how far a price or the open interest has moved within a
@@ -60,8 +62,18 @@ export interface AlgoMarket {
   start(): void;
   stop(): void;
   readonly up: boolean;
-  /** The markets to watch and the wallets whose order updates to follow (replaces the previous sets). */
+  /**
+   * The markets to watch and the wallets whose order updates to follow
+   * (replaces the previous sets). `owners` most important first: when there
+   * are more than the socket may follow, the first ones get the socket.
+   */
   watch(symbols: readonly string[], owners: readonly string[]): void;
+  /**
+   * Whether this wallet's order updates arrive on the socket now. false: the
+   * runtime reads its orders by REST instead (AlgoRuntime.pollOrders). Absent
+   * (a test's fake): every wallet is followed.
+   */
+  followsOrders?(owner: string): boolean;
   quote(symbol: string): Quote | null;
   last(symbol: string): { price: number; at: number } | null;
   mark(symbol: string): MarkInfo | null;
@@ -103,11 +115,22 @@ export interface AlgoFeedOptions {
   log?: Logger;
   /** Override the gateway origin (tests). */
   wsOrigin?: string;
+  /** Wallets one socket (one IP) may follow on account channels (default ACCOUNT_USERS_PER_IP). */
+  maxAccountUsers?: number;
 }
+
+/**
+ * SoDEX's documented limit: 10 unique users per IP on account channels
+ * (docs/research/01-sodex-valuechain.md, WS account channels). Every hosted
+ * algo leaves the executor from one IP, so one socket follows at most this
+ * many wallets' order updates; the others are read by REST (pollOrders).
+ */
+export const ACCOUNT_USERS_PER_IP = 10;
 
 export class AlgoFeed implements AlgoMarket {
   private socket: LiveSocket;
   private symbols = new Set<string>();
+  /** The wallets the socket follows: at most maxAccountUsers, most important first. */
   private owners = new Set<string>();
   private subscribed = { symbols: new Set<string>(), owners: new Set<string>(), marks: false };
   private quotes = new Map<string, Quote>();
@@ -155,11 +178,19 @@ export class AlgoFeed implements AlgoMarket {
 
   watch(symbols: readonly string[], owners: readonly string[]): void {
     const s = new Set(symbols.map((x) => x.toUpperCase()));
-    const w = new Set(owners.map((x) => x.toLowerCase()));
-    const grew = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x));
+    const want = [...new Set(owners.map((x) => x.toLowerCase()))];
+    // Who keeps the socket: a wallet it follows already stays (no churn), the free places go in order of importance.
+    const cap = Math.max(0, this.o.maxAccountUsers ?? ACCOUNT_USERS_PER_IP);
+    const w = new Set(want.filter((x) => this.owners.has(x)).slice(0, cap));
+    for (const x of want) if (w.size < cap) w.add(x);
+    const changed = [...s].some((x) => !this.subscribed.symbols.has(x)) || [...w].some((x) => !this.subscribed.owners.has(x)) || [...this.subscribed.owners].some((x) => !w.has(x));
     this.symbols = s;
     this.owners = w;
-    if (grew) this.socket.resubscribe();
+    if (changed) this.socket.resubscribe();
+  }
+
+  followsOrders(owner: string): boolean {
+    return this.socket.up && this.subscribed.owners.has(owner.toLowerCase());
   }
 
   private subscribeAll(send: (m: unknown) => void, fresh: boolean): void {
@@ -177,6 +208,12 @@ export class AlgoFeed implements AlgoMarket {
       send({ op: 'subscribe', id: id++, params: { channel: 'bookTicker', symbols: chunk } });
       send({ op: 'subscribe', id: id++, params: { channel: 'trade', symbols: chunk } });
       for (const s of chunk) this.subscribed.symbols.add(s);
+    }
+    // A wallet that lost its place (or no longer has an algo) frees it first: the per-IP count is of users subscribed now.
+    for (const w of [...this.subscribed.owners]) {
+      if (this.owners.has(w)) continue;
+      send({ op: 'unsubscribe', id: id++, params: { channel: 'accountOrderUpdate', user: w } });
+      this.subscribed.owners.delete(w);
     }
     for (const w of this.owners) {
       if (this.subscribed.owners.has(w)) continue;

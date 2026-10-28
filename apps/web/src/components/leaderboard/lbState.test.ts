@@ -16,6 +16,22 @@ import {
   writeView,
   type LbView,
 } from './lbState';
+import { setNumStyle } from '../../numStyle';
+import { fmtRoi as roi } from './lbState';
+
+test('fmtRoi in the default number format (1.234,56)', () => {
+  setNumStyle('dot-comma');
+  try {
+    assert.equal(roi(0.1234), '+12,34%');
+    assert.equal(roi(12.3456), '+1.234,56%');
+    assert.equal(roi(0), '0,00%');
+  } finally {
+    setNumStyle('comma-dot');
+  }
+});
+
+// These cases read the en-US format (1,234.56); the app's default (1.234,56) is checked separately.
+setNumStyle('comma-dot');
 
 test('parseView: empty search gives the defaults', () => {
   assert.deepEqual(parseView(''), DEFAULT_VIEW);

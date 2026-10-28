@@ -8,6 +8,7 @@
  */
 import { LEAN_LABEL, SECTORS, leanOf, longShare, type MapSector, type Sector } from '@sign/valuedesk/cohorts/model.js';
 import { fmtUsdShort } from '../model';
+import { fmtNum } from '../../../numStyle';
 import { useMapZoom } from './mapZoom';
 import { MarketTile, ZoomControls, squarify, visible } from './Treemap';
 
@@ -78,7 +79,7 @@ export function MarketMap({
         {!blocks.length && <p className="coh-tree__empty">No open positions in this view.</p>}
       </div>
       {blocks.length > 0 && <ZoomControls zoom={zoom} />}
-      {blocks.length > 0 && !zoom.zoomed && <span className="coh-tree__hint">{count.toLocaleString('en-US')} assets in {blocks.length} sectors · scroll to zoom</span>}
+      {blocks.length > 0 && !zoom.zoomed && <span className="coh-tree__hint">{fmtNum(count)} assets in {blocks.length} sectors · scroll to zoom</span>}
     </div>
   );
 }

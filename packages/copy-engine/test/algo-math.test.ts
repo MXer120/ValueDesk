@@ -211,16 +211,13 @@ test('spec: canonical - unknown keys dropped, quantities canonical, the same tex
   assert.equal(canonicalJSON(parseAlgoSpec(JSON.parse(canonicalJSON(a)))), canonicalJSON(a));
 });
 
-test('plan: slices under SoDEX minimum are merged (fewer, bigger orders), not refused; a whole order under it is', () => {
+test('plan: slices under SoDEX minimum are an error with the fix (never merged); a whole order under it too', () => {
   const s = parseAlgoSpec(twap({ quantity: '0.001', slices: 20 }));
   const p = planAlgo(s, BTC, { now: 0, price: 60_000, seed: 1 });
-  assert.deepEqual(p.errors, []);
-  assert.ok(p.children.length <= 6 && p.children.length >= 4, String(p.children.length));
-  assert.ok(p.children.every((c) => c.qty * 60_000 >= 10 - 1e-9), p.children.map((c) => c.qty).join(','));
-  close(sum(p.children.map((c) => c.qty)), 0.001, 1e-12);
-  assert.ok(p.warnings.some((w) => /Slices under SoDEX's \$10.00 minimum go out together: \d orders instead of 20/.test(w)), p.warnings.join(' | '));
+  assert.ok(p.errors.some((e) => /^Each of the 20 slices would be about \$3, under SoDEX's \$10 minimum\. Use at most [3-6] slices, or raise the size to \$\d+\.$/.test(e)), p.errors.join(' | '));
+  assert.equal(p.children.length, 20, 'nothing merged');
   const tiny = planAlgo(parseAlgoSpec(twap({ quantity: '0.0001', slices: 4 })), BTC, { now: 0, price: 60_000, seed: 1 });
-  assert.ok(tiny.errors.some((e) => /whole order is about \$6.00, under SoDEX's minimum/.test(e)), tiny.errors.join(' | '));
+  assert.ok(tiny.errors.some((e) => /whole order is about \$6, under SoDEX's \$10 minimum/.test(e)), tiny.errors.join(' | '));
   const ok = planAlgo(parseAlgoSpec(twap({ quantity: '0.01', slices: 20 })), BTC, { now: 0, price: 60_000, seed: 1 });
   assert.deepEqual(ok.errors, []);
   close(sum(ok.children.map((c) => c.qty)), 0.01, 1e-12);

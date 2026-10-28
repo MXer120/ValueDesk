@@ -24,6 +24,7 @@ import { flattenMapAssets, mapTotals } from './model';
 import { retryDelay } from './usePaletteData';
 import { visibleTimeout } from '../../exchange/visibility';
 import { EmptyState, Panel, useBoxSize } from './ui';
+import { fmtFixed, fmtNum } from '../../numStyle';
 
 const POLL_MS = 60_000;
 const TIMEOUT_MS = 45_000;
@@ -157,13 +158,13 @@ export function MarketHeatmap({
   const share = totals.longShare;
   const meta = assets.length > 0 ? (
     <>
-      <span className="cp-num">{assets.length.toLocaleString('en-US')}</span> assets
+      <span className="cp-num">{fmtNum(assets.length)}</span> assets
       <span className="cp-dot">·</span>
       <span className="cp-num">{fmtUsdShort(totals.long + totals.short)}</span>
       {share !== null && (
         <>
           <span className="cp-dot">·</span>
-          <span className={`cp-num ${leanClass(share)}`} title="Share of the notional that is long">{(share * 100).toFixed(1)}% long</span>
+          <span className={`cp-num ${leanClass(share)}`} title="Share of the notional that is long">{fmtFixed(share * 100, 1)}% long</span>
         </>
       )}
     </>

@@ -12,6 +12,7 @@
 import { ORACLE_VENUES, SLIP_FROM, type AlgoPlan, type MarketInfo, type SlipFrom, type BoundAction, type ConditionType, type OracleVenue, type SweepReferenceKind } from '@copy-engine';
 import type { Symbol as MarketSymbol } from '../../api';
 import { engineKind, type UiKind } from './menu';
+import { NUM_STYLES, getNumStyle, parseNumInput, type NumStyle } from '../../numStyle';
 
 /**
  * A Symbol from the app's market list, as the engine's MarketInfo: its order
@@ -408,13 +409,47 @@ export interface TicketShared {
 }
 
 /** The prices typed for a DCA's later buys ('list'): positive numbers, in the order typed. */
-export function parsePrices(raw: string): number[] {
-  return raw
-    .split(/[\s,;]+/)
-    .map((x) => x.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter((x) => Number.isFinite(x) && x > 0);
+/**
+ * The separator of a typed list of prices (the DCA's "Then at"): ";" or a new
+ * line. Never "," (a decimal mark in 1.234,56 and 1 234,56) nor a space (a
+ * grouping mark in 1 234,56): one list must read the same in every number format.
+ */
+export const PRICE_LIST_SEP = ';';
+
+/**
+ * A typed list of prices, each read as the number boxes read one
+ * (parseNumInput, in the app's number format). An item that may be two prices
+ * run together ("100, 99", "95 90", "100,99" where "," is not the decimal
+ * mark) or that the format cannot read is refused with the reason - never
+ * guessed: `prices` is then empty and `error` says which item and why.
+ */
+export function parsePriceList(raw: string, style: NumStyle = getNumStyle()): { prices: number[]; error: string | null } {
+  const { decimal, group } = NUM_STYLES[style];
+  const spaceGroups = /\s/.test(group);
+  const items = raw.split(/[;\n\r]+/).map((x) => x.trim()).filter(Boolean);
+  const prices: number[] = [];
+  const fail = (i: number, item: string, why: string) => ({ prices: [], error: `Price ${i + 1} (“${item}”): ${why}` });
+  for (const [i, item] of items.entries()) {
+    const together = `put “${PRICE_LIST_SEP}” between prices`;
+    // A mark beside a space, a comma where "," is not the decimal mark (and no "." makes it grouping), or digits split by a space that is not grouping.
+    if (/[.,]\s|\s[.,]/.test(item)) return fail(i, item, `${together}.`);
+    if (decimal !== ',' && item.includes(',') && !item.includes('.')) return fail(i, item, `${together}, and write one price without “,”.`);
+    if (/\d\s+\d/.test(item) && !(spaceGroups && /^\d{1,3}(\s\d{3})+([.,]\d+)?$/.test(item))) return fail(i, item, `${together}.`);
+    const r = parseNumInput(item, { style });
+    if (!r.ok) return fail(i, item, r.error);
+    const v = Number(r.value);
+    if (!(v > 0)) return fail(i, item, 'a price above 0.');
+    prices.push(v);
+  }
+  return { prices, error: null };
+}
+
+/** What the "Then at" box keeps of a keystroke: digits, the marks of every number format, and the list separator. */
+export const priceListInput = (raw: string): string => raw.replace(/[\r\n]+/g, `${PRICE_LIST_SEP} `).replace(/[^0-9.,;'’\s]/g, '');
+
+/** The prices of a typed list (none while any item is refused: parsePriceList says why). */
+export function parsePrices(raw: string, style?: NumStyle): number[] {
+  return parsePriceList(raw, style).prices;
 }
 
 export interface DcaLadder {
@@ -453,9 +488,11 @@ export function dcaLadder(d: Pick<Draft, 'perOrder' | 'dcaOrders' | 'dcaStep' | 
   let prices: number[] | null = null;
   let orders: number;
   if (d.dcaLevels === 'list') {
-    const rest = parsePrices(d.dcaPrices);
-    orders = rest.length + 1;
-    prices = first !== null ? [first, ...rest] : null;
+    // A list any item of which is refused is no ladder at all (the ticket shows why: parsePriceList).
+    const list = parsePriceList(d.dcaPrices);
+    const rest = list.prices;
+    orders = list.error ? 0 : rest.length + 1;
+    prices = first !== null && !list.error ? [first, ...rest] : null;
   } else {
     orders = Math.trunc(n(d.dcaOrders));
     const step = frac(d.dcaStep);

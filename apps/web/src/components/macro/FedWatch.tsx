@@ -12,6 +12,7 @@ import { useAsync, useStored } from '../../hooks';
 import { EmptyState } from '../EmptyState';
 import { SeriesChart, type ChartSeries } from '../datachart/SeriesChart';
 import { macroApi, type FedOutcome } from './api';
+import { fmtFixed, localize } from '../../numStyle';
 import './macro.css';
 
 const RANGES = [['7d', '7D'], ['30d', '30D'], ['90d', '3M']] as const;
@@ -23,14 +24,28 @@ export function outcomeColor(bp: number): string {
   return bp >= 50 ? '#b5271b' : '#ef4a3c';
 }
 
-const pct = (p: number) => `${(p * 100).toFixed(p >= 0.995 || p <= 0.005 ? 0 : 1)}%`;
+const pct = (p: number) => `${fmtFixed(p * 100, p >= 0.995 || p <= 0.005 ? 0 : 1)}%`;
 
 function meetingLabel(day: string): string {
   const d = new Date(`${day}T12:00:00Z`);
   return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: d.getUTCFullYear() !== new Date().getUTCFullYear() ? '2-digit' : undefined, timeZone: 'UTC' });
 }
 
+/**
+ * OFF (licence review 2026-10-28, docs/legal/THIRD-PARTY-REVIEW.md rows 2-3):
+ * neither Kalshi's Developer Agreement nor Polymarket's Terms of Use allow
+ * showing their prices on a commercial site without written permission. The
+ * server answers `not_available` unless FOMC_ODDS=on; this switch also hides
+ * the widget from the dashboard (registry.tsx) and keeps saved copies quiet.
+ */
+export const FOMC_ODDS_ON = false;
+
 export function FedWatch({ instance }: { instance?: string }) {
+  if (!FOMC_ODDS_ON) return <div className="mc"><EmptyState icon="news" title="FOMC rate odds are off" line="The prediction markets have not licensed their prices for display here, so this widget shows nothing for now." /></div>;
+  return <FedWatchLive instance={instance} />;
+}
+
+function FedWatchLive({ instance }: { instance?: string }) {
   const ns = instance ? `.${instance}` : '';
   const [pick, setPick] = useStored<string | null>(`vs.fedwatch.meeting${ns}`, null);
   const [range, setRange] = useStored<string>(`vs.fedwatch.range${ns}`, '30d');
@@ -44,7 +59,7 @@ export function FedWatch({ instance }: { instance?: string }) {
   const top = outcomes.reduce<FedOutcome | null>((best, o) => (!best || o.prob > best.prob ? o : best), null);
   const series = useMemo<ChartSeries[]>(() => (hist.data?.series ?? [])
     .filter((s) => s.points.length > 1)
-    .map((s) => ({ key: s.key, kind: 'line', color: outcomeColor(s.bp), points: s.points.map(([t, p]) => [t, p * 100] as [number, number]), format: (v: number) => `${v.toFixed(0)}%`, title: s.label })), [hist.data]);
+    .map((s) => ({ key: s.key, kind: 'line', color: outcomeColor(s.bp), points: s.points.map(([t, p]) => [t, p * 100] as [number, number]), format: (v: number) => `${fmtFixed(v, 0)}%`, title: s.label })), [hist.data]);
 
   if (fw.error && !fw.data) return <div className="mc"><EmptyState icon="news" title="The rate odds did not load" line={fw.error} /></div>;
   if (!fw.data) return <div className="mc"><p className="acct-empty acct-loading" role="status"><span className="acct-spin" aria-hidden="true" />Loading…</p></div>;
@@ -70,13 +85,13 @@ export function FedWatch({ instance }: { instance?: string }) {
           <span className="mc__kicker">FOMC · {new Date(m.statementAt).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
           <b className="mc__big">{top ? `${top.label} ${pct(top.prob)}` : '—'}</b>
         </div>
-        {cur && <span className="mc__note">Now {cur.lower.toFixed(2)}–{cur.upper.toFixed(2)}%</span>}
+        {cur && <span className="mc__note">Now {fmtFixed(cur.lower, 2)}–{fmtFixed(cur.upper, 2)}%</span>}
       </div>
 
       <ol className="mc__odds">
         {outcomes.map((o) => (
           <li key={o.key}>
-            <span className="mc__olabel">{o.label}{o.target && <small>{o.target}%</small>}</span>
+            <span className="mc__olabel">{o.label}{o.target && <small>{localize(o.target)}%</small>}</span>
             <span className="mc__track"><i style={{ width: `${Math.max(0.5, o.prob * 100)}%`, background: outcomeColor(o.bp) }} /></span>
             <b className="mc__pct">{pct(o.prob)}</b>
             {m.polymarket && m.polymarket[o.key] !== undefined && <span className="mc__alt" title="Polymarket's price for the same outcome">{pct(m.polymarket[o.key]!)}</span>}

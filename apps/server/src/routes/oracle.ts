@@ -1,9 +1,10 @@
 /**
  * GET /api/vs/oracle?coin=BTC&venues=binanceFutures,bybit
  *
- * The shared price oracle (valuedesk/oracle.ts): each venue's bid, ask, mid
- * and mark for the coin with its age, the stale ones flagged, and the combined
- * oracle mid and fair price. `venues` is optional (all when absent).
+ * The shared price oracle (valuedesk/oracle.ts): the combined oracle mid and
+ * fair price for the coin, the venues it is made of, the stale and missing ones
+ * flagged, and the age of its oldest quote. No venue's own bid, ask or mark is
+ * handed on. `venues` is optional (all when absent).
  *
  * One OracleFeed for the whole server: a venue and coin is read at most once
  * a second and one read at a time, however many users ask - so each venue sees
@@ -31,13 +32,14 @@ export function parseOracleQuery(q: Record<string, string | undefined>): { coin:
 }
 
 /**
- * What leaves the server. One venue asked: its quote, as asked. Several: only
- * the combined price and the venues it is made of (owner, 2026-10-26) - no
- * venue's own bid, ask or mark is handed on - with `ageMs`, the age of the
- * oldest quote in it, so a reader can still tell a stale price.
+ * What leaves the server: only the combined price and the venues it is made of
+ * (owner, 2026-10-26, for several venues; licence review 2026-10-28, for one
+ * venue too - the exchanges license re-serving their quotes, e.g. Coinbase's
+ * Market Data Terms, only through authorised partners), with `ageMs`, the age of
+ * the oldest quote in it, so a reader can still tell a stale price. No venue's
+ * own bid, ask or mark is handed on, whatever was asked.
  */
-export function publicSnapshot(snap: OracleSnapshot, venues: readonly OracleVenue[]) {
-  if (venues.length <= 1) return snap;
+export function publicSnapshot(snap: OracleSnapshot, _venues?: readonly OracleVenue[]) {
   const used = snap.quotes.filter((q) => snap.used.includes(q.venue));
   const { quotes: _quotes, errors: _errors, ...combined } = snap;
   return { ...combined, ageMs: used.length ? Math.max(...used.map((q) => q.ageMs)) : null };

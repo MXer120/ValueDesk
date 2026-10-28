@@ -24,6 +24,7 @@
  * So the popup has exactly the book's decimals, never more and never fewer,
  * and its Price is the focused row's Price cell, character for character.
  */
+import { fmtDecimalString, getNumSeps } from '../numStyle';
 import { DASH, fmtPrice, fmtQty, num, precisionOf } from '../format';
 
 export type BookSide = 'bid' | 'ask';
@@ -214,7 +215,8 @@ function roundDecimal(int: string, frac: string, dp: number): { int: string; fra
 
 /**
  * THE BOOK'S NOTIONAL CELL - the quote-unit (USDC) Size and Sum columns, and
- * the popup's Sum USDC: whole dollars with thousands separators, `171,242,255`,
+ * the popup's Sum USDC: whole dollars with thousands separators, `171.242.255`
+ * (or `171,242,255` - the separator is the number format's, numStyle.ts),
  * never K / M / B (the owner wants the full figure, to $1).
  *
  * HALF-UP ON THE DECIMAL DIGITS, never on a binary float: a number is taken at
@@ -228,22 +230,21 @@ export function fmtNotional(v: number | string): string {
   const r = roundDecimal(m[2] ?? '', m[3] ?? '', 0);
   const int = r.int.replace(/^0+(?=\d)/, '');
   const sign = m[1] && int !== '0' ? '-' : '';
-  return `${sign}${int.replace(/\B(?=(\d{3})+$)/g, ',')}`;
+  return `${sign}${int.replace(/\B(?=(\d{3})+$)/g, getNumSeps().group)}`;
 }
 
 /**
  * `cell(exact)` for an exact decimal ALREADY at the cell's own places. The
  * cell formatters parse to a double, and below 2^53 at those places that is
  * exact, so this is the formatter's own output digit for digit - checked, and
- * only a figure too long for a double is grouped here instead (the same en-US
- * separators `fmt` pins).
+ * only a figure too long for a double is grouped here instead (the same
+ * separators `fmt` uses, numStyle.ts).
  */
 function asCell(exact: string, cell: (v: string) => string): string {
   const out = cell(exact);
-  if (out.replace(/,/g, '') === exact) return out;
-  const [int, frac] = exact.split('.') as [string, string?];
-  const g = int.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-  return frac === undefined ? g : `${g}.${frac}`;
+  const { group, decimal } = getNumSeps();
+  if (out.split(group).join('').replace(decimal, '.') === exact) return out;
+  return fmtDecimalString(exact);
 }
 
 // --- what the popup PRINTS ---------------------------------------------------

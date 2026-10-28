@@ -11,7 +11,7 @@
  * Pure (no React, no DOM) so it runs under `npx tsx --test`.
  */
 import { WIN_RATE_MIN_CLOSES } from '@sign/valuedesk/winRate.js';
-import { formatNumber } from './intlCache';
+import { fmtFixed, fmtNum } from './numStyle';
 
 export interface WinRateFields {
   winRate?: number | null;
@@ -41,7 +41,7 @@ const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFin
 export const fmtSince = (ms: number): string =>
   new Date(ms).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 
-const closesWord = (n: number): string => `${formatNumber(n, 'en-US')} ${n === 1 ? 'close' : 'closes'}`;
+const closesWord = (n: number): string => `${fmtNum(n)} ${n === 1 ? 'close' : 'closes'}`;
 
 /**
  * `context`:
@@ -69,13 +69,13 @@ export function winRateView(
 
   const p = v * 100;
   const tone = p >= 55 ? 'pos' : p >= 45 ? 'warn' : 'neg';
-  const text = `${p.toFixed(dp)}%`;
+  const text = `${fmtFixed(p, dp)}%`;
 
   if (r.winRateExact === false) {
     const since = from !== null ? ` since ${fmtDate(from)}` : '';
     const title = o.context === 'sample'
       ? `From the last ${closes !== null ? closesWord(closes) : 'closes'}${since}.`
-      : `Estimate from the last ${closes !== null ? `${closes.toLocaleString('en-US')} closed trades` : 'closed trades'} held${from !== null ? ` (since ${fmtDate(from)})` : ''}. The full window is still being read.`;
+      : `Estimate from the last ${closes !== null ? `${fmtNum(closes)} closed trades` : 'closed trades'} held${from !== null ? ` (since ${fmtDate(from)})` : ''}. The full window is still being read.`;
     return { text, approx: true, title, tone };
   }
   // A profile's sample has no window to be complete over; the caller keeps its own hint.

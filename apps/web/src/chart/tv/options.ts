@@ -6,6 +6,7 @@
 import { QUICK_INTERVALS } from '../intervals';
 import { SUPPORTED_RESOLUTIONS, TIMEZONE, resolutionForInterval } from './datafeedCore';
 import { chartOverrides, studiesOverrides, type TvPalette } from './theme';
+import { getNumSeps } from '../../numStyle';
 import type {
   ChartingLibraryWidgetOptions,
   IBasicDataFeed,
@@ -72,6 +73,10 @@ export function buildWidgetOptions(a: WidgetOptionInput): ChartingLibraryWidgetO
     ...(a.customCssUrl ? { custom_css_url: a.customCssUrl } : {}),
     // Numbers on the canvas use the numeral face, as on the klinecharts chart.
     custom_font_family: a.palette.fontNum,
+    // The app's number format (Settings). Read once, at widget creation: the
+    // library has no API to change it on a live widget, so a switch shows on
+    // the next chart the app builds (symbol/layout change, reload).
+    numeric_formatting: { decimal_sign: getNumSeps().decimal, grouping_separator: getNumSeps().group },
     loading_screen: { backgroundColor: a.palette.panel, foregroundColor: a.palette.muted },
     toolbar_bg: a.palette.panel,
     favorites: { intervals: FAVORITE_RESOLUTIONS },

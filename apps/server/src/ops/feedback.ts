@@ -177,7 +177,7 @@ export const kindLine = (f: Pick<Feedback, 'category' | 'areas'>): string => [f.
 
 /** Which wallet sent it: proven by a signature, only claimed by the browser, or none. */
 export function walletLine(wallet: string | null, verified: boolean): string {
-  if (!wallet) return 'Wallet: none connected';
+  if (!wallet) return 'Wallet: none connected - the visitor reads a reply only after connecting a wallet and signing in';
   return `Wallet ${wallet} ${verified ? '(signed in - proven)' : '(connected, not proven)'}`;
 }
 

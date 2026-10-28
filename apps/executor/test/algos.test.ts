@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { secp256k1 } from '@noble/curves/secp256k1';
 import { bytesToHex, hexToBytes, privateKeyToAddress } from '../../../packages/sodex-core/src/index.ts';
-import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, type AlgoFeed, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
+import { COPY_TERMS_VERSION, buildCopyRequest, copyRequestDigest, limitNoticeOf, parseAlgoSpec, parseMarkets, planAlgo, type AlgoFeed, type CopyAction, type FetchLike, type WebSocketLike } from '../../../packages/copy-engine/src/index.ts';
 import { loadConfig, type ExecutorConfig } from '../src/config.ts';
 import { ExecutorDb } from '../src/db.ts';
 import { Secrets } from '../src/secrets.ts';
@@ -271,11 +271,61 @@ test('algos: SoDEX\'s limits are checked at the start, on the server - the posit
   svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
   const start = (spec: Record<string, unknown>, seed: number) => svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, ...spec }, seed }), ctx);
   // 70 BTC at 40x is $4.2M, over the $4M tier.
-  await assert.rejects(start({ quantity: '70', leverage: 40 }, 1), (e: unknown) => e instanceof ApiError && e.status === 400 && /over SoDEX's limit of \$4,000,000 at 40x/.test(e.message));
+  await assert.rejects(start({ quantity: '70', leverage: 40 }, 1), (e: unknown) => e instanceof ApiError && e.status === 400 && /over SoDEX's limit of \$4M at 40x\. At most about \$4M \(66\.67 BTC\) can be bought under it\. Use a smaller size or lower leverage\./.test(e.message));
   // At 25x the tier is $100M: it starts.
   const ok = await start({ quantity: '70', leverage: 25 }, 2);
   assert.equal(ok.algo.status, 'scheduled');
   // A limit entry 10% over the mark: SoDEX refuses a limit buy past 5%.
   await assert.rejects(start({ kind: 'bracket', entry: 'limit', price: 66_000, quantity: '0.01', exits: { tpPct: 0.02, slPct: 0.01 }, durationMs: undefined, slices: undefined, exec: undefined }, 3), (e: unknown) => e instanceof ApiError && e.status === 400 && /priced too far from the price: SoDEX refuses a limit buy more than 5% over the mark/.test(e.message));
+  await cleanup();
+});
+
+test('algos: the executor refuses slices SoDEX would refuse, in the ticket\'s words - never merged into fewer orders or split into more', async () => {
+  const { svc, cleanup } = make({}, { marks: [{ symbol: 'BTC-USD', markPrice: '60000', indexPrice: '60000', openInterest: '3000', fundingRate: '0' }] });
+  const w = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const start = (spec: Record<string, unknown>, seed: number) => svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, ...spec }, seed }), ctx);
+  // The ticket's plan of the same spec, at the same price and seed: the executor's reason is word for word the same.
+  const spec = { quantity: '0.00124', slices: 12 };
+  const [m] = parseMarkets([BTC_ROW]);
+  const plan = planAlgo(parseAlgoSpec({ ...TWAP, ...spec }), m!, { now: Date.now(), price: 60_000, seed: 5 });
+  assert.match(plan.errors[0]!, /^Each of the 12 slices would be about \$6\.20, under SoDEX's \$10 minimum\. Use at most 7 slices/);
+  await assert.rejects(start(spec, 5), (e: unknown) => e instanceof ApiError && e.status === 400 && e.code === 'algo' && e.message === plan.errors.join(' '));
+  // Over SoDEX's $5M per order: refused, not split.
+  await assert.rejects(start({ quantity: '200', slices: 2 }, 6), (e: unknown) => e instanceof ApiError && e.status === 400 && /^Each slice would be about \$6M, over SoDEX's \$5M per order on BTC-USD\. Use at least 3 slices\.$/.test(e.message));
+  // A swarm's clips and a DCA ladder's levels the same.
+  await assert.rejects(start({ kind: 'swarm', quantity: '0.004', clips: 200, inFlight: 20, waveMs: 0, slippageBps: 20, durationMs: undefined, slices: undefined, exec: undefined }, 7), /Each of the 200 clips would be about \$1\.20, under SoDEX's \$10 minimum/);
+  await assert.rejects(start({ kind: 'scale', quantity: '0.01', from: 59_000, to: 58_000, orders: 3, prices: [59_000, 58_000.2, 58_000.4], label: 'DCA', durationMs: undefined, slices: undefined, exec: undefined }, 8), /Orders 2 and 3 both land on 58000/);
+  assert.equal(svc.algoList(w.address).length, 0);
+  // What it names as the fix starts.
+  assert.equal((await start({ quantity: '0.00124', slices: 7 }, 9)).algo.status, 'scheduled');
+  await cleanup();
+});
+
+test('algos: at the open-interest cap an executor algo holds, and the notice with the room left reaches the wallet\'s algo list', async () => {
+  const row = { ...BTC_ROW, openInterestCap: '1000.5', openInterestCapUSD: '0' };
+  const { svc, cleanup } = make({}, { rows: [row] });
+  const w = new Wallet();
+  const ctx = { viewerCountry: 'SG' };
+  svc.acceptTerms(w.sign(svc.executorId, 'accept-terms', TERMS), ctx);
+  const feed = svc.algos.market as AlgoFeed;
+  const quote = (oi: number) => {
+    feed.handle({ channel: 'bookTicker', data: [{ s: 'BTC-USD', b: '60000', a: '60010' }] });
+    feed.handle({ channel: 'allMarkPrice', data: [{ s: 'BTC-USD', p: '60005', oi: String(oi) }] });
+  };
+  quote(1000.5);
+  const v = await svc.algoStart(w.sign(svc.executorId, 'algo-start', { spec: { ...TWAP, quantity: '0.004', slices: 2, durationMs: 120_000 }, seed: 1 }), ctx);
+  await svc.algos.stepNow(v.algo.id, Date.now());
+  const [row0] = svc.algoList(w.address);
+  assert.equal(row0!.algo.status, 'waiting');
+  assert.equal(row0!.algo.statusReason, "Held: Open interest on BTC-USD is at SoDEX's cap: nothing can be added market-wide until it drops. Nothing goes out until there is room.");
+  // What GET /algos sends the browser carries the notice; the bell shows it once (by its id).
+  const n = limitNoticeOf(row0!.algo)!;
+  assert.deepEqual([n.kind, n.what, n.title], ['oi', 'held', 'TWAP on BTC-USD is held']);
+  // Room again: it goes on.
+  quote(900);
+  await svc.algos.stepNow(v.algo.id, Date.now());
+  assert.notEqual(svc.algoList(w.address)[0]!.algo.status, 'waiting');
   await cleanup();
 });

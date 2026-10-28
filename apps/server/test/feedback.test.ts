@@ -164,17 +164,29 @@ const post = (app: App, url: string, payload: unknown, headers: Record<string, s
 const upload = (app: App, bytes: Buffer, token = TOKEN_A, type = 'application/octet-stream') =>
   app.inject({ method: 'POST', url: '/api/vs/feedback/upload', payload: bytes, headers: { 'content-type': type, origin: SITE, ...auth(token) } });
 
-test('threads: the token is the key - none or a malformed one is a 401, another token sees nothing', async () => {
+/** A wallet's session token, as the browser gets it from its one signature. */
+async function sessionFor(app: App, w: { key: Uint8Array; address: string }, now = Date.now()): Promise<string> {
+  return ((await post(app, '/api/vs/feedback/session', { signIn: signIn(w, {}, now) })).json() as { token: string }).token;
+}
+
+test('sending needs no signature; reading needs the wallet\'s - a browser token, or a typed address, reads nothing', async () => {
   const { app } = await appFor();
+  const w = newWallet();
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' })).statusCode, 401);
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' }, { authorization: 'Bearer short' })).statusCode, 401);
   assert.equal((await post(app, '/api/vs/feedback', { message: 'hi' }, { authorization: TOKEN_A })).statusCode, 401, 'Bearer, exactly');
-  const r = await post(app, '/api/vs/feedback', { category: 'bug', areas: ['charts'], message: 'The chart froze' }, auth(TOKEN_A));
+  const r = await post(app, '/api/vs/feedback', { category: 'bug', areas: ['charts'], message: 'The chart froze', wallet: w.address }, auth(TOKEN_A));
   assert.equal(r.statusCode, 200);
   assert.equal(r.headers['cache-control'], 'no-store');
-  const mine = await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A));
+  assert.equal((r.json() as { readable: boolean }).readable, false, 'sent without proof: not readable by its sender');
+  // The browser that sent it - or anyone who typed that address - cannot read the chat.
+  const byToken = await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A));
+  assert.equal(byToken.statusCode, 401);
+  assert.equal((byToken.json() as { code: string }).code, 'wallet');
+  // The wallet's signature can.
+  const mine = await post(app, '/api/vs/feedback/thread', {}, auth(await sessionFor(app, w)));
   assert.deepEqual((mine.json() as { messages: Array<{ from: string; text: string }> }).messages.map((m) => [m.from, m.text]), [['user', 'The chart froze']]);
-  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_B))).statusCode, 404);
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(await sessionFor(app, newWallet())))).statusCode, 404, 'another wallet: its own (no) chat');
   assert.equal((await post(app, '/api/vs/feedback/thread', {})).statusCode, 401);
   // A token in the URL is no token.
   assert.equal((await app.inject({ method: 'POST', url: `/api/vs/feedback/thread?token=${TOKEN_A}`, payload: '{}', headers: { 'content-type': 'application/json' } })).statusCode, 401);
@@ -203,16 +215,20 @@ test('forward: one Telegram chain per thread, follow-ups and screenshots as repl
   assert.match(sent[0]!.text, /Reply to this message/);
   const a = (await upload(app, png())).json() as { id: string };
   const b = (await upload(app, jpeg())).json() as { id: string };
-  await post(app, '/api/vs/feedback', { message: 'Here is how it looks', images: [a.id, b.id] }, auth(TOKEN_A));
+  await post(app, '/api/vs/feedback', { message: 'Here is how it looks', images: [a.id, b.id], wallet: WALLET }, auth(TOKEN_A));
   await settled();
   assert.deepEqual(sent.slice(1).map((s) => [s.kind, s.replyTo]), [['message', 101], ['photo', 102], ['photo', 102]]);
   assert.match(sent[1]!.text, /^Thread #1 · the visitor wrote \(other\)/);
-  assert.match(sent[1]!.text, /Wallet: none connected/, 'every message names its wallet, or that there is none');
-  // Another browser, another chain.
+  // Another browser, same wallet: the same chat, the same chain.
+  await post(app, '/api/vs/feedback', { message: 'From my phone', wallet: WALLET }, auth(TOKEN_B));
+  await settled();
+  assert.equal(sent.at(-1)!.replyTo, 104);
+  // No wallet at all: a chat of its own, and the owner is told the visitor cannot read a reply yet.
   await post(app, '/api/vs/feedback', { message: 'Hello' }, auth(TOKEN_B));
   await settled();
   assert.equal(sent.at(-1)!.replyTo, null);
   assert.match(sent.at(-1)!.text, /thread #2/);
+  assert.match(sent.at(-1)!.text, /Wallet: none connected - the visitor reads a reply only after connecting a wallet and signing in/);
 });
 
 test('owner replies: only the owner\'s chat, only replies to a thread\'s message; the offset is kept', async () => {
@@ -237,10 +253,10 @@ test('owner replies: only the owner\'s chat, only replies to a thread\'s message
   assert.equal(calls[0]!.offset, 0);
   assert.equal(calls[1]!.offset, 504, 'the next round starts after the last update');
   assert.ok(String(calls[0]!.url).endsWith('/getUpdates'));
-  const poll = await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A, TOKEN_B] });
-  assert.deepEqual((poll.json() as { threads: unknown[] }).threads.map((t) => (t as { owner: number } | null)?.owner ?? null), [1, null]);
-  const thread = (await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A))).json() as { messages: Array<{ from: string; text: string }> };
-  assert.deepEqual(thread.messages.map((m) => [m.from, m.text]), [['user', 'Is hosted copy down?'], ['owner', 'It is back up - sorry!']]);
+  // The browser that sent it learns nothing - not the words, not even that there is a reply.
+  assert.equal((await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A] }, auth(TOKEN_A))).statusCode, 401);
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A))).statusCode, 401);
+  assert.deepEqual(store.messages(1).map((m) => [m.from, m.text]), [['user', 'Is hosted copy down?'], ['owner', 'It is back up - sorry!']]);
   // The owner may answer the answer: a reply to their own message lands in the same thread.
   assert.equal(store.threadForTg(903), 1);
   // A restart reads the offset back.
@@ -255,8 +271,9 @@ test('owner replies: only the owner\'s chat, only replies to a thread\'s message
   assert.deepEqual(await pollReplies(store, { ...o, fetch: failing }), { ok: false, stored: 0 });
 });
 
-test('screenshots: checked bytes, three per message, back only to the token, with safe headers', async () => {
-  const { app } = await appFor();
+test("screenshots: checked bytes, three per message, back only to the wallet's signature, with safe headers", async () => {
+  const { app, store } = await appFor();
+  const w = newWallet();
   const ok = await upload(app, png(), TOKEN_A, 'image/png');
   assert.equal(ok.statusCode, 200);
   const id = (ok.json() as { id: string }).id;
@@ -269,23 +286,23 @@ test('screenshots: checked bytes, three per message, back only to the token, wit
   await upload(app, jpeg());
   await upload(app, webp());
   assert.equal((await upload(app, png())).statusCode, 409, 'a fourth pending screenshot');
-  const get = (token: string) => app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${id}`, headers: auth(token) });
-  const mine = await get(TOKEN_A);
+  const get = (key: string) => app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${id}`, headers: auth(key) });
+  assert.equal((await get(TOKEN_A)).statusCode, 401, 'the uploading browser reads nothing back');
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${id}` })).statusCode, 401);
+  // Another browser cannot attach it.
+  await post(app, '/api/vs/feedback', { message: 'stealing', images: [id], wallet: WALLET }, auth(TOKEN_B));
+  assert.deepEqual(store.messages(1)[0]!.images, []);
+  // Sent with a message into the wallet's chat: the wallet's signature gets it back.
+  await post(app, '/api/vs/feedback', { message: 'see image', images: [id], wallet: w.address }, auth(TOKEN_A));
+  const session = await sessionFor(app, w);
+  const mine = await get(session);
   assert.equal(mine.statusCode, 200);
   assert.equal(mine.headers['content-type'], 'image/png');
   assert.equal(mine.headers['x-content-type-options'], 'nosniff');
   assert.match(String(mine.headers['content-disposition']), /^inline; filename="screenshot\.png"$/);
   assert.match(String(mine.headers['content-security-policy']), /default-src 'none'/);
   assert.ok(Buffer.from(mine.rawPayload).equals(png()));
-  assert.equal((await get(TOKEN_B)).statusCode, 404);
-  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${id}` })).statusCode, 401);
-  // Sent with a message: still the token's, through its thread.
-  await post(app, '/api/vs/feedback', { message: 'see image', images: [id] }, auth(TOKEN_A));
-  assert.equal((await get(TOKEN_A)).statusCode, 200);
-  // Another token cannot attach it.
-  await post(app, '/api/vs/feedback', { message: 'stealing', images: [id] }, auth(TOKEN_B));
-  const theirs = (await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_B))).json() as { messages: Array<{ images: string[] }> };
-  assert.deepEqual(theirs.messages[0]!.images, []);
+  assert.equal((await get(await sessionFor(app, newWallet()))).statusCode, 404, "another wallet's signature");
 });
 
 test('screenshots never sent are removed after an hour', async () => {
@@ -298,20 +315,18 @@ test('screenshots never sent are removed after an hour', async () => {
 
 test('messages: a secret is refused in red words, a bot is answered and dropped, limits per client', async () => {
   let t = 1_800_000_000_000;
-  const { app, sent, settled } = await appFor({ now: () => t });
+  const { app, store, sent, settled } = await appFor({ now: () => t });
   const r = await post(app, '/api/vs/feedback', { message: `key ${'ab'.repeat(32)}` }, auth(TOKEN_A));
   assert.equal(r.statusCode, 400);
   assert.equal((r.json() as { code: string }).code, 'secret');
   assert.equal((await post(app, '/api/vs/feedback', { message: 'cheap watches', website: 'http://spam' }, auth(TOKEN_A))).statusCode, 200);
   await settled();
   assert.equal(sent.length, 0);
-  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A))).statusCode, 404, 'nothing was kept');
+  assert.equal(store.thread({ token: TOKEN_A }), null, 'nothing was kept');
   for (let i = 2; i < REPORT_LIMITS.feedback.max; i++) assert.equal((await post(app, '/api/vs/feedback', { message: `m${i}` }, auth(TOKEN_A))).statusCode, 200);
   assert.equal((await post(app, '/api/vs/feedback', { message: 'one too many' }, auth(TOKEN_A))).statusCode, 429);
   t += REPORT_LIMITS.feedback.windowMs;
   assert.equal((await post(app, '/api/vs/feedback', { message: 'later' }, auth(TOKEN_A))).statusCode, 200);
-  assert.equal((await post(app, '/api/vs/feedback/poll', { tokens: Array(11).fill(TOKEN_A) })).statusCode, 400);
-  assert.equal((await post(app, '/api/vs/feedback/poll', { tokens: ['short'] })).statusCode, 400);
 });
 
 test('Telegram failing never changes the answer', async () => {
@@ -342,8 +357,9 @@ test('the page info carries online and how long the page is open; areas come bac
   assert.ok(r.ok === true);
   assert.deepEqual([r.feedback.context!.online, r.feedback.context!.pageAgeS], [false, 125]);
   const { app } = await appFor();
-  await post(app, '/api/vs/feedback', { category: 'bug', areas: ['copy'], message: 'Copy stopped' }, auth(TOKEN_A));
-  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A))).json() as { messages: Array<{ category: string; areas: string[] }> };
+  const session = await sessionFor(app, newWallet());
+  await post(app, '/api/vs/feedback', { category: 'bug', areas: ['copy'], message: 'Copy stopped' }, auth(session));
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(session))).json() as { messages: Array<{ category: string; areas: string[] }> };
   assert.deepEqual([t.messages[0]!.category, t.messages[0]!.areas], ['bug', ['copy']]);
 });
 
@@ -416,7 +432,25 @@ test('wallet chat: a signed-in wallet writes and reads its one chat; Telegram sa
   assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${up.id}`, headers: auth(theirs) })).statusCode, 404);
 });
 
-test("attach: a browser's chat moves onto the wallet; then the token alone opens nothing but its reply count", async () => {
+test("someone types another person's address: it lands in that chat marked not proven - and tells the sender nothing", async () => {
+  const { app, store, sent, settled } = await appFor();
+  const victim = newWallet();
+  const session = await sessionFor(app, victim);
+  await post(app, '/api/vs/feedback', { message: 'my own words' }, auth(session));
+  await post(app, '/api/vs/feedback', { message: 'pretending', wallet: victim.address }, auth(TOKEN_B));
+  await settled();
+  store.addOwnerReply(sent[0]!.id, 'Private answer', 777);
+  // The sender learns nothing: not the words, not a count.
+  assert.equal((await post(app, '/api/vs/feedback/poll', {}, auth(TOKEN_B))).statusCode, 401);
+  assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_B))).statusCode, 401);
+  assert.equal((await post(app, '/api/vs/feedback/session', { signIn: signIn(newWallet()), attach: TOKEN_B })).json().attached, 'none', 'its token is no chat to take');
+  // The wallet sees which message was really its own.
+  const t = (await post(app, '/api/vs/feedback/thread', {}, auth(session))).json() as { messages: Array<{ text: string; proven: boolean }> };
+  assert.deepEqual(t.messages.map((m) => [m.text, m.proven]), [['my own words', true], ['pretending', false], ['Private answer', true]]);
+  assert.match(sent[1]!.text, /\(connected, not proven\)/);
+});
+
+test("migration: a browser's own chat (no wallet, or from before) moves onto the wallet at its first sign-in; the token never reads", async () => {
   const { app, store, sent, settled } = await appFor();
   const w = newWallet();
   await post(app, '/api/vs/feedback', { message: 'before I connected' }, auth(TOKEN_A));
@@ -428,20 +462,15 @@ test("attach: a browser's chat moves onto the wallet; then the token alone opens
   assert.equal(a.attached, 'adopted');
   await settled();
   assert.match(sent.at(-1)!.text, /is now kept on wallet/);
-  // The token: locked everywhere...
-  for (const r of [
-    await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A)),
-    await post(app, '/api/vs/feedback', { message: 'sneaky' }, auth(TOKEN_A)),
-    await upload(app, png(), TOKEN_A),
-  ]) {
-    assert.equal(r.statusCode, 401);
-    assert.equal((r.json() as { code: string }).code, 'wallet');
-  }
-  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${shot.id}`, headers: auth(TOKEN_A) })).statusCode, 404);
-  // ...but the bell still learns there is a reply, and the wallet session sees it too.
-  const poll = (await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A] }, auth(a.token))).json() as { threads: Array<{ owner: number }>; wallet: { owner: number } };
-  assert.deepEqual([poll.threads[0]!.owner, poll.wallet.owner], [1, 1]);
-  assert.ok(!('wallet' in ((await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_A] })).json() as object)), 'no session, no wallet summary');
+  // The token reads nothing, before or after...
+  const r = await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_A));
+  assert.equal(r.statusCode, 401);
+  assert.equal((r.json() as { code: string }).code, 'wallet');
+  assert.equal((await app.inject({ method: 'GET', url: `/api/vs/feedback/image?id=${shot.id}`, headers: auth(TOKEN_A) })).statusCode, 401);
+  // ...nor a count; the wallet's session learns there is a reply.
+  assert.equal((await post(app, '/api/vs/feedback/poll', {}, auth(TOKEN_A))).statusCode, 401);
+  assert.equal((await post(app, '/api/vs/feedback/poll', {})).statusCode, 401);
+  assert.equal(((await post(app, '/api/vs/feedback/poll', {}, auth(a.token))).json() as { wallet: { owner: number } }).wallet.owner, 1);
   // The wallet reads all of it, screenshots included.
   const t = (await post(app, '/api/vs/feedback/thread', {}, auth(a.token))).json() as { messages: Array<{ from: string; text: string }> };
   assert.deepEqual(t.messages.map((m) => m.text), ['before I connected', 'a picture', 'We are on it']);
@@ -471,7 +500,7 @@ test("attach: a second browser's chat merges into the wallet's - one conversatio
   assert.equal(t.thread.id, 1);
   assert.deepEqual(t.messages.map((x) => x.text), ['laptop', 'phone', 'Got both']);
   assert.equal((await post(app, '/api/vs/feedback/thread', {}, auth(TOKEN_B))).statusCode, 401, "the phone's token is locked too");
-  assert.equal(((await post(app, '/api/vs/feedback/poll', { tokens: [TOKEN_B] })).json() as { threads: Array<{ owner: number }> }).threads[0]!.owner, 1);
+  assert.equal(((await post(app, '/api/vs/feedback/poll', {}, auth(m.token))).json() as { wallet: { owner: number } }).wallet.owner, 1);
 });
 
 test('limits: per chat as well as per address; the sign-in has its own', async () => {

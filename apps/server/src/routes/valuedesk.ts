@@ -14,7 +14,7 @@
  *   GET /api/vs/whales?venue=all|..&minUsd&limit
  *   GET /api/vs/positioning?venue=all|..&symbol
  *   GET /api/vs/news?feed&category&coin&q&page&limit&topic&posts&history   (SoSoValue; coin is one or several, comma-separated; topic=macro for economics; posts=all keeps every post; history=1 the chart's: the feed as far back as kept, up to 300, hot ones ranked; SOSOVALUE_API_KEY, else not_available)
- *   GET /api/vs/news/sources?ids=whitehouse,watcherguru&coin&q&limit   (news from other sources' RSS feeds, newest first - valuedesk/feeds.ts)
+ *   GET /api/vs/news/sources?ids=whitehouse&coin&q&limit   (news from other sources' RSS feeds, newest first - valuedesk/feeds.ts)
  *   GET /api/vs/logo?domain   (a news source's site icon, read and cached here so the page asks only this origin)
  *   GET /api/vs/calendar?from&to   (the economic calendar: the Fed, BLS, BEA and SoSoValue - valuedesk/calendar.ts)
  *   GET /api/vs/calendar/results?ids=a,b   (official results of up to 50 calendar events, read at the release second - valuedesk/releases.ts)
@@ -22,7 +22,7 @@
  *   GET /api/vs/fedwatch   (the coming FOMC meetings' decision probabilities: Kalshi, Polymarket beside - valuedesk/fedwatch.ts)
  *   GET /api/vs/fedwatch/history?meeting=YYYY-MM-DD&range=7d|30d|90d   (one meeting's probabilities over time, Kalshi's candlesticks)
  *   GET /api/vs/indicators   (the catalog of the calendar's indicators - valuedesk/indicators.ts)
- *   GET /api/vs/indicator?id&range=1y|5y|10y|max   (one indicator's history from FRED, its table and next release)
+ *   GET /api/vs/indicator?id&range=1y|5y|10y|max   (one indicator's history from its agency, its table and next release)
  *   GET /api/vs/etf/flows?asset=BTC|ETH|SOL..&range=1m|3m|1y|all   (US spot ETF flows and funds, SoSoValue - valuedesk/sosovalue/etf.ts; SOSOVALUE_API_KEY, else not_available)
  *   GET /api/vs/oracle?coin=BTC&venues=a,b   (the shared price oracle over 19 venues - routes/oracle.ts)
  *   GET /api/vs/live?channel   (one of the Live Feed's YouTube channels: its stream on air; YOUTUBE_API_KEY, else not_available)
@@ -64,7 +64,7 @@ import { feedNews, logoDomain, parseFeedQuery, siteLogo } from '../valuedesk/fee
 import { SOURCE_NAME, calendar, parseCalendarQuery } from '../valuedesk/calendar.js';
 import { LIVE_CHANNELS, liveVideo, youtubeKey } from '../valuedesk/youtube/live.js';
 import { fedLive, releaseResults } from '../valuedesk/releases.js';
-import { fedWatch, fedWatchHistory, parseFedHistoryRange } from '../valuedesk/fedwatch.js';
+import { FOMC_ODDS_OFF, fedWatch, fedWatchHistory, fomcOddsEnabled, parseFedHistoryRange } from '../valuedesk/fedwatch.js';
 import { INDICATORS, indicator, indicatorList, parseIndicatorRange } from '../valuedesk/indicators.js';
 import { etfFlows, parseEtfAsset, parseEtfRange } from '../valuedesk/sosovalue/etf.js';
 import { oracleRoutes } from './oracle.js';
@@ -261,7 +261,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   });
 
   /**
-   * News from sources beside SoSoValue (the White House, Watcher.Guru), read from
+   * News from sources beside SoSoValue (the White House), read from
    * their RSS feeds and cached - valuedesk/feeds.ts. The widget merges them in.
    */
   app.get('/api/vs/news/sources', async (req, reply) => {
@@ -338,6 +338,8 @@ export async function valuedeskRoutes(app: FastifyInstance) {
    */
   app.get('/api/vs/fedwatch', async (_req, reply) => {
     try {
+      // Off until Kalshi / Polymarket license their prices in writing (fedwatch.ts header).
+      if (!fomcOddsEnabled()) throw new NotAvailable(FOMC_ODDS_OFF);
       const page = await fedWatch();
       reply.header('Cache-Control', 'public, max-age=0, s-maxage=30');
       return { ok: true, ...page };
@@ -351,6 +353,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
     try {
       const q = req.query as Q;
       const meeting = String(q.meeting ?? '');
+      if (!fomcOddsEnabled()) throw new NotAvailable(FOMC_ODDS_OFF);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(meeting)) throw bad('meeting must be YYYY-MM-DD');
       const range = parseFedHistoryRange(q.range);
       const series = await fedWatchHistory(meeting, range);
@@ -366,7 +369,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/indicators', async () => ({ ok: true, indicators: indicatorList() }));
 
   /**
-   * One indicator's history from FRED (read at most every 6 hours, sooner
+   * One indicator's history from the agency that publishes it (read at most every 6 hours, sooner
    * after a release of its kind): the chart's points over `range`, the last
    * 24 periods with their priors, and the next release on the calendar.
    */

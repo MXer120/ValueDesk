@@ -43,3 +43,14 @@ test('asked once; a sanctioned or close-only place sets the access; failures res
   }
   _resetGeoForTests();
 });
+
+test('the region strip: close-only places by name, an unknown country, nothing where open', async () => {
+  const { regionBannerText } = await import('./notices');
+  const { siteAccess } = await import('./jurisdictions.mjs');
+  assert.equal(regionBannerText(siteAccess({ country: 'US' }), true), 'ValueDesk is close-only in the United States: you can close positions, cancel orders and withdraw, but not open new positions.');
+  assert.match(regionBannerText(siteAccess({ country: 'GB' }), true)!, /close-only in the United Kingdom:/);
+  assert.match(regionBannerText(siteAccess({ country: 'DE', declared: 'CA' }), true)!, /close-only in Canada:/);
+  assert.match(regionBannerText(siteAccess({ country: 'PR' }), true)!, /Puerto Rico \(a US territory\)/);
+  assert.match(regionBannerText(siteAccess(), false)!, /could not tell your country/);
+  assert.equal(regionBannerText(siteAccess({ country: 'DE' }), true), null);
+});

@@ -48,6 +48,7 @@
  */
 import type { Chart as KChart, Overlay, OverlayTemplate, Point } from 'klinecharts';
 import { NUM_FAMILY, T } from './theme';
+import { fmtFixed } from '../numStyle';
 
 /** Registry name. Prefixed like the order line so it can never collide with a
  *  library overlay, and so Chart.tsx can tell ours apart from theirs. */
@@ -128,7 +129,7 @@ function formatPct(from: number, to: number): string {
   if (!isNum(from) || !isNum(to) || from === 0) return NONE;
   const pct = ((to - from) / Math.abs(from)) * 100;
   if (!Number.isFinite(pct)) return NONE;
-  return `${pct > 0 ? '+' : ''}${pct.toFixed(2)}%`;
+  return `${pct > 0 ? '+' : ''}${fmtFixed(pct, 2)}%`;
 }
 
 /** Whole bars, pluralised. */

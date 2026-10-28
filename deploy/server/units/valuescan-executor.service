@@ -45,6 +45,10 @@ EnvironmentFile=/etc/valuescan/executor.env
 # accepts). Root-only (0600): systemd reads it before it drops to the service user.
 EnvironmentFile=/etc/valuescan/executor.secret.env
 EnvironmentFile=-/etc/valuescan/executor.local.env
+# The operator's Telegram alerts (ALERT_TELEGRAM_TOKEN, ALERT_TELEGRAM_CHAT_ID; apps/executor/src/alerts.ts):
+# root-only (0600, deploy/server/bin/telegram-setup.sh), read by systemd before it drops to the service
+# user. Absent (not set up on this server yet): the executor runs without alerts.
+EnvironmentFile=-/etc/valuescan/alert.env
 # The heap is set, not derived (see valuescan-api.service): a full 384 MB heap plus
 # Node's own memory fits under MemoryMax; above MemoryHigh the kernel reclaims and
 # slows this unit before MemoryMax would kill it.

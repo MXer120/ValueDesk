@@ -6,6 +6,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { setNumStyle } from '../../numStyle';
 import type { OrderLine } from '../orderOverlays';
 import { LineManager, type LineChart } from './lineManager';
 import {
@@ -18,6 +19,8 @@ import {
   positionPnl,
   type LineShape,
 } from './lines';
+
+setNumStyle('comma-dot');
 import type { CreateMultipointShapeOptions, EntityId, ShapePoint } from './types';
 
 const line = (over: Partial<OrderLine>): OrderLine => ({

@@ -181,6 +181,8 @@ export function FedLive() {
           </ol>
         </div>
       </div>
+      {/* The Board asks to be cited as the source (federalreserve.gov/disclaimer.htm); not its logo or seal. */}
+      <p className="fl__src">Source: Federal Reserve Board · transcript: Moonshine speech model (MIT), in your browser</p>
     </div>
   );
 }

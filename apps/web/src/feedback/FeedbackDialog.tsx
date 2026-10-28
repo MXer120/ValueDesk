@@ -1,21 +1,23 @@
 /**
- * The feedback chat (feedback.ts): this visitor's one ongoing conversation with
- * the ValueDesk team - everything said so far, and the box to say more. It
- * never ends; there is no "new conversation".
+ * The feedback chat (feedback.ts): a wallet's one ongoing conversation with the
+ * ValueDesk team - everything said so far, and the box to say more. It never
+ * ends; there is no "new conversation".
  *
- * WHOSE CHAT. A browser writes by its thread token (threads.ts) - with or
- * without a wallet. A connected wallet can keep the chat on itself with one free
- * signature (session.ts): then it opens in any browser with that wallet, and
- * only with its signature. A chat already kept on a wallet asks for that
- * signature before it shows a word.
+ * WHOSE CHAT (owner, 2026-10-28): always the connected wallet's. SENDING needs
+ * no signature - anyone can send, with or without a wallet; the message carries
+ * the connected wallet's address. READING the chat needs the wallet's signature
+ * (session.ts: once, then 30 days): without it the form shows "Sign in to read
+ * your chat", never a word of it. Without a wallet the message still goes, and
+ * the form says a reply can only be read with a wallet connected. What this
+ * browser sent before signing in joins the wallet's chat at the first sign-in.
  *
  * A message names its kind (Bug, Idea, Other) and its areas (AreaPicker.tsx; at
  * least one for a bug), can take up to three screenshots (pasted, or picked as
  * PNG, JPEG or WebP; re-encoded before they leave - images.ts), the element
  * right-clicked to open the form (a chip, removable), the page and browser info
- * - on by default, Recommended, every line shown under "What will be sent" - and
- * always the connected wallet's address. A text that holds a private key or a
- * seed phrase is not sent (secretIn): the form says so in red.
+ * - on by default, Recommended, every line shown under "What will be sent". A
+ * text that holds a private key or a seed phrase is not sent (secretIn): the
+ * form says so in red.
  *
  * SEND opens a second, small window: the red warning (never a private key, a
  * seed phrase, passwords or API keys) and a slide to confirm (the algo ticket's,
@@ -31,9 +33,10 @@ import { FEEDBACK_MAX, FEEDBACK_URL, messageLength, secretIn, sendMessage, type 
 import { buildContext, connectedWallet, contextRows, gatherSources, type ContextSources } from './context';
 import { elementSummary, type ElementInfo } from './element';
 import { ACCEPT, MAX_IMAGES, acceptable, reencode } from './images';
-import { REPLY_EVENT, imageUrl, loadThread, markAttached, markSeen, newToken, rememberThread, threads, uploadImage, type ChatMessage } from './threads';
+import { REPLY_EVENT, imageUrl, loadThread, markAttached, rememberThread, threads, tokenFor, uploadImage, type ChatMessage } from './threads';
 import { forgetSession, heldSession, markSessionSeen, signInFeedback, type WalletSession } from './session';
 import { AreaPicker } from './AreaPicker';
+import { pushNotice } from '../notices';
 import type { OpenFeedback } from './FeedbackButton';
 
 const CATEGORIES: Array<{ value: FeedbackCategory; label: string }> = [
@@ -48,6 +51,9 @@ const PLACEHOLDER: Record<FeedbackCategory, string> = {
   other: 'Tell us anything.',
 };
 
+/** The bell's one row for unsigned senders: always the same, whatever happens in the chat. */
+export const SIGN_IN_NOTICE = 'feedback:sign-in';
+
 /** The words on the slide (the owner's "I did not include any private info"). */
 export const CONFIRM_LABEL = 'Slide to confirm: I included no private keys, seed phrases or passwords';
 
@@ -57,7 +63,8 @@ interface Shot {
   blob: Blob;
 }
 
-type View = 'loading' | 'ok' | 'locked' | 'error';
+/** `chat`: signed in, the chat on screen. `signin`: a wallet, not signed in. `nowallet`: none connected. */
+type View = 'loading' | 'chat' | 'signin' | 'nowallet' | 'error';
 
 const when = (ms: number): string => new Date(ms).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 const short = (a: string): string => `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -67,13 +74,12 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
   open: boolean;
   request: OpenFeedback | null;
   onClose: () => void;
-  /** The chat on screen (FeedbackHost: a reply to it is shown here, not announced): a thread token, or 'wallet'. */
+  /** The chat on screen (FeedbackHost: a reply to it is shown here, not announced): 'wallet', or '' for none. */
   onThread: (key: string) => void;
-  /** The connected wallet (App.tsx) - its address goes with every message, and it can sign the chat in. */
+  /** The connected wallet (App.tsx) - its address goes with every message, and it signs in to read the chat. */
   address?: string | null;
   provider?: Eip1193Provider | null;
 }) {
-  const [token, setToken] = useState<string>(() => threads()[0]?.token ?? newToken());
   const [session, setSession] = useState<WalletSession | null>(null);
   const [history, setHistory] = useState<ChatMessage[]>([]);
   const [view, setView] = useState<View>('loading');
@@ -98,10 +104,9 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
   const layer = useRef<(() => void) | null>(null);
   const wallet = useMemo(() => (open ? (address ?? connectedWallet())?.toLowerCase() ?? null : null), [open, address]);
 
-  // Each opening: the chat asked for (a reply in the bell), the element right-clicked, the wallet's session, fresh page info.
+  // Each opening: the element right-clicked, the wallet's session, fresh page info.
   useEffect(() => {
     if (!open) return;
-    if (request?.thread && request.thread !== 'wallet') setToken(request.thread);
     if (request?.element) setElement(request.element);
     setError(null);
     setNote(null);
@@ -111,51 +116,41 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     if (open) setSession(heldSession(wallet));
   }, [open, wallet]);
 
-  /** The key the chat on screen is opened with: the wallet's session, else this browser's token. */
-  const key = session?.token ?? token;
-  const ref = threads().find((t) => t.token === token);
-
   const reload = useCallback(async () => {
-    if (!session && !threads().some((t) => t.token === token)) {
+    if (!session) {
       setHistory([]);
-      setView('ok');
+      setView(wallet ? 'signin' : 'nowallet');
       return;
     }
-    const r = await loadThread(key);
+    const r = await loadThread(session.token);
     if (!r) {
       setView((v) => (v === 'loading' ? 'error' : v));
       return;
     }
     if (r.status === 'wallet' || r.status === 'session') {
-      if (r.status === 'session' && session) {
-        forgetSession(session.owner);
-        setSession(null);
-      }
+      forgetSession(session.owner);
+      setSession(null);
       setHistory([]);
-      setView('locked');
+      setView('signin');
       return;
     }
     const msgs = r.status === 'ok' ? r.messages : [];
     setHistory(msgs);
-    setView('ok');
+    setView('chat');
     const n = ownerCount(msgs);
-    if (session) {
-      markSessionSeen(session.owner, n);
-      for (const t of threads()) if (t.wallet === session.owner) markSeen(t.token, n);
-    } else markSeen(token, n);
-  }, [key, session, token]);
+    markSessionSeen(session.owner, n);
+  }, [session, wallet]);
 
   useEffect(() => {
     if (!open) return;
-    onThread(session ? 'wallet' : token);
+    onThread(session ? 'wallet' : '');
     void reload();
     const onReply = (e: Event) => {
-      const d = (e as CustomEvent<string>).detail;
-      if (d === token || (session && d === 'wallet')) void reload();
+      if (session && (e as CustomEvent<string>).detail === 'wallet') void reload();
     };
     window.addEventListener(REPLY_EVENT, onReply);
     return () => window.removeEventListener(REPLY_EVENT, onReply);
-  }, [open, token, session, reload, onThread]);
+  }, [open, session, reload, onThread]);
 
   // A fresh chat starts as a bug report; a reply in a running chat is "Other" until changed.
   const started = history.length > 0;
@@ -171,7 +166,7 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
   const len = messageLength(text);
   const secret = text ? secretIn(text) : null;
   const needAreas = category === 'bug' && areas.length === 0;
-  const canWrite = view === 'ok';
+  const canWrite = view === 'chat' || view === 'signin' || view === 'nowallet';
   const canSend = canWrite && !busy && len >= 1 && len <= FEEDBACK_MAX && !secret;
 
   const addFiles = async (files: Iterable<File>) => {
@@ -213,12 +208,14 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     setConfirming(true);
   };
 
-  /** The slide reached its end: now it goes out. */
+  /** The slide reached its end: now it goes out - with the wallet's session when there is one, else this browser's token. */
   const send = async () => {
     setConfirming(false);
     if (!canSend || needAreas) return;
     setBusy(true);
     setError(null);
+    setNote(null);
+    const key = session?.token ?? tokenFor(wallet);
     const ids: string[] = [];
     for (const s of shots) {
       const r = await uploadImage(key, s.blob);
@@ -233,14 +230,18 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     setBusy(false);
     if (!r.ok) {
       setError(r.error);
-      if (r.auth) {
-        if (session) forgetSession(session.owner);
+      if (r.auth && session) {
+        forgetSession(session.owner);
         setSession(null);
-        setView('locked');
       }
       return;
     }
-    if (!session) rememberThread(token, text);
+    if (!session) {
+      rememberThread(key, text, wallet);
+      setNote(wallet ? 'Sent. Sign in with your wallet to read our reply.' : 'Sent. Connect a wallet to read our reply - replies are kept on a wallet.');
+      // The same words in the bell, whether or not a reply ever comes - it says nothing about the chat.
+      pushNotice({ id: SIGN_IN_NOTICE, kind: 'info', title: 'Feedback sent', body: wallet ? 'Sign in with your wallet in Send feedback to see replies to your feedback.' : 'Connect a wallet and sign in in Send feedback to see replies to your feedback.', important: false });
+    }
     setText('');
     shots.forEach((s) => URL.revokeObjectURL(s.url));
     setShots([]);
@@ -250,22 +251,20 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     await reload();
   };
 
-  /** One free signature: the wallet's chat opens here, and this browser's chat joins it. */
+  /** One free signature: the wallet's chat opens here, and what this browser sent without a wallet joins it. */
   const signIn = async () => {
     if (!wallet || !provider) return;
     setSigning(true);
     setError(null);
-    const attach = threads().some((t) => t.token === token) ? token : null;
-    const r = await signInFeedback(provider, wallet, attach);
+    const own = threads().find((t) => !t.wallet)?.token ?? null;
+    const r = await signInFeedback(provider, wallet, own);
     setSigning(false);
     if (!r.ok) {
       setError(r.error);
       return;
     }
-    if (attach && (r.attached === 'adopted' || r.attached === 'merged' || r.attached === 'same')) markAttached(attach, wallet);
-    if (r.attached === 'other') setNote('The chat in this browser is kept on another wallet. This wallet has its own chat.');
-    else if (r.attached === 'merged') setNote('Your chat from this browser was added to your wallet\'s chat.');
-    else if (r.attached === 'adopted') setNote('This chat is now kept on your wallet - open it on any device with it.');
+    if (own && (r.attached === 'adopted' || r.attached === 'merged' || r.attached === 'same')) markAttached(own, wallet);
+    if (r.attached === 'merged' || r.attached === 'adopted') setNote('What you sent from this browser before is now in your wallet\'s chat.');
     setView('loading');
     setSession(r.session);
   };
@@ -282,8 +281,7 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
     onClose();
   };
 
-  const lockedWallet = ref?.wallet ?? null;
-  const title = view === 'locked' ? 'Feedback chat' : history.length ? 'Feedback chat' : 'Send feedback';
+  const title = history.length ? 'Feedback chat' : 'Send feedback';
   return (
     <>
       <Modal open={open} size="md" title={title} className="fx fb-dialog" onClose={closeTop} dismissOnBackdrop={!text.trim() && !shots.length}>
@@ -295,18 +293,23 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
             askToSend();
           }}
         >
-          {view === 'locked' && (
+          {view === 'signin' && wallet && (
             <div className="fb-lock" role="status">
               <p>
-                This chat is kept on {lockedWallet ? <>wallet <b className="fb-mono">{short(lockedWallet)}</b></> : 'a wallet'}. Sign in with that wallet to open it - a free signature, never a transaction.
+                Your chat with us is kept on wallet <b className="fb-mono">{short(wallet)}</b>. Sign in to read it and our replies - a free signature, never a transaction. You can send without signing.
               </p>
-              {wallet && provider ? (
+              {provider ? (
                 <button type="button" className="dlg-btn is-go" disabled={signing} onClick={() => void signIn()}>
-                  {signing ? 'Waiting for your wallet…' : 'Sign in with wallet'}
+                  {signing ? 'Waiting for your wallet…' : 'Sign in to read your chat'}
                 </button>
               ) : (
-                <p className="fb-hint">Connect {lockedWallet ? 'that wallet' : 'your wallet'} first.</p>
+                <p className="fb-hint">Reconnect your wallet to sign in.</p>
               )}
+            </div>
+          )}
+          {view === 'nowallet' && (
+            <div className="fb-lock" role="status">
+              <p>No wallet connected. You can send this, but our reply can only be read with a wallet connected - connect yours to read replies.</p>
             </div>
           )}
           {view === 'error' && <p className="dlg-err fb-err" role="alert">The chat could not be loaded - check your connection and open it again.</p>}
@@ -317,10 +320,11 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
                   <span className="fb-msg__who">
                     {m.from === 'owner' ? 'ValueDesk team' : 'You'} · {when(m.at)}
                     {m.from === 'user' && m.areas && m.areas.length > 0 && <> · {m.areas.map(areaLabel).join(', ')}</>}
+                    {m.from === 'user' && m.proven === false && <span className="fb-msg__unsigned" title="Sent with this wallet's address, without its signature - from a browser that was not signed in."> · not signed</span>}
                   </span>
                   <p className="fb-msg__text">{m.text}</p>
-                  {m.images.length > 0 && (
-                    <span className="fb-msg__shots">{m.images.map((id) => <ThreadImage key={id} credential={key} id={id} />)}</span>
+                  {m.images.length > 0 && session && (
+                    <span className="fb-msg__shots">{m.images.map((id) => <ThreadImage key={id} credential={session.token} id={id} />)}</span>
                   )}
                 </div>
               ))}
@@ -407,18 +411,12 @@ export function FeedbackDialog({ open, request, onClose, onThread, address = nul
                   title="Your wallet"
                   line={
                     session
-                      ? <>Signed in as <span className="fb-mono">{short(session.owner)}</span> - this chat is kept on your wallet.</>
+                      ? <>Signed in as <span className="fb-mono">{short(session.owner)}</span> - this is your wallet's chat.</>
                       : wallet
-                        ? <>Your address <span className="fb-mono">{short(wallet)}</span> goes with every message, so we can look at your account's public trades.</>
-                        : 'No wallet connected - you can still write. Connect one to keep this chat on it.'
+                        ? <>Your address <span className="fb-mono">{short(wallet)}</span> goes with every message, so we know whose account it is about.</>
+                        : 'No wallet connected - replies can be read only with a wallet connected.'
                   }
-                >
-                  {!session && wallet && provider && (
-                    <button type="button" className="dlg-btn is-small" disabled={signing} onClick={() => void signIn()} title="Read this chat on any device with your wallet. A free signature, never a transaction.">
-                      {signing ? 'Waiting…' : 'Keep chat on wallet'}
-                    </button>
-                  )}
-                </DlgRow>
+                />
               </DlgSection>
             </>
           )}
@@ -464,7 +462,7 @@ export function SendConfirm({ open, onCancel, onConfirm }: { open: boolean; onCa
   );
 }
 
-/** A screenshot of the chat, fetched with the chat's key (no URL could carry it). */
+/** A screenshot of the chat, fetched with the wallet's session (no URL could carry it). */
 function ThreadImage({ credential, id }: { credential: string; id: string }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
