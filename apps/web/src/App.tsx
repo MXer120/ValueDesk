@@ -14,6 +14,7 @@ import { CommandPalette, loadPalette, openPalette, paletteReady } from './compon
 import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
 import { SiteNoticeBanner, navAlertOf, useHealthDown } from './status/SiteNoticeBanner';
+import { UpdateHeldBanner } from './status/UpdateHeldBanner';
 import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -513,6 +514,7 @@ function AppShell() {
       <Guarded name="Maintenance">
         {/* Our own incidents and maintenance (status/), from /api/health: no request of its own. */}
         <SiteNoticeBanner health={health} down={healthDown} onOpenStatus={openStatus} />
+        <UpdateHeldBanner />
         <MaintenanceBanner />
       </Guarded>
       <Guarded name="Brake">

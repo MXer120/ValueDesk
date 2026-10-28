@@ -55,6 +55,7 @@ import { readOracle } from './oracle';
 import { PAPER_OWNER, needsRunner, noteRunnerLoaded, setLiveAlgos } from './algoBus';
 import { openAlgoStore, type BrowserAlgoStore } from './algoStore';
 import { noteLimitNotices } from './limitNotices';
+import { holdReloadWhile } from '../lazyPage';
 
 const log = logger('algo');
 const CHANNEL = 'vd-algo';
@@ -564,4 +565,11 @@ function staticView(a: AlgoRecord): AlgoView {
 }
 
 export const browserAlgos = new BrowserAlgos();
+
+// A release never reloads the tab that runs live algos (lazyPage.ts): it would stop them mid-way.
+holdReloadWhile(() => {
+  if (browserAlgos.role !== 'runner') return null;
+  const n = browserAlgos.views.filter((v) => !FINAL_STATUSES.has(v.algo.status)).length;
+  return n ? `${n} live algo${n === 1 ? '' : 's'}` : null;
+});
 noteRunnerLoaded();

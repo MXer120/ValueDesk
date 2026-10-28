@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { installChunkErrorReload, lazyPage, lazyPageEnv, reloadForChunkError } from './lazyPage';
+import { holdReloadWhile, installChunkErrorReload, lazyPage, lazyPageEnv, reloadForChunkError, reloadHeldBy } from './lazyPage';
 
 /** An in-memory sessionStorage for the reload guard. */
 function memoryStorage(): Storage {
@@ -140,4 +140,21 @@ test('any lazily loaded module that fails (vite:preloadError, a release replaced
   clock += 60_000;
   assert.equal(fire(), true);
   assert.equal(reloads, 2);
+});
+
+test('a release never reloads a tab that runs live algos or copies: it is held, and says so', () => {
+  let algos = 2;
+  const stopA = holdReloadWhile(() => (algos ? `${algos} live algos` : null));
+  const stopB = holdReloadWhile(() => null);
+  assert.equal(reloadHeldBy(), '2 live algos');
+  assert.equal(reloadForChunkError(), false, 'held: no reload');
+  assert.equal(reloads, 0);
+  algos = 0;
+  assert.equal(reloadHeldBy(), null);
+  assert.equal(reloadForChunkError(), true, 'once they are done, the next failure reloads');
+  assert.equal(reloads, 1);
+  const stopC = holdReloadWhile(() => { throw new Error('broken'); });
+  assert.equal(reloadHeldBy(), 'a running algo or copy', 'a hold that cannot answer holds');
+  stopA(); stopB(); stopC();
+  assert.equal(reloadHeldBy(), null);
 });

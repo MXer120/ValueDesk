@@ -6,6 +6,7 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
 #   sudo /opt/valuescan/bin/release.sh <tag> --units=indexer,api   install <tag>, restart exactly these (deploy/release/ship.sh)
+#   sudo /opt/valuescan/bin/release.sh <tag> --install-only   install and check <tag>, switch nothing (ship.sh's executor preflight)
 #   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only|--units=..]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
 #   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
@@ -357,6 +358,7 @@ status() {
 TAG=""
 MODE=auto
 UNITS=""
+INSTALL_ONLY=0
 ROLLBACK=0
 FROM=""
 ONE_MODE="--all, --api-only, --executor-only and --units exclude each other"
@@ -371,6 +373,7 @@ for arg in "$@"; do
       [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor"
       ;;
     --from=*) FROM="${arg#--from=}" ;;
+    --install-only) INSTALL_ONLY=1 ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;
     -h|--help) usage 0 ;;
@@ -393,6 +396,10 @@ else
   [ -n "$TAG" ] || usage 2
   valid_tag "$TAG" || die "not a usable tag name: $TAG"
   install_release "$TAG"
+  if [ "$INSTALL_ONLY" = 1 ]; then
+    log "$TAG is installed in $RELEASES/$TAG; nothing switched, nothing restarted"
+    exit 0
+  fi
 fi
 
 activate "$TAG"

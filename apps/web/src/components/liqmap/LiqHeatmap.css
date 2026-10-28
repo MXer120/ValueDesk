@@ -95,6 +95,9 @@
 .lqm-bar-long { fill: var(--neg); opacity: 0.85; }
 .lqm-bar-short { fill: var(--pos); opacity: 0.85; }
 .is-picked .lqm-bar-long, .is-picked .lqm-bar-short { opacity: 1; stroke: var(--text); stroke-width: 1; }
+/* The chart view: the candles run over the profile, so its bars step back (the candles are the same red and green). */
+.lqm-plot.is-chart .lqm-bar-long, .lqm-plot.is-chart .lqm-bar-short { opacity: 0.42; }
+.lqm-plot.is-chart .is-picked .lqm-bar-long, .lqm-plot.is-chart .is-picked .lqm-bar-short { opacity: 0.9; }
 .lqm-cum { fill: none; stroke-width: 1.4; }
 .lqm-cum.is-long { stroke: #f28b9a; }
 .lqm-cum.is-short { stroke: #7fe0bd; }

@@ -7,6 +7,17 @@
 #   bash deploy/release/ship.sh --yes            no question (the owner's go is already given)
 #   bash deploy/release/ship.sh --tag=v0.2.60    this tag instead of the next one (or the one HEAD already has)
 #   bash deploy/release/ship.sh --no-notice      no maintenance notice on the status page for an indexer restart
+#   bash deploy/release/ship.sh --yes --executor-ok   with --yes, the copy executor is restarted only with this too
+#
+# THE COPY EXECUTOR runs followers' live copies and algos with their keys, so its release has guards of its own
+# (step 6b): its own yes (the plan shows its copies, algos and send queue); the new code installed and checked
+# first while the old one runs; tools/preflight.ts - the new code reads a snapshot of today's database: every
+# copy and algo loads, the audit chain holds, the counts are the running executor's - else nothing is
+# switched; that snapshot, as taken, kept beside the live database (pre-release/, never deleted: the copy to
+# go back to - not the backup service, whose rotation would drop an older backup sooner); a quiet moment (an empty send queue, up to a minute); the brake on copies
+# and algos over the restart, so the new process sends nothing until it reports the same copies and algos and
+# its SoDEX feed up - only then is the brake set back to what it was. Anything else rolls back with copies and
+# algos still held, and they resume only on a healthy executor; if even that fails the brake stays on.
 #
 # THE STEPS, each only when it is needed; the first that fails stops it:
 #   1. what runs where: the release each unit runs (server 1: indexer, API; server 2: executor) and main on
@@ -59,13 +70,14 @@ say() { printf '\n== %s\n' "$*" >&2; }
 remote() { local host="$1"; shift; "${SSH[@]}" "$host" "$@"; }
 
 # --- arguments ------------------------------------------------------------------------------------
-PARTS=() DRY=0 YES=0 TAG="" NOTICE=1
+PARTS=() DRY=0 YES=0 TAG="" NOTICE=1 EXEC_OK=0
 for a in "$@"; do
   case "$a" in
     web|api|indexer|executor) PARTS+=("$a") ;;
     all) PARTS+=(web api indexer executor) ;;
     --dry-run) DRY=1 ;;
     --yes) YES=1 ;;
+    --executor-ok) EXEC_OK=1 ;;
     --tag=*) TAG="${a#--tag=}" ;;
     --no-notice) NOTICE=0 ;;
     -h|--help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -86,7 +98,10 @@ REPO="$(git remote get-url origin | sed -E 's#^(https://([^@/]*@)?github\.com/|g
 gh_api() { GH_PATH="$1" node --input-type=module -e '
   const r = await fetch(`https://api.github.com/repos/${process.env.GH_PATH}`, { headers: { authorization: `Bearer ${process.env.GITHUB_TOKEN || process.env.GH_TOKEN}`, accept: "application/vnd.github+json", "user-agent": "valuedesk-ship" } }).catch(() => null);
   process.stdout.write(r && r.ok ? await r.text() : "null");'; }
-json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const v=JSON.parse(s||"null");const f=new Function("v",`return (${process.argv[1]})`);const o=f(v);process.stdout.write(o==null?"":String(o))})' "$1"; }
+json() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{let v=null;try{v=JSON.parse(s||"null")}catch{};const f=new Function("v",`return (${process.argv[1]})`);const o=f(v);process.stdout.write(o==null?"":String(o))})' "$1"; }
+# The executor's own health on server 2 (copies, algos, feed, brake, send queue), or "null".
+exec_health() { remote "$S2" 'curl -fsS --max-time 5 http://127.0.0.1:8799/api/copy/v1/health' 2>/dev/null || echo null; }
+counts() { printf '%s' "$1" | json 'v && typeof v.copies === "number" ? `${v.copies} copies, ${v.algos} algos` : "?"'; }
 
 # --- 1. what runs where ---------------------------------------------------------------------------
 say "what runs where"
@@ -162,6 +177,11 @@ for p in indexer api executor web; do
   printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
+if [ ${#U2[@]} -gt 0 ]; then
+  EXEC0="$(exec_health)"
+  note "  executor now: $(printf '%s' "$EXEC0" | json 'v ? `${v.copies} copies (${v.active} active), ${v.algos} algos running, ${v.queue ? v.queue.waiting + v.queue.inFlight : "?"} orders in the send queue, brake ${v.brake ? "ON" : "off"}${v.ok ? "" : " - NOT HEALTHY NOW"}` : "NOT ANSWERING"')"
+  note "  executor guards: install + preflight on a snapshot, backup, quiet send queue, brake over the restart, same copies/algos before trading resumes"
+fi
 [ -z "$INFRA" ] || note "  NOT SHIPPED: $INFRA - units/Caddy/env need deploy/release/bootstrap-instance.sh"
 [ "$MOVE_MAIN" = 1 ] || note "  main stays at $(git rev-parse --short origin/main): the web changed but is not shipped"
 dirty="$(git status --porcelain -- apps packages deploy/server package.json package-lock.json | grep -v '^?? deploy/\.out/' || true)"
@@ -172,6 +192,12 @@ if [ "$YES" != 1 ]; then
   [ -t 0 ] || die "no terminal to ask: add --yes once the plan above is agreed"
   read -r -p "Ship $TAG? [y/N] " a
   case "$a" in y|Y|yes) ;; *) die "not shipped" ;; esac
+  if [ ${#U2[@]} -gt 0 ]; then
+    read -r -p "Restart the copy executor too (live copies and algos, guarded as above)? [y/N] " a
+    case "$a" in y|Y|yes) ;; *) U2=(); note "the executor stays on ${LIVE_EXECUTOR:-its release}" ;; esac
+  fi
+elif [ ${#U2[@]} -gt 0 ] && [ "$EXEC_OK" != 1 ]; then
+  die "the copy executor runs live copies and algos: add --executor-ok to restart it, or name the parts without it"
 fi
 
 START="$(date -u +%s)"
@@ -309,11 +335,71 @@ if [ ${#U1[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
   fi
 fi
 
+# --- 6b. the copy executor, guarded ---------------------------------------------------------------
+BRAKE_FILE=/var/lib/valuescan/brake.json
+BRAKE0=""
+# The brake as it was before (the file's exact text; empty: off), put back as it was.
+restore_brake() {
+  if [ -z "$BRAKE0" ]; then remote "$S2" 'sudo bash /opt/valuescan/bin/brake.sh off' >&2
+  else printf '%s\n' "$BRAKE0" | remote "$S2" "sudo bash -c 'cat > $BRAKE_FILE.ship && chmod 0644 $BRAKE_FILE.ship && mv -f $BRAKE_FILE.ship $BRAKE_FILE'"
+  fi
+}
+exec_healthy() { printf '%s' "$1" | json 'v && v.ok && v.db && v.feeds && v.feeds.sodex ? 1 : 0'; }
+exec_rollback() {   # why
+  local cur h i
+  note "!! executor on $TAG: $1 - rolling back; copies and algos stay held"
+  cur="$(remote "$S2" 'sudo /opt/valuescan/bin/release.sh --status' | sed -n 's/^current: *//p')"
+  if [ "$cur" = "$TAG" ]; then remote "$S2" 'sudo /opt/valuescan/bin/release.sh --rollback --units=executor' >&2 || true; fi
+  for i in $(seq 1 30); do
+    h="$(exec_health)"
+    if [ "$(exec_healthy "$h")" = 1 ]; then
+      restore_brake
+      die "executor: $TAG rolled back - it runs the release before ($(counts "$h")), copies and algos resumed"
+    fi
+    sleep 2
+  done
+  die "executor: $TAG rolled back but the executor is NOT healthy ($h). The brake stays ON: copies and algos are held. Now: docs/INCIDENT-RUNBOOK.md"
+}
+ship_executor() {
+  local tb="$INBOX/$(basename "$TARBALL")" pre h h1="" i ok=""
+  # a. the new code installed and checked; the old one keeps running
+  remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --install-only --from=$tb" >&2 || die "executor: $TAG did not install on server 2 - nothing switched"
+  # b. the new code on a snapshot of today's data, against what the running executor reports; as the
+  #    executor's own user, so nothing it touches beside the live database can end up root's. The snapshot
+  #    as taken stays (c): the database as it stood before this release, beside the live one, never deleted.
+  local keep="/var/lib/valuescan/executor/pre-release/executor-before-$TAG-$(date -u +%Y%m%dT%H%M%SZ).db"
+  pre="$(remote "$S2" "sudo -u valuescan-executor bash -c 'cd /opt/valuescan/releases/$TAG/apps/executor && /opt/node/current/bin/node --disable-warning=ExperimentalWarning --import tsx tools/preflight.ts /var/lib/valuescan/executor/executor.db --keep=$keep'" || true)"
+  h="$(exec_health)"
+  note "preflight: $pre"
+  [ "$(printf '%s' "$pre" | json 'v && v.ok ? 1 : 0')" = 1 ] || die "executor: the new code does not read today's data - nothing switched"
+  [ "$(counts "$pre")" = "$(counts "$h")" ] || die "executor: the new code sees $(counts "$pre"), the running one $(counts "$h") - nothing switched (a copy added meanwhile? run it again)"
+  # c. (the snapshot above is the copy to go back to: $keep)
+  # d. a quiet moment: nothing waiting in the send queue (up to a minute; the stop lets a step in flight finish anyway)
+  for i in $(seq 1 30); do
+    [ "$(exec_health | json 'v && v.queue ? v.queue.waiting + v.queue.inFlight : 0')" = 0 ] && break
+    sleep 2
+  done
+  # e. the brake over the restart: the new process sends nothing until it is checked
+  BRAKE0="$(remote "$S2" "cat $BRAKE_FILE 2>/dev/null || true")"
+  remote "$S2" "sudo bash /opt/valuescan/bin/brake.sh on copies,algos 'Updating the copy executor: copies and algos go on within a minute.'" >&2
+  # f. switch and restart
+  remote "$S2" "sudo /opt/valuescan/bin/release.sh $TAG --units=executor --from=$tb && sudo rm -f $tb $tb.sha256" >&2 || exec_rollback "it did not come back healthy"
+  # g. the same copies and algos and its SoDEX feed up, then trading as it was
+  for i in $(seq 1 45); do
+    h1="$(exec_health)"
+    if [ "$(exec_healthy "$h1")" = 1 ] && [ "$(counts "$h1")" = "$(counts "$h")" ]; then ok=1; break; fi
+    sleep 2
+  done
+  [ -n "$ok" ] || exec_rollback "after 90 s it reports $(counts "$h1") (before: $(counts "$h")), healthy: $(exec_healthy "$h1")"
+  restore_brake
+  note "executor on $TAG: $(counts "$h1"), the brake back as it was"
+}
+
 if [ ${#U2[@]} -gt 0 ] || [ "$BIN" = 1 ]; then
   say "server 2 ($S2): ${U2[*]:-bin only}"
   upload "$S2"
   sync_bin "$S2" >&2
-  [ ${#U2[@]} -eq 0 ] || release_on "$S2" executor
+  [ ${#U2[@]} -eq 0 ] || ship_executor
 fi
 
 # --- 7. the web -----------------------------------------------------------------------------------

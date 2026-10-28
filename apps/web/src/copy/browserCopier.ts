@@ -42,6 +42,7 @@ import { openVault, type KeyVault, type StoredKey } from '../trading/vault';
 import { logger } from '../log';
 import { openBrowserStore, type BrowserStore } from './browserStore';
 import { copyKeyRegistered } from './sodexSetup';
+import { holdReloadWhile } from '../lazyPage';
 
 const log = logger('copy');
 
@@ -490,3 +491,10 @@ class BrowserCopier {
 }
 
 export const browserCopier = new BrowserCopier();
+
+// A release never reloads the tab that runs live copies (lazyPage.ts): a leader's trade could be missed meanwhile.
+holdReloadWhile(() => {
+  if (browserCopier.role !== 'runner') return null;
+  const n = browserCopier.views.filter((v) => v.subscription.status === 'active').length;
+  return n ? `${n} live cop${n === 1 ? 'y' : 'ies'}` : null;
+});

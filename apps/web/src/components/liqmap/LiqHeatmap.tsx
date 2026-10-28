@@ -561,12 +561,15 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   const MR = 62;
   const W = Math.max(1, w - ML - MR);
   const H = Math.max(1, ht - M.t - M.b);
+  /** Where the profile's hover and click begin: its bars grow left from the price axis over the last R pixels. */
   const cw = Math.max(1, W - R);
   const n = candles.length;
   const nShow = Math.max(10, Math.min(Math.max(10, n), Math.round(span)));
   const end = Math.max(0, Math.min(n, n - Math.round(back)));
   const vis = candles.slice(Math.max(0, end - nShow), end);
-  const slot = cw / nShow;
+  // The candles run the whole width up to the price axis, over the profile (two slots kept free at
+  // the axis), so the newest stay in sight next to the levels instead of ending where the profile starts.
+  const slot = W / (nShow + 2);
   // The price axis by default: the candles shown with room either side (12% of the price), so the levels near the price show.
   let aLo = p * 0.88;
   let aHi = p * 1.12;
@@ -609,13 +612,12 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
     const px = e.clientX - r.left;
     const py = e.clientY - r.top;
     const f = wheelFactor(e);
-    if (px > ML + cw - 4 || e.shiftKey) zoomY(f, priceAt(py));
+    if (px > ML + W || e.shiftKey) zoomY(f, priceAt(py));
     else zoomT(f);
   });
   const drag = useDrag((dx, dy, start) => {
     setHover(null);
     if (start.x > ML + W) { zoomY(Math.exp(dy / 150)); return; }
-    if (start.x > ML + cw - 4 && start.x <= ML + W) return;
     setBack((b) => Math.max(0, Math.min(Math.max(0, n - 10), b + dx / slot)));
     const d = (dy / H) * (hi - lo);
     setYv([lo + d, hi + d]);
@@ -638,7 +640,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   return (
     <div
       ref={bind}
-      className={`lqm-plot${drag.dragging() ? ' is-drag' : ''}`}
+      className={`lqm-plot is-chart${drag.dragging() ? ' is-drag' : ''}`}
       onPointerDown={drag.onPointerDown}
       onPointerMove={move}
       onPointerUp={drag.onPointerUp}
@@ -656,16 +658,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
           ))}
           <rect x={ML + W} y={M.t} width={MR} height={H} className="lqm-axis-hit is-y" />
           <g clipPath="url(#lqm-clip-chart)">
-            {vis.map((c, i) => {
-              const xc = ML + slot * (i + 0.5);
-              const up = c.c >= c.o;
-              return (
-                <g key={c.t} className={up ? 'lqm-up' : 'lqm-down'}>
-                  <line x1={xc} x2={xc} y1={y(c.h)} y2={y(c.l)} />
-                  <rect x={xc - Math.max(0.5, slot * 0.35)} width={Math.max(1, slot * 0.7)} y={y(Math.max(c.o, c.c))} height={Math.max(1, Math.abs(y(c.o) - y(c.c)))} />
-                </g>
-              );
-            })}
+            {/* The profile first, the candles over it. */}
             {shortA && <path d={shortA.fill} className="lqm-area is-short" />}
             {longA && <path d={longA.fill} className="lqm-area is-long" />}
             {shown.map((b) => {
@@ -681,10 +674,20 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
             })}
             {shortA && <path d={shortA.line} className="lqm-cum is-short" />}
             {longA && <path d={longA.line} className="lqm-cum is-long" />}
+            {vis.map((c, i) => {
+              const xc = ML + slot * (i + 0.5);
+              const up = c.c >= c.o;
+              return (
+                <g key={c.t} className={up ? 'lqm-up' : 'lqm-down'}>
+                  <line x1={xc} x2={xc} y1={y(c.h)} y2={y(c.l)} />
+                  <rect x={xc - Math.max(0.5, slot * 0.35)} width={Math.max(1, slot * 0.7)} y={y(Math.max(c.o, c.c))} height={Math.max(1, Math.abs(y(c.o) - y(c.c)))} />
+                </g>
+              );
+            })}
             <line x1={ML} x2={ML + W} y1={y(p)} y2={y(p)} className="lqm-now" />
             {hover !== null && <rect x={ML} y={y(hover + h.step)} width={W} height={Math.max(2, bh)} className="lqm-hover" />}
           </g>
-          {vis.length > 0 && ticks(0, vis.length - 1, Math.max(2, Math.floor(cw / 90))).map((i) => {
+          {vis.length > 0 && ticks(0, vis.length - 1, Math.max(2, Math.floor((slot * vis.length) / 90))).map((i) => {
             const c = vis[Math.round(i)];
             return c ? <text key={`t${i}`} x={ML + slot * (Math.round(i) + 0.5)} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtT(c.t)}</text> : null;
           })}
@@ -694,7 +697,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
               <text x={(MR - 4) / 2} y={13} textAnchor="middle" className="lqm-now-text">{fmtPx(p)}</text>
             </g>
           )}
-          {!n && <text x={ML + cw / 2} y={M.t + H / 2} textAnchor="middle" className="lqm-ax">{k.error ? 'No candles for this market' : 'Loading candles…'}</text>}
+          {!n && <text x={ML + W / 2} y={M.t + H / 2} textAnchor="middle" className="lqm-ax">{k.error ? 'No candles for this market' : 'Loading candles…'}</text>}
         </svg>
       )}
       <ZoomButtons onIn={() => zoomY(0.7, p >= lo && p <= hi ? p : undefined)} onOut={() => zoomY(1 / 0.7, p >= lo && p <= hi ? p : undefined)} onReset={reset} hint="Wheel zooms time, wheel on the price scale (or Shift+wheel) zooms price; drag pans." />

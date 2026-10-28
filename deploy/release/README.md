@@ -20,6 +20,18 @@ are about two minutes staler). Units, Caddy and env templates are never shipped:
 them, and `bootstrap-instance.sh` installs them. Every ship is a line in
 `deploy/.out/ships.log`.
 
+**The copy executor** (live copies and algos, with the followers' keys) is restarted only
+with its own yes (`--executor-ok` beside `--yes`), and behind guards: the new code is
+installed and checked while the old one runs; `apps/executor/tools/preflight.ts` opens a
+snapshot of today's database with the new code (every copy and algo loads, the audit chain
+holds, the counts match the running executor's) - otherwise nothing is switched; that
+snapshot is kept in `/var/lib/valuescan/executor/pre-release/` as the copy to go back to;
+it waits for an empty send queue; the brake holds copies and algos over the restart and is
+set back only once the new process reports the same copies and algos with its SoDEX feed
+up. Anything else rolls back with copies and algos still held; they resume only on a
+healthy executor. **The web** never reloads a tab by itself while that tab runs live
+browser algos or copies (`lazyPage.ts`): it says an update is waiting instead.
+
 The scripts below are its pieces, and what it does by hand.
 
 ## The scripts

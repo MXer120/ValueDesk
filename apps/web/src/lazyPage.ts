@@ -56,11 +56,48 @@ const RELOAD_KEY = 'vs.chunkReloadAt';
 const RELOAD_WINDOW_MS = 60_000;
 
 /**
+ * What a reload would stop: the algos and copies this tab runs (browserAlgos.ts and
+ * browserCopier.ts register themselves). While one says so, an update never reloads the
+ * tab by itself - it says an update is waiting instead (`vs:update-held`, UpdateHeld.tsx),
+ * and the user reloads once their algo or copy can stop.
+ */
+const holds = new Set<() => string | null>();
+/** A reason the tab must not reload now ("2 live algos"), or null. Returns the unregister. */
+export function holdReloadWhile(why: () => string | null): () => void {
+  holds.add(why);
+  return () => holds.delete(why);
+}
+/** Why the tab must not reload now, or null. */
+export function reloadHeldBy(): string | null {
+  for (const h of holds) {
+    try {
+      const r = h();
+      if (r) return r;
+    } catch {
+      return 'a running algo or copy';
+    }
+  }
+  return null;
+}
+export const UPDATE_HELD_EVENT = 'vs:update-held';
+
+/**
  * Reload to pick up the current build, unless that already happened within
  * the last minute - then a stale build is not the problem and a reload loop
- * would only hide the real error. Returns whether it reloaded.
+ * would only hide the real error - or this tab runs something a reload would
+ * stop. Returns whether it reloaded.
  */
 export function reloadForChunkError(): boolean {
+  const held = reloadHeldBy();
+  if (held) {
+    log.warn('a new build is out, not reloading: this tab runs ' + held);
+    try {
+      window.dispatchEvent(new CustomEvent(UPDATE_HELD_EVENT, { detail: held }));
+    } catch {
+      /* no window (tests): the log line is the record */
+    }
+    return false;
+  }
   const s = lazyPageEnv.storage();
   const now = lazyPageEnv.now();
   let last = 0;
