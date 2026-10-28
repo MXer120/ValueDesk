@@ -433,14 +433,22 @@ export function ConnectDialog() {
 
 /**
  * A wallet icon that never shows as broken: AppKit's own image first, then the
- * icon the extension announced (when it is installed), then the wallet's
- * initial on a plain tile.
+ * icon the extension announced (when it is installed), then a plain wallet
+ * glyph on a control tile - never a letter (owner, 2026-10-28).
  */
 function WalletIcon({ sources, label }: { sources: string[]; label: string }) {
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   if (!src) {
-    return <span className="cdlg-icon cdlg-icon--mono" aria-hidden="true">{label.charAt(0)}</span>;
+    return (
+      <span className="cdlg-icon cdlg-icon--mono" title={label} aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="70%" height="70%">
+          <rect x="3" y="6" width="18" height="13" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
+          <path d="M3 9.5h18" stroke="currentColor" strokeWidth="1.8" />
+          <circle cx="16.5" cy="14" r="1.3" fill="currentColor" />
+        </svg>
+      </span>
+    );
   }
   return (
     <img

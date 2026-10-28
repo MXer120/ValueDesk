@@ -1,6 +1,6 @@
 /**
  * Small pieces shared by the Deposit, Withdraw and Transfer sheets: a picker
- * with coin/chain icons (our own copies, see logos.ts - letter avatar when an
+ * with coin/chain icons (our own copies, see logos.ts - the venue's mark when an
  * asset has none), and the handful of line icons the reference sheets use.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';

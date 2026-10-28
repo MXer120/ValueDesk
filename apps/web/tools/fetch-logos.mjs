@@ -20,13 +20,14 @@
  *
  * Everything else SoDEX lists (newer stocks / ETFs / pre-IPO perps, a few
  * memecoins) takes its owner's own icon from fetch-site-logos.mjs (COIN_SITES)
- * or the app's letter avatar. Licence review 2026-10-28: TradingView's symbol
+ * or, with no allowed icon anywhere, SoDEX's own mark (CoinIcon's fallback;
+ * never a letter, owner 2026-10-28). Licence review 2026-10-28: TradingView's symbol
  * logos and CoinGecko's images are no longer taken (their terms do not cover a
  * commercial site), nor the recoloured Unitree tile (shown unaltered now, from
  * unitree.com, by fetch-site-logos.mjs).
  *
  * The run fails without touching the manifest if any listed chain ends up
- * without an image; listed assets without one are reported (letter avatar).
+ * without an image; listed assets without one are reported (they show SoDEX's mark).
  */
 import { mkdirSync, writeFileSync, readdirSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -310,8 +311,8 @@ const { SITE_COIN_LOGOS } = await import('../src/logoManifestSites.ts');
 const unresolvedAssets = listed.assets.filter((a) => !resolveKey(a, coins) && !resolveKey(a, SITE_COIN_LOGOS));
 const unresolvedChains = listed.chains.filter((c) => !chains[canonical(c)]);
 if (problems.length) console.log('problems:\n  ' + problems.join('\n  '));
-// An asset without a licensed icon is drawn as a letter avatar; add its owner's site to COIN_SITES in fetch-site-logos.mjs.
-if (unresolvedAssets.length) console.log(`letter avatars (no licensed icon): ${unresolvedAssets.join(', ')}`);
+// An asset without a licensed icon shows SoDEX's mark (CoinIcon); add its owner's site to COIN_SITES in fetch-site-logos.mjs.
+if (unresolvedAssets.length) console.log(`SoDEX's mark (no licensed icon): ${unresolvedAssets.join(', ')}`);
 if (unresolvedChains.length) {
   console.error(`missing chain icons: ${unresolvedChains.join(', ')}`);
   console.error('Add them to CHAIN_AS_COIN. Nothing was changed.');

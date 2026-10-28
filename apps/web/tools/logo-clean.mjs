@@ -211,6 +211,37 @@ export function cleanSvg(input) {
   return { svg: recompressEmbedded(minifySvg(svg)), removed };
 }
 
+/**
+ * A traced (vectorised-photo) SVG slimmed for icon use: path coordinates
+ * rounded to 1/1000 of the viewBox (invisible at the 14-128 px an icon is shown
+ * at - an error of at most 0.05 % of its width), and the attributes a tracer
+ * writes on every one of thousands of paths that only repeat the default
+ * (opacity="1.000000"; stroke="none" where nothing sets a stroke). Used by
+ * fetch-venue-logos.mjs on SVGs over SLIM_OVER bytes (some Hyperliquid memecoin
+ * icons are 0.5-1 MB): the drawing stays the same, the file shrinks severalfold.
+ */
+export const SLIM_OVER = 100_000;
+export function slimTracedSvg(input) {
+  let svg = String(input);
+  const vb = /\sviewBox\s*=\s*["']\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)/i.exec(svg);
+  const span = vb ? Math.max(Number(vb[1]), Number(vb[2])) : 0;
+  if (!(span > 0)) return svg;
+  const dec = Math.max(0, Math.ceil(Math.log10(1000 / span)));
+  const round = (x) => {
+    const r = Number(Number(x).toFixed(dec));
+    return String(Object.is(r, -0) ? 0 : r);
+  };
+  svg = svg.replace(/(\sd\s*=\s*)(["'])([^"']*)\2/g, (m, pre, q, d) => {
+    if (/[eE]/.test(d)) return m;
+    const out = d.replace(/-?\d*\.\d+/g, round);
+    return `${pre}${q}${minifyPath(out)}${q}`;
+  });
+  svg = svg.replace(/\sopacity\s*=\s*["']1(?:\.0*)?["']/g, '');
+  const otherStroke = /\sstroke\s*=\s*["'](?!none["'])|stroke\s*:/i.test(svg);
+  if (!otherStroke) svg = svg.replace(/\sstroke\s*=\s*["']none["']/g, '');
+  return svg;
+}
+
 /* ------------------------------------------------------------------ CLI */
 
 function walk(dir, out = []) {

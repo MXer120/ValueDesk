@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { cleanSvg, minifyPath, sanitizeSvg } from './logo-clean.mjs';
+import { cleanSvg, minifyPath, sanitizeSvg, slimTracedSvg } from './logo-clean.mjs';
 import { recompressPng } from './png-shrink.mjs';
 
 test('sanitise: script, handlers, foreignObject, external and javascript: refs go', () => {
@@ -76,4 +76,13 @@ test('recompressPng: same pixels, never bigger, rendering chunks kept', () => {
   assert.ok(PNG.sync.read(out).data.equals(PNG.sync.read(withSrgb).data), 'identical pixels');
   assert.ok(out.includes(Buffer.from('sRGB')), 'sRGB kept');
   assert.equal(recompressPng(Buffer.from('not a png')).toString(), 'not a png');
+});
+
+test('slimTracedSvg: coordinates rounded to 1/1000 of the box, default attributes dropped, strokes kept where set', () => {
+  const svg = '<svg viewBox="0 0 500 500"><path fill="#BA561B" opacity="1.000000" stroke="none" d="M1 195C1 177.979111 1 160.958206 1.336729 143.386505Z"/></svg>';
+  assert.equal(slimTracedSvg(svg), '<svg viewBox="0 0 500 500"><path fill="#BA561B" d="M1 195C1 178 1 161 1.3 143.4Z"/></svg>');
+  const stroked = '<svg viewBox="0 0 2000 2000"><path stroke="none" d="M0.4 0.6Z"/><path stroke="#000" d="M1 1Z"/></svg>';
+  assert.match(slimTracedSvg(stroked), /stroke="none"/, 'another path sets a stroke: stroke="none" stays');
+  assert.match(slimTracedSvg(stroked), /d="M0 1Z"/);
+  assert.equal(slimTracedSvg('<svg><path d="M0.123 0Z"/></svg>'), '<svg><path d="M0.123 0Z"/></svg>', 'no viewBox: untouched');
 });

@@ -17,7 +17,12 @@
  * apple-touch-icons, then the largest size); then /favicon.ico. Only the first
  * 32 KB of the page are read (the <head>), and every transfer is
  * paced to stay under ~1.5 MB/s (the laptop's bandwidth cap), one at a time.
+ *
+ * recordSources() keeps tools/logo-sources.json: for every shipped logo file,
+ * the URL it was downloaded from (or the fallback it shows), per tool section -
+ * the attribution record the licence review points to.
  */
+import { readFileSync, writeFileSync } from 'node:fs';
 import { cleanSvg } from './logo-clean.mjs';
 import { createRequire } from 'node:module';
 import { recompressPng, shrinkPng } from './png-shrink.mjs';
@@ -39,7 +44,8 @@ let bytes = 0;
 /** Total bytes this process downloaded through here. */
 export const downloaded = () => bytes;
 
-async function pace(n) {
+/** Count `n` downloaded bytes and wait until the average is back under RATE (shared by every logo tool). */
+export async function pace(n) {
   bytes += n;
   const due = (bytes / RATE) * 1000 - (Date.now() - started);
   if (due > 0) await new Promise((r) => setTimeout(r, due));
@@ -119,7 +125,23 @@ async function get(url, limit, imageOnly = false) {
 
 /** An image at `url` ready to ship (SVG sanitised, PNG shrunk), or null. */
 export async function imageAt(url) {
+  return ready(await get(url, MAX_IMAGE, true), url);
+}
+
+/**
+ * A GitHub organisation's own avatar (github.com/<org>.png, served from
+ * avatars.githubusercontent.com), or null - also when the org never set one:
+ * GitHub then answers its generated 420 x 420 identicon, which is no logo.
+ */
+export async function githubAvatar(org) {
+  const url = `https://github.com/${encodeURIComponent(org)}.png?size=128`;
   const res = await get(url, MAX_IMAGE, true);
+  if (res && sniff(res.body) === '.png' && res.body.readUInt32BE(16) === 420 && res.body.readUInt32BE(20) === 420) return null;
+  const img = ready(res, url);
+  return img && { ...img, url: `https://github.com/${org}.png (${img.url})` };
+}
+
+function ready(res, url) {
   if (!res || res.body.length < 64 || res.body.length > MAX_IMAGE) return null;
   const ext = sniff(res.body);
   if (!ext) return null;
@@ -223,4 +245,21 @@ export async function siteIcon(domain, page = `https://${domain}/`) {
     if (img) return img;
   }
   return null;
+}
+
+/**
+ * Replace one tool's section of tools/logo-sources.json ({ key: source URL or
+ * fallback note }), leaving the other tools' sections as they are.
+ */
+export function recordSources(section, entries) {
+  const file = new URL('./logo-sources.json', import.meta.url);
+  let all = {};
+  try {
+    all = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    /* first run */
+  }
+  all[section] = Object.fromEntries(Object.entries(entries).sort(([a], [b]) => a.localeCompare(b)));
+  const sorted = Object.fromEntries(Object.entries(all).sort(([a], [b]) => a.localeCompare(b)));
+  writeFileSync(file, JSON.stringify(sorted, null, 1) + '\n');
 }

@@ -142,7 +142,7 @@
 .kt { display: flex; flex-direction: column; gap: 12px; max-width: 640px; }
 .kt-post { display: flex; flex-direction: column; gap: 10px; padding: 16px 18px; border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 16px; background: rgba(255, 255, 255, 0.025); }
 .kt-post__who { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.kt-avatar { display: grid; place-items: center; flex: none; border-radius: 999px; color: #fff; font-weight: 650; }
+.kt-avatar { display: grid; place-items: center; flex: none; overflow: hidden; border-radius: 999px; }
 .kt-post__names { display: flex; flex-direction: column; min-width: 0; }
 .kt-post__names b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); font-weight: 650; }
 .kt-post__names span { color: var(--dim); font-size: var(--fs-micro); }

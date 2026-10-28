@@ -294,8 +294,8 @@ const LOGO_TYPES: ReadonlySet<string> = new Set(['image/png', 'image/x-icon', 'i
  */
 export async function siteLogo(domain: string, get: PublicGet = publicGet): Promise<{ type: string; body: Buffer | null }> {
   // Official seals and marks whose owners ask for written permission (the Fed Board's and Reserve
-  // Banks' logos and seals, the SEC's and DOL's seals, Kalshi's s. 6.4): never fetched; the app
-  // ships a neutral letter badge for them instead.
+  // Banks' logos and seals, the SEC's and DOL's seals, Kalshi's s. 6.4): never fetched here; the app
+  // ships each one's own site icon in public/logos/news instead (taken once by tools/fetch-site-logos.mjs).
   if (NO_SITE_ICON.some((d) => domain === d || domain.endsWith(`.${d}`))) return { type: 'image/x-icon', body: null };
   const hit = logos.get(domain);
   if (hit && Date.now() - hit.at < LOGO_MS) return hit;

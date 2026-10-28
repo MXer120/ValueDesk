@@ -1,12 +1,14 @@
 /**
  * A saved address's picture: the platform's logo (or the coin's) with the CHAIN
- * as the small badge - always the chain. A contact that names neither gets a
- * plain wallet mark (a bare initial read as a riddle); a named platform or coin
- * whose logo cannot load falls back to its initial. An EVM address nobody said
- * the chain of gets a plain "EVM" badge rather than a guessed network.
+ * as the small badge - always the chain. Never a letter (owner, 2026-10-28): a
+ * contact the user made for a bare address (no platform, no coin) gets its
+ * wallet identicon, drawn from the address; a coin whose file cannot load shows
+ * SoDEX's mark, a platform's the identicon. An EVM address nobody said the chain
+ * of gets a neutral "any EVM chain" link mark rather than a guessed network.
  */
 import { useMemo, useState } from 'react';
-import { chainLogo, coinColor, coinLogo } from '../../../logos';
+import { chainLogo, coinLogo, venueMark } from '../../../logos';
+import { Identicon } from '../../Identicon';
 import { COIN_LOGOS } from '../../../logoManifest';
 import type { Contact } from '../contacts';
 import { CATALOG, CHAIN_LOGOS, PLATFORM_LOGOS } from './catalogData';
@@ -44,33 +46,27 @@ function Img({ src, alt, className, fallback }: { src: string | null; alt: strin
   return src && bad !== src ? <img className={className} src={src} alt={alt} onError={() => setBad(src)} /> : fallback;
 }
 
-export function ContactAvatar({ name, kind, look, size = 30 }: { name: string; kind: Contact['kind']; look: Look; size?: number }) {
+export function ContactAvatar({ name, address, kind, look, size = 30 }: { name: string; address: string; kind: Contact['kind']; look: Look; size?: number }) {
   const platform = platformById(look.platform);
   const chain = chainById(look.chain);
   const main = platform ? platformLogo(platform.id) : look.coin ? coinLogo(look.coin) : null;
-  const named = platform?.name ?? look.coin ?? null;
   const badge = chain ? catalogChainLogo(chain) : null;
   const badgeSize = Math.round(size * 0.46);
+  const face = <Identicon seed={address || name} size={size} className="ab-av__main ab-av__face" title={platform || look.coin ? undefined : name} />;
   return (
     <span className="ab-av" style={{ width: size, height: size }} aria-hidden="true">
       <Img
         src={main}
         alt=""
         className="ab-av__main"
-        fallback={
-          named ? (
-            <span className="ab-av__main ab-av__letter" style={{ background: coinColor(named) }}>{named.charAt(0).toUpperCase()}</span>
-          ) : (
-            <span className="ab-av__main ab-av__plain" title={name}><PlainWallet /></span>
-          )
-        }
+        fallback={!platform && look.coin ? <Img src={venueMark(null)} alt="" className="ab-av__main" fallback={face} /> : face}
       />
       {(chain || kind === 'evm') && (
         <span className="ab-av__badge" style={{ width: badgeSize, height: badgeSize }} title={chain?.name ?? 'Any EVM chain'}>
           {chain ? (
-            <Img src={badge} alt="" className="ab-av__badgeimg" fallback={<span className="ab-av__badgetxt">{chain.name.charAt(0)}</span>} />
+            <Img src={badge} alt="" className="ab-av__badgeimg" fallback={<Identicon seed={chain.id} size={badgeSize} className="ab-av__badgeimg" />} />
           ) : (
-            <span className="ab-av__badgetxt">EVM</span>
+            <AnyEvm />
           )}
         </span>
       )}
@@ -78,11 +74,9 @@ export function ContactAvatar({ name, kind, look, size = 30 }: { name: string; k
   );
 }
 
-/** A contact that is just an address: a wallet mark, not a letter. */
-const PlainWallet = () => (
-  <svg viewBox="0 0 24 24" width="56%" height="56%" aria-hidden="true">
-    <rect x="3" y="6" width="18" height="13" rx="2.5" fill="none" stroke="currentColor" strokeWidth="1.8" />
-    <path d="M3 9.5h18" stroke="currentColor" strokeWidth="1.8" />
-    <circle cx="16.5" cy="14" r="1.3" fill="currentColor" />
+/** "Any EVM chain": a neutral link mark (no network's logo is guessed, no letters). */
+const AnyEvm = () => (
+  <svg className="ab-av__anyevm" viewBox="0 0 16 16" width="70%" height="70%" aria-hidden="true">
+    <path d="M6.5 9.5l3-3M5.2 7.3L4 8.5a2.5 2.5 0 003.5 3.5l1.2-1.2M10.8 8.7L12 7.5A2.5 2.5 0 008.5 4L7.3 5.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
   </svg>
 );

@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { FolderLimits, FolderSummary, ItemSummary, TweetData } from '@sign/folders/types.js';
 import { findTweetUrl } from '@sign/folders/tweetUrl.js';
+import { Identicon } from '../components/Identicon';
 import { Modal } from '../components/Modal';
 import { DlgFoot } from '../components/dialogParts';
 import { foldersApi } from '../folders/api';
@@ -39,13 +40,11 @@ export function Linked({ text }: { text: string }) {
   return <>{parts}</>;
 }
 
-/** A round initial for an account: no picture is fetched from X. */
+/** An account's identicon, from its handle: no picture is fetched from X, and no letter is drawn (owner, 2026-10-28). */
 function Avatar({ handle, name, size = 36 }: { handle: string; name: string; size?: number }) {
-  let h = 0;
-  for (const c of handle || name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
   return (
-    <span className="kt-avatar" style={{ width: size, height: size, background: `hsl(${h % 360} 45% 32%)`, fontSize: size * 0.42 }} aria-hidden="true">
-      {(name || handle || '?').trim().charAt(0).toUpperCase()}
+    <span className="kt-avatar" style={{ width: size, height: size }} aria-hidden="true">
+      <Identicon seed={(handle || name || '?').toLowerCase()} size={size} />
     </span>
   );
 }

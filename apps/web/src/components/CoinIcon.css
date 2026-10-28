@@ -8,16 +8,8 @@
   vertical-align: middle;
   user-select: none;
 }
-/* The letter avatar for anything without an icon: ink on the coin's colour disc. */
-.coin-ic--letter {
-  color: var(--bg);
-  font-weight: 700;
-  line-height: 1;
-}
-/* The letter is drawn, not written: a table cell's text must stay the market's
-   name alone - the "Current market" filter (dashboard/Panel.tsx:MarketOnly)
-   matches rows on it. */
-.coin-ic--letter::before { content: attr(data-letter); }
+/* Only when the icon AND the venue's mark both failed to load: an empty disc, no letter. */
+.coin-ic--blank { background: var(--bg-elevated); }
 
 /* Icon + name in a table cell or list row. */
 .coin-lbl {

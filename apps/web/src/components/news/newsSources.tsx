@@ -7,7 +7,9 @@
  *
  * A story's source mark: its outlet's site icon (server /api/vs/logo, so the page
  * asks only its own origin) - the story's own site, or the outlet's known site
- * when the link is SoSoValue's page or a post on X - else the outlet's initial.
+ * when the link is SoSoValue's page or a post on X - else (no site, or its icon
+ * fails to load) the mark of the feed that carried the story (SoSoValue's, the
+ * White House's). Never a letter (owner, 2026-10-28).
  */
 import { useState } from 'react';
 import { useSharedStored } from '../../hooks';
@@ -119,7 +121,7 @@ const OWN_ICON: Record<string, string> = { 'sosovalue.com': '/logos/brand/sosova
 
 const keyOf = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 
-/** The site whose icon marks a story, or null (the initial instead). */
+/** The site whose icon marks a story, or null (the feed's mark instead). */
 export function sourceSite(n: Pick<NewsItem, 'href' | 'author' | 'post'> & { source?: string }): string | null {
   const own = NEWS_SOURCES.find((s) => s.id === n.source);
   if (own) return own.site;
@@ -156,18 +158,21 @@ export const CalendarMark = ({ source }: { source: CalendarSource }) => (
   <img className="nw__logo" src={logoUrl(CALENDAR_SITE[source])} alt="" width={14} height={14} />
 );
 
-/** A story's source: its icon (or initial) and its name. */
+/** The feed that carried a story (SoSoValue unless it names another), whose mark stands in for an outlet without an icon. */
+export const feedSite = (n: { source?: string }) => NEWS_SOURCES.find((s) => s.id === n.source)?.site ?? 'sosovalue.com';
+
+/** A story's source: its icon (or the feed's mark) and its name. */
 export function SourceMark({ n }: { n: Pick<NewsItem, 'href' | 'author' | 'post'> & { source?: string } }) {
   const site = sourceSite(n);
-  const [broken, setBroken] = useState<string | null>(null);
+  const [broken, setBroken] = useState<ReadonlySet<string>>(() => new Set());
   const name = n.author ?? site ?? 'Source';
-  const initial = (name.match(/\p{L}|\p{N}/u)?.[0] ?? '?').toUpperCase();
+  const shown = [site, feedSite(n)].find((s): s is string => !!s && !broken.has(s));
   return (
     <span className="nw__src" title={name}>
-      {site && broken !== site ? (
-        <img className="nw__logo" src={logoUrl(site)} alt="" width={14} height={14} loading="lazy" onError={() => setBroken(site)} />
+      {shown ? (
+        <img className="nw__logo" src={logoUrl(shown)} alt="" width={14} height={14} loading="lazy" onError={() => setBroken((b) => new Set(b).add(shown))} />
       ) : (
-        <span className="nw__logo is-letter" aria-hidden="true">{initial}</span>
+        <span className="nw__logo" aria-hidden="true" />
       )}
       <span className="nw__by">{name}</span>
     </span>

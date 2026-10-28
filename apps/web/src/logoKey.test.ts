@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { CHAIN_LOGOS, COIN_LOGOS } from './logoManifest';
 import { SITE_COIN_LOGOS } from './logoManifestSites';
 import { VENUE_COIN_LOGOS } from './logoManifestVenues';
-import { coinLogo } from './logos';
+import { brandLogo, coinLogo, venueMark } from './logos';
 
 test('every SoDEX spelling of a coin finds the icon sodex.com shows for it', () => {
   const same: Array<[string, string]> = [
@@ -46,7 +46,7 @@ test('candidates run most specific first, the loose fallbacks last', () => {
   assert.ok(!logoCandidates('VET').includes('ET'));
 });
 
-test('unknown names resolve to nothing (the component then draws a letter avatar)', () => {
+test('unknown names resolve to nothing (the component then shows the venue mark)', () => {
   assert.equal(resolveKey('NOT-A-COIN-XYZ', COIN_LOGOS), undefined);
   assert.equal(resolveKey('SoDEX', COIN_LOGOS), undefined);
 });
@@ -71,7 +71,10 @@ const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true 
 
 test('licence review 2026-10-28: no TradingView symbol logo ships, and every manifest path is on disk', () => {
   // TradingView's symbol logos are 18 x 18 px SVGs; its terms bar commercial use without an agreement.
-  const tv = files(LOGOS).filter((f) => f.endsWith('.svg') && /<svg[^>]*\swidth="18"/.test(readFileSync(f, 'utf8').slice(0, 300)));
+  // An 18 px file Hyperliquid's own set serves (FEUSD_USDC.svg) is allowed: tools/logo-sources.json records where each venue file came from.
+  const venueSources: Record<string, string> = JSON.parse(readFileSync(fileURLToPath(new URL('../tools/logo-sources.json', import.meta.url)), 'utf8')).venues;
+  const fromHyperliquid = (f: string) => Object.entries(VENUE_COIN_LOGOS).some(([k, rel]) => f.replace(/\\/g, '/').endsWith(`/logos/${rel}`) && venueSources[k]?.startsWith('https://app.hyperliquid.xyz/coins/'));
+  const tv = files(LOGOS).filter((f) => f.endsWith('.svg') && /<svg[^>]*\swidth="18"/.test(readFileSync(f, 'utf8').slice(0, 300)) && !fromHyperliquid(f));
   assert.deepEqual(tv, []);
   for (const [k, rel] of [...Object.entries(COIN_LOGOS), ...Object.entries(SITE_COIN_LOGOS), ...Object.entries(VENUE_COIN_LOGOS)]) {
     assert.ok(existsSync(`${LOGOS}${rel}`), `${k} -> ${rel}`);
@@ -79,8 +82,22 @@ test('licence review 2026-10-28: no TradingView symbol logo ships, and every man
   for (const rel of Object.values(SITE_COIN_LOGOS)) assert.match(rel, /^sites\/[a-z0-9._-]+\.(png|svg|jpg|webp|ico)$/);
 });
 
-test("a listing SoDEX has no icon for takes its owner's own (the site set), else a letter avatar", () => {
+test("a listing SoDEX has no icon for takes its owner's own (the site set), else the venue's mark - never a letter", () => {
   assert.equal(coinLogo('aUNITREE'), '/logos/sites/unitree.com.svg');
   assert.equal(coinLogo('VOO-USD'), coinLogo('VT'), 'one issuer, one mark');
-  assert.equal(coinLogo('CASHCAT'), null, 'the CoinGecko image is gone: letter avatar');
+  assert.equal(coinLogo('SCHD'), null, 'no allowed source has one: CoinIcon shows the venue mark');
+  assert.equal(coinLogo('USDE'), '/logos/sites/github-ethena-labs.png', "a site that refuses bots: the project's GitHub org avatar");
+  assert.equal(coinLogo('AERO'), '/logos/sites/tw-aero.png', "Trust Wallet's file (MIT) where Hyperliquid's is a 1 MB traced photo");
+  assert.equal(coinLogo('HMSTR'), '/logos/venues/brand/hyperliquid.png', "no icon anywhere: Hyperliquid's mark, where it trades");
+  assert.equal(venueMark(null), '/logos/brand/sodex.svg', "SoDEX's mark when the venue is not known");
+  assert.equal(venueMark('sodex'), '/logos/brand/sodex.svg');
+  assert.equal(venueMark('Hyperliquid'), brandLogo('HYPERLIQUID'));
+  assert.equal(venueMark('nowhere'), '/logos/brand/sodex.svg');
+});
+
+test('no letter rendering path is left in the logo code (owner, 2026-10-28)', () => {
+  const src = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+  for (const rel of ['./logos.ts', './components/CoinIcon.tsx', './components/CoinIcon.css', './components/funds/addrbook/ContactAvatar.tsx', './components/news/newsSources.tsx']) {
+    assert.doesNotMatch(src(rel), /coinInitial|data-letter|coin-ic--letter|ab-av__letter|is-letter|charAt\(0\)/, rel);
+  }
 });

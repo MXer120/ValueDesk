@@ -39,6 +39,7 @@ import { CATALOG } from './addrbook/catalogData';
 import { ContactAvatar, KNOWN_COINS, catalogChainLogo, chainById, platformById, platformLogo, useContactLook } from './addrbook/ContactAvatar';
 import { chainsForKind, detectFromName, resolveLook } from './addrbook/detect';
 import { FxSelect, SearchIcon, short, type FxOption } from './ui';
+import { Identicon } from '../Identicon';
 
 type Row = 'favorite' | 'recent' | 'all';
 const MEMO_KINDS = new Set<ContactKind>(['xrp', 'stellar']);
@@ -206,7 +207,7 @@ export function AddressBook({ kind, onPick, onClose, draft }: {
 
 function RowAvatar({ c }: { c: Contact }) {
   const look = useContactLook(c);
-  return <ContactAvatar name={c.name} kind={c.kind} look={look} size={30} />;
+  return <ContactAvatar name={c.name} address={c.address} kind={c.kind} look={look} size={30} />;
 }
 
 /** "auto" | "none" | "p:<platform>" | "c:<coin>" */
@@ -225,15 +226,16 @@ const logoOptions = (): FxOption[] =>
     ...CATALOG.platforms.map((p) => ({
       value: `p:${p.id}`,
       label: p.name,
-      iconNode: <LogoImg src={platformLogo(p.id)} letter={p.name} />,
+      iconNode: <LogoImg src={platformLogo(p.id)} seed={p.id} />,
       hint: KIND_LABEL[p.kind] ?? p.kind,
     })),
     ...[...KNOWN_COINS].sort().map((coin) => ({ value: `c:${coin}`, label: coin, icon: coin, hint: 'Coin' })),
   ]);
 
-function LogoImg({ src, letter }: { src: string | null; letter: string }) {
+/** A platform's or chain's logo in a picker row; a file that fails to load shows an identicon of its name, never a letter. */
+function LogoImg({ src, seed }: { src: string | null; seed: string }) {
   const [bad, setBad] = useState(false);
-  return src && !bad ? <img className="fx-av ab-optimg" src={src} alt="" width={20} height={20} onError={() => setBad(true)} /> : <span className="fx-av ab-optletter">{letter.charAt(0).toUpperCase()}</span>;
+  return src && !bad ? <img className="fx-av ab-optimg" src={src} alt="" width={20} height={20} onError={() => setBad(true)} /> : <Identicon seed={seed} size={20} className="fx-av ab-optimg" />;
 }
 
 /** Add a contact, or edit one: name, address (fixed when editing), memo, logo, chain - with a live preview. */
@@ -288,7 +290,7 @@ function ContactForm({ editing, draft, onDone }: { editing: Contact | null; draf
     >
       <p className="fx-book__sec">{editing ? `Edit ${editing.name}` : 'New contact'}</p>
       <div className="fx-book__namerow">
-        <ContactAvatar name={name || '?'} kind={drawKind} look={preview} size={34} />
+        <ContactAvatar name={name || '?'} address={editing?.address ?? addr} kind={drawKind} look={preview} size={34} />
         <input className="fx-input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Bitget ETH deposit" aria-label="Contact name" autoFocus={!!editing} />
       </div>
       {editing ? (
@@ -320,7 +322,7 @@ function ContactForm({ editing, draft, onDone }: { editing: Contact | null; draf
           listAlign="end"
           options={[
             { value: 'auto', label: `Auto · ${autoChain}` },
-            ...chains.map((c) => ({ value: c.id, label: c.name, iconNode: <LogoImg src={catalogChainLogo(c)} letter={c.name} /> })),
+            ...chains.map((c) => ({ value: c.id, label: c.name, iconNode: <LogoImg src={catalogChainLogo(c)} seed={c.id} /> })),
           ]}
         />
       </div>

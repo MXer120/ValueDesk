@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CALENDAR_SITE, FEED_IDS, NEWS_SOURCES, OUTLETS, logoUrl, sourceSite } from './newsSources';
+import { CALENDAR_SITE, FEED_IDS, NEWS_SOURCES, OUTLETS, feedSite, logoUrl, sourceSite } from './newsSources';
 import SHIPPED from '../../../public/logos/news.json';
 
 const SOSO_PAGE = 'https://sosovalue.com/news/123';
@@ -71,8 +71,8 @@ test('a site\'s icon: the app\'s own, then the shipped copy, else the logo route
   assert.equal(logoUrl('sosovalue.com'), '/logos/brand/sosovalue.png');
   assert.equal(logoUrl('bloomberg.com'), '/logos/news/bloomberg.com.png');
   assert.equal(logoUrl('coindesk.com'), '/logos/news/coindesk.com.svg');
-  // Official seals and marks that need permission are neutral letter badges (licence review 2026-10-28).
-  for (const s of ['federalreserve.gov', 'sec.gov', 'dol.gov', 'kalshi.com']) assert.equal(logoUrl(s), `/logos/news/${s}.svg`, s);
+  // The agencies and Kalshi ship their own site icons (never the server's logo route), no letter badges (owner, 2026-10-28).
+  for (const s of ['federalreserve.gov', 'stlouisfed.org', 'sec.gov', 'dol.gov', 'kalshi.com']) assert.equal(logoUrl(s), `/logos/news/${s}.${(SHIPPED as Record<string, string>)[s]}`, s);
   assert.equal(logoUrl('nowhere.example'), '/api/vs/logo?domain=nowhere.example');
   assert.equal(logoUrl('a b&c'), '/api/vs/logo?domain=a%20b%26c');
 });
@@ -83,4 +83,11 @@ test('every shipped icon is on disk, and the calendar\'s agencies and the feeds 
   for (const s of [...Object.values(CALENDAR_SITE), ...NEWS_SOURCES.map((x) => x.site)]) {
     assert.doesNotMatch(logoUrl(s), /^\/api\//, `${s} should not wait on the logo route`);
   }
+});
+
+test("an outlet without an icon shows the mark of the feed that carried it, never a letter", () => {
+  assert.equal(feedSite({}), 'sosovalue.com');
+  assert.equal(feedSite({ source: 'whitehouse' }), 'whitehouse.gov');
+  assert.equal(feedSite({ source: 'nowhere' }), 'sosovalue.com');
+  for (const s of NEWS_SOURCES) assert.doesNotMatch(logoUrl(s.site), /^\/api\//, s.site);
 });

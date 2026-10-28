@@ -6,8 +6,10 @@
  * their own sites, and CC0 icons, for what SoDEX's set lacks) and
  * tools/fetch-venue-logos.mjs (Hyperliquid's set); the app never asks SoDEX or
  * anyone else for an image at runtime. No TradingView, CoinGecko or DefiLlama
- * image is used (licence review 2026-10-28). Anything without an icon
- * gets a letter avatar from the component, so a brand-new listing still renders.
+ * image is used (licence review 2026-10-28). No letter is ever drawn (owner,
+ * 2026-10-28): a coin no allowed source has an icon for carries the mark of the
+ * venue it trades on (fetch-venue-logos.mjs writes that into the manifest), and
+ * CoinIcon falls back to venueMark() for a brand-new listing or a broken file.
  */
 import { BRAND_LOGOS, CHAIN_LOGOS, COIN_LOGOS } from './logoManifest';
 import { VENUE_BRAND_LOGOS, VENUE_COIN_LOGOS } from './logoManifestVenues';
@@ -38,31 +40,18 @@ export function chainLogo(chain: string | null | undefined): string | null {
   return url(CHAIN_LOGOS[key] ?? CHAIN_LOGOS[key.replace(/[\s-]+/g, '_')] ?? resolveKey(key, COIN_LOGOS));
 }
 
-/**
- * The letter avatar's disc colour: deterministic per name, for listings newer
- * than the icon set.
- *
- * NO --warn IN HERE, and no warm greys. The first entry used to be #ffb547,
- * which IS `--warn` - so a coin disc could render in the one hue this app
- * reserves for "something needs your attention", 18px from the loudest number
- * on the page. Three more were leftovers from the warm scheme; #996d2b lands
- * 2.6:1 ink and is unreadable.
- */
-const COIN_COLORS = ['#00b481', '#ef4a3c', '#bcbcbc', '#7b7b7b', '#d4d4d4', '#f7f7f7'];
-export function coinColor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return COIN_COLORS[h % COIN_COLORS.length]!;
-}
-
 /** A venue's own mark (SODEX, HYPERLIQUID, TRADEXYZ, LIGHTER, ARCUS), or null. */
 export function brandLogo(key: string): string | null {
   const k = key.toUpperCase();
   return url(BRAND_LOGOS[k] ?? VENUE_BRAND_LOGOS[k]);
 }
 
-/** The letter a letter-avatar shows for a coin: the asset's own first letter, not the v/a/vs prefix. */
-export function coinInitial(name: string | null | undefined): string {
-  const n = (name ?? '').trim().replace(/^vs(?=[A-Z0-9])/, '').replace(/^[va](?=[A-Z0-9])/, '');
-  return n.charAt(0).toUpperCase() || '?';
+/**
+ * The mark CoinIcon falls back to: the venue's own (SoDEX's when the venue is
+ * not known - this is a SoDEX front end), so a listing newer than the icon set
+ * or a file that fails to load still shows a logo, never a letter.
+ */
+export function venueMark(venue: string | null | undefined): string | null {
+  const k = (venue ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return (k && brandLogo(k)) || brandLogo('SODEX');
 }

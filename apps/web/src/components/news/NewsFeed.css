@@ -75,10 +75,9 @@
 .nw__item:not(:only-child) { padding-bottom: 6px; }
 .nw__meta { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--dim); font-size: var(--fs-micro); }
 .nw__meta time { display: inline-flex; gap: 5px; flex: none; margin-left: auto; font-family: var(--font-num); }
-/* The source: its site's icon (or its initial) and its name. */
+/* The source: its site's icon (or the feed's mark) and its name. */
 .nw__src { display: inline-flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; color: var(--muted); font-weight: 600; }
 .nw__logo { display: block; flex: none; width: 14px; height: 14px; border-radius: 4px; object-fit: cover; background: rgba(255, 255, 255, 0.06); }
-.nw__logo.is-letter { display: grid; place-items: center; color: var(--text); font-size: 9px; font-weight: 700; line-height: 1; }
 .nw__clock { color: var(--muted); font-weight: 600; }
 .nw__ago::before { content: '·'; margin-right: 5px; color: var(--dim); }
 .nw__by { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

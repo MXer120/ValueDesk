@@ -361,7 +361,7 @@ button.coh-pick__opt {
 }
 button.coh-pick__opt:where(:not(.active)) { background: none; }
 button.coh-pick__opt:hover, button.coh-pick__opt.is-on { background: color-mix(in srgb, var(--text) 7%, transparent); }
-/* Only the label stretches: a coin's letter avatar is a span too, and must keep its size. */
+/* Only the label stretches: a coin's icon (or its empty fallback disc, a span) must keep its size. */
 .coh-pick__opt .coh-pick__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .coh-pick__opt .coin-ic { flex: none; }
 /* A sector's icon (SectorIcon.tsx): muted, lit with the row. */
