@@ -103,6 +103,8 @@ const MIX_COINS = 120;
 /** Every 2 minutes: a pass over ~90k books took 14-26 s of a disk-bound loop (2026-10-25); the edge serves the row in between. */
 /** The liquidation backlog takes the reads above this many books (updateLiqBoost)... */
 export const LIQ_BOOST_MIN = 300;
+/** A book counts toward that from this much notional (USD). */
+const LIQ_BOOST_NOTIONAL = 10_000;
 /** ...with the boards lane's loan to the history rebuild, and the PnL reads' share cut to this. */
 const LIQ_BOOST_LEND = 200;
 const LIQ_BOOST_PNL_SHARE = 0.1;
@@ -1144,8 +1146,11 @@ export class CohortTracker {
         // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
         // their liquidations sit nearest the price, where the heatmap is read.
         if (book.pos.size && !liqKnown(book) && (book.at < this.startedAt || book.liqMiss) && this.holdsSodexCoin(book)) {
-          push(liqBacklogPrio(notional(book), book.collateral ?? book.equity));
-          liqDue++;
+          const n = notional(book);
+          push(liqBacklogPrio(n, book.collateral ?? book.equity));
+          // Only books that show on the map hold the rebuild back: ~540 nearly empty accounts
+          // (equity under $3, 2026-10-28) never came up in the queue and paused it for good.
+          if (n >= LIQ_BOOST_NOTIONAL) liqDue++;
         }
         else if (book.pos.size && staleEquity(book, notional(book), now)) push(950 + size);
         else if (follows && eq >= floor && book.at < gap) push(900 + size);
