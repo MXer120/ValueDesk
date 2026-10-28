@@ -337,6 +337,8 @@ let cohortLoad: CohortLoad | null = null;
 const wanted = new Map<string, Want>();
 let lastAsked = 0;
 let rebuilding = false;
+/** The rebuild from behind under way (cohortsReady waits for it while there is no load yet). */
+let inflight: Promise<unknown> | null = null;
 let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 let lastRebuildMs = 0;
 /** When a rebuild from behind last failed: the next one waits, instead of spinning. */
@@ -519,7 +521,9 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
   if (rebuilding || started - lastAsked > KEEP_WARM_MS) return;
   rebuilding = true;
   try {
-    cohortLoad = await runBehind(loadSteps(s, started, wantedNow(started)));
+    const p = runBehind(loadSteps(s, started, wantedNow(started)));
+    inflight = p;
+    cohortLoad = await p;
     built.behind++;
     lastRebuildMs = Date.now() - started;
   } catch {
@@ -527,6 +531,7 @@ async function rebuildBehind(s: IndexStore): Promise<void> {
     rebuildFailedAt = Date.now();
   } finally {
     rebuilding = false;
+    inflight = null;
   }
   armRebuild(s);
 }
@@ -824,4 +829,14 @@ export function indexerStatus(): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * Before a cohort read: with no load yet and the start's warm-up building one, wait for it -
+ * asynchronously, so every other request goes on. Reading straight away built a second load in
+ * place: synchronous, it held the whole API 15 s and more after a restart (2026-10-28), and a
+ * page that asked then saw "Cohorts couldn't load" or waited half a minute.
+ */
+export async function cohortsReady(): Promise<void> {
+  if (!cohortLoad && inflight) await inflight.catch(() => undefined);
 }

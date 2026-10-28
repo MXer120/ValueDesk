@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 import { IndexStore } from '../src/indexer/store.js';
 import { TAIL_RATE } from '../src/indexer/cohortTracker.js';
-import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, warmCohorts } from '../src/indexer/read.js';
+import { KEEP_WARM_MS, LOAD_TTL_MS, _cohortLoad, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, warmCohorts } from '../src/indexer/read.js';
 import {
   MARGIN_SIBLING, aggregate, cohortsOf, holdsPosition, perpEquity, sampledVenue, scopeKey, scopeWallets, sumCohorts, walletRow,
   type CohortFilter, type NettedWallet, type WalletVenue,
@@ -318,4 +318,16 @@ test('a member that left the set leaves the table: the next load neither counts 
   const after = cohortsRead(ALL, NONE)!;
   assert.equal(after.coverage.sodex!.members, before.coverage.sodex!.members, 'the empty book is still a wallet, its member row is gone');
   assert.ok(after.cohorts.find((c) => c.id === 'apex')!.long < before.cohorts.find((c) => c.id === 'apex')!.long - 5e10, 'its old figures are out');
+});
+
+test('a read while the start warm-up builds waits for it (no second load built in place, holding the API)', async () => {
+  _cohortLoad.reset();
+  const warm = warmCohorts(ALL);
+  assert.equal(_cohortLoad.state().rebuilding, true, 'the warm-up is under way');
+  await cohortsReady();
+  const r = cohortsRead(ALL, NONE);
+  assert.ok(r, 'answered from the warm-up');
+  assert.deepEqual(_cohortLoad.built, { inPlace: 0, behind: 1 });
+  await warm;
+  await cohortsReady(); // with a load in hand it does not wait
 });

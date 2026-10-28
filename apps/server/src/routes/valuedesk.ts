@@ -49,7 +49,7 @@ import { hlInfo, hlLeaderboardRow, hyperliquidProvider } from '../valuedesk/hype
 import { hlPriceSeries } from '../valuedesk/hyperliquid/price.js';
 import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyzProvider } from '../valuedesk/extra/providers.js';
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
-import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
+import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
 import { isLiqRange, liqHeatmap, liqHistory, liqWallets } from '../indexer/liqRead.js';
 import { watchAddresses } from '../indexer/host.js';
@@ -442,6 +442,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts', async (req, reply) => {
     try {
       const q = req.query as Q;
+      await cohortsReady();
       const body = cohortsRead(cohortVenues(q), cohortFilter(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -505,6 +506,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       if (!isCohortId(q.cohort)) return fail(reply, new NotAvailable('Unknown cohort'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      await cohortsReady();
       const body = cohortDetail(cohortVenues(q), q.cohort, range, cohortFilter(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -567,6 +569,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
   app.get('/api/vs/cohorts/map', async (req, reply) => {
     try {
       const q = req.query as Q;
+      await cohortsReady();
       const body = cohortMap(cohortVenues(q), isCohortId(q.cohort) ? q.cohort : null);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -582,6 +585,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const f = cohortFilter(q);
       if (!f.coin && !f.sector) return fail(reply, new NotAvailable('Name a coin or a sector'));
       const range: CohortRange = q.range === '1d' || q.range === '30d' ? q.range : '7d';
+      await cohortsReady();
       const body = cohortFocus(cohortVenues(q), f, range);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
@@ -598,6 +602,7 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const sort: WalletSort = WALLET_SORTS.find((x) => x === q.sort) ?? 'equity';
       // `range` (1d | 7d | 30d, default 30d): the window of the PnL and win-rate columns. Membership stays all-time.
       const range: WalletRange = COHORT_RANGES.find((x) => x === q.range) ?? '30d';
+      await cohortsReady();
       const body = cohortWallets(cohortVenues(q), q.cohort, cohortFilter(q), {
         sort, dir: q.dir === 'asc' ? 'asc' : 'desc', offset: intOf(q.offset, 0, 0, 1_000_000), limit: intOf(q.limit, 50, 1, 200), range,
       });
