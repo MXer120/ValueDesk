@@ -84,6 +84,8 @@ export const CACHE_POLICIES: Readonly<Record<string, CachePolicy>> = {
   // the edge may share one answer per coin for five seconds.
   '/api/vs/liquidations': { cacheControl: 'public, max-age=5, stale-while-revalidate=5' },
   '/api/vs/liquidations/wallets': BOARD,
+  // A wallet's positions, every coin (the wallet filter).
+  '/api/vs/liquidations/positions': BOARD,
   // Snapshots are written every 15 minutes.
   '/api/vs/liquidations/history': { cacheControl: 'public, max-age=300, stale-while-revalidate=300' },
   '/api/vs/whales': LIVE,

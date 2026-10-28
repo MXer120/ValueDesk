@@ -15,8 +15,8 @@
  */
 import type { Venue } from '../valuedesk/types.js';
 import type { WalletVenue } from '../valuedesk/cohorts/model.js';
-import { emptyDrift, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
-import { coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuedesk/liquidations/levels.js';
+import { emptyDrift, niceStep, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
+import { NOW_HI, NOW_LO, NOW_STEP, coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap, type LiqWalletSnap } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
 import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
@@ -294,6 +294,97 @@ const MARKETS_WAIT_MS = 3_000;
  * A coin's liquidation levels over the venues asked for: from the live feed (the
  * indexer's engine, a second old) when the API has it, else from the minute row.
  */
+/**
+ * The heatmap of some wallets only (the wallet filter, live and chart views): their positions
+ * from the cohort load (a minute old at most), priced as the details panel prices them, in the
+ * live feed's 0.02% buckets around the price. Coverage is theirs: what they hold against the
+ * venue's open interest.
+ */
+export async function liqHeatmapOf(coin: string, venues: readonly Venue[], wallets: readonly string[]): Promise<LiqHeatmap | null> {
+  const g = await gather(coin, venues);
+  if (!g) return null;
+  const only = new Set(wallets);
+  const p = g.price;
+  const st = p ? niceStep(p * NOW_STEP) : 1;
+  const sum = new Map<number, [number, number, number, number, number]>();
+  const outside = { long: 0, short: 0, longN: 0, shortN: 0 };
+  const coverage: Partial<Record<Venue, VenueCoverage>> = {};
+  for (const v of venues) {
+    const c = g.coverage[v];
+    if (c) coverage[v] = { ...c, long: 0, short: 0, longKnown: 0, shortKnown: 0, positions: 0, past: 0 };
+  }
+  for (const l of g.levels) {
+    if (!only.has(l.address)) continue;
+    const c = coverage[l.venue];
+    const a = Math.abs(l.szi);
+    const long = l.szi > 0;
+    if (c) {
+      c.positions++;
+      if (long) { c.long += a; if (l.liq !== null) c.longKnown += a; } else { c.short += a; if (l.liq !== null) c.shortKnown += a; }
+    }
+    if (l.liq === null || !p) continue;
+    if (long ? l.liq >= p : l.liq <= p) { if (c) c.past += a; continue; }
+    const usd = a * l.liq;
+    if (l.liq < p * NOW_LO || l.liq >= p * NOW_HI) {
+      if (long) { outside.long += usd; outside.longN++; } else { outside.short += usd; outside.shortN++; }
+      continue;
+    }
+    const i = Math.floor(l.liq / st);
+    const b = sum.get(i) ?? [i, 0, 0, 0, 0];
+    if (long) { b[1] += usd; b[3]++; } else { b[2] += usd; b[4]++; }
+    sum.set(i, b);
+  }
+  return {
+    coin, venues: [...venues], at: g.load.at, price: p, step: st,
+    buckets: [...sum.values()].sort((x, y) => x[0] - y[0]), outside, coverage,
+  };
+}
+
+/** A wallet's open positions, every coin, with their liquidation prices (the wallet filter's list). */
+export interface WalletLiq {
+  venue: Venue;
+  address: string;
+  label: string | null;
+  coin: string;
+  symbol: string;
+  szi: number;
+  liq: number | null;
+  /** USD at the liquidation price (null without one), and the distance from the price. */
+  usd: number | null;
+  price: number | null;
+  dist: number | null;
+}
+
+/** Every position of `wallets` on `venues`, largest first. */
+export async function walletLiqs(wallets: readonly string[], venues: readonly Venue[]): Promise<WalletLiq[] | null> {
+  const load = cohortBooksNow();
+  if (!load) return null;
+  const markets = await marketsFor(venues);
+  const out: WalletLiq[] = [];
+  for (const venue of venues) {
+    const per = load.per.get(venue);
+    if (!per) continue;
+    const m = markets.get(venue) ?? null;
+    const priceOf = (s: string) => load.marks.get(`${venue}|${s}`) ?? m?.oi.get(s)?.px ?? null;
+    const tiersFor = (s: string): Tiers | null => m?.tiers.get(s) ?? null;
+    for (const address of wallets) {
+      const w = per.get(address);
+      if (!w?.positions?.length) continue;
+      const coins = new Set(w.positions.map((x) => liqCoin(x.symbol)));
+      for (const coin of coins) {
+        for (const l of coinLevels(venue, [[address, w]], coin, priceOf, tiersFor)) {
+          const px = priceOf(l.symbol);
+          out.push({
+            venue, address, label: shownLabel(address, w.label ?? null), coin, symbol: l.symbol, szi: l.szi, liq: l.liq,
+            usd: l.liq !== null ? r2(Math.abs(l.szi) * l.liq) : null, price: px, dist: l.liq !== null && px ? l.liq / px - 1 : null,
+          });
+        }
+      }
+    }
+  }
+  return out.sort((a, b) => (b.usd ?? 0) - (a.usd ?? 0));
+}
+
 export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promise<LiqHeatmap | null> {
   const markets = await marketsFor(venues);
   const live = liveSrc(coin);
@@ -307,12 +398,13 @@ export async function liqHeatmap(coin: string, venues: readonly Venue[]): Promis
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
 /** The wallets whose `side` liquidates in [from, to), largest first. */
-export async function liqWallets(coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, limit = 25): Promise<LiqWallets | null> {
+export async function liqWallets(coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, limit = 25, wallets: readonly string[] = []): Promise<LiqWallets | null> {
   const g = await gather(coin, venues);
   if (!g) return null;
   const p = g.price;
   // As the buckets: a long priced above the price (a short below) is past, not a level.
-  const hits = g.levels.filter((l) => l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 && !(p && l.liq >= p) : l.szi < 0 && !(p && l.liq <= p)));
+  const only = wallets.length ? new Set(wallets) : null;
+  const hits = g.levels.filter((l) => (!only || only.has(l.address)) && l.liq !== null && l.liq >= from && l.liq < to && (side === 'long' ? l.szi > 0 && !(p && l.liq >= p) : l.szi < 0 && !(p && l.liq <= p)));
   const rows = hits.map((l): LiqWallet => {
     const usd = Math.abs(l.szi) * l.liq!;
     return {
@@ -327,11 +419,33 @@ const RANGE_MS = { '1d': 86_400_000, '2d': 2 * 86_400_000, '7d': 7 * 86_400_000,
 export type LiqRange = keyof typeof RANGE_MS;
 export const isLiqRange = (r: unknown): r is LiqRange => typeof r === 'string' && r in RANGE_MS;
 
-export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRange): LiqHistory | null {
+export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRange, wallets: readonly string[] = []): LiqHistory | null {
   const s = reader();
   if (!s) return null;
   const points: LiqHistory['points'] = [];
   let coins: string[] = [];
+  // Some wallets only: their positions as each step kept them (liq_hist_w), summed into the
+  // snapshot's buckets. Kept from a wallet's first $100k+ position or first look-up on.
+  if (wallets.length) {
+    const only = new Set(wallets);
+    const vs = new Set(venues);
+    try {
+      for (const r of s.liqHistW(coin, Date.now() - RANGE_MS[range])) {
+        let snap: LiqWalletSnap;
+        try { snap = JSON.parse(inflateRawSync(r.data).toString('utf8')) as LiqWalletSnap; } catch { continue; }
+        const sum = new Map<number, [number, number]>();
+        for (const [v, a, side, i, usd] of snap.w) {
+          if (!vs.has(v) || !only.has(a)) continue;
+          const b = sum.get(i) ?? [0, 0];
+          if (side > 0) b[0] += usd; else b[1] += usd;
+          sum.set(i, b);
+        }
+        if (sum.size) points.push({ t: r.t, p: snap.p, st: snap.st, b: [...sum].sort((x, y) => x[0] - y[0]).map(([i, [l, sh]]) => [i, l, sh]) });
+      }
+      coins = s.liqHistCoins();
+    } catch { /* the table arrives with the indexer's first start */ }
+    return { coin, venues: [...venues], points, coins };
+  }
   try {
     for (const r of s.liqHist(coin, Date.now() - RANGE_MS[range])) {
       let snap: LiqSnap;

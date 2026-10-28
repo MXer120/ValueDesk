@@ -158,3 +158,16 @@ test('the accounts waiting at one moment are the next ones priced, however busy 
   // ...yet the 100 books waiting at the start are priced after 100 / 30 beats, not never.
   assert.equal(beats, 4);
 });
+
+test('per coin, the positions worth the minimum - and every one of a watched wallet - with venue, address and level', () => {
+  const { books, live } = world();
+  books.set('hyperliquid|0xbig', { cash: -1_440_000, priced: true, positions: [{ symbol: 'BTC', szi: 20 }] }); // 10x: equity 160k
+  books.set('hyperliquid|0xsmall', { cash: -7_200, priced: true, positions: [{ symbol: 'BTC', szi: 0.1 }] });
+  books.set('hyperliquid|0xwatched', { cash: 8_800, priced: true, positions: [{ symbol: 'BTC', szi: -0.1 }] });
+  for (const a of ['0xbig', '0xsmall', '0xwatched']) live.touch('hyperliquid', a);
+  live.work();
+  live.flush();
+  const got = live.positionsByCoin(100_000, new Set(['0xwatched'])).get('BTC') ?? [];
+  assert.deepEqual(got.map((x) => [x.address, x.long]).sort(), [['0xbig', true], ['0xwatched', false]]);
+  for (const x of got) assert.ok(x.liq > 0 && x.usd > 0 && x.venue === 'hyperliquid');
+});

@@ -151,6 +151,29 @@ export class LiqLive {
     return this.dirty.size;
   }
 
+  /**
+   * Per coin, the positions worth `minUsd` at their liquidation price - or held by a wallet in
+   * `also` - with venue, address, side and that price (the middle of its bucket: 0.02% wide).
+   * One pass over every account: the history's wallet filter takes it once a step.
+   */
+  positionsByCoin(minUsd: number, also: ReadonlySet<string>): Map<string, Array<{ venue: Venue; address: string; long: boolean; liq: number; usd: number }>> {
+    const out = new Map<string, Array<{ venue: Venue; address: string; long: boolean; liq: number; usd: number }>>();
+    for (const [key, entries] of this.added) {
+      const i = key.indexOf('|');
+      const address = key.slice(i + 1);
+      const watched = also.has(address);
+      for (const e of entries) {
+        if (e.at < 0 || (!watched && e.usd < minUsd)) continue;
+        const c = this.coins.get(e.coin);
+        if (!c || c.ep !== e.ep) continue;
+        let list = out.get(e.coin);
+        if (!list) { list = []; out.set(e.coin, list); }
+        list.push({ venue: key.slice(0, i) as Venue, address, long: e.long, liq: (e.at + 0.5) * c.st, usd: e.usd });
+      }
+    }
+    return out;
+  }
+
   /** The changes since the last flush, per coin (and the coins' prices now). */
   flush(): LiveDelta[] {
     const out: LiveDelta[] = [];

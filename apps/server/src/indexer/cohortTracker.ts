@@ -73,11 +73,12 @@ import {
   type Bridge, type RebuildCheck, type RebuildWallet, type Span, type WalletHist,
 } from './cohortRebuild.js';
 import type { BookPosition, CohortPnlRow } from './store.js';
-import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
+import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundingCash, niceStep, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
 import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
-import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
+import { HIST_STEP, WALLET_HIST_MIN_USD, liqCoin, snapOfNow, type LiqWalletSnap } from '../valuedesk/liquidations/levels.js';
+import { watchedWallets } from './liqWatch.js';
 import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
@@ -1703,6 +1704,24 @@ export class CohortTracker {
           if (row) hist.push([coin, JSON.stringify(snapOfNow(row))]);
         }
         if (hist.length) s.putLiqHist(t, hist);
+        // The same step by wallet, for the history's wallet filter: the large positions, and
+        // every one of a wallet someone looked up (liqWatch.ts), at the snapshot's bucket width.
+        const byCoin = this.live.positionsByCoin(WALLET_HIST_MIN_USD, watchedWallets(now));
+        const histW: Array<[string, Uint8Array]> = [];
+        for (const coin of keep) {
+          const row = rows.get(coin);
+          const list = byCoin.get(coin);
+          if (!row || !list?.length) continue;
+          const st = niceStep(row.p * HIST_STEP);
+          const w: LiqWalletSnap['w'] = [];
+          for (const x of list) {
+            // A level the price has crossed is past (as in the buckets).
+            if (x.long ? x.liq >= row.p : x.liq <= row.p) continue;
+            w.push([x.venue, x.address, x.long ? 1 : -1, Math.floor(x.liq / st), Math.round(x.usd)]);
+          }
+          if (w.length) histW.push([coin, deflateRawSync(JSON.stringify({ p: row.p, st, w } satisfies LiqWalletSnap))]);
+        }
+        if (histW.length) s.putLiqHistW(t, histW);
         s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
         this.lastLiqT = t;
       }

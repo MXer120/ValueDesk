@@ -319,6 +319,11 @@ CREATE TABLE IF NOT EXISTS cohort_series (
 CREATE TABLE IF NOT EXISTS cohort_hist (
   span INTEGER NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, data TEXT NOT NULL, at INTEGER NOT NULL,
   PRIMARY KEY (span, kind, key)) WITHOUT ROWID;
+-- Per wallet, the positions of the history's snapshots worth WALLET_HIST_MIN_USD or held by a wallet
+-- looked up (cohortTracker.ts recordLiq): deflated JSON (levels.ts LiqWalletSnap) per coin and step.
+CREATE TABLE IF NOT EXISTS liq_hist_w (
+  coin TEXT NOT NULL, t INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY (coin, t)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS liq_hist (
   coin TEXT NOT NULL, t INTEGER NOT NULL, data TEXT NOT NULL,
   PRIMARY KEY (coin, t)) WITHOUT ROWID;
@@ -2760,6 +2765,20 @@ export class IndexStore {
   pruneLiqHist(beforeT: number, thinBeforeT: number, hourMs: number): void {
     this.q('DELETE FROM liq_hist WHERE t < ?').run(beforeT);
     this.q('DELETE FROM liq_hist WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
+    this.q('DELETE FROM liq_hist_w WHERE t < ?').run(beforeT);
+    this.q('DELETE FROM liq_hist_w WHERE t < ? AND t % ? != 0').run(thinBeforeT, hourMs);
+  }
+
+  /** One step's per-wallet positions, per coin (deflated LiqWalletSnap JSON). */
+  putLiqHistW(t: number, rows: ReadonlyArray<[string, Uint8Array]>): void {
+    this.tx(() => {
+      const ins = this.q('INSERT OR REPLACE INTO liq_hist_w (coin, t, data) VALUES (?, ?, ?)');
+      for (const [coin, data] of rows) ins.run(coin, t, data);
+    });
+  }
+
+  liqHistW(coin: string, fromT: number): Array<{ t: number; data: Uint8Array }> {
+    return this.q('SELECT t, data FROM liq_hist_w WHERE coin = ? AND t >= ? ORDER BY t').all(coin, fromT) as Array<{ t: number; data: Uint8Array }>;
   }
 
   /**

@@ -51,7 +51,8 @@ import { ACCOUNT_DETAIL, arcusProvider, lighterProvider, nameSpotFills, tradexyz
 import { applyCachedCurves, attachPodiumCurves } from '../valuedesk/curves.js';
 import { attachStats, boardPage, cohortDetail, cohortFocus, cohortMap, cohortWallets, cohortsReady, cohortsRead, indexerStatus, netPage } from '../indexer/read.js';
 import { isCohortId, isSector, type CohortFilter, type CohortRange, type WalletSort } from '../valuedesk/cohorts/model.js';
-import { isLiqRange, liqHeatmap, liqHistory, liqWallets } from '../indexer/liqRead.js';
+import { isLiqRange, liqHeatmap, liqHeatmapOf, liqHistory, liqWallets, walletLiqs } from '../indexer/liqRead.js';
+import { noteWatched } from '../indexer/liqWatch.js';
 import { watchAddresses } from '../indexer/host.js';
 import { BOARD_WINDOWS, type BoardWindow } from '../valuedesk/types.js';
 import { buildExplore } from '../valuedesk/explore.js';
@@ -92,6 +93,12 @@ function cohortFilter(q: Q): CohortFilter {
 function cohortVenues(q: Q): Venue[] {
   const listed = (q.venues ?? '').split(',').map((v) => v.trim().toLowerCase()).filter((v): v is Venue => (VENUES as readonly string[]).includes(v));
   return listed.length ? [...new Set(listed)] : [...VENUES];
+}
+
+/** `wallets=0x..,0x..` for the liquidation heatmap's wallet filter: up to 10 addresses, lower-cased; anything else is left out. */
+function walletsOf(q: Q): string[] {
+  const list = (q.wallets ?? '').split(',').map((a) => a.trim().toLowerCase()).filter((a) => /^0x[0-9a-f]{40}$/.test(a));
+  return [...new Set(list)].slice(0, 10);
 }
 
 const bad = (msg: string) => Object.assign(new Error(msg), { statusCode: 400 });
@@ -460,7 +467,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
-      const body = await liqHeatmap(coin, cohortVenues(q));
+      const ws = walletsOf(q);
+      if (ws.length) noteWatched(ws);
+      const body = ws.length ? await liqHeatmapOf(coin, cohortVenues(q), ws) : await liqHeatmap(coin, cohortVenues(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {
@@ -478,9 +487,24 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       if (!coin) throw bad('coin= is required');
       if (q.side !== 'long' && q.side !== 'short') throw bad('side= must be long or short');
       if (!(from >= 0) || !(to > from)) throw bad('from= and to= must be a price range');
-      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to);
+      const body = await liqWallets(coin, cohortVenues(q), q.side, from, to, 25, walletsOf(q));
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
+    } catch (e) {
+      return fail(reply, e);
+    }
+  });
+
+  /** Every open position of `wallets=` (up to 10) on `venues`, every coin, with its liquidation price. */
+  app.get('/api/vs/liquidations/positions', async (req, reply) => {
+    try {
+      const q = req.query as Q;
+      const ws = walletsOf(q);
+      if (!ws.length) throw bad('wallets= is required: up to 10 0x addresses, comma separated');
+      noteWatched(ws);
+      const body = await walletLiqs(ws, cohortVenues(q));
+      if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
+      return { ok: true, wallets: ws, positions: body };
     } catch (e) {
       return fail(reply, e);
     }
@@ -492,7 +516,9 @@ export async function valuedeskRoutes(app: FastifyInstance) {
       const q = req.query as Q;
       const coin = cohortFilter(q).coin;
       if (!coin) throw bad('coin= is required');
-      const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d');
+      const ws = walletsOf(q);
+      if (ws.length) noteWatched(ws);
+      const body = liqHistory(coin, cohortVenues(q), isLiqRange(q.range) ? q.range : '1d', ws);
       if (!body) return fail(reply, new NotAvailable('The index is not running yet'));
       return { ok: true, ...body };
     } catch (e) {

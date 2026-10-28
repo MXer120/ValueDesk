@@ -105,6 +105,7 @@ export const HOSTED_ROUTES: readonly HostedRoute[] = [
   { method: 'GET', url: '/api/vs/liquidations', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/wallets', cls: 'read' },
   { method: 'GET', url: '/api/vs/liquidations/history', cls: 'read' },
+  { method: 'GET', url: '/api/vs/liquidations/positions', cls: 'read' },
   // ...and live: one WebSocket per viewer, straight from the browser to the instance (routes/liqWs.ts).
   { method: 'GET', url: '/ws/liq', cls: 'read' },
   { method: 'GET', url: '/api/vs/screener', cls: 'read' },
