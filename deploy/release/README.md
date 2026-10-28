@@ -1,5 +1,29 @@
 # Releases
 
+## Ship: the pipeline (production on Contabo)
+
+```
+bash deploy/release/ship.sh --dry-run      # what changed since what runs, where it goes, what it costs
+bash deploy/release/ship.sh                # the same plan, one question, then all of it
+bash deploy/release/ship.sh web            # only the parts named: web, api, indexer, executor, all
+```
+
+One command from a committed HEAD to every place it runs: the next tag, GitHub's CI for it,
+the server tarball to server 1 (indexer, API) and server 2 (executor) within the laptop's
+upload cap, the operations scripts (`deploy/server/bin`) into `/opt/valuescan/bin`, each
+service restarted only when code it imports changed (`parts.mjs` reads the import graphs),
+a rollback at once when one does not come back healthy, a maintenance notice on the status
+page around an indexer restart, and finally `main` - so Vercel publishes the web after the
+servers it calls. The header of `ship.sh` lists every step and what each restart costs
+(measured: no failed request for the web, the API or the executor; the indexer's boards
+are about two minutes staler). Units, Caddy and env templates are never shipped: it names
+them, and `bootstrap-instance.sh` installs them. Every ship is a line in
+`deploy/.out/ships.log`.
+
+The scripts below are its pieces, and what it does by hand.
+
+## The scripts
+
 Scripts you run on your workstation (bash and AWS CLI v2; Git Bash on Windows
 works). They print every AWS or SSH command before running it; `--print` shows the
 commands and calls nothing. The runbooks are `docs/deploy/DEPLOY.md` and
@@ -35,6 +59,8 @@ separately and roll back separately.
 
 | Script | Does |
 |---|---|
+| `ship.sh [parts] [--dry-run] [--yes]` | the pipeline above |
+| `parts.mjs --from=<ref> [--to=<ref>]` | which parts (web, api, indexer, executor, bin, infra) the commits between two refs change |
 | `build-web.sh <tag> [--public]` | typecheck + `vite build` of the clean tag with the settings of `web.env`, static audit, the legal-page check (a warning; an error with `--public`), tarball in `deploy/.out/` |
 | `publish-web.sh <tag>` | (cfn) upload to the site bucket with the right types and cache headers, store the build for rollbacks, invalidate CloudFront |
 | `publish-vercel.sh <tag> --out=<dir> [--deploy]` | (ec2) the build as a Vercel deployment directory (`deploy/vercel/package.mjs`), then `vercel deploy --prebuilt --prod` |

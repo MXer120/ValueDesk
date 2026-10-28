@@ -5,7 +5,8 @@
 #   sudo /opt/valuescan/bin/release.sh <tag> --all        install <tag>, restart indexer, API, executor
 #   sudo /opt/valuescan/bin/release.sh <tag> --api-only   install <tag>, restart the API only
 #   sudo /opt/valuescan/bin/release.sh <tag> --executor-only   install <tag>, restart the copy executor only
-#   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only]   back to the release before
+#   sudo /opt/valuescan/bin/release.sh <tag> --units=indexer,api   install <tag>, restart exactly these (deploy/release/ship.sh)
+#   sudo /opt/valuescan/bin/release.sh --rollback [--all|--api-only|--executor-only|--units=..]   back to the release before
 #   sudo /opt/valuescan/bin/release.sh --status           what is installed and running
 #   sudo /opt/valuescan/bin/release.sh <tag> --from=<file.tar.gz>   the tarball is already here
 #
@@ -41,6 +42,12 @@
 # A unit that is not running is started. --all restarts all three regardless.
 # The comparison is of the two release directories on this disk (diff), so it
 # needs no git and holds for a rollback too.
+#
+# WHICH UNITS THIS SERVER RUNS: VS_UNITS (ops.local.env), a comma list of indexer, api,
+# executor - unset, all three. On a server that runs some of them (server 1: indexer,api;
+# server 2: executor) the others are neither compared nor started. --units= names the
+# units to restart outright, in the order indexer, API, executor; deploy/release/ship.sh
+# passes it, having worked out from the commits which services run changed code.
 #
 # THE COST OF RESTARTING THE INDEXER: its trade streams reconnect. Hyperliquid
 # and SoDEX are back in seconds; Lighter needs 3.5-8 minutes to re-subscribe its
@@ -216,15 +223,23 @@ needs_restart() {
 restart_indexer_and_api() {
   local api_only="$1"
   if [ "$api_only" != 1 ]; then
-    log "restarting the indexer (its Lighter stream needs 3.5-8 minutes to be whole again)"
-    "$SYSTEMCTL" restart valuescan-indexer.service
-    wait_active valuescan-indexer.service 30 || die "the indexer did not become active - journalctl -u valuescan-indexer -n 80"
-    # Schema changes happen as it opens the database: let it get there before the API reads.
-    sleep "${INDEXER_SETTLE_S:-5}"
-    "$SYSTEMCTL" is-active --quiet valuescan-indexer.service || die "the indexer stopped again - journalctl -u valuescan-indexer -n 80"
+    restart_indexer
   else
     log "API only: the indexer keeps running release $(indexer_release)"
   fi
+  restart_api
+}
+
+restart_indexer() {
+  log "restarting the indexer (its Lighter stream needs minutes to be whole again)"
+  "$SYSTEMCTL" restart valuescan-indexer.service
+  wait_active valuescan-indexer.service 30 || die "the indexer did not become active - journalctl -u valuescan-indexer -n 80"
+  # Schema changes happen as it opens the database: let it get there before the API reads.
+  sleep "${INDEXER_SETTLE_S:-5}"
+  "$SYSTEMCTL" is-active --quiet valuescan-indexer.service || die "the indexer stopped again - journalctl -u valuescan-indexer -n 80"
+}
+
+restart_api() {
   log "restarting the API"
   "$SYSTEMCTL" restart valuescan-api.service
   wait_active valuescan-api.service 30 || die "the API did not become active - journalctl --namespace=pii -u valuescan-api -n 80"
@@ -249,27 +264,42 @@ restart_executor() {
   log "the executor answers /api/copy/v1/health"
 }
 
-restart_units() {   # auto | all | api | executor
+here() { case ",${VS_UNITS:-indexer,api,executor}," in *,"$1",*) return 0 ;; *) return 1 ;; esac; }
+
+restart_units() {   # auto | all | api | executor | units (the list in $UNITS)
   case "$1" in
     auto)
       local idx=0 api=0 exe=0
-      if needs_restart valuescan-indexer.service "${SERVER_CODE[@]}"; then idx=1; fi
-      if needs_restart valuescan-api.service "${SERVER_CODE[@]}"; then api=1; fi
-      if [ -e "$CURRENT/apps/executor/src/main.ts" ] && needs_restart valuescan-executor.service "${EXECUTOR_CODE[@]}"; then exe=1; fi
-      if [ "$idx" = 1 ]; then
+      if here indexer && needs_restart valuescan-indexer.service "${SERVER_CODE[@]}"; then idx=1; fi
+      if here api && needs_restart valuescan-api.service "${SERVER_CODE[@]}"; then api=1; fi
+      if here executor && [ -e "$CURRENT/apps/executor/src/main.ts" ] && needs_restart valuescan-executor.service "${EXECUTOR_CODE[@]}"; then exe=1; fi
+      if [ "$idx" = 1 ] && here api; then
         restart_indexer_and_api 0
+      elif [ "$idx" = 1 ]; then
+        restart_indexer
       elif [ "$api" = 1 ]; then
         restart_indexer_and_api 1
-      else
+      elif here indexer || here api; then
         log "the indexer (release $(indexer_release)) and the API (release $(release_of valuescan-api.service)) already run this server code: not restarted"
       fi
-      if [ "$exe" = 1 ]; then
+      if ! here executor; then
+        :
+      elif [ "$exe" = 1 ]; then
         restart_executor
       elif [ -e "$CURRENT/apps/executor/src/main.ts" ]; then
         log "the copy executor (release $(release_of valuescan-executor.service)) already runs this code: not restarted, copies and algos carry on"
       else
         restart_executor
       fi
+      ;;
+    units)
+      case ",$UNITS," in *,indexer,*) restart_indexer ;; esac
+      case ",$UNITS," in *,api,*) restart_api ;; esac
+      case ",$UNITS," in *,executor,*) restart_executor ;; esac
+      local u
+      for u in indexer api executor; do
+        case ",$UNITS," in *,"$u",*) ;; *) if here "$u"; then log "$u not named: it keeps running release $(release_of "valuescan-$u.service")"; fi ;; esac
+      done
       ;;
     all) restart_indexer_and_api 0; restart_executor ;;
     api)
@@ -326,13 +356,20 @@ status() {
 
 TAG=""
 MODE=auto
+UNITS=""
 ROLLBACK=0
 FROM=""
+ONE_MODE="--all, --api-only, --executor-only and --units exclude each other"
 for arg in "$@"; do
   case "$arg" in
-    --all) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=all ;;
-    --api-only) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=api ;;
-    --executor-only) [ "$MODE" = auto ] || die "--all, --api-only and --executor-only exclude each other"; MODE=executor ;;
+    --all) [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=all ;;
+    --api-only) [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=api ;;
+    --executor-only) [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=executor ;;
+    --units=*)
+      [ "$MODE" = auto ] || die "$ONE_MODE"; MODE=units; UNITS="${arg#--units=}"
+      for u in ${UNITS//,/ }; do case "$u" in indexer|api|executor) ;; *) die "--units: $u is not one of indexer, api, executor" ;; esac; done
+      [ -n "${UNITS//,/}" ] || die "--units: name at least one of indexer, api, executor"
+      ;;
     --from=*) FROM="${arg#--from=}" ;;
     --rollback) ROLLBACK=1 ;;
     --status) status; exit 0 ;;

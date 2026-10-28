@@ -55,32 +55,7 @@ load_params
 TEST_GATE_SKIPPED=0
 [ "${PRINT_ONLY:-0}" = 1 ] || test_gate "$TAG"
 
-mkdir -p "$OUT_DIR"
-tarball="$OUT_DIR/valuescan-server-$TAG.tar.gz"
-note "archiving tag $TAG"
-# The copy executor and what it imports, where the tag has them (older tags do not:
-# git archive refuses a path that matches nothing).
-executor_paths=()
-if git cat-file -e "$TAG:apps/executor/src/main.ts" 2>/dev/null; then
-  for p in apps/executor packages/copy-engine packages/sodex-core; do
-    git cat-file -e "$TAG:$p" 2>/dev/null || die "tag $TAG has apps/executor but not $p, which it imports"
-    executor_paths+=("$p")
-  done
-  note "with the copy executor (${executor_paths[*]})"
-else
-  note "tag $TAG has no apps/executor: a release without the copy executor"
-fi
-git archive --format=tar.gz --prefix="valuescan-$TAG/" -o "$tarball" "$TAG" -- \
-  package.json package-lock.json apps/server apps/web/package.json 'packages/*/package.json' deploy/server \
-  ${executor_paths[@]+"${executor_paths[@]}"} \
-  || die "git archive failed - does tag $TAG contain deploy/server?"
-# Nothing that could carry a secret may be in a release - a self-hosted copier's data
-# directory (copier-data/: kek, session.key, executor.db) included.
-if tar -tzf "$tarball" | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|keystore\.json$|local-api\.token$|(^|/)kek$|(^|/)copier-data/|executor\.db' | grep -v '\.env\.example$' >&2; then
-  die "the archive of $TAG contains the files listed above - refusing to upload it"
-fi
-printf '%s  %s\n' "$(sha256_of "$tarball")" "$(basename "$tarball")" > "$tarball.sha256"
-note "built $tarball ($(du -h "$tarball" | awk '{print $1}'))"
+tarball="$(server_tarball "$TAG")"
 
 if [ "$VS_TARGET" = ec2 ]; then
   inbox="/var/cache/valuescan/inbox/valuescan-server-$TAG.tar.gz"

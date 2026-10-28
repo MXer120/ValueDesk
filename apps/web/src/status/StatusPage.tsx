@@ -2,16 +2,20 @@
  * /status - is ValueDesk up? Public, no wallet, no terms to accept first.
  *
  * One card, the way common status pages are laid out:
- *   - the headline (all operational, degraded, down, maintenance) - or, while one is
- *     open, each open incident and maintenance in progress with its latest update;
- *   - scheduled maintenance still to come;
+ *   - the headline with its icon: a check (all operational), a warning (degraded or
+ *     partly down), an X (a service down, or this page's own service unreachable),
+ *     maintenance in blue;
+ *   - incidents and maintenance behind a Current | Past switch (Current first):
+ *     current is each open incident, maintenance in progress and maintenance to
+ *     come, with its timeline; past is one slim row each for the last 90 days,
+ *     opened in place for its timeline. A link to one (#notice-<id>) opens its list
+ *     and the row;
  *   - each service - the website, the data API, the copy & algo executor, the
  *     indexer - with its state now and a bar for each of the last 90 UTC days
  *     (green up, amber degraded, orange partly down, red down, blue maintenance,
  *     grey no data). Each bar tells its day on hover, focus (arrow keys move along
  *     the days) or a tap: the date, the uptime, the minutes down or degraded and
- *     that day's incidents and maintenance;
- *   - the incidents and maintenance of the last 90 days, each with its timeline.
+ *     that day's incidents and maintenance.
  * Everything the owner wrote is shown as text (React escapes it), never as markup.
  * Read again every minute while the tab is visible.
  *
@@ -21,9 +25,9 @@
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { openFeedback } from '../feedback/FeedbackButton';
 import {
-  OVERALL_SHOWN_TEXT, SERVICE_LINE, SHOWN_TEXT, STAGE_TEXT, componentNames, dayDetail, fmtUptime, fmtUtc, loadStatus,
-  noticeKindText, noticeLive, noticePhase, noticeTimes, overallShown, shownState,
-  type DayDetail, type Notice, type NoticePhase, type ShownState, type StatusView,
+  OVERALL_SHOWN_TEXT, SERVICE_LINE, SHOWN_TEXT, STAGE_TEXT, componentNames, dayDetail, fmtUptime, fmtUtc, heroTone, loadStatus,
+  noticeDuration, noticeKindText, noticePhase, noticeTimes, overallShown, shownState, splitNotices,
+  type DayDetail, type HeroTone, type Notice, type NoticePhase, type ShownState, type StatusView,
 } from './statusData';
 import './status.css';
 
@@ -76,29 +80,85 @@ const PHASE_TEXT: Record<NoticePhase, string> = {
   completed: 'Completed',
 };
 
-/** One incident or maintenance: what, where, when, and its updates, newest first. */
+/** A notice's colour: its impact, or maintenance. */
+const toneOf = (n: Notice): string => (n.kind === 'incident' ? n.impact ?? 'minor' : 'maintenance');
+
+/** A notice's updates, newest first, on a line. */
+function Timeline({ n }: { n: Notice }) {
+  return (
+    <ol className="st-timeline">
+      {[...n.updates].reverse().map((u, i) => (
+        <li key={`${u.at}-${i}`}>
+          <b>{STAGE_TEXT[u.stage]}</b>
+          <time dateTime={new Date(u.at).toISOString()}>{fmtUtc(u.at)}</time>
+          {u.text && <span className="st-timeline__text">{u.text}</span>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** One current incident or maintenance: what, where, when, and its updates, newest first. */
 export function NoticeCard({ n, now, open = false }: { n: Notice; now: number; open?: boolean }) {
   const phase = noticePhase(n, now);
   return (
-    <article id={`notice-${n.id}`} className={`st-notice is-${n.kind === 'incident' ? n.impact : 'maintenance'}${open ? ' is-open' : ''}`}>
+    <article id={`notice-${n.id}`} className={`st-notice is-${toneOf(n)}${open ? ' is-open' : ''}`}>
       <header className="st-notice__head">
+        <i className="st-dot" aria-hidden="true" />
         <b className="st-notice__title">{n.title}</b>
-        <span className="st-chip">{noticeKindText(n)}</span>
-        <span className={`st-notice__phase is-${phase}`}>{PHASE_TEXT[phase]}</span>
+        <span className={`st-phase is-${phase}`}>{PHASE_TEXT[phase]}</span>
       </header>
       <p className="st-notice__meta">
-        {componentNames(n)} · {noticeTimes(n, now)}
+        <span className="st-chip">{noticeKindText(n)}</span>
+        <span>{componentNames(n)} · {noticeTimes(n, now)}</span>
       </p>
-      <ol className="st-timeline">
-        {[...n.updates].reverse().map((u, i) => (
-          <li key={`${u.at}-${i}`}>
-            <b>{STAGE_TEXT[u.stage]}</b>
-            {u.text && <span className="st-timeline__text">{u.text}</span>}
-            <time dateTime={new Date(u.at).toISOString()}>{fmtUtc(u.at)}</time>
-          </li>
-        ))}
-      </ol>
+      <Timeline n={n} />
     </article>
+  );
+}
+
+/** One past incident or maintenance: a slim row - what, when, how long - that opens in place for its timeline. */
+export function NoticeRow({ n, now, open, onToggle }: { n: Notice; now: number; open: boolean; onToggle: (id: number) => void }) {
+  const bodyId = useId();
+  return (
+    <li id={`notice-${n.id}`} className={`st-row is-${toneOf(n)}${open ? ' is-open' : ''}`}>
+      <button type="button" className="st-row__bar" aria-expanded={open} aria-controls={bodyId} onClick={() => onToggle(n.id)}>
+        <i className="st-dot" aria-hidden="true" />
+        <span className="st-row__title">{n.title}</span>
+        <span className="st-row__kind">{noticeKindText(n)}</span>
+        <time className="st-row__when" dateTime={new Date(n.startsAt).toISOString()}>{fmtUtc(n.startsAt).replace(/ UTC$/, '')}</time>
+        <span className="st-row__dur">{noticeDuration(n, now)}</span>
+        <svg className="st-row__chev" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
+          <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div id={bodyId} className="st-row__body">
+          <p className="st-notice__meta">
+            <span>{componentNames(n)} · {noticeTimes(n, now)}</span>
+          </p>
+          <Timeline n={n} />
+        </div>
+      )}
+    </li>
+  );
+}
+
+const HERO_ICON: Record<HeroTone, string> = {
+  ok: 'M6 10.4l2.7 2.7L14 7.6',
+  warn: 'M10 6.6v4.1M10 13.4v.1',
+  down: 'M7 7l6 6M13 7l-6 6',
+  maintenance: 'M10 6.4V10l2.4 1.6',
+  unknown: 'M6.8 10h6.4',
+};
+
+/** The headline's icon: a disc in the state's colour (a triangle for a warning) with its sign. */
+function HeroIcon({ tone }: { tone: HeroTone }) {
+  return (
+    <svg className="st-hero__icon" viewBox="0 0 20 20" width="36" height="36" aria-hidden="true">
+      {tone === 'warn' ? <path className="st-hero__shape" d="M10 2.2 18.4 17H1.6Z" strokeLinejoin="round" /> : <circle className="st-hero__shape" cx="10" cy="10" r="8.6" />}
+      <path className="st-hero__sign" d={HERO_ICON[tone]} fill="none" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" transform={tone === 'warn' ? 'translate(0 1.2)' : undefined} />
+    </svg>
   );
 }
 
@@ -192,68 +252,127 @@ function DayBars({ days, label }: { days: DayDetail[]; label: string }) {
   );
 }
 
+type NoticeTab = 'current' | 'past';
+
+/** The headline: icon, state, which services it is about, and when it was last checked. */
+function Hero({ view, loading, reload, states, services }: {
+  view: StatusView | null; loading: boolean; reload: () => void; states: ShownState[]; services: { name: string }[];
+}) {
+  const unreachable = view?.kind === 'unreachable';
+  const overall = view?.kind === 'report' ? overallShown(states) : null;
+  const tone: HeroTone = !view ? 'unknown' : heroTone(unreachable ? 'unreachable' : overall!);
+  const affected = services
+    .map((s, i) => ({ name: s.name, state: states[i] }))
+    .filter((s): s is { name: string; state: ShownState } => !!s.state && s.state !== 'up' && s.state !== 'unknown');
+  return (
+    <header className={`st-hero is-${tone}`}>
+      <HeroIcon tone={tone} />
+      <div className="st-hero__text" role="status">
+        <h1 className="st-hero__title">
+          {!view ? 'Checking…' : unreachable ? 'The status service is unreachable' : OVERALL_SHOWN_TEXT[overall!]}
+        </h1>
+        {unreachable ? (
+          <p className="st-hero__line">
+            It runs with the data API, so that is likely down too: leaderboards, cohorts and news may not load. What your
+            browser could check by itself is below.
+          </p>
+        ) : affected.length > 0 ? (
+          <p className="st-hero__line">{affected.map((s) => `${s.name}: ${SHOWN_TEXT[s.state]}`).join(' · ')}</p>
+        ) : null}
+      </div>
+      <span className="st-updated">
+        {view ? `Updated ${time(view.kind === 'report' ? view.report.at : view.at)}` : ''}
+        <button type="button" className="st-refresh" onClick={reload} disabled={loading} aria-label="Check again" title="Check again">
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+      </span>
+    </header>
+  );
+}
+
+/**
+ * Incidents and maintenance: Current (the default) or Past, one list at a time. With
+ * `scrollTo` it lands on that notice once drawn (a link to it: drawn again with a new key).
+ */
+export function NoticeLists({ notices, now, initialTab = 'current', initialOpen = null, scrollTo = null }: {
+  notices: readonly Notice[]; now: number; initialTab?: NoticeTab; initialOpen?: number | null; scrollTo?: number | null;
+}) {
+  const { current, past } = splitNotices(notices, now);
+  const [tab, setTab] = useState<NoticeTab>(initialTab);
+  const [openId, setOpenId] = useState<number | null>(initialOpen);
+  useEffect(() => {
+    if (scrollTo !== null) document.getElementById(`notice-${scrollTo}`)?.scrollIntoView({ block: 'start' });
+    // Once, as drawn: a later link remounts this list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const tabs: Array<{ id: NoticeTab; label: string; count: number }> = [
+    { id: 'current', label: 'Current', count: current.length },
+    { id: 'past', label: 'Past', count: past.length },
+  ];
+  return (
+    <section className="st-notices" aria-labelledby="st-notices">
+      <div className="st-notices__head">
+        <h2 id="st-notices" className="st-h2">Incidents and maintenance</h2>
+        <div className="segmented st-seg" role="tablist" aria-label="Incidents and maintenance">
+          {tabs.map((t) => (
+            <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className={tab === t.id ? 'active' : ''} onClick={() => setTab(t.id)}>
+              {t.label}
+              {t.count > 0 && <span className="st-seg__n">{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div role="tabpanel" aria-label={tab === 'current' ? 'Current' : 'Past'}>
+        {tab === 'current'
+          ? current.length
+            ? <div className="st-open">{current.map((n) => <NoticeCard key={n.id} n={n} now={now} open={noticePhase(n, now) !== 'upcoming'} />)}</div>
+            : <p className="st-none">No incidents or maintenance right now.</p>
+          : past.length
+            ? (
+              <ul className="st-rows">
+                {past.map((n) => <NoticeRow key={n.id} n={n} now={now} open={openId === n.id} onToggle={(id) => setOpenId((o) => (o === id ? null : id))} />)}
+              </ul>
+            )
+            : <p className="st-none">None in the last 90 days.</p>}
+      </div>
+    </section>
+  );
+}
+
 export function StatusPage() {
   const { view, loading, reload } = useStatus();
   const now = Date.now();
   const report = view?.kind === 'report' ? view.report : null;
   const notices = report?.notices ?? [];
-  const open = notices.filter((n) => noticeLive(n, now)).sort((a, b) => (a.kind === b.kind ? b.startsAt - a.startsAt : a.kind === 'incident' ? -1 : 1));
-  const upcoming = notices.filter((n) => noticePhase(n, now) === 'upcoming').sort((a, b) => a.startsAt - b.startsAt);
-  const past = notices.filter((n) => !open.includes(n) && !upcoming.includes(n));
   const states = report ? report.services.map((s) => shownState(s.state, s.id, notices, now)) : [];
-  const overall = report ? overallShown(states) : view ? 'outage' : null;
 
-  // A link to one notice (the app's banner, the feed) lands on it once it is drawn.
-  const scrolled = useRef(false);
+  // A link to one notice (the app's banner, the feed) opens its list - and, for a past
+  // one, its row - and lands on it once it is drawn.
+  const [target, setTarget] = useState<{ key: number; tab: NoticeTab; open: number | null; scrollTo: number | null }>({ key: 0, tab: 'current', open: null, scrollTo: null });
+  const linked = useRef(false);
   useEffect(() => {
-    if (scrolled.current || !report) return;
-    scrolled.current = true;
-    const id = window.location.hash.slice(1);
-    if (/^notice-\d+$/.test(id)) document.getElementById(id)?.scrollIntoView({ block: 'start' });
+    if (linked.current || !report) return;
+    linked.current = true;
+    const m = /^notice-(\d+)$/.exec(window.location.hash.slice(1));
+    if (!m) return;
+    const id = Number(m[1]);
+    const inPast = splitNotices(report.notices ?? [], Date.now()).past.some((n) => n.id === id);
+    setTarget({ key: 1, tab: inPast ? 'past' : 'current', open: inPast ? id : null, scrollTo: id });
   }, [report]);
 
   return (
     <main className="st" aria-busy={loading}>
       <article className="st-card">
-        <header className="st-head">
-          <h1 className="st-title">Status</h1>
-          <span className="st-updated">
-            {view ? `Updated ${time(view.kind === 'report' ? view.report.at : view.at)}` : 'Checking…'}
-            <button type="button" className="st-refresh" onClick={reload} disabled={loading} aria-label="Check again" title="Check again">
-              <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
-                <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </span>
-        </header>
+        <Hero view={view} loading={loading} reload={reload} states={states} services={report?.services ?? []} />
 
-        {overall && !open.length && (
-          <div className={`st-banner is-${view?.kind === 'unreachable' ? 'unreachable' : overall}`} role="status">
-            <b>{view?.kind === 'unreachable' ? 'The status service is unreachable' : OVERALL_SHOWN_TEXT[overall]}</b>
-            {view?.kind === 'unreachable' && (
-              <span>
-                It runs with the data API, so that is likely down too. Leaderboards, cohorts and news may not load. What your
-                browser could check by itself is below.
-              </span>
-            )}
-          </div>
-        )}
-
-        {open.length > 0 && (
-          <section className="st-open" aria-label="Open incidents and maintenance">
-            {open.map((n) => <NoticeCard key={n.id} n={n} now={now} open />)}
-          </section>
-        )}
-
-        {upcoming.length > 0 && (
-          <section className="st-section" aria-labelledby="st-upcoming">
-            <h2 id="st-upcoming" className="st-h2">Scheduled maintenance</h2>
-            {upcoming.map((n) => <NoticeCard key={n.id} n={n} now={now} />)}
-          </section>
+        {report && (
+          <NoticeLists key={target.key} notices={notices} now={now} initialTab={target.tab} initialOpen={target.open} scrollTo={target.scrollTo} />
         )}
 
         {report && (
-          <ul className="st-list">
+          <ul className="st-list" aria-label="Services">
             {report.services.map((s, i) => {
               const shown = states[i] ?? s.state;
               const days = s.days.map((d) => dayDetail(d, s.id, notices, now));
@@ -282,7 +401,7 @@ export function StatusPage() {
         )}
 
         {view?.kind === 'unreachable' && (
-          <ul className="st-list">
+          <ul className="st-list" aria-label="Services">
             <li className="st-svc">
               <div className="st-svc__head">
                 <div className="st-svc__name"><b>Website</b><small>You are viewing it</small></div>
@@ -308,13 +427,6 @@ export function StatusPage() {
               </div>
             </li>
           </ul>
-        )}
-
-        {report && (
-          <section className="st-section st-past" aria-labelledby="st-past">
-            <h2 id="st-past" className="st-h2">Past incidents and maintenance</h2>
-            {past.length ? past.map((n) => <NoticeCard key={n.id} n={n} now={now} />) : <p className="st-none">None in the last 90 days.</p>}
-          </section>
         )}
 
         <footer className="st-foot">

@@ -231,3 +231,39 @@ ssh_put_secret() {   # local file, remote path
 remote_run() {   # comment, command
   if [ "$VS_TARGET" = ec2 ]; then ssh_run "$1" "$2"; else ssm_run "$(instance_id)" "$1" "$2"; fi
 }
+
+# The server release of a tag (release-server.sh, ship.sh): `git archive` of the TAG, never
+# the working tree - the lockfile, the server workspace, the other workspaces' package.json
+# files (the lockfile names them), deploy/server and, in a tag that has it, the copy
+# executor with the two packages it imports. Refused when it holds anything that could be
+# a secret. Writes <OUT_DIR>/valuescan-server-<tag>.tar.gz and its .sha256; prints the path.
+server_tarball() {   # tag
+  local tag="$1" tarball p
+  mkdir -p "$OUT_DIR"
+  tarball="$OUT_DIR/valuescan-server-$tag.tar.gz"
+  note "archiving tag $tag"
+  # The copy executor and what it imports, where the tag has them (older tags do not:
+  # git archive refuses a path that matches nothing).
+  local executor_paths=()
+  if git cat-file -e "$tag:apps/executor/src/main.ts" 2>/dev/null; then
+    for p in apps/executor packages/copy-engine packages/sodex-core; do
+      git cat-file -e "$tag:$p" 2>/dev/null || die "tag $tag has apps/executor but not $p, which it imports"
+      executor_paths+=("$p")
+    done
+    note "with the copy executor (${executor_paths[*]})"
+  else
+    note "tag $tag has no apps/executor: a release without the copy executor"
+  fi
+  git archive --format=tar.gz --prefix="valuescan-$tag/" -o "$tarball" "$tag" -- \
+    package.json package-lock.json apps/server apps/web/package.json 'packages/*/package.json' deploy/server \
+    ${executor_paths[@]+"${executor_paths[@]}"} \
+    || die "git archive failed - does tag $tag contain deploy/server?"
+  # Nothing that could carry a secret may be in a release - a self-hosted copier's data
+  # directory (copier-data/: kek, session.key, executor.db) included.
+  if tar -tzf "$tarball" | grep -E '(^|/)\.env($|\.)|\.pem$|\.key$|keystore\.json$|local-api\.token$|(^|/)kek$|(^|/)copier-data/|executor\.db' | grep -v '\.env\.example$' >&2; then
+    die "the archive of $tag contains the files listed above - refusing to upload it"
+  fi
+  printf '%s  %s\n' "$(sha256_of "$tarball")" "$(basename "$tarball")" > "$tarball.sha256"
+  note "built $tarball ($(du -h "$tarball" | awk '{print $1}'))"
+  printf '%s' "$tarball"
+}

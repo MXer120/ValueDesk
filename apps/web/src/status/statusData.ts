@@ -140,17 +140,48 @@ export function shownState(probe: ServiceState, service: ServiceId, notices: rea
 
 export const SHOWN_TEXT: Record<ShownState, string> = { ...STATE_TEXT, partial: 'Partial outage', maintenance: 'Maintenance' };
 
-export type OverallShown = Overall | 'maintenance';
+export type OverallShown = Overall | 'partial' | 'maintenance';
 
-/** The headline over the shown states. */
+/** The headline over the shown states: a service down outranks one partly down, then degraded, then maintenance. */
 export function overallShown(states: readonly ShownState[]): OverallShown {
-  if (states.includes('down') || states.includes('partial')) return 'outage';
+  if (states.includes('down')) return 'outage';
+  if (states.includes('partial')) return 'partial';
   if (states.includes('degraded')) return 'degraded';
   if (states.includes('maintenance')) return 'maintenance';
   return overallOf(states.filter((s): s is ServiceState => s !== 'maintenance' && s !== 'partial'));
 }
 
-export const OVERALL_SHOWN_TEXT: Record<OverallShown, string> = { ...OVERALL_TEXT, maintenance: 'Maintenance in progress' };
+export const OVERALL_SHOWN_TEXT: Record<OverallShown, string> = { ...OVERALL_TEXT, partial: 'Partial outage', maintenance: 'Maintenance in progress' };
+
+/** The headline's icon: a check, a warning (degraded or partly down), an X (a service down, or this page's own service), maintenance, no data. */
+export type HeroTone = 'ok' | 'warn' | 'down' | 'maintenance' | 'unknown';
+
+export function heroTone(overall: OverallShown | 'unreachable'): HeroTone {
+  switch (overall) {
+    case 'operational': return 'ok';
+    case 'degraded':
+    case 'partial': return 'warn';
+    case 'outage':
+    case 'unreachable': return 'down';
+    case 'maintenance': return 'maintenance';
+    default: return 'unknown';
+  }
+}
+
+/** How long it lasted, or has lasted so far: "12 min", "4 h 35 min". */
+export function noticeDuration(n: Notice, now: number): string {
+  const [from, to] = noticeSpan(n, now);
+  return fmtMinutes(Math.max(1, Math.round((to - from) / 60_000)));
+}
+
+/** The incidents and maintenance the page's two lists show: current (open, in progress, scheduled) and past, newest first. */
+export function splitNotices(notices: readonly Notice[], now: number): { current: Notice[]; past: Notice[] } {
+  const phase = (n: Notice) => noticePhase(n, now);
+  const live = notices.filter((n) => noticeLive(n, now)).sort((a, b) => (a.kind === b.kind ? b.startsAt - a.startsAt : a.kind === 'incident' ? -1 : 1));
+  const upcoming = notices.filter((n) => phase(n) === 'upcoming').sort((a, b) => a.startsAt - b.startsAt);
+  const past = notices.filter((n) => !live.includes(n) && !upcoming.includes(n)).sort((a, b) => noticeSpan(b, now)[0] - noticeSpan(a, now)[0]);
+  return { current: [...live, ...upcoming], past };
+}
 
 const SERVICE_NAME = new Map<string, string>(STATUS_SERVICES.map((s) => [s.id, s.name]));
 export const componentNames = (n: Notice): string => n.components.map((c) => SERVICE_NAME.get(c) ?? c).join(', ');

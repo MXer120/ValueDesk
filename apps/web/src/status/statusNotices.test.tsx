@@ -16,7 +16,7 @@ installViteStubs();
 const { createElement } = await import('react');
 const render = await staticMarkup();
 const D = await import('./statusData');
-const { NoticeCard, DayTip } = await import('./StatusPage');
+const { NoticeCard, NoticeRow, NoticeLists, DayTip } = await import('./StatusPage');
 const { SiteNoticeBanner } = await import('./SiteNoticeBanner');
 type Notice = import('./statusData').Notice;
 
@@ -42,8 +42,60 @@ test('a service: the probe, made worse by an open incident; maintenance in progr
   assert.equal(D.shownState('down', 'api', [maint()], T0 + 90 * MIN), 'maintenance');
   assert.equal(D.shownState('up', 'api', [maint()], T0), 'up', 'not begun');
   assert.equal(D.overallShown(['up', 'maintenance']), 'maintenance');
-  assert.equal(D.overallShown(['partial', 'maintenance']), 'outage');
+  assert.equal(D.overallShown(['partial', 'maintenance']), 'partial');
+  assert.equal(D.overallShown(['partial', 'down']), 'outage');
   assert.equal(D.overallShown(['up', 'unknown']), 'operational');
+});
+
+test('the headline icon: a check, a warning for degraded or partly down, an X for down', () => {
+  assert.equal(D.heroTone('operational'), 'ok');
+  assert.equal(D.heroTone('degraded'), 'warn');
+  assert.equal(D.heroTone('partial'), 'warn');
+  assert.equal(D.heroTone('outage'), 'down');
+  assert.equal(D.heroTone('unreachable'), 'down');
+  assert.equal(D.heroTone('maintenance'), 'maintenance');
+  assert.equal(D.heroTone('unknown'), 'unknown');
+  assert.equal(D.OVERALL_SHOWN_TEXT.partial, 'Partial outage');
+});
+
+test('current and past: open and scheduled now, the rest newest first', () => {
+  const old = incident({ id: 1, startsAt: T0 - 48 * H, closedAt: T0 - 47 * H });
+  const newer = incident({ id: 2, startsAt: T0 - 5 * H, closedAt: T0 - 4 * H });
+  const done = maint({ id: 3, startsAt: T0 - 3 * H, endsAt: T0 - 2 * H });
+  const { current, past } = D.splitNotices([old, maint(), done, incident(), newer], T0);
+  assert.deepEqual(current.map((n) => n.id), [7, 8], 'the open incident, then the maintenance to come');
+  assert.deepEqual(past.map((n) => n.id), [3, 2, 1]);
+  assert.equal(D.noticeDuration(newer, T0), '1 h');
+  assert.equal(D.noticeDuration(incident({ startsAt: T0 - 275 * MIN, closedAt: T0 }), T0), '4 h 35 min');
+});
+
+test('a past notice is one slim row: title, kind, start, duration - its timeline only when opened', () => {
+  const n = incident({ title: 'Indexer <slow>', closedAt: T0 - 5 * MIN });
+  const shut = render(createElement(NoticeRow, { n, now: T0, open: false, onToggle: () => {} }));
+  assert.match(shut, /id="notice-7"/);
+  assert.match(shut, /aria-expanded="false"/);
+  assert.match(shut, /Indexer &lt;slow&gt;/);
+  assert.match(shut, /Major incident/);
+  assert.match(shut, /27 Oct 11:00</);
+  assert.match(shut, /55 min/);
+  assert.ok(!shut.includes('st-timeline'), 'no timeline while shut');
+  const open = render(createElement(NoticeRow, { n, now: T0, open: true, onToggle: () => {} }));
+  assert.match(open, /aria-expanded="true"/);
+  assert.ok(open.indexOf('Identified') < open.indexOf('Investigating'), 'its timeline, newest first');
+});
+
+test('the lists: Current by default with its count, Past behind the switch', () => {
+  const past = incident({ id: 1, closedAt: T0 - 5 * MIN });
+  const html = render(createElement(NoticeLists, { notices: [past], now: T0 }));
+  assert.match(html, /role="tablist"/);
+  assert.match(html, /aria-selected="true" class="active">Current</);
+  assert.match(html, />Past<span class="st-seg__n">1<\/span>/);
+  assert.match(html, /No incidents or maintenance right now\./);
+  assert.ok(!html.includes('notice-1'), 'past rows only behind the switch');
+  const shown = render(createElement(NoticeLists, { notices: [past], now: T0, initialTab: 'past', initialOpen: 1 }));
+  assert.match(shown, /class="st-row is-major is-open"/);
+  const open = render(createElement(NoticeLists, { notices: [incident()], now: T0 }));
+  assert.match(open, /class="st-notice is-major is-open"/);
 });
 
 test('loadStatus: notices checked one by one, the rest still shows', async () => {

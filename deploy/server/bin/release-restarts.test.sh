@@ -24,12 +24,15 @@ indexer_release() { unit_release valuescan-indexer.service; }
 release_of() { local r; r="$(unit_release "$1")"; printf '%s' "${r:-unknown}"; }
 RESTARTED=""
 restart_indexer_and_api() { if [ "$1" = 1 ]; then RESTARTED+="api "; else RESTARTED+="indexer api "; fi; }
+restart_indexer() { RESTARTED+="indexer "; }
+restart_api() { RESTARTED+="api "; }
 restart_executor() { RESTARTED+="executor "; }
+eval "$(sed -n '/^here() {/p' "$SRC")"
 eval "$(sed -n '/^restart_units() {/,/^}/p' "$SRC")"
 
 pass=0; fail=0
-check() {  # name, expected restarts
-  RESTARTED=""; restart_units auto >/dev/null
+check() {  # name, expected restarts[, mode]
+  RESTARTED=""; restart_units "${3:-auto}" >/dev/null
   if [ "$(echo $RESTARTED)" = "$2" ]; then pass=$((pass+1)); echo "ok   $1: [$2]"; else fail=$((fail+1)); echo "FAIL $1: got [$(echo $RESTARTED)] want [$2]"; fi
 }
 mk v1
@@ -67,6 +70,24 @@ cp -r "$RELEASES/v1" "$RELEASES/v6"; echo new > "$RELEASES/v6/apps/executor/src/
 CURRENT="$RELEASES/v6"
 RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1 [valuescan-executor.service]=v1)
 check "a new executor file" "executor"
+
+# A server that runs some units (VS_UNITS): the others are not compared and not started.
+CURRENT="$RELEASES/v5"
+RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1)
+VS_UNITS=indexer,api check "server 1: dependencies, the executor is not its own" "indexer api"
+RUNS=([valuescan-executor.service]=v1)
+VS_UNITS=executor check "server 2: dependencies, the indexer and API are not its own" "executor"
+CURRENT="$RELEASES/v3"
+RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1)
+VS_UNITS=indexer check "a server with the indexer only" "indexer"
+
+# --units: exactly the units named, in the order indexer, API, executor.
+UNITS=api,indexer check "--units=api,indexer" "indexer api" units
+UNITS=executor check "--units=executor" "executor" units
+VS_UNITS=indexer,api UNITS=indexer check "--units=indexer on server 1" "indexer" units
+CURRENT="$RELEASES/v1"
+RUNS=([valuescan-indexer.service]=v1 [valuescan-api.service]=v1 [valuescan-executor.service]=v1)
+UNITS=api check "--units=api with nothing changed" "api" units
 
 rm -rf "$T"
 echo "pass $pass fail $fail"
