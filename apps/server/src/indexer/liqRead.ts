@@ -18,7 +18,7 @@ import type { WalletVenue } from '../valuedesk/cohorts/model.js';
 import { emptyDrift, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
 import { coinLevels, liqCoin, type LevelPos, type LiqNow, type LiqSnap } from '../valuedesk/liquidations/levels.js';
 import { inflateRawSync } from 'node:zlib';
-import { venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
+import { marketsNow, venueMarkets, type VenueMarkets } from '../valuedesk/liquidations/rules.js';
 import { shownLabel } from '../valuedesk/labels.js';
 import { cohortBooksNow } from './read.js';
 import { reader } from './reader.js';
@@ -158,7 +158,7 @@ async function gather(coin: string, venues: readonly Venue[]): Promise<Gathered 
   const load = cohortBooksNow();
   if (!load) return null;
   const idx = coinIndex(load).get(coin);
-  const markets = new Map(await Promise.all(venues.map(async (v) => [v, await venueMarkets(v, { oi: true }).catch(() => null)] as const)));
+  const markets = await marketsFor(venues);
   const acc = accuracyOf();
   const levels: LevelPos[] = [];
   const coverage: Partial<Record<Venue, VenueCoverage>> = {};
@@ -270,10 +270,25 @@ export function liveSrc(coin: string): Parameters<typeof heatOf>[2] | null {
   };
 }
 
-/** The venues' market lists, read where stale (open interest a minute old at most). */
+/**
+ * The venues' market lists: what is cached answers at once and a stale one is read again behind
+ * it (open interest a minute old at most, for the next request). Only a venue never read yet is
+ * waited for, and not past MARKETS_WAIT_MS. Awaiting every refresh held the heatmap 40-90 s
+ * (2026-10-28) whenever the API's shared Lighter / Arcus pacers or Hyperliquid budget were busy:
+ * the edge gave up at 30 s and the map showed nothing.
+ */
 export async function marketsFor(venues: readonly Venue[]): Promise<Map<Venue, VenueMarkets | null>> {
-  return new Map(await Promise.all(venues.map(async (v) => [v, await venueMarkets(v, { oi: true }).catch(() => null)] as const)));
+  return new Map(await Promise.all(venues.map(async (v) => {
+    const fresh = venueMarkets(v, { oi: true }).catch(() => null);
+    const now = marketsNow(v);
+    if (now) return [v, now] as const;
+    const late = new Promise<null>((r) => setTimeout(() => r(null), MARKETS_WAIT_MS).unref?.());
+    return [v, await Promise.race([fresh, late])] as const;
+  })));
 }
+
+/** How long a heatmap waits for a venue's first market list before answering without its open interest. */
+const MARKETS_WAIT_MS = 3_000;
 
 /**
  * A coin's liquidation levels over the venues asked for: from the live feed (the
