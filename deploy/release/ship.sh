@@ -159,7 +159,7 @@ say "plan: $TAG ($(git rev-parse --short HEAD)$([ "$NEW_TAG" = 1 ] && echo ", ne
 for p in indexer api executor web; do
   want "$p" || continue
   where=""; case "$p" in indexer|api) where="server 1" ;; executor) where="server 2" ;; web) where="Vercel" ;; esac
-  printf '  %-9s %-9s %-26s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
+  printf '  %-9s %-9s %-30s %s\n' "$p" "$where" "${WHY[$p]:-}" "$(cost "$p")" >&2
 done
 [ "$BIN" = 0 ] || note "  bin       both      /opt/valuescan/bin from the tarball where it differs"
 [ -z "$INFRA" ] || note "  NOT SHIPPED: $INFRA - units/Caddy/env need deploy/release/bootstrap-instance.sh"
