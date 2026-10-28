@@ -75,6 +75,14 @@ STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 
 die() { printf 'rotate-secret: %s\n' "$*" >&2; exit 1; }
 say() { printf 'rotate-secret: %s\n' "$*" >&2; }
+# This machine's short name for key comments. Not every system has `hostname` (the
+# Vercel build that runs the tests has none): /etc/hostname, then the kernel's, then "server".
+short_host() {
+  local h
+  h="$(hostname 2>/dev/null || cat /etc/hostname 2>/dev/null || cat /proc/sys/kernel/hostname 2>/dev/null || true)"
+  h="${h%%.*}"
+  printf '%s' "${h:-server}"
+}
 journal() { command -v logger >/dev/null 2>&1 && logger -t valuescan-rotate -- "$*" 2>/dev/null || true; }
 
 [ "$(id -u)" = 0 ] || [ "${ROTATE_ALLOW_NONROOT:-0}" = 1 ] || die "run as root (sudo)"
@@ -331,7 +339,7 @@ offsite_ssh() {
     say "the new key works for ${OFFSITE_USER:-vsbackup}@$OFFSITE_HOST"
     return
   fi
-  keypair "$k" "valuedesk-offsite@$(hostname | cut -d. -f1)" "${1:-}"
+  keypair "$k" "valuedesk-offsite@$(short_host)" "${1:-}"
   if [ "${1:-}" = finish ]; then
     "$OFFSITE_SETUP" test >&2 || die "the test copy with the new key failed - ROLL BACK: sudo bash $HERE/rotate-secret.sh restore $k.old-$STAMP"
   fi
@@ -347,7 +355,7 @@ ledger_pull() {
     rm -rf "$t"
     die "the new key does not pull the ledger from $LEDGER_HOST yet (authorized add --like=builder-snapshot.sh there first)"
   fi
-  keypair "$LEDGER_KEY" "valuedesk-ledger-pull@$(hostname | cut -d. -f1)" "${1:-}"
+  keypair "$LEDGER_KEY" "valuedesk-ledger-pull@$(short_host)" "${1:-}"
   if [ "${1:-}" = finish ]; then
     "$SYSTEMCTL" start valuescan-ledger-pull.service || die "the ledger pull with the new key failed - ROLL BACK: sudo bash $HERE/rotate-secret.sh restore $LEDGER_KEY.old-$STAMP"
     say "valuescan-ledger-pull.service ran with the new key"
