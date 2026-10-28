@@ -222,8 +222,9 @@ export function rotateKek(o: { dir: string; network: string; now?: number; newKe
     // 1. a copy of the database as it is
     let snapshot: string | null = null;
     if (o.snapshot !== false) {
+      // Two rotations within one second (a fast test machine) get -2, -3, ... as the old keks do.
       snapshot = `${p.db}.before-kek-${stamp}`;
-      if (existsSync(snapshot)) throw new Error(`${snapshot} exists already`);
+      for (let i = 2; existsSync(snapshot); i++) snapshot = `${p.db}.before-kek-${stamp}-${i}`;
       db.exec(`VACUUM INTO '${snapshot.replace(/'/g, "''")}'`);
       protect(snapshot, p.db);
     }
