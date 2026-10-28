@@ -308,7 +308,7 @@ export async function liqWallets(coin: string, venues: readonly Venue[], side: '
   return { coin, side, from, to, price: g.price, total: r2(rows.reduce((a, x) => a + x.usd, 0)), count: rows.length, wallets: rows.slice(0, limit) };
 }
 
-const RANGE_MS = { '1d': 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 } as const;
+const RANGE_MS = { '1d': 86_400_000, '2d': 2 * 86_400_000, '7d': 7 * 86_400_000, '30d': 30 * 86_400_000 } as const;
 export type LiqRange = keyof typeof RANGE_MS;
 export const isLiqRange = (r: unknown): r is LiqRange => typeof r === 'string' && r in RANGE_MS;
 
@@ -323,7 +323,13 @@ export function liqHistory(coin: string, venues: readonly Venue[], range: LiqRan
       try { snap = JSON.parse(r.data) as LiqSnap; } catch { continue; }
       const sum = new Map<number, [number, number]>();
       for (const v of venues) {
-        for (const [i, l, sh] of snap.v[v] ?? []) {
+        for (const [i, l0, sh0] of snap.v[v] ?? []) {
+          // A level the price had crossed when the snapshot was taken (a long priced above it, a
+          // short below) is past, not a level: snapshots before 2026-10-28 kept them, and drew
+          // longs above the price line and shorts below it.
+          const l = i * snap.st >= snap.p ? 0 : l0;
+          const sh = (i + 1) * snap.st <= snap.p ? 0 : sh0;
+          if (!l && !sh) continue;
           const b = sum.get(i) ?? [0, 0];
           b[0] += l;
           b[1] += sh;

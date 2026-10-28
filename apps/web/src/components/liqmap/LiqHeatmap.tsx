@@ -29,7 +29,6 @@ import './LiqHeatmap.css';
 type View = 'live' | 'chart' | 'history';
 type Res = 'fine' | 'medium' | 'coarse';
 type Unit = 'usd' | 'coin';
-type Range = '1d' | '7d' | '30d';
 const TFS = ['1m', '5m', '15m', '1h', '4h', '1D'] as const;
 type Tf = (typeof TFS)[number];
 
@@ -39,9 +38,10 @@ interface Prefs {
   unit: Unit;
   venues: Venue[];
   tf: Tf;
-  range: Range;
+  /** The historical view's timeframe. */
+  htf: HTf;
 }
-const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', range: '1d' };
+const DEFAULTS: Prefs = { view: 'live', res: 'fine', unit: 'usd', venues: [...SCAN_VENUES], tf: '1h', htf: '1h' };
 
 /** A market's coin, as the server nets it (cohorts/model.ts coinOf): `BTC-USD` -> BTC, `vETH_vUSDC` -> ETH, `xyz:TSLA` -> TSLA. */
 export function coinOfSymbol(symbol: string): string {
@@ -242,8 +242,8 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
           </div>
         )}
         {prefs.view === 'history' && (
-          <div className="lqm-seg" aria-label="Range">
-            {(['1d', '7d', '30d'] as const).map((r) => <button key={r} type="button" aria-pressed={prefs.range === r} className={prefs.range === r ? 'is-on' : ''} onClick={() => set({ range: r })}>{r.toUpperCase()}</button>)}
+          <div className="lqm-seg" aria-label="Timeframe">
+            {HTFS.map((t) => <button key={t} type="button" aria-pressed={prefs.htf === t} className={prefs.htf === t ? 'is-on' : ''} onClick={() => set({ htf: t })}>{t}</button>)}
           </div>
         )}
         {prefs.view !== 'history' && (
@@ -262,7 +262,7 @@ export function LiqHeatmap({ symbol, engine, instance }: { symbol: string; engin
       )}
       <div className="lqm-body">
         {prefs.view === 'history' ? (
-          <HistoryView coin={coin} venues={chosen} range={prefs.range} />
+          <HistoryView coin={coin} venues={chosen} engine={engine} symbol={symbol} tf={HTFS.includes(prefs.htf) ? prefs.htf : '1h'} />
         ) : !h ? (
           <p className="lqm-empty">{heat.error ? `Liquidation levels unavailable: ${heat.error}` : 'Reading the books…'}</p>
         ) : !h.price || !h.buckets.length ? (
@@ -707,113 +707,203 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
 
 // --- history ------------------------------------------------------------------------------
 
-function HistoryView({ coin, venues, range }: { coin: string; venues: Venue[]; range: Range }) {
+/** The historical view's timeframes: one column per bar, and how far back each reaches (snapshots are 15-minutely for 3 days, hourly to 30). */
+const HTFS = ['15m', '1h', '4h', '1D'] as const;
+type HTf = (typeof HTFS)[number];
+const HTF_MS: Record<HTf, number> = { '15m': 15 * 60_000, '1h': 3_600_000, '4h': 4 * 3_600_000, '1D': 86_400_000 };
+const HTF_RANGE: Record<HTf, '2d' | '7d' | '30d'> = { '15m': '2d', '1h': '7d', '4h': '30d', '1D': '30d' };
+
+/**
+ * A cell's colour by its share of the scale: transparent below a floor, then dark
+ * violet through teal to yellow (viridis) - only real clusters stand out, the way
+ * liquidation heatmaps read, instead of every bucket painting its side's colour.
+ */
+const RAMP: ReadonlyArray<[number, number, number]> = [[68, 1, 84], [59, 82, 139], [33, 145, 140], [94, 201, 98], [253, 231, 37]];
+const FLOOR = 0.03;
+function cellColor(x: number): string | null {
+  if (!(x > FLOOR)) return null;
+  const t = Math.min(1, x);
+  const f = t * (RAMP.length - 1);
+  const i = Math.min(RAMP.length - 2, Math.floor(f));
+  const k = f - i;
+  const [r1, g1, b1] = RAMP[i]!;
+  const [r2, g2, b2] = RAMP[i + 1]!;
+  const a = 0.35 + 0.65 * Math.min(1, t * 1.6);
+  return `rgba(${Math.round(r1 + (r2 - r1) * k)},${Math.round(g1 + (g2 - g1) * k)},${Math.round(b1 + (b2 - b1) * k)},${a.toFixed(3)})`;
+}
+
+function HistoryView({ coin, venues, engine, symbol, tf }: { coin: string; venues: Venue[]; engine: Engine; symbol: string; tf: HTf }) {
+  const range = HTF_RANGE[tf];
   const r = usePolled<LiqHistory>(`${coin}|${venues.join(',')}|${range}`, (s) => vsApi.liquidationHistory(coin, venues, range, s), 5 * 60_000);
+  const k = usePolled<Kline[]>(`${engine}|${symbol}|${tf}`, () => api.klines(engine, symbol, tf, 500).then((x) => x.klines), 60_000);
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [ref, { w, h: ht }] = useSize<HTMLDivElement>();
+  const bind = useCallback((x: HTMLDivElement | null) => { ref(x); setEl(x); }, [ref]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [tip, setTip] = useState<{ x: number; y: number; text: string[] } | null>(null);
+  const [yv, setYv] = useState<[number, number] | null>(null);
+  useEffect(() => setYv(null), [coin, tf]);
+  const step = HTF_MS[tf];
   const pts = r.data?.points ?? [];
-  const geo = useMemo(() => {
-    if (!pts.length) return null;
-    let lo = Infinity;
-    let hi = -Infinity;
-    let max = 0;
-    for (const q of pts) {
-      lo = Math.min(lo, q.p * 0.75);
-      hi = Math.max(hi, q.p * 1.25);
-      for (const [, l, s] of q.b) max = Math.max(max, l + s);
-    }
-    return { lo, hi, max, t0: pts[0]!.t, t1: pts.at(-1)!.t };
-  }, [pts]);
+  // One column per bar: the last snapshot taken in it.
+  const cols = useMemo(() => {
+    const by = new Map<number, LiqHistory['points'][number]>();
+    for (const q of pts) by.set(Math.floor(q.t / step) * step, q);
+    return by;
+  }, [pts, step]);
+  const candles = useMemo(() => (k.data ?? []).map((c) => ({ t: c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c })).filter((c) => c.h > 0), [k.data]);
+  // The bars shown: from the first snapshot to now, one slot each.
+  const slots = useMemo(() => {
+    const first = pts[0]?.t;
+    if (first === undefined) return [] as number[];
+    const t0 = Math.floor(first / step) * step;
+    const t1 = Math.floor(Date.now() / step) * step;
+    const out: number[] = [];
+    for (let t = t0; t <= t1 && out.length < 1_000; t += step) out.push(t);
+    return out;
+  }, [pts, step]);
+  const candleAt = useMemo(() => new Map(candles.map((c) => [Math.floor(c.t / step) * step, c])), [candles, step]);
+  // The scale: a high percentile of the cells, so one giant cluster does not wash out the rest.
+  const scale = useMemo(() => {
+    const v: number[] = [];
+    for (const q of cols.values()) for (const [, l, s] of q.b) v.push(l + s);
+    if (!v.length) return 1;
+    v.sort((a, b) => a - b);
+    return v[Math.min(v.length - 1, Math.floor(v.length * 0.985))]! || 1;
+  }, [cols]);
   const ML = 8;
-  const MR = 58;
-  const W = Math.max(0, w - ML - MR);
-  const H = Math.max(0, ht - M.t - M.b);
+  const MR = 62;
+  const W = Math.max(1, w - ML - MR);
+  const H = Math.max(1, ht - M.t - M.b);
+  const slot = W / Math.max(1, slots.length);
+  // The price axis: the candles (or the snapshots' prices) with 15% either side; the wheel zooms it.
+  let aLo = Infinity;
+  let aHi = -Infinity;
+  for (const t of slots) {
+    const c = candleAt.get(t);
+    const q = cols.get(t);
+    if (c) { aLo = Math.min(aLo, c.l); aHi = Math.max(aHi, c.h); }
+    else if (q) { aLo = Math.min(aLo, q.p); aHi = Math.max(aHi, q.p); }
+  }
+  if (!Number.isFinite(aLo)) { aLo = 0; aHi = 1; }
+  const pad = Math.max((aHi - aLo) * 0.1, aHi * 0.15);
+  const [lo, hi] = yv ?? [Math.max(0, aLo - pad), aHi + pad];
+  const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
+  const priceAt = (py: number) => lo + ((M.t + H - py) / H) * (hi - lo);
+  useWheel(el, (e) => {
+    const rc = el!.getBoundingClientRect();
+    setYv(zoomAt([lo, hi], priceAt(e.clientY - rc.top), wheelFactor(e)));
+  });
+  const drag = useDrag((_dx, dy) => {
+    const d = (dy / H) * (hi - lo);
+    setYv([lo + d, hi + d]);
+  }, () => {});
+
   useEffect(() => {
     const c = canvas.current;
-    if (!c || !geo || !w) return;
+    if (!c || !w || !slots.length) return;
     const dpr = window.devicePixelRatio || 1;
-    c.width = w * dpr;
-    c.height = ht * dpr;
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(ht * dpr);
     const g = c.getContext('2d')!;
-    g.scale(dpr, dpr);
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, ht);
-    const { lo, hi, max, t0, t1 } = geo;
-    const span = Math.max(1, t1 - t0);
-    const colW = Math.max(1, W / Math.max(1, pts.length));
-    const y = (v: number) => M.t + H - ((v - lo) / (hi - lo)) * H;
-    const lmax = Math.log1p(max);
-    pts.forEach((q, i) => {
-      const x = ML + (pts.length > 1 ? ((q.t - t0) / span) * (W - colW) : 0);
-      for (const [bi, l, s] of q.b) {
-        const v = l + s;
-        if (!(v > 0)) continue;
-        const a = Math.log1p(v) / lmax;
-        const top = y((bi + 1) * q.st);
-        const hh = Math.max(1, y(bi * q.st) - top);
-        // Long-heavy cells lean red, short-heavy green; brightness is the notional (log).
-        const share = l / v;
-        const rr = Math.round(239 * share + 0 * (1 - share));
-        const gg = Math.round(74 * share + 180 * (1 - share));
-        const bb = Math.round(60 * share + 129 * (1 - share));
-        g.fillStyle = `rgba(${rr},${gg},${bb},${(0.12 + 0.88 * a).toFixed(3)})`;
-        g.fillRect(x, top, colW + 0.5, hh);
-      }
-      void i;
-    });
-    // The price over time.
-    g.strokeStyle = 'rgba(247,247,247,0.85)';
-    g.lineWidth = 1.25;
+    g.save();
     g.beginPath();
-    pts.forEach((q, i) => {
-      const x = ML + (pts.length > 1 ? ((q.t - t0) / span) * (W - colW) : 0) + colW / 2;
-      if (i) g.lineTo(x, y(q.p)); else g.moveTo(x, y(q.p));
+    g.rect(ML, M.t, W, H);
+    g.clip();
+    slots.forEach((t, i) => {
+      const q = cols.get(t);
+      if (!q) return;
+      const x = ML + i * slot;
+      for (const [bi, l, s] of q.b) {
+        const top = y((bi + 1) * q.st);
+        const bot = y(bi * q.st);
+        if (bot < M.t || top > M.t + H) continue;
+        const col = cellColor((l + s) / scale);
+        if (!col) continue;
+        g.fillStyle = col;
+        g.fillRect(x, top, Math.ceil(slot), Math.max(1, bot - top));
+      }
     });
-    g.stroke();
-  }, [geo, pts, w, ht, W, H]);
+    g.restore();
+  }, [cols, slots, scale, w, ht, lo, hi]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (r.error && !r.data) return <p className="lqm-empty">History unavailable: {r.error}</p>;
   if (!r.data) return <p className="lqm-empty">Reading the snapshots…</p>;
   if (!pts.length) {
-    return (
-      <p className="lqm-empty">
-        No snapshots of {coin} yet. The index keeps the levels of the {r.data.coins.length || 30} coins with the most open interest tracked, every 15 minutes
-        {r.data.coins.length ? ` (now: ${r.data.coins.slice(0, 12).join(', ')}…)` : ''}.
-      </p>
-    );
+    return <p className="lqm-empty">No snapshots of {coin} yet: the index keeps every coin SoDEX lists, a snapshot every 15 minutes.</p>;
   }
-  const g = geo!;
-  const y = (v: number) => M.t + H - ((v - g.lo) / (g.hi - g.lo)) * H;
+  const fmtT = (t: number) => {
+    const d = new Date(t);
+    return tf === '1D' || tf === '4h' ? d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  };
   const move = (e: ReactPointerEvent<HTMLDivElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const py = e.clientY - rect.top;
+    if (drag.onPointerMoveDrag(e)) { setTip(null); return; }
+    const rc = e.currentTarget.getBoundingClientRect();
+    const px = e.clientX - rc.left;
+    const py = e.clientY - rc.top;
     if (px < ML || px > ML + W || py < M.t || py > M.t + H) { setTip(null); return; }
-    const t = g.t0 + ((px - ML) / Math.max(1, W)) * (g.t1 - g.t0);
-    let q = pts[0]!;
-    for (const x of pts) if (Math.abs(x.t - t) < Math.abs(q.t - t)) q = x;
-    const price = g.lo + ((M.t + H - py) / H) * (g.hi - g.lo);
+    const t = slots[Math.min(slots.length - 1, Math.floor((px - ML) / slot))]!;
+    const q = cols.get(t);
+    const price = priceAt(py);
+    const head = new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+    if (!q) { setTip({ x: px, y: py, text: [head, 'No snapshot in this bar'] }); return; }
     const bi = Math.floor(price / q.st);
     const cell = q.b.find((b) => b[0] === bi);
     setTip({
       x: px, y: py,
       text: [
-        new Date(q.t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }),
-        `${fmtPx(bi * q.st)} – ${fmtPx((bi + 1) * q.st)} (${pct(bi * q.st / q.p - 1)} from ${fmtPx(q.p)})`,
+        head,
+        `${fmtPx(bi * q.st)} – ${fmtPx((bi + 1) * q.st)} (${pct((bi * q.st) / q.p - 1)} from ${fmtPx(q.p)})`,
         cell ? `Longs ${fmtUsdShort(cell[1])} · Shorts ${fmtUsdShort(cell[2])}` : 'No liquidations here',
       ],
     });
   };
   return (
-    <div ref={ref} className="lqm-plot" onPointerMove={move} onPointerLeave={() => setTip(null)}>
+    <div
+      ref={bind}
+      className={`lqm-plot lqm-hist${drag.dragging() ? ' is-drag' : ''}`}
+      onPointerDown={drag.onPointerDown}
+      onPointerMove={move}
+      onPointerUp={drag.onPointerUp}
+      onPointerLeave={() => setTip(null)}
+      onDoubleClick={() => setYv(null)}
+    >
       <canvas ref={canvas} style={{ width: w, height: ht }} />
       <svg width={w} height={ht} className="lqm-over">
-        {ticks(g.lo, g.hi, Math.max(2, Math.floor(H / 50))).map((v) => <text key={v} x={ML + W + 6} y={y(v) + 3} className="lqm-ax">{fmtPx(v)}</text>)}
-        {ticks(g.t0, g.t1, Math.max(2, Math.floor(W / 110))).map((t) => (
-          <text key={t} x={ML + ((t - g.t0) / Math.max(1, g.t1 - g.t0)) * W} y={M.t + H + 16} textAnchor="middle" className="lqm-ax">
-            {new Date(t).toLocaleString('en-US', range === '1d' ? { hour: '2-digit', minute: '2-digit', hour12: false } : { month: 'short', day: 'numeric' })}
-          </text>
-        ))}
+        <defs><clipPath id="lqm-clip-hist"><rect x={ML} y={M.t} width={W} height={H} /></clipPath></defs>
+        {ticks(lo, hi, Math.max(2, Math.floor(H / 45))).map((v) => <text key={v} x={ML + W + 6} y={y(v) + 3} className="lqm-ax">{fmtPx(v)}</text>)}
+        {slots.length > 0 && ticks(0, slots.length - 1, Math.max(2, Math.floor(W / 100))).map((i) => {
+          const t = slots[Math.round(i)];
+          return t === undefined ? null : <text key={`t${i}`} x={ML + slot * (Math.round(i) + 0.5)} y={M.t + H + 16} textAnchor="middle" className="lqm-ax">{fmtT(t)}</text>;
+        })}
+        <g clipPath="url(#lqm-clip-hist)">
+          {slots.map((t, i) => {
+            const c = candleAt.get(t);
+            if (!c) return null;
+            const xc = ML + slot * (i + 0.5);
+            return (
+              <g key={t} className={c.c >= c.o ? 'lqm-up' : 'lqm-down'}>
+                <line x1={xc} x2={xc} y1={y(c.h)} y2={y(c.l)} />
+                <rect x={xc - Math.max(0.5, slot * 0.32)} width={Math.max(1, slot * 0.64)} y={y(Math.max(c.o, c.c))} height={Math.max(1, Math.abs(y(c.o) - y(c.c)))} />
+              </g>
+            );
+          })}
+          {/* Without candles (a coin SoDEX's chart lacks), the price at each snapshot. */}
+          {!candles.length && (
+            <polyline
+              className="lqm-hist-px"
+              points={slots.flatMap((t, i) => { const q = cols.get(t); return q ? [`${ML + slot * (i + 0.5)},${y(q.p)}`] : []; }).join(' ')}
+            />
+          )}
+        </g>
       </svg>
+      <div className="lqm-hist-scale" title="Liquidation notional per cell (USD at the liquidation price): low to high">
+        <span>{fmtUsdShort(scale * FLOOR)}</span>
+        <i aria-hidden="true" />
+        <span>{fmtUsdShort(scale)}+</span>
+      </div>
       {tip && <div className="lqm-tip" style={{ left: Math.min(w - 230, tip.x + 12), top: Math.max(0, tip.y - 40) }}>{tip.text.map((t, i) => (i ? <span key={i}>{t}</span> : <b key={i}>{t}</b>))}</div>}
     </div>
   );
