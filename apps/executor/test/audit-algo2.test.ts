@@ -64,7 +64,7 @@ function fakeFetch(f: Fake): FetchLike {
     m = /\/user\/0x[0-9a-f]{40}\/builders$/.exec(path);
     if (m) {
       if (f.builders === 'error') return { status: 403, ok: false, text: async () => '{"code":403,"message":"forbidden"}' };
-      return ok({ perps: [{ builderID: 221909, feeRate: 25 }], spot: [] });
+      return ok({ perps: [{ builderID: 234812, feeRate: 25 }], spot: [] });
     }
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };

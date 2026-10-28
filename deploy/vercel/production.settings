@@ -26,7 +26,7 @@ VITE_FEEDBACK_URL=https://discord.gg/TVJKHY9vhK
 
 # ValueDesk's SoDEX builder account; 1.5 bp per order, 2.5 bp ceiling (the copy
 # fee ladder's top tier, packages/copy-engine/src/policy.ts COPY_FEE_MAX).
-VITE_BUILDER_ID=221909
+VITE_BUILDER_ID=234812
 VITE_BUILDER_FEE_PERPS=15
 VITE_BUILDER_FEE_SPOT=15
 VITE_BUILDER_MAX_FEE=25

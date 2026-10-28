@@ -4016,7 +4016,7 @@ function loadConfig(env = process.env) {
   const owner = env.EXECUTOR_OWNER?.trim() || null;
   if (owner && !ADDRESS.test(owner)) throw new Error("EXECUTOR_OWNER must be a 0x wallet address");
   const network = env.SODEX_NETWORK === "testnet" ? "testnet" : "mainnet";
-  const builderId = Number(env.EXECUTOR_BUILDER_ID ?? 221909);
+  const builderId = Number(env.EXECUTOR_BUILDER_ID ?? 234812);
   if (!Number.isSafeInteger(builderId) || builderId < 0) throw new Error("EXECUTOR_BUILDER_ID must be a SoDEX account id (or 0 for none)");
   const ttl = Number(env.EXECUTOR_KEY_TTL_DAYS ?? 180);
   const level = env.LOG_LEVEL;

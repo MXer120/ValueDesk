@@ -27,7 +27,7 @@ function make(answer: () => { status: number; body: unknown }) {
     return { status: a.status, ok: a.status < 400, text: async () => JSON.stringify(a.body) };
   };
   const cfg = loadConfig({
-    EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_ORIGIN_SECRET: 'edge-secret', EXECUTOR_BUILDER_ID: '221909',
+    EXECUTOR_DATA_DIR: dir, EXECUTOR_KIND: 'hosted', EXECUTOR_ORIGIN_SECRET: 'edge-secret', EXECUTOR_BUILDER_ID: '234812',
     EXECUTOR_BUILDER_URL: 'https://api.example/api/vs/builder/volume', EXECUTOR_BUILDER_TOKEN: 'internal-token',
   });
   const db = new ExecutorDb(':memory:');
@@ -43,7 +43,7 @@ test('volume: read from the API with the internal token and the origin secret, t
   assert.equal(calls.length, 1, 'one read for ten minutes');
   const u = new URL(calls[0]!.url);
   assert.equal(u.searchParams.get('address'), OWNER);
-  assert.equal(u.searchParams.get('builder'), '221909');
+  assert.equal(u.searchParams.get('builder'), '234812');
   assert.equal(u.searchParams.get('days'), '14');
   assert.equal(calls[0]!.headers['X-Internal-Token'], 'internal-token');
   assert.equal(calls[0]!.headers['X-Origin-Verify'], 'edge-secret');

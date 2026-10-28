@@ -97,7 +97,7 @@ a new key and pair again). By default:
 | `EXECUTOR_DATA_DIR` | see above | database, the key-encryption key, the session secret |
 | `EXECUTOR_OWNER` | (paired) | the one wallet it serves |
 | `SODEX_NETWORK` | `mainnet` | or `testnet` |
-| `EXECUTOR_BUILDER_ID` | `221909` | the builder orders carry; `0` for none |
+| `EXECUTOR_BUILDER_ID` | `234812` | the builder orders carry; `0` for none |
 | `EXECUTOR_KEY_TTL_DAYS` | `180` | the longest key lifetime you may register (at most 180) |
 | `EXECUTOR_LIVE_ALGOS` | off | `1` lets real (non-practice) algo orders start; practice runs always can |
 | `EXECUTOR_ALLOWED_ORIGINS` | ValueDesk's site and `localhost:5180` | which web pages may call it |

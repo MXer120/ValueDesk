@@ -54,7 +54,7 @@ function fakeFetch(s: FakeSodex): FetchLike {
     m = /\/api\/v1\/user\/(0x[0-9a-f]{40})\/subaccounts$/.exec(path);
     if (m) return ok({ primaryAccountID: m[1] === LEADER ? 7 : 42 });
     if (/\/perps\/accounts\/0x[0-9a-f]{40}\/state$/.test(path)) return ok({ aid: 42, av: '1000', P: [] });
-    if (/\/user\/0x[0-9a-f]{40}\/builders$/.test(path)) return ok({ perps: [{ builderID: 221909, feeRate: 25 }], spot: [] });
+    if (/\/user\/0x[0-9a-f]{40}\/builders$/.test(path)) return ok({ perps: [{ builderID: 234812, feeRate: 25 }], spot: [] });
     return { status: 404, ok: false, text: async () => '{"code":404,"message":"not found"}' };
   };
 }
