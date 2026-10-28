@@ -2525,6 +2525,19 @@ export class IndexStore {
     });
   }
 
+  /** Every address a venue's member table holds. */
+  cohortMemberAddresses(venue: Venue): string[] {
+    return (this.q('SELECT address FROM cohort_member WHERE venue = ?').all(venue) as Array<{ address: string }>).map((r) => r.address);
+  }
+
+  /** Members that left the set: the API thread would otherwise keep counting them (with no book, as "not covered"). */
+  dropCohortMembers(venue: Venue, addresses: readonly string[]): void {
+    this.tx(() => {
+      const del = this.q('DELETE FROM cohort_member WHERE venue = ? AND address = ?');
+      for (const a of addresses) del.run(venue, a);
+    });
+  }
+
   cohortMembers(venue: Venue): Map<string, CohortMemberRow> {
     const out = new Map<string, CohortMemberRow>();
     for (const r of this.q('SELECT address, pnl, equity, label, pnl_1d, pnl_7d, pnl_30d FROM cohort_member WHERE venue = ?').all(venue) as Array<Record<string, unknown>>) {

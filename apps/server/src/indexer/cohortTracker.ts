@@ -115,6 +115,8 @@ const LIVE_SLICE = 5_000;
 const LIVE_BUDGET_MS = 150;
 /** With a backlog, up to this long: 30k books waited ~2 minutes at 150 ms (2026-10-28). */
 const LIVE_BUDGET_MAX_MS = 300;
+/** A member set at least this share of the table it replaces: smaller is a partial read, and nothing is removed. */
+const MEMBERS_KEPT_MIN = 0.8;
 /** A beat's budget for `pending` changed accounts: the base, doubled from 10k waiting on. */
 const liveBudget = (pending: number): number => (pending > 10_000 ? LIVE_BUDGET_MAX_MS : LIVE_BUDGET_MS);
 export const LIQ_NOW_MS = 2 * 60_000;
@@ -480,6 +482,8 @@ export class CohortTracker {
   private dirtyMarks = new Set<string>();
   private members = new Map<Venue, Map<string, Member>>();
   private memberSig = new Map<string, string>();
+  /** Per venue, the addresses its member table holds (read once, then kept with each save). */
+  private savedMembers = new Map<Venue, Set<string>>();
   /** Wallets a stream saw trade that have no book yet. */
   private wanted = new Map<string, number>();
   /** Hyperliquid holders' PnL from their portfolio (cohort_pnl), loaded at the first plan. */
@@ -795,6 +799,20 @@ export class CohortTracker {
       this.memberSig.set(k, sig);
       changed.push({ address, pnl: m.pnl, equity: m.equity, label: m.label, pnl1d: m.pnlRange?.['1d'] ?? null, pnl7d: m.pnlRange?.['7d'] ?? null, pnl30d: m.pnlRange?.['30d'] ?? null });
     }
+    // Members that left the set leave the table too: until 2026-10-28 nothing removed them, and the
+    // API counted 218 Hyperliquid and 15.8k trade.xyz wallets that had left up to 29 days before (no
+    // book: shown as not covered, their old PnL and equity still in the cohorts). A set far smaller
+    // than the table is a partial read upstream, not wallets leaving: nothing is removed then.
+    let saved = this.savedMembers.get(venue);
+    if (!saved) { saved = new Set(this.d.store.cohortMemberAddresses(venue)); this.savedMembers.set(venue, saved); }
+    const gone = saved.size && members.size >= MEMBERS_KEPT_MIN * saved.size ? [...saved].filter((a) => !members.has(a)) : [];
+    for (let i = 0; i < gone.length; i += 5_000) {
+      this.d.store.dropCohortMembers(venue, gone.slice(i, i + 5_000));
+      await new Promise<void>((r) => setImmediate(r));
+      mark('coh:plan');
+    }
+    for (const a of gone) { saved.delete(a); this.memberSig.delete(`${venue}|${a}`); }
+    for (const a of members.keys()) saved.add(a);
     for (let i = 0; i < changed.length; i += 5_000) {
       this.d.store.putCohortMembers(venue, changed.slice(i, i + 5_000), this.d.now());
       await new Promise<void>((r) => setImmediate(r));

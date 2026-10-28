@@ -304,3 +304,18 @@ test('a rebuild from behind lets other work run: no gap near the time the whole 
   assert.ok(ticks >= 5, `other work ran ${ticks} times during the ${behindMs.toFixed(0)} ms rebuild`);
   assert.ok(maxGap < Math.max(120, inPlaceMs / 3), `longest hold ${maxGap.toFixed(0)} ms; the same build in place holds ${inPlaceMs.toFixed(0)} ms`);
 });
+
+test('a member that left the set leaves the table: the next load neither counts nor shows it', async () => {
+  _cohortLoad.reset();
+  const before = cohortsRead(ALL, NONE)!;
+  const gone = addr('sodex', 999_999);
+  assert.ok(writer.cohortMemberAddresses('sodex').includes(gone));
+  writer.dropCohortMembers('sodex', [gone]);
+  writer.putCohortBooks([{ venue: 'sodex', address: gone, equity: 0, positions: [], at: Date.now() + 10 }]);
+  assert.ok(!writer.cohortMemberAddresses('sodex').includes(gone));
+  _cohortLoad.age(LOAD_TTL_MS + 1);
+  await _cohortLoad.rebuild();
+  const after = cohortsRead(ALL, NONE)!;
+  assert.equal(after.coverage.sodex!.members, before.coverage.sodex!.members, 'the empty book is still a wallet, its member row is gone');
+  assert.ok(after.cohorts.find((c) => c.id === 'apex')!.long < before.cohorts.find((c) => c.id === 'apex')!.long - 5e10, 'its old figures are out');
+});
