@@ -180,7 +180,7 @@ done
 if [ ${#U2[@]} -gt 0 ]; then
   EXEC0="$(exec_health)"
   note "  executor now: $(printf '%s' "$EXEC0" | json 'v ? `${v.copies} copies (${v.active} active), ${v.algos} algos running, ${v.queue ? v.queue.waiting + v.queue.inFlight : "?"} orders in the send queue, brake ${v.brake ? "ON" : "off"}${v.ok ? "" : " - NOT HEALTHY NOW"}` : "NOT ANSWERING"')"
-  note "  executor guards: install + preflight on a snapshot, backup, quiet send queue, brake over the restart, same copies/algos before trading resumes"
+  note "  executor guards: install + preflight on a snapshot (kept), quiet send queue, brake over the restart, same copies/algos before trading resumes"
 fi
 [ -z "$INFRA" ] || note "  NOT SHIPPED: $INFRA - units/Caddy/env need deploy/release/bootstrap-instance.sh"
 [ "$MOVE_MAIN" = 1 ] || note "  main stays at $(git rev-parse --short origin/main): the web changed but is not shipped"
