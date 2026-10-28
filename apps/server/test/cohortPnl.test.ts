@@ -15,7 +15,7 @@ import type { HlPortfolio } from '../src/valuedesk/hyperliquid/raw.js';
 
 const DAY = 86_400_000;
 
-test('portfolioPnl: the last point of the window asked for, the whole account (allTime), not perps only', () => {
+test('portfolioPnl: the last point of the window asked for (the cohorts ask for perpAllTime: hlPortfolioPnl)', () => {
   const p: HlPortfolio = [
     ['day', { accountValueHistory: [[1, '10']], pnlHistory: [[1, '0'], [2, '-12.5']], vlm: '0' }],
     ['allTime', { accountValueHistory: [[1, '10']], pnlHistory: [[1, '0'], [2, '900'], [3, '1234.5']], vlm: '0' }],

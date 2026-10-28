@@ -315,6 +315,13 @@ export function applyFill(book: Book, symbol: string, d: number, px: number): vo
 }
 
 
+/** What a fill of `d` at `px` realizes on the book's position: the part it closes, against the entry. */
+export function realizedOf(book: Pick<Book, 'pos'>, symbol: string, d: number, px: number): number {
+  const cur = book.pos.get(symbol);
+  if (!cur || !cur.szi || cur.entry === null || !Number.isFinite(cur.entry) || Math.sign(cur.szi) === Math.sign(d)) return 0;
+  return Math.min(Math.abs(d), Math.abs(cur.szi)) * (px - cur.entry) * Math.sign(cur.szi);
+}
+
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
 function bookable(venue: Venue, symbol: string): boolean {
   if (symbol.includes('/') || symbol.startsWith('@')) return false;
@@ -395,6 +402,13 @@ export function pnlPrio(equity: number): number {
  * written in the first 70 minutes after v0.2.13.
  */
 export const PNL_SHARE = 0.4;
+/** While more perp PnL reads than PNL_BACKLOG wait (the switch to perp PnL, 2026-10-28), they get this share. */
+export const PNL_BACKLOG_SHARE = 0.7;
+const PNL_BACKLOG = 1_000;
+/** Meta keys: when perp PnL reads began, and the accounts' PnL flows since their reads (saved every PNL_FLOW_SAVE_MS). */
+const PERP_SINCE_META = 'cohort_pnl_perp_since';
+const PNL_FLOW_META = 'cohort_pnl_flow';
+const PNL_FLOW_SAVE_MS = 5 * 60_000;
 /**
  * Cohort reads in flight at once (lanes.ts CONCURRENCY). One at a time made ~20
  * a minute; 8 made ~46 (v0.2.16, 2026-10-24), still bound by the event loop's
@@ -525,6 +539,19 @@ export class CohortTracker {
   private wanted = new Map<string, number>();
   /** Hyperliquid holders' PnL from their portfolio (cohort_pnl), loaded at the first plan. */
   private pnlRead: Map<string, CohortPnlRow & { at: number }> | null = null;
+  /**
+   * When perp PnL reads began (meta PERP_SINCE_META): a cohort_pnl row older holds the whole
+   * account's PnL, spot included - provisional until read again.
+   */
+  private perpSince = 0;
+  /**
+   * Per Hyperliquid account since its perp PnL read: what its fills realized less fees and
+   * funding (`flow`), and its unrealized PnL at the read (`u0`). Its all-time PnL now is the
+   * read's + flow + (unrealized now - u0): current between reads, transfers left out as PnL does.
+   */
+  private pnlFlow = new Map<string, { flow: number; u0: number }>();
+  /** Perp PnL reads still due (planPnl): their share of the lane rises while many wait. */
+  private pnlDue = 0;
   private span = new Map<Venue, number | null>();
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
@@ -594,6 +621,15 @@ export class CohortTracker {
       const saved = JSON.parse(s.getMeta(LIQ_ACC_META) ?? '{}') as Record<string, { cur: DriftStats; prev: DriftStats | null }>;
       for (const v of VENUES) if (saved[v]?.cur) this.liqAcc.set(v, saved[v]!);
     } catch { /* starts afresh */ }
+    // Perp PnL: since when the reads hold it (first start of this code: now), and each account's
+    // flow since its read as last saved. Prints missed while down are not in a flow: after an
+    // outage the accounts that hold the most are read again first (planPnl).
+    this.perpSince = Number(s.getMeta(PERP_SINCE_META)) || 0;
+    if (!this.perpSince) { this.perpSince = now; s.setMeta(PERP_SINCE_META, String(now)); }
+    try {
+      const saved = JSON.parse(s.getMeta(PNL_FLOW_META) ?? '{}') as Record<string, [number, number]>;
+      for (const [a, [flow, u0]] of Object.entries(saved)) if (Number.isFinite(flow) && Number.isFinite(u0)) this.pnlFlow.set(a, { flow, u0 });
+    } catch { /* starts afresh: the PnL stands as read until the next read */ }
     void loadSeeds().then((r) => { this.seeds = r.seeds; this.seedsAt = r.at; }).catch((e) => (this.lastError = `archive seeds: ${String(e)}`));
     this.hlc.start();
     this.hlh.start();
@@ -610,6 +646,7 @@ export class CohortTracker {
     every(30_000, () => this.fundingTick(), 'coh:funding');
     every(6 * 60 * 60_000, () => this.loadSpotPairs(), 'coh:spot');
     every(60 * 60_000, () => this.loadXyzScales(), 'coh:xyzfees');
+    every(PNL_FLOW_SAVE_MS, () => this.saveFlows(), 'coh:pnlflow');
     void this.loadXyzScales().catch((e) => (this.lastError = `xyz fee terms: ${String(e)}`));
     void this.loadSpotPairs().catch((e) => (this.lastError = `spot pairs: ${String(e)}`));
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
@@ -630,6 +667,43 @@ export class CohortTracker {
     this.scoh.stop();
     this.feed.stop();
     this.flush();
+    this.saveFlows();
+  }
+
+  /** The PnL flows to the index (they survive a restart; a write that fails keeps the last). */
+  private saveFlows(): void {
+    try {
+      const out: Record<string, [number, number]> = {};
+      for (const [a, f] of this.pnlFlow) out[a] = [Math.round(f.flow * 100) / 100, Math.round(f.u0 * 100) / 100];
+      this.d.store.setMeta(PNL_FLOW_META, JSON.stringify(out));
+    } catch (e) {
+      this.lastError = `pnl flows: ${String(e)}`;
+    }
+  }
+
+  /** A book's unrealized PnL at the marks the index holds (a position without a mark or an entry adds nothing). */
+  private unrealized(venue: Venue, book: Book): number {
+    let u = 0;
+    for (const [symbol, p] of book.pos) {
+      const px = this.marks.get(`${venue}|${symbol}`);
+      if (px === undefined || p.entry === null || !Number.isFinite(p.entry)) continue;
+      u += p.szi * (px - p.entry);
+    }
+    return u;
+  }
+
+  /**
+   * The portfolio reads' share of the cohort lane: cut while the liquidation backlog takes the
+   * reads, raised while many perp PnL reads wait (the switch: ~120k holders, 20 weight each).
+   */
+  private pnlShare(): void {
+    this.hlc.setShare('cohpnl:', this.liqBoost ? LIQ_BOOST_PNL_SHARE : this.pnlDue > PNL_BACKLOG ? PNL_BACKLOG_SHARE : PNL_SHARE);
+  }
+
+  /** A Hyperliquid account's flow since its perp PnL read moves by `x` (none before its first read). */
+  private addFlow(address: string, x: number): void {
+    const f = this.pnlFlow.get(address);
+    if (f && Number.isFinite(x)) f.flow += x;
   }
 
   // --- the streams ----------------------------------------------------------------------
@@ -655,7 +729,9 @@ export class CohortTracker {
         continue;
       }
       if (!book.pos.has(p.symbol) && OPENED_REREAD.has(p.venue)) book.opened = true;
-      feeCash(book, p.symbol, this.fillFee(p, address, d > 0));
+      const fee = this.fillFee(p, address, d > 0);
+      if (p.venue === 'hyperliquid') this.addFlow(address, realizedOf(book, p.symbol, d, p.px) - fee);
+      feeCash(book, p.symbol, fee);
       applyFill(book, p.symbol, d, p.px);
       this.live.touch(p.venue, address);
       this.dirtyBooks.add(`${p.venue}|${address}`);
@@ -783,6 +859,7 @@ export class CohortTracker {
       liqMs: this.liqMs,
       liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
+      pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
       staleBefore: this.staleBefore,
@@ -858,13 +935,20 @@ export class CohortTracker {
       if (venue === 'hyperliquid' && out.get(a)?.equity != null) continue;
       put(a, { equity: b.equity });
     }
-    // A holder the leaderboard does not rank: its PnL as its portfolio last read it,
-    // so it sits in a PnL cohort as it does in a size cohort.
+    // Perp PnL: a read since the switch (perpSince) decides the PnL cohort - the leaderboard's
+    // figure is the whole account's, spot included - kept current by the account's flow since
+    // the read (pnlFlow). A row from before the switch, or the leaderboard's figure, stands
+    // only until the account is read (provisional: largest first, planPnl).
     if (venue === 'hyperliquid') {
+      const books = this.books.get('hyperliquid');
       for (const [a, r] of this.pnls()) {
         const cur = out.get(a);
-        if (!cur || cur.pnl != null || r.pnl == null) continue;
-        cur.pnl = r.pnl;
+        if (!cur || r.pnl == null) continue;
+        const perp = r.at >= this.perpSince;
+        if (!perp && cur.pnl != null) continue;
+        const f = perp ? this.pnlFlow.get(a) : undefined;
+        const b = books?.get(a);
+        cur.pnl = r.pnl + (f ? f.flow + (b ? this.unrealized('hyperliquid', b) : 0) - f.u0 : 0);
         cur.pnlRange = { '1d': r.pnl1d, '7d': r.pnl7d, '30d': r.pnl30d };
       }
     }
@@ -888,19 +972,29 @@ export class CohortTracker {
     if (queued >= PNL_QUEUE_CAP) return;
     const done = this.pnls();
     const due: Array<[string, number]> = [];
-    // Holders on the main dex and on trade.xyz (the same accounts: accountPnl).
+    // After an outage the flows miss what traded meanwhile: the large accounts are read again.
+    const outage = this.downAtStart >= OUTAGE_GAP_MS;
+    // Holders on the main dex and on trade.xyz (the same accounts: accountPnl), every one of them -
+    // the leaderboard's PnL is the whole account's, so a ranked holder is read too. By what it
+    // holds (notional), the larger of that and its equity: the money in a PnL cohort is there.
     const seen = new Set<string>();
-    for (const [address, book] of [...this.books.get('hyperliquid')!, ...this.books.get('tradexyz')!]) {
-      if (!book.pos.size || seen.has(address)) continue;
-      seen.add(address);
-      const m = members.get(address);
-      const read = done.get(address);
-      // Ranked by the leaderboard (its PnL is the leaderboard's), unless only our read gave it.
-      if (m?.pnl != null && !read) continue;
-      const eq = m?.equity ?? book.equity ?? 0;
-      if (read && now - read.at < pnlTtl(eq)) continue;
-      due.push([address, pnlPrio(eq)]);
+    for (const [venue, books] of [['hyperliquid', this.books.get('hyperliquid')!], ['tradexyz', this.books.get('tradexyz')!]] as const) {
+      for (const [address, book] of books) {
+        if (!book.pos.size || seen.has(address)) continue;
+        seen.add(address);
+        const m = members.get(address);
+        const read = done.get(address);
+        let ntl = 0;
+        for (const [symbol, p] of book.pos) ntl += Math.abs(p.szi) * (this.marks.get(`${venue}|${symbol}`) ?? p.entry ?? 0);
+        const eq = Math.max(ntl, m?.equity ?? book.equity ?? 0);
+        const fresh = read && read.at >= this.perpSince && now - read.at < pnlTtl(eq)
+          && !(outage && eq >= 100_000 && read.at < this.startedAt);
+        if (fresh) continue;
+        due.push([address, pnlPrio(eq)]);
+      }
     }
+    this.pnlDue = due.length;
+    this.pnlShare();
     due.sort((a, b) => b[1] - a[1]);
     for (const [address, prio] of due.slice(0, PNL_QUEUE_CAP - queued)) {
       lane.add({
@@ -912,6 +1006,10 @@ export class CohortTracker {
           const row: CohortPnlRow = r ?? { address, pnl: null, pnl1d: null, pnl7d: null, pnl30d: null };
           this.d.store.putCohortPnl('hyperliquid', [row], at);
           done.set(address, { ...row, at });
+          // The flow starts over from this read, at the unrealized PnL the book holds now.
+          const book = this.books.get('hyperliquid')?.get(address);
+          if (row.pnl != null) this.pnlFlow.set(address, { flow: 0, u0: book ? this.unrealized('hyperliquid', book) : 0 });
+          else this.pnlFlow.delete(address);
           return PNL_READ_COST;
         },
       });
@@ -1038,7 +1136,7 @@ export class CohortTracker {
     const on = this.liqBoost ? due > LIQ_BOOST_MIN / 2 : due > LIQ_BOOST_MIN;
     if (on === this.liqBoost) return;
     this.liqBoost = on;
-    this.hlc.setShare('cohpnl:', on ? LIQ_BOOST_PNL_SHARE : PNL_SHARE);
+    this.pnlShare();
     // A rebuild task already running finishes on its own budget; no new one starts.
     this.hlh.setPerMin(on ? 1 : this.hlhBase);
     this.applyLending();
@@ -1451,6 +1549,7 @@ export class CohortTracker {
         if (!book.pos.size || book.at >= f.end) continue;
         const p = fundingCash(book, (sym) => rates.get(sym) ?? null);
         if (!p) continue;
+        if (venue === 'hyperliquid') this.addFlow(address, -p);
         paid += p;
         n++;
         this.live.touch(venue, address);

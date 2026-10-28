@@ -41,3 +41,13 @@ test('SoDEX names the taker; Lighter carries what each side paid, in millionths 
   const free = lighterPrint({ trade_id: 8, market_id: 1, size: '1', price: '100', ask_account_id: 10, bid_account_id: 11, timestamp: 5, is_maker_ask: false, maker_fee: 0 } as never, () => 'BTC')!;
   assert.deepEqual(free.fee, { buyer: 0, seller: 0 }, 'a standard account pays nothing');
 });
+
+test('a fill realizes PnL on the part of the position it closes, against the entry; an add realizes nothing', async () => {
+  const { realizedOf } = await import('../src/indexer/cohortTracker.js');
+  const book = { pos: new Map([['BTC', { szi: 2, entry: 80_000 }], ['ETH', { szi: -10, entry: 3_000 }]]) };
+  assert.equal(realizedOf(book, 'BTC', -0.5, 82_000), 1_000, 'a long sells half a coin 2,000 up');
+  assert.equal(realizedOf(book, 'BTC', -3, 79_000), -2_000, 'a flip closes only the 2 it held');
+  assert.equal(realizedOf(book, 'BTC', 1, 90_000), 0, 'adding realizes nothing');
+  assert.equal(realizedOf(book, 'ETH', 4, 2_900), 400, 'a short buys back 100 lower');
+  assert.equal(realizedOf(book, 'SOL', 1, 100), 0, 'no position, nothing to realize');
+});

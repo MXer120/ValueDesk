@@ -196,21 +196,21 @@ export function portfolioPnl(p: HlPortfolio | null | undefined, window: string):
 }
 
 /**
- * A Hyperliquid wallet's PnL from its portfolio chart, for a holder the
- * leaderboard file does not rank: all-time and the day / week / month windows.
- * The whole account, spot included - the leaderboard's own measure (checked
- * 2026-10-24: its all-time figure matches the portfolio's `allTime`, not
- * `perpAllTime`). Null when Hyperliquid has no chart for it.
+ * A Hyperliquid wallet's PERP PnL from its portfolio chart: all-time and the day / week /
+ * month windows (`perpAllTime`, `perpDay`, ...). The PnL cohorts are by perp PnL, as
+ * Hyperdash's are: on the whole account's (`allTime`, the leaderboard's own figure, spot
+ * included) 45% of 80 sampled "extremely profitable" holders were there on spot gains alone
+ * (2026-10-28) - 582 against Hyperdash's 322. Null when Hyperliquid has no chart for it.
  */
 export async function hlPortfolioPnl(address: string): Promise<CohortPnlRow | null> {
   const p = await hlInfo.post<HlPortfolio | null>({ type: 'portfolio', user: address }, { ttlMs: 0 });
   if (!Array.isArray(p)) return null;
   return {
     address,
-    pnl: portfolioPnl(p, 'allTime'),
-    pnl1d: portfolioPnl(p, 'day'),
-    pnl7d: portfolioPnl(p, 'week'),
-    pnl30d: portfolioPnl(p, 'month'),
+    pnl: portfolioPnl(p, 'perpAllTime'),
+    pnl1d: portfolioPnl(p, 'perpDay'),
+    pnl7d: portfolioPnl(p, 'perpWeek'),
+    pnl30d: portfolioPnl(p, 'perpMonth'),
   };
 }
 
