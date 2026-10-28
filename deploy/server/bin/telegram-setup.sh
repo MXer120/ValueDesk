@@ -21,8 +21,10 @@
 # environment. The chat id is not a secret; it is printed so the other server and the
 # GitHub watcher (repository secret TELEGRAM_CHAT_ID) can use the same one.
 #
-# Who reads alert.env: valuescan-health.service (alerts) and valuescan-offsite.service
-# (a failed off-server copy). Both read it at their next start - no restart needed.
+# Who reads alert.env: valuescan-health.service (alerts), valuescan-offsite.service
+# (a failed off-server copy) and valuescan-executor.service (order, key and rate-limit
+# alerts). Health and offsite read it at their next start; the executor reads it when it
+# starts, so restart it once after this (systemctl restart valuescan-executor).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
