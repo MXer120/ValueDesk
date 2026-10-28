@@ -61,7 +61,9 @@ import { Lane } from './lanes.js';
 import { WeightBudget } from '../valuedesk/hyperliquid/info.js';
 import { mark } from './busy.js';
 import type { Print } from './streams.js';
-import type { IndexStore } from './store.js';
+import { defaultDbPath, type IndexStore } from './store.js';
+import { readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DAY_MS, dayOf } from './windows.js';
 import {
   PNL_READ_COST, READ_COST, arcusPositions, hlEquityHistory, hlFundingRows, hlHourlyPrices, hlPortfolioPnl, hlPositions,
@@ -562,6 +564,8 @@ export class CohortTracker {
   private levelPrunedAt = 0;
   /** Rows the last step wrote. */
   private levelRows = 0;
+  /** Perp PnL rows taken from the backfill's drops (importPnlDrops). */
+  private pnlImported = 0;
   private span = new Map<Venue, number | null>();
   private gapAt = new Map<Venue, number>();
   /** Per venue, the equity from which books are re-read after its last outage. */
@@ -869,7 +873,7 @@ export class CohortTracker {
       liqMs: this.liqMs,
       liq: { boost: this.liqBoost, due: Object.fromEntries(this.liqDue), live: { ready: this.liveReady, pending: this.live.pending, ms: this.liveMs, readers: this.feed.readers, error: this.feed.lastError }, nowAt: this.lastNowAt || null, since: this.startedAt },
       hlc: { queued: this.hlc.size, done: this.hlc.done, failed: this.hlc.failed, lastError: this.hlc.lastError },
-      pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size },
+      pnl: { perpSince: this.perpSince, due: this.pnlDue, flows: this.pnlFlow.size, imported: this.pnlImported },
       levels: { open: this.levelState?.size ?? null, lastRows: this.levelRows },
       scoh: { queued: this.scoh.size, done: this.scoh.done, failed: this.scoh.failed, lastError: this.scoh.lastError },
       hlh: { queued: this.hlh.size, done: this.hlh.done, failed: this.hlh.failed, lastError: this.hlh.lastError, lent: this.lent },
@@ -977,7 +981,56 @@ export class CohortTracker {
    * all-time PnL a holder is in a size cohort but in no PnL cohort. Largest
    * first; each read again after pnlTtl.
    */
+  /**
+   * Perp PnL reads made elsewhere (the one-off backfill on the second server, at its own
+   * Hyperliquid budget: deploy/release/pnl-backfill.mjs), dropped as JSON lines into
+   * `pnl-import/` beside the index: {address, pnl, pnl1d, pnl7d, pnl30d, at}. A row is taken as
+   * a read of its own (`at`, perp figures) - not over a newer read here - and its file removed.
+   */
+  private importPnlDrops(): void {
+    const dir = join(dirname(defaultDbPath()), 'pnl-import');
+    let files: string[];
+    try { files = readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort(); } catch { return; }
+    const done = this.pnls();
+    const books = this.books.get('hyperliquid');
+    const isNum = (v: unknown): v is number | null => v === null || (typeof v === 'number' && Number.isFinite(v));
+    for (const f of files.slice(0, 20)) {
+      const path = join(dir, f);
+      let n = 0;
+      try {
+        const byAt = new Map<number, CohortPnlRow[]>();
+        for (const line of readFileSync(path, 'utf8').split('\n')) {
+          if (!line.trim()) continue;
+          let r: Record<string, unknown>;
+          try { r = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+          const address = typeof r.address === 'string' ? r.address.toLowerCase() : '';
+          const at = Number(r.at);
+          if (!/^0x[0-9a-f]{40}$/.test(address) || !(at >= this.perpSince) || at > this.d.now() + 60_000) continue;
+          if (!isNum(r.pnl) || !isNum(r.pnl1d) || !isNum(r.pnl7d) || !isNum(r.pnl30d)) continue;
+          if ((done.get(address)?.at ?? 0) >= at) continue;
+          const row: CohortPnlRow = { address, pnl: r.pnl, pnl1d: r.pnl1d, pnl7d: r.pnl7d, pnl30d: r.pnl30d };
+          const t = Math.floor(at / 60_000) * 60_000;
+          byAt.set(t, [...(byAt.get(t) ?? []), row]);
+        }
+        for (const [at, rows] of byAt) {
+          this.d.store.putCohortPnl('hyperliquid', rows, at);
+          for (const row of rows) {
+            done.set(row.address, { ...row, at });
+            const b = books?.get(row.address);
+            if (row.pnl != null) this.pnlFlow.set(row.address, { flow: 0, u0: b ? this.unrealized('hyperliquid', b) : 0 });
+            n++;
+          }
+        }
+        unlinkSync(path);
+        this.pnlImported += n;
+      } catch (e) {
+        this.lastError = `pnl import ${f}: ${String(e)}`;
+      }
+    }
+  }
+
   private planPnl(members: Map<string, Member>, now: number): void {
+    this.importPnlDrops();
     const lane = this.hlc;
     const queued = lane.countPrefix('cohpnl:');
     if (queued >= PNL_QUEUE_CAP) return;
