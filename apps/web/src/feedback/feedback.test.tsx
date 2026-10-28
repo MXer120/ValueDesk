@@ -160,7 +160,7 @@ test('the page info: everything useful, nothing identifying, and the form lists 
     sockets: 'hub open · perps open', walletConnected: true, online: true, pageAgeS: 42, modes: ['hosted'], errors: ['0123456789abcdef'], element: null,
   });
   const rows = Object.fromEntries(contextRows(ctx));
-  assert.equal(rows.Wallet, 'connected');
+  assert.equal(rows['Wallet connected'], 'yes');
   assert.deepEqual([rows.Online, rows['Page open for']], ['yes', '42 s']);
   assert.ok(!JSON.stringify(ctx).includes(WALLET.slice(2)));
   assert.equal(osFamily('Mozilla/5.0 (Linux; Android 14)'), 'android');
@@ -258,10 +258,12 @@ test('reading: a browser token gets "wallet", an expired sign-in "session" - the
 test('the chat is always the wallet\'s: no opt-in, sending unsigned with the address, reading only signed in; one token per wallet', async () => {
   const src = readFileSync(new URL('./FeedbackDialog.tsx', import.meta.url), 'utf8');
   assert.ok(!src.includes('Keep chat on wallet'), 'no opt-in button any more');
-  assert.match(src, /const key = session\?\.token \?\? tokenFor\(wallet\)/, 'sends with the session if there is one, else the browser token - no signature asked');
-  assert.match(src, /sendMessage\(key, \{ category, areas, message: text, images: ids, context, wallet, website \}\)/, 'always with the connected wallet');
+  assert.match(src, /const key = signedSend \? session!\.token : tokenFor\(sendWallet\)/, 'the session only for its own wallet\'s chat, else the browser token for the address named - no signature asked');
+  assert.match(src, /sendMessage\(key, \{ category, areas, message: text, images: ids, context, wallet: sendWallet, website \}\)/, 'with the wallet the form names');
+  assert.match(src, /setWalletText\(wallet \?\? ''\)/, 'the field starts as the connected wallet');
   assert.match(src, /loadThread\(session\.token\)/, 'the chat is read with the session only');
-  assert.match(src, /our reply can only be read with a wallet connected/);
+  assert.match(src, /we can't reply to this/, 'no wallet: said before sending');
+  assert.match(src, /only its owner can read it/, 'another wallet: said before sending');
   const privacy = readFileSync(new URL('../legal/privacy.ts', import.meta.url), 'utf8');
   assert.ok(!privacy.includes('Keep chat on wallet'));
   assert.match(privacy, /Sending needs no signature; reading the conversation and the team\\'s replies does/);

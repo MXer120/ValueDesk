@@ -42,6 +42,7 @@ import { ENGINES, defaultFee, type Engine, type LogLike, type TiersConfig } from
 import { OrderState, applyFills, dayOf, defaultsOf, feeOwedAt, judgeOrder, readFill, type FeeRow, type Fill, type OrderRow } from './counting.js';
 import { explorerPath, orderFacts, readExplorerTx } from './explorer.js';
 import type { BuilderStore, Evidence, WalletRow } from './store.js';
+import { mayPrune } from '../retention.js';
 
 // --- budgets and bounds ---------------------------------------------------------------
 
@@ -653,7 +654,7 @@ export class Verifier {
     this.jobs.delete(job.address);
     this.guard(() => {
       this.store.completePass(job.builder, job.address, job.gen, now);
-      this.store.pruneOrders(job.builder, job.address, now - ORDER_RETAIN_MS);
+      if (mayPrune('builder')) this.store.pruneOrders(job.builder, job.address, now - ORDER_RETAIN_MS);
       this.store.capOrders(job.builder, job.address, MAX_ORDER_ROWS);
     });
   }

@@ -27,6 +27,8 @@ export interface FeedbackContext {
   timeZone: string | null;
   sockets: string | null;
   walletConnected: boolean;
+  /** The address sent is not the connected wallet's: typed into the form, or changed there (FeedbackDialog.tsx). */
+  walletTyped?: boolean;
   online: boolean | null;
   /** Seconds since the page loaded. */
   pageAgeS: number | null;
@@ -141,7 +143,7 @@ export function contextRows(c: FeedbackContext): Array<[string, string]> {
     ['Window', `${c.viewport ?? '?'}${c.dpr ? ` at ${c.dpr}x` : ''}`],
     ['Language, time zone', `${c.lang ?? '?'} · ${c.timeZone ?? '?'}`],
     ['Connection', c.sockets ?? 'unknown'],
-    ['Wallet', c.walletConnected ? 'connected' : 'not connected'],
+    ['Wallet connected', c.walletConnected ? 'yes' : 'no'],
     ['Online', c.online === null ? 'unknown' : c.online ? 'yes' : 'no'],
     ['Page open for', c.pageAgeS === null ? 'unknown' : c.pageAgeS < 120 ? `${c.pageAgeS} s` : `${Math.round(c.pageAgeS / 60)} min`],
     ['Copy modes in use', c.modes.length ? c.modes.join(', ') : 'none'],

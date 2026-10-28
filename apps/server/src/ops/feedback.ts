@@ -51,6 +51,8 @@ export interface FeedbackContext {
   timeZone: string | null;
   sockets: string | null;
   walletConnected: boolean | null;
+  /** The address sent is not the connected wallet's: typed into the form, or changed there. */
+  walletTyped?: boolean;
   online: boolean | null;
   /** Seconds since the page loaded. */
   pageAgeS: number | null;
@@ -91,6 +93,7 @@ export function projectContext(c: Record<string, unknown>): FeedbackContext {
     timeZone: typeof c.timeZone === 'string' && /^[A-Za-z_]+(\/[A-Za-z0-9_+-]+){0,2}$/.test(c.timeZone) && c.timeZone.length <= 40 ? c.timeZone : null,
     sockets: short(c.sockets, 60),
     walletConnected: typeof c.walletConnected === 'boolean' ? c.walletConnected : null,
+    ...(c.walletTyped === true ? { walletTyped: true } : {}),
     online: typeof c.online === 'boolean' ? c.online : null,
     pageAgeS: typeof c.pageAgeS === 'number' && Number.isFinite(c.pageAgeS) && c.pageAgeS >= 0 ? Math.min(Math.round(c.pageAgeS), 31_536_000) : null,
     modes: Array.isArray(c.modes) ? [...new Set(c.modes.filter((m): m is string => m === 'browser' || m === 'hosted' || m === 'self'))] : [],
@@ -175,11 +178,17 @@ const ago = (s: number): string => (s < 120 ? `${s}s` : s < 7200 ? `${Math.round
 /** "bug · Charts, Order book & trades" */
 export const kindLine = (f: Pick<Feedback, 'category' | 'areas'>): string => [f.category, f.areas.map(areaLabel).join(', ')].filter(Boolean).join(' · ');
 
-/** Which wallet sent it: proven by a signature, only claimed by the browser, or none. */
-export function walletLine(wallet: string | null, verified: boolean): string {
-  if (!wallet) return 'Wallet: none connected - the visitor reads a reply only after connecting a wallet and signing in';
-  return `Wallet ${wallet} ${verified ? '(signed in - proven)' : '(connected, not proven)'}`;
+/**
+ * Which wallet sent it: proven by a signature, only claimed, or none. `typed`: not the
+ * connected wallet's address - the visitor typed it into the form (owner, 2026-10-28).
+ */
+export function walletLine(wallet: string | null, verified: boolean, typed = false): string {
+  if (!wallet) return 'Wallet: none - the visitor reads a reply only after connecting a wallet and signing in from the same browser';
+  return `Wallet ${wallet} ${verified ? '(signed in - proven)' : typed ? '(typed into the form, not the connected wallet - not proven)' : '(connected, not proven)'}`;
 }
+
+/** A message with no wallet: marked at the top, so it is plain that a reply will most likely never be read (owner, 2026-10-28). */
+export const NO_WALLET_MARK = 'NO WALLET - a reply will most likely not be read';
 
 /**
  * The owner's message for one feedback: the first of a thread, or a follow-up in
@@ -187,7 +196,8 @@ export function walletLine(wallet: string | null, verified: boolean): string {
  * page info goes with the first one and with every bug.
  */
 export function feedbackText(f: Feedback, thread: { id: number; isNew: boolean; images: number; verified?: boolean }): string {
-  const head = thread.isNew ? `ValueDesk feedback (${kindLine(f)}) · thread #${thread.id}` : `Thread #${thread.id} · the visitor wrote (${kindLine(f)})`;
+  const base = thread.isNew ? `ValueDesk feedback (${kindLine(f)}) · thread #${thread.id}` : `Thread #${thread.id} · the visitor wrote (${kindLine(f)})`;
+  const head = f.wallet ? base : `[${NO_WALLET_MARK}] ${base}`;
   const ctx = thread.isNew || f.category === 'bug' ? contextLines(f.context) : f.context ? [`Page ${f.context.route} · build ${f.context.build}`] : [];
   return [
     head,
@@ -196,7 +206,7 @@ export function feedbackText(f: Feedback, thread: { id: number; isNew: boolean; 
     ...(thread.images ? ['', `${thread.images} screenshot${thread.images === 1 ? '' : 's'} below`] : []),
     '',
     ...ctx,
-    walletLine(f.wallet, !!thread.verified),
-    ...(thread.isNew ? ['', "Reply to this message to answer in the visitor's app."] : []),
+    walletLine(f.wallet, !!thread.verified, f.context?.walletTyped === true),
+    ...(thread.isNew ? ['', f.wallet ? "Reply to this message to answer in the visitor's app." : 'No wallet: answer only if it matters - the visitor sees it only if they connect a wallet and sign in from the same browser.'] : []),
   ].join('\n');
 }

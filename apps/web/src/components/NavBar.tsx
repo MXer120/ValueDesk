@@ -31,6 +31,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { TABS, TAB_LABELS, pathForTab, type Tab } from '../router';
 import { preloadWalletModal, warmWalletModal } from '../walletconnect';
 import { Notices } from './Notices';
+import { NavMore, type NavAlert } from './NavMore';
 import { SettingsMenu } from './SettingsMenu';
 import { useAddressMask, useMask } from '../privacy';
 import { fmtUsd } from '../format';
@@ -84,10 +85,14 @@ export interface NavBarProps {
   onEngine?: (e: Engine) => void;
   /** Knowledge is on (folders/access.ts): its link and, without the rail, its button. Off, neither exists. */
   knowledge?: boolean;
+  /** What the status page has open, for More's dot (status/SiteNoticeBanner.tsx navAlertOf). */
+  alert?: NavAlert;
+  /** Open the status page in place (App.tsx). */
+  onOpenStatus?: () => void;
 }
 
 export function NavBar({
-  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false,
+  tab, onNavigate, address, hasLayout, dashLocked, onOpenSearch, rail = false, engine, onEngine, knowledge = false, alert = null, onOpenStatus,
 }: NavBarProps) {
   /*
    * Have the wallet modal's chunk in memory BEFORE the click.
@@ -198,6 +203,8 @@ export function NavBar({
             </a>
           ))}
         </nav>
+        {/* More: the status page, Help & FAQ, Send feedback (owner, 2026-10-28). Outside the nav: its menu's rows are not nav links. */}
+        <NavMore alert={alert} onOpenStatus={onOpenStatus} />
 
         <div className={`navstatus${rail ? ' navstatus--rail' : ''}`}>
           {/*

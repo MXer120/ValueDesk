@@ -607,6 +607,11 @@ button.navicon { position: relative; min-height: 0; }
 .banner.info .banner-inner { border-left-color: var(--accent); }
 .banner.warn .banner-inner { border-left-color: var(--warn); }
 .banner-text { flex: 1 1 260px; color: var(--text); font-size: var(--fs-xs); }
+/* The status line (status/SiteNoticeBanner.tsx): the whole line is the link to /status. */
+a.banner-hit { color: inherit; text-decoration: none; cursor: pointer; transition: background 120ms; }
+.banner--status:hover { background: color-mix(in srgb, var(--bg-panel) 80%, var(--text) 4%); }
+a.banner-hit:hover .link { text-decoration: underline; }
+a.banner-hit:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 
 footer {
   display: flex; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap;
@@ -1198,6 +1203,30 @@ button.danger:hover:not(:disabled) { background: var(--neg); border-color: var(-
 }
 .tabbar button:hover:not(.active),
 .navlinks button:hover:not(.active) { color: var(--text); background: none; }
+
+/* "More" (NavMore.tsx): the last of the pages, in their look, pulled to their spacing (it
+   sits outside .navlinks, whose margin and the bar's gap would set it apart); its menu the
+   app's glass dropdown (.menu-popup) with its rows. */
+.navmore { position: relative; display: flex; align-items: center; height: 100%; margin-left: -4px; }
+.navmore__btn {
+  display: inline-flex; align-items: center; gap: 5px; height: 100%; min-height: 0; padding: 0 var(--sp-1);
+  border: 0; border-radius: 0; background: none; box-shadow: none;
+  color: var(--muted); font: inherit; font-size: var(--fs-base); font-weight: 400; line-height: var(--lh-base); white-space: nowrap; cursor: pointer;
+  transition: color .15s cubic-bezier(.4, 0, .2, 1);
+}
+.navmore__btn:hover,
+.navmore__btn.is-open { color: var(--text); background: none; border-color: transparent; }
+.navmore__btn:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.navmore__chev { opacity: 0.7; transition: transform var(--dur-fast) var(--ease-out); }
+.navmore__btn.is-open .navmore__chev { transform: rotate(180deg); }
+.navmore__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+.navmore__dot.is-down { background: var(--neg); }
+.navmore__dot.is-maintenance { background: var(--accent); }
+.navmore__menu { top: calc(100% + 6px); left: 0; z-index: 72; min-width: 210px; }
+.navmore__menu a.menu-row { text-decoration: none; }
+.navmore__hint { flex: none; color: var(--warn); font-size: var(--fs-micro); }
+.navmore__hint.is-down { color: var(--neg); }
+.navmore__hint.is-maintenance { color: var(--muted); }
 /* Null out the shared selected FILL here: a tab is identified by its rule, not
    by a filled surface. */
 .tabbar button.active,

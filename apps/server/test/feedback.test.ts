@@ -228,7 +228,8 @@ test('forward: one Telegram chain per thread, follow-ups and screenshots as repl
   await settled();
   assert.equal(sent.at(-1)!.replyTo, null);
   assert.match(sent.at(-1)!.text, /thread #2/);
-  assert.match(sent.at(-1)!.text, /Wallet: none connected - the visitor reads a reply only after connecting a wallet and signing in/);
+  assert.match(sent.at(-1)!.text, /Wallet: none - the visitor reads a reply only after connecting a wallet and signing in/);
+  assert.ok(sent.at(-1)!.text.startsWith('[NO WALLET - a reply will most likely not be read] '), 'marked at the top');
 });
 
 test('owner replies: only the owner\'s chat, only replies to a thread\'s message; the offset is kept', async () => {

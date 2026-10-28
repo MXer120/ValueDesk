@@ -18,6 +18,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { dataDir } from '../builder/paths.js';
+import { mayPrune } from '../retention.js';
 import {
   MAX_FRAMES, errorFingerprint, scrubFrame, scrubName, scrubRoute, scrubShort, scrubText,
 } from './scrub.js';
@@ -191,7 +192,7 @@ export class ClientErrorStore {
     const row = this.db.prepare('SELECT n FROM alerts WHERE day = ?').get(day) as { n: number } | undefined;
     if ((row?.n ?? 0) >= perDay) return false;
     this.db.prepare('INSERT INTO alerts (day, n) VALUES (?, 1) ON CONFLICT (day) DO UPDATE SET n = n + 1').run(day);
-    this.db.prepare('DELETE FROM alerts WHERE day < ?').run(utcDay(now - 30 * 86_400_000));
+    if (mayPrune('client-errors')) this.db.prepare('DELETE FROM alerts WHERE day < ?').run(utcDay(now - 30 * 86_400_000));
     return true;
   }
 

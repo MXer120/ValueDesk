@@ -99,15 +99,28 @@ test('record: a minute counts once, a day adds up, a gap is no data', () => {
   s.close();
 });
 
-test('record: samples are kept two days, tallies STATUS_KEEP_DAYS', () => {
-  const s = store();
-  s.record([{ service: 'api', state: 'up', ms: 10 }], T0 - (STATUS_KEEP_DAYS + 5) * DAY);
-  s.record([{ service: 'api', state: 'up', ms: 10 }], T0 - 3 * DAY);
-  s.record([{ service: 'api', state: 'up', ms: 10 }], T0);
-  const db = (s as unknown as { db: { prepare: (q: string) => { get: () => { n: number } } } }).db;
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM samples').get().n, 1);
-  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM days').get().n, 2);
-  s.close();
+test('record: everything is kept unless the owner allows pruning; then samples two days, tallies STATUS_KEEP_DAYS', () => {
+  const fill = (s: StatusStore) => {
+    s.record([{ service: 'api', state: 'up', ms: 10 }], T0 - (STATUS_KEEP_DAYS + 5) * DAY);
+    s.record([{ service: 'api', state: 'up', ms: 10 }], T0 - 3 * DAY);
+    s.record([{ service: 'api', state: 'up', ms: 10 }], T0);
+    return (s as unknown as { db: { prepare: (q: string) => { get: () => { n: number } } } }).db;
+  };
+  const kept = store();
+  const k = fill(kept);
+  assert.equal(k.prepare('SELECT COUNT(*) AS n FROM samples').get().n, 3);
+  assert.equal(k.prepare('SELECT COUNT(*) AS n FROM days').get().n, 3);
+  kept.close();
+  process.env.VALUESCAN_PRUNE = 'status';
+  try {
+    const s = store();
+    const db = fill(s);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM samples').get().n, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM days').get().n, 2);
+    s.close();
+  } finally {
+    delete process.env.VALUESCAN_PRUNE;
+  }
 });
 
 test('model: the day tone, the days, the expected minutes', () => {

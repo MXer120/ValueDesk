@@ -878,8 +878,8 @@ test('forget: a wallet removed while the server runs stays removed - nothing in 
   const forgotAt = w.clock.now();
   const removed = tool.forget(wallet, forgotAt);
   tool.close();
-  // (One fill: the first order's is no longer needed for telling repeats and was dropped.)
-  assert.deepEqual(removed, { wallets: 1, engines: 2, orders: 2, fills: 1, fees: 2, keys: 1, evidence: 1, days: 1 });
+  // (Both orders' fills: nothing is pruned for being old without the owner's word, retention.ts.)
+  assert.deepEqual(removed, { wallets: 1, engines: 2, orders: 2, fills: 2, fees: 2, keys: 1, evidence: 1, days: 1 });
 
   // The very next request starts from nothing.
   const clean = w.ask(wallet);
@@ -952,26 +952,47 @@ test('ledger: another builder id starts a fresh ledger and loses nothing of the 
   assert.deepEqual(back.fee, { perps: 15, spot: 20 });
 });
 
-test('ledger: order rows are kept while an order may still fill, then dropped; a late fill is looked up afresh', async () => {
+test('ledger: with the owner saying so (VALUESCAN_PRUNE=builder) order rows are kept while an order may still fill, then dropped; a late fill is looked up afresh', async () => {
+  process.env.VALUESCAN_PRUNE = 'builder';
+  try {
+    const w = world();
+    const { wallet, app } = trader(w, 400);
+    w.clock.advance(SEC);
+    const id = nextId();
+    w.sodex.order(wallet, { engine: 'perps', orderId: id, at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '100', quantity: '0.01' }] });
+    w.clock.advance(SEC);
+    await w.verify(wallet);
+    assert.ok(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`));
+    // Forty days later the row is gone with the next pass ...
+    w.clock.advance(40 * DAY);
+    await w.verify(wallet);
+    assert.equal(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`), null);
+    assert.equal(w.ask(wallet).volume.perpsUsd, 1, 'what it counted stays counted');
+    // ... and should the order fill again after all, the explorer is asked once more and only the new fill is added.
+    w.sodex.fillMore(wallet, 'perps', id, [{ price: '100', quantity: '0.02', at: w.clock.now() }]);
+    w.clock.advance(SEC);
+    const lookups = w.sodex.count('explorer');
+    assert.equal((await w.verify(wallet)).volume.perpsUsd, 3);
+    assert.equal(w.sodex.count('explorer'), lookups + 1);
+  } finally {
+    delete process.env.VALUESCAN_PRUNE;
+  }
+});
+
+test('ledger: unless the owner says so an order row is kept however old, and a late fill adds only itself', async () => {
   const w = world();
-  const { wallet, app } = trader(w, 400);
+  const { wallet, app } = trader(w, 401);
   w.clock.advance(SEC);
   const id = nextId();
   w.sodex.order(wallet, { engine: 'perps', orderId: id, at: w.clock.now(), builder: { id: BUILDER, fee: 20 }, key: app, fills: [{ price: '100', quantity: '0.01' }] });
   w.clock.advance(SEC);
   await w.verify(wallet);
-  assert.ok(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`));
-  // Forty days later the row is gone with the next pass ...
   w.clock.advance(40 * DAY);
   await w.verify(wallet);
-  assert.equal(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`), null);
-  assert.equal(w.ask(wallet).volume.perpsUsd, 1, 'what it counted stays counted');
-  // ... and should the order fill again after all, the explorer is asked once more and only the new fill is added.
+  assert.ok(w.svc.store!.order(BUILDER, wallet, 'perps', `BTC-USD:${id}`), 'kept (retention.ts)');
   w.sodex.fillMore(wallet, 'perps', id, [{ price: '100', quantity: '0.02', at: w.clock.now() }]);
   w.clock.advance(SEC);
-  const lookups = w.sodex.count('explorer');
   assert.equal((await w.verify(wallet)).volume.perpsUsd, 3);
-  assert.equal(w.sodex.count('explorer'), lookups + 1);
 });
 
 test('counting: with volumeDays 14 a new wallet is read back 14 days, and its volume of those days sets the tier', async () => {

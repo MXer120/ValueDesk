@@ -141,6 +141,11 @@
 }
 .navbar--rail .navlinks a:hover { color: var(--text); }
 .navbar--rail .navlinks a.active { color: var(--text); font-weight: 500; }
+/* More (NavMore.tsx) in the rail's look: its links' size and grey, 4px from the last one (the bar's gap is 14px). */
+.navbar--rail .navmore { margin-left: -10px; }
+.navbar--rail .navmore__btn { padding: 0 11px; color: #8e8e93; font-size: 15px; letter-spacing: -0.005em; transition: color 140ms; }
+.navbar--rail .navmore__btn:hover,
+.navbar--rail .navmore__btn.is-open { color: var(--text); }
 
 /* Futures / Spot: a pill in a well, the chosen one lifted. */
 .nav-seg {

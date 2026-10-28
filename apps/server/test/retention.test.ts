@@ -7,6 +7,8 @@
  */
 process.env.VALUESCAN_INDEX_STREAMS = '0';
 process.env.VALUESCAN_INDEX_COHORTS = '0';
+// These test the sweep itself, which runs only with the owner's word (src/retention.ts): given here.
+process.env.VALUESCAN_PRUNE = 'fills';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
@@ -893,4 +895,21 @@ test('activity: one account\'s stream trades are read through the account index,
   assert.match(plan('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_hour INDEXED BY activity_hour_acct WHERE venue = ? AND acct = ? AND hour >= ?'), /activity_hour_acct \(venue=\? AND acct=\? AND hour>\?\)/);
   assert.match(plan('SELECT COALESCE(SUM(trades), 0) AS n FROM activity_day INDEXED BY activity_day_acct WHERE venue = ? AND acct = ? AND day >= ?'), /activity_day_acct \(venue=\? AND acct=\? AND day>\?\)/);
   s.close();
+});
+
+test('retention: without the owner saying so (VALUESCAN_PRUNE) the sweep deletes nothing, however old', () => {
+  const was = process.env.VALUESCAN_PRUNE;
+  delete process.env.VALUESCAN_PRUNE;
+  try {
+    const s = seeded();
+    const before = all(s);
+    const old = count(s, 'SELECT COUNT(*) AS n FROM fills WHERE t < ?', CUT);
+    assert.ok(old > 0);
+    s.pruneNow(NOW);
+    assert.equal(count(s, 'SELECT COUNT(*) AS n FROM fills WHERE t < ?', CUT), old, 'every raw row kept');
+    assert.deepEqual(all(s), before);
+    s.close();
+  } finally {
+    process.env.VALUESCAN_PRUNE = was;
+  }
 });

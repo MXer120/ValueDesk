@@ -162,7 +162,10 @@ async function main(): Promise<void> {
 
   const prune = setInterval(() => {
     try {
-      const n = db?.pruneActivity(Number(process.env.EXECUTOR_ACTIVITY_DAYS ?? 365)) ?? 0;
+      // Only with the owner's word: EXECUTOR_ACTIVITY_DAYS set (unset keeps every row - nothing is
+      // deleted for being old without it, server retention.ts).
+      const days = Number(process.env.EXECUTOR_ACTIVITY_DAYS);
+      const n = days > 0 ? db?.pruneActivity(days) ?? 0 : 0;
       if (n) log.info('activity pruned', { rows: n });
     } catch (e) {
       log.warn('activity prune failed', { error: String(e) });

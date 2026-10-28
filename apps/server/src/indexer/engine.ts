@@ -42,6 +42,7 @@ import { accountValue as fetchAccountValue, chartWindows, lookupPnl, syncCloses,
 import type { BoardRow, Coverage, HistoryKind, IndexStore, TraderStatsRow, TraderWin } from './store.js';
 import { winRateOf } from '../valuedesk/winRate.js';
 import { HlStream, SodexStream, type Print } from './streams.js';
+import { mayPrune } from '../retention.js';
 import {
   BOARD_SIZE,
   dayOf,
@@ -1073,7 +1074,8 @@ export class Indexer {
   /** Old activity rows go a slice at a time, never in one long DELETE. */
   private pruneDue = true;
   private async pruneSome(now: number): Promise<void> {
-    if (!this.pruneDue) return;
+    // Old activity and cumulative PnL days go only with the owner's word (retention.ts).
+    if (!this.pruneDue || !mayPrune('activity')) return;
     const cum = { beforeDay: dayOf(now) - CUM_KEEP_DAYS, yearStartDay: dayOf(yearStartUtc(now)) };
     for (let k = 0; k < 20; k++) {
       if (!this.store.pruneActivityChunk(hourOf(now) - HOUR_RETAIN, dayOf(now) - 400, 5_000, cum)) {
@@ -1421,7 +1423,7 @@ export class Indexer {
       }
       this.statsSweep[venue] = i;
     }
-    if (dayOf(now) !== dayOf(now - REBUILD_MS)) this.store.pruneTraderStats(now - 3 * DAY_MS);
+    if (dayOf(now) !== dayOf(now - REBUILD_MS) && mayPrune('trader-stats')) this.store.pruneTraderStats(now - 3 * DAY_MS);
   }
 
   /** A venue's PnL and volume for any address in a window, from what the index holds. */

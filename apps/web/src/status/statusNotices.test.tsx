@@ -105,7 +105,7 @@ test('the app banner: from /api/health, silent without a notice, plain text', ()
     ],
   };
   const html = render(createElement(SiteNoticeBanner, { health }));
-  assert.match(html, /class="banner warn"/);
+  assert.match(html, /class="banner warn banner--status"/);
   assert.match(html, /Incident: Copies are &lt;late&gt;/);
   assert.match(html, /\(and 1 more\)/);
   assert.match(html, /href="\/status#notice-7"/);
@@ -113,5 +113,10 @@ test('the app banner: from /api/health, silent without a notice, plain text', ()
   assert.equal(D.healthNoticeText({ id: 8, kind: 'maintenance', title: 'DB', impact: null, phase: 'in_progress', startsAt: T0, endsAt: T0 + H }), 'Maintenance in progress: DB, until 13:00 UTC');
   assert.equal(D.healthNoticeText({ id: 9, kind: 'incident', title: 'All down', impact: 'critical', phase: 'active', startsAt: T0, endsAt: null }), 'Outage: All down');
   const info = render(createElement(SiteNoticeBanner, { health: { notices: [health.notices[1]] } }));
-  assert.match(info, /class="banner info"/);
+  assert.match(info, /class="banner info banner--status"/);
+  // The data service not answering: the line on its own, to the status page.
+  const down = render(createElement(SiteNoticeBanner, { health: null, down: true }));
+  assert.match(down, /class="banner warn banner--status"/);
+  assert.match(down, /Our data service is not answering/);
+  assert.ok(down.includes('href="/status"'), 'to the status page');
 });

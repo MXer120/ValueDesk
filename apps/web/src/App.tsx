@@ -13,7 +13,7 @@ import { StatusFooter } from './components/StatusFooter';
 import { CommandPalette, loadPalette, openPalette, paletteReady } from './components/palette/lazyPalette';
 import type { TradeContext } from './dashboard';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
-import { SiteNoticeBanner } from './status/SiteNoticeBanner';
+import { SiteNoticeBanner, navAlertOf, useHealthDown } from './status/SiteNoticeBanner';
 import { BrakeBanner } from './components/BrakeBanner';
 import type { Eip1193Provider } from './wallet';
 import { AccountController } from './components/account/AccountController';
@@ -337,7 +337,9 @@ function AppShell() {
   const { session, refresh: refreshSession } = useSession();
   const { symbols, byName } = useSymbols(engine);
   const { state: connState, upstream } = useConnState();
-  const { data: health } = useAsync(() => api.health(), [], { pollMs: 30_000 });
+  const { data: health, error: healthError } = useAsync(() => api.health(), [], { pollMs: 30_000 });
+  /* The data service not answering for a while: the status line says so on every page (status/SiteNoticeBanner.tsx). */
+  const healthDown = useHealthDown(healthError);
   // Browser trading follows the backend's network (the one its market data and
   // account ids come from), then the connected wallet: load that wallet's key
   // from this device, or show trading as off.
@@ -496,6 +498,8 @@ function AppShell() {
         rail={rail}
         engine={engine}
         onEngine={switchEngine}
+        alert={navAlertOf(health, healthDown)}
+        onOpenStatus={openStatus}
       />
 
       {/* The venue-status line is the ONLY full-width strip allowed under the
@@ -508,7 +512,7 @@ function AppShell() {
           that state now ("Read-only - unlock a signing key"). */}
       <Guarded name="Maintenance">
         {/* Our own incidents and maintenance (status/), from /api/health: no request of its own. */}
-        <SiteNoticeBanner health={health} />
+        <SiteNoticeBanner health={health} down={healthDown} onOpenStatus={openStatus} />
         <MaintenanceBanner />
       </Guarded>
       <Guarded name="Brake">

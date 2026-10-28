@@ -68,6 +68,7 @@ import { deviceKeyPath } from '../deviceKey.js';
 import { VENUES, type BoardWindow, type Venue } from '../valuedesk/types.js';
 import type { BoardFilter, Side } from './windows.js';
 import { closeRuns, type CloseFill } from '../valuedesk/winRate.js';
+import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -300,6 +301,12 @@ CREATE TABLE IF NOT EXISTS boards (
 DROP TABLE IF EXISTS cohort_pos;
 CREATE TABLE IF NOT EXISTS cohort_member (
   venue TEXT NOT NULL, address TEXT NOT NULL, pnl REAL, equity REAL, label TEXT, at INTEGER NOT NULL,
+  PRIMARY KEY (venue, address)) WITHOUT ROWID;
+-- Members that left a venue's set (dropCohortMembers): kept, as they were when they left - nothing is
+-- deleted without the owner's word (retention.ts).
+CREATE TABLE IF NOT EXISTS cohort_member_gone (
+  venue TEXT NOT NULL, address TEXT NOT NULL, pnl REAL, equity REAL, label TEXT, at INTEGER NOT NULL,
+  pnl_1d REAL, pnl_7d REAL, pnl_30d REAL, gone_at INTEGER NOT NULL,
   PRIMARY KEY (venue, address)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS cohort_book (
   venue TEXT NOT NULL, address TEXT NOT NULL, equity REAL, positions TEXT NOT NULL, at INTEGER NOT NULL,
@@ -1940,6 +1947,9 @@ export class IndexStore {
       // 4. The sweep.
       if (!this.sweep) {
         if (Math.floor(now / DAY) === this.sweepDay && now - this.sweepAt < SWEEP_EVERY_MS) break;
+        // Raw fills older than the retention go only with the owner's word (retention.ts); a wallet
+        // dropped on request (2.) and a stretch already being frozen (3.) still finish.
+        if (!mayPrune('fills')) break;
         this.sweep = { keepDay: Math.floor(now / DAY) - this.retainDays, vi: 0, address: '', again: false, floorDay: 0, wallets: 0, startedAt: Date.now() };
       }
       if (!this.sweepNext(now)) {
@@ -2544,10 +2554,13 @@ export class IndexStore {
   }
 
   /** Members that left the set: the API thread would otherwise keep counting them (with no book, as "not covered"). */
-  dropCohortMembers(venue: Venue, addresses: readonly string[]): void {
+  dropCohortMembers(venue: Venue, addresses: readonly string[], now = Date.now()): void {
     this.tx(() => {
+      // Kept in cohort_member_gone as they were (retention.ts): out of the cohorts, not lost.
+      const keep = this.q(`INSERT OR REPLACE INTO cohort_member_gone (venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, gone_at)
+        SELECT venue, address, pnl, equity, label, at, pnl_1d, pnl_7d, pnl_30d, ? FROM cohort_member WHERE venue = ? AND address = ?`);
       const del = this.q('DELETE FROM cohort_member WHERE venue = ? AND address = ?');
-      for (const a of addresses) del.run(venue, a);
+      for (const a of addresses) { keep.run(now, venue, a); del.run(venue, a); }
     });
   }
 

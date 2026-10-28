@@ -84,6 +84,7 @@ import { LiqLive } from '../valuedesk/liquidations/live.js';
 import { LiqFeedServer } from './liqFeed.js';
 import { deflateRawSync } from 'node:zlib';
 import { loadSeeds, type Seeds } from './archiveSeed.js';
+import { mayPrune } from '../retention.js';
 
 const envNum = (name: string, dflt: number, min: number, max: number): number => {
   const n = Number(process.env[name]);
@@ -1828,7 +1829,7 @@ export class CohortTracker {
     }
     for (const c of closed) state.delete(`${c.aid}|${c.coin}|${c.venue}`);
     if (t - this.levelPrunedAt >= DAY_MS) {
-      s.pruneLiqLog(t - LIQ_KEEP_MS);
+      if (mayPrune('liq-log')) s.pruneLiqLog(t - LIQ_KEEP_MS);
       this.levelPrunedAt = t;
     }
     this.levelRows = changed.length + closed.length;
@@ -1857,7 +1858,8 @@ export class CohortTracker {
         if (hist.length) s.putLiqHist(t, hist);
         // Every position's level at the same step, as a change log (the history's wallet filter).
         this.logLevels(t, keep);
-        s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
+        // Older snapshots - and the 15-minute ones thinned to hourly - go only with the owner's word.
+        if (mayPrune('liq-history')) s.pruneLiqHist(now - LIQ_KEEP_MS, now - LIQ_THIN_MS, 60 * 60_000);
         this.lastLiqT = t;
       }
     } catch (e) {
@@ -1966,12 +1968,12 @@ export class CohortTracker {
       const s = this.d.store;
       if (seriesT > this.lastSeriesT) {
         s.putCohortSeries(series);
-        s.pruneCohortSeries(now - SERIES_KEEP_MS);
+        if (mayPrune('cohort-history')) s.pruneCohortSeries(now - SERIES_KEEP_MS);
         this.lastSeriesT = seriesT;
       }
       if (doMix) {
         s.putCohortMix(mix);
-        s.pruneCohortMix(now - SERIES_KEEP_MS);
+        if (mayPrune('cohort-history')) s.pruneCohortMix(now - SERIES_KEEP_MS);
         this.lastMixT = mixT;
       }
     } finally {

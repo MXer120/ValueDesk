@@ -36,6 +36,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { Engine } from './config.js';
 import { OrderState, addMicro, type FeeRow, type OrderRow, type OrderStateValue } from './counting.js';
+import { mayPrune } from '../retention.js';
 
 export const SCHEMA_VERSION = 1;
 
@@ -412,7 +413,7 @@ export class BuilderStore {
       add.run(builder, address, engine, day, micro);
       newest = Math.max(newest, day);
     }
-    if (newest) this.q('DELETE FROM days WHERE builder = ? AND address = ? AND engine = ? AND day < ?').run(builder, address, engine, newest - KEEP_DAYS);
+    if (newest && mayPrune('builder')) this.q('DELETE FROM days WHERE builder = ? AND address = ? AND engine = ? AND day < ?').run(builder, address, engine, newest - KEEP_DAYS);
   }
 
   /** How many wallets the ledger holds (one count at open; kept current by the caller). */
@@ -484,7 +485,7 @@ export class BuilderStore {
       this.q('INSERT INTO fees (builder, address, at, perps, spot) VALUES (?, ?, ?, ?, ?) ON CONFLICT (builder, address, at) DO UPDATE SET perps = excluded.perps, spot = excluded.spot').run(
         builder, address, row.at, row.perps, row.spot,
       );
-      this.q(
+      if (mayPrune('builder')) this.q(
         `DELETE FROM fees WHERE builder = ? AND address = ? AND at < coalesce(
            (SELECT at FROM fees WHERE builder = ? AND address = ? ORDER BY at DESC LIMIT 1 OFFSET ?), -1)`,
       ).run(builder, address, builder, address, MAX_FEE_ROWS - 1);
@@ -541,7 +542,7 @@ export class BuilderStore {
          ON CONFLICT (builder, address, engine) DO UPDATE SET hi = excluded.hi, sw_from = excluded.sw_from, sw_end = excluded.sw_end, sw_top = excluded.sw_top,
            sw_pages = excluded.sw_pages, swept_at = excluded.swept_at`,
       ).run(c.builder, c.address, c.engine, c.state.hi, c.state.swFrom, c.state.swEnd, c.state.swTop, c.state.swPages, c.state.sweptAt);
-      if (c.pruneFillsBefore !== null) {
+      if (c.pruneFillsBefore !== null && mayPrune('builder')) {
         this.q('DELETE FROM fills WHERE builder = ? AND address = ? AND engine = ? AND t < ?').run(c.builder, c.address, c.engine, c.pruneFillsBefore);
       }
       return true;
@@ -596,7 +597,7 @@ export class BuilderStore {
           c.builder, c.address, e.kind, e.engine, e.orderId, e.txHash, e.at, e.signer, e.keyName, e.fee, e.owed,
         );
       }
-      if (c.evidence.length) {
+      if (c.evidence.length && mayPrune('builder')) {
         this.q(
           `DELETE FROM evidence WHERE builder = ? AND address = ? AND id < coalesce(
              (SELECT id FROM evidence WHERE builder = ? AND address = ? ORDER BY id DESC LIMIT 1 OFFSET ?), -1)`,

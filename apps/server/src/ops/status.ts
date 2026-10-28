@@ -18,10 +18,15 @@
  *             and every stream up, else `degraded` (a stream down) or `down` (stale)
  *
  * Each answer is one minute's sample in `status.db` (the server's data directory;
- * SQLite, WAL) and adds one minute to that UTC day's tally. Samples are kept two
- * days, tallies STATUS_KEEP_DAYS, so the file stays a few hundred kilobytes. A
- * minute the prober did not run - this server down, a restart - has no sample: the
- * page shows it as no data, never as up.
+ * SQLite, WAL) and adds one minute to that UTC day's tally. Both are kept (about
+ * 6k samples a day, a few hundred kilobytes a month); only with the owner's word,
+ * VALUESCAN_PRUNE=status (retention.ts), samples go after two days and tallies
+ * after STATUS_KEEP_DAYS. A minute the prober did not run - this server down, a
+ * restart - has no sample: the page shows it as no data, never as up.
+ *
+ * Each round's samples also feed the automatic incidents (ops/statusAuto.ts): an
+ * outage the probes see gets its entry on the page, in the feed and in the app's
+ * banner without anyone posting it.
  *
  * The same file keeps the owner's incidents and maintenance (ops/statusNotices.ts).
  * After each round the finished days and the notices are written to
@@ -44,7 +49,9 @@ import {
   type DayTuple, type ServiceId, type ServiceState, type StatusReport,
 } from './statusModel.js';
 import { NoticeStore, healthNoticeReader } from './statusNotices.js';
+import { AutoIncidents, REPLAYED_KEY } from './statusAuto.js';
 import type { HealthNotice } from './statusModel.js';
+import { mayPrune } from '../retention.js';
 
 export const PROBE_EVERY_MS = 60_000;
 export const PROBE_TIMEOUT_MS = 10_000;
@@ -89,6 +96,8 @@ export class StatusStore {
   private readonly db: DatabaseSync;
   /** The incidents and maintenance (ops/statusNotices.ts), in the same file. */
   readonly notices: NoticeStore;
+  /** The incidents the probes open and resolve themselves (ops/statusAuto.ts). */
+  readonly auto: AutoIncidents;
 
   constructor(readonly path = statusDbPath()) {
     mkdirSync(dirname(path), { recursive: true });
@@ -98,6 +107,32 @@ export class StatusStore {
     this.db.exec('PRAGMA synchronous = NORMAL');
     this.db.exec(SCHEMA);
     this.notices = new NoticeStore(this.db);
+    this.auto = new AutoIncidents(this.notices);
+  }
+
+  /**
+   * Once per status.db: the record already here played through the automatic incidents
+   * (statusAuto.ts), at most 7 days back, so outages from before them get their entries.
+   * How many minutes were played (0 when done before).
+   */
+  replayAuto(now = Date.now()): number {
+    if (this.notices.getMeta(REPLAYED_KEY)) return 0;
+    const from = Math.floor((now - 7 * 86_400_000) / 60_000) + 1;
+    const rows = this.db.prepare('SELECT minute, service, state FROM samples WHERE minute >= ? ORDER BY minute, service').all(from) as Array<{ minute: number; service: string; state: number }>;
+    let played = 0;
+    for (let i = 0; i < rows.length; ) {
+      const minute = Number(rows[i]!.minute);
+      const list: Array<{ service: ServiceId; state: Exclude<ServiceState, 'unknown'> }> = [];
+      for (; i < rows.length && Number(rows[i]!.minute) === minute; i++) {
+        const r = rows[i]!;
+        const state = CODE_STATE[Number(r.state)];
+        if (isServiceId(r.service) && state) list.push({ service: r.service, state });
+      }
+      this.auto.observe(minute, list, minute * 60_000);
+      played += 1;
+    }
+    this.notices.setMeta(REPLAYED_KEY, String(now));
+    return played;
   }
 
   /**
@@ -119,8 +154,8 @@ export class StatusStore {
         if (Number(add.run(s.service, minute, STATE_CODE[s.state], s.ms).changes) === 0) continue;
         tally.run(s.service, day, s.state === 'up' ? 1 : 0, s.state === 'degraded' ? 1 : 0, s.state === 'down' ? 1 : 0);
       }
-      this.db.prepare('DELETE FROM samples WHERE minute < ?').run(Math.floor((now - SAMPLE_KEEP_MS) / 60_000));
-      this.db.prepare('DELETE FROM days WHERE day < ?').run(utcDay(now - STATUS_KEEP_DAYS * 86_400_000));
+      if (mayPrune('status')) this.db.prepare('DELETE FROM samples WHERE minute < ?').run(Math.floor((now - SAMPLE_KEEP_MS) / 60_000));
+      if (mayPrune('status')) this.db.prepare('DELETE FROM days WHERE day < ?').run(utcDay(now - STATUS_KEEP_DAYS * 86_400_000));
       this.db.exec('COMMIT');
     } catch (err) {
       this.db.exec('ROLLBACK');
@@ -177,7 +212,7 @@ export class StatusStore {
    * two days), only whole days before it. What was added, per service and day.
    */
   backfill(samples: ReadonlyArray<Sample & { minute: number }>, now = Date.now(), o: { dryRun?: boolean } = {}): Record<string, Record<string, [number, number, number]>> {
-    const keepFrom = Math.floor(Date.parse(`${utcDay(now - STATUS_KEEP_DAYS * 86_400_000)}T00:00:00Z`) / 60_000);
+    const keepFrom = mayPrune('status') ? Math.floor(Date.parse(`${utcDay(now - STATUS_KEEP_DAYS * 86_400_000)}T00:00:00Z`) / 60_000) : 0;
     const nowMin = Math.floor(now / 60_000);
     const firstSample = this.db.prepare('SELECT MIN(minute) AS m FROM samples WHERE service = ?');
     const firstDay = this.db.prepare('SELECT MIN(day) AS d FROM days WHERE service = ?');
@@ -248,7 +283,7 @@ export class StatusStore {
       throw new Error('not a status history (not JSON)');
     }
     if (v?.kind !== 'valuedesk-status-history') throw new Error('not a status history');
-    const oldest = utcDay(now - STATUS_KEEP_DAYS * 86_400_000);
+    const oldest = mayPrune('status') ? utcDay(now - STATUS_KEEP_DAYS * 86_400_000) : '0000-00-00';
     const ins = this.db.prepare('INSERT OR IGNORE INTO days (service, day, up, degraded, down) VALUES (?, ?, ?, ?, ?)');
     const n = (x: unknown): number => (typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= 1440 ? x : -1);
     let days = 0;
@@ -422,6 +457,11 @@ export function startStatusProber(o: {
       o.log?.warn({ err: e instanceof Error ? e.message : String(e) }, 'status: status-history.json could not be read back');
     }
   }
+  try {
+    store.replayAuto();
+  } catch (e) {
+    o.log?.warn({ err: e instanceof Error ? e.message : String(e) }, 'status: the record could not be played through the automatic incidents');
+  }
   let running = false;
   const tick = async (): Promise<void> => {
     // One round at a time: a slow round is never overlapped by the next.
@@ -429,7 +469,9 @@ export function startStatusProber(o: {
     running = true;
     try {
       const samples = await probeAll({ targets, fetch: o.fetch, indexerStatus: o.indexerStatus });
-      store.record(samples);
+      const at = Date.now();
+      store.record(samples, at);
+      store.auto.observe(Math.floor(at / 60_000), samples, at);
       if (historyFile) writeHistory(store, historyFile);
     } catch (e) {
       o.log?.warn({ err: e instanceof Error ? e.message : String(e) }, 'status probe round failed');
