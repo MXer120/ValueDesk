@@ -224,6 +224,17 @@ export function pollTtl(equity: number): number {
  * 51k of 55k Hyperliquid books holding positions still unpriced, though they held
  * under half the size.
  */
+/**
+ * How often a book is read again for its liquidation prices, by its notional: what
+ * prints and prices cannot move (spot collateral, fees, deposits) drifts them. Found
+ * 2026-10-28: a 2,613 BTC short read 6 h before stood 1.9% from Hyperliquid's figure,
+ * the largest level on the BTC map. $5M+ every 30 min, $1M+ every 2 h; smaller books
+ * keep their reconcile (6 h to 7 days).
+ */
+export function liqRefreshTtl(notional: number): number {
+  return notional >= 5_000_000 ? 30 * 60_000 : notional >= 1_000_000 ? 2 * 60 * 60_000 : Infinity;
+}
+
 export function liqBacklogPrio(notional: number, equity: number | null): number {
   const lev = equity && equity > 0 ? Math.min(25, notional / equity) : 25;
   return 1100 + Math.min(500, Math.max(0, Math.round(Math.log10(Math.max(1, notional * lev)) * 60)));
@@ -1158,6 +1169,8 @@ export class CohortTracker {
         else if (follows && book.at < this.staleBefore) push(900 + size);
         // Read before the spot state was looked at, and the leaderboard says it may matter.
         else if (venue === 'hyperliquid' && spotDue(book, m?.equity)) push(900 + size);
+        // A large book whose liquidation prices sit on the heatmap: read again sooner than its reconcile (liqRefreshTtl).
+        else if (book.pos.size && liqKnown(book) && age >= liqRefreshTtl(notional(book)) && this.holdsSodexCoin(book)) push(880 + size);
         else if (age >= (follows ? reconcileTtl(eq, venue) : pollTtl(eq))) push(400 + size);
       };
       let t0 = Date.now();

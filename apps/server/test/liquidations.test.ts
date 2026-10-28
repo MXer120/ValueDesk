@@ -11,7 +11,7 @@ import {
 } from '../src/valuedesk/liquidations/math.js';
 import { LevelsBuilder, bucketize, coinLevels, liqCoin, snapOfNow, type LevelPos } from '../src/valuedesk/liquidations/levels.js';
 import { hlTiers, lighterMarkets, sodexTiers } from '../src/valuedesk/liquidations/rules.js';
-import { applyFill, liqBacklogPrio, type Book } from '../src/indexer/cohortTracker.js';
+import { applyFill, liqBacklogPrio, liqRefreshTtl, type Book } from '../src/indexer/cohortTracker.js';
 import { IndexStore } from '../src/indexer/store.js';
 
 const near = (a: number | null, b: number, tol = 1e-6) => assert.ok(a !== null && Math.abs(a - b) <= tol * Math.abs(b), `${a} vs ${b}`);
@@ -267,4 +267,17 @@ test('books without liquidation data are read by what they add to the map: notio
   // Above a stale re-read of a large book, below a new wallet the stream saw trade.
   assert.ok(leveredWhale > 900 + size(100_000), "above the stale re-read of a mid-sized book (a stale read prices a book too)");
   assert.ok(liqBacklogPrio(1e12, 1) <= 1600);
+});
+
+test('large books are read again for their liquidation prices sooner than their reconcile', () => {
+  assert.equal(liqRefreshTtl(10_000_000), 30 * 60_000);
+  assert.equal(liqRefreshTtl(2_000_000), 2 * 60 * 60_000);
+  assert.equal(liqRefreshTtl(500_000), Infinity);
+});
+
+test('a snapshot keeps no level the price had crossed: no long above it, no short below', () => {
+  const row = { p: 1000, st: 1, v: { hyperliquid: { b: [[1200, 50, 0, 1, 0], [800, 0, 70, 0, 1], [900, 30, 0, 1, 0], [1100, 0, 40, 0, 1]] as Array<[number, number, number, number, number]>, c: [0, 0, 0, 0, 0, 0] as [number, number, number, number, number, number], o: [0, 0, 0, 0] as [number, number, number, number] } } };
+  const snap = snapOfNow(row);
+  const cells = (snap.v.hyperliquid ?? []).map(([i, l, s]) => [i * snap.st, l, s]);
+  assert.deepEqual(cells, [[900, 30, 0], [1100, 0, 40]]);
 });

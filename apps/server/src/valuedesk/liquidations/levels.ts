@@ -243,9 +243,13 @@ export function snapOfNow(row: LiqNow): LiqSnap {
   const v: LiqSnap['v'] = {};
   for (const [venue, x] of Object.entries(row.v) as Array<[Venue, LiqNowVenue]>) {
     const m = new Map<number, [number, number]>();
-    for (const [i, l, s] of x.b) {
+    for (const [i, l0, s0] of x.b) {
       const px = (i + 0.5) * row.st;
       if (px < lo || px >= hi) continue;
+      // Past levels (the price has crossed them) are not kept: a long priced above the price, a short below.
+      const l = i * row.st >= row.p ? 0 : l0;
+      const s = (i + 1) * row.st <= row.p ? 0 : s0;
+      if (!l && !s) continue;
       const j = Math.floor(px / st);
       const b = m.get(j) ?? [0, 0];
       b[0] += l;

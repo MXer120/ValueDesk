@@ -141,8 +141,12 @@
   gap: 8px;
   padding: 10px 12px;
   border-radius: var(--radius-tile);
-  background: var(--bg-panel);
-  box-shadow: var(--shadow-pop), 0 0 0 1px var(--line-soft);
+  /* Never --bg-panel: in the glass look a panel clears it to transparent, and the chart showed
+     through the details. An (almost) opaque card of its own, with the pop-ups' blur behind it. */
+  background: color-mix(in srgb, var(--bg-elevated) 96%, transparent);
+  -webkit-backdrop-filter: var(--glass-pop-blur);
+  backdrop-filter: var(--glass-pop-blur);
+  box-shadow: var(--shadow-modal), 0 0 0 1px var(--line);
   overflow: auto;
 }
 .lqm-det header { display: flex; justify-content: space-between; align-items: center; }
@@ -222,3 +226,28 @@
 .lqm-dot.is-on { background: var(--pos); animation: lqm-pulse 1.6s ease-in-out infinite; }
 @keyframes lqm-pulse { 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .lqm-dot.is-on { animation: none; } }
+
+/* The historical view: cells coloured by size (viridis), the market's candles over them. */
+.lqm-hist { background: #0b0b10; }
+.lqm-hist-px { fill: none; stroke: rgba(247, 247, 247, 0.85); stroke-width: 1.25; }
+.lqm-hist-scale {
+  position: absolute;
+  left: 12px;
+  bottom: 30px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(11, 11, 16, 0.75);
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: auto;
+}
+.lqm-hist-scale i {
+  width: 90px;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, rgba(68, 1, 84, 0.4), rgb(59, 82, 139), rgb(33, 145, 140), rgb(94, 201, 98), rgb(253, 231, 37));
+}

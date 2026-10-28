@@ -182,7 +182,7 @@ export const vsApi = {
   liquidationWallets: (coin: string, venues: readonly Venue[], side: 'long' | 'short', from: number, to: number, signal?: AbortSignal) =>
     unwrap<LiqWallets>(`/api/vs/liquidations/wallets${qs({ coin, venues: venues.join(','), side, from, to })}`, signal),
   /** The levels over time: the indexer's 15-minute snapshots (hourly past 3 days). */
-  liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '7d' | '30d', signal?: AbortSignal) =>
+  liquidationHistory: (coin: string, venues: readonly Venue[], range: '1d' | '2d' | '7d' | '30d', signal?: AbortSignal) =>
     unwrap<LiqHistory>(`/api/vs/liquidations/history${qs({ coin, venues: venues.join(','), range })}`, signal),
 
   /** Every cohort for a set of venues (netted over them), under a sector / coin filter. */
