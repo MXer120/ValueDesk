@@ -94,6 +94,7 @@ import {
   type IndicatorSpec,
 } from '../chart/indicators';
 import { IndicatorLegend } from '../chart/IndicatorLegend';
+import { LIQ_HEAT } from '../chart/liqHeatIndicator';
 import { IndicatorSettings } from '../chart/IndicatorSettings';
 import {
   DRAWING_OVERLAYS,
@@ -546,6 +547,12 @@ export interface ChartProps {
    * Called with the instance once it exists and with null on teardown.
    */
   onChartReady?: (chart: KChart | null) => void;
+  /**
+   * The chart and its controls only - timeframes, scroll, zoom, the scales, the clock - with
+   * nothing of the user's on it: no drawings, studies, news, fills or order lines, and none of
+   * their settings touched (the liquidation heatmap's historical view draws its cells on it).
+   */
+  bare?: boolean;
 
   // --- order lines ----------------------------------------------------------
   // All optional: the chart renders candles perfectly well without any of them,
@@ -605,7 +612,7 @@ function GuardedChart(props: ChartProps) {
 export { GuardedChart as Chart };
 
 function Chart({
-  engine, symbol, sym, onChartReady,
+  engine, symbol, sym, onChartReady, bare = false,
   address = null, unlocked = false, refreshToken = 0, onChanged, onPrice, lastPrice,
 }: ChartProps) {
   const root = useRef<HTMLElement>(null);
@@ -753,7 +760,7 @@ function Chart({
   const [tz, setTz] = useStored<TimeZoneMode>('chart.tz', 'local');
   /** The chart's own layers: position, orders, executions, news (chartMarks.ts). */
   const [storedShow, setStoredShow] = useStored<ChartShow>(SHOW_KEY, sanitizeShow(null));
-  const show = sanitizeShow(storedShow);
+  const show = bare ? { ...sanitizeShow(storedShow), position: false, orders: false, executions: false, news: false, calendar: false } : sanitizeShow(storedShow);
   const showRef = useRef(show);
   showRef.current = show;
   const patchShow = useCallback((p: Partial<ChartShow>) => setStoredShow({ ...showRef.current, ...p }), [setStoredShow]);
@@ -847,7 +854,7 @@ function Chart({
    *  the price axis to 0–10. */
   const [view, setView] = useState<ViewId>('chart');
   /** The object list slides in and out (usePresence keeps it while it leaves). */
-  const side = usePresence(sidebar && view === 'chart', 240);
+  const side = usePresence(sidebar && view === 'chart' && !bare, 240);
   const [ready, setReady] = useState(false);
   /**
    * Which klinecharts instance the effects below are wired to: bumped every
@@ -2501,8 +2508,10 @@ function Chart({
     const c = chart.current;
     if (!ready || !c) return;
     // Idempotent: whatever this instance already carries is taken off first.
-    for (const i of c.getIndicators()) c.removeIndicator({ id: i.id, paneId: i.paneId });
-    const specs = sanitizeSpecs(snapViewRef.current?.indicators ?? storedRef.current, new Set(lib.current?.getSupportedIndicators() ?? []));
+    // Idempotent: whatever this instance already carries is taken off first - but a layer a
+    // caller drew on it (the liquidation heatmap: chart/liqHeatIndicator.ts) is the caller's.
+    for (const i of c.getIndicators()) if (i.name !== LIQ_HEAT) c.removeIndicator({ id: i.id, paneId: i.paneId });
+    const specs = bare ? [] : sanitizeSpecs(snapViewRef.current?.indicators ?? storedRef.current, new Set(lib.current?.getSupportedIndicators() ?? []));
     const out: ActiveIndicator[] = [];
     const paneOf = new Map<string, string>([['main', CANDLE_PANE_ID]]);
     let order = PANE_ORDER_BASE;
@@ -2920,7 +2929,7 @@ function Chart({
       beforeSnap.current = null;
       setIndGen((g) => g + 1);
     }
-    const stored = snapViewRef.current ? parseDrawings(snapViewRef.current.drawings, known) : loadDrawings(key, known);
+    const stored = bare ? [] : snapViewRef.current ? parseDrawings(snapViewRef.current.drawings, known) : loadDrawings(key, known);
     for (const d of stored) {
       const id = c.createOverlay({
         name: d.name,
@@ -4174,7 +4183,7 @@ function Chart({
             )}
           </div>
 
-          <div className="menu">
+          <div className="menu" style={bare ? { display: 'none' } : undefined}>
             <button
               className={openMenu === 'indicators' ? 'kc-tf on' : 'kc-tf'}
               disabled={!ready}
@@ -4338,7 +4347,7 @@ function Chart({
           {/* `kc-fs` only sets it apart from the view group beside it — see
               chart.css. It is not a fifth view, so it does not sit on the
               group's rhythm. */}
-          <div className="menu kc-news-tb" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="menu kc-news-tb" style={bare ? { display: 'none' } : undefined} onMouseDown={(e) => e.stopPropagation()}>
             <button
               type="button"
               className={`kc-ico kc-tb-ico${show.news ? ' on' : ''}`}
@@ -4377,6 +4386,7 @@ function Chart({
             )}
           </div>
           <button
+            style={bare ? { display: 'none' } : undefined}
             type="button"
             className={`kc-ico kc-tb-ico${sidebar ? ' on' : ''}`}
             title={sidebar ? 'Hide the object list' : 'Object list: drawings, indicators, what the chart shows'}
@@ -4421,7 +4431,7 @@ function Chart({
           they come back to. */}
       <div className="kc-body">
       <div className={`chartholder-wrap kc-stage${view === 'chart' ? '' : ' is-parked'}`}>
-        <DrawingRail
+        {!bare && <DrawingRail
           tools={supported.overlays}
           active={drawing}
           onSelect={startDrawing}
@@ -4439,7 +4449,7 @@ function Chart({
           onLock={onLockDrawings}
           hidden={drawHidden || hiddenDrawings.current.size > 0}
           onHide={onHideDrawings}
-        />
+        />}
         {/* Plot column. The footer strip lives in here rather than beside the
             whole stage so the rail keeps the full height of the card — see
             .kc-col in rail.css. */}
@@ -4479,8 +4489,8 @@ function Chart({
         <div ref={holder} className={`chartholder kc-canvas${masked && !keepFrame ? ' kc-masked' : ''}${marking ? ' is-marking' : ''}`} />
         <div ref={marqueeEl} className="kc-marquee" aria-hidden />
         <SelectionMarks chart={ready ? chart.current : null} ids={multi} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
-        <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />
-        {newsLayer.value && (
+        {!bare && <DraftOrderLines chart={ready ? chart.current : null} engine={engine} symbol={symbol} left={holder.current?.offsetLeft ?? 0} top={holder.current?.offsetTop ?? 0} />}
+        {!bare && newsLayer.value && (
           <NewsMarkers
             chart={ready ? chart.current : null}
             marks={newsLayer.value}

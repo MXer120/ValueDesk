@@ -46,7 +46,7 @@ function widgetTab(id: string, c: TradeContext): { content: ReactNode; scroll: P
     case 'indicator': return { content: <IndicatorWidget instance={instance} />, scroll: 'hidden' };
     case 'etfflows': return { content: <EtfFlows instance={instance} />, scroll: 'hidden' };
     case 'funding': return { content: <FundingScanner enabled mode="compact" onOpenSymbol={(s) => c.onSelectSymbol?.(s)} />, scroll: 'auto' };
-    case 'liqmap': return { content: <LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} />, scroll: 'hidden' };
+    case 'liqmap': return { content: <LiqHeatmap symbol={c.symbol} engine={c.engine} instance={instance} address={c.address} />, scroll: 'hidden' };
     case 'sizecalc': return { content: <LiveSizeCalc price={c.price} />, scroll: 'auto' };
     case 'feetier': return { content: <FeeTier address={c.address} engine={c.engine} />, scroll: 'auto' };
     case 'venue': return { content: <Stats address={c.address} showTitle={false} />, scroll: 'auto' };

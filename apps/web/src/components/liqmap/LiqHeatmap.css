@@ -251,3 +251,99 @@
   border-radius: 3px;
   background: linear-gradient(90deg, rgba(68, 1, 84, 0.4), rgb(59, 82, 139), rgb(33, 145, 140), rgb(94, 201, 98), rgb(253, 231, 37));
 }
+
+/* The historical view: the app's own chart (Chart.tsx, bare) filling the body, the heatmap drawn
+   on its candle pane; the colour key and any note sit over its foot-left, clear of the axes. */
+.lqm-hist2 { position: relative; display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; height: 100%; }
+.lqm-hist2 > :first-child { flex: 1 1 auto; min-height: 0; }
+.lqm-hist2-key {
+  position: absolute;
+  left: 12px;
+  bottom: 34px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 90px);
+  pointer-events: none;
+}
+.lqm-hist2-key > * { pointer-events: auto; }
+.lqm-hist2-key .lqm-hist-scale { position: static; }
+.lqm-hist2-note { padding: 3px 7px; border-radius: 6px; background: rgba(11, 11, 16, 0.75); color: var(--muted); font-size: 11px; }
+
+/* "View": wallets and side (WalletView.tsx), the portfolio pages' View panel. */
+.lqm-view {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--panel-line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.lqm-view:hover { color: var(--text); border-color: var(--line); }
+.lqm-view.is-on { color: var(--text); border-color: color-mix(in srgb, var(--pos) 50%, var(--panel-line)); }
+.lqm-view-n { color: var(--dim); font-size: 11px; }
+.lqm-view-search {
+  width: 100%;
+  height: 30px;
+  margin-bottom: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.lqm-view-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; }
+.lqm-view-row {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.lqm-view-row:hover:not(:disabled) { background: rgba(255, 255, 255, 0.05); }
+.lqm-view-row:disabled { opacity: 0.45; cursor: default; }
+.lqm-view-check {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--panel-line);
+  border-radius: 4px;
+  color: var(--pos);
+  font-size: 11px;
+}
+.lqm-view-row.is-on .lqm-view-check { border-color: var(--pos); }
+.lqm-view-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lqm-view-addr { color: var(--dim); font-size: 11px; font-variant-numeric: tabular-nums; }
+.lqm-view-empty { margin: 6px 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+.lqm-view-pos { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; max-height: 220px; overflow-y: auto; }
+.lqm-view-pos li {
+  display: grid;
+  grid-template-columns: 1fr auto auto 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.lqm-view-pos li.is-long > span:nth-child(2) { color: var(--neg); }
+.lqm-view-pos li.is-short > span:nth-child(2) { color: var(--pos); }
+.lqm-view-who { display: inline-flex; align-items: center; gap: 5px; color: var(--text); font-weight: 600; }
+.lqm-view-dist { color: var(--dim); text-align: right; }

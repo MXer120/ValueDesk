@@ -455,7 +455,7 @@ export const TRADE_PANELS: PanelDefinition<TradeContext>[] = [
         if (id === 'fedwatch') return <FedWatch />;
         if (id === 'indicator') return <IndicatorWidget />;
         if (id === 'etfflows') return <EtfFlows />;
-        if (id === 'liqmap') return <LiqHeatmap symbol={c.symbol} engine={c.engine} />;
+        if (id === 'liqmap') return <LiqHeatmap symbol={c.symbol} engine={c.engine} address={c.address} />;
         if (id === 'news') return <NewsFeed {...newsProps(c)} />;
         if (quick) {
           return (
