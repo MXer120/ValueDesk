@@ -36,7 +36,7 @@ export const LICENSES: LegalDoc = {
             '**Reown AppKit and WalletConnect** (wallet connection), under the Reown Community License and the WalletConnect Community License. Portions © 2025 Reown, Inc. All Rights Reserved. The licences\' full text is in the file above.',
             '**Fonts:** Asap, IBM Plex Sans and Space Grotesk, under the SIL Open Font License 1.1, served from this site.',
             '**Charts:** KLineChart, under the Apache License 2.0.',
-            '**Speech recognition** (the Fed live transcript, run in your browser): the Moonshine tiny model, © 2025 Useful Sensors, Inc. (dba Moonshine AI), under the [MIT licence](https://github.com/moonshine-ai/moonshine/blob/main/LICENSE); served from this site, with the licence text beside the model files (/models/onnx-community/moonshine-tiny-ONNX/LICENSE).',
+            '**Speech recognition** (the Fed live transcript, run in your browser): the Moonshine tiny model, © 2025 Useful Sensors, Inc. (dba Moonshine AI), under the [MIT licence](https://github.com/moonshine-ai/moonshine/blob/main/LICENSE); served from this site, with the licence text beside the model files (/models/onnx-community/moonshine-tiny-ONNX/LICENSE.txt).',
             '**Everything else** - React, ethers, viem, the noble cryptography libraries and the rest - under the MIT, Apache 2.0, BSD or ISC licences; see the file.',
           ],
         },

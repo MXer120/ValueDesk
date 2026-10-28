@@ -20,9 +20,9 @@ for f in config.json generation_config.json preprocessor_config.json special_tok
   curl -fsSL --retry 3 -o "$out/$f" "https://huggingface.co/$repo/resolve/$rev/$f"
 done
 # MIT asks for its notice with every copy, and the site serves the weights: the licence goes
-# next to them (served as /models/onnx-community/moonshine-tiny-ONNX/LICENSE, named on /licenses).
+# next to them (served as /models/onnx-community/moonshine-tiny-ONNX/LICENSE.txt, named on /licenses; .txt because the Vercel packaging refuses a file without an extension).
 # The English Tiny model is MIT (github.com/moonshine-ai/moonshine LICENSE, section 1; read 2026-10-28).
-cat > "$out/LICENSE" <<'EOF'
+cat > "$out/LICENSE.txt" <<'EOF'
 Moonshine tiny (English speech recognition), ONNX export onnx-community/moonshine-tiny-ONNX
 (https://huggingface.co/onnx-community/moonshine-tiny-ONNX), base model UsefulSensors/moonshine-tiny
 (https://huggingface.co/UsefulSensors/moonshine-tiny), from https://github.com/moonshine-ai/moonshine.
