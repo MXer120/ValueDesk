@@ -94,6 +94,8 @@ export const MIX_STEP_MS = 60 * 60_000;
 const SERIES_KEEP_MS = 35 * DAY_MS;
 /** Queued reads per venue at a time: the plan tops the queue up every minute. */
 const QUEUE_CAP = 400;
+/** An archive holder's notional from which its first read ranks with a trader's (USD). */
+const SEED_BONUS_MIN = 1_000;
 /** Coins kept per cohort in the hourly mix. */
 const MIX_COINS = 120;
 
@@ -1129,8 +1131,11 @@ export class CohortTracker {
           if (venue === 'hyperliquid') totals.set(address, m?.equity ?? null);
         };
         if (!book) {
-          // Never read: one the stream saw trade, or one the archive found holding, before any re-read.
-          push(1_000 + size + (traded || this.seeds.get(venue)?.has(address) ? 300 : 0));
+          // Never read: one the stream saw trade, or one the archive found holding $1K or more, before
+          // any re-read. Dust from the archive (13.9k wallets under $33, 2026-10-28) waits its turn: with
+          // the bonus it outranked the books still missing liquidation data, and the history rebuild,
+          // paused until those are read, never ran.
+          push(1_000 + size + (traded || (this.seeds.get(venue)?.get(address) ?? 0) >= SEED_BONUS_MIN ? 300 : 0));
           return;
         }
         const age = now - book.at;
