@@ -281,7 +281,7 @@ test('Arcus prints: side is the taker\'s, timestamps are µs, addresses lower-ca
     marketDisplayName: 'BTC-USD', side: 'SELL', price: '100', size: '2', tradeId: '9', timestamp: 1_000_000_500,
     makerAddress: '0xAA', takerAddress: '0xBB',
   });
-  assert.deepEqual(p, { venue: 'arcus', id: '9', t: 1_000_000, symbol: 'BTC-USD', px: 100, sz: 2, buyer: '0xaa', seller: '0xbb' });
+  assert.deepEqual(p, { venue: 'arcus', id: '9', t: 1_000_000, symbol: 'BTC-USD', px: 100, sz: 2, buyer: '0xaa', seller: '0xbb', taker: 'seller' });
   assert.equal(arcusPrint({ marketDisplayName: 'BTC-USD', price: '1', size: '1', tradeId: '1', timestamp: 1 }), null);
 });
 

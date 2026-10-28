@@ -301,7 +301,8 @@ export function fillCash(book: FillBook, symbol: string, d: number, px: number):
  * base taker rate is 0.09% of the notional, a liquidation price's whole 0.1% tolerance.
  */
 export function feeCash(book: FillBook & { equity?: number | null }, symbol: string, fee: number): void {
-  if (!(fee > 0)) return;
+  // Negative: a maker rebate, paid in.
+  if (!fee || !Number.isFinite(fee)) return;
   const cur = book.pos.get(symbol);
   if (cur && cur.iso !== undefined) { if (cur.iso !== null) cur.iso -= fee; }
   else if (book.cash !== undefined && book.cash !== null) book.cash -= fee;

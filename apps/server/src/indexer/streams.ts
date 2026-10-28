@@ -41,6 +41,8 @@ export interface Print {
   seller: string;
   /** Which party took liquidity, where the venue says (Hyperliquid's `side`): it pays the taker fee, the other the maker's. */
   taker?: 'buyer' | 'seller';
+  /** What each party paid (USD; negative = a rebate), where the trade itself says (Lighter). */
+  fee?: { buyer: number; seller: number };
 }
 
 const PING_MS = 30_000;
@@ -270,6 +272,8 @@ interface SodexWsTrade {
   q?: string;
   bi?: number;
   si?: number;
+  /** The taker's side: BUY or SELL. */
+  S?: string;
 }
 
 async function sodexSymbols(engine: 'perps' | 'spot'): Promise<string[]> {
@@ -287,7 +291,9 @@ export function sodexPrint(t: SodexWsTrade): Print | null {
   const px = Number(t.p);
   const sz = Number(t.q);
   if (!(px > 0) || !(sz > 0) || !Number.isInteger(t.bi) || !Number.isInteger(t.si)) return null;
-  return { venue: 'sodex', id: `${t.s}:${t.t}`, t: t.T, symbol: t.s, px, sz, buyer: String(t.bi), seller: String(t.si) };
+  // `S` is the taker's side, as on Hyperliquid and Arcus.
+  const taker = t.S === 'BUY' ? 'buyer' as const : t.S === 'SELL' ? 'seller' as const : undefined;
+  return { venue: 'sodex', id: `${t.s}:${t.t}`, t: t.T, symbol: t.s, px, sz, buyer: String(t.bi), seller: String(t.si), ...(taker ? { taker } : {}) };
 }
 
 export class SodexStream {
@@ -367,6 +373,7 @@ export function arcusPrint(t: ArcusWsTrade): Print | null {
     sz,
     buyer: takerBuys ? taker : maker,
     seller: takerBuys ? maker : taker,
+    taker: takerBuys ? 'buyer' : 'seller',
   };
 }
 
@@ -423,6 +430,10 @@ interface LighterWsTrade {
   ask_account_id?: number;
   bid_account_id?: number;
   timestamp?: number;
+  /** Whether the ask (seller) made the book; each side's fee in millionths of the notional (taker_fee absent = 0). */
+  is_maker_ask?: boolean;
+  maker_fee?: number;
+  taker_fee?: number;
 }
 
 /** Both parties are ACCOUNT INDICES (sub-accounts); the venue maps them to L1 addresses. */
@@ -434,7 +445,14 @@ export function lighterPrint(t: LighterWsTrade, symbolOf: (marketId: number) => 
   if (!Number.isInteger(t.ask_account_id) || !Number.isInteger(t.bid_account_id)) return null;
   const symbol = symbolOf(t.market_id);
   if (!symbol) return null;
-  return { venue: 'lighter', id, t: t.timestamp, symbol, px, sz, buyer: String(t.bid_account_id), seller: String(t.ask_account_id) };
+  const ntl = px * sz;
+  const makerFee = (Number(t.maker_fee) || 0) * 1e-6 * ntl;
+  const takerFee = (Number(t.taker_fee) || 0) * 1e-6 * ntl;
+  const sellerMakes = t.is_maker_ask === true;
+  return {
+    venue: 'lighter', id, t: t.timestamp, symbol, px, sz, buyer: String(t.bid_account_id), seller: String(t.ask_account_id),
+    ...(typeof t.is_maker_ask === 'boolean' ? { taker: sellerMakes ? 'buyer' as const : 'seller' as const, fee: { buyer: sellerMakes ? takerFee : makerFee, seller: sellerMakes ? makerFee : takerFee } } : {}),
+  };
 }
 
 /**

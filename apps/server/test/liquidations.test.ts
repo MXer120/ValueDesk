@@ -292,6 +292,8 @@ test('a fill fee comes out of the cross cash, or out of an isolated position mar
   assert.equal(book.equity, 10_000 - 36 - 2.7);
   feeCash(book, 'SOL', 1); // a new position opens cross
   assert.equal(book.cash, 9_963);
+  feeCash(book, 'SOL', -0.5); // a maker rebate
+  assert.equal(book.cash, 9_963.5);
   const unknown: FillBook = { cash: null, pos: new Map() };
   feeCash(unknown, 'BTC', 5);
   assert.equal(unknown.cash, null, 'an unknown cash stays unknown');

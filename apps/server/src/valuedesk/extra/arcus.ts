@@ -127,6 +127,8 @@ export interface ArcusFill {
   fee: number | null;
   closedPnl: number | null;
   orderId: string | null;
+  /** MAKER or TAKER (feeRates.ts learns an account's rates from them). */
+  role?: 'MAKER' | 'TAKER' | null;
 }
 
 /** Fills newest first; `from`/`to` in ms. */
@@ -152,6 +154,7 @@ export async function arcusFills(address: string, o: { from?: number; to?: numbe
       // as Hyperliquid reports it, so an open is not a losing close and PnL - fee is net.
       closedPnl: grossPnl(num(f.closedPnl), num(f.fee), String(f.positionEffect ?? '')),
       orderId: typeof f.orderId === 'string' ? f.orderId : null,
+      role: f.role === 'MAKER' || f.role === 'TAKER' ? f.role : null,
     }];
   });
 }

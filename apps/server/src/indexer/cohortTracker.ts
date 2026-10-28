@@ -75,6 +75,7 @@ import {
 import type { BookPosition, CohortPnlRow } from './store.js';
 import { accountLiqs, addDrift, calibrate, emptyDrift, feeCash, fillCash, fundingCash, type DriftStats, type Tiers } from '../valuedesk/liquidations/math.js';
 import { hlInfo } from '../valuedesk/hyperliquid/index.js';
+import { ARCUS_FEES_COST, ASK_MIN_USD, BASE_FEES, FEES_TTL_MS, HL_FEES_COST, SODEX_FEES_COST, arcusFees, fillRate, hlFees, sodexFees, spotSellRate, xyzScales, type FeeRates, type MarketScale } from './feeRates.js';
 import { marketsNow, setRulesPacers, venueMarkets } from '../valuedesk/liquidations/rules.js';
 import { liqCoin, snapOfNow } from '../valuedesk/liquidations/levels.js';
 import { LiqLive } from '../valuedesk/liquidations/live.js';
@@ -121,6 +122,13 @@ const MEMBERS_KEPT_MIN = 0.8;
 const MODE_READ_COST = 20;
 const MODE_PRIO = 960;
 const HL_MODE_MAX = 300_000;
+/** Accounts kept in the fee maps at most (cleared past it). */
+const TRADED_MAX = 400_000;
+/** Where a newly opened market's margin mode is the account's choice, and how soon its book is read again. */
+const OPENED_REREAD: ReadonlySet<Venue> = new Set(['hyperliquid', 'tradexyz', 'sodex']);
+const OPENED_REREAD_MS = 2 * 60_000;
+/** A trade.xyz market whose terms are not read yet: the usual xyz market's (scale 1, growth mode). */
+const XYZ_SCALE_UNKNOWN: MarketScale = { scale: 1, growth: true };
 /** A beat's budget for `pending` changed accounts: the base, doubled from 10k waiting on. */
 const liveBudget = (pending: number): number => (pending > 10_000 ? LIVE_BUDGET_MAX_MS : LIVE_BUDGET_MS);
 export const LIQ_NOW_MS = 2 * 60_000;
@@ -273,6 +281,8 @@ export interface Book {
   cash?: number | null;
   /** A read that could not be priced (the venue's margin rules were not loaded yet): read again soon. */
   liqMiss?: boolean;
+  /** A market it did not hold was opened since the read (its margin mode and leverage are unknown): read again soon. */
+  opened?: boolean;
   /** When the snapshot was read. */
   at: number;
   /** Hyperliquid: a unified account's stablecoin collateral (model.ts perpEquity), when the read looked. */
@@ -304,18 +314,6 @@ export function applyFill(book: Book, symbol: string, d: number, px: number): vo
   book.pos.set(symbol, { ...cur, szi: n, entry });
 }
 
-/**
- * The fee a fill pays (share of its notional) where the venue says who took liquidity: the base
- * tier's, measured 2026-10-28 on Hyperliquid's own fills (taker 4.32-4.5 bp, maker 1.2-1.5 bp;
- * trade.xyz's growth-mode markets ~0.3-0.9 bp taker, makers ~0). A lower tier or a builder fee
- * on top is not seen: re-reads correct those. Spot: only the seller pays in USDC (a buyer pays
- * in the coin it receives).
- */
-export const FILL_FEE: Partial<Record<Venue, { taker: number; maker: number }>> = {
-  hyperliquid: { taker: 4.5e-4, maker: 1.5e-4 },
-  tradexyz: { taker: 0.45e-4, maker: 0 },
-};
-export const SPOT_SELL_FEE = { taker: 7e-4, maker: 4e-4 };
 
 /** Which prints move which venue's books: spot never, and a HIP-3 market only its own dex's book. */
 function bookable(venue: Venue, symbol: string): boolean {
@@ -466,6 +464,11 @@ export class CohortTracker {
   private hlMode = new Map<string, 'unified' | 'classic'>();
   /** Spot cash an account traded while its mode was being asked. */
   private spotPending = new Map<string, number>();
+  /** Per venue|address: the account's own fee rates once asked (feeRates.ts); traded since the last ask. */
+  private feeRates = new Map<string, FeeRates>();
+  private traded = new Map<string, number>();
+  /** trade.xyz market -> its fee terms. */
+  private xyzScale = new Map<string, MarketScale>();
 
   /** SoDEX's list, as its markets read gives it; books holding a coin new to it are priced in. */
   /** The spot pairs quoted in USDC, by the names the trades stream uses (`@107`, `PURR/USDC`). */
@@ -606,6 +609,8 @@ export class CohortTracker {
     every(60_000, () => this.recordLiq(), 'coh:liq');
     every(30_000, () => this.fundingTick(), 'coh:funding');
     every(6 * 60 * 60_000, () => this.loadSpotPairs(), 'coh:spot');
+    every(60 * 60_000, () => this.loadXyzScales(), 'coh:xyzfees');
+    void this.loadXyzScales().catch((e) => (this.lastError = `xyz fee terms: ${String(e)}`));
     void this.loadSpotPairs().catch((e) => (this.lastError = `spot pairs: ${String(e)}`));
     // The live engine: every book in at the start (priced a few thousand a second), then what changes.
     for (const v of VENUES) for (const [a, b] of this.books.get(v) ?? []) if (b.pos.size) this.live.touch(v, a);
@@ -633,7 +638,6 @@ export class CohortTracker {
   onPrint(p: Print, addressOf: (acct: string) => string | null): void {
     if (p.venue === 'hyperliquid' && (p.symbol.startsWith('@') || p.symbol.includes('/'))) { this.onSpotPrint(p); return; }
     if (!bookable(p.venue, p.symbol)) return;
-    const fees = p.taker ? FILL_FEE[p.venue] : undefined;
     const mk = `${p.venue}|${p.symbol}`;
     this.marks.set(mk, p.px);
     this.noteCoinPx(mk, p.px);
@@ -650,7 +654,8 @@ export class CohortTracker {
         if (!this.wanted.has(k)) this.wanted.set(k, this.d.now());
         continue;
       }
-      if (fees) feeCash(book, p.symbol, p.sz * p.px * ((d > 0) === (p.taker === 'buyer') ? fees.taker : fees.maker));
+      if (!book.pos.has(p.symbol) && OPENED_REREAD.has(p.venue)) book.opened = true;
+      feeCash(book, p.symbol, this.fillFee(p, address, d > 0));
       applyFill(book, p.symbol, d, p.px);
       this.live.touch(p.venue, address);
       this.dirtyBooks.add(`${p.venue}|${address}`);
@@ -675,7 +680,7 @@ export class CohortTracker {
     for (const [address, buys] of [[p.buyer, true], [p.seller, false]] as const) {
       const book = books.get(address);
       if (!book || book.cash == null) continue;
-      const fee = buys || !p.taker ? 0 : ntl * ((p.taker === 'seller') ? SPOT_SELL_FEE.taker : SPOT_SELL_FEE.maker);
+      const fee = buys || !p.taker ? 0 : ntl * spotSellRate(this.feeRates.get(`hyperliquid|${address}`) ?? BASE_FEES.hyperliquid, p.taker === 'seller');
       const delta = buys ? -ntl : ntl - fee;
       const mode = this.hlMode.get(address);
       if (mode === 'classic') continue;
@@ -683,6 +688,60 @@ export class CohortTracker {
       this.spotPending.set(address, (this.spotPending.get(address) ?? 0) + delta);
       this.askMode(address);
     }
+  }
+
+  /**
+   * What one side of a print paid (USD): the trade's own figure where it has one (Lighter), else
+   * the account's rate for its role (feeRates.ts) - asked of the venue once it trades enough -
+   * else the venue's base tier. trade.xyz is a Hyperliquid account's: its rates, the market's scale.
+   */
+  private fillFee(p: Print, address: string, buys: boolean): number {
+    if (p.fee) return buys ? p.fee.buyer : p.fee.seller;
+    if (!p.taker) return 0;
+    const ntl = p.sz * p.px;
+    const acct: Venue = p.venue === 'tradexyz' ? 'hyperliquid' : p.venue;
+    const r = this.feeRates.get(`${acct}|${address}`) ?? BASE_FEES[p.venue];
+    this.noteTraded(acct, address, ntl);
+    return ntl * fillRate(r, (p.taker === 'buyer') === buys, p.venue === 'tradexyz' ? this.xyzScale.get(p.symbol) ?? XYZ_SCALE_UNKNOWN : null);
+  }
+
+  /** An account that traded ASK_MIN_USD since its rates were last asked (a day ago at least) is asked again. */
+  private noteTraded(acct: Venue, address: string, ntl: number): void {
+    const min = ASK_MIN_USD[acct];
+    if (!min) return;
+    const key = `${acct}|${address}`;
+    const t = (this.traded.get(key) ?? 0) + ntl;
+    const r = this.feeRates.get(key);
+    if (t < min || (r && this.d.now() - r.at < FEES_TTL_MS)) {
+      if (this.traded.size > TRADED_MAX) this.traded.clear();
+      this.traded.set(key, t);
+      return;
+    }
+    this.traded.delete(key);
+    const lane = acct === 'sodex' ? this.scoh : acct === 'arcus' ? this.d.arcus.lane : this.hlc;
+    const k = `cohfee:${key}`;
+    if (lane.has(k)) return;
+    lane.add({
+      key: k,
+      prio: MODE_PRIO,
+      run: async () => {
+        const now = this.d.now();
+        const got = acct === 'sodex' ? await sodexFees(address, now)
+          : acct === 'arcus' ? await arcusFees(address, now, this.d.arcus.pacer)
+            : await hlFees(address, now);
+        if (got) {
+          if (this.feeRates.size > TRADED_MAX) this.feeRates.clear();
+          this.feeRates.set(key, got);
+        }
+        return acct === 'sodex' ? SODEX_FEES_COST : acct === 'arcus' ? ARCUS_FEES_COST : HL_FEES_COST;
+      },
+    });
+  }
+
+  /** trade.xyz's markets' fee terms (deployerFeeScale, growth mode). */
+  private async loadXyzScales(): Promise<void> {
+    const m = await xyzScales();
+    if (m.size) this.xyzScale = m;
   }
 
   private spotCash(address: string, book: Book, delta: number): void {
@@ -1269,6 +1328,10 @@ export class CohortTracker {
           return;
         }
         const age = now - book.at;
+        // A market it did not hold opened since the read: cross or isolated, and at what leverage, is
+        // the venue's to say - booked as cross until then, which moved trade.xyz books' cash by
+        // thousands (most of its markets are isolated). Read again within minutes.
+        if (book.opened && age >= OPENED_REREAD_MS) { push(970 + size); return; }
         // Lighter prints name sub-accounts: a book follows them only once its indices are known.
         const follows = streamed && (venue !== 'lighter' || (this.d.lighter.known?.(address) ?? false));
         // Read before the books kept liquidation prices (2026-10-25): once, the most leveraged first -
