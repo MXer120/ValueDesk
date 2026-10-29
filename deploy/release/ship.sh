@@ -419,7 +419,9 @@ if [ "$MOVE_MAIN" = 1 ]; then
       sleep 15
     done
     [ "$state" = success ] || die "the web's Production deployment is '${state:-not there}' after 15 minutes (Vercel dashboard)"
-    code="$(curl -s -o /dev/null -w '%{http_code}' --limit-rate 2M --max-time 20 "$SITE/")"
+    # Into a file of our own: with MSYS_NO_PATHCONV (lib.sh) Windows curl takes /dev/null literally and fails (23).
+    code="$(curl -s -o "$OUT_DIR/site-check.html" -w '%{http_code}' --limit-rate 2M --max-time 20 "$SITE/" || true)"
+    rm -f "$OUT_DIR/site-check.html"
     [ "$code" = 200 ] || die "$SITE answers $code after the deployment"
     note "web live on $SITE"
   fi
