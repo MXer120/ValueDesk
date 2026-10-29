@@ -372,7 +372,12 @@ test('the key file is in no release, no backup and not in the repository', () =>
   const ignore = readFileSync(join(root, '.gitignore'), 'utf8').split(/\r?\n/).map((l) => l.trim());
   for (const pattern of ['builder-terms.key*', 'builder-tiers.json', '*.key', '*.pem', '*.db', '*.db-wal', '*.db-shm']) assert.ok(ignore.includes(pattern), `.gitignore lists ${pattern}`);
   // A server release is `git archive` of a tag - never the working tree - and is refused if it holds a key anyway.
-  const release = readFileSync(join(root, 'deploy', 'release', 'release-server.sh'), 'utf8');
+  // Both ways to release build it the same way: lib.sh server_tarball (release-server.sh and ship.sh).
+  for (const f of ['release-server.sh', 'ship.sh']) {
+    assert.match(readFileSync(join(root, 'deploy', 'release', f), 'utf8'), /server_tarball "\$TAG"/, `${f} builds the tarball with server_tarball`);
+  }
+  const lib = readFileSync(join(root, 'deploy', 'release', 'lib.sh'), 'utf8');
+  const release = lib.slice(lib.indexOf('server_tarball() {'));
   assert.match(release, /git archive /);
   const guard = /grep -E '([^']+)'/.exec(release.split('\n').find((l) => l.includes('tar -tzf')) ?? '');
   assert.ok(guard, 'the release looks through its tarball');

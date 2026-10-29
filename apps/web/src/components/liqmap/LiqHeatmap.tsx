@@ -539,6 +539,8 @@ function LiveView({ h: base, unit, res, streamK, onWant, onPick, pick }: { h: He
 
 const TF_POLL: Record<Tf, number> = { '1m': 10_000, '5m': 20_000, '15m': 30_000, '1h': 60_000, '4h': 60_000, '1D': 120_000 };
 const CANDLES = 500;
+/** Where the chart view starts: four empty slots right of the newest candle. */
+const CHART_BACK = -4;
 
 function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, onPick, pick }: { h: Heat; unit: Unit; res: Res; streamK: number; onWant: (k: number) => void; engine: Engine; symbol: string; tf: Tf; onPick: (p: Pick) => void; pick: Pick | null }) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
@@ -548,13 +550,17 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   const k = usePolled<Kline[]>(`${engine}|${symbol}|${tf}`, () => api.klines(engine, symbol, tf, CANDLES).then((r) => r.klines), TF_POLL[tf]);
   const candles = useMemo(() => (k.data ?? []).map((c) => ({ t: c.t, o: +c.o, h: +c.h, l: +c.l, c: +c.c })).filter((c) => c.h > 0).sort((a, b) => a.t - b.t), [k.data]);
   const cum = useMemo(() => cumulative(base, unit), [base, unit]);
-  /** Candles shown, and how many back from the newest the view ends. */
+  /**
+   * Candle slots shown, and how many slots back from the newest the view ends: below zero the
+   * view runs past the newest candle into empty slots, as far as most of the width - room on the
+   * right to see the levels next to the price; dragging moves it either way.
+   */
   const [span, setSpan] = useState(120);
-  const [back, setBack] = useState(0);
+  const [back, setBack] = useState(CHART_BACK);
   /** The price axis: null follows the candles shown. */
   const [yv, setYv] = useState<[number, number] | null>(null);
   const [profMax, setProfMax] = useState<number | null>(null);
-  useEffect(() => { setYv(null); setBack(0); setProfMax(null); }, [base.coin, tf]);
+  useEffect(() => { setYv(null); setBack(CHART_BACK); setProfMax(null); }, [base.coin, tf]);
   const p = base.price!;
   const R = Math.min(240, Math.max(130, w * 0.28));
   const ML = 8;
@@ -565,11 +571,16 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   const cw = Math.max(1, W - R);
   const n = candles.length;
   const nShow = Math.max(10, Math.min(Math.max(10, n), Math.round(span)));
-  const end = Math.max(0, Math.min(n, n - Math.round(back)));
-  const vis = candles.slice(Math.max(0, end - nShow), end);
-  // The candles run the whole width up to the price axis, over the profile (two slots kept free at
-  // the axis), so the newest stay in sight next to the levels instead of ending where the profile starts.
-  const slot = W / (nShow + 2);
+  // The window in candle slots, [start, end): end past n is empty slots after the newest candle. The
+  // candles run the whole width up to the price axis, over the profile, wherever the view is moved.
+  const end = n - back;
+  const start = end - nShow;
+  const first = Math.max(0, Math.floor(start));
+  const vis = candles.slice(first, Math.max(first, Math.min(n, Math.ceil(end))));
+  const slot = W / nShow;
+  /** The middle of candle slot `i` (an index into `candles`). */
+  const xAt = (i: number) => ML + slot * (i - start + 0.5);
+  const panBack = (b: number) => Math.max(-Math.floor(nShow * 0.85), Math.min(Math.max(0, n - 10), b));
   // The price axis by default: the candles shown with room either side (12% of the price), so the levels near the price show.
   let aLo = p * 0.88;
   let aHi = p * 1.12;
@@ -618,7 +629,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
   const drag = useDrag((dx, dy, start) => {
     setHover(null);
     if (start.x > ML + W) { zoomY(Math.exp(dy / 150)); return; }
-    setBack((b) => Math.max(0, Math.min(Math.max(0, n - 10), b + dx / slot)));
+    setBack((b) => panBack(b + dx / slot));
     const d = (dy / H) * (hi - lo);
     setYv([lo + d, hi + d]);
   }, (px, py) => {
@@ -635,7 +646,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
     if (px < ML + cw - 4 || px > ML + W || py < M.t || py > M.t + H) { setHover(null); return; }
     setHover(Math.floor(priceAt(py) / h.step) * h.step);
   };
-  const reset = () => { setYv(null); setBack(0); setSpan(120); setProfMax(null); };
+  const reset = () => { setYv(null); setBack(CHART_BACK); setSpan(120); setProfMax(null); };
   const hb = hover !== null ? h.buckets.find((b) => Math.abs(b[0] - hover) < h.step / 2) ?? null : null;
   return (
     <div
@@ -675,7 +686,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
             {shortA && <path d={shortA.line} className="lqm-cum is-short" />}
             {longA && <path d={longA.line} className="lqm-cum is-long" />}
             {vis.map((c, i) => {
-              const xc = ML + slot * (i + 0.5);
+              const xc = xAt(first + i);
               const up = c.c >= c.o;
               return (
                 <g key={c.t} className={up ? 'lqm-up' : 'lqm-down'}>
@@ -689,7 +700,7 @@ function ChartView({ h: base, unit, res, streamK, onWant, engine, symbol, tf, on
           </g>
           {vis.length > 0 && ticks(0, vis.length - 1, Math.max(2, Math.floor((slot * vis.length) / 90))).map((i) => {
             const c = vis[Math.round(i)];
-            return c ? <text key={`t${i}`} x={ML + slot * (Math.round(i) + 0.5)} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtT(c.t)}</text> : null;
+            return c ? <text key={`t${i}`} x={xAt(first + Math.round(i))} y={M.t + H + 16} className="lqm-ax" textAnchor="middle">{fmtT(c.t)}</text> : null;
           })}
           {p >= lo && p <= hi && (
             <g transform={`translate(${ML + W + 2},${y(p) - 9})`}>
