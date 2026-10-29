@@ -7399,10 +7399,10 @@ var perpsUpdateLeverage = (accountID, symbolID, leverage, marginMode) => ({
   leverage: u64(leverage, "leverage"),
   marginMode
 });
-var perpsUpdateMargin = (accountID, symbolID, amount) => ({
+var perpsUpdateMargin = (accountID, symbolID, amount2) => ({
   accountID: u64(accountID, "accountID"),
   symbolID: u64(symbolID, "symbolID"),
-  amount: canonicalDecimal(amount)
+  amount: canonicalDecimal(amount2)
 });
 var replaceOrder = (accountID, orders) => ({
   accountID: u64(accountID, "accountID"),
@@ -7487,7 +7487,7 @@ var perpsActions = {
   replaceOrder: (accountID, orders) => act("perps", "replaceOrder", replaceOrder(accountID, orders)),
   scheduleCancel: (accountID, scheduledTimestamp) => act("perps", "scheduleCancel", scheduleCancel(accountID, scheduledTimestamp)),
   updateLeverage: (accountID, symbolID, leverage, marginMode) => act("perps", "updateLeverage", perpsUpdateLeverage(accountID, symbolID, leverage, marginMode)),
-  updateMargin: (accountID, symbolID, amount) => act("perps", "updateMargin", perpsUpdateMargin(accountID, symbolID, amount)),
+  updateMargin: (accountID, symbolID, amount2) => act("perps", "updateMargin", perpsUpdateMargin(accountID, symbolID, amount2)),
   transferAsset: (i) => act("perps", "transferAsset", transferAsset(i)),
   newTwapOrder: (i) => act("perps", "newTwapOrder", newTwapOrder(i)),
   cancelTwapOrder: (accountID, symbolID, orderID) => act("perps", "cancelTwapOrder", cancelTwapOrder(accountID, symbolID, orderID))
@@ -9543,6 +9543,24 @@ var SodexClient = class {
   async follower(address, now = Date.now()) {
     return followerFromState(await this.perpsState(address), now);
   }
+  /**
+   * The account's fills on one market since `since` (GET .../trades, weight 25: read only when
+   * a copied position changed outside the copier). SoDEX's own fills carry their origin in the
+   * client order id: a liquidation is "liquidation:<id>" (docs/research/07 G7), the copier's
+   * stops "vds-...".
+   */
+  async fills(address, symbol2, since) {
+    const path = `/api/v1/perps/accounts/${address.toLowerCase()}/trades?symbol=${encodeURIComponent(symbol2)}&startTime=${Math.max(0, Math.floor(since))}&limit=100`;
+    const rows2 = await this.get(path, weightFor(path, 100));
+    const list = Array.isArray(rows2) ? rows2 : rows2?.trades ?? [];
+    return list.filter((r) => !r.symbol || r.symbol === symbol2).map((r) => ({
+      clOrdID: typeof r.clOrdID === "string" && r.clOrdID ? r.clOrdID : null,
+      side: String(r.side).toUpperCase() === "SELL" ? "sell" : "buy",
+      qty: Number(r.quantity) || 0,
+      price: Number(r.price) || 0,
+      time: Number(r.time) || 0
+    })).filter((f) => !f.time || f.time >= since - 1e3);
+  }
   /** Leader positions on SoDEX, symbol -> signed size, plus equity. */
   async leaderPositions(address) {
     const st = await this.perpsState(address);
@@ -11576,6 +11594,9 @@ function algoNotice(a, status, reason, at = Date.now()) {
       return null;
   }
 }
+function algoClosedNotice(a, body, at = Date.now()) {
+  return mk({ owner: a.owner, source: "algo", ref: a.id, kind: "closed", grade: "error", title: `${algoName(a)}: position closed outside it`, body, at, paper: !!a.spec.paper });
+}
 function copyNotice(s, status, reason, at = Date.now()) {
   const body = reason ?? "";
   const who = leaderShort(s);
@@ -11602,7 +11623,22 @@ function copyClosedNotice(s, symbol2, why, detail, at = Date.now()) {
     ref: `${s.id}:${symbol2}`,
     kind: "closed",
     grade: byStop ? "info" : "error",
-    title: `${symbol2} closed in the copy of ${who}`,
+    title: why === "liquidation" ? `${symbol2} liquidated in the copy of ${who}` : `${symbol2} closed in the copy of ${who}`,
+    body: detail,
+    at,
+    paper: !!s.settings.paper
+  });
+}
+function copyReducedNotice(s, symbol2, why, detail, at = Date.now()) {
+  const who = leaderShort(s);
+  const grade = why === "liquidation" ? "error" : why === "stop-loss" || why === "take-profit" ? "info" : "warn";
+  return mk({
+    owner: s.owner,
+    source: "copy",
+    ref: `${s.id}:${symbol2}`,
+    kind: "reduced",
+    grade,
+    title: why === "liquidation" ? `${symbol2} partly liquidated in the copy of ${who}` : `${symbol2} made smaller in the copy of ${who}`,
     body: detail,
     at,
     paper: !!s.settings.paper
@@ -11660,6 +11696,9 @@ var HL_COINS_REFRESH_MS = 10 * 6e4;
 var HL_COINS_RETRY_MS = 3e4;
 var HL_MAX_COINS = 990;
 var PENDING_MS = 3e4;
+var RECENT_ORDERS_MS = 10 * 6e4;
+var FILLS_SLACK_MS = 6e4;
+var amount = (n) => String(Number(n.toPrecision(6)));
 var CONFIRM_UNAVAILABLE = '"Ask me each time" needs a copier that can ask you (the browser copier). Choose automatic approval to copy here.';
 var QUIET_SKIPS = /* @__PURE__ */ new Set(["duplicate", "at-target", "no-follower-position", "spot-not-copied"]);
 var lk = (l) => `${l.venue}:${l.address.toLowerCase()}`;
@@ -11687,6 +11726,12 @@ var CopyRuntime = class {
   pending = [];
   /** `${subId}|${symbol}` -> the last order that opened or added, so a fill the stream missed is still adopted. */
   recentGrow = /* @__PURE__ */ new Map();
+  /**
+   * `${subId}|${symbol}` -> the copier's reduce-only orders sent there lately and what of each the
+   * stream has not shown filled: a position found smaller by that much is the copier's own
+   * reduction (its fill missed), not one made outside it.
+   */
+  recentShrink = /* @__PURE__ */ new Map();
   leverageSet = /* @__PURE__ */ new Map();
   refreshTimers = /* @__PURE__ */ new Map();
   stopTimers = /* @__PURE__ */ new Map();
@@ -12156,6 +12201,10 @@ var CopyRuntime = class {
         });
       } else if (r.ok || r.outcomeUnknown) {
         if (!it.reduceOnly) this.recentGrow.set(`${s.id}|${it.symbol}`, { side: it.side, at: Date.now() });
+        else {
+          const k = `${s.id}|${it.symbol}`;
+          this.recentShrink.set(k, [...(this.recentShrink.get(k) ?? []).filter((x) => Date.now() - x.at <= RECENT_ORDERS_MS), { clOrdID: it.clOrdID, left: Number(it.quantity), at: Date.now() }]);
+        }
         this.pending.push({
           subId: s.id,
           symbol: it.symbol,
@@ -12210,6 +12259,8 @@ var CopyRuntime = class {
       const m = this.markets.get(p.symbol);
       const fee = q * f.price * ((m?.takerFee ?? 4e-4) + p.builderFee / 1e5);
       this.fillBooks(s, p.symbol, p.side, q, f.price, fee, p.reduceOnly);
+      const shrink = p.reduceOnly ? this.recentShrink.get(`${s.id}|${p.symbol}`)?.find((x) => x.clOrdID === p.clOrdID) : void 0;
+      if (shrink) shrink.left = Math.max(0, shrink.left - q);
       void this.activity(s, {
         kind: "fill",
         reason: p.leg,
@@ -12251,6 +12302,7 @@ var CopyRuntime = class {
       this.host.log.warn("copy: follower read failed", { owner, error: String(e) });
       return;
     }
+    const lastRead = this.followers.get(owner)?.at ?? 0;
     this.followers.set(owner, snap);
     if (snap.accountId) this.followerAccounts.set(snap.accountId, owner);
     this.sodexFeed?.setFollowers([...this.followerAccounts.keys()]);
@@ -12261,7 +12313,7 @@ var CopyRuntime = class {
       for (const [k, g2] of this.recentGrow) {
         if (!k.startsWith(`${s.id}|`)) continue;
         const sym = k.slice(s.id.length + 1);
-        if (now - g2.at > 10 * 6e4) {
+        if (now - g2.at > RECENT_ORDERS_MS) {
           this.recentGrow.delete(k);
           continue;
         }
@@ -12277,34 +12329,81 @@ var CopyRuntime = class {
         if (inFlight(s.id, sym)) continue;
         const actual = snap.positions[sym];
         const mark = this.markets.mark(sym) ?? p.entry;
+        const since = Math.max(p.openedAt, lastRead) - FILLS_SLACK_MS;
         if (!actual || Math.sign(actual.size) !== Math.sign(p.size)) {
           st.realizedPnl += p.size * (mark - p.entry);
           delete st.owned[sym];
           this.recentGrow.delete(`${s.id}|${sym}`);
-          const why = this.closedWhy(s, p, mark, sym);
-          for (const lsym of this.leaderSymbolsFor(s, sym)) if (st.leaderPos[lsym]) st.detached[lsym] = why;
+          this.recentShrink.delete(`${s.id}|${sym}`);
+          const stops = st.stops[sym] ?? null;
+          const detach = this.leaderSymbolsFor(s, sym).filter((lsym) => st.leaderPos[lsym]);
+          for (const lsym of detach) st.detached[lsym] = "own-position";
           this.cancelStops(s, sym);
           this.leverageSet.delete(`${s.owner}|${sym}`);
-          const detail = why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`;
-          await this.activity(s, { kind: "status", reason: why === "own-position" ? "closed-outside" : why, symbol: sym, detail });
-          this.notice(copyClosedNotice(s, sym, why, detail));
           this.dirty.add(s.id);
+          const why = await this.outsideWhy(s, sym, since, stops);
+          for (const lsym of detach) if (st.detached[lsym]) st.detached[lsym] = why === "liquidation" ? "own-position" : why;
+          const detail = why === "liquidation" ? "SoDEX liquidated this copied position, so it was closed outside the copier. Its stops on SoDEX are cancelled; it resumes when the leader is flat." : why === "own-position" ? "This copied position was closed outside the copier (by you, or by SoDEX). It resumes when the leader is flat." : `Your ${why} closed this copied position.`;
+          await this.activity(s, { kind: "status", reason: why === "own-position" || why === "liquidation" ? "closed-outside" : why, symbol: sym, detail });
+          this.notice(copyClosedNotice(s, sym, why, detail));
         } else if (Math.abs(actual.size - p.size) > 1e-12 * Math.max(1, Math.abs(p.size))) {
-          if (Math.abs(actual.size) < Math.abs(p.size)) st.realizedPnl += (p.size - actual.size) * (mark - p.entry);
+          const drop = Math.abs(p.size) - Math.abs(actual.size);
+          if (drop > 0) st.realizedPnl += (p.size - actual.size) * (mark - p.entry);
           st.owned[sym] = { size: actual.size, entry: actual.entry || p.entry, openedAt: p.openedAt };
           this.scheduleStops(s, sym);
           this.dirty.add(s.id);
+          const lot = Number(this.markets.get(sym)?.stepSize) || 1e-12;
+          const outside = drop - this.ownShrink(s.id, sym, drop);
+          if (outside >= lot / 2) {
+            const why = await this.outsideWhy(s, sym, since, st.stops[sym] ?? null);
+            const part = `${amount(outside)} of this copied position`;
+            const left = `the copy holds the ${amount(Math.abs(actual.size))} left`;
+            const detail = why === "liquidation" ? `SoDEX liquidated ${part}; ${left}.` : why === "own-position" ? `${part[0].toUpperCase()}${part.slice(1)} was closed outside the copier (by you, or by SoDEX: a partial liquidation or ADL); ${left}.` : `Your ${why} closed ${part}; ${left}.`;
+            await this.activity(s, { kind: "status", reason: "reduced-outside", symbol: sym, size: outside, detail });
+            this.notice(copyReducedNotice(s, sym, why, detail));
+          }
         }
       }
     }
   }
-  closedWhy(s, p, mark, sym) {
-    const m = this.markets.get(sym);
-    const lev = m ? effectiveLeverage(s.settings.maxLeverage, this.host.policyFor(s), m.maxLeverage) : s.settings.maxLeverage;
-    const sl = guardTrigger("stop-loss", p, s.settings, lev);
-    const tp = guardTrigger("take-profit", p, s.settings, lev);
-    if (sl !== null && (p.size > 0 ? mark <= sl * 1.002 : mark >= sl * 0.998)) return "stop-loss";
-    if (tp !== null && (p.size > 0 ? mark >= tp * 0.998 : mark <= tp * 1.002)) return "take-profit";
+  /**
+   * Of a drop of `drop` in a copied position, how much the copier's own recent reduce-only
+   * orders explain (their fills the stream did not show); that much of them is used up.
+   */
+  ownShrink(subId, sym, drop) {
+    const k = `${subId}|${sym}`;
+    const now = Date.now();
+    const list = (this.recentShrink.get(k) ?? []).filter((x) => now - x.at <= RECENT_ORDERS_MS && x.left > 1e-12);
+    let used = 0;
+    for (const x of list) {
+      if (used >= drop - 1e-12) break;
+      const q = Math.min(x.left, drop - used);
+      x.left -= q;
+      used += q;
+    }
+    const kept = list.filter((x) => x.left > 1e-12);
+    if (kept.length) this.recentShrink.set(k, kept);
+    else this.recentShrink.delete(k);
+    return used;
+  }
+  /**
+   * Why a copied position went (or got smaller) outside the copier's orders, from SoDEX's fills
+   * since `since`: a liquidation (SoDEX's own fill "liquidation:<id>"), the copy's SoDEX stop-loss
+   * or take-profit (its client id filled), or otherwise the follower or SoDEX ('own-position') -
+   * also when the fills cannot be read. The copy's stop is never named without its fill, so a
+   * liquidation past the stop's level is not told as the stop.
+   */
+  async outsideWhy(s, sym, since, stops) {
+    let fills;
+    try {
+      fills = await this.host.sodex.fills(s.owner, sym, since);
+    } catch (e) {
+      this.host.log.warn("copy: fills read failed", { owner: s.owner, symbol: sym, error: String(e) });
+      return "own-position";
+    }
+    if (fills.some((f) => f.clOrdID?.startsWith("liquidation:"))) return "liquidation";
+    if (stops?.sl && fills.some((f) => f.clOrdID === stops.sl)) return "stop-loss";
+    if (stops?.tp && fills.some((f) => f.clOrdID === stops.tp)) return "take-profit";
     return "own-position";
   }
   /** Leader symbols (in this copy's books) that map to a SoDEX market. */
@@ -12639,6 +12738,8 @@ var CopyRuntime = class {
     } else if (s.status === "blocked" && !this.live(s)) await this.setStatus(id, "active", null);
   }
   /* ------------------------------------------------------------- leaders ----- */
+  /** The leaders the feeds were last pointed at (syncFeeds). */
+  fedLeaders = /* @__PURE__ */ new Map();
   followedLeaders() {
     const seen = /* @__PURE__ */ new Map();
     for (const s of this.subs.values()) if (s.status !== "stopped") seen.set(lk(s.settings.leader), s.settings.leader);
@@ -12647,6 +12748,9 @@ var CopyRuntime = class {
   /** Point the feeds at the followed leaders (and start Hyperliquid's when one is needed). */
   async syncFeeds() {
     const leaders = this.followedLeaders();
+    const now = new Set(leaders.map(lk));
+    for (const [k, l] of this.fedLeaders) if (!now.has(k)) this.leaders.forget(l);
+    this.fedLeaders = new Map(leaders.map((l) => [lk(l), l]));
     const sodex = [];
     for (const l of leaders.filter((x) => x.venue === "sodex")) {
       let id = this.sodexIds.get(l.address);
@@ -13854,6 +13958,8 @@ var TAKER_RETRY_MS = 1e3;
 var POSITIONS_MS = 5e3;
 var ACCOUNT_MS = 1e4;
 var EXITS_RESIZE_MS = 5e3;
+var EXITS_WATCH_MS = 6e4;
+var EXITS_SETTLE_MS = 3e3;
 var LIVE = /* @__PURE__ */ new Set(["sending", "open", "unknown"]);
 var FINAL_ORDER = /^(FILLED|CANCELED|CANCELLED|REJECTED|EXPIRED|REPLACED)$/;
 var levelOf = (c) => {
@@ -13888,7 +13994,8 @@ var AlgoRuntime = class {
   byClOrd = /* @__PURE__ */ new Map();
   busy = /* @__PURE__ */ new Set();
   dirty = /* @__PURE__ */ new Set();
-  leverageSet = /* @__PURE__ */ new Set();
+  /** The leverage and margin mode last sent per owner and market: an algo asking for others sends them again. */
+  leverageSet = /* @__PURE__ */ new Map();
   problems = /* @__PURE__ */ new Map();
   lastHistoryAt = 0;
   lookupBusy = false;
@@ -13902,13 +14009,17 @@ var AlgoRuntime = class {
   /** Algos that raised a hold in the step now running (steps of one algo never overlap). */
   heldNow = /* @__PURE__ */ new Set();
   eventSeq = 0;
-  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling). */
+  /** Each owner's positions and account, read at most every few seconds (conditions, closes, the leverage ceiling); `from`: when that read left. */
   positionsOf = /* @__PURE__ */ new Map();
   accounts = /* @__PURE__ */ new Map();
   /** Algos whose exits are being placed or resized right now. */
   exitsBusy = /* @__PURE__ */ new Set();
   /** Algos whose final exits were asked for while a placement was out: placed again once it is back. */
   exitsAgain = /* @__PURE__ */ new Set();
+  /** Ended algos whose exits are being held against the position right now, when each was last, and when its position was last found held (watchExits). */
+  exitsWatching = /* @__PURE__ */ new Set();
+  exitsWatchAt = /* @__PURE__ */ new Map();
+  exitsHeldAt = /* @__PURE__ */ new Map();
   paper = /* @__PURE__ */ new Map();
   timers = [];
   running = false;
@@ -14410,9 +14521,12 @@ var AlgoRuntime = class {
   tick(now = Date.now()) {
     this.checkPaperExits();
     for (const a of this.algos.values()) {
-      if (FINAL_STATUSES.has(a.status) && this.exitsDue(a, now)) {
+      if (FINAL_STATUSES.has(a.status)) {
         const m = this.markets.get(a.spec.symbol);
-        if (m) void this.syncExits(a, m, true).catch((e) => this.host.log.error("algo: exits failed", { algo: a.id, error: String(e) }));
+        if (m && this.exitsWatchDue(a, now)) void this.watchExits(a, m, now).catch((e) => this.host.log.error("algo: exits watch failed", { algo: a.id, error: String(e) }));
+        else if (m && !this.exitsWatching.has(a.id) && !this.exitsUnchecked(a) && this.exitsDue(a, now)) {
+          void this.syncExits(a, m, true).catch((e) => this.host.log.error("algo: exits failed", { algo: a.id, error: String(e) }));
+        }
       }
       if (FINAL_STATUSES.has(a.status) || this.busy.has(a.id)) continue;
       this.busy.add(a.id);
@@ -15520,7 +15634,8 @@ var AlgoRuntime = class {
   }
   async loadPositions(a) {
     const prev = this.positionsOf.get(a.owner);
-    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: true });
+    const from = Date.now();
+    this.positionsOf.set(a.owner, { at: prev?.at ?? 0, from: prev?.from, data: prev?.data ?? {}, loading: true });
     try {
       let data;
       if (this.host.positions) data = await this.host.positions(a);
@@ -15528,11 +15643,11 @@ var AlgoRuntime = class {
         const snap = await this.host.sodex.follower(a.owner);
         data = Object.fromEntries(Object.entries(snap.positions).map(([s, p]) => [s, { size: p.size, entry: p.entry, ...p.leverageReported ? { leverage: p.leverage } : {} }]));
       }
-      this.positionsOf.set(a.owner, { at: Date.now(), data, loading: false });
+      this.positionsOf.set(a.owner, { at: Date.now(), from, data, loading: false });
       return data;
     } catch (e) {
       this.host.log.warn("algo: positions read failed", { owner: a.owner, error: String(e) });
-      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, data: prev?.data ?? {}, loading: false });
+      this.positionsOf.set(a.owner, { at: prev?.at ?? 0, from: prev?.from, data: prev?.data ?? {}, loading: false });
       return null;
     }
   }
@@ -15622,9 +15737,14 @@ var AlgoRuntime = class {
     const opening = list.some((x) => !(x.reduceOnly ?? s.reduceOnly));
     const ceiling = !s.paper ? this.host.policyFor?.(a)?.maxLeverage ?? null : null;
     const leverage = ceiling !== null ? Math.min(s.leverage ?? ceiling, ceiling) : s.leverage;
-    if (sink && opening && leverage !== null && !this.leverageSet.has(`${a.owner}|${m.name}`)) {
-      this.leverageSet.add(`${a.owner}|${m.name}`);
-      await sink.setLeverage(a, m, Math.min(leverage, m.maxLeverage), s.marginMode ?? "cross").catch((e) => this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`));
+    const lev = leverage !== null ? Math.min(leverage, m.maxLeverage) : null;
+    const want = lev !== null ? `${lev}|${s.marginMode ?? "cross"}` : null;
+    if (sink && opening && lev !== null && this.leverageSet.get(`${a.owner}|${m.name}`) !== want) {
+      this.leverageSet.set(`${a.owner}|${m.name}`, want);
+      await sink.setLeverage(a, m, lev, s.marginMode ?? "cross").catch((e) => {
+        this.leverageSet.delete(`${a.owner}|${m.name}`);
+        this.event(a, "error", `Leverage not set: ${e instanceof Error ? e.message : String(e)}`);
+      });
     }
     if (opening && ceiling !== null) {
       const acct = await this.accountOf(a);
@@ -16013,6 +16133,7 @@ var AlgoRuntime = class {
       if (refused) {
         const n = Number(a.k.exitsRefused ?? 0) + 1;
         a.k.exitsRefused = n;
+        a.k.exitsRefusedAt = now;
         a.k.exitsSize = 0;
         if (n >= EXITS_MAX_REFUSALS) {
           a.k.exitsGaveUp = true;
@@ -16043,6 +16164,109 @@ var AlgoRuntime = class {
     if (size < Math.max(Number(m.stepSize), Number(m.minQuantity) || 0)) return false;
     const standing = this.liveExits(a).filter((x) => !x.cancelling);
     return !standing.length || Math.abs(size - Number(a.k.exitsSize ?? 0)) >= Number(m.stepSize) / 2;
+  }
+  /**
+   * Whether an ended live algo's exits are to be held against its position now: they rest on
+   * SoDEX (every EXITS_WATCH_MS, the first read one that left EXITS_SETTLE_MS after they were
+   * placed), SoDEX cancelled them (once), or a pair is about to go out again after SoDEX refused
+   * or expired one (once per refusal, before it is placed: it may have had nothing to reduce).
+   */
+  exitsWatchDue(a, now) {
+    const s = a.spec;
+    if (s.paper || !s.exits || !opensPosition(s) || a.filled <= 0 || a.k.exitsOutside || a.k.exitsGaveUp) return false;
+    if (this.exitsWatching.has(a.id) || this.exitsBusy.has(a.id)) return false;
+    const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
+    if (now < placed + EXITS_SETTLE_MS) return false;
+    const last = this.exitsWatchAt.get(a.id) ?? 0;
+    const periodic = now - last >= EXITS_WATCH_MS;
+    if (a.k.exitsDone) return a.k.exitsPulled === true && periodic;
+    if (this.exitsUnchecked(a) && now >= Number(a.k.exitsRetryAt ?? 0) && (periodic || last < Number(a.k.exitsRefusedAt ?? 0))) return true;
+    return periodic && this.liveExits(a).some((x) => x.state === "open" && !x.cancelling);
+  }
+  /** A refused or expired pair whose position was not found held since: it is not placed again before (watchExits). */
+  exitsUnchecked(a) {
+    return !a.spec.paper && !a.k.exitsDone && Number(a.k.exitsRefused ?? 0) > 0 && Number(a.k.exitsRefusedAt ?? 0) >= (this.exitsHeldAt.get(a.id) ?? 0);
+  }
+  /**
+   * An ended algo's exits held against its position (exitsWatchDue). Flat, or on the other side:
+   * the position the exits protect is gone, closed outside the algo (a liquidation, or by hand),
+   * so they are cancelled, not placed again, and the trader is told (exitsOutside). Still held:
+   * a pair that is due goes out again. A position that cannot be read changes nothing.
+   */
+  async watchExits(a, m, now) {
+    this.exitsWatching.add(a.id);
+    this.exitsWatchAt.set(a.id, now);
+    try {
+      const placed = Math.max(0, ...(a.exitOrders ?? []).map((x) => x.placedAt));
+      const size = await this.positionSince(a, m.name, placed + EXITS_SETTLE_MS);
+      const held2 = size === null ? null : (a.spec.side === "buy" ? size : -size) >= Number(m.stepSize) / 2;
+      if (held2 === false) return await this.exitsOutside(a, m, now);
+      this.exitsHeldAt.set(a.id, now);
+      if (a.k.exitsPulled) {
+        if (held2) delete a.k.exitsPulled;
+        return;
+      }
+      if (!a.k.exitsDone && this.exitsDue(a, Date.now())) await this.syncExits(a, m, true);
+    } finally {
+      this.exitsWatching.delete(a.id);
+    }
+  }
+  /** The owner's signed position on `symbol` from a read that left at `from` or later (one is made when the last is older). null: not readable. */
+  async positionSince(a, symbol2, from) {
+    try {
+      if (this.host.position) return await this.host.position(a, symbol2);
+      const hit = this.positionsOf.get(a.owner);
+      const book = hit && !hit.loading && (hit.from ?? 0) >= from && Date.now() - hit.at <= POSITIONS_MS ? hit.data : await this.loadPositions(a);
+      return book ? book[symbol2]?.size ?? 0 : null;
+    } catch (e) {
+      this.host.log.warn("algo: position read failed", { algo: a.id, error: String(e) });
+      return null;
+    }
+  }
+  /**
+   * The position an ended algo's exits protect is gone. An exit that fired while its update was
+   * lost is asked of SoDEX's order history first (it closed the position: booked, the other one
+   * cancelled). Otherwise it was closed outside the algo: what rests is cancelled, nothing is
+   * placed again, the log says why and the trader gets an error notice.
+   */
+  async exitsOutside(a, m, now) {
+    const live = this.liveExits(a).filter((x) => !x.cancelling);
+    if (live.length) {
+      if (this.lookupBusy || now - this.lastHistoryAt < HISTORY_EVERY_MS) return;
+      this.lastHistoryAt = now;
+      let hist;
+      try {
+        hist = await this.lookupOrders(a, m.name, true);
+      } catch (e) {
+        this.host.log.warn("algo: order lookup failed", { algo: a.id, error: String(e) });
+        return;
+      }
+      let fired = false;
+      for (const x of live) {
+        const row = hist.find((r) => r.clOrdID === x.clOrdID);
+        if (row && row.executedQty > 1e-12) {
+          this.onExitUpdate(a, x, { clOrdID: x.clOrdID, orderId: row.orderId, symbol: m.name, status: "FILLED", filledQty: row.executedQty, filledValue: row.executedValue, maker: false, reason: null, at: now });
+          fired = true;
+        }
+      }
+      if (fired) return;
+    }
+    const pulled = a.k.exitsPulled === true;
+    a.k.exitsDone = true;
+    a.k.exitsOutside = true;
+    delete a.k.exitsPulled;
+    await this.cancelExits(a, m, live);
+    const what = live.length ? `its ${live.map((x) => x.tag).join(" and ")} ${live.length === 1 ? "is" : "are"} cancelled on SoDEX and not placed again` : pulled ? "its exits, cancelled on SoDEX, are not placed again" : "its exits are not placed again";
+    const text = `Your ${m.name} position is gone: it was closed outside this algo (a liquidation, or by hand), so ${what}.`;
+    await this.event(a, "error", text);
+    await this.save(a);
+    try {
+      this.host.onNotice?.(algoClosedNotice(a, text));
+    } catch (e) {
+      this.host.log.warn("algo: notice not taken", { error: String(e) });
+    }
+    this.syncWatch();
+    this.host.onChange?.(a.id);
   }
   async cancelExits(a, m, list) {
     const open = list.filter((x) => LIVE.has(x.state) && !x.cancelling);
@@ -16090,10 +16314,12 @@ var AlgoRuntime = class {
       if (!x.cancelling && x.filled <= 1e-12 && x.state !== "done" && !a.k.exitsDone) {
         if (/^CANCEL/.test(u.status)) {
           a.k.exitsDone = true;
+          a.k.exitsPulled = true;
           void this.event(a, "info", `The ${x.tag} was cancelled on SoDEX; its exits are not placed again.`);
         } else {
           const n = Number(a.k.exitsRefused ?? 0) + 1;
           a.k.exitsRefused = n;
+          a.k.exitsRefusedAt = Date.now();
           a.k.exitsSize = 0;
           a.k.exitsRetryAt = Date.now() + EXITS_RETRY_MS * 2 ** (n - 1);
           if (n >= EXITS_MAX_REFUSALS) a.k.exitsGaveUp = true;
