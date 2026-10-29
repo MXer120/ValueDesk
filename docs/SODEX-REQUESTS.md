@@ -43,7 +43,7 @@ users needs each user's order history, which is limited to about four requests a
 - The documented plain `AddAPIKey` registration is rejected on mainnet; the web app's
   `UserSignedAddAPIKeyAction` on `/exchange` works. The documentation could say which one is current.
 
-## 5. A fee tier for a builder's flow (broker tier)
+## 5. A fee group for a builder's flow (fee tier and staking)
 
 **Why we ask.** SoDEX's fee tier is per user and needs more than $5 M of 14-day volume for the first step. Most of
 our users trade far less, so every one of them pays tier 0 (4.0 bp taker) plus our builder fee. Together they
@@ -54,18 +54,34 @@ volume over those orders (or at a fixed rate agreed for the builder), while each
 account. A user's own tier applies when it is better. As an alternative, a rebate of the difference paid to the
 builder, which we pass on to the users.
 
+**Group staking.** The SOSO each member stakes in their own wallet on SSI Earn, plus the builder's own stake, add up
+to one staking discount for the group: 1,000 members with 30 SOSO each reach the 20 % step together. Nothing leaves
+anyone's wallet. Each member pays the better of their own tier and discount and the group's.
+
+**Limits SoDEX may set.** Only fee-paying fills count, self-matches are excluded, the group can be capped at a tier,
+and SoDEX can end the group.
+
 **What it changes.** Users get a lower fee without handing anyone their funds, and SoDEX gets the volume that a
-lower fee brings. Without it, the only way to reach the tier is to pool users' funds into one account (§6-9), which
+lower fee brings. Without it, the next way is §6; the last is to pool users' funds into one account (§7-9), which
 moves custody and the users' margin into one account. We would rather not do that.
 
-## 6. Sub-accounts for a contract-owned master
+## 6. Member sub-accounts bound to the member
 
-If §5 is not possible: `createSubAccount` for a master account owned by our contract, one sub-account per user.
-Please confirm that sub-accounts count toward the master's fee tier ("each user has a single fee tier"), that each
-sub-account is margined and liquidated on its own, that it has its own order-rate limits, and that internal
-transfers between the master and its sub-accounts will be enabled (both engine pages say "not supported yet").
+If §5 is not possible: sub-accounts under a master account owned by our contract, one per user, bound to that user
+so that the master never holds their funds:
+- created for the wallet that asks (our contract calls it for `msg.sender`; `createSubAccount` is owner-only today);
+- API keys for it registered and revoked only by the member's own signature, never by the master;
+- withdrawals from it paid only to the member's wallet, transfers only to the member's own accounts; the master
+  cannot sign anything for it;
+- deposits credited to it directly;
+- the member can detach it into an ordinary account of their own, open positions included.
+
+Please confirm that such sub-accounts count toward the master's fee tier and staking discount ("each user has a
+single fee tier"), and that each is margined, liquidated and rate-limited on its own.
 
 ## 7. Restricted keys for contract accounts
+
+§7-9 matter only for a shared pool account, if §5 and §6 are not possible.
 
 `addAPIKey` on the gateway takes no permissions and no expiry. We ask for the same restrictions the REST
 registration has, and two more: a trade-only key that cannot withdraw or transfer, and a close-only key (reduce-only
